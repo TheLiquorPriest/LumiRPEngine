@@ -5192,7 +5192,7 @@ function narratorViewOf(raw) {
   const secrets = NARRATOR_SECRETS.find((s3) => s3 === raw.secrets);
   return knowledge && secrets ? { knowledge, secrets } : null;
 }
-var LORE_INDEX_DEFAULTS = Object.freeze({ tagPattern: "^lr\\d{4}$", idPrefix: "lre", idDigits: 4, holdsChars: 100, inPrompts: false, promptTokens: 1500, own: null, built: null });
+var LORE_INDEX_DEFAULTS = Object.freeze({ tagPattern: "^lr\\d{4}$", idPrefix: "lre", idDigits: 4, holdsChars: 100, promptTokens: 1500, own: null, built: null });
 var SHORT_ID = /^[\p{L}\p{N}_.-]+$/u;
 var LORE_INDEX_BOUNDS = { idPrefix: 16, idDigits: [1, 9], holdsChars: [0, 2000], promptTokens: [1, 1e6] };
 function tagPatternOf(pattern) {
@@ -14030,7 +14030,7 @@ var HOST_LIMITS = {
     effect: "Lumiverse closes the socket; the client pings every 45 s to keep it open."
   }
 };
-var TIMEOUT_KEYS = ["engineRunMs", "preLookupMs", "postReplyMs", "postLookupMs", "guardMs", "skipPlanMs", "requestMs", "caveatsMs", "mindsRunMs", "jobCallMs", "tokenCountMs", "laneStartupMs", "laneHeartbeatMs", "mcpReconnectMs"];
+var TIMEOUT_KEYS = ["engineRunMs", "preLookupMs", "finalReviewMs", "postReplyMs", "postLookupMs", "guardMs", "skipPlanMs", "requestMs", "caveatsMs", "mindsRunMs", "jobCallMs", "tokenCountMs", "laneStartupMs", "laneHeartbeatMs", "mcpReconnectMs"];
 var MIN = 60000;
 var TIMEOUTS = {
   engineRunMs: {
@@ -14051,6 +14051,15 @@ var TIMEOUTS = {
     minMs: 0,
     zero: "no lookups",
     none: "lookups may start until the run's last third"
+  },
+  finalReviewMs: {
+    label: "Final review",
+    group: "turn",
+    limits: "The main agent's final review of the narrator's prompt, after the engine run makes the turn's sections and before the reply is generated (Settings → Agents → Main agent → Final review).",
+    fires: "The review stops and its edits are dropped: the narrator gets the sections as the engine made them, with a Diagnostics record, or the turn stops with a Retry, as the review's failure setting says.",
+    defaultMs: 2 * MIN,
+    minMs: 1000,
+    none: "the review takes as long as it needs (its budget still bounds it)"
   },
   postReplyMs: {
     label: "Reading the reply",
@@ -15003,7 +15012,7 @@ var entity = "The person or thing: their id, or their name as the world has it."
 var person2 = "The person: their id, or their name as the world has it.";
 var field = "The field's id.";
 var relation = "The relation type's id: knows, owns, member_of, regard, in, or one of the world's own.";
-var path = "The workspace file's path: names joined by /, such as notes/marcus.md.";
+var path = "The workspace file's path: names joined by /, such as notes/marcus.md; start it with ~/ for the global workspace, which every chat shares, such as ~/notes/style.md.";
 var under = "Only files under this folder, such as notes/; leave it out for every file.";
 var lore = "The lore entry's id, as lore_index, lore_search or lore_grep gives it: a short id such as lr0101, a World Info entry as bookId/entryId, or a world entry's own id.";
 var proposes = "The answer is the change in plain words, its change type and its mode. Working a turn, the change is staged at once: it lands when the turn commits, or, when its mode is confirm, waits for the game master's Apply on the turn's review card. Otherwise nothing changes until the game master applies it.";
@@ -15078,7 +15087,7 @@ var WRITE_TOOL_TEXTS = [
     args: [
       { path: "kind", text: "Its kind." },
       { path: "name", text: "Its name." },
-      { path: "id", text: "An id of your own for it; leave it out for one the engine makes. Reading with the player character's knowledge, always leave it out: an id is refused." },
+      { path: "id", text: "An id of your own for it; leave it out for one the engine makes." },
       { path: "tier", text: "Its tier; leave it out for the world's spawn tier." },
       { path: "place", text: "Where it starts: a place's id or name." },
       { path: "agent", text: "true: it lives on its own between turns." }
@@ -15246,8 +15255,8 @@ var WRITE_TOOL_TEXTS = [
     name: "workspace_list",
     family: "workspace",
     tier: "read",
-    note: "Lists the chat's workspace files.",
-    text: "List the chat's workspace files, the notes the agents and the game master keep for this chat: each one's path, its size in characters, whether it is pinned, the turn it was written on and who wrote it. The workspace follows the chat's turns, so a swipe from before a note has none of it.",
+    note: "Lists the workspace files: the chat's and the global ones (~/).",
+    text: "List the workspace files: the chat's, the notes the agents and the game master keep for this chat, and the global workspace's under ~/, which every chat of the player's shares. Each one's path, its size in characters, whether it is pinned, the turn it was written on and who wrote it. AGENTS.md and roles/<role>.md, at either level, are system files: every agent is given AGENTS.md as its instructions, and each role its own roles/<role>.md. Each turn's transcript is under transcripts/, to read. The chat's story notes follow its turns, so a swipe from before a note has none of it; files under learned/ and ~/ stay as they are.",
     args: [{ path: "under", text: under }]
   },
   {
@@ -15324,6 +15333,18 @@ var WRITE_TOOL_TEXTS = [
     ]
   },
   {
+    name: "condense",
+    family: "workspace",
+    tier: "gm",
+    note: "Condenses a long source into a workspace note, with one call of the agent's own model.",
+    text: `Condense a long source (a workspace file, a turn's transcript among them, or a lore entry) into a short workspace note: your own model writes it in one call, and the note opens with its source and the source's hash, so whoever reads it later can tell whether it is still current. Read the note, or name it in a task, instead of the whole source. ${proposes}`,
+    args: [
+      { path: "source", text: `The source: a workspace file's path, or a lore entry's id. ${lore}` },
+      { path: "note", text: "Where the note goes: a workspace path; leave it out for notes/condensed/ and a name taken from the source's." },
+      { path: "focus", text: "What the note should keep: the task it is for, or what matters in the source; leave it out for a plain digest." }
+    ]
+  },
+  {
     name: "lore_index",
     family: "lore",
     tier: "read",
@@ -15392,13 +15413,8 @@ var WRITE_NOTE = {
   badOp: "tool.note.bad_op",
   badPath: "tool.note.bad_path",
   noFile: "tool.note.no_file",
-  pathTaken: "tool.note.path_taken",
   never: "tool.note.never",
   spawnCap: "tool.note.spawn_cap",
-  spawnId: "tool.note.spawn_id",
-  notYourMind: "tool.note.not_your_mind",
-  povEffect: "tool.note.pov_effect",
-  povRefused: "tool.note.pov_refused",
   learnedMove: "tool.note.learned_move",
   transcriptReadOnly: "tool.note.transcript_read_only",
   fileExists: "tool.note.file_exists",
@@ -15418,26 +15434,23 @@ var WRITE_NOTE = {
   gmCap: "tool.note.gm_cap",
   workspaceLine: "tool.note.workspace_line",
   staged: "tool.note.staged",
-  stagedReview: "tool.note.staged_review"
+  stagedReview: "tool.note.staged_review",
+  noSource: "tool.note.no_source",
+  condenseFailed: "tool.note.condense_failed"
 };
 var filePath = { name: "path", text: "the workspace path the call gave" };
 var WRITE_TOOL_NOTES = [
   { id: WRITE_NOTE.noWriter, label: "Nothing to write with", note: "A write tool's answer when the agent may only read.", text: "This agent can't change anything here: it only reads.", vars: [] },
   { id: WRITE_NOTE.badOp, label: "A change it can't read", note: "A write's answer when the change it was given isn't one the engine can read.", text: "That change isn't one the engine can read: check it against the tool's description.", vars: [] },
-  { id: WRITE_NOTE.badPath, label: "Not a workspace path", note: "A workspace write's answer when the path isn't one a file may have.", text: "{{path}} isn't a workspace path: names of letters, digits, “.”, “_” and “-”, joined by /.", vars: [filePath] },
-  { id: WRITE_NOTE.noFile, label: "No such file", note: "A workspace tool's answer when no file is at the path, or none the agent's knowledge may read.", text: "No workspace file {{path}} here.", vars: [filePath] },
-  { id: WRITE_NOTE.pathTaken, label: "A path taken by a file it can't read", note: "A workspace write's answer when a file the agent's knowledge may not read (Who may read it, GM → Workspace) is at the path.", text: "A workspace file you can't read is already at {{path}}: pick another path.", vars: [filePath] },
+  { id: WRITE_NOTE.badPath, label: "Not a workspace path", note: "A workspace write's answer when the path isn't one a file may have.", text: "{{path}} isn't a workspace path: names of letters, digits, “.”, “_” and “-”, joined by /, with ~/ before them for the global workspace.", vars: [filePath] },
+  { id: WRITE_NOTE.noFile, label: "No such file", note: "A workspace tool's answer when no file is at the path.", text: "No workspace file {{path}} here.", vars: [filePath] },
   { id: WRITE_NOTE.never, label: "A change type set to Never", note: "A write's answer when the user set its change type to Never in Settings → Changes from the reply.", text: "{{type}} is set to Never (Settings → Changes from the reply), so this change isn't made.", vars: [{ name: "type", text: "the change type, as Settings names it", required: true }] },
   { id: WRITE_NOTE.spawnCap, label: "The spawn cap", note: "A GM spawn's answer when the chat has brought in as many people as its world allows.", text: "This chat has brought in {{count}} {{people}}, all its world allows (its spawn cap, Build → World), so no one new can join it.", vars: [{ name: "count", text: "the people the chat has brought in", required: true }, { name: "people", text: '"person" for 1, else "people"' }] },
-  { id: WRITE_NOTE.spawnId, label: "An id a spawn can't take", note: "A GM spawn's answer, under the player character's knowledge, when the id it asks for is taken or isn't an id: one answer whoever holds it, so it never tells of someone the player character can't know.", text: "{{id}} can't be used for someone or something new: leave the id out, and one is made.", vars: [{ name: "id", text: "the id the spawn asked for" }] },
-  { id: WRITE_NOTE.notYourMind, label: "Another's mind", note: "A minds change's answer, under the player character's knowledge, for anyone but the player character: one answer whoever it is and whatever their mind holds, so it never tells what another knows or thinks.", text: "{{pov}} can't see into anyone else's mind, and you read the world as {{pov}} knows it: only what {{pov}} knows may be changed.", vars: [{ name: "pov", text: "the player character's name" }] },
-  { id: WRITE_NOTE.povEffect, label: "An effect under your character's knowledge", note: "gm_effect's answer under the player character's knowledge: one answer for every effect, whatever it would touch, since an effect works on what the player character may not know of.", text: "Effects aren't proposed with {{pov}}'s knowledge: their workings reach past what {{pov}} knows. Use the other tools, or ask the game master.", vars: [{ name: "pov", text: "the player character's name" }] },
-  { id: WRITE_NOTE.povRefused, label: "A refusal under your character's knowledge", note: "A write's answer, under the player character's knowledge, whenever the engine refuses the change: one answer whatever the engine's reason, so a refusal never tells what the player character can't know.", text: "That change can't be made as {{pov}} knows the world: check it against what you can read, or propose another.", vars: [{ name: "pov", text: "the player character's name" }] },
   { id: WRITE_NOTE.tooMany, label: "Too many changes at once", note: "An apply's answer when one batch holds more changes than one GM edit may.", text: "One batch holds at most {{max}} changes, as one GM edit does.", vars: [{ name: "max", text: "the most one GM edit holds", required: true }] },
   { id: WRITE_NOTE.editMissing, label: "Text not in the file", note: "workspace_edit's answer when the file doesn't hold the text to replace.", text: "{{path}} doesn't hold that text.", vars: [filePath] },
-  { id: WRITE_NOTE.learnedMove, label: "Into or out of learned/", note: "workspace_move's answer when it would take a file into or out of the learned area (learned/), which is kept apart from the turns.", text: "{{path}} can't move to {{to}}: files under learned/ stay there, and the others stay out of it. Write the file at its new path, then delete the old one.", vars: [filePath, { name: "to", text: "the path it was to move to" }] },
+  { id: WRITE_NOTE.learnedMove, label: "Out of its part of the workspace", note: "workspace_move's answer when it would take a file from one part of the workspace to another: the chat's story, the learned area (learned/) or the global workspace (~/), the last two kept apart from the turns.", text: "{{path}} can't move to {{to}}, since files stay in their part: the chat's story, learned/, or the global workspace ~/. Write the file at its new path, then delete the old one.", vars: [filePath, { name: "to", text: "the path it was to move to" }] },
   { id: WRITE_NOTE.transcriptReadOnly, label: "A transcript", note: "A workspace change's answer when it touches transcripts/, where each turn's transcript is kept to read: nothing writes, moves, deletes or pins a file there.", text: "{{path}} is under transcripts/, where each turn's transcript is kept as it was: read it, but write your notes at another path.", vars: [filePath] },
-  { id: WRITE_NOTE.fileExists, label: "A path taken in learned/", note: "workspace_move's answer, in the learned area, when a file is already at the path it was to move to.", text: "A workspace file is already at {{to}}: pick another path.", vars: [{ name: "to", text: "the path it was to move to" }] },
+  { id: WRITE_NOTE.fileExists, label: "A path taken in learned/ or ~/", note: "workspace_move's answer, in the learned area or the global workspace, when a file is already at the path it was to move to.", text: "A workspace file is already at {{to}}: pick another path.", vars: [{ name: "to", text: "the path it was to move to" }] },
   { id: WRITE_NOTE.editSeveral, label: "Text in the file more than once", note: "workspace_edit's answer when the text to replace is there more than once and all isn't set.", text: "{{path}} holds that text {{count}} times: give more of it to pick one, or set all to replace every one.", vars: [filePath, { name: "count", text: "how many times the file holds it", required: true }] },
   { id: WRITE_NOTE.noLore, label: "No such lore entry", note: "A lore tool's answer when no entry has the id, or none the agent's knowledge may read.", text: "No lore entry {{id}} here.", vars: [{ name: "id", text: "the entry id the call gave" }] },
   { id: WRITE_NOTE.draftPath, label: "A draft outside lore-drafts/", note: "lore_draft's answer when the path it was given isn't under lore-drafts/.", text: "A lore draft goes under lore-drafts/, and {{path}} isn't there.", vars: [filePath] },
@@ -15446,13 +15459,15 @@ var WRITE_TOOL_NOTES = [
   { id: WRITE_NOTE.cancelled, label: "Cancelled", note: "A write's answer when the agent's work was cancelled before it ran.", text: "The agent's work was cancelled, so nothing was checked or written.", vars: [] },
   { id: WRITE_NOTE.paused, label: "The chat is paused", note: "An apply's answer while an earlier message's edit waits for Keep or Discard.", text: "An earlier message was edited: Keep or Discard it first, under that message.", vars: [] },
   { id: WRITE_NOTE.noWorld, label: "No world", note: "A write's answer when the chat plays no LumiRPEngine world, or its world isn't loaded.", text: "This chat plays no LumiRPEngine world, or its world isn't loaded.", vars: [] },
-  { id: WRITE_NOTE.noChange, label: "A change that changes nothing", note: "A write's answer when the change would leave everything as it is, or, under the player character's knowledge, when it can't be made for a reason the player mustn't learn of.", text: "That changes nothing.", vars: [] },
+  { id: WRITE_NOTE.noChange, label: "A change that changes nothing", note: "A write's answer when the change would leave everything as it is.", text: "That changes nothing.", vars: [] },
   { id: WRITE_NOTE.stale, label: "The chat changed meanwhile", note: "An apply's answer when the chat changed between the check and the write (a turn landed), so the engine no longer takes the change.", text: "The chat changed while this was being written, so it no longer applies: read it again and propose the change anew.", vars: [] },
-  { id: WRITE_NOTE.notGranted, label: "A change the role isn't granted", note: "A turn agent's write answer when its role's tier (Settings → Agents → Roles) doesn't take that kind of change: the GM's edits need the GM tier, and so does the pins manifest (.pins.json, which sets what every agent is shown first); a role that only reads changes nothing.", text: "This role may make {{tier}} changes only, and this one is a {{needs}} change, so it isn't made.", vars: [{ name: "tier", text: "what the role may change: read (nothing), story or gm", required: true }, { name: "needs", text: "what the change needs: story or gm", required: true }] },
+  { id: WRITE_NOTE.notGranted, label: "A change the role isn't granted", note: "A turn agent's write answer when its role's tier (Settings → Agents → Roles) doesn't take that kind of change: the GM's edits need the GM tier, a workspace change (.pins.json and the system files included) the story tier; a role that only reads changes nothing.", text: "This role may make {{tier}} changes only, and this one is a {{needs}} change, so it isn't made.", vars: [{ name: "tier", text: "what the role may change: read (nothing), story or gm", required: true }, { name: "needs", text: "what the change needs: story or gm", required: true }] },
   { id: WRITE_NOTE.gmCap, label: "GM edits per turn", note: "A turn agent's write answer once the turn's agents have staged as many of the GM's edits as Settings → Agents → Budgets allows.", text: "This turn's agents have staged {{count}} of the GM's edits, all a turn allows (GM edits per turn, Settings → Agents → Budgets), so this one isn't made.", vars: [{ name: "count", text: "the GM edits the turn's agents have staged", required: true }] },
-  { id: WRITE_NOTE.workspaceLine, label: "A workspace change, below the GM", note: "The line a workspace change reads as under the player character's knowledge (the review card's) and everyone's: one line naming no file, as the player's Journal shows none. Under the GM's knowledge it reads as the GM's line, with its path.", text: "A note the story's agents keep changes.", vars: [] },
+  { id: WRITE_NOTE.workspaceLine, label: "A workspace change, below the GM", note: "The line a workspace change reads as on the review card and under everyone's view: one line naming no file, as the player's Journal shows none. Under the GM's view it reads as the GM's line, with its path.", text: "A note the story's agents keep changes.", vars: [] },
   { id: WRITE_NOTE.staged, label: "Staged in a turn", note: "A write tool's answer, working a turn, for a change it staged whose mode is Auto: it lands when the turn commits.", text: "Staged for this turn: it lands when the turn commits.", vars: [] },
-  { id: WRITE_NOTE.stagedReview, label: "Staged for the review card", note: "A write tool's answer, working a turn, for a change it staged whose mode is Confirm (Settings → Changes from the reply): it waits on the turn's review card.", text: "Staged for this turn, waiting for the GM's Apply on the review card: it lands only once the game master applies it.", vars: [] }
+  { id: WRITE_NOTE.stagedReview, label: "Staged for the review card", note: "A write tool's answer, working a turn, for a change it staged whose mode is Confirm (Settings → Changes from the reply): it waits on the turn's review card.", text: "Staged for this turn, waiting for the GM's Apply on the review card: it lands only once the game master applies it.", vars: [] },
+  { id: WRITE_NOTE.noSource, label: "No such source", note: "condense's answer when its source is neither a workspace file's path nor a lore entry's id.", text: "{{source}} is neither a workspace file nor a lore entry here.", vars: [{ name: "source", text: "the source the call gave" }] },
+  { id: WRITE_NOTE.condenseFailed, label: "Condensing failed", note: "condense's answer when its model call gave no note.", text: "{{source}} wasn't condensed: {{reason}}", vars: [{ name: "source", text: "the source it was to condense" }, { name: "reason", text: "why the call gave no note" }] }
 ];
 
 // src/shared/agent-tools.ts
@@ -15469,7 +15484,6 @@ var TOOL_FAMILY_LABEL = {
   lore: "Lore",
   workspace: "Workspace"
 };
-var AGENT_KNOWLEDGE = ["pov", "everyone", "gm"];
 function toolTextId(name) {
   return `tool.${name}`;
 }
@@ -15482,12 +15496,10 @@ var TOOL_NOTE = {
   noThing: "tool.note.no_thing",
   noTrack: "tool.note.no_track",
   noFact: "tool.note.no_fact",
-  noField: "tool.note.no_field",
   ambiguous: "tool.note.ambiguous",
   missing: "tool.note.missing",
   badValue: "tool.note.bad_value",
-  badValueUnlisted: "tool.note.bad_value_unlisted",
-  hidden: "tool.note.hidden"
+  badValueUnlisted: "tool.note.bad_value_unlisted"
 };
 var asked = { name: "name", text: "the name or id the model asked for, as it wrote it" };
 var LAYER_NOTES = [
@@ -15495,8 +15507,7 @@ var LAYER_NOTES = [
   { id: TOOL_NOTE.noPlace, label: "No such place", note: "A tool's answer when a place's name or id names no place the agent's knowledge can see.", text: "No such place here: {{name}}.", vars: [asked] },
   { id: TOOL_NOTE.noThing, label: "No such thing", note: "A tool's answer when a thing's name or id names nothing the agent's knowledge can see.", text: "No such thing here: {{name}}.", vars: [asked] },
   { id: TOOL_NOTE.noTrack, label: "No such quest or secret", note: "A tool's answer when a quest, secret, puzzle or agenda's id or label names none the agent's knowledge can see.", text: "No such quest, secret, puzzle or agenda here: {{name}}.", vars: [asked] },
-  { id: TOOL_NOTE.noFact, label: "No such fact", note: "A tool's answer when a fact's id names no fact the agent's knowledge can see: under the player character's knowledge, one it doesn't hold reads exactly as one the chat doesn't record.", text: "No such fact here: {{name}}.", vars: [asked] },
-  { id: TOOL_NOTE.noField, label: "No such field", note: "A write's answer, under the player character's knowledge, when a field names none it may see of that person or thing: a hidden field reads exactly as one its kind doesn't have.", text: "No such field here: {{name}}.", vars: [asked] },
+  { id: TOOL_NOTE.noFact, label: "No such fact", note: "A tool's answer when a fact's id names no fact the chat records.", text: "No such fact here: {{name}}.", vars: [asked] },
   {
     id: TOOL_NOTE.ambiguous,
     label: "Several match",
@@ -15530,20 +15541,13 @@ var LAYER_NOTES = [
   {
     id: TOOL_NOTE.badValueUnlisted,
     label: "A value it doesn't take, with none to list",
-    note: "A tool's answer when an argument holds a value the tool doesn't take and there is none it may list: under the player character's knowledge, a quest's stages it hasn't come to.",
+    note: "A tool's answer when an argument holds a value the tool doesn't take and there is none it may list.",
     text: "{{tool}} doesn't take {{value}} as {{arg}}.",
     vars: [
       { name: "tool", text: "the tool" },
       { name: "arg", text: "the argument" },
       { name: "value", text: "the value given", required: true }
     ]
-  },
-  {
-    id: TOOL_NOTE.hidden,
-    label: "Beyond the player character's knowledge",
-    note: "A tool's answer, under the player character's knowledge, to what the player character can't know: another's mind or knowledge, or another's odds.",
-    text: "{{pov}} doesn't know that, and you read the world as {{pov}} knows it.",
-    vars: [{ name: "pov", text: "the player character's name" }]
   }
 ];
 var TOOL_NOTES = [...LAYER_NOTES, ...WRITE_TOOL_NOTES];
@@ -15554,7 +15558,6 @@ var BY_NAME = new Map(TOOL_TEXTS.map((t3) => [t3.name, t3]));
 var ROLE_IDS = ["intent", "scene", "minds", "knowledge", "director", "read", "memory", "skip", "world"];
 var ROLE_TIERS = ["read", "story", "gm"];
 var ROLE_ON_FAIL = ["prompt_only", "skip", "stop"];
-var ROLE_KNOWLEDGE = ["pov", "everyone", "gm", "own"];
 var ROLE_LABEL = {
   intent: "Intent",
   scene: "Scene and lore",
@@ -15566,7 +15569,6 @@ var ROLE_LABEL = {
   skip: "Skip beats",
   world: "World steps"
 };
-var KNOWLEDGE = { intent: "pov", scene: "everyone", minds: "own", knowledge: "everyone", director: "everyone", read: "everyone", memory: "own", skip: "everyone", world: "everyone" };
 var FAMILIES = {
   intent: ["people", "places", "items", "money", "checks", "time"],
   scene: ["people", "places", "lore", "workspace"],
@@ -15581,8 +15583,89 @@ var FAMILIES = {
 function defaultRoleSettings() {
   const out = {};
   for (const id of ROLE_IDS)
-    out[id] = { connectionId: null, model: null, effort: "inherit", knowledge: KNOWLEDGE[id], families: [...FAMILIES[id]], tier: "story", promptOnly: false, onFail: id === "intent" ? "stop" : "prompt_only", budget: {} };
+    out[id] = { connectionId: null, model: null, effort: "inherit", families: [...FAMILIES[id]], tier: "story", promptOnly: false, onFail: id === "intent" ? "stop" : "prompt_only", budget: {} };
   return out;
+}
+
+// src/shared/sections.ts
+var LINES_MARKER = "{{lines}}";
+var DEFAULT_SECTIONS = {
+  outcome: { id: "outcome", label: "Outcome", rank: 0, template: `What the player character's actions did this turn, in the order they played, as the engine settled them: the authoritative record of this turn's results. Each line names the action, then in brackets what it was about, then its result and how long it took, then what it changed, in plain sentences ("you" is the player character). Narrate each as having happened this turn, with the exact results, rolls, amounts and changes its line gives; never soften, round or swap them for vaguer ones.
+{{lines}}`, position: { type: "chat_depth", role: "system", depth: 0, direction: "from_end" } },
+  montage: { id: "montage", label: "Montage", rank: 1, template: `What happened while time passed, in order, as the engine played it out: the authoritative record of the interval. Narrate the interval as a summary of these lines, in their order, keeping the specific people, places, amounts and changes each one names. A line that gives the player's own words for this time comes first: narrate what they say happens, and fit the other lines around it.
+{{lines}}`, position: { type: "chat_depth", role: "system", depth: 0, direction: "from_end" } },
+  scene: { id: "scene", label: "Scene", rank: 2, template: `Where the player character is now, when, and what they can perceive there: the authoritative facts of the scene. Describe it from these specifics as given (the place by its name, the time, the weather, what is in view), never generic stand-ins, and keep to them whenever the prose touches the setting. Its time, where it gives one, is the engine's clock once this turn's actions are done (the line on how long this turn took says from when): give no time of day or date that contradicts it, and let any time the reply tells passing after them run on from it.
+{{lines}}`, position: { type: "chat_depth", role: "system", depth: 1, direction: "from_end" } },
+  people: { id: "people", label: "People", rank: 3, template: `The people with the player character, as the player character knows them, and what each is doing: the authoritative record of who is here. Call them by these names, and keep each one's activity, state, clothes and what they carry as their line gives it; never fold them into a crowd or swap in generic details. Bring a person's specifics in whenever the prose turns to them.
+{{lines}}`, position: { type: "chat_depth", role: "system", depth: 1, direction: "from_end" } },
+  money: { id: "money", label: "Money", rank: 4, template: `The player character's money as it stands now: the authoritative figures. Use these exact amounts whenever money comes up; never round them, estimate them or give another balance.
+{{lines}}`, position: { type: "chat_depth", role: "system", depth: 2, direction: "from_end" } },
+  gear: { id: "gear", label: "Gear", rank: 5, template: `What the player character carries, wears and has to hand, as it stands now: the authoritative list, one specific item a line. Name each item as given, with its details and condition, whenever the prose touches it; never replace it with a generic stand-in ("a bag", "some tools").
+{{lines}}`, position: { type: "chat_depth", role: "system", depth: 2, direction: "from_end" } },
+  vehicles: { id: "vehicles", label: "Vehicles", rank: 6, template: `The vehicles the player character may use, and others nearby, as they know them: where each is, whose it is, its fuel and its state. These lines are the authoritative record: call each vehicle by the name and details its line gives, keep its place, fuel and condition as stated, and bring them in whenever a vehicle comes up, never a generic "the car" where a line names one.
+{{lines}}`, position: { type: "chat_depth", role: "system", depth: 2, direction: "from_end" } },
+  quest: { id: "quest", label: "Quest", rank: 7, template: `The player character's quests and goals, as far as they know them: the authoritative record of where each stands. Let the reply follow from these, keeping each one's names, objectives and stage as given; never reveal a step they haven't reached.
+{{lines}}`, position: { type: "chat_depth", role: "system", depth: 3, direction: "from_end" } },
+  outline: { id: "outline", label: "Outline", rank: 8, template: `The turn as the engine planned it, beat by beat. Write the reply from these beats, in this order, covering each one and keeping the specific people, things, places and amounts it names; what a beat leaves open is yours to fill in.
+{{lines}}`, position: { type: "chat_depth", role: "system", depth: 0, direction: "from_end" } },
+  stance: { id: "stance", label: "Stance", rank: 9, template: `These lines are the authoritative record of how the people here behave and what each is about: show each person as their line says, in what they do and say; never state what a cue only hints at.
+{{lines}}`, position: { type: "chat_depth", role: "system", depth: 1, direction: "from_end" } },
+  [MINDS_SLOT]: { id: MINDS_SLOT, label: "Minds", rank: 10, template: `Each mind below is scoped to what that character knows and is blind to everyone else's. Let each shape that character's own choices, words and manner this turn, as specifically as it says. Show it through what they do and say; never state a thought, a reason or an intent outright, and never let one character act on another's private mind.
+{{lines}}`, position: { type: "chat_depth", role: "system", depth: 1, direction: "from_end" } },
+  place: { id: "place", label: "Place", rank: 11, template: `The place the player character is in: what it is like, what is here, where it leads, and the lore about it. These lines are the authoritative inventory of the place: name each thing, room, way out and detail as given whenever the prose touches it, and never reduce them to a summary or a generic stand-in ("some furniture", "various goods").
+{{lines}}`, position: { type: "chat_depth", role: "system", depth: 2, direction: "from_end" } },
+  property: { id: "property", label: "Property", rank: 12, template: `Property the player character has a part in: where it is, who holds it and in what role. It is theirs only where a line says "yours"; otherwise they only use, keep or benefit from it. These lines are the authoritative record: use each property's name, place and details as given whenever it comes up.
+{{lines}}`, position: { type: "chat_depth", role: "system", depth: 3, direction: "from_end" } },
+  [KNOWLEDGE_SLOT]: { id: KNOWLEDGE_SLOT, label: "Who knows what", rank: 13, template: `Who knows what among the people here, a fact at a time, the player character ("You") first among those who hold it: the authoritative record of what each person holds and how they came by it. Each person acts and speaks only from what their own lines give them: never let anyone use, hint at or guess a fact their lines don't give them, nor know what a line says they don't. "Suspects" is a guess they aren't sure of; "keeps it from" is something they won't reveal to those named.
+{{lines}}`, position: { type: "chat_depth", role: "system", depth: 1, direction: "from_end" } }
+};
+function builtInSectionsOf(world) {
+  const own = Object.keys(world.sections);
+  if (own.length === 0)
+    return Object.values(DEFAULT_SECTIONS);
+  return [MINDS_SLOT, KNOWLEDGE_SLOT].flatMap((slot) => {
+    const section = DEFAULT_SECTIONS[slot];
+    return section && !own.includes(slot) ? [section] : [];
+  });
+}
+function sectionTemplateProblem(text) {
+  return text.includes(LINES_MARKER) ? null : `it must hold ${LINES_MARKER}, where the section's lines go`;
+}
+function storedSectionTemplates(value) {
+  return Object.fromEntries(Object.entries(value).filter(([id, text]) => hasOwn(DEFAULT_SECTIONS, id) && text !== DEFAULT_SECTIONS[id]?.template));
+}
+
+// src/shared/agent-context.ts
+var ROLE_PERSPECTIVES = ["pov", "everyone", "gm", "own"];
+var LORE_INDEX_SOURCE = "lore_index";
+var CONTEXT_SOURCES = [LORE_INDEX_SOURCE, ...Object.values(DEFAULT_SECTIONS).sort((a3, b3) => a3.rank - b3.rank).map((s3) => s3.id)];
+var SOURCE_USES = ["start", "ask", "never"];
+var PERSPECTIVE = { intent: "pov", scene: "everyone", minds: "own", knowledge: "everyone", director: "everyone", read: "everyone", memory: "own", skip: "everyone", world: "everyone" };
+var START = { director: [MINDS_SLOT, "scene"] };
+function defaultContextSettings() {
+  const roles = {};
+  for (const id of ROLE_IDS)
+    roles[id] = { perspective: PERSPECTIVE[id], start: CONTEXT_SOURCES.filter((s3) => START[id]?.includes(s3) === true), never: [], pins: [] };
+  return { roles };
+}
+function sourceUse(context, source) {
+  return context.start.includes(source) ? "start" : context.never.includes(source) ? "never" : "ask";
+}
+function withSourceUse(context, source, use) {
+  const start = context.start.filter((s3) => s3 !== source);
+  const never = context.never.filter((s3) => s3 !== source);
+  if (use === "start")
+    start.push(source);
+  if (use === "never")
+    never.push(source);
+  return { start: CONTEXT_SOURCES.filter((s3) => start.includes(s3)), never: CONTEXT_SOURCES.filter((s3) => never.includes(s3)) };
+}
+var PERSPECTIVE_LABEL = { pov: "Your character's", everyone: "Everyone's, secrets marked", gm: "The GM's", own: "Its character's own" };
+var SOURCE_USE_LABEL = { start: "Starts with", ask: "When needed", never: "Never" };
+function sourceLabel(source) {
+  if (source === LORE_INDEX_SOURCE)
+    return "Lore index";
+  return Object.values(DEFAULT_SECTIONS).find((s3) => s3.id === source)?.label ?? source;
 }
 
 // src/shared/agent-settings.ts
@@ -15591,28 +15674,36 @@ var ASSISTANT_APPLY = ["ask", "at_once"];
 var PIPELINE_MODES = ["fixed", "main"];
 var MEMORY_PLACEMENTS = ["after_reply", "before_next"];
 var REVIEW_PLACEMENTS = ["chips", "gate"];
+var FINAL_REVIEW_ON_FAIL = ["send", "stop"];
+var KEPT_FOLDS_DEFAULT = 65536;
 var DEFAULT_ACCEPTANCE = Object.freeze({ only: true, tokensIn: 300000, tokensOut: 30000 });
 function defaultAgentSettings() {
   return {
     thinkingInToolLoops: false,
     budget: { callTokensIn: "none", callTokensOut: HELPER_MAX_TOKENS, callMs: "none", callTools: "none", tokensIn: "none", tokensOut: "none", toolTurns: 10, wallMs: "none", revisions: 2, concurrency: 4 },
-    turn: { tokensIn: 1e5, tokensOut: 1e4, toolTurns: "none", wallMs: "none" },
+    turn: { tokensIn: "none", tokensOut: "none", toolTurns: "none", wallMs: "none" },
     loopRepeats: 3,
     clipChars: 4000,
     throttles: [],
     caching: { on: true, nonce: "", roles: {} },
     acceptance: { connections: [], estimateFactor: 2 },
-    assistant: { connectionId: null, model: null, effort: "inherit", knowledge: "everyone", apply: "ask", historyTokens: 20000, budget: {} },
+    assistant: { connectionId: null, model: null, effort: "inherit", apply: "ask", historyTokens: 20000, budget: {} },
     pipeline: { mode: "fixed", memory: "after_reply" },
     roles: defaultRoleSettings(),
-    main: { connectionId: null, model: null, effort: "inherit", knowledge: "everyone", families: ["workspace"], budget: {}, digestTokens: 2000, pinsTokens: 2000 },
+    main: { connectionId: null, model: null, effort: "inherit", families: ["workspace"], budget: {}, digestTokens: 2000, pinsTokens: 2000 },
+    context: defaultContextSettings(),
+    finalReview: { on: true, onFail: "send", budget: {} },
     gmOpsPerTurn: 10,
-    kept: { runs: 64, gates: 256, watchers: 256, live: 16 },
+    kept: { runs: 64, gates: 256, watchers: 256, live: 16, texts: 4000000, folds: KEPT_FOLDS_DEFAULT },
     compaction: { atTokens: 32000, keepTurns: 3, summarizeTool: true },
     recording: { outputChars: 2000 },
     review: { placement: "chips" },
-    vsClassic: 2
+    vsClassic: 2,
+    systemTokens: 8000
   };
+}
+function mainBudget(settings) {
+  return { ...settings.budget, ...settings.main.budget };
 }
 var MAIN_AGENT_ROLE = "main";
 var AGENT_ROLES = [
@@ -15644,7 +15735,6 @@ var LOOP_DEFS = {
   loopRepeats: { label: "Loop detector", limits: "The same tool call, with the same arguments, this many times in a row.", fires: "That call isn't run, and the agent stops.", unit: "count", min: 2, none: null },
   clipChars: { label: "Tool results clipped past", limits: "How much of one tool result reaches the model at once.", fires: "The rest goes to scratch, which the model reads with scratch_read.", unit: "chars", min: 1, none: null }
 };
-var ASSISTANT_KNOWLEDGE_LABELS = { pov: "Your character's", everyone: "Everyone's, secrets marked", gm: "The GM's" };
 var ASSISTANT_APPLY_LABELS = { ask: "Each waits for your Apply", at_once: "At once, with an Undo chip" };
 var HISTORY_TOKENS_DEF = { label: "History tokens", limits: "How much of the conversation goes with each message you send, the newest messages first.", fires: "The older messages are left out, and the assistant is told how many.", unit: "tokens", min: 0, none: null };
 var GM_OPS_DEF = { label: "GM edits per turn", limits: "How many of the GM's edits (a spawn, a removal, any field, a stage, the clock) a turn's agents may stage together.", fires: "The edits past it are refused, and the agent that asked is told so.", unit: "count", min: 0, none: null };
@@ -15652,7 +15742,9 @@ var KEPT_DEFS = {
   runs: { label: "Agent turns under way", limits: "How many agent turns, across your chats, the engine keeps running at once.", fires: "The oldest is let go when another starts: a turn that went stale with no end heard.", unit: "count", min: 1, none: null },
   gates: { label: "Turns waiting at a gate", limits: "How many agent turns, across your chats, may wait at a gate (the intent or outline gate, a question asked first, the review card) with everything their agents had done kept for the resume.", fires: "The oldest waiting turn is let go: it resumes afresh, its agents asked again where the turn still needs them; a review gate's still plays its plan and lands what you let through, but its record no longer says which role wrote what it committed before the gate, nor keeps the lines its roles had for the narrator.", unit: "count", min: 1, none: null },
   watchers: { label: "Chats whose review cards are watched", limits: "How many chats' review cards the pages that show them hear about as they change.", fires: "The chat watched longest ago stops hearing, until a page asks for its cards again.", unit: "count", min: 1, none: null },
-  live: { label: "Chats in the live view", limits: "How many chats' latest agent turn GM → Live keeps in memory, each with everything its agents did, and tells the pages watching it as it runs.", fires: "The chat whose turn started longest ago is let go: GM → Live shows nothing for it until its next turn, and that turn's transcript stays in GM → Workspace → transcripts.", unit: "count", min: 1, none: null }
+  live: { label: "Chats in the live view", limits: "How many chats' latest agent turn GM → Live keeps in memory, each with everything its agents did, and tells the pages watching it as it runs.", fires: "The chat whose turn started longest ago is let go: GM → Live shows nothing for it until its next turn, and that turn's transcript stays in GM → Workspace → transcripts.", unit: "count", min: 1, none: null },
+  texts: { label: "Agent texts kept once read", limits: "How many characters of the agents' stored texts the engine keeps in memory once it has read them: the main agent's session, the GM assistant's conversation and the workspace's files, across your chats.", fires: "The text read longest ago is let go, and its next read comes from storage. At 0 every read does.", unit: "chars", min: 0, none: null },
+  folds: { label: "Messages kept worked out", limits: "How many of your chats' messages the engine keeps worked out in memory, each with what it did to the world, so working a chat out again starts where it changed rather than from its first message. Keep it above your longest chat's messages.", fires: "The message used longest ago is let go: the next time it is needed, it is worked out again from the nearest state the engine kept or saved.", unit: "count", min: 1, none: null }
 };
 var COMPACTION_DEFS = {
   atTokens: { label: "Compact the session past", limits: "How long the main agent's session may grow before everything but its latest turns is summarized.", fires: "The older turns become one summary, kept with the span it replaced for a rollback.", unit: "tokens", min: 1, none: null },
@@ -15663,9 +15755,11 @@ var MAIN_DEFS = {
   pinsTokens: { label: "Pinned files, per role", limits: "How much of an agent's prompt its pinned files may take, where .pins.json sets no budget for it: the main agent's, and every role's.", fires: "A file past it comes as its headings, which workspace_read reads whole.", unit: "tokens", min: 0, none: null }
 };
 var OUTPUT_CHARS_DEF = { label: "Narrator-facing output, each", limits: "How long each text an agent turn records for the narrator may be: an outcome, montage or outline line, the brief, a scene note.", fires: "A longer text is cut to it, ending in “…”; the cut is noted in your diagnostics.log, not on the Diagnostics page.", unit: "chars", min: 1, none: null };
+var SYSTEM_TOKENS_DEF = { label: "System instructions", limits: "How much of each agent's prompt its system files may take together: AGENTS.md and roles/<role>.md, the global workspace's (~/) and this chat's.", fires: "The files past it are cut at a line, and the agent is told which were cut.", unit: "tokens", min: 0, none: null };
 var PIPELINE_MODE_LABELS = { fixed: "A fixed pipeline, in classic's order", main: "A main agent decides" };
 var MEMORY_PLACEMENT_LABELS = { after_reply: "After the reply", before_next: "Before the next turn" };
 var REVIEW_PLACEMENT_LABELS = { chips: "On the review card after the reply", gate: "On the review card before the reply" };
+var FINAL_REVIEW_ON_FAIL_LABELS = { send: "Send the prompt unrevised", stop: "Stop the turn" };
 var FAMILIES2 = Object.keys(TOOL_FAMILY_LABEL);
 var THROTTLE_MIN = 1;
 var CEILING_MIN = 0;
@@ -16313,6 +16407,49 @@ function DefaultChip(props) {
     ]
   }, undefined, true, undefined, this);
 }
+function Spoiler(props) {
+  return /* @__PURE__ */ u3("details", {
+    class: "lre-spoiler",
+    "data-lre-spoiler": true,
+    children: [
+      /* @__PURE__ */ u3("summary", {
+        children: [
+          /* @__PURE__ */ u3(Icon, {
+            name: "eye",
+            size: 14
+          }, undefined, false, undefined, this),
+          props.label
+        ]
+      }, undefined, true, undefined, this),
+      props.children
+    ]
+  }, undefined, true, undefined, this);
+}
+function SpoilerLines(props) {
+  const { lines } = props;
+  if (!lines || lines.length === 0)
+    return null;
+  return /* @__PURE__ */ u3("ul", {
+    class: "lre-chat-spoilers",
+    children: lines.map((line, i3) => /* @__PURE__ */ u3("li", {
+      children: /* @__PURE__ */ u3(Spoiler, {
+        label: "A line with a spoiler: tap to show",
+        children: /* @__PURE__ */ u3("span", {
+          class: "lre-spoiler-text",
+          children: line
+        }, undefined, false, undefined, this)
+      }, undefined, false, undefined, this)
+    }, i3, false, undefined, this))
+  }, undefined, false, undefined, this);
+}
+function SuggestionPill(props) {
+  return props.spoiler ? /* @__PURE__ */ u3(Spoiler, {
+    label: "A suggestion with a spoiler: tap to show",
+    children: props.children
+  }, undefined, false, undefined, this) : /* @__PURE__ */ u3(M, {
+    children: props.children
+  }, undefined, false, undefined, this);
+}
 function DecisionCard(props) {
   const { chip } = props;
   const controls = useChipControls(chip, props.chatId);
@@ -16350,7 +16487,10 @@ function DecisionCard(props) {
               chip.detail ? /* @__PURE__ */ u3("span", {
                 class: "lre-chat-decision-detail",
                 children: chip.detail
-              }, undefined, false, undefined, this) : null
+              }, undefined, false, undefined, this) : null,
+              /* @__PURE__ */ u3(SpoilerLines, {
+                lines: chip.spoilers
+              }, undefined, false, undefined, this)
             ]
           }, undefined, true, undefined, this)
         ]
@@ -16376,39 +16516,44 @@ function OfferChip(props) {
     class: "lre-chat-offer-detail",
     children: chip.detail
   }, undefined, false, undefined, this) : null;
-  if (only)
+  if (only) {
+    const pill = /* @__PURE__ */ u3("button", {
+      type: "button",
+      class: only.style === "primary" ? "lre-chat-pill primary" : "lre-chat-pill",
+      "aria-describedby": detail ? detailId : undefined,
+      "aria-expanded": only.input ? controls.asking === only.id : undefined,
+      disabled: controls.busy,
+      onClick: () => controls.press(only),
+      children: [
+        /* @__PURE__ */ u3(Icon, {
+          name: CHIP_ICON[chip.kind],
+          size: 16
+        }, undefined, false, undefined, this),
+        /* @__PURE__ */ u3("strong", {
+          children: [
+            only.label,
+            ":"
+          ]
+        }, undefined, true, undefined, this),
+        /* @__PURE__ */ u3("span", {
+          class: "lre-chat-pill-text",
+          children: chip.label
+        }, undefined, false, undefined, this)
+      ]
+    }, undefined, true, undefined, this);
     return /* @__PURE__ */ u3("div", {
       class: controls.busy ? "lre-chat-offer busy" : "lre-chat-offer",
       "data-kind": chip.kind,
       children: [
-        /* @__PURE__ */ u3("button", {
-          type: "button",
-          class: only.style === "primary" ? "lre-chat-pill primary" : "lre-chat-pill",
-          "aria-describedby": detail ? detailId : undefined,
-          "aria-expanded": only.input ? controls.asking === only.id : undefined,
-          disabled: controls.busy,
-          onClick: () => controls.press(only),
-          children: [
-            /* @__PURE__ */ u3(Icon, {
-              name: CHIP_ICON[chip.kind],
-              size: 16
-            }, undefined, false, undefined, this),
-            /* @__PURE__ */ u3("strong", {
-              children: [
-                only.label,
-                ":"
-              ]
-            }, undefined, true, undefined, this),
-            /* @__PURE__ */ u3("span", {
-              class: "lre-chat-pill-text",
-              children: chip.label
-            }, undefined, false, undefined, this)
-          ]
-        }, undefined, true, undefined, this),
+        /* @__PURE__ */ u3(SuggestionPill, {
+          spoiler: chip.spoiler === true,
+          children: pill
+        }, undefined, false, undefined, this),
         detail,
         controls.form
       ]
     }, undefined, true, undefined, this);
+  }
   return /* @__PURE__ */ u3("div", {
     class: controls.busy ? "lre-chat-offer busy" : "lre-chat-offer",
     "data-kind": chip.kind,
@@ -27305,9 +27450,11 @@ var MAIN_AGENT_PAGE = {
   label: "Main agent",
   note: "The agent that runs a chat's turns while Settings → Agents → Pipeline has a main agent decide: its system prompt, the turn task it gets each turn with the digest and its pinned files, each stage's message, its tools and their answers, what a role it runs is told, and how its session is summarized."
 };
-var MAIN_TOOLS = { runRole: "run_role", revise: "revise", commit: "commit", summarize: "summarize" };
+var MAIN_TOOLS = { runRole: "run_role", revise: "revise", commit: "commit", summarize: "summarize", condense: "condense" };
 var MAIN_TEXT = {
   system: "main.system",
+  context: "main.context",
+  contextRole: "main.context.role",
   turn: "main.turn",
   digest: "main.digest",
   digestFresh: "main.digest.fresh",
@@ -27344,7 +27491,6 @@ var MAIN_TEXT = {
   refusedCommitted: "main.refused.committed",
   committed: "main.committed",
   brief: "main.brief",
-  briefWithheld: "main.brief.withheld",
   briefRevision: "main.brief.revision",
   historyCall: "main.history.call",
   summary: "main.summary",
@@ -27406,6 +27552,17 @@ Your session keeps your earlier turns. Each turn's task says what changed since 
     vars: [v3("world", "the world's name"), v3("pov", "the player character's name")]
   },
   {
+    id: MAIN_TEXT.context,
+    page,
+    group: INSTRUCTIONS,
+    label: "How each role is set up",
+    note: "Follows the system prompt in the main agent's stable prefix: Settings → Agents → Context for every role, the guide it briefs the roles by. It steers; it screens nothing: every role's tools read everything, secrets marked.",
+    text: `How each role is set up (Settings → Agents → Context). A role's prompt already starts with what its line says it starts with, and its pinned files, and its tools read everything for themselves, each secret marked with whom it is known to and kept from. Brief each run with what its task needs beyond that: what you know that it doesn't, what to stress, what to leave alone. Never give a role what its line says it is never given, and pass a secret on only to a role whose work needs it, marked as it is marked.
+{{roles}}`,
+    vars: [v3("roles", "a line for each role, as below", true)]
+  },
+  { id: MAIN_TEXT.contextRole, page, group: INSTRUCTIONS, label: "One role's setup", note: "One line of How each role is set up, per role.", text: "- {{role}}: works from {{perspective}}; starts with {{start}}; never given {{never}}; pinned files: {{pins}}; its tools: {{tools}}", vars: [v3("role", "the role's id, as run_role takes it", true), v3("perspective", "the perspective it works from"), v3("start", "the sections it starts with, or none"), v3("never", "what it is never to be given, or none"), v3("pins", "the workspace files pinned for it, or none"), v3("tools", "its tool families, or none")] },
+  {
     id: MAIN_TEXT.turn,
     page,
     group: INSTRUCTIONS,
@@ -27437,7 +27594,7 @@ Run the roles you want with run_role, revise a run with revise if its answer nee
   ...Object.entries(STAGE_TEXTS).map(([stage, t3]) => ({ id: MAIN_TEXT.stageLabel(stage), page, group: STAGES, label: t3.label, note: "Fills {{stage}} in the stage's message.", text: t3.text, vars: [] })),
   { id: MAIN_TEXT.enginePrepare, page, group: STAGES, label: "What the engine did: the checks", note: "Leads stage 3's message: the engine's checks and gates let the turn play, and the action it plays.", text: "The engine checked the turn and let it play. It plays: {{intent}}", vars: [v3("intent", "the action the turn plays, with its parameters, or none")] },
   { id: MAIN_TEXT.engineBeats, page, group: STAGES, label: "What the engine did: the plan", note: "Leads stage 5's message: what the engine planned, as the narrator is told it.", text: `The engine planned the turn:
-{{lines}}`, vars: [v3("lines", "the plan's outcome, montage and beat lines; their count only where the main agent's knowledge doesn't reach them", true)] },
+{{lines}}`, vars: [v3("lines", "the plan's outcome, montage and beat lines", true)] },
   { id: MAIN_TEXT.engineReply, page, group: STAGES, label: "What the engine did: the reply", note: "Leads stage 7's message, and ends a turn's session with the reply when no stage showed it.", text: `The narrator's reply:
 {{reply}}`, vars: [v3("reply", "the reply as written", true)] },
   { id: MAIN_TEXT.engineRemember, page, group: STAGES, label: "What the minds remember", note: "Leads the message of the memory the last turn left to this one: the reply they remember.", text: `The last reply, which the minds remember now:
@@ -27470,7 +27627,12 @@ The reply: {{reply}}`, vars: [v3("n", "the reply's number in the chat"), v3("sai
   { id: MAIN_TEXT.toolArg(MAIN_TOOLS.revise, "message"), page, group: TOOLS, label: "revise: message", note: "The description of revise's message argument.", text: "What to change in the answer, and why.", vars: [] },
   { id: MAIN_TEXT.tool(MAIN_TOOLS.commit), page, group: TOOLS, label: "commit: what it does", note: "The description of the commit tool.", text: "Hand the engine what this stage's runs answered, and end the stage. A request you didn't run goes on without its role.", vars: [] },
   { id: MAIN_TEXT.tool(MAIN_TOOLS.summarize), page, group: TOOLS, label: "summarize: what it does", note: "The description of the summarize tool, offered while Settings → Agents → Compaction has it on.", text: "Summarize your session now: everything but your latest turns becomes one summary, which your next stages read instead. Use it when your session runs long.", vars: [] },
-  { id: MAIN_TEXT.ran, page, group: ANSWERS, label: "A run answered", note: "run_role's and revise's answer for a run that answered: its agent id, its role, how it ran and its answer, as far as the main agent's knowledge reaches.", text: "{{agent}}: the {{role}} role answered ({{via}}): {{answer}}", vars: [v3("agent", "the run's agent id", true), v3("role", "the role"), v3("via", "how it ran, in the words below"), v3("answer", "its answer", true)] },
+  { id: MAIN_TEXT.tool(MAIN_TOOLS.condense), page, group: TOOLS, label: "condense: what it does", note: "The description of the main agent's condense tool.", text: "Condense a long source (a workspace file, a turn's transcript among them, or a lore entry) into a short workspace note for a role, with one call of your own model, staged as that role's note for this turn: name the note in its task instead of handing it the whole source. The note opens with its source and the source's hash.", vars: [] },
+  { id: MAIN_TEXT.toolArg(MAIN_TOOLS.condense, "source"), page, group: TOOLS, label: "condense: source", note: "The description of condense's source argument.", text: "The source: a workspace file's path, or a lore entry's id as the lore tools give it.", vars: [] },
+  { id: MAIN_TEXT.toolArg(MAIN_TOOLS.condense, "role"), page, group: TOOLS, label: "condense: role", note: "The description of condense's role argument.", text: "The role the note is for: it is written as that role's, so the role's tier must let it write the workspace.", vars: [] },
+  { id: MAIN_TEXT.toolArg(MAIN_TOOLS.condense, "note"), page, group: TOOLS, label: "condense: note", note: "The description of condense's note argument.", text: "Where the note goes: a workspace path; leave it out for notes/condensed/ and a name taken from the source's.", vars: [] },
+  { id: MAIN_TEXT.toolArg(MAIN_TOOLS.condense, "focus"), page, group: TOOLS, label: "condense: focus", note: "The description of condense's focus argument.", text: "What the note should keep: the task it is for, or what matters in the source; leave it out for a plain digest.", vars: [] },
+  { id: MAIN_TEXT.ran, page, group: ANSWERS, label: "A run answered", note: "run_role's and revise's answer for a run that answered: its agent id, its role, how it ran and its answer, whole.", text: "{{agent}}: the {{role}} role answered ({{via}}): {{answer}}", vars: [v3("agent", "the run's agent id", true), v3("role", "the role"), v3("via", "how it ran, in the words below"), v3("answer", "its answer", true)] },
   { id: MAIN_TEXT.ranFailed, page, group: ANSWERS, label: "A run failed", note: "run_role's and revise's answer for a run that failed.", text: "{{agent}}: the {{role}} role failed ({{via}}): {{reason}}. Revise it, run it again prompt-only, or go on without it.", vars: [v3("agent", "the run's agent id", true), v3("role", "the role"), v3("via", "how it ran, in the words below"), v3("reason", "why it failed")] },
   { id: MAIN_TEXT.viaAgent, page, group: ANSWERS, label: "Ran as an agent", note: "Fills {{via}}: the role ran as an agent with its tools.", text: "an agent with tools", vars: [] },
   { id: MAIN_TEXT.viaPromptOnly, page, group: ANSWERS, label: "Ran prompt-only", note: "Fills {{via}}: the role ran as one call with its classic contract.", text: "one call, prompt only", vars: [] },
@@ -27488,7 +27650,6 @@ The reply: {{reply}}`, vars: [v3("n", "the reply's number in the chat"), v3("sai
 {{task}}`, vars: [v3("task", "the task run_role gave", true)] },
   { id: MAIN_TEXT.briefRevision, page, group: ROLES, label: "A revision", note: "Follows the task for each revision the main agent sent the run, oldest first.", text: `The main agent asks you to revise your answer:
 {{message}}`, vars: [v3("message", "the revision's message", true)] },
-  { id: MAIN_TEXT.briefWithheld, page, group: ANSWERS, label: "Part of a task kept back", note: "Follows a run's answer when a line of the main agent's task or revision wasn't sent to a role that reads with the player character's knowledge or a mind's own: it named a secret, or someone or something hidden from the player character.", text: "A line of your task wasn't sent to the {{role}} role: it named what that role's knowledge doesn't reach.", vars: [v3("role", "the role")] },
   { id: MAIN_TEXT.historyCall, page, group: SESSION, label: "A tool call, kept", note: "How the main agent's session keeps each tool call it made in a stage, for its later stages and turns.", text: `[{{tool}} {{args}}]
 {{result}}`, vars: [v3("tool", "the tool's name", true), v3("args", "its arguments"), v3("result", "what it answered")] },
   { id: MAIN_TEXT.summary, page, group: SESSION, label: "The summary", note: "Opens the main agent's session once it was summarized: the summary stands for the turns it replaced.", text: `Your session before this point, summarized:
@@ -27591,7 +27752,7 @@ var page3 = MAIN_AGENT_PAGE.id;
 var GROUP = "What a run gave";
 var count = { name: "count", text: "how many", required: true };
 var def = (id, label, note, text, vars = [count]) => ({ id, page: page3, group: GROUP, label, note: `${note} Worded alike to the main agent (run_role's and revise's answers), in Diagnostics and in the host log.`, text, vars });
-var KNOWLEDGE2 = {
+var KNOWLEDGE = {
   matters: { label: "Knowledge: no reason it matters", note: "A new fact that doesn't say why it matters and to whom (matters), which the knowledge step refuses, with every learning of it.", text: "{{count}} refused (no matters: a new fact says why it matters and to whom)" },
   facts_limit: { label: "Knowledge: past the new facts", note: "A new fact past the new facts a turn or a chat may hold (Settings → Minds → Knowledge), all of a turn's calls together.", text: "{{count}} refused (past the new facts a turn or a chat may hold, Settings → Minds → Knowledge)" },
   learnings_limit: { label: "Knowledge: past the learnings", note: "A learning past the learnings a turn may hold (Settings → Minds → Knowledge), all of a turn's calls together.", text: "{{count}} refused (past the learnings a turn may hold, Settings → Minds → Knowledge)" },
@@ -27616,12 +27777,12 @@ var READ = {
   same: { label: "Read: a repeat", note: "A proposal the same as another, or a handover or payment a purchase it proposed already holds.", text: "{{count}} not read (the same as another, or a handover or payment a purchase already holds)" },
   shape: { label: "Read: not a change", note: "An item of its proposals that isn't a change: no type.", text: "{{count}} not read (not a change: no type)" }
 };
-var lines = { name: "lines", text: "the lines, quoted, after a colon; empty where the main agent's knowledge doesn't reach the director's" };
+var lines = { name: "lines", text: "the lines, quoted, after a colon" };
 var PROSE = {
-  here: { label: "Director: someone here who isn't", note: "A line of the brief or the outline that has someone in the scene whom the engine has elsewhere: withheld from the narrator.", text: "{{count}} withheld (it has someone here whom the engine has elsewhere{{lines}})" },
-  gone: { label: "Director: someone gone who is here", note: "A line of the brief or the outline that has someone the engine has in the scene gone from it: withheld from the narrator.", text: "{{count}} withheld (it has someone gone whom the engine has here{{lines}})" },
-  holds: { label: "Director: a thing someone doesn't have", note: "A line of the brief or the outline that has someone hold or hand over a thing the engine says they don't have: withheld from the narrator.", text: "{{count}} withheld (it has someone hold or hand over a thing the engine says they don't have{{lines}})" },
-  lies: { label: "Director: a thing lying where it isn't", note: "A line of the brief or the outline that has a thing lying in the scene that the engine has on someone or elsewhere: withheld from the narrator.", text: "{{count}} withheld (it has a thing lying here that the engine has on someone or elsewhere{{lines}})" }
+  here: { label: "Director: someone here who isn't", note: "A line of the brief or the outline that has someone in the scene whom the engine has elsewhere: flagged, and kept for the narrator.", text: "{{count}} flagged, still in the reply's prompt (it has someone here whom the engine has elsewhere{{lines}})" },
+  gone: { label: "Director: someone gone who is here", note: "A line of the brief or the outline that has someone the engine has in the scene gone from it: flagged, and kept for the narrator.", text: "{{count}} flagged, still in the reply's prompt (it has someone gone whom the engine has here{{lines}})" },
+  holds: { label: "Director: a thing someone doesn't have", note: "A line of the brief or the outline that has someone hold or hand over a thing the engine says they don't have: flagged, and kept for the narrator.", text: "{{count}} flagged, still in the reply's prompt (it has someone hold or hand over a thing the engine says they don't have{{lines}})" },
+  lies: { label: "Director: a thing lying where it isn't", note: "A line of the brief or the outline that has a thing lying in the scene that the engine has on someone or elsewhere: flagged, and kept for the narrator.", text: "{{count}} flagged, still in the reply's prompt (it has a thing lying here that the engine has on someone or elsewhere{{lines}})" }
 };
 var AGENT_YIELD_PROMPTS = [
   def(YIELD_TEXT.writes, "Its changes", "Follows a run's answer when it staged a change, or a change it asked for was refused: each part below, joined.", "Its changes: {{writes}}.", [{ name: "writes", text: "the parts below that it has, joined", required: true }]),
@@ -27629,7 +27790,7 @@ var AGENT_YIELD_PROMPTS = [
   def(YIELD_TEXT.review, "Changes held for the review card", "The changes a run staged whose mode is Confirm: they wait for the GM's Apply on the turn's review card.", "{{count}} held for the review card, waiting for the GM's Apply"),
   def(YIELD_TEXT.refused, "Changes refused", "The changes a run asked for that were refused, with the writer's reasons.", "{{count}} refused ({{reasons}})", [count, { name: "reasons", text: "each refusal's reason, in the tool layer's words", required: true }]),
   def(YIELD_TEXT.lost, "What the engine didn't take", "Follows a run's answer when the engine took less of it than it gave, or it gave nothing: each reason below, joined.", "What the engine didn't take: {{lost}}.", [{ name: "lost", text: "the reasons below that apply, joined", required: true }]),
-  ...Object.entries(KNOWLEDGE2).map(([kind, t3]) => def(YIELD_TEXT.knowledge(kind), t3.label, t3.note, t3.text)),
+  ...Object.entries(KNOWLEDGE).map(([kind, t3]) => def(YIELD_TEXT.knowledge(kind), t3.label, t3.note, t3.text)),
   def(YIELD_TEXT.knowledgeCalls, "Knowledge: calls with no answer", "Calls of the knowledge step (one per person, or one for the scene) whose agent gave no answer the engine takes; Diagnostics has each call.", "{{count}} of its calls gave no answer the engine takes (see Diagnostics)"),
   def(YIELD_TEXT.knowledgeEmpty, "Knowledge: an empty answer", "A knowledge run whose answers held no fact and no learning, so it recorded nothing and refused nothing.", "its answers held no new fact and no learning", []),
   def(YIELD_TEXT.knowledgeOff, "Knowledge: no step", "A knowledge run that made no call: the knowledge step is off in Settings → Steps and connections, or no one could perceive the turn.", "the knowledge step made no call: it is off in Settings → Steps and connections, or no one could perceive the turn", []),
@@ -27641,7 +27802,7 @@ var AGENT_YIELD_PROMPTS = [
 ];
 
 // src/shared/agent-prompts.ts
-var RUNTIME_PROMPT_PAGE = { id: "runtime", label: "Every agent", note: "What the agent runtime says to any agent's model besides its role's own prompts: the scratch_read tool, the notes on tool results, and tools offered as text." };
+var RUNTIME_PROMPT_PAGE = { id: "runtime", label: "Every agent", note: "What the agent runtime says to any agent's model besides its role's own prompts: the scratch_read tool, the notes on tool results, tools offered as text, and how the workspace's system files (AGENTS.md, roles/<role>.md) are framed." };
 var RUNTIME_TEXT = {
   scratchRead: "runtime.scratch_read",
   scratchHandle: "runtime.scratch_read.handle",
@@ -27658,7 +27819,13 @@ var RUNTIME_TEXT = {
   toolResults: "runtime.tool_results",
   toolResult: "runtime.tool_result",
   toolError: "runtime.tool_error",
-  cacheNonce: "runtime.cache_nonce"
+  cacheNonce: "runtime.cache_nonce",
+  systemFiles: "runtime.system_files",
+  systemFile: "runtime.system_file",
+  systemCut: "runtime.system_cut",
+  condenseSystem: "runtime.condense.system",
+  condenseAsk: "runtime.condense.ask",
+  condenseNote: "runtime.condense.note"
 };
 var page4 = RUNTIME_PROMPT_PAGE.id;
 var RUNTIME_PROMPTS = [
@@ -27800,7 +27967,118 @@ Arguments (JSON Schema): {{parameters}}`,
       { name: "error", text: "why it failed", required: true }
     ]
   },
-  { id: RUNTIME_TEXT.cacheNonce, page: page4, label: "Cache key", note: "Heads an agent's prompt after Bust, and every call while its caching is off, so the provider's cached prompt no longer matches.", text: "Cache key {{nonce}}; ignore it.", vars: [{ name: "nonce", text: "the key", required: true }] }
+  { id: RUNTIME_TEXT.cacheNonce, page: page4, label: "Cache key", note: "Heads an agent's prompt after Bust, and every call while its caching is off, so the provider's cached prompt no longer matches.", text: "Cache key {{nonce}}; ignore it.", vars: [{ name: "nonce", text: "the key", required: true }] },
+  {
+    id: RUNTIME_TEXT.systemFiles,
+    page: page4,
+    group: "System instructions",
+    label: "The system files",
+    note: "Follows every agent's own system prompt when the workspace holds system files for it: AGENTS.md, then roles/<its role>.md, the global workspace's (~/) first, then this chat's.",
+    text: `The user's own instructions, from the workspace's system files: follow them. Where one says otherwise than the instructions above, it wins, as long as your answer keeps the form your task asks for. The global workspace's (~/) come first and this chat's after them, so this chat's have the last word.
+
+{{files}}`,
+    vars: [{ name: "files", text: "each file, framed as below, in order", required: true }]
+  },
+  { id: RUNTIME_TEXT.systemFile, page: page4, group: "System instructions", label: "One file", note: "Each system file within the system files, whole.", text: `## {{path}}
+{{text}}`, vars: [{ name: "path", text: "the file's path: ~/AGENTS.md, ~/roles/director.md, AGENTS.md, roles/director.md", required: true }, { name: "text", text: "what it holds", required: true }] },
+  {
+    id: RUNTIME_TEXT.systemCut,
+    page: page4,
+    group: "System instructions",
+    label: "Files cut",
+    note: "Ends the system files when they come to more than Settings → Agents → System instructions allows: the files past it are cut at a line or left out.",
+    text: "({{paths}}: cut short, past the {{tokens}} tokens the system files may take. workspace_read reads a file whole.)",
+    vars: [{ name: "paths", text: "the paths of the files cut or left out, joined with commas", required: true }, { name: "tokens", text: "how many tokens the system files may take" }]
+  },
+  { id: RUNTIME_TEXT.condenseSystem, page: page4, label: "condense: the call's system prompt", note: "The system prompt of the one call the condense tool makes, on the agent's own connection, with no tools.", text: "You condense a source for the agents of a roleplay engine. Keep every name, number, date, id and fact they could need, and each secret's mark as written; drop repetition, scaffolding and anything the instructions say doesn't matter. Answer with the note alone: plain lines, no preamble.", vars: [] },
+  { id: RUNTIME_TEXT.condenseAsk, page: page4, label: "condense: what it is asked", note: "Leads the source's text in the condense call.", text: `Condense {{source}} into a short note.
+{{focus}}`, vars: [{ name: "source", text: "the source's path or lore id", required: true }, { name: "focus", text: "what the agent said the note should keep, if anything" }] },
+  { id: RUNTIME_TEXT.condenseNote, page: page4, label: "condense: the note", note: "The note the condense tool writes: its source and the source's hash (so a later reader can tell whether it is still current), then the condensed text.", text: `Condensed from {{source}} (hash {{hash}}):
+{{text}}`, vars: [{ name: "source", text: "the source's path or lore id", required: true }, { name: "hash", text: "the start of the source text's hash", required: true }, { name: "text", text: "the condensed text", required: true }] }
+];
+
+// src/shared/final-review.ts
+var REVIEW_TOOLS = { replace: "review_replace", append: "review_append", drop: "review_drop", commit: "commit" };
+var REVIEW_TEXT = {
+  system: "main.review.system",
+  stage: "main.review.stage",
+  stageMain: "main.review.stage.main",
+  stageFixed: "main.review.stage.fixed",
+  part: "main.review.part",
+  line: "main.review.line",
+  empty: "main.review.empty",
+  tool: (name) => `main.tool.${name}`,
+  toolArg: (name, arg) => `main.tool.${name}.${arg}`,
+  commit: "main.review.commit",
+  edited: "main.review.edited",
+  refusedPart: "main.review.refused.part",
+  refusedLine: "main.review.refused.line",
+  refusedText: "main.review.refused.text",
+  committed: "main.review.committed",
+  committedNone: "main.review.committed.none"
+};
+var page5 = MAIN_AGENT_PAGE.id;
+var GROUP2 = "Final review";
+var v5 = (name, text, required) => required ? { name, text, required } : { name, text };
+var PART_VAR = v5("part", "the part's id, as the review lists it");
+var FINAL_REVIEW_PROMPTS = [
+  {
+    id: REVIEW_TEXT.system,
+    page: page5,
+    group: GROUP2,
+    label: "System prompt, on the fixed pipeline",
+    note: "Who the main agent is when the fixed pipeline runs a chat's turns and the main agent works only their final review. With a main agent deciding, it keeps its own system prompt.",
+    text: `You are the main agent for {{world}}, a roleplay world that LumiRPEngine keeps; {{pov}} is the player character. In this chat the engine and its role agents work each turn on a fixed pipeline, and you do one job in it: before the narrator writes each reply, you review what the narrator will be given and fix what is wrong. You never write the story yourself: the narrator writes each reply from the prompt you hand it.
+
+Your tools read the world as it stands. Each turn's task says what changed since your last review and gives you your pinned files.`,
+    vars: [v5("world", "the world's name"), v5("pov", "the player character's name")]
+  },
+  {
+    id: REVIEW_TEXT.stage,
+    page: page5,
+    group: GROUP2,
+    label: "The review",
+    note: "What the main agent is sent for the final review: what the review is for and how it works, then the prompt the narrator gets, part by part, each line numbered.",
+    text: `{{stage}}
+Before the narrator writes its reply, review the prompt it gets: the engine's sections below, the Outline and its brief among them, and the narrator rules, as the narrator will read them. Check each line against the world as it stands and this turn: a fact that is wrong, one the reply needs that is missing, lines that contradict each other, guidance that would lead the narrator astray, a secret told as known where it should stay marked. The player's own words and rules come first: never undo what they asked for.
+
+Change only what needs it, a line at a time: review_replace rewrites a line, review_append adds lines at the end of a part, review_drop takes a line out. Each names a line by its number as its part reads now, and answers with the part as it reads after it. A fact's line starts with "- ". Then call commit, which hands the narrator the prompt as you leave it; with nothing to fix, call commit at once.
+
+{{parts}}`,
+    vars: [v5("stage", "where the review stands in the turn, in the words below"), v5("parts", "each part of the prompt, as below", true)]
+  },
+  { id: REVIEW_TEXT.stageMain, page: page5, group: GROUP2, label: "Where it stands: a main agent's turn", note: "Leads the review's message in a turn the main agent decides: the review is the start of the reply's stage.", text: "Stage 6 of 8: the narrator's reply.", vars: [] },
+  { id: REVIEW_TEXT.stageFixed, page: page5, group: GROUP2, label: "Where it stands: the fixed pipeline", note: "Leads the review's message on the fixed pipeline, after the turn's task.", text: "The engine has planned this turn and its roles have done their work.", vars: [] },
+  {
+    id: REVIEW_TEXT.part,
+    page: page5,
+    group: GROUP2,
+    label: "A part of the prompt",
+    note: "One part of the narrator's prompt in the review's message and in its tools' answers: its id, which the tools take, its header as the narrator reads it, and its lines.",
+    text: `Part {{part}}: {{header}}
+{{lines}}`,
+    vars: [v5("part", "the part's id, as the tools take it", true), v5("header", "its header as the narrator reads it, such as [Outcome], or its name when it has none"), v5("lines", "its lines, each numbered as below", true)]
+  },
+  { id: REVIEW_TEXT.line, page: page5, group: GROUP2, label: "A numbered line", note: "One line of a part, with the number the review's tools name it by.", text: "{{n}}: {{text}}", vars: [v5("n", "the line's number in its part, from 1", true), v5("text", "the line as the narrator reads it", true)] },
+  { id: REVIEW_TEXT.empty, page: page5, group: GROUP2, label: "A part with no lines", note: "Stands in for the lines of a part that has none left.", text: "(no lines)", vars: [] },
+  { id: REVIEW_TEXT.tool(REVIEW_TOOLS.replace), page: page5, group: GROUP2, label: "review_replace: what it does", note: "The description of the review_replace tool.", text: "Rewrite one line of a part of the narrator's prompt: the line by its number as its part reads now, with your text in its place. Several lines in your text take its place together.", vars: [] },
+  { id: REVIEW_TEXT.toolArg(REVIEW_TOOLS.replace, "part"), page: page5, group: GROUP2, label: "review_replace: part", note: "The description of review_replace's part argument.", text: "The part's id, as the review lists it.", vars: [] },
+  { id: REVIEW_TEXT.toolArg(REVIEW_TOOLS.replace, "line"), page: page5, group: GROUP2, label: "review_replace: line", note: "The description of review_replace's line argument.", text: "The line's number, as its part reads now.", vars: [] },
+  { id: REVIEW_TEXT.toolArg(REVIEW_TOOLS.replace, "text"), page: page5, group: GROUP2, label: "review_replace: text", note: "The description of review_replace's text argument.", text: "The line as the narrator should read it, whole.", vars: [] },
+  { id: REVIEW_TEXT.tool(REVIEW_TOOLS.append), page: page5, group: GROUP2, label: "review_append: what it does", note: "The description of the review_append tool.", text: "Add lines at the end of a part of the narrator's prompt: what the reply needs that the part doesn't say.", vars: [] },
+  { id: REVIEW_TEXT.toolArg(REVIEW_TOOLS.append, "part"), page: page5, group: GROUP2, label: "review_append: part", note: "The description of review_append's part argument.", text: "The part's id, as the review lists it.", vars: [] },
+  { id: REVIEW_TEXT.toolArg(REVIEW_TOOLS.append, "text"), page: page5, group: GROUP2, label: "review_append: text", note: "The description of review_append's text argument.", text: "The line to add, as the narrator should read it; one per line break for several.", vars: [] },
+  { id: REVIEW_TEXT.tool(REVIEW_TOOLS.drop), page: page5, group: GROUP2, label: "review_drop: what it does", note: "The description of the review_drop tool.", text: "Take one line out of a part of the narrator's prompt, by its number as its part reads now.", vars: [] },
+  { id: REVIEW_TEXT.toolArg(REVIEW_TOOLS.drop, "part"), page: page5, group: GROUP2, label: "review_drop: part", note: "The description of review_drop's part argument.", text: "The part's id, as the review lists it.", vars: [] },
+  { id: REVIEW_TEXT.toolArg(REVIEW_TOOLS.drop, "line"), page: page5, group: GROUP2, label: "review_drop: line", note: "The description of review_drop's line argument.", text: "The line's number, as its part reads now.", vars: [] },
+  { id: REVIEW_TEXT.commit, page: page5, group: GROUP2, label: "commit, in the review: what it does", note: "The description of the commit tool in the final review.", text: "Hand the narrator the prompt as your edits leave it, and end the review.", vars: [] },
+  { id: REVIEW_TEXT.edited, page: page5, group: GROUP2, label: "An edit made", note: "review_replace's, review_append's and review_drop's answer: the part as it reads after the edit.", text: `Done. It now reads:
+{{part}}`, vars: [v5("part", "the part, as the review shows parts", true)] },
+  { id: REVIEW_TEXT.refusedPart, page: page5, group: GROUP2, label: "No such part", note: "An edit's answer when no part of the prompt has the id it gave.", text: "No part of the narrator's prompt has the id {{part}}. Its parts are {{parts}}.", vars: [PART_VAR, v5("parts", "every part's id")] },
+  { id: REVIEW_TEXT.refusedLine, page: page5, group: GROUP2, label: "No such line", note: "review_replace's and review_drop's answer for a line number its part doesn't have.", text: "Part {{part}} has no line {{line}}: it has {{count}} {{lines}}.", vars: [PART_VAR, v5("line", "the number given"), v5("count", "how many lines it has"), v5("lines", '"line" for 1, else "lines"')] },
+  { id: REVIEW_TEXT.refusedText, page: page5, group: GROUP2, label: "No text", note: "review_replace's and review_append's answer when the text given is empty.", text: "Give the line's text: an empty one says nothing. review_drop takes a line out.", vars: [] },
+  { id: REVIEW_TEXT.committed, page: page5, group: GROUP2, label: "Committed", note: "commit's answer in the final review, once it edited the prompt.", text: "Committed. The narrator gets the prompt with your {{count}} {{edits}}.", vars: [v5("count", "how many edits the review made", true), v5("edits", '"edit" for 1, else "edits"')] },
+  { id: REVIEW_TEXT.committedNone, page: page5, group: GROUP2, label: "Committed, unchanged", note: "commit's answer in the final review when it edited nothing.", text: "Committed. The narrator gets the prompt as the engine made it.", vars: [] }
 ];
 
 // src/shared/skip-plan.ts
@@ -27813,7 +28091,7 @@ var SKIP_PLAN_PROMPT = [
 var SKIP_PLAN_ANSWER = 'Answer with JSON only: {"plans":[{"entity":"<person id>","blocks":[{"label":"...","start":"YYYY-MM-DD HH:MM","end":"YYYY-MM-DD HH:MM","place":"<place id>","activity":"<activity>"}]}]}. Leave out anyone with nothing worth planning.';
 
 // src/shared/role-prompts.ts
-var ROLES_PAGE = { id: "roles", label: "Every role", note: "What every role of an agent turn is told besides its own prompts: what its tools show it, how the preset's guidance for its steps leads in, and how its pinned files come." };
+var ROLES_PAGE = { id: "roles", label: "Every role", note: "What every role of an agent turn is told besides its own prompts: the perspective it works from (its tools read everything, secrets marked, whatever it is), how the preset's guidance for its steps leads in, how its pinned files come, and the sections it starts with." };
 function rolePageId(role) {
   return `role.${role}`;
 }
@@ -27828,6 +28106,7 @@ function roleContractId(role, sub) {
 }
 var ROLES_TEXT = {
   sees: { pov: "role.sees.pov", everyone: "role.sees.everyone", gm: "role.sees.gm", own: "role.sees.own" },
+  context: "role.context",
   guidance: "role.guidance",
   guidanceBlock: "role.guidance.block",
   pins: "role.pins",
@@ -27850,7 +28129,7 @@ var WORLD_VARS = [
   { name: "world", text: "the world's name" },
   { name: "pov", text: "the player character's name" }
 ];
-var SYSTEM_VARS = [...WORLD_VARS, { name: "knowledge", text: "what the role's tools show it: the shared page's text for the knowledge it reads with (Settings → Agents → Roles → Knowledge)" }];
+var SYSTEM_VARS = [...WORLD_VARS, { name: "knowledge", text: "what the role's tools show it (everything, secrets marked) and the perspective it works from: the Every role page's text for its perspective (Settings → Agents → Context)" }];
 var MIND_VARS2 = [
   { name: "character", text: "the character the call thinks for; empty for one about no one" },
   { name: "world", text: "the world's name" },
@@ -27880,7 +28159,7 @@ var PROSE_VARS2 = [
   { name: "sections", text: "the sections the narrator has this turn" }
 ];
 var INSTRUCTIONS2 = "Instructions";
-function page5(role, note) {
+function page6(role, note) {
   return { id: rolePageId(role), label: ROLE_LABEL[role], note };
 }
 function roleTexts(role, system, instructions) {
@@ -27903,17 +28182,20 @@ function howToWork(role, extra = []) {
   ].join(`
 `);
 }
-var SEES_NOTE = "Fills {{knowledge}} in a role's system prompt while it reads with ";
+var SEES_NOTE = "Fills {{knowledge}} in a role's system prompt while Settings → Agents → Context has it work from ";
+var SEES = "everything in the world, each secret marked with whom it is known to and whom it is kept from";
 var SHARED_PROMPTS = [
-  { id: ROLES_TEXT.sees.pov, page: ROLES_PAGE.id, group: "What a role's tools show it", label: "Your character's knowledge", note: `${SEES_NOTE}your character's knowledge.`, text: "only what {{pov}}, the player character, knows: nobody and nothing they haven't met, seen or been told of", vars: WORLD_VARS },
-  { id: ROLES_TEXT.sees.everyone, page: ROLES_PAGE.id, group: "What a role's tools show it", label: "Everyone's knowledge, secrets marked", note: `${SEES_NOTE}what everyone in the world knows.`, text: "what everyone in the world knows, each secret marked with whom it is known to and whom it is kept from", vars: WORLD_VARS },
-  { id: ROLES_TEXT.sees.gm, page: ROLES_PAGE.id, group: "What a role's tools show it", label: "The GM's knowledge", note: `${SEES_NOTE}the game master's knowledge.`, text: "everything, as the game master sees it: every secret, plan and hidden person, place and thing", vars: WORLD_VARS },
-  { id: ROLES_TEXT.sees.own, page: ROLES_PAGE.id, group: "What a role's tools show it", label: "A character's own knowledge", note: `${SEES_NOTE}one character's own knowledge, as a mind does: it has no tools, and its task holds what it reads.`, text: "nothing beyond the task: it holds only what the character it is about knows, and that is all you work from", vars: WORLD_VARS },
+  { id: ROLES_TEXT.sees.pov, page: ROLES_PAGE.id, group: "A role's perspective", label: "Your character's perspective", note: `${SEES_NOTE}your character's perspective. A hint only: its tools read everything, secrets marked.`, text: `${SEES}. Work from what {{pov}}, the player character, knows: treat anyone or anything they haven't met, seen or been told of, and every secret not known to them, as unknown to them`, vars: WORLD_VARS },
+  { id: ROLES_TEXT.sees.everyone, page: ROLES_PAGE.id, group: "A role's perspective", label: "Everyone's perspective, secrets marked", note: `${SEES_NOTE}what everyone in the world knows. A hint only: its tools read everything, secrets marked.`, text: `${SEES}. Work from what everyone in the world knows: a secret is for those it is known to, and never reaches the player or anyone it is kept from unless the story reveals it`, vars: WORLD_VARS },
+  { id: ROLES_TEXT.sees.gm, page: ROLES_PAGE.id, group: "A role's perspective", label: "The GM's perspective", note: `${SEES_NOTE}the game master's perspective. A hint only: its tools read everything, secrets marked.`, text: `${SEES}. Work as the game master, who knows it all: a secret still reaches the player only when the story reveals it`, vars: WORLD_VARS },
+  { id: ROLES_TEXT.sees.own, page: ROLES_PAGE.id, group: "A role's perspective", label: "A character's own perspective", note: `${SEES_NOTE}the perspective of the character its task is about, as a mind does. A hint only: its tools read everything, secrets marked.`, text: `${SEES}. Work from what the character the task is about knows: the task gives it, and nothing else, of theirs or anyone's, is theirs to act on`, vars: WORLD_VARS },
+  { id: ROLES_TEXT.context, page: ROLES_PAGE.id, group: "What a role starts with", label: "The sections it starts with", note: "Frames the narrator's sections Settings → Agents → Context starts a role with, after its task, as the narrator would get them now.", text: `What the narrator would be told now, in the engine's sections (a secret's mark says whom it is known to and kept from):
+{{sections}}`, vars: [...WORLD_VARS, { name: "sections", text: "each section the role starts with, under its name", required: true }] },
   { id: ROLES_TEXT.guidance, page: ROLES_PAGE.id, group: "The preset's guidance", label: "Before the guidance", note: "Leads the blocks of your preset's guidance for the steps a role stands in for (RPEngine · <step>), after its instructions, when the preset has any.", text: `Style and rules from the player's preset, each under the step it is for. Follow them where they fit the instructions above; they never change what you answer or its form:
 {{blocks}}`, vars: [{ name: "blocks", text: "the preset's blocks for the role's steps, each under its step's name", required: true }] },
   { id: ROLES_TEXT.guidanceBlock, page: ROLES_PAGE.id, group: "The preset's guidance", label: "One step's guidance", note: "One block of the preset's guidance, under the name of the step it is for.", text: `{{step}}:
 {{text}}`, vars: [{ name: "step", text: "the step's name, as Settings → Steps and connections names it", required: true }, { name: "text", text: "the block's text", required: true }] },
-  { id: ROLES_TEXT.pins, page: ROLES_PAGE.id, group: "Pinned files", label: "Pinned files", note: "Frames a role's pinned files after its instructions and guidance: those .pins.json lists for the role, then those pinned in GM → Workspace, read with its knowledge within its pins budget. A role reading with a character's own knowledge gets none.", text: `Pinned files for your work (at most {{tokens}} {{unit}} of them; a file past that comes as its headings):
+  { id: ROLES_TEXT.pins, page: ROLES_PAGE.id, group: "Pinned files", label: "Pinned files", note: "Frames a role's pinned files after its instructions and guidance: those Settings → Agents → Context pins for it, then those .pins.json lists for the role, then those pinned in GM → Workspace, within its pins budget.", text: `Pinned files for your work (at most {{tokens}} {{unit}} of them; a file past that comes as its headings):
 {{files}}`, vars: [{ name: "tokens", text: "the role's pins budget: the manifest's for it, else Settings → Agents → Main agent's Pinned files, per role" }, { name: "unit", text: '"token" for 1, else "tokens"' }, { name: "files", text: "each file, as below", required: true }] },
   { id: ROLES_TEXT.pinsFile, page: ROLES_PAGE.id, group: "Pinned files", label: "A pinned file", note: "One of a role's pinned files, whole.", text: `[{{path}}]
 {{text}}`, vars: [{ name: "path", text: "the file's path", required: true }, { name: "text", text: "the file's text", required: true }] },
@@ -28197,65 +28479,17 @@ The narrator's reply:
 ];
 var ROLE_PROMPT_PAGES = [
   ROLES_PAGE,
-  page5("intent", "The intent role (before the plan): it reads the player's message into the actions it takes, judges a described approach, and checks a puzzle's answer."),
-  page5("scene", "The scene role (before the plan): the lore and notes the narrator should have for the turn's scene."),
-  page5("minds", "The minds role (before the plan): each character's private mind at the turn's moment."),
-  page5("knowledge", "The knowledge role (after the reply, and before the plan when a decision turns on it): who learned, inferred, doubted or forgot what."),
-  page5("director", "The director role: the odds of each person's choices before the plan and off-screen after the reply, the brief and outline before the reply, and suggested next moves after it."),
-  page5("read", "The read role (after the reply): the changes the reply states."),
-  page5("memory", "The memory role (after the reply, or before the next turn): each character's memory of the turn, and their older notes folded into their summary."),
-  page5("skip", "The time-skip role (on a skip): the moments worth stopping for, and how the people the engine lives a day for spend it."),
-  page5("world", "The world-steps role: a world's own steps, as their author wrote them.")
+  page6("intent", "The intent role (before the plan): it reads the player's message into the actions it takes, judges a described approach, and checks a puzzle's answer."),
+  page6("scene", "The scene role (before the plan): the lore and notes the narrator should have for the turn's scene."),
+  page6("minds", "The minds role (before the plan): each character's private mind at the turn's moment."),
+  page6("knowledge", "The knowledge role (after the reply, and before the plan when a decision turns on it): who learned, inferred, doubted or forgot what."),
+  page6("director", "The director role: the odds of each person's choices before the plan and off-screen after the reply, the brief and outline before the reply, and suggested next moves after it."),
+  page6("read", "The read role (after the reply): the changes the reply states."),
+  page6("memory", "The memory role (after the reply, or before the next turn): each character's memory of the turn, and their older notes folded into their summary."),
+  page6("skip", "The time-skip role (on a skip): the moments worth stopping for, and how the people the engine lives a day for spend it."),
+  page6("world", "The world-steps role: a world's own steps, as their author wrote them.")
 ];
 var ROLE_PROMPTS = [...SHARED_PROMPTS, ...INTENT_PROMPTS, ...SCENE_PROMPTS, ...MINDS_PROMPTS, ...KNOWLEDGE_PROMPTS, ...DIRECTOR_PROMPTS, ...READ_PROMPTS, ...MEMORY_PROMPTS, ...SKIP_PROMPTS, ...WORLD_PROMPTS];
-
-// src/shared/sections.ts
-var LINES_MARKER = "{{lines}}";
-var DEFAULT_SECTIONS = {
-  outcome: { id: "outcome", label: "Outcome", rank: 0, template: `What the player character's actions did this turn, in the order they played, as the engine settled them: the authoritative record of this turn's results. Each line names the action, then in brackets what it was about, then its result and how long it took, then what it changed, in plain sentences ("you" is the player character). Narrate each as having happened this turn, with the exact results, rolls, amounts and changes its line gives; never soften, round or swap them for vaguer ones.
-{{lines}}`, position: { type: "chat_depth", role: "system", depth: 0, direction: "from_end" } },
-  montage: { id: "montage", label: "Montage", rank: 1, template: `What happened while time passed, in order, as the engine played it out: the authoritative record of the interval. Narrate the interval as a summary of these lines, in their order, keeping the specific people, places, amounts and changes each one names. A line that gives the player's own words for this time comes first: narrate what they say happens, and fit the other lines around it.
-{{lines}}`, position: { type: "chat_depth", role: "system", depth: 0, direction: "from_end" } },
-  scene: { id: "scene", label: "Scene", rank: 2, template: `Where the player character is now, when, and what they can perceive there: the authoritative facts of the scene. Describe it from these specifics as given (the place by its name, the time, the weather, what is in view), never generic stand-ins, and keep to them whenever the prose touches the setting. Its time, where it gives one, is the engine's clock once this turn's actions are done (the line on how long this turn took says from when): give no time of day or date that contradicts it, and let any time the reply tells passing after them run on from it.
-{{lines}}`, position: { type: "chat_depth", role: "system", depth: 1, direction: "from_end" } },
-  people: { id: "people", label: "People", rank: 3, template: `The people with the player character, as the player character knows them, and what each is doing: the authoritative record of who is here. Call them by these names, and keep each one's activity, state, clothes and what they carry as their line gives it; never fold them into a crowd or swap in generic details. Bring a person's specifics in whenever the prose turns to them.
-{{lines}}`, position: { type: "chat_depth", role: "system", depth: 1, direction: "from_end" } },
-  money: { id: "money", label: "Money", rank: 4, template: `The player character's money as it stands now: the authoritative figures. Use these exact amounts whenever money comes up; never round them, estimate them or give another balance.
-{{lines}}`, position: { type: "chat_depth", role: "system", depth: 2, direction: "from_end" } },
-  gear: { id: "gear", label: "Gear", rank: 5, template: `What the player character carries, wears and has to hand, as it stands now: the authoritative list, one specific item a line. Name each item as given, with its details and condition, whenever the prose touches it; never replace it with a generic stand-in ("a bag", "some tools").
-{{lines}}`, position: { type: "chat_depth", role: "system", depth: 2, direction: "from_end" } },
-  vehicles: { id: "vehicles", label: "Vehicles", rank: 6, template: `The vehicles the player character may use, and others nearby, as they know them: where each is, whose it is, its fuel and its state. These lines are the authoritative record: call each vehicle by the name and details its line gives, keep its place, fuel and condition as stated, and bring them in whenever a vehicle comes up, never a generic "the car" where a line names one.
-{{lines}}`, position: { type: "chat_depth", role: "system", depth: 2, direction: "from_end" } },
-  quest: { id: "quest", label: "Quest", rank: 7, template: `The player character's quests and goals, as far as they know them: the authoritative record of where each stands. Let the reply follow from these, keeping each one's names, objectives and stage as given; never reveal a step they haven't reached.
-{{lines}}`, position: { type: "chat_depth", role: "system", depth: 3, direction: "from_end" } },
-  outline: { id: "outline", label: "Outline", rank: 8, template: `The turn as the engine planned it, beat by beat. Write the reply from these beats, in this order, covering each one and keeping the specific people, things, places and amounts it names; what a beat leaves open is yours to fill in.
-{{lines}}`, position: { type: "chat_depth", role: "system", depth: 0, direction: "from_end" } },
-  stance: { id: "stance", label: "Stance", rank: 9, template: `These lines are the authoritative record of how the people here behave and what each is about: show each person as their line says, in what they do and say; never state what a cue only hints at.
-{{lines}}`, position: { type: "chat_depth", role: "system", depth: 1, direction: "from_end" } },
-  [MINDS_SLOT]: { id: MINDS_SLOT, label: "Minds", rank: 10, template: `Each mind below is scoped to what that character knows and is blind to everyone else's. Let each shape that character's own choices, words and manner this turn, as specifically as it says. Show it through what they do and say; never state a thought, a reason or an intent outright, and never let one character act on another's private mind.
-{{lines}}`, position: { type: "chat_depth", role: "system", depth: 1, direction: "from_end" } },
-  place: { id: "place", label: "Place", rank: 11, template: `The place the player character is in: what it is like, what is here, where it leads, and the lore about it. These lines are the authoritative inventory of the place: name each thing, room, way out and detail as given whenever the prose touches it, and never reduce them to a summary or a generic stand-in ("some furniture", "various goods").
-{{lines}}`, position: { type: "chat_depth", role: "system", depth: 2, direction: "from_end" } },
-  property: { id: "property", label: "Property", rank: 12, template: `Property the player character has a part in: where it is, who holds it and in what role. It is theirs only where a line says "yours"; otherwise they only use, keep or benefit from it. These lines are the authoritative record: use each property's name, place and details as given whenever it comes up.
-{{lines}}`, position: { type: "chat_depth", role: "system", depth: 3, direction: "from_end" } },
-  [KNOWLEDGE_SLOT]: { id: KNOWLEDGE_SLOT, label: "Who knows what", rank: 13, template: `Who knows what among the people here, a fact at a time, the player character ("You") first among those who hold it: the authoritative record of what each person holds and how they came by it. Each person acts and speaks only from what their own lines give them: never let anyone use, hint at or guess a fact their lines don't give them, nor know what a line says they don't. "Suspects" is a guess they aren't sure of; "keeps it from" is something they won't reveal to those named.
-{{lines}}`, position: { type: "chat_depth", role: "system", depth: 1, direction: "from_end" } }
-};
-function builtInSectionsOf(world) {
-  const own = Object.keys(world.sections);
-  if (own.length === 0)
-    return Object.values(DEFAULT_SECTIONS);
-  return [MINDS_SLOT, KNOWLEDGE_SLOT].flatMap((slot) => {
-    const section = DEFAULT_SECTIONS[slot];
-    return section && !own.includes(slot) ? [section] : [];
-  });
-}
-function sectionTemplateProblem(text) {
-  return text.includes(LINES_MARKER) ? null : `it must hold ${LINES_MARKER}, where the section's lines go`;
-}
-function storedSectionTemplates(value) {
-  return Object.fromEntries(Object.entries(value).filter(([id, text]) => hasOwn(DEFAULT_SECTIONS, id) && text !== DEFAULT_SECTIONS[id]?.template));
-}
 
 // src/shared/lore-routing.ts
 var LORE_INDEX_TEXT = {
@@ -28268,34 +28502,34 @@ var LORE_INDEX_TEXT = {
   cut: "lore.index.cut",
   built: "lore.index.built"
 };
-var GROUP2 = "Lore index";
+var GROUP3 = "Lore index";
 var BOOKS = { name: "books", text: "a line per book, each as below", required: true };
 var ID = { name: "id", text: "the entry's short id: its tag, else the id LRE gave it", required: true };
 var TITLE = { name: "title", text: "the entry's title: its comment, else its first words" };
-function loreIndexPrompts(page6) {
+function loreIndexPrompts(page7) {
   return [
     {
       id: LORE_INDEX_TEXT.lead,
-      page: page6,
-      group: GROUP2,
+      page: page7,
+      group: GROUP3,
       label: "The lore index",
-      note: "The index the agents read: lore_index's answer, and, with Settings → Lore's switch on, every role's prompt. Unless you set your own index entry there.",
+      note: "The index the agents read: lore_index's answer, and the prompt of a role whose context starts with it (Settings → Agents → Context). Unless you set your own index entry in Settings → Lore.",
       text: `Lore index: every lore entry of the World Info books read here, by book: its id and title, and what it holds where the title doesn't say. Read an entry whole with lore_read and its id. In a turn, lore_load and its id put an entry into the prompt of the reply the turn is writing.
 {{books}}`,
       vars: [BOOKS]
     },
-    { id: LORE_INDEX_TEXT.book, page: page6, group: GROUP2, label: "A book's line", note: "One book of the index, with its entries.", text: "{{book}}: {{entries}}", vars: [{ name: "book", text: "the book's name" }, { name: "entries", text: "its entries, each as below, joined by the separator", required: true }] },
-    { id: LORE_INDEX_TEXT.entry, page: page6, group: GROUP2, label: "An entry", note: "One entry of a book's line, whose title says what it holds.", text: "{{id}} {{title}}", vars: [ID, TITLE] },
-    { id: LORE_INDEX_TEXT.holds, page: page6, group: GROUP2, label: "An entry with what it holds", note: "One entry of a book's line whose text says more than its title: the first line of its text, within Settings → Lore's length.", text: "{{id}} {{title}} ({{holds}})", vars: [ID, TITLE, { name: "holds", text: "the first line of the entry's text", required: true }] },
-    { id: LORE_INDEX_TEXT.separator, page: page6, group: GROUP2, label: "Between entries", note: "Joins the entries of a book's line.", text: " · ", vars: [], nonEmpty: true },
-    { id: LORE_INDEX_TEXT.none, page: page6, group: GROUP2, label: "No entries", note: "Stands in for the books' lines when no book read here holds an entry the agent may read.", text: "(No lore entries in the World Info books read here.)", vars: [] },
-    { id: LORE_INDEX_TEXT.cut, page: page6, group: GROUP2, label: "Past the budget", note: "Ends the index in a role's prompt when it runs past Settings → Lore's tokens for it: how many of its entries (or of your own index's lines) are left out.", text: "({{count}} more {{what}} past this index's budget: lore_index gives the whole index.)", vars: [{ name: "count", text: "how many entries, or lines of your own index, are left out", required: true }, { name: "what", text: '"entry" or "line" for 1, else "entries" or "lines"' }] },
+    { id: LORE_INDEX_TEXT.book, page: page7, group: GROUP3, label: "A book's line", note: "One book of the index, with its entries.", text: "{{book}}: {{entries}}", vars: [{ name: "book", text: "the book's name" }, { name: "entries", text: "its entries, each as below, joined by the separator", required: true }] },
+    { id: LORE_INDEX_TEXT.entry, page: page7, group: GROUP3, label: "An entry", note: "One entry of a book's line, whose title says what it holds.", text: "{{id}} {{title}}", vars: [ID, TITLE] },
+    { id: LORE_INDEX_TEXT.holds, page: page7, group: GROUP3, label: "An entry with what it holds", note: "One entry of a book's line whose text says more than its title: the first line of its text, within Settings → Lore's length.", text: "{{id}} {{title}} ({{holds}})", vars: [ID, TITLE, { name: "holds", text: "the first line of the entry's text", required: true }] },
+    { id: LORE_INDEX_TEXT.separator, page: page7, group: GROUP3, label: "Between entries", note: "Joins the entries of a book's line.", text: " · ", vars: [], nonEmpty: true },
+    { id: LORE_INDEX_TEXT.none, page: page7, group: GROUP3, label: "No entries", note: "Stands in for the books' lines when no book read here holds an entry the agent may read.", text: "(No lore entries in the World Info books read here.)", vars: [] },
+    { id: LORE_INDEX_TEXT.cut, page: page7, group: GROUP3, label: "Past the budget", note: "Ends the index in a role's prompt when it runs past Settings → Lore's tokens for it: how many of its entries (or of your own index's lines) are left out.", text: "({{count}} more {{what}} past this index's budget: lore_index gives the whole index.)", vars: [{ name: "count", text: "how many entries, or lines of your own index, are left out", required: true }, { name: "what", text: '"entry" or "line" for 1, else "entries" or "lines"' }] },
     {
       id: LORE_INDEX_TEXT.built,
-      page: page6,
-      group: GROUP2,
+      page: page7,
+      group: GROUP3,
       label: "The index entry Build writes",
-      note: "The text of the World Info entry Build → Lore writes and keeps in sync, which reaches the narrator as any entry of its book does: the entries anyone may read, each by its id and title.",
+      note: "The text of the World Info entry Build → Lore writes and keeps in sync, which reaches the narrator as any entry of its book does: every entry by its id and title, a secret or restricted one inside its secret mark (Secret marks texts).",
       text: `LORE INDEX: the lore entries of the World Info books, by book: each entry's id and title, and what it holds where the title doesn't say.
 {{books}}`,
       vars: [BOOKS]
@@ -28330,7 +28564,7 @@ var FINAL_OUTPUT_PAGE = {
 var GM_AGENT_PAGE = {
   id: "gm",
   label: "GM agent",
-  note: "The game master's assistant (GM → Assistant): its system prompt, its instructions, the descriptions of its tools and the notes its tools answer with."
+  note: "The game master's assistant (GM → Assistant), outside the story: its system prompt, its instructions, the descriptions of its tools and the notes its tools answer with."
 };
 var NARRATOR_GROUP = "Narrator rules";
 var MARKS_GROUP = "Secret marks";
@@ -28403,16 +28637,13 @@ var FINAL_OUTPUT_PROMPTS = [
 var GM_TEXT = {
   system: "gm.system",
   instructions: "gm.instructions",
-  historyNote: "gm.history_note",
-  knowledge: { pov: "gm.knowledge.pov", everyone: "gm.knowledge.everyone", gm: "gm.knowledge.gm" }
+  historyNote: "gm.history_note"
 };
 var GM_VARS = [
   { name: "world", text: "the world's name" },
   { name: "pov", text: "the player character's name" }
 ];
-var GM_SYSTEM_VARS = [...GM_VARS, { name: "knowledge", text: "what the assistant's tools show it: the text below for the knowledge it reads with (Settings → Agents → Assistant → Knowledge)" }];
 var GM_INSTRUCTIONS = "Instructions";
-var GM_KNOWLEDGE = "What it sees";
 var GM_THREAD = "The conversation";
 var GM_AGENT_PROMPTS = [
   {
@@ -28421,10 +28652,10 @@ var GM_AGENT_PROMPTS = [
     group: GM_INSTRUCTIONS,
     label: "System prompt",
     note: "Who the assistant is, whom it works for, and what it may rely on.",
-    text: `You are the game master's assistant for {{world}}, a roleplay world that LumiRPEngine keeps; {{pov}} is the player character. You work for the game master, outside the story: you answer their questions about the world and make the changes they ask for. You never narrate the story or speak as one of its characters.
+    text: `You are the game master's assistant for {{world}}, a roleplay world that LumiRPEngine keeps; {{pov}} is the player character. You work for the game master, outside the story and outside its world: you are no one in it, and nothing in it is kept from you. You answer their questions about the world, the engine and the agents' workspace, and make the changes they ask for. You never narrate the story or speak as one of its characters.
 
-You see the world through your tools, as it stands now, and they show you {{knowledge}}. They are your only source. Look things up before you answer, and answer only from what the tools give back: when they don't show something, say that you can't see it, and never guess or fill a gap from memory. A secret the tools mark stays marked in what you say: say whom it is known to and whom it is kept from.`,
-    vars: GM_SYSTEM_VARS
+Your tools show you the world as it stands now, all of it: every secret, plan and hidden person, place and thing. They are your only source. Look things up before you answer, and answer only from what the tools give back: when they don't have something, say so, and never guess or fill a gap from memory. When something is a secret, say so plainly, with whom it is known to and whom it is kept from: what the story reveals is the game master's to decide.`,
+    vars: GM_VARS
   },
   {
     id: GM_TEXT.instructions,
@@ -28433,10 +28664,10 @@ You see the world through your tools, as it stands now, and they show you {{know
     label: "Role instructions",
     note: "How it works through a question or a change.",
     text: `How to work:
-- Find whom and what a request is about first, by the names the game master uses, then read only what you need. A name the tools don't find is one you can't see: say so.
+- Find whom and what a request is about first, by the names the game master uses, then read only what you need. A name the tools don't find isn't in the world: say so.
 - Answer briefly and concretely, naming people, places, things and amounts as the tools give them.
 - To change the world, use the edit tools. An edit tool changes nothing by itself: it checks the change against the world as it stands now and gives back a preview. The game master then applies it, with an Undo, or turns it down; if they chose so, it applies as soon as you have answered. Propose only what the game master asked for, and say in plain words what you propose. When a tool refuses a change, say why, in its words.
-- Write a workspace note only when the game master asks you to keep something.`,
+- Write a workspace note only when the game master asks you to keep something: under ~/ for every chat of theirs, else for this chat.`,
     vars: GM_VARS
   },
   {
@@ -28444,40 +28675,13 @@ You see the world through your tools, as it stands now, and they show you {{know
     page: GM_AGENT_PAGE.id,
     group: GM_THREAD,
     label: "Earlier messages left out",
-    note: "Leads what is sent of the conversation when any of it isn't sent, past History tokens (Settings → Agents → Assistant) or written with more knowledge than the assistant reads with now: how many of its earlier messages aren't sent.",
+    note: "Leads what is sent of the conversation when any of it isn't sent, past History tokens (Settings → Agents → Assistant): how many of its earlier messages aren't sent.",
     text: "({{count}} earlier {{messages}} of this conversation left out. If you need what was said there, ask the game master.)",
     vars: [...GM_VARS, { name: "count", text: "how many of the conversation's earlier messages aren't sent" }, { name: "messages", text: '"message" for 1, else "messages"' }]
-  },
-  {
-    id: GM_TEXT.knowledge.pov,
-    page: GM_AGENT_PAGE.id,
-    group: GM_KNOWLEDGE,
-    label: "Your character's knowledge",
-    note: "Fills {{knowledge}} in the system prompt while the assistant reads with your character's knowledge.",
-    text: "only what {{pov}}, the player character, knows: nobody and nothing they haven't met, seen or been told of",
-    vars: GM_VARS
-  },
-  {
-    id: GM_TEXT.knowledge.everyone,
-    page: GM_AGENT_PAGE.id,
-    group: GM_KNOWLEDGE,
-    label: "Everyone's knowledge, secrets marked",
-    note: "Fills {{knowledge}} in the system prompt while the assistant reads with what everyone in the world knows.",
-    text: "what everyone in the world knows, each secret marked with whom it is known to and whom it is kept from",
-    vars: GM_VARS
-  },
-  {
-    id: GM_TEXT.knowledge.gm,
-    page: GM_AGENT_PAGE.id,
-    group: GM_KNOWLEDGE,
-    label: "The GM's knowledge",
-    note: "Fills {{knowledge}} in the system prompt while the assistant reads with the game master's knowledge.",
-    text: "everything, as the game master sees it: every secret, plan and hidden person, place and thing",
-    vars: GM_VARS
   }
 ];
 var PROMPT_PAGES = [FINAL_OUTPUT_PAGE, GM_AGENT_PAGE, MAIN_AGENT_PAGE, RUNTIME_PROMPT_PAGE, ...ROLE_PROMPT_PAGES];
-var PROMPTS = [...FINAL_OUTPUT_PROMPTS, ...GM_AGENT_PROMPTS, ...TOOL_PROMPTS, ...loreIndexPrompts(GM_AGENT_PAGE.id), ...MAIN_AGENT_PROMPTS, ...AGENT_FAILURE_PROMPTS, ...AGENT_YIELD_PROMPTS, ...RUNTIME_PROMPTS, ...ROLE_PROMPTS];
+var PROMPTS = [...FINAL_OUTPUT_PROMPTS, ...GM_AGENT_PROMPTS, ...TOOL_PROMPTS, ...loreIndexPrompts(GM_AGENT_PAGE.id), ...MAIN_AGENT_PROMPTS, ...FINAL_REVIEW_PROMPTS, ...AGENT_FAILURE_PROMPTS, ...AGENT_YIELD_PROMPTS, ...RUNTIME_PROMPTS, ...ROLE_PROMPTS];
 var TURN_PROMPT_PAGES = [FINAL_OUTPUT_PAGE.id];
 var BY_ID = new Map(PROMPTS.map((d3) => [d3.id, d3]));
 var PROMPT_BRACES = /\{\{[\s\S]*?\}\}/g;
@@ -28485,11 +28689,11 @@ function placeholder(name) {
   return `{{${name}}}`;
 }
 function missingPlaceholders2(def2, text) {
-  return def2.vars.filter((v5) => v5.required && !text.includes(placeholder(v5.name)));
+  return def2.vars.filter((v6) => v6.required && !text.includes(placeholder(v6.name)));
 }
 function promptProblems(def2, text, maxChars) {
   const out = [];
-  const known = new Set(def2.vars.map((v5) => placeholder(v5.name)));
+  const known = new Set(def2.vars.map((v6) => placeholder(v6.name)));
   const flagged = new Set;
   for (const m2 of text.matchAll(PROMPT_BRACES)) {
     const token = m2[0];
@@ -28497,10 +28701,10 @@ function promptProblems(def2, text, maxChars) {
       continue;
     flagged.add(token);
     const shown = token.length > 80 ? `${token.slice(0, 77)}…` : token;
-    out.push({ code: "unknown_placeholder", message: def2.vars.length > 0 ? `${shown} isn't one of this text's placeholders (${def2.vars.map((v5) => placeholder(v5.name)).join(", ")})` : `${shown} isn't a placeholder: this text has none` });
+    out.push({ code: "unknown_placeholder", message: def2.vars.length > 0 ? `${shown} isn't one of this text's placeholders (${def2.vars.map((v6) => placeholder(v6.name)).join(", ")})` : `${shown} isn't a placeholder: this text has none` });
   }
-  for (const v5 of missingPlaceholders2(def2, text))
-    out.push({ code: "missing_placeholder", message: `it must keep ${placeholder(v5.name)}: ${v5.text}` });
+  for (const v6 of missingPlaceholders2(def2, text))
+    out.push({ code: "missing_placeholder", message: `it must keep ${placeholder(v6.name)}: ${v6.text}` });
   if (def2.nonEmpty === true && text.trim() === "")
     out.push({ code: "empty", message: "it can't be empty" });
   if (maxChars !== undefined && text.length > maxChars)
@@ -28510,26 +28714,26 @@ function promptProblems(def2, text, maxChars) {
 var PROMPT_SETTINGS_DEFAULTS = Object.freeze({ texts: {}, maxChars: 20000 });
 
 // src/frontend/settings/prompt-editor.tsx
-function isVarsKey(v5) {
-  return typeof v5 === "string" && hasOwn(STEP_VARS, v5);
+function isVarsKey(v6) {
+  return typeof v6 === "string" && hasOwn(STEP_VARS, v6);
 }
 function PlaceholderList(props) {
   return /* @__PURE__ */ u3("dl", {
     class: "lre-minds-vars-list",
-    children: props.vars.map((v5) => /* @__PURE__ */ u3("div", {
+    children: props.vars.map((v6) => /* @__PURE__ */ u3("div", {
       class: "lre-minds-var",
-      "data-lre-var": v5.name,
+      "data-lre-var": v6.name,
       children: [
         /* @__PURE__ */ u3("dt", {
           children: /* @__PURE__ */ u3("code", {
-            children: placeholder(v5.name)
+            children: placeholder(v6.name)
           }, undefined, false, undefined, this)
         }, undefined, false, undefined, this),
         /* @__PURE__ */ u3("dd", {
-          children: v5.holds
+          children: v6.holds
         }, undefined, false, undefined, this)
       ]
-    }, v5.name, true, undefined, this))
+    }, v6.name, true, undefined, this))
   }, undefined, false, undefined, this);
 }
 function VarsPanel(props) {
@@ -28571,7 +28775,7 @@ function PromptVarsPanel(props) {
           children: "No placeholders: the text is sent as you write it."
         }, undefined, false, undefined, this) : null,
         props.vars.length > 0 ? /* @__PURE__ */ u3(PlaceholderList, {
-          vars: props.vars.map((v5) => ({ name: v5.name, holds: v5.required ? `${v5.text}; it must stay in the text` : v5.text }))
+          vars: props.vars.map((v6) => ({ name: v6.name, holds: v6.required ? `${v6.text}; it must stay in the text` : v6.text }))
         }, undefined, false, undefined, this) : null
       ]
     }, undefined, true, undefined, this)
@@ -28850,12 +29054,12 @@ var TOOLS2 = ["import_lore", "index_text", "refine", "describe_map", "propose_ro
 function Build() {
   const route = useUi((ui) => ui.build);
   const root = T2(null);
-  const page6 = JSON.stringify(route);
+  const page7 = JSON.stringify(route);
   F2(() => {
     const scroller = root.current ? scrollParent(root.current) : null;
     if (scroller && scroller.scrollTop > 0)
       scroller.scrollTop = 0;
-  }, [page6]);
+  }, [page7]);
   return /* @__PURE__ */ u3("div", {
     ref: root,
     class: "lre-build-root",
@@ -30081,7 +30285,7 @@ function Servers(props) {
 }
 function UpdateNotice() {
   const app = useApp();
-  const view = useSelect(app.agents, (v5) => v5);
+  const view = useSelect(app.agents, (v6) => v6);
   if (view === null || view.notice === null)
     return null;
   return /* @__PURE__ */ u3("div", {
@@ -30109,7 +30313,7 @@ function UpdateNotice() {
 }
 function McpServerPage() {
   const app = useApp();
-  const view = useSelect(app.agents, (v5) => v5);
+  const view = useSelect(app.agents, (v6) => v6);
   A(() => {
     app.request({ type: "lre.agents", op: "get" }).then((r3) => r3?.view && app.agents.set(r3.view));
   }, []);
@@ -30703,7 +30907,7 @@ function UpgradePanel(props) {
                       value: choiceOf(c3),
                       disabled: busy,
                       options: c3.options.map((o4) => ({ value: o4, label: PICK_LABEL[o4] })),
-                      onChange: (v5) => setChoices((prev) => ({ ...prev, [c3.id]: v5 }))
+                      onChange: (v6) => setChoices((prev) => ({ ...prev, [c3.id]: v6 }))
                     }, undefined, false, undefined, this)
                   }, undefined, false, undefined, this)
                 }, c3.id, false, undefined, this);
@@ -31176,7 +31380,7 @@ function SectionFeedForm(props) {
         label: "Whose knowledge",
         value: draft.scope ?? FOLLOW,
         options: [{ value: FOLLOW, label: FOLLOWS_NARRATOR }, ...FEED_SCOPES.map((s3) => ({ value: s3, label: SCOPE_LABEL[s3] }))],
-        onChange: (v5) => set({ scope: FEED_SCOPES.find((s3) => s3 === v5) })
+        onChange: (v6) => set({ scope: FEED_SCOPES.find((s3) => s3 === v6) })
       }, undefined, false, undefined, this),
       draft.scope === undefined && props.narrator ? /* @__PURE__ */ u3("span", {
         class: "lre-small lre-muted",
@@ -31192,7 +31396,7 @@ function SectionFeedForm(props) {
         value: draft.maxLines,
         min: 1,
         integer: true,
-        onChange: (v5) => set({ maxLines: v5 })
+        onChange: (v6) => set({ maxLines: v6 })
       }, undefined, false, undefined, this) : null,
       /* @__PURE__ */ u3(HostSwitch, {
         checked: draft.maxTokens !== undefined,
@@ -31206,7 +31410,7 @@ function SectionFeedForm(props) {
             value: draft.maxTokens,
             min: 1,
             integer: true,
-            onChange: (v5) => set({ maxTokens: v5 })
+            onChange: (v6) => set({ maxTokens: v6 })
           }, undefined, false, undefined, this),
           /* @__PURE__ */ u3("span", {
             class: "lre-small lre-muted",
@@ -31500,7 +31704,7 @@ function ThisChat(props) {
   const app = useApp();
   const revealed = useUi((ui) => ui.gm.revealed);
   const pages = usePages();
-  const page6 = pages.page;
+  const page7 = pages.page;
   const controls = view.controls;
   const panelProps = (panel) => ({ chatId: view.chatId, view: view.panels[panel.id] ?? null, state: view, send: app.send });
   const dot = (panel) => view.pending.some((mark) => mark.panel === panel.id);
@@ -31512,7 +31716,7 @@ function ThisChat(props) {
     children: [
       /* @__PURE__ */ u3("div", {
         class: "lre-stack lre-gm-list",
-        hidden: page6 !== null,
+        hidden: page7 !== null,
         children: [
           /* @__PURE__ */ u3(Section, {
             title: "Rules",
@@ -31604,7 +31808,7 @@ function ThisChat(props) {
           }, undefined, false, undefined, this) : null
         ]
       }, undefined, true, undefined, this),
-      page6 === "engine" ? /* @__PURE__ */ u3(GmPage, {
+      page7 === "engine" ? /* @__PURE__ */ u3(GmPage, {
         name: "engine",
         title: "Engine",
         subtitle: "This chat",
@@ -31613,7 +31817,7 @@ function ThisChat(props) {
         children: /* @__PURE__ */ u3(EngineThisChat, {
           chatId: view.chatId
         }, undefined, false, undefined, this)
-      }, undefined, false, undefined, this) : page6 === "realism" ? /* @__PURE__ */ u3(GmPage, {
+      }, undefined, false, undefined, this) : page7 === "realism" ? /* @__PURE__ */ u3(GmPage, {
         name: "realism",
         title: "Realism",
         subtitle: "This chat",
@@ -31623,7 +31827,7 @@ function ThisChat(props) {
           chatId: view.chatId,
           controls
         }, undefined, false, undefined, this)
-      }, undefined, false, undefined, this) : page6 === "checks" ? /* @__PURE__ */ u3(GmPage, {
+      }, undefined, false, undefined, this) : page7 === "checks" ? /* @__PURE__ */ u3(GmPage, {
         name: "checks",
         title: "Checks",
         subtitle: "This chat",
@@ -31639,7 +31843,7 @@ function ThisChat(props) {
             controls
           }, undefined, false, undefined, this) : null
         ]
-      }, undefined, true, undefined, this) : page6 === "time" ? /* @__PURE__ */ u3(GmPage, {
+      }, undefined, true, undefined, this) : page7 === "time" ? /* @__PURE__ */ u3(GmPage, {
         name: "time",
         title: "Time",
         subtitle: "This chat",
@@ -31648,7 +31852,7 @@ function ThisChat(props) {
         children: /* @__PURE__ */ u3(TimeThisChat, {
           view
         }, undefined, false, undefined, this)
-      }, undefined, false, undefined, this) : page6 === "sections" ? /* @__PURE__ */ u3(GmPage, {
+      }, undefined, false, undefined, this) : page7 === "sections" ? /* @__PURE__ */ u3(GmPage, {
         name: "sections",
         title: "Sections",
         subtitle: "This chat",
@@ -31659,7 +31863,7 @@ function ThisChat(props) {
           controls,
           chips: view.chips
         }, undefined, false, undefined, this)
-      }, undefined, false, undefined, this) : page6 === "knowledge" ? /* @__PURE__ */ u3(GmPage, {
+      }, undefined, false, undefined, this) : page7 === "knowledge" ? /* @__PURE__ */ u3(GmPage, {
         name: "knowledge",
         title: "Knowledge",
         subtitle: "This chat",
@@ -31669,7 +31873,7 @@ function ThisChat(props) {
           chatId: view.chatId,
           controls
         }, undefined, false, undefined, this)
-      }, undefined, false, undefined, this) : page6 === "pins" ? /* @__PURE__ */ u3(GmPage, {
+      }, undefined, false, undefined, this) : page7 === "pins" ? /* @__PURE__ */ u3(GmPage, {
         name: "pins",
         title: "Pins and upgrade",
         subtitle: "This chat",
@@ -31678,7 +31882,7 @@ function ThisChat(props) {
         children: /* @__PURE__ */ u3(PinsAndUpgrade, {
           view
         }, undefined, false, undefined, this)
-      }, undefined, false, undefined, this) : page6 === "edits" && props.truth ? /* @__PURE__ */ u3(GmPage, {
+      }, undefined, false, undefined, this) : page7 === "edits" && props.truth ? /* @__PURE__ */ u3(GmPage, {
         name: "edits",
         title: "Edits",
         subtitle: "Corrections in force, newest first",
@@ -31687,14 +31891,14 @@ function ThisChat(props) {
         children: /* @__PURE__ */ u3(props.truth.component, {
           ...panelProps(props.truth)
         }, undefined, false, undefined, this)
-      }, undefined, false, undefined, this) : page6 !== null && typeof page6 === "object" ? /* @__PURE__ */ u3(GmPage, {
-        name: page6.panel.id,
-        title: page6.panel.label,
+      }, undefined, false, undefined, this) : page7 !== null && typeof page7 === "object" ? /* @__PURE__ */ u3(GmPage, {
+        name: page7.panel.id,
+        title: page7.panel.label,
         subtitle: "This chat",
         backLabel: "This chat",
         onBack: pages.back,
-        children: /* @__PURE__ */ u3(page6.panel.component, {
-          ...panelProps(page6.panel)
+        children: /* @__PURE__ */ u3(page7.panel.component, {
+          ...panelProps(page7.panel)
         }, undefined, false, undefined, this)
       }, undefined, false, undefined, this) : null
     ]
@@ -34371,6 +34575,8 @@ function defaultButton(label, busy, reset) {
 }
 function OwnLimitRow(props) {
   const { def: def2, own, every } = props;
+  const fallback = props.fallback ?? "every agent's";
+  const Fallback = fallback.charAt(0).toUpperCase() + fallback.slice(1);
   const value = own ?? every;
   const seconds = def2.unit === "ms";
   const onValue = every === "none" ? def2.min : every;
@@ -34390,10 +34596,10 @@ function OwnLimitRow(props) {
             size: "sm",
             variant: "ghost",
             icon: "undo",
-            label: `Use every agent's ${def2.label.toLowerCase()}, ${amountText2(every, def2.unit)}`,
+            label: `Use ${fallback} ${def2.label.toLowerCase()}, ${amountText2(every, def2.unit)}`,
             disabled: props.busy,
             onClick: () => props.set(null),
-            children: "Every agent's"
+            children: Fallback
           }, undefined, false, undefined, this)
         ]
       }, undefined, true, undefined, this),
@@ -34426,7 +34632,7 @@ function OwnLimitRow(props) {
       /* @__PURE__ */ u3("span", {
         class: "lre-small lre-muted",
         children: [
-          own === undefined ? `Every agent's limit applies: ${amountText2(every, def2.unit)}` : `${props.owner} own; every agent's is ${amountText2(every, def2.unit)}`,
+          own === undefined ? `${Fallback} limit applies: ${amountText2(every, def2.unit)}` : `${props.owner} own; ${fallback} is ${amountText2(every, def2.unit)}`,
           value === "none" && def2.none ? props.outsideTurn && def2.turnBound ? "; no limit" : `; no limit: ${def2.none}` : "",
           "."
         ]
@@ -35397,7 +35603,7 @@ function BudgetsSection(props) {
       }, undefined, true, undefined, this),
       /* @__PURE__ */ u3(BudgetGroup, {
         title: "Kept in memory",
-        lead: "What the engine holds at once for agent turns, across your chats: past each, the oldest is let go.",
+        lead: "What the engine holds at once, across your chats: past each, the oldest, or the one used longest ago, is let go.",
         defs: KEPT_DEFS,
         values: agents.kept,
         standard: DEFAULTS.kept,
@@ -35406,6 +35612,30 @@ function BudgetsSection(props) {
       }, undefined, false, undefined, this)
     ]
   }, undefined, true, undefined, this);
+}
+function SystemInstructionsSection(props) {
+  return /* @__PURE__ */ u3(Section, {
+    title: "System instructions",
+    flush: true,
+    children: /* @__PURE__ */ u3("div", {
+      class: "lre-set-rows lre-set-group",
+      "data-lre-agent-group": "System instructions",
+      children: [
+        /* @__PURE__ */ u3("p", {
+          class: "lre-set-timeout-lead",
+          children: "Every agent is told AGENTS.md, and each role its own roles/<role>.md (main for the main agent, assistant for the GM assistant, a turn role by its id), after its own system prompt: your global workspace's (~/) first, then this chat's, each whole in that order. Write them in GM → Workspace; a file that isn't there costs nothing."
+        }, undefined, false, undefined, this),
+        /* @__PURE__ */ u3(LimitRow, {
+          id: "systemTokens",
+          def: SYSTEM_TOKENS_DEF,
+          value: props.agents.systemTokens,
+          standard: DEFAULTS.systemTokens,
+          busy: props.busy,
+          set: (systemTokens) => props.patch({ agents: { systemTokens } })
+        }, undefined, false, undefined, this)
+      ]
+    }, undefined, true, undefined, this)
+  }, undefined, false, undefined, this);
 }
 function AgentsSection(props) {
   const { agents, busy } = props;
@@ -35416,7 +35646,7 @@ function AgentsSection(props) {
     children: [
       /* @__PURE__ */ u3("p", {
         class: "lre-set-lead",
-        children: "What the agent runtime runs under: how an agent turn runs, its budgets, compaction, recording, throttles, caching and acceptance runs. No classic step reads any of these."
+        children: "What the agent runtime runs under: how an agent turn runs, every agent's system instructions, its budgets, compaction, recording, throttles, caching and acceptance runs. No classic step reads any of these."
       }, undefined, false, undefined, this),
       /* @__PURE__ */ u3(Section, {
         title: "Thinking in agent tool loops",
@@ -35438,6 +35668,11 @@ function AgentsSection(props) {
         ]
       }, undefined, true, undefined, this),
       /* @__PURE__ */ u3(AgentTurnSettings, {
+        agents,
+        patch: props.patch,
+        busy
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(SystemInstructionsSection, {
         agents,
         patch: props.patch,
         busy
@@ -35529,22 +35764,14 @@ var EFFORT_HELP = {
   model: "For a model that picks its own effort by its name: sent as Lumiverse's Auto.",
   inherit: "The connection's own reasoning setting, else yours in Lumiverse."
 };
-var KNOWLEDGE3 = ["pov", "everyone", "gm"];
-var KNOWLEDGE_CHOICES2 = KNOWLEDGE3.map((value) => ({ value, label: ASSISTANT_KNOWLEDGE_LABELS[value] }));
-var KNOWLEDGE_HELP2 = {
-  pov: "Its tools read only what your character knows.",
-  everyone: "Its tools read what anyone in the world knows, each secret marked with whom it's kept from.",
-  gm: "Its tools read everything, secrets and all."
-};
 var APPLY_CHOICES = ASSISTANT_APPLY.map((value) => ({ value, label: ASSISTANT_APPLY_LABELS[value] }));
 var APPLY_HELP = {
   ask: "Each change it proposes waits for you: Apply all, pick the ones you want, or No.",
   at_once: "Its changes are applied as soon as it answers, with an Undo chip, except a type of change set to Confirm in Settings → Changes from the reply, which waits for your Apply."
 };
 function assistantSummary(assistant, connections) {
-  const knowledge = ASSISTANT_KNOWLEDGE_LABELS[assistant.knowledge];
   const apply = ASSISTANT_APPLY_LABELS[assistant.apply];
-  return `${placeOf2(assistant, connections)} · knowledge: ${knowledge.charAt(0).toLowerCase()}${knowledge.slice(1)} · changes: ${apply.charAt(0).toLowerCase()}${apply.slice(1)}`;
+  return `${placeOf2(assistant, connections)} · changes: ${apply.charAt(0).toLowerCase()}${apply.slice(1)}`;
 }
 function assistantPatch(fields) {
   return { agents: { assistant: fields } };
@@ -35668,93 +35895,51 @@ function AssistantSettingsBody(props) {
         }, undefined, true, undefined, this)
       }, undefined, false, undefined, this),
       /* @__PURE__ */ u3(Section, {
-        title: "Knowledge and changes",
+        title: "Changes",
         flush: true,
         children: /* @__PURE__ */ u3("div", {
           class: "lre-set-rows",
-          children: [
-            /* @__PURE__ */ u3("div", {
-              class: "lre-set-ext",
-              "data-lre-assistant-setting": "knowledge",
-              children: [
-                /* @__PURE__ */ u3("div", {
-                  class: "lre-set-ext-head",
-                  children: [
-                    /* @__PURE__ */ u3("span", {
-                      class: "lre-set-ext-title",
-                      children: "Knowledge"
-                    }, undefined, false, undefined, this),
-                    a3.knowledge === DEFAULTS2.knowledge ? null : defaultButton(`Reset whose knowledge it reads to its default, ${ASSISTANT_KNOWLEDGE_LABELS[DEFAULTS2.knowledge]}`, busy, () => set({ knowledge: null }))
-                  ]
-                }, undefined, true, undefined, this),
-                /* @__PURE__ */ u3("div", {
-                  class: "lre-field",
-                  children: [
-                    /* @__PURE__ */ u3(Seg, {
-                      label: "Whose knowledge the assistant reads",
-                      value: a3.knowledge,
-                      options: KNOWLEDGE_CHOICES2,
-                      disabled: busy,
-                      onChange: (knowledge) => set({ knowledge })
-                    }, undefined, false, undefined, this),
-                    /* @__PURE__ */ u3("span", {
-                      class: "lre-field-help",
-                      children: KNOWLEDGE_HELP2[a3.knowledge]
-                    }, undefined, false, undefined, this)
-                  ]
-                }, undefined, true, undefined, this),
-                /* @__PURE__ */ u3("span", {
-                  class: "lre-small lre-muted",
-                  children: [
-                    "Default ",
-                    ASSISTANT_KNOWLEDGE_LABELS[DEFAULTS2.knowledge],
-                    "."
-                  ]
-                }, undefined, true, undefined, this)
-              ]
-            }, undefined, true, undefined, this),
-            /* @__PURE__ */ u3("div", {
-              class: "lre-set-ext",
-              "data-lre-assistant-setting": "apply",
-              children: [
-                /* @__PURE__ */ u3("div", {
-                  class: "lre-set-ext-head",
-                  children: [
-                    /* @__PURE__ */ u3("span", {
-                      class: "lre-set-ext-title",
-                      children: "How its changes land"
-                    }, undefined, false, undefined, this),
-                    a3.apply === DEFAULTS2.apply ? null : defaultButton(`Reset how its changes land to its default, ${ASSISTANT_APPLY_LABELS[DEFAULTS2.apply]}`, busy, () => set({ apply: null }))
-                  ]
-                }, undefined, true, undefined, this),
-                /* @__PURE__ */ u3("div", {
-                  class: "lre-field",
-                  children: [
-                    /* @__PURE__ */ u3(Seg, {
-                      label: "How the assistant's changes land",
-                      value: a3.apply,
-                      options: APPLY_CHOICES,
-                      disabled: busy,
-                      onChange: (apply) => set({ apply })
-                    }, undefined, false, undefined, this),
-                    /* @__PURE__ */ u3("span", {
-                      class: "lre-field-help",
-                      children: APPLY_HELP[a3.apply]
-                    }, undefined, false, undefined, this)
-                  ]
-                }, undefined, true, undefined, this),
-                /* @__PURE__ */ u3("span", {
-                  class: "lre-small lre-muted",
-                  children: [
-                    "Default ",
-                    ASSISTANT_APPLY_LABELS[DEFAULTS2.apply],
-                    "."
-                  ]
-                }, undefined, true, undefined, this)
-              ]
-            }, undefined, true, undefined, this)
-          ]
-        }, undefined, true, undefined, this)
+          children: /* @__PURE__ */ u3("div", {
+            class: "lre-set-ext",
+            "data-lre-assistant-setting": "apply",
+            children: [
+              /* @__PURE__ */ u3("div", {
+                class: "lre-set-ext-head",
+                children: [
+                  /* @__PURE__ */ u3("span", {
+                    class: "lre-set-ext-title",
+                    children: "How its changes land"
+                  }, undefined, false, undefined, this),
+                  a3.apply === DEFAULTS2.apply ? null : defaultButton(`Reset how its changes land to its default, ${ASSISTANT_APPLY_LABELS[DEFAULTS2.apply]}`, busy, () => set({ apply: null }))
+                ]
+              }, undefined, true, undefined, this),
+              /* @__PURE__ */ u3("div", {
+                class: "lre-field",
+                children: [
+                  /* @__PURE__ */ u3(Seg, {
+                    label: "How the assistant's changes land",
+                    value: a3.apply,
+                    options: APPLY_CHOICES,
+                    disabled: busy,
+                    onChange: (apply) => set({ apply })
+                  }, undefined, false, undefined, this),
+                  /* @__PURE__ */ u3("span", {
+                    class: "lre-field-help",
+                    children: APPLY_HELP[a3.apply]
+                  }, undefined, false, undefined, this)
+                ]
+              }, undefined, true, undefined, this),
+              /* @__PURE__ */ u3("span", {
+                class: "lre-small lre-muted",
+                children: [
+                  "Default ",
+                  ASSISTANT_APPLY_LABELS[DEFAULTS2.apply],
+                  "."
+                ]
+              }, undefined, true, undefined, this)
+            ]
+          }, undefined, true, undefined, this)
+        }, undefined, false, undefined, this)
       }, undefined, false, undefined, this),
       /* @__PURE__ */ u3(Section, {
         title: "Conversation",
@@ -35806,7 +35991,7 @@ function AssistantPage(props) {
     children: [
       /* @__PURE__ */ u3("p", {
         class: "lre-set-lead",
-        children: "What the GM assistant (GM → Assistant) runs with: its model, whose knowledge it reads, how its changes land, and its budget. No turn of play reads any of these."
+        children: "What the GM assistant (GM → Assistant) runs with: its model, how its changes land, and its budget. It works outside the story and reads everything. No turn of play reads any of these."
       }, undefined, false, undefined, this),
       /* @__PURE__ */ u3(AssistantSettingsBody, {
         agents: props.agents,
@@ -35818,8 +36003,190 @@ function AssistantPage(props) {
   }, undefined, true, undefined, this);
 }
 
+// src/frontend/settings/context.tsx
+var DEFAULTS3 = defaultContextSettings();
+var PERSPECTIVE_HELP = {
+  pov: "It works from what your character knows. A hint in its prompt only: its tools still read everything, secrets marked.",
+  everyone: "It works from what everyone in the world knows, each secret marked with whom it is known to and kept from.",
+  gm: "It works as the game master, who knows it all; a secret still reaches you only when the story reveals it.",
+  own: "It works from what the character its task is about knows, as a mind does. A hint in its prompt only."
+};
+var USE_HELP = {
+  start: "In its prompt from the start, as the narrator would get it then, in both pipelines.",
+  ask: "Not in its prompt; the main agent may give it when the task needs it, and its tools can read it.",
+  never: "Not in its prompt, and the main agent is told never to give it."
+};
+function contextPatch(role, fields) {
+  return { agents: { context: { roles: { [role]: fields } } } };
+}
+function pinsOf(text) {
+  return [...new Set(text.split(`
+`).map((line2) => line2.trim()).filter((line2) => line2 !== ""))];
+}
+function contextSummary(agents) {
+  const starting = ROLE_IDS.filter((id) => agents.context.roles[id].start.length > 0).length;
+  const own = ROLE_IDS.filter((id) => !jsonEqual(agents.context.roles[id], DEFAULTS3.roles[id])).length;
+  return `${starting} of ${ROLE_IDS.length} roles start with sections${own > 0 ? ` · ${own} changed` : ""}`;
+}
+function ContextCard(props) {
+  const { id, agents, busy } = props;
+  const c3 = agents.context.roles[id];
+  const d3 = DEFAULTS3.roles[id];
+  const label = ROLE_LABEL[id];
+  const set = (fields) => props.patch(contextPatch(id, fields));
+  const families = agents.roles[id].families;
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-set-rows lre-set-group",
+    "data-lre-context-role": id,
+    children: [
+      /* @__PURE__ */ u3("div", {
+        class: "lre-set-ext-head",
+        children: [
+          /* @__PURE__ */ u3("span", {
+            class: "lre-set-ext-title",
+            children: label
+          }, undefined, false, undefined, this),
+          jsonEqual(c3, d3) ? null : defaultButton(`Reset the ${label} role's context to its defaults`, busy, () => props.patch(contextPatch(id, null)))
+        ]
+      }, undefined, true, undefined, this),
+      /* @__PURE__ */ u3("div", {
+        class: "lre-set-ext",
+        "data-lre-context-setting": "perspective",
+        children: [
+          /* @__PURE__ */ u3("div", {
+            class: "lre-field",
+            children: [
+              /* @__PURE__ */ u3(Seg, {
+                label: `${label}: the perspective it works from`,
+                value: c3.perspective,
+                options: ROLE_PERSPECTIVES.map((value) => ({ value, label: PERSPECTIVE_LABEL[value] })),
+                disabled: busy,
+                onChange: (perspective) => set({ perspective })
+              }, undefined, false, undefined, this),
+              /* @__PURE__ */ u3("span", {
+                class: "lre-field-help",
+                children: PERSPECTIVE_HELP[c3.perspective]
+              }, undefined, false, undefined, this)
+            ]
+          }, undefined, true, undefined, this),
+          /* @__PURE__ */ u3("span", {
+            class: "lre-small lre-muted",
+            children: [
+              "Default ",
+              PERSPECTIVE_LABEL[d3.perspective],
+              "."
+            ]
+          }, undefined, true, undefined, this)
+        ]
+      }, undefined, true, undefined, this),
+      /* @__PURE__ */ u3("div", {
+        class: "lre-set-ext",
+        "data-lre-context-setting": "sources",
+        children: [
+          /* @__PURE__ */ u3("span", {
+            class: "lre-set-ext-title",
+            children: "What it gets"
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3("span", {
+            class: "lre-field-help",
+            children: "Each source as the narrator would get it: the lore index, or one of the engine's sections, secrets marked."
+          }, undefined, false, undefined, this),
+          CONTEXT_SOURCES.map((source) => {
+            const use = sourceUse(c3, source);
+            return /* @__PURE__ */ u3("div", {
+              class: "lre-field",
+              "data-lre-context-source": source,
+              children: [
+                /* @__PURE__ */ u3(Seg, {
+                  label: `${label}: ${sourceLabel(source)}`,
+                  value: use,
+                  options: SOURCE_USES.map((value) => ({ value, label: SOURCE_USE_LABEL[value] })),
+                  disabled: busy,
+                  onChange: (next) => set(withSourceUse(c3, source, next))
+                }, undefined, false, undefined, this),
+                /* @__PURE__ */ u3("span", {
+                  class: "lre-field-help",
+                  children: `${sourceLabel(source)}: ${USE_HELP[use]}`
+                }, undefined, false, undefined, this)
+              ]
+            }, source, true, undefined, this);
+          }),
+          /* @__PURE__ */ u3("span", {
+            class: "lre-small lre-muted",
+            children: [
+              "Default: starts with ",
+              d3.start.length > 0 ? d3.start.map(sourceLabel).join(", ") : "nothing but its task",
+              "."
+            ]
+          }, undefined, true, undefined, this)
+        ]
+      }, undefined, true, undefined, this),
+      /* @__PURE__ */ u3("div", {
+        class: "lre-set-ext",
+        "data-lre-context-setting": "pins",
+        children: /* @__PURE__ */ u3("label", {
+          class: "lre-field",
+          children: [
+            /* @__PURE__ */ u3("span", {
+              class: "label",
+              children: `${label}: pinned files`
+            }, undefined, false, undefined, this),
+            /* @__PURE__ */ u3("textarea", {
+              class: "lre-input",
+              rows: 2,
+              value: c3.pins.join(`
+`),
+              disabled: busy,
+              placeholder: "notes/marcus.md",
+              onChange: (e3) => set({ pins: pinsOf(e3.target.value) })
+            }, undefined, false, undefined, this),
+            /* @__PURE__ */ u3("span", {
+              class: "lre-field-help",
+              children: "Workspace paths, one a line, read whole within the pins budget before .pins.json's and those pinned in GM → Workspace. A path the chat has no file at is passed over."
+            }, undefined, false, undefined, this)
+          ]
+        }, undefined, true, undefined, this)
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3("span", {
+        class: "lre-small lre-muted",
+        "data-lre-context-setting": "tools",
+        children: `Its tools (Roles page): ${families.length > 0 ? families.map((f3) => TOOL_FAMILY_LABEL[f3]).join(", ") : "none"}. They read everything, secrets marked, whatever its perspective.`
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+function ContextBody(props) {
+  return /* @__PURE__ */ u3(Section, {
+    title: "Context",
+    flush: true,
+    children: ROLE_IDS.map((id) => /* @__PURE__ */ u3(ContextCard, {
+      id,
+      agents: props.agents,
+      busy: props.busy,
+      patch: props.patch
+    }, id, false, undefined, this))
+  }, undefined, false, undefined, this);
+}
+function ContextPage(props) {
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-stack",
+    "data-lre-settings-page": "context",
+    children: [
+      /* @__PURE__ */ u3("p", {
+        class: "lre-set-lead",
+        children: "What each role of an agent turn starts with, and how the main agent is to brief it. This steers; it never hides: every role's tools read everything, each secret marked with whom it is known to and kept from, and secrets are guidance, in the texts on Prompts → Every role."
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(ContextBody, {
+        agents: props.agents,
+        patch: props.patch,
+        busy: props.busy
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+
 // src/frontend/settings/roles.tsx
-var DEFAULTS3 = defaultAgentSettings();
+var DEFAULTS4 = defaultAgentSettings();
 var FAMILIES3 = Object.keys(TOOL_FAMILY_LABEL);
 var EFFORT_HELP2 = {
   off: "It works without reasoning.",
@@ -35828,13 +36195,6 @@ var EFFORT_HELP2 = {
   high: "Sent as Lumiverse's reasoning setting, which it turns into the provider's own.",
   model: "For a model that picks its own effort by its name: sent as Lumiverse's Auto.",
   inherit: "The connection's own reasoning setting, else yours in Lumiverse."
-};
-var KNOWLEDGE_LABEL = { ...ASSISTANT_KNOWLEDGE_LABELS, own: "Its character's own" };
-var KNOWLEDGE_HELP3 = {
-  pov: "It reads only what your character knows.",
-  everyone: "It reads what anyone in the world knows, each secret marked with whom it's kept from.",
-  gm: "It reads everything, secrets and all.",
-  own: "A mind reads as the character it thinks for: only what that character knows."
 };
 var TIER_LABEL2 = { read: "Nothing", story: "The story's changes", gm: "The GM's edits too" };
 var TIER_HELP = {
@@ -35856,7 +36216,7 @@ function roleResetPatch(id) {
 }
 function roleAtDefaults(agents, id) {
   const sorted = (r3) => ({ ...r3, families: [...r3.families].sort() });
-  return jsonEqual(sorted(agents.roles[id]), sorted(DEFAULTS3.roles[id])) && !hasOwn(agents.caching.roles, id);
+  return jsonEqual(sorted(agents.roles[id]), sorted(DEFAULTS4.roles[id])) && !hasOwn(agents.caching.roles, id);
 }
 function rolesSummary(agents) {
   const own = ROLE_IDS.filter((id) => !roleAtDefaults(agents, id)).length;
@@ -35872,7 +36232,7 @@ function placeWords3(r3, connections) {
 function RoleCard(props) {
   const { id, agents, busy } = props;
   const r3 = agents.roles[id];
-  const d3 = DEFAULTS3.roles[id];
+  const d3 = DEFAULTS4.roles[id];
   const label = ROLE_LABEL[id];
   const set = (fields) => props.patch(rolePatch(id, fields));
   const caching = roleCaching(agents, id);
@@ -35981,36 +36341,6 @@ function RoleCard(props) {
       }, undefined, true, undefined, this),
       /* @__PURE__ */ u3("div", {
         class: "lre-set-ext",
-        "data-lre-role-setting": "knowledge",
-        children: [
-          /* @__PURE__ */ u3("div", {
-            class: "lre-field",
-            children: [
-              /* @__PURE__ */ u3(Seg, {
-                label: `${label}: whose knowledge it reads`,
-                value: r3.knowledge,
-                options: ROLE_KNOWLEDGE.map((value) => ({ value, label: KNOWLEDGE_LABEL[value] })),
-                disabled: busy,
-                onChange: (knowledge) => set({ knowledge })
-              }, undefined, false, undefined, this),
-              /* @__PURE__ */ u3("span", {
-                class: "lre-field-help",
-                children: KNOWLEDGE_HELP3[r3.knowledge]
-              }, undefined, false, undefined, this)
-            ]
-          }, undefined, true, undefined, this),
-          /* @__PURE__ */ u3("span", {
-            class: "lre-small lre-muted",
-            children: [
-              "Default ",
-              KNOWLEDGE_LABEL[d3.knowledge],
-              "."
-            ]
-          }, undefined, true, undefined, this)
-        ]
-      }, undefined, true, undefined, this),
-      /* @__PURE__ */ u3("div", {
-        class: "lre-set-ext",
         "data-lre-role-setting": "families",
         children: [
           /* @__PURE__ */ u3("span", {
@@ -36019,7 +36349,7 @@ function RoleCard(props) {
           }, undefined, false, undefined, this),
           /* @__PURE__ */ u3("span", {
             class: "lre-field-help",
-            children: "The families of tools it is given, at the tier below; its knowledge bounds what they read."
+            children: "The families of tools it is given, at the tier below. They read everything, secrets marked, whatever perspective it works from (Settings → Agents → Context)."
           }, undefined, false, undefined, this),
           FAMILIES3.map((family) => /* @__PURE__ */ u3(HostSwitch, {
             label: `${label}: ${TOOL_FAMILY_LABEL[family]}`,
@@ -36209,300 +36539,13 @@ function RolesPage(props) {
   }, undefined, true, undefined, this);
 }
 
-// src/frontend/settings/main-agent.tsx
-var DEFAULTS4 = defaultAgentSettings().main;
-var DEFAULT_PLACE2 = placeOf2(DEFAULTS4, []);
-var KNOWLEDGE_HELP4 = {
-  pov: "Its tools, and what the engine tells it, read only what your character knows.",
-  everyone: "Its tools, and what the engine tells it, read what anyone in the world knows, each secret marked with whom it's kept from.",
-  gm: "Its tools, and what the engine tells it, read everything, secrets and all."
-};
-function mainPatch(fields) {
-  return { agents: { main: fields } };
-}
-function mainSummary(agents, connections) {
-  return `${placeOf2(agents.main, connections)} · ${agents.pipeline.mode === "main" ? "deciding each agent turn" : `off: ${PIPELINE_MODE_LABELS[agents.pipeline.mode].toLowerCase()}`}`;
-}
-function MainAgentBody(props) {
-  const { agents, busy } = props;
-  const m2 = agents.main;
-  const set = (fields) => props.patch(mainPatch(fields));
-  const budgetKeys = Object.keys(BUDGET_DEFS);
-  const familiesDefault = m2.families.length === DEFAULTS4.families.length && m2.families.every((f3) => DEFAULTS4.families.includes(f3));
-  return /* @__PURE__ */ u3(M, {
-    children: [
-      /* @__PURE__ */ u3(Section, {
-        title: "Model",
-        flush: true,
-        children: /* @__PURE__ */ u3("div", {
-          class: "lre-set-rows",
-          children: [
-            /* @__PURE__ */ u3("div", {
-              class: "lre-set-ext",
-              "data-lre-main-setting": "connection",
-              children: [
-                /* @__PURE__ */ u3("div", {
-                  class: "lre-set-ext-head",
-                  children: [
-                    /* @__PURE__ */ u3("span", {
-                      class: "lre-set-ext-title",
-                      children: "Connection and model"
-                    }, undefined, false, undefined, this),
-                    m2.connectionId === DEFAULTS4.connectionId && m2.model === DEFAULTS4.model ? null : defaultButton(`Reset the main agent's connection and model to their default, ${DEFAULT_PLACE2}`, busy, () => set({ connectionId: null, model: null }))
-                  ]
-                }, undefined, true, undefined, this),
-                /* @__PURE__ */ u3(ConnectionSelect, {
-                  value: m2.connectionId,
-                  connections: props.connections,
-                  firstLabel: "None: Lumiverse's default connection",
-                  help: "None runs the main agent on the connection Lumiverse marks as your default, with that connection's model and settings.",
-                  disabled: busy,
-                  onChange: (connectionId) => set({ connectionId, model: null })
-                }, undefined, false, undefined, this),
-                m2.connectionId ? /* @__PURE__ */ u3(M, {
-                  children: [
-                    /* @__PURE__ */ u3(HostModelPicker, {
-                      connectionId: m2.connectionId,
-                      value: m2.model ?? "",
-                      label: "Main agent: model",
-                      onChange: (model) => set({ model: model || null })
-                    }, undefined, false, undefined, this),
-                    /* @__PURE__ */ u3("span", {
-                      class: "lre-field-help",
-                      children: "Pick from the connection's models, or type one. Empty uses the connection's own model."
-                    }, undefined, false, undefined, this)
-                  ]
-                }, undefined, true, undefined, this) : null,
-                /* @__PURE__ */ u3("span", {
-                  class: "lre-small lre-muted",
-                  children: [
-                    "Default: ",
-                    DEFAULT_PLACE2,
-                    ", with that connection's model."
-                  ]
-                }, undefined, true, undefined, this)
-              ]
-            }, undefined, true, undefined, this),
-            /* @__PURE__ */ u3("div", {
-              class: "lre-set-ext",
-              "data-lre-main-setting": "effort",
-              children: [
-                /* @__PURE__ */ u3("div", {
-                  class: "lre-set-ext-head",
-                  children: [
-                    /* @__PURE__ */ u3("span", {
-                      class: "lre-set-ext-title",
-                      children: "Reasoning"
-                    }, undefined, false, undefined, this),
-                    m2.effort === DEFAULTS4.effort ? null : defaultButton(`Reset the main agent's effort to its default, ${EFFORT_LABEL2[DEFAULTS4.effort]}`, busy, () => set({ effort: null }))
-                  ]
-                }, undefined, true, undefined, this),
-                /* @__PURE__ */ u3("label", {
-                  class: "lre-field",
-                  children: [
-                    /* @__PURE__ */ u3("span", {
-                      class: "label",
-                      children: "Effort"
-                    }, undefined, false, undefined, this),
-                    /* @__PURE__ */ u3("select", {
-                      class: "lre-input",
-                      "aria-label": "Main agent: reasoning effort",
-                      value: m2.effort,
-                      disabled: busy,
-                      onChange: (event) => {
-                        const effort = AGENT_EFFORTS.find((e3) => e3 === event.currentTarget.value);
-                        if (effort)
-                          set({ effort });
-                      },
-                      children: AGENT_EFFORTS.map((e3) => /* @__PURE__ */ u3("option", {
-                        value: e3,
-                        children: EFFORT_LABEL2[e3]
-                      }, e3, false, undefined, this))
-                    }, undefined, false, undefined, this),
-                    /* @__PURE__ */ u3("span", {
-                      class: "lre-field-help",
-                      children: EFFORT_HELP2[m2.effort]
-                    }, undefined, false, undefined, this)
-                  ]
-                }, undefined, true, undefined, this),
-                /* @__PURE__ */ u3("span", {
-                  class: "lre-small lre-muted",
-                  children: [
-                    "Default ",
-                    EFFORT_LABEL2[DEFAULTS4.effort],
-                    "."
-                  ]
-                }, undefined, true, undefined, this)
-              ]
-            }, undefined, true, undefined, this)
-          ]
-        }, undefined, true, undefined, this)
-      }, undefined, false, undefined, this),
-      /* @__PURE__ */ u3(Section, {
-        title: "Knowledge and tools",
-        flush: true,
-        children: /* @__PURE__ */ u3("div", {
-          class: "lre-set-rows",
-          children: [
-            /* @__PURE__ */ u3("div", {
-              class: "lre-set-ext",
-              "data-lre-main-setting": "knowledge",
-              children: [
-                /* @__PURE__ */ u3("div", {
-                  class: "lre-set-ext-head",
-                  children: [
-                    /* @__PURE__ */ u3("span", {
-                      class: "lre-set-ext-title",
-                      children: "Knowledge"
-                    }, undefined, false, undefined, this),
-                    m2.knowledge === DEFAULTS4.knowledge ? null : defaultButton(`Reset whose knowledge the main agent reads to its default, ${ASSISTANT_KNOWLEDGE_LABELS[DEFAULTS4.knowledge]}`, busy, () => set({ knowledge: null }))
-                  ]
-                }, undefined, true, undefined, this),
-                /* @__PURE__ */ u3("div", {
-                  class: "lre-field",
-                  children: [
-                    /* @__PURE__ */ u3(Seg, {
-                      label: "Whose knowledge the main agent reads",
-                      value: m2.knowledge,
-                      options: AGENT_KNOWLEDGE.map((value) => ({ value, label: ASSISTANT_KNOWLEDGE_LABELS[value] })),
-                      disabled: busy,
-                      onChange: (knowledge) => set({ knowledge })
-                    }, undefined, false, undefined, this),
-                    /* @__PURE__ */ u3("span", {
-                      class: "lre-field-help",
-                      children: KNOWLEDGE_HELP4[m2.knowledge]
-                    }, undefined, false, undefined, this)
-                  ]
-                }, undefined, true, undefined, this),
-                /* @__PURE__ */ u3("span", {
-                  class: "lre-small lre-muted",
-                  children: [
-                    "Default ",
-                    ASSISTANT_KNOWLEDGE_LABELS[DEFAULTS4.knowledge],
-                    "."
-                  ]
-                }, undefined, true, undefined, this)
-              ]
-            }, undefined, true, undefined, this),
-            /* @__PURE__ */ u3("div", {
-              class: "lre-set-ext",
-              "data-lre-main-setting": "families",
-              children: [
-                /* @__PURE__ */ u3("div", {
-                  class: "lre-set-ext-head",
-                  children: [
-                    /* @__PURE__ */ u3("span", {
-                      class: "lre-set-ext-title",
-                      children: "Tools it reads with"
-                    }, undefined, false, undefined, this),
-                    familiesDefault ? null : defaultButton(`Reset the main agent's tools to their default, ${DEFAULTS4.families.map((f3) => TOOL_FAMILY_LABEL[f3]).join(", ")}`, busy, () => set({ families: null }))
-                  ]
-                }, undefined, true, undefined, this),
-                /* @__PURE__ */ u3("span", {
-                  class: "lre-field-help",
-                  children: "Read-only: what it changes, it changes through the roles it runs."
-                }, undefined, false, undefined, this),
-                FAMILIES3.map((family) => /* @__PURE__ */ u3(HostSwitch, {
-                  label: `Main agent: ${TOOL_FAMILY_LABEL[family]}`,
-                  checked: m2.families.includes(family),
-                  disabled: busy,
-                  onChange: (on) => set({ families: FAMILIES3.filter((f3) => f3 === family ? on : m2.families.includes(f3)) })
-                }, family, false, undefined, this)),
-                /* @__PURE__ */ u3("span", {
-                  class: "lre-small lre-muted",
-                  children: [
-                    "Default: ",
-                    DEFAULTS4.families.map((f3) => TOOL_FAMILY_LABEL[f3]).join(", "),
-                    "."
-                  ]
-                }, undefined, true, undefined, this)
-              ]
-            }, undefined, true, undefined, this)
-          ]
-        }, undefined, true, undefined, this)
-      }, undefined, false, undefined, this),
-      /* @__PURE__ */ u3(Section, {
-        title: "Turn task",
-        flush: true,
-        children: /* @__PURE__ */ u3("div", {
-          class: "lre-set-rows",
-          children: [
-            /* @__PURE__ */ u3(LimitRow, {
-              id: "digestTokens",
-              def: MAIN_DEFS.digestTokens,
-              value: m2.digestTokens,
-              standard: DEFAULTS4.digestTokens,
-              busy,
-              set: (digestTokens) => set({ digestTokens })
-            }, undefined, false, undefined, this),
-            /* @__PURE__ */ u3(LimitRow, {
-              id: "pinsTokens",
-              def: MAIN_DEFS.pinsTokens,
-              value: m2.pinsTokens,
-              standard: DEFAULTS4.pinsTokens,
-              busy,
-              set: (pinsTokens) => set({ pinsTokens })
-            }, undefined, false, undefined, this)
-          ]
-        }, undefined, true, undefined, this)
-      }, undefined, false, undefined, this),
-      /* @__PURE__ */ u3(Section, {
-        title: "Budget",
-        flush: true,
-        children: /* @__PURE__ */ u3("div", {
-          class: "lre-set-rows lre-set-group",
-          "data-lre-agent-group": "Main agent",
-          children: [
-            /* @__PURE__ */ u3("p", {
-              class: "lre-set-timeout-lead",
-              children: "What the main agent may spend on each stage of a turn it works. Each limit is every agent's (Settings → Agents → Budgets) until you change it here; Every agent's goes back to that one."
-            }, undefined, false, undefined, this),
-            budgetKeys.map((key) => /* @__PURE__ */ u3(OwnLimitRow, {
-              id: key,
-              owner: "The main agent's",
-              def: BUDGET_DEFS[key],
-              own: m2.budget[key],
-              every: agents.budget[key],
-              busy,
-              set: (value) => set({ budget: { [key]: value } })
-            }, key, false, undefined, this))
-          ]
-        }, undefined, true, undefined, this)
-      }, undefined, false, undefined, this)
-    ]
-  }, undefined, true, undefined, this);
-}
-function MainAgentPage(props) {
-  const connections = useConnections();
-  return /* @__PURE__ */ u3("div", {
-    class: "lre-stack",
-    "data-lre-settings-page": "main",
-    children: [
-      /* @__PURE__ */ u3("p", {
-        class: "lre-set-lead",
-        children: [
-          "What the main agent runs with. It decides each agent turn while Settings → Agents → Pipeline has a main agent decide (",
-          props.agents.pipeline.mode === "main" ? "it does now" : "it doesn't now",
-          "); it keeps a session from turn to turn, which GM → Workspace shows."
-        ]
-      }, undefined, true, undefined, this),
-      /* @__PURE__ */ u3(MainAgentBody, {
-        agents: props.agents,
-        connections,
-        patch: props.patch,
-        busy: props.busy
-      }, undefined, false, undefined, this)
-    ]
-  }, undefined, true, undefined, this);
-}
-
 // src/frontend/settings/timeouts.tsx
 var GROUPS4 = [
   { group: "turn", title: "Turns", lead: "How long the engine may work on a turn before the reply, and after it." },
   { group: "app", title: "This tab", lead: "How long LumiRPEngine's tab waits for the engine." },
   { group: "work", title: "Jobs and background work", lead: "Build's model jobs, minds runs you start, and the engine's work in the background." }
 ];
-var STEP_S = { engineRunMs: 30, preLookupMs: 15, postReplyMs: 30, postLookupMs: 15, guardMs: 10, skipPlanMs: 30, requestMs: 30, caveatsMs: 10, mindsRunMs: 60, jobCallMs: 60, tokenCountMs: 5, laneStartupMs: 10, laneHeartbeatMs: 10, mcpReconnectMs: 10 };
+var STEP_S = { engineRunMs: 30, preLookupMs: 15, finalReviewMs: 15, postReplyMs: 30, postLookupMs: 15, guardMs: 10, skipPlanMs: 30, requestMs: 30, caveatsMs: 10, mindsRunMs: 60, jobCallMs: 60, tokenCountMs: 5, laneStartupMs: 10, laneHeartbeatMs: 10, mcpReconnectMs: 10 };
 function limitText(limit) {
   return limit === "none" ? "No limit" : formatMs(limit);
 }
@@ -36658,16 +36701,403 @@ function TimeoutsSection(props) {
   }, undefined, true, undefined, this);
 }
 
+// src/frontend/settings/main-agent.tsx
+var DEFAULTS5 = defaultAgentSettings().main;
+var REVIEW_DEFAULTS = defaultAgentSettings().finalReview;
+var DEFAULT_PLACE2 = placeOf2(DEFAULTS5, []);
+function mainPatch(fields) {
+  return { agents: { main: fields } };
+}
+function mainSummary(agents, connections) {
+  return `${placeOf2(agents.main, connections)} · ${agents.pipeline.mode === "main" ? "deciding each agent turn" : `off: ${PIPELINE_MODE_LABELS[agents.pipeline.mode].toLowerCase()}`}`;
+}
+function MainAgentBody(props) {
+  const { agents, busy } = props;
+  const m2 = agents.main;
+  const set = (fields) => props.patch(mainPatch(fields));
+  const budgetKeys = Object.keys(BUDGET_DEFS);
+  const familiesDefault = m2.families.length === DEFAULTS5.families.length && m2.families.every((f3) => DEFAULTS5.families.includes(f3));
+  return /* @__PURE__ */ u3(M, {
+    children: [
+      /* @__PURE__ */ u3(Section, {
+        title: "Model",
+        flush: true,
+        children: /* @__PURE__ */ u3("div", {
+          class: "lre-set-rows",
+          children: [
+            /* @__PURE__ */ u3("div", {
+              class: "lre-set-ext",
+              "data-lre-main-setting": "connection",
+              children: [
+                /* @__PURE__ */ u3("div", {
+                  class: "lre-set-ext-head",
+                  children: [
+                    /* @__PURE__ */ u3("span", {
+                      class: "lre-set-ext-title",
+                      children: "Connection and model"
+                    }, undefined, false, undefined, this),
+                    m2.connectionId === DEFAULTS5.connectionId && m2.model === DEFAULTS5.model ? null : defaultButton(`Reset the main agent's connection and model to their default, ${DEFAULT_PLACE2}`, busy, () => set({ connectionId: null, model: null }))
+                  ]
+                }, undefined, true, undefined, this),
+                /* @__PURE__ */ u3(ConnectionSelect, {
+                  value: m2.connectionId,
+                  connections: props.connections,
+                  firstLabel: "None: Lumiverse's default connection",
+                  help: "None runs the main agent on the connection Lumiverse marks as your default, with that connection's model and settings.",
+                  disabled: busy,
+                  onChange: (connectionId) => set({ connectionId, model: null })
+                }, undefined, false, undefined, this),
+                m2.connectionId ? /* @__PURE__ */ u3(M, {
+                  children: [
+                    /* @__PURE__ */ u3(HostModelPicker, {
+                      connectionId: m2.connectionId,
+                      value: m2.model ?? "",
+                      label: "Main agent: model",
+                      onChange: (model) => set({ model: model || null })
+                    }, undefined, false, undefined, this),
+                    /* @__PURE__ */ u3("span", {
+                      class: "lre-field-help",
+                      children: "Pick from the connection's models, or type one. Empty uses the connection's own model."
+                    }, undefined, false, undefined, this)
+                  ]
+                }, undefined, true, undefined, this) : null,
+                /* @__PURE__ */ u3("span", {
+                  class: "lre-small lre-muted",
+                  children: [
+                    "Default: ",
+                    DEFAULT_PLACE2,
+                    ", with that connection's model."
+                  ]
+                }, undefined, true, undefined, this)
+              ]
+            }, undefined, true, undefined, this),
+            /* @__PURE__ */ u3("div", {
+              class: "lre-set-ext",
+              "data-lre-main-setting": "effort",
+              children: [
+                /* @__PURE__ */ u3("div", {
+                  class: "lre-set-ext-head",
+                  children: [
+                    /* @__PURE__ */ u3("span", {
+                      class: "lre-set-ext-title",
+                      children: "Reasoning"
+                    }, undefined, false, undefined, this),
+                    m2.effort === DEFAULTS5.effort ? null : defaultButton(`Reset the main agent's effort to its default, ${EFFORT_LABEL2[DEFAULTS5.effort]}`, busy, () => set({ effort: null }))
+                  ]
+                }, undefined, true, undefined, this),
+                /* @__PURE__ */ u3("label", {
+                  class: "lre-field",
+                  children: [
+                    /* @__PURE__ */ u3("span", {
+                      class: "label",
+                      children: "Effort"
+                    }, undefined, false, undefined, this),
+                    /* @__PURE__ */ u3("select", {
+                      class: "lre-input",
+                      "aria-label": "Main agent: reasoning effort",
+                      value: m2.effort,
+                      disabled: busy,
+                      onChange: (event) => {
+                        const effort = AGENT_EFFORTS.find((e3) => e3 === event.currentTarget.value);
+                        if (effort)
+                          set({ effort });
+                      },
+                      children: AGENT_EFFORTS.map((e3) => /* @__PURE__ */ u3("option", {
+                        value: e3,
+                        children: EFFORT_LABEL2[e3]
+                      }, e3, false, undefined, this))
+                    }, undefined, false, undefined, this),
+                    /* @__PURE__ */ u3("span", {
+                      class: "lre-field-help",
+                      children: EFFORT_HELP2[m2.effort]
+                    }, undefined, false, undefined, this)
+                  ]
+                }, undefined, true, undefined, this),
+                /* @__PURE__ */ u3("span", {
+                  class: "lre-small lre-muted",
+                  children: [
+                    "Default ",
+                    EFFORT_LABEL2[DEFAULTS5.effort],
+                    "."
+                  ]
+                }, undefined, true, undefined, this)
+              ]
+            }, undefined, true, undefined, this)
+          ]
+        }, undefined, true, undefined, this)
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(Section, {
+        title: "Tools",
+        flush: true,
+        children: /* @__PURE__ */ u3("div", {
+          class: "lre-set-rows",
+          children: /* @__PURE__ */ u3("div", {
+            class: "lre-set-ext",
+            "data-lre-main-setting": "families",
+            children: [
+              /* @__PURE__ */ u3("div", {
+                class: "lre-set-ext-head",
+                children: [
+                  /* @__PURE__ */ u3("span", {
+                    class: "lre-set-ext-title",
+                    children: "Tools it reads with"
+                  }, undefined, false, undefined, this),
+                  familiesDefault ? null : defaultButton(`Reset the main agent's tools to their default, ${DEFAULTS5.families.map((f3) => TOOL_FAMILY_LABEL[f3]).join(", ")}`, busy, () => set({ families: null }))
+                ]
+              }, undefined, true, undefined, this),
+              /* @__PURE__ */ u3("span", {
+                class: "lre-field-help",
+                children: "Read-only: what it changes, it changes through the roles it runs, and in the narrator's prompt through its final review."
+              }, undefined, false, undefined, this),
+              FAMILIES3.map((family) => /* @__PURE__ */ u3(HostSwitch, {
+                label: `Main agent: ${TOOL_FAMILY_LABEL[family]}`,
+                checked: m2.families.includes(family),
+                disabled: busy,
+                onChange: (on) => set({ families: FAMILIES3.filter((f3) => f3 === family ? on : m2.families.includes(f3)) })
+              }, family, false, undefined, this)),
+              /* @__PURE__ */ u3("span", {
+                class: "lre-small lre-muted",
+                children: [
+                  "Default: ",
+                  DEFAULTS5.families.map((f3) => TOOL_FAMILY_LABEL[f3]).join(", "),
+                  "."
+                ]
+              }, undefined, true, undefined, this)
+            ]
+          }, undefined, true, undefined, this)
+        }, undefined, false, undefined, this)
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(Section, {
+        title: "Turn task",
+        flush: true,
+        children: /* @__PURE__ */ u3("div", {
+          class: "lre-set-rows",
+          children: [
+            /* @__PURE__ */ u3(LimitRow, {
+              id: "digestTokens",
+              def: MAIN_DEFS.digestTokens,
+              value: m2.digestTokens,
+              standard: DEFAULTS5.digestTokens,
+              busy,
+              set: (digestTokens) => set({ digestTokens })
+            }, undefined, false, undefined, this),
+            /* @__PURE__ */ u3(LimitRow, {
+              id: "pinsTokens",
+              def: MAIN_DEFS.pinsTokens,
+              value: m2.pinsTokens,
+              standard: DEFAULTS5.pinsTokens,
+              busy,
+              set: (pinsTokens) => set({ pinsTokens })
+            }, undefined, false, undefined, this)
+          ]
+        }, undefined, true, undefined, this)
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(Section, {
+        title: "Budget",
+        flush: true,
+        children: /* @__PURE__ */ u3("div", {
+          class: "lre-set-rows lre-set-group",
+          "data-lre-agent-group": "Main agent",
+          children: [
+            /* @__PURE__ */ u3("p", {
+              class: "lre-set-timeout-lead",
+              children: "What the main agent may spend on each stage of a turn it works. Each limit is every agent's (Settings → Agents → Budgets) until you change it here; Every agent's goes back to that one."
+            }, undefined, false, undefined, this),
+            budgetKeys.map((key) => /* @__PURE__ */ u3(OwnLimitRow, {
+              id: key,
+              owner: "The main agent's",
+              def: BUDGET_DEFS[key],
+              own: m2.budget[key],
+              every: agents.budget[key],
+              busy,
+              set: (value) => set({ budget: { [key]: value } })
+            }, key, false, undefined, this))
+          ]
+        }, undefined, true, undefined, this)
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+var ON_FAIL_HELP2 = {
+  send: "The narrator gets the prompt as the engine made it, and Settings → Diagnostics records why the review failed.",
+  stop: "The turn stops before its reply, as a role set to stop does: the chat says why, with a Retry."
+};
+function FinalReviewSection(props) {
+  const { agents, busy } = props;
+  const r3 = agents.finalReview;
+  const set = (fields) => props.patch({ agents: { finalReview: fields } });
+  const main = mainBudget(agents);
+  const budgetKeys = Object.keys(BUDGET_DEFS);
+  return /* @__PURE__ */ u3(Section, {
+    title: "Final review",
+    flush: true,
+    children: [
+      /* @__PURE__ */ u3("div", {
+        class: "lre-set-rows",
+        "data-lre-main-setting": "final-review",
+        children: [
+          /* @__PURE__ */ u3("p", {
+            class: "lre-set-timeout-lead",
+            children: "Before each reply of an agent chat, the main agent reviews the prompt the narrator gets (every section, the outline with its brief, and the narrator rules) against the world and the turn, and may fix it a line at a time. It does so in either pipeline: on the fixed pipeline it runs for this alone, on the connection above. GM → Live shows each edit, the Prompt Breakdown shows the prompt as revised, and a Re-narrate tells the same prompt again."
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3("div", {
+            class: "lre-set-ext",
+            children: [
+              /* @__PURE__ */ u3("div", {
+                class: "lre-set-ext-head",
+                children: [
+                  /* @__PURE__ */ u3("span", {
+                    class: "lre-set-ext-title",
+                    children: "Review the narrator's prompt"
+                  }, undefined, false, undefined, this),
+                  r3.on === REVIEW_DEFAULTS.on ? null : defaultButton(`Reset the final review to its default, ${REVIEW_DEFAULTS.on ? "on" : "off"}`, busy, () => set({ on: null }))
+                ]
+              }, undefined, true, undefined, this),
+              /* @__PURE__ */ u3(HostSwitch, {
+                label: "The main agent reviews the narrator's prompt before each reply",
+                checked: r3.on,
+                disabled: busy,
+                onChange: (on) => set({ on })
+              }, undefined, false, undefined, this),
+              /* @__PURE__ */ u3("span", {
+                class: "lre-small lre-muted",
+                children: [
+                  "Off, nothing runs and the narrator gets the prompt as the engine made it. Default ",
+                  REVIEW_DEFAULTS.on ? "on" : "off",
+                  "."
+                ]
+              }, undefined, true, undefined, this)
+            ]
+          }, undefined, true, undefined, this),
+          /* @__PURE__ */ u3("div", {
+            class: "lre-set-ext",
+            children: [
+              /* @__PURE__ */ u3("div", {
+                class: "lre-set-ext-head",
+                children: [
+                  /* @__PURE__ */ u3("span", {
+                    class: "lre-set-ext-title",
+                    children: "When the review fails"
+                  }, undefined, false, undefined, this),
+                  r3.onFail === REVIEW_DEFAULTS.onFail ? null : defaultButton(`Reset what a failed review does to its default, ${FINAL_REVIEW_ON_FAIL_LABELS[REVIEW_DEFAULTS.onFail]}`, busy, () => set({ onFail: null }))
+                ]
+              }, undefined, true, undefined, this),
+              /* @__PURE__ */ u3("div", {
+                class: "lre-field",
+                children: [
+                  /* @__PURE__ */ u3(Seg, {
+                    label: "What a final review that fails does",
+                    value: r3.onFail,
+                    options: FINAL_REVIEW_ON_FAIL.map((value) => ({ value, label: FINAL_REVIEW_ON_FAIL_LABELS[value] })),
+                    disabled: busy,
+                    onChange: (onFail) => set({ onFail })
+                  }, undefined, false, undefined, this),
+                  /* @__PURE__ */ u3("span", {
+                    class: "lre-field-help",
+                    children: ON_FAIL_HELP2[r3.onFail]
+                  }, undefined, false, undefined, this)
+                ]
+              }, undefined, true, undefined, this),
+              /* @__PURE__ */ u3("span", {
+                class: "lre-small lre-muted",
+                children: [
+                  "A review fails when it runs out of time or budget, or its model call fails. Default ",
+                  FINAL_REVIEW_ON_FAIL_LABELS[REVIEW_DEFAULTS.onFail],
+                  "."
+                ]
+              }, undefined, true, undefined, this)
+            ]
+          }, undefined, true, undefined, this),
+          /* @__PURE__ */ u3(TimeoutRow, {
+            id: "finalReviewMs",
+            value: props.timeouts.finalReviewMs,
+            busy,
+            set: (finalReviewMs) => props.patch({ timeouts: { finalReviewMs } })
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this),
+      /* @__PURE__ */ u3("div", {
+        class: "lre-set-rows lre-set-group",
+        "data-lre-agent-group": "Final review",
+        children: [
+          /* @__PURE__ */ u3("p", {
+            class: "lre-set-timeout-lead",
+            children: "What the review may spend. Each limit is the main agent's for a stage (its Budget, above) until you change it here; The main agent's goes back to that one. What it spends counts toward the turn's, as every agent's does."
+          }, undefined, false, undefined, this),
+          budgetKeys.map((key) => /* @__PURE__ */ u3(OwnLimitRow, {
+            id: key,
+            owner: "The final review's",
+            fallback: "the main agent's",
+            def: BUDGET_DEFS[key],
+            own: r3.budget[key],
+            every: main[key],
+            busy,
+            set: (value) => set({ budget: { [key]: value } })
+          }, key, false, undefined, this))
+        ]
+      }, undefined, true, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+function MainAgentPage(props) {
+  const connections = useConnections();
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-stack",
+    "data-lre-settings-page": "main",
+    children: [
+      /* @__PURE__ */ u3("p", {
+        class: "lre-set-lead",
+        children: [
+          "What the main agent runs with. It decides each agent turn while Settings → Agents → Pipeline has a main agent decide (",
+          props.agents.pipeline.mode === "main" ? "it does now" : "it doesn't now",
+          "); it keeps a session from turn to turn, which GM → Workspace shows. In either pipeline it works each turn's final review, below."
+        ]
+      }, undefined, true, undefined, this),
+      /* @__PURE__ */ u3(MainAgentBody, {
+        agents: props.agents,
+        connections,
+        patch: props.patch,
+        busy: props.busy
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(FinalReviewSection, {
+        agents: props.agents,
+        timeouts: props.timeouts,
+        patch: props.patch,
+        busy: props.busy
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+
 // src/shared/stores.ts
 var PATH_SEGMENT = /^[\p{L}\p{N}._-]+(?: [\p{L}\p{N}._-]+)*$/u;
-function isWorkspacePath(v5) {
-  if (!safeKey(v5))
+function isWorkspacePath(v6) {
+  if (!safeKey(v6))
     return false;
-  return v5.split("/").every((name) => name !== "." && name !== ".." && PATH_SEGMENT.test(name));
+  return v6.split("/").every((name) => name !== "." && name !== ".." && PATH_SEGMENT.test(name));
+}
+var GLOBAL_PREFIX = "~/";
+function isGlobalPath(v6) {
+  return typeof v6 === "string" && v6.startsWith(GLOBAL_PREFIX) && isWorkspacePath(v6.slice(GLOBAL_PREFIX.length));
+}
+function isFilePath(v6) {
+  return isWorkspacePath(v6) || isGlobalPath(v6);
+}
+function levelPath(path2) {
+  return path2.startsWith(GLOBAL_PREFIX) ? path2.slice(GLOBAL_PREFIX.length) : path2;
+}
+var AGENTS_PATH = "AGENTS.md";
+var ROLES_DIR = "roles/";
+function isSystemPath(path2) {
+  const at = levelPath(path2);
+  return at === AGENTS_PATH || at.startsWith(ROLES_DIR) && at.endsWith(".md") && !at.slice(ROLES_DIR.length).includes("/");
 }
 var LEARNED_DIR = "learned/";
 function isLearnedPath(path2) {
   return path2.startsWith(LEARNED_DIR);
+}
+function isKeptPath(path2) {
+  return isLearnedPath(path2) || isGlobalPath(path2);
 }
 var PINS_PATH = ".pins.json";
 var TRANSCRIPTS_DIR = "transcripts/";
@@ -36798,7 +37228,7 @@ function RetentionPage(props) {
 }
 
 // src/frontend/settings/lore.tsx
-var RESET_FIELDS = ["tagPattern", "idPrefix", "idDigits", "holdsChars", "inPrompts", "promptTokens", "own"];
+var RESET_FIELDS = ["tagPattern", "idPrefix", "idDigits", "holdsChars", "promptTokens", "own"];
 var BOOKS_CHOICES = [
   { value: "auto", label: "Every book a chat reads" },
   { value: "list", label: "Only the books I tick" }
@@ -36818,7 +37248,7 @@ function loreTextProblem(field2, value) {
 }
 function loreSummary(books, index) {
   const read = books === "auto" ? "Every book a chat reads" : `${books.length} ${books.length === 1 ? "book" : "books"} ticked`;
-  const parts = [read, index.own ? "your own index entry" : index.inPrompts ? "index in every role's prompt" : null, index.built ? "an index entry kept in sync" : null];
+  const parts = [read, index.own ? "your own index entry" : null, index.built ? "an index entry kept in sync" : null];
   return parts.filter((p3) => p3 !== null).join(" · ");
 }
 function LoreSettingsBody(props) {
@@ -37031,13 +37461,7 @@ function LoreSettingsBody(props) {
                     children: "In the roles' prompts"
                   }, undefined, false, undefined, this)
                 }, undefined, false, undefined, this),
-                /* @__PURE__ */ u3(HostSwitch, {
-                  label: "Every role's prompt carries the lore index",
-                  checked: index.inPrompts,
-                  disabled: busy,
-                  onChange: (inPrompts) => setIndex({ inPrompts })
-                }, undefined, false, undefined, this),
-                index.inPrompts ? /* @__PURE__ */ u3(NumberStepper, {
+                /* @__PURE__ */ u3(NumberStepper, {
                   label: "Index tokens",
                   value: index.promptTokens,
                   min: LORE_INDEX_BOUNDS.promptTokens[0],
@@ -37045,11 +37469,11 @@ function LoreSettingsBody(props) {
                   integer: true,
                   disabled: busy,
                   onChange: (promptTokens) => setIndex({ promptTokens })
-                }, undefined, false, undefined, this) : null,
+                }, undefined, false, undefined, this),
                 /* @__PURE__ */ u3("span", {
                   class: "lre-small lre-muted",
                   children: [
-                    "Off, an agent asks for the index with its lore_index tool. On, each role's prompt has it after its pinned files, cut to the tokens set here and saying how many entries it left out. Default off, ",
+                    "A role whose context starts with the lore index (Settings → Agents → Context) has it after its pinned files, cut to the tokens set here and saying how many entries it left out; any agent asks for it with its lore_index tool. Default ",
                     LORE_INDEX_DEFAULTS.promptTokens.toLocaleString("en-US"),
                     " tokens."
                   ]
@@ -37287,12 +37711,12 @@ function promptTextPatch(def2, text, maxChars) {
     return null;
   return { prompts: { texts: { [def2.id]: text.trim() === def2.text.trim() ? null : text } } };
 }
-function promptGroups(page6) {
+function promptGroups(page7) {
   const out = [];
   for (const def2 of PROMPTS) {
-    if (def2.page !== page6.id)
+    if (def2.page !== page7.id)
       continue;
-    const title = def2.group ?? page6.label;
+    const title = def2.group ?? page7.label;
     const group = out.find((g2) => g2.title === title);
     if (group)
       group.defs.push(def2);
@@ -37308,8 +37732,8 @@ function PromptsPage(props) {
   const { prompts, busy } = props;
   const [pageId, setPageId] = d2(PROMPT_PAGES[0]?.id ?? "");
   const [tests, setTests] = d2({});
-  const page6 = PROMPT_PAGES.find((p3) => p3.id === pageId) ?? PROMPT_PAGES[0];
-  if (!page6)
+  const page7 = PROMPT_PAGES.find((p3) => p3.id === pageId) ?? PROMPT_PAGES[0];
+  if (!page7)
     return null;
   const run = async (def2, text) => {
     if (!props.test)
@@ -37331,17 +37755,17 @@ function PromptsPage(props) {
       }, undefined, false, undefined, this),
       /* @__PURE__ */ u3(Seg, {
         label: "Prompts for",
-        value: page6.id,
+        value: page7.id,
         options: PROMPT_PAGES.map((p3) => ({ value: p3.id, label: p3.label })),
         disabled: busy,
-        onChange: (v5) => setPageId(String(v5))
+        onChange: (v6) => setPageId(String(v6))
       }, undefined, false, undefined, this),
       /* @__PURE__ */ u3("p", {
         class: "lre-minds-note",
-        "data-lre-prompt-page": page6.id,
-        children: page6.note
+        "data-lre-prompt-page": page7.id,
+        children: page7.note
       }, undefined, false, undefined, this),
-      promptGroups(page6).map((group) => /* @__PURE__ */ u3(Section, {
+      promptGroups(page7).map((group) => /* @__PURE__ */ u3(Section, {
         title: group.title,
         flush: true,
         children: /* @__PURE__ */ u3("div", {
@@ -37406,8 +37830,9 @@ var PAGE2 = {
   timeouts: { title: "Timeouts", subtitle: "How long each wait may run", icon: "hourglass" },
   agents: { title: "Agents", subtitle: "How agent turns run, and the runtime's budgets, caching and acceptance runs", icon: "function" },
   roles: { title: "Roles", subtitle: "What each role of an agent turn runs with", icon: "branch" },
+  context: { title: "Context", subtitle: "What each role starts with, and how the main agent briefs it", icon: "layers" },
   main: { title: "Main agent", subtitle: "The agent that decides each turn, when the pipeline has one", icon: "sparkle" },
-  assistant: { title: "Assistant", subtitle: "The GM assistant's model, knowledge and budget", icon: "message" },
+  assistant: { title: "Assistant", subtitle: "The GM assistant's model and budget", icon: "message" },
   realism: { title: "Realism", subtitle: "For new chats", icon: "layers" },
   checks: { title: "Checks", subtitle: "For new chats", icon: "dice" },
   time: { title: "Time", subtitle: "For new chats", icon: "clock" },
@@ -37424,7 +37849,7 @@ var PAGE2 = {
 };
 var GROUPS5 = [
   { title: "Getting started", pages: ["helper", "model", "steps", "minds", "narrator", "timeouts"] },
-  { title: "Agents", pages: ["agents", "roles", "main", "assistant", "prompts", "retention"] },
+  { title: "Agents", pages: ["agents", "roles", "context", "main", "assistant", "prompts", "retention"] },
   { title: "Defaults for new chats", pages: ["realism", "checks", "time"] },
   { title: "Replies", pages: ["extraction", "swipes"] },
   { title: "Your preset", pages: ["preset"] },
@@ -37439,9 +37864,9 @@ var STATIC_CAVEATS = [
   "Realism, checks and time settings seed new chats only, after a world's own defaults unless you turn on Use my settings. Change a running chat in GM → This chat.",
   "Undo covers the latest reply; earlier changes go through Keep or Discard."
 ];
-function summaryOf(page6, data, caveats, showIds, connections) {
+function summaryOf(page7, data, caveats, showIds, connections) {
   const { settings } = data;
-  switch (page6) {
+  switch (page7) {
     case "helper":
       return { subtitle: helperSummary(settings.helper, connections) };
     case "model":
@@ -37456,6 +37881,8 @@ function summaryOf(page6, data, caveats, showIds, connections) {
       return { subtitle: agentsSummary(settings.agents) };
     case "roles":
       return { subtitle: rolesSummary(settings.agents) };
+    case "context":
+      return { subtitle: contextSummary(settings.agents) };
     case "main":
       return { subtitle: mainSummary(settings.agents, connections) };
     case "assistant":
@@ -37519,22 +37946,22 @@ function Home(props) {
         title: group.title,
         flush: true,
         children: /* @__PURE__ */ u3(List, {
-          children: group.pages.map((page6) => {
-            const summary = summaryOf(page6, props.data, props.caveats, showIds, connections);
+          children: group.pages.map((page7) => {
+            const summary = summaryOf(page7, props.data, props.caveats, showIds, connections);
             return /* @__PURE__ */ u3("div", {
               class: "lre-set-home-row",
-              "data-lre-settings": page6,
+              "data-lre-settings": page7,
               children: /* @__PURE__ */ u3(ListRow, {
-                icon: PAGE2[page6].icon,
-                title: PAGE2[page6].title,
+                icon: PAGE2[page7].icon,
+                title: PAGE2[page7].title,
                 subtitle: summary.subtitle,
                 value: summary.value,
                 valueTone: "muted",
                 badge: summary.badge,
                 chevron: true,
-                onClick: () => props.open(page6)
+                onClick: () => props.open(page7)
               }, undefined, false, undefined, this)
-            }, page6, false, undefined, this);
+            }, page7, false, undefined, this);
           })
         }, undefined, false, undefined, this)
       }, group.title, false, undefined, this))
@@ -37616,14 +38043,14 @@ function Settings() {
   const app = useApp();
   const view = useView();
   const chatId = useSelect(app.sync, (state) => state.chatId);
-  const page6 = useUi((ui) => ui.settings.page);
+  const page7 = useUi((ui) => ui.settings.page);
   const [data, setData] = d2(null);
   const [failed2, setFailed] = d2(false);
   const [caveats, setCaveats] = d2(null);
   const caveatsAsked = T2(0);
   const [busy, run] = useBusy();
   const [adjusted, setAdjusted] = d2([]);
-  A(() => setAdjusted([]), [page6]);
+  A(() => setAdjusted([]), [page7]);
   const root = T2(null);
   const opener = T2(null);
   A(() => {
@@ -37635,7 +38062,7 @@ function Settings() {
     });
   }, []);
   A(() => {
-    if (page6 !== "home" && page6 !== "caveats")
+    if (page7 !== "home" && page7 !== "caveats")
       return;
     const asked2 = caveatsAsked.current += 1;
     setCaveats(null);
@@ -37644,17 +38071,17 @@ function Settings() {
         return;
       setCaveats(result ? result.caveats : [{ code: "preset_lint_failed", message: "The preset check didn't answer, so its warnings aren't known. Open Caveats again to retry." }]);
     });
-  }, [page6]);
+  }, [page7]);
   A(() => {
     const el = root.current;
     if (!el || !data)
       return;
-    const target = page6 === "home" ? opener.current ? el.querySelector(`[data-lre-settings="${opener.current}"] button`) : null : el.querySelector(".lre-page-header button");
+    const target = page7 === "home" ? opener.current ? el.querySelector(`[data-lre-settings="${opener.current}"] button`) : null : el.querySelector(".lre-page-header button");
     if (!target)
       return;
     target.focus({ preventScroll: true });
-    revealInScroller(page6 === "home" ? target : target.closest(".lre-page-header") ?? target, page6 === "home" ? "nearest" : "start");
-  }, [page6, data !== null]);
+    revealInScroller(page7 === "home" ? target : target.closest(".lre-page-header") ?? target, page7 === "home" ? "nearest" : "start");
+  }, [page7, data !== null]);
   const go2 = (next) => app.ui.update((ui) => ({ ...ui, settings: { page: next } }));
   const patch = (body2) => run(async () => {
     const result = await app.request({ type: "lre.settings.set", patch: body2 });
@@ -37670,7 +38097,7 @@ function Settings() {
     }, undefined, false, undefined, this) : /* @__PURE__ */ u3(Empty, {
       children: "Loading settings…"
     }, undefined, false, undefined, this);
-  if (page6 === "home") {
+  if (page7 === "home") {
     return /* @__PURE__ */ u3("div", {
       ref: root,
       class: "lre-set",
@@ -37686,17 +38113,17 @@ function Settings() {
     }, undefined, false, undefined, this);
   }
   const { settings } = data;
-  const body = page6 === "helper" ? /* @__PURE__ */ u3(HelperSection, {
+  const body = page7 === "helper" ? /* @__PURE__ */ u3(HelperSection, {
     helper: settings.helper,
     patch,
     busy
-  }, undefined, false, undefined, this) : page6 === "model" ? /* @__PURE__ */ u3(ModelUseSection, {
+  }, undefined, false, undefined, this) : page7 === "model" ? /* @__PURE__ */ u3(ModelUseSection, {
     modelUse: settings.modelUse,
     meter: view?.meter ?? null,
     patch,
     openTimeouts: () => go2("timeouts"),
     busy
-  }, undefined, false, undefined, this) : page6 === "steps" ? /* @__PURE__ */ u3(StepsSection, {
+  }, undefined, false, undefined, this) : page7 === "steps" ? /* @__PURE__ */ u3(StepsSection, {
     modelUse: settings.modelUse,
     helper: settings.helper,
     jobs: settings.jobs,
@@ -37705,75 +38132,80 @@ function Settings() {
     patch,
     openHelper: () => go2("helper"),
     busy
-  }, undefined, false, undefined, this) : page6 === "minds" ? /* @__PURE__ */ u3(MindsSection, {
+  }, undefined, false, undefined, this) : page7 === "minds" ? /* @__PURE__ */ u3(MindsSection, {
     minds: settings.minds,
     patch,
     busy
-  }, undefined, false, undefined, this) : page6 === "narrator" ? /* @__PURE__ */ u3(NarratorPage, {
+  }, undefined, false, undefined, this) : page7 === "narrator" ? /* @__PURE__ */ u3(NarratorPage, {
     narrator: settings.narrator,
     patch,
     busy
-  }, undefined, false, undefined, this) : page6 === "timeouts" ? /* @__PURE__ */ u3(TimeoutsSection, {
+  }, undefined, false, undefined, this) : page7 === "timeouts" ? /* @__PURE__ */ u3(TimeoutsSection, {
     timeouts: settings.timeouts,
     patch,
     busy
-  }, undefined, false, undefined, this) : page6 === "agents" ? /* @__PURE__ */ u3(AgentsSection, {
+  }, undefined, false, undefined, this) : page7 === "agents" ? /* @__PURE__ */ u3(AgentsSection, {
     agents: settings.agents,
     patch,
     busy
-  }, undefined, false, undefined, this) : page6 === "roles" ? /* @__PURE__ */ u3(RolesPage, {
+  }, undefined, false, undefined, this) : page7 === "roles" ? /* @__PURE__ */ u3(RolesPage, {
     agents: settings.agents,
     patch,
     busy
-  }, undefined, false, undefined, this) : page6 === "main" ? /* @__PURE__ */ u3(MainAgentPage, {
+  }, undefined, false, undefined, this) : page7 === "context" ? /* @__PURE__ */ u3(ContextPage, {
     agents: settings.agents,
     patch,
     busy
-  }, undefined, false, undefined, this) : page6 === "assistant" ? /* @__PURE__ */ u3(AssistantPage, {
+  }, undefined, false, undefined, this) : page7 === "main" ? /* @__PURE__ */ u3(MainAgentPage, {
+    agents: settings.agents,
+    timeouts: settings.timeouts,
+    patch,
+    busy
+  }, undefined, false, undefined, this) : page7 === "assistant" ? /* @__PURE__ */ u3(AssistantPage, {
     agents: settings.agents,
     patch,
     busy
-  }, undefined, false, undefined, this) : page6 === "realism" ? /* @__PURE__ */ u3(RealismPage, {
+  }, undefined, false, undefined, this) : page7 === "realism" ? /* @__PURE__ */ u3(RealismPage, {
     settings,
     patch,
     busy
-  }, undefined, false, undefined, this) : page6 === "checks" ? /* @__PURE__ */ u3(ChecksPage, {
+  }, undefined, false, undefined, this) : page7 === "checks" ? /* @__PURE__ */ u3(ChecksPage, {
     settings,
     skills: view?.controls?.skills ?? [],
     patch,
     busy
-  }, undefined, false, undefined, this) : page6 === "time" ? /* @__PURE__ */ u3(TimePage, {
+  }, undefined, false, undefined, this) : page7 === "time" ? /* @__PURE__ */ u3(TimePage, {
     settings,
     patch,
     busy
-  }, undefined, false, undefined, this) : page6 === "extraction" ? /* @__PURE__ */ u3(ExtractionPage, {
+  }, undefined, false, undefined, this) : page7 === "extraction" ? /* @__PURE__ */ u3(ExtractionPage, {
     data,
     patch,
     busy
-  }, undefined, false, undefined, this) : page6 === "swipes" ? /* @__PURE__ */ u3(SwipesPage, {
+  }, undefined, false, undefined, this) : page7 === "swipes" ? /* @__PURE__ */ u3(SwipesPage, {
     value: settings.swipeDefault,
     texts: settings.swipeTexts,
     patch,
     busy
-  }, undefined, false, undefined, this) : page6 === "preset" ? /* @__PURE__ */ u3(PresetPage, {
+  }, undefined, false, undefined, this) : page7 === "preset" ? /* @__PURE__ */ u3(PresetPage, {
     hideJsonBlocks: settings.hideJsonBlocks,
     patch,
     busy
-  }, undefined, false, undefined, this) : page6 === "lore" ? /* @__PURE__ */ u3(LorePage, {
+  }, undefined, false, undefined, this) : page7 === "lore" ? /* @__PURE__ */ u3(LorePage, {
     loreBooks: settings.loreBooks,
     loreIndex: settings.loreIndex,
     patch,
     busy
-  }, undefined, false, undefined, this) : page6 === "display" ? /* @__PURE__ */ u3(DisplayPage, {}, undefined, false, undefined, this) : page6 === "diagnostics" ? /* @__PURE__ */ u3(DiagnosticsPage, {
+  }, undefined, false, undefined, this) : page7 === "display" ? /* @__PURE__ */ u3(DisplayPage, {}, undefined, false, undefined, this) : page7 === "diagnostics" ? /* @__PURE__ */ u3(DiagnosticsPage, {
     diagnostics: settings.diagnostics,
     patch,
     busy
-  }, undefined, false, undefined, this) : page6 === "mcp" ? /* @__PURE__ */ u3(McpServerPage, {}, undefined, false, undefined, this) : page6 === "prompts" ? /* @__PURE__ */ u3(PromptsPage, {
+  }, undefined, false, undefined, this) : page7 === "mcp" ? /* @__PURE__ */ u3(McpServerPage, {}, undefined, false, undefined, this) : page7 === "prompts" ? /* @__PURE__ */ u3(PromptsPage, {
     prompts: settings.prompts,
     patch,
     busy,
     ...chatId ? { test: async (def2, text) => (await app.request(promptTestRequest(chatId, def2.id, text)))?.test ?? null } : {}
-  }, undefined, false, undefined, this) : page6 === "retention" ? /* @__PURE__ */ u3(RetentionPage, {
+  }, undefined, false, undefined, this) : page7 === "retention" ? /* @__PURE__ */ u3(RetentionPage, {
     retention: settings.retention,
     patch,
     busy
@@ -37793,8 +38225,8 @@ function Settings() {
     },
     children: [
       /* @__PURE__ */ u3(PageHeader, {
-        title: PAGE2[page6].title,
-        subtitle: PAGE2[page6].subtitle,
+        title: PAGE2[page7].title,
+        subtitle: PAGE2[page7].subtitle,
         onBack: () => go2("home"),
         backLabel: "Settings"
       }, undefined, false, undefined, this),
@@ -40233,7 +40665,7 @@ function decodeCastView(value) {
       classes: isRecord(p3.classes) ? Object.fromEntries(Object.entries(p3.classes).map(([facet, values]) => [facet, strings(values)])) : {},
       groups: list(p3.groups, (g2) => typeof g2.id === "string" ? { id: g2.id, role: optStr(g2.role) } : null)
     } : null),
-    facets: list(value.facets, (f3) => typeof f3.id === "string" ? { id: f3.id, label: str(f3.label, f3.id), multiple: f3.multiple === true, values: list(f3.values, (v5) => typeof v5.id === "string" ? { id: v5.id, label: str(v5.label, v5.id), parent: optStr(v5.parent) } : null) } : null),
+    facets: list(value.facets, (f3) => typeof f3.id === "string" ? { id: f3.id, label: str(f3.label, f3.id), multiple: f3.multiple === true, values: list(f3.values, (v6) => typeof v6.id === "string" ? { id: v6.id, label: str(v6.label, v6.id), parent: optStr(v6.parent) } : null) } : null),
     tiers: list(value.tiers, (t3) => typeof t3.id === "string" ? { id: t3.id, label: str(t3.label, t3.id) } : null),
     groups: list(value.groups, decodeGroup),
     mine: list(value.mine, decodeGroup)
@@ -40241,7 +40673,7 @@ function decodeCastView(value) {
 }
 var NO_FILTERS = { classes: {}, groups: [] };
 function parentsOf(facet) {
-  return Object.fromEntries(facet.values.map((v5) => [v5.id, { parent: v5.parent }]));
+  return Object.fromEntries(facet.values.map((v6) => [v6.id, { parent: v6.parent }]));
 }
 function passes(person3, filters, facets) {
   for (const [facetId, accepted] of Object.entries(filters.classes)) {
@@ -40249,7 +40681,7 @@ function passes(person3, filters, facets) {
       continue;
     const facet = facets.find((f3) => f3.id === facetId);
     const tree = facet ? parentsOf(facet) : {};
-    if (!(person3.classes[facetId] ?? []).some((v5) => accepted.some((a3) => withinValue(tree, v5, a3))))
+    if (!(person3.classes[facetId] ?? []).some((v6) => accepted.some((a3) => withinValue(tree, v6, a3))))
       return false;
   }
   if (filters.groups.length > 0 && !person3.groups.some((g2) => filters.groups.includes(g2.id)))
@@ -40270,11 +40702,11 @@ function castSections(view, people, by) {
   if (facet) {
     const label = (id) => {
       const parts = [];
-      for (let v5 = facet.values.find((x2) => x2.id === id), guard = 0;v5 && guard < 16; v5 = facet.values.find((x2) => x2.id === v5?.parent), guard++)
-        parts.unshift(v5.label);
+      for (let v6 = facet.values.find((x2) => x2.id === id), guard = 0;v6 && guard < 16; v6 = facet.values.find((x2) => x2.id === v6?.parent), guard++)
+        parts.unshift(v6.label);
       return parts.join(" › ") || id;
     };
-    return sections(facet.values.map((v5) => ({ key: v5.id, label: label(v5.id) })), (p3) => p3.classes[facet.id] ?? [], `No ${facet.label.toLowerCase()}`);
+    return sections(facet.values.map((v6) => ({ key: v6.id, label: label(v6.id) })), (p3) => p3.classes[facet.id] ?? [], `No ${facet.label.toLowerCase()}`);
   }
   return [
     { key: "here", label: "Here", people: ordered.filter((p3) => p3.here) },
@@ -40339,10 +40771,10 @@ function CastPanel(props) {
       children: "You don't know anyone yet."
     }, undefined, false, undefined, this);
   const shown = view.people.filter((p3) => passes(p3, filters, view.facets));
-  const active = Object.values(filters.classes).reduce((n4, v5) => n4 + v5.length, 0) + filters.groups.length;
+  const active = Object.values(filters.classes).reduce((n4, v6) => n4 + v6.length, 0) + filters.groups.length;
   const held = (facet) => {
     const tree = parentsOf(facet);
-    return facet.values.filter((v5) => view.people.some((p3) => (p3.classes[facet.id] ?? []).some((x2) => withinValue(tree, x2, v5.id)))).map((v5) => ({ id: v5.id, label: v5.label }));
+    return facet.values.filter((v6) => view.people.some((p3) => (p3.classes[facet.id] ?? []).some((x2) => withinValue(tree, x2, v6.id)))).map((v6) => ({ id: v6.id, label: v6.label }));
   };
   const row = (p3) => {
     const pending = props.state.pending.some((mark) => mark.entity === p3.id);
@@ -40659,8 +41091,8 @@ function classLabel(view, facetId, valueId) {
   if (!facet)
     return valueId;
   const parts = [];
-  for (let v5 = facet.values.find((x2) => x2.id === valueId), guard = 0;v5 && guard < 16; v5 = facet.values.find((x2) => x2.id === v5?.parent), guard++)
-    parts.unshift(v5.label);
+  for (let v6 = facet.values.find((x2) => x2.id === valueId), guard = 0;v6 && guard < 16; v6 = facet.values.find((x2) => x2.id === v6?.parent), guard++)
+    parts.unshift(v6.label);
   return parts.join(" › ") || valueId;
 }
 function PersonSheet(props) {
@@ -40931,10 +41363,10 @@ function GmRoutinesSection(props) {
   const ctx = { chatId: props.chatId, gm: props.gm, busy: props.busy, send: props.send, edit: props.edit };
   const roles = routineSettingsOf(useChatWorld(props.send) ?? {}).roles;
   const rows = routineRows(props.gm.minds.characters, props.gm.entities, changed ?? [], roles);
-  const page6 = pages.page;
-  const selected = page6 === null ? undefined : rows.find((r3) => r3.entity === page6);
+  const page7 = pages.page;
+  const selected = page7 === null ? undefined : rows.find((r3) => r3.entity === page7);
   A(() => {
-    if (page6 !== null && selected === undefined)
+    if (page7 !== null && selected === undefined)
       pages.back();
   });
   const q2 = query.trim().toLowerCase();
@@ -42116,7 +42548,7 @@ function SchedulePage(props) {
                     { value: "hours", label: "For some hours" }
                   ],
                   disabled: ctx.busy,
-                  onChange: (v5) => setHours(v5 === "cleared" ? null : hours ?? 24)
+                  onChange: (v6) => setHours(v6 === "cleared" ? null : hours ?? 24)
                 }, undefined, false, undefined, this),
                 hours !== null ? /* @__PURE__ */ u3(NumberStepper, {
                   label: "Hours",
@@ -42205,8 +42637,8 @@ var CLASS_TRAITS = Object.freeze({
   brokerage: traits("Brokerage", { asset: true, depositRank: 5, investment: true }),
   retirement: traits("Retirement", { asset: true, investment: true, locked: true })
 });
-function isAccountClass(v5) {
-  return typeof v5 === "string" && ACCOUNT_CLASSES.includes(v5);
+function isAccountClass(v6) {
+  return typeof v6 === "string" && ACCOUNT_CLASSES.includes(v6);
 }
 var LEGACY_TYPE_CLASS = Object.freeze({ cash: "cash", checking: "checking", savings: "savings", card: "credit_card", loan: "loan", brokerage: "brokerage" });
 var PARTY_KINDS = ["person", "business", "trust", "household"];
@@ -42327,10 +42759,10 @@ var FINANCE_ACTIONS = {
 };
 
 // src/engine/pack-kit.ts
-function bandOfJson(v5) {
-  if (!isRecord(v5))
+function bandOfJson(v6) {
+  if (!isRecord(v6))
     return null;
-  const o4 = v5;
+  const o4 = v6;
   return typeof o4.min === "number" && typeof o4.typical === "number" && typeof o4.max === "number" ? { min: o4.min, typical: o4.typical, max: o4.max } : null;
 }
 function own(map, key) {
@@ -42343,9 +42775,9 @@ function mutableSlice(state, pack) {
 }
 function sliceRecord(state, pack, key) {
   const s3 = mutableSlice(state, pack);
-  const v5 = s3[key];
-  if (isRecord(v5))
-    return v5;
+  const v6 = s3[key];
+  if (isRecord(v6))
+    return v6;
   const fresh = {};
   s3[key] = fresh;
   return fresh;
@@ -42596,11 +43028,11 @@ var PARSED = new Map;
 var MATH = {
   min: (a3) => Math.min(...a3),
   max: (a3) => Math.max(...a3),
-  clamp: ([v5, lo, hi]) => Math.min(hi, Math.max(lo, v5)),
-  floor: ([v5]) => Math.floor(v5),
-  ceil: ([v5]) => Math.ceil(v5),
-  round: ([v5]) => Math.round(v5),
-  abs: ([v5]) => Math.abs(v5)
+  clamp: ([v6, lo, hi]) => Math.min(hi, Math.max(lo, v6)),
+  floor: ([v6]) => Math.floor(v6),
+  ceil: ([v6]) => Math.ceil(v6),
+  round: ([v6]) => Math.round(v6),
+  abs: ([v6]) => Math.abs(v6)
 };
 var MATH_FUNCTIONS = Object.keys(MATH);
 
@@ -42650,9 +43082,9 @@ var SLICE = "seen";
 var PARTS3 = ["places", "people", "cells"];
 function writable(state, key) {
   const seen = sliceRecord(state, PACK, SLICE);
-  const v5 = seen[key];
-  if (isRecord(v5))
-    return v5;
+  const v6 = seen[key];
+  if (isRecord(v6))
+    return v6;
   const fresh = {};
   seen[key] = fresh;
   return fresh;
@@ -42663,18 +43095,18 @@ function restoreObservations(state, data) {
     if (!isRecord(diff))
       continue;
     const list2 = writable(state, key);
-    for (const [id, v5] of Object.entries(diff)) {
-      if (v5 === null)
+    for (const [id, v6] of Object.entries(diff)) {
+      if (v6 === null)
         delete list2[id];
-      else if (isRecord(v5))
-        list2[id] = structuredClone(v5);
+      else if (isRecord(v6))
+        list2[id] = structuredClone(v6);
     }
   }
 }
 
 // src/engine/selector.ts
-function stringsIn(v5) {
-  return Array.isArray(v5) ? v5.filter((x2) => typeof x2 === "string") : null;
+function stringsIn(v6) {
+  return Array.isArray(v6) ? v6.filter((x2) => typeof x2 === "string") : null;
 }
 function classProblems(world, value, who) {
   if (value === undefined)
@@ -42693,9 +43125,9 @@ function classProblems(world, value, who) {
       out.push({ code: "unknown_class", message: `${who}'s ${def2.label} isn't a list of values.` });
       continue;
     }
-    for (const v5 of values)
-      if (!hasOwn(def2.values, v5))
-        out.push({ code: "unknown_class", message: `${who} is classed as "${v5}", which isn't a value of ${def2.label}.` });
+    for (const v6 of values)
+      if (!hasOwn(def2.values, v6))
+        out.push({ code: "unknown_class", message: `${who} is classed as "${v6}", which isn't a value of ${def2.label}.` });
     if (!def2.multiple && values.length > 1)
       out.push({ code: "single_class", message: `${who} holds ${values.length} ${def2.label} values; ${def2.label} takes one.` });
   }
@@ -42845,9 +43277,9 @@ function slice(state) {
 }
 function sub(state, key) {
   const s3 = slice(state);
-  const v5 = s3[key];
-  if (isRecord(v5))
-    return v5;
+  const v6 = s3[key];
+  if (isRecord(v6))
+    return v6;
   const fresh = {};
   s3[key] = fresh;
   return fresh;
@@ -42861,14 +43293,14 @@ function countStage(state, key, track3, stage, next) {
   all[track3] = { ...row, [stage]: next(typeof n4 === "number" ? n4 : 0) };
 }
 function str2(e3, key) {
-  const v5 = e3.data[key];
-  return typeof v5 === "string" ? v5 : "";
+  const v6 = e3.data[key];
+  return typeof v6 === "string" ? v6 : "";
 }
-function tagList(v5) {
-  if (!Array.isArray(v5))
+function tagList(v6) {
+  if (!Array.isArray(v6))
     return null;
-  const tags = v5.filter((t3) => typeof t3 === "string" && t3.trim() !== "");
-  return tags.length === v5.length ? tags : null;
+  const tags = v6.filter((t3) => typeof t3 === "string" && t3.trim() !== "");
+  return tags.length === v6.length ? tags : null;
 }
 function need(e3, ...keys) {
   for (const k2 of keys)
@@ -43034,7 +43466,7 @@ var events = [
         return { code: "bad_tier", reason: `no tier ${String(tier)}` };
       if (agent !== undefined && typeof agent !== "boolean")
         return { code: "bad_event", reason: "agent is yes or no" };
-      if (levels !== undefined && !(isRecord(levels) && Object.entries(levels).every(([d3, v5]) => DOMAINS.some((x2) => x2 === d3) && (v5 === null || typeof v5 === "number" && Number.isInteger(v5) && v5 >= 0 && v5 <= 4))))
+      if (levels !== undefined && !(isRecord(levels) && Object.entries(levels).every(([d3, v6]) => DOMAINS.some((x2) => x2 === d3) && (v6 === null || typeof v6 === "number" && Number.isInteger(v6) && v6 >= 0 && v6 <= 4))))
         return { code: "bad_level", reason: "a level is a whole number 0–4, or null to follow the tier" };
       return null;
     },
@@ -43050,11 +43482,11 @@ var events = [
       if (!isRecord(levels))
         return;
       for (const domain of DOMAINS) {
-        const v5 = levels[domain];
-        if (v5 === null)
+        const v6 = levels[domain];
+        if (v6 === null)
           delete ent.levels[domain];
-        else if (typeof v5 === "number" && Number.isInteger(v5) && v5 >= 0 && v5 <= 4)
-          ent.levels[domain] = v5;
+        else if (typeof v6 === "number" && Number.isInteger(v6) && v6 >= 0 && v6 <= 4)
+          ent.levels[domain] = v6;
       }
     },
     touches: (e3) => {
@@ -43069,11 +43501,11 @@ var events = [
         clauses.push(e3.data.agent ? "now lives their own life off-screen" : "no longer lives their own life off-screen");
       const levels = e3.data.levels;
       if (isRecord(levels))
-        for (const [d3, v5] of Object.entries(levels)) {
+        for (const [d3, v6] of Object.entries(levels)) {
           const domain = DOMAINS.find((x2) => x2 === d3);
           const area = domain ? DOMAIN_LABEL[domain] : d3;
-          const level = LEVELS4.find((n4) => n4 === v5);
-          clauses.push(v5 === null ? `has ${area} detail from their tier again` : `now has ${area} detail at level ${String(v5)}${level !== undefined ? ` (${LEVEL_LABEL[level]})` : ""}`);
+          const level = LEVELS4.find((n4) => n4 === v6);
+          clauses.push(v6 === null ? `has ${area} detail from their tier again` : `now has ${area} detail at level ${String(v6)}${level !== undefined ? ` (${LEVEL_LABEL[level]})` : ""}`);
         }
       return `${own(ctx.state.entities, str2(e3, "entity"))?.name ?? str2(e3, "entity")} ${listWords3(clauses)}`;
     }
@@ -43105,7 +43537,7 @@ var events = [
     describe: (e3, ctx, viewer) => {
       const classes = classOf(e3.data.class) ?? {};
       const name = own(ctx.state.entities, str2(e3, "entity"))?.name ?? str2(e3, "entity");
-      const valuesOf = (f3, values) => values.length > 0 ? listWords3(values.map((v5) => own(f3.values, v5)?.label ?? v5)) : "none";
+      const valuesOf = (f3, values) => values.length > 0 ? listWords3(values.map((v6) => own(f3.values, v6)?.label ?? v6)) : "none";
       const facetLine = (f3, values) => `${possessive(name)} ${fieldNoun(f3.label, "").noun} is now ${valuesOf(f3, values)}`;
       if (viewer !== undefined) {
         const was = classOf(e3.data.was);
@@ -43276,7 +43708,7 @@ function exemptChoices(world, exempt) {
   return [...known, ...exempt.filter((c3) => !hasOwn(rows, c3)).map((c3) => ({ value: c3, label: `${c3} (not in the categories table)` }))];
 }
 var CONFIG = "packs.economy.config";
-var isObject = (v5) => isRecord(v5);
+var isObject = (v6) => isRecord(v6);
 function withKey2(values, key, next) {
   const out = { ...values };
   if (next === undefined)
@@ -43379,7 +43811,7 @@ function Prices(props) {
             value: region,
             none: "Not set: the national averages",
             options,
-            onChange: (v5) => props.onChange(withRegion(props.config, v5))
+            onChange: (v6) => props.onChange(withRegion(props.config, v6))
           }, undefined, false, undefined, this),
           /* @__PURE__ */ u3("span", {
             class: "lre-field-help",
@@ -43413,7 +43845,7 @@ function LivingCosts(props) {
           min: 0,
           optional: true,
           issues: lintAt(props.lint, `${CONFIG}.livingCosts.${b3.label}`),
-          onChange: (v5) => props.onChange(withLivingCost(props.config, b3.label, typeof v5 === "number" ? v5 : undefined))
+          onChange: (v6) => props.onChange(withLivingCost(props.config, b3.label, typeof v6 === "number" ? v6 : undefined))
         }, b3.label, false, undefined, this))
       }, undefined, false, undefined, this),
       /* @__PURE__ */ u3(Issues, {
@@ -43450,7 +43882,7 @@ function Taxes(props) {
         placeholder: String(CORPORATE_PCT),
         hint: `What a C corporation pays on its profit, with its state's rate. Empty, it's the federal rate, ${CORPORATE_PCT}%.`,
         issues: lintAt(props.lint, `${CONFIG}.taxes.corporatePct`),
-        onChange: (v5) => props.onChange(withTax(props.config, "corporatePct", typeof v5 === "number" ? v5 : undefined))
+        onChange: (v6) => props.onChange(withTax(props.config, "corporatePct", typeof v6 === "number" ? v6 : undefined))
       }, undefined, false, undefined, this),
       /* @__PURE__ */ u3("div", {
         class: "lre-form-items",
@@ -44847,16 +45279,16 @@ function PayTiersEditor(props) {
 
 // src/packs/economy/ui/field-editors.tsx
 function recordsOf(value) {
-  return Array.isArray(value) ? value.filter((v5) => isRecord(v5)) : [];
+  return Array.isArray(value) ? value.filter((v6) => isRecord(v6)) : [];
 }
 function numbersOf(value) {
-  return Array.isArray(value) ? [...new Set(value.filter((v5) => typeof v5 === "number" && Number.isFinite(v5)))].sort((a3, b3) => a3 - b3) : [];
+  return Array.isArray(value) ? [...new Set(value.filter((v6) => typeof v6 === "number" && Number.isFinite(v6)))].sort((a3, b3) => a3 - b3) : [];
 }
 function compact3(o4) {
   const out = {};
-  for (const [k2, v5] of Object.entries(o4))
-    if (v5 !== undefined && v5 !== null && v5 !== "")
-      out[k2] = v5;
+  for (const [k2, v6] of Object.entries(o4))
+    if (v6 !== undefined && v6 !== null && v6 !== "")
+      out[k2] = v6;
   return out;
 }
 function entityChoices(doc, kinds) {
@@ -44877,8 +45309,8 @@ function monthDays(text) {
   const days = parts.map(Number);
   return days.every((d3) => Number.isInteger(d3) && (d3 === -1 || d3 >= 1 && d3 <= 31)) ? [...new Set(days)].sort((a3, b3) => a3 - b3) : null;
 }
-var textOf = (v5) => typeof v5 === "string" ? v5 : "";
-var isObject2 = (v5) => isRecord(v5);
+var textOf = (v6) => typeof v6 === "string" ? v6 : "";
+var isObject2 = (v6) => isRecord(v6);
 function nameOf5(doc, id) {
   return (hasOwn(doc.entities, id) ? doc.entities[id]?.name : undefined) || id;
 }
@@ -45320,7 +45752,7 @@ function MonthDaysField(p3) {
   }, undefined, false, undefined, this);
 }
 function HolidaysField(p3) {
-  const on = Array.isArray(p3.value) ? p3.value.filter((v5) => typeof v5 === "string") : [];
+  const on = Array.isArray(p3.value) ? p3.value.filter((v6) => typeof v6 === "string") : [];
   const holidays = p3.doc.calendar.holidays;
   const gone = [...new Set(on.filter((id) => !holidays.some((h3) => h3.id === id)))];
   const label = labelOf2(p3);
@@ -45500,7 +45932,7 @@ function DeductionsField(p3) {
   }, undefined, false, undefined, this);
 }
 function PlacesField(p3) {
-  const on = Array.isArray(p3.value) ? p3.value.filter((v5) => typeof v5 === "string") : [];
+  const on = Array.isArray(p3.value) ? p3.value.filter((v6) => typeof v6 === "string") : [];
   const places2 = refOptions(p3.doc, "places");
   const label = labelOf2(p3);
   const nameOfPlace = (id) => places2.find((o4) => o4.value === id)?.label;
@@ -45780,10 +46212,10 @@ function nullableStr(value) {
   return typeof value === "string" ? value : null;
 }
 function nullableOf(value, values) {
-  return values.find((v5) => v5 === value) ?? null;
+  return values.find((v6) => v6 === value) ?? null;
 }
 function numbers(value) {
-  return Array.isArray(value) ? value.filter((v5) => typeof v5 === "number" && Number.isFinite(v5)) : [];
+  return Array.isArray(value) ? value.filter((v6) => typeof v6 === "number" && Number.isFinite(v6)) : [];
 }
 function idName(value) {
   const o4 = obj(value);
@@ -46406,10 +46838,10 @@ function autopaySources(view, account2) {
 }
 function gmAutopaySources(views, account2) {
   const out = [];
-  for (const v5 of views) {
-    const a3 = findAccount(v5, account2);
+  for (const v6 of views) {
+    const a3 = findAccount(v6, account2);
     if (a3) {
-      for (const s3 of autopaySources(v5, a3))
+      for (const s3 of autopaySources(v6, a3))
         if (!out.some((o4) => o4.id === s3.id))
           out.push(s3);
     }
@@ -46558,9 +46990,9 @@ var SHOWN_ON_SHEET = { in: true, [PARTY_RELATION]: true };
 function relationRows(entity2, gm, words3) {
   const detailOf = (relation2) => {
     const defs = gm.relationTypes.find((t3) => t3.id === relation2.type)?.fields ?? [];
-    const parts = Object.entries(relation2.fields ?? {}).flatMap(([id, v5]) => {
+    const parts = Object.entries(relation2.fields ?? {}).flatMap(([id, v6]) => {
       const def2 = defs.find((d3) => d3.id === id);
-      return def2 ? [`${def2.label} ${typeof v5 === "string" ? v5 : JSON.stringify(v5)}`] : [];
+      return def2 ? [`${def2.label} ${typeof v6 === "string" ? v6 : JSON.stringify(v6)}`] : [];
     });
     if (relation2.value !== undefined)
       parts.push(`now ${relation2.value}`);
@@ -46743,7 +47175,7 @@ function FieldRow(props) {
     }, undefined, false, undefined, this);
   }
   const refs = field2.type === "ref" ? { places: editor.gm.places, entities: editor.gm.entities.filter((e3) => !field2.ref || e3.kind === field2.ref) } : null;
-  const options = field2.type === "enum" ? (field2.values ?? []).map((v5) => ({ value: v5, label: v5 })) : field2.type === "bool" ? [{ value: "true", label: "Yes" }, { value: "false", label: "No" }] : [];
+  const options = field2.type === "enum" ? (field2.values ?? []).map((v6) => ({ value: v6, label: v6 })) : field2.type === "bool" ? [{ value: "true", label: "Yes" }, { value: "false", label: "No" }] : [];
   const value = field2.type === "ref" ? text === "" ? null : text : field2.type === "enum" ? text : parse(entity2, field2, text, editor.currency);
   const invalid = value === null && field2.type !== "ref";
   const area = field2.type === "text" || field2.type === "list" || field2.extra === true && field2.type !== "number" && field2.type !== "duration";
@@ -47122,7 +47554,7 @@ function Relations(props) {
                 onClick: () => {
                   setType(r3.type);
                   setTo(r3.to);
-                  setInputs(Object.fromEntries(Object.entries(r3.fields ?? {}).map(([id, v5]) => [id, typeof v5 === "string" ? v5 : JSON.stringify(v5)])));
+                  setInputs(Object.fromEntries(Object.entries(r3.fields ?? {}).map(([id, v6]) => [id, typeof v6 === "string" ? v6 : JSON.stringify(v6)])));
                   form.current?.querySelector("select")?.focus();
                 }
               }, undefined, false, undefined, this),
@@ -47200,10 +47632,10 @@ function Relations(props) {
                   value: "",
                   children: "None"
                 }, undefined, false, undefined, this),
-                (d3.type === "bool" ? ["true", "false"] : d3.values ?? []).map((v5) => /* @__PURE__ */ u3("option", {
-                  value: v5,
-                  children: d3.type === "bool" ? v5 === "true" ? "Yes" : "No" : v5
-                }, v5, false, undefined, this))
+                (d3.type === "bool" ? ["true", "false"] : d3.values ?? []).map((v6) => /* @__PURE__ */ u3("option", {
+                  value: v6,
+                  children: d3.type === "bool" ? v6 === "true" ? "Yes" : "No" : v6
+                }, v6, false, undefined, this))
               ]
             }, undefined, true, undefined, this) : /* @__PURE__ */ u3("input", {
               class: inputs[d3.id] && relationFields([d3], inputs) === null ? "lre-input invalid" : "lre-input",
@@ -47921,11 +48353,11 @@ function MoneyHub(props) {
 
 // src/packs/economy/ui/routes.ts
 var TYPES = ["section", "detail", "action"];
-function routeOf(page6) {
-  const [head, id] = page6.path;
-  if (page6.type === "detail" && head === "account" && id !== undefined && page6.path.length === 2)
+function routeOf(page7) {
+  const [head, id] = page7.path;
+  if (page7.type === "detail" && head === "account" && id !== undefined && page7.path.length === 2)
     return { kind: "account", id };
-  return { kind: "money", id: `${page6.type}:${page6.path.map(encodeURIComponent).join("/")}` };
+  return { kind: "money", id: `${page7.type}:${page7.path.map(encodeURIComponent).join("/")}` };
 }
 function pageOf(kind, id) {
   if (kind === "account")
@@ -47954,7 +48386,7 @@ function MoneyGlance(props) {
   if (lines2.length === 0)
     return null;
   const currency = props.state.currency ?? DEFAULT_CURRENCY;
-  const open = (page6) => app.ui.update((ui) => pushSheet(ui, routeOf(page6)));
+  const open = (page7) => app.ui.update((ui) => pushSheet(ui, routeOf(page7)));
   return /* @__PURE__ */ u3(GlanceCard, {
     title: "Money",
     panel: "economy.money",
@@ -48409,7 +48841,7 @@ function PayPage(props) {
         label: "How much",
         value: how,
         options: [...a3.due ? [{ value: "due", label: a3.due.label, detail: `${fmt(a3.due.cents)}, due ${a3.due.at}` }] : [], { value: "all", label: "The whole balance", detail: fmt(balance) }, { value: "other", label: "Another amount" }],
-        onChange: (v5) => setHow(v5 === "due" ? "due" : v5 === "other" ? "other" : "all")
+        onChange: (v6) => setHow(v6 === "due" ? "due" : v6 === "other" ? "other" : "all")
       }, undefined, false, undefined, this),
       how === "other" ? /* @__PURE__ */ u3(AmountField, {
         label: "Amount",
@@ -48504,7 +48936,7 @@ function AutopayPage(props) {
         label: "Pays",
         value: mode,
         options: AUTOPAY_MODES.map((m2) => ({ value: m2, label: AUTOPAY_LABEL[m2] })),
-        onChange: (v5) => setMode(AUTOPAY_MODES.find((m2) => m2 === v5) ?? "none")
+        onChange: (v6) => setMode(AUTOPAY_MODES.find((m2) => m2 === v6) ?? "none")
       }, undefined, false, undefined, this),
       mode !== "none" ? /* @__PURE__ */ u3(SelectField, {
         label: "From",
@@ -48867,10 +49299,10 @@ function cardActionPage(props, card2, action) {
 }
 var accountPages = {
   heads: ["accounts", "account", "card"],
-  render(page6, props) {
-    const [head, id, action, within] = page6.path;
+  render(page7, props) {
+    const [head, id, action, within] = page7.path;
     if (head === "accounts") {
-      if (page6.type === "section")
+      if (page7.type === "section")
         return /* @__PURE__ */ u3(AccountsPage, {
           ...props
         }, undefined, false, undefined, this);
@@ -48882,7 +49314,7 @@ var accountPages = {
       const account2 = findAccount(props.view, id);
       if (!account2)
         return null;
-      return page6.type === "detail" ? /* @__PURE__ */ u3(AccountPage, {
+      return page7.type === "detail" ? /* @__PURE__ */ u3(AccountPage, {
         ...props,
         account: account2
       }, undefined, false, undefined, this) : accountActionPage(props, account2, action, within);
@@ -48890,7 +49322,7 @@ var accountPages = {
     const card2 = findCard(props.view, id);
     if (!card2)
       return null;
-    return page6.type === "detail" ? /* @__PURE__ */ u3(CardPage, {
+    return page7.type === "detail" ? /* @__PURE__ */ u3(CardPage, {
       ...props,
       card: card2
     }, undefined, false, undefined, this) : cardActionPage(props, card2, action);
@@ -49153,7 +49585,7 @@ function FlowFormPage(props) {
         label: "Kind",
         value: form.kind,
         options: FLOW_KINDS.map((k2) => ({ value: k2, label: humanize(k2) })),
-        onChange: (v5) => set({ kind: FLOW_KINDS.find((k2) => k2 === v5) ?? "transfer" })
+        onChange: (v6) => set({ kind: FLOW_KINDS.find((k2) => k2 === v6) ?? "transfer" })
       }, undefined, false, undefined, this),
       /* @__PURE__ */ u3(SelectField, {
         label: "From",
@@ -49167,9 +49599,9 @@ function FlowFormPage(props) {
         value: otherTo ? OTHER : form.to,
         empty: "Choose",
         options: [...toChoices, { value: OTHER, label: "Someone else (type the name)" }],
-        onChange: (v5) => {
-          setOtherTo(v5 === OTHER);
-          set({ to: v5 === OTHER ? "" : v5 });
+        onChange: (v6) => {
+          setOtherTo(v6 === OTHER);
+          set({ to: v6 === OTHER ? "" : v6 });
         }
       }, undefined, false, undefined, this),
       otherTo ? /* @__PURE__ */ u3(TextField2, {
@@ -49189,28 +49621,28 @@ function FlowFormPage(props) {
         label: "When",
         value: form.every,
         options: EVERY2,
-        onChange: (v5) => set({ every: EVERY2.find((e3) => e3.value === v5)?.value ?? "month" })
+        onChange: (v6) => set({ every: EVERY2.find((e3) => e3.value === v6)?.value ?? "month" })
       }, undefined, false, undefined, this),
       form.every === "week" ? /* @__PURE__ */ u3(SelectField, {
         label: "On",
         value: form.weekday === null ? "" : String(form.weekday),
         empty: "Choose a weekday",
         options: WEEKDAY_CHOICES,
-        onChange: (v5) => set({ weekday: v5 === "" ? null : Number(v5) })
+        onChange: (v6) => set({ weekday: v6 === "" ? null : Number(v6) })
       }, undefined, false, undefined, this) : null,
       form.every === "year" ? /* @__PURE__ */ u3(SelectField, {
         label: "Month",
         value: form.month === null ? "" : String(form.month),
         empty: "Choose a month",
         options: MONTH_CHOICES,
-        onChange: (v5) => set({ month: v5 === "" ? null : Number(v5) })
+        onChange: (v6) => set({ month: v6 === "" ? null : Number(v6) })
       }, undefined, false, undefined, this) : null,
       form.every === "month" || form.every === "year" ? /* @__PURE__ */ u3(SelectField, {
         label: "Day of the month",
         value: form.day === null ? "" : String(form.day),
         empty: "The day it starts",
         options: DAYS,
-        onChange: (v5) => set({ day: v5 === "" ? null : Number(v5) })
+        onChange: (v6) => set({ day: v6 === "" ? null : Number(v6) })
       }, undefined, false, undefined, this) : null,
       /* @__PURE__ */ u3(TextField2, {
         label: form.every === "once" ? "On" : "Starts",
@@ -49258,7 +49690,7 @@ function FlowFormPage(props) {
                 value: form.roll,
                 empty: "As the engine does",
                 options: [{ value: "none", label: "Stays" }, { value: "before", label: "Moves to the business day before" }, { value: "after", label: "Moves to the business day after" }],
-                onChange: (v5) => set({ roll: v5 === "none" || v5 === "before" || v5 === "after" ? v5 : "" })
+                onChange: (v6) => set({ roll: v6 === "none" || v6 === "before" || v6 === "after" ? v6 : "" })
               }, undefined, false, undefined, this)
             ]
           }, undefined, true, undefined, this) : null,
@@ -49266,7 +49698,7 @@ function FlowFormPage(props) {
             label: "When the money isn't there",
             value: form.shortfall,
             options: FLOW_SHORTFALLS.map((s3) => ({ value: s3, label: SHORTFALL_LABEL[s3] })),
-            onChange: (v5) => set({ shortfall: FLOW_SHORTFALLS.find((s3) => s3 === v5) ?? "skip" })
+            onChange: (v6) => set({ shortfall: FLOW_SHORTFALLS.find((s3) => s3 === v6) ?? "skip" })
           }, undefined, false, undefined, this),
           form.shortfall === "retry" ? /* @__PURE__ */ u3(M, {
             children: [
@@ -49318,21 +49750,21 @@ function FlowLine(props) {
 function FlowControlPage(props) {
   const { controls, nav, flow: f3, control } = props;
   const link = f3.link?.id ?? null;
-  let page6 = null;
+  let page7 = null;
   if (controls.mode === "gm") {
     if (control === "delete")
-      page6 = { text: `Delete ${f3.label}? It won't run again.`, go: "Delete", danger: true, submit: () => controls.edit([{ op: "despawn", entity: f3.id }]) };
+      page7 = { text: `Delete ${f3.label}? It won't run again.`, go: "Delete", danger: true, submit: () => controls.edit([{ op: "despawn", entity: f3.id }]) };
   } else if (control === "pause")
-    page6 = { text: "It won't run until you resume it.", go: "Pause", danger: false, submit: () => controls.act(flowStatusAction(f3.id, "pause")) };
+    page7 = { text: "It won't run until you resume it.", go: "Pause", danger: false, submit: () => controls.act(flowStatusAction(f3.id, "pause")) };
   else if (control === "resume")
-    page6 = { text: "It runs again on its schedule.", go: "Resume", danger: false, submit: () => controls.act(flowStatusAction(f3.id, "resume")) };
+    page7 = { text: "It runs again on its schedule.", go: "Resume", danger: false, submit: () => controls.act(flowStatusAction(f3.id, "resume")) };
   else if (control === "end_lease")
-    page6 = { text: `Give notice on ${f3.label}? It ends today.`, go: "End it", danger: true, submit: () => controls.act(leaseEndAction(f3.id)) };
+    page7 = { text: `Give notice on ${f3.label}? It ends today.`, go: "End it", danger: true, submit: () => controls.act(leaseEndAction(f3.id)) };
   else if (control === "delete")
-    page6 = { text: `Delete ${f3.label}? It won't run again.`, go: "Delete", danger: true, submit: () => controls.act(flowStatusAction(f3.id, "delete")) };
+    page7 = { text: `Delete ${f3.label}? It won't run again.`, go: "Delete", danger: true, submit: () => controls.act(flowStatusAction(f3.id, "delete")) };
   else if (link !== null)
-    page6 = { text: "Otherwise it's paid when it falls due, if the money's there.", go: "Pay now", danger: false, submit: () => controls.act(invoiceAction(link, "pay")) };
-  if (page6 === null)
+    page7 = { text: "Otherwise it's paid when it falls due, if the money's there.", go: "Pay now", danger: false, submit: () => controls.act(invoiceAction(link, "pay")) };
+  if (page7 === null)
     return null;
   return /* @__PURE__ */ u3(ActionPage, {
     nav,
@@ -49340,15 +49772,15 @@ function FlowControlPage(props) {
     name: `flow-${control}`,
     title: CONTROL[control].label,
     subtitle: f3.label,
-    go: page6.go,
-    danger: page6.danger,
-    submit: page6.submit,
+    go: page7.go,
+    danger: page7.danger,
+    submit: page7.submit,
     children: [
       /* @__PURE__ */ u3(FlowLine, {
         flow: f3
       }, undefined, false, undefined, this),
       /* @__PURE__ */ u3(Note2, {
-        children: page6.text
+        children: page7.text
       }, undefined, false, undefined, this)
     ]
   }, undefined, true, undefined, this);
@@ -49376,16 +49808,16 @@ function FlowStatusPage(props) {
         label: "Status",
         value: status,
         options: FLOW_STATUSES.map((s3) => ({ value: s3, label: humanize(s3), detail: STATUS_DETAIL[s3] })),
-        onChange: (v5) => setStatus(FLOW_STATUSES.find((s3) => s3 === v5) ?? f3.status)
+        onChange: (v6) => setStatus(FLOW_STATUSES.find((s3) => s3 === v6) ?? f3.status)
       }, undefined, false, undefined, this)
     ]
   }, undefined, true, undefined, this);
 }
 var flowPages = {
   heads: ["flows", "flow"],
-  render(page6, props) {
+  render(page7, props) {
     const { view, controls } = props;
-    const [head, id, control] = page6.path;
+    const [head, id, control] = page7.path;
     if (head === "flows")
       return id === undefined ? /* @__PURE__ */ u3(FlowsSection, {
         ...props
@@ -50344,9 +50776,9 @@ function propertyPage(control, inner, props, p3) {
 }
 var assetPages = {
   heads: ["investments", "holding", "properties", "property"],
-  render(page6, props) {
+  render(page7, props) {
     const { view, controls } = props;
-    const [head, id, control, inner] = page6.path;
+    const [head, id, control, inner] = page7.path;
     if (head === "investments")
       return id === undefined ? /* @__PURE__ */ u3(InvestmentsSection, {
         ...props
@@ -50718,9 +51150,9 @@ function RemoveMemberPage(props) {
 }
 var creditPages = {
   heads: ["credit", "household"],
-  render(page6, props) {
+  render(page7, props) {
     const { view, controls, nav } = props;
-    const [head, id, inner] = page6.path;
+    const [head, id, inner] = page7.path;
     if (head === "household")
       return id === undefined ? /* @__PURE__ */ u3(HouseholdSection, {
         ...props
@@ -51292,11 +51724,11 @@ function BusinessPage(props) {
           children: "No invoices."
         }, undefined, false, undefined, this) : /* @__PURE__ */ u3(List, {
           children: b3.invoices.map((i3) => {
-            const page6 = invoicePage(i3);
+            const page7 = invoicePage(i3);
             return /* @__PURE__ */ u3(InvoiceRow, {
               invoice: i3,
               currency: controls.currency,
-              onOpen: page6 === null ? undefined : () => nav.open(page6)
+              onOpen: page7 === null ? undefined : () => nav.open(page7)
             }, i3.id, false, undefined, this);
           })
         }, undefined, false, undefined, this)
@@ -51568,7 +52000,7 @@ function InvoiceStatePage(props) {
         label: "State",
         value: state,
         options: INVOICE_STATES.map((s3) => ({ value: s3, label: humanize(s3), detail: INVOICE_STATE_DETAIL[s3] })),
-        onChange: (v5) => setState(INVOICE_STATES.find((s3) => s3 === v5) ?? i3.state)
+        onChange: (v6) => setState(INVOICE_STATES.find((s3) => s3 === v6) ?? i3.state)
       }, undefined, false, undefined, this)
     ]
   }, undefined, true, undefined, this);
@@ -51671,8 +52103,8 @@ function businessPage(control, inner, props, b3) {
 }
 var workPages = {
   heads: ["jobs", "job", "businesses", "business"],
-  render(page6, props) {
-    const [head, id, control, inner] = page6.path;
+  render(page7, props) {
+    const [head, id, control, inner] = page7.path;
     if (head === "jobs")
       return id === undefined ? /* @__PURE__ */ u3(JobsSection, {
         ...props
@@ -51705,8 +52137,8 @@ for (const module of MODULES) {
   }
 }
 function HubPageView(props) {
-  const { page: page6, view, controls, nav } = props;
-  const drawn = BY_HEAD.get(page6.path[0] ?? "")?.render(page6, { view, controls, nav }) ?? null;
+  const { page: page7, view, controls, nav } = props;
+  const drawn = BY_HEAD.get(page7.path[0] ?? "")?.render(page7, { view, controls, nav }) ?? null;
   if (drawn !== null)
     return /* @__PURE__ */ u3(M, {
       children: drawn
@@ -51722,13 +52154,13 @@ function HubPageView(props) {
 function isSection(head) {
   return Object.hasOwn(SECTION_LABELS, head);
 }
-function pageLabel(view, page6) {
-  const [head, id] = page6.path;
+function pageLabel(view, page7) {
+  const [head, id] = page7.path;
   if (head === undefined)
     return null;
-  if (page6.type === "section")
+  if (page7.type === "section")
     return isSection(head) ? SECTION_LABELS[head] : null;
-  if (page6.type !== "detail")
+  if (page7.type !== "detail")
     return null;
   switch (head) {
     case "account":
@@ -51772,9 +52204,9 @@ function usePageStack() {
   const backFrom = (level) => setStack((s3) => s3.length === level ? s3.slice(0, -1) : s3);
   return {
     stack,
-    open: (page6) => {
+    open: (page7) => {
       openers.current.push(document.activeElement instanceof HTMLElement ? document.activeElement : null);
-      setStack((s3) => [...s3, page6]);
+      setStack((s3) => [...s3, page7]);
     },
     backFrom,
     ref,
@@ -51816,17 +52248,17 @@ function GmHub(props) {
           props.extra
         ]
       }, undefined, true, undefined, this),
-      pages.stack.map((page6, i3) => /* @__PURE__ */ u3("div", {
+      pages.stack.map((page7, i3) => /* @__PURE__ */ u3("div", {
         class: "lre-money-level",
         "data-lre-money-level": i3 + 1,
         hidden: i3 !== top - 1,
         children: /* @__PURE__ */ u3(HubPageView, {
-          page: page6,
+          page: page7,
           view,
           controls,
           nav: navAt(i3 + 1)
         }, undefined, false, undefined, this)
-      }, `${i3}:${page6.type}:${page6.path.join("/")}`, false, undefined, this))
+      }, `${i3}:${page7.type}:${page7.path.join("/")}`, false, undefined, this))
     ]
   }, undefined, true, undefined, this);
 }
@@ -51944,7 +52376,7 @@ function MoneyPanel(props) {
       view,
       label: "Your money",
       controls,
-      nav: { page: null, open: (page6) => app.ui.update((ui) => pushSheet(ui, routeOf(page6))), back: () => {
+      nav: { page: null, open: (page7) => app.ui.update((ui) => pushSheet(ui, routeOf(page7))), back: () => {
         return;
       }, frame: "play", backLabel: null }
     }, undefined, false, undefined, this)
@@ -51955,7 +52387,7 @@ function MoneyPanel(props) {
 function HubSheet(props) {
   const app = useApp();
   const controls = usePlayerControls(props.chatId, props.state);
-  const page6 = pageOf(props.kind, props.id);
+  const page7 = pageOf(props.kind, props.id);
   A(() => {
     const stack = app.ui.get().play.stack;
     const first = stack.find((route) => route.kind === "money" || route.kind === "account");
@@ -51968,7 +52400,7 @@ function HubSheet(props) {
   }, [props.chatId]);
   const raw = props.state.panels["economy.money"];
   const view = raw === undefined || raw === null ? null : decodeFinanceView(raw);
-  if (!view || !page6) {
+  if (!view || !page7) {
     return /* @__PURE__ */ u3("div", {
       class: "lre-money-page",
       children: [
@@ -51984,7 +52416,7 @@ function HubSheet(props) {
     }, undefined, true, undefined, this);
   }
   const nav = {
-    page: page6,
+    page: page7,
     open: (next) => props.open(routeOf(next)),
     back: () => {
       const top = app.ui.get().play.stack.at(-1);
@@ -51996,9 +52428,9 @@ function HubSheet(props) {
   };
   return /* @__PURE__ */ u3("div", {
     class: "lre-money-root",
-    "data-lre-money-sheet": page6.type,
+    "data-lre-money-sheet": page7.type,
     children: /* @__PURE__ */ u3(HubPageView, {
-      page: page6,
+      page: page7,
       view,
       controls,
       nav
@@ -52815,12 +53247,12 @@ function GmMindsSection(props) {
     gm: props.gm
   };
   const liveNear = view.characters.filter((c3) => c3.fidelity.level === "live" || c3.fidelity.level === "near").length;
-  const page6 = pages.page;
-  const selected = page6 === null ? undefined : view.characters.find((c3) => c3.entity === page6);
+  const page7 = pages.page;
+  const selected = page7 === null ? undefined : view.characters.find((c3) => c3.entity === page7);
   const knower = view.knowledge.pov;
-  const povKnows = knower !== null && page6 === knower.entity ? knower : undefined;
+  const povKnows = knower !== null && page7 === knower.entity ? knower : undefined;
   A(() => {
-    if (page6 !== null && selected === undefined && povKnows === undefined)
+    if (page7 !== null && selected === undefined && povKnows === undefined)
       pages.back();
   });
   const q2 = query.trim().toLowerCase();
@@ -53645,7 +54077,7 @@ function PeopleField(props) {
         children: props.value.map((id) => /* @__PURE__ */ u3(Chip, {
           removeLabel: `Remove ${nameIn2(props.people, id)}`,
           disabled: props.disabled,
-          onRemove: () => props.onChange(props.value.filter((v5) => v5 !== id)),
+          onRemove: () => props.onChange(props.value.filter((v6) => v6 !== id)),
           children: nameIn2(props.people, id)
         }, id, false, undefined, this))
       }, undefined, false, undefined, this) : null,
@@ -56918,7 +57350,7 @@ function childOf(world, scope, place2) {
 function ring(ids, frame) {
   const step = Math.min(frame.width, frame.height) / 100;
   const r3 = Math.min(frame.width, frame.height) / 3;
-  const round = (v5) => Math.round(v5 / step) * step;
+  const round = (v6) => Math.round(v6 / step) * step;
   return new Map(ids.map((id, i3) => {
     const angle = 2 * Math.PI * i3 / Math.max(1, ids.length);
     return [id, { x: round(frame.width / 2 + r3 * Math.cos(angle)), y: round(frame.height / 2 + r3 * Math.sin(angle)) }];
@@ -57349,11 +57781,11 @@ function freeChar(legend, layout, name) {
 }
 function patched(record, patch) {
   const out = { ...record };
-  for (const [key, v5] of Object.entries(patch)) {
-    if (v5 === undefined)
+  for (const [key, v6] of Object.entries(patch)) {
+    if (v6 === undefined)
       delete out[key];
     else
-      out[key] = v5;
+      out[key] = v6;
   }
   return out;
 }
@@ -60512,36 +60944,36 @@ function decodeGarageView(value) {
     return null;
   return {
     level: num(value.level, 1),
-    vehicles: list(value.vehicles, (v5) => {
-      const assigned = obj(v5.assignedTo);
-      return typeof v5.id === "string" ? {
-        id: v5.id,
-        name: str(v5.name, v5.id),
-        kind: str(v5.kind),
-        status: str(v5.status, "runs fine"),
-        place: optStr(v5.place) ?? null,
-        fuelPct: optNum(v5.fuelPct),
-        rangeLabel: optStr(v5.rangeLabel),
-        odometerLabel: optStr(v5.odometerLabel),
-        condition: optNum(v5.condition),
-        home: optStr(v5.home),
+    vehicles: list(value.vehicles, (v6) => {
+      const assigned = obj(v6.assignedTo);
+      return typeof v6.id === "string" ? {
+        id: v6.id,
+        name: str(v6.name, v6.id),
+        kind: str(v6.kind),
+        status: str(v6.status, "runs fine"),
+        place: optStr(v6.place) ?? null,
+        fuelPct: optNum(v6.fuelPct),
+        rangeLabel: optStr(v6.rangeLabel),
+        odometerLabel: optStr(v6.odometerLabel),
+        condition: optNum(v6.condition),
+        home: optStr(v6.home),
         assignedTo: assigned ? { name: str(assigned.name), until: optStr(assigned.until), overdue: assigned.overdue === true } : undefined,
-        service: list(v5.service, (s3) => ({ label: str(s3.label), due: str(s3.due), overdue: s3.overdue === true }))
+        service: list(v6.service, (s3) => ({ label: str(s3.label), due: str(s3.due), overdue: s3.overdue === true }))
       } : null;
     })
   };
 }
-function vehicleIcon(v5) {
-  return /boat|water|sea|marine/i.test(v5.kind) ? "boat" : "car";
+function vehicleIcon(v6) {
+  return /boat|water|sea|marine/i.test(v6.kind) ? "boat" : "car";
 }
 function VehicleCard(props) {
-  const v5 = props.vehicle;
-  const status = v5.status.toLowerCase();
+  const v6 = props.vehicle;
+  const status = v6.status.toLowerCase();
   const fine = status.includes("fine") || status === "ok";
-  const fuel = v5.fuelPct === undefined ? null : Math.max(0, Math.min(100, Math.round(v5.fuelPct)));
+  const fuel = v6.fuelPct === undefined ? null : Math.max(0, Math.min(100, Math.round(v6.fuelPct)));
   return /* @__PURE__ */ u3("section", {
     class: "lre-me-vehicle",
-    "aria-label": v5.name,
+    "aria-label": v6.name,
     children: [
       /* @__PURE__ */ u3("div", {
         class: "lre-me-vehicle-head",
@@ -60549,7 +60981,7 @@ function VehicleCard(props) {
           /* @__PURE__ */ u3("span", {
             class: "lre-me-vehicle-icon",
             children: /* @__PURE__ */ u3(Icon, {
-              name: vehicleIcon(v5)
+              name: vehicleIcon(v6)
             }, undefined, false, undefined, this)
           }, undefined, false, undefined, this),
           /* @__PURE__ */ u3("div", {
@@ -60557,11 +60989,11 @@ function VehicleCard(props) {
             children: [
               /* @__PURE__ */ u3("h3", {
                 class: "lre-me-vehicle-name",
-                children: v5.name
+                children: v6.name
               }, undefined, false, undefined, this),
-              v5.kind ? /* @__PURE__ */ u3("span", {
+              v6.kind ? /* @__PURE__ */ u3("span", {
                 class: "lre-me-vehicle-kind",
-                children: v5.kind
+                children: v6.kind
               }, undefined, false, undefined, this) : null
             ]
           }, undefined, true, undefined, this),
@@ -60572,52 +61004,52 @@ function VehicleCard(props) {
                 name: fine ? "check" : "alert",
                 size: 12
               }, undefined, false, undefined, this),
-              v5.status
+              v6.status
             ]
           }, undefined, true, undefined, this)
         ]
       }, undefined, true, undefined, this),
-      fuel !== null || v5.condition !== undefined ? /* @__PURE__ */ u3("div", {
+      fuel !== null || v6.condition !== undefined ? /* @__PURE__ */ u3("div", {
         class: "lre-me-vehicle-meters",
         children: [
           fuel !== null ? /* @__PURE__ */ u3(Meter, {
-            label: `Fuel ${fuel}%${v5.rangeLabel ? ` · ${v5.rangeLabel}` : ""}${fuel < LOW_FUEL_PCT ? " · low" : ""}`,
+            label: `Fuel ${fuel}%${v6.rangeLabel ? ` · ${v6.rangeLabel}` : ""}${fuel < LOW_FUEL_PCT ? " · low" : ""}`,
             value: fuel,
             max: 100,
             tone: fuel < LOW_FUEL_PCT ? "neg" : "accent"
           }, undefined, false, undefined, this) : null,
-          v5.condition !== undefined ? /* @__PURE__ */ u3(Meter, {
-            label: `Condition ${Math.round(v5.condition)}%`,
-            value: Math.round(v5.condition),
+          v6.condition !== undefined ? /* @__PURE__ */ u3(Meter, {
+            label: `Condition ${Math.round(v6.condition)}%`,
+            value: Math.round(v6.condition),
             max: 100,
-            tone: v5.condition <= 25 ? "neg" : "accent"
+            tone: v6.condition <= 25 ? "neg" : "accent"
           }, undefined, false, undefined, this) : null
         ]
       }, undefined, true, undefined, this) : null,
       /* @__PURE__ */ u3(List, {
         children: [
-          v5.place ? /* @__PURE__ */ u3(ListRow, {
+          v6.place ? /* @__PURE__ */ u3(ListRow, {
             icon: "pin",
             title: "Location",
-            subtitle: v5.home && v5.home !== v5.place ? `home: ${v5.home}` : undefined,
-            value: v5.place
+            subtitle: v6.home && v6.home !== v6.place ? `home: ${v6.home}` : undefined,
+            value: v6.place
           }, undefined, false, undefined, this) : null,
-          v5.odometerLabel ? /* @__PURE__ */ u3(ListRow, {
+          v6.odometerLabel ? /* @__PURE__ */ u3(ListRow, {
             icon: "route",
-            title: v5.odometerLabel.endsWith(" h") ? "Engine hours" : "Odometer",
-            value: v5.odometerLabel
+            title: v6.odometerLabel.endsWith(" h") ? "Engine hours" : "Odometer",
+            value: v6.odometerLabel
           }, undefined, false, undefined, this) : null,
-          v5.assignedTo ? /* @__PURE__ */ u3(ListRow, {
+          v6.assignedTo ? /* @__PURE__ */ u3(ListRow, {
             icon: "key",
             title: "Assigned to",
-            subtitle: v5.assignedTo.overdue ? `overdue since ${v5.assignedTo.until ?? "—"}` : v5.assignedTo.until ? `until ${v5.assignedTo.until}` : undefined,
-            value: v5.assignedTo.name,
-            badge: v5.assignedTo.overdue ? /* @__PURE__ */ u3(Badge, {
+            subtitle: v6.assignedTo.overdue ? `overdue since ${v6.assignedTo.until ?? "—"}` : v6.assignedTo.until ? `until ${v6.assignedTo.until}` : undefined,
+            value: v6.assignedTo.name,
+            badge: v6.assignedTo.overdue ? /* @__PURE__ */ u3(Badge, {
               tone: "warn",
               children: "Overdue"
             }, undefined, false, undefined, this) : undefined
           }, undefined, false, undefined, this) : null,
-          (v5.service ?? []).map((s3) => /* @__PURE__ */ u3(ListRow, {
+          (v6.service ?? []).map((s3) => /* @__PURE__ */ u3(ListRow, {
             icon: "wrench",
             title: s3.label,
             value: s3.due,
@@ -60651,24 +61083,24 @@ function GaragePanel(props) {
   return /* @__PURE__ */ u3("div", {
     class: "lre-stack lre-me",
     "data-lre-panel": "vehicles.garage",
-    children: view.vehicles.map((v5) => /* @__PURE__ */ u3(VehicleCard, {
-      vehicle: v5
-    }, v5.id, false, undefined, this))
+    children: view.vehicles.map((v6) => /* @__PURE__ */ u3(VehicleCard, {
+      vehicle: v6
+    }, v6.id, false, undefined, this))
   }, undefined, false, undefined, this);
 }
 
 // src/packs/vehicles/ui/glance.tsx
 function garageAlerts(view) {
   const out = [];
-  for (const v5 of view.vehicles) {
-    const icon = vehicleIcon(v5);
-    if (v5.fuelPct !== undefined && v5.fuelPct < LOW_FUEL_PCT)
-      out.push({ key: `${v5.id}:fuel`, vehicle: v5.name, icon, text: `Fuel ${Math.round(v5.fuelPct)}%${v5.rangeLabel ? ` · ${v5.rangeLabel}` : ""}`, flag: "Low" });
-    if (v5.assignedTo?.overdue)
-      out.push({ key: `${v5.id}:grant`, vehicle: v5.name, icon, text: `Loan to ${v5.assignedTo.name}${v5.assignedTo.until ? ` ended ${v5.assignedTo.until}` : ""}`, flag: "Overdue" });
-    for (const s3 of v5.service ?? [])
+  for (const v6 of view.vehicles) {
+    const icon = vehicleIcon(v6);
+    if (v6.fuelPct !== undefined && v6.fuelPct < LOW_FUEL_PCT)
+      out.push({ key: `${v6.id}:fuel`, vehicle: v6.name, icon, text: `Fuel ${Math.round(v6.fuelPct)}%${v6.rangeLabel ? ` · ${v6.rangeLabel}` : ""}`, flag: "Low" });
+    if (v6.assignedTo?.overdue)
+      out.push({ key: `${v6.id}:grant`, vehicle: v6.name, icon, text: `Loan to ${v6.assignedTo.name}${v6.assignedTo.until ? ` ended ${v6.assignedTo.until}` : ""}`, flag: "Overdue" });
+    for (const s3 of v6.service ?? [])
       if (s3.overdue)
-        out.push({ key: `${v5.id}:service:${s3.label}`, vehicle: v5.name, icon, text: `${s3.label} · ${s3.due}`, flag: "Overdue" });
+        out.push({ key: `${v6.id}:service:${s3.label}`, vehicle: v6.name, icon, text: `${s3.label} · ${s3.due}`, flag: "Overdue" });
   }
   return out;
 }
@@ -61313,7 +61745,7 @@ function AssistantThread(props) {
           onClick: on.settings,
           children: "Assistant settings"
         }, undefined, false, undefined, this),
-        children: "It looks things up in this chat's world with the engine's own tools and answers from what they show it, reading with the knowledge Settings → Agents → Assistant gives it. Ask it to change something and it proposes the change for you to apply."
+        children: "It looks things up in this chat's world with the engine's own tools and answers from what they show it: it works beside you, outside the story, and reads everything you can. Ask it to change something and it proposes the change for you to apply."
       }, undefined, false, undefined, this) : /* @__PURE__ */ u3(M, {
         children: [
           /* @__PURE__ */ u3("div", {
@@ -61492,6 +61924,7 @@ function liveItems(view) {
       case "failed":
       case "wait":
       case "resume":
+      case "review":
         marks.push({ type: "mark", entry: e3 });
         break;
       case "run": {
@@ -61584,6 +62017,14 @@ var WRITE_OUTCOME_WORDS = { staged: "staged", landed: "landed", held: "held for 
 var DROP_WORDS = { failed: "its run failed", replaced: "a revision replaced its run", unused: "the turn went on without its run", ended: "the turn's run ended" };
 var END_WORDS = { done: "done", waiting: "waiting at a gate", failed: "failed", cancelled: "cancelled", dropped: "let go" };
 var PHASE_WORDS = { pre: "Before the plan", plan: "The plan is made", post: "The reply is in: its read" };
+var REVIEW_OUTCOME_WORDS = { revised: "The final review revised the narrator's prompt", unchanged: "The final review left the narrator's prompt as the engine made it", unrevised: "The final review failed: the narrator got its prompt unrevised", stopped: "The final review failed: the turn stopped" };
+function reviewEditWords(e3) {
+  if (e3.op === "append")
+    return `${e3.label}: added “${e3.text ?? ""}”`;
+  if (e3.op === "drop")
+    return `${e3.label}: took out “${e3.line ?? ""}”`;
+  return `${e3.label}: “${e3.line ?? ""}” → “${e3.text ?? ""}”`;
+}
 var count3 = (n5) => n5.toLocaleString("en-US");
 function usageWords(u4) {
   const cached = u4.cachedIn ? ` (${count3(u4.cachedIn)} cached)` : "";
@@ -61910,6 +62351,27 @@ function groupOf2(g2, view, open, onToggle) {
 }
 function markOf2(item) {
   const e3 = item.entry;
+  if (e3.kind === "review") {
+    const failed2 = e3.outcome === "unrevised" || e3.outcome === "stopped";
+    return /* @__PURE__ */ u3("li", {
+      class: `lre-live-mark review${failed2 ? " failed" : ""}`,
+      "data-lre-live-mark": "review",
+      "data-outcome": e3.outcome,
+      children: [
+        /* @__PURE__ */ u3("span", {
+          children: `${REVIEW_OUTCOME_WORDS[e3.outcome]}${e3.reason ? `: ${e3.reason}` : ""}`
+        }, undefined, false, undefined, this),
+        e3.edits.length > 0 ? /* @__PURE__ */ u3("ul", {
+          class: "lre-live-review",
+          "aria-label": "The final review's edits",
+          children: e3.edits.map((edit, i3) => /* @__PURE__ */ u3("li", {
+            "data-lre-live-edit": edit.op,
+            children: reviewEditWords(edit)
+          }, i3, false, undefined, this))
+        }, undefined, false, undefined, this) : null
+      ]
+    }, `mark-${e3.seq}`, true, undefined, this);
+  }
   const words3 = e3.kind === "phase" ? PHASE_WORDS[e3.phase] : e3.kind === "failed" ? `The turn stopped at ${e3.step}: ${e3.reason}` : e3.kind === "wait" ? "Waiting on you at a gate" : "Resumed";
   return /* @__PURE__ */ u3("li", {
     class: `lre-live-mark${e3.kind === "failed" ? " failed" : ""}`,
@@ -62014,7 +62476,7 @@ function LiveFeed(props) {
         label: "Show the work of",
         value: props.role ?? "all",
         options: [{ value: "all", label: "Every agent" }, ...roles.map((r3) => ({ value: r3, label: agentLabel(r3) }))],
-        onChange: (v5) => props.onRole(v5 === "all" ? null : v5)
+        onChange: (v6) => props.onRole(v6 === "all" ? null : v6)
       }, undefined, false, undefined, this),
       /* @__PURE__ */ u3("ol", {
         class: "lre-live-feed",
@@ -62140,14 +62602,17 @@ function LiveSection(props) {
 }
 
 // src/frontend/gm/workspace-tree.ts
-var WORKSPACE_AREAS = ["notes", "learned", "transcripts", "pins"];
+var WORKSPACE_AREAS = ["notes", "learned", "transcripts", "pins", "global"];
 var AREA_WORDS = {
   notes: { title: "Notes", note: "What the agents and you keep for this chat. They follow the story: a swipe back past a reply takes what it wrote." },
   learned: { title: "Learned", note: "Kept apart from the story: a swipe, a Re-run or an Undo never changes them, and a change lands at once." },
-  transcripts: { title: "Transcripts", note: "Everything each turn's agents did, as Live showed it. Read-only; read by agents only with the GM's knowledge." },
-  pins: { title: "Pins file", note: "Which files each role is shown first, and how much of them." }
+  transcripts: { title: "Transcripts", note: "Everything each turn's agents did, as Live showed it. Read-only; every agent reads them." },
+  pins: { title: "Pins file", note: "Which files each role is shown first, and how much of them." },
+  global: { title: "Global (~/)", note: "Your own workspace, which every chat of yours shares: kept apart from the story, and a change lands at once. Its AGENTS.md and roles/ come before this chat's." }
 };
 function workspaceArea(path2) {
+  if (isGlobalPath(path2))
+    return "global";
   if (path2 === PINS_PATH)
     return "pins";
   if (isTranscriptPath(path2))
@@ -62156,7 +62621,7 @@ function workspaceArea(path2) {
     return "learned";
   return "notes";
 }
-var AREA_ROOT = { notes: "", learned: LEARNED_DIR, transcripts: TRANSCRIPTS_DIR, pins: "" };
+var AREA_ROOT = { notes: "", learned: LEARNED_DIR, transcripts: TRANSCRIPTS_DIR, pins: "", global: GLOBAL_PREFIX };
 function naturalCompare(a3, b3) {
   return a3.localeCompare(b3, "en", { numeric: true, sensitivity: "base" }) || (a3 < b3 ? -1 : a3 > b3 ? 1 : 0);
 }
@@ -62193,7 +62658,6 @@ function folderOf(path2) {
   const slash = path2.lastIndexOf("/");
   return slash < 0 ? "" : path2.slice(0, slash + 1);
 }
-var READERS_SHORT = { gm: "GM only", everyone: "Everyone's", pov: "Your character's" };
 function writerWords(file) {
   const { role } = file.provenance;
   if (file.transcript || role === undefined)
@@ -62202,15 +62666,28 @@ function writerWords(file) {
     return "You (GM)";
   return AGENT_ROLES.find((r3) => r3.id === role)?.label ?? humanize(role);
 }
+function systemWords(path2) {
+  if (!isSystemPath(path2))
+    return null;
+  const at = levelPath(path2);
+  const where = isGlobalPath(path2) ? "in every chat of yours" : "in this chat";
+  if (!at.startsWith(ROLES_DIR))
+    return `System instructions for every agent, ${where}`;
+  const role = at.slice(ROLES_DIR.length, -".md".length);
+  return `System instructions for ${AGENT_ROLES.find((r3) => r3.id === role)?.label ?? humanize(role)} alone, ${where}`;
+}
 function fileChips(file) {
   const { turn, role } = file.provenance;
   const who = writerWords(file);
+  const global = isGlobalPath(file.path);
   const reply = turn !== null ? `Reply ${turn}` : role === undefined ? "This turn" : "Before reply 1";
   const replyTitle = turn !== null ? `Written at reply ${turn}` : role === undefined ? "Written by the turn under way" : "Written before the first reply";
+  const system = systemWords(file.path);
   return [
     { kind: "who", text: who, title: `Written by ${who === "You (GM)" ? "you, the GM" : who === "The turn" ? "the turn itself" : who}` },
-    { kind: "reply", text: reply, title: replyTitle },
-    { kind: "readers", text: READERS_SHORT[file.readers], title: `Who may read it: ${READERS_SHORT[file.readers]}` },
+    ...global ? [] : [{ kind: "reply", text: reply, title: replyTitle }],
+    ...system !== null ? [{ kind: "system", text: "System", title: system }] : [],
+    ...global ? [{ kind: "global", text: "Global", title: "Global: every chat of yours shares it, and a swipe never changes it" }] : [],
     ...file.pinned ? [{ kind: "pinned", text: "Pinned", title: "Pinned: it goes with every agent turn" }] : [],
     ...file.learned ? [{ kind: "learned", text: "Learned", title: "Learned: a swipe never changes it" }] : [],
     ...file.transcript ? [{ kind: "read-only", text: "Read-only", title: "Read-only: kept as its turn left it" }] : []
@@ -62218,13 +62695,6 @@ function fileChips(file) {
 }
 
 // src/frontend/gm/workspace.tsx
-var READERS_LABELS = { gm: "GM only", everyone: "Everyone's, secrets marked", pov: "Your character's" };
-var READERS_NOTES = {
-  gm: "Only agents reading with the GM's knowledge see it.",
-  everyone: "Agents reading with everyone's knowledge see it too, as the GM's do; agents reading as your character don't.",
-  pov: "Every agent sees it, those reading as your character too: keep anything your character doesn't know out of it."
-};
-var READERS_OPTIONS = ["gm", "everyone", "pov"].map((k2) => ({ value: k2, label: READERS_LABELS[k2] }));
 function workspaceControls(chatId, request, out) {
   const change = async (body, text, landed) => {
     const result = await request(body);
@@ -62232,7 +62702,7 @@ function workspaceControls(chatId, request, out) {
       return false;
     if (result.files)
       out.files(result.files);
-    landed?.();
+    landed?.(result);
     await out.changed(text, result);
     return true;
   };
@@ -62242,10 +62712,9 @@ function workspaceControls(chatId, request, out) {
       const result = await request({ type: "lre.workspace", op: "read", chatId, path: path2 });
       return result === null ? undefined : result.text ?? null;
     },
-    create: (path2, readers, landed) => change({ type: "lre.workspace", op: "write", chatId, path: path2, text: "", readers }, `Created ${path2}`, landed),
+    create: (path2, landed) => change({ type: "lre.workspace", op: "write", chatId, path: path2, text: "" }, `Created ${path2}`, landed),
     save: (path2, text, landed) => change({ type: "lre.workspace", op: "write", chatId, path: path2, text }, `Saved ${path2}`, landed),
     pin: (path2, pinned, landed) => change({ type: "lre.workspace", op: "pin", chatId, path: path2, pinned }, `${pinned ? "Pinned" : "Unpinned"} ${path2}`, landed),
-    readers: (path2, readers, landed) => change({ type: "lre.workspace", op: "readers", chatId, path: path2, readers }, `Who may read ${path2}: ${READERS_LABELS[readers]}`, landed),
     move: (from, to, landed) => change({ type: "lre.workspace", op: "move", chatId, from, to }, `Moved ${from} to ${to}`, landed),
     remove: (path2, landed) => change({ type: "lre.workspace", op: "delete", chatId, path: path2 }, `Deleted ${path2}`, landed),
     session: async () => (await request({ type: "lre.workspace", op: "session", chatId }))?.session ?? null,
@@ -62255,25 +62724,25 @@ function workspaceControls(chatId, request, out) {
 function sizeWords(size) {
   return `${size.toLocaleString("en-US")} character${size === 1 ? "" : "s"}`;
 }
-var PATH_WORDS = "A path is names joined by /: letters, digits, dots, dashes, underscores and single spaces, no name empty, . or .., such as notes/marcus.md.";
+var PATH_WORDS = "A path is names joined by /: letters, digits, dots, dashes, underscores and single spaces, no name empty, . or .., such as notes/marcus.md; ~/ before them for the global workspace, such as ~/AGENTS.md.";
 var TRANSCRIPT_WORDS = "transcripts/ holds the turns' transcripts, which are read-only: choose another folder.";
 function moveProblem(from, to, paths) {
   if (to === from)
     return "Type the path to move it to.";
-  if (!isWorkspacePath(to))
+  if (!isFilePath(to))
     return PATH_WORDS;
   if (paths.includes(to))
     return `There is already a file at ${to}.`;
   if (isTranscriptPath(to))
     return TRANSCRIPT_WORDS;
-  if (isLearnedPath(from) !== isLearnedPath(to))
-    return "A file under learned/ stays there, and the others stay out of it: write the file at its new path, then delete this one.";
+  if (isGlobalPath(from) !== isGlobalPath(to) || isLearnedPath(from) !== isLearnedPath(to))
+    return "A file stays in its part: the chat's story, learned/, or the global workspace ~/. Write the file at its new path, then delete this one.";
   return null;
 }
 function newNoteProblem(path2, paths) {
   if (path2 === "" || path2.endsWith("/"))
     return "Type the note's path, its name last, such as notes/marcus.md.";
-  if (!isWorkspacePath(path2))
+  if (!isFilePath(path2))
     return PATH_WORDS;
   if (paths.includes(path2))
     return `There is already a file at ${path2}.`;
@@ -62281,12 +62750,33 @@ function newNoteProblem(path2, paths) {
     return TRANSCRIPT_WORDS;
   return null;
 }
+var LEVEL_OPTIONS = [
+  { value: "chat", label: "This chat" },
+  { value: "global", label: "Global (~/), every chat" }
+];
+function atLevel(path2, level) {
+  return level === "global" ? `${GLOBAL_PREFIX}${levelPath(path2)}` : levelPath(path2);
+}
 function newNoteFolder(open) {
   if (open === null || open === SESSION_PAGE || isTranscriptPath(open) || open === PINS_PATH)
     return "notes/";
   return folderOf(open) || "notes/";
 }
 var SESSION_PAGE = "@session";
+function paneFile(page7, files, held) {
+  if (page7 === null || page7 === SESSION_PAGE || files === null)
+    return;
+  const listed = files.find((f3) => f3.path === page7);
+  if (listed !== undefined || page7 !== held)
+    return listed;
+  return { path: held, hash: "", size: 0, pinned: false, learned: isLearnedPath(held), provenance: { role: "gm", turn: null } };
+}
+function heldCreate(path2, result) {
+  return result.pending === true && !(result.files ?? []).some((f3) => f3.path === path2) ? path2 : null;
+}
+function workspaceReadKeys(props) {
+  return [props.chatId, props.reloadKey];
+}
 async function guardDraft(dirty, confirm, next) {
   if (dirty !== null && !await confirm("Discard your changes?", `${dirty} has changes you haven't saved. Leave it and they're gone.`, "Discard"))
     return false;
@@ -62304,6 +62794,7 @@ function WorkspaceSection(props) {
   const [dialog, setDialog] = d2(null);
   const [toggled, setToggled] = d2({});
   const controls = workspaceControls(props.chatId, (body) => app.request(body), { files: setFiles, changed: props.changed });
+  const [heldNote, setHeldNote] = d2(null);
   A(() => {
     let live = true;
     controls.list().then((listed) => {
@@ -62317,26 +62808,31 @@ function WorkspaceSection(props) {
     return () => {
       live = false;
     };
-  }, [props.chatId, props.gm]);
-  const page6 = pages.page;
-  const onSession = page6 === SESSION_PAGE;
-  const selected = page6 === null || onSession || files === null ? undefined : files.find((f3) => f3.path === page6);
+  }, workspaceReadKeys(props));
+  const page7 = pages.page;
+  const onSession = page7 === SESSION_PAGE;
+  const selected = paneFile(page7, files, heldNote);
+  const waiting = heldNote !== null && page7 === heldNote && selected?.hash === "";
   const text = selected !== undefined && opened !== null && opened.path === selected.path ? opened.text : undefined;
   const dirty = typeof text === "string" && draft !== text;
   A(() => {
-    if (page6 !== null && !onSession && files !== null && selected === undefined)
+    if (page7 !== null && !onSession && files !== null && selected === undefined)
       pages.back();
+    if (heldNote !== null && files?.some((f3) => f3.path === heldNote))
+      setHeldNote(null);
   });
   A(() => {
-    if (page6 === null || page6 === SESSION_PAGE) {
+    if (page7 === null || page7 === SESSION_PAGE) {
       setOpened(null);
       return;
     }
-    const held = opened !== null && opened.path === page6 ? opened : null;
+    if (waiting)
+      return;
+    const held = opened !== null && opened.path === page7 ? opened : null;
     if (held !== null && held.text !== null && draft !== held.text)
       return;
     let live = true;
-    controls.read(page6).then((read) => {
+    controls.read(page7).then((read) => {
       if (!live)
         return;
       if (read === undefined) {
@@ -62344,13 +62840,13 @@ function WorkspaceSection(props) {
           pages.back();
         return;
       }
-      setOpened({ path: page6, text: read });
+      setOpened({ path: page7, text: read });
       setDraft((now) => held !== null && now !== (held.text ?? "") ? now : read ?? "");
     });
     return () => {
       live = false;
     };
-  }, [page6, props.chatId, props.gm]);
+  }, [page7, ...workspaceReadKeys(props)]);
   const leave = (next) => {
     guardDraft(dirty ? selected?.path ?? null : null, (title, message, label) => app.host.confirm(title, message, "danger", label), () => {
       if (dirty && opened !== null)
@@ -62359,13 +62855,14 @@ function WorkspaceSection(props) {
     });
   };
   const open = (next) => {
-    if (next !== page6)
+    if (next !== page7)
       leave(() => pages.open(next));
   };
   const busy = props.busy || working;
   const paths = (files ?? []).map((f3) => f3.path);
   const pane = selected !== undefined ? /* @__PURE__ */ u3(WorkspaceFilePane, {
     file: selected,
+    held: waiting,
     text,
     draft,
     busy,
@@ -62375,7 +62872,7 @@ function WorkspaceSection(props) {
     onDraft: setDraft,
     onSaved: (saved) => setOpened({ path: selected.path, text: saved }),
     onRevert: () => setDraft(text ?? ""),
-    onMove: () => setDialog({ mode: "move", from: selected.path, value: selected.path, readers: selected.readers }),
+    onMove: () => setDialog({ mode: "move", from: selected.path, value: selected.path }),
     onDeleted: () => {
       setOpened(null);
       setDraft("");
@@ -62414,7 +62911,8 @@ function WorkspaceSection(props) {
     if (state.mode === "new")
       run(async () => {
         const path2 = state.value;
-        const made = await controls.create(path2, state.readers, () => {
+        const made = await controls.create(path2, (result) => {
+          setHeldNote(heldCreate(path2, result));
           setOpened({ path: path2, text: "" });
           setDraft("");
           pages.open(path2);
@@ -62439,9 +62937,9 @@ function WorkspaceSection(props) {
     children: [
       /* @__PURE__ */ u3("div", {
         ref: pages.host.ref,
-        class: page6 !== null ? "lre-gm-pages lre-ws has-preview" : "lre-gm-pages lre-ws",
+        class: page7 !== null ? "lre-gm-pages lre-ws has-preview" : "lre-gm-pages lre-ws",
         onKeyDown: (event) => {
-          if (event.key === "Escape" && dirty && page6 !== null && !event.defaultPrevented) {
+          if (event.key === "Escape" && dirty && page7 !== null && !event.defaultPrevented) {
             event.preventDefault();
             event.stopPropagation();
             leave(pages.back);
@@ -62456,12 +62954,12 @@ function WorkspaceSection(props) {
             children: /* @__PURE__ */ u3(WorkspaceBrowser, {
               files,
               session,
-              selected: page6,
+              selected: page7,
               busy,
               open: (key, start) => toggled[key] ?? start,
               onToggle: (key, now) => setToggled((t3) => t3[key] === now ? t3 : { ...t3, [key]: now }),
               onOpen: open,
-              onNew: () => leave(() => setDialog({ mode: "new", from: null, value: newNoteFolder(page6), readers: "gm" }))
+              onNew: () => leave(() => setDialog({ mode: "new", from: null, value: newNoteFolder(page7) }))
             }, undefined, false, undefined, this)
           }, undefined, false, undefined, this),
           pane
@@ -62630,7 +63128,7 @@ function WorkspaceBrowser(props) {
       files === null ? null : files.length === 0 ? /* @__PURE__ */ u3(Empty, {
         icon: "box",
         title: "Nothing in the workspace yet",
-        children: "The workspace holds the notes the agents keep for this chat as the story goes: what they've worked out, what they plan, drafts for you to look over. The notes follow the story: swipe back past a reply and what it wrote goes with it. Notes under learned/ are kept apart from the story: a swipe never changes them, and a Branch takes them along."
+        children: "The workspace holds the notes the agents keep for this chat as the story goes: what they've worked out, what they plan, drafts for you to look over. The notes follow the story: swipe back past a reply and what it wrote goes with it. Notes under learned/ are kept apart from the story: a swipe never changes them, and a Branch takes them along. Notes under ~/ are your global workspace, in every chat of yours; an AGENTS.md there or here is every agent's instructions, and roles/<role>.md one role's."
       }, undefined, false, undefined, this) : workspaceGroups(files).map((g2) => /* @__PURE__ */ u3("details", {
         class: "lre-ws-group",
         "data-lre-ws-area": g2.area,
@@ -62671,9 +63169,11 @@ function WorkspaceFilePane(props) {
   const dirty = typeof text === "string" && draft !== text;
   const name = file.path.slice(folderOf(file.path).length);
   const area = workspaceArea(file.path);
+  const system = systemWords(file.path);
+  const kept = isKeptPath(file.path) ? isGlobalPath(file.path) ? "global" : "learned" : null;
   const save = () => props.run(() => props.controls.save(file.path, draft, () => props.onSaved(draft)));
   const remove = () => props.run(async () => {
-    if (file.learned && !await props.confirm("Delete the learned note", `Delete ${file.path}? A learned note's change lands at once: there is no Undo.`, "Delete"))
+    if (kept !== null && !await props.confirm(`Delete the ${kept} note`, `Delete ${file.path}? A ${kept} note's change lands at once: there is no Undo.`, "Delete"))
       return;
     await props.controls.remove(file.path, props.onDeleted);
   });
@@ -62704,7 +63204,7 @@ function WorkspaceFilePane(props) {
           children: [
             /* @__PURE__ */ u3("p", {
               class: "lre-gm-note",
-              children: "Everything the turn's agents did, as Live showed it: kept with the reply, read-only, and read by agents only with the GM's knowledge. A swipe has its own; it is no pin and no part of the main session."
+              children: "Everything the turn's agents did, as Live showed it: kept with the reply, read-only, and every agent reads it. A swipe has its own; it is no pin and no part of the main session."
             }, undefined, false, undefined, this),
             text === undefined ? /* @__PURE__ */ u3("p", {
               class: "lre-gm-note",
@@ -62721,6 +63221,13 @@ function WorkspaceFilePane(props) {
           children: "Reading it…"
         }, undefined, false, undefined, this) : /* @__PURE__ */ u3(M, {
           children: [
+            system !== null ? /* @__PURE__ */ u3("p", {
+              class: "lre-gm-note",
+              children: [
+                system,
+                ": it goes in the agent's system prompt, so it is never one of its pinned files."
+              ]
+            }, undefined, true, undefined, this) : null,
             /* @__PURE__ */ u3("div", {
               class: "lre-ws-editor-bar",
               children: [
@@ -62771,60 +63278,48 @@ function WorkspaceFilePane(props) {
                   save();
               }
             }, undefined, false, undefined, this),
-            /* @__PURE__ */ u3("div", {
-              class: "lre-ws-actions",
-              role: "group",
-              "aria-label": "This file",
-              children: [
-                area !== "pins" ? /* @__PURE__ */ u3(Button, {
-                  size: "sm",
-                  icon: "pin",
-                  disabled: busy,
-                  onClick: () => props.run(() => props.controls.pin(file.path, !file.pinned)),
-                  children: file.pinned ? "Unpin" : "Pin"
-                }, undefined, false, undefined, this) : null,
-                /* @__PURE__ */ u3(Button, {
-                  size: "sm",
-                  icon: "route",
-                  disabled: busy,
-                  onClick: props.onMove,
-                  children: "Rename or move"
-                }, undefined, false, undefined, this),
-                /* @__PURE__ */ u3(Button, {
-                  size: "sm",
-                  variant: "danger",
-                  icon: "trash",
-                  disabled: busy,
-                  onClick: remove,
-                  children: "Delete"
-                }, undefined, false, undefined, this)
-              ]
-            }, undefined, true, undefined, this),
-            /* @__PURE__ */ u3("p", {
+            props.held ? /* @__PURE__ */ u3("p", {
               class: "lre-gm-note",
+              role: "status",
+              children: "Waiting for the reply being written: the note lands when it finishes. Its text saves meanwhile, held the same way; Pin, Rename or move and Delete wait until it lands."
+            }, undefined, false, undefined, this) : /* @__PURE__ */ u3(M, {
               children: [
-                area === "pins" ? "The pins file says which files each role is shown first, and how much of them; only you change it." : file.pinned ? "Pinned: it goes with every agent turn." : "Pin it to send it with every agent turn; unpinned, the agents read it when they need it.",
-                " ",
-                file.learned ? "A learned note's change lands at once, with no Undo." : "Each change has its Undo, in the notice above."
-              ]
-            }, undefined, true, undefined, this),
-            /* @__PURE__ */ u3("div", {
-              class: "lre-stack",
-              children: [
-                /* @__PURE__ */ u3(Seg, {
-                  label: "Who may read it",
-                  value: file.readers,
-                  options: READERS_OPTIONS,
-                  disabled: busy,
-                  onChange: (readers) => props.run(() => props.controls.readers(file.path, readers))
-                }, undefined, false, undefined, this),
+                /* @__PURE__ */ u3("div", {
+                  class: "lre-ws-actions",
+                  role: "group",
+                  "aria-label": "This file",
+                  children: [
+                    area !== "pins" && system === null ? /* @__PURE__ */ u3(Button, {
+                      size: "sm",
+                      icon: "pin",
+                      disabled: busy,
+                      onClick: () => props.run(() => props.controls.pin(file.path, !file.pinned)),
+                      children: file.pinned ? "Unpin" : "Pin"
+                    }, undefined, false, undefined, this) : null,
+                    /* @__PURE__ */ u3(Button, {
+                      size: "sm",
+                      icon: "route",
+                      disabled: busy,
+                      onClick: props.onMove,
+                      children: "Rename or move"
+                    }, undefined, false, undefined, this),
+                    /* @__PURE__ */ u3(Button, {
+                      size: "sm",
+                      variant: "danger",
+                      icon: "trash",
+                      disabled: busy,
+                      onClick: remove,
+                      children: "Delete"
+                    }, undefined, false, undefined, this)
+                  ]
+                }, undefined, true, undefined, this),
                 /* @__PURE__ */ u3("p", {
                   class: "lre-gm-note",
                   children: [
-                    READERS_NOTES[file.readers],
-                    " A file an agent writes is read with the knowledge it wrote it under."
-                  ]
-                }, undefined, true, undefined, this)
+                    area === "pins" ? "The pins file says which files each role is shown first, and how much of them." : system !== null ? null : file.pinned ? "Pinned: it goes with every agent turn." : "Pin it to send it with every agent turn; unpinned, the agents read it when they need it.",
+                    kept !== null ? `A ${kept} note's change lands at once, with no Undo.` : "Each change has its Undo, in the notice above."
+                  ].filter((s3) => s3 !== null).join(" ")
+                }, undefined, false, undefined, this)
               ]
             }, undefined, true, undefined, this)
           ]
@@ -62885,10 +63380,26 @@ function PathDialog(props) {
         class: "lre-ws-dialog-title",
         children: fresh ? "New note" : `Rename or move ${state.from ?? ""}`
       }, undefined, false, undefined, this),
+      fresh ? /* @__PURE__ */ u3("div", {
+        class: "lre-stack",
+        children: [
+          /* @__PURE__ */ u3(Seg, {
+            label: "Where it goes",
+            value: state.value.startsWith(GLOBAL_PREFIX) ? "global" : "chat",
+            options: LEVEL_OPTIONS,
+            disabled: props.busy,
+            onChange: (level) => props.onChange({ ...state, value: atLevel(state.value, level) })
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3("p", {
+            class: "lre-gm-note",
+            children: "A global note is in every chat of yours, kept apart from the story: a change lands at once. Its AGENTS.md and roles/<role>.md come before this chat's in each agent's instructions."
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this) : null,
       /* @__PURE__ */ u3(Field, {
         label: "Path",
         for: PATH_ID,
-        help: fresh ? "Folders and its name, joined by /, such as notes/marcus.md." : "Change its name, its folder or both, such as notes/people/marcus.md.",
+        help: fresh ? "Folders and its name, joined by /, such as notes/marcus.md; a global note's starts with ~/." : "Change its name, its folder or both, such as notes/people/marcus.md.",
         error: said,
         children: /* @__PURE__ */ u3("input", {
           id: PATH_ID,
@@ -62899,22 +63410,6 @@ function PathDialog(props) {
           onInput: (event) => props.onChange({ ...state, value: event.currentTarget.value })
         }, undefined, false, undefined, this)
       }, undefined, false, undefined, this),
-      fresh ? /* @__PURE__ */ u3("div", {
-        class: "lre-stack",
-        children: [
-          /* @__PURE__ */ u3(Seg, {
-            label: "Who may read it",
-            value: state.readers,
-            options: READERS_OPTIONS,
-            disabled: props.busy,
-            onChange: (readers) => props.onChange({ ...state, readers })
-          }, undefined, false, undefined, this),
-          /* @__PURE__ */ u3("p", {
-            class: "lre-gm-note",
-            children: READERS_NOTES[state.readers]
-          }, undefined, false, undefined, this)
-        ]
-      }, undefined, true, undefined, this) : null,
       /* @__PURE__ */ u3("div", {
         class: "lre-ws-dialog-actions",
         children: [
@@ -62935,8 +63430,6 @@ function PathDialog(props) {
     ]
   }, undefined, true, undefined, this);
 }
-var MADE_UNDER = { gm: "the GM's knowledge", everyone: "everyone's knowledge, secrets marked", pov: "your character's knowledge" };
-var KNOWLEDGE_SHORT = { gm: "GM's knowledge", everyone: "Everyone's knowledge", pov: "Your character's knowledge" };
 function speaker(m2) {
   if (m2.main)
     return m2.role === "user" ? "To the main agent" : "The main agent";
@@ -62945,39 +63438,21 @@ function speaker(m2) {
 function bubble(m2, key) {
   return /* @__PURE__ */ u3("li", {
     class: m2.role === "user" ? "lre-ws-msg to" : "lre-ws-msg from",
-    "data-lre-session-read": m2.read ? "read" : "unread",
+    "data-lre-session-read": m2.main ? "read" : "digest",
     children: [
       /* @__PURE__ */ u3("div", {
         class: "lre-ws-msg-meta",
-        children: [
-          /* @__PURE__ */ u3("span", {
-            class: "lre-ws-msg-who",
-            children: speaker(m2)
-          }, undefined, false, undefined, this),
-          m2.knowledge ? /* @__PURE__ */ u3("span", {
-            class: "lre-ws-chip",
-            "data-chip": "readers",
-            title: `Made under ${MADE_UNDER[m2.knowledge]}`,
-            children: KNOWLEDGE_SHORT[m2.knowledge]
-          }, undefined, false, undefined, this) : null,
-          m2.read ? null : /* @__PURE__ */ u3("span", {
-            class: "lre-ws-chip",
-            "data-chip": "unsent",
-            title: "With its knowledge now, the main agent isn't sent this message",
-            children: "Not sent to the main agent now"
-          }, undefined, false, undefined, this)
-        ]
-      }, undefined, true, undefined, this),
+        children: /* @__PURE__ */ u3("span", {
+          class: "lre-ws-msg-who",
+          children: speaker(m2)
+        }, undefined, false, undefined, this)
+      }, undefined, false, undefined, this),
       /* @__PURE__ */ u3("div", {
         class: "lre-ws-msg-bubble",
         tabIndex: 0,
         "aria-label": speaker(m2),
         children: m2.text
       }, undefined, false, undefined, this),
-      m2.files && m2.files.length > 0 ? /* @__PURE__ */ u3("p", {
-        class: "lre-ws-msg-foot",
-        children: `Files its tools read: ${m2.files.join(", ")}`
-      }, undefined, false, undefined, this) : null,
       m2.engine && (m2.engine.roles.length > 0 || m2.engine.committed.length > 0) ? /* @__PURE__ */ u3("p", {
         class: "lre-ws-msg-foot",
         children: `Roles: ${m2.engine.roles.map((r3) => `${r3.role} (${r3.via === "prompt_only" ? "prompt-only" : "agent"}${r3.ok ? "" : ", failed"})`).join(", ") || "none"} · landed: ${m2.engine.committed.map((c3) => `${c3.role} ${c3.type}`).join(", ") || "nothing"}`
@@ -63006,7 +63481,7 @@ function SessionPanel(props) {
         }, undefined, true, undefined, this),
         /* @__PURE__ */ u3("p", {
           class: "lre-gm-note",
-          children: `It is all here, whoever may know it. The main agent is sent only what ${MADE_UNDER[session.reads.knowledge]} reads: ${session.reads.turns} turn${session.reads.turns === 1 ? "" : "s"}, about ${session.reads.tokens.toLocaleString("en-US")} tokens${session.summary !== null ? session.reads.summary ? ", with the summary" : ", without the summary" : ""}.`
+          children: `The main agent reads its own messages and the summary, whole: ${session.reads.turns} turn${session.reads.turns === 1 ? "" : "s"}, about ${session.reads.tokens.toLocaleString("en-US")} tokens. A fixed pipeline's digest of its turns is here for you; the main agent reads its turn task's digest instead.`
         }, undefined, false, undefined, this),
         session.missing > 0 ? /* @__PURE__ */ u3("p", {
           class: "lre-gm-note",
@@ -63014,17 +63489,11 @@ function SessionPanel(props) {
         }, undefined, false, undefined, this) : null,
         session.summary !== null ? /* @__PURE__ */ u3(Disclosure, {
           summary: "The summary",
-          children: [
-            /* @__PURE__ */ u3("p", {
-              class: "lre-gm-note",
-              children: `Made under ${MADE_UNDER[session.summaryKnowledge]}.${session.reads.summary ? "" : " Not sent to the main agent now."}`
-            }, undefined, false, undefined, this),
-            /* @__PURE__ */ u3("p", {
-              class: "lre-gm-note lre-workspace-summary",
-              children: session.summary
-            }, undefined, false, undefined, this)
-          ]
-        }, undefined, true, undefined, this) : null,
+          children: /* @__PURE__ */ u3("p", {
+            class: "lre-gm-note lre-workspace-summary",
+            children: session.summary
+          }, undefined, false, undefined, this)
+        }, undefined, false, undefined, this) : null,
         session.segments.map((s3, i3) => /* @__PURE__ */ u3("section", {
           class: "lre-ws-turn",
           "data-lre-workspace-segment": s3.turn ?? "kept",
@@ -64575,12 +65044,12 @@ function WorldSection(props) {
   const selection = useSelection();
   const fight = editor.gm.encounter === null ? null : decodeEncounterView(editor.gm.encounter);
   const turn = fight === null ? "" : fight.yours ? "Your turn" : `${fight.turn.charAt(0).toUpperCase()}${fight.turn.slice(1)}'s turn`;
-  const page6 = pages.page;
-  const entity2 = page6 !== null && typeof page6 === "object" ? editor.gm.entities.find((e3) => e3.id === page6.entity) : undefined;
+  const page7 = pages.page;
+  const entity2 = page7 !== null && typeof page7 === "object" ? editor.gm.entities.find((e3) => e3.id === page7.entity) : undefined;
   const chosen = editor.gm.entities.filter((e3) => selection.ids.includes(e3.id)).map((e3) => e3.id);
-  const open = page6 === "spawn" || page6 === "fight" && fight !== null || page6 === "batch" && chosen.length > 0 || entity2 !== undefined;
+  const open = page7 === "spawn" || page7 === "fight" && fight !== null || page7 === "batch" && chosen.length > 0 || entity2 !== undefined;
   A(() => {
-    if (page6 !== null && !open)
+    if (page7 !== null && !open)
       pages.back();
   });
   const list2 = findEntities(editor.gm.entities, query, kind);
@@ -64712,11 +65181,11 @@ function WorldSection(props) {
           }, undefined, false, undefined, this) : /* @__PURE__ */ u3(BuildLink, {}, undefined, false, undefined, this)
         ]
       }, undefined, true, undefined, this),
-      page6 === "spawn" ? /* @__PURE__ */ u3(SpawnPage, {
+      page7 === "spawn" ? /* @__PURE__ */ u3(SpawnPage, {
         editor,
         onBack: pages.back
       }, undefined, false, undefined, this) : null,
-      page6 === "fight" && fight ? /* @__PURE__ */ u3(GmPage, {
+      page7 === "fight" && fight ? /* @__PURE__ */ u3(GmPage, {
         name: "fight",
         title: "Fight",
         subtitle: `Round ${fight.round} · ${turn}`,
@@ -64737,7 +65206,7 @@ function WorldSection(props) {
         editor,
         onBack: pages.back
       }, undefined, false, undefined, this) : null,
-      page6 === "batch" && chosen.length > 0 ? /* @__PURE__ */ u3(BatchPage, {
+      page7 === "batch" && chosen.length > 0 ? /* @__PURE__ */ u3(BatchPage, {
         editor,
         ids: chosen,
         onBack: pages.back
@@ -64846,6 +65315,7 @@ function GmPanel(props) {
         gm: editor.gm,
         currency: editor.currency,
         busy: editor.busy,
+        reloadKey: gmReloadKey(props.state),
         edit: editor.edit,
         reload: async () => void await load(),
         changed,
@@ -65996,16 +66466,16 @@ function remember(turns, turn) {
   if (turns.size > REMEMBERED)
     turns.delete(turns.values().next().value ?? "");
 }
-function startPreparedReplies(client, page6) {
+function startPreparedReplies(client, page7) {
   const started = new Set;
   const told = new Set;
   return client.onGenerate((push) => {
-    if (page6.activeChat() !== push.chatId || !client.visible() || started.has(push.turn))
+    if (page7.activeChat() !== push.chatId || !client.visible() || started.has(push.turn))
       return;
     const as = push.as;
     if (as === "send") {
       if (!told.has(push.turn))
-        page6.toast("The engine is ready: press Send for the reply.", "info");
+        page7.toast("The engine is ready: press Send for the reply.", "info");
       remember(told, push.turn);
       return;
     }
@@ -66014,8 +66484,8 @@ function startPreparedReplies(client, page6) {
         return;
       remember(started, push.turn);
       const command = as === "continue" ? "Continue" : "Regenerate";
-      if (!await page6.generate(as))
-        page6.toast(`The engine is ready, but ${command} couldn't start here: use ${command} on the last message.`, "error");
+      if (!await page7.generate(as))
+        page7.toast(`The engine is ready, but ${command} couldn't start here: use ${command} on the last message.`, "error");
     });
   });
 }
@@ -66294,6 +66764,12 @@ var CHAT_CSS = `
 .lre .lre-chat-pill.primary{border-color:color-mix(in srgb,var(--lre-accent) 45%,transparent);background:var(--lre-accent-soft);color:var(--lre-accent-text)}
 .lre .lre-chat-pill.primary:hover:not(:disabled){background:color-mix(in srgb,var(--lre-accent) 24%,transparent)}
 .lre .lre-chat-pill.primary .lre-chat-pill-text{color:var(--lre-fg)}
+.lre .lre-spoiler{min-width:0;max-width:100%}
+.lre .lre-spoiler>summary{display:inline-flex;align-items:center;gap:6px;min-height:var(--lre-tap);padding:var(--lre-s1) 14px;border:1px dashed var(--lre-border);border-radius:var(--lre-r-pill);color:var(--lre-muted);font-size:var(--lre-fs-sm);cursor:pointer;list-style:none}
+.lre .lre-spoiler>summary::-webkit-details-marker{display:none}
+.lre .lre-spoiler[open]>summary{margin-bottom:var(--lre-s1)}
+.lre .lre-chat-spoilers{display:flex;flex-direction:column;gap:var(--lre-s1);margin:0;padding:0;list-style:none}
+.lre .lre-spoiler-text{color:var(--lre-muted);overflow-wrap:anywhere;white-space:pre-line}
 .lre .lre-chat-pill.danger{color:var(--lre-neg);border-color:color-mix(in srgb,var(--lre-danger) 40%,transparent)}
 .lre .lre-chat-pill[aria-pressed=true]{border-color:transparent;background:var(--lre-accent-fill);color:var(--lre-accent-fg)}
 .lre .lre-chat-pill[aria-pressed=true]:hover:not(:disabled){background:var(--lre-accent-fill)}
@@ -66989,6 +67465,9 @@ var LIVE_CSS = `
 .lre-live-write[data-lre-live-write=refused]{color:var(--lre-neg)}
 .lre-live-mark{color:var(--lre-muted);text-align:center}
 .lre-live-mark.failed{color:var(--lre-neg);text-align:left}
+.lre-live-mark.review{color:var(--lre-fg);text-align:left}
+.lre-live-mark.review.failed{color:var(--lre-neg)}
+.lre-live-review{margin:var(--lre-s1) 0 0;padding-left:var(--lre-s3);color:var(--lre-fg);overflow-wrap:anywhere}
 .lre-live-follow{position:sticky;bottom:var(--lre-s2);display:flex;justify-content:center;pointer-events:none}
 .lre-live-follow>.lre-btn{pointer-events:auto}
 `;
@@ -67668,7 +68147,8 @@ var WORKSPACE_CSS = `
 .lre-ws-chip{display:inline-block;padding:0 var(--lre-s1);border:1px solid currentColor;border-radius:var(--lre-r-sm);font-family:var(--lre-font);font-size:var(--lre-fs-xs);font-weight:600;line-height:1.45;letter-spacing:.04em;text-transform:uppercase;white-space:nowrap;color:var(--lre-muted)}
 .lre-ws-chip[data-chip=who]{color:var(--lre-fg)}
 .lre-ws-chip[data-chip=pinned]{color:var(--lre-accent-text)}
-.lre-ws-chip[data-chip=learned]{color:var(--lre-pos)}
+.lre-ws-chip[data-chip=learned],.lre-ws-chip[data-chip=global]{color:var(--lre-pos)}
+.lre-ws-chip[data-chip=system]{color:var(--lre-accent-text)}
 .lre-ws-chip[data-chip=read-only],.lre-ws-chip[data-chip=unsent],.lre-ws-chip[data-chip=warn]{color:var(--lre-warn)}
 .lre-ws-pane{min-width:0}
 .lre-ws-editor-bar{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:var(--lre-s2)}

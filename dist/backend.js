@@ -10,6 +10,14 @@ var UNSAFE_KEYS = new Set(["__proto__", "constructor", "prototype"]);
 function safeKey(key) {
   return typeof key === "string" && key.length > 0 && key.length <= 200 && !UNSAFE_KEYS.has(key);
 }
+function deepFreeze(value) {
+  if (typeof value !== "object" || value === null || Object.isFrozen(value))
+    return value;
+  Object.freeze(value);
+  for (const v of Object.values(value))
+    deepFreeze(v);
+  return value;
+}
 
 // src/shared/classes.ts
 var NESTING_DEPTH = 16;
@@ -6408,6 +6416,12 @@ function secretMarkText(text, known, kept2, wording = SECRET_MARK_WORDING) {
   const values = { text, known: known.join(", "), kept: keptFrom ?? wording.everyone };
   return template.replace(/\{\{(text|known|kept)\}\}/g, (whole2, key) => values[key] ?? whole2);
 }
+function holdsSecretMark(text, wording = SECRET_MARK_WORDING) {
+  return [wording.known, wording.kept, wording.both].some((form) => {
+    const parts = form.split(/\{\{(?:text|known|kept)\}\}/);
+    return parts.join("").trim() !== "" && new RegExp(parts.map((p) => p.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("[\\s\\S]*?")).test(text);
+  });
+}
 function secretMarkForms(wording = SECRET_MARK_WORDING) {
   const cases = [[["\u2026"], "everyone"], [[], ["\u2026"]], [[], "everyone"], [["\u2026"], ["\u2026"]]];
   return [...new Set(cases.map(([known, kept2]) => neutralizeMacros(secretMarkText("\u2026", known, kept2, wording))))];
@@ -7295,7 +7309,7 @@ function narratorSettingsOf(raw, base) {
 function loreBooksSettingOf(raw) {
   return Array.isArray(raw) ? [...new Set(raw.filter((id) => typeof id === "string" && id !== ""))] : "auto";
 }
-var LORE_INDEX_DEFAULTS = Object.freeze({ tagPattern: "^lr\\d{4}$", idPrefix: "lre", idDigits: 4, holdsChars: 100, inPrompts: false, promptTokens: 1500, own: null, built: null });
+var LORE_INDEX_DEFAULTS = Object.freeze({ tagPattern: "^lr\\d{4}$", idPrefix: "lre", idDigits: 4, holdsChars: 100, promptTokens: 1500, own: null, built: null });
 var SHORT_ID = /^[\p{L}\p{N}_.-]+$/u;
 var LORE_INDEX_BOUNDS = { idPrefix: 16, idDigits: [1, 9], holdsChars: [0, 2000], promptTokens: [1, 1e6] };
 function tagPatternOf(pattern) {
@@ -7321,7 +7335,6 @@ function loreIndexSettingsOf(raw, base = LORE_INDEX_DEFAULTS) {
     idPrefix: typeof v.idPrefix === "string" && v.idPrefix.length <= LORE_INDEX_BOUNDS.idPrefix && isShortId(v.idPrefix) ? v.idPrefix : base.idPrefix,
     idDigits: int(v.idDigits, LORE_INDEX_BOUNDS.idDigits, base.idDigits),
     holdsChars: int(v.holdsChars, LORE_INDEX_BOUNDS.holdsChars, base.holdsChars),
-    inPrompts: typeof v.inPrompts === "boolean" ? v.inPrompts : base.inPrompts,
     promptTokens: int(v.promptTokens, LORE_INDEX_BOUNDS.promptTokens, base.promptTokens),
     own: v.own === undefined ? base.own : entryRefOf(v.own),
     built: v.built === undefined ? base.built : built && worldId ? { ...built, worldId } : null
@@ -7756,7 +7769,7 @@ var entity = "The person or thing: their id, or their name as the world has it."
 var person2 = "The person: their id, or their name as the world has it.";
 var field = "The field's id.";
 var relation = "The relation type's id: knows, owns, member_of, regard, in, or one of the world's own.";
-var path = "The workspace file's path: names joined by /, such as notes/marcus.md.";
+var path = "The workspace file's path: names joined by /, such as notes/marcus.md; start it with ~/ for the global workspace, which every chat shares, such as ~/notes/style.md.";
 var under = "Only files under this folder, such as notes/; leave it out for every file.";
 var lore = "The lore entry's id, as lore_index, lore_search or lore_grep gives it: a short id such as lr0101, a World Info entry as bookId/entryId, or a world entry's own id.";
 var proposes = "The answer is the change in plain words, its change type and its mode. Working a turn, the change is staged at once: it lands when the turn commits, or, when its mode is confirm, waits for the game master's Apply on the turn's review card. Otherwise nothing changes until the game master applies it.";
@@ -7831,7 +7844,7 @@ var WRITE_TOOL_TEXTS = [
     args: [
       { path: "kind", text: "Its kind." },
       { path: "name", text: "Its name." },
-      { path: "id", text: "An id of your own for it; leave it out for one the engine makes. Reading with the player character's knowledge, always leave it out: an id is refused." },
+      { path: "id", text: "An id of your own for it; leave it out for one the engine makes." },
       { path: "tier", text: "Its tier; leave it out for the world's spawn tier." },
       { path: "place", text: "Where it starts: a place's id or name." },
       { path: "agent", text: "true: it lives on its own between turns." }
@@ -7999,8 +8012,8 @@ var WRITE_TOOL_TEXTS = [
     name: "workspace_list",
     family: "workspace",
     tier: "read",
-    note: "Lists the chat's workspace files.",
-    text: "List the chat's workspace files, the notes the agents and the game master keep for this chat: each one's path, its size in characters, whether it is pinned, the turn it was written on and who wrote it. The workspace follows the chat's turns, so a swipe from before a note has none of it.",
+    note: "Lists the workspace files: the chat's and the global ones (~/).",
+    text: "List the workspace files: the chat's, the notes the agents and the game master keep for this chat, and the global workspace's under ~/, which every chat of the player's shares. Each one's path, its size in characters, whether it is pinned, the turn it was written on and who wrote it. AGENTS.md and roles/<role>.md, at either level, are system files: every agent is given AGENTS.md as its instructions, and each role its own roles/<role>.md. Each turn's transcript is under transcripts/, to read. The chat's story notes follow its turns, so a swipe from before a note has none of it; files under learned/ and ~/ stay as they are.",
     args: [{ path: "under", text: under }]
   },
   {
@@ -8077,6 +8090,18 @@ var WRITE_TOOL_TEXTS = [
     ]
   },
   {
+    name: "condense",
+    family: "workspace",
+    tier: "gm",
+    note: "Condenses a long source into a workspace note, with one call of the agent's own model.",
+    text: `Condense a long source (a workspace file, a turn's transcript among them, or a lore entry) into a short workspace note: your own model writes it in one call, and the note opens with its source and the source's hash, so whoever reads it later can tell whether it is still current. Read the note, or name it in a task, instead of the whole source. ${proposes}`,
+    args: [
+      { path: "source", text: `The source: a workspace file's path, or a lore entry's id. ${lore}` },
+      { path: "note", text: "Where the note goes: a workspace path; leave it out for notes/condensed/ and a name taken from the source's." },
+      { path: "focus", text: "What the note should keep: the task it is for, or what matters in the source; leave it out for a plain digest." }
+    ]
+  },
+  {
     name: "lore_index",
     family: "lore",
     tier: "read",
@@ -8145,13 +8170,8 @@ var WRITE_NOTE = {
   badOp: "tool.note.bad_op",
   badPath: "tool.note.bad_path",
   noFile: "tool.note.no_file",
-  pathTaken: "tool.note.path_taken",
   never: "tool.note.never",
   spawnCap: "tool.note.spawn_cap",
-  spawnId: "tool.note.spawn_id",
-  notYourMind: "tool.note.not_your_mind",
-  povEffect: "tool.note.pov_effect",
-  povRefused: "tool.note.pov_refused",
   learnedMove: "tool.note.learned_move",
   transcriptReadOnly: "tool.note.transcript_read_only",
   fileExists: "tool.note.file_exists",
@@ -8171,26 +8191,23 @@ var WRITE_NOTE = {
   gmCap: "tool.note.gm_cap",
   workspaceLine: "tool.note.workspace_line",
   staged: "tool.note.staged",
-  stagedReview: "tool.note.staged_review"
+  stagedReview: "tool.note.staged_review",
+  noSource: "tool.note.no_source",
+  condenseFailed: "tool.note.condense_failed"
 };
 var filePath = { name: "path", text: "the workspace path the call gave" };
 var WRITE_TOOL_NOTES = [
   { id: WRITE_NOTE.noWriter, label: "Nothing to write with", note: "A write tool's answer when the agent may only read.", text: "This agent can't change anything here: it only reads.", vars: [] },
   { id: WRITE_NOTE.badOp, label: "A change it can't read", note: "A write's answer when the change it was given isn't one the engine can read.", text: "That change isn't one the engine can read: check it against the tool's description.", vars: [] },
-  { id: WRITE_NOTE.badPath, label: "Not a workspace path", note: "A workspace write's answer when the path isn't one a file may have.", text: "{{path}} isn't a workspace path: names of letters, digits, \u201C.\u201D, \u201C_\u201D and \u201C-\u201D, joined by /.", vars: [filePath] },
-  { id: WRITE_NOTE.noFile, label: "No such file", note: "A workspace tool's answer when no file is at the path, or none the agent's knowledge may read.", text: "No workspace file {{path}} here.", vars: [filePath] },
-  { id: WRITE_NOTE.pathTaken, label: "A path taken by a file it can't read", note: "A workspace write's answer when a file the agent's knowledge may not read (Who may read it, GM \u2192 Workspace) is at the path.", text: "A workspace file you can't read is already at {{path}}: pick another path.", vars: [filePath] },
+  { id: WRITE_NOTE.badPath, label: "Not a workspace path", note: "A workspace write's answer when the path isn't one a file may have.", text: "{{path}} isn't a workspace path: names of letters, digits, \u201C.\u201D, \u201C_\u201D and \u201C-\u201D, joined by /, with ~/ before them for the global workspace.", vars: [filePath] },
+  { id: WRITE_NOTE.noFile, label: "No such file", note: "A workspace tool's answer when no file is at the path.", text: "No workspace file {{path}} here.", vars: [filePath] },
   { id: WRITE_NOTE.never, label: "A change type set to Never", note: "A write's answer when the user set its change type to Never in Settings \u2192 Changes from the reply.", text: "{{type}} is set to Never (Settings \u2192 Changes from the reply), so this change isn't made.", vars: [{ name: "type", text: "the change type, as Settings names it", required: true }] },
   { id: WRITE_NOTE.spawnCap, label: "The spawn cap", note: "A GM spawn's answer when the chat has brought in as many people as its world allows.", text: "This chat has brought in {{count}} {{people}}, all its world allows (its spawn cap, Build \u2192 World), so no one new can join it.", vars: [{ name: "count", text: "the people the chat has brought in", required: true }, { name: "people", text: '"person" for 1, else "people"' }] },
-  { id: WRITE_NOTE.spawnId, label: "An id a spawn can't take", note: "A GM spawn's answer, under the player character's knowledge, when the id it asks for is taken or isn't an id: one answer whoever holds it, so it never tells of someone the player character can't know.", text: "{{id}} can't be used for someone or something new: leave the id out, and one is made.", vars: [{ name: "id", text: "the id the spawn asked for" }] },
-  { id: WRITE_NOTE.notYourMind, label: "Another's mind", note: "A minds change's answer, under the player character's knowledge, for anyone but the player character: one answer whoever it is and whatever their mind holds, so it never tells what another knows or thinks.", text: "{{pov}} can't see into anyone else's mind, and you read the world as {{pov}} knows it: only what {{pov}} knows may be changed.", vars: [{ name: "pov", text: "the player character's name" }] },
-  { id: WRITE_NOTE.povEffect, label: "An effect under your character's knowledge", note: "gm_effect's answer under the player character's knowledge: one answer for every effect, whatever it would touch, since an effect works on what the player character may not know of.", text: "Effects aren't proposed with {{pov}}'s knowledge: their workings reach past what {{pov}} knows. Use the other tools, or ask the game master.", vars: [{ name: "pov", text: "the player character's name" }] },
-  { id: WRITE_NOTE.povRefused, label: "A refusal under your character's knowledge", note: "A write's answer, under the player character's knowledge, whenever the engine refuses the change: one answer whatever the engine's reason, so a refusal never tells what the player character can't know.", text: "That change can't be made as {{pov}} knows the world: check it against what you can read, or propose another.", vars: [{ name: "pov", text: "the player character's name" }] },
   { id: WRITE_NOTE.tooMany, label: "Too many changes at once", note: "An apply's answer when one batch holds more changes than one GM edit may.", text: "One batch holds at most {{max}} changes, as one GM edit does.", vars: [{ name: "max", text: "the most one GM edit holds", required: true }] },
   { id: WRITE_NOTE.editMissing, label: "Text not in the file", note: "workspace_edit's answer when the file doesn't hold the text to replace.", text: "{{path}} doesn't hold that text.", vars: [filePath] },
-  { id: WRITE_NOTE.learnedMove, label: "Into or out of learned/", note: "workspace_move's answer when it would take a file into or out of the learned area (learned/), which is kept apart from the turns.", text: "{{path}} can't move to {{to}}: files under learned/ stay there, and the others stay out of it. Write the file at its new path, then delete the old one.", vars: [filePath, { name: "to", text: "the path it was to move to" }] },
+  { id: WRITE_NOTE.learnedMove, label: "Out of its part of the workspace", note: "workspace_move's answer when it would take a file from one part of the workspace to another: the chat's story, the learned area (learned/) or the global workspace (~/), the last two kept apart from the turns.", text: "{{path}} can't move to {{to}}, since files stay in their part: the chat's story, learned/, or the global workspace ~/. Write the file at its new path, then delete the old one.", vars: [filePath, { name: "to", text: "the path it was to move to" }] },
   { id: WRITE_NOTE.transcriptReadOnly, label: "A transcript", note: "A workspace change's answer when it touches transcripts/, where each turn's transcript is kept to read: nothing writes, moves, deletes or pins a file there.", text: "{{path}} is under transcripts/, where each turn's transcript is kept as it was: read it, but write your notes at another path.", vars: [filePath] },
-  { id: WRITE_NOTE.fileExists, label: "A path taken in learned/", note: "workspace_move's answer, in the learned area, when a file is already at the path it was to move to.", text: "A workspace file is already at {{to}}: pick another path.", vars: [{ name: "to", text: "the path it was to move to" }] },
+  { id: WRITE_NOTE.fileExists, label: "A path taken in learned/ or ~/", note: "workspace_move's answer, in the learned area or the global workspace, when a file is already at the path it was to move to.", text: "A workspace file is already at {{to}}: pick another path.", vars: [{ name: "to", text: "the path it was to move to" }] },
   { id: WRITE_NOTE.editSeveral, label: "Text in the file more than once", note: "workspace_edit's answer when the text to replace is there more than once and all isn't set.", text: "{{path}} holds that text {{count}} times: give more of it to pick one, or set all to replace every one.", vars: [filePath, { name: "count", text: "how many times the file holds it", required: true }] },
   { id: WRITE_NOTE.noLore, label: "No such lore entry", note: "A lore tool's answer when no entry has the id, or none the agent's knowledge may read.", text: "No lore entry {{id}} here.", vars: [{ name: "id", text: "the entry id the call gave" }] },
   { id: WRITE_NOTE.draftPath, label: "A draft outside lore-drafts/", note: "lore_draft's answer when the path it was given isn't under lore-drafts/.", text: "A lore draft goes under lore-drafts/, and {{path}} isn't there.", vars: [filePath] },
@@ -8199,13 +8216,15 @@ var WRITE_TOOL_NOTES = [
   { id: WRITE_NOTE.cancelled, label: "Cancelled", note: "A write's answer when the agent's work was cancelled before it ran.", text: "The agent's work was cancelled, so nothing was checked or written.", vars: [] },
   { id: WRITE_NOTE.paused, label: "The chat is paused", note: "An apply's answer while an earlier message's edit waits for Keep or Discard.", text: "An earlier message was edited: Keep or Discard it first, under that message.", vars: [] },
   { id: WRITE_NOTE.noWorld, label: "No world", note: "A write's answer when the chat plays no LumiRPEngine world, or its world isn't loaded.", text: "This chat plays no LumiRPEngine world, or its world isn't loaded.", vars: [] },
-  { id: WRITE_NOTE.noChange, label: "A change that changes nothing", note: "A write's answer when the change would leave everything as it is, or, under the player character's knowledge, when it can't be made for a reason the player mustn't learn of.", text: "That changes nothing.", vars: [] },
+  { id: WRITE_NOTE.noChange, label: "A change that changes nothing", note: "A write's answer when the change would leave everything as it is.", text: "That changes nothing.", vars: [] },
   { id: WRITE_NOTE.stale, label: "The chat changed meanwhile", note: "An apply's answer when the chat changed between the check and the write (a turn landed), so the engine no longer takes the change.", text: "The chat changed while this was being written, so it no longer applies: read it again and propose the change anew.", vars: [] },
-  { id: WRITE_NOTE.notGranted, label: "A change the role isn't granted", note: "A turn agent's write answer when its role's tier (Settings \u2192 Agents \u2192 Roles) doesn't take that kind of change: the GM's edits need the GM tier, and so does the pins manifest (.pins.json, which sets what every agent is shown first); a role that only reads changes nothing.", text: "This role may make {{tier}} changes only, and this one is a {{needs}} change, so it isn't made.", vars: [{ name: "tier", text: "what the role may change: read (nothing), story or gm", required: true }, { name: "needs", text: "what the change needs: story or gm", required: true }] },
+  { id: WRITE_NOTE.notGranted, label: "A change the role isn't granted", note: "A turn agent's write answer when its role's tier (Settings \u2192 Agents \u2192 Roles) doesn't take that kind of change: the GM's edits need the GM tier, a workspace change (.pins.json and the system files included) the story tier; a role that only reads changes nothing.", text: "This role may make {{tier}} changes only, and this one is a {{needs}} change, so it isn't made.", vars: [{ name: "tier", text: "what the role may change: read (nothing), story or gm", required: true }, { name: "needs", text: "what the change needs: story or gm", required: true }] },
   { id: WRITE_NOTE.gmCap, label: "GM edits per turn", note: "A turn agent's write answer once the turn's agents have staged as many of the GM's edits as Settings \u2192 Agents \u2192 Budgets allows.", text: "This turn's agents have staged {{count}} of the GM's edits, all a turn allows (GM edits per turn, Settings \u2192 Agents \u2192 Budgets), so this one isn't made.", vars: [{ name: "count", text: "the GM edits the turn's agents have staged", required: true }] },
-  { id: WRITE_NOTE.workspaceLine, label: "A workspace change, below the GM", note: "The line a workspace change reads as under the player character's knowledge (the review card's) and everyone's: one line naming no file, as the player's Journal shows none. Under the GM's knowledge it reads as the GM's line, with its path.", text: "A note the story's agents keep changes.", vars: [] },
+  { id: WRITE_NOTE.workspaceLine, label: "A workspace change, below the GM", note: "The line a workspace change reads as on the review card and under everyone's view: one line naming no file, as the player's Journal shows none. Under the GM's view it reads as the GM's line, with its path.", text: "A note the story's agents keep changes.", vars: [] },
   { id: WRITE_NOTE.staged, label: "Staged in a turn", note: "A write tool's answer, working a turn, for a change it staged whose mode is Auto: it lands when the turn commits.", text: "Staged for this turn: it lands when the turn commits.", vars: [] },
-  { id: WRITE_NOTE.stagedReview, label: "Staged for the review card", note: "A write tool's answer, working a turn, for a change it staged whose mode is Confirm (Settings \u2192 Changes from the reply): it waits on the turn's review card.", text: "Staged for this turn, waiting for the GM's Apply on the review card: it lands only once the game master applies it.", vars: [] }
+  { id: WRITE_NOTE.stagedReview, label: "Staged for the review card", note: "A write tool's answer, working a turn, for a change it staged whose mode is Confirm (Settings \u2192 Changes from the reply): it waits on the turn's review card.", text: "Staged for this turn, waiting for the GM's Apply on the review card: it lands only once the game master applies it.", vars: [] },
+  { id: WRITE_NOTE.noSource, label: "No such source", note: "condense's answer when its source is neither a workspace file's path nor a lore entry's id.", text: "{{source}} is neither a workspace file nor a lore entry here.", vars: [{ name: "source", text: "the source the call gave" }] },
+  { id: WRITE_NOTE.condenseFailed, label: "Condensing failed", note: "condense's answer when its model call gave no note.", text: "{{source}} wasn't condensed: {{reason}}", vars: [{ name: "source", text: "the source it was to condense" }, { name: "reason", text: "why the call gave no note" }] }
 ];
 
 // src/shared/agent-tools.ts
@@ -8223,12 +8242,6 @@ var TOOL_FAMILY_LABEL = {
   workspace: "Workspace"
 };
 var AGENT_KNOWLEDGE = ["pov", "everyone", "gm"];
-function knowledgeWithin(k, of) {
-  return AGENT_KNOWLEDGE.indexOf(k) <= AGENT_KNOWLEDGE.indexOf(of);
-}
-function widerKnowledge(a, b) {
-  return knowledgeWithin(a, b) ? b : a;
-}
 function isAgentKnowledge(v) {
   return typeof v === "string" && AGENT_KNOWLEDGE.includes(v);
 }
@@ -8244,12 +8257,10 @@ var TOOL_NOTE = {
   noThing: "tool.note.no_thing",
   noTrack: "tool.note.no_track",
   noFact: "tool.note.no_fact",
-  noField: "tool.note.no_field",
   ambiguous: "tool.note.ambiguous",
   missing: "tool.note.missing",
   badValue: "tool.note.bad_value",
-  badValueUnlisted: "tool.note.bad_value_unlisted",
-  hidden: "tool.note.hidden"
+  badValueUnlisted: "tool.note.bad_value_unlisted"
 };
 var asked = { name: "name", text: "the name or id the model asked for, as it wrote it" };
 var LAYER_NOTES = [
@@ -8257,8 +8268,7 @@ var LAYER_NOTES = [
   { id: TOOL_NOTE.noPlace, label: "No such place", note: "A tool's answer when a place's name or id names no place the agent's knowledge can see.", text: "No such place here: {{name}}.", vars: [asked] },
   { id: TOOL_NOTE.noThing, label: "No such thing", note: "A tool's answer when a thing's name or id names nothing the agent's knowledge can see.", text: "No such thing here: {{name}}.", vars: [asked] },
   { id: TOOL_NOTE.noTrack, label: "No such quest or secret", note: "A tool's answer when a quest, secret, puzzle or agenda's id or label names none the agent's knowledge can see.", text: "No such quest, secret, puzzle or agenda here: {{name}}.", vars: [asked] },
-  { id: TOOL_NOTE.noFact, label: "No such fact", note: "A tool's answer when a fact's id names no fact the agent's knowledge can see: under the player character's knowledge, one it doesn't hold reads exactly as one the chat doesn't record.", text: "No such fact here: {{name}}.", vars: [asked] },
-  { id: TOOL_NOTE.noField, label: "No such field", note: "A write's answer, under the player character's knowledge, when a field names none it may see of that person or thing: a hidden field reads exactly as one its kind doesn't have.", text: "No such field here: {{name}}.", vars: [asked] },
+  { id: TOOL_NOTE.noFact, label: "No such fact", note: "A tool's answer when a fact's id names no fact the chat records.", text: "No such fact here: {{name}}.", vars: [asked] },
   {
     id: TOOL_NOTE.ambiguous,
     label: "Several match",
@@ -8292,20 +8302,13 @@ var LAYER_NOTES = [
   {
     id: TOOL_NOTE.badValueUnlisted,
     label: "A value it doesn't take, with none to list",
-    note: "A tool's answer when an argument holds a value the tool doesn't take and there is none it may list: under the player character's knowledge, a quest's stages it hasn't come to.",
+    note: "A tool's answer when an argument holds a value the tool doesn't take and there is none it may list.",
     text: "{{tool}} doesn't take {{value}} as {{arg}}.",
     vars: [
       { name: "tool", text: "the tool" },
       { name: "arg", text: "the argument" },
       { name: "value", text: "the value given", required: true }
     ]
-  },
-  {
-    id: TOOL_NOTE.hidden,
-    label: "Beyond the player character's knowledge",
-    note: "A tool's answer, under the player character's knowledge, to what the player character can't know: another's mind or knowledge, or another's odds.",
-    text: "{{pov}} doesn't know that, and you read the world as {{pov}} knows it.",
-    vars: [{ name: "pov", text: "the player character's name" }]
   }
 ];
 var TOOL_NOTES = [...LAYER_NOTES, ...WRITE_TOOL_NOTES];
@@ -8329,9 +8332,42 @@ function isWorkspacePath(v) {
     return false;
   return v.split("/").every((name) => name !== "." && name !== ".." && PATH_SEGMENT.test(name));
 }
+var GLOBAL_PREFIX = "~/";
+function isGlobalPath(v) {
+  return typeof v === "string" && v.startsWith(GLOBAL_PREFIX) && isWorkspacePath(v.slice(GLOBAL_PREFIX.length));
+}
+function isFilePath(v) {
+  return isWorkspacePath(v) || isGlobalPath(v);
+}
+function levelPath(path2) {
+  return path2.startsWith(GLOBAL_PREFIX) ? path2.slice(GLOBAL_PREFIX.length) : path2;
+}
+var AGENTS_PATH = "AGENTS.md";
+var ROLES_DIR = "roles/";
+function systemPaths(role) {
+  const own2 = `${ROLES_DIR}${role}.md`;
+  return [`${GLOBAL_PREFIX}${AGENTS_PATH}`, `${GLOBAL_PREFIX}${own2}`, AGENTS_PATH, own2];
+}
+function isSystemPath(path2) {
+  const at = levelPath(path2);
+  return at === AGENTS_PATH || at.startsWith(ROLES_DIR) && at.endsWith(".md") && !at.slice(ROLES_DIR.length).includes("/");
+}
 var LEARNED_DIR = "learned/";
 function isLearnedPath(path2) {
   return path2.startsWith(LEARNED_DIR);
+}
+function isKeptPath(path2) {
+  return isLearnedPath(path2) || isGlobalPath(path2);
+}
+function keptFileOf(raw) {
+  if (!isRecord(raw) || !isBlobHash(raw.hash))
+    return null;
+  if (raw.pinned !== undefined && raw.pinned !== true || raw.role !== undefined && typeof raw.role !== "string")
+    return null;
+  return { hash: raw.hash, ...raw.pinned === true ? { pinned: true } : {}, ...typeof raw.role === "string" ? { role: raw.role } : {} };
+}
+function keptFileJson(file) {
+  return { hash: file.hash, ...file.pinned ? { pinned: true } : {}, ...file.role !== undefined ? { role: file.role } : {} };
 }
 var PINS_PATH = ".pins.json";
 var TRANSCRIPTS_DIR = "transcripts/";
@@ -8371,9 +8407,6 @@ function wsDelete(path2) {
 function wsPin(path2, pinned) {
   return { type: WS_PIN, data: { path: path2, pinned } };
 }
-function wsReaders(path2, readers) {
-  return { type: WS_READERS, data: { path: path2, readers } };
-}
 function workspaceOf(state) {
   const raw = engineSlice(state)[WS_KEY];
   const out = {};
@@ -8393,19 +8426,6 @@ function workspacePins(state) {
     if (isWorkspacePath(path2) && pinned === true)
       out[path2] = true;
   return out;
-}
-function workspaceReaders(state) {
-  const raw = engineSlice(state)[READERS_KEY];
-  const out = {};
-  if (!isRecord(raw))
-    return out;
-  for (const [path2, readers] of Object.entries(raw))
-    if (isWorkspacePath(path2) && isAgentKnowledge(readers))
-      out[path2] = readers;
-  return out;
-}
-function readersOf(state, path2) {
-  return own(workspaceReaders(state), path2) ?? "gm";
 }
 function workspaceRefs(events) {
   const out = [];
@@ -8500,8 +8520,8 @@ var strings = (v) => Array.isArray(v) && v.every((s) => typeof s === "string");
 function outLines(kind, lines) {
   return { type: OUT_LINES, data: { kind, lines: [...lines] } };
 }
-function outScene(lore2, notes, knowledge) {
-  return { type: OUT_SCENE, data: { lore: [...lore2], notes: [...notes], knowledge } };
+function outScene(lore2, notes) {
+  return { type: OUT_SCENE, data: { lore: [...lore2], notes: [...notes] } };
 }
 var outLinesEvent = {
   type: OUT_LINES,
@@ -8528,15 +8548,12 @@ function outputsOf(events) {
   for (const e of events) {
     if (e.type !== OUT_LINES && e.type !== OUT_SCENE || !("data" in e) || !isRecord(e.data))
       continue;
-    out ??= { outcome: [], montage: [], outline: [], brief: null, scene: { lore: [], notes: [], knowledge: "pov" } };
+    out ??= { outcome: [], montage: [], outline: [], brief: null, scene: { lore: [], notes: [] } };
     if (e.type === OUT_SCENE) {
       if (strings(e.data.lore))
         out.scene.lore.push(...e.data.lore);
       if (strings(e.data.notes))
         out.scene.notes.push(...e.data.notes);
-      const knowledge = isAgentKnowledge(e.data.knowledge) ? e.data.knowledge : "everyone";
-      if (AGENT_KNOWLEDGE.indexOf(knowledge) > AGENT_KNOWLEDGE.indexOf(out.scene.knowledge))
-        out.scene.knowledge = knowledge;
       continue;
     }
     if (!strings(e.data.lines))
@@ -64324,18 +64341,12 @@ function effectOp(reg, w, op, opts, rng) {
 function workspaceOp(w, op) {
   const files = workspaceOf(w.state);
   switch (op.op) {
-    case "ws_write": {
-      if (!isWorkspacePath(op.path) || !isBlobHash(op.hash) || !isAgentKnowledge(op.readers))
-        return reject17("bad_op", "a workspace file's path is names joined by /, its body a stored text, and its readers a knowledge");
-      const held3 = own(files, op.path);
-      const before = held3 === undefined ? "gm" : readersOf(w.state, op.path);
-      if (held3 === op.hash && before === op.readers)
+    case "ws_write":
+      if (!isWorkspacePath(op.path) || !isBlobHash(op.hash))
+        return reject17("bad_op", "a workspace file's path is names joined by /, and its body a stored text");
+      if (own(files, op.path) === op.hash)
         return reject17("no_change", "the file already holds that text");
-      const events3 = held3 === op.hash ? [] : [wsWrite(op.path, op.hash)];
-      if (before !== op.readers)
-        events3.push(wsReaders(op.path, op.readers));
-      return applyAll2(w, events3);
-    }
+      return w.apply(wsWrite(op.path, op.hash));
     case "ws_delete":
       return w.apply(wsDelete(op.path));
     case "ws_move": {
@@ -64348,12 +64359,9 @@ function workspaceOp(w, op) {
         return reject17("no_change", "the file is already there");
       if (own(files, op.to) !== undefined)
         return reject17("file_exists", `there is a workspace file ${op.to} already`);
-      const shared = own(workspaceReaders(w.state), op.from);
       const events3 = [wsWrite(op.to, hash), wsDelete(op.from)];
       if (own(workspacePins(w.state), op.from))
         events3.push(wsPin(op.to, true));
-      if (shared !== undefined)
-        events3.push(wsReaders(op.to, shared));
       return applyAll2(w, events3);
     }
     case "ws_pin":
@@ -64362,14 +64370,6 @@ function workspaceOp(w, op) {
       if (own(workspacePins(w.state), op.path) === true === op.pinned)
         return reject17("no_change", op.pinned ? "the file is pinned already" : "the file isn't pinned");
       return w.apply(wsPin(op.path, op.pinned));
-    case "ws_readers":
-      if (own(files, op.path) === undefined)
-        return reject17("no_file", `no workspace file ${op.path}`);
-      if (!isAgentKnowledge(op.readers))
-        return reject17("bad_op", "a file's readers are a knowledge: pov, everyone or gm");
-      if (readersOf(w.state, op.path) === op.readers)
-        return reject17("no_change", "the file is read with that knowledge already");
-      return w.apply(wsReaders(op.path, op.readers));
   }
 }
 function applyOp(reg, w, op, opts, rng) {
@@ -64432,7 +64432,6 @@ function applyOp(reg, w, op, opts, rng) {
     case "ws_delete":
     case "ws_move":
     case "ws_pin":
-    case "ws_readers":
       return workspaceOp(w, op);
     case "clock": {
       const fixed = clockFix(reg, w.world, w.state, op.time, opts.runSeed);
@@ -64501,15 +64500,13 @@ function parseFixOps(raw) {
   return parseOps(raw, (o) => {
     switch (o.op) {
       case "ws_write":
-        return str14(o.path) && str14(o.hash) && (o.readers === undefined || str14(o.readers)) ? { op: "ws_write", path: o.path, hash: o.hash, readers: o.readers ?? "gm" } : null;
+        return str14(o.path) && str14(o.hash) ? { op: "ws_write", path: o.path, hash: o.hash } : null;
       case "ws_delete":
         return str14(o.path) ? { op: "ws_delete", path: o.path } : null;
       case "ws_move":
         return str14(o.from) && str14(o.to) ? { op: "ws_move", from: o.from, to: o.to } : null;
       case "ws_pin":
         return str14(o.path) && typeof o.pinned === "boolean" ? { op: "ws_pin", path: o.path, pinned: o.pinned } : null;
-      case "ws_readers":
-        return str14(o.path) && str14(o.readers) ? { op: "ws_readers", path: o.path, readers: o.readers } : null;
       case "clock":
         return str14(o.time) ? { op: "clock", time: o.time } : null;
       case "fix_set":
@@ -64821,7 +64818,7 @@ function hostBound(host, limit) {
     return host.noneMs ?? host.maxMs;
   return Math.min(host.maxMs, Math.max(host.minMs ?? 0, limit));
 }
-var TIMEOUT_KEYS = ["engineRunMs", "preLookupMs", "postReplyMs", "postLookupMs", "guardMs", "skipPlanMs", "requestMs", "caveatsMs", "mindsRunMs", "jobCallMs", "tokenCountMs", "laneStartupMs", "laneHeartbeatMs", "mcpReconnectMs"];
+var TIMEOUT_KEYS = ["engineRunMs", "preLookupMs", "finalReviewMs", "postReplyMs", "postLookupMs", "guardMs", "skipPlanMs", "requestMs", "caveatsMs", "mindsRunMs", "jobCallMs", "tokenCountMs", "laneStartupMs", "laneHeartbeatMs", "mcpReconnectMs"];
 var MIN = 60000;
 var TIMEOUTS = {
   engineRunMs: {
@@ -64842,6 +64839,15 @@ var TIMEOUTS = {
     minMs: 0,
     zero: "no lookups",
     none: "lookups may start until the run's last third"
+  },
+  finalReviewMs: {
+    label: "Final review",
+    group: "turn",
+    limits: "The main agent's final review of the narrator's prompt, after the engine run makes the turn's sections and before the reply is generated (Settings \u2192 Agents \u2192 Main agent \u2192 Final review).",
+    fires: "The review stops and its edits are dropped: the narrator gets the sections as the engine made them, with a Diagnostics record, or the turn stops with a Retry, as the review's failure setting says.",
+    defaultMs: 2 * MIN,
+    minMs: 1000,
+    none: "the review takes as long as it needs (its budget still bounds it)"
   },
   postReplyMs: {
     label: "Reading the reply",
@@ -65143,6 +65149,439 @@ function nextPath(m, parent, tombstones) {
   return stepPath(parent, false, content, recordHash(rec, livePost, parent), markersHash(live));
 }
 
+// src/shared/main-agent-prompts.ts
+var MAIN_AGENT_PAGE = {
+  id: "main",
+  label: "Main agent",
+  note: "The agent that runs a chat's turns while Settings \u2192 Agents \u2192 Pipeline has a main agent decide: its system prompt, the turn task it gets each turn with the digest and its pinned files, each stage's message, its tools and their answers, what a role it runs is told, and how its session is summarized."
+};
+var MAIN_TOOLS = { runRole: "run_role", revise: "revise", commit: "commit", summarize: "summarize", condense: "condense" };
+var MAIN_TEXT = {
+  system: "main.system",
+  context: "main.context",
+  contextRole: "main.context.role",
+  turn: "main.turn",
+  digest: "main.digest",
+  digestFresh: "main.digest.fresh",
+  digestEntry: "main.digest.entry",
+  digestLanded: "main.digest.landed",
+  digestLeftOut: "main.digest.left_out",
+  digestNothing: "main.digest.nothing",
+  none: "main.none",
+  pins: "main.pins",
+  pinsFile: "main.pins.file",
+  pinsHeadings: "main.pins.headings",
+  stage: "main.stage",
+  stageLabel: (stage) => `main.stage.${stage}`,
+  enginePrepare: "main.engine.prepare",
+  engineBeats: "main.engine.beats",
+  engineReply: "main.engine.reply",
+  engineRemember: "main.engine.memory_before",
+  open: "main.open",
+  request: (kind) => `main.request.${kind}`,
+  tool: (name) => `main.tool.${name}`,
+  toolArg: (name, arg) => `main.tool.${name}.${arg}`,
+  ran: "main.ran",
+  ranFailed: "main.ran.failed",
+  viaAgent: "main.via.agent",
+  viaPromptOnly: "main.via.prompt_only",
+  refusedOrder: "main.refused.order",
+  refusedOver: "main.refused.over",
+  refusedIdle: "main.refused.idle",
+  refusedRole: "main.refused.role",
+  refusedRan: "main.refused.ran",
+  refusedRunning: "main.refused.running",
+  refusedAgent: "main.refused.agent",
+  refusedRevisions: "main.refused.revisions",
+  refusedCommitted: "main.refused.committed",
+  committed: "main.committed",
+  brief: "main.brief",
+  briefRevision: "main.brief.revision",
+  historyCall: "main.history.call",
+  summary: "main.summary",
+  compaction: "main.compaction",
+  compactionInput: "main.compaction.input",
+  summarized: "main.summarized",
+  summarizeNothing: "main.summarize.nothing",
+  summarizeAgain: "main.summarize.again",
+  summarizeFailed: "main.summarize.failed"
+};
+var page = MAIN_AGENT_PAGE.id;
+var INSTRUCTIONS = "Instructions";
+var DIGEST = "Digest";
+var PINS = "Pinned files";
+var STAGES = "Stages";
+var REQUESTS = "What the engine asks";
+var TOOLS = "Tools";
+var ANSWERS = "Tool answers";
+var ROLES = "What a role is told";
+var SESSION = "Session";
+var v = (name, text5, required) => required ? { name, text: text5, required } : { name, text: text5 };
+var STAGE_TEXTS = {
+  memory_before: { label: "Stage 8, left to this turn", text: "the last reply's memory, which the last turn left to this one" },
+  intent: { label: "Stage 1: the intent", text: "the intent, what the player's message plays" },
+  prepare: { label: "Stage 3: scene, minds and decisions", text: "the scene, the minds of the people present and the director's decisions" },
+  beats: { label: "Stage 5: the beats", text: "the director's beats for the planned turn" },
+  read: { label: "Stage 7: the read", text: "the read of the reply, the knowledge it gives and the suggested choices" },
+  memory: { label: "Stage 8: the memory", text: "the minds' memory of the reply" }
+};
+var REQUEST_TEXTS = {
+  interpret: { label: "The intent: the message's action", text: "read the player's message into the action it plays" },
+  judge: { label: "The intent: the approach", text: "rate the approach the player described, for the check the action rolls" },
+  puzzle: { label: "The intent: a puzzle's answer", text: "judge how likely the player's answer to the puzzle is right" },
+  decisions: { label: "The director: decisions here", text: "give the odds of each choice open to the people present" },
+  minds: { label: "The minds", text: "think as each mind the scene calls on" },
+  skipPlan: { label: "The skip: its plan", text: "plan the time skip for the people it spans" },
+  skip: { label: "The skip: its beats", text: "find the time skip's beats, with the minds at them" },
+  scene: { label: "The scene", text: "pick the lore and notes the narrator needs for this scene" },
+  prose: { label: "The director: the beats", text: "write the brief and the outline's beats for the planned turn" },
+  extract: { label: "The read", text: "read the reply into the changes it makes" },
+  effects: { label: "A world step", text: "run the world's own step on the reply" },
+  knowledge: { label: "The knowledge", text: "work out what each person present or told learned from the reply" },
+  offscreen: { label: "The director: decisions elsewhere", text: "give the odds of each choice open to people elsewhere" },
+  choices: { label: "The director: suggested choices", text: "suggest the player's next moves" },
+  memory: { label: "The memory", text: "remember the reply for each mind present" }
+};
+var MAIN_AGENT_PROMPTS = [
+  {
+    id: MAIN_TEXT.system,
+    page,
+    group: INSTRUCTIONS,
+    label: "System prompt",
+    note: "Who the main agent is, what a turn's stages are, and how it works through them with its tools.",
+    text: `You are the main agent for {{world}}, a roleplay world that LumiRPEngine keeps; {{pov}} is the player character. You run this chat's turns behind the scenes, one at a time, and never write the story yourself: a narrator writes each reply, the engine plans each turn, rolls its checks from the turn's seed and keeps the world's state, and role agents do the work you give them.
+
+Each turn, the engine opens its stages in a fixed order: 1, the intent, what the player's message plays; 2, the engine's checks and gates; 3, the scene, the minds of the people present and the director's decisions; 4, the engine's plan; 5, the director's beats; 6, the narrator's reply; 7, the read of the reply, the knowledge it gives and the suggested choices; 8, the minds' memory. At each stage you work in, it says what it asks of the roles. Run the roles you want with run_role, each with a short, concrete task; when a run's answer needs another try, send it a revise message; then call commit, which hands the engine what you have and ends the stage. A request you don't run goes on without its role. A role that fails is yours to decide on: revise it, run it again prompt-only, or go on without it. The engine refuses a role out of its stage.
+
+Your session keeps your earlier turns. Each turn's task says what changed since your last one and gives you your pinned files. The engine's messages and your tools show you what your knowledge lets you see: never guess at what they don't show.`,
+    vars: [v("world", "the world's name"), v("pov", "the player character's name")]
+  },
+  {
+    id: MAIN_TEXT.context,
+    page,
+    group: INSTRUCTIONS,
+    label: "How each role is set up",
+    note: "Follows the system prompt in the main agent's stable prefix: Settings \u2192 Agents \u2192 Context for every role, the guide it briefs the roles by. It steers; it screens nothing: every role's tools read everything, secrets marked.",
+    text: `How each role is set up (Settings \u2192 Agents \u2192 Context). A role's prompt already starts with what its line says it starts with, and its pinned files, and its tools read everything for themselves, each secret marked with whom it is known to and kept from. Brief each run with what its task needs beyond that: what you know that it doesn't, what to stress, what to leave alone. Never give a role what its line says it is never given, and pass a secret on only to a role whose work needs it, marked as it is marked.
+{{roles}}`,
+    vars: [v("roles", "a line for each role, as below", true)]
+  },
+  { id: MAIN_TEXT.contextRole, page, group: INSTRUCTIONS, label: "One role's setup", note: "One line of How each role is set up, per role.", text: "- {{role}}: works from {{perspective}}; starts with {{start}}; never given {{never}}; pinned files: {{pins}}; its tools: {{tools}}", vars: [v("role", "the role's id, as run_role takes it", true), v("perspective", "the perspective it works from"), v("start", "the sections it starts with, or none"), v("never", "what it is never to be given, or none"), v("pins", "the workspace files pinned for it, or none"), v("tools", "its tool families, or none")] },
+  {
+    id: MAIN_TEXT.turn,
+    page,
+    group: INSTRUCTIONS,
+    label: "Turn task",
+    note: "What the main agent gets as a turn starts, before its first stage: the digest, its pinned files and the player's message.",
+    text: `A new turn.
+
+{{digest}}
+
+{{pins}}
+
+The player's message:
+{{message}}`,
+    vars: [v("message", "the player's message this turn answers", true), v("digest", "what changed since the main agent's last turn, framed below"), v("pins", "its pinned files, framed below; nothing when it has none")]
+  },
+  {
+    id: MAIN_TEXT.stage,
+    page,
+    group: STAGES,
+    label: "A stage opens",
+    note: "Each stage the main agent works in starts with this message: what the engine did since the last one, and what it asks of the roles now.",
+    text: `Stage {{number}} of 8: {{stage}}.
+{{engine}}
+What the engine asks of the roles now:
+{{open}}
+Run the roles you want with run_role, revise a run with revise if its answer needs it, then call commit.`,
+    vars: [v("number", "the stage's number in the turn's order"), v("stage", "the stage's words below"), v("engine", "what the engine did since the main agent's last stage, when there is something to say"), v("open", "each request of this stage, one line each", true)]
+  },
+  ...Object.entries(STAGE_TEXTS).map(([stage, t]) => ({ id: MAIN_TEXT.stageLabel(stage), page, group: STAGES, label: t.label, note: "Fills {{stage}} in the stage's message.", text: t.text, vars: [] })),
+  { id: MAIN_TEXT.enginePrepare, page, group: STAGES, label: "What the engine did: the checks", note: "Leads stage 3's message: the engine's checks and gates let the turn play, and the action it plays.", text: "The engine checked the turn and let it play. It plays: {{intent}}", vars: [v("intent", "the action the turn plays, with its parameters, or none")] },
+  { id: MAIN_TEXT.engineBeats, page, group: STAGES, label: "What the engine did: the plan", note: "Leads stage 5's message: what the engine planned, as the narrator is told it.", text: `The engine planned the turn:
+{{lines}}`, vars: [v("lines", "the plan's outcome, montage and beat lines", true)] },
+  { id: MAIN_TEXT.engineReply, page, group: STAGES, label: "What the engine did: the reply", note: "Leads stage 7's message, and ends a turn's session with the reply when no stage showed it.", text: `The narrator's reply:
+{{reply}}`, vars: [v("reply", "the reply as written", true)] },
+  { id: MAIN_TEXT.engineRemember, page, group: STAGES, label: "What the minds remember", note: "Leads the message of the memory the last turn left to this one: the reply they remember.", text: `The last reply, which the minds remember now:
+{{reply}}`, vars: [v("reply", "the last reply as written", true)] },
+  { id: MAIN_TEXT.open, page, group: REQUESTS, label: "A request", note: "One line of a stage's message per request: the role, as run_role takes it, and what the engine asks of it.", text: "- {{role}}: {{what}}", vars: [v("role", "the role's id", true), v("what", "what the engine asks, in the words below")] },
+  ...Object.entries(REQUEST_TEXTS).map(([kind, t]) => ({ id: MAIN_TEXT.request(kind), page, group: REQUESTS, label: t.label, note: "Fills {{what}} in a request's line.", text: t.text, vars: [] })),
+  { id: MAIN_TEXT.digest, page, group: DIGEST, label: "Since the last turn", note: "Frames the digest in the turn task: what changed since the main agent's last turn, oldest first.", text: `What happened in this chat since your last turn, oldest first:
+{{turns}}`, vars: [v("turns", "each reply since, as below", true)] },
+  { id: MAIN_TEXT.digestFresh, page, group: DIGEST, label: "A fresh session", note: "Frames the digest when the main agent has no session in the chat yet, as when a chat switches from classic: the chat so far.", text: `You take this chat up now, with no session of your own in it yet. The chat so far, oldest first:
+{{turns}}`, vars: [v("turns", "each reply so far, as below", true)] },
+  { id: MAIN_TEXT.digestEntry, page, group: DIGEST, label: "A reply", note: "One reply of the digest: the player's message, what changed as the player saw it, and the reply.", text: `Reply {{n}}. The player: {{said}}
+What changed: {{changed}}
+The reply: {{reply}}`, vars: [v("n", "the reply's number in the chat"), v("said", "the player's message before it"), v("changed", "what changed, as the player's Journal says it"), v("reply", "the reply as written")] },
+  { id: MAIN_TEXT.digestLanded, page, group: DIGEST, label: "The last turn's changes", note: "Leads the digest with what landed of the main agent's own last turn once its reply was read.", text: "What landed of your last turn: {{changed}}", vars: [v("changed", "what changed, as the player's Journal says it", true)] },
+  { id: MAIN_TEXT.digestLeftOut, page, group: DIGEST, label: "Earlier replies left out", note: "Heads the digest when it runs past its tokens (Settings \u2192 Agents \u2192 Main agent): how many earlier replies aren't in it.", text: "({{count}} earlier {{replies}} left out.)", vars: [v("count", "how many replies the digest leaves out", true), v("replies", '"reply" for 1, else "replies"')] },
+  { id: MAIN_TEXT.digestNothing, page, group: DIGEST, label: "Nothing changed", note: "The digest when nothing happened since the main agent's last turn.", text: "Nothing changed since your last turn.", vars: [] },
+  { id: MAIN_TEXT.none, page, group: DIGEST, label: "Nothing", note: "Stands in for a part that is empty: no message, no change, no answer.", text: "(none)", vars: [] },
+  { id: MAIN_TEXT.pins, page, group: PINS, label: "Pinned files", note: "Frames the main agent's pinned files in the turn task: those .pins.json lists for it, and those pinned in GM \u2192 Workspace, within its pins budget.", text: `Your pinned files (at most {{tokens}} {{unit}} of them; a file past that comes as its headings, and workspace_read reads it whole):
+{{files}}`, vars: [v("tokens", "the pins budget: the manifest's for the main agent, else Settings \u2192 Agents \u2192 Main agent"), v("unit", '"token" for 1, else "tokens"'), v("files", "each file, as below", true)] },
+  { id: MAIN_TEXT.pinsFile, page, group: PINS, label: "A pinned file", note: "One pinned file, whole.", text: `[{{path}}]
+{{text}}`, vars: [v("path", "the file's path", true), v("text", "the file's text", true)] },
+  { id: MAIN_TEXT.pinsHeadings, page, group: PINS, label: "A file past the budget", note: "A pinned file past the pins budget: its headings only.", text: `[{{path}}: its headings]
+{{headings}}`, vars: [v("path", "the file's path", true), v("headings", "the file's heading lines, or none")] },
+  { id: MAIN_TEXT.tool(MAIN_TOOLS.runRole), page, group: TOOLS, label: "run_role: what it does", note: "The description of the run_role tool.", text: "Run a role on what the engine asks of it in this stage, with your task for it. Each request of the role gets a run with an agent id, which revise takes. A role this stage doesn't ask for is refused.", vars: [] },
+  { id: MAIN_TEXT.toolArg(MAIN_TOOLS.runRole, "role"), page, group: TOOLS, label: "run_role: role", note: "The description of run_role's role argument.", text: "The role to run, as the stage lists it.", vars: [] },
+  { id: MAIN_TEXT.toolArg(MAIN_TOOLS.runRole, "task"), page, group: TOOLS, label: "run_role: task", note: "The description of run_role's task argument.", text: "Your task for the run: what to do or to watch for, in a few concrete sentences.", vars: [] },
+  { id: MAIN_TEXT.toolArg(MAIN_TOOLS.runRole, "prompt_only"), page, group: TOOLS, label: "run_role: prompt_only", note: "The description of run_role's prompt_only argument.", text: "Run it as one call with its classic contract and no tools: the way to try a role again whose run failed.", vars: [] },
+  { id: MAIN_TEXT.tool(MAIN_TOOLS.revise), page, group: TOOLS, label: "revise: what it does", note: "The description of the revise tool.", text: "Send one of this stage's runs a revision: it runs again with your task and your message, and its new answer stands for the old. A run takes as many revisions as its role's budget allows.", vars: [] },
+  { id: MAIN_TEXT.toolArg(MAIN_TOOLS.revise, "agentId"), page, group: TOOLS, label: "revise: agentId", note: "The description of revise's agentId argument.", text: "The run's agent id, as run_role gave it.", vars: [] },
+  { id: MAIN_TEXT.toolArg(MAIN_TOOLS.revise, "message"), page, group: TOOLS, label: "revise: message", note: "The description of revise's message argument.", text: "What to change in the answer, and why.", vars: [] },
+  { id: MAIN_TEXT.tool(MAIN_TOOLS.commit), page, group: TOOLS, label: "commit: what it does", note: "The description of the commit tool.", text: "Hand the engine what this stage's runs answered, and end the stage. A request you didn't run goes on without its role.", vars: [] },
+  { id: MAIN_TEXT.tool(MAIN_TOOLS.summarize), page, group: TOOLS, label: "summarize: what it does", note: "The description of the summarize tool, offered while Settings \u2192 Agents \u2192 Compaction has it on.", text: "Summarize your session now: everything but your latest turns becomes one summary, which your next stages read instead. Use it when your session runs long.", vars: [] },
+  { id: MAIN_TEXT.tool(MAIN_TOOLS.condense), page, group: TOOLS, label: "condense: what it does", note: "The description of the main agent's condense tool.", text: "Condense a long source (a workspace file, a turn's transcript among them, or a lore entry) into a short workspace note for a role, with one call of your own model, staged as that role's note for this turn: name the note in its task instead of handing it the whole source. The note opens with its source and the source's hash.", vars: [] },
+  { id: MAIN_TEXT.toolArg(MAIN_TOOLS.condense, "source"), page, group: TOOLS, label: "condense: source", note: "The description of condense's source argument.", text: "The source: a workspace file's path, or a lore entry's id as the lore tools give it.", vars: [] },
+  { id: MAIN_TEXT.toolArg(MAIN_TOOLS.condense, "role"), page, group: TOOLS, label: "condense: role", note: "The description of condense's role argument.", text: "The role the note is for: it is written as that role's, so the role's tier must let it write the workspace.", vars: [] },
+  { id: MAIN_TEXT.toolArg(MAIN_TOOLS.condense, "note"), page, group: TOOLS, label: "condense: note", note: "The description of condense's note argument.", text: "Where the note goes: a workspace path; leave it out for notes/condensed/ and a name taken from the source's.", vars: [] },
+  { id: MAIN_TEXT.toolArg(MAIN_TOOLS.condense, "focus"), page, group: TOOLS, label: "condense: focus", note: "The description of condense's focus argument.", text: "What the note should keep: the task it is for, or what matters in the source; leave it out for a plain digest.", vars: [] },
+  { id: MAIN_TEXT.ran, page, group: ANSWERS, label: "A run answered", note: "run_role's and revise's answer for a run that answered: its agent id, its role, how it ran and its answer, whole.", text: "{{agent}}: the {{role}} role answered ({{via}}): {{answer}}", vars: [v("agent", "the run's agent id", true), v("role", "the role"), v("via", "how it ran, in the words below"), v("answer", "its answer", true)] },
+  { id: MAIN_TEXT.ranFailed, page, group: ANSWERS, label: "A run failed", note: "run_role's and revise's answer for a run that failed.", text: "{{agent}}: the {{role}} role failed ({{via}}): {{reason}}. Revise it, run it again prompt-only, or go on without it.", vars: [v("agent", "the run's agent id", true), v("role", "the role"), v("via", "how it ran, in the words below"), v("reason", "why it failed")] },
+  { id: MAIN_TEXT.viaAgent, page, group: ANSWERS, label: "Ran as an agent", note: "Fills {{via}}: the role ran as an agent with its tools.", text: "an agent with tools", vars: [] },
+  { id: MAIN_TEXT.viaPromptOnly, page, group: ANSWERS, label: "Ran prompt-only", note: "Fills {{via}}: the role ran as one call with its classic contract.", text: "one call, prompt only", vars: [] },
+  { id: MAIN_TEXT.refusedOrder, page, group: ANSWERS, label: "Out of order", note: "run_role's answer for a role whose work comes at a later stage.", text: "Out of order: the {{role}} role works at stage {{number}}, {{stage}}. The engine keeps the turn's order, so run it once that stage opens.", vars: [v("role", "the role asked for"), v("number", "the number of the role's next stage"), v("stage", "that stage's words")] },
+  { id: MAIN_TEXT.refusedOver, page, group: ANSWERS, label: "Its stage is over", note: "run_role's answer for a role whose stages this turn are over.", text: "The {{role}} role's stage is over this turn: what it answered is the engine's now.", vars: [v("role", "the role asked for")] },
+  { id: MAIN_TEXT.refusedIdle, page, group: ANSWERS, label: "Nothing asked of it", note: "run_role's answer for a role the stage asks nothing of.", text: "The engine asks nothing of the {{role}} role in this stage.", vars: [v("role", "the role asked for")] },
+  { id: MAIN_TEXT.refusedRole, page, group: ANSWERS, label: "No such role", note: "run_role's answer for a role that doesn't exist.", text: "There is no role called {{role}}. The roles are {{roles}}.", vars: [v("role", "the name given"), v("roles", "every role's id")] },
+  { id: MAIN_TEXT.refusedRan, page, group: ANSWERS, label: "It ran already", note: "run_role's answer for a role whose runs this stage answered: a revision changes an answer.", text: "The {{role}} role has run in this stage: revise its run ({{agents}}) to change its answer.", vars: [v("role", "the role asked for"), v("agents", "its runs' agent ids")] },
+  { id: MAIN_TEXT.refusedRunning, page, group: ANSWERS, label: "It is running", note: "run_role's and revise's answer while a run of the role, started by another call of the same answer, hasn't answered yet: a request runs once at a time, so no two runs of it stage changes together.", text: "The {{role}} role is already running in this stage, started by another of your calls: its answer comes back to that call. Revise its run once it has answered, if its answer needs it.", vars: [v("role", "the role asked for")] },
+  { id: MAIN_TEXT.refusedAgent, page, group: ANSWERS, label: "No such run", note: "revise's answer for an agent id no run of this stage has.", text: "No run of this stage has the agent id {{agent}}. Its runs are {{agents}}.", vars: [v("agent", "the id given"), v("agents", "the stage's runs' agent ids, or none")] },
+  { id: MAIN_TEXT.refusedRevisions, page, group: ANSWERS, label: "No revisions left", note: "revise's answer once a run has had the revisions its role's budget allows (Settings \u2192 Agents \u2192 Budgets).", text: "{{agent}} has had the {{limit}} {{revisions}} its role allows; its last answer stands.", vars: [v("agent", "the run's agent id"), v("limit", "the revisions its role allows"), v("revisions", '"revision" for 1, else "revisions"')] },
+  { id: MAIN_TEXT.refusedCommitted, page, group: ANSWERS, label: "The stage is committed", note: "The answer to a call after commit in the same stage.", text: "This stage is committed. The engine goes on, and opens the next stage when it gets there.", vars: [] },
+  { id: MAIN_TEXT.committed, page, group: ANSWERS, label: "Committed", note: "commit's answer: what the engine takes, and what it goes on without.", text: "Committed. The engine takes: {{ran}}. It goes on without: {{skipped}}.", vars: [v("ran", "the roles whose answers it takes"), v("skipped", "the requests no run answered")] },
+  { id: MAIN_TEXT.brief, page, group: ROLES, label: "The main agent's task", note: "What a role run by the main agent is told of its task, after its own instructions. A prompt-only run is sent its classic prompt alone.", text: `The main agent's task for you this turn:
+{{task}}`, vars: [v("task", "the task run_role gave", true)] },
+  { id: MAIN_TEXT.briefRevision, page, group: ROLES, label: "A revision", note: "Follows the task for each revision the main agent sent the run, oldest first.", text: `The main agent asks you to revise your answer:
+{{message}}`, vars: [v("message", "the revision's message", true)] },
+  { id: MAIN_TEXT.historyCall, page, group: SESSION, label: "A tool call, kept", note: "How the main agent's session keeps each tool call it made in a stage, for its later stages and turns.", text: `[{{tool}} {{args}}]
+{{result}}`, vars: [v("tool", "the tool's name", true), v("args", "its arguments"), v("result", "what it answered")] },
+  { id: MAIN_TEXT.summary, page, group: SESSION, label: "The summary", note: "Opens the main agent's session once it was summarized: the summary stands for the turns it replaced.", text: `Your session before this point, summarized:
+{{summary}}`, vars: [v("summary", "the summary", true)] },
+  { id: MAIN_TEXT.compaction, page, group: SESSION, label: "Compaction instructions", note: "The instructions of the call that summarizes the main session once it passes Compact the session past (Settings \u2192 Agents \u2192 Compaction), or when the main agent asks with summarize.", text: "You keep a main agent's session short. You get the summary so far, if there is one, and the turns that now fold into it. Write one summary the main agent can keep working from: who and what matters, what each turn played and what changed, the threads still open, and anything the main agent noted for itself. Keep names, numbers and facts exactly as they are, and leave out what no later turn needs. The latest {{keep}} turns stay whole after your summary, so don't repeat them. Answer with the summary alone.", vars: [v("keep", "how many of the latest turns stay whole (Recent turns kept whole)")] },
+  { id: MAIN_TEXT.compactionInput, page, group: SESSION, label: "What it summarizes", note: "The compaction call's message: the summary so far and the turns to fold into it.", text: `The summary so far:
+{{summary}}
+
+The turns to fold into it, oldest first:
+{{turns}}`, vars: [v("summary", "the summary so far, or the text for nothing"), v("turns", "the turns to summarize, each message in order", true)] },
+  { id: MAIN_TEXT.summarized, page, group: SESSION, label: "summarize: done", note: "summarize's answer once the session is summarized.", text: `Your session is summarized: {{folded}} turns folded into the summary, the latest {{kept}} kept whole. From your next stage on, you read:
+{{summary}}`, vars: [v("summary", "the summary", true), v("folded", "how many turns it holds"), v("kept", "how many stay whole")] },
+  { id: MAIN_TEXT.summarizeNothing, page, group: SESSION, label: "summarize: nothing to do", note: "summarize's answer when the session is no longer than the turns kept whole.", text: "There is nothing to summarize: your session holds {{turns}} turns, and the latest {{keep}} stay whole.", vars: [v("turns", "the turns the session holds"), v("keep", "how many stay whole")] },
+  { id: MAIN_TEXT.summarizeAgain, page, group: SESSION, label: "summarize: once a turn", note: "summarize's answer to a second call in one turn.", text: "Your session was summarized this turn already.", vars: [] },
+  { id: MAIN_TEXT.summarizeFailed, page, group: SESSION, label: "summarize: it failed", note: "summarize's answer when the summarizing call failed.", text: "The summary wasn't made ({{reason}}). Your session stays as it is.", vars: [v("reason", "why")] }
+];
+
+// src/shared/final-review.ts
+var FINAL_REVIEW_STEP = "final review";
+var RULES_PART = "narrator_rules";
+function partOf(id, label, content) {
+  const lines = content.split(`
+`);
+  const first = lines[0] ?? "";
+  return /^\[.*\]$/.test(first) ? { id, label, header: first, lines: lines.slice(1) } : { id, label, header: null, lines };
+}
+function partText(part) {
+  return [...part.header === null ? [] : [part.header], ...part.lines].join(`
+`);
+}
+var isAt = (v2) => Number.isSafeInteger(v2) && v2 >= 0;
+function finalEditsOf(raw) {
+  if (!Array.isArray(raw))
+    return [];
+  return raw.flatMap((e) => {
+    if (typeof e !== "object" || e === null || Array.isArray(e))
+      return [];
+    const r = e;
+    if (typeof r.part !== "string")
+      return [];
+    if (r.op === "append")
+      return typeof r.text === "string" ? [{ op: "append", part: r.part, text: r.text }] : [];
+    if (!isAt(r.at) || typeof r.line !== "string")
+      return [];
+    if (r.op === "drop")
+      return [{ op: "drop", part: r.part, at: r.at, line: r.line }];
+    return r.op === "replace" && typeof r.text === "string" ? [{ op: "replace", part: r.part, at: r.at, line: r.line, text: r.text }] : [];
+  });
+}
+function applyOne(part, edit) {
+  if (edit.op === "append") {
+    part.lines.push(...edit.text.split(`
+`));
+    return true;
+  }
+  const i = part.lines[edit.at] === edit.line ? edit.at : part.lines.indexOf(edit.line);
+  if (i < 0)
+    return false;
+  if (edit.op === "drop")
+    part.lines.splice(i, 1);
+  else
+    part.lines.splice(i, 1, ...edit.text.split(`
+`));
+  return true;
+}
+function applyFinalEdits(parts, edits) {
+  const out = parts.map((p) => ({ ...p, lines: [...p.lines] }));
+  const applied = [];
+  const missed = [];
+  for (const edit of edits) {
+    const part = out.find((p) => p.id === edit.part);
+    if (part && applyOne(part, edit))
+      applied.push(edit);
+    else
+      missed.push(edit);
+  }
+  return { parts: out, applied, missed };
+}
+
+class ReviewDraft {
+  maxChars;
+  current;
+  made = [];
+  constructor(parts, maxChars) {
+    this.maxChars = maxChars;
+    this.current = parts.map((p) => ({ ...p, lines: [...p.lines] }));
+  }
+  get parts() {
+    return this.current;
+  }
+  get edits() {
+    return this.made;
+  }
+  part(id) {
+    return this.current.find((p) => p.id === id);
+  }
+  replace(id, n, text5) {
+    const found = this.line(id, n);
+    if ("refused" in found)
+      return found;
+    const clean = this.clean(text5);
+    if (clean === null)
+      return { refused: "text" };
+    const line2 = found.part.lines[n - 1] ?? "";
+    if (clean !== line2)
+      this.edit({ op: "replace", part: id, at: n - 1, line: line2, text: clean }, found.part);
+    return found.part;
+  }
+  append(id, text5) {
+    const part = this.part(id);
+    if (!part)
+      return { refused: "part" };
+    const clean = this.clean(text5);
+    if (clean === null)
+      return { refused: "text" };
+    this.edit({ op: "append", part: id, text: clean }, part);
+    return part;
+  }
+  drop(id, n) {
+    const found = this.line(id, n);
+    if ("refused" in found)
+      return found;
+    this.edit({ op: "drop", part: id, at: n - 1, line: found.part.lines[n - 1] ?? "" }, found.part);
+    return found.part;
+  }
+  line(id, n) {
+    const part = this.part(id);
+    if (!part)
+      return { refused: "part" };
+    return Number.isSafeInteger(n) && n >= 1 && n <= part.lines.length ? { part } : { refused: "line", part };
+  }
+  edit(edit, part) {
+    applyOne(part, edit);
+    this.made.push(edit);
+  }
+  clean(text5) {
+    const trimmed = text5.replace(/\r\n?/g, `
+`).replace(/^\s*\n|\n\s*$/g, "");
+    if (trimmed.trim() === "")
+      return null;
+    const fit = trimmed.length <= this.maxChars ? trimmed : `${trimmed.slice(0, Math.max(0, this.maxChars - 1))}\u2026`;
+    return neutralizeMacros(fit);
+  }
+}
+var REVIEW_TOOLS = { replace: "review_replace", append: "review_append", drop: "review_drop", commit: "commit" };
+var REVIEW_TEXT = {
+  system: "main.review.system",
+  stage: "main.review.stage",
+  stageMain: "main.review.stage.main",
+  stageFixed: "main.review.stage.fixed",
+  part: "main.review.part",
+  line: "main.review.line",
+  empty: "main.review.empty",
+  tool: (name) => `main.tool.${name}`,
+  toolArg: (name, arg) => `main.tool.${name}.${arg}`,
+  commit: "main.review.commit",
+  edited: "main.review.edited",
+  refusedPart: "main.review.refused.part",
+  refusedLine: "main.review.refused.line",
+  refusedText: "main.review.refused.text",
+  committed: "main.review.committed",
+  committedNone: "main.review.committed.none"
+};
+var page2 = MAIN_AGENT_PAGE.id;
+var GROUP2 = "Final review";
+var v2 = (name, text5, required) => required ? { name, text: text5, required } : { name, text: text5 };
+var PART_VAR = v2("part", "the part's id, as the review lists it");
+var FINAL_REVIEW_PROMPTS = [
+  {
+    id: REVIEW_TEXT.system,
+    page: page2,
+    group: GROUP2,
+    label: "System prompt, on the fixed pipeline",
+    note: "Who the main agent is when the fixed pipeline runs a chat's turns and the main agent works only their final review. With a main agent deciding, it keeps its own system prompt.",
+    text: `You are the main agent for {{world}}, a roleplay world that LumiRPEngine keeps; {{pov}} is the player character. In this chat the engine and its role agents work each turn on a fixed pipeline, and you do one job in it: before the narrator writes each reply, you review what the narrator will be given and fix what is wrong. You never write the story yourself: the narrator writes each reply from the prompt you hand it.
+
+Your tools read the world as it stands. Each turn's task says what changed since your last review and gives you your pinned files.`,
+    vars: [v2("world", "the world's name"), v2("pov", "the player character's name")]
+  },
+  {
+    id: REVIEW_TEXT.stage,
+    page: page2,
+    group: GROUP2,
+    label: "The review",
+    note: "What the main agent is sent for the final review: what the review is for and how it works, then the prompt the narrator gets, part by part, each line numbered.",
+    text: `{{stage}}
+Before the narrator writes its reply, review the prompt it gets: the engine's sections below, the Outline and its brief among them, and the narrator rules, as the narrator will read them. Check each line against the world as it stands and this turn: a fact that is wrong, one the reply needs that is missing, lines that contradict each other, guidance that would lead the narrator astray, a secret told as known where it should stay marked. The player's own words and rules come first: never undo what they asked for.
+
+Change only what needs it, a line at a time: review_replace rewrites a line, review_append adds lines at the end of a part, review_drop takes a line out. Each names a line by its number as its part reads now, and answers with the part as it reads after it. A fact's line starts with "- ". Then call commit, which hands the narrator the prompt as you leave it; with nothing to fix, call commit at once.
+
+{{parts}}`,
+    vars: [v2("stage", "where the review stands in the turn, in the words below"), v2("parts", "each part of the prompt, as below", true)]
+  },
+  { id: REVIEW_TEXT.stageMain, page: page2, group: GROUP2, label: "Where it stands: a main agent's turn", note: "Leads the review's message in a turn the main agent decides: the review is the start of the reply's stage.", text: "Stage 6 of 8: the narrator's reply.", vars: [] },
+  { id: REVIEW_TEXT.stageFixed, page: page2, group: GROUP2, label: "Where it stands: the fixed pipeline", note: "Leads the review's message on the fixed pipeline, after the turn's task.", text: "The engine has planned this turn and its roles have done their work.", vars: [] },
+  {
+    id: REVIEW_TEXT.part,
+    page: page2,
+    group: GROUP2,
+    label: "A part of the prompt",
+    note: "One part of the narrator's prompt in the review's message and in its tools' answers: its id, which the tools take, its header as the narrator reads it, and its lines.",
+    text: `Part {{part}}: {{header}}
+{{lines}}`,
+    vars: [v2("part", "the part's id, as the tools take it", true), v2("header", "its header as the narrator reads it, such as [Outcome], or its name when it has none"), v2("lines", "its lines, each numbered as below", true)]
+  },
+  { id: REVIEW_TEXT.line, page: page2, group: GROUP2, label: "A numbered line", note: "One line of a part, with the number the review's tools name it by.", text: "{{n}}: {{text}}", vars: [v2("n", "the line's number in its part, from 1", true), v2("text", "the line as the narrator reads it", true)] },
+  { id: REVIEW_TEXT.empty, page: page2, group: GROUP2, label: "A part with no lines", note: "Stands in for the lines of a part that has none left.", text: "(no lines)", vars: [] },
+  { id: REVIEW_TEXT.tool(REVIEW_TOOLS.replace), page: page2, group: GROUP2, label: "review_replace: what it does", note: "The description of the review_replace tool.", text: "Rewrite one line of a part of the narrator's prompt: the line by its number as its part reads now, with your text in its place. Several lines in your text take its place together.", vars: [] },
+  { id: REVIEW_TEXT.toolArg(REVIEW_TOOLS.replace, "part"), page: page2, group: GROUP2, label: "review_replace: part", note: "The description of review_replace's part argument.", text: "The part's id, as the review lists it.", vars: [] },
+  { id: REVIEW_TEXT.toolArg(REVIEW_TOOLS.replace, "line"), page: page2, group: GROUP2, label: "review_replace: line", note: "The description of review_replace's line argument.", text: "The line's number, as its part reads now.", vars: [] },
+  { id: REVIEW_TEXT.toolArg(REVIEW_TOOLS.replace, "text"), page: page2, group: GROUP2, label: "review_replace: text", note: "The description of review_replace's text argument.", text: "The line as the narrator should read it, whole.", vars: [] },
+  { id: REVIEW_TEXT.tool(REVIEW_TOOLS.append), page: page2, group: GROUP2, label: "review_append: what it does", note: "The description of the review_append tool.", text: "Add lines at the end of a part of the narrator's prompt: what the reply needs that the part doesn't say.", vars: [] },
+  { id: REVIEW_TEXT.toolArg(REVIEW_TOOLS.append, "part"), page: page2, group: GROUP2, label: "review_append: part", note: "The description of review_append's part argument.", text: "The part's id, as the review lists it.", vars: [] },
+  { id: REVIEW_TEXT.toolArg(REVIEW_TOOLS.append, "text"), page: page2, group: GROUP2, label: "review_append: text", note: "The description of review_append's text argument.", text: "The line to add, as the narrator should read it; one per line break for several.", vars: [] },
+  { id: REVIEW_TEXT.tool(REVIEW_TOOLS.drop), page: page2, group: GROUP2, label: "review_drop: what it does", note: "The description of the review_drop tool.", text: "Take one line out of a part of the narrator's prompt, by its number as its part reads now.", vars: [] },
+  { id: REVIEW_TEXT.toolArg(REVIEW_TOOLS.drop, "part"), page: page2, group: GROUP2, label: "review_drop: part", note: "The description of review_drop's part argument.", text: "The part's id, as the review lists it.", vars: [] },
+  { id: REVIEW_TEXT.toolArg(REVIEW_TOOLS.drop, "line"), page: page2, group: GROUP2, label: "review_drop: line", note: "The description of review_drop's line argument.", text: "The line's number, as its part reads now.", vars: [] },
+  { id: REVIEW_TEXT.commit, page: page2, group: GROUP2, label: "commit, in the review: what it does", note: "The description of the commit tool in the final review.", text: "Hand the narrator the prompt as your edits leave it, and end the review.", vars: [] },
+  { id: REVIEW_TEXT.edited, page: page2, group: GROUP2, label: "An edit made", note: "review_replace's, review_append's and review_drop's answer: the part as it reads after the edit.", text: `Done. It now reads:
+{{part}}`, vars: [v2("part", "the part, as the review shows parts", true)] },
+  { id: REVIEW_TEXT.refusedPart, page: page2, group: GROUP2, label: "No such part", note: "An edit's answer when no part of the prompt has the id it gave.", text: "No part of the narrator's prompt has the id {{part}}. Its parts are {{parts}}.", vars: [PART_VAR, v2("parts", "every part's id")] },
+  { id: REVIEW_TEXT.refusedLine, page: page2, group: GROUP2, label: "No such line", note: "review_replace's and review_drop's answer for a line number its part doesn't have.", text: "Part {{part}} has no line {{line}}: it has {{count}} {{lines}}.", vars: [PART_VAR, v2("line", "the number given"), v2("count", "how many lines it has"), v2("lines", '"line" for 1, else "lines"')] },
+  { id: REVIEW_TEXT.refusedText, page: page2, group: GROUP2, label: "No text", note: "review_replace's and review_append's answer when the text given is empty.", text: "Give the line's text: an empty one says nothing. review_drop takes a line out.", vars: [] },
+  { id: REVIEW_TEXT.committed, page: page2, group: GROUP2, label: "Committed", note: "commit's answer in the final review, once it edited the prompt.", text: "Committed. The narrator gets the prompt with your {{count}} {{edits}}.", vars: [v2("count", "how many edits the review made", true), v2("edits", '"edit" for 1, else "edits"')] },
+  { id: REVIEW_TEXT.committedNone, page: page2, group: GROUP2, label: "Committed, unchanged", note: "commit's answer in the final review when it edited nothing.", text: "Committed. The narrator gets the prompt as the engine made it.", vars: [] }
+];
+
 // src/engine/ledger/journal.ts
 function emptyJournal(chatId) {
   return { v: 1, chatId, seq: 0, chain: [], messages: {}, pauses: [], tombstones: [], held: [], windows: [], pending: {}, started: false };
@@ -65169,6 +65608,7 @@ class LedgerCore {
   startsChecked = false;
   addedFrom = new Map;
   seen = new Map;
+  startKey = null;
   constructor(journal, env, folder) {
     this.journal = journal;
     this.env = env;
@@ -65205,6 +65645,9 @@ class LedgerCore {
   }
   fold(observed) {
     return this.folder.fold({ ...this.foldInput(observed), ...this.env.snapshots ? { snapshots: this.env.snapshots } : {} });
+  }
+  foldKeys(observed) {
+    return this.folder.keys(this.foldInput(observed));
   }
   foldInput(observed) {
     return {
@@ -65362,7 +65805,7 @@ class LedgerCore {
           for (const [at, markers] of restored) {
             const message = observed[at];
             if (message)
-              this.ledgerFor(message.id, message).markers = markers;
+              this.ledgerFor(message.id, message).markers = structuredClone(markers);
           }
           return;
         }
@@ -65641,6 +66084,10 @@ class LedgerCore {
       p.prompts = from.prompts;
     if (from.agents)
       p.agents = from.agents;
+    if (from.finalEdits)
+      p.finalEdits = from.finalEdits;
+    else
+      delete p.finalEdits;
     return true;
   }
   planState(generationId, observed) {
@@ -65750,6 +66197,11 @@ class LedgerCore {
       p.agents = structuredClone(agents);
     else
       delete p.agents;
+    const edits = finalEditsOf(source.finalEdits);
+    if (edits.length > 0)
+      p.finalEdits = edits;
+    else
+      delete p.finalEdits;
     return true;
   }
   carry(state2, world, entries2, undone, markers, from = -Infinity) {
@@ -65919,23 +66371,46 @@ class LedgerCore {
     const prefix = this.prefixState(this.fold(observed.slice(0, index)), m, rec, [], true);
     return prefix?.start ? { ...prefix, start: prefix.start, seed: rec.seed, read: readSeed(rec.seed), pre: rec.events.slice(0, rec.pre) } : null;
   }
-  renderState(observed, keepStart = false) {
-    const planned = Object.values(this.journal.pending).filter((p) => p.planned).at(-1);
+  renderState(observed, keepStart = false, head) {
+    const planned = this.plannedTurn();
     if (planned)
       return this.renderPlanned(observed, planned, keepStart);
-    const out = this.fold(observed);
+    const out = head ?? this.fold(observed);
     const world = this.env.worlds(out.state.revision);
     if (!world)
       return null;
+    if (head && this.journal.started)
+      return { state: head.state, world };
     const state2 = structuredClone(out.state);
     if (!this.journal.started)
       for (const body of this.env.startMarkers())
         applyMarker(state2, body, this.env);
     return { state: state2, world };
   }
-  renderPlanned(observed, planned, keepStart = false) {
+  renderKey(observed, keys = this.foldKeys(observed)) {
+    const planned = this.plannedTurn();
+    if (!planned)
+      return this.journal.started ? keys.state : hashParts("lre.render", keys.state, this.startMarkersKey());
+    const at = this.plannedAt(observed, planned);
+    const target = this.chain(observed.slice(at, at + 1))[0];
+    return hashParts("lre.render.planned", keys.steps[at - 1] ?? keys.root, hashJson(target?.ledger?.markers ?? []), String(planned.markersApplied), hashJson(planned.events), this.commitPath(planned), hashJson(planned.startMarkers));
+  }
+  startMarkersKey() {
+    const markers = this.env.startMarkers();
+    const json = JSON.stringify(markers);
+    if (this.startKey?.json !== json)
+      this.startKey = { json, key: hashJson(markers) };
+    return this.startKey.key;
+  }
+  plannedTurn() {
+    return Object.values(this.journal.pending).filter((p) => p.planned).at(-1);
+  }
+  plannedAt(observed, planned) {
     const index = planned.messageId ? observed.findIndex((m) => m.id === planned.messageId) : observed.length;
-    const at = index < 0 ? observed.length : index;
+    return index < 0 ? observed.length : index;
+  }
+  renderPlanned(observed, planned, keepStart = false) {
+    const at = this.plannedAt(observed, planned);
     return this.prefixState(this.fold(observed.slice(0, at)), this.chain(observed.slice(at, at + 1))[0], { markersApplied: planned.markersApplied, events: planned.events, pre: planned.events.length, path: this.commitPath(planned), undone: [] }, planned.startMarkers, keepStart);
   }
   commitContext(generationId, messageId, observed) {
@@ -66025,6 +66500,8 @@ class LedgerCore {
       rec.memoryNext = true;
     if (p.agents && p.agents.length > 0)
       rec.agents = structuredClone(p.agents);
+    if (p.finalEdits && p.finalEdits.length > 0)
+      rec.finalEdits = structuredClone(p.finalEdits);
     if (p.copies) {
       if (p.dropped && p.dropped.length > 0)
         rec.dropped = structuredClone(p.dropped);
@@ -66551,7 +67028,6 @@ async function setAside(host, path2, userId, what, why) {
 var ROLE_IDS = ["intent", "scene", "minds", "knowledge", "director", "read", "memory", "skip", "world"];
 var ROLE_TIERS = ["read", "story", "gm"];
 var ROLE_ON_FAIL = ["prompt_only", "skip", "stop"];
-var ROLE_KNOWLEDGE = ["pov", "everyone", "gm", "own"];
 var ROLE_LABEL2 = {
   intent: "Intent",
   scene: "Scene and lore",
@@ -66563,7 +67039,6 @@ var ROLE_LABEL2 = {
   skip: "Skip beats",
   world: "World steps"
 };
-var KNOWLEDGE = { intent: "pov", scene: "everyone", minds: "own", knowledge: "everyone", director: "everyone", read: "everyone", memory: "own", skip: "everyone", world: "everyone" };
 var FAMILIES = {
   intent: ["people", "places", "items", "money", "checks", "time"],
   scene: ["people", "places", "lore", "workspace"],
@@ -66578,8 +67053,46 @@ var FAMILIES = {
 function defaultRoleSettings() {
   const out = {};
   for (const id of ROLE_IDS)
-    out[id] = { connectionId: null, model: null, effort: "inherit", knowledge: KNOWLEDGE[id], families: [...FAMILIES[id]], tier: "story", promptOnly: false, onFail: id === "intent" ? "stop" : "prompt_only", budget: {} };
+    out[id] = { connectionId: null, model: null, effort: "inherit", families: [...FAMILIES[id]], tier: "story", promptOnly: false, onFail: id === "intent" ? "stop" : "prompt_only", budget: {} };
   return out;
+}
+
+// src/shared/agent-context.ts
+var ROLE_PERSPECTIVES = ["pov", "everyone", "gm", "own"];
+var LORE_INDEX_SOURCE = "lore_index";
+var CONTEXT_SOURCES = [LORE_INDEX_SOURCE, ...Object.values(DEFAULT_SECTIONS).sort((a, b) => a.rank - b.rank).map((s) => s.id)];
+var PERSPECTIVE = { intent: "pov", scene: "everyone", minds: "own", knowledge: "everyone", director: "everyone", read: "everyone", memory: "own", skip: "everyone", world: "everyone" };
+var START = { director: [MINDS_SLOT, "scene"] };
+function defaultContextSettings() {
+  const roles = {};
+  for (const id of ROLE_IDS)
+    roles[id] = { perspective: PERSPECTIVE[id], start: CONTEXT_SOURCES.filter((s) => START[id]?.includes(s) === true), never: [], pins: [] };
+  return { roles };
+}
+function roleContextOf(v3, d) {
+  const r = isRecord(v3) ? v3 : {};
+  const { start: rawStart, never: rawNever, pins } = r;
+  const start = Array.isArray(rawStart) ? CONTEXT_SOURCES.filter((s) => rawStart.includes(s)) : [...d.start];
+  const never = (Array.isArray(rawNever) ? CONTEXT_SOURCES.filter((s) => rawNever.includes(s)) : [...d.never]).filter((s) => !start.includes(s));
+  return {
+    perspective: typeof r.perspective === "string" && ROLE_PERSPECTIVES.includes(r.perspective) ? r.perspective : d.perspective,
+    start,
+    never,
+    pins: Array.isArray(pins) ? [...new Set(pins.flatMap((p) => typeof p === "string" && safeKey(p.trim()) ? [p.trim()] : []))] : [...d.pins]
+  };
+}
+function contextSettingsOf(raw, d = defaultContextSettings()) {
+  const roles = isRecord(raw) && isRecord(raw.roles) ? raw.roles : {};
+  const out = {};
+  for (const id of ROLE_IDS)
+    out[id] = roleContextOf(hasOwn(roles, id) ? roles[id] : undefined, d.roles[id]);
+  return { roles: out };
+}
+var PERSPECTIVE_LABEL = { pov: "Your character's", everyone: "Everyone's, secrets marked", gm: "The GM's", own: "Its character's own" };
+function sourceLabel(source) {
+  if (source === LORE_INDEX_SOURCE)
+    return "Lore index";
+  return Object.values(DEFAULT_SECTIONS).find((s) => s.id === source)?.label ?? source;
 }
 
 // src/shared/agent-settings.ts
@@ -66588,27 +67101,32 @@ var ASSISTANT_APPLY = ["ask", "at_once"];
 var PIPELINE_MODES = ["fixed", "main"];
 var MEMORY_PLACEMENTS = ["after_reply", "before_next"];
 var REVIEW_PLACEMENTS = ["chips", "gate"];
+var FINAL_REVIEW_ON_FAIL = ["send", "stop"];
+var KEPT_FOLDS_DEFAULT = 65536;
 var DEFAULT_ACCEPTANCE = Object.freeze({ only: true, tokensIn: 300000, tokensOut: 30000 });
 function defaultAgentSettings() {
   return {
     thinkingInToolLoops: false,
     budget: { callTokensIn: "none", callTokensOut: HELPER_MAX_TOKENS, callMs: "none", callTools: "none", tokensIn: "none", tokensOut: "none", toolTurns: 10, wallMs: "none", revisions: 2, concurrency: 4 },
-    turn: { tokensIn: 1e5, tokensOut: 1e4, toolTurns: "none", wallMs: "none" },
+    turn: { tokensIn: "none", tokensOut: "none", toolTurns: "none", wallMs: "none" },
     loopRepeats: 3,
     clipChars: 4000,
     throttles: [],
     caching: { on: true, nonce: "", roles: {} },
     acceptance: { connections: [], estimateFactor: 2 },
-    assistant: { connectionId: null, model: null, effort: "inherit", knowledge: "everyone", apply: "ask", historyTokens: 20000, budget: {} },
+    assistant: { connectionId: null, model: null, effort: "inherit", apply: "ask", historyTokens: 20000, budget: {} },
     pipeline: { mode: "fixed", memory: "after_reply" },
     roles: defaultRoleSettings(),
-    main: { connectionId: null, model: null, effort: "inherit", knowledge: "everyone", families: ["workspace"], budget: {}, digestTokens: 2000, pinsTokens: 2000 },
+    main: { connectionId: null, model: null, effort: "inherit", families: ["workspace"], budget: {}, digestTokens: 2000, pinsTokens: 2000 },
+    context: defaultContextSettings(),
+    finalReview: { on: true, onFail: "send", budget: {} },
     gmOpsPerTurn: 10,
-    kept: { runs: 64, gates: 256, watchers: 256, live: 16 },
+    kept: { runs: 64, gates: 256, watchers: 256, live: 16, texts: 4000000, folds: KEPT_FOLDS_DEFAULT },
     compaction: { atTokens: 32000, keepTurns: 3, summarizeTool: true },
     recording: { outputChars: 2000 },
     review: { placement: "chips" },
-    vsClassic: 2
+    vsClassic: 2,
+    systemTokens: 8000
   };
 }
 function assistantBudget(settings) {
@@ -66619,6 +67137,9 @@ function roleBudget(settings, role) {
 }
 function mainBudget(settings) {
   return { ...settings.budget, ...settings.main.budget };
+}
+function finalReviewBudget(settings) {
+  return { ...mainBudget(settings), ...settings.finalReview.budget };
 }
 var MAIN_AGENT_ROLE = "main";
 var AGENT_ROLES = [
@@ -66656,7 +67177,9 @@ var KEPT_DEFS = {
   runs: { label: "Agent turns under way", limits: "How many agent turns, across your chats, the engine keeps running at once.", fires: "The oldest is let go when another starts: a turn that went stale with no end heard.", unit: "count", min: 1, none: null },
   gates: { label: "Turns waiting at a gate", limits: "How many agent turns, across your chats, may wait at a gate (the intent or outline gate, a question asked first, the review card) with everything their agents had done kept for the resume.", fires: "The oldest waiting turn is let go: it resumes afresh, its agents asked again where the turn still needs them; a review gate's still plays its plan and lands what you let through, but its record no longer says which role wrote what it committed before the gate, nor keeps the lines its roles had for the narrator.", unit: "count", min: 1, none: null },
   watchers: { label: "Chats whose review cards are watched", limits: "How many chats' review cards the pages that show them hear about as they change.", fires: "The chat watched longest ago stops hearing, until a page asks for its cards again.", unit: "count", min: 1, none: null },
-  live: { label: "Chats in the live view", limits: "How many chats' latest agent turn GM \u2192 Live keeps in memory, each with everything its agents did, and tells the pages watching it as it runs.", fires: "The chat whose turn started longest ago is let go: GM \u2192 Live shows nothing for it until its next turn, and that turn's transcript stays in GM \u2192 Workspace \u2192 transcripts.", unit: "count", min: 1, none: null }
+  live: { label: "Chats in the live view", limits: "How many chats' latest agent turn GM \u2192 Live keeps in memory, each with everything its agents did, and tells the pages watching it as it runs.", fires: "The chat whose turn started longest ago is let go: GM \u2192 Live shows nothing for it until its next turn, and that turn's transcript stays in GM \u2192 Workspace \u2192 transcripts.", unit: "count", min: 1, none: null },
+  texts: { label: "Agent texts kept once read", limits: "How many characters of the agents' stored texts the engine keeps in memory once it has read them: the main agent's session, the GM assistant's conversation and the workspace's files, across your chats.", fires: "The text read longest ago is let go, and its next read comes from storage. At 0 every read does.", unit: "chars", min: 0, none: null },
+  folds: { label: "Messages kept worked out", limits: "How many of your chats' messages the engine keeps worked out in memory, each with what it did to the world, so working a chat out again starts where it changed rather than from its first message. Keep it above your longest chat's messages.", fires: "The message used longest ago is let go: the next time it is needed, it is worked out again from the nearest state the engine kept or saved.", unit: "count", min: 1, none: null }
 };
 var COMPACTION_DEFS = {
   atTokens: { label: "Compact the session past", limits: "How long the main agent's session may grow before everything but its latest turns is summarized.", fires: "The older turns become one summary, kept with the span it replaced for a rollback.", unit: "tokens", min: 1, none: null },
@@ -66667,11 +67190,12 @@ var MAIN_DEFS = {
   pinsTokens: { label: "Pinned files, per role", limits: "How much of an agent's prompt its pinned files may take, where .pins.json sets no budget for it: the main agent's, and every role's.", fires: "A file past it comes as its headings, which workspace_read reads whole.", unit: "tokens", min: 0, none: null }
 };
 var OUTPUT_CHARS_DEF = { label: "Narrator-facing output, each", limits: "How long each text an agent turn records for the narrator may be: an outcome, montage or outline line, the brief, a scene note.", fires: "A longer text is cut to it, ending in \u201C\u2026\u201D; the cut is noted in your diagnostics.log, not on the Diagnostics page.", unit: "chars", min: 1, none: null };
-var whole4 = (v, lo) => typeof v === "number" && Number.isInteger(v) && v >= lo && v <= Number.MAX_SAFE_INTEGER ? v : undefined;
-var limit = (v, def, fallback) => v === "none" && def.none === null ? fallback : limitIn(v, def.min, Number.MAX_SAFE_INTEGER, fallback);
-var cacheNonce = (v, fallback) => v === "" || safeKey(v) ? v : fallback;
-function budgetOf(v, d) {
-  const b = isRecord(v) ? v : {};
+var SYSTEM_TOKENS_DEF = { label: "System instructions", limits: "How much of each agent's prompt its system files may take together: AGENTS.md and roles/<role>.md, the global workspace's (~/) and this chat's.", fires: "The files past it are cut at a line, and the agent is told which were cut.", unit: "tokens", min: 0, none: null };
+var whole4 = (v3, lo) => typeof v3 === "number" && Number.isInteger(v3) && v3 >= lo && v3 <= Number.MAX_SAFE_INTEGER ? v3 : undefined;
+var limit = (v3, def, fallback) => v3 === "none" && def.none === null ? fallback : limitIn(v3, def.min, Number.MAX_SAFE_INTEGER, fallback);
+var cacheNonce = (v3, fallback) => v3 === "" || safeKey(v3) ? v3 : fallback;
+function budgetOf(v3, d) {
+  const b = isRecord(v3) ? v3 : {};
   return {
     callTokensIn: limit(b.callTokensIn, BUDGET_DEFS.callTokensIn, d.callTokensIn),
     callTokensOut: whole4(b.callTokensOut, BUDGET_DEFS.callTokensOut.min) ?? d.callTokensOut,
@@ -66685,61 +67209,62 @@ function budgetOf(v, d) {
     concurrency: whole4(b.concurrency, BUDGET_DEFS.concurrency.min) ?? d.concurrency
   };
 }
-function turnOf(v, d) {
-  const t = isRecord(v) ? v : {};
+function turnOf(v3, d) {
+  const t = isRecord(v3) ? v3 : {};
   return { tokensIn: limit(t.tokensIn, TURN_DEFS.tokensIn, d.tokensIn), tokensOut: limit(t.tokensOut, TURN_DEFS.tokensOut, d.tokensOut), toolTurns: limit(t.toolTurns, TURN_DEFS.toolTurns, d.toolTurns), wallMs: limit(t.wallMs, TURN_DEFS.wallMs, d.wallMs) };
 }
-function oneOf3(v, list, fallback) {
-  return typeof v === "string" && list.includes(v) ? v : fallback;
+function oneOf3(v3, list, fallback) {
+  return typeof v3 === "string" && list.includes(v3) ? v3 : fallback;
 }
-function ownBudgetOf(v, d) {
-  if (!isRecord(v))
+function ownBudgetOf(v3, d) {
+  if (!isRecord(v3))
     return { ...d };
   const out = {};
   for (const key of Object.keys(BUDGET_DEFS)) {
-    if (!hasOwn(v, key))
+    if (!hasOwn(v3, key))
       continue;
     const def = BUDGET_DEFS[key];
-    const value = v[key] === "none" ? def.none === null ? undefined : "none" : whole4(v[key], def.min);
+    const value = v3[key] === "none" ? def.none === null ? undefined : "none" : whole4(v3[key], def.min);
     if (value !== undefined)
       out[key] = value;
   }
   return out;
 }
-function assistantOf(v, d) {
-  const a = isRecord(v) ? v : {};
+function assistantOf(v3, d) {
+  const a = isRecord(v3) ? v3 : {};
   return {
     connectionId: safeKey(a.connectionId) ? a.connectionId : d.connectionId,
     model: safeKey(a.model) ? a.model : d.model,
     effort: oneOf3(a.effort, AGENT_EFFORTS, d.effort),
-    knowledge: oneOf3(a.knowledge, AGENT_KNOWLEDGE, d.knowledge),
     apply: oneOf3(a.apply, ASSISTANT_APPLY, d.apply),
     historyTokens: whole4(a.historyTokens, HISTORY_TOKENS_DEF.min) ?? d.historyTokens,
     budget: ownBudgetOf(a.budget, d.budget)
   };
 }
 var FAMILIES2 = Object.keys(TOOL_FAMILY_LABEL);
-function mainOf(v, d) {
-  const m = isRecord(v) ? v : {};
+function mainOf(v3, d) {
+  const m = isRecord(v3) ? v3 : {};
   return {
     connectionId: m.connectionId === null ? null : safeKey(m.connectionId) ? m.connectionId : d.connectionId,
     model: m.model === null ? null : safeKey(m.model) ? m.model : d.model,
     effort: oneOf3(m.effort, AGENT_EFFORTS, d.effort),
-    knowledge: oneOf3(m.knowledge, AGENT_KNOWLEDGE, d.knowledge),
     families: Array.isArray(m.families) ? [...new Set(m.families.filter((f) => typeof f === "string" && FAMILIES2.includes(f)))] : [...d.families],
     budget: ownBudgetOf(m.budget, d.budget),
     digestTokens: whole4(m.digestTokens, MAIN_DEFS.digestTokens.min) ?? d.digestTokens,
     pinsTokens: whole4(m.pinsTokens, MAIN_DEFS.pinsTokens.min) ?? d.pinsTokens
   };
 }
-function roleOf(v, d) {
-  const r = isRecord(v) ? v : {};
+function finalReviewOf(v3, d) {
+  const r = isRecord(v3) ? v3 : {};
+  return { on: typeof r.on === "boolean" ? r.on : d.on, onFail: oneOf3(r.onFail, FINAL_REVIEW_ON_FAIL, d.onFail), budget: ownBudgetOf(r.budget, d.budget) };
+}
+function roleOf(v3, d) {
+  const r = isRecord(v3) ? v3 : {};
   const families = Array.isArray(r.families) ? [...new Set(r.families.filter((f) => typeof f === "string" && FAMILIES2.includes(f)))] : [...d.families];
   return {
     connectionId: r.connectionId === null ? null : safeKey(r.connectionId) ? r.connectionId : d.connectionId,
     model: r.model === null ? null : safeKey(r.model) ? r.model : d.model,
     effort: oneOf3(r.effort, AGENT_EFFORTS, d.effort),
-    knowledge: oneOf3(r.knowledge, ROLE_KNOWLEDGE, d.knowledge),
     families,
     tier: oneOf3(r.tier, ROLE_TIERS, d.tier),
     promptOnly: typeof r.promptOnly === "boolean" ? r.promptOnly : d.promptOnly,
@@ -66747,19 +67272,19 @@ function roleOf(v, d) {
     budget: ownBudgetOf(r.budget, d.budget)
   };
 }
-function rolesOf(v, d) {
-  const raw = isRecord(v) ? v : {};
+function rolesOf(v3, d) {
+  const raw = isRecord(v3) ? v3 : {};
   const out = {};
   for (const id of ROLE_IDS)
     out[id] = roleOf(hasOwn(raw, id) ? raw[id] : undefined, d[id]);
   return out;
 }
-function listOf2(v, d, entry) {
-  if (!Array.isArray(v))
+function listOf2(v3, d, entry) {
+  if (!Array.isArray(v3))
     return d.map((x) => ({ ...x }));
   const seen = new Set;
   const out = [];
-  for (const raw of v) {
+  for (const raw of v3) {
     if (!isRecord(raw) || !safeKey(raw.id) || seen.has(raw.id))
       continue;
     seen.add(raw.id);
@@ -66770,8 +67295,8 @@ function listOf2(v, d, entry) {
 var THROTTLE_MIN = 1;
 var CEILING_MIN = 0;
 var ESTIMATE_FACTOR_MIN = 1;
-function acceptanceConnectionsOf(v, d = []) {
-  return listOf2(v, d, (c, id) => ({ id, only: typeof c.only === "boolean" ? c.only : true, tokensIn: limitIn(c.tokensIn, CEILING_MIN, Number.MAX_SAFE_INTEGER, "none"), tokensOut: limitIn(c.tokensOut, CEILING_MIN, Number.MAX_SAFE_INTEGER, "none") }));
+function acceptanceConnectionsOf(v3, d = []) {
+  return listOf2(v3, d, (c, id) => ({ id, only: typeof c.only === "boolean" ? c.only : true, tokensIn: limitIn(c.tokensIn, CEILING_MIN, Number.MAX_SAFE_INTEGER, "none"), tokensOut: limitIn(c.tokensOut, CEILING_MIN, Number.MAX_SAFE_INTEGER, "none") }));
 }
 function agentSettingsOf(raw, d = defaultAgentSettings()) {
   const a = isRecord(raw) ? raw : {};
@@ -66808,12 +67333,15 @@ function agentSettingsOf(raw, d = defaultAgentSettings()) {
     pipeline: { mode: oneOf3(pipeline.mode, PIPELINE_MODES, d.pipeline.mode), memory: oneOf3(pipeline.memory, MEMORY_PLACEMENTS, d.pipeline.memory) },
     roles: rolesOf(a.roles, d.roles),
     main: mainOf(a.main, d.main),
+    context: contextSettingsOf(a.context, d.context),
+    finalReview: finalReviewOf(a.finalReview, d.finalReview),
     gmOpsPerTurn: whole4(a.gmOpsPerTurn, GM_OPS_DEF.min) ?? d.gmOpsPerTurn,
-    kept: { runs: whole4(kept2.runs, KEPT_DEFS.runs.min) ?? d.kept.runs, gates: whole4(kept2.gates, KEPT_DEFS.gates.min) ?? d.kept.gates, watchers: whole4(kept2.watchers, KEPT_DEFS.watchers.min) ?? d.kept.watchers, live: whole4(kept2.live, KEPT_DEFS.live.min) ?? d.kept.live },
+    kept: { runs: whole4(kept2.runs, KEPT_DEFS.runs.min) ?? d.kept.runs, gates: whole4(kept2.gates, KEPT_DEFS.gates.min) ?? d.kept.gates, watchers: whole4(kept2.watchers, KEPT_DEFS.watchers.min) ?? d.kept.watchers, live: whole4(kept2.live, KEPT_DEFS.live.min) ?? d.kept.live, texts: whole4(kept2.texts, KEPT_DEFS.texts.min) ?? d.kept.texts, folds: whole4(kept2.folds, KEPT_DEFS.folds.min) ?? d.kept.folds },
     compaction: { atTokens: whole4(compaction.atTokens, COMPACTION_DEFS.atTokens.min) ?? d.compaction.atTokens, keepTurns: whole4(compaction.keepTurns, COMPACTION_DEFS.keepTurns.min) ?? d.compaction.keepTurns, summarizeTool: typeof compaction.summarizeTool === "boolean" ? compaction.summarizeTool : d.compaction.summarizeTool },
     recording: { outputChars: whole4(recording.outputChars, OUTPUT_CHARS_DEF.min) ?? d.recording.outputChars },
     review: { placement: oneOf3(review.placement, REVIEW_PLACEMENTS, d.review.placement) },
-    vsClassic: typeof a.vsClassic === "number" && Number.isFinite(a.vsClassic) && a.vsClassic > 0 ? a.vsClassic : d.vsClassic
+    vsClassic: typeof a.vsClassic === "number" && Number.isFinite(a.vsClassic) && a.vsClassic > 0 ? a.vsClassic : d.vsClassic,
+    systemTokens: whole4(a.systemTokens, SYSTEM_TOKENS_DEF.min) ?? d.systemTokens
   };
 }
 function roleCaching(settings, role) {
@@ -66849,6 +67377,7 @@ var STEP_LABEL2 = {
   brief: "Writing the outline\u2026",
   outline: "Writing the outline\u2026",
   sections: "Filling the prompt\u2026",
+  "final review": "Reviewing the prompt\u2026",
   book: "Waiting for another chat of this world\u2026",
   clear: "Clearing an earlier turn's sections\u2026",
   restart: "Ready; reopen the chat to continue",
@@ -66903,7 +67432,7 @@ function isDiagRecord(raw) {
     return false;
   return typeof raw.seq === "number" && KINDS.some((k) => k === raw.kind) && LEVELS2.some((l) => l === raw.level) && STATUSES.some((s) => s === raw.status) && (raw.turn === null || typeof raw.turn === "string") && (raw.phase === null || DIAG_PHASES.some((p) => p === raw.phase)) && typeof raw.step === "string" && typeof raw.start === "number" && typeof raw.end === "number" && typeof raw.ms === "number";
 }
-var isCount = (v) => typeof v === "number" && Number.isFinite(v) && v >= 0;
+var isCount = (v3) => typeof v3 === "number" && Number.isFinite(v3) && v3 >= 0;
 function usageOf(raw) {
   if (raw === null)
     return null;
@@ -67459,9 +67988,9 @@ var METADATA_CHUNK_CHARS = 1e4;
 var CHUNK_PREFIX = `${LEDGER_NAMESPACE}:`;
 function encodeLedger(bag, ledger) {
   const out = {};
-  for (const [k, v] of Object.entries(bag))
+  for (const [k, v3] of Object.entries(bag))
     if (!k.startsWith(CHUNK_PREFIX))
-      out[k] = v;
+      out[k] = v3;
   const text5 = JSON.stringify(ledger);
   if (new TextEncoder().encode(text5).length <= METADATA_CAP_BYTES) {
     out[LEDGER_NAMESPACE] = JSON.parse(text5);
@@ -67473,14 +68002,33 @@ function encodeLedger(bag, ledger) {
     out[`${CHUNK_PREFIX}${i}`] = text5.slice(i * METADATA_CHUNK_CHARS, (i + 1) * METADATA_CHUNK_CHARS);
   return out;
 }
+var DECODED = new WeakMap;
+function chunksOf(bag, raw) {
+  if (!isRecord(raw) || typeof raw.chunks !== "number" || !Number.isInteger(raw.chunks) || raw.chunks < 1 || raw.chunks > 1000)
+    return [];
+  return Array.from({ length: raw.chunks }, (_, i) => bag[`${CHUNK_PREFIX}${i}`]);
+}
 function decodeLedger(bag, damaged) {
-  let raw = bag[LEDGER_NAMESPACE];
+  const raw = bag[LEDGER_NAMESPACE];
+  const chunks = chunksOf(bag, raw);
+  let decoded = DECODED.get(bag);
+  if (!decoded || decoded.raw !== raw || decoded.chunks.length !== chunks.length || decoded.chunks.some((c, i) => c !== chunks[i])) {
+    const skipped = [];
+    decoded = { raw, chunks, ledger: deepFreeze(decodeBag(raw, chunks, (swipe) => skipped.push(swipe))), damaged: skipped };
+    DECODED.set(bag, decoded);
+  }
+  if (damaged)
+    for (const swipe of decoded.damaged)
+      damaged(swipe);
+  return decoded.ledger;
+}
+function decodeBag(value, chunks, damaged) {
+  let raw = value;
   if (isRecord(raw) && typeof raw.chunks === "number" && typeof raw.hash === "string") {
-    if (!Number.isInteger(raw.chunks) || raw.chunks < 1 || raw.chunks > 1000)
+    if (chunks.length === 0)
       return null;
     let text5 = "";
-    for (let i = 0;i < raw.chunks; i++) {
-      const part = bag[`${CHUNK_PREFIX}${i}`];
+    for (const part of chunks) {
       if (typeof part !== "string")
         return null;
       text5 += part;
@@ -67502,7 +68050,7 @@ function decodeLedger(bag, damaged) {
     if (isRec(rec))
       swipes[key] = structuredClone(rec);
     else
-      damaged?.(key);
+      damaged(key);
   }
   const markers = [];
   for (const m of raw.markers) {
@@ -67510,7 +68058,7 @@ function decodeLedger(bag, damaged) {
       continue;
     const { seq: _seq, at: _at, start: _start, ...body } = m;
     if (validMarkerBody(body))
-      markers.push({ ...body, seq: m.seq, at: m.at, ...m.start === true ? { start: true } : {} });
+      markers.push({ ...structuredClone(body), seq: m.seq, at: m.at, ...m.start === true ? { start: true } : {} });
   }
   return { v: 1, swipes, markers };
 }
@@ -67557,10 +68105,10 @@ class ChatSnapshots {
     return [...this.map.values()];
   }
 }
-var isInt = (v) => Number.isInteger(v);
-var isStrings2 = (v) => Array.isArray(v) && v.every((s) => typeof s === "string");
-var isContent = (v) => isRecord(v) && typeof v.len === "number" && typeof v.hash === "string";
-var isRefs = (v) => Array.isArray(v) && v.every((r) => isRecord(r) && isInt(r.index) && (r.in === "events" || r.in === "post" && isInt(r.seq)));
+var isInt = (v3) => Number.isInteger(v3);
+var isStrings2 = (v3) => Array.isArray(v3) && v3.every((s) => typeof s === "string");
+var isContent = (v3) => isRecord(v3) && typeof v3.len === "number" && typeof v3.hash === "string";
+var isRefs = (v3) => Array.isArray(v3) && v3.every((r) => isRecord(r) && isInt(r.index) && (r.in === "events" || r.in === "post" && isInt(r.seq)));
 var SWIPE_KEY = /^\d{1,6}$/;
 var POST_KINDS = ["materialize", "fix", "confirm", "cont", "narr"];
 var REC_STATUSES = ["ok", "degraded", "stopped"];
@@ -67583,7 +68131,7 @@ function isRec(rec) {
     return false;
   return (rec.accepted === undefined || isContent(rec.accepted)) && (rec.diag === undefined || typeof rec.diag === "string") && (rec.prompts === undefined || typeof rec.prompts === "string") && (rec.readElsewhere === undefined || rec.readElsewhere === true);
 }
-var isChainEntry = (v) => isRecord(v) && typeof v.id === "string" && typeof v.isUser === "boolean" && isInt(v.swipeId) && isInt(v.swipeCount) && isContent(v.content) && typeof v.parentPath === "string";
+var isChainEntry = (v3) => isRecord(v3) && typeof v3.id === "string" && typeof v3.isUser === "boolean" && isInt(v3.swipeId) && isInt(v3.swipeCount) && isContent(v3.content) && typeof v3.parentPath === "string";
 function isHeldWrite(w) {
   if (!isRecord(w) || typeof w.id !== "string")
     return false;
@@ -67920,6 +68468,7 @@ class LedgerService {
     else
       this.hooks?.changed(chatId, gate.userId);
     this.drop(chatId, gate.userId, p);
+    this.gone(chatId, gate.userId, p, "dropped");
     this.endRun(chatId, gate.userId, p);
   }
   endRun(chatId, userId, p) {
@@ -67944,8 +68493,11 @@ class LedgerService {
       return null;
     gate.taken = null;
     const failed = !ended ? null : ended.error ? "error" : p.type !== "continue" && ended.content.trim() === "" ? "empty" : null;
-    if (failed === null || gate.prepared !== null || gate.halt !== null)
+    if (failed === null || gate.prepared !== null || gate.halt !== null) {
+      if (!ended || failed !== null)
+        this.gone(chatId, gate.userId, p, ended ? "failed" : "cancelled");
       return failed;
+    }
     const started = this.started.get(chatId);
     const ours = started?.generationId === generationId ? started : null;
     const message = ours?.targetMessageId ?? null;
@@ -67976,8 +68528,10 @@ class LedgerService {
         if (this.gates.get(chatId) === gate && gate.prepared === null && gate.halt === null && gate.taken === null) {
           gate.prepared = { ...p, generationId: null };
           this.dropIfStale(chatId);
-        } else
+        } else {
+          this.gone(chatId, userId, p, "dropped");
           this.hooks?.changed(chatId, userId);
+        }
         return;
       }
       this.diag?.begin(at, STEP_LABEL2.read);
@@ -68047,12 +68601,16 @@ class LedgerService {
       return false;
     gate.prepared = null;
     this.drop(chatId, gate.userId, p);
+    this.gone(chatId, gate.userId, p, "dropped");
     return true;
   }
   notStarted(chatId, userId, p, why) {
     const at = { chatId, userId, turn: p.id };
     this.diag?.end(at, { status: "failed", reason: `${why}, so nothing was generated` });
     this.hooks?.failed({ chatId, userId, turn: p.id, step: "stale", reason: why, as: p.as }).catch((error) => this.diag?.error(at, "restart", error, "the chat wasn't told its reply didn't start"));
+  }
+  gone(chatId, userId, p, how) {
+    this.hooks?.turnGone?.({ chatId, userId, turn: p.id, generationId: p.generationId, how });
   }
   page(session, userId, chatId, viewing) {
     this.pages.delete(session);
@@ -68066,17 +68624,17 @@ class LedgerService {
     }
   }
   shows(session, chatId) {
-    const page = this.pages.get(session);
-    return page === undefined || page.chatId === chatId && page.viewing;
+    const page3 = this.pages.get(session);
+    return page3 === undefined || page3.chatId === chatId && page3.viewing;
   }
   reports(session, chatId) {
-    const page = this.pages.get(session);
-    return page !== undefined && page.chatId === chatId && page.viewing;
+    const page3 = this.pages.get(session);
+    return page3 !== undefined && page3.chatId === chatId && page3.viewing;
   }
   viewerOf(chatId, userId) {
     let last = null;
-    for (const [session, page] of this.pages)
-      if (page.userId === userId && page.chatId === chatId && page.viewing)
+    for (const [session, page3] of this.pages)
+      if (page3.userId === userId && page3.chatId === chatId && page3.viewing)
         last = session;
     return last;
   }
@@ -68255,6 +68813,7 @@ class LedgerService {
       gate.prepared = null;
       this.letGo(gate.worldId, p.id);
       this.endRun(chatId, userId, p);
+      this.gone(chatId, userId, p, "dropped");
       return "cancel";
     }
     const hooks = this.hooks;
@@ -68268,6 +68827,7 @@ class LedgerService {
       if (await writing === "moved") {
         gate.prepared = null;
         this.letGo(gate.worldId, p.id);
+        this.gone(chatId, userId, p, "dropped");
         this.diag?.end({ chatId, userId, turn: p.id }, { status: "skipped", reason: "the preset this chat generates with changed after the engine ran; the engine runs again" });
         return "moved";
       }
@@ -68275,6 +68835,7 @@ class LedgerService {
       gate.prepared = null;
       this.drop(chatId, userId, p);
       this.endRun(chatId, userId, p);
+      this.gone(chatId, userId, p, "failed");
       const reason2 = messageOf(error);
       this.diag?.end({ chatId, userId, turn: p.id }, { status: "failed", reason: `sections: ${reason2}` });
       this.hooks?.failed({ chatId, userId, turn: p.id, step: "sections", reason: reason2, as: p.as }).catch((e) => this.diag?.error({ chatId, userId, turn: p.id }, "guard", e, "the failure flag wasn't shown"));
@@ -68298,6 +68859,7 @@ class LedgerService {
       if (holder && p && p.generationId !== null && lease.chatId === chatId) {
         holder.prepared = null;
         await this.unfill(lease.chatId, holder.userId, p);
+        this.gone(lease.chatId, holder.userId, p, "dropped");
         continue;
       }
       if (lease.kind === "impersonate" && lease.chatId === chatId) {
@@ -68337,6 +68899,7 @@ class LedgerService {
         gate.prepared = null;
         this.diag?.end({ chatId, userId, turn: earlier.id }, { status: "skipped", reason: "the chat changed before its reply; the engine ran again" });
         await this.unfill(chatId, userId, earlier);
+        this.gone(chatId, userId, earlier, "dropped");
       }
       const target = halt.target ? observed.find((m) => m.id === halt.target) : undefined;
       const blank = target !== undefined && target.swipes.length > 1 && target.swipes.at(-1) === "";
@@ -68396,6 +68959,11 @@ class LedgerService {
         }
         going();
         this.failedStep(at);
+        if (hooks.finalReview) {
+          delivered = await hooks.finalReview({ chatId, userId, core, observed, generationId: halt.id, delivered, signal: signal2 });
+          going();
+          this.stoppedRun(at);
+        }
       } catch (error) {
         core.take(halt.id);
         ended();
@@ -68557,8 +69125,10 @@ class LedgerService {
     const gate = this.gates.get(chatId);
     this.gates.delete(chatId);
     const p = gate?.prepared;
-    if (gate && p)
+    if (gate && p) {
       this.drop(chatId, gate.userId, p);
+      this.gone(chatId, gate.userId, p, "dropped");
+    }
   }
   busy(chatId) {
     const slot = this.chats.get(chatId);
@@ -68596,9 +69166,9 @@ class LedgerService {
   }
   viewed() {
     const out = new Set;
-    for (const page of this.pages.values())
-      if (page.chatId !== null && page.viewing)
-        out.add(page.chatId);
+    for (const page3 of this.pages.values())
+      if (page3.chatId !== null && page3.viewing)
+        out.add(page3.chatId);
     return out;
   }
   trim(keep) {
@@ -68619,6 +69189,10 @@ class LedgerService {
     const key = `${userId}\x00${chatId}`;
     const reset = this.resets.get(key);
     return [...reset ? [reset] : [], ...this.damaged.get(key) ?? []];
+  }
+  viewStamp(chatId, slot, messages) {
+    const keys = slot.core.foldKeys(this.observe(chatId, slot.userId, messages));
+    return JSON.stringify([slot.written, keys.steps.at(-1) ?? keys.root, this.keptOf(chatId), this.notices(chatId, slot.userId)]);
   }
   observe(chatId, userId, messages) {
     return toChain(messages, (messageId, swipe) => {
@@ -68702,7 +69276,7 @@ class LedgerService {
         this.host.log("warn", `[LumiRPEngine] chat ${chatId}: its journal was ${reset}; starting a fresh one (the chat's records still fold)`, userId);
       const stored = await this.host.storage.read(snapshotsPath(chatId), userId).catch(() => null);
       const snapshots = ChatSnapshots.parse(stored);
-      const slot = { core: new LedgerCore(journal, { ...env, snapshots }, this.folder), userId, queue: Promise.resolve(), written: reset || raw === null ? null : journalHash(raw), ops: 0, snapshots, reasserts: new Map, leftOpen: new Set([...journal.windows, ...journal.prereply ?? [], ...Object.keys(journal.pending)]), chars: { journal: raw?.length ?? 0, snapshots: stored?.length ?? 0 } };
+      const slot = { core: new LedgerCore(journal, { ...env, snapshots }, this.folder(userId)), userId, queue: Promise.resolve(), written: reset || raw === null ? null : journalHash(raw), ops: 0, snapshots, reasserts: new Map, leftOpen: new Set([...journal.windows, ...journal.prereply ?? [], ...Object.keys(journal.pending)]), chars: { journal: raw?.length ?? 0, snapshots: stored?.length ?? 0 }, viewed: null };
       await slot.core.prepareWorlds(this.observe(chatId, userId, await this.host.chats.messages(chatId, userId)));
       this.chats.set(chatId, slot);
       let chars = 0;
@@ -68748,7 +69322,12 @@ class LedgerService {
           await this.hooks?.writesLanded({ chatId, userId: slot.userId, core: slot.core, observed, writes: landed, refused });
         }
         await this.persist(chatId, slot);
-        await this.flush(chatId, slot);
+        if (await this.flush(chatId, slot))
+          await this.persist(chatId, slot);
+        const viewed = this.viewStamp(chatId, slot, await this.host.chats.messages(chatId, slot.userId));
+        if (viewed === slot.viewed)
+          return;
+        slot.viewed = viewed;
         this.hooks?.changed(chatId, slot.userId);
       })).catch((error) => {
         const text5 = `[LumiRPEngine] ledger ${chatId}: ${error instanceof Error ? error.stack ?? error.message : String(error)}`;
@@ -68790,7 +69369,8 @@ class LedgerService {
   }
   async flush(chatId, slot) {
     if (slot.core.inFlight)
-      return;
+      return false;
+    let wrote = false;
     const messages = await this.host.chats.messages(chatId, slot.userId);
     const observed = this.observe(chatId, slot.userId, messages);
     const stored = new Map(observed.map((m) => [m.id, JSON.stringify(m.ledger)]));
@@ -68819,7 +69399,9 @@ class LedgerService {
         slot.reasserts.delete(id);
       await this.host.chats.writeMetadata(chatId, id, encodeLedger(message.metadata, ledger), slot.userId);
       slot.core.markFlushed(id);
+      wrote = true;
     }
+    return wrote;
   }
 }
 
@@ -68935,7 +69517,7 @@ function matchRowIn(tables, text5) {
   for (const table of tables) {
     for (const id of Object.keys(table.rows).sort()) {
       const row = table.rows[id] ?? {};
-      const label = [row.title, row.name, row.label].find((v) => typeof v === "string") ?? "";
+      const label = [row.title, row.name, row.label].find((v3) => typeof v3 === "string") ?? "";
       const have = new Set([...words4(id.replace(/_/g, " ")), ...words4(label)]);
       const shared = [...wanted].filter((w) => have.has(w)).length;
       if (shared > score) {
@@ -69051,18 +69633,18 @@ function checkProposals(world, registry, raw, mode, sources, drops = new Map) {
       drop2("named the player character");
       continue;
     }
-    const v = isRecord(p.value) ? p.value : {};
+    const v3 = isRecord(p.value) ? p.value : {};
     const notes = p.note ? [p.note] : [];
     let value = null;
     let pack = "space";
     if (p.collection === "entities") {
-      const stated = typeof v.kind === "string" ? v.kind : "";
+      const stated = typeof v3.kind === "string" ? v3.kind : "";
       const base = exists ? world.entities[p.key] : undefined;
-      const kindless = (v.kind === undefined || v.kind === null || typeof v.kind === "string" && /^\s*(none)?\s*$/i.test(v.kind)) && !kindOf(world, registry, stated);
+      const kindless = (v3.kind === undefined || v3.kind === null || typeof v3.kind === "string" && /^\s*(none)?\s*$/i.test(v3.kind)) && !kindOf(world, registry, stated);
       const kindId = kindless ? base?.kind ?? fallbackKind ?? stated : stated;
       const assumeKind = base === undefined && kindId !== stated;
       const kind = kindOf(world, registry, kindId);
-      const name = typeof v.name === "string" ? neutralizeMacros(v.name).trim() : "";
+      const name = typeof v3.name === "string" ? neutralizeMacros(v3.name).trim() : "";
       if (!kind) {
         drop2(`used a kind this world doesn't have (${stated || "none"})`);
         continue;
@@ -69082,7 +69664,7 @@ function checkProposals(world, registry, raw, mode, sources, drops = new Map) {
       pack = kind.pack ?? "world";
       const defs = fieldsOf2(world, registry, kindId);
       const fields = {};
-      for (const [f, raw2] of Object.entries(isRecord(v.fields) ? v.fields : {})) {
+      for (const [f, raw2] of Object.entries(isRecord(v3.fields) ? v3.fields : {})) {
         const def = safeKey(f) && hasOwn(defs, f) ? defs[f] : undefined;
         const checked = def ? fieldValue(def, raw2, known) : undefined;
         if (checked === undefined)
@@ -69090,7 +69672,7 @@ function checkProposals(world, registry, raw, mode, sources, drops = new Map) {
         else
           fields[f] = checked;
       }
-      const relations = (Array.isArray(v.relations) ? v.relations : []).filter((r) => isRecord(r) && typeof r.type === "string" && typeof r.to === "string" && known(r.to) && (hasOwn(world.relations, r.type) || registry.relations.has(r.type)));
+      const relations = (Array.isArray(v3.relations) ? v3.relations : []).filter((r) => isRecord(r) && typeof r.type === "string" && typeof r.to === "string" && known(r.to) && (hasOwn(world.relations, r.type) || registry.relations.has(r.type)));
       const assumed = [];
       for (const [f, def] of Object.entries(defs)) {
         const table = def.table && hasOwn(world.tables, def.table) ? world.tables[def.table] : undefined;
@@ -69110,35 +69692,35 @@ function checkProposals(world, registry, raw, mode, sources, drops = new Map) {
         assumed.push(f);
         notes.push(`assumed ${f}: ${row}`);
       }
-      const tier = typeof v.tier === "string" && tierOf(world, v.tier) ? v.tier : base?.tier ?? spawnTierOf(world);
+      const tier = typeof v3.tier === "string" && tierOf(world, v3.tier) ? v3.tier : base?.tier ?? spawnTierOf(world);
       const link = sources?.linkOf(p.source) ?? null;
       const linked = [...new Set([...base?.sources ?? [], ...link ? [link] : []])];
-      const marked = [...new Set([...assumeKind ? ["kind"] : [], ...(base?.assumed ?? []).filter((f) => f === "kind" ? kindId === base?.kind : !hasOwn(isRecord(v.fields) ? v.fields : {}, f)), ...assumed])];
-      const proposed = { id: p.key, kind: kindId, name, tier, fields, relations: relations.map((r) => ({ type: r.type, to: r.to })), ...typeof v.agent === "boolean" ? { agent: v.agent } : {}, ...linked.length > 0 ? { sources: linked } : {}, ...marked.length > 0 ? { assumed: marked } : {} };
+      const marked = [...new Set([...assumeKind ? ["kind"] : [], ...(base?.assumed ?? []).filter((f) => f === "kind" ? kindId === base?.kind : !hasOwn(isRecord(v3.fields) ? v3.fields : {}, f)), ...assumed])];
+      const proposed = { id: p.key, kind: kindId, name, tier, fields, relations: relations.map((r) => ({ type: r.type, to: r.to })), ...typeof v3.agent === "boolean" ? { agent: v3.agent } : {}, ...linked.length > 0 ? { sources: linked } : {}, ...marked.length > 0 ? { assumed: marked } : {} };
       value = base ? { ...JSON.parse(JSON.stringify(base)), ...proposed, fields: { ...base.fields, ...fields }, relations: relations.length > 0 ? proposed.relations : JSON.parse(JSON.stringify(base.relations)) } : proposed;
     } else if (p.collection === "places") {
-      const name = typeof v.name === "string" ? neutralizeMacros(v.name).trim() : "";
+      const name = typeof v3.name === "string" ? neutralizeMacros(v3.name).trim() : "";
       if (name === "") {
         drop2("had no name");
         continue;
       }
-      const parent = typeof v.parent === "string" && v.parent !== p.key && placeKnown(v.parent) ? v.parent : undefined;
-      if (typeof v.parent === "string" && !parent)
-        notes.push(`dropped unknown parent ${v.parent}`);
+      const parent = typeof v3.parent === "string" && v3.parent !== p.key && placeKnown(v3.parent) ? v3.parent : undefined;
+      if (typeof v3.parent === "string" && !parent)
+        notes.push(`dropped unknown parent ${v3.parent}`);
       const base = exists ? world.places[p.key] : undefined;
       const link = sources?.linkOf(p.source) ?? null;
       const linked = [...new Set([...base?.sources ?? [], ...link ? [link] : []])];
-      const proposed = { id: p.key, name, fields: isRecord(v.fields) ? v.fields : {}, ...parent ? { parent } : {}, ...typeof v.sceneType === "string" ? { sceneType: v.sceneType } : {}, ...linked.length > 0 ? { sources: linked } : {} };
-      value = base ? { ...JSON.parse(JSON.stringify(base)), ...proposed, fields: { ...base.fields, ...isRecord(v.fields) ? v.fields : {} } } : proposed;
+      const proposed = { id: p.key, name, fields: isRecord(v3.fields) ? v3.fields : {}, ...parent ? { parent } : {}, ...typeof v3.sceneType === "string" ? { sceneType: v3.sceneType } : {}, ...linked.length > 0 ? { sources: linked } : {} };
+      value = base ? { ...JSON.parse(JSON.stringify(base)), ...proposed, fields: { ...base.fields, ...isRecord(v3.fields) ? v3.fields : {} } } : proposed;
     } else {
-      const from = typeof v.from === "string" ? v.from : "";
-      const to = typeof v.to === "string" ? v.to : "";
+      const from = typeof v3.from === "string" ? v3.from : "";
+      const to = typeof v3.to === "string" ? v3.to : "";
       if (!placeKnown(from) || !placeKnown(to) || from === to) {
         drop2("joined places that don't exist");
         continue;
       }
       const modes = {};
-      const rawModes = isRecord(v.modes) ? v.modes : {};
+      const rawModes = isRecord(v3.modes) ? v3.modes : {};
       for (const m of TRAVEL_MODES2) {
         const leg = rawModes[m];
         if (isRecord(leg) && typeof leg.minutes === "number" && leg.minutes > 0)
@@ -69148,7 +69730,7 @@ function checkProposals(world, registry, raw, mode, sources, drops = new Map) {
         drop2("had no travel time");
         continue;
       }
-      value = { id: p.key, from, to, modes, bidirectional: v.bidirectional !== false };
+      value = { id: p.key, from, to, modes, bidirectional: v3.bidirectional !== false };
     }
     out.push({ ...p, value, pack, ...notes.length > 0 ? { note: notes.join("; ") } : {} });
   }
@@ -69198,7 +69780,7 @@ function readIndexProposals(raw, source) {
   return list.flatMap((e, i) => {
     if (!isRecord(e))
       return [];
-    const key = [e.key, e.title, e.source].find((v) => typeof v === "string" && v.trim() !== "") ?? "";
+    const key = [e.key, e.title, e.source].find((v3) => typeof v3 === "string" && v3.trim() !== "") ?? "";
     if (key === "")
       return [];
     return [{ id: `${source}:${i}`, collection: "lore", key, value: JSON.parse(JSON.stringify(e)), source: typeof e.source === "string" ? e.source : source, confidence: typeof e.confidence === "number" ? Math.min(1, Math.max(0, e.confidence)) : 0.5, ...typeof e.note === "string" ? { note: e.note } : {} }];
@@ -69240,9 +69822,9 @@ ${rest}`;
     out.push(current2);
   return out;
 }
-function names(v, max, count) {
+function names(v3, max, count) {
   const out = [];
-  for (const s of Array.isArray(v) ? v : []) {
+  for (const s of Array.isArray(v3) ? v3 : []) {
     if (typeof s !== "string")
       continue;
     const name = neutralizeMacros(s).replace(/\s+/g, " ").trim().slice(0, max);
@@ -69257,8 +69839,8 @@ function checkIndexProposals(world, raw, drops = new Map) {
   };
   const chosen = new Map;
   for (const p of raw) {
-    const v = isRecord(p.value) ? p.value : {};
-    const group = typeof v.title === "string" ? loreTerm(v.title) : p.key;
+    const v3 = isRecord(p.value) ? p.value : {};
+    const group = typeof v3.title === "string" ? loreTerm(v3.title) : p.key;
     const prior = chosen.get(group);
     if (prior)
       drop2("repeated another proposal");
@@ -69273,8 +69855,8 @@ function checkIndexProposals(world, raw, drops = new Map) {
       drop2(`were past the ${PROPOSALS_MAX}-proposal limit`);
       continue;
     }
-    const v = isRecord(p.value) ? p.value : {};
-    const title = names([v.title], NAME_MAX2, 1)[0] ?? "";
+    const v3 = isRecord(p.value) ? p.value : {};
+    const title = names([v3.title], NAME_MAX2, 1)[0] ?? "";
     if (title === "") {
       drop2("had no title");
       continue;
@@ -69283,7 +69865,7 @@ function checkIndexProposals(world, raw, drops = new Map) {
       drop2("repeated an existing entry's title");
       continue;
     }
-    const content = typeof v.content === "string" ? v.content.trim().slice(0, CONTENT_MAX) : "";
+    const content = typeof v3.content === "string" ? v3.content.trim().slice(0, CONTENT_MAX) : "";
     if (content.trim() === "") {
       drop2("had no text");
       continue;
@@ -69295,17 +69877,17 @@ function checkIndexProposals(world, raw, drops = new Map) {
       key = `${base}_${n}`;
     taken.add(key);
     const notes = p.note ? [p.note] : [];
-    const aliases = names(v.aliases, NAME_MAX2, ALIASES_MAX).filter((a) => loreTerm(a) !== loreTerm(title));
-    const topics = names(v.topics, NAME_MAX2, TOPICS_MAX);
+    const aliases = names(v3.aliases, NAME_MAX2, ALIASES_MAX).filter((a) => loreTerm(a) !== loreTerm(title));
+    const topics = names(v3.topics, NAME_MAX2, TOPICS_MAX);
     const links = [];
-    for (const link of names(v.links, 200, LINKS_MAX * 2)) {
+    for (const link of names(v3.links, 200, LINKS_MAX * 2)) {
       if (hasOwn(world.entities, link) || hasOwn(world.places, link)) {
         if (links.length < LINKS_MAX)
           links.push(link);
       } else
         notes.push(`dropped unknown link ${link}`);
     }
-    const terms2 = [...new Set([title, ...aliases, ...names(v.terms, NAME_MAX2, TERMS_MAX)].map(loreTerm))].filter((t) => safeKey(t)).slice(0, TERMS_MAX);
+    const terms2 = [...new Set([title, ...aliases, ...names(v3.terms, NAME_MAX2, TERMS_MAX)].map(loreTerm))].filter((t) => safeKey(t)).slice(0, TERMS_MAX);
     const filed = [...new Map(topics.map((label) => [topicIdOf(label), label])).entries()].filter(([id]) => safeKey(id)).map(([id, label]) => ({ id, label }));
     const value = { id: key, title, content, keys: [], links, ...aliases.length > 0 ? { aliases } : {}, ...topics.length > 0 ? { topics } : {}, source: { kind: "ai", status: "pending" } };
     const { note: _said, ...rest } = p;
@@ -69412,213 +69994,6 @@ ${problemLines(answer.problems)}` } : {}
   };
 }
 
-// src/shared/main-agent-prompts.ts
-var MAIN_AGENT_PAGE = {
-  id: "main",
-  label: "Main agent",
-  note: "The agent that runs a chat's turns while Settings \u2192 Agents \u2192 Pipeline has a main agent decide: its system prompt, the turn task it gets each turn with the digest and its pinned files, each stage's message, its tools and their answers, what a role it runs is told, and how its session is summarized."
-};
-var MAIN_TOOLS = { runRole: "run_role", revise: "revise", commit: "commit", summarize: "summarize" };
-var MAIN_TEXT = {
-  system: "main.system",
-  turn: "main.turn",
-  digest: "main.digest",
-  digestFresh: "main.digest.fresh",
-  digestEntry: "main.digest.entry",
-  digestLanded: "main.digest.landed",
-  digestLeftOut: "main.digest.left_out",
-  digestNothing: "main.digest.nothing",
-  none: "main.none",
-  pins: "main.pins",
-  pinsFile: "main.pins.file",
-  pinsHeadings: "main.pins.headings",
-  stage: "main.stage",
-  stageLabel: (stage) => `main.stage.${stage}`,
-  enginePrepare: "main.engine.prepare",
-  engineBeats: "main.engine.beats",
-  engineReply: "main.engine.reply",
-  engineRemember: "main.engine.memory_before",
-  open: "main.open",
-  request: (kind) => `main.request.${kind}`,
-  tool: (name) => `main.tool.${name}`,
-  toolArg: (name, arg) => `main.tool.${name}.${arg}`,
-  ran: "main.ran",
-  ranFailed: "main.ran.failed",
-  viaAgent: "main.via.agent",
-  viaPromptOnly: "main.via.prompt_only",
-  refusedOrder: "main.refused.order",
-  refusedOver: "main.refused.over",
-  refusedIdle: "main.refused.idle",
-  refusedRole: "main.refused.role",
-  refusedRan: "main.refused.ran",
-  refusedRunning: "main.refused.running",
-  refusedAgent: "main.refused.agent",
-  refusedRevisions: "main.refused.revisions",
-  refusedCommitted: "main.refused.committed",
-  committed: "main.committed",
-  brief: "main.brief",
-  briefWithheld: "main.brief.withheld",
-  briefRevision: "main.brief.revision",
-  historyCall: "main.history.call",
-  summary: "main.summary",
-  compaction: "main.compaction",
-  compactionInput: "main.compaction.input",
-  summarized: "main.summarized",
-  summarizeNothing: "main.summarize.nothing",
-  summarizeAgain: "main.summarize.again",
-  summarizeFailed: "main.summarize.failed"
-};
-var page = MAIN_AGENT_PAGE.id;
-var INSTRUCTIONS = "Instructions";
-var DIGEST = "Digest";
-var PINS = "Pinned files";
-var STAGES = "Stages";
-var REQUESTS = "What the engine asks";
-var TOOLS = "Tools";
-var ANSWERS = "Tool answers";
-var ROLES = "What a role is told";
-var SESSION = "Session";
-var v = (name, text5, required) => required ? { name, text: text5, required } : { name, text: text5 };
-var STAGE_TEXTS = {
-  memory_before: { label: "Stage 8, left to this turn", text: "the last reply's memory, which the last turn left to this one" },
-  intent: { label: "Stage 1: the intent", text: "the intent, what the player's message plays" },
-  prepare: { label: "Stage 3: scene, minds and decisions", text: "the scene, the minds of the people present and the director's decisions" },
-  beats: { label: "Stage 5: the beats", text: "the director's beats for the planned turn" },
-  read: { label: "Stage 7: the read", text: "the read of the reply, the knowledge it gives and the suggested choices" },
-  memory: { label: "Stage 8: the memory", text: "the minds' memory of the reply" }
-};
-var REQUEST_TEXTS = {
-  interpret: { label: "The intent: the message's action", text: "read the player's message into the action it plays" },
-  judge: { label: "The intent: the approach", text: "rate the approach the player described, for the check the action rolls" },
-  puzzle: { label: "The intent: a puzzle's answer", text: "judge how likely the player's answer to the puzzle is right" },
-  decisions: { label: "The director: decisions here", text: "give the odds of each choice open to the people present" },
-  minds: { label: "The minds", text: "think as each mind the scene calls on" },
-  skipPlan: { label: "The skip: its plan", text: "plan the time skip for the people it spans" },
-  skip: { label: "The skip: its beats", text: "find the time skip's beats, with the minds at them" },
-  scene: { label: "The scene", text: "pick the lore and notes the narrator needs for this scene" },
-  prose: { label: "The director: the beats", text: "write the brief and the outline's beats for the planned turn" },
-  extract: { label: "The read", text: "read the reply into the changes it makes" },
-  effects: { label: "A world step", text: "run the world's own step on the reply" },
-  knowledge: { label: "The knowledge", text: "work out what each person present or told learned from the reply" },
-  offscreen: { label: "The director: decisions elsewhere", text: "give the odds of each choice open to people elsewhere" },
-  choices: { label: "The director: suggested choices", text: "suggest the player's next moves" },
-  memory: { label: "The memory", text: "remember the reply for each mind present" }
-};
-var MAIN_AGENT_PROMPTS = [
-  {
-    id: MAIN_TEXT.system,
-    page,
-    group: INSTRUCTIONS,
-    label: "System prompt",
-    note: "Who the main agent is, what a turn's stages are, and how it works through them with its tools.",
-    text: `You are the main agent for {{world}}, a roleplay world that LumiRPEngine keeps; {{pov}} is the player character. You run this chat's turns behind the scenes, one at a time, and never write the story yourself: a narrator writes each reply, the engine plans each turn, rolls its checks from the turn's seed and keeps the world's state, and role agents do the work you give them.
-
-Each turn, the engine opens its stages in a fixed order: 1, the intent, what the player's message plays; 2, the engine's checks and gates; 3, the scene, the minds of the people present and the director's decisions; 4, the engine's plan; 5, the director's beats; 6, the narrator's reply; 7, the read of the reply, the knowledge it gives and the suggested choices; 8, the minds' memory. At each stage you work in, it says what it asks of the roles. Run the roles you want with run_role, each with a short, concrete task; when a run's answer needs another try, send it a revise message; then call commit, which hands the engine what you have and ends the stage. A request you don't run goes on without its role. A role that fails is yours to decide on: revise it, run it again prompt-only, or go on without it. The engine refuses a role out of its stage.
-
-Your session keeps your earlier turns. Each turn's task says what changed since your last one and gives you your pinned files. The engine's messages and your tools show you what your knowledge lets you see: never guess at what they don't show.`,
-    vars: [v("world", "the world's name"), v("pov", "the player character's name")]
-  },
-  {
-    id: MAIN_TEXT.turn,
-    page,
-    group: INSTRUCTIONS,
-    label: "Turn task",
-    note: "What the main agent gets as a turn starts, before its first stage: the digest, its pinned files and the player's message.",
-    text: `A new turn.
-
-{{digest}}
-
-{{pins}}
-
-The player's message:
-{{message}}`,
-    vars: [v("message", "the player's message this turn answers", true), v("digest", "what changed since the main agent's last turn, framed below"), v("pins", "its pinned files, framed below; nothing when it has none")]
-  },
-  {
-    id: MAIN_TEXT.stage,
-    page,
-    group: STAGES,
-    label: "A stage opens",
-    note: "Each stage the main agent works in starts with this message: what the engine did since the last one, and what it asks of the roles now.",
-    text: `Stage {{number}} of 8: {{stage}}.
-{{engine}}
-What the engine asks of the roles now:
-{{open}}
-Run the roles you want with run_role, revise a run with revise if its answer needs it, then call commit.`,
-    vars: [v("number", "the stage's number in the turn's order"), v("stage", "the stage's words below"), v("engine", "what the engine did since the main agent's last stage, when there is something to say"), v("open", "each request of this stage, one line each", true)]
-  },
-  ...Object.entries(STAGE_TEXTS).map(([stage, t]) => ({ id: MAIN_TEXT.stageLabel(stage), page, group: STAGES, label: t.label, note: "Fills {{stage}} in the stage's message.", text: t.text, vars: [] })),
-  { id: MAIN_TEXT.enginePrepare, page, group: STAGES, label: "What the engine did: the checks", note: "Leads stage 3's message: the engine's checks and gates let the turn play, and the action it plays.", text: "The engine checked the turn and let it play. It plays: {{intent}}", vars: [v("intent", "the action the turn plays, with its parameters, or none")] },
-  { id: MAIN_TEXT.engineBeats, page, group: STAGES, label: "What the engine did: the plan", note: "Leads stage 5's message: what the engine planned, as the narrator is told it.", text: `The engine planned the turn:
-{{lines}}`, vars: [v("lines", "the plan's outcome, montage and beat lines; their count only where the main agent's knowledge doesn't reach them", true)] },
-  { id: MAIN_TEXT.engineReply, page, group: STAGES, label: "What the engine did: the reply", note: "Leads stage 7's message, and ends a turn's session with the reply when no stage showed it.", text: `The narrator's reply:
-{{reply}}`, vars: [v("reply", "the reply as written", true)] },
-  { id: MAIN_TEXT.engineRemember, page, group: STAGES, label: "What the minds remember", note: "Leads the message of the memory the last turn left to this one: the reply they remember.", text: `The last reply, which the minds remember now:
-{{reply}}`, vars: [v("reply", "the last reply as written", true)] },
-  { id: MAIN_TEXT.open, page, group: REQUESTS, label: "A request", note: "One line of a stage's message per request: the role, as run_role takes it, and what the engine asks of it.", text: "- {{role}}: {{what}}", vars: [v("role", "the role's id", true), v("what", "what the engine asks, in the words below")] },
-  ...Object.entries(REQUEST_TEXTS).map(([kind, t]) => ({ id: MAIN_TEXT.request(kind), page, group: REQUESTS, label: t.label, note: "Fills {{what}} in a request's line.", text: t.text, vars: [] })),
-  { id: MAIN_TEXT.digest, page, group: DIGEST, label: "Since the last turn", note: "Frames the digest in the turn task: what changed since the main agent's last turn, oldest first.", text: `What happened in this chat since your last turn, oldest first:
-{{turns}}`, vars: [v("turns", "each reply since, as below", true)] },
-  { id: MAIN_TEXT.digestFresh, page, group: DIGEST, label: "A fresh session", note: "Frames the digest when the main agent has no session in the chat yet, as when a chat switches from classic: the chat so far.", text: `You take this chat up now, with no session of your own in it yet. The chat so far, oldest first:
-{{turns}}`, vars: [v("turns", "each reply so far, as below", true)] },
-  { id: MAIN_TEXT.digestEntry, page, group: DIGEST, label: "A reply", note: "One reply of the digest: the player's message, what changed as the player saw it, and the reply.", text: `Reply {{n}}. The player: {{said}}
-What changed: {{changed}}
-The reply: {{reply}}`, vars: [v("n", "the reply's number in the chat"), v("said", "the player's message before it"), v("changed", "what changed, as the player's Journal says it"), v("reply", "the reply as written")] },
-  { id: MAIN_TEXT.digestLanded, page, group: DIGEST, label: "The last turn's changes", note: "Leads the digest with what landed of the main agent's own last turn once its reply was read.", text: "What landed of your last turn: {{changed}}", vars: [v("changed", "what changed, as the player's Journal says it", true)] },
-  { id: MAIN_TEXT.digestLeftOut, page, group: DIGEST, label: "Earlier replies left out", note: "Heads the digest when it runs past its tokens (Settings \u2192 Agents \u2192 Main agent): how many earlier replies aren't in it.", text: "({{count}} earlier {{replies}} left out.)", vars: [v("count", "how many replies the digest leaves out", true), v("replies", '"reply" for 1, else "replies"')] },
-  { id: MAIN_TEXT.digestNothing, page, group: DIGEST, label: "Nothing changed", note: "The digest when nothing happened since the main agent's last turn.", text: "Nothing changed since your last turn.", vars: [] },
-  { id: MAIN_TEXT.none, page, group: DIGEST, label: "Nothing", note: "Stands in for a part that is empty: no message, no change, no answer.", text: "(none)", vars: [] },
-  { id: MAIN_TEXT.pins, page, group: PINS, label: "Pinned files", note: "Frames the main agent's pinned files in the turn task: those .pins.json lists for it, and those pinned in GM \u2192 Workspace, within its pins budget.", text: `Your pinned files (at most {{tokens}} {{unit}} of them; a file past that comes as its headings, and workspace_read reads it whole):
-{{files}}`, vars: [v("tokens", "the pins budget: the manifest's for the main agent, else Settings \u2192 Agents \u2192 Main agent"), v("unit", '"token" for 1, else "tokens"'), v("files", "each file, as below", true)] },
-  { id: MAIN_TEXT.pinsFile, page, group: PINS, label: "A pinned file", note: "One pinned file, whole.", text: `[{{path}}]
-{{text}}`, vars: [v("path", "the file's path", true), v("text", "the file's text", true)] },
-  { id: MAIN_TEXT.pinsHeadings, page, group: PINS, label: "A file past the budget", note: "A pinned file past the pins budget: its headings only.", text: `[{{path}}: its headings]
-{{headings}}`, vars: [v("path", "the file's path", true), v("headings", "the file's heading lines, or none")] },
-  { id: MAIN_TEXT.tool(MAIN_TOOLS.runRole), page, group: TOOLS, label: "run_role: what it does", note: "The description of the run_role tool.", text: "Run a role on what the engine asks of it in this stage, with your task for it. Each request of the role gets a run with an agent id, which revise takes. A role this stage doesn't ask for is refused.", vars: [] },
-  { id: MAIN_TEXT.toolArg(MAIN_TOOLS.runRole, "role"), page, group: TOOLS, label: "run_role: role", note: "The description of run_role's role argument.", text: "The role to run, as the stage lists it.", vars: [] },
-  { id: MAIN_TEXT.toolArg(MAIN_TOOLS.runRole, "task"), page, group: TOOLS, label: "run_role: task", note: "The description of run_role's task argument.", text: "Your task for the run: what to do or to watch for, in a few concrete sentences.", vars: [] },
-  { id: MAIN_TEXT.toolArg(MAIN_TOOLS.runRole, "prompt_only"), page, group: TOOLS, label: "run_role: prompt_only", note: "The description of run_role's prompt_only argument.", text: "Run it as one call with its classic contract and no tools: the way to try a role again whose run failed.", vars: [] },
-  { id: MAIN_TEXT.tool(MAIN_TOOLS.revise), page, group: TOOLS, label: "revise: what it does", note: "The description of the revise tool.", text: "Send one of this stage's runs a revision: it runs again with your task and your message, and its new answer stands for the old. A run takes as many revisions as its role's budget allows.", vars: [] },
-  { id: MAIN_TEXT.toolArg(MAIN_TOOLS.revise, "agentId"), page, group: TOOLS, label: "revise: agentId", note: "The description of revise's agentId argument.", text: "The run's agent id, as run_role gave it.", vars: [] },
-  { id: MAIN_TEXT.toolArg(MAIN_TOOLS.revise, "message"), page, group: TOOLS, label: "revise: message", note: "The description of revise's message argument.", text: "What to change in the answer, and why.", vars: [] },
-  { id: MAIN_TEXT.tool(MAIN_TOOLS.commit), page, group: TOOLS, label: "commit: what it does", note: "The description of the commit tool.", text: "Hand the engine what this stage's runs answered, and end the stage. A request you didn't run goes on without its role.", vars: [] },
-  { id: MAIN_TEXT.tool(MAIN_TOOLS.summarize), page, group: TOOLS, label: "summarize: what it does", note: "The description of the summarize tool, offered while Settings \u2192 Agents \u2192 Compaction has it on.", text: "Summarize your session now: everything but your latest turns becomes one summary, which your next stages read instead. Use it when your session runs long.", vars: [] },
-  { id: MAIN_TEXT.ran, page, group: ANSWERS, label: "A run answered", note: "run_role's and revise's answer for a run that answered: its agent id, its role, how it ran and its answer, as far as the main agent's knowledge reaches.", text: "{{agent}}: the {{role}} role answered ({{via}}): {{answer}}", vars: [v("agent", "the run's agent id", true), v("role", "the role"), v("via", "how it ran, in the words below"), v("answer", "its answer", true)] },
-  { id: MAIN_TEXT.ranFailed, page, group: ANSWERS, label: "A run failed", note: "run_role's and revise's answer for a run that failed.", text: "{{agent}}: the {{role}} role failed ({{via}}): {{reason}}. Revise it, run it again prompt-only, or go on without it.", vars: [v("agent", "the run's agent id", true), v("role", "the role"), v("via", "how it ran, in the words below"), v("reason", "why it failed")] },
-  { id: MAIN_TEXT.viaAgent, page, group: ANSWERS, label: "Ran as an agent", note: "Fills {{via}}: the role ran as an agent with its tools.", text: "an agent with tools", vars: [] },
-  { id: MAIN_TEXT.viaPromptOnly, page, group: ANSWERS, label: "Ran prompt-only", note: "Fills {{via}}: the role ran as one call with its classic contract.", text: "one call, prompt only", vars: [] },
-  { id: MAIN_TEXT.refusedOrder, page, group: ANSWERS, label: "Out of order", note: "run_role's answer for a role whose work comes at a later stage.", text: "Out of order: the {{role}} role works at stage {{number}}, {{stage}}. The engine keeps the turn's order, so run it once that stage opens.", vars: [v("role", "the role asked for"), v("number", "the number of the role's next stage"), v("stage", "that stage's words")] },
-  { id: MAIN_TEXT.refusedOver, page, group: ANSWERS, label: "Its stage is over", note: "run_role's answer for a role whose stages this turn are over.", text: "The {{role}} role's stage is over this turn: what it answered is the engine's now.", vars: [v("role", "the role asked for")] },
-  { id: MAIN_TEXT.refusedIdle, page, group: ANSWERS, label: "Nothing asked of it", note: "run_role's answer for a role the stage asks nothing of.", text: "The engine asks nothing of the {{role}} role in this stage.", vars: [v("role", "the role asked for")] },
-  { id: MAIN_TEXT.refusedRole, page, group: ANSWERS, label: "No such role", note: "run_role's answer for a role that doesn't exist.", text: "There is no role called {{role}}. The roles are {{roles}}.", vars: [v("role", "the name given"), v("roles", "every role's id")] },
-  { id: MAIN_TEXT.refusedRan, page, group: ANSWERS, label: "It ran already", note: "run_role's answer for a role whose runs this stage answered: a revision changes an answer.", text: "The {{role}} role has run in this stage: revise its run ({{agents}}) to change its answer.", vars: [v("role", "the role asked for"), v("agents", "its runs' agent ids")] },
-  { id: MAIN_TEXT.refusedRunning, page, group: ANSWERS, label: "It is running", note: "run_role's and revise's answer while a run of the role, started by another call of the same answer, hasn't answered yet: a request runs once at a time, so no two runs of it stage changes together.", text: "The {{role}} role is already running in this stage, started by another of your calls: its answer comes back to that call. Revise its run once it has answered, if its answer needs it.", vars: [v("role", "the role asked for")] },
-  { id: MAIN_TEXT.refusedAgent, page, group: ANSWERS, label: "No such run", note: "revise's answer for an agent id no run of this stage has.", text: "No run of this stage has the agent id {{agent}}. Its runs are {{agents}}.", vars: [v("agent", "the id given"), v("agents", "the stage's runs' agent ids, or none")] },
-  { id: MAIN_TEXT.refusedRevisions, page, group: ANSWERS, label: "No revisions left", note: "revise's answer once a run has had the revisions its role's budget allows (Settings \u2192 Agents \u2192 Budgets).", text: "{{agent}} has had the {{limit}} {{revisions}} its role allows; its last answer stands.", vars: [v("agent", "the run's agent id"), v("limit", "the revisions its role allows"), v("revisions", '"revision" for 1, else "revisions"')] },
-  { id: MAIN_TEXT.refusedCommitted, page, group: ANSWERS, label: "The stage is committed", note: "The answer to a call after commit in the same stage.", text: "This stage is committed. The engine goes on, and opens the next stage when it gets there.", vars: [] },
-  { id: MAIN_TEXT.committed, page, group: ANSWERS, label: "Committed", note: "commit's answer: what the engine takes, and what it goes on without.", text: "Committed. The engine takes: {{ran}}. It goes on without: {{skipped}}.", vars: [v("ran", "the roles whose answers it takes"), v("skipped", "the requests no run answered")] },
-  { id: MAIN_TEXT.brief, page, group: ROLES, label: "The main agent's task", note: "What a role run by the main agent is told of its task, after its own instructions. A prompt-only run is sent its classic prompt alone.", text: `The main agent's task for you this turn:
-{{task}}`, vars: [v("task", "the task run_role gave", true)] },
-  { id: MAIN_TEXT.briefRevision, page, group: ROLES, label: "A revision", note: "Follows the task for each revision the main agent sent the run, oldest first.", text: `The main agent asks you to revise your answer:
-{{message}}`, vars: [v("message", "the revision's message", true)] },
-  { id: MAIN_TEXT.briefWithheld, page, group: ANSWERS, label: "Part of a task kept back", note: "Follows a run's answer when a line of the main agent's task or revision wasn't sent to a role that reads with the player character's knowledge or a mind's own: it named a secret, or someone or something hidden from the player character.", text: "A line of your task wasn't sent to the {{role}} role: it named what that role's knowledge doesn't reach.", vars: [v("role", "the role")] },
-  { id: MAIN_TEXT.historyCall, page, group: SESSION, label: "A tool call, kept", note: "How the main agent's session keeps each tool call it made in a stage, for its later stages and turns.", text: `[{{tool}} {{args}}]
-{{result}}`, vars: [v("tool", "the tool's name", true), v("args", "its arguments"), v("result", "what it answered")] },
-  { id: MAIN_TEXT.summary, page, group: SESSION, label: "The summary", note: "Opens the main agent's session once it was summarized: the summary stands for the turns it replaced.", text: `Your session before this point, summarized:
-{{summary}}`, vars: [v("summary", "the summary", true)] },
-  { id: MAIN_TEXT.compaction, page, group: SESSION, label: "Compaction instructions", note: "The instructions of the call that summarizes the main session once it passes Compact the session past (Settings \u2192 Agents \u2192 Compaction), or when the main agent asks with summarize.", text: "You keep a main agent's session short. You get the summary so far, if there is one, and the turns that now fold into it. Write one summary the main agent can keep working from: who and what matters, what each turn played and what changed, the threads still open, and anything the main agent noted for itself. Keep names, numbers and facts exactly as they are, and leave out what no later turn needs. The latest {{keep}} turns stay whole after your summary, so don't repeat them. Answer with the summary alone.", vars: [v("keep", "how many of the latest turns stay whole (Recent turns kept whole)")] },
-  { id: MAIN_TEXT.compactionInput, page, group: SESSION, label: "What it summarizes", note: "The compaction call's message: the summary so far and the turns to fold into it.", text: `The summary so far:
-{{summary}}
-
-The turns to fold into it, oldest first:
-{{turns}}`, vars: [v("summary", "the summary so far, or the text for nothing"), v("turns", "the turns to summarize, each message in order", true)] },
-  { id: MAIN_TEXT.summarized, page, group: SESSION, label: "summarize: done", note: "summarize's answer once the session is summarized.", text: `Your session is summarized: {{folded}} turns folded into the summary, the latest {{kept}} kept whole. From your next stage on, you read:
-{{summary}}`, vars: [v("summary", "the summary", true), v("folded", "how many turns it holds"), v("kept", "how many stay whole")] },
-  { id: MAIN_TEXT.summarizeNothing, page, group: SESSION, label: "summarize: nothing to do", note: "summarize's answer when the session is no longer than the turns kept whole.", text: "There is nothing to summarize: your session holds {{turns}} turns, and the latest {{keep}} stay whole.", vars: [v("turns", "the turns the session holds"), v("keep", "how many stay whole")] },
-  { id: MAIN_TEXT.summarizeAgain, page, group: SESSION, label: "summarize: once a turn", note: "summarize's answer to a second call in one turn.", text: "Your session was summarized this turn already.", vars: [] },
-  { id: MAIN_TEXT.summarizeFailed, page, group: SESSION, label: "summarize: it failed", note: "summarize's answer when the summarizing call failed.", text: "The summary wasn't made ({{reason}}). Your session stays as it is.", vars: [v("reason", "why")] }
-];
-
 // src/shared/agent-failures.ts
 var STOP_TEXT = {
   cancelled: "main.stop.cancelled",
@@ -69649,33 +70024,33 @@ var FAILED_TEXT = {
   interpret: "main.failed.interpret",
   choices: "main.failed.choices"
 };
-var page2 = MAIN_AGENT_PAGE.id;
+var page3 = MAIN_AGENT_PAGE.id;
 var STOPS = "Why an agent stopped";
 var FAILURES = "Why a role failed";
-var v2 = (name, text5) => ({ name, text: text5, required: true });
-var stop = (id, label, note, text5, vars = []) => ({ id, page: page2, group: STOPS, label, note: `${note} The reason a run that stopped so gives, in main.ran.failed's {{reason}}, Diagnostics and the engine-failed card.`, text: text5, vars });
-var failed = (id, label, note, text5) => ({ id, page: page2, group: FAILURES, label, note: `${note} The reason the role's run gives, in main.ran.failed's {{reason}}, Diagnostics and the engine-failed card.`, text: text5, vars: [] });
+var v3 = (name, text5) => ({ name, text: text5, required: true });
+var stop = (id, label, note, text5, vars = []) => ({ id, page: page3, group: STOPS, label, note: `${note} The reason a run that stopped so gives, in main.ran.failed's {{reason}}, Diagnostics and the engine-failed card.`, text: text5, vars });
+var failed = (id, label, note, text5) => ({ id, page: page3, group: FAILURES, label, note: `${note} The reason the role's run gives, in main.ran.failed's {{reason}}, Diagnostics and the engine-failed card.`, text: text5, vars: [] });
 var AGENT_FAILURE_PROMPTS = [
   stop(STOP_TEXT.cancelled, "Cancelled", "The agent was cancelled: the turn's Cancel, its run ending, or the orchestrator stopping it.", "the agent was cancelled"),
   stop(STOP_TEXT.busy, "Still working", "A message sent while the agent still works on its last one.", "the agent is still working on its last message"),
-  stop(STOP_TEXT.revisions, "Out of revisions", "A message after its first answer, once it has had every revision its budget allows (Revisions per agent).", "it has had the {{revisions}} it may have after its first answer", [v2("revisions", 'the revisions it may have, with the word: "2 revisions"')]),
+  stop(STOP_TEXT.revisions, "Out of revisions", "A message after its first answer, once it has had every revision its budget allows (Revisions per agent).", "it has had the {{revisions}} it may have after its first answer", [v3("revisions", 'the revisions it may have, with the word: "2 revisions"')]),
   stop(STOP_TEXT.wallTime, "Out of time", "The agent's own time ran out (Time per agent, Settings \u2192 Agents \u2192 Budgets).", "the agent's time ran out (Time per agent)"),
   stop(STOP_TEXT.turnTime, "The turn out of time", "The turn's agents' time ran out (Agent time per turn).", "the turn's agent time ran out (Agent time per turn)"),
   stop(STOP_TEXT.callTime, "A call too slow", "One call took longer than Time per call.", "the call took longer than Time per call"),
-  stop(STOP_TEXT.callTokensIn, "A prompt too long", "A call whose prompt, as estimated, is past Prompt per call.", "the call's prompt, about {{tokens}}, is past Prompt per call ({{limit}})", [v2("tokens", `the prompt's estimate, with the word: "9,000 tokens"`), v2("limit", "Prompt per call")]),
-  stop(STOP_TEXT.tokensIn, "The agent's prompt tokens spent", "A call that would take the agent's prompt tokens past Prompt tokens per agent.", "the call would take the agent's prompt tokens past {{limit}} (Prompt tokens per agent)", [v2("limit", "Prompt tokens per agent")]),
-  stop(STOP_TEXT.tokensOut, "The agent's answer tokens spent", "The agent has written all Answer tokens per agent allows.", "the agent has written its {{tokens}} (Answer tokens per agent)", [v2("tokens", 'Answer tokens per agent, with the word: "4,000 tokens"')]),
-  stop(STOP_TEXT.turnTokensIn, "The turn's prompt tokens spent", "A call that would take the turn's prompt tokens past Prompt tokens per turn.", "the call would take the turn's prompt tokens past {{limit}} (Prompt tokens per turn)", [v2("limit", "Prompt tokens per turn")]),
-  stop(STOP_TEXT.turnTokensOut, "The turn's answer tokens spent", "The turn's agents have written all Answer tokens per turn allows.", "the turn's agents have written its {{tokens}} (Answer tokens per turn)", [v2("tokens", 'Answer tokens per turn, with the word: "20,000 tokens"')]),
-  stop(STOP_TEXT.loop, "The loop detector", "The agent called one tool with the same arguments as many times in a row as the loop detector allows.", "the agent called {{tool}} with the same arguments {{times}} in a row (Loop detector)", [v2("tool", "the tool's name"), v2("times", 'how many times, with the word: "3 times"')]),
-  stop(STOP_TEXT.toolTurns, "The agent's tool rounds spent", "The agent has had every round of tool calls Tool rounds per agent allows.", "the agent has had its {{rounds}} of tool calls (Tool rounds per agent)", [v2("rounds", 'Tool rounds per agent, with the word: "8 rounds"')]),
-  stop(STOP_TEXT.turnToolTurns, "The turn's tool rounds spent", "The turn's agents have had every round of tool calls Tool rounds per turn allows.", "the turn's agents have had its {{rounds}} of tool calls (Tool rounds per turn)", [v2("rounds", 'Tool rounds per turn, with the word: "40 rounds"')]),
-  stop(STOP_TEXT.failed, "A call failed", "A call that failed: the connection's or Lumiverse's error, as it gave it; words of your own may go around it.", "{{error}}", [v2("error", "the error, as the connection or Lumiverse gave it")]),
-  stop(STOP_TEXT.acceptanceRoulette, "A Model Roulette over a guarded connection", "An agent call on a Model Roulette connection that may send it on a connection acceptance runs guard.", "connection {{connection}} is a Model Roulette that may send the call on connection {{picked}}, which acceptance runs guard: an agent never calls through it while any of its connections is guarded", [v2("connection", "the Model Roulette connection"), v2("picked", "the guarded connection it may send the call on")]),
-  stop(STOP_TEXT.acceptanceClosed, "No acceptance run open", "An agent call on a connection kept for acceptance runs while none is open.", "connection {{connection}} is kept for acceptance runs, and none is open: open one in Settings \u2192 Agents \u2192 Acceptance runs", [v2("connection", "the connection")]),
-  stop(STOP_TEXT.ceilingIn, "An acceptance run's prompt ceiling", "An agent call that would pass the connection's prompt-token ceiling for the open acceptance run.", "the call would pass connection {{connection}}'s ceiling for this acceptance run: {{ceiling}} in all, {{used}} of them spent or held, and it needs about {{needs}}", [v2("connection", "the connection"), v2("ceiling", `the run's prompt-token ceiling, with the words: "300,000 prompt tokens"`), v2("used", "the prompt tokens spent or held"), v2("needs", "the prompt tokens the call needs, as estimated")]),
-  stop(STOP_TEXT.ceilingOut, "An acceptance run's answer ceiling", "An agent call that would pass the connection's answer-token ceiling for the open acceptance run.", "the call would pass connection {{connection}}'s ceiling for this acceptance run: {{ceiling}} in all, {{used}} of them spent or held, and it may write {{needs}}", [v2("connection", "the connection"), v2("ceiling", `the run's answer-token ceiling, with the words: "30,000 answer tokens"`), v2("used", "the answer tokens spent or held"), v2("needs", "the answer tokens the call may write")]),
-  stop(STOP_TEXT.throttle, "Past a connection's throttle", "An agent call that needs more tokens than the connection's throttle lets through in a minute (Settings \u2192 Agents \u2192 Throttles).", "the call needs {{tokens}}, more than this connection's throttle lets through in a minute ({{limit}})", [v2("tokens", 'the tokens the call needs, with the word: "9,000 tokens"'), v2("limit", "the tokens the throttle lets through in a minute")]),
+  stop(STOP_TEXT.callTokensIn, "A prompt too long", "A call whose prompt, as estimated, is past Prompt per call.", "the call's prompt, about {{tokens}}, is past Prompt per call ({{limit}})", [v3("tokens", `the prompt's estimate, with the word: "9,000 tokens"`), v3("limit", "Prompt per call")]),
+  stop(STOP_TEXT.tokensIn, "The agent's prompt tokens spent", "A call that would take the agent's prompt tokens past Prompt tokens per agent.", "the call would take the agent's prompt tokens past {{limit}} (Prompt tokens per agent)", [v3("limit", "Prompt tokens per agent")]),
+  stop(STOP_TEXT.tokensOut, "The agent's answer tokens spent", "The agent has written all Answer tokens per agent allows.", "the agent has written its {{tokens}} (Answer tokens per agent)", [v3("tokens", 'Answer tokens per agent, with the word: "4,000 tokens"')]),
+  stop(STOP_TEXT.turnTokensIn, "The turn's prompt tokens spent", "A call that would take the turn's prompt tokens past Prompt tokens per turn.", "the call would take the turn's prompt tokens past {{limit}} (Prompt tokens per turn)", [v3("limit", "Prompt tokens per turn")]),
+  stop(STOP_TEXT.turnTokensOut, "The turn's answer tokens spent", "The turn's agents have written all Answer tokens per turn allows.", "the turn's agents have written its {{tokens}} (Answer tokens per turn)", [v3("tokens", 'Answer tokens per turn, with the word: "20,000 tokens"')]),
+  stop(STOP_TEXT.loop, "The loop detector", "The agent called one tool with the same arguments as many times in a row as the loop detector allows.", "the agent called {{tool}} with the same arguments {{times}} in a row (Loop detector)", [v3("tool", "the tool's name"), v3("times", 'how many times, with the word: "3 times"')]),
+  stop(STOP_TEXT.toolTurns, "The agent's tool rounds spent", "The agent has had every round of tool calls Tool rounds per agent allows.", "the agent has had its {{rounds}} of tool calls (Tool rounds per agent)", [v3("rounds", 'Tool rounds per agent, with the word: "8 rounds"')]),
+  stop(STOP_TEXT.turnToolTurns, "The turn's tool rounds spent", "The turn's agents have had every round of tool calls Tool rounds per turn allows.", "the turn's agents have had its {{rounds}} of tool calls (Tool rounds per turn)", [v3("rounds", 'Tool rounds per turn, with the word: "40 rounds"')]),
+  stop(STOP_TEXT.failed, "A call failed", "A call that failed: the connection's or Lumiverse's error, as it gave it; words of your own may go around it.", "{{error}}", [v3("error", "the error, as the connection or Lumiverse gave it")]),
+  stop(STOP_TEXT.acceptanceRoulette, "A Model Roulette over a guarded connection", "An agent call on a Model Roulette connection that may send it on a connection acceptance runs guard.", "connection {{connection}} is a Model Roulette that may send the call on connection {{picked}}, which acceptance runs guard: an agent never calls through it while any of its connections is guarded", [v3("connection", "the Model Roulette connection"), v3("picked", "the guarded connection it may send the call on")]),
+  stop(STOP_TEXT.acceptanceClosed, "No acceptance run open", "An agent call on a connection kept for acceptance runs while none is open.", "connection {{connection}} is kept for acceptance runs, and none is open: open one in Settings \u2192 Agents \u2192 Acceptance runs", [v3("connection", "the connection")]),
+  stop(STOP_TEXT.ceilingIn, "An acceptance run's prompt ceiling", "An agent call that would pass the connection's prompt-token ceiling for the open acceptance run.", "the call would pass connection {{connection}}'s ceiling for this acceptance run: {{ceiling}} in all, {{used}} of them spent or held, and it needs about {{needs}}", [v3("connection", "the connection"), v3("ceiling", `the run's prompt-token ceiling, with the words: "300,000 prompt tokens"`), v3("used", "the prompt tokens spent or held"), v3("needs", "the prompt tokens the call needs, as estimated")]),
+  stop(STOP_TEXT.ceilingOut, "An acceptance run's answer ceiling", "An agent call that would pass the connection's answer-token ceiling for the open acceptance run.", "the call would pass connection {{connection}}'s ceiling for this acceptance run: {{ceiling}} in all, {{used}} of them spent or held, and it may write {{needs}}", [v3("connection", "the connection"), v3("ceiling", `the run's answer-token ceiling, with the words: "30,000 answer tokens"`), v3("used", "the answer tokens spent or held"), v3("needs", "the answer tokens the call may write")]),
+  stop(STOP_TEXT.throttle, "Past a connection's throttle", "An agent call that needs more tokens than the connection's throttle lets through in a minute (Settings \u2192 Agents \u2192 Throttles).", "the call needs {{tokens}}, more than this connection's throttle lets through in a minute ({{limit}})", [v3("tokens", 'the tokens the call needs, with the word: "9,000 tokens"'), v3("limit", "the tokens the throttle lets through in a minute")]),
   failed(FAILED_TEXT.noAnswer, "No answer", "A role's agent stopped without an answer and without saying why.", "the agent stopped without an answer"),
   failed(FAILED_TEXT.noJson, "No JSON", "A role's agent answered with no JSON in it.", "the answer holds no JSON"),
   failed(FAILED_TEXT.contract, "Not its task's form", "A role's agent answered JSON that isn't its task's output contract, which classic's own check refuses.", "the answer doesn't keep the task's form"),
@@ -69703,11 +70078,11 @@ var YIELD_TEXT = {
   sceneLore: "main.lost.scene.lore",
   prose: (kind) => `main.lost.prose.${kind}`
 };
-var page3 = MAIN_AGENT_PAGE.id;
-var GROUP2 = "What a run gave";
+var page4 = MAIN_AGENT_PAGE.id;
+var GROUP3 = "What a run gave";
 var count = { name: "count", text: "how many", required: true };
-var def = (id, label, note, text5, vars = [count]) => ({ id, page: page3, group: GROUP2, label, note: `${note} Worded alike to the main agent (run_role's and revise's answers), in Diagnostics and in the host log.`, text: text5, vars });
-var KNOWLEDGE2 = {
+var def = (id, label, note, text5, vars = [count]) => ({ id, page: page4, group: GROUP3, label, note: `${note} Worded alike to the main agent (run_role's and revise's answers), in Diagnostics and in the host log.`, text: text5, vars });
+var KNOWLEDGE = {
   matters: { label: "Knowledge: no reason it matters", note: "A new fact that doesn't say why it matters and to whom (matters), which the knowledge step refuses, with every learning of it.", text: "{{count}} refused (no matters: a new fact says why it matters and to whom)" },
   facts_limit: { label: "Knowledge: past the new facts", note: "A new fact past the new facts a turn or a chat may hold (Settings \u2192 Minds \u2192 Knowledge), all of a turn's calls together.", text: "{{count}} refused (past the new facts a turn or a chat may hold, Settings \u2192 Minds \u2192 Knowledge)" },
   learnings_limit: { label: "Knowledge: past the learnings", note: "A learning past the learnings a turn may hold (Settings \u2192 Minds \u2192 Knowledge), all of a turn's calls together.", text: "{{count}} refused (past the learnings a turn may hold, Settings \u2192 Minds \u2192 Knowledge)" },
@@ -69732,12 +70107,12 @@ var READ = {
   same: { label: "Read: a repeat", note: "A proposal the same as another, or a handover or payment a purchase it proposed already holds.", text: "{{count}} not read (the same as another, or a handover or payment a purchase already holds)" },
   shape: { label: "Read: not a change", note: "An item of its proposals that isn't a change: no type.", text: "{{count}} not read (not a change: no type)" }
 };
-var lines = { name: "lines", text: "the lines, quoted, after a colon; empty where the main agent's knowledge doesn't reach the director's" };
+var lines = { name: "lines", text: "the lines, quoted, after a colon" };
 var PROSE = {
-  here: { label: "Director: someone here who isn't", note: "A line of the brief or the outline that has someone in the scene whom the engine has elsewhere: withheld from the narrator.", text: "{{count}} withheld (it has someone here whom the engine has elsewhere{{lines}})" },
-  gone: { label: "Director: someone gone who is here", note: "A line of the brief or the outline that has someone the engine has in the scene gone from it: withheld from the narrator.", text: "{{count}} withheld (it has someone gone whom the engine has here{{lines}})" },
-  holds: { label: "Director: a thing someone doesn't have", note: "A line of the brief or the outline that has someone hold or hand over a thing the engine says they don't have: withheld from the narrator.", text: "{{count}} withheld (it has someone hold or hand over a thing the engine says they don't have{{lines}})" },
-  lies: { label: "Director: a thing lying where it isn't", note: "A line of the brief or the outline that has a thing lying in the scene that the engine has on someone or elsewhere: withheld from the narrator.", text: "{{count}} withheld (it has a thing lying here that the engine has on someone or elsewhere{{lines}})" }
+  here: { label: "Director: someone here who isn't", note: "A line of the brief or the outline that has someone in the scene whom the engine has elsewhere: flagged, and kept for the narrator.", text: "{{count}} flagged, still in the reply's prompt (it has someone here whom the engine has elsewhere{{lines}})" },
+  gone: { label: "Director: someone gone who is here", note: "A line of the brief or the outline that has someone the engine has in the scene gone from it: flagged, and kept for the narrator.", text: "{{count}} flagged, still in the reply's prompt (it has someone gone whom the engine has here{{lines}})" },
+  holds: { label: "Director: a thing someone doesn't have", note: "A line of the brief or the outline that has someone hold or hand over a thing the engine says they don't have: flagged, and kept for the narrator.", text: "{{count}} flagged, still in the reply's prompt (it has someone hold or hand over a thing the engine says they don't have{{lines}})" },
+  lies: { label: "Director: a thing lying where it isn't", note: "A line of the brief or the outline that has a thing lying in the scene that the engine has on someone or elsewhere: flagged, and kept for the narrator.", text: "{{count}} flagged, still in the reply's prompt (it has a thing lying here that the engine has on someone or elsewhere{{lines}})" }
 };
 var AGENT_YIELD_PROMPTS = [
   def(YIELD_TEXT.writes, "Its changes", "Follows a run's answer when it staged a change, or a change it asked for was refused: each part below, joined.", "Its changes: {{writes}}.", [{ name: "writes", text: "the parts below that it has, joined", required: true }]),
@@ -69745,7 +70120,7 @@ var AGENT_YIELD_PROMPTS = [
   def(YIELD_TEXT.review, "Changes held for the review card", "The changes a run staged whose mode is Confirm: they wait for the GM's Apply on the turn's review card.", "{{count}} held for the review card, waiting for the GM's Apply"),
   def(YIELD_TEXT.refused, "Changes refused", "The changes a run asked for that were refused, with the writer's reasons.", "{{count}} refused ({{reasons}})", [count, { name: "reasons", text: "each refusal's reason, in the tool layer's words", required: true }]),
   def(YIELD_TEXT.lost, "What the engine didn't take", "Follows a run's answer when the engine took less of it than it gave, or it gave nothing: each reason below, joined.", "What the engine didn't take: {{lost}}.", [{ name: "lost", text: "the reasons below that apply, joined", required: true }]),
-  ...Object.entries(KNOWLEDGE2).map(([kind, t]) => def(YIELD_TEXT.knowledge(kind), t.label, t.note, t.text)),
+  ...Object.entries(KNOWLEDGE).map(([kind, t]) => def(YIELD_TEXT.knowledge(kind), t.label, t.note, t.text)),
   def(YIELD_TEXT.knowledgeCalls, "Knowledge: calls with no answer", "Calls of the knowledge step (one per person, or one for the scene) whose agent gave no answer the engine takes; Diagnostics has each call.", "{{count}} of its calls gave no answer the engine takes (see Diagnostics)"),
   def(YIELD_TEXT.knowledgeEmpty, "Knowledge: an empty answer", "A knowledge run whose answers held no fact and no learning, so it recorded nothing and refused nothing.", "its answers held no new fact and no learning", []),
   def(YIELD_TEXT.knowledgeOff, "Knowledge: no step", "A knowledge run that made no call: the knowledge step is off in Settings \u2192 Steps and connections, or no one could perceive the turn.", "the knowledge step made no call: it is off in Settings \u2192 Steps and connections, or no one could perceive the turn", []),
@@ -69757,7 +70132,7 @@ var AGENT_YIELD_PROMPTS = [
 ];
 
 // src/shared/agent-prompts.ts
-var RUNTIME_PROMPT_PAGE = { id: "runtime", label: "Every agent", note: "What the agent runtime says to any agent's model besides its role's own prompts: the scratch_read tool, the notes on tool results, and tools offered as text." };
+var RUNTIME_PROMPT_PAGE = { id: "runtime", label: "Every agent", note: "What the agent runtime says to any agent's model besides its role's own prompts: the scratch_read tool, the notes on tool results, tools offered as text, and how the workspace's system files (AGENTS.md, roles/<role>.md) are framed." };
 var RUNTIME_TEXT = {
   scratchRead: "runtime.scratch_read",
   scratchHandle: "runtime.scratch_read.handle",
@@ -69774,17 +70149,23 @@ var RUNTIME_TEXT = {
   toolResults: "runtime.tool_results",
   toolResult: "runtime.tool_result",
   toolError: "runtime.tool_error",
-  cacheNonce: "runtime.cache_nonce"
+  cacheNonce: "runtime.cache_nonce",
+  systemFiles: "runtime.system_files",
+  systemFile: "runtime.system_file",
+  systemCut: "runtime.system_cut",
+  condenseSystem: "runtime.condense.system",
+  condenseAsk: "runtime.condense.ask",
+  condenseNote: "runtime.condense.note"
 };
-var page4 = RUNTIME_PROMPT_PAGE.id;
+var page5 = RUNTIME_PROMPT_PAGE.id;
 var RUNTIME_PROMPTS = [
-  { id: RUNTIME_TEXT.scratchRead, page: page4, label: "scratch_read: what it does", note: "The description of the built-in tool that reads the rest of a clipped tool result.", text: "Read more of a tool result that came back clipped. Give the scratch handle the clipped result names and where to start; you get the next part.", vars: [] },
-  { id: RUNTIME_TEXT.scratchHandle, page: page4, label: "scratch_read: handle", note: "The description of scratch_read's handle argument.", text: "The scratch handle the clipped result names, such as s1.", vars: [] },
-  { id: RUNTIME_TEXT.scratchOffset, page: page4, label: "scratch_read: offset", note: "The description of scratch_read's offset argument.", text: "The character to start from; 0 is the start.", vars: [] },
-  { id: RUNTIME_TEXT.scratchLength, page: page4, label: "scratch_read: length", note: "The description of scratch_read's length argument.", text: "How many characters to read, at most {{max}}.", vars: [{ name: "max", text: "the most one read returns: Tool results clipped past, in Settings \u2192 Agents" }] },
+  { id: RUNTIME_TEXT.scratchRead, page: page5, label: "scratch_read: what it does", note: "The description of the built-in tool that reads the rest of a clipped tool result.", text: "Read more of a tool result that came back clipped. Give the scratch handle the clipped result names and where to start; you get the next part.", vars: [] },
+  { id: RUNTIME_TEXT.scratchHandle, page: page5, label: "scratch_read: handle", note: "The description of scratch_read's handle argument.", text: "The scratch handle the clipped result names, such as s1.", vars: [] },
+  { id: RUNTIME_TEXT.scratchOffset, page: page5, label: "scratch_read: offset", note: "The description of scratch_read's offset argument.", text: "The character to start from; 0 is the start.", vars: [] },
+  { id: RUNTIME_TEXT.scratchLength, page: page5, label: "scratch_read: length", note: "The description of scratch_read's length argument.", text: "How many characters to read, at most {{max}}.", vars: [{ name: "max", text: "the most one read returns: Tool results clipped past, in Settings \u2192 Agents" }] },
   {
     id: RUNTIME_TEXT.scratchPart,
-    page: page4,
+    page: page5,
     label: "scratch_read: its answer",
     note: "What scratch_read returns.",
     text: `[Scratch {{handle}}, characters {{from}} to {{to}} of {{total}}.]
@@ -69799,7 +70180,7 @@ var RUNTIME_PROMPTS = [
   },
   {
     id: RUNTIME_TEXT.scratchMissing,
-    page: page4,
+    page: page5,
     label: "scratch_read: no such handle",
     note: "scratch_read's answer to a handle that doesn't exist.",
     text: "There's no scratch {{handle}}. Scratch holds: {{handles}}.",
@@ -69810,7 +70191,7 @@ var RUNTIME_PROMPTS = [
   },
   {
     id: RUNTIME_TEXT.clipped,
-    page: page4,
+    page: page5,
     label: "A clipped tool result",
     note: "Follows the part of a long tool result that reaches the model.",
     text: "[Clipped: the first {{shown}} of {{total}} characters. The rest is in scratch {{handle}}; read it with scratch_read from offset {{shown}}.]",
@@ -69822,7 +70203,7 @@ var RUNTIME_PROMPTS = [
   },
   {
     id: RUNTIME_TEXT.unknownTool,
-    page: page4,
+    page: page5,
     label: "A tool that doesn't exist",
     note: "The result of a call to a tool the agent wasn't given.",
     text: "There's no tool {{name}}. The tools are: {{tools}}.",
@@ -69833,7 +70214,7 @@ var RUNTIME_PROMPTS = [
   },
   {
     id: RUNTIME_TEXT.toolFailed,
-    page: page4,
+    page: page5,
     label: "A tool that failed",
     note: "The result of a tool call that failed.",
     text: "{{name}} failed: {{error}}",
@@ -69844,7 +70225,7 @@ var RUNTIME_PROMPTS = [
   },
   {
     id: RUNTIME_TEXT.tooManyCalls,
-    page: page4,
+    page: page5,
     label: "Too many calls in one answer",
     note: "The result of each call past Tool calls per answer.",
     text: "Not run: one answer may call at most {{limit}} {{tools}}. Call {{name}} again in your next answer if you still need it.",
@@ -69856,7 +70237,7 @@ var RUNTIME_PROMPTS = [
   },
   {
     id: RUNTIME_TEXT.toolsInText,
-    page: page4,
+    page: page5,
     label: "Tools offered as text",
     note: "Follows an agent's prompt on a connection that refuses native tools, offering them as text instead.",
     text: `You can use tools. To call one, write a block like this and stop there:
@@ -69869,7 +70250,7 @@ The tools:
   },
   {
     id: RUNTIME_TEXT.toolInText,
-    page: page4,
+    page: page5,
     label: "Each tool offered as text",
     note: "One tool in Tools offered as text.",
     text: `{{name}}: {{description}}
@@ -69882,7 +70263,7 @@ Arguments (JSON Schema): {{parameters}}`,
   },
   {
     id: RUNTIME_TEXT.toolResults,
-    page: page4,
+    page: page5,
     label: "Tool results sent as text",
     note: "The message that brings tool calls written as text their results.",
     text: `Results of your tool calls:
@@ -69892,7 +70273,7 @@ Arguments (JSON Schema): {{parameters}}`,
   },
   {
     id: RUNTIME_TEXT.toolResult,
-    page: page4,
+    page: page5,
     label: "A tool result as text",
     note: "One result in Tool results sent as text.",
     text: `<tool_result name="{{name}}">
@@ -69905,7 +70286,7 @@ Arguments (JSON Schema): {{parameters}}`,
   },
   {
     id: RUNTIME_TEXT.toolError,
-    page: page4,
+    page: page5,
     label: "A failed tool result as text",
     note: "One failed result in Tool results sent as text.",
     text: `<tool_result name="{{name}}" error="true">
@@ -69916,7 +70297,34 @@ Arguments (JSON Schema): {{parameters}}`,
       { name: "error", text: "why it failed", required: true }
     ]
   },
-  { id: RUNTIME_TEXT.cacheNonce, page: page4, label: "Cache key", note: "Heads an agent's prompt after Bust, and every call while its caching is off, so the provider's cached prompt no longer matches.", text: "Cache key {{nonce}}; ignore it.", vars: [{ name: "nonce", text: "the key", required: true }] }
+  { id: RUNTIME_TEXT.cacheNonce, page: page5, label: "Cache key", note: "Heads an agent's prompt after Bust, and every call while its caching is off, so the provider's cached prompt no longer matches.", text: "Cache key {{nonce}}; ignore it.", vars: [{ name: "nonce", text: "the key", required: true }] },
+  {
+    id: RUNTIME_TEXT.systemFiles,
+    page: page5,
+    group: "System instructions",
+    label: "The system files",
+    note: "Follows every agent's own system prompt when the workspace holds system files for it: AGENTS.md, then roles/<its role>.md, the global workspace's (~/) first, then this chat's.",
+    text: `The user's own instructions, from the workspace's system files: follow them. Where one says otherwise than the instructions above, it wins, as long as your answer keeps the form your task asks for. The global workspace's (~/) come first and this chat's after them, so this chat's have the last word.
+
+{{files}}`,
+    vars: [{ name: "files", text: "each file, framed as below, in order", required: true }]
+  },
+  { id: RUNTIME_TEXT.systemFile, page: page5, group: "System instructions", label: "One file", note: "Each system file within the system files, whole.", text: `## {{path}}
+{{text}}`, vars: [{ name: "path", text: "the file's path: ~/AGENTS.md, ~/roles/director.md, AGENTS.md, roles/director.md", required: true }, { name: "text", text: "what it holds", required: true }] },
+  {
+    id: RUNTIME_TEXT.systemCut,
+    page: page5,
+    group: "System instructions",
+    label: "Files cut",
+    note: "Ends the system files when they come to more than Settings \u2192 Agents \u2192 System instructions allows: the files past it are cut at a line or left out.",
+    text: "({{paths}}: cut short, past the {{tokens}} tokens the system files may take. workspace_read reads a file whole.)",
+    vars: [{ name: "paths", text: "the paths of the files cut or left out, joined with commas", required: true }, { name: "tokens", text: "how many tokens the system files may take" }]
+  },
+  { id: RUNTIME_TEXT.condenseSystem, page: page5, label: "condense: the call's system prompt", note: "The system prompt of the one call the condense tool makes, on the agent's own connection, with no tools.", text: "You condense a source for the agents of a roleplay engine. Keep every name, number, date, id and fact they could need, and each secret's mark as written; drop repetition, scaffolding and anything the instructions say doesn't matter. Answer with the note alone: plain lines, no preamble.", vars: [] },
+  { id: RUNTIME_TEXT.condenseAsk, page: page5, label: "condense: what it is asked", note: "Leads the source's text in the condense call.", text: `Condense {{source}} into a short note.
+{{focus}}`, vars: [{ name: "source", text: "the source's path or lore id", required: true }, { name: "focus", text: "what the agent said the note should keep, if anything" }] },
+  { id: RUNTIME_TEXT.condenseNote, page: page5, label: "condense: the note", note: "The note the condense tool writes: its source and the source's hash (so a later reader can tell whether it is still current), then the condensed text.", text: `Condensed from {{source}} (hash {{hash}}):
+{{text}}`, vars: [{ name: "source", text: "the source's path or lore id", required: true }, { name: "hash", text: "the start of the source text's hash", required: true }, { name: "text", text: "the condensed text", required: true }] }
 ];
 
 // src/shared/skip-plan.ts
@@ -69929,7 +70337,7 @@ var SKIP_PLAN_PROMPT = [
 var SKIP_PLAN_ANSWER = 'Answer with JSON only: {"plans":[{"entity":"<person id>","blocks":[{"label":"...","start":"YYYY-MM-DD HH:MM","end":"YYYY-MM-DD HH:MM","place":"<place id>","activity":"<activity>"}]}]}. Leave out anyone with nothing worth planning.';
 
 // src/shared/role-prompts.ts
-var ROLES_PAGE = { id: "roles", label: "Every role", note: "What every role of an agent turn is told besides its own prompts: what its tools show it, how the preset's guidance for its steps leads in, and how its pinned files come." };
+var ROLES_PAGE = { id: "roles", label: "Every role", note: "What every role of an agent turn is told besides its own prompts: the perspective it works from (its tools read everything, secrets marked, whatever it is), how the preset's guidance for its steps leads in, how its pinned files come, and the sections it starts with." };
 function rolePageId(role) {
   return `role.${role}`;
 }
@@ -69944,6 +70352,7 @@ function roleContractId(role, sub2) {
 }
 var ROLES_TEXT = {
   sees: { pov: "role.sees.pov", everyone: "role.sees.everyone", gm: "role.sees.gm", own: "role.sees.own" },
+  context: "role.context",
   guidance: "role.guidance",
   guidanceBlock: "role.guidance.block",
   pins: "role.pins",
@@ -69966,7 +70375,7 @@ var WORLD_VARS = [
   { name: "world", text: "the world's name" },
   { name: "pov", text: "the player character's name" }
 ];
-var SYSTEM_VARS = [...WORLD_VARS, { name: "knowledge", text: "what the role's tools show it: the shared page's text for the knowledge it reads with (Settings \u2192 Agents \u2192 Roles \u2192 Knowledge)" }];
+var SYSTEM_VARS = [...WORLD_VARS, { name: "knowledge", text: "what the role's tools show it (everything, secrets marked) and the perspective it works from: the Every role page's text for its perspective (Settings \u2192 Agents \u2192 Context)" }];
 var MIND_VARS2 = [
   { name: "character", text: "the character the call thinks for; empty for one about no one" },
   { name: "world", text: "the world's name" },
@@ -69996,7 +70405,7 @@ var PROSE_VARS2 = [
   { name: "sections", text: "the sections the narrator has this turn" }
 ];
 var INSTRUCTIONS2 = "Instructions";
-function page5(role, note) {
+function page6(role, note) {
   return { id: rolePageId(role), label: ROLE_LABEL2[role], note };
 }
 function roleTexts(role, system, instructions) {
@@ -70019,17 +70428,20 @@ function howToWork(role, extra = []) {
   ].join(`
 `);
 }
-var SEES_NOTE = "Fills {{knowledge}} in a role's system prompt while it reads with ";
+var SEES_NOTE = "Fills {{knowledge}} in a role's system prompt while Settings \u2192 Agents \u2192 Context has it work from ";
+var SEES = "everything in the world, each secret marked with whom it is known to and whom it is kept from";
 var SHARED_PROMPTS = [
-  { id: ROLES_TEXT.sees.pov, page: ROLES_PAGE.id, group: "What a role's tools show it", label: "Your character's knowledge", note: `${SEES_NOTE}your character's knowledge.`, text: "only what {{pov}}, the player character, knows: nobody and nothing they haven't met, seen or been told of", vars: WORLD_VARS },
-  { id: ROLES_TEXT.sees.everyone, page: ROLES_PAGE.id, group: "What a role's tools show it", label: "Everyone's knowledge, secrets marked", note: `${SEES_NOTE}what everyone in the world knows.`, text: "what everyone in the world knows, each secret marked with whom it is known to and whom it is kept from", vars: WORLD_VARS },
-  { id: ROLES_TEXT.sees.gm, page: ROLES_PAGE.id, group: "What a role's tools show it", label: "The GM's knowledge", note: `${SEES_NOTE}the game master's knowledge.`, text: "everything, as the game master sees it: every secret, plan and hidden person, place and thing", vars: WORLD_VARS },
-  { id: ROLES_TEXT.sees.own, page: ROLES_PAGE.id, group: "What a role's tools show it", label: "A character's own knowledge", note: `${SEES_NOTE}one character's own knowledge, as a mind does: it has no tools, and its task holds what it reads.`, text: "nothing beyond the task: it holds only what the character it is about knows, and that is all you work from", vars: WORLD_VARS },
+  { id: ROLES_TEXT.sees.pov, page: ROLES_PAGE.id, group: "A role's perspective", label: "Your character's perspective", note: `${SEES_NOTE}your character's perspective. A hint only: its tools read everything, secrets marked.`, text: `${SEES}. Work from what {{pov}}, the player character, knows: treat anyone or anything they haven't met, seen or been told of, and every secret not known to them, as unknown to them`, vars: WORLD_VARS },
+  { id: ROLES_TEXT.sees.everyone, page: ROLES_PAGE.id, group: "A role's perspective", label: "Everyone's perspective, secrets marked", note: `${SEES_NOTE}what everyone in the world knows. A hint only: its tools read everything, secrets marked.`, text: `${SEES}. Work from what everyone in the world knows: a secret is for those it is known to, and never reaches the player or anyone it is kept from unless the story reveals it`, vars: WORLD_VARS },
+  { id: ROLES_TEXT.sees.gm, page: ROLES_PAGE.id, group: "A role's perspective", label: "The GM's perspective", note: `${SEES_NOTE}the game master's perspective. A hint only: its tools read everything, secrets marked.`, text: `${SEES}. Work as the game master, who knows it all: a secret still reaches the player only when the story reveals it`, vars: WORLD_VARS },
+  { id: ROLES_TEXT.sees.own, page: ROLES_PAGE.id, group: "A role's perspective", label: "A character's own perspective", note: `${SEES_NOTE}the perspective of the character its task is about, as a mind does. A hint only: its tools read everything, secrets marked.`, text: `${SEES}. Work from what the character the task is about knows: the task gives it, and nothing else, of theirs or anyone's, is theirs to act on`, vars: WORLD_VARS },
+  { id: ROLES_TEXT.context, page: ROLES_PAGE.id, group: "What a role starts with", label: "The sections it starts with", note: "Frames the narrator's sections Settings \u2192 Agents \u2192 Context starts a role with, after its task, as the narrator would get them now.", text: `What the narrator would be told now, in the engine's sections (a secret's mark says whom it is known to and kept from):
+{{sections}}`, vars: [...WORLD_VARS, { name: "sections", text: "each section the role starts with, under its name", required: true }] },
   { id: ROLES_TEXT.guidance, page: ROLES_PAGE.id, group: "The preset's guidance", label: "Before the guidance", note: "Leads the blocks of your preset's guidance for the steps a role stands in for (RPEngine \xB7 <step>), after its instructions, when the preset has any.", text: `Style and rules from the player's preset, each under the step it is for. Follow them where they fit the instructions above; they never change what you answer or its form:
 {{blocks}}`, vars: [{ name: "blocks", text: "the preset's blocks for the role's steps, each under its step's name", required: true }] },
   { id: ROLES_TEXT.guidanceBlock, page: ROLES_PAGE.id, group: "The preset's guidance", label: "One step's guidance", note: "One block of the preset's guidance, under the name of the step it is for.", text: `{{step}}:
 {{text}}`, vars: [{ name: "step", text: "the step's name, as Settings \u2192 Steps and connections names it", required: true }, { name: "text", text: "the block's text", required: true }] },
-  { id: ROLES_TEXT.pins, page: ROLES_PAGE.id, group: "Pinned files", label: "Pinned files", note: "Frames a role's pinned files after its instructions and guidance: those .pins.json lists for the role, then those pinned in GM \u2192 Workspace, read with its knowledge within its pins budget. A role reading with a character's own knowledge gets none.", text: `Pinned files for your work (at most {{tokens}} {{unit}} of them; a file past that comes as its headings):
+  { id: ROLES_TEXT.pins, page: ROLES_PAGE.id, group: "Pinned files", label: "Pinned files", note: "Frames a role's pinned files after its instructions and guidance: those Settings \u2192 Agents \u2192 Context pins for it, then those .pins.json lists for the role, then those pinned in GM \u2192 Workspace, within its pins budget.", text: `Pinned files for your work (at most {{tokens}} {{unit}} of them; a file past that comes as its headings):
 {{files}}`, vars: [{ name: "tokens", text: "the role's pins budget: the manifest's for it, else Settings \u2192 Agents \u2192 Main agent's Pinned files, per role" }, { name: "unit", text: '"token" for 1, else "tokens"' }, { name: "files", text: "each file, as below", required: true }] },
   { id: ROLES_TEXT.pinsFile, page: ROLES_PAGE.id, group: "Pinned files", label: "A pinned file", note: "One of a role's pinned files, whole.", text: `[{{path}}]
 {{text}}`, vars: [{ name: "path", text: "the file's path", required: true }, { name: "text", text: "the file's text", required: true }] },
@@ -70313,15 +70725,15 @@ The narrator's reply:
 ];
 var ROLE_PROMPT_PAGES = [
   ROLES_PAGE,
-  page5("intent", "The intent role (before the plan): it reads the player's message into the actions it takes, judges a described approach, and checks a puzzle's answer."),
-  page5("scene", "The scene role (before the plan): the lore and notes the narrator should have for the turn's scene."),
-  page5("minds", "The minds role (before the plan): each character's private mind at the turn's moment."),
-  page5("knowledge", "The knowledge role (after the reply, and before the plan when a decision turns on it): who learned, inferred, doubted or forgot what."),
-  page5("director", "The director role: the odds of each person's choices before the plan and off-screen after the reply, the brief and outline before the reply, and suggested next moves after it."),
-  page5("read", "The read role (after the reply): the changes the reply states."),
-  page5("memory", "The memory role (after the reply, or before the next turn): each character's memory of the turn, and their older notes folded into their summary."),
-  page5("skip", "The time-skip role (on a skip): the moments worth stopping for, and how the people the engine lives a day for spend it."),
-  page5("world", "The world-steps role: a world's own steps, as their author wrote them.")
+  page6("intent", "The intent role (before the plan): it reads the player's message into the actions it takes, judges a described approach, and checks a puzzle's answer."),
+  page6("scene", "The scene role (before the plan): the lore and notes the narrator should have for the turn's scene."),
+  page6("minds", "The minds role (before the plan): each character's private mind at the turn's moment."),
+  page6("knowledge", "The knowledge role (after the reply, and before the plan when a decision turns on it): who learned, inferred, doubted or forgot what."),
+  page6("director", "The director role: the odds of each person's choices before the plan and off-screen after the reply, the brief and outline before the reply, and suggested next moves after it."),
+  page6("read", "The read role (after the reply): the changes the reply states."),
+  page6("memory", "The memory role (after the reply, or before the next turn): each character's memory of the turn, and their older notes folded into their summary."),
+  page6("skip", "The time-skip role (on a skip): the moments worth stopping for, and how the people the engine lives a day for spend it."),
+  page6("world", "The world-steps role: a world's own steps, as their author wrote them.")
 ];
 var ROLE_PROMPTS = [...SHARED_PROMPTS, ...INTENT_PROMPTS, ...SCENE_PROMPTS, ...MINDS_PROMPTS, ...KNOWLEDGE_PROMPTS, ...DIRECTOR_PROMPTS, ...READ_PROMPTS, ...MEMORY_PROMPTS, ...SKIP_PROMPTS, ...WORLD_PROMPTS];
 
@@ -70366,34 +70778,34 @@ var LORE_INDEX_TEXT = {
   cut: "lore.index.cut",
   built: "lore.index.built"
 };
-var GROUP3 = "Lore index";
+var GROUP4 = "Lore index";
 var BOOKS = { name: "books", text: "a line per book, each as below", required: true };
 var ID = { name: "id", text: "the entry's short id: its tag, else the id LRE gave it", required: true };
 var TITLE = { name: "title", text: "the entry's title: its comment, else its first words" };
-function loreIndexPrompts(page6) {
+function loreIndexPrompts(page7) {
   return [
     {
       id: LORE_INDEX_TEXT.lead,
-      page: page6,
-      group: GROUP3,
+      page: page7,
+      group: GROUP4,
       label: "The lore index",
-      note: "The index the agents read: lore_index's answer, and, with Settings \u2192 Lore's switch on, every role's prompt. Unless you set your own index entry there.",
+      note: "The index the agents read: lore_index's answer, and the prompt of a role whose context starts with it (Settings \u2192 Agents \u2192 Context). Unless you set your own index entry in Settings \u2192 Lore.",
       text: `Lore index: every lore entry of the World Info books read here, by book: its id and title, and what it holds where the title doesn't say. Read an entry whole with lore_read and its id. In a turn, lore_load and its id put an entry into the prompt of the reply the turn is writing.
 {{books}}`,
       vars: [BOOKS]
     },
-    { id: LORE_INDEX_TEXT.book, page: page6, group: GROUP3, label: "A book's line", note: "One book of the index, with its entries.", text: "{{book}}: {{entries}}", vars: [{ name: "book", text: "the book's name" }, { name: "entries", text: "its entries, each as below, joined by the separator", required: true }] },
-    { id: LORE_INDEX_TEXT.entry, page: page6, group: GROUP3, label: "An entry", note: "One entry of a book's line, whose title says what it holds.", text: "{{id}} {{title}}", vars: [ID, TITLE] },
-    { id: LORE_INDEX_TEXT.holds, page: page6, group: GROUP3, label: "An entry with what it holds", note: "One entry of a book's line whose text says more than its title: the first line of its text, within Settings \u2192 Lore's length.", text: "{{id}} {{title}} ({{holds}})", vars: [ID, TITLE, { name: "holds", text: "the first line of the entry's text", required: true }] },
-    { id: LORE_INDEX_TEXT.separator, page: page6, group: GROUP3, label: "Between entries", note: "Joins the entries of a book's line.", text: " \xB7 ", vars: [], nonEmpty: true },
-    { id: LORE_INDEX_TEXT.none, page: page6, group: GROUP3, label: "No entries", note: "Stands in for the books' lines when no book read here holds an entry the agent may read.", text: "(No lore entries in the World Info books read here.)", vars: [] },
-    { id: LORE_INDEX_TEXT.cut, page: page6, group: GROUP3, label: "Past the budget", note: "Ends the index in a role's prompt when it runs past Settings \u2192 Lore's tokens for it: how many of its entries (or of your own index's lines) are left out.", text: "({{count}} more {{what}} past this index's budget: lore_index gives the whole index.)", vars: [{ name: "count", text: "how many entries, or lines of your own index, are left out", required: true }, { name: "what", text: '"entry" or "line" for 1, else "entries" or "lines"' }] },
+    { id: LORE_INDEX_TEXT.book, page: page7, group: GROUP4, label: "A book's line", note: "One book of the index, with its entries.", text: "{{book}}: {{entries}}", vars: [{ name: "book", text: "the book's name" }, { name: "entries", text: "its entries, each as below, joined by the separator", required: true }] },
+    { id: LORE_INDEX_TEXT.entry, page: page7, group: GROUP4, label: "An entry", note: "One entry of a book's line, whose title says what it holds.", text: "{{id}} {{title}}", vars: [ID, TITLE] },
+    { id: LORE_INDEX_TEXT.holds, page: page7, group: GROUP4, label: "An entry with what it holds", note: "One entry of a book's line whose text says more than its title: the first line of its text, within Settings \u2192 Lore's length.", text: "{{id}} {{title}} ({{holds}})", vars: [ID, TITLE, { name: "holds", text: "the first line of the entry's text", required: true }] },
+    { id: LORE_INDEX_TEXT.separator, page: page7, group: GROUP4, label: "Between entries", note: "Joins the entries of a book's line.", text: " \xB7 ", vars: [], nonEmpty: true },
+    { id: LORE_INDEX_TEXT.none, page: page7, group: GROUP4, label: "No entries", note: "Stands in for the books' lines when no book read here holds an entry the agent may read.", text: "(No lore entries in the World Info books read here.)", vars: [] },
+    { id: LORE_INDEX_TEXT.cut, page: page7, group: GROUP4, label: "Past the budget", note: "Ends the index in a role's prompt when it runs past Settings \u2192 Lore's tokens for it: how many of its entries (or of your own index's lines) are left out.", text: "({{count}} more {{what}} past this index's budget: lore_index gives the whole index.)", vars: [{ name: "count", text: "how many entries, or lines of your own index, are left out", required: true }, { name: "what", text: '"entry" or "line" for 1, else "entries" or "lines"' }] },
     {
       id: LORE_INDEX_TEXT.built,
-      page: page6,
-      group: GROUP3,
+      page: page7,
+      group: GROUP4,
       label: "The index entry Build writes",
-      note: "The text of the World Info entry Build \u2192 Lore writes and keeps in sync, which reaches the narrator as any entry of its book does: the entries anyone may read, each by its id and title.",
+      note: "The text of the World Info entry Build \u2192 Lore writes and keeps in sync, which reaches the narrator as any entry of its book does: every entry by its id and title, a secret or restricted one inside its secret mark (Secret marks texts).",
       text: `LORE INDEX: the lore entries of the World Info books, by book: each entry's id and title, and what it holds where the title doesn't say.
 {{books}}`,
       vars: [BOOKS]
@@ -70428,7 +70840,7 @@ var FINAL_OUTPUT_PAGE = {
 var GM_AGENT_PAGE = {
   id: "gm",
   label: "GM agent",
-  note: "The game master's assistant (GM \u2192 Assistant): its system prompt, its instructions, the descriptions of its tools and the notes its tools answer with."
+  note: "The game master's assistant (GM \u2192 Assistant), outside the story: its system prompt, its instructions, the descriptions of its tools and the notes its tools answer with."
 };
 var NARRATOR_GROUP = "Narrator rules";
 var MARKS_GROUP = "Secret marks";
@@ -70501,16 +70913,13 @@ var FINAL_OUTPUT_PROMPTS = [
 var GM_TEXT = {
   system: "gm.system",
   instructions: "gm.instructions",
-  historyNote: "gm.history_note",
-  knowledge: { pov: "gm.knowledge.pov", everyone: "gm.knowledge.everyone", gm: "gm.knowledge.gm" }
+  historyNote: "gm.history_note"
 };
 var GM_VARS = [
   { name: "world", text: "the world's name" },
   { name: "pov", text: "the player character's name" }
 ];
-var GM_SYSTEM_VARS = [...GM_VARS, { name: "knowledge", text: "what the assistant's tools show it: the text below for the knowledge it reads with (Settings \u2192 Agents \u2192 Assistant \u2192 Knowledge)" }];
 var GM_INSTRUCTIONS = "Instructions";
-var GM_KNOWLEDGE = "What it sees";
 var GM_THREAD = "The conversation";
 var GM_AGENT_PROMPTS = [
   {
@@ -70519,10 +70928,10 @@ var GM_AGENT_PROMPTS = [
     group: GM_INSTRUCTIONS,
     label: "System prompt",
     note: "Who the assistant is, whom it works for, and what it may rely on.",
-    text: `You are the game master's assistant for {{world}}, a roleplay world that LumiRPEngine keeps; {{pov}} is the player character. You work for the game master, outside the story: you answer their questions about the world and make the changes they ask for. You never narrate the story or speak as one of its characters.
+    text: `You are the game master's assistant for {{world}}, a roleplay world that LumiRPEngine keeps; {{pov}} is the player character. You work for the game master, outside the story and outside its world: you are no one in it, and nothing in it is kept from you. You answer their questions about the world, the engine and the agents' workspace, and make the changes they ask for. You never narrate the story or speak as one of its characters.
 
-You see the world through your tools, as it stands now, and they show you {{knowledge}}. They are your only source. Look things up before you answer, and answer only from what the tools give back: when they don't show something, say that you can't see it, and never guess or fill a gap from memory. A secret the tools mark stays marked in what you say: say whom it is known to and whom it is kept from.`,
-    vars: GM_SYSTEM_VARS
+Your tools show you the world as it stands now, all of it: every secret, plan and hidden person, place and thing. They are your only source. Look things up before you answer, and answer only from what the tools give back: when they don't have something, say so, and never guess or fill a gap from memory. When something is a secret, say so plainly, with whom it is known to and whom it is kept from: what the story reveals is the game master's to decide.`,
+    vars: GM_VARS
   },
   {
     id: GM_TEXT.instructions,
@@ -70531,10 +70940,10 @@ You see the world through your tools, as it stands now, and they show you {{know
     label: "Role instructions",
     note: "How it works through a question or a change.",
     text: `How to work:
-- Find whom and what a request is about first, by the names the game master uses, then read only what you need. A name the tools don't find is one you can't see: say so.
+- Find whom and what a request is about first, by the names the game master uses, then read only what you need. A name the tools don't find isn't in the world: say so.
 - Answer briefly and concretely, naming people, places, things and amounts as the tools give them.
 - To change the world, use the edit tools. An edit tool changes nothing by itself: it checks the change against the world as it stands now and gives back a preview. The game master then applies it, with an Undo, or turns it down; if they chose so, it applies as soon as you have answered. Propose only what the game master asked for, and say in plain words what you propose. When a tool refuses a change, say why, in its words.
-- Write a workspace note only when the game master asks you to keep something.`,
+- Write a workspace note only when the game master asks you to keep something: under ~/ for every chat of theirs, else for this chat.`,
     vars: GM_VARS
   },
   {
@@ -70542,40 +70951,13 @@ You see the world through your tools, as it stands now, and they show you {{know
     page: GM_AGENT_PAGE.id,
     group: GM_THREAD,
     label: "Earlier messages left out",
-    note: "Leads what is sent of the conversation when any of it isn't sent, past History tokens (Settings \u2192 Agents \u2192 Assistant) or written with more knowledge than the assistant reads with now: how many of its earlier messages aren't sent.",
+    note: "Leads what is sent of the conversation when any of it isn't sent, past History tokens (Settings \u2192 Agents \u2192 Assistant): how many of its earlier messages aren't sent.",
     text: "({{count}} earlier {{messages}} of this conversation left out. If you need what was said there, ask the game master.)",
     vars: [...GM_VARS, { name: "count", text: "how many of the conversation's earlier messages aren't sent" }, { name: "messages", text: '"message" for 1, else "messages"' }]
-  },
-  {
-    id: GM_TEXT.knowledge.pov,
-    page: GM_AGENT_PAGE.id,
-    group: GM_KNOWLEDGE,
-    label: "Your character's knowledge",
-    note: "Fills {{knowledge}} in the system prompt while the assistant reads with your character's knowledge.",
-    text: "only what {{pov}}, the player character, knows: nobody and nothing they haven't met, seen or been told of",
-    vars: GM_VARS
-  },
-  {
-    id: GM_TEXT.knowledge.everyone,
-    page: GM_AGENT_PAGE.id,
-    group: GM_KNOWLEDGE,
-    label: "Everyone's knowledge, secrets marked",
-    note: "Fills {{knowledge}} in the system prompt while the assistant reads with what everyone in the world knows.",
-    text: "what everyone in the world knows, each secret marked with whom it is known to and whom it is kept from",
-    vars: GM_VARS
-  },
-  {
-    id: GM_TEXT.knowledge.gm,
-    page: GM_AGENT_PAGE.id,
-    group: GM_KNOWLEDGE,
-    label: "The GM's knowledge",
-    note: "Fills {{knowledge}} in the system prompt while the assistant reads with the game master's knowledge.",
-    text: "everything, as the game master sees it: every secret, plan and hidden person, place and thing",
-    vars: GM_VARS
   }
 ];
 var PROMPT_PAGES = [FINAL_OUTPUT_PAGE, GM_AGENT_PAGE, MAIN_AGENT_PAGE, RUNTIME_PROMPT_PAGE, ...ROLE_PROMPT_PAGES];
-var PROMPTS = [...FINAL_OUTPUT_PROMPTS, ...GM_AGENT_PROMPTS, ...TOOL_PROMPTS, ...loreIndexPrompts(GM_AGENT_PAGE.id), ...MAIN_AGENT_PROMPTS, ...AGENT_FAILURE_PROMPTS, ...AGENT_YIELD_PROMPTS, ...RUNTIME_PROMPTS, ...ROLE_PROMPTS];
+var PROMPTS = [...FINAL_OUTPUT_PROMPTS, ...GM_AGENT_PROMPTS, ...TOOL_PROMPTS, ...loreIndexPrompts(GM_AGENT_PAGE.id), ...MAIN_AGENT_PROMPTS, ...FINAL_REVIEW_PROMPTS, ...AGENT_FAILURE_PROMPTS, ...AGENT_YIELD_PROMPTS, ...RUNTIME_PROMPTS, ...ROLE_PROMPTS];
 var TURN_PROMPT_PAGES = [FINAL_OUTPUT_PAGE.id];
 var BY_ID = new Map(PROMPTS.map((d) => [d.id, d]));
 function promptDef(id) {
@@ -70586,14 +70968,14 @@ function placeholder(name) {
   return `{{${name}}}`;
 }
 function missingPlaceholders(def2, text5) {
-  return def2.vars.filter((v3) => v3.required && !text5.includes(placeholder(v3.name)));
+  return def2.vars.filter((v4) => v4.required && !text5.includes(placeholder(v4.name)));
 }
 function sendable(def2, text5) {
   return missingPlaceholders(def2, text5).length === 0 && !(def2.nonEmpty === true && text5.trim() === "");
 }
 function promptProblems(def2, text5, maxChars) {
   const out = [];
-  const known = new Set(def2.vars.map((v3) => placeholder(v3.name)));
+  const known = new Set(def2.vars.map((v4) => placeholder(v4.name)));
   const flagged = new Set;
   for (const m of text5.matchAll(PROMPT_BRACES)) {
     const token = m[0];
@@ -70601,10 +70983,10 @@ function promptProblems(def2, text5, maxChars) {
       continue;
     flagged.add(token);
     const shown3 = token.length > 80 ? `${token.slice(0, 77)}\u2026` : token;
-    out.push({ code: "unknown_placeholder", message: def2.vars.length > 0 ? `${shown3} isn't one of this text's placeholders (${def2.vars.map((v3) => placeholder(v3.name)).join(", ")})` : `${shown3} isn't a placeholder: this text has none` });
+    out.push({ code: "unknown_placeholder", message: def2.vars.length > 0 ? `${shown3} isn't one of this text's placeholders (${def2.vars.map((v4) => placeholder(v4.name)).join(", ")})` : `${shown3} isn't a placeholder: this text has none` });
   }
-  for (const v3 of missingPlaceholders(def2, text5))
-    out.push({ code: "missing_placeholder", message: `it must keep ${placeholder(v3.name)}: ${v3.text}` });
+  for (const v4 of missingPlaceholders(def2, text5))
+    out.push({ code: "missing_placeholder", message: `it must keep ${placeholder(v4.name)}: ${v4.text}` });
   if (def2.nonEmpty === true && text5.trim() === "")
     out.push({ code: "empty", message: "it can't be empty" });
   if (maxChars !== undefined && text5.length > maxChars)
@@ -70614,12 +70996,12 @@ function promptProblems(def2, text5, maxChars) {
 var PROMPT_SETTINGS_DEFAULTS = Object.freeze({ texts: {}, maxChars: 20000 });
 var SWIPE_TEXTS = ["turn", "current"];
 function promptSettingsOf(raw, base = PROMPT_SETTINGS_DEFAULTS) {
-  const v3 = isRecord(raw) ? raw : {};
-  const maxChars = typeof v3.maxChars === "number" && Number.isInteger(v3.maxChars) && v3.maxChars >= 1 ? v3.maxChars : base.maxChars;
-  if (!isRecord(v3.texts))
+  const v4 = isRecord(raw) ? raw : {};
+  const maxChars = typeof v4.maxChars === "number" && Number.isInteger(v4.maxChars) && v4.maxChars >= 1 ? v4.maxChars : base.maxChars;
+  if (!isRecord(v4.texts))
     return { texts: { ...base.texts }, maxChars };
   const texts2 = {};
-  for (const [id, text5] of Object.entries(v3.texts)) {
+  for (const [id, text5] of Object.entries(v4.texts)) {
     const def2 = promptDef(id);
     if (!def2 || typeof text5 !== "string" || text5 === def2.text || !sendable(def2, text5))
       continue;
@@ -70804,7 +71186,7 @@ var METER_TURNS = 200;
 function tallyOf(raw) {
   if (!isRecord(raw))
     return null;
-  const count2 = (v3) => typeof v3 === "number" && Number.isFinite(v3) && v3 >= 0;
+  const count2 = (v4) => typeof v4 === "number" && Number.isFinite(v4) && v4 >= 0;
   if (!count2(raw.calls) || !count2(raw.tokens) || !count2(raw.ms))
     return null;
   return { calls: raw.calls, tokens: raw.tokens, ms: raw.ms, lookups: count2(raw.lookups) ? raw.lookups : 0 };
@@ -71171,9 +71553,9 @@ function decisionAnswers(raw, questions) {
     }
     const probabilities = {};
     if (isRecord(a.probabilities)) {
-      for (const [k, v3] of Object.entries(a.probabilities))
-        if (typeof v3 === "number" && v3 >= 0)
-          probabilities[k] = v3;
+      for (const [k, v4] of Object.entries(a.probabilities))
+        if (typeof v4 === "number" && v4 >= 0)
+          probabilities[k] = v4;
     }
     const keys = q.type === "choice" ? Object.keys(q.criteria) : q.criteria.map((_, i) => String(i));
     const best = keys.reduce((b, k) => (probabilities[k] ?? 0) > (probabilities[b] ?? 0) ? k : b, keys[0] ?? "");
@@ -71263,12 +71645,12 @@ function interpretAnswer(raw, actions) {
   const action = typeof raw.action === "string" && actions.some((a) => a.id === raw.action) ? raw.action : null;
   const params = {};
   if (isRecord(raw.params))
-    for (const [k, v3] of Object.entries(raw.params))
-      params[k] = JSON.parse(JSON.stringify(v3 ?? null));
+    for (const [k, v4] of Object.entries(raw.params))
+      params[k] = JSON.parse(JSON.stringify(v4 ?? null));
   const confidence = typeof raw.confidence === "number" ? Math.min(1, Math.max(0, raw.confidence)) : 0.8;
   const then = isRecord(raw.then) ? JSON.parse(JSON.stringify(raw.then)) : undefined;
-  const words5 = (v3) => {
-    const s = typeof v3 === "string" ? v3.replace(/\s+/g, " ").trim() : "";
+  const words5 = (v4) => {
+    const s = typeof v4 === "string" ? v4.replace(/\s+/g, " ").trim() : "";
     return s.length <= 120 ? s : "";
   };
   const queue = [];
@@ -71279,8 +71661,8 @@ function interpretAnswer(raw, actions) {
     if (rest.length === 0 && queue.length < ACTION_QUEUE_LIMIT - 1 && isRecord(entry) && id !== null && actions.some((a) => a.id === id)) {
       const own2 = {};
       if (isRecord(entry.params))
-        for (const [k, v3] of Object.entries(entry.params))
-          own2[k] = JSON.parse(JSON.stringify(v3 ?? null));
+        for (const [k, v4] of Object.entries(entry.params))
+          own2[k] = JSON.parse(JSON.stringify(v4 ?? null));
       const thing3 = THING_SORTS.find((s) => s === entry.thing);
       queue.push({ action: id, params: own2, text: said2, ...thing3 ? { thing: thing3 } : {} });
     } else if (said2 !== "")
@@ -71390,9 +71772,9 @@ function inMinorUnits(p, currency) {
   delete q.playerPrice;
   delete q.owned;
   const money4 = q.type === "purchase" ? "price" : q.type === "transfer" ? "amount" : null;
-  const v3 = money4 ? q[money4] : undefined;
-  if (money4 && typeof v3 === "number" && Number.isFinite(v3))
-    q[money4] = Math.round(v3 * 10 ** currency.decimals);
+  const v4 = money4 ? q[money4] : undefined;
+  if (money4 && typeof v4 === "number" && Number.isFinite(v4))
+    q[money4] = Math.round(v4 * 10 ** currency.decimals);
   return q;
 }
 function same2(a, b) {
@@ -71442,7 +71824,7 @@ function resolvePrompt(id, texts2, world) {
   return { text: def2.text, source: "default" };
 }
 function fillPrompt(def2, text5, vars) {
-  const names2 = new Set(def2.vars.map((v3) => v3.name));
+  const names2 = new Set(def2.vars.map((v4) => v4.name));
   return text5.replace(PROMPT_BRACES, (token) => {
     const name = token.slice(2, -2);
     return names2.has(name) && hasOwn(vars, name) ? vars[name] ?? "" : "";
@@ -71800,14 +72182,14 @@ function readable(scope, id) {
   return scope.people.has(id) || scope.groups.has(id) || scope.places.has(id);
 }
 function fieldText(scope, value) {
-  const one = (v3) => {
-    if (typeof v3 === "string") {
-      if (readable(scope, v3))
-        return `${v3} (${nameOf6(scope, v3)})`;
-      return hasOwn(scope.state.entities, v3) || hasOwn(scope.world.places, v3) ? null : v3;
+  const one = (v4) => {
+    if (typeof v4 === "string") {
+      if (readable(scope, v4))
+        return `${v4} (${nameOf6(scope, v4)})`;
+      return hasOwn(scope.state.entities, v4) || hasOwn(scope.world.places, v4) ? null : v4;
     }
-    if (isRecord(v3) && typeof v3.label === "string")
-      return v3.label;
+    if (isRecord(v4) && typeof v4.label === "string")
+      return v4.label;
     return null;
   };
   if (typeof value === "string")
@@ -71817,7 +72199,7 @@ function fieldText(scope, value) {
   const parts = value.map(one);
   if (parts.some((p) => p === null))
     return null;
-  return parts.join(Array.isArray(value) && value.every((v3) => typeof v3 === "string") ? ", " : "; ");
+  return parts.join(Array.isArray(value) && value.every((v4) => typeof v4 === "string") ? ", " : "; ");
 }
 function sheetFields(scope, who) {
   const e = own(scope.state.entities, who);
@@ -71859,12 +72241,12 @@ function membersRead(scope, group) {
   return membersOf(scope.reg, scope.world, scope.state, group).filter((m) => scope.people.has(m));
 }
 function placeOf3(scope, who, field2) {
-  const v3 = own(scope.state.entities, who)?.fields[field2];
-  if (typeof v3 !== "string")
+  const v4 = own(scope.state.entities, who)?.fields[field2];
+  if (typeof v4 !== "string")
     return null;
-  if (hasOwn(scope.world.places, v3))
-    return v3;
-  return field2 === "employer" ? placeOfEntity(scope.state, v3) : null;
+  if (hasOwn(scope.world.places, v4))
+    return v4;
+  return field2 === "employer" ? placeOfEntity(scope.state, v4) : null;
 }
 function readRoutineInput(input) {
   const owners = Array.isArray(input.owners) ? input.owners.filter((o) => typeof o === "string") : undefined;
@@ -72108,14 +72490,14 @@ ${def2.content}`;
   if (!plainText(shown3.text).includes(plainText(quote2)))
     return `its quote isn't in ${nameOf6(scope, entity2)}'s ${field2}: copy it word for word`;
   const value = own(scope.state.entities, entity2)?.fields[field2];
-  const refs = (Array.isArray(value) ? value : [value]).filter((v3) => typeof v3 === "string" && readable(scope, v3));
+  const refs = (Array.isArray(value) ? value : [value]).filter((v4) => typeof v4 === "string" && readable(scope, v4));
   return { source: { type: "sheet", entity: entity2, field: field2, quote: shortQuote(quote2) }, key: `${entity2}.${field2}`, name: `${nameOf6(scope, entity2)} \xB7 ${field2}`, text: shown3.text, refs };
 }
-var str15 = (v3) => typeof v3 === "string" ? v3.trim() : "";
-var ints = (v3, lo, hi) => Array.isArray(v3) && v3.every((n) => typeof n === "number" && Number.isInteger(n) && n >= lo && n <= hi) ? [...new Set(v3)].sort((a, b) => a - b) : null;
-var strings3 = (v3) => Array.isArray(v3) && v3.every((s) => typeof s === "string") ? v3 : null;
-function hhmm(v3) {
-  const t = str15(v3);
+var str15 = (v4) => typeof v4 === "string" ? v4.trim() : "";
+var ints = (v4, lo, hi) => Array.isArray(v4) && v4.every((n) => typeof n === "number" && Number.isInteger(n) && n >= lo && n <= hi) ? [...new Set(v4)].sort((a, b) => a - b) : null;
+var strings3 = (v4) => Array.isArray(v4) && v4.every((s) => typeof s === "string") ? v4 : null;
+function hhmm(v4) {
+  const t = str15(v4);
   const m = /^(\d{1,2}):(\d{2})$/.exec(t);
   if (!m)
     return t;
@@ -72299,12 +72681,12 @@ function readRecurrence(scope, raw, fatal) {
       fatal.push("its days of the month are 1 to 31, or -1 to -31 from the end");
   }
   for (const key of ["from", "until"]) {
-    const v3 = str15(raw[key]);
-    if (v3 === "")
+    const v4 = str15(raw[key]);
+    if (v4 === "")
       continue;
     try {
-      dayIndexOfText(scope.cal, v3);
-      r[key] = v3;
+      dayIndexOfText(scope.cal, v4);
+      r[key] = v4;
     } catch {
       fatal.push(`its ${key} is a YYYY-MM-DD date`);
     }
@@ -72687,7 +73069,7 @@ function jsonEqual(a, b) {
   if (a === b)
     return true;
   if (Array.isArray(a) && Array.isArray(b))
-    return a.length === b.length && a.every((v3, i) => jsonEqual(v3, b[i]));
+    return a.length === b.length && a.every((v4, i) => jsonEqual(v4, b[i]));
   if (isRecord(a) && isRecord(b)) {
     const ka = Object.keys(a);
     return ka.length === Object.keys(b).length && ka.every((k) => hasOwn(b, k) && jsonEqual(a[k], b[k]));
@@ -72751,21 +73133,21 @@ function measure(value, caps) {
   let depth2 = 0;
   const stack = [{ value, level: 0 }];
   for (let top = stack.pop();top !== undefined; top = stack.pop()) {
-    const v3 = top.value;
-    if (Array.isArray(v3) || isRecord(v3)) {
+    const v4 = top.value;
+    if (Array.isArray(v4) || isRecord(v4)) {
       const level = top.level + 1;
       if (level > caps.depth)
         return "depth";
       depth2 = Math.max(depth2, level);
       size += 2;
-      for (const [key, item] of Array.isArray(v3) ? v3.map((x, i) => [String(i), x]) : Object.entries(v3)) {
-        size += Array.isArray(v3) ? 1 : key.length + 4;
+      for (const [key, item] of Array.isArray(v4) ? v4.map((x, i) => [String(i), x]) : Object.entries(v4)) {
+        size += Array.isArray(v4) ? 1 : key.length + 4;
         if (size > caps.size)
           return "size";
         stack.push({ value: item, level });
       }
     } else
-      size += typeof v3 === "string" ? v3.length + 2 : String(v3).length;
+      size += typeof v4 === "string" ? v4.length + 2 : String(v4).length;
     if (size > caps.size)
       return "size";
   }
@@ -73390,25 +73772,25 @@ function statusOf2(slot) {
     return "add";
   return hashJson(slot.mine) === hashJson(slot.theirs) ? "same" : "conflict";
 }
-function fitted(def2, v3) {
+function fitted(def2, v4) {
   switch (def2.type) {
     case "number":
     case "money":
     case "duration": {
-      if (typeof v3 !== "number" || !Number.isFinite(v3))
+      if (typeof v4 !== "number" || !Number.isFinite(v4))
         return null;
       const lo = Math.max(def2.min ?? -Infinity, def2.pool ? def2.pool.min ?? 0 : -Infinity);
-      const n = Math.min(def2.max ?? Infinity, Math.max(lo, v3));
-      return n === v3 ? undefined : n;
+      const n = Math.min(def2.max ?? Infinity, Math.max(lo, v4));
+      return n === v4 ? undefined : n;
     }
     case "bool":
-      return typeof v3 === "boolean" ? undefined : null;
+      return typeof v4 === "boolean" ? undefined : null;
     case "enum":
-      return typeof v3 === "string" && (def2.values ?? []).includes(v3) ? undefined : null;
+      return typeof v4 === "string" && (def2.values ?? []).includes(v4) ? undefined : null;
     case "list":
-      return Array.isArray(v3) ? undefined : null;
+      return Array.isArray(v4) ? undefined : null;
     default:
-      return typeof v3 === "string" ? undefined : null;
+      return typeof v4 === "string" ? undefined : null;
   }
 }
 function planOf3(world, profile, packKinds, choices) {
@@ -73448,14 +73830,14 @@ function applyProfile(world, profile, packKinds, choices = {}) {
   const doc = structuredClone(world);
   for (const slot of write)
     slot.write(doc);
-  for (const v3 of plan2.values) {
-    const fields = doc.entities[v3.entity]?.fields;
+  for (const v4 of plan2.values) {
+    const fields = doc.entities[v4.entity]?.fields;
     if (!fields)
       continue;
-    if (v3.to === null)
-      delete fields[v3.field];
+    if (v4.to === null)
+      delete fields[v4.field];
     else
-      fields[v3.field] = v3.to;
+      fields[v4.field] = v4.to;
   }
   rulesetIn(doc).profile = profile.id;
   return doc;
@@ -73617,7 +73999,7 @@ class WorldStore {
     return out.sort((a, b) => a.name.localeCompare(b.name));
   }
   async history(worldId, userId) {
-    const raw = await readStoredJson(this.host, `${worldDir(worldId)}history.json`, userId, `world ${worldId} history`, (v3) => isRecord(v3) && Array.isArray(v3.notes));
+    const raw = await readStoredJson(this.host, `${worldDir(worldId)}history.json`, userId, `world ${worldId} history`, (v4) => isRecord(v4) && Array.isArray(v4.notes));
     return isRecord(raw) && Array.isArray(raw.notes) ? raw.notes.filter(isRevisionNote) : [];
   }
   async revision(worldId, revision, userId) {
@@ -73707,6 +74089,10 @@ class WorldStore {
   }
   async working(worldId, userId) {
     return (await this.draft(worldId, userId)).doc;
+  }
+  async workingAt(worldId, userId) {
+    const draft = await this.draft(worldId, userId);
+    return { doc: draft.doc, at: `${draft.head}\x00${draft.stored ? draft.version : ""}` };
   }
   async edit(request, userId, changed) {
     return this.serial(userId, request.worldId, async () => this.apply(request, await this.draft(request.worldId, userId), userId, changed));
@@ -73986,8 +74372,8 @@ function collectionOf(doc, name) {
     throw new WorldError("bad_request", `collection ${name} is not an object`);
   return value;
 }
-function isRevisionNote(v3) {
-  return isRecord(v3) && typeof v3.revision === "string" && typeof v3.at === "number" && typeof v3.source === "string" && hasOwn(HEAD_SOURCES, v3.source) && (v3.note === undefined || typeof v3.note === "string");
+function isRevisionNote(v4) {
+  return isRecord(v4) && typeof v4.revision === "string" && typeof v4.at === "number" && typeof v4.source === "string" && hasOwn(HEAD_SOURCES, v4.source) && (v4.note === undefined || typeof v4.note === "string");
 }
 function prototypeKeyOf(op) {
   for (const pointer of op.op === "move" || op.op === "copy" ? [op.path, op.from] : [op.path])
@@ -74104,7 +74490,7 @@ function setPart(doc, part, value) {
     return;
   }
   if (part === "loreIndex") {
-    const ids2 = (v3) => Array.isArray(v3) ? v3.filter((x) => typeof x === "string") : [];
+    const ids2 = (v4) => Array.isArray(v4) ? v4.filter((x) => typeof x === "string") : [];
     const terms2 = isRecord(value.terms) ? Object.fromEntries(Object.entries(value.terms).flatMap(([term, entries2]) => safeKey(term) ? [[term, ids2(entries2)]] : [])) : {};
     const topics = isRecord(value.topics) ? Object.fromEntries(Object.entries(value.topics).flatMap(([id, t]) => safeKey(id) && isRecord(t) ? [[id, { label: typeof t.label === "string" ? t.label : id, entries: ids2(t.entries) }]] : [])) : {};
     doc.loreIndex = { terms: terms2, topics };
@@ -74159,6 +74545,17 @@ function textOf(content) {
   const text5 = content.replace(/\s+/g, " ").trim();
   return text5 === "" ? "" : hashParts("lre-lore-text-v1", text5);
 }
+var TEXT_KEYS = new WeakMap;
+function heldTextOf(holder, content) {
+  if (!Object.isFrozen(holder))
+    return textOf(content);
+  let key = TEXT_KEYS.get(holder);
+  if (key === undefined) {
+    key = textOf(content);
+    TEXT_KEYS.set(holder, key);
+  }
+  return key;
+}
 function keyOf2(e) {
   return `${e.bookId}/${e.id}`;
 }
@@ -74175,7 +74572,7 @@ function worldFields(entry) {
   const knownBy = visibility !== undefined && visibility !== "public";
   if (!secret && !knownBy)
     return null;
-  const ids2 = (v3) => Array.isArray(v3) ? v3.filter((x) => typeof x === "string" && x !== "") : [];
+  const ids2 = (v4) => Array.isArray(v4) ? v4.filter((x) => typeof x === "string" && x !== "") : [];
   const out = {};
   if (secret) {
     out.secret = true;
@@ -74206,11 +74603,16 @@ function markFields(world, mark2) {
   const holders = world ? resolveMarkNames(world, null, mark2).knownTo : [];
   return { secret: true, gate: "", ...holders.length > 0 ? { holders } : {} };
 }
+var MARKS = new WeakMap;
 function marksAt(e) {
+  const kept2 = MARKS.get(e);
+  if (kept2)
+    return kept2;
   const whole5 = wholeEntrySecret(e.content);
-  if (whole5)
-    return [{ mark: whole5, bookId: e.bookId, entryId: e.id, n: null }];
-  return parseSecretMarks(e.content).map((mark2, i) => ({ mark: mark2, bookId: e.bookId, entryId: e.id, n: i + 1 }));
+  const out = whole5 ? [{ mark: whole5, bookId: e.bookId, entryId: e.id, n: null }] : parseSecretMarks(e.content).map((mark2, i) => ({ mark: mark2, bookId: e.bookId, entryId: e.id, n: i + 1 }));
+  if (Object.isFrozen(e))
+    MARKS.set(e, out);
+  return out;
 }
 var UNREAD_ORIGINAL = { secret: true, gate: "" };
 function secretTexts(also = {}) {
@@ -74228,7 +74630,7 @@ function secretTexts(also = {}) {
     add(out.sources, `${source.bookId}/${source.entryId}`, fields);
     const now = given.get(source.entryId);
     if (now)
-      add(out.texts, textOf(now.content), fields);
+      add(out.texts, heldTextOf(now, now.content), fields);
   }
   for (const e of entries2) {
     const marks = marksAt(e);
@@ -74247,7 +74649,7 @@ function secretTexts(also = {}) {
     const fields = bookLoreFieldsOf(e.extensions);
     if (!fields || !restricts(fields))
       continue;
-    add(out.texts, textOf(e.content), fields);
+    add(out.texts, heldTextOf(e, e.content), fields);
     if (loreIsSecret(fields))
       out.originals.set(e.id, fields);
   }
@@ -74319,7 +74721,7 @@ function secrecyParts(e, texts2) {
   if (copy && copy.entry !== keyOf2(e))
     out.push(...texts2.sources.get(copy.entry) ?? []);
   if (!marked)
-    out.push(...textParts(texts2, e.content));
+    out.push(...texts2.texts.get(heldTextOf(e, e.content)) ?? []);
   return out;
 }
 function bookSecrecy(e, texts2) {
@@ -74382,7 +74784,7 @@ class MarkChangeError extends Error {
 function markChangeOf(raw) {
   if (!isRecord(raw))
     return null;
-  const names2 = (v3) => Array.isArray(v3) && v3.every((x) => typeof x === "string") ? [...v3] : null;
+  const names2 = (v4) => Array.isArray(v4) && v4.every((x) => typeof x === "string") ? [...v4] : null;
   const knownTo = raw.knownTo === undefined ? [] : names2(raw.knownTo);
   const keptFrom = raw.keptFrom === undefined || raw.keptFrom === "everyone" ? "everyone" : names2(raw.keptFrom);
   const mark2 = typeof raw.mark === "number" && Number.isInteger(raw.mark) && raw.mark >= 0 ? raw.mark : null;
@@ -74495,7 +74897,46 @@ async function loreBookIds(host, world, chatId, userId, picked) {
   const [books, global] = await Promise.all([host.books.list(userId), host.books.global(userId)]);
   const known = new Map(books.map((b) => [b.id, b.engine]));
   const ids2 = [...new Set([...listed2, ...chat, ...global, ...copied])];
-  return { read: ids2.filter((id) => known.get(id) === false && (picked === "auto" || picked.includes(id))), gone: listed2.filter((id) => !known.has(id)) };
+  const read = ids2.filter((id) => known.get(id) === false && (picked === "auto" || picked.includes(id)));
+  return { read, gone: listed2.filter((id) => !known.has(id)), updated: bookStamps(books, read) };
+}
+function bookStamps(books, ids2) {
+  const of = new Map(books.map((b) => [b.id, b.updated]));
+  return new Map(ids2.map((id) => [id, of.get(id) ?? null]));
+}
+
+class BookReads {
+  kept = new Map;
+  async entries(host, bookId, userId, updated) {
+    const key = `${userId}\x00${bookId}`;
+    const kept2 = this.kept.get(key);
+    if (updated !== null && kept2 && kept2.updated === updated && updated < kept2.at)
+      return kept2.entries;
+    const at = Math.floor(Date.now() / 1000);
+    const entries2 = deepFreeze(await host.books.entries(bookId, userId));
+    if (updated !== null)
+      this.kept.set(key, { updated, at, entries: entries2 });
+    else
+      this.kept.delete(key);
+    return entries2;
+  }
+  trim() {
+    const n = this.kept.size;
+    this.kept.clear();
+    return n;
+  }
+}
+var MADE = new WeakMap;
+function entryLore(e, parts, world) {
+  if (!Object.isFrozen(e))
+    return bookLoreEntries(e, parts, world);
+  const key = JSON.stringify(parts);
+  const made = MADE.get(e);
+  if (made && made.world === world && made.parts === key)
+    return made.lore;
+  const lore2 = deepFreeze(bookLoreEntries(e, parts, world));
+  MADE.set(e, { world, parts: key, lore: lore2 });
+  return lore2;
 }
 function copiedEntry(world, loreId) {
   const source = hasOwn(world.lore, loreId) ? loreSourceOf(world.lore[loreId]?.source) : null;
@@ -74518,17 +74959,17 @@ function recordedLoreId(world, loreId) {
   const copied = copiedEntry(world, loreId);
   return copied ? bookLoreId(copied.bookId, copied.entryId) : loreId;
 }
-async function liveLore(host, world, chatId, userId, picked) {
+async function liveLore(host, world, chatId, userId, picked, reads) {
   const books = await loreBookIds(host, world, chatId, userId, picked).catch((error) => {
     host.log("warn", `[LumiRPEngine] the World Info books this chat reads weren't told, so none is read as lore this run: ${error instanceof Error ? error.message : String(error)}`, userId);
     return { read: [], gone: [] };
   });
-  return (await booksLore(host, world, books, userId)).world;
+  return (await booksLore(host, world, books, userId, reads)).world;
 }
-async function booksLore(host, world, books, userId) {
+async function booksLore(host, world, books, userId, reads) {
   for (const id of books.gone)
     host.log("warn", `[LumiRPEngine] lore book ${id} the world lists is gone: no call reads it (Build \u2192 Lore \u2192 Lore books)`, userId);
-  const read = await Promise.all(books.read.map((id) => host.books.entries(id, userId).catch((error) => {
+  const read = await Promise.all(books.read.map((id) => (reads ? reads.entries(host, id, userId, books.updated?.get(id) ?? null) : host.books.entries(id, userId)).catch((error) => {
     host.log("warn", `[LumiRPEngine] lore book ${id} wasn't read: ${error instanceof Error ? error.message : String(error)}`, userId);
     return [];
   })));
@@ -74542,14 +74983,14 @@ async function booksLore(host, world, books, userId) {
   }
   const seen = new Set(Object.values(lore2).map((entry) => textOf(entry.content)));
   const keep = (entry) => {
-    const text5 = textOf(entry.content);
+    const text5 = heldTextOf(entry, entry.content);
     if (hasOwn(lore2, entry.id) || text5 !== "" && seen.has(text5))
       return;
     lore2[entry.id] = entry;
     seen.add(text5);
   };
   for (const e of live.values())
-    for (const entry of bookLoreEntries(e, secrecyParts(e, texts2), world))
+    for (const entry of entryLore(e, secrecyParts(e, texts2), world))
       keep(entry);
   const lorePins = pinsToBooks(world);
   return { world: { ...world, lore: lore2, ...lorePins ? { lorePins } : {} }, entries: [...live.values()].filter((e) => !engineWroteEntry(e.extensions)) };
@@ -74568,14 +75009,14 @@ var INSTRUCTIONS_MAX = 4000;
 var TURNS_MAX = 50;
 var TURN_MAX = 2000;
 var INDEX_TEXT_MAX = (IMPORT_MAX_CALLS + 1) * INDEX_TEXT_CHUNK;
-function isJobKind(v3) {
-  return typeof v3 === "string" && hasOwn(JOB_KINDS, v3);
+function isJobKind(v4) {
+  return typeof v4 === "string" && hasOwn(JOB_KINDS, v4);
 }
-function isJobStatus(v3) {
-  return typeof v3 === "string" && hasOwn(JOB_STATUSES, v3);
+function isJobStatus(v4) {
+  return typeof v4 === "string" && hasOwn(JOB_STATUSES, v4);
 }
-function isCollection(v3) {
-  return typeof v3 === "string" && hasOwn(WORLD_COLLECTIONS, v3);
+function isCollection(v4) {
+  return typeof v4 === "string" && hasOwn(WORLD_COLLECTIONS, v4);
 }
 function isProposal(raw) {
   if (!isRecord(raw) || typeof raw.id !== "string" || !isCollection(raw.collection) || typeof raw.key !== "string" || !hasOwn(raw, "value"))
@@ -74618,15 +75059,15 @@ function interruptedMessage(job) {
   return proposals > 0 ? `Interrupted by a restart. The ${proposals} proposal(s) it made before it stopped are below; run it again for the rest.` : "Interrupted by a restart. Run it again.";
 }
 function boundedInput(kind, input) {
-  const id = (v3) => {
-    if (typeof v3 !== "string")
+  const id = (v4) => {
+    if (typeof v4 !== "string")
       return "";
-    if (v3.length > ID_MAX)
+    if (v4.length > ID_MAX)
       throw new JobError("bad_request", `an id is at most ${ID_MAX} characters`);
-    return v3;
+    return v4;
   };
-  const text5 = (v3, max) => typeof v3 === "string" ? v3.trim().slice(0, max) : "";
-  const strings4 = (v3) => Array.isArray(v3) ? v3.filter((s) => typeof s === "string") : [];
+  const text5 = (v4, max) => typeof v4 === "string" ? v4.trim().slice(0, max) : "";
+  const strings4 = (v4) => Array.isArray(v4) ? v4.filter((s) => typeof s === "string") : [];
   switch (kind) {
     case "import_lore": {
       const bookIds = strings4(input.bookIds).map(id);
@@ -75435,7 +75876,7 @@ function mapOf(raw) {
   if (!isRecord(raw))
     return out;
   out.next = typeof raw.next === "number" && Number.isInteger(raw.next) && raw.next >= 1 ? raw.next : 1;
-  const pairs = (v3, ok) => Object.fromEntries(Object.entries(isRecord(v3) ? v3 : {}).filter((p) => typeof p[1] === "string" && safeKey(p[0]) && ok(p[0], p[1])));
+  const pairs = (v4, ok) => Object.fromEntries(Object.entries(isRecord(v4) ? v4 : {}).filter((p) => typeof p[1] === "string" && safeKey(p[0]) && ok(p[0], p[1])));
   out.ids = pairs(raw.ids, (id) => isShortId(id));
   out.own = pairs(raw.own, (_key, id) => isShortId(id));
   return out;
@@ -75575,13 +76016,16 @@ class LoreRouting {
   host;
   settings;
   worlds;
+  reads;
   ids;
   latest = new Map;
   syncs = new Map;
-  constructor(host, settings, worlds) {
+  synced = new Map;
+  constructor(host, settings, worlds, reads) {
     this.host = host;
     this.settings = settings;
     this.worlds = worlds;
+    this.reads = reads;
     this.ids = new LoreIds(host);
   }
   async index(userId, live, entries2, settings) {
@@ -75616,16 +76060,29 @@ class LoreRouting {
   }
   async builtBooks(world, userId, picked) {
     if (picked === "auto")
-      return (await loreBookIds(this.host, world, null, userId, "auto")).read;
-    const engine = new Map((await this.host.books.list(userId)).map((b) => [b.id, b.engine]));
-    return picked.filter((id) => engine.get(id) === false);
+      return loreBookIds(this.host, world, null, userId, "auto");
+    const books = await this.host.books.list(userId);
+    const engine = new Map(books.map((b) => [b.id, b.engine]));
+    const read = picked.filter((id) => engine.get(id) === false);
+    return { read, gone: [], updated: bookStamps(books, read) };
   }
-  async builtText(userId, worldId, settings) {
-    const world = await this.worlds.working(worldId, userId);
-    const read = await booksLore(this.host, world, { read: await this.builtBooks(world, userId, settings.loreBooks), gone: [] }, userId);
+  async builtText(userId, worldId, settings, from) {
+    const world = from?.world ?? await this.worlds.working(worldId, userId);
+    const read = await booksLore(this.host, world, { ...from?.books ?? await this.builtBooks(world, userId, settings.loreBooks), gone: [] }, userId, this.reads);
     const index = await this.index(userId, read.world, read.entries, settings.loreIndex);
-    const books = index.books.map((b) => ({ name: b.name, entries: b.entries.filter((e) => e.open).map((e) => ({ id: e.id, title: e.title, holds: e.holds })) }));
-    return { text: renderIndex(settings.prompts.texts, LORE_INDEX_TEXT.built, books), index };
+    const wording = markWording(settings.prompts.texts);
+    const kept2 = (text5) => secretMarkText(text5, [], "everyone", wording);
+    const books = index.books.map((b) => ({
+      bookId: b.bookId,
+      name: b.name,
+      entries: b.entries.flatMap((e) => {
+        if (e.open)
+          return [{ id: e.id, title: e.title, holds: e.holds }];
+        const source = loreSourceOf(own(read.world.lore, e.lore)?.source);
+        return source.kind === "ai" && source.status === "pending" ? [] : [{ id: e.id, title: kept2(e.title), holds: e.holds === null ? null : kept2(e.holds) }];
+      })
+    }));
+    return { text: renderIndex(settings.prompts.texts, LORE_INDEX_TEXT.built, books), books };
   }
   async build(userId, worldId, bookId) {
     await this.sync(userId);
@@ -75656,9 +76113,17 @@ class LoreRouting {
           this.host.log("warn", `[LumiRPEngine] the lore index entry Build wrote (${built.bookId}/${built.entryId}) is gone or no longer LumiRPEngine's, so it is no longer kept in sync (Build \u2192 Lore builds another)`, userId);
           return;
         }
-        const { text: text5 } = await this.builtText(userId, built.worldId, settings);
+        const draft = await this.worlds.workingAt(built.worldId, userId);
+        const books = await this.builtBooks(draft.doc, userId, settings.loreBooks);
+        const stamped2 = [...books.updated.values()].every((u) => u !== null);
+        const key = JSON.stringify([built, draft.at, [...books.updated], settings.loreBooks, settings.loreIndex, settings.prompts.texts]);
+        const last = this.synced.get(userId);
+        if (stamped2 && last?.key === key && last.text === e.content)
+          return;
+        const { text: text5 } = await this.builtText(userId, built.worldId, settings, { world: draft.doc, books });
         if (text5 !== e.content && await this.keeps(userId, built))
           await this.host.books.update(e.id, { content: text5 }, userId);
+        this.synced.set(userId, { key, text: text5 });
       } catch (error) {
         this.host.log("warn", `[LumiRPEngine] the lore index entry wasn't brought up to date: ${error instanceof Error ? error.message : String(error)}`, userId);
       }
@@ -75673,12 +76138,12 @@ class LoreRouting {
   async view(userId, worldId) {
     await this.sync(userId, worldId);
     const settings = await this.settings.get(userId);
-    const { text: text5, index } = await this.builtText(userId, worldId, settings);
+    const { text: text5, books } = await this.builtText(userId, worldId, settings);
     const built = settings.loreIndex.built;
     const names2 = built ? new Map((await this.host.books.list(userId).catch(() => [])).map((b) => [b.id, b.name])) : new Map;
     return {
       text: text5,
-      books: index.books.map((b) => ({ id: b.bookId, name: b.name, entries: b.entries.filter((e) => e.open).length })),
+      books: books.map((b) => ({ id: b.bookId, name: b.name, entries: b.entries.length })),
       built: built ? { ...built, book: names2.get(built.bookId) ?? built.bookId } : null
     };
   }
@@ -75858,7 +76323,7 @@ function list(items) {
   return items.length <= 1 ? items[0] ?? "" : `${items.slice(0, -1).join(", ")} and ${items.at(-1) ?? ""}`;
 }
 function slotValue(world, target, slot) {
-  const one = (v3) => target === "place" && typeof v3 === "string" && own(world.places, v3) ? own(world.places, v3)?.name ?? v3 : typeof v3 === "string" ? v3 : v3 === undefined || v3 === null ? "nothing" : JSON.stringify(v3);
+  const one = (v4) => target === "place" && typeof v4 === "string" && own(world.places, v4) ? own(world.places, v4)?.name ?? v4 : typeof v4 === "string" ? v4 : v4 === undefined || v4 === null ? "nothing" : JSON.stringify(v4);
   if (slot.weighted && slot.weighted.length > 0) {
     const options = [...new Set(slot.weighted.map((w) => one(w.value)))];
     return options.length <= 1 ? options[0] ?? "nothing" : `${options.slice(0, -1).join(", ")} or ${options.at(-1) ?? ""}`;
@@ -75887,7 +76352,7 @@ function relationsOf(reg, world, ctx, from, e) {
   return e.relations.filter((r) => r.type !== "in" && r.type !== PARTY_RELATION).map((r) => {
     const def2 = types.get(r.type);
     const fieldDefs = isRecord(def2?.fields) ? def2.fields : {};
-    const words_ = r.type === "regard" && band && ctx ? band(ctx, from, r.to) : Object.entries(r.fields ?? {}).filter(([k, v3]) => !RELATION_INTERNAL.has(k) && v3 !== null && v3 !== "").map(([k, v3]) => `${own(fieldDefs, k)?.label ?? words6(k)}: ${typeof v3 === "string" ? v3 : typeof v3 === "number" || typeof v3 === "boolean" ? String(v3) : JSON.stringify(v3)}`).join(", ");
+    const words_ = r.type === "regard" && band && ctx ? band(ctx, from, r.to) : Object.entries(r.fields ?? {}).filter(([k, v4]) => !RELATION_INTERNAL.has(k) && v4 !== null && v4 !== "").map(([k, v4]) => `${own(fieldDefs, k)?.label ?? words6(k)}: ${typeof v4 === "string" ? v4 : typeof v4 === "number" || typeof v4 === "boolean" ? String(v4) : JSON.stringify(v4)}`).join(", ");
     const to = (ctx ? own(ctx.state.entities, r.to) : undefined) ?? own(world.entities, r.to);
     return { type: r.type, to: { id: r.to, name: to?.name ?? own(world.places, r.to)?.name ?? r.to }, words: words_ };
   });
@@ -76514,58 +76979,102 @@ function derivedChips(chain, fold, keepReport, core, registry, world) {
   }
   return chips;
 }
+
+class ViewMemo {
+  state = null;
+  chain = null;
+  palette = null;
+  controls = null;
+}
+function kept2(part) {
+  return deepFreeze(structuredClone(part));
+}
 function buildView(input) {
-  const { core, observed, registry } = input;
-  const chain = core.chain(observed);
-  const fold = core.fold(observed);
-  const state2 = fold.state;
-  const world = input.world(state2.revision) ?? input.world(input.run.revision);
+  const { core, observed, registry, memo } = input;
+  const journal = core.journal;
+  const keys = core.foldKeys(observed);
+  const stateKey = `${keys.state}\x00${input.run.revision}\x00${JSON.stringify(input.mapDisplay ?? null)}`;
+  const chainKey = `${keys.steps.at(-1) ?? keys.root}\x00${input.run.revision}\x00${JSON.stringify(journal.pauses)}\x00${JSON.stringify(journal.refused ?? [])}`;
+  const stateHit = memo.state?.key === stateKey ? memo.state : null;
+  const chainHit = memo.chain?.key === chainKey ? memo.chain : null;
+  let fold = null;
+  const folded = () => fold ??= core.fold(observed);
+  const head = stateHit ? null : folded().state;
+  const world = stateHit?.world ?? (head ? input.world(head.revision) ?? input.world(input.run.revision) : undefined);
   if (!world)
     return notWorldView(input.chatId);
-  const next = core.renderState(observed)?.state ?? state2;
+  const paletteKey = `${core.renderKey(observed, keys)}\x00${stateKey}`;
+  const controlsKey = (sceneType2) => `${paletteKey}\x00${sceneType2}\x00${JSON.stringify(input.knowledge)}`;
+  const paletteHit = memo.palette?.key === paletteKey ? memo.palette : null;
+  const controlsHit = chainHit && memo.controls?.key === controlsKey(chainHit.scene.sceneType) ? memo.controls : null;
+  let next = null;
+  const nextState = () => next ??= core.renderState(observed, false, fold ?? undefined)?.state ?? folded().state;
+  if (!chainHit)
+    folded();
+  if (!paletteHit || !controlsHit)
+    nextState();
   return readPass(() => {
-    const ctx = registry.context(world, state2);
-    const panels = {};
-    const prefs = { mapDisplay: input.mapDisplay ?? null };
-    for (const view of registry.views) {
-      try {
-        panels[view.panel] = view.build(ctx, prefs);
-      } catch (error) {
-        panels[view.panel] = { error: error instanceof Error ? error.message : String(error) };
+    let parts = stateHit;
+    if (!parts) {
+      const state2 = folded().state;
+      const ctx = registry.context(world, state2);
+      const panels = {};
+      const prefs = { mapDisplay: input.mapDisplay ?? null };
+      for (const view of registry.views) {
+        try {
+          panels[view.panel] = view.build(ctx, prefs);
+        } catch (error) {
+          panels[view.panel] = { error: error instanceof Error ? error.message : String(error) };
+        }
       }
+      parts = memo.state = { key: stateKey, world, revision: state2.revision, lag: definitionsLag(state2), panels: kept2(panels), hud: kept2(hud(world, state2, panels, ctx)) };
     }
-    const head = chain.findLast((m) => !m.isUser);
-    const headRec = head ? activeRecord(head, core.journal.tombstones) : null;
-    const sceneView = scene(world, state2, headRec ? clockMinutes(headRec.events) : 0, registry);
-    const pending = core.journal.held.map((h) => ({ panel: "*", entity: h.write.kind === "post" ? povEntity(world) : null }));
+    let read = chainHit;
+    if (!read) {
+      const out = folded();
+      const state2 = out.state;
+      const chain = core.chain(observed);
+      const last = chain.findLast((m) => !m.isUser);
+      const lastRec = last ? activeRecord(last, journal.tombstones) : null;
+      const recordOf = (messageId) => {
+        const m = chain.find((x) => x.id === messageId);
+        return m ? activeRecord(m, journal.tombstones) : null;
+      };
+      const drops = playerDrops(registry, world, state2, recordOf, out.notes, out.keepReport);
+      read = memo.chain = {
+        key: chainKey,
+        scene: kept2(scene(world, state2, lastRec ? clockMinutes(lastRec.events) : 0, registry)),
+        chips: kept2(derivedChips(chain, out, drops.keep, core, registry, world)),
+        replyClocks: kept2(replyClocks(chain, out, core, world, state2)),
+        journal: kept2([...turnNotes(chain, out, core, registry, world, state2), ...drops.notes]),
+        keepReport: kept2(drops.keep)
+      };
+    }
+    const sceneType2 = read.scene.sceneType;
+    const shownPalette = paletteHit ?? (memo.palette = { key: paletteKey, palette: kept2(palette(world, nextState(), registry)) });
+    const shownControls = controlsHit ?? (memo.controls = { key: controlsKey(sceneType2), controls: kept2(controls(world, nextState(), sceneType2, registry, input.knowledge)) });
+    const pending = journal.held.map((h) => ({ panel: "*", entity: h.write.kind === "post" ? povEntity(world) : null }));
     const packs = {};
     for (const pack of registry.packs)
       packs[pack.id] = pack.version;
-    const shown3 = input.stored.filter((c) => c.swipeId === undefined || chain.find((m) => m.id === c.messageId)?.swipeId === c.swipeId);
-    const recordOf = (messageId) => {
-      const m = chain.find((x) => x.id === messageId);
-      return m ? activeRecord(m, core.journal.tombstones) : null;
-    };
-    const drops = playerDrops(registry, world, state2, recordOf, fold.notes, fold.keepReport);
-    const chips = [...shown3.map(({ payload: _payload, ...chip }) => chip), ...derivedChips(chain, fold, drops.keep, core, registry, world)];
-    const lag = definitionsLag(state2);
+    const shown3 = input.stored.filter((c) => c.swipeId === undefined || observed.find((m) => m.id === c.messageId)?.swipeId === c.swipeId);
     return {
       v: 1,
       chatId: input.chatId,
       worldId: input.run.worldId,
-      revision: state2.revision,
-      ...lag !== null ? { definitionsFrom: lag } : {},
-      status: core.journal.pauses.length > 0 ? "paused" : core.inFlight ? "in_flight" : "idle",
-      hud: hud(world, state2, panels, ctx),
-      scene: sceneView,
-      chips,
-      replyClocks: replyClocks(chain, fold, core, world, state2),
-      journal: [...turnNotes(chain, fold, core, registry, world, state2), ...drops.notes],
-      keepReport: drops.keep,
+      revision: parts.revision,
+      ...parts.lag !== null ? { definitionsFrom: parts.lag } : {},
+      status: journal.pauses.length > 0 ? "paused" : core.inFlight ? "in_flight" : "idle",
+      hud: parts.hud,
+      scene: read.scene,
+      chips: [...shown3.map(({ payload: _payload, ...chip }) => chip), ...read.chips],
+      replyClocks: read.replyClocks,
+      journal: read.journal,
+      keepReport: read.keepReport,
       pending,
-      panels,
-      palette: palette(world, next, registry),
-      controls: controls(world, next, sceneView.sceneType, registry, input.knowledge),
+      panels: { ...parts.panels },
+      palette: shownPalette.palette,
+      controls: shownControls.controls,
       meter: input.meter,
       packs,
       currency: world.currency
@@ -77471,10 +77980,10 @@ function sheetLines(scope) {
         out.push(`- ${label}: ${formatClock(calendarOf(world), end)}`);
       continue;
     }
-    const items = Array.isArray(value) ? value.filter((v3) => typeof v3 === "string") : typeof value === "object" ? [] : [value];
+    const items = Array.isArray(value) ? value.filter((v4) => typeof v4 === "string") : typeof value === "object" ? [] : [value];
     if (items.length === 0)
       continue;
-    out.push(`- ${label}: ${items.map((v3) => typeof v3 === "string" && (own(state2.entities, v3) || own(world.places, v3)) ? nameOf7(scope, v3) : String(v3).replace(/_/g, " ")).join(", ")}`);
+    out.push(`- ${label}: ${items.map((v4) => typeof v4 === "string" && (own(state2.entities, v4) || own(world.places, v4)) ? nameOf7(scope, v4) : String(v4).replace(/_/g, " ")).join(", ")}`);
   }
   return out;
 }
@@ -77520,8 +78029,8 @@ function heldKnowledge(scope, settings, place2) {
   const play = { here: [...here, ...place2 ? [place2] : []], recent: latestTurns(slice2, settings.inPlayTurns), secret: worldSecrets(scope.reg.context(world, state2)) };
   const words7 = { texts: settings, threshold: knowledgeThreshold(slice2), nameOf: (id) => id === world.pov ? povLabel(scope) : nameOf7(scope, id) };
   const lines2 = rankedHoldings(slice2, who, play).map((h) => `- ${holdingLine(applyMarks(h.fact?.claim ?? h.id, { world, state: state2 }, `holder:${who}`), h.holding, words7)}`);
-  const kept2 = linesWithin(lines2, settings.mindTokens);
-  return kept2.length > 0 ? block(knowledgeText(settings, "mindTitle"), [knowledgeText(settings, "mindLead"), ...kept2]) : "";
+  const kept3 = linesWithin(lines2, settings.mindTokens);
+  return kept3.length > 0 ? block(knowledgeText(settings, "mindTitle"), [knowledgeText(settings, "mindLead"), ...kept3]) : "";
 }
 function lifeLines(scope, c) {
   const { reg, world, state: state2, who } = scope;
@@ -77814,8 +78323,8 @@ ${lines2.join(`
   }
   return render(reply, taken);
 }
-var str16 = (v3) => typeof v3 === "string" ? v3.trim() : "";
-var list2 = (v3) => Array.isArray(v3) ? v3 : [];
+var str16 = (v4) => typeof v4 === "string" ? v4.trim() : "";
+var list2 = (v4) => Array.isArray(v4) ? v4 : [];
 function checkKnowledge(turn, batch, raw, spent = { facts: new Set, learnings: 0, witnessed: new Set }) {
   const out = { events: [], proposals: [], refused: [], refusedAs: {} };
   if (!isRecord(raw))
@@ -77848,7 +78357,7 @@ function checkKnowledge(turn, batch, raw, spent = { facts: new Set, learnings: 0
   };
   const refs = new Map;
   const written = new Map;
-  const idOf = (v3) => str16(v3).replace(/^\[([^[\]]+)\]$/, "$1").trim();
+  const idOf = (v4) => str16(v4).replace(/^\[([^[\]]+)\]$/, "$1").trim();
   const claims = Object.values(begun).filter((f) => f.kind === "claim").length;
   for (const f of list2(raw.facts)) {
     if (!isRecord(f))
@@ -77882,8 +78391,8 @@ function checkKnowledge(turn, batch, raw, spent = { facts: new Set, learnings: 0
       refs.set(ref, id);
     written.set(id, str16(f.claim));
   }
-  const factOf3 = (v3) => {
-    const id = idOf(v3);
+  const factOf3 = (v4) => {
+    const id = idOf(v4);
     return refs.get(id) ?? (facts.has(id) ? id : null);
   };
   const carried = (ids2) => ids2.flatMap((id) => own(begun, id) === undefined && facts.has(id) ? [facts.get(id)] : []);
@@ -77959,13 +78468,13 @@ ${turn.reply}`;
     }
     const belief = teller ? teller.belief : facts.get(fact)?.truth === "open" ? "uncertain" : "true";
     const confidence = teller ? teller.confidence : 1;
-    const namesOf3 = (v3) => typeof v3 === "string" ? [v3] : list2(v3).map(str16);
+    const namesOf3 = (v4) => typeof v4 === "string" ? [v4] : list2(v4).map(str16);
     const idsOf2 = (names2) => names2.flatMap((n) => {
       const id = who(n);
       return id === null ? [] : [id];
     });
     const missedNames = namesOf3(l.missed);
-    const unnamed = (v3) => v3 !== undefined && v3 !== null && typeof v3 !== "string" && !Array.isArray(v3);
+    const unnamed = (v4) => v4 !== undefined && v4 !== null && typeof v4 !== "string" && !Array.isArray(v4);
     if (how === "witnessed" && unnamed(l.who)) {
       refuse2("witnesses", `a witnessing whose witnesses aren't names: "${claim2}"`);
       continue;
@@ -78033,9 +78542,9 @@ ${turn.reply}`;
     const groups = new Map;
     for (const [id, target] of learning2) {
       const keptFrom = named === "everyone" || named.length > 0 ? named : heldBy2(id).get(target)?.keptFrom;
-      const kept2 = keptFrom === "everyone" || keptFrom !== undefined && keptFrom.length > 0 ? keptFrom : undefined;
-      const key = JSON.stringify([target, kept2 ?? null]);
-      const group = groups.get(key) ?? { fact: target, keptFrom: kept2, who: [] };
+      const kept3 = keptFrom === "everyone" || keptFrom !== undefined && keptFrom.length > 0 ? keptFrom : undefined;
+      const key = JSON.stringify([target, kept3 ?? null]);
+      const group = groups.get(key) ?? { fact: target, keptFrom: kept3, who: [] };
       group.who.push(id);
       groups.set(key, group);
     }
@@ -78121,13 +78630,13 @@ function orderedKeys(p, keys) {
 }
 function weightsOf(p, ks) {
   return ks.map((k) => {
-    const v3 = hasOwn6(p, k) ? p[k] : undefined;
-    if (v3 === undefined)
+    const v4 = hasOwn6(p, k) ? p[k] : undefined;
+    if (v4 === undefined)
       return 0;
-    if (typeof v3 !== "number" || !Number.isFinite(v3) || v3 < 0) {
-      throw new DecideError(`Probability for "${k}" must be a finite number \u2265 0, got ${String(v3)}`);
+    if (typeof v4 !== "number" || !Number.isFinite(v4) || v4 < 0) {
+      throw new DecideError(`Probability for "${k}" must be a finite number \u2265 0, got ${String(v4)}`);
     }
-    return v3;
+    return v4;
   });
 }
 function normalized(p, keys) {
@@ -78376,8 +78885,8 @@ ${lines2.map((l) => `- ${l}`).join(`
       if (calls.length === 0)
         return null;
       const text5 = (args, key) => {
-        const v4 = args[key];
-        return typeof v4 === "string" ? v4.trim() : "";
+        const v5 = args[key];
+        return typeof v5 === "string" ? v5.trim() : "";
       };
       return calls.slice(0, ROUND_ASKS).map((c) => {
         if (c.name === "lore_get")
@@ -78390,15 +78899,15 @@ ${lines2.map((l) => `- ${l}`).join(`
         return { kind: "search", text: text5(c.args, "query"), ...topic !== "" ? { topic } : {} };
       });
     }
-    let v3;
+    let v4;
     try {
-      v3 = parseJsonReply(reply.content);
+      v4 = parseJsonReply(reply.content);
     } catch {
       return null;
     }
-    if (!isRecord(v3) || !Array.isArray(v3.need))
+    if (!isRecord(v4) || !Array.isArray(v4.need))
       return null;
-    const needs = v3.need.filter((n) => typeof n === "string" && n.trim() !== "").slice(0, ROUND_ASKS);
+    const needs = v4.need.filter((n) => typeof n === "string" && n.trim() !== "").slice(0, ROUND_ASKS);
     return needs.length > 0 ? needs.map((text5) => ({ kind: "search", text: text5.trim() })) : null;
   }
   answer(asks) {
@@ -78474,9 +78983,9 @@ class ToolSupport {
     const raw = await readStoredJson(this.host, TOOL_SUPPORT_PATH, userId, "lore tool support", (r) => isRecord(r) && r.v === 1 && isRecord(r.refused));
     const refused = {};
     const stored = isRecord(raw) && isRecord(raw.refused) ? raw.refused : {};
-    for (const [id, v3] of Object.entries(stored))
-      if (safeKey(id) && isRecord(v3) && typeof v3.at === "number" && typeof v3.reason === "string")
-        refused[id] = { at: v3.at, reason: v3.reason.slice(0, 300) };
+    for (const [id, v4] of Object.entries(stored))
+      if (safeKey(id) && isRecord(v4) && typeof v4.at === "number" && typeof v4.reason === "string")
+        refused[id] = { at: v4.at, reason: v4.reason.slice(0, 300) };
     this.users.set(userId, refused);
   }
   refuses(userId, connectionId) {
@@ -78859,8 +79368,8 @@ function renderTemplate(template, vars) {
 }
 function safeVars(vars, secrets) {
   const out = {};
-  for (const [k, v3] of Object.entries(vars))
-    out[k] = v3.split(`
+  for (const [k, v4] of Object.entries(vars))
+    out[k] = v4.split(`
 `).filter((line2) => findLeaks(line2, secrets).length === 0).join(`
 `);
   return out;
@@ -78877,10 +79386,10 @@ var CONTRACT = {
 function dataBlock(vars) {
   const parts = [];
   const add2 = (label2, key) => {
-    const v3 = vars[key];
-    if (v3 && v3.trim() !== "")
+    const v4 = vars[key];
+    if (v4 && v4.trim() !== "")
       parts.push(`${label2}:
-${v3}`);
+${v4}`);
   };
   add2("Facts", "facts");
   add2("Present", "present");
@@ -78895,20 +79404,21 @@ ${v3}`);
 
 `) || "(no facts)";
 }
-function proseLines(v3, max, withheld, chars = 300, long = "cut") {
-  const all2 = (typeof v3 === "string" ? [v3] : Array.isArray(v3) ? v3 : []).flatMap((x) => typeof x === "string" && x.trim() !== "" ? [x.trim()] : []);
-  return (long === "drop" ? all2.filter((x) => x.length <= chars) : all2).slice(0, max).filter((x) => !withheld(x)).map((x) => x.slice(0, chars));
+var keepLine = (_line, shown3) => shown3;
+function proseLines(v4, max, mark2, chars = 300, long = "cut") {
+  const all2 = (typeof v4 === "string" ? [v4] : Array.isArray(v4) ? v4 : []).flatMap((x) => typeof x === "string" && x.trim() !== "" ? [x.trim()] : []);
+  return (long === "drop" ? all2.filter((x) => x.length <= chars) : all2).slice(0, max).map((x) => mark2(x, x.slice(0, chars)));
 }
-async function promptedText(steps, run2, kind, vars, withheld, userId, signal2, lore2 = null) {
+async function promptedText(steps, run2, kind, vars, mark2, userId, signal2, lore2 = null) {
   const instructions = renderTemplate(run2.template?.template ?? PROSE_PROMPTS[kind], vars);
   const raw = await steps.helperJson(run2.purpose, `${instructions}
 ${CONTRACT[kind]}`, dataBlock(vars), run2.config, userId, signal2, { lore: lore2, guidance: run2.guidance, recent: run2.recent });
   if (!isRecord(raw))
     return null;
-  return proseAnswer(kind, kind === "brief" ? raw.text : kind === "outline" ? raw.beats : raw.choices, withheld);
+  return proseAnswer(kind, kind === "brief" ? raw.text : kind === "outline" ? raw.beats : raw.choices, mark2);
 }
-function proseAnswer(kind, v3, withheld) {
-  return kind === "brief" ? proseLines(v3, 1, withheld, BRIEF_CHARS) : kind === "outline" ? proseLines(v3, OUTLINE_BEATS_MAX, withheld, BEAT_CHARS) : proseLines(v3, 4, withheld, 120, "drop");
+function proseAnswer(kind, v4, mark2 = keepLine) {
+  return kind === "brief" ? proseLines(v4, 1, mark2, BRIEF_CHARS) : kind === "outline" ? proseLines(v4, OUTLINE_BEATS_MAX, mark2, BEAT_CHARS) : proseLines(v4, 4, mark2, 120, "drop");
 }
 async function promptedEffects(steps, run2, vars, currency, userId, signal2, lore2 = null) {
   if (!run2.template)
@@ -79054,7 +79564,7 @@ function varsFor(world, state2, who) {
   const place2 = placeOfEntity(state2, who);
   return { world: world.name, character: own(state2.entities, who)?.name ?? who, clock: formatClock(calendarOf(world), state2.clock), place: place2 ? own(world.places, place2)?.name ?? place2 : "", pov: povLabel({ state: state2, world, who }) };
 }
-var str17 = (v3) => typeof v3 === "string" ? v3 : "";
+var str17 = (v4) => typeof v4 === "string" ? v4 : "";
 function localTime(world, now, text5) {
   const t = text5.trim();
   const cal = calendarOf(world);
@@ -79216,9 +79726,9 @@ async function runMinds(deps, input) {
       return { data: null, trace: { ...base, outcome: "failed", ms: 0, tokens: 0, prompt: prompt.source }, entry: { entity: who, name, level, status: "failed", reason: "they aren't in the world any more" } };
     if (input.signal.aborted)
       return { data: null, trace: { ...base, outcome: "failed", ms: 0, tokens: 0, prompt: prompt.source }, entry: { entity: who, name, level, status: "cancelled", reason: "the run stopped before they were asked" } };
-    const kept2 = input.kept?.get(who);
-    if (kept2)
-      return { data: kept2, trace: { ...base, outcome: "recorded", ms: 0, tokens: 0, prompt: prompt.source }, entry: { entity: who, name, level, status: "recorded", ms: 0, tokens: 0 } };
+    const kept3 = input.kept?.get(who);
+    if (kept3)
+      return { data: kept3, trace: { ...base, outcome: "recorded", ms: 0, tokens: 0, prompt: prompt.source }, entry: { entity: who, name, level, status: "recorded", ms: 0, tokens: 0 } };
     input.progress?.({ entity: who, name, level, status: "thinking" });
     const pinned = pinsOf(refs.get(who) ?? []);
     const scope = { reg, world, state: state2, who, memory: memory2, messages, hideJson: settings.hideJsonBlocks, reads, moment: input.moment, pinned, ...history ? { history } : {}, ...input.knowledge ? { knowledge: input.knowledge } : {} };
@@ -79880,8 +80390,8 @@ function capBeats(beats, max) {
       byMinute.set(b.at, { ...b.rank < same3.rank ? b : same3, source: same3.source === "scan" || b.source === "scan" ? "scan" : "model", who: [...new Set([...same3.who, ...b.who])] });
   }
   const merged2 = [...byMinute.values()];
-  const kept2 = Number.isFinite(max) ? [...merged2].sort((a, b) => a.rank - b.rank || a.at - b.at).slice(0, Math.max(0, max)) : merged2;
-  return kept2.sort((a, b) => a.at - b.at);
+  const kept3 = Number.isFinite(max) ? [...merged2].sort((a, b) => a.rank - b.rank || a.at - b.at).slice(0, Math.max(0, max)) : merged2;
+  return kept3.sort((a, b) => a.at - b.at);
 }
 async function proposedBeats(deps, input, state2, scanned, traces) {
   const config3 = mindsStepConfig(input.settings.modelUse, "skip");
@@ -80275,6 +80785,17 @@ var dependentKeep = (k) => k.status === "dropped" || k.status === "converted";
 var TAILS_KEPT = 8;
 var CHECKPOINTS_KEPT = 16;
 var KEPT_LIMIT = { checkpoint: CHECKPOINTS_KEPT, tail: TAILS_KEPT };
+function digestOf(kept3, owner, text5, make) {
+  const known = kept3.get(owner);
+  if (known?.text === text5)
+    return known.digest;
+  const digest = make();
+  kept3.set(owner, { text: text5, digest });
+  return digest;
+}
+function pausedAfter(m, paused, pausesHere) {
+  return paused || m.isUser && pausesHere;
+}
 
 class LedgerFold {
   types;
@@ -80282,44 +80803,80 @@ class LedgerFold {
   settled = new Map;
   every;
   fingerprint;
-  capacity;
+  limit;
   kept = { checkpoint: new Map, tail: new Map };
-  digests = { record: new Map, markers: new Map, folds: new Map, key: new Map };
+  records = new WeakMap;
+  markers = new WeakMap;
+  folds = new WeakMap;
+  stepKeys = new Map;
   constructor(types, options = {}) {
     this.types = types;
     this.every = Math.max(1, options.snapshotEvery ?? 200);
     this.fingerprint = options.fingerprint ?? "dev";
-    this.capacity = options.capacity ?? 1 << 16;
+    this.limit = options.keep ?? (() => KEPT_FOLDS_DEFAULT);
   }
   keyOf(prev, m, input, paused, pausesHere) {
     const rec = activeRecord(m, input.tombstones);
     const stored = m.ledger?.swipes[String(m.swipeId)];
-    const recKey = stored ? `${rec ? "r" : "t"}${this.digest(this.digests.record, JSON.stringify(stored), () => hashJson(stored))}` : "";
-    const markers = m.ledger ? this.digest(this.digests.markers, JSON.stringify(m.ledger.markers), () => hashJson(m.ledger?.markers)) : "";
+    const recKey = stored ? `${rec ? "r" : "t"}${digestOf(this.records, stored, JSON.stringify(stored), () => hashJson(stored))}` : "";
+    const markers = m.ledger ? digestOf(this.markers, m.ledger.markers, JSON.stringify(m.ledger.markers), () => hashJson(m.ledger?.markers)) : "";
     const content = contentId(activeText(m)).hash;
     const flags = `${m.isUser ? "u" : "a"}${paused ? "p" : ""}${pausesHere ? "P" : ""}`;
     const memo = `${prev}\x00${flags}\x00${m.swipeId}\x00${content}\x00${recKey}\x00${markers}\x00${m.id}`;
-    return this.digest(this.digests.key, memo, () => hashParts("lre.fold", prev, m.id, m.isUser ? "u" : "a", String(m.swipeId), content, recKey, markers, paused ? "p" : "", pausesHere ? "P" : ""));
+    return this.recent(this.stepKeys, memo, () => hashParts("lre.fold", prev, m.id, m.isUser ? "u" : "a", String(m.swipeId), content, recKey, markers, paused ? "p" : "", pausesHere ? "P" : ""));
   }
-  digest(memo, text5, compute) {
-    const hit = memo.get(text5);
-    if (hit !== undefined)
+  recent(memo, key, make) {
+    const hit = memo.get(key);
+    if (hit !== undefined) {
+      memo.delete(key);
+      memo.set(key, hit);
       return hit;
-    const d = compute();
-    if (memo.size >= this.capacity) {
-      const oldest = memo.keys().next();
-      if (!oldest.done)
-        memo.delete(oldest.value);
     }
-    memo.set(text5, d);
-    return d;
+    const made = make();
+    memo.set(key, made);
+    const limit2 = Math.max(1, this.limit());
+    for (const oldest of memo.keys()) {
+      if (memo.size <= limit2)
+        break;
+      memo.delete(oldest);
+    }
+    return made;
+  }
+  keys(input) {
+    const root = hashParts("lre.fold", input.revision);
+    const pausedAt = new Set(input.pauses.map((p) => p.messageId));
+    const steps = [];
+    let key = root;
+    let state2 = root;
+    let paused = false;
+    for (const m of input.chain) {
+      const here = pausedAt.has(m.id);
+      key = this.keyOf(key, m, input, paused, here);
+      steps.push(key);
+      paused = pausedAfter(m, paused, here);
+      if (!m.isUser && (m.ledger?.swipes[String(m.swipeId)] !== undefined || (m.ledger?.markers.length ?? 0) > 0))
+        state2 = key;
+    }
+    return { root, steps, state: state2 };
+  }
+  trim() {
+    const gone = this.cache.size;
+    this.cache.clear();
+    this.kept.checkpoint.clear();
+    this.kept.tail.clear();
+    this.settled.clear();
+    this.stepKeys.clear();
+    this.records = new WeakMap;
+    this.markers = new WeakMap;
+    this.folds = new WeakMap;
+    return gone;
   }
   fold(input) {
     const startWorld = input.worlds(input.revision);
     if (!startWorld)
       throw new FoldError(`unknown revision ${input.revision}`);
     const n = input.chain.length;
-    const pausedAfter = new Set(input.pauses.map((p) => p.messageId));
+    const pausedAt = new Set(input.pauses.map((p) => p.messageId));
     const steps = [];
     const keys = [];
     let key = hashParts("lre.fold", input.revision);
@@ -80327,10 +80884,12 @@ class LedgerFold {
     let base = -1;
     for (let i = 0;i < n; i++) {
       const m = input.chain[i];
-      const k = this.keyOf(key, m, input, paused, pausedAfter.has(m.id));
+      const k = this.keyOf(key, m, input, paused, pausedAt.has(m.id));
       const cached = this.cache.get(k);
       if (!cached)
         break;
+      this.cache.delete(k);
+      this.cache.set(k, cached);
       steps.push(cached);
       keys.push(k);
       key = k;
@@ -80403,21 +80962,21 @@ class LedgerFold {
     }
     for (let i = base + 1;i < n; i++) {
       const m = input.chain[i];
-      key = this.keyOf(key, m, input, paused, pausedAfter.has(m.id));
-      const f = this.frame(input, m, parent, paused, pausedAfter.has(m.id));
+      key = this.keyOf(key, m, input, paused, pausedAt.has(m.id));
+      const f = this.frame(input, m, parent, paused, pausedAt.has(m.id));
       if (shared && !(m.isUser || f.result.fold === "paused" || !f.rec && f.liveMarkers.length === 0)) {
         state2 = structuredClone(shared);
         shared = null;
       }
       const step = this.step(input, m, f, shared ?? state2);
       const checkpoint = (i + 1) % this.every === 0;
-      const kept2 = this.remember(key, step, checkpoint ? "checkpoint" : i === n - 1 ? "tail" : null, shared !== null);
+      const kept3 = this.remember(key, step, checkpoint ? "checkpoint" : i === n - 1 ? "tail" : null, shared !== null);
       steps.push(step);
       keys.push(key);
       parent = step.result.path;
       paused = step.paused;
-      if (kept2 && checkpoint && input.snapshots && input.pauses.length === 0)
-        input.snapshots.put(this.snapshotOf(hashParts(context, parent), steps, kept2));
+      if (kept3 && checkpoint && input.snapshots && input.pauses.length === 0)
+        input.snapshots.put(this.snapshotOf(hashParts(context, parent), steps, kept3));
     }
     const out = { state: shared ? structuredClone(shared) : state2, notes: [], keepReport: [], messages: [], resolved: [], violations: [] };
     for (const s of steps) {
@@ -80449,16 +81008,17 @@ class LedgerFold {
     });
     return snap;
   }
-  remember(key, step, kept2, shared) {
-    const state2 = kept2 && step.state ? shared ? step.state : structuredClone(step.state) : null;
+  remember(key, step, kept3, shared) {
+    const state2 = kept3 && step.state ? shared ? step.state : structuredClone(step.state) : null;
+    this.cache.delete(key);
     this.cache.set(key, { ...step, state: state2 });
     this.kept.checkpoint.delete(key);
     this.kept.tail.delete(key);
-    if (kept2 && state2)
-      this.keep(kept2, key);
-    while (this.cache.size > this.capacity) {
-      const oldest = this.cache.keys().next().value;
-      if (oldest === undefined)
+    if (kept3 && state2)
+      this.keep(kept3, key);
+    const limit2 = Math.max(1, this.limit());
+    for (const oldest of this.cache.keys()) {
+      if (this.cache.size <= limit2)
         break;
       this.cache.delete(oldest);
       this.kept.checkpoint.delete(oldest);
@@ -80467,14 +81027,14 @@ class LedgerFold {
     return state2;
   }
   keep(kind, key) {
-    const kept2 = this.kept[kind];
-    kept2.delete(key);
-    kept2.set(key, true);
-    while (kept2.size > KEPT_LIMIT[kind]) {
-      const oldest = kept2.keys().next().value;
+    const kept3 = this.kept[kind];
+    kept3.delete(key);
+    kept3.set(key, true);
+    while (kept3.size > KEPT_LIMIT[kind]) {
+      const oldest = kept3.keys().next().value;
       if (oldest === undefined)
         break;
-      kept2.delete(oldest);
+      kept3.delete(oldest);
       const entry = this.cache.get(oldest);
       if (entry)
         entry.state = null;
@@ -80513,7 +81073,7 @@ class LedgerFold {
     } else {
       const view = f.result.fold === "view";
       const folds = recPath === null ? null : [rec.events, rec.markersApplied, rec.post, rec.undone, rec.keep ?? null, rec.path, m.ledger?.markers ?? []];
-      const settledKey = folds === null ? "" : this.digest(this.digests.folds, JSON.stringify(folds), () => hashJson(folds));
+      const settledKey = folds === null ? "" : digestOf(this.folds, rec, JSON.stringify(folds), () => hashJson(folds));
       const before = recPath !== null && !view && !this.settled.has(settledKey) ? hashJson(state2) : null;
       let converged = false;
       if (view) {
@@ -80674,7 +81234,7 @@ class LedgerFold {
           post(item.post);
       }
       if (before !== null && violations.length === 0)
-        this.digest(this.settled, settledKey, () => before);
+        this.recent(this.settled, settledKey, () => before);
     }
     return { state: state2, result: { ...f.result, clock: state2.clock }, notes, keep, violations, resolved, paused: f.paused };
   }
@@ -80683,7 +81243,7 @@ class LedgerFold {
     const keep = [];
     if (m.isUser) {
       const path3 = stepPath(parent, true, contentId(activeText(m)).hash, "", "");
-      return { result: { id: m.id, fold: "user", parentPath: parent, path: path3 }, notes, keep, rec: null, recPath: null, liveMarkers: [], livePost: [], paused: paused || pausesHere };
+      return { result: { id: m.id, fold: "user", parentPath: parent, path: path3 }, notes, keep, rec: null, recPath: null, liveMarkers: [], livePost: [], paused: pausedAfter(m, paused, pausesHere) };
     }
     const rec = activeRecord(m, input.tombstones);
     const stored = m.ledger?.swipes[String(m.swipeId)];
@@ -80714,7 +81274,7 @@ class LedgerFold {
     const fold = paused ? "paused" : !rec ? tombstoned ? "tombstoned" : "plain" : recPath === null ? "plain" : view ? "view" : "on_path";
     const content = rec ? rec.swipeHash.hash : contentId(activeText(m)).hash;
     const path2 = stepPath(parent, false, content, recordHash(rec, livePost, parent), markersHash(liveMarkers));
-    return { result: { id: m.id, fold, parentPath: parent, path: path2 }, notes, keep, rec, recPath, liveMarkers, livePost, paused };
+    return { result: { id: m.id, fold, parentPath: parent, path: path2 }, notes, keep, rec, recPath, liveMarkers, livePost, paused: pausedAfter(m, paused, pausesHere) };
   }
 }
 function clocksCover(snapshot, base, at) {
@@ -80787,9 +81347,9 @@ function thisBuild(moduleUrl = import.meta.url) {
   const dir = moduleUrl.replace(/[^/]*$/, "");
   const path2 = pathOfFileUrl(`${dir}${KIT_FILE}`);
   const core = pathOfFileUrl(`${dir}${CORE_FILE}`);
-  const sha256 = "ba16543086b896a6ede1d511fdae20e1af76ad2a54e6c5c0c0db2066a857654f";
-  const tools = ["ba824c22725ba3f1ddba4fdfb2c3bf4f", "6b497091d778a776e1d3b9ca1c07731b"].filter((f) => f !== undefined);
-  return { id: "c3ad1b86", kit: sha256 !== undefined && path2 !== null && core !== null ? { path: path2, core, sha256, api: KIT_API } : null, tools };
+  const sha256 = "49e038261e43bcf69601fce2c0f9bc7e68425162b8c1ff97af583e2ef788ccc4";
+  const tools = ["ca98470582c3b249fbb3dd300fcecc29", "d440503a7f2dcde6c206daa5ba7e70be"].filter((f) => f !== undefined);
+  return { id: "83b29af7", kit: sha256 !== undefined && path2 !== null && core !== null ? { path: path2, core, sha256, api: KIT_API } : null, tools };
 }
 var BUILD_FILE = "agents/build.json";
 var USER_FILE = "agents.json";
@@ -81204,8 +81764,8 @@ function promptTokens(messages, tools) {
 function count2(o, key) {
   if (!isRecord(o))
     return;
-  const v3 = o[key];
-  return typeof v3 === "number" && Number.isFinite(v3) && v3 >= 0 ? v3 : undefined;
+  const v4 = o[key];
+  return typeof v4 === "number" && Number.isFinite(v4) && v4 >= 0 ? v4 : undefined;
 }
 function parseUsage(raw, provider, estimate) {
   const estimated = [];
@@ -81340,13 +81900,13 @@ function toolsAsText(tools, texts2) {
 
 `) });
 }
-function writtenArgs(v3) {
-  if (v3 === undefined || v3 === null)
+function writtenArgs(v4) {
+  if (v4 === undefined || v4 === null)
     return {};
-  if (typeof v3 !== "string")
-    return isRecord(v3) ? v3 : null;
+  if (typeof v4 !== "string")
+    return isRecord(v4) ? v4 : null;
   try {
-    const parsed = JSON.parse(v3);
+    const parsed = JSON.parse(v4);
     return isRecord(parsed) ? parsed : null;
   } catch {
     return null;
@@ -81481,8 +82041,8 @@ function spendOf2(raw) {
   if (!isRecord(raw))
     return null;
   const n = (k) => {
-    const v3 = raw[k];
-    return typeof v3 === "number" && Number.isFinite(v3) && v3 >= 0 ? v3 : 0;
+    const v4 = raw[k];
+    return typeof v4 === "number" && Number.isFinite(v4) && v4 >= 0 ? v4 : 0;
   };
   return { tokensIn: n("tokensIn"), cachedIn: n("cachedIn"), tokensOut: n("tokensOut"), calls: n("calls"), refused: n("refused"), estimated: raw.estimated === true };
 }
@@ -81847,13 +82407,6 @@ class ChatPrefs {
 
 // src/backend/chat-agent-meta.ts
 var AGENTS_KEY = "agents";
-function learnedFileOf(raw) {
-  if (!isRecord(raw) || !isBlobHash(raw.hash) || !isAgentKnowledge(raw.readers))
-    return null;
-  if (raw.pinned !== undefined && raw.pinned !== true || raw.role !== undefined && typeof raw.role !== "string")
-    return null;
-  return { hash: raw.hash, readers: raw.readers, ...raw.pinned === true ? { pinned: true } : {}, ...typeof raw.role === "string" ? { role: raw.role } : {} };
-}
 function agentMetaOf(meta) {
   const own2 = meta[LEDGER_NAMESPACE];
   const agents = isRecord(own2) ? own2[AGENTS_KEY] : undefined;
@@ -81861,7 +82414,7 @@ function agentMetaOf(meta) {
   const learned = {};
   if (isRecord(raw)) {
     for (const [path2, entry] of Object.entries(raw)) {
-      const file = isWorkspacePath(path2) && isLearnedPath(path2) ? learnedFileOf(entry) : null;
+      const file = isWorkspacePath(path2) && isLearnedPath(path2) ? keptFileOf(entry) : null;
       if (file)
         learned[path2] = file;
     }
@@ -81882,9 +82435,6 @@ function agentRefs(meta) {
   const { learned, assistant, rollback } = agentMetaOf(meta);
   return [...Object.values(learned).map((f) => f.hash), ...assistant.messages, ...Object.values(assistant.proposals), ...rollback ? [rollback.base, rollback.archived] : []];
 }
-function learnedJson(file) {
-  return { hash: file.hash, readers: file.readers, ...file.pinned ? { pinned: true } : {}, ...file.role !== undefined ? { role: file.role } : {} };
-}
 
 class ChatAgentMeta {
   host;
@@ -81900,8 +82450,8 @@ class ChatAgentMeta {
     for (const [path2, file] of Object.entries(changes)) {
       if (!isWorkspacePath(path2) || !isLearnedPath(path2))
         throw new Error(`"${path2}" isn't a path in the learned area`);
-      if (file !== null && learnedFileOf(file) === null)
-        throw new Error(`the learned file at "${path2}" isn't a stored file with its readers`);
+      if (file !== null && keptFileOf(file) === null)
+        throw new Error(`the learned file at "${path2}" isn't a stored file`);
     }
     return this.update(chatId, userId, (now) => {
       const learned = { ...now.learned };
@@ -81941,7 +82491,7 @@ class ChatAgentMeta {
       const parts = change2(now);
       const agents = isRecord(own2[AGENTS_KEY]) ? { ...own2[AGENTS_KEY] } : {};
       if (parts.learned)
-        agents.learned = Object.fromEntries(Object.entries(parts.learned).map(([path2, file]) => [path2, learnedJson(file)]));
+        agents.learned = Object.fromEntries(Object.entries(parts.learned).map(([path2, file]) => [path2, keptFileJson(file)]));
       if (parts.assistant)
         agents.assistant = { messages: parts.assistant.messages, proposals: parts.assistant.proposals };
       if (parts.rollback === null)
@@ -81951,6 +82501,78 @@ class ChatAgentMeta {
       await this.host.chats.mergeChatMetadata(chatId, { [LEDGER_NAMESPACE]: { ...own2, [AGENTS_KEY]: agents } }, userId);
       return { ...now, ...parts };
     });
+  }
+}
+
+// src/backend/global-workspace.ts
+var GLOBAL_INDEX_PATH = "agents/global.json";
+function isIndexFile(raw) {
+  return isRecord(raw) && raw.v === 1 && isRecord(raw.files);
+}
+
+class GlobalWorkspace {
+  host;
+  known = new Map;
+  writes = new Map;
+  constructor(host) {
+    this.host = host;
+  }
+  get(userId) {
+    const known = this.known.get(userId);
+    if (known)
+      return known;
+    const load = this.load(userId);
+    this.known.set(userId, load);
+    load.catch(() => {
+      if (this.known.get(userId) === load)
+        this.known.delete(userId);
+    });
+    return load;
+  }
+  set(userId, changes) {
+    for (const [path2, file] of Object.entries(changes)) {
+      if (!isGlobalPath(path2))
+        throw new Error(`"${path2}" isn't a path in the global workspace`);
+      if (file !== null && keptFileOf(file) === null)
+        throw new Error(`the global file at "${path2}" isn't a stored file`);
+    }
+    const work = (this.writes.get(userId) ?? Promise.resolve()).catch(() => {
+      return;
+    }).then(async () => {
+      const next = { ...await this.get(userId) };
+      for (const [path2, file] of Object.entries(changes)) {
+        if (file === null)
+          delete next[path2];
+        else
+          next[path2] = file;
+      }
+      const files = Object.fromEntries(Object.entries(next).map(([path2, file]) => [path2, keptFileJson(file)]));
+      await this.host.storage.write(`${GLOBAL_INDEX_PATH}.tmp`, JSON.stringify({ v: 1, files }), userId);
+      await this.host.storage.move(`${GLOBAL_INDEX_PATH}.tmp`, GLOBAL_INDEX_PATH, userId);
+      this.known.set(userId, Promise.resolve(next));
+      return next;
+    });
+    this.writes.set(userId, work);
+    work.finally(() => {
+      if (this.writes.get(userId) === work)
+        this.writes.delete(userId);
+    });
+    return work;
+  }
+  async refs(userId) {
+    return Object.values(await this.get(userId)).map((f) => f.hash);
+  }
+  async load(userId) {
+    const raw = await readStoredJson(this.host, GLOBAL_INDEX_PATH, userId, "global workspace", isIndexFile);
+    const out = {};
+    if (!isIndexFile(raw))
+      return out;
+    for (const [path2, entry] of Object.entries(raw.files)) {
+      const file = isGlobalPath(path2) ? keptFileOf(entry) : null;
+      if (file)
+        out[path2] = file;
+    }
+    return out;
   }
 }
 
@@ -81964,12 +82586,16 @@ function blobPath(hash) {
 
 class BlobStore {
   host;
+  keep;
   writing = new Map;
   removing = new Map;
   holds = new Map;
+  lengths = new Map;
   onPut = null;
-  constructor(host) {
+  texts = new Map;
+  constructor(host, keep = () => defaultAgentSettings().kept.texts) {
     this.host = host;
+    this.keep = keep;
   }
   async put(userId, text5, holder) {
     const hash = blobHash(text5);
@@ -81977,6 +82603,7 @@ class BlobStore {
       this.hold(userId, holder, hash);
     this.onPut?.(userId, hash);
     const key = `${userId}\x00${hash}`;
+    this.lengths.set(key, text5.length);
     const under2 = this.writing.get(key);
     if (under2) {
       await under2;
@@ -82004,14 +82631,26 @@ class BlobStore {
   async get(userId, hash) {
     if (!isBlobHash(hash))
       return null;
+    const kept3 = this.recall(userId, hash);
+    if (kept3 !== null)
+      return kept3;
     await this.writing.get(`${userId}\x00${hash}`);
     const text5 = await this.host.storage.read(blobPath(hash), userId);
     if (text5 === null)
       return null;
-    if (blobHash(text5) === hash)
+    if (blobHash(text5) === hash) {
+      this.lengths.set(`${userId}\x00${hash}`, text5.length);
+      this.remember(userId, hash, text5);
       return text5;
+    }
     this.host.log("warn", `[LumiRPEngine] the stored blob ${hash} doesn't match its hash, so it is read as missing`, userId);
     return null;
+  }
+  async size(userId, hash) {
+    const known = this.lengths.get(`${userId}\x00${hash}`);
+    if (known !== undefined)
+      return known;
+    return (await this.get(userId, hash))?.length ?? null;
   }
   async getJson(userId, hash) {
     const text5 = await this.get(userId, hash);
@@ -82035,14 +82674,64 @@ class BlobStore {
   }
   async remove(userId, hash) {
     const key = `${userId}\x00${hash}`;
+    this.forget(userId, hash);
     const removal = this.host.storage.remove(blobPath(hash), userId);
     this.removing.set(key, removal);
     try {
       await removal;
+      this.lengths.delete(key);
     } finally {
       if (this.removing.get(key) === removal)
         this.removing.delete(key);
     }
+  }
+  recall(userId, hash) {
+    const own2 = this.texts.get(userId);
+    const text5 = own2?.byHash.get(hash);
+    if (own2 === undefined || text5 === undefined)
+      return null;
+    own2.byHash.delete(hash);
+    own2.byHash.set(hash, text5);
+    this.fit(own2, this.keep(userId));
+    return text5;
+  }
+  remember(userId, hash, text5) {
+    const limit2 = this.keep(userId);
+    if (text5.length > limit2)
+      return;
+    const own2 = this.texts.get(userId) ?? { byHash: new Map, chars: 0 };
+    this.texts.set(userId, own2);
+    const before = own2.byHash.get(hash);
+    if (before !== undefined)
+      own2.chars -= before.length;
+    own2.byHash.delete(hash);
+    own2.byHash.set(hash, text5);
+    own2.chars += text5.length;
+    this.fit(own2, limit2);
+  }
+  fit(own2, limit2) {
+    for (const [old, kept3] of own2.byHash) {
+      if (own2.chars <= limit2)
+        break;
+      own2.byHash.delete(old);
+      own2.chars -= kept3.length;
+    }
+  }
+  forget(userId, hash) {
+    const own2 = this.texts.get(userId);
+    const text5 = own2?.byHash.get(hash);
+    if (own2 === undefined || text5 === undefined)
+      return;
+    own2.byHash.delete(hash);
+    own2.chars -= text5.length;
+  }
+  trim() {
+    let gone = 0;
+    for (const own2 of this.texts.values())
+      gone += own2.byHash.size;
+    this.texts.clear();
+    this.lengths.clear();
+    return gone;
   }
   hold(userId, holder, hash) {
     if (!isBlobHash(hash))
@@ -82108,8 +82797,7 @@ function sessionAt(chain, tombstones) {
 function baseOf(value) {
   if (!isRecord(value) || value.v !== 1 || value.kind !== "base" || !(value.summary === null || typeof value.summary === "string") || !Array.isArray(value.segments) || !value.segments.every(isBlobHash))
     return null;
-  const knowledge = AGENT_KNOWLEDGE.find((k) => k === value.knowledge);
-  return { summary: value.summary, segments: [...value.segments], ...knowledge ? { knowledge } : {}, ...value.restored === true ? { restored: true } : {} };
+  return { summary: value.summary, segments: [...value.segments], ...value.restored === true ? { restored: true } : {} };
 }
 function baseRefsOf(value) {
   return baseOf(value)?.segments ?? [];
@@ -82127,6 +82815,11 @@ class Sessions {
   constructor(blobs, ledger) {
     this.blobs = blobs;
     this.ledger = ledger;
+  }
+  trim() {
+    const gone = this.read.size;
+    this.read.clear();
+    return gone;
   }
   resume(userId, chain, tombstones) {
     return this.load(userId, sessionAt(chain, tombstones));
@@ -82149,31 +82842,31 @@ class Sessions {
     const cached = this.read.get(userId);
     const read = await Promise.all(hashes.map(async (hash) => cached?.get(hash) ?? segmentOf(await this.blobs.getJson(userId, hash))));
     const segments = [];
-    const kept2 = new Map;
+    const kept3 = new Map;
     hashes.forEach((hash, i) => {
       const messages = read[i];
       if (!messages)
         return missing.push(hash);
       segments.push({ hash, messages });
-      kept2.set(hash, messages);
+      kept3.set(hash, messages);
     });
-    this.read.set(userId, kept2);
-    return { summary: base?.summary ?? null, summaryKnowledge: base?.knowledge ?? "gm", restored: base?.restored === true, segments, missing };
+    this.read.set(userId, kept3);
+    return { summary: base?.summary ?? null, restored: base?.restored === true, segments, missing };
   }
   segment(userId, holder, messages) {
     return this.blobs.putJson(userId, { v: 1, kind: "segment", messages: [...messages] }, holder);
   }
-  async compact(userId, holder, at, summary, keep, knowledge) {
+  async compact(userId, holder, at, summary, keep) {
     const current2 = await this.expanded(userId, at);
-    const kept2 = keep > 0 ? current2.segments.slice(-keep) : [];
-    return this.rebase(userId, holder, current2, { summary, segments: kept2, ...knowledge ? { knowledge } : {} });
+    const kept3 = keep > 0 ? current2.segments.slice(-keep) : [];
+    return this.rebase(userId, holder, current2, { summary, segments: kept3 });
   }
   async rollback(userId, holder, at, archived) {
     const span2 = baseOf(await this.blobs.getJson(userId, archived));
     if (!span2)
       return null;
     const current2 = await this.expanded(userId, at);
-    return this.rebase(userId, holder, current2, { summary: span2.summary, segments: [...span2.segments, ...at.segments], ...span2.knowledge ? { knowledge: span2.knowledge } : {}, restored: true });
+    return this.rebase(userId, holder, current2, { summary: span2.summary, segments: [...span2.segments, ...at.segments], restored: true });
   }
   async record(chatId, userId, holder, at, session) {
     try {
@@ -82195,10 +82888,10 @@ class Sessions {
     const base = baseOf(await this.blobs.getJson(userId, at.base));
     if (!base)
       throw new Error("the session's summary isn't stored, so it can't be rebased");
-    return { summary: base.summary, segments: [...base.segments, ...at.segments], ...base.knowledge ? { knowledge: base.knowledge } : {} };
+    return { summary: base.summary, segments: [...base.segments, ...at.segments] };
   }
   async rebase(userId, holder, replaced, next) {
-    const stored = (b) => ({ v: 1, kind: "base", summary: b.summary, segments: b.segments, ...b.knowledge ? { knowledge: b.knowledge } : {}, ...b.restored ? { restored: true } : {} });
+    const stored = (b) => ({ v: 1, kind: "base", summary: b.summary, segments: b.segments, ...b.restored ? { restored: true } : {} });
     const archived = await this.blobs.putJson(userId, stored(replaced), holder);
     const summary = await this.blobs.putJson(userId, stored(next), holder);
     return { summary, archived };
@@ -82208,7 +82901,7 @@ class Sessions {
 // src/backend/agents/sweep.ts
 var SWEEP_PATH = "agents/sweep.json";
 var CHUNK_PREFIX2 = `${LEDGER_NAMESPACE}:`;
-var isTime2 = (v3) => typeof v3 === "number" && Number.isFinite(v3);
+var isTime2 = (v4) => typeof v4 === "number" && Number.isFinite(v4);
 function isSweepFile(raw) {
   return isRecord(raw) && raw.v === 1 && isTime2(raw.last) && isRecord(raw.unreferenced) && Object.entries(raw.unreferenced).every(([hash, at]) => isBlobHash(hash) && isTime2(at));
 }
@@ -82451,14 +83144,17 @@ class Sweep {
   async references(userId, stored) {
     const { host, blobs } = this.deps;
     const found = { blobs: new Set, bases: new Set };
-    let reading = "the chat list";
+    let reading = "the global workspace";
     try {
+      for (const hash of await this.deps.global(userId))
+        found.blobs.add(hash);
+      reading = "the chat list";
       const chats = await host.chats.list(userId);
       for (const chat of chats) {
         for (const hash of agentRefs(chat.metadata))
           found.blobs.add(hash);
         reading = `chat ${chat.id}'s messages`;
-        for (const m of await host.chats.messages(chat.id, userId))
+        for (const m of await this.deps.messages(chat.id, userId))
           if (!ledgerRefs(m.metadata, found))
             return { refs: found.blobs, unknown: `chat ${chat.id}: the engine data on message ${m.id} can't be read` };
       }
@@ -82508,6 +83204,10 @@ function isStoredChip(raw) {
   if (raw.swipeId !== undefined && !Number.isInteger(raw.swipeId))
     return false;
   if (raw.detail !== undefined && typeof raw.detail !== "string")
+    return false;
+  if (raw.spoiler !== undefined && raw.spoiler !== true)
+    return false;
+  if (raw.spoilers !== undefined && !(Array.isArray(raw.spoilers) && raw.spoilers.every((l) => typeof l === "string")))
     return false;
   if (raw.expires !== "next_send" && raw.expires !== "never")
     return false;
@@ -82591,10 +83291,10 @@ class ChipStore {
   }
   async removeWhere(chatId, userId, drop2) {
     const list3 = await this.list(chatId, userId);
-    const kept2 = list3.filter((c) => !drop2(c));
-    if (kept2.length === list3.length)
+    const kept3 = list3.filter((c) => !drop2(c));
+    if (kept3.length === list3.length)
       return;
-    this.chips.set(this.key(chatId, userId), kept2);
+    this.chips.set(this.key(chatId, userId), kept3);
     await this.save(chatId, userId);
   }
   async lapse(chatId, userId) {
@@ -82617,10 +83317,10 @@ class ChipStore {
   }
   async prune(chatId, userId, alive) {
     const list3 = await this.list(chatId, userId);
-    const kept2 = list3.filter((c) => alive.has(c.messageId));
-    if (kept2.length === list3.length)
+    const kept3 = list3.filter((c) => alive.has(c.messageId));
+    if (kept3.length === list3.length)
       return;
-    this.chips.set(this.key(chatId, userId), kept2);
+    this.chips.set(this.key(chatId, userId), kept3);
     await this.save(chatId, userId);
   }
   async shiftSwipes(chatId, userId, messageId, deleted) {
@@ -82708,6 +83408,18 @@ class MessageCache {
     }
     const reading = this.reading.get(key) ?? this.read(key, chatId, userId);
     return [...await reading.messages];
+  }
+  async glance(chatId, userId) {
+    const key = `${userId}\x00${chatId}`;
+    const copy = this.copies.get(key);
+    if (copy)
+      return [...copy.messages];
+    const reading = this.reading.get(key);
+    if (reading)
+      return [...await reading.messages];
+    const read = await this.inner.chats.messages(chatId, userId);
+    this.onRead?.(chatId);
+    return read;
   }
   read(key, chatId, userId) {
     const reading = { chatId, userId, changes: [], forgotten: false, messages: Promise.resolve([]) };
@@ -82815,6 +83527,8 @@ function deleted(list3, messageId) {
 
 // src/backend/push.ts
 function diff(from, to, path2 = [], out = []) {
+  if (from === to)
+    return out;
   if (isRecord(from) && isRecord(to) && !Array.isArray(from) && !Array.isArray(to)) {
     for (const key of Object.keys(from))
       if (!(key in to))
@@ -82832,8 +83546,31 @@ function diff(from, to, path2 = [], out = []) {
     out.push({ op: "set", path: path2, value: to });
   return out;
 }
-function asJson(view) {
-  return JSON.parse(JSON.stringify(view));
+function toJson(value, before, json) {
+  if (value === null || typeof value === "string" || typeof value === "boolean")
+    return value;
+  if (typeof value === "number")
+    return Number.isFinite(value) ? value : null;
+  if (typeof value !== "object")
+    return;
+  if (value === before && json !== undefined && Object.isFrozen(value))
+    return json;
+  if (Array.isArray(value)) {
+    const was2 = Array.isArray(before) ? before : null;
+    const wasJson2 = Array.isArray(json) ? json : null;
+    return value.map((v4, i) => toJson(v4, was2?.[i], wasJson2?.[i]) ?? null);
+  }
+  if ("toJSON" in value && typeof value.toJSON === "function")
+    return JSON.parse(JSON.stringify(value));
+  const was = isRecord(before) ? before : null;
+  const wasJson = isRecord(json) && !Array.isArray(json) ? json : null;
+  const out = {};
+  for (const [key, v4] of Object.entries(value)) {
+    const j = toJson(v4, was?.[key], wasJson?.[key]);
+    if (j !== undefined)
+      out[key] = j;
+  }
+  return out;
 }
 var VIEWS_KEPT = 32;
 
@@ -82850,14 +83587,15 @@ class StatePush {
     const key = `${userId}\x00${chatId}`;
     let c = this.channels.get(key);
     if (!c) {
-      c = { rev: 0, last: null, timer: null, running: null, queued: false, building: 0 };
+      c = { rev: 0, last: null, source: null, timer: null, running: null, queued: false, building: 0 };
       this.channels.set(key, c);
     }
     return c;
   }
-  pushed(chatId, userId, c, view) {
+  pushed(chatId, userId, c, built) {
     c.rev = ++this.revs;
-    c.last = view;
+    c.last = built.json;
+    c.source = built.view;
     const key = `${userId}\x00${chatId}`;
     this.channels.delete(key);
     this.channels.set(key, c);
@@ -82884,9 +83622,9 @@ class StatePush {
   async snapshot(chatId, userId, frontendSessionId) {
     const c = this.channel(chatId, userId);
     if (c.last === null) {
-      const view = await this.built(c, chatId, userId);
+      const built = await this.built(c, chatId, userId);
       if (c.last === null)
-        this.pushed(chatId, userId, c, view);
+        this.pushed(chatId, userId, c, built);
       else
         this.changed(chatId, userId);
     } else
@@ -82897,7 +83635,8 @@ class StatePush {
     c.building++;
     try {
       await giveWay();
-      return asJson(await this.build(chatId, userId));
+      const view = await this.build(chatId, userId);
+      return { view, json: toJson(view, c.source, c.last ?? undefined) ?? null };
     } finally {
       c.building--;
     }
@@ -82939,9 +83678,12 @@ class StatePush {
       return;
     }
     const next = await this.built(c, chatId, userId);
-    const ops = diff(c.last, next);
-    if (ops.length === 0)
+    const ops = diff(c.last, next.json);
+    if (ops.length === 0) {
+      c.last = next.json;
+      c.source = next.view;
       return;
+    }
     const base = c.rev;
     this.pushed(chatId, userId, c, next);
     this.host.frontend.send({ lre: PROTOCOL_VERSION, type: "lre.state.delta", chatId, base, rev: c.rev, ops }, userId);
@@ -83141,13 +83883,13 @@ function mergePatch(target, patch) {
   if (!isRecord(patch))
     return patch;
   const out = isRecord(target) ? { ...target } : {};
-  for (const [k, v3] of Object.entries(patch)) {
+  for (const [k, v4] of Object.entries(patch)) {
     if (!safeKey(k))
       continue;
-    if (v3 === null)
+    if (v4 === null)
       delete out[k];
     else
-      out[k] = mergePatch(hasOwn(out, k) ? out[k] ?? null : null, v3);
+      out[k] = mergePatch(hasOwn(out, k) ? out[k] ?? null : null, v4);
   }
   return out;
 }
@@ -83202,16 +83944,16 @@ function normalize(raw) {
   return isRecord(merged2) && merged2.v === 1 ? conform(merged2, fill) : defaultSettings();
 }
 var STEP_PURPOSES = ["interpret", "npc.choose", "puzzle.answer", "brief", "outline", "extract", "choices", "judge", "mind", "memory", "skip", "consolidate", "knowledge"];
-var int = (v3, lo, hi) => typeof v3 === "number" && Number.isInteger(v3) && v3 >= lo && v3 <= hi ? v3 : undefined;
-var atLeast = (v3, lo) => int(v3, lo, Number.MAX_SAFE_INTEGER);
-var real = (v3, lo, hi) => typeof v3 === "number" && Number.isFinite(v3) && v3 >= lo && v3 <= hi ? v3 : undefined;
-function askBeyondOf(v3) {
-  const minutes2 = real(v3, 0, Number.POSITIVE_INFINITY);
+var int = (v4, lo, hi) => typeof v4 === "number" && Number.isInteger(v4) && v4 >= lo && v4 <= hi ? v4 : undefined;
+var atLeast = (v4, lo) => int(v4, lo, Number.MAX_SAFE_INTEGER);
+var real = (v4, lo, hi) => typeof v4 === "number" && Number.isFinite(v4) && v4 >= lo && v4 <= hi ? v4 : undefined;
+function askBeyondOf(v4) {
+  const minutes2 = real(v4, 0, Number.POSITIVE_INFINITY);
   return minutes2 === undefined ? undefined : Math.min(TIMELAPSE_REACH_MINUTES, Math.round(minutes2));
 }
-var oneOf4 = (v3, values) => values.find((x) => x === v3);
+var oneOf4 = (v4, values) => values.find((x) => x === v4);
 var LEVELS3 = [0, 1, 2, 3, 4];
-var level = (v3) => LEVELS3.find((l) => l === v3);
+var level = (v4) => LEVELS3.find((l) => l === v4);
 function speedOf(x) {
   if (!isRecord(x))
     return;
@@ -83220,11 +83962,11 @@ function speedOf(x) {
   const raw = real(x.thresholdMinutes, Number.NEGATIVE_INFINITY, Number.POSITIVE_INFINITY);
   return mode && raw !== undefined ? { mode, thresholdMinutes: Math.round(Math.min(hi, Math.max(lo, raw))) } : undefined;
 }
-function entries2(v3, max, entry) {
+function entries2(v4, max, entry) {
   const out = {};
-  if (!isRecord(v3))
+  if (!isRecord(v4))
     return out;
-  for (const [k, x] of Object.entries(v3).slice(0, max)) {
+  for (const [k, x] of Object.entries(v4).slice(0, max)) {
     if (!safeKey(k))
       continue;
     const checked = entry(x);
@@ -83234,68 +83976,68 @@ function entries2(v3, max, entry) {
   return out;
 }
 var text5 = (x) => typeof x === "string" && x !== "" ? x.slice(0, 200) : null;
-function paramsOf(v3) {
+function paramsOf(v4) {
   const out = {};
-  if (!isRecord(v3))
+  if (!isRecord(v4))
     return out;
   for (const p of SAMPLING_PARAMS) {
-    const x = real(v3[p.key], p.min, p.max);
+    const x = real(v4[p.key], p.min, p.max);
     if (x !== undefined)
       out[p.key] = p.integer ? Math.round(x) : x;
   }
   return out;
 }
-function routeOf2(v3) {
-  if (!isRecord(v3))
+function routeOf2(v4) {
+  if (!isRecord(v4))
     return;
-  const provider = oneOf4(v3.provider, ["decision", "helper"]);
+  const provider = oneOf4(v4.provider, ["decision", "helper"]);
   if (!provider)
     return;
-  const effort = oneOf4(v3.effort, REASONING_CHOICES);
-  const params = paramsOf(v3.params);
-  return { provider, connectionId: text5(v3.connectionId), model: text5(v3.model), ...effort ? { effort } : {}, ...Object.keys(params).length > 0 ? { params } : {} };
+  const effort = oneOf4(v4.effort, REASONING_CHOICES);
+  const params = paramsOf(v4.params);
+  return { provider, connectionId: text5(v4.connectionId), model: text5(v4.model), ...effort ? { effort } : {}, ...Object.keys(params).length > 0 ? { params } : {} };
 }
-function helperOf(v3, d) {
-  if (!isRecord(v3))
+function helperOf(v4, d) {
+  if (!isRecord(v4))
     return { ...d, params: { ...d.params } };
-  return { connectionId: text5(v3.connectionId), model: text5(v3.model), effort: oneOf4(v3.effort, REASONING_CHOICES) ?? d.effort, maxTokens: atLeast(v3.maxTokens, 1) ?? d.maxTokens, params: paramsOf(v3.params) };
+  return { connectionId: text5(v4.connectionId), model: text5(v4.model), effort: oneOf4(v4.effort, REASONING_CHOICES) ?? d.effort, maxTokens: atLeast(v4.maxTokens, 1) ?? d.maxTokens, params: paramsOf(v4.params) };
 }
-function loreOf(v3) {
-  if (!isRecord(v3))
+function loreOf(v4) {
+  if (!isRecord(v4))
     return;
-  const policy = oneOf4(v3.policy, LORE_POLICIES);
-  const tokens2 = atLeast(v3.tokens, 0);
-  const transport = oneOf4(v3.transport, LORE_TRANSPORTS);
+  const policy = oneOf4(v4.policy, LORE_POLICIES);
+  const tokens2 = atLeast(v4.tokens, 0);
+  const transport = oneOf4(v4.transport, LORE_TRANSPORTS);
   return policy && tokens2 !== undefined ? { policy, tokens: tokens2, ...transport ? { transport } : {} } : undefined;
 }
 var OWN_PROMPT_ELSEWHERE = { mind: true, memory: true, consolidate: true, knowledge: true };
-function stepOf(v3, base, purpose) {
-  if (!isRecord(v3))
+function stepOf(v4, base, purpose) {
+  if (!isRecord(v4))
     return base;
-  const route = routeOf2(v3.route);
-  const maxTokens = atLeast(v3.maxTokens, 1);
-  const lore3 = isMindPurpose(purpose) ? undefined : loreOf(v3.lore) ?? base?.lore;
-  const recent = isMindPurpose(purpose) ? undefined : recentHistoryOf(v3.recent) ?? base?.recent;
+  const route = routeOf2(v4.route);
+  const maxTokens = atLeast(v4.maxTokens, 1);
+  const lore3 = isMindPurpose(purpose) ? undefined : loreOf(v4.lore) ?? base?.lore;
+  const recent = isMindPurpose(purpose) ? undefined : recentHistoryOf(v4.recent) ?? base?.recent;
   return {
-    enabled: typeof v3.enabled === "boolean" ? v3.enabled : base?.enabled ?? false,
-    signals: currentSignals(Array.isArray(v3.signals) ? v3.signals.filter((s) => typeof s === "string").slice(0, 32).map((s) => s.slice(0, 64)) : base?.signals ?? []),
+    enabled: typeof v4.enabled === "boolean" ? v4.enabled : base?.enabled ?? false,
+    signals: currentSignals(Array.isArray(v4.signals) ? v4.signals.filter((s) => typeof s === "string").slice(0, 32).map((s) => s.slice(0, 64)) : base?.signals ?? []),
     ...route ? { route } : {},
-    ...typeof v3.template === "string" && !OWN_PROMPT_ELSEWHERE[purpose] ? { template: v3.template.slice(0, 20000) } : {},
+    ...typeof v4.template === "string" && !OWN_PROMPT_ELSEWHERE[purpose] ? { template: v4.template.slice(0, 20000) } : {},
     ...maxTokens !== undefined ? { maxTokens } : {},
     ...lore3 ? { lore: { ...lore3 } } : {},
     ...recent ? { recent: { ...recent } } : {}
   };
 }
-function recentHistoryOf(v3) {
-  if (!isRecord(v3))
+function recentHistoryOf(v4) {
+  if (!isRecord(v4))
     return;
   const limit2 = (x) => x === "none" ? "none" : atLeast(x, 0);
-  const messages = limit2(v3.messages);
-  const tokens2 = limit2(v3.tokens);
-  return messages !== undefined && tokens2 !== undefined ? { on: typeof v3.on === "boolean" ? v3.on : true, messages, tokens: tokens2 } : undefined;
+  const messages = limit2(v4.messages);
+  const tokens2 = limit2(v4.tokens);
+  return messages !== undefined && tokens2 !== undefined ? { on: typeof v4.on === "boolean" ? v4.on : true, messages, tokens: tokens2 } : undefined;
 }
-function conform(v3, d) {
-  const mu = isRecord(v3.modelUse) ? v3.modelUse : {};
+function conform(v4, d) {
+  const mu = isRecord(v4.modelUse) ? v4.modelUse : {};
   const budgets = isRecord(mu.budgets) ? mu.budgets : {};
   const phase = (x, b) => {
     if (!isRecord(x))
@@ -83318,7 +84060,7 @@ function conform(v3, d) {
     budgets: { pre: phase(budgets.pre, d.modelUse.budgets.pre), post: phase(budgets.post, d.modelUse.budgets.post) },
     tokens: { sections: atLeast(tokens2.sections, 0) ?? d.modelUse.tokens.sections }
   };
-  const re = isRecord(v3.realism) ? v3.realism : {};
+  const re = isRecord(v4.realism) ? v4.realism : {};
   const rawLevels = isRecord(re.levels) ? re.levels : {};
   const levels = { ...d.realism.levels };
   for (const dom of DOMAINS)
@@ -83339,7 +84081,7 @@ function conform(v3, d) {
     tierCaps[band] = caps;
   }
   const realism = { preset: oneOf4(re.preset, ["story", "grounded", "simulation", "custom"]) ?? d.realism.preset, levels, tierCaps, claims: readClaims(re.claims) ?? { ...d.realism.claims } };
-  const t = isRecord(v3.time) ? v3.time : {};
+  const t = isRecord(v4.time) ? v4.time : {};
   const rawInterrupts = isRecord(t.interrupts) ? t.interrupts : {};
   const interrupts = { ...d.time.interrupts };
   for (const c of INTERRUPT_CLASSES)
@@ -83358,7 +84100,7 @@ function conform(v3, d) {
     unitCap: { agentDays: int(unitCap.agentDays, 1, 1e6) ?? d.time.unitCap.agentDays, events: int(unitCap.events, 1, 1e7) ?? d.time.unitCap.events },
     askBeyondMinutes: askBeyondOf(t.askBeyondMinutes) ?? d.time.askBeyondMinutes
   };
-  const rawBounds = isRecord(v3.extraction) ? v3.extraction : {};
+  const rawBounds = isRecord(v4.extraction) ? v4.extraction : {};
   const extraction = {};
   for (const type of CHANGE_TYPES) {
     const b = hasOwn(rawBounds, type) ? rawBounds[type] : undefined;
@@ -83370,34 +84112,34 @@ function conform(v3, d) {
   return {
     v: 1,
     defaults: SETTINGS_DEFAULTS_REV,
-    helper: helperOf(v3.helper, d.helper),
+    helper: helperOf(v4.helper, d.helper),
     modelUse,
     realism,
     time,
-    overrideWorldDefaults: typeof v3.overrideWorldDefaults === "boolean" ? v3.overrideWorldDefaults : d.overrideWorldDefaults,
-    adjudication: readAdjudication(v3.adjudication) ?? d.adjudication,
-    overrideWorldAdjudication: typeof v3.overrideWorldAdjudication === "boolean" ? v3.overrideWorldAdjudication : d.overrideWorldAdjudication,
-    inferred: readInferred(v3.inferred),
+    overrideWorldDefaults: typeof v4.overrideWorldDefaults === "boolean" ? v4.overrideWorldDefaults : d.overrideWorldDefaults,
+    adjudication: readAdjudication(v4.adjudication) ?? d.adjudication,
+    overrideWorldAdjudication: typeof v4.overrideWorldAdjudication === "boolean" ? v4.overrideWorldAdjudication : d.overrideWorldAdjudication,
+    inferred: readInferred(v4.inferred),
     extraction,
-    swipeDefault: oneOf4(v3.swipeDefault, ["rerun", "renarrate"]) ?? d.swipeDefault,
-    swipeTexts: oneOf4(v3.swipeTexts, SWIPE_TEXTS) ?? d.swipeTexts,
-    hideJsonBlocks: typeof v3.hideJsonBlocks === "boolean" ? v3.hideJsonBlocks : d.hideJsonBlocks,
-    minds: mindsSettingsOf(v3.minds, d.minds),
-    timeouts: timeoutsOf(v3.timeouts, d.timeouts),
-    jobs: jobSettingsOf(v3.jobs, d.jobs),
-    loreBooks: loreBooksSettingOf(v3.loreBooks),
-    loreIndex: loreIndexSettingsOf(v3.loreIndex, d.loreIndex),
-    gates: gatesOf2(v3.gates, d.gates),
-    agents: agentSettingsOf(v3.agents, d.agents),
-    prompts: promptSettingsOf(v3.prompts, d.prompts),
-    retention: retentionOf(v3.retention, d.retention),
-    diagnostics: diagnosticsSettingsOf(v3.diagnostics, d.diagnostics),
-    narrator: narratorSettingsOf(v3.narrator, d.narrator)
+    swipeDefault: oneOf4(v4.swipeDefault, ["rerun", "renarrate"]) ?? d.swipeDefault,
+    swipeTexts: oneOf4(v4.swipeTexts, SWIPE_TEXTS) ?? d.swipeTexts,
+    hideJsonBlocks: typeof v4.hideJsonBlocks === "boolean" ? v4.hideJsonBlocks : d.hideJsonBlocks,
+    minds: mindsSettingsOf(v4.minds, d.minds),
+    timeouts: timeoutsOf(v4.timeouts, d.timeouts),
+    jobs: jobSettingsOf(v4.jobs, d.jobs),
+    loreBooks: loreBooksSettingOf(v4.loreBooks),
+    loreIndex: loreIndexSettingsOf(v4.loreIndex, d.loreIndex),
+    gates: gatesOf2(v4.gates, d.gates),
+    agents: agentSettingsOf(v4.agents, d.agents),
+    prompts: promptSettingsOf(v4.prompts, d.prompts),
+    retention: retentionOf(v4.retention, d.retention),
+    diagnostics: diagnosticsSettingsOf(v4.diagnostics, d.diagnostics),
+    narrator: narratorSettingsOf(v4.narrator, d.narrator)
   };
 }
 function gatesOf2(value, d) {
-  const v3 = isRecord(value) ? value : {};
-  return { intent: typeof v3.intent === "boolean" ? v3.intent : d.intent, outline: typeof v3.outline === "boolean" ? v3.outline : d.outline };
+  const v4 = isRecord(value) ? value : {};
+  return { intent: typeof v4.intent === "boolean" ? v4.intent : d.intent, outline: typeof v4.outline === "boolean" ? v4.outline : d.outline };
 }
 function expandPresets(settings, patch) {
   const out = structuredClone(settings);
@@ -83445,7 +84187,7 @@ function statsFor(learning2, connectionId, type, role) {
 }
 var MODES2 = ["auto", "confirm", "never"];
 function learningFrom(raw) {
-  const count3 = (v3) => typeof v3 === "number" && Number.isInteger(v3) && v3 >= 0;
+  const count3 = (v4) => typeof v4 === "number" && Number.isInteger(v4) && v4 >= 0;
   const statsFrom = (s) => {
     if (!isRecord(s) || !count3(s.accepted) || !count3(s.rejected) || typeof s.recent !== "string" || !/^[ar]*$/.test(s.recent))
       return;
@@ -83465,13 +84207,13 @@ function learningFrom(raw) {
   for (const [connectionId, byType] of Object.entries(isRecord(raw.connections) ? raw.connections : {})) {
     if (!safeKey(connectionId) || !isRecord(byType))
       continue;
-    const kept2 = {};
+    const kept3 = {};
     for (const type of EXTRACTION_TYPES) {
       const stats = statsFrom(hasOwn(byType, type) ? byType[type] : undefined);
       if (stats)
-        kept2[type] = stats;
+        kept3[type] = stats;
     }
-    connections[connectionId] = kept2;
+    connections[connectionId] = kept3;
   }
   if (!isRecord(raw.roles))
     return { v: 1, connections };
@@ -83483,13 +84225,13 @@ function learningFrom(raw) {
     for (const [connectionId, byType] of Object.entries(byConnection)) {
       if (!safeKey(connectionId) || !isRecord(byType))
         continue;
-      const kept2 = {};
+      const kept3 = {};
       for (const type of CHANGE_TYPES) {
         const stats = statsFrom(hasOwn(byType, type) ? byType[type] : undefined);
         if (stats)
-          kept2[type] = stats;
+          kept3[type] = stats;
       }
-      keptConnections[connectionId] = kept2;
+      keptConnections[connectionId] = kept3;
     }
     roles[role] = keptConnections;
   }
@@ -83514,9 +84256,9 @@ function recordOutcome(settings, learning2, connectionId, type, outcome, now, ro
   if (role === undefined) {
     if (isAgentChangeType(type))
       return null;
-    const kept2 = hasOwn(learning2.connections, connectionId) ? learning2.connections[connectionId] ?? {} : {};
-    learning2.connections[connectionId] = kept2;
-    byType = kept2;
+    const kept3 = hasOwn(learning2.connections, connectionId) ? learning2.connections[connectionId] ?? {} : {};
+    learning2.connections[connectionId] = kept3;
+    byType = kept3;
   } else {
     if (!safeKey(role))
       return null;
@@ -83597,11 +84339,11 @@ class SettingsStore {
       return { settings: known, kept: true };
     const raw = await readStoredJson(this.host, SETTINGS_PATH, userId, "settings", (r) => isRecord(r) && r.v === 1);
     const settings = normalize(migrateMarkWording(raw ?? null));
-    const kept2 = await this.withGuard(userId, settings, hasGuardCopy(raw));
-    if (kept2)
+    const kept3 = await this.withGuard(userId, settings, hasGuardCopy(raw));
+    if (kept3)
       this.settings.set(userId, settings);
     this.loaded(userId, settings);
-    return { settings, kept: kept2 };
+    return { settings, kept: kept3 };
   }
   async withGuard(userId, settings, copy) {
     if (!this.guards)
@@ -83624,7 +84366,7 @@ class SettingsStore {
     return true;
   }
   async set(userId, patch, check) {
-    const { settings: current2, kept: kept2 } = await this.read(userId);
+    const { settings: current2, kept: kept3 } = await this.read(userId);
     const merged2 = normalize(mergePatch(JSON.parse(JSON.stringify(current2)), patch));
     const next = expandPresets(merged2, patch);
     next.prompts = promptsWritten(current2.prompts, next.prompts);
@@ -83634,7 +84376,7 @@ class SettingsStore {
       await this.guards.set(userId, next.agents.acceptance.connections);
     await this.host.storage.write(`${SETTINGS_PATH}.tmp`, JSON.stringify(storedForm(next)), userId);
     await this.host.storage.move(`${SETTINGS_PATH}.tmp`, SETTINGS_PATH, userId);
-    if (kept2 || guard)
+    if (kept3 || guard)
       this.settings.set(userId, next);
     this.revisions.set(userId, (this.revisions.get(userId) ?? 0) + 1);
     this.loaded(userId, next);
@@ -83688,8 +84430,8 @@ function at(map, key) {
   return isRecord(map) && hasOwn(map, key) ? map[key] : undefined;
 }
 function levelAt(map, key) {
-  const v3 = at(map, key);
-  return LEVELS4.find((l) => l === v3);
+  const v4 = at(map, key);
+  return LEVELS4.find((l) => l === v4);
 }
 function worldFirstTime(user, world) {
   const w = world.time;
@@ -84151,7 +84893,7 @@ function withoutMissing(lines2, missing) {
       continue;
     }
     const sentences = line2.trim().split(/(?<=[.!?])\s+(?=[A-Z"\u201C'\u2018([])/u);
-    const kept2 = sentences.flatMap((sentence3) => {
+    const kept3 = sentences.flatMap((sentence3) => {
       const clauses = sentence3.split(/\s*;\s*/);
       const left = clauses.filter((c) => !missing.some((label2) => names2(c, label2)));
       if (left.length === clauses.length)
@@ -84162,14 +84904,13 @@ function withoutMissing(lines2, missing) {
       const ended = /[.!?]$/.test(joined3) ? joined3 : `${joined3}.`;
       return [ended.charAt(0).toUpperCase() + ended.slice(1)];
     });
-    if (kept2.length > 0)
-      out.push(kept2.join(" "));
+    if (kept3.length > 0)
+      out.push(kept3.join(" "));
   }
   return out;
 }
 
 // src/backend/sections-build.ts
-var NOTE_KNOWN = { pov: "pov", everyone: "scene", gm: "gm" };
 function unitsOf(lines2) {
   const units = [];
   const facts = new Map;
@@ -84210,9 +84951,9 @@ function buildSections(input) {
   let budget = input.budget;
   const mindsBudget = input.mindsBudget;
   const marking = input.narrator.view.secrets === "marked";
-  const carries = (text6) => findLeaks(text6, secrets).length > 0;
+  const carries = (text6) => findLeaks(text6, secrets).length > 0 || holdsSecretMark(text6, input.wording);
   const pov = state2.entities[world.pov]?.name ?? world.entities[world.pov]?.name ?? world.pov;
-  const secret = (text6) => secretMarkText(text6, [], [pov], input.wording);
+  const secret = (text6) => holdsSecretMark(text6, input.wording) ? text6 : secretMarkText(text6, [], [pov], input.wording);
   const hinted = [];
   const outcome = (section, feed, scope, status, more = {}) => {
     outcomes.set(section.id, { slot: section.id, label: section.label, rank: section.rank, feed, scope, status, content: null, tokens: null, cut: 0, marked: 0, hints: 0, ...more });
@@ -84226,7 +84967,7 @@ function buildSections(input) {
     const allMinds = mindsOn3 ? mindLines(read).flatMap((l) => !carries(l.line) && !hidden(l.line) ? [l] : marking ? [{ ...l, line: secretMarkText(l.line, [l.name], [pov], input.wording) }] : []) : [];
     const ladder = (optionalQuery(read, "minds.fidelity")?.(read, { user: input.said, reply: "" }) ?? []).map((s) => s.entity);
     const mindsCap = Math.min(mindsBudget, mindsFeed?.maxTokens ?? Number.POSITIVE_INFINITY);
-    const mindsFit = mindsSection && mindsOn3 ? fitMindLines(allMinds, ladder, mindsCap, (kept2) => input.cost(renderSection(mindsSection.label, mindsSection.template, kept2.map((l) => l.line)))).slice(0, mindsFeed?.maxLines ?? Number.POSITIVE_INFINITY) : [];
+    const mindsFit = mindsSection && mindsOn3 ? fitMindLines(allMinds, ladder, mindsCap, (kept3) => input.cost(renderSection(mindsSection.label, mindsSection.template, kept3.map((l) => l.line)))).slice(0, mindsFeed?.maxLines ?? Number.POSITIVE_INFINITY) : [];
     const ctx = registry.context(world, state2, { "minds.minded": () => mindsFit.map((l) => l.entity), ...input.knowledge ? { "minds.knowing": () => input.knowledge } : {} });
     const nameOf8 = (id) => state2.entities[id]?.name ?? world.entities[id]?.name ?? id;
     const filled = new Set;
@@ -84287,20 +85028,11 @@ function buildSections(input) {
         lines2.push(...withoutMissing(input.outline, missingSections(sections, section.rank, filled, mindsFit.length > 0 && mindsSection !== undefined && input.hasEntry(mindsSection))).map((text6) => ({ text: text6 })));
       if (section.id === "scene") {
         lines2.push(...(input.planned.scene ?? []).map((text6) => ({ text: text6 })));
-        const notes = input.planned.notes;
-        const known = notes ? NOTE_KNOWN[notes.knowledge] : "pov";
-        for (const text6 of notes?.lines ?? []) {
-          if (known !== "pov" && (scope === "player" || known === "gm" && scope !== "gm"))
-            continue;
-          if (carries(text6) || hidden(text6)) {
-            if (marking)
-              beyond2.push({ text: secret(text6) });
-            continue;
-          }
-          if (known === "pov")
+        for (const text6 of input.planned.notes ?? []) {
+          if (!carries(text6) && !hidden(text6))
             lines2.push({ text: text6 });
-          else
-            beyond2.push({ text: markedText({ text: text6, known }) });
+          else if (marking)
+            beyond2.push({ text: secret(text6) });
         }
       }
       const elapsed = section.id === "scene" && input.elapsed !== null ? turnTimeLine(read, input.elapsed, input.texts) : "";
@@ -84327,15 +85059,15 @@ function buildSections(input) {
       if (maxTokens !== undefined)
         while (capped.length > 0 && costOf3(capped) > maxTokens)
           capped.pop();
-      const kept2 = [...capped];
+      const kept3 = [...capped];
       if (!minds && section.rank > 0)
-        while (kept2.length > 1 && costOf3(kept2) > budget)
-          kept2.pop();
-      const cutFacts = new Set(plain4.flatMap((u) => u.group !== undefined && !kept2.includes(u) ? [u.group] : []));
+        while (kept3.length > 1 && costOf3(kept3) > budget)
+          kept3.pop();
+      const cutFacts = new Set(plain4.flatMap((u) => u.group !== undefined && !kept3.includes(u) ? [u.group] : []));
       const facts = withinLines(marked2.filter((u) => u.group === undefined || !cutFacts.has(u.group)), markedRoom);
       const safeHints = marking ? hints.map((l) => carries(l) ? secret(l) : l) : hints.filter((l) => !carries(l));
-      const cut = (minds ? allMinds.length - mindsFit.length : 0) + (linesIn(plain4).length - linesIn(kept2).length);
-      if (kept2.length === 0) {
+      const cut = (minds ? allMinds.length - mindsFit.length : 0) + (linesIn(plain4).length - linesIn(kept3).length);
+      if (kept3.length === 0) {
         if (minds && allMinds.length > 0) {
           record3.push({ slot: section.id, label: section.label, tokens: input.cost(renderSection(section.label, section.template, allMinds.map((l) => l.line))), clipped: true, cut: allMinds.length, delivery: "unchecked" });
           outcome(section, feed, scope, "clipped", { cut: allMinds.length });
@@ -84345,12 +85077,12 @@ function buildSections(input) {
           hinted.push({ fill: null, slot: section.id, label: section.label, template: section.template, lines: [], marked: facts, hints: safeHints, cost: 0, maxTokens, maxLines: feed.maxLines });
         continue;
       }
-      const content = renderSection(section.label, section.template, linesIn(kept2));
+      const content = renderSection(section.label, section.template, linesIn(kept3));
       input.seen(content);
       const cost = input.cost(content);
       if (minds ? cost > mindsBudget : section.rank > 0 && cost > budget) {
         const whole5 = minds ? cost : costOf3(capped);
-        const capsCut = cut - (linesIn(capped).length - linesIn(kept2).length);
+        const capsCut = cut - (linesIn(capped).length - linesIn(kept3).length);
         record3.push({ slot: section.id, label: section.label, tokens: whole5, clipped: true, ...capsCut > 0 ? { cut: capsCut } : {}, delivery: "unchecked" });
         outcome(section, feed, scope, "clipped", { tokens: whole5, cut: capsCut });
         continue;
@@ -84364,7 +85096,7 @@ function buildSections(input) {
       recorded.push(section.id);
       outcome(section, feed, scope, "sent", { content, tokens: cost, cut });
       if (safeHints.length > 0 || facts.length > 0)
-        hinted.push({ fill, slot: section.id, label: section.label, template: section.template, lines: linesIn(kept2), marked: facts, hints: safeHints, cost, maxTokens, maxLines: feed.maxLines });
+        hinted.push({ fill, slot: section.id, label: section.label, template: section.template, lines: linesIn(kept3), marked: facts, hints: safeHints, cost, maxTokens, maxLines: feed.maxLines });
     }
   });
   const used = input.budget - budget;
@@ -84421,15 +85153,15 @@ function statedIn(text6, said2) {
   const end = all2.slice(at2 + words7.length).search(/[.!?\n]/);
   return end < 0 || all2.charAt(at2 + words7.length + end) !== "?";
 }
-function str18(v3) {
-  return typeof v3 === "string" ? v3.trim() : "";
+function str18(v4) {
+  return typeof v4 === "string" ? v4.trim() : "";
 }
 function plainly(p, world, state2) {
   const who = str18(p.entity);
   const you = who === world.pov;
   const name = state2.entities[who]?.name ?? who;
-  const placeName2 = (v3) => {
-    const id = str18(v3);
+  const placeName2 = (v4) => {
+    const id = str18(v4);
     return hasOwn(world.places, id) ? world.places[id]?.name ?? id : id;
   };
   const whose = you ? "your routine" : `${name}'s routine`;
@@ -84490,7 +85222,7 @@ function routineAsks(registry, world, state2, said2, text6, secrets, known) {
     const fits2 = open ? placesFor(registry, world, state2, placeWords) : [];
     const { place: _place, ...placeless } = proposal;
     const variants = !open ? [proposal] : fits2.length === 0 ? [placeless] : fits2.map((id) => ({ ...proposal, place: id }));
-    const holding = variants.filter((v3) => !("code" in storyChange(v3, ctx)));
+    const holding = variants.filter((v4) => !("code" in storyChange(v4, ctx)));
     const first = holding[0];
     if (!first)
       continue;
@@ -84500,7 +85232,7 @@ function routineAsks(registry, world, state2, said2, text6, secrets, known) {
     const base = { question: `Would you like to add this to ${whose}?`, added: `Added to ${whose}` };
     if (holding.length > 1) {
       const { detail: detail2 } = plainly(placeless, world, state2);
-      asks.push({ ...base, proposal: first, detail: `${detail2} Which place?`, places: holding.map((v3) => ({ label: `At ${own(world.places, str18(v3.place))?.name ?? str18(v3.place)}`, proposal: v3 })) });
+      asks.push({ ...base, proposal: first, detail: `${detail2} Which place?`, places: holding.map((v4) => ({ label: `At ${own(world.places, str18(v4.place))?.name ?? str18(v4.place)}`, proposal: v4 })) });
       continue;
     }
     const { detail } = plainly(first, world, state2);
@@ -84512,8 +85244,8 @@ function routineAsks(registry, world, state2, said2, text6, secrets, known) {
 
 // src/backend/plan-notes.ts
 var PLAN_NOTES_CAP = 128;
-function lines2(v3) {
-  return Array.isArray(v3) ? v3.filter((s) => typeof s === "string") : [];
+function lines2(v4) {
+  return Array.isArray(v4) ? v4.filter((s) => typeof s === "string") : [];
 }
 
 class PlanNotes {
@@ -84534,9 +85266,9 @@ class PlanNotes {
     const map = new Map;
     if (isRecord(raw)) {
       for (const seed of Object.keys(raw)) {
-        const v3 = hasOwn(raw, seed) ? raw[seed] : undefined;
-        if (safeKey(seed) && isRecord(v3))
-          map.set(seed, { outcome: lines2(v3.outcome), montage: lines2(v3.montage), outline: lines2(v3.outline) });
+        const v4 = hasOwn(raw, seed) ? raw[seed] : undefined;
+        if (safeKey(seed) && isRecord(v4))
+          map.set(seed, { outcome: lines2(v4.outcome), montage: lines2(v4.montage), outline: lines2(v4.outline) });
       }
     }
     this.notes.set(key, map);
@@ -84579,7 +85311,7 @@ class StagedActions {
   async get(chatId, userId) {
     const key = `${userId}\x00${chatId}`;
     if (!this.staged.has(key)) {
-      const raw = await readStoredJson(this.host, this.path(chatId), userId, "Staged action", (v3) => v3 === null || isStaged(v3));
+      const raw = await readStoredJson(this.host, this.path(chatId), userId, "Staged action", (v4) => v4 === null || isStaged(v4));
       this.staged.set(key, isStaged(raw) ? raw : null);
       if (this.staged.size > 256)
         this.staged.delete(this.staged.keys().next().value ?? "");
@@ -84599,8 +85331,8 @@ var INSPECTOR_RUNS = 10;
 var FORMAT2 = 2;
 var ACTIVATIONS = { confirmed: true, unconfirmed: true };
 var DELIVERIES = { verified: true, unverified: true, unchecked: true };
-function strings4(v3) {
-  return Array.isArray(v3) && v3.every((s) => typeof s === "string");
+function strings4(v4) {
+  return Array.isArray(v4) && v4.every((s) => typeof s === "string");
 }
 function isInspectorRecord(raw) {
   if (!isRecord(raw) || typeof raw.id !== "string" || typeof raw.at !== "number" || typeof raw.activation !== "string" || !hasOwn(ACTIVATIONS, raw.activation))
@@ -84658,11 +85390,11 @@ function mindTracesOf(raw) {
     const prompt = MIND_PROMPTS.find((p) => p === t.prompt);
     if (!purpose || !phase || level2 === undefined || !outcome || !prompt)
       return [];
-    const lore3 = (v3) => Array.isArray(v3) ? v3.flatMap((p) => isRecord(p) && typeof p.title === "string" && typeof p.tokens === "number" && typeof p.cut === "boolean" ? [{ title: p.title, tokens: p.tokens, cut: p.cut }] : []) : [];
+    const lore3 = (v4) => Array.isArray(v4) ? v4.flatMap((p) => isRecord(p) && typeof p.title === "string" && typeof p.tokens === "number" && typeof p.cut === "boolean" ? [{ title: p.title, tokens: p.tokens, cut: p.cut }] : []) : [];
     const pinned = lore3(t.pinned);
     const activated = lore3(t.activated);
     const notes = strings4(t.notes) ? [...t.notes] : [];
-    const count3 = (v3) => typeof v3 === "number" && Number.isSafeInteger(v3) && v3 > 0 ? v3 : 0;
+    const count3 = (v4) => typeof v4 === "number" && Number.isSafeInteger(v4) && v4 > 0 ? v4 : 0;
     const routine = count3(t.routine);
     const plans = count3(t.plans);
     const history = count3(t.history);
@@ -84868,8 +85600,8 @@ class TurnBridge {
     trim(this.readAt);
   }
   forget(userText) {
-    for (const kept2 of [this.intents, this.unfit, this.nexts, this.decisions, this.minds, this.offers, this.skips, this.skipPlans, this.held, this.routineAsks, this.ownPlans, this.outlines, this.memories, this.commits])
-      kept2.delete(userText);
+    for (const kept3 of [this.intents, this.unfit, this.nexts, this.decisions, this.minds, this.offers, this.skips, this.skipPlans, this.held, this.routineAsks, this.ownPlans, this.outlines, this.memories, this.commits])
+      kept3.delete(userText);
     if (this.replay === userText)
       this.replay = null;
     this.interpreted.delete(userText);
@@ -85120,8 +85852,8 @@ class TurnBridge {
       return false;
     if (params) {
       const { claim: claim2, said: _read, ...rest } = intent2;
-      const kept2 = claim2 !== undefined && JSON.stringify(params[claim2.param] ?? null) === JSON.stringify(intent2.params[claim2.param] ?? null);
-      this.intents.set(userText, { ...rest, params, ...claim2 && kept2 ? { claim: claim2 } : {}, ...Object.keys(said2).length > 0 ? { said: said2 } : {} });
+      const kept3 = claim2 !== undefined && JSON.stringify(params[claim2.param] ?? null) === JSON.stringify(intent2.params[claim2.param] ?? null);
+      this.intents.set(userText, { ...rest, params, ...claim2 && kept3 ? { claim: claim2 } : {}, ...Object.keys(said2).length > 0 ? { said: said2 } : {} });
     }
     this.intentsPassed.add(userText);
     if (this.intentsPassed.size > 64)
@@ -85186,14 +85918,8 @@ function trim(map, cap = 64) {
 }
 
 // src/backend/agents/tools/schema.ts
-function schemaWorld(world, registry, knowledge) {
-  const kinds = playedKinds(Object.fromEntries(registry.kinds), world.kinds);
-  if (knowledge !== "pov")
-    return { ...world, kinds, actions: { ...Object.fromEntries(registry.actions), ...world.actions } };
-  const shown4 = {};
-  for (const [id, kind] of Object.entries(kinds))
-    shown4[id] = { ...kind, fields: Object.fromEntries(Object.entries(kind.fields).filter(([, def2]) => visibilityOf(def2.visibility) === "public")) };
-  return { ...world, kinds: shown4, actions: {}, places: {} };
+function schemaWorld(world, registry) {
+  return { ...world, kinds: playedKinds(Object.fromEntries(registry.kinds), world.kinds), actions: { ...Object.fromEntries(registry.actions), ...world.actions } };
 }
 function objectSchema(properties, required = []) {
   return { type: "object", properties: { ...properties }, ...required.length > 0 ? { required: [...required] } : {}, additionalProperties: false };
@@ -85236,12 +85962,12 @@ function actionEnum(world) {
   return Object.keys(world.actions).sort();
 }
 function textArg(args, key) {
-  const v3 = args[key];
-  return typeof v3 === "string" && v3.trim() !== "" ? v3.trim() : null;
+  const v4 = args[key];
+  return typeof v4 === "string" && v4.trim() !== "" ? v4.trim() : null;
 }
 function intArg(args, key) {
-  const v3 = args[key];
-  const n = typeof v3 === "string" && v3.trim() !== "" ? Number(v3) : v3;
+  const v4 = args[key];
+  const n = typeof v4 === "string" && v4.trim() !== "" ? Number(v4) : v4;
   return typeof n === "number" && Number.isInteger(n) ? n : null;
 }
 function jsonTextOf(text7) {
@@ -85252,15 +85978,15 @@ function jsonTextOf(text7) {
   }
 }
 function argGiven(args, key) {
-  const v3 = args[key];
-  return v3 !== undefined && !(typeof v3 === "string" && v3.trim() === "");
+  const v4 = args[key];
+  return v4 !== undefined && !(typeof v4 === "string" && v4.trim() === "");
 }
 function objectArg(args, key) {
   if (!argGiven(args, key))
     return null;
   const raw = args[key];
-  const v3 = typeof raw === "string" ? jsonTextOf(raw) : raw;
-  return isRecord(v3) ? v3 : null;
+  const v4 = typeof raw === "string" ? jsonTextOf(raw) : raw;
+  return isRecord(v4) ? v4 : null;
 }
 function needText(view, tool, args, key) {
   return textArg(args, key) ?? view.refuse(TOOL_NOTE.missing, { tool, arg: key, text: view.text(toolArgTextId(tool, key)) });
@@ -85275,11 +86001,11 @@ var NUMBER = { type: "number" };
 var TEXT_LIST = { type: "array", items: { type: "string" } };
 var JSON_VALUE = { type: "string" };
 function jsonArg(args, key, text7 = false) {
-  const v3 = args[key];
-  if (typeof v3 !== "string")
-    return v3;
-  const parsed2 = jsonTextOf(v3);
-  return parsed2 === undefined || text7 && typeof parsed2 !== "string" ? v3 : parsed2;
+  const v4 = args[key];
+  if (typeof v4 !== "string")
+    return v4;
+  const parsed2 = jsonTextOf(v4);
+  return parsed2 === undefined || text7 && typeof parsed2 !== "string" ? v4 : parsed2;
 }
 function fieldValueArg(view, args, key, entity2, field2) {
   const kind = own(view.state.entities, entity2)?.kind;
@@ -85304,8 +86030,8 @@ function missing(view, tool, arg) {
   return view.refuse(TOOL_NOTE.missing, { tool, arg, text: view.text(toolArgTextId(tool, arg)) });
 }
 function boolArg(args, key) {
-  const v3 = args[key];
-  return typeof v3 === "boolean" ? v3 : null;
+  const v4 = args[key];
+  return typeof v4 === "boolean" ? v4 : null;
 }
 function needId(view, tool, args, key, resolve) {
   const said2 = needText(view, tool, args, key);
@@ -85316,10 +86042,10 @@ function needId(view, tool, args, key, resolve) {
 }
 function nullableObject(args, key) {
   const raw = args[key];
-  const v3 = typeof raw === "string" ? jsonTextOf(raw) : raw;
-  if (raw === undefined || v3 === null)
+  const v4 = typeof raw === "string" ? jsonTextOf(raw) : raw;
+  if (raw === undefined || v4 === null)
     return null;
-  return isRecord(v3) ? v3 : undefined;
+  return isRecord(v4) ? v4 : undefined;
 }
 
 // src/backend/agents/tools/transcript-files.ts
@@ -85334,7 +86060,7 @@ function transcriptFiles(head) {
     const { transcript, transcriptChars } = recordSessionOf(rec);
     if (transcript === undefined)
       continue;
-    out.push({ path: transcriptPath(turn), hash: transcript, size: transcriptChars ?? 0, pinned: false, readers: "gm", learned: false, transcript: true, provenance: { turn } });
+    out.push({ path: transcriptPath(turn), hash: transcript, size: transcriptChars ?? 0, pinned: false, learned: false, transcript: true, provenance: { turn } });
   }
   return out;
 }
@@ -85383,17 +86109,21 @@ function fileSources(head) {
   }
   return out;
 }
-function filesOf(head, learned, staged = new Map) {
+async function keptFiles(rt, chatId, userId) {
+  const [{ learned }, global] = await Promise.all([rt.chatAgents.get(chatId, userId), rt.globalFiles.get(userId)]);
+  return { ...learned, ...global };
+}
+function filesOf(head, kept3, staged = new Map) {
   const out = new Map;
   const sources = fileSources(head);
   const pins = workspacePins(head.state);
   for (const [path2, hash] of Object.entries(workspaceOf(head.state))) {
     const by = staged.get(path2);
     const source = by ? { ...by, turn: null } : sources.get(path2);
-    out.set(path2, { path: path2, hash, pinned: own(pins, path2) === true, readers: readersOf(head.state, path2), learned: false, provenance: { ...source?.role !== undefined ? { role: source.role } : {}, ...source?.key !== undefined ? { key: source.key } : {}, turn: source?.turn ?? null } });
+    out.set(path2, { path: path2, hash, pinned: own(pins, path2) === true, learned: false, provenance: { ...source?.role !== undefined ? { role: source.role } : {}, ...source?.key !== undefined ? { key: source.key } : {}, turn: source?.turn ?? null } });
   }
-  for (const [path2, file] of Object.entries(learned)) {
-    out.set(path2, { path: path2, hash: file.hash, pinned: file.pinned === true, readers: file.readers, learned: true, provenance: { ...file.role !== undefined ? { role: file.role } : {}, turn: null } });
+  for (const [path2, file] of Object.entries(kept3)) {
+    out.set(path2, { path: path2, hash: file.hash, pinned: file.pinned === true, learned: isLearnedPath(path2), provenance: { ...file.role !== undefined ? { role: file.role } : {}, turn: null } });
   }
   for (const file of transcriptFiles(head))
     out.set(file.path, file);
@@ -85401,19 +86131,20 @@ function filesOf(head, learned, staged = new Map) {
 }
 async function allFiles(rt, env, at2) {
   if (at2)
-    return filesOf(at2.head, at2.learned, at2.staged);
+    return filesOf(at2.head, at2.kept, at2.staged);
   const head = await chatHead(rt, env.chatId, env.userId);
-  return head ? filesOf(head, (await rt.chatAgents.get(env.chatId, env.userId)).learned) : new Map;
+  return head ? filesOf(head, await keptFiles(rt, env.chatId, env.userId)) : new Map;
 }
 async function listWorkspace(rt, env, at2) {
-  const files = [...(await allFiles(rt, env, at2)).values()].filter((f) => knowledgeWithin(f.readers, env.knowledge)).sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0);
-  return Promise.all(files.map(async (f) => ({ ...f, size: f.size ?? (await rt.blobs.get(env.userId, f.hash))?.length ?? 0 })));
+  const files = [...(await allFiles(rt, env, at2)).values()].sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0);
+  return Promise.all(files.map(async (f) => ({ ...f, size: f.size ?? await rt.blobs.size(env.userId, f.hash) ?? 0 })));
 }
 async function readWorkspaceFile(rt, env, path2) {
-  const file = (await allFiles(rt, env)).get(path2);
-  if (!file || !knowledgeWithin(file.readers, env.knowledge))
+  const head = await chatHead(rt, env.chatId, env.userId);
+  if (!head)
     return null;
-  return rt.blobs.get(env.userId, file.hash);
+  const hash = isKeptPath(path2) ? own(await keptFiles(rt, env.chatId, env.userId), path2)?.hash : isTranscriptPath(path2) ? transcriptFiles(head).find((f) => f.path === path2)?.hash : own(workspaceOf(head.state), path2);
+  return hash === undefined ? null : rt.blobs.get(env.userId, hash);
 }
 async function fileText(view, path2) {
   const file = (await view.workspace()).find((f) => f.path === path2);
@@ -85574,35 +86305,21 @@ var MAIN_BY = "main";
 function isMainMessage(m) {
   return m.by === MAIN_BY && (m.role === "user" || m.role === "assistant") && typeof m.content === "string";
 }
-function knowledgeOf(m) {
-  return typeof m.knowledge === "string" && AGENT_KNOWLEDGE.includes(m.knowledge) ? m.knowledge : "gm";
-}
-function mainLens(knowledge, readers) {
-  const reads = (path2) => {
-    const r = typeof path2 === "string" ? readers.get(path2) : undefined;
-    return r === undefined || knowledgeWithin(r, knowledge);
-  };
-  return { knowledge, message: (m) => isMainMessage(m) && knowledgeWithin(knowledgeOf(m), knowledge) && (Array.isArray(m.files) ? m.files : []).every(reads) };
-}
 async function readSession(rt, userId, refs) {
   return { refs, ...await rt.sessions.parts(userId, refs) };
 }
 function rebasedRefs(rebase) {
   return { base: rebase.summary, segments: [], archived: rebase.archived };
 }
-function summaryOf(session, lens) {
-  return session.summary !== null && knowledgeWithin(session.summaryKnowledge, lens.knowledge) ? session.summary : null;
-}
-function sessionTokens(session, lens) {
-  const summary = summaryOf(session, lens);
-  let tokens2 = summary === null ? 0 : tokensOf(summary);
+function sessionTokens(session) {
+  let tokens2 = session.summary === null ? 0 : tokensOf(session.summary);
   for (const segment of session.segments)
     for (const m of segment.messages)
-      if (lens.message(m) && typeof m.content === "string")
+      if (isMainMessage(m))
         tokens2 += tokensOf(m.content);
   return tokens2;
 }
-function historyOf(session, texts2, lens) {
+function historyOf(session, texts2) {
   const out = [];
   const push = (role, text7) => {
     const last = out.at(-1);
@@ -85613,12 +86330,11 @@ ${text7}`;
     else
       out.push({ role, text: text7 });
   };
-  const summary = summaryOf(session, lens);
-  if (summary !== null)
-    push("user", renderPrompt(MAIN_TEXT.summary, texts2, { summary }));
+  if (session.summary !== null)
+    push("user", renderPrompt(MAIN_TEXT.summary, texts2, { summary: session.summary }));
   for (const segment of session.segments)
     for (const m of segment.messages)
-      if (lens.message(m) && isMainMessage(m))
+      if (isMainMessage(m))
         push(m.role, m.content);
   return out;
 }
@@ -85638,24 +86354,21 @@ function lastMainTurn(chain, tombstones, refs, main) {
   return based;
 }
 async function compact(rt, input) {
-  const { session, keep, texts: texts2, lens } = input;
+  const { session, keep, texts: texts2 } = input;
   const folded = session.segments.slice(0, Math.max(0, session.segments.length - keep));
-  const read = folded.map((segment) => segment.messages.filter((m) => lens.message(m)));
-  const before = summaryOf(session, lens);
+  const read = folded.map((segment) => segment.messages.filter(isMainMessage));
   if (read.every((messages) => messages.length === 0))
     return null;
   const none = renderPrompt(MAIN_TEXT.none, texts2, {});
-  const turns = read.flatMap((messages) => messages.length === 0 ? [] : [messages.map((m) => `${String(m.role)}: ${typeof m.content === "string" ? m.content : ""}`).join(`
+  const turns = read.flatMap((messages) => messages.length === 0 ? [] : [messages.map((m) => `${m.role}: ${m.content}`).join(`
 `)]).join(`
 
 `);
-  const reply = await input.summarize(renderPrompt(MAIN_TEXT.compaction, texts2, { keep: String(keep) }), renderPrompt(MAIN_TEXT.compactionInput, texts2, { summary: before ?? none, turns }));
+  const reply = await input.summarize(renderPrompt(MAIN_TEXT.compaction, texts2, { keep: String(keep) }), renderPrompt(MAIN_TEXT.compactionInput, texts2, { summary: session.summary ?? none, turns }));
   const summary = reply.text.trim();
   if (reply.status !== "answered" || summary === "")
     return { failed: reply.reason ?? none };
-  const held3 = [...read.flat().map(knowledgeOf), ...before !== null ? [session.summaryKnowledge] : []];
-  const knowledge = AGENT_KNOWLEDGE[Math.max(0, ...held3.map((k) => AGENT_KNOWLEDGE.indexOf(k)))] ?? lens.knowledge;
-  const rebase = await rt.sessions.compact(input.userId, input.holder, session.refs, summary, keep, knowledge);
+  const rebase = await rt.sessions.compact(input.userId, input.holder, session.refs, summary, keep);
   return { rebase, session: await readSession(rt, input.userId, rebasedRefs(rebase)), summary, folded: folded.length, kept: session.segments.length - folded.length };
 }
 async function rolledBack(rt, input) {
@@ -85684,46 +86397,43 @@ function segmentTurns(chain, tombstones) {
   }
   return out;
 }
-function messageView(m, lens) {
+function messageView(m) {
   if (m.role !== "user" && m.role !== "assistant" || typeof m.content !== "string")
     return [];
-  const main = isMainMessage(m);
-  const files = main && Array.isArray(m.files) ? m.files.filter((f) => typeof f === "string") : [];
   const engine = isRecord(m.engine) ? m.engine : null;
   const list3 = (part) => {
     const value = engine?.[part];
-    return Array.isArray(value) ? value.filter((v3) => isRecord(v3)) : [];
+    return Array.isArray(value) ? value.filter((v4) => isRecord(v4)) : [];
   };
   return [
     {
       role: m.role,
       text: m.content,
-      main,
-      ...main ? { knowledge: knowledgeOf(m) } : {},
-      ...files.length > 0 ? { files } : {},
-      ...engine ? { engine: { roles: list3("roles").map((r) => ({ role: String(r.role ?? ""), via: String(r.via ?? ""), ok: r.ok === true })), committed: list3("committed").map((c) => ({ role: String(c.role ?? ""), key: String(c.key ?? ""), type: String(c.type ?? "") })) } } : {},
-      read: lens.message(m)
+      main: isMainMessage(m),
+      ...engine ? { engine: { roles: list3("roles").map((r) => ({ role: String(r.role ?? ""), via: String(r.via ?? ""), ok: r.ok === true })), committed: list3("committed").map((c) => ({ role: String(c.role ?? ""), key: String(c.key ?? ""), type: String(c.type ?? "") })) } } : {}
     }
   ];
 }
 async function sessionView(rt, chatId, userId) {
-  const knowledge = (await rt.settings.get(userId)).agents.main.knowledge;
   const head = await chatHead(rt, chatId, userId);
   if (!head)
-    return { summary: null, summaryKnowledge: "gm", turns: 0, tokens: 0, segments: [], reads: { knowledge, turns: 0, tokens: 0, summary: false }, missing: 0, rollback: "none" };
+    return { summary: null, turns: 0, tokens: 0, segments: [], reads: { turns: 0, tokens: 0 }, missing: 0, rollback: "none" };
   const chain = head.core.chain(head.observed);
   const session = await readSession(rt, userId, sessionAt(chain, head.core.journal.tombstones));
-  const lens = mainLens(knowledge, new Map((await listWorkspace(rt, { userId, chatId, knowledge: "gm" })).map((f) => [f.path, f.readers])));
   const asked2 = (await rt.chatAgents.get(chatId, userId)).rollback;
   const rollback = !undoable(session) ? "none" : asked2?.base === session.refs.base && asked2.archived === session.refs.archived ? "pending" : "available";
   const turns = segmentTurns(chain, head.core.journal.tombstones);
+  let tokens2 = session.summary === null ? 0 : tokensOf(session.summary);
+  for (const segment of session.segments)
+    for (const m of segment.messages)
+      if (typeof m.content === "string")
+        tokens2 += tokensOf(m.content);
   return {
     summary: session.summary,
-    summaryKnowledge: session.summaryKnowledge,
     turns: session.segments.length,
-    tokens: sessionTokens(session, { knowledge: "gm", message: () => true }),
-    segments: session.segments.map((s) => ({ turn: turns.get(s.hash) ?? null, messages: s.messages.flatMap((m) => messageView(m, lens)) })),
-    reads: { knowledge, turns: session.segments.filter((s) => s.messages.some((m) => lens.message(m))).length, tokens: sessionTokens(session, lens), summary: summaryOf(session, lens) !== null },
+    tokens: tokens2,
+    segments: session.segments.map((s) => ({ turn: turns.get(s.hash) ?? null, messages: s.messages.flatMap(messageView) })),
+    reads: { turns: session.segments.filter((s) => s.messages.some(isMainMessage)).length, tokens: sessionTokens(session) },
     missing: session.missing.length,
     rollback
   };
@@ -85736,48 +86446,204 @@ async function askRollback(rt, chatId, userId) {
   return sessionView(rt, chatId, userId);
 }
 
-// src/backend/agents/brief.ts
-function namesOf4(reg, head, pick) {
-  const out = { people: [], things: [] };
-  for (const [id, e] of Object.entries(head.state.entities))
-    if (pick(id))
-      (kindIs(reg, head.world, e.kind, "person") ? out.people : out.things).push(e.name);
+// src/backend/agents/turn-task.ts
+var MAIN_PINS = "main";
+var MAIN_PINS_TEXTS = { pins: MAIN_TEXT.pins, file: MAIN_TEXT.pinsFile, headings: MAIN_TEXT.pinsHeadings, none: MAIN_TEXT.none };
+function pinsManifestOf(text7) {
+  if (text7 === null)
+    return {};
+  let raw;
+  try {
+    raw = JSON.parse(text7);
+  } catch {
+    return {};
+  }
+  if (!isRecord(raw))
+    return {};
+  const out = {};
+  for (const [role, value] of Object.entries(raw)) {
+    const entry = Array.isArray(value) ? { files: value } : isRecord(value) ? value : null;
+    if (!entry || !safeKey(role))
+      continue;
+    const files = Array.isArray(entry.files) ? [...new Set(entry.files.filter(isFilePath))] : [];
+    const tokens2 = "tokens" in entry && typeof entry.tokens === "number" && Number.isInteger(entry.tokens) && entry.tokens >= 0 ? entry.tokens : null;
+    out[role] = { files, tokens: tokens2 };
+  }
   return out;
 }
-function everyoneScreen(reg, head) {
-  const gone = namesOf4(reg, head, (id) => isGone(head.state, id));
-  return (line2) => !namesAny(line2, gone.people, gone.things);
-}
-function viewerScreen(reg, head, viewer, pov) {
-  const { world, state: state2 } = head;
-  const hidden = hiddenNameCheck(reg, world, state2, viewer, { stages: false });
-  const knows2 = (id) => id === viewer || (pov ? povMayKnow(reg, world, state2, id) : playerKnows(reg, world, state2, viewer, id));
-  const unknown = namesOf4(reg, head, (id) => !knows2(id));
-  const here = placeOfEntity(state2, viewer);
-  const away = Object.entries(state2.entities).flatMap(([id, e]) => {
-    const at2 = id === viewer || !knows2(id) || !kindIs(reg, world, e.kind, "person") ? undefined : placeOfEntity(state2, id);
-    const place2 = at2 === undefined || at2 === null || at2 === here ? undefined : own(world.places, at2)?.name;
-    return place2 ? [{ name: e.name, place: place2 }] : [];
-  });
-  const slice2 = readSlice(state2);
-  const minds = Object.entries(slice2.chars).flatMap(([id, c]) => id === viewer ? [] : [c.mind?.monologue ?? "", c.mind?.intent ?? "", ...c.mind?.reactions ?? [], ...c.plans.map((p) => p.what), ...c.notes.map((n) => n.text), ...c.commitments.map((m) => m.text), ...c.witness.map((w) => w.what), c.summary, c.intent?.text ?? ""]);
-  const held3 = holdingsOf(slice2, viewer);
-  const keptFrom = Object.entries(factsOf(slice2)).flatMap(([id, f]) => own(held3, id) === undefined ? [f.claim] : []);
-  const phrases = [...unrevealedSecrets(reg, world, state2), ...minds, ...keptFrom];
-  return (line2) => findLeaks(line2, phrases).length === 0 && !hidden(line2) && !namesAny(line2, unknown.people, unknown.things) && !away.some((a) => namesAny(line2, [a.name]) && namesAny(line2, [], [a.place]));
-}
-function screenBrief(reg, head, text7, reads) {
-  if (text7.trim() === "" || reads === "gm")
-    return { text: text7, withheld: false };
-  const viewer = reads === "pov" ? head?.world.pov ?? null : reads === "everyone" ? null : reads.own;
-  if (!head || reads !== "everyone" && viewer === null)
-    return { text: "", withheld: true };
-  const keeps = viewer === null ? everyoneScreen(reg, head) : viewerScreen(reg, head, viewer, reads === "pov");
-  const lines3 = text7.split(`
+var HEADING = /^#{1,6}\s/;
+async function pinnedFiles(view, input) {
+  const { texts: texts2, framing } = input;
+  const files = (await view.workspace()).filter((f) => f.transcript !== true && !isSystemPath(f.path));
+  const byPath = new Map(files.map((f) => [f.path, f]));
+  const stored = byPath.get(PINS_PATH);
+  const manifest = pinsManifestOf(stored ? await view.blob(stored.hash) : null);
+  const entry = own(manifest, input.role);
+  const pinned = input.pinned ? files.filter((f) => f.pinned && f.path !== PINS_PATH).map((f) => f.path) : [];
+  const paths = [...new Set([...input.config ?? [], ...entry?.files ?? [], ...pinned])];
+  const budget = entry?.tokens ?? input.tokens;
+  let left = budget;
+  const parts = [];
+  for (const path2 of paths) {
+    const file = byPath.get(path2);
+    const text7 = file ? await view.blob(file.hash) : null;
+    if (text7 === null)
+      continue;
+    const whole5 = renderPrompt(framing.file, texts2, { path: path2, text: text7 });
+    if (tokensOf(whole5) <= left) {
+      parts.push(whole5);
+      left -= tokensOf(whole5);
+      continue;
+    }
+    const headings = text7.split(`
+`).filter((line2) => HEADING.test(line2)).join(`
 `);
-  const kept2 = lines3.filter((line2) => line2.trim() === "" || keeps(line2));
-  return { text: kept2.join(`
-`), withheld: kept2.length < lines3.length };
+    const shown4 = renderPrompt(framing.headings, texts2, { path: path2, headings: headings === "" ? renderPrompt(framing.none, texts2, {}) : headings });
+    parts.push(shown4);
+    left = Math.max(0, left - tokensOf(shown4));
+  }
+  return parts.length === 0 ? "" : renderPrompt(framing.pins, texts2, { tokens: String(budget), unit: nounFor(budget, "token", "tokens"), files: parts.join(`
+
+`) });
+}
+function cutTo(text7, tokens2) {
+  if (tokensOf(text7) <= tokens2)
+    return text7;
+  let lo = 0;
+  let hi = text7.length;
+  while (lo < hi) {
+    const mid = Math.ceil((lo + hi) / 2);
+    if (tokensOf(`${text7.slice(0, mid)}\u2026`) <= tokens2)
+      lo = mid;
+    else
+      hi = mid - 1;
+  }
+  return `${text7.slice(0, lo)}\u2026`;
+}
+function digestOf2(d) {
+  const { texts: texts2 } = d;
+  const chain = d.core.chain(d.observed);
+  const lines3 = new Map;
+  for (const note of journalNotes(d.core, d.observed, d.observed.length, d.registry))
+    lines3.set(note.messageId, [...lines3.get(note.messageId) ?? [], note.text]);
+  const none = renderPrompt(MAIN_TEXT.none, texts2, {});
+  const entries3 = [];
+  let replies = 0;
+  chain.forEach((m, i) => {
+    if (m.isUser)
+      return;
+    replies++;
+    if (d.last !== null && i <= d.last)
+      return;
+    const before = chain[i - 1];
+    const said2 = before?.isUser ? (before.swipes[before.swipeId] ?? "").trim() : "";
+    entries3.push(renderPrompt(MAIN_TEXT.digestEntry, texts2, { n: String(replies), said: said2 || none, changed: (lines3.get(m.id) ?? []).join(" \xB7 ") || none, reply: (m.swipes[m.swipeId] ?? "").trim() || none }));
+  });
+  const last = d.last === null ? undefined : chain[d.last];
+  const landed = last ? lines3.get(last.id) ?? [] : [];
+  const head = landed.length > 0 ? renderPrompt(MAIN_TEXT.digestLanded, texts2, { changed: landed.join(" \xB7 ") }) : null;
+  const framing = d.fresh ? MAIN_TEXT.digestFresh : MAIN_TEXT.digest;
+  if (entries3.length === 0 && head === null)
+    return d.fresh ? "" : renderPrompt(MAIN_TEXT.digestNothing, texts2, {});
+  let left = d.tokens - tokensOf(renderPrompt(framing, texts2, { turns: "" })) - tokensOf(renderPrompt(MAIN_TEXT.digestLeftOut, texts2, { count: String(entries3.length), replies: nounFor(entries3.length, "reply", "replies") }));
+  const shownHead = head !== null && tokensOf(head) <= left ? head : null;
+  if (shownHead)
+    left -= tokensOf(shownHead);
+  const kept3 = [];
+  let next = entries3.length - 1;
+  while (next >= 0) {
+    const entry = entries3[next] ?? "";
+    if (tokensOf(entry) <= left) {
+      kept3.unshift(entry);
+      left -= tokensOf(entry);
+      next--;
+      continue;
+    }
+    if (kept3.length === 0 && left > 0) {
+      kept3.unshift(cutTo(entry, left));
+      next--;
+    }
+    break;
+  }
+  const leftOut = next + 1;
+  return renderPrompt(framing, texts2, { turns: [...leftOut > 0 ? [renderPrompt(MAIN_TEXT.digestLeftOut, texts2, { count: String(leftOut), replies: nounFor(leftOut, "reply", "replies") })] : [], ...shownHead ? [shownHead] : [], ...kept3].join(`
+
+`) });
+}
+function tidy2(text7) {
+  return text7.replace(/\n{3,}/g, `
+
+`).trim();
+}
+function turnTask(texts2, parts) {
+  return tidy2(renderPrompt(MAIN_TEXT.turn, texts2, parts));
+}
+
+// src/backend/agents/final-review.ts
+function partShown(texts2, part) {
+  const lines3 = part.lines.length === 0 ? renderPrompt(REVIEW_TEXT.empty, texts2, {}) : part.lines.map((text7, i) => renderPrompt(REVIEW_TEXT.line, texts2, { n: String(i + 1), text: text7 })).join(`
+`);
+  return renderPrompt(REVIEW_TEXT.part, texts2, { part: part.id, header: part.header ?? part.label, lines: lines3 });
+}
+function reviewMessage(texts2, draft, stage) {
+  return tidy2(renderPrompt(REVIEW_TEXT.stage, texts2, { stage: renderPrompt(stage, texts2, {}), parts: draft.parts.map((p) => partShown(texts2, p)).join(`
+
+`) }));
+}
+function lineArg(v4) {
+  const n = typeof v4 === "string" && v4.trim() !== "" ? Number(v4) : v4;
+  return typeof n === "number" && Number.isSafeInteger(n) ? n : 0;
+}
+function reviewTools(texts2, draft, done) {
+  const text7 = (id, vars = {}) => renderPrompt(id, texts2, vars);
+  const describe = (name, arg) => text7(REVIEW_TEXT.toolArg(name, arg));
+  const str19 = (args, key) => typeof args[key] === "string" ? args[key] : "";
+  const answer = (got, part, line2) => {
+    if (!("refused" in got))
+      return { text: text7(REVIEW_TEXT.edited, { part: partShown(texts2, got) }) };
+    if (got.refused === "part")
+      return { text: text7(REVIEW_TEXT.refusedPart, { part, parts: draft.parts.map((p) => p.id).join(", ") }), error: true };
+    if (got.refused === "line")
+      return { text: text7(REVIEW_TEXT.refusedLine, { part, line: String(line2 ?? ""), count: String(got.part.lines.length), lines: nounFor(got.part.lines.length, "line", "lines") }), error: true };
+    return { text: text7(REVIEW_TEXT.refusedText), error: true };
+  };
+  const edit = (run2) => Promise.resolve(done.committed ? { text: text7(MAIN_TEXT.refusedCommitted), error: true } : run2());
+  const partProp = (name) => ({ type: "string", description: describe(name, "part") });
+  const lineProp = (name) => ({ type: "integer", minimum: 1, description: describe(name, "line") });
+  const textProp = (name) => ({ type: "string", description: describe(name, "text") });
+  return [
+    {
+      name: REVIEW_TOOLS.replace,
+      description: text7(REVIEW_TEXT.tool(REVIEW_TOOLS.replace)),
+      parameters: { type: "object", properties: { part: partProp(REVIEW_TOOLS.replace), line: lineProp(REVIEW_TOOLS.replace), text: textProp(REVIEW_TOOLS.replace) }, required: ["part", "line", "text"] },
+      run: (args) => edit(() => answer(draft.replace(str19(args, "part"), lineArg(args.line), str19(args, "text")), str19(args, "part"), lineArg(args.line)))
+    },
+    {
+      name: REVIEW_TOOLS.append,
+      description: text7(REVIEW_TEXT.tool(REVIEW_TOOLS.append)),
+      parameters: { type: "object", properties: { part: partProp(REVIEW_TOOLS.append), text: textProp(REVIEW_TOOLS.append) }, required: ["part", "text"] },
+      run: (args) => edit(() => answer(draft.append(str19(args, "part"), str19(args, "text")), str19(args, "part")))
+    },
+    {
+      name: REVIEW_TOOLS.drop,
+      description: text7(REVIEW_TEXT.tool(REVIEW_TOOLS.drop)),
+      parameters: { type: "object", properties: { part: partProp(REVIEW_TOOLS.drop), line: lineProp(REVIEW_TOOLS.drop) }, required: ["part", "line"] },
+      run: (args) => edit(() => answer(draft.drop(str19(args, "part"), lineArg(args.line)), str19(args, "part"), lineArg(args.line)))
+    },
+    {
+      name: REVIEW_TOOLS.commit,
+      description: text7(REVIEW_TEXT.commit),
+      parameters: { type: "object", properties: {} },
+      run: () => edit(() => {
+        done.committed = true;
+        const n = draft.edits.length;
+        return { text: n === 0 ? text7(REVIEW_TEXT.committedNone) : text7(REVIEW_TEXT.committed, { count: String(n), edits: nounFor(n, "edit", "edits") }), end: true };
+      })
+    }
+  ];
+}
+function liveEdits(draft) {
+  return draft.edits.map((e) => ({ part: e.part, label: draft.part(e.part)?.label ?? e.part, op: e.op, ...e.op === "append" ? {} : { line: e.line }, ...e.op === "drop" ? {} : { text: e.text } }));
 }
 
 // src/backend/agents/runtime.ts
@@ -86054,9 +86920,9 @@ class Agent {
         outcome = { text: this.text(RUNTIME_TEXT.toolFailed, { name: call.name, error: error instanceof Error ? error.message : String(error) }), error: true };
       }
     }
-    const kept2 = call.name === SCRATCH_READ ? null : this.clip(outcome.text);
-    const text7 = kept2?.text ?? outcome.text;
-    this.record({ kind: "result", callId: call.id, name: call.name, text: text7, error: outcome.error === true, ...kept2 ? { scratch: kept2.handle } : {}, ms: this.now() - t0, at: this.now() });
+    const kept3 = call.name === SCRATCH_READ ? null : this.clip(outcome.text);
+    const text7 = kept3?.text ?? outcome.text;
+    this.record({ kind: "result", callId: call.id, name: call.name, text: text7, error: outcome.error === true, ...kept3 ? { scratch: kept3.handle } : {}, ms: this.now() - t0, at: this.now() });
     if (outcome.end && outcome.error !== true)
       this.ending = outcome.text;
     return { call, text: text7, error: outcome.error === true };
@@ -86147,6 +87013,12 @@ async function namedLore(view, tool, args) {
   const found = corpus.find((r) => r.lore.id === loreId);
   return found ? { ...found, id: (await shownIds(view))(found.lore.id) } : view.refuse(WRITE_NOTE.noLore, { id: ref });
 }
+async function loreText(view, ref) {
+  const corpus = await readableLore2(view);
+  const loreId = await loreIdOf(view, (id) => corpus.some((r) => r.entry.id === id), ref);
+  const found = corpus.find((r) => r.lore.id === loreId);
+  return found ? { id: (await shownIds(view))(found.lore.id), title: found.lore.title, text: found.lore.text } : null;
+}
 async function loreIndexText(view, opts = {}) {
   const own2 = await view.routing?.own();
   if (own2) {
@@ -86156,12 +87028,12 @@ async function loreIndexText(view, opts = {}) {
       return written;
     const lines3 = written.split(`
 `);
-    const cut = (kept3) => [...lines3.slice(0, kept3), view.text(LORE_INDEX_TEXT.cut, { count: String(lines3.length - kept3), what: nounFor(lines3.length - kept3, "line", "lines") })].join(`
+    const cut = (kept4) => [...lines3.slice(0, kept4), view.text(LORE_INDEX_TEXT.cut, { count: String(lines3.length - kept4), what: nounFor(lines3.length - kept4, "line", "lines") })].join(`
 `);
-    let kept2 = lines3.length - 1;
-    while (kept2 > 0 && tokensOf(cut(kept2)) > tokens2)
-      kept2--;
-    return cut(kept2);
+    let kept3 = lines3.length - 1;
+    while (kept3 > 0 && tokensOf(cut(kept3)) > tokens2)
+      kept3--;
+    return cut(kept3);
   }
   const index = await view.loreIndex();
   const corpus = new Map((await readableLore2(view)).map((r) => [r.entry.id, r]));
@@ -86178,7 +87050,7 @@ async function loreIndexText(view, opts = {}) {
       const r = corpus.get(e.lore);
       if (!r)
         return [];
-      const secrecy = view.knowledge === "everyone" ? view.loreSecrecy(r.entry) : null;
+      const secrecy = view.marked ? view.loreSecrecy(r.entry) : null;
       return [{ id: e.id, title: view.mark(e.title, secrecy), holds: e.holds === null ? null : view.mark(e.holds, secrecy) }];
     })
   }));
@@ -86214,7 +87086,7 @@ var LORE_TOOLS2 = [
       const { hits } = view.read(() => loreSearch({ reg: view.registry, world, state: view.state, tokens: () => 0 }, { query, purpose: "gm", tokenBudget: 0 }));
       const results = hits.flatMap((hit) => {
         const r = byId.get(hit.id);
-        return r ? [{ id: named(hit.id), title: r.lore.title, why: hit.why, ...view.knowledge !== "pov" && view.loreSecrecy(r.entry) !== null ? { secret: true } : {} }] : [];
+        return r ? [{ id: named(hit.id), title: r.lore.title, why: hit.why, ...view.loreSecrecy(r.entry) !== null ? { secret: true } : {} }] : [];
       });
       return view.answer({ results });
     }
@@ -86233,7 +87105,7 @@ var LORE_TOOLS2 = [
       const named = await shownIds(view);
       const matches2 = [];
       for (const { entry, lore: lore3 } of await readableLore2(view)) {
-        const secret = view.knowledge !== "pov" && view.loreSecrecy(entry) !== null ? { secret: true } : {};
+        const secret = view.loreSecrecy(entry) !== null ? { secret: true } : {};
         lore3.text.split(`
 `).forEach((line2, i) => {
           if (line2.toLowerCase().includes(lower))
@@ -86312,6 +87184,53 @@ ${draft}` });
   }
 ];
 
+// src/backend/agents/tools/condense.ts
+var CONDENSE = "condense";
+var NOTES = "notes/condensed/";
+var NOT_IN_NAME3 = /[^\p{L}\p{N}._-]+/gu;
+async function sourceOf2(view, ref) {
+  const file = (await view.workspace()).find((f) => f.path === ref);
+  if (file) {
+    const body = await view.blob(file.hash);
+    return body === null ? null : { name: ref, text: body };
+  }
+  const lore3 = await loreText(view, ref);
+  return lore3 ? { name: lore3.id, text: `${lore3.title}
+${lore3.text}` } : null;
+}
+async function condenseSource(view, input) {
+  const source = await sourceOf2(view, input.ref);
+  if (!source)
+    return view.refuse(WRITE_NOTE.noSource, { source: input.ref });
+  const done = await input.summarize(view.text(RUNTIME_TEXT.condenseAsk, { source: source.name, focus: input.focus }), source.text, input.signal);
+  if ("failed" in done)
+    return view.refuse(WRITE_NOTE.condenseFailed, { source: source.name, reason: done.failed });
+  const path2 = input.note ?? `${NOTES}${source.name.replace(NOT_IN_NAME3, "-").replace(/^-+|-+$/g, "") || "source"}.md`;
+  return { path: path2, text: view.text(RUNTIME_TEXT.condenseNote, { source: source.name, hash: blobHash(source.text).slice(0, 12), text: done.text }), chars: source.text.length };
+}
+var CONDENSE_TOOLS = [
+  {
+    name: CONDENSE,
+    family: "workspace",
+    tier: "gm",
+    summarizes: true,
+    parameters: () => objectSchema({ source: text6(), note: text6(), focus: text6() }, ["source"]),
+    async run(args, env) {
+      const view = await env.reader.view();
+      const ref = needText(view, CONDENSE, args, "source");
+      if (typeof ref !== "string")
+        return ref;
+      if (!env.summarize)
+        return view.refuse(WRITE_NOTE.noWriter);
+      const made = await condenseSource(view, { ref, note: textArg(args, "note"), focus: textArg(args, "focus") ?? "", summarize: env.summarize, signal: env.signal });
+      if (!("path" in made))
+        return made;
+      const out = await propose(view, env.writer, { kind: "ws_write", path: made.path, text: made.text });
+      return out.error ? out : view.answer({ note: made.path, chars: { source: made.chars, note: made.text.length }, ...JSON.parse(out.text) });
+    }
+  }
+];
+
 // src/backend/agents/tools/resolve.ts
 var spaced = (s) => s.trim().replace(/\s+/g, " ").toLowerCase();
 var wordsOf6 = (s) => spaced(s).replace(/['\u2019]s\b/g, "").split(/[^\p{L}\p{N}]+/u).filter((w) => w !== "");
@@ -86380,10 +87299,8 @@ function resolveTrack(view, said2) {
   const candidates = [];
   for (const [id, t] of Object.entries(view.world.tracks)) {
     const ref = view.track(id);
-    if (!ref)
-      continue;
-    const shown4 = view.knowledge === "pov";
-    candidates.push({ id, ids: shown4 ? [ref.id] : [id], names: [shown4 ? ref.name : t.label], shown: `${ref.name} (${ref.id})` });
+    if (ref)
+      candidates.push({ id, ids: [id], names: [t.label], shown: `${ref.name} (${ref.id})` });
   }
   return resolveAmong(view, said2, candidates, TOOL_NOTE.noTrack);
 }
@@ -86397,10 +87314,7 @@ function namable(view) {
   const all2 = new Map(view.registry.actions);
   for (const [id, a] of Object.entries(view.world.actions))
     all2.set(id, a);
-  if (view.knowledge !== "pov")
-    return [...all2.values()];
-  const env = scopeEnv({ reg: view.registry, ctx: view.ctx, bindings: { self: view.pov, actor: view.pov } });
-  return [...all2.values()].filter((a) => offersAction(view.world, a) && !storyLocked(env, a));
+  return [...all2.values()];
 }
 function paramValue(view, def2, given) {
   const said2 = typeof given === "string" ? given.trim() : "";
@@ -86439,26 +87353,24 @@ function paramValue(view, def2, given) {
 function oddsAnswer(view, action, actor2, params) {
   const a = actionOdds(view.registry, view.world, view.state, { action, actor: actor2, params });
   const shown4 = checkView(a, policyOf(view.world, view.state).retry);
-  const pov = view.knowledge === "pov";
   const c = a.check;
-  const numbers3 = c && (!pov || c.opponent === null) ? c : null;
-  const exact = pov ? (shown4.odds ?? []).map((o) => [o.outcome, o.p]) : Object.entries(a.odds ?? {});
-  const v3 = pov ? null : a.verdict;
+  const exact = Object.entries(a.odds ?? {});
+  const v4 = a.verdict;
   return {
     action: { id: action.id, label: action.label },
     actor: view.entity(actor2),
     available: a.available,
-    why: a.failed ? pov ? playerReason(a.failed) : a.failed.reason : undefined,
-    hard: !pov && a.failed?.hard === true ? true : undefined,
+    why: a.failed ? a.failed.reason : undefined,
+    hard: a.failed?.hard === true ? true : undefined,
     minutes: a.duration,
     odds: exact.length > 0 ? Object.fromEntries(exact.map(([outcome, p]) => [outcome, percent(p)])) : undefined,
     detail: shown4.detail,
-    dice: numbers3?.notation,
-    modifier: numbers3 ? a.modifier : undefined,
-    dc: numbers3?.dc ?? undefined,
+    dice: c?.notation,
+    modifier: c ? a.modifier : undefined,
+    dc: c?.dc ?? undefined,
     advantage: c && c.advantage !== 0 ? c.advantage > 0 ? "advantage" : "disadvantage" : undefined,
     opponent: c?.opponent ? view.entity(c.opponent) ?? undefined : undefined,
-    verdict: v3 ? { roll: v3.roll, why: v3.why, outcome: v3.outcome, chance: v3.chance === null ? null : percent(v3.chance), pass: v3.pass } : undefined
+    verdict: v4 ? { roll: v4.roll, why: v4.why, outcome: v4.outcome, chance: v4.chance === null ? null : percent(v4.chance), pass: v4.pass } : undefined
   };
 }
 var CHECKS_TOOLS = [
@@ -86476,8 +87388,6 @@ var CHECKS_TOOLS = [
       const r = named === null ? { id: view.pov } : resolvePerson(view, named);
       if ("refused" in r)
         return r.refused;
-      if (view.knowledge === "pov" && r.id !== view.pov)
-        return view.refuse(TOOL_NOTE.hidden, { pov: view.name(view.pov) });
       const actions = view.read(() => namable(view));
       const action = actions.find((a) => a.id === said2);
       if (!action)
@@ -86487,10 +87397,10 @@ var CHECKS_TOOLS = [
       if (argGiven(args, "params") && given === null)
         return missing(view, ODDS, "params");
       for (const [name, value] of Object.entries(given ?? {})) {
-        const v3 = paramValue(view, own(action.params, name), value);
-        if ("refused" in v3)
-          return v3.refused;
-        params[name] = v3.value;
+        const v4 = paramValue(view, own(action.params, name), value);
+        if ("refused" in v4)
+          return v4.refused;
+        params[name] = v4.value;
       }
       return view.answer(view.read(() => oddsAnswer(view, action, r.id, params)));
     }
@@ -86511,28 +87421,15 @@ function pathOf(view, place2) {
   }
   return out;
 }
-function beyondPov(view) {
-  return view.refuse(TOOL_NOTE.hidden, { pov: view.name(view.pov) });
-}
 function byName(view) {
   return (a, b) => view.name(a).localeCompare(view.name(b)) || a.localeCompare(b);
 }
-function locate(view, id) {
-  const at2 = placeOfEntity(view.state, id);
-  if (view.knowledge !== "pov")
-    return { here: false, now: at2, seen: null };
-  if (id === view.pov || at2 !== null && at2 === placeOfEntity(view.state, view.pov))
-    return { here: true, now: at2, seen: null };
-  return { here: false, now: null, seen: view.ctx.levelOf(view.pov, "castlife") >= 2 ? lastSighting(view.state, id) : null };
-}
 function lifeWords(view, id) {
-  if (view.knowledge === "pov")
-    return povLife(view.world, view.state, id)?.label;
   const truth = lifeOf(view.state, id);
   if (truth === ALIVE)
     return;
   const label2 = lifeStateOf(view.world, truth).label;
-  if (view.knowledge === "gm" || lifeKnownTo(view.state, id, view.pov) === truth)
+  if (!view.marked || lifeKnownTo(view.state, id, view.pov) === truth)
     return label2;
   const known = Object.keys(view.state.entities).filter((who) => who !== id && view.isPerson(who) && !isGone(view.state, who) && lifeKnownTo(view.state, id, who) === truth).map((who) => view.name(who));
   return view.mark(label2, { known, kept: "everyone" });
@@ -86541,33 +87438,13 @@ function doingNow(view, id) {
   const activity = own(view.state.entities, id)?.fields.activity;
   if (typeof activity !== "string" || activity === "")
     return;
-  const kept2 = id !== view.pov && shownActivity(view.ctx, id, activity) !== activity ? { known: [view.name(id)], kept: "everyone" } : view.fieldSecrecy(id, "activity");
-  return view.mark(activity, kept2);
+  const kept3 = id !== view.pov && shownActivity(view.ctx, id, activity) !== activity ? { known: [view.name(id)], kept: "everyone" } : view.fieldSecrecy(id, "activity");
+  return view.mark(activity, kept3);
 }
 function whereabouts(view, id) {
-  const locus = locate(view, id);
-  const life = lifeWords(view, id);
-  const now = locus.now;
-  if (view.knowledge !== "pov") {
-    const place2 = now !== null ? view.place(now) : null;
-    return { ...now !== null && place2 ? { place: place2, path: pathOf(view, now) } : {}, doing: doingNow(view, id), life };
-  }
-  if (!locus.here) {
-    const seen = locus.seen;
-    const at2 = seen ? formatClock(calendarOf(view.world), seen.at, placeOffset(view.world, seen.at, view.seesPlace(seen.place) ? seen.place : null)) : null;
-    return { here: false, ...seen && at2 !== null ? { lastSeen: { place: placeShown(view, seen.place), at: at2 } } : {}, life };
-  }
-  const activity = own(view.state.entities, id)?.fields.activity;
-  const said2 = typeof activity === "string" && activity !== "" ? activity : null;
-  if (id === view.pov)
-    return { here: true, ...now !== null ? { place: placeShown(view, now) } : {}, ...said2 !== null ? { doing: said2 } : {}, life };
-  const acts3 = povLife(view.world, view.state, id)?.acts !== false;
-  return {
-    here: true,
-    ...now !== null && view.seesField(id, "place") ? { place: placeShown(view, now) } : {},
-    ...said2 !== null && acts3 && view.seesField(id, "activity") ? { doing: shownActivity(view.ctx, id, said2).replace(/_/g, " ") } : {},
-    life
-  };
+  const now = placeOfEntity(view.state, id);
+  const place2 = now !== null ? view.place(now) : null;
+  return { ...now !== null && place2 ? { place: place2, path: pathOf(view, now) } : {}, doing: doingNow(view, id), life: lifeWords(view, id) };
 }
 async function loreAbout2(view, subjects, secrecy) {
   const world = await view.lore();
@@ -86584,20 +87461,19 @@ async function loreAbout2(view, subjects, secrecy) {
     const shown4 = view.loreEntry(entry);
     if (!shown4)
       return [];
-    const kept2 = view.knowledge === "everyone" && view.loreSecrecy(entry) === null ? secrecy(subject) : null;
-    return [kept2 ? { ...shown4, text: view.mark(shown4.text, kept2) } : shown4];
+    const kept3 = view.marked && view.loreSecrecy(entry) === null ? secrecy(subject) : null;
+    return [kept3 ? { ...shown4, text: view.mark(shown4.text, kept3) } : shown4];
   }));
 }
-var DOINGS = { activity: true, scene: true, appointments: true, trips: true, chores: true };
 function fieldValue2(view, id, f) {
-  const kept2 = view.knowledge === "everyone" ? view.fieldSecrecy(id, f.id) : null;
+  const kept3 = view.marked ? view.fieldSecrecy(id, f.id) : null;
   const value = f.value;
   if (f.type === "ref" && typeof value === "string") {
     const ref = hasOwn(view.state.entities, value) ? view.entity(value) : view.place(value);
     if (ref)
-      return kept2 ? { ...ref, name: view.mark(view.name(value), kept2) } : ref;
+      return kept3 ? { ...ref, name: view.mark(view.name(value), kept3) } : ref;
   }
-  return kept2 ? view.mark(typeof value === "string" ? value : JSON.stringify(value), kept2) : value;
+  return kept3 ? view.mark(typeof value === "string" ? value : JSON.stringify(value), kept3) : value;
 }
 function sheetRelations(view, id, relations) {
   const out = [];
@@ -86605,18 +87481,7 @@ function sheetRelations(view, id, relations) {
     const to = hasOwn(view.state.entities, r.to.id) ? view.entity(r.to.id) : view.place(r.to.id);
     if (!to)
       continue;
-    let words7 = r.words;
-    if (view.knowledge === "pov") {
-      if (r.type === "knows" && id !== view.pov)
-        continue;
-      if (r.type === "regard") {
-        if (id !== view.pov && r.to.id !== view.pov)
-          continue;
-        words7 = regardWords(view.ctx, id, r.to.id) ?? "";
-        if (words7 === "")
-          continue;
-      }
-    }
+    const words7 = r.words;
     out.push({ type: r.type, to, ...words7 !== "" ? { words: words7 } : {} });
   }
   return out;
@@ -86625,11 +87490,6 @@ function sheetOf(view, person5, sheet, lore3) {
   const id = person5.id;
   const head = { person: person5, kind: sheet.kind, tier: sheet.tier, ...whereabouts(view, id) };
   const relations = sheetRelations(view, id, sheet.relations);
-  if (view.knowledge === "pov") {
-    const description = thingDescription(view.ctx, id);
-    const details = thingDetails(view.ctx, id, (field2, def2) => def2.locked === true || hasOwn(DOINGS, field2));
-    return { ...head, details, ...description !== null ? { description } : {}, relations, lore: lore3 };
-  }
   const fields = sheet.sections.flatMap((s) => s.fields).flatMap((f) => f.value === null || f.locked === true || f.id === "place" || f.id === "activity" ? [] : [{ id: f.id, label: f.label, value: fieldValue2(view, id, f) }]);
   const inside = sheet.inside ? view.entity(sheet.inside.id) : null;
   const now = sheet.now;
@@ -86649,20 +87509,13 @@ function axesNow(view, from, to) {
   });
 }
 function regardOf(view, from, toward) {
-  const targets = (own(view.state.entities, from)?.relations ?? []).filter((r) => r.type === "regard" && (toward === null || r.to === toward) && (view.knowledge !== "pov" || from === view.pov || r.to === view.pov)).map((r) => r.to);
+  const targets = (own(view.state.entities, from)?.relations ?? []).filter((r) => r.type === "regard" && (toward === null || r.to === toward)).map((r) => r.to);
   const out = [];
   for (const to of [...new Set(targets)].sort(byName(view))) {
     const ref = view.entity(to);
     if (!ref)
       continue;
-    const words7 = regardWords(view.ctx, from, to) ?? undefined;
-    if (view.knowledge !== "pov")
-      out.push({ toward: ref, words: words7, axes: axesNow(view, from, to) });
-    else {
-      const axes = regardView(view.ctx, from, to);
-      if (axes.length > 0)
-        out.push({ toward: ref, words: words7, axes });
-    }
+    out.push({ toward: ref, words: regardWords(view.ctx, from, to) ?? undefined, axes: axesNow(view, from, to) });
   }
   return out;
 }
@@ -86683,7 +87536,7 @@ var PEOPLE_TOOLS = [
       const placeSaid2 = textArg(args, "place");
       return view.read(() => {
         if (kind !== null) {
-          const kinds = kindEnum(schemaWorld(view.world, view.registry, view.knowledge), "person");
+          const kinds = kindEnum(schemaWorld(view.world, view.registry), "person");
           if (!kinds.includes(kind))
             return badValue(view, FIND, "kind", kind, kinds);
         }
@@ -86702,11 +87555,10 @@ var PEOPLE_TOOLS = [
           const ref = view.entity(id);
           if (!ref)
             continue;
-          const locus = locate(view, id);
-          if (within5 !== null && !placeWithin(view.world, locus.now ?? locus.seen?.place ?? null, within5))
+          const at2 = placeOfEntity(view.state, id);
+          if (within5 !== null && !placeWithin(view.world, at2, within5))
             continue;
-          const { place: place2, lastSeen } = whereabouts(view, id);
-          people.push({ ...ref, kind: e.kind, place: place2, lastSeen });
+          people.push({ ...ref, kind: e.kind, place: whereabouts(view, id).place });
         }
         const answer = { people };
         return view.answer(answer);
@@ -86754,7 +87606,7 @@ var PEOPLE_TOOLS = [
         if (!person5)
           return view.refuse(TOOL_NOTE.noPerson, { name: said2 });
         const answer = { person: person5, ...whereabouts(view, r.id) };
-        if (view.knowledge !== "pov" && r.id !== view.pov)
+        if (r.id !== view.pov)
           answer.together = together(view.world, placeOfEntity(view.state, view.pov), placeOfEntity(view.state, r.id));
         return view.answer(answer);
       });
@@ -86785,8 +87637,6 @@ var PEOPLE_TOOLS = [
             return r.refused;
           toward = r.id;
         }
-        if (view.knowledge === "pov" && who.id !== view.pov && toward !== null && toward !== view.pov)
-          return beyondPov(view);
         const answer = { person: person5, regard: regardOf(view, who.id, toward) };
         return view.answer(answer);
       });
@@ -86802,17 +87652,13 @@ function clockWords(view, at2) {
 }
 function clockAnswer(view, place2) {
   const { world, state: state2 } = view;
-  const level2 = view.knowledge === "pov" ? view.ctx.levelOf(view.pov, "calendar") : null;
-  const shows = (from) => level2 === null || level2 >= from;
-  if (!shows(1))
-    return null;
   const cal = calendarOf(world);
-  const offset = shows(3) ? placeOffset(world, state2.clock, place2) : 0;
+  const offset = placeOffset(world, state2.clock, place2);
   return {
-    time: shows(2) ? formatClock(cal, state2.clock, offset) : undefined,
-    minutes: shows(2) ? state2.clock : undefined,
+    time: formatClock(cal, state2.clock, offset),
+    minutes: state2.clock,
     dayPart: dayPartAt(cal, state2.clock + offset).label,
-    holidays: shows(4) ? holidaysOn(cal, dateAt(cal, state2.clock + offset).dayIndex).map((h) => h.label) : undefined,
+    holidays: holidaysOn(cal, dateAt(cal, state2.clock + offset).dayIndex).map((h) => h.label),
     paused: clockPaused(world, state2)
   };
 }
@@ -86829,21 +87675,19 @@ function dayAnswer(view, who, offset) {
   const person5 = view.entity(who);
   if (!person5)
     return null;
-  if (view.knowledge === "pov") {
-    const shown4 = offset === 0 ? routinePlayerView(view.ctx, who) : null;
-    return shown4?.day ? { person: person5, day: shown4.day.label, blocks: shown4.day.blocks } : null;
-  }
   const cal = calendarOf(view.world);
   const day2 = dateAt(cal, view.state.clock).dayIndex + offset;
   const date = formatClock(cal, clockAt(cal, day2, 0)).split(",")[0] ?? "";
   if (view.knowledge === "gm") {
-    const blocks2 = routineGmView(view.ctx, who, day2).day.blocks.map((b) => ({ from: b.from, to: b.to, label: b.label, activity: b.activity, place: b.place === null ? null : view.place(b.place), kind: b.kind, reasons: b.reasons, origin: b.origin }));
+    const secrecy2 = view.marked ? blockSecrecy(view, who, day2) : null;
+    const keptOf = (o) => secrecy2 === null ? null : o.type === "agenda" ? secrecy2(`${AGENDA_OPTION}${o.track}`) : o.type === "routine" ? secrecy2(`${ROUTINE_OPTION}${o.block}`) : null;
+    const blocks2 = routineGmView(view.ctx, who, day2).day.blocks.map((b) => ({ from: b.from, to: b.to, label: view.mark(b.label, keptOf(b.origin)), activity: view.mark(b.activity, keptOf(b.origin)), place: b.place === null ? null : view.place(b.place), kind: b.kind, reasons: b.reasons, origin: b.origin }));
     return { person: person5, day: date, blocks: blocks2 };
   }
   const secrecy = blockSecrecy(view, who, day2);
   const blocks = dayPlan(view.ctx, who, day2).blocks.map((b) => {
-    const kept2 = secrecy(b.option);
-    return { from: formatTimeOfDay(dateAt(cal, b.start).minuteOfDay), to: formatTimeOfDay(dateAt(cal, b.end).minuteOfDay), label: view.mark(b.label, kept2), activity: view.mark(b.activity, kept2), place: b.place === null ? null : view.place(b.place) };
+    const kept3 = secrecy(b.option);
+    return { from: formatTimeOfDay(dateAt(cal, b.start).minuteOfDay), to: formatTimeOfDay(dateAt(cal, b.end).minuteOfDay), label: view.mark(b.label, kept3), activity: view.mark(b.activity, kept3), place: b.place === null ? null : view.place(b.place) };
   });
   return { person: person5, day: date, blocks };
 }
@@ -86860,8 +87704,7 @@ var TIME_TOOLS = [
         const r = said2 === null ? { id: placeOfEntity(view.state, view.pov) } : resolvePlace(view, said2);
         if ("refused" in r)
           return r.refused;
-        const answer = clockAnswer(view, r.id);
-        return answer ? view.answer(answer) : view.refuse(TOOL_NOTE.hidden, { pov: view.name(view.pov) });
+        return view.answer(clockAnswer(view, r.id));
       });
     }
   },
@@ -86883,7 +87726,7 @@ var TIME_TOOLS = [
       if (offset === null)
         return badValue(view, DAY3, "day", typeof given === "string" ? given : JSON.stringify(given), [view.text(toolArgTextId(DAY3, "day"))]);
       const answer = view.read(() => dayAnswer(view, r.id, offset));
-      return answer ? view.answer(answer) : view.refuse(TOOL_NOTE.hidden, { pov: view.name(view.pov) });
+      return answer ? view.answer(answer) : view.refuse(TOOL_NOTE.noPerson, { name: said2 });
     }
   }
 ];
@@ -86897,10 +87740,6 @@ var CONDITION_DOMAINS = { gear: true, vehicles: true };
 function isThing(view, id) {
   const e = own(view.state.entities, id);
   return e !== undefined && e.kind !== "account" && !view.isPerson(id);
-}
-function withPov2(view, id) {
-  const at2 = placeOfEntity(view.state, id);
-  return at2 !== null && at2 === placeOfEntity(view.state, view.pov);
 }
 function holdersOf3(view, id) {
   const out = [];
@@ -86920,10 +87759,7 @@ function heldIn(view, id) {
 }
 function whereIs(view, id) {
   const at2 = placeOfEntity(view.state, id);
-  if (at2 === null)
-    return null;
-  const unknown = view.knowledge === "pov" && holdersOf3(view, id).some((h) => h !== view.pov && (!view.seesEntity(h) || view.isPerson(h) && !withPov2(view, h)));
-  return unknown ? { name: view.hiddenPlace } : placeShown(view, at2);
+  return at2 === null ? null : placeShown(view, at2);
 }
 function wornOn(view, id, who) {
   const e = own(view.state.entities, id);
@@ -86943,8 +87779,6 @@ function fieldRead(view, id, field2, def2) {
   const value = e ? own(e.fields, field2) : undefined;
   if (value === undefined || value === null || def2.derived !== undefined)
     return null;
-  if (view.knowledge === "pov" && (!view.seesField(id, field2) || def2.domain !== undefined && view.ctx.levelOf(view.pov, def2.domain) < (def2.level ?? 1)))
-    return null;
   const shown4 = def2.type === "ref" && typeof value === "string" ? refValue(view, value) : value;
   if (shown4 === null)
     return null;
@@ -86959,36 +87793,23 @@ function listed3(l, id, seen) {
     return null;
   seen.add(id);
   const qty = numOf(e.fields.qty, 1);
-  const def2 = l.condition ? fieldDef(view.registry, view.world, e.kind, "condition") : undefined;
-  const kit = l.kit ? kitStatus(view.ctx, id) : null;
-  const contents = l.contents ? contentsOf(view.state, id).flatMap((c) => listed3(l, c, seen) ?? []) : [];
+  const def2 = fieldDef(view.registry, view.world, e.kind, "condition");
+  const kit = kitStatus(view.ctx, id);
+  const contents = contentsOf(view.state, id).flatMap((c) => listed3(l, c, seen) ?? []);
   return {
     ...ref,
-    qty: l.qty && qty !== 1 ? qty : undefined,
+    qty: qty !== 1 ? qty : undefined,
     condition: def2 ? fieldRead(view, id, "condition", def2) ?? undefined : undefined,
-    kit: kit ? { complete: kit.complete, present: kit.present, total: kit.total, missing: l.missing ? kit.missing : undefined } : undefined,
+    kit: kit ? { complete: kit.complete, present: kit.present, total: kit.total, missing: kit.missing } : undefined,
     lost: e.fields.lost === true ? true : undefined,
     contents: contents.length > 0 ? contents : undefined
   };
 }
-function seenOn(view, person5) {
-  if (view.ctx.levelOf(view.pov, "gear") === 0)
-    return { person: person5, worn: [], carried: [] };
-  const l = { view, ref: (id) => isThing(view, id) ? view.entity(id) : null, qty: true, condition: false, kit: Math.max(1, view.ctx.levelOf(person5.id, "gear")) >= 3, missing: false, contents: false };
-  const seen = new Set;
-  const worn = wornBy(view.ctx, person5.id);
-  const held3 = contentsOf(view.state, person5.id).filter((id) => own(view.state.entities, id)?.fields.slot !== "pocket" && !worn.includes(id));
-  return { person: person5, worn: worn.flatMap((id) => listed3(l, id, seen) ?? []), carried: held3.flatMap((id) => listed3(l, id, seen) ?? []) };
-}
 function inventory(view, person5) {
   const who = person5.id;
-  const level2 = view.ctx.levelOf(view.pov, "gear");
-  const pov = view.knowledge === "pov";
-  const ref = (id) => isThing(view, id) && (!pov || level2 >= 2 || own(view.state.entities, id)?.fields.notable === true) ? view.entity(id) : null;
-  const detail = !pov || level2 >= 3;
-  const l = { view, ref, qty: !pov || level2 >= 2, condition: detail, kit: detail, missing: detail, contents: true };
+  const l = { view, ref: (id) => isThing(view, id) ? view.entity(id) : null };
   const seen = new Set;
-  const wornIds = detail ? wornBy(view.ctx, who) : [];
+  const wornIds = wornBy(view.ctx, who);
   const worn = wornIds.flatMap((id) => {
     const node = listed3(l, id, seen);
     return node ? [{ ...node, slot: wornOn(view, id, who)?.slot }] : [];
@@ -86998,7 +87819,7 @@ function inventory(view, person5) {
   const elsewhere = [];
   for (const id of owned2) {
     const holder = holderOf(view.state, id);
-    if (holder !== null && owned2.includes(holder) && ref(holder) !== null)
+    if (holder !== null && owned2.includes(holder) && l.ref(holder) !== null)
       continue;
     const node = listed3(l, id, seen);
     if (!node)
@@ -87012,11 +87833,11 @@ function inventory(view, person5) {
   }
   const loans = grants(view.state);
   const lent = loans.filter((g) => g.owner === who).flatMap((g) => {
-    const thing2 = ref(g.thing);
+    const thing2 = l.ref(g.thing);
     return thing2 ? [{ thing: thing2, to: view.entity(g.borrower), until: g.until === null ? undefined : clockWords(view, g.until), overdue: g.overdue }] : [];
   });
   const borrowed = loans.filter((g) => g.borrower === who).flatMap((g) => {
-    const thing2 = ref(g.thing);
+    const thing2 = l.ref(g.thing);
     return thing2 ? [{ thing: thing2, from: g.owner === null ? null : view.entity(g.owner), until: g.until === null ? undefined : clockWords(view, g.until), overdue: g.overdue }] : [];
   });
   return { person: person5, worn, carried, elsewhere, lent, borrowed };
@@ -87049,7 +87870,7 @@ function holderRead(view, thing2) {
 function conditionRead(view, thing2) {
   const e = own(view.state.entities, thing2.id);
   const fields = e ? Object.entries(kindFields(view.registry, view.world, e.kind)).flatMap(([field2, def2]) => hasOwn(CONDITION_FIELDS, field2) || def2.domain !== undefined && hasOwn(CONDITION_DOMAINS, def2.domain) ? fieldRead(view, thing2.id, field2, def2) ?? [] : []) : [];
-  const kit = view.knowledge !== "pov" || view.ctx.levelOf(view.pov, "gear") >= 3 ? kitStatus(view.ctx, thing2.id) : null;
+  const kit = kitStatus(view.ctx, thing2.id);
   return { thing: thing2, fields, kit: kit ? { complete: kit.complete, present: kit.present, total: kit.total, missing: kit.missing } : undefined };
 }
 var ITEMS_TOOLS = [
@@ -87070,9 +87891,7 @@ var ITEMS_TOOLS = [
         const person5 = view.entity(r.id);
         if (!person5)
           return view.refuse(TOOL_NOTE.noPerson, { name: said2 });
-        if (view.knowledge !== "pov" || r.id === view.pov)
-          return view.answer(inventory(view, person5));
-        return withPov2(view, r.id) ? view.answer(seenOn(view, person5)) : beyondPov(view);
+        return view.answer(inventory(view, person5));
       });
     }
   },
@@ -87146,7 +87965,7 @@ function namedBy2(view, about2) {
       ids2.add(got.id);
   }
   const entry = own(view.world.lore, about2);
-  if (entry && (view.knowledge !== "pov" || view.povReadsLore(entry)))
+  if (entry)
     ids2.add(about2);
   return ids2;
 }
@@ -87167,23 +87986,21 @@ function matching(view, about2, facts) {
 }
 function factSecrecy(view, holders) {
   const sure = holders.filter(({ holding }) => !holding.suspicion);
-  const kept2 = sure.map(({ holding }) => holding.keptFromNames).filter((names3) => names3 === "everyone" || names3.length > 0);
-  if (kept2.length === 0)
+  const kept3 = sure.map(({ holding }) => holding.keptFromNames).filter((names3) => names3 === "everyone" || names3.length > 0);
+  if (kept3.length === 0)
     return null;
   return {
     known: sure.map(({ who }) => view.name(who.id)),
-    kept: kept2.includes("everyone") ? "everyone" : [...new Set(kept2.flatMap((names3) => names3 === "everyone" ? [] : names3))]
+    kept: kept3.includes("everyone") ? "everyone" : [...new Set(kept3.flatMap((names3) => names3 === "everyone" ? [] : names3))]
   };
 }
 function factPart(view, fact, secrecy) {
-  if (view.knowledge === "pov")
-    return { claim: fact.claim };
   if (view.knowledge === "everyone")
     return { fact: fact.id, claim: view.mark(fact.claim, secrecy()) };
-  return { fact: fact.id, claim: fact.claim, kind: fact.kind, truth: fact.truth, about: fact.about.map((id) => view.entity(id) ?? view.place(id) ?? view.track(id) ?? { id, name: view.name(id) }) };
+  return { fact: fact.id, claim: view.marked ? view.mark(fact.claim, secrecy()) : fact.claim, kind: fact.kind, truth: fact.truth, about: fact.about.map((id) => view.entity(id) ?? view.place(id) ?? view.track(id) ?? { id, name: view.name(id) }) };
 }
 function holdingPart(view, h) {
-  const kept2 = h.keptFrom === "everyone" ? "everyone" : (h.keptFrom ?? []).flatMap((id) => view.entity(id)?.name ?? []);
+  const kept3 = h.keptFrom === "everyone" ? "everyone" : (h.keptFrom ?? []).flatMap((id) => view.entity(id)?.name ?? []);
   return {
     how: h.how,
     by: h.by === null ? null : view.entity(h.by),
@@ -87191,7 +88008,7 @@ function holdingPart(view, h) {
     belief: h.belief,
     confidence: h.confidence,
     suspicion: h.suspicion,
-    keptFrom: kept2 === "everyone" || kept2.length > 0 ? kept2 : undefined,
+    keptFrom: kept3 === "everyone" || kept3.length > 0 ? kept3 : undefined,
     evidence: view.knowledge === "gm" && h.evidenceShown.length > 0 ? h.evidenceShown.map((e) => e.text) : undefined
   };
 }
@@ -87208,7 +88025,7 @@ var KNOWLEDGE_TOOLS = [
         return about2;
       return view.read(() => {
         const k = knowing2(view);
-        const facts = view.knowledge === "pov" ? k.heldBy(view.pov).map((held3) => ({ ...heldFact(k, held3.holding), holders: [held3] })) : Object.values(k.facts).map((f) => ({ id: f.id, claim: f.claim, kind: f.kind, truth: f.truth, about: f.about, holders: k.holders(f.id) }));
+        const facts = Object.values(k.facts).map((f) => ({ id: f.id, claim: f.claim, kind: f.kind, truth: f.truth, about: f.about, holders: k.holders(f.id) }));
         facts.sort((a, b) => a.claim.localeCompare(b.claim) || (a.id < b.id ? -1 : 1));
         return view.answer({
           facts: matching(view, about2, facts).map((f) => ({ ...factPart(view, f, () => factSecrecy(view, f.holders)), holders: f.holders.map(({ who, holding }) => ({ who, ...holdingPart(view, holding) })) }))
@@ -87231,8 +88048,6 @@ var KNOWLEDGE_TOOLS = [
         const person5 = resolvePerson(view, said2);
         if ("refused" in person5)
           return person5.refused;
-        if (view.knowledge === "pov" && person5.id !== view.pov)
-          return view.refuse(TOOL_NOTE.hidden, { pov: view.name(view.pov) });
         const who = view.entity(person5.id);
         if (!who)
           return view.refuse(TOOL_NOTE.noPerson, { name: said2 });
@@ -87250,26 +88065,32 @@ var KNOWLEDGE_TOOLS = [
 // src/backend/agents/tools/read/minds.ts
 function narratorLine(view, id) {
   const line2 = mindLines(view.ctx).find((l) => l.entity === id);
-  if (!line2)
-    return null;
-  const carries = findLeaks(line2.line, unrevealedSecrets(view.registry, view.world, view.state)).length > 0 || hiddenNameCheck(view.registry, view.world, view.state, view.pov)(line2.line);
-  return view.mark(line2.line, carries ? { known: [line2.name], kept: [view.name(view.pov)] } : null);
+  return line2 ? mindMarker(view, line2.name)(line2.line) : null;
+}
+function mindMarker(view, name) {
+  if (!view.marked)
+    return (text7) => text7;
+  const secrets = unrevealedSecrets(view.registry, view.world, view.state);
+  const hidden = hiddenNameCheck(view.registry, view.world, view.state, view.pov);
+  const kept3 = { known: [name], kept: [view.name(view.pov)] };
+  return (text7) => view.mark(text7, findLeaks(text7, secrets).length > 0 || hidden(text7) ? kept3 : null);
 }
 function gmMind(view, who, c) {
   const person5 = (id) => view.entity(id) ?? { id, name: view.name(id) };
   const place2 = (id) => id === null ? null : view.place(id) ?? { id, name: view.name(id) };
+  const said2 = mindMarker(view, view.name(who.id));
   const m = c.mind;
   return {
     who,
     fidelity: { level: c.fidelity.level, score: Math.round(c.fidelity.score), reasons: c.fidelity.reasons, pin: c.fidelity.pin },
     refreshQueued: c.refreshQueued,
-    intent: c.intent,
-    mind: m ? { at: m.clock, level: m.level, moment: m.moment, reason: m.reason, place: place2(m.place), monologue: m.monologue, depiction: m.depiction, intent: m.intent, reactions: m.reactions, mood: m.mood, interrupt: m.interrupt, withheld: m.withheld } : null,
-    plans: c.plans.map((p) => ({ id: p.id, what: p.what, kind: p.kind, from: p.fromText, to: p.toText, where: place2(p.where), with: p.with.map(person5), priority: p.priority, status: p.status, source: p.source, reason: p.reason ?? undefined, amount: p.cents === undefined ? undefined : formatMoney(p.cents, view.world.currency), cents: p.cents })),
-    commitments: c.commitments.map((x) => ({ id: x.id, kind: x.kind, text: x.text, with: x.with.map(person5), due: x.dueText, status: x.status })),
-    notes: c.notes.map((n) => ({ id: n.id, text: n.text, at: n.clock, salience: n.salience, salienceNow: n.now, faded: n.faded })),
-    witness: c.witness.map((w) => ({ what: w.what, how: w.how, by: w.by === null ? null : person5(w.by), place: place2(w.place), at: w.clock })),
-    summary: c.summary
+    intent: c.intent ? { ...c.intent, text: said2(c.intent.text) } : null,
+    mind: m ? { at: m.clock, level: m.level, moment: m.moment, reason: m.reason, place: place2(m.place), monologue: said2(m.monologue), depiction: said2(m.depiction), intent: said2(m.intent), reactions: m.reactions.map(said2), mood: m.mood, interrupt: m.interrupt, withheld: m.withheld } : null,
+    plans: c.plans.map((p) => ({ id: p.id, what: said2(p.what), kind: p.kind, from: p.fromText, to: p.toText, where: place2(p.where), with: p.with.map(person5), priority: p.priority, status: p.status, source: p.source, reason: p.reason ?? undefined, amount: p.cents === undefined ? undefined : formatMoney(p.cents, view.world.currency), cents: p.cents })),
+    commitments: c.commitments.map((x) => ({ id: x.id, kind: x.kind, text: said2(x.text), with: x.with.map(person5), due: x.dueText, status: x.status })),
+    notes: c.notes.map((n) => ({ id: n.id, text: said2(n.text), at: n.clock, salience: n.salience, salienceNow: n.now, faded: n.faded })),
+    witness: c.witness.map((w) => ({ what: said2(w.what), how: w.how, by: w.by === null ? null : person5(w.by), place: place2(w.place), at: w.clock })),
+    summary: said2(c.summary)
   };
 }
 var MINDS_TOOLS = [
@@ -87280,8 +88101,6 @@ var MINDS_TOOLS = [
     parameters: () => objectSchema({ person: text6() }, ["person"]),
     run: async (args, env) => {
       const view = await env.reader.view();
-      if (view.knowledge === "pov")
-        return view.refuse(TOOL_NOTE.hidden, { pov: view.name(view.pov) });
       const said2 = needText(view, "minds_read", args, "person");
       if (typeof said2 !== "string")
         return said2;
@@ -87355,15 +88174,7 @@ function wholeMoney(view, party, money4) {
 }
 function balances(view, party) {
   const finance = optionalQuery(view.ctx, "economy.finance");
-  if (!finance)
-    return { party, accounts: [], owes: [] };
-  if (view.knowledge !== "pov")
-    return wholeMoney(view, party, finance(view.ctx, party.id, false));
-  const mine = finance(view.ctx, view.pov, true);
-  if (party.id === view.pov)
-    return wholeMoney(view, party, mine);
-  const shared = mine.accounts.filter((a) => rightsOf(view.state, a.id, party.id) !== null);
-  return shared.length === 0 ? null : { party, accounts: accountReads(view, party, shared), owes: owedOn(view, shared) };
+  return finance ? wholeMoney(view, party, finance(view.ctx, party.id, false)) : { party, accounts: [], owes: [] };
 }
 function sells(view, place2) {
   const trade2 = placeTrade(view.ctx, place2);
@@ -87422,8 +88233,7 @@ var MONEY_TOOLS = [
         const party = view.entity(r.id);
         if (!party || !isParty(view.ctx, r.id))
           return view.refuse(TOOL_NOTE.noPerson, { name: said2 ?? view.name(r.id) });
-        const money4 = balances(view, party);
-        return money4 ? view.answer(money4) : beyondPov(view);
+        return view.answer(balances(view, party));
       });
     }
   },
@@ -87449,19 +88259,12 @@ var MONEY_TOOLS = [
 ];
 
 // src/backend/agents/tools/read/places.ts
-function namesUnseen(view, value) {
-  if (typeof value === "string")
-    return hasOwn(view.state.entities, value) && !view.seesEntity(value) || hasOwn(view.world.places, value) && !view.seesPlace(value);
-  if (Array.isArray(value))
-    return value.some((v3) => namesUnseen(view, v3));
-  return value !== null && typeof value === "object" && Object.values(value).some((v3) => namesUnseen(view, v3));
-}
 function placeRead(view, place2, lore3) {
   const id = place2.id;
   const fields = own(view.world.places, id)?.fields ?? {};
   const description = typeof fields.description === "string" ? fields.description.trim() : "";
-  const rest = Object.fromEntries(Object.entries(fields).filter(([field2, value]) => field2 !== "description" && !(view.knowledge === "pov" && namesUnseen(view, value))));
-  const kept2 = view.knowledge === "pov" ? null : view.placeSecrecy(id);
+  const rest = Object.fromEntries(Object.entries(fields).filter(([field2]) => field2 !== "description"));
+  const kept3 = view.placeSecrecy(id);
   const inside = [...placeChildren(view.world).get(id) ?? []].sort(byName(view)).flatMap((p) => {
     const ref = view.place(p);
     return ref ? [ref] : [];
@@ -87476,21 +88279,16 @@ function placeRead(view, place2, lore3) {
   return {
     place: place2,
     path: pathOf(view, id),
-    ...description !== "" ? { description: view.mark(description, kept2) } : {},
+    ...description !== "" ? { description: view.mark(description, kept3) } : {},
     ...Object.keys(rest).length > 0 ? { fields: rest } : {},
     inside,
     waysOut: ways,
-    ...view.knowledge === "gm" && kept2 ? { knownTo: [...kept2.known] } : {},
+    ...view.knowledge === "gm" && kept3 ? { knownTo: [...kept3.known] } : {},
     lore: lore3
   };
 }
-function peopleAt2(view, place2, here) {
-  return Object.keys(view.state.entities).filter((id) => {
-    if (!view.isPerson(id) || !view.seesEntity(id))
-      return false;
-    const at2 = placeOfEntity(view.state, id);
-    return view.knowledge === "pov" ? at2 !== null && at2 === here : placeWithin(view.world, at2, place2);
-  }).sort(byName(view)).flatMap((id) => {
+function peopleAt2(view, place2) {
+  return Object.keys(view.state.entities).filter((id) => view.isPerson(id) && view.seesEntity(id) && placeWithin(view.world, placeOfEntity(view.state, id), place2)).sort(byName(view)).flatMap((id) => {
     const ref = view.entity(id);
     if (!ref)
       return [];
@@ -87561,10 +88359,7 @@ var PLACES_TOOLS = [
         const place2 = view.place(r.id);
         if (!place2)
           return view.refuse(TOOL_NOTE.noPlace, { name: said2 });
-        const here = placeOfEntity(view.state, view.pov);
-        if (view.knowledge === "pov" && !placeWithin(view.world, here, r.id))
-          return beyondPov(view);
-        const answer = { place: place2, people: peopleAt2(view, r.id, here), things: view.knowledge === "pov" && here !== r.id ? [] : looseAt(view, r.id) };
+        const answer = { place: place2, people: peopleAt2(view, r.id), things: looseAt(view, r.id) };
         return view.answer(answer);
       });
     }
@@ -87637,10 +88432,6 @@ function objectivesOf(view, t, def2) {
   return objectives.map((o) => ({ label: objectiveLabel(o), when: objectiveWhen(o), done: truthy2(evalExpr(objectiveWhen(o), env, false)) }));
 }
 function trackRows(view, kind) {
-  if (view.knowledge === "pov") {
-    const log = buildQuestLog(view.ctx);
-    return [...log.active, ...log.done, ...log.failed].filter((t) => kind === null || t.kind === kind).map((t) => ({ id: t.id, label: t.label, kind: t.kind, stage: t.stage, status: t.status, cue: t.cue ?? undefined }));
-  }
   const rows = [];
   for (const id of Object.keys(view.world.tracks).sort()) {
     const t = own(view.world.tracks, id);
@@ -87653,10 +88444,6 @@ function trackRows(view, kind) {
   return rows;
 }
 function stageAnswer(view, id) {
-  if (view.knowledge === "pov") {
-    const shown4 = view.povTrack(id);
-    return shown4 && { id: shown4.id, label: shown4.label, kind: shown4.kind, stage: shown4.stage, status: shown4.status, cue: shown4.cue ?? undefined, objectives: shown4.objectives, hints: shown4.hints.slice(0, shown4.opened), truths: shown4.truths };
-  }
   const t = own(view.world.tracks, id);
   const at2 = t ? standing3(view, id, t) : null;
   if (!t || !at2)
@@ -87676,22 +88463,19 @@ function stageAnswer(view, id) {
   };
   const stages = Object.entries(t.stages);
   if (view.knowledge === "everyone") {
-    const kept2 = view.trackSecrecy(id) ?? KEPT3;
-    return { ...answer, secrets: stages.flatMap(([sid, s]) => s.truth && !at2.revealed.includes(sid) ? [{ stage: at2.words(s.label), truth: view.mark(s.truth, kept2), current: sid === at2.stage || undefined }] : []) };
+    const kept4 = view.trackSecrecy(id) ?? KEPT3;
+    return { ...answer, secrets: stages.flatMap(([sid, s]) => s.truth && !at2.revealed.includes(sid) ? [{ stage: at2.words(s.label), truth: view.mark(s.truth, kept4), current: sid === at2.stage || undefined }] : []) };
   }
+  const kept3 = view.marked ? view.trackSecrecy(id) ?? KEPT3 : null;
   return {
     ...answer,
     stageId: at2.stage,
     visibility: at2.ref.visibility,
     owner: t.owner === undefined ? undefined : view.entity(t.owner),
-    stages: stages.map(([sid, s]) => ({ id: sid, label: s.label, truth: s.truth, revealed: s.truth === undefined ? undefined : at2.revealed.includes(sid), current: sid === at2.stage || undefined }))
+    stages: stages.map(([sid, s]) => ({ id: sid, label: at2.words(s.label), truth: s.truth === undefined || at2.revealed.includes(sid) ? s.truth : view.mark(s.truth, kept3), revealed: s.truth === undefined ? undefined : at2.revealed.includes(sid), current: sid === at2.stage || undefined }))
   };
 }
 function movesAnswer(view, id) {
-  if (view.knowledge === "pov") {
-    const shown4 = view.povTrack(id);
-    return shown4 && { id: shown4.id, label: shown4.label, stage: shown4.stage, todo: shown4.objectives.filter((o) => !o.done).map((o) => o.label), hints: shown4.hints.slice(0, shown4.opened) };
-  }
   const t = own(view.world.tracks, id);
   const at2 = t ? standing3(view, id, t) : null;
   if (!t || !at2)
@@ -88046,7 +88830,7 @@ var PEOPLE_WRITES = [
       const kind = needText(view, "gm_spawn", args, "kind");
       if (typeof kind !== "string")
         return kind;
-      const kinds = kindEnum(schemaWorld(view.world, view.registry, view.knowledge));
+      const kinds = kindEnum(schemaWorld(view.world, view.registry));
       if (!kinds.includes(kind))
         return badValue(view, "gm_spawn", "kind", kind, kinds);
       const name = needText(view, "gm_spawn", args, "name");
@@ -88174,13 +88958,11 @@ var QUESTS_WRITES = [
       if (typeof said2 !== "string")
         return said2;
       const t = own(view.world.tracks, track2);
-      const shown4 = view.knowledge === "pov" ? view.povTrack(track2)?.stage ?? "" : null;
-      const at2 = own(view.state.tracks, track2)?.stage ?? t?.start;
-      const stages = Object.entries(t?.stages ?? {}).filter(([id, s]) => shown4 === null || shown4 !== "" && id === at2 && s.label === shown4);
+      const stages = Object.entries(t?.stages ?? {});
       const lower = said2.toLowerCase();
-      const to = (shown4 === null ? stages.find(([id]) => id.toLowerCase() === lower) : undefined) ?? stages.find(([, s]) => s.label.toLowerCase() === lower);
+      const to = stages.find(([id]) => id.toLowerCase() === lower) ?? stages.find(([, s]) => s.label.toLowerCase() === lower);
       if (!to)
-        return badValue(view, "gm_set_stage", "stage", said2, shown4 === null ? stages.map(([id]) => id) : stages.map(([, s]) => s.label));
+        return badValue(view, "gm_set_stage", "stage", said2, stages.map(([id]) => id));
       return propose(view, env.writer, gmEdit({ op: "stage", track: track2, to: to[0] }));
     }
   }
@@ -88272,7 +89054,7 @@ var TIME_WRITES = [
 var WRITE_TOOLS = [...PEOPLE_WRITES, ...PLACES_WRITES, ...ITEMS_WRITES, ...MONEY_WRITES, ...QUESTS_WRITES, ...KNOWLEDGE_WRITES, ...MINDS_WRITES, ...TIME_WRITES];
 
 // src/backend/agents/tools/registry.ts
-var TOOL_DEFINITIONS = [...READ_TOOLS, ...WRITE_TOOLS, ...WORKSPACE_TOOLS, ...LORE_TOOLS2];
+var TOOL_DEFINITIONS = [...READ_TOOLS, ...WRITE_TOOLS, ...WORKSPACE_TOOLS, ...CONDENSE_TOOLS, ...LORE_TOOLS2];
 function propertyAt(schema, path2) {
   let at2 = schema;
   for (const key of path2.split(".")) {
@@ -88296,8 +89078,8 @@ function described(def2, schema, texts2) {
 }
 function toolsFor(input) {
   const { env, texts: texts2 } = input;
-  const world = schemaWorld(input.world, env.reader.registry, env.knowledge);
-  return TOOL_DEFINITIONS.filter((def2) => input.tiers.includes(def2.tier) && (input.families === undefined || input.families.includes(def2.family)) && (def2.turn !== true || env.loads !== undefined)).map((def2) => ({
+  const world = schemaWorld(input.world, env.reader.registry);
+  return TOOL_DEFINITIONS.filter((def2) => input.tiers.includes(def2.tier) && (input.families === undefined || input.families.includes(def2.family)) && (def2.turn !== true || env.loads !== undefined) && (def2.summarizes !== true || env.summarize !== undefined)).map((def2) => ({
     name: def2.name,
     description: renderPrompt(toolTextId(def2.name), texts2, {}),
     parameters: described(def2, def2.parameters(world), texts2),
@@ -88358,8 +89140,65 @@ async function recordAgentCalls(diag, input) {
   }
 }
 
+// src/backend/agents/system-files.ts
+async function systemInstructions(source, input) {
+  const { texts: texts2 } = input;
+  const listed4 = new Map((await source.workspace()).map((f) => [f.path, f]));
+  const read = [];
+  for (const path2 of systemPaths(input.role)) {
+    const file = listed4.get(path2);
+    const text7 = file ? (await source.blob(file.hash) ?? "").trim() : "";
+    if (text7 !== "")
+      read.push({ path: path2, text: text7 });
+  }
+  if (read.length === 0)
+    return "";
+  const framed = (path2, text7) => renderPrompt(RUNTIME_TEXT.systemFile, texts2, { path: path2, text: text7 });
+  const parts = [];
+  const cut = [];
+  let left = input.tokens;
+  for (const { path: path2, text: text7 } of read) {
+    if (cut.length > 0) {
+      cut.push(path2);
+      continue;
+    }
+    const whole5 = framed(path2, text7);
+    if (tokensOf(whole5) <= left) {
+      parts.push(whole5);
+      left -= tokensOf(whole5);
+      continue;
+    }
+    const lines3 = text7.split(`
+`);
+    let lo = 0;
+    let hi = lines3.length - 1;
+    while (lo < hi) {
+      const mid = Math.ceil((lo + hi) / 2);
+      if (tokensOf(framed(path2, lines3.slice(0, mid).join(`
+`))) <= left)
+        lo = mid;
+      else
+        hi = mid - 1;
+    }
+    if (lo > 0)
+      parts.push(framed(path2, lines3.slice(0, lo).join(`
+`)));
+    cut.push(path2);
+  }
+  if (cut.length > 0)
+    parts.push(renderPrompt(RUNTIME_TEXT.systemCut, texts2, { paths: cut.join(", "), tokens: String(input.tokens) }));
+  return renderPrompt(RUNTIME_TEXT.systemFiles, texts2, { files: parts.join(`
+
+`) });
+}
+function withInstructions(system, instructions) {
+  return instructions === "" ? system : system.trim() === "" ? instructions : `${system}
+
+${instructions}`;
+}
+
 // src/backend/agents/yields.ts
-function runYield(texts2, kind, out, writes, reasons = true) {
+function runYield(texts2, kind, out, writes) {
   const say = (id, vars = {}) => renderPrompt(id, texts2, vars);
   const parts = [];
   const lands = writes.staged.filter((o) => o.mode !== "confirm").length;
@@ -88369,8 +89208,8 @@ function runYield(texts2, kind, out, writes, reasons = true) {
   if (held3 > 0)
     parts.push(say(YIELD_TEXT.review, { count: String(held3) }));
   if (writes.refused.length > 0)
-    parts.push(say(YIELD_TEXT.refused, { count: String(writes.refused.length), reasons: [...new Set(writes.refused.map((r) => reasons ? r.reason : r.code))].join("; ") }));
-  const lost = lostOf(say, kind, out, reasons);
+    parts.push(say(YIELD_TEXT.refused, { count: String(writes.refused.length), reasons: [...new Set(writes.refused.map((r) => r.reason))].join("; ") }));
+  const lost = lostOf(say, kind, out);
   return { writes: parts.length > 0 ? say(YIELD_TEXT.writes, { writes: parts.join("; ") }) : "", lost: lost.length > 0 ? say(YIELD_TEXT.lost, { lost: lost.join("; ") }) : "" };
 }
 function recordYield(rt, at2, phase, role, y) {
@@ -88402,7 +89241,7 @@ function recordCommit(rt, at2, texts2, out) {
     rt.diag.yielded(at2, COMMIT_PHASE[op.phase], ROLE_LABEL2[op.role], say(YIELD_TEXT.writes, { writes: parts.join("; ") }), refused.length > 0);
   }
 }
-function lostOf(say, kind, out, reasons) {
+function lostOf(say, kind, out) {
   switch (kind) {
     case "knowledge": {
       const k = out.knowledge;
@@ -88436,7 +89275,7 @@ function lostOf(say, kind, out, reasons) {
       const flagged = out.flagged ?? [];
       return PROSE_CLASHES.flatMap((why) => {
         const of = flagged.filter((f) => f.kind === why);
-        return of.length > 0 ? [say(YIELD_TEXT.prose(why), { count: String(of.length), lines: reasons ? `: ${of.map((f) => `"${f.line}"`).join("; ")}` : "" })] : [];
+        return of.length > 0 ? [say(YIELD_TEXT.prose(why), { count: String(of.length), lines: `: ${of.map((f) => `"${f.line}"`).join("; ")}` })] : [];
       });
     }
     case "scene": {
@@ -88468,139 +89307,6 @@ function knowledgeAnswer(out) {
   return { facts: facts.size, learnings, yours: k.proposals.length };
 }
 
-// src/backend/agents/turn-task.ts
-var MAIN_PINS = "main";
-var MAIN_PINS_TEXTS = { pins: MAIN_TEXT.pins, file: MAIN_TEXT.pinsFile, headings: MAIN_TEXT.pinsHeadings, none: MAIN_TEXT.none };
-function pinsManifestOf(text7) {
-  if (text7 === null)
-    return {};
-  let raw;
-  try {
-    raw = JSON.parse(text7);
-  } catch {
-    return {};
-  }
-  if (!isRecord(raw))
-    return {};
-  const out = {};
-  for (const [role, value] of Object.entries(raw)) {
-    const entry = Array.isArray(value) ? { files: value } : isRecord(value) ? value : null;
-    if (!entry || !safeKey(role))
-      continue;
-    const files = Array.isArray(entry.files) ? [...new Set(entry.files.filter(isWorkspacePath))] : [];
-    const tokens2 = "tokens" in entry && typeof entry.tokens === "number" && Number.isInteger(entry.tokens) && entry.tokens >= 0 ? entry.tokens : null;
-    out[role] = { files, tokens: tokens2 };
-  }
-  return out;
-}
-var HEADING = /^#{1,6}\s/;
-async function pinnedFiles(view, input) {
-  const { texts: texts2, framing } = input;
-  const files = (await view.workspace()).filter((f) => f.transcript !== true);
-  const byPath = new Map(files.map((f) => [f.path, f]));
-  const stored = byPath.get(PINS_PATH);
-  const manifest = pinsManifestOf(stored ? await view.blob(stored.hash) : null);
-  const entry = own(manifest, input.role);
-  const pinned = input.pinned ? files.filter((f) => f.pinned && f.path !== PINS_PATH).map((f) => f.path) : [];
-  const paths = [...new Set([...entry?.files ?? [], ...pinned])];
-  const budget = entry?.tokens ?? input.tokens;
-  let left = budget;
-  const parts = [];
-  for (const path2 of paths) {
-    const file = byPath.get(path2);
-    const text7 = file ? await view.blob(file.hash) : null;
-    if (text7 === null)
-      continue;
-    const whole5 = renderPrompt(framing.file, texts2, { path: path2, text: text7 });
-    if (tokensOf(whole5) <= left) {
-      parts.push(whole5);
-      left -= tokensOf(whole5);
-      continue;
-    }
-    const headings = text7.split(`
-`).filter((line2) => HEADING.test(line2)).join(`
-`);
-    const shown4 = renderPrompt(framing.headings, texts2, { path: path2, headings: headings === "" ? renderPrompt(framing.none, texts2, {}) : headings });
-    parts.push(shown4);
-    left = Math.max(0, left - tokensOf(shown4));
-  }
-  return parts.length === 0 ? "" : renderPrompt(framing.pins, texts2, { tokens: String(budget), unit: nounFor(budget, "token", "tokens"), files: parts.join(`
-
-`) });
-}
-function cutTo(text7, tokens2) {
-  if (tokensOf(text7) <= tokens2)
-    return text7;
-  let lo = 0;
-  let hi = text7.length;
-  while (lo < hi) {
-    const mid = Math.ceil((lo + hi) / 2);
-    if (tokensOf(`${text7.slice(0, mid)}\u2026`) <= tokens2)
-      lo = mid;
-    else
-      hi = mid - 1;
-  }
-  return `${text7.slice(0, lo)}\u2026`;
-}
-function digestOf(d) {
-  const { texts: texts2 } = d;
-  const chain = d.core.chain(d.observed);
-  const lines3 = new Map;
-  for (const note of journalNotes(d.core, d.observed, d.observed.length, d.registry))
-    lines3.set(note.messageId, [...lines3.get(note.messageId) ?? [], note.text]);
-  const none = renderPrompt(MAIN_TEXT.none, texts2, {});
-  const entries3 = [];
-  let replies = 0;
-  chain.forEach((m, i) => {
-    if (m.isUser)
-      return;
-    replies++;
-    if (d.last !== null && i <= d.last)
-      return;
-    const before = chain[i - 1];
-    const said2 = before?.isUser ? (before.swipes[before.swipeId] ?? "").trim() : "";
-    entries3.push(renderPrompt(MAIN_TEXT.digestEntry, texts2, { n: String(replies), said: said2 || none, changed: (lines3.get(m.id) ?? []).join(" \xB7 ") || none, reply: (m.swipes[m.swipeId] ?? "").trim() || none }));
-  });
-  const last = d.last === null ? undefined : chain[d.last];
-  const landed = last ? lines3.get(last.id) ?? [] : [];
-  const head = landed.length > 0 ? renderPrompt(MAIN_TEXT.digestLanded, texts2, { changed: landed.join(" \xB7 ") }) : null;
-  const framing = d.fresh ? MAIN_TEXT.digestFresh : MAIN_TEXT.digest;
-  if (entries3.length === 0 && head === null)
-    return d.fresh ? "" : renderPrompt(MAIN_TEXT.digestNothing, texts2, {});
-  let left = d.tokens - tokensOf(renderPrompt(framing, texts2, { turns: "" })) - tokensOf(renderPrompt(MAIN_TEXT.digestLeftOut, texts2, { count: String(entries3.length), replies: nounFor(entries3.length, "reply", "replies") }));
-  const shownHead = head !== null && tokensOf(head) <= left ? head : null;
-  if (shownHead)
-    left -= tokensOf(shownHead);
-  const kept2 = [];
-  let next = entries3.length - 1;
-  while (next >= 0) {
-    const entry = entries3[next] ?? "";
-    if (tokensOf(entry) <= left) {
-      kept2.unshift(entry);
-      left -= tokensOf(entry);
-      next--;
-      continue;
-    }
-    if (kept2.length === 0 && left > 0) {
-      kept2.unshift(cutTo(entry, left));
-      next--;
-    }
-    break;
-  }
-  const leftOut = next + 1;
-  return renderPrompt(framing, texts2, { turns: [...leftOut > 0 ? [renderPrompt(MAIN_TEXT.digestLeftOut, texts2, { count: String(leftOut), replies: nounFor(leftOut, "reply", "replies") })] : [], ...shownHead ? [shownHead] : [], ...kept2].join(`
-
-`) });
-}
-function tidy2(text7) {
-  return text7.replace(/\n{3,}/g, `
-
-`).trim();
-}
-function turnTask(texts2, parts) {
-  return tidy2(renderPrompt(MAIN_TEXT.turn, texts2, parts));
-}
-
 // src/backend/agents/main-agent.ts
 var REQUESTS2 = {
   interpret: { role: "intent", stage: "intent" },
@@ -88622,7 +89328,6 @@ var REQUESTS2 = {
 var ORDER = ["memory_before", "intent", "prepare", "beats", "read", "memory"];
 var NUMBER2 = { memory_before: 8, intent: 1, prepare: 3, beats: 5, read: 7, memory: 8 };
 var DIAG_PHASE = { memory_before: "memory", intent: "pre", prepare: "pre", beats: "prose", read: "read", memory: "memory" };
-var WIDTH = { pov: 0, everyone: 1, gm: 2, own: 2 };
 var MAIN_LABEL = AGENT_ROLES.find((r) => r.id === MAIN_AGENT_ROLE)?.label ?? MAIN_AGENT_ROLE;
 
 class MainTurn {
@@ -88631,6 +89336,7 @@ class MainTurn {
   requests = [];
   opened = new Set(["memory_before", "intent"]);
   round = null;
+  playing = null;
   waking = false;
   failure = null;
   session = null;
@@ -88638,6 +89344,7 @@ class MainTurn {
   summarized = false;
   task = "";
   keptTask = "";
+  instructions = "";
   sent = [];
   kept = [];
   replyShown = false;
@@ -88704,11 +89411,10 @@ class MainTurn {
     this.opened.add(stage);
     this.wake();
   }
-  lens = { knowledge: "gm", message: () => false };
   segment(reply) {
     if (this.kept.length === 0)
       return null;
-    return this.replyShown || reply.trim() === "" ? [...this.kept] : [...this.kept, { role: "user", content: this.text(MAIN_TEXT.engineReply, { reply }), by: MAIN_BY, knowledge: "pov" }];
+    return this.replyShown || reply.trim() === "" ? [...this.kept] : [...this.kept, { role: "user", content: this.text(MAIN_TEXT.engineReply, { reply }), by: MAIN_BY }];
   }
   async rebased() {
     if (this.session !== null || this.failure !== null)
@@ -88736,7 +89442,11 @@ class MainTurn {
     const stage = ORDER.find((s) => this.isOpen(s) && this.requests.some((r) => r.stage === s && r.round === null));
     if (stage === undefined)
       return;
-    this.play(stage, this.requests.filter((r) => r.stage === stage && r.round === null));
+    const playing = this.play(stage, this.requests.filter((r) => r.stage === stage && r.round === null)).finally(() => {
+      if (this.playing === playing)
+        this.playing = null;
+    });
+    this.playing = playing;
   }
   async play(stage, requests) {
     const round2 = { stage, requests, committed: false, controller: new AbortController, running: new Set };
@@ -88754,10 +89464,10 @@ class MainTurn {
 ${message}` : message;
       const history = this.history();
       const lead = history.at(-1)?.role === "user" ? history.pop()?.text : undefined;
-      const agent = startAgent(this.spec(round2, history), { host: this.host.rt.host, userId: this.host.userId, settings: this.host.settings.agents, texts: this.texts, accounts: this.host.rt.agentAccounts, turn: this.host.turn, trace: { phase: DIAG_PHASE[stage], stage: `Stage ${NUMBER2[stage]}: ${this.text(MAIN_TEXT.stageLabel(stage))}` } });
+      const agent = startAgent(this.spec(this.tools(round2), history), { host: this.host.rt.host, userId: this.host.userId, settings: this.host.settings.agents, texts: this.texts, accounts: this.host.rt.agentAccounts, turn: this.host.turn, trace: { phase: DIAG_PHASE[stage], stage: `Stage ${NUMBER2[stage]}: ${this.text(MAIN_TEXT.stageLabel(stage))}` } });
       const reply = await this.send(agent, lead ? `${lead}
 
-${sent2}` : sent2, signal2, stage);
+${sent2}` : sent2, signal2, DIAG_PHASE[stage]);
       if (round2.committed) {
         this.keep(first ? `${this.keptTask}
 
@@ -88775,23 +89485,56 @@ ${message}` : message, sent2, agent);
       this.wake();
     }
   }
+  async review(draft, signal2) {
+    while (this.playing)
+      await this.playing;
+    if (this.failure !== null)
+      return { ok: false, reason: this.failure };
+    const stop2 = AbortSignal.any([this.host.stop, signal2]);
+    const alone = this.start.alone === true;
+    try {
+      const first = this.session === null;
+      if (first)
+        await (alone ? this.prepareAlone() : this.prepare(stop2));
+      const message = reviewMessage(this.texts, draft, alone ? REVIEW_TEXT.stageFixed : REVIEW_TEXT.stageMain);
+      const sent2 = first ? `${this.task}
+
+${message}` : message;
+      const history = this.history();
+      const lead = history.at(-1)?.role === "user" ? history.pop()?.text : undefined;
+      const done = { committed: false };
+      const spec = { ...this.spec([...reviewTools(this.texts, draft, done), ...this.readTools()], history, alone ? REVIEW_TEXT.system : MAIN_TEXT.system), budget: finalReviewBudget(this.host.settings.agents) };
+      const agent = startAgent(spec, { host: this.host.rt.host, userId: this.host.userId, settings: this.host.settings.agents, texts: this.texts, accounts: this.host.rt.agentAccounts, turn: this.host.turn, trace: { phase: "sections", stage: alone ? "The final review" : "Stage 6: the final review" } });
+      const reply = await this.send(agent, lead ? `${lead}
+
+${sent2}` : sent2, stop2, "sections");
+      if (!done.committed && reply.status !== "answered")
+        return { ok: false, reason: firedTimeout(signal2)?.message ?? reply.reason ?? reply.status };
+      if (!alone)
+        this.keep(first ? `${this.keptTask}
+
+${message}` : message, sent2, agent);
+      return { ok: true };
+    } catch (error) {
+      return { ok: false, reason: firedTimeout(signal2)?.message ?? (error instanceof Error ? error.message : String(error)) };
+    }
+  }
   async prepare(signal2) {
     const { rt, chatId, userId, holder, settings } = this.host;
     const { core, observed } = this.start;
     const main = settings.agents.main;
     const chain = core.chain(observed);
     const refs = sessionAt(chain, core.journal.tombstones);
-    const readers = new Map(this.host.head() ? (await (await this.host.reader("gm").view()).workspace()).map((f) => [f.path, f.readers]) : []);
-    this.lens = mainLens(main.knowledge, readers);
+    this.instructions = await this.systemText();
     let session = await readSession(rt, userId, refs);
-    const own2 = new Set(session.segments.filter((s) => s.messages.some((m) => this.lens.message(m))).map((s) => s.hash));
-    const last = lastMainTurn(chain, core.journal.tombstones, summaryOf(session, this.lens) === null ? { ...refs, base: null } : refs, own2);
+    const own2 = new Set(session.segments.filter((s) => s.messages.some(isMainMessage)).map((s) => s.hash));
+    const last = lastMainTurn(chain, core.journal.tombstones, refs, own2);
     const rollback = await rolledBack(rt, { chatId, userId, holder, at: refs });
     if (rollback) {
       this.rebase = rollback;
       session = await readSession(rt, userId, rebasedRefs(rollback));
-    } else if (sessionTokens(session, this.lens) > settings.agents.compaction.atTokens) {
-      const made = await compact(rt, { userId, holder, session, keep: settings.agents.compaction.keepTurns, texts: this.texts, lens: this.lens, summarize: (system, message) => this.summarizer(system, message, signal2) });
+    } else if (sessionTokens(session) > settings.agents.compaction.atTokens) {
+      const made = await compact(rt, { userId, holder, session, keep: settings.agents.compaction.keepTurns, texts: this.texts, summarize: (system, message) => this.summarizer(system, message, signal2) });
       if (made && "rebase" in made) {
         this.rebase = made.rebase;
         session = made.session;
@@ -88799,13 +89542,27 @@ ${message}` : message, sent2, agent);
         rt.host.log("warn", `[LumiRPEngine] chat ${chatId}: the main session wasn't compacted (${made.failed}); it goes on whole`, userId);
     }
     this.session = session;
-    const digest = digestOf({ core, observed, registry: rt.registry, last, fresh: last === null && summaryOf(session, this.lens) === null, tokens: main.digestTokens, texts: this.texts });
-    const pins = this.host.head() ? await pinnedFiles(await this.host.reader(main.knowledge).view(), { role: MAIN_PINS, tokens: main.pinsTokens, pinned: true, texts: this.texts, framing: MAIN_PINS_TEXTS }) : "";
+    await this.taskOf(digestOf2({ core, observed, registry: rt.registry, last, fresh: last === null && session.summary === null, tokens: main.digestTokens, texts: this.texts }));
+  }
+  async prepareAlone() {
+    const { rt, settings } = this.host;
+    const { core, observed } = this.start;
+    this.instructions = await this.systemText();
+    await this.taskOf(digestOf2({ core, observed, registry: rt.registry, last: null, fresh: true, tokens: settings.agents.main.digestTokens, texts: this.texts }));
+  }
+  async taskOf(digest) {
+    const main = this.host.settings.agents.main;
+    const pins = this.host.head() ? await pinnedFiles(await this.host.reader().view(), { role: MAIN_PINS, tokens: main.pinsTokens, pinned: true, texts: this.texts, framing: MAIN_PINS_TEXTS }) : "";
     this.task = turnTask(this.texts, { message: this.start.text, digest, pins });
     this.keptTask = turnTask(this.texts, { message: this.start.text, digest, pins: "" });
   }
+  async systemText() {
+    if (!this.host.head())
+      return "";
+    return systemInstructions(await this.host.reader().view(), { role: MAIN_AGENT_ROLE, tokens: this.host.settings.agents.systemTokens, texts: this.texts });
+  }
   history() {
-    const out = this.session ? historyOf(this.session, this.texts, this.lens) : [];
+    const out = this.session ? historyOf(this.session, this.texts) : [];
     for (const m of this.sent) {
       const last = out.at(-1);
       if (last?.role === m.role)
@@ -88817,14 +89574,26 @@ ${m.text}`;
     }
     return out;
   }
-  spec(round2, history) {
+  spec(tools, history, systemId = MAIN_TEXT.system) {
     const { settings } = this.host;
     const main = settings.agents.main;
     const head = this.host.head();
     const vars = { world: head?.world.name ?? "", pov: head ? head.state.entities[head.world.pov]?.name ?? head.world.pov : "" };
-    return { role: MAIN_AGENT_ROLE, connectionId: main.connectionId, model: main.model, effort: main.effort, system: this.text(MAIN_TEXT.system, vars), prefix: [], tools: this.tools(round2), budget: mainBudget(settings.agents), history };
+    return { role: MAIN_AGENT_ROLE, connectionId: main.connectionId, model: main.model, effort: main.effort, system: withInstructions(this.text(systemId, vars), this.instructions), prefix: [this.contextGuidance()], tools, budget: mainBudget(settings.agents), history };
   }
-  async send(agent, text7, signal2, stage) {
+  contextGuidance() {
+    const { agents } = this.host.settings;
+    const none = this.text(MAIN_TEXT.none);
+    const named = (list3) => list3.length > 0 ? list3.map(sourceLabel).join(", ") : none;
+    const roles = ROLE_IDS.map((role) => {
+      const c = agents.context.roles[role];
+      const families = agents.roles[role].families;
+      return this.text(MAIN_TEXT.contextRole, { role, perspective: PERSPECTIVE_LABEL[c.perspective], start: named(c.start), never: named(c.never), pins: c.pins.length > 0 ? c.pins.join(", ") : none, tools: families.length > 0 ? families.map((f) => TOOL_FAMILY_LABEL[f]).join(", ") : none });
+    });
+    return this.text(MAIN_TEXT.context, { roles: roles.join(`
+`) });
+  }
+  async send(agent, text7, signal2, phase) {
     const { rt, chatId, userId } = this.host;
     rt.diag.agentWorking(chatId, userId, agent.id, STEP_LABEL2[MAIN_AGENT_ROLE] ?? MAIN_LABEL);
     let reply;
@@ -88836,42 +89605,34 @@ ${m.text}`;
       rt.diag.agentDone(chatId, userId, agent.id);
     }
     const main = this.host.settings.agents.main;
-    await recordAgentCalls(rt.diag, { at: this.host.at(), phase: DIAG_PHASE[stage], role: MAIN_AGENT_ROLE, connection: main.connectionId ?? "active", model: main.model, transcript: agent.transcript() }).catch((error) => rt.host.log("warn", `[LumiRPEngine] chat ${chatId}: the main agent's calls weren't all recorded (${error instanceof Error ? error.message : String(error)})`, userId));
+    await recordAgentCalls(rt.diag, { at: this.host.at(), phase, role: MAIN_AGENT_ROLE, connection: main.connectionId ?? "active", model: main.model, transcript: agent.transcript() }).catch((error) => rt.host.log("warn", `[LumiRPEngine] chat ${chatId}: the main agent's calls weren't all recorded (${error instanceof Error ? error.message : String(error)})`, userId));
     return reply;
   }
   async summarizer(system, message, signal2) {
     const { settings } = this.host;
     const main = settings.agents.main;
     const stage = this.round?.stage ?? "intent";
-    const agent = startAgent({ role: MAIN_AGENT_ROLE, connectionId: main.connectionId, model: main.model, effort: main.effort, system, prefix: [], tools: [], budget: mainBudget(settings.agents) }, { host: this.host.rt.host, userId: this.host.userId, settings: settings.agents, texts: this.texts, accounts: this.host.rt.agentAccounts, turn: this.host.turn, trace: { phase: DIAG_PHASE[stage], task: "compaction" } });
-    return this.send(agent, message, signal2, stage);
+    const agent = startAgent({ role: MAIN_AGENT_ROLE, connectionId: main.connectionId, model: main.model, effort: main.effort, system: withInstructions(system, this.instructions), prefix: [], tools: [], budget: mainBudget(settings.agents) }, { host: this.host.rt.host, userId: this.host.userId, settings: settings.agents, texts: this.texts, accounts: this.host.rt.agentAccounts, turn: this.host.turn, trace: { phase: DIAG_PHASE[stage], task: "compaction" } });
+    return this.send(agent, message, signal2, DIAG_PHASE[stage]);
   }
   keep(stored, sent2, agent) {
     const t = agent.transcript();
     const args = new Map;
     const did = [];
-    const files = new Set;
     for (const e of t.entries) {
       if (e.kind === "answer") {
         if (e.text.trim() !== "")
           did.push(e.text.trim());
         for (const c of e.calls)
           args.set(c.id, c.args);
-      } else if (e.kind === "result") {
+      } else if (e.kind === "result")
         did.push(this.text(MAIN_TEXT.historyCall, { tool: e.name, args: JSON.stringify(args.get(e.callId) ?? {}), result: e.text }));
-        if (WORKSPACE_TOOLS2.has(e.name)) {
-          for (const path2 of [args.get(e.callId)?.path, ...pathsIn(e.text)])
-            if (isWorkspacePath(path2))
-              files.add(path2);
-        }
-      }
     }
     const done = did.join(`
 
 `);
-    const knowledge = this.host.settings.agents.main.knowledge;
     this.sent.push({ role: "user", text: sent2 }, { role: "assistant", text: done });
-    this.kept.push({ role: "user", content: stored, by: MAIN_BY, knowledge }, { role: "assistant", content: done, by: MAIN_BY, knowledge, ...files.size > 0 ? { files: [...files] } : {} });
+    this.kept.push({ role: "user", content: stored, by: MAIN_BY }, { role: "assistant", content: done, by: MAIN_BY });
   }
   fail(stage, reason2) {
     if (this.failure !== null)
@@ -88902,8 +89663,8 @@ ${m.text}`;
       const task = requests.find((r) => r.kind === "prose")?.task;
       if (!task)
         return "";
-      const lines3 = this.reaches("director") ? [...task.lines.outcome, ...task.lines.montage, ...task.lines.beats].join(`
-`) : "";
+      const lines3 = [...task.lines.outcome, ...task.lines.montage, ...task.lines.beats].join(`
+`);
       return this.text(MAIN_TEXT.engineBeats, { lines: lines3 === "" ? none : lines3 });
     }
     if (stage === "read") {
@@ -88915,11 +89676,7 @@ ${m.text}`;
     }
     return "";
   }
-  reaches(role) {
-    return WIDTH[this.host.settings.agents.main.knowledge] >= WIDTH[this.host.settings.agents.roles[role].knowledge];
-  }
   answerOf(r, out) {
-    const whole5 = this.reaches(r.role);
     switch (r.kind) {
       case "interpret": {
         const read = out;
@@ -88932,10 +89689,8 @@ ${m.text}`;
       case "puzzle":
         return { probability: out };
       case "decisions":
-      case "offscreen": {
-        const odds = out;
-        return odds === null ? null : whole5 ? odds : { ties: Object.keys(odds).length };
-      }
+      case "offscreen":
+        return out;
       case "minds":
       case "memory":
         return { events: out.events.length };
@@ -88947,22 +89702,25 @@ ${m.text}`;
       }
       case "scene": {
         const scene2 = out;
-        return { lore: scene2.lore.length, ...whole5 ? { notes: scene2.notes } : {} };
+        return { lore: scene2.lore.length, notes: scene2.notes };
       }
       case "prose": {
         const prose = out.prose;
-        return whole5 ? { brief: prose.brief, outline: prose.outline } : { outline: prose.outline.length };
+        return { brief: prose.brief, outline: prose.outline };
       }
       case "extract": {
         const read = out;
-        return whole5 ? { proposals: read.proposals, where: read.where } : { proposals: read.proposals.map((p) => typeof p.type === "string" ? p.type : null) };
+        return { proposals: read.proposals, where: read.where };
       }
       case "effects":
         return { proposals: out.length };
       case "knowledge":
         return knowledgeAnswer(out);
-      case "choices":
-        return out;
+      case "choices": {
+        const task = r.task;
+        const wording = markWording(this.texts);
+        return out.map((line2) => task.secret(line2) ? secretMarkText(line2, [], [task.vars.pov ?? ""], wording) : line2);
+      }
     }
   }
   ran(r) {
@@ -88971,29 +89729,18 @@ ${m.text}`;
       return "";
     const via = this.text(run2.result.via === "prompt_only" ? MAIN_TEXT.viaPromptOnly : MAIN_TEXT.viaAgent);
     const agent = r.handle ?? run2.agentId;
-    const gave = run2.result.ok ? runYield(this.texts, r.kind, run2.result.out, run2.writes, this.reaches(r.role)) : { writes: "", lost: "" };
+    const gave = run2.result.ok ? runYield(this.texts, r.kind, run2.result.out, run2.writes) : { writes: "", lost: "" };
     const answer = run2.result.ok ? this.text(MAIN_TEXT.ran, { agent, role: r.role, via, answer: JSON.stringify(this.answerOf(r, run2.result.out)) }) : this.text(MAIN_TEXT.ranFailed, { agent, role: r.role, via, reason: run2.result.reason });
-    return [answer, gave.writes, gave.lost, run2.withheld ? this.text(MAIN_TEXT.briefWithheld, { role: r.role }) : ""].filter((t) => t !== "").join(`
+    return [answer, gave.writes, gave.lost].filter((t) => t !== "").join(`
 `);
   }
   briefFor(task, revisions) {
-    const text7 = [this.text(MAIN_TEXT.brief, { task }), ...revisions.map((message) => this.text(MAIN_TEXT.briefRevision, { message }))].join(`
+    return [this.text(MAIN_TEXT.brief, { task }), ...revisions.map((message) => this.text(MAIN_TEXT.briefRevision, { message }))].join(`
 
 `);
-    const brief = {
-      withheld: false,
-      for: (reads) => {
-        const told = screenBrief(this.host.rt.registry, this.host.head(), text7, reads);
-        if (told.withheld)
-          brief.withheld = true;
-        return told.text;
-      }
-    };
-    return brief;
   }
   tools(round2) {
     const { settings } = this.host;
-    const main = settings.agents.main;
     const describe = (name, arg) => this.text(MAIN_TEXT.toolArg(name, arg));
     const own2 = [
       {
@@ -89009,13 +89756,47 @@ ${m.text}`;
         run: (args) => this.revise(round2, args)
       },
       { name: MAIN_TOOLS.commit, description: this.text(MAIN_TEXT.tool(MAIN_TOOLS.commit)), parameters: { type: "object", properties: {} }, run: () => this.commit(round2) },
-      ...settings.agents.compaction.summarizeTool ? [{ name: MAIN_TOOLS.summarize, description: this.text(MAIN_TEXT.tool(MAIN_TOOLS.summarize)), parameters: { type: "object", properties: {} }, run: () => this.summarize(round2) }] : []
+      ...settings.agents.compaction.summarizeTool ? [{ name: MAIN_TOOLS.summarize, description: this.text(MAIN_TEXT.tool(MAIN_TOOLS.summarize)), parameters: { type: "object", properties: {} }, run: () => this.summarize(round2) }] : [],
+      {
+        name: MAIN_TOOLS.condense,
+        description: this.text(MAIN_TEXT.tool(MAIN_TOOLS.condense)),
+        parameters: { type: "object", properties: { source: { type: "string", description: describe(MAIN_TOOLS.condense, "source") }, role: { type: "string", enum: [...ROLE_IDS], description: describe(MAIN_TOOLS.condense, "role") }, note: { type: "string", description: describe(MAIN_TOOLS.condense, "note") }, focus: { type: "string", description: describe(MAIN_TOOLS.condense, "focus") } }, required: ["source", "role"] },
+        run: (args) => this.condense(round2, args)
+      }
     ];
+    return [...own2, ...this.readTools()];
+  }
+  readTools() {
+    const main = this.host.settings.agents.main;
     const head = this.host.head();
     if (!head || main.families.length === 0)
-      return own2;
-    const reader = this.host.reader(main.knowledge);
-    return [...own2, ...toolsFor({ world: head.world, tiers: ["read"], families: main.families, texts: this.texts, env: { userId: this.host.userId, chatId: this.host.chatId, knowledge: main.knowledge, reader, writer: null, agent: { role: MAIN_AGENT_ROLE, id: MAIN_AGENT_ROLE }, signal: this.host.stop, loads: this.host.loads } })];
+      return [];
+    return toolsFor({ world: head.world, tiers: ["read"], families: main.families, texts: this.texts, env: { userId: this.host.userId, chatId: this.host.chatId, knowledge: "gm", marks: true, reader: this.host.reader(), writer: null, agent: { role: MAIN_AGENT_ROLE, id: MAIN_AGENT_ROLE }, signal: this.host.stop, loads: this.host.loads } });
+  }
+  async condense(round2, args) {
+    if (round2.committed)
+      return this.refuse(MAIN_TEXT.refusedCommitted);
+    const role = typeof args.role === "string" ? args.role : "";
+    if (!ROLE_IDS.includes(role))
+      return this.refuse(MAIN_TEXT.refusedRole, { role, roles: ROLE_IDS.join(", ") });
+    const view = await this.host.reader().view();
+    const note = typeof args.note === "string" && args.note.trim() !== "" ? args.note.trim() : null;
+    const made = await condenseSource(view, {
+      ref: typeof args.source === "string" ? args.source : "",
+      note,
+      focus: typeof args.focus === "string" ? args.focus : "",
+      signal: round2.controller.signal,
+      summarize: async (instructions, text7, signal2) => {
+        const reply = await this.summarizer(this.text(RUNTIME_TEXT.condenseSystem), `${instructions}
+
+${text7}`, AbortSignal.any([round2.controller.signal, signal2]));
+        return reply.status === "answered" && reply.text.trim() !== "" ? { text: reply.text.trim() } : { failed: reply.reason ?? this.text(MAIN_TEXT.none) };
+      }
+    });
+    if (!("path" in made))
+      return made;
+    const out = await propose(view, this.host.writer(role), { kind: "ws_write", path: made.path, text: made.text });
+    return out.error ? out : { text: JSON.stringify({ note: made.path, chars: { source: made.chars, note: made.text.length }, ...JSON.parse(out.text) }) };
   }
   refuse(id, vars = {}) {
     return { text: this.text(id, vars), error: true };
@@ -89076,7 +89857,7 @@ ${m.text}`;
       if (r.done)
         this.host.drop(agentId, "unused");
       const writes = this.host.writes(agentId);
-      r.current = { agentId, result, task, revisions, promptOnly, withheld: brief.withheld, learned, writes };
+      r.current = { agentId, result, task, revisions, promptOnly, learned, writes };
       r.handle ??= agentId;
       if (result.ok)
         recordYield(this.host.rt, this.host.at(), DIAG_PHASE[round2.stage], r.role, runYield(this.texts, r.kind, result.out, writes));
@@ -89117,7 +89898,7 @@ ${m.text}`;
       return this.refuse(MAIN_TEXT.summarizeAgain);
     this.summarized = true;
     const { compaction } = this.host.settings.agents;
-    const made = await compact(this.host.rt, { userId: this.host.userId, holder: this.host.holder, session, keep: compaction.keepTurns, texts: this.texts, lens: this.lens, summarize: (system, message) => this.summarizer(system, message, round2.controller.signal) });
+    const made = await compact(this.host.rt, { userId: this.host.userId, holder: this.host.holder, session, keep: compaction.keepTurns, texts: this.texts, summarize: (system, message) => this.summarizer(system, message, round2.controller.signal) });
     if (made === null || "failed" in made)
       this.summarized = false;
     if (made === null)
@@ -89128,18 +89909,6 @@ ${m.text}`;
     this.session = made.session;
     return { text: this.text(MAIN_TEXT.summarized, { summary: made.summary, folded: String(made.folded), kept: String(made.kept) }) };
   }
-}
-var WORKSPACE_TOOLS2 = new Set(TOOL_DEFINITIONS.filter((d) => d.family === "workspace").map((d) => d.name));
-function pathsIn(text7) {
-  const out = [];
-  for (const m of text7.matchAll(/"path":("(?:[^"\\]|\\.)*")/g)) {
-    try {
-      const path2 = JSON.parse(m[1] ?? "");
-      if (typeof path2 === "string")
-        out.push(path2);
-    } catch {}
-  }
-  return out;
 }
 
 // src/backend/agents/roles/classic.ts
@@ -89200,9 +89969,9 @@ var ROLE_GUIDANCE = {
   world: []
 };
 var STORY_FAMILIES = ["workspace", "lore"];
-function roleTools(ctx, io, world, texts2, knowledge) {
+function roleTools(ctx, world, texts2, summarize) {
   const tier = ctx.settings.tier;
-  const env = { userId: ctx.userId, chatId: ctx.chatId, knowledge, reader: io.reader, writer: tier === "read" ? null : io.writer, agent: { role: ctx.role, id: ctx.agentId }, signal: ctx.signal, loads: ctx.loads };
+  const env = { userId: ctx.userId, chatId: ctx.chatId, knowledge: "gm", marks: true, reader: ctx.reader, writer: tier === "read" ? null : ctx.writer, agent: { role: ctx.role, id: ctx.agentId }, signal: ctx.signal, loads: ctx.loads, summarize };
   const families = ctx.settings.families;
   const reads = toolsFor({ world, tiers: ["read"], families, texts: texts2, env });
   if (tier === "read")
@@ -89222,44 +89991,48 @@ function guidanceOf(rt, ctx, texts2, names3) {
 `) }) : "";
 }
 var ROLE_PINS_TEXTS = { pins: ROLES_TEXT.pins, file: ROLES_TEXT.pinsFile, headings: ROLES_TEXT.pinsHeadings, none: ROLES_TEXT.pinsNoHeadings };
-async function rolePins(ctx, reader, texts2, tokens2) {
-  let view;
-  try {
-    view = await reader.view();
-  } catch {
-    return "";
-  }
-  return pinnedFiles(view, { role: ctx.role, tokens: tokens2, pinned: true, texts: texts2, framing: ROLE_PINS_TEXTS });
-}
-async function roleIndex(reader, tokens2) {
-  try {
-    const text7 = await loreIndexText(await reader.view(), { tokens: tokens2 });
-    return typeof text7 === "string" ? text7 : "";
-  } catch {
-    return "";
-  }
-}
 async function runRoleAgent(rt, ctx, ask) {
   const settings = await rt.settings.get(ctx.userId);
   const own2 = ctx.texts ?? settings.prompts.texts;
   const role = ctx.role;
+  const context = settings.agents.context.roles[role];
   const step2 = helperCallOf(ask.purpose ? stepConfigOf(settings.modelUse.steps, ask.purpose) : null, settings.helper);
   const at2 = ctx.settings.connectionId !== null ? ctx : { ...ctx, settings: { ...ctx.settings, connectionId: step2.connectionId, model: ctx.settings.model ?? step2.model } };
-  const roleKnowledge = ctx.settings.knowledge !== "own" ? ctx.settings.knowledge : null;
-  const knowledge = ask.tools ? typeof ask.reads === "string" ? ask.reads : roleKnowledge : null;
-  const io = knowledge !== null && knowledge !== roleKnowledge ? ctx.readAs(knowledge) : { reader: ctx.reader, writer: ctx.writer };
-  const sees = renderPrompt(ROLES_TEXT.sees[knowledge ?? "own"], own2, ask.names);
-  const system = renderPrompt(roleTextId(role, "system"), own2, { ...ask.names, knowledge: sees });
-  const pins = knowledge ? await rolePins(ctx, io.reader, own2, settings.agents.main.pinsTokens) : "";
-  const index = knowledge && settings.loreIndex.inPrompts ? await roleIndex(io.reader, settings.loreIndex.promptTokens) : "";
+  const perspective = renderPrompt(ROLES_TEXT.sees[context.perspective], own2, ask.names);
+  const system = renderPrompt(roleTextId(role, "system"), own2, { ...ask.names, knowledge: perspective });
+  const view = await ctx.reader.view().catch(() => null);
+  const instructions = view ? await systemInstructions(view, { role, tokens: settings.agents.systemTokens, texts: own2 }) : "";
+  const pins = view ? await pinnedFiles(view, { role, tokens: settings.agents.main.pinsTokens, pinned: true, texts: own2, framing: ROLE_PINS_TEXTS, config: context.pins }) : "";
+  const indexed = view && context.start.includes(LORE_INDEX_SOURCE) ? await loreIndexText(view, { tokens: settings.loreIndex.promptTokens }) : "";
+  const index = typeof indexed === "string" ? indexed : "";
   const prefix = [renderPrompt(roleTextId(role, "instructions"), own2, ask.names), guidanceOf(rt, ctx, own2, ask.names), pins, index].filter((t) => t.trim() !== "");
-  const tools = ask.tools && knowledge ? roleTools(ctx, io, ask.tools, own2, knowledge) : [];
+  const sections = await ctx.sections(context.start.filter((s) => s !== LORE_INDEX_SOURCE));
   const answer = ask.answer?.part ?? "answer";
-  const told = ctx.brief?.for(ask.reads ?? (ctx.settings.knowledge === "own" ? { own: null } : ctx.settings.knowledge)) ?? "";
-  const message = [renderPrompt(roleTaskTextId(role, ask.sub, "task"), own2, { ...ask.names, ...ask.vars }, ask.own), ask.data ?? "", renderPrompt(roleTaskTextId(role, ask.sub, answer), own2, { ...ask.names, ...ask.answer?.vars ?? {} }), told].filter((t) => t.trim() !== "").join(`
+  const message = [
+    renderPrompt(roleTaskTextId(role, ask.sub, "task"), own2, { ...ask.names, ...ask.vars }, ask.own),
+    ask.data ?? "",
+    sections === "" ? "" : renderPrompt(ROLES_TEXT.context, own2, { ...ask.names, sections }),
+    renderPrompt(roleTaskTextId(role, ask.sub, answer), own2, { ...ask.names, ...ask.answer?.vars ?? {} }),
+    ctx.brief ?? ""
+  ].filter((t) => t.trim() !== "").join(`
 
 `);
-  const handle = startRoleAgent(rt, at2, { system, prefix, tools }, { phase: ask.phase, task: ask.sub });
+  const condenseSystem = withInstructions(renderPrompt(RUNTIME_TEXT.condenseSystem, own2, {}), instructions);
+  const summarize = async (asked2, text7, signal2) => {
+    const condenser = startRoleAgent(rt, at2, { system: condenseSystem, prefix: [], tools: [] }, { phase: ask.phase, task: "condense" });
+    try {
+      const reply2 = await condenser.send(`${asked2}
+
+${text7}`, AbortSignal.any([ctx.signal, signal2]));
+      return reply2.status === "answered" && reply2.text.trim() !== "" ? { text: reply2.text.trim() } : { failed: reply2.reason ?? renderPrompt(FAILED_TEXT.noAnswer, own2, {}) };
+    } finally {
+      await recordAgentCalls(rt.diag, { at: { chatId: ctx.chatId, userId: ctx.userId, turn: ctx.generationId }, phase: ask.phase, role, connection: at2.settings.connectionId ?? "active", model: at2.settings.model, transcript: condenser.transcript() }).catch(() => {
+        return;
+      });
+    }
+  };
+  const tools = ask.tools ? roleTools(ctx, ask.tools, own2, summarize) : [];
+  const handle = startRoleAgent(rt, at2, { system: withInstructions(system, instructions), prefix, tools }, { phase: ask.phase, task: ask.sub });
   rt.diag.agentWorking(ctx.chatId, ctx.userId, handle.id, ROLE_LABEL2[role]);
   let reply;
   try {
@@ -89292,7 +90065,7 @@ async function roleCtx(rt, ctx, role) {
   const settings = await rt.settings.get(ctx.userId);
   return { ...ctx, role, agentId: `${ctx.agentId}>${role}`, settings: settings.agents.roles[role], brief: null };
 }
-function namesOf5(world, state2) {
+function namesOf4(world, state2) {
   return { world: world.name, pov: state2.entities[world.pov]?.name ?? world.pov };
 }
 
@@ -89309,6 +90082,7 @@ async function mindRun(rt, ctx, call, phase) {
   const kind = KINDS2[call.kind];
   const settings = await rt.settings.get(ctx.userId);
   const taskId = roleTaskTextId(kind.role, kind.sub, "task");
+  const world = (await ctx.reader.view().catch(() => null))?.world ?? null;
   const answer = call.knowing ? { part: "answer_knowing" } : call.kind === "knowledge" ? { part: "answer", vars: { lists: knowledgeText(settings.minds.knowledge, "stepAnswer") } } : undefined;
   return runRoleAgent(rt, ctx, {
     sub: kind.sub,
@@ -89319,8 +90093,7 @@ async function mindRun(rt, ctx, call, phase) {
     ...call.template !== null ? { own: { [taskId]: call.template } } : {},
     data: call.context,
     ...answer ? { answer } : {},
-    tools: null,
-    ...ctx.settings.knowledge === "own" ? { reads: { own: call.who } } : {},
+    tools: world,
     check: (raw) => call.check(raw) ? raw : null
   });
 }
@@ -89494,7 +90267,7 @@ async function decideRun(rt, task, ctx) {
   const state2 = await learnFirst(rt, task, ctx, choosers);
   const questionId = roleTaskTextId("director", "decisions", "question");
   const question = renderPrompt(questionId, ownTexts, {}, task.template !== null ? { [questionId]: task.template } : null);
-  const names3 = namesOf5(task.world, task.state);
+  const names3 = namesOf4(task.world, task.state);
   const cal = calendarOf(task.world);
   const asked2 = await Promise.all(choosers.map(async (who) => {
     const ties = task.ties.filter((t) => t.agent === who);
@@ -89517,8 +90290,7 @@ async function decideRun(rt, task, ctx) {
         holdings: task.knowing ? heldKnowledge({ reg: rt.registry, world: task.world, state: state2, who }, settings.minds.knowledge, place2) : "",
         choices: JSON.stringify(choices)
       },
-      tools: null,
-      reads: { own: who },
+      tools: task.world,
       check: (raw) => {
         const answers = decisionAnswers(raw, questions);
         const odds2 = answers ? npcOddsOf(ties, answers) : {};
@@ -89563,8 +90335,7 @@ async function proseRun(rt, task, ctx) {
     sub: "prose",
     purpose: brief ? "brief" : "outline",
     phase: "prose",
-    reads: "pov",
-    names: namesOf5(task.world, task.state),
+    names: namesOf4(task.world, task.state),
     vars: { ...vars, ...proseData(vars), asks: [brief ? rule("brief", brief) : "", outline2 ? rule("outline", outline2) : ""].filter((t) => t !== "").join(`
 
 `), sections: outline2?.vars.sections ?? "" },
@@ -89575,15 +90346,18 @@ async function proseRun(rt, task, ctx) {
         return null;
       const clash = proseClashes(rt.registry, task.world, task.start, task.state);
       const flagged = [];
-      const kept2 = (line2) => {
+      const flag = (line2) => {
         const kind = clash(line2);
         if (kind !== null)
           flagged.push({ kind, line: line2 });
-        return kind === null;
       };
-      const said2 = brief ? proseAnswer("brief", raw.brief, brief.withheld).join(" ").trim() : "";
-      const told = said2.split(/(?<=[.!?])\s+(?=["\u201C'(]?\p{Lu})/u).filter((s) => s.trim() !== "" && kept2(s)).join(" ");
-      const beats = outline2 ? proseAnswer("outline", raw.beats, (line2) => outline2.withheld(line2) || !kept2(line2)) : [];
+      const told = brief ? proseAnswer("brief", raw.brief, brief.mark).join(" ").trim() : "";
+      for (const sentence3 of told.split(/(?<=[.!?])\s+(?=["\u201C'(]?\p{Lu})/u))
+        if (sentence3.trim() !== "")
+          flag(sentence3);
+      const beats = outline2 ? proseAnswer("outline", raw.beats, outline2.mark) : [];
+      for (const beat of beats)
+        flag(beat);
       return { prose: { brief: told === "" ? null : told, outline: beats }, ...flagged.length > 0 ? { flagged } : {} };
     }
   });
@@ -89599,8 +90373,7 @@ async function choicesRun(rt, task, ctx) {
     names: { world: task.vars.world ?? "", pov: task.vars.pov ?? "" },
     vars: { ...task.vars, ...proseData(task.vars), rule: renderPrompt(ruleId, ownTexts, task.vars, task.template !== null ? { [ruleId]: task.template } : null), reply: task.reply },
     tools: null,
-    reads: "pov",
-    check: (raw) => isRecord(raw) ? proseAnswer("choices", raw.choices, task.withheld) : null
+    check: (raw) => isRecord(raw) ? proseAnswer("choices", raw.choices) : null
   });
 }
 
@@ -89646,7 +90419,7 @@ async function judgeRun(rt, task, ctx) {
     sub: "judge",
     purpose: "judge",
     phase: "pre",
-    names: namesOf5(task.world, task.state),
+    names: namesOf4(task.world, task.state),
     vars: {
       question: renderPrompt(question, own2, {}, task.template !== null ? { [question]: task.template } : null),
       max: String(task.ask.max),
@@ -89667,7 +90440,7 @@ async function puzzleRun(rt, task, ctx) {
     sub: "puzzle",
     purpose: "puzzle.answer",
     phase: "pre",
-    names: namesOf5(task.world, task.state),
+    names: namesOf4(task.world, task.state),
     vars: { question: renderPrompt(question, own2, {}, task.template !== null ? { [question]: task.template } : null), puzzle: task.question, accepted: JSON.stringify(task.accepted), answer: task.answer },
     tools: null,
     check: (raw) => {
@@ -89747,12 +90520,12 @@ async function extractRun(rt, task, ctx) {
 }
 
 // src/backend/agents/roles/scene.ts
-function sceneAnswer(raw, knowledge) {
+function sceneAnswer(raw) {
   if (!isRecord(raw) || !Array.isArray(raw.lore) || !Array.isArray(raw.notes))
     return null;
   const lore3 = [...new Set(raw.lore.flatMap((id) => typeof id === "string" && id.trim() !== "" ? [id.trim()] : []))];
   const notes = [...new Set(raw.notes.flatMap((n) => typeof n === "string" && n.trim() !== "" ? [n.replace(/\s+/g, " ").trim()] : []))];
-  return { lore: lore3, notes, knowledge };
+  return { lore: lore3, notes };
 }
 async function liveLoreIds(reader, world, refs) {
   let view;
@@ -89767,15 +90540,14 @@ async function liveLoreIds(reader, world, refs) {
   return { lore: [...new Set(ids2.filter(has))], unknown: refs.filter((_, i) => !has(ids2[i])) };
 }
 async function sceneRun(rt, task, ctx) {
-  const knowledge = ctx.settings.knowledge === "own" ? "pov" : ctx.settings.knowledge;
   const answer = await runRoleAgent(rt, ctx, {
     sub: "scene",
     purpose: null,
     phase: "pre",
-    names: namesOf5(task.world, task.state),
+    names: namesOf4(task.world, task.state),
     vars: { text: task.text, place: povPlace(rt.registry, task.world, task.state)?.name ?? "", present: presentNames(rt.registry, task.world, task.state).join(", ") },
     tools: task.world,
-    check: (raw) => sceneAnswer(raw, knowledge)
+    check: (raw) => sceneAnswer(raw)
   });
   if (!answer.ok)
     return answer;
@@ -89835,6 +90607,7 @@ var NARRATOR_READS2 = "brief";
 
 class ToolReadView {
   knowledge;
+  marked;
   registry;
   world;
   state;
@@ -89856,6 +90629,7 @@ class ToolReadView {
   gates = null;
   constructor(input) {
     this.knowledge = input.knowledge;
+    this.marked = input.knowledge === "everyone" || input.marks === true;
     this.registry = input.registry;
     this.world = input.world;
     this.state = input.state;
@@ -89874,48 +90648,22 @@ class ToolReadView {
   read(read) {
     return readPass(read);
   }
-  povKnowsEntity(id) {
-    return povMayKnow(this.registry, this.world, this.state, id);
-  }
-  povSeesPlace(id) {
-    return canSeePlace(this.registry, this.world, this.state, this.pov, id);
-  }
-  povTrack(id) {
-    return playerTrack(this.registry, this.world, this.state, this.pov, id);
-  }
-  povSeesField(entity2, field2) {
-    return canSeeField(this.registry, this.world, this.state, this.pov, entity2, field2);
-  }
-  povReadsLore(entry) {
-    return loreReadable(this.registry, this.world, this.state, entry, NARRATOR_READS2, false, this.gate()) || loreIsSecret(entry) && loreHeldBy(this.world, entry, this.pov);
-  }
   seesEntity(id) {
     if (!hasOwn(this.state.entities, id))
       return false;
-    if (this.knowledge === "gm")
-      return true;
-    if (this.knowledge === "everyone")
-      return !isGone(this.state, id);
-    return this.povKnowsEntity(id);
+    return this.knowledge === "gm" || !isGone(this.state, id);
   }
   seesPlace(id) {
-    if (!hasOwn(this.world.places, id))
-      return false;
-    return this.knowledge === "pov" ? this.povSeesPlace(id) : true;
+    return hasOwn(this.world.places, id);
   }
   seesTrack(id) {
-    if (!hasOwn(this.world.tracks, id))
-      return false;
-    return this.knowledge === "pov" ? this.povTrack(id) !== null : true;
+    return hasOwn(this.world.tracks, id);
   }
   seesFact(id) {
-    const slice2 = readSlice(this.state);
-    return this.knowledge === "pov" ? own(holdingsOf(slice2, this.pov), id) !== undefined : own(factsOf(slice2), id) !== undefined;
+    return own(factsOf(readSlice(this.state)), id) !== undefined;
   }
-  seesField(entity2, field2) {
-    if (!this.seesEntity(entity2))
-      return false;
-    return this.knowledge === "pov" ? this.povSeesField(entity2, field2) : true;
+  seesField(entity2, _field) {
+    return this.seesEntity(entity2);
   }
   isPerson(id) {
     const e = own(this.state.entities, id);
@@ -89972,22 +90720,19 @@ class ToolReadView {
   loreSecrecy(entry) {
     if (loreIsSecret(entry))
       return this.gate()(entry) ? null : { known: this.knowers(null, (who) => loreHeldBy(this.world, entry, who)), kept: "everyone" };
-    const v3 = entry.visibility;
-    if (v3 === undefined || v3 === "public")
+    const v4 = entry.visibility;
+    if (v4 === undefined || v4 === "public")
       return null;
-    return { known: v3 === "known_by" ? this.knowers(null, (who) => loreReadable(this.registry, this.world, this.state, entry, NARRATOR_READS2, false, this.gate(), who)) : [], kept: "everyone" };
+    return { known: v4 === "known_by" ? this.knowers(null, (who) => loreReadable(this.registry, this.world, this.state, entry, NARRATOR_READS2, false, this.gate(), who)) : [], kept: "everyone" };
   }
   mark(text7, secrecy) {
-    return this.knowledge === "everyone" && secrecy ? secretMarkText(text7, secrecy.known, secrecy.kept, this.wording) : text7;
+    return this.marked && secrecy ? secretMarkText(text7, secrecy.known, secrecy.kept, this.wording) : text7;
   }
   entryText(text7) {
-    return applyMarks(text7, { world: this.world, state: this.state, wording: this.wording }, this.knowledge === "pov" ? `holder:${this.pov}` : "marked");
+    return applyMarks(text7, { world: this.world, state: this.state, wording: this.wording }, "marked");
   }
   name(id) {
     return labelOf(this.ctx, id);
-  }
-  trackRef(id) {
-    return this.knowledge === "pov" ? shownTrackId(this.world, id) : id;
   }
   entity(id) {
     if (!this.seesEntity(id))
@@ -89996,7 +90741,7 @@ class ToolReadView {
     if (this.knowledge !== "gm")
       return { id, name: this.mark(name, this.entitySecrecy(id)) };
     const visibility = isDiscoverable(this.world, this.state, id) ? "discoverable" : entityVisibility(this.world, this.state, id);
-    return { id, name, ...visibility !== "public" ? { visibility } : {}, ...isGone(this.state, id) ? { visibility: "removed" } : {} };
+    return { id, name: this.marked ? this.mark(name, this.entitySecrecy(id)) : name, ...visibility !== "public" ? { visibility } : {}, ...isGone(this.state, id) ? { visibility: "removed" } : {} };
   }
   place(id) {
     if (!this.seesPlace(id))
@@ -90006,7 +90751,7 @@ class ToolReadView {
     if (this.knowledge !== "gm")
       return { id, name: this.mark(name, this.placeSecrecy(id)) };
     const visibility = def2?.visibility === "discoverable" ? "discoverable" : visibilityOf(def2?.visibility);
-    return { id, name, ...visibility !== "public" ? { visibility } : {} };
+    return { id, name: this.marked ? this.mark(name, this.placeSecrecy(id)) : name, ...visibility !== "public" ? { visibility } : {} };
   }
   get hiddenPlace() {
     return HIDDEN_PLACE_NAME;
@@ -90015,14 +90760,10 @@ class ToolReadView {
     const t = own(this.world.tracks, id);
     if (!t)
       return null;
-    if (this.knowledge === "pov") {
-      const shown4 = this.povTrack(id);
-      return shown4 ? { id: shown4.id, name: shown4.label } : null;
-    }
     if (this.knowledge === "everyone")
       return { id, name: this.mark(t.label, this.trackSecrecy(id)) };
     const visibility = visibilityOf(t.visibility);
-    return { id, name: t.label, ...visibility !== "public" ? { visibility } : {} };
+    return { id, name: this.marked ? this.mark(t.label, this.trackSecrecy(id)) : t.label, ...visibility !== "public" ? { visibility } : {} };
   }
   lore() {
     this.loreRead ??= this.readLore(this.world);
@@ -90035,12 +90776,10 @@ class ToolReadView {
     if (this.knowledge === "gm") {
       const secrecy = this.loreSecrecy(entry);
       const visibility = entry.visibility;
-      return { id: entry.id, title, text: text7, ...loreIsSecret(entry) ? { secret: true } : {}, ...secrecy && secrecy.known.length > 0 ? { holders: [...secrecy.known] } : {}, ...typeof visibility === "string" && visibility !== "public" ? { visibility } : {}, ...source.kind === "ai" && source.status === "pending" ? { visibility: "pending review" } : {} };
+      return { id: entry.id, title, text: this.mark(text7, secrecy), ...loreIsSecret(entry) ? { secret: true } : {}, ...secrecy && secrecy.known.length > 0 ? { holders: [...secrecy.known] } : {}, ...typeof visibility === "string" && visibility !== "public" ? { visibility } : {}, ...source.kind === "ai" && source.status === "pending" ? { visibility: "pending review" } : {} };
     }
     if (source.kind === "ai" && source.status === "pending")
       return null;
-    if (this.knowledge === "pov")
-      return this.povReadsLore(entry) ? { id: entry.id, title, text: text7 } : null;
     return { id: entry.id, title, text: this.mark(text7, this.loreSecrecy(entry)) };
   }
   blob(hash) {
@@ -90085,6 +90824,7 @@ function outsideReader(rt, env) {
       const settings = await rt.settings.get(env.userId);
       return readView({
         knowledge: env.knowledge,
+        marks: env.marks,
         registry: rt.registry,
         world: head.world,
         state: head.state,
@@ -90106,15 +90846,14 @@ function outsideReader(rt, env) {
 }
 
 // src/backend/agents/tools/writer.ts
-function isLearnedOp(op) {
+function isKeptOp(op) {
   switch (op.kind) {
     case "ws_write":
     case "ws_delete":
     case "ws_pin":
-    case "ws_readers":
-      return typeof op.path === "string" && isLearnedPath(op.path);
+      return typeof op.path === "string" && isKeptPath(op.path);
     case "ws_move":
-      return typeof op.from === "string" && isLearnedPath(op.from);
+      return typeof op.from === "string" && isKeptPath(op.from);
     default:
       return false;
   }
@@ -90132,8 +90871,8 @@ function outsideWriter(rt, env) {
 function refusal(code, reason2, key) {
   return { refused: true, code, reason: reason2, ...key !== undefined ? { key } : {} };
 }
-function isOpRefusal(v3) {
-  return "refused" in v3;
+function isOpRefusal(v4) {
+  return "refused" in v4;
 }
 var isRefusal = isOpRefusal;
 var MIND_OPS = { mind_pin: true, mind_refresh: true, mind_memory: true, mind_intent: true, mind_knowledge: true };
@@ -90160,67 +90899,55 @@ function prepareFix(rt, ctx, state2, key, op) {
   const ops = moved && doing !== undefined && doing !== "idle" ? [set, { op: "fix_set", entity: fix.entity, field: "activity", value: "idle" }] : [set];
   return { key, op, ops };
 }
-function prepareFile(ctx, env, state2, learned, key, op) {
-  const files = workspaceOf(state2);
-  const gm = env.agent.role === GM_ROLE;
-  const readersAt = (path2) => isLearnedPath(path2) ? own(learned, path2)?.readers : own(files, path2) !== undefined ? readersOf(state2, path2) : undefined;
-  const hidden = (path2) => {
-    const readers = readersAt(path2);
-    return readers !== undefined && !knowledgeWithin(readers, env.knowledge);
-  };
-  const bad2 = (path2) => !isWorkspacePath(path2) ? refusal("bad_path", ctx.view.text(WRITE_NOTE.badPath, { path: String(path2) }), key) : isTranscriptPath(path2) ? refusal("transcript", ctx.view.text(WRITE_NOTE.transcriptReadOnly, { path: path2 }), key) : null;
+function keptIn(path2) {
+  return isGlobalPath(path2) ? "global" : isLearnedPath(path2) ? "learned" : "story";
+}
+function prepareFile(ctx, env, kept3, key, op) {
+  const bad2 = (path2) => !isFilePath(path2) ? refusal("bad_path", ctx.view.text(WRITE_NOTE.badPath, { path: String(path2) }), key) : isTranscriptPath(path2) ? refusal("transcript", ctx.view.text(WRITE_NOTE.transcriptReadOnly, { path: path2 }), key) : null;
   const none = (path2) => refusal("no_file", ctx.view.text(WRITE_NOTE.noFile, { path: path2 }), key);
   const badOp = () => refusal("bad_op", ctx.view.text(WRITE_NOTE.badOp), key);
   const same3 = () => refusal("no_change", ctx.view.text(WRITE_NOTE.noChange), key);
-  const learn = (changes, shown4, body) => ({ key, op, ops: [], ...body ? { body } : {}, learned: { changes, shown: shown4 } });
+  const keep = (changes, shown4, body) => ({ key, op, ops: [], ...body ? { body } : {}, kept: { changes, shown: shown4 } });
   switch (op.kind) {
     case "ws_write": {
       const wrong = bad2(op.path);
       if (wrong)
         return wrong;
-      if (typeof op.text !== "string" || op.readers !== undefined && (!gm || !isAgentKnowledge(op.readers)))
+      if (typeof op.text !== "string")
         return badOp();
-      if (hidden(op.path))
-        return refusal("path_taken", ctx.view.text(WRITE_NOTE.pathTaken, { path: op.path }), key);
-      const readers = gm ? op.readers ?? readersAt(op.path) ?? "gm" : env.knowledge;
       const hash = blobHash(op.text);
       const body = { text: op.text, hash };
-      if (!isLearnedPath(op.path))
-        return { key, op, ops: [{ op: "ws_write", path: op.path, hash, readers }], body };
-      const now = own(learned, op.path);
-      if (now?.hash === hash && now.readers === readers)
+      if (!isKeptPath(op.path))
+        return { key, op, ops: [{ op: "ws_write", path: op.path, hash }], body };
+      const now = own(kept3, op.path);
+      if (now?.hash === hash)
         return same3();
-      const shown4 = [...now?.hash === hash ? [] : [wsWrite(op.path, hash)], ...(now?.readers ?? "gm") !== readers ? [wsReaders(op.path, readers)] : []];
-      return learn({ [op.path]: { hash, readers, ...now?.pinned ? { pinned: true } : {}, role: env.agent.role } }, shown4, body);
+      return keep({ [op.path]: { hash, ...now?.pinned ? { pinned: true } : {}, role: env.agent.role } }, [wsWrite(op.path, hash)], body);
     }
     case "ws_delete": {
       const wrong = bad2(op.path);
       if (wrong)
         return wrong;
-      if (hidden(op.path))
-        return none(op.path);
-      if (!isLearnedPath(op.path))
+      if (!isKeptPath(op.path))
         return { key, op, ops: [{ op: "ws_delete", path: op.path }] };
-      return own(learned, op.path) ? learn({ [op.path]: null }, [wsDelete(op.path)]) : none(op.path);
+      return own(kept3, op.path) ? keep({ [op.path]: null }, [wsDelete(op.path)]) : none(op.path);
     }
     case "ws_move": {
       const wrong = bad2(op.from) ?? bad2(op.to);
       if (wrong)
         return wrong;
-      if (hidden(op.from))
-        return none(op.from);
-      if (isLearnedPath(op.from) !== isLearnedPath(op.to))
+      if (keptIn(op.from) !== keptIn(op.to))
         return refusal("learned_move", ctx.view.text(WRITE_NOTE.learnedMove, { path: op.from, to: op.to }), key);
-      if (!isLearnedPath(op.from))
+      if (!isKeptPath(op.from))
         return { key, op, ops: [{ op: "ws_move", from: op.from, to: op.to }] };
-      const file = own(learned, op.from);
+      const file = own(kept3, op.from);
       if (!file)
         return none(op.from);
       if (op.to === op.from)
         return same3();
-      if (own(learned, op.to))
+      if (own(kept3, op.to))
         return refusal("file_exists", ctx.view.text(WRITE_NOTE.fileExists, { to: op.to }), key);
-      return learn({ [op.from]: null, [op.to]: file }, [wsWrite(op.to, file.hash), wsDelete(op.from), ...file.pinned ? [wsPin(op.to, true)] : [], ...file.readers !== "gm" ? [wsReaders(op.to, file.readers)] : []]);
+      return keep({ [op.from]: null, [op.to]: file }, [wsWrite(op.to, file.hash), wsDelete(op.from), ...file.pinned ? [wsPin(op.to, true)] : []]);
     }
     case "ws_pin": {
       const wrong = bad2(op.path);
@@ -90228,36 +90955,19 @@ function prepareFile(ctx, env, state2, learned, key, op) {
         return wrong;
       if (typeof op.pinned !== "boolean")
         return badOp();
-      if (hidden(op.path))
-        return none(op.path);
-      if (!isLearnedPath(op.path))
+      if (!isKeptPath(op.path))
         return { key, op, ops: [{ op: "ws_pin", path: op.path, pinned: op.pinned }] };
-      const file = own(learned, op.path);
+      const file = own(kept3, op.path);
       if (!file)
         return none(op.path);
       if (file.pinned === true === op.pinned)
         return same3();
       const { pinned: _pinned, ...rest } = file;
-      return learn({ [op.path]: op.pinned ? { ...rest, pinned: true } : rest }, [wsPin(op.path, op.pinned)]);
-    }
-    case "ws_readers": {
-      if (!gm || !isAgentKnowledge(op.readers))
-        return badOp();
-      const wrong = bad2(op.path);
-      if (wrong)
-        return wrong;
-      if (!isLearnedPath(op.path))
-        return { key, op, ops: [{ op: "ws_readers", path: op.path, readers: op.readers }] };
-      const file = own(learned, op.path);
-      if (!file)
-        return none(op.path);
-      if (file.readers === op.readers)
-        return same3();
-      return learn({ [op.path]: { ...file, readers: op.readers } }, [wsReaders(op.path, op.readers)]);
+      return keep({ [op.path]: op.pinned ? { ...rest, pinned: true } : rest }, [wsPin(op.path, op.pinned)]);
     }
   }
 }
-function prepare2(rt, ctx, env, state2, learned, op) {
+function prepare2(rt, ctx, env, state2, kept3, op) {
   const bad2 = (key2) => refusal("bad_op", ctx.view.text(WRITE_NOTE.badOp), key2);
   if (!isRecord(op))
     return bad2();
@@ -90286,8 +90996,7 @@ function prepare2(rt, ctx, env, state2, learned, op) {
     case "ws_delete":
     case "ws_move":
     case "ws_pin":
-    case "ws_readers":
-      return prepareFile(ctx, env, state2, learned, key, op);
+      return prepareFile(ctx, env, kept3, key, op);
     default:
       return bad2(key);
   }
@@ -90433,18 +91142,6 @@ function unseenValues(rt, ctx, state2, ops) {
   }
   return null;
 }
-function unseenField(rt, ctx, state2, ops) {
-  const { world } = ctx.head;
-  for (const op of ops) {
-    if (op.op !== "set" && op.op !== "fix_set" && op.op !== "add")
-      continue;
-    const kind = own(state2.entities, op.entity)?.kind;
-    const declared = kind !== undefined && fieldDef(rt.registry, world, kind, op.field) !== undefined;
-    if (!declared || !canSeeField(rt.registry, world, state2, world.pov, op.entity, op.field))
-      return ctx.view.text(TOOL_NOTE.noField, { name: op.field });
-  }
-  return null;
-}
 function moneyField(rt, head, state2, entity2, field2) {
   return fieldDef(rt.registry, head.world, own(state2.entities, entity2)?.kind ?? "", field2)?.type === "money";
 }
@@ -90454,7 +91151,6 @@ function changeTypeOf(rt, head, state2, op) {
     case "ws_delete":
     case "ws_move":
     case "ws_pin":
-    case "ws_readers":
       return "workspace";
     case "mind_edit":
     case "routine_edit":
@@ -90505,28 +91201,25 @@ function gate(rt, ctx, env, state2, p) {
 function marker(rt, ctx, state2) {
   const { world } = ctx.head;
   const secrets = unrevealedSecrets(rt.registry, world, state2);
-  const kept2 = [own(state2.entities, world.pov)?.name ?? world.pov];
-  return (text7) => findLeaks(text7, secrets).length > 0 ? ctx.view.mark(text7, { known: [], kept: kept2 }) : text7;
+  const kept3 = [own(state2.entities, world.pov)?.name ?? world.pov];
+  return (text7) => findLeaks(text7, secrets).length > 0 ? ctx.view.mark(text7, { known: [], kept: kept3 }) : text7;
 }
-function refused(rt, ctx, knowledge, rejection, key) {
-  if (knowledge === "gm")
-    return refusal(rejection.code, rejection.gm ?? rejection.reason, key);
-  if (knowledge === "everyone")
-    return refusal(rejection.code, marker(rt, ctx, ctx.head.state)(rejection.gm ?? rejection.reason), key);
-  return refusal(rejection.code === WRITE_REFUSED ? WRITE_REFUSED : "refused", ctx.view.text(WRITE_NOTE.povRefused, { pov: ctx.view.name(ctx.view.pov) }), key);
+function refused(rt, ctx, view, rejection, key) {
+  const reason2 = rejection.gm ?? rejection.reason;
+  return refusal(rejection.code, view === "gm" ? reason2 : marker(rt, ctx, ctx.head.state)(reason2), key);
 }
-function opLines(rt, ctx, knowledge, type, after, events3) {
+function opLines(rt, ctx, reader, type, after, events3) {
   const reg = rt.registry;
   const world = ctx.head.world;
   if (type === "workspace")
-    return knowledge === "gm" ? authorLines(reg, world, after, events3, events3.length) : [ctx.view.text(WRITE_NOTE.workspaceLine)];
+    return reader === "gm" ? authorLines(reg, world, after, events3, events3.length) : [ctx.view.text(WRITE_NOTE.workspaceLine)];
   const clock = clockFixLine(events3);
-  if (knowledge === "pov") {
+  if (reader === "player") {
     const lines4 = [...clock ? [clock] : [], ...playerLines(reg, world, after, world.pov, events3, events3.length)];
     return lines4.length > 0 || events3.length === 0 ? lines4 : [unseenFixLine(reg, world, after, events3)];
   }
   const lines3 = [...clock ? [clock] : [], ...authorLines(reg, world, after, events3, events3.length)];
-  return knowledge === "gm" ? lines3 : lines3.map(marker(rt, ctx, after));
+  return reader === "gm" ? lines3 : lines3.map(marker(rt, ctx, after));
 }
 async function context(rt, env) {
   const settings = await rt.settings.get(env.userId);
@@ -90535,45 +91228,36 @@ async function context(rt, env) {
   const head = await chatHead(rt, env.chatId, env.userId);
   if (!head)
     return refusal("no_world", renderPrompt(WRITE_NOTE.noWorld, settings.prompts.texts, {}));
-  const { learned } = await rt.chatAgents.get(env.chatId, env.userId);
-  return contextOf(rt, env, head, settings, await rt.settings.learningOf(env.userId), learned, await rt.activeConnectionId(env.userId));
+  return contextOf(rt, env, head, settings, await rt.settings.learningOf(env.userId), await keptFiles(rt, env.chatId, env.userId), await rt.activeConnectionId(env.userId));
 }
-function contextOf(rt, env, head, settings, learning2, learned, active) {
+function contextOf(rt, env, head, settings, learning2, kept3, active) {
   const view = readView({ knowledge: env.knowledge, registry: rt.registry, world: head.world, state: head.state, texts: settings.prompts.texts, wording: markWording(settings.prompts.texts), threshold: settings.minds.knowledge.threshold });
-  return { head, view, settings, learning: learning2, learned, active };
+  return { head, view, settings, learning: learning2, kept: kept3, active };
 }
-function checkOp(rt, ctx, env, state2, learned, op) {
-  const p = prepare2(rt, ctx, env, state2, learned, op);
+function checkOp(rt, ctx, env, state2, kept3, op) {
+  const p = prepare2(rt, ctx, env, state2, kept3, op);
   if (isRefusal(p))
     return p;
-  const pov = { pov: ctx.view.name(ctx.view.pov) };
-  if (env.knowledge === "pov" && p.ops.some((o) => o.op === "effect"))
-    return refusal("pov_effect", ctx.view.text(WRITE_NOTE.povEffect, pov), p.key);
-  if (env.knowledge === "pov" && p.ops.some((o) => own(MIND_OPS, o.op) !== undefined && ("entity" in o) && o.entity !== ctx.head.world.pov))
-    return refusal("not_your_mind", ctx.view.text(WRITE_NOTE.notYourMind, pov), p.key);
-  const hidden = unseen(ctx, state2, p.ops) ?? (env.knowledge !== "gm" ? unseenValues(rt, ctx, state2, p.ops) : null) ?? (env.knowledge === "pov" ? unseenField(rt, ctx, state2, p.ops) : null);
+  const hidden = unseen(ctx, state2, p.ops) ?? (env.knowledge !== "gm" ? unseenValues(rt, ctx, state2, p.ops) : null);
   if (hidden !== null)
     return refusal("not_found", hidden, p.key);
-  const named = env.knowledge === "pov" ? p.ops.find((o) => o.op === "spawn" && o.id !== undefined) : undefined;
-  if (named?.op === "spawn")
-    return refusal("bad_id", ctx.view.text(WRITE_NOTE.spawnId, { id: named.id ?? "" }), p.key);
   const g = gate(rt, ctx, env, state2, p);
   if (isRefusal(g))
     return g;
-  if (p.learned)
-    return { p, type: g.type, mode: g.mode, events: [], shown: p.learned.shown };
+  if (p.kept)
+    return { p, type: g.type, mode: g.mode, events: [], shown: p.kept.shown };
   const out = resolveEdit(rt.registry, ctx.head.world, state2, p.ops, { gm: true, runSeed: ctx.head.run.runSeed });
   if ("rejection" in out)
     return refused(rt, ctx, env.knowledge, out.rejection, p.key);
   if (out.events.length === 0)
-    return env.knowledge === "pov" ? refusal("refused", ctx.view.text(WRITE_NOTE.povRefused, pov), p.key) : refusal("no_change", ctx.view.text(WRITE_NOTE.noChange), p.key);
+    return refusal("no_change", ctx.view.text(WRITE_NOTE.noChange), p.key);
   return { p, type: g.type, mode: g.mode, events: out.events, shown: out.events };
 }
 async function dryRun(rt, env, op) {
   const ctx = await context(rt, env);
   if (isRefusal(ctx))
     return ctx;
-  const checked = checkOp(rt, ctx, env, ctx.head.state, ctx.learned, op);
+  const checked = checkOp(rt, ctx, env, ctx.head.state, ctx.kept, op);
   if (isRefusal(checked))
     return checked;
   const after = new Working(rt.registry, ctx.head.world, ctx.head.state);
@@ -90621,25 +91305,25 @@ async function apply(rt, env, ops, label2) {
     return { applied: already2.applied, refused: asks.flatMap((ask) => ask && already2.applied.includes(ask) ? [] : [refusal("no_change", ctx.view.text(WRITE_NOTE.noChange), ask ?? undefined)]), chipId: already2.chipId, pending: already2.pending };
   const { world, run: run2 } = ctx.head;
   const running = new Working(rt.registry, world, ctx.head.state);
-  let learned = { ...ctx.learned };
+  let kept3 = { ...ctx.kept };
   const verdicts = [];
   for (const op of ops) {
-    const checked = checkOp(rt, ctx, env, running.state, learned, op);
+    const checked = checkOp(rt, ctx, env, running.state, kept3, op);
     if (isRefusal(checked)) {
       verdicts.push(checked);
       continue;
     }
-    if (checked.p.learned)
-      learned = withLearned(learned, checked.p.learned.changes);
+    if (checked.p.kept)
+      kept3 = withKept(kept3, checked.p.kept.changes);
     else
       running.applyAll(checked.events);
     verdicts.push(checked.p);
   }
-  const kept2 = verdicts.filter((v3) => !isRefusal(v3));
-  if (kept2.length === 0)
-    return { applied: [], refused: verdicts.filter((v3) => isRefusal(v3)), chipId: null, pending: false };
-  const files = kept2.filter((p) => p.learned !== undefined);
-  const edits = kept2.filter((p) => p.learned === undefined);
+  const passed = verdicts.filter((v4) => !isRefusal(v4));
+  if (passed.length === 0)
+    return { applied: [], refused: verdicts.filter((v4) => isRefusal(v4)), chipId: null, pending: false };
+  const files = passed.filter((p) => p.kept !== undefined);
+  const edits = passed.filter((p) => p.kept === undefined);
   const refusedAs = new Map;
   const refuseEdits = (why) => {
     for (const p of edits)
@@ -90649,11 +91333,11 @@ async function apply(rt, env, ops, label2) {
   let pending = false;
   const holder = `agent:${key}`;
   try {
-    for (const p of kept2)
+    for (const p of passed)
       if (p.body)
         await rt.blobs.put(env.userId, p.body.text, holder);
     if (files.length > 0)
-      await rt.chatAgents.setLearned(env.chatId, env.userId, Object.assign({}, ...files.map((p) => p.learned?.changes ?? {})));
+      await landKept(rt, env.chatId, env.userId, Object.assign({}, ...files.map((p) => p.kept?.changes ?? {})));
     if (edits.length > 0) {
       const asked2 = edits.flatMap((p) => p.ops);
       const group = resolveEdit(rt.registry, world, ctx.head.state, asked2, { gm: true, runSeed: run2.runSeed });
@@ -90677,19 +91361,19 @@ async function apply(rt, env, ops, label2) {
   } finally {
     rt.blobs.release(env.userId, holder);
   }
-  const applied = kept2.filter((p) => !refusedAs.has(p)).map((p) => p.key);
-  if (applied.length > 0)
+  const applied = passed.filter((p) => !refusedAs.has(p)).map((p) => p.key);
+  if (edits.some((p) => !refusedAs.has(p)))
     rt.push.changed(env.chatId, env.userId);
-  const refusals = verdicts.flatMap((v3) => {
-    if (isRefusal(v3))
-      return [v3];
-    const after = refusedAs.get(v3);
+  const refusals = verdicts.flatMap((v4) => {
+    if (isRefusal(v4))
+      return [v4];
+    const after = refusedAs.get(v4);
     return after ? [after] : [];
   });
   return { applied, refused: refusals, chipId, pending };
 }
-function withLearned(learned, changes) {
-  const out = { ...learned };
+function withKept(kept3, changes) {
+  const out = { ...kept3 };
   for (const [path2, file] of Object.entries(changes)) {
     if (file === null)
       delete out[path2];
@@ -90697,6 +91381,11 @@ function withLearned(learned, changes) {
       out[path2] = file;
   }
   return out;
+}
+async function landKept(rt, chatId, userId, changes) {
+  const learned = Object.fromEntries(Object.entries(changes).filter(([path2]) => isLearnedPath(path2)));
+  const global = Object.fromEntries(Object.entries(changes).filter(([path2]) => isGlobalPath(path2)));
+  await Promise.all([Object.keys(learned).length > 0 ? rt.chatAgents.setLearned(chatId, userId, learned) : null, Object.keys(global).length > 0 ? rt.globalFiles.set(userId, global) : null]);
 }
 var queues = new WeakMap;
 function serialized(rt, env, task) {
@@ -90782,24 +91471,20 @@ function commitOrder(ops) {
   return [...ops].sort((a, b) => rank(a.role) - rank(b.role) || a.seq - b.seq);
 }
 function opTier(op) {
-  if (op.kind === "ws_write" || op.kind === "ws_delete" || op.kind === "ws_pin")
-    return op.path === PINS_PATH ? "gm" : "story";
-  if (op.kind === "ws_move")
-    return op.from === PINS_PATH || op.to === PINS_PATH ? "gm" : "story";
-  return "gm";
+  return op.kind.startsWith("ws_") ? "story" : "gm";
 }
-function stagedWorkspace(rt, draft, head, learned) {
+function stagedWorkspace(rt, draft, head, kept3) {
   const ops = commitOrder(draft.pending()).filter((o) => o.mode === "auto" && o.op.kind.startsWith("ws_"));
   if (ops.length === 0)
-    return { head, learned, staged: new Map };
+    return { head, kept: kept3, staged: new Map };
   const w = new Working(rt.registry, head.world, head.state);
-  let area = learned;
+  let area = kept3;
   const staged = new Map;
   for (const o of ops) {
     const by = { role: o.role, key: o.key };
-    if (o.learned) {
-      area = withLearned(area, o.learned);
-      for (const path2 of Object.keys(o.learned))
+    if (o.kept) {
+      area = withKept(area, o.kept);
+      for (const path2 of Object.keys(o.kept))
         staged.set(path2, by);
       continue;
     }
@@ -90812,15 +91497,13 @@ function stagedWorkspace(rt, draft, head, learned) {
       if ("data" in e && isRecord(e.data) && typeof e.data.path === "string")
         staged.set(e.data.path, by);
   }
-  return { head: { ...head, state: w.state }, learned: area, staged };
+  return { head: { ...head, state: w.state }, kept: area, staged };
 }
 function turnReader(rt, base, env) {
   return {
     registry: rt.registry,
     async view() {
       const knowledge = env.knowledge;
-      if (knowledge === null)
-        throw new Error("this role reads with its own character's knowledge, which its own context gives it; the tools read as the player character, everyone or the GM");
       const head = base();
       if (!head)
         throw new Error("this chat's world isn't loaded");
@@ -90828,6 +91511,7 @@ function turnReader(rt, base, env) {
       const files = { userId: env.userId, chatId: env.chatId, knowledge };
       return readView({
         knowledge,
+        marks: env.marks,
         registry: rt.registry,
         world: head.world,
         state: head.state,
@@ -90862,24 +91546,24 @@ function turnWriter(rt, draft, env) {
     const note = (id, vars = {}) => renderPrompt(id, settings.prompts.texts, vars);
     if (env.signal.aborted)
       return { refused: true, code: "cancelled", reason: note(WRITE_NOTE.cancelled) };
-    if (env.knowledge === null || env.tier === "read")
+    if (env.tier === "read")
       return { refused: true, code: "no_writer", reason: note(WRITE_NOTE.noWriter) };
     const head = env.base();
     if (!head)
       return { refused: true, code: "no_world", reason: note(WRITE_NOTE.noWorld) };
     const learning2 = await rt.settings.learningOf(env.userId);
-    return { ctx: contextOf(rt, { knowledge: env.knowledge }, head, settings, learning2, env.learned(), await rt.activeConnectionId(env.userId)), settings, learning: learning2 };
+    return { ctx: contextOf(rt, { knowledge: "everyone" }, head, settings, learning2, env.kept(), await rt.activeConnectionId(env.userId)), settings, learning: learning2 };
   };
-  const check = (c, state2, op, knowledge) => {
+  const check = (c, state2, op) => {
     const needs = opTier(op);
     const key = keyOf4(op);
     if (!(env.tier === "gm" || env.tier === "story" && needs === "story"))
       return refusalOf("not_granted", c.ctx.view.text(WRITE_NOTE.notGranted, { tier: env.tier, needs }), key);
     if (needs === "gm" && draft.gmStaged() >= env.gmOps)
       return refusalOf("gm_cap", c.ctx.view.text(WRITE_NOTE.gmCap, { count: String(draft.gmStaged()) }), key);
-    const writer = { userId: env.userId, chatId: env.chatId, knowledge, reader: env.reader, agent: { role: env.role, id: env.agentId }, signal: env.signal, connectionId: env.connectionId };
-    const learned = draft.own(env.agentId, env.phase).reduce((files, o) => o.learned ? withLearned(files, o.learned) : files, c.ctx.learned);
-    return checkOp(rt, c.ctx, writer, state2, learned, op);
+    const writer = { userId: env.userId, chatId: env.chatId, knowledge: "everyone", reader: env.reader, agent: { role: env.role, id: env.agentId }, signal: env.signal, connectionId: env.connectionId };
+    const kept3 = draft.own(env.agentId, env.phase).reduce((files, o) => o.kept ? withKept(files, o.kept) : files, c.ctx.kept);
+    return checkOp(rt, c.ctx, writer, state2, kept3, op);
   };
   const unstaged = (c, op) => {
     const key = keyOf4(op);
@@ -90892,9 +91576,8 @@ function turnWriter(rt, draft, env) {
     const again = key === undefined ? undefined : draft.own(env.agentId, env.phase).find((o) => o.key === key);
     if (again)
       return { key: again.key, changeType: again.changeType, mode: again.mode, lines: again.lines };
-    const knowledge = env.knowledge;
     const state2 = ownState(rt, draft, env, c.ctx.head);
-    const checked = check(c, state2, op, knowledge);
+    const checked = check(c, state2, op);
     if (isOpRefusal(checked)) {
       draft.refuse(env, checked);
       return checked;
@@ -90903,8 +91586,8 @@ function turnWriter(rt, draft, env) {
       await rt.blobs.put(env.userId, checked.p.body.text, env.holder);
     const after = new Working(rt.registry, c.ctx.head.world, state2);
     after.applyAll(checked.events);
-    const lines3 = opLines(rt, c.ctx, knowledge, checked.type, after.state, checked.shown);
-    draft.stage({ phase: env.phase, role: env.role, agentId: env.agentId, key: checked.p.key, op, changeType: checked.type, mode: checked.mode, tier: opTier(op), knowledge, connectionId: env.connectionId, lines: lines3, events: checked.events, ...checked.p.learned ? { learned: checked.p.learned.changes } : {} });
+    const lines3 = opLines(rt, c.ctx, "everyone", checked.type, after.state, checked.shown);
+    draft.stage({ phase: env.phase, role: env.role, agentId: env.agentId, key: checked.p.key, op, changeType: checked.type, mode: checked.mode, tier: opTier(op), connectionId: env.connectionId, lines: lines3, events: checked.events, ...checked.p.kept ? { kept: checked.p.kept.changes } : {} });
     return { key: checked.p.key, changeType: checked.type, mode: checked.mode, lines: lines3 };
   };
   return {
@@ -90912,14 +91595,13 @@ function turnWriter(rt, draft, env) {
       const c = await context2();
       if (isOpRefusal(c))
         return c;
-      const knowledge = env.knowledge;
       const state2 = ownState(rt, draft, env, c.ctx.head);
-      const checked = check(c, state2, op, knowledge);
+      const checked = check(c, state2, op);
       if (isOpRefusal(checked))
         return checked;
       const after = new Working(rt.registry, c.ctx.head.world, state2);
       after.applyAll(checked.events);
-      return { key: checked.p.key, changeType: checked.type, mode: checked.mode, lines: opLines(rt, c.ctx, knowledge, checked.type, after.state, checked.shown) };
+      return { key: checked.p.key, changeType: checked.type, mode: checked.mode, lines: opLines(rt, c.ctx, "everyone", checked.type, after.state, checked.shown) };
     },
     async apply(ops) {
       const c = await context2();
@@ -90953,33 +91635,32 @@ function keyOf4(op) {
   }
 }
 function commitStaged(rt, commit, ops, w) {
-  const out = { committed: [], confirm: [], refused: [], learned: {} };
+  const out = { committed: [], confirm: [], refused: [], kept: {} };
   for (const op of ops) {
-    const env = { userId: commit.userId, chatId: commit.chatId, knowledge: op.knowledge, reader: commit.reader, agent: { role: op.role, id: op.agentId }, signal: commit.signal, connectionId: op.connectionId };
-    const ctx = commit.ctx(op.knowledge);
-    const checked = checkOp(rt, ctx, env, w.state, withLearned(ctx.learned, out.learned), op.op);
+    const env = { userId: commit.userId, chatId: commit.chatId, knowledge: "everyone", reader: commit.reader, agent: { role: op.role, id: op.agentId }, signal: commit.signal, connectionId: op.connectionId };
+    const ctx = commit.ctx();
+    const checked = checkOp(rt, ctx, env, w.state, withKept(ctx.kept, out.kept), op.op);
     if (isOpRefusal(checked)) {
       out.refused.push({ op, refusal: checked });
       continue;
     }
     if (checked.mode === "confirm" && op.approved !== true) {
-      const pov = commit.ctx("pov");
-      const after = new Working(rt.registry, pov.head.world, w.state);
+      const after = new Working(rt.registry, ctx.head.world, w.state);
       after.applyAll(checked.events);
-      out.confirm.push({ ...op, mode: "confirm", events: checked.events, cardLines: opLines(rt, pov, "pov", checked.type, after.state, checked.shown) });
+      out.confirm.push({ ...op, mode: "confirm", events: checked.events, cardLines: opLines(rt, ctx, "player", checked.type, after.state, checked.shown) });
       continue;
     }
-    if (checked.p.learned) {
-      Object.assign(out.learned, checked.p.learned.changes);
+    if (checked.p.kept) {
+      Object.assign(out.kept, checked.p.kept.changes);
       out.committed.push({ op, events: [] });
       continue;
     }
     const mark2 = w.mark();
     const from = w.events.length;
-    const kept2 = w.applyAll(checked.events);
-    if (kept2.length < checked.events.length) {
+    const kept3 = w.applyAll(checked.events);
+    if (kept3.length < checked.events.length) {
       w.restore(mark2);
-      out.refused.push({ op, refusal: refusalOf("write_refused", commit.ctx(op.knowledge).view.text(WRITE_NOTE.stale), op.key) });
+      out.refused.push({ op, refusal: refusalOf("write_refused", ctx.view.text(WRITE_NOTE.stale), op.key) });
       continue;
     }
     if (!checked.events.some((e) => e.group !== undefined))
@@ -90987,6 +91668,46 @@ function commitStaged(rt, commit, ops, w) {
     out.committed.push({ op, events: w.events.slice(from) });
   }
   return out;
+}
+
+// src/backend/agents/context.ts
+async function roleSections(rt, input) {
+  const { head, slots } = input;
+  if (slots.length === 0 || !head)
+    return "";
+  const settings = await rt.settings.get(input.userId);
+  const world = await rt.readLore(input.chatId, input.userId, head.world);
+  const { state: state2 } = head;
+  const texts2 = input.texts ?? settings.prompts.texts;
+  const chat = await rt.chatKnowledge.get(input.chatId, input.userId);
+  const lore3 = (input.scene?.lore ?? []).flatMap((id) => {
+    const entry = world.lore[id];
+    return entry && loreReadable(rt.registry, world, state2, entry, "brief") ? [`${entry.title}: ${entry.content}`] : [];
+  });
+  const notes = input.scene?.notes ?? [];
+  const built = buildSections({
+    registry: rt.registry,
+    world,
+    state: state2,
+    secrets: unrevealedSecrets(rt.registry, world, state2),
+    budget: settings.modelUse.tokens.sections,
+    mindsBudget: settings.minds.tokens,
+    narrator: { chat: chat.narrator ?? null, view: narratorView(chat, world, settings) },
+    wording: markWording(texts2),
+    texts: texts2,
+    knowledge: settings.minds.knowledge,
+    said: input.said,
+    planned: { outcome: [], montage: [], scene: lore3, ...notes.length > 0 ? { notes } : {} },
+    outline: [],
+    elapsed: null,
+    hasEntry: (section) => slots.includes(section.id),
+    cost: sectionTokens,
+    seen: () => {},
+    warn: (message) => rt.host.log("warn", `[LumiRPEngine] a role's sections: ${message}`, input.userId)
+  });
+  return built.fills.map((f) => f.content).join(`
+
+`);
 }
 
 // src/backend/agents/orchestrator.ts
@@ -91101,11 +91822,26 @@ class Orchestrator {
       s.main = new MainTurn(this.mainHost(s), { text: text7, core: input.core, observed: before });
     return true;
   }
+  async beginContinue(input) {
+    if (this.runs.has(input.generationId))
+      return true;
+    if (await this.rt.chatKnowledge.engine(input.chatId, input.userId) !== "agents")
+      return false;
+    if (!(await this.rt.settings.get(input.userId)).agents.finalReview.on)
+      return false;
+    const run2 = await this.rt.runOf(input.chatId, input.userId);
+    const at2 = input.core.renderState(input.observed);
+    const head = run2 && at2 ? { run: run2, core: input.core, observed: input.observed, world: at2.world, state: at2.state } : null;
+    const reply = input.observed.findLastIndex((m) => !m.isUser);
+    const said2 = ownMessage(reply < 0 ? input.observed : input.observed.slice(0, reply));
+    await this.newRun({ chatId: input.chatId, userId: input.userId, key: input.generationId, phase: "plan", head, text: said2 ? said2.swipes[said2.swipeId] ?? "" : "", parentPath: "", retry: false, kind: "reply", mainable: false, cancelRead: (why) => void this.rt.ledger.cancel(input.chatId, input.userId, why) });
+    return true;
+  }
   async newRun(input) {
     const settings = await this.rt.settings.get(input.userId);
     const learning2 = await this.rt.settings.learningOf(input.userId);
     const active = await this.rt.activeConnectionId(input.userId);
-    const { learned } = await this.rt.chatAgents.get(input.chatId, input.userId);
+    const kept3 = await keptFiles(this.rt, input.chatId, input.userId);
     const at2 = { chatId: input.chatId, userId: input.userId, turn: input.key };
     this.rt.diag.agentTurn(at2);
     const own2 = [...this.runs.values()].filter((r) => r.userId === input.userId);
@@ -91120,7 +91856,7 @@ class Orchestrator {
       settings,
       learning: learning2,
       active,
-      learned,
+      kept: kept3,
       landing: {},
       turn: new AgentTurn(settings.agents.turn, undefined, (agent, spent) => this.rt.diag.agentAtWork(input.chatId, input.userId, agent, spent), live),
       draft: new TurnDraft(input.key),
@@ -91193,7 +91929,7 @@ class Orchestrator {
     if (!s)
       return;
     const gated = await this.review.gated(s.chatId, s.userId, text7);
-    s.approved = (gated?.approved ?? []).flatMap((item, i) => item.op && item.knowledge ? [{ seq: -1000 + i, phase: "pre", role: roleOf3(item.role), agentId: item.agentId ?? item.role, key: item.key, op: item.op, changeType: item.changeType, mode: "auto", tier: opTier(item.op), knowledge: item.knowledge, connectionId: item.connection ?? null, lines: item.lines, events: [], approved: true }] : []);
+    s.approved = (gated?.approved ?? []).flatMap((item, i) => item.op ? [{ seq: -1000 + i, phase: "pre", role: roleOf3(item.role), agentId: item.agentId ?? item.role, key: item.key, op: item.op, changeType: item.changeType, mode: "auto", tier: opTier(item.op), connectionId: item.connection ?? null, lines: item.lines, events: [], approved: true }] : []);
   }
   preCommit(generationId) {
     if (!this.runs.has(generationId))
@@ -91247,12 +91983,41 @@ class Orchestrator {
       events3.push(outLines("brief", [fit(lines3.brief)]));
     const lore3 = [...new Set([...s.scene?.lore ?? [], ...s.loads])];
     if (s.scene || lore3.length > 0)
-      events3.push(outScene(lore3, (s.scene?.notes ?? []).map(fit), s.scene?.knowledge ?? "pov"));
+      events3.push(outScene(lore3, (s.scene?.notes ?? []).map(fit)));
     if (events3.length === 0)
       events3.push(outLines("outcome", []));
     if (cut > 0)
       this.rt.host.log("info", `[LumiRPEngine] turn ${s.generationId.slice(0, 8)}: ${counted(cut, "narrator line", "narrator lines")} cut to ${counted(limit2, "character", "characters")} (Settings \u2192 Agents \u2192 Recording)`, s.userId);
     return events3;
+  }
+  reviews(generationId) {
+    return this.runs.get(generationId)?.settings.agents.finalReview.on === true;
+  }
+  async finalReview(input) {
+    const s = this.runs.get(input.generationId);
+    if (!s || !this.reviews(input.generationId))
+      return null;
+    const settings = s.settings.agents.finalReview;
+    const draft = new ReviewDraft(input.parts, s.settings.agents.recording.outputChars);
+    const signal2 = within4(AbortSignal.any([input.signal, s.stop.signal]), "finalReviewMs", s.settings.timeouts.finalReviewMs);
+    const target = input.core.journal.pending[input.generationId]?.messageId;
+    const index = target ? input.observed.findIndex((m) => m.id === target) : -1;
+    const reviewer = s.main ?? new MainTurn(this.mainHost(s), { text: s.text, core: input.core, observed: index < 0 ? input.observed : input.observed.slice(0, index), alone: true });
+    const got = await reviewer.review(draft, signal2);
+    if (got.ok) {
+      s.live.add({ kind: "review", outcome: draft.edits.length > 0 ? "revised" : "unchanged", edits: liveEdits(draft) });
+      return { reviewed: true, parts: draft.parts.map((p) => ({ ...p, lines: [...p.lines] })), edits: [...draft.edits] };
+    }
+    const fired = firedTimeout(signal2);
+    if (signal2.aborted && !fired)
+      return null;
+    const stopped = settings.onFail === "stop";
+    s.live.add({ kind: "review", outcome: stopped ? "stopped" : "unrevised", edits: [], reason: got.reason });
+    if (stopped) {
+      this.rt.diag.fatal(s.at, "sections", FINAL_REVIEW_STEP, got.reason);
+      s.live.add({ kind: "failed", step: FINAL_REVIEW_STEP, reason: got.reason });
+    }
+    return { reviewed: false, reason: got.reason, ...fired ? { fix: fired.fix } : {}, stopped };
   }
   memoryLater(generationId) {
     const s = this.runs.get(generationId);
@@ -91335,7 +92100,7 @@ class Orchestrator {
         this.rt.host.log("warn", `[LumiRPEngine] chat ${s.chatId}: the turn's record doesn't say which role wrote its events (${refused2})`, s.userId);
     }
     if (Object.keys(s.landing).length > 0)
-      await this.rt.chatAgents.setLearned(s.chatId, s.userId, s.landing).catch((error) => this.rt.host.log("warn", `[LumiRPEngine] chat ${s.chatId}: the turn's changes to the learned area weren't made (${error instanceof Error ? error.message : String(error)})`, s.userId));
+      await landKept(this.rt, s.chatId, s.userId, s.landing).catch((error) => this.rt.host.log("warn", `[LumiRPEngine] chat ${s.chatId}: the turn's changes to the learned area and the global workspace weren't made (${error instanceof Error ? error.message : String(error)})`, s.userId));
     const items = [...s.confirm.map((op) => itemOf(op)), ...s.read];
     await this.review.make({ chatId: s.chatId, userId: s.userId, turn: `${at2.messageId}:${at2.swipeId}`, messageId: at2.messageId, swipeId: at2.swipeId, placement: "chips", text: s.text, items });
   }
@@ -91365,8 +92130,8 @@ class Orchestrator {
   }
   async transcript(s, at2, holder) {
     const reply = at2.core.chain(at2.observed).find((m) => m.id === at2.messageId);
-    const kept2 = reply ? recordSessionOf(activeRecord(reply, at2.core.journal.tombstones)).transcript : undefined;
-    const before = kept2 ? await this.rt.blobs.get(s.userId, kept2) : null;
+    const kept3 = reply ? recordSessionOf(activeRecord(reply, at2.core.journal.tombstones)).transcript : undefined;
+    const before = kept3 ? await this.rt.blobs.get(s.userId, kept3) : null;
     const text7 = before ? `${before}
 ${s.live.transcript()}` : s.live.transcript();
     return { transcript: await this.rt.blobs.put(s.userId, text7, holder), transcriptChars: text7.length };
@@ -91384,16 +92149,16 @@ ${s.live.transcript()}` : s.live.transcript();
   async continued(s, at2, content, digest) {
     const reply = at2.core.chain(at2.observed).find((m) => m.id === at2.messageId);
     const hash = reply ? recordSessionOf(activeRecord(reply, at2.core.journal.tombstones)).segment : undefined;
-    const kept2 = hash ? segmentOf(await this.rt.blobs.getJson(s.userId, hash)) : null;
-    if (!kept2)
+    const kept3 = hash ? segmentOf(await this.rt.blobs.getJson(s.userId, hash)) : null;
+    if (!kept3)
       return digest;
-    if (kept2.some(isMainMessage)) {
+    if (kept3.some(isMainMessage)) {
       const note = renderPrompt(MAIN_TEXT.engineReply, s.settings.prompts.texts, { reply: content });
-      const last = kept2.at(-1);
-      return last && isMainMessage(last) && last.role === "user" ? [...kept2.slice(0, -1), { ...last, content: note }] : [...kept2, { role: "user", content: note, by: MAIN_BY, knowledge: "pov" }];
+      const last = kept3.at(-1);
+      return last && isMainMessage(last) && last.role === "user" ? [...kept3.slice(0, -1), { ...last, content: note }] : [...kept3, { role: "user", content: note, by: MAIN_BY }];
     }
-    const answer = kept2.findLastIndex((m) => m.role === "assistant");
-    const was = kept2[answer];
+    const answer = kept3.findLastIndex((m) => m.role === "assistant");
+    const was = kept3[answer];
     if (!was)
       return digest;
     const done = (m, part) => {
@@ -91402,7 +92167,7 @@ ${s.live.transcript()}` : s.live.transcript();
       return Array.isArray(list3) ? list3 : [];
     };
     const now = digest.at(-1);
-    return kept2.map((m, i) => i === answer ? { ...m, content, engine: { roles: [...done(was, "roles"), ...done(now, "roles")], committed: [...done(was, "committed"), ...done(now, "committed")] } } : m);
+    return kept3.map((m, i) => i === answer ? { ...m, content, engine: { roles: [...done(was, "roles"), ...done(now, "roles")], committed: [...done(was, "committed"), ...done(now, "committed")] } } : m);
   }
   async ran(input) {
     if (input.outcome === "prepared")
@@ -91432,6 +92197,11 @@ ${s.live.transcript()}` : s.live.transcript();
     }
     this.dropWaiting(chatId);
     await this.review.dropGates(chatId, userId);
+  }
+  gone(turn, generationId, state2) {
+    this.drop(turn, state2);
+    if (generationId !== null)
+      this.drop(generationId, state2);
   }
   park(chatId, generationId) {
     const s = this.runs.get(generationId);
@@ -91572,19 +92342,16 @@ ${s.live.transcript()}` : s.live.transcript();
     }
   }
   staged(s) {
-    return (head) => stagedWorkspace(this.rt, s.draft, head, withLearned(s.learned, s.landing));
+    return (head) => stagedWorkspace(this.rt, s.draft, head, withKept(s.kept, s.landing));
   }
   ctx(s, role, settings, signal2, brief) {
-    const knowledge = settings.knowledge === "own" ? null : settings.knowledge;
     const both = AbortSignal.any([signal2, s.stop.signal]);
     const base = () => s.head;
     const agentId = `${role}:${s.generationId.slice(0, 8)}:${++s.agents}`;
-    const io = (as) => {
-      const reader2 = turnReader(this.rt, base, { userId: s.userId, chatId: s.chatId, knowledge: as, staged: this.staged(s) });
-      return { reader: reader2, writer: turnWriter(this.rt, s.draft, { userId: s.userId, chatId: s.chatId, role, agentId, tier: settings.tier, knowledge: as, connectionId: settings.connectionId, phase: s.phase, base, learned: () => withLearned(s.learned, s.landing), reader: reader2, gmOps: s.settings.agents.gmOpsPerTurn, holder: s.holder, signal: both }) };
-    };
-    const { reader, writer } = io(knowledge);
-    return { turn: s.turn, signal: both, userId: s.userId, chatId: s.chatId, generationId: s.generationId, reader, writer, role, agentId, settings, brief, readAs: io, loads: loadsOf(s) };
+    const reader = turnReader(this.rt, base, { userId: s.userId, chatId: s.chatId, knowledge: "gm", marks: true, staged: this.staged(s) });
+    const writer = turnWriter(this.rt, s.draft, { userId: s.userId, chatId: s.chatId, role, agentId, tier: settings.tier, connectionId: settings.connectionId, phase: s.phase, base, kept: () => withKept(s.kept, s.landing), reader, gmOps: s.settings.agents.gmOpsPerTurn, holder: s.holder, signal: both });
+    const sections = (slots) => roleSections(this.rt, { userId: s.userId, chatId: s.chatId, head: s.head, slots, scene: s.scene, said: s.text });
+    return { turn: s.turn, signal: both, userId: s.userId, chatId: s.chatId, generationId: s.generationId, reader, writer, role, agentId, settings, brief, sections, loads: loadsOf(s) };
   }
   mainHost(s) {
     return {
@@ -91599,7 +92366,12 @@ ${s.live.transcript()}` : s.live.transcript();
       at: () => s.at,
       phase: () => s.phase,
       head: () => s.head,
-      reader: (knowledge) => turnReader(this.rt, () => s.head, { userId: s.userId, chatId: s.chatId, knowledge, staged: this.staged(s) }),
+      reader: () => turnReader(this.rt, () => s.head, { userId: s.userId, chatId: s.chatId, knowledge: "gm", marks: true, staged: this.staged(s) }),
+      writer: (role) => {
+        const settings = s.settings.agents.roles[role];
+        const reader = turnReader(this.rt, () => s.head, { userId: s.userId, chatId: s.chatId, knowledge: "gm", marks: true, staged: this.staged(s) });
+        return turnWriter(this.rt, s.draft, { userId: s.userId, chatId: s.chatId, role, agentId: `main>${role}:${s.generationId.slice(0, 8)}:${++s.agents}`, tier: settings.tier, connectionId: settings.connectionId, phase: s.phase, base: () => s.head, kept: () => withKept(s.kept, s.landing), reader, gmOps: s.settings.agents.gmOpsPerTurn, holder: s.holder, signal: s.stop.signal });
+      },
       loads: loadsOf(s),
       run: async ({ role, run: run2, task, signal: signal2, brief, promptOnly }) => {
         const settings = s.settings.agents.roles[role];
@@ -91623,13 +92395,13 @@ ${s.live.transcript()}` : s.live.transcript();
     const head = s.head;
     if (ops.length === 0 || !head)
       return;
-    const learned = withLearned(s.learned, s.landing);
-    const commit = { ctx: (knowledge) => contextOf(this.rt, { knowledge }, head, s.settings, s.learning, learned, s.active), reader: turnReader(this.rt, () => head, { userId: s.userId, chatId: s.chatId, knowledge: "gm" }), userId: s.userId, chatId: s.chatId, signal: s.stop.signal };
+    const kept3 = withKept(s.kept, s.landing);
+    const commit = { ctx: () => contextOf(this.rt, { knowledge: "everyone" }, head, s.settings, s.learning, kept3, s.active), reader: turnReader(this.rt, () => head, { userId: s.userId, chatId: s.chatId, knowledge: "gm" }), userId: s.userId, chatId: s.chatId, signal: s.stop.signal };
     const out = commitStaged(this.rt, commit, ops, w);
     s.live.committed(out);
     s.draft.landed([...out.committed.map((c) => c.op), ...out.confirm].filter((op) => op.tier === "gm").length);
     s.committed.push(...out.committed);
-    Object.assign(s.landing, out.learned);
+    Object.assign(s.landing, out.kept);
     s.confirm.push(...out.confirm);
     recordCommit(this.rt, s.at, s.settings.prompts.texts, out);
   }
@@ -91649,7 +92421,7 @@ function roleOf3(name) {
   return name in ROLE_LABEL2 ? name : "read";
 }
 function itemOf(op) {
-  return { key: op.key, source: "agent", role: op.role, changeType: op.changeType, lines: op.cardLines ?? [], status: "open", op: op.op, agentId: op.agentId, knowledge: op.knowledge, connection: op.connectionId };
+  return { key: op.key, source: "agent", role: op.role, changeType: op.changeType, lines: op.cardLines ?? [], status: "open", op: op.op, agentId: op.agentId, connection: op.connectionId };
 }
 function rangeOf(events3, slice2) {
   if (slice2.length === 0)
@@ -91715,9 +92487,9 @@ class Review {
       sessions.add(session);
       this.watchers.delete(key);
       this.watchers.set(key, sessions);
-      const kept2 = (await this.rt.settings.get(userId)).agents.kept.watchers;
+      const kept3 = (await this.rt.settings.get(userId)).agents.kept.watchers;
       const own2 = [...this.watchers.keys()].filter((k) => k.startsWith(`${userId}\x00`));
-      for (const k of own2.slice(0, Math.max(0, own2.length - kept2)))
+      for (const k of own2.slice(0, Math.max(0, own2.length - kept3)))
         this.watchers.delete(k);
     }
     return (await this.rt.chips.list(chatId, userId)).flatMap((chip) => {
@@ -91827,12 +92599,12 @@ class Review {
     return { chip, card };
   }
   async land(chatId, userId, item) {
-    if (!item.op || !item.knowledge) {
+    if (!item.op) {
       item.status = "refused";
       item.refused = { code: "bad_op", reason: NO_LONGER };
       return;
     }
-    const base = { userId, chatId, knowledge: item.knowledge };
+    const base = { userId, chatId, knowledge: "everyone" };
     const writer = outsideWriter(this.rt, { ...base, reader: outsideReader(this.rt, base), agent: { role: item.role, id: item.agentId ?? item.role }, signal: new AbortController().signal, connectionId: item.connection ?? null });
     const result = await writer.apply([item.op], `${item.role}: ${item.lines[0] ?? item.changeType}`);
     if (result.applied.includes(item.key)) {
@@ -91845,7 +92617,7 @@ class Review {
     }
     const no = result.refused[0];
     item.status = "refused";
-    item.refused = { code: no?.code ?? "write_refused", reason: item.knowledge === "pov" && no ? no.reason : NO_LONGER };
+    item.refused = { code: no?.code ?? "write_refused", reason: NO_LONGER };
   }
   async answered(chatId, userId, chip, card, resume) {
     const saved = await this.save(chatId, userId, chip, card);
@@ -91959,6 +92731,7 @@ function liveItems(view) {
       case "failed":
       case "wait":
       case "resume":
+      case "review":
         marks.push({ type: "mark", entry: e });
         break;
       case "run": {
@@ -92051,6 +92824,14 @@ var WRITE_OUTCOME_WORDS = { staged: "staged", landed: "landed", held: "held for 
 var DROP_WORDS = { failed: "its run failed", replaced: "a revision replaced its run", unused: "the turn went on without its run", ended: "the turn's run ended" };
 var END_WORDS = { done: "done", waiting: "waiting at a gate", failed: "failed", cancelled: "cancelled", dropped: "let go" };
 var PHASE_WORDS = { pre: "Before the plan", plan: "The plan is made", post: "The reply is in: its read" };
+var REVIEW_OUTCOME_WORDS = { revised: "The final review revised the narrator's prompt", unchanged: "The final review left the narrator's prompt as the engine made it", unrevised: "The final review failed: the narrator got its prompt unrevised", stopped: "The final review failed: the turn stopped" };
+function reviewEditWords(e) {
+  if (e.op === "append")
+    return `${e.label}: added \u201C${e.text ?? ""}\u201D`;
+  if (e.op === "drop")
+    return `${e.label}: took out \u201C${e.line ?? ""}\u201D`;
+  return `${e.label}: \u201C${e.line ?? ""}\u201D \u2192 \u201C${e.text ?? ""}\u201D`;
+}
 var seconds = (ms) => `${(ms / 1000).toFixed(1)} s`;
 var count3 = (n) => n.toLocaleString("en-US");
 function usageWords(u) {
@@ -92085,8 +92866,11 @@ function transcriptText(view) {
         out.push(`!!! The turn stopped at ${e.step}: ${e.reason}`);
       else if (e.kind === "wait")
         out.push(`--- Waiting on the player at a gate (+${seconds(e.at - view.startedAt)}) ---`);
-      else
+      else if (e.kind === "resume")
         out.push(`--- Resumed (+${seconds(e.at - view.startedAt)}) ---`);
+      else
+        out.push([`--- ${REVIEW_OUTCOME_WORDS[e.outcome]}${e.reason ? `: ${e.reason}` : ""} (+${seconds(e.at - view.startedAt)}) ---`, ...e.edits.map((edit) => `- ${reviewEditWords(edit)}`)].join(`
+`));
       continue;
     }
     const spent = groupSpent(item);
@@ -92155,9 +92939,9 @@ class LiveFeeds {
   now;
   feeds = new Map;
   watchers = new Map;
-  constructor(host, kept2, now = () => Date.now()) {
+  constructor(host, kept3, now = () => Date.now()) {
     this.host = host;
-    this.kept = kept2;
+    this.kept = kept3;
     this.now = now;
     host.on("FRONTEND_SESSION_CLOSED", (e) => {
       for (const [key, sessions] of this.watchers) {
@@ -92380,21 +93164,21 @@ function proposalKnown(p, reg, world, state2) {
     const t = s.trim();
     return hasOwn(state2.entities, t) || hasOwn(world.places, t) ? t : t.toLowerCase();
   };
-  const ok = (v3, depth2) => {
-    if (typeof v3 === "string") {
-      const id = named(v3);
+  const ok = (v4, depth2) => {
+    if (typeof v4 === "string") {
+      const id = named(v4);
       return hasOwn(state2.entities, id) ? povMayKnow(reg, world, state2, id) : hasOwn(world.places, id) ? canSeePlace(reg, world, state2, world.pov, id) : true;
     }
     if (depth2 > 3)
       return true;
-    if (Array.isArray(v3))
-      return v3.every((x) => ok(x, depth2 + 1));
-    if (isRecord(v3))
-      return Object.values(v3).every((x) => ok(x, depth2 + 1));
+    if (Array.isArray(v4))
+      return v4.every((x) => ok(x, depth2 + 1));
+    if (isRecord(v4))
+      return Object.values(v4).every((x) => ok(x, depth2 + 1));
     return true;
   };
   const free = typeof p.type === "string" ? own(FREE_TEXT, p.type) ?? [] : [];
-  return Object.entries(p).every(([k, v3]) => k === "type" || free.includes(k) || k === "fact" && heardPlace({ registry: reg, world, state: state2 }, p) !== null || ok(v3, 0));
+  return Object.entries(p).every(([k, v4]) => k === "type" || free.includes(k) || k === "fact" && heardPlace({ registry: reg, world, state: state2 }, p) !== null || ok(v4, 0));
 }
 function knownRef(view, role, said2) {
   const { registry: reg, world, state: state2 } = view;
@@ -92416,8 +93200,8 @@ function namesUnknown(view, p) {
   if (!roles)
     return false;
   return Object.entries(roles).some(([field2, role]) => {
-    const v3 = p[field2];
-    return typeof v3 === "string" && v3.trim() !== "" && knownRef(view, role, v3) === null && !(role === "fact" && heardPlace(view, p) !== null);
+    const v4 = p[field2];
+    return typeof v4 === "string" && v4.trim() !== "" && knownRef(view, role, v4) === null && !(role === "fact" && heardPlace(view, p) !== null);
   });
 }
 function lentAlong(p, pre, state2) {
@@ -92453,7 +93237,7 @@ function movedAlong(p, pre, state2) {
   if (from === "" || to === "")
     return false;
   const cents = transferCents(p);
-  const near = (v3) => !Number.isFinite(cents) || Math.abs(Math.abs(cents) - v3) <= 0.25 * v3;
+  const near = (v4) => !Number.isFinite(cents) || Math.abs(Math.abs(cents) - v4) <= 0.25 * v4;
   const names3 = (side, account2) => account2 === side || account2 === `${EXTERNAL_ACCOUNT_PREFIX}${side}` || heldBy(state2.entities, account2, side);
   return pre.some((e) => {
     if (e.type !== "post")
@@ -92513,7 +93297,7 @@ function boughtAlong(p, pre, ctx, typed = [], narration = "", items = []) {
   if (!said2)
     return null;
   const stated = typeof p.price === "number" && Number.isFinite(p.price) ? Math.abs(p.price) : null;
-  const near = (v3) => stated === null || Math.abs(stated - v3) <= 0.25 * v3;
+  const near = (v4) => stated === null || Math.abs(stated - v4) <= 0.25 * v4;
   const another = ANOTHER.test(`${p.item} ${typeof p.name === "string" ? p.name : ""}`) || said2.trailing?.word === "for" && forSomeone(said2.trailing.words, ctx);
   const buys = buysIn(pre);
   const typedNames = items.flatMap((item) => itemName(item) ?? []);
@@ -92678,6 +93462,7 @@ class Runtime {
   steps;
   toolSupport;
   loreRouting;
+  bookReads = new BookReads;
   ledger;
   jsonHiding;
   presets;
@@ -92689,6 +93474,7 @@ class Runtime {
   live;
   orchestrator;
   chatAgents;
+  globalFiles;
   sweep;
   agents;
   agentAccounts;
@@ -92697,6 +93483,8 @@ class Runtime {
   pipeline;
   runs = new Map;
   bridges = new Map;
+  folds = new Map;
+  viewMemos = new WeakMap;
   turnNarrator = new Map;
   tokenCounts = new Map;
   lateCounts = new Set;
@@ -92745,17 +93533,18 @@ class Runtime {
     this.presets = new PresetBinding(this.host);
     this.meter = new CallMeter(this.host);
     this.steps = new Steps(this.host, this.meter, async (userId) => (await this.settings.get(userId)).helper);
-    this.blobs = new BlobStore(this.host);
+    this.blobs = new BlobStore(this.host, (userId) => this.settings.known(userId)?.agents.kept.texts ?? defaultAgentSettings().kept.texts);
     this.diag = new Diagnostics(this.host, { blobs: this.blobs, ring: (userId) => this.settings.known(userId)?.diagnostics.recordsPerChat ?? DIAG_RING, transcriptDays: (userId) => this.settings.known(userId)?.retention.transcriptDays ?? RETENTION_DEFAULTS.transcriptDays });
     this.steps.onCall = (userId, call) => this.diag.call(userId, call);
     this.steps.onCallStart = (userId, purpose) => this.diag.callStart(userId, purpose);
     this.toolSupport = new ToolSupport(this.host);
-    this.loreRouting = new LoreRouting(this.host, this.settings, this.worlds);
+    this.loreRouting = new LoreRouting(this.host, this.settings, this.worlds, this.bookReads);
     this.minds = { host: this.host, registry: this.registry, steps: this.steps, settings: this.settings, presets: this.presets };
-    this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: "c3ad1b86" }), (chatId) => this.messages.forget(chatId));
+    this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), (userId) => this.foldOf(userId), (chatId) => this.messages.forget(chatId));
     this.sessions = new Sessions(this.blobs, this.ledger);
     this.chatAgents = new ChatAgentMeta(this.host, this.chatMeta);
-    this.sweep = new Sweep({ host: this.host, blobs: this.blobs, retention: async (userId) => (await this.settings.get(userId)).retention, turning: (userId) => this.ledger.turning(userId), journals: (userId) => this.ledger.journals(userId), transcripts: (chatId, userId) => this.diag.transcripts(chatId, userId) });
+    this.globalFiles = new GlobalWorkspace(this.host);
+    this.sweep = new Sweep({ host: this.host, messages: (chatId, userId) => this.messages.glance(chatId, userId), blobs: this.blobs, retention: async (userId) => (await this.settings.get(userId)).retention, turning: (userId) => this.ledger.turning(userId), journals: (userId) => this.ledger.journals(userId), transcripts: (chatId, userId) => this.diag.transcripts(chatId, userId), global: (userId) => this.globalFiles.refs(userId) });
     this.agents = new Agents(this.host, options.build ?? thisBuild(), async (userId) => (await this.settings.get(userId)).timeouts.mcpReconnectMs);
     this.push = new StatePush(this.host, (chatId, userId) => this.diag.timed(userId, chatId, "state view", () => this.view(chatId, userId)));
     this.review = new Review(this);
@@ -92834,7 +93623,18 @@ class Runtime {
     for (const [chatId, bridge] of [...this.bridges])
       if (!inUse(chatId) && !bridge.waiting && this.bridges.delete(chatId))
         bridges++;
-    return { messages: this.messages.trim(inUse), ledgers: ledgers.size, views: this.push.trim(inUse), bridges };
+    let steps = 0;
+    for (const fold of this.folds.values())
+      steps += fold.trim();
+    return { messages: this.messages.trim(inUse), ledgers: ledgers.size, views: this.push.trim(inUse), bridges, texts: this.blobs.trim(), sessions: this.sessions.trim(), steps, books: this.bookReads.trim() };
+  }
+  foldOf(userId) {
+    let fold = this.folds.get(userId);
+    if (!fold) {
+      fold = new LedgerFold(this.registry, { fingerprint: "83b29af7", keep: () => this.settings.known(userId)?.agents.kept.folds ?? KEPT_FOLDS_DEFAULT });
+      this.folds.set(userId, fold);
+    }
+    return fold;
   }
   async resolveEnv(chatId, userId) {
     const run2 = await this.runOf(chatId, userId);
@@ -92954,11 +93754,11 @@ class Runtime {
     }
     const knowing3 = knowledgeOn(await this.chatKnowledge.get(input.chatId, input.userId), render.world, settings);
     const mindsKey = [input.runKey, render.state.revision, text7, hashParts("lre.kept-minds", JSON.stringify({ minds: settings.minds, knowing: knowing3, step: mindsStepConfig(settings.modelUse, "mind"), guidance: preset.guidance.mind ?? "" }))].join("\x00");
-    const kept2 = this.keptMinds.get(input.chatId);
+    const kept3 = this.keptMinds.get(input.chatId);
     this.keptMinds.delete(input.chatId);
-    if (kept2 && kept2.key !== mindsKey)
-      kept2.stop?.abort(new NotNeeded("the turn they were thinking for changed"));
-    const same3 = kept2?.key === mindsKey ? kept2 : undefined;
+    if (kept3 && kept3.key !== mindsKey)
+      kept3.stop?.abort(new NotNeeded("the turn they were thinking for changed"));
+    const same3 = kept3?.key === mindsKey ? kept3 : undefined;
     const asking = { chatId: input.chatId, userId: input.userId, world: render.world, state: render.state, user: text7, reply: lastReply ? lastReply.swipes[lastReply.swipeId] ?? "" : "", guidance: preset.guidance.mind ?? "", knowledge: knowing3, ...p.messageId ? { replaces: p.messageId } : {} };
     const readTimelapse = () => bridge.intentOf(text7)?.action === TIMELAPSE_ACTION2;
     const known = text7.trim() === "" || bridge.hasIntent(text7) || bridge.isHeld(text7);
@@ -92997,7 +93797,7 @@ class Runtime {
     trimMap(this.prePhase);
     if (!thinking)
       return;
-    const scene2 = () => agent ? this.orchestrator.scene(p.generationId, { text: text7, world: render.world, state: render.state, classic: async () => ({ lore: [], notes: [], knowledge: "pov" }) }, budget.signal) : Promise.resolve();
+    const scene2 = () => agent ? this.orchestrator.scene(p.generationId, { text: text7, world: render.world, state: render.state, classic: async () => ({ lore: [], notes: [] }) }, budget.signal) : Promise.resolve();
     const judged = async () => {
       await this.judgeAnswer(bridge, text7, render, settings, facts, budget, at2, calls);
       if (described2)
@@ -93095,12 +93895,12 @@ class Runtime {
     if (stop2)
       throw new EngineFailure(stop2.step, stop2.reason);
   }
-  thinkMinds(asking, timelapse, signal2, kept2, calls) {
+  thinkMinds(asking, timelapse, signal2, kept3, calls) {
     const stop2 = new AbortController;
     if (timelapse)
-      kept2?.stop?.abort(new NotNeeded("the message plays a timelapse, whose minds think at its beats"));
+      kept3?.stop?.abort(new NotNeeded("the message plays a timelapse, whose minds think at its beats"));
     const task = (async () => {
-      const input = { ...asking, timelapse, ...kept2 && !timelapse ? { kept: await kept2.minds } : {} };
+      const input = { ...asking, timelapse, ...kept3 && !timelapse ? { kept: await kept3.minds } : {} };
       return calls.minds({ input, classic: (s) => preMinds(this.minds, { ...input, signal: s }) }, AbortSignal.any([signal2, stop2.signal]));
     })();
     task.catch(() => {
@@ -93188,14 +93988,11 @@ class Runtime {
       const inputs = { text: [pre.text, vars.outcome ?? "", vars.beats ?? "", this.trackWords(render.world, render.state)].join(`
 `), links: this.sceneLinks(render.world, render.state) };
       const at2 = await this.lorePhase("pre", input.generationId, input.chatId, input.userId, render.world, render.state, budget, pre.text, pre.preset.guidance);
-      const hidden = hiddenNameCheck(this.registry, render.world, render.state, render.world.pov, { stages: false });
       const run2 = (r, kind, stepVars = vars) => {
         if (!budget.take())
           return Promise.resolve([]);
-        const heard = [pre.text, ...Object.values(stepVars)].join(`
-`);
-        const withheld = (line2) => findLeaks(line2, secrets).length > 0 || hidden(line2, heard);
-        return promptedText(this.steps, r, kind, stepVars, withheld, input.userId, signal2, this.stepLore(r, at2, inputs)).then((lines4) => lines4 ?? []);
+        return promptedText(this.steps, r, kind, stepVars, this.proseMark(render, secrets, [pre.text, ...Object.values(stepVars)].join(`
+`), settings.prompts.texts), input.userId, signal2, this.stepLore(r, at2, inputs)).then((lines4) => lines4 ?? []);
       };
       const briefTask = Promise.all(briefRuns.map((r) => run2(r, "brief")));
       const outlineVars = outlineRuns.length > 0 ? { ...vars, sections: this.narratorSections(render.world, render.state, plan2).join(", ") } : vars;
@@ -93225,12 +94022,14 @@ class Runtime {
       this.keepRunLines(input.generationId, p.seed, plan2, render, prose);
     if (!outlineGate || !anchor)
       return;
-    const visible2 = lines3.filter((line2) => findLeaks(line2, secrets).length === 0);
-    const held3 = lines3.filter((line2) => findLeaks(line2, secrets).length > 0);
+    const wording = markWording(settings.prompts.texts);
+    const secret = (line2) => findLeaks(line2, secrets).length > 0 || holdsSecretMark(line2, wording);
+    const visible2 = lines3.filter((line2) => !secret(line2));
+    const held3 = lines3.filter(secret);
     const actions = [{ id: "play", label: "Play", style: "primary" }, { id: "edit", label: "Edit", input: { type: "text", label: "The outline, one line each", value: visible2.join(`
 `) } }, { id: "cancel", label: "Cancel" }];
     await this.chips.add(input.chatId, input.userId, [{ id: `outline_gate:${anchor.id}`, kind: "outline_gate", messageId: anchor.id, label: "Write the reply from this outline?", detail: visible2.join(`
-`), actions, as: input.as, expires: "next_send", payload: { text: pre.text, lines: visible2, held: held3 } }]);
+`), ...held3.length > 0 ? { spoilers: held3 } : {}, actions, as: input.as, expires: "next_send", payload: { text: pre.text, lines: visible2, held: held3 } }]);
     this.push.changed(input.chatId, input.userId);
     return { waiting: "waiting for you to play the turn's outline" };
   }
@@ -93326,7 +94125,6 @@ class Runtime {
     const vars = safeVars({ ...this.stepVars(world, state2, input.plan, input.text, "", "", input.recent), outcome: input.lines.outcome.join(`
 `), beats: input.lines.beats.join(`
 `), elapsed }, input.secrets);
-    const hidden = hiddenNameCheck(this.registry, world, state2, world.pov, { stages: false });
     let left = input.calls ?? Number.POSITIVE_INFINITY;
     const ask = (runs, stepVars) => {
       const going = runs.slice(0, Math.max(0, left));
@@ -93338,11 +94136,18 @@ class Runtime {
       const own2 = going.flatMap((r) => r.template ? [renderTemplate(r.template.template, stepVars)] : []);
       return { template: own2.length > 0 ? own2.join(`
 
-`) : null, vars: stepVars, withheld: (line2) => findLeaks(line2, input.secrets).length > 0 || hidden(line2, heard) };
+`) : null, vars: stepVars, mark: this.proseMark(render, input.secrets, heard, input.texts) };
     };
     return { brief: ask(input.briefRuns, vars), outline: ask(input.outlineRuns, input.outlineRuns.length > 0 ? { ...vars, sections: this.narratorSections(world, state2, input.plan).join(", ") } : vars) };
   }
-  choiceWithheld(world, state2, secrets, heard) {
+  proseMark(render, secrets, heard, texts2) {
+    const { world, state: state2 } = render;
+    const hidden = hiddenNameCheck(this.registry, world, state2, world.pov, { stages: false });
+    const pov = [own(state2.entities, world.pov)?.name ?? world.pov];
+    const wording = markWording(texts2);
+    return (line2, shown4) => findLeaks(line2, secrets).length > 0 || hidden(line2, heard) ? secretMarkText(shown4, [], pov, wording) : shown4;
+  }
+  choiceSecret(world, state2, secrets, heard) {
     const hidden = hiddenNameCheck(this.registry, world, state2, world.pov, { stages: false });
     return (line2) => findLeaks(line2, secrets).length > 0 || hidden(line2, heard);
   }
@@ -93363,9 +94168,9 @@ class Runtime {
       const params2 = isRecord(recorded.params) ? JSON.parse(JSON.stringify(recorded.params)) : {};
       const target = recorded.action === TIMELAPSE_ACTION2 ? parseTarget(params2.target) : null;
       const overrides = {};
-      for (const [k, v3] of Object.entries(parseOverrides(params2.overrides)))
-        if (typeof v3 === "string")
-          overrides[k] = v3;
+      for (const [k, v4] of Object.entries(parseOverrides(params2.overrides)))
+        if (typeof v4 === "string")
+          overrides[k] = v4;
       const typed = recorded.staged === true && text7.trim() !== "" ? quotedWords(this.registry, render.world, render.state, text7, unrevealedSecrets(this.registry, render.world, render.state).filter((s) => !text7.toLowerCase().includes(s.toLowerCase())), text7) : null;
       const words8 = typeof recorded.text === "string" && recorded.text.trim() !== "" ? recorded.text : typed;
       const fill = recorded.action === TIMELAPSE_ACTION2 && words8 ? { text: words8 } : {};
@@ -93444,13 +94249,13 @@ ${this.trackWords(render.world, render.state)}`, links: this.sceneLinks(render.w
     const ownAnswers = (def2, given) => {
       let out = given;
       for (const name of answerParams(def2)) {
-        const v3 = given[name];
+        const v4 = given[name];
         if (own(def2.params, name)?.type === "money") {
-          if (typeof v3 === "number" && saysAmount(v3, text7, render.world.currency))
+          if (typeof v4 === "number" && saysAmount(v4, text7, render.world.currency))
             continue;
           return name;
         }
-        const read = typeof v3 === "string" || typeof v3 === "number" ? String(v3) : "";
+        const read = typeof v4 === "string" || typeof v4 === "number" ? String(v4) : "";
         const played = saysAnswer(read, text7);
         if (played === null)
           return name;
@@ -93612,7 +94417,7 @@ ${answer}`, links: owner ? [owner] : [] })) }, budget.signal);
     const story = verdict2.why === "story" ? Object.fromEntries(outcomeChoices(action, Object.keys(odds)).map((o) => [o, odds[o] ?? 0])) : null;
     const placeName2 = povPlace(this.registry, render.world, render.state)?.name ?? null;
     const scene2 = { you: render.state.entities[render.world.pov]?.name ?? render.world.pov, place: placeName2, present: presentNames(this.registry, render.world, render.state) };
-    const targets = Object.values(params).filter((v3) => typeof v3 === "string" && (hasOwn(render.state.entities, v3) || hasOwn(render.world.places, v3)));
+    const targets = Object.values(params).filter((v4) => typeof v4 === "string" && (hasOwn(render.state.entities, v4) || hasOwn(render.world.places, v4)));
     const names3 = targets.map((id) => render.state.entities[id]?.name ?? render.world.places[id]?.name ?? id);
     const lore3 = this.stepLore(run2, at2, { text: [action.label, text7, placeName2 ?? "", ...names3].join(`
 `), links: [...new Set([...this.sceneLinks(render.world, render.state), ...targets])] });
@@ -93805,9 +94610,9 @@ ${pre?.text ?? ""}`, links: this.sceneLinks(context2.world, context2.state) };
     const offscreen = npcAsked(ties.offscreen);
     const npcTask = npcRun && ties.offscreen.length > 0 && budget.take() ? calls.offscreen({ phase: "post", ties: offscreen, world: context2.world, state: context2.state, describe: (t) => this.describeTie(t, context2.world, context2.state), template: npcRun.template?.template ?? null, knowing: knowing3, heard: null, classic: (signal3) => npcOdds(this.steps, npcRun, offscreen, (t) => this.describeTie(t, context2.world, context2.state), userId, signal3, this.stepLore(npcRun, at2, this.tieInputs(ties.offscreen, context2.world, context2.state))) }, budget.signal).then((odds) => odds ? oddsDecisions(offscreen, odds, createRng(hashParts("lre.npc.post", bridge.runSeed, key))) : []) : Promise.resolve([]);
     const choiceRuns = runsOf(modelUse, context2.world, "choices", facts, { output: "text", guidance });
-    const unshown = choiceRuns.length > 0 ? this.choiceWithheld(live, context2.state, secrets, [read.text, ...Object.values(vars)].join(`
+    const spoiler = choiceRuns.length > 0 ? this.choiceSecret(live, context2.state, secrets, [read.text, ...Object.values(vars)].join(`
 `)) : () => false;
-    const choiceTasks = choiceRuns.map((r) => post && budget.take() ? calls.choices({ reply: text7, template: r.template ? renderTemplate(r.template.template, vars) : null, vars, withheld: unshown, classic: (signal3) => promptedText(this.steps, r, "choices", vars, unshown, userId, signal3, lore3(r)).then((lines3) => lines3 ?? []) }, budget.signal) : Promise.resolve([]));
+    const choiceTasks = choiceRuns.map((r) => post && budget.take() ? calls.choices({ reply: text7, template: r.template ? renderTemplate(r.template.template, vars) : null, vars, secret: spoiler, classic: (signal3) => promptedText(this.steps, r, "choices", vars, keepLine, userId, signal3, lore3(r)).then((lines3) => lines3 ?? []) }, budget.signal) : Promise.resolve([]));
     const found = extractTask.then((r) => r.proposals.map((p) => describeProposal(p, ctx)), () => []);
     const later = post && this.orchestrator.memoryLater(key);
     const remember2 = { ...postMindsInput({ world: live, start: context2.start, state: context2.state, pre: context2.pre }, { chatId, userId, messageId, user: pre?.text ?? "", reply: text7, guidance, knowledge: knowing3 }), read: found };
@@ -94047,11 +94852,11 @@ ${pre?.text ?? ""}`, links: this.sceneLinks(context2.world, context2.state) };
       });
     });
     choices.flat().forEach((choice, i) => {
-      stored.push({ id: `choice:${messageId}:${key}:${i}`, kind: "choice", messageId, swipeId, label: choice, actions: [{ id: "send", label: "Send" }], expires: "next_send", payload: { text: choice } });
+      stored.push({ id: `choice:${messageId}:${key}:${i}`, kind: "choice", messageId, swipeId, label: choice, ...spoiler(choice) ? { spoiler: true } : {}, actions: [{ id: "send", label: "Send" }], expires: "next_send", payload: { text: choice } });
     });
-    const kept2 = this.orchestrator.readConfirm(key, stored);
-    await this.chips.add(input.chatId, input.userId, kept2);
-    this.readStored.set(key, kept2.map((c) => c.id));
+    const kept3 = this.orchestrator.readConfirm(key, stored);
+    await this.chips.add(input.chatId, input.userId, kept3);
+    this.readStored.set(key, kept3.map((c) => c.id));
     if (this.readStored.size > 64)
       this.readStored.delete(this.readStored.keys().next().value ?? "");
   }
@@ -94244,15 +95049,15 @@ ${pre?.text ?? ""}`, links: this.sceneLinks(context2.world, context2.state) };
     return unfit ? `${action.label}: ${unfitReason(this.registry, world, state2, unfit, "", unrevealedSecrets(this.registry, world, state2), mayKnow)}` : null;
   }
   editRefusal(world, state2, action, params, read, claim2) {
-    const kept2 = (name) => JSON.stringify(params[name] ?? null) === JSON.stringify(read[name] ?? null);
-    const refused2 = this.requestRefusal(world, state2, action, params, "read", claim2 !== undefined && kept2(claim2) ? claim2 : undefined);
+    const kept3 = (name) => JSON.stringify(params[name] ?? null) === JSON.stringify(read[name] ?? null);
+    const refused2 = this.requestRefusal(world, state2, action, params, "read", claim2 !== undefined && kept3(claim2) ? claim2 : undefined);
     if (refused2)
       return refused2;
     const mayKnow = (id) => povMayKnow(this.registry, world, state2, id);
     const why = (param, def2, value) => `${action.label}: ${unfitReason(this.registry, world, state2, { param, def: def2, value }, "", unrevealedSecrets(this.registry, world, state2), mayKnow)}`;
     for (const [name, def2] of Object.entries(action.params)) {
       const value = params[name];
-      if (value === undefined || value === null || value === "" || kept2(name))
+      if (value === undefined || value === null || value === "" || kept3(name))
         continue;
       if (def2.type === "ref" && payeeOf(this.registry, action, params, def2, value, world, state2, mayKnow) !== null)
         continue;
@@ -94269,7 +95074,7 @@ ${pre?.text ?? ""}`, links: this.sceneLinks(context2.world, context2.state) };
   }
   keptPayees(action, params, read) {
     const out = { ...params };
-    const blank = (v3) => v3 === undefined || v3 === null || v3 === "";
+    const blank = (v4) => v4 === undefined || v4 === null || v4 === "";
     const pays = Object.values(action.params).some((def2) => def2.outside !== undefined);
     for (const [name, def2] of Object.entries(action.params)) {
       const was = read[name];
@@ -94281,8 +95086,8 @@ ${pre?.text ?? ""}`, links: this.sceneLinks(context2.world, context2.state) };
   editedPaid(world, state2, action, params, read, text7) {
     const mayKnow = (id) => povMayKnow(this.registry, world, state2, id);
     const paid = paidOutside(this.registry, action, params, world, state2, mayKnow, text7);
-    const kept2 = Object.fromEntries(Object.entries(read.said ?? {}).filter(([name]) => JSON.stringify(params[name] ?? null) === JSON.stringify(read.params[name] ?? null)));
-    return { params: handedCash(this.registry, action, { ...params, ...kept2 }, paid.params, world, state2, mayKnow), said: { ...kept2, ...paid.said } };
+    const kept3 = Object.fromEntries(Object.entries(read.said ?? {}).filter(([name]) => JSON.stringify(params[name] ?? null) === JSON.stringify(read.params[name] ?? null)));
+    return { params: handedCash(this.registry, action, { ...params, ...kept3 }, paid.params, world, state2, mayKnow), said: { ...kept3, ...paid.said } };
   }
   intentEdit(world, state2, action, params, typed) {
     if (!palette(world, state2, this.registry).entries.some((e) => e.action === action.id))
@@ -94489,14 +95294,14 @@ ${pre?.text ?? ""}`, links: this.sceneLinks(context2.world, context2.state) };
     const recorded = plan2 ? outputsOf(plan2.events) : null;
     const own2 = plan2 && !renarrated && !recorded ? this.runLines.get(input.generationId) : undefined;
     const turnPlan = plan2 && !renarrated && !own2 && !recorded ? this.bridges.get(input.chatId)?.planFor(plan2.seed) : undefined;
-    const kept2 = plan2 && renarrated && !recorded ? await this.planNotes.get(input.chatId, input.userId, plan2.seed) : null;
-    const turnLines2 = recorded ?? own2?.lines ?? (turnPlan ? { ...planLines2(turnPlan, world, state2, this.registry), outline: planOutline(turnPlan, undefined) } : kept2);
+    const kept3 = plan2 && renarrated && !recorded ? await this.planNotes.get(input.chatId, input.userId, plan2.seed) : null;
+    const turnLines2 = recorded ?? own2?.lines ?? (turnPlan ? { ...planLines2(turnPlan, world, state2, this.registry), outline: planOutline(turnPlan, undefined) } : kept3);
     const outline2 = turnLines2?.outline ?? [];
     const scene2 = recorded ? [...new Set(recorded.scene.lore.map((id) => recordedLoreId(folded, id)))].flatMap((id) => {
       const entry = world.lore[id];
       return entry && loreReadable(this.registry, world, state2, entry, "brief") ? [`${entry.title}: ${entry.content}`] : [];
     }) : [];
-    const planned = { outcome: [...turnLines2?.outcome ?? []], montage: [...turnLines2?.montage ?? []], scene: scene2, ...recorded && recorded.scene.notes.length > 0 ? { notes: { lines: recorded.scene.notes, knowledge: recorded.scene.knowledge } } : {} };
+    const planned = { outcome: [...turnLines2?.outcome ?? []], montage: [...turnLines2?.montage ?? []], scene: scene2, ...recorded && recorded.scene.notes.length > 0 ? { notes: recorded.scene.notes } : {} };
     const preset = this.prePhase.get(input.generationId)?.preset ?? await this.presets.current(input.chatId, input.userId);
     const after = plan2 ? this.thenLine(input.chatId, this.prePhase.get(input.generationId)?.text ?? "", plan2.seed, world, state2, settings, secrets) : null;
     if (after)
@@ -94547,7 +95352,7 @@ ${pre?.text ?? ""}`, links: this.sceneLinks(context2.world, context2.state) };
     };
     const fills = built.fills.flatMap((f) => {
       const id = entryAt(f.slot);
-      return id ? [{ id, content: f.content }] : [];
+      return id ? [{ id, content: f.content, part: f.slot, label: slots.get(f.slot)?.label ?? f.slot }] : [];
     });
     for (const slot of built.recorded) {
       const id = entryAt(slot);
@@ -94556,7 +95361,7 @@ ${pre?.text ?? ""}`, links: this.sceneLinks(context2.world, context2.state) };
     }
     const rulesAt = entries3.narratorOutlet !== null && preset.outlets.has(NARRATOR_OUTLET) ? entries3.narratorOutlet : entries3.narrator;
     if (rulesAt)
-      fills.push({ id: rulesAt, content: narratorRules(preset.guidance.narrator ?? null, texts2) });
+      fills.push({ id: rulesAt, content: narratorRules(preset.guidance.narrator ?? null, texts2), part: RULES_PART, label: "Narrator rules" });
     this.countLater(input.userId, uncounted);
     const traced2 = new Set(Object.values(record3.entries ?? {}));
     if (preset.guidance.narrator && rulesAt)
@@ -94568,7 +95373,66 @@ ${pre?.text ?? ""}`, links: this.sceneLinks(context2.world, context2.state) };
     this.diag.sections({ chatId: input.chatId, userId: input.userId, turn: input.generationId }, `${pending?.kind ?? "continue"} turn, ${preset.preset ? `preset ${preset.preset.id}` : "no preset"}`, sectionsOf(world).map((s) => ({ slot: s.id, outlet: preset.outlets.has(outletOf(s.id)) ? outletOf(s.id) : null, filled: sent2.has(s.id) })), started);
     if (pending)
       pending.prompts = await this.promptSets.put(input.userId, turnPromptSet(texts2));
-    return { bookId, fills: new Map(fills.map((f) => [f.id, f.content])), placed: `${preset.placed}\x00${this.book.placedAs(bookId)}`, wording, view: narrated };
+    return { bookId, fills: new Map(fills.map((f) => [f.id, f.content])), parts: fills.map((f) => ({ id: f.part, label: f.label, entry: f.id })), placed: `${preset.placed}\x00${this.book.placedAs(bookId)}`, wording, view: narrated };
+  }
+  async finalReview(input) {
+    const at2 = { chatId: input.chatId, userId: input.userId, turn: input.generationId };
+    const pending = input.core.journal.pending[input.generationId];
+    const parts = input.delivered.parts.map((p) => partOf(p.id, p.label, input.delivered.fills.get(p.entry) ?? ""));
+    if (pending?.kind === "renarrate" && pending.planned && pending.renarrateOf) {
+      const edits = finalEditsOf(pending.finalEdits);
+      if (edits.length === 0)
+        return input.delivered;
+      const told = applyFinalEdits(parts, edits);
+      if (told.applied.length > 0)
+        pending.finalEdits = told.applied;
+      else
+        delete pending.finalEdits;
+      const missed = told.missed.length > 0 ? `; ${counted(told.missed.length, "edit no longer finds its line", "edits no longer find their lines")} and changed nothing` : "";
+      this.diag.yielded(at2, "sections", FINAL_REVIEW_STEP, `the re-narrated turn's final review told again: ${counted(told.applied.length, "edit", "edits")}${missed}`, told.missed.length > 0);
+      return this.revised(input, told.parts);
+    }
+    if (pending)
+      delete pending.finalEdits;
+    if (pending?.kind === "continue")
+      await this.orchestrator.beginContinue({ chatId: input.chatId, userId: input.userId, generationId: input.generationId, core: input.core, observed: input.observed });
+    if (!this.orchestrator.reviews(input.generationId))
+      return input.delivered;
+    const outcome = await this.diag.step(at2, "sections", FINAL_REVIEW_STEP, () => this.orchestrator.finalReview({ generationId: input.generationId, core: input.core, observed: input.observed, parts, signal: input.signal }), (o) => o === null || o.reviewed ? null : { status: "failed", reason: o.stopped ? o.reason : `${o.reason}; the narrator gets the prompt as the engine made it`, ...o.fix ? { fix: o.fix } : {} });
+    if (!outcome?.reviewed || outcome.edits.length === 0)
+      return input.delivered;
+    if (pending)
+      pending.finalEdits = outcome.edits;
+    this.diag.yielded(at2, "sections", FINAL_REVIEW_STEP, `the main agent revised the narrator's prompt: ${counted(outcome.edits.length, "edit", "edits")} (GM \u2192 Live shows each)`, false);
+    return this.revised(input, outcome.parts);
+  }
+  revised(input, parts) {
+    const fills = new Map(input.delivered.fills);
+    const changed = new Map;
+    for (const [i, at2] of input.delivered.parts.entries()) {
+      const part = parts[i];
+      if (!part)
+        continue;
+      const text7 = partText(part);
+      if (text7 === fills.get(at2.entry))
+        continue;
+      fills.set(at2.entry, text7);
+      changed.set(at2.id, text7);
+    }
+    const record3 = this.inspector.records(input.chatId)?.find((r) => r.id === input.generationId);
+    if (record3 && changed.size > 0) {
+      for (const row of record3.sections) {
+        const text7 = changed.get(row.slot);
+        if (text7 === undefined || row.clipped)
+          continue;
+        const tokens2 = this.sectionCost(input.userId, text7);
+        record3.budget.used += tokens2 - row.tokens;
+        row.tokens = tokens2;
+      }
+      this.inspector.save(input.chatId);
+      this.push.changed(input.chatId, input.userId);
+    }
+    return { ...input.delivered, fills };
   }
   async turnTexts(input, plan2, settings) {
     if (!plan2 || settings.swipeTexts !== "turn")
@@ -94607,11 +95471,11 @@ ${pre?.text ?? ""}`, links: this.sceneLinks(context2.world, context2.state) };
       await this.book.vacate(bookId, userId);
   }
   keptEarlier(chatId, earlier) {
-    let kept2 = [];
+    let kept3 = [];
     for (const pre of this.prePhase.values())
       if (pre.chatId === chatId)
-        kept2 = pre.facts.earlier.messages;
-    const known = new Map(kept2.map((m) => [m.id, m]));
+        kept3 = pre.facts.earlier.messages;
+    const known = new Map(kept3.map((m) => [m.id, m]));
     return earlier.map((m) => {
       const text7 = m.swipes[m.swipeId] ?? "";
       const was = known.get(m.id);
@@ -94622,16 +95486,16 @@ ${pre?.text ?? ""}`, links: this.sceneLinks(context2.world, context2.state) };
     });
   }
   async liveWorld(key, chatId, userId, world) {
-    const kept2 = this.liveLores.get(key);
-    if (kept2)
-      return kept2 === world.lore ? world : { ...world, lore: kept2 };
+    const kept3 = this.liveLores.get(key);
+    if (kept3)
+      return kept3 === world.lore ? world : { ...world, lore: kept3 };
     const live = await this.readLore(chatId, userId, world);
     lruSet(this.liveLores, key, live.lore, LIVE_LORES_KEPT);
     await this.loreRouting.sync(userId, world.id);
     return live;
   }
   async readLore(chatId, userId, world) {
-    return liveLore(this.host, world, chatId, userId, (await this.settings.get(userId)).loreBooks);
+    return liveLore(this.host, world, chatId, userId, (await this.settings.get(userId)).loreBooks, this.bookReads);
   }
   worldInfoGate() {
     return {
@@ -94653,6 +95517,9 @@ ${pre?.text ?? ""}`, links: this.sceneLinks(context2.world, context2.state) };
     if (bridge)
       bridge.waiting = input.outcome === "waiting";
     this.orchestrator.ran(input).catch((error) => this.host.log("warn", `[LumiRPEngine] chat ${input.chatId}: an agent turn's run wasn't cleared up (${error instanceof Error ? error.message : String(error)})`, input.userId));
+  }
+  turnGone(input) {
+    this.orchestrator.gone(input.turn, input.generationId, input.how);
   }
   async adopted(chatId, userId, from, to) {
     rekey(this.preBudgets, from, to);
@@ -94872,12 +95739,18 @@ ${pre?.text ?? ""}`, links: this.sceneLinks(context2.world, context2.state) };
     await this.meter.ready(userId);
     const settings = await this.settings.get(userId);
     const knowledge = { chat: await this.chatKnowledge.get(chatId, userId), tracking: knowledgeOn(null, null, settings), narrator: narratorView(null, null, settings) };
-    const view = buildView({ chatId, run: run2, core, observed, registry: this.registry, world: (r) => core.worldAt(r), stored, meter: this.meter.view(userId), mapDisplay: await this.chatPrefs.mapDisplay(chatId, userId), knowledge });
+    const mapDisplay = await this.chatPrefs.mapDisplay(chatId, userId);
+    let memo = this.viewMemos.get(core);
+    if (!memo) {
+      memo = new ViewMemo;
+      this.viewMemos.set(core, memo);
+    }
+    const view = buildView({ chatId, run: run2, core, observed, registry: this.registry, world: (r) => core.worldAt(r), stored, meter: this.meter.view(userId), mapDisplay, knowledge, memo });
     view.panels["core.context"] = this.inspectorView(chatId, userId);
-    const kept2 = this.ledger.keptOf(chatId);
+    const kept3 = this.ledger.keptOf(chatId);
     const last = observed.at(-1);
-    if (kept2 && last)
-      view.chips.push(replyFailedChip(kept2.turn, kept2.failed, kept2.as, last.id));
+    if (kept3 && last)
+      view.chips.push(replyFailedChip(kept3.turn, kept3.failed, kept3.as, last.id));
     const staged = await this.staged.get(chatId, userId);
     view.staged = staged ? { action: staged.action, params: staged.request, source: staged.source, label: staged.label } : null;
     return view;
@@ -95079,9 +95952,9 @@ function playable(action, params, world, said2) {
   const out = { ...params };
   const scale = 10 ** world.currency.decimals;
   for (const [name, def2] of Object.entries(action.params)) {
-    const v3 = out[name];
-    if (def2.type === "money" && typeof v3 === "number" && Number.isFinite(v3))
-      out[name] = Math.round(v3 * scale);
+    const v4 = out[name];
+    if (def2.type === "money" && typeof v4 === "number" && Number.isFinite(v4))
+      out[name] = Math.round(v4 * scale);
   }
   const method = out.method;
   const named = hasOwn(action.params, "method") && !(typeof method === "string" && method.trim() !== "") ? said2.map(saidPayMethod).find((m) => m !== null) ?? null : null;
@@ -95285,8 +96158,8 @@ function rollChip(label2, res) {
   return { label: `${label2}: ${res.outcome ?? ""}`, detail: `No roll: ${a.why ? why[a.why] : "the policy settled it"}.${approach}` };
 }
 function describeItem(p) {
-  const v3 = p.name ?? p.item ?? p.category;
-  return typeof v3 === "string" && v3 !== "" ? v3 : String(p.type);
+  const v4 = p.name ?? p.item ?? p.category;
+  return typeof v4 === "string" && v4 !== "" ? v4 : String(p.type);
 }
 function purchaseQuote(p, events3, world) {
   if (p.type !== "purchase")
@@ -95367,24 +96240,24 @@ function describeProposal(p, view) {
   const raw = (k) => typeof p[k] === "string" || typeof p[k] === "number" ? String(p[k]) : "?";
   const roles = typeof p.type === "string" ? own(REF_ROLES, p.type) : undefined;
   const s = (k) => {
-    const v3 = raw(k);
+    const v4 = raw(k);
     if (!view)
-      return v3;
-    if (v3 === view.world.pov)
+      return v4;
+    if (v4 === view.world.pov)
       return "you";
     const role = roles ? own(roles, k) : undefined;
-    if (role !== undefined && typeof p[k] === "string" && v3.trim() !== "") {
+    if (role !== undefined && typeof p[k] === "string" && v4.trim() !== "") {
       const heard = role === "fact" ? heardPlace(view, p) : null;
       if (heard !== null)
         return own(view.world.places, heard)?.name ?? heard;
-      const said2 = v3.trim();
+      const said2 = v4.trim();
       return refName(view, role, said2);
     }
-    if (hasOwn(view.state.entities, v3))
-      return povMayKnow(view.registry, view.world, view.state, v3) ? own(view.state.entities, v3)?.name ?? v3 : v3;
-    if (hasOwn(view.world.places, v3))
-      return canSeePlace(view.registry, view.world, view.state, view.world.pov, v3) ? own(view.world.places, v3)?.name ?? v3 : v3;
-    return v3;
+    if (hasOwn(view.state.entities, v4))
+      return povMayKnow(view.registry, view.world, view.state, v4) ? own(view.state.entities, v4)?.name ?? v4 : v4;
+    if (hasOwn(view.world.places, v4))
+      return canSeePlace(view.registry, view.world, view.state, view.world.pov, v4) ? own(view.world.places, v4)?.name ?? v4 : v4;
+    return v4;
   };
   const subject = (k) => {
     const who = s(k);
@@ -95493,8 +96366,8 @@ function upgradePreview(reg, plan2, state2, after, inForce2) {
     const t = own(w.tracks, id);
     if (!t)
       return true;
-    const v3 = visibilityOf(t.visibility);
-    return v3 === "public" || v3 === "known_by" && trackKnown(reg, w, state2, pov, t);
+    const v4 = visibilityOf(t.visibility);
+    return v4 === "public" || v4 === "known_by" && trackKnown(reg, w, state2, pov, t);
   });
   let spoils = false;
   const nameOf8 = (id) => {
@@ -95503,34 +96376,34 @@ function upgradePreview(reg, plan2, state2, after, inForce2) {
       spoils = true;
     return name;
   };
-  const valueText2 = (v3, def2) => {
-    if (v3 === undefined || v3 === null)
+  const valueText2 = (v4, def2) => {
+    if (v4 === undefined || v4 === null)
       return "\u2014";
-    if (typeof v3 === "boolean")
-      return v3 ? "yes" : "no";
-    if (typeof v3 === "number")
-      return def2?.type === "money" ? formatMoney(v3, after.currency) : String(v3);
-    if (typeof v3 === "string")
-      return clip2(nameOf8(v3) ?? v3);
-    if (Array.isArray(v3))
-      return v3.length === 0 ? "none" : clip2(`${v3.length} \xD7 ${JSON.stringify(v3)}`);
-    return clip2(JSON.stringify(v3));
+    if (typeof v4 === "boolean")
+      return v4 ? "yes" : "no";
+    if (typeof v4 === "number")
+      return def2?.type === "money" ? formatMoney(v4, after.currency) : String(v4);
+    if (typeof v4 === "string")
+      return clip2(nameOf8(v4) ?? v4);
+    if (Array.isArray(v4))
+      return v4.length === 0 ? "none" : clip2(`${v4.length} \xD7 ${JSON.stringify(v4)}`);
+    return clip2(JSON.stringify(v4));
   };
-  const aspectText = (aspect, v3) => {
-    if (aspect === "kind" && typeof v3 === "string")
-      return kindDef(reg, after, v3)?.label ?? kindDef(reg, inForce2, v3)?.label ?? v3;
-    if (aspect === "tier" && typeof v3 === "string")
-      return tierLabel(after, v3);
-    if (aspect === "levels" && isRecord(v3))
-      return Object.entries(v3).map(([domain, level2]) => `${domain} ${String(level2)}`).join(", ") || "none";
-    if (aspect === "life" && typeof v3 === "string")
-      return lifeStateOf(after, v3).label;
-    if (aspect === "class" && isRecord(v3)) {
-      const classes = isRecord(v3.class) ? Object.entries(v3.class).map(([facet, values]) => `${own(after.classifications, facet)?.label ?? facet}: ${Array.isArray(values) ? values.join(", ") : ""}`) : [];
-      const tags = Array.isArray(v3.tags) && v3.tags.length > 0 ? [`tags: ${v3.tags.join(", ")}`] : [];
+  const aspectText = (aspect, v4) => {
+    if (aspect === "kind" && typeof v4 === "string")
+      return kindDef(reg, after, v4)?.label ?? kindDef(reg, inForce2, v4)?.label ?? v4;
+    if (aspect === "tier" && typeof v4 === "string")
+      return tierLabel(after, v4);
+    if (aspect === "levels" && isRecord(v4))
+      return Object.entries(v4).map(([domain, level2]) => `${domain} ${String(level2)}`).join(", ") || "none";
+    if (aspect === "life" && typeof v4 === "string")
+      return lifeStateOf(after, v4).label;
+    if (aspect === "class" && isRecord(v4)) {
+      const classes = isRecord(v4.class) ? Object.entries(v4.class).map(([facet, values]) => `${own(after.classifications, facet)?.label ?? facet}: ${Array.isArray(values) ? values.join(", ") : ""}`) : [];
+      const tags = Array.isArray(v4.tags) && v4.tags.length > 0 ? [`tags: ${v4.tags.join(", ")}`] : [];
       return [...classes, ...tags].join("; ") || "none";
     }
-    return valueText2(v3);
+    return valueText2(v4);
   };
   const linkText = (r) => r ? r.fields && Object.keys(r.fields).length > 0 ? clip2(`linked, ${Object.entries(r.fields).map(([k, x]) => `${k.replace(/_/g, " ")} ${valueText2(x)}`).join(", ")}`) : "linked" : "not linked";
   const rows = [];
@@ -95627,25 +96500,25 @@ class SecrecyError extends Error {
     this.name = "SecrecyError";
   }
 }
-function isParts(v3) {
-  return isRecord(v3) && typeof v3.content === "string" && Array.isArray(v3.keys) && v3.keys.every((k) => typeof k === "string") && typeof v3.disabled === "boolean" && isRecord(v3.extensions);
+function isParts(v4) {
+  return isRecord(v4) && typeof v4.content === "string" && Array.isArray(v4.keys) && v4.keys.every((k) => typeof k === "string") && typeof v4.disabled === "boolean" && isRecord(v4.extensions);
 }
 var KINDS3 = ["mark", "marked", "twin", "fields", "refused"];
 var STEPS = ["apply", "confirm", "restore"];
-function isBackup(v3) {
-  if (!isRecord(v3) || typeof v3.id !== "string" || typeof v3.title !== "string" || typeof v3.kind !== "string" || !KINDS3.includes(v3.kind))
+function isBackup(v4) {
+  if (!isRecord(v4) || typeof v4.id !== "string" || typeof v4.title !== "string" || typeof v4.kind !== "string" || !KINDS3.includes(v4.kind))
     return false;
-  if (typeof v3.switchedOff !== "boolean" || typeof v3.applied !== "boolean" || typeof v3.confirmed !== "boolean" || v3.reason !== undefined && typeof v3.reason !== "string")
+  if (typeof v4.switchedOff !== "boolean" || typeof v4.applied !== "boolean" || typeof v4.confirmed !== "boolean" || v4.reason !== undefined && typeof v4.reason !== "string")
     return false;
-  if (!isParts(v3.before) || !isParts(v3.after) || v3.replaced !== undefined && !isParts(v3.replaced))
+  if (!isParts(v4.before) || !isParts(v4.after) || v4.replaced !== undefined && !isParts(v4.replaced))
     return false;
-  return v3.error === undefined || isRecord(v3.error) && typeof v3.error.step === "string" && STEPS.includes(v3.error.step) && typeof v3.error.message === "string";
+  return v4.error === undefined || isRecord(v4.error) && typeof v4.error.step === "string" && STEPS.includes(v4.error.step) && typeof v4.error.message === "string";
 }
-function isMove(v3) {
-  return isRecord(v3) && typeof v3.applied === "number" && Number.isFinite(v3.applied) && [v3.confirmed, v3.restored].every((t) => t === null || typeof t === "number" && Number.isFinite(t)) && typeof v3.restoring === "boolean" && Array.isArray(v3.entries) && v3.entries.every(isBackup);
+function isMove(v4) {
+  return isRecord(v4) && typeof v4.applied === "number" && Number.isFinite(v4.applied) && [v4.confirmed, v4.restored].every((t) => t === null || typeof t === "number" && Number.isFinite(t)) && typeof v4.restoring === "boolean" && Array.isArray(v4.entries) && v4.entries.every(isBackup);
 }
-function isFile(v3, bookId) {
-  return isRecord(v3) && v3.v === 1 && v3.bookId === bookId && typeof v3.name === "string" && Array.isArray(v3.moves) && v3.moves.every(isMove);
+function isFile(v4, bookId) {
+  return isRecord(v4) && v4.v === 1 && v4.bookId === bookId && typeof v4.name === "string" && Array.isArray(v4.moves) && v4.moves.every(isMove);
 }
 function fileOf(bookId) {
   return `${DIR}${hashParts("lre-secrecy-book-v1", bookId)}.json`;
@@ -95818,10 +96691,10 @@ class SecrecyMoves {
     return look;
   }
   async books(userId) {
-    const kept2 = new Set(await this.host.storage.list(DIR, userId));
+    const kept3 = new Set(await this.host.storage.list(DIR, userId));
     const out = [];
     for (const book of await pinBooks(this.host, null, userId)) {
-      const { last, state: state2 } = standing4(kept2.has(fileOf(book.id)) ? (await this.read(book.id, userId)).file : null);
+      const { last, state: state2 } = standing4(kept3.has(fileOf(book.id)) ? (await this.read(book.id, userId)).file : null);
       out.push({ ...book, state: state2, applied: last?.applied ?? null, restored: last?.restored ?? null });
     }
     return out;
@@ -95940,23 +96813,22 @@ class AssistantError extends Error {
   }
 }
 var newId = (prefix) => `${prefix}_${crypto.randomUUID().slice(0, 8)}`;
-function historyOf2(messages, tokens2, knowledge) {
-  const readable2 = (m) => knowledgeWithin(m.knowledge ?? "gm", knowledge);
+function historyOf2(messages, tokens2) {
   const exchanges = [];
   for (const [at2, m] of messages.entries()) {
     const next = messages[at2 + 1];
-    if (m.role === "user" && next?.role === "assistant" && next.text.trim() !== "" && readable2(m) && readable2(next))
+    if (m.role === "user" && next?.role === "assistant" && next.text.trim() !== "")
       exchanges.push({ user: m.text, answer: next.text });
   }
-  const kept2 = [];
+  const kept3 = [];
   let used = 0;
   for (const e of exchanges.toReversed()) {
     used += tokensOf(e.user) + tokensOf(e.answer);
     if (used > tokens2)
       break;
-    kept2.unshift(e);
+    kept3.unshift(e);
   }
-  return { history: kept2.flatMap((e) => [{ role: "user", text: e.user }, { role: "assistant", text: e.answer }]), left: messages.length - kept2.length * 2 };
+  return { history: kept3.flatMap((e) => [{ role: "user", text: e.user }, { role: "assistant", text: e.answer }]), left: messages.length - kept3.length * 2 };
 }
 function traceOf(t) {
   const args = new Map;
@@ -95975,22 +96847,24 @@ function traceOf(t) {
 function storedMessageOf(raw) {
   if (!isRecord(raw) || raw.v !== 1 || typeof raw.id !== "string" || raw.role !== "user" && raw.role !== "assistant" || typeof raw.text !== "string" || typeof raw.at !== "number")
     return null;
-  return raw.knowledge === undefined || isAgentKnowledge(raw.knowledge) ? raw : null;
+  const { knowledge: _old, ...message2 } = raw;
+  return message2;
 }
 function storedProposalOf(raw) {
   if (!isRecord(raw) || raw.v !== 1 || typeof raw.id !== "string" || typeof raw.messageId !== "string" || typeof raw.agentId !== "string" || raw.status !== "open" && raw.status !== "applied" && raw.status !== "rejected" || !Array.isArray(raw.ops))
     return null;
-  if (raw.connection !== undefined && typeof raw.connection !== "string" || raw.batch !== undefined && typeof raw.batch !== "string" || raw.knowledge !== undefined && !isAgentKnowledge(raw.knowledge))
+  if (raw.connection !== undefined && typeof raw.connection !== "string" || raw.batch !== undefined && typeof raw.batch !== "string")
     return null;
   if (raw.again !== undefined && !(Array.isArray(raw.again) && raw.again.every((k) => typeof k === "string")))
     return null;
-  return raw.ops.every((o) => isRecord(o) && typeof o.key === "string" && isRecord(o.op)) ? raw : null;
+  const { knowledge: _old, ...proposal } = raw;
+  return raw.ops.every((o) => isRecord(o) && typeof o.key === "string" && isRecord(o.op)) ? proposal : null;
 }
 function settledProposal(p, how) {
   const { pending: _held, batch: _batch, again: _again, ...rest } = p;
   if (!("refused" in how))
     return { ...rest, status: "applied", ...how.chipId !== null ? { chipId: how.chipId } : {} };
-  const ops = rest.ops.map(({ applied, ...o }) => applied && isLearnedOp(o.op) ? { ...o, applied } : applied ? { ...o, refused: { code: WRITE_REFUSED, reason: how.refused } } : o);
+  const ops = rest.ops.map(({ applied, ...o }) => applied && isKeptOp(o.op) ? { ...o, applied } : applied ? { ...o, refused: { code: WRITE_REFUSED, reason: how.refused } } : o);
   return { ...rest, status: ops.some((o) => o.applied) ? "applied" : "open", ops };
 }
 function appliable(p) {
@@ -96112,23 +96986,13 @@ class Assistant {
   }
   async load(chatId, userId) {
     const { assistant } = await this.rt.chatAgents.get(chatId, userId);
-    const messages = [];
-    const proposals = [];
-    let lost = 0;
-    for (const hash of assistant.messages) {
-      const value = storedMessageOf(await this.rt.blobs.getJson(userId, hash));
-      if (value)
-        messages.push({ hash, value });
-      else
-        lost++;
-    }
-    for (const hash of Object.values(assistant.proposals)) {
-      const value = storedProposalOf(await this.rt.blobs.getJson(userId, hash));
-      if (value)
-        proposals.push({ hash, value });
-      else
-        lost++;
-    }
+    const [readMessages, readProposals2] = await Promise.all([
+      Promise.all(assistant.messages.map(async (hash) => ({ hash, value: storedMessageOf(await this.rt.blobs.getJson(userId, hash)) }))),
+      Promise.all(Object.values(assistant.proposals).map(async (hash) => ({ hash, value: storedProposalOf(await this.rt.blobs.getJson(userId, hash)) })))
+    ]);
+    const messages = readMessages.flatMap(({ hash, value }) => value ? [{ hash, value }] : []);
+    const proposals = readProposals2.flatMap(({ hash, value }) => value ? [{ hash, value }] : []);
+    const lost = readMessages.length - messages.length + (readProposals2.length - proposals.length);
     if (lost > 0)
       this.rt.host.log("warn", `[LumiRPEngine] chat ${chatId}: ${lost} of the GM assistant thread's messages and proposals couldn't be read, so they're left out`, userId);
     return { messages, proposals };
@@ -96155,8 +97019,8 @@ class Assistant {
   viewOf(t) {
     const run2 = t.run;
     const running = run2 ? { agentId: run2.agentId, label: run2.label, tokens: { ...run2.tokens }, startedAt: run2.startedAt } : null;
-    const thread = t.messages.map(({ value: { v: _v, knowledge: _knowledge, ...m } }) => m);
-    const proposals = t.proposals.map(({ value: { v: _v, agentId: _agent, knowledge: _knowledge, connection: _connection, batch: _batch, again: _again, ops, ...p } }) => ({ ...p, ops: ops.map(({ op: _op, ...o }) => o) }));
+    const thread = t.messages.map(({ value: { v: _v, ...m } }) => m);
+    const proposals = t.proposals.map(({ value: { v: _v, agentId: _agent, connection: _connection, batch: _batch, again: _again, ops, ...p } }) => ({ ...p, ops: ops.map(({ op: _op, ...o }) => o) }));
     return { thread, running, proposals };
   }
   push(t) {
@@ -96181,10 +97045,13 @@ class Assistant {
     const own2 = agents.assistant;
     const texts2 = settings.prompts.texts;
     const vars = { world: world.name, pov: state2.entities[world.pov]?.name ?? world.pov };
-    const system = [renderPrompt(GM_TEXT.system, texts2, { ...vars, knowledge: renderPrompt(GM_TEXT.knowledge[own2.knowledge], texts2, vars) }), renderPrompt(GM_TEXT.instructions, texts2, vars)].filter((s) => s.trim() !== "").join(`
+    const reads = { userId, chatId, knowledge: "gm" };
+    const reader = outsideReader(this.rt, reads);
+    const prompt = [renderPrompt(GM_TEXT.system, texts2, vars), renderPrompt(GM_TEXT.instructions, texts2, vars)].filter((s) => s.trim() !== "").join(`
 
 `);
-    const { history, left } = historyOf2(t.messages.map((m) => m.value), own2.historyTokens, own2.knowledge);
+    const system = withInstructions(prompt, await systemInstructions(await reader.view(), { role: ASSISTANT_ROLE, tokens: agents.systemTokens, texts: texts2 }));
+    const { history, left } = historyOf2(t.messages.map((m) => m.value), own2.historyTokens);
     const note = left > 0 ? renderPrompt(GM_TEXT.historyNote, texts2, { ...vars, count: String(left), messages: nounFor(left, "message", "messages") }).trim() : "";
     const first = history[0];
     if (note !== "" && first)
@@ -96196,8 +97063,7 @@ ${first.text}` };
 ${text7}` : text7;
     const run2 = { id: newId("run"), agentId: "", label: RUN_LABEL, startedAt: Date.now(), tokens: { in: 0, out: 0 }, controller: new AbortController, handle: null };
     const agent = { role: ASSISTANT_ROLE, id: "" };
-    const reads = { userId, chatId, knowledge: own2.knowledge };
-    const base = { ...reads, reader: outsideReader(this.rt, reads), agent, signal: run2.controller.signal };
+    const base = { ...reads, reader, agent, signal: run2.controller.signal };
     const modes = own2.connectionId ?? await this.rt.activeConnectionId(userId);
     const real2 = outsideWriter(this.rt, { ...base, connectionId: modes });
     const collected = new Map;
@@ -96217,9 +97083,9 @@ ${text7}` : text7;
     run2.handle = handle;
     run2.agentId = handle.id;
     agent.id = handle.id;
-    await this.save(t, { messages: [{ v: 1, id: newId("m"), role: "user", text: text7, at: Date.now(), knowledge: own2.knowledge }] });
+    await this.save(t, { messages: [{ v: 1, id: newId("m"), role: "user", text: text7, at: Date.now() }] });
     t.run = run2;
-    this.answer(t, run2, { handle, text: sent2, collected, apply: own2.apply, knowledge: own2.knowledge, connection: own2.connectionId ?? ACTIVE_CONNECTION, modes, model: own2.model });
+    this.answer(t, run2, { handle, text: sent2, collected, apply: own2.apply, connection: own2.connectionId ?? ACTIVE_CONNECTION, modes, model: own2.model });
     return this.viewOf(t);
   }
   watched(t, run2, tool) {
@@ -96264,11 +97130,10 @@ ${text7}` : text7;
             ...trace.length > 0 ? { trace } : {},
             usage: { in: reply.usage.in, out: reply.usage.out, cached: reply.usage.cachedIn, ...reply.usage.cacheWrite !== undefined ? { written: reply.usage.cacheWrite } : {} },
             status: reply.status,
-            ...reply.status !== "answered" && reply.reason ? { reason: reply.reason } : {},
-            knowledge: ask.knowledge
+            ...reply.status !== "answered" && reply.reason ? { reason: reply.reason } : {}
           };
           const ops = [...ask.collected.values()].map(({ op, preview }) => ({ key: preview.key, changeType: preview.changeType, lines: [...preview.lines], mode: preview.mode, op }));
-          const proposal = reply.status !== "cancelled" && ops.length > 0 ? { v: 1, id: newId("p"), messageId: answer.id, agentId: run2.agentId, status: "open", ops, knowledge: ask.knowledge, connection: ask.modes } : null;
+          const proposal = reply.status !== "cancelled" && ops.length > 0 ? { v: 1, id: newId("p"), messageId: answer.id, agentId: run2.agentId, status: "open", ops, connection: ask.modes } : null;
           await this.save(u, { messages: [answer], proposals: proposal ? [proposal] : [] });
           return proposal && ask.apply === "at_once" && reply.status === "answered" && ops.every((o) => o.mode !== "confirm") ? proposal.id : null;
         } finally {
@@ -96311,7 +97176,7 @@ ${text7}` : text7;
       const p = t.proposals.find(({ value: q }) => q.status === "applied" && q.chipId === chipId && q.undone !== true)?.value;
       if (!p)
         return;
-      const ops = p.ops.map((o) => o.applied && !isLearnedOp(o.op) ? { ...o, undone: true } : o);
+      const ops = p.ops.map((o) => o.applied && !isKeptOp(o.op) ? { ...o, undone: true } : o);
       await this.save(t, { proposals: [{ ...p, ops, undone: true }] });
       this.push(t);
       await this.learn(userId, await this.connectionOf(userId, p), ops.filter((o) => o.undone).map((o) => ({ changeType: o.changeType, outcome: "undone" })));
@@ -96387,7 +97252,7 @@ ${text7}` : text7;
     const sent2 = new Set(begun.picked.map((o) => o.key));
     try {
       const own2 = (await this.rt.settings.get(userId)).agents.assistant;
-      const base = { userId, chatId, knowledge: widerKnowledge(begun.p.knowledge ?? "gm", own2.knowledge) };
+      const base = { userId, chatId, knowledge: "gm" };
       const connection = begun.p.connection ?? own2.connectionId ?? await this.rt.activeConnectionId(userId);
       const writer = outsideWriter(this.rt, { ...base, reader: outsideReader(this.rt, base), agent: { role: ASSISTANT_ROLE, id: begun.p.agentId }, signal: new AbortController().signal, connectionId: connection });
       const result = await writer.apply(begun.picked.map((o) => o.op), ROLE_LABEL3);
@@ -96423,15 +97288,10 @@ ${text7}` : text7;
 }
 async function workspaceRequest(rt, r, userId) {
   const base = { userId, chatId: r.chatId, knowledge: "gm" };
-  const text7 = (v3, what) => {
-    if (typeof v3 !== "string")
+  const text7 = (v4, what) => {
+    if (typeof v4 !== "string")
       throw new AssistantError("bad_request", `Give the ${what}.`);
-    return v3;
-  };
-  const readers = (v3) => {
-    if (!isAgentKnowledge(v3))
-      throw new AssistantError("bad_request", "Say who may read the file: pov, everyone or gm.");
-    return v3;
+    return v4;
   };
   if (r.op === "list")
     return { files: await listWorkspace(rt, base) };
@@ -96447,7 +97307,7 @@ async function workspaceRequest(rt, r, userId) {
   }
   let op;
   if (r.op === "write")
-    op = { kind: "ws_write", path: text7(r.path, "file's path"), text: text7(r.text, "file's text"), ...r.readers !== undefined ? { readers: readers(r.readers) } : {} };
+    op = { kind: "ws_write", path: text7(r.path, "file's path"), text: text7(r.text, "file's text") };
   else if (r.op === "delete")
     op = { kind: "ws_delete", path: text7(r.path, "file's path") };
   else if (r.op === "move")
@@ -96456,10 +97316,8 @@ async function workspaceRequest(rt, r, userId) {
     if (typeof r.pinned !== "boolean")
       throw new AssistantError("bad_request", "Say whether the file is pinned.");
     op = { kind: "ws_pin", path: text7(r.path, "file's path"), pinned: r.pinned };
-  } else if (r.op === "readers")
-    op = { kind: "ws_readers", path: text7(r.path, "file's path"), readers: readers(r.readers) };
-  else
-    throw new AssistantError("bad_request", "op must be list, read, write, delete, move, pin, readers, session or rollback");
+  } else
+    throw new AssistantError("bad_request", "op must be list, read, write, delete, move, pin, session or rollback");
   const writer = outsideWriter(rt, { ...base, reader: outsideReader(rt, base), agent: { role: GM_ROLE, id: GM_ROLE }, signal: new AbortController().signal, connectionId: null });
   const result = await writer.apply([op], WORKSPACE_LABEL);
   if (result.applied.length === 0)
@@ -96658,10 +97516,10 @@ var GROUNDED = {
     if (!reply)
       return { run: null, left: [] };
     const { vars, secrets } = replyFacts(rt, m, reply.text);
-    const withheld = rt.choiceWithheld(m.world, m.at.state, secrets, [`${reply.text}
+    const secret = rt.choiceSecret(m.world, m.at.state, secrets, [`${reply.text}
 ${m.user}`, ...Object.values(vars)].join(`
 `));
-    return { run: (ctx) => choicesRun(rt, { reply: reply.text, template: run2.template ? renderTemplate(run2.template.template, vars) : null, vars, withheld, classic: noClassic }, ctx), left: [] };
+    return { run: (ctx) => choicesRun(rt, { reply: reply.text, template: run2.template ? renderTemplate(run2.template.template, vars) : null, vars, secret, classic: noClassic }, ctx), left: [] };
   },
   [roleContractId("world", "effects")]: async (rt, m) => {
     const run2 = ["extract", "choices"].flatMap((purpose) => stepRuns(m, purpose, "effects"))[0];
@@ -96692,7 +97550,7 @@ var ALONE = "the rest of its task: it ran on the role's texts alone, named for t
 function textsAlone(rt, ctx, m, def2, contract) {
   const sub2 = contract.slice(roleContractId(ctx.role, "").length);
   const part = def2.id.startsWith(`${contract}.answer`) ? def2.id.slice(contract.length + 1) : "answer";
-  return runRoleAgent(rt, ctx, { sub: sub2, purpose: TEST_PURPOSE[contract] ?? null, phase: "pre", names: namesOf5(m.head.world, m.head.state), vars: {}, answer: { part }, tools: null, check: (raw) => raw });
+  return runRoleAgent(rt, ctx, { sub: sub2, purpose: TEST_PURPOSE[contract] ?? null, phase: "pre", names: namesOf4(m.head.world, m.head.state), vars: {}, answer: { part }, tools: null, check: (raw) => raw });
 }
 async function roleTextTest(rt, input) {
   const { userId, chatId, def: def2, role, signal: signal2 } = input;
@@ -96716,14 +97574,14 @@ async function roleTextTest(rt, input) {
         userId,
         chatId,
         generationId: `test:${def2.id}`,
-        reader: turnReader(rt, () => m.head, { userId, chatId, knowledge: own2.knowledge === "own" ? null : own2.knowledge }),
+        reader: turnReader(rt, () => m.head, { userId, chatId, knowledge: "gm", marks: true }),
         writer,
         role,
         agentId: `test:${role}`,
         settings: { ...own2, families: [] },
         brief: null,
         texts: texts2,
-        readAs: (knowledge) => ({ reader: turnReader(rt, () => m.head, { userId, chatId, knowledge }), writer }),
+        sections: (slots) => roleSections(rt, { userId, chatId, head: m.head, slots, scene: null, said: "", texts: texts2 }),
         loads: { add: () => false }
       };
       const out = task.run ? await task.run(ctx) : await textsAlone(rt, ctx, m, def2, contract);
@@ -96975,12 +97833,12 @@ class Dispatcher {
           const refused2 = this.rt.requestRefusal(world, state2, action, r.params, "seen");
           if (refused2)
             throw new RequestError("validation", refused2);
-          const picked = Object.entries(r.params).flatMap(([k, v3]) => {
-            if (typeof v3 === "number")
-              return [action.params[k]?.type === "money" ? formatMoney(v3, world.currency) : String(v3)];
-            if (typeof v3 !== "string" || v3 === "")
+          const picked = Object.entries(r.params).flatMap(([k, v4]) => {
+            if (typeof v4 === "number")
+              return [action.params[k]?.type === "money" ? formatMoney(v4, world.currency) : String(v4)];
+            if (typeof v4 !== "string" || v4 === "")
               return [];
-            return [state2.entities[v3]?.name ?? (hasOwn(world.places, v3) ? world.places[v3]?.name : undefined) ?? v3];
+            return [state2.entities[v4]?.name ?? (hasOwn(world.places, v4) ? world.places[v4]?.name : undefined) ?? v4];
           });
           label2 = picked.length > 0 ? `${action.label}: ${picked.join(", ")}` : action.label;
           if (action.mechanical === true && said2 === "") {
@@ -98022,9 +98880,9 @@ class Dispatcher {
             if ("code" in reached)
               throw new RequestError("validation", `Timelapse: ${reached.reason}`);
             const overrides = {};
-            for (const [k, v3] of Object.entries(parseOverrides(payload.params.overrides)))
-              if (typeof v3 === "string")
-                overrides[k] = v3;
+            for (const [k, v4] of Object.entries(parseOverrides(payload.params.overrides)))
+              if (typeof v4 === "string")
+                overrides[k] = v4;
             const follows = typeof payload.params.followRoutine === "boolean" ? payload.params.followRoutine : read.params.povRoutine !== false;
             return { applied: this.rt.passIntent(chatId, text7, timelapseIntent(target, Object.keys(overrides).length > 0 ? overrides : undefined, 1, follows).params), pending: false };
           }
@@ -98176,7 +99034,7 @@ class MemoryBudget {
     this.trimmedAt = rss;
     const gone = this.trim();
     this.probe.collect();
-    this.log(`memory: RSS ${Math.round(rss / MB)} MB is past the ${Math.round(this.limit / MB)} MB budget; let go of the copies of ${gone.messages} chats' messages, ${gone.ledgers} open ledgers, ${gone.views} views and ${gone.bridges} turn bridges of chats not in use`);
+    this.log(`memory: RSS ${Math.round(rss / MB)} MB is past the ${Math.round(this.limit / MB)} MB budget; let go of the copies of ${gone.messages} chats' messages, ${gone.ledgers} open ledgers, ${gone.views} views and ${gone.bridges} turn bridges of chats not in use, ${gone.texts} agent texts, ${gone.sessions} main sessions read, ${gone.steps} fold steps and ${gone.books} World Info books read`);
     return true;
   }
   start() {
@@ -98201,13 +99059,13 @@ function watchMemory(runtime, probe, log, limit2 = MEMORY_LIMIT_BYTES) {
 }
 
 // src/backend/spindle-host.ts
-function toJson(value) {
+function toJson2(value) {
   if (value === null || typeof value === "string" || typeof value === "boolean")
     return value;
   if (typeof value === "number")
     return Number.isFinite(value) ? value : null;
   if (Array.isArray(value))
-    return value.map(toJson);
+    return value.map(toJson2);
   if (isRecord(value))
     return toJsonObject(value);
   return null;
@@ -98216,22 +99074,22 @@ function toJsonObject(value) {
   const out = {};
   if (!isRecord(value))
     return out;
-  for (const [k, v3] of Object.entries(value))
-    if (v3 !== undefined && typeof v3 !== "function")
-      out[k] = toJson(v3);
+  for (const [k, v4] of Object.entries(value))
+    if (v4 !== undefined && typeof v4 !== "function")
+      out[k] = toJson2(v4);
   return out;
 }
 function str19(o, key) {
   if (!isRecord(o))
     return;
-  const v3 = o[key];
-  return typeof v3 === "string" ? v3 : undefined;
+  const v4 = o[key];
+  return typeof v4 === "string" ? v4 : undefined;
 }
 function num6(o, key) {
   if (!isRecord(o))
     return;
-  const v3 = o[key];
-  return typeof v3 === "number" && Number.isFinite(v3) ? v3 : undefined;
+  const v4 = o[key];
+  return typeof v4 === "number" && Number.isFinite(v4) ? v4 : undefined;
 }
 var GENERATION_TYPES = { normal: "normal", regenerate: "regenerate", swipe: "swipe", continue: "continue", impersonate: "impersonate" };
 function generationType(o) {
@@ -98377,9 +99235,9 @@ function decodeAnswer(raw) {
     return null;
   const probabilities = {};
   if (isRecord(raw.probabilities)) {
-    for (const [k, v3] of Object.entries(raw.probabilities))
-      if (typeof v3 === "number")
-        probabilities[k] = v3;
+    for (const [k, v4] of Object.entries(raw.probabilities))
+      if (typeof v4 === "number")
+        probabilities[k] = v4;
   }
   if (type === "choice")
     return { type, choice: str19(raw, "choice") ?? "", probabilities, confidence: num6(raw, "confidence") ?? 0 };
@@ -98514,14 +99372,14 @@ class DiagnosticsLog {
 async function listScripts(options, userId) {
   const out = [];
   for (let offset = 0;offset < 1e5; offset += 200) {
-    const page6 = await spindle.regex_scripts.list({ ...options, limit: 200, offset, userId });
-    for (const s of page6.data) {
+    const page7 = await spindle.regex_scripts.list({ ...options, limit: 200, offset, userId });
+    for (const s of page7.data) {
       const chatId = s.scope === "chat" ? s.scope_id : null;
       if (s.scope !== options.scope || s.scope === "chat" && !chatId)
         continue;
       out.push({ id: s.id, chatId, mine: s.can_mutate, findRegex: s.find_regex, replaceString: s.replace_string, flags: s.flags, placement: [...s.placement], targets: Array.isArray(s.target) ? [...s.target] : [s.target], runOnEdit: s.run_on_edit, sortOrder: s.sort_order, metadata: toJsonObject(s.metadata) });
     }
-    if (page6.data.length < 200 || offset + page6.data.length >= page6.total)
+    if (page7.data.length < 200 || offset + page7.data.length >= page7.total)
       break;
   }
   return out;
@@ -98565,19 +99423,19 @@ function createSpindleHost() {
       async list(userId) {
         const out = new Map;
         const read = async (offset) => {
-          const page6 = await spindle.chats.list({ limit: 200, offset, userId });
+          const page7 = await spindle.chats.list({ limit: 200, offset, userId });
           let fresh = 0;
-          for (const chat of page6.data) {
+          for (const chat of page7.data) {
             if (out.has(chat.id))
               continue;
             out.set(chat.id, { id: chat.id, name: chat.name, metadata: toJsonObject(chat.metadata) });
             fresh++;
           }
-          return { size: page6.data.length, total: page6.total, fresh };
+          return { size: page7.data.length, total: page7.total, fresh };
         };
         for (let offset = 0;offset < 1e5; offset += 180) {
-          const page6 = await read(offset);
-          if (page6.size < 200 || offset + 200 >= page6.total)
+          const page7 = await read(offset);
+          if (page7.size < 200 || offset + 200 >= page7.total)
             break;
         }
         for (let pass = 0;pass < 5 && (await read(0)).fresh > 0; pass++)
@@ -98587,9 +99445,13 @@ function createSpindleHost() {
     },
     storage: {
       async read(path2, userId) {
-        if (!await spindle.userStorage.exists(path2, userId))
-          return null;
-        return spindle.userStorage.read(path2, userId);
+        try {
+          return await spindle.userStorage.read(path2, userId);
+        } catch {
+          if (!await spindle.userStorage.exists(path2, userId))
+            return null;
+          return spindle.userStorage.read(path2, userId);
+        }
       },
       write: (path2, data, userId) => spindle.userStorage.write(path2, data, userId),
       move: (from, to, userId) => spindle.userStorage.move(from, to, userId),
@@ -98604,9 +99466,13 @@ function createSpindleHost() {
     },
     extensionStorage: {
       async read(path2) {
-        if (!await spindle.storage.exists(path2))
-          return null;
-        return spindle.storage.read(path2);
+        try {
+          return await spindle.storage.read(path2);
+        } catch {
+          if (!await spindle.storage.exists(path2))
+            return null;
+          return spindle.storage.read(path2);
+        }
       },
       write: (path2, data) => spindle.storage.write(path2, data)
     },
@@ -98753,12 +99619,12 @@ function createSpindleHost() {
         const out = [];
         const seconds2 = (t) => typeof t === "number" && Number.isFinite(t) ? t : null;
         for (let offset = 0;offset < 1e5; offset += 200) {
-          const page6 = await spindle.world_books.list({ limit: 200, offset, userId });
-          for (const b of page6.data) {
+          const page7 = await spindle.world_books.list({ limit: 200, offset, userId });
+          for (const b of page7.data) {
             const meta = isRecord(b.metadata) ? b.metadata : {};
             out.push({ id: b.id, name: b.name, engine: meta.lumi_rp_engine === true, character: typeof meta.source_character_id === "string" && meta.source_character_id !== "", added: seconds2(b.created_at), updated: seconds2(b.updated_at) });
           }
-          if (page6.data.length < 200 || out.length >= page6.total)
+          if (page7.data.length < 200 || out.length >= page7.total)
             break;
         }
         return out;
@@ -98766,10 +99632,10 @@ function createSpindleHost() {
       async entries(bookId, userId) {
         const out = [];
         for (let offset = 0;offset < 1e5; offset += 200) {
-          const page6 = await spindle.world_books.entries.list(bookId, { limit: 200, offset, userId });
-          for (const e of page6.data)
+          const page7 = await spindle.world_books.entries.list(bookId, { limit: 200, offset, userId });
+          for (const e of page7.data)
             out.push(bookEntryOf(e));
-          if (page6.data.length < 200 || out.length >= page6.total)
+          if (page7.data.length < 200 || out.length >= page7.total)
             break;
         }
         return out;
@@ -98801,7 +99667,7 @@ function createSpindleHost() {
     async dryRun(chatId, userId) {
       const result = await spindle.generate.dryRun({ chatId }, userId);
       const p = result.parameters;
-      const max = [p.max_tokens, p.maxTokens, p.max_new_tokens, p.max_output_tokens].find((v3) => typeof v3 === "number" && Number.isFinite(v3));
+      const max = [p.max_tokens, p.maxTokens, p.max_new_tokens, p.max_output_tokens].find((v4) => typeof v4 === "number" && Number.isFinite(v4));
       return {
         messages: result.messages.map((m) => ({ role: m.role, content: typeof m.content === "string" ? m.content : JSON.stringify(m.content) })),
         blocks: result.breakdown.filter((b) => b.type === "block").map((b) => ({ id: b.blockId ?? null, name: b.name, content: b.content ?? "" })),
@@ -98880,12 +99746,12 @@ function createSpindleHost() {
       async stdioProfiles(userId) {
         const out = [];
         for (let offset = 0;; ) {
-          const page6 = await spindle.mcp.servers.list({ limit: 100, offset, userId });
-          for (const p of page6.data)
+          const page7 = await spindle.mcp.servers.list({ limit: 100, offset, userId });
+          for (const p of page7.data)
             if (p.transport_type === "stdio")
               out.push({ id: p.id, name: p.name });
-          offset += page6.data.length;
-          if (page6.data.length === 0 || offset >= page6.total)
+          offset += page7.data.length;
+          if (page7.data.length === 0 || offset >= page7.total)
             return out;
         }
       },
@@ -98957,6 +99823,9 @@ function spliceBlocks(stored, at2, blocks, newId2) {
 // src/backend/main.ts
 function startBackend() {
   const host = createSpindleHost();
+  const caught = (what) => (error) => host.log("error", `[LumiRPEngine] ${what}: ${error instanceof Error ? error.stack ?? `${error.name}: ${error.message}` : String(error)}`);
+  process.on("unhandledRejection", caught("unhandled rejection"));
+  process.on("uncaughtException", caught("uncaught exception"));
   const runtime = new Runtime({ host, packs: ALL_PACKS, pipeline: { plan: planTurn, post: postTurn }, templates: STARTER_WORLDS, templateInfo: STARTER_INFO });
   const jobs = new JobRunner(host, runtime.worlds, runtime.steps, runtime.settings, runtime.registry);
   runtime.start();

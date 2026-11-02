@@ -328,6 +328,15 @@ var TIMEOUTS = {
     zero: "no lookups",
     none: "lookups may start until the run's last third"
   },
+  finalReviewMs: {
+    label: "Final review",
+    group: "turn",
+    limits: "The main agent's final review of the narrator's prompt, after the engine run makes the turn's sections and before the reply is generated (Settings → Agents → Main agent → Final review).",
+    fires: "The review stops and its edits are dropped: the narrator gets the sections as the engine made them, with a Diagnostics record, or the turn stops with a Retry, as the review's failure setting says.",
+    defaultMs: 2 * MIN,
+    minMs: 1000,
+    none: "the review takes as long as it needs (its budget still bounds it)"
+  },
   postReplyMs: {
     label: "Reading the reply",
     group: "turn",
@@ -980,7 +989,7 @@ var ENGINE_FIELDS = { [ACTIVITY_SPAN_OF]: true, [ACTIVITY_PLACE]: true, _activit
 // src/cli/version.ts
 var CLI_NAME = "lumirpengine";
 var CLI_VERSION = package_default.version;
-var BUILD = "c3ad1b86";
+var BUILD = "83b29af7";
 function runtimeCannotFollow(bun) {
   if (bun === undefined)
     return null;

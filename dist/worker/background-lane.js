@@ -2296,7 +2296,7 @@ function narratorViewOf(raw) {
   const secrets = NARRATOR_SECRETS.find((s) => s === raw.secrets);
   return knowledge && secrets ? { knowledge, secrets } : null;
 }
-var LORE_INDEX_DEFAULTS = Object.freeze({ tagPattern: "^lr\\d{4}$", idPrefix: "lre", idDigits: 4, holdsChars: 100, inPrompts: false, promptTokens: 1500, own: null, built: null });
+var LORE_INDEX_DEFAULTS = Object.freeze({ tagPattern: "^lr\\d{4}$", idPrefix: "lre", idDigits: 4, holdsChars: 100, promptTokens: 1500, own: null, built: null });
 var JOB_SETTINGS_DEFAULTS = Object.freeze({ routineLoreTokens: 8000 });
 
 // src/engine/read-pass.ts
@@ -7083,7 +7083,7 @@ var entity = "The person or thing: their id, or their name as the world has it."
 var person2 = "The person: their id, or their name as the world has it.";
 var field = "The field's id.";
 var relation = "The relation type's id: knows, owns, member_of, regard, in, or one of the world's own.";
-var path = "The workspace file's path: names joined by /, such as notes/marcus.md.";
+var path = "The workspace file's path: names joined by /, such as notes/marcus.md; start it with ~/ for the global workspace, which every chat shares, such as ~/notes/style.md.";
 var under = "Only files under this folder, such as notes/; leave it out for every file.";
 var lore = "The lore entry's id, as lore_index, lore_search or lore_grep gives it: a short id such as lr0101, a World Info entry as bookId/entryId, or a world entry's own id.";
 var proposes = "The answer is the change in plain words, its change type and its mode. Working a turn, the change is staged at once: it lands when the turn commits, or, when its mode is confirm, waits for the game master's Apply on the turn's review card. Otherwise nothing changes until the game master applies it.";
@@ -7158,7 +7158,7 @@ var WRITE_TOOL_TEXTS = [
     args: [
       { path: "kind", text: "Its kind." },
       { path: "name", text: "Its name." },
-      { path: "id", text: "An id of your own for it; leave it out for one the engine makes. Reading with the player character's knowledge, always leave it out: an id is refused." },
+      { path: "id", text: "An id of your own for it; leave it out for one the engine makes." },
       { path: "tier", text: "Its tier; leave it out for the world's spawn tier." },
       { path: "place", text: "Where it starts: a place's id or name." },
       { path: "agent", text: "true: it lives on its own between turns." }
@@ -7326,8 +7326,8 @@ var WRITE_TOOL_TEXTS = [
     name: "workspace_list",
     family: "workspace",
     tier: "read",
-    note: "Lists the chat's workspace files.",
-    text: "List the chat's workspace files, the notes the agents and the game master keep for this chat: each one's path, its size in characters, whether it is pinned, the turn it was written on and who wrote it. The workspace follows the chat's turns, so a swipe from before a note has none of it.",
+    note: "Lists the workspace files: the chat's and the global ones (~/).",
+    text: "List the workspace files: the chat's, the notes the agents and the game master keep for this chat, and the global workspace's under ~/, which every chat of the player's shares. Each one's path, its size in characters, whether it is pinned, the turn it was written on and who wrote it. AGENTS.md and roles/<role>.md, at either level, are system files: every agent is given AGENTS.md as its instructions, and each role its own roles/<role>.md. Each turn's transcript is under transcripts/, to read. The chat's story notes follow its turns, so a swipe from before a note has none of it; files under learned/ and ~/ stay as they are.",
     args: [{ path: "under", text: under }]
   },
   {
@@ -7404,6 +7404,18 @@ var WRITE_TOOL_TEXTS = [
     ]
   },
   {
+    name: "condense",
+    family: "workspace",
+    tier: "gm",
+    note: "Condenses a long source into a workspace note, with one call of the agent's own model.",
+    text: `Condense a long source (a workspace file, a turn's transcript among them, or a lore entry) into a short workspace note: your own model writes it in one call, and the note opens with its source and the source's hash, so whoever reads it later can tell whether it is still current. Read the note, or name it in a task, instead of the whole source. ${proposes}`,
+    args: [
+      { path: "source", text: `The source: a workspace file's path, or a lore entry's id. ${lore}` },
+      { path: "note", text: "Where the note goes: a workspace path; leave it out for notes/condensed/ and a name taken from the source's." },
+      { path: "focus", text: "What the note should keep: the task it is for, or what matters in the source; leave it out for a plain digest." }
+    ]
+  },
+  {
     name: "lore_index",
     family: "lore",
     tier: "read",
@@ -7472,13 +7484,8 @@ var WRITE_NOTE = {
   badOp: "tool.note.bad_op",
   badPath: "tool.note.bad_path",
   noFile: "tool.note.no_file",
-  pathTaken: "tool.note.path_taken",
   never: "tool.note.never",
   spawnCap: "tool.note.spawn_cap",
-  spawnId: "tool.note.spawn_id",
-  notYourMind: "tool.note.not_your_mind",
-  povEffect: "tool.note.pov_effect",
-  povRefused: "tool.note.pov_refused",
   learnedMove: "tool.note.learned_move",
   transcriptReadOnly: "tool.note.transcript_read_only",
   fileExists: "tool.note.file_exists",
@@ -7498,26 +7505,23 @@ var WRITE_NOTE = {
   gmCap: "tool.note.gm_cap",
   workspaceLine: "tool.note.workspace_line",
   staged: "tool.note.staged",
-  stagedReview: "tool.note.staged_review"
+  stagedReview: "tool.note.staged_review",
+  noSource: "tool.note.no_source",
+  condenseFailed: "tool.note.condense_failed"
 };
 var filePath = { name: "path", text: "the workspace path the call gave" };
 var WRITE_TOOL_NOTES = [
   { id: WRITE_NOTE.noWriter, label: "Nothing to write with", note: "A write tool's answer when the agent may only read.", text: "This agent can't change anything here: it only reads.", vars: [] },
   { id: WRITE_NOTE.badOp, label: "A change it can't read", note: "A write's answer when the change it was given isn't one the engine can read.", text: "That change isn't one the engine can read: check it against the tool's description.", vars: [] },
-  { id: WRITE_NOTE.badPath, label: "Not a workspace path", note: "A workspace write's answer when the path isn't one a file may have.", text: "{{path}} isn't a workspace path: names of letters, digits, \u201C.\u201D, \u201C_\u201D and \u201C-\u201D, joined by /.", vars: [filePath] },
-  { id: WRITE_NOTE.noFile, label: "No such file", note: "A workspace tool's answer when no file is at the path, or none the agent's knowledge may read.", text: "No workspace file {{path}} here.", vars: [filePath] },
-  { id: WRITE_NOTE.pathTaken, label: "A path taken by a file it can't read", note: "A workspace write's answer when a file the agent's knowledge may not read (Who may read it, GM \u2192 Workspace) is at the path.", text: "A workspace file you can't read is already at {{path}}: pick another path.", vars: [filePath] },
+  { id: WRITE_NOTE.badPath, label: "Not a workspace path", note: "A workspace write's answer when the path isn't one a file may have.", text: "{{path}} isn't a workspace path: names of letters, digits, \u201C.\u201D, \u201C_\u201D and \u201C-\u201D, joined by /, with ~/ before them for the global workspace.", vars: [filePath] },
+  { id: WRITE_NOTE.noFile, label: "No such file", note: "A workspace tool's answer when no file is at the path.", text: "No workspace file {{path}} here.", vars: [filePath] },
   { id: WRITE_NOTE.never, label: "A change type set to Never", note: "A write's answer when the user set its change type to Never in Settings \u2192 Changes from the reply.", text: "{{type}} is set to Never (Settings \u2192 Changes from the reply), so this change isn't made.", vars: [{ name: "type", text: "the change type, as Settings names it", required: true }] },
   { id: WRITE_NOTE.spawnCap, label: "The spawn cap", note: "A GM spawn's answer when the chat has brought in as many people as its world allows.", text: "This chat has brought in {{count}} {{people}}, all its world allows (its spawn cap, Build \u2192 World), so no one new can join it.", vars: [{ name: "count", text: "the people the chat has brought in", required: true }, { name: "people", text: '"person" for 1, else "people"' }] },
-  { id: WRITE_NOTE.spawnId, label: "An id a spawn can't take", note: "A GM spawn's answer, under the player character's knowledge, when the id it asks for is taken or isn't an id: one answer whoever holds it, so it never tells of someone the player character can't know.", text: "{{id}} can't be used for someone or something new: leave the id out, and one is made.", vars: [{ name: "id", text: "the id the spawn asked for" }] },
-  { id: WRITE_NOTE.notYourMind, label: "Another's mind", note: "A minds change's answer, under the player character's knowledge, for anyone but the player character: one answer whoever it is and whatever their mind holds, so it never tells what another knows or thinks.", text: "{{pov}} can't see into anyone else's mind, and you read the world as {{pov}} knows it: only what {{pov}} knows may be changed.", vars: [{ name: "pov", text: "the player character's name" }] },
-  { id: WRITE_NOTE.povEffect, label: "An effect under your character's knowledge", note: "gm_effect's answer under the player character's knowledge: one answer for every effect, whatever it would touch, since an effect works on what the player character may not know of.", text: "Effects aren't proposed with {{pov}}'s knowledge: their workings reach past what {{pov}} knows. Use the other tools, or ask the game master.", vars: [{ name: "pov", text: "the player character's name" }] },
-  { id: WRITE_NOTE.povRefused, label: "A refusal under your character's knowledge", note: "A write's answer, under the player character's knowledge, whenever the engine refuses the change: one answer whatever the engine's reason, so a refusal never tells what the player character can't know.", text: "That change can't be made as {{pov}} knows the world: check it against what you can read, or propose another.", vars: [{ name: "pov", text: "the player character's name" }] },
   { id: WRITE_NOTE.tooMany, label: "Too many changes at once", note: "An apply's answer when one batch holds more changes than one GM edit may.", text: "One batch holds at most {{max}} changes, as one GM edit does.", vars: [{ name: "max", text: "the most one GM edit holds", required: true }] },
   { id: WRITE_NOTE.editMissing, label: "Text not in the file", note: "workspace_edit's answer when the file doesn't hold the text to replace.", text: "{{path}} doesn't hold that text.", vars: [filePath] },
-  { id: WRITE_NOTE.learnedMove, label: "Into or out of learned/", note: "workspace_move's answer when it would take a file into or out of the learned area (learned/), which is kept apart from the turns.", text: "{{path}} can't move to {{to}}: files under learned/ stay there, and the others stay out of it. Write the file at its new path, then delete the old one.", vars: [filePath, { name: "to", text: "the path it was to move to" }] },
+  { id: WRITE_NOTE.learnedMove, label: "Out of its part of the workspace", note: "workspace_move's answer when it would take a file from one part of the workspace to another: the chat's story, the learned area (learned/) or the global workspace (~/), the last two kept apart from the turns.", text: "{{path}} can't move to {{to}}, since files stay in their part: the chat's story, learned/, or the global workspace ~/. Write the file at its new path, then delete the old one.", vars: [filePath, { name: "to", text: "the path it was to move to" }] },
   { id: WRITE_NOTE.transcriptReadOnly, label: "A transcript", note: "A workspace change's answer when it touches transcripts/, where each turn's transcript is kept to read: nothing writes, moves, deletes or pins a file there.", text: "{{path}} is under transcripts/, where each turn's transcript is kept as it was: read it, but write your notes at another path.", vars: [filePath] },
-  { id: WRITE_NOTE.fileExists, label: "A path taken in learned/", note: "workspace_move's answer, in the learned area, when a file is already at the path it was to move to.", text: "A workspace file is already at {{to}}: pick another path.", vars: [{ name: "to", text: "the path it was to move to" }] },
+  { id: WRITE_NOTE.fileExists, label: "A path taken in learned/ or ~/", note: "workspace_move's answer, in the learned area or the global workspace, when a file is already at the path it was to move to.", text: "A workspace file is already at {{to}}: pick another path.", vars: [{ name: "to", text: "the path it was to move to" }] },
   { id: WRITE_NOTE.editSeveral, label: "Text in the file more than once", note: "workspace_edit's answer when the text to replace is there more than once and all isn't set.", text: "{{path}} holds that text {{count}} times: give more of it to pick one, or set all to replace every one.", vars: [filePath, { name: "count", text: "how many times the file holds it", required: true }] },
   { id: WRITE_NOTE.noLore, label: "No such lore entry", note: "A lore tool's answer when no entry has the id, or none the agent's knowledge may read.", text: "No lore entry {{id}} here.", vars: [{ name: "id", text: "the entry id the call gave" }] },
   { id: WRITE_NOTE.draftPath, label: "A draft outside lore-drafts/", note: "lore_draft's answer when the path it was given isn't under lore-drafts/.", text: "A lore draft goes under lore-drafts/, and {{path}} isn't there.", vars: [filePath] },
@@ -7526,13 +7530,15 @@ var WRITE_TOOL_NOTES = [
   { id: WRITE_NOTE.cancelled, label: "Cancelled", note: "A write's answer when the agent's work was cancelled before it ran.", text: "The agent's work was cancelled, so nothing was checked or written.", vars: [] },
   { id: WRITE_NOTE.paused, label: "The chat is paused", note: "An apply's answer while an earlier message's edit waits for Keep or Discard.", text: "An earlier message was edited: Keep or Discard it first, under that message.", vars: [] },
   { id: WRITE_NOTE.noWorld, label: "No world", note: "A write's answer when the chat plays no LumiRPEngine world, or its world isn't loaded.", text: "This chat plays no LumiRPEngine world, or its world isn't loaded.", vars: [] },
-  { id: WRITE_NOTE.noChange, label: "A change that changes nothing", note: "A write's answer when the change would leave everything as it is, or, under the player character's knowledge, when it can't be made for a reason the player mustn't learn of.", text: "That changes nothing.", vars: [] },
+  { id: WRITE_NOTE.noChange, label: "A change that changes nothing", note: "A write's answer when the change would leave everything as it is.", text: "That changes nothing.", vars: [] },
   { id: WRITE_NOTE.stale, label: "The chat changed meanwhile", note: "An apply's answer when the chat changed between the check and the write (a turn landed), so the engine no longer takes the change.", text: "The chat changed while this was being written, so it no longer applies: read it again and propose the change anew.", vars: [] },
-  { id: WRITE_NOTE.notGranted, label: "A change the role isn't granted", note: "A turn agent's write answer when its role's tier (Settings \u2192 Agents \u2192 Roles) doesn't take that kind of change: the GM's edits need the GM tier, and so does the pins manifest (.pins.json, which sets what every agent is shown first); a role that only reads changes nothing.", text: "This role may make {{tier}} changes only, and this one is a {{needs}} change, so it isn't made.", vars: [{ name: "tier", text: "what the role may change: read (nothing), story or gm", required: true }, { name: "needs", text: "what the change needs: story or gm", required: true }] },
+  { id: WRITE_NOTE.notGranted, label: "A change the role isn't granted", note: "A turn agent's write answer when its role's tier (Settings \u2192 Agents \u2192 Roles) doesn't take that kind of change: the GM's edits need the GM tier, a workspace change (.pins.json and the system files included) the story tier; a role that only reads changes nothing.", text: "This role may make {{tier}} changes only, and this one is a {{needs}} change, so it isn't made.", vars: [{ name: "tier", text: "what the role may change: read (nothing), story or gm", required: true }, { name: "needs", text: "what the change needs: story or gm", required: true }] },
   { id: WRITE_NOTE.gmCap, label: "GM edits per turn", note: "A turn agent's write answer once the turn's agents have staged as many of the GM's edits as Settings \u2192 Agents \u2192 Budgets allows.", text: "This turn's agents have staged {{count}} of the GM's edits, all a turn allows (GM edits per turn, Settings \u2192 Agents \u2192 Budgets), so this one isn't made.", vars: [{ name: "count", text: "the GM edits the turn's agents have staged", required: true }] },
-  { id: WRITE_NOTE.workspaceLine, label: "A workspace change, below the GM", note: "The line a workspace change reads as under the player character's knowledge (the review card's) and everyone's: one line naming no file, as the player's Journal shows none. Under the GM's knowledge it reads as the GM's line, with its path.", text: "A note the story's agents keep changes.", vars: [] },
+  { id: WRITE_NOTE.workspaceLine, label: "A workspace change, below the GM", note: "The line a workspace change reads as on the review card and under everyone's view: one line naming no file, as the player's Journal shows none. Under the GM's view it reads as the GM's line, with its path.", text: "A note the story's agents keep changes.", vars: [] },
   { id: WRITE_NOTE.staged, label: "Staged in a turn", note: "A write tool's answer, working a turn, for a change it staged whose mode is Auto: it lands when the turn commits.", text: "Staged for this turn: it lands when the turn commits.", vars: [] },
-  { id: WRITE_NOTE.stagedReview, label: "Staged for the review card", note: "A write tool's answer, working a turn, for a change it staged whose mode is Confirm (Settings \u2192 Changes from the reply): it waits on the turn's review card.", text: "Staged for this turn, waiting for the GM's Apply on the review card: it lands only once the game master applies it.", vars: [] }
+  { id: WRITE_NOTE.stagedReview, label: "Staged for the review card", note: "A write tool's answer, working a turn, for a change it staged whose mode is Confirm (Settings \u2192 Changes from the reply): it waits on the turn's review card.", text: "Staged for this turn, waiting for the GM's Apply on the review card: it lands only once the game master applies it.", vars: [] },
+  { id: WRITE_NOTE.noSource, label: "No such source", note: "condense's answer when its source is neither a workspace file's path nor a lore entry's id.", text: "{{source}} is neither a workspace file nor a lore entry here.", vars: [{ name: "source", text: "the source the call gave" }] },
+  { id: WRITE_NOTE.condenseFailed, label: "Condensing failed", note: "condense's answer when its model call gave no note.", text: "{{source}} wasn't condensed: {{reason}}", vars: [{ name: "source", text: "the source it was to condense" }, { name: "reason", text: "why the call gave no note" }] }
 ];
 
 // src/shared/agent-tools.ts
@@ -7546,12 +7552,10 @@ var TOOL_NOTE = {
   noThing: "tool.note.no_thing",
   noTrack: "tool.note.no_track",
   noFact: "tool.note.no_fact",
-  noField: "tool.note.no_field",
   ambiguous: "tool.note.ambiguous",
   missing: "tool.note.missing",
   badValue: "tool.note.bad_value",
-  badValueUnlisted: "tool.note.bad_value_unlisted",
-  hidden: "tool.note.hidden"
+  badValueUnlisted: "tool.note.bad_value_unlisted"
 };
 var asked = { name: "name", text: "the name or id the model asked for, as it wrote it" };
 var LAYER_NOTES = [
@@ -7559,8 +7563,7 @@ var LAYER_NOTES = [
   { id: TOOL_NOTE.noPlace, label: "No such place", note: "A tool's answer when a place's name or id names no place the agent's knowledge can see.", text: "No such place here: {{name}}.", vars: [asked] },
   { id: TOOL_NOTE.noThing, label: "No such thing", note: "A tool's answer when a thing's name or id names nothing the agent's knowledge can see.", text: "No such thing here: {{name}}.", vars: [asked] },
   { id: TOOL_NOTE.noTrack, label: "No such quest or secret", note: "A tool's answer when a quest, secret, puzzle or agenda's id or label names none the agent's knowledge can see.", text: "No such quest, secret, puzzle or agenda here: {{name}}.", vars: [asked] },
-  { id: TOOL_NOTE.noFact, label: "No such fact", note: "A tool's answer when a fact's id names no fact the agent's knowledge can see: under the player character's knowledge, one it doesn't hold reads exactly as one the chat doesn't record.", text: "No such fact here: {{name}}.", vars: [asked] },
-  { id: TOOL_NOTE.noField, label: "No such field", note: "A write's answer, under the player character's knowledge, when a field names none it may see of that person or thing: a hidden field reads exactly as one its kind doesn't have.", text: "No such field here: {{name}}.", vars: [asked] },
+  { id: TOOL_NOTE.noFact, label: "No such fact", note: "A tool's answer when a fact's id names no fact the chat records.", text: "No such fact here: {{name}}.", vars: [asked] },
   {
     id: TOOL_NOTE.ambiguous,
     label: "Several match",
@@ -7594,20 +7597,13 @@ var LAYER_NOTES = [
   {
     id: TOOL_NOTE.badValueUnlisted,
     label: "A value it doesn't take, with none to list",
-    note: "A tool's answer when an argument holds a value the tool doesn't take and there is none it may list: under the player character's knowledge, a quest's stages it hasn't come to.",
+    note: "A tool's answer when an argument holds a value the tool doesn't take and there is none it may list.",
     text: "{{tool}} doesn't take {{value}} as {{arg}}.",
     vars: [
       { name: "tool", text: "the tool" },
       { name: "arg", text: "the argument" },
       { name: "value", text: "the value given", required: true }
     ]
-  },
-  {
-    id: TOOL_NOTE.hidden,
-    label: "Beyond the player character's knowledge",
-    note: "A tool's answer, under the player character's knowledge, to what the player character can't know: another's mind or knowledge, or another's odds.",
-    text: "{{pov}} doesn't know that, and you read the world as {{pov}} knows it.",
-    vars: [{ name: "pov", text: "the player character's name" }]
   }
 ];
 var TOOL_NOTES = [...LAYER_NOTES, ...WRITE_TOOL_NOTES];
