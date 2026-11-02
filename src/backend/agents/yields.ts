@@ -86,7 +86,7 @@ export function recordCommit(rt: Pick<Runtime, "diag" | "host">, at: DiagAt, tex
   }
 }
 
-/** What of a run's answer the engine didn't take, each reason with how many; an answer that held nothing says so. A director's flagged line stays in the reply's prompt: it is told here with its words. */
+/** What of a run's answer the engine didn't take, each reason with how many; an answer that held nothing says so. A director's flagged line stays in the reply's prompt: it is told here with its words, and the flags as advice. */
 function lostOf(say: (id: string, vars?: Readonly<Record<string, string>>) => string, kind: MainRequestKind, out: unknown): string[] {
   switch (kind) {
     case "knowledge": {
@@ -114,10 +114,11 @@ function lostOf(say: (id: string, vars?: Readonly<Record<string, string>>) => st
     }
     case "prose": {
       const flagged = (out as DirectorProse).flagged ?? [];
-      return PROSE_CLASHES.flatMap((why) => {
+      const told = PROSE_CLASHES.flatMap((why) => {
         const of = flagged.filter((f) => f.kind === why);
         return of.length > 0 ? [say(YIELD_TEXT.prose(why), { count: String(of.length), lines: `: ${of.map((f) => `"${f.line}"`).join("; ")}` })] : [];
       });
+      return told.length > 0 ? [...told, say(YIELD_TEXT.proseAdvice)] : [];
     }
     case "scene": {
       const unknown = (out as SceneOut).unknown ?? [];

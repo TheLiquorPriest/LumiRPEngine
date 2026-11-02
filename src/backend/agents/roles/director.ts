@@ -165,15 +165,21 @@ export async function proseRun(rt: Runtime, task: ProseTask, ctx: TurnAgentCtx):
         if (!isRecord(raw)) return null;
         const clash = proseClashes(rt.registry, task.world, task.start, task.state);
         const flagged: ProseClash[] = [];
-        // A clash is told with the run, and the line stays: the main agent and the GM judge it.
-        const flag = (line: string): void => {
-          const kind = clash(line);
-          if (kind !== null) flagged.push({ kind, line });
+        // A clash is told with the run, and the line stays: the main agent and the GM judge it. Each
+        // line is read after the one before it, which may have put it on a call.
+        const flag = (lines: readonly string[]): void => {
+          let before: string | undefined;
+          for (const line of lines) {
+            if (line.trim() === "") continue;
+            const kind = clash(line, before);
+            if (kind !== null) flagged.push({ kind, line });
+            before = line;
+          }
         };
         const told = brief ? proseAnswer("brief", raw.brief, brief.mark).join(" ").trim() : "";
-        for (const sentence of told.split(/(?<=[.!?])\s+(?=["“'(]?\p{Lu})/u)) if (sentence.trim() !== "") flag(sentence);
+        flag(told.split(/(?<=[.!?])\s+(?=["“'(]?\p{Lu})/u));
         const beats = outline ? proseAnswer("outline", raw.beats, outline.mark) : [];
-        for (const beat of beats) flag(beat);
+        flag(beats);
         return { prose: { brief: told === "" ? null : told, outline: beats }, ...(flagged.length > 0 ? { flagged } : {}) };
       },
     },

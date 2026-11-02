@@ -39,6 +39,7 @@ export const YIELD_TEXT = {
   readUntracked: "main.lost.read.untracked",
   sceneLore: "main.lost.scene.lore",
   prose: (kind: ProseClashKind): string => `main.lost.prose.${kind}`,
+  proseAdvice: "main.lost.prose.advice",
 } as const;
 
 const page = MAIN_AGENT_PAGE.id;
@@ -104,4 +105,11 @@ export const AGENT_YIELD_PROMPTS: readonly PromptDef[] = [
   ),
   def(YIELD_TEXT.sceneLore, "Scene: lore it doesn't have", "Lore ids a scene run chose that the world has no entry for.", "{{count}} lore ids not taken (the world has no such entry: {{ids}})", [count, { name: "ids", text: "the ids it gave", required: true }]),
   ...Object.entries(PROSE).map(([kind, t]) => def(YIELD_TEXT.prose(kind as ProseClashKind), t.label, t.note, t.text, [count, lines])),
+  def(
+    YIELD_TEXT.proseAdvice,
+    "Director: what a flag means",
+    "Follows the director's flagged lines: the engine's check reads each line against the state by its words alone, so a flag is advice, never by itself a reason to revise.",
+    "the engine thinks these lines may contradict the state; not by itself a reason to revise",
+    [],
+  ),
 ];

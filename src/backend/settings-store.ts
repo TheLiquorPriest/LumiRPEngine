@@ -162,6 +162,8 @@ const LIFTED = {
     [600, MINDS_PRESETS.standard.tokens],
     [1000, MINDS_PRESETS.full.tokens],
   ]),
+  /** The turn's tokens before revision 5 (`agents.turn`), each lifted to No limit. */
+  turn: { tokensIn: 100_000, tokensOut: 10_000 },
 };
 
 /**
@@ -171,8 +173,10 @@ const LIFTED = {
  * off where it left their effort to a helper model at its default effort (Inherit): an effort the
  * user chose, the step's or the helper model's, stays; one from revision 2 or 3 has a section budget
  * still at Standard's or Full's old default lifted to its new one, since the sections now tell their
- * facts whole (a file from before revision 2 already lifts to the new ones). Only plain values are
- * touched; anything malformed is left to `conform`.
+ * facts whole (a file from before revision 2 already lifts to the new ones); and one from before
+ * revision 5 has a turn budget still at its old default (`LIFTED.turn`) set to No limit, since every
+ * agent's own limits now bound a turn. Only plain values are touched; anything malformed is left to
+ * `conform`.
  */
 function lifted(raw: Readonly<Record<string, unknown>>): JsonObject {
   const out = JSON.parse(JSON.stringify(raw)) as JsonObject;
@@ -198,7 +202,7 @@ function lifted(raw: Readonly<Record<string, unknown>>): JsonObject {
     }
     if (mu && isRecord(mu.tokens) && typeof mu.tokens.sections === "number") mu.tokens.sections = lift(LIFTED.sections, mu.tokens.sections);
     if (isRecord(out.minds) && typeof out.minds.tokens === "number") out.minds.tokens = lift(LIFTED.minds, out.minds.tokens);
-  } else if (mu && isRecord(mu.tokens) && typeof mu.tokens.sections === "number") mu.tokens.sections = lift(LIFTED.wholeSections, mu.tokens.sections);
+  } else if (rev < 4 && mu && isRecord(mu.tokens) && typeof mu.tokens.sections === "number") mu.tokens.sections = lift(LIFTED.wholeSections, mu.tokens.sections);
   const helperEffort = isRecord(out.helper) ? out.helper.effort : undefined;
   if (rev < 3 && mu && isRecord(mu.steps) && (helperEffort === undefined || helperEffort === DEFAULT_HELPER.effort)) {
     for (const purpose of UNREASONED_STEPS) {
@@ -206,6 +210,11 @@ function lifted(raw: Readonly<Record<string, unknown>>): JsonObject {
       const route = isRecord(s) ? s.route : undefined;
       if (isRecord(route) && route.provider === "helper" && !hasOwn(route, "effort")) route.effort = "off";
     }
+  }
+  const turn = isRecord(out.agents) && isRecord(out.agents.turn) ? out.agents.turn : null;
+  if (rev < 5 && turn) {
+    if (turn.tokensIn === LIFTED.turn.tokensIn) turn.tokensIn = "none";
+    if (turn.tokensOut === LIFTED.turn.tokensOut) turn.tokensOut = "none";
   }
   out.defaults = SETTINGS_DEFAULTS_REV;
   return out;

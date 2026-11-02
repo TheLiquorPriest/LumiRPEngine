@@ -10,6 +10,7 @@
 
 import { describe, expect, test } from "bun:test";
 import { proseClashes } from "../../src/backend/agents/roles/prose-check";
+import { runYield } from "../../src/backend/agents/yields";
 import type { QuietRequest } from "../../src/backend/host";
 import { factLines, sceneClock } from "../../src/backend/turn-steps";
 import { clockMinutes } from "../../src/backend/view";
@@ -18,9 +19,11 @@ import { together } from "../../src/engine/presence";
 import { placeOfEntity } from "../../src/engine/scope";
 import { holderOf } from "../../src/packs/gear/core/model";
 import { ROLE_LABEL } from "../../src/shared/agent-roles";
+import { YIELD_TEXT } from "../../src/shared/agent-yield";
+import { MAIN_AGENT_PAGE } from "../../src/shared/main-agent-prompts";
 import type { JsonObject } from "../../src/shared/json";
 import type { Rec } from "../../src/shared/ledger";
-import { PROMPTS } from "../../src/shared/prompts";
+import { PROMPTS, promptDef } from "../../src/shared/prompts";
 import { alderChat, DANNY, MARCUS, PRIYA, stateOf } from "../support/mind-chat";
 import { Rig } from "../support/rig";
 
@@ -110,6 +113,39 @@ describe("the director's lines, held to the turn it was given", () => {
     expect(clash("A mug sits on the counter.")).toBeNull();
   });
 
+  test("leaves alone a line about a call, a text, a phone, a message or a screen, and the line right after one: whoever is on the other end is remote; answering and replying never place anyone", async () => {
+    const rig = new Rig({ shipped: true });
+    const chatId = await alderChat(rig, async () => {}, [DANNY, PRIYA]);
+    const { world, state } = await stateOf(rig, chatId);
+    const clash = proseClashes(rig.rt.registry, world, state, state);
+    // Danny is with Jordan; Marcus Delgado is at home on Birch Lane.
+    expect(together(world, placeOfEntity(state, "pov"), placeOfEntity(state, DANNY))).toBe(true);
+    expect(together(world, placeOfEntity(state, "pov"), placeOfEntity(state, MARCUS))).toBe(false);
+    // The other end of a call.
+    for (const line of [
+      "Danny answers the phone and talks to Marcus.",
+      "Danny answers the phone and talks to Marcus Delgado.",
+      "Marcus answers the phone and talks to Danny.",
+      "Marcus sighs into Danny's cell.",
+      "Marcus says on the call that the part is in.",
+      "Marcus smiles on the screen.",
+      "Marcus nods, the phone's speaker crackling.",
+      "Marcus asks over the line whether the truck is ready.",
+      "Marcus laughs as the message comes through.",
+      "Marcus grins at Jordan from the video call.",
+      "Marcus says the part is in, his text short.",
+    ])
+      expect([line, clash(line)]).toEqual([line, null]);
+    // Answering and replying, with nothing else that places them: either may be down a line.
+    for (const line of ["Marcus answers and reacts with a grunt.", "Marcus answers in a few words.", "Marcus replies that the part is in."]) expect([line, clash(line)]).toEqual([line, null]);
+    // The line right after one about a call is its other end; after any other line, it is still flagged.
+    expect(clash("Marcus says the part is in.", "Danny's phone rings.")).toBeNull();
+    expect(clash("Marcus sighs.", "Jordan picks up the call.")).toBeNull();
+    expect(clash("Marcus says the part is in.", "Danny wipes the counter.")).toBe("here");
+    expect(clash("Marcus says the part is in.")).toBe("here");
+    expect(clash("Marcus nods and talks to Danny.")).toBe("here");
+  });
+
   test("holds each line to the turn as it started and as it ends: the turn's own hand-over, put-down and leaving stand, and a line that fits neither is still flagged", async () => {
     const rig = new Rig({ shipped: true });
     const chatId = await alderChat(rig, async () => {}, [DANNY, PRIYA]);
@@ -163,22 +199,35 @@ describe("the director's lines, held to the turn it was given", () => {
     expect(leaving("Marcus nods at Jordan.")).toBe("here");
   });
 
-  test("a line that contradicts it is flagged and told with the run, in Diagnostics and the host log, and still reaches the narrator with the rest", async () => {
+  test("a line that contradicts it is flagged and told with the run as advice, in Diagnostics and the host log, and still reaches the narrator with the rest; the line after a call isn't", async () => {
     const rig = new Rig({ shipped: true });
     const chatId = await agentsChat(rig, PROSE);
     const here = "Marcus Delgado leans on the counter beside Jordan.";
     const hands = "Danny hands Jordan the festival clipboard.";
-    const seen = scripted(rig, { director: () => JSON.stringify({ brief: "BRIEF-OK The harbor is grey this morning. Marcus Delgado sits at the counter beside Jordan.", beats: ["OUTLINE-OK Jordan looks out at the harbor.", here, hands] }) });
+    const call = "Jordan's phone buzzes. Marcus asks whether the truck is ready.";
+    const seen = scripted(rig, { director: () => JSON.stringify({ brief: `BRIEF-OK The harbor is grey this morning. ${call} Marcus Delgado sits at the counter beside Jordan.`, beats: ["OUTLINE-OK Jordan looks out at the harbor.", "Danny answers the phone.", "Marcus says the part is in.", here, hands] }) });
     const { told } = await played(rig, chatId, "I look out at the harbor.", "The harbor is calm.");
     expect(seen.some((s) => s.role === "director")).toBe(true);
     expect(told).toContain("OUTLINE-OK Jordan looks out at the harbor.");
     expect(told).toContain("BRIEF-OK The harbor is grey this morning.");
-    for (const line of [here, hands, "Marcus Delgado sits at the counter"]) expect(told).toContain(line);
-    const said = `2 flagged, still in the reply's prompt (it has someone here whom the engine has elsewhere: "Marcus Delgado sits at the counter beside Jordan."; "${here}"); 1 flagged, still in the reply's prompt (it has someone hold or hand over a thing the engine says they don't have: "${hands}")`;
+    for (const line of [here, hands, call, "Marcus says the part is in.", "Marcus Delgado sits at the counter"]) expect(told).toContain(line);
+    const said = `2 flagged, still in the reply's prompt (it has someone here whom the engine has elsewhere: "Marcus Delgado sits at the counter beside Jordan."; "${here}"); 1 flagged, still in the reply's prompt (it has someone hold or hand over a thing the engine says they don't have: "${hands}"); the engine thinks these lines may contradict the state; not by itself a reason to revise.`;
     const records = await rig.rt.diag.records(chatId, rig.host.userId);
     expect(records.some((r) => r.step === ROLE_LABEL.director && r.level === "warn" && (r.reason ?? "").includes(said))).toBe(true);
     expect(rig.host.logs.some((l) => l.includes(`the ${ROLE_LABEL.director} role's run: What the engine didn't take: ${said}`))).toBe(true);
     expect(rig.rt.ledger.errors).toEqual([]);
+  });
+
+  test("the flags' advice is a registry text on the Main agent page: the user's own words go in its place, and its reset brings back the shipped ones", () => {
+    const def = promptDef(YIELD_TEXT.proseAdvice);
+    expect([def?.page, def?.text]).toEqual([MAIN_AGENT_PAGE.id, "the engine thinks these lines may contradict the state; not by itself a reason to revise"]);
+    const out = { prose: { brief: null, outline: ["Marcus nods at Jordan."] }, flagged: [{ kind: "here" as const, line: "Marcus nods at Jordan." }] };
+    const none = { staged: [], refused: [] };
+    const mine = "a guess, not a reason to revise";
+    expect(runYield({ [YIELD_TEXT.proseAdvice]: mine }, "prose", out, none).lost).toEndWith(`"Marcus nods at Jordan."); ${mine}.`);
+    expect(runYield({}, "prose", out, none).lost).toEndWith(`"Marcus nods at Jordan."); ${def?.text}.`);
+    // No flag, no advice.
+    expect(runYield({}, "prose", { prose: out.prose }, none).lost).toBe("");
   });
 
   test("an agent turn's own give reaches the narrator as the director tells it, unflagged; a hand that never had the thing is still flagged", async () => {

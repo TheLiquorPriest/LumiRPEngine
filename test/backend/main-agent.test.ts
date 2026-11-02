@@ -697,7 +697,7 @@ describe("what a run gave the engine", () => {
     expect(rig.rt.ledger.errors).toEqual([]);
   });
 
-  test("a director's line that contradicts the state it was given is flagged and told with its run, quoted, and stays in its answer", async () => {
+  test("a director's line that contradicts the state it was given is flagged and told with its run, quoted, as advice, and stays in its answer", async () => {
     const here = "Marcus Delgado leans on the counter beside Jordan.";
     const PROSE: JsonObject = { modelUse: { steps: { brief: { enabled: true, signals: ["always"] }, outline: { enabled: true, signals: ["always"] }, "npc.choose": { enabled: false } }, budgets: { pre: { calls: 8 } } } };
     const director = (): QuietScript => JSON.stringify({ brief: "BRIEF-OK The harbor is grey this morning.", beats: ["OUTLINE-OK Jordan looks out at the harbor.", here] });
@@ -707,7 +707,7 @@ describe("what a run gave the engine", () => {
     await played(rig, chatId, "I look out at the harbor.", "The harbor is calm.");
     const [ran = ""] = ranOf(asked, "director");
     expect(ran).toContain(`"outline":["OUTLINE-OK Jordan looks out at the harbor.","${here}"]`);
-    expect(ran).toContain(`What the engine didn't take: 1 flagged, still in the reply's prompt (it has someone here whom the engine has elsewhere: "${here}").`);
+    expect(ran).toContain(`What the engine didn't take: 1 flagged, still in the reply's prompt (it has someone here whom the engine has elsewhere: "${here}"); the engine thinks these lines may contradict the state; not by itself a reason to revise.`);
     expect(rig.rt.ledger.errors).toEqual([]);
   });
 

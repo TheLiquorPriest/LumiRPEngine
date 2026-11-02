@@ -512,7 +512,8 @@ export interface UserSettings {
    * one from before memory, consolidation and the time skip's steps stopped reasoning (2) has those
    * steps lifted to reasoning off where they were left to the helper model's; and one from before
    * the sections told their facts whole (2 or 3) has a section budget still at Standard's or Full's
-   * old default lifted to its new one.
+   * old default lifted to its new one; and one from before the turn's tokens went unbounded (up to 4)
+   * has a turn budget still at its old 100,000 prompt or 10,000 answer tokens set to No limit.
    */
   defaults: typeof SETTINGS_DEFAULTS_REV;
   /** The helper model, apart from the presets: picking one never changes it. */
@@ -571,7 +572,7 @@ export interface UserSettings {
 }
 
 /** The shipped defaults' revision (`UserSettings.defaults`). */
-export const SETTINGS_DEFAULTS_REV = 4;
+export const SETTINGS_DEFAULTS_REV = 5;
 
 /** Build's jobs (DESIGN §13.1): the user's own, which no preset sets. */
 export interface JobSettings {

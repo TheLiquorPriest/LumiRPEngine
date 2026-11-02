@@ -939,6 +939,33 @@ describe("the settings", () => {
     expect(read).toMatchObject({ loopRepeats: 3, clipChars: 4000, budget: { revisions: 2, toolTurns: "none", concurrency: 4 }, turn: { tokensIn: "none" }, acceptance: { estimateFactor: 2, connections: [{ id: "c1", only: false, tokensIn: 5, tokensOut: "none" }] }, throttles: [{ id: "c1", requestsPerMinute: "none", tokensPerMinute: 9000 }] });
   });
 
+  test("a turn budget saved at the old default, 100,000 prompt or 10,000 answer tokens, is read as No limit once; one the user chose stays", async () => {
+    const stored = (rig: Rig, file: JsonObject): void => void rig.host.files.set(`${rig.host.userId}/settings.json`, JSON.stringify({ v: 1, ...file }));
+    const read = async (file: JsonObject): Promise<UserSettings> => {
+      const rig = new Rig({ shipped: true });
+      stored(rig, file);
+      return rig.rt.settings.get(rig.host.userId);
+    };
+    for (const defaults of [undefined, 2, 4]) {
+      const old = await read({ ...(defaults !== undefined ? { defaults } : {}), agents: { turn: { tokensIn: 100_000, tokensOut: 10_000, toolTurns: 6 } } });
+      expect([defaults, old.agents.turn]).toEqual([defaults, { tokensIn: "none", tokensOut: "none", toolTurns: 6, wallMs: "none" }]);
+    }
+    const chosen = await read({ defaults: 4, agents: { turn: { tokensIn: 250_000, tokensOut: 10_001 } } });
+    expect([chosen.agents.turn.tokensIn, chosen.agents.turn.tokensOut]).toEqual([250_000, 10_001]);
+    // Once: a file read against the new defaults keeps the old numbers as the user's own.
+    const now = await read({ defaults: 5, agents: { turn: { tokensIn: 100_000, tokensOut: 10_000 } } });
+    expect([now.defaults, now.agents.turn.tokensIn, now.agents.turn.tokensOut]).toEqual([5, 100_000, 10_000]);
+    // A lifted file saved back is at the new defaults, and reads the same again.
+    const rig = new Rig({ shipped: true });
+    stored(rig, { defaults: 4, agents: { turn: { tokensIn: 100_000, tokensOut: 10_000 } } });
+    rig.body(await rig.send({ type: "lre.settings.set", patch: { agents: { turn: { toolTurns: 7 } } } }));
+    const saved = JSON.parse(rig.host.files.get(`${rig.host.userId}/settings.json`) ?? "{}") as JsonObject;
+    expect([saved.defaults, (saved.agents as JsonObject).turn]).toEqual([5, { tokensIn: "none", tokensOut: "none", toolTurns: 7, wallMs: "none" }]);
+    const again = new Rig({ shipped: true });
+    stored(again, saved);
+    expect((await again.rt.settings.get(again.host.userId)).agents.turn).toEqual({ tokensIn: "none", tokensOut: "none", toolTurns: 7, wallMs: "none" });
+  });
+
   test("what the engine keeps in memory is 64 turns, 256 gates, 256 watched chats, 16 chats in the live view, 4,000,000 characters of texts read and 65,536 messages worked out; a count under its least or not whole falls back", () => {
     expect(defaultAgentSettings().kept).toEqual({ runs: 64, gates: 256, watchers: 256, live: 16, texts: 4_000_000, folds: 65_536 });
     expect(agentSettingsOf({ kept: { runs: 0, gates: -3, watchers: 2.5, live: 0, texts: -1, folds: 0 } }).kept).toEqual({ runs: 64, gates: 256, watchers: 256, live: 16, texts: 4_000_000, folds: 65_536 });

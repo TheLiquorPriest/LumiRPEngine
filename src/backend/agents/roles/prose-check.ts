@@ -14,7 +14,9 @@
 // plain statement in the present (the name, then what they do there or that they're gone; the
 // holder's, then a verb of holding or handing, then "the" thing); never a line that tells it as
 // remote, remembered, hoped for or still to come, as arriving or leaving, or that names a place apart
-// from the scene; and nothing the world has no entity for. Pure: one check per turn, read line by line.
+// from the scene; nor one right after a line about a call, a text, a phone, a message or a screen,
+// which may be the other end of it; and nothing the world has no entity for. Answering and replying
+// are never read as being here: either may be down a line. Pure: one check per turn, read line by line.
 
 import type { ProseClashKind } from "../../../shared/agent-yield";
 import type { EntityId } from "../../../shared/ids";
@@ -39,11 +41,14 @@ const W = "[\\p{L}\\p{N}]";
 const BEFORE = `(?<!${W}|')`;
 const AFTER = `(?!${W}|')`;
 
-/** What someone does in the scene, said plainly in the present right after their name. */
-const HERE_VERBS = ["sits", "sits down", "stands", "stands up", "leans", "waits", "watches", "nods", "smiles", "grins", "laughs", "chuckles", "frowns", "shrugs", "sighs", "says", "asks", "tells", "answers", "replies", "whispers", "mutters", "hands", "gives", "passes", "pours", "slides", "puts", "places", "points", "glances", "joins", "greets", "hugs", "winks", "wipes", "reaches", "turns to", "looks at", "looks up", "looks over", "looks around", "is here", "is sitting", "is standing", "is leaning", "is waiting", "is behind", "is beside", "is next to"];
+/** What someone does in the scene, said plainly in the present right after their name: never answering or replying, which may be down a line. */
+const HERE_VERBS = ["sits", "sits down", "stands", "stands up", "leans", "waits", "watches", "nods", "smiles", "grins", "laughs", "chuckles", "frowns", "shrugs", "sighs", "says", "asks", "tells", "whispers", "mutters", "hands", "gives", "passes", "pours", "slides", "puts", "places", "points", "glances", "joins", "greets", "hugs", "winks", "wipes", "reaches", "turns to", "looks at", "looks up", "looks over", "looks around", "is here", "is sitting", "is standing", "is leaning", "is waiting", "is behind", "is beside", "is next to"];
 
-/** Words that put what a line says of someone away from the scene: remote, remembered, habitual, hoped for, still to come, arriving or leaving. */
-const REMOTE = ["phone", "phones", "call", "calls", "called", "calling", "text", "texts", "texted", "texting", "message", "messages", "messaged", "voicemail", "video", "screen", "letter", "note", "email", "radio", "remember", "remembers", "remembered", "recall", "recalls", "think", "thinks", "thought", "thoughts", "imagine", "imagines", "imagined", "dream", "dreams", "dreamed", "photo", "photograph", "picture", "portrait", "mention", "mentions", "mentioned", "usually", "always", "often", "sometimes", "never", "every", "all day", "these days", "will", "would", "could", "might", "should", "later", "tomorrow", "yesterday", "earlier", "tonight", "before", "after", "once", "used to", "if", "when", "whether", "wonder", "wonders", "hope", "hopes", "plan", "plans", "expect", "expects", "arrive", "arrives", "arrived", "arriving", "comes in", "walks in", "enters", "entered", "shows up", "returns", "returned", "appears", "knocks", "pulls up", "on the way", "on his way", "on her way", "on their way", "leave", "leaves", "leaving", "departs", "departed", "departing", "goes out", "walks out", "steps out", "heads out", "heads off", "heads for", "heads to", "heads toward", "heads towards", "heads home", "heads back", "walks away", "drives off", "drives away", "out the door", "for the door", "goodbye", "goodbyes", "farewell", "outside", "across the street", "in the distance", "through the window", "next door", "back at", "over at", "at home", "across town", "elsewhere", "meanwhile", "somewhere"];
+/** Words of a call, a text, a phone, a message or a screen: whoever a line has at the other end is remote, and so is the line right after one. */
+const CHANNEL = ["phone", "phones", "phoned", "phoning", "cellphone", "smartphone", "speakerphone", "cell", "mobile", "receiver", "handset", "on speaker", "the line", "dial", "dials", "dialed", "dialled", "rings", "ringing", "rang", "hangs up", "hung up", "call", "calls", "called", "calling", "caller", "text", "texts", "texted", "texting", "message", "messages", "messaged", "messaging", "voicemail", "video", "facetime", "facetimes", "screen", "screens", "on-screen", "onscreen", "monitor", "laptop", "tablet", "webcam", "livestream", "broadcast", "television", "tv", "email", "emails", "radio"];
+
+/** Words that put what a line says of someone away from the scene: a call, a text, a phone, a message or a screen, and what is remote, remembered, habitual, hoped for, still to come, arriving or leaving. */
+const REMOTE = [...CHANNEL, "letter", "note", "remember", "remembers", "remembered", "recall", "recalls", "think", "thinks", "thought", "thoughts", "imagine", "imagines", "imagined", "dream", "dreams", "dreamed", "photo", "photograph", "picture", "portrait", "mention", "mentions", "mentioned", "usually", "always", "often", "sometimes", "never", "every", "all day", "these days", "will", "would", "could", "might", "should", "later", "tomorrow", "yesterday", "earlier", "tonight", "before", "after", "once", "used to", "if", "when", "whether", "wonder", "wonders", "hope", "hopes", "plan", "plans", "expect", "expects", "arrive", "arrives", "arrived", "arriving", "comes in", "walks in", "enters", "entered", "shows up", "returns", "returned", "appears", "knocks", "pulls up", "on the way", "on his way", "on her way", "on their way", "leave", "leaves", "leaving", "departs", "departed", "departing", "goes out", "walks out", "steps out", "heads out", "heads off", "heads for", "heads to", "heads toward", "heads towards", "heads home", "heads back", "walks away", "drives off", "drives away", "out the door", "for the door", "goodbye", "goodbyes", "farewell", "outside", "across the street", "in the distance", "through the window", "next door", "back at", "over at", "at home", "across town", "elsewhere", "meanwhile", "somewhere"];
 
 /** Holding something, said plainly right before "the" thing. */
 const HOLD_VERBS = ["holds", "is holding", "carries", "is carrying", "has", "clutches", "is clutching", "grips", "wields", "brandishes", "draws", "pulls out", "takes out", "produces", "sets down", "puts down", "lays down", "drops"];
@@ -97,9 +102,10 @@ interface Moment {
  * The check for the turn the director was given: a line's clash with it, or null. `world` is the
  * turn's (its lore included); `start` is the state the turn started from, before its planned events,
  * and `end` the planned turn's, as the director's facts read it. What a line says of someone or
- * something clashes only where it fits neither.
+ * something clashes only where it fits neither. `before` is the line told just before it in the same
+ * answer: a line right after one about a call, a text, a phone, a message or a screen is remote too.
  */
-export function proseClashes(reg: Registry, world: WorldDoc, start: Readonly<WorldState>, end: Readonly<WorldState>): (line: string) => ProseClashKind | null {
+export function proseClashes(reg: Registry, world: WorldDoc, start: Readonly<WorldState>, end: Readonly<WorldState>): (line: string, before?: string) => ProseClashKind | null {
   const pov = world.pov;
   const moment = (state: Readonly<WorldState>): Moment => {
     const here = placeOfEntity(state, pov);
@@ -147,7 +153,9 @@ export function proseClashes(reg: Registry, world: WorldDoc, start: Readonly<Wor
   const definite = `(?:the|${W}+(?:'s|'))\\s+`;
   // What the line says of the thing next isn't a participle ("has the relay installed").
   const thing = `(${things})(?!\\s+${W}+ed${AFTER})${AFTER}`;
-  const remote = new RegExp(`${BEFORE}(?:${alt(REMOTE)})${AFTER}`, "u");
+  // A word that puts a line away from the scene, or its possessive ("the phone's speaker").
+  const remote = new RegExp(`${BEFORE}(?:${alt(REMOTE)})(?:'s?)?${AFTER}`, "u");
+  const channel = new RegExp(`${BEFORE}(?:${alt(CHANNEL)})(?:'s?)?${AFTER}`, "u");
   const checks = named.map(({ id, names }) => {
     const who = `${BEFORE}(?:${names})${AFTER}`;
     return {
@@ -179,10 +187,10 @@ export function proseClashes(reg: Registry, world: WorldDoc, start: Readonly<Wor
   };
   // What a line says is held to each moment of the turn, and clashes only where every one has it
   // otherwise; a moment in which the player character can't see whom or what it names says nothing.
-  return (line) => {
+  return (line, before) => {
     const text = plain(line);
     if (text === "") return null;
-    const away = remote.test(text);
+    const away = remote.test(text) || (before !== undefined && channel.test(plain(before)));
     for (const c of checks) {
       if (c.id === pov) continue;
       if (!away && c.here.test(text) && moments.every((m) => m.sees.has(c.id) && acts(world, m.state, c.id) && !together(world, m.here, placeOfEntity(m.state, c.id)) && !(m.apart?.test(text) ?? false))) return "here";
