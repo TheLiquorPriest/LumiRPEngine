@@ -7340,7 +7340,7 @@ function loreIndexSettingsOf(raw, base = LORE_INDEX_DEFAULTS) {
     built: v.built === undefined ? base.built : built && worldId ? { ...built, worldId } : null
   };
 }
-var SETTINGS_DEFAULTS_REV = 4;
+var SETTINGS_DEFAULTS_REV = 5;
 var JOB_SETTINGS_DEFAULTS = Object.freeze({ routineLoreTokens: 8000 });
 function jobSettingsOf(raw, base = JOB_SETTINGS_DEFAULTS) {
   const j = isRecord(raw) ? raw : {};
@@ -70076,7 +70076,8 @@ var YIELD_TEXT = {
   readEmpty: "main.lost.read.empty",
   readUntracked: "main.lost.read.untracked",
   sceneLore: "main.lost.scene.lore",
-  prose: (kind) => `main.lost.prose.${kind}`
+  prose: (kind) => `main.lost.prose.${kind}`,
+  proseAdvice: "main.lost.prose.advice"
 };
 var page4 = MAIN_AGENT_PAGE.id;
 var GROUP3 = "What a run gave";
@@ -70128,7 +70129,8 @@ var AGENT_YIELD_PROMPTS = [
   def(YIELD_TEXT.readEmpty, "Read: an empty answer", "A read whose answer proposed no change at all.", "its answer proposed no change", []),
   def(YIELD_TEXT.readUntracked, "Read: a thing the world doesn't have", "Changes to a thing (taken, dropped, used up, worn, lost, damaged or counted) that the world has no entity for, or none the player character knows of: each is only a Not tracked note to the player, since no such change makes a thing; a give by someone other than the player character, with the thing in the reply's words, or a purchase, makes one.", "{{count}} name a thing the world doesn't have ({{things}}): each changes nothing but a Not tracked note; only a give by someone other than the player character, the thing in the reply's words, or a purchase makes one", [count, { name: "things", text: "each thing as the read named it; one named by an id the player character doesn't know, as something they don't know", required: true }]),
   def(YIELD_TEXT.sceneLore, "Scene: lore it doesn't have", "Lore ids a scene run chose that the world has no entry for.", "{{count}} lore ids not taken (the world has no such entry: {{ids}})", [count, { name: "ids", text: "the ids it gave", required: true }]),
-  ...Object.entries(PROSE).map(([kind, t]) => def(YIELD_TEXT.prose(kind), t.label, t.note, t.text, [count, lines]))
+  ...Object.entries(PROSE).map(([kind, t]) => def(YIELD_TEXT.prose(kind), t.label, t.note, t.text, [count, lines])),
+  def(YIELD_TEXT.proseAdvice, "Director: what a flag means", "Follows the director's flagged lines: the engine's check reads each line against the state by its words alone, so a flag is advice, never by itself a reason to revise.", "the engine thinks these lines may contradict the state; not by itself a reason to revise", [])
 ];
 
 // src/shared/agent-prompts.ts
@@ -81347,9 +81349,9 @@ function thisBuild(moduleUrl = import.meta.url) {
   const dir = moduleUrl.replace(/[^/]*$/, "");
   const path2 = pathOfFileUrl(`${dir}${KIT_FILE}`);
   const core = pathOfFileUrl(`${dir}${CORE_FILE}`);
-  const sha256 = "49e038261e43bcf69601fce2c0f9bc7e68425162b8c1ff97af583e2ef788ccc4";
+  const sha256 = "503b263feef42b85e673662e635c15c37d7f553680a4a143eee13d3f1f8b67b4";
   const tools = ["ca98470582c3b249fbb3dd300fcecc29", "d440503a7f2dcde6c206daa5ba7e70be"].filter((f) => f !== undefined);
-  return { id: "83b29af7", kit: sha256 !== undefined && path2 !== null && core !== null ? { path: path2, core, sha256, api: KIT_API } : null, tools };
+  return { id: "5f679d03", kit: sha256 !== undefined && path2 !== null && core !== null ? { path: path2, core, sha256, api: KIT_API } : null, tools };
 }
 var BUILD_FILE = "agents/build.json";
 var USER_FILE = "agents.json";
@@ -83795,7 +83797,8 @@ var LIFTED = {
     [300, MINDS_PRESETS.lean.tokens],
     [600, MINDS_PRESETS.standard.tokens],
     [1000, MINDS_PRESETS.full.tokens]
-  ])
+  ]),
+  turn: { tokensIn: 1e5, tokensOut: 1e4 }
 };
 function lifted(raw) {
   const out = JSON.parse(JSON.stringify(raw));
@@ -83828,7 +83831,7 @@ function lifted(raw) {
       mu.tokens.sections = lift(LIFTED.sections, mu.tokens.sections);
     if (isRecord(out.minds) && typeof out.minds.tokens === "number")
       out.minds.tokens = lift(LIFTED.minds, out.minds.tokens);
-  } else if (mu && isRecord(mu.tokens) && typeof mu.tokens.sections === "number")
+  } else if (rev < 4 && mu && isRecord(mu.tokens) && typeof mu.tokens.sections === "number")
     mu.tokens.sections = lift(LIFTED.wholeSections, mu.tokens.sections);
   const helperEffort = isRecord(out.helper) ? out.helper.effort : undefined;
   if (rev < 3 && mu && isRecord(mu.steps) && (helperEffort === undefined || helperEffort === DEFAULT_HELPER.effort)) {
@@ -83838,6 +83841,13 @@ function lifted(raw) {
       if (isRecord(route) && route.provider === "helper" && !hasOwn(route, "effort"))
         route.effort = "off";
     }
+  }
+  const turn = isRecord(out.agents) && isRecord(out.agents.turn) ? out.agents.turn : null;
+  if (rev < 5 && turn) {
+    if (turn.tokensIn === LIFTED.turn.tokensIn)
+      turn.tokensIn = "none";
+    if (turn.tokensOut === LIFTED.turn.tokensOut)
+      turn.tokensOut = "none";
   }
   out.defaults = SETTINGS_DEFAULTS_REV;
   return out;
@@ -89273,10 +89283,11 @@ function lostOf(say, kind, out) {
     }
     case "prose": {
       const flagged = out.flagged ?? [];
-      return PROSE_CLASHES.flatMap((why) => {
+      const told = PROSE_CLASHES.flatMap((why) => {
         const of = flagged.filter((f) => f.kind === why);
         return of.length > 0 ? [say(YIELD_TEXT.prose(why), { count: String(of.length), lines: `: ${of.map((f) => `"${f.line}"`).join("; ")}` })] : [];
       });
+      return told.length > 0 ? [...told, say(YIELD_TEXT.proseAdvice)] : [];
     }
     case "scene": {
       const unknown = out.unknown ?? [];
@@ -90128,8 +90139,9 @@ function mindAsk(rt, ctx, phase) {
 var W = "[\\p{L}\\p{N}]";
 var BEFORE = `(?<!${W}|')`;
 var AFTER = `(?!${W}|')`;
-var HERE_VERBS = ["sits", "sits down", "stands", "stands up", "leans", "waits", "watches", "nods", "smiles", "grins", "laughs", "chuckles", "frowns", "shrugs", "sighs", "says", "asks", "tells", "answers", "replies", "whispers", "mutters", "hands", "gives", "passes", "pours", "slides", "puts", "places", "points", "glances", "joins", "greets", "hugs", "winks", "wipes", "reaches", "turns to", "looks at", "looks up", "looks over", "looks around", "is here", "is sitting", "is standing", "is leaning", "is waiting", "is behind", "is beside", "is next to"];
-var REMOTE = ["phone", "phones", "call", "calls", "called", "calling", "text", "texts", "texted", "texting", "message", "messages", "messaged", "voicemail", "video", "screen", "letter", "note", "email", "radio", "remember", "remembers", "remembered", "recall", "recalls", "think", "thinks", "thought", "thoughts", "imagine", "imagines", "imagined", "dream", "dreams", "dreamed", "photo", "photograph", "picture", "portrait", "mention", "mentions", "mentioned", "usually", "always", "often", "sometimes", "never", "every", "all day", "these days", "will", "would", "could", "might", "should", "later", "tomorrow", "yesterday", "earlier", "tonight", "before", "after", "once", "used to", "if", "when", "whether", "wonder", "wonders", "hope", "hopes", "plan", "plans", "expect", "expects", "arrive", "arrives", "arrived", "arriving", "comes in", "walks in", "enters", "entered", "shows up", "returns", "returned", "appears", "knocks", "pulls up", "on the way", "on his way", "on her way", "on their way", "leave", "leaves", "leaving", "departs", "departed", "departing", "goes out", "walks out", "steps out", "heads out", "heads off", "heads for", "heads to", "heads toward", "heads towards", "heads home", "heads back", "walks away", "drives off", "drives away", "out the door", "for the door", "goodbye", "goodbyes", "farewell", "outside", "across the street", "in the distance", "through the window", "next door", "back at", "over at", "at home", "across town", "elsewhere", "meanwhile", "somewhere"];
+var HERE_VERBS = ["sits", "sits down", "stands", "stands up", "leans", "waits", "watches", "nods", "smiles", "grins", "laughs", "chuckles", "frowns", "shrugs", "sighs", "says", "asks", "tells", "whispers", "mutters", "hands", "gives", "passes", "pours", "slides", "puts", "places", "points", "glances", "joins", "greets", "hugs", "winks", "wipes", "reaches", "turns to", "looks at", "looks up", "looks over", "looks around", "is here", "is sitting", "is standing", "is leaning", "is waiting", "is behind", "is beside", "is next to"];
+var CHANNEL = ["phone", "phones", "phoned", "phoning", "cellphone", "smartphone", "speakerphone", "cell", "mobile", "receiver", "handset", "on speaker", "the line", "dial", "dials", "dialed", "dialled", "rings", "ringing", "rang", "hangs up", "hung up", "call", "calls", "called", "calling", "caller", "text", "texts", "texted", "texting", "message", "messages", "messaged", "messaging", "voicemail", "video", "facetime", "facetimes", "screen", "screens", "on-screen", "onscreen", "monitor", "laptop", "tablet", "webcam", "livestream", "broadcast", "television", "tv", "email", "emails", "radio"];
+var REMOTE = [...CHANNEL, "letter", "note", "remember", "remembers", "remembered", "recall", "recalls", "think", "thinks", "thought", "thoughts", "imagine", "imagines", "imagined", "dream", "dreams", "dreamed", "photo", "photograph", "picture", "portrait", "mention", "mentions", "mentioned", "usually", "always", "often", "sometimes", "never", "every", "all day", "these days", "will", "would", "could", "might", "should", "later", "tomorrow", "yesterday", "earlier", "tonight", "before", "after", "once", "used to", "if", "when", "whether", "wonder", "wonders", "hope", "hopes", "plan", "plans", "expect", "expects", "arrive", "arrives", "arrived", "arriving", "comes in", "walks in", "enters", "entered", "shows up", "returns", "returned", "appears", "knocks", "pulls up", "on the way", "on his way", "on her way", "on their way", "leave", "leaves", "leaving", "departs", "departed", "departing", "goes out", "walks out", "steps out", "heads out", "heads off", "heads for", "heads to", "heads toward", "heads towards", "heads home", "heads back", "walks away", "drives off", "drives away", "out the door", "for the door", "goodbye", "goodbyes", "farewell", "outside", "across the street", "in the distance", "through the window", "next door", "back at", "over at", "at home", "across town", "elsewhere", "meanwhile", "somewhere"];
 var HOLD_VERBS = ["holds", "is holding", "carries", "is carrying", "has", "clutches", "is clutching", "grips", "wields", "brandishes", "draws", "pulls out", "takes out", "produces", "sets down", "puts down", "lays down", "drops"];
 var HAND_VERBS = ["hands", "hands over", "gives", "passes", "slides", "tosses"];
 var LIE_VERBS = ["lies", "lie", "sits", "sit", "rests", "rest", "waits", "hangs", "is lying", "is sitting", "is resting", "is waiting", "is hanging", "are lying", "are sitting"];
@@ -90188,7 +90200,8 @@ function proseClashes(reg, world, start, end) {
   };
   const definite = `(?:the|${W}+(?:'s|'))\\s+`;
   const thing2 = `(${things})(?!\\s+${W}+ed${AFTER})${AFTER}`;
-  const remote = new RegExp(`${BEFORE}(?:${alt(REMOTE)})${AFTER}`, "u");
+  const remote = new RegExp(`${BEFORE}(?:${alt(REMOTE)})(?:'s?)?${AFTER}`, "u");
+  const channel = new RegExp(`${BEFORE}(?:${alt(CHANNEL)})(?:'s?)?${AFTER}`, "u");
   const checks = named.map(({ id, names: names3 }) => {
     const who = `${BEFORE}(?:${names3})${AFTER}`;
     return {
@@ -90215,11 +90228,11 @@ function proseClashes(reg, world, start, end) {
     }
     return false;
   };
-  return (line2) => {
+  return (line2, before) => {
     const text7 = plain4(line2);
     if (text7 === "")
       return null;
-    const away = remote.test(text7);
+    const away = remote.test(text7) || before !== undefined && channel.test(plain4(before));
     for (const c of checks) {
       if (c.id === pov)
         continue;
@@ -90346,18 +90359,21 @@ async function proseRun(rt, task, ctx) {
         return null;
       const clash = proseClashes(rt.registry, task.world, task.start, task.state);
       const flagged = [];
-      const flag = (line2) => {
-        const kind = clash(line2);
-        if (kind !== null)
-          flagged.push({ kind, line: line2 });
+      const flag = (lines3) => {
+        let before;
+        for (const line2 of lines3) {
+          if (line2.trim() === "")
+            continue;
+          const kind = clash(line2, before);
+          if (kind !== null)
+            flagged.push({ kind, line: line2 });
+          before = line2;
+        }
       };
       const told = brief ? proseAnswer("brief", raw.brief, brief.mark).join(" ").trim() : "";
-      for (const sentence3 of told.split(/(?<=[.!?])\s+(?=["\u201C'(]?\p{Lu})/u))
-        if (sentence3.trim() !== "")
-          flag(sentence3);
+      flag(told.split(/(?<=[.!?])\s+(?=["\u201C'(]?\p{Lu})/u));
       const beats = outline2 ? proseAnswer("outline", raw.beats, outline2.mark) : [];
-      for (const beat of beats)
-        flag(beat);
+      flag(beats);
       return { prose: { brief: told === "" ? null : told, outline: beats }, ...flagged.length > 0 ? { flagged } : {} };
     }
   });
@@ -93631,7 +93647,7 @@ class Runtime {
   foldOf(userId) {
     let fold = this.folds.get(userId);
     if (!fold) {
-      fold = new LedgerFold(this.registry, { fingerprint: "83b29af7", keep: () => this.settings.known(userId)?.agents.kept.folds ?? KEPT_FOLDS_DEFAULT });
+      fold = new LedgerFold(this.registry, { fingerprint: "5f679d03", keep: () => this.settings.known(userId)?.agents.kept.folds ?? KEPT_FOLDS_DEFAULT });
       this.folds.set(userId, fold);
     }
     return fold;

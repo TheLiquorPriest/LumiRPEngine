@@ -27746,7 +27746,8 @@ var YIELD_TEXT = {
   readEmpty: "main.lost.read.empty",
   readUntracked: "main.lost.read.untracked",
   sceneLore: "main.lost.scene.lore",
-  prose: (kind) => `main.lost.prose.${kind}`
+  prose: (kind) => `main.lost.prose.${kind}`,
+  proseAdvice: "main.lost.prose.advice"
 };
 var page3 = MAIN_AGENT_PAGE.id;
 var GROUP = "What a run gave";
@@ -27798,7 +27799,8 @@ var AGENT_YIELD_PROMPTS = [
   def(YIELD_TEXT.readEmpty, "Read: an empty answer", "A read whose answer proposed no change at all.", "its answer proposed no change", []),
   def(YIELD_TEXT.readUntracked, "Read: a thing the world doesn't have", "Changes to a thing (taken, dropped, used up, worn, lost, damaged or counted) that the world has no entity for, or none the player character knows of: each is only a Not tracked note to the player, since no such change makes a thing; a give by someone other than the player character, with the thing in the reply's words, or a purchase, makes one.", "{{count}} name a thing the world doesn't have ({{things}}): each changes nothing but a Not tracked note; only a give by someone other than the player character, the thing in the reply's words, or a purchase makes one", [count, { name: "things", text: "each thing as the read named it; one named by an id the player character doesn't know, as something they don't know", required: true }]),
   def(YIELD_TEXT.sceneLore, "Scene: lore it doesn't have", "Lore ids a scene run chose that the world has no entry for.", "{{count}} lore ids not taken (the world has no such entry: {{ids}})", [count, { name: "ids", text: "the ids it gave", required: true }]),
-  ...Object.entries(PROSE).map(([kind, t3]) => def(YIELD_TEXT.prose(kind), t3.label, t3.note, t3.text, [count, lines]))
+  ...Object.entries(PROSE).map(([kind, t3]) => def(YIELD_TEXT.prose(kind), t3.label, t3.note, t3.text, [count, lines])),
+  def(YIELD_TEXT.proseAdvice, "Director: what a flag means", "Follows the director's flagged lines: the engine's check reads each line against the state by its words alone, so a flag is advice, never by itself a reason to revise.", "the engine thinks these lines may contradict the state; not by itself a reason to revise", [])
 ];
 
 // src/shared/agent-prompts.ts
