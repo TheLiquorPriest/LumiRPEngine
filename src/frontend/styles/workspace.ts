@@ -47,7 +47,8 @@ export const WORKSPACE_CSS = `
 .lre-ws-chip{display:inline-block;padding:0 var(--lre-s1);border:1px solid currentColor;border-radius:var(--lre-r-sm);font-family:var(--lre-font);font-size:var(--lre-fs-xs);font-weight:600;line-height:1.45;letter-spacing:.04em;text-transform:uppercase;white-space:nowrap;color:var(--lre-muted)}
 .lre-ws-chip[data-chip=who]{color:var(--lre-fg)}
 .lre-ws-chip[data-chip=pinned]{color:var(--lre-accent-text)}
-.lre-ws-chip[data-chip=learned]{color:var(--lre-pos)}
+.lre-ws-chip[data-chip=learned],.lre-ws-chip[data-chip=global]{color:var(--lre-pos)}
+.lre-ws-chip[data-chip=system]{color:var(--lre-accent-text)}
 .lre-ws-chip[data-chip=read-only],.lre-ws-chip[data-chip=unsent],.lre-ws-chip[data-chip=warn]{color:var(--lre-warn)}
 .lre-ws-pane{min-width:0}
 .lre-ws-editor-bar{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:var(--lre-s2)}

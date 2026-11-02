@@ -73,6 +73,12 @@ export const CHAT_CSS = `
 .lre .lre-chat-pill.primary{border-color:color-mix(in srgb,var(--lre-accent) 45%,transparent);background:var(--lre-accent-soft);color:var(--lre-accent-text)}
 .lre .lre-chat-pill.primary:hover:not(:disabled){background:color-mix(in srgb,var(--lre-accent) 24%,transparent)}
 .lre .lre-chat-pill.primary .lre-chat-pill-text{color:var(--lre-fg)}
+.lre .lre-spoiler{min-width:0;max-width:100%}
+.lre .lre-spoiler>summary{display:inline-flex;align-items:center;gap:6px;min-height:var(--lre-tap);padding:var(--lre-s1) 14px;border:1px dashed var(--lre-border);border-radius:var(--lre-r-pill);color:var(--lre-muted);font-size:var(--lre-fs-sm);cursor:pointer;list-style:none}
+.lre .lre-spoiler>summary::-webkit-details-marker{display:none}
+.lre .lre-spoiler[open]>summary{margin-bottom:var(--lre-s1)}
+.lre .lre-chat-spoilers{display:flex;flex-direction:column;gap:var(--lre-s1);margin:0;padding:0;list-style:none}
+.lre .lre-spoiler-text{color:var(--lre-muted);overflow-wrap:anywhere;white-space:pre-line}
 .lre .lre-chat-pill.danger{color:var(--lre-neg);border-color:color-mix(in srgb,var(--lre-danger) 40%,transparent)}
 .lre .lre-chat-pill[aria-pressed=true]{border-color:transparent;background:var(--lre-accent-fill);color:var(--lre-accent-fg)}
 .lre .lre-chat-pill[aria-pressed=true]:hover:not(:disabled){background:var(--lre-accent-fill)}

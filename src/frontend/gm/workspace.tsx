@@ -1,21 +1,24 @@
 // GM → Workspace (DESIGN §4.4; AGENT-LOOP-PLAN §9; INC1-SPEC R6b, contract C8): the notes the agents
-// keep for this chat at its head, its learned area, its turns' transcripts and its pins file, behind
-// the GM gate, as a two-pane browser: the list on one side, what you opened on the other; in a narrow
-// drawer the opened pane takes the list's place, with Back. The list (`lre.workspace {op: "list"}`,
-// asked again whenever the GM view reloads) groups the files by area (`workspace-tree.ts`): Notes,
-// Learned (learned/), Transcripts (transcripts/, folded until you open it) and the Pins file
-// (.pins.json), each as folders first, names in natural order, every file with chips for who wrote
-// it, at which reply, who may read it and whether it is pinned, learned or read-only. New note asks
-// for a path (and who may read it) and writes the note empty (`{op: "write"}`), then opens it. A
-// file's pane reads its text (`{op: "read"}`) into a draft to edit inline: Save sends it (Ctrl+S or
-// ⌘S too), Revert takes the draft back, and leaving a draft with changes not saved asks first; Pin
-// or Unpin (`{op: "pin"}`), Who may read it (`{op: "readers"}`), Rename or move (`{op: "move"}`, the
-// pane following it) and Delete (`{op: "delete"}`). Each change is one GM edit with its Undo chip,
-// held while a reply is written: GmPanel says it (`changed`) with its Undo, as after an edit; a
-// learned file's changes land at once, with none, so deleting one asks first. A transcript opens
-// read-only. Above the files, the main agent's session at the head (`{op: "session"}`, read with the
-// list) opens in the same pane: its turns as message bubbles, whether a compaction summary stands in
-// for its older turns, and Roll back for its latest compaction (`{op: "rollback"}`), which the next
+// keep for this chat at its head, its learned area, its turns' transcripts and its pins file, and,
+// apart from them, your global workspace (~/), which every chat of yours shares, behind the GM gate,
+// as a two-pane browser: the list on one side, what you opened on the other; in a narrow drawer the
+// opened pane takes the list's place, with Back. The list (`lre.workspace {op: "list"}`, asked again
+// whenever the chat moves on: `GmSectionProps.reloadKey`, not each load of the GM view) groups the
+// files by area (`workspace-tree.ts`): Notes, Learned (learned/), Transcripts (transcripts/, folded
+// until you open it), the Pins file (.pins.json) and Global (~/), each as folders first, names in
+// natural order, every file with chips for who wrote it, at which reply and whether it is a system
+// file (AGENTS.md, roles/<role>.md), global, pinned, learned or read-only. Every agent reads every
+// file. New note asks for a path, in this chat or the global workspace, and writes the note empty
+// (`{op: "write"}`), then opens it; one held while a reply is written opens as it will be once it
+// lands. A file's pane reads its text (`{op: "read"}`) into a draft to edit inline: Save sends it
+// (Ctrl+S or ⌘S too), Revert takes the draft back, and leaving a draft with changes not saved asks
+// first; Pin or Unpin (`{op: "pin"}`), Rename or move (`{op: "move"}`, the pane following it) and
+// Delete (`{op: "delete"}`). Each change is one GM edit with its Undo chip, held while a reply is
+// written: GmPanel says it (`changed`) with its Undo, as after an edit; a kept file's (learned/ or
+// ~/) changes land at once, with none, so deleting one asks first. A transcript opens read-only.
+// Above the files, the main agent's session at the head (`{op: "session"}`, read with the list)
+// opens in the same pane: its turns as message bubbles, whether a compaction summary stands in for
+// its older turns, and Roll back for its latest compaction (`{op: "rollback"}`), which the next
 // agent turn's record carries (INC2-SPEC C14). Workspace content and the session never go to Play or
 // the drawer's activity line.
 
@@ -24,13 +27,13 @@ import { useEffect, useRef, useState } from "preact/hooks";
 import type { AgentKnowledge } from "../../shared/agent-tools";
 import type { ChatId } from "../../shared/ids";
 import type { ResultBodies, SessionMessageView, SessionView, WorkspaceFileView } from "../../shared/protocol";
-import { isLearnedPath, isTranscriptPath, isWorkspacePath, PINS_PATH } from "../../shared/stores";
+import { GLOBAL_PREFIX, isFilePath, isGlobalPath, isKeptPath, isLearnedPath, isTranscriptPath, levelPath, PINS_PATH } from "../../shared/stores";
 import { useApp } from "../app";
 import { Badge, Button, Disclosure, Empty, Field, IdText, Seg, useBusy } from "../components";
 import { Icon } from "../icons";
 import type { GmSectionProps, RequestBody } from "../registry";
 import { GmPage, usePages } from "./ui";
-import { AREA_WORDS, type FileChip, fileChips, folderOf, workspaceArea, workspaceGroups, type WorkspaceNode, writerWords } from "./workspace-tree";
+import { AREA_WORDS, type FileChip, fileChips, folderOf, systemWords, workspaceArea, workspaceGroups, type WorkspaceNode, writerWords } from "./workspace-tree";
 
 /** A workspace request as the tab sends it (C8 `lre.workspace`). */
 export type WorkspaceBody = Extract<RequestBody, { type: "lre.workspace" }>;
@@ -41,17 +44,16 @@ export type WorkspaceResult = ResultBodies["lre.workspace"];
 /** Sends one workspace request: its result, or null when it failed (the error already said in a toast, as `app.request` does). */
 export type WorkspaceAsk = (body: WorkspaceBody) => Promise<WorkspaceResult | null>;
 
-/** The tab's requests, each built for one chat. A change resolves true once it landed (or is held); `landed` runs as soon as the list is set from its result, before the GM view loads again. */
+/** The tab's requests, each built for one chat. A change resolves true once it landed (or is held); `landed` runs with its result as soon as the list is set from it, before the GM view loads again. */
 export interface WorkspaceControls {
   /** The chat's files, or null when the list failed. */
   list(): Promise<WorkspaceFileView[] | null>;
   /** A file's text: null when there is no such file, undefined when the read failed. */
   read(path: string): Promise<string | null | undefined>;
-  /** A new note at `path`, empty, read by `readers`. */
-  create(path: string, readers: AgentKnowledge, landed?: () => void): Promise<boolean>;
+  /** A new note at `path`, empty; `landed` gets the result, which says whether it is held (`pending`). */
+  create(path: string, landed?: (result: WorkspaceResult) => void): Promise<boolean>;
   save(path: string, text: string, landed?: () => void): Promise<boolean>;
   pin(path: string, pinned: boolean, landed?: () => void): Promise<boolean>;
-  readers(path: string, readers: AgentKnowledge, landed?: () => void): Promise<boolean>;
   move(from: string, to: string, landed?: () => void): Promise<boolean>;
   remove(path: string, landed?: () => void): Promise<boolean>;
   /** The main agent's session at the head, or null when the read failed. */
@@ -60,29 +62,17 @@ export interface WorkspaceControls {
   rollback(): Promise<SessionView | null>;
 }
 
-/** Whose knowledge may read a file, as its page offers the choice: the GM's alone, everyone's (and so the GM's), or your character's (every agent's). */
-export const READERS_LABELS: Readonly<Record<AgentKnowledge, string>> = { gm: "GM only", everyone: "Everyone's, secrets marked", pov: "Your character's" };
-
-/** What each choice means, under the choice. */
-export const READERS_NOTES: Readonly<Record<AgentKnowledge, string>> = {
-  gm: "Only agents reading with the GM's knowledge see it.",
-  everyone: "Agents reading with everyone's knowledge see it too, as the GM's do; agents reading as your character don't.",
-  pov: "Every agent sees it, those reading as your character too: keep anything your character doesn't know out of it.",
-};
-
-const READERS_OPTIONS = (["gm", "everyone", "pov"] as const).map((k) => ({ value: k, label: READERS_LABELS[k] }));
-
 /**
  * The tab's requests over `request` for chat `chatId`. After each change that landed, the list is
  * set from the result's `files` (`out.files`), then `out.changed` gets the change in a sentence
  * ("Saved notes/marcus.md") with its result, for GmPanel's notice and its Undo.
  */
 export function workspaceControls(chatId: ChatId, request: WorkspaceAsk, out: { files(files: WorkspaceFileView[]): void; changed(text: string, result: WorkspaceResult): Promise<void> }): WorkspaceControls {
-  const change = async (body: WorkspaceBody, text: string, landed: (() => void) | undefined): Promise<boolean> => {
+  const change = async (body: WorkspaceBody, text: string, landed: ((result: WorkspaceResult) => void) | undefined): Promise<boolean> => {
     const result = await request(body);
     if (result === null) return false;
     if (result.files) out.files(result.files);
-    landed?.();
+    landed?.(result);
     await out.changed(text, result);
     return true;
   };
@@ -92,10 +82,9 @@ export function workspaceControls(chatId: ChatId, request: WorkspaceAsk, out: { 
       const result = await request({ type: "lre.workspace", op: "read", chatId, path });
       return result === null ? undefined : (result.text ?? null);
     },
-    create: (path, readers, landed) => change({ type: "lre.workspace", op: "write", chatId, path, text: "", readers }, `Created ${path}`, landed),
+    create: (path, landed) => change({ type: "lre.workspace", op: "write", chatId, path, text: "" }, `Created ${path}`, landed),
     save: (path, text, landed) => change({ type: "lre.workspace", op: "write", chatId, path, text }, `Saved ${path}`, landed),
     pin: (path, pinned, landed) => change({ type: "lre.workspace", op: "pin", chatId, path, pinned }, `${pinned ? "Pinned" : "Unpinned"} ${path}`, landed),
-    readers: (path, readers, landed) => change({ type: "lre.workspace", op: "readers", chatId, path, readers }, `Who may read ${path}: ${READERS_LABELS[readers]}`, landed),
     move: (from, to, landed) => change({ type: "lre.workspace", op: "move", chatId, from, to }, `Moved ${from} to ${to}`, landed),
     remove: (path, landed) => change({ type: "lre.workspace", op: "delete", chatId, path }, `Deleted ${path}`, landed),
     session: async () => (await request({ type: "lre.workspace", op: "session", chatId }))?.session ?? null,
@@ -121,26 +110,40 @@ export function sizeWords(size: number): string {
   return `${size.toLocaleString("en-US")} character${size === 1 ? "" : "s"}`;
 }
 
-const PATH_WORDS = "A path is names joined by /: letters, digits, dots, dashes, underscores and single spaces, no name empty, . or .., such as notes/marcus.md.";
+const PATH_WORDS = "A path is names joined by /: letters, digits, dots, dashes, underscores and single spaces, no name empty, . or .., such as notes/marcus.md; ~/ before them for the global workspace, such as ~/AGENTS.md.";
 const TRANSCRIPT_WORDS = "transcripts/ holds the turns' transcripts, which are read-only: choose another folder.";
 
-/** Why a file can't move to `to` yet, in words, or null when it can: a new path, a valid one, one no listed file has, outside transcripts/, and one on the same side of the learned area. */
+/** Why a file can't move to `to` yet, in words, or null when it can: a new path, a valid one, one no listed file has, outside transcripts/, and in the same part of the workspace (the chat's story, learned/, or ~/). */
 export function moveProblem(from: string, to: string, paths: readonly string[]): string | null {
   if (to === from) return "Type the path to move it to.";
-  if (!isWorkspacePath(to)) return PATH_WORDS;
+  if (!isFilePath(to)) return PATH_WORDS;
   if (paths.includes(to)) return `There is already a file at ${to}.`;
   if (isTranscriptPath(to)) return TRANSCRIPT_WORDS;
-  if (isLearnedPath(from) !== isLearnedPath(to)) return "A file under learned/ stays there, and the others stay out of it: write the file at its new path, then delete this one.";
+  // A global path is never under learned/, so the two marks tell the three parts apart.
+  if (isGlobalPath(from) !== isGlobalPath(to) || isLearnedPath(from) !== isLearnedPath(to)) return "A file stays in its part: the chat's story, learned/, or the global workspace ~/. Write the file at its new path, then delete this one.";
   return null;
 }
 
-/** Why a new note can't be written at `path` yet, in words, or null when it can: a whole, valid path no listed file has, outside transcripts/. */
+/** Why a new note can't be written at `path` yet, in words, or null when it can: a whole, valid path, in this chat or the global workspace, no listed file has, outside transcripts/. */
 export function newNoteProblem(path: string, paths: readonly string[]): string | null {
   if (path === "" || path.endsWith("/")) return "Type the note's path, its name last, such as notes/marcus.md.";
-  if (!isWorkspacePath(path)) return PATH_WORDS;
+  if (!isFilePath(path)) return PATH_WORDS;
   if (paths.includes(path)) return `There is already a file at ${path}.`;
   if (isTranscriptPath(path)) return TRANSCRIPT_WORDS;
   return null;
+}
+
+/** Where a new note goes: this chat's workspace, or the global one (~/) every chat of yours shares. */
+export type NoteLevel = "chat" | "global";
+
+const LEVEL_OPTIONS: readonly { value: NoteLevel; label: string }[] = [
+  { value: "chat", label: "This chat" },
+  { value: "global", label: "Global (~/), every chat" },
+];
+
+/** The same path at `level`: the global workspace's with ~/ before it, this chat's without. */
+export function atLevel(path: string, level: NoteLevel): string {
+  return level === "global" ? `${GLOBAL_PREFIX}${levelPath(path)}` : levelPath(path);
 }
 
 /** Where a new note starts: in the folder of the file open (not a transcript's), else under notes/. */
@@ -153,6 +156,32 @@ export function newNoteFolder(open: string | null): string {
 export const SESSION_PAGE = "@session";
 
 /**
+ * The file the pane shows for `page`: the listed one; else, for a new note held while a reply is
+ * written (`held`: no list holds it until it lands), the empty note it will be, so its pane stays
+ * open meanwhile. None for the session's page, or before the list is read.
+ */
+export function paneFile(page: string | null, files: readonly WorkspaceFileView[] | null, held: string | null): WorkspaceFileView | undefined {
+  if (page === null || page === SESSION_PAGE || files === null) return undefined;
+  const listed = files.find((f) => f.path === page);
+  if (listed !== undefined || page !== held) return listed;
+  return { path: held, hash: "", size: 0, pinned: false, learned: isLearnedPath(held), provenance: { role: "gm", turn: null } };
+}
+
+/** A new note's create, from its result: its path while it is held for the reply being written (`pending`) and the list doesn't hold it yet; null once it landed. */
+export function heldCreate(path: string, result: WorkspaceResult): string | null {
+  return result.pending === true && !(result.files ?? []).some((f) => f.path === path) ? path : null;
+}
+
+/**
+ * What the tab reads its list, session and open file again on: the chat, and its moving on
+ * (`reloadKey`). Never the GM view itself: each change of the tab's own loads it again, and so does
+ * the chat moving on, so keyed on it one change would read everything twice.
+ */
+export function workspaceReadKeys(props: Pick<GmSectionProps, "chatId" | "reloadKey">): readonly string[] {
+  return [props.chatId, props.reloadKey];
+}
+
+/**
  * Leaving the pane: with no draft changed (`dirty` null), `next` runs at once; with changes not
  * saved to the file at `dirty`, only once `confirm` says to discard them. True when it left.
  */
@@ -162,13 +191,12 @@ export async function guardDraft(dirty: string | null, confirm: (title: string, 
   return true;
 }
 
-/** The path dialog's state: a new note (with who may read it) or a file's new path. */
+/** The path dialog's state: a new note or a file's new path. */
 export interface PathDialogState {
   mode: "new" | "move";
   /** The file moved; null for a new note. */
   from: string | null;
   value: string;
-  readers: AgentKnowledge;
 }
 
 // ---------------------------------------------------------------- the tab
@@ -187,7 +215,10 @@ export function WorkspaceSection(props: GmSectionProps) {
   // The areas and folders you folded or unfolded, by key; the rest show as they start.
   const [toggled, setToggled] = useState<Readonly<Record<string, boolean>>>({});
   const controls = workspaceControls(props.chatId, (body) => app.request<"lre.workspace">(body), { files: setFiles, changed: props.changed });
-  // Read again whenever the GM view reloads: an Undo, a turn or a swipe may have changed the files and the session.
+  // A new note held while a reply is written: its path until the list holds it.
+  const [heldNote, setHeldNote] = useState<string | null>(null);
+  // Read again whenever the chat moves on (an Undo, a turn or a swipe may have changed the files and
+  // the session), not on each load of the GM view, which follows every change of its own.
   useEffect(() => {
     let live = true;
     void controls.list().then((listed) => {
@@ -199,22 +230,27 @@ export function WorkspaceSection(props: GmSectionProps) {
     return () => {
       live = false;
     };
-  }, [props.chatId, props.gm]);
+  }, workspaceReadKeys(props));
   const page = pages.page;
   const onSession = page === SESSION_PAGE;
-  const selected = page === null || onSession || files === null ? undefined : files.find((f) => f.path === page);
+  const selected = paneFile(page, files, heldNote);
+  const waiting = heldNote !== null && page === heldNote && selected?.hash === "";
   const text = selected !== undefined && opened !== null && opened.path === selected.path ? opened.text : undefined;
   const dirty = typeof text === "string" && draft !== text;
-  // A file no longer listed (an Undo took back its write, a swipe went back before it) gives way to the list.
+  // A file no longer listed (an Undo took back its write, a swipe went back before it) gives way to
+  // the list; a held note is let go once it is listed.
   useEffect(() => {
     if (page !== null && !onSession && files !== null && selected === undefined) pages.back();
+    if (heldNote !== null && files?.some((f) => f.path === heldNote)) setHeldNote(null);
   });
-  // The pane's text: read on open, and again when the GM view reloads unless the draft holds changes not saved.
+  // The pane's text: read on open, and again when the chat moves on unless the draft holds changes
+  // not saved; a held note has none to read until it lands.
   useEffect(() => {
     if (page === null || page === SESSION_PAGE) {
       setOpened(null);
       return;
     }
+    if (waiting) return;
     // The same file read again: what the pane holds now, kept when the draft has changes not saved.
     const held = opened !== null && opened.path === page ? opened : null;
     if (held !== null && held.text !== null && draft !== held.text) return;
@@ -232,7 +268,7 @@ export function WorkspaceSection(props: GmSectionProps) {
     return () => {
       live = false;
     };
-  }, [page, props.chatId, props.gm]);
+  }, [page, ...workspaceReadKeys(props)]);
   // Leaving a draft with changes not saved asks first; `next` runs once you choose to.
   const leave = (next: () => void): void => {
     void guardDraft(dirty ? (selected?.path ?? null) : null, (title, message, label) => app.host.confirm(title, message, "danger", label), () => {
@@ -249,6 +285,7 @@ export function WorkspaceSection(props: GmSectionProps) {
     selected !== undefined ? (
       <WorkspaceFilePane
         file={selected}
+        held={waiting}
         text={text}
         draft={draft}
         busy={busy}
@@ -258,7 +295,7 @@ export function WorkspaceSection(props: GmSectionProps) {
         onDraft={setDraft}
         onSaved={(saved) => setOpened({ path: selected.path, text: saved })}
         onRevert={() => setDraft(text ?? "")}
-        onMove={() => setDialog({ mode: "move", from: selected.path, value: selected.path, readers: selected.readers })}
+        onMove={() => setDialog({ mode: "move", from: selected.path, value: selected.path })}
         onDeleted={() => {
           setOpened(null);
           setDraft("");
@@ -289,7 +326,8 @@ export function WorkspaceSection(props: GmSectionProps) {
     if (state.mode === "new")
       run(async () => {
         const path = state.value;
-        const made = await controls.create(path, state.readers, () => {
+        const made = await controls.create(path, (result) => {
+          setHeldNote(heldCreate(path, result));
           setOpened({ path, text: "" });
           setDraft("");
           pages.open(path);
@@ -332,7 +370,7 @@ export function WorkspaceSection(props: GmSectionProps) {
             open={(key, start) => toggled[key] ?? start}
             onToggle={(key, now) => setToggled((t) => (t[key] === now ? t : { ...t, [key]: now }))}
             onOpen={open}
-            onNew={() => leave(() => setDialog({ mode: "new", from: null, value: newNoteFolder(page), readers: "gm" }))}
+            onNew={() => leave(() => setDialog({ mode: "new", from: null, value: newNoteFolder(page) }))}
           />
         </div>
         {pane}
@@ -441,7 +479,7 @@ function sessionRow(props: WorkspaceBrowserProps) {
 
 /**
  * The browser: New note and how many files there are, the main agent's session, then the files by
- * area (Notes, Learned, Transcripts folded until you open them, the Pins file), each area's folders
+ * area (Notes, Learned, Transcripts folded until you open them, the Pins file, then Global), each area's folders
  * first and names in natural order, every file with its chips; empty, what the workspace will hold.
  */
 export function WorkspaceBrowser(props: WorkspaceBrowserProps) {
@@ -460,7 +498,7 @@ export function WorkspaceBrowser(props: WorkspaceBrowserProps) {
       {sessionRow(props)}
       {files === null ? null : files.length === 0 ? (
         <Empty icon="box" title="Nothing in the workspace yet">
-          The workspace holds the notes the agents keep for this chat as the story goes: what they've worked out, what they plan, drafts for you to look over. The notes follow the story: swipe back past a reply and what it wrote goes with it. Notes under learned/ are kept apart from the story: a swipe never changes them, and a Branch takes them along.
+          The workspace holds the notes the agents keep for this chat as the story goes: what they've worked out, what they plan, drafts for you to look over. The notes follow the story: swipe back past a reply and what it wrote goes with it. Notes under learned/ are kept apart from the story: a swipe never changes them, and a Branch takes them along. Notes under ~/ are your global workspace, in every chat of yours; an AGENTS.md there or here is every agent's instructions, and roles/&lt;role&gt;.md one role's.
         </Empty>
       ) : (
         workspaceGroups(files).map((g) => (
@@ -484,6 +522,8 @@ export function WorkspaceBrowser(props: WorkspaceBrowserProps) {
 /** What a file's pane shows and what its controls do; the tab's wrapper keeps the state. */
 export interface WorkspaceFilePaneProps {
   file: WorkspaceFileView;
+  /** A new note held while a reply is written (`paneFile`): no list holds it until it lands, so only its text may change meanwhile. */
+  held?: boolean;
   /** The text read: undefined while it is read, null when the file is gone. */
   text: string | null | undefined;
   draft: string;
@@ -509,18 +549,21 @@ export const TEXT_ID = "lre-workspace-text";
 
 /**
  * A file's pane: its chips, then its text to edit inline with Save and Revert and whether it is
- * saved; its actions (Pin or Unpin, Rename or move, Delete) and who may read it. A transcript is
- * read-only; the pins file isn't pinned; a learned file says a change lands at once.
+ * saved; its actions (Pin or Unpin, Rename or move, Delete). A transcript is read-only; neither the
+ * pins file nor a system file is pinned; a kept file (learned/ or ~/) says a change lands at once,
+ * and deleting one asks first; a held new note waits for the reply before anything but its text.
  */
 export function WorkspaceFilePane(props: WorkspaceFilePaneProps) {
   const { file, text, draft, busy } = props;
   const dirty = typeof text === "string" && draft !== text;
   const name = file.path.slice(folderOf(file.path).length);
   const area = workspaceArea(file.path);
+  const system = systemWords(file.path);
+  const kept = isKeptPath(file.path) ? (isGlobalPath(file.path) ? "global" : "learned") : null;
   const save = () => props.run(() => props.controls.save(file.path, draft, () => props.onSaved(draft)));
   const remove = () =>
     props.run(async () => {
-      if (file.learned && !(await props.confirm("Delete the learned note", `Delete ${file.path}? A learned note's change lands at once: there is no Undo.`, "Delete"))) return;
+      if (kept !== null && !(await props.confirm(`Delete the ${kept} note`, `Delete ${file.path}? A ${kept} note's change lands at once: there is no Undo.`, "Delete"))) return;
       await props.controls.remove(file.path, props.onDeleted);
     });
   return (
@@ -531,13 +574,14 @@ export function WorkspaceFilePane(props: WorkspaceFilePaneProps) {
           <Empty icon="box">This file is gone: an Undo, a swipe or another change took it away.</Empty>
         ) : file.transcript ? (
           <>
-            <p class="lre-gm-note">Everything the turn's agents did, as Live showed it: kept with the reply, read-only, and read by agents only with the GM's knowledge. A swipe has its own; it is no pin and no part of the main session.</p>
+            <p class="lre-gm-note">Everything the turn's agents did, as Live showed it: kept with the reply, read-only, and every agent reads it. A swipe has its own; it is no pin and no part of the main session.</p>
             {text === undefined ? <p class="lre-gm-note">Reading it…</p> : <pre class="lre-workspace-session-text" tabIndex={0} aria-label={`Text of ${file.path}, read-only`}>{text}</pre>}
           </>
         ) : text === undefined ? (
           <p class="lre-gm-note">Reading it…</p>
         ) : (
           <>
+            {system !== null ? <p class="lre-gm-note">{system}: it goes in the agent's system prompt, so it is never one of its pinned files.</p> : null}
             <div class="lre-ws-editor-bar">
               <span class={dirty ? "lre-ws-saved dirty" : "lre-ws-saved"} role="status">
                 {dirty ? "Not saved" : "Saved"} · {sizeWords(draft.length)}
@@ -564,31 +608,35 @@ export function WorkspaceFilePane(props: WorkspaceFilePaneProps) {
                 if (dirty && !busy) save();
               }}
             />
-            <div class="lre-ws-actions" role="group" aria-label="This file">
-              {area !== "pins" ? (
-                <Button size="sm" icon="pin" disabled={busy} onClick={() => props.run(() => props.controls.pin(file.path, !file.pinned))}>
-                  {file.pinned ? "Unpin" : "Pin"}
-                </Button>
-              ) : null}
-              <Button size="sm" icon="route" disabled={busy} onClick={props.onMove}>
-                Rename or move
-              </Button>
-              <Button size="sm" variant="danger" icon="trash" disabled={busy} onClick={remove}>
-                Delete
-              </Button>
-            </div>
-            <p class="lre-gm-note">
-              {area === "pins"
-                ? "The pins file says which files each role is shown first, and how much of them; only you change it."
-                : file.pinned
-                  ? "Pinned: it goes with every agent turn."
-                  : "Pin it to send it with every agent turn; unpinned, the agents read it when they need it."}{" "}
-              {file.learned ? "A learned note's change lands at once, with no Undo." : "Each change has its Undo, in the notice above."}
-            </p>
-            <div class="lre-stack">
-              <Seg<AgentKnowledge> label="Who may read it" value={file.readers} options={READERS_OPTIONS} disabled={busy} onChange={(readers) => props.run(() => props.controls.readers(file.path, readers))} />
-              <p class="lre-gm-note">{READERS_NOTES[file.readers]} A file an agent writes is read with the knowledge it wrote it under.</p>
-            </div>
+            {props.held ? (
+              <p class="lre-gm-note" role="status">
+                Waiting for the reply being written: the note lands when it finishes. Its text saves meanwhile, held the same way; Pin, Rename or move and Delete wait until it lands.
+              </p>
+            ) : (
+              <>
+                <div class="lre-ws-actions" role="group" aria-label="This file">
+                  {area !== "pins" && system === null ? (
+                    <Button size="sm" icon="pin" disabled={busy} onClick={() => props.run(() => props.controls.pin(file.path, !file.pinned))}>
+                      {file.pinned ? "Unpin" : "Pin"}
+                    </Button>
+                  ) : null}
+                  <Button size="sm" icon="route" disabled={busy} onClick={props.onMove}>
+                    Rename or move
+                  </Button>
+                  <Button size="sm" variant="danger" icon="trash" disabled={busy} onClick={remove}>
+                    Delete
+                  </Button>
+                </div>
+                <p class="lre-gm-note">
+                  {[
+                    area === "pins" ? "The pins file says which files each role is shown first, and how much of them." : system !== null ? null : file.pinned ? "Pinned: it goes with every agent turn." : "Pin it to send it with every agent turn; unpinned, the agents read it when they need it.",
+                    kept !== null ? `A ${kept} note's change lands at once, with no Undo.` : "Each change has its Undo, in the notice above.",
+                  ]
+                    .filter((s) => s !== null)
+                    .join(" ")}
+                </p>
+              </>
+            )}
           </>
         )}
       </div>
@@ -634,8 +682,9 @@ function ModalDialog(props: { labelledBy: string; onCancel(): void; children: Co
 }
 
 /**
- * The path dialog: a new note's path and who may read it, or a file's new path to rename or move
- * it; what's wrong with the path under it, once it is one you typed; Create or Move only for a path
+ * The path dialog: a new note's path and where it goes (this chat, or the global workspace every
+ * chat of yours shares, which puts ~/ before the path), or a file's new path to rename or move it;
+ * what's wrong with the path under it, once it is one you typed; Create or Move only for a path
  * that can take it.
  */
 export function PathDialog(props: { state: PathDialogState; paths: readonly string[]; busy: boolean; onChange(state: PathDialogState): void; onSubmit(): void; onCancel(): void }) {
@@ -656,15 +705,15 @@ export function PathDialog(props: { state: PathDialogState; paths: readonly stri
       <h2 id={DIALOG_TITLE_ID} class="lre-ws-dialog-title">
         {fresh ? "New note" : `Rename or move ${state.from ?? ""}`}
       </h2>
-      <Field label="Path" for={PATH_ID} help={fresh ? "Folders and its name, joined by /, such as notes/marcus.md." : "Change its name, its folder or both, such as notes/people/marcus.md."} error={said}>
-        <input id={PATH_ID} class="lre-input lre-ws-path" autoComplete="off" spellcheck={false} value={state.value} onInput={(event) => props.onChange({ ...state, value: event.currentTarget.value })} />
-      </Field>
       {fresh ? (
         <div class="lre-stack">
-          <Seg<AgentKnowledge> label="Who may read it" value={state.readers} options={READERS_OPTIONS} disabled={props.busy} onChange={(readers) => props.onChange({ ...state, readers })} />
-          <p class="lre-gm-note">{READERS_NOTES[state.readers]}</p>
+          <Seg<NoteLevel> label="Where it goes" value={state.value.startsWith(GLOBAL_PREFIX) ? "global" : "chat"} options={LEVEL_OPTIONS} disabled={props.busy} onChange={(level) => props.onChange({ ...state, value: atLevel(state.value, level) })} />
+          <p class="lre-gm-note">{"A global note is in every chat of yours, kept apart from the story: a change lands at once. Its AGENTS.md and roles/<role>.md come before this chat's in each agent's instructions."}</p>
         </div>
       ) : null}
+      <Field label="Path" for={PATH_ID} help={fresh ? "Folders and its name, joined by /, such as notes/marcus.md; a global note's starts with ~/." : "Change its name, its folder or both, such as notes/people/marcus.md."} error={said}>
+        <input id={PATH_ID} class="lre-input lre-ws-path" autoComplete="off" spellcheck={false} value={state.value} onInput={(event) => props.onChange({ ...state, value: event.currentTarget.value })} />
+      </Field>
       <div class="lre-ws-dialog-actions">
         <Button variant="ghost" onClick={props.onCancel}>
           Cancel
@@ -679,39 +728,22 @@ export function PathDialog(props: { state: PathDialogState; paths: readonly stri
 
 // ---------------------------------------------------------------- the main session
 
-/** Whose knowledge a part of the session was made under, as the session panel says it. */
-const MADE_UNDER: Readonly<Record<AgentKnowledge, string>> = { gm: "the GM's knowledge", everyone: "everyone's knowledge, secrets marked", pov: "your character's knowledge" };
-
-/** The same, short, for a message's chip. */
-const KNOWLEDGE_SHORT: Readonly<Record<AgentKnowledge, string>> = { gm: "GM's knowledge", everyone: "Everyone's knowledge", pov: "Your character's knowledge" };
-
 /** Who a message of the session is from: the engine's message to the main agent, or its answer; in a fixed pipeline's digest, the player's words or the reply. */
 function speaker(m: SessionMessageView): string {
   if (m.main) return m.role === "user" ? "To the main agent" : "The main agent";
   return m.role === "user" ? "The player" : "The reply";
 }
 
-/** A message as a bubble: what's sent to the main agent (or the player's words) on one side, its answer (or the reply) on the other; its speaker and chips over it, the files its tools read and the digest's roles under it. */
+/** A message as a bubble: what's sent to the main agent (or the player's words) on one side, its answer (or the reply) on the other; its speaker over it, and the digest's roles under it. */
 function bubble(m: SessionMessageView, key: number) {
   return (
-    <li key={key} class={m.role === "user" ? "lre-ws-msg to" : "lre-ws-msg from"} data-lre-session-read={m.read ? "read" : "unread"}>
+    <li key={key} class={m.role === "user" ? "lre-ws-msg to" : "lre-ws-msg from"} data-lre-session-read={m.main ? "read" : "digest"}>
       <div class="lre-ws-msg-meta">
         <span class="lre-ws-msg-who">{speaker(m)}</span>
-        {m.knowledge ? (
-          <span class="lre-ws-chip" data-chip="readers" title={`Made under ${MADE_UNDER[m.knowledge]}`}>
-            {KNOWLEDGE_SHORT[m.knowledge]}
-          </span>
-        ) : null}
-        {m.read ? null : (
-          <span class="lre-ws-chip" data-chip="unsent" title="With its knowledge now, the main agent isn't sent this message">
-            Not sent to the main agent now
-          </span>
-        )}
       </div>
       <div class="lre-ws-msg-bubble" tabIndex={0} aria-label={speaker(m)}>
         {m.text}
       </div>
-      {m.files && m.files.length > 0 ? <p class="lre-ws-msg-foot">{`Files its tools read: ${m.files.join(", ")}`}</p> : null}
       {m.engine && (m.engine.roles.length > 0 || m.engine.committed.length > 0) ? <p class="lre-ws-msg-foot">{`Roles: ${m.engine.roles.map((r) => `${r.role} (${r.via === "prompt_only" ? "prompt-only" : "agent"}${r.ok ? "" : ", failed"})`).join(", ") || "none"} · landed: ${m.engine.committed.map((c) => `${c.role} ${c.type}`).join(", ") || "nothing"}`}</p> : null}
     </li>
   );
@@ -719,12 +751,10 @@ function bubble(m: SessionMessageView, key: number) {
 
 /**
  * The main agent's session at the head (INC2-SPEC C14; DESIGN §4.6), whole: how many turns it holds
- * and their size, what of it the main agent reads now with its knowledge, the compaction summary that
- * stands in for its older turns, and every turn's messages as bubbles, each saying whose knowledge it
- * was made under, the files the main agent's tools read for it, and, where the main agent doesn't
- * read it now, that it isn't sent; then its latest compaction's rollback: Roll back while one is
- * there to roll back, then that it waits for the next agent turn, whose record carries it. Nothing
- * while it is read; a read that failed says so.
+ * and their size, what of it the main agent reads (its own messages and the summary), the compaction
+ * summary that stands in for its older turns, and every turn's messages as bubbles; then its latest
+ * compaction's rollback: Roll back while one is there to roll back, then that it waits for the next
+ * agent turn, whose record carries it. Nothing while it is read; a read that failed says so.
  */
 export function SessionPanel(props: { session: SessionView | null | undefined; busy: boolean; onRollback(): void }) {
   const { session } = props;
@@ -739,11 +769,10 @@ export function SessionPanel(props: { session: SessionView | null | undefined; b
             {`It holds ${session.turns} turn${session.turns === 1 ? "" : "s"} whole, about ${session.tokens.toLocaleString("en-US")} tokens. `}
             {session.summary === null ? "No compaction yet: nothing of it is summarized." : "A compaction summary stands in for its older turns."}
           </p>
-          <p class="lre-gm-note">{`It is all here, whoever may know it. The main agent is sent only what ${MADE_UNDER[session.reads.knowledge]} reads: ${session.reads.turns} turn${session.reads.turns === 1 ? "" : "s"}, about ${session.reads.tokens.toLocaleString("en-US")} tokens${session.summary !== null ? (session.reads.summary ? ", with the summary" : ", without the summary") : ""}.`}</p>
+          <p class="lre-gm-note">{`The main agent reads its own messages and the summary, whole: ${session.reads.turns} turn${session.reads.turns === 1 ? "" : "s"}, about ${session.reads.tokens.toLocaleString("en-US")} tokens. A fixed pipeline's digest of its turns is here for you; the main agent reads its turn task's digest instead.`}</p>
           {session.missing > 0 ? <p class="lre-gm-note">{`${session.missing} of its parts are no longer stored, so what they held is missing here.`}</p> : null}
           {session.summary !== null ? (
             <Disclosure summary="The summary">
-              <p class="lre-gm-note">{`Made under ${MADE_UNDER[session.summaryKnowledge]}.${session.reads.summary ? "" : " Not sent to the main agent now."}`}</p>
               <p class="lre-gm-note lre-workspace-summary">{session.summary}</p>
             </Disclosure>
           ) : null}

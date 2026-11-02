@@ -112,6 +112,15 @@ describe("prototype pollution", () => {
     expect(markersHash(read?.markers ?? [])).toBe(markersHash(ledger.markers));
   });
 
+  test("a decoded ledger is frozen, and what it was decoded from (a journal's own ledger, as a flush decodes it) stays the reader's own", () => {
+    const scope = { sceneType: "action" };
+    const own: MessageLedger = { v: 1, swipes: {}, markers: [{ kind: "time", control: "tick", scope, to: 0.5, seq: 1, at: null, start: true }] };
+    const read = decodeLedger({ [LEDGER_NAMESPACE]: own as unknown as JsonObject });
+    const marker = read?.markers[0];
+    expect(marker?.kind === "time" && Object.isFrozen(marker) && Object.isFrozen(marker.scope)).toBe(true);
+    expect(Object.isFrozen(scope)).toBe(false);
+  });
+
   test("editor ids and collections that are prototype keys are refused", async () => {
     const rig = new Rig();
     const worldId = await rig.newWorld("Keys");

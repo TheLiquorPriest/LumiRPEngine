@@ -1,25 +1,25 @@
 // The agents' writer (C7; INC1-SPEC R3b; AGENT-LOOP-PLAN §6, "The write path, every time"). Every
 // change an agent makes is an `AgentOp`: a GM edit, a mind or routine edit, a ✎ fix, or a workspace
-// file written, deleted, moved or pinned (and, for the GM alone, a file's readers set). A dry run
-// checks one as it would be written and says what it would change; apply writes a batch of them as
-// one GM edit. This is the writer outside a turn's engine run (`outsideWriter`: the GM agent chat,
-// GM → Workspace, an agent turn's review card); a turn agent's, which stages into its turn instead,
-// is `turn-writer.ts`, through the same checks (`checkOp`, `opLines`, `contextOf`).
+// file written, deleted, moved or pinned. A dry run checks one as it would be written and says what
+// it would change; apply writes a batch of them as one GM edit. This is the writer outside a turn's
+// engine run (`outsideWriter`: the GM agent chat, GM → Workspace, an agent turn's review card); a
+// turn agent's, which stages into its turn instead, is `turn-writer.ts`, through the same checks
+// (`checkOp`, `opLines`, `contextOf`).
 //
 // The write path, for every operation:
 // 1. It is read for its shape and turned into what the engine writes (`FixOp`s): a GM edit as
 //    `lre.edit` takes it, a ✎ fix as `lre.fix` does (locked fields refused, a place only one the
 //    player character can see, a moved person's activity left behind), a workspace file's body as
-//    the hash of the blob it will be, with whose knowledge may read the file: an agent's file, the
-//    knowledge it writes under; the GM's own, the readers the GM chose, else the GM's alone. A file
-//    under `learned/` is the learned area's instead: its change is made in the chat's metadata
-//    (`ChatAgentMeta`), not its ledger, and no file moves into or out of the area.
+//    the hash of the blob it will be. A file under `learned/` (the learned area) or `~/` (the global
+//    workspace) is kept apart from the story instead: its change is made in its store (the chat's
+//    metadata, `ChatAgentMeta`; the user's storage, `GlobalWorkspace`), not the ledger, and no file
+//    moves between the chat's story, its learned area and the global workspace. Every agent may
+//    read and write every file, the pins manifest among them; a transcript is read-only.
 // 2. It is held to the agent's knowledge through the tool layer's view (`ToolReadView`): an id the
 //    view may not name reads as no such person, thing, place or track, in the tool layer's own words,
 //    and, under any knowledge but the GM's, so does an id a value names where the engine reads one
 //    (a reference field's, a routine block's place and company, a schedule's slots for a reference
-//    field), a missing one alike; a workspace file the knowledge may not read is no file to it. Under
-//    the player character's knowledge no effect is proposed at all.
+//    field), a missing one alike.
 // 3. Its change type (`changeTypeOf`) is looked up in the user's modes, keyed by the agent's role,
 //    its connection and the type (`effectiveMode`): Never refuses it; Auto and Confirm say how its
 //    proposal may land. The GM's own writes (`GM_ROLE`, GM → Workspace) are no agent's: no mode or
@@ -33,19 +33,18 @@
 //    turn's engine run, as every write made then is (R4), lands when the turn closes, worked out
 //    again over what the turn did (`resolveFix`), and never discards the turn. The entry names the
 //    agent (`PostEntry.agent`: its
-//    role, the batch's key, the label it was applied with and the knowledge it wrote under). A
-//    learned-area change lands at once, in the chat's metadata, with no Undo chip.
+//    role, the batch's key, the label it was applied with and the knowledge it wrote under). A kept
+//    file's change lands at once, in its store, with no Undo chip.
 //
 // Operation keys are a hash of the operation (`opKey`) and a batch's a hash of its role and its
 // operations' keys, so a retry of a batch the head already has, or the journal holds, writes nothing
-// again. What a dry run says is worded for the agent's knowledge: the author's lines for `gm`; the
-// same for `everyone`, with an unrevealed secret's words marked as the narrator's scene view marks
-// them, in the user's wording (the prompt registry's Secret marks texts); only what the player
-// character may see for `pov`. The engine's refusals are the GM's reasons, marked the same way for
-// `everyone`; under `pov` every one is the same note, whatever its reason, so none tells what the
-// player character can't know. The writer's own answers are the tool layer's notes, editable texts.
+// again. What a dry run says is worded for the agent's view: the author's lines for `gm`; the same
+// for `everyone`, with an unrevealed secret's words marked as the narrator's scene view marks them,
+// in the user's wording (the prompt registry's Secret marks texts); only what the player character
+// may see for the review card (`player`). The engine's refusals are the GM's reasons, marked the
+// same way for `everyone`. The writer's own answers are the tool layer's notes, editable texts.
 
-import { type AgentKnowledge, isAgentKnowledge, knowledgeWithin, TOOL_NOTE } from "../../../shared/agent-tools";
+import { TOOL_NOTE, type ToolView } from "../../../shared/agent-tools";
 import { WRITE_NOTE } from "../../../shared/agent-tools-write";
 import { hashJson } from "../../../shared/hash";
 import type { ChatId, UserId } from "../../../shared/ids";
@@ -55,7 +54,7 @@ import { isWitnessRef, type MindEditOp } from "../../../shared/minds";
 import { EDIT_OPS_MAX, type EditOp, WRITE_REFUSED } from "../../../shared/protocol";
 import { isOff, type RoutineEditOp } from "../../../shared/routines";
 import { AGENT_CHANGE_LABEL, type AgentChangeType, type ExtractionLearning, type UserSettings } from "../../../shared/settings";
-import { blobHash, isLearnedPath, isTranscriptPath, isWorkspacePath } from "../../../shared/stores";
+import { blobHash, isFilePath, isGlobalPath, isKeptPath, isLearnedPath, isTranscriptPath, type KeptFile } from "../../../shared/stores";
 import { nounFor } from "../../../shared/words";
 import { type FieldDef, spawnCapOf } from "../../../shared/world";
 import { parseEditOps, resolveEdit } from "../../../engine/edits";
@@ -65,46 +64,43 @@ import { authorLines, playerLines } from "../../../engine/player-events";
 import type { Rejection } from "../../../engine/registry";
 import { fieldDef, kindIs } from "../../../engine/scope";
 import type { WorldState } from "../../../engine/state";
-import { canSeeEntity, canSeeField, canSeePlace, findLeaks, unrevealedSecrets } from "../../../engine/visibility";
+import { canSeeEntity, canSeePlace, findLeaks, unrevealedSecrets } from "../../../engine/visibility";
 import { Working } from "../../../engine/working";
-import { readersOf, workspaceOf, wsDelete, wsPin, wsReaders, wsWrite } from "../../../engine/workspace";
-import type { LearnedFile } from "../../chat-agent-meta";
+import { wsDelete, wsPin, wsWrite } from "../../../engine/workspace";
 import { markWording, renderPrompt } from "../../prompts";
 import type { Runtime } from "../../runtime";
 import { effectiveMode } from "../../settings-store";
 import { appliedEvents, clockFixLine, fixChip, unseenFixLine } from "../../view";
 import { readView, type ToolReadView } from "./read-view";
 import type { ToolEnv } from "./registry";
-import { chatHead, type ChatHead } from "./workspace";
+import { chatHead, type ChatHead, keptFiles } from "./workspace";
 
 // ---------------------------------------------------------------- the contract
 
-/** One change an agent asks for. A GM edit's `op` is typed as `lre.edit` takes it; a mind's, a routine's and a ✎ fix's are read for their shape here. A file's `readers` are the GM's to choose: an agent's file is read with its own knowledge. */
+/** One change an agent asks for. A GM edit's `op` is typed as `lre.edit` takes it; a mind's, a routine's and a ✎ fix's are read for their shape here. A workspace path is the chat's, or the global workspace's under `~/`. */
 export type AgentOp =
   | { kind: "gm_edit"; op: EditOp }
   | { kind: "mind_edit"; edit: JsonObject }
   | { kind: "routine_edit"; edit: JsonObject }
   | { kind: "fix"; fix: JsonObject }
-  | { kind: "ws_write"; path: string; text: string; readers?: AgentKnowledge }
+  | { kind: "ws_write"; path: string; text: string }
   | { kind: "ws_delete"; path: string }
   | { kind: "ws_move"; from: string; to: string }
-  | { kind: "ws_pin"; path: string; pinned: boolean }
-  | { kind: "ws_readers"; path: string; readers: AgentKnowledge };
+  | { kind: "ws_pin"; path: string; pinned: boolean };
 
 /**
- * Whether an operation is the learned area's (a workspace change under `learned/`): made in the
- * chat's metadata at once, which no Undo chip takes back. A move into or out of the area is
- * refused, so its source decides.
+ * Whether an operation changes a file kept apart from the story (`isKeptPath`: under `learned/` or
+ * `~/`): made in its store at once, which no Undo chip takes back. A move between the story and a
+ * kept area, or between the two areas, is refused, so its source decides.
  */
-export function isLearnedOp(op: AgentOp): boolean {
+export function isKeptOp(op: AgentOp): boolean {
   switch (op.kind) {
     case "ws_write":
     case "ws_delete":
     case "ws_pin":
-    case "ws_readers":
-      return typeof op.path === "string" && isLearnedPath(op.path);
+      return typeof op.path === "string" && isKeptPath(op.path);
     case "ws_move":
-      return typeof op.from === "string" && isLearnedPath(op.from);
+      return typeof op.from === "string" && isKeptPath(op.from);
     default:
       return false;
   }
@@ -177,8 +173,8 @@ export interface WriterCtx {
   view: ToolReadView;
   settings: UserSettings;
   learning: ExtractionLearning;
-  /** The learned area as the chat's metadata holds it. */
-  learned: Readonly<Record<string, LearnedFile>>;
+  /** The files kept apart from the story, by path: the learned area's, as the chat's metadata holds it, and the global workspace's. */
+  kept: Readonly<Record<string, KeptFile>>;
   /** The connection an agent naming none works on (the user's default): its changes' learned modes count there, the key the review card counts their outcomes under. */
   active: string;
 }
@@ -192,8 +188,8 @@ export interface PreparedOp {
   ops: FixOp[];
   /** A written file's body, put as a blob just before its write. */
   body?: { text: string; hash: string };
-  /** A learned-area change instead (in the chat's metadata, not its ledger): each path's file after it, null where it is taken out, and the events that word it, never written. */
-  learned?: { changes: Record<string, LearnedFile | null>; shown: LedgerEvent[] };
+  /** A kept file's change instead (in its store, not the ledger): each path's file after it, null where it is taken out, and the events that word it, never written. */
+  kept?: { changes: Record<string, KeptFile | null>; shown: LedgerEvent[] };
 }
 
 type Prepared = PreparedOp;
@@ -237,92 +233,73 @@ function prepareFix(rt: Runtime, ctx: Ctx, state: Readonly<WorldState>, key: str
   return { key, op, ops };
 }
 
-type FileOp = Extract<AgentOp, { kind: "ws_write" | "ws_delete" | "ws_move" | "ws_pin" | "ws_readers" }>;
+type FileOp = Extract<AgentOp, { kind: "ws_write" | "ws_delete" | "ws_move" | "ws_pin" }>;
+
+/** Where a file at `path` is kept: in the chat's story (its ledger), its learned area or the global workspace. */
+function keptIn(path: string): "story" | "learned" | "global" {
+  return isGlobalPath(path) ? "global" : isLearnedPath(path) ? "learned" : "story";
+}
 
 /**
- * A workspace operation against the files of `state` and of the learned area (`learned`), held to
- * those the agent's knowledge may read: one the batch wrote before it is the agent's own. A path
- * under `learned/` is the learned area's, changed in the chat's metadata; no file moves into or out
- * of it. An agent's file is read with its own knowledge; the GM's with the readers it chose, else
- * the GM's alone; and only the GM changes a file's readers without writing it.
+ * A workspace operation against the files of `state` and the kept files (`kept`, the learned area's
+ * and the global workspace's): a path under `learned/` or `~/` is a kept file's, changed in its
+ * store; no file moves from the story, the learned area or the global workspace into another. Every
+ * file is every agent's to write, the pins manifest among them; a transcript is kept as its turn
+ * left it.
  */
-function prepareFile(ctx: Ctx, env: WriterEnv, state: Readonly<WorldState>, learned: Readonly<Record<string, LearnedFile>>, key: string, op: FileOp): Prepared | OpRefusal {
-  const files = workspaceOf(state);
-  const gm = env.agent.role === GM_ROLE;
-  const readersAt = (path: string): AgentKnowledge | undefined => (isLearnedPath(path) ? own(learned, path)?.readers : own(files, path) !== undefined ? readersOf(state, path) : undefined);
-  const hidden = (path: string): boolean => {
-    const readers = readersAt(path);
-    return readers !== undefined && !knowledgeWithin(readers, env.knowledge);
-  };
+function prepareFile(ctx: Ctx, env: WriterEnv, kept: Readonly<Record<string, KeptFile>>, key: string, op: FileOp): Prepared | OpRefusal {
   // A transcript (`transcripts/`) is kept as its turn left it: nothing writes, moves, deletes or pins one.
-  const bad = (path: unknown): OpRefusal | null => (!isWorkspacePath(path) ? refusal("bad_path", ctx.view.text(WRITE_NOTE.badPath, { path: String(path) }), key) : isTranscriptPath(path) ? refusal("transcript", ctx.view.text(WRITE_NOTE.transcriptReadOnly, { path }), key) : null);
+  const bad = (path: unknown): OpRefusal | null => (!isFilePath(path) ? refusal("bad_path", ctx.view.text(WRITE_NOTE.badPath, { path: String(path) }), key) : isTranscriptPath(path) ? refusal("transcript", ctx.view.text(WRITE_NOTE.transcriptReadOnly, { path }), key) : null);
   const none = (path: string): OpRefusal => refusal("no_file", ctx.view.text(WRITE_NOTE.noFile, { path }), key);
   const badOp = (): OpRefusal => refusal("bad_op", ctx.view.text(WRITE_NOTE.badOp), key);
   const same = (): OpRefusal => refusal("no_change", ctx.view.text(WRITE_NOTE.noChange), key);
-  const learn = (changes: Record<string, LearnedFile | null>, shown: LedgerEvent[], body?: { text: string; hash: string }): Prepared => ({ key, op, ops: [], ...(body ? { body } : {}), learned: { changes, shown } });
+  const keep = (changes: Record<string, KeptFile | null>, shown: LedgerEvent[], body?: { text: string; hash: string }): Prepared => ({ key, op, ops: [], ...(body ? { body } : {}), kept: { changes, shown } });
   switch (op.kind) {
     case "ws_write": {
       const wrong = bad(op.path);
       if (wrong) return wrong;
-      if (typeof op.text !== "string" || (op.readers !== undefined && (!gm || !isAgentKnowledge(op.readers)))) return badOp();
-      if (hidden(op.path)) return refusal("path_taken", ctx.view.text(WRITE_NOTE.pathTaken, { path: op.path }), key);
-      // An agent's file is read with its own knowledge; the GM's with the readers it chose, else as the file is read now, a new one by the GM alone.
-      const readers = gm ? (op.readers ?? readersAt(op.path) ?? "gm") : env.knowledge;
+      if (typeof op.text !== "string") return badOp();
       const hash = blobHash(op.text);
       const body = { text: op.text, hash };
-      if (!isLearnedPath(op.path)) return { key, op, ops: [{ op: "ws_write", path: op.path, hash, readers }], body };
-      const now = own(learned, op.path);
-      if (now?.hash === hash && now.readers === readers) return same();
-      const shown = [...(now?.hash === hash ? [] : [wsWrite(op.path, hash)]), ...((now?.readers ?? "gm") !== readers ? [wsReaders(op.path, readers)] : [])];
-      return learn({ [op.path]: { hash, readers, ...(now?.pinned ? { pinned: true as const } : {}), role: env.agent.role } }, shown, body);
+      if (!isKeptPath(op.path)) return { key, op, ops: [{ op: "ws_write", path: op.path, hash }], body };
+      const now = own(kept, op.path);
+      if (now?.hash === hash) return same();
+      return keep({ [op.path]: { hash, ...(now?.pinned ? { pinned: true as const } : {}), role: env.agent.role } }, [wsWrite(op.path, hash)], body);
     }
     case "ws_delete": {
       const wrong = bad(op.path);
       if (wrong) return wrong;
-      if (hidden(op.path)) return none(op.path);
-      if (!isLearnedPath(op.path)) return { key, op, ops: [{ op: "ws_delete", path: op.path }] };
-      return own(learned, op.path) ? learn({ [op.path]: null }, [wsDelete(op.path)]) : none(op.path);
+      if (!isKeptPath(op.path)) return { key, op, ops: [{ op: "ws_delete", path: op.path }] };
+      return own(kept, op.path) ? keep({ [op.path]: null }, [wsDelete(op.path)]) : none(op.path);
     }
     case "ws_move": {
       const wrong = bad(op.from) ?? bad(op.to);
       if (wrong) return wrong;
-      if (hidden(op.from)) return none(op.from);
-      if (isLearnedPath(op.from) !== isLearnedPath(op.to)) return refusal("learned_move", ctx.view.text(WRITE_NOTE.learnedMove, { path: op.from, to: op.to }), key);
-      if (!isLearnedPath(op.from)) return { key, op, ops: [{ op: "ws_move", from: op.from, to: op.to }] };
-      const file = own(learned, op.from);
+      if (keptIn(op.from) !== keptIn(op.to)) return refusal("learned_move", ctx.view.text(WRITE_NOTE.learnedMove, { path: op.from, to: op.to }), key);
+      if (!isKeptPath(op.from)) return { key, op, ops: [{ op: "ws_move", from: op.from, to: op.to }] };
+      const file = own(kept, op.from);
       if (!file) return none(op.from);
       if (op.to === op.from) return same();
-      if (own(learned, op.to)) return refusal("file_exists", ctx.view.text(WRITE_NOTE.fileExists, { to: op.to }), key);
-      // The file keeps its pin and its readers, as a move in the head does.
-      return learn({ [op.from]: null, [op.to]: file }, [wsWrite(op.to, file.hash), wsDelete(op.from), ...(file.pinned ? [wsPin(op.to, true)] : []), ...(file.readers !== "gm" ? [wsReaders(op.to, file.readers)] : [])]);
+      if (own(kept, op.to)) return refusal("file_exists", ctx.view.text(WRITE_NOTE.fileExists, { to: op.to }), key);
+      // The file keeps its pin, as a move in the head does.
+      return keep({ [op.from]: null, [op.to]: file }, [wsWrite(op.to, file.hash), wsDelete(op.from), ...(file.pinned ? [wsPin(op.to, true)] : [])]);
     }
     case "ws_pin": {
       const wrong = bad(op.path);
       if (wrong) return wrong;
       if (typeof op.pinned !== "boolean") return badOp();
-      if (hidden(op.path)) return none(op.path);
-      if (!isLearnedPath(op.path)) return { key, op, ops: [{ op: "ws_pin", path: op.path, pinned: op.pinned }] };
-      const file = own(learned, op.path);
+      if (!isKeptPath(op.path)) return { key, op, ops: [{ op: "ws_pin", path: op.path, pinned: op.pinned }] };
+      const file = own(kept, op.path);
       if (!file) return none(op.path);
       if ((file.pinned === true) === op.pinned) return same();
       const { pinned: _pinned, ...rest } = file;
-      return learn({ [op.path]: op.pinned ? { ...rest, pinned: true } : rest }, [wsPin(op.path, op.pinned)]);
-    }
-    case "ws_readers": {
-      if (!gm || !isAgentKnowledge(op.readers)) return badOp();
-      const wrong = bad(op.path);
-      if (wrong) return wrong;
-      if (!isLearnedPath(op.path)) return { key, op, ops: [{ op: "ws_readers", path: op.path, readers: op.readers }] };
-      const file = own(learned, op.path);
-      if (!file) return none(op.path);
-      if (file.readers === op.readers) return same();
-      return learn({ [op.path]: { ...file, readers: op.readers } }, [wsReaders(op.path, op.readers)]);
+      return keep({ [op.path]: op.pinned ? { ...rest, pinned: true } : rest }, [wsPin(op.path, op.pinned)]);
     }
   }
 }
 
-/** Reads an operation into what the engine writes for it against `state` and the learned area (`learned`), or why it can't be read. */
-function prepare(rt: Runtime, ctx: Ctx, env: WriterEnv, state: Readonly<WorldState>, learned: Readonly<Record<string, LearnedFile>>, op: AgentOp): Prepared | OpRefusal {
+/** Reads an operation into what the engine writes for it against `state` and the kept files (`kept`), or why it can't be read. */
+function prepare(rt: Runtime, ctx: Ctx, env: WriterEnv, state: Readonly<WorldState>, kept: Readonly<Record<string, KeptFile>>, op: AgentOp): Prepared | OpRefusal {
   const bad = (key?: string): OpRefusal => refusal("bad_op", ctx.view.text(WRITE_NOTE.badOp), key);
   if (!isRecord(op)) return bad();
   let key: string;
@@ -350,8 +327,7 @@ function prepare(rt: Runtime, ctx: Ctx, env: WriterEnv, state: Readonly<WorldSta
     case "ws_delete":
     case "ws_move":
     case "ws_pin":
-    case "ws_readers":
-      return prepareFile(ctx, env, state, learned, key, op);
+      return prepareFile(ctx, env, kept, key, op);
     default:
       return bad(key);
   }
@@ -507,23 +483,6 @@ function unseenValues(rt: Runtime, ctx: Ctx, state: Readonly<WorldState>, ops: r
   return null;
 }
 
-/**
- * The note for the first field an operation sets or adds to that the player character's view may
- * not read (`seesField`): one its kind has no such field as reads exactly as a hidden one, so no
- * answer tells of a hidden field, or of its value by how a change to it would land. Null when it may
- * read every one.
- */
-function unseenField(rt: Runtime, ctx: Ctx, state: Readonly<WorldState>, ops: readonly FixOp[]): string | null {
-  const { world } = ctx.head;
-  for (const op of ops) {
-    if (op.op !== "set" && op.op !== "fix_set" && op.op !== "add") continue;
-    const kind = own(state.entities, op.entity)?.kind;
-    const declared = kind !== undefined && fieldDef(rt.registry, world, kind, op.field) !== undefined;
-    if (!declared || !canSeeField(rt.registry, world, state, world.pov, op.entity, op.field)) return ctx.view.text(TOOL_NOTE.noField, { name: op.field });
-  }
-  return null;
-}
-
 /** Whether a field holds money: setting or adding to it moves money against a correction, as `adjust` does. */
 function moneyField(rt: Runtime, head: ChatHead, state: Readonly<WorldState>, entity: string, field: string): boolean {
   return fieldDef(rt.registry, head.world, own(state.entities, entity)?.kind ?? "", field)?.type === "money";
@@ -541,7 +500,6 @@ export function changeTypeOf(rt: Runtime, head: ChatHead, state: Readonly<WorldS
     case "ws_delete":
     case "ws_move":
     case "ws_pin":
-    case "ws_readers":
       return "workspace";
     case "mind_edit":
     case "routine_edit":
@@ -597,31 +555,29 @@ function marker(rt: Runtime, ctx: Ctx, state: Readonly<WorldState>): (text: stri
   return (text) => (findLeaks(text, secrets).length > 0 ? ctx.view.mark(text, { known: [], kept }) : text);
 }
 
-/** A refusal from the engine, worded for the agent's knowledge: the GM's reason; everyone's, its secrets marked; under the player character's, one note whatever the reason, so no refusal tells what the player character can't know. */
-function refused(rt: Runtime, ctx: Ctx, knowledge: AgentKnowledge, rejection: Rejection, key: string): OpRefusal {
-  if (knowledge === "gm") return refusal(rejection.code, rejection.gm ?? rejection.reason, key);
-  if (knowledge === "everyone") return refusal(rejection.code, marker(rt, ctx, ctx.head.state)(rejection.gm ?? rejection.reason), key);
-  // Under `pov` every reason is the same note, and every code `refused`, but a write refused for when it came (`WRITE_REFUSED`), which tells nothing of the world: that one may be applied again.
-  return refusal(rejection.code === WRITE_REFUSED ? WRITE_REFUSED : "refused", ctx.view.text(WRITE_NOTE.povRefused, { pov: ctx.view.name(ctx.view.pov) }), key);
+/** A refusal from the engine, worded for the agent's view: the GM's reason, or everyone's with its secrets marked. */
+function refused(rt: Runtime, ctx: Ctx, view: ToolView, rejection: Rejection, key: string): OpRefusal {
+  const reason = rejection.gm ?? rejection.reason;
+  return refusal(rejection.code, view === "gm" ? reason : marker(rt, ctx, ctx.head.state)(reason), key);
 }
 
 /**
- * What an operation's events change, in plain words, as the agent's knowledge may have them; `after`
- * is the state they leave, which names whom they bring in. A workspace change reads as the GM's line
- * of it, with its path, under the GM's knowledge alone: below it (the review card's, which is the
- * player character's, and everyone's) it is one line naming no file, as the Journal shows it none.
+ * What an operation's events change, in plain words, for `reader`; `after` is the state they leave,
+ * which names whom they bring in. A workspace change reads as the GM's line of it, with its path, for
+ * the GM alone: for anyone else it is one line naming no file, as the Journal shows it none. The
+ * review card (`player`, a player surface) reads it as the player character may.
  */
-export function opLines(rt: Runtime, ctx: Ctx, knowledge: AgentKnowledge, type: AgentChangeType, after: Readonly<WorldState>, events: readonly LedgerEvent[]): string[] {
+export function opLines(rt: Runtime, ctx: Ctx, reader: ToolView | "player", type: AgentChangeType, after: Readonly<WorldState>, events: readonly LedgerEvent[]): string[] {
   const reg = rt.registry;
   const world = ctx.head.world;
-  if (type === "workspace") return knowledge === "gm" ? authorLines(reg, world, after, events, events.length) : [ctx.view.text(WRITE_NOTE.workspaceLine)];
+  if (type === "workspace") return reader === "gm" ? authorLines(reg, world, after, events, events.length) : [ctx.view.text(WRITE_NOTE.workspaceLine)];
   const clock = clockFixLine(events);
-  if (knowledge === "pov") {
+  if (reader === "player") {
     const lines = [...(clock ? [clock] : []), ...playerLines(reg, world, after, world.pov, events, events.length)];
     return lines.length > 0 || events.length === 0 ? lines : [unseenFixLine(reg, world, after, events)];
   }
   const lines = [...(clock ? [clock] : []), ...authorLines(reg, world, after, events, events.length)];
-  return knowledge === "gm" ? lines : lines.map(marker(rt, ctx, after));
+  return reader === "gm" ? lines : lines.map(marker(rt, ctx, after));
 }
 
 // ---------------------------------------------------------------- dry run and apply
@@ -632,17 +588,16 @@ async function context(rt: Runtime, env: WriterEnv): Promise<Ctx | OpRefusal> {
   if (env.signal.aborted) return refusal("cancelled", renderPrompt(WRITE_NOTE.cancelled, settings.prompts.texts, {}));
   const head = await chatHead(rt, env.chatId, env.userId);
   if (!head) return refusal("no_world", renderPrompt(WRITE_NOTE.noWorld, settings.prompts.texts, {}));
-  const { learned } = await rt.chatAgents.get(env.chatId, env.userId);
-  return contextOf(rt, env, head, settings, await rt.settings.learningOf(env.userId), learned, await rt.activeConnectionId(env.userId));
+  return contextOf(rt, env, head, settings, await rt.settings.learningOf(env.userId), await keptFiles(rt, env.chatId, env.userId), await rt.activeConnectionId(env.userId));
 }
 
-/** The writer's context over a head and a learned area in hand: a turn's own, as its engine run reads them (`turn-writer.ts`), never through the ledger's queue. */
-export function contextOf(rt: Runtime, env: Pick<WriterEnv, "knowledge">, head: ChatHead, settings: UserSettings, learning: ExtractionLearning, learned: Readonly<Record<string, LearnedFile>>, active: string): Ctx {
+/** The writer's context over a head and kept files in hand: a turn's own, as its engine run reads them (`turn-writer.ts`), never through the ledger's queue. */
+export function contextOf(rt: Runtime, env: Pick<WriterEnv, "knowledge">, head: ChatHead, settings: UserSettings, learning: ExtractionLearning, kept: Readonly<Record<string, KeptFile>>, active: string): Ctx {
   const view = readView({ knowledge: env.knowledge, registry: rt.registry, world: head.world, state: head.state, texts: settings.prompts.texts, wording: markWording(settings.prompts.texts), threshold: settings.minds.knowledge.threshold });
-  return { head, view, settings, learning, learned, active };
+  return { head, view, settings, learning, kept, active };
 }
 
-/** A checked operation: what it writes in the head (none for a learned-area change), its type and mode, and the events that word it. */
+/** A checked operation: what it writes in the head (none for a kept file's change), its type and mode, and the events that word it. */
 export interface CheckedOp {
   p: Prepared;
   type: AgentChangeType;
@@ -651,40 +606,27 @@ export interface CheckedOp {
   shown: LedgerEvent[];
 }
 
-/** Prepares, holds to knowledge, gates and validates one operation against `state` and the learned area (`learned`): what it writes and its mode, or why not. */
-export function checkOp(rt: Runtime, ctx: Ctx, env: WriterEnv, state: Readonly<WorldState>, learned: Readonly<Record<string, LearnedFile>>, op: AgentOp): CheckedOp | OpRefusal {
-  const p = prepare(rt, ctx, env, state, learned, op);
+/** Prepares, holds to the view, gates and validates one operation against `state` and the kept files (`kept`): what it writes and its mode, or why not. */
+export function checkOp(rt: Runtime, ctx: Ctx, env: WriterEnv, state: Readonly<WorldState>, kept: Readonly<Record<string, KeptFile>>, op: AgentOp): CheckedOp | OpRefusal {
+  const p = prepare(rt, ctx, env, state, kept, op);
   if (isRefusal(p)) return p;
-  const pov = { pov: ctx.view.name(ctx.view.pov) };
-  // Under the player character's knowledge no effect is proposed: what one touches reaches past what
-  // it may know, so every effect is refused alike, whatever it names.
-  if (env.knowledge === "pov" && p.ops.some((o) => o.op === "effect")) return refusal("pov_effect", ctx.view.text(WRITE_NOTE.povEffect, pov), p.key);
-  // Under the player character's knowledge only its own mind may be changed: anyone else's is beyond
-  // it, so every change to one is refused alike, whoever it is and whatever that mind holds.
-  if (env.knowledge === "pov" && p.ops.some((o) => own(MIND_OPS, o.op) !== undefined && "entity" in o && o.entity !== ctx.head.world.pov)) return refusal("not_your_mind", ctx.view.text(WRITE_NOTE.notYourMind, pov), p.key);
-  const hidden = unseen(ctx, state, p.ops) ?? (env.knowledge !== "gm" ? unseenValues(rt, ctx, state, p.ops) : null) ?? (env.knowledge === "pov" ? unseenField(rt, ctx, state, p.ops) : null);
+  const hidden = unseen(ctx, state, p.ops) ?? (env.knowledge !== "gm" ? unseenValues(rt, ctx, state, p.ops) : null);
   if (hidden !== null) return refusal("not_found", hidden, p.key);
-  // Under the player character's knowledge a spawn takes no id of its own: a refusal of only a taken
-  // one would tell an id someone it can't know holds from a free one, so every id is refused alike.
-  const named = env.knowledge === "pov" ? p.ops.find((o) => o.op === "spawn" && o.id !== undefined) : undefined;
-  if (named?.op === "spawn") return refusal("bad_id", ctx.view.text(WRITE_NOTE.spawnId, { id: named.id ?? "" }), p.key);
   const g = gate(rt, ctx, env, state, p);
   if (isRefusal(g)) return g;
-  // A learned-area change is the chat's metadata's, not the engine's: it writes no event.
-  if (p.learned) return { p, type: g.type, mode: g.mode, events: [], shown: p.learned.shown };
+  // A kept file's change is its store's, not the engine's: it writes no event.
+  if (p.kept) return { p, type: g.type, mode: g.mode, events: [], shown: p.kept.shown };
   // A GM edit's rules; a ✎ fix's operations keep the player's (`fix_set`).
   const out = resolveEdit(rt.registry, ctx.head.world, state, p.ops, { gm: true, runSeed: ctx.head.run.runSeed });
   if ("rejection" in out) return refused(rt, ctx, env.knowledge, out.rejection, p.key);
-  // A change that changes nothing is one note under the player character's knowledge, as every
-  // refusal is there: that a value is already at its bound is the value told.
-  if (out.events.length === 0) return env.knowledge === "pov" ? refusal("refused", ctx.view.text(WRITE_NOTE.povRefused, pov), p.key) : refusal("no_change", ctx.view.text(WRITE_NOTE.noChange), p.key);
+  if (out.events.length === 0) return refusal("no_change", ctx.view.text(WRITE_NOTE.noChange), p.key);
   return { p, type: g.type, mode: g.mode, events: out.events, shown: out.events };
 }
 
 async function dryRun(rt: Runtime, env: WriterEnv, op: AgentOp): Promise<OpPreview | OpRefusal> {
   const ctx = await context(rt, env);
   if (isRefusal(ctx)) return ctx;
-  const checked = checkOp(rt, ctx, env, ctx.head.state, ctx.learned, op);
+  const checked = checkOp(rt, ctx, env, ctx.head.state, ctx.kept, op);
   if (isRefusal(checked)) return checked;
   const after = new Working(rt.registry, ctx.head.world, ctx.head.state);
   after.applyAll(checked.events);
@@ -742,26 +684,26 @@ async function apply(rt: Runtime, env: WriterEnv, ops: readonly AgentOp[], label
   const already = written(ctx, env.agent.role, key);
   if (already) return { applied: already.applied, refused: asks.flatMap((ask) => (ask && already.applied.includes(ask) ? [] : [refusal("no_change", ctx.view.text(WRITE_NOTE.noChange), ask ?? undefined)])), chipId: already.chipId, pending: already.pending };
   const { world, run } = ctx.head;
-  // Each operation is checked against the head and the learned area and the ones before it that
+  // Each operation is checked against the head and the kept files and the ones before it that
   // passed; one that doesn't is left out and the rest still go. Refusals come back in the
   // operations' order.
   const running = new Working(rt.registry, world, ctx.head.state);
-  let learned: Record<string, LearnedFile> = { ...ctx.learned };
+  let kept: Record<string, KeptFile> = { ...ctx.kept };
   const verdicts: (Prepared | OpRefusal)[] = [];
   for (const op of ops) {
-    const checked = checkOp(rt, ctx, env, running.state, learned, op);
+    const checked = checkOp(rt, ctx, env, running.state, kept, op);
     if (isRefusal(checked)) {
       verdicts.push(checked);
       continue;
     }
-    if (checked.p.learned) learned = withLearned(learned, checked.p.learned.changes);
+    if (checked.p.kept) kept = withKept(kept, checked.p.kept.changes);
     else running.applyAll(checked.events);
     verdicts.push(checked.p);
   }
-  const kept = verdicts.filter((v): v is Prepared => !isRefusal(v));
-  if (kept.length === 0) return { applied: [], refused: verdicts.filter((v): v is OpRefusal => isRefusal(v)), chipId: null, pending: false };
-  const files = kept.filter((p) => p.learned !== undefined);
-  const edits = kept.filter((p) => p.learned === undefined);
+  const passed = verdicts.filter((v): v is Prepared => !isRefusal(v));
+  if (passed.length === 0) return { applied: [], refused: verdicts.filter((v): v is OpRefusal => isRefusal(v)), chipId: null, pending: false };
+  const files = passed.filter((p) => p.kept !== undefined);
+  const edits = passed.filter((p) => p.kept === undefined);
   /** The kept operations the write refused after all, each as its refusal words it. */
   const refusedAs = new Map<Prepared, OpRefusal>();
   const refuseEdits = (why: (p: Prepared) => OpRefusal): void => {
@@ -769,12 +711,12 @@ async function apply(rt: Runtime, env: WriterEnv, ops: readonly AgentOp[], label
   };
   let chipId: string | null = null;
   let pending = false;
-  // Each new body is stored first, held for this write until its record, the journal or the learned index points at it.
+  // Each new body is stored first, held for this write until its record, the journal or a kept index points at it.
   const holder = `agent:${key}`;
   try {
-    for (const p of kept) if (p.body) await rt.blobs.put(env.userId, p.body.text, holder);
-    // The learned area's changes land at once, in the chat's metadata: no turn holds them, and a swipe never changes them.
-    if (files.length > 0) await rt.chatAgents.setLearned(env.chatId, env.userId, Object.assign({}, ...files.map((p) => p.learned?.changes ?? {})) as Record<string, LearnedFile | null>);
+    for (const p of passed) if (p.body) await rt.blobs.put(env.userId, p.body.text, holder);
+    // A kept file's change lands at once, in its store: no turn holds it, and a swipe never changes it.
+    if (files.length > 0) await landKept(rt, env.chatId, env.userId, Object.assign({}, ...files.map((p) => p.kept?.changes ?? {})) as Record<string, KeptFile | null>);
     if (edits.length > 0) {
       // The batch is one GM edit, resolved as `resolveFix` will resolve it again: one generator over
       // all of its operations, so a rebased view or a held landing works out the same ids.
@@ -797,8 +739,9 @@ async function apply(rt: Runtime, env: WriterEnv, ops: readonly AgentOp[], label
   } finally {
     rt.blobs.release(env.userId, holder);
   }
-  const applied = kept.filter((p) => !refusedAs.has(p)).map((p) => p.key);
-  if (applied.length > 0) rt.push.changed(env.chatId, env.userId);
+  const applied = passed.filter((p) => !refusedAs.has(p)).map((p) => p.key);
+  // The chat's state moves only with a GM edit written (its Undo chip); a kept file's change touches none of it.
+  if (edits.some((p) => !refusedAs.has(p))) rt.push.changed(env.chatId, env.userId);
   const refusals = verdicts.flatMap((v): OpRefusal[] => {
     if (isRefusal(v)) return [v];
     const after = refusedAs.get(v);
@@ -807,14 +750,25 @@ async function apply(rt: Runtime, env: WriterEnv, ops: readonly AgentOp[], label
   return { applied, refused: refusals, chipId, pending };
 }
 
-/** The learned area with `changes` made: a file at each path, none where it is null. */
-export function withLearned(learned: Readonly<Record<string, LearnedFile>>, changes: Readonly<Record<string, LearnedFile | null>>): Record<string, LearnedFile> {
-  const out = { ...learned };
+/** The kept files with `changes` made: a file at each path, none where it is null. */
+export function withKept(kept: Readonly<Record<string, KeptFile>>, changes: Readonly<Record<string, KeptFile | null>>): Record<string, KeptFile> {
+  const out = { ...kept };
   for (const [path, file] of Object.entries(changes)) {
     if (file === null) delete out[path];
     else out[path] = file;
   }
   return out;
+}
+
+/**
+ * Makes kept files' changes in their stores: those under `learned/` in the chat's metadata, those
+ * under `~/` in the user's global workspace. Each body is a blob the caller stored and holds until
+ * this lands.
+ */
+export async function landKept(rt: Pick<Runtime, "chatAgents" | "globalFiles">, chatId: ChatId, userId: UserId, changes: Readonly<Record<string, KeptFile | null>>): Promise<void> {
+  const learned = Object.fromEntries(Object.entries(changes).filter(([path]) => isLearnedPath(path)));
+  const global = Object.fromEntries(Object.entries(changes).filter(([path]) => isGlobalPath(path)));
+  await Promise.all([Object.keys(learned).length > 0 ? rt.chatAgents.setLearned(chatId, userId, learned) : null, Object.keys(global).length > 0 ? rt.globalFiles.set(userId, global) : null]);
 }
 
 /** Applies in turn per chat, so a retry finds the batch it repeats already written. */

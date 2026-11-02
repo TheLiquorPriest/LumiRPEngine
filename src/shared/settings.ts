@@ -444,8 +444,9 @@ export interface BuiltLoreIndex extends LoreEntryRef {
  * World Info books LRE reads, each entry by a short id and its title. `tagPattern`: a World Info key
  * of an entry that matches it (a regular expression) is that entry's id, a tag; an entry with none
  * gets one of LRE's own, `idPrefix` then its number padded to `idDigits` digits, kept for good.
- * `holdsChars`: the longest line of what an entry holds beside its title (0: none). `inPrompts`:
- * every role's prompt carries the index, within `promptTokens`. `own`: an entry of the user's whose
+ * `holdsChars`: the longest line of what an entry holds beside its title (0: none). `promptTokens`:
+ * the most of the index a role's prompt carries when the role starts with it (Settings → Agents →
+ * Context's `lore_index` source). `own`: an entry of the user's whose
  * text the agents get as the index instead, verbatim. `built`: the entry Build → Lore wrote, which LRE
  * keeps in sync; set by Build, taken off by Stop.
  */
@@ -454,14 +455,13 @@ export interface LoreIndexSettings {
   idPrefix: string;
   idDigits: number;
   holdsChars: number;
-  inPrompts: boolean;
   promptTokens: number;
   own: LoreEntryRef | null;
   built: BuiltLoreIndex | null;
 }
 
-/** A new user's lore index: the tags `lr` and four digits are, LRE's own ids `lre` and four digits, a holds line of 100 characters, and no index in the roles' prompts (1,500 tokens of it once it is switched on). */
-export const LORE_INDEX_DEFAULTS: Readonly<LoreIndexSettings> = Object.freeze({ tagPattern: "^lr\\d{4}$", idPrefix: "lre", idDigits: 4, holdsChars: 100, inPrompts: false, promptTokens: 1500, own: null, built: null });
+/** A new user's lore index: the tags `lr` and four digits are, LRE's own ids `lre` and four digits, a holds line of 100 characters, and 1,500 tokens of it in a prompt that starts with it. */
+export const LORE_INDEX_DEFAULTS: Readonly<LoreIndexSettings> = Object.freeze({ tagPattern: "^lr\\d{4}$", idPrefix: "lre", idDigits: 4, holdsChars: 100, promptTokens: 1500, own: null, built: null });
 
 /** What a short id is made of: letters, digits, `_`, `.` and `-`, so it never reads as a book's entry (`/`), a lore id (`:`) or a mark (`#`). */
 const SHORT_ID = /^[\p{L}\p{N}_.-]+$/u;
@@ -498,7 +498,6 @@ export function loreIndexSettingsOf(raw: unknown, base: Readonly<LoreIndexSettin
     idPrefix: typeof v.idPrefix === "string" && v.idPrefix.length <= LORE_INDEX_BOUNDS.idPrefix && isShortId(v.idPrefix) ? v.idPrefix : base.idPrefix,
     idDigits: int(v.idDigits, LORE_INDEX_BOUNDS.idDigits, base.idDigits),
     holdsChars: int(v.holdsChars, LORE_INDEX_BOUNDS.holdsChars, base.holdsChars),
-    inPrompts: typeof v.inPrompts === "boolean" ? v.inPrompts : base.inPrompts,
     promptTokens: int(v.promptTokens, LORE_INDEX_BOUNDS.promptTokens, base.promptTokens),
     own: v.own === undefined ? base.own : entryRefOf(v.own),
     built: v.built === undefined ? base.built : built && worldId ? { ...built, worldId } : null,

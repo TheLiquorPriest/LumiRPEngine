@@ -2,8 +2,8 @@
 // brief or outline that has someone in the scene whom the state has elsewhere (`here`), someone the
 // state has in the scene gone from it (`gone`), someone holding or handing over a thing the state says
 // they don't have (`holds`), or a thing lying in the scene that the state has on someone or elsewhere
-// (`lies`) is flagged: the director role withholds it from the narrator, as a leak is withheld, and
-// its run tells the main agent which lines and why (`agents/yields.ts`), never dropping one silently.
+// (`lies`) is flagged and kept: the narrator still gets it, and the director's run tells the main
+// agent and Diagnostics which lines and why (`agents/yields.ts`), never passing one over silently.
 // Its lines tell the turn's own actions as well as the scene they leave, so what a line says is held
 // to the state as the turn started and as it ends, and stands when it fits either: what someone hands
 // over or puts down this turn was theirs as it started, and whoever the player character leaves was

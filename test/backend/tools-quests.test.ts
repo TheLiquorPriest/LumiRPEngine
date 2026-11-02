@@ -1,12 +1,11 @@
-// The quests family (INC1-SPEC R3a) on Port Alder: the quest log under the player character's
-// knowledge (the secret of Marcus's debt only as its masked row, under its stand-in id), every track
-// under everyone's with the secret's words and its unrevealed truth marked as kept from everyone, the
-// GM's every stage and truth, and what moves a track on by knowledge.
+// The quests family (INC1-SPEC R3a) on Port Alder: every track under everyone's view with the
+// secret's words and its unrevealed truth marked as kept from everyone, the GM's every stage and
+// truth, and what moves a track on.
 
 import { describe, expect, test } from "bun:test";
 import { STARTER_WORLDS } from "../../src/packs/index";
 import { SECRET_MARK_WORDING, secretMarkText } from "../../src/shared/secret-marks";
-import { objectiveLabel, type WorldDoc } from "../../src/shared/world";
+import type { WorldDoc } from "../../src/shared/world";
 import { alderChat, answerOf, callTool } from "../support/tools";
 
 const PORT_ALDER = (STARTER_WORLDS["modern_slice_of_life"] as (id: string, name: string) => WorldDoc)("w", "Port Alder");
@@ -57,36 +56,6 @@ interface Moves {
 }
 
 describe("the quests tools", () => {
-  test("quests_tracks under the player character's knowledge is Play's quest log: the public quests, the secret only as its masked row under its stand-in id", async () => {
-    const { rig, chatId } = await alderChat();
-    const out = await callTool(rig, chatId, "pov", "quests_tracks");
-    expect(out.error).toBeUndefined();
-    const { tracks } = JSON.parse(out.text) as { tracks: Row[] };
-    expect(tracks.map((t) => t.id)).toEqual(expect.arrayContaining(["q_fleet_contract", "q_pontoon_weekend"]));
-    expect(tracks.find((t) => t.id === "q_fleet_contract")).toMatchObject({ label: FLEET?.label, kind: "quest", stage: FLEET?.stages.kickoff?.label, status: "active" });
-    const masked = tracks.find((t) => t.kind === "secret");
-    expect(masked).toMatchObject({ label: "Something is going on", stage: "", cue: SECRET?.stages.cue?.cue, status: "active" });
-    expect(masked?.id.startsWith("~")).toBe(true);
-    for (const hidden of ["s_shop_trouble", LABEL, TRUTH, "[secret;"]) expect(out.text).not.toContain(hidden);
-    // The quest log has no agendas, and nothing of the GM's.
-    expect(tracks.some((t) => t.kind === "agenda" || t.visibility !== undefined || t.stageId !== undefined)).toBe(false);
-  });
-
-  test("quests_stage under the player character's knowledge: the masked row by its stand-in, never the secret by its own id or label", async () => {
-    const { rig, chatId } = await alderChat();
-    const { tracks } = await answerOf<{ tracks: Row[] }>(rig, chatId, "pov", "quests_tracks");
-    const standIn = tracks.find((t) => t.kind === "secret")?.id ?? "";
-    const out = await callTool(rig, chatId, "pov", "quests_stage", { track: standIn });
-    expect(JSON.parse(out.text)).toMatchObject({ id: standIn, label: "Something is going on", stage: "", objectives: [], truths: [] });
-    expect((JSON.parse(out.text) as Stage).since).toBeUndefined();
-    for (const hidden of ["s_shop_trouble", LABEL, TRUTH]) expect(out.text).not.toContain(hidden);
-    for (const said of ["s_shop_trouble", LABEL]) {
-      const refused = await callTool(rig, chatId, "pov", "quests_stage", { track: said });
-      expect(refused.error).toBe(true);
-      expect(refused.text).not.toContain(TRUTH);
-    }
-  });
-
   test("under everyone every track, the secret's label and stage marked as kept from everyone, and its truth marked where quests_stage gives it", async () => {
     const { rig, chatId } = await alderChat();
     const { tracks } = await answerOf<{ tracks: Row[] }>(rig, chatId, "everyone", "quests_tracks");
@@ -114,18 +83,13 @@ describe("the quests tools", () => {
     expect(wrong.text).toContain("quest, secret, puzzle, agenda");
   });
 
-  test("quests_moves: the GM's ways on from the kickoff with what each needs, and under the player character's knowledge only what is still to do", async () => {
+  test("quests_moves: the GM's ways on from the kickoff with what each needs", async () => {
     const { rig, chatId } = await alderChat();
     const gm = await answerOf<Moves>(rig, chatId, "gm", "quests_moves", { track: "q_fleet_contract" });
     expect(gm.stageId).toBe("kickoff");
     expect(gm.next).toEqual([{ to: { id: "trial", label: FLEET?.stages.trial?.label ?? "" }, when: "flag('fleet_deal_accepted')", holds: false }]);
     expect(gm.objectives?.length).toBeGreaterThan(0);
     expect(gm.objectives?.every((o) => o.when !== "" && !o.done)).toBe(true);
-    const out = await callTool(rig, chatId, "pov", "quests_moves", { track: "The Fleet Contract" });
-    const pov = JSON.parse(out.text) as Moves;
-    expect(pov).toMatchObject({ id: "q_fleet_contract", todo: (FLEET?.stages.kickoff?.objectives ?? []).map(objectiveLabel), hints: [] });
-    expect(pov.next).toBeUndefined();
-    expect(out.text).not.toContain("flag(");
   });
 
   test("quests_moves under everyone: the secret's way on, its words marked", async () => {

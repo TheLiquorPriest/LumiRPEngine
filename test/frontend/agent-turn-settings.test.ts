@@ -1,4 +1,4 @@
-// Settings → Agents for agent turns (INC2-SPEC C12, lane T4): the Agents page's Pipeline, Review card,
+// Settings → Agents for agent turns (INC2-SPEC C12, lane T4): the Agents page's Pipeline, Review card, System instructions,
 // Budgets (GM edits per turn, and what the engine keeps in memory), Compaction, Recording and the classic comparison ratio under Acceptance
 // runs; Settings → Agents → Roles, each role's settings with its Default; and Settings → Agents → Main
 // agent. Each group reads the shipped defaults and sends its change as a merge patch; each Default
@@ -7,12 +7,14 @@
 // rendered trees (no DOM), as the Assistant page's tests do.
 
 import { describe, expect, test } from "bun:test";
-import { AcceptanceSection, AgentTurnSettings, amountText, BudgetGroup, BudgetsSection, LimitRow, OwnLimitRow } from "../../src/frontend/settings/agents";
+import { AcceptanceSection, AgentTurnSettings, amountText, BudgetGroup, BudgetsSection, LimitRow, OwnLimitRow, SystemInstructionsSection } from "../../src/frontend/settings/agents";
 import { MainAgentBody, mainPatch, mainSummary } from "../../src/frontend/settings/main-agent";
 import { FAMILIES, RoleCard, RolesBody, roleResetPatch, rolesSummary } from "../../src/frontend/settings/roles";
+import { ContextBody, ContextCard, contextSummary, pinsOf } from "../../src/frontend/settings/context";
 import { type Connection, ConnectionSelect } from "../../src/frontend/settings/steps";
 import { Button, HostModelPicker, HostSwitch, NumberStepper, Seg } from "../../src/frontend/components";
-import { defaultRoleSettings, ROLE_IDS, type RoleId } from "../../src/shared/agent-roles";
+import { defaultRoleSettings, ROLE_IDS, ROLE_LABEL, type RoleId } from "../../src/shared/agent-roles";
+import { defaultContextSettings, sourceLabel } from "../../src/shared/agent-context";
 import type { AgentSettings } from "../../src/shared/agent-settings";
 import { defaultAgentSettings } from "../../src/shared/agent-settings";
 import type { JsonObject } from "../../src/shared/json";
@@ -69,8 +71,8 @@ function limitRow(tree: unknown, id: string): unknown {
   return expand({ type: LimitRow, props: only([...direct, ...grouped]) });
 }
 
-/** The Budgets rows of what the engine keeps in memory for agent turns, by setting. */
-const KEPT_IDS = ["runs", "gates", "watchers", "live"] as const;
+/** The Budgets rows of what the engine keeps in memory, counted, by setting. */
+const KEPT_IDS = ["runs", "gates", "watchers", "live", "folds"] as const;
 
 /** Every Default on the agent-turn parts of the Agents page, rows included. */
 function agentsPageDefaults(agents: AgentSettings): unknown[] {
@@ -115,8 +117,8 @@ describe("Settings → Agents: how an agent turn runs", () => {
     expect(take()).toEqual({ agents: { gmOpsPerTurn: 4 } });
   });
 
-  test("Budgets keeps in memory 64 agent turns under way, 256 waiting at a gate, 256 watched chats and 16 chats in the live view by default: counts of at least 1, never lifted", () => {
-    const shown: Record<(typeof KEPT_IDS)[number], [string, number]> = { runs: ["Agent turns under way", 64], gates: ["Turns waiting at a gate", 256], watchers: ["Chats whose review cards are watched", 256], live: ["Chats in the live view", 16] };
+  test("Budgets keeps in memory 64 agent turns under way, 256 waiting at a gate, 256 watched chats, 16 chats in the live view and 65,536 messages worked out by default: counts of at least 1, never lifted", () => {
+    const shown: Record<(typeof KEPT_IDS)[number], [string, number]> = { runs: ["Agent turns under way", 64], gates: ["Turns waiting at a gate", 256], watchers: ["Chats whose review cards are watched", 256], live: ["Chats in the live view", 16], folds: ["Messages kept worked out", 65_536] };
     for (const id of KEPT_IDS) {
       const row = limitRow(budgets(DEFAULTS), id);
       expect(propsOf(row, HostSwitch)).toEqual([]);
@@ -168,7 +170,7 @@ describe("Settings → Agents: how an agent turn runs", () => {
       a.compaction = { atTokens: 48_000, keepTurns: 5, summarizeTool: false };
       a.recording.outputChars = 1500;
       a.gmOpsPerTurn = 4;
-      a.kept = { runs: 8, gates: 16, watchers: 32, live: 4 };
+      a.kept = { runs: 8, gates: 16, watchers: 32, live: 4, texts: 1_000_000, folds: 1000 };
       a.vsClassic = 1.5;
     });
     const resets: [unknown, string, JsonObject][] = [
@@ -184,6 +186,7 @@ describe("Settings → Agents: how an agent turn runs", () => {
       [limitRow(budgets(changed), "gates"), "Reset Turns waiting at a gate to its default, 256", { kept: { gates: null } }],
       [limitRow(budgets(changed), "watchers"), "Reset Chats whose review cards are watched to its default, 256", { kept: { watchers: null } }],
       [limitRow(budgets(changed), "live"), "Reset Chats in the live view to its default, 16", { kept: { live: null } }],
+      [limitRow(budgets(changed), "folds"), "Reset Messages kept worked out to its default, 65,536", { kept: { folds: null } }],
       [acceptance(changed), "Reset Against classic to its default, 2×", { vsClassic: null }],
     ];
     expect(agentsPageDefaults(changed)).toEqual(resets.map(([, label]) => label));
@@ -213,7 +216,6 @@ describe("Settings → Agents → Roles", () => {
     for (const id of ROLE_IDS) {
       const card = roleCard(DEFAULTS, id);
       const label = String(propsOf(card, Seg)[0]?.label).split(":")[0];
-      expect(labelled(card, Seg, `${label}: whose knowledge it reads`).value).toBe(shipped[id].knowledge);
       expect(labelled(card, Seg, `${label}: what it may change`).value).toBe(shipped[id].tier);
       expect(labelled(card, Seg, `${label}: when it fails`).value).toBe(shipped[id].onFail);
       expect(labelled(card, HostSwitch, `${label}: prompt-only`).checked).toBe(false);
@@ -233,8 +235,6 @@ describe("Settings → Agents → Roles", () => {
     expect(take()).toEqual({ agents: { roles: { intent: { model: "deepseek-v4-flash" } } } });
     press(only(propsOf(card, "select")), { currentTarget: { value: "high" } });
     expect(take()).toEqual({ agents: { roles: { intent: { effort: "high" } } } });
-    press(labelled(card, Seg, "Intent: whose knowledge it reads"), "everyone");
-    expect(take()).toEqual({ agents: { roles: { intent: { knowledge: "everyone" } } } });
     press(labelled(card, HostSwitch, "Intent: Lore"), true);
     expect(take()).toEqual({ agents: { roles: { intent: { families: FAMILIES.filter((f) => f === "lore" || defaultRoleSettings().intent.families.includes(f)) } } } });
     press(labelled(card, HostSwitch, "Intent: Money"), false);
@@ -285,10 +285,6 @@ describe("Settings → Agents → Main agent", () => {
     expect(only(propsOf(tree, "select")).value).toBe("inherit");
     press(only(propsOf(tree, "select")), { currentTarget: { value: "medium" } });
     expect(take()).toEqual({ agents: { main: { effort: "medium" } } });
-    const knowledge = labelled(tree, Seg, "Whose knowledge the main agent reads");
-    expect(knowledge.value).toBe("everyone");
-    press(knowledge, "pov");
-    expect(take()).toEqual({ agents: { main: { knowledge: "pov" } } });
     expect(propsOf(tree, HostSwitch).filter((p) => p.checked === true).map((p) => p.label)).toEqual(["Main agent: Workspace"]);
     press(labelled(tree, HostSwitch, "Main agent: People"), true);
     expect(take()).toEqual({ agents: { main: { families: ["people", "workspace"] } } });
@@ -308,11 +304,10 @@ describe("Settings → Agents → Main agent", () => {
 
   test("Default shows only while a value differs, and sends null", () => {
     expect(labels(mainPage(DEFAULTS))).toEqual([]);
-    const changed = agentsWith((a) => (a.main = { ...a.main, connectionId: "deepseek", effort: "high", knowledge: "gm", families: ["people"], digestTokens: 3000 }));
+    const changed = agentsWith((a) => (a.main = { ...a.main, connectionId: "deepseek", effort: "high", families: ["people"], digestTokens: 3000 }));
     const resets: [string, JsonObject][] = [
       ["Reset the main agent's connection and model to their default, Lumiverse's default connection", { connectionId: null, model: null }],
       ["Reset the main agent's effort to its default, Connection's own", { effort: null }],
-      ["Reset whose knowledge the main agent reads to its default, Everyone's, secrets marked", { knowledge: null }],
       ["Reset the main agent's tools to their default, Workspace", { families: null }],
     ];
     expect(labels(mainPage(changed))).toEqual(resets.map(([label]) => label));
@@ -363,7 +358,7 @@ describe("the agent-turn settings in the settings store", () => {
       compaction: { atTokens: 48_000, keepTurns: 5, summarizeTool: false },
       recording: { outputChars: 1500 },
       gmOpsPerTurn: 4,
-      kept: { runs: 64, gates: 16, watchers: 256, live: 16 },
+      kept: { runs: 64, gates: 16, watchers: 256, live: 16, texts: 4_000_000, folds: 65_536 },
       vsClassic: 1.5,
     });
 
@@ -384,11 +379,9 @@ describe("the agent-turn settings in the settings store", () => {
     for (const id of ROLE_IDS.filter((r) => r !== "director")) expect(agents.roles[id]).toEqual(defaultRoleSettings()[id]);
 
     // The main agent.
-    press(labelled(mainPage(agents), Seg, "Whose knowledge the main agent reads"), "pov");
-    agents = await save();
     press(labelled(limitRow(mainPage(agents), "pinsTokens"), NumberStepper, "Pinned files, per role (tokens)"), 1000);
     agents = await save();
-    expect(agents.main).toEqual({ ...DEFAULTS.main, knowledge: "pov", pinsTokens: 1000 });
+    expect(agents.main).toEqual({ ...DEFAULTS.main, pinsTokens: 1000 });
 
     // Every Default, pressed on the pages as they stand.
     for (const label of agentsPageDefaults(agents)) {
@@ -409,8 +402,84 @@ describe("the agent-turn settings in the settings store", () => {
   });
 });
 
+describe("Settings → Agents → System instructions", () => {
+  test("says what the system files are, reads 8,000 tokens, sends a change and its Default, and the store keeps it", async () => {
+    const page = (agents: AgentSettings) => SystemInstructionsSection({ agents, patch, busy: false });
+    const tree = page(DEFAULTS);
+    const lead = propsOf(tree, "p").map((p) => p.children).join("");
+    expect(lead).toContain("AGENTS.md");
+    expect(lead).toContain("roles/<role>.md");
+    expect(lead).toContain("global workspace's (~/) first, then this chat's");
+    const row = limitRow(tree, "systemTokens");
+    expect(propsOf(row, HostSwitch)).toEqual([]);
+    const stepper = labelled(row, NumberStepper, "System instructions (tokens)");
+    expect(stepper.value).toBe(8000);
+    expect(labels(row)).toEqual([]);
+    const rig = new Rig();
+    press(stepper, 2000);
+    rig.body(await rig.send({ type: "lre.settings.set", patch: take() }));
+    const agents = (await rig.rt.settings.get(rig.host.userId)).agents;
+    expect(agents.systemTokens).toBe(2000);
+    click(labelled(limitRow(page(agents), "systemTokens"), Button, "Reset System instructions to its default, 8,000 tokens"));
+    expect(sent).toEqual({ agents: { systemTokens: null } });
+    rig.body(await rig.send({ type: "lre.settings.set", patch: take() }));
+    expect((await rig.rt.settings.get(rig.host.userId)).agents.systemTokens).toBe(8000);
+  });
+});
+
 describe("a limit as the page says it", () => {
   test("counts its unit as one or as many", () => {
     expect([amountText(1, "tokens"), amountText(100_000, "tokens"), amountText(1, "chars"), amountText(4000, "chars"), amountText(1, "count"), amountText("none", "tokens")]).toEqual(["1 token", "100,000 tokens", "1 character", "4,000 characters", "1", "No limit"]);
+  });
+});
+
+/** One role's card on Settings → Agents → Context, laid out. */
+function contextCard(agents: AgentSettings, id: RoleId): unknown {
+  return expand({ type: ContextCard, props: only(propsOf(ContextBody({ agents, patch, busy: false }), ContextCard).filter((p) => p.id === id)) });
+}
+
+describe("Settings → Agents → Context", () => {
+  test("lists every role in §5's order on its defaults: the director starts with the Scene and the Minds, every other role with its task alone", () => {
+    expect(propsOf(ContextBody({ agents: DEFAULTS, patch, busy: false }), ContextCard).map((p) => p.id)).toEqual([...ROLE_IDS]);
+    const shipped = defaultContextSettings().roles;
+    for (const id of ROLE_IDS) {
+      const card = contextCard(DEFAULTS, id);
+      const label = ROLE_LABEL[id];
+      expect(labelled(card, Seg, `${label}: the perspective it works from`).value).toBe(shipped[id].perspective);
+      expect(labelled(card, Seg, `${label}: ${sourceLabel("scene")}`).value).toBe(id === "director" ? "start" : "ask");
+      expect(labelled(card, Seg, `${label}: ${sourceLabel("minds")}`).value).toBe(id === "director" ? "start" : "ask");
+      expect(labels(card)).toEqual([]);
+    }
+    expect(contextSummary(DEFAULTS)).toBe(`1 of ${ROLE_IDS.length} roles start with sections`);
+  });
+
+  test("each control sends that role's field alone, and Default sends null for the role; what it sends lands in the settings store", async () => {
+    const rig = new Rig();
+    const save = async (): Promise<AgentSettings> => {
+      rig.body(await rig.send({ type: "lre.settings.set", patch: take() }));
+      return (await rig.rt.settings.get(rig.host.userId)).agents;
+    };
+    let agents = DEFAULTS;
+    press(labelled(contextCard(agents, "read"), Seg, "Read: the perspective it works from"), "gm");
+    expect(sent).toEqual({ agents: { context: { roles: { read: { perspective: "gm" } } } } });
+    agents = await save();
+    press(labelled(contextCard(agents, "read"), Seg, `Read: ${sourceLabel("lore_index")}`), "start");
+    expect(sent).toEqual({ agents: { context: { roles: { read: { start: ["lore_index"], never: [] } } } } });
+    agents = await save();
+    press(labelled(contextCard(agents, "read"), Seg, `Read: ${sourceLabel("money")}`), "never");
+    agents = await save();
+    expect(pinsOf("notes/a.md\n\n  notes/b.md \nnotes/a.md")).toEqual(["notes/a.md", "notes/b.md"]);
+    const typed = only(propsOf(contextCard(agents, "read"), "textarea")).onChange;
+    if (typeof typed !== "function") throw new Error("the pins aren't a control");
+    typed({ target: { value: "notes/harbor.md\n" } });
+    expect(sent).toEqual({ agents: { context: { roles: { read: { pins: ["notes/harbor.md"] } } } } });
+    agents = await save();
+    expect(agents.context.roles.read).toEqual({ perspective: "gm", start: ["lore_index"], never: ["money"], pins: ["notes/harbor.md"] });
+    expect(agents.context.roles.director).toEqual(defaultContextSettings().roles.director);
+    expect(contextSummary(agents)).toBe(`2 of ${ROLE_IDS.length} roles start with sections · 1 changed`);
+    click(labelled(contextCard(agents, "read"), Button, "Reset the Read role's context to its defaults"));
+    expect(sent).toEqual({ agents: { context: { roles: { read: null } } } });
+    agents = await save();
+    expect(agents.context).toEqual(defaultContextSettings());
   });
 });

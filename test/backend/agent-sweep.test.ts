@@ -1,7 +1,7 @@
 // The blob sweep (DESIGN §4.4): what nothing references any more is removed once its retention has
 // passed, counted from the first sweep that found it so, and never while a turn runs. Every swipe's
-// record in every chat, every learned index, Diagnostics' kept texts and the work in flight keep
-// what they name, so a Branch still resolves after its parent is pruned.
+// record in every chat, every learned index, the user's global workspace, Diagnostics' kept texts
+// and the work in flight keep what they name, so a Branch still resolves after its parent is pruned.
 
 import { describe, expect, test } from "bun:test";
 import { BLOBS_DIR, BlobStore } from "../../src/backend/agents/blobs";
@@ -9,6 +9,7 @@ import { Sessions, sessionAt } from "../../src/backend/agents/sessions";
 import { Sweep, SWEEP_PATH } from "../../src/backend/agents/sweep";
 import { ChatAgentMeta } from "../../src/backend/chat-agent-meta";
 import { Diagnostics } from "../../src/backend/diagnostics";
+import { GLOBAL_INDEX_PATH, GlobalWorkspace } from "../../src/backend/global-workspace";
 import { decodeLedger } from "../../src/backend/ledger-io";
 import type { DiagAgentCall } from "../../src/shared/diagnostics";
 import type { ChatId, MessageId } from "../../src/shared/ids";
@@ -29,6 +30,8 @@ class Stores {
   readonly blobs = new BlobStore(this.h.host);
   readonly sessions = new Sessions(this.blobs, this.h.service);
   readonly meta = new ChatAgentMeta(this.h.host);
+  /** The user's global workspace; a test may swap in a fresh one, which reads its index from storage again. */
+  global = new GlobalWorkspace(this.h.host);
   now = DAY0;
   readonly diag = new Diagnostics(this.h.host, { blobs: this.blobs, now: () => this.now });
   /** Done once while the next sweep reads what references what: a put, or a turn starting. */
@@ -40,6 +43,7 @@ class Stores {
     this.retention = { ...RETENTION_DEFAULTS, ...retention };
     this.sweep = new Sweep({
       host: this.h.host,
+      messages: (chatId, userId) => this.h.host.chats.messages(chatId, userId),
       blobs: this.blobs,
       retention: async () => ({ ...this.retention }),
       turning: (userId) => this.h.service.turning(userId),
@@ -50,6 +54,7 @@ class Stores {
         await work?.();
         return this.diag.transcripts(chatId, userId);
       },
+      global: (userId) => this.global.refs(userId),
       now: () => this.now,
     });
   }
@@ -84,7 +89,7 @@ async function gmFile(t: Stores, chat: ChatId, path: string, text: string): Prom
 
 async function learn(t: Stores, chat: ChatId, path: string, text: string): Promise<void> {
   const hash = await t.blobs.put(t.user, text, "learn");
-  await t.meta.setLearned(chat, t.user, { [path]: { hash, readers: "everyone", role: "assistant" } });
+  await t.meta.setLearned(chat, t.user, { [path]: { hash, role: "assistant" } });
   t.blobs.release(t.user, "learn");
 }
 
@@ -286,6 +291,46 @@ describe("the blob sweep", () => {
     expect(await t.sweep.run(t.user)).toMatchObject({ ran: true, removed: 2 });
     expect(await Promise.all(junk.map((hash) => t.blobs.get(t.user, hash)))).toEqual([null, null]);
     expect(await t.blobs.get(t.user, segment)).not.toBeNull();
+  });
+
+  test("the global workspace keeps its files' bodies while its index names them, in no chat at all; one taken out goes a retention later, and while the index can't be read nothing goes", async () => {
+    const t = new Stores();
+    const chat = await t.h.newChat();
+    await t.h.send(chat, "look around");
+    await close(t, chat, "one");
+    const style = await t.blobs.put(t.user, "Keep replies short.", "global");
+    const agents = await t.blobs.put(t.user, "Every agent: name a place the first time it matters.", "global");
+    await t.global.set(t.user, { "~/notes/style.md": { hash: style, role: "gm" }, "~/AGENTS.md": { hash: agents, pinned: true, role: "main" } });
+    t.blobs.release(t.user, "global");
+    // No chat's record or metadata names them: the index alone keeps them, sweep after sweep.
+    for (const days of [0, 8, 30]) {
+      t.at(days);
+      expect(await t.sweep.run(t.user)).toMatchObject({ ran: true, stored: 3, referenced: 3, found: 0, removed: 0 });
+    }
+    // The index is the user's, in their storage: a fresh store reads it back whole.
+    expect(t.h.host.files.has(`${t.user}/${GLOBAL_INDEX_PATH}`)).toBe(true);
+    expect(await new GlobalWorkspace(t.h.host).get(t.user)).toEqual({ "~/AGENTS.md": { hash: agents, pinned: true, role: "main" }, "~/notes/style.md": { hash: style, role: "gm" } });
+    // Taken out of the index, its body is found unreferenced, and goes only a retention later.
+    await t.global.set(t.user, { "~/notes/style.md": null });
+    t.at(31);
+    expect(await t.sweep.run(t.user)).toMatchObject({ ran: true, referenced: 2, found: 1, removed: 0 });
+    // Meanwhile the index can't be read: what is still referenced isn't known, so nothing goes.
+    const read = t.h.host.storage.read;
+    t.h.host.storage.read = async (path, userId) => {
+      if (path === GLOBAL_INDEX_PATH) throw new Error("the host is busy");
+      return read(path, userId);
+    };
+    t.global = new GlobalWorkspace(t.h.host);
+    t.at(38);
+    const unread = await t.sweep.run(t.user);
+    expect(unread).toMatchObject({ ran: true, removed: 0 });
+    expect(unread.ran ? unread.stopped : undefined).toContain("the global workspace");
+    expect(await t.blobs.get(t.user, style)).toBe("Keep replies short.");
+    // Read again, the file taken out goes; the one still named stays.
+    t.h.host.storage.read = read;
+    t.at(39);
+    expect(await t.sweep.run(t.user)).toMatchObject({ ran: true, referenced: 2, removed: 1 });
+    expect([await t.blobs.get(t.user, style), await t.blobs.get(t.user, agents)]).toEqual([null, "Every agent: name a place the first time it matters."]);
   });
 
   test("a record only a closed chat's journal still holds keeps what it names, and the chat writes it back when it opens", async () => {

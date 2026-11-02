@@ -1,10 +1,9 @@
 // minds_read against Port Alder (INC1-SPEC R3a): a character's mind as each knowledge may read it.
 // Danny's and Maddie's minds are recorded as a turn records them (a minds round, then each mind),
 // with Danny's memory of it and the GM's intent and pin for him, both of them with Jordan at home.
-// Under the player character's knowledge no mind is read at all; under everyone's, each one's line in
-// the narrator's Minds section, Maddie's, which carries the shop's unrevealed truth, marked as hers
-// and kept from Jordan, as the engine run marks it for the narrator; under the GM's, everything
-// GM → Minds shows.
+// Under everyone's view, each one's line in the narrator's Minds section, Maddie's, which carries the
+// shop's unrevealed truth, marked as hers and kept from Jordan, as the engine run marks it for the
+// narrator; under the GM's, everything GM → Minds shows.
 
 import { describe, expect, test } from "bun:test";
 import { calendarOf, formatClock } from "../../src/engine/calendar";
@@ -13,7 +12,7 @@ import type { LedgerEvent } from "../../src/shared/ledger";
 import { MINDS_EVENTS } from "../../src/shared/minds";
 import { SECRET_MARK_WORDING, secretMarkText } from "../../src/shared/secret-marks";
 import type { Rig } from "../support/rig";
-import { alderChat, answerOf, callTool, HOME, POV, recordFix, toolEnv } from "../support/tools";
+import { alderChat, answerOf, HOME, POV, recordFix, toolEnv } from "../support/tools";
 
 /** Words no world text has, so a leak of a mind shows. */
 const MARK = "MIND-MARK";
@@ -68,15 +67,6 @@ async function seed(rig: Rig, chatId: string): Promise<{ truth: string; clock: (
 }
 
 describe("minds_read", () => {
-  test("under the player character's knowledge no mind is ever read, not even one it is with", async () => {
-    const { rig, chatId } = await alderChat();
-    await seed(rig, chatId);
-    for (const person of ["Danny", "Maddie Kowalczyk", "Jordan", "Nobody Atall"]) {
-      const out = await callTool(rig, chatId, "pov", "minds_read", { person });
-      expect({ person, out }).toEqual({ person, out: { text: "Jordan Ellis doesn't know that, and you read the world as Jordan Ellis knows it.", error: true } });
-    }
-  });
-
   test("under everyone's knowledge, each one's line in the narrator's Minds section: a mind carrying an unrevealed secret marked as theirs, kept from Jordan; none for one the section tells nothing of", async () => {
     const { rig, chatId } = await alderChat();
     const { truth } = await seed(rig, chatId);

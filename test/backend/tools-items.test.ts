@@ -1,16 +1,15 @@
 // The items family's read tools on Port Alder (INC1-SPEC R3a): what Jordan wears, carries and owns,
 // what someone with him has on them, where a thing is and whose it is, and how worn his pickup is,
-// under each knowledge an agent reads with. A secret thing in his toolbox never reaches the player
-// character's knowledge: the narrator reads it marked, and the GM with its visibility.
+// under each view an agent reads with. A secret thing in his toolbox is marked for the narrator, and
+// read with its visibility by the GM.
 
 import { describe, expect, test } from "bun:test";
 import { bandOf, fieldDef } from "../../src/engine/scope";
 import type { JsonObject } from "../../src/shared/json";
 import { SECRET_MARK_WORDING, secretMarkText } from "../../src/shared/secret-marks";
-import { alderChat, answerOf, callTool, HOME, KNOWLEDGE, POV, toolEnv } from "../support/tools";
+import { alderChat, answerOf, HOME, KNOWLEDGE, POV, toolEnv } from "../support/tools";
 
 const JORDAN = "Jordan Ellis";
-const HIDDEN = `${JORDAN} doesn't know that, and you read the world as ${JORDAN} knows it.`;
 const LEDGER = "Vex's ledger";
 /** A secret thing in Jordan's toolbox at the shop: no one knows of it. */
 const SECRET: Record<string, JsonObject> = {
@@ -98,35 +97,21 @@ describe("items_inventory", () => {
     }
   });
 
-  test("a secret thing in Jordan's toolbox: never under his knowledge, marked for the narrator, with its visibility for the GM", async () => {
+  test("a secret thing in Jordan's toolbox: marked for the narrator, with its visibility for the GM", async () => {
     const { rig, chatId } = await alderChat({ put: { entities: SECRET } });
-    const pov = await callTool(rig, chatId, "pov", "items_inventory", { person: JORDAN });
-    expect(pov.error).toBeUndefined();
-    expect(pov.text).not.toContain("Vex");
-    expect(pov.text).not.toContain("vex_ledger");
-    expect(inToolbox(JSON.parse(pov.text) as Inventory).map((i) => i.id)).toEqual(["pov_headlamp"]);
     const everyone = await answerOf<Inventory>(rig, chatId, "everyone", "items_inventory", { person: JORDAN });
     expect(inToolbox(everyone)).toContainEqual({ id: "vex_ledger", name: secretMarkText(LEDGER, [], "everyone", SECRET_MARK_WORDING) });
     const gm = await answerOf<Inventory>(rig, chatId, "gm", "items_inventory", { person: JORDAN });
     expect(inToolbox(gm)).toContainEqual({ id: "vex_ledger", name: LEDGER, visibility: "secret" });
   });
 
-  test("someone with Jordan: what he sees on them, never what is in their bag; someone away is beyond his knowledge", async () => {
+  test("someone with Jordan or away: what they have on them, what is in their bag, and what they own elsewhere", async () => {
     const { rig, chatId } = await alderChat({ put: { entities: DANNY_GEAR } });
-    const pov = await answerOf<Inventory>(rig, chatId, "pov", "items_inventory", { person: "Danny Okafor" });
-    expect(pov.person).toMatchObject({ id: "danny_okafor" });
-    expect(pov.worn).toEqual([]);
-    expect(pov.carried.map((i) => i.id)).toEqual(["duffel", "thermos"]);
-    expect(pov.carried.find((i) => i.id === "duffel")?.contents).toBeUndefined();
-    // What he owns elsewhere and his loans aren't Jordan's to see.
-    expect(pov.elsewhere).toBeUndefined();
-    expect(JSON.stringify(pov)).not.toContain("Brass key");
     for (const knowledge of ["everyone", "gm"] as const) {
       const inv = await answerOf<Inventory>(rig, chatId, knowledge, "items_inventory", { person: "Danny Okafor" });
       expect(inv.carried.find((i) => i.id === "duffel")?.contents?.map((i) => i.id)).toEqual(["brass_key"]);
       expect(inv.elsewhere).toEqual([]);
     }
-    expect(await callTool(rig, chatId, "pov", "items_inventory", { person: "Marcus Delgado" })).toEqual({ text: HIDDEN, error: true });
     const marcus = await answerOf<Inventory>(rig, chatId, "gm", "items_inventory", { person: "Marcus Delgado" });
     expect(marcus.worn.map((i) => i.id)).toContain("shop_office_key");
     expect(marcus.elsewhere?.find((i) => i.id === "shop_tow_truck")?.at).toMatchObject({ id: "alder_automotive" });
@@ -147,9 +132,8 @@ describe("items_holder", () => {
     }
   });
 
-  test("a secret thing is no such thing to Jordan; the narrator reads it marked, the GM with its visibility", async () => {
+  test("a secret thing: the narrator reads it marked, the GM with its visibility", async () => {
     const { rig, chatId } = await alderChat({ put: { entities: SECRET } });
-    expect(await callTool(rig, chatId, "pov", "items_holder", { thing: LEDGER })).toEqual({ text: `No such thing here: ${LEDGER}.`, error: true });
     const everyone = await answerOf<Holder>(rig, chatId, "everyone", "items_holder", { thing: LEDGER });
     expect(everyone.thing).toEqual({ id: "vex_ledger", name: secretMarkText(LEDGER, [], "everyone", SECRET_MARK_WORDING) });
     expect(everyone.in.map((h) => h.id)).toEqual(["pov_toolbox"]);
@@ -184,9 +168,9 @@ describe("items_condition", () => {
     }
   });
 
-  test("a secret thing's condition is no such thing to Jordan", async () => {
+  test("a secret thing's condition: the narrator reads it marked, the GM with its visibility", async () => {
     const { rig, chatId } = await alderChat({ put: { entities: SECRET } });
-    expect(await callTool(rig, chatId, "pov", "items_condition", { thing: LEDGER })).toEqual({ text: `No such thing here: ${LEDGER}.`, error: true });
+    expect((await answerOf<Condition>(rig, chatId, "everyone", "items_condition", { thing: LEDGER })).thing).toEqual({ id: "vex_ledger", name: secretMarkText(LEDGER, [], "everyone", SECRET_MARK_WORDING) });
     expect((await answerOf<Condition>(rig, chatId, "gm", "items_condition", { thing: LEDGER })).thing).toEqual({ id: "vex_ledger", name: LEDGER, visibility: "secret" });
   });
 });

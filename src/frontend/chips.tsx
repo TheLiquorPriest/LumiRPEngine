@@ -360,7 +360,45 @@ export function DefaultChip(props: ChipProps) {
   );
 }
 
-/** A decision the player owes: a card with its question, detail and answers, marked when the next send lapses it. */
+/**
+ * A line carrying a secret on a player surface (DESIGN §7.1: secrecy is guidance, never a filter):
+ * shown, but collapsed until the player taps it open, so it never spoils the story unasked.
+ */
+export function Spoiler(props: { label: string; children: ComponentChildren }) {
+  return (
+    <details class="lre-spoiler" data-lre-spoiler>
+      <summary>
+        <Icon name="eye" size={14} />
+        {props.label}
+      </summary>
+      {props.children}
+    </details>
+  );
+}
+
+/** The lines a decision holds back as spoilers (`Chip.spoilers`: an outline gate's lines carrying a secret), each collapsed until tapped open; nothing when it holds none. */
+export function SpoilerLines(props: { lines: readonly string[] | undefined }) {
+  const { lines } = props;
+  if (!lines || lines.length === 0) return null;
+  return (
+    <ul class="lre-chat-spoilers">
+      {lines.map((line, i) => (
+        <li key={i}>
+          <Spoiler label="A line with a spoiler: tap to show">
+            <span class="lre-spoiler-text">{line}</span>
+          </Spoiler>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+/** A suggestion's pill, inside a spoiler when the suggestion carries a secret (`Chip.spoiler`). */
+export function SuggestionPill(props: { spoiler: boolean; children: ComponentChildren }) {
+  return props.spoiler ? <Spoiler label="A suggestion with a spoiler: tap to show">{props.children}</Spoiler> : <>{props.children}</>;
+}
+
+/** A decision the player owes: a card with its question, detail and answers (its detail's lines carrying a secret each a spoiler), marked when the next send lapses it. */
 function DecisionCard(props: ChipProps) {
   const { chip } = props;
   const controls = useChipControls(chip, props.chatId);
@@ -377,6 +415,7 @@ function DecisionCard(props: ChipProps) {
         <div class="lre-chat-decision-text">
           <strong class="lre-chat-decision-label">{chip.label}</strong>
           {chip.detail ? <span class="lre-chat-decision-detail">{chip.detail}</span> : null}
+          <SpoilerLines lines={chip.spoilers} />
         </div>
       </div>
       {chip.actions.length > 0 ? (
@@ -394,7 +433,8 @@ function DecisionCard(props: ChipProps) {
 /**
  * An offer as compact pills: one action makes the whole pill its button ("Send: the
  * suggestion"), several sit as pills after the offer's label ("Swipe as… Re-narrate · Re-run"). The
- * detail follows in quiet text, so a touch screen loses none of it.
+ * detail follows in quiet text, so a touch screen loses none of it. A suggestion carrying a secret
+ * (`Chip.spoiler`) is a spoiler: its pill shows once the player taps it open.
  */
 function OfferChip(props: ChipProps) {
   const { chip } = props;
@@ -406,25 +446,29 @@ function OfferChip(props: ChipProps) {
       {chip.detail}
     </span>
   ) : null;
-  if (only)
+  if (only) {
+    const pill = (
+      <button
+        type="button"
+        class={only.style === "primary" ? "lre-chat-pill primary" : "lre-chat-pill"}
+        aria-describedby={detail ? detailId : undefined}
+        aria-expanded={only.input ? controls.asking === only.id : undefined}
+        disabled={controls.busy}
+        onClick={() => controls.press(only)}
+      >
+        <Icon name={CHIP_ICON[chip.kind]} size={16} />
+        <strong>{only.label}:</strong>
+        <span class="lre-chat-pill-text">{chip.label}</span>
+      </button>
+    );
     return (
       <div class={controls.busy ? "lre-chat-offer busy" : "lre-chat-offer"} data-kind={chip.kind}>
-        <button
-          type="button"
-          class={only.style === "primary" ? "lre-chat-pill primary" : "lre-chat-pill"}
-          aria-describedby={detail ? detailId : undefined}
-          aria-expanded={only.input ? controls.asking === only.id : undefined}
-          disabled={controls.busy}
-          onClick={() => controls.press(only)}
-        >
-          <Icon name={CHIP_ICON[chip.kind]} size={16} />
-          <strong>{only.label}:</strong>
-          <span class="lre-chat-pill-text">{chip.label}</span>
-        </button>
+        <SuggestionPill spoiler={chip.spoiler === true}>{pill}</SuggestionPill>
         {detail}
         {controls.form}
       </div>
     );
+  }
   return (
     <div class={controls.busy ? "lre-chat-offer busy" : "lre-chat-offer"} data-kind={chip.kind} role="group" aria-label={chip.label} aria-describedby={detail ? detailId : undefined}>
       <span class="lre-chat-offer-lead">

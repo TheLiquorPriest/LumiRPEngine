@@ -8,6 +8,7 @@
 
 import type { JsonObject, JsonValue } from "./json";
 import type { ClaimsPolicy } from "./claims";
+import type { FinalEdit } from "./final-review";
 import type { InferredChecks } from "./inferred";
 import type { AdjudicationDef } from "./world";
 import type {
@@ -258,15 +259,12 @@ export interface PostEntry {
 
 /**
  * A workspace change one GM edit carries (DESIGN §4.4): write a file (its body a blob the writer
- * stored first) for the knowledge that may read it (`readers`: the writer's), remove it, move it
- * (its pin and readers with it), pin or unpin it, or set whose knowledge may read it.
+ * stored first), remove it, move it (its pin with it), or pin or unpin it. Every file is every
+ * agent's to read: the readers an earlier build's write named are read and ignored, and an entry
+ * holding its op that set them alone reads as asking for nothing, so its own events stand
+ * (`parseFixOps`).
  */
-export type WorkspaceOp =
-  | { op: "ws_write"; path: string; hash: string; readers: "pov" | "everyone" | "gm" }
-  | { op: "ws_delete"; path: string }
-  | { op: "ws_move"; from: string; to: string }
-  | { op: "ws_pin"; path: string; pinned: boolean }
-  | { op: "ws_readers"; path: string; readers: "pov" | "everyone" | "gm" };
+export type WorkspaceOp = { op: "ws_write"; path: string; hash: string } | { op: "ws_delete"; path: string } | { op: "ws_move"; from: string; to: string } | { op: "ws_pin"; path: string; pinned: boolean };
 
 /** The clock set as its ✎ fix sets it (`clockFix`), inside a GM edit: "YYYY-MM-DD HH:MM" in the world's calendar at the POV's place. */
 export interface ClockOp {
@@ -460,6 +458,12 @@ export interface Rec {
    * holds none of them. Outside every hash but the tombstone's.
    */
   memoryNext?: true;
+  /**
+   * What the turn's final review changed in the narrator's prompt (DESIGN §4.6), each edit in order,
+   * which a Re-narrate tells again: outside every hash but the tombstone's, written with the record
+   * and read leniently (`finalEditsOf`), so a damaged one costs only the edits, never the turn.
+   */
+  finalEdits?: FinalEdit[];
 }
 
 /** `spindle_metadata.lumi_rp_engine` on an assistant message. Swipe keys are decimal indexes. */
@@ -597,6 +601,8 @@ export interface PendingTurn {
   memoryNext?: true;
   /** An agent turn's committed operations among its planned events (`Rec.agents`), recorded on its record at commit; a Re-narrate copies its source's with its `pre`. */
   agents?: RecAgent[];
+  /** What the turn's final review changed in the narrator's prompt (`Rec.finalEdits`), recorded on its record at commit; a Re-narrate copies its source's and keeps those it told again. */
+  finalEdits?: FinalEdit[];
 }
 
 /** Latest journal state of one message's ledger. */

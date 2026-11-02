@@ -459,9 +459,17 @@ export function createSpindleHost(): HostPort {
       },
     },
     storage: {
+      // One round trip for a file that is there, as nearly every read is (a blob, a journal): the read
+      // itself, and only once it fails, whether the file is there (the host fails a read of a missing
+      // one), so a missing file reads as none, one that appeared meanwhile is read, and any other
+      // failure stands.
       async read(path, userId) {
-        if (!(await spindle.userStorage.exists(path, userId))) return null;
-        return spindle.userStorage.read(path, userId);
+        try {
+          return await spindle.userStorage.read(path, userId);
+        } catch {
+          if (!(await spindle.userStorage.exists(path, userId))) return null;
+          return spindle.userStorage.read(path, userId);
+        }
       },
       write: (path, data, userId) => spindle.userStorage.write(path, data, userId),
       move: (from, to, userId) => spindle.userStorage.move(from, to, userId),
@@ -478,8 +486,12 @@ export function createSpindleHost(): HostPort {
     },
     extensionStorage: {
       async read(path) {
-        if (!(await spindle.storage.exists(path))) return null;
-        return spindle.storage.read(path);
+        try {
+          return await spindle.storage.read(path);
+        } catch {
+          if (!(await spindle.storage.exists(path))) return null;
+          return spindle.storage.read(path);
+        }
       },
       write: (path, data) => spindle.storage.write(path, data),
     },

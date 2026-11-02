@@ -5,16 +5,16 @@
 
 import { describe, expect, test } from "bun:test";
 import { BlobStore } from "../../src/backend/agents/blobs";
-import { agentMetaOf, agentRefs, ChatAgentMeta, type LearnedFile } from "../../src/backend/chat-agent-meta";
+import { agentMetaOf, agentRefs, ChatAgentMeta } from "../../src/backend/chat-agent-meta";
 import { chatKnowledgePrefsOf } from "../../src/backend/chat-knowledge-prefs";
 import { isRecord } from "../../src/shared/json";
 import { LEDGER_NAMESPACE } from "../../src/shared/ledger";
-import { blobHash } from "../../src/shared/stores";
+import { blobHash, type KeptFile } from "../../src/shared/stores";
 import { Harness } from "../support/harness";
 import { Rig } from "../support/rig";
 
-/** A learned file of `hash`, read with everyone's knowledge, as the assistant writes one. */
-const file = (hash: string): LearnedFile => ({ hash, readers: "everyone", role: "assistant" });
+/** A learned file of `hash`, as the assistant writes one. */
+const file = (hash: string): KeptFile => ({ hash, role: "assistant" });
 
 describe("the learned area", () => {
   test("a Branch keeps it as it stood at branch time, swipes never change it, and the chat's run stays beside it", async () => {
@@ -51,7 +51,7 @@ describe("the learned area", () => {
     expect((await h.folds(branch)).reference.violations).toEqual([]);
   });
 
-  test("an entry that doesn't read is left out, a path outside learned/, a bad hash or readers are refused, and a chat that plays no world has none", async () => {
+  test("an entry that doesn't read is left out, an earlier build's readers are read and dropped, a path outside learned/ or a bad hash is refused, and a chat that plays no world has none", async () => {
     const h = new Harness();
     const meta = new ChatAgentMeta(h.host);
     const user = h.host.userId;
@@ -60,8 +60,8 @@ describe("the learned area", () => {
     const kept = { hash, readers: "gm" };
     await h.host.chats.mergeChatMetadata(chat, { [LEDGER_NAMESPACE]: { ...((await h.host.chats.chatMetadata(chat, user))[LEDGER_NAMESPACE] as object), agents: { learned: { "learned/a.md": kept, "notes/b.md": kept, "learned/c.md": { hash: "not a hash", readers: "gm" }, "learned/d.md": { hash, readers: "nobody" }, "learned/e.md": hash } } } }, user);
     const read = agentMetaOf(await h.host.chats.chatMetadata(chat, user));
-    expect(read.learned).toEqual({ "learned/a.md": { hash, readers: "gm" } });
-    expect(agentRefs(await h.host.chats.chatMetadata(chat, user))).toEqual([hash]);
+    expect(read.learned).toEqual({ "learned/a.md": { hash }, "learned/d.md": { hash } });
+    expect(agentRefs(await h.host.chats.chatMetadata(chat, user))).toEqual([hash, hash]);
     await expect(meta.setLearned(chat, user, { "/learned": file(hash) })).rejects.toThrow();
     await expect(meta.setLearned(chat, user, { "notes/d.md": file(hash) })).rejects.toThrow();
     await expect(meta.setLearned(chat, user, { "learned/d.md": file("nope") })).rejects.toThrow();

@@ -2,7 +2,7 @@
 // wrote it, resolved only among what the view may name (`ToolReadView.sees*`), so one the agent's
 // knowledge can't see reads exactly as one that doesn't exist: "No such person here", never a hidden
 // name. What a model may write, tried in order, the first that names exactly one winning:
-// 1. its id, then its id in any case (a secret track's stand-in id under `pov`);
+// 1. its id, then its id in any case;
 // 2. its whole name in any case, spaces aside (a place's also as `placeKey` reads it: no article,
 //    no punctuation);
 // 3. its whole name followed by a mark or a note, as an answer under `everyone` writes it
@@ -21,9 +21,9 @@ export type Resolved = { id: string } | { refused: ToolOutcome };
 
 interface Candidate {
   id: string;
-  /** The ids a model may write for it: its own, and under `pov` a secret track's stand-in. */
+  /** The ids a model may write for it: its own. */
   ids: readonly string[];
-  /** Its names: an entity's or place's name, a track's label (the quest log's under `pov`). */
+  /** Its names: an entity's or place's name, a track's label. */
   names: readonly string[];
   /** How a note lists it: its name as the view gives it, with its id. */
   shown: string;
@@ -101,15 +101,12 @@ export function resolvePlace(view: ToolReadView, said: string): Resolved {
   return resolveAmong(view, said, candidates, TOOL_NOTE.noPlace, true);
 }
 
-/** A track the view may name, by its id (under `pov` the stand-in the quest log knows it by) or its label; resolved to its own id. */
+/** A track the view may name, by its id or its label. */
 export function resolveTrack(view: ToolReadView, said: string): Resolved {
   const candidates: Candidate[] = [];
   for (const [id, t] of Object.entries(view.world.tracks)) {
     const ref = view.track(id);
-    if (!ref) continue;
-    // Under `pov` a track goes by the id and the label the quest log gives it, never its own.
-    const shown = view.knowledge === "pov";
-    candidates.push({ id, ids: shown ? [ref.id] : [id], names: [shown ? ref.name : t.label], shown: `${ref.name} (${ref.id})` });
+    if (ref) candidates.push({ id, ids: [id], names: [t.label], shown: `${ref.name} (${ref.id})` });
   }
   return resolveAmong(view, said, candidates, TOOL_NOTE.noTrack);
 }

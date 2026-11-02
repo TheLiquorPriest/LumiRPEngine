@@ -1,8 +1,8 @@
 // What an agent turn's roles are held to (DESIGN §4.6, §9.2), on Port Alder with scripted models: the
 // director's brief and outline are checked against the turn it was given, as it started and as it
 // ends, and a line that has someone here whom both have elsewhere, gone whom both have here, holding
-// a thing they have at neither, or a thing lying where it lies at neither, is withheld from the
-// narrator and told with its run, never dropped silently, while the turn's own give, put-down and
+// a thing they have at neither, or a thing lying where it lies at neither, is flagged and told with
+// its run, never silently, and kept for the narrator, while the turn's own give, put-down and
 // leaving are told as they happen; the read is given the engine's clock as the Scene tells it, when
 // the message came and now, and a time of day it measures from when the message came lands the clock
 // where the reply says; and every text that tells a model the turn's time tells the Scene's: the
@@ -163,7 +163,7 @@ describe("the director's lines, held to the turn it was given", () => {
     expect(leaving("Marcus nods at Jordan.")).toBe("here");
   });
 
-  test("a line that contradicts it is withheld from the narrator and told with the run, in Diagnostics and the host log; the rest reaches the narrator", async () => {
+  test("a line that contradicts it is flagged and told with the run, in Diagnostics and the host log, and still reaches the narrator with the rest", async () => {
     const rig = new Rig({ shipped: true });
     const chatId = await agentsChat(rig, PROSE);
     const here = "Marcus Delgado leans on the counter beside Jordan.";
@@ -173,15 +173,15 @@ describe("the director's lines, held to the turn it was given", () => {
     expect(seen.some((s) => s.role === "director")).toBe(true);
     expect(told).toContain("OUTLINE-OK Jordan looks out at the harbor.");
     expect(told).toContain("BRIEF-OK The harbor is grey this morning.");
-    for (const line of [here, hands, "Marcus Delgado sits at the counter"]) expect(told).not.toContain(line);
-    const said = `2 withheld (it has someone here whom the engine has elsewhere: "Marcus Delgado sits at the counter beside Jordan."; "${here}"); 1 withheld (it has someone hold or hand over a thing the engine says they don't have: "${hands}")`;
+    for (const line of [here, hands, "Marcus Delgado sits at the counter"]) expect(told).toContain(line);
+    const said = `2 flagged, still in the reply's prompt (it has someone here whom the engine has elsewhere: "Marcus Delgado sits at the counter beside Jordan."; "${here}"); 1 flagged, still in the reply's prompt (it has someone hold or hand over a thing the engine says they don't have: "${hands}")`;
     const records = await rig.rt.diag.records(chatId, rig.host.userId);
     expect(records.some((r) => r.step === ROLE_LABEL.director && r.level === "warn" && (r.reason ?? "").includes(said))).toBe(true);
     expect(rig.host.logs.some((l) => l.includes(`the ${ROLE_LABEL.director} role's run: What the engine didn't take: ${said}`))).toBe(true);
     expect(rig.rt.ledger.errors).toEqual([]);
   });
 
-  test("an agent turn's own give reaches the narrator as the director tells it; a hand that never had the thing is still withheld", async () => {
+  test("an agent turn's own give reaches the narrator as the director tells it, unflagged; a hand that never had the thing is still flagged", async () => {
     const rig = new Rig({ shipped: true });
     const chatId = await agentsChat(rig, PROSE);
     const { state } = await stateOf(rig, chatId);
@@ -198,15 +198,15 @@ describe("the director's lines, held to the turn it was given", () => {
     expect(holderOf((await stateOf(rig, chatId)).state, knife)).toBe(DANNY);
     expect(told).toContain("OUTLINE-OK Jordan turns to Danny.");
     expect(told).toContain(give);
-    expect(told).not.toContain(never);
+    expect(told).toContain(never);
     const records = await rig.rt.diag.records(chatId, rig.host.userId);
-    const director = records.filter((r) => r.step === ROLE_LABEL.director && (r.reason ?? "").includes("withheld"));
-    expect(director.map((r) => r.reason ?? "").join("\n")).toContain(`1 withheld (it has someone hold or hand over a thing the engine says they don't have: "${never}")`);
+    const director = records.filter((r) => r.step === ROLE_LABEL.director && (r.reason ?? "").includes("flagged"));
+    expect(director.map((r) => r.reason ?? "").join("\n")).toContain(`1 flagged, still in the reply's prompt (it has someone hold or hand over a thing the engine says they don't have: "${never}")`);
     expect(director.some((r) => (r.reason ?? "").includes(give))).toBe(false);
     expect(rig.rt.ledger.errors).toEqual([]);
   });
 
-  test("an agent turn in which the player character leaves tells whom they leave behind; someone with them neither as it started nor as it ended is still withheld", async () => {
+  test("an agent turn in which the player character leaves tells whom they leave behind; someone with them neither as it started nor as it ended is still flagged", async () => {
     const rig = new Rig({ shipped: true });
     const chatId = await agentsChat(rig, PROSE);
     const before = await stateOf(rig, chatId);
@@ -223,9 +223,8 @@ describe("the director's lines, held to the turn it was given", () => {
     expect(placeOfEntity(after.state, "pov")).toBe("rusty_anchor");
     for (const who of [DANNY, PRIYA]) expect(together(after.world, placeOfEntity(after.state, "pov"), placeOfEntity(after.state, who))).toBe(false);
     for (const s of [before.state, after.state]) expect(together(after.world, placeOfEntity(s, "pov"), placeOfEntity(s, MARCUS))).toBe(false);
-    for (const line of ["OUTLINE-OK Jordan grabs a jacket.", farewell, nod]) expect(told).toContain(line);
-    expect(told).not.toContain(away);
-    const said = `1 withheld (it has someone here whom the engine has elsewhere: "${away}")`;
+    for (const line of ["OUTLINE-OK Jordan grabs a jacket.", farewell, nod, away]) expect(told).toContain(line);
+    const said = `1 flagged, still in the reply's prompt (it has someone here whom the engine has elsewhere: "${away}")`;
     const records = await rig.rt.diag.records(chatId, rig.host.userId);
     expect(records.some((r) => r.step === ROLE_LABEL.director && r.level === "warn" && (r.reason ?? "").includes(said))).toBe(true);
     expect(rig.rt.ledger.errors).toEqual([]);

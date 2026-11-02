@@ -174,7 +174,7 @@ describe("a chat's messages", () => {
     expect(rig.rt.ledger.preparedOf(waiting)).not.toBeNull();
     rig.body(await rig.send({ type: "lre.hello", chatId: left, viewing: true }, FakeHost.PAGE));
     rig.body(await rig.send({ type: "lre.hello", chatId: shown, viewing: true }, FakeHost.PAGE));
-    expect(rig.rt.trimIdle()).toEqual({ messages: 1, ledgers: 1, views: 1, bridges: 1 });
+    expect(rig.rt.trimIdle()).toMatchObject({ messages: 1, ledgers: 1, views: 1, bridges: 1 });
     const reads = countReads(rig.host);
     for (const chatId of [shown, waiting]) await rig.rt.host.chats.messages(chatId, rig.host.userId);
     expect(reads.count()).toBe(0);
@@ -185,7 +185,7 @@ describe("a chat's messages", () => {
     expect(reads.count()).toBe(1);
     expect(rig.rt.ledger.errors).toEqual([]);
     // The page shows that chat now: the one it left is no one's.
-    expect(rig.rt.trimIdle()).toEqual({ messages: 1, ledgers: 1, views: 1, bridges: 1 });
+    expect(rig.rt.trimIdle()).toMatchObject({ messages: 1, ledgers: 1, views: 1, bridges: 1 });
     await rig.rt.host.chats.messages(left, rig.host.userId);
     expect(reads.count()).toBe(1);
   });
@@ -194,12 +194,41 @@ describe("a chat's messages", () => {
     const rig = new Rig();
     const earlier = await playedChat(rig, 1);
     const latest = await playedChat(rig, 1);
-    expect(rig.rt.trimIdle()).toEqual({ messages: 1, ledgers: 1, views: 1, bridges: 1 });
+    expect(rig.rt.trimIdle()).toMatchObject({ messages: 1, ledgers: 1, views: 1, bridges: 1 });
     const reads = countReads(rig.host);
     await rig.rt.host.chats.messages(latest, rig.host.userId);
     expect(reads.count()).toBe(0);
     await rig.rt.host.chats.messages(earlier, rig.host.userId);
     expect(reads.count()).toBe(1);
+  });
+
+  test("the blob sweep reads every chat without keeping one: the copies kept stay, and the chat read last stays the latest", async () => {
+    const rig = new Rig();
+    const user = rig.host.userId;
+    const earlier = await playedChat(rig, 1);
+    const latest = await playedChat(rig, 1);
+    // More chats than the copies kept: had the sweep kept each it read, the played chats' copies would go.
+    const others = Array.from({ length: 12 }, (_, i) => rig.host.createChat(`Elsewhere (${i}).`));
+    await rig.rt.host.chats.messages(earlier, user);
+    await rig.rt.host.chats.messages(latest, user);
+    // A blob stored, so the sweep reads what references it.
+    await rig.rt.blobs.put(user, "Nothing names this.");
+    const reads = countReads(rig.host);
+    const swept = async (): Promise<number> => {
+      const before = reads.count();
+      expect(await rig.rt.sweep.run(user)).toMatchObject({ ran: true });
+      return reads.count() - before;
+    };
+    const first = await swept();
+    expect(first).toBeGreaterThanOrEqual(others.length);
+    // Nothing the first read was kept, so the next sweep reads the same chats again.
+    expect(await swept()).toBe(first);
+    // The chat read last is still the played one, and the other's copy is still kept: the memory
+    // budget keeps the latest and lets that other go, and a read of the latest reads nothing.
+    expect(rig.rt.trimIdle()).toMatchObject({ messages: 1 });
+    const before = reads.count();
+    await rig.rt.host.chats.messages(latest, user);
+    expect(reads.count()).toBe(before);
   });
 });
 

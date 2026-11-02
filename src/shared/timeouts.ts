@@ -82,7 +82,7 @@ export function hostBound(host: HostLimit, limit: Limit): number {
 
 // ---------------------------------------------------------------- the settings
 
-export const TIMEOUT_KEYS = ["engineRunMs", "preLookupMs", "postReplyMs", "postLookupMs", "guardMs", "skipPlanMs", "requestMs", "caveatsMs", "mindsRunMs", "jobCallMs", "tokenCountMs", "laneStartupMs", "laneHeartbeatMs", "mcpReconnectMs"] as const;
+export const TIMEOUT_KEYS = ["engineRunMs", "preLookupMs", "finalReviewMs", "postReplyMs", "postLookupMs", "guardMs", "skipPlanMs", "requestMs", "caveatsMs", "mindsRunMs", "jobCallMs", "tokenCountMs", "laneStartupMs", "laneHeartbeatMs", "mcpReconnectMs"] as const;
 
 export type TimeoutKey = (typeof TIMEOUT_KEYS)[number];
 
@@ -131,6 +131,15 @@ export const TIMEOUTS: Readonly<Record<TimeoutKey, TimeoutDef>> = {
     minMs: 0,
     zero: "no lookups",
     none: "lookups may start until the run's last third",
+  },
+  finalReviewMs: {
+    label: "Final review",
+    group: "turn",
+    limits: "The main agent's final review of the narrator's prompt, after the engine run makes the turn's sections and before the reply is generated (Settings → Agents → Main agent → Final review).",
+    fires: "The review stops and its edits are dropped: the narrator gets the sections as the engine made them, with a Diagnostics record, or the turn stops with a Retry, as the review's failure setting says.",
+    defaultMs: 2 * MIN,
+    minMs: 1_000,
+    none: "the review takes as long as it needs (its budget still bounds it)",
   },
   postReplyMs: {
     label: "Reading the reply",

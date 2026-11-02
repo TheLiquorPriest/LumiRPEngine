@@ -5,10 +5,11 @@
 //
 // The write path inside a turn (AGENT-LOOP-PLAN §6), for every operation:
 // 1. The role's tier must take it (Settings → Agents → Roles): the GM's edits need the GM tier, a
-//    workspace change the story's, and a role that only reads changes nothing.
+//    workspace change (the pins manifest's among them) the story's, and a role that only reads
+//    changes nothing.
 // 2. The GM's edits a turn's agents stage together stop at the turn's cap (GM edits per turn).
-// 3. It is checked exactly as the outside writer checks it (`checkOp`): read for its shape, held to
-//    the role's knowledge, its change type's mode looked up for the role on its connection, the
+// 3. It is checked exactly as the outside writer checks it (`checkOp`): read for its shape, under the
+//    marked view every turn agent reads (`everyone`), its change type's mode looked up for the role on its connection, the
 //    spawn cap, and validated by the engine, against the head (before the plan) or the planned head
 //    (after it), with what this agent staged before it in the same phase on top: each agent writes
 //    into its own draft, so two agents that spend the same cash both stage, and the commit refuses
@@ -17,9 +18,10 @@
 //    (`TurnDraft.writesOf`, `agents/yields.ts`). A role's write tool stages at once (`stage`, through
 //    `propose`), and its answer says where the change stands: landing when the turn commits, or, its
 //    mode Confirm, waiting for the GM's Apply on the review card. A workspace file's body is stored as
-//    a blob when it is staged, held for the turn until the turn's run ends. A change to the learned
-//    area (a path under `learned/`) is staged the same way, and made in the chat's metadata when the
-//    turn closes (`ChatAgentMeta.setLearned`): no record holds it, and a cancelled turn makes none.
+//    a blob when it is staged, held for the turn until the turn's run ends. A change to a kept file
+//    (a path under `learned/`, the learned area, or `~/`, the global workspace) is staged the same
+//    way, and made in its store when the turn closes (`landKept`): no record holds it, and a
+//    cancelled turn makes none.
 //
 // The turn's roles read its workspace as the turn holds it (`stagedWorkspace`): what they and the runs
 // before them staged is listed and read before it is committed.
@@ -30,7 +32,7 @@
 // key is the hash of the operation, so staging it again is the same operation and stages nothing more.
 
 import { ROLE_IDS, type RoleId, type RoleTier } from "../../shared/agent-roles";
-import type { AgentKnowledge } from "../../shared/agent-tools";
+import type { ToolView } from "../../shared/agent-tools";
 import { WRITE_NOTE } from "../../shared/agent-tools-write";
 import type { ChatId, UserId } from "../../shared/ids";
 import { isRecord } from "../../shared/json";
@@ -44,11 +46,10 @@ import { loreBookIds } from "../book-lore";
 import { latestTexts } from "../gm";
 import { markWording, renderPrompt } from "../prompts";
 import type { Runtime } from "../runtime";
-import type { LearnedFile } from "../chat-agent-meta";
+import type { KeptFile } from "../../shared/stores";
 import { readView, type ToolReader, viewRouting } from "./tools/read-view";
 import { type ChatHead, listWorkspace, type WorkspaceAt } from "./tools/workspace";
-import { PINS_PATH } from "../../shared/stores";
-import { type AgentOp, checkOp, contextOf, isOpRefusal, opKey, opLines, type OpPreview, type OpRefusal, type ToolWriter, withLearned, type WriterCtx, type WriterEnv } from "./tools/writer";
+import { type AgentOp, checkOp, contextOf, isOpRefusal, opKey, opLines, type OpPreview, type OpRefusal, type ToolWriter, withKept, type WriterCtx, type WriterEnv } from "./tools/writer";
 
 /** Where in its turn an operation was staged: before the plan, between the plan and the reply, or after the reply. */
 export type StagePhase = "pre" | "plan" | "post";
@@ -67,15 +68,14 @@ export interface StagedOp {
   mode: "auto" | "confirm";
   /** What it needs of its role's tier. */
   tier: "story" | "gm";
-  knowledge: AgentKnowledge;
   /** The connection its role runs on, which its change type's learned mode is keyed by. */
   connectionId: string | null;
   /** The change in plain words, as the role's knowledge has it. */
   lines: string[];
   /** Its events as staged, on its agent's own draft. */
   events: LedgerEvent[];
-  /** A learned-area change instead, as staged: each path's file after it, null where it is taken out. */
-  learned?: Record<string, LearnedFile | null>;
+  /** A kept file's change instead, as staged: each path's file after it, null where it is taken out. */
+  kept?: Record<string, KeptFile | null>;
   /** Let through at its turn's review gate: it commits without asking again. */
   approved?: true;
   /** The change as the player character may read it, for the review card (a player surface): set when a commit sets it aside. */
@@ -177,15 +177,9 @@ export function commitOrder(ops: readonly StagedOp[]): StagedOp[] {
   return [...ops].sort((a, b) => rank(a.role) - rank(b.role) || a.seq - b.seq);
 }
 
-/**
- * What an operation needs of its role's tier: the GM's edits the GM tier, a workspace change the
- * story's, but the pins manifest's (`.pins.json`, which sets what each agent is shown first and how
- * much of it): writing, moving, pinning or taking it out is the GM tier's, as the GM's own file.
- */
+/** What an operation needs of its role's tier: the GM's edits the GM tier, a workspace change (any file, the pins manifest among them) the story's. */
 export function opTier(op: AgentOp): "story" | "gm" {
-  if (op.kind === "ws_write" || op.kind === "ws_delete" || op.kind === "ws_pin") return op.path === PINS_PATH ? "gm" : "story";
-  if (op.kind === "ws_move") return op.from === PINS_PATH || op.to === PINS_PATH ? "gm" : "story";
-  return "gm";
+  return op.kind.startsWith("ws_") ? "story" : "gm";
 }
 
 // ---------------------------------------------------------------- reading
@@ -194,23 +188,23 @@ export function opTier(op: AgentOp): "story" | "gm" {
 export type TurnBase = () => ChatHead | null;
 
 /**
- * The workspace as a turn holds it while it runs (`WorkspaceAt`): `head`'s files and the learned area
- * (`learned`), with what the turn's agents staged and the turn hasn't committed on top, in the
+ * The workspace as a turn holds it while it runs (`WorkspaceAt`): `head`'s files and the kept files
+ * (`kept`), with what the turn's agents staged and the turn hasn't committed on top, in the
  * commit's order (`commitOrder`), each on what the ones before it left, and who staged each file. A
  * change that waits for the review card (Confirm), or no longer applies, changes nothing here, as it
  * changes nothing when the turn commits. So each run reads the files it and the runs before it staged.
  */
-export function stagedWorkspace(rt: Runtime, draft: TurnDraft, head: ChatHead, learned: Readonly<Record<string, LearnedFile>>): WorkspaceAt {
+export function stagedWorkspace(rt: Runtime, draft: TurnDraft, head: ChatHead, kept: Readonly<Record<string, KeptFile>>): WorkspaceAt {
   const ops = commitOrder(draft.pending()).filter((o) => o.mode === "auto" && o.op.kind.startsWith("ws_"));
-  if (ops.length === 0) return { head, learned, staged: new Map() };
+  if (ops.length === 0) return { head, kept, staged: new Map() };
   const w = new Working(rt.registry, head.world, head.state);
-  let area = learned;
+  let area = kept;
   const staged = new Map<string, { role: string; key: string }>();
   for (const o of ops) {
     const by = { role: o.role, key: o.key };
-    if (o.learned) {
-      area = withLearned(area, o.learned);
-      for (const path of Object.keys(o.learned)) staged.set(path, by);
+    if (o.kept) {
+      area = withKept(area, o.kept);
+      for (const path of Object.keys(o.kept)) staged.set(path, by);
       continue;
     }
     const mark = w.mark();
@@ -220,28 +214,28 @@ export function stagedWorkspace(rt: Runtime, draft: TurnDraft, head: ChatHead, l
     }
     for (const e of o.events) if ("data" in e && isRecord(e.data) && typeof e.data.path === "string") staged.set(e.data.path, by);
   }
-  return { head: { ...head, state: w.state }, learned: area, staged };
+  return { head: { ...head, state: w.state }, kept: area, staged };
 }
 
 /**
- * A turn's reader (C10): the turn's base as `knowledge` reads it, built afresh on each read from the
- * turn's own core and chain, never through the ledger's queue; its workspace, with `staged`, as the
- * turn holds it (`stagedWorkspace`), else the chat's as it stands. A role reading with its own
- * character's knowledge (`own`) has no reader here: the tool layer reads as the player character,
- * everyone or the GM, none of which is one character's own, so each such read is refused.
+ * A turn's reader (C10): the turn's base as `view` reads it (`gm` with `marks` for every role and
+ * the main agent, whatever perspective it works from: nothing left out, every secret marked; plain
+ * `gm` for the turn's own commit), built afresh on each read from the turn's own core and chain,
+ * never through the ledger's queue; its workspace, with `staged`, as the turn holds it
+ * (`stagedWorkspace`), else the chat's as it stands.
  */
-export function turnReader(rt: Runtime, base: TurnBase, env: { userId: UserId; chatId: ChatId; knowledge: AgentKnowledge | null; staged?: (head: ChatHead) => WorkspaceAt }): ToolReader {
+export function turnReader(rt: Runtime, base: TurnBase, env: { userId: UserId; chatId: ChatId; knowledge: ToolView; marks?: boolean; staged?: (head: ChatHead) => WorkspaceAt }): ToolReader {
   return {
     registry: rt.registry,
     async view() {
       const knowledge = env.knowledge;
-      if (knowledge === null) throw new Error("this role reads with its own character's knowledge, which its own context gives it; the tools read as the player character, everyone or the GM");
       const head = base();
       if (!head) throw new Error("this chat's world isn't loaded");
       const settings = await rt.settings.get(env.userId);
       const files = { userId: env.userId, chatId: env.chatId, knowledge };
       return readView({
         knowledge,
+        marks: env.marks,
         registry: rt.registry,
         world: head.world,
         state: head.state,
@@ -271,13 +265,11 @@ export interface TurnWriterEnv {
   role: RoleId;
   agentId: string;
   tier: RoleTier;
-  /** The role's knowledge; null for one that reads with its own character's (`own`), which writes nothing here. */
-  knowledge: AgentKnowledge | null;
   connectionId: string | null;
   phase: StagePhase;
   base: TurnBase;
-  /** The learned area as the turn stands: the chat's, with what the turn committed to it so far. */
-  learned: () => Readonly<Record<string, LearnedFile>>;
+  /** The kept files as the turn stands: the chat's learned area and the global workspace, with what the turn committed to them so far. */
+  kept: () => Readonly<Record<string, KeptFile>>;
   reader: ToolReader;
   /** The turn's GM edits cap (Settings → Agents → Budgets, GM edits per turn). */
   gmOps: number;
@@ -306,21 +298,21 @@ export function turnWriter(rt: Runtime, draft: TurnDraft, env: TurnWriterEnv): T
     const settings = await rt.settings.get(env.userId);
     const note = (id: string, vars: Record<string, string> = {}): string => renderPrompt(id, settings.prompts.texts, vars);
     if (env.signal.aborted) return { refused: true, code: "cancelled", reason: note(WRITE_NOTE.cancelled) };
-    if (env.knowledge === null || env.tier === "read") return { refused: true, code: "no_writer", reason: note(WRITE_NOTE.noWriter) };
+    if (env.tier === "read") return { refused: true, code: "no_writer", reason: note(WRITE_NOTE.noWriter) };
     const head = env.base();
     if (!head) return { refused: true, code: "no_world", reason: note(WRITE_NOTE.noWorld) };
     const learning = await rt.settings.learningOf(env.userId);
-    return { ctx: contextOf(rt, { knowledge: env.knowledge }, head, settings, learning, env.learned(), await rt.activeConnectionId(env.userId)), settings, learning };
+    return { ctx: contextOf(rt, { knowledge: "everyone" }, head, settings, learning, env.kept(), await rt.activeConnectionId(env.userId)), settings, learning };
   };
-  /** One operation checked for this agent on `state`: its role's tier (the GM tier takes every change, the story's all but the GM's edits), the turn's GM edits cap, then the outside writer's checks, on the learned area with what it staged there before in this phase. */
-  const check = (c: { ctx: WriterCtx; settings: UserSettings }, state: Readonly<WorldState>, op: AgentOp, knowledge: AgentKnowledge) => {
+  /** One operation checked for this agent on `state`: its role's tier (the GM tier takes every change, the story's all but the GM's edits), the turn's GM edits cap, then the outside writer's checks, on the kept files with what it staged there before in this phase. */
+  const check = (c: { ctx: WriterCtx; settings: UserSettings }, state: Readonly<WorldState>, op: AgentOp) => {
     const needs = opTier(op);
     const key = keyOf(op);
     if (!(env.tier === "gm" || (env.tier === "story" && needs === "story"))) return refusalOf("not_granted", c.ctx.view.text(WRITE_NOTE.notGranted, { tier: env.tier, needs }), key);
     if (needs === "gm" && draft.gmStaged() >= env.gmOps) return refusalOf("gm_cap", c.ctx.view.text(WRITE_NOTE.gmCap, { count: String(draft.gmStaged()) }), key);
-    const writer: WriterEnv = { userId: env.userId, chatId: env.chatId, knowledge, reader: env.reader, agent: { role: env.role, id: env.agentId }, signal: env.signal, connectionId: env.connectionId };
-    const learned = draft.own(env.agentId, env.phase).reduce((files, o) => (o.learned ? withLearned(files, o.learned) : files), c.ctx.learned);
-    return checkOp(rt, c.ctx, writer, state, learned, op);
+    const writer: WriterEnv = { userId: env.userId, chatId: env.chatId, knowledge: "everyone", reader: env.reader, agent: { role: env.role, id: env.agentId }, signal: env.signal, connectionId: env.connectionId };
+    const kept = draft.own(env.agentId, env.phase).reduce((files, o) => (o.kept ? withKept(files, o.kept) : files), c.ctx.kept);
+    return checkOp(rt, c.ctx, writer, state, kept, op);
   };
   /** Why nothing can be staged now (`context`), for one operation, kept for the run's answer. */
   const unstaged = (c: OpRefusal, op: AgentOp): OpRefusal => {
@@ -334,9 +326,8 @@ export function turnWriter(rt: Runtime, draft: TurnDraft, env: TurnWriterEnv): T
     const key = keyOf(op);
     const again = key === undefined ? undefined : draft.own(env.agentId, env.phase).find((o) => o.key === key);
     if (again) return { key: again.key, changeType: again.changeType, mode: again.mode, lines: again.lines };
-    const knowledge = env.knowledge as AgentKnowledge;
     const state = ownState(rt, draft, env, c.ctx.head);
-    const checked = check(c, state, op, knowledge);
+    const checked = check(c, state, op);
     if (isOpRefusal(checked)) {
       draft.refuse(env, checked);
       return checked;
@@ -345,21 +336,20 @@ export function turnWriter(rt: Runtime, draft: TurnDraft, env: TurnWriterEnv): T
     if (checked.p.body) await rt.blobs.put(env.userId, checked.p.body.text, env.holder);
     const after = new Working(rt.registry, c.ctx.head.world, state);
     after.applyAll(checked.events);
-    const lines = opLines(rt, c.ctx, knowledge, checked.type, after.state, checked.shown);
-    draft.stage({ phase: env.phase, role: env.role, agentId: env.agentId, key: checked.p.key, op, changeType: checked.type, mode: checked.mode, tier: opTier(op), knowledge, connectionId: env.connectionId, lines, events: checked.events, ...(checked.p.learned ? { learned: checked.p.learned.changes } : {}) });
+    const lines = opLines(rt, c.ctx, "everyone", checked.type, after.state, checked.shown);
+    draft.stage({ phase: env.phase, role: env.role, agentId: env.agentId, key: checked.p.key, op, changeType: checked.type, mode: checked.mode, tier: opTier(op), connectionId: env.connectionId, lines, events: checked.events, ...(checked.p.kept ? { kept: checked.p.kept.changes } : {}) });
     return { key: checked.p.key, changeType: checked.type, mode: checked.mode, lines };
   };
   return {
     async dryRun(op) {
       const c = await context();
       if (isOpRefusal(c)) return c;
-      const knowledge = env.knowledge as AgentKnowledge;
       const state = ownState(rt, draft, env, c.ctx.head);
-      const checked = check(c, state, op, knowledge);
+      const checked = check(c, state, op);
       if (isOpRefusal(checked)) return checked;
       const after = new Working(rt.registry, c.ctx.head.world, state);
       after.applyAll(checked.events);
-      return { key: checked.p.key, changeType: checked.type, mode: checked.mode, lines: opLines(rt, c.ctx, knowledge, checked.type, after.state, checked.shown) };
+      return { key: checked.p.key, changeType: checked.type, mode: checked.mode, lines: opLines(rt, c.ctx, "everyone", checked.type, after.state, checked.shown) };
     },
     async apply(ops) {
       const c = await context();
@@ -397,19 +387,19 @@ function keyOf(op: AgentOp): string | undefined {
 
 /** What a commit made of a phase's operations, in the commit's order. */
 export interface CommitOutcome {
-  /** Each applied, with the events it added (none for a learned-area change). */
+  /** Each applied, with the events it added (none for a kept file's change). */
   committed: { op: StagedOp; events: LedgerEvent[] }[];
   /** Each under Confirm, for the turn's review card. */
   confirm: StagedOp[];
   /** Each that no longer holds, with why. */
   refused: { op: StagedOp; refusal: OpRefusal }[];
-  /** The learned area's changes it committed, each path's file after them, null where taken out: made when the turn closes. */
-  learned: Record<string, LearnedFile | null>;
+  /** The kept files' changes it committed, each path's file after them, null where taken out: made when the turn closes. */
+  kept: Record<string, KeptFile | null>;
 }
 
-/** What a turn's commit checks its operations with: each role's writer context, by the role's knowledge, against the turn's base and learned area. */
+/** What a turn's commit checks its operations with: the roles' writer context, against the turn's base and kept files. */
 export interface CommitCtx {
-  ctx(knowledge: AgentKnowledge): WriterCtx;
+  ctx(): WriterCtx;
   reader: ToolReader;
   userId: UserId;
   chatId: ChatId;
@@ -424,26 +414,25 @@ export interface CommitCtx {
  * plan and the read call it inside the core's own steps.
  */
 export function commitStaged(rt: Runtime, commit: CommitCtx, ops: readonly StagedOp[], w: Working): CommitOutcome {
-  const out: CommitOutcome = { committed: [], confirm: [], refused: [], learned: {} };
+  const out: CommitOutcome = { committed: [], confirm: [], refused: [], kept: {} };
   for (const op of ops) {
-    const env: WriterEnv = { userId: commit.userId, chatId: commit.chatId, knowledge: op.knowledge, reader: commit.reader, agent: { role: op.role, id: op.agentId }, signal: commit.signal, connectionId: op.connectionId };
-    const ctx = commit.ctx(op.knowledge);
-    const checked = checkOp(rt, ctx, env, w.state, withLearned(ctx.learned, out.learned), op.op);
+    const env: WriterEnv = { userId: commit.userId, chatId: commit.chatId, knowledge: "everyone", reader: commit.reader, agent: { role: op.role, id: op.agentId }, signal: commit.signal, connectionId: op.connectionId };
+    const ctx = commit.ctx();
+    const checked = checkOp(rt, ctx, env, w.state, withKept(ctx.kept, out.kept), op.op);
     if (isOpRefusal(checked)) {
       out.refused.push({ op, refusal: checked });
       continue;
     }
     if (checked.mode === "confirm" && op.approved !== true) {
-      // The card is the player's, whatever the role read with: its lines are the player character's.
-      const pov = commit.ctx("pov");
-      const after = new Working(rt.registry, pov.head.world, w.state);
+      // The card is the player's: its lines are the player character's.
+      const after = new Working(rt.registry, ctx.head.world, w.state);
       after.applyAll(checked.events);
-      out.confirm.push({ ...op, mode: "confirm", events: checked.events, cardLines: opLines(rt, pov, "pov", checked.type, after.state, checked.shown) });
+      out.confirm.push({ ...op, mode: "confirm", events: checked.events, cardLines: opLines(rt, ctx, "player", checked.type, after.state, checked.shown) });
       continue;
     }
-    // A learned-area change writes no event: it is made in the chat's metadata when the turn closes.
-    if (checked.p.learned) {
-      Object.assign(out.learned, checked.p.learned.changes);
+    // A kept file's change writes no event: it is made in its store when the turn closes.
+    if (checked.p.kept) {
+      Object.assign(out.kept, checked.p.kept.changes);
       out.committed.push({ op, events: [] });
       continue;
     }
@@ -452,7 +441,7 @@ export function commitStaged(rt: Runtime, commit: CommitCtx, ops: readonly Stage
     const kept = w.applyAll(checked.events);
     if (kept.length < checked.events.length) {
       w.restore(mark);
-      out.refused.push({ op, refusal: refusalOf("write_refused", commit.ctx(op.knowledge).view.text(WRITE_NOTE.stale), op.key) });
+      out.refused.push({ op, refusal: refusalOf("write_refused", ctx.view.text(WRITE_NOTE.stale), op.key) });
       continue;
     }
     if (!checked.events.some((e) => e.group !== undefined)) w.unite(from, `agent:${op.key}`);

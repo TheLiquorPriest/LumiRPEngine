@@ -1,29 +1,30 @@
 // The GM assistant (DESIGN §4.5; AGENT-LOOP-PLAN §9-§11; INC1-SPEC R6a, C8): GM → Assistant, the game
 // master's chat with the GM agent about a chat's world, and GM → Workspace's reads and writes.
 //
-// The thread lives in the chat's metadata (`ChatAgentMeta`, `lumi_rp_engine.agents.assistant`): each
-// message and each proposal is a blob, so a Branch keeps the thread as it stood and the sweep keeps
-// what any chat's thread names. Each send starts an agent (`startAgent`) on Settings → Agents →
-// Assistant: the read and GM tiers of the tool layer (`toolsFor`), reading the world with the
-// assistant's knowledge, and a writer whose dry runs the answer collects as its proposal; the thread's
-// latest exchanges go with it, as many as History tokens holds and only those written under the same
-// knowledge as the assistant's now or a narrower one, the others left out with a note saying how
-// many. Each message and proposal keeps the knowledge it was written under. The answer runs in the
-// background: the request answers at once, and each change to the thread is pushed
-// (`lre.assistant.update`) to the pages that asked about that chat's assistant, GM data shown only
-// behind the GM gate.
+// The assistant works outside the story and its world: it is no one in it, and it reads everything,
+// every secret included, with the GM's view of the tool layer. The thread lives in the chat's
+// metadata (`ChatAgentMeta`, `lumi_rp_engine.agents.assistant`): each message and each proposal is a
+// blob, so a Branch keeps the thread as it stood and the sweep keeps what any chat's thread names.
+// Each send starts an agent (`startAgent`) on Settings → Agents → Assistant: the read and GM tiers of
+// the tool layer (`toolsFor`), and a writer whose dry runs the answer collects as its proposal; its
+// system prompt, then its system files (AGENTS.md and roles/assistant.md, the global workspace's then
+// the chat's); and the thread's latest exchanges, as many as History tokens holds, the others left
+// out with a note saying how many. The knowledge an earlier build kept on a message or a proposal is
+// read and ignored. The answer runs in the background: the request answers at once, and each change
+// to the thread is pushed (`lre.assistant.update`) to the pages that asked about that chat's
+// assistant, GM data shown only behind the GM gate.
 //
 // A proposal waits for Apply (all of it, or a pick) or No; with Apply set to at once it applies as
 // soon as its answer is in, unless one of its changes is of a type that asks first. Applied, it is
-// one GM edit with its Undo chip, held while the engine runs a turn (as every write made then is),
-// written with the wider of the knowledge it was proposed under and the assistant's then. Its write
-// runs outside the thread's lock, so Cancel and the rest of the thread never wait on it. Cancel
-// stops the answer; its limits are the assistant's budget over every agent's, the loop detector the
-// runtime's. Each call is a Diagnostics agent record (a connection's refusal of native tools among
-// them), and while it answers the chat's activity line shows the assistant's label and nothing else.
+// one GM edit with its Undo chip, held while the engine runs a turn (as every write made then is).
+// Its write runs outside the thread's lock, so Cancel and the rest of the thread never wait on it.
+// Cancel stops the answer; its limits are the assistant's budget over every agent's, the loop
+// detector the runtime's. Each call is a Diagnostics agent record (a connection's refusal of native
+// tools among them), and while it answers the chat's activity line shows the assistant's label and
+// nothing else.
 
 import { AGENT_ROLES, type AgentSettings, type AssistantApply, assistantBudget } from "../../shared/agent-settings";
-import { type AgentKnowledge, isAgentKnowledge, knowledgeWithin, widerKnowledge } from "../../shared/agent-tools";
+
 import { STEP_LABEL } from "../../shared/diagnostics";
 import type { ChatId, UserId } from "../../shared/ids";
 import type { JsonObject, JsonValue } from "../../shared/json";
@@ -45,10 +46,11 @@ import { AGENT_CHANGE_TYPES } from "../../shared/settings";
 import { nounFor } from "../../shared/words";
 import { askRollback, sessionView } from "./compaction";
 import { type AgentHandle, type AgentHistoryMessage, type AgentReply, type AgentTool, type AgentTranscript, startAgent } from "./runtime";
+import { systemInstructions, withInstructions } from "./system-files";
 import { outsideReader } from "./tools/read-view";
 import { type ToolTier, toolsFor } from "./tools/registry";
 import { listWorkspace, readWorkspaceFile } from "./tools/workspace";
-import { type AgentOp, batchKey, GM_ROLE, isLearnedOp, type OpPreview, outsideWriter, type ToolWriter } from "./tools/writer";
+import { type AgentOp, batchKey, GM_ROLE, isKeptOp, type OpPreview, outsideWriter, type ToolWriter } from "./tools/writer";
 import { recordAgentCalls } from "./transcripts";
 import { emptyUsage } from "./usage";
 
@@ -78,10 +80,9 @@ export class AssistantError extends Error {
   }
 }
 
-/** A message as its blob holds it, with the knowledge it was written under (absent: one kept before that was, taken as the GM's). */
+/** A message as its blob holds it. */
 interface StoredMessage extends AssistantMessage {
   v: 1;
-  knowledge?: AgentKnowledge;
 }
 
 /** A change of a proposal as its blob holds it: the view's, with the operation Apply sends. */
@@ -89,12 +90,11 @@ interface StoredOp extends AssistantProposalOp {
   op: AgentOp;
 }
 
-/** A proposal as its blob holds it: the view's, with each change's operation, the agent that proposed it and the knowledge it was proposed under (absent: taken as the GM's). */
+/** A proposal as its blob holds it: the view's, with each change's operation and the agent that proposed it. */
 interface StoredProposal extends Omit<AssistantProposal, "ops"> {
   v: 1;
   agentId: string;
   ops: StoredOp[];
-  knowledge?: AgentKnowledge;
   /** The connection its change types' modes and learning are keyed by: the one it was proposed on. */
   connection?: string;
   /** While its write is held for a turn: that write's key (`batchKey`), by which its Undo chip is named once it lands. */
@@ -141,8 +141,6 @@ interface Ask {
   /** The changes its edit tools' dry runs checked, by operation key, each once. */
   collected: Map<string, { op: AgentOp; preview: OpPreview }>;
   apply: AssistantApply;
-  /** The knowledge it reads the world with, kept on its message and its proposal. */
-  knowledge: AgentKnowledge;
   /** The connection's id for its records, or "active" for the user's default. */
   connection: string;
   /** The connection its change types' modes and learning are keyed by: its own, else the user's default's id. */
@@ -158,17 +156,14 @@ const newId = (prefix: string): string => `${prefix}_${crypto.randomUUID().slice
 /**
  * What of the thread goes with a new message (Settings → Agents → Assistant, History tokens): its
  * exchanges, a message of yours with the answer to it, the newest first, as many as fit in `tokens`
- * by the engine's token estimate, and only those written under `knowledge` or a narrower one (a
- * message kept before its knowledge was, as the GM's); one whose answer said nothing (cancelled
- * before a word) goes with none. `left`: how many of the thread's messages aren't sent, which the
- * note counts.
+ * by the engine's token estimate; one whose answer said nothing (cancelled before a word) goes with
+ * none. `left`: how many of the thread's messages aren't sent, which the note counts.
  */
-export function historyOf(messages: readonly (AssistantMessage & { knowledge?: AgentKnowledge })[], tokens: number, knowledge: AgentKnowledge): { history: AgentHistoryMessage[]; left: number } {
-  const readable = (m: { knowledge?: AgentKnowledge }): boolean => knowledgeWithin(m.knowledge ?? "gm", knowledge);
+export function historyOf(messages: readonly AssistantMessage[], tokens: number): { history: AgentHistoryMessage[]; left: number } {
   const exchanges: { user: string; answer: string }[] = [];
   for (const [at, m] of messages.entries()) {
     const next = messages[at + 1];
-    if (m.role === "user" && next?.role === "assistant" && next.text.trim() !== "" && readable(m) && readable(next)) exchanges.push({ user: m.text, answer: next.text });
+    if (m.role === "user" && next?.role === "assistant" && next.text.trim() !== "") exchanges.push({ user: m.text, answer: next.text });
   }
   const kept: typeof exchanges = [];
   let used = 0;
@@ -197,28 +192,32 @@ function traceOf(t: AgentTranscript): TraceRow[] {
   return rows;
 }
 
+/** A message as its blob holds it, the knowledge an earlier build kept on it left out; null when it isn't one. */
 function storedMessageOf(raw: JsonValue | null): StoredMessage | null {
   if (!isRecord(raw) || raw.v !== 1 || typeof raw.id !== "string" || (raw.role !== "user" && raw.role !== "assistant") || typeof raw.text !== "string" || typeof raw.at !== "number") return null;
-  return raw.knowledge === undefined || isAgentKnowledge(raw.knowledge) ? (raw as unknown as StoredMessage) : null;
+  const { knowledge: _old, ...message } = raw;
+  return message as unknown as StoredMessage;
 }
 
+/** A proposal as its blob holds it, the knowledge an earlier build kept on it left out; null when it isn't one. */
 function storedProposalOf(raw: JsonValue | null): StoredProposal | null {
   if (!isRecord(raw) || raw.v !== 1 || typeof raw.id !== "string" || typeof raw.messageId !== "string" || typeof raw.agentId !== "string" || (raw.status !== "open" && raw.status !== "applied" && raw.status !== "rejected") || !Array.isArray(raw.ops)) return null;
-  if ((raw.connection !== undefined && typeof raw.connection !== "string") || (raw.batch !== undefined && typeof raw.batch !== "string") || (raw.knowledge !== undefined && !isAgentKnowledge(raw.knowledge))) return null;
+  if ((raw.connection !== undefined && typeof raw.connection !== "string") || (raw.batch !== undefined && typeof raw.batch !== "string")) return null;
   if (raw.again !== undefined && !(Array.isArray(raw.again) && raw.again.every((k) => typeof k === "string"))) return null;
-  return raw.ops.every((o) => isRecord(o) && typeof o.key === "string" && isRecord(o.op)) ? (raw as unknown as StoredProposal) : null;
+  const { knowledge: _old, ...proposal } = raw;
+  return raw.ops.every((o) => isRecord(o) && typeof o.key === "string" && isRecord(o.op)) ? (proposal as unknown as StoredProposal) : null;
 }
 
 /**
  * A proposal whose held write settled: applied, named its Undo chip when it has one; or, refused,
  * each change that write held saying why (`WRITE_REFUSED`), and open again unless a change landed
- * without it: a learned-area change, made at Apply, stands applied, and the proposal with it, whose
+ * without it: a kept file's change, made at Apply, stands applied, and the proposal with it, whose
  * refused changes a later Apply may send again (`appliable`).
  */
 function settledProposal(p: StoredProposal, how: Settled): StoredProposal {
   const { pending: _held, batch: _batch, again: _again, ...rest } = p;
   if (!("refused" in how)) return { ...rest, status: "applied", ...(how.chipId !== null ? { chipId: how.chipId } : {}) };
-  const ops = rest.ops.map(({ applied, ...o }): StoredOp => (applied && isLearnedOp(o.op) ? { ...o, applied } : applied ? { ...o, refused: { code: WRITE_REFUSED, reason: how.refused } } : o));
+  const ops = rest.ops.map(({ applied, ...o }): StoredOp => (applied && isKeptOp(o.op) ? { ...o, applied } : applied ? { ...o, refused: { code: WRITE_REFUSED, reason: how.refused } } : o));
   return { ...rest, status: ops.some((o) => o.applied) ? "applied" : "open", ops };
 }
 
@@ -361,22 +360,16 @@ export class Assistant {
     }
   }
 
-  /** The chat's thread as its metadata names it; a blob that is gone or doesn't read is left out, and said in the log. */
+  /** The chat's thread as its metadata names it, its blobs read together; a blob that is gone or doesn't read is left out, and said in the log. */
   private async load(chatId: ChatId, userId: UserId): Promise<Pick<Thread, "messages" | "proposals">> {
     const { assistant } = await this.rt.chatAgents.get(chatId, userId);
-    const messages: Kept<StoredMessage>[] = [];
-    const proposals: Kept<StoredProposal>[] = [];
-    let lost = 0;
-    for (const hash of assistant.messages) {
-      const value = storedMessageOf(await this.rt.blobs.getJson(userId, hash));
-      if (value) messages.push({ hash, value });
-      else lost++;
-    }
-    for (const hash of Object.values(assistant.proposals)) {
-      const value = storedProposalOf(await this.rt.blobs.getJson(userId, hash));
-      if (value) proposals.push({ hash, value });
-      else lost++;
-    }
+    const [readMessages, readProposals] = await Promise.all([
+      Promise.all(assistant.messages.map(async (hash) => ({ hash, value: storedMessageOf(await this.rt.blobs.getJson(userId, hash)) }))),
+      Promise.all(Object.values(assistant.proposals).map(async (hash) => ({ hash, value: storedProposalOf(await this.rt.blobs.getJson(userId, hash)) }))),
+    ]);
+    const messages = readMessages.flatMap(({ hash, value }): Kept<StoredMessage>[] => (value ? [{ hash, value }] : []));
+    const proposals = readProposals.flatMap(({ hash, value }): Kept<StoredProposal>[] => (value ? [{ hash, value }] : []));
+    const lost = readMessages.length - messages.length + (readProposals.length - proposals.length);
     if (lost > 0) this.rt.host.log("warn", `[LumiRPEngine] chat ${chatId}: ${lost} of the GM assistant thread's messages and proposals couldn't be read, so they're left out`, userId);
     return { messages, proposals };
   }
@@ -407,9 +400,9 @@ export class Assistant {
   private viewOf(t: Thread): AssistantView {
     const run = t.run;
     const running: AssistantRun | null = run ? { agentId: run.agentId, label: run.label, tokens: { ...run.tokens }, startedAt: run.startedAt } : null;
-    // Less the blobs' format and the knowledge each was written under; a proposal also less its agent and its operations, which only Apply sends.
-    const thread = t.messages.map(({ value: { v: _v, knowledge: _knowledge, ...m } }): AssistantMessage => m);
-    const proposals = t.proposals.map(({ value: { v: _v, agentId: _agent, knowledge: _knowledge, connection: _connection, batch: _batch, again: _again, ops, ...p } }): AssistantProposal => ({ ...p, ops: ops.map(({ op: _op, ...o }) => o) }));
+    // Less the blobs' format; a proposal also less its agent and its operations, which only Apply sends.
+    const thread = t.messages.map(({ value: { v: _v, ...m } }): AssistantMessage => m);
+    const proposals = t.proposals.map(({ value: { v: _v, agentId: _agent, connection: _connection, batch: _batch, again: _again, ops, ...p } }): AssistantProposal => ({ ...p, ops: ops.map(({ op: _op, ...o }) => o) }));
     return { thread, running, proposals };
   }
 
@@ -423,7 +416,7 @@ export class Assistant {
 
   /**
    * Adds your message and starts the agent on it (C8 `send`): one answer at a time per chat. The
-   * agent reads the world as it stands now, with the assistant's knowledge; its edit tools only check
+   * agent reads the world as it stands now, all of it; its edit tools only check
    * a change (the writer here collects what they checked) until you apply it.
    */
   private async send(t: Thread, text: string): Promise<AssistantView> {
@@ -438,12 +431,16 @@ export class Assistant {
     const own = agents.assistant;
     const texts: PromptTexts = settings.prompts.texts;
     const vars = { world: world.name, pov: state.entities[world.pov]?.name ?? world.pov };
-    const system = [renderPrompt(GM_TEXT.system, texts, { ...vars, knowledge: renderPrompt(GM_TEXT.knowledge[own.knowledge], texts, vars) }), renderPrompt(GM_TEXT.instructions, texts, vars)].filter((s) => s.trim() !== "").join("\n\n");
-    // The thread's latest exchanges written with as much as it knows now or less go with it; when any are left out, the first message sent says how many.
+    // One reader for the whole answer, with the GM's view of everything: each tool call reads the chat's head afresh through it, so a turn that lands meanwhile is seen.
+    const reads = { userId, chatId, knowledge: "gm" as const };
+    const reader = outsideReader(this.rt, reads);
+    // Its system prompt and instructions, then its system files: AGENTS.md and roles/assistant.md, the global workspace's then the chat's (DESIGN §4.4).
+    const prompt = [renderPrompt(GM_TEXT.system, texts, vars), renderPrompt(GM_TEXT.instructions, texts, vars)].filter((s) => s.trim() !== "").join("\n\n");
+    const system = withInstructions(prompt, await systemInstructions(await reader.view(), { role: ASSISTANT_ROLE, tokens: agents.systemTokens, texts }));
+    // The thread's latest exchanges go with it; when any are left out, the first message sent says how many.
     const { history, left } = historyOf(
       t.messages.map((m) => m.value),
       own.historyTokens,
-      own.knowledge,
     );
     const note = left > 0 ? renderPrompt(GM_TEXT.historyNote, texts, { ...vars, count: String(left), messages: nounFor(left, "message", "messages") }).trim() : "";
     const first = history[0];
@@ -452,9 +449,7 @@ export class Assistant {
     const run: Run = { id: newId("run"), agentId: "", label: RUN_LABEL, startedAt: Date.now(), tokens: { in: 0, out: 0 }, controller: new AbortController(), handle: null };
     // The runtime names each tool run's agent itself; the writer's agent is named once the agent starts.
     const agent = { role: ASSISTANT_ROLE, id: "" };
-    // One reader for the whole answer: each tool call reads the chat's head afresh through it, so a turn that lands meanwhile is seen.
-    const reads = { userId, chatId, knowledge: own.knowledge };
-    const base = { ...reads, reader: outsideReader(this.rt, reads), agent, signal: run.controller.signal };
+    const base = { ...reads, reader, agent, signal: run.controller.signal };
     // The connection its change types' modes and learning are keyed by (role × connection × type): its own, else your default's.
     const modes = own.connectionId ?? (await this.rt.activeConnectionId(userId));
     const real = outsideWriter(this.rt, { ...base, connectionId: modes });
@@ -475,9 +470,9 @@ export class Assistant {
     run.handle = handle;
     run.agentId = handle.id;
     agent.id = handle.id;
-    await this.save(t, { messages: [{ v: 1, id: newId("m"), role: "user", text, at: Date.now(), knowledge: own.knowledge }] });
+    await this.save(t, { messages: [{ v: 1, id: newId("m"), role: "user", text, at: Date.now() }] });
     t.run = run;
-    this.answer(t, run, { handle, text: sent, collected, apply: own.apply, knowledge: own.knowledge, connection: own.connectionId ?? ACTIVE_CONNECTION, modes, model: own.model });
+    this.answer(t, run, { handle, text: sent, collected, apply: own.apply, connection: own.connectionId ?? ACTIVE_CONNECTION, modes, model: own.model });
     return this.viewOf(t);
   }
 
@@ -532,10 +527,9 @@ export class Assistant {
             usage: { in: reply.usage.in, out: reply.usage.out, cached: reply.usage.cachedIn, ...(reply.usage.cacheWrite !== undefined ? { written: reply.usage.cacheWrite } : {}) },
             status: reply.status,
             ...(reply.status !== "answered" && reply.reason ? { reason: reply.reason } : {}),
-            knowledge: ask.knowledge,
           };
           const ops = [...ask.collected.values()].map(({ op, preview }): StoredOp => ({ key: preview.key, changeType: preview.changeType, lines: [...preview.lines], mode: preview.mode, op }));
-          const proposal: StoredProposal | null = reply.status !== "cancelled" && ops.length > 0 ? { v: 1, id: newId("p"), messageId: answer.id, agentId: run.agentId, status: "open", ops, knowledge: ask.knowledge, connection: ask.modes } : null;
+          const proposal: StoredProposal | null = reply.status !== "cancelled" && ops.length > 0 ? { v: 1, id: newId("p"), messageId: answer.id, agentId: run.agentId, status: "open", ops, connection: ask.modes } : null;
           await this.save(u, { messages: [answer], proposals: proposal ? [proposal] : [] });
           // An answer stopped short leaves its changes for you to look at; one that asks first waits for Apply.
           return proposal && ask.apply === "at_once" && reply.status === "answered" && ops.every((o) => o.mode !== "confirm") ? proposal.id : null;
@@ -583,14 +577,14 @@ export class Assistant {
   /**
    * An applied proposal's Undo, wherever it was pressed (its card, the chat, GM → Edits): the
    * proposal says it was undone, and each change the Undo took back says so and counts as undone
-   * toward its type's learning. A change it made in the learned area is no chip's to take back: it
+   * toward its type's learning. A change it made to a kept file is no chip's to take back: it
    * stays applied, and counts as it did. A failure here is logged: the Undo stands.
    */
   async undone(chatId: ChatId, userId: UserId, chipId: string): Promise<void> {
     await this.withThread(chatId, userId, async (t) => {
       const p = t.proposals.find(({ value: q }) => q.status === "applied" && q.chipId === chipId && q.undone !== true)?.value;
       if (!p) return;
-      const ops = p.ops.map((o): StoredOp => (o.applied && !isLearnedOp(o.op) ? { ...o, undone: true } : o));
+      const ops = p.ops.map((o): StoredOp => (o.applied && !isKeptOp(o.op) ? { ...o, undone: true } : o));
       await this.save(t, { proposals: [{ ...p, ops, undone: true }] });
       this.push(t);
       await this.learn(userId, await this.connectionOf(userId, p), ops.filter((o) => o.undone).map((o) => ({ changeType: o.changeType, outcome: "undone" as const })));
@@ -602,7 +596,7 @@ export class Assistant {
    * them. A proposal applied while a turn ran is named its write's Undo chip once it lands, read here
    * from the reply it landed on (none when the turn had already made it so), and counts toward what
    * the assistant learns then; one whose write the turn's close refused waits for Apply or No again,
-   * each change it held saying why, and counts nothing, unless it made a learned-area change too:
+   * each change it held saying why, and counts nothing, unless it made a kept file's change too:
    * that one landed at Apply, so the proposal stays applied and counts what landed. A write that
    * settles before its Apply took in its own result is kept for that Apply to settle (`early`). The
    * thread is pushed after.
@@ -657,10 +651,9 @@ export class Assistant {
    * or an applied one's whose write a turn refused) or those of them `keys` picks, as one GM edit,
    * held while the engine runs a turn: what landed is applied, with the edit's chip for its Undo
    * (none while it is held); what the head refused says why. A later Apply skips what landed
-   * already, and counts only what it sent. A proposal none of whose changes landed stays open. It is
-   * written with the wider of the knowledge it was proposed under and the assistant's now, so a file
-   * it writes is read only with as much as went into it. The write runs outside the thread's lock:
-   * Cancel, a new message and the rest of the thread never wait on it.
+   * already, and counts only what it sent. A proposal none of whose changes landed stays open. The
+   * write runs outside the thread's lock: Cancel, a new message and the rest of the thread never
+   * wait on it.
    */
   private async applyProposal(chatId: ChatId, userId: UserId, id: string, keys: readonly string[] | undefined): Promise<void> {
     const thread = `${userId}\u0000${chatId}`;
@@ -679,7 +672,7 @@ export class Assistant {
     const sent = new Set(begun.picked.map((o) => o.key));
     try {
       const own = (await this.rt.settings.get(userId)).agents.assistant;
-      const base = { userId, chatId, knowledge: widerKnowledge(begun.p.knowledge ?? "gm", own.knowledge) };
+      const base = { userId, chatId, knowledge: "gm" as const };
       const connection = begun.p.connection ?? own.connectionId ?? (await this.rt.activeConnectionId(userId));
       const writer = outsideWriter(this.rt, { ...base, reader: outsideReader(this.rt, base), agent: { role: ASSISTANT_ROLE, id: begun.p.agentId }, signal: new AbortController().signal, connectionId: connection });
       // The writer pushes the chat's state once the edit lands or is held, its Undo chip among it.
@@ -720,21 +713,16 @@ export class Assistant {
 }
 
 /**
- * GM → Workspace (C8 `lre.workspace`): the chat's workspace at its head and its learned area, read
- * with the GM's knowledge, and your own changes to it, each one GM edit through the writer the
- * agents' tools use, with its Undo chip, held while the engine runs a turn (a learned file's at
- * once, in the chat's metadata). A file you write is yours alone until you say who else may read it
- * (`readers`, on the write or by itself). The main agent's session is there too, whose latest
- * compaction you may roll back (`compaction.ts`).
+ * GM → Workspace (C8 `lre.workspace`): the chat's workspace at its head, its learned area and the
+ * user's global workspace (`~/`), and your own changes to them, each one GM edit through the writer
+ * the agents' tools use, with its Undo chip, held while the engine runs a turn (a kept file's at
+ * once, in its store). Every file is every agent's to read. The main agent's session is there too,
+ * whose latest compaction you may roll back (`compaction.ts`).
  */
 export async function workspaceRequest(rt: Runtime, r: WorkspaceRequest, userId: UserId): Promise<ResultBodies["lre.workspace"]> {
   const base = { userId, chatId: r.chatId, knowledge: "gm" as const };
   const text = (v: unknown, what: string): string => {
     if (typeof v !== "string") throw new AssistantError("bad_request", `Give the ${what}.`);
-    return v;
-  };
-  const readers = (v: unknown): AgentKnowledge => {
-    if (!isAgentKnowledge(v)) throw new AssistantError("bad_request", "Say who may read the file: pov, everyone or gm.");
     return v;
   };
   if (r.op === "list") return { files: await listWorkspace(rt, base) };
@@ -746,14 +734,13 @@ export async function workspaceRequest(rt: Runtime, r: WorkspaceRequest, userId:
     return { session };
   }
   let op: AgentOp;
-  if (r.op === "write") op = { kind: "ws_write", path: text(r.path, "file's path"), text: text(r.text, "file's text"), ...(r.readers !== undefined ? { readers: readers(r.readers) } : {}) };
+  if (r.op === "write") op = { kind: "ws_write", path: text(r.path, "file's path"), text: text(r.text, "file's text") };
   else if (r.op === "delete") op = { kind: "ws_delete", path: text(r.path, "file's path") };
   else if (r.op === "move") op = { kind: "ws_move", from: text(r.from, "file's path"), to: text(r.to, "path to move it to") };
   else if (r.op === "pin") {
     if (typeof r.pinned !== "boolean") throw new AssistantError("bad_request", "Say whether the file is pinned.");
     op = { kind: "ws_pin", path: text(r.path, "file's path"), pinned: r.pinned };
-  } else if (r.op === "readers") op = { kind: "ws_readers", path: text(r.path, "file's path"), readers: readers(r.readers) };
-  else throw new AssistantError("bad_request", "op must be list, read, write, delete, move, pin, readers, session or rollback");
+  } else throw new AssistantError("bad_request", "op must be list, read, write, delete, move, pin, session or rollback");
   // Your own change is no agent's operation: the GM's role skips the change types' modes (`GM_ROLE`). The writer pushes the chat's state after it.
   const writer = outsideWriter(rt, { ...base, reader: outsideReader(rt, base), agent: { role: GM_ROLE, id: GM_ROLE }, signal: new AbortController().signal, connectionId: null });
   const result = await writer.apply([op], WORKSPACE_LABEL);

@@ -12,7 +12,7 @@ import type { JsonObject } from "../../shared/json";
 import type { LoreBookEntryView, LoreBookView } from "../../shared/protocol";
 import { LORE_INDEX_BOUNDS, LORE_INDEX_DEFAULTS, type LoreBooks, type LoreIndexSettings, isShortId, tagPatternOf } from "../../shared/settings";
 import { useApp } from "../app";
-import { Badge, Button, HostSelect, HostSwitch, NumberStepper, Section, Seg } from "../components";
+import { Badge, Button, HostSelect, NumberStepper, Section, Seg } from "../components";
 import { bookLabels } from "../build/book-lore";
 import { CheckField } from "../build/form-kit";
 import { defaultButton } from "./agents";
@@ -20,7 +20,7 @@ import { defaultButton } from "./agents";
 type BooksMode = "auto" | "list";
 
 /** The index settings Reset sends back to their defaults: every one but the built entry, which only Stop lets go. */
-const RESET_FIELDS = ["tagPattern", "idPrefix", "idDigits", "holdsChars", "inPrompts", "promptTokens", "own"] as const satisfies readonly (keyof LoreIndexSettings)[];
+const RESET_FIELDS = ["tagPattern", "idPrefix", "idDigits", "holdsChars", "promptTokens", "own"] as const satisfies readonly (keyof LoreIndexSettings)[];
 
 /** The two index settings typed as text, which are sent once typed out (on blur or Enter) and only when they can be what they set. */
 export type LoreTextField = "tagPattern" | "idPrefix";
@@ -50,7 +50,7 @@ export function loreTextProblem(field: LoreTextField, value: string): string | n
 /** The home row's line: which books, and what of the index is on. */
 export function loreSummary(books: LoreBooks, index: LoreIndexSettings): string {
   const read = books === "auto" ? "Every book a chat reads" : `${books.length} ${books.length === 1 ? "book" : "books"} ticked`;
-  const parts = [read, index.own ? "your own index entry" : index.inPrompts ? "index in every role's prompt" : null, index.built ? "an index entry kept in sync" : null];
+  const parts = [read, index.own ? "your own index entry" : null, index.built ? "an index entry kept in sync" : null];
   return parts.filter((p): p is string => p !== null).join(" · ");
 }
 
@@ -169,9 +169,8 @@ export function LoreSettingsBody(props: LoreSettingsProps) {
             <div class="lre-set-ext-head">
               <span class="lre-set-ext-title">In the roles' prompts</span>
             </div>
-            <HostSwitch label="Every role's prompt carries the lore index" checked={index.inPrompts} disabled={busy} onChange={(inPrompts) => setIndex({ inPrompts })} />
-            {index.inPrompts ? <NumberStepper label="Index tokens" value={index.promptTokens} min={LORE_INDEX_BOUNDS.promptTokens[0]} max={LORE_INDEX_BOUNDS.promptTokens[1]} integer disabled={busy} onChange={(promptTokens) => setIndex({ promptTokens })} /> : null}
-            <span class="lre-small lre-muted">Off, an agent asks for the index with its lore_index tool. On, each role's prompt has it after its pinned files, cut to the tokens set here and saying how many entries it left out. Default off, {LORE_INDEX_DEFAULTS.promptTokens.toLocaleString("en-US")} tokens.</span>
+            <NumberStepper label="Index tokens" value={index.promptTokens} min={LORE_INDEX_BOUNDS.promptTokens[0]} max={LORE_INDEX_BOUNDS.promptTokens[1]} integer disabled={busy} onChange={(promptTokens) => setIndex({ promptTokens })} />
+            <span class="lre-small lre-muted">A role whose context starts with the lore index (Settings → Agents → Context) has it after its pinned files, cut to the tokens set here and saying how many entries it left out; any agent asks for it with its lore_index tool. Default {LORE_INDEX_DEFAULTS.promptTokens.toLocaleString("en-US")} tokens.</span>
           </div>
           <div class="lre-set-ext" data-lre-lore-setting="own">
             <div class="lre-set-ext-head">

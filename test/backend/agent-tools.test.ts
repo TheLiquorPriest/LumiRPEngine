@@ -1,9 +1,9 @@
 // The agent tool layer's registry and read view (INC1-SPEC C6, R3a): the GM agent page lists exactly
 // the tools there are, each with its description and its arguments'; an edited text reaches the tool
-// `toolsFor` gives, and its reset brings the shipped one back; no schema names a place or an action
-// under the player character's knowledge; the resolver names only what the view may, so a hidden one
-// reads as one that doesn't exist; and a World Info entry's text reaches each view with its marks
-// marked, in the user's wording, or left out where the player character doesn't hold them.
+// `toolsFor` gives, and its reset brings the shipped one back; a place argument offers every place
+// in every view; the resolver names everything the world has, a secret too, so only a name the world
+// lacks is refused; and a World Info entry's text reaches each view with its marks marked, in the
+// user's wording.
 
 import { describe, expect, test } from "bun:test";
 import { type Resolved, resolvePerson, resolvePlace, resolveTrack } from "../../src/backend/agents/tools/resolve";
@@ -12,7 +12,7 @@ import { badValue, schemaWorld } from "../../src/backend/agents/tools/schema";
 import { renderPrompt } from "../../src/backend/prompts";
 import { TOOL_DEFINITIONS, toolsFor } from "../../src/backend/agents/tools/registry";
 import { promptGroups } from "../../src/frontend/settings/agent-prompts";
-import { TOOL_NOTE, TOOL_NOTES, TOOL_TEXTS, toolArgTextId, toolText, toolTextId } from "../../src/shared/agent-tools";
+import { TOOL_NOTE, TOOL_NOTES, TOOL_TEXTS, type ToolView, toolArgTextId, toolText, toolTextId } from "../../src/shared/agent-tools";
 import type { JsonObject } from "../../src/shared/json";
 import { GM_AGENT_PAGE, promptDef } from "../../src/shared/prompts";
 import { SECRET_MARK_WORDING, secretMarkText } from "../../src/shared/secret-marks";
@@ -81,7 +81,7 @@ describe("the GM agent page lists exactly the tools", () => {
     const { rig, chatId } = await alderChat();
     for (const knowledge of KNOWLEDGE) {
       const view = await toolEnv(rig, chatId, knowledge).reader.view();
-      const world = schemaWorld(view.world, view.registry, knowledge);
+      const world = schemaWorld(view.world, view.registry);
       for (const def of TOOL_DEFINITIONS) {
         const schema = def.parameters(world);
         expect({ tool: def.name, args: Object.keys(propertiesOf(schema)).sort() }).toEqual({ tool: def.name, args: argsOf(def.name) });
@@ -113,17 +113,12 @@ describe("the GM agent page lists exactly the tools", () => {
 describe("a value a tool doesn't take", () => {
   test("is answered with the values it takes, or without a list when there is none it may give", async () => {
     const { rig, chatId } = await alderChat();
-    const view = await toolEnv(rig, chatId, "pov").reader.view();
+    const view = await toolEnv(rig, chatId, "everyone").reader.view();
     const vars = { tool: "gm_set_stage", arg: "stage", value: "Signed" };
     expect(badValue(view, "gm_set_stage", "stage", "Signed", ["kickoff", "signed"])).toEqual({ text: renderPrompt(TOOL_NOTE.badValue, {}, { ...vars, values: "kickoff, signed" }), error: true });
     const unlisted = badValue(view, "gm_set_stage", "stage", "Signed", []);
     expect(unlisted).toEqual({ text: renderPrompt(TOOL_NOTE.badValueUnlisted, {}, vars), error: true });
     expect(unlisted.text).not.toContain("one of");
-    // Under the player character's knowledge a stage is named only as its quest log shows one: the start stage's id is no name it knows.
-    const setStage = (await agentTools(rig, chatId, "pov", { tiers: ["gm"] })).find((t) => t.name === "gm_set_stage");
-    if (!setStage) throw new Error("no gm_set_stage");
-    const ran = await setStage.run({ track: "The Fleet Contract", stage: "kickoff" }, { signal: new AbortController().signal, agentId: "agent_test", role: "assistant", callId: "call_stage" });
-    expect(ran).toEqual({ text: renderPrompt(TOOL_NOTE.badValue, {}, { tool: "gm_set_stage", arg: "stage", value: "kickoff", values: "A deal on the table" }), error: true });
   });
 });
 
@@ -221,17 +216,13 @@ describe("toolsFor", () => {
     for (const t of toolsFor({ world, tiers: ["gm"], texts: {}, env })) expect(tier(t.name)?.tier).toBe("gm");
   });
 
-  test("under the player character's knowledge no schema names a place or an action; under everyone's and the GM's a place argument offers every place", async () => {
+  test("under every view a place argument offers every place, a secret one too, and an action argument every action", async () => {
     const { rig, chatId } = await alderChat();
-    const schemas = async (knowledge: "pov" | "everyone" | "gm") => JSON.stringify((await agentTools(rig, chatId, knowledge, { tiers: ["read", "gm"] })).map((t) => t.parameters));
     // Marcus's house is secret, and reading the bank statement is a step of the shop's secret.
-    const pov = await schemas("pov");
-    expect(pov).not.toContain("birch_lane_12");
-    expect(pov).not.toContain("read_bank_statement");
-    for (const knowledge of ["everyone", "gm"] as const) {
+    for (const knowledge of KNOWLEDGE) {
       const place = (await agentTools(rig, chatId, knowledge)).find((t) => t.name === "places_read");
       expect((propertiesOf(place?.parameters ?? {}).place as JsonObject).enum).toContain("birch_lane_12");
-      expect(await schemas(knowledge)).toContain("read_bank_statement");
+      expect(JSON.stringify((await agentTools(rig, chatId, knowledge, { tiers: ["read", "gm"] })).map((t) => t.parameters))).toContain("read_bank_statement");
     }
   });
 });
@@ -254,34 +245,26 @@ describe("the resolver", () => {
     for (const one of ["Helen Kowalczyk (helen_kowalczyk)", "Jess Kowalczyk (jess_kowalczyk)", "Maddie Kowalczyk (maddie_kowalczyk)"]) expect(text).toContain(one);
   });
 
-  test("one the view can't see reads exactly as one that doesn't exist", async () => {
+  test("a secret one resolves in every view; only one the world lacks is refused, as no such one", async () => {
     const { rig, chatId } = await alderChat({ put: { entities: { vex_morrow: VEX } } });
-    const pov = await toolEnv(rig, chatId, "pov").reader.view();
     const refusal = (got: Resolved): string => ("refused" in got ? got.refused.text : `resolved to ${got.id}`);
-    expect(refusal(resolvePerson(pov, "Vex Morrow"))).toBe("No such person here: Vex Morrow.");
-    expect(refusal(resolvePerson(pov, "vex_morrow"))).toBe("No such person here: vex_morrow.");
-    expect(refusal(resolvePerson(pov, "Nobody Atall"))).toBe("No such person here: Nobody Atall.");
-    expect(refusal(resolvePlace(pov, "12 Birch Lane"))).toBe("No such place here: 12 Birch Lane.");
-    expect(refusal(resolveTrack(pov, "s_shop_trouble"))).toBe("No such quest, secret, puzzle or agenda here: s_shop_trouble.");
-    const gm = await toolEnv(rig, chatId, "gm").reader.view();
-    expect(resolvePerson(gm, "Vex Morrow")).toEqual({ id: "vex_morrow" });
-    expect(resolvePlace(gm, "12 Birch Lane")).toEqual({ id: "birch_lane_12" });
+    for (const knowledge of KNOWLEDGE) {
+      const view = await toolEnv(rig, chatId, knowledge).reader.view();
+      expect(resolvePerson(view, "Vex Morrow")).toEqual({ id: "vex_morrow" });
+      expect(resolvePlace(view, "12 Birch Lane")).toEqual({ id: "birch_lane_12" });
+      expect(resolveTrack(view, "s_shop_trouble")).toEqual({ id: "s_shop_trouble" });
+      expect(refusal(resolvePerson(view, "Nobody Atall"))).toBe("No such person here: Nobody Atall.");
+    }
   });
 });
 
 describe("World Info text in each view", () => {
-  test("a user's entry reaches each view with every mark marked, or, for the player character, only the marks it holds", async () => {
+  test("a user's entry reaches each view with every mark marked", async () => {
     const { rig, chatId } = await alderChat();
     const entry = `${FERRY}\n{{// Secret (known to Marcus): ${DEBT}}}\n{{// Secret (known to Jordan): ${SEEN}}}`;
-    const read = async (knowledge: "pov" | "everyone" | "gm", text: string) => (await toolEnv(rig, chatId, knowledge).reader.view()).entryText(text);
+    const read = async (knowledge: ToolView, text: string) => (await toolEnv(rig, chatId, knowledge).reader.view()).entryText(text);
 
-    const pov = await read("pov", entry);
-    expect(pov).toContain(FERRY);
-    expect(pov).not.toContain(DEBT);
-    expect(pov).toContain(secretMarkText(SEEN, ["Jordan Ellis"], "everyone", SECRET_MARK_WORDING));
-    expect(await read("pov", `{{// Secret: ${WRECK}}}`)).not.toContain(WRECK);
-
-    for (const knowledge of ["everyone", "gm"] as const) {
+    for (const knowledge of KNOWLEDGE) {
       const all = await read(knowledge, entry);
       expect(all).toContain(FERRY);
       expect(all).toContain(secretMarkText(DEBT, ["Marcus Delgado"], "everyone", SECRET_MARK_WORDING));
@@ -297,8 +280,7 @@ describe("World Info text in each view", () => {
     const view = await toolEnv(rig, chatId, "everyone").reader.view();
     expect(view.entryText(`{{// Secret (known to Marcus): ${DEBT}}}`)).toBe(`${DEBT} (a secret only Marcus Delgado knows)`);
     expect(view.mark("Vex Morrow is here.", { known: ["Marcus Delgado"], kept: "everyone" })).toBe("Vex Morrow is here. (a secret only Marcus Delgado knows)");
-    // Under the player character's knowledge and the GM's, nothing is marked that way.
-    expect((await toolEnv(rig, chatId, "pov").reader.view()).mark("Vex Morrow is here.", { known: ["Marcus Delgado"], kept: "everyone" })).toBe("Vex Morrow is here.");
+    // Under the GM's view, nothing is marked that way.
     expect((await toolEnv(rig, chatId, "gm").reader.view()).mark("Vex Morrow is here.", { known: ["Marcus Delgado"], kept: "everyone" })).toBe("Vex Morrow is here.");
   });
 });

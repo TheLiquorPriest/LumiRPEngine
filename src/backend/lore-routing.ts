@@ -6,14 +6,16 @@
 // in a book is what the next index holds; the latest one is kept by the hash of what it was made
 // from, so it is made again exactly when that changes.
 //
-// Build → Lore's index entry: on the user's press, the index of a world's books (the entries anyone
-// may read) is written as a World Info entry into a book the user picks, marked as LRE's own
+// Build → Lore's index entry: on the user's press, the index of a world's books (every entry, a
+// secret or restricted one inside its secret mark, in the user's wording; secrecy is guidance, never
+// a filter) is written as a World Info entry into a book the user picks, marked as LRE's own
 // (`builtIndexMark`). From then on each engine run of that world's chats, and each look at it in
 // Build or Settings, writes its text again when the index changed, until the user stops it
 // (Settings → Lore), which counts at once, in a turn under way too: Settings are read as they stand,
 // never as a turn's snapshot holds them. Nothing else of any entry is written: not its keys, not
 // where it sits, and no other entry at all.
 
+import { own } from "../engine/pack-kit";
 import type { UserId, WorldId } from "../shared/ids";
 import { hashParts } from "../shared/hash";
 import { builtIndexMark, builtIndexOf, loreIsSecret, loreSourceOf } from "../shared/lore";
@@ -22,13 +24,14 @@ import type { LoreIndexView } from "../shared/protocol";
 import type { PromptTexts } from "../shared/prompts";
 import type { BuiltLoreIndex, LoreBooks, LoreIndexSettings, UserSettings } from "../shared/settings";
 import { tagPatternOf } from "../shared/settings";
+import { secretMarkText } from "../shared/secret-marks";
 import { nounFor } from "../shared/words";
 import type { LoreEntryDef, WorldDoc } from "../shared/world";
-import { bookEntryTitle, booksLore, loreBookIds } from "./book-lore";
+import { bookEntryTitle, bookStamps, booksLore, loreBookIds, type BookReads } from "./book-lore";
 import { tokensOf } from "./book";
 import type { HostBookEntry, HostPort } from "./host";
 import { LoreIds } from "./lore-ids";
-import { renderPrompt } from "./prompts";
+import { markWording, renderPrompt } from "./prompts";
 import type { SettingsStore } from "./settings-store";
 import { outsideTurns } from "./turn-frame";
 import type { WorldStore } from "./worlds";
@@ -97,11 +100,15 @@ export class LoreRouting {
   private readonly latest = new Map<UserId, RoutingIndex>();
   /** Each user's syncs of the built entry, one after another. */
   private readonly syncs = new Map<UserId, Promise<unknown>>();
+  /** What each user's last sync made the built entry from (its draft, its books' stamps, the settings it reads) and the text it left there: a sync with all of it the same remakes nothing. */
+  private readonly synced = new Map<UserId, { key: string; text: string }>();
 
   constructor(
     private readonly host: Pick<HostPort, "books" | "chats" | "storage" | "log">,
     private readonly settings: Pick<SettingsStore, "get" | "set">,
-    private readonly worlds: Pick<WorldStore, "working">,
+    private readonly worlds: Pick<WorldStore, "working" | "workingAt">,
+    /** The books as last read, until each changes, shared with live lore (`liveLore`). */
+    private readonly reads: BookReads,
   ) {
     this.ids = new LoreIds(host);
   }
@@ -142,20 +149,37 @@ export class LoreRouting {
     return index;
   }
 
-  /** The books Build's index entry lists for `world`: those Settings → Lore picks, or, on Auto, those every chat of the world reads (its Lore books, the global ones, those its old copies came from). */
-  private async builtBooks(world: WorldDoc, userId: UserId, picked: LoreBooks): Promise<string[]> {
-    if (picked === "auto") return (await loreBookIds(this.host, world, null, userId, "auto")).read;
-    const engine = new Map((await this.host.books.list(userId)).map((b) => [b.id, b.engine]));
-    return picked.filter((id) => engine.get(id) === false);
+  /** The books Build's index entry lists for `world`, with each one's last-change stamp: those Settings → Lore picks, or, on Auto, those every chat of the world reads (its Lore books, the global ones, those its old copies came from). */
+  private async builtBooks(world: WorldDoc, userId: UserId, picked: LoreBooks): Promise<{ read: string[]; gone: string[]; updated: Map<string, number | null> }> {
+    if (picked === "auto") return loreBookIds(this.host, world, null, userId, "auto");
+    const books = await this.host.books.list(userId);
+    const engine = new Map(books.map((b) => [b.id, b.engine]));
+    const read = picked.filter((id) => engine.get(id) === false);
+    return { read, gone: [], updated: bookStamps(books, read) };
   }
 
-  /** The index Build's entry holds for `worldId` (its draft, as Build shows it): the entries anyone may read, worded in `texts`. */
-  async builtText(userId: UserId, worldId: WorldId, settings: UserSettings): Promise<{ text: string; index: RoutingIndex }> {
-    const world = await this.worlds.working(worldId, userId);
-    const read = await booksLore(this.host, world, { read: await this.builtBooks(world, userId, settings.loreBooks), gone: [] }, userId);
+  /**
+   * The index Build's entry holds for `worldId` (its draft, as Build shows it), worded in `texts`:
+   * every entry, a secret or restricted one with its title and what it holds each inside its secret
+   * mark, kept from everyone (the draft has no chat to say who knows it); an AI-written entry still
+   * waiting for review isn't lore yet, so it isn't listed.
+   */
+  async builtText(userId: UserId, worldId: WorldId, settings: UserSettings, from?: { world: WorldDoc; books: { read: string[]; updated: Map<string, number | null> } }): Promise<{ text: string; books: { bookId: string; name: string; entries: IndexLine[] }[] }> {
+    const world = from?.world ?? (await this.worlds.working(worldId, userId));
+    const read = await booksLore(this.host, world, { ...(from?.books ?? (await this.builtBooks(world, userId, settings.loreBooks))), gone: [] }, userId, this.reads);
     const index = await this.index(userId, read.world, read.entries, settings.loreIndex);
-    const books = index.books.map((b) => ({ name: b.name, entries: b.entries.filter((e) => e.open).map((e) => ({ id: e.id, title: e.title, holds: e.holds })) }));
-    return { text: renderIndex(settings.prompts.texts, LORE_INDEX_TEXT.built, books), index };
+    const wording = markWording(settings.prompts.texts);
+    const kept = (text: string): string => secretMarkText(text, [], "everyone", wording);
+    const books = index.books.map((b) => ({
+      bookId: b.bookId,
+      name: b.name,
+      entries: b.entries.flatMap((e): IndexLine[] => {
+        if (e.open) return [{ id: e.id, title: e.title, holds: e.holds }];
+        const source = loreSourceOf(own(read.world.lore, e.lore)?.source);
+        return source.kind === "ai" && source.status === "pending" ? [] : [{ id: e.id, title: kept(e.title), holds: e.holds === null ? null : kept(e.holds) }];
+      }),
+    }));
+    return { text: renderIndex(settings.prompts.texts, LORE_INDEX_TEXT.built, books), books };
   }
 
   /**
@@ -201,8 +225,17 @@ export class LoreRouting {
             this.host.log("warn", `[LumiRPEngine] the lore index entry Build wrote (${built.bookId}/${built.entryId}) is gone or no longer LumiRPEngine's, so it is no longer kept in sync (Build → Lore builds another)`, userId);
             return;
           }
-          const { text } = await this.builtText(userId, built.worldId, settings);
+          // Nothing it is made from changed since the last sync (the draft, every book's stamp, the settings it reads), and the entry still holds what that sync left: nothing is remade.
+          const draft = await this.worlds.workingAt(built.worldId, userId);
+          const books = await this.builtBooks(draft.doc, userId, settings.loreBooks);
+          const stamped = [...books.updated.values()].every((u) => u !== null);
+          const key = JSON.stringify([built, draft.at, [...books.updated], settings.loreBooks, settings.loreIndex, settings.prompts.texts]);
+          const last = this.synced.get(userId);
+          if (stamped && last?.key === key && last.text === e.content) return;
+          const { text } = await this.builtText(userId, built.worldId, settings, { world: draft.doc, books });
           if (text !== e.content && (await this.keeps(userId, built))) await this.host.books.update(e.id, { content: text }, userId);
+          // A write moves its book's stamp, so the next sync remakes it once more and finds it so.
+          this.synced.set(userId, { key, text });
         } catch (error) {
           this.host.log("warn", `[LumiRPEngine] the lore index entry wasn't brought up to date: ${error instanceof Error ? error.message : String(error)}`, userId);
         }
@@ -222,12 +255,12 @@ export class LoreRouting {
   async view(userId: UserId, worldId: WorldId): Promise<LoreIndexView> {
     await this.sync(userId, worldId);
     const settings = await this.settings.get(userId);
-    const { text, index } = await this.builtText(userId, worldId, settings);
+    const { text, books } = await this.builtText(userId, worldId, settings);
     const built = settings.loreIndex.built;
     const names = built ? new Map((await this.host.books.list(userId).catch(() => [])).map((b) => [b.id, b.name])) : new Map<string, string>();
     return {
       text,
-      books: index.books.map((b) => ({ id: b.bookId, name: b.name, entries: b.entries.filter((e) => e.open).length })),
+      books: books.map((b) => ({ id: b.bookId, name: b.name, entries: b.entries.length })),
       built: built ? { ...built, book: names.get(built.bookId) ?? built.bookId } : null,
     };
   }

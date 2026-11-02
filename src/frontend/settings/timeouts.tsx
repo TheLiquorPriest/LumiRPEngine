@@ -18,7 +18,7 @@ const GROUPS: readonly { group: TimeoutGroup; title: string; lead: string }[] = 
 ];
 
 /** The −/+ step of each setting's seconds. */
-const STEP_S: Record<TimeoutKey, number> = { engineRunMs: 30, preLookupMs: 15, postReplyMs: 30, postLookupMs: 15, guardMs: 10, skipPlanMs: 30, requestMs: 30, caveatsMs: 10, mindsRunMs: 60, jobCallMs: 60, tokenCountMs: 5, laneStartupMs: 10, laneHeartbeatMs: 10, mcpReconnectMs: 10 };
+const STEP_S: Record<TimeoutKey, number> = { engineRunMs: 30, preLookupMs: 15, finalReviewMs: 15, postReplyMs: 30, postLookupMs: 15, guardMs: 10, skipPlanMs: 30, requestMs: 30, caveatsMs: 10, mindsRunMs: 60, jobCallMs: 60, tokenCountMs: 5, laneStartupMs: 10, laneHeartbeatMs: 10, mcpReconnectMs: 10 };
 
 /** A limit as the page says it: "5 min", or "No limit". */
 export function limitText(limit: Limit): string {
@@ -36,7 +36,8 @@ function hostNote(key: TimeoutKey, value: Limit): string | null {
   return limitOf(value) > host.maxMs ? `${cap} What's set here runs as ${formatMs(host.maxMs)}.` : cap;
 }
 
-function TimeoutRow(props: { id: TimeoutKey; value: Limit; busy: boolean; set(value: Limit | null): void }) {
+/** One timeout: what it limits, what happens when it runs out, No limit where it may be lifted, its seconds, and Default. Settings → Agents → Main agent shows the final review's here too. */
+export function TimeoutRow(props: { id: TimeoutKey; value: Limit; busy: boolean; set(value: Limit | null): void }) {
   const { id, value } = props;
   const def = TIMEOUTS[id];
   const fallback = def.defaultMs === "none" ? def.minMs : def.defaultMs;

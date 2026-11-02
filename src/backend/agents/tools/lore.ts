@@ -1,5 +1,5 @@
 // The lore family's tools (AGENT-LOOP-PLAN §6; INC1-SPEC R3b; DESIGN §4.2): the world's lore and the
-// World Info books the chat reads, as the agent's knowledge may read them. Index, search, grep and
+// World Info books the chat reads, every entry of them, a secret marked as the view marks it. Index, search, grep and
 // read read; load puts an entry into the prompt of the reply a turn is writing; save and draft
 // propose a workspace file (`propose`). Nothing here writes a book, the world's lore or any host
 // store: a draft is applied in Build, on the game master's own press.
@@ -8,9 +8,8 @@
 // it (`loreEntry`); one the view gives nothing of reads as one that doesn't exist. Live lore reads a
 // book entry's text with its marks left out (`publicText`), each mark an entry of its own beside it
 // (`bookMarkLores`), so an entry whose live text is its book entry's public text is read from the book
-// entry as written instead: its marks then go through `applyMarks` for this view, in place (under the
-// player character's knowledge only those it holds, marked; under everyone's and the GM's every one,
-// marked). A whole-entry secret's live text is the mark's own text already, and stays so.
+// entry as written instead: its marks then go through `applyMarks` for this view, in place, every
+// one marked. A whole-entry secret's live text is the mark's own text already, and stays so.
 //
 // The lore index (`lore_index`, `ToolReadView.loreIndex`) names each World Info entry by its short
 // id, and every tool here gives a book entry by it (a mark of it as the id, then `#` and its number);
@@ -118,13 +117,20 @@ async function namedLore(view: ToolReadView, tool: string, args: JsonObject): Pr
   return found ? { ...found, id: (await shownIds(view))(found.lore.id) } : view.refuse(WRITE_NOTE.noLore, { id: ref });
 }
 
+/** The entry `ref` names (any id the lore tools take), as the view gives it, with the id the tools name it by; null for none. The condense tool reads a lore source by it. */
+export async function loreText(view: ToolReadView, ref: string): Promise<{ id: string; title: string; text: string } | null> {
+  const corpus = await readableLore(view);
+  const loreId = await loreIdOf(view, (id) => corpus.some((r) => r.entry.id === id), ref);
+  const found = corpus.find((r) => r.lore.id === loreId);
+  return found ? { id: (await shownIds(view))(found.lore.id), title: found.lore.title, text: found.lore.text } : null;
+}
+
 /**
  * The lore index as this view reads it (see the header): the user's own index entry's text when
  * Settings → Lore names one that is there, as written but for its marks (`entryText`); else every
- * entry of the index the view may read (under everyone's knowledge a secret's title, and what it
- * holds, each inside its secret mark), framed by the registry's texts. `book` keeps one book's line
- * (by its id or name); one no book read here goes by is answered with its note. Within `tokens` when
- * given: a role's prompt.
+ * entry of the index (under everyone's knowledge a secret's title, and what it holds, each inside its
+ * secret mark), framed by the registry's texts. `book` keeps one book's line (by its id or name); one
+ * no book read here goes by is answered with its note. Within `tokens` when given: a role's prompt.
  */
 export async function loreIndexText(view: ToolReadView, opts: { book?: string; tokens?: number } = {}): Promise<string | ToolOutcome> {
   const own = await view.routing?.own();
@@ -152,7 +158,7 @@ export async function loreIndexText(view: ToolReadView, opts: { book?: string; t
     entries: b.entries.flatMap((e) => {
       const r = corpus.get(e.lore);
       if (!r) return [];
-      const secrecy = view.knowledge === "everyone" ? view.loreSecrecy(r.entry) : null;
+      const secrecy = view.marked ? view.loreSecrecy(r.entry) : null;
       return [{ id: e.id, title: view.mark(e.title, secrecy), holds: e.holds === null ? null : view.mark(e.holds, secrecy) }];
     }),
   }));
@@ -189,7 +195,7 @@ export const LORE_TOOLS: readonly ToolDefinition[] = [
       const { hits } = view.read(() => loreSearch({ reg: view.registry, world, state: view.state, tokens: () => 0 }, { query, purpose: "gm", tokenBudget: 0 }));
       const results = hits.flatMap((hit): SearchResult[] => {
         const r = byId.get(hit.id);
-        return r ? [{ id: named(hit.id), title: r.lore.title, why: hit.why, ...(view.knowledge !== "pov" && view.loreSecrecy(r.entry) !== null ? { secret: true as const } : {}) }] : [];
+        return r ? [{ id: named(hit.id), title: r.lore.title, why: hit.why, ...(view.loreSecrecy(r.entry) !== null ? { secret: true as const } : {}) }] : [];
       });
       return view.answer({ results });
     },
@@ -207,8 +213,7 @@ export const LORE_TOOLS: readonly ToolDefinition[] = [
       const named = await shownIds(view);
       const matches: GrepMatch[] = [];
       for (const { entry, lore } of await readableLore(view)) {
-        // The player character's knowledge reads a restricted entry plainly: it carries no marker.
-        const secret = view.knowledge !== "pov" && view.loreSecrecy(entry) !== null ? { secret: true as const } : {};
+        const secret = view.loreSecrecy(entry) !== null ? { secret: true as const } : {};
         lore.text.split("\n").forEach((line, i) => {
           if (line.toLowerCase().includes(lower)) matches.push({ id: named(lore.id), title: lore.title, line: i + 1, text: line, ...secret });
         });

@@ -372,6 +372,12 @@ export class WorldStore {
     return (await this.draft(worldId, userId)).doc;
   }
 
+  /** `working`, with what says which draft it is: its head and, for a stored draft, its version; the same while the draft doesn't change. */
+  async workingAt(worldId: WorldId, userId: UserId): Promise<{ doc: WorldDoc; at: string }> {
+    const draft = await this.draft(worldId, userId);
+    return { doc: draft.doc, at: `${draft.head}\u0000${draft.stored ? draft.version : ""}` };
+  }
+
   /**
    * One editor operation on the draft, in turn with the world's other writes. `base` must match the
    * draft's base, and `version`, when sent, the working copy's (else `conflict`); `get` ignores both,

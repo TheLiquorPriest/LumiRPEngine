@@ -13,7 +13,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { agentLabel } from "../../shared/agent-settings";
 import type { ChatId } from "../../shared/ids";
-import { agentModel, DROP_WORDS, END_WORDS, followLive, groupSpent, type LiveAgentView, type LiveGroup, type LiveItem, liveItems, type LiveStatus, type LiveView, PHASE_WORDS, usageWords, WRITE_OUTCOME_WORDS } from "../../shared/live";
+import { agentModel, DROP_WORDS, END_WORDS, followLive, groupSpent, type LiveAgentView, type LiveGroup, type LiveItem, liveItems, type LiveStatus, type LiveView, PHASE_WORDS, REVIEW_OUTCOME_WORDS, reviewEditWords, usageWords, WRITE_OUTCOME_WORDS } from "../../shared/live";
 import { useApp } from "../app";
 import { Badge, Button, Empty, Seg, useBusy } from "../components";
 import { cancelTurn, elapsedText } from "../diagnostics";
@@ -187,9 +187,26 @@ function groupOf(g: LiveGroup, view: LiveView, open: boolean, onToggle: (open: b
   );
 }
 
-/** A mark between groups. */
+/** A mark between groups; the final review's says how it ended, with each edit it made to the narrator's prompt. */
 function markOf(item: Extract<LiveItem, { type: "mark" }>) {
   const e = item.entry;
+  if (e.kind === "review") {
+    const failed = e.outcome === "unrevised" || e.outcome === "stopped";
+    return (
+      <li key={`mark-${e.seq}`} class={`lre-live-mark review${failed ? " failed" : ""}`} data-lre-live-mark="review" data-outcome={e.outcome}>
+        <span>{`${REVIEW_OUTCOME_WORDS[e.outcome]}${e.reason ? `: ${e.reason}` : ""}`}</span>
+        {e.edits.length > 0 ? (
+          <ul class="lre-live-review" aria-label="The final review's edits">
+            {e.edits.map((edit, i) => (
+              <li key={i} data-lre-live-edit={edit.op}>
+                {reviewEditWords(edit)}
+              </li>
+            ))}
+          </ul>
+        ) : null}
+      </li>
+    );
+  }
   const words = e.kind === "phase" ? PHASE_WORDS[e.phase] : e.kind === "failed" ? `The turn stopped at ${e.step}: ${e.reason}` : e.kind === "wait" ? "Waiting on you at a gate" : "Resumed";
   return (
     <li key={`mark-${e.seq}`} class={`lre-live-mark${e.kind === "failed" ? " failed" : ""}`} data-lre-live-mark={e.kind}>

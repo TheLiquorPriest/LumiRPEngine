@@ -2,16 +2,14 @@
 // turn's delivery and the GM's preview of it (GM → This chat → Sections) read the same renderers,
 // scopes, caps, marks and budgets, so the preview is what the next prompt gets.
 
-import type { AgentKnowledge } from "../shared/agent-tools";
 import type { SlotId } from "../shared/ids";
 import { KNOWLEDGE_DEFAULTS, KNOWLEDGE_SLOT, MINDS_SLOT, type KnowledgeSettings } from "../shared/minds";
-import { secretMarkText, type SecretMarkWording } from "../shared/secret-marks";
+import { holdsSecretMark, secretMarkText, type SecretMarkWording } from "../shared/secret-marks";
 import type { NarratorView } from "../shared/settings";
 import type { ContextGeneration } from "../shared/state-view";
 import type { PromptTexts } from "../shared/prompts";
 import type { FeedScope, SectionFeed, SectionTemplate, WorldDoc } from "../shared/world";
 import { feedOf, linesOf, markedText, renderersOf, sectionScope, secretLineText, sourceOf } from "../engine/feed";
-import type { FeedLine } from "../engine/registry";
 import { optionalQuery } from "../engine/pack-kit";
 import { readPass } from "../engine/read-pass";
 import type { Registry } from "../engine/registry-impl";
@@ -47,9 +45,9 @@ export interface SectionsInput {
   said: string;
   /**
    * What the turn itself tells: its resolution, a timelapse's Montage, and an agent turn's scene role's
-   * lore and notes (INC2-SPEC C11), the notes with the knowledge they were written with.
+   * lore and notes (INC2-SPEC C11), each note marked where it carries a secret, whatever the scene read with.
    */
-  planned: { outcome: readonly string[]; montage: readonly string[]; scene?: readonly string[]; notes?: { lines: readonly string[]; knowledge: AgentKnowledge } };
+  planned: { outcome: readonly string[]; montage: readonly string[]; scene?: readonly string[]; notes?: readonly string[] };
   outline: readonly string[];
   /** The minutes the turn took, for Scene's elapsed-time line; null without a turn. */
   elapsed: number | null;
@@ -93,9 +91,6 @@ export interface SectionsBuilt {
   recorded: SlotId[];
   used: number;
 }
-
-/** What a scene note's knowledge reads as among a section's lines: the player character's, the scene's (everyone's), or the GM's. */
-const NOTE_KNOWN: Readonly<Record<AgentKnowledge, FeedLine["known"]>> = { pov: "pov", everyone: "scene", gm: "gm" };
 
 /** A line of a section as it is built, with the fact it tells part of (`FeedLine.group`, under its renderer's name); none, and it stands alone. */
 interface Told {
@@ -157,13 +152,14 @@ export function buildSections(input: SectionsInput): SectionsBuilt {
   // shared one (DESIGN §24.3).
   let budget = input.budget;
   const mindsBudget = input.mindsBudget;
-  // A line carrying a secret's words (the leak screen's, `findLeaks`): under "marked" it goes in
-  // marked as a secret kept from the player character, whatever the scope; under "omit" it is left
-  // out, in every scope.
+  // A line carrying a secret's words (the leak screen's, `findLeaks`), or one marked where it was
+  // written (a prose step's line naming someone hidden, `ProseMark`): under "marked" it goes in marked
+  // as a secret kept from the player character, whatever the scope, and never marked twice; under
+  // "omit" it is left out, in every scope.
   const marking = input.narrator.view.secrets === "marked";
-  const carries = (text: string): boolean => findLeaks(text, secrets).length > 0;
+  const carries = (text: string): boolean => findLeaks(text, secrets).length > 0 || holdsSecretMark(text, input.wording);
   const pov = state.entities[world.pov]?.name ?? world.entities[world.pov]?.name ?? world.pov;
-  const secret = (text: string): string => secretMarkText(text, [], [pov], input.wording);
+  const secret = (text: string): string => (holdsSecretMark(text, input.wording) ? text : secretMarkText(text, [], [pov], input.wording));
   // Sections with lines that ride once every section has its place: hints (Stance's cues, §6.6) and
   // facts beyond the POV's, a secret's lines among them (§6.11), none counted in what the player sees.
   const hinted: { fill: { slot: SlotId; content: string } | null; slot: SlotId; label: string; template: string; lines: string[]; marked: Unit[]; hints: string[]; cost: number; maxTokens: number | undefined; maxLines: number | undefined }[] = [];
@@ -254,20 +250,12 @@ export function buildSections(input: SectionsInput): SectionsBuilt {
       if (section.id === "scene") {
         // An agent turn's scene role's lore leads the Scene slot, each entry as the brief may read it.
         lines.push(...(input.planned.scene ?? []).map((text) => ({ text })));
-        // Its notes, held to what Minds lines are: one written beyond the player character's knowledge
-        // never in the player scope (one the GM's knowledge wrote, in the GM's alone) and marked as
-        // beyond them elsewhere; one naming someone or something the player character can't see, or
-        // carrying a secret's words, marked as a secret kept from them, or left out.
-        const notes = input.planned.notes;
-        const known = notes ? NOTE_KNOWN[notes.knowledge] : "pov";
-        for (const text of notes?.lines ?? []) {
-          if (known !== "pov" && (scope === "player" || (known === "gm" && scope !== "gm"))) continue;
-          if (carries(text) || hidden(text)) {
-            if (marking) beyond.push({ text: secret(text) });
-            continue;
-          }
-          if (known === "pov") lines.push({ text });
-          else beyond.push({ text: markedText({ text, known }) });
+        // Its notes, marked as Minds lines are: one naming someone or something the player character
+        // can't see, or carrying a secret's words, goes in marked as a secret kept from them (left out
+        // where the narrator's knowledge omits secrets); every other note goes in plain.
+        for (const text of input.planned.notes ?? []) {
+          if (!carries(text) && !hidden(text)) lines.push({ text });
+          else if (marking) beyond.push({ text: secret(text) });
         }
       }
       // DESIGN §9.2: every turn has an elapsed time, and the Scene slot states it, from when to when

@@ -7,10 +7,11 @@
 // Branch being made), each with its session's parts, the segments a compaction's summary or an
 // archived span reads (once earlier messages are deleted, only they name a kept segment) and the
 // workspace files its events and post entries write; every chat's agent metadata (its learned
-// index, and its GM assistant thread's messages and proposals); the agent-call texts Diagnostics
-// still keeps; and what the metadata may not hold yet: the open chats' journals (a
-// record not yet flushed, a pending turn, a held write), the stored journal of each chat that isn't
-// open (what it writes back, commits or lands when it opens again), and what work in flight holds.
+// index, and its GM assistant thread's messages and proposals); the user's global workspace's index;
+// the agent-call texts Diagnostics still keeps; and what the metadata may not hold yet: the open
+// chats' journals (a record not yet flushed, a pending turn, a held write), the stored journal of
+// each chat that isn't open (what it writes back, commits or lands when it opens again), and what
+// work in flight holds.
 //
 // A blob is removed only once an earlier sweep found it unreferenced, `unreferencedDays` have passed
 // since, and it is still unreferenced, unheld and not put again (a put restarts its clock), with no
@@ -28,7 +29,7 @@ import { DAY_MS, HOUR_MS, isBlobHash, type RetentionSettings } from "../../share
 import { workspaceRefs } from "../../engine/workspace";
 import { agentRefs } from "../chat-agent-meta";
 import { messageOf } from "../diagnostics";
-import type { HostPort } from "../host";
+import type { HostMessage, HostPort } from "../host";
 import { journalPath } from "../ledger-io";
 import { readStoredJson } from "../stored-json";
 import type { BlobStore } from "./blobs";
@@ -42,6 +43,8 @@ const CHUNK_PREFIX = `${LEDGER_NAMESPACE}:`;
 
 export interface SweepDeps {
   host: Pick<HostPort, "chats" | "storage" | "log">;
+  /** A chat's messages, read without keeping a copy of the chat (`MessageCache.glance`): the sweep passes through every chat of the user's. */
+  messages(chatId: ChatId, userId: UserId): Promise<readonly HostMessage[]>;
   blobs: BlobStore;
   /** The user's Settings → Agents → Retention. */
   retention(userId: UserId): Promise<RetentionSettings>;
@@ -51,6 +54,8 @@ export interface SweepDeps {
   journals(userId: UserId): readonly Journal[];
   /** The agent-call texts a chat's diagnostics still keep (`Diagnostics.transcripts`). */
   transcripts(chatId: ChatId, userId: UserId): Promise<string[]>;
+  /** The bodies the user's global workspace names (`GlobalWorkspace.refs`); a read that fails throws. */
+  global(userId: UserId): Promise<string[]>;
   now?(): number;
 }
 
@@ -354,13 +359,15 @@ export class Sweep {
   private async references(userId: UserId, stored: ReadonlySet<string>): Promise<{ refs: Set<string>; unknown: string | null }> {
     const { host, blobs } = this.deps;
     const found: Found = { blobs: new Set(), bases: new Set() };
-    let reading = "the chat list";
+    let reading = "the global workspace";
     try {
+      for (const hash of await this.deps.global(userId)) found.blobs.add(hash);
+      reading = "the chat list";
       const chats = await host.chats.list(userId);
       for (const chat of chats) {
         for (const hash of agentRefs(chat.metadata)) found.blobs.add(hash);
         reading = `chat ${chat.id}'s messages`;
-        for (const m of await host.chats.messages(chat.id, userId)) if (!ledgerRefs(m.metadata, found)) return { refs: found.blobs, unknown: `chat ${chat.id}: the engine data on message ${m.id} can't be read` };
+        for (const m of await this.deps.messages(chat.id, userId)) if (!ledgerRefs(m.metadata, found)) return { refs: found.blobs, unknown: `chat ${chat.id}: the engine data on message ${m.id} can't be read` };
       }
       const open = new Set<ChatId>();
       for (const journal of this.deps.journals(userId)) {

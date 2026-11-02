@@ -14,7 +14,6 @@
 // the queue would wait behind for ever (classic-turn-map §10, "Deadlock").
 
 import type { RoleId, RoleSettings } from "../../shared/agent-roles";
-import type { AgentKnowledge } from "../../shared/agent-tools";
 import { roleBudget } from "../../shared/agent-settings";
 import type { ChatId, MessageId, UserId } from "../../shared/ids";
 import type { JsonObject, JsonValue } from "../../shared/json";
@@ -30,9 +29,8 @@ import type { Runtime } from "../runtime";
 import type { BeatMinds, SkipInput, SkipRun } from "../skip";
 import type { SkipPlanInput } from "../skip-plan";
 import type { ExtractRead, InterpretContext, InterpretRead } from "../steps";
-import type { JudgeAsk, Tie, TieOdds } from "../turn-steps";
+import type { JudgeAsk, ProseMark, Tie, TieOdds } from "../turn-steps";
 import type { PlanProse } from "../turn-model";
-import type { TaskReads } from "./brief";
 import type { ProseClash } from "./roles/prose-check";
 import { type AgentHandle, type AgentSpec, type AgentTraceTag, type AgentTurn, startAgent } from "./runtime";
 import type { ToolReader } from "./tools/read-view";
@@ -49,7 +47,7 @@ export interface TurnAgentCtx {
   userId: UserId;
   chatId: ChatId;
   generationId: string;
-  /** Reads the head before the plan and the planned head after it, as the role's knowledge has it; never through the ledger's queue. */
+  /** Reads the head before the plan and the planned head after it, everything secrets marked (every role reads so, whatever perspective it works from); never through the ledger's queue. */
   reader: ToolReader;
   /** The turn's writer (`turnWriter`): stages into this turn's draft; never `rt.ledger.write`. */
   writer: ToolWriter;
@@ -58,27 +56,21 @@ export interface TurnAgentCtx {
   settings: RoleSettings;
   /**
    * What the main agent told this run (`pipeline.mode: main`, C14): its task, then each revision it
-   * sent, framed by the Main agent page's texts, as each task of the run may be told it (`TurnBrief`);
-   * an agent-backed role puts it after its own instructions. Null on the fixed pipeline, and for
-   * another role's run inside this one's (`roleCtx`); ignored by a prompt-only run, which is
-   * classic's own call.
+   * sent, framed by the Main agent page's texts, whole; an agent-backed role puts it after its own
+   * instructions. Null on the fixed pipeline, and for another role's run inside this one's
+   * (`roleCtx`); ignored by a prompt-only run, which is classic's own call.
    */
-  brief: TurnBrief | null;
+  brief: string | null;
   /** The texts its role's agents are told in place of the user's own (Test's, with the text it checks in place); absent in play. */
   texts?: PromptTexts;
   /**
-   * The same run's reader and writer as `knowledge` reads and checks, for a task its role works with
-   * less than the role reads with (the director's brief and outline, as the player character): the
-   * same turn, its head and draft, its agent id and its tier.
+   * The narrator's sections named by `slots` (Settings → Agents → Context's sources), as the narrator
+   * would get them now: from the head this role reads, with the scene's lore and notes this turn so
+   * far, each whole, in rank order, secrets marked as the narrator's knowledge says; "" for none.
    */
-  readAs(knowledge: AgentKnowledge): { reader: ToolReader; writer: ToolWriter };
+  sections(slots: readonly string[]): Promise<string>;
   /** Where its agent loads lore into the reply the turn is writing (`lore_load`, DESIGN §4.6). */
   loads: LoreLoads;
-}
-
-/** The main agent's words for a run, as a task of it reading with `reads` may be told them: the lines that name nothing that knowledge doesn't reach (`screenBrief`). */
-export interface TurnBrief {
-  for(reads: TaskReads): string;
 }
 
 /**
@@ -209,11 +201,10 @@ export interface SceneTask extends RoleTask<SceneOut> {
   state: WorldState;
 }
 
-/** What the scene gives the narrator: live lore ids, and notes, with the knowledge they were written with (its role's; a scene told only its task, the player character's), which the narrator's sections hold them to; and the lore ids its answer gave that the world has no entry for (`unknown`), which its run reports. */
+/** What the scene gives the narrator: live lore ids, and notes, which the narrator's sections mark where they carry a secret; and the lore ids its answer gave that the world has no entry for (`unknown`), which its run reports. */
 export interface SceneOut {
   lore: string[];
   notes: string[];
-  knowledge: AgentKnowledge;
   unknown?: string[];
 }
 
@@ -223,8 +214,8 @@ export interface ProseAsk {
   template: string | null;
   /** The facts it reads, as classic fills them (`safeVars`). */
   vars: Readonly<Record<string, string>>;
-  /** Whether a line it writes is withheld whole: it carries an unrevealed secret, or names someone or something hidden that it wasn't told. */
-  withheld(line: string): boolean;
+  /** How a line it writes goes on (`ProseMark`): marked in the user's wording when it carries an unrevealed secret, or names someone or something hidden that it wasn't told; never left out. */
+  mark: ProseMark;
 }
 
 /** director: the brief and the prose outline for the planned turn, from the plan's own lines. */
@@ -242,8 +233,8 @@ export interface ProseTask extends RoleTask<PlanProse> {
 
 /**
  * What the director gives the narrator for a planned turn: its prose, and lines of its own where it
- * rewrote the engine's (none: the engine's stand); and the lines of its answer it withheld for
- * contradicting the state it was given (`flagged`, `roles/prose-check.ts`), which its run reports.
+ * rewrote the engine's (none: the engine's stand); and the lines of its answer that contradict the
+ * state it was given (`flagged`, `roles/prose-check.ts`), kept and reported with its run.
  */
 export interface DirectorProse {
   prose: PlanProse;
@@ -299,7 +290,8 @@ export interface ChoicesTask extends RoleTask<string[]> {
   /** The world's or the user's own words for the choices step, filled in; null for the shipped. */
   template: string | null;
   vars: Readonly<Record<string, string>>;
-  withheld(line: string): boolean;
+  /** Whether a suggestion carries a secret (an unrevealed secret's words, a hidden name it wasn't told): kept, its chip a spoiler the player taps open, and marked where the main agent reads it. */
+  secret(line: string): boolean;
 }
 
 /**

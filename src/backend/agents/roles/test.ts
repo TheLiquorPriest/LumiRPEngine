@@ -42,6 +42,7 @@ import { type ChatHead, chatHead } from "../tools/workspace";
 import type { OpRefusal, ToolWriter } from "../tools/writer";
 import type { TurnAgentCtx } from "../turn-ctx";
 import { turnReader } from "../turn-writer";
+import { roleSections } from "../context";
 import { namesOf, type RoleAnswer, runRoleAgent } from "./agent";
 import { roleContract } from "./contracts";
 import { choicesRun, proseRun } from "./director";
@@ -253,8 +254,8 @@ const GROUNDED: Readonly<Record<string, Build>> = {
     if (!run) return { run: null, left: ["suggested next moves: the choices step is off"] };
     if (!reply) return { run: null, left: [] };
     const { vars, secrets } = replyFacts(rt, m, reply.text);
-    const withheld = rt.choiceWithheld(m.world, m.at.state, secrets, [`${reply.text}\n${m.user}`, ...Object.values(vars)].join("\n"));
-    return { run: (ctx) => choicesRun(rt, { reply: reply.text, template: run.template ? renderTemplate(run.template.template, vars) : null, vars, withheld, classic: noClassic }, ctx), left: [] };
+    const secret = rt.choiceSecret(m.world, m.at.state, secrets, [`${reply.text}\n${m.user}`, ...Object.values(vars)].join("\n"));
+    return { run: (ctx) => choicesRun(rt, { reply: reply.text, template: run.template ? renderTemplate(run.template.template, vars) : null, vars, secret, classic: noClassic }, ctx), left: [] };
   },
   [roleContractId("world", "effects")]: async (rt, m) => {
     const run = (["extract", "choices"] as const).flatMap((purpose) => stepRuns(m, purpose, "effects"))[0];
@@ -324,7 +325,7 @@ export async function roleTextTest(rt: Runtime, input: { userId: UserId; chatId:
         userId,
         chatId,
         generationId: `test:${def.id}`,
-        reader: turnReader(rt, () => m.head, { userId, chatId, knowledge: own.knowledge === "own" ? null : own.knowledge }),
+        reader: turnReader(rt, () => m.head, { userId, chatId, knowledge: "gm", marks: true }),
         writer,
         role,
         agentId: `test:${role}`,
@@ -332,7 +333,8 @@ export async function roleTextTest(rt: Runtime, input: { userId: UserId; chatId:
         settings: { ...own, families: [] },
         brief: null,
         texts,
-        readAs: (knowledge) => ({ reader: turnReader(rt, () => m.head, { userId, chatId, knowledge }), writer }),
+        // The sections its context starts it with, from the chat's head as it stands, as a turn's would be before the scene.
+        sections: (slots) => roleSections(rt, { userId, chatId, head: m.head, slots, scene: null, said: "", texts }),
         // A Test writes no reply: nothing it loads is told to a narrator.
         loads: { add: () => false },
       };

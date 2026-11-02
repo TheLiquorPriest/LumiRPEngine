@@ -15,7 +15,7 @@
 
 import { useEffect, useId, useState } from "preact/hooks";
 import type { AcceptanceConnection, AcceptanceRunView, AcceptanceState, AgentBudget, AgentLimitDef, AgentLimitUnit, AgentSettings, ConnectionThrottle, KeptSettings, MemoryPlacement, PipelineMode, ReviewPlacement, TurnBudget } from "../../shared/agent-settings";
-import { AGENT_ROLES, BUDGET_DEFS, CEILING_MIN, COMPACTION_DEFS, DEFAULT_ACCEPTANCE, defaultAgentSettings, ESTIMATE_FACTOR_MIN, GM_OPS_DEF, KEPT_DEFS, LOOP_DEFS, MEMORY_PLACEMENT_LABELS, MEMORY_PLACEMENTS, OUTPUT_CHARS_DEF, PIPELINE_MODE_LABELS, PIPELINE_MODES, REVIEW_PLACEMENT_LABELS, REVIEW_PLACEMENTS, roleCaching, THROTTLE_MIN, TURN_DEFS } from "../../shared/agent-settings";
+import { AGENT_ROLES, BUDGET_DEFS, CEILING_MIN, COMPACTION_DEFS, DEFAULT_ACCEPTANCE, defaultAgentSettings, ESTIMATE_FACTOR_MIN, GM_OPS_DEF, KEPT_DEFS, LOOP_DEFS, MEMORY_PLACEMENT_LABELS, MEMORY_PLACEMENTS, OUTPUT_CHARS_DEF, PIPELINE_MODE_LABELS, PIPELINE_MODES, REVIEW_PLACEMENT_LABELS, REVIEW_PLACEMENTS, roleCaching, SYSTEM_TOKENS_DEF, THROTTLE_MIN, TURN_DEFS } from "../../shared/agent-settings";
 import { hasOwn, type JsonObject } from "../../shared/json";
 import type { Limit } from "../../shared/minds";
 import { formatMs } from "../../shared/timeouts";
@@ -110,17 +110,20 @@ export function defaultButton(label: string, busy: boolean, reset: () => void) {
 }
 
 /**
- * One of an agent's own budget limits (the GM assistant's, the main agent's, a role's): what it
- * limits, what happens when it's reached, and its value, every agent's until it has its own (`owner`
- * names whose: "The assistant's"). Changing the number (or No limit, where it may be lifted) sets its
- * own; Every agent's drops it, so every agent's limit applies again. An agent that runs outside any
- * turn (`outsideTurn`: the GM assistant) has no turn to bound a limit lifted to none.
+ * One of an agent's own budget limits (the GM assistant's, the main agent's, a role's, the final
+ * review's): what it limits, what happens when it's reached, and its value, the limit it falls back
+ * on until it has its own (`every`: every agent's, or as `fallback` names it: "the main agent's";
+ * `owner` names whose: "The assistant's"). Changing the number (or No limit, where it may be lifted)
+ * sets its own; the fallback's button drops it, so that limit applies again. An agent that runs
+ * outside any turn (`outsideTurn`: the GM assistant) has no turn to bound a limit lifted to none.
  */
-export function OwnLimitRow(props: { id: keyof AgentBudget; owner: string; def: AgentLimitDef; own: Limit | undefined; every: Limit; busy: boolean; outsideTurn?: boolean; set(value: Limit | null): void }) {
+export function OwnLimitRow(props: { id: keyof AgentBudget; owner: string; fallback?: string; def: AgentLimitDef; own: Limit | undefined; every: Limit; busy: boolean; outsideTurn?: boolean; set(value: Limit | null): void }) {
   const { def, own, every } = props;
+  const fallback = props.fallback ?? "every agent's";
+  const Fallback = fallback.charAt(0).toUpperCase() + fallback.slice(1);
   const value = own ?? every;
   const seconds = def.unit === "ms";
-  // Turning No limit off starts from every agent's limit when it's a number, else from the least the limit takes.
+  // Turning No limit off starts from the fallback's limit when it's a number, else from the least the limit takes.
   const onValue = every === "none" ? def.min : every;
   const unitLabel = seconds ? "seconds" : def.unit === "tokens" ? "tokens" : def.unit === "chars" ? "characters" : null;
   return (
@@ -128,8 +131,8 @@ export function OwnLimitRow(props: { id: keyof AgentBudget; owner: string; def: 
       <div class="lre-set-ext-head">
         <span class="lre-set-ext-title">{def.label}</span>
         {own === undefined ? null : (
-          <Button size="sm" variant="ghost" icon="undo" label={`Use every agent's ${def.label.toLowerCase()}, ${amountText(every, def.unit)}`} disabled={props.busy} onClick={() => props.set(null)}>
-            Every agent's
+          <Button size="sm" variant="ghost" icon="undo" label={`Use ${fallback} ${def.label.toLowerCase()}, ${amountText(every, def.unit)}`} disabled={props.busy} onClick={() => props.set(null)}>
+            {Fallback}
           </Button>
         )}
       </div>
@@ -148,7 +151,7 @@ export function OwnLimitRow(props: { id: keyof AgentBudget; owner: string; def: 
         />
       )}
       <span class="lre-small lre-muted">
-        {own === undefined ? `Every agent's limit applies: ${amountText(every, def.unit)}` : `${props.owner} own; every agent's is ${amountText(every, def.unit)}`}
+        {own === undefined ? `${Fallback} limit applies: ${amountText(every, def.unit)}` : `${props.owner} own; ${fallback} is ${amountText(every, def.unit)}`}
         {/* Outside any turn, a "none" that leans on a turn's bounds is no limit at all. */}
         {value === "none" && def.none ? (props.outsideTurn && def.turnBound ? "; no limit" : `; no limit: ${def.none}`) : ""}.
       </span>
@@ -583,7 +586,23 @@ export function BudgetsSection(props: { agents: AgentSettings; patch(patch: Json
         </p>
         <LimitRow id="gmOpsPerTurn" def={GM_OPS_DEF} value={agents.gmOpsPerTurn} standard={DEFAULTS.gmOpsPerTurn} busy={busy} set={(gmOpsPerTurn) => props.patch({ agents: { gmOpsPerTurn } })} />
       </div>
-      <BudgetGroup<keyof KeptSettings> title="Kept in memory" lead="What the engine holds at once for agent turns, across your chats: past each, the oldest is let go." defs={KEPT_DEFS} values={agents.kept} standard={DEFAULTS.kept} busy={busy} set={(key, value) => props.patch({ agents: { kept: { [key]: value } } })} />
+      <BudgetGroup<keyof KeptSettings> title="Kept in memory" lead="What the engine holds at once, across your chats: past each, the oldest, or the one used longest ago, is let go." defs={KEPT_DEFS} values={agents.kept} standard={DEFAULTS.kept} busy={busy} set={(key, value) => props.patch({ agents: { kept: { [key]: value } } })} />
+    </Section>
+  );
+}
+
+/** Settings → Agents → System instructions: how much of every agent's prompt its system files may take, and what they are. Hook-free. */
+export function SystemInstructionsSection(props: { agents: AgentSettings; patch(patch: JsonObject): void; busy: boolean }) {
+  return (
+    <Section title="System instructions" flush>
+      <div class="lre-set-rows lre-set-group" data-lre-agent-group="System instructions">
+        <p class="lre-set-timeout-lead">
+          {
+            "Every agent is told AGENTS.md, and each role its own roles/<role>.md (main for the main agent, assistant for the GM assistant, a turn role by its id), after its own system prompt: your global workspace's (~/) first, then this chat's, each whole in that order. Write them in GM → Workspace; a file that isn't there costs nothing."
+          }
+        </p>
+        <LimitRow id="systemTokens" def={SYSTEM_TOKENS_DEF} value={props.agents.systemTokens} standard={DEFAULTS.systemTokens} busy={props.busy} set={(systemTokens) => props.patch({ agents: { systemTokens } })} />
+      </div>
     </Section>
   );
 }
@@ -593,7 +612,7 @@ export function AgentsSection(props: { agents: AgentSettings; patch(patch: JsonO
   const connections = useConnections();
   return (
     <div class="lre-stack" data-lre-settings-page="agents">
-      <p class="lre-set-lead">What the agent runtime runs under: how an agent turn runs, its budgets, compaction, recording, throttles, caching and acceptance runs. No classic step reads any of these.</p>
+      <p class="lre-set-lead">What the agent runtime runs under: how an agent turn runs, every agent's system instructions, its budgets, compaction, recording, throttles, caching and acceptance runs. No classic step reads any of these.</p>
       <Section title="Thinking in agent tool loops">
         <HostSwitch label="Thinking in agent tool loops" checked={agents.thinkingInToolLoops} disabled={busy} onChange={(on) => props.patch({ agents: { thinkingInToolLoops: on } })} />
         <span class="lre-small lre-muted">
@@ -601,6 +620,7 @@ export function AgentsSection(props: { agents: AgentSettings; patch(patch: JsonO
         </span>
       </Section>
       <AgentTurnSettings agents={agents} patch={props.patch} busy={busy} />
+      <SystemInstructionsSection agents={agents} patch={props.patch} busy={busy} />
       <BudgetsSection agents={agents} patch={props.patch} busy={busy} />
       <ThrottlesSection throttles={agents.throttles} connections={connections} patch={props.patch} busy={busy} />
       <CachingSection agents={agents} patch={props.patch} busy={busy} />

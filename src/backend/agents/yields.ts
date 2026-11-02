@@ -1,9 +1,9 @@
 // What a role's run left the engine, in words (DESIGN §4.6, "What a run gave"): the changes it
 // staged, landing when the turn commits or held for the review card, and those it asked for that were
-// refused; and what of its answer the engine didn't take, and why: the knowledge step's refusals, the
+// refused, each with why; and what of its answer the engine didn't take, and why: the knowledge step's refusals, the
 // read's proposals it didn't read and the things they name that the world has no entity for, the
-// scene's lore the world doesn't have, the director's lines withheld for contradicting the state it
-// was given, or an answer that held nothing. Nothing a run answered drops silently: the main agent's
+// scene's lore the world doesn't have, the director's lines flagged (and kept) for contradicting the
+// state it was given, or an answer that held nothing. Nothing a run answered drops silently: the main agent's
 // run_role and revise answers carry these words, and Diagnostics and the host log carry the same, on
 // either pipeline. Every reason is a registry text on the Main agent page (`shared/agent-yield.ts`),
 // rendered in the user's own texts.
@@ -36,20 +36,18 @@ export interface RunWrites {
 }
 
 /**
- * What a run of `kind` that answered `out` left the engine, with its changes (`writes`), in `texts`. A
- * refused change gives the writer's reason, worded for the role's knowledge; with `reasons` false (a
- * reader whose knowledge doesn't reach the role's) only its code, and a director's withheld lines
- * only their count.
+ * What a run of `kind` that answered `out` left the engine, with its changes (`writes`), in `texts`.
+ * A refused change gives the writer's reason, everyone's with its secrets marked, whoever reads it.
  */
-export function runYield(texts: PromptTexts, kind: MainRequestKind, out: unknown, writes: RunWrites, reasons = true): RunYield {
+export function runYield(texts: PromptTexts, kind: MainRequestKind, out: unknown, writes: RunWrites): RunYield {
   const say = (id: string, vars: Readonly<Record<string, string>> = {}): string => renderPrompt(id, texts, vars);
   const parts: string[] = [];
   const lands = writes.staged.filter((o) => o.mode !== "confirm").length;
   const held = writes.staged.length - lands;
   if (lands > 0) parts.push(say(YIELD_TEXT.staged, { count: String(lands) }));
   if (held > 0) parts.push(say(YIELD_TEXT.review, { count: String(held) }));
-  if (writes.refused.length > 0) parts.push(say(YIELD_TEXT.refused, { count: String(writes.refused.length), reasons: [...new Set(writes.refused.map((r) => (reasons ? r.reason : r.code)))].join("; ") }));
-  const lost = lostOf(say, kind, out, reasons);
+  if (writes.refused.length > 0) parts.push(say(YIELD_TEXT.refused, { count: String(writes.refused.length), reasons: [...new Set(writes.refused.map((r) => r.reason))].join("; ") }));
+  const lost = lostOf(say, kind, out);
   return { writes: parts.length > 0 ? say(YIELD_TEXT.writes, { writes: parts.join("; ") }) : "", lost: lost.length > 0 ? say(YIELD_TEXT.lost, { lost: lost.join("; ") }) : "" };
 }
 
@@ -88,8 +86,8 @@ export function recordCommit(rt: Pick<Runtime, "diag" | "host">, at: DiagAt, tex
   }
 }
 
-/** What of a run's answer the engine didn't take, each reason with how many; an answer that held nothing says so. */
-function lostOf(say: (id: string, vars?: Readonly<Record<string, string>>) => string, kind: MainRequestKind, out: unknown, reasons: boolean): string[] {
+/** What of a run's answer the engine didn't take, each reason with how many; an answer that held nothing says so. A director's flagged line stays in the reply's prompt: it is told here with its words. */
+function lostOf(say: (id: string, vars?: Readonly<Record<string, string>>) => string, kind: MainRequestKind, out: unknown): string[] {
   switch (kind) {
     case "knowledge": {
       const k = (out as RunMindsResult).knowledge;
@@ -118,7 +116,7 @@ function lostOf(say: (id: string, vars?: Readonly<Record<string, string>>) => st
       const flagged = (out as DirectorProse).flagged ?? [];
       return PROSE_CLASHES.flatMap((why) => {
         const of = flagged.filter((f) => f.kind === why);
-        return of.length > 0 ? [say(YIELD_TEXT.prose(why), { count: String(of.length), lines: reasons ? `: ${of.map((f) => `"${f.line}"`).join("; ")}` : "" })] : [];
+        return of.length > 0 ? [say(YIELD_TEXT.prose(why), { count: String(of.length), lines: `: ${of.map((f) => `"${f.line}"`).join("; ")}` })] : [];
       });
     }
     case "scene": {

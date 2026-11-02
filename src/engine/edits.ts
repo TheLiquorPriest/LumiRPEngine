@@ -17,7 +17,6 @@ import type { EntityId, FieldId } from "../shared/ids";
 import { DOMAINS } from "../shared/ids";
 import type { JsonObject, JsonValue } from "../shared/json";
 import { isRecord, safeKey } from "../shared/json";
-import { type AgentKnowledge, isAgentKnowledge } from "../shared/agent-tools";
 import type { FixDirective, FixOp, LedgerEvent, PostEntry, WorkspaceOp } from "../shared/ledger";
 import type { Holding } from "../shared/minds";
 import type { EditOp } from "../shared/protocol";
@@ -45,7 +44,7 @@ import type { WorldState } from "./state";
 import { clockFix } from "./time";
 import { moveTrack } from "./tracks";
 import { Working } from "./working";
-import { readersOf, workspaceOf, workspacePins, workspaceReaders, wsDelete, wsPin, wsReaders, wsWrite } from "./workspace";
+import { workspaceOf, workspacePins, wsDelete, wsPin, wsWrite } from "./workspace";
 
 export interface EditOptions {
   /** The GM editor writes locked fields too; a player's ✎ fix can't. */
@@ -387,25 +386,17 @@ function effectOp(reg: Registry, w: Working, op: Extract<EditOp, { op: "effect" 
 }
 
 /**
- * A workspace change (DESIGN §4.4) as its events. A write sets whose knowledge may read the file
- * (its readers) with its text: writing the text a file holds already, for the readers it has,
- * changes nothing. A move is the file written at its new path and removed from its old one, its pin
- * and its readers going with it; a pin or unpin, or a change of readers, needs the file, and a state
- * it isn't in already.
+ * A workspace change (DESIGN §4.4) as its events: writing the text a file holds already changes
+ * nothing; a move is the file written at its new path and removed from its old one, its pin going
+ * with it; a pin or unpin needs the file, and a state it isn't in already.
  */
 function workspaceOp(w: Working, op: WorkspaceOp): Rejection | null {
   const files = workspaceOf(w.state);
   switch (op.op) {
-    case "ws_write": {
-      if (!isWorkspacePath(op.path) || !isBlobHash(op.hash) || !isAgentKnowledge(op.readers)) return reject("bad_op", "a workspace file's path is names joined by /, its body a stored text, and its readers a knowledge");
-      const held = own(files, op.path);
-      // A new file is the GM's alone until its readers are set.
-      const before = held === undefined ? "gm" : readersOf(w.state, op.path);
-      if (held === op.hash && before === op.readers) return reject("no_change", "the file already holds that text");
-      const events = held === op.hash ? [] : [wsWrite(op.path, op.hash)];
-      if (before !== op.readers) events.push(wsReaders(op.path, op.readers));
-      return applyAll(w, events);
-    }
+    case "ws_write":
+      if (!isWorkspacePath(op.path) || !isBlobHash(op.hash)) return reject("bad_op", "a workspace file's path is names joined by /, and its body a stored text");
+      if (own(files, op.path) === op.hash) return reject("no_change", "the file already holds that text");
+      return w.apply(wsWrite(op.path, op.hash));
     case "ws_delete":
       // The event's own check refuses a file that isn't there (`missing_file`).
       return w.apply(wsDelete(op.path));
@@ -415,21 +406,14 @@ function workspaceOp(w: Working, op: WorkspaceOp): Rejection | null {
       if (!isWorkspacePath(op.to)) return reject("bad_op", "a workspace file's path is names joined by /");
       if (op.to === op.from) return reject("no_change", "the file is already there");
       if (own(files, op.to) !== undefined) return reject("file_exists", `there is a workspace file ${op.to} already`);
-      const shared = own(workspaceReaders(w.state), op.from);
       const events = [wsWrite(op.to, hash), wsDelete(op.from)];
       if (own(workspacePins(w.state), op.from)) events.push(wsPin(op.to, true));
-      if (shared !== undefined) events.push(wsReaders(op.to, shared));
       return applyAll(w, events);
     }
     case "ws_pin":
       if (own(files, op.path) === undefined) return reject("no_file", `no workspace file ${op.path}`);
       if ((own(workspacePins(w.state), op.path) === true) === op.pinned) return reject("no_change", op.pinned ? "the file is pinned already" : "the file isn't pinned");
       return w.apply(wsPin(op.path, op.pinned));
-    case "ws_readers":
-      if (own(files, op.path) === undefined) return reject("no_file", `no workspace file ${op.path}`);
-      if (!isAgentKnowledge(op.readers)) return reject("bad_op", "a file's readers are a knowledge: pov, everyone or gm");
-      if (readersOf(w.state, op.path) === op.readers) return reject("no_change", "the file is read with that knowledge already");
-      return w.apply(wsReaders(op.path, op.readers));
   }
 }
 
@@ -496,7 +480,6 @@ function applyOp(reg: Registry, w: Working, op: FixOp, opts: EditOptions, rng: R
     case "ws_delete":
     case "ws_move":
     case "ws_pin":
-    case "ws_readers":
       return workspaceOp(w, op);
     case "clock": {
       // The clock set as its ✎ fix sets it (DESIGN §9.2, §12), from where the operations before it leave the story.
@@ -586,22 +569,21 @@ export function parseEditOps(raw: unknown): EditOp[] | null {
 /**
  * What a `fix` entry asks for (`FixDirective.ops`), checked for shape as `parseEditOps` checks a
  * request's: the GM editor's operations, plus an agent's workspace changes and clock sets. A path's
- * and a hash's form, a file's readers, and a time's, are checked when they resolve. A write stored
- * before writes named their readers reads as the GM's alone, as a file no write shared is.
+ * and a hash's form, and a time's, are checked when they resolve. The readers an earlier build's
+ * write named are read and ignored; its op that set them alone is no operation, so an entry holding
+ * it asks for nothing this reads and its own events stand (`resolveFix`).
  */
 export function parseFixOps(raw: unknown): FixOp[] | null {
   return parseOps(raw, (o): FixOp | null => {
     switch (o.op) {
       case "ws_write":
-        return str(o.path) && str(o.hash) && (o.readers === undefined || str(o.readers)) ? { op: "ws_write", path: o.path, hash: o.hash, readers: (o.readers ?? "gm") as AgentKnowledge } : null;
+        return str(o.path) && str(o.hash) ? { op: "ws_write", path: o.path, hash: o.hash } : null;
       case "ws_delete":
         return str(o.path) ? { op: "ws_delete", path: o.path } : null;
       case "ws_move":
         return str(o.from) && str(o.to) ? { op: "ws_move", from: o.from, to: o.to } : null;
       case "ws_pin":
         return str(o.path) && typeof o.pinned === "boolean" ? { op: "ws_pin", path: o.path, pinned: o.pinned } : null;
-      case "ws_readers":
-        return str(o.path) && str(o.readers) ? { op: "ws_readers", path: o.path, readers: o.readers as AgentKnowledge } : null;
       case "clock":
         return str(o.time) ? { op: "clock", time: o.time } : null;
       case "fix_set":

@@ -10,17 +10,19 @@
 //   counted as left out.
 // - **The pins manifest** is a workspace file (`.pins.json`) listing files per role: `main` for the
 //   main agent, a role's id for a role, each with its files in order and its budget in tokens, else
-//   the pins budget of Settings → Agents → Main agent. An agent's pinned files are the manifest's for
-//   it, then those pinned in GM → Workspace: the main agent's in its turn task, a role's in its
-//   prompt after its instructions (`roles/agent.ts`), each framed by its own page's texts
-//   (`PinsTexts`). A file past the budget comes as its headings, which `workspace_read` reads whole.
-//   Files are read with the agent's knowledge, as its workspace tools read them.
+//   the pins budget of Settings → Agents → Main agent. A listed file may be a chat path or a global
+//   one (`~/`). An agent's pinned files are the manifest's for it, then those pinned in GM →
+//   Workspace: the main agent's in its turn task, a role's in its prompt after its instructions
+//   (`roles/agent.ts`), each framed by its own page's texts (`PinsTexts`). A file past the budget
+//   comes as its headings, which `workspace_read` reads whole. Neither a turn's transcript nor a
+//   system file (`AGENTS.md`, `roles/<role>.md`, at either level) is ever one: a system file is
+//   already in the agent's system prompt (`system-files.ts`).
 
 import { isRecord, safeKey } from "../../shared/json";
 import { own } from "../../engine/pack-kit";
 import { MAIN_TEXT } from "../../shared/main-agent-prompts";
 import type { PromptTexts } from "../../shared/prompts";
-import { isWorkspacePath, PINS_PATH } from "../../shared/stores";
+import { isFilePath, isSystemPath, PINS_PATH } from "../../shared/stores";
 import { nounFor } from "../../shared/words";
 import type { ChainMessage } from "../../engine/ledger/chain";
 import type { LedgerCore } from "../../engine/ledger/journal";
@@ -67,7 +69,7 @@ export function pinsManifestOf(text: string | null): Record<string, PinsEntry> {
   for (const [role, value] of Object.entries(raw)) {
     const entry = Array.isArray(value) ? { files: value } : isRecord(value) ? value : null;
     if (!entry || !safeKey(role)) continue;
-    const files = Array.isArray(entry.files) ? [...new Set(entry.files.filter(isWorkspacePath))] : [];
+    const files = Array.isArray(entry.files) ? [...new Set(entry.files.filter(isFilePath))] : [];
     const tokens = "tokens" in entry && typeof entry.tokens === "number" && Number.isInteger(entry.tokens) && entry.tokens >= 0 ? entry.tokens : null;
     out[role] = { files, tokens };
   }
@@ -78,20 +80,21 @@ export function pinsManifestOf(text: string | null): Record<string, PinsEntry> {
 const HEADING = /^#{1,6}\s/;
 
 /**
- * `role`'s pinned files as its prompt brings them in, read with the view's knowledge and framed by
- * `framing`: the manifest's for it, then, with `pinned`, the files pinned in GM → Workspace; each
- * whole while it fits the role's budget, else as its headings. Empty when it has none. A turn's
- * transcript (`transcripts/`) is never one, even listed in the manifest.
+ * `role`'s pinned files as its prompt brings them in, framed by `framing`: those Settings → Agents →
+ * Context pins for it (`config`), then the manifest's for it, then, with `pinned`, the files pinned in
+ * GM → Workspace; each whole while it fits the role's budget, else as its headings. Empty when it has
+ * none. A path the chat has no file at is passed over. A turn's transcript (`transcripts/`) and a
+ * system file are never one, even listed in the manifest.
  */
-export async function pinnedFiles(view: ToolReadView, input: { role: string; tokens: number; pinned: boolean; texts: PromptTexts; framing: PinsTexts }): Promise<string> {
+export async function pinnedFiles(view: ToolReadView, input: { role: string; tokens: number; pinned: boolean; texts: PromptTexts; framing: PinsTexts; config?: readonly string[] }): Promise<string> {
   const { texts, framing } = input;
-  const files = (await view.workspace()).filter((f) => f.transcript !== true);
+  const files = (await view.workspace()).filter((f) => f.transcript !== true && !isSystemPath(f.path));
   const byPath = new Map(files.map((f) => [f.path, f]));
   const stored = byPath.get(PINS_PATH);
   const manifest = pinsManifestOf(stored ? await view.blob(stored.hash) : null);
   const entry = own(manifest, input.role);
   const pinned = input.pinned ? files.filter((f) => f.pinned && f.path !== PINS_PATH).map((f) => f.path) : [];
-  const paths = [...new Set([...(entry?.files ?? []), ...pinned])];
+  const paths = [...new Set([...(input.config ?? []), ...(entry?.files ?? []), ...pinned])];
   const budget = entry?.tokens ?? input.tokens;
   let left = budget;
   const parts: string[] = [];

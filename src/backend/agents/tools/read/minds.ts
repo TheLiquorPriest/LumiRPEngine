@@ -1,8 +1,6 @@
 // The minds family (AGENT-LOOP-PLAN §6: "a mind, its notes and commitments"; INC1-SPEC R3a): a
-// character's mind, as each knowledge may read it.
+// character's mind, as each view reads it.
 //
-// - `pov`: never. No player surface shows anyone's mind (DESIGN §24.9), so whoever is asked about,
-//   the answer is the hidden note.
 // - `everyone`: what the narrator's Minds section gets of them this turn (`mindLines`): their line,
 //   marked as a secret known to whose mind it is and kept from the player character when it carries
 //   an unrevealed secret's words or names someone or something the player character can't see, as
@@ -123,27 +121,35 @@ interface GmMind {
  */
 function narratorLine(view: ToolReadView, id: EntityId): string | null {
   const line = mindLines(view.ctx).find((l) => l.entity === id);
-  if (!line) return null;
-  const carries = findLeaks(line.line, unrevealedSecrets(view.registry, view.world, view.state)).length > 0 || hiddenNameCheck(view.registry, view.world, view.state, view.pov)(line.line);
-  return view.mark(line.line, carries ? { known: [line.name], kept: [view.name(view.pov)] } : null);
+  return line ? mindMarker(view, line.name)(line.line) : null;
 }
 
-/** Everything GM → Minds shows of a character, with everyone and everywhere in it by ref. */
+/** A text of `name`'s mind as the view gives it: one carrying an unrevealed secret's words or a name the player character can't see marked, where the view marks, as a secret known to `name` and kept from the player character. */
+function mindMarker(view: ToolReadView, name: string): (text: string) => string {
+  if (!view.marked) return (text) => text;
+  const secrets = unrevealedSecrets(view.registry, view.world, view.state);
+  const hidden = hiddenNameCheck(view.registry, view.world, view.state, view.pov);
+  const kept = { known: [name], kept: [view.name(view.pov)] };
+  return (text) => view.mark(text, findLeaks(text, secrets).length > 0 || hidden(text) ? kept : null);
+}
+
+/** Everything GM → Minds shows of a character, with everyone and everywhere in it by ref; where the view marks, each of its mind's texts carrying a secret marked (`mindMarker`). */
 function gmMind(view: ToolReadView, who: ViewRef, c: MindsGmCharacter): GmMind {
   const person = (id: EntityId): ViewRef => view.entity(id) ?? { id, name: view.name(id) };
   const place = (id: PlaceId | null): ViewRef | null => (id === null ? null : (view.place(id) ?? { id, name: view.name(id) }));
+  const said = mindMarker(view, view.name(who.id));
   const m = c.mind;
   return {
     who,
     fidelity: { level: c.fidelity.level, score: Math.round(c.fidelity.score), reasons: c.fidelity.reasons, pin: c.fidelity.pin },
     refreshQueued: c.refreshQueued,
-    intent: c.intent,
-    mind: m ? { at: m.clock, level: m.level, moment: m.moment, reason: m.reason, place: place(m.place), monologue: m.monologue, depiction: m.depiction, intent: m.intent, reactions: m.reactions, mood: m.mood, interrupt: m.interrupt, withheld: m.withheld } : null,
-    plans: c.plans.map((p) => ({ id: p.id, what: p.what, kind: p.kind, from: p.fromText, to: p.toText, where: place(p.where), with: p.with.map(person), priority: p.priority, status: p.status, source: p.source, reason: p.reason ?? undefined, amount: p.cents === undefined ? undefined : formatMoney(p.cents, view.world.currency), cents: p.cents })),
-    commitments: c.commitments.map((x) => ({ id: x.id, kind: x.kind, text: x.text, with: x.with.map(person), due: x.dueText, status: x.status })),
-    notes: c.notes.map((n) => ({ id: n.id, text: n.text, at: n.clock, salience: n.salience, salienceNow: n.now, faded: n.faded })),
-    witness: c.witness.map((w) => ({ what: w.what, how: w.how, by: w.by === null ? null : person(w.by), place: place(w.place), at: w.clock })),
-    summary: c.summary,
+    intent: c.intent ? { ...c.intent, text: said(c.intent.text) } : null,
+    mind: m ? { at: m.clock, level: m.level, moment: m.moment, reason: m.reason, place: place(m.place), monologue: said(m.monologue), depiction: said(m.depiction), intent: said(m.intent), reactions: m.reactions.map(said), mood: m.mood, interrupt: m.interrupt, withheld: m.withheld } : null,
+    plans: c.plans.map((p) => ({ id: p.id, what: said(p.what), kind: p.kind, from: p.fromText, to: p.toText, where: place(p.where), with: p.with.map(person), priority: p.priority, status: p.status, source: p.source, reason: p.reason ?? undefined, amount: p.cents === undefined ? undefined : formatMoney(p.cents, view.world.currency), cents: p.cents })),
+    commitments: c.commitments.map((x) => ({ id: x.id, kind: x.kind, text: said(x.text), with: x.with.map(person), due: x.dueText, status: x.status })),
+    notes: c.notes.map((n) => ({ id: n.id, text: said(n.text), at: n.clock, salience: n.salience, salienceNow: n.now, faded: n.faded })),
+    witness: c.witness.map((w) => ({ what: said(w.what), how: w.how, by: w.by === null ? null : person(w.by), place: place(w.place), at: w.clock })),
+    summary: said(c.summary),
   };
 }
 
@@ -155,8 +161,6 @@ export const MINDS_TOOLS: readonly ToolDefinition[] = [
     parameters: () => objectSchema({ person: text() }, ["person"]),
     run: async (args, env) => {
       const view = await env.reader.view();
-      // No player surface shows a mind: whoever is asked about, it is beyond the player character.
-      if (view.knowledge === "pov") return view.refuse(TOOL_NOTE.hidden, { pov: view.name(view.pov) });
       const said = needText(view, "minds_read", args, "person");
       if (typeof said !== "string") return said;
       return view.read(() => {

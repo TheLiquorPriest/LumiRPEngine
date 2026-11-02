@@ -195,6 +195,8 @@ export const STEP_LABEL: Record<string, string> = {
   brief: "Writing the outline…",
   outline: "Writing the outline…",
   sections: "Filling the prompt…",
+  /** The main agent's final review of the narrator's prompt (DESIGN §4.6), after the sections are made. */
+  "final review": "Reviewing the prompt…",
   book: "Waiting for another chat of this world…",
   clear: "Clearing an earlier turn's sections…",
   restart: "Ready; reopen the chat to continue",

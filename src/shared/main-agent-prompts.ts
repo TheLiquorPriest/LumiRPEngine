@@ -22,11 +22,13 @@ export const MAIN_REQUEST_KINDS = ["interpret", "judge", "puzzle", "decisions", 
 export type MainRequestKind = (typeof MAIN_REQUEST_KINDS)[number];
 
 /** The main agent's tools, by name. */
-export const MAIN_TOOLS = { runRole: "run_role", revise: "revise", commit: "commit", summarize: "summarize" } as const;
+export const MAIN_TOOLS = { runRole: "run_role", revise: "revise", commit: "commit", summarize: "summarize", condense: "condense" } as const;
 
 /** The main agent's text ids, so code names them once. */
 export const MAIN_TEXT = {
   system: "main.system",
+  context: "main.context",
+  contextRole: "main.context.role",
   turn: "main.turn",
   digest: "main.digest",
   digestFresh: "main.digest.fresh",
@@ -63,7 +65,6 @@ export const MAIN_TEXT = {
   refusedCommitted: "main.refused.committed",
   committed: "main.committed",
   brief: "main.brief",
-  briefWithheld: "main.brief.withheld",
   briefRevision: "main.brief.revision",
   historyCall: "main.history.call",
   summary: "main.summary",
@@ -127,6 +128,16 @@ export const MAIN_AGENT_PROMPTS: readonly PromptDef[] = [
     vars: [v("world", "the world's name"), v("pov", "the player character's name")],
   },
   {
+    id: MAIN_TEXT.context,
+    page,
+    group: INSTRUCTIONS,
+    label: "How each role is set up",
+    note: "Follows the system prompt in the main agent's stable prefix: Settings → Agents → Context for every role, the guide it briefs the roles by. It steers; it screens nothing: every role's tools read everything, secrets marked.",
+    text: "How each role is set up (Settings → Agents → Context). A role's prompt already starts with what its line says it starts with, and its pinned files, and its tools read everything for themselves, each secret marked with whom it is known to and kept from. Brief each run with what its task needs beyond that: what you know that it doesn't, what to stress, what to leave alone. Never give a role what its line says it is never given, and pass a secret on only to a role whose work needs it, marked as it is marked.\n{{roles}}",
+    vars: [v("roles", "a line for each role, as below", true)],
+  },
+  { id: MAIN_TEXT.contextRole, page, group: INSTRUCTIONS, label: "One role's setup", note: "One line of How each role is set up, per role.", text: "- {{role}}: works from {{perspective}}; starts with {{start}}; never given {{never}}; pinned files: {{pins}}; its tools: {{tools}}", vars: [v("role", "the role's id, as run_role takes it", true), v("perspective", "the perspective it works from"), v("start", "the sections it starts with, or none"), v("never", "what it is never to be given, or none"), v("pins", "the workspace files pinned for it, or none"), v("tools", "its tool families, or none")] },
+  {
     id: MAIN_TEXT.turn,
     page,
     group: INSTRUCTIONS,
@@ -146,7 +157,7 @@ export const MAIN_AGENT_PROMPTS: readonly PromptDef[] = [
   },
   ...Object.entries(STAGE_TEXTS).map(([stage, t]): PromptDef => ({ id: MAIN_TEXT.stageLabel(stage as MainRoleStage), page, group: STAGES, label: t.label, note: "Fills {{stage}} in the stage's message.", text: t.text, vars: [] })),
   { id: MAIN_TEXT.enginePrepare, page, group: STAGES, label: "What the engine did: the checks", note: "Leads stage 3's message: the engine's checks and gates let the turn play, and the action it plays.", text: "The engine checked the turn and let it play. It plays: {{intent}}", vars: [v("intent", "the action the turn plays, with its parameters, or none")] },
-  { id: MAIN_TEXT.engineBeats, page, group: STAGES, label: "What the engine did: the plan", note: "Leads stage 5's message: what the engine planned, as the narrator is told it.", text: "The engine planned the turn:\n{{lines}}", vars: [v("lines", "the plan's outcome, montage and beat lines; their count only where the main agent's knowledge doesn't reach them", true)] },
+  { id: MAIN_TEXT.engineBeats, page, group: STAGES, label: "What the engine did: the plan", note: "Leads stage 5's message: what the engine planned, as the narrator is told it.", text: "The engine planned the turn:\n{{lines}}", vars: [v("lines", "the plan's outcome, montage and beat lines", true)] },
   { id: MAIN_TEXT.engineReply, page, group: STAGES, label: "What the engine did: the reply", note: "Leads stage 7's message, and ends a turn's session with the reply when no stage showed it.", text: "The narrator's reply:\n{{reply}}", vars: [v("reply", "the reply as written", true)] },
   { id: MAIN_TEXT.engineRemember, page, group: STAGES, label: "What the minds remember", note: "Leads the message of the memory the last turn left to this one: the reply they remember.", text: "The last reply, which the minds remember now:\n{{reply}}", vars: [v("reply", "the last reply as written", true)] },
   { id: MAIN_TEXT.open, page, group: REQUESTS, label: "A request", note: "One line of a stage's message per request: the role, as run_role takes it, and what the engine asks of it.", text: "- {{role}}: {{what}}", vars: [v("role", "the role's id", true), v("what", "what the engine asks, in the words below")] },
@@ -170,7 +181,12 @@ export const MAIN_AGENT_PROMPTS: readonly PromptDef[] = [
   { id: MAIN_TEXT.toolArg(MAIN_TOOLS.revise, "message"), page, group: TOOLS, label: "revise: message", note: "The description of revise's message argument.", text: "What to change in the answer, and why.", vars: [] },
   { id: MAIN_TEXT.tool(MAIN_TOOLS.commit), page, group: TOOLS, label: "commit: what it does", note: "The description of the commit tool.", text: "Hand the engine what this stage's runs answered, and end the stage. A request you didn't run goes on without its role.", vars: [] },
   { id: MAIN_TEXT.tool(MAIN_TOOLS.summarize), page, group: TOOLS, label: "summarize: what it does", note: "The description of the summarize tool, offered while Settings → Agents → Compaction has it on.", text: "Summarize your session now: everything but your latest turns becomes one summary, which your next stages read instead. Use it when your session runs long.", vars: [] },
-  { id: MAIN_TEXT.ran, page, group: ANSWERS, label: "A run answered", note: "run_role's and revise's answer for a run that answered: its agent id, its role, how it ran and its answer, as far as the main agent's knowledge reaches.", text: "{{agent}}: the {{role}} role answered ({{via}}): {{answer}}", vars: [v("agent", "the run's agent id", true), v("role", "the role"), v("via", "how it ran, in the words below"), v("answer", "its answer", true)] },
+  { id: MAIN_TEXT.tool(MAIN_TOOLS.condense), page, group: TOOLS, label: "condense: what it does", note: "The description of the main agent's condense tool.", text: "Condense a long source (a workspace file, a turn's transcript among them, or a lore entry) into a short workspace note for a role, with one call of your own model, staged as that role's note for this turn: name the note in its task instead of handing it the whole source. The note opens with its source and the source's hash.", vars: [] },
+  { id: MAIN_TEXT.toolArg(MAIN_TOOLS.condense, "source"), page, group: TOOLS, label: "condense: source", note: "The description of condense's source argument.", text: "The source: a workspace file's path, or a lore entry's id as the lore tools give it.", vars: [] },
+  { id: MAIN_TEXT.toolArg(MAIN_TOOLS.condense, "role"), page, group: TOOLS, label: "condense: role", note: "The description of condense's role argument.", text: "The role the note is for: it is written as that role's, so the role's tier must let it write the workspace.", vars: [] },
+  { id: MAIN_TEXT.toolArg(MAIN_TOOLS.condense, "note"), page, group: TOOLS, label: "condense: note", note: "The description of condense's note argument.", text: "Where the note goes: a workspace path; leave it out for notes/condensed/ and a name taken from the source's.", vars: [] },
+  { id: MAIN_TEXT.toolArg(MAIN_TOOLS.condense, "focus"), page, group: TOOLS, label: "condense: focus", note: "The description of condense's focus argument.", text: "What the note should keep: the task it is for, or what matters in the source; leave it out for a plain digest.", vars: [] },
+  { id: MAIN_TEXT.ran, page, group: ANSWERS, label: "A run answered", note: "run_role's and revise's answer for a run that answered: its agent id, its role, how it ran and its answer, whole.", text: "{{agent}}: the {{role}} role answered ({{via}}): {{answer}}", vars: [v("agent", "the run's agent id", true), v("role", "the role"), v("via", "how it ran, in the words below"), v("answer", "its answer", true)] },
   { id: MAIN_TEXT.ranFailed, page, group: ANSWERS, label: "A run failed", note: "run_role's and revise's answer for a run that failed.", text: "{{agent}}: the {{role}} role failed ({{via}}): {{reason}}. Revise it, run it again prompt-only, or go on without it.", vars: [v("agent", "the run's agent id", true), v("role", "the role"), v("via", "how it ran, in the words below"), v("reason", "why it failed")] },
   { id: MAIN_TEXT.viaAgent, page, group: ANSWERS, label: "Ran as an agent", note: "Fills {{via}}: the role ran as an agent with its tools.", text: "an agent with tools", vars: [] },
   { id: MAIN_TEXT.viaPromptOnly, page, group: ANSWERS, label: "Ran prompt-only", note: "Fills {{via}}: the role ran as one call with its classic contract.", text: "one call, prompt only", vars: [] },
@@ -186,7 +202,6 @@ export const MAIN_AGENT_PROMPTS: readonly PromptDef[] = [
   { id: MAIN_TEXT.committed, page, group: ANSWERS, label: "Committed", note: "commit's answer: what the engine takes, and what it goes on without.", text: "Committed. The engine takes: {{ran}}. It goes on without: {{skipped}}.", vars: [v("ran", "the roles whose answers it takes"), v("skipped", "the requests no run answered")] },
   { id: MAIN_TEXT.brief, page, group: ROLES, label: "The main agent's task", note: "What a role run by the main agent is told of its task, after its own instructions. A prompt-only run is sent its classic prompt alone.", text: "The main agent's task for you this turn:\n{{task}}", vars: [v("task", "the task run_role gave", true)] },
   { id: MAIN_TEXT.briefRevision, page, group: ROLES, label: "A revision", note: "Follows the task for each revision the main agent sent the run, oldest first.", text: "The main agent asks you to revise your answer:\n{{message}}", vars: [v("message", "the revision's message", true)] },
-  { id: MAIN_TEXT.briefWithheld, page, group: ANSWERS, label: "Part of a task kept back", note: "Follows a run's answer when a line of the main agent's task or revision wasn't sent to a role that reads with the player character's knowledge or a mind's own: it named a secret, or someone or something hidden from the player character.", text: "A line of your task wasn't sent to the {{role}} role: it named what that role's knowledge doesn't reach.", vars: [v("role", "the role")] },
   { id: MAIN_TEXT.historyCall, page, group: SESSION, label: "A tool call, kept", note: "How the main agent's session keeps each tool call it made in a stage, for its later stages and turns.", text: "[{{tool}} {{args}}]\n{{result}}", vars: [v("tool", "the tool's name", true), v("args", "its arguments"), v("result", "what it answered")] },
   { id: MAIN_TEXT.summary, page, group: SESSION, label: "The summary", note: "Opens the main agent's session once it was summarized: the summary stands for the turns it replaced.", text: "Your session before this point, summarized:\n{{summary}}", vars: [v("summary", "the summary", true)] },
   { id: MAIN_TEXT.compaction, page, group: SESSION, label: "Compaction instructions", note: "The instructions of the call that summarizes the main session once it passes Compact the session past (Settings → Agents → Compaction), or when the main agent asks with summarize.", text: "You keep a main agent's session short. You get the summary so far, if there is one, and the turns that now fold into it. Write one summary the main agent can keep working from: who and what matters, what each turn played and what changed, the threads still open, and anything the main agent noted for itself. Keep names, numbers and facts exactly as they are, and leave out what no later turn needs. The latest {{keep}} turns stay whole after your summary, so don't repeat them. Answer with the summary alone.", vars: [v("keep", "how many of the latest turns stay whole (Recent turns kept whole)")] },

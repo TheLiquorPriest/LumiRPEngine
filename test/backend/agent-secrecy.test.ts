@@ -1,8 +1,10 @@
-// Increment 2's secrecy review (H1, H2, L1, L2), on scripted models: what an agent turn's roles write
-// reaches the player and the narrator only as classic's own lines would. The director's brief and
-// outline read as the player character, whatever the director reads with (H1); the scene role's notes
-// are held to the narrator's knowledge and to the screens Minds lines get (H2); the pins manifest is
-// the GM tier's to change (L1); and the review card names no workspace file below the GM (L2).
+// Increment 2's secrecy review (H1, H2, L2), as the context redesign decided it (secrets are marks
+// plus guidance, never a filter), on scripted models. The director reads a mind whole and its brief
+// reaches the narrator as it wrote it, its perspective only a hint (H1); the scene role's notes all
+// reach the Scene, one naming someone hidden marked, or left out where the narrator omits secrets
+// (H2); the pins manifest and the system files are workspace files like any other, the story tier's
+// to change (the GM lock L1 once put on .pins.json is gone); and the review card names no workspace
+// file (L2).
 
 import { describe, expect, test } from "bun:test";
 import { classicRoles } from "../../src/backend/agents/roles/classic";
@@ -84,7 +86,7 @@ function sceneStages(rig: Rig, ops: readonly AgentOp[]): ApplyResult[] {
 }
 
 describe("the director's brief and outline", () => {
-  test("read as the player character whatever the director reads with: a mind its tools could show everyone never reaches the brief (H1)", async () => {
+  test("reads a mind whole whatever its perspective hint, and its brief reaches the narrator as it wrote it, never screened (H1)", async () => {
     const rig = new Rig({ shipped: true, minds: true });
     rig.body(await rig.send({ type: "lre.settings.set", patch: { modelUse: { steps: { brief: { enabled: true, signals: ["always"] } } } } }));
     const chatId = await agentChat(rig);
@@ -110,14 +112,13 @@ describe("the director's brief and outline", () => {
     });
     await played(rig, chatId, "Morning, Danny.", "Danny nods.");
     const { rec } = await played(rig, chatId, "How's the boat, Danny?", "Danny shrugs.");
-    // The director reads Danny's mind as the player character may: never.
+    // The director reads Danny's mind whole; its perspective (everyone's, by default) is a hint in its prompt.
     expect(heads.length).toBeGreaterThan(0);
-    expect(heads.every((h) => h.includes(renderPrompt(ROLES_TEXT.sees.pov, {}, { world: world.name, pov })))).toBe(true);
+    expect(heads.every((h) => h.includes(renderPrompt(ROLES_TEXT.sees.everyone, {}, { world: world.name, pov })))).toBe(true);
     expect(results.length).toBeGreaterThan(0);
-    expect(results.some((r) => r.includes("INTENT-MARK"))).toBe(false);
+    expect(results.some((r) => r.includes("INTENT-MARK"))).toBe(true);
     const brief = outputsOf(rec.events)?.brief ?? "";
-    expect(brief).toContain("BRIEF-MARK");
-    expect(brief).not.toContain("INTENT-MARK");
+    expect(brief).toContain("BRIEF-MARK Danny means to INTENT-MARK keep the debt quiet.");
     expect(rig.rt.ledger.errors).toEqual([]);
   });
 });
@@ -126,23 +127,18 @@ describe("the scene role's notes", () => {
   const hiding = (put: Put): Promise<void> => put("entities", VIKTOR, { id: VIKTOR, kind: "person", name: "Viktor Crane", tier: "supporting", visibility: "known_by", fields: {}, relations: [] });
   const notes = { scene: () => JSON.stringify({ lore: [], notes: [HIDING, KETTLE] }) };
 
-  test("under the narrator's \"your character's knowledge\" with secrets left out, none written with everyone's knowledge goes in, nor one naming someone the player character can't see (H2)", async () => {
+  test("under the narrator's \"your character's knowledge\" with secrets left out, every note goes in but one naming someone the player character can't see (H2)", async () => {
     const rig = new Rig({ shipped: true });
     const chatId = await agentChat(rig, hiding, [DANNY, PRIYA, VIKTOR]);
     rig.body(await rig.send({ type: "lre.settings.set", patch: { narrator: { knowledge: "pov", secrets: "omit" } } }));
     scripted(rig, notes);
     const { scene } = await played(rig, chatId, "I look around the kitchen.", "The kitchen is quiet.");
+    expect(scene).toContain(KETTLE);
     expect(scene).not.toContain("Viktor");
-    expect(scene).not.toContain("SCENE-NOTE");
-    // A scene reading as the player character tells what they may know; the hidden name still never goes in.
-    rig.body(await rig.send({ type: "lre.settings.set", patch: { agents: { roles: { scene: { knowledge: "pov" } } } } }));
-    const pov = await played(rig, chatId, "I look around again.", "Still quiet.");
-    expect(pov.scene).toContain(KETTLE);
-    expect(pov.scene).not.toContain("Viktor");
     expect(rig.rt.ledger.errors).toEqual([]);
   });
 
-  test("under the narrator's default knowledge, with secrets marked, a note naming someone hidden goes in marked as a secret kept from the player character, and one beyond them marked so (H2)", async () => {
+  test("under the narrator's default knowledge, with secrets marked, a note naming someone hidden goes in marked as a secret kept from the player character, and every other note plain (H2)", async () => {
     const rig = new Rig({ shipped: true });
     const chatId = await agentChat(rig, hiding, [DANNY, PRIYA, VIKTOR]);
     const { state, world } = await stateOf(rig, chatId);
@@ -151,24 +147,33 @@ describe("the scene role's notes", () => {
     const { scene } = await played(rig, chatId, "I look around the kitchen.", "The kitchen is quiet.");
     expect(scene).toContain(secretMarkText(HIDING, [], [pov], markWording({})));
     expect(scene.split("\n").some((line) => line.includes(HIDING) && line.trim().replace(/^- /, "") === HIDING)).toBe(false);
-    expect(scene).toContain(`${KETTLE} [unknown to you; known to others here]`);
+    expect(scene.split("\n").some((line) => line.trim().replace(/^- /, "") === KETTLE)).toBe(true);
     expect(rig.rt.ledger.errors).toEqual([]);
   });
 });
 
-describe("the pins manifest", () => {
-  test("is the GM tier's to write: a story-tier role is refused, a GM-tier role stages it (L1)", async () => {
+describe("the pins manifest and the system files", () => {
+  test("are the story tier's to write, as every workspace file is: a story-tier role stages .pins.json, AGENTS.md and its roles/<role>.md, and they land with the turn", async () => {
     const rig = new Rig({ shipped: true });
     const chatId = await agentChat(rig);
     scripted(rig);
-    const seen = sceneStages(rig, [{ kind: "ws_write", path: ".pins.json", text: JSON.stringify({ main: { tokens: 0 } }) }]);
+    const pins = JSON.stringify({ main: { tokens: 0 } });
+    const seen = sceneStages(rig, [
+      { kind: "ws_write", path: ".pins.json", text: pins },
+      { kind: "ws_write", path: "AGENTS.md", text: "Keep it plain." },
+      { kind: "ws_write", path: "roles/scene.md", text: "Note the weather." },
+    ]);
+    expect((await rig.rt.settings.get(rig.host.userId)).agents.roles.scene.tier).toBe("story");
     await played(rig, chatId, "I stretch.", "You stretch.");
-    expect(seen[0]?.applied).toEqual([]);
-    expect(seen[0]?.refused.map((r) => r.code)).toEqual(["not_granted"]);
-    rig.body(await rig.send({ type: "lre.settings.set", patch: { agents: { roles: { scene: { tier: "gm" } } } } }));
-    await played(rig, chatId, "I yawn.", "You yawn.");
-    expect(seen[1]?.refused).toEqual([]);
-    expect(seen[1]?.applied.length).toBe(1);
+    expect(seen[0]?.refused).toEqual([]);
+    expect(seen[0]?.applied.length).toBe(3);
+    const listed = rig.body(await rig.send({ type: "lre.workspace", op: "list", chatId })).files as { path: string; provenance: { role?: string } }[];
+    expect(listed.filter((f) => [".pins.json", "AGENTS.md", "roles/scene.md"].includes(f.path)).map((f) => [f.path, f.provenance.role])).toEqual([
+      [".pins.json", "scene"],
+      ["AGENTS.md", "scene"],
+      ["roles/scene.md", "scene"],
+    ]);
+    expect(rig.body(await rig.send({ type: "lre.workspace", op: "read", chatId, path: ".pins.json" })).text).toBe(pins);
     expect(rig.rt.ledger.errors).toEqual([]);
   });
 });

@@ -21,7 +21,6 @@
 // connection (`recordOutcome(..., role)`), as Apply, No or an Undo of an applied one; a read
 // proposal's counts as the read's, as its confirm chip's always has.
 
-import type { AgentKnowledge } from "../../shared/agent-tools";
 import type { ChatId, ChipId, MessageId, UserId } from "../../shared/ids";
 import { isRecord, type JsonObject } from "../../shared/json";
 import { type GenerateAs, PROTOCOL_VERSION, type ReviewCardView, type ReviewItemView } from "../../shared/protocol";
@@ -56,10 +55,9 @@ export interface StoredReviewItem {
   /** Applied while a turn ran: its write's batch, by which its Undo chip is named once it lands. */
   batch?: string;
   undone?: true;
-  /** An operation's own: what it asks, who staged it, with whose knowledge, and the connection its change type's learning is keyed by. */
+  /** An operation's own: what it asks, who staged it, and the connection its change type's learning is keyed by. An older item's `knowledge` is read and ignored. */
   op?: AgentOp;
   agentId?: string;
-  knowledge?: AgentKnowledge;
   connection?: string | null;
 }
 
@@ -255,12 +253,12 @@ export class Review {
 
   /** One operation landed on the head as one GM edit, held while a turn runs, through the writer the assistant's Apply uses, with the knowledge its role staged it with. */
   private async land(chatId: ChatId, userId: UserId, item: StoredReviewItem): Promise<void> {
-    if (!item.op || !item.knowledge) {
+    if (!item.op) {
       item.status = "refused";
       item.refused = { code: "bad_op", reason: NO_LONGER };
       return;
     }
-    const base = { userId, chatId, knowledge: item.knowledge };
+    const base = { userId, chatId, knowledge: "everyone" as const };
     const writer = outsideWriter(this.rt, { ...base, reader: outsideReader(this.rt, base), agent: { role: item.role, id: item.agentId ?? item.role }, signal: new AbortController().signal, connectionId: item.connection ?? null });
     const result = await writer.apply([item.op], `${item.role}: ${item.lines[0] ?? item.changeType}`);
     if (result.applied.includes(item.key)) {
@@ -269,10 +267,10 @@ export class Review {
       if (result.pending) item.batch = batchKey(item.role, [item.op]);
       return;
     }
-    // The writer's reason is worded for the role's knowledge; the card is the player's, so only one read as the player character is passed on.
+    // The writer's reason is everyone's, its secrets marked; the card is the player's, so it passes on none of it.
     const no = result.refused[0];
     item.status = "refused";
-    item.refused = { code: no?.code ?? "write_refused", reason: item.knowledge === "pov" && no ? no.reason : NO_LONGER };
+    item.refused = { code: no?.code ?? "write_refused", reason: NO_LONGER };
   }
 
   /** Saves the card as answered; a gate's card says how its turn resumes, and its turn replays the plan the gate held. */

@@ -4,6 +4,7 @@
 // persists `journal` after each call; `dirty()` lists the messages whose metadata mirror must be
 // written. Classification is a function of the chain-snapshot diff, never of event names (L4).
 
+import { finalEditsOf } from "../../shared/final-review";
 import { hashJson, hashParts } from "../../shared/hash";
 import type { GenerationId, MessageId, RevisionId } from "../../shared/ids";
 import type {
@@ -34,7 +35,7 @@ import { applyEvent, applyMarker, applyValidUnits, validateEvent, validMarkerBod
 import type { ReadContext } from "../registry";
 import type { WorldState } from "../state";
 import type { ChainMessage, FoldInput, FoldOutput, SnapshotStore } from "./chain";
-import type { LedgerFold } from "./fold";
+import type { FoldKeys, LedgerFold } from "./fold";
 import { activeRecord, activeText, contentId, isLive, isTombstoned, nextPath, sameContent, stepPath, storedRecordHash, turnPath } from "./path";
 import type { FoldTypes } from "./reference";
 
@@ -133,6 +134,8 @@ export class LedgerCore {
   private readonly addedFrom = new Map<MessageId, { swipe: number; from: number }>();
   /** Each reply's shown swipe and its number of swipes as the last sync saw them, whatever a turn in flight keeps of it in the snapshot (`noteAdded`). */
   private seen = new Map<MessageId, { swipeId: number; count: number }>();
+  /** The starting markers' key as `renderKey` last hashed them, by their JSON: a chat with no record yet hashes them again only when they change, not at every view. */
+  private startKey: { json: string; key: string } | null = null;
 
   constructor(
     public journal: Journal,
@@ -178,6 +181,11 @@ export class LedgerCore {
 
   fold(observed: readonly ChainMessage[]): FoldOutput {
     return this.folder.fold({ ...this.foldInput(observed), ...(this.env.snapshots ? { snapshots: this.env.snapshots } : {}) });
+  }
+
+  /** The keys a fold of `observed` ends on (`LedgerFold.keys`), read without folding: what is made from the fold can be kept under them. */
+  foldKeys(observed: readonly ChainMessage[]): FoldKeys {
+    return this.folder.keys(this.foldInput(observed));
   }
 
   /** What a fold of `observed` reads (`fold`, and the reference fold the ledger gate holds it to); stored snapshots aside. */
@@ -369,7 +377,8 @@ export class LedgerCore {
         if (paths.has(asRestored)) {
           for (const [at, markers] of restored) {
             const message = observed[at];
-            if (message) this.ledgerFor(message.id, message).markers = markers;
+            // The chain's ledger may be a decoded one, frozen and shared: the journal keeps its own copy.
+            if (message) this.ledgerFor(message.id, message).markers = structuredClone(markers);
           }
           return;
         }
@@ -677,6 +686,9 @@ export class LedgerCore {
     if (from.dropped) p.dropped = from.dropped;
     if (from.prompts) p.prompts = from.prompts;
     if (from.agents) p.agents = from.agents;
+    // What its final review changed in the prompt it was made with goes with the turn its reply takes.
+    if (from.finalEdits) p.finalEdits = from.finalEdits;
+    else delete p.finalEdits;
     return true;
   }
 
@@ -796,6 +808,10 @@ export class LedgerCore {
     const agents = (source.agents ?? []).filter((a) => a.seq === undefined && a.to <= source.pre);
     if (agents.length > 0) p.agents = structuredClone(agents);
     else delete p.agents;
+    // Its final review's edits, which the Re-narrate tells again on the prompt the copied plan makes (DESIGN §4.6).
+    const edits = finalEditsOf(source.finalEdits);
+    if (edits.length > 0) p.finalEdits = edits;
+    else delete p.finalEdits;
     return true;
   }
 
@@ -1021,17 +1037,54 @@ export class LedgerCore {
    * markers the first turn applies (the world's realism and time defaults, with the user's settings
    * filling in, DESIGN §9.1), so the palette judges actions at the levels the turn will use. With
    * `keepStart`, a planned turn's also comes with the state it started from (`start`, before its
-   * planned events). Pure: nothing is written.
+   * planned events). `head`, the fold of `observed` the caller made already, is read instead of
+   * folding again, and its own state is the one given when nothing applies over it. Pure: nothing is
+   * written.
    */
-  renderState(observed: readonly ChainMessage[], keepStart = false): { state: WorldState; world: WorldDoc; start?: WorldState } | null {
-    const planned = Object.values(this.journal.pending).filter((p) => p.planned).at(-1);
+  renderState(observed: readonly ChainMessage[], keepStart = false, head?: FoldOutput): { state: WorldState; world: WorldDoc; start?: WorldState } | null {
+    const planned = this.plannedTurn();
     if (planned) return this.renderPlanned(observed, planned, keepStart);
-    const out = this.fold(observed);
+    const out = head ?? this.fold(observed);
     const world = this.env.worlds(out.state.revision);
     if (!world) return null;
+    if (head && this.journal.started) return { state: head.state, world };
     const state = structuredClone(out.state);
     if (!this.journal.started) for (const body of this.env.startMarkers()) applyMarker(state, body, this.env);
     return { state, world };
+  }
+
+  /**
+   * What `renderState` reads, as one key (DESIGN §9.6): equal keys give equal states, so what is made
+   * from the state the narrator sees can be kept under it. The head fold's state key, with the
+   * starting markers before the chat's first record; while a planned turn is in flight, its fold
+   * prefix's key, its target's markers and its planned events, markers and path. `keys` are the
+   * fold's of `observed`.
+   */
+  renderKey(observed: readonly ChainMessage[], keys: FoldKeys = this.foldKeys(observed)): string {
+    const planned = this.plannedTurn();
+    if (!planned) return this.journal.started ? keys.state : hashParts("lre.render", keys.state, this.startMarkersKey());
+    const at = this.plannedAt(observed, planned);
+    const target = this.chain(observed.slice(at, at + 1))[0];
+    return hashParts("lre.render.planned", keys.steps[at - 1] ?? keys.root, hashJson(target?.ledger?.markers ?? []), String(planned.markersApplied), hashJson(planned.events), this.commitPath(planned), hashJson(planned.startMarkers));
+  }
+
+  /** The starting markers' hash, kept while they read the same. */
+  private startMarkersKey(): string {
+    const markers = this.env.startMarkers();
+    const json = JSON.stringify(markers);
+    if (this.startKey?.json !== json) this.startKey = { json, key: hashJson(markers) };
+    return this.startKey.key;
+  }
+
+  /** The latest planned turn in flight, whose state the narrator sees. */
+  private plannedTurn(): PendingTurn | undefined {
+    return Object.values(this.journal.pending).filter((p) => p.planned).at(-1);
+  }
+
+  /** Where `planned`'s fold prefix ends on `observed`: at its message, else after the last. */
+  private plannedAt(observed: readonly ChainMessage[], planned: PendingTurn): number {
+    const index = planned.messageId ? observed.findIndex((m) => m.id === planned.messageId) : observed.length;
+    return index < 0 ? observed.length : index;
   }
 
   /**
@@ -1041,8 +1094,7 @@ export class LedgerCore {
    * its own prompt sees it (DESIGN §6.1). Pure.
    */
   renderPlanned(observed: readonly ChainMessage[], planned: PendingTurn, keepStart = false): { state: WorldState; world: WorldDoc; start?: WorldState } | null {
-    const index = planned.messageId ? observed.findIndex((m) => m.id === planned.messageId) : observed.length;
-    const at = index < 0 ? observed.length : index;
+    const at = this.plannedAt(observed, planned);
     return this.prefixState(this.fold(observed.slice(0, at)), this.chain(observed.slice(at, at + 1))[0], { markersApplied: planned.markersApplied, events: planned.events, pre: planned.events.length, path: this.commitPath(planned), undone: [] }, planned.startMarkers, keepStart);
   }
 
@@ -1164,6 +1216,7 @@ export class LedgerCore {
     if (p.prompts) rec.prompts = p.prompts;
     if (p.memoryNext) rec.memoryNext = true;
     if (p.agents && p.agents.length > 0) rec.agents = structuredClone(p.agents);
+    if (p.finalEdits && p.finalEdits.length > 0) rec.finalEdits = structuredClone(p.finalEdits);
     if (p.copies) {
       // P3: the new reply is read on the same fold prefix as its source's was (its `pre` after the
       // source's markers), and the copies, keeping their seqs and undos, are carried after that read:

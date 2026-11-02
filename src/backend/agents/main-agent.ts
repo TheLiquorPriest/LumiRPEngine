@@ -9,7 +9,8 @@
 //      the gates;
 //   4. the engine's plan;
 //   5. the director's beats;
-//   6. the narrator's reply;
+//   6. the narrator's reply, which opens with the final review (`review`): the main agent reviews
+//      the prompt the narrator gets and may revise it a line at a time;
 //   7. the read, the knowledge and the suggested choices;
 //   8. the memory.
 // The engine's stages are its marks (`open`): the gates let the turn play, the plan, the read. In
@@ -25,12 +26,16 @@
 // parent, rolled back if GM → Workspace asked, else compacted once it passes its tokens. The main
 // agent failing (its send ends short of a commit) stops the turn: before the reply, with the
 // engine-failed card and its Retry (`Diagnostics.fatal`); after it, the read stops as a cancelled one
-// does, which leaves Retry read. There is no fallback to classic. The turn's segment of the session,
-// with any compaction or rollback it made, is written at its close (`Orchestrator.closed`).
+// does, which leaves Retry read. There is no fallback to classic. The final review is a send of its
+// own, which never fails the turn: what its failure does is its own setting. On the fixed pipeline
+// the main agent works that review alone (`MainStart.alone`), with no session. The turn's segment of
+// the session, with any compaction or rollback it made, is written at its close (`Orchestrator.closed`).
 
 import { ROLE_IDS, type RoleId } from "../../shared/agent-roles";
-import { AGENT_ROLES, MAIN_AGENT_ROLE, mainBudget, roleBudget } from "../../shared/agent-settings";
-import { type AgentKnowledge, knowledgeWithin } from "../../shared/agent-tools";
+import { AGENT_ROLES, finalReviewBudget, MAIN_AGENT_ROLE, mainBudget, roleBudget } from "../../shared/agent-settings";
+import { PERSPECTIVE_LABEL, sourceLabel } from "../../shared/agent-context";
+import { RUNTIME_TEXT } from "../../shared/agent-prompts";
+import { TOOL_FAMILY_LABEL } from "../../shared/agent-tools";
 import type { DiagPhase } from "../../shared/diagnostics";
 import { STEP_LABEL } from "../../shared/diagnostics";
 import type { ChatId, UserId } from "../../shared/ids";
@@ -38,31 +43,36 @@ import type { JsonObject, JsonValue } from "../../shared/json";
 import type { LedgerEvent } from "../../shared/ledger";
 import type { LiveDropWhy } from "../../shared/live";
 import { MAIN_TEXT, MAIN_TOOLS, type MainRequestKind, type MainRoleStage } from "../../shared/main-agent-prompts";
+import { REVIEW_TEXT, type ReviewDraft } from "../../shared/final-review";
 import type { PromptTexts } from "../../shared/prompts";
 import type { UserSettings } from "../../shared/settings";
-import { isWorkspacePath } from "../../shared/stores";
+import { secretMarkText } from "../../shared/secret-marks";
 import { nounFor } from "../../shared/words";
 import type { Judgement } from "../../engine/adjudication";
 import type { ChainMessage } from "../../engine/ledger/chain";
 import type { LedgerCore } from "../../engine/ledger/journal";
 import type { DiagAt } from "../diagnostics";
 import type { RunMindsResult } from "../minds";
-import { renderPrompt } from "../prompts";
+import { markWording, renderPrompt } from "../prompts";
 import type { Runtime } from "../runtime";
 import type { SkipRun } from "../skip";
 import type { ExtractRead, InterpretRead } from "../steps";
 import type { TieOdds } from "../turn-steps";
-import { screenBrief, type TaskReads } from "./brief";
-import { compact, historyOf, isMainMessage, knowledgeOf, lastMainTurn, MAIN_BY, type MainMessage, mainLens, type MainSession, readSession, rebasedRefs, rolledBack, type SessionLens, sessionTokens, summaryOf } from "./compaction";
+import { compact, historyOf, isMainMessage, lastMainTurn, MAIN_BY, type MainMessage, type MainSession, readSession, rebasedRefs, rolledBack, sessionTokens } from "./compaction";
 import { type AgentHandle, type AgentHistoryMessage, type AgentReply, type AgentSpec, type AgentTool, type AgentTurn, startAgent, type ToolOutcome } from "./runtime";
 import { type Rebase, sessionAt } from "./sessions";
 import type { ToolReader } from "./tools/read-view";
-import { type LoreLoads, TOOL_DEFINITIONS, toolsFor } from "./tools/registry";
+import { condenseSource } from "./tools/condense";
+import { propose } from "./tools/propose";
+import { type LoreLoads, toolsFor } from "./tools/registry";
+import type { ToolWriter } from "./tools/writer";
 import type { ChatHead } from "./tools/workspace";
 import { recordAgentCalls } from "./transcripts";
+import { systemInstructions, withInstructions } from "./system-files";
 import type { LiveRun } from "./live";
+import { reviewMessage, reviewTools } from "./final-review";
 import { knowledgeAnswer, recordYield, type RunWrites, runYield } from "./yields";
-import type { ChooseTask, DirectorProse, ExtractTask, MemoryTask, ProseTask, RoleResult, RoleRun, SceneOut, TurnBrief } from "./turn-ctx";
+import type { ChoicesTask, ChooseTask, DirectorProse, ExtractTask, MemoryTask, ProseTask, RoleResult, RoleRun, SceneOut } from "./turn-ctx";
 import { digestOf, MAIN_PINS, MAIN_PINS_TEXTS, pinnedFiles, tidy, turnTask } from "./turn-task";
 import type { StagePhase } from "./turn-writer";
 import { emptyUsage } from "./usage";
@@ -96,9 +106,6 @@ const NUMBER: Readonly<Record<MainRoleStage, number>> = { memory_before: 8, inte
 /** The Diagnostics phase each stage's records join. */
 const DIAG_PHASE: Readonly<Record<MainRoleStage, DiagPhase>> = { memory_before: "memory", intent: "pre", prepare: "pre", beats: "prose", read: "read", memory: "memory" };
 
-/** How wide each knowledge reads; a mind's own knowledge is its character's, which only the GM's takes in. */
-const WIDTH: Readonly<Record<AgentKnowledge | "own", number>> = { pov: 0, everyone: 1, gm: 2, own: 2 };
-
 /** The main agent's name as Settings → Agents gives it: the step its failure names on the engine-failed card. */
 const MAIN_LABEL = AGENT_ROLES.find((r) => r.id === MAIN_AGENT_ROLE)?.label ?? MAIN_AGENT_ROLE;
 
@@ -112,8 +119,6 @@ interface Run {
   task: string;
   revisions: string[];
   promptOnly: boolean;
-  /** A line of its brief was kept from the role (`briefFor`). */
-  withheld: boolean;
   /** What a decision's run recorded of its choosers' learnings (`ChooseTask.heard`), handed to the turn only once its answer stands, at commit. */
   learned: LedgerEvent[][];
   /** What it staged that the turn hasn't committed, and the writes it asked for that were refused, as it ended: its answer says them (`runYield`). */
@@ -166,11 +171,14 @@ export interface MainHost {
   at(): DiagAt;
   phase(): StagePhase;
   head(): ChatHead | null;
-  reader(knowledge: AgentKnowledge): ToolReader;
+  /** Reads the turn's head, everything secrets marked, as every turn agent reads it. */
+  reader(): ToolReader;
+  /** `role`'s writer in the turn's draft, which the main agent's condense stages a note for it through. */
+  writer(role: RoleId): ToolWriter;
   /** Where the main agent loads lore into the reply the turn is writing (`lore_load`, DESIGN §4.6). */
   loads: LoreLoads;
   /** Runs `role` once on `task`, as the orchestrator runs a role (C9, C10), with what the main agent told it; its settings' onFail never applies. */
-  run(input: { role: RoleId; run: RoleRun<unknown, unknown>; task: unknown; signal: AbortSignal; brief: TurnBrief; promptOnly: boolean }): Promise<{ agentId: string; result: RoleResult<unknown> }>;
+  run(input: { role: RoleId; run: RoleRun<unknown, unknown>; task: unknown; signal: AbortSignal; brief: string; promptOnly: boolean }): Promise<{ agentId: string; result: RoleResult<unknown> }>;
   /** Drops what a run that no longer stands staged: one a revision or a run again replaced, or one its request went on without; `why` is what GM → Live says. */
   drop(agentId: string, why: LiveDropWhy): void;
   /** What a run staged that the turn hasn't committed, and the writes it asked for that were refused. */
@@ -179,11 +187,16 @@ export interface MainHost {
   intent(): JsonValue;
 }
 
-/** Where a turn starts: the player's words, and the chain before it (up to its target), as its core overlays the records. */
+/**
+ * Where a turn starts: the player's words, and the chain before it (up to its target), as its core
+ * overlays the records. `alone`: the main agent works only the turn's final review (the fixed
+ * pipeline's), with no session of its own, its task's digest the chat so far.
+ */
 export interface MainStart {
   text: string;
   core: LedgerCore;
   observed: ChainMessage[];
+  alone?: true;
 }
 
 export class MainTurn {
@@ -192,6 +205,8 @@ export class MainTurn {
   /** The engine's marks: the stages it has reached that open by them. */
   private readonly opened = new Set<MainRoleStage>(["memory_before", "intent"]);
   private round: Round | null = null;
+  /** The stage's send under way, which the final review waits for: it comes after the turn's other stages. */
+  private playing: Promise<void> | null = null;
   private waking = false;
   /** Why the main agent failed; from then on every request goes on without its role. */
   private failure: string | null = null;
@@ -202,6 +217,8 @@ export class MainTurn {
   /** The turn task with its pinned files, and as the session keeps it, without them (they are sent afresh each turn). */
   private task = "";
   private keptTask = "";
+  /** Its system files (AGENTS.md and roles/main.md, the global workspace's then the chat's), read before its first stage and sent after its system prompt in every call of the turn. */
+  private instructions = "";
   /** What this turn's stages were sent and did: as the agent read them, and as its session keeps them. */
   private readonly sent: AgentHistoryMessage[] = [];
   private readonly kept: MainMessage[] = [];
@@ -282,14 +299,10 @@ export class MainTurn {
     this.wake();
   }
 
-  /** What of its session the main agent reads this turn (`prepare`). */
-  private lens: SessionLens = { knowledge: "gm", message: () => false };
-
   /** The turn's messages for its session segment, the reply after them when no stage showed it; null when the main agent never worked a stage. */
   segment(reply: string): MainMessage[] | null {
     if (this.kept.length === 0) return null;
-    // The reply is the player's to read: it is the player character's knowledge.
-    return this.replyShown || reply.trim() === "" ? [...this.kept] : [...this.kept, { role: "user", content: this.text(MAIN_TEXT.engineReply, { reply }), by: MAIN_BY, knowledge: "pov" }];
+    return this.replyShown || reply.trim() === "" ? [...this.kept] : [...this.kept, { role: "user", content: this.text(MAIN_TEXT.engineReply, { reply }), by: MAIN_BY }];
   }
 
   /** The compaction or rollback the turn made, for its record; or, when the main agent never read its session, the rollback asked for, made now. */
@@ -321,7 +334,10 @@ export class MainTurn {
     if (this.round !== null || this.failure !== null || this.host.stop.aborted) return;
     const stage = ORDER.find((s) => this.isOpen(s) && this.requests.some((r) => r.stage === s && r.round === null));
     if (stage === undefined) return;
-    void this.play(stage, this.requests.filter((r) => r.stage === stage && r.round === null));
+    const playing = this.play(stage, this.requests.filter((r) => r.stage === stage && r.round === null)).finally(() => {
+      if (this.playing === playing) this.playing = null;
+    });
+    this.playing = playing;
   }
 
   private async play(stage: MainRoleStage, requests: Request[]): Promise<void> {
@@ -337,8 +353,8 @@ export class MainTurn {
       const history = this.history();
       // The session's last message is the engine's: it leads this one.
       const lead = history.at(-1)?.role === "user" ? history.pop()?.text : undefined;
-      const agent = startAgent(this.spec(round, history), { host: this.host.rt.host, userId: this.host.userId, settings: this.host.settings.agents, texts: this.texts, accounts: this.host.rt.agentAccounts, turn: this.host.turn, trace: { phase: DIAG_PHASE[stage], stage: `Stage ${NUMBER[stage]}: ${this.text(MAIN_TEXT.stageLabel(stage))}` } });
-      const reply = await this.send(agent, lead ? `${lead}\n\n${sent}` : sent, signal, stage);
+      const agent = startAgent(this.spec(this.tools(round), history), { host: this.host.rt.host, userId: this.host.userId, settings: this.host.settings.agents, texts: this.texts, accounts: this.host.rt.agentAccounts, turn: this.host.turn, trace: { phase: DIAG_PHASE[stage], stage: `Stage ${NUMBER[stage]}: ${this.text(MAIN_TEXT.stageLabel(stage))}` } });
+      const reply = await this.send(agent, lead ? `${lead}\n\n${sent}` : sent, signal, DIAG_PHASE[stage]);
       if (round.committed) {
         this.keep(first ? `${this.keptTask}\n\n${message}` : message, sent, agent);
         return;
@@ -354,11 +370,45 @@ export class MainTurn {
   }
 
   /**
-   * The turn's session, before its first stage: read at its parent, as the main agent's knowledge
-   * reads it now (`SessionLens`); the rollback GM → Workspace asked for, when this turn's session
-   * stands on that compaction; else, once what it reads passes Settings → Agents → Compaction's
-   * tokens, compacted. Then the turn task: the digest since its last turn on the chain it reads (the
-   * chat so far for a fresh session, or one it reads nothing of) and its pinned files.
+   * The final review (DESIGN §4.6): one send of the main agent once the turn's other stages before
+   * the reply are done, with the narrator's prompt part by part (`draft`) and its review tools beside
+   * its read tools. In a turn it decides, it opens stage 6 from its session and the turn's stages so
+   * far, and joins the turn's messages as a stage does; alone (the fixed pipeline), it is the turn's
+   * one send, from the turn task, and keeps nothing. Its own budget bounds it, and so does `signal`
+   * (its time, the turn's Cancel). It ends at commit, or at an answer that calls nothing more; a send
+   * that stops short of both fails it, with why, and nothing of the draft stands. It never fails the
+   * main agent's turn: what a failure does is the review's own setting.
+   */
+  async review(draft: ReviewDraft, signal: AbortSignal): Promise<{ ok: true } | { ok: false; reason: string }> {
+    while (this.playing) await this.playing;
+    if (this.failure !== null) return { ok: false, reason: this.failure };
+    const stop = AbortSignal.any([this.host.stop, signal]);
+    const alone = this.start.alone === true;
+    try {
+      const first = this.session === null;
+      if (first) await (alone ? this.prepareAlone() : this.prepare(stop));
+      const message = reviewMessage(this.texts, draft, alone ? REVIEW_TEXT.stageFixed : REVIEW_TEXT.stageMain);
+      const sent = first ? `${this.task}\n\n${message}` : message;
+      const history = this.history();
+      // The session's last message is the engine's: it leads this one.
+      const lead = history.at(-1)?.role === "user" ? history.pop()?.text : undefined;
+      const done = { committed: false };
+      const spec = { ...this.spec([...reviewTools(this.texts, draft, done), ...this.readTools()], history, alone ? REVIEW_TEXT.system : MAIN_TEXT.system), budget: finalReviewBudget(this.host.settings.agents) };
+      const agent = startAgent(spec, { host: this.host.rt.host, userId: this.host.userId, settings: this.host.settings.agents, texts: this.texts, accounts: this.host.rt.agentAccounts, turn: this.host.turn, trace: { phase: "sections", stage: alone ? "The final review" : "Stage 6: the final review" } });
+      const reply = await this.send(agent, lead ? `${lead}\n\n${sent}` : sent, stop, "sections");
+      if (!done.committed && reply.status !== "answered") return { ok: false, reason: firedTimeout(signal)?.message ?? reply.reason ?? reply.status };
+      if (!alone) this.keep(first ? `${this.keptTask}\n\n${message}` : message, sent, agent);
+      return { ok: true };
+    } catch (error) {
+      return { ok: false, reason: firedTimeout(signal)?.message ?? (error instanceof Error ? error.message : String(error)) };
+    }
+  }
+
+  /**
+   * The turn's session, before its first stage: read at its parent, its own messages whole; the
+   * rollback GM → Workspace asked for, when this turn's session stands on that compaction; else, once
+   * its own messages pass Settings → Agents → Compaction's tokens, compacted. Then the turn task: the
+   * digest since its last turn on the chain (the chat so far for a fresh session) and its pinned files.
    */
   private async prepare(signal: AbortSignal): Promise<void> {
     const { rt, chatId, userId, holder, settings } = this.host;
@@ -366,35 +416,56 @@ export class MainTurn {
     const main = settings.agents.main;
     const chain = core.chain(observed);
     const refs = sessionAt(chain, core.journal.tombstones);
-    // Its own messages made under its knowledge or a narrower one, and of those whose tools read a
-    // workspace file, only while the file's readers still take its knowledge in (`mainLens`).
-    const readers = new Map(this.host.head() ? (await (await this.host.reader("gm").view()).workspace()).map((f) => [f.path, f.readers] as const) : []);
-    this.lens = mainLens(main.knowledge, readers);
+    // Its system files, read once for the turn, so every stage and the compaction send the same.
+    this.instructions = await this.systemText();
     let session = await readSession(rt, userId, refs);
-    const own = new Set(session.segments.filter((s) => s.messages.some((m) => this.lens.message(m))).map((s) => s.hash));
-    const last = lastMainTurn(chain, core.journal.tombstones, summaryOf(session, this.lens) === null ? { ...refs, base: null } : refs, own);
+    const own = new Set(session.segments.filter((s) => s.messages.some(isMainMessage)).map((s) => s.hash));
+    const last = lastMainTurn(chain, core.journal.tombstones, refs, own);
     const rollback = await rolledBack(rt, { chatId, userId, holder, at: refs });
     if (rollback) {
       this.rebase = rollback;
       session = await readSession(rt, userId, rebasedRefs(rollback));
-    } else if (sessionTokens(session, this.lens) > settings.agents.compaction.atTokens) {
-      const made = await compact(rt, { userId, holder, session, keep: settings.agents.compaction.keepTurns, texts: this.texts, lens: this.lens, summarize: (system, message) => this.summarizer(system, message, signal) });
+    } else if (sessionTokens(session) > settings.agents.compaction.atTokens) {
+      const made = await compact(rt, { userId, holder, session, keep: settings.agents.compaction.keepTurns, texts: this.texts, summarize: (system, message) => this.summarizer(system, message, signal) });
       if (made && "rebase" in made) {
         this.rebase = made.rebase;
         session = made.session;
       } else if (made) rt.host.log("warn", `[LumiRPEngine] chat ${chatId}: the main session wasn't compacted (${made.failed}); it goes on whole`, userId);
     }
     this.session = session;
-    const digest = digestOf({ core, observed, registry: rt.registry, last, fresh: last === null && summaryOf(session, this.lens) === null, tokens: main.digestTokens, texts: this.texts });
-    // Its pinned files, read with its knowledge on the turn's head; none while the chat's world isn't loaded.
-    const pins = this.host.head() ? await pinnedFiles(await this.host.reader(main.knowledge).view(), { role: MAIN_PINS, tokens: main.pinsTokens, pinned: true, texts: this.texts, framing: MAIN_PINS_TEXTS }) : "";
+    await this.taskOf(digestOf({ core, observed, registry: rt.registry, last, fresh: last === null && session.summary === null, tokens: main.digestTokens, texts: this.texts }));
+  }
+
+  /**
+   * The turn task when the main agent works only the final review (`MainStart.alone`, the fixed
+   * pipeline): no session of its own is read or kept, so its digest is the chat so far, framed as a
+   * fresh session, and nothing is compacted or rolled back. Its system files are read first, as a
+   * turn's first stage reads them.
+   */
+  private async prepareAlone(): Promise<void> {
+    const { rt, settings } = this.host;
+    const { core, observed } = this.start;
+    this.instructions = await this.systemText();
+    await this.taskOf(digestOf({ core, observed, registry: rt.registry, last: null, fresh: true, tokens: settings.agents.main.digestTokens, texts: this.texts }));
+  }
+
+  /** The turn task with `digest`: its pinned files on the turn's head (none while the chat's world isn't loaded), and as the session keeps it, without them. */
+  private async taskOf(digest: string): Promise<void> {
+    const main = this.host.settings.agents.main;
+    const pins = this.host.head() ? await pinnedFiles(await this.host.reader().view(), { role: MAIN_PINS, tokens: main.pinsTokens, pinned: true, texts: this.texts, framing: MAIN_PINS_TEXTS }) : "";
     this.task = turnTask(this.texts, { message: this.start.text, digest, pins });
     this.keptTask = turnTask(this.texts, { message: this.start.text, digest, pins: "" });
   }
 
+  /** AGENTS.md and roles/main.md, the global workspace's then the chat's, as the turn holds them (DESIGN §4.4); none while the chat's world isn't loaded. */
+  private async systemText(): Promise<string> {
+    if (!this.host.head()) return "";
+    return systemInstructions(await this.host.reader().view(), { role: MAIN_AGENT_ROLE, tokens: this.host.settings.agents.systemTokens, texts: this.texts });
+  }
+
   /** The main agent's history for a stage: its session, then this turn's stages so far. */
   private history(): AgentHistoryMessage[] {
-    const out = this.session ? historyOf(this.session, this.texts, this.lens) : [];
+    const out = this.session ? historyOf(this.session, this.texts) : [];
     for (const m of this.sent) {
       const last = out.at(-1);
       if (last?.role === m.role) last.text = `${last.text}\n\n${m.text}`;
@@ -403,16 +474,31 @@ export class MainTurn {
     return out;
   }
 
-  private spec(round: Round, history: AgentHistoryMessage[]): AgentSpec {
+  /** The main agent as it starts each send: on its connection, model and effort, with `tools`, its stage's budget and its system prompt (`systemId`: the main agent's own, or the final review's when it works that alone). */
+  private spec(tools: AgentTool[], history: AgentHistoryMessage[], systemId: string = MAIN_TEXT.system): AgentSpec {
     const { settings } = this.host;
     const main = settings.agents.main;
     const head = this.host.head();
     const vars = { world: head?.world.name ?? "", pov: head ? (head.state.entities[head.world.pov]?.name ?? head.world.pov) : "" };
-    return { role: MAIN_AGENT_ROLE, connectionId: main.connectionId, model: main.model, effort: main.effort, system: this.text(MAIN_TEXT.system, vars), prefix: [], tools: this.tools(round), budget: mainBudget(settings.agents), history };
+    // The roles' context config leads its stable prefix: the guide it briefs the roles by, the same every send, so the provider caches it.
+    return { role: MAIN_AGENT_ROLE, connectionId: main.connectionId, model: main.model, effort: main.effort, system: withInstructions(this.text(systemId, vars), this.instructions), prefix: [this.contextGuidance()], tools, budget: mainBudget(settings.agents), history };
+  }
+
+  /** Settings → Agents → Context for every role, as the main agent is told it (`main.context`): what each starts with, what it is never to be given, its pinned files and its tools. */
+  private contextGuidance(): string {
+    const { agents } = this.host.settings;
+    const none = this.text(MAIN_TEXT.none);
+    const named = (list: readonly string[]): string => (list.length > 0 ? list.map(sourceLabel).join(", ") : none);
+    const roles = ROLE_IDS.map((role) => {
+      const c = agents.context.roles[role];
+      const families = agents.roles[role].families;
+      return this.text(MAIN_TEXT.contextRole, { role, perspective: PERSPECTIVE_LABEL[c.perspective], start: named(c.start), never: named(c.never), pins: c.pins.length > 0 ? c.pins.join(", ") : none, tools: families.length > 0 ? families.map((f) => TOOL_FAMILY_LABEL[f]).join(", ") : none });
+    });
+    return this.text(MAIN_TEXT.context, { roles: roles.join("\n") });
   }
 
   /** A send of the main agent's, on the activity line while it works, its calls Diagnostics records. */
-  private async send(agent: AgentHandle, text: string, signal: AbortSignal, stage: MainRoleStage): Promise<AgentReply> {
+  private async send(agent: AgentHandle, text: string, signal: AbortSignal, phase: DiagPhase): Promise<AgentReply> {
     const { rt, chatId, userId } = this.host;
     rt.diag.agentWorking(chatId, userId, agent.id, STEP_LABEL[MAIN_AGENT_ROLE] ?? MAIN_LABEL);
     let reply: AgentReply;
@@ -424,7 +510,7 @@ export class MainTurn {
       rt.diag.agentDone(chatId, userId, agent.id);
     }
     const main = this.host.settings.agents.main;
-    await recordAgentCalls(rt.diag, { at: this.host.at(), phase: DIAG_PHASE[stage], role: MAIN_AGENT_ROLE, connection: main.connectionId ?? "active", model: main.model, transcript: agent.transcript() }).catch((error: unknown) => rt.host.log("warn", `[LumiRPEngine] chat ${chatId}: the main agent's calls weren't all recorded (${error instanceof Error ? error.message : String(error)})`, userId));
+    await recordAgentCalls(rt.diag, { at: this.host.at(), phase, role: MAIN_AGENT_ROLE, connection: main.connectionId ?? "active", model: main.model, transcript: agent.transcript() }).catch((error: unknown) => rt.host.log("warn", `[LumiRPEngine] chat ${chatId}: the main agent's calls weren't all recorded (${error instanceof Error ? error.message : String(error)})`, userId));
     return reply;
   }
 
@@ -433,33 +519,24 @@ export class MainTurn {
     const { settings } = this.host;
     const main = settings.agents.main;
     const stage = this.round?.stage ?? "intent";
-    const agent = startAgent({ role: MAIN_AGENT_ROLE, connectionId: main.connectionId, model: main.model, effort: main.effort, system, prefix: [], tools: [], budget: mainBudget(settings.agents) }, { host: this.host.rt.host, userId: this.host.userId, settings: settings.agents, texts: this.texts, accounts: this.host.rt.agentAccounts, turn: this.host.turn, trace: { phase: DIAG_PHASE[stage], task: "compaction" } });
-    return this.send(agent, message, signal, stage);
+    const agent = startAgent({ role: MAIN_AGENT_ROLE, connectionId: main.connectionId, model: main.model, effort: main.effort, system: withInstructions(system, this.instructions), prefix: [], tools: [], budget: mainBudget(settings.agents) }, { host: this.host.rt.host, userId: this.host.userId, settings: settings.agents, texts: this.texts, accounts: this.host.rt.agentAccounts, turn: this.host.turn, trace: { phase: DIAG_PHASE[stage], task: "compaction" } });
+    return this.send(agent, message, signal, DIAG_PHASE[stage]);
   }
 
-  /**
-   * A committed stage joins the turn's messages: what the agent was sent, and what it did, call by
-   * call; each with the knowledge it was made under, and the stage's with the workspace files its
-   * tools read, so a later turn reads them only as its knowledge and their readers allow then.
-   */
+  /** A committed stage joins the turn's messages: what the agent was sent, and what it did, call by call. */
   private keep(stored: string, sent: string, agent: AgentHandle): void {
     const t = agent.transcript();
     const args = new Map<string, JsonObject>();
     const did: string[] = [];
-    const files = new Set<string>();
     for (const e of t.entries) {
       if (e.kind === "answer") {
         if (e.text.trim() !== "") did.push(e.text.trim());
         for (const c of e.calls) args.set(c.id, c.args);
-      } else if (e.kind === "result") {
-        did.push(this.text(MAIN_TEXT.historyCall, { tool: e.name, args: JSON.stringify(args.get(e.callId) ?? {}), result: e.text }));
-        if (WORKSPACE_TOOLS.has(e.name)) for (const path of [args.get(e.callId)?.path, ...pathsIn(e.text)]) if (isWorkspacePath(path)) files.add(path);
-      }
+      } else if (e.kind === "result") did.push(this.text(MAIN_TEXT.historyCall, { tool: e.name, args: JSON.stringify(args.get(e.callId) ?? {}), result: e.text }));
     }
     const done = did.join("\n\n");
-    const knowledge = this.host.settings.agents.main.knowledge;
     this.sent.push({ role: "user", text: sent }, { role: "assistant", text: done });
-    this.kept.push({ role: "user", content: stored, by: MAIN_BY, knowledge }, { role: "assistant", content: done, by: MAIN_BY, knowledge, ...(files.size > 0 ? { files: [...files] } : {}) });
+    this.kept.push({ role: "user", content: stored, by: MAIN_BY }, { role: "assistant", content: done, by: MAIN_BY });
   }
 
   /** The main agent failed: the turn stops (see the header), and every request still waiting goes on without its role. */
@@ -491,8 +568,8 @@ export class MainTurn {
     if (stage === "beats") {
       const task = requests.find((r) => r.kind === "prose")?.task as ProseTask | undefined;
       if (!task) return "";
-      // The plan's lines are what the narrator is told: everyone's knowledge, secrets marked.
-      const lines = this.reaches("director") ? [...task.lines.outcome, ...task.lines.montage, ...task.lines.beats].join("\n") : "";
+      // The plan's lines are what the narrator is told: everything, secrets marked.
+      const lines = [...task.lines.outcome, ...task.lines.montage, ...task.lines.beats].join("\n");
       return this.text(MAIN_TEXT.engineBeats, { lines: lines === "" ? none : lines });
     }
     if (stage === "read") {
@@ -504,14 +581,8 @@ export class MainTurn {
     return "";
   }
 
-  /** Whether the main agent's knowledge takes in what `role` reads with: only then does it see the role's answers whole. */
-  private reaches(role: RoleId): boolean {
-    return WIDTH[this.host.settings.agents.main.knowledge] >= WIDTH[this.host.settings.agents.roles[role].knowledge];
-  }
-
-  /** A run's answer as the main agent sees it: the answer's shape, and its content as far as its knowledge reaches the role's. */
+  /** A run's answer as the main agent sees it: the answer's shape and its content, whole, a line carrying a secret marked (a brief or outline line is marked as it is written, `ProseMark`). */
   private answerOf(r: Request, out: unknown): JsonValue {
-    const whole = this.reaches(r.role);
     switch (r.kind) {
       case "interpret": {
         const read = out as InterpretRead | null;
@@ -524,10 +595,8 @@ export class MainTurn {
       case "puzzle":
         return { probability: out as number | null };
       case "decisions":
-      case "offscreen": {
-        const odds = out as TieOdds | null;
-        return odds === null ? null : whole ? odds : { ties: Object.keys(odds).length };
-      }
+      case "offscreen":
+        return out as TieOdds | null;
       case "minds":
       case "memory":
         return { events: (out as RunMindsResult).events.length };
@@ -539,65 +608,55 @@ export class MainTurn {
       }
       case "scene": {
         const scene = out as SceneOut;
-        return { lore: scene.lore.length, ...(whole ? { notes: scene.notes } : {}) };
+        return { lore: scene.lore.length, notes: scene.notes };
       }
       case "prose": {
         const prose = (out as DirectorProse).prose;
-        return whole ? { brief: prose.brief, outline: prose.outline } : { outline: prose.outline.length };
+        return { brief: prose.brief, outline: prose.outline };
       }
       case "extract": {
         const read = out as ExtractRead;
-        return whole ? { proposals: read.proposals, where: read.where } : { proposals: read.proposals.map((p) => (typeof p.type === "string" ? p.type : null)) };
+        return { proposals: read.proposals, where: read.where };
       }
       case "effects":
         return { proposals: (out as JsonObject[]).length };
       case "knowledge":
         // What the knowledge step recorded of its answers: its learnings are the run's `knowledge`, never its `events`.
         return knowledgeAnswer(out as RunMindsResult);
-      case "choices":
-        // The player's own suggestions, held to what the player character may know.
-        return out as string[];
+      case "choices": {
+        // A suggestion carrying a secret stays (its chip a spoiler); here it is marked, kept from the player character.
+        const task = r.task as ChoicesTask;
+        const wording = markWording(this.texts);
+        return (out as string[]).map((line) => (task.secret(line) ? secretMarkText(line, [], [task.vars.pov ?? ""], wording) : line));
+      }
     }
   }
 
   /**
-   * A run as run_role and revise answer it: its answer as far as the main agent's knowledge reaches
-   * the role's, then what it left the engine (`runYield`): its changes, staged, held for the review
-   * card or refused, and what of its answer the engine didn't take, and why; or why it failed.
+   * A run as run_role and revise answer it: its answer whole, then what it left the engine
+   * (`runYield`): its changes, staged, held for the review card or refused with why, and what of its
+   * answer the engine didn't take, and why (a director's line that contradicts the state, flagged and
+   * kept, among them); or why it failed.
    */
   private ran(r: Request): string {
     const run = r.current;
     if (!run) return "";
     const via = this.text(run.result.via === "prompt_only" ? MAIN_TEXT.viaPromptOnly : MAIN_TEXT.viaAgent);
     const agent = r.handle ?? run.agentId;
-    const gave = run.result.ok ? runYield(this.texts, r.kind, run.result.out, run.writes, this.reaches(r.role)) : { writes: "", lost: "" };
+    const gave = run.result.ok ? runYield(this.texts, r.kind, run.result.out, run.writes) : { writes: "", lost: "" };
     const answer = run.result.ok ? this.text(MAIN_TEXT.ran, { agent, role: r.role, via, answer: JSON.stringify(this.answerOf(r, run.result.out)) }) : this.text(MAIN_TEXT.ranFailed, { agent, role: r.role, via, reason: run.result.reason });
-    return [answer, gave.writes, gave.lost, run.withheld ? this.text(MAIN_TEXT.briefWithheld, { role: r.role }) : ""].filter((t) => t !== "").join("\n");
+    return [answer, gave.writes, gave.lost].filter((t) => t !== "").join("\n");
   }
 
-  /**
-   * What a run is told of the main agent's task and revisions (`TurnAgentCtx.brief`): each task of
-   * the run the lines its own knowledge reaches (`screenBrief`), whatever the main agent reads with;
-   * `withheld` once a line was kept from one.
-   */
-  private briefFor(task: string, revisions: readonly string[]): TurnBrief & { withheld: boolean } {
-    const text = [this.text(MAIN_TEXT.brief, { task }), ...revisions.map((message) => this.text(MAIN_TEXT.briefRevision, { message }))].join("\n\n");
-    const brief = {
-      withheld: false,
-      for: (reads: TaskReads): string => {
-        const told = screenBrief(this.host.rt.registry, this.host.head(), text, reads);
-        if (told.withheld) brief.withheld = true;
-        return told.text;
-      },
-    };
-    return brief;
+  /** What a run is told of the main agent's task and revisions (`TurnAgentCtx.brief`), whole. */
+  private briefFor(task: string, revisions: readonly string[]): string {
+    return [this.text(MAIN_TEXT.brief, { task }), ...revisions.map((message) => this.text(MAIN_TEXT.briefRevision, { message }))].join("\n\n");
   }
 
   // ---------------------------------------------------------------- the tools
 
   private tools(round: Round): AgentTool[] {
     const { settings } = this.host;
-    const main = settings.agents.main;
     const describe = (name: string, arg: string): string => this.text(MAIN_TEXT.toolArg(name, arg));
     const own: AgentTool[] = [
       {
@@ -614,12 +673,45 @@ export class MainTurn {
       },
       { name: MAIN_TOOLS.commit, description: this.text(MAIN_TEXT.tool(MAIN_TOOLS.commit)), parameters: { type: "object", properties: {} }, run: () => this.commit(round) },
       ...(settings.agents.compaction.summarizeTool ? [{ name: MAIN_TOOLS.summarize, description: this.text(MAIN_TEXT.tool(MAIN_TOOLS.summarize)), parameters: { type: "object", properties: {} }, run: () => this.summarize(round) } satisfies AgentTool] : []),
+      {
+        name: MAIN_TOOLS.condense,
+        description: this.text(MAIN_TEXT.tool(MAIN_TOOLS.condense)),
+        parameters: { type: "object", properties: { source: { type: "string", description: describe(MAIN_TOOLS.condense, "source") }, role: { type: "string", enum: [...ROLE_IDS], description: describe(MAIN_TOOLS.condense, "role") }, note: { type: "string", description: describe(MAIN_TOOLS.condense, "note") }, focus: { type: "string", description: describe(MAIN_TOOLS.condense, "focus") } }, required: ["source", "role"] },
+        run: (args) => this.condense(round, args),
+      },
     ];
+    return [...own, ...this.readTools()];
+  }
+
+  /** The main agent's read tools, the GM's view with every secret marked: it changes nothing itself. None while the chat's world isn't loaded. */
+  private readTools(): AgentTool[] {
+    const main = this.host.settings.agents.main;
     const head = this.host.head();
-    if (!head || main.families.length === 0) return own;
-    // Its tools read only, with its knowledge: it changes nothing itself.
-    const reader = this.host.reader(main.knowledge);
-    return [...own, ...toolsFor({ world: head.world, tiers: ["read"], families: main.families, texts: this.texts, env: { userId: this.host.userId, chatId: this.host.chatId, knowledge: main.knowledge, reader, writer: null, agent: { role: MAIN_AGENT_ROLE, id: MAIN_AGENT_ROLE }, signal: this.host.stop, loads: this.host.loads } })];
+    if (!head || main.families.length === 0) return [];
+    // Its tools read only, the GM's view with every secret marked: it changes nothing itself but the notes it condenses.
+    return toolsFor({ world: head.world, tiers: ["read"], families: main.families, texts: this.texts, env: { userId: this.host.userId, chatId: this.host.chatId, knowledge: "gm", marks: true, reader: this.host.reader(), writer: null, agent: { role: MAIN_AGENT_ROLE, id: MAIN_AGENT_ROLE }, signal: this.host.stop, loads: this.host.loads } });
+  }
+
+  /** `condense`: a source condensed with the main agent's own model (`condenseSource`) into a workspace note staged as `role`'s, which a task names. */
+  private async condense(round: Round, args: JsonObject): Promise<ToolOutcome> {
+    if (round.committed) return this.refuse(MAIN_TEXT.refusedCommitted);
+    const role = typeof args.role === "string" ? args.role : "";
+    if (!(ROLE_IDS as readonly string[]).includes(role)) return this.refuse(MAIN_TEXT.refusedRole, { role, roles: ROLE_IDS.join(", ") });
+    const view = await this.host.reader().view();
+    const note = typeof args.note === "string" && args.note.trim() !== "" ? args.note.trim() : null;
+    const made = await condenseSource(view, {
+      ref: typeof args.source === "string" ? args.source : "",
+      note,
+      focus: typeof args.focus === "string" ? args.focus : "",
+      signal: round.controller.signal,
+      summarize: async (instructions, text, signal) => {
+        const reply = await this.summarizer(this.text(RUNTIME_TEXT.condenseSystem), `${instructions}\n\n${text}`, AbortSignal.any([round.controller.signal, signal]));
+        return reply.status === "answered" && reply.text.trim() !== "" ? { text: reply.text.trim() } : { failed: reply.reason ?? this.text(MAIN_TEXT.none) };
+      },
+    });
+    if (!("path" in made)) return made;
+    const out = await propose(view, this.host.writer(role as RoleId), { kind: "ws_write", path: made.path, text: made.text });
+    return out.error ? out : { text: JSON.stringify({ note: made.path, chars: { source: made.chars, note: made.text.length }, ...(JSON.parse(out.text) as object) }) };
   }
 
   private refuse(id: string, vars: Readonly<Record<string, string>> = {}): ToolOutcome {
@@ -689,7 +781,7 @@ export class MainTurn {
       const { agentId, result } = await running;
       if (r.done) this.host.drop(agentId, "unused");
       const writes = this.host.writes(agentId);
-      r.current = { agentId, result, task, revisions, promptOnly, withheld: brief.withheld, learned, writes };
+      r.current = { agentId, result, task, revisions, promptOnly, learned, writes };
       r.handle ??= agentId;
       if (result.ok) recordYield(this.host.rt, this.host.at(), DIAG_PHASE[round.stage], r.role, runYield(this.texts, r.kind, result.out, writes));
     } finally {
@@ -728,7 +820,7 @@ export class MainTurn {
     if (this.summarized || !session) return this.refuse(MAIN_TEXT.summarizeAgain);
     this.summarized = true;
     const { compaction } = this.host.settings.agents;
-    const made = await compact(this.host.rt, { userId: this.host.userId, holder: this.host.holder, session, keep: compaction.keepTurns, texts: this.texts, lens: this.lens, summarize: (system, message) => this.summarizer(system, message, round.controller.signal) });
+    const made = await compact(this.host.rt, { userId: this.host.userId, holder: this.host.holder, session, keep: compaction.keepTurns, texts: this.texts, summarize: (system, message) => this.summarizer(system, message, round.controller.signal) });
     if (made === null || "failed" in made) this.summarized = false;
     if (made === null) return this.refuse(MAIN_TEXT.summarizeNothing, { turns: String(session.segments.length), keep: String(compaction.keepTurns) });
     if ("failed" in made) return this.refuse(MAIN_TEXT.summarizeFailed, { reason: made.failed });
@@ -736,21 +828,4 @@ export class MainTurn {
     this.session = made.session;
     return { text: this.text(MAIN_TEXT.summarized, { summary: made.summary, folded: String(made.folded), kept: String(made.kept) }) };
   }
-}
-
-/** The main agent's workspace tools, by name: the files their answers read, its stage's message keeps (`MainMessage.files`). */
-const WORKSPACE_TOOLS = new Set(TOOL_DEFINITIONS.filter((d) => d.family === "workspace").map((d) => d.name));
-
-/** The paths a workspace tool's answer names, each `"path"` of its JSON, a clipped answer's too. */
-function pathsIn(text: string): string[] {
-  const out: string[] = [];
-  for (const m of text.matchAll(/"path":("(?:[^"\\]|\\.)*")/g)) {
-    try {
-      const path: unknown = JSON.parse(m[1] ?? "");
-      if (typeof path === "string") out.push(path);
-    } catch {
-      // A path the clip cut off names no file.
-    }
-  }
-  return out;
 }

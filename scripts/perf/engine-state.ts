@@ -17,16 +17,16 @@
 // The dataset (~40 MB of JSON) is kept in $LRE_PERF_CACHE (default /tmp/lre-perf) and rebuilt with
 // --rebuild (about 10 minutes); `LRE_EVIDENCE_DIR` also gets the report.
 
-import { heapStats } from "bun:jsc";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import type { HostPort, QuietRequest } from "../../src/backend/host";
+import type { QuietRequest } from "../../src/backend/host";
 import { toChain } from "../../src/backend/ledger-io";
 import { LedgerFold } from "../../src/engine/ledger/fold";
 import { contentId } from "../../src/engine/ledger/path";
 import type { JsonObject, JsonValue } from "../../src/shared/json";
-import { FakeHost, type FakeChat } from "../../test/support/fake-host";
+import { FakeHost } from "../../test/support/fake-host";
 import { Rig } from "../../test/support/rig";
+import { calm, dumpHost, empty, field, heap, type HostDump, ipcPort, mb, quiet, restoreHost } from "./fixture";
 import { HeapGraph } from "./heap-retainers";
 import { bookLore, largeWorld } from "./large-world";
 
@@ -48,7 +48,6 @@ const VERBS = ["check", "carry", "sort", "mend", "watch", "open", "close", "coun
 const PLACES = ["bluebird_coffee", "alder_automotive", "gen_place_3", "alder_market", "gen_place_10", "harbor_street_114", "gen_place_21", "lakefront_park"];
 
 const word = (t: number): string => WORDS[t % WORDS.length] as string;
-const mb = (bytes: number): number => Math.round(bytes / 1e5) / 10;
 
 /** What the player types on turn `t`. */
 function userText(t: number): string {
@@ -98,102 +97,13 @@ function scripted(turn: () => number): (req: QuietRequest) => string {
   };
 }
 
-/**
- * The host as the extension's subprocess sees it: every value that crosses the port is a copy, as
- * over Spindle's IPC, and nothing on either side holds the other's objects strongly. The backend's
- * handlers are held on its side and reached from the host through weak references, and the port
- * reaches the host weakly too, so a heap snapshot's dominators split the two.
- */
-function ipcPort(host: FakeHost): HostPort {
-  const far = new WeakRef(host);
-  const near = (): FakeHost => {
-    const h = far.deref();
-    if (!h) throw new Error("the host is gone");
-    return h;
-  };
-  const own = new Set<unknown>();
-  const copy = (v: unknown): unknown => {
-    if (typeof v === "string") return JSON.parse(JSON.stringify(v)) as string;
-    if (v === null || typeof v !== "object" || v instanceof AbortSignal) return v;
-    if (Object.values(v).some((x) => typeof x === "function")) return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, typeof x === "function" ? x : copy(x)]));
-    return structuredClone(v);
-  };
-  const settled = (v: unknown): unknown => (v instanceof Promise ? v.then(copy) : copy(v));
-  // What the backend hands the host: data copied; a function kept here and called through a weak reference.
-  const out = (v: unknown): unknown => {
-    if (typeof v !== "function") return copy(v);
-    own.add(v);
-    const ref = new WeakRef(v as (...args: unknown[]) => unknown);
-    return (...args: unknown[]) => settled(ref.deref()?.(...args.map(copy)));
-  };
-  const call =
-    (target: () => Record<string, unknown>, name: string) =>
-    (...args: unknown[]): unknown => {
-      const t = target();
-      return settled((t[name] as (...a: unknown[]) => unknown).apply(t, args.map(out)));
-    };
-  const namespace = (key: string): Record<string, unknown> => {
-    const of = (): Record<string, unknown> => (near() as unknown as Record<string, Record<string, unknown>>)[key] as Record<string, unknown>;
-    return Object.fromEntries(Object.keys(of()).map((name) => [name, call(of, name)]));
-  };
-  const self = (): Record<string, unknown> => near() as unknown as Record<string, unknown>;
-  const port = {
-    chats: namespace("chats"),
-    storage: namespace("storage"),
-    extensionStorage: namespace("extensionStorage"),
-    models: namespace("models"),
-    tokens: namespace("tokens"),
-    frontend: namespace("frontend"),
-    books: namespace("books"),
-    presets: namespace("presets"),
-    connections: namespace("connections"),
-    mcp: namespace("mcp"),
-    regex: namespace("regex"),
-    processes: namespace("processes"),
-    on: call(self, "on"),
-    registerContextHandler: call(self, "registerContextHandler"),
-    registerWorldInfoInterceptor: call(self, "registerWorldInfoInterceptor"),
-    toast: call(self, "toast"),
-    dryRun: call(self, "dryRun"),
-    log: call(self, "log"),
-    get capabilities() {
-      return copy(near().capabilities);
-    },
-  };
-  return port as unknown as HostPort;
-}
-
 // ---------------------------------------------------------------- the dataset
 
 interface Dataset {
   v: 1;
   chats: string[];
-  host: {
-    nextId: number;
-    bookChanges: number;
-    chats: FakeChat[];
-    files: [string, string][];
-    extensionFiles: [string, string][];
-    books: [string, { name: string; character?: boolean; added?: number; updated: number; entries: [string, JsonObject][] }][];
-    regex: [string, JsonObject][];
-    globalBooks: string[];
-  };
+  host: HostDump;
   world: { entities: number; places: number; lore: number; bytes: number };
-}
-
-/** The fake host's private counters, which a stored dataset carries. */
-interface HostCounters {
-  nextId: number;
-  bookChanges: number;
-}
-
-/** Drops what the fake host records for tests (every message sent, call made, line logged): host-side, and not the backend's. */
-function quiet(host: FakeHost): void {
-  for (const list of [host.sent, host.sentTo, host.quietCalls, host.quietStopped, host.logs, host.tokenCalls, host.placed, host.fills, host.restarts, host.toasts, host.spawned, host.decideCalls, host.mcpReads]) list.length = 0;
-  host.userLogs.clear();
-  host.logTurns.clear();
-  host.processMail.clear();
-  host.assembled = [];
 }
 
 async function build(): Promise<void> {
@@ -226,20 +136,10 @@ async function build(): Promise<void> {
   rig.body(await rig.send({ type: "lre.hello", chatId }, PAGE));
   await host.settle();
   const world = largeWorld("w", "w", { bookId, entryIds });
-  const counters = host as unknown as HostCounters;
   const data: Dataset = {
     v: 1,
     chats: [chatId, ...branches],
-    host: {
-      nextId: counters.nextId,
-      bookChanges: counters.bookChanges,
-      chats: [...host.chatsById.values()],
-      files: [...host.files],
-      extensionFiles: [...host.extensionFiles],
-      books: [...host.bookStore].map(([id, b]) => [id, { ...b, entries: [...b.entries].map(([k, e]): [string, JsonObject] => [k, e as unknown as JsonObject]) }]),
-      regex: [...host.regexScripts].map(([k, s]): [string, JsonObject] => [k, s as unknown as JsonObject]),
-      globalBooks: [...host.globalBooks],
-    },
+    host: dumpHost(host),
     world: { entities: Object.keys(world.entities).length, places: Object.keys(world.places).length, lore: Object.keys(world.lore).length, bytes: JSON.stringify(world).length },
   };
   mkdirSync(CACHE, { recursive: true });
@@ -248,56 +148,7 @@ async function build(): Promise<void> {
   process.exit(0);
 }
 
-function restore(data: Dataset): FakeHost {
-  const host = new FakeHost();
-  const counters = host as unknown as HostCounters;
-  counters.nextId = data.host.nextId;
-  counters.bookChanges = data.host.bookChanges;
-  for (const c of data.host.chats) host.chatsById.set(c.id, c);
-  for (const [k, v] of data.host.files) host.files.set(k, v);
-  for (const [k, v] of data.host.extensionFiles) host.extensionFiles.set(k, v);
-  for (const [id, b] of data.host.books) host.bookStore.set(id, { ...b, entries: new Map(b.entries.map(([k, e]) => [k, e as never])) });
-  for (const [k, s] of data.host.regex) host.regexScripts.set(k, s as never);
-  host.globalBooks = [...data.host.globalBooks];
-  return host;
-}
-
 // ---------------------------------------------------------------- measuring
-
-/** The heap after a full collection, in bytes. */
-function heap(): number {
-  Bun.gc(true);
-  Bun.gc(true);
-  return heapStats().heapSize;
-}
-
-/** Waits until nothing the backend started is still running or scheduled. */
-async function calm(rig: Rig): Promise<void> {
-  for (let i = 0; i < 3; i++) {
-    await rig.host.settle();
-    await Bun.sleep(30);
-  }
-  quiet(rig.host);
-}
-
-type Clear = Map<unknown, unknown> | Set<unknown> | unknown[];
-
-/** Empties each named field of `owner` (a Map, Set or array); a field missing is an error, so a renamed one never measures as nothing. */
-function empty(owner: unknown, ...fields: string[]): void {
-  for (const f of fields) {
-    const v = (owner as Record<string, Clear | undefined>)[f];
-    if (v instanceof Map || v instanceof Set) v.clear();
-    else if (Array.isArray(v)) v.length = 0;
-    else throw new Error(`no field ${f} to empty`);
-  }
-}
-
-/** A private field, read as `T`; missing is an error. */
-function field<T>(owner: unknown, name: string): T {
-  const v = (owner as Record<string, unknown>)[name];
-  if (v === undefined) throw new Error(`no field ${name}`);
-  return v as T;
-}
 
 interface Slot {
   snapshots: { map: Map<string, unknown> };
@@ -401,9 +252,9 @@ type Scenario = "open" | "turns" | "chats";
 async function scenario(name: Scenario): Promise<JsonObject> {
   const data = JSON.parse(readFileSync(DATASET, "utf8")) as Dataset;
   let turn = TURNS;
-  const host = restore(data);
+  const host = restoreHost(data.host);
   host.quietReply = scripted(() => turn);
-  const rig = new Rig({ shipped: true, minds: true, host, port: ipcPort });
+  const rig = new Rig({ shipped: true, minds: true, host, port: (h) => ipcPort(h) });
   await calm(rig);
   const [chatId, ...branches] = data.chats as [string, ...string[]];
   const base = heap();

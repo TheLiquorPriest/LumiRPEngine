@@ -1,23 +1,28 @@
 // An agent-backed role's task (INC2-SPEC C9, lane T2): one agent per task, started on the role's
 // settings (`startRoleAgent`: its connection, model, effort, budget within the turn's, and caching),
-// told its role's texts from R5's registry (`shared/role-prompts.ts`: its system prompt, its
-// instructions with the preset's guidance for its steps after them and its pinned files after that,
-// then the task's text and the description of its answer), given the tools of its families and tier
-// under its knowledge (`toolsFor`, reading through the turn's reader and staging through its
-// writer), and answered in its task's JSON contract, which classic's own validator turns into
-// classic's type or refuses.
+// told its role's texts from R5's registry (`shared/role-prompts.ts`), given the tools of its families
+// and tier (`toolsFor`, reading through the turn's reader and staging through its writer), and
+// answered in its task's JSON contract, which classic's own validator turns into classic's type or
+// refuses.
 //
-// A role reading with one character's own knowledge, or a task that reads only what its context holds
-// (a mind, a decision), gets no tools and no pinned files: the tool layer reads as the player
-// character, everyone or the GM, none of which is one character's own. Its pinned files are those
-// `.pins.json` lists for its role, then those pinned in GM → Workspace, read with its knowledge on
-// the turn's head within its pins budget (`pinnedFiles`). Every call is recorded in Diagnostics, and
+// Its context is its config's (Settings → Agents → Context, `agents.context.roles[<role>]`), a guide
+// and never a screen: every role's tools read everything, secrets marked in the user's wording,
+// whatever perspective it works from. The prompt is laid out so the provider can cache what stays the
+// same: the system prompt (with its perspective's text, then the workspace's system files for it,
+// AGENTS.md and roles/<role>.md, the global workspace's then the chat's) and the stable prefix (its
+// instructions, the preset's guidance for its steps, its pinned files: those its config pins, then
+// `.pins.json`'s for it, then those pinned in GM → Workspace, within its pins budget; and the lore
+// index when it starts with it) come first, then the message: the task's text, what the task reads
+// besides it, the narrator's sections its config starts it with as they stand now, its answer's
+// description, and the main agent's words for it whole. Every call is recorded in Diagnostics, and
 // the live trace shows the role at work, by its label only.
 
+import { LORE_INDEX_SOURCE } from "../../../shared/agent-context";
 import { FAILED_TEXT } from "../../../shared/agent-failures";
+import { RUNTIME_TEXT } from "../../../shared/agent-prompts";
 import type { RoleId, RoleTier } from "../../../shared/agent-roles";
 import { ROLE_LABEL } from "../../../shared/agent-roles";
-import type { AgentKnowledge, ToolFamily } from "../../../shared/agent-tools";
+import type { ToolFamily } from "../../../shared/agent-tools";
 import type { DiagPhase } from "../../../shared/diagnostics";
 import type { JsonValue } from "../../../shared/json";
 import type { PromptTexts } from "../../../shared/prompts";
@@ -29,15 +34,14 @@ import { GUIDANCE_PREFIX, GUIDANCE_TARGETS, type GuidanceTarget } from "../../pr
 import { renderPrompt } from "../../prompts";
 import type { Runtime } from "../../runtime";
 import { parseJsonReply } from "../../steps";
-import type { TaskReads } from "../brief";
 import type { AgentTool } from "../runtime";
-import type { ToolReader } from "../tools/read-view";
+import type { Summarize } from "../tools/condense";
 import { loreIndexText } from "../tools/lore";
 import { toolsFor } from "../tools/registry";
-import type { ToolWriter } from "../tools/writer";
 import { recordAgentCalls } from "../transcripts";
 import { type RoleResult, startRoleAgent, type TurnAgentCtx } from "../turn-ctx";
 import { pinnedFiles, type PinsTexts } from "../turn-task";
+import { systemInstructions, withInstructions } from "../system-files";
 
 /** The preset's guidance blocks each role gets, by the classic steps it stands in for, in Settings' order (§5's guidance rule). */
 const ROLE_GUIDANCE: Readonly<Record<RoleId, readonly GuidanceTarget[]>> = {
@@ -73,16 +77,8 @@ export interface RoleAsk<O> {
   data?: string;
   /** Its answer's text (default `answer`), and that text's placeholders. */
   answer?: { part: string; vars?: Readonly<Record<string, string>> };
-  /** The world its tools' schemas are filled from; null for a task that gets none. */
+  /** The world its tools' schemas are filled from; null for a task that gets none (a puzzle's answer, which only its call is told). */
   tools: WorldDoc | null;
-  /**
-   * Whose knowledge the task reads with: what its tools and pinned files read with in place of its
-   * role's (the director's brief and outline as the player character, as classic's prose steps
-   * read, whatever the director reads with), and what the main agent's words for it are held to
-   * (`screenBrief`): a decision its chooser's own, a player surface the player character's. Absent:
-   * its role's, and under a character's own knowledge a character the task doesn't name, so none.
-   */
-  reads?: TaskReads;
   /** Classic's own check of the answer: its classic type, or null when it isn't one. */
   check(raw: JsonValue): O | null;
 }
@@ -90,10 +86,10 @@ export interface RoleAsk<O> {
 /** How a role's task ended (C9), with the answer as the model wrote it, which Test checks against the contract. */
 export type RoleAnswer<O> = RoleResult<O> & { text: string };
 
-/** The tools a role is given (§6): its families, at its tier, under the knowledge its task reads with (`io` its reader and writer); none under a character's own knowledge. */
-function roleTools(ctx: TurnAgentCtx, io: { reader: ToolReader; writer: ToolWriter }, world: WorldDoc, texts: PromptTexts, knowledge: AgentKnowledge): AgentTool[] {
+/** The tools a role is given (§6): its families, at its tier, every one reading the GM's view with every secret marked; `summarize` lets its `condense` tool condense a source with its own model. */
+function roleTools(ctx: TurnAgentCtx, world: WorldDoc, texts: PromptTexts, summarize: Summarize): AgentTool[] {
   const tier: RoleTier = ctx.settings.tier;
-  const env = { userId: ctx.userId, chatId: ctx.chatId, knowledge, reader: io.reader, writer: tier === "read" ? null : io.writer, agent: { role: ctx.role, id: ctx.agentId }, signal: ctx.signal, loads: ctx.loads };
+  const env = { userId: ctx.userId, chatId: ctx.chatId, knowledge: "gm" as const, marks: true, reader: ctx.reader, writer: tier === "read" ? null : ctx.writer, agent: { role: ctx.role, id: ctx.agentId }, signal: ctx.signal, loads: ctx.loads, summarize };
   const families = ctx.settings.families;
   const reads = toolsFor({ world, tiers: ["read"], families, texts, env });
   if (tier === "read") return reads;
@@ -115,26 +111,6 @@ function guidanceOf(rt: Runtime, ctx: TurnAgentCtx, texts: PromptTexts, names: R
 /** A role's framing of its pinned files, from the Every role page. */
 const ROLE_PINS_TEXTS: PinsTexts = { pins: ROLES_TEXT.pins, file: ROLES_TEXT.pinsFile, headings: ROLES_TEXT.pinsHeadings, none: ROLES_TEXT.pinsNoHeadings };
 
-/** `ctx`'s role's pinned files, read through `reader` (its task's knowledge) on the turn's head: its pins budget the manifest's for it, else `tokens`; none while the chat's world isn't loaded. */
-async function rolePins(ctx: TurnAgentCtx, reader: ToolReader, texts: PromptTexts, tokens: number): Promise<string> {
-  let view;
-  try {
-    view = await reader.view();
-  } catch {
-    return "";
-  }
-  return pinnedFiles(view, { role: ctx.role, tokens, pinned: true, texts, framing: ROLE_PINS_TEXTS });
-}
-
-/** The lore index as `reader` (its task's knowledge) reads it, within `tokens` (`loreIndexText`); none while the chat's world isn't loaded. */
-async function roleIndex(reader: ToolReader, tokens: number): Promise<string> {
-  try {
-    const text = await loreIndexText(await reader.view(), { tokens });
-    return typeof text === "string" ? text : "";
-  } catch {
-    return "";
-  }
-}
 
 /**
  * Works one task of `ctx`'s role with an agent and checks its answer with classic's own validator
@@ -148,26 +124,46 @@ export async function runRoleAgent<O>(rt: Runtime, ctx: TurnAgentCtx, ask: RoleA
   const settings = await rt.settings.get(ctx.userId);
   const own = ctx.texts ?? settings.prompts.texts;
   const role = ctx.role;
+  const context = settings.agents.context.roles[role];
   const step = helperCallOf(ask.purpose ? stepConfigOf(settings.modelUse.steps, ask.purpose) : null, settings.helper);
   const at = ctx.settings.connectionId !== null ? ctx : { ...ctx, settings: { ...ctx.settings, connectionId: step.connectionId, model: ctx.settings.model ?? step.model } };
-  const roleKnowledge = ctx.settings.knowledge !== "own" ? ctx.settings.knowledge : null;
-  // What the task reads with: its own where it names one, else its role's; a task given no tools reads only what it is told.
-  const knowledge = ask.tools ? (typeof ask.reads === "string" ? ask.reads : roleKnowledge) : null;
-  const io = knowledge !== null && knowledge !== roleKnowledge ? ctx.readAs(knowledge) : { reader: ctx.reader, writer: ctx.writer };
-  const sees = renderPrompt(ROLES_TEXT.sees[knowledge ?? "own"], own, ask.names);
-  const system = renderPrompt(roleTextId(role, "system"), own, { ...ask.names, knowledge: sees });
-  const pins = knowledge ? await rolePins(ctx, io.reader, own, settings.agents.main.pinsTokens) : "";
-  // The lore index after the pinned files, with Settings → Lore's switch on (off by default), within its tokens.
-  const index = knowledge && settings.loreIndex.inPrompts ? await roleIndex(io.reader, settings.loreIndex.promptTokens) : "";
+  // Its perspective is a hint in its system prompt; its tools read the same whatever it is.
+  const perspective = renderPrompt(ROLES_TEXT.sees[context.perspective], own, ask.names);
+  const system = renderPrompt(roleTextId(role, "system"), own, { ...ask.names, knowledge: perspective });
+  // The head it reads, once for its system files, its pinned files and its lore index; none while the chat's world isn't loaded.
+  const view = await ctx.reader.view().catch(() => null);
+  // AGENTS.md and roles/<role>.md, the global workspace's then the chat's, after the role's own system prompt (DESIGN §4.4).
+  const instructions = view ? await systemInstructions(view, { role, tokens: settings.agents.systemTokens, texts: own }) : "";
+  const pins = view ? await pinnedFiles(view, { role, tokens: settings.agents.main.pinsTokens, pinned: true, texts: own, framing: ROLE_PINS_TEXTS, config: context.pins }) : "";
+  const indexed = view && context.start.includes(LORE_INDEX_SOURCE) ? await loreIndexText(view, { tokens: settings.loreIndex.promptTokens }) : "";
+  const index = typeof indexed === "string" ? indexed : "";
   const prefix = [renderPrompt(roleTextId(role, "instructions"), own, ask.names), guidanceOf(rt, ctx, own, ask.names), pins, index].filter((t) => t.trim() !== "");
-  const tools = ask.tools && knowledge ? roleTools(ctx, io, ask.tools, own, knowledge) : [];
+  // What changes as the turn goes comes after the task, so the prefix stays the provider's to cache.
+  const sections = await ctx.sections(context.start.filter((s) => s !== LORE_INDEX_SOURCE));
   const answer = ask.answer?.part ?? "answer";
-  // The main agent's words for this run (C10's `brief`), held to what this task reads with; none in the fixed pipeline.
-  const told = ctx.brief?.for(ask.reads ?? (ctx.settings.knowledge === "own" ? { own: null } : ctx.settings.knowledge)) ?? "";
-  const message = [renderPrompt(roleTaskTextId(role, ask.sub, "task"), own, { ...ask.names, ...ask.vars }, ask.own), ask.data ?? "", renderPrompt(roleTaskTextId(role, ask.sub, answer), own, { ...ask.names, ...(ask.answer?.vars ?? {}) }), told]
+  const message = [
+    renderPrompt(roleTaskTextId(role, ask.sub, "task"), own, { ...ask.names, ...ask.vars }, ask.own),
+    ask.data ?? "",
+    sections === "" ? "" : renderPrompt(ROLES_TEXT.context, own, { ...ask.names, sections }),
+    renderPrompt(roleTaskTextId(role, ask.sub, answer), own, { ...ask.names, ...(ask.answer?.vars ?? {}) }),
+    // The main agent's words for this run (C10's `brief`), whole; none in the fixed pipeline.
+    ctx.brief ?? "",
+  ]
     .filter((t) => t.trim() !== "")
     .join("\n\n");
-  const handle = startRoleAgent(rt, at, { system, prefix, tools }, { phase: ask.phase, task: ask.sub });
+  // A source its `condense` tool condenses goes to one call of its own model, with no tools, recorded as its role's; its system files go with it, as with every call of the role.
+  const condenseSystem = withInstructions(renderPrompt(RUNTIME_TEXT.condenseSystem, own, {}), instructions);
+  const summarize: Summarize = async (asked, text, signal) => {
+    const condenser = startRoleAgent(rt, at, { system: condenseSystem, prefix: [], tools: [] }, { phase: ask.phase, task: "condense" });
+    try {
+      const reply = await condenser.send(`${asked}\n\n${text}`, AbortSignal.any([ctx.signal, signal]));
+      return reply.status === "answered" && reply.text.trim() !== "" ? { text: reply.text.trim() } : { failed: reply.reason ?? renderPrompt(FAILED_TEXT.noAnswer, own, {}) };
+    } finally {
+      await recordAgentCalls(rt.diag, { at: { chatId: ctx.chatId, userId: ctx.userId, turn: ctx.generationId }, phase: ask.phase, role, connection: at.settings.connectionId ?? "active", model: at.settings.model, transcript: condenser.transcript() }).catch(() => undefined);
+    }
+  };
+  const tools = ask.tools ? roleTools(ctx, ask.tools, own, summarize) : [];
+  const handle = startRoleAgent(rt, at, { system: withInstructions(system, instructions), prefix, tools }, { phase: ask.phase, task: ask.sub });
   rt.diag.agentWorking(ctx.chatId, ctx.userId, handle.id, ROLE_LABEL[role]);
   let reply;
   try {

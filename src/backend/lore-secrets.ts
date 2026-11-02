@@ -25,6 +25,20 @@ export function textOf(content: string): string {
   return text === "" ? "" : hashParts("lre-lore-text-v1", text);
 }
 
+/** Each frozen holder's text key (a kept book entry, the lore made of one: `BookReads`), made once: its text never changes. */
+const TEXT_KEYS = new WeakMap<object, string>();
+
+/** `textOf` `holder`'s own text, `content`: kept with a frozen holder, made each time for any other. */
+export function heldTextOf(holder: object, content: string): string {
+  if (!Object.isFrozen(holder)) return textOf(content);
+  let key = TEXT_KEYS.get(holder);
+  if (key === undefined) {
+    key = textOf(content);
+    TEXT_KEYS.set(holder, key);
+  }
+  return key;
+}
+
 /** An entry as a copy names its original, and a world entry its source: `bookId/entryId`. */
 function keyOf(e: { bookId: string; id: string }): string {
   return `${e.bookId}/${e.id}`;
@@ -92,11 +106,17 @@ export interface MarkAt {
   n: number | null;
 }
 
-/** An entry's marks, each where it stands (`MarkAt`): the one its whole text is, or each in order. */
+/** Each frozen entry's marks where they stand (`marksAt`), read once. */
+const MARKS = new WeakMap<object, MarkAt[]>();
+
+/** An entry's marks, each where it stands (`MarkAt`): the one its whole text is, or each in order. Kept with a frozen entry. */
 function marksAt(e: Pick<HostBookEntry, "id" | "bookId" | "content">): MarkAt[] {
+  const kept = MARKS.get(e);
+  if (kept) return kept;
   const whole = wholeEntrySecret(e.content);
-  if (whole) return [{ mark: whole, bookId: e.bookId, entryId: e.id, n: null }];
-  return parseSecretMarks(e.content).map((mark, i) => ({ mark, bookId: e.bookId, entryId: e.id, n: i + 1 }));
+  const out = whole ? [{ mark: whole, bookId: e.bookId, entryId: e.id, n: null }] : parseSecretMarks(e.content).map((mark, i) => ({ mark, bookId: e.bookId, entryId: e.id, n: i + 1 }));
+  if (Object.isFrozen(e)) MARKS.set(e, out);
+  return out;
 }
 
 /** What a copy whose original isn't read is held to, when it holds no secret of its own: a secret no gate opens, which nothing read says the end of. */
@@ -134,7 +154,7 @@ export function secretTexts(also: { world?: WorldDoc | null; entries?: readonly 
     if (source.kind !== "book") continue;
     add(out.sources, `${source.bookId}/${source.entryId}`, fields);
     const now = given.get(source.entryId);
-    if (now) add(out.texts, textOf(now.content), fields);
+    if (now) add(out.texts, heldTextOf(now, now.content), fields);
   }
   for (const e of entries) {
     const marks = marksAt(e);
@@ -151,7 +171,7 @@ export function secretTexts(also: { world?: WorldDoc | null; entries?: readonly 
     if (secretCopyOf(e.extensions) !== null) continue;
     const fields = bookLoreFieldsOf(e.extensions);
     if (!fields || !restricts(fields)) continue;
-    add(out.texts, textOf(e.content), fields);
+    add(out.texts, heldTextOf(e, e.content), fields);
     if (loreIsSecret(fields)) out.originals.set(e.id, fields);
   }
   return out;
@@ -241,7 +261,7 @@ export function secrecyParts(e: Pick<HostBookEntry, "id" | "bookId" | "content" 
   else if (named !== null && named !== e.id && !texts.read.has(named) && !(own && loreIsSecret(own))) out.push(UNREAD_ORIGINAL);
   out.push(...(texts.sources.get(keyOf(e)) ?? []));
   if (copy && copy.entry !== keyOf(e)) out.push(...(texts.sources.get(copy.entry) ?? []));
-  if (!marked) out.push(...textParts(texts, e.content));
+  if (!marked) out.push(...(texts.texts.get(heldTextOf(e, e.content)) ?? []));
   return out;
 }
 

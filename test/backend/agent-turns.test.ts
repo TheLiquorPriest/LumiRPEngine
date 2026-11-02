@@ -17,6 +17,7 @@ import { isRecord, type JsonObject } from "../../src/shared/json";
 import type { LedgerEvent, Rec } from "../../src/shared/ledger";
 import { ROLE_IDS } from "../../src/shared/agent-roles";
 import type { ReviewCardView } from "../../src/shared/protocol";
+import { blobHash } from "../../src/shared/stores";
 import { alderChat, DANNY, fakeModels, MARCUS, PRIYA, stateOf } from "../support/mind-chat";
 import { Rig } from "../support/rig";
 
@@ -333,19 +334,21 @@ describe("what an agent turn's roles write", () => {
     expect(rig.rt.ledger.errors).toEqual([]);
   });
 
-  test("a role's change to the learned area is made in the chat's metadata as the turn closes, with no event in its record; a cancelled turn makes none", async () => {
+  test("a role's change to the learned area or the global workspace is made in its store as the turn closes, with no event in its record; a cancelled turn makes none", async () => {
     const rig = new Rig({ shipped: true });
     const { agents } = await pair(rig);
     plainModels(rig);
     rig.body(await rig.send({ type: "lre.settings.set", patch: { agents: { roles: { scene: { tier: "story" } } } } }));
     const note: AgentOp = { kind: "ws_write", path: "learned/harbour.md", text: "Marcus opens the bait shop at six." };
+    const global: AgentOp = { kind: "ws_write", path: "~/notes/harbour.md", text: "Harbours wake early." };
     const learned = async (): Promise<Record<string, unknown>> => (await rig.rt.chatAgents.get(agents, rig.host.userId)).learned;
+    const globals = async (): Promise<Record<string, unknown>> => ({ ...(await rig.rt.globalFiles.get(rig.host.userId)) });
     // Cancelled while the role works: what it staged never lands, in the learned area either.
     const roles = classicRoles();
     rig.rt.orchestrator.roles = {
       ...roles,
       scene: async (task, ctx) => {
-        await ctx.writer.apply([note], "scene");
+        await ctx.writer.apply([note, global], "scene");
         void rig.send({ type: "lre.cancel", chatId: agents });
         return roles.scene(task, ctx);
       },
@@ -353,13 +356,14 @@ describe("what an agent turn's roles write", () => {
     rig.host.sendUser(agents, "I walk to the harbour.");
     await rig.host.settle();
     expect((await rig.host.start(agents, { type: "normal" })).halted).toBe("cancelled");
-    expect(await learned()).toEqual({});
-    // Played through, it lands as the turn closes: the scene role's file, read with its knowledge, and no event of the record's.
-    const seen = sceneStages(rig, [note]);
+    expect([await learned(), await globals()]).toEqual([{}, {}]);
+    // Played through, they land as the turn closes: the scene role's files, and no event of the record's.
+    const seen = sceneStages(rig, [note, global]);
     const again = await rig.host.start(agents, { type: "regenerate" });
     await rig.host.finish(again, "The harbour is quiet.");
-    expect(seen[0]?.applied.length).toBe(1);
-    expect((await learned())["learned/harbour.md"]).toMatchObject({ readers: "everyone", role: "scene" });
+    expect(seen[0]?.applied.length).toBe(2);
+    expect((await learned())["learned/harbour.md"]).toEqual({ hash: blobHash("Marcus opens the bait shop at six."), role: "scene" });
+    expect(await globals()).toEqual({ "~/notes/harbour.md": { hash: blobHash("Harbours wake early."), role: "scene" } });
     expect((await lastRecord(rig, agents)).events.some((e) => e.type.startsWith("engine.ws."))).toBe(false);
     expect(rig.rt.ledger.errors).toEqual([]);
   });
@@ -416,7 +420,7 @@ describe("what an agent turn's roles write", () => {
 describe("the review gate", () => {
   const gated = { agents: { roles: { scene: { tier: "gm" } }, review: { placement: "gate" } } };
 
-  test("the turn waits after its plan; Apply lets the change through, and the resume replays the plan without a call", async () => {
+  test("the turn waits after its plan; Apply lets the change through, and the resume replays the plan asking no role again", async () => {
     const rig = new Rig({ shipped: true });
     const { agents } = await pair(rig);
     plainModels(rig);
@@ -434,7 +438,8 @@ describe("the review gate", () => {
     const calls = rig.host.quietCalls.length;
     const g = await rig.host.start(agents, { type: "regenerate" });
     expect(g.halted).toBeUndefined();
-    expect(rig.host.quietCalls.length).toBe(calls);
+    // No role is asked again; the one call is the final review of the prompt, which the gate came before.
+    expect(rig.host.quietCalls.slice(calls).map((c) => (c.tools ?? []).some((t) => t.name === "review_replace"))).toEqual([true]);
     await rig.host.finish(g, "You count your cash.");
     expect(await cash(rig, agents)).toBe(before - 100);
     expect((await lastRecord(rig, agents)).agents?.map((a) => a.role)).toEqual(["scene"]);

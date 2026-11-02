@@ -1,8 +1,8 @@
 // The lore tools' read of a World Info entry (INC1-SPEC R3b; DESIGN §4.2), driven on the fake host
-// with no model, in Port Alder. A user's entry text reaches each knowledge through `applyMarks`:
-// under the player character's, a secret mark Jordan doesn't hold is left out (Marcus's debt, kept
-// from everyone but him) and the mark's own entry is no entry at all; under everyone's, the mark is
-// there, marked as Marcus's in the user's own wording of a mark (the registry's `narrator.mark.known`).
+// with no model, in Port Alder. A user's entry text reaches each view through `applyMarks`: a secret
+// mark (Marcus's debt, kept from everyone but him) is there under every view, marked as Marcus's in
+// the user's own wording of a mark (the registry's `narrator.mark.known`), and the mark's own entry
+// reads marked too.
 
 import { describe, expect, test } from "bun:test";
 import type { ToolOutcome } from "../../src/backend/agents/runtime";
@@ -10,9 +10,7 @@ import { LORE_TOOLS } from "../../src/backend/agents/tools/lore";
 import { outsideReader, type ViewLore } from "../../src/backend/agents/tools/read-view";
 import { bookLoreId, bookMarkLoreId } from "../../src/backend/book-lore";
 import type { HostBookEntryInput } from "../../src/backend/host";
-import { renderPrompt } from "../../src/backend/prompts";
-import type { AgentKnowledge } from "../../src/shared/agent-tools";
-import { WRITE_NOTE } from "../../src/shared/agent-tools-write";
+import type { ToolView } from "../../src/shared/agent-tools";
 import { Rig } from "../support/rig";
 
 const FERRY = "FERRY-MARK: the ferry runs twice a day.";
@@ -21,7 +19,7 @@ const DEBT = "DEBT-MARK: Marcus owes the marina three months of slip fees.";
 const KNOWN = "{{text}} (a secret only {{known}} knows)";
 
 /** What `lore_read` answers for `id` in `chatId` under `knowledge`, as an agent's call gets it. */
-async function loreRead(rig: Rig, chatId: string, knowledge: AgentKnowledge, id: string): Promise<ToolOutcome> {
+async function loreRead(rig: Rig, chatId: string, knowledge: ToolView, id: string): Promise<ToolOutcome> {
   const tool = LORE_TOOLS.find((t) => t.name === "lore_read");
   if (!tool) throw new Error("no lore_read tool");
   const base = { userId: rig.host.userId, chatId, knowledge };
@@ -35,7 +33,7 @@ function entryOf(out: ToolOutcome): ViewLore {
 }
 
 describe("lore_read of a World Info entry", () => {
-  test("under the player character's knowledge leaves out a mark Jordan doesn't hold; under everyone's, marks it as Marcus's in the user's wording", async () => {
+  test("under every view, a secret mark is there, marked as Marcus's in the user's wording", async () => {
     const rig = new Rig({ shipped: true });
     const user = rig.host.userId;
     const worldId = await rig.newWorld("Alder", "modern_slice_of_life");
@@ -53,19 +51,14 @@ describe("lore_read of a World Info entry", () => {
     // The mark's own entry, beside the book entry's.
     const mark = bookMarkLoreId(bookId, entryId, 1);
 
-    const pov = entryOf(await loreRead(rig, chatId, "pov", id));
-    // Read by its lore id, it answers by its short id: the first LRE gave, as the entry carries no tag.
-    expect(pov).toMatchObject({ id: "lre0001", title: "The ferry" });
-    expect(pov.text).toContain(FERRY);
-    expect(pov.text).not.toContain("DEBT-MARK");
-    expect(pov.text).not.toContain("Marcus");
-    expect(await loreRead(rig, chatId, "pov", mark)).toEqual({ text: renderPrompt(WRITE_NOTE.noLore, {}, { id: mark }), error: true });
-
     const marked = `${DEBT} (a secret only Marcus Delgado knows)`;
-    const everyone = entryOf(await loreRead(rig, chatId, "everyone", id));
-    expect(everyone).toMatchObject({ id: "lre0001", title: "The ferry" });
-    expect(everyone.text).toContain(FERRY);
-    expect(everyone.text).toContain(marked);
+    for (const knowledge of ["everyone", "gm"] as const) {
+      const read = entryOf(await loreRead(rig, chatId, knowledge, id));
+      // Read by its lore id, it answers by its short id: the first LRE gave, as the entry carries no tag.
+      expect(read).toMatchObject({ id: "lre0001", title: "The ferry" });
+      expect(read.text).toContain(FERRY);
+      expect(read.text).toContain(marked);
+    }
     expect(entryOf(await loreRead(rig, chatId, "everyone", mark)).text).toBe(marked);
     expect(rig.rt.ledger.errors).toEqual([]);
   });

@@ -289,6 +289,58 @@ describe("what the engine keeps of agent turns", () => {
     expect([refs.length, refs.filter((r) => r.deref() !== undefined).length]).toEqual([3, 0]);
   });
 
+  describe("a turn the ledger lets go without a commit takes its run with it", () => {
+    const runsOf = (rig: Rig): string[] => [...(Reflect.get(rig.rt.orchestrator, "runs") as Map<string, object>).keys()];
+
+    test("a reply that ends in error keeps its run for the retry only until the next turn takes the turn's place", async () => {
+      const rig = new Rig({ shipped: true });
+      const chatId = await agentsChat(rig);
+      models(rig);
+      await played(rig, chatId, "I look around.", "The square is quiet.");
+      rig.host.sendUser(chatId, "I walk to the pier.");
+      await rig.host.settle();
+      await rig.host.finish(await rig.host.start(chatId, { type: "normal" }), "", { error: "provider error" });
+      await rig.host.settle();
+      const kept = rig.rt.ledger.keptOf(chatId);
+      expect([kept?.failed, runsOf(rig)]).toEqual(["error", [kept?.turn ?? ""]]);
+      await played(rig, chatId, "I sit down.", "The bench is warm.");
+      await rig.host.settle();
+      expect(runsOf(rig)).toEqual([]);
+      expect(rig.rt.ledger.errors).toEqual([]);
+    });
+
+    test("a reply that is stopped lets its run go at once", async () => {
+      const rig = new Rig({ shipped: true });
+      const chatId = await agentsChat(rig);
+      models(rig);
+      rig.host.sendUser(chatId, "I walk to the pier.");
+      await rig.host.settle();
+      await rig.host.stop(await rig.host.start(chatId, { type: "normal" }), "You walk");
+      await rig.host.settle();
+      expect(runsOf(rig)).toEqual([]);
+      expect(rig.rt.ledger.errors).toEqual([]);
+    });
+
+    test("a prepared turn no page starts keeps its run until it goes stale", async () => {
+      const rig = new Rig({ shipped: true });
+      const chatId = await agentsChat(rig);
+      models(rig);
+      rig.host.claimRestart = async () => false;
+      rig.host.sendUser(chatId, "I walk to the pier.");
+      await rig.host.settle();
+      await rig.host.start(chatId, { type: "normal" });
+      await rig.host.settle();
+      const prepared = rig.rt.ledger.preparedOf(chatId);
+      expect(prepared?.generationId).toBeNull();
+      expect(runsOf(rig)).toEqual([prepared?.id ?? ""]);
+      rig.host.claimRestart = null;
+      rig.host.editMessage(chatId, rig.host.head(chatId)?.id ?? "", "I walk to the harbor.");
+      await rig.host.settle();
+      expect([rig.rt.ledger.preparedOf(chatId), runsOf(rig)]).toEqual([null, []]);
+      expect(rig.rt.ledger.errors).toEqual([]);
+    });
+  });
+
   test("the memory budget lets go of an idle chat's turn bridge, but not of one whose turn waits on the player", async () => {
     const rig = new Rig({ shipped: true });
     const idle = await agentsChat(rig);

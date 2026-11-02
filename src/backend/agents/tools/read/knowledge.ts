@@ -5,9 +5,6 @@
 // they are (under Settings → Minds → Knowledge's threshold it is a suspicion) and whom they keep it
 // from. As each knowledge reads them:
 //
-// - `pov`: only what Play's player character holds, each fact with only its own holding; a teller,
-//   or someone it keeps a fact from, that it can't name is left out, and no fact's id is given (one
-//   can name a quest or a field it can't see). What anyone else knows is beyond it (the hidden note).
 // - `everyone`: every fact with everyone who holds it, as the narrator would know them; a fact someone
 //   holds surely and keeps from anyone is a secret, its claim marked as known to all who hold it
 //   surely and kept from whom they keep it from (`factSecrecy`).
@@ -50,7 +47,7 @@ interface Held {
 
 /** A fact's part of an answer (`factPart`). */
 interface FactAnswer {
-  /** Its id; never under `pov`. */
+  /** Its id. */
   fact?: FactId;
   /** What it claims; under `everyone` marked when it is a secret. */
   claim: string;
@@ -127,7 +124,7 @@ function namedBy(view: ToolReadView, about: string): Set<string> {
     if ("id" in got) ids.add(got.id);
   }
   const entry = own(view.world.lore, about);
-  if (entry && (view.knowledge !== "pov" || view.povReadsLore(entry))) ids.add(about);
+  if (entry) ids.add(about);
   return ids;
 }
 
@@ -168,11 +165,10 @@ function factSecrecy(view: ToolReadView, holders: readonly Held[]): Secrecy | nu
   };
 }
 
-/** A fact's part of an answer (see the header); `secrecy` gives, under `everyone`, what marks its claim. */
+/** A fact's part of an answer (see the header); `secrecy` gives, where the view marks, what marks its claim. */
 function factPart(view: ToolReadView, fact: Fact, secrecy: () => Secrecy | null): FactAnswer {
-  if (view.knowledge === "pov") return { claim: fact.claim };
   if (view.knowledge === "everyone") return { fact: fact.id, claim: view.mark(fact.claim, secrecy()) };
-  return { fact: fact.id, claim: fact.claim, kind: fact.kind, truth: fact.truth, about: fact.about.map((id) => view.entity(id) ?? view.place(id) ?? view.track(id) ?? { id, name: view.name(id) }) };
+  return { fact: fact.id, claim: view.marked ? view.mark(fact.claim, secrecy()) : fact.claim, kind: fact.kind, truth: fact.truth, about: fact.about.map((id) => view.entity(id) ?? view.place(id) ?? view.track(id) ?? { id, name: view.name(id) }) };
 }
 
 /** A holding's part of an answer (see the header): anyone in it the view can't name is left out. */
@@ -202,11 +198,8 @@ export const KNOWLEDGE_TOOLS: readonly ToolDefinition[] = [
       if (typeof about !== "string") return about;
       return view.read(() => {
         const k = knowing(view);
-        // The player character's own holdings, each fact with only its holding; else every fact the chat records.
-        const facts: (Fact & { holders: Held[] })[] =
-          view.knowledge === "pov"
-            ? k.heldBy(view.pov).map((held) => ({ ...heldFact(k, held.holding), holders: [held] }))
-            : Object.values(k.facts).map((f) => ({ id: f.id, claim: f.claim, kind: f.kind, truth: f.truth, about: f.about, holders: k.holders(f.id) }));
+        // Every fact the chat records, with everyone who holds it.
+        const facts: (Fact & { holders: Held[] })[] = Object.values(k.facts).map((f) => ({ id: f.id, claim: f.claim, kind: f.kind, truth: f.truth, about: f.about, holders: k.holders(f.id) }));
         facts.sort((a, b) => a.claim.localeCompare(b.claim) || (a.id < b.id ? -1 : 1));
         return view.answer({
           facts: matching(view, about, facts).map((f) => ({ ...factPart(view, f, () => factSecrecy(view, f.holders)), holders: f.holders.map(({ who, holding }) => ({ who, ...holdingPart(view, holding) })) })),
@@ -227,8 +220,6 @@ export const KNOWLEDGE_TOOLS: readonly ToolDefinition[] = [
       return view.read(() => {
         const person = resolvePerson(view, said);
         if ("refused" in person) return person.refused;
-        // Anyone else's knowledge is beyond the player character.
-        if (view.knowledge === "pov" && person.id !== view.pov) return view.refuse(TOOL_NOTE.hidden, { pov: view.name(view.pov) });
         const who = view.entity(person.id);
         if (!who) return view.refuse(TOOL_NOTE.noPerson, { name: said });
         const k = knowing(view);

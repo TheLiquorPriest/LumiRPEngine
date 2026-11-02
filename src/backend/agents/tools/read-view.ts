@@ -1,15 +1,16 @@
 // The one way the agent tools read a chat (AGENT-LOOP-PLAN §6; INC1-SPEC C6): `ToolReadView`, the
 // chat's head as the agent's knowledge lets it read it. Outside a turn it is built from the head
 // without the ledger's queue (`outsideReader`: what the GM view and the narrator's preview read), so a
-// long agent run never waits behind, or stales, a turn. The three knowledge settings:
+// long agent run never waits behind, or stales, a turn. None of its views leaves anything out
+// (secrecy is guidance, DESIGN §7.1):
 //
-// - `pov` reads as Play's player scope: the people and things the player character may know of
-//   (`povMayKnow`), the places it can see, the tracks of its quest log under the ids Play knows them
-//   by, and the fields it may see, each as Play shows it: plain, with no hint of how hidden anything is.
 // - `everyone` reads as the narrator's `scene` view: everything in the world, with every secret (a
 //   restricted person, thing, place, field, track or lore entry, a fact someone keeps) marked in the
 //   user's wording of a secret's mark (the prompt registry's Secret marks texts), naming who knows it.
 // - `gm` reads everything, unmarked; a tool gives each restricted thing's visibility instead.
+// - `gm` with `marks` (every turn agent's, the roles and the main agent alike, whatever perspective
+//   it works from): the GM's view, what only the GM reads included (a truth no one holds, a whole
+//   mind, narrator-only lore), with every secret marked as `everyone` marks it besides.
 //
 // A user's entry text (World Info) is handed on through `applyMarks` for the view (`entryText`). What
 // the view may name (`seesEntity`, `seesPlace`, `seesTrack`) is all the resolver (`tools/resolve.ts`)
@@ -20,13 +21,12 @@ import type { Registry } from "../../../engine/registry-impl";
 import type { WorldState } from "../../../engine/state";
 import { loreHeldBy, loreReadable } from "../../../engine/lore";
 import { labelOf, own } from "../../../engine/pack-kit";
-import { povMayKnow } from "../../../engine/player-events";
 import { readPass } from "../../../engine/read-pass";
 import { fieldDef, isGone, kindIs } from "../../../engine/scope";
-import { canSeeEntity, canSeeField, canSeePlace, entityVisibility, HIDDEN_PLACE_NAME, isDiscoverable, loreGateReader, playerTrack, type PlayerTrack, shownTrackId, trackKnown, visibilityOf } from "../../../engine/visibility";
-import { factsOf, holdingsOf } from "../../../packs/minds/core/knowledge";
+import { canSeeEntity, canSeeField, canSeePlace, entityVisibility, HIDDEN_PLACE_NAME, isDiscoverable, loreGateReader, trackKnown, visibilityOf } from "../../../engine/visibility";
+import { factsOf } from "../../../packs/minds/core/knowledge";
 import { readSlice } from "../../../packs/minds/core/state";
-import type { AgentKnowledge } from "../../../shared/agent-tools";
+import type { ToolView } from "../../../shared/agent-tools";
 import type { EntityId, PlaceId, TrackId, UserId } from "../../../shared/ids";
 import { hasOwn } from "../../../shared/json";
 import { engineWroteEntry, loreIsSecret, loreSourceOf } from "../../../shared/lore";
@@ -61,14 +61,14 @@ export interface Secrecy {
   kept: readonly string[] | "everyone";
 }
 
-/** A person, thing, place or track as a view names it: its id (a secret track's stand-in under `pov`), its name (marked under `everyone`), and its visibility under `gm` when it isn't public. */
+/** A person, thing, place or track as a view names it: its id, its name (marked where the view marks), and its visibility under `gm` when it isn't public. */
 export interface ViewRef {
   id: string;
   name: string;
   visibility?: string;
 }
 
-/** A lore entry as a view gives it: its text marked under `everyone`, its secrecy spelled out under `gm`. */
+/** A lore entry as a view gives it: its text marked where the view marks, its secrecy spelled out under `gm`. */
 export interface ViewLore {
   id: string;
   title: string;
@@ -79,7 +79,9 @@ export interface ViewLore {
 }
 
 export interface ReadViewInput {
-  knowledge: AgentKnowledge;
+  knowledge: ToolView;
+  /** Under `gm`, marks every secret as `everyone` does (a turn agent's view); `everyone` always marks. */
+  marks?: boolean;
   registry: Registry;
   world: WorldDoc;
   state: WorldState;
@@ -139,7 +141,9 @@ export function viewRouting(rt: Runtime, userId: UserId, settings: LoreIndexSett
 const NARRATOR_READS = "brief";
 
 export class ToolReadView {
-  readonly knowledge: AgentKnowledge;
+  readonly knowledge: ToolView;
+  /** Whether this view marks secrets in the user's wording: `everyone`'s, and a turn agent's `gm` view. */
+  readonly marked: boolean;
   readonly registry: Registry;
   readonly world: WorldDoc;
   readonly state: Readonly<WorldState>;
@@ -164,6 +168,7 @@ export class ToolReadView {
 
   constructor(input: ReadViewInput) {
     this.knowledge = input.knowledge;
+    this.marked = input.knowledge === "everyone" || input.marks === true;
     this.registry = input.registry;
     this.world = input.world;
     this.state = input.state;
@@ -185,61 +190,30 @@ export class ToolReadView {
     return readPass(read);
   }
 
-  // ---------------------------------------------------------------- the player character's knowledge
-
-  /** Whether the player character may know of an entity (Play's player scope, `povMayKnow`): itself, someone it has met, its own thing, or one it can see where it stands. */
-  povKnowsEntity(id: EntityId): boolean {
-    return povMayKnow(this.registry, this.world, this.state, id);
-  }
-
-  povSeesPlace(id: PlaceId): boolean {
-    return canSeePlace(this.registry, this.world, this.state, this.pov, id);
-  }
-
-  /** A track as the player character's quest log has it (`playerTrack`), or null when it is hidden from it. */
-  povTrack(id: TrackId): PlayerTrack | null {
-    return playerTrack(this.registry, this.world, this.state, this.pov, id);
-  }
-
-  povSeesField(entity: EntityId, field: string): boolean {
-    return canSeeField(this.registry, this.world, this.state, this.pov, entity, field);
-  }
-
-  /** Whether the player character reads a lore entry: as the narrator does (a secret once its gate holds), or as one of its own secrets' holders. */
-  povReadsLore(entry: LoreEntryDef): boolean {
-    return loreReadable(this.registry, this.world, this.state, entry, NARRATOR_READS, false, this.gate()) || (loreIsSecret(entry) && loreHeldBy(this.world, entry, this.pov));
-  }
-
   // ---------------------------------------------------------------- what this view may name
 
-  /** An entity this view may name: under `gm` every one, a removed one too; under `everyone` every one in the world; under `pov`, as Play would. */
+  /** An entity this view may name: under `gm` every one, a removed one too; under `everyone` every one in the world. */
   seesEntity(id: EntityId): boolean {
     if (!hasOwn(this.state.entities, id)) return false;
-    if (this.knowledge === "gm") return true;
-    if (this.knowledge === "everyone") return !isGone(this.state, id);
-    return this.povKnowsEntity(id);
+    return this.knowledge === "gm" || !isGone(this.state, id);
   }
 
   seesPlace(id: PlaceId): boolean {
-    if (!hasOwn(this.world.places, id)) return false;
-    return this.knowledge === "pov" ? this.povSeesPlace(id) : true;
+    return hasOwn(this.world.places, id);
   }
 
   seesTrack(id: TrackId): boolean {
-    if (!hasOwn(this.world.tracks, id)) return false;
-    return this.knowledge === "pov" ? this.povTrack(id) !== null : true;
+    return hasOwn(this.world.tracks, id);
   }
 
-  /** A fact this view may name, by its id: under `pov` one the player character holds; else any the chat records. One it may not name reads as one that doesn't exist. */
+  /** A fact this view may name, by its id: any the chat records. One it may not name reads as one that doesn't exist. */
   seesFact(id: FactId): boolean {
-    const slice = readSlice(this.state);
-    return this.knowledge === "pov" ? own(holdingsOf(slice, this.pov), id) !== undefined : own(factsOf(slice), id) !== undefined;
+    return own(factsOf(readSlice(this.state)), id) !== undefined;
   }
 
-  /** A field of an entity this view may read: under `pov`, one the player character may see of one it may know of. */
-  seesField(entity: EntityId, field: string): boolean {
-    if (!this.seesEntity(entity)) return false;
-    return this.knowledge === "pov" ? this.povSeesField(entity, field) : true;
+  /** A field of an entity this view may read: any of an entity it may name. */
+  seesField(entity: EntityId, _field: string): boolean {
+    return this.seesEntity(entity);
   }
 
   /** Whether an entity is a person (its kind is or extends `person`). */
@@ -313,18 +287,14 @@ export class ToolReadView {
     return { known: v === "known_by" ? this.knowers(null, (who) => loreReadable(this.registry, this.world, this.state, entry, NARRATOR_READS, false, this.gate(), who)) : [], kept: "everyone" };
   }
 
-  /** `text` as this view gives it: under `everyone`, marked in the user's wording when `secrecy` makes it a secret; under `pov` and `gm`, as it is. */
+  /** `text` as this view gives it: where the view marks, marked in the user's wording when `secrecy` makes it a secret; else as it is. */
   mark(text: string, secrecy: Secrecy | null): string {
-    return this.knowledge === "everyone" && secrecy ? secretMarkText(text, secrecy.known, secrecy.kept, this.wording) : text;
+    return this.marked && secrecy ? secretMarkText(text, secrecy.known, secrecy.kept, this.wording) : text;
   }
 
-  /**
-   * A user's entry text (World Info) as this view may have it (`applyMarks`): under `pov` as the
-   * player character holds its marks, each mark it holds marked and every other left out; under
-   * `everyone` and `gm` every mark marked.
-   */
+  /** A user's entry text (World Info) as this view may have it (`applyMarks`): every mark marked. */
   entryText(text: string): string {
-    return applyMarks(text, { world: this.world, state: this.state, wording: this.wording }, this.knowledge === "pov" ? `holder:${this.pov}` : "marked");
+    return applyMarks(text, { world: this.world, state: this.state, wording: this.wording }, "marked");
   }
 
   // ---------------------------------------------------------------- names and refs
@@ -334,18 +304,13 @@ export class ToolReadView {
     return labelOf(this.ctx, id);
   }
 
-  /** The id this view gives a track: under `pov` the one Play knows it by (a secret track's stand-in, `shownTrackId`). */
-  trackRef(id: TrackId): string {
-    return this.knowledge === "pov" ? shownTrackId(this.world, id) : id;
-  }
-
   /** An entity as this view names it, or null when it may not name it. */
   entity(id: EntityId): ViewRef | null {
     if (!this.seesEntity(id)) return null;
     const name = own(this.state.entities, id)?.name ?? id;
     if (this.knowledge !== "gm") return { id, name: this.mark(name, this.entitySecrecy(id)) };
     const visibility = isDiscoverable(this.world, this.state, id) ? "discoverable" : entityVisibility(this.world, this.state, id);
-    return { id, name, ...(visibility !== "public" ? { visibility } : {}), ...(isGone(this.state, id) ? { visibility: "removed" } : {}) };
+    return { id, name: this.marked ? this.mark(name, this.entitySecrecy(id)) : name, ...(visibility !== "public" ? { visibility } : {}), ...(isGone(this.state, id) ? { visibility: "removed" } : {}) };
   }
 
   /** A place as this view names it, or null when it may not name it. */
@@ -355,7 +320,7 @@ export class ToolReadView {
     const name = def?.name ?? id;
     if (this.knowledge !== "gm") return { id, name: this.mark(name, this.placeSecrecy(id)) };
     const visibility = def?.visibility === "discoverable" ? "discoverable" : visibilityOf(def?.visibility);
-    return { id, name, ...(visibility !== "public" ? { visibility } : {}) };
+    return { id, name: this.marked ? this.mark(name, this.placeSecrecy(id)) : name, ...(visibility !== "public" ? { visibility } : {}) };
   }
 
   /** What this view calls a place it may not name: never its name. */
@@ -363,17 +328,13 @@ export class ToolReadView {
     return HIDDEN_PLACE_NAME;
   }
 
-  /** A track as this view names it: under `pov` as the quest log has it (a secret one under its stand-in and, until something of it is revealed, a label that tells nothing); null when the view may not name it. */
+  /** A track as this view names it, or null when the world has none by `id`. */
   track(id: TrackId): ViewRef | null {
     const t = own(this.world.tracks, id);
     if (!t) return null;
-    if (this.knowledge === "pov") {
-      const shown = this.povTrack(id);
-      return shown ? { id: shown.id, name: shown.label } : null;
-    }
     if (this.knowledge === "everyone") return { id, name: this.mark(t.label, this.trackSecrecy(id)) };
     const visibility = visibilityOf(t.visibility);
-    return { id, name: t.label, ...(visibility !== "public" ? { visibility } : {}) };
+    return { id, name: this.marked ? this.mark(t.label, this.trackSecrecy(id)) : t.label, ...(visibility !== "public" ? { visibility } : {}) };
   }
 
   // ---------------------------------------------------------------- lore
@@ -386,9 +347,9 @@ export class ToolReadView {
 
   /**
    * A lore entry of `world` (the world as it reads lore, `lore()`) as this view gives it, its text
-   * handed on through `entryText`: under `pov` only one the player character reads, under `everyone`
-   * every one, a secret marked with who holds it, under `gm` every one with its secrecy spelled out.
-   * An AI-written entry still waiting for review reaches no one but the GM.
+   * handed on through `entryText`: under `everyone` every one, a secret marked with who holds it,
+   * under `gm` every one with its secrecy spelled out, its text marked too where the view marks. An
+   * AI-written entry still waiting for review reaches no one but the GM: it isn't lore yet.
    */
   loreEntry(entry: LoreEntryDef): ViewLore | null {
     const title = typeof entry.title === "string" && entry.title.trim() !== "" ? entry.title : entry.id;
@@ -397,10 +358,9 @@ export class ToolReadView {
     if (this.knowledge === "gm") {
       const secrecy = this.loreSecrecy(entry);
       const visibility: unknown = entry.visibility;
-      return { id: entry.id, title, text, ...(loreIsSecret(entry) ? { secret: true as const } : {}), ...(secrecy && secrecy.known.length > 0 ? { holders: [...secrecy.known] } : {}), ...(typeof visibility === "string" && visibility !== "public" ? { visibility } : {}), ...(source.kind === "ai" && source.status === "pending" ? { visibility: "pending review" } : {}) };
+      return { id: entry.id, title, text: this.mark(text, secrecy), ...(loreIsSecret(entry) ? { secret: true as const } : {}), ...(secrecy && secrecy.known.length > 0 ? { holders: [...secrecy.known] } : {}), ...(typeof visibility === "string" && visibility !== "public" ? { visibility } : {}), ...(source.kind === "ai" && source.status === "pending" ? { visibility: "pending review" } : {}) };
     }
     if (source.kind === "ai" && source.status === "pending") return null;
-    if (this.knowledge === "pov") return this.povReadsLore(entry) ? { id: entry.id, title, text } : null;
     return { id: entry.id, title, text: this.mark(text, this.loreSecrecy(entry)) };
   }
 
@@ -462,7 +422,7 @@ export function readView(input: ReadViewInput): ToolReadView {
  * wording and the suspicion threshold; the World Info books the chat reads lore from, read only
  * when a tool asks for lore; and the lore index of them (`viewRouting`).
  */
-export function outsideReader(rt: Runtime, env: Pick<ToolEnv, "userId" | "chatId" | "knowledge">): ToolReader {
+export function outsideReader(rt: Runtime, env: Pick<ToolEnv, "userId" | "chatId" | "knowledge" | "marks">): ToolReader {
   return {
     registry: rt.registry,
     async view() {
@@ -474,6 +434,7 @@ export function outsideReader(rt: Runtime, env: Pick<ToolEnv, "userId" | "chatId
       const settings = await rt.settings.get(env.userId);
       return readView({
         knowledge: env.knowledge,
+        marks: env.marks,
         registry: rt.registry,
         world: head.world,
         state: head.state,

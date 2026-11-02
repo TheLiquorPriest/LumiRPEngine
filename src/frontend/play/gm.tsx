@@ -127,7 +127,7 @@ export function GmPanel(props: PanelProps) {
       ) : section === "chat" ? (
         <EditsLog gm={editor.gm} busy={busy} onUndo={(chip) => undo([chip])} />
       ) : pack ? (
-        <pack.component chatId={props.chatId} gm={editor.gm} currency={editor.currency} busy={editor.busy} edit={editor.edit} reload={async () => void (await load())} changed={changed} send={props.send} />
+        <pack.component chatId={props.chatId} gm={editor.gm} currency={editor.currency} busy={editor.busy} reloadKey={gmReloadKey(props.state)} edit={editor.edit} reload={async () => void (await load())} changed={changed} send={props.send} />
       ) : (
         <WorldSection editor={editor} chatId={props.chatId} />
       )}

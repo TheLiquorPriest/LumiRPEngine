@@ -4,16 +4,16 @@
 // outline for the planned turn, held to classic's caps and leak checks; and suggested next moves
 // after the reply, held to classic's.
 //
-// Each person's choices are their own agent's, reading what they know and nothing of anyone else's
-// (§5: an NPC decision reads its chooser's own knowledge), so it gets no tools. The brief and the
-// outline read as the player character, as classic's prose steps do, whatever the director reads
-// with: their lines reach the outline card and the narrator as the turn's own, so their tools and
-// pinned files are the player character's (`reads`), and what they write is withheld as classic's is.
-// Knowledge before the plan: while the chat tracks knowledge, a decision before the plan turns on
-// what its chooser heard in the player's message, so the knowledge step runs for the choosers who
-// heard it first, on the knowledge role's settings; what they learned is recorded ahead of the
-// decisions (`heard.learned`) as the user's `learn` mode keeps it after the reply, and each decision
-// reads its chooser's holdings with what was kept.
+// Every task of it reads as every role does (Settings → Agents → Context): its tools everything,
+// secrets marked, and its prompt starting with the sections its context names (by default the Minds
+// and the Scene, with the scene role's notes). Each person's choices are their own agent's, told to
+// work from what they know (its perspective and its task's holdings), with the director's tools. A
+// brief or outline line that contradicts the turn it was given (`proseClashes`) is flagged to the
+// main agent and Diagnostics, never dropped: the line stays. Knowledge before the plan: while the chat
+// tracks knowledge, a decision before the plan turns on what its chooser heard in the player's
+// message, so the knowledge step runs for the choosers who heard it first, on the knowledge role's
+// settings; what they learned is recorded ahead of the decisions (`heard.learned`) as the user's
+// `learn` mode keeps it after the reply, and each decision reads its chooser's holdings with what was kept.
 
 import type { EntityId } from "../../../shared/ids";
 import { isRecord } from "../../../shared/json";
@@ -106,10 +106,7 @@ export async function decideRun(rt: Runtime, task: ChooseTask, ctx: TurnAgentCtx
             holdings: task.knowing ? heldKnowledge({ reg: rt.registry, world: task.world, state, who }, settings.minds.knowledge, place) : "",
             choices: JSON.stringify(choices),
           },
-          // A person's choice reads what they know, which its task holds: no tool reads one character's own knowledge.
-          tools: null,
-          // What the main agent said is held to the chooser's own knowledge too.
-          reads: { own: who },
+          tools: task.world,
           check: (raw) => {
             const answers = decisionAnswers(raw, questions);
             const odds = answers ? npcOddsOf(ties, answers) : {};
@@ -136,13 +133,13 @@ export async function decideRun(rt: Runtime, task: ChooseTask, ctx: TurnAgentCtx
 }
 
 /**
- * The brief and the outline for the planned turn, from one agent reading as the player character: only
- * what classic's steps would write this turn, each line held to their caps and checked whole by their
- * own withholding. A line that contradicts the turn the director was given, as it started and as it
- * ends alike (`proseClashes`: someone here whom both have elsewhere, or gone whom both have here; a
- * thing in the hands of someone who has it in neither, or lying here when neither has it here), is
- * withheld too, a beat whole and the brief a sentence at a time, and its run tells which and why
- * (`DirectorProse.flagged`, `yields.ts`).
+ * The brief and the outline for the planned turn, from one agent: only what classic's steps would
+ * write this turn, each line held to their caps and marked as classic's steps mark it (`ProseMark`:
+ * a line carrying a secret goes on marked, never left out). A line
+ * that contradicts the turn the director was given, as it started and as it ends alike
+ * (`proseClashes`: someone here whom both have elsewhere, or gone whom both have here; a thing in the
+ * hands of someone who has it in neither, or lying here when neither has it here), is flagged to the
+ * main agent and Diagnostics with its run (`DirectorProse.flagged`, `yields.ts`), and stays.
  */
 export async function proseRun(rt: Runtime, task: ProseTask, ctx: TurnAgentCtx): Promise<RoleAnswer<DirectorProse>> {
   const { brief, outline } = task;
@@ -160,8 +157,6 @@ export async function proseRun(rt: Runtime, task: ProseTask, ctx: TurnAgentCtx):
       sub: "prose",
       purpose: brief ? "brief" : "outline",
       phase: "prose",
-      // The brief and the outline reach player surfaces: their tools, pins and the main agent's words for them read as the player character.
-      reads: "pov",
       names: namesOf(task.world, task.state),
       vars: { ...vars, ...proseData(vars), asks: [brief ? rule("brief", brief) : "", outline ? rule("outline", outline) : ""].filter((t) => t !== "").join("\n\n"), sections: outline?.vars.sections ?? "" },
       answer: { part: "answer", vars: { beats_max: String(OUTLINE_BEATS_MAX) } },
@@ -170,15 +165,15 @@ export async function proseRun(rt: Runtime, task: ProseTask, ctx: TurnAgentCtx):
         if (!isRecord(raw)) return null;
         const clash = proseClashes(rt.registry, task.world, task.start, task.state);
         const flagged: ProseClash[] = [];
-        const kept = (line: string): boolean => {
+        // A clash is told with the run, and the line stays: the main agent and the GM judge it.
+        const flag = (line: string): void => {
           const kind = clash(line);
           if (kind !== null) flagged.push({ kind, line });
-          return kind === null;
         };
-        // A leak goes first and is never told; a clash is told with the run.
-        const said = brief ? proseAnswer("brief", raw.brief, brief.withheld).join(" ").trim() : "";
-        const told = said.split(/(?<=[.!?])\s+(?=["“'(]?\p{Lu})/u).filter((s) => s.trim() !== "" && kept(s)).join(" ");
-        const beats = outline ? proseAnswer("outline", raw.beats, (line) => outline.withheld(line) || !kept(line)) : [];
+        const told = brief ? proseAnswer("brief", raw.brief, brief.mark).join(" ").trim() : "";
+        for (const sentence of told.split(/(?<=[.!?])\s+(?=["“'(]?\p{Lu})/u)) if (sentence.trim() !== "") flag(sentence);
+        const beats = outline ? proseAnswer("outline", raw.beats, outline.mark) : [];
+        for (const beat of beats) flag(beat);
         return { prose: { brief: told === "" ? null : told, outline: beats }, ...(flagged.length > 0 ? { flagged } : {}) };
       },
     },
@@ -186,7 +181,7 @@ export async function proseRun(rt: Runtime, task: ProseTask, ctx: TurnAgentCtx):
   return r;
 }
 
-/** Suggested next moves after the reply: held to classic's own check (at most four, each short enough for a chip, none naming what the player can't know). */
+/** Suggested next moves after the reply: held to classic's own check (at most four, each short enough for a chip); one carrying a secret stays, its chip a spoiler (`ChoicesTask.secret`). */
 export async function choicesRun(rt: Runtime, task: ChoicesTask, ctx: TurnAgentCtx): Promise<RoleAnswer<string[]>> {
   const ownTexts = ctx.texts ?? (await rt.settings.get(ctx.userId)).prompts.texts;
   const ruleId = roleTaskTextId("director", "choices", "rule");
@@ -200,9 +195,7 @@ export async function choicesRun(rt: Runtime, task: ChoicesTask, ctx: TurnAgentC
       names: { world: task.vars.world ?? "", pov: task.vars.pov ?? "" },
       vars: { ...task.vars, ...proseData(task.vars), rule: renderPrompt(ruleId, ownTexts, task.vars, task.template !== null ? { [ruleId]: task.template } : null), reply: task.reply },
       tools: null,
-      // Suggested choices are a player surface: the main agent's words are held to the player character's knowledge.
-      reads: "pov",
-      check: (raw) => (isRecord(raw) ? proseAnswer("choices", raw.choices, task.withheld) : null),
+      check: (raw) => (isRecord(raw) ? proseAnswer("choices", raw.choices) : null),
     },
   );
 }

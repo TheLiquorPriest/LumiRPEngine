@@ -199,6 +199,10 @@ export interface Chip {
   swipeId?: number;
   label: string;
   detail?: string;
+  /** A suggestion carrying a secret (DESIGN §5.2, §7.1): its label a spoiler, collapsed until the player taps it open. */
+  spoiler?: true;
+  /** The lines of its detail carrying a secret (the outline gate's), each a spoiler collapsed until the player taps it open. */
+  spoilers?: string[];
   actions: ChipAction[];
   /**
    * How the reply this chip's choices wait for starts (`chipStarts`): Lumiverse's Regenerate (as

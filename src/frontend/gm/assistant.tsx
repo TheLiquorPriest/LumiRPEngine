@@ -5,7 +5,7 @@
 // message; while the assistant answers, a running row shows its label, the tokens it has spent so
 // far and Cancel. Each answer says how it ended and what it spent, with what it looked up folded
 // under it (its trace: each tool call in short). A proposal lists each change in plain words, as the
-// assistant's knowledge reads them, with Apply all, a pick of them or No; once applied, its Undo
+// GM reads them, with Apply all, a pick of them or No; once applied, its Undo
 // takes it back (`lre.chip`) for as long as its chip stands, as a GM edit's does. Clear forgets the
 // conversation. None of it reaches Play: while it answers, the drawer's activity line shows only the
 // assistant's label, which the backend sets. Styles: styles/assistant.ts.
@@ -345,7 +345,7 @@ export function AssistantThread(props: { view: AssistantView; edits: GmView["edi
             </Button>
           }
         >
-          It looks things up in this chat's world with the engine's own tools and answers from what they show it, reading with the knowledge Settings → Agents → Assistant gives it. Ask it to change something and it proposes the change for you to apply.
+          It looks things up in this chat's world with the engine's own tools and answers from what they show it: it works beside you, outside the story, and reads everything you can. Ask it to change something and it proposes the change for you to apply.
         </Empty>
       ) : (
         <>

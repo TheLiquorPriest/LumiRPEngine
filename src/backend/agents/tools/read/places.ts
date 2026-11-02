@@ -1,11 +1,6 @@
 // The places tools (AGENT-LOOP-PLAN §6; INC1-SPEC R3a): a place read whole, who and what is at a
 // place now, and the way from one place to another, each read through the agent's `ToolReadView`:
 //
-// - `pov` reads the places the player character can see (`canSeePlace`, the resolver's own rule),
-//   each path cut at the first place it can't see (`knownPlaceRefs`' rule), with the lore it may
-//   read; who and what is at a place only where it stands, as Play's Scene and Place section show
-//   it (anywhere else is beyond its knowledge, `TOOL_NOTE.hidden`); a leg of a route through a place
-//   it can't see goes by `Somewhere`, never its name.
 // - `everyone` reads every place and everyone and everything at one, a restricted place, person or
 //   thing and a secret's lore marked in the user's wording.
 // - `gm` reads every place, a removed person or thing too, unmarked, with each restricted one's
@@ -27,13 +22,13 @@ import { placeChildren } from "../../../../packs/space/core/map-scope";
 import { goMinutes, routeAt } from "../../../../packs/space/core/travel";
 import { TOOL_NOTE } from "../../../../shared/agent-tools";
 import type { PlaceId, TravelMode } from "../../../../shared/ids";
-import { hasOwn, type JsonObject, type JsonValue } from "../../../../shared/json";
+import { type JsonObject } from "../../../../shared/json";
 import { TRAVEL_MODES } from "../../../../shared/maps";
 import type { ToolReadView, ViewLore, ViewRef } from "../read-view";
 import type { ToolDefinition } from "../registry";
 import { type Resolved, resolvePlace } from "../resolve";
 import { badValue, needText, objectSchema, placeEnum, text, textArg } from "../schema";
-import { beyondPov, byName, loreAbout, pathOf, type PlaceShown, placeShown, whereabouts } from "./people";
+import { byName, loreAbout, pathOf, type PlaceShown, placeShown, whereabouts } from "./people";
 
 interface WayOut {
   place: ViewRef;
@@ -94,23 +89,13 @@ interface RouteAnswer {
   none?: TravelMode[];
 }
 
-/** Whether a value names, by its id, someone, something or somewhere the view can't see. */
-function namesUnseen(view: ToolReadView, value: JsonValue): boolean {
-  if (typeof value === "string") return (hasOwn(view.state.entities, value) && !view.seesEntity(value)) || (hasOwn(view.world.places, value) && !view.seesPlace(value));
-  if (Array.isArray(value)) return value.some((v) => namesUnseen(view, v));
-  return value !== null && typeof value === "object" && Object.values(value).some((v) => namesUnseen(view, v));
-}
-
-/**
- * A place as the view reads it (see the header): under `everyone` a restricted place's description
- * marked as the place is; under `pov` a field naming what the player character can't see left out.
- */
+/** A place as the view reads it (see the header): under `everyone` a restricted place's description marked as the place is. */
 function placeRead(view: ToolReadView, place: ViewRef, lore: ViewLore[]): PlaceAnswer {
   const id = place.id;
   const fields: JsonObject = own(view.world.places, id)?.fields ?? {};
   const description = typeof fields.description === "string" ? fields.description.trim() : "";
-  const rest = Object.fromEntries(Object.entries(fields).filter(([field, value]) => field !== "description" && !(view.knowledge === "pov" && namesUnseen(view, value))));
-  const kept = view.knowledge === "pov" ? null : view.placeSecrecy(id);
+  const rest = Object.fromEntries(Object.entries(fields).filter(([field]) => field !== "description"));
+  const kept = view.placeSecrecy(id);
   const inside = [...(placeChildren(view.world).get(id) ?? [])].sort(byName(view)).flatMap((p): ViewRef[] => {
     const ref = view.place(p);
     return ref ? [ref] : [];
@@ -133,18 +118,10 @@ function placeRead(view: ToolReadView, place: ViewRef, lore: ViewLore[]): PlaceA
   };
 }
 
-/**
- * The people at a place or anywhere inside it, by name, each where they are and what they are doing
- * as the view knows it (`whereabouts`); under `pov`, who is with the player character at its very
- * place, as Play's Scene lists them, the player character too.
- */
-function peopleAt(view: ToolReadView, place: PlaceId, here: PlaceId | null): PresentPerson[] {
+/** The people at a place or anywhere inside it, by name, each where they are and what they are doing (`whereabouts`). */
+function peopleAt(view: ToolReadView, place: PlaceId): PresentPerson[] {
   return Object.keys(view.state.entities)
-    .filter((id) => {
-      if (!view.isPerson(id) || !view.seesEntity(id)) return false;
-      const at = placeOfEntity(view.state, id);
-      return view.knowledge === "pov" ? at !== null && at === here : placeWithin(view.world, at, place);
-    })
+    .filter((id) => view.isPerson(id) && view.seesEntity(id) && placeWithin(view.world, placeOfEntity(view.state, id), place))
     .sort(byName(view))
     .flatMap((id): PresentPerson[] => {
       const ref = view.entity(id);
@@ -220,10 +197,7 @@ export const PLACES_TOOLS: readonly ToolDefinition[] = [
         if ("refused" in r) return r.refused;
         const place = view.place(r.id);
         if (!place) return view.refuse(TOOL_NOTE.noPlace, { name: said });
-        const here = placeOfEntity(view.state, view.pov);
-        // Who and what is at a place the player character isn't at or inside is beyond its knowledge; what lies loose at the place itself it sees only standing there.
-        if (view.knowledge === "pov" && !placeWithin(view.world, here, r.id)) return beyondPov(view);
-        const answer: ContentsAnswer = { place, people: peopleAt(view, r.id, here), things: view.knowledge === "pov" && here !== r.id ? [] : looseAt(view, r.id) };
+        const answer: ContentsAnswer = { place, people: peopleAt(view, r.id), things: looseAt(view, r.id) };
         return view.answer(answer);
       });
     },

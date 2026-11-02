@@ -1,24 +1,25 @@
 // The chat's workspace as the agents write and read it (INC1-SPEC R3b; DESIGN §4.4), driven on the
 // fake host with no model. A note an agent writes is listed and read with who wrote it, on which
-// reply, whose knowledge may read it, and its pin. It follows its turn as every other event does: a
-// Re-run and a Re-narrate carry it, a swipe made before it never had it, and a Branch made from
-// before it lacks it while keeping the chat's learned area (learned/), which lives beside the chat's
-// run rather than in its turns. A note is read with the knowledge it was written under: one written
-// under the GM's knowledge is no file to an agent that reads as the player character, or as
-// everyone, a move keeps that, and the GM's own notes are the GM's alone until the GM shares them.
+// reply, and its pin. It follows its turn as every other event does: a Re-run and a Re-narrate carry
+// it, a swipe made before it never had it, and a Branch made from before it lacks it while keeping
+// the chat's learned area (learned/), which lives beside the chat's run rather than in its turns.
+// Every file is every agent's to read, whatever knowledge it reads the world with: a file names no
+// readers. The user's global workspace (~/) is every chat's: a change lands at once, in their own
+// storage, and no swipe touches it.
 
 import { describe, expect, test } from "bun:test";
+import { BLOBS_DIR, BlobStore } from "../../src/backend/agents/blobs";
 import { outsideReader } from "../../src/backend/agents/tools/read-view";
 import type { ToolDefinition, ToolEnv } from "../../src/backend/agents/tools/registry";
 import { listWorkspace, readWorkspaceFile, WORKSPACE_TOOLS } from "../../src/backend/agents/tools/workspace";
 import { type AgentOp, opKey, outsideWriter, type ToolWriter } from "../../src/backend/agents/tools/writer";
-import type { LearnedFile } from "../../src/backend/chat-agent-meta";
+import { GLOBAL_INDEX_PATH } from "../../src/backend/global-workspace";
 import type { QuietRequest } from "../../src/backend/host";
 import { renderPrompt } from "../../src/backend/prompts";
 import { ROLE_LABEL } from "../../src/shared/agent-roles";
-import type { AgentKnowledge } from "../../src/shared/agent-tools";
+import type { ToolView } from "../../src/shared/agent-tools";
 import { WRITE_NOTE } from "../../src/shared/agent-tools-write";
-import { blobHash } from "../../src/shared/stores";
+import { blobHash, type KeptFile } from "../../src/shared/stores";
 import { Rig } from "../support/rig";
 
 const NOTE = "notes/dev.md";
@@ -31,7 +32,7 @@ const LEARNED = "learned/dev.md";
 const LEARNED_TEXT = "Dev takes his coffee black.";
 
 /** The env an agent's tools run with in `chatId` under `knowledge`, as the assistant, with the writer outside a turn. */
-function agentEnv(rig: Rig, chatId: string, knowledge: AgentKnowledge): ToolEnv & { writer: ToolWriter } {
+function agentEnv(rig: Rig, chatId: string, knowledge: ToolView): ToolEnv & { writer: ToolWriter } {
   const base = { userId: rig.host.userId, chatId, knowledge };
   const env = { ...base, reader: outsideReader(rig.rt, base), agent: { role: "assistant", id: "agent_test" }, signal: new AbortController().signal };
   return { ...env, writer: outsideWriter(rig.rt, { ...env, connectionId: null }) };
@@ -48,7 +49,7 @@ async function applied(writer: ToolWriter, ops: readonly AgentOp[], label: strin
 
 /** The chat's workspace notes as the GM's knowledge lists them, the turns' transcripts aside: each file's path and its body's hash. */
 async function files(rig: Rig, chatId: string): Promise<Record<string, string>> {
-  return Object.fromEntries((await listWorkspace(rig.rt, { userId: rig.host.userId, chatId, knowledge: "gm" })).filter((f) => f.transcript !== true).map((f) => [f.path, f.hash]));
+  return Object.fromEntries((await listWorkspace(rig.rt, { userId: rig.host.userId, chatId })).filter((f) => f.transcript !== true).map((f) => [f.path, f.hash]));
 }
 
 /** Swipes the head reply as `mode`, and checks it ran so: a Re-narrate keeps its source's seed, a Re-run rolls a new one. */
@@ -85,8 +86,8 @@ describe("a workspace note", () => {
     expect(fix?.agent).toMatchObject({ role: "assistant", label: "Notes on Dev", knowledge: "everyone" });
     // Written on the head reply: its place among the chat's replies, the greeting the first of them.
     const turn = (await rig.host.chats.messages(chatId, user)).filter((m) => !m.isUser).length;
-    const env = { userId: user, chatId, knowledge: "everyone" as const };
-    const file = { path: NOTE, hash: blobHash(NOTE_TEXT), size: NOTE_TEXT.length, readers: "everyone" as const, learned: false, provenance: { role: "assistant", key: fix?.agent?.key, turn } };
+    const env = { userId: user, chatId };
+    const file = { path: NOTE, hash: blobHash(NOTE_TEXT), size: NOTE_TEXT.length, learned: false, provenance: { role: "assistant", key: fix?.agent?.key, turn } };
     expect(await listWorkspace(rig.rt, env)).toEqual([{ ...file, pinned: false }]);
     expect(await readWorkspaceFile(rig.rt, env, NOTE)).toBe(NOTE_TEXT);
     // A pin is a change of its own; the file is still the one that write made.
@@ -98,7 +99,7 @@ describe("a workspace note", () => {
   test("follows a Re-run and a Re-narrate of the reply it was written on and of a later one, and is gone on a swipe made before it", async () => {
     const rig = new Rig();
     const chatId = await rig.worldChat();
-    const env = { userId: rig.host.userId, chatId, knowledge: "gm" as const };
+    const env = { userId: rig.host.userId, chatId };
     await rig.turn(chatId, "I look around.", "The square is quiet.");
     const reply = rig.host.head(chatId);
     if (!reply) throw new Error("no reply");
@@ -340,9 +341,9 @@ describe("a workspace note", () => {
     await applied(writer, [{ kind: "ws_write", path: NOTE, text: NOTE_TEXT }], "Notes on Dev");
     // What the agents keep across turns: under learned/, in the chat's metadata beside its run, never in its turns, so it lands at once with no Undo chip.
     expect(await writer.apply([{ kind: "ws_write", path: LEARNED, text: LEARNED_TEXT }], "What Dev drinks")).toMatchObject({ applied: [expect.any(String)], refused: [], chipId: null, pending: false });
-    const learned: Record<string, LearnedFile> = { [LEARNED]: { hash: blobHash(LEARNED_TEXT), readers: "everyone", role: "assistant" } };
+    const learned: Record<string, KeptFile> = { [LEARNED]: { hash: blobHash(LEARNED_TEXT), role: "assistant" } };
     expect((await rig.rt.chatAgents.get(chatId, user)).learned).toEqual(learned);
-    expect(await readWorkspaceFile(rig.rt, { userId: user, chatId, knowledge: "everyone" }, LEARNED)).toBe(LEARNED_TEXT);
+    expect(await readWorkspaceFile(rig.rt, { userId: user, chatId }, LEARNED)).toBe(LEARNED_TEXT);
     const all = { [LEARNED]: blobHash(LEARNED_TEXT), [NOTE]: blobHash(NOTE_TEXT), [SQUARE]: blobHash(SQUARE_TEXT) };
     expect(await files(rig, chatId)).toEqual(all);
     // A Re-run of the reply leaves it as it is.
@@ -364,7 +365,7 @@ describe("a workspace note", () => {
     expect(rig.rt.ledger.errors).toEqual([]);
   });
 
-  test("a learned file moves, pins and is read as the others are, and never moves into or out of learned/", async () => {
+  test("a learned file moves, pins and is read as the others are, and never moves into or out of learned/, nor into the global workspace", async () => {
     const rig = new Rig();
     const chatId = await rig.worldChat();
     const user = rig.host.userId;
@@ -374,11 +375,13 @@ describe("a workspace note", () => {
     await applied(writer, [{ kind: "ws_write", path: NOTE, text: NOTE_TEXT }], "Notes on Dev");
     const moved = "learned/people/dev.md";
     expect((await writer.apply([{ kind: "ws_move", from: LEARNED, to: moved }, { kind: "ws_pin", path: moved, pinned: true }], "File it")).applied).toHaveLength(2);
-    expect((await listWorkspace(rig.rt, { userId: user, chatId, knowledge: "everyone" })).find((f) => f.path === moved)).toMatchObject({ pinned: true, readers: "everyone", learned: true, provenance: { role: "assistant", turn: null } });
-    // Across the line, either way, the move is refused in the tool layer's own words, and nothing changes.
+    expect((await listWorkspace(rig.rt, { userId: user, chatId })).find((f) => f.path === moved)).toMatchObject({ pinned: true, learned: true, provenance: { role: "assistant", turn: null } });
+    // Across the line, any way, the move is refused in the tool layer's own words, and nothing changes.
     for (const [from, to] of [
       [moved, "notes/dev-drinks.md"],
       [NOTE, "learned/notes.md"],
+      [moved, "~/dev-drinks.md"],
+      [NOTE, "~/notes/dev.md"],
     ] as const) {
       const op: AgentOp = { kind: "ws_move", from, to };
       expect(await writer.dryRun(op)).toEqual({ refused: true, code: "learned_move", reason: renderPrompt(WRITE_NOTE.learnedMove, {}, { path: from, to }), key: opKey(op) });
@@ -387,89 +390,112 @@ describe("a workspace note", () => {
     expect(rig.rt.ledger.errors).toEqual([]);
   });
 
-  test("written under the GM's knowledge is no file to an agent that reads as the player character or as everyone", async () => {
+  test("every agent reads every file, whatever view it reads the world with: the GM's note too, which an agent may write over", async () => {
     const rig = new Rig();
     const chatId = await rig.worldChat();
     const user = rig.host.userId;
     await rig.turn(chatId, "I look around.", "The square is quiet.");
     await applied(agentEnv(rig, chatId, "gm").writer, [{ kind: "ws_write", path: PLOT, text: PLOT_TEXT }], "The plot");
-    await applied(agentEnv(rig, chatId, "pov").writer, [{ kind: "ws_write", path: NOTE, text: NOTE_TEXT }], "Notes on Dev");
-    const paths = async (knowledge: AgentKnowledge) => (await listWorkspace(rig.rt, { userId: user, chatId, knowledge })).map((f) => f.path);
-    expect(await paths("gm")).toEqual([PLOT, NOTE]);
-    expect(await paths("everyone")).toEqual([NOTE]);
-    expect(await paths("pov")).toEqual([NOTE]);
-    expect(await readWorkspaceFile(rig.rt, { userId: user, chatId, knowledge: "pov" }, PLOT)).toBeNull();
-    expect(await readWorkspaceFile(rig.rt, { userId: user, chatId, knowledge: "gm" }, PLOT)).toBe(PLOT_TEXT);
-
-    // The player character's agent gets the same from its own tools: the list lacks it, and a read finds no such file.
-    const pov = agentEnv(rig, chatId, "pov");
-    const listed = JSON.parse((await workspaceTool("workspace_list").run({}, pov)).text) as { files: { path: string }[] };
-    expect(listed.files.map((f) => f.path)).toEqual([NOTE]);
-    const read = workspaceTool("workspace_read");
-    expect(await read.run({ path: PLOT }, pov)).toEqual({ text: renderPrompt(WRITE_NOTE.noFile, {}, { path: PLOT }), error: true });
-    expect(JSON.parse((await read.run({ path: NOTE }, pov)).text)).toEqual({ path: NOTE, text: NOTE_TEXT });
-    // Nor can its writer take the file over or remove it: the path is taken, and there is no such file to delete.
-    const over: AgentOp = { kind: "ws_write", path: PLOT, text: "Nothing is planned." };
-    expect(await pov.writer.dryRun(over)).toEqual({ refused: true, code: "path_taken", reason: renderPrompt(WRITE_NOTE.pathTaken, {}, { path: PLOT }), key: opKey(over) });
-    const remove: AgentOp = { kind: "ws_delete", path: PLOT };
-    expect(await pov.writer.dryRun(remove)).toEqual({ refused: true, code: "no_file", reason: renderPrompt(WRITE_NOTE.noFile, {}, { path: PLOT }), key: opKey(remove) });
-    expect(await readWorkspaceFile(rig.rt, { userId: user, chatId, knowledge: "gm" }, PLOT)).toBe(PLOT_TEXT);
-  });
-
-  test("written under the GM's knowledge and moved in GM → Workspace, it is still the GM's: the move keeps who may read it", async () => {
-    const rig = new Rig();
-    const chatId = await rig.worldChat();
-    const user = rig.host.userId;
-    await rig.turn(chatId, "I look around.", "The square is quiet.");
-    await applied(agentEnv(rig, chatId, "gm").writer, [{ kind: "ws_write", path: PLOT, text: PLOT_TEXT }], "The plot");
-    const moved = "gm/rent.md";
-    rig.body(await rig.send({ type: "lre.workspace", op: "move", chatId, from: PLOT, to: moved }));
-    await rig.host.settle();
-    const paths = async (knowledge: AgentKnowledge) => (await listWorkspace(rig.rt, { userId: user, chatId, knowledge })).map((f) => f.path);
-    expect(await paths("gm")).toEqual([moved]);
-    expect(await paths("everyone")).toEqual([]);
-    expect(await paths("pov")).toEqual([]);
-    expect(await readWorkspaceFile(rig.rt, { userId: user, chatId, knowledge: "pov" }, moved)).toBeNull();
-    expect(rig.rt.ledger.errors).toEqual([]);
-  });
-
-  test("the GM's own note is the GM's alone until the GM chooses who else may read it, and a save keeps the choice", async () => {
-    const rig = new Rig();
-    const chatId = await rig.worldChat();
-    const user = rig.host.userId;
-    await rig.turn(chatId, "I look around.", "The square is quiet.");
-    const paths = async (knowledge: AgentKnowledge) => (await listWorkspace(rig.rt, { userId: user, chatId, knowledge })).map((f) => f.path);
-    const readers = async () => (await listWorkspace(rig.rt, { userId: user, chatId, knowledge: "gm" })).map((f) => [f.path, f.readers]);
+    await applied(agentEnv(rig, chatId, "everyone").writer, [{ kind: "ws_write", path: NOTE, text: NOTE_TEXT }], "Notes on Dev");
     rig.body(await rig.send({ type: "lre.workspace", op: "write", chatId, path: SQUARE, text: SQUARE_TEXT }));
     await rig.host.settle();
-    expect(await readers()).toEqual([[SQUARE, "gm"]]);
-    expect(await paths("pov")).toEqual([]);
-    expect(await paths("everyone")).toEqual([]);
-    // Shared as the player character knows the world: every agent reads it.
-    rig.body(await rig.send({ type: "lre.workspace", op: "readers", chatId, path: SQUARE, readers: "pov" }));
+    expect((await listWorkspace(rig.rt, { userId: user, chatId })).map((f) => f.path)).toEqual([PLOT, NOTE, SQUARE]);
+    expect(await readWorkspaceFile(rig.rt, { userId: user, chatId }, PLOT)).toBe(PLOT_TEXT);
+    // A file names no readers: none is listed with any.
+    expect((await listWorkspace(rig.rt, { userId: user, chatId })).some((f) => "readers" in f)).toBe(false);
+    // An agent gets the same from its own tools whatever its view: every file listed, and each read whole.
+    for (const knowledge of ["everyone", "gm"] as const) {
+      const env = agentEnv(rig, chatId, knowledge);
+      const listed = JSON.parse((await workspaceTool("workspace_list").run({}, env)).text) as { files: { path: string }[] };
+      expect(listed.files.map((f) => f.path)).toEqual([PLOT, NOTE, SQUARE]);
+      const read = workspaceTool("workspace_read");
+      expect(JSON.parse((await read.run({ path: PLOT }, env)).text)).toEqual({ path: PLOT, text: PLOT_TEXT });
+      expect(JSON.parse((await read.run({ path: SQUARE }, env)).text)).toEqual({ path: SQUARE, text: SQUARE_TEXT });
+    }
+    // Nor is any file kept from its writer: the GM's note is written over, and moved in GM → Workspace like any other.
+    await applied(agentEnv(rig, chatId, "everyone").writer, [{ kind: "ws_write", path: PLOT, text: "Nothing is planned." }], "The plot, again");
+    expect(await readWorkspaceFile(rig.rt, { userId: user, chatId }, PLOT)).toBe("Nothing is planned.");
+    rig.body(await rig.send({ type: "lre.workspace", op: "move", chatId, from: PLOT, to: "gm/rent.md" }));
     await rig.host.settle();
-    expect(await paths("pov")).toEqual([SQUARE]);
-    expect(await paths("everyone")).toEqual([SQUARE]);
-    // A save of new text keeps it; everyone's knowledge alone keeps it from the player character's agents again.
-    rig.body(await rig.send({ type: "lre.workspace", op: "write", chatId, path: SQUARE, text: `${SQUARE_TEXT} Dev opens at ten.` }));
-    await rig.host.settle();
-    expect(await readers()).toEqual([[SQUARE, "pov"]]);
-    const shared = rig.body(await rig.send({ type: "lre.workspace", op: "readers", chatId, path: SQUARE, readers: "everyone" }));
-    await rig.host.settle();
-    expect(await paths("pov")).toEqual([]);
-    expect(await paths("everyone")).toEqual([SQUARE]);
-    // The same choice again is the same write, answered as it was; a write may name its readers too.
-    expect(rig.body(await rig.send({ type: "lre.workspace", op: "readers", chatId, path: SQUARE, readers: "everyone" })).undo).toBe(shared.undo);
-    rig.body(await rig.send({ type: "lre.workspace", op: "write", chatId, path: NOTE, text: NOTE_TEXT, readers: "pov" }));
-    await rig.host.settle();
-    expect(await readers()).toEqual([
-      [NOTE, "pov"],
-      [SQUARE, "everyone"],
-    ]);
-    // An agent can't choose: its file is read with the knowledge it writes under.
-    const op: AgentOp = { kind: "ws_readers", path: SQUARE, readers: "pov" };
+    expect(JSON.parse((await workspaceTool("workspace_list").run({}, agentEnv(rig, chatId, "everyone"))).text).files.map((f: { path: string }) => f.path)).toEqual(["gm/rent.md", NOTE, SQUARE]);
+    // Asking to set who may read a file is no operation, from an agent or GM → Workspace.
+    const op = { kind: "ws_readers", path: SQUARE, readers: "pov" } as unknown as AgentOp;
     expect(await agentEnv(rig, chatId, "gm").writer.dryRun(op)).toEqual({ refused: true, code: "bad_op", reason: renderPrompt(WRITE_NOTE.badOp, {}, {}), key: opKey(op) });
+    expect(await rig.send({ type: "lre.workspace", op: "readers", chatId, path: SQUARE, readers: "pov" } as never)).toMatchObject({ type: "lre.error", code: "bad_request" });
     expect(rig.rt.ledger.errors).toEqual([]);
+  });
+});
+
+describe("the global workspace (~/)", () => {
+  test("a file written under ~/ lands at once in the user's storage, is listed and read in every chat of theirs, and no swipe or Undo changes it", async () => {
+    const rig = new Rig();
+    const chatId = await rig.worldChat();
+    const other = await rig.worldChat();
+    const user = rig.host.userId;
+    await rig.turn(chatId, "I look around.", "The square is quiet.");
+    const AGENTS = "~/AGENTS.md";
+    const STYLE = "~/notes/style.md";
+    // GM → Workspace writes it: it lands at once, with no Undo chip, held by no turn.
+    const written = rig.body(await rig.send({ type: "lre.workspace", op: "write", chatId, path: AGENTS, text: "Keep replies short." })) as { files?: { path: string }[]; pending?: boolean; undo?: string | null };
+    expect([written.pending, written.undo]).toEqual([false, null]);
+    expect(written.files?.find((f) => f.path === AGENTS)).toMatchObject({ pinned: false, learned: false, provenance: { role: "gm", turn: null } });
+    // An agent writes one too, with its own tool, outside a turn: it lands at once, as a learned file's change does.
+    const { writer } = agentEnv(rig, chatId, "everyone");
+    expect(await writer.apply([{ kind: "ws_write", path: STYLE, text: "Plain words." }], "House style")).toMatchObject({ applied: [expect.any(String)], refused: [], chipId: null, pending: false });
+    // In the user's own storage, not in any chat's ledger or metadata.
+    const stored = JSON.parse(rig.host.files.get(`${user}/${GLOBAL_INDEX_PATH}`) ?? "null") as { files: Record<string, unknown> };
+    expect(stored.files).toEqual({ [AGENTS]: { hash: blobHash("Keep replies short."), role: "gm" }, [STYLE]: { hash: blobHash("Plain words."), role: "assistant" } });
+    expect((await rig.rt.chatAgents.get(chatId, user)).learned).toEqual({});
+    // Every chat of the user's lists and reads them; the other chat never had a turn.
+    for (const chat of [chatId, other]) {
+      expect((await listWorkspace(rig.rt, { userId: user, chatId: chat })).map((f) => f.path).filter((p) => p.startsWith("~/"))).toEqual([AGENTS, STYLE]);
+      expect(await readWorkspaceFile(rig.rt, { userId: user, chatId: chat }, AGENTS)).toBe("Keep replies short.");
+    }
+    const listed = JSON.parse((await workspaceTool("workspace_list").run({ under: "~/notes/" }, agentEnv(rig, other, "everyone"))).text) as { files: { path: string }[] };
+    expect(listed.files.map((f) => f.path)).toEqual([STYLE]);
+    // A Re-run of the reply leaves it as it is.
+    await swipeAs(rig, chatId, "rerun", "The square is waking.");
+    expect(await readWorkspaceFile(rig.rt, { userId: user, chatId }, STYLE)).toBe("Plain words.");
+    // It moves within ~/, pins, and is deleted there; a move out of it is refused.
+    rig.body(await rig.send({ type: "lre.workspace", op: "move", chatId: other, from: STYLE, to: "~/style.md" }));
+    rig.body(await rig.send({ type: "lre.workspace", op: "pin", chatId: other, path: "~/style.md", pinned: true }));
+    expect((await listWorkspace(rig.rt, { userId: user, chatId })).find((f) => f.path === "~/style.md")).toMatchObject({ pinned: true });
+    expect(await rig.send({ type: "lre.workspace", op: "move", chatId, from: AGENTS, to: "AGENTS.md" })).toMatchObject({ type: "lre.error", code: "validation" });
+    rig.body(await rig.send({ type: "lre.workspace", op: "delete", chatId, path: "~/style.md" }));
+    expect((await listWorkspace(rig.rt, { userId: user, chatId: other })).map((f) => f.path).filter((p) => p.startsWith("~/"))).toEqual([AGENTS]);
+    // A ~ anywhere but the start is no path.
+    expect(await writer.dryRun({ kind: "ws_write", path: "notes/~/x.md", text: "x" })).toMatchObject({ refused: true, code: "bad_path" });
+    expect(rig.rt.ledger.errors).toEqual([]);
+  });
+});
+
+describe("listing the workspace", () => {
+  test("reads no stored body whose size it knows: New note and the list after it read none, with 31 notes there; a body not yet read is read once", async () => {
+    const rig = new Rig();
+    const chatId = await rig.worldChat();
+    const user = rig.host.userId;
+    for (let i = 0; i < 31; i++) rig.body(await rig.send({ type: "lre.workspace", op: "write", chatId, path: `notes/n-${String(i).padStart(2, "0")}.md`, text: `Note ${i}: the harbour at ${i} o'clock.` }));
+    await rig.host.settle();
+    // Every read of a stored body from here on, counted.
+    const read = rig.host.storage.read;
+    let bodies = 0;
+    rig.host.storage.read = async (path, userId) => {
+      if (path.startsWith(BLOBS_DIR)) bodies++;
+      return read(path, userId);
+    };
+    // GM → Workspace's New note: the write, then the list it answers with and the one asked for after it.
+    const created = rig.body(await rig.send({ type: "lre.workspace", op: "write", chatId, path: "notes/new.md", text: "" })) as { files?: { path: string; size: number }[] };
+    const listed = rig.body(await rig.send({ type: "lre.workspace", op: "list", chatId })) as { files?: { path: string; size: number }[] };
+    expect(listed.files).toHaveLength(32);
+    expect(created.files).toEqual(listed.files);
+    expect(listed.files?.find((f) => f.path === "notes/n-07.md")?.size).toBe("Note 7: the harbour at 7 o'clock.".length);
+    expect(bodies).toBe(0);
+    // A store that has read no body yet (the engine started again) reads each once, then knows its size.
+    const fresh = new BlobStore(rig.host);
+    const hash = blobHash("Note 7: the harbour at 7 o'clock.");
+    expect([await fresh.size(user, hash), await fresh.size(user, hash)]).toEqual(["Note 7: the harbour at 7 o'clock.".length, "Note 7: the harbour at 7 o'clock.".length]);
+    expect(bodies).toBe(1);
+    expect(await fresh.size(user, blobHash("never stored"))).toBeNull();
   });
 });
 
@@ -511,7 +537,7 @@ describe("an agent turn's note", () => {
     expect(told.join("\n")).toContain(renderPrompt(WRITE_NOTE.staged, {}, {}));
     expect(read.join("\n")).toContain(NOTE_TEXT);
     const turn = (await rig.host.chats.messages(chatId, rig.host.userId)).filter((m) => !m.isUser).length;
-    expect((await listWorkspace(rig.rt, { userId: rig.host.userId, chatId, knowledge: "gm" })).find((f) => f.path === NOTE)).toMatchObject({ hash: blobHash(NOTE_TEXT), readers: "everyone", provenance: { role: "scene", turn } });
+    expect((await listWorkspace(rig.rt, { userId: rig.host.userId, chatId })).find((f) => f.path === NOTE)).toMatchObject({ hash: blobHash(NOTE_TEXT), provenance: { role: "scene", turn } });
     const records = await rig.rt.diag.records(chatId, rig.host.userId);
     expect(records.some((r) => r.step === ROLE_LABEL.scene && r.reason === "Its changes: 1 staged, landing when the turn commits.")).toBe(true);
     expect(rig.rt.ledger.errors).toEqual([]);

@@ -4,8 +4,8 @@
 // every lore tool takes; under everyone's knowledge a restricted entry's line is inside its secret
 // mark, its title and what it holds alike; an entry loaded by id reaches the reply the turn is
 // writing; the user's own index entry is what the agents get when Settings names it; and Build's index
-// entry stays in step with its books until it is stopped, reading Settings as they stand, never a
-// turn's.
+// entry lists every entry, a restricted one inside its secret mark, and stays in step with its books
+// until it is stopped, reading Settings as they stand, never a turn's.
 
 import { describe, expect, test } from "bun:test";
 import { classicRoles } from "../../src/backend/agents/roles/classic";
@@ -16,7 +16,7 @@ import { toolsFor } from "../../src/backend/agents/tools/registry";
 import type { HostBookEntryInput } from "../../src/backend/host";
 import { outsideTurns } from "../../src/backend/turn-frame";
 import { ROLE_IDS } from "../../src/shared/agent-roles";
-import type { AgentKnowledge } from "../../src/shared/agent-tools";
+import type { ToolView } from "../../src/shared/agent-tools";
 import { LEDGER_NAMESPACE } from "../../src/shared/ledger";
 import { builtIndexOf } from "../../src/shared/lore";
 import { holdsOf } from "../../src/shared/lore-routing";
@@ -34,14 +34,14 @@ const CHANDLERY = "The chandlery sells rope, paint and charts.";
 
 const entry = (comment: string, content: string, keys: string[]): HostBookEntryInput => ({ comment, content, keys, disabled: false, constant: false, extensions: {} });
 
-async function tool(rig: Rig, chatId: string, name: string, args: Record<string, string>, knowledge: AgentKnowledge = "gm"): Promise<ToolOutcome> {
+async function tool(rig: Rig, chatId: string, name: string, args: Record<string, string>, knowledge: ToolView = "gm"): Promise<ToolOutcome> {
   const found = LORE_TOOLS.find((t) => t.name === name);
   if (!found) throw new Error(`no ${name} tool`);
   const base = { userId: rig.host.userId, chatId, knowledge };
   return found.run(args, { ...base, reader: outsideReader(rig.rt, base), writer: null, agent: { role: "assistant", id: "agent_test" }, signal: new AbortController().signal });
 }
 
-async function index(rig: Rig, chatId: string, knowledge: AgentKnowledge = "gm"): Promise<string> {
+async function index(rig: Rig, chatId: string, knowledge: ToolView = "gm"): Promise<string> {
   const out = await tool(rig, chatId, "lore_index", {}, knowledge);
   if (out.error) throw new Error(out.text);
   return (JSON.parse(out.text) as { index: string }).index;
@@ -102,7 +102,7 @@ describe("the lore index", () => {
     expect(await read(rig, chatId, "lr0102")).toBeNull();
   }, 30_000);
 
-  test("under everyone's knowledge a restricted entry's title and what it holds are each inside its secret mark; the GM's reads them plainly, and the player character's has no line for it", async () => {
+  test("under everyone's knowledge a restricted entry's title and what it holds are each inside its secret mark; the GM's reads them plainly", async () => {
     const { rig, user, chatId, bookId } = await harbor();
     const affair = "Marcus has been meeting the harbor master's wife at the boathouse.\nNobody else knows.";
     await rig.host.books.createEntry(bookId, { ...entry("Boathouse meetings", affair, ["boathouse"]), extensions: { [LEDGER_NAMESPACE]: { lore: { visibility: "known_by", links: ["nobody_the_pov_knows"] } } } }, user);
@@ -115,7 +115,6 @@ describe("the lore index", () => {
     // An entry anyone may read is as it is.
     expect(everyone).toContain(`lr0101 Ferry (${FERRY})`);
     expect(await index(rig, chatId)).toContain(`lre0001 Boathouse meetings (${holds})`);
-    expect(await index(rig, chatId, "pov")).not.toContain("Boathouse");
   }, 30_000);
 
   test("the user's own index entry is what lore_index gives once Settings names it, as written, and its tags read their entries", async () => {
@@ -245,6 +244,62 @@ describe("Build's index entry", () => {
     expect(stored()?.content).toContain("lre0001 Beacon");
     expect(rig.rt.ledger.errors).toEqual([]);
   }, 60_000);
+
+  test("a book is read again only once it changes, and a sync with nothing changed remakes nothing and writes nothing", async () => {
+    const { rig, user, worldId, chatId, bookId } = await harbor();
+    const light = await rig.host.books.createEntry(bookId, entry("Lighthouse", LIGHT, ["lighthouse"]), user);
+    rig.body(await rig.send({ type: "lre.settings.set", patch: { loreBooks: [bookId] } }));
+    const target = await rig.host.books.create("Index", "", user);
+    rig.body(await rig.send({ type: "lre.lore", op: "build", worldId, bookId: target }));
+    // Every read of the harbor book's entries, and every write of an entry, from here on.
+    const reads: string[] = [];
+    const writes: string[] = [];
+    const entries = rig.host.books.entries.bind(rig.host.books);
+    const update = rig.host.books.update.bind(rig.host.books);
+    rig.host.books.entries = async (id, userId) => {
+      reads.push(id);
+      return entries(id, userId);
+    };
+    rig.host.books.update = async (id, patch, userId) => {
+      writes.push(id);
+      return update(id, patch, userId);
+    };
+    const world = (await rig.rt.worlds.get(worldId, user)).world;
+    const lore = async (): Promise<string> => JSON.stringify(Object.values((await rig.rt.readLore(chatId, user, world)).lore).map((l) => l.content));
+    // Read once, then kept: the next reads and syncs read and write nothing while the books stand.
+    expect(await lore()).toContain(LIGHT);
+    await rig.rt.loreRouting.sync(user, worldId);
+    const settled = { reads: reads.length, writes: writes.length };
+    expect(await lore()).toContain(LIGHT);
+    await rig.rt.loreRouting.sync(user, worldId);
+    expect({ reads: reads.length, writes: writes.length }).toEqual(settled);
+    // An edit moves its book's stamp: it is read again, and the built entry brought up to date once.
+    rig.host.editEntry(light, { comment: "Beacon", content: LIT });
+    expect(await lore()).toContain(LIT);
+    expect(reads.length).toBeGreaterThan(settled.reads);
+    await rig.rt.loreRouting.sync(user, worldId);
+    expect(writes.length).toBe(settled.writes + 1);
+    expect(rig.host.storedEntry((await rig.rt.settings.get(user)).loreIndex.built?.entryId ?? "")?.content).toContain("Beacon");
+    expect(rig.rt.ledger.errors).toEqual([]);
+  });
+
+  test("lists every entry, a restricted one with its title and what it holds each inside its secret mark, kept from everyone", async () => {
+    const { rig, user, worldId, bookId } = await harbor();
+    const affair = "Marcus has been meeting the harbor master's wife at the boathouse.\nNobody else knows.";
+    await rig.host.books.createEntry(bookId, { ...entry("Boathouse meetings", affair, ["boathouse"]), extensions: { [LEDGER_NAMESPACE]: { lore: { visibility: "known_by", links: ["nobody_the_pov_knows"] } } } }, user);
+    await rig.host.books.createEntry(bookId, entry("Ferry", FERRY, ["ferry", "lr0101"]), user);
+    rig.body(await rig.send({ type: "lre.settings.set", patch: { loreBooks: [bookId] } }));
+    const holds = holdsOf("Boathouse meetings", affair, (await rig.rt.settings.get(user)).loreIndex.holdsChars);
+    if (holds === null) throw new Error("the entry holds no line beside its title");
+    const kept = (text: string): string => secretMarkText(text, [], "everyone");
+    const target = await rig.host.books.create("Index", "", user);
+    const built = (rig.body(await rig.send({ type: "lre.lore", op: "build", worldId, bookId: target })).index as LoreIndexView).built;
+    if (!built) throw new Error("nothing built");
+    const content = rig.host.storedEntry(built.entryId)?.content ?? "";
+    expect(content).toContain(`lre0001 ${kept("Boathouse meetings")} (${kept(holds)})`);
+    expect(content).toContain(`lr0101 Ferry (${FERRY})`);
+    expect(rig.rt.ledger.errors).toEqual([]);
+  }, 30_000);
 
   test("a Stop while a turn runs counts at once: the turn leaves the entry as it stands", async () => {
     const { rig, user, worldId, chatId, bookId } = await harbor();

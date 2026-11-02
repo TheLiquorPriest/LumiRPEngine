@@ -31,18 +31,26 @@ export const TOOL_FAMILY_LABEL: Readonly<Record<ToolFamily, string>> = {
   workspace: "Workspace",
 };
 
-/** Whose knowledge an agent reads with: the player character's, everyone in the world's (secrets marked), or the GM's (everything). */
+/**
+ * A knowledge as stored data names it (a file's old readers, an old session message's or review
+ * item's knowledge): the player character's, everyone in the world's (secrets marked), or the GM's.
+ * Read and ignored by every agent since secrecy became guidance (DESIGN §7.1).
+ */
 export type AgentKnowledge = "pov" | "everyone" | "gm";
 export const AGENT_KNOWLEDGE: readonly AgentKnowledge[] = ["pov", "everyone", "gm"];
+
+/**
+ * How an agent's tools read the world (DESIGN §7.1). Neither leaves anything out: `everyone` reads
+ * everything with each secret marked in the user's wording of a mark (the narrator's view); `gm`
+ * reads everything, each restricted thing with its visibility: unmarked for the GM's own tools, and
+ * with every secret marked besides (`ToolEnv.marks`) for every turn agent, the roles and the main
+ * agent alike.
+ */
+export type ToolView = "everyone" | "gm";
 
 /** Whether what `k` reads is within what `of` reads: the player character's knowledge is within everyone's, and everyone's within the GM's. */
 export function knowledgeWithin(k: AgentKnowledge, of: AgentKnowledge): boolean {
   return AGENT_KNOWLEDGE.indexOf(k) <= AGENT_KNOWLEDGE.indexOf(of);
-}
-
-/** The wider of two knowledges: the one the other's reads are within. */
-export function widerKnowledge(a: AgentKnowledge, b: AgentKnowledge): AgentKnowledge {
-  return knowledgeWithin(a, b) ? b : a;
 }
 
 export function isAgentKnowledge(v: unknown): v is AgentKnowledge {
@@ -96,24 +104,21 @@ export const TOOL_NOTE = {
   noThing: "tool.note.no_thing",
   noTrack: "tool.note.no_track",
   noFact: "tool.note.no_fact",
-  noField: "tool.note.no_field",
   ambiguous: "tool.note.ambiguous",
   missing: "tool.note.missing",
   badValue: "tool.note.bad_value",
   badValueUnlisted: "tool.note.bad_value_unlisted",
-  hidden: "tool.note.hidden",
 } as const;
 
 const asked: PromptVar = { name: "name", text: "the name or id the model asked for, as it wrote it" };
 
-/** The notes every tool may answer with: a name the view can't resolve, a missing or wrong argument, what lies beyond the player character's knowledge. */
+/** The notes every tool may answer with: a name the view can't resolve, a missing or wrong argument. */
 const LAYER_NOTES: readonly ToolNote[] = [
   { id: TOOL_NOTE.noPerson, label: "No such person", note: "A tool's answer when a person's name or id names no one the agent's knowledge can see: a hidden person reads exactly as one who doesn't exist.", text: "No such person here: {{name}}.", vars: [asked] },
   { id: TOOL_NOTE.noPlace, label: "No such place", note: "A tool's answer when a place's name or id names no place the agent's knowledge can see.", text: "No such place here: {{name}}.", vars: [asked] },
   { id: TOOL_NOTE.noThing, label: "No such thing", note: "A tool's answer when a thing's name or id names nothing the agent's knowledge can see.", text: "No such thing here: {{name}}.", vars: [asked] },
   { id: TOOL_NOTE.noTrack, label: "No such quest or secret", note: "A tool's answer when a quest, secret, puzzle or agenda's id or label names none the agent's knowledge can see.", text: "No such quest, secret, puzzle or agenda here: {{name}}.", vars: [asked] },
-  { id: TOOL_NOTE.noFact, label: "No such fact", note: "A tool's answer when a fact's id names no fact the agent's knowledge can see: under the player character's knowledge, one it doesn't hold reads exactly as one the chat doesn't record.", text: "No such fact here: {{name}}.", vars: [asked] },
-  { id: TOOL_NOTE.noField, label: "No such field", note: "A write's answer, under the player character's knowledge, when a field names none it may see of that person or thing: a hidden field reads exactly as one its kind doesn't have.", text: "No such field here: {{name}}.", vars: [asked] },
+  { id: TOOL_NOTE.noFact, label: "No such fact", note: "A tool's answer when a fact's id names no fact the chat records.", text: "No such fact here: {{name}}.", vars: [asked] },
   {
     id: TOOL_NOTE.ambiguous,
     label: "Several match",
@@ -147,20 +152,13 @@ const LAYER_NOTES: readonly ToolNote[] = [
   {
     id: TOOL_NOTE.badValueUnlisted,
     label: "A value it doesn't take, with none to list",
-    note: "A tool's answer when an argument holds a value the tool doesn't take and there is none it may list: under the player character's knowledge, a quest's stages it hasn't come to.",
+    note: "A tool's answer when an argument holds a value the tool doesn't take and there is none it may list.",
     text: "{{tool}} doesn't take {{value}} as {{arg}}.",
     vars: [
       { name: "tool", text: "the tool" },
       { name: "arg", text: "the argument" },
       { name: "value", text: "the value given", required: true },
     ],
-  },
-  {
-    id: TOOL_NOTE.hidden,
-    label: "Beyond the player character's knowledge",
-    note: "A tool's answer, under the player character's knowledge, to what the player character can't know: another's mind or knowledge, or another's odds.",
-    text: "{{pov}} doesn't know that, and you read the world as {{pov}} knows it.",
-    vars: [{ name: "pov", text: "the player character's name" }],
   },
 ];
 

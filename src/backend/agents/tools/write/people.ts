@@ -141,7 +141,7 @@ export const PEOPLE_WRITES: readonly ToolDefinition[] = [
       const kind = needText(view, "gm_spawn", args, "kind");
       if (typeof kind !== "string") return kind;
       // The kinds as the schema offers them: the packs' and the world's, as played.
-      const kinds = kindEnum(schemaWorld(view.world, view.registry, view.knowledge));
+      const kinds = kindEnum(schemaWorld(view.world, view.registry));
       if (!kinds.includes(kind)) return badValue(view, "gm_spawn", "kind", kind, kinds);
       const name = needText(view, "gm_spawn", args, "name");
       if (typeof name !== "string") return name;

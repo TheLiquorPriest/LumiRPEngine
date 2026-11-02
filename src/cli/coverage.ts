@@ -150,7 +150,6 @@ export const COVERAGE: Coverage = {
     delete: { excluded: "GM → Workspace's Delete of a file, the user's own press with its Undo; the MCP server's tools reach the workspace once they move onto the agent tool layer (Increment 3)." },
     move: { excluded: "GM → Workspace's Move of a file to another path, the user's own; the MCP server's tools reach the workspace once they move onto the agent tool layer (Increment 3)." },
     pin: { excluded: "GM → Workspace's pin of a file for the agents, the user's own choice; the MCP server's tools reach the workspace once they move onto the agent tool layer (Increment 3)." },
-    readers: { excluded: "GM → Workspace's choice of whose knowledge may read a file, the user's own; the MCP server's tools reach the workspace once they move onto the agent tool layer (Increment 3)." },
     session: { excluded: "GM → Workspace's view of the main agent's session in the chat (its summary, turns and rollback), GM data for the page; the MCP server's tools reach the main agent once they move onto the agent tool layer (Increment 3)." },
     rollback: { excluded: "GM → Workspace's rollback of the main agent's latest compaction, the user's own press, which the next agent turn carries; an outside agent keeps no main session." },
   },

@@ -6,7 +6,7 @@
 // index default but the built entry, which only Stop lets go; and Settings home's line for the page.
 
 import { describe, expect, test } from "bun:test";
-import { Button, HostSelect, HostSwitch, NumberStepper, Seg } from "../../src/frontend/components";
+import { Button, HostSelect, NumberStepper, Seg } from "../../src/frontend/components";
 import { CheckField } from "../../src/frontend/build/form-kit";
 import { type LoreSettingsProps, LoreSettingsBody, type LoreTextField, loreIndexResetPatch, loreSummary } from "../../src/frontend/settings/lore";
 import type { JsonObject } from "../../src/shared/json";
@@ -140,17 +140,13 @@ describe("Settings → Lore patches", () => {
     expect(sent).toBeNull();
   });
 
-  test("the numbers and the prompts switch send themselves; the index tokens show only with the switch on", () => {
+  test("the numbers send themselves, the index tokens among them", () => {
     const plain = page("auto", DEFAULTS);
     press(labelled(plain, NumberStepper, "Id digits"), 6);
     expect(take()).toEqual({ loreIndex: { idDigits: 6 } });
     press(labelled(plain, NumberStepper, "Holds line (characters)"), 0);
     expect(take()).toEqual({ loreIndex: { holdsChars: 0 } });
-    expect(propsOf(plain, NumberStepper).map((p) => p.label)).not.toContain("Index tokens");
-    press(labelled(plain, HostSwitch, "Every role's prompt carries the lore index"), true);
-    expect(take()).toEqual({ loreIndex: { inPrompts: true } });
-    const on = page("auto", { ...DEFAULTS, inPrompts: true });
-    const tokens = labelled(on, NumberStepper, "Index tokens");
+    const tokens = labelled(plain, NumberStepper, "Index tokens");
     expect([tokens.value, tokens.min, tokens.max]).toEqual([LORE_INDEX_DEFAULTS.promptTokens, ...LORE_INDEX_BOUNDS.promptTokens]);
     press(tokens, 800);
     expect(take()).toEqual({ loreIndex: { promptTokens: 800 } });
@@ -195,7 +191,7 @@ describe("Settings → Lore patches", () => {
     click(labelled(page("auto", { ...DEFAULTS, holdsChars: 0 }), Button, RESET));
     const reset = take();
     expect(reset).toEqual(loreIndexResetPatch());
-    expect(reset).toEqual({ loreIndex: { tagPattern: null, idPrefix: null, idDigits: null, holdsChars: null, inPrompts: null, promptTokens: null, own: null } });
+    expect(reset).toEqual({ loreIndex: { tagPattern: null, idPrefix: null, idDigits: null, holdsChars: null, promptTokens: null, own: null } });
   });
 });
 
@@ -228,18 +224,16 @@ describe("Settings → Lore in the settings store", () => {
     now = await save(take());
     press(labelled(page(now.books, now.index), NumberStepper, "Holds line (characters)"), 0);
     now = await save(take());
-    press(labelled(page(now.books, now.index), HostSwitch, "Every role's prompt carries the lore index"), true);
-    now = await save(take());
     press(labelled(page(now.books, now.index), NumberStepper, "Index tokens"), 800);
     now = await save(take());
     press(labelled(page(now.books, now.index, { ownBook: "book_town", ownEntries: ENTRIES }), HostSelect, "Your index entry"), "e_index");
     now = await save(take());
     // Build → Lore's press sets the built entry; the page only stops it.
     now = await save({ loreIndex: { built: { bookId: "book_town", entryId: "e_built", worldId: "alder" } } });
-    expect(now.index).toEqual({ tagPattern: "^tag-\\d+$", idPrefix: "lore", idDigits: 6, holdsChars: 0, inPrompts: true, promptTokens: 800, own: { bookId: "book_town", entryId: "e_index" }, built: { bookId: "book_town", entryId: "e_built", worldId: "alder" } });
+    expect(now.index).toEqual({ tagPattern: "^tag-\\d+$", idPrefix: "lore", idDigits: 6, holdsChars: 0, promptTokens: 800, own: { bookId: "book_town", entryId: "e_index" }, built: { bookId: "book_town", entryId: "e_built", worldId: "alder" } });
     // The page shows what was saved.
     const shown = page(now.books, now.index);
-    expect([input(shown, "Tag pattern").value, input(shown, "Id prefix").value, labelled(shown, NumberStepper, "Id digits").value, labelled(shown, HostSwitch, "Every role's prompt carries the lore index").checked]).toEqual(["^tag-\\d+$", "lore", 6, true]);
+    expect([input(shown, "Tag pattern").value, input(shown, "Id prefix").value, labelled(shown, NumberStepper, "Id digits").value, labelled(shown, NumberStepper, "Index tokens").value]).toEqual(["^tag-\\d+$", "lore", 6, 800]);
 
     click(labelled(page(now.books, now.index), Button, RESET));
     now = await save(take());
@@ -256,7 +250,7 @@ describe("Settings → Lore in the settings store", () => {
 describe("Settings home's line for the Lore page", () => {
   test("says which books, and what of the index is on", () => {
     expect(loreSummary("auto", DEFAULTS)).toBe("Every book a chat reads");
-    expect(loreSummary(["a"], { ...DEFAULTS, inPrompts: true })).toBe("1 book ticked · index in every role's prompt");
-    expect(loreSummary(["a", "b"], { ...DEFAULTS, inPrompts: true, own: { bookId: "a", entryId: "e" }, built: { bookId: "a", entryId: "i", worldId: "w" } })).toBe("2 books ticked · your own index entry · an index entry kept in sync");
+    expect(loreSummary(["a"], DEFAULTS)).toBe("1 book ticked");
+    expect(loreSummary(["a", "b"], { ...DEFAULTS, own: { bookId: "a", entryId: "e" }, built: { bookId: "a", entryId: "i", worldId: "w" } })).toBe("2 books ticked · your own index entry · an index entry kept in sync");
   });
 });

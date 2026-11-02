@@ -15,7 +15,8 @@ import { EXTRACTION_TYPES, helperCallOf, recentOf, stepConfigOf, stepLoreOf } fr
 import type { ChipAction, ChipInput, ContextGeneration, ContextView, LoreStepTrace, StateView } from "../shared/state-view";
 import type { ActionDef, AdjudicationDef, LoreEntryDef, ParamDef, SectionTemplate, StepPurpose, WorldDoc } from "../shared/world";
 import { formatMoney, offersAction } from "../shared/world";
-import { fieldNoun } from "../shared/words";
+import { counted, fieldNoun } from "../shared/words";
+import { applyFinalEdits, FINAL_REVIEW_STEP, finalEditsOf, partOf, partText, type PromptPart, RULES_PART } from "../shared/final-review";
 import { LORE_AUDIENCE } from "../shared/lore";
 import { isMindPurpose, KNOWLEDGE_CHANGES, MINDS_EVENTS, MINDS_SLOT, type MindCallTrace, type MindEventData } from "../shared/minds";
 import { firedTimeout, TimeoutFired, TIMEOUTS, timerMs } from "../shared/timeouts";
@@ -69,10 +70,11 @@ import { AgentAccounts } from "./agents/provider";
 import { EngineBook, narratorRules, sectionsOf, sectionTokens } from "./book";
 import { DEFAULT_SECTIONS } from "../shared/sections";
 import type { PromptTexts } from "../shared/prompts";
-import type { SecretMarkWording } from "../shared/secret-marks";
+import { holdsSecretMark, type SecretMarkWording, secretMarkText } from "../shared/secret-marks";
 import { markWording, PromptSets, sourceTexts, turnPromptSet } from "./prompts";
 import { ChatPrefs } from "./chat-prefs";
 import { ChatAgentMeta } from "./chat-agent-meta";
+import { GlobalWorkspace } from "./global-workspace";
 import { ChatMetaQueue } from "./chat-meta-queue";
 import { BlobStore } from "./agents/blobs";
 import { Sessions } from "./agents/sessions";
@@ -80,7 +82,7 @@ import { Sweep } from "./agents/sweep";
 import { ChatKnowledge, chatKnowledgePrefsOf, knowledgeOn, narratorView } from "./chat-knowledge-prefs";
 import { ChipStore, type StoredChip } from "./chips";
 import type { DryRun, HostPort } from "./host";
-import { EngineFailure, LedgerService, OPEN_CHATS_CAP, toChain, type Delivered, type PreOutcome, type RunOutcome, type TurnContext, type TurnHooks } from "./ledger-io";
+import { EngineFailure, LedgerService, OPEN_CHATS_CAP, toChain, type Delivered, type PreOutcome, type RunOutcome, type TurnContext, type TurnGone, type TurnHooks } from "./ledger-io";
 import { outsideTurns, type TurnFrame } from "./turn-frame";
 import type { TrimReport } from "./memory-budget";
 import { MessageCache } from "./message-cache";
@@ -90,7 +92,7 @@ import { startMarkersFrom } from "./start-markers";
 import { claimFor, outOfHand } from "./claims";
 import { StepLore, ToolSupport, type LoreInputs, type LookupTransport } from "./lore-steps";
 import { pinReader } from "./lore-pins";
-import { liveLore, recordedLoreId } from "./book-lore";
+import { BookReads, liveLore, recordedLoreId } from "./book-lore";
 import { LoreRouting } from "./lore-routing";
 import { worldInfoVerdict, type WorldInfoGate } from "./wi-interceptor";
 import { type CatalogEntry, interpretCatalog, interpretScene, timelapseEntry, tryEntry } from "./interpret-context";
@@ -106,15 +108,15 @@ import { JsonHiding, readableReply } from "./json-hiding";
 import { GUIDANCE_PREFIX, GUIDANCE_TARGETS, NARRATOR_OUTLET, outletOf, PresetBinding, type Guidance, type PresetConfig } from "./preset-binding";
 import { presetCaveats, type PresetCaveat } from "./preset-lint";
 import { applyProposals, applyRead, type EnginePipeline, type PlanProse, type PreparedRead, type ProposalOutcome, type ReadChip, type ReadStep, TurnBridge, type UnfitAction } from "./turn-model";
-import { agentsActHere, factLines, handedCash, judge, noFacts, npcAsked, npcOdds, oddsDecisions, paidOutside, payeeOf, phaseBudget, planFacts, presentNames, promptedEffects, promptedText, puzzleAnswer, renderTemplate, runsOf, safeVars, sceneClock, slotVars, type EarlierMessage, type StepBudget, tiesOf, turnTimeLine, unfitRef, type PlanStart, type SignalFacts, type StepRun, type Tie, type UnfitRef } from "./turn-steps";
-import { buildView, clockMinutes, notWorldView, palette, recentLines, replyFailedChip, TIMELAPSE_ACTION } from "./view";
+import { agentsActHere, factLines, handedCash, judge, keepLine, noFacts, npcAsked, npcOdds, oddsDecisions, paidOutside, payeeOf, phaseBudget, planFacts, presentNames, promptedEffects, promptedText, puzzleAnswer, renderTemplate, runsOf, safeVars, sceneClock, slotVars, type EarlierMessage, type StepBudget, tiesOf, turnTimeLine, unfitRef, type PlanStart, type ProseMark, type SignalFacts, type StepRun, type Tie, type UnfitRef } from "./turn-steps";
+import { buildView, clockMinutes, notWorldView, palette, recentLines, replyFailedChip, TIMELAPSE_ACTION, ViewMemo } from "./view";
 import { actionWords, compactSpan, editedText, spanText } from "../engine/action-words";
 import { WorldStore } from "./worlds";
 import { Diagnostics, type DiagAt } from "./diagnostics";
 import { Orchestrator, type TurnCalls } from "./agents/orchestrator";
 import { Review } from "./agents/review";
 import { LiveFeeds } from "./agents/live";
-import { defaultAgentSettings } from "../shared/agent-settings";
+import { defaultAgentSettings, KEPT_FOLDS_DEFAULT } from "../shared/agent-settings";
 import type { ExtractInput, InterpretOutcome, ProseAsk } from "./agents/turn-ctx";
 import { outputsOf } from "../engine/outputs";
 import { CANNOT_STOP, DIAG_RING, STEP_LABEL, type DiagPhase } from "../shared/diagnostics";
@@ -770,6 +772,8 @@ export class Runtime implements TurnHooks {
   readonly toolSupport: ToolSupport;
   /** The lore index the agents read, its short ids and Build's index entry (DESIGN §4.2). */
   readonly loreRouting: LoreRouting;
+  /** Each World Info book's entries as last read, until the book changes: what live lore reads (`liveLore`). */
+  readonly bookReads = new BookReads();
   readonly ledger: LedgerService;
   /** The JSON regex scripts, each world chat's and the user's unwraps (DESIGN §6.7). */
   readonly jsonHiding: JsonHiding;
@@ -790,6 +794,8 @@ export class Runtime implements TurnHooks {
   readonly orchestrator: Orchestrator;
   /** Each chat's agent metadata: the learned area's index, the GM assistant's thread and a session rollback asked for (DESIGN §4.4). */
   readonly chatAgents: ChatAgentMeta;
+  /** Each user's global workspace (`~/`, DESIGN §4.4): the files every chat of theirs shares, kept apart from every chat's story. */
+  readonly globalFiles: GlobalWorkspace;
   /** Removes the blobs nothing references once their retention has passed, never during a turn (DESIGN §4.4). */
   readonly sweep: Sweep;
   /** The outside MCP servers' check-ins and the update notice (DESIGN §23). */
@@ -802,6 +808,10 @@ export class Runtime implements TurnHooks {
   /** Runs by `user \0 chat`. */
   private readonly runs = new Map<string, ChatRun | null>();
   private readonly bridges = new Map<ChatId, TurnBridge>();
+  /** Each user's fold (DESIGN §4.3, §9.6): its caches kept within their Settings → Agents → Budgets (`kept.folds`), and their chats' ledgers fold on it. */
+  private readonly folds = new Map<UserId, LedgerFold>();
+  /** What each open chat's state views share from one build to the next, kept with its ledger, so it goes when the ledger does (`ViewMemo`). */
+  private readonly viewMemos = new WeakMap<LedgerCore, ViewMemo>();
   /**
    * What the narrator of the turn each chat's book holds sees of a secret (DESIGN §6.11, §6.12), from
    * the guard's write (`fill`) until its prompt is assembled (`clear`): the World Info entries in that
@@ -901,19 +911,21 @@ export class Runtime implements TurnHooks {
     this.presets = new PresetBinding(this.host);
     this.meter = new CallMeter(this.host);
     this.steps = new Steps(this.host, this.meter, async (userId) => (await this.settings.get(userId)).helper);
-    this.blobs = new BlobStore(this.host);
+    // Each user's Settings → Agents → Budgets, as known: a read before they load keeps the default's texts.
+    this.blobs = new BlobStore(this.host, (userId) => this.settings.known(userId)?.agents.kept.texts ?? defaultAgentSettings().kept.texts);
     // Each user's Settings → Diagnostics and Agents → Retention, as known: a call recorded before they load keeps the defaults.
     this.diag = new Diagnostics(this.host, { blobs: this.blobs, ring: (userId) => this.settings.known(userId)?.diagnostics.recordsPerChat ?? DIAG_RING, transcriptDays: (userId) => this.settings.known(userId)?.retention.transcriptDays ?? RETENTION_DEFAULTS.transcriptDays });
     this.steps.onCall = (userId, call) => this.diag.call(userId, call);
     this.steps.onCallStart = (userId, purpose) => this.diag.callStart(userId, purpose);
     this.toolSupport = new ToolSupport(this.host);
-    this.loreRouting = new LoreRouting(this.host, this.settings, this.worlds);
+    this.loreRouting = new LoreRouting(this.host, this.settings, this.worlds, this.bookReads);
     this.minds = { host: this.host, registry: this.registry, steps: this.steps, settings: this.settings, presets: this.presets };
-    // Snapshots from another build never apply (the build defines LRE_BUILD_ID; tests fold as "dev").
-    this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: process.env.LRE_BUILD_ID ?? "dev" }), (chatId) => this.messages.forget(chatId));
+    // Each user's chats fold on their own fold, its caches within their Settings → Agents → Budgets.
+    this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), (userId) => this.foldOf(userId), (chatId) => this.messages.forget(chatId));
     this.sessions = new Sessions(this.blobs, this.ledger);
     this.chatAgents = new ChatAgentMeta(this.host, this.chatMeta);
-    this.sweep = new Sweep({ host: this.host, blobs: this.blobs, retention: async (userId) => (await this.settings.get(userId)).retention, turning: (userId) => this.ledger.turning(userId), journals: (userId) => this.ledger.journals(userId), transcripts: (chatId, userId) => this.diag.transcripts(chatId, userId) });
+    this.globalFiles = new GlobalWorkspace(this.host);
+    this.sweep = new Sweep({ host: this.host, messages: (chatId, userId) => this.messages.glance(chatId, userId), blobs: this.blobs, retention: async (userId) => (await this.settings.get(userId)).retention, turning: (userId) => this.ledger.turning(userId), journals: (userId) => this.ledger.journals(userId), transcripts: (chatId, userId) => this.diag.transcripts(chatId, userId), global: (userId) => this.globalFiles.refs(userId) });
     this.agents = new Agents(this.host, options.build ?? thisBuild(), async (userId) => (await this.settings.get(userId)).timeouts.mcpReconnectMs);
     // A view slower than a second is kept in the chat's diagnostics (a slow tab says where it went).
     this.push = new StatePush(this.host, (chatId, userId) => this.diag.timed(userId, chatId, "state view", () => this.view(chatId, userId)));
@@ -998,7 +1010,9 @@ export class Runtime implements TurnHooks {
    * that pins, its last pushed view, and its turn bridge (what the engine kept of its turns' reads and
    * plans), unless a turn there waits on the player, whose answer's run reads what that holds. A chat
    * is in use while a page shows it on screen, while it holds a turn or an operation, and while it is
-   * its user's latest chat read. How many of each went.
+   * its user's latest chat read. And for every chat, what is read again on demand: the agents' texts
+   * kept once read, each user's main session as last read, and the folds' steps (each chat's next fold
+   * starts from its stored snapshots). How many of each went.
    */
   trimIdle(): TrimReport {
     const viewed = this.ledger.viewed();
@@ -1008,7 +1022,23 @@ export class Runtime implements TurnHooks {
     for (const key of [...this.pins.keys()]) if (ledgers.has(key.slice(key.indexOf("\u0000") + 1))) this.pins.delete(key);
     let bridges = 0;
     for (const [chatId, bridge] of [...this.bridges]) if (!inUse(chatId) && !bridge.waiting && this.bridges.delete(chatId)) bridges++;
-    return { messages: this.messages.trim(inUse), ledgers: ledgers.size, views: this.push.trim(inUse), bridges };
+    let steps = 0;
+    for (const fold of this.folds.values()) steps += fold.trim();
+    return { messages: this.messages.trim(inUse), ledgers: ledgers.size, views: this.push.trim(inUse), bridges, texts: this.blobs.trim(), sessions: this.sessions.trim(), steps, books: this.bookReads.trim() };
+  }
+
+  /**
+   * The user's fold: their chats' ledgers share it, and it keeps as many steps as their Settings →
+   * Agents → Budgets say (`kept.folds`, read as each is kept). Snapshots from another build never
+   * apply (the build defines LRE_BUILD_ID; tests fold as "dev").
+   */
+  private foldOf(userId: UserId): LedgerFold {
+    let fold = this.folds.get(userId);
+    if (!fold) {
+      fold = new LedgerFold(this.registry, { fingerprint: process.env.LRE_BUILD_ID ?? "dev", keep: () => this.settings.known(userId)?.agents.kept.folds ?? KEPT_FOLDS_DEFAULT });
+      this.folds.set(userId, fold);
+    }
+    return fold;
   }
 
   private async resolveEnv(chatId: ChatId, userId: UserId): Promise<LedgerEnv | null> {
@@ -1241,7 +1271,7 @@ export class Runtime implements TurnHooks {
     // its minds, decisions and skip are that plan's, so nothing more is asked.
     if (!thinking) return;
     // An agent turn's scene role, once the turn plays: its lore and notes are told the narrator with the turn's lines.
-    const scene = (): Promise<void> => (agent ? this.orchestrator.scene(p.generationId, { text, world: render.world, state: render.state, classic: async () => ({ lore: [], notes: [], knowledge: "pov" }) }, budget.signal) : Promise.resolve());
+    const scene = (): Promise<void> => (agent ? this.orchestrator.scene(p.generationId, { text, world: render.world, state: render.state, classic: async () => ({ lore: [], notes: [] }) }, budget.signal) : Promise.resolve());
     const judged = async (): Promise<void> => {
       await this.judgeAnswer(bridge, text, render, settings, facts, budget, at, calls);
       if (described) await this.judgeApproach(bridge, text, render, settings, facts, budget, at, calls);
@@ -1496,18 +1526,12 @@ export class Runtime implements TurnHooks {
       const vars = safeVars(this.stepVars(render.world, render.state, plan, pre.text, "", "", recent), secrets);
       const inputs = { text: [pre.text, vars.outcome ?? "", vars.beats ?? "", this.trackWords(render.world, render.state)].join("\n"), links: this.sceneLinks(render.world, render.state) };
       const at = await this.lorePhase("pre", input.generationId, input.chatId, input.userId, render.world, render.state, budget, pre.text, pre.preset.guidance);
-      // A brief or an outline line that names someone or something hidden is withheld whole, as one
-      // carrying a secret is, and the outline gate shows what is left (DESIGN §5.2, §7). What the step
-      // was given counts as said: the player's message, which the narrator reads anyway, and its other
-      // inputs, which hold only what the POV may know, so a line naming nothing else tells nothing. The
-      // prose steps never read secret lore or a track's stages, so a secret entry counts by its title
-      // only and a hidden track by its own label (`hiddenNameCheck`).
-      const hidden = hiddenNameCheck(this.registry, render.world, render.state, render.world.pov, { stages: false });
+      // A brief or an outline line that carries a secret or names someone or something hidden goes on
+      // marked, never left out (`proseMark`; DESIGN §5.2, §7.1), and the outline gate shows it as a
+      // spoiler the player taps open.
       const run = (r: StepRun, kind: "brief" | "outline", stepVars = vars): Promise<string[]> => {
         if (!budget.take()) return Promise.resolve([]);
-        const heard = [pre.text, ...Object.values(stepVars)].join("\n");
-        const withheld = (line: string): boolean => findLeaks(line, secrets).length > 0 || hidden(line, heard);
-        return promptedText(this.steps, r, kind, stepVars, withheld, input.userId, signal, this.stepLore(r, at, inputs)).then((lines) => lines ?? []);
+        return promptedText(this.steps, r, kind, stepVars, this.proseMark(render, secrets, [pre.text, ...Object.values(stepVars)].join("\n"), settings.prompts.texts), input.userId, signal, this.stepLore(r, at, inputs)).then((lines) => lines ?? []);
       };
       const briefTask = Promise.all(briefRuns.map((r) => run(r, "brief")));
       // The outline is told the sections the narrator has this turn, so it points at no other (DESIGN §9.5).
@@ -1521,7 +1545,7 @@ export class Runtime implements TurnHooks {
       return { brief: brief === "" ? null : brief, outline };
     };
     const engineLines = plan ? planLines(plan, render.world, render.state, this.registry) : { outcome: [], montage: [] };
-    // What the director role is asked on an agent turn: each prose step that would run, as classic would ask it (its facts, its own words, its withholding), with how long the turn took on the engine's clock.
+    // What the director role is asked on an agent turn: each prose step that would run, as classic would ask it (its facts, its own words, how its lines are marked), with how long the turn took on the engine's clock.
     let asks: { brief: ProseAsk | null; outline: ProseAsk | null } = { brief: null, outline: null };
     if (agent && proseBudget && (briefRuns.length > 0 || outlineRuns.length > 0)) {
       const recent = recentLines(input.core, input.observed, target < 0 ? input.observed.length : target, this.registry);
@@ -1535,7 +1559,7 @@ export class Runtime implements TurnHooks {
     // message, or for a new reply after a reply on the reply it follows; Play and Edit keep the outline
     // as let through, and the reply they start as the stopped generation started (`as`: Regenerate, or
     // the player's own Send) resumes the turn with this plan (`TurnBridge.plan`). The player sees and
-    // edits only lines a secret isn't in; those stay as they are.
+    // edits only lines a secret isn't in; those stay as they are, each shown as a spoiler it taps open.
     const lines = plan ? planOutline(plan, prose) : [];
     const outlineGate = settings.gates.outline && anchor !== undefined && lines.length > 0;
     // An agent turn records the lines its narrator is told (C11), its roles' own where they rewrote
@@ -1546,10 +1570,13 @@ export class Runtime implements TurnHooks {
       if (waiting) return { waiting };
     } else this.keepRunLines(input.generationId, p.seed, plan, render, prose);
     if (!outlineGate || !anchor) return;
-    const visible = lines.filter((line) => findLeaks(line, secrets).length === 0);
-    const held = lines.filter((line) => findLeaks(line, secrets).length > 0);
+    // A line carrying a secret: one with a secret's words, or one a prose step marked (a hidden name).
+    const wording = markWording(settings.prompts.texts);
+    const secret = (line: string): boolean => findLeaks(line, secrets).length > 0 || holdsSecretMark(line, wording);
+    const visible = lines.filter((line) => !secret(line));
+    const held = lines.filter(secret);
     const actions: ChipAction[] = [{ id: "play", label: "Play", style: "primary" }, { id: "edit", label: "Edit", input: { type: "text", label: "The outline, one line each", value: visible.join("\n") } }, { id: "cancel", label: "Cancel" }];
-    await this.chips.add(input.chatId, input.userId, [{ id: `outline_gate:${anchor.id}`, kind: "outline_gate", messageId: anchor.id, label: "Write the reply from this outline?", detail: visible.join("\n"), actions, as: input.as, expires: "next_send", payload: { text: pre.text, lines: visible, held } }]);
+    await this.chips.add(input.chatId, input.userId, [{ id: `outline_gate:${anchor.id}`, kind: "outline_gate", messageId: anchor.id, label: "Write the reply from this outline?", detail: visible.join("\n"), ...(held.length > 0 ? { spoilers: held } : {}), actions, as: input.as, expires: "next_send", payload: { text: pre.text, lines: visible, held } }]);
     this.push.changed(input.chatId, input.userId);
     return { waiting: "waiting for you to play the turn's outline" };
   }
@@ -1692,8 +1719,8 @@ export class Runtime implements TurnHooks {
    * What the director role is asked of a planned turn's prose (C9): each prose step that would run
    * (`briefRuns`, `outlineRuns`) as classic would ask it, with its facts (`stepVars`, with the turn's
    * Outcome and outline beats as `lines` gives them, and how long the turn took on the engine's clock,
-   * `elapsed`, as the Scene tells it), its own words, and its withholding: a line that names someone
-   * or something hidden is withheld whole, as one carrying a secret is, what the step was given
+   * `elapsed`, as the Scene tells it), its own words, and how its lines are marked (`ProseMark`): a
+   * line that names someone or something hidden is marked whole, as one carrying a secret is, what the step was given
    * counting as said (DESIGN §5.2, §7). The outline is told the sections the narrator has this turn
    * (DESIGN §9.5). The plan's, and Test's for the director's prose texts, from the lines the turn
    * recorded (C11). With `calls`, the pre-reply calls left, each step takes its call as classic's
@@ -1705,7 +1732,6 @@ export class Runtime implements TurnHooks {
     // The turn's time as the Scene tells it, in the user's own wording of the Scene's line (`texts`).
     const elapsed = input.elapsed === null ? "" : turnTimeLine(this.registry.context(world, state), input.elapsed, input.texts);
     const vars = safeVars({ ...this.stepVars(world, state, input.plan, input.text, "", "", input.recent), outcome: input.lines.outcome.join("\n"), beats: input.lines.beats.join("\n"), elapsed }, input.secrets);
-    const hidden = hiddenNameCheck(this.registry, world, state, world.pov, { stages: false });
     let left = input.calls ?? Number.POSITIVE_INFINITY;
     const ask = (runs: readonly StepRun[], stepVars: Readonly<Record<string, string>>): ProseAsk | null => {
       const going = runs.slice(0, Math.max(0, left));
@@ -1713,18 +1739,36 @@ export class Runtime implements TurnHooks {
       if (going.length === 0) return null;
       const heard = [input.text, ...Object.values(stepVars)].join("\n");
       const own = going.flatMap((r) => (r.template ? [renderTemplate(r.template.template, stepVars)] : []));
-      return { template: own.length > 0 ? own.join("\n\n") : null, vars: stepVars, withheld: (line) => findLeaks(line, input.secrets).length > 0 || hidden(line, heard) };
+      return { template: own.length > 0 ? own.join("\n\n") : null, vars: stepVars, mark: this.proseMark(render, input.secrets, heard, input.texts) };
     };
     return { brief: ask(input.briefRuns, vars), outline: ask(input.outlineRuns, input.outlineRuns.length > 0 ? { ...vars, sections: this.narratorSections(world, state, input.plan).join(", ") } : vars) };
   }
 
   /**
-   * Whether a suggested next move after a reply is withheld whole (DESIGN §5.2, §7): it carries an
-   * unrevealed secret, or names someone hidden that the player hasn't seen said, in their message or
-   * the reply, or that the step's inputs don't name (`heard`), read as the brief and the outline are.
-   * The read's, and Test's for the director's choices texts.
+   * How a brief or outline line goes on (`ProseMark`; DESIGN §5.2, §7.1): marked in the user's
+   * wording (`texts`), as a secret kept from the player character, when the whole line carries an
+   * unrevealed secret's words or names someone or something hidden; else as it is. What the step was
+   * given counts as said (`heard`): the player's message, which the narrator reads anyway, and its
+   * other inputs, which hold only what the POV may know, so a line naming nothing else tells nothing.
+   * The prose steps never read secret lore or a track's stages, so a secret entry counts by its title
+   * only and a hidden track by its own label (`hiddenNameCheck`).
    */
-  choiceWithheld(world: WorldDoc, state: WorldState, secrets: readonly string[], heard: string): (line: string) => boolean {
+  proseMark(render: { world: WorldDoc; state: WorldState }, secrets: readonly string[], heard: string, texts: PromptTexts): ProseMark {
+    const { world, state } = render;
+    const hidden = hiddenNameCheck(this.registry, world, state, world.pov, { stages: false });
+    const pov = [own(state.entities, world.pov)?.name ?? world.pov];
+    const wording = markWording(texts);
+    return (line, shown) => (findLeaks(line, secrets).length > 0 || hidden(line, heard) ? secretMarkText(shown, [], pov, wording) : shown);
+  }
+
+  /**
+   * Whether a suggested next move after a reply carries a secret (DESIGN §5.2, §7.1): an unrevealed
+   * secret's words, or someone hidden that the player hasn't seen said, in their message or the
+   * reply, or that the step's inputs don't name (`heard`), read as the brief and the outline are. It
+   * is kept: its chip a spoiler the player taps open. The read's, and Test's for the director's
+   * choices texts.
+   */
+  choiceSecret(world: WorldDoc, state: WorldState, secrets: readonly string[], heard: string): (line: string) => boolean {
     const hidden = hiddenNameCheck(this.registry, world, state, world.pov, { stages: false });
     return (line) => findLeaks(line, secrets).length > 0 || hidden(line, heard);
   }
@@ -2367,9 +2411,9 @@ export class Runtime implements TurnHooks {
     const offscreen = npcAsked(ties.offscreen);
     const npcTask = npcRun && ties.offscreen.length > 0 && budget.take() ? calls.offscreen({ phase: "post", ties: offscreen, world: context.world, state: context.state, describe: (t) => this.describeTie(t, context.world, context.state), template: npcRun.template?.template ?? null, knowing, heard: null, classic: (signal) => npcOdds(this.steps, npcRun, offscreen, (t) => this.describeTie(t, context.world, context.state), userId, signal, this.stepLore(npcRun, at, this.tieInputs(ties.offscreen, context.world, context.state))) }, budget.signal).then((odds) => (odds ? oddsDecisions(offscreen, odds, createRng(hashParts("lre.npc.post", bridge.runSeed, key))) : [])) : Promise.resolve([]);
     const choiceRuns = runsOf(modelUse, context.world, "choices", facts, { output: "text", guidance });
-    // What a suggestion may not say (`choiceWithheld`): read only while the choices step runs.
-    const unshown = choiceRuns.length > 0 ? this.choiceWithheld(live, context.state, secrets, [read.text, ...Object.values(vars)].join("\n")) : () => false;
-    const choiceTasks = choiceRuns.map((r) => (post && budget.take() ? calls.choices({ reply: text, template: r.template ? renderTemplate(r.template.template, vars) : null, vars, withheld: unshown, classic: (signal) => promptedText(this.steps, r, "choices", vars, unshown, userId, signal, lore(r)).then((lines) => lines ?? []) }, budget.signal) : Promise.resolve([])));
+    // Which suggestion carries a secret (`choiceSecret`), its chip a spoiler: read only while the choices step runs.
+    const spoiler = choiceRuns.length > 0 ? this.choiceSecret(live, context.state, secrets, [read.text, ...Object.values(vars)].join("\n")) : () => false;
+    const choiceTasks = choiceRuns.map((r) => (post && budget.take() ? calls.choices({ reply: text, template: r.template ? renderTemplate(r.template.template, vars) : null, vars, secret: spoiler, classic: (signal) => promptedText(this.steps, r, "choices", vars, keepLine, userId, signal, lore(r)).then((lines) => lines ?? []) }, budget.signal) : Promise.resolve([])));
     // The minds' post phase (DESIGN §24.4, §24.11): who was present, their memory of what was written,
     // consolidation, and while the chat tracks knowledge, its seeding and the knowledge step, which
     // reads what the read found, so runs once it is in; beside the reply's other steps, on the phase's
@@ -2684,9 +2728,10 @@ export class Runtime implements TurnHooks {
         payload: { type: String(d.proposal.type), proposal: d.proposal, reason: d.reason },
       });
     });
-    // Suggested next moves (DESIGN §5.2 choices): one tap sends it as the player's message.
+    // Suggested next moves (DESIGN §5.2 choices): one tap sends it as the player's message; one
+    // carrying a secret is a spoiler, collapsed until the player taps it open.
     choices.flat().forEach((choice, i) => {
-      stored.push({ id: `choice:${messageId}:${key}:${i}`, kind: "choice", messageId, swipeId, label: choice, actions: [{ id: "send", label: "Send" }], expires: "next_send", payload: { text: choice } });
+      stored.push({ id: `choice:${messageId}:${key}:${i}`, kind: "choice", messageId, swipeId, label: choice, ...(spoiler(choice) ? { spoiler: true as const } : {}), actions: [{ id: "send", label: "Send" }], expires: "next_send", payload: { text: choice } });
     });
     // An agent turn's confirm changes join its review card, their chips held for it (`readConfirm`).
     const kept = this.orchestrator.readConfirm(key, stored);
@@ -3314,10 +3359,10 @@ export class Runtime implements TurnHooks {
     const turnLines = recorded ?? own?.lines ?? (turnPlan ? { ...planLines(turnPlan, world, state, this.registry), outline: planOutline(turnPlan, undefined) } : kept);
     const outline = turnLines?.outline ?? [];
     // The scene an agent turn's scene role gave its narrator: the lore it may read, then its notes, which
-    // the sections hold to the knowledge it wrote them with. An id the turn recorded for an earlier
+    // the sections mark where they carry a secret. An id the turn recorded for an earlier
     // build's copy of a World Info entry reads as that entry, as the copy's pins do, each entry once.
     const scene = recorded ? [...new Set(recorded.scene.lore.map((id) => recordedLoreId(folded, id)))].flatMap((id) => { const entry = world.lore[id]; return entry && loreReadable(this.registry, world, state, entry, "brief") ? [`${entry.title}: ${entry.content}`] : []; }) : [];
-    const planned = { outcome: [...(turnLines?.outcome ?? [])], montage: [...(turnLines?.montage ?? [])], scene, ...(recorded && recorded.scene.notes.length > 0 ? { notes: { lines: recorded.scene.notes, knowledge: recorded.scene.knowledge } } : {}) };
+    const planned = { outcome: [...(turnLines?.outcome ?? [])], montage: [...(turnLines?.montage ?? [])], scene, ...(recorded && recorded.scene.notes.length > 0 ? { notes: recorded.scene.notes } : {}) };
     // The preset the reply assembles with: the one the pre phase read, else read now (a Continue).
     const preset = this.prePhase.get(input.generationId)?.preset ?? (await this.presets.current(input.chatId, input.userId));
     // Time the player's message lets pass after its actions (DESIGN §9.2), when every one of them
@@ -3369,10 +3414,10 @@ export class Runtime implements TurnHooks {
       const section = slots.get(slot);
       return section ? entryOf(section) : null;
     };
-    // What goes into the book, in the order it's written: each entry and its text.
+    // What goes into the book, in the order it's written: each entry, its text, and the section it holds, which the final review reads it by.
     const fills = built.fills.flatMap((f) => {
       const id = entryAt(f.slot);
-      return id ? [{ id, content: f.content }] : [];
+      return id ? [{ id, content: f.content, part: f.slot, label: slots.get(f.slot)?.label ?? f.slot }] : [];
     });
     for (const slot of built.recorded) {
       const id = entryAt(slot);
@@ -3384,7 +3429,7 @@ export class Runtime implements TurnHooks {
     // wording, one text in every world whether or not the turn carries marked facts (§6.8, §6.11),
     // then the preset's own rules, as the player's.
     const rulesAt = entries.narratorOutlet !== null && preset.outlets.has(NARRATOR_OUTLET) ? entries.narratorOutlet : entries.narrator;
-    if (rulesAt) fills.push({ id: rulesAt, content: narratorRules(preset.guidance.narrator ?? null, texts) });
+    if (rulesAt) fills.push({ id: rulesAt, content: narratorRules(preset.guidance.narrator ?? null, texts), part: RULES_PART, label: "Narrator rules" });
     this.countLater(input.userId, uncounted);
     // Activation is confirmed from the entries the player's record shows (a section's row) and the
     // preset's own narrator rules: an entry filled only for marked facts, or rules filled only with the
@@ -3400,8 +3445,71 @@ export class Runtime implements TurnHooks {
     // The prompt set the turn was made from goes onto its record at commit, outside every hash, so a
     // later Re-narrate can be sent the same texts (DESIGN §6.12).
     if (pending) pending.prompts = await this.promptSets.put(input.userId, turnPromptSet(texts));
-    // Nothing goes into the book yet: the guard of the generation that takes the turn writes it (`fill`).
-    return { bookId, fills: new Map(fills.map((f) => [f.id, f.content])), placed: `${preset.placed}\u0000${this.book.placedAs(bookId)}`, wording, view: narrated };
+    // Nothing goes into the book yet: the final review reads it first, and the guard of the generation that takes the turn writes it (`fill`).
+    return { bookId, fills: new Map(fills.map((f) => [f.id, f.content])), parts: fills.map((f) => ({ id: f.part, label: f.label, entry: f.id })), placed: `${preset.placed}\u0000${this.book.placedAs(bookId)}`, wording, view: narrated };
+  }
+
+  /**
+   * The engine run's last step, the final review (DESIGN §4.6): on an agent turn with the review on,
+   * the main agent reviews the prompt `deliver` made and may revise it (`Orchestrator.finalReview`),
+   * and the turn's pending entry keeps its edits for the record (`Rec.finalEdits`, outside every
+   * hash). A Re-narrate makes no call: it tells again the edits its source's review made, on the
+   * prompt its copied plan makes, and keeps those that still found their line. What it leaves is what
+   * the guard writes, and what the turn's inspector record counts. A review that fails leaves the
+   * prompt as made, with its Diagnostics record; one its settings stop the turn on leaves the fatal
+   * record the engine run stops on.
+   */
+  async finalReview(input: { chatId: ChatId; userId: UserId; core: LedgerCore; observed: ChainMessage[]; generationId: string; delivered: Delivered; signal: AbortSignal }): Promise<Delivered> {
+    const at: DiagAt = { chatId: input.chatId, userId: input.userId, turn: input.generationId };
+    const pending = input.core.journal.pending[input.generationId];
+    const parts = input.delivered.parts.map((p) => partOf(p.id, p.label, input.delivered.fills.get(p.entry) ?? ""));
+    if (pending?.kind === "renarrate" && pending.planned && pending.renarrateOf) {
+      const edits = finalEditsOf(pending.finalEdits);
+      if (edits.length === 0) return input.delivered;
+      const told = applyFinalEdits(parts, edits);
+      if (told.applied.length > 0) pending.finalEdits = told.applied;
+      else delete pending.finalEdits;
+      const missed = told.missed.length > 0 ? `; ${counted(told.missed.length, "edit no longer finds its line", "edits no longer find their lines")} and changed nothing` : "";
+      this.diag.yielded(at, "sections", FINAL_REVIEW_STEP, `the re-narrated turn's final review told again: ${counted(told.applied.length, "edit", "edits")}${missed}`, told.missed.length > 0);
+      return this.revised(input, told.parts);
+    }
+    // A turn that wasn't re-narrated keeps only the edits its own review makes.
+    if (pending) delete pending.finalEdits;
+    // A Continue has no run before its reply: its review, of its own sections, starts one.
+    if (pending?.kind === "continue") await this.orchestrator.beginContinue({ chatId: input.chatId, userId: input.userId, generationId: input.generationId, core: input.core, observed: input.observed });
+    if (!this.orchestrator.reviews(input.generationId)) return input.delivered;
+    const outcome = await this.diag.step(at, "sections", FINAL_REVIEW_STEP, () => this.orchestrator.finalReview({ generationId: input.generationId, core: input.core, observed: input.observed, parts, signal: input.signal }), (o) => (o === null || o.reviewed ? null : { status: "failed", reason: o.stopped ? o.reason : `${o.reason}; the narrator gets the prompt as the engine made it`, ...(o.fix ? { fix: o.fix } : {}) }));
+    if (!outcome?.reviewed || outcome.edits.length === 0) return input.delivered;
+    if (pending) pending.finalEdits = outcome.edits;
+    this.diag.yielded(at, "sections", FINAL_REVIEW_STEP, `the main agent revised the narrator's prompt: ${counted(outcome.edits.length, "edit", "edits")} (GM → Live shows each)`, false);
+    return this.revised(input, outcome.parts);
+  }
+
+  /** The prompt with `parts` in place of what `deliver` made: each part's entry takes its text, and the turn's inspector record counts each part it changed again. */
+  private revised(input: { chatId: ChatId; userId: UserId; generationId: string; delivered: Delivered }, parts: readonly PromptPart[]): Delivered {
+    const fills = new Map(input.delivered.fills);
+    const changed = new Map<string, string>();
+    for (const [i, at] of input.delivered.parts.entries()) {
+      const part = parts[i];
+      if (!part) continue;
+      const text = partText(part);
+      if (text === fills.get(at.entry)) continue;
+      fills.set(at.entry, text);
+      changed.set(at.id, text);
+    }
+    const record = this.inspector.records(input.chatId)?.find((r) => r.id === input.generationId);
+    if (record && changed.size > 0) {
+      for (const row of record.sections) {
+        const text = changed.get(row.slot);
+        if (text === undefined || row.clipped) continue;
+        const tokens = this.sectionCost(input.userId, text);
+        record.budget.used += tokens - row.tokens;
+        row.tokens = tokens;
+      }
+      this.inspector.save(input.chatId);
+      this.push.changed(input.chatId, input.userId);
+    }
+    return { ...input.delivered, fills };
   }
 
   /**
@@ -3498,7 +3606,7 @@ export class Runtime implements TurnHooks {
    * a turn's, and GM → Minds → Run's. It reads the books and writes nothing to them.
    */
   async readLore(chatId: ChatId, userId: UserId, world: WorldDoc): Promise<WorldDoc> {
-    return liveLore(this.host, world, chatId, userId, (await this.settings.get(userId)).loreBooks);
+    return liveLore(this.host, world, chatId, userId, (await this.settings.get(userId)).loreBooks, this.bookReads);
   }
 
   /** What the World Info interceptor reads of the engine (DESIGN §6.1). */
@@ -3522,6 +3630,11 @@ export class Runtime implements TurnHooks {
     const bridge = this.bridges.get(input.chatId);
     if (bridge) bridge.waiting = input.outcome === "waiting";
     this.orchestrator.ran(input).catch((error: unknown) => this.host.log("warn", `[LumiRPEngine] chat ${input.chatId}: an agent turn's run wasn't cleared up (${error instanceof Error ? error.message : String(error)})`, input.userId));
+  }
+
+  /** The ledger let a turn go without a commit (`TurnHooks.turnGone`): an agent turn's run goes with it. */
+  turnGone(input: { chatId: ChatId; userId: UserId; turn: string; generationId: string | null; how: TurnGone }): void {
+    this.orchestrator.gone(input.turn, input.generationId, input.how);
   }
 
   /**
@@ -3811,7 +3924,13 @@ export class Runtime implements TurnHooks {
     // GM → This chat shows the chat's knowledge choices beside what each follows: the user's own (no chat, no world).
     const settings = await this.settings.get(userId);
     const knowledge = { chat: await this.chatKnowledge.get(chatId, userId), tracking: knowledgeOn(null, null, settings), narrator: narratorView(null, null, settings) };
-    const view = buildView({ chatId, run, core, observed, registry: this.registry, world: (r) => core.worldAt(r), stored, meter: this.meter.view(userId), mapDisplay: await this.chatPrefs.mapDisplay(chatId, userId), knowledge });
+    const mapDisplay = await this.chatPrefs.mapDisplay(chatId, userId);
+    let memo = this.viewMemos.get(core);
+    if (!memo) {
+      memo = new ViewMemo();
+      this.viewMemos.set(core, memo);
+    }
+    const view = buildView({ chatId, run, core, observed, registry: this.registry, world: (r) => core.worldAt(r), stored, meter: this.meter.view(userId), mapDisplay, knowledge, memo });
     view.panels["core.context"] = this.inspectorView(chatId, userId);
     // A turn kept from a reply that failed waits on the player (DESIGN §5.1): its card shows while it lasts.
     const kept = this.ledger.keptOf(chatId);

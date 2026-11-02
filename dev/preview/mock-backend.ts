@@ -20,7 +20,7 @@ import { loreBooksSettingOf, loreIndexSettingsOf, type UserSettings } from "../.
 import { LORE_INDEX_TEXT } from "../../src/shared/lore-routing";
 import { renderIndex } from "../../src/backend/lore-routing";
 import { agentSettingsOf, type AcceptanceState } from "../../src/shared/agent-settings";
-import { blobHash, isLearnedPath, isWorkspacePath } from "../../src/shared/stores";
+import { blobHash, isFilePath, isKeptPath, isLearnedPath } from "../../src/shared/stores";
 import type { GmView, StateView } from "../../src/shared/state-view";
 import type { WorldDoc, WorldIndex } from "../../src/shared/world";
 import { compileMaps, mapLint, mapTemplate } from "../../src/shared/maps";
@@ -1030,9 +1030,9 @@ export class MockBackend {
         if (message.op === "list") return this.result(reqId, "lre.workspace", { files: structuredClone(this.workspace.files) });
         if (message.op === "read") return this.result(reqId, "lre.workspace", { text: this.workspace.files.some((f) => f.path === message.path) ? (this.workspace.texts[message.path] ?? null) : null });
         // The preview plays no agent turn, so its main agent has no session, and nothing to roll back.
-        if (message.op === "session") return this.result(reqId, "lre.workspace", { session: { summary: null, summaryKnowledge: "gm", turns: 0, tokens: 0, segments: [], reads: { knowledge: "everyone", turns: 0, tokens: 0, summary: false }, missing: 0, rollback: "none" } });
+        if (message.op === "session") return this.result(reqId, "lre.workspace", { session: { summary: null, turns: 0, tokens: 0, segments: [], reads: { turns: 0, tokens: 0 }, missing: 0, rollback: "none" } });
         if (message.op === "rollback") return this.error(reqId, "validation", "The main agent's session has no compaction to roll back.");
-        const change: PreviewFileChange = message.op === "write" ? { kind: "ws_write", path: message.path, text: message.text, ...(message.readers !== undefined ? { readers: message.readers } : {}) } : message.op === "delete" ? { kind: "ws_delete", path: message.path } : message.op === "move" ? { kind: "ws_move", from: message.from, to: message.to } : message.op === "readers" ? { kind: "ws_readers", path: message.path, readers: message.readers } : { kind: "ws_pin", path: message.path, pinned: message.pinned };
+        const change: PreviewFileChange = message.op === "write" ? { kind: "ws_write", path: message.path, text: message.text } : message.op === "delete" ? { kind: "ws_delete", path: message.path } : message.op === "move" ? { kind: "ws_move", from: message.from, to: message.to } : { kind: "ws_pin", path: message.path, pinned: message.pinned };
         const before = this.editSnapshot();
         // Your own write is the GM's, credited to the reply it lands on.
         const lines = this.changeWorkspace(change, { role: "gm", key: previewOpKey(change) });
@@ -1147,27 +1147,25 @@ export class MockBackend {
 
   /**
    * A workspace change as the writer checks it and the engine makes it (`prepareFile`,
-   * `workspaceOp`): a path that isn't one, a file that isn't there, a move into or out of the
-   * learned area, or a change that changes nothing is refused, in plain words, and nothing changes;
-   * else the files and their bodies change (listed by path, as the backend lists them), a file
-   * written credited to `by` on the reply the preview's edits land on (a learned one, on none), read
-   * with the readers the GM chose, else as it was, a new one by the GM alone (the preview's agent
-   * writes are the assistant's, with everyone's knowledge). Answers the edit's lines.
+   * `workspaceOp`): a path that isn't one, a file that isn't there, a move from one part of the
+   * workspace to another (the story, learned/, ~/), or a change that changes nothing is refused, in
+   * plain words, and nothing changes; else the files and their bodies change (listed by path, as
+   * the backend lists them), a file written credited to `by` on the reply the preview's edits land
+   * on (a kept one, learned/ or ~/, on none). Answers the edit's lines.
    */
   private changeWorkspace(change: PreviewFileChange, by: { role: string; key: string }): string[] | { code: string; reason: string } {
     const ws = this.workspace;
-    const notPath = (path: string) => (isWorkspacePath(path) ? null : { code: "bad_path", reason: `${path} isn't a workspace path: names of letters, digits, “.”, “_” and “-”, joined by /.` });
+    const notPath = (path: string) => (isFilePath(path) ? null : { code: "bad_path", reason: `${path} isn't a workspace path: names of letters, digits, “.”, “_” and “-”, joined by /, with ~/ before them for the global workspace.` });
     const noFile = (path: string) => ({ code: "no_file", reason: `No workspace file ${path} here.` });
-    const provenance = (path: string) => ({ role: by.role, ...(isLearnedPath(path) ? {} : { key: by.key }), turn: isLearnedPath(path) ? null : EDIT_TURN });
+    const provenance = (path: string) => ({ role: by.role, ...(isKeptPath(path) ? {} : { key: by.key }), turn: isKeptPath(path) ? null : EDIT_TURN });
     switch (change.kind) {
       case "ws_write": {
         const wrong = notPath(change.path);
         if (wrong) return wrong;
         const file = ws.files.find((f) => f.path === change.path);
         const hash = blobHash(change.text);
-        const readers = by.role === "gm" ? (change.readers ?? file?.readers ?? "gm") : "everyone";
-        if (file?.hash === hash && file.readers === readers) return { code: "no_change", reason: "The file already holds that text." };
-        const written: WorkspaceFileView = { path: change.path, hash, size: change.text.length, pinned: file?.pinned ?? false, readers, learned: isLearnedPath(change.path), provenance: provenance(change.path) };
+        if (file?.hash === hash) return { code: "no_change", reason: "The file already holds that text." };
+        const written: WorkspaceFileView = { path: change.path, hash, size: change.text.length, pinned: file?.pinned ?? false, learned: isLearnedPath(change.path), provenance: provenance(change.path) };
         ws.files = [...ws.files.filter((f) => f !== file), written].sort((a, b) => (a.path < b.path ? -1 : 1));
         ws.texts[change.path] = change.text;
         return [`workspace file ${change.path} written`];
@@ -1185,10 +1183,10 @@ export class MockBackend {
         if (wrong) return wrong;
         const file = ws.files.find((f) => f.path === change.from);
         if (!file) return noFile(change.from);
-        if (isLearnedPath(change.from) !== isLearnedPath(change.to)) return { code: "learned_move", reason: `${change.from} can't move to ${change.to}: files under learned/ stay there, and the others stay out of it. Write the file at its new path, then delete the old one.` };
+        if (isLearnedPath(change.from) !== isLearnedPath(change.to) || change.from.startsWith("~/") !== change.to.startsWith("~/")) return { code: "learned_move", reason: `${change.from} can't move to ${change.to}, since files stay in their part: the chat's story, learned/, or the global workspace ~/. Write the file at its new path, then delete the old one.` };
         if (change.to === change.from) return { code: "no_change", reason: "The file is already there." };
         if (ws.files.some((f) => f.path === change.to)) return { code: "file_exists", reason: `There is a workspace file ${change.to} already.` };
-        // Written at its new path, its pin and readers going with it, and removed from its old one.
+        // Written at its new path, its pin going with it, and removed from its old one.
         ws.files = [...ws.files.filter((f) => f !== file), { ...file, path: change.to, provenance: provenance(change.to) }].sort((a, b) => (a.path < b.path ? -1 : 1));
         ws.texts[change.to] = ws.texts[change.from] ?? "";
         delete ws.texts[change.from];
@@ -1202,15 +1200,6 @@ export class MockBackend {
         if (file.pinned === change.pinned) return { code: "no_change", reason: change.pinned ? "The file is pinned already." : "The file isn't pinned." };
         file.pinned = change.pinned;
         return [`workspace file ${change.path} ${change.pinned ? "pinned" : "unpinned"}`];
-      }
-      case "ws_readers": {
-        const wrong = notPath(change.path);
-        if (wrong) return wrong;
-        const file = ws.files.find((f) => f.path === change.path);
-        if (!file) return noFile(change.path);
-        if (file.readers === change.readers) return { code: "no_change", reason: "The file is read with that knowledge already." };
-        file.readers = change.readers;
-        return [`workspace file ${change.path} read with ${change.readers === "pov" ? "the player character's" : change.readers === "everyone" ? "everyone's" : "the GM's"} knowledge`];
       }
     }
   }

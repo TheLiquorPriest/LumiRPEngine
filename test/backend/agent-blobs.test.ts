@@ -29,6 +29,9 @@ describe("the blob store", () => {
     const hash = await blobs.putJson(user, { v: 1, note: "kept" });
     expect(await blobs.getJson(user, hash)).toEqual({ v: 1, note: "kept" });
     host.files.set(`${user}/${BLOBS_DIR}${hash}`, JSON.stringify({ v: 1, note: "changed" }));
+    // A text read once is kept as it was read, so the damage shows on the next read from storage.
+    expect(await blobs.getJson(user, hash)).toEqual({ v: 1, note: "kept" });
+    expect(blobs.trim()).toBe(1);
     expect(await blobs.get(user, hash)).toBeNull();
     expect(host.logs.some((line) => line.startsWith("warn:"))).toBe(true);
     expect(await blobs.get(user, "../settings.json")).toBeNull();

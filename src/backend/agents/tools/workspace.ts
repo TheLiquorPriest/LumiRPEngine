@@ -1,38 +1,32 @@
-// The chat's workspace for the agents (AGENT-LOOP-PLAN §4, §6; INC1-SPEC R3b): its files as an
-// agent's knowledge may read them, and the workspace family's tools.
+// The agents' workspace (AGENT-LOOP-PLAN §4, §6; INC1-SPEC R3b; DESIGN §4.4): its files at both
+// levels, and the workspace family's tools.
 //
 // A file is a path in the chat's head (`engine/workspace.ts`: the index the `engine.ws.*` events fold
-// along the active chain, its pins and readers beside it), its body a blob (`agents/blobs.ts`); or a
-// path under `learned/`, the learned area, kept with its pin and readers in the chat's metadata
-// (`chat-agent-meta.ts`), so a swipe never changes it and a Branch copies it. Each file says whose
-// knowledge may read it, its readers: the player character's (every agent's), everyone's, or the
-// GM's alone; it is read under that knowledge or a wider one. An agent's write is read with the
-// knowledge it wrote under (an assistant proposal's, the wider of the one it was proposed under and
-// the one it is applied under), so a note an agent wrote with the GM's knowledge never reaches one
-// that reads as the player character. The GM's own files (GM → Workspace) are the GM's alone until
-// the GM shares them; a move keeps a file's readers; a file no write named readers for (a turn's
-// own) is the GM's alone. Who wrote a file is the record its write landed in: an agent's write is a
-// `fix` entry naming the agent (`PostEntry.agent`). Everything here reads the head without the
-// ledger's queue, as the GM view does.
+// along the active chain, its pins beside it), its body a blob (`agents/blobs.ts`); a path under
+// `learned/`, the learned area, kept with its pin in the chat's metadata (`chat-agent-meta.ts`), so a
+// swipe never changes it and a Branch copies it; a path under `~/`, the user's global workspace,
+// which every chat of theirs shares (`global-workspace.ts`); or a turn's transcript under
+// `transcripts/`, read-only. Every agent and the GM read every file: there is no file a role can't
+// read, whatever it was told to keep in mind. Who wrote a file is the record its write landed in: an
+// agent's write is a `fix` entry naming the agent (`PostEntry.agent`), a kept file names the role
+// that wrote it last. Everything here reads the head without the ledger's queue, as the GM view does.
 //
 // The tools: list, read and grep read; write, edit, move, delete and pin propose the change
-// (`propose`), which lands as one GM edit with its Undo once it is applied (a learned file's at once,
-// in the chat's metadata).
+// (`propose`), which lands as one GM edit with its Undo once it is applied (a kept file's at once).
 
 import { WRITE_NOTE } from "../../../shared/agent-tools-write";
-import { type AgentKnowledge, knowledgeWithin } from "../../../shared/agent-tools";
 import type { ChatId, UserId } from "../../../shared/ids";
 import { isRecord, type JsonObject } from "../../../shared/json";
 import type { ChatRun, LedgerEvent } from "../../../shared/ledger";
+import { isKeptPath, isLearnedPath, isTranscriptPath, type KeptFile } from "../../../shared/stores";
 import type { WorldDoc } from "../../../shared/world";
 import type { ChainMessage } from "../../../engine/ledger/chain";
 import type { LedgerCore } from "../../../engine/ledger/journal";
 import { activeRecord } from "../../../engine/ledger/path";
 import { own } from "../../../engine/pack-kit";
 import type { WorldState } from "../../../engine/state";
-import { readersOf, WS_WRITE, workspaceOf, workspacePins } from "../../../engine/workspace";
+import { WS_WRITE, workspaceOf, workspacePins } from "../../../engine/workspace";
 import { toChain } from "../../ledger-io";
-import type { LearnedFile } from "../../chat-agent-meta";
 import type { Runtime } from "../../runtime";
 import { appliedEvents } from "../../view";
 import type { ToolOutcome } from "../runtime";
@@ -101,13 +95,12 @@ export function fileSources(head: ChatHead): Map<string, FileSource> {
   return out;
 }
 
-/** A workspace file as GM → Workspace and the agents list it: its path and body's hash, its size in characters, its pin, whose knowledge may read it, whether it is the learned area's or a turn's transcript (`transcripts/`, read-only), and who wrote it on which turn. */
+/** A workspace file as GM → Workspace and the agents list it: its path and body's hash, its size in characters, its pin, whether it is the learned area's or a turn's transcript (`transcripts/`, read-only), and who wrote it on which turn. A global file's path starts `~/`. */
 export interface WorkspaceFile {
   path: string;
   hash: string;
   size: number;
   pinned: boolean;
-  readers: AgentKnowledge;
   learned: boolean;
   transcript?: true;
   provenance: { role?: string; key?: string; turn: number | null };
@@ -115,50 +108,57 @@ export interface WorkspaceFile {
 
 /**
  * A workspace as a turn under way holds it (`stagedWorkspace`): its head, the turn's state with what
- * the turn staged on top, the learned area with the turn's changes to it, and who staged each file the
- * turn changed, which is no reply's yet.
+ * the turn staged on top, the kept files (the learned area's and the global workspace's) with the
+ * turn's changes to them, and who staged each file the turn changed, which is no reply's yet.
  */
 export interface WorkspaceAt {
   head: ChatHead;
-  learned: Readonly<Record<string, LearnedFile>>;
+  kept: Readonly<Record<string, KeptFile>>;
   staged: ReadonlyMap<string, { role: string; key: string }>;
 }
 
-/** Every file of a workspace, the head's, the learned area's, then the turns' transcripts (each with its size), by path; a file `staged` names was staged by the turn under way, so no reply holds it yet. */
-function filesOf(head: ChatHead, learned: Readonly<Record<string, LearnedFile>>, staged: WorkspaceAt["staged"] = new Map()): Map<string, Omit<WorkspaceFile, "size"> & { size?: number }> {
+/** The files kept apart from the chat's story, by path: its learned area's (`learned/`) and its user's global workspace's (`~/`). */
+export async function keptFiles(rt: Pick<Runtime, "chatAgents" | "globalFiles">, chatId: ChatId, userId: UserId): Promise<Record<string, KeptFile>> {
+  const [{ learned }, global] = await Promise.all([rt.chatAgents.get(chatId, userId), rt.globalFiles.get(userId)]);
+  return { ...learned, ...global };
+}
+
+/** Every file of a workspace, the head's, the kept ones, then the turns' transcripts (each with its size), by path; a file `staged` names was staged by the turn under way, so no reply holds it yet. */
+function filesOf(head: ChatHead, kept: Readonly<Record<string, KeptFile>>, staged: WorkspaceAt["staged"] = new Map()): Map<string, Omit<WorkspaceFile, "size"> & { size?: number }> {
   const out = new Map<string, Omit<WorkspaceFile, "size"> & { size?: number }>();
   const sources = fileSources(head);
   const pins = workspacePins(head.state);
   for (const [path, hash] of Object.entries(workspaceOf(head.state))) {
     const by = staged.get(path);
     const source = by ? { ...by, turn: null } : sources.get(path);
-    out.set(path, { path, hash, pinned: own(pins, path) === true, readers: readersOf(head.state, path), learned: false, provenance: { ...(source?.role !== undefined ? { role: source.role } : {}), ...(source?.key !== undefined ? { key: source.key } : {}), turn: source?.turn ?? null } });
+    out.set(path, { path, hash, pinned: own(pins, path) === true, learned: false, provenance: { ...(source?.role !== undefined ? { role: source.role } : {}), ...(source?.key !== undefined ? { key: source.key } : {}), turn: source?.turn ?? null } });
   }
-  for (const [path, file] of Object.entries(learned)) {
-    out.set(path, { path, hash: file.hash, pinned: file.pinned === true, readers: file.readers, learned: true, provenance: { ...(file.role !== undefined ? { role: file.role } : {}), turn: null } });
+  for (const [path, file] of Object.entries(kept)) {
+    out.set(path, { path, hash: file.hash, pinned: file.pinned === true, learned: isLearnedPath(path), provenance: { ...(file.role !== undefined ? { role: file.role } : {}), turn: null } });
   }
   for (const file of transcriptFiles(head)) out.set(file.path, file);
   return out;
 }
 
-/** Every file of the chat's workspace, as `at` holds it (a turn under way), else as the chat's head and learned area stand; none for a chat that plays no world. */
+/** Every file of the chat's workspace, as `at` holds it (a turn under way), else as the chat's head and kept files stand; none for a chat that plays no world. */
 async function allFiles(rt: Runtime, env: Pick<ToolEnv, "userId" | "chatId">, at?: WorkspaceAt): Promise<Map<string, Omit<WorkspaceFile, "size"> & { size?: number }>> {
-  if (at) return filesOf(at.head, at.learned, at.staged);
+  if (at) return filesOf(at.head, at.kept, at.staged);
   const head = await chatHead(rt, env.chatId, env.userId);
-  return head ? filesOf(head, (await rt.chatAgents.get(env.chatId, env.userId)).learned) : new Map();
+  return head ? filesOf(head, await keptFiles(rt, env.chatId, env.userId)) : new Map();
 }
 
-/** The workspace's files the knowledge may read, by path, as `at` holds them (a turn under way) or the chat's stand; none for a chat that plays no world. */
-export async function listWorkspace(rt: Runtime, env: Pick<ToolEnv, "userId" | "chatId" | "knowledge">, at?: WorkspaceAt): Promise<WorkspaceFile[]> {
-  const files = [...(await allFiles(rt, env, at)).values()].filter((f) => knowledgeWithin(f.readers, env.knowledge)).sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
-  return Promise.all(files.map(async (f): Promise<WorkspaceFile> => ({ ...f, size: f.size ?? (await rt.blobs.get(env.userId, f.hash))?.length ?? 0 })));
+/** The workspace's files, by path, as `at` holds them (a turn under way) or the chat's stand, each with its size (`BlobStore.size`, which reads a body once); none for a chat that plays no world. */
+export async function listWorkspace(rt: Runtime, env: Pick<ToolEnv, "userId" | "chatId">, at?: WorkspaceAt): Promise<WorkspaceFile[]> {
+  const files = [...(await allFiles(rt, env, at)).values()].sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+  return Promise.all(files.map(async (f): Promise<WorkspaceFile> => ({ ...f, size: f.size ?? (await rt.blobs.size(env.userId, f.hash)) ?? 0 })));
 }
 
-/** A file's text as the knowledge may read it; null when there is no such file, the knowledge may not read it, or its body is gone. */
-export async function readWorkspaceFile(rt: Runtime, env: Pick<ToolEnv, "userId" | "chatId" | "knowledge">, path: string): Promise<string | null> {
-  const file = (await allFiles(rt, env)).get(path);
-  if (!file || !knowledgeWithin(file.readers, env.knowledge)) return null;
-  return rt.blobs.get(env.userId, file.hash);
+/** A file's text; null when there is no such file, its body is gone, or the chat plays no world. Only the file's own index is read, never who wrote what. */
+export async function readWorkspaceFile(rt: Runtime, env: Pick<ToolEnv, "userId" | "chatId">, path: string): Promise<string | null> {
+  const head = await chatHead(rt, env.chatId, env.userId);
+  if (!head) return null;
+  const hash = isKeptPath(path) ? own(await keptFiles(rt, env.chatId, env.userId), path)?.hash : isTranscriptPath(path) ? transcriptFiles(head).find((f) => f.path === path)?.hash : own(workspaceOf(head.state), path);
+  return hash === undefined ? null : rt.blobs.get(env.userId, hash);
 }
 
 // ---------------------------------------------------------------- the tools

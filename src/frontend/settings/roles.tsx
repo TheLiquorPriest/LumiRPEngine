@@ -1,6 +1,6 @@
 // Settings → Agents → Roles (AGENT-LOOP-PLAN §5, §8, §15; INC2-SPEC C9, C12): what each role of an
 // agent turn runs with, every setting kept under `agents.roles[<role>]` (shared/agent-roles.ts): the
-// connection and model it runs on (none: its classic step's), its effort, whose knowledge it reads,
+// connection and model it runs on (none: its classic step's), its effort,
 // its tool families and what it may write (its tier), whether it runs prompt-only (its classic
 // step's one call), what the fixed pipeline does when it fails, and its own limits over every
 // agent's budget; and its caching, which the providers read from `agents.caching.roles[<role>]`, as
@@ -10,10 +10,10 @@
 // `RoleCard`, `rolePatch`, `roleResetPatch`) is hook-free, so tests press it without a DOM.
 // Styles: styles/settings.ts.
 
-import type { RoleId, RoleKnowledge, RoleOnFail, RoleSettings, RoleTier } from "../../shared/agent-roles";
-import { ROLE_IDS, ROLE_KNOWLEDGE, ROLE_LABEL, ROLE_ON_FAIL, ROLE_TIERS } from "../../shared/agent-roles";
+import type { RoleId, RoleOnFail, RoleSettings, RoleTier } from "../../shared/agent-roles";
+import { ROLE_IDS, ROLE_LABEL, ROLE_ON_FAIL, ROLE_TIERS } from "../../shared/agent-roles";
 import type { AgentBudget, AgentEffort, AgentSettings } from "../../shared/agent-settings";
-import { AGENT_EFFORTS, ASSISTANT_KNOWLEDGE_LABELS, BUDGET_DEFS, defaultAgentSettings, roleCaching } from "../../shared/agent-settings";
+import { AGENT_EFFORTS, BUDGET_DEFS, defaultAgentSettings, roleCaching } from "../../shared/agent-settings";
 import type { ToolFamily } from "../../shared/agent-tools";
 import { TOOL_FAMILY_LABEL } from "../../shared/agent-tools";
 import { hasOwn, type JsonObject } from "../../shared/json";
@@ -37,15 +37,6 @@ export const EFFORT_HELP: Record<AgentEffort, string> = {
   high: "Sent as Lumiverse's reasoning setting, which it turns into the provider's own.",
   model: "For a model that picks its own effort by its name: sent as Lumiverse's Auto.",
   inherit: "The connection's own reasoning setting, else yours in Lumiverse.",
-};
-
-const KNOWLEDGE_LABEL: Record<RoleKnowledge, string> = { ...ASSISTANT_KNOWLEDGE_LABELS, own: "Its character's own" };
-
-const KNOWLEDGE_HELP: Record<RoleKnowledge, string> = {
-  pov: "It reads only what your character knows.",
-  everyone: "It reads what anyone in the world knows, each secret marked with whom it's kept from.",
-  gm: "It reads everything, secrets and all.",
-  own: "A mind reads as the character it thinks for: only what that character knows.",
 };
 
 const TIER_LABEL: Record<RoleTier, string> = { read: "Nothing", story: "The story's changes", gm: "The GM's edits too" };
@@ -146,16 +137,9 @@ export function RoleCard(props: { id: RoleId; agents: AgentSettings; connections
         </label>
         <span class="lre-small lre-muted">Default {EFFORT_LABEL[d.effort]}.</span>
       </div>
-      <div class="lre-set-ext" data-lre-role-setting="knowledge">
-        <div class="lre-field">
-          <Seg<RoleKnowledge> label={`${label}: whose knowledge it reads`} value={r.knowledge} options={ROLE_KNOWLEDGE.map((value) => ({ value, label: KNOWLEDGE_LABEL[value] }))} disabled={busy} onChange={(knowledge) => set({ knowledge })} />
-          <span class="lre-field-help">{KNOWLEDGE_HELP[r.knowledge]}</span>
-        </div>
-        <span class="lre-small lre-muted">Default {KNOWLEDGE_LABEL[d.knowledge]}.</span>
-      </div>
       <div class="lre-set-ext" data-lre-role-setting="families">
         <span class="lre-set-ext-title">Tools</span>
-        <span class="lre-field-help">The families of tools it is given, at the tier below; its knowledge bounds what they read.</span>
+        <span class="lre-field-help">The families of tools it is given, at the tier below. They read everything, secrets marked, whatever perspective it works from (Settings → Agents → Context).</span>
         {FAMILIES.map((family) => (
           <HostSwitch key={family} label={`${label}: ${TOOL_FAMILY_LABEL[family]}`} checked={r.families.includes(family)} disabled={busy} onChange={(on) => set({ families: FAMILIES.filter((f) => (f === family ? on : r.families.includes(f))) })} />
         ))}

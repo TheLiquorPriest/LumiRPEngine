@@ -687,39 +687,46 @@ function dataBlock(vars: Readonly<Record<string, string>>): string {
 }
 
 /**
- * A prompted step's lines: its non-empty strings, trimmed, at most `max` of them. Each is checked whole
- * (`withheld`: an unrevealed secret, a hidden name) and withheld when it carries one, before anything
- * is cut, so a cut never leaves part of what the check looks for whole. One longer than `chars` is
- * then cut to it, or with `"drop"`, left out before the others are counted.
+ * How a prose step's line goes on (DESIGN §7.1, secrecy is guidance): `shown` (the line as it is
+ * kept, cut to its length), marked in the user's wording when the whole `line` carries a secret (an
+ * unrevealed secret's words, a hidden name), else as it is. Never left out.
  */
-function proseLines(v: JsonValue | undefined, max: number, withheld: (line: string) => boolean, chars = 300, long: "cut" | "drop" = "cut"): string[] {
+export type ProseMark = (line: string, shown: string) => string;
+
+/** A line as it is: a suggestion, which its chip shows as a spoiler where it carries a secret (`ChoicesTask.secret`). */
+export const keepLine: ProseMark = (_line, shown) => shown;
+
+/**
+ * A prompted step's lines: its non-empty strings, trimmed, at most `max` of them. One longer than
+ * `chars` is cut to it, or with `"drop"`, left out before the others are counted. Each is checked
+ * whole by `mark` before it is cut, so a cut never leaves part of what the check looks for unmarked.
+ */
+function proseLines(v: JsonValue | undefined, max: number, mark: ProseMark, chars = 300, long: "cut" | "drop" = "cut"): string[] {
   const all = (typeof v === "string" ? [v] : Array.isArray(v) ? v : []).flatMap((x) => (typeof x === "string" && x.trim() !== "" ? [x.trim()] : []));
-  return (long === "drop" ? all.filter((x) => x.length <= chars) : all)
-    .slice(0, max)
-    .filter((x) => !withheld(x))
-    .map((x) => x.slice(0, chars));
+  return (long === "drop" ? all.filter((x) => x.length <= chars) : all).slice(0, max).map((x) => mark(x, x.slice(0, chars)));
 }
 
 /**
  * A prompted step (`brief`, `outline`, `choices`): the world's template or the built-in
- * instructions, the output contract, and the facts. Prose comes back checked whole by `withheld`
- * (the caller's: an unrevealed secret, and a name hidden from whoever reads it); null when the
- * call fails.
+ * instructions, the output contract, and the facts. Prose comes back with each line as `mark` has
+ * it (the caller's: marked where it carries an unrevealed secret or a name hidden from whoever reads
+ * it); null when the call fails.
  */
-export async function promptedText(steps: Steps, run: StepRun, kind: "brief" | "outline" | "choices", vars: Readonly<Record<string, string>>, withheld: (line: string) => boolean, userId: UserId, signal: AbortSignal, lore: StepLore | null = null): Promise<string[] | null> {
+export async function promptedText(steps: Steps, run: StepRun, kind: "brief" | "outline" | "choices", vars: Readonly<Record<string, string>>, mark: ProseMark, userId: UserId, signal: AbortSignal, lore: StepLore | null = null): Promise<string[] | null> {
   const instructions = renderTemplate(run.template?.template ?? PROSE_PROMPTS[kind], vars);
   const raw = await steps.helperJson(run.purpose, `${instructions}\n${CONTRACT[kind]}`, dataBlock(vars), run.config, userId, signal, { lore, guidance: run.guidance, recent: run.recent });
   if (!isRecord(raw)) return null;
-  return proseAnswer(kind, kind === "brief" ? raw.text : kind === "outline" ? raw.beats : raw.choices, withheld);
+  return proseAnswer(kind, kind === "brief" ? raw.text : kind === "outline" ? raw.beats : raw.choices, mark);
 }
 
 /**
- * A prose step's lines from its answer (its output contract, §16), checked as `promptedText` checks
- * them: a brief or an outline beat may run long and is cut, once checked whole; a suggestion is a
- * chip's text and the player's next message, so one too long for a chip is dropped rather than cut.
+ * A prose step's lines from its answer (its output contract, §16), each as `mark` has it, as
+ * `promptedText` gives them: a brief or an outline beat may run long and is cut, once checked whole;
+ * a suggestion is a chip's text and the player's next message, so one too long for a chip is dropped
+ * rather than cut.
  */
-export function proseAnswer(kind: "brief" | "outline" | "choices", v: JsonValue | undefined, withheld: (line: string) => boolean): string[] {
-  return kind === "brief" ? proseLines(v, 1, withheld, BRIEF_CHARS) : kind === "outline" ? proseLines(v, OUTLINE_BEATS_MAX, withheld, BEAT_CHARS) : proseLines(v, 4, withheld, 120, "drop");
+export function proseAnswer(kind: "brief" | "outline" | "choices", v: JsonValue | undefined, mark: ProseMark = keepLine): string[] {
+  return kind === "brief" ? proseLines(v, 1, mark, BRIEF_CHARS) : kind === "outline" ? proseLines(v, OUTLINE_BEATS_MAX, mark, BEAT_CHARS) : proseLines(v, 4, mark, 120, "drop");
 }
 
 /** A prompted `effects` step (a world template with `output: "effects"`): proposals, for the caller to validate and bound like extraction. */

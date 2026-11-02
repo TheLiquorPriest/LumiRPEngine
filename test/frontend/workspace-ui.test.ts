@@ -1,37 +1,47 @@
 // GM → Workspace (C8 `lre.workspace`): the browser's areas (Notes, Learned, Transcripts folded until
-// opened, the Pins file), folders first and names in natural order (scene-9 before scene-10), each
-// row's chips for who wrote it, at which reply, who may read it and how it stands, and its empty
-// state; New note's path dialog and its request; a file's pane and its controls (Save and Revert
-// once the draft changes, Ctrl+S, the ask before a draft with changes not saved is left, Pin or
-// Unpin by state, Rename or move, Delete, asking first for a learned note); a transcript read-only;
-// and the requests each control sends, as the literal objects, with each change's result handed to
-// `changed` in its sentence. Rendered trees are walked with no DOM, with a recording `request` in
-// place of the backend. The files are the starter world's (Port Alder).
+// opened, the Pins file, then Global for the ~/ workspace), folders first and names in natural order
+// (scene-9 before scene-10), each row's chips for who wrote it, at which reply and how it stands (a
+// system file, a global one), and its empty state; New note's path dialog, its level (this chat or
+// ~/) and its request; a file's pane and its controls (Save and Revert once the draft changes,
+// Ctrl+S, the ask before a draft with changes not saved is left, Pin or Unpin by state, Rename or
+// move, Delete, asking first for a kept note); a transcript read-only; a new note held while a
+// reply is written, whose pane stays open until it lands; what the tab reads again on (the chat
+// moving on, not each load of the GM view); and the requests each control sends, as the literal
+// objects, with each change's result handed to `changed` in its sentence. Rendered trees are walked
+// with no DOM, with a recording `request` in place of the backend. The files are the starter
+// world's (Port Alder).
 
 import { describe, expect, test } from "bun:test";
 import type { VNode } from "preact";
 import { Button, Empty, Field, Seg } from "../../src/frontend/components";
-import { ChipRow, guardDraft, moveProblem, newNoteFolder, newNoteProblem, PathDialog, type PathDialogState, provenanceWords, READERS_NOTES, SESSION_PAGE, sizeWords, workspaceControls, WorkspaceBrowser, type WorkspaceBrowserProps, type WorkspaceBody, type WorkspaceControls, WorkspaceFilePane, type WorkspaceFilePaneProps, type WorkspaceResult } from "../../src/frontend/gm/workspace";
-import { fileChips, naturalCompare, treeFiles, workspaceArea, workspaceGroups, workspaceTree } from "../../src/frontend/gm/workspace-tree";
+import { atLevel, ChipRow, guardDraft, heldCreate, moveProblem, newNoteFolder, newNoteProblem, paneFile, PathDialog, type PathDialogState, provenanceWords, SESSION_PAGE, sizeWords, workspaceControls, WorkspaceBrowser, type WorkspaceBrowserProps, type WorkspaceBody, type WorkspaceControls, WorkspaceFilePane, type WorkspaceFilePaneProps, workspaceReadKeys, type WorkspaceResult } from "../../src/frontend/gm/workspace";
+import { fileChips, naturalCompare, systemWords, treeFiles, workspaceArea, workspaceGroups, workspaceTree } from "../../src/frontend/gm/workspace-tree";
+import { gmReloadKey } from "../../src/frontend/play/gm";
 import type { SessionView, WorkspaceFileView } from "../../src/shared/protocol";
 import { propsOf, type Props } from "../support/tree";
 
 const CHAT = "chat-port-alder";
 
-const MARCUS: WorkspaceFileView = { path: "notes/marcus.md", hash: "1".repeat(32), size: 412, pinned: true, readers: "everyone", learned: false, provenance: { role: "assistant", key: "assistant.op-4-1", turn: 4 } };
-const ANCHOR: WorkspaceFileView = { path: "lore-drafts/rusty-anchor.md", hash: "2".repeat(32), size: 1280, pinned: false, readers: "everyone", learned: false, provenance: { role: "scene_lore", key: "scene_lore.op-2-3", turn: 2 } };
-const FLEET: WorkspaceFileView = { path: "plans/fleet-contract.md", hash: "3".repeat(32), size: 1, pinned: false, readers: "gm", learned: false, provenance: { role: "gm", key: "gm.op-0-1", turn: null } };
-const DANNY: WorkspaceFileView = { path: "notes/danny.md", hash: "4".repeat(32), size: 96, pinned: false, readers: "gm", learned: false, provenance: { turn: 3 } };
+const MARCUS: WorkspaceFileView = { path: "notes/marcus.md", hash: "1".repeat(32), size: 412, pinned: true, learned: false, provenance: { role: "assistant", key: "assistant.op-4-1", turn: 4 } };
+const ANCHOR: WorkspaceFileView = { path: "lore-drafts/rusty-anchor.md", hash: "2".repeat(32), size: 1280, pinned: false, learned: false, provenance: { role: "scene_lore", key: "scene_lore.op-2-3", turn: 2 } };
+const FLEET: WorkspaceFileView = { path: "plans/fleet-contract.md", hash: "3".repeat(32), size: 1, pinned: false, learned: false, provenance: { role: "gm", key: "gm.op-0-1", turn: null } };
+const DANNY: WorkspaceFileView = { path: "notes/danny.md", hash: "4".repeat(32), size: 96, pinned: false, learned: false, provenance: { turn: 3 } };
 const FILES = [MARCUS, ANCHOR, FLEET, DANNY];
 
-const JORDAN: WorkspaceFileView = { path: "learned/jordan.md", hash: "6".repeat(32), size: 40, pinned: true, readers: "pov", learned: true, provenance: { role: "assistant", turn: null } };
-const SCENE_9: WorkspaceFileView = { path: "notes/scenes/scene-9.md", hash: "7".repeat(32), size: 20, pinned: false, readers: "gm", learned: false, provenance: { role: "scene_lore", turn: 9 } };
-const SCENE_10: WorkspaceFileView = { path: "notes/scenes/scene-10.md", hash: "8".repeat(32), size: 22, pinned: false, readers: "gm", learned: false, provenance: { role: "scene_lore", turn: 10 } };
-const REPLY_9: WorkspaceFileView = { path: "transcripts/reply-0009.md", hash: "9".repeat(32), size: 5000, pinned: false, readers: "gm", learned: false, transcript: true, provenance: { turn: 9 } };
-const REPLY_10: WorkspaceFileView = { path: "transcripts/reply-0010.md", hash: "a".repeat(32), size: 5200, pinned: false, readers: "gm", learned: false, transcript: true, provenance: { turn: 10 } };
-const PINS: WorkspaceFileView = { path: ".pins.json", hash: "b".repeat(32), size: 60, pinned: false, readers: "gm", learned: false, provenance: { role: "gm", turn: 2 } };
+const JORDAN: WorkspaceFileView = { path: "learned/jordan.md", hash: "6".repeat(32), size: 40, pinned: true, learned: true, provenance: { role: "assistant", turn: null } };
+const SCENE_9: WorkspaceFileView = { path: "notes/scenes/scene-9.md", hash: "7".repeat(32), size: 20, pinned: false, learned: false, provenance: { role: "scene_lore", turn: 9 } };
+const SCENE_10: WorkspaceFileView = { path: "notes/scenes/scene-10.md", hash: "8".repeat(32), size: 22, pinned: false, learned: false, provenance: { role: "scene_lore", turn: 10 } };
+const REPLY_9: WorkspaceFileView = { path: "transcripts/reply-0009.md", hash: "9".repeat(32), size: 5000, pinned: false, learned: false, transcript: true, provenance: { turn: 9 } };
+const REPLY_10: WorkspaceFileView = { path: "transcripts/reply-0010.md", hash: "a".repeat(32), size: 5200, pinned: false, learned: false, transcript: true, provenance: { turn: 10 } };
+const PINS: WorkspaceFileView = { path: ".pins.json", hash: "b".repeat(32), size: 60, pinned: false, learned: false, provenance: { role: "gm", turn: 2 } };
 /** Every area, listed out of order as the backend may. */
 const ALL = [PINS, REPLY_10, SCENE_10, JORDAN, MARCUS, REPLY_9, ANCHOR, SCENE_9, FLEET, DANNY];
+
+/** The system files and the global workspace: every agent's AGENTS.md at both levels, the narrator's own, and a global note. */
+const AGENTS: WorkspaceFileView = { path: "AGENTS.md", hash: "c".repeat(32), size: 80, pinned: false, learned: false, provenance: { role: "gm", key: "gm.op-1-1", turn: 1 } };
+const GLOBAL_AGENTS: WorkspaceFileView = { path: "~/AGENTS.md", hash: "d".repeat(32), size: 120, pinned: false, learned: false, provenance: { role: "gm", turn: null } };
+const GLOBAL_NARRATOR: WorkspaceFileView = { path: "~/roles/narrator.md", hash: "e".repeat(32), size: 64, pinned: false, learned: false, provenance: { role: "gm", turn: null } };
+const GLOBAL_STYLE: WorkspaceFileView = { path: "~/notes/style.md", hash: "f".repeat(32), size: 30, pinned: true, learned: false, provenance: { role: "main", turn: null } };
 
 const MARCUS_TEXT = "# Marcus Delgado\n\nOwes on the shop. Won't say so to Jordan.";
 
@@ -206,7 +216,7 @@ describe("GM → Workspace: the browser", () => {
   });
 
   test("a row opens its file, the open one is marked current, New note asks for a path, the session opens in the pane", () => {
-    const session: SessionView = { summary: "SUMMARY", summaryKnowledge: "gm", turns: 3, tokens: 4200, segments: [], reads: { knowledge: "pov", turns: 3, tokens: 1200, summary: false }, missing: 0, rollback: "pending" };
+    const session: SessionView = { summary: "SUMMARY", turns: 3, tokens: 4200, segments: [], reads: { turns: 3, tokens: 1200 }, missing: 0, rollback: "pending" };
     const { tree, calls } = browser(FILES, { selected: MARCUS.path, session });
     const rows = propsOf(tree, "button").filter((p) => p["data-lre-ws-file"] !== undefined);
     expect(rows.map((r) => [r["data-lre-ws-file"], r["aria-current"]])).toEqual([
@@ -238,21 +248,66 @@ describe("GM → Workspace: the browser", () => {
     expect(rowPaths(reading)).toEqual([]);
     expect(textOf(reading)).toContain("Reading the workspace…");
   });
+
+  test("the global workspace (~/) is its own area after the chat's, under its own folder; a system file sits where its level puts it", () => {
+    const files = [GLOBAL_STYLE, AGENTS, MARCUS, GLOBAL_NARRATOR, PINS, GLOBAL_AGENTS];
+    expect(files.map((f) => workspaceArea(f.path))).toEqual(["global", "notes", "notes", "global", "pins", "global"]);
+    const groups = workspaceGroups(files);
+    expect(groups.map((g) => [g.area, treeFiles(g.nodes).map((f) => f.path)])).toEqual([
+      ["notes", ["notes/marcus.md", "AGENTS.md"]],
+      ["pins", [".pins.json"]],
+      ["global", ["~/notes/style.md", "~/roles/narrator.md", "~/AGENTS.md"]],
+    ]);
+    // ~/ isn't a folder of its own: the area is the global workspace's top.
+    expect(groups.find((g) => g.area === "global")?.nodes.map((n) => [n.kind, n.name])).toEqual([
+      ["folder", "notes"],
+      ["folder", "roles"],
+      ["file", "AGENTS.md"],
+    ]);
+    const { tree } = browser(files);
+    const area = propsOf(tree, "details").find((p) => p["data-lre-ws-area"] === "global");
+    expect([area?.open, textOf((area?.children as unknown[])[0])]).toEqual([true, "Global (~/)3"]);
+    expect(textOf(area?.children)).toContain("every chat of yours shares");
+    expect(textOf(tree)).toContain("6 files · 2 pinned");
+  });
+
+  test("the transcripts are every agent's to read, as their area says", () => {
+    const { tree } = browser([REPLY_9]);
+    const area = propsOf(tree, "details").find((p) => p["data-lre-ws-area"] === "transcripts");
+    expect(textOf(area?.children)).toContain("every agent reads them");
+    expect(textOf(area?.children)).not.toContain("GM's knowledge");
+  });
 });
 
 describe("GM → Workspace: provenance and status chips", () => {
   const words = (file: WorkspaceFileView) => fileChips(file).map((c) => `${c.kind}:${c.text}`);
 
-  test("each file says who wrote it, at which reply, who may read it, and Pinned, Learned or Read-only", () => {
-    expect(words(MARCUS)).toEqual(["who:GM assistant", "reply:Reply 4", "readers:Everyone's", "pinned:Pinned"]);
-    expect(words(ANCHOR)).toEqual(["who:Scene lore", "reply:Reply 2", "readers:Everyone's"]);
-    expect(words(FLEET)).toEqual(["who:You (GM)", "reply:Before reply 1", "readers:GM only"]);
-    expect(words(DANNY)).toEqual(["who:The turn", "reply:Reply 3", "readers:GM only"]);
-    expect(words({ ...DANNY, provenance: { turn: null } })).toEqual(["who:The turn", "reply:This turn", "readers:GM only"]);
-    expect(words(JORDAN)).toEqual(["who:GM assistant", "reply:Before reply 1", "readers:Your character's", "pinned:Pinned", "learned:Learned"]);
-    expect(words(REPLY_10)).toEqual(["who:The turn", "reply:Reply 10", "readers:GM only", "read-only:Read-only"]);
+  test("each file says who wrote it, at which reply, and System, Global, Pinned, Learned or Read-only", () => {
+    expect(words(MARCUS)).toEqual(["who:GM assistant", "reply:Reply 4", "pinned:Pinned"]);
+    expect(words(ANCHOR)).toEqual(["who:Scene lore", "reply:Reply 2"]);
+    expect(words(FLEET)).toEqual(["who:You (GM)", "reply:Before reply 1"]);
+    expect(words(DANNY)).toEqual(["who:The turn", "reply:Reply 3"]);
+    expect(words({ ...DANNY, provenance: { turn: null } })).toEqual(["who:The turn", "reply:This turn"]);
+    expect(words(JORDAN)).toEqual(["who:GM assistant", "reply:Before reply 1", "pinned:Pinned", "learned:Learned"]);
+    expect(words(REPLY_10)).toEqual(["who:The turn", "reply:Reply 10", "read-only:Read-only"]);
     // Each chip says in full what it means, for its tooltip.
-    expect(fileChips(FLEET).map((c) => c.title)).toEqual(["Written by you, the GM", "Written before the first reply", "Who may read it: GM only"]);
+    expect(fileChips(FLEET).map((c) => c.title)).toEqual(["Written by you, the GM", "Written before the first reply"]);
+  });
+
+  test("a system file says whose instructions it is, and a global file is no reply's", () => {
+    expect(words(AGENTS)).toEqual(["who:You (GM)", "reply:Reply 1", "system:System"]);
+    expect(words(GLOBAL_AGENTS)).toEqual(["who:You (GM)", "system:System", "global:Global"]);
+    expect(words(GLOBAL_NARRATOR)).toEqual(["who:You (GM)", "system:System", "global:Global"]);
+    expect(words(GLOBAL_STYLE)).toEqual(["who:Main agent", "global:Global", "pinned:Pinned"]);
+    expect([AGENTS, GLOBAL_AGENTS, GLOBAL_NARRATOR, { ...GLOBAL_NARRATOR, path: "roles/main.md" }].map((f) => systemWords(f.path))).toEqual([
+      "System instructions for every agent, in this chat",
+      "System instructions for every agent, in every chat of yours",
+      "System instructions for Narrator alone, in every chat of yours",
+      "System instructions for Main agent alone, in this chat",
+    ]);
+    // Only AGENTS.md and a file straight under roles/ named .md are system files.
+    expect(["notes/AGENTS.md", "roles/narrator.txt", "roles/old/narrator.md", "~/notes/style.md"].map(systemWords)).toEqual([null, null, null, null]);
+    expect(fileChips(GLOBAL_AGENTS).find((c) => c.kind === "global")?.title).toBe("Global: every chat of yours shares it, and a swipe never changes it");
   });
 
   test("a row and a file's pane carry the file's chips; the sentence form stays for the record", () => {
@@ -273,32 +328,38 @@ describe("GM → Workspace: provenance and status chips", () => {
 describe("GM → Workspace: New note", () => {
   const paths = ALL.map((f) => f.path);
 
-  test("asks for a whole, valid, free path outside transcripts/, saying what's wrong once it is one you typed", () => {
+  test("asks for a whole, valid, free path outside transcripts/, in this chat or ~/, saying what's wrong once it is one you typed", () => {
     expect(newNoteProblem("notes/", paths)).toContain("Type the note's path");
     expect(newNoteProblem("notes/../harbor.md", paths)).toContain("A path is names joined by /");
     expect(newNoteProblem(MARCUS.path, paths)).toBe("There is already a file at notes/marcus.md.");
     expect(newNoteProblem("transcripts/reply-0011.md", paths)).toContain("read-only");
     expect(newNoteProblem("notes/harbor.md", paths)).toBeNull();
     expect(newNoteProblem("learned/harbor master.md", paths)).toBeNull();
-    const at = (value: string) => dialog({ mode: "new", from: null, value, readers: "gm" }).tree;
+    // A global path is one too; a ~ anywhere else is no path.
+    expect(newNoteProblem("~/AGENTS.md", paths)).toBeNull();
+    expect(newNoteProblem("~/roles/narrator.md", paths)).toBeNull();
+    expect(newNoteProblem("~/AGENTS.md", [...paths, GLOBAL_AGENTS.path])).toBe("There is already a file at ~/AGENTS.md.");
+    expect(["~/", "notes/~/x.md", "~x.md"].map((p) => newNoteProblem(p, paths))).toEqual([expect.stringContaining("Type the note's path"), expect.stringContaining("~/ before them"), expect.stringContaining("~/ before them")]);
+    const at = (value: string) => dialog({ mode: "new", from: null, value }).tree;
     const error = (value: string) => propsOf(at(value), Field).find((p) => p.label === "Path")?.error;
     // A folder waiting for its name is no mistake yet.
-    expect(["notes/", "notes/../harbor.md", MARCUS.path, "notes/harbor.md"].map(error)).toEqual([null, newNoteProblem("notes/../harbor.md", paths), "There is already a file at notes/marcus.md.", null]);
-    expect(["notes/", MARCUS.path, "notes/harbor.md"].map((v) => button(at(v), "Create").disabled)).toEqual([true, true, false]);
-    expect(button(dialog({ mode: "new", from: null, value: "notes/harbor.md", readers: "gm" }, paths, true).tree, "Create").disabled).toBe(true);
+    expect(["notes/", "notes/../harbor.md", MARCUS.path, "notes/harbor.md", "~/"].map(error)).toEqual([null, newNoteProblem("notes/../harbor.md", paths), "There is already a file at notes/marcus.md.", null, null]);
+    expect(["notes/", MARCUS.path, "notes/harbor.md", "~/AGENTS.md"].map((v) => button(at(v), "Create").disabled)).toEqual([true, true, false, false]);
+    expect(button(dialog({ mode: "new", from: null, value: "notes/harbor.md" }, paths, true).tree, "Create").disabled).toBe(true);
     expect(textOf(at("notes/harbor.md"))).toContain("New note");
   });
 
-  test("starts in the open note's folder, else notes/; typing, who may read it, Create and Cancel reach the tab", () => {
-    expect([null, SESSION_PAGE, MARCUS.path, JORDAN.path, REPLY_9.path, ".pins.json", "top.md"].map(newNoteFolder)).toEqual(["notes/", "notes/", "notes/", "learned/", "notes/", "notes/", "notes/"]);
-    const state: PathDialogState = { mode: "new", from: null, value: "notes/", readers: "gm" };
+  test("starts in the open note's folder, else notes/; typing, where it goes, Create and Cancel reach the tab", () => {
+    expect([null, SESSION_PAGE, MARCUS.path, JORDAN.path, REPLY_9.path, ".pins.json", "top.md", GLOBAL_AGENTS.path, GLOBAL_NARRATOR.path].map(newNoteFolder)).toEqual(["notes/", "notes/", "notes/", "learned/", "notes/", "notes/", "notes/", "~/", "~/roles/"]);
+    const state: PathDialogState = { mode: "new", from: null, value: "notes/" };
     const { tree, calls } = dialog(state);
     const input = propsOf(tree, "input").find((p) => p.id === "lre-workspace-path");
     (input?.onInput as (event: unknown) => void)({ currentTarget: { value: "notes/harbor.md" } });
     const [seg] = propsOf(tree, Seg);
-    expect([seg?.label, seg?.value]).toEqual(["Who may read it", "gm"]);
-    (seg?.onChange as (v: string) => void)("pov");
-    expect(textOf(tree)).toContain(READERS_NOTES.gm);
+    expect([seg?.label, seg?.value, (seg?.options as { value: string }[]).map((o) => o.value)]).toEqual(["Where it goes", "chat", ["chat", "global"]]);
+    // Global puts ~/ before the path; This chat takes it off again.
+    (seg?.onChange as (v: string) => void)("global");
+    expect(textOf(tree)).toContain("A global note is in every chat of yours");
     // Create sends nothing while the path can't take it, but the form never reloads the page.
     expect(submitForm(tree)).toBe(true);
     click(button(tree, "Cancel"));
@@ -306,20 +367,64 @@ describe("GM → Workspace: New note", () => {
     expect(submitForm(ready.tree)).toBe(true);
     expect(calls).toEqual([
       ["change", { ...state, value: "notes/harbor.md" }],
-      ["change", { ...state, readers: "pov" }],
+      ["change", { ...state, value: "~/notes/" }],
       ["cancel", null],
     ]);
     expect(ready.calls).toEqual([["submit", null]]);
+    const fromGlobal = dialog({ ...state, value: "~/AGENTS.md" });
+    const [global] = propsOf(fromGlobal.tree, Seg);
+    expect(global?.value).toBe("global");
+    (global?.onChange as (v: string) => void)("chat");
+    expect(fromGlobal.calls).toEqual([["change", { ...state, value: "AGENTS.md" }]]);
+    expect([atLevel("~/AGENTS.md", "chat"), atLevel("AGENTS.md", "global"), atLevel("~/AGENTS.md", "global"), atLevel("notes/", "chat")]).toEqual(["AGENTS.md", "~/AGENTS.md", "~/AGENTS.md", "notes/"]);
+    // Moving a file asks no level: its path says it.
+    expect(propsOf(dialog({ mode: "move", from: MARCUS.path, value: MARCUS.path }).tree, Seg)).toEqual([]);
   });
 
-  test("Create writes the note empty with who may read it, sets the list and hands the result to changed", async () => {
-    const created: WorkspaceResult = { files: [...FILES, { ...DANNY, path: "notes/harbor.md", size: 0, readers: "pov", provenance: { role: "gm", turn: 4 } }], pending: false, undo: "chip-ws-2" };
+  test("Create writes the note empty, sets the list and hands the result to changed", async () => {
+    const created: WorkspaceResult = { files: [...FILES, { ...DANNY, path: "notes/harbor.md", size: 0, provenance: { role: "gm", turn: 4 } }], pending: false, undo: "chip-ws-2" };
     const r = recorder(() => created);
-    expect(await r.controls.create("notes/harbor.md", "pov", () => void r.events.push("opened"))).toBe(true);
-    expect(r.sent).toEqual([{ type: "lre.workspace", op: "write", chatId: CHAT, path: "notes/harbor.md", text: "", readers: "pov" }]);
+    const landed: WorkspaceResult[] = [];
+    expect(
+      await r.controls.create("notes/harbor.md", (result) => {
+        r.events.push("opened");
+        landed.push(result);
+      }),
+    ).toBe(true);
+    expect(r.sent).toEqual([{ type: "lre.workspace", op: "write", chatId: CHAT, path: "notes/harbor.md", text: "" }]);
     expect(r.said).toEqual([["Created notes/harbor.md", created]]);
     expect(r.events).toEqual(["files", "opened", "changed"]);
-    expect(await recorder(() => null).controls.create("notes/harbor.md", "gm")).toBe(false);
+    // It landed: nothing is held.
+    expect(landed.map((result) => heldCreate("notes/harbor.md", result))).toEqual([null]);
+    expect(await recorder(() => null).controls.create("notes/harbor.md")).toBe(false);
+    // A global note goes by its ~/ path.
+    const global = recorder(() => ({ files: [GLOBAL_AGENTS], pending: false, undo: null }));
+    expect(await global.controls.create("~/AGENTS.md")).toBe(true);
+    expect(global.sent).toEqual([{ type: "lre.workspace", op: "write", chatId: CHAT, path: "~/AGENTS.md", text: "" }]);
+  });
+
+  test("a new note held while a reply is written keeps its pane open, as the empty note it will be, until the list holds it", async () => {
+    // Held for the turn: the answer's list is the head's, which doesn't hold it yet.
+    const held: WorkspaceResult = { files: FILES, pending: true, undo: null };
+    const r = recorder(() => held);
+    let waiting: string | null = null;
+    await r.controls.create("notes/harbor.md", (result) => void (waiting = heldCreate("notes/harbor.md", result)));
+    expect(waiting as string | null).toBe("notes/harbor.md");
+    // Without the held note, the pane's file isn't listed, so the pane would give way to the list.
+    expect(paneFile("notes/harbor.md", FILES, null)).toBeUndefined();
+    const shown = paneFile("notes/harbor.md", FILES, waiting);
+    expect(shown).toEqual({ path: "notes/harbor.md", hash: "", size: 0, pinned: false, learned: false, provenance: { role: "gm", turn: null } });
+    // Its pane: the empty note, its text to write meanwhile, and nothing else until it lands.
+    const page = pane(r.controls, { file: shown, held: true, text: "", draft: "" });
+    expect(propsOf(page.tree, Button).map((p) => textOf(p.children))).toEqual(["Revert", "Save"]);
+    expect(textOf(page.tree)).toContain("Waiting for the reply being written");
+    expect(propsOf(page.tree, "textarea")).toHaveLength(1);
+    // Once it lands, the listed file is the pane's, and an unrelated page or the session is none.
+    const landed: WorkspaceFileView = { ...DANNY, path: "notes/harbor.md", size: 0, provenance: { role: "gm", key: "gm.op-5-1", turn: 5 } };
+    expect(paneFile("notes/harbor.md", [...FILES, landed], waiting)).toBe(landed);
+    expect([paneFile("notes/other.md", FILES, waiting), paneFile(SESSION_PAGE, FILES, waiting), paneFile("notes/harbor.md", null, waiting), paneFile(null, FILES, waiting)]).toEqual([undefined, undefined, undefined, undefined]);
+    // A create that came back listed (no reply was being written) holds nothing.
+    expect(heldCreate("notes/harbor.md", { files: [...FILES, landed], pending: true, undo: null })).toBeNull();
   });
 });
 
@@ -346,6 +451,10 @@ describe("GM → Workspace: editing a file", () => {
     expect(propsOf(pane(controls, { file: ANCHOR }).tree, Button).map((p) => textOf(p.children))).toEqual(["Revert", "Save", "Pin", "Rename or move", "Delete"]);
     // The pins file is never pinned itself.
     expect(propsOf(pane(controls, { file: PINS }).tree, Button).map((p) => textOf(p.children))).toEqual(["Revert", "Save", "Rename or move", "Delete"]);
+    // Nor is a system file: it goes in the agent's system prompt, never with the pinned files.
+    const system = pane(controls, { file: GLOBAL_NARRATOR, text: "Keep it terse.", draft: "Keep it terse." }).tree;
+    expect(propsOf(system, Button).map((p) => textOf(p.children))).toEqual(["Revert", "Save", "Rename or move", "Delete"]);
+    expect(textOf(system)).toContain("System instructions for Narrator alone, in every chat of yours: it goes in the agent's system prompt");
   });
 
   test("Ctrl+S or ⌘S saves a changed draft and nothing else; the request sends the draft and hands the result to changed", async () => {
@@ -454,33 +563,33 @@ describe("GM → Workspace: the requests", () => {
     ]);
   });
 
-  test("Who may read it shows the file's readers and sends the one chosen", async () => {
+  test("a file's pane sends no readers and offers no choice of who may read it: every agent reads every file", async () => {
     const r = recorder(() => CHANGED);
     const page = pane(r.controls);
-    const [seg] = propsOf(page.tree, Seg);
-    expect([seg?.label, seg?.value, (seg?.options as { value: string; label: string }[] | undefined)?.map((o) => o.label)]).toEqual(["Who may read it", "everyone", ["GM only", "Everyone's, secrets marked", "Your character's"]]);
-    expect(textOf(page.tree)).toContain(READERS_NOTES.everyone);
-    (seg?.onChange as (v: string) => void)("gm");
+    expect(propsOf(page.tree, Seg)).toEqual([]);
+    expect(textOf(page.tree)).not.toContain("Who may read");
+    click(button(page.tree, "Save"));
     await Promise.all(page.runs);
-    expect(r.sent).toEqual([{ type: "lre.workspace", op: "readers", chatId: CHAT, path: "notes/marcus.md", readers: "gm" }]);
-    expect(r.said).toEqual([["Who may read notes/marcus.md: GM only", CHANGED]]);
+    expect(r.sent.every((body) => !("readers" in body))).toBe(true);
   });
 
-  test("Rename or move opens the path dialog, open only to a new, valid, free path on the same side of learned/", async () => {
+  test("Rename or move opens the path dialog, open only to a new, valid, free path in the same part: the story, learned/ or ~/", async () => {
     const r = recorder(() => CHANGED);
     const page = pane(r.controls);
     click(button(page.tree, "Rename or move"));
     expect(page.calls).toEqual([["move", null]]);
     const paths = FILES.map((f) => f.path);
-    const at = (value: string) => dialog({ mode: "move", from: MARCUS.path, value, readers: MARCUS.readers }, paths).tree;
+    const at = (value: string) => dialog({ mode: "move", from: MARCUS.path, value }, paths).tree;
     expect(propsOf(at(MARCUS.path), Seg)).toEqual([]);
     expect(textOf(at(MARCUS.path))).toContain("Rename or move notes/marcus.md");
-    expect([MARCUS.path, "notes/../marcus.md", FLEET.path, "learned/marcus.md", "notes/marcus-delgado.md"].map((v) => button(at(v), "Move").disabled)).toEqual([true, true, true, true, false]);
+    expect([MARCUS.path, "notes/../marcus.md", FLEET.path, "learned/marcus.md", "~/notes/marcus.md", "notes/marcus-delgado.md"].map((v) => button(at(v), "Move").disabled)).toEqual([true, true, true, true, true, false]);
     const why = (value: string) => propsOf(at(value), Field).find((p) => p.label === "Path")?.error;
     expect([MARCUS.path, FLEET.path, "notes/marcus-delgado.md"].map(why)).toEqual([null, "There is already a file at plans/fleet-contract.md.", null]);
     expect(moveProblem(MARCUS.path, MARCUS.path, paths)).toBe("Type the path to move it to.");
-    expect(moveProblem("learned/jordan.md", "notes/jordan.md", [])).toContain("learned/");
+    const part = "A file stays in its part: the chat's story, learned/, or the global workspace ~/. Write the file at its new path, then delete this one.";
+    expect([moveProblem("learned/jordan.md", "notes/jordan.md", []), moveProblem(MARCUS.path, "~/notes/marcus.md", []), moveProblem(GLOBAL_STYLE.path, "notes/style.md", []), moveProblem(GLOBAL_STYLE.path, "~/learned/style.md", []), moveProblem("learned/jordan.md", "~/jordan.md", [])]).toEqual([part, part, part, null, part]);
     expect(moveProblem("learned/jordan.md", "learned/people/jordan.md", [])).toBeNull();
+    expect(moveProblem(GLOBAL_STYLE.path, "~/style/house.md", [])).toBeNull();
     expect(moveProblem(MARCUS.path, "people/marcus delgado.md", paths)).toBeNull();
   });
 
@@ -493,7 +602,7 @@ describe("GM → Workspace: the requests", () => {
     expect(r.events).toEqual(["files", "moved", "changed"]);
   });
 
-  test("Delete sends the path and closes the pane, its Undo in the notice; a learned note asks first, having none", async () => {
+  test("Delete sends the path and closes the pane, its Undo in the notice; a kept note (learned/ or ~/) asks first, having none", async () => {
     const r = recorder(() => CHANGED);
     const page = pane(r.controls, { file: ANCHOR, text: "The Rusty Anchor", draft: "The Rusty Anchor" });
     click(button(page.tree, "Delete"));
@@ -515,5 +624,42 @@ describe("GM → Workspace: the requests", () => {
       ["deleted", null],
     ]);
     expect(learned.sent).toEqual([{ type: "lre.workspace", op: "delete", chatId: CHAT, path: "learned/jordan.md" }]);
+    // A global note's delete lands at once in every chat: it asks first too, and its pane says so.
+    const global = recorder(() => CHANGED);
+    const asked: string[] = [];
+    const globalPane = pane(global.controls, {
+      file: GLOBAL_STYLE,
+      text: "Short.",
+      draft: "Short.",
+      confirm: async (title, message) => {
+        asked.push(title, message);
+        return true;
+      },
+    });
+    expect(textOf(globalPane.tree)).toContain("A global note's change lands at once, with no Undo.");
+    click(button(globalPane.tree, "Delete"));
+    await Promise.all(globalPane.runs);
+    expect(asked).toEqual(["Delete the global note", "Delete ~/notes/style.md? A global note's change lands at once: there is no Undo."]);
+    expect(global.sent).toEqual([{ type: "lre.workspace", op: "delete", chatId: CHAT, path: "~/notes/style.md" }]);
+  });
+});
+
+describe("GM → Workspace: what it reads again on", () => {
+  test("the chat moving on, not each load of the GM view: one change reads the list, the session and the open file once", () => {
+    // The chat's state as the player's view has it, before and after a workspace write lands: its Undo chip is new.
+    const before = { status: "idle", journal: [{}, {}], chips: [{ id: "chip-1" }] } as unknown as Parameters<typeof gmReloadKey>[0];
+    const after = { ...before, chips: [...before.chips, { id: "chip-ws-1" }] } as unknown as Parameters<typeof gmReloadKey>[0];
+    const keys = (state: Parameters<typeof gmReloadKey>[0]) => workspaceReadKeys({ chatId: CHAT, reloadKey: gmReloadKey(state) });
+    // The GM view loads again after the change (a new `gm` each time), with the chat where it was: nothing to read again.
+    const first = keys(before);
+    const reloaded = keys({ ...before } as Parameters<typeof gmReloadKey>[0]);
+    expect(reloaded).toEqual(first);
+    expect(reloaded.every((key, i) => Object.is(key, first[i]))).toBe(true);
+    // The chat moving on (the change's Undo chip, a turn, a swipe) is read once.
+    expect(keys(after)).not.toEqual(first);
+    // The GM view is no key: what it holds never makes the tab read again.
+    expect(workspaceReadKeys({ chatId: CHAT, reloadKey: "k", gm: { edits: [] } } as Parameters<typeof workspaceReadKeys>[0])).toEqual([CHAT, "k"]);
+    // Another chat is read anew.
+    expect(workspaceReadKeys({ chatId: "chat-other", reloadKey: gmReloadKey(before) })).not.toEqual(first);
   });
 });

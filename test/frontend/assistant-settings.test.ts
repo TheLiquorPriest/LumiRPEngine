@@ -1,7 +1,8 @@
 // Settings → Agents → Assistant (INC1-SPEC C8, R6b): each control's patch under `agents.assistant`;
 // Default (and a budget limit's Every agent's) sends null and shows only while a value differs from
 // its default; what the page sends lands in the real settings store and reads back, and a reset reads
-// back the default (every agent's limit for the budget); and Settings home's line for the page.
+// back the default (every agent's limit for the budget); and Settings home's line for the page. The
+// assistant works out of world, so the page offers no choice of whose knowledge it reads.
 
 import { describe, expect, test } from "bun:test";
 import { LimitRow, OwnLimitRow } from "../../src/frontend/settings/agents";
@@ -9,8 +10,8 @@ import { AssistantSettingsBody, assistantBudgetPatch, assistantPatch, assistantS
 import { type Connection, ConnectionSelect } from "../../src/frontend/settings/steps";
 import { Button, HostModelPicker, HostSwitch, NumberStepper, Seg } from "../../src/frontend/components";
 import type { AgentBudget, AgentSettings, AssistantSettings } from "../../src/shared/agent-settings";
-import { AGENT_EFFORTS, assistantBudget, BUDGET_DEFS, defaultAgentSettings } from "../../src/shared/agent-settings";
-import type { JsonObject } from "../../src/shared/json";
+import { AGENT_EFFORTS, agentSettingsOf, assistantBudget, BUDGET_DEFS, defaultAgentSettings } from "../../src/shared/agent-settings";
+import { hasOwn, type JsonObject } from "../../src/shared/json";
 import { Rig } from "../support/rig";
 import { expand, labelled, press, propsOf, type Props } from "../support/tree";
 
@@ -22,7 +23,6 @@ const CONNECTIONS: Connection[] = [
 const DEFAULTS = defaultAgentSettings();
 const BUDGET_KEYS = Object.keys(BUDGET_DEFS) as (keyof AgentBudget)[];
 
-const KNOWLEDGE_SEG = "Whose knowledge the assistant reads";
 const APPLY_SEG = "How the assistant's changes land";
 
 /** Agent settings with some of the assistant's own. */
@@ -110,18 +110,11 @@ describe("Settings → Agents → Assistant patches", () => {
     expect(sent).toBeNull();
   });
 
-  test("knowledge offers each choice with its label and sends it", () => {
-    const seg = labelled(page(DEFAULTS), Seg, KNOWLEDGE_SEG);
-    expect(seg.value).toBe("everyone");
-    expect(seg.options).toEqual([
-      { value: "pov", label: "Your character's" },
-      { value: "everyone", label: "Everyone's, secrets marked" },
-      { value: "gm", label: "The GM's" },
-    ]);
-    for (const knowledge of ["pov", "everyone", "gm"]) {
-      press(seg, knowledge);
-      expect(take()).toEqual({ agents: { assistant: { knowledge } } });
-    }
+  test("offers no choice of whose knowledge it reads: it works out of world, and an earlier build's stored choice reads as none", () => {
+    const tree = page(DEFAULTS);
+    expect(propsOf(tree, Seg).map((p) => p.label)).toEqual([APPLY_SEG]);
+    expect(hasOwn(DEFAULTS.assistant, "knowledge")).toBe(false);
+    expect(agentSettingsOf({ assistant: { knowledge: "pov", apply: "at_once" } }).assistant).toEqual({ ...DEFAULTS.assistant, apply: "at_once" });
   });
 
   test("how changes land offers ask and at once and sends the one picked", () => {
@@ -185,17 +178,15 @@ describe("Settings → Agents → Assistant patches", () => {
     expect(labels(page(withAssistant({ effort: "high" })))).toEqual(["Reset reasoning effort to its default, Connection's own"]);
     expect(labels(page(withAssistant({ model: "deepseek-v4-flash" })))).toEqual(["Reset the connection and model to their default, Lumiverse's default connection"]);
 
-    const changed = page(withAssistant({ connectionId: "deepseek", model: "deepseek-v4-flash", effort: "off", knowledge: "gm", apply: "at_once", historyTokens: 8000, budget: { toolTurns: 4 } }));
+    const changed = page(withAssistant({ connectionId: "deepseek", model: "deepseek-v4-flash", effort: "off", apply: "at_once", historyTokens: 8000, budget: { toolTurns: 4 } }));
     expect(labels(changed)).toEqual([
       "Reset the connection and model to their default, Lumiverse's default connection",
       "Reset reasoning effort to its default, Connection's own",
-      "Reset whose knowledge it reads to its default, Everyone's, secrets marked",
       "Reset how its changes land to its default, Each waits for your Apply",
     ]);
     const resets: [string, JsonObject][] = [
       ["Reset the connection and model to their default, Lumiverse's default connection", { connectionId: null, model: null }],
       ["Reset reasoning effort to its default, Connection's own", { effort: null }],
-      ["Reset whose knowledge it reads to its default, Everyone's, secrets marked", { knowledge: null }],
       ["Reset how its changes land to its default, Each waits for your Apply", { apply: null }],
     ];
     for (const [label, fields] of resets) {
@@ -229,8 +220,6 @@ describe("Settings → Agents → Assistant in the settings store", () => {
     agents = await save(take());
     press(only(propsOf(page(agents), "select")), { currentTarget: { value: "high" } });
     agents = await save(take());
-    press(labelled(page(agents), Seg, KNOWLEDGE_SEG), "pov");
-    agents = await save(take());
     press(labelled(page(agents), Seg, APPLY_SEG), "at_once");
     agents = await save(take());
     press(labelled(historyRow(page(agents)), NumberStepper, "History tokens (tokens)"), 8000);
@@ -243,14 +232,14 @@ describe("Settings → Agents → Assistant in the settings store", () => {
     press(labelled(budgetRow(page(agents), "callTokensOut"), NumberStepper, "Answer per call (tokens)"), 2048);
     agents = await save(take());
 
-    expect(agents.assistant).toEqual({ connectionId: "deepseek", model: "deepseek-v4-flash", effort: "high", knowledge: "pov", apply: "at_once", historyTokens: 8000, budget: { toolTurns: "none", callTokensOut: 2048 } });
+    expect(agents.assistant).toEqual({ connectionId: "deepseek", model: "deepseek-v4-flash", effort: "high", apply: "at_once", historyTokens: 8000, budget: { toolTurns: "none", callTokensOut: 2048 } });
     expect(assistantBudget(agents)).toEqual({ ...DEFAULTS.budget, toolTurns: "none", callTokensOut: 2048 });
     expect(agents.budget).toEqual(DEFAULTS.budget);
     // The page shows what was saved.
     const shown = page(agents);
     expect(only(propsOf(shown, ConnectionSelect)).value).toBe("deepseek");
     expect(labelled(shown, HostModelPicker, "Model").value).toBe("deepseek-v4-flash");
-    expect([only(propsOf(shown, "select")).value, labelled(shown, Seg, KNOWLEDGE_SEG).value, labelled(shown, Seg, APPLY_SEG).value]).toEqual(["high", "pov", "at_once"]);
+    expect([only(propsOf(shown, "select")).value, labelled(shown, Seg, APPLY_SEG).value]).toEqual(["high", "at_once"]);
     expect(propsOf(shown, OwnLimitRow).filter((p) => p.own !== undefined).map((p) => [p.id, p.own])).toEqual([
       ["callTokensOut", 2048],
       ["toolTurns", "none"],
@@ -279,11 +268,11 @@ describe("Settings → Agents → Assistant in the settings store", () => {
 });
 
 describe("Settings home's line for the Assistant page", () => {
-  test("says where it runs, whose knowledge it reads and how its changes land", () => {
-    expect(assistantSummary(DEFAULTS.assistant, CONNECTIONS)).toBe("Lumiverse's default connection · knowledge: everyone's, secrets marked · changes: each waits for your Apply");
-    expect(assistantSummary(withAssistant({ connectionId: "deepseek" }).assistant, CONNECTIONS)).toBe("Deepseek · deepseek-v4-flash · knowledge: everyone's, secrets marked · changes: each waits for your Apply");
-    expect(assistantSummary(withAssistant({ connectionId: "harbor", model: "deepseek-v4-flash", knowledge: "gm", apply: "at_once" }).assistant, CONNECTIONS)).toBe("Harbor relay · deepseek-v4-flash · knowledge: the GM's · changes: at once, with an Undo chip");
+  test("says where it runs and how its changes land", () => {
+    expect(assistantSummary(DEFAULTS.assistant, CONNECTIONS)).toBe("Lumiverse's default connection · changes: each waits for your Apply");
+    expect(assistantSummary(withAssistant({ connectionId: "deepseek" }).assistant, CONNECTIONS)).toBe("Deepseek · deepseek-v4-flash · changes: each waits for your Apply");
+    expect(assistantSummary(withAssistant({ connectionId: "harbor", model: "deepseek-v4-flash", apply: "at_once" }).assistant, CONNECTIONS)).toBe("Harbor relay · deepseek-v4-flash · changes: at once, with an Undo chip");
     // Before the connections come, or once Lumiverse no longer has it: its id.
-    expect(assistantSummary(withAssistant({ connectionId: "harbor", knowledge: "pov" }).assistant, [])).toBe("harbor · knowledge: your character's · changes: each waits for your Apply");
+    expect(assistantSummary(withAssistant({ connectionId: "harbor" }).assistant, [])).toBe("harbor · changes: each waits for your Apply");
   });
 });

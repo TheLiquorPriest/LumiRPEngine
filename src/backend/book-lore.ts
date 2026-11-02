@@ -13,14 +13,14 @@
 // they stand.
 
 import type { ChatId, UserId } from "../shared/ids";
-import { hasOwn, isRecord } from "../shared/json";
+import { deepFreeze, hasOwn, isRecord } from "../shared/json";
 import { bookLoreFieldsOf, bookTextHash, editedBookFields, engineWroteEntry, loreBooksOf, loreIsSecret, loreSourceOf, secretCopyOf, withBookLoreFields, type BookFieldsEdit, type BookLoreFields } from "../shared/lore";
 import type { LoreMarkChange } from "../shared/protocol";
 import { parseSecretMarks, publicText, SecretMarkError, unreadableMarks, wholeEntrySecret, writeSecretMark, type MarkNamesSource, type SecretMark, type SecretMarkInput } from "../shared/secret-marks";
 import type { LoreEntryDef, LorePin, WorldDoc } from "../shared/world";
 import type { LoreBooks } from "../shared/settings";
 import type { HostBookEntry, HostPort } from "./host";
-import { copiedOriginals, heldTo, markFields, secrecyParts, secretTexts, textOf, textParts } from "./lore-secrets";
+import { copiedOriginals, heldTextOf, heldTo, markFields, secrecyParts, secretTexts, textOf, textParts } from "./lore-secrets";
 
 /** The words a book entry with no comment is titled by. */
 const TITLE_WORDS = 8;
@@ -188,9 +188,11 @@ export function bookLoreEntries(e: HostBookEntry, parts: readonly BookLoreFields
  * chat's books, the global ones, then the books an earlier build copied the world's lore from (so a
  * world that has such copies reads the books themselves now); never the engine's own, nor one that is
  * gone. The user's books setting (`picked`, Settings → Lore) narrows them: `"auto"` reads
- * them all, a list only those of them it names. `gone`: listed books that are gone.
+ * them all, a list only those of them it names. `gone`: listed books that are gone. `updated`: each
+ * read book's last change as the host stamps it (`books.list`), which says when a kept read of it
+ * is stale (`BookReads`).
  */
-export async function loreBookIds(host: Pick<HostPort, "books" | "chats">, world: WorldDoc, chatId: ChatId | null, userId: UserId, picked: LoreBooks): Promise<{ read: string[]; gone: string[] }> {
+export async function loreBookIds(host: Pick<HostPort, "books" | "chats">, world: WorldDoc, chatId: ChatId | null, userId: UserId, picked: LoreBooks): Promise<{ read: string[]; gone: string[]; updated: Map<string, number | null> }> {
   const listed = loreBooksOf(world);
   const copied = Object.values(world.lore).flatMap((entry) => {
     const source = loreSourceOf(entry.source);
@@ -201,7 +203,59 @@ export async function loreBookIds(host: Pick<HostPort, "books" | "chats">, world
   const [books, global] = await Promise.all([host.books.list(userId), host.books.global(userId)]);
   const known = new Map(books.map((b) => [b.id, b.engine]));
   const ids = [...new Set([...listed, ...chat, ...global, ...copied])];
-  return { read: ids.filter((id) => known.get(id) === false && (picked === "auto" || picked.includes(id))), gone: listed.filter((id) => !known.has(id)) };
+  const read = ids.filter((id) => known.get(id) === false && (picked === "auto" || picked.includes(id)));
+  return { read, gone: listed.filter((id) => !known.has(id)), updated: bookStamps(books, read) };
+}
+
+/** The host's last-change stamp of each of `ids` among `books`. */
+export function bookStamps(books: readonly { id: string; updated: number | null }[], ids: readonly string[]): Map<string, number | null> {
+  const of = new Map(books.map((b) => [b.id, b.updated]));
+  return new Map(ids.map((id) => [id, of.get(id) ?? null]));
+}
+
+/**
+ * Each World Info book's entries as last read, per user, kept until the book changes (DESIGN §9.6),
+ * frozen and shared, so the lore made of each entry is made once (`entryLore`): every turn, Minds run
+ * and agent read reads lore live, and reading and hashing every book each time is most of its cost.
+ * The host's stamp of a book (`books.list` `updated`) moves whenever it or any of its entries
+ * changes, in whole seconds; a read made within the second its stamp names is read again the next
+ * time, since a change later in that second wouldn't move it, and a book the host gives no stamp is
+ * read every time. The memory budget lets every one go (`trim`).
+ */
+export class BookReads {
+  private readonly kept = new Map<string, { updated: number; at: number; entries: readonly HostBookEntry[] }>();
+
+  async entries(host: Pick<HostPort, "books">, bookId: string, userId: UserId, updated: number | null): Promise<readonly HostBookEntry[]> {
+    const key = `${userId}\u0000${bookId}`;
+    const kept = this.kept.get(key);
+    if (updated !== null && kept && kept.updated === updated && updated < kept.at) return kept.entries;
+    const at = Math.floor(Date.now() / 1000);
+    const entries = deepFreeze(await host.books.entries(bookId, userId));
+    if (updated !== null) this.kept.set(key, { updated, at, entries });
+    else this.kept.delete(key);
+    return entries;
+  }
+
+  /** Lets every kept read go; how many books' went. */
+  trim(): number {
+    const n = this.kept.size;
+    this.kept.clear();
+    return n;
+  }
+}
+
+/** The lore last made of each kept (frozen) book entry, with what it was made with: the world it names holders by and the parts holding it back. */
+const MADE = new WeakMap<HostBookEntry, { world: MarkNamesSource; parts: string; lore: LoreEntryDef[] }>();
+
+/** `bookLoreEntries`, made once per kept entry for the same world and parts; an entry of a read not kept (not frozen) is made each time. */
+function entryLore(e: HostBookEntry, parts: readonly BookLoreFields[], world: MarkNamesSource): LoreEntryDef[] {
+  if (!Object.isFrozen(e)) return bookLoreEntries(e, parts, world);
+  const key = JSON.stringify(parts);
+  const made = MADE.get(e);
+  if (made && made.world === world && made.parts === key) return made.lore;
+  const lore = deepFreeze(bookLoreEntries(e, parts, world));
+  MADE.set(e, { world, parts: key, lore });
+  return lore;
 }
 
 /** The World Info entry an earlier build's copy of one (a world entry with a `book` source) stands for, by the copy's lore id in `world`; null for any other id. */
@@ -250,25 +304,27 @@ export function recordedLoreId(world: WorldDoc, loreId: string): string {
  * already, a world entry's or a twin's, is read once, where it first comes. A book that can't be read
  * gives nothing, and the log says so; a listed book that is gone is named too. When the chat's books
  * can't be told (the books not listed, say), none is read and the run goes on with the world's own lore.
+ * With `reads`, a book unchanged since it was last read isn't read again (`BookReads`).
  */
-export async function liveLore(host: Pick<HostPort, "books" | "chats" | "log">, world: WorldDoc, chatId: ChatId | null, userId: UserId, picked: LoreBooks): Promise<WorldDoc> {
+export async function liveLore(host: Pick<HostPort, "books" | "chats" | "log">, world: WorldDoc, chatId: ChatId | null, userId: UserId, picked: LoreBooks, reads?: BookReads): Promise<WorldDoc> {
   const books = await loreBookIds(host, world, chatId, userId, picked).catch((error: unknown): { read: string[]; gone: string[] } => {
     host.log("warn", `[LumiRPEngine] the World Info books this chat reads weren't told, so none is read as lore this run: ${error instanceof Error ? error.message : String(error)}`, userId);
     return { read: [], gone: [] };
   });
-  return (await booksLore(host, world, books, userId)).world;
+  return (await booksLore(host, world, books, userId, reads)).world;
 }
 
 /**
  * `world` with the lore of the books `books.read` names, read live as `liveLore` reads a chat's (a
  * gone one of `books.gone` logged), and the books' entries as they were read, the engine's own left
- * out: what the lore index is made from too (`lore-routing.ts`).
+ * out: what the lore index is made from too (`lore-routing.ts`). With `reads`, a book whose stamp
+ * (`books.updated`) is the one it was last read at is taken as read then (`BookReads`).
  */
-export async function booksLore(host: Pick<HostPort, "books" | "log">, world: WorldDoc, books: { read: readonly string[]; gone: readonly string[] }, userId: UserId): Promise<{ world: WorldDoc; entries: HostBookEntry[] }> {
+export async function booksLore(host: Pick<HostPort, "books" | "log">, world: WorldDoc, books: { read: readonly string[]; gone: readonly string[]; updated?: ReadonlyMap<string, number | null> }, userId: UserId, reads?: BookReads): Promise<{ world: WorldDoc; entries: HostBookEntry[] }> {
   for (const id of books.gone) host.log("warn", `[LumiRPEngine] lore book ${id} the world lists is gone: no call reads it (Build → Lore → Lore books)`, userId);
   const read = await Promise.all(
     books.read.map((id) =>
-      host.books.entries(id, userId).catch((error: unknown) => {
+      (reads ? reads.entries(host, id, userId, books.updated?.get(id) ?? null) : host.books.entries(id, userId)).catch((error: unknown) => {
         host.log("warn", `[LumiRPEngine] lore book ${id} wasn't read: ${error instanceof Error ? error.message : String(error)}`, userId);
         return [];
       }),
@@ -286,12 +342,12 @@ export async function booksLore(host: Pick<HostPort, "books" | "log">, world: Wo
   const seen = new Set(Object.values(lore).map((entry) => textOf(entry.content)));
   // A book's entry or mark whose text is read already is left out: its twin reads where it first came.
   const keep = (entry: LoreEntryDef): void => {
-    const text = textOf(entry.content);
+    const text = heldTextOf(entry, entry.content);
     if (hasOwn(lore, entry.id) || (text !== "" && seen.has(text))) return;
     lore[entry.id] = entry;
     seen.add(text);
   };
-  for (const e of live.values()) for (const entry of bookLoreEntries(e, secrecyParts(e, texts), world)) keep(entry);
+  for (const e of live.values()) for (const entry of entryLore(e, secrecyParts(e, texts), world)) keep(entry);
   const lorePins = pinsToBooks(world);
   return { world: { ...world, lore, ...(lorePins ? { lorePins } : {}) }, entries: [...live.values()].filter((e) => !engineWroteEntry(e.extensions)) };
 }

@@ -1406,19 +1406,20 @@ export function extractionView(settings: UserSettings): Record<ChangeType, Extra
 // ---------------------------------------------------------------- GM → Assistant and GM → Workspace (INC1-SPEC C8)
 
 /** A workspace change as the agents' writer takes it (its `ws_*` operations): GM → Workspace's own, or what a proposal's workspace change makes when it is applied. */
-export type PreviewFileChange = { kind: "ws_write"; path: string; text: string; readers?: AgentKnowledge } | { kind: "ws_delete"; path: string } | { kind: "ws_move"; from: string; to: string } | { kind: "ws_pin"; path: string; pinned: boolean } | { kind: "ws_readers"; path: string; readers: AgentKnowledge };
+export type PreviewFileChange = { kind: "ws_write"; path: string; text: string } | { kind: "ws_delete"; path: string } | { kind: "ws_move"; from: string; to: string } | { kind: "ws_pin"; path: string; pinned: boolean };
 
 /** An operation's key as the writer's `opKey` makes it: the hash of the operation as given, so the same operation is the same key. */
 export function previewOpKey(op: PreviewFileChange | { kind: "gm_edit"; op: Record<string, string | number> }): string {
   return hashJson(["lre.agent.op", op]);
 }
 
-/** Port Alder's workspace files: what the assistant noted on Marcus (pinned) and drafted for the Rusty Anchor, the GM's own plan for the fleet contract, and a learned note on how Jordan Ellis plays. */
+/** Port Alder's workspace files: what the assistant noted on Marcus (pinned) and drafted for the Rusty Anchor, the GM's own plan for the fleet contract, a learned note on how Jordan Ellis plays, and the user's global AGENTS.md. */
 const MARCUS_NOTE = "# Marcus Delgado\n\n- Owns Alder Automotive; the township fleet contract would carry the shop through the winter.\n- Takes calls in the parking lot and won't say who from (What Marcus isn't saying).\n- Trusts Jordan with the truck that won't start; hasn't told Danny Okafor about the letter.\n";
 const RUSTY_ANCHOR_DRAFT = "# The Rusty Anchor\n\nThe bar at the end of Harbor Street where the marina crews drink once the boats are in. Dale Whitcomb keeps a stool by the window; Sam Reyes tends bar on weekends.\n";
 const FLEET_PLAN = "# The Fleet Contract\n\n1. Fix the township pickup (the truck that won't start).\n2. Pass Priya's inspection at Alder Township Hall.\n3. Service the township fleet: six trucks, two a week.\n";
 const DANNY_NOTE = "# Danny Okafor\n\n- At Bluebird Coffee this afternoon, not the shop.\n- Doesn't know what Marcus isn't saying; suspects something from the calls.\n";
 const PLAY_NOTE = "# How Jordan Ellis plays\n\n- Asks around before acting; likes to be told who knows what.\n- Keeps the shop's hours: mornings at the garage, evenings at Bluebird Coffee.\n";
+const AGENTS_NOTE = "# Every agent\n\n- Keep the town small: people know each other, and news travels by the coffee counter.\n- Name a place or a person the first time they matter.\n";
 
 /** The changes the assistant's notes on Marcus were: written, then pinned. */
 const MARCUS_WRITE: PreviewFileChange = { kind: "ws_write", path: "notes/marcus.md", text: MARCUS_NOTE };
@@ -1426,9 +1427,9 @@ const MARCUS_PIN: PreviewFileChange = { kind: "ws_pin", path: "notes/marcus.md",
 /** The open proposal's workspace change: the assistant's note on Danny. */
 const DANNY_WRITE: PreviewFileChange = { kind: "ws_write", path: "notes/danny.md", text: DANNY_NOTE };
 
-/** A workspace file as `listWorkspace` lists it: its body's hash and size in characters, whose knowledge may read it, whether it is a learned note, and who wrote it on which reply. */
-function workspaceFile(path: string, text: string, pinned: boolean, readers: AgentKnowledge, provenance: WorkspaceFileView["provenance"]): WorkspaceFileView {
-  return { path, hash: blobHash(text), size: text.length, pinned, readers, learned: isLearnedPath(path), provenance };
+/** A workspace file as `listWorkspace` lists it: its body's hash and size in characters, whether it is a learned note, and who wrote it on which reply. */
+function workspaceFile(path: string, text: string, pinned: boolean, provenance: WorkspaceFileView["provenance"]): WorkspaceFileView {
+  return { path, hash: blobHash(text), size: text.length, pinned, learned: isLearnedPath(path), provenance };
 }
 
 /** The chat's workspace as the preview keeps it: its files as GM → Workspace lists them, and their bodies, by path. */
@@ -1439,18 +1440,19 @@ export interface PreviewWorkspace {
 
 /**
  * GM → Workspace's files and their bodies, by path, sorted as the backend lists them: the
- * assistant's note on Marcus (written on reply 4 with everyone's knowledge, and pinned), its Rusty
- * Anchor draft (reply 6), the GM's own fleet-contract plan, written before any reply and GM only,
- * and the assistant's learned note on how Jordan Ellis plays, readable as Jordan knows the world.
+ * assistant's note on Marcus (written on reply 4, and pinned), its Rusty Anchor draft (reply 6),
+ * the GM's own fleet-contract plan, written before any reply, the assistant's learned note on how
+ * Jordan Ellis plays, and the global workspace's AGENTS.md, which every agent of every chat is told.
  */
 export function workspaceFixture(): PreviewWorkspace {
-  const texts: Record<string, string> = { "learned/how-jordan-plays.md": PLAY_NOTE, "lore-drafts/rusty-anchor.md": RUSTY_ANCHOR_DRAFT, "notes/marcus.md": MARCUS_NOTE, "plans/fleet-contract.md": FLEET_PLAN };
+  const texts: Record<string, string> = { "learned/how-jordan-plays.md": PLAY_NOTE, "lore-drafts/rusty-anchor.md": RUSTY_ANCHOR_DRAFT, "notes/marcus.md": MARCUS_NOTE, "plans/fleet-contract.md": FLEET_PLAN, "~/AGENTS.md": AGENTS_NOTE };
   return {
     files: [
-      workspaceFile("learned/how-jordan-plays.md", PLAY_NOTE, false, "pov", { role: "assistant", turn: null }),
-      workspaceFile("lore-drafts/rusty-anchor.md", RUSTY_ANCHOR_DRAFT, false, "everyone", { role: "assistant", key: previewOpKey({ kind: "ws_write", path: "lore-drafts/rusty-anchor.md", text: RUSTY_ANCHOR_DRAFT }), turn: 6 }),
-      workspaceFile("notes/marcus.md", MARCUS_NOTE, true, "everyone", { role: "assistant", key: previewOpKey(MARCUS_WRITE), turn: 4 }),
-      workspaceFile("plans/fleet-contract.md", FLEET_PLAN, false, "gm", { role: "gm", key: previewOpKey({ kind: "ws_write", path: "plans/fleet-contract.md", text: FLEET_PLAN }), turn: null }),
+      workspaceFile("learned/how-jordan-plays.md", PLAY_NOTE, false, { role: "assistant", turn: null }),
+      workspaceFile("lore-drafts/rusty-anchor.md", RUSTY_ANCHOR_DRAFT, false, { role: "assistant", key: previewOpKey({ kind: "ws_write", path: "lore-drafts/rusty-anchor.md", text: RUSTY_ANCHOR_DRAFT }), turn: 6 }),
+      workspaceFile("notes/marcus.md", MARCUS_NOTE, true, { role: "assistant", key: previewOpKey(MARCUS_WRITE), turn: 4 }),
+      workspaceFile("plans/fleet-contract.md", FLEET_PLAN, false, { role: "gm", key: previewOpKey({ kind: "ws_write", path: "plans/fleet-contract.md", text: FLEET_PLAN }), turn: null }),
+      workspaceFile("~/AGENTS.md", AGENTS_NOTE, false, { role: "gm", turn: null }),
     ],
     texts,
   };

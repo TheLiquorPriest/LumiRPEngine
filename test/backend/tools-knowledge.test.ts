@@ -1,10 +1,9 @@
 // The knowledge read tools against Port Alder (INC1-SPEC R3a, K1), with who knows the shop's debt
 // seeded as GM → Minds' own tests seed it (`gm-knowledge.test.ts`): Marcus keeps the debt from
 // everyone, Priya only guesses at it from the rumour, Danny half-believes the rumour Priya told him
-// and keeps it from Marcus, and Danny told Jordan. Under the player character's knowledge only what
-// Jordan holds, with only his own holding, and nothing of anyone else's; under everyone's, every
-// holder, a fact someone keeps marked in the user's wording; under the GM's, every fact plain with
-// its truth, and what each holding rests on.
+// and keeps it from Marcus, and Danny told Jordan. Under everyone's view, every holder, a fact
+// someone keeps marked in the user's wording; under the GM's, every fact plain with its truth, and
+// what each holding rests on.
 
 import { describe, expect, test } from "bun:test";
 import { calendarOf, formatClock } from "../../src/engine/calendar";
@@ -69,29 +68,6 @@ async function seed(rig: Rig, chatId: string): Promise<string> {
 const MARKED_DEBT = secretMarkText(debt.claim, ["Marcus Delgado"], "everyone", SECRET_MARK_WORDING);
 
 describe("knowledge_who_knows and knowledge_what_knows: who knows the shop's debt", () => {
-  test("under the player character's knowledge, only what Jordan holds, with only his own holding: never the debt, nor anyone else's knowledge", async () => {
-    const { rig, chatId } = await alderChat();
-    const since = await seed(rig, chatId);
-    const jordans = { claim: rumorClaim, holders: [{ who: JORDAN, how: "told", by: DANNY, since, belief: "true", confidence: 0.8, suspicion: false }] };
-    // By words of the claim (a possessive's "s" aside), and by whom it is about.
-    for (const about of ["shop's debt", "shop", "Marcus"]) {
-      const out = await callTool(rig, chatId, "pov", "knowledge_who_knows", { about });
-      expect(out.error).toBeUndefined();
-      expect(out.text).not.toContain("112,000");
-      expect(out.text).not.toContain(`${MARK}: the shop is`);
-      expect({ about, answer: JSON.parse(out.text) }).toEqual({ about, answer: { facts: [jordans] } });
-    }
-    // Asked for by its id, the debt reads as a fact there isn't.
-    const byId = await callTool(rig, chatId, "pov", "knowledge_who_knows", { about: debt.id });
-    expect(JSON.parse(byId.text)).toEqual({ facts: [] });
-    expect(byId.text).not.toContain("112,000");
-
-    // What anyone else knows is beyond him; what he knows himself is his.
-    expect(await callTool(rig, chatId, "pov", "knowledge_what_knows", { person: "Marcus" })).toEqual({ text: "Jordan Ellis doesn't know that, and you read the world as Jordan Ellis knows it.", error: true });
-    expect(await answerOf(rig, chatId, "pov", "knowledge_what_knows", { person: "Jordan" })).toEqual({ who: JORDAN, facts: [{ claim: rumorClaim, how: "told", by: DANNY, since, belief: "true", confidence: 0.8, suspicion: false }] });
-    expect(await answerOf(rig, chatId, "pov", "knowledge_what_knows", { person: "Jordan", about: "pontoon" })).toEqual({ who: JORDAN, facts: [] });
-  });
-
   test("under everyone's knowledge, every holder: the debt marked as Marcus's, kept from everyone, Priya's guess a suspicion; the rumour plain, as no one sure of it keeps it", async () => {
     const { rig, chatId } = await alderChat();
     const since = await seed(rig, chatId);
@@ -139,7 +115,7 @@ describe("knowledge_who_knows and knowledge_what_knows: who knows the shop's deb
     });
   });
 
-  test("a teller the player character can't see reads as none, and whom it keeps a fact from leaves them out; everyone's knowledge marks them, the GM's names them plainly", async () => {
+  test("a secret teller and whom a fact is kept from: everyone's view marks them, the GM's names them plainly", async () => {
     const { rig, chatId } = await alderChat({ put: { entities: { vex_morrow: VEX } } });
     const { at, since } = await now(rig, chatId);
     const letterClaim = `${MARK}: someone slid an unsigned letter under the shop door`;
@@ -149,14 +125,6 @@ describe("knowledge_who_knows and knowledge_what_knows: who knows the shop's deb
       learn({ who: [POV], fact: letter.id, how: "told", by: "vex_morrow", evidence: [], belief: "true", confidence: 0.9, keptFrom: ["vex_morrow", "marcus_delgado"], at }),
     ]);
     expect(rig.rt.ledger.errors).toEqual([]);
-
-    const pov = await callTool(rig, chatId, "pov", "knowledge_what_knows", { person: "Jordan", about: "letter" });
-    expect(JSON.parse(pov.text)).toEqual({ who: JORDAN, facts: [{ claim: letterClaim, how: "told", by: null, since, belief: "true", confidence: 0.9, suspicion: false, keptFrom: ["Marcus Delgado"] }] });
-    expect(pov.text).not.toMatch(/Vex|Morrow/);
-    expect((await callTool(rig, chatId, "pov", "knowledge_who_knows", { about: "letter" })).text).not.toMatch(/Vex|Morrow/);
-    // Nor is he anyone the player character's knowledge may ask about.
-    expect(await callTool(rig, chatId, "pov", "knowledge_what_knows", { person: "Vex Morrow" })).toEqual({ text: "No such person here: Vex Morrow.", error: true });
-
     // Jordan holds it surely and keeps it from Vex and Marcus: a secret he knows, kept from them.
     const vex = secretMarkText("Vex Morrow", [], "everyone", SECRET_MARK_WORDING);
     expect(await answerOf(rig, chatId, "everyone", "knowledge_who_knows", { about: letter.id })).toEqual({

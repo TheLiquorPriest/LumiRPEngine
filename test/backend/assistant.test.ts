@@ -1,10 +1,11 @@
 // GM → Assistant, the backend (INC1-SPEC R6a; AGENT-LOOP-PLAN §11, Increment 1's acceptance), on a
-// Port Alder chat with a scripted model: the three questions answered from the tools; the shop's
-// debt under the player character's knowledge and under everyone's; a change proposed, previewed,
-// applied with its Undo chip and undone; a change made while a turn runs held until the turn closes,
-// the turn kept; the loop detector, a budget and Cancel stopping an answer; an edited system prompt
-// sent, and its reset; the thread's history within History tokens; and a Branch keeping the thread,
-// whose blobs the sweep keeps. Starter-world names only.
+// Port Alder chat with a scripted model: the three questions answered from the tools; the
+// assistant out of world, reading everything the GM can whatever an earlier build's knowledge
+// setting said; a change proposed, previewed, applied with its Undo chip and undone; a change made
+// while a turn runs held until the turn closes, the turn kept; the loop detector, a budget and
+// Cancel stopping an answer; an edited system prompt sent, and its reset; the thread's history
+// within History tokens, every message of it; and a Branch keeping the thread, whose blobs the sweep
+// keeps. Starter-world names only.
 
 import { describe, expect, test } from "bun:test";
 import { historyOf } from "../../src/backend/agents/assistant";
@@ -22,8 +23,6 @@ import { LEDGER_NAMESPACE, type LedgerEvent } from "../../src/shared/ledger";
 import { factId, type KnowledgeFact, MINDS_EVENTS, type MindsGmView } from "../../src/shared/minds";
 import { GM_TEXT, promptDef } from "../../src/shared/prompts";
 import { type AssistantView, type BackendToFrontend, WRITE_REFUSED } from "../../src/shared/protocol";
-import { WRITE_NOTE } from "../../src/shared/agent-tools-write";
-import { SECRET_MARK_WORDING, secretMarkText } from "../../src/shared/secret-marks";
 import { nounFor } from "../../src/shared/words";
 import type { QuietScript } from "../support/fake-host";
 import { Rig } from "../support/rig";
@@ -126,7 +125,9 @@ describe("GM → Assistant answers from the tools", () => {
     model(rig, fromTool("knowledge_who_knows", { about: "shop debt" }));
     const debt = (await ask(rig, chatId, "Who knows about the shop's debt?")).thread.at(-1);
     expect(debt).toMatchObject({ role: "assistant", status: "answered", trace: [{ tool: "knowledge_who_knows", summary: 'about: "shop debt"' }] });
-    expect(debt?.text).toContain(secretMarkText(CLAIM, [MARCUS], "everyone", SECRET_MARK_WORDING));
+    // Read with the GM's view: the fact whole, with who keeps it from whom.
+    expect(debt?.text).toContain(CLAIM);
+    expect(debt?.text).toContain('"keptFrom":"everyone"');
 
     model(rig, fromTool("people_where", { person: "Danny" }));
     const where = (await ask(rig, chatId, "Where is Danny?")).thread.at(-1);
@@ -164,22 +165,24 @@ describe("GM → Assistant answers from the tools", () => {
     expect(rig.rt.ledger.errors).toEqual([]);
   });
 
-  test("on the player character's knowledge the debt isn't revealed; on everyone's it shows as Marcus's, kept from everyone", async () => {
-    for (const knowledge of ["pov", "everyone"] as const) {
-      const { rig, chatId } = await alder({ agents: { assistant: { knowledge } } });
+  test("it works out of world: it reads every secret whole, with who keeps it, whatever knowledge an earlier build's settings named, and its system prompt says so", async () => {
+    for (const stored of [null, "pov", "everyone"] as const) {
+      // An earlier build's knowledge setting is read and dropped.
+      const { rig, chatId } = await alder(stored === null ? {} : { agents: { assistant: { knowledge: stored } } });
+      expect(hasOwn((await rig.rt.settings.get(rig.host.userId)).agents.assistant, "knowledge")).toBe(false);
       await seedDebt(rig, chatId);
       const asked = model(rig, fromTool("knowledge_who_knows", { about: "shop debt" }));
       const answer = (await ask(rig, chatId, "Who knows about the shop's debt?")).thread.at(-1)?.text ?? "";
       const told = asked[1] ? resultsOf(asked[1]).join("\n") : "";
-      if (knowledge === "pov") {
-        for (const seen of [answer, told]) expect(seen).not.toContain(MARK);
-      } else {
-        expect(told).toContain(secretMarkText(CLAIM, [MARCUS], "everyone", SECRET_MARK_WORDING));
-        expect(answer).toContain(secretMarkText(CLAIM, [MARCUS], "everyone", SECRET_MARK_WORDING));
+      for (const seen of [answer, told]) {
+        expect(seen).toContain(CLAIM);
+        expect(seen).toContain('"keptFrom":"everyone"');
       }
-      // The system prompt says whose knowledge it reads with.
-      const pov = "Jordan Ellis";
-      expect(asked[0]?.messages[0]?.content).toContain(renderPrompt(GM_TEXT.knowledge[knowledge], {}, { world: "Port Alder", pov }));
+      // The system prompt: outside the story, and nothing kept from it.
+      const system = asked[0]?.messages[0]?.content ?? "";
+      expect(system).toContain(renderPrompt(GM_TEXT.system, {}, { world: "Port Alder", pov: "Jordan Ellis" }));
+      expect(system).toContain("outside the story");
+      expect(system).toContain("nothing in it is kept from you");
     }
   });
 });
@@ -332,14 +335,13 @@ describe("its changes", () => {
     ]);
     expect(await counts()).toEqual([[0, 1, 1, 0]]);
     // The note stays: no Undo reaches the learned area.
-    expect((await listWorkspace(rig.rt, { userId: user, chatId, knowledge: "gm" })).map((f) => f.path)).toContain(path);
+    expect((await listWorkspace(rig.rt, { userId: user, chatId })).map((f) => f.path)).toContain(path);
   });
 
   test("a change held for a turn that the turn's close refuses waits for Apply or No again, each change saying why, and counts nothing", async () => {
     const { rig, chatId } = await alder({ agents: { assistant: { apply: "at_once" } } });
     const path = "notes/danny.md";
-    // Shared with everyone's knowledge, which the assistant reads with: a note of the GM's is the GM's alone until it is.
-    rig.body(await rig.send({ type: "lre.workspace", op: "write", chatId, path, text: "Danny fixes boats.", readers: "everyone" }));
+    rig.body(await rig.send({ type: "lre.workspace", op: "write", chatId, path, text: "Danny fixes boats." }));
     await rig.turn(chatId, "I look around.", "The street is quiet.");
     rig.host.sendUser(chatId, "I wave.");
     await rig.host.settle();
@@ -377,7 +379,7 @@ describe("its changes", () => {
     const { rig, chatId } = await alder({ agents: { assistant: { apply: "at_once" } } });
     const path = "notes/danny.md";
     const learned = "learned/danny.md";
-    rig.body(await rig.send({ type: "lre.workspace", op: "write", chatId, path, text: "Danny fixes boats.", readers: "everyone" }));
+    rig.body(await rig.send({ type: "lre.workspace", op: "write", chatId, path, text: "Danny fixes boats." }));
     await rig.turn(chatId, "I look around.", "The street is quiet.");
     rig.host.sendUser(chatId, "I wave.");
     await rig.host.settle();
@@ -408,12 +410,12 @@ describe("its changes", () => {
       [undefined, "write_refused"],
       [true, undefined],
     ]);
-    expect((await listWorkspace(rig.rt, { userId: rig.host.userId, chatId, knowledge: "gm" })).map((f) => f.path)).toEqual([learned]);
+    expect((await listWorkspace(rig.rt, { userId: rig.host.userId, chatId })).map((f) => f.path)).toEqual([learned]);
     // What landed counts toward what the assistant learns, as accepted; the refused change, neither way.
     const counts = async () => Object.values((await rig.rt.settings.learningOf(rig.host.userId)).roles?.assistant ?? {}).map((byType) => [byType.workspace?.accepted, byType.workspace?.rejected]);
     expect(await counts()).toEqual([[1, 0]]);
     // The note on Danny is back, and the GM rewrote the learned note meanwhile: Apply again sends only the refused pin, which lands with its Undo.
-    rig.body(await rig.send({ type: "lre.workspace", op: "write", chatId, path, text: "Danny fixes boats.", readers: "everyone" }));
+    rig.body(await rig.send({ type: "lre.workspace", op: "write", chatId, path, text: "Danny fixes boats." }));
     const rewritten = "Danny fixes boats at the marina, and keeps odd hours.";
     rig.body(await rig.send({ type: "lre.workspace", op: "write", chatId, path: learned, text: rewritten }));
     const again = (rig.body(await rig.send({ type: "lre.assistant", op: "apply", chatId, proposalId: proposal?.id })) as unknown as AssistantView).proposals[0];
@@ -422,20 +424,20 @@ describe("its changes", () => {
       [true, undefined],
     ]);
     expect(again?.chipId).toBeDefined();
-    expect((await listWorkspace(rig.rt, { userId: rig.host.userId, chatId, knowledge: "gm" })).find((f) => f.path === path)?.pinned).toBe(true);
+    expect((await listWorkspace(rig.rt, { userId: rig.host.userId, chatId })).find((f) => f.path === path)?.pinned).toBe(true);
     // The learned note wasn't written a second time: the GM's text stands.
-    expect(await readWorkspaceFile(rig.rt, { userId: rig.host.userId, chatId, knowledge: "gm" }, learned)).toBe(rewritten);
+    expect(await readWorkspaceFile(rig.rt, { userId: rig.host.userId, chatId }, learned)).toBe(rewritten);
     // Once is all: nothing is left to apply, and each change counted once.
     expect(await rig.send({ type: "lre.assistant", op: "apply", chatId, proposalId: proposal?.id })).toMatchObject({ type: "lre.error", code: "bad_request" });
     expect(await counts()).toEqual([[2, 0]]);
     expect(rig.rt.ledger.errors).toEqual([]);
   });
 
-  test("with your character's knowledge, a change whose write a turn refused between its check and its write applies again, its reason the note every refusal gives", async () => {
+  test("a change whose write a turn refused between its check and its write applies again, its reason the GM's own words, whatever an earlier build's knowledge setting said", async () => {
     const { rig, chatId } = await alder({ agents: { assistant: { knowledge: "pov" } } });
     const path = "notes/harbor.md";
     const learned = "learned/harbor.md";
-    rig.body(await rig.send({ type: "lre.workspace", op: "write", chatId, path, text: "The harbor wakes early.", readers: "pov" }));
+    rig.body(await rig.send({ type: "lre.workspace", op: "write", chatId, path, text: "The harbor wakes early." }));
     model(rig, (req) => (resultsOf(req).length === 0 ? { content: "", toolCalls: [call("workspace_pin", { path, pinned: true }, "c1"), call("workspace_write", { path: learned, text: "The harbor wakes before six." }, "c2")] } : "Pinned, and noted."));
     const [proposal] = (await ask(rig, chatId, "Pin the harbor note, and keep what you learned.")).proposals;
     expect(proposal?.status).toBe("open");
@@ -448,19 +450,18 @@ describe("its changes", () => {
       return { applied: false, pending: false, reason: "GM-REASON: the turn moved the harbor note" };
     };
     const refused = (rig.body(await rig.send({ type: "lre.assistant", op: "apply", chatId, proposalId: proposal?.id })) as unknown as AssistantView).proposals[0];
-    // The learned note landed, so the proposal stands applied; the pin says only what any refusal says to your character, under the code Apply again sends.
+    // The learned note landed, so the proposal stands applied; the pin says why in the ledger's own words, the GM's, under the code Apply again sends.
     expect(refused?.status).toBe("applied");
     expect(refused?.ops.map((o) => [o.applied, o.refused])).toEqual([
-      [undefined, { code: WRITE_REFUSED, reason: renderPrompt(WRITE_NOTE.povRefused, {}, { pov: "Jordan Ellis" }) }],
+      [undefined, { code: WRITE_REFUSED, reason: "GM-REASON: the turn moved the harbor note" }],
       [true, undefined],
     ]);
-    expect(JSON.stringify(rig.host.sent)).not.toContain("GM-REASON");
     const again = (rig.body(await rig.send({ type: "lre.assistant", op: "apply", chatId, proposalId: proposal?.id })) as unknown as AssistantView).proposals[0];
     expect(again?.ops.map((o) => [o.applied, o.refused?.code])).toEqual([
       [true, undefined],
       [true, undefined],
     ]);
-    expect((await listWorkspace(rig.rt, { userId: rig.host.userId, chatId, knowledge: "gm" })).find((f) => f.path === path)?.pinned).toBe(true);
+    expect((await listWorkspace(rig.rt, { userId: rig.host.userId, chatId })).find((f) => f.path === path)?.pinned).toBe(true);
   });
 
   test("notes the assistant's Apply and GM → Workspace wrote on an earlier swipe of the head reply follow a Re-run and a Re-narrate made from it, each with its Undo there, and are gone on the swipe made before them", async () => {
@@ -482,7 +483,7 @@ describe("its changes", () => {
     const [proposal] = (await ask(rig, chatId, "Note when Marcus opens the shop.")).proposals;
     rig.body(await rig.send({ type: "lre.assistant", op: "apply", chatId, proposalId: proposal?.id }));
     rig.body(await rig.send({ type: "lre.workspace", op: "write", chatId, path: own, text: "Keep an eye on the marina." }));
-    const paths = async (): Promise<string[]> => (await listWorkspace(rig.rt, { userId: user, chatId, knowledge: "gm" })).map((f) => f.path);
+    const paths = async (): Promise<string[]> => (await listWorkspace(rig.rt, { userId: user, chatId })).map((f) => f.path);
     const both = [proposed, own].sort();
     expect(await paths()).toEqual(both);
     await shown(1);
@@ -513,21 +514,21 @@ describe("its changes", () => {
     expect(rig.rt.ledger.errors).toEqual([]);
   });
 
-  test("a note proposed under the GM's knowledge and applied after the assistant moved to your character's is still the GM's alone", async () => {
+  test("a note it proposes is every agent's to read once applied: no readers, whatever knowledge an earlier build's settings named", async () => {
     const { rig, chatId } = await alder({ agents: { assistant: { knowledge: "gm" } } });
     const path = "notes/marcus.md";
-    model(rig, (req) => (resultsOf(req).length === 0 ? { content: "", toolCalls: [call("workspace_write", { path, text: `GM only: ${CLAIM}` })] } : "Proposed a note."));
+    model(rig, (req) => (resultsOf(req).length === 0 ? { content: "", toolCalls: [call("workspace_write", { path, text: `Marcus hides: ${CLAIM}` })] } : "Proposed a note."));
     const [proposal] = (await ask(rig, chatId, "Note what Marcus hides.")).proposals;
     rig.body(await rig.send({ type: "lre.settings.set", patch: { agents: { assistant: { knowledge: "pov" } } } }));
     const applied = rig.body(await rig.send({ type: "lre.assistant", op: "apply", chatId, proposalId: proposal?.id }, PAGE)) as unknown as AssistantView;
     expect(applied.proposals[0]?.status).toBe("applied");
+    // A stored proposal or message names no knowledge.
+    expect(JSON.stringify(applied)).not.toContain('"knowledge"');
     await rig.host.settle();
-    const env = (knowledge: "pov" | "everyone" | "gm") => ({ userId: rig.host.userId, chatId, knowledge });
-    expect((await listWorkspace(rig.rt, env("gm"))).map((f) => [f.path, f.readers])).toEqual([[path, "gm"]]);
-    for (const knowledge of ["pov", "everyone"] as const) {
-      expect(await listWorkspace(rig.rt, env(knowledge))).toEqual([]);
-      expect(await readWorkspaceFile(rig.rt, env(knowledge), path)).toBeNull();
-    }
+    const listed = await listWorkspace(rig.rt, { userId: rig.host.userId, chatId });
+    expect(listed.map((f) => f.path)).toEqual([path]);
+    expect(listed.some((f) => "readers" in f)).toBe(false);
+    expect(await readWorkspaceFile(rig.rt, { userId: rig.host.userId, chatId }, path)).toBe(`Marcus hides: ${CLAIM}`);
     expect(rig.rt.ledger.errors).toEqual([]);
   });
 });
@@ -641,20 +642,19 @@ describe("its texts and its thread", () => {
   test("an edited system prompt is the one sent, and its reset brings back the shipped text", async () => {
     const { rig, chatId } = await alder();
     const vars = { world: "Port Alder", pov: "Jordan Ellis" };
-    const knowledge = renderPrompt(GM_TEXT.knowledge.everyone, {}, vars);
     const instructions = renderPrompt(GM_TEXT.instructions, {}, vars);
-    const mine = "You help the game master of {{world}}, where {{pov}} plays; your tools show you {{knowledge}}.";
+    const mine = "You help the game master of {{world}}, where {{pov}} plays.";
     rig.body(await rig.send({ type: "lre.settings.set", patch: { prompts: { texts: { [GM_TEXT.system]: mine } } } }));
     const asked = model(rig, () => "Ready.");
     await ask(rig, chatId, "Are you there?");
-    expect(asked[0]?.messages[0]).toMatchObject({ role: "system", content: `You help the game master of Port Alder, where Jordan Ellis plays; your tools show you ${knowledge}.\n\n${instructions}` });
+    expect(asked[0]?.messages[0]).toMatchObject({ role: "system", content: `You help the game master of Port Alder, where Jordan Ellis plays.\n\n${instructions}` });
     // Its Diagnostics record keeps what was sent.
     const [record] = await agentRecords(rig, chatId);
     expect(rig.body(await rig.send({ type: "lre.diag", chatId, op: "text", hash: record?.agent?.text ?? "" })).text).toContain("You help the game master of Port Alder");
 
     rig.body(await rig.send({ type: "lre.settings.set", patch: { prompts: { texts: { [GM_TEXT.system]: null } } } }));
     await ask(rig, chatId, "And now?");
-    const shipped = renderPrompt(GM_TEXT.system, {}, { ...vars, knowledge });
+    const shipped = renderPrompt(GM_TEXT.system, {}, vars);
     expect(shipped.startsWith((promptDef(GM_TEXT.system)?.text ?? "").slice(0, 40))).toBe(true);
     expect(asked[1]?.messages[0]?.content).toBe(`${shipped}\n\n${instructions}`);
     // The thread so far went with it.
@@ -663,6 +663,22 @@ describe("its texts and its thread", () => {
       ["assistant", "Ready."],
       ["user", "And now?"],
     ]);
+  });
+
+  test("its system files follow its system prompt: AGENTS.md and roles/assistant.md, the global workspace's before the chat's, and no other role's", async () => {
+    const { rig, chatId } = await alder();
+    const write = async (path: string, text: string): Promise<void> => void rig.body(await rig.send({ type: "lre.workspace", op: "write", chatId, path, text }));
+    await write("~/AGENTS.md", "GLOBAL-AGENTS-MARK: write plainly.");
+    await write("roles/assistant.md", "ASSISTANT-MARK: answer in one line.");
+    await write("roles/main.md", "MAIN-MARK: keep the turn short.");
+    const asked = model(rig, () => "Ready.");
+    await ask(rig, chatId, "Are you there?");
+    const system = asked[0]?.messages[0]?.content ?? "";
+    const shipped = renderPrompt(GM_TEXT.system, {}, { world: "Port Alder", pov: "Jordan Ellis" });
+    expect(system.startsWith(shipped)).toBe(true);
+    expect(system.indexOf("GLOBAL-AGENTS-MARK")).toBeGreaterThan(system.indexOf(shipped));
+    expect(system.indexOf("ASSISTANT-MARK")).toBeGreaterThan(system.indexOf("GLOBAL-AGENTS-MARK"));
+    expect(system).not.toContain("MAIN-MARK");
   });
 
   test("the past messages sent stay within History tokens, the older ones left out with a note saying how many", async () => {
@@ -686,26 +702,31 @@ describe("its texts and its thread", () => {
     await ask(rig, chatId, "Who is here?");
     expect(asked[3]?.messages.slice(1).map((m) => [m.role, m.content])).toEqual([["user", `${note(6)}\n\nWho is here?`]]);
     // An answer that said nothing goes with no exchange.
-    expect(historyOf([{ id: "a", role: "user", text: "Hello?", at: 0 }, { id: "b", role: "assistant", text: "", at: 1, status: "cancelled" }], 1000, "gm")).toEqual({ history: [], left: 2 });
+    expect(historyOf([{ id: "a", role: "user", text: "Hello?", at: 0 }, { id: "b", role: "assistant", text: "", at: 1, status: "cancelled" }], 1000)).toEqual({ history: [], left: 2 });
   });
 
-  test("a message written with more knowledge than the assistant reads with now never goes with a new one: the debt asked about with everyone's isn't sent with your character's", async () => {
+  test("every message of the thread goes with a new one, whatever knowledge an earlier build wrote it under or its settings name now", async () => {
     const { rig, chatId } = await alder({ agents: { assistant: { knowledge: "everyone" } } });
     await seedDebt(rig, chatId);
     const asked = model(rig, (_req, n) => (n === 0 ? `Marcus keeps it from everyone: ${CLAIM}.` : `Answer ${n + 1}.`));
     await ask(rig, chatId, "What is Marcus hiding?");
     rig.body(await rig.send({ type: "lre.settings.set", patch: { agents: { assistant: { knowledge: "pov" } } } }));
     await ask(rig, chatId, "What do I know about the shop?");
-    const vars = { world: "Port Alder", pov: "Jordan Ellis" };
-    const note = (count: number): string => renderPrompt(GM_TEXT.historyNote, {}, { ...vars, count: String(count), messages: nounFor(count, "message", "messages") });
-    // The first exchange was written with everyone's knowledge: left out, and counted in the note.
-    expect(JSON.stringify(asked[1]?.messages)).not.toContain(MARK);
-    expect(asked[1]?.messages.slice(1).map((m) => [m.role, m.content])).toEqual([["user", `${note(2)}\n\nWhat do I know about the shop?`]]);
-    // With everyone's again, both go: one was written with it, the other with less.
-    rig.body(await rig.send({ type: "lre.settings.set", patch: { agents: { assistant: { knowledge: "everyone" } } } }));
-    await ask(rig, chatId, "And now?");
-    expect(asked[2]?.messages.slice(1).map((m) => m.role)).toEqual(["user", "assistant", "user", "assistant", "user"]);
-    expect(JSON.stringify(asked[2]?.messages)).toContain(MARK);
+    // The first exchange goes, the secret in it too: the assistant is no one in the story.
+    expect(asked[1]?.messages.slice(1).map((m) => m.role)).toEqual(["user", "assistant", "user"]);
+    expect(JSON.stringify(asked[1]?.messages)).toContain(MARK);
+    // A message stored by an earlier build with the knowledge it was written under: read, and sent all the same.
+    const stored = [
+      { id: "a", role: "user", text: "What is Marcus hiding?", at: 0, knowledge: "everyone" },
+      { id: "b", role: "assistant", text: CLAIM, at: 1, knowledge: "everyone" },
+    ] as unknown as Parameters<typeof historyOf>[0];
+    expect(historyOf(stored, 1000)).toEqual({
+      history: [
+        { role: "user", text: "What is Marcus hiding?" },
+        { role: "assistant", text: CLAIM },
+      ],
+      left: 0,
+    });
   });
 
   test("its pushes go to the pages that asked about the chat's assistant, and to no other", async () => {
@@ -756,10 +777,11 @@ describe("its texts and its thread", () => {
 describe("Settings → Agents → Assistant", () => {
   test("its defaults, and a stored value it can't take keeps the default", () => {
     const d = defaultAgentSettings();
-    expect(d.assistant).toEqual({ connectionId: null, model: null, effort: "inherit", knowledge: "everyone", apply: "ask", historyTokens: 20_000, budget: {} });
+    expect(d.assistant).toEqual({ connectionId: null, model: null, effort: "inherit", apply: "ask", historyTokens: 20_000, budget: {} });
     const read = agentSettingsOf({ assistant: { connectionId: "", model: 7, effort: "loud", knowledge: "nobody", apply: "later", historyTokens: -1, budget: { toolTurns: 4, tokensIn: "none", revisions: "none", concurrency: 0, nope: 3 } } });
     expect(read.assistant).toEqual({ ...d.assistant, budget: { toolTurns: 4, tokensIn: "none" } });
     expect(assistantBudget(read)).toEqual({ ...d.budget, toolTurns: 4, tokensIn: "none" });
-    expect(agentSettingsOf({ assistant: { connectionId: "conn-main", model: "deepseek-v4-flash", effort: "low", knowledge: "pov", apply: "at_once", historyTokens: 0 } }).assistant).toEqual({ connectionId: "conn-main", model: "deepseek-v4-flash", effort: "low", knowledge: "pov", apply: "at_once", historyTokens: 0, budget: {} });
+    // An earlier build's knowledge, whatever it named, is read and dropped: the assistant has none.
+    expect(agentSettingsOf({ assistant: { connectionId: "conn-main", model: "deepseek-v4-flash", effort: "low", knowledge: "pov", apply: "at_once", historyTokens: 0 } }).assistant).toEqual({ connectionId: "conn-main", model: "deepseek-v4-flash", effort: "low", apply: "at_once", historyTokens: 0, budget: {} });
   });
 });

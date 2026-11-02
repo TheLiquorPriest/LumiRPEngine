@@ -1,34 +1,33 @@
-// Settings → Agents → Main agent (AGENT-LOOP-PLAN §15; INC2-SPEC C14): what the main agent runs with
-// while Settings → Agents → Pipeline has one decide, every setting kept under `agents.main`
-// (shared/agent-settings.ts): the connection and model it runs on, its effort, whose knowledge its
-// tools and the engine's messages to it read with, its tool families (it only reads: what it changes
-// goes through the roles it runs), its own limits over every agent's budget for each stage it works,
-// and its turn task's parts: the digest of what changed since its last turn, and its pinned files
-// where `.pins.json` sets no budget, which is every role's pins budget too. Each shows its default;
-// Default sends null, so the store reads the default back. Its caching is Settings → Agents → Caching.
-// What renders and what is pressed (`MainAgentBody`, `mainPatch`) is hook-free, so tests press it
-// without a DOM. Styles: styles/settings.ts.
+// Settings → Agents → Main agent (AGENT-LOOP-PLAN §15; INC2-SPEC C14): what the main agent runs with,
+// every setting kept under `agents.main` (shared/agent-settings.ts): the connection and model it runs
+// on, its effort, its tool families (it only reads, everything secrets marked: what it changes goes
+// through the roles it runs, and the prompt it reviews), its own limits over every agent's budget for
+// each stage it works, and its turn task's parts: the digest of what changed since its last turn, and
+// its pinned files where `.pins.json` sets no budget, which is every role's pins budget too. Then its
+// final review of the narrator's prompt before each reply, in either pipeline (`agents.finalReview`,
+// DESIGN §4.6): on or off, what a review that fails does, its time (Settings → Timeouts → Final
+// review, shown here too) and its own limits over the main agent's. Each shows its default; Default
+// sends null, so the store reads the default back. Its caching is Settings → Agents → Caching. What
+// renders and what is pressed (`MainAgentBody`, `FinalReviewSection`, `mainPatch`) is hook-free, so
+// tests press it without a DOM. Styles: styles/settings.ts.
 
-import type { AgentBudget, AgentSettings, MainAgentSettings } from "../../shared/agent-settings";
-import { AGENT_EFFORTS, ASSISTANT_KNOWLEDGE_LABELS, BUDGET_DEFS, defaultAgentSettings, MAIN_DEFS, PIPELINE_MODE_LABELS } from "../../shared/agent-settings";
-import { AGENT_KNOWLEDGE, type AgentKnowledge, TOOL_FAMILY_LABEL } from "../../shared/agent-tools";
+import type { AgentBudget, AgentSettings, FinalReviewOnFail, MainAgentSettings } from "../../shared/agent-settings";
+import { AGENT_EFFORTS, BUDGET_DEFS, defaultAgentSettings, FINAL_REVIEW_ON_FAIL, FINAL_REVIEW_ON_FAIL_LABELS, MAIN_DEFS, mainBudget, PIPELINE_MODE_LABELS } from "../../shared/agent-settings";
+import { TOOL_FAMILY_LABEL } from "../../shared/agent-tools";
 import type { JsonObject } from "../../shared/json";
+import type { TimeoutSettings } from "../../shared/timeouts";
 import { HostModelPicker, HostSwitch, Section, Seg } from "../components";
 import { defaultButton, LimitRow, OwnLimitRow } from "./agents";
 import { EFFORT_LABEL } from "./assistant";
 import { EFFORT_HELP, FAMILIES } from "./roles";
 import { type Connection, ConnectionSelect, placeOf, useConnections } from "./steps";
+import { TimeoutRow } from "./timeouts";
 
 /** What each Default resets to (a reset deletes the stored value, so the reader falls back to these). */
 const DEFAULTS: Readonly<MainAgentSettings> = defaultAgentSettings().main;
+const REVIEW_DEFAULTS = defaultAgentSettings().finalReview;
 
 const DEFAULT_PLACE = placeOf(DEFAULTS, []);
-
-const KNOWLEDGE_HELP: Record<AgentKnowledge, string> = {
-  pov: "Its tools, and what the engine tells it, read only what your character knows.",
-  everyone: "Its tools, and what the engine tells it, read what anyone in the world knows, each secret marked with whom it's kept from.",
-  gm: "Its tools, and what the engine tells it, read everything, secrets and all.",
-};
 
 /** The settings patch (`lre.settings.set`) for some of the main agent's settings; a field sent as null is deleted, so the store reads its default. */
 export function mainPatch(fields: JsonObject): JsonObject {
@@ -94,25 +93,14 @@ export function MainAgentBody(props: { agents: AgentSettings; connections: reado
           </div>
         </div>
       </Section>
-      <Section title="Knowledge and tools" flush>
+      <Section title="Tools" flush>
         <div class="lre-set-rows">
-          <div class="lre-set-ext" data-lre-main-setting="knowledge">
-            <div class="lre-set-ext-head">
-              <span class="lre-set-ext-title">Knowledge</span>
-              {m.knowledge === DEFAULTS.knowledge ? null : defaultButton(`Reset whose knowledge the main agent reads to its default, ${ASSISTANT_KNOWLEDGE_LABELS[DEFAULTS.knowledge]}`, busy, () => set({ knowledge: null }))}
-            </div>
-            <div class="lre-field">
-              <Seg<AgentKnowledge> label="Whose knowledge the main agent reads" value={m.knowledge} options={AGENT_KNOWLEDGE.map((value) => ({ value, label: ASSISTANT_KNOWLEDGE_LABELS[value] }))} disabled={busy} onChange={(knowledge) => set({ knowledge })} />
-              <span class="lre-field-help">{KNOWLEDGE_HELP[m.knowledge]}</span>
-            </div>
-            <span class="lre-small lre-muted">Default {ASSISTANT_KNOWLEDGE_LABELS[DEFAULTS.knowledge]}.</span>
-          </div>
           <div class="lre-set-ext" data-lre-main-setting="families">
             <div class="lre-set-ext-head">
               <span class="lre-set-ext-title">Tools it reads with</span>
               {familiesDefault ? null : defaultButton(`Reset the main agent's tools to their default, ${DEFAULTS.families.map((f) => TOOL_FAMILY_LABEL[f]).join(", ")}`, busy, () => set({ families: null }))}
             </div>
-            <span class="lre-field-help">Read-only: what it changes, it changes through the roles it runs.</span>
+            <span class="lre-field-help">Read-only: what it changes, it changes through the roles it runs, and in the narrator's prompt through its final review.</span>
             {FAMILIES.map((family) => (
               <HostSwitch key={family} label={`Main agent: ${TOOL_FAMILY_LABEL[family]}`} checked={m.families.includes(family)} disabled={busy} onChange={(on) => set({ families: FAMILIES.filter((f) => (f === family ? on : m.families.includes(f))) })} />
             ))}
@@ -138,15 +126,68 @@ export function MainAgentBody(props: { agents: AgentSettings; connections: reado
   );
 }
 
-/** Settings → Agents → Main agent: what the main agent runs with. */
-export function MainAgentPage(props: { agents: AgentSettings; patch(patch: JsonObject): void; busy: boolean }) {
+const ON_FAIL_HELP: Record<FinalReviewOnFail, string> = {
+  send: "The narrator gets the prompt as the engine made it, and Settings → Diagnostics records why the review failed.",
+  stop: "The turn stops before its reply, as a role set to stop does: the chat says why, with a Retry.",
+};
+
+/**
+ * The final review (DESIGN §4.6), without hooks: whether the main agent reviews the narrator's prompt
+ * before each reply of an agent chat, in either pipeline; what a review that fails does; how long it
+ * may take (Settings → Timeouts → Final review, the same setting); and its own limits over the main
+ * agent's budget for a stage. Each patches `agents.finalReview`, the time `timeouts`.
+ */
+export function FinalReviewSection(props: { agents: AgentSettings; timeouts: TimeoutSettings; patch(patch: JsonObject): void; busy: boolean }) {
+  const { agents, busy } = props;
+  const r = agents.finalReview;
+  const set = (fields: JsonObject) => props.patch({ agents: { finalReview: fields } });
+  const main = mainBudget(agents);
+  const budgetKeys = Object.keys(BUDGET_DEFS) as (keyof AgentBudget)[];
+  return (
+    <Section title="Final review" flush>
+      <div class="lre-set-rows" data-lre-main-setting="final-review">
+        <p class="lre-set-timeout-lead">Before each reply of an agent chat, the main agent reviews the prompt the narrator gets (every section, the outline with its brief, and the narrator rules) against the world and the turn, and may fix it a line at a time. It does so in either pipeline: on the fixed pipeline it runs for this alone, on the connection above. GM → Live shows each edit, the Prompt Breakdown shows the prompt as revised, and a Re-narrate tells the same prompt again.</p>
+        <div class="lre-set-ext">
+          <div class="lre-set-ext-head">
+            <span class="lre-set-ext-title">Review the narrator's prompt</span>
+            {r.on === REVIEW_DEFAULTS.on ? null : defaultButton(`Reset the final review to its default, ${REVIEW_DEFAULTS.on ? "on" : "off"}`, busy, () => set({ on: null }))}
+          </div>
+          <HostSwitch label="The main agent reviews the narrator's prompt before each reply" checked={r.on} disabled={busy} onChange={(on) => set({ on })} />
+          <span class="lre-small lre-muted">Off, nothing runs and the narrator gets the prompt as the engine made it. Default {REVIEW_DEFAULTS.on ? "on" : "off"}.</span>
+        </div>
+        <div class="lre-set-ext">
+          <div class="lre-set-ext-head">
+            <span class="lre-set-ext-title">When the review fails</span>
+            {r.onFail === REVIEW_DEFAULTS.onFail ? null : defaultButton(`Reset what a failed review does to its default, ${FINAL_REVIEW_ON_FAIL_LABELS[REVIEW_DEFAULTS.onFail]}`, busy, () => set({ onFail: null }))}
+          </div>
+          <div class="lre-field">
+            <Seg<FinalReviewOnFail> label="What a final review that fails does" value={r.onFail} options={FINAL_REVIEW_ON_FAIL.map((value) => ({ value, label: FINAL_REVIEW_ON_FAIL_LABELS[value] }))} disabled={busy} onChange={(onFail) => set({ onFail })} />
+            <span class="lre-field-help">{ON_FAIL_HELP[r.onFail]}</span>
+          </div>
+          <span class="lre-small lre-muted">A review fails when it runs out of time or budget, or its model call fails. Default {FINAL_REVIEW_ON_FAIL_LABELS[REVIEW_DEFAULTS.onFail]}.</span>
+        </div>
+        <TimeoutRow id="finalReviewMs" value={props.timeouts.finalReviewMs} busy={busy} set={(finalReviewMs) => props.patch({ timeouts: { finalReviewMs } })} />
+      </div>
+      <div class="lre-set-rows lre-set-group" data-lre-agent-group="Final review">
+        <p class="lre-set-timeout-lead">What the review may spend. Each limit is the main agent's for a stage (its Budget, above) until you change it here; The main agent's goes back to that one. What it spends counts toward the turn's, as every agent's does.</p>
+        {budgetKeys.map((key) => (
+          <OwnLimitRow key={key} id={key} owner="The final review's" fallback="the main agent's" def={BUDGET_DEFS[key]} own={r.budget[key]} every={main[key]} busy={busy} set={(value) => set({ budget: { [key]: value } })} />
+        ))}
+      </div>
+    </Section>
+  );
+}
+
+/** Settings → Agents → Main agent: what the main agent runs with, and its final review. */
+export function MainAgentPage(props: { agents: AgentSettings; timeouts: TimeoutSettings; patch(patch: JsonObject): void; busy: boolean }) {
   const connections = useConnections();
   return (
     <div class="lre-stack" data-lre-settings-page="main">
       <p class="lre-set-lead">
-        What the main agent runs with. It decides each agent turn while Settings → Agents → Pipeline has a main agent decide ({props.agents.pipeline.mode === "main" ? "it does now" : "it doesn't now"}); it keeps a session from turn to turn, which GM → Workspace shows.
+        What the main agent runs with. It decides each agent turn while Settings → Agents → Pipeline has a main agent decide ({props.agents.pipeline.mode === "main" ? "it does now" : "it doesn't now"}); it keeps a session from turn to turn, which GM → Workspace shows. In either pipeline it works each turn's final review, below.
       </p>
       <MainAgentBody agents={props.agents} connections={connections} patch={props.patch} busy={props.busy} />
+      <FinalReviewSection agents={props.agents} timeouts={props.timeouts} patch={props.patch} busy={props.busy} />
     </div>
   );
 }

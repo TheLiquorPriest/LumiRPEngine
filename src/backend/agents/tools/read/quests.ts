@@ -1,15 +1,11 @@
 // The quests family (AGENT-LOOP-PLAN §6; INC1-SPEC R3a): the world's tracks (quests, secrets,
 // puzzles and agendas), where one stands, and what moves it on.
 //
-// - Under `pov` each reads as Play's quest log does (`buildQuestLog`, `playerTrack`): only the
-//   tracks it shows (no agendas), a secret under its stand-in id and, until something of it is
-//   revealed, a label that tells nothing; the objectives as the quest log ticks them, the hints the
-//   player has opened and the truths revealed, never a predicate.
 // - Under `everyone` every track. A restricted track's own words (its label, its stages, its
 //   objectives) are marked with its secrecy, and every truth not yet revealed is marked as kept;
 //   what the player is meant to read (a cue, a hint, a revealed truth) stays plain.
-// - Under `gm` all of it unmarked, with each track's visibility and owner and every stage with its
-//   truth.
+// - Under `gm` all of it, with each track's visibility and owner and every stage with its truth;
+//   a turn agent's view (`marked`) marks each truth not yet revealed as kept.
 //
 // What moves a track on is read as the engine steps it (`stepTracks`): each way on with what it
 // needs and its target's gate, the way it fails, and whether each holds now, in the track's own
@@ -20,7 +16,6 @@ import { own } from "../../../../engine/pack-kit";
 import { evalExpr, scopeEnv, truthy } from "../../../../engine/scope";
 import { currentStage, isTerminal, trackEnv } from "../../../../engine/tracks";
 import { hintsEarned, hintsOpened, type PlayerTrack } from "../../../../engine/visibility";
-import { buildQuestLog } from "../../../../packs/story/core/index";
 import { TOOL_NOTE } from "../../../../shared/agent-tools";
 import type { StageId, TrackId } from "../../../../shared/ids";
 import { type Expr, objectiveLabel, objectiveWhen, type StageDef, TRACK_KINDS, type TrackDef, type TrackKind } from "../../../../shared/world";
@@ -50,10 +45,10 @@ interface TrackRow {
   id: string;
   label: string;
   kind: TrackKind;
-  /** The stage it is at, by its label: under `pov` as the quest log reads it ("" for a secret nothing of which is revealed yet). */
+  /** The stage it is at, by its label. */
   stage: string;
   status: TrackStatus;
-  /** Under `pov`: what the player can notice at the stage. */
+  /** What the player can notice at the stage. */
   cue?: string;
   /** Under `gm`: the stage's id, the track's visibility when it isn't public, and its owner. */
   stageId?: StageId;
@@ -68,12 +63,12 @@ interface StageAnswer {
   kind: TrackKind;
   stage: string;
   status: TrackStatus;
-  /** Under `everyone` and `gm`: when the track came to the stage. */
+  /** When the track came to the stage. */
   since?: string;
   cue?: string;
   /** The stage's objectives, ticked as the quest log ticks them. */
   objectives: { label: string; done: boolean }[];
-  /** Under `pov` the hints the player has opened; else every hint earned at the stage, `opened` of them opened. */
+  /** Every hint earned at the stage, `opened` of them opened. */
   hints: string[];
   opened?: number;
   /** The truths revealed so far, oldest first. */
@@ -92,17 +87,14 @@ interface MovesAnswer {
   id: string;
   label: string;
   stage: string;
-  /** Under `pov`: the objectives still to do, and the hints the player has opened. */
-  todo?: string[];
-  hints?: string[];
-  /** Under `everyone` and `gm`: the stage's id; each way on, with what it needs, its target's gate and whether each holds now; the way it fails; the stage's objectives with what decides each. */
+  /** The stage's id; each way on, with what it needs, its target's gate and whether each holds now; the way it fails; the stage's objectives with what decides each. */
   stageId?: StageId;
   next?: { to: StageRef; when: Expr; holds: boolean; gate?: { when: Expr; holds: boolean } }[];
   fail?: { to: StageRef; when: Expr; holds: boolean };
   objectives?: { label: string; when: Expr; done: boolean }[];
 }
 
-/** Where a track stands as the engine has it, for `everyone` and `gm`. */
+/** Where a track stands as the engine has it. */
 interface Standing {
   ref: ViewRef;
   stage: StageId;
@@ -112,7 +104,7 @@ interface Standing {
   status: TrackStatus;
   /** The stages whose truths are revealed, oldest first. */
   revealed: readonly StageId[];
-  /** The track's own words as the view gives them: under `everyone` marked with its secrecy when it isn't public. */
+  /** The track's own words as the view gives them: where the view marks, marked with its secrecy when it isn't public. */
   words: (text: string) => string;
 }
 
@@ -142,12 +134,8 @@ function objectivesOf(view: ToolReadView, t: TrackDef, def: StageDef | undefined
   return objectives.map((o) => ({ label: objectiveLabel(o), when: objectiveWhen(o), done: truthy(evalExpr(objectiveWhen(o), env, false)) }));
 }
 
-/** The tracks the view may name, of `kind` when given: under `pov` the quest log's rows in its order, else every track by id. */
+/** Every track by id, of `kind` when given. */
 function trackRows(view: ToolReadView, kind: TrackKind | null): TrackRow[] {
-  if (view.knowledge === "pov") {
-    const log = buildQuestLog(view.ctx);
-    return [...log.active, ...log.done, ...log.failed].filter((t) => kind === null || t.kind === kind).map((t) => ({ id: t.id, label: t.label, kind: t.kind, stage: t.stage, status: t.status, cue: t.cue ?? undefined }));
-  }
   const rows: TrackRow[] = [];
   for (const id of Object.keys(view.world.tracks).sort()) {
     const t = own(view.world.tracks, id);
@@ -161,10 +149,6 @@ function trackRows(view: ToolReadView, kind: TrackKind | null): TrackRow[] {
 
 /** Where a track stands, as the view reads it; null when it may not name it. */
 function stageAnswer(view: ToolReadView, id: TrackId): StageAnswer | null {
-  if (view.knowledge === "pov") {
-    const shown = view.povTrack(id);
-    return shown && { id: shown.id, label: shown.label, kind: shown.kind, stage: shown.stage, status: shown.status, cue: shown.cue ?? undefined, objectives: shown.objectives, hints: shown.hints.slice(0, shown.opened), truths: shown.truths };
-  }
   const t = own(view.world.tracks, id);
   const at = t ? standing(view, id, t) : null;
   if (!t || !at) return null;
@@ -186,21 +170,19 @@ function stageAnswer(view: ToolReadView, id: TrackId): StageAnswer | null {
     const kept = view.trackSecrecy(id) ?? KEPT;
     return { ...answer, secrets: stages.flatMap(([sid, s]) => (s.truth && !at.revealed.includes(sid) ? [{ stage: at.words(s.label), truth: view.mark(s.truth, kept), current: sid === at.stage || undefined }] : [])) };
   }
+  // The GM's every stage, each truth not yet revealed marked as kept where the view marks.
+  const kept = view.marked ? (view.trackSecrecy(id) ?? KEPT) : null;
   return {
     ...answer,
     stageId: at.stage,
     visibility: at.ref.visibility,
     owner: t.owner === undefined ? undefined : view.entity(t.owner),
-    stages: stages.map(([sid, s]) => ({ id: sid, label: s.label, truth: s.truth, revealed: s.truth === undefined ? undefined : at.revealed.includes(sid), current: sid === at.stage || undefined })),
+    stages: stages.map(([sid, s]) => ({ id: sid, label: at.words(s.label), truth: s.truth === undefined || at.revealed.includes(sid) ? s.truth : view.mark(s.truth, kept), revealed: s.truth === undefined ? undefined : at.revealed.includes(sid), current: sid === at.stage || undefined })),
   };
 }
 
 /** What moves a track on, as the view reads it; null when it may not name it. */
 function movesAnswer(view: ToolReadView, id: TrackId): MovesAnswer | null {
-  if (view.knowledge === "pov") {
-    const shown = view.povTrack(id);
-    return shown && { id: shown.id, label: shown.label, stage: shown.stage, todo: shown.objectives.filter((o) => !o.done).map((o) => o.label), hints: shown.hints.slice(0, shown.opened) };
-  }
   const t = own(view.world.tracks, id);
   const at = t ? standing(view, id, t) : null;
   if (!t || !at) return null;

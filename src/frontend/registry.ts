@@ -148,6 +148,12 @@ export interface GmSectionProps {
   chatId: ChatId;
   gm: GmView;
   currency: WorldCurrency;
+  /**
+   * Changes when the chat moves on (a turn, an edit, an undo: `gmReloadKey`), not when the GM view is
+   * only loaded again: a tab that reads more than `gm` reads it again on this, not on `gm`, so one
+   * change isn't read twice (once for the chat moving on, once for the reload after it).
+   */
+  reloadKey: string;
   busy: boolean;
   /** Sends the operations as one `lre.edit` (all or none, one GM edit chip), then reloads the view; true when it was accepted. The GM view then says what it did, with its Undo. */
   edit(ops: EditOp[]): Promise<boolean>;

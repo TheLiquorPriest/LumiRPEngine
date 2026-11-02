@@ -27,6 +27,14 @@ export interface TrimReport {
   views: number;
   /** Turn bridges: what the engine kept of a chat's turns' reads and plans. */
   bridges: number;
+  /** The agents' texts kept once read (`BlobStore`), every chat's. */
+  texts: number;
+  /** Users' main sessions as last read (`Sessions`). */
+  sessions: number;
+  /** The folds' steps kept, every user's (`LedgerFold`): each chat's next fold starts from its stored snapshots. */
+  steps: number;
+  /** The World Info books' entries kept as last read (`BookReads`), every user's: each is read from its book again. */
+  books: number;
 }
 
 const MB = 1024 * 1024;
@@ -54,7 +62,7 @@ export class MemoryBudget {
     this.trimmedAt = rss;
     const gone = this.trim();
     this.probe.collect();
-    this.log(`memory: RSS ${Math.round(rss / MB)} MB is past the ${Math.round(this.limit / MB)} MB budget; let go of the copies of ${gone.messages} chats' messages, ${gone.ledgers} open ledgers, ${gone.views} views and ${gone.bridges} turn bridges of chats not in use`);
+    this.log(`memory: RSS ${Math.round(rss / MB)} MB is past the ${Math.round(this.limit / MB)} MB budget; let go of the copies of ${gone.messages} chats' messages, ${gone.ledgers} open ledgers, ${gone.views} views and ${gone.bridges} turn bridges of chats not in use, ${gone.texts} agent texts, ${gone.sessions} main sessions read, ${gone.steps} fold steps and ${gone.books} World Info books read`);
     return true;
   }
 

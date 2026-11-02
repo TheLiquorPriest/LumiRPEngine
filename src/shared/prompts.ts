@@ -8,6 +8,7 @@
 import { AGENT_FAILURE_PROMPTS } from "./agent-failures";
 import { AGENT_YIELD_PROMPTS } from "./agent-yield";
 import { RUNTIME_PROMPT_PAGE, RUNTIME_PROMPTS } from "./agent-prompts";
+import { FINAL_REVIEW_PROMPTS } from "./final-review";
 import { MAIN_AGENT_PAGE, MAIN_AGENT_PROMPTS } from "./main-agent-prompts";
 import { ROLE_PROMPT_PAGES, ROLE_PROMPTS } from "./role-prompts";
 import { TOOL_FAMILY_LABEL, TOOL_NOTES, TOOL_TEXTS, toolArgTextId, toolTextId } from "./agent-tools";
@@ -128,7 +129,7 @@ export const FINAL_OUTPUT_PAGE: PromptPage = {
 export const GM_AGENT_PAGE: PromptPage = {
   id: "gm",
   label: "GM agent",
-  note: "The game master's assistant (GM → Assistant): its system prompt, its instructions, the descriptions of its tools and the notes its tools answer with.",
+  note: "The game master's assistant (GM → Assistant), outside the story: its system prompt, its instructions, the descriptions of its tools and the notes its tools answer with.",
 };
 
 const NARRATOR_GROUP = "Narrator rules";
@@ -229,7 +230,6 @@ export const GM_TEXT = {
   system: "gm.system",
   instructions: "gm.instructions",
   historyNote: "gm.history_note",
-  knowledge: { pov: "gm.knowledge.pov", everyone: "gm.knowledge.everyone", gm: "gm.knowledge.gm" },
 } as const;
 
 /** What the GM agent's prompts may name. */
@@ -238,11 +238,7 @@ const GM_VARS: readonly PromptVar[] = [
   { name: "pov", text: "the player character's name" },
 ];
 
-/** What the system prompt may name besides: what the assistant's tools show it, in the words of its knowledge's text below. */
-const GM_SYSTEM_VARS: readonly PromptVar[] = [...GM_VARS, { name: "knowledge", text: "what the assistant's tools show it: the text below for the knowledge it reads with (Settings → Agents → Assistant → Knowledge)" }];
-
 const GM_INSTRUCTIONS = "Instructions";
-const GM_KNOWLEDGE = "What it sees";
 const GM_THREAD = "The conversation";
 
 /** The GM agent's own texts; its tools' descriptions join them with the tools. */
@@ -253,8 +249,8 @@ export const GM_AGENT_PROMPTS: readonly PromptDef[] = [
     group: GM_INSTRUCTIONS,
     label: "System prompt",
     note: "Who the assistant is, whom it works for, and what it may rely on.",
-    text: "You are the game master's assistant for {{world}}, a roleplay world that LumiRPEngine keeps; {{pov}} is the player character. You work for the game master, outside the story: you answer their questions about the world and make the changes they ask for. You never narrate the story or speak as one of its characters.\n\nYou see the world through your tools, as it stands now, and they show you {{knowledge}}. They are your only source. Look things up before you answer, and answer only from what the tools give back: when they don't show something, say that you can't see it, and never guess or fill a gap from memory. A secret the tools mark stays marked in what you say: say whom it is known to and whom it is kept from.",
-    vars: GM_SYSTEM_VARS,
+    text: "You are the game master's assistant for {{world}}, a roleplay world that LumiRPEngine keeps; {{pov}} is the player character. You work for the game master, outside the story and outside its world: you are no one in it, and nothing in it is kept from you. You answer their questions about the world, the engine and the agents' workspace, and make the changes they ask for. You never narrate the story or speak as one of its characters.\n\nYour tools show you the world as it stands now, all of it: every secret, plan and hidden person, place and thing. They are your only source. Look things up before you answer, and answer only from what the tools give back: when they don't have something, say so, and never guess or fill a gap from memory. When something is a secret, say so plainly, with whom it is known to and whom it is kept from: what the story reveals is the game master's to decide.",
+    vars: GM_VARS,
   },
   {
     id: GM_TEXT.instructions,
@@ -262,7 +258,7 @@ export const GM_AGENT_PROMPTS: readonly PromptDef[] = [
     group: GM_INSTRUCTIONS,
     label: "Role instructions",
     note: "How it works through a question or a change.",
-    text: "How to work:\n- Find whom and what a request is about first, by the names the game master uses, then read only what you need. A name the tools don't find is one you can't see: say so.\n- Answer briefly and concretely, naming people, places, things and amounts as the tools give them.\n- To change the world, use the edit tools. An edit tool changes nothing by itself: it checks the change against the world as it stands now and gives back a preview. The game master then applies it, with an Undo, or turns it down; if they chose so, it applies as soon as you have answered. Propose only what the game master asked for, and say in plain words what you propose. When a tool refuses a change, say why, in its words.\n- Write a workspace note only when the game master asks you to keep something.",
+    text: "How to work:\n- Find whom and what a request is about first, by the names the game master uses, then read only what you need. A name the tools don't find isn't in the world: say so.\n- Answer briefly and concretely, naming people, places, things and amounts as the tools give them.\n- To change the world, use the edit tools. An edit tool changes nothing by itself: it checks the change against the world as it stands now and gives back a preview. The game master then applies it, with an Undo, or turns it down; if they chose so, it applies as soon as you have answered. Propose only what the game master asked for, and say in plain words what you propose. When a tool refuses a change, say why, in its words.\n- Write a workspace note only when the game master asks you to keep something: under ~/ for every chat of theirs, else for this chat.",
     vars: GM_VARS,
   },
   {
@@ -270,36 +266,9 @@ export const GM_AGENT_PROMPTS: readonly PromptDef[] = [
     page: GM_AGENT_PAGE.id,
     group: GM_THREAD,
     label: "Earlier messages left out",
-    note: "Leads what is sent of the conversation when any of it isn't sent, past History tokens (Settings → Agents → Assistant) or written with more knowledge than the assistant reads with now: how many of its earlier messages aren't sent.",
+    note: "Leads what is sent of the conversation when any of it isn't sent, past History tokens (Settings → Agents → Assistant): how many of its earlier messages aren't sent.",
     text: "({{count}} earlier {{messages}} of this conversation left out. If you need what was said there, ask the game master.)",
     vars: [...GM_VARS, { name: "count", text: "how many of the conversation's earlier messages aren't sent" }, { name: "messages", text: '"message" for 1, else "messages"' }],
-  },
-  {
-    id: GM_TEXT.knowledge.pov,
-    page: GM_AGENT_PAGE.id,
-    group: GM_KNOWLEDGE,
-    label: "Your character's knowledge",
-    note: "Fills {{knowledge}} in the system prompt while the assistant reads with your character's knowledge.",
-    text: "only what {{pov}}, the player character, knows: nobody and nothing they haven't met, seen or been told of",
-    vars: GM_VARS,
-  },
-  {
-    id: GM_TEXT.knowledge.everyone,
-    page: GM_AGENT_PAGE.id,
-    group: GM_KNOWLEDGE,
-    label: "Everyone's knowledge, secrets marked",
-    note: "Fills {{knowledge}} in the system prompt while the assistant reads with what everyone in the world knows.",
-    text: "what everyone in the world knows, each secret marked with whom it is known to and whom it is kept from",
-    vars: GM_VARS,
-  },
-  {
-    id: GM_TEXT.knowledge.gm,
-    page: GM_AGENT_PAGE.id,
-    group: GM_KNOWLEDGE,
-    label: "The GM's knowledge",
-    note: "Fills {{knowledge}} in the system prompt while the assistant reads with the game master's knowledge.",
-    text: "everything, as the game master sees it: every secret, plan and hidden person, place and thing",
-    vars: GM_VARS,
   },
 ];
 
@@ -307,7 +276,7 @@ export const GM_AGENT_PROMPTS: readonly PromptDef[] = [
 export const PROMPT_PAGES: readonly PromptPage[] = [FINAL_OUTPUT_PAGE, GM_AGENT_PAGE, MAIN_AGENT_PAGE, RUNTIME_PROMPT_PAGE, ...ROLE_PROMPT_PAGES];
 
 /** Every editable text. */
-export const PROMPTS: readonly PromptDef[] = [...FINAL_OUTPUT_PROMPTS, ...GM_AGENT_PROMPTS, ...TOOL_PROMPTS, ...loreIndexPrompts(GM_AGENT_PAGE.id), ...MAIN_AGENT_PROMPTS, ...AGENT_FAILURE_PROMPTS, ...AGENT_YIELD_PROMPTS, ...RUNTIME_PROMPTS, ...ROLE_PROMPTS];
+export const PROMPTS: readonly PromptDef[] = [...FINAL_OUTPUT_PROMPTS, ...GM_AGENT_PROMPTS, ...TOOL_PROMPTS, ...loreIndexPrompts(GM_AGENT_PAGE.id), ...MAIN_AGENT_PROMPTS, ...FINAL_REVIEW_PROMPTS, ...AGENT_FAILURE_PROMPTS, ...AGENT_YIELD_PROMPTS, ...RUNTIME_PROMPTS, ...ROLE_PROMPTS];
 
 /** The pages whose texts a turn's prompt set records (DESIGN §6.12): what the narrator's prompt is made from. */
 export const TURN_PROMPT_PAGES: readonly string[] = [FINAL_OUTPUT_PAGE.id];

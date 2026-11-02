@@ -724,7 +724,7 @@ describe("World Info secrecy wherever the entry is read", () => {
     expect(carrying(rig, SECRET)).toEqual([]);
   });
 
-  test("the outline gate's chip shows no World Info secret an outline beat repeats", async () => {
+  test("the outline gate's chip holds a World Info secret an outline beat repeats as a spoiler, never in its editable lines", async () => {
     const OUTLINE = "You outline a roleplay narrator's next reply";
     const rig = new Rig({ shipped: true });
     rig.host.quietReply = () => "{}";
@@ -739,7 +739,10 @@ describe("World Info secrecy wherever the entry is read", () => {
     await rig.host.start(chatId, { type: "normal" });
     const gate = (await rig.rt.view(chatId, rig.host.userId)).chips.find((c) => c.kind === "outline_gate");
     expect(gate?.detail ?? "").toContain("Danny glances at the clock");
-    expect(JSON.stringify(gate)).not.toContain(SECRET);
+    expect(gate?.detail ?? "").not.toContain(SECRET);
+    expect(gate?.spoilers?.length).toBe(1);
+    expect(gate?.spoilers?.[0]).toContain(SECRET);
+    expect(JSON.stringify(gate?.actions ?? [])).not.toContain(SECRET);
   });
 
   test("a secret whose gate this turn's Go opens is in that turn's own prompt", async () => {

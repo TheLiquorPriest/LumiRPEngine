@@ -2,8 +2,8 @@
 // dry run says what a change would do and writes nothing. Apply writes the changes that pass as one
 // GM edit with one Undo chip: the same apply sent again finds it and writes nothing more, a batch
 // asked for again after another is a new write, and the chip's Undo takes the edit back whole. A
-// change that can't be made comes back with its code, its reason and its key, and someone the player
-// character can't know reads exactly as an id no one has. A write made while a turn's engine runs
+// change that can't be made comes back with its code, its reason and its key; someone the world keeps
+// secret is changed as anyone else is, under every view. A write made while a turn's engine runs
 // waits for the turn, whatever Settings → Writes says, and lands once its reply is in; the turn
 // stands as it was played.
 
@@ -16,15 +16,13 @@ import { renderPrompt } from "../../src/backend/prompts";
 import { fixChip } from "../../src/backend/view";
 import { resolveEdit } from "../../src/engine/edits";
 import { GONE_FIELD } from "../../src/engine/scope";
-import { STARTER_WORLDS } from "../../src/packs/index";
-import { type AgentKnowledge, TOOL_NOTE } from "../../src/shared/agent-tools";
+import { TOOL_NOTE, type ToolView } from "../../src/shared/agent-tools";
 import { WRITE_NOTE } from "../../src/shared/agent-tools-write";
 import { hashJson } from "../../src/shared/hash";
 import type { JsonObject } from "../../src/shared/json";
 import { factId, type KnowledgeFact, MINDS_EVENTS, type MindsGmView } from "../../src/shared/minds";
 import type { Rec } from "../../src/shared/ledger";
 import type { EditOp } from "../../src/shared/protocol";
-import type { WorldDoc } from "../../src/shared/world";
 import { AGENT_CHANGE_LABEL } from "../../src/shared/settings";
 import { Rig } from "../support/rig";
 import { POV } from "../support/test-pack";
@@ -40,7 +38,7 @@ const MARA: JsonObject = { id: NEIGHBOR, kind: "person", name: "Mara", tier: "ba
 const NO_ONE = "lodger";
 
 /** The env an agent's tools run with in `chatId` under `knowledge`, as `role` (the assistant unless named), with the writer outside a turn. */
-function agentEnv(rig: Rig, chatId: string, knowledge: AgentKnowledge, role = "assistant"): ToolEnv & { writer: ToolWriter } {
+function agentEnv(rig: Rig, chatId: string, knowledge: ToolView, role = "assistant"): ToolEnv & { writer: ToolWriter } {
   const base = { userId: rig.host.userId, chatId, knowledge };
   const env = { ...base, reader: outsideReader(rig.rt, base), agent: { role, id: "agent_test" }, signal: new AbortController().signal };
   return { ...env, writer: outsideWriter(rig.rt, { ...env, connectionId: null }) };
@@ -198,7 +196,7 @@ describe("apply", () => {
     expect(chips).not.toContain(null);
     expect(new Set(chips).size).toBe(3);
     expect((await headRecord(rig, chatId))?.post.filter((p) => p.kind === "fix")).toHaveLength(4);
-    expect((await listWorkspace(rig.rt, { userId: rig.host.userId, chatId, knowledge: "gm" })).map((f) => [f.path, f.pinned])).toEqual([[NOTE, true]]);
+    expect((await listWorkspace(rig.rt, { userId: rig.host.userId, chatId })).map((f) => [f.path, f.pinned])).toEqual([[NOTE, true]]);
     // Sent once more straight after, it is the latest write again: nothing more is written.
     const seq = await journalSeq(rig, chatId);
     expect(await writer.apply([pin], "Pin the notes")).toEqual(third);
@@ -238,31 +236,20 @@ describe("a change that can't be made", () => {
     expect(previewOf(await agentEnv(rig, chatId, "gm", GM_ROLE).writer.dryRun(tense)).mode).toBe("auto");
   });
 
-  test("under the player character's knowledge, someone it can't know is refused exactly as an id no one has: the not-found note, never her name", async () => {
+  test("someone the world keeps secret is changed as anyone else is, under every view; an id no one has is the not-found note", async () => {
     const rig = new Rig();
     const worldId = await rig.newWorld();
     rig.body(await rig.send({ type: "lre.editor", op: "put", worldId, base: null, collection: "entities", id: NEIGHBOR, value: MARA }));
     rig.body(await rig.send({ type: "lre.world", op: "commit", worldId, base: null }));
     const chatId = rig.host.createChat("Morning, Sam.");
     rig.body(await rig.send({ type: "lre.world", op: "attach", worldId, chatId }));
-    const { writer } = agentEnv(rig, chatId, "pov");
     const mara: AgentOp = { kind: "gm_edit", op: { op: "set", entity: NEIGHBOR, field: "mood", value: "wary" } };
     const lodger: AgentOp = { kind: "gm_edit", op: { op: "set", entity: NO_ONE, field: "mood", value: "wary" } };
-    const hidden = refusalOf(await writer.dryRun(mara));
-    const missing = refusalOf(await writer.dryRun(lodger));
-    expect(hidden).toEqual({ refused: true, code: "not_found", reason: renderPrompt(TOOL_NOTE.noThing, {}, { name: NEIGHBOR }), key: opKey(mara) });
-    expect(hidden.reason).not.toContain("Mara");
-    // Only the id each was asked for tells the two apart.
-    expect(missing.code).toBe(hidden.code);
-    expect(missing.reason.replaceAll(NO_ONE, "{id}")).toBe(hidden.reason.replaceAll(NEIGHBOR, "{id}"));
-    // Applied together, both are refused as their dry runs were, and nothing is written.
-    const seq = await journalSeq(rig, chatId);
-    expect(await writer.apply([mara, lodger], "Mornings")).toEqual({ applied: [], refused: [hidden, missing], chipId: null, pending: false });
-    expect(await journalSeq(rig, chatId)).toBe(seq);
-    // Everyone's knowledge reaches her, so there the same change may be made; an id no one has is still no one.
-    const everyone = agentEnv(rig, chatId, "everyone").writer;
-    expect(previewOf(await everyone.dryRun(mara)).changeType).toBe("gm_edit");
-    expect(await everyone.dryRun(lodger)).toEqual(missing);
+    for (const knowledge of ["everyone", "gm"] as const) {
+      const { writer } = agentEnv(rig, chatId, knowledge);
+      expect(previewOf(await writer.dryRun(mara)).changeType).toBe("gm_edit");
+      expect(refusalOf(await writer.dryRun(lodger))).toEqual({ refused: true, code: "not_found", reason: renderPrompt(TOOL_NOTE.noThing, {}, { name: NO_ONE }), key: opKey(lodger) });
+    }
   });
 });
 
@@ -313,8 +300,8 @@ describe("a write made while a turn's engine runs", () => {
   });
 });
 
-describe("what the player character's knowledge may ask of the writer", () => {
-  test("a spawn takes no id of its own: an id someone it can't know holds, one it knows and one no one has are refused alike", async () => {
+describe("what every view may ask of the writer", () => {
+  test("a spawn may name its own id: a free id is taken, and one in use is the engine's refusal", async () => {
     const rig = new Rig();
     const worldId = await rig.newWorld();
     rig.body(await rig.send({ type: "lre.editor", op: "put", worldId, base: null, collection: "entities", id: NEIGHBOR, value: MARA }));
@@ -322,132 +309,21 @@ describe("what the player character's knowledge may ask of the writer", () => {
     const chatId = rig.host.createChat("Morning, Sam.");
     rig.body(await rig.send({ type: "lre.world", op: "attach", worldId, chatId }));
     const spawn = (id?: string): AgentOp => ({ kind: "gm_edit", op: { op: "spawn", kind: "person", name: "Lou", ...(id !== undefined ? { id } : {}) } });
-    const pov = agentEnv(rig, chatId, "pov").writer;
-    for (const id of [NEIGHBOR, "dev", NO_ONE]) expect(await pov.dryRun(spawn(id))).toEqual({ refused: true, code: "bad_id", reason: renderPrompt(WRITE_NOTE.spawnId, {}, { id }), key: opKey(spawn(id)) });
-    expect(renderPrompt(WRITE_NOTE.spawnId, {}, { id: NEIGHBOR })).not.toContain("Mara");
-    // With no id of its own, one is made.
-    expect(previewOf(await pov.dryRun(spawn())).changeType).toBe("gm_spawn");
-    // The GM's knowledge may name one: a free id is taken, and one in use is the engine's refusal.
-    const gm = agentEnv(rig, chatId, "gm").writer;
-    expect(previewOf(await gm.dryRun(spawn(NO_ONE))).changeType).toBe("gm_spawn");
-    expect(refusalOf(await gm.dryRun(spawn(NEIGHBOR))).code).toBe("bad_id");
-  });
-
-  test("a fact it doesn't hold reads exactly as one the chat doesn't record; everyone's knowledge finds each fact the chat records", async () => {
-    const { rig, chatId, now, debt } = await debtChat();
-    const learns = (fact: string): AgentOp => ({ kind: "mind_edit", edit: { op: "mind_knowledge", entity: "pov", fact, holding: { how: "witnessed", by: null, evidence: [], since: { msg: null, at: now }, belief: "true", confidence: 1 } } });
-    const nothing = factId({ kind: "claim", hash: "nothing" });
-    const pov = agentEnv(rig, chatId, "pov").writer;
-    const held = refusalOf(await pov.dryRun(learns(debt.id)));
-    expect(held).toEqual({ refused: true, code: "not_found", reason: renderPrompt(TOOL_NOTE.noFact, {}, { name: debt.id }), key: opKey(learns(debt.id)) });
-    const none = refusalOf(await pov.dryRun(learns(nothing)));
-    expect([none.code, none.reason.replaceAll(nothing, "{id}")]).toEqual([held.code, held.reason.replaceAll(debt.id, "{id}")]);
-    const everyone = agentEnv(rig, chatId, "everyone").writer;
-    expect(await everyone.dryRun(learns(debt.id))).not.toMatchObject({ code: "not_found" });
-    expect(refusalOf(await everyone.dryRun(learns(nothing))).code).toBe("not_found");
-  });
-
-  test("another's mind is beyond it: a change to Marcus's mind answers alike whether or not he holds the fact", async () => {
-    const { rig, chatId, now, debt, rumour } = await debtChat();
-    const holding = { how: "witnessed", by: null, evidence: [], since: { msg: null, at: now }, belief: "true", confidence: 1 };
-    const marcus = (fact: string, held: JsonObject | null): AgentOp => ({ kind: "mind_edit", edit: { op: "mind_knowledge", entity: "marcus_delgado", fact, holding: held } });
-    // He holds the debt and not the rumour: forgetting each, or learning the rumour.
-    const asks = [marcus(debt.id, null), marcus(rumour.id, null), marcus(rumour.id, holding), { kind: "mind_edit", edit: { op: "mind_intent", entity: "marcus_delgado", text: "Keep the shop open." } } satisfies AgentOp];
-    const pov = agentEnv(rig, chatId, "pov").writer;
-    const reason = renderPrompt(WRITE_NOTE.notYourMind, {}, { pov: "Jordan Ellis" });
-    for (const ask of asks) expect(await pov.dryRun(ask)).toEqual({ refused: true, code: "not_your_mind", reason, key: opKey(ask) });
-    const seq = await journalSeq(rig, chatId);
-    expect((await pov.apply(asks, "Marcus")).refused.map((r) => [r.code, r.reason])).toEqual(asks.map(() => ["not_your_mind", reason]));
-    expect(await journalSeq(rig, chatId)).toBe(seq);
-    // Everyone's knowledge reaches his mind, where the same two forgets tell what he holds: the rule above is what keeps that from the player character's.
-    const everyone = agentEnv(rig, chatId, "everyone").writer;
-    expect(previewOf(await everyone.dryRun(marcus(debt.id, null))).changeType).toBe("gm_edit");
-    expect(refusalOf(await everyone.dryRun(marcus(rumour.id, null))).code).toBe("no_change");
-  });
-
-  test("an id in a value is held to it too: a reference set to an account it can't know reads exactly as one set to an account no one has", async () => {
-    const { rig, chatId } = await debtChat();
-    const pov = agentEnv(rig, chatId, "pov").writer;
-    // Jordan's debit card draws on an account: Danny's, which Jordan can't know of, or one no one has.
-    const draws = (account: string): AgentOp => ({ kind: "gm_edit", op: { op: "set", entity: "card_pov_debit", field: "account", value: account } });
-    const hidden = refusalOf(await pov.dryRun(draws("acct_danny_checking")));
-    const missing = refusalOf(await pov.dryRun(draws("acct_no_one")));
-    expect(hidden).toEqual({ refused: true, code: "not_found", reason: renderPrompt(TOOL_NOTE.noThing, {}, { name: "acct_danny_checking" }), key: opKey(draws("acct_danny_checking")) });
-    expect([missing.code, missing.reason.replaceAll("acct_no_one", "{id}")]).toEqual([hidden.code, hidden.reason.replaceAll("acct_danny_checking", "{id}")]);
-    // One it knows of is taken, as before; everyone's knowledge reaches Danny's.
-    expect(previewOf(await pov.dryRun(draws("acct_pov_savings"))).changeType).toBe("gm_edit");
-    expect(previewOf(await agentEnv(rig, chatId, "everyone").writer.dryRun(draws("acct_danny_checking"))).changeType).toBe("gm_edit");
-  });
-
-  test("no effect is proposed with it, whatever the effect would touch, and every refusal of the engine's is one note", async () => {
-    const { rig, chatId } = await debtChat();
-    const pov = agentEnv(rig, chatId, "pov").writer;
-    const closes = (account: string): AgentOp => ({ kind: "gm_edit", op: { op: "effect", effect: "economy.close_account", args: { account } } });
-    const effectNote = renderPrompt(WRITE_NOTE.povEffect, {}, { pov: "Jordan Ellis" });
-    // Danny's account, one no one has and Jordan's own: refused alike.
-    for (const account of ["acct_danny_checking", "acct_no_one", "acct_pov_savings"]) expect(await pov.dryRun(closes(account))).toEqual({ refused: true, code: "pov_effect", reason: effectNote, key: opKey(closes(account)) });
-    expect(effectNote).not.toContain("Danny");
-    // The engine refuses a tier the world doesn't have: the GM's knowledge hears its reason, the player character's one note.
-    const tier: AgentOp = { kind: "gm_edit", op: { op: "entity", entity: "pov", tier: "legendary" } };
-    const head = await chatHead(rig.rt, chatId, rig.host.userId);
-    if (!head) throw new Error("the chat plays no world");
-    const engine = resolveEdit(rig.rt.registry, head.world, head.state, [{ op: "entity", entity: "pov", tier: "legendary" }], { gm: true, runSeed: head.run.runSeed });
-    if (!("rejection" in engine)) throw new Error("the engine took it");
-    expect(await agentEnv(rig, chatId, "gm").writer.dryRun(tier)).toMatchObject({ code: engine.rejection.code, reason: engine.rejection.gm ?? engine.rejection.reason });
-    expect(await pov.dryRun(tier)).toEqual({ refused: true, code: "refused", reason: renderPrompt(WRITE_NOTE.povRefused, {}, { pov: "Jordan Ellis" }), key: opKey(tier) });
-  });
-
-  test("a field it can't see reads exactly as one its kind doesn't have, whatever its value, and a change that changes nothing is the one note", async () => {
-    /** Port Alder with Marcus's desperation, a secret field, at `level`, and his composure, a field anyone may see, at its top. */
-    const alder = (level: number) => (id: string, name: string): WorldDoc => {
-      const doc = STARTER_WORLDS.modern_slice_of_life(id, name);
-      const character = doc.kinds.character;
-      const marcus = doc.entities.marcus_delgado;
-      if (!character || !marcus) throw new Error("Port Alder has no Marcus");
-      character.fields = { ...character.fields, desperation: { type: "number", label: "Desperation", min: 0, max: 3, visibility: "secret" }, composure: { type: "number", label: "Composure", min: 0, max: 3, visibility: "public" } };
-      marcus.fields = { ...marcus.fields, desperation: level, composure: 3 };
-      return doc;
-    };
-    const adds = (field: string): AgentOp => ({ kind: "gm_edit", op: { op: "add", entity: "marcus_delgado", field, delta: 1 } });
-    const sets = (field: string): AgentOp => ({ kind: "gm_edit", op: { op: "set", entity: "marcus_delgado", field, value: 3 } });
-    // Below its top and at it, the hidden field is answered as a field Marcus doesn't have is.
-    for (const level of [1, 3]) {
-      const rig = new Rig({ shipped: true, templates: { alder_hidden: alder(level) } });
-      const worldId = await rig.newWorld("Port Alder", "alder_hidden");
-      const chatId = rig.host.createChat("Morning.");
-      rig.body(await rig.send({ type: "lre.world", op: "attach", worldId, chatId }));
-      const pov = agentEnv(rig, chatId, "pov").writer;
-      for (const change of [adds, sets]) {
-        const hidden = refusalOf(await pov.dryRun(change("desperation")));
-        const none = refusalOf(await pov.dryRun(change("no_such_field")));
-        expect(hidden).toEqual({ refused: true, code: "not_found", reason: renderPrompt(TOOL_NOTE.noField, {}, { name: "desperation" }), key: opKey(change("desperation")) });
-        expect([none.code, none.reason.replace("no_such_field", "{field}")]).toEqual([hidden.code, hidden.reason.replace("desperation", "{field}")]);
-      }
-      // A field it sees, already at its top: the GM's knowledge hears that nothing changes, the player character's the one note.
-      expect(refusalOf(await agentEnv(rig, chatId, "gm").writer.dryRun(adds("composure"))).code).toBe("no_change");
-      expect(await pov.dryRun(adds("composure"))).toEqual({ refused: true, code: "refused", reason: renderPrompt(WRITE_NOTE.povRefused, {}, { pov: "Jordan Ellis" }), key: opKey(adds("composure")) });
+    for (const knowledge of ["everyone", "gm"] as const) {
+      const { writer } = agentEnv(rig, chatId, knowledge);
+      expect(previewOf(await writer.dryRun(spawn())).changeType).toBe("gm_spawn");
+      expect(previewOf(await writer.dryRun(spawn(NO_ONE))).changeType).toBe("gm_spawn");
+      expect(refusalOf(await writer.dryRun(spawn(NEIGHBOR))).code).toBe("bad_id");
     }
   });
 
-  test("an id in a relation's own field is held to it as well: an account it can't know reads exactly as one no one has", async () => {
-    // A relation with a reference field, as Build → Relations allows one.
-    const alder = (id: string, name: string): WorldDoc => {
-      const doc = STARTER_WORLDS.modern_slice_of_life(id, name);
-      doc.relations = { ...doc.relations, owes: { id: "owes", label: "Owes", from: "*", to: "*", cardinality: "many_many", symmetric: false, fields: { via: { type: "ref", label: "Via" } } } };
-      return doc;
-    };
-    const rig = new Rig({ shipped: true, templates: { alder_owes: alder } });
-    const worldId = await rig.newWorld("Port Alder", "alder_owes");
-    const chatId = rig.host.createChat("Morning.");
-    rig.body(await rig.send({ type: "lre.world", op: "attach", worldId, chatId }));
-    const owes = (via: string): AgentOp => ({ kind: "gm_edit", op: { op: "link", rel: "owes", from: "pov", to: "marcus_delgado", fields: { via } } });
-    const pov = agentEnv(rig, chatId, "pov").writer;
-    const hidden = refusalOf(await pov.dryRun(owes("acct_danny_checking")));
-    const missing = refusalOf(await pov.dryRun(owes("acct_no_one")));
-    expect(hidden).toEqual({ refused: true, code: "not_found", reason: renderPrompt(TOOL_NOTE.noThing, {}, { name: "acct_danny_checking" }), key: opKey(owes("acct_danny_checking")) });
-    expect([missing.code, missing.reason.replaceAll("acct_no_one", "{id}")]).toEqual([hidden.code, hidden.reason.replaceAll("acct_danny_checking", "{id}")]);
-    // The GM's knowledge reaches Danny's account.
-    expect(previewOf(await agentEnv(rig, chatId, "gm").writer.dryRun(owes("acct_danny_checking"))).changeType).toBe("gm_edit");
+  test("each fact the chat records may be learned, one Jordan doesn't hold too; a fact the chat doesn't record is the not-found note", async () => {
+    const { rig, chatId, now, debt } = await debtChat();
+    const learns = (fact: string): AgentOp => ({ kind: "mind_edit", edit: { op: "mind_knowledge", entity: "pov", fact, holding: { how: "witnessed", by: null, evidence: [], since: { msg: null, at: now }, belief: "true", confidence: 1 } } });
+    const nothing = factId({ kind: "claim", hash: "nothing" });
+    const { writer } = agentEnv(rig, chatId, "everyone");
+    expect(await writer.dryRun(learns(debt.id))).not.toMatchObject({ code: "not_found" });
+    expect(refusalOf(await writer.dryRun(learns(nothing)))).toEqual({ refused: true, code: "not_found", reason: renderPrompt(TOOL_NOTE.noFact, {}, { name: nothing }), key: opKey(learns(nothing)) });
   });
 });
 
@@ -501,7 +377,7 @@ describe("rules and retries through a turn", () => {
     const seq = await journalSeq(rig, chatId);
     expect(await writer.apply([pin], LABEL)).toEqual({ applied: [opKey(pin)], refused: [], chipId: null, pending: false });
     expect(await journalSeq(rig, chatId)).toBe(seq);
-    expect((await listWorkspace(rig.rt, { userId: user, chatId, knowledge: "gm" })).find((f) => f.path === NOTE)?.pinned).toBe(false);
+    expect((await listWorkspace(rig.rt, { userId: user, chatId })).find((f) => f.path === NOTE)?.pinned).toBe(false);
     expect(rig.rt.ledger.errors).toEqual([]);
   });
 });

@@ -1,8 +1,9 @@
 // The minds' calls in an agent turn (INC2-SPEC lane T2): every call a minds phase makes (a mind, a
 // memory, a consolidation, the knowledge step, a time skip's beats or its plan) is asked of the role
 // its step belongs to, on that role's settings. Its agent works the call's task from the call's own
-// context, which classic builds for the character it is about, so it gets no tools: what it reads is
-// that character's own. Classic's own check takes or refuses its answer; a refused one does as the
+// context, which classic builds for the character it is about, with its role's tools, which read
+// everything secrets marked as every role's do: its perspective (Settings → Agents → Context) tells
+// it to work from that character's own. Classic's own check takes or refuses its answer; a refused one does as the
 // role's `onFail` says, call by call: classic's own call, nothing (the step's call failed), or the
 // turn stopped (after the reply, its read: `Orchestrator.roleStopped`). Who is asked, what they read
 // and how their answers are recorded stay classic's.
@@ -31,14 +32,16 @@ const KINDS: Readonly<Record<MindCallKind, { role: RoleId; sub: string; purpose:
 
 /**
  * One minds call as its role's agent works it, on `ctx`, that role's context: the call's own task,
- * placeholders, wording and context, with no tools, and its answer as classic's own check takes it,
- * or why not, with the answer as written. The minds family's asker runs each call so; Test for a
+ * placeholders, wording and context, with its role's tools, and its answer as classic's own check
+ * takes it, or why not, with the answer as written. The minds family's asker runs each call so; Test for a
  * minds role's text runs one.
  */
 export async function mindRun(rt: Runtime, ctx: TurnAgentCtx, call: MindCall, phase: DiagPhase): Promise<RoleAnswer<JsonValue>> {
   const kind = KINDS[call.kind];
   const settings = await rt.settings.get(ctx.userId);
   const taskId = roleTaskTextId(kind.role, kind.sub, "task");
+  // Its tools' schemas are the world's as the head it reads holds it; none while that world isn't loaded.
+  const world = (await ctx.reader.view().catch(() => null))?.world ?? null;
   const answer = call.knowing ? { part: "answer_knowing" } : call.kind === "knowledge" ? { part: "answer", vars: { lists: knowledgeText(settings.minds.knowledge, "stepAnswer") } } : undefined;
   return runRoleAgent(rt, ctx, {
     sub: kind.sub,
@@ -49,9 +52,7 @@ export async function mindRun(rt: Runtime, ctx: TurnAgentCtx, call: MindCall, ph
     ...(call.template !== null ? { own: { [taskId]: call.template } } : {}),
     data: call.context,
     ...(answer ? { answer } : {}),
-    tools: null,
-    // A call about one character reads that character's own knowledge, which the main agent's words are held to.
-    ...(ctx.settings.knowledge === "own" ? { reads: { own: call.who } } : {}),
+    tools: world,
     check: (raw) => (call.check(raw) ? raw : null),
   });
 }

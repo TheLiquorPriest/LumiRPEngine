@@ -12,7 +12,6 @@
 // that makes it, so no earlier record ever changes, and nothing is written into a record once the
 // next turn is planned (`LedgerCore.recordSession`).
 
-import { AGENT_KNOWLEDGE, type AgentKnowledge } from "../../shared/agent-tools";
 import type { ChatId, MessageId, UserId } from "../../shared/ids";
 import type { JsonObject, JsonValue } from "../../shared/json";
 import { isRecord } from "../../shared/json";
@@ -30,13 +29,12 @@ export type SessionMessage = JsonObject;
 /**
  * A base the session reads from (a compaction's summary, or an archived span): the summary standing
  * for what came before (null when nothing was summarized), then the segments read whole after it;
- * the knowledge its summary was made under (the main agent's, C14; absent in a base kept before it,
- * read as the GM's); and whether a rollback restored it, so it is no compaction to roll back.
+ * and whether a rollback restored it, so it is no compaction to roll back. An older base's
+ * `knowledge` is read and ignored.
  */
 export interface SessionBase {
   summary: string | null;
   segments: string[];
-  knowledge?: AgentKnowledge;
   restored?: true;
 }
 
@@ -61,8 +59,6 @@ export interface ResumedSession {
 /** A session as `refs` name it, turn by turn: the summary standing for what came before, then each segment it reads whole with its hash, which is how a compaction keeps the latest turns whole. */
 export interface SessionParts {
   summary: string | null;
-  /** The knowledge the summary was made under: the GM's for one kept without it, or none. */
-  summaryKnowledge: AgentKnowledge;
   /** The base it reads from is a span a rollback restored. */
   restored: boolean;
   segments: { hash: string; messages: SessionMessage[] }[];
@@ -116,8 +112,7 @@ export function sessionAt(chain: readonly ChainMessage[], tombstones: readonly T
 
 function baseOf(value: unknown): SessionBase | null {
   if (!isRecord(value) || value.v !== 1 || value.kind !== "base" || !(value.summary === null || typeof value.summary === "string") || !Array.isArray(value.segments) || !value.segments.every(isBlobHash)) return null;
-  const knowledge = AGENT_KNOWLEDGE.find((k) => k === value.knowledge);
-  return { summary: value.summary, segments: [...value.segments], ...(knowledge ? { knowledge } : {}), ...(value.restored === true ? { restored: true as const } : {}) };
+  return { summary: value.summary, segments: [...value.segments], ...(value.restored === true ? { restored: true as const } : {}) };
 }
 
 /**
@@ -143,6 +138,13 @@ export class Sessions {
     private readonly blobs: BlobStore,
     private readonly ledger: Pick<LedgerService, "recordSession">,
   ) {}
+
+  /** The memory budget: lets go of every user's latest session read, which its next read reads again. How many went. */
+  trim(): number {
+    const gone = this.read.size;
+    this.read.clear();
+    return gone;
+  }
 
   /** The session at the end of `chain` (`sessionAt`), read back. */
   resume(userId: UserId, chain: readonly ChainMessage[], tombstones: readonly Tombstone[]): Promise<ResumedSession> {
@@ -176,7 +178,7 @@ export class Sessions {
       kept.set(hash, messages);
     });
     this.read.set(userId, kept);
-    return { summary: base?.summary ?? null, summaryKnowledge: base?.knowledge ?? "gm", restored: base?.restored === true, segments, missing };
+    return { summary: base?.summary ?? null, restored: base?.restored === true, segments, missing };
   }
 
   /** Stores what a turn added to the session, held for `holder` until its record carries it (`record`). */
@@ -185,14 +187,14 @@ export class Sessions {
   }
 
   /**
-   * A compaction by the turn whose session stands at `at`: `summary`, made under `knowledge`, stands
-   * for everything but the last `keep` segments, which stay whole, and the session it replaced is
-   * archived whole, for a rollback. Both are held for `holder` until the turn's record carries them.
+   * A compaction by the turn whose session stands at `at`: `summary` stands for everything but the
+   * last `keep` segments, which stay whole, and the session it replaced is archived whole, for a
+   * rollback. Both are held for `holder` until the turn's record carries them.
    */
-  async compact(userId: UserId, holder: string, at: SessionRefs, summary: string, keep: number, knowledge?: AgentKnowledge): Promise<Rebase> {
+  async compact(userId: UserId, holder: string, at: SessionRefs, summary: string, keep: number): Promise<Rebase> {
     const current = await this.expanded(userId, at);
     const kept = keep > 0 ? current.segments.slice(-keep) : [];
-    return this.rebase(userId, holder, current, { summary, segments: kept, ...(knowledge ? { knowledge } : {}) });
+    return this.rebase(userId, holder, current, { summary, segments: kept });
   }
 
   /**
@@ -204,7 +206,7 @@ export class Sessions {
     const span = baseOf(await this.blobs.getJson(userId, archived));
     if (!span) return null;
     const current = await this.expanded(userId, at);
-    return this.rebase(userId, holder, current, { summary: span.summary, segments: [...span.segments, ...at.segments], ...(span.knowledge ? { knowledge: span.knowledge } : {}), restored: true });
+    return this.rebase(userId, holder, current, { summary: span.summary, segments: [...span.segments, ...at.segments], restored: true });
   }
 
   /**
@@ -229,16 +231,16 @@ export class Sessions {
     }
   }
 
-  /** The session `at` names as one base: its base's summary and knowledge, then the base's segments and those after it. */
+  /** The session `at` names as one base: its base's summary, then the base's segments and those after it. */
   private async expanded(userId: UserId, at: SessionRefs): Promise<SessionBase> {
     if (at.base === null) return { summary: null, segments: [...at.segments] };
     const base = baseOf(await this.blobs.getJson(userId, at.base));
     if (!base) throw new Error("the session's summary isn't stored, so it can't be rebased");
-    return { summary: base.summary, segments: [...base.segments, ...at.segments], ...(base.knowledge ? { knowledge: base.knowledge } : {}) };
+    return { summary: base.summary, segments: [...base.segments, ...at.segments] };
   }
 
   private async rebase(userId: UserId, holder: string, replaced: SessionBase, next: SessionBase): Promise<Rebase> {
-    const stored = (b: SessionBase) => ({ v: 1, kind: "base", summary: b.summary, segments: b.segments, ...(b.knowledge ? { knowledge: b.knowledge } : {}), ...(b.restored ? { restored: true } : {}) });
+    const stored = (b: SessionBase) => ({ v: 1, kind: "base", summary: b.summary, segments: b.segments, ...(b.restored ? { restored: true } : {}) });
     const archived = await this.blobs.putJson(userId, stored(replaced), holder);
     const summary = await this.blobs.putJson(userId, stored(next), holder);
     return { summary, archived };

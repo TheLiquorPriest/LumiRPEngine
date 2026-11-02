@@ -11,6 +11,11 @@ import { createSpindleHost } from "./spindle-host";
 
 export function startBackend(): Runtime {
   const host = createSpindleHost();
+  // The last resort: an error nothing caught is logged with its stack, to the host's log and the
+  // extension's diagnostics file, and the backend goes on rather than taking every chat down with it.
+  const caught = (what: string) => (error: unknown) => host.log("error", `[LumiRPEngine] ${what}: ${error instanceof Error ? (error.stack ?? `${error.name}: ${error.message}`) : String(error)}`);
+  process.on("unhandledRejection", caught("unhandled rejection"));
+  process.on("uncaughtException", caught("uncaught exception"));
   const runtime = new Runtime({ host, packs: ALL_PACKS, pipeline: { plan: planTurn, post: postTurn }, templates: STARTER_WORLDS, templateInfo: STARTER_INFO });
   const jobs = new JobRunner(host, runtime.worlds, runtime.steps, runtime.settings, runtime.registry);
   runtime.start();

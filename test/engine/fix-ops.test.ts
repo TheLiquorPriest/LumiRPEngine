@@ -1,6 +1,7 @@
 // What one `fix` entry asks for beyond the GM editor's operations (AGENT-LOOP-PLAN §4, §15): an
-// agent's workspace changes (who may read each file among them) and clock sets resolve as the events
-// they make, in order, all or none, and read back from a stored entry the same way.
+// agent's workspace changes and clock sets resolve as the events they make, in order, all or none,
+// and read back from a stored entry the same way. Every file is every agent's to read: a write names
+// no readers, and an earlier build's readers, stored or recorded, change nothing a chat reads now.
 
 import { describe, expect, test } from "bun:test";
 import type { FixOp, LedgerEvent } from "../../src/shared/ledger";
@@ -10,7 +11,7 @@ import { blobHash } from "../../src/shared/stores";
 import { parseEditOps, parseFixOps, resolveEdit, resolveFix } from "../../src/engine/edits";
 import type { WorldState } from "../../src/engine/state";
 import { clockFix } from "../../src/engine/time";
-import { readersOf, WS_DELETE, workspaceOf, workspacePins, workspaceReaders, wsDelete, wsPin, wsReaders, wsWrite } from "../../src/engine/workspace";
+import { WS_DELETE, WS_READERS, workspaceOf, workspacePins, wsDelete, wsPin, wsWrite } from "../../src/engine/workspace";
 import { baseWorld, fold, POV, registryOf, startState } from "../packs/support";
 
 const reg = registryOf();
@@ -38,8 +39,8 @@ function refused(state: Readonly<WorldState>, ops: readonly FixOp[]): string | n
 describe("an agent's workspace changes", () => {
   test("write, pin, move and delete resolve as the workspace's events, in order and as one unit", () => {
     const ops: FixOp[] = [
-      { op: "ws_write", path: "notes/inn.md", hash: INN, readers: "gm" },
-      { op: "ws_write", path: "notes/dev.md", hash: DEV, readers: "gm" },
+      { op: "ws_write", path: "notes/inn.md", hash: INN },
+      { op: "ws_write", path: "notes/dev.md", hash: DEV },
       { op: "ws_pin", path: "notes/inn.md", pinned: true },
       { op: "ws_move", from: "notes/inn.md", to: "old/inn.md" },
       { op: "ws_delete", path: "notes/dev.md" },
@@ -63,9 +64,9 @@ describe("an agent's workspace changes", () => {
   });
 
   test("what is already so, a missing file, a taken path and a malformed path or hash are refused, and nothing applies", () => {
-    expect(refused(files, [{ op: "ws_write", path: "notes/inn.md", hash: INN, readers: "gm" }])).toBe("no_change");
-    expect(refused(files, [{ op: "ws_write", path: "../inn.md", hash: INN, readers: "gm" }])).toBe("bad_op");
-    expect(refused(files, [{ op: "ws_write", path: "notes/inn.md", hash: "nope", readers: "gm" }])).toBe("bad_op");
+    expect(refused(files, [{ op: "ws_write", path: "notes/inn.md", hash: INN }])).toBe("no_change");
+    expect(refused(files, [{ op: "ws_write", path: "../inn.md", hash: INN }])).toBe("bad_op");
+    expect(refused(files, [{ op: "ws_write", path: "notes/inn.md", hash: "nope" }])).toBe("bad_op");
     expect(refused(files, [{ op: "ws_delete", path: "notes/gone.md" }])).toBe("missing_file");
     expect(refused(files, [{ op: "ws_move", from: "notes/gone.md", to: "old/gone.md" }])).toBe("no_file");
     expect(refused(files, [{ op: "ws_move", from: "notes/inn.md", to: "notes/inn.md" }])).toBe("no_change");
@@ -75,32 +76,23 @@ describe("an agent's workspace changes", () => {
     expect(refused(files, [{ op: "ws_pin", path: "notes/inn.md", pinned: true }])).toBe("no_change");
     expect(refused(files, [{ op: "ws_pin", path: "notes/dev.md", pinned: false }])).toBe("no_change");
     // All or none: the write before the refused pin never lands.
-    expect(refused(files, [{ op: "ws_write", path: "notes/new.md", hash: DEV, readers: "gm" }, { op: "ws_pin", path: "notes/gone.md", pinned: true }])).toBe("no_file");
+    expect(refused(files, [{ op: "ws_write", path: "notes/new.md", hash: DEV }, { op: "ws_pin", path: "notes/gone.md", pinned: true }])).toBe("no_file");
   });
 
-  test("a file is the GM's alone until a write or a change of its readers says otherwise; a move keeps them, a delete drops them", () => {
-    // A new file read as the player character knows the world: its write, then its readers.
-    const events = resolved(start, [{ op: "ws_write", path: "notes/square.md", hash: DEV, readers: "pov" }]);
-    expect(events).toEqual([wsWrite("notes/square.md", DEV), wsReaders("notes/square.md", "pov")].map((e) => ({ ...e, group: expect.stringMatching(/^edit:/) })));
+  test("a write is its body alone, with no readers; an earlier build's recorded readers still fold, and change nothing else", () => {
+    // A new file: its write, and nothing more.
+    const events = resolved(start, [{ op: "ws_write", path: "notes/square.md", hash: DEV }]);
+    expect(events).toEqual([wsWrite("notes/square.md", DEV)]);
+    // A move carries the body and pin only.
     const shared = fold(reg, world, files, events);
-    expect(workspaceReaders(shared)).toEqual({ "notes/square.md": "pov" });
-    expect(readersOf(shared, "notes/inn.md")).toBe("gm");
-    // The same text for other readers is a change of readers alone; the same of both, none.
-    expect(resolved(shared, [{ op: "ws_write", path: "notes/square.md", hash: DEV, readers: "everyone" }]).map((e) => e.type)).toEqual([wsReaders("x", "gm").type]);
-    expect(refused(shared, [{ op: "ws_write", path: "notes/square.md", hash: DEV, readers: "pov" }])).toBe("no_change");
-    // A move takes them along, with no entry left at the old path.
-    const moved = fold(reg, world, shared, resolved(shared, [{ op: "ws_move", from: "notes/square.md", to: "old/square.md" }]));
-    expect(workspaceReaders(moved)).toEqual({ "old/square.md": "pov" });
-    // Kept to the GM again: no entry at all.
-    const kept = fold(reg, world, moved, resolved(moved, [{ op: "ws_readers", path: "old/square.md", readers: "gm" }]));
-    expect(workspaceReaders(kept)).toEqual({});
-    expect(refused(kept, [{ op: "ws_readers", path: "old/square.md", readers: "gm" }])).toBe("no_change");
-    expect(refused(kept, [{ op: "ws_readers", path: "notes/gone.md", readers: "pov" }])).toBe("no_file");
-    expect(refused(kept, [{ op: "ws_readers", path: "old/square.md", readers: "nobody" as "gm" }])).toBe("bad_op");
-    // A delete drops them with the file.
-    const everyone = fold(reg, world, kept, resolved(kept, [{ op: "ws_readers", path: "old/square.md", readers: "everyone" }]));
-    const gone = fold(reg, world, everyone, resolved(everyone, [{ op: "ws_delete", path: "old/square.md" }]));
-    expect(workspaceReaders(gone)).toEqual({});
+    expect(resolved(shared, [{ op: "ws_move", from: "notes/square.md", to: "old/square.md" }]).map((e) => e.type)).not.toContain(WS_READERS);
+    // A chat recorded under an earlier build replays as it was: its readers event still folds into the index nothing reads.
+    const recorded = fold(reg, world, shared, [{ type: WS_READERS, data: { path: "notes/square.md", readers: "pov" } }]);
+    expect(recorded.packs.engine?.wsReaders).toEqual({ "notes/square.md": "pov" });
+    expect([workspaceOf(recorded), workspacePins(recorded)]).toEqual([workspaceOf(shared), workspacePins(shared)]);
+    // A delete still drops its entry with the file, as it did.
+    const gone = fold(reg, world, recorded, resolved(recorded, [{ op: "ws_delete", path: "notes/square.md" }]));
+    expect(gone.packs.engine?.wsReaders).toEqual({});
     // A chat that never shared a file holds no readers key.
     expect(Object.keys(files.packs.engine ?? {})).not.toContain("wsReaders");
   });
@@ -116,7 +108,7 @@ describe("an agent's clock set", () => {
     const fixed = fold(reg, world, start, fix.events);
     expect([after.clock, after.accounts, after.entities]).toEqual([fixed.clock, fixed.accounts, fixed.entities]);
     expect(after.clock).toBe(start.clock + 60);
-    const both = resolved(start, [{ op: "ws_write", path: "notes/inn.md", hash: INN, readers: "gm" }, { op: "clock", time: "2026-10-16 09:00" }]);
+    const both = resolved(start, [{ op: "ws_write", path: "notes/inn.md", hash: INN }, { op: "clock", time: "2026-10-16 09:00" }]);
     expect(new Set(both.map((e) => e.group)).size).toBe(1);
     const bothAfter = fold(reg, world, start, both);
     expect([bothAfter.clock, workspaceOf(bothAfter)]).toEqual([start.clock + 60, { "notes/inn.md": INN }]);
@@ -133,8 +125,7 @@ describe("an agent's clock set", () => {
 
 describe("reading what a fix entry asks for", () => {
   const NEW_OPS: FixOp[] = [
-    { op: "ws_write", path: "notes/inn.md", hash: INN, readers: "everyone" },
-    { op: "ws_readers", path: "notes/inn.md", readers: "pov" },
+    { op: "ws_write", path: "notes/inn.md", hash: INN },
     { op: "ws_delete", path: "notes/inn.md" },
     { op: "ws_move", from: "notes/inn.md", to: "old/inn.md" },
     { op: "ws_pin", path: "notes/inn.md", pinned: false },
@@ -169,16 +160,17 @@ describe("reading what a fix entry asks for", () => {
     expect(parseFixOps([...EDIT_OPS.slice(0, 3), ...NEW_OPS])).toEqual([...EDIT_OPS.slice(0, 3), ...NEW_OPS]);
     // What an op doesn't hold is dropped.
     expect(parseFixOps([{ op: "ws_delete", path: "notes/inn.md", extra: 1 }])).toEqual([{ op: "ws_delete", path: "notes/inn.md" }]);
-    // A write stored before writes named their readers is the GM's alone.
-    expect(parseFixOps([{ op: "ws_write", path: "notes/inn.md", hash: INN }])).toEqual([{ op: "ws_write", path: "notes/inn.md", hash: INN, readers: "gm" }]);
+    // A write stored by an earlier build that named its readers reads back without them.
+    expect(parseFixOps([{ op: "ws_write", path: "notes/inn.md", hash: INN, readers: "gm" }])).toEqual([{ op: "ws_write", path: "notes/inn.md", hash: INN }]);
+    expect(parseFixOps([{ op: "ws_write", path: "notes/inn.md", hash: INN, readers: 1 }])).toEqual([{ op: "ws_write", path: "notes/inn.md", hash: INN }]);
   });
 
   test("malformed ops, none and too many are refused; the GM editor's request still refuses the agent's ops", () => {
     for (const bad of [
       { op: "ws_write", path: "notes/inn.md" },
-      { op: "ws_write", path: "notes/inn.md", hash: INN, readers: 1 },
-      { op: "ws_write", path: 7, hash: INN, readers: "gm" },
-      { op: "ws_readers", path: "notes/inn.md" },
+      { op: "ws_write", path: 7, hash: INN },
+      // An earlier build's op that set a file's readers alone is no operation now.
+      { op: "ws_readers", path: "notes/inn.md", readers: "pov" },
       { op: "ws_delete" },
       { op: "ws_move", from: "notes/inn.md", to: 7 },
       { op: "ws_pin", path: "notes/inn.md", pinned: "true" },

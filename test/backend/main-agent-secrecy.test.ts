@@ -1,24 +1,22 @@
-// The main agent's secrecy (Increment 2 reviews: secrecy M1-M3, integration M2 and L7, correctness
-// M6). Its words reach each task of a role held to that task's own knowledge, whatever the main agent
-// reads with; another role's run inside the role's gets none of them. Its session keeps the knowledge
-// each message was made under and the workspace files its tools read, and a turn reads only what its
-// knowledge, and those files' readers, take in now; only that is counted and compacted. Models are
-// scripted; roles run prompt-only unless a test captures what a task is told.
+// The main agent's secrecy is guidance (DESIGN §4.5, §7.1), and correctness M6. Its words reach each
+// task of a role whole, a name the player character doesn't know of too; another role's run inside a
+// role's gets none of them. Its session is read whole: its summary and every message of its own, a
+// session kept before knowledge was stored too. Models are scripted; roles run prompt-only unless a
+// test captures what a task is told.
 
 import { describe, expect, test } from "bun:test";
-import { screenBrief } from "../../src/backend/agents/brief";
 import { emptyUsage } from "../../src/backend/agents/usage";
-import { historyOf, knowledgeLens, sessionTokens } from "../../src/backend/agents/compaction";
+import { historyOf, sessionTokens } from "../../src/backend/agents/compaction";
 import { classicRoles } from "../../src/backend/agents/roles/classic";
 import { roleCtx } from "../../src/backend/agents/roles/agent";
 import type { TurnAgentCtx } from "../../src/backend/agents/turn-ctx";
 import type { QuietRequest, QuietToolCall } from "../../src/backend/host";
-import { playerKnows, povMayKnow } from "../../src/engine/player-events";
+import { povMayKnow } from "../../src/engine/player-events";
 import { kindIs, placeOfEntity } from "../../src/engine/scope";
 import { ROLE_IDS } from "../../src/shared/agent-roles";
 import type { JsonObject } from "../../src/shared/json";
 import type { QuietScript } from "../support/fake-host";
-import { DANNY, stateOf } from "../support/mind-chat";
+import { stateOf } from "../support/mind-chat";
 import { Rig } from "../support/rig";
 import { POV } from "../support/test-pack";
 
@@ -45,12 +43,12 @@ function models(rig: Rig, opts: { task?: string; says?: () => string; script?: (
   return asked;
 }
 
-async function mainChat(rig: Rig, knowledge: "pov" | "everyone" | "gm" = "everyone"): Promise<string> {
+async function mainChat(rig: Rig): Promise<string> {
   const worldId = await rig.newWorld("Alder", "modern_slice_of_life");
   rig.body(await rig.send({ type: "lre.world", op: "commit", worldId, base: null }));
   const chatId = rig.host.createChat("Morning.");
   rig.body(await rig.send({ type: "lre.world", op: "attach", worldId, chatId }));
-  rig.body(await rig.send({ type: "lre.settings.set", patch: { agents: { pipeline: { mode: "main" }, roles: PROMPT_ONLY, main: { knowledge } } } }));
+  rig.body(await rig.send({ type: "lre.settings.set", patch: { agents: { pipeline: { mode: "main" }, roles: PROMPT_ONLY } } }));
   rig.body(await rig.send({ type: "lre.chat.knowledge", chatId, engine: "agents" }));
   return chatId;
 }
@@ -77,79 +75,38 @@ async function stranger(rig: Rig, chatId: string): Promise<string> {
   return name;
 }
 
-describe("the main agent's words for a task (secrecy M1, M2)", () => {
-  test("a player-character task gets no line naming someone the player character doesn't know of, also while the main agent reads as the player character", async () => {
-    const rig = new Rig({ shipped: true });
-    for (const knowledge of ["everyone", "pov"] as const) {
-      const chatId = await mainChat(rig, knowledge);
-      const who = await stranger(rig, chatId);
-      const told: string[] = [];
-      const roles = classicRoles();
-      rig.rt.orchestrator.roles = { ...roles, intent: { ...roles.intent, interpret: (task, ctx) => (told.push(ctx.brief?.for("pov") ?? ""), roles.intent.interpret(task, ctx)) } };
-      const asked = models(rig, { task: `Read the harbor look.\n${who} is watching from the alley.` });
-      await played(rig, chatId, "I look out over the harbor.", "Gulls wheel over the water.");
-      expect(told[0]).toContain("Read the harbor look.");
-      expect(told[0]).not.toContain(who);
-      // The run's answer, with the note, reaches the main agent in its next stage (it committed beside the call).
-      expect(asked.some((req) => sentOf(req).includes("wasn't sent to the intent role"))).toBe(true);
-    }
-  });
-
-  test("a decision reads its chooser's own knowledge, prose and choices the player character's; another role's run inside a role's gets none of the words", async () => {
+describe("the main agent's words for a task", () => {
+  test("a player-character task gets its words whole, a name the player character doesn't know of too, and nothing is said to be held back", async () => {
     const rig = new Rig({ shipped: true });
     const chatId = await mainChat(rig);
-    const { world, state } = await stateOf(rig, chatId);
-    const head = { world, state };
-    const unmet = Object.entries(state.entities).find(([id, e]) => id !== DANNY && kindIs(rig.rt.registry, world, e.kind, "person") && !playerKnows(rig.rt.registry, world, state, DANNY, id))?.[1].name;
-    const text = `Keep it short.\n${unmet} hid the ledger in the cellar.`;
-    expect(screenBrief(rig.rt.registry, head, text, "everyone")).toEqual({ text, withheld: false });
-    expect(screenBrief(rig.rt.registry, head, text, { own: DANNY })).toEqual({ text: "Keep it short.", withheld: true });
-    expect(screenBrief(rig.rt.registry, head, text, { own: null })).toEqual({ text: "", withheld: true });
-    // The skip's minds at its beats, or a decision's knowledge step, run as another role: none of the words.
-    const ctx = { role: "skip", agentId: "skip:1", userId: rig.host.userId, brief: { for: () => text } } as unknown as TurnAgentCtx;
+    const who = await stranger(rig, chatId);
+    const told: string[] = [];
+    const roles = classicRoles();
+    rig.rt.orchestrator.roles = { ...roles, intent: { ...roles.intent, interpret: (task, ctx) => (told.push(ctx.brief ?? ""), roles.intent.interpret(task, ctx)) } };
+    const asked = models(rig, { task: `Read the harbor look.\n${who} is watching from the alley.` });
+    await played(rig, chatId, "I look out over the harbor.", "Gulls wheel over the water.");
+    expect(told[0]).toContain("Read the harbor look.");
+    expect(told[0]).toContain(who);
+    expect(asked.some((req) => sentOf(req).includes("wasn't sent to the intent role"))).toBe(false);
+  });
+
+  test("another role's run inside a role's gets none of the words", async () => {
+    const rig = new Rig({ shipped: true });
+    await mainChat(rig);
+    // The skip's minds at its beats, or a decision's knowledge step, run as another role.
+    const ctx = { role: "skip", agentId: "skip:1", userId: rig.host.userId, brief: "Keep it short." } as unknown as TurnAgentCtx;
     expect((await roleCtx(rig.rt, ctx, "minds")).brief).toBeNull();
   });
 });
 
-describe("the main session as its knowledge reads it (secrecy M3, integration M2)", () => {
-  test("narrowed, the main agent no longer reads what it said under wider knowledge; widened again, it does", async () => {
-    const rig = new Rig({ shipped: true });
-    const chatId = await mainChat(rig, "everyone");
-    let says = "NOTE-WIDE about the harbor.";
-    const asked = models(rig, { says: () => says });
-    await played(rig, chatId, "I look out over the harbor.", "Gulls wheel over the water.");
-    says = "";
-    rig.body(await rig.send({ type: "lre.settings.set", patch: { agents: { main: { knowledge: "pov" } } } }));
-    const narrowed = asked.length;
-    await played(rig, chatId, "I walk to the pier.", "The boards creak.");
-    expect(sentOf(asked[narrowed] as QuietRequest)).not.toContain("NOTE-WIDE");
-    // With nothing of its own it reads, its turn task is the chat so far.
-    expect(sentOf(asked[narrowed] as QuietRequest)).toContain("You take this chat up now");
-    rig.body(await rig.send({ type: "lre.settings.set", patch: { agents: { main: { knowledge: "everyone" } } } }));
-    const widened = asked.length;
-    await played(rig, chatId, "I sit down.", "You sit.");
-    expect(sentOf(asked[widened] as QuietRequest)).toContain("NOTE-WIDE");
-  });
-
-  test("a workspace note it read drops from its session once the note's readers no longer take its knowledge in", async () => {
-    const rig = new Rig({ shipped: true });
-    const chatId = await mainChat(rig, "everyone");
-    const path = "notes/harbor.md";
-    rig.body(await rig.send({ type: "lre.workspace", chatId, op: "write", path, text: "HARBOR-NOTE: the boat leaves at dawn.", readers: "everyone" }));
-    const asked = models(rig, { script: (req, n) => (n === 0 && resultsOf(req).length === 0 ? { content: "", toolCalls: [call("workspace_read", { path }, "read")] } : undefined) });
-    await played(rig, chatId, "I look out over the harbor.", "Gulls wheel over the water.");
-    rig.body(await rig.send({ type: "lre.workspace", chatId, op: "write", path, text: "HARBOR-NOTE: the boat leaves at dawn.", readers: "gm" }));
-    const next = asked.length;
-    await played(rig, chatId, "I walk to the pier.", "The boards creak.");
-    expect(sentOf(asked[next] as QuietRequest)).not.toContain("HARBOR-NOTE");
-  });
-
-  test("a session kept before knowledge was stored reads as the GM's, and a fixed pipeline's digest segments are neither read nor counted", () => {
+describe("the main session, read whole", () => {
+  test("a session kept before knowledge was stored is read whole, and a fixed pipeline's digest segments are neither read nor counted", () => {
     const old = { summary: "OLD-SUMMARY", summaryKnowledge: "gm" as const, segments: [{ hash: "a", messages: [{ role: "user", content: "OLD-TASK", by: "main" }] }, { hash: "b", messages: [{ role: "assistant", content: "A fixed pipeline's reply." }] }] };
-    expect(historyOf(old, {}, knowledgeLens("everyone"))).toEqual([]);
-    expect(sessionTokens(old, knowledgeLens("everyone"))).toBe(0);
-    expect(historyOf(old, {}, knowledgeLens("gm")).map((m) => m.text).join("\n")).toContain("OLD-TASK");
-    expect(historyOf(old, {}, knowledgeLens("gm")).map((m) => m.text).join("\n")).not.toContain("fixed pipeline's reply");
+    const read = historyOf(old, {}).map((m) => m.text).join("\n");
+    expect(read).toContain("OLD-SUMMARY");
+    expect(read).toContain("OLD-TASK");
+    expect(read).not.toContain("fixed pipeline's reply");
+    expect(sessionTokens(old)).toBeGreaterThan(0);
   });
 });
 

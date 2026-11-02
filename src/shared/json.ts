@@ -26,3 +26,15 @@ const UNSAFE_KEYS = new Set(["__proto__", "constructor", "prototype"]);
 export function safeKey(key: unknown): key is string {
   return typeof key === "string" && key.length > 0 && key.length <= 200 && !UNSAFE_KEYS.has(key);
 }
+
+/**
+ * `value`, frozen through and through: a value many readers share (a ledger decoded once, the parts
+ * of a state view kept from one build to the next) can't then be changed by one of them. A part
+ * already frozen is taken as frozen through. Plain JSON only.
+ */
+export function deepFreeze<T>(value: T): T {
+  if (typeof value !== "object" || value === null || Object.isFrozen(value)) return value;
+  Object.freeze(value);
+  for (const v of Object.values(value)) deepFreeze(v);
+  return value;
+}

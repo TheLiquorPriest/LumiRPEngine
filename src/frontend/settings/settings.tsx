@@ -35,6 +35,7 @@ import { type Connection, HelperSection, helperSummary, ModelUseSection, StepsSe
 import { STEP_LABEL } from "../../shared/steps";
 import { AgentsSection, agentsSummary } from "./agents";
 import { AssistantPage, assistantSummary } from "./assistant";
+import { ContextPage, contextSummary } from "./context";
 import { MainAgentPage, mainSummary } from "./main-agent";
 import { RolesPage, rolesSummary } from "./roles";
 import { limitText, TimeoutsSection } from "./timeouts";
@@ -64,8 +65,9 @@ const PAGE: Record<Page, { title: string; subtitle: string; icon: IconName }> = 
   timeouts: { title: "Timeouts", subtitle: "How long each wait may run", icon: "hourglass" },
   agents: { title: "Agents", subtitle: "How agent turns run, and the runtime's budgets, caching and acceptance runs", icon: "function" },
   roles: { title: "Roles", subtitle: "What each role of an agent turn runs with", icon: "branch" },
+  context: { title: "Context", subtitle: "What each role starts with, and how the main agent briefs it", icon: "layers" },
   main: { title: "Main agent", subtitle: "The agent that decides each turn, when the pipeline has one", icon: "sparkle" },
-  assistant: { title: "Assistant", subtitle: "The GM assistant's model, knowledge and budget", icon: "message" },
+  assistant: { title: "Assistant", subtitle: "The GM assistant's model and budget", icon: "message" },
   realism: { title: "Realism", subtitle: "For new chats", icon: "layers" },
   checks: { title: "Checks", subtitle: "For new chats", icon: "dice" },
   time: { title: "Time", subtitle: "For new chats", icon: "clock" },
@@ -84,7 +86,7 @@ const PAGE: Record<Page, { title: string; subtitle: string; icon: IconName }> = 
 /** The home list's groups, in order. */
 const GROUPS: readonly { title: string; pages: readonly Page[] }[] = [
   { title: "Getting started", pages: ["helper", "model", "steps", "minds", "narrator", "timeouts"] },
-  { title: "Agents", pages: ["agents", "roles", "main", "assistant", "prompts", "retention"] },
+  { title: "Agents", pages: ["agents", "roles", "context", "main", "assistant", "prompts", "retention"] },
   { title: "Defaults for new chats", pages: ["realism", "checks", "time"] },
   { title: "Replies", pages: ["extraction", "swipes"] },
   { title: "Your preset", pages: ["preset"] },
@@ -119,6 +121,8 @@ function summaryOf(page: Page, data: SettingsResult, caveats: readonly Caveat[] 
       return { subtitle: agentsSummary(settings.agents) };
     case "roles":
       return { subtitle: rolesSummary(settings.agents) };
+    case "context":
+      return { subtitle: contextSummary(settings.agents) };
     case "main":
       return { subtitle: mainSummary(settings.agents, connections) };
     case "assistant":
@@ -329,8 +333,10 @@ export function Settings() {
       <AgentsSection agents={settings.agents} patch={patch} busy={busy} />
     ) : page === "roles" ? (
       <RolesPage agents={settings.agents} patch={patch} busy={busy} />
+    ) : page === "context" ? (
+      <ContextPage agents={settings.agents} patch={patch} busy={busy} />
     ) : page === "main" ? (
-      <MainAgentPage agents={settings.agents} patch={patch} busy={busy} />
+      <MainAgentPage agents={settings.agents} timeouts={settings.timeouts} patch={patch} busy={busy} />
     ) : page === "assistant" ? (
       <AssistantPage agents={settings.agents} patch={patch} busy={busy} />
     ) : page === "realism" ? (

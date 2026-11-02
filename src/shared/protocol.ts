@@ -18,7 +18,6 @@ import type { ActionId, BoundMode, ChatId, ChipId, DomainId, EntityId, FieldId, 
 import type { EntityUpgradePick, EventRef, PathHash, ResolveScope, TimeControl, TimeScope, UpgradeAspect, UpgradePicks } from "./ledger";
 import type { BuiltLoreIndex, ChangeType, NarratorView, UserSettings } from "./settings";
 import type { Activity, DiagRecord } from "./diagnostics";
-import type { AgentKnowledge } from "./agent-tools";
 import type { LiveChange, LiveView } from "./live";
 import type { GmView, SheetSectionView, StateView } from "./state-view";
 import type { AdjudicationDef, FacetId, FacetValueId, FeedScope, KindDef, LifeStateId, LorePin, MapDisplay, RelationTypeDef, RevisionNote, SectionFeed, StepPurpose, WorldDoc, WorldIndex } from "./world";
@@ -933,35 +932,33 @@ export interface AssistantView {
 }
 
 /**
- * GM → Workspace (DESIGN §4.4): the chat's workspace at its head, and its learned area. `list` and
- * `read` read it; `write`, `delete`, `move`, `pin` and `readers` change one file through the writer
- * the agents' tools use, as one GM edit with its Undo chip, held while the engine runs a turn
- * (`HeldWrite.hold`); a file under `learned/` changes at once, in the chat's metadata, with no Undo
- * chip. A write says whose knowledge may read the file (`readers`: the player character's,
- * everyone's or the GM's); left out, a file keeps its readers, and a new one is the GM's alone;
- * `readers` sets them by themselves. `session` reads the main agent's session at the head, whole, and
- * `rollback` rolls its latest compaction back: the next agent turn's record carries the restore, so
- * no earlier record changes (INC2-SPEC C14). The turns' transcripts (`transcripts/`) are listed and
- * read like files, and refused to every change. GM data, behind the gate as `lre.gm` is.
+ * GM → Workspace (DESIGN §4.4): the chat's workspace at its head, its learned area, and the user's
+ * global workspace, whose paths start `~/`. `list` and `read` read them; `write`, `delete`, `move`
+ * and `pin` change one file through the writer the agents' tools use, as one GM edit with its Undo
+ * chip, held while the engine runs a turn (`HeldWrite.hold`); a file under `learned/` or `~/`
+ * changes at once, in its store, with no Undo chip. Every file is every agent's to read. `session`
+ * reads the main agent's session at the head, whole, and `rollback` rolls its latest compaction
+ * back: the next agent turn's record carries the restore, so no earlier record changes (INC2-SPEC
+ * C14). The turns' transcripts (`transcripts/`) are listed and read like files, and refused to
+ * every change. GM data, behind the gate as `lre.gm` is.
  */
-export type WorkspaceRequest = Request<"lre.workspace"> & { chatId: ChatId } & ({ op: "list" } | { op: "read"; path: string } | { op: "write"; path: string; text: string; readers?: "pov" | "everyone" | "gm" } | { op: "delete"; path: string } | { op: "move"; from: string; to: string } | { op: "pin"; path: string; pinned: boolean } | { op: "readers"; path: string; readers: "pov" | "everyone" | "gm" } | { op: "session" } | { op: "rollback" });
+export type WorkspaceRequest = Request<"lre.workspace"> & { chatId: ChatId } & ({ op: "list" } | { op: "read"; path: string } | { op: "write"; path: string; text: string } | { op: "delete"; path: string } | { op: "move"; from: string; to: string } | { op: "pin"; path: string; pinned: boolean } | { op: "session" } | { op: "rollback" });
 
 /**
  * The main agent's session at the chat's head (`lre.workspace session`), whole: no knowledge holds
- * any of it back, since GM → Workspace is the GM's. Its compaction summary (null when none) with the
- * knowledge it was made under; the turns it holds whole and their size in tokens, estimated; each
- * turn's segment with its messages; what of it the main agent reads now, with its knowledge (the only
- * part its prompt is sent); how many of its parts the store no longer has; and its latest
- * compaction's rollback: `none` when there is none to roll back, `available`, or `pending` once asked
- * for, until the next agent turn's record carries it.
+ * any of it back, since GM → Workspace is the GM's. Its compaction summary (null when none); the
+ * turns it holds whole and their size in tokens, estimated; each turn's segment with its messages;
+ * what of it the main agent reads (its own messages and the summary, the only part its prompt is
+ * sent); how many of its parts the store no longer has; and its latest compaction's rollback: `none`
+ * when there is none to roll back, `available`, or `pending` once asked for, until the next agent
+ * turn's record carries it.
  */
 export interface SessionView {
   summary: string | null;
-  summaryKnowledge: AgentKnowledge;
   turns: number;
   tokens: number;
   segments: SessionSegmentView[];
-  reads: { knowledge: AgentKnowledge; turns: number; tokens: number; summary: boolean };
+  reads: { turns: number; tokens: number };
   missing: number;
   rollback: "none" | "available" | "pending";
 }
@@ -974,18 +971,14 @@ export interface SessionSegmentView {
 
 /**
  * A message of the main session: who it is from (the engine's message to the main agent, or its
- * own answer: `main`; else a fixed pipeline's digest of its turn, the player's words or the reply),
- * its text, the knowledge it was made under and the workspace files its tools read (the main
- * agent's own), each role run and what landed (a digest's), and whether the main agent reads it now.
+ * own answer: `main`, which the main agent reads; else a fixed pipeline's digest of its turn, the
+ * player's words or the reply), its text, and each role run and what landed (a digest's).
  */
 export interface SessionMessageView {
   role: "user" | "assistant";
   text: string;
   main: boolean;
-  knowledge?: AgentKnowledge;
-  files?: string[];
   engine?: { roles: { role: string; via: string; ok: boolean }[]; committed: { role: string; key: string; type: string }[] };
-  read: boolean;
 }
 
 /**
@@ -1006,19 +999,17 @@ export interface PromptTestView {
 }
 
 /**
- * A workspace file as GM → Workspace lists it: its path, its body's hash and size, whether it is
- * pinned, whose knowledge may read it (`readers`), whether it is the learned area's (kept outside the
- * turns) or a turn's transcript (`transcript`: read-only, the GM's alone, under `transcripts/`), and
- * who wrote it: the agent's role (`gm` for your own) and its operation's key, and the turn, the
- * number of the reply on the chain whose record holds the write (null before any reply, and for a
- * learned file).
+ * A workspace file as GM → Workspace lists it: its path (`~/…` for the global workspace's), its
+ * body's hash and size, whether it is pinned, whether it is the learned area's (kept outside the
+ * turns) or a turn's transcript (`transcript`: read-only, under `transcripts/`), and who wrote it:
+ * the agent's role (`gm` for your own) and its operation's key, and the turn, the number of the
+ * reply on the chain whose record holds the write (null before any reply, and for a kept file).
  */
 export interface WorkspaceFileView {
   path: string;
   hash: string;
   size: number;
   pinned: boolean;
-  readers: "pov" | "everyone" | "gm";
   learned: boolean;
   transcript?: true;
   provenance: { role?: string; key?: string; turn: number | null };

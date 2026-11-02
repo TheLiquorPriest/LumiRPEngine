@@ -1,30 +1,33 @@
 // GM → Workspace's browser (frontend/gm/workspace.tsx), as data: which area of the workspace a file
-// is in (the notes, the learned notes under learned/, the turns' transcripts under transcripts/, and
-// the pins manifest .pins.json), each area's files as folders and files, folders first, names in
-// natural order (reply-9 before reply-10), and the chips that say who wrote a file, at which reply,
-// who may read it and how it stands. Pure, so the list and its tests share it.
+// is in (the chat's notes, the learned notes under learned/, the turns' transcripts under
+// transcripts/ and the pins manifest .pins.json, then, apart from the chat's, the user's global
+// workspace under ~/), each area's files as folders and files, folders first, names in natural order
+// (reply-9 before reply-10), and the chips that say who wrote a file, at which reply, and how it
+// stands: a system file (AGENTS.md, roles/<role>.md) is every agent's or one role's instructions.
+// Every agent reads every file. Pure, so the list and its tests share it.
 
 import { AGENT_ROLES } from "../../shared/agent-settings";
-import type { AgentKnowledge } from "../../shared/agent-tools";
 import type { WorkspaceFileView } from "../../shared/protocol";
-import { isLearnedPath, isTranscriptPath, LEARNED_DIR, PINS_PATH, TRANSCRIPTS_DIR } from "../../shared/stores";
+import { GLOBAL_PREFIX, isGlobalPath, isLearnedPath, isSystemPath, isTranscriptPath, LEARNED_DIR, levelPath, PINS_PATH, ROLES_DIR, TRANSCRIPTS_DIR } from "../../shared/stores";
 import { humanize } from "../format";
 
-/** An area of the workspace, in the order the browser lists them. */
-export type WorkspaceArea = "notes" | "learned" | "transcripts" | "pins";
+/** An area of the workspace, in the order the browser lists them: the chat's, then the global workspace's. */
+export type WorkspaceArea = "notes" | "learned" | "transcripts" | "pins" | "global";
 
-export const WORKSPACE_AREAS: readonly WorkspaceArea[] = ["notes", "learned", "transcripts", "pins"];
+export const WORKSPACE_AREAS: readonly WorkspaceArea[] = ["notes", "learned", "transcripts", "pins", "global"];
 
 /** Each area's heading and what it holds, as the browser says them. */
 export const AREA_WORDS: Readonly<Record<WorkspaceArea, { title: string; note: string }>> = {
   notes: { title: "Notes", note: "What the agents and you keep for this chat. They follow the story: a swipe back past a reply takes what it wrote." },
   learned: { title: "Learned", note: "Kept apart from the story: a swipe, a Re-run or an Undo never changes them, and a change lands at once." },
-  transcripts: { title: "Transcripts", note: "Everything each turn's agents did, as Live showed it. Read-only; read by agents only with the GM's knowledge." },
+  transcripts: { title: "Transcripts", note: "Everything each turn's agents did, as Live showed it. Read-only; every agent reads them." },
   pins: { title: "Pins file", note: "Which files each role is shown first, and how much of them." },
+  global: { title: "Global (~/)", note: "Your own workspace, which every chat of yours shares: kept apart from the story, and a change lands at once. Its AGENTS.md and roles/ come before this chat's." },
 };
 
 /** The area a path is in. */
 export function workspaceArea(path: string): WorkspaceArea {
+  if (isGlobalPath(path)) return "global";
   if (path === PINS_PATH) return "pins";
   if (isTranscriptPath(path)) return "transcripts";
   if (isLearnedPath(path)) return "learned";
@@ -32,7 +35,7 @@ export function workspaceArea(path: string): WorkspaceArea {
 }
 
 /** Where an area's own folder starts in a path ("learned/"), so its files list under the area and not under that folder again. */
-const AREA_ROOT: Readonly<Record<WorkspaceArea, string>> = { notes: "", learned: LEARNED_DIR, transcripts: TRANSCRIPTS_DIR, pins: "" };
+const AREA_ROOT: Readonly<Record<WorkspaceArea, string>> = { notes: "", learned: LEARNED_DIR, transcripts: TRANSCRIPTS_DIR, pins: "", global: GLOBAL_PREFIX };
 
 /** Names in natural order: digits as numbers (reply-9 before reply-10), case aside, then exact order so the sort is total. */
 export function naturalCompare(a: string, b: string): number {
@@ -106,13 +109,10 @@ export function folderOf(path: string): string {
   return slash < 0 ? "" : path.slice(0, slash + 1);
 }
 
-/** Who may read a file, short, for its chip. */
-export const READERS_SHORT: Readonly<Record<AgentKnowledge, string>> = { gm: "GM only", everyone: "Everyone's", pov: "Your character's" };
-
 /** A chip of a file's row and page: what it says, what it means in full (its tooltip and accessible name), and its kind for its style. */
 export interface FileChip {
-  /** A file's: who wrote it, at which reply, who may read it, and how it stands; `info` and `warn` for what else a row says. */
-  kind: "who" | "reply" | "readers" | "pinned" | "learned" | "read-only" | "info" | "warn";
+  /** A file's: who wrote it, at which reply, and how it stands; `info` and `warn` for what else a row says. */
+  kind: "who" | "reply" | "pinned" | "learned" | "global" | "system" | "read-only" | "info" | "warn";
   text: string;
   title: string;
 }
@@ -126,19 +126,35 @@ export function writerWords(file: WorkspaceFileView): string {
 }
 
 /**
- * A file's chips: who wrote it, at which reply, who may read it, then Pinned, Learned and Read-only
- * as they apply. A file no reply holds yet is the turn under way's, or, one of yours, from before
- * the first reply.
+ * Whose instructions a system file is (`isSystemPath`), in words: AGENTS.md every agent's,
+ * roles/<role>.md that role's alone; null for any other file.
+ */
+export function systemWords(path: string): string | null {
+  if (!isSystemPath(path)) return null;
+  const at = levelPath(path);
+  const where = isGlobalPath(path) ? "in every chat of yours" : "in this chat";
+  if (!at.startsWith(ROLES_DIR)) return `System instructions for every agent, ${where}`;
+  const role = at.slice(ROLES_DIR.length, -".md".length);
+  return `System instructions for ${AGENT_ROLES.find((r) => r.id === role)?.label ?? humanize(role)} alone, ${where}`;
+}
+
+/**
+ * A file's chips: who wrote it, at which reply (a global file is no reply's), then System, Global,
+ * Pinned, Learned and Read-only as they apply. A file no reply holds yet is the turn under way's,
+ * or, one of yours, from before the first reply.
  */
 export function fileChips(file: WorkspaceFileView): FileChip[] {
   const { turn, role } = file.provenance;
   const who = writerWords(file);
+  const global = isGlobalPath(file.path);
   const reply = turn !== null ? `Reply ${turn}` : role === undefined ? "This turn" : "Before reply 1";
   const replyTitle = turn !== null ? `Written at reply ${turn}` : role === undefined ? "Written by the turn under way" : "Written before the first reply";
+  const system = systemWords(file.path);
   return [
     { kind: "who", text: who, title: `Written by ${who === "You (GM)" ? "you, the GM" : who === "The turn" ? "the turn itself" : who}` },
-    { kind: "reply", text: reply, title: replyTitle },
-    { kind: "readers", text: READERS_SHORT[file.readers], title: `Who may read it: ${READERS_SHORT[file.readers]}` },
+    ...(global ? [] : [{ kind: "reply" as const, text: reply, title: replyTitle }]),
+    ...(system !== null ? [{ kind: "system" as const, text: "System", title: system }] : []),
+    ...(global ? [{ kind: "global" as const, text: "Global", title: "Global: every chat of yours shares it, and a swipe never changes it" }] : []),
     ...(file.pinned ? [{ kind: "pinned" as const, text: "Pinned", title: "Pinned: it goes with every agent turn" }] : []),
     ...(file.learned ? [{ kind: "learned" as const, text: "Learned", title: "Learned: a swipe never changes it" }] : []),
     ...(file.transcript ? [{ kind: "read-only" as const, text: "Read-only", title: "Read-only: kept as its turn left it" }] : []),

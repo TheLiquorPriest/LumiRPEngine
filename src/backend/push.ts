@@ -13,8 +13,9 @@ import type { StateView } from "../shared/state-view";
 import { giveWay } from "./give-way";
 import type { HostPort } from "./host";
 
-/** Set/delete operations turning `from` into `to`; arrays are replaced whole when they differ. */
+/** Set/delete operations turning `from` into `to`; arrays are replaced whole when they differ. A part that is the same object in both is unchanged. */
 export function diff(from: JsonValue, to: JsonValue, path: (string | number)[] = [], out: DeltaOp[] = []): DeltaOp[] {
+  if (from === to) return out;
   if (isRecord(from) && isRecord(to) && !Array.isArray(from) && !Array.isArray(to)) {
     for (const key of Object.keys(from)) if (!(key in to)) out.push({ op: "del", path: [...path, key] });
     for (const [key, value] of Object.entries(to)) {
@@ -28,13 +29,45 @@ export function diff(from: JsonValue, to: JsonValue, path: (string | number)[] =
   return out;
 }
 
-function asJson(view: StateView): JsonValue {
-  return JSON.parse(JSON.stringify(view)) as JsonValue;
+/**
+ * `value` as JSON, as `JSON.parse(JSON.stringify(value))` makes it, except that a part that is the
+ * same frozen object `before` held at the same place is `json`'s part there again (`json` being
+ * `before` as JSON): the view parts kept between builds (`ViewMemo`, frozen whole) are neither copied
+ * again nor compared, since `diff` stops at the same object. Undefined where JSON leaves the value out.
+ */
+function toJson(value: unknown, before: unknown, json: JsonValue | undefined): JsonValue | undefined {
+  if (value === null || typeof value === "string" || typeof value === "boolean") return value;
+  if (typeof value === "number") return Number.isFinite(value) ? value : null;
+  if (typeof value !== "object") return undefined;
+  if (value === before && json !== undefined && Object.isFrozen(value)) return json;
+  if (Array.isArray(value)) {
+    const was = Array.isArray(before) ? before : null;
+    const wasJson = Array.isArray(json) ? json : null;
+    return value.map((v, i) => toJson(v, was?.[i], wasJson?.[i]) ?? null);
+  }
+  if ("toJSON" in value && typeof value.toJSON === "function") return JSON.parse(JSON.stringify(value)) as JsonValue;
+  const was = isRecord(before) ? before : null;
+  const wasJson = isRecord(json) && !Array.isArray(json) ? json : null;
+  const out: Record<string, JsonValue> = {};
+  for (const [key, v] of Object.entries(value)) {
+    const j = toJson(v, was?.[key], wasJson?.[key]);
+    if (j !== undefined) out[key] = j;
+  }
+  return out;
+}
+
+/** A view built for a push, and it as JSON (`toJson`). */
+interface Built {
+  view: StateView;
+  json: JsonValue;
 }
 
 interface Channel {
   rev: number;
+  /** The view last pushed, as JSON: the base of the next delta. */
   last: JsonValue | null;
+  /** The view `last` was made from: the next one's parts that are the same frozen objects reuse `last`'s. */
+  source: StateView | null;
   timer: ReturnType<typeof setTimeout> | null;
   running: Promise<void> | null;
   /** A push waits behind the one being built: every change until it starts is in it. */
@@ -64,16 +97,17 @@ export class StatePush {
     const key = `${userId}\u0000${chatId}`;
     let c = this.channels.get(key);
     if (!c) {
-      c = { rev: 0, last: null, timer: null, running: null, queued: false, building: 0 };
+      c = { rev: 0, last: null, source: null, timer: null, running: null, queued: false, building: 0 };
       this.channels.set(key, c);
     }
     return c;
   }
 
-  /** The channel just pushed `view` at a new rev: it becomes the newest, and the views of the chats pushed longest ago go past `VIEWS_KEPT`. */
-  private pushed(chatId: ChatId, userId: UserId, c: Channel, view: JsonValue): void {
+  /** The channel just pushed `built` at a new rev: it becomes the newest, and the views of the chats pushed longest ago go past `VIEWS_KEPT`. */
+  private pushed(chatId: ChatId, userId: UserId, c: Channel, built: Built): void {
     c.rev = ++this.revs;
-    c.last = view;
+    c.last = built.json;
+    c.source = built.view;
     const key = `${userId}\u0000${chatId}`;
     this.channels.delete(key);
     this.channels.set(key, c);
@@ -110,20 +144,21 @@ export class StatePush {
   async snapshot(chatId: ChatId, userId: UserId, frontendSessionId?: string): Promise<void> {
     const c = this.channel(chatId, userId);
     if (c.last === null) {
-      const view = await this.built(c, chatId, userId);
+      const built = await this.built(c, chatId, userId);
       // Another snapshot or push set the base while this one was built: that one stands, and a delta follows.
-      if (c.last === null) this.pushed(chatId, userId, c, view);
+      if (c.last === null) this.pushed(chatId, userId, c, built);
       else this.changed(chatId, userId);
     } else this.changed(chatId, userId);
     this.host.frontend.send({ lre: PROTOCOL_VERSION, type: "lre.state.snapshot", chatId, rev: c.rev, view: c.last as unknown as StateView }, userId, frontendSessionId);
   }
 
-  /** The chat's view now, built after the messages already waiting (`giveWay`); its channel stays while it is built. */
-  private async built(c: Channel, chatId: ChatId, userId: UserId): Promise<JsonValue> {
+  /** The chat's view now, built after the messages already waiting (`giveWay`), with its JSON made against the view last pushed (`toJson`); its channel stays while it is built. */
+  private async built(c: Channel, chatId: ChatId, userId: UserId): Promise<Built> {
     c.building++;
     try {
       await giveWay();
-      return asJson(await this.build(chatId, userId));
+      const view = await this.build(chatId, userId);
+      return { view, json: toJson(view, c.source, c.last ?? undefined) ?? null };
     } finally {
       c.building--;
     }
@@ -172,8 +207,13 @@ export class StatePush {
       return;
     }
     const next = await this.built(c, chatId, userId);
-    const ops = diff(c.last, next);
-    if (ops.length === 0) return;
+    const ops = diff(c.last, next.json);
+    if (ops.length === 0) {
+      // The same view: the base stays, held as this build made it, so the next build reuses its parts.
+      c.last = next.json;
+      c.source = next.view;
+      return;
+    }
     const base = c.rev;
     this.pushed(chatId, userId, c, next);
     this.host.frontend.send({ lre: PROTOCOL_VERSION, type: "lre.state.delta", chatId, base, rev: c.rev, ops }, userId);

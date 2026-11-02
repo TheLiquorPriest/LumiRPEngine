@@ -4,23 +4,14 @@
 // keeps it (`engine/access.ts`).
 //
 // - `items_inventory`: what a person wears and carries, each container's contents nested, what they
-//   own elsewhere with where it is and what holds it, and what they have lent and borrowed. Under
-//   `pov` the player character's own is what Play's Gear panel shows (`buildGearView`'s rules: the
-//   things its Gear level shows, each detail from the level that shows it), each a thing it may know
-//   of; someone else's only while they are with it, at its very place (the people tools' rule), and
-//   only what it sees on them (`presentGearLines`): what they wear and hold, never what is in a bag
-//   or a pocket; of anyone away, the note that it doesn't know. Under `everyone` and `gm`,
+//   own elsewhere with where it is and what holds it, and what they have lent and borrowed:
 //   everything, each thing named as the view names it (marked, or with its visibility).
 // - `items_holder`: what holds a thing (`holderOf`, outward), where it is (`placeOfEntity`), its
-//   owners with their shares and who may use it (`accessOf`). Under `pov` a holder, owner or user it
-//   may not name is left out (`held`: something holds it), and where it is reads "Somewhere" for a
-//   place the player character can't see, or while something it may not name, or someone away from
-//   it, holds the thing.
+//   owners with their shares and who may use it (`accessOf`).
 // - `items_condition`: a thing's condition and state as the world keeps them: its condition (with
 //   its band's word), its status, every field the gear and vehicle packs keep a thing's state in
-//   (fuel, mileage, engine hours, uses left, …), and a kit's pieces. Under `pov` each field the
-//   player character may see (`canSeeField`), at its level in the field's domain; under `everyone`
-//   a restricted field's label is marked, under `gm` it carries the field's visibility.
+//   (fuel, mileage, engine hours, uses left, …), and a kit's pieces. Under `everyone` a restricted
+//   field's label is marked, under `gm` it carries the field's visibility.
 
 import { accessOf, owns } from "../../../../engine/access";
 import { numOf, own, strOf } from "../../../../engine/pack-kit";
@@ -36,7 +27,7 @@ import type { ToolReadView, ViewRef } from "../read-view";
 import type { ToolDefinition } from "../registry";
 import { resolvePerson, resolveThing } from "../resolve";
 import { needText, objectSchema, text } from "../schema";
-import { beyondPov, type PlaceShown, placeShown } from "./people";
+import { type PlaceShown, placeShown } from "./people";
 import { clockWords } from "./time";
 
 const INVENTORY = "items_inventory";
@@ -101,10 +92,9 @@ interface InventoryAnswer {
   person: ViewRef;
   worn: Listed[];
   carried: Listed[];
-  /** Absent under `pov` for someone else: what they own elsewhere and their loans aren't the player character's to see. */
-  elsewhere?: Stored[];
-  lent?: Lent[];
-  borrowed?: Borrowed[];
+  elsewhere: Stored[];
+  lent: Lent[];
+  borrowed: Borrowed[];
 }
 
 /** An owner as the view names them, with their role and their share of its worth in percent. */
@@ -151,12 +141,6 @@ function isThing(view: ToolReadView, id: EntityId): boolean {
   return e !== undefined && e.kind !== "account" && !view.isPerson(id);
 }
 
-/** Whether someone is with the player character: at its very place, as Play's Scene has them (the people tools' rule). */
-function withPov(view: ToolReadView, id: EntityId): boolean {
-  const at = placeOfEntity(view.state, id);
-  return at !== null && at === placeOfEntity(view.state, view.pov);
-}
-
 /** What holds a thing, its holder first and outward (`holderOf`). */
 function holdersOf(view: ToolReadView, id: EntityId): EntityId[] {
   const out: EntityId[] = [];
@@ -175,16 +159,10 @@ function heldIn(view: ToolReadView, id: EntityId): { in: ViewRef[]; held: boolea
   return { in: refs, held: false };
 }
 
-/**
- * Where a thing is (`placeOfEntity`) as the view may say: under `pov` only somewhere for a place the
- * player character can't see, and while something it may not name, or someone away from it, holds
- * the thing: where someone away is now, the player character doesn't know.
- */
+/** Where a thing is (`placeOfEntity`), as the view names the place. */
 function whereIs(view: ToolReadView, id: EntityId): PlaceShown | null {
   const at = placeOfEntity(view.state, id);
-  if (at === null) return null;
-  const unknown = view.knowledge === "pov" && holdersOf(view, id).some((h) => h !== view.pov && (!view.seesEntity(h) || (view.isPerson(h) && !withPov(view, h))));
-  return unknown ? { name: view.hiddenPlace } : placeShown(view, at);
+  return at === null ? null : placeShown(view, at);
 }
 
 /** How a thing is on `who` when they wear it or have it equipped, and the slot it is in. */
@@ -202,36 +180,25 @@ function refValue(view: ToolReadView, id: string): PlaceShown | string | null {
   return own(view.state.entities, id) ? view.entity(id) : id;
 }
 
-/**
- * A field of a thing as the world keeps it (`FieldRead`), or null when it keeps no value there or
- * the view may not read it: under `pov` one the player character may see (`canSeeField`), at its
- * level in the field's domain, naming nothing it may not.
- */
+/** A field of a thing as the world keeps it (`FieldRead`), or null when it keeps no value there or the view may not read it. */
 function fieldRead(view: ToolReadView, id: EntityId, field: string, def: FieldDef): FieldRead | null {
   const e = own(view.state.entities, id);
   const value = e ? own(e.fields, field) : undefined;
   if (value === undefined || value === null || def.derived !== undefined) return null;
-  if (view.knowledge === "pov" && (!view.seesField(id, field) || (def.domain !== undefined && view.ctx.levelOf(view.pov, def.domain) < (def.level ?? 1)))) return null;
   const shown = def.type === "ref" && typeof value === "string" ? refValue(view, value) : value;
   if (shown === null) return null;
   const visibility = view.knowledge === "gm" ? visibilityOf(def.visibility) : "public";
   return { field, label: view.mark(def.label ?? field, view.fieldSecrecy(id, field)), value: shown, band: typeof value === "number" ? bandOf(def.bands, value)?.label : undefined, visibility: visibility === "public" ? undefined : visibility };
 }
 
-/** How an inventory lists things: the ones it names, and which details it tells of each. */
+/** How an inventory lists things: the ones it names. */
 interface Lister {
   view: ToolReadView;
   /** A thing as the list names it; null for one it leaves out. */
   ref(id: EntityId): ViewRef | null;
-  qty: boolean;
-  condition: boolean;
-  kit: boolean;
-  /** A kit's missing pieces, besides how many are in it. */
-  missing: boolean;
-  contents: boolean;
 }
 
-/** A thing as `l` lists it, with what it holds when `l` tells that; null for one it leaves out or has listed already. */
+/** A thing as `l` lists it, with what it holds; null for one it leaves out or has listed already. */
 function listed(l: Lister, id: EntityId, seen: Set<EntityId>): Listed | null {
   const { view } = l;
   const e = own(view.state.entities, id);
@@ -239,49 +206,26 @@ function listed(l: Lister, id: EntityId, seen: Set<EntityId>): Listed | null {
   if (!e || !ref) return null;
   seen.add(id);
   const qty = numOf(e.fields.qty, 1);
-  const def = l.condition ? fieldDef(view.registry, view.world, e.kind, "condition") : undefined;
-  const kit = l.kit ? kitStatus(view.ctx, id) : null;
-  const contents = l.contents ? contentsOf(view.state, id).flatMap((c) => listed(l, c, seen) ?? []) : [];
+  const def = fieldDef(view.registry, view.world, e.kind, "condition");
+  const kit = kitStatus(view.ctx, id);
+  const contents = contentsOf(view.state, id).flatMap((c) => listed(l, c, seen) ?? []);
   return {
     ...ref,
-    qty: l.qty && qty !== 1 ? qty : undefined,
+    qty: qty !== 1 ? qty : undefined,
     condition: def ? (fieldRead(view, id, "condition", def) ?? undefined) : undefined,
-    kit: kit ? { complete: kit.complete, present: kit.present, total: kit.total, missing: l.missing ? kit.missing : undefined } : undefined,
+    kit: kit ? { complete: kit.complete, present: kit.present, total: kit.total, missing: kit.missing } : undefined,
     lost: e.fields.lost === true ? true : undefined,
     contents: contents.length > 0 ? contents : undefined,
   };
 }
 
-/**
- * Someone else's inventory as the player character sees it on them where it is with them
- * (`presentGearLines`): what they wear or have equipped and what they hold, never what is in a bag
- * or a pocket, each named as a line names it (a count, and a kit's pieces at their Gear level).
- */
-function seenOn(view: ToolReadView, person: ViewRef): InventoryAnswer {
-  if (view.ctx.levelOf(view.pov, "gear") === 0) return { person, worn: [], carried: [] };
-  const l: Lister = { view, ref: (id) => (isThing(view, id) ? view.entity(id) : null), qty: true, condition: false, kit: Math.max(1, view.ctx.levelOf(person.id, "gear")) >= 3, missing: false, contents: false };
-  const seen = new Set<EntityId>();
-  const worn = wornBy(view.ctx, person.id);
-  const held = contentsOf(view.state, person.id).filter((id) => own(view.state.entities, id)?.fields.slot !== "pocket" && !worn.includes(id));
-  return { person, worn: worn.flatMap((id) => listed(l, id, seen) ?? []), carried: held.flatMap((id) => listed(l, id, seen) ?? []) };
-}
-
-/**
- * A person's whole inventory: what they wear and carry, what they own elsewhere (an item they own,
- * by any of the ways the engine keeps ownership: `owns`), and their loans. Under `pov`, the player
- * character's own, only what Play's Gear panel shows, each detail from the Gear level that shows it
- * (`buildGearView`).
- */
+/** A person's whole inventory: what they wear and carry, what they own elsewhere (an item they own, by any of the ways the engine keeps ownership: `owns`), and their loans. */
 function inventory(view: ToolReadView, person: ViewRef): InventoryAnswer {
   const who = person.id;
-  const level = view.ctx.levelOf(view.pov, "gear");
-  const pov = view.knowledge === "pov";
-  const ref = (id: EntityId): ViewRef | null => (isThing(view, id) && (!pov || level >= 2 || own(view.state.entities, id)?.fields.notable === true) ? view.entity(id) : null);
-  const detail = !pov || level >= 3;
-  const l: Lister = { view, ref, qty: !pov || level >= 2, condition: detail, kit: detail, missing: detail, contents: true };
+  const l: Lister = { view, ref: (id) => (isThing(view, id) ? view.entity(id) : null) };
   const seen = new Set<EntityId>();
   // What is worn, and the slot it is worn in, from the Gear level that tells them; below it, worn things are carried.
-  const wornIds = detail ? wornBy(view.ctx, who) : [];
+  const wornIds = wornBy(view.ctx, who);
   const worn = wornIds.flatMap((id) => {
     const node = listed(l, id, seen);
     return node ? [{ ...node, slot: wornOn(view, id, who)?.slot }] : [];
@@ -296,7 +240,7 @@ function inventory(view: ToolReadView, person: ViewRef): InventoryAnswer {
   for (const id of owned) {
     // A thing in another of their things the list names is listed in what holds it.
     const holder = holderOf(view.state, id);
-    if (holder !== null && owned.includes(holder) && ref(holder) !== null) continue;
+    if (holder !== null && owned.includes(holder) && l.ref(holder) !== null) continue;
     const node = listed(l, id, seen);
     if (!node) continue;
     if (isInside(view.state, id, who)) {
@@ -310,13 +254,13 @@ function inventory(view: ToolReadView, person: ViewRef): InventoryAnswer {
   const lent = loans
     .filter((g) => g.owner === who)
     .flatMap((g): Lent[] => {
-      const thing = ref(g.thing);
+      const thing = l.ref(g.thing);
       return thing ? [{ thing, to: view.entity(g.borrower), until: g.until === null ? undefined : clockWords(view, g.until), overdue: g.overdue }] : [];
     });
   const borrowed = loans
     .filter((g) => g.borrower === who)
     .flatMap((g): Borrowed[] => {
-      const thing = ref(g.thing);
+      const thing = l.ref(g.thing);
       return thing ? [{ thing, from: g.owner === null ? null : view.entity(g.owner), until: g.until === null ? undefined : clockWords(view, g.until), overdue: g.overdue }] : [];
     });
   return { person, worn, carried, elsewhere, lent, borrowed };
@@ -353,8 +297,7 @@ function holderRead(view: ToolReadView, thing: ViewRef): HolderAnswer {
 function conditionRead(view: ToolReadView, thing: ViewRef): ConditionAnswer {
   const e = own(view.state.entities, thing.id);
   const fields = e ? Object.entries(kindFields(view.registry, view.world, e.kind)).flatMap(([field, def]) => (hasOwn(CONDITION_FIELDS, field) || (def.domain !== undefined && hasOwn(CONDITION_DOMAINS, def.domain)) ? (fieldRead(view, thing.id, field, def) ?? []) : [])) : [];
-  // A kit's pieces show from Gear 3, as Play's Gear panel shows them.
-  const kit = view.knowledge !== "pov" || view.ctx.levelOf(view.pov, "gear") >= 3 ? kitStatus(view.ctx, thing.id) : null;
+  const kit = kitStatus(view.ctx, thing.id);
   return { thing, fields, kit: kit ? { complete: kit.complete, present: kit.present, total: kit.total, missing: kit.missing } : undefined };
 }
 
@@ -374,9 +317,7 @@ export const ITEMS_TOOLS: readonly ToolDefinition[] = [
         if ("refused" in r) return r.refused;
         const person = view.entity(r.id);
         if (!person) return view.refuse(TOOL_NOTE.noPerson, { name: said });
-        if (view.knowledge !== "pov" || r.id === view.pov) return view.answer(inventory(view, person));
-        // What someone has on them, the player character sees only while they are with it.
-        return withPov(view, r.id) ? view.answer(seenOn(view, person)) : beyondPov(view);
+        return view.answer(inventory(view, person));
       });
     },
   },

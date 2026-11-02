@@ -6,7 +6,7 @@
 
 import type { ChatId, EntityId, MessageId, PackId, PanelId } from "../shared/ids";
 import type { JsonObject, JsonValue } from "../shared/json";
-import { hasOwn, isRecord } from "../shared/json";
+import { deepFreeze, hasOwn, isRecord } from "../shared/json";
 import { formatMoney, requirementExpr } from "../shared/world";
 import { bandTiers } from "../shared/tiers";
 import type { ChatRun, EventRef, HeldWrite, JournalNote, KeepLine, LedgerEvent, PostEntry, Rec } from "../shared/ledger";
@@ -677,6 +677,46 @@ function derivedChips(chain: readonly ChainMessage[], fold: FoldOutput, keepRepo
   return chips;
 }
 
+/** The parts read off the head state, kept under the fold's state key and the map display: the world it is in, the packs' panels and the HUD. */
+interface StateParts {
+  key: string;
+  world: WorldDoc;
+  revision: string;
+  lag: string | null;
+  panels: Readonly<Record<PanelId, JsonValue>>;
+  hud: HudView;
+}
+
+/** The parts read off the chain's fold, kept under its key with the journal's pauses and refused writes: the scene, the chips its records give, each reply's clock, the Journal and the Keep report. */
+interface ChainParts {
+  key: string;
+  scene: SceneView;
+  chips: readonly Chip[];
+  replyClocks: Record<string, string>;
+  journal: JournalNote[];
+  keepReport: KeepLine[];
+}
+
+/**
+ * What one chat's state views share from one build to the next (DESIGN §9.6), kept with the chat's
+ * open ledger (`Runtime`), so it goes when the ledger does. Each part is kept frozen under the keys
+ * of what it was made from: the head state's (`LedgerFold.keys`), the chain's, and the state the
+ * narrator sees (`LedgerCore.renderKey`). A build after a change that left them as they were (a
+ * message sent, a turn's status, a stored chip) makes none of them again and folds nothing, and a
+ * view sent before shares them, so the push copies and compares only what changed.
+ */
+export class ViewMemo {
+  state: StateParts | null = null;
+  chain: ChainParts | null = null;
+  palette: { key: string; palette: PaletteView } | null = null;
+  controls: { key: string; controls: ControlsView } | null = null;
+}
+
+/** A part kept for later builds: its own copy, frozen, so nothing that reads it (or what it was read from) changes it. */
+function kept<T>(part: T): T {
+  return deepFreeze(structuredClone(part));
+}
+
 export interface ViewInput {
   chatId: ChatId;
   run: ChatRun;
@@ -690,62 +730,99 @@ export interface ViewInput {
   mapDisplay?: MapDisplay | null;
   /** The chat's own knowledge choices (`ChatKnowledge`), beside the user's: knowledge tracking and the narrator's knowledge. */
   knowledge: { chat: ChatKnowledgePrefs; tracking: boolean; narrator: NarratorView };
+  /** What the chat's views share between builds (`ViewMemo`). */
+  memo: ViewMemo;
 }
 
 export function buildView(input: ViewInput): StateView {
-  const { core, observed, registry } = input;
-  const chain = core.chain(observed);
-  const fold = core.fold(observed);
-  const state = fold.state;
-  const world = input.world(state.revision) ?? input.world(input.run.revision);
+  const { core, observed, registry, memo } = input;
+  const journal = core.journal;
+  const keys = core.foldKeys(observed);
+  const stateKey = `${keys.state}\u0000${input.run.revision}\u0000${JSON.stringify(input.mapDisplay ?? null)}`;
+  const chainKey = `${keys.steps.at(-1) ?? keys.root}\u0000${input.run.revision}\u0000${JSON.stringify(journal.pauses)}\u0000${JSON.stringify(journal.refused ?? [])}`;
+  const stateHit = memo.state?.key === stateKey ? memo.state : null;
+  const chainHit = memo.chain?.key === chainKey ? memo.chain : null;
+  // Folded only when a part kept doesn't stand for the chat as it is now.
+  let fold: FoldOutput | null = null;
+  const folded = (): FoldOutput => (fold ??= core.fold(observed));
+  const head = stateHit ? null : folded().state;
+  const world = stateHit?.world ?? (head ? (input.world(head.revision) ?? input.world(input.run.revision)) : undefined);
   if (!world) return notWorldView(input.chatId);
-  // Judged against what the next turn acts on: before the first record, that includes the starting
-  // markers (the world's defaults, the user's settings filling in), which the head fold doesn't hold yet.
-  const next = core.renderState(observed)?.state ?? state;
+  // The palette and the controls are judged against what the next turn acts on: before the first
+  // record, that includes the starting markers (the world's defaults, the user's settings filling
+  // in), which the head fold doesn't hold yet; while a planned turn is in flight, its plan.
+  const paletteKey = `${core.renderKey(observed, keys)}\u0000${stateKey}`;
+  const controlsKey = (sceneType: string): string => `${paletteKey}\u0000${sceneType}\u0000${JSON.stringify(input.knowledge)}`;
+  const paletteHit = memo.palette?.key === paletteKey ? memo.palette : null;
+  const controlsHit = chainHit && memo.controls?.key === controlsKey(chainHit.scene.sceneType) ? memo.controls : null;
+  let next: WorldState | null = null;
+  const nextState = (): WorldState => (next ??= core.renderState(observed, false, fold ?? undefined)?.state ?? folded().state);
+  if (!chainHit) folded();
+  if (!paletteHit || !controlsHit) nextState();
   // Everything else only reads the folded states, many times over: one read pass (DESIGN §9.6).
   return readPass(() => {
-    const ctx = registry.context(world, state);
-    const panels: Record<PanelId, JsonValue> = {};
-    const prefs = { mapDisplay: input.mapDisplay ?? null };
-    for (const view of registry.views) {
-      try {
-        panels[view.panel] = view.build(ctx, prefs);
-      } catch (error) {
-        panels[view.panel] = { error: error instanceof Error ? error.message : String(error) };
+    let parts = stateHit;
+    if (!parts) {
+      const state = folded().state;
+      const ctx = registry.context(world, state);
+      const panels: Record<PanelId, JsonValue> = {};
+      const prefs = { mapDisplay: input.mapDisplay ?? null };
+      for (const view of registry.views) {
+        try {
+          panels[view.panel] = view.build(ctx, prefs);
+        } catch (error) {
+          panels[view.panel] = { error: error instanceof Error ? error.message : String(error) };
+        }
       }
+      parts = memo.state = { key: stateKey, world, revision: state.revision, lag: definitionsLag(state), panels: kept(panels), hud: kept(hud(world, state, panels, ctx)) };
     }
-    const head = chain.findLast((m) => !m.isUser);
-    const headRec = head ? activeRecord(head, core.journal.tombstones) : null;
-    const sceneView = scene(world, state, headRec ? clockMinutes(headRec.events) : 0, registry);
-    const pending: PendingMark[] = core.journal.held.map((h) => ({ panel: "*", entity: h.write.kind === "post" ? povEntity(world) : null }));
+    let read = chainHit;
+    if (!read) {
+      const out = folded();
+      const state = out.state;
+      const chain = core.chain(observed);
+      const last = chain.findLast((m) => !m.isUser);
+      const lastRec = last ? activeRecord(last, journal.tombstones) : null;
+      const recordOf = (messageId: string): Rec | null => {
+        const m = chain.find((x) => x.id === messageId);
+        return m ? activeRecord(m, journal.tombstones) : null;
+      };
+      const drops = playerDrops(registry, world, state, recordOf, out.notes, out.keepReport);
+      read = memo.chain = {
+        key: chainKey,
+        scene: kept(scene(world, state, lastRec ? clockMinutes(lastRec.events) : 0, registry)),
+        chips: kept(derivedChips(chain, out, drops.keep, core, registry, world)),
+        replyClocks: kept(replyClocks(chain, out, core, world, state)),
+        journal: kept([...turnNotes(chain, out, core, registry, world, state), ...drops.notes]),
+        keepReport: kept(drops.keep),
+      };
+    }
+    const sceneType = read.scene.sceneType;
+    const shownPalette = paletteHit ?? (memo.palette = { key: paletteKey, palette: kept(palette(world, nextState(), registry)) });
+    const shownControls = controlsHit ?? (memo.controls = { key: controlsKey(sceneType), controls: kept(controls(world, nextState(), sceneType, registry, input.knowledge)) });
+    const pending: PendingMark[] = journal.held.map((h) => ({ panel: "*", entity: h.write.kind === "post" ? povEntity(world) : null }));
     const packs: Record<PackId, number> = {};
     for (const pack of registry.packs) packs[pack.id] = pack.version;
     // A swipe's chips show only while that swipe is displayed (switching back shows them again).
-    const shown = input.stored.filter((c) => c.swipeId === undefined || chain.find((m) => m.id === c.messageId)?.swipeId === c.swipeId);
-    const recordOf = (messageId: string): Rec | null => {
-      const m = chain.find((x) => x.id === messageId);
-      return m ? activeRecord(m, core.journal.tombstones) : null;
-    };
-    const drops = playerDrops(registry, world, state, recordOf, fold.notes, fold.keepReport);
-    const chips: Chip[] = [...shown.map(({ payload: _payload, ...chip }) => chip), ...derivedChips(chain, fold, drops.keep, core, registry, world)];
-    const lag = definitionsLag(state);
+    const shown = input.stored.filter((c) => c.swipeId === undefined || observed.find((m) => m.id === c.messageId)?.swipeId === c.swipeId);
     return {
       v: 1,
       chatId: input.chatId,
       worldId: input.run.worldId,
-      revision: state.revision,
-      ...(lag !== null ? { definitionsFrom: lag } : {}),
-      status: core.journal.pauses.length > 0 ? "paused" : core.inFlight ? "in_flight" : "idle",
-      hud: hud(world, state, panels, ctx),
-      scene: sceneView,
-      chips,
-      replyClocks: replyClocks(chain, fold, core, world, state),
-      journal: [...turnNotes(chain, fold, core, registry, world, state), ...drops.notes],
-      keepReport: drops.keep,
+      revision: parts.revision,
+      ...(parts.lag !== null ? { definitionsFrom: parts.lag } : {}),
+      status: journal.pauses.length > 0 ? "paused" : core.inFlight ? "in_flight" : "idle",
+      hud: parts.hud,
+      scene: read.scene,
+      chips: [...shown.map(({ payload: _payload, ...chip }) => chip), ...read.chips],
+      replyClocks: read.replyClocks,
+      journal: read.journal,
+      keepReport: read.keepReport,
       pending,
-      panels,
-      palette: palette(world, next, registry),
-      controls: controls(world, next, sceneView.sceneType, registry, input.knowledge),
+      // A record of its own: the runtime adds the inspector's panel to it.
+      panels: { ...parts.panels },
+      palette: shownPalette.palette,
+      controls: shownControls.controls,
       meter: input.meter,
       packs,
       currency: world.currency,

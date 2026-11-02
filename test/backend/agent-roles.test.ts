@@ -2,8 +2,9 @@
 // agent answers in its task's contract and the turn reads its answer as classic's type, by classic's
 // own validators, so the same answers record the same events as classic; a bad answer does as the
 // role's `onFail` says; a decision that turns on what its chooser heard runs the knowledge step for
-// them first and reads their holdings; an edited role text reaches its calls; and Test refuses an
-// edit that breaks a role's contract.
+// them first and reads their holdings; an edited role text reaches its calls; its pinned files and
+// its system files (AGENTS.md and roles/<role>.md, the global workspace's then the chat's) go with
+// its prompt; and Test refuses an edit that breaks a role's contract.
 
 import { describe, expect, test } from "bun:test";
 import { decideRun } from "../../src/backend/agents/roles/director";
@@ -19,6 +20,7 @@ import type { JsonObject } from "../../src/shared/json";
 import type { LedgerEvent, Rec } from "../../src/shared/ledger";
 import { FAILED_TEXT } from "../../src/shared/agent-failures";
 import { ROLE_LABEL } from "../../src/shared/agent-roles";
+import { RUNTIME_TEXT } from "../../src/shared/agent-prompts";
 import { PROMPTS } from "../../src/shared/prompts";
 import { alderChat, DANNY, PRIYA, stateOf } from "../support/mind-chat";
 import { Rig } from "../support/rig";
@@ -169,25 +171,29 @@ describe("an agent-backed role", () => {
 });
 
 describe("a role's pinned files", () => {
-  test("come after its instructions: those .pins.json lists for it, read with its knowledge, each whole within the manifest's budget for it, else as its headings", async () => {
+  test("come after its instructions: those .pins.json lists for it, the chat's and the global workspace's, each whole within the manifest's budget for it, else as its headings; a system file listed there is no pin", async () => {
     const rig = new Rig({ shipped: true });
     const { agents } = await pair(rig);
-    const write = async (path: string, text: string, readers?: "pov" | "everyone"): Promise<void> => void rig.body(await rig.send({ type: "lre.workspace", op: "write", chatId: agents, path, text, ...(readers ? { readers } : {}) }));
-    await write("notes/harbour.md", "HARBOUR-NOTE: Marcus opens the bait shop at six.", "everyone");
-    await write("notes/tides.md", `# Tides\n${"The tide turns twice a day at the north pier. ".repeat(60)}\n# Ferries\nTIDES-BODY`, "everyone");
-    // The GM's own note, which no role's knowledge but the GM's reads.
-    await write("notes/plans.md", "GM-ONLY-NOTE: Danny skims the till.");
-    await write(".pins.json", JSON.stringify({ read: { files: ["notes/harbour.md", "notes/tides.md", "notes/plans.md"], tokens: 120 } }), "everyone");
+    const write = async (path: string, text: string): Promise<void> => void rig.body(await rig.send({ type: "lre.workspace", op: "write", chatId: agents, path, text }));
+    await write("notes/harbour.md", "HARBOUR-NOTE: Marcus opens the bait shop at six.");
+    await write("~/notes/style.md", "STYLE-NOTE: keep it brief.");
+    await write("notes/tides.md", `# Tides\n${"The tide turns twice a day at the north pier. ".repeat(60)}\n# Ferries\nTIDES-BODY`);
+    await write("AGENTS.md", "AGENTS-MARK: every agent reads this.");
+    await write(".pins.json", JSON.stringify({ read: { files: ["notes/harbour.md", "~/notes/style.md", "AGENTS.md", "notes/tides.md"], tokens: 160 } }));
     const seen = scripted(rig);
     await played(rig, agents, "I walk down to the pier.", "The pier is quiet.");
     const read = seen.filter((s) => s.role === "read");
     expect(read.length).toBeGreaterThan(0);
     for (const s of read) {
       expect(s.head).toContain("[notes/harbour.md]\nHARBOUR-NOTE: Marcus opens the bait shop at six.");
+      expect(s.head).toContain("[~/notes/style.md]\nSTYLE-NOTE: keep it brief.");
       expect(s.head).toContain("[notes/tides.md: its headings]\n# Tides\n# Ferries");
       expect(s.head).not.toContain("TIDES-BODY");
-      expect(s.head).not.toContain("GM-ONLY-NOTE");
-      expect(s.head).toContain("at most 120 tokens");
+      expect(s.head).toContain("at most 160 tokens");
+      // AGENTS.md is in its system instructions, once, and never a pin.
+      expect(s.head).not.toContain("[AGENTS.md]");
+      expect(s.head).toContain("## AGENTS.md\nAGENTS-MARK: every agent reads this.");
+      expect(s.head.split("AGENTS-MARK").length).toBe(2);
     }
     // The manifest lists none for the intent, and no file is pinned in GM → Workspace.
     const intent = seen.filter((s) => s.role === "intent");
@@ -195,21 +201,84 @@ describe("a role's pinned files", () => {
     expect(intent.some((s) => s.head.includes("HARBOUR-NOTE"))).toBe(false);
   });
 
-  test("pinned in GM → Workspace, go with every role reading with knowledge that reaches them, within Settings → Agents → Main agent's pins budget; a mind gets none", async () => {
+  test("pinned in GM → Workspace, go with every role, a mind's and a memory's too, within Settings → Agents → Main agent's pins budget", async () => {
     const rig = new Rig({ shipped: true, minds: true });
     const { agents } = await pair(rig);
-    rig.body(await rig.send({ type: "lre.workspace", op: "write", chatId: agents, path: "notes/pier.md", text: "PIER-NOTE: the ferry leaves at noon.", readers: "pov" }));
+    rig.body(await rig.send({ type: "lre.workspace", op: "write", chatId: agents, path: "notes/pier.md", text: "PIER-NOTE: the ferry leaves at noon." }));
     rig.body(await rig.send({ type: "lre.workspace", op: "pin", chatId: agents, path: "notes/pier.md", pinned: true }));
     rig.body(await rig.send({ type: "lre.settings.set", patch: { agents: { main: { pinsTokens: 400 } } } }));
     const seen = scripted(rig);
     await played(rig, agents, "I check the ferry times.", "The board says noon.");
-    for (const role of ["intent", "read"]) {
+    for (const role of ["intent", "read", "minds", "memory"]) {
       const calls = seen.filter((s) => s.role === role);
       expect(calls.length).toBeGreaterThan(0);
       expect(calls.every((s) => s.head.includes("PIER-NOTE: the ferry leaves at noon.") && s.head.includes("at most 400 tokens"))).toBe(true);
     }
-    // A role reading with a character's own knowledge works from its task alone.
-    expect(seen.some((s) => (s.role === "minds" || s.role === "memory") && s.head.includes("PIER-NOTE"))).toBe(false);
+  });
+});
+
+describe("a role's system files", () => {
+  test("AGENTS.md goes to every role and roles/<role>.md to that role alone, after its system prompt: the global workspace's first, then the chat's", async () => {
+    const rig = new Rig({ shipped: true });
+    const { agents, classic } = await pair(rig);
+    const write = async (path: string, text: string): Promise<void> => void rig.body(await rig.send({ type: "lre.workspace", op: "write", chatId: agents, path, text }));
+    await write("~/AGENTS.md", "GLOBAL-AGENTS-MARK: write plainly.");
+    await write("~/roles/read.md", "GLOBAL-READ-MARK: name who acts.");
+    await write("AGENTS.md", "CHAT-AGENTS-MARK: this chat is a quiet one.");
+    await write("roles/read.md", "CHAT-READ-MARK: the harbour matters here.");
+    await write("roles/intent.md", "INTENT-MARK: read the player's words literally.");
+    // A file under roles/ but not straight under it, and a note named like one, are no system files.
+    await write("roles/old/read.md", "OLD-READ-MARK");
+    await write("notes/AGENTS.md", "NOTE-AGENTS-MARK");
+    const seen = scripted(rig);
+    await played(rig, agents, "I walk down to the pier.", "The pier is quiet.");
+    const order = ["GLOBAL-AGENTS-MARK", "GLOBAL-READ-MARK", "CHAT-AGENTS-MARK", "CHAT-READ-MARK"];
+    const read = seen.filter((s) => s.role === "read");
+    expect(read.length).toBeGreaterThan(0);
+    for (const s of read) {
+      const at = order.map((mark) => s.head.indexOf(mark));
+      expect(at.every((i) => i > s.head.indexOf("You are the read agent of LumiRPEngine"))).toBe(true);
+      expect([...at].sort((a, b) => a - b)).toEqual(at);
+      expect(s.head).toContain("## ~/AGENTS.md\nGLOBAL-AGENTS-MARK: write plainly.");
+      expect(s.head).toContain("## roles/read.md\nCHAT-READ-MARK: the harbour matters here.");
+      for (const other of ["INTENT-MARK", "OLD-READ-MARK", "NOTE-AGENTS-MARK"]) expect(s.head).not.toContain(other);
+    }
+    const intent = seen.filter((s) => s.role === "intent");
+    expect(intent.length).toBeGreaterThan(0);
+    for (const s of intent) {
+      for (const mark of ["GLOBAL-AGENTS-MARK", "CHAT-AGENTS-MARK", "INTENT-MARK"]) expect(s.head).toContain(mark);
+      for (const other of ["GLOBAL-READ-MARK", "CHAT-READ-MARK"]) expect(s.head).not.toContain(other);
+    }
+    // The global workspace's go with every chat of the user's; the chat's stay with it.
+    rig.body(await rig.send({ type: "lre.chat.knowledge", chatId: classic, engine: "agents" }));
+    const elsewhere = scripted(rig);
+    await played(rig, classic, "I look around.", "The square is quiet.");
+    const other = elsewhere.filter((s) => s.role === "read");
+    expect(other.length).toBeGreaterThan(0);
+    for (const s of other) {
+      expect(s.head).toContain("GLOBAL-AGENTS-MARK");
+      expect(s.head).toContain("GLOBAL-READ-MARK");
+      expect(s.head).not.toContain("CHAT-AGENTS-MARK");
+    }
+  });
+
+  test("within Settings → Agents → System instructions' tokens: the file past it is cut at a line, and the agent is told which were cut", async () => {
+    const rig = new Rig({ shipped: true });
+    const { agents } = await pair(rig);
+    const write = async (path: string, text: string): Promise<void> => void rig.body(await rig.send({ type: "lre.workspace", op: "write", chatId: agents, path, text }));
+    await write("~/AGENTS.md", Array.from({ length: 40 }, (_, i) => `Line ${i + 1}: keep the harbour quiet.`).join("\n"));
+    await write("AGENTS.md", "CHAT-AGENTS-MARK: this chat is a quiet one.");
+    rig.body(await rig.send({ type: "lre.settings.set", patch: { agents: { systemTokens: 60 } } }));
+    const seen = scripted(rig);
+    await played(rig, agents, "I walk down to the pier.", "The pier is quiet.");
+    const read = seen.filter((s) => s.role === "read");
+    expect(read.length).toBeGreaterThan(0);
+    for (const s of read) {
+      expect(s.head).toContain("Line 1: keep the harbour quiet.");
+      expect(s.head).not.toContain("Line 40:");
+      expect(s.head).not.toContain("CHAT-AGENTS-MARK");
+      expect(s.head).toContain(renderPrompt(RUNTIME_TEXT.systemCut, {}, { paths: "~/AGENTS.md, AGENTS.md", tokens: "60" }));
+    }
   });
 });
 
@@ -249,8 +318,8 @@ describe("knowledge before the plan", () => {
       heard: { messageId: said.id, text: claim, connection: null, learned: (events) => void learned.push(...events) },
       classic: async () => null,
     };
-    // A person's choice and the knowledge step read what their task holds: no tool reads or writes.
-    const none = { reader: {} as ToolReader, writer: {} as ToolWriter };
+    // A person's choice and the knowledge step read what their task holds: their reader has the engine's registry for its tools' schemas but no head to read, and nothing writes.
+    const none = { reader: { registry: rig.rt.registry, view: () => Promise.reject(new Error("no head")) } as unknown as ToolReader, writer: {} as ToolWriter };
     const ctx: TurnAgentCtx = {
       turn: new AgentTurn(settings.agents.turn),
       signal: new AbortController().signal,
@@ -262,7 +331,7 @@ describe("knowledge before the plan", () => {
       agentId: "director",
       settings: settings.agents.roles.director,
       brief: null,
-      readAs: () => none,
+      sections: async () => "",
       loads: { add: () => false },
     };
     return { learned, order, odds: await decideRun(rig.rt, task, ctx) };

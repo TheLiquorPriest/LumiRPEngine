@@ -122,7 +122,7 @@ describe("model calls per preset (DESIGN §5.3)", () => {
     expect(labels).toEqual(["I go home"]);
   });
 
-  test("a brief is checked whole before it's cut: a secret across the cut withholds it, and a long clean one still runs, cut", async () => {
+  test("a brief is checked whole before it's cut: a secret across the cut keeps it, cut and marked once, and a long clean one still runs, cut", async () => {
     const unit = "Sam stands at the window of the little house, watching the gulls wheel over the harbor. ";
     const lead = "Down at the far end of the pier people still whisper that ";
     // The secret runs across the brief's cut: a cut there would keep only its start.
@@ -136,9 +136,10 @@ describe("model calls per preset (DESIGN §5.3)", () => {
       const { rig } = await turnCalls("full", undefined, (req) => (req.messages[0]?.content.includes("You brief a roleplay narrator") ? JSON.stringify({ text: brief }) : quiet(req)));
       return rig.host.section("Outline");
     };
-    const withheld = await outlineFor(leaky);
-    expect(withheld).not.toContain("Brief:");
-    expect(withheld).not.toContain("ferryman");
+    const marked = await outlineFor(leaky);
+    expect(marked).toContain(`Brief: ${unit.trim()}`);
+    expect(marked.match(/\[secret; kept from Sam\]/g)?.length).toBe(1);
+    expect(marked).not.toContain("nobody will say it aloud");
     const kept = await outlineFor(clean);
     expect(kept).toContain(`Brief: ${unit.trim()}`);
     expect(kept).not.toContain("by the minute");
@@ -192,8 +193,8 @@ describe("the prose steps and someone the POV can't see", () => {
     return { rig, chatId };
   }
 
-  /** The narrator's Outline after `typed`, and the outline gate's lines for it, in a world with `puts`. */
-  async function outlined(reply: (req: QuietRequest) => string, typed: string, puts: [string, JsonObject][]): Promise<{ outline: string; gate: string }> {
+  /** The narrator's Outline after `typed`, and the outline gate's lines for it (those it holds as spoilers apart), in a world with `puts`. */
+  async function outlined(reply: (req: QuietRequest) => string, typed: string, puts: [string, JsonObject][]): Promise<{ outline: string; gate: string; spoilers: string[] }> {
     const played = await withVex(reply, [], puts);
     await played.rig.turn(played.chatId, typed, "The ferry horn sounds.");
     const gated = await withVex(reply, [{ gates: { outline: true } }], puts);
@@ -201,18 +202,20 @@ describe("the prose steps and someone the POV can't see", () => {
     await gated.rig.host.settle();
     expect((await gated.rig.host.start(gated.chatId, { type: "normal" })).halted).toBe("cancelled");
     const gate = (await gated.rig.rt.view(gated.chatId, gated.rig.host.userId)).chips.find((c) => c.kind === "outline_gate");
-    return { outline: played.rig.host.section("Outline"), gate: gate?.detail ?? "" };
+    return { outline: played.rig.host.section("Outline"), gate: gate?.detail ?? "", spoilers: gate?.spoilers ?? [] };
   }
 
   const NAMING = prose("Sam waits at the ferry for Vex Morrow.", ["Vex Morrow steps off the ferry.", "The horn sounds."]);
 
-  test("a brief or an outline line naming them that neither the player nor the step's inputs said is withheld whole, on the gate too", async () => {
-    const { outline, gate } = await outlined(NAMING, "I walk to the ferry and wait.", WITH_VEX);
-    for (const told of [outline, gate]) {
-      expect(told).toContain("The horn sounds.");
-      expect(told).not.toContain("Brief:");
-      expect(told).not.toMatch(/Vex|Morrow/);
-    }
+  test("a brief or an outline line naming them that neither the player nor the step's inputs said is kept and marked whole; the gate holds it as a spoiler", async () => {
+    const { outline, gate, spoilers } = await outlined(NAMING, "I walk to the ferry and wait.", WITH_VEX);
+    expect(outline).toContain("Brief: Sam waits at the ferry for Vex Morrow. [secret; kept from Sam]");
+    expect(outline).toContain("Vex Morrow steps off the ferry. [secret; kept from Sam]");
+    expect(outline.match(/\[secret; kept from Sam\]/g)?.length).toBe(2);
+    expect(outline).toContain("The horn sounds.");
+    expect(gate).toContain("The horn sounds.");
+    expect(gate).not.toMatch(/Vex|Morrow/);
+    expect(spoilers).toEqual(["Brief: Sam waits at the ferry for Vex Morrow. [secret; kept from Sam]", "Vex Morrow steps off the ferry. [secret; kept from Sam]"]);
   });
 
   test("a line saying a name the player typed reads the same with or without someone hidden by it: 'I wait for Vex'", async () => {
@@ -234,14 +237,14 @@ describe("the prose steps and someone the POV can't see", () => {
     expect(await outlined(reply, "I wave back.", [...room, rourke])).toEqual(none);
   });
 
-  test("a suggestion naming them is dropped, unless the player saw them named in their message or the reply", async () => {
-    const offered = async (reply: string): Promise<string[]> => {
+  test("a suggestion naming them is kept as a spoiler, unless the player saw them named in their message or the reply", async () => {
+    const offered = async (reply: string): Promise<{ label: string; spoiler?: true }[]> => {
       const { rig, chatId } = await withVex((req) => (req.messages[0]?.content.includes("Suggest three short") ? JSON.stringify({ choices: ["I ask Vex Morrow about the ferry", "I go home"] }) : quiet(req)));
       await rig.turn(chatId, "I walk to the ferry and wait.", reply);
-      return (await rig.rt.view(chatId, rig.host.userId)).chips.filter((c) => c.kind === "choice").map((c) => c.label);
+      return (await rig.rt.view(chatId, rig.host.userId)).chips.filter((c) => c.kind === "choice").map((c) => ({ label: c.label, ...(c.spoiler ? { spoiler: c.spoiler } : {}) }));
     };
-    expect(await offered("The ferry horn sounds.")).toEqual(["I go home"]);
-    expect(await offered("The ferry horn sounds, and Vex Morrow steps off the gangway.")).toEqual(["I ask Vex Morrow about the ferry", "I go home"]);
+    expect(await offered("The ferry horn sounds.")).toEqual([{ label: "I ask Vex Morrow about the ferry", spoiler: true }, { label: "I go home" }]);
+    expect(await offered("The ferry horn sounds, and Vex Morrow steps off the gangway.")).toEqual([{ label: "I ask Vex Morrow about the ferry" }, { label: "I go home" }]);
   });
 
   test("an everyday word a secret entry is filed under doesn't withhold a line: the prose steps never read secret lore", async () => {

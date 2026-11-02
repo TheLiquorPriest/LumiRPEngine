@@ -99,6 +99,23 @@ export class MessageCache {
   }
 
   /**
+   * The chat's messages for a reader that passes through every chat (the blob sweep): a kept copy,
+   * or a read under way, answers as it would anyone, but neither is used for it, and a whole read it
+   * makes is the host's, kept for no one. So the chats it passes through push out no copy and none
+   * counts as the user's latest; the memory budget still hears of the read.
+   */
+  async glance(chatId: ChatId, userId: UserId): Promise<HostMessage[]> {
+    const key = `${userId}\u0000${chatId}`;
+    const copy = this.copies.get(key);
+    if (copy) return [...copy.messages];
+    const reading = this.reading.get(key);
+    if (reading) return [...(await reading.messages)];
+    const read = await this.inner.chats.messages(chatId, userId);
+    this.onRead?.(chatId);
+    return read;
+  }
+
+  /**
    * Reads the chat whole from the host. The changes seen meanwhile are replayed onto what it returns
    * (each event carries the message as saved, so one the read already holds changes nothing), and
    * that is kept; one that can't be applied leaves the read as the host gave it, kept for no one.

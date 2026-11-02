@@ -7,7 +7,7 @@
 
 import { hashParts } from "../shared/hash";
 import type { JsonObject } from "../shared/json";
-import { isRecord } from "../shared/json";
+import { deepFreeze, isRecord } from "../shared/json";
 import type { ChatId, MessageId, UserId, WorldId } from "../shared/ids";
 import { runDir } from "../shared/ids";
 import type { SecretMarkWording } from "../shared/secret-marks";
@@ -77,19 +77,56 @@ export function encodeLedger(bag: JsonObject, ledger: MessageLedger): JsonObject
   return out;
 }
 
+/** A bag's ledger as decoded, with what it was decoded from: the namespace's value and, for a chunked one, its chunks. */
+interface Decoded {
+  raw: unknown;
+  chunks: readonly unknown[];
+  ledger: MessageLedger | null;
+  /** The swipe keys of the records skipped as malformed. */
+  damaged: readonly string[];
+}
+
+/**
+ * Each metadata bag's ledger, decoded once (DESIGN §9.6): a chat's copy of its messages keeps each
+ * message's bag until the message changes, and every fold, view and read of the chat decodes the
+ * chain again. The ledger is frozen, so all of them share it. A message the host or the engine
+ * changes comes with a new bag; one whose namespace's value or chunks were replaced in place is
+ * decoded again.
+ */
+const DECODED = new WeakMap<JsonObject, Decoded>();
+
+/** A chunked ledger's chunks as the bag holds them; none for an inline one. */
+function chunksOf(bag: JsonObject, raw: unknown): unknown[] {
+  if (!isRecord(raw) || typeof raw.chunks !== "number" || !Number.isInteger(raw.chunks) || raw.chunks < 1 || raw.chunks > 1000) return [];
+  return Array.from({ length: raw.chunks }, (_, i) => bag[`${CHUNK_PREFIX}${i}`]);
+}
+
 /**
  * The ledger a metadata bag holds, inline or chunked; null when absent, malformed or a chunk is
  * missing. Stored ledgers come from outside (any metadata writer, an imported chat), so a marker is
  * kept only when its body passes the check requests pass, swipe keys must be swipe indexes, and a
- * record that fails `isRec` is skipped and reported to `damaged` with its swipe key.
+ * record that fails `isRec` is skipped and reported to `damaged` with its swipe key, on every read.
+ * It is frozen and shared: a reader that changes it takes its own copy.
  */
 export function decodeLedger(bag: JsonObject, damaged?: (swipe: string) => void): MessageLedger | null {
-  let raw: unknown = bag[LEDGER_NAMESPACE];
+  const raw = bag[LEDGER_NAMESPACE];
+  const chunks = chunksOf(bag, raw);
+  let decoded = DECODED.get(bag);
+  if (!decoded || decoded.raw !== raw || decoded.chunks.length !== chunks.length || decoded.chunks.some((c, i) => c !== chunks[i])) {
+    const skipped: string[] = [];
+    decoded = { raw, chunks, ledger: deepFreeze(decodeBag(raw, chunks, (swipe) => skipped.push(swipe))), damaged: skipped };
+    DECODED.set(bag, decoded);
+  }
+  if (damaged) for (const swipe of decoded.damaged) damaged(swipe);
+  return decoded.ledger;
+}
+
+function decodeBag(value: unknown, chunks: readonly unknown[], damaged: (swipe: string) => void): MessageLedger | null {
+  let raw = value;
   if (isRecord(raw) && typeof raw.chunks === "number" && typeof raw.hash === "string") {
-    if (!Number.isInteger(raw.chunks) || raw.chunks < 1 || raw.chunks > 1000) return null;
+    if (chunks.length === 0) return null;
     let text = "";
-    for (let i = 0; i < raw.chunks; i++) {
-      const part = bag[`${CHUNK_PREFIX}${i}`];
+    for (const part of chunks) {
       if (typeof part !== "string") return null;
       text += part;
     }
@@ -105,16 +142,17 @@ export function decodeLedger(bag: JsonObject, damaged?: (swipe: string) => void)
   for (const [key, rec] of Object.entries(raw.swipes)) {
     if (!SWIPE_KEY.test(key)) continue;
     if (isRec(rec)) swipes[key] = structuredClone(rec);
-    else damaged?.(key);
+    else damaged(key);
   }
   const markers: Marker[] = [];
   for (const m of raw.markers) {
     if (!isRecord(m) || typeof m.seq !== "number" || !(m.at === null || typeof m.at === "string")) continue;
     // A body that passes is kept as written, not as the check clamps it: the chain hashed it so when
     // the marker was made (an earlier build journaled a start marker's half-minute tick unclamped),
-    // and `applyMarker` checks and clamps it again wherever it applies.
+    // and `applyMarker` checks and clamps it again wherever it applies. Its own copy, as a record's
+    // is: the ledger is frozen, and what it was decoded from (a journal's own ledger, at a flush) isn't.
     const { seq: _seq, at: _at, start: _start, ...body } = m;
-    if (validMarkerBody(body)) markers.push({ ...(body as MarkerBody), seq: m.seq, at: m.at, ...(m.start === true ? { start: true as const } : {}) });
+    if (validMarkerBody(body)) markers.push({ ...(structuredClone(body) as MarkerBody), seq: m.seq, at: m.at, ...(m.start === true ? { start: true as const } : {}) });
   }
   return { v: 1, swipes, markers };
 }
@@ -157,6 +195,8 @@ interface ChatSlot {
   leftOpen: Set<string>;
   /** The JSON characters of its journal and its snapshots as last read or written: about half of what it holds of them once parsed (`OPEN_CHATS_CHARS`). */
   chars: { journal: number; snapshots: number };
+  /** What a view reads of the chat's ledger as the last operation left it (`viewStamp`): an operation that leaves it the same pushes nothing. Null until one ran. */
+  viewed: string | null;
 }
 
 /**
@@ -368,7 +408,7 @@ export type PreOutcome = { waiting: string };
  * Async work around the core's synchronous steps (DESIGN §5.1): the engine run's pre phase, plan
  * phase and sections, and `extract` before the commit, run here inside the chat's queue, so the
  * core then folds their results as plain data. `afterCommit` collects chips; `changed` fires after
- * every operation.
+ * an operation that changed what a view reads of the ledger (`viewStamp`).
  */
 export interface TurnHooks {
   /**
@@ -383,8 +423,15 @@ export interface TurnHooks {
    * reply as the stopped generation started (`as`).
    */
   afterPlan(input: { chatId: ChatId; userId: UserId; core: LedgerCore; observed: ChainMessage[]; generationId: string; as: GenerateAs; signal: AbortSignal }): Promise<PreOutcome | undefined>;
-  /** The engine run's last step (DESIGN §6.4): the prepared turn's sections made, and the book's entries placed for them; nothing is written into the book yet. */
+  /** The engine run's sections step (DESIGN §6.4): the prepared turn's sections made, and the book's entries placed for them; nothing is written into the book yet. */
   deliver(input: { chatId: ChatId; userId: UserId; core: LedgerCore; observed: ChainMessage[]; generationId: string }): Promise<Delivered>;
+  /**
+   * The engine run's last step, the final review (DESIGN §4.6): the sections as the main agent's
+   * review leaves them (a Re-narrate's as its source's review left them), recorded on the prepared
+   * turn. Its failure is the turn's only when the review's settings say to stop. Absent: the
+   * sections go as made.
+   */
+  finalReview?(input: { chatId: ChatId; userId: UserId; core: LedgerCore; observed: ChainMessage[]; generationId: string; delivered: Delivered; signal: AbortSignal }): Promise<Delivered>;
   /**
    * The guard's write of a turn's sections, for the generation that takes it (DESIGN §6.4): `moved`,
    * writing nothing, when what the placement was decided from changed since the engine run. Throws
@@ -438,21 +485,34 @@ export interface TurnHooks {
    * cancelled, or failed. What the run kept for itself alone goes; what a wait keeps for its resume stays.
    */
   ran?(input: { chatId: ChatId; userId: UserId; turn: string; outcome: RunOutcome }): void;
+  /**
+   * The ledger let a turn go without a commit (DESIGN §5.1): a prepared turn gone stale or replaced,
+   * a kept one discarded, a reply that was stopped or failed with nothing kept for its retry. What
+   * the runtime kept for it alone goes, under the id it was prepared as (`turn`) and the generation
+   * that took it, if one did; `how` says how it ended.
+   */
+  turnGone?(input: { chatId: ChatId; userId: UserId; turn: string; generationId: string | null; how: TurnGone }): void;
 }
 
 /** How an engine run ended (`TurnHooks.ran`). */
 export type RunOutcome = "prepared" | "waiting" | "cancelled" | "failed";
 
+/** How a turn the ledger let go without a commit ended (`TurnHooks.turnGone`). */
+export type TurnGone = "cancelled" | "failed" | "dropped";
+
 /**
  * What the engine run made for a turn's prompt (DESIGN §6.4): each entry of the world's book and the
  * text it takes, written only by the guard of the generation that takes the turn, and `placed`, what
  * the placement was decided from (the preset the host generates the chat with and the book's
- * Positions), which the write checks first. `wording` is the turn's wording of a secret's mark
- * (§6.12), which the World Info entries in the same prompt are marked in too.
+ * Positions), which the write checks first. `parts` names each entry filled, in the order written:
+ * its section's slot (or the narrator rules') and its name, which the final review reads it by.
+ * `wording` is the turn's wording of a secret's mark (§6.12), which the World Info entries in the
+ * same prompt are marked in too.
  */
 export interface Delivered {
   bookId: string;
   fills: ReadonlyMap<string, string>;
+  parts: readonly { id: string; label: string; entry: string }[];
   placed: string;
   wording: SecretMarkWording;
   /** What the narrator knew as the sections were made (DESIGN §6.11): the World Info entries in the same prompt are marked by it. */
@@ -674,7 +734,8 @@ export class LedgerService {
   constructor(
     private readonly host: HostPort,
     private readonly resolveEnv: EnvResolver,
-    private readonly folder: LedgerFold,
+    /** The fold the user's chats fold on (each user's own, its caches within their settings). */
+    private readonly folder: (userId: UserId) => LedgerFold,
     /** Drops the runtime's copy of a chat's messages (`MessageCache`), so a chat forgotten is read afresh. */
     private readonly forgetMessages: (chatId: ChatId) => void = () => undefined,
   ) {}
@@ -891,6 +952,7 @@ export class LedgerService {
     if (p.kept === null) this.notStarted(chatId, gate.userId, p, `${changed} after the engine ran and before the reply started`);
     else this.hooks?.changed(chatId, gate.userId);
     this.drop(chatId, gate.userId, p);
+    this.gone(chatId, gate.userId, p, "dropped");
     this.endRun(chatId, gate.userId, p);
   }
 
@@ -937,7 +999,11 @@ export class LedgerService {
     gate.taken = null;
     const failed: ReplyFailure | null = !ended ? null : ended.error ? "error" : p.type !== "continue" && ended.content.trim() === "" ? "empty" : null;
     // A turn the engine prepared since, or a run it was asked for, comes first.
-    if (failed === null || gate.prepared !== null || gate.halt !== null) return failed;
+    if (failed === null || gate.prepared !== null || gate.halt !== null) {
+      // A stop, or a failure nothing keeps: the turn goes. A reply that came back commits it.
+      if (!ended || failed !== null) this.gone(chatId, gate.userId, p, ended ? "failed" : "cancelled");
+      return failed;
+    }
     const started = this.started.get(chatId);
     const ours = started?.generationId === generationId ? started : null;
     const message = ours?.targetMessageId ?? null;
@@ -980,7 +1046,10 @@ export class LedgerService {
         if (this.gates.get(chatId) === gate && gate.prepared === null && gate.halt === null && gate.taken === null) {
           gate.prepared = { ...p, generationId: null };
           this.dropIfStale(chatId);
-        } else this.hooks?.changed(chatId, userId);
+        } else {
+          this.gone(chatId, userId, p, "dropped");
+          this.hooks?.changed(chatId, userId);
+        }
         return;
       }
       this.diag?.begin(at, STEP_LABEL.read);
@@ -1065,6 +1134,7 @@ export class LedgerService {
     if (!gate || !p || p.kept === null || p.generationId !== null || (turn !== undefined && p.id !== turn)) return false;
     gate.prepared = null;
     this.drop(chatId, gate.userId, p);
+    this.gone(chatId, gate.userId, p, "dropped");
     return true;
   }
 
@@ -1077,6 +1147,11 @@ export class LedgerService {
     const at = { chatId, userId, turn: p.id };
     this.diag?.end(at, { status: "failed", reason: `${why}, so nothing was generated` });
     void this.hooks?.failed({ chatId, userId, turn: p.id, step: "stale", reason: why, as: p.as }).catch((error: unknown) => this.diag?.error(at, "restart", error, "the chat wasn't told its reply didn't start"));
+  }
+
+  /** A turn let go without a commit: what the runtime kept for it alone goes (`TurnHooks.turnGone`). */
+  private gone(chatId: ChatId, userId: UserId, p: Pick<Prepared, "id" | "generationId">, how: TurnGone): void {
+    this.hooks?.turnGone?.({ chatId, userId, turn: p.id, generationId: p.generationId, how });
   }
 
   /**
@@ -1351,6 +1426,7 @@ export class LedgerService {
       gate.prepared = null;
       this.letGo(gate.worldId, p.id);
       this.endRun(chatId, userId, p);
+      this.gone(chatId, userId, p, "dropped");
       return "cancel";
     }
     const hooks = this.hooks;
@@ -1364,6 +1440,7 @@ export class LedgerService {
       if ((await writing) === "moved") {
         gate.prepared = null;
         this.letGo(gate.worldId, p.id);
+        this.gone(chatId, userId, p, "dropped");
         this.diag?.end({ chatId, userId, turn: p.id }, { status: "skipped", reason: "the preset this chat generates with changed after the engine ran; the engine runs again" });
         return "moved";
       }
@@ -1371,6 +1448,7 @@ export class LedgerService {
       gate.prepared = null;
       this.drop(chatId, userId, p);
       this.endRun(chatId, userId, p);
+      this.gone(chatId, userId, p, "failed");
       const reason = messageOf(error);
       this.diag?.end({ chatId, userId, turn: p.id }, { status: "failed", reason: `sections: ${reason}` });
       void this.hooks?.failed({ chatId, userId, turn: p.id, step: "sections", reason, as: p.as }).catch((e: unknown) => this.diag?.error({ chatId, userId, turn: p.id }, "guard", e, "the failure flag wasn't shown"));
@@ -1401,6 +1479,7 @@ export class LedgerService {
       if (holder && p && p.generationId !== null && lease.chatId === chatId) {
         holder.prepared = null;
         await this.unfill(lease.chatId, holder.userId, p);
+        this.gone(lease.chatId, holder.userId, p, "dropped");
         continue;
       }
       if (lease.kind === "impersonate" && lease.chatId === chatId) {
@@ -1452,6 +1531,7 @@ export class LedgerService {
         gate.prepared = null;
         this.diag?.end({ chatId, userId, turn: earlier.id }, { status: "skipped", reason: "the chat changed before its reply; the engine ran again" });
         await this.unfill(chatId, userId, earlier);
+        this.gone(chatId, userId, earlier, "dropped");
       }
       const target = halt.target ? observed.find((m) => m.id === halt.target) : undefined;
       // A stopped Regenerate or swipe leaves its blank swipe (the frontend that started a swipe
@@ -1525,6 +1605,13 @@ export class LedgerService {
         // A cancel while the sections were made ends the run before it prepares the turn.
         going();
         this.failedStep(at);
+        // The final review (DESIGN §4.6), with the book let go: the guard writes what it leaves. A
+        // review its settings stop the turn on fails the run here, as a role under `stop` does.
+        if (hooks.finalReview) {
+          delivered = await hooks.finalReview({ chatId, userId, core, observed, generationId: halt.id, delivered, signal });
+          going();
+          this.stoppedRun(at);
+        }
       } catch (error) {
         core.take(halt.id);
         ended();
@@ -1728,7 +1815,10 @@ export class LedgerService {
     const gate = this.gates.get(chatId);
     this.gates.delete(chatId);
     const p = gate?.prepared;
-    if (gate && p) this.drop(chatId, gate.userId, p);
+    if (gate && p) {
+      this.drop(chatId, gate.userId, p);
+      this.gone(chatId, gate.userId, p, "dropped");
+    }
   }
 
   /**
@@ -1817,6 +1907,16 @@ export class LedgerService {
     const key = `${userId}\u0000${chatId}`;
     const reset = this.resets.get(key);
     return [...(reset ? [reset] : []), ...(this.damaged.get(key) ?? [])];
+  }
+
+  /**
+   * What a chat's view reads of its ledger, as one string: the journal as last written, the chain's
+   * key (its messages, their records and markers, as a fold reads them), the turn kept from a failed
+   * reply and the notices. Equal stamps build equal views of the ledger.
+   */
+  private viewStamp(chatId: ChatId, slot: ChatSlot, messages: readonly HostMessage[]): string {
+    const keys = slot.core.foldKeys(this.observe(chatId, slot.userId, messages));
+    return JSON.stringify([slot.written, keys.steps.at(-1) ?? keys.root, this.keptOf(chatId), this.notices(chatId, slot.userId)]);
   }
 
   /** The chain as the core sees it; a stored record skipped as malformed is logged and the player told (the inspector's warnings). */
@@ -1909,7 +2009,7 @@ export class LedgerService {
       const stored = await this.host.storage.read(snapshotsPath(chatId), userId).catch(() => null);
       const snapshots = ChatSnapshots.parse(stored);
       // A stamped journal differs from the stored text, so the next persist writes it.
-      const slot: ChatSlot = { core: new LedgerCore(journal, { ...env, snapshots }, this.folder), userId, queue: Promise.resolve(), written: reset || raw === null ? null : journalHash(raw), ops: 0, snapshots, reasserts: new Map(), leftOpen: new Set([...journal.windows, ...(journal.prereply ?? []), ...Object.keys(journal.pending)]), chars: { journal: raw?.length ?? 0, snapshots: stored?.length ?? 0 } };
+      const slot: ChatSlot = { core: new LedgerCore(journal, { ...env, snapshots }, this.folder(userId)), userId, queue: Promise.resolve(), written: reset || raw === null ? null : journalHash(raw), ops: 0, snapshots, reasserts: new Map(), leftOpen: new Set([...journal.windows, ...(journal.prereply ?? []), ...Object.keys(journal.pending)]), chars: { journal: raw?.length ?? 0, snapshots: stored?.length ?? 0 }, viewed: null };
       // The revisions its folds will ask for are loaded before anyone folds it.
       await slot.core.prepareWorlds(this.observe(chatId, userId, await this.host.chats.messages(chatId, userId)));
       this.chats.set(chatId, slot);
@@ -1961,7 +2061,13 @@ export class LedgerService {
             await this.hooks?.writesLanded({ chatId, userId: slot.userId, core: slot.core, observed, writes: landed, refused });
           }
           await this.persist(chatId, slot);
-          await this.flush(chatId, slot);
+          // What the flush marked as written is persisted with it, so the journal stands as this op left it.
+          if (await this.flush(chatId, slot)) await this.persist(chatId, slot);
+          // Only an operation that changed what a view reads of the ledger pushes: what else a view
+          // reads (chips, the inspector, the meter) tells its own changes, or changes with the journal.
+          const viewed = this.viewStamp(chatId, slot, await this.host.chats.messages(chatId, slot.userId));
+          if (viewed === slot.viewed) return;
+          slot.viewed = viewed;
           this.hooks?.changed(chatId, slot.userId);
         }))
         .catch((error: unknown) => {
@@ -2010,10 +2116,11 @@ export class LedgerService {
    * Writes the journal's ledgers into message metadata once no turn is in flight (DESIGN §5.1 step
    * 10). A ledger is compared and written as the metadata reads it back (`decodeLedger`), so a part
    * the reader drops never looks clobbered; a re-assert after another write that doesn't stick is
-   * tried at most `REASSERTS_PER_LEDGER` times in a row for the same ledger.
+   * tried at most `REASSERTS_PER_LEDGER` times in a row for the same ledger. Whether it wrote any.
    */
-  private async flush(chatId: ChatId, slot: ChatSlot): Promise<void> {
-    if (slot.core.inFlight) return;
+  private async flush(chatId: ChatId, slot: ChatSlot): Promise<boolean> {
+    if (slot.core.inFlight) return false;
+    let wrote = false;
     const messages = await this.host.chats.messages(chatId, slot.userId);
     const observed = this.observe(chatId, slot.userId, messages);
     const stored = new Map(observed.map((m) => [m.id, JSON.stringify(m.ledger)]));
@@ -2039,6 +2146,8 @@ export class LedgerService {
       // The host replaces the whole bag (G2): read-merge-write, keeping other writers' keys.
       await this.host.chats.writeMetadata(chatId, id, encodeLedger(message.metadata, ledger), slot.userId);
       slot.core.markFlushed(id);
+      wrote = true;
     }
+    return wrote;
   }
 }

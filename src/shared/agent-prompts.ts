@@ -1,11 +1,12 @@
 // What the agent runtime itself says to a model (AGENT-LOOP-PLAN §9: everything sent to a model is
-// editable): the built-in `scratch_read` tool, the notes it puts on tool results, and the text form
-// a connection that refuses native tools is offered them in. Each is a registry text with the
-// shipped default, reset per item on Settings → Agents → Prompts (R5), under the page "Every agent".
+// editable): the built-in `scratch_read` tool, the notes it puts on tool results, the text form a
+// connection that refuses native tools is offered them in, and the framing of the system files every
+// agent's prompt carries (AGENTS.md and roles/<role>.md). Each is a registry text with the shipped
+// default, reset per item on Settings → Agents → Prompts (R5), under the page "Every agent".
 
 import type { PromptDef, PromptPage } from "./prompts";
 
-export const RUNTIME_PROMPT_PAGE: PromptPage = { id: "runtime", label: "Every agent", note: "What the agent runtime says to any agent's model besides its role's own prompts: the scratch_read tool, the notes on tool results, and tools offered as text." };
+export const RUNTIME_PROMPT_PAGE: PromptPage = { id: "runtime", label: "Every agent", note: "What the agent runtime says to any agent's model besides its role's own prompts: the scratch_read tool, the notes on tool results, tools offered as text, and how the workspace's system files (AGENTS.md, roles/<role>.md) are framed." };
 
 /** The runtime's text ids, so code names them once. */
 export const RUNTIME_TEXT = {
@@ -25,6 +26,12 @@ export const RUNTIME_TEXT = {
   toolResult: "runtime.tool_result",
   toolError: "runtime.tool_error",
   cacheNonce: "runtime.cache_nonce",
+  systemFiles: "runtime.system_files",
+  systemFile: "runtime.system_file",
+  systemCut: "runtime.system_cut",
+  condenseSystem: "runtime.condense.system",
+  condenseAsk: "runtime.condense.ask",
+  condenseNote: "runtime.condense.note",
 } as const;
 
 const page = RUNTIME_PROMPT_PAGE.id;
@@ -156,4 +163,26 @@ export const RUNTIME_PROMPTS: readonly PromptDef[] = [
     ],
   },
   { id: RUNTIME_TEXT.cacheNonce, page, label: "Cache key", note: "Heads an agent's prompt after Bust, and every call while its caching is off, so the provider's cached prompt no longer matches.", text: "Cache key {{nonce}}; ignore it.", vars: [{ name: "nonce", text: "the key", required: true }] },
+  {
+    id: RUNTIME_TEXT.systemFiles,
+    page,
+    group: "System instructions",
+    label: "The system files",
+    note: "Follows every agent's own system prompt when the workspace holds system files for it: AGENTS.md, then roles/<its role>.md, the global workspace's (~/) first, then this chat's.",
+    text: "The user's own instructions, from the workspace's system files: follow them. Where one says otherwise than the instructions above, it wins, as long as your answer keeps the form your task asks for. The global workspace's (~/) come first and this chat's after them, so this chat's have the last word.\n\n{{files}}",
+    vars: [{ name: "files", text: "each file, framed as below, in order", required: true }],
+  },
+  { id: RUNTIME_TEXT.systemFile, page, group: "System instructions", label: "One file", note: "Each system file within the system files, whole.", text: "## {{path}}\n{{text}}", vars: [{ name: "path", text: "the file's path: ~/AGENTS.md, ~/roles/director.md, AGENTS.md, roles/director.md", required: true }, { name: "text", text: "what it holds", required: true }] },
+  {
+    id: RUNTIME_TEXT.systemCut,
+    page,
+    group: "System instructions",
+    label: "Files cut",
+    note: "Ends the system files when they come to more than Settings → Agents → System instructions allows: the files past it are cut at a line or left out.",
+    text: "({{paths}}: cut short, past the {{tokens}} tokens the system files may take. workspace_read reads a file whole.)",
+    vars: [{ name: "paths", text: "the paths of the files cut or left out, joined with commas", required: true }, { name: "tokens", text: "how many tokens the system files may take" }],
+  },
+  { id: RUNTIME_TEXT.condenseSystem, page, label: "condense: the call's system prompt", note: "The system prompt of the one call the condense tool makes, on the agent's own connection, with no tools.", text: "You condense a source for the agents of a roleplay engine. Keep every name, number, date, id and fact they could need, and each secret's mark as written; drop repetition, scaffolding and anything the instructions say doesn't matter. Answer with the note alone: plain lines, no preamble.", vars: [] },
+  { id: RUNTIME_TEXT.condenseAsk, page, label: "condense: what it is asked", note: "Leads the source's text in the condense call.", text: "Condense {{source}} into a short note.\n{{focus}}", vars: [{ name: "source", text: "the source's path or lore id", required: true }, { name: "focus", text: "what the agent said the note should keep, if anything" }] },
+  { id: RUNTIME_TEXT.condenseNote, page, label: "condense: the note", note: "The note the condense tool writes: its source and the source's hash (so a later reader can tell whether it is still current), then the condensed text.", text: "Condensed from {{source}} (hash {{hash}}):\n{{text}}", vars: [{ name: "source", text: "the source's path or lore id", required: true }, { name: "hash", text: "the start of the source text's hash", required: true }, { name: "text", text: "the condensed text", required: true }] },
 ];

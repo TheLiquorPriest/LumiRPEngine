@@ -1,12 +1,12 @@
 // The agent tool registry (AGENT-LOOP-PLAN §6; INC1-SPEC C6): every tool LRE's agents may call, by
 // family and tier, and `toolsFor`, which gives an agent its tools as the runtime takes them (R1's
 // `AgentTool`). Each tool reads through one `ToolReadView` (`env.reader`, `tools/read-view.ts`),
-// filtered by the agent's knowledge, and writes, at the GM tier, through `env.writer` (C7). A tool's
+// everything in it marked as its view marks it, and writes, at the GM tier, through `env.writer` (C7). A tool's
 // description and each argument's are registry texts (`tool.<name>`, `tool.<name>.<path>`, Settings →
 // Agents → Prompts, GM agent page, group "Tools"), sent in the user's own words where they wrote them;
 // its JSON Schema is hand-written with the world's enums filled in (`tools/schema.ts`).
 
-import type { AgentKnowledge, ToolFamily, ToolTier } from "../../../shared/agent-tools";
+import type { ToolFamily, ToolTier, ToolView } from "../../../shared/agent-tools";
 import { toolArgTextId, toolText, toolTextId } from "../../../shared/agent-tools";
 import type { ChatId, UserId } from "../../../shared/ids";
 import { isRecord, type JsonObject } from "../../../shared/json";
@@ -14,6 +14,7 @@ import type { PromptTexts } from "../../../shared/prompts";
 import type { WorldDoc } from "../../../shared/world";
 import { renderPrompt } from "../../prompts";
 import type { AgentTool, ToolOutcome } from "../runtime";
+import { CONDENSE_TOOLS, type Summarize } from "./condense";
 import { LORE_TOOLS } from "./lore";
 import { READ_TOOLS } from "./read";
 import type { ToolReader } from "./read-view";
@@ -22,23 +23,29 @@ import { WORKSPACE_TOOLS } from "./workspace";
 import { WRITE_TOOLS } from "./write";
 import type { ToolWriter } from "./writer";
 
-export type { AgentKnowledge, ToolFamily, ToolTier } from "../../../shared/agent-tools";
+export type { ToolFamily, ToolTier, ToolView } from "../../../shared/agent-tools";
 
 /**
- * What a tool runs with: whose chat, the agent's knowledge, where it reads (`reader`: outside a turn
- * the chat's head, `outsideReader`) and writes (`writer`, null for an agent that may not write), who
- * calls, and a signal that ends when the agent is cancelled or its time runs out. `loads`: where an
- * agent working a turn loads lore into the reply the turn is writing; absent outside a turn.
+ * What a tool runs with: whose chat, the view it reads with (`gm` with `marks` for every turn agent,
+ * plain `gm` for the GM's own tools, `everyone` for a reader of the narrator's view), where it reads
+ * (`reader`: outside a turn the chat's head, `outsideReader`) and writes (`writer`, null for an agent
+ * that may not write), who calls, and a signal that ends when the agent is cancelled or its time runs
+ * out. `loads`: where an agent working a turn loads lore into the reply the turn is writing; absent
+ * outside a turn.
  */
 export interface ToolEnv {
   userId: UserId;
   chatId: ChatId;
-  knowledge: AgentKnowledge;
+  knowledge: ToolView;
+  /** Under `gm`, every secret marked in the user's wording besides (`ReadViewInput.marks`): a turn agent's view. */
+  marks?: boolean;
   reader: ToolReader;
   writer: ToolWriter | null;
   agent: { role: string; id: string };
   signal: AbortSignal;
   loads?: LoreLoads;
+  /** Condenses a source with the agent's own model (`condense`); absent for an agent that can't make the call. */
+  summarize?: Summarize;
 }
 
 /** Where a turn's agents load lore into the reply it is writing (`lore_load`, DESIGN §4.6): the turn's scene lore, which reaches the narrator in the Scene section. */
@@ -53,13 +60,15 @@ export interface ToolDefinition {
   tier: ToolTier;
   /** Given only to an agent working a turn (`ToolEnv.loads`): what it does is for the turn's reply. */
   turn?: true;
+  /** Given only to an agent that can condense a source (`ToolEnv.summarize`). */
+  summarizes?: true;
   /** Its description is the registry text `tool.<name>` (R5, GM agent page, group "Tools"): editable, with a reset. */
   parameters(world: WorldDoc): JsonObject; // hand-written JSON Schema, with the world's enums filled in
   run(args: JsonObject, env: ToolEnv): Promise<ToolOutcome>;
 }
 
 /** Every tool, in the order the Prompts page lists their texts: the read families, then the writes, the workspace and the lore. */
-export const TOOL_DEFINITIONS: readonly ToolDefinition[] = [...READ_TOOLS, ...WRITE_TOOLS, ...WORKSPACE_TOOLS, ...LORE_TOOLS];
+export const TOOL_DEFINITIONS: readonly ToolDefinition[] = [...READ_TOOLS, ...WRITE_TOOLS, ...WORKSPACE_TOOLS, ...CONDENSE_TOOLS, ...LORE_TOOLS];
 
 /** The property at a dotted path of a schema, through nested `properties` and an array's `items`; null where the schema has none. */
 function propertyAt(schema: JsonObject, path: string): JsonObject | null {
@@ -94,8 +103,8 @@ function described(def: ToolDefinition, schema: JsonObject, texts: PromptTexts):
  */
 export function toolsFor(input: { world: WorldDoc; tiers: readonly ToolTier[]; families?: readonly ToolFamily[]; texts: PromptTexts; env: ToolEnv }): AgentTool[] {
   const { env, texts } = input;
-  const world = schemaWorld(input.world, env.reader.registry, env.knowledge);
-  return TOOL_DEFINITIONS.filter((def) => input.tiers.includes(def.tier) && (input.families === undefined || input.families.includes(def.family)) && (def.turn !== true || env.loads !== undefined)).map(
+  const world = schemaWorld(input.world, env.reader.registry);
+  return TOOL_DEFINITIONS.filter((def) => input.tiers.includes(def.tier) && (input.families === undefined || input.families.includes(def.family)) && (def.turn !== true || env.loads !== undefined) && (def.summarizes !== true || env.summarize !== undefined)).map(
     (def): AgentTool => ({
       name: def.name,
       description: renderPrompt(toolTextId(def.name), texts, {}),

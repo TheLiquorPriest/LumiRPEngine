@@ -1,14 +1,15 @@
 // GM → Live, GM → Workspace's whole session, and the turns' transcripts (DESIGN §4.6). The session
-// view shows the main session whole, whatever the main agent's knowledge, while the main agent is
-// still sent only what its knowledge reads. A page watching GM → Live hears each agent's work in
+// view shows the main session whole, and the main agent is sent all of its own messages. A page
+// watching GM → Live hears each agent's work in
 // order (the main agent's stages, each role run with its agent's messages, reasoning, tool calls and
 // results, its writes and what came of them, and how the turn ended), and a page opened mid-turn
-// catches up first. Each turn's transcript is listed under transcripts/, the GM's alone, read-only,
-// following the chat's path, and no agent below the GM's knowledge reads it. Models are scripted;
+// catches up first. Each turn's transcript is listed under transcripts/, read-only, following the
+// chat's path, and every agent reads it, whatever knowledge it reads the world with. Models are scripted;
 // every role runs prompt-only but the scene's, whose agent writes a note before it answers.
 
 import { describe, expect, test } from "bun:test";
-import { listWorkspace, readWorkspaceFile } from "../../src/backend/agents/tools/workspace";
+import { outsideReader } from "../../src/backend/agents/tools/read-view";
+import { listWorkspace, readWorkspaceFile, WORKSPACE_TOOLS } from "../../src/backend/agents/tools/workspace";
 import type { QuietRequest, QuietToolCall } from "../../src/backend/host";
 import { ROLE_IDS } from "../../src/shared/agent-roles";
 import type { JsonObject } from "../../src/shared/json";
@@ -52,16 +53,16 @@ function models(rig: Rig, opts: { says?: () => string; scene?: (req: QuietReques
 }
 
 /**
- * A Port Alder chat on agents, its turns run by a main agent reading with `knowledge`; every role
- * prompt-only but the scene's, whose run stages the note through the turn's writer before its agent
- * works (its agent's own workspace_write, the same operation, answers what the run staged).
+ * A Port Alder chat on agents, its turns run by a main agent; every role prompt-only but the scene's,
+ * whose run stages the note through the turn's writer before its agent works (its agent's own
+ * workspace_write, the same operation, answers what the run staged).
  */
-async function liveChat(rig: Rig, knowledge: "pov" | "everyone" | "gm" = "everyone"): Promise<string> {
+async function liveChat(rig: Rig): Promise<string> {
   const worldId = await rig.newWorld("Alder", "modern_slice_of_life");
   rig.body(await rig.send({ type: "lre.world", op: "commit", worldId, base: null }));
   const chatId = rig.host.createChat("Morning.");
   rig.body(await rig.send({ type: "lre.world", op: "attach", worldId, chatId }));
-  rig.body(await rig.send({ type: "lre.settings.set", patch: { agents: { pipeline: { mode: "main" }, roles: { ...PROMPT_ONLY, scene: { promptOnly: false } }, main: { knowledge } } } }));
+  rig.body(await rig.send({ type: "lre.settings.set", patch: { agents: { pipeline: { mode: "main" }, roles: { ...PROMPT_ONLY, scene: { promptOnly: false } } } } }));
   rig.body(await rig.send({ type: "lre.chat.knowledge", chatId, engine: "agents" }));
   const roles = rig.rt.orchestrator.roles;
   rig.rt.orchestrator.roles = {
@@ -107,48 +108,42 @@ function heard(rig: Rig, chatId: string, session: string, held: LiveView | null 
 const kinds = (entries: readonly LiveEntry[], agent: string): string[] => entries.filter((e) => "agent" in e && e.agent === agent && e.kind !== "agent").map((e) => e.kind);
 
 describe("GM → Workspace's main session", () => {
-  test("shows the session whole, whatever the main agent's knowledge, while the main agent is sent only what its knowledge reads", async () => {
+  test("shows the session whole, and the main agent is sent every message of it", async () => {
     const rig = new Rig({ shipped: true });
-    const chatId = await liveChat(rig, "gm");
+    const chatId = await liveChat(rig);
     let says = "NOTE-GM: the stranger in the alley runs the smuggling.";
     const asked = models(rig, { says: () => says });
     await played(rig, chatId, "I look out over the harbor.", "Gulls wheel over the water.");
     says = "";
-    rig.body(await rig.send({ type: "lre.settings.set", patch: { agents: { main: { knowledge: "pov" } } } }));
     const session = await sessionOf(rig, chatId);
     const messages = session.segments.flatMap((s) => s.messages);
-    // The note made under the GM's knowledge is there, said not to be read now; the turn task is too.
-    expect(messages.find((m) => m.text.includes("NOTE-GM"))).toMatchObject({ role: "assistant", main: true, knowledge: "gm", read: false });
+    expect(messages.find((m) => m.text.includes("NOTE-GM"))).toMatchObject({ role: "assistant", main: true });
     expect(messages.some((m) => m.text.includes("I look out over the harbor."))).toBe(true);
     expect(session.turns).toBe(1);
     expect(session.segments[0]?.turn).toBe(2);
-    expect(session.reads).toMatchObject({ knowledge: "pov", turns: 0, tokens: 0 });
+    expect(session.reads.turns).toBe(1);
     expect(session.tokens).toBeGreaterThan(0);
-    // The main agent's next turn isn't sent it.
+    // The main agent's next turn is sent it.
     const next = asked.length;
     await played(rig, chatId, "I walk to the pier.", "The boards creak.");
-    expect(sentOf(asked[next] as QuietRequest)).not.toContain("NOTE-GM");
+    expect(sentOf(asked[next] as QuietRequest)).toContain("NOTE-GM");
     const after = await sessionOf(rig, chatId);
     expect(after.turns).toBe(2);
-    expect(after.segments.flatMap((s) => s.messages).some((m) => m.text.includes("NOTE-GM"))).toBe(true);
-    expect(after.reads.turns).toBe(1);
+    expect(after.reads.turns).toBe(2);
     expect(rig.rt.ledger.errors).toEqual([]);
   });
 
-  test("shows a summary made under wider knowledge than the main agent reads with now", async () => {
+  test("shows a summary, which the main agent reads", async () => {
     const rig = new Rig({ shipped: true });
-    const chatId = await liveChat(rig, "gm");
+    const chatId = await liveChat(rig);
     rig.body(await rig.send({ type: "lre.settings.set", patch: { agents: { compaction: { atTokens: 1, keepTurns: 1 } } } }));
     models(rig);
     rig.host.quietReply = ((inner) => (req: QuietRequest) => (sentOf(req).includes("You keep a main agent's session short") ? "SUMMARY-GM of the harbor." : (inner?.(req) ?? "{}")))(rig.host.quietReply);
     await played(rig, chatId, "I look out over the harbor.", "Gulls wheel over the water.");
     await played(rig, chatId, "I walk to the pier.", "The boards creak.");
     await played(rig, chatId, "I sit on a bench.", "The bench is warm.");
-    rig.body(await rig.send({ type: "lre.settings.set", patch: { agents: { main: { knowledge: "pov" } } } }));
     const session = await sessionOf(rig, chatId);
     expect(session.summary).toBe("SUMMARY-GM of the harbor.");
-    expect(session.summaryKnowledge).toBe("gm");
-    expect(session.reads.summary).toBe(false);
     expect(session.rollback).toBe("available");
   });
 });
@@ -292,7 +287,7 @@ describe("GM → Live", () => {
 });
 
 describe("the turns' transcripts", () => {
-  test("each turn's is listed under transcripts/, the GM's alone and read-only; agents read it only with the GM's knowledge; it follows the chat's path", async () => {
+  test("each turn's is listed under transcripts/, read-only; every agent lists and reads it, whatever knowledge it reads with; it follows the chat's path", async () => {
     const rig = new Rig({ shipped: true });
     const chatId = await liveChat(rig);
     models(rig);
@@ -301,7 +296,7 @@ describe("the turns' transcripts", () => {
     const listed = files.filter((f) => f.path.startsWith("transcripts/"));
     expect(listed.map((f) => f.path)).toEqual(["transcripts/reply-0002.md"]);
     const file = listed[0] as WorkspaceFileView;
-    expect(file).toMatchObject({ readers: "gm", pinned: false, learned: false, transcript: true, provenance: { turn: 2 } });
+    expect(file).toMatchObject({ pinned: false, learned: false, transcript: true, provenance: { turn: 2 } });
     const text = rig.body(await rig.send({ type: "lre.workspace", chatId, op: "read", path: file.path })).text as string;
     expect(file.size).toBe(text.length);
     for (const part of ["I look out over the harbor.", "Main agent", "Scene and lore", "workspace_write", NOTE, "REASONING for stage call 0", "Ended: done"]) expect(text).toContain(part);
@@ -309,14 +304,21 @@ describe("the turns' transcripts", () => {
     for (const op of [{ op: "write", path: file.path, text: "Mine now." }, { op: "pin", path: file.path, pinned: true }, { op: "delete", path: file.path }, { op: "move", from: file.path, to: "notes/kept.md" }, { op: "write", path: "transcripts/mine.md", text: "Mine." }]) {
       expect((await rig.send({ type: "lre.workspace", chatId, ...op })).type).toBe("lre.error");
     }
-    // Only the GM's knowledge reads it.
-    const env = (knowledge: "pov" | "everyone" | "gm") => ({ userId: rig.host.userId, chatId, knowledge });
-    expect((await listWorkspace(rig.rt, env("pov"))).some((f) => f.path === file.path)).toBe(false);
-    expect((await listWorkspace(rig.rt, env("everyone"))).some((f) => f.path === file.path)).toBe(false);
-    expect((await listWorkspace(rig.rt, env("gm"))).some((f) => f.path === file.path)).toBe(true);
-    expect(await readWorkspaceFile(rig.rt, env("pov"), file.path)).toBeNull();
-    expect(await readWorkspaceFile(rig.rt, env("everyone"), file.path)).toBeNull();
-    expect(await readWorkspaceFile(rig.rt, env("gm"), file.path)).toBe(text);
+    // Every agent reads it: the workspace lists it and reads it whole, and so do an agent's tools, whatever view they read with.
+    expect((await listWorkspace(rig.rt, { userId: rig.host.userId, chatId })).some((f) => f.path === file.path)).toBe(true);
+    expect(await readWorkspaceFile(rig.rt, { userId: rig.host.userId, chatId }, file.path)).toBe(text);
+    const tool = (name: string) => {
+      const def = WORKSPACE_TOOLS.find((t) => t.name === name);
+      if (!def) throw new Error(`no ${name}`);
+      return def;
+    };
+    for (const knowledge of ["everyone", "gm"] as const) {
+      const base = { userId: rig.host.userId, chatId, knowledge };
+      const env = { ...base, reader: outsideReader(rig.rt, base), writer: null, agent: { role: "scene", id: "agent_scene" }, signal: new AbortController().signal };
+      const listedBy = JSON.parse((await tool("workspace_list").run({ under: "transcripts/" }, env)).text) as { files: { path: string }[] };
+      expect(listedBy.files.map((f) => f.path)).toEqual([file.path]);
+      expect(JSON.parse((await tool("workspace_read").run({ path: file.path }, env)).text)).toEqual({ path: file.path, text });
+    }
     // A swipe of that reply has a transcript of its own, in the same place on the chain.
     const g = await rig.host.start(chatId, { type: "swipe" });
     expect(g.halted).toBeUndefined();
@@ -327,9 +329,9 @@ describe("the turns' transcripts", () => {
     expect(rig.rt.ledger.errors).toEqual([]);
   });
 
-  test("a transcript is never a pin, even listed in .pins.json for a role reading with the GM's knowledge", async () => {
+  test("a transcript is never a pin, even listed in .pins.json for the main agent", async () => {
     const rig = new Rig({ shipped: true });
-    const chatId = await liveChat(rig, "gm");
+    const chatId = await liveChat(rig);
     const asked = models(rig);
     await played(rig, chatId, "I look out over the harbor.", "Gulls wheel over the water.");
     rig.body(await rig.send({ type: "lre.workspace", chatId, op: "write", path: ".pins.json", text: JSON.stringify({ main: { files: ["transcripts/reply-0002.md"] } }) }));

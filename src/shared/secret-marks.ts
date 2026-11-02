@@ -425,6 +425,18 @@ export function secretMarkText(text: string, known: readonly string[], kept: rea
 }
 
 /**
+ * Whether `text` holds a secret's mark in `wording` (any form `secretMarkText` writes), so a line
+ * marked where it was written (a prose step's, DESIGN §7.1) isn't marked a second time. A form that
+ * is its text alone marks nothing, so it is never found.
+ */
+export function holdsSecretMark(text: string, wording: SecretMarkWording = SECRET_MARK_WORDING): boolean {
+  return [wording.known, wording.kept, wording.both].some((form) => {
+    const parts = form.split(/\{\{(?:text|known|kept)\}\}/);
+    return parts.join("").trim() !== "" && new RegExp(parts.map((p) => p.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("[\\s\\S]*?")).test(text);
+  });
+}
+
+/**
  * Every form a secret's mark takes in a wording, "…" standing for its text and names: each case
  * `secretMarkText` writes for the sections and the interceptor (holders or none, kept from some or
  * from everyone), as a section shows it. The narrator rules' text on secret marks

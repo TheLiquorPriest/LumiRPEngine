@@ -108,6 +108,8 @@ export class Harness {
     this.copyReads.clear();
     if (this.copy) this.copy.onRead = (chatId) => this.copyReads.set(chatId, (this.copyReads.get(chatId) ?? 0) + 1);
     const copy = this.copy;
+    // Every chat of the harness folds on one fold, as one user's do.
+    const fold = new LedgerFold(this.registry, { snapshotEvery: HARNESS_SNAPSHOT_EVERY });
     this.service = new LedgerService(
       copy ? copy.host : this.host,
       async (chatId) => {
@@ -129,7 +131,7 @@ export class Harness {
           resolveFix: (doc, state, entry) => resolveFix(this.registry, doc, state, entry, run.runSeed),
         };
       },
-      new LedgerFold(this.registry, { snapshotEvery: HARNESS_SNAPSHOT_EVERY }),
+      () => fold,
       (chatId) => {
         copy?.forget(chatId);
         this.copyReads.delete(chatId);
@@ -145,7 +147,7 @@ export class Harness {
       },
       afterPlan: async () => undefined,
       // No sections here: the engine run plans, and its reply starts again (DESIGN §5.1).
-      deliver: async () => ({ bookId: "", fills: new Map(), placed: "", wording: SECRET_MARK_WORDING, view: { ...NARRATOR_DEFAULTS } }),
+      deliver: async () => ({ bookId: "", fills: new Map(), parts: [], placed: "", wording: SECRET_MARK_WORDING, view: { ...NARRATOR_DEFAULTS } }),
       fill: async () => "filled" as const,
       clear: noop,
       vacate: noop,

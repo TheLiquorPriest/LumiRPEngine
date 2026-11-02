@@ -32,6 +32,18 @@ export type LiveEndState = "done" | "waiting" | "failed" | "cancelled" | "droppe
 /** Where in its turn a write was staged: before the plan, between the plan and the reply, or after the reply. */
 export type LivePhase = "pre" | "plan" | "post";
 
+/** One edit of the final review (DESIGN §4.6): the part of the narrator's prompt it changed, by id and name, what it did, the line it changed (none for an append) and the text it gave (none for a drop). */
+export interface LiveReviewEdit {
+  part: string;
+  label: string;
+  op: "replace" | "append" | "drop";
+  line?: string;
+  text?: string;
+}
+
+/** How the final review ended: it revised the prompt, left it as made, or failed, after which the prompt went unrevised or the turn stopped, as its settings say. */
+export type LiveReviewOutcome = "revised" | "unchanged" | "unrevised" | "stopped";
+
 /** One thing a turn's agents did, as the live view and the transcript tell it. */
 export type LiveEntryBody =
   /** The turn moved on: its plan is made (`plan`), or the reply is in and read (`post`). */
@@ -66,7 +78,9 @@ export type LiveEntryBody =
   /** The turn waits on the player at a gate; its resume carries it on. */
   | { kind: "wait" }
   /** The gate's resume took the turn up again. */
-  | { kind: "resume" };
+  | { kind: "resume" }
+  /** The final review ended: how, each edit it made to the narrator's prompt, and why it failed when it did. */
+  | { kind: "review"; outcome: LiveReviewOutcome; edits: LiveReviewEdit[]; reason?: string };
 
 /** An entry with its place in the run's order and when it happened (epoch ms). */
 export type LiveEntry = LiveEntryBody & { seq: number; at: number };
@@ -159,10 +173,10 @@ export interface LiveGroup {
   status: LiveStatus;
 }
 
-/** A mark between groups: the turn's phase moving on, what stopped it, its wait at a gate and its resume. */
+/** A mark between groups: the turn's phase moving on, what stopped it, its wait at a gate and its resume, and how its final review ended. */
 export interface LiveMark {
   type: "mark";
-  entry: Of<"phase"> | Of<"failed"> | Of<"wait"> | Of<"resume">;
+  entry: Of<"phase"> | Of<"failed"> | Of<"wait"> | Of<"resume"> | Of<"review">;
 }
 
 export type LiveItem = LiveGroup | LiveMark;
@@ -191,6 +205,7 @@ export function liveItems(view: LiveView): LiveItem[] {
       case "failed":
       case "wait":
       case "resume":
+      case "review":
         marks.push({ type: "mark", entry: e });
         break;
       case "run": {
@@ -290,6 +305,16 @@ export const END_WORDS: Readonly<Record<LiveEndState, string>> = { done: "done",
 /** A phase mark, in words. */
 export const PHASE_WORDS: Readonly<Record<LivePhase, string>> = { pre: "Before the plan", plan: "The plan is made", post: "The reply is in: its read" };
 
+/** How the final review ended, in words. */
+export const REVIEW_OUTCOME_WORDS: Readonly<Record<LiveReviewOutcome, string>> = { revised: "The final review revised the narrator's prompt", unchanged: "The final review left the narrator's prompt as the engine made it", unrevised: "The final review failed: the narrator got its prompt unrevised", stopped: "The final review failed: the turn stopped" };
+
+/** One edit of the final review in a line: its part, and what it did to which line. */
+export function reviewEditWords(e: LiveReviewEdit): string {
+  if (e.op === "append") return `${e.label}: added “${e.text ?? ""}”`;
+  if (e.op === "drop") return `${e.label}: took out “${e.line ?? ""}”`;
+  return `${e.label}: “${e.line ?? ""}” → “${e.text ?? ""}”`;
+}
+
 const seconds = (ms: number): string => `${(ms / 1000).toFixed(1)} s`;
 const count = (n: number): string => n.toLocaleString("en-US");
 
@@ -331,7 +356,8 @@ export function transcriptText(view: LiveView): string {
       if (e.kind === "phase") out.push(`--- ${PHASE_WORDS[e.phase]} (+${seconds(e.at - view.startedAt)}) ---`);
       else if (e.kind === "failed") out.push(`!!! The turn stopped at ${e.step}: ${e.reason}`);
       else if (e.kind === "wait") out.push(`--- Waiting on the player at a gate (+${seconds(e.at - view.startedAt)}) ---`);
-      else out.push(`--- Resumed (+${seconds(e.at - view.startedAt)}) ---`);
+      else if (e.kind === "resume") out.push(`--- Resumed (+${seconds(e.at - view.startedAt)}) ---`);
+      else out.push([`--- ${REVIEW_OUTCOME_WORDS[e.outcome]}${e.reason ? `: ${e.reason}` : ""} (+${seconds(e.at - view.startedAt)}) ---`, ...e.edits.map((edit) => `- ${reviewEditWords(edit)}`)].join("\n"));
       continue;
     }
     const spent = groupSpent(item);

@@ -5,18 +5,17 @@
 // agent turn's record carries. None is part of a turn: a swipe, a Re-run or an Undo never changes them,
 // and a Lumiverse Branch, which copies the chat's metadata, keeps them as they stood when the branch
 // was made, with no event handling. All hold blob hashes (a blob is a text in the user's store,
-// `agents/blobs.ts`): the learned index each file's path with the hash of its body, whose knowledge
-// may read it, its pin and who wrote it; the thread each message's hash in order, and each proposal's
-// by its id; the rollback the compaction's summary it undoes and the span it brings back. The sweep
-// keeps every blob any chat's metadata names (`agentRefs`). Every write takes its turn in the chat's
-// queue (`ChatMetaQueue`), with LRE's other writes of the chat's metadata.
+// `agents/blobs.ts`): the learned index each file's path with the hash of its body, its pin and who
+// wrote it (an earlier build's `readers` read and ignored); the thread each message's hash in order,
+// and each proposal's by its id; the rollback the compaction's summary it undoes and the span it
+// brings back. The sweep keeps every blob any chat's metadata names (`agentRefs`). Every write takes
+// its turn in the chat's queue (`ChatMetaQueue`), with LRE's other writes of the chat's metadata.
 
-import { type AgentKnowledge, isAgentKnowledge } from "../shared/agent-tools";
 import type { ChatId, UserId } from "../shared/ids";
 import type { JsonObject } from "../shared/json";
 import { isRecord, safeKey } from "../shared/json";
 import { LEDGER_NAMESPACE } from "../shared/ledger";
-import { isBlobHash, isLearnedPath, isWorkspacePath } from "../shared/stores";
+import { isBlobHash, isLearnedPath, isWorkspacePath, type KeptFile, keptFileJson, keptFileOf } from "../shared/stores";
 import { ChatMetaQueue } from "./chat-meta-queue";
 import type { HostPort } from "./host";
 
@@ -32,18 +31,10 @@ export interface SessionRollback {
   archived: string;
 }
 
-/** A file of the learned area: its body's hash, whose knowledge may read it, whether it is pinned, and the role that wrote it last. */
-export interface LearnedFile {
-  hash: string;
-  readers: AgentKnowledge;
-  pinned?: true;
-  role?: string;
-}
-
 /** What a chat's metadata holds for its agents (`lumi_rp_engine.agents`). */
 export interface AgentMeta {
   /** The learned area: each file by its path (under `learned/`). */
-  learned: Record<string, LearnedFile>;
+  learned: Record<string, KeptFile>;
   assistant: AssistantThread;
   /** A rollback asked for in GM → Workspace; null when none was. */
   rollback: SessionRollback | null;
@@ -52,21 +43,15 @@ export interface AgentMeta {
 /** Where a chat's agent metadata sits inside LRE's key of its metadata. */
 const AGENTS_KEY = "agents";
 
-function learnedFileOf(raw: unknown): LearnedFile | null {
-  if (!isRecord(raw) || !isBlobHash(raw.hash) || !isAgentKnowledge(raw.readers)) return null;
-  if ((raw.pinned !== undefined && raw.pinned !== true) || (raw.role !== undefined && typeof raw.role !== "string")) return null;
-  return { hash: raw.hash, readers: raw.readers, ...(raw.pinned === true ? { pinned: true as const } : {}), ...(typeof raw.role === "string" ? { role: raw.role } : {}) };
-}
-
 /** A chat's agent metadata as its bag holds it; an entry that doesn't read (another writer's, a damaged one) is left out. */
 export function agentMetaOf(meta: JsonObject): AgentMeta {
   const own = meta[LEDGER_NAMESPACE];
   const agents = isRecord(own) ? own[AGENTS_KEY] : undefined;
   const raw = isRecord(agents) ? agents.learned : undefined;
-  const learned: Record<string, LearnedFile> = {};
+  const learned: Record<string, KeptFile> = {};
   if (isRecord(raw)) {
     for (const [path, entry] of Object.entries(raw)) {
-      const file = isWorkspacePath(path) && isLearnedPath(path) ? learnedFileOf(entry) : null;
+      const file = isWorkspacePath(path) && isLearnedPath(path) ? keptFileOf(entry) : null;
       if (file) learned[path] = file;
     }
   }
@@ -85,10 +70,6 @@ export function agentRefs(meta: JsonObject): string[] {
   return [...Object.values(learned).map((f) => f.hash), ...assistant.messages, ...Object.values(assistant.proposals), ...(rollback ? [rollback.base, rollback.archived] : [])];
 }
 
-function learnedJson(file: LearnedFile): JsonObject {
-  return { hash: file.hash, readers: file.readers, ...(file.pinned ? { pinned: true } : {}), ...(file.role !== undefined ? { role: file.role } : {}) };
-}
-
 export class ChatAgentMeta {
   constructor(
     private readonly host: Pick<HostPort, "chats">,
@@ -105,10 +86,10 @@ export class ChatAgentMeta {
    * Changes the learned area: a file puts it at its path (its body a blob the caller stored and holds
    * until this lands), null takes it out.
    */
-  async setLearned(chatId: ChatId, userId: UserId, changes: Readonly<Record<string, LearnedFile | null>>): Promise<AgentMeta> {
+  async setLearned(chatId: ChatId, userId: UserId, changes: Readonly<Record<string, KeptFile | null>>): Promise<AgentMeta> {
     for (const [path, file] of Object.entries(changes)) {
       if (!isWorkspacePath(path) || !isLearnedPath(path)) throw new Error(`"${path}" isn't a path in the learned area`);
-      if (file !== null && learnedFileOf(file) === null) throw new Error(`the learned file at "${path}" isn't a stored file with its readers`);
+      if (file !== null && keptFileOf(file) === null) throw new Error(`the learned file at "${path}" isn't a stored file`);
     }
     return this.update(chatId, userId, (now) => {
       const learned = { ...now.learned };
@@ -156,7 +137,7 @@ export class ChatAgentMeta {
       const now = agentMetaOf(meta);
       const parts = change(now);
       const agents: JsonObject = isRecord(own[AGENTS_KEY]) ? { ...(own[AGENTS_KEY] as JsonObject) } : {};
-      if (parts.learned) agents.learned = Object.fromEntries(Object.entries(parts.learned).map(([path, file]) => [path, learnedJson(file)]));
+      if (parts.learned) agents.learned = Object.fromEntries(Object.entries(parts.learned).map(([path, file]) => [path, keptFileJson(file)]));
       if (parts.assistant) agents.assistant = { messages: parts.assistant.messages, proposals: parts.assistant.proposals };
       if (parts.rollback === null) delete agents.rollback;
       else if (parts.rollback) agents.rollback = { base: parts.rollback.base, archived: parts.rollback.archived };

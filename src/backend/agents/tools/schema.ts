@@ -4,26 +4,18 @@
 // no description of its own: `toolsFor` fills each from the tool's registry texts.
 //
 // A tool's `parameters` gets the world as the agent may name it (`schemaWorld`): its kinds and
-// actions as played, the packs' under the world's own. Under the player character's knowledge it
-// holds no places and no actions, whose ids could name what the player character can't know (a
-// secret room, a step of a secret the story hasn't come to), and only the fields anyone may see: such
-// an argument is then a free name, which the resolver checks against the view.
+// actions as played, the packs' under the world's own; every agent names the same world.
 
 import type { Registry } from "../../../engine/registry-impl";
-import { visibilityOf } from "../../../engine/visibility";
-import { type AgentKnowledge, TOOL_NOTE, toolArgTextId } from "../../../shared/agent-tools";
+import { TOOL_NOTE, toolArgTextId } from "../../../shared/agent-tools";
 import { hasOwn, isRecord, type JsonObject, type JsonValue } from "../../../shared/json";
 import { type KindDef, playedKinds, type WorldDoc } from "../../../shared/world";
 import type { ToolOutcome } from "../runtime";
 import type { ToolReadView } from "./read-view";
 
 /** The world as the agent may name it (see the header). */
-export function schemaWorld(world: WorldDoc, registry: Registry, knowledge: AgentKnowledge): WorldDoc {
-  const kinds = playedKinds(Object.fromEntries(registry.kinds), world.kinds);
-  if (knowledge !== "pov") return { ...world, kinds, actions: { ...Object.fromEntries(registry.actions), ...world.actions } };
-  const shown: Record<string, KindDef> = {};
-  for (const [id, kind] of Object.entries(kinds)) shown[id] = { ...kind, fields: Object.fromEntries(Object.entries(kind.fields).filter(([, def]) => visibilityOf(def.visibility) === "public")) };
-  return { ...world, kinds: shown, actions: {}, places: {} };
+export function schemaWorld(world: WorldDoc, registry: Registry): WorldDoc {
+  return { ...world, kinds: playedKinds(Object.fromEntries(registry.kinds), world.kinds), actions: { ...Object.fromEntries(registry.actions), ...world.actions } };
 }
 
 // ---------------------------------------------------------------- writing schemas
@@ -79,12 +71,12 @@ export function fieldEnum(world: WorldDoc, kind?: string): string[] {
   return [...out].sort();
 }
 
-/** The world's place ids, sorted; none under the player character's knowledge (`schemaWorld`). */
+/** The world's place ids, sorted (`schemaWorld`). */
 export function placeEnum(world: WorldDoc): string[] {
   return Object.keys(world.places).sort();
 }
 
-/** The world's action ids, the packs' included, sorted; none under the player character's knowledge (`schemaWorld`). */
+/** The world's action ids, the packs' included, sorted (`schemaWorld`). */
 export function actionEnum(world: WorldDoc): string[] {
   return Object.keys(world.actions).sort();
 }

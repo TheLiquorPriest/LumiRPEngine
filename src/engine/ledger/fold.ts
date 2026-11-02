@@ -3,7 +3,10 @@
 //    change at the head reuses everything before it; only every SNAPSHOT_EVERY-th step (a
 //    checkpoint) and each fold's last keep a state copy, the rest keep their outputs; of those,
 //    the TAILS_KEPT fold ends and CHECKPOINTS_KEPT checkpoints used last keep it, and steps that
-//    hold the same state (one that changed nothing, a stored snapshot) hold the same copy;
+//    hold the same state (one that changed nothing, a stored snapshot) hold the same copy; as many
+//    steps as the user's setting keeps (`kept.folds`), those used longest ago going first;
+//  - the keys alone (`keys`): what a fold would end on, read without folding, so what is made
+//    from a fold (a state view's parts) can be kept under them;
 //  - stored snapshots (cold folds): a fold with no cached prefix finds the furthest stored
 //    state on its chain by path hash, rebuilds the outputs before it without state (and caches
 //    them, so the next fold walks the cache past it), and folds on from there; it stores a
@@ -13,6 +16,7 @@
 //    path with nothing failing applies without re-validation (validation is a function of state).
 // L1 holds when this equals referenceFold for every input; L42 checks snapshot-started folds.
 
+import { KEPT_FOLDS_DEFAULT } from "../../shared/agent-settings";
 import { hashJson, hashParts } from "../../shared/hash";
 import type { EventRef, JournalNote, KeepLine, LedgerEvent, Marker, MarkerBody, PathHash, PostEntry, Rec } from "../../shared/ledger";
 import { ROOT_PATH } from "../../shared/ledger";
@@ -67,8 +71,22 @@ export interface LedgerFoldOptions {
   snapshotEvery?: number;
   /** Identifies the code that folded (a build id): snapshots from other code never apply. */
   fingerprint?: string;
-  /** Cached steps (most hold outputs only). */
-  capacity?: number;
+  /**
+   * The most steps the cache keeps, read as each is added (the user's Settings → Agents → Budgets,
+   * `kept.folds`): past it, the step used longest ago goes, and so do the step keys and re-convergence
+   * hashes used longest ago past as many.
+   */
+  keep?: () => number;
+}
+
+/** What a fold of a chain ends on, read without folding it (`LedgerFold.keys`). */
+export interface FoldKeys {
+  /** The key a fold of no message is: its revision's. */
+  root: string;
+  /** Each message's step key, in chain order: equal keys fold to equal outputs up to that message. */
+  steps: string[];
+  /** The key of the last step that may change the state (a user message never does, nor one with no record and no marker): equal keys end on equal states. */
+  state: string;
 }
 
 /** What a cached step keeps its state for: it is a checkpoint, or it ended a fold. */
@@ -76,7 +94,28 @@ type Kept = "checkpoint" | "tail";
 
 const KEPT_LIMIT: Readonly<Record<Kept, number>> = { checkpoint: CHECKPOINTS_KEPT, tail: TAILS_KEPT };
 
+/** A digest kept beside the object it was made from, with the text it was made from. */
+interface Digest {
+  text: string;
+  digest: string;
+}
+
+/** `owner`'s digest as kept beside it; made again (`make`) when its text changed, as the journal's own records change in place. */
+function digestOf(kept: WeakMap<object, Digest>, owner: object, text: string, make: () => string): string {
+  const known = kept.get(owner);
+  if (known?.text === text) return known.digest;
+  const digest = make();
+  kept.set(owner, { text, digest });
+  return digest;
+}
+
+/** Whether the chain is paused after `m`: from the message a pause sits on (a user message) on. */
+function pausedAfter(m: ChainMessage, paused: boolean, pausesHere: boolean): boolean {
+  return paused || (m.isUser && pausesHere);
+}
+
 export class LedgerFold {
+  /** Cached steps by key, the least recently used first. */
   private readonly cache = new Map<string, Step>();
   /**
    * Per record fold (what a step folds besides the state: the record's events, `markersApplied`,
@@ -84,20 +123,26 @@ export class LedgerFold {
    * it folded from on the record's own path with nothing failing, for re-convergence. Keyed by
    * record, not by path: the swipes of a message share their parent path, and one may hold what
    * fails there. What the step never reads (an accepted edit, the status) leaves it as it was.
+   * The least recently used first.
    */
   private readonly settled = new Map<string, string>();
   private readonly every: number;
   private readonly fingerprint: string;
-  private readonly capacity: number;
+  private readonly limit: () => number;
   /** The cache keys whose step keeps its state, by what for, least recently used first (`keep`). */
   private readonly kept: Record<Kept, Map<string, true>> = { checkpoint: new Map(), tail: new Map() };
   /**
-   * Digests of stored records, markers and record folds, keyed by their exact text (a warm fold's
-   * prefix walk then hashes only what changed; the lookup is the host's string hashing). Records and
-   * markers come from parsed JSON, so their JSON text determines their canonical digest. Message
-   * texts are `contentId`'s, which keeps one copy of each, the one the chat's messages hold now.
+   * Digests of stored records, of markers and of record folds, each kept beside the object it was
+   * made from with the JSON text it was made from (DESIGN §9.6): a warm fold's prefix walk hashes
+   * only what changed, and one changed in place, as the journal's own records are, is hashed again.
+   * Each goes with its object, so a record's earlier versions and a closed chat's records hold none.
+   * Message texts are `contentId`'s, which keeps one copy of each, the one the chat's messages hold now.
    */
-  private readonly digests = { record: new Map<string, string>(), markers: new Map<string, string>(), folds: new Map<string, string>(), key: new Map<string, string>() };
+  private records = new WeakMap<object, Digest>();
+  private markers = new WeakMap<object, Digest>();
+  private folds = new WeakMap<object, Digest>();
+  /** Step keys by what they hash (the key before and the message's parts), the least recently used first. */
+  private readonly stepKeys = new Map<string, string>();
 
   constructor(
     private readonly types: FoldTypes,
@@ -105,50 +150,95 @@ export class LedgerFold {
   ) {
     this.every = Math.max(1, options.snapshotEvery ?? 200);
     this.fingerprint = options.fingerprint ?? "dev";
-    this.capacity = options.capacity ?? 1 << 16;
+    this.limit = options.keep ?? (() => KEPT_FOLDS_DEFAULT);
   }
 
   private keyOf(prev: string, m: ChainMessage, input: FoldInput, paused: boolean, pausesHere: boolean): string {
     const rec = activeRecord(m, input.tombstones);
     // A tombstoned record folds as none, but adds a note: key the stored record, and whether it is live.
     const stored = m.ledger?.swipes[String(m.swipeId)];
-    const recKey = stored ? `${rec ? "r" : "t"}${this.digest(this.digests.record, JSON.stringify(stored), () => hashJson(stored))}` : "";
-    const markers = m.ledger ? this.digest(this.digests.markers, JSON.stringify(m.ledger.markers), () => hashJson(m.ledger?.markers)) : "";
+    const recKey = stored ? `${rec ? "r" : "t"}${digestOf(this.records, stored, JSON.stringify(stored), () => hashJson(stored))}` : "";
+    const markers = m.ledger ? digestOf(this.markers, m.ledger.markers, JSON.stringify(m.ledger.markers), () => hashJson(m.ledger?.markers)) : "";
     const content = contentId(activeText(m)).hash;
     const flags = `${m.isUser ? "u" : "a"}${paused ? "p" : ""}${pausesHere ? "P" : ""}`;
     // The memo key: every part but the message id has a fixed form without NUL, and the id comes last.
     const memo = `${prev}\u0000${flags}\u0000${m.swipeId}\u0000${content}\u0000${recKey}\u0000${markers}\u0000${m.id}`;
-    return this.digest(this.digests.key, memo, () => hashParts("lre.fold", prev, m.id, m.isUser ? "u" : "a", String(m.swipeId), content, recKey, markers, paused ? "p" : "", pausesHere ? "P" : ""));
+    return this.recent(this.stepKeys, memo, () => hashParts("lre.fold", prev, m.id, m.isUser ? "u" : "a", String(m.swipeId), content, recKey, markers, paused ? "p" : "", pausesHere ? "P" : ""));
   }
 
-  private digest(memo: Map<string, string>, text: string, compute: () => string): string {
-    const hit = memo.get(text);
-    if (hit !== undefined) return hit;
-    const d = compute();
-    if (memo.size >= this.capacity) {
-      const oldest = memo.keys().next();
-      if (!oldest.done) memo.delete(oldest.value);
+  /** `memo`'s value for `key`, now its newest; else `make()`'s, kept, the least recently used going past the limit. */
+  private recent(memo: Map<string, string>, key: string, make: () => string): string {
+    const hit = memo.get(key);
+    if (hit !== undefined) {
+      memo.delete(key);
+      memo.set(key, hit);
+      return hit;
     }
-    memo.set(text, d);
-    return d;
+    const made = make();
+    memo.set(key, made);
+    const limit = Math.max(1, this.limit());
+    for (const oldest of memo.keys()) {
+      if (memo.size <= limit) break;
+      memo.delete(oldest);
+    }
+    return made;
+  }
+
+  /**
+   * The keys a fold of `input` ends on, read without folding (DESIGN §9.6): the one it starts from,
+   * each message's, and the state's. Equal keys fold to equal outputs, as the cache's own do, so what
+   * is made from a fold can be kept under them; this costs a walk of the chain, hashing only what
+   * changed since it was last walked.
+   */
+  keys(input: FoldInput): FoldKeys {
+    const root = hashParts("lre.fold", input.revision);
+    const pausedAt = new Set(input.pauses.map((p) => p.messageId));
+    const steps: string[] = [];
+    let key = root;
+    let state = root;
+    let paused = false;
+    for (const m of input.chain) {
+      const here = pausedAt.has(m.id);
+      key = this.keyOf(key, m, input, paused, here);
+      steps.push(key);
+      paused = pausedAfter(m, paused, here);
+      if (!m.isUser && (m.ledger?.swipes[String(m.swipeId)] !== undefined || (m.ledger?.markers.length ?? 0) > 0)) state = key;
+    }
+    return { root, steps, state };
+  }
+
+  /** Lets go of every step and digest kept (the memory budget): each chat's next fold starts from its stored snapshots. How many steps went. */
+  trim(): number {
+    const gone = this.cache.size;
+    this.cache.clear();
+    this.kept.checkpoint.clear();
+    this.kept.tail.clear();
+    this.settled.clear();
+    this.stepKeys.clear();
+    this.records = new WeakMap();
+    this.markers = new WeakMap();
+    this.folds = new WeakMap();
+    return gone;
   }
 
   fold(input: FoldInput): FoldOutput {
     const startWorld = input.worlds(input.revision);
     if (!startWorld) throw new FoldError(`unknown revision ${input.revision}`);
     const n = input.chain.length;
-    const pausedAfter = new Set(input.pauses.map((p) => p.messageId));
+    const pausedAt = new Set(input.pauses.map((p) => p.messageId));
     const steps: Step[] = [];
     const keys: string[] = [];
     let key = hashParts("lre.fold", input.revision);
     let paused = false;
-    // 1. The cached prefix, and the last cached step that kept its state.
+    // 1. The cached prefix, and the last cached step that kept its state; each step found is the newest used.
     let base = -1;
     for (let i = 0; i < n; i++) {
       const m = input.chain[i] as ChainMessage;
-      const k = this.keyOf(key, m, input, paused, pausedAfter.has(m.id));
+      const k = this.keyOf(key, m, input, paused, pausedAt.has(m.id));
       const cached = this.cache.get(k);
       if (!cached) break;
+      this.cache.delete(k);
+      this.cache.set(k, cached);
       steps.push(cached);
       keys.push(k);
       key = k;
@@ -228,8 +318,8 @@ export class LedgerFold {
     // the first step that may change it runs, and the steps before that keep the same state.
     for (let i = base + 1; i < n; i++) {
       const m = input.chain[i] as ChainMessage;
-      key = this.keyOf(key, m, input, paused, pausedAfter.has(m.id));
-      const f = this.frame(input, m, parent, paused, pausedAfter.has(m.id));
+      key = this.keyOf(key, m, input, paused, pausedAt.has(m.id));
+      const f = this.frame(input, m, parent, paused, pausedAt.has(m.id));
       if (shared && !(m.isUser || f.result.fold === "paused" || (!f.rec && f.liveMarkers.length === 0))) {
         state = structuredClone(shared);
         shared = null;
@@ -277,13 +367,15 @@ export class LedgerFold {
    */
   private remember(key: string, step: Step, kept: Kept | null, shared: boolean): WorldState | null {
     const state = kept && step.state ? (shared ? step.state : structuredClone(step.state)) : null;
+    // The newest used: past the user's limit, the steps used longest ago go.
+    this.cache.delete(key);
     this.cache.set(key, { ...step, state });
     this.kept.checkpoint.delete(key);
     this.kept.tail.delete(key);
     if (kept && state) this.keep(kept, key);
-    while (this.cache.size > this.capacity) {
-      const oldest = this.cache.keys().next().value;
-      if (oldest === undefined) break;
+    const limit = Math.max(1, this.limit());
+    for (const oldest of this.cache.keys()) {
+      if (this.cache.size <= limit) break;
       this.cache.delete(oldest);
       this.kept.checkpoint.delete(oldest);
       this.kept.tail.delete(oldest);
@@ -337,7 +429,7 @@ export class LedgerFold {
       const view = f.result.fold === "view";
       // Re-convergence is keyed by what this step folds besides the state.
       const folds = recPath === null ? null : [rec.events, rec.markersApplied, rec.post, rec.undone, rec.keep ?? null, rec.path, m.ledger?.markers ?? []];
-      const settledKey = folds === null ? "" : this.digest(this.digests.folds, JSON.stringify(folds), () => hashJson(folds));
+      const settledKey = folds === null ? "" : digestOf(this.folds, rec, JSON.stringify(folds), () => hashJson(folds));
       const before = recPath !== null && !view && !this.settled.has(settledKey) ? hashJson(state) : null;
       let converged = false;
       if (view) {
@@ -492,7 +584,7 @@ export class LedgerFold {
         if ("marker" in item) marker(item.marker);
         else post(item.post);
       }
-      if (before !== null && violations.length === 0) this.digest(this.settled, settledKey, () => before);
+      if (before !== null && violations.length === 0) this.recent(this.settled, settledKey, () => before);
     }
     return { state, result: { ...f.result, clock: state.clock }, notes, keep, violations, resolved, paused: f.paused };
   }
@@ -503,7 +595,7 @@ export class LedgerFold {
     const keep: KeepLine[] = [];
     if (m.isUser) {
       const path = stepPath(parent, true, contentId(activeText(m)).hash, "", "");
-      return { result: { id: m.id, fold: "user", parentPath: parent, path }, notes, keep, rec: null, recPath: null, liveMarkers: [], livePost: [], paused: paused || pausesHere };
+      return { result: { id: m.id, fold: "user", parentPath: parent, path }, notes, keep, rec: null, recPath: null, liveMarkers: [], livePost: [], paused: pausedAfter(m, paused, pausesHere) };
     }
     const rec = activeRecord(m, input.tombstones);
     const stored = m.ledger?.swipes[String(m.swipeId)];
@@ -531,7 +623,7 @@ export class LedgerFold {
     const fold: MessageResult["fold"] = paused ? "paused" : !rec ? (tombstoned ? "tombstoned" : "plain") : recPath === null ? "plain" : view ? "view" : "on_path";
     const content = rec ? rec.swipeHash.hash : contentId(activeText(m)).hash;
     const path = stepPath(parent, false, content, recordHash(rec, livePost, parent), markersHash(liveMarkers));
-    return { result: { id: m.id, fold, parentPath: parent, path }, notes, keep, rec, recPath, liveMarkers, livePost, paused };
+    return { result: { id: m.id, fold, parentPath: parent, path }, notes, keep, rec, recPath, liveMarkers, livePost, paused: pausedAfter(m, paused, pausesHere) };
   }
 }
 

@@ -6,11 +6,18 @@
 //
 // A blob never changes. A put writes the text under its hash (again, when it is there already: the
 // same bytes), so a put is idempotent and a blob a sweep removed meanwhile comes back whole. What
-// points at a blob keeps it: a turn record, a learned index, a Diagnostics record, or work in flight
+// points at a blob keeps it: a turn record, a kept file's index, a Diagnostics record, or work in flight
 // that holds it (`hold`) until its record or index points there. The sweep (`sweep.ts`) removes the
 // rest once their retention has passed, and hears each put (`onPut`), so what is put while it looks
 // is kept.
+//
+// Memory: a text read once is kept, so the next read of it (a main session's segments on every turn
+// and every GM → Workspace session, the GM assistant's thread on every `get`, a file's body) takes no
+// round trip to the host. A blob never changes, so a kept text is never stale. Each user keeps as many
+// characters as their Settings → Agents → Budgets allow (`kept.texts`), the text read longest ago let
+// go first; a removal drops it, and the memory budget lets all of them go (`trim`).
 
+import { defaultAgentSettings } from "../../shared/agent-settings";
 import type { UserId } from "../../shared/ids";
 import type { JsonValue } from "../../shared/json";
 import { blobHash, isBlobHash } from "../../shared/stores";
@@ -35,12 +42,25 @@ export class BlobStore {
   /** Per user, per holder (a turn, a GM chat's write), the blobs it holds until something points at them. */
   private readonly holds = new Map<UserId, Map<string, Set<string>>>();
   /**
+   * Each stored blob's length in characters, by `user \0 hash`, once a put or a read learned it: the
+   * workspace lists every file's size from here, so a list reads no body it read before. A removal
+   * drops it.
+   */
+  private readonly lengths = new Map<string, number>();
+  /**
    * Hears every put before its text is written (the sweep: a blob put while it looks is kept, and a
    * blob put again for a new use starts its retention over).
    */
   onPut: ((userId: UserId, hash: string) => void) | null = null;
 
-  constructor(private readonly host: BlobHost) {}
+  /** Each user's texts read lately, by hash, the one read longest ago first, and their characters: within `keep(userId)`. */
+  private readonly texts = new Map<UserId, { byHash: Map<string, string>; chars: number }>();
+
+  constructor(
+    private readonly host: BlobHost,
+    /** The characters of read texts the user keeps (Settings → Agents → Budgets, `kept.texts`). */
+    private readonly keep: (userId: UserId) => number = () => defaultAgentSettings().kept.texts,
+  ) {}
 
   /**
    * Stores `text` and gives its hash. With `holder`, the blob is held for it (`hold`) from before it
@@ -51,6 +71,7 @@ export class BlobStore {
     if (holder !== undefined) this.hold(userId, holder, hash);
     this.onPut?.(userId, hash);
     const key = `${userId}\u0000${hash}`;
+    this.lengths.set(key, text.length);
     const under = this.writing.get(key);
     if (under) {
       await under;
@@ -82,12 +103,25 @@ export class BlobStore {
    */
   async get(userId: UserId, hash: string): Promise<string | null> {
     if (!isBlobHash(hash)) return null;
+    const kept = this.recall(userId, hash);
+    if (kept !== null) return kept;
     await this.writing.get(`${userId}\u0000${hash}`);
     const text = await this.host.storage.read(blobPath(hash), userId);
     if (text === null) return null;
-    if (blobHash(text) === hash) return text;
+    if (blobHash(text) === hash) {
+      this.lengths.set(`${userId}\u0000${hash}`, text.length);
+      this.remember(userId, hash, text);
+      return text;
+    }
     this.host.log("warn", `[LumiRPEngine] the stored blob ${hash} doesn't match its hash, so it is read as missing`, userId);
     return null;
+  }
+
+  /** A blob's length in characters, read once and then known; null when it isn't stored, as `get` reads it. */
+  async size(userId: UserId, hash: string): Promise<number | null> {
+    const known = this.lengths.get(`${userId}\u0000${hash}`);
+    if (known !== undefined) return known;
+    return (await this.get(userId, hash))?.length ?? null;
   }
 
   /** A blob read as JSON; null when it is missing or isn't JSON. */
@@ -115,13 +149,69 @@ export class BlobStore {
   /** Removes a blob: the sweep's alone, for one nothing references. A put of it meanwhile writes it again after. */
   async remove(userId: UserId, hash: string): Promise<void> {
     const key = `${userId}\u0000${hash}`;
+    this.forget(userId, hash);
     const removal = this.host.storage.remove(blobPath(hash), userId);
     this.removing.set(key, removal);
     try {
       await removal;
+      this.lengths.delete(key);
     } finally {
       if (this.removing.get(key) === removal) this.removing.delete(key);
     }
+  }
+
+  // ---------------------------------------------------------------- texts kept once read
+
+  /** A text kept for the user, now the one read last; null when none is. */
+  private recall(userId: UserId, hash: string): string | null {
+    const own = this.texts.get(userId);
+    const text = own?.byHash.get(hash);
+    if (own === undefined || text === undefined) return null;
+    own.byHash.delete(hash);
+    own.byHash.set(hash, text);
+    // The user may keep fewer now than when these were kept.
+    this.fit(own, this.keep(userId));
+    return text;
+  }
+
+  /** Keeps a text just read, letting go of those read longest ago past what the user keeps; one longer than all of it isn't kept. */
+  private remember(userId: UserId, hash: string, text: string): void {
+    const limit = this.keep(userId);
+    if (text.length > limit) return;
+    const own = this.texts.get(userId) ?? { byHash: new Map<string, string>(), chars: 0 };
+    this.texts.set(userId, own);
+    const before = own.byHash.get(hash);
+    if (before !== undefined) own.chars -= before.length;
+    own.byHash.delete(hash);
+    own.byHash.set(hash, text);
+    own.chars += text.length;
+    this.fit(own, limit);
+  }
+
+  /** Lets go of the texts read longest ago until what is kept fits `limit` characters. */
+  private fit(own: { byHash: Map<string, string>; chars: number }, limit: number): void {
+    for (const [old, kept] of own.byHash) {
+      if (own.chars <= limit) break;
+      own.byHash.delete(old);
+      own.chars -= kept.length;
+    }
+  }
+
+  private forget(userId: UserId, hash: string): void {
+    const own = this.texts.get(userId);
+    const text = own?.byHash.get(hash);
+    if (own === undefined || text === undefined) return;
+    own.byHash.delete(hash);
+    own.chars -= text.length;
+  }
+
+  /** The memory budget: lets go of every text kept and every length known, which the next reads learn again. How many texts went. */
+  trim(): number {
+    let gone = 0;
+    for (const own of this.texts.values()) gone += own.byHash.size;
+    this.texts.clear();
+    this.lengths.clear();
+    return gone;
   }
 
   // ---------------------------------------------------------------- work in flight

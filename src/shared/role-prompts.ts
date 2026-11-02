@@ -20,7 +20,7 @@ import { SKIP_PLAN_ANSWER, SKIP_PLAN_PROMPT } from "./skip-plan";
 import { DECISION_PROMPTS, PROSE_PROMPTS } from "./steps";
 
 /** The page every role's shared texts are on. */
-export const ROLES_PAGE: PromptPage = { id: "roles", label: "Every role", note: "What every role of an agent turn is told besides its own prompts: what its tools show it, how the preset's guidance for its steps leads in, and how its pinned files come." };
+export const ROLES_PAGE: PromptPage = { id: "roles", label: "Every role", note: "What every role of an agent turn is told besides its own prompts: the perspective it works from (its tools read everything, secrets marked, whatever it is), how the preset's guidance for its steps leads in, how its pinned files come, and the sections it starts with." };
 
 /** A role's own page. */
 export function rolePageId(role: RoleId): string {
@@ -45,6 +45,7 @@ export function roleContractId(role: RoleId, sub: string): string {
 /** The shared texts' ids. */
 export const ROLES_TEXT = {
   sees: { pov: "role.sees.pov", everyone: "role.sees.everyone", gm: "role.sees.gm", own: "role.sees.own" },
+  context: "role.context",
   guidance: "role.guidance",
   guidanceBlock: "role.guidance.block",
   pins: "role.pins",
@@ -71,8 +72,8 @@ const WORLD_VARS: readonly PromptVar[] = [
   { name: "pov", text: "the player character's name" },
 ];
 
-/** What a role's system prompt may name besides: what its tools show it, in the words of the shared page. */
-const SYSTEM_VARS: readonly PromptVar[] = [...WORLD_VARS, { name: "knowledge", text: "what the role's tools show it: the shared page's text for the knowledge it reads with (Settings → Agents → Roles → Knowledge)" }];
+/** What a role's system prompt may name besides: what its tools show it and the perspective it works from, in the words of the shared page. */
+const SYSTEM_VARS: readonly PromptVar[] = [...WORLD_VARS, { name: "knowledge", text: "what the role's tools show it (everything, secrets marked) and the perspective it works from: the Every role page's text for its perspective (Settings → Agents → Context)" }];
 
 /** What a minds step's prompt is filled with, as Settings → Minds names them. */
 const MIND_VARS: readonly PromptVar[] = [
@@ -137,16 +138,19 @@ function howToWork(role: string, extra: readonly string[] = []): string {
   ].join("\n");
 }
 
-const SEES_NOTE = "Fills {{knowledge}} in a role's system prompt while it reads with ";
+const SEES_NOTE = "Fills {{knowledge}} in a role's system prompt while Settings → Agents → Context has it work from ";
+/** What every perspective's text starts with: what its tools show it, the same whatever the perspective. */
+const SEES = "everything in the world, each secret marked with whom it is known to and whom it is kept from";
 
 const SHARED_PROMPTS: readonly PromptDef[] = [
-  { id: ROLES_TEXT.sees.pov, page: ROLES_PAGE.id, group: "What a role's tools show it", label: "Your character's knowledge", note: `${SEES_NOTE}your character's knowledge.`, text: "only what {{pov}}, the player character, knows: nobody and nothing they haven't met, seen or been told of", vars: WORLD_VARS },
-  { id: ROLES_TEXT.sees.everyone, page: ROLES_PAGE.id, group: "What a role's tools show it", label: "Everyone's knowledge, secrets marked", note: `${SEES_NOTE}what everyone in the world knows.`, text: "what everyone in the world knows, each secret marked with whom it is known to and whom it is kept from", vars: WORLD_VARS },
-  { id: ROLES_TEXT.sees.gm, page: ROLES_PAGE.id, group: "What a role's tools show it", label: "The GM's knowledge", note: `${SEES_NOTE}the game master's knowledge.`, text: "everything, as the game master sees it: every secret, plan and hidden person, place and thing", vars: WORLD_VARS },
-  { id: ROLES_TEXT.sees.own, page: ROLES_PAGE.id, group: "What a role's tools show it", label: "A character's own knowledge", note: `${SEES_NOTE}one character's own knowledge, as a mind does: it has no tools, and its task holds what it reads.`, text: "nothing beyond the task: it holds only what the character it is about knows, and that is all you work from", vars: WORLD_VARS },
+  { id: ROLES_TEXT.sees.pov, page: ROLES_PAGE.id, group: "A role's perspective", label: "Your character's perspective", note: `${SEES_NOTE}your character's perspective. A hint only: its tools read everything, secrets marked.`, text: `${SEES}. Work from what {{pov}}, the player character, knows: treat anyone or anything they haven't met, seen or been told of, and every secret not known to them, as unknown to them`, vars: WORLD_VARS },
+  { id: ROLES_TEXT.sees.everyone, page: ROLES_PAGE.id, group: "A role's perspective", label: "Everyone's perspective, secrets marked", note: `${SEES_NOTE}what everyone in the world knows. A hint only: its tools read everything, secrets marked.`, text: `${SEES}. Work from what everyone in the world knows: a secret is for those it is known to, and never reaches the player or anyone it is kept from unless the story reveals it`, vars: WORLD_VARS },
+  { id: ROLES_TEXT.sees.gm, page: ROLES_PAGE.id, group: "A role's perspective", label: "The GM's perspective", note: `${SEES_NOTE}the game master's perspective. A hint only: its tools read everything, secrets marked.`, text: `${SEES}. Work as the game master, who knows it all: a secret still reaches the player only when the story reveals it`, vars: WORLD_VARS },
+  { id: ROLES_TEXT.sees.own, page: ROLES_PAGE.id, group: "A role's perspective", label: "A character's own perspective", note: `${SEES_NOTE}the perspective of the character its task is about, as a mind does. A hint only: its tools read everything, secrets marked.`, text: `${SEES}. Work from what the character the task is about knows: the task gives it, and nothing else, of theirs or anyone's, is theirs to act on`, vars: WORLD_VARS },
+  { id: ROLES_TEXT.context, page: ROLES_PAGE.id, group: "What a role starts with", label: "The sections it starts with", note: "Frames the narrator's sections Settings → Agents → Context starts a role with, after its task, as the narrator would get them now.", text: "What the narrator would be told now, in the engine's sections (a secret's mark says whom it is known to and kept from):\n{{sections}}", vars: [...WORLD_VARS, { name: "sections", text: "each section the role starts with, under its name", required: true }] },
   { id: ROLES_TEXT.guidance, page: ROLES_PAGE.id, group: "The preset's guidance", label: "Before the guidance", note: "Leads the blocks of your preset's guidance for the steps a role stands in for (RPEngine · <step>), after its instructions, when the preset has any.", text: "Style and rules from the player's preset, each under the step it is for. Follow them where they fit the instructions above; they never change what you answer or its form:\n{{blocks}}", vars: [{ name: "blocks", text: "the preset's blocks for the role's steps, each under its step's name", required: true }] },
   { id: ROLES_TEXT.guidanceBlock, page: ROLES_PAGE.id, group: "The preset's guidance", label: "One step's guidance", note: "One block of the preset's guidance, under the name of the step it is for.", text: "{{step}}:\n{{text}}", vars: [{ name: "step", text: "the step's name, as Settings → Steps and connections names it", required: true }, { name: "text", text: "the block's text", required: true }] },
-  { id: ROLES_TEXT.pins, page: ROLES_PAGE.id, group: "Pinned files", label: "Pinned files", note: "Frames a role's pinned files after its instructions and guidance: those .pins.json lists for the role, then those pinned in GM → Workspace, read with its knowledge within its pins budget. A role reading with a character's own knowledge gets none.", text: "Pinned files for your work (at most {{tokens}} {{unit}} of them; a file past that comes as its headings):\n{{files}}", vars: [{ name: "tokens", text: "the role's pins budget: the manifest's for it, else Settings → Agents → Main agent's Pinned files, per role" }, { name: "unit", text: '"token" for 1, else "tokens"' }, { name: "files", text: "each file, as below", required: true }] },
+  { id: ROLES_TEXT.pins, page: ROLES_PAGE.id, group: "Pinned files", label: "Pinned files", note: "Frames a role's pinned files after its instructions and guidance: those Settings → Agents → Context pins for it, then those .pins.json lists for the role, then those pinned in GM → Workspace, within its pins budget.", text: "Pinned files for your work (at most {{tokens}} {{unit}} of them; a file past that comes as its headings):\n{{files}}", vars: [{ name: "tokens", text: "the role's pins budget: the manifest's for it, else Settings → Agents → Main agent's Pinned files, per role" }, { name: "unit", text: '"token" for 1, else "tokens"' }, { name: "files", text: "each file, as below", required: true }] },
   { id: ROLES_TEXT.pinsFile, page: ROLES_PAGE.id, group: "Pinned files", label: "A pinned file", note: "One of a role's pinned files, whole.", text: "[{{path}}]\n{{text}}", vars: [{ name: "path", text: "the file's path", required: true }, { name: "text", text: "the file's text", required: true }] },
   { id: ROLES_TEXT.pinsHeadings, page: ROLES_PAGE.id, group: "Pinned files", label: "A file past the budget", note: "One of a role's pinned files past its pins budget: its headings only.", text: "[{{path}}: its headings]\n{{headings}}", vars: [{ name: "path", text: "the file's path", required: true }, { name: "headings", text: "the file's heading lines, or the text for none" }] },
   { id: ROLES_TEXT.pinsNoHeadings, page: ROLES_PAGE.id, group: "Pinned files", label: "No headings", note: "Stands in for the headings of a file past the pins budget that has none.", text: "(no headings)", vars: [] },

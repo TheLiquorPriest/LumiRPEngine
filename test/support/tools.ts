@@ -1,5 +1,5 @@
 // The agent tools against a Port Alder chat (INC1-SPEC R3a): a chat on the shipped starter world with
-// whatever a test adds to its world first, the env an agent's tools run with under each knowledge
+// whatever a test adds to its world first, the env an agent's tools run with under each tool view
 // setting, and a call through `toolsFor`, as an agent makes one: the tool it is given, the arguments
 // it writes and the text it gets back. Starter-world names only.
 
@@ -7,7 +7,7 @@ import type { AgentTool, ToolOutcome } from "../../src/backend/agents/runtime";
 import { outsideReader } from "../../src/backend/agents/tools/read-view";
 import { type ToolEnv, toolsFor } from "../../src/backend/agents/tools/registry";
 import type { HostBookEntryInput } from "../../src/backend/host";
-import type { AgentKnowledge, ToolTier } from "../../src/shared/agent-tools";
+import type { ToolTier, ToolView } from "../../src/shared/agent-tools";
 import type { JsonObject } from "../../src/shared/json";
 import { LEDGER_NAMESPACE, type LedgerEvent } from "../../src/shared/ledger";
 import type { PromptTexts } from "../../src/shared/prompts";
@@ -17,7 +17,7 @@ import { Rig } from "./rig";
 export const POV = "pov";
 /** Where Jordan wakes. */
 export const HOME = "harbor_street_114";
-export const KNOWLEDGE: readonly AgentKnowledge[] = ["pov", "everyone", "gm"];
+export const KNOWLEDGE: readonly ToolView[] = ["everyone", "gm"];
 
 /** What a test adds to Port Alder's world before its chat starts: whole items of a collection by id (entities, places, lore, tracks, …). */
 export interface AlderSetup {
@@ -40,27 +40,27 @@ export async function alderChat(setup: AlderSetup = {}): Promise<{ rig: Rig; cha
 }
 
 /** The env an agent's tools run with in `chatId` under `knowledge`, reading the chat's head; no writer unless given. */
-export function toolEnv(rig: Rig, chatId: string, knowledge: AgentKnowledge, writer: ToolEnv["writer"] = null): ToolEnv {
+export function toolEnv(rig: Rig, chatId: string, knowledge: ToolView, writer: ToolEnv["writer"] = null): ToolEnv {
   const base = { userId: rig.host.userId, chatId, knowledge };
   return { ...base, reader: outsideReader(rig.rt, base), writer, agent: { role: "assistant", id: "agent_test" }, signal: new AbortController().signal };
 }
 
 /** The tools an agent would be given in `chatId` under `knowledge`: the read tier unless told otherwise, in the user's texts as `texts` has them. */
-export async function agentTools(rig: Rig, chatId: string, knowledge: AgentKnowledge, options: { tiers?: readonly ToolTier[]; texts?: PromptTexts } = {}): Promise<AgentTool[]> {
+export async function agentTools(rig: Rig, chatId: string, knowledge: ToolView, options: { tiers?: readonly ToolTier[]; texts?: PromptTexts } = {}): Promise<AgentTool[]> {
   const env = toolEnv(rig, chatId, knowledge);
   const { world } = await env.reader.view();
   return toolsFor({ world, tiers: options.tiers ?? ["read"], texts: options.texts ?? {}, env });
 }
 
 /** One call of the tool `name`, as the runtime makes it. */
-export async function callTool(rig: Rig, chatId: string, knowledge: AgentKnowledge, name: string, args: JsonObject = {}): Promise<ToolOutcome> {
+export async function callTool(rig: Rig, chatId: string, knowledge: ToolView, name: string, args: JsonObject = {}): Promise<ToolOutcome> {
   const tool = (await agentTools(rig, chatId, knowledge)).find((t) => t.name === name);
   if (!tool) throw new Error(`no tool ${name}`);
   return tool.run(args, { signal: new AbortController().signal, agentId: "agent_test", role: "assistant", callId: `call_${name}` });
 }
 
 /** A call's answer, read back from its JSON; a refusal fails the test with its text. */
-export async function answerOf<T = Record<string, unknown>>(rig: Rig, chatId: string, knowledge: AgentKnowledge, name: string, args: JsonObject = {}): Promise<T> {
+export async function answerOf<T = Record<string, unknown>>(rig: Rig, chatId: string, knowledge: ToolView, name: string, args: JsonObject = {}): Promise<T> {
   const out = await callTool(rig, chatId, knowledge, name, args);
   if (out.error) throw new Error(`${name} refused: ${out.text}`);
   return JSON.parse(out.text) as T;

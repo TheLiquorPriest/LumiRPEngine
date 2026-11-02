@@ -25,7 +25,7 @@
 //   asks first goes to the turn's review card (`review.ts`); at a gate the turn waits on the card.
 // - A wait (Ask first, a suggested check, the intent and outline gates, the review gate) keeps the
 //   run whole for its resume: what its roles staged, committed and set aside for the card, the
-//   learned-area changes it made, and its calls still under way (a mind's among them). The resume, a
+//   changes it made to kept files, and its calls still under way (a mind's among them). The resume, a
 //   run of the same turn, takes it (`begin`), so no agent is called again; what it committed after
 //   its plan lands again in the plan the resume replays (`recommit`). With the outline gate on, the
 //   review gate waits after it.
@@ -42,14 +42,15 @@
 // with its task for it (`TurnAgentCtx.brief`) and never by its `onFail`. Its failure stops the turn.
 
 import { ROLE_LABEL, type RoleId, type RoleSettings } from "../../shared/agent-roles";
-import type { AgentKnowledge } from "../../shared/agent-tools";
 import type { DiagPhase } from "../../shared/diagnostics";
 import type { ChatId, MessageId, UserId } from "../../shared/ids";
 import { isRecord, type JsonObject, type JsonValue } from "../../shared/json";
 import { MAIN_TEXT, type MainRequestKind } from "../../shared/main-agent-prompts";
 import type { GenerationKind, LedgerEvent, PackEvent, Rec, RecAgent, RecSession } from "../../shared/ledger";
 import type { ExtractionLearning, UserSettings } from "../../shared/settings";
-import { firedTimeout } from "../../shared/timeouts";
+import type { KeptFile } from "../../shared/stores";
+import { firedTimeout, within } from "../../shared/timeouts";
+import { type FinalEdit, FINAL_REVIEW_STEP, type PromptPart, ReviewDraft } from "../../shared/final-review";
 import type { ChainMessage } from "../../engine/ledger/chain";
 import type { LedgerCore } from "../../engine/ledger/journal";
 import { activeRecord, ownMessage } from "../../engine/ledger/path";
@@ -58,7 +59,6 @@ import type { StepPurpose, WorldDoc } from "../../shared/world";
 import { outLines, outScene } from "../../engine/outputs";
 import { Working } from "../../engine/working";
 import type { StoredChip } from "../chips";
-import type { LearnedFile } from "../chat-agent-meta";
 import type { DiagAt } from "../diagnostics";
 import { EngineFailure, type RunOutcome, type TurnContext } from "../ledger-io";
 import type { Judgement } from "../../engine/adjudication";
@@ -71,18 +71,19 @@ import type { GenerateAs } from "../../shared/protocol";
 import type { LiveEndState, LiveView } from "../../shared/live";
 import { counted } from "../../shared/words";
 import { isMainMessage, MAIN_BY, rolledBack } from "./compaction";
+import { liveEdits } from "./final-review";
 import { type MainHost, MainTurn } from "./main-agent";
 import { agentRoles } from "./roles/index";
 import type { Review, StoredReviewItem } from "./review";
 import { AgentTurn } from "./runtime";
 import type { LiveRun } from "./live";
-import type { ToolReader } from "./tools/read-view";
 import type { LoreLoads } from "./tools/registry";
-import { contextOf, type ToolWriter, withLearned } from "./tools/writer";
-import type { ChatHead, WorkspaceAt } from "./tools/workspace";
+import { contextOf, landKept, withKept } from "./tools/writer";
+import { type ChatHead, keptFiles, type WorkspaceAt } from "./tools/workspace";
 import { recordSessionOf, segmentOf, sessionAt, type SessionMessage } from "./sessions";
-import type { ChoicesTask, ChooseTask, DirectorProse, EffectsTask, ExtractTask, InterpretOutcome, InterpretTask, JudgeTask, KnowledgeTask, MemoryTask, MindsTask, ProseTask, PuzzleTask, RoleResult, RoleRun, SceneOut, SceneTask, SkipPlanTask, SkipTask, TurnAgentCtx, TurnBrief, TurnRoles } from "./turn-ctx";
+import type { ChoicesTask, ChooseTask, DirectorProse, EffectsTask, ExtractTask, InterpretOutcome, InterpretTask, JudgeTask, KnowledgeTask, MemoryTask, MindsTask, ProseTask, PuzzleTask, RoleResult, RoleRun, SceneOut, SceneTask, SkipPlanTask, SkipTask, TurnAgentCtx, TurnRoles } from "./turn-ctx";
 import { type CommitCtx, commitOrder, commitStaged, opTier, type StagedOp, type StagePhase, stagedWorkspace, TurnDraft, turnReader, turnWriter } from "./turn-writer";
+import { roleSections } from "./context";
 import { recordCommit, recordYield, runYield } from "./yields";
 import type { ExtractRead } from "../steps";
 import { renderPrompt } from "../prompts";
@@ -146,6 +147,13 @@ const CLASSIC_PURPOSES: Partial<Record<MainRequestKind, readonly StepPurpose[]>>
   memory: ["memory", "consolidate"],
 };
 
+/**
+ * What the final review left (DESIGN §4.6): the prompt's parts as it left them, with the edits it
+ * made; or why it failed, with what to do about it where a limit said, and whether its settings
+ * stopped the turn on it.
+ */
+export type FinalReviewOutcome = { reviewed: true; parts: PromptPart[]; edits: FinalEdit[] } | { reviewed: false; reason: string; fix?: string; stopped: boolean };
+
 /** One agent turn while it runs: from its pre phase through its reply's commit. */
 interface AgentRun {
   chatId: ChatId;
@@ -157,10 +165,10 @@ interface AgentRun {
   learning: ExtractionLearning;
   /** The connection a change's learned mode counts on where its role names none: the user's default, the key the review card counts its outcomes under. */
   active: string;
-  /** The chat's learned area as the turn read it, which its roles' learned-area changes are checked on. */
-  learned: Readonly<Record<string, LearnedFile>>;
-  /** The learned-area changes its commits made, by path (null: taken out), which land in the chat's metadata when it closes. */
-  landing: Record<string, LearnedFile | null>;
+  /** The files kept apart from the story (the chat's learned area, the global workspace) as the turn read them, which its roles' changes to them are checked on. */
+  kept: Readonly<Record<string, KeptFile>>;
+  /** The kept files' changes its commits made, by path (null: taken out), which land in their stores when it closes. */
+  landing: Record<string, KeptFile | null>;
   turn: AgentTurn;
   draft: TurnDraft;
   /** Stops every role of the turn: Cancel, or the turn's run ending. */
@@ -304,12 +312,12 @@ export class Orchestrator {
 
   /**
    * The read of a reply whose generation has no run (a Re-narrate, which makes no call before its
-   * reply, and a Continue), on a chat whose Engine is on agents: the read on the chat's roles, in a
-   * run under the generation's id, from the post phase on the read (`world`, `state`), which the
-   * chat's Cancel stops as it stops a turn's read. A Re-narrate is a turn: with the pipeline set to
-   * a main agent, its main agent works its read and memory, from the chain before its reply. A
-   * Continue's is the read alone, as a Retry read's is. False on any other chat, whose read is
-   * classic's.
+   * reply, and a Continue with no final review, `beginContinue`), on a chat whose Engine is on
+   * agents: the read on the chat's roles, in a run under the generation's id, from the post phase on
+   * the read (`world`, `state`), which the chat's Cancel stops as it stops a turn's read. A
+   * Re-narrate is a turn: with the pipeline set to a main agent, its main agent works its read and
+   * memory, from the chain before its reply. A Continue's is the read alone, as a Retry read's is.
+   * False on any other chat, whose read is classic's.
    */
   async beginReply(input: { chatId: ChatId; userId: UserId; generationId: string; kind: GenerationKind; core: LedgerCore; observed: ChainMessage[]; messageId: MessageId; world: WorldDoc; state: WorldState }): Promise<boolean> {
     this.drop(input.generationId);
@@ -326,6 +334,27 @@ export class Orchestrator {
   }
 
   /**
+   * A Continue's final review (DESIGN §4.6): a Continue has no run before its reply, so on a chat
+   * whose Engine is on agents, with the review on, one starts now under the turn's id, between the
+   * plan and the reply, on the chat's head, for the main agent to review the Continue's own sections
+   * alone, as the fixed pipeline's review is worked; the generation that takes the turn takes the run
+   * (`adopted`), and its read is the run's (`isAgent`). False when none starts.
+   */
+  async beginContinue(input: { chatId: ChatId; userId: UserId; generationId: string; core: LedgerCore; observed: ChainMessage[] }): Promise<boolean> {
+    if (this.runs.has(input.generationId)) return true;
+    if ((await this.rt.chatKnowledge.engine(input.chatId, input.userId)) !== "agents") return false;
+    if (!(await this.rt.settings.get(input.userId)).agents.finalReview.on) return false;
+    const run = await this.rt.runOf(input.chatId, input.userId);
+    const at = input.core.renderState(input.observed);
+    const head = run && at ? { run, core: input.core, observed: input.observed, world: at.world, state: at.state } : null;
+    // Its words are the continued reply's turn's own, as its read's are (`beginReply`).
+    const reply = input.observed.findLastIndex((m) => !m.isUser);
+    const said = ownMessage(reply < 0 ? input.observed : input.observed.slice(0, reply));
+    await this.newRun({ chatId: input.chatId, userId: input.userId, key: input.generationId, phase: "plan", head, text: said ? (said.swipes[said.swipeId] ?? "") : "", parentPath: "", retry: false, kind: "reply", mainable: false, cancelRead: (why) => void this.rt.ledger.cancel(input.chatId, input.userId, why) });
+    return true;
+  }
+
+  /**
    * A run under `key` on the chat's roles, from `phase` on `head`, with the user's settings as they
    * stand, the turn's agent budget and nothing yet staged; its Diagnostics place an agent turn's, which
    * only its fatal records stop; and its live view, of `kind`, worked by a main agent where the
@@ -335,7 +364,7 @@ export class Orchestrator {
     const settings = await this.rt.settings.get(input.userId);
     const learning = await this.rt.settings.learningOf(input.userId);
     const active = await this.rt.activeConnectionId(input.userId);
-    const { learned } = await this.rt.chatAgents.get(input.chatId, input.userId);
+    const kept = await keptFiles(this.rt, input.chatId, input.userId);
     const at: DiagAt = { chatId: input.chatId, userId: input.userId, turn: input.key };
     this.rt.diag.agentTurn(at);
     // A run whose turn went stale with no end heard (`dropIfStale`) is let go with the user's oldest,
@@ -351,7 +380,7 @@ export class Orchestrator {
       settings,
       learning,
       active,
-      learned,
+      kept,
       landing: {},
       // Each agent at work shows as a row of the drawer's live trace: its label and tokens, nothing it reads or calls. GM → Live hears everything it does.
       turn: new AgentTurn(settings.agents.turn, undefined, (agent, spent) => this.rt.diag.agentAtWork(input.chatId, input.userId, agent, spent), live),
@@ -447,7 +476,7 @@ export class Orchestrator {
     const s = this.runs.get(generationId);
     if (!s) return;
     const gated = await this.review.gated(s.chatId, s.userId, text);
-    s.approved = (gated?.approved ?? []).flatMap((item, i): StagedOp[] => (item.op && item.knowledge ? [{ seq: -1000 + i, phase: "pre", role: roleOf(item.role), agentId: item.agentId ?? item.role, key: item.key, op: item.op, changeType: item.changeType as StagedOp["changeType"], mode: "auto", tier: opTier(item.op), knowledge: item.knowledge, connectionId: item.connection ?? null, lines: item.lines, events: [], approved: true }] : []));
+    s.approved = (gated?.approved ?? []).flatMap((item, i): StagedOp[] => (item.op ? [{ seq: -1000 + i, phase: "pre", role: roleOf(item.role), agentId: item.agentId ?? item.role, key: item.key, op: item.op, changeType: item.changeType as StagedOp["changeType"], mode: "auto", tier: opTier(item.op), connectionId: item.connection ?? null, lines: item.lines, events: [], approved: true }] : []));
   }
 
   /**
@@ -510,11 +539,54 @@ export class Orchestrator {
     if (lines.brief) events.push(outLines("brief", [fit(lines.brief)]));
     // What its agents loaded joins the scene's lore (DESIGN §4.6): delivery tells each entry in the Scene section as the narrator may read it.
     const lore = [...new Set([...(s.scene?.lore ?? []), ...s.loads])];
-    if (s.scene || lore.length > 0) events.push(outScene(lore, (s.scene?.notes ?? []).map(fit), s.scene?.knowledge ?? "pov"));
+    if (s.scene || lore.length > 0) events.push(outScene(lore, (s.scene?.notes ?? []).map(fit)));
     // An agent turn records the outcome even when it has none, so its narrator is told the turn's own lines and never another's.
     if (events.length === 0) events.push(outLines("outcome", []));
     if (cut > 0) this.rt.host.log("info", `[LumiRPEngine] turn ${s.generationId.slice(0, 8)}: ${counted(cut, "narrator line", "narrator lines")} cut to ${counted(limit, "character", "characters")} (Settings → Agents → Recording)`, s.userId);
     return events;
+  }
+
+  // ---------------------------------------------------------------- the final review
+
+  /** Whether the turn gets a final review: it is an agent turn, and the review was on as the turn read its settings. */
+  reviews(generationId: string): boolean {
+    return this.runs.get(generationId)?.settings.agents.finalReview.on === true;
+  }
+
+  /**
+   * The final review (DESIGN §4.6), once the turn's sections are made and before its reply's guard
+   * writes them: the turn's main agent reviews the narrator's prompt (`parts`) and may revise it a
+   * line at a time. On the fixed pipeline the main agent works it alone, on its own settings, from
+   * the chain before the turn (`MainStart.alone`). Settings → Timeouts → Final review bounds it,
+   * with its own budget. A review that fails leaves the prompt as made, and GM → Live says why: the
+   * turn goes on with it, or, under the review's `stop`, stops as a role under `stop` does (its
+   * fatal record). Null when none runs (a classic turn, the review off) or the turn was cancelled
+   * meanwhile, which ends its run itself.
+   */
+  async finalReview(input: { generationId: string; core: LedgerCore; observed: ChainMessage[]; parts: readonly PromptPart[]; signal: AbortSignal }): Promise<FinalReviewOutcome | null> {
+    const s = this.runs.get(input.generationId);
+    if (!s || !this.reviews(input.generationId)) return null;
+    const settings = s.settings.agents.finalReview;
+    const draft = new ReviewDraft(input.parts, s.settings.agents.recording.outputChars);
+    const signal = within(AbortSignal.any([input.signal, s.stop.signal]), "finalReviewMs", s.settings.timeouts.finalReviewMs);
+    // Alone, its digest reads the chain before the turn: up to the reply a swipe or Regenerate replaces.
+    const target = input.core.journal.pending[input.generationId]?.messageId;
+    const index = target ? input.observed.findIndex((m) => m.id === target) : -1;
+    const reviewer = s.main ?? new MainTurn(this.mainHost(s), { text: s.text, core: input.core, observed: index < 0 ? input.observed : input.observed.slice(0, index), alone: true });
+    const got = await reviewer.review(draft, signal);
+    if (got.ok) {
+      s.live.add({ kind: "review", outcome: draft.edits.length > 0 ? "revised" : "unchanged", edits: liveEdits(draft) });
+      return { reviewed: true, parts: draft.parts.map((p) => ({ ...p, lines: [...p.lines] })), edits: [...draft.edits] };
+    }
+    const fired = firedTimeout(signal);
+    if (signal.aborted && !fired) return null;
+    const stopped = settings.onFail === "stop";
+    s.live.add({ kind: "review", outcome: stopped ? "stopped" : "unrevised", edits: [], reason: got.reason });
+    if (stopped) {
+      this.rt.diag.fatal(s.at, "sections", FINAL_REVIEW_STEP, got.reason);
+      s.live.add({ kind: "failed", step: FINAL_REVIEW_STEP, reason: got.reason });
+    }
+    return { reviewed: false, reason: got.reason, ...(fired ? { fix: fired.fix } : {}), stopped };
   }
 
   // ---------------------------------------------------------------- the reply's read
@@ -608,7 +680,7 @@ export class Orchestrator {
   /**
    * What a run leaves once its read is on the reply's record: which role wrote which events
    * (`Rec.agents`, after those the record names already: a Re-narrate's copied plan, a Continue's
-   * turn), what its roles changed in the learned area, made now in the chat's metadata (no record
+   * turn), what its roles changed in the kept files, made now in their stores (no record
    * holds it), and its review card for what still asks first.
    */
   private async landed(s: AgentRun, at: Pick<TurnContext, "core" | "observed" | "messageId" | "swipeId">): Promise<void> {
@@ -622,7 +694,7 @@ export class Orchestrator {
       const refused = agents.length > 0 ? at.core.recordAgents(at.messageId, at.swipeId, [...(rec.agents ?? []), ...agents], at.observed) : null;
       if (refused) this.rt.host.log("warn", `[LumiRPEngine] chat ${s.chatId}: the turn's record doesn't say which role wrote its events (${refused})`, s.userId);
     }
-    if (Object.keys(s.landing).length > 0) await this.rt.chatAgents.setLearned(s.chatId, s.userId, s.landing).catch((error: unknown) => this.rt.host.log("warn", `[LumiRPEngine] chat ${s.chatId}: the turn's changes to the learned area weren't made (${error instanceof Error ? error.message : String(error)})`, s.userId));
+    if (Object.keys(s.landing).length > 0) await landKept(this.rt, s.chatId, s.userId, s.landing).catch((error: unknown) => this.rt.host.log("warn", `[LumiRPEngine] chat ${s.chatId}: the turn's changes to the learned area and the global workspace weren't made (${error instanceof Error ? error.message : String(error)})`, s.userId));
     const items = [...s.confirm.map((op) => itemOf(op)), ...s.read];
     await this.review.make({ chatId: s.chatId, userId: s.userId, turn: `${at.messageId}:${at.swipeId}`, messageId: at.messageId, swipeId: at.swipeId, placement: "chips", text: s.text, items });
   }
@@ -698,8 +770,7 @@ export class Orchestrator {
     if (kept.some(isMainMessage)) {
       const note = renderPrompt(MAIN_TEXT.engineReply, s.settings.prompts.texts, { reply: content });
       const last = kept.at(-1);
-      // The reply is the player's to read: the note is read with the player character's knowledge.
-      return last && isMainMessage(last) && last.role === "user" ? [...kept.slice(0, -1), { ...last, content: note }] : [...kept, { role: "user", content: note, by: MAIN_BY, knowledge: "pov" }];
+      return last && isMainMessage(last) && last.role === "user" ? [...kept.slice(0, -1), { ...last, content: note }] : [...kept, { role: "user", content: note, by: MAIN_BY }];
     }
     const answer = kept.findLastIndex((m) => m.role === "assistant");
     const was = kept[answer];
@@ -748,6 +819,16 @@ export class Orchestrator {
     }
     this.dropWaiting(chatId);
     await this.review.dropGates(chatId, userId);
+  }
+
+  /**
+   * The ledger let the turn go without a commit (`TurnHooks.turnGone`): a reply stopped or failed
+   * with nothing kept for its retry, a prepared turn gone stale or replaced, a kept one discarded. Its
+   * run goes, under the id it was prepared as or the generation that took it, whichever holds it now.
+   */
+  gone(turn: string, generationId: string | null, state: LiveEndState): void {
+    this.drop(turn, state);
+    if (generationId !== null) this.drop(generationId, state);
   }
 
   /**
@@ -899,7 +980,7 @@ export class Orchestrator {
    * answer, or why it failed; a cancelled turn's role throws as classic's call would. GM → Live hears
    * it start and end, with what it spent.
    */
-  private async runOnce<T, O>(s: AgentRun, role: RoleId, settings: RoleSettings, run: RoleRun<T, O>, task: T, signal: AbortSignal, brief: TurnBrief | null): Promise<{ agentId: string; result: RoleResult<O> }> {
+  private async runOnce<T, O>(s: AgentRun, role: RoleId, settings: RoleSettings, run: RoleRun<T, O>, task: T, signal: AbortSignal, brief: string | null): Promise<{ agentId: string; result: RoleResult<O> }> {
     const ctx = this.ctx(s, role, settings, signal, brief);
     const via = settings.promptOnly ? "prompt_only" : "agent";
     const started = Date.now();
@@ -924,22 +1005,23 @@ export class Orchestrator {
 
   /** The workspace as the turn holds it now (`stagedWorkspace`): what its roles read in it, what they and the runs before them staged included. */
   private staged(s: AgentRun): (head: ChatHead) => WorkspaceAt {
-    return (head) => stagedWorkspace(this.rt, s.draft, head, withLearned(s.learned, s.landing));
+    return (head) => stagedWorkspace(this.rt, s.draft, head, withKept(s.kept, s.landing));
   }
 
-  /** A role's context (C10): its own agent id, a reader with its knowledge, the turn's writer for its phase, what the main agent told it, and where it loads lore into the turn's reply. */
-  private ctx(s: AgentRun, role: RoleId, settings: RoleSettings, signal: AbortSignal, brief: TurnBrief | null): TurnAgentCtx {
-    const knowledge = settings.knowledge === "own" ? null : settings.knowledge;
+  /**
+   * A role's context (C10): its own agent id, a reader of the GM's view with every secret marked
+   * (every role's, whatever perspective it works from), the turn's writer for its phase, what the main agent told
+   * it, the sections its context starts it with, as they stand when it asks (the head it reads, the
+   * scene's choices so far), and where it loads lore into the turn's reply.
+   */
+  private ctx(s: AgentRun, role: RoleId, settings: RoleSettings, signal: AbortSignal, brief: string | null): TurnAgentCtx {
     const both = AbortSignal.any([signal, s.stop.signal]);
     const base = (): ChatHead | null => s.head;
     const agentId = `${role}:${s.generationId.slice(0, 8)}:${++s.agents}`;
-    // Its reader and writer as a knowledge reads and checks: its role's, or a narrower one for a task (`readAs`).
-    const io = (as: AgentKnowledge | null): { reader: ToolReader; writer: ToolWriter } => {
-      const reader = turnReader(this.rt, base, { userId: s.userId, chatId: s.chatId, knowledge: as, staged: this.staged(s) });
-      return { reader, writer: turnWriter(this.rt, s.draft, { userId: s.userId, chatId: s.chatId, role, agentId, tier: settings.tier, knowledge: as, connectionId: settings.connectionId, phase: s.phase, base, learned: () => withLearned(s.learned, s.landing), reader, gmOps: s.settings.agents.gmOpsPerTurn, holder: s.holder, signal: both }) };
-    };
-    const { reader, writer } = io(knowledge);
-    return { turn: s.turn, signal: both, userId: s.userId, chatId: s.chatId, generationId: s.generationId, reader, writer, role, agentId, settings, brief, readAs: io, loads: loadsOf(s) };
+    const reader = turnReader(this.rt, base, { userId: s.userId, chatId: s.chatId, knowledge: "gm", marks: true, staged: this.staged(s) });
+    const writer = turnWriter(this.rt, s.draft, { userId: s.userId, chatId: s.chatId, role, agentId, tier: settings.tier, connectionId: settings.connectionId, phase: s.phase, base, kept: () => withKept(s.kept, s.landing), reader, gmOps: s.settings.agents.gmOpsPerTurn, holder: s.holder, signal: both });
+    const sections = (slots: readonly string[]): Promise<string> => roleSections(this.rt, { userId: s.userId, chatId: s.chatId, head: s.head, slots, scene: s.scene, said: s.text });
+    return { turn: s.turn, signal: both, userId: s.userId, chatId: s.chatId, generationId: s.generationId, reader, writer, role, agentId, settings, brief, sections, loads: loadsOf(s) };
   }
 
   /** What the turn's main agent runs with (`MainHost`): the run's own state, as it stands when asked. */
@@ -956,7 +1038,12 @@ export class Orchestrator {
       at: () => s.at,
       phase: () => s.phase,
       head: () => s.head,
-      reader: (knowledge: AgentKnowledge) => turnReader(this.rt, () => s.head, { userId: s.userId, chatId: s.chatId, knowledge, staged: this.staged(s) }),
+      reader: () => turnReader(this.rt, () => s.head, { userId: s.userId, chatId: s.chatId, knowledge: "gm", marks: true, staged: this.staged(s) }),
+      writer: (role) => {
+        const settings = s.settings.agents.roles[role];
+        const reader = turnReader(this.rt, () => s.head, { userId: s.userId, chatId: s.chatId, knowledge: "gm", marks: true, staged: this.staged(s) });
+        return turnWriter(this.rt, s.draft, { userId: s.userId, chatId: s.chatId, role, agentId: `main>${role}:${s.generationId.slice(0, 8)}:${++s.agents}`, tier: settings.tier, connectionId: settings.connectionId, phase: s.phase, base: () => s.head, kept: () => withKept(s.kept, s.landing), reader, gmOps: s.settings.agents.gmOpsPerTurn, holder: s.holder, signal: s.stop.signal });
+      },
       loads: loadsOf(s),
       run: async ({ role, run, task, signal, brief, promptOnly }) => {
         const settings = s.settings.agents.roles[role];
@@ -981,14 +1068,14 @@ export class Orchestrator {
   private commit(s: AgentRun, ops: StagedOp[], w: Working): void {
     const head = s.head;
     if (ops.length === 0 || !head) return;
-    const learned = withLearned(s.learned, s.landing);
-    const commit: CommitCtx = { ctx: (knowledge) => contextOf(this.rt, { knowledge }, head, s.settings, s.learning, learned, s.active), reader: turnReader(this.rt, () => head, { userId: s.userId, chatId: s.chatId, knowledge: "gm" }), userId: s.userId, chatId: s.chatId, signal: s.stop.signal };
+    const kept = withKept(s.kept, s.landing);
+    const commit: CommitCtx = { ctx: () => contextOf(this.rt, { knowledge: "everyone" }, head, s.settings, s.learning, kept, s.active), reader: turnReader(this.rt, () => head, { userId: s.userId, chatId: s.chatId, knowledge: "gm" }), userId: s.userId, chatId: s.chatId, signal: s.stop.signal };
     const out = commitStaged(this.rt, commit, ops, w);
     s.live.committed(out);
     // What landed, or went to the review card, of the GM's edits counts toward the turn's cap in its later phases.
     s.draft.landed([...out.committed.map((c) => c.op), ...out.confirm].filter((op) => op.tier === "gm").length);
     s.committed.push(...out.committed);
-    Object.assign(s.landing, out.learned);
+    Object.assign(s.landing, out.kept);
     s.confirm.push(...out.confirm);
     recordCommit(this.rt, s.at, s.settings.prompts.texts, out);
   }
@@ -1012,7 +1099,7 @@ function roleOf(name: string): RoleId {
 
 /** A staged operation as an item of its turn's review card: worded as the player character may read it. */
 function itemOf(op: StagedOp): StoredReviewItem {
-  return { key: op.key, source: "agent", role: op.role, changeType: op.changeType, lines: op.cardLines ?? [], status: "open", op: op.op, agentId: op.agentId, knowledge: op.knowledge, connection: op.connectionId };
+  return { key: op.key, source: "agent", role: op.role, changeType: op.changeType, lines: op.cardLines ?? [], status: "open", op: op.op, agentId: op.agentId, connection: op.connectionId };
 }
 
 /** Where `slice` sits in `events`, by value: the first run of events that equals it, or null. */

@@ -2,7 +2,7 @@
 // a run gave"): nothing a run answered drops silently. The changes it staged (landing when the turn
 // commits, held for the review card, or refused), what the knowledge step refused of its answer, what
 // the read didn't read of its proposals and the things they name that the world has no entity for,
-// and the director's lines withheld for contradicting the state it was given, each with how many.
+// and the director's lines flagged (and kept) for contradicting the state it was given, each with how many.
 // Each reason is a registry text on the Main agent page with its default and its reset, worded alike
 // in the main agent's run_role and revise answers, in Diagnostics and in the host log. Pure data.
 
@@ -17,7 +17,7 @@ export type KnowledgeRefusal = (typeof KNOWLEDGE_REFUSALS)[number];
 export const READ_DROPS = ["type", "time", "same", "shape"] as const;
 export type ReadDrop = (typeof READ_DROPS)[number];
 
-/** How a director's line contradicts the state it was given (`proseClashes`), each withheld from the narrator. */
+/** How a director's line contradicts the state it was given (`proseClashes`), each flagged to the main agent and Diagnostics; the line stays. */
 export const PROSE_CLASHES = ["here", "gone", "holds", "lies"] as const;
 export type ProseClashKind = (typeof PROSE_CLASHES)[number];
 
@@ -73,14 +73,14 @@ const READ: Readonly<Record<ReadDrop, { label: string; note: string; text: strin
   shape: { label: "Read: not a change", note: "An item of its proposals that isn't a change: no type.", text: "{{count}} not read (not a change: no type)" },
 };
 
-/** The director's lines, as the main agent may read them, follow each reason: quoted after a colon, or nothing where its knowledge doesn't reach the director's. */
-const lines: PromptVar = { name: "lines", text: "the lines, quoted, after a colon; empty where the main agent's knowledge doesn't reach the director's" };
+/** The director's lines follow each reason, quoted after a colon. */
+const lines: PromptVar = { name: "lines", text: "the lines, quoted, after a colon" };
 
 const PROSE: Readonly<Record<ProseClashKind, { label: string; note: string; text: string }>> = {
-  here: { label: "Director: someone here who isn't", note: "A line of the brief or the outline that has someone in the scene whom the engine has elsewhere: withheld from the narrator.", text: "{{count}} withheld (it has someone here whom the engine has elsewhere{{lines}})" },
-  gone: { label: "Director: someone gone who is here", note: "A line of the brief or the outline that has someone the engine has in the scene gone from it: withheld from the narrator.", text: "{{count}} withheld (it has someone gone whom the engine has here{{lines}})" },
-  holds: { label: "Director: a thing someone doesn't have", note: "A line of the brief or the outline that has someone hold or hand over a thing the engine says they don't have: withheld from the narrator.", text: "{{count}} withheld (it has someone hold or hand over a thing the engine says they don't have{{lines}})" },
-  lies: { label: "Director: a thing lying where it isn't", note: "A line of the brief or the outline that has a thing lying in the scene that the engine has on someone or elsewhere: withheld from the narrator.", text: "{{count}} withheld (it has a thing lying here that the engine has on someone or elsewhere{{lines}})" },
+  here: { label: "Director: someone here who isn't", note: "A line of the brief or the outline that has someone in the scene whom the engine has elsewhere: flagged, and kept for the narrator.", text: "{{count}} flagged, still in the reply's prompt (it has someone here whom the engine has elsewhere{{lines}})" },
+  gone: { label: "Director: someone gone who is here", note: "A line of the brief or the outline that has someone the engine has in the scene gone from it: flagged, and kept for the narrator.", text: "{{count}} flagged, still in the reply's prompt (it has someone gone whom the engine has here{{lines}})" },
+  holds: { label: "Director: a thing someone doesn't have", note: "A line of the brief or the outline that has someone hold or hand over a thing the engine says they don't have: flagged, and kept for the narrator.", text: "{{count}} flagged, still in the reply's prompt (it has someone hold or hand over a thing the engine says they don't have{{lines}})" },
+  lies: { label: "Director: a thing lying where it isn't", note: "A line of the brief or the outline that has a thing lying in the scene that the engine has on someone or elsewhere: flagged, and kept for the narrator.", text: "{{count}} flagged, still in the reply's prompt (it has a thing lying here that the engine has on someone or elsewhere{{lines}})" },
 };
 
 export const AGENT_YIELD_PROMPTS: readonly PromptDef[] = [

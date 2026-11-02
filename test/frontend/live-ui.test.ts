@@ -217,35 +217,34 @@ describe("the tool-call cards", () => {
 });
 
 describe("GM → Workspace: the whole session", () => {
-  test("shows every turn's messages, saying which the main agent doesn't read now, and the summary whatever its knowledge", () => {
+  test("shows every turn's messages, each one the main agent reads, and the summary", () => {
     const session: SessionView = {
       summary: "SUMMARY-GM: the smuggler's boat.",
-      summaryKnowledge: "gm",
       turns: 1,
       tokens: 900,
       segments: [
         {
           turn: 4,
           messages: [
-            { role: "user", text: "TASK: I look out over the harbor.", main: true, knowledge: "pov", read: true },
-            { role: "assistant", text: "NOTE-GM: the stranger runs the smuggling.", main: true, knowledge: "gm", read: false, files: ["notes/smuggler.md"] },
+            { role: "user", text: "TASK: I look out over the harbor.", main: true },
+            { role: "assistant", text: "NOTE-GM: the stranger runs the smuggling.", main: true },
           ],
         },
       ],
-      reads: { knowledge: "pov", turns: 1, tokens: 300, summary: false },
+      reads: { turns: 1, tokens: 900 },
       missing: 0,
       rollback: "available",
     };
     const tree = SessionPanel({ session, busy: false, onRollback: () => undefined });
     const text = textOf(tree);
-    for (const part of ["SUMMARY-GM: the smuggler's boat.", "TASK: I look out over the harbor.", "NOTE-GM: the stranger runs the smuggling.", "Reply 4", "notes/smuggler.md", "Not sent to the main agent now"]) expect(text).toContain(part);
-    // Each message a bubble: what's sent to the main agent on one side, its answer on the other, each saying whose knowledge made it.
+    for (const part of ["SUMMARY-GM: the smuggler's boat.", "TASK: I look out over the harbor.", "NOTE-GM: the stranger runs the smuggling.", "Reply 4", "The main agent reads its own messages and the summary, whole"]) expect(text).toContain(part);
+    expect(text).not.toContain("Not sent to the main agent now");
+    // Each message a bubble: what's sent to the main agent on one side, its answer on the other.
     const bubbles = propsOf(tree, "li").filter((p) => p["data-lre-session-read"] !== undefined);
     expect(bubbles.map((b) => [b.class, b["data-lre-session-read"]])).toEqual([
       ["lre-ws-msg to", "read"],
-      ["lre-ws-msg from", "unread"],
+      ["lre-ws-msg from", "read"],
     ]);
-    expect(bubbles.map((b) => propsOf(b.children, "span").flatMap((s) => (s["data-chip"] !== undefined ? [textOf(s.children)] : [])))).toEqual([["Your character's knowledge"], ["GM's knowledge", "Not sent to the main agent now"]]);
     expect(bubbles.map((b) => textOf(propsOf(b.children, "div").find((d) => d.class === "lre-ws-msg-bubble")?.children))).toEqual(["TASK: I look out over the harbor.", "NOTE-GM: the stranger runs the smuggling."]);
   });
 });

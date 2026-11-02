@@ -932,17 +932,17 @@ describe("usage", () => {
 describe("the settings", () => {
   test("a new user's agent settings are §15's defaults, each one the reader keeps or falls back from", () => {
     const d = defaultAgentSettings();
-    expect(d).toMatchObject({ thinkingInToolLoops: false, turn: { tokensIn: 100_000, tokensOut: 10_000 }, budget: { toolTurns: 10, revisions: 2, tokensIn: "none", tokensOut: "none", wallMs: "none" }, loopRepeats: 3, clipChars: 4000, throttles: [], caching: { on: true } });
+    expect(d).toMatchObject({ thinkingInToolLoops: false, turn: { tokensIn: "none", tokensOut: "none", toolTurns: "none", wallMs: "none" }, budget: { toolTurns: 10, revisions: 2, tokensIn: "none", tokensOut: "none", wallMs: "none" }, loopRepeats: 3, clipChars: 4000, throttles: [], caching: { on: true } });
     expect(d.acceptance).toEqual({ connections: [], estimateFactor: 2 });
     expect(agentSettingsOf(undefined)).toEqual(d);
     const read = agentSettingsOf({ loopRepeats: 1, clipChars: 0, budget: { revisions: -1, toolTurns: "none", concurrency: 0 }, turn: { tokensIn: "none" }, acceptance: { estimateFactor: 0, connections: [{ id: "__proto__" }, { id: "c1", only: false, tokensIn: 5, tokensOut: "none" }] }, throttles: [{ id: "c1", requestsPerMinute: 0, tokensPerMinute: 9000 }] });
     expect(read).toMatchObject({ loopRepeats: 3, clipChars: 4000, budget: { revisions: 2, toolTurns: "none", concurrency: 4 }, turn: { tokensIn: "none" }, acceptance: { estimateFactor: 2, connections: [{ id: "c1", only: false, tokensIn: 5, tokensOut: "none" }] }, throttles: [{ id: "c1", requestsPerMinute: "none", tokensPerMinute: 9000 }] });
   });
 
-  test("what the engine keeps in memory for agent turns is 64 turns, 256 gates, 256 watched chats and 16 chats in the live view; a count under 1 or not whole falls back", () => {
-    expect(defaultAgentSettings().kept).toEqual({ runs: 64, gates: 256, watchers: 256, live: 16 });
-    expect(agentSettingsOf({ kept: { runs: 0, gates: -3, watchers: 2.5, live: 0 } }).kept).toEqual({ runs: 64, gates: 256, watchers: 256, live: 16 });
-    expect(agentSettingsOf({ kept: { runs: 1, gates: 8, watchers: 12, live: 3 } }).kept).toEqual({ runs: 1, gates: 8, watchers: 12, live: 3 });
+  test("what the engine keeps in memory is 64 turns, 256 gates, 256 watched chats, 16 chats in the live view, 4,000,000 characters of texts read and 65,536 messages worked out; a count under its least or not whole falls back", () => {
+    expect(defaultAgentSettings().kept).toEqual({ runs: 64, gates: 256, watchers: 256, live: 16, texts: 4_000_000, folds: 65_536 });
+    expect(agentSettingsOf({ kept: { runs: 0, gates: -3, watchers: 2.5, live: 0, texts: -1, folds: 0 } }).kept).toEqual({ runs: 64, gates: 256, watchers: 256, live: 16, texts: 4_000_000, folds: 65_536 });
+    expect(agentSettingsOf({ kept: { runs: 1, gates: 8, watchers: 12, live: 3, texts: 0, folds: 1 } }).kept).toEqual({ runs: 1, gates: 8, watchers: 12, live: 3, texts: 0, folds: 1 });
   });
 
   test("Settings saves them as the other pages' settings: a list replaces whole, and a reset goes back to the default", async () => {
@@ -951,7 +951,7 @@ describe("the settings", () => {
     expect((await set({ throttles: [{ id: MAIN, requestsPerMinute: 30, tokensPerMinute: "none" }] })).throttles).toEqual([{ id: MAIN, requestsPerMinute: 30, tokensPerMinute: "none" }]);
     expect((await set({ throttles: [] })).throttles).toEqual([]);
     expect((await set({ turn: { tokensOut: 20_000 } })).turn.tokensOut).toBe(20_000);
-    expect((await set({ turn: { tokensOut: null } })).turn.tokensOut).toBe(10_000);
+    expect((await set({ turn: { tokensOut: null } })).turn.tokensOut).toBe("none");
     // A new user's file holds none of it until they change one, and reads as the defaults.
     const fresh = new Rig();
     expect(settingsOf(fresh.body(await fresh.send({ type: "lre.settings.get" }))).agents).toEqual(defaultAgentSettings());

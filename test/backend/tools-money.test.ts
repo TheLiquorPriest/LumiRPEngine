@@ -1,15 +1,14 @@
 // The money family's read tools on Port Alder (INC1-SPEC R3a): Jordan's accounts at the balances
-// they open with, his cash and his debts; Marcus's money, which Jordan doesn't know and the narrator
-// and the GM read whole; and what a latte costs at Bluebird Coffee, and everything Bluebird sells.
+// they open with, his cash and his debts; Marcus's money, which the narrator and the GM read whole;
+// and what a latte costs at Bluebird Coffee, and everything Bluebird sells.
 
 import { describe, expect, test } from "bun:test";
 import { matchCatalog, placeTrade } from "../../src/packs/economy/core/index";
 import { priceOf } from "../../src/packs/economy/core/model";
 import { formatMoney } from "../../src/shared/world";
-import { alderChat, answerOf, callTool, HOME, KNOWLEDGE, POV, toolEnv } from "../support/tools";
+import { alderChat, answerOf, HOME, KNOWLEDGE, POV, toolEnv } from "../support/tools";
 
 const JORDAN = "Jordan Ellis";
-const HIDDEN = `${JORDAN} doesn't know that, and you read the world as ${JORDAN} knows it.`;
 
 interface Amount {
   cents: number;
@@ -66,11 +65,10 @@ describe("money_balances", () => {
     }
   });
 
-  test("Marcus's money is beyond Jordan's knowledge; the narrator and the GM read his checking and the mortgage he owes", async () => {
+  test("the narrator and the GM read Marcus's checking and the mortgage he owes", async () => {
     const { rig, chatId } = await alderChat();
     const view = await toolEnv(rig, chatId, "gm").reader.view();
     const opening = (account: string): number => Number(view.state.entities[account]?.fields.opening);
-    expect(await callTool(rig, chatId, "pov", "money_balances", { person: "Marcus Delgado" })).toEqual({ text: HIDDEN, error: true });
     for (const knowledge of ["everyone", "gm"] as const) {
       const m = await answerOf<Balances>(rig, chatId, knowledge, "money_balances", { person: "Marcus Delgado" });
       expect(m.party).toMatchObject({ id: "marcus_delgado", name: "Marcus Delgado" });
@@ -102,7 +100,7 @@ describe("money_prices", () => {
     }
   });
 
-  test("everything Bluebird Coffee sells, every one of it, priced there; Jordan prices where he is, and never at a place he can't see", async () => {
+  test("everything Bluebird Coffee sells, every one of it, priced there; by default, priced where Jordan is", async () => {
     const { rig, chatId } = await alderChat();
     const view = await toolEnv(rig, chatId, "gm").reader.view();
     const trade = view.read(() => placeTrade(view.ctx, "bluebird_coffee"));
@@ -116,10 +114,9 @@ describe("money_prices", () => {
       for (const o of s.sells) expect(o.cents).toBe(view.read(() => priceOf(view.ctx, { catalog: o.catalog, place: "bluebird_coffee" }))?.unitCents ?? NaN);
     }
     // Where he is, by default: home sells nothing, and a latte has its price there all the same.
-    const home = await answerOf<Priced>(rig, chatId, "pov", "money_prices", { item: "latte_16oz" });
+    const home = await answerOf<Priced>(rig, chatId, "everyone", "money_prices", { item: "latte_16oz" });
     expect(home.place).toMatchObject({ id: HOME });
     expect(home.price?.sold).toBe(false);
-    expect((await answerOf<Sells>(rig, chatId, "pov", "money_prices", {})).sells).toEqual([]);
-    expect(await callTool(rig, chatId, "pov", "money_prices", { item: "latte_16oz", place: "12 Birch Lane" })).toEqual({ text: "No such place here: 12 Birch Lane.", error: true });
+    expect((await answerOf<Sells>(rig, chatId, "everyone", "money_prices", {})).sells).toEqual([]);
   });
 });

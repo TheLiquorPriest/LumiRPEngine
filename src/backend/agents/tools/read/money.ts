@@ -4,21 +4,19 @@
 // - `money_balances`: a person's or a business's accounts, each balance in the world's minor units
 //   and in its currency (a negative one owed), their cash, how well off they are (the wealth band),
 //   their net worth and what they owe, from the economy's view of a party's money at its own Money
-//   level (`economy.finance`: the Money panel's, and the GM's). Under `pov` the player character's
-//   own money is what Play's Money panel shows (`player: true`); of anyone else, only the accounts
-//   it holds a role on with them (`rightsOf`), and with none the note that it doesn't know. Under
-//   `everyone` and `gm` the party's whole view, unmasked (`player: false`), each account and owner
-//   named as the view names it (marked, or with its visibility); `gm` adds the economy's notes.
+//   level (`economy.finance`: the Money panel's, and the GM's): the party's whole view, unmasked
+//   (`player: false`), each account and owner named as the view names it (marked, or with its
+//   visibility); `gm` adds the economy's notes.
 // - `money_prices`: what a catalog item costs at a place (`priceOf`; an item in words is the catalog
 //   item a purchase of it would be, `matchCatalog`), with its band and whether the place sells it;
 //   with no item, everything the place sells (`placeTrade`), priced there, in the order the Buy
-//   options list them (`economy.offers`), every one of them. Prices are public; under `pov` the
-//   place is one the player character can see (the resolver), the one it is at by default.
+//   options list them (`economy.offers`), every one of them. Prices are public; the place is the one
+//   the player character is at by default.
 
 import { optionalQuery, own, rowOf, strOf } from "../../../../engine/pack-kit";
 import { placeOfEntity } from "../../../../engine/scope";
 import { matchCatalog, placeTrade } from "../../../../packs/economy/core/index";
-import { priceOf, rightsOf } from "../../../../packs/economy/core/model";
+import { priceOf } from "../../../../packs/economy/core/model";
 import { isParty } from "../../../../packs/economy/core/pay";
 import { TOOL_NOTE } from "../../../../shared/agent-tools";
 import { type AccountView, CLASS_TRAITS, type FinanceView, type PartyKind } from "../../../../shared/finance";
@@ -28,7 +26,7 @@ import type { ToolReadView, ViewRef } from "../read-view";
 import type { ToolDefinition } from "../registry";
 import { resolveEntity, resolvePlace } from "../resolve";
 import { objectSchema, placeEnum, text, textArg } from "../schema";
-import { beyondPov, type PlaceShown, placeShown } from "./people";
+import { type PlaceShown, placeShown } from "./people";
 
 const BALANCES = "money_balances";
 const PRICES = "money_prices";
@@ -72,7 +70,7 @@ interface Owed extends ViewRef, Amount {
 
 interface BalancesAnswer {
   party: ViewRef;
-  /** Absent under `pov` for someone else, as their level, wealth, cash and worth are: only the accounts the player character shares with them are its to know. */
+  /** What kind of party it is, its Money level, wealth, cash and worth. */
   kind?: PartyKind;
   level?: number;
   wealth?: string | null;
@@ -170,18 +168,10 @@ function wholeMoney(view: ToolReadView, party: ViewRef, money: FinanceView): Bal
   };
 }
 
-/**
- * A party's money as the view may read it, or null when it is the player character's not to know:
- * someone else's with whom it shares no account. A world without the economy pack keeps no money.
- */
-function balances(view: ToolReadView, party: ViewRef): BalancesAnswer | null {
+/** A party's money: its whole view. A world without the economy pack keeps no money. */
+function balances(view: ToolReadView, party: ViewRef): BalancesAnswer {
   const finance = optionalQuery(view.ctx, "economy.finance");
-  if (!finance) return { party, accounts: [], owes: [] };
-  if (view.knowledge !== "pov") return wholeMoney(view, party, finance(view.ctx, party.id, false));
-  const mine = finance(view.ctx, view.pov, true);
-  if (party.id === view.pov) return wholeMoney(view, party, mine);
-  const shared = mine.accounts.filter((a) => rightsOf(view.state, a.id, party.id) !== null);
-  return shared.length === 0 ? null : { party, accounts: accountReads(view, party, shared), owes: owedOn(view, shared) };
+  return finance ? wholeMoney(view, party, finance(view.ctx, party.id, false)) : { party, accounts: [], owes: [] };
 }
 
 /**
@@ -250,8 +240,7 @@ export const MONEY_TOOLS: readonly ToolDefinition[] = [
         const party = view.entity(r.id);
         // Money is a person's or a party's (a business, a trust, a household); nothing else holds any.
         if (!party || !isParty(view.ctx, r.id)) return view.refuse(TOOL_NOTE.noPerson, { name: said ?? view.name(r.id) });
-        const money = balances(view, party);
-        return money ? view.answer(money) : beyondPov(view);
+        return view.answer(balances(view, party));
       });
     },
   },

@@ -83,7 +83,8 @@ async function mainChat(rig: Rig, patch: JsonObject = {}): Promise<string> {
   rig.body(await rig.send({ type: "lre.world", op: "commit", worldId, base: null }));
   const chatId = rig.host.createChat("Morning.");
   rig.body(await rig.send({ type: "lre.world", op: "attach", worldId, chatId }));
-  rig.body(await rig.send({ type: "lre.settings.set", patch: { agents: { pipeline: { mode: "main" }, roles: PROMPT_ONLY } } }));
+  // The turn's tokens unbounded: its roles, its stages and its final review never run out of the turn's budget mid-test.
+  rig.body(await rig.send({ type: "lre.settings.set", patch: { agents: { pipeline: { mode: "main" }, roles: PROMPT_ONLY, turn: { tokensIn: "none", tokensOut: "none" } } } }));
   if (Object.keys(patch).length > 0) rig.body(await rig.send({ type: "lre.settings.set", patch }));
   expect(rig.body(await rig.send({ type: "lre.chat.knowledge", chatId, engine: "agents" })).engine).toBe("agents");
   return chatId;
@@ -154,7 +155,7 @@ describe("the main agent's turn", () => {
       intent: {
         ...roles.intent,
         interpret: (task, ctx) => {
-          briefs.push(ctx.brief?.for("pov") ?? null);
+          briefs.push(ctx.brief);
           return roles.intent.interpret(task, ctx);
         },
       },
@@ -178,6 +179,35 @@ describe("the main agent's turn", () => {
     expect(briefs[1]).toContain("Read the harbor look.");
     expect(briefs[1]).toContain("Is a look an action?");
     expect(rig.host.quietCalls.filter((c) => (c.messages[0]?.content ?? "").includes(INTERPRET_MARK))).toHaveLength(2);
+    expect(rig.rt.ledger.errors).toEqual([]);
+  });
+});
+
+describe("the main agent's system files", () => {
+  test("AGENTS.md and roles/main.md follow its system prompt in every call, the global workspace's before the chat's; a role's own file and a system file listed in .pins.json are no part of its turn task", async () => {
+    const rig = new Rig({ shipped: true });
+    const chatId = await mainChat(rig);
+    const write = async (path: string, text: string): Promise<void> => void rig.body(await rig.send({ type: "lre.workspace", chatId, op: "write", path, text }));
+    await write("~/AGENTS.md", "GLOBAL-AGENTS-MARK: write plainly.");
+    await write("~/roles/main.md", "GLOBAL-MAIN-MARK: run the scene role first.");
+    await write("AGENTS.md", "CHAT-AGENTS-MARK: this chat is a quiet one.");
+    await write("roles/main.md", "CHAT-MAIN-MARK: keep the turn short.");
+    await write("roles/read.md", "READ-MARK: name who acts.");
+    await write(".pins.json", JSON.stringify({ main: { files: ["AGENTS.md", "roles/main.md"] } }));
+    const asked = models(rig);
+    await played(rig, chatId, "I look out over the harbor.", "Gulls wheel over the water.");
+    expect(asked.length).toBeGreaterThan(1);
+    const order = ["GLOBAL-AGENTS-MARK", "GLOBAL-MAIN-MARK", "CHAT-AGENTS-MARK", "CHAT-MAIN-MARK"];
+    for (const req of asked) {
+      const system = req.messages[0]?.content ?? "";
+      expect(req.messages[0]?.role).toBe("system");
+      const at = order.map((mark) => system.indexOf(mark));
+      expect(at.every((i) => i >= 0)).toBe(true);
+      expect([...at].sort((a, b) => a - b)).toEqual(at);
+      expect(system).not.toContain("READ-MARK");
+      // Once, in the system prompt: the pins manifest's listing of them adds nothing to the turn task.
+      for (const mark of order) expect(sentOf(req).split(mark).length).toBe(2);
+    }
     expect(rig.rt.ledger.errors).toEqual([]);
   });
 });
@@ -237,6 +267,32 @@ describe("a main agent that fails", () => {
     expect(rig.host.quietCalls.slice(from).some((c) => (c.messages[0]?.content ?? "").includes(EXTRACT_MARK))).toBe(true);
     expect((await rig.rt.view(chatId, rig.host.userId)).chips.some((c) => c.kind === "retry_read")).toBe(false);
     expect(rig.rt.ledger.errors).toEqual([]);
+  });
+});
+
+describe("a GM note on the reply a Regenerate remakes", () => {
+  test("written in GM → Workspace on the shown head swipe, it follows a Regenerate of that reply, in the fixed pipeline and the main one", async () => {
+    for (const [mode, trim] of [["fixed", false], ["main", false], ["fixed", true], ["main", true]] as const) {
+      const rig = new Rig({ shipped: true });
+      const chatId = await mainChat(rig, { agents: { pipeline: { mode } } });
+      models(rig);
+      await played(rig, chatId, "I look out over the harbor.", "Gulls wheel over the water.");
+      const head = rig.host.head(chatId);
+      if (!head) throw new Error("no reply");
+      const path = "notes/harbor.md";
+      const text = "The harbor master owes Danny a favour.";
+      rig.body(await rig.send({ type: "lre.workspace", chatId, op: "write", path, text }));
+      const notes = async (): Promise<string[]> => (await listWorkspace(rig.rt, { userId: rig.host.userId, chatId })).filter((f) => f.transcript !== true).map((f) => f.path);
+      expect(await notes()).toEqual([path]);
+      if (trim) expect(rig.rt.ledger.trim(() => false)).toContain(chatId);
+      const g = await rig.host.start(chatId, { type: "regenerate" });
+      expect(g.halted).toBeUndefined();
+      await rig.host.finish(g, "Gulls wheel lower over the water.");
+      expect(rig.host.message(chatId, head.id).swipes.length).toBe(2);
+      expect(rig.host.message(chatId, head.id).swipeId).toBe(1);
+      expect([mode, trim, await notes()]).toEqual([mode, trim, [path]]);
+      expect(rig.rt.ledger.errors).toEqual([]);
+    }
   });
 });
 
@@ -398,7 +454,7 @@ describe("what a run gave the engine", () => {
   /** Port Alder with Danny and Priya beside the player character, minds on, played on agents by a main agent; the roles agent-backed, as §15 ships them; `patch` joins the settings. */
   async function rolesChat(rig: Rig, patch: JsonObject = {}): Promise<string> {
     const chatId = await alderChat(rig, async () => {}, [DANNY, PRIYA]);
-    rig.body(await rig.send({ type: "lre.settings.set", patch: { agents: { pipeline: { mode: "main" } } } }));
+    rig.body(await rig.send({ type: "lre.settings.set", patch: { agents: { pipeline: { mode: "main" }, turn: { tokensIn: "none", tokensOut: "none" } } } }));
     if (Object.keys(patch).length > 0) rig.body(await rig.send({ type: "lre.settings.set", patch }));
     expect(rig.body(await rig.send({ type: "lre.chat.knowledge", chatId, engine: "agents" })).engine).toBe("agents");
     return chatId;
@@ -497,8 +553,8 @@ describe("what a run gave the engine", () => {
     const looked = asked.flatMap(resultsOf).filter((r) => r.includes(NOTE));
     expect(looked.some((r) => r.includes('"files"'))).toBe(true);
     expect(looked.some((r) => r.includes(NOTE_TEXT))).toBe(true);
-    const files = await listWorkspace(rig.rt, { userId: rig.host.userId, chatId, knowledge: "gm" });
-    expect(files.find((f) => f.path === NOTE)).toMatchObject({ readers: "everyone", provenance: { role: "scene" } });
+    const files = await listWorkspace(rig.rt, { userId: rig.host.userId, chatId });
+    expect(files.find((f) => f.path === NOTE)).toMatchObject({ provenance: { role: "scene" } });
     expect(rig.rt.ledger.errors).toEqual([]);
   });
 
@@ -518,7 +574,7 @@ describe("what a run gave the engine", () => {
     expect(ranOf(asked, "scene").join("\n")).toContain("1 held for the review card, waiting for the GM's Apply");
     const cards = rig.body(await rig.send({ type: "lre.review", chatId, op: "get" })).cards as ReviewCardView[];
     expect(cards.flatMap((c) => c.items).map((i) => i.changeType)).toEqual(["workspace"]);
-    expect((await listWorkspace(rig.rt, { userId: rig.host.userId, chatId, knowledge: "gm" })).some((f) => f.path === NOTE)).toBe(false);
+    expect((await listWorkspace(rig.rt, { userId: rig.host.userId, chatId })).some((f) => f.path === NOTE)).toBe(false);
     expect(rig.rt.ledger.errors).toEqual([]);
   });
 
@@ -554,7 +610,7 @@ describe("what a run gave the engine", () => {
     await played(rig, chatId, "I look out over the harbor.", "Gulls wheel over the water.");
     expect(listed.join("\n")).not.toContain(FIRST);
     expect(ranOf(asked, "scene").at(-1)).toContain("Its changes: 1 staged, landing when the turn commits.");
-    const paths = (await listWorkspace(rig.rt, { userId: rig.host.userId, chatId, knowledge: "gm" })).map((f) => f.path);
+    const paths = (await listWorkspace(rig.rt, { userId: rig.host.userId, chatId })).map((f) => f.path);
     expect(paths).toContain(SECOND);
     expect(paths).not.toContain(FIRST);
     expect(rig.rt.ledger.errors).toEqual([]);
@@ -590,7 +646,7 @@ describe("what a run gave the engine", () => {
     }
     expect(runs).toBe(2);
     // Only the revision's note lands: the first run's went as the revision started, and no other run staged beside either.
-    const notes = (await listWorkspace(rig.rt, { userId: rig.host.userId, chatId, knowledge: "gm" })).map((f) => f.path).filter((p) => p.startsWith("notes/run-"));
+    const notes = (await listWorkspace(rig.rt, { userId: rig.host.userId, chatId })).map((f) => f.path).filter((p) => p.startsWith("notes/run-"));
     expect(notes).toEqual(["notes/run-2.md"]);
     expect(rig.rt.ledger.errors).toEqual([]);
   });
@@ -611,7 +667,7 @@ describe("what a run gave the engine", () => {
     expect(rec.status).toBe("ok");
     // The read answered, its note staged, before the time ran out.
     expect(ranOf(asked, "read")[0]).toContain("Its changes: 1 staged, landing when the turn commits.");
-    expect((await listWorkspace(rig.rt, { userId: rig.host.userId, chatId, knowledge: "gm" })).some((f) => f.path === LATE)).toBe(false);
+    expect((await listWorkspace(rig.rt, { userId: rig.host.userId, chatId })).some((f) => f.path === LATE)).toBe(false);
     const writes = (rig.rt.live.view(chatId, rig.host.userId)?.entries ?? []).flatMap((e) => (e.kind === "write" && e.role === "read" ? [[e.outcome, e.why ?? null]] : []));
     expect(writes).toEqual([["staged", null], ["dropped", "unused"]]);
     expect(rig.rt.ledger.errors).toEqual([]);
@@ -641,7 +697,7 @@ describe("what a run gave the engine", () => {
     expect(rig.rt.ledger.errors).toEqual([]);
   });
 
-  test("a director's line that contradicts the state it was given is withheld and told with its run: quoted where the main agent's knowledge reaches the director's, else only counted", async () => {
+  test("a director's line that contradicts the state it was given is flagged and told with its run, quoted, and stays in its answer", async () => {
     const here = "Marcus Delgado leans on the counter beside Jordan.";
     const PROSE: JsonObject = { modelUse: { steps: { brief: { enabled: true, signals: ["always"] }, outline: { enabled: true, signals: ["always"] }, "npc.choose": { enabled: false } }, budgets: { pre: { calls: 8 } } } };
     const director = (): QuietScript => JSON.stringify({ brief: "BRIEF-OK The harbor is grey this morning.", beats: ["OUTLINE-OK Jordan looks out at the harbor.", here] });
@@ -650,16 +706,38 @@ describe("what a run gave the engine", () => {
     const asked = agentModels(rig, { director });
     await played(rig, chatId, "I look out at the harbor.", "The harbor is calm.");
     const [ran = ""] = ranOf(asked, "director");
-    expect(ran).toContain('"outline":["OUTLINE-OK Jordan looks out at the harbor."]');
-    expect(ran).toContain(`What the engine didn't take: 1 withheld (it has someone here whom the engine has elsewhere: "${here}").`);
-    // A main agent that reads only what the player character knows is told how many, never the lines.
-    rig.body(await rig.send({ type: "lre.settings.set", patch: { agents: { main: { knowledge: "pov" } } } }));
-    const narrow = agentModels(rig, { director });
-    await played(rig, chatId, "I look out at the harbor again.", "The harbor is still calm.");
-    const [counted = ""] = ranOf(narrow, "director");
-    expect(counted).toContain('"outline":1');
-    expect(counted).toContain("What the engine didn't take: 1 withheld (it has someone here whom the engine has elsewhere).");
-    expect(counted).not.toContain(here);
+    expect(ran).toContain(`"outline":["OUTLINE-OK Jordan looks out at the harbor.","${here}"]`);
+    expect(ran).toContain(`What the engine didn't take: 1 flagged, still in the reply's prompt (it has someone here whom the engine has elsewhere: "${here}").`);
+    expect(rig.rt.ledger.errors).toEqual([]);
+  });
+
+  test("a GM note written in GM → Workspace on the shown head swipe follows a Regenerate whose main agent revises its roles' runs before and after the plan", async () => {
+    const PROSE: JsonObject = { modelUse: { steps: { brief: { enabled: true, signals: ["always"] }, outline: { enabled: true, signals: ["always"] } }, budgets: { pre: { calls: 8 } } } };
+    const rig = new Rig({ shipped: true, minds: true });
+    const chatId = await rolesChat(rig, PROSE);
+    agentModels(rig);
+    await played(rig, chatId, "I look out at the harbor.", "The harbor is calm.");
+    const head = rig.host.head(chatId);
+    if (!head) throw new Error("no reply");
+    const path = "notes/gm.md";
+    rig.body(await rig.send({ type: "lre.workspace", op: "write", chatId, path, text: "GM-NOTE: Danny owes Priya." }));
+    const notes = async (): Promise<string[]> => (await listWorkspace(rig.rt, { userId: rig.host.userId, chatId })).filter((f) => f.transcript !== true).map((f) => f.path);
+    expect(await notes()).toEqual([path]);
+    // Each stage's first answers in, the main agent revises one of its runs once, then commits.
+    const revised = new Set<number>();
+    const asked = agentModels(rig, { director: () => JSON.stringify({ brief: "The harbor is grey.", beats: ["Jordan looks out at the harbor."] }) }, (req, n) => {
+      const agent = /^(\S+): the \w+ role answered/m.exec(resultsOf(req).join("\n"))?.[1];
+      if (!agent || revised.has(stageNumber(req))) return undefined;
+      revised.add(stageNumber(req));
+      return { content: "", toolCalls: [call("revise", { agentId: agent, message: "Once more, shorter." }, `v${n}`)] };
+    });
+    const g = await rig.host.start(chatId, { type: "regenerate" });
+    expect(g.halted).toBeUndefined();
+    await rig.host.finish(g, "The harbor is calm and grey.");
+    expect(rig.host.message(chatId, head.id).swipes.length).toBe(2);
+    expect(asked.flatMap(resultsOf).filter((r) => /: the (scene|director) role answered/.test(r)).length).toBeGreaterThan(0);
+    expect(revised.size).toBeGreaterThan(1);
+    expect(await notes()).toEqual([path]);
     expect(rig.rt.ledger.errors).toEqual([]);
   });
 });
