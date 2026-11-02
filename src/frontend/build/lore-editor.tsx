@@ -1,21 +1,23 @@
 // Build → Lore (DESIGN §4.2): the entries, searchable by title, alias, topic, keyword and text, with
-// the lookup table and the indexing jobs a tap away, and + New, which names a new entry; and the
-// entry page: its title and text, how lookups find it (aliases, topics and keywords as chips, then
-// links, group and priority), the source (read-only; an entry indexed from a World Info book whose
-// entry changed since can take the book's new text), and secrecy: who may read it, the gate (with
-// examples made of the world's names), whose own secret it is, and the helpers that may read the
-// secret, those whose output reaches the player not offered.
+// the lookup table and Index this text a tap away, and + New, which names a new entry; the lore index
+// of the world's books (each entry by its short id) with Build an index entry, which writes it into a
+// book the user picks, on their press only, for LRE to keep in sync until Settings → Lore stops it;
+// and the entry page: its title and text, how lookups find it (aliases, topics and keywords as chips,
+// then links, group and priority), the source (read-only; a copy an earlier build made of a World Info
+// entry says it is no longer read, its book entry being read live), and secrecy: who may read it, the
+// gate (with examples made of the world's names), whose own secret it is, and the helpers that may
+// read the secret, those whose output reaches the player not offered.
 // Styles: the lore block of styles/forms.ts.
 
 import { useEffect, useMemo, useState } from "preact/hooks";
 import type { JsonObject } from "../../shared/json";
 import { hasOwn } from "../../shared/json";
 import { LORE_AUDIENCE, loreIsSecret, loreSourceOf } from "../../shared/lore";
-import type { LoreDrift } from "../../shared/protocol";
+import type { LoreBookView, LoreIndexView } from "../../shared/protocol";
 import type { LoreEntryDef, LoreSource, StepPurpose, WorldDoc } from "../../shared/world";
 import type { App } from "../app";
 import { useApp } from "../app";
-import { Badge, Banner, Button, Empty, List, ListRow, PageHeader, SaveBar, Section, useBusy } from "../components";
+import { Badge, Banner, Button, Empty, HostSelect, List, ListRow, PageHeader, SaveBar, Section, useBusy } from "../components";
 import { strings } from "../decode";
 import { Icon } from "../icons";
 import type { EditorProps } from "../registry";
@@ -26,7 +28,7 @@ import { useHeld } from "./held";
 import { COLLECTION_SPECS, newItem } from "./schema";
 import { FieldInput, lintAt, SchemaFields, worldIdentifiers } from "./schema-form";
 import { TagListInput } from "./selector-editor";
-import { BookEntriesSection, GateExamples, LoreBooksSection, SecretAudience, SECRET_GATE_SPEC } from "./book-lore";
+import { BookEntriesSection, bookLabels, GateExamples, LoreBooksSection, SecretAudience, SECRET_GATE_SPEC } from "./book-lore";
 
 const specs = (keys: readonly string[]) => COLLECTION_SPECS.lore.filter((s) => keys.includes(s.key));
 const TEXT = specs(["title", "content"]);
@@ -35,17 +37,6 @@ const MORE = specs(["links", "group", "priority"]);
 const SECRET = specs(["visibility", "secret"]);
 const HOLDERS = specs(["holders"]);
 
-/** The world's book-sourced entries (or just `id`) whose book entry changed or is gone: asked again whenever their sources change. */
-function useDrift(app: App, worldId: string, lore: Readonly<Record<string, LoreEntryDef>>, id?: string): Record<string, LoreDrift> | null {
-  const [drift, setDrift] = useState<Record<string, LoreDrift> | null>(null);
-  const sourced = Object.entries(lore).filter(([key, l]) => (id === undefined || key === id) && loreSourceOf(l.source).kind === "book");
-  const signature = JSON.stringify(sourced.map(([key, l]) => [key, l.source]));
-  useEffect(() => {
-    if (sourced.length === 0) return;
-    void app.request(id === undefined ? { type: "lre.lore", op: "drift", worldId } : { type: "lre.lore", op: "drift", worldId, id }).then((body) => setDrift(body?.drift ?? {}));
-  }, [worldId, signature]);
-  return drift;
-}
 
 function useBookNames(app: App): Record<string, string> {
   const [names, setNames] = useState<Record<string, string>>({});
@@ -66,7 +57,6 @@ export function LoreList(props: { worldId: string }) {
   const [query, setQuery] = useState("");
   const [adding, setAdding] = useState(false);
   const doc = draft?.doc;
-  const drift = useDrift(app, props.worldId, doc?.lore ?? {});
   if (!draft || !doc) return null;
   const q = query.trim().toLowerCase();
   const all = Object.entries(doc.lore);
@@ -93,12 +83,13 @@ export function LoreList(props: { worldId: string }) {
             chevron
             onClick={() => go(app, { view: "part", worldId: draft.worldId, part: "loreIndex" })}
           />
-          <ListRow icon="book" title="Index a World Info book" subtitle="Optional: copy a book into the world's own lore, with aliases, topics and lookup terms, for a world you export" chevron onClick={() => go(app, { view: "job", worldId: draft.worldId, kind: "index_book" })} />
-          <ListRow icon="scroll" title="Index this text" subtitle="The same, from text you paste" chevron onClick={() => go(app, { view: "job", worldId: draft.worldId, kind: "index_text" })} />
+          <ListRow icon="book" title="World Info is read live" subtitle="The helpers and agents read your World Info books as they are now; nothing to copy or refresh. Settings → Lore picks which books they read." />
+          <ListRow icon="scroll" title="Index this text" subtitle="Lore entries made from text you paste, each for you to review" chevron onClick={() => go(app, { view: "job", worldId: draft.worldId, kind: "index_text" })} />
           <ListRow icon="lock" title="Secrecy in your World Info" subtitle="Move your books' secrets from LumiRPEngine's old fields to secret marks in their text, book by book, with a restore" chevron onClick={() => go(app, { view: "secrecy", worldId: draft.worldId })} />
         </List>
       </Section>
       <LoreBooksSection />
+      <LoreIndexSection worldId={draft.worldId} />
       <BookEntriesSection />
       <div class="lre-build-search">
         <Icon name="search" size={16} />
@@ -107,7 +98,7 @@ export function LoreList(props: { worldId: string }) {
       {shown.length === 0 ? (
         all.length === 0 ? (
           <Empty icon="book" title="No lore yet" action={adding ? undefined : add}>
-            Write an entry, or index a World Info book or some text.
+            Write an entry, or index some text. Your World Info books are read as they are, with no entry here.
           </Empty>
         ) : (
           <Empty icon="search" title="No matches">
@@ -119,14 +110,14 @@ export function LoreList(props: { worldId: string }) {
           <List>
             {shown.map(([id, l]) => {
               const source = loreSourceOf(l.source);
-              const changed = drift && hasOwn(drift, id) ? drift[id] : undefined;
+              const copy = source.kind === "book";
               const issues = lintAt(draft.lint, `lore.${id}`).length;
               const aliases = l.aliases ?? [];
               const named = l.topics ?? [];
               const subtitle = [aliases.length > 0 ? `also ${aliases.join(", ")}` : "", named.join(", ")].filter((part) => part !== "").join(" · ");
               const secret = loreIsSecret(l);
               const kind = SOURCE_BADGE[source.kind];
-              const badges = secret || kind || changed || issues > 0;
+              const badges = secret || kind || copy || issues > 0;
               return (
                 // The wrapper only carries the row's hook for scripts and tests; it takes no box.
                 <div key={id} class="lre-form-lore-row" data-lre-lore={id}>
@@ -138,8 +129,8 @@ export function LoreList(props: { worldId: string }) {
                       badges ? (
                         <span class="lre-form-lore-badges">
                           {secret ? <Badge tone="warn">Secret</Badge> : null}
-                          {kind ? <Badge>{source.kind === "ai" && source.status === "pending" ? "AI · to review" : kind}</Badge> : null}
-                          {changed ? <Badge tone={changed.status === "changed" ? "warn" : "neg"}>{changed.status === "changed" ? "Book changed" : "Book entry gone"}</Badge> : null}
+                          {kind && !copy ? <Badge>{source.kind === "ai" && source.status === "pending" ? "AI · to review" : kind}</Badge> : null}
+                          {copy ? <Badge tone="warn">Old copy · not read</Badge> : null}
                           {issues > 0 ? <Badge tone="warn">{issues}</Badge> : null}
                         </span>
                       ) : undefined
@@ -157,40 +148,126 @@ export function LoreList(props: { worldId: string }) {
   );
 }
 
-/** Where the entry came from, read-only; a book entry that changed since can be refreshed into the form. */
-function SourceSection(props: { app: App; doc: WorldDoc; id: string; source: LoreSource; onSource(next: LoreSource, content?: string): void }) {
+export interface LoreIndexProps {
+  worldId: string;
+  /** The index as `lre.lore index` answers it, once read. */
+  view: LoreIndexView | null;
+  /** The user's World Info books (the engine's own left out), once loaded: those Build an index entry may write into. */
+  books: readonly LoreBookView[] | null;
+  /** The book picked to write the entry into ("" for none). */
+  target: string;
+  pickTarget(bookId: string): void;
+  /** Build an index entry, on the user's press: `lre.lore build` into `target`. */
+  build(): void;
+  openSettings(): void;
+  busy: boolean;
+}
+
+/**
+ * The lore index of the world's books as Build shows it, without hooks: each book with how many of
+ * its entries the index lists, the text an index entry would hold, and either the entry LRE keeps in
+ * sync (Settings → Lore stops it) or a book picker and Build an index entry.
+ */
+export function LoreIndexBody(props: LoreIndexProps) {
+  const { view, busy } = props;
+  const labels = bookLabels(props.books ?? []);
+  const built = view?.built ?? null;
+  const settings = (
+    <Button size="sm" variant="secondary" icon="sliders" onClick={props.openSettings}>
+      Open Settings → Lore
+    </Button>
+  );
+  return (
+    <Section title="Lore index" aside={built ? <Badge tone="accent">Kept in sync</Badge> : undefined}>
+      <div class="lre-stack" data-lre-lore-index>
+        <span class="lre-small lre-muted">The agents find World Info entries by the short id each has here: one line per entry, with its title and what it holds. They ask for it with lore_index, or get it in their prompts when Settings → Lore says so.</span>
+        {view === null ? (
+          <span class="lre-small lre-muted">Reading the index…</span>
+        ) : (
+          <>
+            {view.books.length > 0 ? (
+              <List>
+                {view.books.map((b) => (
+                  <ListRow key={b.id} icon="book" title={b.name} value={`${b.entries} ${b.entries === 1 ? "entry" : "entries"}`} valueTone="muted" />
+                ))}
+              </List>
+            ) : (
+              <span class="lre-small lre-muted">No book this world reads has an entry anyone may read.</span>
+            )}
+            <details class="lre-form-lore-index-preview">
+              <summary>What an index entry holds</summary>
+              <pre class="lre-form-lore-mono" data-lre-lore-index-text>
+                {view.text}
+              </pre>
+            </details>
+          </>
+        )}
+        {built ? (
+          <Banner tone="info" actions={settings}>
+            <span data-lre-lore-index-built>
+              {built.worldId === props.worldId ? `${built.book} has this index as entry ${built.entryId}, which LumiRPEngine writes again whenever the index changes.` : `${built.book} has an index entry LumiRPEngine keeps in sync for another world (${built.worldId}). One is kept at a time: stop it before building one for this world.`} Stop it in Settings → Lore; the entry stays in its book.
+            </span>
+          </Banner>
+        ) : (
+          <div class="lre-stack">
+            <HostSelect label="Book to write the index entry into" value={props.target} placeholder="Pick one of your books" options={(props.books ?? []).map((b) => ({ value: b.id, label: labels[b.id] ?? b.name }))} disabled={busy} onChange={props.pickTarget} />
+            <span class="lre-small lre-muted">Writes one entry, always on and kept out of recursion, that lists every entry anyone may read. Nothing is written until you press Build.</span>
+            <span>
+              <Button variant="secondary" icon="plus" disabled={busy || props.target === "" || view === null} onClick={props.build}>
+                Build an index entry
+              </Button>
+            </span>
+          </div>
+        )}
+      </div>
+    </Section>
+  );
+}
+
+/** Build → Lore's lore index: read when the page opens, and built into the book picked on the user's press. */
+function LoreIndexSection(props: { worldId: string }) {
+  const app = useApp();
+  const [view, setView] = useState<LoreIndexView | null>(null);
+  const [books, setBooks] = useState<LoreBookView[] | null>(null);
+  const [target, setTarget] = useState("");
+  const [busy, run] = useBusy();
+  useEffect(() => {
+    void app.request({ type: "lre.lore", op: "index", worldId: props.worldId }).then((body) => setView(body?.index ?? null));
+    void app.request({ type: "lre.lore", op: "books" }).then((body) => setBooks(body?.books ?? []));
+  }, [props.worldId]);
+  return (
+    <LoreIndexBody
+      worldId={props.worldId}
+      view={view}
+      books={books}
+      target={target}
+      pickTarget={setTarget}
+      busy={busy}
+      build={() =>
+        run(async () => {
+          const body = await app.request({ type: "lre.lore", op: "build", worldId: props.worldId, bookId: target });
+          if (body?.index) setView(body.index);
+        })
+      }
+      openSettings={() => app.ui.update((ui) => ({ ...ui, mode: "settings", settings: { page: "lore" } }))}
+    />
+  );
+}
+
+/** Where the entry came from, read-only. */
+function SourceSection(props: { app: App; source: LoreSource; onSource(next: LoreSource): void }) {
   const names = useBookNames(props.app);
-  const drift = useDrift(props.app, props.doc.id, props.doc.lore, props.id);
   const { source } = props;
   if (source.kind === "book") {
-    const now = drift && hasOwn(drift, props.id) ? drift[props.id] : undefined;
-    const refreshed = now?.status === "changed" && now.hash === source.hash;
     return (
-      <Section title="Source" aside={<Badge>World Info</Badge>}>
+      <Section title="Source" aside={<Badge tone="warn">Old copy</Badge>}>
         <div class="lre-form-lore-source" data-lre-lore-source="book">
           <span>
             {names[source.bookId] ?? source.bookId} · entry <code class="lre-form-lore-mono">{source.entryId}</code>
           </span>
-          {drift === null ? (
-            <span class="lre-form-lore-note">Checking the book…</span>
-          ) : refreshed ? (
-            <span class="lre-form-lore-note">Refreshed from the book. Save to draft to keep it.</span>
-          ) : now?.status === "changed" ? (
-            <Banner
-              tone="warn"
-              actions={
-                <Button size="sm" icon="refresh" onClick={() => props.onSource({ ...source, hash: now.hash }, now.content)}>
-                  Refresh from book
-                </Button>
-              }
-            >
-              The book entry has changed since this was indexed.
-            </Banner>
-          ) : now?.status === "missing" ? (
-            <Banner tone="warn">The book entry is gone, or its book was deleted. The text here stays as it is.</Banner>
-          ) : (
-            <span class="lre-form-lore-note">Matches the book.</span>
-          )}
+          <Banner tone="info">
+            An earlier version of LumiRPEngine copied this entry from your World Info. LumiRPEngine now reads the book entry itself, as the book has it, so this copy isn't read. Its secrecy still holds the book entry back; delete the copy once you no longer need that.
+          </Banner>
         </div>
       </Section>
     );
@@ -316,13 +393,7 @@ export function LoreEditor(props: EditorProps) {
           <SchemaFields specs={MORE} value={value} ctx={ctx} onChange={setValue} />
         </div>
       </Section>
-      <SourceSection
-        app={app}
-        doc={props.world}
-        id={id}
-        source={loreSourceOf(value.source)}
-        onSource={(source, content) => setValue({ ...value, source, ...(content !== undefined ? { content } : {}) })}
-      />
+      <SourceSection app={app} source={loreSourceOf(value.source)} onSource={(source) => setValue({ ...value, source })} />
       <Section title="Secrecy">
         <div class="lre-form-lore-fields">
           <SchemaFields specs={SECRET} value={value} ctx={ctx} onChange={setValue} />

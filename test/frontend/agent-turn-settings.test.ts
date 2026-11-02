@@ -70,7 +70,7 @@ function limitRow(tree: unknown, id: string): unknown {
 }
 
 /** The Budgets rows of what the engine keeps in memory for agent turns, by setting. */
-const KEPT_IDS = ["runs", "gates", "watchers"] as const;
+const KEPT_IDS = ["runs", "gates", "watchers", "live"] as const;
 
 /** Every Default on the agent-turn parts of the Agents page, rows included. */
 function agentsPageDefaults(agents: AgentSettings): unknown[] {
@@ -115,8 +115,8 @@ describe("Settings → Agents: how an agent turn runs", () => {
     expect(take()).toEqual({ agents: { gmOpsPerTurn: 4 } });
   });
 
-  test("Budgets keeps in memory 64 agent turns under way, 256 waiting at a gate and 256 watched chats by default: counts of at least 1, never lifted", () => {
-    const shown: Record<(typeof KEPT_IDS)[number], [string, number]> = { runs: ["Agent turns under way", 64], gates: ["Turns waiting at a gate", 256], watchers: ["Chats whose review cards are watched", 256] };
+  test("Budgets keeps in memory 64 agent turns under way, 256 waiting at a gate, 256 watched chats and 16 chats in the live view by default: counts of at least 1, never lifted", () => {
+    const shown: Record<(typeof KEPT_IDS)[number], [string, number]> = { runs: ["Agent turns under way", 64], gates: ["Turns waiting at a gate", 256], watchers: ["Chats whose review cards are watched", 256], live: ["Chats in the live view", 16] };
     for (const id of KEPT_IDS) {
       const row = limitRow(budgets(DEFAULTS), id);
       expect(propsOf(row, HostSwitch)).toEqual([]);
@@ -168,7 +168,7 @@ describe("Settings → Agents: how an agent turn runs", () => {
       a.compaction = { atTokens: 48_000, keepTurns: 5, summarizeTool: false };
       a.recording.outputChars = 1500;
       a.gmOpsPerTurn = 4;
-      a.kept = { runs: 8, gates: 16, watchers: 32 };
+      a.kept = { runs: 8, gates: 16, watchers: 32, live: 4 };
       a.vsClassic = 1.5;
     });
     const resets: [unknown, string, JsonObject][] = [
@@ -183,6 +183,7 @@ describe("Settings → Agents: how an agent turn runs", () => {
       [limitRow(budgets(changed), "runs"), "Reset Agent turns under way to its default, 64", { kept: { runs: null } }],
       [limitRow(budgets(changed), "gates"), "Reset Turns waiting at a gate to its default, 256", { kept: { gates: null } }],
       [limitRow(budgets(changed), "watchers"), "Reset Chats whose review cards are watched to its default, 256", { kept: { watchers: null } }],
+      [limitRow(budgets(changed), "live"), "Reset Chats in the live view to its default, 16", { kept: { live: null } }],
       [acceptance(changed), "Reset Against classic to its default, 2×", { vsClassic: null }],
     ];
     expect(agentsPageDefaults(changed)).toEqual(resets.map(([, label]) => label));
@@ -362,7 +363,7 @@ describe("the agent-turn settings in the settings store", () => {
       compaction: { atTokens: 48_000, keepTurns: 5, summarizeTool: false },
       recording: { outputChars: 1500 },
       gmOpsPerTurn: 4,
-      kept: { runs: 64, gates: 16, watchers: 256 },
+      kept: { runs: 64, gates: 16, watchers: 256, live: 16 },
       vsClassic: 1.5,
     });
 

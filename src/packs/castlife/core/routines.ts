@@ -9,7 +9,7 @@ import type { JsonObject, JsonValue } from "../../../shared/json";
 import { isRecord } from "../../../shared/json";
 import { hashParts } from "../../../shared/hash";
 import type { LintIssue } from "../../../shared/protocol";
-import { FIDELITIES } from "../../../shared/minds";
+import { FIDELITIES, wiFactIdOfLiveLore } from "../../../shared/minds";
 import {
   BASIC_BLOCKS,
   blockShapeProblems,
@@ -466,8 +466,10 @@ export function sourceView(ctx: Pick<ReadContext, "world" | "state">, source: Ro
     case "authored":
       return { ...source, label: "Authored" };
     case "lore": {
+      // A World Info entry (`book:<bookId>/<entryId>`) the world being read doesn't hold goes by where it is.
       const title = own(ctx.world.lore, source.entry)?.title;
-      return { ...source, label: `Lore: ${title ?? source.entry}`, ...(title !== undefined ? { title } : {}) };
+      const fallback = wiFactIdOfLiveLore(source.entry) !== null ? `World Info: ${source.entry.slice("book:".length)}` : `Lore: ${source.entry}`;
+      return { ...source, label: title !== undefined ? `Lore: ${title}` : fallback, ...(title !== undefined ? { title } : {}) };
     }
     case "sheet":
       return { ...source, label: `${own(ctx.state.entities, source.entity)?.name ?? source.entity} · ${source.field.replace(/_/g, " ")}` };
@@ -528,7 +530,8 @@ export function routineIssues(world: WorldDoc, reg: Registry, id: string, value:
   def.blocks.forEach((entry, i) => {
     const path = `${at}.blocks.${i}`;
     const source = entry.source ?? def.source;
-    if (source?.type === "lore" && !own(world.lore, source.entry)) warn(ROUTINE_LINT.source, `${path}.source`, `Routine ${id}, block ${entry.id}: rests on lore entry ${source.entry}, which the world doesn't have.`);
+    // A World Info entry (`book:<bookId>/<entryId>`) is read live, from books the lint can't see: only the world's own lore is checked.
+    if (source?.type === "lore" && wiFactIdOfLiveLore(source.entry) === null && !own(world.lore, source.entry)) warn(ROUTINE_LINT.source, `${path}.source`, `Routine ${id}, block ${entry.id}: rests on lore entry ${source.entry}, which the world doesn't have.`);
     if (source?.type === "sheet" && !own(world.entities, source.entity)) warn(ROUTINE_LINT.source, `${path}.source`, `Routine ${id}, block ${entry.id}: rests on ${source.entity}'s sheet, who isn't in the world.`);
     if (isOff(entry)) return;
     const b = entry;
@@ -612,7 +615,7 @@ export function schedulesLint(world: WorldDoc, reg: Registry, state: Readonly<Wo
   const issues: LintIssue[] = [];
   const time = /^([01]\d|2[0-4]):[0-5]\d$/;
   const sourceIssue = (source: ScheduleDef["source"], path: string, name: string): void => {
-    if (source?.type === "lore" && !own(world.lore, source.entry)) issues.push({ severity: "warning", code: ROUTINE_LINT.scheduleSource, path, message: `${name} rests on lore entry ${source.entry}, which the world doesn't have.` });
+    if (source?.type === "lore" && wiFactIdOfLiveLore(source.entry) === null && !own(world.lore, source.entry)) issues.push({ severity: "warning", code: ROUTINE_LINT.scheduleSource, path, message: `${name} rests on lore entry ${source.entry}, which the world doesn't have.` });
     if (source?.type === "sheet" && !own(world.entities, source.entity)) issues.push({ severity: "warning", code: ROUTINE_LINT.scheduleSource, path, message: `${name} rests on ${source.entity}'s sheet, who isn't in the world.` });
   };
   for (const s of allSchedules(reg, world)) {

@@ -1,8 +1,10 @@
-// What every write tool answers (AGENT-LOOP-PLAN §6; INC1-SPEC R3b): its operation's dry run, never
-// the write itself. An agent only proposes a change; the GM assistant collects its proposals (its
-// `env.writer` keeps each dry run's operation) and applies them on the game master's Apply, or at
-// once where Settings lets it. A tool answers the dry run as JSON: what the change would do in plain
-// words, its change type and mode, or the code and reason it can't be made.
+// What every write tool answers (AGENT-LOOP-PLAN §6; INC1-SPEC R3b). Outside a turn, its operation's
+// dry run, never the write itself: an agent only proposes a change, the GM assistant collects its
+// proposals (its `env.writer` keeps each dry run's operation) and applies them on the game master's
+// Apply, or at once where Settings lets it. Working a turn, the turn's writer stages it at once
+// (`ToolWriter.stage`): it lands when the turn commits, or waits for the GM's Apply on the review
+// card. A tool answers as JSON: what the change does in plain words, its change type and mode (and, in
+// a turn, where it stands), or the code and reason it can't be made.
 
 import { TOOL_NOTE, toolArgTextId } from "../../../shared/agent-tools";
 import { WRITE_NOTE } from "../../../shared/agent-tools-write";
@@ -47,12 +49,15 @@ export function fieldValueArg(view: ToolReadView, args: JsonObject, key: string,
   return jsonArg(args, key, type === "text" || type === "enum");
 }
 
-/** The dry run of `op`, as a write tool answers it; an agent with no writer reads only. */
+/** What `op` comes to, as a write tool answers it: staged into the turn by a turn's writer, else its dry run; an agent with no writer reads only. */
 export async function propose(view: ToolReadView, writer: ToolWriter | null, op: AgentOp): Promise<ToolOutcome> {
   if (!writer) return view.refuse(WRITE_NOTE.noWriter);
-  const out = await writer.dryRun(op);
+  const out = writer.stage ? await writer.stage(op) : await writer.dryRun(op);
   if ("refused" in out) return { text: JSON.stringify({ refused: { code: out.code, reason: out.reason } }), error: true };
-  return view.answer({ proposed: { key: out.key, changeType: out.changeType, mode: out.mode, lines: out.lines } });
+  const change = { key: out.key, changeType: out.changeType, mode: out.mode, lines: out.lines };
+  // A staged change says where it stands: landing with the turn, or waiting on the review card.
+  if (writer.stage) return view.answer({ staged: { ...change, lands: view.text(out.mode === "confirm" ? WRITE_NOTE.stagedReview : WRITE_NOTE.staged) } });
+  return view.answer({ proposed: change });
 }
 
 /** A GM edit as a tool builds it from its arguments: the writer reads it for its shape again (`parseEditOps`), so a malformed one is refused there. */

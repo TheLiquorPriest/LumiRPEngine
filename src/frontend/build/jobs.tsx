@@ -87,7 +87,6 @@ export function proposalWrites(worldId: string, proposals: readonly JobProposal[
 /** Each tool as Build's Tools list and the job's page name it: its title, what it does, its icon. */
 export const JOB_INFO: Readonly<Record<JobKind, { title: string; hint: string; icon: IconName }>> = {
   import_lore: { title: "Import from lore", hint: "Turn lore-book entries into entities, places and facts", icon: "download" },
-  index_book: { title: "Index a World Info book", hint: "Lore entries, aliases, topics and lookup terms from one of your books", icon: "book" },
   index_text: { title: "Index this text", hint: "Lore entries from text you paste; review each one", icon: "scroll" },
   refine: { title: "Build / Refine with AI", hint: "Describe changes; review every proposal", icon: "sparkle" },
   describe_map: { title: "Describe a map", hint: "Write a place's inside in your words; the AI draws it as a map to review", icon: "map" },
@@ -127,34 +126,10 @@ function JobInput(props: { kind: JobKind; onStart(input: Record<string, string |
   const mapIdId = useId();
   useEffect(() => {
     // The books every lore picker lists, so two that share a name read apart here too.
-    if (props.kind === "import_lore" || props.kind === "index_book") void app.request({ type: "lre.lore", op: "books" }).then((body) => setBooks(body?.books ?? []));
+    if (props.kind === "import_lore") void app.request({ type: "lre.lore", op: "books" }).then((body) => setBooks(body?.books ?? []));
   }, [props.kind]);
   const labels = useMemo(() => bookLabels(books ?? []), [books]);
   if (props.kind === "propose_routines") return <RoutineJobStart busy={props.busy} onStart={(start) => props.onStart(start.owners ? { owners: start.owners } : {})} />;
-  if (props.kind === "index_book") {
-    return (
-      <div class="lre-stack">
-        <p class="lre-build-note">Pick one of your World Info books. Each entry with text becomes a lore entry to review, with aliases, topics, links and lookup terms, and keeps the book's own text; entries already in the world's lore are skipped. Nothing changes until you apply.</p>
-        {books === null ? (
-          <Empty icon="hourglass">Loading books…</Empty>
-        ) : books.length === 0 ? (
-          <Empty icon="book">No World Info books.</Empty>
-        ) : (
-          <div class="lre-build-picks" role="radiogroup" aria-label="World Info book">
-            {books.map((book) => (
-              <label key={book.id} class="lre-build-pick">
-                <input type="radio" name="lre-index-book" checked={picked[0] === book.id} onChange={() => setPicked([book.id])} />
-                <span>{labels[book.id] ?? book.name}</span>
-              </label>
-            ))}
-          </div>
-        )}
-        <Button variant="primary" block disabled={picked.length === 0 || props.busy} onClick={() => props.onStart({ bookId: picked[0] ?? "" })}>
-          Index the book
-        </Button>
-      </div>
-    );
-  }
   if (props.kind === "index_text") {
     return (
       <div class="lre-stack">
@@ -299,9 +274,7 @@ export function startTicked(proposals: readonly JobProposal[]): Set<string> {
 /** A lore proposal's lines in the review: where it came from, its aliases, topics and links, and the lookup terms it adds. */
 function LoreProposalLines(props: { p: JobProposal; bookNames: Readonly<Record<string, string>>; names: Readonly<Record<string, string>> }) {
   const value = isRecord(props.p.value) ? props.p.value : {};
-  const source = loreSourceOf(value.source);
-  const link = source.kind === "book" ? `${source.bookId}/${source.entryId}` : "";
-  const entry = source.kind === "book" ? ((props.p.sourceNames && hasOwn(props.p.sourceNames, link) ? props.p.sourceNames[link] : undefined) ?? source.entryId) : "";
+  // Index this text's proposals hold the helper's words: World Info is read live, never indexed into the world.
   const lists: [string, string[]][] = [
     ["Aliases", strings(value.aliases)],
     ["Topics", strings(value.topics)],
@@ -311,7 +284,7 @@ function LoreProposalLines(props: { p: JobProposal; bookNames: Readonly<Record<s
   return (
     <>
       <span class="lre-build-proposal-line" data-lre-proposal-from>
-        {source.kind === "book" ? `From ${hasOwn(props.bookNames, source.bookId) ? props.bookNames[source.bookId] : source.bookId}: ${entry}` : "From the pasted text, in the AI's words"}
+        From the pasted text, in the AI's words
       </span>
       {lists
         .filter(([, items]) => items.length > 0)

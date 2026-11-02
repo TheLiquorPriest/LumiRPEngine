@@ -65,7 +65,7 @@ const GROUPS: readonly { title: string; collections: readonly WorldCollection[] 
 // so a part with a page can never be left off the list, as Pinned lore once was.
 const PARTS = Object.keys(PART_INFO) as WorldPart[];
 
-const TOOLS: readonly JobKind[] = ["import_lore", "index_book", "index_text", "refine", "describe_map", "propose_routines", "playtest", "check_world"];
+const TOOLS: readonly JobKind[] = ["import_lore", "index_text", "refine", "describe_map", "propose_routines", "playtest", "check_world"];
 
 export function Build() {
   const route = useUi((ui) => ui.build);

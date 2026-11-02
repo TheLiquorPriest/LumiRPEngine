@@ -45,6 +45,26 @@ export function isLearnedPath(path: string): boolean {
   return path.startsWith(LEARNED_DIR);
 }
 
+/** The pins manifest's path in the chat's workspace (a stored name, §16.7): which files each role is shown first (`backend/agents/turn-task.ts`). */
+export const PINS_PATH = ".pins.json";
+
+/**
+ * The turns' transcripts' folder (DESIGN §4.6): a read-only area GM → Workspace lists, one file for
+ * each reply on the chat's chain whose turn record keeps a transcript (`RecSession.transcript`), so
+ * the files follow the chat's path as its workspace does. Their readers are the GM's alone, nothing
+ * writes, moves, deletes or pins a file under it, and none is a pin or part of the main session.
+ */
+export const TRANSCRIPTS_DIR = "transcripts/";
+
+export function isTranscriptPath(path: string): boolean {
+  return path.startsWith(TRANSCRIPTS_DIR);
+}
+
+/** The transcript of the reply at `turn` on the chain (1-based): `transcripts/reply-0004.md`, the number padded so the list reads in order. */
+export function transcriptPath(turn: number): string {
+  return `${TRANSCRIPTS_DIR}reply-${String(turn).padStart(4, "0")}.md`;
+}
+
 /** How long the agent stores keep what nothing needs (Settings → Agents → Retention). */
 export interface RetentionSettings {
   /** Days Diagnostics keeps an agent call's text after the call; "none" keeps it as long as its record. */

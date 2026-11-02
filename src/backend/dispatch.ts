@@ -46,9 +46,10 @@ import { activeRecord } from "../engine/ledger/path";
 import type { StoredChip } from "./chips";
 import { toChain } from "./ledger-io";
 import { JobError, type JobRunner } from "./jobs";
-import { bookDrift, saveFromChat } from "./lore";
+import { saveFromChat } from "./lore";
 import { pinBooks, pinEntries, pinViews } from "./lore-pins";
 import { markBookEntry, MarkChangeError, markChangeOf, writeBookFields } from "./book-lore";
+import { LoreIndexError } from "./lore-routing";
 import { bookLoreFieldsOf, engineWroteEntry, OLD_SECRECY_FIELDS } from "../shared/lore";
 import { MindsRuns, RunError } from "./minds-run";
 import { ACTIVE_CONNECTION, readRun, replyReadKey, Runtime, unpricedChip } from "./runtime";
@@ -666,9 +667,8 @@ export class Dispatcher {
         const change = { ...(r.knowledge !== undefined ? { knowledge: r.knowledge } : {}), ...(narrator !== undefined ? { narrator } : {}), ...(engine !== undefined ? { engine } : {}) };
         const changes = Object.keys(change).length > 0;
         const prefs = changes ? await this.rt.chatKnowledge.set(r.chatId, userId, change) : await this.rt.chatKnowledge.get(r.chatId, userId);
+        // A turn under way finishes on the engine and choices it started with (`TurnFrame`): the change applies from the chat's next turn.
         if (changes) this.rt.push.changed(r.chatId, userId);
-        // A turn the other engine prepared goes at once: the switch is one of what a turn is made from (`TurnInputs.engine`).
-        if (engine !== undefined) this.rt.ledger.inputsChanged(userId);
         reply("lre.chat.knowledge", { knowledge: prefs.knowledge ?? null, narrator: prefs.narrator ?? null, ...(prefs.engine === "agents" ? { engine: "agents" as const } : {}) });
         return;
       }
@@ -740,10 +740,23 @@ export class Dispatcher {
           reply("lre.lore", { pins: await pinViews(this.rt.host, (await this.head(r.chatId, userId)).world, userId) });
           return;
         }
-        const world = await this.rt.worlds.working(r.worldId, userId);
-        if (r.id !== undefined && !(safeKey(r.id) && hasOwn(world.lore, r.id))) throw new RequestError("not_found", "no such lore entry");
-        reply("lre.lore", { drift: await bookDrift(this.rt.host, world, userId, r.id) });
-        return;
+        if (r.op === "index" || r.op === "build") {
+          // The lore index of a world's books (DESIGN §4.2); Build an index entry writes it into one of the user's books, on the user's press.
+          if (typeof r.worldId !== "string" || r.worldId === "") throw new RequestError("bad_request", "name the world");
+          if (!(await this.rt.worlds.index(r.worldId, userId))) throw new RequestError("not_found", "no such world");
+          if (r.op === "build") {
+            if (typeof r.bookId !== "string" || r.bookId === "") throw new RequestError("bad_request", "name the book to write the index into");
+            try {
+              await this.rt.loreRouting.build(userId, r.worldId, r.bookId);
+            } catch (error) {
+              if (error instanceof LoreIndexError) throw new RequestError("bad_request", error.message);
+              throw error;
+            }
+          }
+          reply("lre.lore", { index: await this.rt.loreRouting.view(userId, r.worldId) });
+          return;
+        }
+        throw new RequestError("bad_request", "no such lore request");
       }
       case "lre.minds": {
         // GM → Minds (DESIGN §24.9): sent only from behind the GM gate; its progress goes to this session.
@@ -825,6 +838,19 @@ export class Dispatcher {
           if (error instanceof ReviewError) throw new RequestError(error.code, error.message);
           throw error;
         }
+        return;
+      }
+      case "lre.live": {
+        // GM → Live (DESIGN §4.6): behind the GM gate, as `lre.gm` is; what a run does is pushed only to the pages that asked about its chat.
+        // The view is in memory: answered at once, never behind the turn the page wants to watch.
+        if (r.op === "leave") {
+          this.rt.live.leave(r.chatId, userId, session ?? "");
+          reply("lre.live", { live: null });
+          return;
+        }
+        if (r.op !== "get") throw new RequestError("bad_request", "op must be get or leave");
+        this.rt.live.watch(r.chatId, userId, session ?? "");
+        reply("lre.live", { live: this.rt.live.view(r.chatId, userId) });
         return;
       }
       case "lre.prompts": {

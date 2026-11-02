@@ -54,7 +54,8 @@ describe("lore_read of a World Info entry", () => {
     const mark = bookMarkLoreId(bookId, entryId, 1);
 
     const pov = entryOf(await loreRead(rig, chatId, "pov", id));
-    expect(pov).toMatchObject({ id, title: "The ferry" });
+    // Read by its lore id, it answers by its short id: the first LRE gave, as the entry carries no tag.
+    expect(pov).toMatchObject({ id: "lre0001", title: "The ferry" });
     expect(pov.text).toContain(FERRY);
     expect(pov.text).not.toContain("DEBT-MARK");
     expect(pov.text).not.toContain("Marcus");
@@ -62,7 +63,7 @@ describe("lore_read of a World Info entry", () => {
 
     const marked = `${DEBT} (a secret only Marcus Delgado knows)`;
     const everyone = entryOf(await loreRead(rig, chatId, "everyone", id));
-    expect(everyone).toMatchObject({ id, title: "The ferry" });
+    expect(everyone).toMatchObject({ id: "lre0001", title: "The ferry" });
     expect(everyone.text).toContain(FERRY);
     expect(everyone.text).toContain(marked);
     expect(entryOf(await loreRead(rig, chatId, "everyone", mark)).text).toBe(marked);

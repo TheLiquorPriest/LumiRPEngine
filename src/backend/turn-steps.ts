@@ -13,6 +13,7 @@ import type { EntityId, UserId } from "../shared/ids";
 import type { JsonObject, JsonValue } from "../shared/json";
 import { hasOwn, isRecord, safeKey } from "../shared/json";
 import type { LedgerEvent } from "../shared/ledger";
+import { ELAPSED_TEXT_IDS, type PromptTexts } from "../shared/prompts";
 import type { LookupLimits, ModelUseSettings, StepConfig, UserSettings } from "../shared/settings";
 import { recentOf, stepConfigOf } from "../shared/settings";
 import type { ChainMessage } from "../engine/ledger/chain";
@@ -23,7 +24,8 @@ import { DECISION_PROMPTS, PROSE_PROMPTS } from "../shared/steps";
 import type { Timeout } from "../shared/timeouts";
 import { within } from "../shared/timeouts";
 import type { ActionDef, ParamDef, StepPurpose, StepTemplateDef, WorldCurrency, WorldDoc } from "../shared/world";
-import { calendarOf, dateAt, dayPartAt, formatClock } from "../engine/calendar";
+import { calendarOf, clockSpanWords, dateAt, dayPartAt, formatClock, sceneOffset } from "../engine/calendar";
+import { spanText } from "../engine/action-words";
 import type { Judgement } from "../engine/adjudication";
 import type { Answers, Questions } from "../engine/decide";
 import { sample } from "../engine/decide";
@@ -43,8 +45,35 @@ import { selectorMatches } from "../engine/selector";
 import { LookupBudget, type StepLore } from "./lore-steps";
 import type { Guidance } from "./preset-binding";
 import { inMinorUnits, type Steps } from "./steps";
+import { renderPrompt } from "./prompts";
 
 // ---------------------------------------------------------------- facts the steps see
+
+/**
+ * The engine's clock at `at` (now, by default), as the Scene section tells it (`sceneOffset`): the
+ * helpers' facts lead with it and a step's `{{clock}}` is it, so no helper is told another time than
+ * the narrator's Scene.
+ */
+export function sceneClock(ctx: Pick<ReadContext, "world" | "state" | "levelOf">, at: number = ctx.state.clock): string {
+  const { world, state } = ctx;
+  return formatClock(calendarOf(world), at, sceneOffset(world, at, placeOfEntity(state, world.pov), ctx.levelOf(world.pov, "calendar")));
+}
+
+/**
+ * How long a turn took in the engine's clock (DESIGN §9.2), which ended at `ctx`'s clock: the Scene
+ * section's elapsed time, and the director's, each in `texts` (the Final output's Elapsed time texts,
+ * the user's own where they have them: `ELAPSED_TEXT_IDS`). Where the Scene tells the time of day
+ * (Calendar 2 on), from when to when, so its time line reads as when the turn's actions end.
+ */
+export function turnTimeLine(ctx: Pick<ReadContext, "world" | "state" | "levelOf">, elapsed: number, texts: PromptTexts): string {
+  if (elapsed <= 0) return renderPrompt(ELAPSED_TEXT_IDS.none, texts, {});
+  const { world, state } = ctx;
+  const level = ctx.levelOf(world.pov, "calendar");
+  const span = spanText(elapsed);
+  if (level < 2) return renderPrompt(ELAPSED_TEXT_IDS.took, texts, { span });
+  const ends = clockSpanWords(world, state.clock - elapsed, state.clock, placeOfEntity(state, world.pov), level);
+  return renderPrompt(ELAPSED_TEXT_IDS.span, texts, { span, from: ends.from, to: ends.to });
+}
 
 /** The most fact lines the helpers read, and the most characters of each. */
 const FACT_LINES = 40;
@@ -68,7 +97,7 @@ export function factLines(registry: Registry, world: WorldDoc, state: Readonly<W
     const pov = state.entities[world.pov];
     // Where the POV is, as every player surface names it: a place it can't see is somewhere unnamed.
     const place = povPlace(registry, world, state);
-    out.push(`${pov?.name ?? world.pov} is ${place === null ? "at an unknown place" : place.id === null ? "somewhere" : `at ${place.name}`}; it is ${formatClock(calendarOf(world), state.clock)}.`);
+    out.push(`${pov?.name ?? world.pov} is ${place === null ? "at an unknown place" : place.id === null ? "somewhere" : `at ${place.name}`}; it is ${sceneClock(ctx)}.`);
     // People names the POV first; the line above already does, so its own line comes in only for the needs it adds.
     const named = `${povLead(pov?.name ?? world.pov)}.`;
     const seen = new Set(out);

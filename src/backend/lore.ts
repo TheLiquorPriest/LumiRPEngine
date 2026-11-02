@@ -1,57 +1,18 @@
-// Lore curation on the host (DESIGN §4.2): whether a lore entry indexed from a World Info book still
-// matches its book entry (the host's books are readable, so the entry's stored hash is compared
-// with the book entry's text now; Build offers the new text for review), and saving a chat's reply
-// or an excerpt of it as a draft lore entry of the chat's world.
+// Lore curation on the host (DESIGN §4.2): saving a chat's reply or an excerpt of it as a draft lore
+// entry of the chat's world. World Info needs no curation here: it is read live (`book-lore.ts`).
 
 import type { ChatId, UserId, WorldId } from "../shared/ids";
 import type { JsonObject } from "../shared/json";
 import { hasOwn } from "../shared/json";
-import { bookTextHash, loreSourceOf, topicIdOf } from "../shared/lore";
-import { publicText, wholeEntrySecret } from "../shared/secret-marks";
+import { topicIdOf } from "../shared/lore";
 import { neutralizeMacros } from "../shared/macros";
-import type { LoreDrift } from "../shared/protocol";
 import { PROTOCOL_VERSION } from "../shared/protocol";
-import type { WorldDoc } from "../shared/world";
-import type { HostBookEntry, HostPort } from "./host";
+import type { HostPort } from "./host";
 import { readableReply } from "./json-hiding";
 import { type DraftNotice, WorldError, type WorldStore } from "./worlds";
 
 /** The most of a chat's text a saved entry keeps. */
 export const SAVED_MAX_CHARS = 20_000;
-
-/**
- * The world's book-sourced entries (or just `only`) whose book entry changed since they were indexed,
- * or is gone. Each book is read once. An entry's text is what the world entry would read of it: a
- * whole-entry secret's text, else its text with its marks left out (`applyMarks` "omit"), so marking
- * an entry secret, the move of a book's secrecy among it, isn't a change, and the text offered never
- * holds a mark as written.
- */
-export async function bookDrift(host: HostPort, world: WorldDoc, userId: UserId, only?: string): Promise<Record<string, LoreDrift>> {
-  const books = new Map<string, Map<string, HostBookEntry>>();
-  const out: Record<string, LoreDrift> = {};
-  for (const [id, entry] of Object.entries(world.lore)) {
-    const source = loreSourceOf(entry.source);
-    if (source.kind !== "book" || (only !== undefined && id !== only)) continue;
-    let book = books.get(source.bookId);
-    if (!book) {
-      // A deleted book reads as one with no entries: every entry from it is gone.
-      const entries = await host.books.entries(source.bookId, userId).catch((): HostBookEntry[] => []);
-      book = new Map(entries.map((e) => [e.id, e]));
-      books.set(source.bookId, book);
-    }
-    const now = book.get(source.entryId);
-    if (!now) {
-      out[id] = { status: "missing" };
-      continue;
-    }
-    const whole = wholeEntrySecret(now.content);
-    const read = whole ? whole.text : publicText(now.content);
-    // The hash an earlier index kept is of the text as it stood, marks and ends included.
-    if ([now.content, read, read.trim()].some((text) => bookTextHash(text) === source.hash)) continue;
-    out[id] = { status: "changed", content: read, hash: bookTextHash(now.content) };
-  }
-  return out;
-}
 
 /** A saved entry's first title: its text's first sentence without roleplay markup, at most eight words. */
 function savedTitle(text: string): string {

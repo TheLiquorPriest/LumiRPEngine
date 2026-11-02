@@ -95,13 +95,14 @@ export const COVERAGE: Coverage = {
   "lre.chat.knowledge": { tools: ["lre_chat_knowledge"] },
   "lre.job": { start: { tools: ["lre_job_start"] }, cancel: { tools: ["lre_job_cancel"] }, list: { tools: ["lre_jobs", "lre_job", "lre_job_apply"] }, dismiss: { tools: ["lre_job_dismiss"] } },
   "lre.lore": {
-    drift: { tools: ["lre_lore_drift"] },
     save: { tools: ["lre_lore_save"] },
     books: { tools: ["lre_lore_books"] },
     entries: { tools: ["lre_lore_entries"] },
     pins: { tools: ["lre_lore_pins"] },
     fields: { tools: ["lre_lore_fields"] },
     mark: { excluded: "Writes a secret mark into the text of one of the user's World Info entries, or takes one out: Build's Make secret, Add a secret line, Make public and Save the names, each the user's own press, never an agent's call." },
+    index: { tools: ["lre_lore_index"] },
+    build: { excluded: "Writes a new entry into one of the user's World Info books, which LumiRPEngine then keeps in sync: Build → Lore's Build an index entry, the user's own press; lre_lore_index reads the index it would write." },
   },
   "lre.preset": {
     get: { tools: ["lre_preset", "lre_preset_add_blocks"] },
@@ -160,5 +161,9 @@ export const COVERAGE: Coverage = {
   },
   "lre.prompts": {
     test: { excluded: "Settings → Agents → Prompts' Test of a role's text, the user's own press that runs the role once on the chat; an outside agent edits no prompt texts." },
+  },
+  "lre.live": {
+    get: { excluded: "GM → Live, the page's live view of the chat's agent turn as its agents work it, pushed to that page; an outside agent reads what a turn left with lre_chat_state and lre_gm, and its transcript once the MCP server's tools reach the workspace (Increment 3)." },
+    leave: { excluded: "GM → Live's page closing its live view, so the engine stops pushing the turn to it; nothing an outside agent watches." },
   },
 };

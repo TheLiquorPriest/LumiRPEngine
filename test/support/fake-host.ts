@@ -37,6 +37,7 @@ import type {
   WorldInfoVerdict,
 } from "../../src/backend/host";
 import { decodeEvent } from "../../src/backend/spindle-host";
+import { outsideTurns } from "../../src/backend/turn-frame";
 
 export interface FakeMessage {
   id: MessageId;
@@ -77,6 +78,9 @@ function untilAborted<T>(answer: Promise<T>, signal: AbortSignal, stopped: (why:
   answer.then(resolve, reject).finally(() => signal.removeEventListener("abort", stop));
   return promise;
 }
+
+/** An entry as the fake host stores it: with the outlet it keeps beside its extension data, and whether its text triggers others (Prevent further recursion). */
+export type StoredEntry = HostBookEntry & { outlet: string | null; preventRecursion?: boolean };
 
 /** A World Info entry a prompt held: its text and where it sat (position, depth, role, outlet). */
 export interface AssembledEntry {
@@ -408,7 +412,8 @@ export class FakeHost implements HostPort {
     quiet: async (request, _userId, signal) => {
       this.quietCalls.push(request);
       if (!this.quietReply) throw new Error("the fake host makes no model calls");
-      const scripted = this.quietReply(request);
+      // The model answers from outside the backend, as Lumiverse's does: a script's own requests are no turn's work.
+      const scripted = outsideTurns(() => this.quietReply?.(request) ?? "{}");
       const reply = scripted instanceof Promise ? await untilAborted(scripted, signal, (why) => this.quietStopped.push(why)) : scripted;
       if (typeof reply === "string") return { content: reply, finishReason: "stop", tokens: 0 };
       const { content, toolCalls, finishReason, reasoning, thinkingBlocks, reasoningDetails, usage } = reply;
@@ -503,7 +508,10 @@ export class FakeHost implements HostPort {
         if (this.queue.length === 0) return;
         continue;
       }
-      for (const h of this.handlers.get(next.event) ?? []) h(next.payload as never, this.userId);
+      // Events come in from Lumiverse, never inside a turn's work.
+      outsideTurns(() => {
+        for (const h of this.handlers.get(next.event) ?? []) h(next.payload as never, this.userId);
+      });
       await this.idle();
     }
     throw new Error("settle: event storm");
@@ -515,7 +523,9 @@ export class FakeHost implements HostPort {
    * operations behind it.
    */
   deliverNow(): void {
-    for (let next = this.queue.shift(); next; next = this.queue.shift()) for (const h of this.handlers.get(next.event) ?? []) h(next.payload as never, this.userId);
+    outsideTurns(() => {
+      for (let next = this.queue.shift(); next; next = this.queue.shift()) for (const h of this.handlers.get(next.event) ?? []) h(next.payload as never, this.userId);
+    });
   }
 
   // ------------------------------------------------------------------ chat model
@@ -899,7 +909,7 @@ export class FakeHost implements HostPort {
    * and age (see `userBook`); `updated` as it reports the book's last change, which every change to
    * the book or any of its entries bumps (a count here, where Lumiverse keeps Unix seconds).
    */
-  readonly bookStore = new Map<string, { name: string; character?: boolean; added?: number; updated: number; entries: Map<string, HostBookEntry & { outlet: string | null }> }>();
+  readonly bookStore = new Map<string, { name: string; character?: boolean; added?: number; updated: number; entries: Map<string, StoredEntry> }>();
   private bookChanges = 0;
 
   /** Entries whose writes the host refuses (`update` throws), as a write a host fails would. */
@@ -925,7 +935,7 @@ export class FakeHost implements HostPort {
   }
 
   /** An entry as the host stores it, outlet included (tests read where it sits). */
-  storedEntry(entryId: string): (HostBookEntry & { outlet: string | null }) | undefined {
+  storedEntry(entryId: string): StoredEntry | undefined {
     for (const book of this.bookStore.values()) {
       const e = book.entries.get(entryId);
       if (e) return structuredClone(e);
@@ -981,7 +991,9 @@ export class FakeHost implements HostPort {
       const book = this.bookStore.get(bookId);
       if (!book) throw new Error(`no book ${bookId}`);
       const id = this.newId("entry");
-      book.entries.set(id, { ...structuredClone(entry), outlet: entry.outlet ?? null, id, bookId });
+      // Where it sits, when left out, is Lumiverse's default for a new entry (world-books.service.ts createEntry).
+      const { outlet, preventRecursion, ...rest } = structuredClone(entry);
+      book.entries.set(id, { ...rest, position: rest.position ?? 0, depth: rest.depth ?? 4, role: rest.role ?? null, order: rest.order ?? 100, outlet: outlet ?? null, id, bookId, ...(preventRecursion !== undefined ? { preventRecursion } : {}) });
       this.touched(bookId);
       return id;
     },

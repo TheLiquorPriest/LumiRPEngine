@@ -17,7 +17,8 @@ import { hasOwn, isRecord } from "../shared/json";
 import { bookLoreFieldsOf, bookTextHash, editedBookFields, engineWroteEntry, loreBooksOf, loreIsSecret, loreSourceOf, secretCopyOf, withBookLoreFields, type BookFieldsEdit, type BookLoreFields } from "../shared/lore";
 import type { LoreMarkChange } from "../shared/protocol";
 import { parseSecretMarks, publicText, SecretMarkError, unreadableMarks, wholeEntrySecret, writeSecretMark, type MarkNamesSource, type SecretMark, type SecretMarkInput } from "../shared/secret-marks";
-import type { LoreEntryDef, WorldDoc } from "../shared/world";
+import type { LoreEntryDef, LorePin, WorldDoc } from "../shared/world";
+import type { LoreBooks } from "../shared/settings";
 import type { HostBookEntry, HostPort } from "./host";
 import { copiedOriginals, heldTo, markFields, secrecyParts, secretTexts, textOf, textParts } from "./lore-secrets";
 
@@ -124,33 +125,15 @@ export async function writeBookFields(host: Pick<HostPort, "books">, e: HostBook
 }
 
 /**
- * A world entry indexed from a book entry, as read now (DESIGN §4.2): the book's text, held back by
- * the stricter secrecy of the two, since the author may make either secret, and of every other secret
- * its text is (`parts`, `secrecyParts`): secret when any is, open only once every secret side's gate
- * holds (a missing gate never does), its audience and holders joined; Known by when any is, about what
- * each links. Of a book text with marks, it reads what anyone may read (its marks are entries of
- * their own, `bookMarkLores`); of a whole-entry secret, the secret, kept as the mark keeps it. A book
- * text the world's entry already holds is that entry, as `heldTo` keeps an entry nothing holds back:
- * each engine run reads its lore afresh, and these are kept for several runs. Its source carries the
- * hash of the book text read now (`source.hash`), as a book's own entry does, so a reader tells when
- * the text changed since it last read it; the world keeps the hash it was indexed with.
- */
-export function indexedEntry(entry: LoreEntryDef, e: HostBookEntry, parts: readonly BookLoreFields[], world: MarkNamesSource): LoreEntryDef {
-  const whole = wholeEntrySecret(e.content);
-  const text = whole ? whole.text : publicText(e.content);
-  const source = loreSourceOf(entry.source);
-  const hash = bookTextHash(e.content);
-  const read = source.kind === "book" && source.hash !== hash ? { ...entry, source: { ...source, hash } } : entry;
-  return heldTo(text.trim() === "" || text === read.content ? read : { ...read, content: text }, whole ? [...parts, markFields(world, whole)] : parts);
-}
-
-/**
- * A book entry as lore, on or off (a pin reads either): its own keys, aliases and links, held back by
- * `parts` (`secrecyParts`). Its text is what anyone may read of it; a whole-entry secret is the
- * secret, read by its holders and no one else (a mark has no gate).
+ * A book entry as lore, on or off (a pin reads either), found by its own fields alone: its title (its
+ * comment, else its first words), its World Info keys, its secondary keys and LRE aliases as other
+ * names, and its text; its links are its own LRE fields'. Held back by `parts` (`secrecyParts`). Its
+ * text is what anyone may read of it; a whole-entry secret is the secret, read by its holders and no
+ * one else (a mark has no gate).
  */
 export function bookEntryLore(e: HostBookEntry, parts: readonly BookLoreFields[], world: MarkNamesSource): LoreEntryDef {
   const fields = bookLoreFieldsOf(e.extensions);
+  const aliases = [...new Set([...(fields?.aliases ?? []), ...(e.secondaryKeys ?? [])].map((a) => a.trim()).filter((a) => a !== ""))];
   const whole = wholeEntrySecret(e.content);
   return heldTo(
     {
@@ -160,7 +143,7 @@ export function bookEntryLore(e: HostBookEntry, parts: readonly BookLoreFields[]
       // The entry's own World Info keys are what its author wrote it to answer to.
       keys: e.keys.filter((k) => k.trim() !== ""),
       links: fields?.links ?? [],
-      ...(fields?.aliases ? { aliases: fields.aliases } : {}),
+      ...(aliases.length > 0 ? { aliases } : {}),
       source: { kind: "book", bookId: e.bookId, entryId: e.id, hash: bookTextHash(e.content) },
     },
     whole ? [...parts, markFields(world, whole)] : parts,
@@ -200,66 +183,105 @@ export function bookLoreEntries(e: HostBookEntry, parts: readonly BookLoreFields
   return [...(entry.content.trim() === "" ? [] : [entry]), ...bookMarkLores(e, world)];
 }
 
-/** The books a world chat reads lore from, each once, in order: the world's list, the chat's books, then the global ones; never the engine's own, nor one that is gone. */
-export async function loreBookIds(host: Pick<HostPort, "books" | "chats">, world: WorldDoc, chatId: ChatId | null, userId: UserId): Promise<{ read: string[]; gone: string[] }> {
+/**
+ * The books a world chat reads lore from (DESIGN §4.2), each once, in order: the world's list, the
+ * chat's books, the global ones, then the books an earlier build copied the world's lore from (so a
+ * world that has such copies reads the books themselves now); never the engine's own, nor one that is
+ * gone. The user's books setting (`picked`, Settings → Lore) narrows them: `"auto"` reads
+ * them all, a list only those of them it names. `gone`: listed books that are gone.
+ */
+export async function loreBookIds(host: Pick<HostPort, "books" | "chats">, world: WorldDoc, chatId: ChatId | null, userId: UserId, picked: LoreBooks): Promise<{ read: string[]; gone: string[] }> {
   const listed = loreBooksOf(world);
+  const copied = Object.values(world.lore).flatMap((entry) => {
+    const source = loreSourceOf(entry.source);
+    return source.kind === "book" ? [source.bookId] : [];
+  });
   const meta = chatId ? await host.chats.chatMetadata(chatId, userId) : {};
   const chat = isRecord(meta) && Array.isArray(meta.chat_world_book_ids) ? meta.chat_world_book_ids.filter((id): id is string => typeof id === "string") : [];
   const [books, global] = await Promise.all([host.books.list(userId), host.books.global(userId)]);
   const known = new Map(books.map((b) => [b.id, b.engine]));
-  const ids = [...new Set([...listed, ...chat, ...global])];
-  return { read: ids.filter((id) => known.get(id) === false), gone: listed.filter((id) => !known.has(id)) };
+  const ids = [...new Set([...listed, ...chat, ...global, ...copied])];
+  return { read: ids.filter((id) => known.get(id) === false && (picked === "auto" || picked.includes(id))), gone: listed.filter((id) => !known.has(id)) };
+}
+
+/** The World Info entry an earlier build's copy of one (a world entry with a `book` source) stands for, by the copy's lore id in `world`; null for any other id. */
+function copiedEntry(world: WorldDoc, loreId: string): { bookId: string; entryId: string } | null {
+  const source = hasOwn(world.lore, loreId) ? loreSourceOf(world.lore[loreId]?.source) : null;
+  return source?.kind === "book" ? { bookId: source.bookId, entryId: source.entryId } : null;
 }
 
 /**
- * The world as its helpers and minds read lore now (DESIGN §4.2): its own entries, one indexed from a
- * book read from that book entry as it is now (`indexedEntry`: its text and the stricter secrecy of
- * the two, its marks beside it), whether or not the chat reads its book, then every lore entry of the
- * books the chat reads, live, marks included (`bookLoreEntries`). Each is held back as its text is
- * (`secrecyParts`), against the world's secrets and the entries read here: a secret's twin in one of
- * these books reads as that secret; a text read already, a world entry's or a twin's, is read once,
- * where it first comes. A book that can't be read gives nothing, and the log says so; a listed book
- * that is gone is named too. When the chat's books can't be told (the books not listed, say), none
- * is read and the run goes on with the world's own lore.
+ * The world's lore pins with each pin of a copy an earlier build made of a World Info entry (a world
+ * entry with a `book` source) pinned to that entry instead, which is what reads now (DESIGN §24.5).
  */
-export async function liveLore(host: Pick<HostPort, "books" | "chats" | "log">, world: WorldDoc, chatId: ChatId | null, userId: UserId): Promise<WorldDoc> {
-  const books = await loreBookIds(host, world, chatId, userId).catch((error: unknown): { read: string[]; gone: string[] } => {
+function pinsToBooks(world: WorldDoc): WorldDoc["lorePins"] {
+  const pins = world.lorePins;
+  if (!pins) return pins;
+  const moved = (list: readonly LorePin[] | undefined): LorePin[] =>
+    (list ?? []).map((pin) => {
+      if (!("lore" in pin)) return pin;
+      const copied = copiedEntry(world, pin.lore);
+      return copied ? { book: copied.bookId, entry: copied.entryId, ...(pin.keep ? { keep: pin.keep } : {}) } : pin;
+    });
+  const part = (record: Readonly<Record<string, readonly LorePin[] | undefined>> | undefined): Record<string, LorePin[]> => Object.fromEntries(Object.entries(record ?? {}).map(([id, list]) => [id, moved(list)]));
+  return { ...pins, characters: part(pins.characters), places: part(pins.places), steps: part(pins.steps) };
+}
+
+/**
+ * The lore id a turn recorded reads by now (DESIGN §4.2): the id of an earlier build's copy of a
+ * World Info entry reads as that entry, as a pin of the copy does (`pinsToBooks`), so an old turn's
+ * scene lore still tells it; any other id as recorded. `world` is the revision the turn was played
+ * on, its copies with it, before its lore is read live.
+ */
+export function recordedLoreId(world: WorldDoc, loreId: string): string {
+  const copied = copiedEntry(world, loreId);
+  return copied ? bookLoreId(copied.bookId, copied.entryId) : loreId;
+}
+
+/**
+ * The world as its helpers, minds and agents read lore now (DESIGN §4.2): the world's own entries
+ * (written in Build, saved from a chat, or written by Index this text), then every lore entry of the
+ * World Info books the chat reads (`loreBookIds`), live, marks included (`bookLoreEntries`), each found
+ * by its own fields. A copy an earlier build made of a World Info entry (a world entry with a `book`
+ * source) isn't read: its book entry is, as the book has it now, and a pin of the copy reads that
+ * entry (`pinsToBooks`); the copy still holds the entry back as it did (`secrecyParts`, which reads
+ * the world's entries indexed from it). Each is held back as its text is, against the world's secrets
+ * and the entries read here: a secret's twin in one of these books reads as that secret; a text read
+ * already, a world entry's or a twin's, is read once, where it first comes. A book that can't be read
+ * gives nothing, and the log says so; a listed book that is gone is named too. When the chat's books
+ * can't be told (the books not listed, say), none is read and the run goes on with the world's own lore.
+ */
+export async function liveLore(host: Pick<HostPort, "books" | "chats" | "log">, world: WorldDoc, chatId: ChatId | null, userId: UserId, picked: LoreBooks): Promise<WorldDoc> {
+  const books = await loreBookIds(host, world, chatId, userId, picked).catch((error: unknown): { read: string[]; gone: string[] } => {
     host.log("warn", `[LumiRPEngine] the World Info books this chat reads weren't told, so none is read as lore this run: ${error instanceof Error ? error.message : String(error)}`, userId);
     return { read: [], gone: [] };
   });
+  return (await booksLore(host, world, books, userId)).world;
+}
+
+/**
+ * `world` with the lore of the books `books.read` names, read live as `liveLore` reads a chat's (a
+ * gone one of `books.gone` logged), and the books' entries as they were read, the engine's own left
+ * out: what the lore index is made from too (`lore-routing.ts`).
+ */
+export async function booksLore(host: Pick<HostPort, "books" | "log">, world: WorldDoc, books: { read: readonly string[]; gone: readonly string[] }, userId: UserId): Promise<{ world: WorldDoc; entries: HostBookEntry[] }> {
   for (const id of books.gone) host.log("warn", `[LumiRPEngine] lore book ${id} the world lists is gone: no call reads it (Build → Lore → Lore books)`, userId);
-  // The books entries of the world were indexed from, read for those entries alone.
-  const sources = [...new Set(Object.values(world.lore).flatMap((entry) => {
-    const source = loreSourceOf(entry.source);
-    return source.kind === "book" && !books.read.includes(source.bookId) ? [source.bookId] : [];
-  }))];
-  const entriesOf = (ids: readonly string[]): Promise<HostBookEntry[][]> =>
-    Promise.all(
-      ids.map((id) =>
-        host.books.entries(id, userId).catch((error: unknown) => {
-          host.log("warn", `[LumiRPEngine] lore book ${id} wasn't read: ${error instanceof Error ? error.message : String(error)}`, userId);
-          return [];
-        }),
-      ),
-    );
-  const [read, sourced] = await Promise.all([entriesOf(books.read), entriesOf(sources)]);
+  const read = await Promise.all(
+    books.read.map((id) =>
+      host.books.entries(id, userId).catch((error: unknown) => {
+        host.log("warn", `[LumiRPEngine] lore book ${id} wasn't read: ${error instanceof Error ? error.message : String(error)}`, userId);
+        return [];
+      }),
+    ),
+  );
   const live = new Map(read.flat().map((e) => [bookLoreId(e.bookId, e.id), e]));
-  const fromBooks = new Map([...live, ...sourced.flat().map((e): [string, HostBookEntry] => [bookLoreId(e.bookId, e.id), e])]);
   // A copy in these books is as secret as its original, which is read for it wherever it is.
-  const texts = secretTexts({ world, entries: [...fromBooks.values(), ...(await copiedOriginals(host, [...fromBooks.values()], userId))] });
+  const texts = secretTexts({ world, entries: [...live.values(), ...(await copiedOriginals(host, [...live.values()], userId))] });
   const lore: Record<string, LoreEntryDef> = {};
-  const indexed = new Set<string>();
-  const sourceEntries: HostBookEntry[] = [];
   for (const [id, entry] of Object.entries(world.lore)) {
-    const source = loreSourceOf(entry.source);
-    const key = source.kind === "book" ? bookLoreId(source.bookId, source.entryId) : null;
-    const now = key ? fromBooks.get(key) : undefined;
-    if (key && now) indexed.add(key);
-    if (now && !engineWroteEntry(now.extensions)) {
-      lore[id] = indexedEntry(entry, now, secrecyParts(now, texts), world);
-      sourceEntries.push(now);
-      // A world entry's own text may hold marks copied from a book: what anyone may read of it, as its book's would be.
-    } else lore[id] = heldTo(typeof entry.content === "string" && publicText(entry.content) !== entry.content ? { ...entry, content: publicText(entry.content) } : entry, textParts(texts, entry.content));
+    if (loreSourceOf(entry.source).kind === "book") continue;
+    // A world entry's own text may hold marks copied from a book: what anyone may read of it, as its book's would be.
+    lore[id] = heldTo(typeof entry.content === "string" && publicText(entry.content) !== entry.content ? { ...entry, content: publicText(entry.content) } : entry, textParts(texts, entry.content));
   }
   const seen = new Set(Object.values(lore).map((entry) => textOf(entry.content)));
   // A book's entry or mark whose text is read already is left out: its twin reads where it first came.
@@ -269,7 +291,7 @@ export async function liveLore(host: Pick<HostPort, "books" | "chats" | "log">, 
     lore[entry.id] = entry;
     seen.add(text);
   };
-  for (const e of sourceEntries) for (const mark of bookMarkLores(e, world)) keep(mark);
-  for (const [key, e] of live) if (!indexed.has(key) && !hasOwn(lore, key)) for (const entry of bookLoreEntries(e, secrecyParts(e, texts), world)) keep(entry);
-  return { ...world, lore };
+  for (const e of live.values()) for (const entry of bookLoreEntries(e, secrecyParts(e, texts), world)) keep(entry);
+  const lorePins = pinsToBooks(world);
+  return { world: { ...world, lore, ...(lorePins ? { lorePins } : {}) }, entries: [...live.values()].filter((e) => !engineWroteEntry(e.extensions)) };
 }

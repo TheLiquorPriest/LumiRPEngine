@@ -27,7 +27,8 @@ export type { AgentKnowledge, ToolFamily, ToolTier } from "../../../shared/agent
 /**
  * What a tool runs with: whose chat, the agent's knowledge, where it reads (`reader`: outside a turn
  * the chat's head, `outsideReader`) and writes (`writer`, null for an agent that may not write), who
- * calls, and a signal that ends when the agent is cancelled or its time runs out.
+ * calls, and a signal that ends when the agent is cancelled or its time runs out. `loads`: where an
+ * agent working a turn loads lore into the reply the turn is writing; absent outside a turn.
  */
 export interface ToolEnv {
   userId: UserId;
@@ -37,12 +38,21 @@ export interface ToolEnv {
   writer: ToolWriter | null;
   agent: { role: string; id: string };
   signal: AbortSignal;
+  loads?: LoreLoads;
+}
+
+/** Where a turn's agents load lore into the reply it is writing (`lore_load`, DESIGN §4.6): the turn's scene lore, which reaches the narrator in the Scene section. */
+export interface LoreLoads {
+  /** Loads a lore entry, by its lore id, into the turn's reply, once however often it is loaded; false once the reply is written, and nothing is loaded. */
+  add(loreId: string): boolean;
 }
 
 export interface ToolDefinition {
   name: string;
   family: ToolFamily;
   tier: ToolTier;
+  /** Given only to an agent working a turn (`ToolEnv.loads`): what it does is for the turn's reply. */
+  turn?: true;
   /** Its description is the registry text `tool.<name>` (R5, GM agent page, group "Tools"): editable, with a reset. */
   parameters(world: WorldDoc): JsonObject; // hand-written JSON Schema, with the world's enums filled in
   run(args: JsonObject, env: ToolEnv): Promise<ToolOutcome>;
@@ -76,15 +86,16 @@ function described(def: ToolDefinition, schema: JsonObject, texts: PromptTexts):
 }
 
 /**
- * The tools an agent is given (C6): those of `tiers`, and of `families` when it names any, each
- * with its description and its arguments' in `texts` (the user's own where they wrote one, else the
- * shipped), and its schema filled from the world as the agent may name it (`schemaWorld`). A call
- * runs with `env` as it stands then, the agent named by the runtime and ended by its signal too.
+ * The tools an agent is given (C6): those of `tiers`, and of `families` when it names any (a turn's
+ * own only to an agent working a turn), each with its description and its arguments' in `texts` (the
+ * user's own where they wrote one, else the shipped), and its schema filled from the world as the
+ * agent may name it (`schemaWorld`). A call runs with `env` as it stands then, the agent named by the
+ * runtime and ended by its signal too.
  */
 export function toolsFor(input: { world: WorldDoc; tiers: readonly ToolTier[]; families?: readonly ToolFamily[]; texts: PromptTexts; env: ToolEnv }): AgentTool[] {
   const { env, texts } = input;
   const world = schemaWorld(input.world, env.reader.registry, env.knowledge);
-  return TOOL_DEFINITIONS.filter((def) => input.tiers.includes(def.tier) && (input.families === undefined || input.families.includes(def.family))).map(
+  return TOOL_DEFINITIONS.filter((def) => input.tiers.includes(def.tier) && (input.families === undefined || input.families.includes(def.family)) && (def.turn !== true || env.loads !== undefined)).map(
     (def): AgentTool => ({
       name: def.name,
       description: renderPrompt(toolTextId(def.name), texts, {}),

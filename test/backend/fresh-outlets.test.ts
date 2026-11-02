@@ -325,9 +325,10 @@ describe("no stale outlets", () => {
     const { chatId, beats } = await outlinedCoins(rig);
     expect((await rig.host.begin(chatId, { type: "regenerate" })).halted).toBe("cancelled");
     expect(beats()).toBe(2);
-    rig.body(await rig.send({ type: "lre.settings.set", patch: { modelUse: { tokens: { sections: 3900 } } } }));
-    rig.host.restarts.length = 0;
     rig.body(await rig.send({ type: "lre.settings.set", patch: { swipeDefault: "renarrate" } }));
+    // The player continues the reply instead: the engine runs for that, and the Re-run goes before its reply.
+    expect((await rig.host.begin(chatId, { type: "continue" })).halted).toBe("cancelled");
+    rig.host.restarts.length = 0;
     const retold = await rig.host.start(chatId, { type: "swipe" });
     expect(retold.halted).toBeUndefined();
     expect(rig.host.section("Outline")).toContain("Beat 1: the coin spins.");

@@ -197,6 +197,7 @@ textarea.lre-input.lre-form-table-prose{font-family:inherit;font-size:var(--lre-
 .lre-form-lore-source{display:flex;flex-direction:column;gap:var(--lre-s2);min-width:0;overflow-wrap:anywhere}
 .lre-form-lore-note{font-size:var(--lre-fs-sm);color:var(--lre-muted);overflow-wrap:anywhere}
 .lre-form-lore-mono{font:var(--lre-fs-sm)/1.3 var(--lre-mono);overflow-wrap:anywhere}
+.lre-form-lore-index-preview>pre{margin:var(--lre-s2) 0 0;max-height:16em;overflow:auto;white-space:pre-wrap}
 .lre-form-lore-from{font-weight:400;color:var(--lre-muted)}
 .lre-form-lore-actions{display:flex;flex-wrap:wrap;gap:var(--lre-s2);min-width:0}
 .lre-form-lore-actions>.lre-btn{max-width:100%;white-space:normal}

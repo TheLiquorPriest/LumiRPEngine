@@ -360,6 +360,8 @@ export interface HostBookEntry {
   comment: string;
   content: string;
   keys: string[];
+  /** The entry's secondary keys (`keysecondary`), which lore reads as other names it goes by; absent: none. */
+  secondaryKeys?: string[];
   disabled: boolean;
   constant: boolean;
   /** Host position code (0 = before character, 1 = after, 4 = at depth, …). */
@@ -370,10 +372,17 @@ export interface HostBookEntry {
   extensions: JsonObject;
 }
 
-export type HostBookEntryInput = Omit<HostBookEntry, "id" | "bookId"> & {
-  /** The `{{outlet::name}}` the entry fills, kept in its `extensions.outlet_name`; none when absent. */
-  outlet?: string | null;
-};
+/**
+ * A new entry: where it sits (`position`, `depth`, `role`, `order`) may be left to the host's own
+ * defaults for a new entry, as Lumiverse's World Info editor makes one.
+ */
+export type HostBookEntryInput = Omit<HostBookEntry, "id" | "bookId" | "position" | "depth" | "role" | "order"> &
+  Partial<Pick<HostBookEntry, "position" | "depth" | "role" | "order">> & {
+    /** The `{{outlet::name}}` the entry fills, kept in its `extensions.outlet_name`; none when absent. */
+    outlet?: string | null;
+    /** Its text never triggers another entry (Lumiverse's Prevent further recursion); absent: the host's default, off. */
+    preventRecursion?: boolean;
+  };
 
 /** The parts of an entry `books.update` writes, each only when given. */
 export interface HostEntryPatch {

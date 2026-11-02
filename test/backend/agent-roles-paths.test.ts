@@ -429,4 +429,25 @@ describe("the knowledge role's answer", () => {
     expect(checkSchema(contract.schema, { facts: [fact], learned: [], inferred: [], doubted: [] }).map((p) => [p.path, p.message])).toEqual([[["facts", 0], 'needs "matters"']]);
     expect(checkSchema(contract.schema, { facts: [{ ...fact, matters: "" }], learned: [], inferred: [], doubted: [] }).map((p) => p.path)).toEqual([["facts", 0, "matters"]]);
   });
+
+  test("what the step refuses of its answer says why, by kind, in Diagnostics and the host log, on the fixed pipeline as with a main agent", async () => {
+    const rig = new Rig({ shipped: true, minds: true });
+    const { agents, start } = await pair(rig, { minds: true, knowing: true });
+    script(rig, start);
+    const scripted = rig.host.quietReply;
+    rig.host.quietReply = (req: QuietRequest) => {
+      const reply = scripted?.(req) ?? "{}";
+      if (typeof reply !== "string" || !(req.messages[0]?.content ?? "").includes("You are the knowledge agent")) return reply;
+      const answer = JSON.parse(reply) as JsonObject;
+      return JSON.stringify({ ...answer, facts: (answer.facts as JsonObject[]).map(({ matters: _, ...f }) => f) });
+    };
+    const b = await played(rig, agents, SAID);
+    if (!b.rec) throw new Error(`the turn stopped: ${b.failed.join("; ")}`);
+    const records = await rig.rt.diag.records(agents, rig.host.userId);
+    const gave = records.find((r) => r.step === ROLE_LABEL.knowledge && r.kind === "step" && r.status === "ok");
+    expect(gave?.level).toBe("warn");
+    expect(gave?.reason).toBe("What the engine didn't take: 1 refused (no matters: a new fact says why it matters and to whom); 1 refused (a learning of no fact the answer gave by its ref or the chat holds by its id, or neither witnessed nor told).");
+    expect(rig.host.logs.some((l) => l.includes(`the ${ROLE_LABEL.knowledge} role's run: ${gave?.reason ?? "-"}`))).toBe(true);
+    expect(rig.rt.ledger.errors).toEqual([]);
+  });
 });

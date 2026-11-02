@@ -32,6 +32,7 @@ import { parseJsonReply } from "../../steps";
 import type { TaskReads } from "../brief";
 import type { AgentTool } from "../runtime";
 import type { ToolReader } from "../tools/read-view";
+import { loreIndexText } from "../tools/lore";
 import { toolsFor } from "../tools/registry";
 import type { ToolWriter } from "../tools/writer";
 import { recordAgentCalls } from "../transcripts";
@@ -92,7 +93,7 @@ export type RoleAnswer<O> = RoleResult<O> & { text: string };
 /** The tools a role is given (§6): its families, at its tier, under the knowledge its task reads with (`io` its reader and writer); none under a character's own knowledge. */
 function roleTools(ctx: TurnAgentCtx, io: { reader: ToolReader; writer: ToolWriter }, world: WorldDoc, texts: PromptTexts, knowledge: AgentKnowledge): AgentTool[] {
   const tier: RoleTier = ctx.settings.tier;
-  const env = { userId: ctx.userId, chatId: ctx.chatId, knowledge, reader: io.reader, writer: tier === "read" ? null : io.writer, agent: { role: ctx.role, id: ctx.agentId }, signal: ctx.signal };
+  const env = { userId: ctx.userId, chatId: ctx.chatId, knowledge, reader: io.reader, writer: tier === "read" ? null : io.writer, agent: { role: ctx.role, id: ctx.agentId }, signal: ctx.signal, loads: ctx.loads };
   const families = ctx.settings.families;
   const reads = toolsFor({ world, tiers: ["read"], families, texts, env });
   if (tier === "read") return reads;
@@ -125,6 +126,16 @@ async function rolePins(ctx: TurnAgentCtx, reader: ToolReader, texts: PromptText
   return pinnedFiles(view, { role: ctx.role, tokens, pinned: true, texts, framing: ROLE_PINS_TEXTS });
 }
 
+/** The lore index as `reader` (its task's knowledge) reads it, within `tokens` (`loreIndexText`); none while the chat's world isn't loaded. */
+async function roleIndex(reader: ToolReader, tokens: number): Promise<string> {
+  try {
+    const text = await loreIndexText(await reader.view(), { tokens });
+    return typeof text === "string" ? text : "";
+  } catch {
+    return "";
+  }
+}
+
 /**
  * Works one task of `ctx`'s role with an agent and checks its answer with classic's own validator
  * (`ask.check`): classic's type, or why the answer isn't one. A role naming no connection runs on its
@@ -146,7 +157,9 @@ export async function runRoleAgent<O>(rt: Runtime, ctx: TurnAgentCtx, ask: RoleA
   const sees = renderPrompt(ROLES_TEXT.sees[knowledge ?? "own"], own, ask.names);
   const system = renderPrompt(roleTextId(role, "system"), own, { ...ask.names, knowledge: sees });
   const pins = knowledge ? await rolePins(ctx, io.reader, own, settings.agents.main.pinsTokens) : "";
-  const prefix = [renderPrompt(roleTextId(role, "instructions"), own, ask.names), guidanceOf(rt, ctx, own, ask.names), pins].filter((t) => t.trim() !== "");
+  // The lore index after the pinned files, with Settings → Lore's switch on (off by default), within its tokens.
+  const index = knowledge && settings.loreIndex.inPrompts ? await roleIndex(io.reader, settings.loreIndex.promptTokens) : "";
+  const prefix = [renderPrompt(roleTextId(role, "instructions"), own, ask.names), guidanceOf(rt, ctx, own, ask.names), pins, index].filter((t) => t.trim() !== "");
   const tools = ask.tools && knowledge ? roleTools(ctx, io, ask.tools, own, knowledge) : [];
   const answer = ask.answer?.part ?? "answer";
   // The main agent's words for this run (C10's `brief`), held to what this task reads with; none in the fixed pipeline.
@@ -154,7 +167,7 @@ export async function runRoleAgent<O>(rt: Runtime, ctx: TurnAgentCtx, ask: RoleA
   const message = [renderPrompt(roleTaskTextId(role, ask.sub, "task"), own, { ...ask.names, ...ask.vars }, ask.own), ask.data ?? "", renderPrompt(roleTaskTextId(role, ask.sub, answer), own, { ...ask.names, ...(ask.answer?.vars ?? {}) }), told]
     .filter((t) => t.trim() !== "")
     .join("\n\n");
-  const handle = startRoleAgent(rt, at, { system, prefix, tools });
+  const handle = startRoleAgent(rt, at, { system, prefix, tools }, { phase: ask.phase, task: ask.sub });
   rt.diag.agentWorking(ctx.chatId, ctx.userId, handle.id, ROLE_LABEL[role]);
   let reply;
   try {

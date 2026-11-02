@@ -32,6 +32,7 @@ import { own } from "../../../engine/pack-kit";
 import type { WorldState } from "../../../engine/state";
 import { readersOf, WS_WRITE, workspaceOf, workspacePins } from "../../../engine/workspace";
 import { toChain } from "../../ledger-io";
+import type { LearnedFile } from "../../chat-agent-meta";
 import type { Runtime } from "../../runtime";
 import { appliedEvents } from "../../view";
 import type { ToolOutcome } from "../runtime";
@@ -39,6 +40,7 @@ import { BOOLEAN, boolArg, missing, propose } from "./propose";
 import type { ToolReadView } from "./read-view";
 import type { ToolDefinition, ToolEnv } from "./registry";
 import { needText, objectSchema, text, textArg } from "./schema";
+import { transcriptFiles } from "./transcript-files";
 
 // ---------------------------------------------------------------- the files
 
@@ -68,7 +70,7 @@ export interface FileSource {
   key?: string;
 }
 
-/** Each file of the head's workspace (not the learned area's) with who wrote it (see the header). */
+/** Each file of the head's workspace (not the learned area's) with who wrote it (see the header): an agent turn's own write by the role its record names (`Rec.agents`). */
 export function fileSources(head: ChatHead): Map<string, FileSource> {
   const fold = head.core.fold(head.observed);
   const written = new Map<string, { hash: string; source: FileSource }>();
@@ -79,10 +81,14 @@ export function fileSources(head: ChatHead): Map<string, FileSource> {
     const rec = activeRecord(m, head.core.journal.tombstones);
     if (!rec) return;
     const applied = appliedEvents(rec, fold, i);
+    const isWrite = (e: LedgerEvent): e is LedgerEvent & { data: { path: string; hash: string } } => e.type === WS_WRITE && "data" in e && isRecord(e.data) && typeof e.data.path === "string" && typeof e.data.hash === "string";
+    // The writes a role of an agent turn committed into the record's own events, by path and body.
+    const roles = new Map<string, FileSource>();
+    for (const a of rec.agents ?? []) for (const e of a.seq === undefined ? rec.events.slice(a.from, a.to) : (rec.post.find((p) => p.seq === a.seq)?.events.slice(a.from, a.to) ?? [])) if (isWrite(e)) roles.set(`${e.data.path}\u0000${e.data.hash}`, { turn, role: a.role, key: a.key });
     const note = (events: readonly LedgerEvent[], source: FileSource): void => {
-      for (const e of events) if (e.type === WS_WRITE && "data" in e && isRecord(e.data) && typeof e.data.path === "string" && typeof e.data.hash === "string") written.set(e.data.path, { hash: e.data.hash, source });
+      for (const e of events) if (isWrite(e)) written.set(e.data.path, { hash: e.data.hash, source: roles.get(`${e.data.path}\u0000${e.data.hash}`) ?? source });
     };
-    // The turn's own events and its other entries name no agent.
+    // The turn's own events and its other entries name no agent but the turn's own roles.
     note([...applied.events, ...applied.post], { turn });
     for (const fix of applied.fixes) note(fix.events, fix.agent ? { turn, role: fix.agent.role, key: fix.agent.key } : { turn });
   });
@@ -95,7 +101,7 @@ export function fileSources(head: ChatHead): Map<string, FileSource> {
   return out;
 }
 
-/** A workspace file as GM → Workspace and the agents list it: its path and body's hash, its size in characters, its pin, whose knowledge may read it, whether it is the learned area's, and who wrote it on which turn. */
+/** A workspace file as GM → Workspace and the agents list it: its path and body's hash, its size in characters, its pin, whose knowledge may read it, whether it is the learned area's or a turn's transcript (`transcripts/`, read-only), and who wrote it on which turn. */
 export interface WorkspaceFile {
   path: string;
   hash: string;
@@ -103,30 +109,49 @@ export interface WorkspaceFile {
   pinned: boolean;
   readers: AgentKnowledge;
   learned: boolean;
+  transcript?: true;
   provenance: { role?: string; key?: string; turn: number | null };
 }
 
-/** Every file of the chat's workspace, the head's then the learned area's, by path; none for a chat that plays no world. */
-async function allFiles(rt: Runtime, env: Pick<ToolEnv, "userId" | "chatId">): Promise<Map<string, Omit<WorkspaceFile, "size">>> {
-  const out = new Map<string, Omit<WorkspaceFile, "size">>();
-  const head = await chatHead(rt, env.chatId, env.userId);
-  if (!head) return out;
+/**
+ * A workspace as a turn under way holds it (`stagedWorkspace`): its head, the turn's state with what
+ * the turn staged on top, the learned area with the turn's changes to it, and who staged each file the
+ * turn changed, which is no reply's yet.
+ */
+export interface WorkspaceAt {
+  head: ChatHead;
+  learned: Readonly<Record<string, LearnedFile>>;
+  staged: ReadonlyMap<string, { role: string; key: string }>;
+}
+
+/** Every file of a workspace, the head's, the learned area's, then the turns' transcripts (each with its size), by path; a file `staged` names was staged by the turn under way, so no reply holds it yet. */
+function filesOf(head: ChatHead, learned: Readonly<Record<string, LearnedFile>>, staged: WorkspaceAt["staged"] = new Map()): Map<string, Omit<WorkspaceFile, "size"> & { size?: number }> {
+  const out = new Map<string, Omit<WorkspaceFile, "size"> & { size?: number }>();
   const sources = fileSources(head);
   const pins = workspacePins(head.state);
   for (const [path, hash] of Object.entries(workspaceOf(head.state))) {
-    const source = sources.get(path);
+    const by = staged.get(path);
+    const source = by ? { ...by, turn: null } : sources.get(path);
     out.set(path, { path, hash, pinned: own(pins, path) === true, readers: readersOf(head.state, path), learned: false, provenance: { ...(source?.role !== undefined ? { role: source.role } : {}), ...(source?.key !== undefined ? { key: source.key } : {}), turn: source?.turn ?? null } });
   }
-  for (const [path, file] of Object.entries((await rt.chatAgents.get(env.chatId, env.userId)).learned)) {
+  for (const [path, file] of Object.entries(learned)) {
     out.set(path, { path, hash: file.hash, pinned: file.pinned === true, readers: file.readers, learned: true, provenance: { ...(file.role !== undefined ? { role: file.role } : {}), turn: null } });
   }
+  for (const file of transcriptFiles(head)) out.set(file.path, file);
   return out;
 }
 
-/** The workspace's files the knowledge may read, by path; none for a chat that plays no world. */
-export async function listWorkspace(rt: Runtime, env: Pick<ToolEnv, "userId" | "chatId" | "knowledge">): Promise<WorkspaceFile[]> {
-  const files = [...(await allFiles(rt, env)).values()].filter((f) => knowledgeWithin(f.readers, env.knowledge)).sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
-  return Promise.all(files.map(async (f): Promise<WorkspaceFile> => ({ ...f, size: (await rt.blobs.get(env.userId, f.hash))?.length ?? 0 })));
+/** Every file of the chat's workspace, as `at` holds it (a turn under way), else as the chat's head and learned area stand; none for a chat that plays no world. */
+async function allFiles(rt: Runtime, env: Pick<ToolEnv, "userId" | "chatId">, at?: WorkspaceAt): Promise<Map<string, Omit<WorkspaceFile, "size"> & { size?: number }>> {
+  if (at) return filesOf(at.head, at.learned, at.staged);
+  const head = await chatHead(rt, env.chatId, env.userId);
+  return head ? filesOf(head, (await rt.chatAgents.get(env.chatId, env.userId)).learned) : new Map();
+}
+
+/** The workspace's files the knowledge may read, by path, as `at` holds them (a turn under way) or the chat's stand; none for a chat that plays no world. */
+export async function listWorkspace(rt: Runtime, env: Pick<ToolEnv, "userId" | "chatId" | "knowledge">, at?: WorkspaceAt): Promise<WorkspaceFile[]> {
+  const files = [...(await allFiles(rt, env, at)).values()].filter((f) => knowledgeWithin(f.readers, env.knowledge)).sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+  return Promise.all(files.map(async (f): Promise<WorkspaceFile> => ({ ...f, size: f.size ?? (await rt.blobs.get(env.userId, f.hash))?.length ?? 0 })));
 }
 
 /** A file's text as the knowledge may read it; null when there is no such file, the knowledge may not read it, or its body is gone. */

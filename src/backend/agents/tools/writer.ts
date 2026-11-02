@@ -30,9 +30,9 @@
 //    run, and on apply against the head plus the batch's operations before it.
 // 6. Apply writes the operations that pass as ONE `fix` post entry on the head: a GM edit
 //    (`gm: true`) with one Undo chip, kept with what it asked for (`edit`), so one held through a
-//    turn's engine run, which every agent write is whatever "Hold writes during the engine run" says
-//    (`hold: true`, R4), lands when the turn closes, worked out again over what the turn did
-//    (`resolveFix`), and never discards the turn. The entry names the agent (`PostEntry.agent`: its
+//    turn's engine run, as every write made then is (R4), lands when the turn closes, worked out
+//    again over what the turn did (`resolveFix`), and never discards the turn. The entry names the
+//    agent (`PostEntry.agent`: its
 //    role, the batch's key, the label it was applied with and the knowledge it wrote under). A
 //    learned-area change lands at once, in the chat's metadata, with no Undo chip.
 //
@@ -55,7 +55,7 @@ import { isWitnessRef, type MindEditOp } from "../../../shared/minds";
 import { EDIT_OPS_MAX, type EditOp, WRITE_REFUSED } from "../../../shared/protocol";
 import { isOff, type RoutineEditOp } from "../../../shared/routines";
 import { AGENT_CHANGE_LABEL, type AgentChangeType, type ExtractionLearning, type UserSettings } from "../../../shared/settings";
-import { blobHash, isLearnedPath, isWorkspacePath } from "../../../shared/stores";
+import { blobHash, isLearnedPath, isTranscriptPath, isWorkspacePath } from "../../../shared/stores";
 import { nounFor } from "../../../shared/words";
 import { type FieldDef, spawnCapOf } from "../../../shared/world";
 import { parseEditOps, resolveEdit } from "../../../engine/edits";
@@ -142,6 +142,12 @@ export interface ToolWriter {
   dryRun(op: AgentOp): Promise<OpPreview | OpRefusal>;
   /** Writes the operations that pass as one GM edit, held while a turn runs, with one Undo chip. */
   apply(ops: readonly AgentOp[], label: string): Promise<ApplyResult>;
+  /**
+   * A turn's writer only (`turnWriter`): stages one operation into the turn at once, as a write tool
+   * asks, and says what it staged: it lands when the turn commits, or, its mode Confirm, waits for the
+   * GM's Apply on the turn's review card. A writer without it only proposes (`propose`).
+   */
+  stage?(op: AgentOp): Promise<OpPreview | OpRefusal>;
 }
 
 /** Who writes, and as whom: the tool env without its writer, and the connection the agent runs on (null or absent: no learned mode applies). */
@@ -248,7 +254,8 @@ function prepareFile(ctx: Ctx, env: WriterEnv, state: Readonly<WorldState>, lear
     const readers = readersAt(path);
     return readers !== undefined && !knowledgeWithin(readers, env.knowledge);
   };
-  const bad = (path: unknown): OpRefusal | null => (isWorkspacePath(path) ? null : refusal("bad_path", ctx.view.text(WRITE_NOTE.badPath, { path: String(path) }), key));
+  // A transcript (`transcripts/`) is kept as its turn left it: nothing writes, moves, deletes or pins one.
+  const bad = (path: unknown): OpRefusal | null => (!isWorkspacePath(path) ? refusal("bad_path", ctx.view.text(WRITE_NOTE.badPath, { path: String(path) }), key) : isTranscriptPath(path) ? refusal("transcript", ctx.view.text(WRITE_NOTE.transcriptReadOnly, { path }), key) : null);
   const none = (path: string): OpRefusal => refusal("no_file", ctx.view.text(WRITE_NOTE.noFile, { path }), key);
   const badOp = (): OpRefusal => refusal("bad_op", ctx.view.text(WRITE_NOTE.badOp), key);
   const same = (): OpRefusal => refusal("no_change", ctx.view.text(WRITE_NOTE.noChange), key);
@@ -777,7 +784,7 @@ async function apply(rt: Runtime, env: WriterEnv, ops: readonly AgentOp[], label
       else if (group.events.length === 0) refuseEdits((p) => refusal("no_change", ctx.view.text(WRITE_NOTE.noChange), p.key));
       else {
         const agent: NonNullable<PostEntry["agent"]> = { role: env.agent.role, key, applied: edits.map((p) => p.key), label, ...(env.agent.role !== GM_ROLE ? { knowledge: env.knowledge } : {}) };
-        const result = await rt.ledger.write(env.chatId, env.userId, { kind: "post", id: `a${Date.now().toString(36)}${(++writes).toString(36)}`, target: "head", entry: { kind: "fix", gm: true, events: group.events, edit: { ops: asked }, agent }, hold: true });
+        const result = await rt.ledger.write(env.chatId, env.userId, { kind: "post", id: `a${Date.now().toString(36)}${(++writes).toString(36)}`, target: "head", entry: { kind: "fix", gm: true, events: group.events, edit: { ops: asked }, agent } });
         if (result.reason === "paused") refuseEdits((p) => refusal("paused", ctx.view.text(WRITE_NOTE.paused), p.key));
         // The chat changed between the check and the write (a turn landed): the ledger's reason is the GM's.
         else if (!result.applied && !result.pending) refuseEdits((p) => refused(rt, ctx, env.knowledge, { code: WRITE_REFUSED, reason: ctx.view.text(WRITE_NOTE.stale), ...(result.reason ? { gm: result.reason } : {}) }, p.key));

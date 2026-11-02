@@ -18,13 +18,14 @@ import { currentSignals } from "../shared/steps";
 import type { Limit } from "../shared/minds";
 import { defaultMindsSettings, isMindPurpose, migrateMindReads, MINDS_PRESETS, mindsSettingsOf } from "../shared/minds";
 import { defaultTimeouts, migrateTimeouts, timeoutsOf } from "../shared/timeouts";
-import { JOB_SETTINGS_DEFAULTS, jobSettingsOf, stepConfigOf } from "../shared/settings";
+import { JOB_SETTINGS_DEFAULTS, jobSettingsOf, LORE_INDEX_DEFAULTS, loreBooksSettingOf, loreIndexSettingsOf, stepConfigOf } from "../shared/settings";
 import { type AcceptanceConnection, agentSettingsOf, defaultAgentSettings } from "../shared/agent-settings";
 import { MARK_TEXT_IDS, PROMPT_SETTINGS_DEFAULTS, promptSettingsOf, promptsWritten, SWIPE_TEXTS } from "../shared/prompts";
 import { DIAGNOSTICS_DEFAULTS, diagnosticsSettingsOf } from "../shared/diagnostics";
 import { RETENTION_DEFAULTS, retentionOf } from "../shared/stores";
 import type { HostPort } from "./host";
 import { readStoredJson } from "./stored-json";
+import { turnFrame } from "./turn-frame";
 
 const SETTINGS_PATH = "settings.json";
 const LEARNING_PATH = "extraction-learning.json";
@@ -242,14 +243,14 @@ export function defaultSettings(): UserSettings {
     minds: defaultMindsSettings(),
     timeouts: defaultTimeouts(),
     jobs: { ...JOB_SETTINGS_DEFAULTS },
+    loreBooks: "auto",
+    loreIndex: { ...LORE_INDEX_DEFAULTS },
     // A turn plays as soon as it is read until the player asks to see it first.
     gates: { intent: false, outline: false },
     // The agent runtime's own: no classic turn reads them (AGENT-LOOP-PLAN §15).
     agents: defaultAgentSettings(),
     // Every text is the shipped one until the user writes their own.
     prompts: { texts: {}, maxChars: PROMPT_SETTINGS_DEFAULTS.maxChars },
-    // A write made while the engine runs lands at once and the turn's reply doesn't start, as it always has (DESIGN §4.3 P2).
-    holdWrites: false,
     // The agent stores keep a call's text a month and a blob nothing references a week, swept daily.
     retention: { ...RETENTION_DEFAULTS },
     diagnostics: { ...DIAGNOSTICS_DEFAULTS },
@@ -558,10 +559,11 @@ function conform(v: JsonObject, d: UserSettings): UserSettings {
     minds: mindsSettingsOf(v.minds, d.minds),
     timeouts: timeoutsOf(v.timeouts, d.timeouts),
     jobs: jobSettingsOf(v.jobs, d.jobs),
+    loreBooks: loreBooksSettingOf(v.loreBooks),
+    loreIndex: loreIndexSettingsOf(v.loreIndex, d.loreIndex),
     gates: gatesOf(v.gates, d.gates),
     agents: agentSettingsOf(v.agents, d.agents),
     prompts: promptSettingsOf(v.prompts, d.prompts),
-    holdWrites: typeof v.holdWrites === "boolean" ? v.holdWrites : d.holdWrites,
     retention: retentionOf(v.retention, d.retention),
     diagnostics: diagnosticsSettingsOf(v.diagnostics, d.diagnostics),
     narrator: narratorSettingsOf(v.narrator, d.narrator),
@@ -812,7 +814,13 @@ export class SettingsStore {
     private readonly guards: AcceptanceGuardStore | null = null,
   ) {}
 
+  /**
+   * The user's settings. Inside a turn's work they are that turn's: as they stood when its engine
+   * run started (`TurnFrame`), so a change saved meanwhile applies from the chat's next turn.
+   */
   async get(userId: UserId): Promise<UserSettings> {
+    const frame = turnFrame();
+    if (frame?.userId === userId) return frame.settings;
     return (await this.read(userId)).settings;
   }
 
@@ -880,19 +888,21 @@ export class SettingsStore {
     await this.host.storage.write(`${SETTINGS_PATH}.tmp`, JSON.stringify(storedForm(next)), userId);
     await this.host.storage.move(`${SETTINGS_PATH}.tmp`, SETTINGS_PATH, userId);
     if (kept || guard) this.settings.set(userId, next);
-    this.revisions.set(userId, this.revision(userId) + 1);
+    this.revisions.set(userId, (this.revisions.get(userId) ?? 0) + 1);
     this.loaded(userId, next);
     return next;
   }
 
-  /** How many times the user's settings were set since the backend started (what a finding read from them is kept against). */
+  /** How many times the user's settings were set since the backend started (what a finding read from them is kept against); a turn's work reads its frame's. */
   revision(userId: UserId): number {
-    return this.revisions.get(userId) ?? 0;
+    const frame = turnFrame();
+    return frame?.userId === userId ? frame.revision : (this.revisions.get(userId) ?? 0);
   }
 
-  /** The settings already loaded for the user (the latest set), without reading storage. */
+  /** The settings already loaded for the user (the latest set), without reading storage; a turn's work reads its frame's. */
   known(userId: UserId): UserSettings | undefined {
-    return this.settings.get(userId);
+    const frame = turnFrame();
+    return frame?.userId === userId ? frame.settings : this.settings.get(userId);
   }
 
   async learningOf(userId: UserId): Promise<ExtractionLearning> {

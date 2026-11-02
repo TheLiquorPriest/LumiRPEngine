@@ -21,7 +21,7 @@ import { hiddenNameCheck } from "../engine/player-events";
 import { fitMindLines, mindLines } from "../packs/minds/core/section";
 import { renderSection, sectionsOf } from "./book";
 import { missingSections, withoutMissing } from "./section-refs";
-import { spanText } from "../engine/action-words";
+import { turnTimeLine } from "./turn-steps";
 
 export interface SectionsInput {
   registry: Registry;
@@ -270,8 +270,11 @@ export function buildSections(input: SectionsInput): SectionsBuilt {
           else beyond.push({ text: markedText({ text, known }) });
         }
       }
-      // DESIGN §9.2: every turn has an elapsed time, and the Scene slot states it.
-      if (section.id === "scene" && input.elapsed !== null) lines.push({ text: input.elapsed > 0 ? `This turn took ${spanText(input.elapsed)}.` : "No time passes this turn." });
+      // DESIGN §9.2: every turn has an elapsed time, and the Scene slot states it, from when to when
+      // where it tells the time of day, so its time line reads as when the turn's actions end; in the
+      // turn's own wording of it (the Final output's Elapsed time texts), none when that is blank.
+      const elapsed = section.id === "scene" && input.elapsed !== null ? turnTimeLine(read, input.elapsed, input.texts) : "";
+      if (elapsed.trim() !== "") lines.push({ text: elapsed });
       // The turn's resolution leads the Outcome slot; a timelapse's Montage fills its own.
       if (section.id === "outcome") lines.unshift(...input.planned.outcome.map((text) => ({ text })));
       if (section.id === "montage") lines.push(...input.planned.montage.map((text) => ({ text })));

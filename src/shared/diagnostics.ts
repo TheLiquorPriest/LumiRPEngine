@@ -177,6 +177,9 @@ export const CANNOT_STOP = "This Lumiverse can't stop generation; engine state m
 /** Why the engine refused a stopped reply for an earlier message: Lumiverse starts only the last reply again (DESIGN §5.1). */
 export const NOT_LAST_REPLY = "Lumiverse can only start the last reply again, so the engine can't prepare an earlier message's reply here. Use Edit and Send as a branch, or regenerate the last reply.";
 
+/** Why an engine run failed as it started: what the turn runs on (DESIGN §5.1: the user's settings and the chat's own choices, `TurnFrame`) couldn't be read; the failure's own message follows it. */
+export const FRAME_UNREAD = "your settings and this chat's choices couldn't be read for the turn";
+
 /** A phase's or a model call's in-flight label, by phase or step purpose. */
 export const STEP_LABEL: Record<string, string> = {
   engine: "Running the engine…",

@@ -33,8 +33,10 @@ import type { ExtractRead, InterpretContext, InterpretRead } from "../steps";
 import type { JudgeAsk, Tie, TieOdds } from "../turn-steps";
 import type { PlanProse } from "../turn-model";
 import type { TaskReads } from "./brief";
-import { type AgentHandle, type AgentSpec, type AgentTurn, startAgent } from "./runtime";
+import type { ProseClash } from "./roles/prose-check";
+import { type AgentHandle, type AgentSpec, type AgentTraceTag, type AgentTurn, startAgent } from "./runtime";
 import type { ToolReader } from "./tools/read-view";
+import type { LoreLoads } from "./tools/registry";
 import type { ToolWriter } from "./tools/writer";
 import type { AgentUsage } from "./usage";
 
@@ -70,6 +72,8 @@ export interface TurnAgentCtx {
    * same turn, its head and draft, its agent id and its tier.
    */
   readAs(knowledge: AgentKnowledge): { reader: ToolReader; writer: ToolWriter };
+  /** Where its agent loads lore into the reply the turn is writing (`lore_load`, DESIGN §4.6). */
+  loads: LoreLoads;
 }
 
 /** The main agent's words for a run, as a task of it reading with `reads` may be told them: the lines that name nothing that knowledge doesn't reach (`screenBrief`). */
@@ -205,11 +209,12 @@ export interface SceneTask extends RoleTask<SceneOut> {
   state: WorldState;
 }
 
-/** What the scene gives the narrator: live lore ids, and notes, with the knowledge they were written with (its role's; a scene told only its task, the player character's), which the narrator's sections hold them to. */
+/** What the scene gives the narrator: live lore ids, and notes, with the knowledge they were written with (its role's; a scene told only its task, the player character's), which the narrator's sections hold them to; and the lore ids its answer gave that the world has no entry for (`unknown`), which its run reports. */
 export interface SceneOut {
   lore: string[];
   notes: string[];
   knowledge: AgentKnowledge;
+  unknown?: string[];
 }
 
 /** What one prose step would write this turn, as classic writes it. */
@@ -228,15 +233,22 @@ export interface ProseTask extends RoleTask<PlanProse> {
   lines: { outcome: readonly string[]; montage: readonly string[]; beats: readonly string[] };
   world: WorldDoc;
   state: WorldState;
+  /** The state the turn started from, before its planned events: the director's lines tell the turn's own actions too, which it holds (`proseClashes`). */
+  start: WorldState;
   /** What the brief and the outline steps would write this turn: each null when it doesn't run. */
   brief: ProseAsk | null;
   outline: ProseAsk | null;
 }
 
-/** What the director gives the narrator for a planned turn: its prose, and lines of its own where it rewrote the engine's (none: the engine's stand). */
+/**
+ * What the director gives the narrator for a planned turn: its prose, and lines of its own where it
+ * rewrote the engine's (none: the engine's stand); and the lines of its answer it withheld for
+ * contradicting the state it was given (`flagged`, `roles/prose-check.ts`), which its run reports.
+ */
 export interface DirectorProse {
   prose: PlanProse;
   lines?: { outcome?: string[]; montage?: string[]; outline?: string[] };
+  flagged?: ProseClash[];
 }
 
 /** What classic's `extract` reads of the reply's turn, besides the reply. */
@@ -247,6 +259,8 @@ export interface ExtractInput {
   prefix: JsonValue;
   /** The minutes the turn already applied: narrated time counts only beyond them. */
   appliedMinutes: number;
+  /** The engine's clock as the Scene tells it (`sceneClock`): when the player's message came (`start`), and `now`, after the minutes the turn's own actions took; the read role measures narrated time against it. */
+  clock: { start: string; now: string };
   /** The change types it may propose. */
   channels: string[];
   /** The world's or the user's own words for the extract step, filled in, which lead it; null for none. */
@@ -314,14 +328,15 @@ export type RoleAgentSpec = Omit<AgentSpec, "role" | "connectionId" | "model" | 
  * effort, with every agent's budget under the role's own limits (`roleBudget`), its revisions among
  * them, and against the turn's shared budget (`ctx.turn`). Its caching is the role's under every
  * agent's caching (`agents.caching.roles`, else every role's: `roleCaching`), which the provider
- * reads for each call. Settings are the user's as the turn read them.
+ * reads for each call. Settings are the user's as the turn read them. GM → Live tells it as working
+ * for `ctx`'s run, with `tag`'s phase and task.
  */
-export function startRoleAgent(rt: Runtime, ctx: TurnAgentCtx, spec: RoleAgentSpec): AgentHandle {
+export function startRoleAgent(rt: Runtime, ctx: TurnAgentCtx, spec: RoleAgentSpec, tag: Omit<AgentTraceTag, "run"> = {}): AgentHandle {
   const settings = rt.settings.known(ctx.userId);
   if (!settings) throw new Error("the user's settings aren't read yet");
   const agents = settings.agents;
   return startAgent(
     { ...spec, role: ctx.role, connectionId: ctx.settings.connectionId, model: ctx.settings.model, effort: ctx.settings.effort, budget: roleBudget(agents, ctx.role) },
-    { host: rt.host, userId: ctx.userId, settings: agents, texts: settings.prompts.texts, accounts: rt.agentAccounts, turn: ctx.turn },
+    { host: rt.host, userId: ctx.userId, settings: agents, texts: settings.prompts.texts, accounts: rt.agentAccounts, turn: ctx.turn, trace: { ...tag, run: ctx.agentId } },
   );
 }

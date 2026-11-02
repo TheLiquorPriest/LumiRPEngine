@@ -24,13 +24,12 @@ import { hasOwn, type JsonObject } from "../shared/json";
 import { engineWroteEntry, loreIsSecret } from "../shared/lore";
 import { heldSecrets } from "../shared/minds";
 import { hasSecretMarks, publicText, renderMark, renderSecretMarks, resolveMarkNames, unreadableMarks, wholeEntrySecret, type ResolvedMarkNames, type SecretMarkWording } from "../shared/secret-marks";
-import type { UserSettings } from "../shared/settings";
 import type { WorldDoc } from "../shared/world";
 import type { Registry } from "../engine/registry-impl";
 import type { WorldState } from "../engine/state";
 import { loreGateReader } from "../engine/visibility";
 import { bookLoreId, bookMarkLoreId } from "./book-lore";
-import { chatKnowledgePrefsOf, narratorView } from "./chat-knowledge-prefs";
+import type { NarratorView } from "../shared/settings";
 import { bookSecrecy, secretTexts, switchedOffForSecrecy, textOf, type MarkAt } from "./lore-secrets";
 import type { WorldInfoCandidate, WorldInfoInput, WorldInfoVerdict } from "./host";
 
@@ -41,10 +40,12 @@ export interface WorldInfoGate {
   playsWorld(meta: JsonObject): boolean;
   /** The chat's world and state as the narrator sees them now (its turn's planned events included), or null when they can't be read. */
   head(chatId: ChatId, userId: UserId): Promise<{ world: WorldDoc; state: WorldState } | null>;
-  /** The user's settings: the narrator's view. */
-  settings(userId: UserId): Promise<UserSettings>;
-  /** The wording of a secret's mark for this prompt (DESIGN §6.12): its turn's, as its sections and narrator rules have it, else the user's texts. */
-  wording(chatId: ChatId, userId: UserId): Promise<SecretMarkWording>;
+  /**
+   * How this prompt's narrator sees a secret: the narrator's knowledge and the wording of a mark
+   * (DESIGN §6.11, §6.12). Its turn's, as its sections and narrator rules have them, while its
+   * sections are in the book; else the chat's own choice (`meta`), its world's, then the user's.
+   */
+  narrator(chatId: ChatId, userId: UserId, meta: JsonObject, world: WorldDoc): Promise<{ view: NarratorView; wording: SecretMarkWording }>;
   log(message: string, userId: UserId): void;
 }
 
@@ -90,9 +91,7 @@ async function verdict(gate: WorldInfoGate, input: WorldInfoInput): Promise<Worl
     return null;
   });
   if (!head) return blind(entries);
-  const settings = await gate.settings(input.userId);
-  const view = narratorView(chatKnowledgePrefsOf(input.chatMetadata), head.world, settings);
-  const wording = await gate.wording(input.chatId, input.userId);
+  const { view, wording } = await gate.narrator(input.chatId, input.userId, input.chatMetadata, head.world);
   const { world, state } = head;
   const texts = secretTexts({ world, entries });
   const open = loreGateReader(gate.registry, world, state);

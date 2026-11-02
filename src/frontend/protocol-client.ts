@@ -20,7 +20,8 @@ import { formatMs, TIMEOUTS, timerMs } from "../shared/timeouts";
 import type { Activity } from "../shared/diagnostics";
 import type { ChatId } from "../shared/ids";
 import { PROTOCOL_VERSION } from "../shared/protocol";
-import type { AssistantUpdate, AssistantView, DeltaOp, DraftChanged, ErrorCode, ErrorMessage, FrontendToBackend, GeneratePush, JobUpdate, MindsRunUpdate, ResultBodies, ResultMessage, ReviewCardView, ReviewUpdate } from "../shared/protocol";
+import type { AssistantUpdate, AssistantView, DeltaOp, DraftChanged, ErrorCode, ErrorMessage, FrontendToBackend, GeneratePush, JobUpdate, LiveUpdate, MindsRunUpdate, ResultBodies, ResultMessage, ReviewCardView, ReviewUpdate } from "../shared/protocol";
+import type { LiveChange, LiveView } from "../shared/live";
 import type { AgentsView } from "../shared/agents";
 import type { AcceptanceRunView, AcceptanceState } from "../shared/agent-settings";
 import type { StateView } from "../shared/state-view";
@@ -66,6 +67,12 @@ function isAssistantView(value: unknown): value is AssistantView {
 /** An agent turn's review card as pushed: a light check, as for the other pushes; the backend owns the rest of the shape. */
 function isReviewCard(value: unknown): value is ReviewCardView {
   return isRecord(value) && typeof value.turn === "string" && typeof value.messageId === "string" && (value.placement === "chips" || value.placement === "gate") && Array.isArray(value.items);
+}
+
+/** A change to a chat's live view as pushed: a new run's view, or a run's entries and how it stands; a light check, as for the other pushes. */
+function isLiveChange(value: Record<string, unknown>): value is Record<string, unknown> & LiveChange {
+  if (isRecord(value.view)) return typeof value.view.turn === "string" && Array.isArray(value.view.entries);
+  return typeof value.turn === "string" && Array.isArray(value.entries) && (value.ended === null || isRecord(value.ended));
 }
 
 export interface SyncState {
@@ -136,6 +143,7 @@ const REQUEST_TYPES: Record<keyof ResultBodies, true> = {
   "lre.workspace": true,
   "lre.review": true,
   "lre.prompts": true,
+  "lre.live": true,
 };
 
 function isRequestType(value: unknown): value is keyof ResultBodies {
@@ -164,6 +172,7 @@ export class ProtocolClient {
   private readonly acceptanceListeners = new Set<(state: AcceptanceState) => void>();
   private readonly assistantListeners = new Set<(update: AssistantUpdate) => void>();
   private readonly reviewListeners = new Set<(update: ReviewUpdate) => void>();
+  private readonly liveListeners = new Set<(update: LiveUpdate) => void>();
   private readonly unsubscribe: () => void;
   private requestMs: Limit;
   private readonly newReqId: () => string;
@@ -247,6 +256,12 @@ export class ProtocolClient {
   onReview(listener: (update: ReviewUpdate) => void): () => void {
     this.reviewListeners.add(listener);
     return () => this.reviewListeners.delete(listener);
+  }
+
+  /** A chat's live view moved on (`lre.live.update`): GM data, which only GM → Live shows, behind the gate. */
+  onLive(listener: (update: LiveUpdate) => void): () => void {
+    this.liveListeners.add(listener);
+    return () => this.liveListeners.delete(listener);
   }
 
   /** Whether this page's document is on screen (setup reads `document.visibilityState`); sent with each hello, resync and `page`. */
@@ -448,6 +463,13 @@ export class ProtocolClient {
         if (typeof payload.chatId === "string" && Array.isArray(payload.cards) && payload.cards.every(isReviewCard)) {
           const update: ReviewUpdate = { lre: PROTOCOL_VERSION, type: "lre.review.update", chatId: payload.chatId, cards: payload.cards };
           for (const listener of this.reviewListeners) listener(update);
+        }
+        return;
+      case "lre.live.update":
+        if (typeof payload.chatId === "string" && isLiveChange(payload)) {
+          const change: LiveChange = "view" in payload ? { view: payload.view as LiveView } : { turn: payload.turn, entries: payload.entries, ended: payload.ended };
+          const update: LiveUpdate = { lre: PROTOCOL_VERSION, type: "lre.live.update", chatId: payload.chatId, ...change };
+          for (const listener of this.liveListeners) listener(update);
         }
         return;
     }

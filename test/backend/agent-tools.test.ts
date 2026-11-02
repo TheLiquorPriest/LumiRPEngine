@@ -215,7 +215,8 @@ describe("toolsFor", () => {
     const env = toolEnv(rig, chatId, "gm");
     const { world } = await env.reader.view();
     const tier = (name: string) => TOOL_DEFINITIONS.find((d) => d.name === name);
-    expect(toolsFor({ world, tiers: ["read"], texts: {}, env }).map((t) => t.name).sort()).toEqual(TOOL_DEFINITIONS.filter((d) => d.tier === "read").map((d) => d.name).sort());
+    // A turn's own tools (lore_load) go only to an agent working a turn.
+    expect(toolsFor({ world, tiers: ["read"], texts: {}, env }).map((t) => t.name).sort()).toEqual(TOOL_DEFINITIONS.filter((d) => d.tier === "read" && d.turn !== true).map((d) => d.name).sort());
     expect(toolsFor({ world, tiers: ["read"], families: ["people"], texts: {}, env }).map((t) => t.name)).toEqual(["people_find", "people_sheet", "people_where", "people_regard"]);
     for (const t of toolsFor({ world, tiers: ["gm"], texts: {}, env })) expect(tier(t.name)?.tier).toBe("gm");
   });

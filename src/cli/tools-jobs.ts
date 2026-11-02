@@ -24,7 +24,6 @@ import type { ToolContext } from "./tools";
 /** What each kind takes, and how it is told: the arguments beside worldId and kind. */
 const KINDS: Readonly<Record<JobKind, { needs: readonly string[]; takes: readonly string[]; about: string }>> = {
   import_lore: { needs: ["bookIds"], takes: ["bookIds"], about: "Import from lore: entities, places and facts proposed from World Info books (bookIds, at most 64)" },
-  index_book: { needs: ["bookId"], takes: ["bookId"], about: "Index a World Info book: a lore entry for each book entry with text, keeping the book's text, with aliases, topics, links and lookup terms (bookId)" },
   index_text: { needs: ["text"], takes: ["text"], about: "Index this text: lore entries in the text's own words, marked written by the AI (text)" },
   refine: { needs: ["instructions"], takes: ["instructions"], about: "Build / Refine with AI: world edits for a request in words (instructions, at most 4,000 characters)" },
   describe_map: { needs: ["scope", "prose"], takes: ["scope", "prose", "mapId"], about: "Describe a map: a map of a place drawn from a description (scope: the place's id; prose; mapId, by default <scope>_map)" },
@@ -38,7 +37,7 @@ const KINDS: Readonly<Record<JobKind, { needs: readonly string[]; takes: readonl
 };
 
 const KIND_NAMES = Object.keys(KINDS) as JobKind[];
-const INPUTS = ["bookIds", "bookId", "text", "instructions", "scope", "prose", "mapId", "owners", "after", "turns", "days"] as const;
+const INPUTS = ["bookIds", "text", "instructions", "scope", "prose", "mapId", "owners", "after", "turns", "days"] as const;
 
 const WORLD_ID: JsonObject = { type: "string", description: "The world's id (w_…), from lre_worlds." };
 const JOB_ID: JsonObject = { type: "string", description: "The job's id (lre_job_start answers it; lre_jobs lists them)." };
@@ -68,7 +67,7 @@ function jobInput(kind: JobKind, args: Args): JsonObject {
     if (owners.length === 0) throw new ToolError("owners names at least one person or group (lre_draft lists the world's entities); leave it out for everyone.");
     input.owners = owners;
   }
-  for (const key of ["bookId", "text", "instructions", "scope", "prose", "mapId", "after"] as const) {
+  for (const key of ["text", "instructions", "scope", "prose", "mapId", "after"] as const) {
     const value = textArg(args, key);
     if (value !== undefined) input[key] = value;
   }
@@ -148,7 +147,6 @@ export const JOB_TOOLS: readonly ToolModule[] = [
         worldId: WORLD_ID,
         kind: { type: "string", enum: KIND_NAMES, description: "Which job." },
         bookIds: { type: "array", items: { type: "string" }, minItems: 1, maxItems: 64, description: "import_lore: the World Info books to read (lre_lore_books)." },
-        bookId: { type: "string", description: "index_book: the book to index." },
         text: { type: "string", description: "index_text: the text to split into lore entries." },
         instructions: { type: "string", maxLength: 4000, description: "refine: what to change, in words." },
         scope: { type: "string", description: "describe_map: the id of the place the map draws." },
@@ -174,10 +172,10 @@ export const JOB_TOOLS: readonly ToolModule[] = [
       command: "job-start",
       section: "Jobs",
       usage: "job-start <worldId> <kind> [<input options>]",
-      summary: "Start a Build job: import_lore --book <id> …, index_book --book-id <id>, index_text --text <t>, refine --instructions <t>, describe_map --scope <place> --prose <t> [--map-id <id>], propose_routines [--owner <id> …] [--after <id>], playtest --turn <t> …, check_world [--days <n>]",
+      summary: "Start a Build job: import_lore --book <id> …, index_text --text <t>, refine --instructions <t>, describe_map --scope <place> --prose <t> [--map-id <id>], propose_routines [--owner <id> …] [--after <id>], playtest --turn <t> …, check_world [--days <n>]",
       positionals: ["worldId", "kind"],
       needs: 2,
-      options: { "--book": { arg: "bookIds", as: "many" }, "--book-id": { arg: "bookId", as: "text" }, "--text": { arg: "text", as: "text" }, "--instructions": { arg: "instructions", as: "text" }, "--scope": { arg: "scope", as: "text" }, "--prose": { arg: "prose", as: "text" }, "--map-id": { arg: "mapId", as: "text" }, "--owner": { arg: "owners", as: "many" }, "--after": { arg: "after", as: "text" }, "--turn": { arg: "turns", as: "many" }, "--days": { arg: "days", as: "int" } },
+      options: { "--book": { arg: "bookIds", as: "many" }, "--text": { arg: "text", as: "text" }, "--instructions": { arg: "instructions", as: "text" }, "--scope": { arg: "scope", as: "text" }, "--prose": { arg: "prose", as: "text" }, "--map-id": { arg: "mapId", as: "text" }, "--owner": { arg: "owners", as: "many" }, "--after": { arg: "after", as: "text" }, "--turn": { arg: "turns", as: "many" }, "--days": { arg: "days", as: "int" } },
     },
   },
   {

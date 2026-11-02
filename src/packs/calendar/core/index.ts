@@ -14,7 +14,7 @@ import type { JsonValue } from "../../../shared/json";
 import type { DataTable } from "../../../shared/tables";
 import { agentOf } from "../../../shared/tiers";
 import type { DateRule, HolidayDef } from "../../../shared/world";
-import { calendarOf, clockOfLocal, dateAt, dayIndexOf, dayPartAt, formatClock, holidaysOn, MINUTES_PER_DAY, nextTimeOfDay, parseHHMM, placeOffset, shortestSlot, weekdayName } from "../../../engine/calendar";
+import { calendarOf, clockOfLocal, dateAt, dayIndexOf, dayPartAt, formatClock, holidaysOn, MINUTES_PER_DAY, nextTimeOfDay, parseHHMM, sceneOffset, shortestSlot, weekdayName } from "../../../engine/calendar";
 import type { PackDef } from "../../../engine/registry";
 import { placeOfEntity } from "../../../engine/scope";
 import { clockPaused } from "../../../engine/time";
@@ -115,7 +115,7 @@ export const calendarPack: PackDef = {
         if (level === 0) return [];
         const cal = calendarOf(ctx.world);
         const place = placeOfEntity(ctx.state, ctx.world.pov);
-        const offset = level >= 3 ? placeOffset(ctx.world, ctx.state.clock, place) : 0;
+        const offset = sceneOffset(ctx.world, ctx.state.clock, place, level);
         const part = dayPartAt(cal, ctx.state.clock + offset).label;
         const lines = [level === 1 ? `Time: ${part}.` : `Time: ${formatClock(cal, ctx.state.clock, offset)} (${part.toLowerCase()}).`];
         if (level >= 4) {

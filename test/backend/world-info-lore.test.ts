@@ -156,7 +156,7 @@ async function sectionTexts(rig: Rig, chatId: string): Promise<string[]> {
 /** An entry as the host gives the interceptor one. */
 const candidate = (id: string, bookId: string, disabled: boolean, extensions: JsonObject, content = `${SECRET}.`): WorldInfoCandidate => ({ id, bookId, disabled, extensions, comment: "", content });
 /** The interceptor's gate as the runtime's, the chat's world and state read by `head`. */
-const gateOn = (registry: Registry, head: WorldInfoGate["head"]): WorldInfoGate => ({ registry, playsWorld: () => true, head, settings: async () => defaultSettings(), wording: async () => SECRET_MARK_WORDING, log: () => undefined });
+const gateOn = (registry: Registry, head: WorldInfoGate["head"]): WorldInfoGate => ({ registry, playsWorld: () => true, head, narrator: async () => ({ view: { ...defaultSettings().narrator }, wording: SECRET_MARK_WORDING }), log: () => undefined });
 
 /**
  * The texts a prompt gets of `entries` with `verdict` applied as the host applies it, before its own
@@ -194,7 +194,7 @@ describe("an earlier build's secrecy fields, read as they stand", () => {
     expect(userEntries(rig)).toEqual(stood);
     // A world entry indexed from it, secret by the same gate: its draft save, the commit, the chat's Upgrade to it.
     const worldId = (await rig.rt.runOf(chatId, rig.host.userId))?.worldId ?? "";
-    rig.body(await rig.send({ type: "lre.editor", op: "put", worldId, base: null, collection: "lore", id: "wreck", value: { id: "wreck", title: "The wreck", content: `${SECRET}.`, keys: ["ferry"], links: [], secret: true, gate: HARBOR_MASTER, source: { kind: "book", bookId, entryId: secretId, hash: bookTextHash(`${SECRET}.`) } } }));
+    await rig.oldCopy(worldId, { id: "wreck", title: "The wreck", content: `${SECRET}.`, keys: ["ferry"], links: [], secret: true, gate: HARBOR_MASTER, source: { kind: "book", bookId, entryId: secretId, hash: bookTextHash(`${SECRET}.`) } });
     expect(userEntries(rig)).toEqual(stood);
     const committed = rig.body(await rig.send({ type: "lre.world", op: "commit", worldId, base: null }));
     rig.body(await rig.send({ type: "lre.world", op: "upgrade", chatId, to: committed.revision }));
@@ -622,7 +622,7 @@ describe("World Info secrecy wherever the entry is read", () => {
   test("a Known-by world entry that links nothing stays unread though the book entry it was indexed from links what the player character knows", async () => {
     const { rig, chatId } = await loreChat(async (rig, worldId, here) => {
       const { bookId, entryId } = await debtBook(rig, [here]);
-      rig.body(await rig.send({ type: "lre.editor", op: "put", worldId, base: null, collection: "lore", id: "debt", value: { id: "debt", title: "The debt", content: DEBT_NOTE, keys: ["ferry"], links: [], visibility: "known_by", source: { kind: "book", bookId, entryId, hash: bookTextHash(DEBT_NOTE) } } }));
+      await rig.oldCopy(worldId, { id: "debt", title: "The debt", content: DEBT_NOTE, keys: ["ferry"], links: [], visibility: "known_by", source: { kind: "book", bookId, entryId, hash: bookTextHash(DEBT_NOTE) } });
     });
     await rig.turn(chatId, "I walk to the ferry and wait.", "The ferry horn sounds.");
     expect(rig.host.quietCalls.length).toBeGreaterThan(0);
@@ -652,7 +652,7 @@ describe("World Info secrecy wherever the entry is read", () => {
 
   test("a book entry pinned where the player character is reads as Known by when the world entry indexed from it is", async () => {
     const { rig, chatId } = await pinnedChat(DEBT_NOTE, {}, async (rig, worldId, bookId, entryId) => {
-      rig.body(await rig.send({ type: "lre.editor", op: "put", worldId, base: null, collection: "lore", id: "debt", value: { id: "debt", title: "The debt", content: DEBT_NOTE, keys: [], links: ["dev"], visibility: "known_by", source: { kind: "book", bookId, entryId, hash: bookTextHash(DEBT_NOTE) } } }));
+      await rig.oldCopy(worldId, { id: "debt", title: "The debt", content: DEBT_NOTE, keys: [], links: ["dev"], visibility: "known_by", source: { kind: "book", bookId, entryId, hash: bookTextHash(DEBT_NOTE) } });
     });
     await rig.turn(chatId, "I look out at the water and wait.", "Gulls call.");
     expect(rig.host.quietCalls.length).toBeGreaterThan(0);
@@ -662,7 +662,7 @@ describe("World Info secrecy wherever the entry is read", () => {
 
   test("a book entry an earlier build kept secret, indexed into a secret world entry and pinned where the player character is, opens only once the world entry's gate holds too", async () => {
     const { rig, chatId } = await pinnedChat(`${SECRET}.`, { disabled: true, extensions: lreFields({ secret: true, gate: "true" }) }, async (rig, worldId, bookId, entryId) => {
-      rig.body(await rig.send({ type: "lre.editor", op: "put", worldId, base: null, collection: "lore", id: "wreck", value: { id: "wreck", title: "The wreck", content: `${SECRET}.`, keys: [], links: [], secret: true, gate: "false", source: { kind: "book", bookId, entryId, hash: bookTextHash(`${SECRET}.`) } } }));
+      await rig.oldCopy(worldId, { id: "wreck", title: "The wreck", content: `${SECRET}.`, keys: [], links: [], secret: true, gate: "false", source: { kind: "book", bookId, entryId, hash: bookTextHash(`${SECRET}.`) } });
     });
     await rig.turn(chatId, "I look out at the water and wait.", "Gulls call.");
     expect(rig.host.quietCalls.length).toBeGreaterThan(0);
@@ -714,7 +714,7 @@ describe("World Info secrecy wherever the entry is read", () => {
     const { bookId, entryId } = await oneEntry(rig, chatId, {});
     const worldId = (await rig.rt.runOf(chatId, rig.host.userId))?.worldId ?? "";
     const draft = rig.body(await rig.send({ type: "lre.editor", op: "get", worldId, base: null })).draft as WorldDoc;
-    rig.body(await rig.send({ type: "lre.editor", op: "put", worldId, base: null, collection: "lore", id: "wall", value: { id: "wall", title: "The harbor wall", content: `${SECRET}.`, keys: [], links: [draft.start.place], source: { kind: "book", bookId, entryId, hash: bookTextHash(`${SECRET}.`) } } }));
+    await rig.oldCopy(worldId, { id: "wall", title: "The harbor wall", content: `${SECRET}.`, keys: [], links: [draft.start.place], source: { kind: "book", bookId, entryId, hash: bookTextHash(`${SECRET}.`) } });
     const committed = rig.body(await rig.send({ type: "lre.world", op: "commit", worldId, base: null }));
     rig.body(await rig.send({ type: "lre.world", op: "upgrade", chatId, to: committed.revision }));
     rig.body(await rig.send({ type: "lre.lore", op: "mark", bookId, entryId, change: { kind: "secret", knownTo: [], keptFrom: "everyone" } }));

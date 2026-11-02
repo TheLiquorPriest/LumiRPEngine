@@ -20,12 +20,16 @@
 //   metadata; the next agent turn whose session stands on that compaction brings the archived span
 //   back, marked as restored, so it offers no rollback of its own. Either lands on the record of the
 //   turn that makes it (`Rebase`), at its close, so no earlier record changes.
+// - **GM → Workspace** reads the session whole (`sessionView`): every message and the summary,
+//   whatever knowledge they were made under, each saying whether the main agent reads it now. Only
+//   what the main agent is sent is held to its knowledge.
 
 import { AGENT_KNOWLEDGE, type AgentKnowledge, knowledgeWithin } from "../../shared/agent-tools";
 import type { ChatId, UserId } from "../../shared/ids";
+import { isRecord, type JsonObject } from "../../shared/json";
 import { MAIN_TEXT } from "../../shared/main-agent-prompts";
 import type { PromptTexts } from "../../shared/prompts";
-import type { SessionView } from "../../shared/protocol";
+import type { SessionMessageView, SessionView } from "../../shared/protocol";
 import type { Tombstone } from "../../shared/ledger";
 import type { ChainMessage } from "../../engine/ledger/chain";
 import { activeRecord } from "../../engine/ledger/path";
@@ -34,7 +38,7 @@ import { renderPrompt } from "../prompts";
 import type { Runtime } from "../runtime";
 import type { AgentHistoryMessage, AgentReply } from "./runtime";
 import { type Rebase, recordSessionOf, type SessionMessage, type SessionParts, type SessionRefs, sessionAt } from "./sessions";
-import { chatHead } from "./tools/workspace";
+import { chatHead, listWorkspace } from "./tools/workspace";
 
 /** What marks a message of the main agent's own in a session segment. */
 export const MAIN_BY = "main";
@@ -71,6 +75,19 @@ export interface SessionLens {
 /** The lens of a main agent reading with `knowledge`: its own messages made under that knowledge or a narrower one. */
 export function knowledgeLens(knowledge: AgentKnowledge): SessionLens {
   return { knowledge, message: (m) => isMainMessage(m) && knowledgeWithin(knowledgeOf(m), knowledge) };
+}
+
+/**
+ * The lens a main-agent turn reads its session with: its own messages made under its knowledge or a
+ * narrower one, and of those whose tools read a workspace file, only while the file's readers
+ * (`readers`, by path) still take its knowledge in; a moved or deleted file narrows nothing.
+ */
+export function mainLens(knowledge: AgentKnowledge, readers: ReadonlyMap<string, AgentKnowledge>): SessionLens {
+  const reads = (path: unknown): boolean => {
+    const r = typeof path === "string" ? readers.get(path) : undefined;
+    return r === undefined || knowledgeWithin(r, knowledge);
+  };
+  return { knowledge, message: (m) => isMainMessage(m) && knowledgeWithin(knowledgeOf(m), knowledge) && (Array.isArray(m.files) ? m.files : []).every(reads) };
 }
 
 /** The session a main-agent turn reads: where it stands on the chain (or after the turn's own compaction or rollback), turn by turn. */
@@ -190,17 +207,69 @@ function undoable(session: MainSession): boolean {
   return session.refs.base !== null && session.refs.archived !== null && !session.restored;
 }
 
+/** Which reply on the chain (1-based) holds each segment, by its hash. */
+function segmentTurns(chain: readonly ChainMessage[], tombstones: readonly Tombstone[]): Map<string, number> {
+  const out = new Map<string, number>();
+  let turn = 0;
+  for (const m of chain) {
+    if (m.isUser) continue;
+    turn++;
+    const segment = recordSessionOf(activeRecord(m, tombstones)).segment;
+    if (segment !== undefined) out.set(segment, turn);
+  }
+  return out;
+}
+
+/** A message of the session as GM → Workspace shows it, with whether `lens` reads it; nothing for one that isn't a message (records come from any metadata writer). */
+function messageView(m: SessionMessage, lens: SessionLens): SessionMessageView[] {
+  if ((m.role !== "user" && m.role !== "assistant") || typeof m.content !== "string") return [];
+  const main = isMainMessage(m);
+  const files = main && Array.isArray(m.files) ? m.files.filter((f): f is string => typeof f === "string") : [];
+  const engine = isRecord(m.engine) ? m.engine : null;
+  const list = (part: "roles" | "committed"): JsonObject[] => {
+    const value = engine?.[part];
+    return Array.isArray(value) ? value.filter((v): v is JsonObject => isRecord(v)) : [];
+  };
+  return [
+    {
+      role: m.role,
+      text: m.content,
+      main,
+      ...(main ? { knowledge: knowledgeOf(m) } : {}),
+      ...(files.length > 0 ? { files } : {}),
+      ...(engine ? { engine: { roles: list("roles").map((r) => ({ role: String(r.role ?? ""), via: String(r.via ?? ""), ok: r.ok === true })), committed: list("committed").map((c) => ({ role: String(c.role ?? ""), key: String(c.key ?? ""), type: String(c.type ?? "") })) } } : {}),
+      read: lens.message(m),
+    },
+  ];
+}
+
 /**
- * GM → Workspace's view of the main session at the chat's head (`lre.workspace session`): what the
- * main agent reads of it with its knowledge now, and its latest compaction's rollback.
+ * GM → Workspace's view of the main session at the chat's head (`lre.workspace session`): all of it,
+ * whatever knowledge each part was made under, every message saying whether the main agent reads it
+ * now (its knowledge and its files' readers, as its next turn reads them), what of it the main agent
+ * reads, and its latest compaction's rollback.
  */
 export async function sessionView(rt: Runtime, chatId: ChatId, userId: UserId): Promise<SessionView> {
-  const session = await headSession(rt, chatId, userId);
-  if (!session) return { summary: null, turns: 0, tokens: 0, rollback: "none" };
-  const lens = knowledgeLens((await rt.settings.get(userId)).agents.main.knowledge);
+  const knowledge = (await rt.settings.get(userId)).agents.main.knowledge;
+  const head = await chatHead(rt, chatId, userId);
+  if (!head) return { summary: null, summaryKnowledge: "gm", turns: 0, tokens: 0, segments: [], reads: { knowledge, turns: 0, tokens: 0, summary: false }, missing: 0, rollback: "none" };
+  const chain = head.core.chain(head.observed);
+  const session = await readSession(rt, userId, sessionAt(chain, head.core.journal.tombstones));
+  const lens = mainLens(knowledge, new Map((await listWorkspace(rt, { userId, chatId, knowledge: "gm" })).map((f) => [f.path, f.readers] as const)));
   const asked = (await rt.chatAgents.get(chatId, userId)).rollback;
   const rollback = !undoable(session) ? "none" : asked?.base === session.refs.base && asked.archived === session.refs.archived ? "pending" : "available";
-  return { summary: summaryOf(session, lens), turns: session.segments.filter((s) => s.messages.some((m) => lens.message(m))).length, tokens: sessionTokens(session, lens), rollback };
+  const turns = segmentTurns(chain, head.core.journal.tombstones);
+  return {
+    summary: session.summary,
+    summaryKnowledge: session.summaryKnowledge,
+    turns: session.segments.length,
+    // The whole of it: the GM's knowledge reads every part, and every message counts.
+    tokens: sessionTokens(session, { knowledge: "gm", message: () => true }),
+    segments: session.segments.map((s) => ({ turn: turns.get(s.hash) ?? null, messages: s.messages.flatMap((m) => messageView(m, lens)) })),
+    reads: { knowledge, turns: session.segments.filter((s) => s.messages.some((m) => lens.message(m))).length, tokens: sessionTokens(session, lens), summary: summaryOf(session, lens) !== null },
+    missing: session.missing.length,
+    rollback,
+  };
 }
 
 /**

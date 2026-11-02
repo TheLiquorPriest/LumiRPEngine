@@ -18,6 +18,7 @@ import type { JsonObject, JsonValue } from "../../shared/json";
 import { hasOwn } from "../../shared/json";
 import type { LintIssue } from "../../shared/protocol";
 import { NEED_IDS, NEED_WORDS } from "../../shared/needs";
+import { wiFactIdOfLiveLore } from "../../shared/minds";
 import type { RoutineBlock, RoutineBlockKind, RoutineDays, RoutineDef, RoutineEntry, RoutinePlace, RoutineSeason, RoutineSource, WorldRoutineSource } from "../../shared/routines";
 import { AWARENESS_LABEL, BASIC_BLOCKS, INVITATIONS_LABEL, isOff, ROUTINE_BLOCK_KINDS, routineSettingsOf } from "../../shared/routines";
 import { playedKinds, type ScheduleSlot, type WorldDoc } from "../../shared/world";
@@ -151,7 +152,8 @@ function sourceWords(doc: WorldDoc, source: RoutineSource | undefined): string |
   if (source.type === "builtin") return "A basic need";
   if (source.type === "story") return "From the story";
   if (source.type === "gm") return "Set by the GM";
-  if (source.type === "lore") return `From lore: ${hasOwn(doc.lore, source.entry) ? doc.lore[source.entry]?.title || source.entry : source.entry}`;
+  // A World Info entry (`book:<bookId>/<entryId>`) is read live, so the draft has no title for it: it goes by where it is.
+  if (source.type === "lore") return hasOwn(doc.lore, source.entry) ? `From lore: ${doc.lore[source.entry]?.title || source.entry}` : wiFactIdOfLiveLore(source.entry) !== null ? `From World Info: ${source.entry.slice("book:".length)}` : `From lore: ${source.entry}`;
   const who = hasOwn(doc.entities, source.entity) ? doc.entities[source.entity]?.name || source.entity : source.entity;
   return `From ${who}'s sheet${source.field ? `: ${humanize(source.field)}` : ""}`;
 }

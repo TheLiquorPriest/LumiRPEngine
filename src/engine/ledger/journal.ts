@@ -27,7 +27,7 @@ import type {
   RecStatus,
   CarryDrop,
 } from "../../shared/ledger";
-import { ROOT_PATH } from "../../shared/ledger";
+import { REC_SESSION_PARTS, ROOT_PATH } from "../../shared/ledger";
 import { isBlobHash } from "../../shared/stores";
 import type { WorldDoc } from "../../shared/world";
 import { applyEvent, applyMarker, applyValidUnits, validateEvent, validMarkerBody } from "../events";
@@ -1019,12 +1019,13 @@ export class LedgerCore {
    * The state the narrator sees now (DESIGN §6): the latest planned in-flight turn's fold prefix plus
    * its planned events, else the head fold. Before the chat's first record it includes the starting
    * markers the first turn applies (the world's realism and time defaults, with the user's settings
-   * filling in, DESIGN §9.1), so the palette judges actions at the levels the turn will use. Pure:
-   * nothing is written.
+   * filling in, DESIGN §9.1), so the palette judges actions at the levels the turn will use. With
+   * `keepStart`, a planned turn's also comes with the state it started from (`start`, before its
+   * planned events). Pure: nothing is written.
    */
-  renderState(observed: readonly ChainMessage[]): { state: WorldState; world: WorldDoc } | null {
+  renderState(observed: readonly ChainMessage[], keepStart = false): { state: WorldState; world: WorldDoc; start?: WorldState } | null {
     const planned = Object.values(this.journal.pending).filter((p) => p.planned).at(-1);
-    if (planned) return this.renderPlanned(observed, planned);
+    if (planned) return this.renderPlanned(observed, planned, keepStart);
     const out = this.fold(observed);
     const world = this.env.worlds(out.state.revision);
     if (!world) return null;
@@ -1034,14 +1035,15 @@ export class LedgerCore {
   }
 
   /**
-   * The state the narrator sees while `planned` is in flight: its fold prefix plus its planned events.
-   * `renderState` reads the journal's; a turn the engine run took out (`take`) and a generation has
-   * yet to adopt is read through this too, so its own prompt sees it (DESIGN §6.1). Pure.
+   * The state the narrator sees while `planned` is in flight: its fold prefix plus its planned events,
+   * and with `keepStart` the state before them (`start`). `renderState` reads the journal's; a turn
+   * the engine run took out (`take`) and a generation has yet to adopt is read through this too, so
+   * its own prompt sees it (DESIGN §6.1). Pure.
    */
-  renderPlanned(observed: readonly ChainMessage[], planned: PendingTurn): { state: WorldState; world: WorldDoc } | null {
+  renderPlanned(observed: readonly ChainMessage[], planned: PendingTurn, keepStart = false): { state: WorldState; world: WorldDoc; start?: WorldState } | null {
     const index = planned.messageId ? observed.findIndex((m) => m.id === planned.messageId) : observed.length;
     const at = index < 0 ? observed.length : index;
-    return this.prefixState(this.fold(observed.slice(0, at)), this.chain(observed.slice(at, at + 1))[0], { markersApplied: planned.markersApplied, events: planned.events, pre: planned.events.length, path: this.commitPath(planned), undone: [] }, planned.startMarkers);
+    return this.prefixState(this.fold(observed.slice(0, at)), this.chain(observed.slice(at, at + 1))[0], { markersApplied: planned.markersApplied, events: planned.events, pre: planned.events.length, path: this.commitPath(planned), undone: [] }, planned.startMarkers, keepStart);
   }
 
   /**
@@ -1323,11 +1325,15 @@ export class LedgerCore {
   recordSession(messageId: MessageId, swipeId: number, session: RecSession, observed: readonly ChainMessage[]): string | null {
     if (this.inFlight || Object.keys(this.journal.pending).length > 0) return "the next turn is already under way";
     const parts: RecSession = {};
-    for (const part of ["segment", "summary", "archived"] as const) {
+    for (const part of REC_SESSION_PARTS) {
       const hash = session[part];
       if (hash === undefined) continue;
       if (!isBlobHash(hash)) return `the session's ${part} isn't a stored blob's hash`;
       parts[part] = hash;
+    }
+    if (session.transcriptChars !== undefined) {
+      if (parts.transcript === undefined || !Number.isInteger(session.transcriptChars) || session.transcriptChars < 0) return "the transcript's length isn't a count of its characters";
+      parts.transcriptChars = session.transcriptChars;
     }
     const chain = this.chain(observed);
     const index = chain.findLastIndex((m) => !m.isUser);

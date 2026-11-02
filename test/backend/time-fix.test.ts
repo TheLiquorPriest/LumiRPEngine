@@ -135,19 +135,18 @@ describe("the clock's ✎ fix", () => {
     expect(await world(rig, chatId)).toEqual(before);
   });
 
-  test("a turn the engine prepared before the fix is stale: the engine runs again, and the reply's Scene has the corrected time", async () => {
+  test("a fix made while a turn the engine prepared waits for its reply waits for it too: the reply goes as prepared, and the clock reads the fixed time once it is in", async () => {
     const { rig, chatId } = await alder();
     rig.host.sendUser(chatId, "I look around.");
     await rig.host.settle();
     expect((await rig.host.begin(chatId, { type: "normal" })).halted).toBe("cancelled");
     await setTime(rig, chatId, "2026-09-14 12:00");
     rig.host.restarts.length = 0;
-    expect((await rig.host.begin(chatId, { type: "regenerate" })).halted).toBe("cancelled");
-    expect(rig.host.restarts).toMatchObject([{ chatId, as: "regenerate" }]);
     const reply = await rig.host.begin(chatId, { type: "regenerate" });
     expect(reply.halted).toBeUndefined();
-    expect(rig.host.section("Scene")).toContain("Time: Mon 14 Sep 2026, 12:");
+    expect(rig.host.section("Scene")).not.toContain("Time: Mon 14 Sep 2026, 12:");
     await rig.host.finish(reply, "The cafe is busy.");
+    expect((await world(rig, chatId)).clock).toBe("Mon 14 Sep 2026, 12:00 PM");
   });
 
   test("a swipe or an edit of the head keeps a fix of the time as it keeps any fix: an edit keeps it, Re-narrate and Re-run carry it, and its own swipe still has it", async () => {

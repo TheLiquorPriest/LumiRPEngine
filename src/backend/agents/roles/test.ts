@@ -36,7 +36,7 @@ import type { Guidance } from "../../preset-binding";
 import { type PromptTestResult, renderPrompt, testPrompt } from "../../prompts";
 import type { ReadInput, Runtime } from "../../runtime";
 import { noFacts, renderTemplate, runsOf, type SignalFacts, type StepRun } from "../../turn-steps";
-import { recentLines } from "../../view";
+import { clockMinutes, recentLines } from "../../view";
 import { AgentTurn } from "../runtime";
 import { type ChatHead, chatHead } from "../tools/workspace";
 import type { OpRefusal, ToolWriter } from "../tools/writer";
@@ -244,8 +244,8 @@ const GROUNDED: Readonly<Record<string, Build>> = {
     const out = outputsOf(m.at.pre);
     const lines = { outcome: out?.outcome ?? [], montage: out?.montage ?? [], beats: out?.outline ?? [] };
     const render = { world: m.world, state: m.at.state };
-    const asks = rt.proseAsks(render, { plan: undefined, lines, text: m.user, recent: m.at.recent, secrets: unrevealedSecrets(rt.registry, m.world, m.at.state), briefRuns, outlineRuns });
-    return { run: (ctx) => proseRun(rt, { lines, ...render, ...asks, classic: noClassic }, ctx), left: out ? [] : ["the plan's lines: the latest turn recorded none"] };
+    const asks = rt.proseAsks(render, { plan: undefined, lines, text: m.user, recent: m.at.recent, secrets: unrevealedSecrets(rt.registry, m.world, m.at.state), briefRuns, outlineRuns, elapsed: m.at.pre.length > 0 ? clockMinutes(m.at.pre) : null, texts: m.settings.prompts.texts });
+    return { run: (ctx) => proseRun(rt, { lines, ...render, start: m.at.start, ...asks, classic: noClassic }, ctx), left: out ? [] : ["the plan's lines: the latest turn recorded none"] };
   },
   [roleContractId("director", "choices")]: async (rt, m) => {
     const run = stepRuns(m, "choices", "text")[0];
@@ -333,6 +333,8 @@ export async function roleTextTest(rt: Runtime, input: { userId: UserId; chatId:
         brief: null,
         texts,
         readAs: (knowledge) => ({ reader: turnReader(rt, () => m.head, { userId, chatId, knowledge }), writer }),
+        // A Test writes no reply: nothing it loads is told to a narrator.
+        loads: { add: () => false },
       };
       const out = task.run ? await task.run(ctx) : await textsAlone(rt, ctx, m, def, contract);
       // An answer that doesn't keep the contract is what Test reports; a call that never answered is no Test at all.

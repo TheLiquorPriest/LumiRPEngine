@@ -1,8 +1,8 @@
 // The tools for lore around a world (DESIGN §4.2, §24.5): the user's World Info books and their
-// entries a pin may name, the pins of a world as they read now, the drift of entries indexed from
-// a book, Save to lore from a chat, and Build's own edits of a World Info entry: its LRE fields and
-// its secret marks. A world's own lore entries and pins are its document's (`/lore`, `/lorePins`),
-// written with lre_edit like the rest of it.
+// entries a pin may name, the pins of a world as they read now, the lore index of a world's books,
+// Save to lore from a chat, and Build's own edits of a World Info entry: its LRE fields and its secret
+// marks. A world's own lore entries and pins are its document's (`/lore`, `/lorePins`), written with
+// lre_edit like the rest of it; World Info is read as lore live, never copied.
 
 import type { JsonObject } from "../shared/json";
 import type { BookFieldsEdit } from "../shared/lore";
@@ -67,6 +67,18 @@ export const LORE_TOOLS: readonly ToolModule[] = [
     cli: { command: "lore-entries", section: "Lore", usage: "lore-entries <bookId> [--offset <n>]", summary: "One book's entries, for a pin", positionals: ["bookId"], needs: 1, options: { "--offset": { arg: "offset", as: "int" } } },
   },
   {
+    name: "lre_lore_index",
+    description:
+      "The lore index of a world's World Info books (DESIGN §4.2), as Build → Lore shows it: the text of the index entry LumiRPEngine writes into a book of yours when you press Build an index entry, every entry anyone may read, book by book, by its short id (its tag: its own World Info key that matches Settings → Lore's pattern, such as lr0101; else the id LumiRPEngine gave it for good, such as lre0001) and title, with a line of what it holds where the title doesn't say; each book read with how many entries it lists; and the index entry kept in sync, if one is (`built`: its book and entry, and the world it lists). The books are those Settings → Lore picks, or on Auto the world's Lore books and your global ones. Reading it brings the kept entry up to date. A chat's agents read the same index with their lore_index tool, as their knowledge may read it.",
+    inputSchema: object({ worldId: { type: "string", description: "The world (lre_worlds lists them)." } }, ["worldId"]),
+    write: false,
+    run: async (args, ctx) => {
+      const worldId = neededText(args, "worldId", "the world's id (lre_worlds lists them)");
+      return { text: json({ worldId, index: (await ctx.live().conn.request("lre.lore", { op: "index", worldId })).index ?? null }) };
+    },
+    cli: { command: "lore-index", section: "Lore", usage: "lore-index <worldId>", summary: "A world's lore index, as Build shows it", positionals: ["worldId"], needs: 1 },
+  },
+  {
     name: "lre_lore_pins",
     description:
       "Every lore pin of a world's draft (worldId, as Build shows them) or of the revision a chat plays (chatId, as GM → Minds shows them, behind spoilers: true), by character, by place and by step (/lorePins/steps/<step>: every call of that step reads them first, whatever its lore policy; the mind step's, every mind), each read now: its entry's or whole book's title, where it comes from (the world's lore, or a book by name; a whole book says how many entries it has switched on), and its status: ok, missing (no such entry or book, or gone from its book), pending (an AI-written entry not reviewed yet, which nothing reads) or off (switched off in its book, which a pin of that entry still reads); secret marks a secret world entry. Pins themselves are written with lre_edit at /lorePins.",
@@ -74,19 +86,6 @@ export const LORE_TOOLS: readonly ToolModule[] = [
     write: false,
     run: pinsRead,
     cli: { command: "lore-pins", section: "Lore", usage: "lore-pins (--world <id> | --chat <id> --spoilers) [--offset <n>]", summary: "A world's or a chat's lore pins, read now", options: { "--world": { arg: "worldId", as: "text" }, "--chat": { arg: "chatId", as: "text" }, "--spoilers": { arg: "spoilers", as: "flag" }, "--offset": { arg: "offset", as: "int" } } },
-  },
-  {
-    name: "lre_lore_drift",
-    description: "The lore entries of a world's draft indexed from a World Info book whose book entry changed since (with its text and hash now) or is gone, by lore id; an entry still as it was is left out. id asks about one entry. To take a book's new text, write it into the entry with lre_edit (its content, and source.hash).",
-    inputSchema: object({ worldId: { type: "string", description: "The world's id (w_…)." }, id: { type: "string", description: "Only this lore entry." }, offset: OFFSET }, ["worldId"]),
-    write: false,
-    run: async (args, ctx) => {
-      const worldId = neededText(args, "worldId", "the world's id (lre_worlds lists them)");
-      const id = textArg(args, "id");
-      const body = await ctx.live().conn.request("lre.lore", id === undefined ? { op: "drift", worldId } : { op: "drift", worldId, id });
-      return answer({ worldId, drift: body.drift ?? {} }, `the book drift of the draft of ${worldId}`, args);
-    },
-    cli: { command: "lore-drift", section: "Lore", usage: "lore-drift <worldId> [--id <loreId>] [--offset <n>]", summary: "Book-sourced entries whose book entry changed", positionals: ["worldId"], needs: 1, options: { "--id": { arg: "id", as: "text" }, "--offset": { arg: "offset", as: "int" } } },
   },
   {
     name: "lre_lore_save",

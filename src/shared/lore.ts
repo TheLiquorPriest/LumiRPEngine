@@ -169,12 +169,24 @@ export function withBookLoreFields(extensions: JsonObject, fields: BookLoreField
 
 /**
  * Whether the engine wrote a World Info entry: its books' sections and their outlet twins, its
- * narrator rules, or a copy an earlier build made of world lore. Such an entry is never lore, and
- * never read through a pin, whatever names it (the Minds section holds other minds).
+ * narrator rules, a copy an earlier build made of world lore, or the lore index Build → Lore built
+ * (`builtIndexOf`). Such an entry is never lore, and never read through a pin, whatever names it
+ * (the Minds section holds other minds).
  */
 export function engineWroteEntry(extensions: unknown): boolean {
   const ns = isRecord(extensions) ? extensions[LEDGER_NAMESPACE] : undefined;
-  return isRecord(ns) && (typeof ns.slot === "string" || typeof ns.twin === "string" || typeof ns.narrator === "string" || typeof ns.lore === "string");
+  return isRecord(ns) && (typeof ns.slot === "string" || typeof ns.twin === "string" || typeof ns.narrator === "string" || typeof ns.lore === "string" || typeof ns.loreIndex === "string");
+}
+
+/** The mark on the lore index entry Build → Lore built, which LRE alone writes (`lumi_rp_engine.loreIndex`): the world whose books it lists; null on any other entry. */
+export function builtIndexOf(extensions: unknown): string | null {
+  const ns = isRecord(extensions) ? extensions[LEDGER_NAMESPACE] : undefined;
+  return isRecord(ns) && typeof ns.loreIndex === "string" ? ns.loreIndex : null;
+}
+
+/** The extension data of a lore index entry built for `worldId` (`builtIndexOf`). */
+export function builtIndexMark(worldId: string): JsonObject {
+  return { [LEDGER_NAMESPACE]: { loreIndex: worldId } };
 }
 
 /** The World Info books a world lists to read lore from (DESIGN §4.2): its well-formed ids, each once, in order. */

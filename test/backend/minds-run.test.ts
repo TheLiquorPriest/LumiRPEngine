@@ -123,7 +123,7 @@ describe("Run minds now (GM → Minds)", () => {
     const text = "RUMOR-PIN: the harbor master takes bribes.";
     const entryId = await rig.host.books.createEntry(book, { comment: "Harbor rumor", content: text, keys: [], disabled: false, constant: false, position: 0, depth: 4, role: null, order: 100, extensions: {} }, user);
     const chatId = await alderChat(rig, async (worldId) => {
-      rig.body(await rig.send({ type: "lre.editor", op: "put", worldId, base: null, collection: "lore", id: "rumor", value: { id: "rumor", title: "Harbor rumor", content: text, keys: [], links: [], source: { kind: "book", bookId: book, entryId, hash: bookTextHash(text) } } }));
+      await rig.oldCopy(worldId, { id: "rumor", title: "Harbor rumor", content: text, keys: [], links: [], source: { kind: "book", bookId: book, entryId, hash: bookTextHash(text) } });
       rig.body(await rig.send({ type: "lre.editor", op: "set", worldId, base: null, part: "lorePins", value: { characters: { danny_okafor: [{ lore: "rumor" }] }, places: {} } }));
     });
     rig.body(await rig.send({ type: "lre.lore", op: "mark", bookId: book, entryId, change: { kind: "secret", knownTo: [], keptFrom: "everyone" } }));
@@ -260,7 +260,7 @@ describe("lore pins", () => {
     const bookId = await rig.host.books.create("Harbor notes", "", user);
     const entryId = await rig.host.books.createEntry(bookId, { comment: "The harbor wall", content: SECRET, keys: [], disabled: false, constant: false, position: 0, depth: 4, role: null, order: 100, extensions: {} }, user);
     const chatId = await alderChat(rig, async (worldId) => {
-      rig.body(await rig.send({ type: "lre.editor", op: "put", worldId, base: null, collection: "lore", id: "wall", value: { id: "wall", title: "The harbor wall", content: SECRET, keys: [], links: [], source: { kind: "book", bookId, entryId, hash: bookTextHash(SECRET) } } }));
+      await rig.oldCopy(worldId, { id: "wall", title: "The harbor wall", content: SECRET, keys: [], links: [], source: { kind: "book", bookId, entryId, hash: bookTextHash(SECRET) } });
       rig.body(await rig.send({ type: "lre.editor", op: "set", worldId, base: null, part: "lorePins", value: { characters: {}, places: {}, steps: { memory: [{ lore: "wall" }] } } }));
     });
     rig.body(await rig.send({ type: "lre.lore", op: "mark", bookId, entryId, change: { kind: "secret", knownTo: [], keptFrom: "everyone" } }));

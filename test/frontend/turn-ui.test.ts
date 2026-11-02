@@ -64,7 +64,7 @@ describe("GM → This chat: the Engine switch", () => {
   });
 });
 
-const SESSION: SessionView = { summary: "Jordan asked about the shop; Helen closed early.", turns: 3, tokens: 4200, rollback: "available" };
+const SESSION: SessionView = { summary: "Jordan asked about the shop; Helen closed early.", summaryKnowledge: "everyone", turns: 3, tokens: 4200, segments: [], reads: { knowledge: "everyone", turns: 3, tokens: 4200, summary: true }, missing: 0, rollback: "available" };
 
 describe("GM → Workspace: compaction rollback", () => {
   test("the session and Roll back send lre.workspace session and rollback, and the panel shows the session after", async () => {
@@ -97,7 +97,7 @@ describe("GM → Workspace: compaction rollback", () => {
     const pending = SessionPanel({ session: { ...SESSION, rollback: "pending" }, busy: false, onRollback: () => undefined });
     expect(propsOf(pending, Button)).toEqual([]);
     expect(textOf(pending)).toContain("The next agent turn rolls the latest compaction back and records it.");
-    const none = SessionPanel({ session: { summary: null, turns: 0, tokens: 0, rollback: "none" }, busy: false, onRollback: () => undefined });
+    const none = SessionPanel({ session: { summary: null, summaryKnowledge: "gm", turns: 0, tokens: 0, segments: [], reads: { knowledge: "everyone", turns: 0, tokens: 0, summary: false }, missing: 0, rollback: "none" }, busy: false, onRollback: () => undefined });
     expect(propsOf(none, Button)).toEqual([]);
     expect(textOf(none)).toContain("No compaction to roll back.");
     expect(SessionPanel({ session: undefined, busy: false, onRollback: () => undefined })).toBeNull();

@@ -13,6 +13,7 @@ import type { ComponentChildren } from "preact";
 import { useEffect, useId, useRef, useState } from "preact/hooks";
 import type { EntityId, ScheduleId } from "../../../shared/ids";
 import { nameOfId } from "../../../shared/maps";
+import { wiFactIdOfLiveLore } from "../../../shared/minds";
 import type { EditOp } from "../../../shared/protocol";
 import type { EffectiveBlock, EffectiveSchedule, InvitationView, RoutineAwareness, RoutineBlock, RoutineBlockId, RoutineChangeSummary, RoutineGmView, RoutineMode, RoutineRole, SkipLife, SourceView } from "../../../shared/routines";
 import { AWARENESS_LABEL, BLOCK_KIND_LABEL, isOff, ROUTINE_AWARENESS, ROUTINE_MODE_LABEL, ROUTINE_MODES, ROUTINE_ROLE_LABEL, ROUTINE_ROLES, routineSettingsOf, SKIP_LIFE_LABEL, SKIP_LIVES, storySourceLabel } from "../../../shared/routines";
@@ -703,7 +704,8 @@ function SourceRow(props: { source: SourceView; now: number }) {
   const app = useApp();
   const worldId = useView()?.worldId ?? null;
   const s = props.source;
-  const target = s.type === "lore" ? { collection: "lore" as const, id: s.entry } : s.type === "sheet" ? { collection: "entities" as const, id: s.entity } : null;
+  // A World Info entry (`book:<bookId>/<entryId>`) is no entry of the world's own in Build, so it has no link there.
+  const target = s.type === "lore" ? (wiFactIdOfLiveLore(s.entry) === null ? { collection: "lore" as const, id: s.entry } : null) : s.type === "sheet" ? { collection: "entities" as const, id: s.entity } : null;
   return (
     <div class="lre-gm-routines-source" data-lre-source={s.type}>
       <span class="lre-gm-routines-lines">

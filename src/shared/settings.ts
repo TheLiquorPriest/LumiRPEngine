@@ -9,7 +9,7 @@ import type { InferredChecks } from "./inferred";
 import type { AdjudicationDef, StepPurpose } from "./world";
 import type { Limit, MindsSettings } from "./minds";
 import { isMindPurpose, limitIn } from "./minds";
-import { isRecord } from "./json";
+import { isRecord, safeKey } from "./json";
 import type { TimeoutSettings } from "./timeouts";
 import type { AgentSettings } from "./agent-settings";
 import type { PromptSettings, SwipeTexts } from "./prompts";
@@ -420,6 +420,91 @@ export function narratorSettingsOf(raw: unknown, base: Readonly<NarratorView>): 
   return { knowledge: NARRATOR_KNOWLEDGE.find((k) => k === n.knowledge) ?? base.knowledge, secrets: NARRATOR_SECRETS.find((s) => s === n.secrets) ?? base.secrets };
 }
 
+/** Which World Info books LRE reads as lore (`UserSettings.loreBooks`): every book a world chat reads, or only those of them listed. */
+export type LoreBooks = "auto" | string[];
+
+/** `UserSettings.loreBooks` as the engine reads it: a list keeps each book id once; anything else reads as every book the chat reads. */
+export function loreBooksSettingOf(raw: unknown): LoreBooks {
+  return Array.isArray(raw) ? [...new Set(raw.filter((id): id is string => typeof id === "string" && id !== ""))] : "auto";
+}
+
+/** One World Info entry, by its book and its own id. */
+export interface LoreEntryRef {
+  bookId: string;
+  entryId: string;
+}
+
+/** The lore index entry Build → Lore built (DESIGN §4.2): where it is, and the world whose books it lists, which LRE keeps it in step with. */
+export interface BuiltLoreIndex extends LoreEntryRef {
+  worldId: string;
+}
+
+/**
+ * The lore index (Settings → Lore, DESIGN §4.2): the routing table the agents read, made from the
+ * World Info books LRE reads, each entry by a short id and its title. `tagPattern`: a World Info key
+ * of an entry that matches it (a regular expression) is that entry's id, a tag; an entry with none
+ * gets one of LRE's own, `idPrefix` then its number padded to `idDigits` digits, kept for good.
+ * `holdsChars`: the longest line of what an entry holds beside its title (0: none). `inPrompts`:
+ * every role's prompt carries the index, within `promptTokens`. `own`: an entry of the user's whose
+ * text the agents get as the index instead, verbatim. `built`: the entry Build → Lore wrote, which LRE
+ * keeps in sync; set by Build, taken off by Stop.
+ */
+export interface LoreIndexSettings {
+  tagPattern: string;
+  idPrefix: string;
+  idDigits: number;
+  holdsChars: number;
+  inPrompts: boolean;
+  promptTokens: number;
+  own: LoreEntryRef | null;
+  built: BuiltLoreIndex | null;
+}
+
+/** A new user's lore index: the tags `lr` and four digits are, LRE's own ids `lre` and four digits, a holds line of 100 characters, and no index in the roles' prompts (1,500 tokens of it once it is switched on). */
+export const LORE_INDEX_DEFAULTS: Readonly<LoreIndexSettings> = Object.freeze({ tagPattern: "^lr\\d{4}$", idPrefix: "lre", idDigits: 4, holdsChars: 100, inPrompts: false, promptTokens: 1500, own: null, built: null });
+
+/** What a short id is made of: letters, digits, `_`, `.` and `-`, so it never reads as a book's entry (`/`), a lore id (`:`) or a mark (`#`). */
+const SHORT_ID = /^[\p{L}\p{N}_.-]+$/u;
+
+/** The bounds each number of the lore index takes. */
+export const LORE_INDEX_BOUNDS = { idPrefix: 16, idDigits: [1, 9], holdsChars: [0, 2000], promptTokens: [1, 1_000_000] } as const;
+
+/** A tag pattern as the engine matches keys with, or null for one that isn't a regular expression. */
+export function tagPatternOf(pattern: string): RegExp | null {
+  try {
+    return new RegExp(pattern, "u");
+  } catch {
+    return null;
+  }
+}
+
+/** Whether `id` can be a short id (`SHORT_ID`) and a stored key. */
+export function isShortId(id: string): boolean {
+  return SHORT_ID.test(id) && safeKey(id);
+}
+
+function entryRefOf(raw: unknown): LoreEntryRef | null {
+  return isRecord(raw) && typeof raw.bookId === "string" && raw.bookId !== "" && typeof raw.entryId === "string" && raw.entryId !== "" ? { bookId: raw.bookId, entryId: raw.entryId } : null;
+}
+
+/** `UserSettings.loreIndex` as the engine reads it: each part checked, else `base`'s; a pattern that isn't a regular expression and a prefix that can't start an id keep `base`'s. */
+export function loreIndexSettingsOf(raw: unknown, base: Readonly<LoreIndexSettings> = LORE_INDEX_DEFAULTS): LoreIndexSettings {
+  const v = isRecord(raw) ? raw : {};
+  const int = (x: unknown, [lo, hi]: readonly [number, number], fallback: number): number => (typeof x === "number" && Number.isInteger(x) && x >= lo && x <= hi ? x : fallback);
+  const built = entryRefOf(v.built);
+  const worldId = isRecord(v.built) && typeof v.built.worldId === "string" && v.built.worldId !== "" ? v.built.worldId : null;
+  return {
+    tagPattern: typeof v.tagPattern === "string" && v.tagPattern !== "" && tagPatternOf(v.tagPattern) !== null ? v.tagPattern : base.tagPattern,
+    idPrefix: typeof v.idPrefix === "string" && v.idPrefix.length <= LORE_INDEX_BOUNDS.idPrefix && isShortId(v.idPrefix) ? v.idPrefix : base.idPrefix,
+    idDigits: int(v.idDigits, LORE_INDEX_BOUNDS.idDigits, base.idDigits),
+    holdsChars: int(v.holdsChars, LORE_INDEX_BOUNDS.holdsChars, base.holdsChars),
+    inPrompts: typeof v.inPrompts === "boolean" ? v.inPrompts : base.inPrompts,
+    promptTokens: int(v.promptTokens, LORE_INDEX_BOUNDS.promptTokens, base.promptTokens),
+    own: v.own === undefined ? base.own : entryRefOf(v.own),
+    built: v.built === undefined ? base.built : built && worldId ? { ...built, worldId } : null,
+  };
+}
+
 export interface UserSettings {
   v: 1;
   /**
@@ -460,20 +545,20 @@ export interface UserSettings {
   timeouts: TimeoutSettings;
   /** Build's jobs (Settings → Steps and connections → Build jobs), apart from the presets. */
   jobs: JobSettings;
+  /**
+   * Which World Info books LRE reads as lore (Settings → Lore, DESIGN §4.2): `"auto"`, the default,
+   * every book a world chat reads (the world's Lore books, the chat's own, the global ones and those
+   * an earlier build copied the world's lore from); a list of book ids, only those of them.
+   */
+  loreBooks: LoreBooks;
+  /** The lore index the agents read (Settings → Lore, DESIGN §4.2): its ids, its holds lines, whether the roles' prompts carry it, the user's own index entry, and the entry Build built. */
+  loreIndex: LoreIndexSettings;
   /** Preview gates (Settings → Steps and connections → Preview before playing, DESIGN §5.1): off, a turn plays as soon as it is read. */
   gates: GateSettings;
   /** The agent runtime (Settings → Agents; AGENT-LOOP-PLAN §15): thinking in tool loops, budgets, the loop detector, clipping, throttles, caching and acceptance runs. No classic step reads it. */
   agents: AgentSettings;
   /** The user's own texts sent to models, and how long one may be (Settings → Agents → Prompts, DESIGN §6.12). */
   prompts: PromptSettings;
-  /**
-   * Hold writes during the engine run (Settings → Writes, DESIGN §4.3 P2): on, a chip, ✎ fix or any
-   * other change made while the engine works on a turn before its reply waits for that turn, as one
-   * made while the reply streams does, and lands over what it did. Off (the default), it lands at once
-   * and the turn's reply doesn't start, as it always has. A GM agent's writes and workspace saves are
-   * held either way (`HeldWrite.hold`).
-   */
-  holdWrites: boolean;
   /** How long the agent stores keep what nothing needs (Settings → Agents → Retention, DESIGN §4.4), apart from the presets. */
   retention: RetentionSettings;
   /** How many records each chat's diagnostics keep (Settings → Diagnostics, DESIGN §6.9). */

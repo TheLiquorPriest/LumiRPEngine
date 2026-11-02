@@ -267,10 +267,9 @@ describe("a change that can't be made", () => {
 });
 
 describe("a write made while a turn's engine runs", () => {
-  test("is held whatever Settings → Writes says, lands once the reply is in, and the turn stands as it was played", async () => {
+  test("is held, lands once the reply is in, and the turn stands as it was played", async () => {
     const { rig, chatId } = await playedChat();
     const user = rig.host.userId;
-    expect((await rig.rt.settings.get(user)).holdWrites).toBe(false);
     const { writer } = agentEnv(rig, chatId, "gm");
     const tense: AgentOp = { kind: "gm_edit", op: { op: "set", entity: POV, field: "mood", value: "tense" } };
     // The agent applies while the engine reads the player's message, as the GM agent may at any time.

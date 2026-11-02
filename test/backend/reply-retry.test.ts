@@ -376,11 +376,12 @@ describe("a failed engine run's card starts the reply the way the stopped one st
   test("a Continue whose reply couldn't start: the card's Retry runs the engine again and continues the reply", async () => {
     const { rig, chatId } = await fullChat();
     await rig.turn(chatId, "I look around the shop.", "The shop is quiet.");
-    // The engine ran for the Continue; no page took its restart, and the player's RPEngine settings
-    // changed before its reply started.
+    // The engine ran for the Continue; no page took its restart, and the player edited the reply
+    // before its Continue started.
     expect((await rig.host.begin(chatId, { type: "continue" })).halted).toBe("cancelled");
     rig.host.restarts.splice(0);
-    rig.body(await rig.send({ type: "lre.settings.set", patch: { modelUse: { tokens: { sections: 3900 } } } }));
+    rig.host.editMessage(chatId, rig.host.head(chatId)?.id ?? "", "The shop is very quiet.");
+    await rig.host.settle();
     const flag = await card(rig, chatId, "engine_failed");
     const retry = flag?.actions.find((a) => a.style === "primary");
     if (!flag || !retry) throw new Error("no Retry on the card");
@@ -388,6 +389,6 @@ describe("a failed engine run's card starts the reply the way the stopped one st
     if (!g?.open) throw new Error("the card's Retry started no reply");
     await rig.host.finish(g, "The bell over the door rings.");
     // The reply is continued, not given a new swipe.
-    expect(rig.host.head(chatId)?.swipes).toEqual(["The shop is quiet. The bell over the door rings."]);
+    expect(rig.host.head(chatId)?.swipes).toEqual(["The shop is very quiet. The bell over the door rings."]);
   });
 });

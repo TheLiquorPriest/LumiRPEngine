@@ -4,6 +4,7 @@
 // repair call when a helper reply doesn't parse (DESIGN §18.4), and every call is made again after a
 // transient failure (a network reset, a timeout, a 429, a 5xx), twice at most. Prompts are model-agnostic.
 
+import type { Counts, ReadDrop } from "../shared/agent-yield";
 import type { DiagCall } from "../shared/diagnostics";
 import type { ActionId, EntityId, UserId } from "../shared/ids";
 import type { JsonObject, JsonValue } from "../shared/json";
@@ -718,10 +719,19 @@ export const EXTRACT_STRICT_RULES = [
 /** The reply's item changes (DESIGN §9.4), each by who (`entity`, the player character when left out) and the thing, its id where the state lists it, else its name. */
 const EXTRACT_ITEM_TYPES = "take{entity,item} · drop{entity,item} · use_up{entity,item,qty?} (qty: how many, 1 when not said) · wear{entity,item,off?} · lose{entity,item,by?} (by: who stole it) · item_condition{entity?,item,delta} (delta: as far as the prose says it changed, on the condition's 0..100 scale: damage negative, mending positive)";
 
-/** What `extract` reads from a reply: the changes it proposes, and the place it leaves the player character in (a place id as the model gave it; null when it doesn't say). */
+/**
+ * What `extract` reads from a reply: the changes it proposes, and the place it leaves the player
+ * character in (a place id as the model gave it; null when it doesn't say); and what of the answer's
+ * proposals it didn't read, by why, with the types it gave that it doesn't read now (`dropped`,
+ * absent when it read them all), and, from the read role, the things its changes name that the world
+ * has no entity for the player character to know (`untracked`, as the read named them), each only a
+ * Not tracked note when it lands; which a read role's run reports (`agents/yields.ts`).
+ */
 export interface ExtractRead {
   proposals: JsonObject[];
   where: string | null;
+  dropped?: { why: Counts<ReadDrop>; types: string[] };
+  untracked?: string[];
 }
 
 /** Where the reply leaves the player character, asked beside the changes: a reply can take a move as given without telling it, and no change holds that (DESIGN §9.4). */
@@ -774,27 +784,44 @@ export async function extract(
  * `extract`'s answer as its read (its output contract, §16): each proposal of an enabled channel,
  * narrated time only beyond what the turn already applied, money in minor units, duplicates gone;
  * and, while `location` is a channel (`moves`), where the reply leaves the player character. An
- * answer that isn't one reads as no change.
+ * answer that isn't one reads as no change. What it leaves out of the answer's proposals it counts,
+ * by why (`ExtractRead.dropped`).
  */
 export function extractAnswer(raw: JsonValue | null, o: { world: Pick<WorldDoc, "pov" | "currency">; appliedMinutes: number; channels: readonly string[]; moves: boolean }): ExtractRead {
   const { world, appliedMinutes, channels, moves } = o;
   const list = isRecord(raw) && Array.isArray(raw.proposals) ? raw.proposals : Array.isArray(raw) ? raw : [];
   const proposals: JsonObject[] = [];
+  const why: Counts<ReadDrop> = {};
+  const types = new Set<string>();
+  const drop = (kind: ReadDrop): void => {
+    why[kind] = (why[kind] ?? 0) + 1;
+  };
   for (const p of list) {
-    if (!isRecord(p) || typeof p.type !== "string" || (channels.length > 0 && !channels.includes(p.type))) continue;
+    if (!isRecord(p) || typeof p.type !== "string") {
+      drop("shape");
+      continue;
+    }
+    if (channels.length > 0 && !channels.includes(p.type)) {
+      drop("type");
+      types.add(p.type);
+      continue;
+    }
     // Narrated time is the turn's whole (DESIGN §9.4): only what goes beyond the minutes the turn
     // already applied (`appliedMinutes`) is proposed, so its action's own time is never counted twice,
     // whatever path applies it (automatically, or on a confirm chip's Apply).
     if (p.type === "time_advance") {
       const beyond = typeof p.minutes === "number" && Number.isFinite(p.minutes) ? Math.round(p.minutes - appliedMinutes) : 0;
       if (beyond > 0) proposals.push({ ...(JSON.parse(JSON.stringify(p)) as JsonObject), minutes: beyond });
+      else drop("time");
       continue;
     }
     // Scaled once: a cash give becomes a transfer carrying its scaled amount.
     proposals.push(inMinorUnits(JSON.parse(JSON.stringify(p)) as JsonObject, world.currency));
   }
   const where = moves && isRecord(raw) && typeof raw.where === "string" && raw.where.trim() !== "" ? raw.where.trim() : null;
-  return { proposals: dedupeProposals(proposals, world.pov), where };
+  const kept = dedupeProposals(proposals, world.pov);
+  if (kept.length < proposals.length) why.same = proposals.length - kept.length;
+  return { proposals: kept, where, ...(Object.keys(why).length > 0 ? { dropped: { why, types: [...types] } } : {}) };
 }
 
 /**

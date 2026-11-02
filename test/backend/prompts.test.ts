@@ -8,12 +8,14 @@ import { describe, expect, test } from "bun:test";
 import { sectionsOf } from "../../src/backend/book";
 import { markWording, PromptSets, renderPrompt, resolvePrompt, testPrompt, turnPromptSet, type PromptContract } from "../../src/backend/prompts";
 import { SettingsStore } from "../../src/backend/settings-store";
+import { turnTimeLine } from "../../src/backend/turn-steps";
 import { hasOwn, type JsonObject } from "../../src/shared/json";
-import { FINAL_OUTPUT_PAGE, FINAL_OUTPUT_PROMPTS, MARK_TEXT_IDS, PROMPT_PAGES, PROMPTS, promptDef, promptProblems, sectionPromptId, type PromptDef } from "../../src/shared/prompts";
+import { ELAPSED_TEXT_IDS, FINAL_OUTPUT_PAGE, FINAL_OUTPUT_PROMPTS, MARK_TEXT_IDS, PROMPT_PAGES, PROMPTS, promptDef, promptProblems, sectionPromptId, type PromptDef } from "../../src/shared/prompts";
 import { SECRET_MARK_WORDING, type SecretMarkWording } from "../../src/shared/secret-marks";
 import { DEFAULT_SECTIONS } from "../../src/shared/sections";
 import { FakeHost } from "../support/fake-host";
 import { testWorld } from "../support/test-pack";
+import { baseWorld, startState } from "../packs/support";
 
 function def(id: string): PromptDef {
   const found = promptDef(id);
@@ -70,6 +72,37 @@ describe("the registry", () => {
     expect(codes(def("narrator.source"), "")).toEqual([]);
     // What a turn is marked in: the user's own part where it can be sent, the shipped one for the rest.
     expect(markWording({ [MARK_TEXT_IDS.kept]: "{{text}} (hidden from {{kept}})", [MARK_TEXT_IDS.both]: "No placeholders.", [MARK_TEXT_IDS.everyone]: "" })).toEqual({ ...SECRET_MARK_WORDING, kept: "{{text}} (hidden from {{kept}})" });
+  });
+
+  test("the line that ends the Scene with how long the turn took is the Final output's Elapsed time texts, shipped as today's wording and keeping the time it tells: a turn tells it in the user's own, one that can't be sent as shipped, and Reset brings the shipped one back", async () => {
+    const shipped = Object.values(ELAPSED_TEXT_IDS).map((id) => {
+      const d = def(id);
+      return { id, page: d.page, group: d.group, text: d.text, needs: d.vars.filter((v) => v.required).map((v) => v.name) };
+    });
+    expect(shipped).toEqual([
+      { id: ELAPSED_TEXT_IDS.none, page: FINAL_OUTPUT_PAGE.id, group: "Elapsed time", text: "No time passes this turn.", needs: [] },
+      { id: ELAPSED_TEXT_IDS.took, page: FINAL_OUTPUT_PAGE.id, group: "Elapsed time", text: "This turn took {{span}}.", needs: ["span"] },
+      { id: ELAPSED_TEXT_IDS.span, page: FINAL_OUTPUT_PAGE.id, group: "Elapsed time", text: "This turn took {{span}}, from {{from}} to {{to}}.", needs: ["span"] },
+    ]);
+    expect(codes(def(ELAPSED_TEXT_IDS.took), "Some time passes.")).toEqual(["missing_placeholder"]);
+    expect(codes(def(ELAPSED_TEXT_IDS.took), "It took {{span}}, to {{to}}.")).toEqual(["unknown_placeholder"]);
+    // As a turn tells it at 9:00 AM: no time; where the Scene tells no time of day (Calendar 1); from when to when where it does (Calendar 2).
+    const world = baseWorld();
+    const state = { ...startState(world), clock: 9 * 60 };
+    const at = (level: 1 | 2) => ({ world, state, levelOf: () => level });
+    expect([turnTimeLine(at(2), 0, {}), turnTimeLine(at(1), 30, {}), turnTimeLine(at(2), 30, {})]).toEqual(["No time passes this turn.", "This turn took 30 min.", "This turn took 30 min, from 8:30 AM to 9:00 AM."]);
+    const mine = { [ELAPSED_TEXT_IDS.none]: "", [ELAPSED_TEXT_IDS.took]: "{{span}} went by.", [ELAPSED_TEXT_IDS.span]: "{{span}} went by, {{from}} to {{to}}." };
+    expect([turnTimeLine(at(2), 0, mine), turnTimeLine(at(1), 30, mine), turnTimeLine(at(2), 90, mine)]).toEqual(["", "30 min went by.", "1.5 hours went by, 7:30 AM to 9:00 AM."]);
+    // A text that drops the time it tells can't be sent: the shipped one is.
+    expect(turnTimeLine(at(1), 30, { [ELAPSED_TEXT_IDS.took]: "Some time passes." })).toBe("This turn took 30 min.");
+    // Saved as the user's own, recorded with the turn's texts, and Reset.
+    const host = new FakeHost();
+    const store = new SettingsStore(host);
+    const saved = (await store.set(host.userId, { prompts: { texts: mine } })).prompts.texts;
+    expect(turnPromptSet(saved).texts).toMatchObject(mine);
+    const reset = (await store.set(host.userId, { prompts: { texts: { [ELAPSED_TEXT_IDS.none]: null, [ELAPSED_TEXT_IDS.took]: null, [ELAPSED_TEXT_IDS.span]: null } } })).prompts.texts;
+    expect(Object.values(ELAPSED_TEXT_IDS).filter((id) => hasOwn(reset, id))).toEqual([]);
+    expect(turnTimeLine(at(2), 30, reset)).toBe("This turn took 30 min, from 8:30 AM to 9:00 AM.");
   });
 });
 

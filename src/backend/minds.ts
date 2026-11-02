@@ -16,6 +16,7 @@
 // Every call goes through `askMind` (`mind-ask.ts`): classic's own call on a classic turn, the
 // turn's role on an agent turn, each answer checked by the same code either way.
 
+import type { Counts, KnowledgeRefusal } from "../shared/agent-yield";
 import { hashParts } from "../shared/hash";
 import type { ChatId, EntityId, MessageId, UserId } from "../shared/ids";
 import type { JsonObject, JsonValue } from "../shared/json";
@@ -116,9 +117,11 @@ export interface RunMindsResult {
   /**
    * The post phase's knowledge step (DESIGN §24.11): the player character's own changes (C4), whose
    * modes decide them; everyone else's learnings, which follow the `learn` mode (none under never);
-   * and the connection the step ran on, whose learning counts them (null: the default one).
+   * the connection the step ran on, whose learning counts them (null: the default one); and what it
+   * didn't take of its calls' answers: how many it refused, by why, and how many calls gave no answer
+   * it takes, which a role's run reports (`agents/yields.ts`).
    */
-  knowledge?: { proposals: KnowledgeProposal[]; events: LedgerEvent[]; connection: string | null };
+  knowledge?: { proposals: KnowledgeProposal[]; events: LedgerEvent[]; connection: string | null; refused?: Counts<KnowledgeRefusal>; failed?: number };
 }
 
 /** The step card a minds purpose runs with (`stepConfigOf`: on with the helper's tokens while unsaved); null when the user saved it off. */
@@ -662,12 +665,18 @@ function memoryData(reg: Registry, world: WorldDoc, state: Readonly<WorldState>,
 /** How many characters' notes one turn folds at most: consolidation is upkeep, never the turn's work. */
 const CONSOLIDATIONS_PER_TURN = 2;
 
-/** What the knowledge step gives a turn: everyone else's learnings as events, the player character's own as changes, its calls' traces, and the connection it ran on. */
+/**
+ * What the knowledge step gives a turn: everyone else's learnings as events, the player character's
+ * own as changes, its calls' traces, the connection it ran on, and what it didn't take: how many it
+ * refused, by why, and how many of its calls gave no answer it takes.
+ */
 interface KnowledgeRan {
   events: LedgerEvent[];
   proposals: KnowledgeProposal[];
   traces: MindCallTrace[];
   connection: string | null;
+  refused: Counts<KnowledgeRefusal>;
+  failed: number;
 }
 
 /** What the knowledge step's calls are asked with: whose they are, their clock, the preset's guidance for the step, and the phase their traces name. */
@@ -711,16 +720,23 @@ async function knowledgeCalls(deps: MindsDeps, settings: UserSettings, config: S
     return { batch, raw, who, ms: Math.round(performance.now() - t0), tokens: usage.tokens, prompt: prompt.source };
   });
   const w = new Working(reg, world, state);
-  const out: KnowledgeRan = { events: [], proposals: [], traces: [], connection: helperCallOf(config, settings.helper).connectionId ?? null };
+  const out: KnowledgeRan = { events: [], proposals: [], traces: [], connection: helperCallOf(config, settings.helper).connectionId ?? null, refused: {}, failed: 0 };
+  const refused = (kind: KnowledgeRefusal, n = 1): void => {
+    out.refused[kind] = (out.refused[kind] ?? 0) + n;
+  };
   // The turn's limits hold across its calls: new facts, learnings and witnessed facts are counted for the turn, not each call.
   const spent: KnowledgeSpent = { facts: new Set(), learnings: 0, witnessed: new Set() };
   for (const call of await Promise.all(asked)) {
     const checked = call.raw === null ? null : checkKnowledge({ ...turn, state: w.state }, call.batch, call.raw, spent);
+    if (!checked && !signal.aborted) out.failed++;
     for (const why of checked?.refused ?? []) deps.host.log("info", `[LumiRPEngine] knowledge ${turn.messageId.slice(0, 8)}: refused ${why}`, userId);
+    for (const [kind, n] of Object.entries(checked?.refusedAs ?? {})) refused(kind as KnowledgeRefusal, n);
     for (const event of checked?.events ?? []) {
       const rejection = w.apply(event);
-      if (rejection) deps.host.log("info", `[LumiRPEngine] knowledge ${turn.messageId.slice(0, 8)}: dropped a learning (${rejection.code}: ${rejection.reason})`, userId);
-      else out.events.push(event);
+      if (rejection) {
+        deps.host.log("info", `[LumiRPEngine] knowledge ${turn.messageId.slice(0, 8)}: dropped a learning (${rejection.code}: ${rejection.reason})`, userId);
+        refused("state");
+      } else out.events.push(event);
     }
     out.proposals.push(...(checked?.proposals ?? []));
     // A scene's call thinks for no one; one person's is listed only when the player may know of them.
@@ -976,9 +992,12 @@ async function remember(deps: MindsDeps, input: PostMindsInput, settings: UserSe
   }
 }
 
-/** What the knowledge step learned, as the post phase gives it: what everyone but the player character learned that still fits `w`, and the player character's own as changes. */
+/** What the knowledge step learned, as the post phase gives it: what everyone but the player character learned that still fits `w`, the player character's own as changes, and what it didn't take, a learning that no longer fits among it. */
 function learnedOn(w: Working, knew: KnowledgeRan): NonNullable<RunMindsResult["knowledge"]> {
-  return { proposals: knew.proposals, events: knew.events.filter((event) => !w.apply(event)), connection: knew.connection };
+  const events = knew.events.filter((event) => !w.apply(event));
+  const unfit = knew.events.length - events.length;
+  const refused = unfit > 0 ? { ...knew.refused, state: (knew.refused.state ?? 0) + unfit } : knew.refused;
+  return { proposals: knew.proposals, events, connection: knew.connection, refused, failed: knew.failed };
 }
 
 /**

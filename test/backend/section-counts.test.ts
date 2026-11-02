@@ -34,7 +34,12 @@ describe("host token counts of sections", () => {
 
   test("one user's host count never prices another user's section", async () => {
     const rig = new Rig();
+    // The clock paused, a turn's Scene tells the same time each turn, so its text is counted once and priced on the next.
+    const paused = async (chatId: string): Promise<void> => {
+      rig.body(await rig.send({ type: "lre.marker", chatId, kind: "time", control: "pause", scope: { all: true }, to: true }));
+    };
     const first = await rig.worldChat();
+    await paused(first);
     await rig.turn(first, "I look around.", "Quiet.");
     await rig.turn(first, "I look around again.", "Still quiet.");
     const count = rig.host.tokenCount;
@@ -46,6 +51,7 @@ describe("host token counts of sections", () => {
     // Minds off for them too, as the rig keeps them for its first user.
     rig.body(await rig.send({ type: "lre.settings.set", patch: { minds: { enabled: false } } }));
     const second = await rig.worldChat();
+    await paused(second);
     await rig.turn(second, "I look around.", "Quiet.");
     const theirs = sections(rig, second).filter((s) => s.text !== "");
     expect(theirs.some((s) => counted.some((c) => c.text === s.text))).toBe(true);

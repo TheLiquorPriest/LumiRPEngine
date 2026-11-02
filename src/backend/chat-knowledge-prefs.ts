@@ -15,6 +15,7 @@ import { narratorViewOf, type NarratorView, type UserSettings } from "../shared/
 import type { WorldDoc } from "../shared/world";
 import { ChatMetaQueue } from "./chat-meta-queue";
 import type { HostPort } from "./host";
+import { turnFrame } from "./turn-frame";
 
 /** Which engine plays a chat's turns (GM → This chat): its classic steps, or the agent loop. */
 export type ChatEngine = "classic" | "agents";
@@ -89,26 +90,19 @@ export class ChatKnowledge {
     this.keep(chatId, userId, chatKnowledgePrefsOf(meta));
   }
 
+  /**
+   * The chat's own choices. Inside a turn of the chat's work they are that turn's: as they stood
+   * when its engine run started (`TurnFrame`), so a choice made meanwhile, its engine included,
+   * applies from the chat's next turn, and a turn finishes on the engine it started on.
+   */
   async get(chatId: ChatId, userId: UserId): Promise<ChatKnowledgePrefs> {
+    const frame = turnFrame();
+    if (frame?.chatId === chatId && frame.userId === userId) return frame.chat;
     const known = this.prefs.get(`${userId}\u0000${chatId}`);
     if (known) return known;
     const prefs = chatKnowledgePrefsOf(await this.host.chats.chatMetadata(chatId, userId));
     this.keep(chatId, userId, prefs);
     return prefs;
-  }
-
-  /** The chat's knowledge choices as known now, as one comparable value (a prepared turn's `TurnInputs.chat`); empty before they are read. Its engine is an input of its own (`engineKey`). */
-  key(chatId: ChatId, userId: UserId): string {
-    const known = this.prefs.get(`${userId}\u0000${chatId}`);
-    if (!known) return "";
-    const { engine: _engine, ...knowledge } = known;
-    return JSON.stringify(knowledge);
-  }
-
-  /** The chat's engine as known now (a prepared turn's `TurnInputs.engine`); empty before its choices are read. */
-  engineKey(chatId: ChatId, userId: UserId): string {
-    const known = this.prefs.get(`${userId}\u0000${chatId}`);
-    return known ? (known.engine ?? "classic") : "";
   }
 
   /** The engine that plays the chat's turns: its own choice, else classic. */

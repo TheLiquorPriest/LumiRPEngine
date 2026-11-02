@@ -23,7 +23,7 @@ import type { RevisionNote, RulesetDef, WorldDoc, WorldIndex } from "../shared/w
 import { DEFAULT_SPAWN_CAP, EXPORT_FORMAT, WORLD_FORMAT } from "../shared/world";
 import { WORLD_MINDS_KEYS, type WorldMindsConfig } from "../shared/minds";
 import { narratorViewOf } from "../shared/settings";
-import { loreBooksOf, lorePinsOf } from "../shared/lore";
+import { loreBooksOf, lorePinsOf, loreSourceOf } from "../shared/lore";
 import { DEFAULT_ROUTINE_SETTINGS, routineSettingsOf, routineSettingsProblems, routineShapeProblems } from "../shared/routines";
 import { needsSettingsOf, needsSettingsProblems, storedNeedsSettings } from "../shared/needs";
 import { sectionTemplatesProblem } from "../shared/sections";
@@ -96,6 +96,20 @@ export class WorldError extends Error {
     super(message);
     this.name = "WorldError";
   }
+}
+
+/**
+ * Each lore entry of `doc` that is a copy of a World Info entry (`source.kind: "book"`, which only an
+ * earlier build wrote), by id: the entry it copies, as `bookId/entryId`. LRE reads World Info live, so
+ * an edit may keep or remove such a copy but never make one (`apply`).
+ */
+function bookCopies(doc: WorldDoc): Map<string, string> {
+  return new Map(
+    Object.entries(doc.lore).flatMap(([id, entry]) => {
+      const source = loreSourceOf(entry.source);
+      return source.kind === "book" ? [[id, `${source.bookId}/${source.entryId}`] as const] : [];
+    }),
+  );
 }
 
 /** A world's storage directory; ids that could escape it are refused. */
@@ -396,6 +410,8 @@ export class WorldStore {
       return { draft: head, lint: lintWorld(head, this.registry), base: draft.head, stored: false, version: count };
     }
     if (request.base !== null && request.base !== draft.base) throw new WorldError("conflict", "the world changed; reload and retry");
+    // The copies of World Info entries the draft holds before the edit, which an edit may keep as they are (see `bookCopies`).
+    const copies = bookCopies(draft.doc);
     let doc = draft.doc;
     let base = draft.base;
     let lint: LintIssue[];
@@ -455,6 +471,10 @@ export class WorldStore {
       } catch (error) {
         throw unreadable(what, error);
       }
+    }
+    if (request.op !== "restore") {
+      const copy = [...bookCopies(doc)].find(([id, entry]) => copies.get(id) !== entry);
+      if (copy) throw new WorldError("bad_request", `lore ${copy[0]} would copy the World Info entry ${copy[1]}: LumiRPEngine reads World Info live, so a copy is never read. Pin the book entry instead (lorePins), or write the lore as the world's own, with no book source.`);
     }
     const version = draft.version + 1;
     await this.writeJson(`${worldDir(worldId)}draft.json`, { base, doc, version }, userId);

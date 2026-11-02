@@ -35,7 +35,7 @@ describe("the Montage", () => {
     const s0 = startState(world);
     const plan = planTurn({ registry: reg, world, state: s0, runSeed: "run", seed: "x", kind: "normal", userTexts: ["/timelapse 1 day"], intent: timelapseIntent({ type: "duration", minutes: 1440 }) });
     expect(plan.montage?.bands.length).toBeGreaterThan(0);
-    const montage = planLines(plan, world, reg).montage;
+    const montage = planLines(plan, world, s0, reg).montage;
     expect(montage.some((l) => l.includes("calm") && l.includes("frantic"))).toBe(true);
   });
 });

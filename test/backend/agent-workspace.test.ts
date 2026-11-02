@@ -13,7 +13,9 @@ import type { ToolDefinition, ToolEnv } from "../../src/backend/agents/tools/reg
 import { listWorkspace, readWorkspaceFile, WORKSPACE_TOOLS } from "../../src/backend/agents/tools/workspace";
 import { type AgentOp, opKey, outsideWriter, type ToolWriter } from "../../src/backend/agents/tools/writer";
 import type { LearnedFile } from "../../src/backend/chat-agent-meta";
+import type { QuietRequest } from "../../src/backend/host";
 import { renderPrompt } from "../../src/backend/prompts";
+import { ROLE_LABEL } from "../../src/shared/agent-roles";
 import type { AgentKnowledge } from "../../src/shared/agent-tools";
 import { WRITE_NOTE } from "../../src/shared/agent-tools-write";
 import { blobHash } from "../../src/shared/stores";
@@ -44,9 +46,9 @@ async function applied(writer: ToolWriter, ops: readonly AgentOp[], label: strin
   return out.chipId;
 }
 
-/** The chat's workspace as the GM's knowledge lists it: each file's path and its body's hash. */
+/** The chat's workspace notes as the GM's knowledge lists them, the turns' transcripts aside: each file's path and its body's hash. */
 async function files(rig: Rig, chatId: string): Promise<Record<string, string>> {
-  return Object.fromEntries((await listWorkspace(rig.rt, { userId: rig.host.userId, chatId, knowledge: "gm" })).map((f) => [f.path, f.hash]));
+  return Object.fromEntries((await listWorkspace(rig.rt, { userId: rig.host.userId, chatId, knowledge: "gm" })).filter((f) => f.transcript !== true).map((f) => [f.path, f.hash]));
 }
 
 /** Swipes the head reply as `mode`, and checks it ran so: a Re-narrate keeps its source's seed, a Re-run rolls a new one. */
@@ -467,6 +469,51 @@ describe("a workspace note", () => {
     // An agent can't choose: its file is read with the knowledge it writes under.
     const op: AgentOp = { kind: "ws_readers", path: SQUARE, readers: "pov" };
     expect(await agentEnv(rig, chatId, "gm").writer.dryRun(op)).toEqual({ refused: true, code: "bad_op", reason: renderPrompt(WRITE_NOTE.badOp, {}, {}), key: opKey(op) });
+    expect(rig.rt.ledger.errors).toEqual([]);
+  });
+});
+
+describe("an agent turn's note", () => {
+  /** A role agent's call: which role's, by its system prompt. */
+  const roleOf = (req: QuietRequest): string | null => /You are the (\w+) agent of LumiRPEngine/.exec(req.messages[0]?.content ?? "")?.[1] ?? null;
+  /** What the tools gave back to the call that sends their results. */
+  const resultsOf = (req: QuietRequest): string[] => (req.messages.at(-1)?.parts ?? []).flatMap((p) => (p.type === "tool_result" ? [p.content] : []));
+
+  test("a role's workspace_write in a turn is staged, as its tool says: a later role of the turn reads it, it lands with the turn under the role that wrote it, and Diagnostics says what the run staged", async () => {
+    const rig = new Rig({ shipped: true });
+    const worldId = await rig.newWorld("Alder", "modern_slice_of_life");
+    rig.body(await rig.send({ type: "lre.world", op: "commit", worldId, base: null }));
+    const chatId = rig.host.createChat("Morning.");
+    rig.body(await rig.send({ type: "lre.world", op: "attach", worldId, chatId }));
+    rig.body(await rig.send({ type: "lre.chat.knowledge", chatId, engine: "agents" }));
+    // The read may read the workspace too: after the reply, it reads the note the scene wrote before the plan.
+    rig.body(await rig.send({ type: "lre.settings.set", patch: { agents: { roles: { read: { families: ["people", "workspace"] } } } } }));
+    const told: string[] = [];
+    const read: string[] = [];
+    rig.host.quietReply = (req: QuietRequest) => {
+      const role = roleOf(req);
+      const all = req.messages.map((m) => m.content).join("\n");
+      const got = resultsOf(req);
+      if (role === "scene") {
+        if (got.length === 0) return { content: "", toolCalls: [{ name: "workspace_write", args: { path: NOTE, text: NOTE_TEXT }, callId: "w1" }] };
+        told.push(...got);
+        return JSON.stringify({ lore: [], notes: [] });
+      }
+      if (role === "read") {
+        if (got.length === 0) return { content: "", toolCalls: [{ name: "workspace_read", args: { path: NOTE }, callId: "r1" }] };
+        read.push(...got);
+        return JSON.stringify({ proposals: [], where: null });
+      }
+      if (all.includes("You map a player's typed input")) return JSON.stringify({ action: null, params: {}, confidence: 0.9 });
+      return "{}";
+    };
+    await rig.turn(chatId, "I look out over the harbor.", "Gulls wheel over the water.");
+    expect(told.join("\n")).toContain(renderPrompt(WRITE_NOTE.staged, {}, {}));
+    expect(read.join("\n")).toContain(NOTE_TEXT);
+    const turn = (await rig.host.chats.messages(chatId, rig.host.userId)).filter((m) => !m.isUser).length;
+    expect((await listWorkspace(rig.rt, { userId: rig.host.userId, chatId, knowledge: "gm" })).find((f) => f.path === NOTE)).toMatchObject({ hash: blobHash(NOTE_TEXT), readers: "everyone", provenance: { role: "scene", turn } });
+    const records = await rig.rt.diag.records(chatId, rig.host.userId);
+    expect(records.some((r) => r.step === ROLE_LABEL.scene && r.reason === "Its changes: 1 staged, landing when the turn commits.")).toBe(true);
     expect(rig.rt.ledger.errors).toEqual([]);
   });
 });

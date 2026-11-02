@@ -15,7 +15,7 @@
 //
 // A proposal waits for Apply (all of it, or a pick) or No; with Apply set to at once it applies as
 // soon as its answer is in, unless one of its changes is of a type that asks first. Applied, it is
-// one GM edit with its Undo chip, held while the engine runs a turn (`outsideWriter`: `hold: true`),
+// one GM edit with its Undo chip, held while the engine runs a turn (as every write made then is),
 // written with the wider of the knowledge it was proposed under and the assistant's then. Its write
 // runs outside the thread's lock, so Cancel and the rest of the thread never wait on it. Cancel
 // stops the answer; its limits are the assistant's budget over every agent's, the loop detector the

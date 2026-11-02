@@ -6,16 +6,21 @@
 // swipe and a Branch resume it where they stand, it compacts past its tokens, and GM → Workspace
 // rolls a compaction back on the next turn's record. Classic to agents starts a fresh session from a
 // digest of the chat so far; agents to classic and back resumes it, the digest covering the classic
-// turns. The models are scripted: each role runs prompt-only, as classic's own calls.
+// turns. The models are scripted: each role runs prompt-only, as classic's own calls, but where a
+// test runs the roles as agents (what a run gave the engine): there each role's agent answers.
 
 import { describe, expect, test } from "bun:test";
+import { listWorkspace } from "../../src/backend/agents/tools/workspace";
 import type { QuietRequest, QuietToolCall } from "../../src/backend/host";
 import { classicRoles } from "../../src/backend/agents/roles/classic";
-import { ROLE_IDS } from "../../src/shared/agent-roles";
+import { defaultRoleSettings, ROLE_IDS, ROLE_LABEL } from "../../src/shared/agent-roles";
 import type { JsonObject } from "../../src/shared/json";
 import type { Rec } from "../../src/shared/ledger";
-import type { SessionView } from "../../src/shared/protocol";
+import type { ReviewCardView, SessionView } from "../../src/shared/protocol";
+import { factsOf, knowersOf } from "../../src/packs/minds/core/knowledge";
+import { readSlice } from "../../src/packs/minds/core/state";
 import type { QuietScript } from "../support/fake-host";
+import { alderChat, DANNY, PRIYA, stateOf } from "../support/mind-chat";
 import { Rig } from "../support/rig";
 
 const INTERPRET_MARK = "You map a player's typed input";
@@ -381,6 +386,280 @@ describe("the Engine switch and the main session", () => {
     expect(task).toContain("I watch a ferry leave.");
     expect(task).not.toContain("You take this chat up now");
     expect(task).not.toContain("I walk to the pier.");
+    expect(rig.rt.ledger.errors).toEqual([]);
+  });
+});
+
+describe("what a run gave the engine", () => {
+  const QUIT = "Danny is taking the marina job at the end of the month";
+  const NOTE = "notes/scene.md";
+  const NOTE_TEXT = "SCENE-NOTE: the harbor is quiet this morning.";
+
+  /** Port Alder with Danny and Priya beside the player character, minds on, played on agents by a main agent; the roles agent-backed, as §15 ships them; `patch` joins the settings. */
+  async function rolesChat(rig: Rig, patch: JsonObject = {}): Promise<string> {
+    const chatId = await alderChat(rig, async () => {}, [DANNY, PRIYA]);
+    rig.body(await rig.send({ type: "lre.settings.set", patch: { agents: { pipeline: { mode: "main" } } } }));
+    if (Object.keys(patch).length > 0) rig.body(await rig.send({ type: "lre.settings.set", patch }));
+    expect(rig.body(await rig.send({ type: "lre.chat.knowledge", chatId, engine: "agents" })).engine).toBe("agents");
+    return chatId;
+  }
+
+  /** A role agent's answer in its contract, with nothing in it. */
+  function quietRole(role: string, req: QuietRequest): QuietScript {
+    const all = sentOf(req);
+    if (role === "scene") return JSON.stringify({ lore: [], notes: [] });
+    if (role === "knowledge") return JSON.stringify({ facts: [], learned: [], inferred: [], doubted: [] });
+    if (role === "minds") return JSON.stringify({ monologue: "Nothing yet.", depiction: "looks up", intent: "Wait.", reactions: [], mood: "calm" });
+    if (role === "memory") return JSON.stringify({ notes: [], commitments: [], resolved: [], plans: [] });
+    if (all.includes(INTERPRET_MARK)) return JSON.stringify({ action: null, params: {}, confidence: 0.9 });
+    if (all.includes(EXTRACT_MARK)) return JSON.stringify({ proposals: [], where: null });
+    return "{}";
+  }
+
+  /**
+   * The turn's agents as scripted: the main agent runs every role its stage asks for and commits once
+   * the results are in, unless `main` answers its call first; each role's agent answers as `roles`
+   * says, else in its contract with nothing. The main agent's calls, in order.
+   */
+  function agentModels(rig: Rig, roles: Readonly<Record<string, (req: QuietRequest) => QuietScript>> = {}, main?: (req: QuietRequest, n: number) => QuietScript | Promise<QuietScript> | undefined): QuietRequest[] {
+    const asked: QuietRequest[] = [];
+    rig.host.quietReply = (req) => {
+      if (isMain(req)) {
+        asked.push(req);
+        const n = asked.length - 1;
+        const own = main?.(req, n);
+        if (own !== undefined) return own;
+        if (resultsOf(req).length > 0) return { content: "", toolCalls: [call("commit", {}, `c${n}_commit`)] };
+        const open = [...new Set([...stageOf(req).matchAll(/^- (\w+):/gm)].map((m) => m[1] ?? ""))];
+        return { content: "", toolCalls: open.map((role) => call("run_role", { role, task: `Do the ${role} work.` }, `c${n}_${role}`)) };
+      }
+      const role = /You are the (\w+) agent of LumiRPEngine/.exec(req.messages[0]?.content ?? "")?.[1];
+      if (role === undefined) return "{}";
+      return roles[role]?.(req) ?? quietRole(role, req);
+    };
+    return asked;
+  }
+
+  /** What run_role and revise answered the main agent about `role`'s runs, in order. */
+  const ranOf = (asked: readonly QuietRequest[], role: string): string[] => asked.flatMap(resultsOf).filter((r) => r.includes(`: the ${role} role `));
+
+  test("a turn's knowledge role, one call per person, records what each learned, and its run tells the main agent the facts and learnings it recorded, never 0 events", async () => {
+    const rig = new Rig({ shipped: true, minds: true });
+    const chatId = await rolesChat(rig, { minds: { knowledge: { batch: "character" } } });
+    const asked = agentModels(rig, { knowledge: () => JSON.stringify({ facts: [{ ref: "n1", claim: QUIT, matters: "Marcus loses his mechanic", about: ["Danny Okafor"], truth: "true" }], learned: [{ fact: "n1", how: "witnessed" }], inferred: [], doubted: [] }) });
+    await played(rig, chatId, "Morning, Danny.", "Danny says he's taking the marina job at the end of the month.");
+    const slice = readSlice((await stateOf(rig, chatId)).state);
+    const quit = Object.values(factsOf(slice)).find((f) => f.claim === QUIT)?.id ?? "";
+    expect(knowersOf(slice, quit)).toEqual(expect.arrayContaining([DANNY, PRIYA, "pov"]));
+    const [ran = ""] = ranOf(asked, "knowledge");
+    expect(ran).toContain('"facts":1');
+    expect(ran).toContain('"yours":1');
+    expect(ran).not.toContain('"events"');
+    expect(ran).not.toContain("What the engine didn't take");
+    expect(rig.rt.ledger.errors).toEqual([]);
+  });
+
+  test("a knowledge answer the step refuses says why, by kind: to the main agent, in Diagnostics and in the host log", async () => {
+    const rig = new Rig({ shipped: true, minds: true });
+    const chatId = await rolesChat(rig);
+    // A new fact that doesn't say why it matters is refused, and so is the learning of it.
+    const asked = agentModels(rig, { knowledge: () => JSON.stringify({ facts: [{ ref: "n1", claim: QUIT, about: ["Danny Okafor"], truth: "true" }], learned: [{ fact: "n1", how: "witnessed" }], inferred: [], doubted: [] }) });
+    await played(rig, chatId, "Morning, Danny.", "Danny says he's taking the marina job at the end of the month.");
+    const [ran = ""] = ranOf(asked, "knowledge");
+    expect(ran).toContain('"facts":0');
+    expect(ran).toContain("What the engine didn't take: 1 refused (no matters: a new fact says why it matters and to whom); 1 refused (a learning of no fact");
+    const records = await rig.rt.diag.records(chatId, rig.host.userId);
+    expect(records.some((r) => r.step === ROLE_LABEL.knowledge && r.level === "warn" && (r.reason ?? "").includes("1 refused (no matters"))).toBe(true);
+    expect(rig.host.logs.some((l) => l.includes(`the ${ROLE_LABEL.knowledge} role's run: What the engine didn't take: 1 refused (no matters`))).toBe(true);
+    expect(rig.rt.ledger.errors).toEqual([]);
+  });
+
+  test("a scene's workspace_write is staged: its tool says it lands with the turn, its run says it staged one, the main agent's workspace_list and workspace_read see it before the stage commits, and it lands", async () => {
+    const rig = new Rig({ shipped: true, minds: true });
+    const chatId = await rolesChat(rig);
+    const told: string[] = [];
+    const asked = agentModels(
+      rig,
+      {
+        scene: (req) => {
+          if (resultsOf(req).length === 0) return { content: "", toolCalls: [call("workspace_write", { path: NOTE, text: NOTE_TEXT }, "w1")] };
+          told.push(...resultsOf(req));
+          return JSON.stringify({ lore: [], notes: [] });
+        },
+      },
+      // In stage 3, once its runs are in, the main agent reads the workspace before it commits.
+      (req, n) => (stageNumber(req) === 3 && resultsOf(req).some((r) => r.includes("the scene role answered")) ? { content: "", toolCalls: [call("workspace_list", {}, `l${n}`), call("workspace_read", { path: NOTE }, `r${n}`)] } : undefined),
+    );
+    await played(rig, chatId, "I look out over the harbor.", "Gulls wheel over the water.");
+    expect(told.join("\n")).toContain('"staged"');
+    expect(told.join("\n")).toContain("Staged for this turn: it lands when the turn commits.");
+    expect(ranOf(asked, "scene").join("\n")).toContain("Its changes: 1 staged, landing when the turn commits.");
+    const looked = asked.flatMap(resultsOf).filter((r) => r.includes(NOTE));
+    expect(looked.some((r) => r.includes('"files"'))).toBe(true);
+    expect(looked.some((r) => r.includes(NOTE_TEXT))).toBe(true);
+    const files = await listWorkspace(rig.rt, { userId: rig.host.userId, chatId, knowledge: "gm" });
+    expect(files.find((f) => f.path === NOTE)).toMatchObject({ readers: "everyone", provenance: { role: "scene" } });
+    expect(rig.rt.ledger.errors).toEqual([]);
+  });
+
+  test("a write under Confirm tells its agent it waits for the GM's Apply on the review card, its run says it is held for the card, and the card lists it", async () => {
+    const rig = new Rig({ shipped: true, minds: true });
+    const chatId = await rolesChat(rig, { extraction: { workspace: { mode: "confirm" } } });
+    const told: string[] = [];
+    const asked = agentModels(rig, {
+      scene: (req) => {
+        if (resultsOf(req).length === 0) return { content: "", toolCalls: [call("workspace_write", { path: NOTE, text: NOTE_TEXT }, "w1")] };
+        told.push(...resultsOf(req));
+        return JSON.stringify({ lore: [], notes: [] });
+      },
+    });
+    await played(rig, chatId, "I look out over the harbor.", "Gulls wheel over the water.");
+    expect(told.join("\n")).toContain("waiting for the GM's Apply on the review card");
+    expect(ranOf(asked, "scene").join("\n")).toContain("1 held for the review card, waiting for the GM's Apply");
+    const cards = rig.body(await rig.send({ type: "lre.review", chatId, op: "get" })).cards as ReviewCardView[];
+    expect(cards.flatMap((c) => c.items).map((i) => i.changeType)).toEqual(["workspace"]);
+    expect((await listWorkspace(rig.rt, { userId: rig.host.userId, chatId, knowledge: "gm" })).some((f) => f.path === NOTE)).toBe(false);
+    expect(rig.rt.ledger.errors).toEqual([]);
+  });
+
+  test("a revision replaces its run as it starts: what the run staged goes first, the revision reads the turn without it, and only the revision's write lands", async () => {
+    const rig = new Rig({ shipped: true, minds: true });
+    const chatId = await rolesChat(rig);
+    const FIRST = "notes/first.md";
+    const SECOND = "notes/second.md";
+    const listed: string[] = [];
+    const asked = agentModels(
+      rig,
+      {
+        scene: (req) => {
+          const got = resultsOf(req);
+          const revised = sentOf(req).includes("REVISE-MARK");
+          if (!revised) return got.length === 0 ? { content: "", toolCalls: [call("workspace_write", { path: FIRST, text: "The first note." }, "w1")] } : JSON.stringify({ lore: [], notes: [] });
+          // The revision lists the workspace first, then writes its own note.
+          if (got.length === 0) return { content: "", toolCalls: [call("workspace_list", {}, "l1")] };
+          if (got.some((r) => r.includes('"files"'))) {
+            listed.push(...got);
+            return { content: "", toolCalls: [call("workspace_write", { path: SECOND, text: "The second note." }, "w2")] };
+          }
+          return JSON.stringify({ lore: [], notes: [] });
+        },
+      },
+      (req, n) => {
+        if (stageNumber(req) !== 3) return undefined;
+        const agent = /^(\S+): the scene role answered/m.exec(resultsOf(req).join("\n"))?.[1];
+        // The scene's first run is in: the main agent revises it once, then commits.
+        return agent && !asked.some((q) => sentOf(q).includes("REVISE-MARK")) ? { content: "", toolCalls: [call("revise", { agentId: agent, message: "REVISE-MARK: keep your note elsewhere." }, `v${n}`)] } : undefined;
+      },
+    );
+    await played(rig, chatId, "I look out over the harbor.", "Gulls wheel over the water.");
+    expect(listed.join("\n")).not.toContain(FIRST);
+    expect(ranOf(asked, "scene").at(-1)).toContain("Its changes: 1 staged, landing when the turn commits.");
+    const paths = (await listWorkspace(rig.rt, { userId: rig.host.userId, chatId, knowledge: "gm" })).map((f) => f.path);
+    expect(paths).toContain(SECOND);
+    expect(paths).not.toContain(FIRST);
+    expect(rig.rt.ledger.errors).toEqual([]);
+  });
+
+  test("a request runs once at a time: a second run_role or revise of it in the same answer is told its run is under way, so only the run that stands lands what it staged", async () => {
+    const rig = new Rig({ shipped: true, minds: true });
+    const chatId = await rolesChat(rig);
+    const RUNNING = "The scene role is already running in this stage, started by another of your calls";
+    // Each scene run writes a note of its own, numbered as the run starts, then answers.
+    let runs = 0;
+    let prepared = 0;
+    const asked = agentModels(
+      rig,
+      { scene: (req) => (resultsOf(req).length === 0 ? { content: "", toolCalls: [call("workspace_write", { path: `notes/run-${++runs}.md`, text: `Scene run ${runs}.` }, "w1")] } : JSON.stringify({ lore: [], notes: [] })) },
+      (req, n) => {
+        if (stageNumber(req) !== 3) return undefined;
+        prepared++;
+        // Its first answer runs the scene twice, beside the stage's other roles; its next revises the scene's run twice; then it commits.
+        if (prepared === 1) {
+          const open = [...new Set([...stageOf(req).matchAll(/^- (\w+):/gm)].map((m) => m[1] ?? ""))].filter((role) => role !== "scene");
+          return { content: "", toolCalls: [call("run_role", { role: "scene", task: "Set the scene." }, "s1"), call("run_role", { role: "scene", task: "Set the scene again." }, "s2"), ...open.map((role) => call("run_role", { role, task: `Do the ${role} work.` }, `c${n}_${role}`))] };
+        }
+        const agent = /^(\S+): the scene role answered/m.exec(resultsOf(req).join("\n"))?.[1] ?? "";
+        return prepared === 2 ? { content: "", toolCalls: [call("revise", { agentId: agent, message: "Keep it shorter." }, "v1"), call("revise", { agentId: agent, message: "Shorter still." }, "v2")] } : undefined;
+      },
+    );
+    await played(rig, chatId, "I look out over the harbor.", "Gulls wheel over the water.");
+    // Of each pair of calls, one ran the scene and the other was told its run was under way.
+    for (const req of asked.filter((q) => stageNumber(q) === 3).slice(1, 3)) {
+      const got = resultsOf(req);
+      expect([got.filter((r) => r.includes(": the scene role answered")).length, got.filter((r) => r.includes(RUNNING)).length]).toEqual([1, 1]);
+    }
+    expect(runs).toBe(2);
+    // Only the revision's note lands: the first run's went as the revision started, and no other run staged beside either.
+    const notes = (await listWorkspace(rig.rt, { userId: rig.host.userId, chatId, knowledge: "gm" })).map((f) => f.path).filter((p) => p.startsWith("notes/run-"));
+    expect(notes).toEqual(["notes/run-2.md"]);
+    expect(rig.rt.ledger.errors).toEqual([]);
+  });
+
+  test("a request whose phase's time runs out after its run answered lands nothing the run staged: the turn goes on without it, and GM → Live says why its write was dropped", async () => {
+    const LATE = "notes/late.md";
+    const rig = new Rig({ shipped: true, minds: true });
+    // The read may write the workspace, and the reads after the reply have a second.
+    const chatId = await rolesChat(rig, { agents: { roles: { read: { families: [...defaultRoleSettings().read.families, "workspace"] } } }, timeouts: { postReplyMs: 1000 } });
+    const asked = agentModels(
+      rig,
+      { read: (req) => (resultsOf(req).length === 0 ? { content: "", toolCalls: [call("workspace_write", { path: LATE, text: "Written by a read whose request ran out of time." }, "w1")] } : JSON.stringify({ proposals: [], where: null })) },
+      // Once stage 7's runs are in, the main agent thinks past the reads' time, never committing.
+      (req) => (stageNumber(req) === 7 && resultsOf(req).length > 0 ? new Promise<QuietScript>(() => undefined) : undefined),
+    );
+    const rec = await played(rig, chatId, "I look out over the harbor.", "Gulls wheel over the water.");
+    await rig.host.settle();
+    expect(rec.status).toBe("ok");
+    // The read answered, its note staged, before the time ran out.
+    expect(ranOf(asked, "read")[0]).toContain("Its changes: 1 staged, landing when the turn commits.");
+    expect((await listWorkspace(rig.rt, { userId: rig.host.userId, chatId, knowledge: "gm" })).some((f) => f.path === LATE)).toBe(false);
+    const writes = (rig.rt.live.view(chatId, rig.host.userId)?.entries ?? []).flatMap((e) => (e.kind === "write" && e.role === "read" ? [[e.outcome, e.why ?? null]] : []));
+    expect(writes).toEqual([["staged", null], ["dropped", "unused"]]);
+    expect(rig.rt.ledger.errors).toEqual([]);
+  });
+
+  test("a read answer the engine reads less of says why, and an empty one says so", async () => {
+    const rig = new Rig({ shipped: true, minds: true });
+    const chatId = await rolesChat(rig);
+    const asked = agentModels(rig, { read: () => JSON.stringify({ proposals: [{ type: "mood", entity: "pov", value: "glad" }, { type: "time_advance", minutes: 0 }], where: null }) });
+    await played(rig, chatId, "I look out over the harbor.", "Gulls wheel over the water.");
+    const [ran = ""] = ranOf(asked, "read");
+    expect(ran).toContain('"proposals":[]');
+    expect(ran).toContain("What the engine didn't take: 1 not read (mood: not a change type the read takes now); 1 not read (narrated time the turn had already passed).");
+    const empty = agentModels(rig);
+    await played(rig, chatId, "I sit.", "You sit.");
+    expect(ranOf(empty, "read")[0]).toContain("What the engine didn't take: its answer proposed no change.");
+    expect(rig.rt.ledger.errors).toEqual([]);
+  });
+
+  test("a read's change to a thing the world doesn't have says so, naming it and how a thing is made", async () => {
+    const rig = new Rig({ shipped: true, minds: true });
+    const chatId = await rolesChat(rig);
+    const asked = agentModels(rig, { read: () => JSON.stringify({ proposals: [{ type: "take", entity: "pov", item: "brass key" }], where: null }) });
+    await played(rig, chatId, "I pick up the brass key from the counter.", "You pocket the brass key.");
+    const [ran = ""] = ranOf(asked, "read");
+    expect(ran).toContain("What the engine didn't take: 1 name a thing the world doesn't have (brass key): each changes nothing but a Not tracked note; only a give by someone other than the player character, the thing in the reply's words, or a purchase makes one.");
+    expect(rig.rt.ledger.errors).toEqual([]);
+  });
+
+  test("a director's line that contradicts the state it was given is withheld and told with its run: quoted where the main agent's knowledge reaches the director's, else only counted", async () => {
+    const here = "Marcus Delgado leans on the counter beside Jordan.";
+    const PROSE: JsonObject = { modelUse: { steps: { brief: { enabled: true, signals: ["always"] }, outline: { enabled: true, signals: ["always"] }, "npc.choose": { enabled: false } }, budgets: { pre: { calls: 8 } } } };
+    const director = (): QuietScript => JSON.stringify({ brief: "BRIEF-OK The harbor is grey this morning.", beats: ["OUTLINE-OK Jordan looks out at the harbor.", here] });
+    const rig = new Rig({ shipped: true, minds: true });
+    const chatId = await rolesChat(rig, PROSE);
+    const asked = agentModels(rig, { director });
+    await played(rig, chatId, "I look out at the harbor.", "The harbor is calm.");
+    const [ran = ""] = ranOf(asked, "director");
+    expect(ran).toContain('"outline":["OUTLINE-OK Jordan looks out at the harbor."]');
+    expect(ran).toContain(`What the engine didn't take: 1 withheld (it has someone here whom the engine has elsewhere: "${here}").`);
+    // A main agent that reads only what the player character knows is told how many, never the lines.
+    rig.body(await rig.send({ type: "lre.settings.set", patch: { agents: { main: { knowledge: "pov" } } } }));
+    const narrow = agentModels(rig, { director });
+    await played(rig, chatId, "I look out at the harbor again.", "The harbor is still calm.");
+    const [counted = ""] = ranOf(narrow, "director");
+    expect(counted).toContain('"outline":1');
+    expect(counted).toContain("What the engine didn't take: 1 withheld (it has someone here whom the engine has elsewhere).");
+    expect(counted).not.toContain(here);
     expect(rig.rt.ledger.errors).toEqual([]);
   });
 });

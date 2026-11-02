@@ -92,7 +92,7 @@ function hostCapabilities(): HostCapabilities {
 
 /** A World Info entry as the port reads it. */
 function bookEntryOf(e: WorldBookEntryDTO): HostBookEntry {
-  return { id: e.id, bookId: e.world_book_id, comment: e.comment, content: e.content, keys: [...e.key], disabled: e.disabled, constant: e.constant, position: e.position, depth: e.depth, role: e.role, order: e.order_value, extensions: toJsonObject(e.extensions) };
+  return { id: e.id, bookId: e.world_book_id, comment: e.comment, content: e.content, keys: [...e.key], secondaryKeys: [...(e.keysecondary ?? [])], disabled: e.disabled, constant: e.constant, position: e.position, depth: e.depth, role: e.role, order: e.order_value, extensions: toJsonObject(e.extensions) };
 }
 
 /** A host message (`getMessages` row or event DTO). `spindle_metadata` arrives as `metadata` or inside `extra`. */
@@ -237,7 +237,7 @@ function usageTokens(raw: unknown): number {
   return (num(u, "input_tokens") ?? num(u, "prompt_tokens") ?? 0) + (num(u, "output_tokens") ?? num(u, "completion_tokens") ?? 0);
 }
 
-/** An entry as the host creates it; its outlet goes into `extensions.outlet_name`, where the host reads it. */
+/** An entry as the host creates it; its outlet goes into `extensions.outlet_name`, where the host reads it. Where it sits, when left out, is the host's default for a new entry. */
 export function entryInput(entry: HostBookEntryInput): WorldBookEntryCreateDTO {
   return {
     comment: entry.comment,
@@ -245,10 +245,11 @@ export function entryInput(entry: HostBookEntryInput): WorldBookEntryCreateDTO {
     key: entry.keys,
     disabled: entry.disabled,
     constant: entry.constant,
-    position: entry.position,
-    depth: entry.depth,
-    ...(entry.role !== null ? { role: entry.role } : {}),
-    order_value: entry.order,
+    ...(entry.position !== undefined ? { position: entry.position } : {}),
+    ...(entry.depth !== undefined ? { depth: entry.depth } : {}),
+    ...(entry.role !== undefined && entry.role !== null ? { role: entry.role } : {}),
+    ...(entry.order !== undefined ? { order_value: entry.order } : {}),
+    ...(entry.preventRecursion !== undefined ? { prevent_recursion: entry.preventRecursion } : {}),
     extensions: entry.outlet ? { ...entry.extensions, outlet_name: entry.outlet } : entry.extensions,
   };
 }

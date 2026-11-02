@@ -13,10 +13,16 @@
 //    (after it), with what this agent staged before it in the same phase on top: each agent writes
 //    into its own draft, so two agents that spend the same cash both stage, and the commit refuses
 //    the second.
-// 4. It is staged, or refused with its code and reason. A workspace file's body is stored as a blob
-//    when it is staged, held for the turn until the turn's run ends. A change to the learned area
-//    (a path under `learned/`) is staged the same way, and made in the chat's metadata when the turn
-//    closes (`ChatAgentMeta.setLearned`): no record holds it, and a cancelled turn makes none.
+// 4. It is staged, or refused with its code and reason, which the draft keeps for the run's answer
+//    (`TurnDraft.writesOf`, `agents/yields.ts`). A role's write tool stages at once (`stage`, through
+//    `propose`), and its answer says where the change stands: landing when the turn commits, or, its
+//    mode Confirm, waiting for the GM's Apply on the review card. A workspace file's body is stored as
+//    a blob when it is staged, held for the turn until the turn's run ends. A change to the learned
+//    area (a path under `learned/`) is staged the same way, and made in the chat's metadata when the
+//    turn closes (`ChatAgentMeta.setLearned`): no record holds it, and a cancelled turn makes none.
+//
+// The turn's roles read its workspace as the turn holds it (`stagedWorkspace`): what they and the runs
+// before them staged is listed and read before it is committed.
 //
 // The orchestrator commits a phase's draft in the turn's fixed order (`commitOrder`: by role in §5's
 // order, then by staging order), each operation re-validated in order (`commitStaged`): one under
@@ -27,7 +33,9 @@ import { ROLE_IDS, type RoleId, type RoleTier } from "../../shared/agent-roles";
 import type { AgentKnowledge } from "../../shared/agent-tools";
 import { WRITE_NOTE } from "../../shared/agent-tools-write";
 import type { ChatId, UserId } from "../../shared/ids";
+import { isRecord } from "../../shared/json";
 import type { LedgerEvent } from "../../shared/ledger";
+import type { LiveDropWhy } from "../../shared/live";
 import { effectiveMemory } from "../../shared/minds";
 import type { AgentChangeType, ExtractionLearning, UserSettings } from "../../shared/settings";
 import type { WorldState } from "../../engine/state";
@@ -37,10 +45,10 @@ import { latestTexts } from "../gm";
 import { markWording, renderPrompt } from "../prompts";
 import type { Runtime } from "../runtime";
 import type { LearnedFile } from "../chat-agent-meta";
-import { readView, type ToolReader } from "./tools/read-view";
-import { type ChatHead, listWorkspace } from "./tools/workspace";
-import { PINS_PATH } from "./turn-task";
-import { type AgentOp, checkOp, contextOf, isOpRefusal, opKey, opLines, type OpRefusal, type ToolWriter, withLearned, type WriterCtx, type WriterEnv } from "./tools/writer";
+import { readView, type ToolReader, viewRouting } from "./tools/read-view";
+import { type ChatHead, listWorkspace, type WorkspaceAt } from "./tools/workspace";
+import { PINS_PATH } from "../../shared/stores";
+import { type AgentOp, checkOp, contextOf, isOpRefusal, opKey, opLines, type OpPreview, type OpRefusal, type ToolWriter, withLearned, type WriterCtx, type WriterEnv } from "./tools/writer";
 
 /** Where in its turn an operation was staged: before the plan, between the plan and the reply, or after the reply. */
 export type StagePhase = "pre" | "plan" | "post";
@@ -74,18 +82,43 @@ export interface StagedOp {
   cardLines?: string[];
 }
 
-/** A turn's draft: every operation its roles staged, in staging order, and how many of the GM's edits among them and among those its earlier phases landed. */
+/** Hears what a turn's roles stage, what is refused as they stage it, and what is dropped uncommitted, with why (GM → Live). */
+export interface DraftWatch {
+  staged(op: StagedOp): void;
+  refused(at: { role: RoleId; agentId: string; phase: StagePhase; key?: string; code: string; reason: string }): void;
+  dropped(ops: readonly StagedOp[], why: LiveDropWhy): void;
+}
+
+/**
+ * A turn's draft: every operation its roles staged, in staging order, and how many of the GM's edits
+ * among them and among those its earlier phases landed; and the writes each agent asked for that were
+ * refused as they were staged, which its run's answer reports (`writesOf`).
+ */
 export class TurnDraft {
   private seq = 0;
   private readonly ops: StagedOp[] = [];
   /** The GM's edits the turn's earlier phases landed, or put to its review card. */
   private gmLanded = 0;
+  /** Hears what is staged, refused and dropped: the turn's live view. */
+  watch: DraftWatch | null = null;
+  /** By agent: the writes it asked for that were refused as they were staged. */
+  private readonly refusals = new Map<string, OpRefusal[]>();
 
   constructor(readonly generationId: string) {}
 
   /** What one agent staged in one phase, in staging order: its own draft. */
   own(agentId: string, phase: StagePhase): StagedOp[] {
     return this.ops.filter((o) => o.agentId === agentId && o.phase === phase);
+  }
+
+  /** Everything staged and not yet committed, every agent and phase, in staging order: what the turn's workspace reads with (`stagedWorkspace`). */
+  pending(): readonly StagedOp[] {
+    return this.ops;
+  }
+
+  /** What one agent staged that the turn hasn't committed, and the writes it asked for that were refused as they were staged. */
+  writesOf(agentId: string): { staged: StagedOp[]; refused: OpRefusal[] } {
+    return { staged: this.ops.filter((o) => o.agentId === agentId), refused: [...(this.refusals.get(agentId) ?? [])] };
   }
 
   /** The GM's edits of this turn so far, every phase and agent together: those its earlier phases landed (`landed`), and those staged since. **GM edits per turn** caps it. */
@@ -101,7 +134,14 @@ export class TurnDraft {
   stage(op: Omit<StagedOp, "seq">): StagedOp {
     const staged = { ...op, seq: ++this.seq };
     this.ops.push(staged);
+    this.watch?.staged(staged);
     return staged;
+  }
+
+  /** A write the agent `at` asked for, refused as it was staged in its phase: kept for its run's answer, and heard by the turn's live view. */
+  refuse(at: { role: RoleId; agentId: string; phase: StagePhase }, refusal: OpRefusal): void {
+    this.refusals.set(at.agentId, [...(this.refusals.get(at.agentId) ?? []), refusal]);
+    this.watch?.refused({ role: at.role, agentId: at.agentId, phase: at.phase, ...(refusal.key !== undefined ? { key: refusal.key } : {}), code: refusal.code, reason: refusal.reason });
   }
 
   /** A phase's operations, taken out of the draft, in the commit's order (`commitOrder`). */
@@ -113,12 +153,17 @@ export class TurnDraft {
 
   /** Everything staged and not yet committed: what the turn drops when it is cancelled or fails. */
   clear(): void {
-    this.ops.length = 0;
+    const dropped = this.ops.splice(0);
+    this.refusals.clear();
+    if (dropped.length > 0) this.watch?.dropped(dropped, "ended");
   }
 
-  /** What one agent staged and the turn hasn't committed: a run the main agent's revision replaced (C14), whose answer no longer stands. */
-  drop(agentId: string): void {
-    for (let i = this.ops.length - 1; i >= 0; i--) if (this.ops[i]?.agentId === agentId) this.ops.splice(i, 1);
+  /** What one agent staged and the turn hasn't committed, and what it was refused: a run that failed, or one the main agent's revision replaced (C14), whose answer no longer stands. */
+  drop(agentId: string, why: LiveDropWhy = "failed"): void {
+    const dropped: StagedOp[] = [];
+    for (let i = this.ops.length - 1; i >= 0; i--) if (this.ops[i]?.agentId === agentId) dropped.unshift(...this.ops.splice(i, 1));
+    this.refusals.delete(agentId);
+    if (dropped.length > 0) this.watch?.dropped(dropped, why);
   }
 
   get size(): number {
@@ -149,12 +194,43 @@ export function opTier(op: AgentOp): "story" | "gm" {
 export type TurnBase = () => ChatHead | null;
 
 /**
+ * The workspace as a turn holds it while it runs (`WorkspaceAt`): `head`'s files and the learned area
+ * (`learned`), with what the turn's agents staged and the turn hasn't committed on top, in the
+ * commit's order (`commitOrder`), each on what the ones before it left, and who staged each file. A
+ * change that waits for the review card (Confirm), or no longer applies, changes nothing here, as it
+ * changes nothing when the turn commits. So each run reads the files it and the runs before it staged.
+ */
+export function stagedWorkspace(rt: Runtime, draft: TurnDraft, head: ChatHead, learned: Readonly<Record<string, LearnedFile>>): WorkspaceAt {
+  const ops = commitOrder(draft.pending()).filter((o) => o.mode === "auto" && o.op.kind.startsWith("ws_"));
+  if (ops.length === 0) return { head, learned, staged: new Map() };
+  const w = new Working(rt.registry, head.world, head.state);
+  let area = learned;
+  const staged = new Map<string, { role: string; key: string }>();
+  for (const o of ops) {
+    const by = { role: o.role, key: o.key };
+    if (o.learned) {
+      area = withLearned(area, o.learned);
+      for (const path of Object.keys(o.learned)) staged.set(path, by);
+      continue;
+    }
+    const mark = w.mark();
+    if (w.applyAll(o.events).length < o.events.length) {
+      w.restore(mark);
+      continue;
+    }
+    for (const e of o.events) if ("data" in e && isRecord(e.data) && typeof e.data.path === "string") staged.set(e.data.path, by);
+  }
+  return { head: { ...head, state: w.state }, learned: area, staged };
+}
+
+/**
  * A turn's reader (C10): the turn's base as `knowledge` reads it, built afresh on each read from the
- * turn's own core and chain, never through the ledger's queue. A role reading with its own
+ * turn's own core and chain, never through the ledger's queue; its workspace, with `staged`, as the
+ * turn holds it (`stagedWorkspace`), else the chat's as it stands. A role reading with its own
  * character's knowledge (`own`) has no reader here: the tool layer reads as the player character,
  * everyone or the GM, none of which is one character's own, so each such read is refused.
  */
-export function turnReader(rt: Runtime, base: TurnBase, env: { userId: UserId; chatId: ChatId; knowledge: AgentKnowledge | null }): ToolReader {
+export function turnReader(rt: Runtime, base: TurnBase, env: { userId: UserId; chatId: ChatId; knowledge: AgentKnowledge | null; staged?: (head: ChatHead) => WorkspaceAt }): ToolReader {
   return {
     registry: rt.registry,
     async view() {
@@ -163,6 +239,7 @@ export function turnReader(rt: Runtime, base: TurnBase, env: { userId: UserId; c
       const head = base();
       if (!head) throw new Error("this chat's world isn't loaded");
       const settings = await rt.settings.get(env.userId);
+      const files = { userId: env.userId, chatId: env.chatId, knowledge };
       return readView({
         knowledge,
         registry: rt.registry,
@@ -175,10 +252,11 @@ export function turnReader(rt: Runtime, base: TurnBase, env: { userId: UserId; c
         lore: (world) => rt.readLore(env.chatId, env.userId, world),
         blob: (hash) => rt.blobs.get(env.userId, hash),
         books: async (world) => {
-          const { read } = await loreBookIds(rt.host, world, env.chatId, env.userId);
+          const { read } = await loreBookIds(rt.host, world, env.chatId, env.userId, (await rt.settings.get(env.userId)).loreBooks);
           return (await Promise.all(read.map((book) => rt.host.books.entries(book, env.userId)))).flat();
         },
-        workspace: () => listWorkspace(rt, { userId: env.userId, chatId: env.chatId, knowledge }),
+        workspace: () => listWorkspace(rt, files, env.staged?.(head)),
+        routing: viewRouting(rt, env.userId, settings.loreIndex),
       });
     },
   };
@@ -219,8 +297,9 @@ function ownState(rt: Runtime, draft: TurnDraft, env: TurnWriterEnv, head: ChatH
 
 /**
  * C10's writer: `dryRun` checks an operation as it would be staged; `apply` stages those that pass
- * into the turn's draft, one by one, each on what the ones before it left, and never writes the
- * ledger: they land when the orchestrator commits the phase.
+ * into the turn's draft, one by one, each on what the ones before it left, and `stage` one, as a write
+ * tool asks (`propose`), saying what it staged. None writes the ledger: they land when the
+ * orchestrator commits the phase. What it refuses to stage, the draft keeps for the run's answer.
  */
 export function turnWriter(rt: Runtime, draft: TurnDraft, env: TurnWriterEnv): ToolWriter {
   const context = async (): Promise<{ ctx: WriterCtx; settings: UserSettings; learning: ExtractionLearning } | OpRefusal> => {
@@ -243,6 +322,33 @@ export function turnWriter(rt: Runtime, draft: TurnDraft, env: TurnWriterEnv): T
     const learned = draft.own(env.agentId, env.phase).reduce((files, o) => (o.learned ? withLearned(files, o.learned) : files), c.ctx.learned);
     return checkOp(rt, c.ctx, writer, state, learned, op);
   };
+  /** Why nothing can be staged now (`context`), for one operation, kept for the run's answer. */
+  const unstaged = (c: OpRefusal, op: AgentOp): OpRefusal => {
+    const key = keyOf(op);
+    const refusal = { ...c, ...(key !== undefined ? { key } : {}) };
+    draft.refuse(env, refusal);
+    return refusal;
+  };
+  /** One operation staged for this agent on what it staged before it: what it staged (the same operation again is the one it staged, and stages nothing more), or why not, kept for the run's answer. */
+  const stageOne = async (c: { ctx: WriterCtx; settings: UserSettings }, op: AgentOp): Promise<OpPreview | OpRefusal> => {
+    const key = keyOf(op);
+    const again = key === undefined ? undefined : draft.own(env.agentId, env.phase).find((o) => o.key === key);
+    if (again) return { key: again.key, changeType: again.changeType, mode: again.mode, lines: again.lines };
+    const knowledge = env.knowledge as AgentKnowledge;
+    const state = ownState(rt, draft, env, c.ctx.head);
+    const checked = check(c, state, op, knowledge);
+    if (isOpRefusal(checked)) {
+      draft.refuse(env, checked);
+      return checked;
+    }
+    // A file's body is stored as it is staged, held for the turn until its run lets it go.
+    if (checked.p.body) await rt.blobs.put(env.userId, checked.p.body.text, env.holder);
+    const after = new Working(rt.registry, c.ctx.head.world, state);
+    after.applyAll(checked.events);
+    const lines = opLines(rt, c.ctx, knowledge, checked.type, after.state, checked.shown);
+    draft.stage({ phase: env.phase, role: env.role, agentId: env.agentId, key: checked.p.key, op, changeType: checked.type, mode: checked.mode, tier: opTier(op), knowledge, connectionId: env.connectionId, lines, events: checked.events, ...(checked.p.learned ? { learned: checked.p.learned.changes } : {}) });
+    return { key: checked.p.key, changeType: checked.type, mode: checked.mode, lines };
+  };
   return {
     async dryRun(op) {
       const c = await context();
@@ -257,32 +363,20 @@ export function turnWriter(rt: Runtime, draft: TurnDraft, env: TurnWriterEnv): T
     },
     async apply(ops) {
       const c = await context();
-      if (isOpRefusal(c)) return { applied: [], refused: ops.map((op): OpRefusal => ({ ...c, ...(keyOf(op) !== undefined ? { key: keyOf(op) } : {}) })), chipId: null, pending: false };
-      const knowledge = env.knowledge as AgentKnowledge;
+      if (isOpRefusal(c)) return { applied: [], refused: ops.map((op) => unstaged(c, op)), chipId: null, pending: false };
       const applied: string[] = [];
       const refused: OpRefusal[] = [];
       for (const op of ops) {
-        const key = keyOf(op);
-        // The same operation staged again by this agent is the one it staged: nothing more.
-        if (key !== undefined && draft.own(env.agentId, env.phase).some((o) => o.key === key)) {
-          applied.push(key);
-          continue;
-        }
-        const state = ownState(rt, draft, env, c.ctx.head);
-        const checked = check(c, state, op, knowledge);
-        if (isOpRefusal(checked)) {
-          refused.push(checked);
-          continue;
-        }
-        // A file's body is stored as it is staged, held for the turn until its run lets it go.
-        if (checked.p.body) await rt.blobs.put(env.userId, checked.p.body.text, env.holder);
-        const after = new Working(rt.registry, c.ctx.head.world, state);
-        after.applyAll(checked.events);
-        draft.stage({ phase: env.phase, role: env.role, agentId: env.agentId, key: checked.p.key, op, changeType: checked.type, mode: checked.mode, tier: opTier(op), knowledge, connectionId: env.connectionId, lines: opLines(rt, c.ctx, knowledge, checked.type, after.state, checked.shown), events: checked.events, ...(checked.p.learned ? { learned: checked.p.learned.changes } : {}) });
-        applied.push(checked.p.key);
+        const out = await stageOne(c, op);
+        if (isOpRefusal(out)) refused.push(out);
+        else applied.push(out.key);
       }
       // Staged, not written: it lands when the turn commits (`pending`), with no chip of its own.
       return { applied, refused, chipId: null, pending: applied.length > 0 };
+    },
+    async stage(op) {
+      const c = await context();
+      return isOpRefusal(c) ? unstaged(c, op) : stageOne(c, op);
     },
   };
 }

@@ -6,6 +6,7 @@
 // each turn's prompt set are kept by them), so they never change once shipped.
 
 import { AGENT_FAILURE_PROMPTS } from "./agent-failures";
+import { AGENT_YIELD_PROMPTS } from "./agent-yield";
 import { RUNTIME_PROMPT_PAGE, RUNTIME_PROMPTS } from "./agent-prompts";
 import { MAIN_AGENT_PAGE, MAIN_AGENT_PROMPTS } from "./main-agent-prompts";
 import { ROLE_PROMPT_PAGES, ROLE_PROMPTS } from "./role-prompts";
@@ -14,6 +15,7 @@ import type { SlotId } from "./ids";
 import { isRecord } from "./json";
 import { DEFAULT_SECTIONS } from "./sections";
 import { SECRET_MARK_WORDING, type SecretMarkWording } from "./secret-marks";
+import { loreIndexPrompts } from "./lore-routing";
 
 /** A placeholder a text may use: `{{name}}`, filled with what `text` says it holds; `required` when the text can't work without it. */
 export interface PromptVar {
@@ -109,10 +111,18 @@ export function sectionPromptId(slot: SlotId): string {
   return `section.${slot}`;
 }
 
+/**
+ * The registry ids of the turn's elapsed-time line (DESIGN §9.2), the Elapsed time group: the Scene
+ * section's last line, which an agent turn's director is told too (`{{elapsed}}`), so both tell the
+ * turn's time alike: no time passed; how long the turn took, where the Scene tells no time of day;
+ * and how long, from when to when, where it does.
+ */
+export const ELAPSED_TEXT_IDS = { none: "scene.elapsed.none", took: "scene.elapsed.took", span: "scene.elapsed.span" } as const;
+
 export const FINAL_OUTPUT_PAGE: PromptPage = {
   id: "final",
   label: "Final output",
-  note: "What LumiRPEngine puts into the narrator's prompt: the narrator rules, how a secret is marked, and the guidance that leads each section's lines. A world's own wording of a section (Build → Sections) comes before yours in its chats.",
+  note: "What LumiRPEngine puts into the narrator's prompt: the narrator rules, how a secret is marked, the guidance that leads each section's lines, and the line that ends the Scene with how long the turn took. A world's own wording of a section (Build → Sections) comes before yours in its chats.",
 };
 
 export const GM_AGENT_PAGE: PromptPage = {
@@ -124,6 +134,7 @@ export const GM_AGENT_PAGE: PromptPage = {
 const NARRATOR_GROUP = "Narrator rules";
 const MARKS_GROUP = "Secret marks";
 const SECTIONS_GROUP = "Sections";
+const ELAPSED_GROUP = "Elapsed time";
 
 /** Every built-in section's guidance, the Minds section's and any later built-in's included. */
 const SECTION_PROMPTS: readonly PromptDef[] = Object.values(DEFAULT_SECTIONS).map((s): PromptDef => ({
@@ -136,6 +147,24 @@ const SECTION_PROMPTS: readonly PromptDef[] = Object.values(DEFAULT_SECTIONS).ma
   vars: [{ name: "lines", text: "where the section's lines go, one to a row", required: true }],
   world: "first",
 }));
+
+/** How long the turn took, in words, as every elapsed-time line has it. */
+const ELAPSED_SPAN_VAR: PromptVar = { name: "span", text: "how long the turn took, in words: 20 min, 1.5 hours, 2 days", required: true };
+
+/** The line that ends the Scene section (DESIGN §9.2), as the turn's time calls for it; an agent turn's director is told the same line. */
+const ELAPSED_PROMPTS: readonly PromptDef[] = [
+  { id: ELAPSED_TEXT_IDS.none, page: FINAL_OUTPUT_PAGE.id, group: ELAPSED_GROUP, label: "No time passed", note: "Ends the Scene section when the turn took no time (the clock is paused, or the turn's tick came to nothing). An agent turn's director is told the same line, as {{elapsed}}.", text: "No time passes this turn.", vars: [] },
+  { id: ELAPSED_TEXT_IDS.took, page: FINAL_OUTPUT_PAGE.id, group: ELAPSED_GROUP, label: "How long it took", note: "Ends the Scene section where the Scene tells no time of day (Calendar 1): how long the turn took. An agent turn's director is told the same line, as {{elapsed}}.", text: "This turn took {{span}}.", vars: [ELAPSED_SPAN_VAR] },
+  {
+    id: ELAPSED_TEXT_IDS.span,
+    page: FINAL_OUTPUT_PAGE.id,
+    group: ELAPSED_GROUP,
+    label: "From when to when",
+    note: "Ends the Scene section from Calendar 2, where the Scene tells the time of day: how long the turn took, and from when to when, so the Scene's time reads as when the turn's actions end. An agent turn's director is told the same line, as {{elapsed}}.",
+    text: "This turn took {{span}}, from {{from}} to {{to}}.",
+    vars: [ELAPSED_SPAN_VAR, { name: "from", text: "when the turn's actions began, as the Scene tells the time: the time of day, with its weekday when the turn ends on another day" }, { name: "to", text: "when they end, told the same way" }],
+  },
+];
 
 const TOOLS_GROUP = "Tools";
 const TOOL_ANSWERS_GROUP = "Tool answers";
@@ -184,7 +213,7 @@ const MARK_PROMPTS: readonly PromptDef[] = [
   },
 ];
 
-/** The final output's texts: the narrator rules' parts, how a secret is marked, then each section's guidance. */
+/** The final output's texts: the narrator rules' parts, how a secret is marked, each section's guidance, then the line that ends the Scene with the turn's time. */
 export const FINAL_OUTPUT_PROMPTS: readonly PromptDef[] = [
   { id: "narrator.source", page: FINAL_OUTPUT_PAGE.id, group: NARRATOR_GROUP, label: "Where the rules come from", note: "Opens the narrator rules: that LumiRPEngine sends them, and how its sections are marked.", text: NARRATOR_SOURCE, vars: [] },
   { id: "narrator.authority", page: FINAL_OUTPUT_PAGE.id, group: NARRATOR_GROUP, label: "Order of authority", note: "The narrator's top rule: whose word comes first. Every rule after it works under it.", text: NARRATOR_AUTHORITY, vars: [] },
@@ -192,6 +221,7 @@ export const FINAL_OUTPUT_PROMPTS: readonly PromptDef[] = [
   { id: PRESET_RULES_LEAD_ID, page: FINAL_OUTPUT_PAGE.id, group: NARRATOR_GROUP, label: "Before your preset's rules", note: "Leads the rules of your preset's RPEngine · narrator block, when it has them.", text: PRESET_RULES_LEAD, vars: [] },
   ...MARK_PROMPTS,
   ...SECTION_PROMPTS,
+  ...ELAPSED_PROMPTS,
 ];
 
 /** The GM agent's text ids, so code names them once. */
@@ -277,7 +307,7 @@ export const GM_AGENT_PROMPTS: readonly PromptDef[] = [
 export const PROMPT_PAGES: readonly PromptPage[] = [FINAL_OUTPUT_PAGE, GM_AGENT_PAGE, MAIN_AGENT_PAGE, RUNTIME_PROMPT_PAGE, ...ROLE_PROMPT_PAGES];
 
 /** Every editable text. */
-export const PROMPTS: readonly PromptDef[] = [...FINAL_OUTPUT_PROMPTS, ...GM_AGENT_PROMPTS, ...TOOL_PROMPTS, ...MAIN_AGENT_PROMPTS, ...AGENT_FAILURE_PROMPTS, ...RUNTIME_PROMPTS, ...ROLE_PROMPTS];
+export const PROMPTS: readonly PromptDef[] = [...FINAL_OUTPUT_PROMPTS, ...GM_AGENT_PROMPTS, ...TOOL_PROMPTS, ...loreIndexPrompts(GM_AGENT_PAGE.id), ...MAIN_AGENT_PROMPTS, ...AGENT_FAILURE_PROMPTS, ...AGENT_YIELD_PROMPTS, ...RUNTIME_PROMPTS, ...ROLE_PROMPTS];
 
 /** The pages whose texts a turn's prompt set records (DESIGN §6.12): what the narrator's prompt is made from. */
 export const TURN_PROMPT_PAGES: readonly string[] = [FINAL_OUTPUT_PAGE.id];

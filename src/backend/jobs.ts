@@ -15,12 +15,12 @@ import { loreSourceOf } from "../shared/lore";
 import { publicText } from "../shared/secret-marks";
 import type { ErrorCode, JobKind, JobProposal, JobResult, JobSummary, JobUpdate, LintIssue, WorldCollection } from "../shared/protocol";
 import { PROTOCOL_VERSION } from "../shared/protocol";
-import type { StepConfig } from "../shared/settings";
+import type { LoreBooks, StepConfig } from "../shared/settings";
 import type { Limit } from "../shared/minds";
 import { firedTimeout, formatMs, HOST_LIMITS, hostBound, timeoutSignal, TIMEOUTS } from "../shared/timeouts";
 import type { Registry } from "../engine/registry-impl";
 import type { HostPort, ProcessEvent, ProcessHandle } from "./host";
-import { checkIndexProposals, INDEX_TEXT_CHUNK, indexReplyProblem, indexRetry, indexSystem, readIndexProposals, textChunks, type IndexBook } from "./lore-index";
+import { checkIndexProposals, INDEX_TEXT_CHUNK, indexReplyProblem, indexRetry, indexSystem, readIndexProposals, textChunks } from "./lore-index";
 import { checkProposals, dropSummary, entryTitle, IMPORT_CHUNK, IMPORT_MAX_CALLS, loreChunk, PROPOSAL_MAX_TOKENS, proposalRetry, proposalSystem, readProposals, replyProblem, type DropCounts, type ProposalMode } from "./proposals";
 import { MAP_PROSE_MAX, mapProposal, mapRepairText, mapRequestText, mapSystem, problemLines, readMapAnswer, readMapRequest } from "./map-job";
 import { afterRepair, checkRoutineReply, finishRoutines, loreCutMessage, readRoutineInput, ROUTINE_MAX_CALLS, ROUTINE_OWNERS_MAX, routineCallText, routinePass, routineRepairText, routineScope, routineSystem, type RoutineCandidate } from "./routine-proposals";
@@ -29,6 +29,7 @@ import type { SettingsStore } from "./settings-store";
 import type { Steps } from "./steps";
 import { readStoredJson } from "./stored-json";
 import { WORLD_COLLECTIONS, type WorldStore } from "./worlds";
+import { liveLore } from "./book-lore";
 
 /** The background lane's entry, relative to the extension root (the host requires it to start with `dist/`; DESIGN §18.7). */
 export const BACKGROUND_LANE = "dist/worker/background-lane.js";
@@ -39,7 +40,7 @@ export const JOBS_PATH = "jobs.json";
 /** Jobs that have ended kept per user (the newest), with their results; running ones are always kept. */
 export const JOBS_KEPT = 8;
 
-const JOB_KINDS: Record<JobKind, true> = { import_lore: true, refine: true, describe_map: true, propose_routines: true, playtest: true, check_world: true, index_book: true, index_text: true };
+const JOB_KINDS: Record<JobKind, true> = { import_lore: true, refine: true, describe_map: true, propose_routines: true, playtest: true, check_world: true, index_text: true };
 const JOB_STATUSES: Record<JobSummary["status"], true> = { running: true, done: true, failed: true, cancelled: true, interrupted: true };
 const SEVERITIES: Record<LintIssue["severity"], true> = { error: true, warning: true, info: true };
 
@@ -134,8 +135,6 @@ function boundedInput(kind: JobKind, input: JsonObject): JsonObject {
       return { turns: strings(input.turns).slice(0, TURNS_MAX).map((t) => t.slice(0, TURN_MAX)) };
     case "check_world":
       return typeof input.days === "number" ? { days: input.days } : {};
-    case "index_book":
-      return { bookId: id(input.bookId) };
     case "index_text":
       return { text: text(input.text, INDEX_TEXT_MAX) };
   }
@@ -390,13 +389,16 @@ export class JobRunner {
   /**
    * Propose routines from lore (DESIGN §13): a pass over the draft's people and groups, a few to a
    * call, each call's answer checked against the draft and, when the helper can fix what's wrong,
-   * asked once more listing it. A call starts only while its repair still has one of the pass's
-   * `ROUTINE_MAX_CALLS`, so a pass that runs out says where the next one starts (`next`). The
-   * proposals so far are kept with the job after each call, so a restart loses none of them.
+   * asked once more listing it. The lore it reads is the draft's own and the World Info books the
+   * world's chats read, live (`liveLore`, narrowed by Settings → Lore's books), so a book entry is cited
+   * by its live lore id (`book:<bookId>/<entryId>`) and an earlier build's copy isn't read. A call
+   * starts only while its repair still has one of the pass's `ROUTINE_MAX_CALLS`, so a pass that runs
+   * out says where the next one starts (`next`). The proposals so far are kept with the job after
+   * each call, so a restart loses none of them.
    */
-  private async proposeRoutines(job: Job, worldId: WorldId, input: JsonObject, config: StepConfig | null, loreTokens: Limit, callSignal: () => AbortSignal): Promise<void> {
+  private async proposeRoutines(job: Job, worldId: WorldId, input: JsonObject, config: StepConfig | null, loreTokens: Limit, loreBooks: LoreBooks, callSignal: () => AbortSignal): Promise<void> {
     // On the draft, where the author is working: what an earlier pass proposed and was applied counts as the world's.
-    const draft = await this.worlds.working(worldId, job.userId);
+    const draft = await liveLore(this.host, await this.worlds.working(worldId, job.userId), null, job.userId, loreBooks);
     const scope = routineScope(this.registry, draft);
     const request = readRoutineInput(input);
     const pass = routinePass(scope, request, loreTokens);
@@ -583,56 +585,33 @@ export class JobRunner {
       return;
     }
     if (job.kind === "propose_routines") {
-      await this.proposeRoutines(job, worldId, input, config, settings.jobs.routineLoreTokens, callSignal);
+      await this.proposeRoutines(job, worldId, input, config, settings.jobs.routineLoreTokens, settings.loreBooks, callSignal);
       return;
     }
-    if (job.kind === "index_book" || job.kind === "index_text") {
+    if (job.kind === "index_text") {
       // Indexing reads the draft, so entries already there (applied from an earlier run) aren't proposed again.
       const draft = await this.worlds.working(worldId, job.userId);
-      const mode = job.kind === "index_book" ? "book" : "text";
       const notes: string[] = [];
-      let book: IndexBook | null = null;
-      let parts: string[];
-      if (mode === "book") {
-        const bookId = typeof input.bookId === "string" ? input.bookId : "";
-        if (bookId === "") throw new Error("pick a World Info book");
-        if (bookId === (await this.worlds.index(worldId, job.userId))?.loreBookId) throw new Error("that is the world's own engine book; pick one of your books");
-        const indexed = new Set(
-          Object.values(draft.lore).flatMap((l) => {
-            const s = loreSourceOf(l.source);
-            return s.kind === "book" && s.bookId === bookId ? [s.entryId] : [];
-          }),
-        );
-        // Marks left out, as for Import: an entry that is secret whole has no text a helper may read.
-        const withText = (await this.host.books.entries(bookId, job.userId)).map((e) => ({ ...e, content: publicText(e.content) })).filter((e) => e.content.trim() !== "" && !e.disabled);
-        const fresh = withText.filter((e) => !indexed.has(e.id));
-        if (fresh.length === 0) throw new Error(withText.length > 0 ? "every entry of that book with text is already in the world's lore" : "that book has no entries with text");
-        if (fresh.length < withText.length) notes.push(`${withText.length - fresh.length} entr${withText.length - fresh.length === 1 ? "y" : "ies"} already in the world's lore ${withText.length - fresh.length === 1 ? "was" : "were"} skipped.`);
-        if (fresh.length > IMPORT_MAX_CALLS * IMPORT_CHUNK) notes.push(`${fresh.length - IMPORT_MAX_CALLS * IMPORT_CHUNK} entries past the first ${IMPORT_MAX_CALLS * IMPORT_CHUNK} were not read; apply these, then index the book again for the rest.`);
-        book = { bookId, entries: new Map(fresh.map((e) => [e.id, { title: entryTitle(e), content: e.content, keys: e.keys }])) };
-        parts = Array.from({ length: Math.ceil(fresh.length / IMPORT_CHUNK) }, (_, c) => loreChunk(fresh.slice(c * IMPORT_CHUNK, (c + 1) * IMPORT_CHUNK)));
-      } else {
-        const text = typeof input.text === "string" ? input.text.trim() : "";
-        if (text === "") throw new Error("paste the text to index");
-        parts = textChunks(text);
-        if (parts.length > IMPORT_MAX_CALLS) notes.push(`Only the first ${IMPORT_MAX_CALLS} parts of the text (about ${IMPORT_MAX_CALLS * INDEX_TEXT_CHUNK} characters) were read; index the rest in another pass.`);
-      }
+      const text = typeof input.text === "string" ? input.text.trim() : "";
+      if (text === "") throw new Error("paste the text to index");
+      const parts = textChunks(text);
+      if (parts.length > IMPORT_MAX_CALLS) notes.push(`Only the first ${IMPORT_MAX_CALLS} parts of the text (about ${IMPORT_MAX_CALLS * INDEX_TEXT_CHUNK} characters) were read; index the rest in another pass.`);
       const calls = Math.min(IMPORT_MAX_CALLS, parts.length);
       // As for Import: retries spend only the calls no part needs.
       let spare = IMPORT_MAX_CALLS - calls;
-      const reader: ReplyReader = { problem: indexReplyProblem, count: (reply) => readIndexProposals(reply, "check").length, retry: indexRetry(mode) };
-      const system = indexSystem(mode, draft);
+      const reader: ReplyReader = { problem: indexReplyProblem, count: (reply) => readIndexProposals(reply, "check").length, retry: indexRetry() };
+      const system = indexSystem(draft);
       const raw: JobProposal[] = [];
       for (let c = 0; c < calls; c++) {
         if (signal.aborted) return;
         const { reply, calls: made } = await this.proposalReply("index", reader, `part ${c + 1} of ${calls}`, system, parts[c] ?? "", config, job.userId, callSignal(), spare > 0);
         spare -= made - 1;
-        raw.push(...readIndexProposals(reply, `${mode}${c}`));
+        raw.push(...readIndexProposals(reply, `text${c}`));
         // The checked proposals so far are kept with the job, so a restart before the end loses none of them.
-        this.update(job, { status: "running", progress: Math.min(0.99, (c + 1) / calls) }, { proposals: checkIndexProposals(draft, raw, book) });
+        this.update(job, { status: "running", progress: Math.min(0.99, (c + 1) / calls) }, { proposals: checkIndexProposals(draft, raw) });
       }
       const drops: DropCounts = new Map();
-      const proposals = checkIndexProposals(draft, raw, book, drops);
+      const proposals = checkIndexProposals(draft, raw, drops);
       const message = [...notes, dropSummary(raw.length, proposals.length, drops)].filter((m): m is string => m !== null).join(" ");
       this.update(job, { status: "done", progress: 1, result: { proposals }, ...(message ? { message } : {}) });
       return;

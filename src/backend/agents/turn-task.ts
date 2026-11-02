@@ -20,7 +20,7 @@ import { isRecord, safeKey } from "../../shared/json";
 import { own } from "../../engine/pack-kit";
 import { MAIN_TEXT } from "../../shared/main-agent-prompts";
 import type { PromptTexts } from "../../shared/prompts";
-import { isWorkspacePath } from "../../shared/stores";
+import { isWorkspacePath, PINS_PATH } from "../../shared/stores";
 import { nounFor } from "../../shared/words";
 import type { ChainMessage } from "../../engine/ledger/chain";
 import type { LedgerCore } from "../../engine/ledger/journal";
@@ -29,9 +29,6 @@ import { tokensOf } from "../book";
 import { renderPrompt } from "../prompts";
 import { journalNotes } from "../view";
 import type { ToolReadView } from "./tools/read-view";
-
-/** The pins manifest's path in the chat's workspace (a stored name, §16.7). */
-export const PINS_PATH = ".pins.json";
 
 /** The manifest's key for the main agent's own pins; a role's are under its id. */
 export const MAIN_PINS = "main";
@@ -83,11 +80,12 @@ const HEADING = /^#{1,6}\s/;
 /**
  * `role`'s pinned files as its prompt brings them in, read with the view's knowledge and framed by
  * `framing`: the manifest's for it, then, with `pinned`, the files pinned in GM → Workspace; each
- * whole while it fits the role's budget, else as its headings. Empty when it has none.
+ * whole while it fits the role's budget, else as its headings. Empty when it has none. A turn's
+ * transcript (`transcripts/`) is never one, even listed in the manifest.
  */
 export async function pinnedFiles(view: ToolReadView, input: { role: string; tokens: number; pinned: boolean; texts: PromptTexts; framing: PinsTexts }): Promise<string> {
   const { texts, framing } = input;
-  const files = await view.workspace();
+  const files = (await view.workspace()).filter((f) => f.transcript !== true);
   const byPath = new Map(files.map((f) => [f.path, f]));
   const stored = byPath.get(PINS_PATH);
   const manifest = pinsManifestOf(stored ? await view.blob(stored.hash) : null);

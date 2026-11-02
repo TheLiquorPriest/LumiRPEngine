@@ -410,12 +410,13 @@ describe("GM → Assistant: the request each control sends", () => {
 });
 
 describe("GM → Assistant's place in GM mode", () => {
-  test("Assistant and Workspace are the last GM tabs, after every pack's, behind This chat", () => {
+  test("the agents' tabs (Assistant, Live, Workspace) are the last GM tabs, after every pack's, behind This chat", () => {
     const tabs = buildCatalog(UI_PACKS).gmSections.map((def) => [def.id, def.label]);
-    expect(tabs.slice(-2)).toEqual([
+    expect(tabs.slice(-3)).toEqual([
       ["core.assistant", "Assistant"],
+      ["core.live", "Live"],
       ["core.workspace", "Workspace"],
     ]);
-    expect(tabs.slice(0, -2).every(([id]) => !id?.startsWith("core."))).toBe(true);
+    expect(tabs.slice(0, -3).every(([id]) => !id?.startsWith("core."))).toBe(true);
   });
 });

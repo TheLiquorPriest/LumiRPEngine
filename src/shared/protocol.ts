@@ -16,8 +16,10 @@ import type { RoutineEditOp, RoutineRead, RoutineReadResult } from "./routines";
 import type { CharacterResult } from "./character";
 import type { ActionId, BoundMode, ChatId, ChipId, DomainId, EntityId, FieldId, KindId, Level, MessageId, PanelId, PlaceId, RelationTypeId, RevisionId, SlotId, StageId, TierId, TrackId, WorldId } from "./ids";
 import type { EntityUpgradePick, EventRef, PathHash, ResolveScope, TimeControl, TimeScope, UpgradeAspect, UpgradePicks } from "./ledger";
-import type { ChangeType, NarratorView, UserSettings } from "./settings";
+import type { BuiltLoreIndex, ChangeType, NarratorView, UserSettings } from "./settings";
 import type { Activity, DiagRecord } from "./diagnostics";
+import type { AgentKnowledge } from "./agent-tools";
+import type { LiveChange, LiveView } from "./live";
 import type { GmView, SheetSectionView, StateView } from "./state-view";
 import type { AdjudicationDef, FacetId, FacetValueId, FeedScope, KindDef, LifeStateId, LorePin, MapDisplay, RelationTypeDef, RevisionNote, SectionFeed, StepPurpose, WorldDoc, WorldIndex } from "./world";
 
@@ -377,11 +379,11 @@ export interface ChatKnowledgeRequest extends Request<"lre.chat.knowledge"> {
  * `import_lore` `{bookIds}`; `refine` `{instructions}`; `describe_map` `{scope, prose, mapId?}`
  * (the place drawn, the author's description, and the map's id, by default `<scope>_map`; its one
  * proposal is the map); `propose_routines` `RoutineJobInput`; `playtest` `{turns: string[]}`;
- * `check_world` `{days?: number}` (1–14 simulated days, default 3); `index_book` `{bookId}`;
- * `index_text` `{text}`. Playtest and Check world results share the `turns`/`lint` shape (Check
+ * `check_world` `{days?: number}` (1–14 simulated days, default 3); `index_text` `{text}`.
+ * Playtest and Check world results share the `turns`/`lint` shape (Check
  * world: one entry per day, with drops, failures and leaks as notes).
  */
-export type JobKind = "import_lore" | "refine" | "describe_map" | "propose_routines" | "playtest" | "check_world" | "index_book" | "index_text";
+export type JobKind = "import_lore" | "refine" | "describe_map" | "propose_routines" | "playtest" | "check_world" | "index_text";
 
 /**
  * Propose routines from lore (DESIGN §13): whom it proposes routines and schedules for, and where a
@@ -577,9 +579,8 @@ export interface WorldChatInfo {
 }
 
 /**
- * Lore curation (DESIGN §4.2) and pins (§24.5). `drift`: the draft's entries indexed from a World
- * Info book whose book entry changed since (its current text and hash) or is gone; `id` asks about
- * one entry. `save`: the chat's latest reply, or `text` (an excerpt of the chat), becomes a lore
+ * Lore curation (DESIGN §4.2) and pins (§24.5). LRE reads World Info as lore live, so nothing here
+ * refreshes a copy of it. `save`: the chat's latest reply, or `text` (an excerpt of the chat), becomes a lore
  * entry in the draft of the chat's world, its source the message it came from. `books`: the user's
  * World Info books a pin may name an entry of, those attached to `chatId` first (the engine's own
  * books left out). `entries`: one book's entries. `pins`: every pin of the world's draft (with
@@ -588,17 +589,33 @@ export interface WorldChatInfo {
  * earlier build's secrecy fields on it stay as they are, and nothing else of the entry is written.
  * `mark`: Build's Make secret and Make public, written as secret marks into the entry's text
  * (`shared/secret-marks.ts`) and nothing else of it. Both answer the book's entries, as read after.
+ * `index`: the lore index of the world's books as Build's index entry would hold it now
+ * (`LoreIndexView`), the entry kept brought up to date first. `build`: Build's Build an index entry,
+ * on the user's press: that index written as a new entry of `bookId`, which LRE keeps in sync until
+ * Settings → Lore stops it; answers the index.
  */
 export type LoreRequest = Request<"lre.lore"> &
   (
-    | { op: "drift"; worldId: WorldId; id?: string }
     | { op: "save"; chatId: ChatId; text?: string }
     | { op: "books"; chatId?: ChatId }
     | { op: "entries"; bookId: string }
     | { op: "pins"; worldId?: WorldId; chatId?: ChatId }
     | { op: "fields"; bookId: string; entryId: string; fields: BookFieldsEdit | null }
     | { op: "mark"; bookId: string; entryId: string; change: LoreMarkChange }
+    | { op: "index"; worldId: WorldId }
+    | { op: "build"; worldId: WorldId; bookId: string }
   );
+
+/**
+ * The lore index of a world's books as Build shows it (`lre.lore index`): the text Build's index
+ * entry holds (the entries anyone may read), each book with how many entries it lists, and the entry
+ * LRE keeps in sync, with its book's name, when there is one.
+ */
+export interface LoreIndexView {
+  text: string;
+  books: { id: string; name: string; entries: number }[];
+  built: (BuiltLoreIndex & { book: string }) | null;
+}
 
 /**
  * A change to the secret marks in one World Info entry's text (`lre.lore mark`), names as written:
@@ -618,9 +635,6 @@ export interface LoreMarkView {
   knownTo: string[];
   keptFrom: string[] | "everyone";
 }
-
-/** A book-sourced lore entry whose World Info entry changed since it was indexed (with its text now), or is gone. */
-export type LoreDrift = { status: "changed"; content: string; hash: string } | { status: "missing" };
 
 /**
  * A World Info book a pin may name an entry of (`lre.lore books`); `attached`: to the chat asked
@@ -925,23 +939,53 @@ export interface AssistantView {
  * (`HeldWrite.hold`); a file under `learned/` changes at once, in the chat's metadata, with no Undo
  * chip. A write says whose knowledge may read the file (`readers`: the player character's,
  * everyone's or the GM's); left out, a file keeps its readers, and a new one is the GM's alone;
- * `readers` sets them by themselves. `session` reads the main agent's session at the head, and
+ * `readers` sets them by themselves. `session` reads the main agent's session at the head, whole, and
  * `rollback` rolls its latest compaction back: the next agent turn's record carries the restore, so
- * no earlier record changes (INC2-SPEC C14). GM data, behind the gate as `lre.gm` is.
+ * no earlier record changes (INC2-SPEC C14). The turns' transcripts (`transcripts/`) are listed and
+ * read like files, and refused to every change. GM data, behind the gate as `lre.gm` is.
  */
 export type WorkspaceRequest = Request<"lre.workspace"> & { chatId: ChatId } & ({ op: "list" } | { op: "read"; path: string } | { op: "write"; path: string; text: string; readers?: "pov" | "everyone" | "gm" } | { op: "delete"; path: string } | { op: "move"; from: string; to: string } | { op: "pin"; path: string; pinned: boolean } | { op: "readers"; path: string; readers: "pov" | "everyone" | "gm" } | { op: "session" } | { op: "rollback" });
 
 /**
- * The main agent's session at the chat's head (`lre.workspace session`): the compaction summary it
- * reads from (null when none), the turns it holds whole and their size in tokens, estimated, and
- * its latest compaction's rollback: `none` when there is none to roll back, `available`, or
- * `pending` once asked for, until the next agent turn's record carries it.
+ * The main agent's session at the chat's head (`lre.workspace session`), whole: no knowledge holds
+ * any of it back, since GM → Workspace is the GM's. Its compaction summary (null when none) with the
+ * knowledge it was made under; the turns it holds whole and their size in tokens, estimated; each
+ * turn's segment with its messages; what of it the main agent reads now, with its knowledge (the only
+ * part its prompt is sent); how many of its parts the store no longer has; and its latest
+ * compaction's rollback: `none` when there is none to roll back, `available`, or `pending` once asked
+ * for, until the next agent turn's record carries it.
  */
 export interface SessionView {
   summary: string | null;
+  summaryKnowledge: AgentKnowledge;
   turns: number;
   tokens: number;
+  segments: SessionSegmentView[];
+  reads: { knowledge: AgentKnowledge; turns: number; tokens: number; summary: boolean };
+  missing: number;
   rollback: "none" | "available" | "pending";
+}
+
+/** One turn's segment of the main session: the reply on the chain whose record holds it (1-based; null for one a compaction kept that no reply on the chain names), and its messages in order. */
+export interface SessionSegmentView {
+  turn: number | null;
+  messages: SessionMessageView[];
+}
+
+/**
+ * A message of the main session: who it is from (the engine's message to the main agent, or its
+ * own answer: `main`; else a fixed pipeline's digest of its turn, the player's words or the reply),
+ * its text, the knowledge it was made under and the workspace files its tools read (the main
+ * agent's own), each role run and what landed (a digest's), and whether the main agent reads it now.
+ */
+export interface SessionMessageView {
+  role: "user" | "assistant";
+  text: string;
+  main: boolean;
+  knowledge?: AgentKnowledge;
+  files?: string[];
+  engine?: { roles: { role: string; via: string; ok: boolean }[]; committed: { role: string; key: string; type: string }[] };
+  read: boolean;
 }
 
 /**
@@ -964,9 +1008,10 @@ export interface PromptTestView {
 /**
  * A workspace file as GM → Workspace lists it: its path, its body's hash and size, whether it is
  * pinned, whose knowledge may read it (`readers`), whether it is the learned area's (kept outside the
- * turns), and who wrote it: the agent's role (`gm` for your own) and its operation's key, and the
- * turn, the number of the reply on the chain whose record holds the write (null before any reply,
- * and for a learned file).
+ * turns) or a turn's transcript (`transcript`: read-only, the GM's alone, under `transcripts/`), and
+ * who wrote it: the agent's role (`gm` for your own) and its operation's key, and the turn, the
+ * number of the reply on the chain whose record holds the write (null before any reply, and for a
+ * learned file).
  */
 export interface WorkspaceFileView {
   path: string;
@@ -975,8 +1020,22 @@ export interface WorkspaceFileView {
   pinned: boolean;
   readers: "pov" | "everyone" | "gm";
   learned: boolean;
+  transcript?: true;
   provenance: { role?: string; key?: string; turn: number | null };
 }
+
+// ---------------------------------------------------------------- GM → Live (DESIGN §4.6)
+
+/**
+ * GM → Live: the chat's latest agent run as its agents work it (`shared/live.ts`). `get` answers the
+ * chat's live view (the run under way, or the last one since the engine started; null when there is
+ * none) and from then on pushes what the run does to this page as `lre.live.update`, until `leave`
+ * or the page closes. GM data, behind the gate as `lre.gm` is.
+ */
+export type LiveRequest = Request<"lre.live"> & { chatId: ChatId; op: "get" | "leave" };
+
+/** What a chat's agent run did since this page last heard (`lre.live`): a new run's view, or the entries its run added and how it stands. Sent to the pages that asked about that chat's live view. */
+export type LiveUpdate = Envelope<"lre.live.update"> & { chatId: ChatId } & LiveChange;
 
 // ---------------------------------------------------------------- an agent turn's review card (INC2-SPEC C13)
 
@@ -1054,7 +1113,8 @@ export type FrontendToBackend =
   | AssistantRequest
   | WorkspaceRequest
   | ReviewRequest
-  | PromptsRequest;
+  | PromptsRequest
+  | LiveRequest;
 
 // ---------------------------------------------------------------- responses (backend → frontend)
 
@@ -1133,11 +1193,10 @@ export interface ResultBodies {
   /** `start`, `cancel` and `dismiss` name the job; `list` returns the world's kept jobs. */
   "lre.job": { jobId?: string; jobs?: JobSummary[] };
   /**
-   * `drift`: book-sourced entries whose book entry changed or is gone, by lore id (unchanged ones are
-   * left out); `save`: the world and the new entry's id; `books`, `entries` and `pins` answer theirs;
-   * `fields` and `mark`: the book's entries, as read after the write.
+   * `save`: the world and the new entry's id; `books`, `entries` and `pins` answer theirs; `fields`
+   * and `mark`: the book's entries, as read after the write; `index` and `build`: the index.
    */
-  "lre.lore": { drift?: Record<string, LoreDrift>; worldId?: WorldId; id?: string; books?: LoreBookView[]; entries?: LoreBookEntryView[]; pins?: LorePinsView; problem?: string | null };
+  "lre.lore": { worldId?: WorldId; id?: string; books?: LoreBookView[]; entries?: LoreBookEntryView[]; pins?: LorePinsView; problem?: string | null; index?: LoreIndexView };
   /** `books` answers the user's books; every other op, the book as it stands now. */
   "lre.secrecy": { books?: SecrecyBookView[]; book?: SecrecyBookPlan };
   "lre.preset": { card: PresetCard };
@@ -1165,6 +1224,8 @@ export interface ResultBodies {
   /** Every op: the chat's review cards after it; `apply` and `reject` at a gate, how to start the turn it resumes (`start`; null when nothing waits on a reply). */
   "lre.review": { cards: ReviewCardView[]; start?: GenerateAs | null };
   "lre.prompts": { test: PromptTestView };
+  /** `get`: the chat's live view now (null when it has had no agent run since the engine started); `leave`: none. */
+  "lre.live": { live: LiveView | null };
 }
 
 export type ResultMessage = {
@@ -1279,4 +1340,4 @@ export interface KitReconnect extends Envelope<"lre.kit.reconnect"> {
   client: string;
 }
 
-export type BackendToFrontend = StateSnapshot | StateDelta | ResultMessage | ErrorMessage | JobUpdate | DraftChanged | ActivityPush | MindsRunUpdate | GeneratePush | AgentsChanged | AcceptanceChanged | AssistantUpdate | ReviewUpdate | KitReload | KitReconnect;
+export type BackendToFrontend = StateSnapshot | StateDelta | ResultMessage | ErrorMessage | JobUpdate | DraftChanged | ActivityPush | MindsRunUpdate | GeneratePush | AgentsChanged | AcceptanceChanged | AssistantUpdate | ReviewUpdate | LiveUpdate | KitReload | KitReconnect;

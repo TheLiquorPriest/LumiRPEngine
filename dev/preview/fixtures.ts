@@ -7,7 +7,7 @@ import type { DomainId, InterruptClass, InterruptPolicy } from "../../src/shared
 import type { JsonValue } from "../../src/shared/json";
 import type { AssistantProposalOp, AssistantView, ExtractionModeView, TraceRow, UpgradePreview, WorkspaceFileView } from "../../src/shared/protocol";
 import type { ChangeType, ExtractionType, UserSettings } from "../../src/shared/settings";
-import { AGENT_CHANGE_DEFAULTS, AGENT_CHANGE_TYPES, NARRATOR_DEFAULTS, SETTINGS_DEFAULTS_REV } from "../../src/shared/settings";
+import { AGENT_CHANGE_DEFAULTS, AGENT_CHANGE_TYPES, LORE_INDEX_DEFAULTS, NARRATOR_DEFAULTS, SETTINGS_DEFAULTS_REV } from "../../src/shared/settings";
 import { claimFactId, defaultMindsSettings, KNOWLEDGE_DEFAULTS, witnessRef } from "../../src/shared/minds";
 import { defaultTimeouts } from "../../src/shared/timeouts";
 import { hashJson } from "../../src/shared/hash";
@@ -1373,10 +1373,11 @@ export function settingsFixture(): UserSettings {
     minds: defaultMindsSettings(),
     timeouts: { ...defaultTimeouts(), requestMs: 600_000, laneHeartbeatMs: "none" },
     jobs: { routineLoreTokens: 8000 },
+    loreBooks: "auto",
+    loreIndex: { ...LORE_INDEX_DEFAULTS },
     gates: { intent: false, outline: false },
     agents: defaultAgentSettings(),
     prompts: { texts: {}, maxChars: 20_000 },
-    holdWrites: false,
     retention: { transcriptDays: 30, unreferencedDays: 7, sweepHours: 24 },
     diagnostics: { recordsPerChat: 400 },
     narrator: { ...NARRATOR_DEFAULTS },

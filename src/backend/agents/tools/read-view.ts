@@ -27,9 +27,11 @@ import { canSeeEntity, canSeeField, canSeePlace, entityVisibility, HIDDEN_PLACE_
 import { factsOf, holdingsOf } from "../../../packs/minds/core/knowledge";
 import { readSlice } from "../../../packs/minds/core/state";
 import type { AgentKnowledge } from "../../../shared/agent-tools";
-import type { EntityId, PlaceId, TrackId } from "../../../shared/ids";
+import type { EntityId, PlaceId, TrackId, UserId } from "../../../shared/ids";
 import { hasOwn } from "../../../shared/json";
 import { engineWroteEntry, loreIsSecret, loreSourceOf } from "../../../shared/lore";
+import type { RoutingIndex } from "../../../shared/lore-routing";
+import type { LoreIndexSettings } from "../../../shared/settings";
 import { effectiveMemory, type FactId, type FidelityTexts, type MindsMemoryConfig } from "../../../shared/minds";
 import type { PromptTexts } from "../../../shared/prompts";
 import { applyMarks, type SecretMarkWording, secretMarkText } from "../../../shared/secret-marks";
@@ -97,6 +99,8 @@ export interface ReadViewInput {
   books?: (world: WorldDoc) => Promise<HostBookEntry[]>;
   /** The chat's workspace files the agent's knowledge may read, with their provenance (`listWorkspace`); absent, none. */
   workspace?: () => Promise<WorkspaceFile[]>;
+  /** The lore index (Settings → Lore, DESIGN §4.2): its settings, its making and its short ids; absent, none. */
+  routing?: ViewRouting;
 }
 
 /** What GM → Minds reads besides the state (`buildMindsGm`). */
@@ -104,6 +108,31 @@ export interface ViewMinds {
   enabled: boolean;
   memory: MindsMemoryConfig;
   latest: FidelityTexts;
+}
+
+/** The lore index as a view reads it (`viewRouting`): the user's settings for it, the index of the world as it reads lore, the entry a short id names, and the user's own index entry. */
+export interface ViewRouting {
+  settings: LoreIndexSettings;
+  index(live: WorldDoc, entries: readonly HostBookEntry[]): Promise<RoutingIndex>;
+  /** The entry a short id names, as `bookId/entryId`; null for an id never given. */
+  entryOf(id: string): Promise<string | null>;
+  /** The user's own index entry (Settings → Lore), as written; null when none is set, or it is gone. */
+  own(): Promise<HostBookEntry | null>;
+}
+
+/** The lore index for a view of `userId`'s chat, on the runtime's (`LoreRouting`), with `settings`. */
+export function viewRouting(rt: Runtime, userId: UserId, settings: LoreIndexSettings): ViewRouting {
+  return {
+    settings,
+    index: (live, entries) => rt.loreRouting.index(userId, live, entries, settings),
+    entryOf: (id) => rt.loreRouting.ids.entryOf(userId, id),
+    async own() {
+      const ref = settings.own;
+      if (!ref) return null;
+      const e = await rt.host.books.entry(ref.entryId, userId).catch(() => null);
+      return e && e.bookId === ref.bookId ? e : null;
+    },
+  };
 }
 
 /** The narrator reads lore as the steps that write for it do (`engine/place-lore.ts`): a secret only once its gate holds, a Known by entry by what the player character knows. */
@@ -125,8 +154,11 @@ export class ToolReadView {
   private readonly readBlob: (hash: string) => Promise<string | null>;
   private readonly readBooks: (world: WorldDoc) => Promise<HostBookEntry[]>;
   private readonly readWorkspace: () => Promise<WorkspaceFile[]>;
+  /** The lore index, null where the view has none (a test's own view, say). */
+  readonly routing: ViewRouting | null;
   private loreRead: Promise<WorldDoc> | null = null;
   private booksRead: Promise<HostBookEntry[]> | null = null;
+  private indexRead: Promise<RoutingIndex | null> | null = null;
   private persons: EntityId[] | null = null;
   private gates: ((entry: LoreEntryDef) => boolean) | null = null;
 
@@ -145,6 +177,7 @@ export class ToolReadView {
     this.readBlob = input.blob ?? (async () => null);
     this.readBooks = input.books ?? (async () => []);
     this.readWorkspace = input.workspace ?? (async () => []);
+    this.routing = input.routing ?? null;
   }
 
   /** `read` inside one read pass, so the engine's readers share their work (`readPass`). */
@@ -388,6 +421,13 @@ export class ToolReadView {
     return this.booksRead;
   }
 
+  /** The lore index of the lore this view reads (`lore()`, `bookEntries()`), every entry in it whatever the view may read, made once for this view; null where the view has none. */
+  loreIndex(): Promise<RoutingIndex | null> {
+    const routing = this.routing;
+    this.indexRead ??= routing ? Promise.all([this.lore(), this.bookEntries()]).then(([live, entries]) => routing.index(live, entries)) : Promise.resolve(null);
+    return this.indexRead;
+  }
+
   /** The chat's workspace files the agent's knowledge may read, with their provenance. */
   workspace(): Promise<WorkspaceFile[]> {
     return this.readWorkspace();
@@ -419,8 +459,8 @@ export function readView(input: ReadViewInput): ToolReadView {
 /**
  * The reader outside a turn (C6): the chat's head as the GM view reads it (`renderState`, a planned
  * turn included), never through the ledger's queue; the user's settings for their texts, their mark
- * wording and the suspicion threshold; and the World Info books the chat reads lore from, read only
- * when a tool asks for lore.
+ * wording and the suspicion threshold; the World Info books the chat reads lore from, read only
+ * when a tool asks for lore; and the lore index of them (`viewRouting`).
  */
 export function outsideReader(rt: Runtime, env: Pick<ToolEnv, "userId" | "chatId" | "knowledge">): ToolReader {
   return {
@@ -444,10 +484,11 @@ export function outsideReader(rt: Runtime, env: Pick<ToolEnv, "userId" | "chatId
         lore: (world) => rt.readLore(env.chatId, env.userId, world),
         blob: (hash) => rt.blobs.get(env.userId, hash),
         books: async (world) => {
-          const { read } = await loreBookIds(rt.host, world, env.chatId, env.userId);
+          const { read } = await loreBookIds(rt.host, world, env.chatId, env.userId, (await rt.settings.get(env.userId)).loreBooks);
           return (await Promise.all(read.map((book) => rt.host.books.entries(book, env.userId)))).flat();
         },
         workspace: () => listWorkspace(rt, env),
+        routing: viewRouting(rt, env.userId, settings.loreIndex),
       });
     },
   };

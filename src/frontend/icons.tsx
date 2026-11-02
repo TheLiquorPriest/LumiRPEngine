@@ -11,7 +11,7 @@ export type IconName =
   | "table" | "checklist" | "sparkle" | "wand" | "send" | "message" | "clock" | "calendar" | "hourglass" | "pause" | "play"
   | "fast-forward" | "bolt" | "pin" | "home" | "route" | "sun" | "moon" | "cloud" | "rain" | "snow" | "wind" | "wallet"
   | "coins" | "card" | "bank" | "receipt" | "bag" | "box" | "key" | "car" | "boat" | "fuel" | "wrench" | "briefcase"
-  | "heart" | "pulse" | "shield" | "sword" | "flag" | "scroll" | "star" | "user-plus";
+  | "heart" | "pulse" | "shield" | "sword" | "flag" | "scroll" | "star" | "user-plus" | "folder" | "file";
 
 /** A path's `d`; a stroked circle; a filled dot (the only fill the set allows); a rounded rect. */
 type Shape =
@@ -51,6 +51,8 @@ const ICONS: Record<IconName, readonly Shape[]> = {
   refresh: ["M20 12a8 8 0 1 1-2.34-5.66", "M18.5 3v4h-4"],
   expand: ["M14 4h6v6M10 20H4v-6", "M20 4l-6.5 6.5M4 20l6.5-6.5"],
   shrink: ["M14 4v6h6M10 20v-6H4", "M14 10l6-6M10 14l-6 6"],
+  folder: ["M3.5 7a2 2 0 0 1 2-2h3.75l2 2.25h7.25a2 2 0 0 1 2 2V17a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2Z"],
+  file: ["M7 3.5h6.5l4.5 4.5v10.5a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2v-13a2 2 0 0 1 2-2Z", "M13.5 3.5V8H18"],
   lock: [["r", 5, 10.5, 14, 10, 2], "M8 10.5V8a4 4 0 0 1 8 0v2.5", "M12 14.5v2"],
   info: [["c", 12, 12, 9], "M12 11v5.5", ["dot", 12, 7.75, 1.15]],
   alert: ["M12 3.5L21 19.5H3Z", "M12 9.5v4.5", ["dot", 12, 16.75, 1.1]],

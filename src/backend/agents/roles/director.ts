@@ -31,11 +31,11 @@ import type { Runtime } from "../../runtime";
 import { effectiveMode } from "../../settings-store";
 import { decisionAnswers } from "../../steps";
 import { npcOddsOf, npcQuestions, OUTLINE_BEATS_MAX, proseAnswer, type TieOdds } from "../../turn-steps";
-import type { PlanProse } from "../../turn-model";
 import type { ChoicesTask, ChooseTask, DirectorProse, ProseTask, RoleResult, TurnAgentCtx } from "../turn-ctx";
 import { addUsage, emptyUsage } from "../usage";
 import { mindAsk } from "./minds-ask";
 import { namesOf, type RoleAnswer, roleCtx, runRoleAgent } from "./agent";
+import { type ProseClash, proseClashes } from "./prose-check";
 
 /** The facts a prose step reads, as its task text names them: classic's own vars, the empty ones empty. */
 function proseData(vars: Readonly<Record<string, string>>): Record<string, string> {
@@ -135,7 +135,15 @@ export async function decideRun(rt: Runtime, task: ChooseTask, ctx: TurnAgentCtx
   return { ok: true, out: odds, usage, via: "agent" };
 }
 
-/** The brief and the outline for the planned turn, from one agent reading as the player character: only what classic's steps would write this turn, each line held to their caps and checked whole by their own withholding. */
+/**
+ * The brief and the outline for the planned turn, from one agent reading as the player character: only
+ * what classic's steps would write this turn, each line held to their caps and checked whole by their
+ * own withholding. A line that contradicts the turn the director was given, as it started and as it
+ * ends alike (`proseClashes`: someone here whom both have elsewhere, or gone whom both have here; a
+ * thing in the hands of someone who has it in neither, or lying here when neither has it here), is
+ * withheld too, a beat whole and the brief a sentence at a time, and its run tells which and why
+ * (`DirectorProse.flagged`, `yields.ts`).
+ */
 export async function proseRun(rt: Runtime, task: ProseTask, ctx: TurnAgentCtx): Promise<RoleAnswer<DirectorProse>> {
   const { brief, outline } = task;
   if (!brief && !outline) return { ok: true, out: { prose: { brief: null, outline: [] } }, usage: emptyUsage(), via: "agent", text: "" };
@@ -158,10 +166,20 @@ export async function proseRun(rt: Runtime, task: ProseTask, ctx: TurnAgentCtx):
       vars: { ...vars, ...proseData(vars), asks: [brief ? rule("brief", brief) : "", outline ? rule("outline", outline) : ""].filter((t) => t !== "").join("\n\n"), sections: outline?.vars.sections ?? "" },
       answer: { part: "answer", vars: { beats_max: String(OUTLINE_BEATS_MAX) } },
       tools: task.world,
-      check: (raw): { prose: PlanProse } | null => {
+      check: (raw): DirectorProse | null => {
         if (!isRecord(raw)) return null;
+        const clash = proseClashes(rt.registry, task.world, task.start, task.state);
+        const flagged: ProseClash[] = [];
+        const kept = (line: string): boolean => {
+          const kind = clash(line);
+          if (kind !== null) flagged.push({ kind, line });
+          return kind === null;
+        };
+        // A leak goes first and is never told; a clash is told with the run.
         const said = brief ? proseAnswer("brief", raw.brief, brief.withheld).join(" ").trim() : "";
-        return { prose: { brief: said === "" ? null : said, outline: outline ? proseAnswer("outline", raw.beats, outline.withheld) : [] } };
+        const told = said.split(/(?<=[.!?])\s+(?=["“'(]?\p{Lu})/u).filter((s) => s.trim() !== "" && kept(s)).join(" ");
+        const beats = outline ? proseAnswer("outline", raw.beats, (line) => outline.withheld(line) || !kept(line)) : [];
+        return { prose: { brief: told === "" ? null : told, outline: beats }, ...(flagged.length > 0 ? { flagged } : {}) };
       },
     },
   );

@@ -122,6 +122,18 @@ export class Rig {
     return reply.body;
   }
 
+  /**
+   * Puts a lore entry into a world's draft as an earlier build wrote it, past the editor: a copy of a
+   * World Info entry (`source.kind: "book"`), which the editor and lre_edit no longer make (DESIGN §4.2).
+   */
+  async oldCopy(worldId: string, value: Record<string, unknown> & { id: string }): Promise<void> {
+    const got = this.body(await this.send({ type: "lre.editor", op: "get", worldId, base: null }));
+    const doc = got.draft as WorldDoc;
+    if (typeof got.version !== "number") throw new Error("no draft version");
+    const lore: Record<string, unknown> = { ...doc.lore, [value.id]: value };
+    await this.host.storage.write(`worlds/${worldId}/draft.json`, JSON.stringify({ base: got.base, doc: { ...doc, lore }, version: got.version + 1 }), this.host.userId);
+  }
+
   async newWorld(name = "Testville", template = "test"): Promise<string> {
     const created = this.body(await this.send({ type: "lre.world", op: "create", name, template }));
     const world = created.world;

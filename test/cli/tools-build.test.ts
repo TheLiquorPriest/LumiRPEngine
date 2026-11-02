@@ -45,13 +45,11 @@ describe("lore through the tools", () => {
 });
 
 describe("jobs through the tools", () => {
-  test("an indexing job is started, followed and read; its proposals apply to the draft as Build's review does, in one write; a book's later edit shows as drift", async () => {
+  test("an indexing job is started, followed and read; its proposals apply to the draft as Build's review does, in one write", async () => {
     const { rig, call, raw } = await cliRig();
     const worldId = await rig.newWorld();
-    const bookId = await rig.host.books.create("Market book", "", rig.host.userId);
-    const entryId = await rig.host.books.createEntry(bookId, bookEntry("Night market", "Stalls open at dusk on the pier."), rig.host.userId);
-    rig.host.quietReply = () => JSON.stringify({ entries: [{ key: "night_market", title: "Night market", aliases: ["the market"], topics: ["Harbor life"], terms: ["stalls"], links: [], confidence: 0.9, source: entryId }] });
-    const started = await call("lre_job_start", { worldId, kind: "index_book", bookId });
+    rig.host.quietReply = () => JSON.stringify({ entries: [{ key: "night_market", title: "Night market", content: "Stalls open at dusk on the pier.", aliases: ["the market"], topics: ["Harbor life"], terms: ["stalls"], links: [], confidence: 0.9 }] });
+    const started = await call("lre_job_start", { worldId, kind: "index_text", text: "The night market: stalls open at dusk on the pier." });
     const jobId = String(started.jobId);
     const jobs = (await call("lre_jobs", { worldId })).jobs as { jobId: string; status: string; result: { proposals: number } | null }[];
     expect(jobs).toEqual([expect.objectContaining({ jobId, status: "done" })]);
@@ -64,12 +62,6 @@ describe("jobs through the tools", () => {
     const draft = await draftOf(rig, worldId);
     for (const p of proposals) expect(draft.lore[p.key]).toBeDefined();
     expect(Object.keys(draft.loreIndex.topics)).toContain("harbor_life");
-
-    // The book's entry changed since it was indexed: the drift says so, with its text now.
-    const entry = (await rig.host.books.entries(bookId, rig.host.userId))[0];
-    rig.host.editEntry(entry?.id ?? "", { content: "Stalls open at noon now." });
-    const drift = body((await raw("lre_lore_drift", { worldId })).text) as { drift: Record<string, { status: string; content?: string }> };
-    expect(Object.values(drift.drift)).toEqual([expect.objectContaining({ status: "changed", content: "Stalls open at noon now." })]);
 
     await call("lre_job_dismiss", { jobId });
     expect((await call("lre_jobs", { worldId })).jobs).toEqual([]);
@@ -175,7 +167,7 @@ describe("read-only mode", () => {
   test("hides the lore, job, Build, map and chat knowledge tools that write, and keeps the ones that read", () => {
     const listed = toolsFor(true).map((t) => t.name);
     for (const name of ["lre_lore_save", "lre_job_start", "lre_job_apply", "lre_job_cancel", "lre_job_dismiss", "lre_profile", "lre_map_display", "lre_chat_knowledge"]) expect(listed).not.toContain(name);
-    for (const name of ["lre_lore_books", "lre_lore_entries", "lre_lore_pins", "lre_lore_drift", "lre_jobs", "lre_job", "lre_lint", "lre_sheet", "lre_map_walk"]) expect(listed).toContain(name);
+    for (const name of ["lre_lore_books", "lre_lore_entries", "lre_lore_pins", "lre_jobs", "lre_job", "lre_lint", "lre_sheet", "lre_map_walk"]) expect(listed).toContain(name);
   });
 
   test("refuses a write before anything is sent", async () => {

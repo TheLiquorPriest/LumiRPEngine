@@ -38,10 +38,10 @@ import { AssistantPage, assistantSummary } from "./assistant";
 import { MainAgentPage, mainSummary } from "./main-agent";
 import { RolesPage, rolesSummary } from "./roles";
 import { limitText, TimeoutsSection } from "./timeouts";
-import { WritesPage } from "./writes";
 import { RetentionPage, retentionSummary } from "./retention";
 import { DiagnosticsPage } from "../diagnostics";
 import { McpServerPage } from "../agents";
+import { LorePage, loreSummary } from "./lore";
 import { ownTextCount, promptTestRequest, PromptsPage } from "./agent-prompts";
 import type { PromptDef } from "../../shared/prompts";
 import { useSelect } from "../store";
@@ -72,8 +72,8 @@ const PAGE: Record<Page, { title: string; subtitle: string; icon: IconName }> = 
   extraction: { title: "Changes from the reply", subtitle: "Auto, Confirm or Never, per type", icon: "checklist" },
   swipes: { title: "Swipes", subtitle: "What a swipe does", icon: "refresh" },
   preset: { title: "Preset", subtitle: "Your Lumiverse preset and LumiRPEngine", icon: "scroll" },
+  lore: { title: "Lore", subtitle: "Which World Info books are read, and the lore index", icon: "book" },
   display: { title: "Display", subtitle: "How LumiRPEngine looks on this device", icon: "eye" },
-  writes: { title: "Writes", subtitle: "What waits while the engine runs", icon: "pause" },
   caveats: { title: "Caveats", subtitle: "What to know", icon: "info" },
   diagnostics: { title: "Diagnostics", subtitle: "What the engine did each turn, and what failed", icon: "list" },
   mcp: { title: "MCP server", subtitle: "Your agent's lumirpengine, and how it follows updates", icon: "branch" },
@@ -84,10 +84,11 @@ const PAGE: Record<Page, { title: string; subtitle: string; icon: IconName }> = 
 /** The home list's groups, in order. */
 const GROUPS: readonly { title: string; pages: readonly Page[] }[] = [
   { title: "Getting started", pages: ["helper", "model", "steps", "minds", "narrator", "timeouts"] },
-  { title: "Agents", pages: ["agents", "roles", "main", "assistant", "prompts", "writes", "retention"] },
+  { title: "Agents", pages: ["agents", "roles", "main", "assistant", "prompts", "retention"] },
   { title: "Defaults for new chats", pages: ["realism", "checks", "time"] },
   { title: "Replies", pages: ["extraction", "swipes"] },
   { title: "Your preset", pages: ["preset"] },
+  { title: "World Info", pages: ["lore"] },
   { title: "Display", pages: ["display"] },
   { title: "Your agent", pages: ["mcp"] },
   { title: "About", pages: ["caveats", "diagnostics"] },
@@ -141,10 +142,10 @@ function summaryOf(page: Page, data: SettingsResult, caveats: readonly Caveat[] 
       return { subtitle: `${settings.swipeDefault === "rerun" ? "Re-run by default" : "Re-narrate by default"} · Swipes send ${settings.swipeTexts === "turn" ? "the turn's texts" : "your current texts"}` };
     case "preset":
       return { subtitle: settings.hideJsonBlocks ? "JSON blocks hidden in world chats" : "JSON blocks shown" };
+    case "lore":
+      return { subtitle: loreSummary(settings.loreBooks, settings.loreIndex) };
     case "display":
       return { subtitle: "Show ids", value: showIds ? "On" : "Off" };
-    case "writes":
-      return { subtitle: "Hold writes during the engine run", value: settings.holdWrites ? "On" : "Off" };
     case "caveats": {
       // A check still running isn't a warning: the row says it's checking until the dry run answers.
       const found = caveats?.filter((c) => !hasOwn(STILL_CHECKING, c.code)) ?? [];
@@ -344,10 +345,10 @@ export function Settings() {
       <SwipesPage value={settings.swipeDefault} texts={settings.swipeTexts} patch={patch} busy={busy} />
     ) : page === "preset" ? (
       <PresetPage hideJsonBlocks={settings.hideJsonBlocks} patch={patch} busy={busy} />
+    ) : page === "lore" ? (
+      <LorePage loreBooks={settings.loreBooks} loreIndex={settings.loreIndex} patch={patch} busy={busy} />
     ) : page === "display" ? (
       <DisplayPage />
-    ) : page === "writes" ? (
-      <WritesPage holdWrites={settings.holdWrites} patch={patch} busy={busy} />
     ) : page === "diagnostics" ? (
       <DiagnosticsPage diagnostics={settings.diagnostics} patch={patch} busy={busy} />
     ) : page === "mcp" ? (

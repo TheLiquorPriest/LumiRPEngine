@@ -1,15 +1,18 @@
 // The editable texts in play (DESIGN §6.12): a narrator rule or a section's guidance of the user's own
-// reaches the narrator's prompt from the next turn, Reset brings back the shipped text, a world's own
-// wording of a section comes before the user's, and every turn records the texts it was made with,
-// which its Re-narrate is sent again unless the user picks their current ones: the wording of a
-// secret's mark too, in its sections, its rules and the World Info in its prompt alike.
+// reaches the narrator's prompt from the next turn, and so does the Scene's elapsed-time line, which an
+// agent turn's director is told too; Reset brings back the shipped text, a world's own wording of a
+// section comes before the user's, and every turn records the texts it was made with, which its
+// Re-narrate is sent again unless the user picks their current ones: the wording of a secret's mark
+// too, in its sections, its rules and the World Info in its prompt alike.
 
 import { describe, expect, test } from "bun:test";
+import type { QuietRequest } from "../../src/backend/host";
 import type { JsonObject } from "../../src/shared/json";
-import { MARK_TEXT_IDS, MARKED_FACTS_RULE, NARRATOR_AUTHORITY, NARRATOR_SOURCE, sectionPromptId } from "../../src/shared/prompts";
+import { ELAPSED_TEXT_IDS, MARK_TEXT_IDS, MARKED_FACTS_RULE, NARRATOR_AUTHORITY, NARRATOR_SOURCE, sectionPromptId } from "../../src/shared/prompts";
 import { SECRET_MARK_WORDING, secretMarkText } from "../../src/shared/secret-marks";
 import { DEFAULT_SECTIONS } from "../../src/shared/sections";
 import { FakeHost } from "../support/fake-host";
+import { alderChat, DANNY, PRIYA } from "../support/mind-chat";
 import { Rig } from "../support/rig";
 import { attachBook } from "../support/tools";
 
@@ -70,6 +73,47 @@ describe("texts of the user's own reach the narrator", () => {
     await rig.turn(worded, "I look around.", "Quiet.");
     expect(rig.host.section("Scene").startsWith("[Scene]\nThe world's: the scene, as it stands.\n- ")).toBe(true);
   });
+
+  test("the Scene's elapsed-time line of the user's own ends the Scene and is what an agent turn's director is told of the turn's time; Reset brings back the shipped one for both", async () => {
+    const rig = new Rig({ shipped: true });
+    const chatId = await alderChat(rig, async () => {}, [DANNY, PRIYA]);
+    // The director's brief and outline run, with calls enough before the reply for both.
+    rig.body(await rig.send({ type: "lre.settings.set", patch: { modelUse: { steps: { brief: { enabled: true, signals: ["always"] }, outline: { enabled: true, signals: ["always"] }, "npc.choose": { enabled: false } }, budgets: { pre: { calls: 8 } } } } }));
+    expect(rig.body(await rig.send({ type: "lre.chat.knowledge", chatId, engine: "agents" })).engine).toBe("agents");
+    const directed: string[] = [];
+    rig.host.quietReply = (req: QuietRequest) => {
+      const role = /You are the (\w+) agent of LumiRPEngine/.exec(req.messages[0]?.content ?? "")?.[1];
+      if (role === "director") directed.push(req.messages.map((m) => m.content).join("\n"));
+      if (role === "director") return JSON.stringify({ brief: "The harbor is grey this morning.", beats: ["Jordan looks out at the harbor."] });
+      if (role === "scene") return JSON.stringify({ lore: [], notes: [] });
+      if (role === "intent") return JSON.stringify({ action: null, params: {}, confidence: 0.9 });
+      if (role === "read") return JSON.stringify({ proposals: [], where: null });
+      return "{}";
+    };
+    /** Plays `text`: the turn's Scene section, and what its director was told of the turn's time. */
+    const played = async (text: string): Promise<{ scene: string; director: string }> => {
+      const from = directed.length;
+      rig.host.sendUser(chatId, text);
+      await rig.host.settle();
+      const g = await rig.host.start(chatId, { type: "normal" });
+      expect(g.halted).toBeUndefined();
+      const scene = rig.host.section("Scene");
+      await rig.host.finish(g, "The harbor is calm.");
+      return { scene, director: directed.slice(from).find((d) => d.includes("once this turn's actions are done.")) ?? "" };
+    };
+    await save(rig, { [ELAPSED_TEXT_IDS.span]: "ELAPSED-MARK {{span}} went by, {{from}} until {{to}}." });
+    const mine = await played("I look out at the harbor.");
+    const line = /ELAPSED-MARK \S.* went by, \S.* until \S.*\./.exec(mine.scene)?.[0] ?? "";
+    expect(line).not.toBe("");
+    expect(mine.director).toContain(`once this turn's actions are done. ${line}`);
+    await save(rig, { [ELAPSED_TEXT_IDS.span]: null });
+    const shipped = await played("I look out at the harbor again.");
+    const again = /This turn took \S.*, from \S.* to \S.*\./.exec(shipped.scene)?.[0] ?? "";
+    expect(again).not.toBe("");
+    expect(shipped.director).toContain(`once this turn's actions are done. ${again}`);
+    expect(`${shipped.scene}\n${shipped.director}`).not.toContain("ELAPSED-MARK");
+    expect(rig.rt.ledger.errors).toEqual([]);
+  });
 });
 
 describe("a turn's own texts", () => {
@@ -96,6 +140,27 @@ describe("a turn's own texts", () => {
     expect(rules(rig)).toContain(EDITED);
     expect(rules(rig)).not.toContain(MARKED_FACTS_RULE);
     expect((await rig.rt.promptSets.get(rig.host.userId, (await record(rig, chatId, 2))?.prompts ?? ""))?.texts["narrator.marked_facts"]).toBe(EDITED);
+  });
+
+  test("a Re-narrate tells the Scene's elapsed time in the wording its turn was made with, and with your current texts chosen, in yours", async () => {
+    const rig = new Rig();
+    const chatId = await rig.worldChat();
+    const marked = { [ELAPSED_TEXT_IDS.none]: "ELAPSED-MARK no time.", [ELAPSED_TEXT_IDS.took]: "ELAPSED-MARK {{span}}.", [ELAPSED_TEXT_IDS.span]: "ELAPSED-MARK {{span}}, {{from}} to {{to}}." };
+    await save(rig, marked);
+    await rig.turn(chatId, "I look around.", "Quiet.");
+    const made = rig.host.section("Scene");
+    expect(made).toContain("ELAPSED-MARK");
+    expect((await rig.rt.promptSets.get(rig.host.userId, (await record(rig, chatId, 0))?.prompts ?? ""))?.texts).toMatchObject(marked);
+    await save(rig, { [ELAPSED_TEXT_IDS.none]: null, [ELAPSED_TEXT_IDS.took]: null, [ELAPSED_TEXT_IDS.span]: null });
+    rig.rt.setSwipeChoice(chatId, "renarrate");
+    await rig.host.finish(await rig.host.start(chatId, { type: "swipe" }), "Still quiet.");
+    expect(rig.host.section("Scene")).toBe(made);
+    // Settings → Swipes: Re-narrate with my current texts, the shipped ones again.
+    rig.body(await rig.send({ type: "lre.settings.set", patch: { swipeTexts: "current" } }));
+    rig.rt.setSwipeChoice(chatId, "renarrate");
+    await rig.host.finish(await rig.host.start(chatId, { type: "swipe" }), "Quiet again.");
+    expect(rig.host.section("Scene")).not.toContain("ELAPSED-MARK");
+    expect(rig.host.section("Scene")).toMatch(/No time passes this turn\.|This turn took /);
   });
 
   test("a turn's Re-run is sent the texts it was made with too, and with your current texts chosen, your edit", async () => {

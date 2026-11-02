@@ -1,9 +1,10 @@
 // The write tools' texts as shipped (AGENT-LOOP-PLAN §6; INC1-SPEC R3b): the GM-tier edits, the
 // workspace's tools and the lore's, each tool's description and its arguments', and the answers the
 // writer and these tools give, all registry texts on the GM agent page (`shared/agent-tools.ts`).
-// What each tool does is `backend/agents/tools/write/*.ts`, `tools/workspace.ts` and `tools/lore.ts`;
-// every write is only proposed there (`tools/writer.ts`, a dry run): the engine checks it and says
-// what it would change, and nothing changes until it is applied.
+// What each tool does is `backend/agents/tools/write/*.ts`, `tools/workspace.ts` and `tools/lore.ts`.
+// Outside a turn a write is only proposed (`tools/writer.ts`, a dry run): the engine checks it and
+// says what it would change, and nothing changes until it is applied. Inside a turn it is staged
+// (`turn-writer.ts`): it lands when the turn commits, or waits for the GM's Apply on the review card.
 
 import type { ToolNote, ToolText } from "./agent-tools";
 
@@ -13,8 +14,8 @@ const field = "The field's id.";
 const relation = "The relation type's id: knows, owns, member_of, regard, in, or one of the world's own.";
 const path = "The workspace file's path: names joined by /, such as notes/marcus.md.";
 const under = "Only files under this folder, such as notes/; leave it out for every file.";
-const lore = "The lore entry's id, as lore_search or lore_grep gives it.";
-const proposes = "The answer is the change in plain words, its change type and its mode; nothing changes until the game master applies it.";
+const lore = "The lore entry's id, as lore_index, lore_search or lore_grep gives it: a short id such as lr0101, a World Info entry as bookId/entryId, or a world entry's own id.";
+const proposes = "The answer is the change in plain words, its change type and its mode. Working a turn, the change is staged at once: it lands when the turn commits, or, when its mode is confirm, waits for the game master's Apply on the turn's review card. Otherwise nothing changes until the game master applies it.";
 
 export const WRITE_TOOL_TEXTS: readonly ToolText[] = [
   // ---------------------------------------------------------------- people
@@ -343,6 +344,14 @@ export const WRITE_TOOL_TEXTS: readonly ToolText[] = [
   },
   // ---------------------------------------------------------------- lore
   {
+    name: "lore_index",
+    family: "lore",
+    tier: "read",
+    note: "Gives the lore index: every entry of the chat's World Info books by its id and title.",
+    text: "The lore index: every lore entry of the World Info books this chat reads, book by book, each by its short id and title, with a line of what it holds where the title doesn't say; or, where the game master keeps an index of their own, that index as they wrote it. Read an entry whole with lore_read and its id.",
+    args: [{ path: "book", text: "Only this book's entries: its name or id; leave it out for every book." }],
+  },
+  {
     name: "lore_search",
     family: "lore",
     tier: "read",
@@ -364,6 +373,14 @@ export const WRITE_TOOL_TEXTS: readonly ToolText[] = [
     tier: "read",
     note: "Reads one lore entry, by its id.",
     text: "Read one lore entry whole, by its id, as your knowledge has it: a secret in its text is marked with who knows it, or left out where your knowledge doesn't reach.",
+    args: [{ path: "id", text: lore }],
+  },
+  {
+    name: "lore_load",
+    family: "lore",
+    tier: "read",
+    note: "Loads a lore entry into the prompt of the reply the turn is writing.",
+    text: "Load a lore entry, by its id, into the prompt of the reply this turn is writing: its title and text go to the narrator in the Scene section, as far as the narrator may read them (a secret only once its gate holds). Load what the reply needs that the prompt doesn't hold; an entry loaded twice goes in once.",
     args: [{ path: "id", text: lore }],
   },
   {
@@ -405,12 +422,15 @@ export const WRITE_NOTE = {
   povEffect: "tool.note.pov_effect",
   povRefused: "tool.note.pov_refused",
   learnedMove: "tool.note.learned_move",
+  transcriptReadOnly: "tool.note.transcript_read_only",
   fileExists: "tool.note.file_exists",
   tooMany: "tool.note.too_many",
   editMissing: "tool.note.edit_missing",
   editSeveral: "tool.note.edit_several",
   noLore: "tool.note.no_lore",
   draftPath: "tool.note.draft_path",
+  loreLate: "tool.note.lore_late",
+  noBook: "tool.note.no_book",
   cancelled: "tool.note.cancelled",
   paused: "tool.note.paused",
   noWorld: "tool.note.no_world",
@@ -419,6 +439,8 @@ export const WRITE_NOTE = {
   notGranted: "tool.note.not_granted",
   gmCap: "tool.note.gm_cap",
   workspaceLine: "tool.note.workspace_line",
+  staged: "tool.note.staged",
+  stagedReview: "tool.note.staged_review",
 } as const;
 
 const filePath = { name: "path", text: "the workspace path the call gave" };
@@ -439,10 +461,13 @@ export const WRITE_TOOL_NOTES: readonly ToolNote[] = [
   { id: WRITE_NOTE.tooMany, label: "Too many changes at once", note: "An apply's answer when one batch holds more changes than one GM edit may.", text: "One batch holds at most {{max}} changes, as one GM edit does.", vars: [{ name: "max", text: "the most one GM edit holds", required: true }] },
   { id: WRITE_NOTE.editMissing, label: "Text not in the file", note: "workspace_edit's answer when the file doesn't hold the text to replace.", text: "{{path}} doesn't hold that text.", vars: [filePath] },
   { id: WRITE_NOTE.learnedMove, label: "Into or out of learned/", note: "workspace_move's answer when it would take a file into or out of the learned area (learned/), which is kept apart from the turns.", text: "{{path}} can't move to {{to}}: files under learned/ stay there, and the others stay out of it. Write the file at its new path, then delete the old one.", vars: [filePath, { name: "to", text: "the path it was to move to" }] },
+  { id: WRITE_NOTE.transcriptReadOnly, label: "A transcript", note: "A workspace change's answer when it touches transcripts/, where each turn's transcript is kept to read: nothing writes, moves, deletes or pins a file there.", text: "{{path}} is under transcripts/, where each turn's transcript is kept as it was: read it, but write your notes at another path.", vars: [filePath] },
   { id: WRITE_NOTE.fileExists, label: "A path taken in learned/", note: "workspace_move's answer, in the learned area, when a file is already at the path it was to move to.", text: "A workspace file is already at {{to}}: pick another path.", vars: [{ name: "to", text: "the path it was to move to" }] },
   { id: WRITE_NOTE.editSeveral, label: "Text in the file more than once", note: "workspace_edit's answer when the text to replace is there more than once and all isn't set.", text: "{{path}} holds that text {{count}} times: give more of it to pick one, or set all to replace every one.", vars: [filePath, { name: "count", text: "how many times the file holds it", required: true }] },
   { id: WRITE_NOTE.noLore, label: "No such lore entry", note: "A lore tool's answer when no entry has the id, or none the agent's knowledge may read.", text: "No lore entry {{id}} here.", vars: [{ name: "id", text: "the entry id the call gave" }] },
   { id: WRITE_NOTE.draftPath, label: "A draft outside lore-drafts/", note: "lore_draft's answer when the path it was given isn't under lore-drafts/.", text: "A lore draft goes under lore-drafts/, and {{path}} isn't there.", vars: [filePath] },
+  { id: WRITE_NOTE.loreLate, label: "Lore loaded after the reply", note: "lore_load's answer once the reply its turn was writing has gone out: it loads lore only while the turn is still being prepared.", text: "This turn's reply is written already, so {{id}} isn't loaded: load lore while a turn is being prepared.", vars: [{ name: "id", text: "the entry id the call gave" }] },
+  { id: WRITE_NOTE.noBook, label: "No such book", note: "lore_index's answer when no World Info book read here has the name or id it was given.", text: "No World Info book {{book}} is read here.", vars: [{ name: "book", text: "the book's name or id the call gave" }] },
   { id: WRITE_NOTE.cancelled, label: "Cancelled", note: "A write's answer when the agent's work was cancelled before it ran.", text: "The agent's work was cancelled, so nothing was checked or written.", vars: [] },
   { id: WRITE_NOTE.paused, label: "The chat is paused", note: "An apply's answer while an earlier message's edit waits for Keep or Discard.", text: "An earlier message was edited: Keep or Discard it first, under that message.", vars: [] },
   { id: WRITE_NOTE.noWorld, label: "No world", note: "A write's answer when the chat plays no LumiRPEngine world, or its world isn't loaded.", text: "This chat plays no LumiRPEngine world, or its world isn't loaded.", vars: [] },
@@ -451,4 +476,6 @@ export const WRITE_TOOL_NOTES: readonly ToolNote[] = [
   { id: WRITE_NOTE.notGranted, label: "A change the role isn't granted", note: "A turn agent's write answer when its role's tier (Settings → Agents → Roles) doesn't take that kind of change: the GM's edits need the GM tier, and so does the pins manifest (.pins.json, which sets what every agent is shown first); a role that only reads changes nothing.", text: "This role may make {{tier}} changes only, and this one is a {{needs}} change, so it isn't made.", vars: [{ name: "tier", text: "what the role may change: read (nothing), story or gm", required: true }, { name: "needs", text: "what the change needs: story or gm", required: true }] },
   { id: WRITE_NOTE.gmCap, label: "GM edits per turn", note: "A turn agent's write answer once the turn's agents have staged as many of the GM's edits as Settings → Agents → Budgets allows.", text: "This turn's agents have staged {{count}} of the GM's edits, all a turn allows (GM edits per turn, Settings → Agents → Budgets), so this one isn't made.", vars: [{ name: "count", text: "the GM edits the turn's agents have staged", required: true }] },
   { id: WRITE_NOTE.workspaceLine, label: "A workspace change, below the GM", note: "The line a workspace change reads as under the player character's knowledge (the review card's) and everyone's: one line naming no file, as the player's Journal shows none. Under the GM's knowledge it reads as the GM's line, with its path.", text: "A note the story's agents keep changes.", vars: [] },
+  { id: WRITE_NOTE.staged, label: "Staged in a turn", note: "A write tool's answer, working a turn, for a change it staged whose mode is Auto: it lands when the turn commits.", text: "Staged for this turn: it lands when the turn commits.", vars: [] },
+  { id: WRITE_NOTE.stagedReview, label: "Staged for the review card", note: "A write tool's answer, working a turn, for a change it staged whose mode is Confirm (Settings → Changes from the reply): it waits on the turn's review card.", text: "Staged for this turn, waiting for the GM's Apply on the review card: it lands only once the game master applies it.", vars: [] },
 ];

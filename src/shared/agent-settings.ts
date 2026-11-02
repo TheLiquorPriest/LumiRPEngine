@@ -147,13 +147,16 @@ export interface ReviewSettings {
  * → Budgets): turns under way (a turn that went stale unheard is let go with the oldest), a user's
  * turns waiting at a gate, each with its whole run for the resume (one let go resumes afresh; a
  * review gate's still replays its plan, but its record keeps neither what the run committed nor its
- * lines for the narrator), and chats whose review cards a page listens to (one let go hears the
- * cards again when it next asks for them).
+ * lines for the narrator), chats whose review cards a page listens to (one let go hears the cards
+ * again when it next asks for them), and chats whose latest agent run GM → Live keeps, each with
+ * everything its agents did and the pages that watch it (one let go shows nothing until its next run;
+ * its turn's transcript stays in GM → Workspace).
  */
 export interface KeptSettings {
   runs: number;
   gates: number;
   watchers: number;
+  live: number;
 }
 
 /**
@@ -245,7 +248,7 @@ export function defaultAgentSettings(): AgentSettings {
     // The main agent reads what everyone in the world knows, secrets marked, and the workspace; its digest and pins, 2,000 tokens each (§15).
     main: { connectionId: null, model: null, effort: "inherit", knowledge: "everyone", families: ["workspace"], budget: {}, digestTokens: 2000, pinsTokens: 2000 },
     gmOpsPerTurn: 10,
-    kept: { runs: 64, gates: 256, watchers: 256 },
+    kept: { runs: 64, gates: 256, watchers: 256, live: 16 },
     compaction: { atTokens: 32_000, keepTurns: 3, summarizeTool: true },
     recording: { outputChars: 2000 },
     review: { placement: "chips" },
@@ -344,6 +347,7 @@ export const KEPT_DEFS: Readonly<Record<keyof KeptSettings, AgentLimitDef>> = {
   runs: { label: "Agent turns under way", limits: "How many agent turns, across your chats, the engine keeps running at once.", fires: "The oldest is let go when another starts: a turn that went stale with no end heard.", unit: "count", min: 1, none: null },
   gates: { label: "Turns waiting at a gate", limits: "How many agent turns, across your chats, may wait at a gate (the intent or outline gate, a question asked first, the review card) with everything their agents had done kept for the resume.", fires: "The oldest waiting turn is let go: it resumes afresh, its agents asked again where the turn still needs them; a review gate's still plays its plan and lands what you let through, but its record no longer says which role wrote what it committed before the gate, nor keeps the lines its roles had for the narrator.", unit: "count", min: 1, none: null },
   watchers: { label: "Chats whose review cards are watched", limits: "How many chats' review cards the pages that show them hear about as they change.", fires: "The chat watched longest ago stops hearing, until a page asks for its cards again.", unit: "count", min: 1, none: null },
+  live: { label: "Chats in the live view", limits: "How many chats' latest agent turn GM → Live keeps in memory, each with everything its agents did, and tells the pages watching it as it runs.", fires: "The chat whose turn started longest ago is let go: GM → Live shows nothing for it until its next turn, and that turn's transcript stays in GM → Workspace → transcripts.", unit: "count", min: 1, none: null },
 };
 
 /** Settings → Agents → Compaction: when the main session is summarized, and how much of it stays whole. */
@@ -532,7 +536,7 @@ export function agentSettingsOf(raw: unknown, d: Readonly<AgentSettings> = defau
     roles: rolesOf(a.roles, d.roles),
     main: mainOf(a.main, d.main),
     gmOpsPerTurn: whole(a.gmOpsPerTurn, GM_OPS_DEF.min) ?? d.gmOpsPerTurn,
-    kept: { runs: whole(kept.runs, KEPT_DEFS.runs.min) ?? d.kept.runs, gates: whole(kept.gates, KEPT_DEFS.gates.min) ?? d.kept.gates, watchers: whole(kept.watchers, KEPT_DEFS.watchers.min) ?? d.kept.watchers },
+    kept: { runs: whole(kept.runs, KEPT_DEFS.runs.min) ?? d.kept.runs, gates: whole(kept.gates, KEPT_DEFS.gates.min) ?? d.kept.gates, watchers: whole(kept.watchers, KEPT_DEFS.watchers.min) ?? d.kept.watchers, live: whole(kept.live, KEPT_DEFS.live.min) ?? d.kept.live },
     compaction: { atTokens: whole(compaction.atTokens, COMPACTION_DEFS.atTokens.min) ?? d.compaction.atTokens, keepTurns: whole(compaction.keepTurns, COMPACTION_DEFS.keepTurns.min) ?? d.compaction.keepTurns, summarizeTool: typeof compaction.summarizeTool === "boolean" ? compaction.summarizeTool : d.compaction.summarizeTool },
     recording: { outputChars: whole(recording.outputChars, OUTPUT_CHARS_DEF.min) ?? d.recording.outputChars },
     review: { placement: oneOf(review.placement, REVIEW_PLACEMENTS, d.review.placement) },

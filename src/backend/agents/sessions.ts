@@ -16,7 +16,7 @@ import { AGENT_KNOWLEDGE, type AgentKnowledge } from "../../shared/agent-tools";
 import type { ChatId, MessageId, UserId } from "../../shared/ids";
 import type { JsonObject, JsonValue } from "../../shared/json";
 import { isRecord } from "../../shared/json";
-import type { RecSession, Tombstone } from "../../shared/ledger";
+import { REC_SESSION_PARTS, type RecSession, type Tombstone } from "../../shared/ledger";
 import { isBlobHash } from "../../shared/stores";
 import type { ChainMessage } from "../../engine/ledger/chain";
 import type { LedgerCore } from "../../engine/ledger/journal";
@@ -76,21 +76,24 @@ export interface Rebase {
   archived: string;
 }
 
-/** A stored record's session as its readers take it: each part a blob's hash, anything else left out (records come from any metadata writer). */
+/** A stored record's session as its readers take it: each blob part a blob's hash, and the transcript's length beside it, anything else left out (records come from any metadata writer). */
 export function recordSessionOf(rec: unknown): RecSession {
   const raw = isRecord(rec) ? rec.session : undefined;
   if (!isRecord(raw)) return {};
   const out: RecSession = {};
-  for (const part of ["segment", "summary", "archived"] as const) {
+  for (const part of REC_SESSION_PARTS) {
     const hash = raw[part];
     if (isBlobHash(hash)) out[part] = hash;
   }
+  const chars = raw.transcriptChars;
+  if (out.transcript !== undefined && typeof chars === "number" && Number.isInteger(chars) && chars >= 0) out.transcriptChars = chars;
   return out;
 }
 
 /** The blobs a stored record's session names: what the sweep keeps for it. */
 export function sessionRefsOf(rec: unknown): string[] {
-  return Object.values(recordSessionOf(rec));
+  const session = recordSessionOf(rec);
+  return REC_SESSION_PARTS.flatMap((part) => session[part] ?? []);
 }
 
 /**

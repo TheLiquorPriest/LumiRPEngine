@@ -374,7 +374,9 @@ export interface CarryDrop {
 /**
  * The agent session's blobs a turn made (DESIGN §4.4, sessions), by hash: its own segment of the
  * main session, and a compaction's summary, or a span a rollback restored, with the span it
- * replaced. No key holds a chat id or a path, so a swipe, a Re-run or a Branch needs no remapping.
+ * replaced; and the turn's transcript (DESIGN §4.6), with its length in characters, which GM →
+ * Workspace lists under `transcripts/`. No key holds a chat id or a path, so a swipe, a Re-run or a
+ * Branch needs no remapping.
  */
 export interface RecSession {
   /** What the turn added to the main session. */
@@ -383,7 +385,14 @@ export interface RecSession {
   summary?: string;
   /** What `summary` replaced, archived, so a rollback can bring it back. */
   archived?: string;
+  /** Everything the turn's agents did (`shared/live.ts` `transcriptText`); a later read of the same reply (a Continue's, a Retry read's, a Re-read edit's) adds its own after it. */
+  transcript?: string;
+  /** The transcript's length in characters, so a listing needs no read of it. */
+  transcriptChars?: number;
 }
+
+/** The parts of a record's session that are blobs, by hash: what the sweep keeps for the record. */
+export const REC_SESSION_PARTS = ["segment", "summary", "archived", "transcript"] as const;
 
 /**
  * What one agent's committed operation made of a turn's record (INC2-SPEC C10, attribution): the
@@ -519,15 +528,7 @@ export type HeldWrite = (
    * out again can't leave the undo naming the wrong part.
    */
   | { kind: "undo"; id: string; messageId: MessageId; swipeId: number; refs: EventRef[]; entry?: number }
-) & {
-  /**
-   * Held through the engine run before the reply too, whatever "Hold writes during the engine run"
-   * says: a GM agent's write or a workspace save, which an agent may make at any time and which must
-   * never throw the turn away. Without it, the pre-reply window holds a write only while that setting
-   * is on; a reply's own window holds every write either way (P2).
-   */
-  hold?: true;
-};
+);
 
 export interface HeldEntry {
   write: HeldWrite;
@@ -620,9 +621,8 @@ export interface Journal {
   /**
    * Open pre-reply windows (P2), by engine run id: a run's, from its start until the generation
    * that takes its turn takes the window over, or the run ends without a reply. At most one is open.
-   * It holds only the writes made meanwhile that are held through the run (`HeldWrite.hold`, or all of
-   * them with "Hold writes during the engine run" on); every other write lands and makes the turn
-   * stale, as before. Apart from `windows`: a turn being planned is not in flight. Absent when none.
+   * It holds every write made meanwhile, so none makes the turn stale. Apart from `windows`: a turn
+   * being planned is not in flight. Absent when none.
    */
   prereply?: GenerationId[];
   pending: Record<GenerationId, PendingTurn>;

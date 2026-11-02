@@ -185,9 +185,10 @@ describe("what the narrator is told", () => {
     const world = baseWorld({ ruleset: { adjudication: policy } });
     world.actions.climb = { id: "climb", label: "Climb", params: {}, requires: [], check: { id: "climb", dice: "d20", dc: "11" }, outcomes: { success: [], failure: [] }, duration: "5" };
     const reg = registryOf();
-    const resolution = resolveOn(reg, world, startState(world), { action: "climb" }, createRng(seed)).resolution;
+    const state = startState(world);
+    const resolution = resolveOn(reg, world, state, { action: "climb" }, createRng(seed)).resolution;
     const plan: EngineTurnPlan = { events: resolution.events, elapsedMinutes: 5, resolutions: [resolution], stopped: null, timelapse: null, montage: null, chips: [], outline: [], combat: [], fill: null };
-    return { text: planLines(plan, world, reg).outcome[0] ?? "", close: resolution.adjudged?.close != null };
+    return { text: planLines(plan, world, state, reg).outcome[0] ?? "", close: resolution.adjudged?.close != null };
   }
 
   test("hybrid: a close call may come at a cost or leave partial progress; a clear one is narrated as it fell", () => {

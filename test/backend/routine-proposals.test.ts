@@ -277,6 +277,31 @@ describe("Propose routines from lore", () => {
     expect(trivia(await dayOf(2))).toBeUndefined();
   });
 
+  test("reads the World Info books the world's chats read, live: a block rests on a book entry by its live lore id, an earlier build's copy isn't read, and the applied routine lints clean", async () => {
+    const { rig, worldId } = await portAlder();
+    const user = rig.host.userId;
+    const SWIM = "Danny Okafor swims at the harbor pool every Saturday morning before the shop opens.";
+    const bookId = await rig.host.books.create("Harbor notes", "", user);
+    const swim = await rig.host.books.createEntry(bookId, { comment: "Danny's Saturdays", content: SWIM, keys: ["Danny Okafor"], disabled: false, constant: false, extensions: {} }, user);
+    rig.body(await rig.send({ type: "lre.editor", op: "set", worldId, base: null, part: "meta", value: { loreBooks: [bookId] } }));
+    await rig.oldCopy(worldId, { id: "danny_copy", title: "Danny's Sundays", content: "Danny Okafor used to swim on Sundays.", keys: ["Danny Okafor"], links: ["danny_okafor"], source: { kind: "book", bookId, entryId: swim, hash: "an earlier text" } });
+    const loreId = `book:${bookId}/${swim}`;
+    const quote = "swims at the harbor pool every Saturday morning";
+    rig.host.quietReply = answering({ danny_okafor: [{ routines: [dannys({ id: "swim", label: "Swimming", at: "08:00", days: { weekdays: [6] }, place: "rusty_anchor", source: { lore: loreId, quote } })] }] });
+    const end = await proposed(rig, worldId, { owners: ["danny_okafor"] });
+    expect(end.status).toBe("done");
+    const text = rig.host.quietCalls.map(said).join("\n");
+    expect(text).toContain(`(lore: ${loreId})\n${SWIM}`);
+    expect(text).not.toContain("used to swim on Sundays");
+    const [p] = end.proposals;
+    expect(p).toMatchObject({ key: "danny_okafor_swim", source: loreId, sourceNames: { [loreId]: "Danny's Saturdays" } });
+    expect(p?.problems).toBeUndefined();
+    expect(isRecord(p?.value) && Array.isArray(p.value.blocks) ? p.value.blocks[0] : null).toMatchObject({ source: { type: "lore", entry: loreId, quote } });
+    // Applied, the routine rests on the book entry, which the lint can't see and doesn't flag.
+    const lint = rig.body(await rig.send({ type: "lre.editor", worldId, base: null, op: "put", collection: "routines", id: p?.key ?? "", value: p?.value ?? null })).lint as { path: string }[];
+    expect(lint.filter((i) => i.path.startsWith("routines.danny_okafor_swim"))).toEqual([]);
+  });
+
   test("the job reads only what may reach the player: no secret lore, entry waiting for review, unknown known_by entry, secret person or secret field; a proposal carrying a secret's words is dropped", async () => {
     const { rig, worldId } = await portAlder();
     await put(rig, worldId, "lore", "lore_danny_nights", { id: "lore_danny_nights", title: "Danny's Wednesdays", content: "Danny meets the smugglers at the boathouse. It happens every Wednesday at midnight.", keys: ["Danny"], links: ["danny_okafor"], secret: true, gate: "false" });

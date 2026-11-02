@@ -11,6 +11,7 @@ import { COMPONENTS_CSS } from "./styles/components";
 import { DIAGNOSTICS_CSS } from "./styles/diagnostics";
 import { FORMS_CSS } from "./styles/forms";
 import { GM_CSS } from "./styles/gm";
+import { LIVE_CSS } from "./styles/live";
 import { MINDS_CSS } from "./styles/minds";
 import { PACKS_ME_CSS } from "./styles/packs-me";
 import { PACKS_MONEY_CSS } from "./styles/packs-money";
@@ -24,4 +25,4 @@ import { TOKENS_CSS } from "./styles/tokens";
 import { VISUAL_EDITORS_CSS } from "./styles/visual-editors";
 import { WORKSPACE_CSS } from "./styles/workspace";
 
-export const CSS = [TOKENS_CSS, COMPONENTS_CSS, SHELL_CSS, CHAT_CSS, PLAY_CSS, PACKS_ME_CSS, PACKS_MONEY_CSS, PACKS_WORLD_CSS, GM_CSS, MINDS_CSS, ROUTINES_GM_CSS, ASSISTANT_CSS, WORKSPACE_CSS, SELECT_CSS, SETTINGS_CSS, BUILD_CSS, FORMS_CSS, CHARACTER_CSS, VISUAL_EDITORS_CSS, DIAGNOSTICS_CSS].join("\n");
+export const CSS = [TOKENS_CSS, COMPONENTS_CSS, SHELL_CSS, CHAT_CSS, PLAY_CSS, PACKS_ME_CSS, PACKS_MONEY_CSS, PACKS_WORLD_CSS, GM_CSS, MINDS_CSS, ROUTINES_GM_CSS, ASSISTANT_CSS, LIVE_CSS, WORKSPACE_CSS, SELECT_CSS, SETTINGS_CSS, BUILD_CSS, FORMS_CSS, CHARACTER_CSS, VISUAL_EDITORS_CSS, DIAGNOSTICS_CSS].join("\n");

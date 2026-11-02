@@ -68,18 +68,22 @@ import type { SkipRun } from "../skip";
 import type { PlanProse, TurnCommit } from "../turn-model";
 import type { TieOdds } from "../turn-steps";
 import type { GenerateAs } from "../../shared/protocol";
+import type { LiveEndState, LiveView } from "../../shared/live";
 import { counted } from "../../shared/words";
 import { isMainMessage, MAIN_BY, rolledBack } from "./compaction";
 import { type MainHost, MainTurn } from "./main-agent";
 import { agentRoles } from "./roles/index";
 import type { Review, StoredReviewItem } from "./review";
 import { AgentTurn } from "./runtime";
+import type { LiveRun } from "./live";
 import type { ToolReader } from "./tools/read-view";
+import type { LoreLoads } from "./tools/registry";
 import { contextOf, type ToolWriter, withLearned } from "./tools/writer";
-import type { ChatHead } from "./tools/workspace";
+import type { ChatHead, WorkspaceAt } from "./tools/workspace";
 import { recordSessionOf, segmentOf, sessionAt, type SessionMessage } from "./sessions";
 import type { ChoicesTask, ChooseTask, DirectorProse, EffectsTask, ExtractTask, InterpretOutcome, InterpretTask, JudgeTask, KnowledgeTask, MemoryTask, MindsTask, ProseTask, PuzzleTask, RoleResult, RoleRun, SceneOut, SceneTask, SkipPlanTask, SkipTask, TurnAgentCtx, TurnBrief, TurnRoles } from "./turn-ctx";
-import { type CommitCtx, commitOrder, commitStaged, opTier, type StagedOp, type StagePhase, TurnDraft, turnReader, turnWriter } from "./turn-writer";
+import { type CommitCtx, commitOrder, commitStaged, opTier, type StagedOp, type StagePhase, stagedWorkspace, TurnDraft, turnReader, turnWriter } from "./turn-writer";
+import { recordCommit, recordYield, runYield } from "./yields";
 import type { ExtractRead } from "../steps";
 import { renderPrompt } from "../prompts";
 import { emptyUsage } from "./usage";
@@ -179,10 +183,16 @@ interface AgentRun {
   /** The reply's own confirm proposals the card lists, by their chips. */
   read: StoredReviewItem[];
   scene: SceneOut | null;
+  /** The lore its agents loaded into its reply (`lore_load`), by lore id, each once in the order loaded: recorded with the scene's lore. */
+  loads: string[];
+  /** Its narrator-facing lines are recorded: lore loaded from now on can't reach its reply. */
+  told: boolean;
   /** Memory placed before the next turn: the read skipped the minds' post phase, so the record says so. */
   memoryLater: boolean;
   /** The main agent working the turn (`pipeline.mode: main`); null on the fixed pipeline. */
   main: MainTurn | null;
+  /** Its live view (GM → Live): everything its agents do, as they do it, and the transcript its record keeps. */
+  live: LiveRun;
   /** A read outside its turn (`beginRead`: a Retry read, a Re-read edit): it remembers in the read, whatever `pipeline.memory` says, and its reply owes the next turn no memory once it lands. */
   retry: boolean;
   /** Stops the run's read as its Cancel stops it, saying why (`roleStopped`): a generation's (a turn's, a Re-narrate's, a Continue's) through the chat's Cancel, a Retry read's and a Re-read edit's through their own signal. */
@@ -234,7 +244,7 @@ export class Orchestrator {
       return true;
     }
     if (parked) this.release(parked);
-    const s = await this.newRun({ chatId: input.chatId, userId: input.userId, key: input.generationId, phase: "pre", head, text: input.text, parentPath, retry: false, cancelRead: (why) => void this.rt.ledger.cancel(input.chatId, input.userId, why) });
+    const s = await this.newRun({ chatId: input.chatId, userId: input.userId, key: input.generationId, phase: "pre", head, text: input.text, parentPath, retry: false, kind: "turn", mainable: true, cancelRead: (why) => void this.rt.ledger.cancel(input.chatId, input.userId, why) });
     if (s.settings.agents.pipeline.mode === "main") {
       // The turn's session and digest read the chain before it: up to the reply a swipe or Regenerate replaces.
       const target = input.core.journal.pending[input.generationId]?.messageId;
@@ -260,6 +270,7 @@ export class Orchestrator {
     this.rt.diag.agentTurn(s.at);
     if (stop) this.rt.diag.fatal(s.at, "pre", stop.step, stop.reason);
     s.phase = "pre";
+    s.live.resume();
     s.head = head;
     s.recommit = [...s.recommit, ...s.committed.filter((c) => c.op.phase === "plan" && c.op.approved !== true).map((c) => c.op)];
     s.committed = s.committed.filter((c) => c.op.phase !== "plan" && c.op.approved !== true);
@@ -287,7 +298,7 @@ export class Orchestrator {
     const said = ownMessage(input.observed.slice(0, Math.max(index, 0)));
     const stopped = new AbortController();
     const head = run ? { run, core: input.core, observed: input.observed, world: input.world, state: input.state } : null;
-    await this.newRun({ chatId: input.chatId, userId: input.userId, key: input.key, phase: "post", head, text: said ? (said.swipes[said.swipeId] ?? "") : "", parentPath: "", retry: true, cancelRead: (why) => stopped.abort(new Error(why)) });
+    await this.newRun({ chatId: input.chatId, userId: input.userId, key: input.key, phase: "post", head, text: said ? (said.swipes[said.swipeId] ?? "") : "", parentPath: "", retry: true, kind: "read", mainable: false, cancelRead: (why) => stopped.abort(new Error(why)) });
     return stopped.signal;
   }
 
@@ -309,7 +320,7 @@ export class Orchestrator {
     const said = ownMessage(before);
     const text = said ? (said.swipes[said.swipeId] ?? "") : "";
     const head = run ? { run, core: input.core, observed: input.observed, world: input.world, state: input.state } : null;
-    const s = await this.newRun({ chatId: input.chatId, userId: input.userId, key: input.generationId, phase: "post", head, text, parentPath: "", retry: false, cancelRead: (why) => void this.rt.ledger.cancel(input.chatId, input.userId, why) });
+    const s = await this.newRun({ chatId: input.chatId, userId: input.userId, key: input.generationId, phase: "post", head, text, parentPath: "", retry: false, kind: "reply", mainable: input.kind !== "continue", cancelRead: (why) => void this.rt.ledger.cancel(input.chatId, input.userId, why) });
     if (input.kind !== "continue" && s.settings.agents.pipeline.mode === "main") s.main = new MainTurn(this.mainHost(s), { text, core: input.core, observed: before });
     return true;
   }
@@ -317,9 +328,10 @@ export class Orchestrator {
   /**
    * A run under `key` on the chat's roles, from `phase` on `head`, with the user's settings as they
    * stand, the turn's agent budget and nothing yet staged; its Diagnostics place an agent turn's, which
-   * only its fatal records stop.
+   * only its fatal records stop; and its live view, of `kind`, worked by a main agent where the
+   * pipeline says so and the run takes one (`mainable`).
    */
-  private async newRun(input: { chatId: ChatId; userId: UserId; key: string; phase: StagePhase; head: ChatHead | null; text: string; parentPath: string; retry: boolean; cancelRead(why: string): void }): Promise<AgentRun> {
+  private async newRun(input: { chatId: ChatId; userId: UserId; key: string; phase: StagePhase; head: ChatHead | null; text: string; parentPath: string; retry: boolean; kind: LiveView["kind"]; mainable: boolean; cancelRead(why: string): void }): Promise<AgentRun> {
     const settings = await this.rt.settings.get(input.userId);
     const learning = await this.rt.settings.learningOf(input.userId);
     const active = await this.rt.activeConnectionId(input.userId);
@@ -330,6 +342,7 @@ export class Orchestrator {
     // past their Settings → Agents → Budgets' turns under way; another user's runs are theirs to bound.
     const own = [...this.runs.values()].filter((r) => r.userId === input.userId);
     for (const r of own.slice(0, Math.max(0, own.length - settings.agents.kept.runs + 1))) this.drop(r.generationId);
+    const live = this.rt.live.start({ chatId: input.chatId, userId: input.userId, turn: input.key, kind: input.kind, pipeline: input.mainable && settings.agents.pipeline.mode === "main" ? "main" : "fixed", text: input.text });
     const s: AgentRun = {
       chatId: input.chatId,
       userId: input.userId,
@@ -340,8 +353,8 @@ export class Orchestrator {
       active,
       learned,
       landing: {},
-      // Each agent at work shows as a row of the drawer's live trace: its label and tokens, nothing it reads or calls.
-      turn: new AgentTurn(settings.agents.turn, undefined, (agent, spent) => this.rt.diag.agentAtWork(input.chatId, input.userId, agent, spent)),
+      // Each agent at work shows as a row of the drawer's live trace: its label and tokens, nothing it reads or calls. GM → Live hears everything it does.
+      turn: new AgentTurn(settings.agents.turn, undefined, (agent, spent) => this.rt.diag.agentAtWork(input.chatId, input.userId, agent, spent), live),
       draft: new TurnDraft(input.key),
       stop: new AbortController(),
       phase: input.phase,
@@ -355,14 +368,18 @@ export class Orchestrator {
       approved: [],
       read: [],
       scene: null,
+      loads: [],
+      told: false,
       memoryLater: false,
       main: null,
+      live,
       retry: input.retry,
       cancelRead: input.cancelRead,
       parentPath: input.parentPath,
       recommit: [],
       held: null,
     };
+    s.draft.watch = live.draft();
     this.runs.set(input.key, s);
     return s;
   }
@@ -393,6 +410,7 @@ export class Orchestrator {
     if (!s) return;
     s.phase = phase;
     s.head = head;
+    s.live.add({ kind: "phase", phase });
     s.main?.open(phase === "post" ? "read" : "beats");
   }
 
@@ -467,6 +485,7 @@ export class Orchestrator {
       if (w.events.length > 0) input.core.appendPlanned(generationId, w.events, input.observed);
     }
     const outputs = input.replaying ? (s.held ?? []) : input.lines ? this.outputs(s, input.lines) : [];
+    if (!input.replaying && input.lines) s.told = true;
     if (outputs.length > 0) input.core.appendPlanned(generationId, outputs, input.observed);
     // The review gate: the turn waits after its plan on the card for what its roles asked to change first.
     if (s.settings.agents.review.placement !== "gate" || s.confirm.length === 0 || input.anchor === null || input.outline) return null;
@@ -489,7 +508,9 @@ export class Orchestrator {
     const events: PackEvent[] = [];
     for (const kind of ["outcome", "montage", "outline"] as const) if (lines[kind].length > 0) events.push(outLines(kind, lines[kind].map(fit)));
     if (lines.brief) events.push(outLines("brief", [fit(lines.brief)]));
-    if (s.scene) events.push(outScene(s.scene.lore, s.scene.notes.map(fit), s.scene.knowledge));
+    // What its agents loaded joins the scene's lore (DESIGN §4.6): delivery tells each entry in the Scene section as the narrator may read it.
+    const lore = [...new Set([...(s.scene?.lore ?? []), ...s.loads])];
+    if (s.scene || lore.length > 0) events.push(outScene(lore, (s.scene?.notes ?? []).map(fit), s.scene?.knowledge ?? "pov"));
     // An agent turn records the outcome even when it has none, so its narrator is told the turn's own lines and never another's.
     if (events.length === 0) events.push(outLines("outcome", []));
     if (cut > 0) this.rt.host.log("info", `[LumiRPEngine] turn ${s.generationId.slice(0, 8)}: ${counted(cut, "narrator line", "narrator lines")} cut to ${counted(limit, "character", "characters")} (Settings → Agents → Recording)`, s.userId);
@@ -532,7 +553,7 @@ export class Orchestrator {
 
   /** The read was cancelled, by its Cancel or a role under `stop`: the run ends with it, and what it staged and offered goes, so nothing of the read lands. */
   readStopped(generationId: string): void {
-    this.drop(generationId);
+    this.drop(generationId, "cancelled");
   }
 
   // ---------------------------------------------------------------- the turn's close
@@ -546,13 +567,14 @@ export class Orchestrator {
 
   /**
    * The turn committed: its record says which role wrote which events, its review card is made for
-   * what still asks first, and its session holds the turn; a Continue's holds its reply as continued
-   * (`continued`). Then it is done.
+   * what still asks first, and its session holds the turn, with its transcript; a Continue's holds its
+   * reply as continued (`continued`). Then it is done.
    */
   async closed(input: TurnContext): Promise<void> {
     const s = this.runs.get(input.generationId);
     if (!s) return;
     this.runs.delete(input.generationId);
+    s.live.end("done");
     try {
       await this.landed(s, input);
       await this.session(s, input, input.kind === "continue");
@@ -565,15 +587,17 @@ export class Orchestrator {
   /**
    * A Retry read's or a Re-read edit's read landed on its reply (`beginRead`): as a turn closes. A
    * Re-read edit's segment of the session is its reply's, as a turn's is; a Retry read's turn keeps
-   * its own. Then its run is done.
+   * its own, with the read's transcript after the turn's. Then its run is done.
    */
   async readClosed(key: string, at: Pick<TurnContext, "core" | "observed" | "messageId" | "swipeId">, kind: "reread" | "retry_read"): Promise<void> {
     const s = this.runs.get(key);
     if (!s) return;
     this.runs.delete(key);
+    s.live.end("done");
     try {
       await this.landed(s, at);
       if (kind === "reread") await this.session(s, { ...at, generationId: key, content: at.observed.find((m) => m.id === at.messageId)?.swipes[at.swipeId] ?? "" }, false);
+      else await this.keepTranscript(s, at, key);
     } finally {
       s.stop.abort();
       this.rt.blobs.release(s.userId, s.holder);
@@ -607,8 +631,9 @@ export class Orchestrator {
    * The turn's segment of the chat's session: on the fixed pipeline a digest, the player's words and
    * the reply with what each role did and what landed; with a main agent, its own messages for the
    * turn. It carries the compaction or rollback the turn made, or on the fixed pipeline the rollback
-   * GM → Workspace asked for, which no model call needs. A Continue's (`continued`) takes its reply's
-   * segment's place with the reply as continued, and carries neither.
+   * GM → Workspace asked for, which no model call needs, and the run's transcript. A Continue's
+   * (`continued`) takes its reply's segment's place with the reply as continued, and carries neither
+   * compaction nor rollback.
    */
   private async session(s: AgentRun, at: Pick<TurnContext, "core" | "observed" | "messageId" | "swipeId" | "generationId" | "content">, continued: boolean): Promise<void> {
     const reply = at.observed.find((m) => m.id === at.messageId);
@@ -626,10 +651,35 @@ export class Orchestrator {
         const segment = await this.rt.sessions.segment(s.userId, holder, s.main?.segment(content) ?? digest);
         parts = { segment, ...(rebase ? { summary: rebase.summary, archived: rebase.archived } : {}) };
       }
-      const refused = this.rt.sessions.recordIn(at.core, at.observed, s.userId, holder, { messageId: at.messageId, swipeId: at.swipeId }, parts);
+      const refused = this.rt.sessions.recordIn(at.core, at.observed, s.userId, holder, { messageId: at.messageId, swipeId: at.swipeId }, { ...parts, ...(await this.transcript(s, at, holder)) });
       if (refused) this.rt.host.log("warn", `[LumiRPEngine] chat ${s.chatId}: the turn's session wasn't kept (${refused})`, s.userId);
     } catch (error) {
       this.rt.host.log("warn", `[LumiRPEngine] chat ${s.chatId}: the turn's session wasn't kept (${error instanceof Error ? error.message : String(error)})`, s.userId);
+    }
+  }
+
+  /**
+   * The run's transcript for its reply's record (`RecSession.transcript`, which GM → Workspace lists
+   * under transcripts/): after the one the record keeps already when an earlier run of the same reply
+   * kept one (a Continue's read, a Retry read's, a Re-read edit's), held for `holder` until the record
+   * carries it.
+   */
+  private async transcript(s: AgentRun, at: Pick<TurnContext, "core" | "observed" | "messageId">, holder: string): Promise<Pick<RecSession, "transcript" | "transcriptChars">> {
+    const reply = at.core.chain(at.observed).find((m) => m.id === at.messageId);
+    const kept = reply ? recordSessionOf(activeRecord(reply, at.core.journal.tombstones)).transcript : undefined;
+    const before = kept ? await this.rt.blobs.get(s.userId, kept) : null;
+    const text = before ? `${before}\n${s.live.transcript()}` : s.live.transcript();
+    return { transcript: await this.rt.blobs.put(s.userId, text, holder), transcriptChars: text.length };
+  }
+
+  /** A Retry read's transcript joins its reply's record, whose session is its turn's. */
+  private async keepTranscript(s: AgentRun, at: Pick<TurnContext, "core" | "observed" | "messageId" | "swipeId">, key: string): Promise<void> {
+    const holder = `session:${key}`;
+    try {
+      const refused = this.rt.sessions.recordIn(at.core, at.observed, s.userId, holder, { messageId: at.messageId, swipeId: at.swipeId }, await this.transcript(s, at, holder));
+      if (refused) this.rt.host.log("warn", `[LumiRPEngine] chat ${s.chatId}: the read's transcript wasn't kept (${refused})`, s.userId);
+    } catch (error) {
+      this.rt.host.log("warn", `[LumiRPEngine] chat ${s.chatId}: the read's transcript wasn't kept (${error instanceof Error ? error.message : String(error)})`, s.userId);
     }
   }
 
@@ -674,7 +724,9 @@ export class Orchestrator {
       this.park(input.chatId, input.turn);
       return;
     }
-    this.drop(input.turn);
+    const s = this.runs.get(input.turn);
+    const stop = s ? (this.rt.diag.stopped(s.at) ?? this.rt.diag.failure(s.at)) : null;
+    this.drop(input.turn, input.outcome, stop ? `${stop.step}: ${stop.reason}` : undefined);
     // A gate's turn cancelled or failed: its card goes, and the plan it held is never replayed.
     const parked = this.waiting.get(input.chatId);
     this.waiting.delete(input.chatId);
@@ -710,6 +762,8 @@ export class Orchestrator {
     this.runs.delete(generationId);
     this.dropWaiting(chatId);
     this.waiting.set(chatId, s);
+    s.live.add({ kind: "wait" });
+    s.live.end("waiting");
     const theirs = [...this.waiting.values()].filter((w) => w.userId === s.userId);
     for (const oldest of theirs.slice(0, Math.max(0, theirs.length - s.settings.agents.kept.gates))) this.dropWaiting(oldest.chatId);
   }
@@ -727,19 +781,20 @@ export class Orchestrator {
     this.release(parked);
   }
 
-  private drop(generationId: string): void {
+  private drop(generationId: string, state: LiveEndState = "dropped", reason?: string): void {
     const s = this.runs.get(generationId);
     if (!s) return;
     this.runs.delete(generationId);
-    this.release(s);
+    this.release(s, state, reason);
   }
 
-  /** A run let go: its roles stop, what they staged goes, and the bodies it held are released. */
-  private release(s: AgentRun): void {
+  /** A run let go: its roles stop, what they staged goes, the bodies it held are released, and its live view ends as `state` says. */
+  private release(s: AgentRun, state: LiveEndState = "dropped", reason?: string): void {
     s.stop.abort();
     s.draft.clear();
     this.rt.blobs.release(s.userId, s.holder);
     this.rt.diag.agentTurnDone(s.at);
+    s.live.end(state, reason);
   }
 
   // ---------------------------------------------------------------- roles
@@ -807,9 +862,13 @@ export class Orchestrator {
       // Its classic call failed as a classic turn stops on: the turn stops on that, as classic says it.
       s.draft.drop(agentId);
       this.rt.diag.fatal(s.at, phase, classic.step, classic.reason);
+      s.live.add({ kind: "failed", step: classic.step, reason: classic.reason });
       return { ok: false };
     }
-    if (result.ok) return { ok: true, out: result.out };
+    if (result.ok) {
+      recordYield(this.rt, s.at, phase, role, runYield(s.settings.prompts.texts, kind, result.out, s.draft.writesOf(agentId)));
+      return { ok: true, out: result.out };
+    }
     if (settings.onFail === "stop") this.roleStopped(s.at, phase, role, result.reason);
     else this.rt.host.log("warn", `[LumiRPEngine] turn ${s.generationId.slice(0, 8)}: the ${ROLE_LABEL[role]} role failed (${result.code}: ${result.reason}); the turn goes on without it`, s.userId);
     return { ok: false };
@@ -831,23 +890,44 @@ export class Orchestrator {
   roleStopped(at: DiagAt, phase: DiagPhase, role: RoleId, reason: string): void {
     this.rt.diag.fatal(at, phase, ROLE_LABEL[role], reason);
     const s = at.turn === null ? undefined : this.runs.get(at.turn);
+    s?.live.add({ kind: "failed", step: ROLE_LABEL[role], reason });
     if (s?.phase === "post") s.cancelRead(`the ${ROLE_LABEL[role]} role failed: ${reason}`);
   }
 
-  /** One run of a role on its task as `settings` say, with what the main agent told it (`brief`): its answer, or why it failed; a cancelled turn's role throws as classic's call would. */
+  /**
+   * One run of a role on its task as `settings` say, with what the main agent told it (`brief`): its
+   * answer, or why it failed; a cancelled turn's role throws as classic's call would. GM → Live hears
+   * it start and end, with what it spent.
+   */
   private async runOnce<T, O>(s: AgentRun, role: RoleId, settings: RoleSettings, run: RoleRun<T, O>, task: T, signal: AbortSignal, brief: TurnBrief | null): Promise<{ agentId: string; result: RoleResult<O> }> {
     const ctx = this.ctx(s, role, settings, signal, brief);
+    const via = settings.promptOnly ? "prompt_only" : "agent";
+    const started = Date.now();
+    s.live.add({ kind: "run", run: ctx.agentId, role, via });
+    const ran = (result: RoleResult<O>): { agentId: string; result: RoleResult<O> } => {
+      s.live.add({ kind: "ran", run: ctx.agentId, ok: result.ok, via: result.via ?? via, ...(result.ok ? {} : { code: result.code, reason: result.reason }), usage: { in: result.usage.in, out: result.usage.out }, ms: Date.now() - started });
+      return { agentId: ctx.agentId, result };
+    };
     try {
-      return { agentId: ctx.agentId, result: await run(task, ctx) };
+      return ran(await run(task, ctx));
     } catch (error) {
       // One whose phase's time ran out (Settings → Timeouts) failed, as classic's call answers nothing then.
       const fired = firedTimeout(ctx.signal);
-      if (ctx.signal.aborted && !fired) throw error;
-      return { agentId: ctx.agentId, result: { ok: false, code: fired ? "timeout" : "error", reason: fired ? fired.message : error instanceof Error ? error.message : String(error), usage: emptyUsage() } };
+      const reason = fired ? fired.message : error instanceof Error ? error.message : String(error);
+      if (ctx.signal.aborted && !fired) {
+        ran({ ok: false, code: "cancelled", reason, usage: emptyUsage(), via });
+        throw error;
+      }
+      return ran({ ok: false, code: fired ? "timeout" : "error", reason, usage: emptyUsage() });
     }
   }
 
-  /** A role's context (C10): its own agent id, a reader with its knowledge, the turn's writer for its phase, and what the main agent told it. */
+  /** The workspace as the turn holds it now (`stagedWorkspace`): what its roles read in it, what they and the runs before them staged included. */
+  private staged(s: AgentRun): (head: ChatHead) => WorkspaceAt {
+    return (head) => stagedWorkspace(this.rt, s.draft, head, withLearned(s.learned, s.landing));
+  }
+
+  /** A role's context (C10): its own agent id, a reader with its knowledge, the turn's writer for its phase, what the main agent told it, and where it loads lore into the turn's reply. */
   private ctx(s: AgentRun, role: RoleId, settings: RoleSettings, signal: AbortSignal, brief: TurnBrief | null): TurnAgentCtx {
     const knowledge = settings.knowledge === "own" ? null : settings.knowledge;
     const both = AbortSignal.any([signal, s.stop.signal]);
@@ -855,11 +935,11 @@ export class Orchestrator {
     const agentId = `${role}:${s.generationId.slice(0, 8)}:${++s.agents}`;
     // Its reader and writer as a knowledge reads and checks: its role's, or a narrower one for a task (`readAs`).
     const io = (as: AgentKnowledge | null): { reader: ToolReader; writer: ToolWriter } => {
-      const reader = turnReader(this.rt, base, { userId: s.userId, chatId: s.chatId, knowledge: as });
+      const reader = turnReader(this.rt, base, { userId: s.userId, chatId: s.chatId, knowledge: as, staged: this.staged(s) });
       return { reader, writer: turnWriter(this.rt, s.draft, { userId: s.userId, chatId: s.chatId, role, agentId, tier: settings.tier, knowledge: as, connectionId: settings.connectionId, phase: s.phase, base, learned: () => withLearned(s.learned, s.landing), reader, gmOps: s.settings.agents.gmOpsPerTurn, holder: s.holder, signal: both }) };
     };
     const { reader, writer } = io(knowledge);
-    return { turn: s.turn, signal: both, userId: s.userId, chatId: s.chatId, generationId: s.generationId, reader, writer, role, agentId, settings, brief, readAs: io };
+    return { turn: s.turn, signal: both, userId: s.userId, chatId: s.chatId, generationId: s.generationId, reader, writer, role, agentId, settings, brief, readAs: io, loads: loadsOf(s) };
   }
 
   /** What the turn's main agent runs with (`MainHost`): the run's own state, as it stands when asked. */
@@ -872,10 +952,12 @@ export class Orchestrator {
       turn: s.turn,
       stop: s.stop.signal,
       holder: s.holder,
+      live: s.live,
       at: () => s.at,
       phase: () => s.phase,
       head: () => s.head,
-      reader: (knowledge: AgentKnowledge) => turnReader(this.rt, () => s.head, { userId: s.userId, chatId: s.chatId, knowledge }),
+      reader: (knowledge: AgentKnowledge) => turnReader(this.rt, () => s.head, { userId: s.userId, chatId: s.chatId, knowledge, staged: this.staged(s) }),
+      loads: loadsOf(s),
       run: async ({ role, run, task, signal, brief, promptOnly }) => {
         const settings = s.settings.agents.roles[role];
         const as = promptOnly ? { ...settings, promptOnly: true } : settings;
@@ -886,7 +968,8 @@ export class Orchestrator {
         if (!done.result.ok) s.draft.drop(done.agentId);
         return { agentId: done.agentId, result: { ...done.result, via } };
       },
-      drop: (agentId) => s.draft.drop(agentId),
+      drop: (agentId, why) => s.draft.drop(agentId, why),
+      writes: (agentId) => s.draft.writesOf(agentId),
       intent: (): JsonValue => {
         const read = this.rt.bridgeOf(s.chatId)?.intentOf(s.text);
         return read ? { action: read.action, params: read.params } : null;
@@ -901,13 +984,25 @@ export class Orchestrator {
     const learned = withLearned(s.learned, s.landing);
     const commit: CommitCtx = { ctx: (knowledge) => contextOf(this.rt, { knowledge }, head, s.settings, s.learning, learned, s.active), reader: turnReader(this.rt, () => head, { userId: s.userId, chatId: s.chatId, knowledge: "gm" }), userId: s.userId, chatId: s.chatId, signal: s.stop.signal };
     const out = commitStaged(this.rt, commit, ops, w);
+    s.live.committed(out);
     // What landed, or went to the review card, of the GM's edits counts toward the turn's cap in its later phases.
     s.draft.landed([...out.committed.map((c) => c.op), ...out.confirm].filter((op) => op.tier === "gm").length);
     s.committed.push(...out.committed);
     Object.assign(s.landing, out.learned);
     s.confirm.push(...out.confirm);
-    for (const { op, refusal } of out.refused) this.rt.host.log("info", `[LumiRPEngine] turn ${s.generationId.slice(0, 8)}: the ${ROLE_LABEL[op.role]} role's change ${op.key.slice(0, 12)} didn't land (${refusal.code}: ${refusal.reason})`, s.userId);
+    recordCommit(this.rt, s.at, s.settings.prompts.texts, out);
   }
+}
+
+/** Where the run's agents load lore into its reply (`lore_load`): each entry once, until its narrator-facing lines are recorded or its reply is written. */
+function loadsOf(s: AgentRun): LoreLoads {
+  return {
+    add(loreId) {
+      if (s.told || s.phase === "post") return false;
+      if (!s.loads.includes(loreId)) s.loads.push(loreId);
+      return true;
+    },
+  };
 }
 
 /** A role id as a review item names it; one the card names that is no role is the read's. */

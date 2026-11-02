@@ -36,6 +36,7 @@ import { STEP_LABEL } from "../../shared/diagnostics";
 import type { ChatId, UserId } from "../../shared/ids";
 import type { JsonObject, JsonValue } from "../../shared/json";
 import type { LedgerEvent } from "../../shared/ledger";
+import type { LiveDropWhy } from "../../shared/live";
 import { MAIN_TEXT, MAIN_TOOLS, type MainRequestKind, type MainRoleStage } from "../../shared/main-agent-prompts";
 import type { PromptTexts } from "../../shared/prompts";
 import type { UserSettings } from "../../shared/settings";
@@ -52,13 +53,15 @@ import type { SkipRun } from "../skip";
 import type { ExtractRead, InterpretRead } from "../steps";
 import type { TieOdds } from "../turn-steps";
 import { screenBrief, type TaskReads } from "./brief";
-import { compact, historyOf, isMainMessage, knowledgeOf, lastMainTurn, MAIN_BY, type MainMessage, type MainSession, readSession, rebasedRefs, rolledBack, type SessionLens, sessionTokens, summaryOf } from "./compaction";
+import { compact, historyOf, isMainMessage, knowledgeOf, lastMainTurn, MAIN_BY, type MainMessage, mainLens, type MainSession, readSession, rebasedRefs, rolledBack, type SessionLens, sessionTokens, summaryOf } from "./compaction";
 import { type AgentHandle, type AgentHistoryMessage, type AgentReply, type AgentSpec, type AgentTool, type AgentTurn, startAgent, type ToolOutcome } from "./runtime";
 import { type Rebase, sessionAt } from "./sessions";
 import type { ToolReader } from "./tools/read-view";
-import { TOOL_DEFINITIONS, toolsFor } from "./tools/registry";
+import { type LoreLoads, TOOL_DEFINITIONS, toolsFor } from "./tools/registry";
 import type { ChatHead } from "./tools/workspace";
 import { recordAgentCalls } from "./transcripts";
+import type { LiveRun } from "./live";
+import { knowledgeAnswer, recordYield, type RunWrites, runYield } from "./yields";
 import type { ChooseTask, DirectorProse, ExtractTask, MemoryTask, ProseTask, RoleResult, RoleRun, SceneOut, TurnBrief } from "./turn-ctx";
 import { digestOf, MAIN_PINS, MAIN_PINS_TEXTS, pinnedFiles, tidy, turnTask } from "./turn-task";
 import type { StagePhase } from "./turn-writer";
@@ -113,6 +116,8 @@ interface Run {
   withheld: boolean;
   /** What a decision's run recorded of its choosers' learnings (`ChooseTask.heard`), handed to the turn only once its answer stands, at commit. */
   learned: LedgerEvent[][];
+  /** What it staged that the turn hasn't committed, and the writes it asked for that were refused, as it ended: its answer says them (`runYield`). */
+  writes: RunWrites;
 }
 
 /** A model call of the turn's flow, waiting on the main agent. */
@@ -126,6 +131,8 @@ interface Request {
   /** The id the main agent names its runs by: its first run's, which a revision keeps. */
   handle: string | null;
   current: Run | null;
+  /** A run of it is under way. A request runs once at a time: the calls of one answer run together, and two runs of it would stage together, both landing. */
+  busy: boolean;
   round: Round | null;
   done: boolean;
   settle(outcome: RequestOutcome<unknown> | { abandoned: unknown }): void;
@@ -153,15 +160,21 @@ export interface MainHost {
   readonly stop: AbortSignal;
   /** Holds the blobs the turn makes until its record carries them, or it is dropped. */
   readonly holder: string;
+  /** The turn's live view (GM → Live), which hears what stopped it; null for a run with none. */
+  readonly live: LiveRun | null;
   /** The turn's Diagnostics place, which a generation taking the prepared turn moves. */
   at(): DiagAt;
   phase(): StagePhase;
   head(): ChatHead | null;
   reader(knowledge: AgentKnowledge): ToolReader;
+  /** Where the main agent loads lore into the reply the turn is writing (`lore_load`, DESIGN §4.6). */
+  loads: LoreLoads;
   /** Runs `role` once on `task`, as the orchestrator runs a role (C9, C10), with what the main agent told it; its settings' onFail never applies. */
   run(input: { role: RoleId; run: RoleRun<unknown, unknown>; task: unknown; signal: AbortSignal; brief: TurnBrief; promptOnly: boolean }): Promise<{ agentId: string; result: RoleResult<unknown> }>;
-  /** Drops what a run that no longer stands staged. */
-  drop(agentId: string): void;
+  /** Drops what a run that no longer stands staged: one a revision or a run again replaced, or one its request went on without; `why` is what GM → Live says. */
+  drop(agentId: string, why: LiveDropWhy): void;
+  /** What a run staged that the turn hasn't committed, and the writes it asked for that were refused. */
+  writes(agentId: string): RunWrites;
   /** The action the turn plays once the gates let it, with its parameters, as the bridge holds it. */
   intent(): JsonValue;
 }
@@ -219,6 +232,7 @@ export class MainTurn {
    * answer it committed. One made after the main agent failed goes on without its role at once; one
    * whose phase's time ran out (Settings → Timeouts) goes on without it then, as classic's call
    * answers nothing; one the turn's Cancel or its run's end cuts short throws, as classic's would.
+   * Whichever way the flow goes on without its role, nothing its runs staged lands.
    */
   request<T, O>(kind: MainRequestKind, run: RoleRun<T, O>, task: T, signal: AbortSignal): Promise<RequestOutcome<O>> {
     if (this.failure !== null) return Promise.resolve({ failed: true });
@@ -236,6 +250,7 @@ export class MainTurn {
       signal,
       handle: null,
       current: null,
+      busy: false,
       round: null,
       done: false,
       settle: (outcome) => {
@@ -244,6 +259,10 @@ export class MainTurn {
         signal.removeEventListener("abort", abandon);
         const at = this.requests.indexOf(r);
         if (at >= 0) this.requests.splice(at, 1);
+        // A request the flow goes on without lands nothing its run staged, as a run that fails lands
+        // nothing (a run under way drops its own as it ends: `attempt`); one it takes keeps them for
+        // its phase's commit.
+        if (!("out" in outcome) && r.current) this.host.drop(r.current.agentId, "unused");
         if ("abandoned" in outcome) reject(outcome.abandoned);
         else resolve(outcome as RequestOutcome<O>);
         // A stage whose every request the flow gave up on is over: its agent is stopped.
@@ -318,7 +337,7 @@ export class MainTurn {
       const history = this.history();
       // The session's last message is the engine's: it leads this one.
       const lead = history.at(-1)?.role === "user" ? history.pop()?.text : undefined;
-      const agent = startAgent(this.spec(round, history), { host: this.host.rt.host, userId: this.host.userId, settings: this.host.settings.agents, texts: this.texts, accounts: this.host.rt.agentAccounts, turn: this.host.turn });
+      const agent = startAgent(this.spec(round, history), { host: this.host.rt.host, userId: this.host.userId, settings: this.host.settings.agents, texts: this.texts, accounts: this.host.rt.agentAccounts, turn: this.host.turn, trace: { phase: DIAG_PHASE[stage], stage: `Stage ${NUMBER[stage]}: ${this.text(MAIN_TEXT.stageLabel(stage))}` } });
       const reply = await this.send(agent, lead ? `${lead}\n\n${sent}` : sent, signal, stage);
       if (round.committed) {
         this.keep(first ? `${this.keptTask}\n\n${message}` : message, sent, agent);
@@ -348,14 +367,9 @@ export class MainTurn {
     const chain = core.chain(observed);
     const refs = sessionAt(chain, core.journal.tombstones);
     // Its own messages made under its knowledge or a narrower one, and of those whose tools read a
-    // workspace file, only while the file's readers still take its knowledge in (a moved or deleted
-    // file narrows nothing).
+    // workspace file, only while the file's readers still take its knowledge in (`mainLens`).
     const readers = new Map(this.host.head() ? (await (await this.host.reader("gm").view()).workspace()).map((f) => [f.path, f.readers] as const) : []);
-    const reads = (path: unknown): boolean => {
-      const r = typeof path === "string" ? readers.get(path) : undefined;
-      return r === undefined || knowledgeWithin(r, main.knowledge);
-    };
-    this.lens = { knowledge: main.knowledge, message: (m) => isMainMessage(m) && knowledgeWithin(knowledgeOf(m), main.knowledge) && (Array.isArray(m.files) ? m.files : []).every(reads) };
+    this.lens = mainLens(main.knowledge, readers);
     let session = await readSession(rt, userId, refs);
     const own = new Set(session.segments.filter((s) => s.messages.some((m) => this.lens.message(m))).map((s) => s.hash));
     const last = lastMainTurn(chain, core.journal.tombstones, summaryOf(session, this.lens) === null ? { ...refs, base: null } : refs, own);
@@ -418,8 +432,9 @@ export class MainTurn {
   private async summarizer(system: string, message: string, signal: AbortSignal): Promise<AgentReply> {
     const { settings } = this.host;
     const main = settings.agents.main;
-    const agent = startAgent({ role: MAIN_AGENT_ROLE, connectionId: main.connectionId, model: main.model, effort: main.effort, system, prefix: [], tools: [], budget: mainBudget(settings.agents) }, { host: this.host.rt.host, userId: this.host.userId, settings: settings.agents, texts: this.texts, accounts: this.host.rt.agentAccounts, turn: this.host.turn });
-    return this.send(agent, message, signal, this.round?.stage ?? "intent");
+    const stage = this.round?.stage ?? "intent";
+    const agent = startAgent({ role: MAIN_AGENT_ROLE, connectionId: main.connectionId, model: main.model, effort: main.effort, system, prefix: [], tools: [], budget: mainBudget(settings.agents) }, { host: this.host.rt.host, userId: this.host.userId, settings: settings.agents, texts: this.texts, accounts: this.host.rt.agentAccounts, turn: this.host.turn, trace: { phase: DIAG_PHASE[stage], task: "compaction" } });
+    return this.send(agent, message, signal, stage);
   }
 
   /**
@@ -453,6 +468,7 @@ export class MainTurn {
     this.failure = reason;
     const { rt, chatId, userId } = this.host;
     rt.diag.fatal(this.host.at(), DIAG_PHASE[stage], MAIN_LABEL, reason);
+    this.host.live?.add({ kind: "failed", step: MAIN_LABEL, reason });
     for (const r of [...this.requests]) r.settle({ failed: true });
     if (this.host.phase() === "post") rt.ledger.cancel(chatId, userId);
   }
@@ -536,20 +552,27 @@ export class MainTurn {
       case "effects":
         return { proposals: (out as JsonObject[]).length };
       case "knowledge":
-        return { events: (out as RunMindsResult).events.length };
+        // What the knowledge step recorded of its answers: its learnings are the run's `knowledge`, never its `events`.
+        return knowledgeAnswer(out as RunMindsResult);
       case "choices":
         // The player's own suggestions, held to what the player character may know.
         return out as string[];
     }
   }
 
+  /**
+   * A run as run_role and revise answer it: its answer as far as the main agent's knowledge reaches
+   * the role's, then what it left the engine (`runYield`): its changes, staged, held for the review
+   * card or refused, and what of its answer the engine didn't take, and why; or why it failed.
+   */
   private ran(r: Request): string {
     const run = r.current;
     if (!run) return "";
     const via = this.text(run.result.via === "prompt_only" ? MAIN_TEXT.viaPromptOnly : MAIN_TEXT.viaAgent);
     const agent = r.handle ?? run.agentId;
+    const gave = run.result.ok ? runYield(this.texts, r.kind, run.result.out, run.writes, this.reaches(r.role)) : { writes: "", lost: "" };
     const answer = run.result.ok ? this.text(MAIN_TEXT.ran, { agent, role: r.role, via, answer: JSON.stringify(this.answerOf(r, run.result.out)) }) : this.text(MAIN_TEXT.ranFailed, { agent, role: r.role, via, reason: run.result.reason });
-    return run.withheld ? `${answer}\n${this.text(MAIN_TEXT.briefWithheld, { role: r.role })}` : answer;
+    return [answer, gave.writes, gave.lost, run.withheld ? this.text(MAIN_TEXT.briefWithheld, { role: r.role }) : ""].filter((t) => t !== "").join("\n");
   }
 
   /**
@@ -596,7 +619,7 @@ export class MainTurn {
     if (!head || main.families.length === 0) return own;
     // Its tools read only, with its knowledge: it changes nothing itself.
     const reader = this.host.reader(main.knowledge);
-    return [...own, ...toolsFor({ world: head.world, tiers: ["read"], families: main.families, texts: this.texts, env: { userId: this.host.userId, chatId: this.host.chatId, knowledge: main.knowledge, reader, writer: null, agent: { role: MAIN_AGENT_ROLE, id: MAIN_AGENT_ROLE }, signal: this.host.stop } })];
+    return [...own, ...toolsFor({ world: head.world, tiers: ["read"], families: main.families, texts: this.texts, env: { userId: this.host.userId, chatId: this.host.chatId, knowledge: main.knowledge, reader, writer: null, agent: { role: MAIN_AGENT_ROLE, id: MAIN_AGENT_ROLE }, signal: this.host.stop, loads: this.host.loads } })];
   }
 
   private refuse(id: string, vars: Readonly<Record<string, string>> = {}): ToolOutcome {
@@ -613,16 +636,17 @@ export class MainTurn {
     return this.refuse(MAIN_TEXT.refusedOver, { role });
   }
 
-  /** `run_role`: each of the stage's open requests of the role that hasn't answered runs, with the main agent's task. */
+  /** `run_role`: each of the stage's open requests of the role that hasn't answered and has no run under way runs, with the main agent's task. */
   private async runRole(round: Round, args: JsonObject): Promise<ToolOutcome> {
     if (round.committed) return this.refuse(MAIN_TEXT.refusedCommitted);
     const role = typeof args.role === "string" ? args.role : "";
     if (!(ROLE_IDS as readonly string[]).includes(role)) return this.refuse(MAIN_TEXT.refusedRole, { role, roles: ROLE_IDS.join(", ") });
     const open = round.requests.filter((r) => r.role === role && !r.done);
     if (open.length === 0) return this.notNow(role as RoleId, round.stage);
-    // A run that answered stands until a revision; one that failed may run again, prompt-only too.
-    const due = open.filter((r) => r.current === null || !r.current.result.ok);
-    if (due.length === 0) return this.refuse(MAIN_TEXT.refusedRan, { role, agents: open.map((r) => r.handle ?? "").join(", ") });
+    // A run that answered stands until a revision; one that failed may run again, prompt-only too. A
+    // request runs once at a time: one whose run another call of this answer started isn't run again.
+    const due = open.filter((r) => !r.busy && (r.current === null || !r.current.result.ok));
+    if (due.length === 0) return open.some((r) => r.busy) ? this.refuse(MAIN_TEXT.refusedRunning, { role }) : this.refuse(MAIN_TEXT.refusedRan, { role, agents: open.map((r) => r.handle ?? "").join(", ") });
     const task = typeof args.task === "string" ? args.task : "";
     await Promise.all(due.map((r) => this.attempt(round, r, task, [], args.prompt_only === true)));
     return { text: due.map((r) => this.ran(r)).join("\n") };
@@ -634,6 +658,8 @@ export class MainTurn {
     const agent = typeof args.agentId === "string" ? args.agentId : "";
     const r = round.requests.find((q) => q.handle === agent && !q.done);
     if (!r?.current) return this.refuse(MAIN_TEXT.refusedAgent, { agent, agents: round.requests.flatMap((q) => (q.handle && !q.done ? [q.handle] : [])).join(", ") || this.text(MAIN_TEXT.none) });
+    // A request runs once at a time: a revision of one whose run another call of this answer started is refused.
+    if (r.busy) return this.refuse(MAIN_TEXT.refusedRunning, { role: r.role });
     const limit = roleBudget(this.host.settings.agents, r.role).revisions;
     if (r.current.revisions.length >= limit) return this.refuse(MAIN_TEXT.refusedRevisions, { agent, limit: String(limit), revisions: nounFor(limit, "revision", "revisions") });
     await this.attempt(round, r, r.current.task, [...r.current.revisions, typeof args.message === "string" ? args.message : ""], r.current.promptOnly);
@@ -641,31 +667,44 @@ export class MainTurn {
   }
 
   /**
-   * One run of a request's role; what the run it replaces staged goes, since its answer no longer
-   * stands. A decision's run records its choosers' learnings into its own list (`Run.learned`), so a
-   * revision or a run again hands the turn only those of the answer that stands.
+   * One run of a request's role, the only one under way for the request (`Request.busy`). The run it
+   * replaces no longer stands as it starts: what that one staged goes first, so this one reads the
+   * turn without it and stages afresh what it still wants. One that ends after its request was
+   * settled (its time ran out, the main agent failed, or a commit of the same answer went on without
+   * it) lands nothing it staged. A decision's run records its choosers' learnings into its own list
+   * (`Run.learned`), so a revision or a run again hands the turn only those of the answer that
+   * stands. What a run that answered left the engine (`runYield`) goes to Diagnostics and the host
+   * log too.
    */
   private async attempt(round: Round, r: Request, task: string, revisions: string[], promptOnly: boolean): Promise<void> {
     const brief = this.briefFor(task, revisions);
     const learned: LedgerEvent[][] = [];
     const heard = (r.task as Partial<ChooseTask>).heard;
     const own = heard ? { ...(r.task as ChooseTask), heard: { ...heard, learned: (events: LedgerEvent[]) => learned.push(events) } } : r.task;
+    r.busy = true;
+    if (r.current) this.host.drop(r.current.agentId, "replaced");
     const running = this.host.run({ role: r.role, run: r.run, task: own, signal: AbortSignal.any([r.signal, round.controller.signal]), brief, promptOnly });
     round.running.add(running);
     try {
       const { agentId, result } = await running;
-      if (r.current) this.host.drop(r.current.agentId);
-      r.current = { agentId, result, task, revisions, promptOnly, withheld: brief.withheld, learned };
+      if (r.done) this.host.drop(agentId, "unused");
+      const writes = this.host.writes(agentId);
+      r.current = { agentId, result, task, revisions, promptOnly, withheld: brief.withheld, learned, writes };
       r.handle ??= agentId;
+      if (result.ok) recordYield(this.host.rt, this.host.at(), DIAG_PHASE[round.stage], r.role, runYield(this.texts, r.kind, result.out, writes));
     } finally {
+      r.busy = false;
       round.running.delete(running);
     }
   }
 
-  /** `commit`: once the runs under way are in, the stage's requests get what answered, the rest go on without their role, and the send ends. */
+  /**
+   * `commit`: once the runs under way are in, those the answer's other calls started meanwhile too,
+   * the stage's requests get what answered, the rest go on without their role, and the send ends.
+   */
   private async commit(round: Round): Promise<ToolOutcome> {
     if (round.committed) return this.refuse(MAIN_TEXT.refusedCommitted);
-    await Promise.allSettled([...round.running]);
+    while (round.running.size > 0) await Promise.allSettled([...round.running]);
     round.committed = true;
     const took: string[] = [];
     const without: string[] = [];

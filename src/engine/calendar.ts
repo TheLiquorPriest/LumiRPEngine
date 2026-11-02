@@ -589,3 +589,22 @@ export function placeOffset(world: Pick<WorldDoc, "places" | "calendar">, clock:
   if (!knownZone(zone) || !knownZone(world.calendar.timeZone)) return 0;
   return zoneOffset(zone, d.year, d.month, d.day, d.minuteOfDay) - home;
 }
+
+/**
+ * Minutes to add to the home clock for the time the Scene section tells at `place` (DESIGN §6.11): its
+ * local time from Calendar 3, where time zones show, else the home clock's. Every text that tells a
+ * model the time of a turn reads it so (the Scene's time line and its elapsed time, the helpers' facts
+ * and `{{clock}}`, the read's clock), so none of them tells another time than the Scene's.
+ */
+export function sceneOffset(world: Pick<WorldDoc, "places" | "calendar">, clock: number, place: string | null | undefined, level: number): number {
+  return level >= 3 ? placeOffset(world, clock, place) : 0;
+}
+
+/** A span of the clock, `from` to `to`, as the Scene tells times at `place` (`sceneOffset`): each end's time of day, with its weekday when the two fall on different days ("Mon 11:40 PM" to "Tue 12:10 AM"). */
+export function clockSpanWords(world: Pick<WorldDoc, "places" | "calendar">, from: number, to: number, place: string | null | undefined, level: number): { from: string; to: string } {
+  const cal = calendarOf(world);
+  const a = dateAt(cal, from + sceneOffset(world, from, place, level));
+  const b = dateAt(cal, to + sceneOffset(world, to, place, level));
+  const words = (d: CalDate): string => `${a.dayIndex === b.dayIndex ? "" : `${weekdayName(cal, d.weekday)} `}${formatTimeOfDay(d.minuteOfDay)}`;
+  return { from: words(a), to: words(b) };
+}

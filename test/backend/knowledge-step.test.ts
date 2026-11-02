@@ -130,7 +130,11 @@ async function atShop(rig: Rig, chatId: string, more: Readonly<Record<string, st
 async function shopChat(rig: Rig, setup: { minds?: JsonObject; lore?: readonly JsonObject[]; owners?: Readonly<Record<string, string>> } = {}): Promise<string> {
   const worldId = await rig.newWorld("Alder", "modern_slice_of_life");
   rig.body(await rig.send({ type: "lre.editor", op: "set", worldId, base: null, part: "minds", value: { thresholds: { live: 900, near: 900, far: 900 }, always: { ids: [MARCUS, DANNY] }, ...setup.minds } }));
-  for (const value of setup.lore ?? []) rig.body(await rig.send({ type: "lre.editor", op: "put", worldId, base: null, collection: "lore", id: String(value.id), value }));
+  // A copy of a World Info entry is an earlier build's, which the editor no longer makes.
+  for (const value of setup.lore ?? []) {
+    if (isRecord(value.source) && value.source.kind === "book") await rig.oldCopy(worldId, { ...value, id: String(value.id) });
+    else rig.body(await rig.send({ type: "lre.editor", op: "put", worldId, base: null, collection: "lore", id: String(value.id), value }));
+  }
   // A track's owner, as Build → Tracks sets it.
   const draft = Object.keys(setup.owners ?? {}).length > 0 ? (rig.body(await rig.send({ type: "lre.editor", op: "get", worldId, base: null })).draft as WorldDoc) : null;
   for (const [track, owner] of Object.entries(setup.owners ?? {})) rig.body(await rig.send({ type: "lre.editor", op: "put", worldId, base: null, collection: "tracks", id: track, value: { ...(draft?.tracks[track] as unknown as JsonObject), owner } }));
@@ -952,7 +956,7 @@ describe("the re-review's fixes (Increment 0)", () => {
     // Recorded, so the book isn't read again, but held by no one: its gate decides when it opens to the player character.
     expect(factsOf(readSlice(state))[wi]?.claim).toBe(`${MILL}.`);
     expect(holdingsOf(readSlice(state), POV)[wi]).toBeUndefined();
-    const live = await liveLore(rig.host, world, chatId, rig.host.userId);
+    const live = await liveLore(rig.host, world, chatId, rig.host.userId, "auto");
     expect(findLeaks(MILL, unrevealedSecrets(rig.rt.registry, live, state)).length).toBeGreaterThan(0);
     expect(JSON.stringify(whatYouKnow(rig, chatId))).not.toContain("old mill");
     expect(pushed(rig)).not.toContain("old mill");
@@ -1303,6 +1307,73 @@ describe("knowledge rides on the story (KN-SPEC)", () => {
       const out = checkKnowledge(later, scene, answer);
       expect([out.refused, learnersOf(out)]).toEqual([[], [POV]]);
     }
+  });
+
+  test("each refusal is counted by its kind, alongside its line, so a run that recorded less than it answered says why (agent-yield)", async () => {
+    const rig = new Rig({ shipped: true, minds: true });
+    models(rig, () => ({}));
+    const chatId = await shopChat(rig, { minds: { holdings: MARCUS_KEEPS } });
+    await rig.turn(chatId, "I open the shutters.", "Marcus counts the till.");
+    const { state, world } = await stateOf(rig, chatId);
+    const turn = { ...shopTurn(rig, world, state, { ...KNOWLEDGE_DEFAULTS, factsPerTurn: 1 }), named: (name: string) => personNamed(rig.rt.registry, world, state, name) };
+    const scene = knowledgeBatches(turn)[0] ?? [];
+    const out = checkKnowledge(turn, scene, {
+      facts: [
+        { ref: "a", claim: SEDAN },
+        { ref: "b", claim: QUIT, matters: "Marcus loses his mechanic" },
+        { ref: "c", claim: LATCH, matters: "Helen will ask again" },
+      ],
+      learned: [
+        { fact: "a", how: "witnessed" },
+        { fact: "b", how: "witnessed", missed: ["Jordan Elis"] },
+        { fact: "b", how: "told", who: ["Danny Okafor"], by: "Priya Nair" },
+        { fact: "[nothing]", how: "witnessed" },
+      ],
+      inferred: [{ who: "Danny Okafor", fact: DEBT, confidence: 2, evidence: [] }],
+      doubted: [{ who: "Danny Okafor", fact: DEBT, confidence: 0.2 }],
+    });
+    expect(out.refusedAs).toEqual({ matters: 1, facts_limit: 1, no_fact: 2, missed: 1, teller: 1, confidence: 1, doubt: 1 });
+    expect(Object.values(out.refusedAs).reduce((a, b) => a + (b ?? 0), 0)).toBe(out.refused.length);
+  });
+
+  test("a fact id written as the step's context shows it, in its brackets, names that fact: the learning of it isn't refused", async () => {
+    const rig = new Rig({ shipped: true, minds: true });
+    models(rig, () => ({}));
+    const chatId = await shopChat(rig, { minds: { holdings: MARCUS_KEEPS } });
+    await rig.turn(chatId, "I open the shutters.", "Marcus counts the till.");
+    const { state, world } = await stateOf(rig, chatId);
+    const turn = shopTurn(rig, world, state);
+    const scene = knowledgeBatches(turn)[0] ?? [];
+    // The context lists each fact in play as "- [id] claim", and a model copies the id as it reads it.
+    expect(knowledgeContext(turn, scene)).toContain(`- [${DEBT}] `);
+    const told = checkKnowledge(turn, scene, { learned: [{ who: ["Danny Okafor"], fact: `[${DEBT}]`, how: "told", by: "Marcus Delgado" }] });
+    expect([told.refused, learnings(told.events).map((l) => [l.fact, l.who])]).toEqual([[], [[DEBT, [DANNY]]]]);
+  });
+
+  test("a new fact's ref written as the context writes ids, in brackets, names that fact wherever the answer names it, bracketed or not: its learning, and an inference resting on it", async () => {
+    const rig = new Rig({ shipped: true, minds: true });
+    models(rig, () => ({}));
+    const chatId = await shopChat(rig);
+    await rig.turn(chatId, "I open the shutters.", "Marcus counts the till.");
+    const { state, world } = await stateOf(rig, chatId);
+    const turn = shopTurn(rig, world, state);
+    const scene = knowledgeBatches(turn)[0] ?? [];
+    const sedan = claimFactId(SEDAN, turn.messageId);
+    const fact = { claim: SEDAN, matters: "Marcus would act on it", about: ["Marcus Delgado"] };
+    // The fact's ref and the learning's fact, each plain or as the context shows an id: all four name the new fact.
+    for (const [ref, named] of [["n1", "n1"], ["[n1]", "[n1]"], ["[n1]", "n1"], ["n1", "[n1]"]] as const) {
+      const out = checkKnowledge(turn, scene, { facts: [{ ref, ...fact }], learned: [{ fact: named, how: "witnessed" }] });
+      expect({ ref, named, refused: out.refused, learned: learnings(out.events).map((l) => l.fact), learners: learnersOf(out) }).toEqual({ ref, named, refused: [], learned: [sedan], learners: [DANNY, MARCUS, POV].sort() });
+    }
+    // An inference names its own new fact and its evidence, the new fact Danny just witnessed, by their bracketed refs.
+    const WATCHED = "Someone has been watching the shop from the sedan";
+    const inferred = checkKnowledge(turn, scene, {
+      facts: [{ ref: "[n1]", ...fact }, { ref: "[n2]", claim: WATCHED, matters: "Danny would warn Marcus", about: ["Marcus Delgado"] }],
+      learned: [{ fact: "[n1]", how: "witnessed" }],
+      inferred: [{ who: "Danny Okafor", fact: "[n2]", evidence: ["[n1]"], confidence: 0.6 }],
+    });
+    expect(inferred.refused).toEqual([]);
+    expect(learnings(inferred.events).find((l) => l.how === "inferred")).toMatchObject({ who: [DANNY], fact: claimFactId(WATCHED, turn.messageId), evidence: [sedan] });
   });
 
   test("Who knows what tells a fact everyone here holds alike, the player character included, as one line, and a fact one of them keeps from someone as one line each", async () => {

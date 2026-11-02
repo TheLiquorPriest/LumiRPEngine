@@ -47,11 +47,9 @@ import { openMoney, POV } from "./test-pack";
  * GM minds control instead (a pin, a refresh, a plan added or closed); `tie`: the head's latest
  * purchase's price corrected instead, as Edit amount records it (`tiedTo` that purchase), not
  * written when the head holds no purchase; `convert`: Keep converting the dropped line it picks
- * instead (the chat's latest nearest 1), not written when nothing dropped. `hold`: flagged as a GM
- * agent's write or a workspace save is, held through an engine run whatever the setting
- * (`HeldWrite.hold`).
+ * instead (the chat's latest nearest 1), not written when nothing dropped.
  */
-type WriteOp = { op: "write"; kind: number; a: number; b: number; gm?: number; asked?: number; open?: number; life?: number; mind?: number; tie?: number; convert?: number; hold?: true };
+type WriteOp = { op: "write"; kind: number; a: number; b: number; gm?: number; asked?: number; open?: number; life?: number; mind?: number; tie?: number; convert?: number };
 
 export type Op =
   /** `linked`: a purchase Dev's account covers part of instead (`LINKED_TEXTS`), with his transfer kept apart before it. */
@@ -91,11 +89,11 @@ export type Op =
   | { op: "undoAsked"; a: number }
   /**
    * A turn (a new reply, a Re-run of the head or a Continue, by `type`) with `writes` made while the
-   * engine runs it before its reply (DESIGN §4.3 P2), "Hold writes during the engine run" set to
-   * `setting`; with `edit`, an earlier reply edited then too, its event arriving while the engine
-   * still runs (`now`) or after, while the turn waits for its reply; then the reply (or its stop).
+   * engine runs it before its reply (DESIGN §4.3 P2); with `edit`, an earlier reply edited then too,
+   * its event arriving while the engine still runs (`now`) or after, while the turn waits for its
+   * reply; then the reply (or its stop).
    */
-  | { op: "duringRun"; type: number; writes: WriteOp[]; setting: boolean; edit?: number; now: boolean; stop: boolean; reply: number };
+  | { op: "duringRun"; type: number; writes: WriteOp[]; edit?: number; now: boolean; stop: boolean; reply: number };
 
 const USER_TEXTS = ["buy:map:30", "buy:lamp:20", "buy:rope:90", "use:map", "use:lamp", "use:rope", "earn:15", "roll", "look around"];
 const REPLIES = ["Okay.", "You find coins. [found:5]", "The lamp slips away. [lose:lamp]", "A windfall! [found:40]", "You drop the map. [lose:map]", "Nothing happens."];
@@ -310,7 +308,7 @@ export function generate(rng: Rng, length: number, depth = 0): Op[] {
 
 /**
  * Writes made while the engine runs a turn before its reply (DESIGN §4.3 P2, L50): a GM agent's or a
- * workspace save (`hold`) or anyone's, with "Hold writes during the engine run" on or off, at times
+ * workspace save or anyone's, at times
  * with an earlier reply edited then too, which still makes the turn stale; and around them the turns,
  * Re-runs and swipes they land over. It starts by settling a pause an earlier part left, since a
  * paused chat refuses every write but Keep and Discard.
@@ -322,8 +320,8 @@ function generateDuringRun(rng: Rng, length: number): Op[] {
   for (let i = 0; i < length; i++) {
     const roll = r();
     if (roll < 0.55) {
-      const writes = Array.from({ length: 1 + Math.floor(r() * 3) }, (): WriteOp => ({ op: "write", kind: r(), a: r(), b: r(), ...(r() < 0.3 ? { gm: r() } : {}), ...(r() < 0.5 ? { hold: true as const } : {}) }));
-      ops.push({ op: "duringRun", type: r(), writes, setting: r() < 0.5, ...(r() < 0.3 ? { edit: r() } : {}), now: r() < 0.5, stop: r() < 0.2, reply: r() });
+      const writes = Array.from({ length: 1 + Math.floor(r() * 3) }, (): WriteOp => ({ op: "write", kind: r(), a: r(), b: r(), ...(r() < 0.3 ? { gm: r() } : {}) }));
+      ops.push({ op: "duringRun", type: r(), writes, ...(r() < 0.3 ? { edit: r() } : {}), now: r() < 0.5, stop: r() < 0.2, reply: r() });
     } else if (roll < 0.75) ops.push({ op: "send", text: r(), reply: r(), createAtEnd: false, rerender: false });
     else if (roll < 0.85) ops.push({ op: "regenerate", at: r(), reply: r(), renarrate: r() < 0.5 });
     else if (roll < 0.92) ops.push({ op: "navigate", at: r(), swipe: r() });
@@ -1035,17 +1033,15 @@ export class Runner {
         if (type !== "normal" && !head) return;
         const core = await this.h.core(chat);
         const before = type === "swipe" && head ? { ledger: structuredClone(core.journal.messages[head.id]?.ledger), tombstones: structuredClone(core.journal.tombstones), shown: head.swipeId } : null;
-        this.h.holdWrites(op.setting);
         // The engine run's pre phase, while the run holds the chat's queue: each write is made then,
         // and waits behind the run, so none is awaited there; and then an earlier reply's edit.
-        const made: { held: boolean; result: Promise<WriteResult> }[] = [];
+        const made: Promise<WriteResult>[] = [];
         let edited = false;
         this.h.duringRun = async (chatId) => {
           for (const inner of op.writes) {
             const w = await this.writeFor(inner);
             if (!w) continue;
-            if (inner.hold) w.hold = true;
-            made.push({ held: inner.hold === true || op.setting, result: this.h.service.write(chatId, this.h.host.userId, w) });
+            made.push(this.h.service.write(chatId, this.h.host.userId, w));
           }
           // A reply before the turn's own target: its edit changes the chain the turn is planned on.
           const replies = this.assistants().filter((m) => type === "normal" || m.id !== head?.id);
@@ -1063,26 +1059,24 @@ export class Runner {
           g = await host.start(chat, { type, messageId: head?.id ?? "" });
         }
         this.h.duringRun = null;
-        const results = await Promise.all(made.map((m) => m.result));
-        const unheld = made.some((m) => !m.held);
+        const results = await Promise.all(made);
         const started = g.halted === undefined;
-        // L50: what the turn's pre-reply window holds never throws the turn away; a write it doesn't
-        // hold, or an edit of the chain the turn was planned on, does, as it always has.
-        if (!unheld && !edited && !started && made.length > 0) throw new InvariantError("L50", `${chat}: a turn whose writes were all held didn't start its reply`);
-        if ((unheld || edited) && started) throw new InvariantError("L50", `${chat}: a turn started its reply though ${edited ? "a reply before it was edited" : "a write its window doesn't hold was made"} while the engine ran`);
+        // L50: the turn's pre-reply window holds every write made while the engine runs it, so none
+        // throws the turn away; an edit of the chain the turn was planned on does, as it always has.
+        if (!edited && !started && made.length > 0) throw new InvariantError("L50", `${chat}: a turn whose writes were all held didn't start its reply`);
+        if (edited && started) throw new InvariantError("L50", `${chat}: a turn started its reply though a reply before it was edited while the engine ran`);
         // L50: none of what it held is journaled before the turn closes.
-        if (started && made.some((m, i) => m.held && results[i]?.applied === true)) throw new InvariantError("L50", `${chat}: a write held through the engine run was journaled before its turn closed`);
+        if (started && results.some((r) => r.applied === true)) throw new InvariantError("L50", `${chat}: a write held through the engine run was journaled before its turn closed`);
         const pending = results.some((r) => r.pending);
         if (started && pending) this.coverage.prereply.held++;
         if (!started && pending) this.coverage.prereply.ended++;
-        if (!started && (unheld || edited)) this.coverage.prereply.stale++;
+        if (!started && edited) this.coverage.prereply.stale++;
         if (started) {
           const reply = pick(REPLIES, op.reply);
           if (op.stop) await host.stop(g, reply.slice(0, 6));
           else await host.finish(g, reply);
           if (before && head) await this.checkRerun(chat, head.id, g.swipeId, before.ledger, before.tombstones, before.shown);
         }
-        this.h.holdWrites(false);
         return;
       }
       case "upgrade": {

@@ -11,6 +11,7 @@ import { isRecord } from "../shared/json";
 import type { ChatId, MessageId, UserId, WorldId } from "../shared/ids";
 import { runDir } from "../shared/ids";
 import type { SecretMarkWording } from "../shared/secret-marks";
+import type { NarratorView } from "../shared/settings";
 import type { ChatRun, GenerationKind, HeldWrite, Journal, Marker, MarkerBody, MessageLedger, PendingTurn, PostKind, Rec, RecSession, RecStatus, RefusedWrite } from "../shared/ledger";
 import { LEDGER_NAMESPACE } from "../shared/ledger";
 import { PROTOCOL_VERSION, type GenerateAs, type GeneratePush } from "../shared/protocol";
@@ -28,7 +29,8 @@ import type { ContextHandlerInput, ContextVerdict, GenerationEndedEvent, Generat
 import { setAside } from "./stored-json";
 import type { Diagnostics } from "./diagnostics";
 import { messageOf } from "./diagnostics";
-import { CANNOT_STOP, NOT_LAST_REPLY, STEP_LABEL } from "../shared/diagnostics";
+import { inTurn, outsideTurns, type TurnFrame } from "./turn-frame";
+import { CANNOT_STOP, FRAME_UNREAD, NOT_LAST_REPLY, STEP_LABEL } from "../shared/diagnostics";
 
 /** Resolves a chat's ledger environment; null when the chat is not a world chat. */
 export type EnvResolver = (chatId: ChatId, userId: UserId) => Promise<LedgerEnv | null>;
@@ -251,7 +253,7 @@ function isRec(rec: unknown): rec is Rec {
 const isChainEntry = (v: unknown): boolean => isRecord(v) && typeof v.id === "string" && typeof v.isUser === "boolean" && isInt(v.swipeId) && isInt(v.swipeCount) && isContent(v.content) && typeof v.parentPath === "string";
 
 function isHeldWrite(w: unknown): boolean {
-  if (!isRecord(w) || typeof w.id !== "string" || !(w.hold === undefined || w.hold === true)) return false;
+  if (!isRecord(w) || typeof w.id !== "string") return false;
   switch (w.kind) {
     case "post":
       return w.target === "head" && isRecord(w.entry) && typeof w.entry.kind === "string" && Array.isArray(w.entry.events) && (w.entry.edit === undefined || (isRecord(w.entry.edit) && (typeof w.entry.edit.clock === "string" ? w.entry.edit.ops === undefined : Array.isArray(w.entry.edit.ops) && w.entry.edit.clock === undefined)));
@@ -363,22 +365,6 @@ export interface TurnContext {
 export type PreOutcome = { waiting: string };
 
 /**
- * What a prepared turn is made from besides its chain and the journal (`TurnHooks.inputs`), and what
- * the chat says when one changes before its reply starts (DESIGN §5.1).
- */
-const TURN_INPUTS = {
-  revision: "the chat's world revision changed",
-  settings: "your RPEngine settings changed",
-  chat: "this chat's knowledge settings changed",
-  engine: "this chat's engine changed",
-} as const satisfies Record<string, string>;
-
-/** Each of a turn's other inputs (`TURN_INPUTS`), as one comparable value. */
-export type TurnInputs = Record<keyof typeof TURN_INPUTS, string>;
-
-const TURN_INPUT_NAMES = Object.keys(TURN_INPUTS) as (keyof typeof TURN_INPUTS)[];
-
-/**
  * Async work around the core's synchronous steps (DESIGN §5.1): the engine run's pre phase, plan
  * phase and sections, and `extract` before the commit, run here inside the chat's queue, so the
  * core then folds their results as plain data. `afterCommit` collects chips; `changed` fires after
@@ -425,11 +411,12 @@ export interface TurnHooks {
   /** The chat's world, read from its metadata alone (the guard's check); null when it isn't a world chat. */
   worldOf(chatId: ChatId, userId: UserId): Promise<WorldId | null>;
   /**
-   * What else the chat's sections are made from, each read from memory (DESIGN §5.1): the chat's
-   * world revision and the settings the turn reads (not every setting: one it doesn't read keeps it).
-   * Each is named, so a turn dropped for it says which changed.
+   * What a turn runs on from its engine run's start to its reply's commit (DESIGN §5.1): the user's
+   * settings and the chat's own choices as they stand now. The run, the guard's write of its
+   * sections and its reply's read each run in it (`inTurn`), so a change made meanwhile applies
+   * from the chat's next turn and never keeps this one's reply from starting.
    */
-  inputs(chatId: ChatId, userId: UserId): TurnInputs;
+  frame(chatId: ChatId, userId: UserId): Promise<TurnFrame>;
   beforeCommit(input: TurnContext): Promise<void>;
   afterCommit(input: TurnContext): Promise<void>;
   /**
@@ -468,6 +455,8 @@ export interface Delivered {
   fills: ReadonlyMap<string, string>;
   placed: string;
   wording: SecretMarkWording;
+  /** What the narrator knew as the sections were made (DESIGN §6.11): the World Info entries in the same prompt are marked by it. */
+  view: NarratorView;
 }
 
 /** One message as the chat's events last showed it: what the guard checks a prepared turn's chain against. */
@@ -524,10 +513,11 @@ interface Prepared {
   target: MessageId | null;
   /** The planned turn, out of the journal; null when it got no plan (a Continue, a turn under a pause). */
   turn: PendingTurn | null;
-  /** The chain it was planned on (`chainStamp`), the journal's epoch then, and the other inputs (`TurnHooks.inputs`). */
+  /** The chain it was planned on (`chainStamp`) and the journal's epoch then. */
   stamp: string;
   epoch: number;
-  inputs: TurnInputs;
+  /** What the turn runs on (`TurnHooks.frame`), taken as its engine run started: its sections' write and its reply's read run in it too. */
+  frame: TurnFrame;
   worldId: WorldId;
   delivered: Delivered;
   /** The guard's write of its sections, once a generation took it: what emptying them waits for. */
@@ -654,8 +644,6 @@ export class LedgerService {
   private readonly answered = new Set<string>();
   /** Each user's guard wait (Settings → Timeouts), within Lumiverse's range, as their settings last read. */
   private readonly guardWait = new Map<UserId, number>();
-  /** The users with "Hold writes during the engine run" on (Settings → Writes, P2), as their settings last read. */
-  private readonly holding = new Set<UserId>();
   /** The last epoch given: every new gate and every write takes the next, so no two are the same (`Gate.epoch`). */
   private epochs = 0;
   /** The guard's registered wait; 0 until attached. */
@@ -740,6 +728,9 @@ export class LedgerService {
       }),
       h.on("GENERATION_ENDED", (e, userId) => {
         this.generationOver(e.chatId, e.generationId);
+        // The reply of a turn the engine prepared is read on what that turn runs on (`Prepared.frame`).
+        const taken = this.gates.get(e.chatId)?.taken;
+        const frame = taken?.generationId === e.generationId ? taken.frame : null;
         // Kept at once, so a retry pressed the moment the reply failed finds its turn.
         const failed = this.afterReply(e.chatId, e.generationId, e);
         const at = userId ? { chatId: e.chatId, userId, turn: e.generationId } : null;
@@ -763,7 +754,8 @@ export class LedgerService {
             if (at) this.diag?.end(at, { status: "failed", reason: "the narrator returned an empty reply" });
             return;
           }
-          await this.commitReply(core, observed, e.chatId, userId, e.generationId, e.messageId, e.content);
+          const read = (): Promise<void> => this.commitReply(core, observed, e.chatId, userId, e.generationId, e.messageId, e.content);
+          await (frame ? inTurn(frame, read) : read());
         });
       }),
       h.on("GENERATION_STOPPED", (e, userId) => {
@@ -798,17 +790,6 @@ export class LedgerService {
   guardBudget(userId: UserId, limit: Limit): void {
     this.guardWait.set(userId, hostBound(HOST_LIMITS.contextHandler, limit));
     if (this.guardTimeout > 0) this.registerGuard();
-  }
-
-  /**
-   * A user's "Hold writes during the engine run" (Settings → Writes, P2), as their settings
-   * read. On, a turn's pre-reply window holds every write made while its engine run, or the turn it
-   * prepared, is under way. Off, it holds only those flagged `hold` (a GM agent's, a workspace
-   * save), and a chip or ✎ fix lands at once and makes the turn stale, as it always has.
-   */
-  holdWrites(userId: UserId, on: boolean): void {
-    if (on) this.holding.add(userId);
-    else this.holding.delete(userId);
   }
 
   /**
@@ -864,7 +845,7 @@ export class LedgerService {
       return "go";
     }
     const p = gate.prepared;
-    if (p && started && this.fresh(input.chatId, gate, p, type, started)) {
+    if (p && started && this.fresh(gate, p, type, started)) {
       const filled = await this.fill(input.chatId, gate, p, started.generationId, signal);
       if (filled !== "moved") return filled;
     }
@@ -875,22 +856,23 @@ export class LedgerService {
   }
 
   /** Whether the engine prepared this generation: one of its type (a swipe's is a regenerate's), on the same target, chain and journal, that no generation took yet. */
-  private fresh(chatId: ChatId, gate: Gate, p: Prepared, type: HostGenerationType, started: GenerationStartedEvent): boolean {
+  private fresh(gate: Gate, p: Prepared, type: HostGenerationType, started: GenerationStartedEvent): boolean {
     if (p.generationId !== null || !(p.type === type || (isSwipe(p.type) && isSwipe(type)))) return false;
     if (isSwipe(type) && started.targetMessageId !== p.target) return false;
-    return this.changedSince(chatId, gate, p) === null;
+    return this.changedSince(gate, p) === null;
   }
 
   /**
-   * What changed since a prepared turn was made (DESIGN §5.1), in the chat's words: its chain, the
-   * journal, or one of the other inputs; null when nothing did.
+   * What changed since a prepared turn was made (DESIGN §5.1), in the chat's words; null when nothing
+   * did. A turn runs on the settings and the chat's choices it started with (`Prepared.frame`), so
+   * only the chat itself counts: its chain, and the journal. No write lands on the journal while a turn
+   * the engine prepared waits (every write made then waits for the turn), so only a turn kept from a
+   * failed reply meets one.
    */
-  private changedSince(chatId: ChatId, gate: Gate, p: Prepared): string | null {
+  private changedSince(gate: Gate, p: Prepared): string | null {
     if (gate.mirror === null || chainStamp(gate.mirror, p.type, p.target) !== p.stamp) return "a message of the chat was sent, edited, swiped or deleted";
     if (p.epoch !== gate.epoch) return "a change was made to the chat's world (a fix, a confirmed change, detail opened)";
-    const now = this.hooks?.inputs(chatId, gate.userId) ?? p.inputs;
-    const input = TURN_INPUT_NAMES.find((name) => now[name] !== p.inputs[name]);
-    return input ? TURN_INPUTS[input] : null;
+    return null;
   }
 
   /**
@@ -903,7 +885,7 @@ export class LedgerService {
   private dropIfStale(chatId: ChatId): void {
     const gate = this.gates.get(chatId);
     const p = gate?.prepared;
-    const changed = gate && p && p.generationId === null ? this.changedSince(chatId, gate, p) : null;
+    const changed = gate && p && p.generationId === null ? this.changedSince(gate, p) : null;
     if (!gate || !p || changed === null) return;
     gate.prepared = null;
     if (p.kept === null) this.notStarted(chatId, gate.userId, p, `${changed} after the engine ran and before the reply started`);
@@ -981,7 +963,7 @@ export class LedgerService {
     const p = gate?.prepared;
     const swipe = p?.failedSwipe ?? null;
     if (!gate || !p || !userId || gate.userId !== userId || p.kept !== "empty" || p.generationId !== null || p.target !== message.id || message.isUser || swipe === null || message.swipeId !== swipe || (message.swipes[swipe] ?? "").trim() === "") return false;
-    if (gate.mirror?.at(-1)?.id !== message.id || this.changedSince(chatId, gate, p) !== null) return false;
+    if (gate.mirror?.at(-1)?.id !== message.id || this.changedSince(gate, p) !== null) return false;
     const generationId = `late-${crypto.randomUUID()}`;
     p.generationId = generationId;
     gate.prepared = null;
@@ -1007,8 +989,11 @@ export class LedgerService {
       if (p.turn && !core.adopt(generationId, p.turn)) this.diag?.failed(at, "plan", "plan", "the reply's text couldn't take the prepared plan, so this turn commits without it");
       core.saved(generationId);
       core.sync(observed);
-      await this.hooks?.adopted(chatId, userId, p.id, generationId);
-      await this.commitReply(core, observed, chatId, userId, generationId, message.id, content);
+      // The read is the kept turn's, on what it runs on (`Prepared.frame`).
+      await inTurn(p.frame, async () => {
+        await this.hooks?.adopted(chatId, userId, p.id, generationId);
+        await this.commitReply(core, observed, chatId, userId, generationId, message.id, content);
+      });
     }).finally(() => {
       if (gate.reading === generationId) gate.reading = null;
     });
@@ -1092,11 +1077,6 @@ export class LedgerService {
     const at = { chatId, userId, turn: p.id };
     this.diag?.end(at, { status: "failed", reason: `${why}, so nothing was generated` });
     void this.hooks?.failed({ chatId, userId, turn: p.id, step: "stale", reason: why, as: p.as }).catch((error: unknown) => this.diag?.error(at, "restart", error, "the chat wasn't told its reply didn't start"));
-  }
-
-  /** The user's settings or preset changed (`TurnHooks.inputs`): each of their chats' waiting turns is checked. */
-  inputsChanged(userId: UserId): void {
-    for (const [chatId, gate] of [...this.gates]) if (gate.userId === userId) this.dropIfStale(chatId);
   }
 
   /**
@@ -1373,7 +1353,9 @@ export class LedgerService {
       this.endRun(chatId, userId, p);
       return "cancel";
     }
-    const writing = this.hooks ? this.hooks.fill(chatId, userId, p.delivered) : Promise.resolve<"filled" | "moved">("filled");
+    const hooks = this.hooks;
+    // Written on what the turn runs on, as its sections were made.
+    const writing = hooks ? inTurn(p.frame, () => hooks.fill(chatId, userId, p.delivered)) : Promise.resolve<"filled" | "moved">("filled");
     p.writing = writing.then(
       () => undefined,
       () => undefined,
@@ -1445,25 +1427,25 @@ export class LedgerService {
    * is prepared, its pre phase, plan and plan phase run, and its sections go into the world's book;
    * then the frontend starts the generation again and the guard lets it through. A failed step stops
    * the run: nothing is generated, the book is emptied, and the chat says which step failed and why,
-   * with a Retry.
+   * with a Retry. The run is the turn's work, on what the turn runs on (`TurnHooks.frame`), taken as
+   * it starts; when that can't be taken, the run fails at its start as a failed step does.
    */
   private engine(chatId: ChatId, userId: UserId, halt: Halt, kind: GenerationKind): Promise<void> {
     const at = { chatId, userId, turn: halt.id };
     // How the run ends, for what the runtime kept for it alone (`TurnHooks.ran`).
     let ending: RunOutcome = "failed";
-    return this.run(chatId, userId, async (core, observed) => {
+    const plan = async (core: LedgerCore, observed: ChainMessage[], frame: TurnFrame | EngineFailure | null): Promise<void> => {
       const gate = this.gates.get(chatId);
       const hooks = this.hooks;
       // Only the gate that stopped the generation, still the chat's: a run never prepares a turn on another.
-      if (!gate || gate.running !== halt.id || !hooks) {
+      if (!gate || gate.running !== halt.id || !hooks || frame === null) {
         this.diag?.end(at, { status: "failed", reason: "the engine lost track of the stopped reply, so nothing was generated; generate again" });
         return;
       }
       core.sync(observed);
-      // The chain and journal the plan reads; anything that changes them before the restart makes it stale.
+      // The chain and journal the plan reads; a change to either before the restart makes it stale.
       gate.mirror = mirrorOf(observed);
       const epoch = gate.epoch;
-      const inputs = hooks.inputs(chatId, userId);
       const stamp = chainStamp(gate.mirror, halt.type, halt.target);
       const earlier = gate.prepared;
       if (earlier) {
@@ -1505,6 +1487,8 @@ export class LedgerService {
       let delivered: Delivered | null = null;
       let claimed = false;
       try {
+        // What the turn runs on couldn't be taken as the run started: it fails here, before any step.
+        if (frame instanceof EngineFailure) throw frame;
         // Lumiverse starts only the last reply again, so a reply for an earlier message (Edit and Send
         // in place, a swipe of an earlier reply) is refused before any model call, never sent to the last one.
         if (halt.target !== null && observed.at(-1)?.id !== target?.id) throw new EngineFailure("target", NOT_LAST_REPLY);
@@ -1565,10 +1549,10 @@ export class LedgerService {
       // the first page to show the chat claims it (`askAgain`).
       const viewer = this.viewerOf(chatId, userId);
       const holder = halt.session !== undefined && (this.reports(halt.session, chatId) || (viewer === null && this.shows(halt.session, chatId))) ? halt.session : viewer;
-      const prepared: Prepared = { id: halt.id, type: halt.type, target: target?.id ?? null, turn: turn?.planned ? turn : null, stamp, epoch, inputs, worldId: gate.worldId, delivered, writing: null, as, holder, generationId: null, kept: null, failedSwipe: null };
+      const prepared: Prepared = { id: halt.id, type: halt.type, target: target?.id ?? null, turn: turn?.planned ? turn : null, stamp, epoch, frame, worldId: gate.worldId, delivered, writing: null, as, holder, generationId: null, kept: null, failedSwipe: null };
       gate.prepared = prepared;
       ending = "prepared";
-      // Anything that changed while the engine ran makes the turn stale at once: nothing is generated.
+      // A change to the chat while the engine ran makes the turn stale at once: nothing is generated.
       this.dropIfStale(chatId);
       if (this.gates.get(chatId)?.prepared !== prepared) {
         ended();
@@ -1579,6 +1563,13 @@ export class LedgerService {
       // A host that names no page asks every page.
       if (prepared.holder !== null) this.host.frontend.send(restartPush(chatId, prepared), userId, prepared.holder);
       else if (!this.host.capabilities.sessions) this.host.frontend.send(restartPush(chatId, prepared), userId);
+    };
+    return this.run(chatId, userId, async (core, observed) => {
+      // What the turn runs on, as its run starts: the settings and the chat's own choices as they
+      // stand. A read of them that fails fails the run as a failed step does (its Diagnostics record,
+      // the engine-failed card and its Retry), never silently; that run has no frame to run in.
+      const frame = this.hooks ? await this.hooks.frame(chatId, userId).catch((error: unknown) => new EngineFailure("engine", `${FRAME_UNREAD} (${messageOf(error)})`)) : null;
+      await (frame === null || frame instanceof EngineFailure ? plan(core, observed, frame) : inTurn(frame, () => plan(core, observed, frame)));
     }).finally(() => {
       this.ran(chatId, halt.id);
       this.hooks?.ran?.({ chatId, userId, turn: halt.id, outcome: ending });
@@ -1657,17 +1648,16 @@ export class LedgerService {
   }
 
   /**
-   * A user write from the frontend (chip confirm, ✎ fix, materialization, marker, Keep/Discard,
-   * Re-read), or an agent's; a turn the engine prepared before it is stale. One the turn's pre-reply
-   * window holds (P2) is the exception: made while the chat's engine run, or the turn it
-   * prepared, is under way (from the guard's stop until that turn's reply ends), and flagged `hold`
-   * or with the user's "Hold writes during the engine run" on, it waits for the turn and never makes
-   * it stale. Its reply's window closing lands it, or the run ending without a reply (`endRun`).
+   * A user write from the frontend (a chip's Apply or Undo, a ✎ fix, a GM edit, a mechanical action,
+   * materialization, a marker, Keep/Discard, Re-read), or an agent's. One made while a turn is under
+   * way (from the guard's stop until that turn's reply ends) waits for the turn (P2): the run's
+   * pre-reply window holds it, so it never makes the turn stale and the reply starts as planned; its
+   * reply's window closing lands it, over what the turn did, or the run ending without a reply
+   * (`endRun`). Any other lands at once, and a turn kept from a failed reply goes with it.
    */
   async write(chatId: ChatId, userId: UserId, w: HeldWrite): Promise<WriteResult> {
     const gate = this.gates.get(chatId);
-    const underWay = gate !== undefined && (gate.running !== null || (gate.prepared !== null && gate.prepared.kept === null) || gate.taken !== null);
-    const early = underWay && (w.hold === true || this.holding.has(userId));
+    const early = gate !== undefined && (gate.running !== null || (gate.prepared !== null && gate.prepared.kept === null) || gate.taken !== null);
     if (!early) this.wrote(chatId);
     let result: WriteResult = { applied: false, pending: false, reason: "not a world chat" };
     await this.run(
@@ -1943,15 +1933,19 @@ export class LedgerService {
     }
   }
 
-  /** Runs one operation on the chat's queue, then persists the journal and flushes metadata. `write` is a write the operation lands (its revision is loaded first). */
+  /**
+   * Runs one operation on the chat's queue, then persists the journal and flushes metadata. `write`
+   * is a write the operation lands (its revision is loaded first). The operation runs outside every
+   * turn's frame, whoever queued it: a turn's own work enters its frame itself (`inTurn`).
+   */
   private async run(chatId: ChatId, userId: UserId | null, op: Op, write?: HeldWrite): Promise<void> {
     this.outstanding++;
     try {
-      const slot = await this.slot(chatId, userId);
+      const slot = await outsideTurns(() => this.slot(chatId, userId));
       if (!slot) return;
       slot.ops++;
       slot.queue = slot.queue
-        .then(async () => {
+        .then(() => outsideTurns(async () => {
           // A kept read answers at once: the op gives way first, so a message waiting runs before its folds.
           await giveWay();
           const observed = this.observe(chatId, slot.userId, await this.host.chats.messages(chatId, slot.userId));
@@ -1969,7 +1963,7 @@ export class LedgerService {
           await this.persist(chatId, slot);
           await this.flush(chatId, slot);
           this.hooks?.changed(chatId, slot.userId);
-        })
+        }))
         .catch((error: unknown) => {
           const text = `[LumiRPEngine] ledger ${chatId}: ${error instanceof Error ? (error.stack ?? error.message) : String(error)}`;
           this.errors.push(text);

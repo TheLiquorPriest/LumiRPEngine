@@ -132,7 +132,40 @@ export interface AgentHandle {
  */
 export type AgentWatch = (agent: { id: string; role: string }, spent: { in: number; out: number } | null) => void;
 
-/** A turn's agents together (§10): their tokens and rounds of tool calls against the turn's budget, and its time from when the turn began; `watch` hears each of them at work. */
+/** Where an agent works in its turn, as GM → Live tells it: the role run it works for, its Diagnostics phase or the main agent's stage, and its task. */
+export interface AgentTraceTag {
+  run?: string;
+  phase?: string;
+  stage?: string;
+  task?: string;
+}
+
+/** An agent starting work, as GM → Live hears it: its spec, what it is told first, how many messages of a conversation it takes up, and where it works (`AgentDeps.trace`). */
+export interface AgentStarted {
+  id: string;
+  role: string;
+  connectionId: string | null;
+  model: string | null;
+  effort: AgentEffort;
+  system: string;
+  prefix: string[];
+  history: number;
+  tag: AgentTraceTag;
+}
+
+/**
+ * Hears everything a turn's agents do, for GM → Live and the turn's transcript (DESIGN §4.6): each
+ * agent as it starts work, every step of its transcript as it is made (what it is sent, each answer
+ * with its reasoning and calls, each result, its stop), and when it finishes a message, with what it
+ * spent. GM data, never on a player surface: the activity line hears only `AgentWatch`.
+ */
+export interface AgentTrace {
+  start(agent: AgentStarted): void;
+  entry(agentId: string, entry: TranscriptEntry): void;
+  idle(agentId: string, spent: { in: number; out: number }): void;
+}
+
+/** A turn's agents together (§10): their tokens and rounds of tool calls against the turn's budget, and its time from when the turn began; `watch` hears each of them at work, and `trace` everything they do. */
 export class AgentTurn {
   readonly startedAt: number;
   readonly used = { in: 0, out: 0, toolTurns: 0 };
@@ -141,6 +174,7 @@ export class AgentTurn {
     readonly budget: TurnBudget,
     now: () => number = () => Date.now(),
     readonly watch: AgentWatch | null = null,
+    readonly trace: AgentTrace | null = null,
   ) {
     this.startedAt = now();
   }
@@ -155,6 +189,8 @@ export interface AgentDeps {
   accounts: AgentAccounts;
   /** The turn the agent works in; null outside one (the GM agent chat). */
   turn: AgentTurn | null;
+  /** Where the agent works in its turn, for GM → Live (`AgentTurn.trace`). */
+  trace?: AgentTraceTag;
   /** The clock (tests pass their own). */
   now?: () => number;
 }
@@ -208,6 +244,7 @@ class Agent implements AgentHandle {
     // An agent with tools gets scratch_read, for the results that come back clipped.
     if (this.tools.size > 0) this.tools.set(SCRATCH_READ, this.scratchRead());
     this.offered = [...this.tools.values()].map((t) => ({ name: t.name, description: t.description, parameters: t.parameters }));
+    deps.turn?.trace?.start({ id: this.id, role: spec.role, connectionId: spec.connectionId, model: spec.model, effort: spec.effort, system: spec.system, prefix: [...spec.prefix], history: spec.history?.length ?? 0, tag: deps.trace ?? {} });
   }
 
   private text(id: string, vars: Readonly<Record<string, string>> = {}): string {
@@ -226,14 +263,21 @@ class Agent implements AgentHandle {
     this.ending = null;
     this.startedAt ??= this.now();
     this.conversation.push({ role: "user", content: text });
-    this.entries.push({ kind: "message", text, at: this.now() });
+    this.record({ kind: "message", text, at: this.now() });
     try {
       this.watched();
       return await this.loop(used, signal);
     } finally {
       this.busy = false;
       this.deps.turn?.watch?.({ id: this.id, role: this.spec.role }, null);
+      this.deps.turn?.trace?.idle(this.id, { in: this.total.in, out: this.total.out });
     }
+  }
+
+  /** A step of its work joins its transcript, and the turn's trace hears it (GM → Live). */
+  private record(entry: TranscriptEntry): void {
+    this.entries.push(entry);
+    this.deps.turn?.trace?.entry(this.id, entry);
   }
 
   /** Tells the turn's watcher what this agent has spent so far, while it works a message. */
@@ -275,7 +319,7 @@ class Agent implements AgentHandle {
       } catch (error) {
         if (error instanceof ToolsRefused) {
           // The connection takes no native tools: the same round again, with them as text, the refusal on the record.
-          this.entries.push({ kind: "tools_refused", reason: error.message, ms: this.now() - sentAt, at: this.now() });
+          this.record({ kind: "tools_refused", reason: error.message, ms: this.now() - sentAt, at: this.now() });
           this.session.refuseNativeTools(error.message);
           continue;
         }
@@ -290,7 +334,7 @@ class Agent implements AgentHandle {
       }
       this.watched();
       said = reply.text;
-      this.entries.push({ kind: "answer", text: reply.text, ...(reply.reasoning ? { reasoning: reply.reasoning } : {}), calls: reply.calls.map((c) => ({ id: c.id, name: c.name, args: c.args })), written: reply.written, tools: prepared.names.size === 0 ? "none" : prepared.textTools ? "text" : "native", usage: reply.usage, model: reply.model, finishReason: reply.finishReason, ms: reply.ms, at: this.now() });
+      this.record({ kind: "answer", text: reply.text, ...(reply.reasoning ? { reasoning: reply.reasoning } : {}), calls: reply.calls.map((c) => ({ id: c.id, name: c.name, args: c.args })), written: reply.written, tools: prepared.names.size === 0 ? "none" : prepared.textTools ? "text" : "native", usage: reply.usage, model: reply.model, finishReason: reply.finishReason, ms: reply.ms, at: this.now() });
       if (reply.calls.length === 0) {
         this.answered = true;
         this.conversation.push({ role: "assistant", content: reply.text });
@@ -394,7 +438,7 @@ class Agent implements AgentHandle {
   private end(used: AgentUsage, stop: AgentStop, said = ""): AgentReply {
     const status = STATUS[stop.code] ?? "refused";
     const reason = this.text(stop.text.id, stop.text.vars);
-    this.entries.push({ kind: "stop", status, code: stop.code, reason, at: this.now() });
+    this.record({ kind: "stop", status, code: stop.code, reason, at: this.now() });
     return { status, text: said, code: stop.code, reason, usage: { ...used } };
   }
 
@@ -430,7 +474,7 @@ class Agent implements AgentHandle {
     }
     const kept = call.name === SCRATCH_READ ? null : this.clip(outcome.text);
     const text = kept?.text ?? outcome.text;
-    this.entries.push({ kind: "result", callId: call.id, name: call.name, text, error: outcome.error === true, ...(kept ? { scratch: kept.handle } : {}), ms: this.now() - t0, at: this.now() });
+    this.record({ kind: "result", callId: call.id, name: call.name, text, error: outcome.error === true, ...(kept ? { scratch: kept.handle } : {}), ms: this.now() - t0, at: this.now() });
     if (outcome.end && outcome.error !== true) this.ending = outcome.text;
     return { call, text, error: outcome.error === true };
   }

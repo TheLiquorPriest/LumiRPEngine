@@ -397,6 +397,17 @@ export class Diagnostics {
     this.add(at, { kind: "step", level: "warn", turn: at.turn, phase, step, status: "failed", start: t, end: t, ms: 0, reason, ...(hint ? { fix: hint } : {}) });
   }
 
+  /**
+   * What a role's run left the engine (`agents/yields.ts`): the changes it staged, held for the review
+   * card or was refused, and what of its answer the engine didn't take, and why. A record of its own,
+   * never a failure: the run answered, and an agent turn stops on its fatal records alone. One that
+   * says what the engine didn't take (`lost`) is a warning.
+   */
+  yielded(at: DiagAt, phase: DiagPhase, step: string, reason: string, lost: boolean): void {
+    const t = this.now();
+    this.add(at, { kind: "step", level: lost ? "warn" : "info", turn: at.turn, phase, step, status: "ok", start: t, end: t, ms: 0, reason });
+  }
+
   /** The turn is an agent turn (INC2-SPEC lane T1): from now on only its fatal records stop it (`failure`). */
   agentTurn(at: DiagAt): void {
     if (at.turn !== null) this.agentTurns.add(`${at.chatId}\u0000${at.turn}`);

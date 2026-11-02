@@ -637,14 +637,14 @@ describe("proposal labels", () => {
 });
 
 describe("Scene slot", () => {
-  test("the Scene slot states the turn's elapsed time (DESIGN §9.2)", async () => {
+  test("the Scene slot states the turn's elapsed time, from when to when where it tells the time of day (DESIGN §9.2)", async () => {
     const rig = new Rig();
     const chatId = await rig.worldChat();
     rig.host.sendUser(chatId, "I look around.");
     await rig.host.settle();
     const g = await rig.host.start(chatId, { type: "normal" });
     const scene = rig.host.section("Scene");
-    expect(scene).toMatch(/This turn took \d+ min\./);
+    expect(scene).toMatch(/This turn took \d+ min(?:, from \d{1,2}:\d{2} [AP]M to \d{1,2}:\d{2} [AP]M)?\./);
     await rig.host.finish(g, "Quiet.");
   });
 });

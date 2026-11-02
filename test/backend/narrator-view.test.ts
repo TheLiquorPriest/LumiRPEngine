@@ -372,7 +372,7 @@ describe("a chat's choices over time", () => {
     expect((await preview(rig, chatId)).sections.find((s) => s.slot === "people")?.scope).toBe("gm");
   });
 
-  test("a turn prepared before the chat's choice changed never goes out on it: the engine runs again, and the reply reads the new one", async () => {
+  test("a turn prepared before the chat's choice changed goes out on the choice it started with; the next turn reads the new one", async () => {
     const rig = new Rig({ shipped: true });
     await roomy(rig);
     const chatId = await alder(rig, { entities: secretHere });
@@ -382,12 +382,12 @@ describe("a chat's choices over time", () => {
     expect((await rig.host.begin(chatId, { type: "normal" })).halted).toBe("cancelled");
     expect(await chatKnowledge(rig, chatId, { narrator: POV })).toEqual({ knowledge: null, narrator: POV });
     rig.host.restarts.length = 0;
-    // The reply finds its turn made on the old choice: the engine runs again before it starts.
-    expect((await rig.host.begin(chatId, { type: "regenerate" })).halted).toBe("cancelled");
-    expect(rig.host.restarts).toMatchObject([{ chatId, as: "regenerate" }]);
+    // The reply takes its turn as prepared: the choice applies from the chat's next turn.
     const reply = await rig.host.begin(chatId, { type: "regenerate" });
     expect(reply.halted).toBeUndefined();
-    expect(prompt(rig)).not.toContain(SECRET);
+    expect(prompt(rig)).toContain(SECRET);
     await rig.host.finish(reply, "Quiet.");
+    await rig.turn(chatId, "I look around again.", "Still quiet.");
+    expect(prompt(rig)).not.toContain(SECRET);
   });
 });

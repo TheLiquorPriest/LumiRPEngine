@@ -1,10 +1,8 @@
-// Lore curation on the fake host (DESIGN §4.2): drift between a book-sourced entry and its World
-// Info entry, the lookup table written whole as a world part, and the AI indexing jobs end to end
-// (book or text → helper → checked proposals with sources → applied as the review does).
+// Lore curation on the fake host (DESIGN §4.2): the lookup table written whole as a world part, and
+// Index this text end to end (text → helper → checked proposals → applied as the review does).
 
 import { describe, expect, test } from "bun:test";
 import { isRecord } from "../../src/shared/json";
-import { bookTextHash } from "../../src/shared/lore";
 import type { JobProposal } from "../../src/shared/protocol";
 import type { WorldDoc } from "../../src/shared/world";
 import { IMPORT_MAX_CALLS } from "../../src/backend/proposals";
@@ -13,7 +11,7 @@ import { proposalWrites } from "../../src/frontend/build/jobs";
 import { Rig } from "../support/rig";
 
 /** Starts a job on the rig's fake host and returns its last update. */
-async function finished(rig: Rig, kind: "index_book" | "index_text", worldId: string, input: Record<string, unknown>) {
+async function finished(rig: Rig, kind: "index_text", worldId: string, input: Record<string, unknown>) {
   const jobId = rig.body(await rig.send({ type: "lre.job", op: "start", kind, worldId, input: JSON.parse(JSON.stringify(input)) })).jobId;
   await rig.host.settle();
   const last = rig.host.sent.filter((m) => m.type === "lre.job.update" && m.jobId === jobId).at(-1);
@@ -34,32 +32,6 @@ async function applyAll(rig: Rig, worldId: string, proposals: JobProposal[]): Pr
 const bookEntry = (comment: string, content: string) => ({ comment, content, keys: [comment.toLowerCase()], disabled: false, constant: false, position: 0, depth: 4, role: null, order: 100, extensions: {} });
 
 describe("lore curation", () => {
-  test("drift: a book-sourced entry whose book entry changed shows the new text; one whose entry is gone says so", async () => {
-    const rig = new Rig();
-    const worldId = await rig.newWorld();
-    const user = rig.host.userId;
-    const book = await rig.host.books.create("Harbor lore", "", user);
-    const text = "The old lighthouse stands dark on the breakwater.";
-    const entryId = await rig.host.books.createEntry(book, bookEntry("Lighthouse", text), user);
-    const gone = await rig.host.books.createEntry(book, bookEntry("Ferry", "The ferry runs hourly."), user);
-    const put = (id: string, from: string, content: string) => rig.send({ type: "lre.editor", op: "put", worldId, base: null, collection: "lore", id, value: { id, title: id, content, keys: [], links: [], source: { kind: "book", bookId: book, entryId: from, hash: bookTextHash(content) } } });
-    rig.body(await put("lighthouse", entryId, text));
-    rig.body(await put("ferry", gone, "The ferry runs hourly."));
-    rig.body(await rig.send({ type: "lre.editor", op: "put", worldId, base: null, collection: "lore", id: "authored", value: { id: "authored", title: "Authored", content: "x", keys: [], links: [] } }));
-    const drift = async (id?: string) => rig.body(await rig.send({ type: "lre.lore", op: "drift", worldId, ...(id ? { id } : {}) })).drift;
-    expect(await drift()).toEqual({});
-    rig.host.editEntry(entryId, { content: "The old lighthouse burns again." });
-    await rig.host.books.deleteEntry(gone, user);
-    expect(await drift()).toEqual({ lighthouse: { status: "changed", content: "The old lighthouse burns again.", hash: bookTextHash("The old lighthouse burns again.") }, ferry: { status: "missing" } });
-    expect(await drift("ferry")).toEqual({ ferry: { status: "missing" } });
-    expect(await drift("authored")).toEqual({});
-    // Refreshed from the book (as the form does) and saved: it matches again.
-    rig.body(await put("lighthouse", entryId, "The old lighthouse burns again."));
-    expect(await drift("lighthouse")).toEqual({});
-    const unknown = await rig.send({ type: "lre.lore", op: "drift", worldId, id: "constructor" });
-    expect(unknown.type === "lre.error" && unknown.code).toBe("not_found");
-  });
-
   test("the lookup table is written whole; keys that could reach a prototype and lists of other things are dropped", async () => {
     const rig = new Rig();
     const worldId = await rig.newWorld();
@@ -70,54 +42,6 @@ describe("lore curation", () => {
 });
 
 describe("AI lore indexing", () => {
-  test("Index a World Info book: proposals keep the book's text and its hash, link only what exists, skip lore the world has, and join the lookup table when applied", async () => {
-    const rig = new Rig();
-    const worldId = await rig.newWorld();
-    const user = rig.host.userId;
-    const book = await rig.host.books.create("Harbor lore", "", user);
-    const text = "The old lighthouse stands dark on the breakwater. Dev keeps the key.";
-    const light = await rig.host.books.createEntry(book, bookEntry("Lighthouse", text), user);
-    const ferry = await rig.host.books.createEntry(book, bookEntry("Ferry", "The ferry runs hourly from the home dock."), user);
-    const off = await rig.host.books.createEntry(book, { ...bookEntry("Off", "Switched off."), disabled: true }, user);
-    // The ferry was indexed before: it is skipped without being read.
-    rig.body(await rig.send({ type: "lre.editor", op: "put", worldId, base: null, collection: "lore", id: "ferry", value: { id: "ferry", title: "The ferry", content: "The ferry runs hourly from the home dock.", keys: [], links: [], source: { kind: "book", bookId: book, entryId: ferry, hash: bookTextHash("The ferry runs hourly from the home dock.") } } }));
-    rig.host.quietReply = () =>
-      JSON.stringify({
-        entries: [
-          { key: "Breakwater Lighthouse", title: "Breakwater Lighthouse", aliases: ["the old lighthouse", "Breakwater lighthouse"], topics: ["Harbor"], links: ["dev", "mars"], terms: ["Lamp house"], confidence: 0.9, source: light },
-          { key: "light_again", title: "Lighthouse again", confidence: 0.5, source: "Lighthouse" },
-          { key: "nowhere", title: "Nowhere", confidence: 0.9, source: "e-unknown" },
-        ],
-      });
-    const out = await finished(rig, "index_book", worldId, { bookId: book });
-    const prompt = rig.host.quietCalls.map((c) => c.messages.map((m) => m.content).join("\n")).join("\n");
-    expect(rig.host.quietCalls.length).toBe(1);
-    expect(prompt).toContain(`(source: ${light})`);
-    expect(prompt).not.toContain(`(source: ${ferry})`);
-    expect(prompt).not.toContain(`(source: ${off})`);
-    expect(prompt).toContain("dev:person:Dev");
-    expect(out.proposals.map((p) => p.key)).toEqual(["breakwater_lighthouse"]);
-    const [p] = out.proposals;
-    expect(p?.value).toEqual({ id: "breakwater_lighthouse", title: "Breakwater Lighthouse", content: text, keys: ["lighthouse"], links: ["dev"], aliases: ["the old lighthouse"], topics: ["Harbor"], source: { kind: "book", bookId: book, entryId: light, hash: bookTextHash(text) } });
-    expect(p?.index).toEqual({ terms: ["breakwater lighthouse", "the old lighthouse", "lamp house"], topics: [{ id: "harbor", label: "Harbor" }] });
-    expect(p?.note).toContain("dropped unknown link mars");
-    expect(p?.sourceNames).toEqual({ [`${book}/${light}`]: "Lighthouse" });
-    expect(out.message).toContain("1 entry already in the world's lore was skipped.");
-    expect(out.message).toContain("2 of 3 proposal(s) dropped");
-    const after = await applyAll(rig, worldId, out.proposals);
-    expect(after.lore.breakwater_lighthouse?.source).toEqual({ kind: "book", bookId: book, entryId: light, hash: bookTextHash(text) });
-    expect(after.loreIndex).toEqual({ terms: { "breakwater lighthouse": ["breakwater_lighthouse"], "the old lighthouse": ["breakwater_lighthouse"], "lamp house": ["breakwater_lighthouse"] }, topics: { harbor: { label: "Harbor", entries: ["breakwater_lighthouse"] } } });
-    expect(rig.body(await rig.send({ type: "lre.lore", op: "drift", worldId })).drift).toEqual({});
-    rig.body(await rig.send({ type: "lre.world", op: "commit", worldId, base: null }));
-    // Run again: every entry with text is in the lore now, so nothing is asked.
-    rig.host.quietCalls.length = 0;
-    const again = await finished(rig, "index_book", worldId, { bookId: book });
-    expect([again.status, again.message, rig.host.quietCalls.length]).toEqual(["failed", "every entry of that book with text is already in the world's lore", 0]);
-    // The world's own engine book is never indexed.
-    const engine = (await rig.rt.worlds.index(worldId, user))?.loreBookId ?? "";
-    expect((await finished(rig, "index_book", worldId, { bookId: engine })).message).toBe("that is the world's own engine book; pick one of your books");
-  });
-
   test("Index this text: entries in the AI's words are pending until applied; repeated titles and empty text are dropped; a taken id gets a number", async () => {
     const rig = new Rig();
     const worldId = await rig.newWorld();

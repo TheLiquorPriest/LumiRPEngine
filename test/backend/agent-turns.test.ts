@@ -248,7 +248,7 @@ describe("the Engine switch", () => {
     expect((await rig.send({ type: "lre.chat.knowledge", chatId: branch, engine: "fast" })).type).toBe("lre.error");
   });
 
-  test("switched while the engine runs, it drops the turn the other engine prepared, and says why", async () => {
+  test("switched while the engine runs, the turn finishes on the engine it started on, and the next turn plays the new one", async () => {
     const rig = new Rig();
     const chatId = await rig.worldChat();
     rig.body(await rig.send({ type: "lre.chat.knowledge", chatId }));
@@ -261,15 +261,15 @@ describe("the Engine switch", () => {
     };
     rig.host.sendUser(chatId, "I wave.");
     await rig.host.settle();
-    const stopped = await rig.host.start(chatId, { type: "normal" });
+    const g = await rig.host.start(chatId, { type: "normal" });
     expect(switched).toBe(true);
-    expect(stopped.halted).toBe("cancelled");
-    const flag = (await rig.rt.view(chatId, rig.host.userId)).chips.find((c) => c.kind === "engine_failed");
-    expect(flag?.detail).toBe("This chat's engine changed after the engine ran and before the reply started");
-    // Retry runs the engine again, now on agents.
-    const g = await rig.host.start(chatId, { type: "regenerate" });
     expect(g.halted).toBeUndefined();
     await rig.host.finish(g, "Someone waves back.");
+    expect((await rig.rt.view(chatId, rig.host.userId)).chips.some((c) => c.kind === "engine_failed")).toBe(false);
+    // Classic's turn records no outputs; the next turn, on agents, does.
+    expect(outputsOf((await lastRecord(rig, chatId)).events)).toBeNull();
+    rig.host.quietReply = () => "{}";
+    await rig.turn(chatId, "I nod.", "Someone nods back.");
     expect(outputsOf((await lastRecord(rig, chatId)).events)).not.toBeNull();
   });
 });

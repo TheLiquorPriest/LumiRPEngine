@@ -14,9 +14,11 @@ import type { MindsRunView } from "../../src/shared/minds";
 import type { AssistantProposal, AssistantProposalOp, AssistantRun, AssistantView, LoreBookEntryView, LorePinView, TraceRow, WorkspaceFileView } from "../../src/shared/protocol";
 import { editedBookFields, OLD_SECRECY_FIELDS, withBookLoreFields, type BookLoreFields } from "../../src/shared/lore";
 import { parseSecretMarks, unreadableMarks, wholeEntrySecret } from "../../src/shared/secret-marks";
-import type { DeltaOp, EditOp, FrontendToBackend, JobProposal, JobSummary, JobUpdate, LoreDrift, PresetCard, ResultBodies } from "../../src/shared/protocol";
+import type { DeltaOp, EditOp, FrontendToBackend, JobProposal, JobSummary, JobUpdate, PresetCard, ResultBodies } from "../../src/shared/protocol";
 import { AGENT_API } from "../../src/shared/protocol";
-import type { UserSettings } from "../../src/shared/settings";
+import { loreBooksSettingOf, loreIndexSettingsOf, type UserSettings } from "../../src/shared/settings";
+import { LORE_INDEX_TEXT } from "../../src/shared/lore-routing";
+import { renderIndex } from "../../src/backend/lore-routing";
 import { agentSettingsOf, type AcceptanceState } from "../../src/shared/agent-settings";
 import { blobHash, isLearnedPath, isWorkspacePath } from "../../src/shared/stores";
 import type { GmView, StateView } from "../../src/shared/state-view";
@@ -100,12 +102,31 @@ const PROPOSALS: JobProposal[] = [
   { id: "p4", collection: "tracks", key: "secret_debt", value: { id: "secret_debt", kind: "secret", label: "Rosie's debt", start: "hidden", stages: { hidden: { label: "Hidden", next: [] } }, visibility: "secret" }, source: "Lore: “Rosie”", confidence: 0.41, note: "Low confidence: mentioned once" },
 ];
 
-/** What "Index a World Info book" proposes for the preview's Town lore. */
+/** What "Index this text" proposes for pasted text about the preview's town: each an AI entry waiting for review. */
 const LORE_PROPOSALS: JobProposal[] = [
-  { id: "l1", collection: "lore", key: "maple_falls_library", value: { id: "maple_falls_library", title: "Maple Falls Library", content: "The library on Elm Street keeps the town's newspapers back to 1902, and Mrs. Hale knows where every one is.", keys: ["library"], links: ["maple"], aliases: ["the library", "Elm Street library"], topics: ["Town places"], source: { kind: "book", bookId: "book-town", entryId: "e-library", hash: "h-library" } }, source: "e-library", confidence: 0.92, pack: "lore", index: { terms: ["maple falls library", "the library", "elm street library"], topics: [{ id: "town_places", label: "Town places" }] }, sourceNames: { "book-town/e-library": "Library" } },
-  { id: "l2", collection: "lore", key: "okafor_family", value: { id: "okafor_family", title: "The Okafor family", content: "The Okafors have run the hardware store on Main for three generations.", keys: ["Okafor"], links: ["npc_rosie"], aliases: ["the Okafors"], topics: ["Families", "Town history"], source: { kind: "book", bookId: "book-town", entryId: "e-okafor", hash: "h-okafor" } }, source: "e-okafor", confidence: 0.78, pack: "lore", note: "dropped unknown link okafor_house", index: { terms: ["the okafor family", "the okafors"], topics: [{ id: "families", label: "Families" }, { id: "town_history", label: "Town history" }] }, sourceNames: { "book-town/e-okafor": "Okafors" } },
-  { id: "l3", collection: "lore", key: "founders_day", value: { id: "founders_day", title: "Founders' Day", content: "Every June the town closes Main Street for a parade and a pie contest.", keys: [], links: [], topics: ["Town history"], source: { kind: "book", bookId: "book-town", entryId: "e-founders", hash: "h-founders" } }, source: "e-founders", confidence: 0.55, pack: "lore", index: { terms: ["founders' day"], topics: [{ id: "town_history", label: "Town history" }] }, sourceNames: { "book-town/e-founders": "Founders Day" } },
+  { id: "l1", collection: "lore", key: "maple_falls_library", value: { id: "maple_falls_library", title: "Maple Falls Library", content: "The library on Elm Street keeps the town's newspapers back to 1902, and Mrs. Hale knows where every one is.", keys: ["library"], links: ["maple"], aliases: ["the library", "Elm Street library"], topics: ["Town places"], source: { kind: "ai", status: "pending" } }, source: "text", confidence: 0.92, pack: "lore", index: { terms: ["maple falls library", "the library", "elm street library"], topics: [{ id: "town_places", label: "Town places" }] } },
+  { id: "l2", collection: "lore", key: "okafor_family", value: { id: "okafor_family", title: "The Okafor family", content: "The Okafors have run the hardware store on Main for three generations.", keys: ["Okafor"], links: ["npc_rosie"], aliases: ["the Okafors"], topics: ["Families", "Town history"], source: { kind: "ai", status: "pending" } }, source: "text", confidence: 0.78, pack: "lore", note: "dropped unknown link okafor_house", index: { terms: ["the okafor family", "the okafors"], topics: [{ id: "families", label: "Families" }, { id: "town_history", label: "Town history" }] } },
+  { id: "l3", collection: "lore", key: "founders_day", value: { id: "founders_day", title: "Founders' Day", content: "Every June the town closes Main Street for a parade and a pie contest.", keys: [], links: [], topics: ["Town history"], source: { kind: "ai", status: "pending" } }, source: "text", confidence: 0.55, pack: "lore", index: { terms: ["founders' day"], topics: [{ id: "town_history", label: "Town history" }] } },
 ];
+
+/**
+ * The preview's World Info: one book attached to the chat and one that isn't, and two that share a
+ * name, as a book imported on its own and the copy a character's card brought.
+ */
+const PREVIEW_BOOKS = [
+  { id: "book_town", name: "Town lore", attached: true, character: false, added: 1792425242 },
+  { id: "book_harbor", name: "Harbor notes", attached: false, character: false, added: 1792425242 },
+  { id: "book_harbor_card", name: "Harbor notes", attached: false, character: true, added: 1792425595 },
+  { id: "book_lost", name: "Lost cities", attached: false, character: false, added: 1792511630 },
+];
+
+/** The preview's book entries, by book: Town lore's two. */
+const PREVIEW_ENTRIES: Readonly<Record<string, readonly { id: string; title: string; disabled: boolean }[]>> = {
+  book_town: [
+    { id: "e1", title: "Town notice", disabled: true },
+    { id: "e2", title: "Harbor hours", disabled: false },
+  ],
+};
 
 /** What a GM edit's Undo restores: the GM view, the routine changes and the workspace as they were before it. */
 interface EditSnapshot {
@@ -675,6 +696,9 @@ export class MockBackend {
         next.inferred = readInferred(next.inferred);
         // The agents' settings as the store reads them back (`agentSettingsOf`): a part reset to its default (null) reads as the default, not a missing key.
         next.agents = agentSettingsOf(next.agents);
+        // The lore settings as the store reads them back: a part reset to its default (null) reads as the default.
+        next.loreBooks = loreBooksSettingOf(next.loreBooks);
+        next.loreIndex = loreIndexSettingsOf(next.loreIndex);
         this.settings = next;
         this.result(reqId, "lre.settings.set", { settings: structuredClone(this.settings), extraction: extractionView(this.settings) });
         return;
@@ -811,7 +835,7 @@ export class MockBackend {
         const kind = message.kind;
         // Propose routines' first pass stops after Rosie (Continue); the next reads the crew.
         const after = isRecord(message.input) && typeof message.input.after === "string";
-        const proposals = kind === "describe_map" ? this.mapProposals(message.input) : kind === "index_book" || kind === "index_text" ? LORE_PROPOSALS : kind === "propose_routines" ? (after ? ROUTINE_PROPOSALS.filter((p) => p.owner === "diner_crew") : ROUTINE_PROPOSALS) : PROPOSALS;
+        const proposals = kind === "describe_map" ? this.mapProposals(message.input) : kind === "index_text" ? LORE_PROPOSALS : kind === "propose_routines" ? (after ? ROUTINE_PROPOSALS.filter((p) => p.owner === "diner_crew") : ROUTINE_PROPOSALS) : PROPOSALS;
         this.result(reqId, "lre.job", { jobId });
         const update = (status: JobUpdate["status"], progress: number, extra: Partial<JobUpdate> = {}) => this.emit({ lre: 1, type: "lre.job.update", jobId, kind, status, progress, ...extra });
         setTimeout(() => update("running", 0.35, { message: kind === "playtest" ? "Turn 2 of 5" : "Reading 14 entries…" }), 200);
@@ -839,19 +863,10 @@ export class MockBackend {
           this.draft.lore[id] = { id, title: "Rosie sets down the coffee pot", content, keys: [], links: [], source: { kind: "chat", chatId: message.chatId, messageId: "m-latest" } };
           return this.result(reqId, "lre.lore", { worldId: WORLDS[0]?.id ?? "", id });
         }
-        // The preview's World Info: one book attached to the chat and one that isn't, and two that share a name, as a
-        // book imported on its own and the copy a character's card brought; the first GM character and where they are have pins.
-        if (message.op === "books")
-          return this.result(reqId, "lre.lore", {
-            books: [
-              { id: "book_town", name: "Town lore", attached: true, character: false, added: 1792425242 },
-              { id: "book_harbor", name: "Harbor notes", attached: false, character: false, added: 1792425242 },
-              { id: "book_harbor_card", name: "Harbor notes", attached: false, character: true, added: 1792425595 },
-              { id: "book_lost", name: "Lost cities", attached: false, character: false, added: 1792511630 },
-            ],
-          });
+        // The first GM character and where they are have pins.
+        if (message.op === "books") return this.result(reqId, "lre.lore", { books: PREVIEW_BOOKS.map((b) => ({ ...b })) });
         const entriesOf = (bookId: string): LoreBookEntryView[] =>
-          (bookId === "book_town" ? [ { id: "e1", title: "Town notice", disabled: true }, { id: "e2", title: "Harbor hours", disabled: false } ] : []).map((e) => {
+          (PREVIEW_ENTRIES[bookId] ?? []).map((e) => {
             // As the backend reads an entry: its own fields, and the marks its text holds.
             const content = this.bookText[e.id] ?? "";
             const lore = this.bookLore[e.id];
@@ -885,10 +900,23 @@ export class MockBackend {
           const notice: LorePinView = { key: "book:book_town/e1", pin: { book: "book_town", entry: "e1" }, title: "Town notice", source: "Town lore", status: "off", secret: false };
           return this.result(reqId, "lre.lore", { pins: { characters: who ? { [who]: [ledger] } : {}, places: place ? { [place]: [notice] } : {}, steps: {} } });
         }
-        // The preview's "Rosie's Diner" was indexed from Town lore, whose entry has changed since.
-        const content = "Rosie's opens at six and closes at two since the new lunch place opened. The booths by the window go first; the counter is for regulars.";
-        const drift: Record<string, LoreDrift> = this.draft.lore.rosies_diner?.source?.kind === "book" && this.draft.lore.rosies_diner.source.hash === "stale" ? { rosies_diner: { status: "changed", content, hash: "fresh" } } : {};
-        return this.result(reqId, "lre.lore", { drift: message.id === undefined || message.id === "rosies_diner" ? drift : {} });
+        if (message.op === "index" || message.op === "build") {
+          // As the backend does: the index of the preview's books, each entry by an id of LumiRPEngine's own, and Build an index entry writes it into the book picked, once.
+          const settings = loreIndexSettingsOf(this.settings.loreIndex);
+          const name = (bookId: string): string => PREVIEW_BOOKS.find((b) => b.id === bookId)?.name ?? bookId;
+          let n = 0;
+          const books = Object.entries(PREVIEW_ENTRIES).map(([bookId, entries]) => ({ id: bookId, name: name(bookId), entries: entries.filter((e) => !e.disabled).map((e) => ({ id: `${settings.idPrefix}${String((n += 1)).padStart(settings.idDigits, "0")}`, title: e.title, holds: null })) }));
+          if (message.op === "build") {
+            if (settings.built) return this.error(reqId, "bad_request", "an index entry is kept already: stop it in Settings → Lore first");
+            if (!PREVIEW_BOOKS.some((b) => b.id === message.bookId)) return this.error(reqId, "bad_request", "no such book");
+            this.settings.loreIndex = { ...settings, built: { bookId: message.bookId, entryId: "e_lore_index", worldId: message.worldId } };
+          }
+          const built = this.settings.loreIndex.built;
+          return this.result(reqId, "lre.lore", {
+            index: { text: renderIndex(this.settings.prompts.texts, LORE_INDEX_TEXT.built, books), books: books.map((b) => ({ id: b.id, name: b.name, entries: b.entries.length })), built: built ? { ...built, book: name(built.bookId) } : null },
+          });
+        }
+        return this.error(reqId, "bad_request", "no such lore request");
       }
       case "lre.minds": {
         if (message.op === "status") return this.result(reqId, "lre.minds", { run: this.mindsRun });
@@ -1002,7 +1030,7 @@ export class MockBackend {
         if (message.op === "list") return this.result(reqId, "lre.workspace", { files: structuredClone(this.workspace.files) });
         if (message.op === "read") return this.result(reqId, "lre.workspace", { text: this.workspace.files.some((f) => f.path === message.path) ? (this.workspace.texts[message.path] ?? null) : null });
         // The preview plays no agent turn, so its main agent has no session, and nothing to roll back.
-        if (message.op === "session") return this.result(reqId, "lre.workspace", { session: { summary: null, turns: 0, tokens: 0, rollback: "none" } });
+        if (message.op === "session") return this.result(reqId, "lre.workspace", { session: { summary: null, summaryKnowledge: "gm", turns: 0, tokens: 0, segments: [], reads: { knowledge: "everyone", turns: 0, tokens: 0, summary: false }, missing: 0, rollback: "none" } });
         if (message.op === "rollback") return this.error(reqId, "validation", "The main agent's session has no compaction to roll back.");
         const change: PreviewFileChange = message.op === "write" ? { kind: "ws_write", path: message.path, text: message.text, ...(message.readers !== undefined ? { readers: message.readers } : {}) } : message.op === "delete" ? { kind: "ws_delete", path: message.path } : message.op === "move" ? { kind: "ws_move", from: message.from, to: message.to } : message.op === "readers" ? { kind: "ws_readers", path: message.path, readers: message.readers } : { kind: "ws_pin", path: message.path, pinned: message.pinned };
         const before = this.editSnapshot();
@@ -1012,6 +1040,9 @@ export class MockBackend {
         const undo = this.landEdit(before, lines);
         return this.result(reqId, "lre.workspace", { files: structuredClone(this.workspace.files), pending: false, undo });
       }
+      case "lre.live":
+        // The preview plays no agent turn: nothing to watch.
+        return this.result(reqId, "lre.live", { live: null });
       case "lre.routine": {
         // Cast's usual day: someone's day as the POV may know it.
         if (message.op === "day" && message.view === "player") return this.result(reqId, "lre.routine", { player: routinePlayerFixture(message.entity) });

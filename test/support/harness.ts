@@ -4,13 +4,14 @@ import { ChatSnapshots, LedgerService, toChain } from "../../src/backend/ledger-
 import { MessageCache } from "../../src/backend/message-cache";
 import { defaultSettings } from "../../src/backend/settings-store";
 import { startMarkersFrom } from "../../src/backend/start-markers";
+import type { TurnFrame } from "../../src/backend/turn-frame";
 import type { ChatId } from "../../src/shared/ids";
 import { hasOwn, isRecord } from "../../src/shared/json";
 import type { ChatRun, HeldWrite } from "../../src/shared/ledger";
 import { LEDGER_NAMESPACE } from "../../src/shared/ledger";
 import type { EditOp } from "../../src/shared/protocol";
 import { SECRET_MARK_WORDING } from "../../src/shared/secret-marks";
-import type { UserSettings } from "../../src/shared/settings";
+import { NARRATOR_DEFAULTS, type UserSettings } from "../../src/shared/settings";
 import type { WorldDoc } from "../../src/shared/world";
 import type { ChainMessage, FoldOutput } from "../../src/engine/ledger/chain";
 import { LedgerFold } from "../../src/engine/ledger/fold";
@@ -75,8 +76,10 @@ export class Harness {
   private readonly model: TurnModel;
   private readonly settings: UserSettings;
   private readonly copied: boolean;
-  /** "Hold writes during the engine run" (Settings → Writes), as the user's settings say now; a restart keeps it. */
-  private holding: boolean;
+  /** What a turn runs on (`TurnHooks.frame`): the user's settings, and a chat with no choices of its own. */
+  private frameOf(chatId: ChatId): TurnFrame {
+    return { userId: this.host.userId, chatId, settings: this.settings, revision: 0, chat: {} };
+  }
 
   constructor(seedMode: WorldDoc["seedMode"] = "fresh", options: HarnessOptions = {}) {
     // Minds' events ride in the generated turns (DESIGN §24): their reducers fold in both folds.
@@ -88,7 +91,6 @@ export class Harness {
         if (plan.stopped) this.plays[plan.stopped.cause]++;
       });
     this.settings = options.settings ?? defaultSettings();
-    this.holding = this.settings.holdWrites;
     this.copied = options.copy === true;
     this.worlds = testWorlds(seedMode, true, true);
     this.revisions = [...this.worlds.keys()];
@@ -143,7 +145,7 @@ export class Harness {
       },
       afterPlan: async () => undefined,
       // No sections here: the engine run plans, and its reply starts again (DESIGN §5.1).
-      deliver: async () => ({ bookId: "", fills: new Map(), placed: "", wording: SECRET_MARK_WORDING }),
+      deliver: async () => ({ bookId: "", fills: new Map(), placed: "", wording: SECRET_MARK_WORDING, view: { ...NARRATOR_DEFAULTS } }),
       fill: async () => "filled" as const,
       clear: noop,
       vacate: noop,
@@ -155,7 +157,7 @@ export class Harness {
         const raw = (await this.host.chats.chatMetadata(chatId, this.host.userId))[LEDGER_NAMESPACE];
         return isRecord(raw) && typeof raw.worldId === "string" ? raw.worldId : null;
       },
-      inputs: () => ({ revision: "", settings: "", chat: "", preset: "", presetWrites: "", engine: "" }),
+      frame: async (chatId) => this.frameOf(chatId),
       beforeCommit: noop,
       afterCommit: noop,
       readStopped: noop,
@@ -168,15 +170,8 @@ export class Harness {
       },
     };
     this.service.attach();
-    this.service.holdWrites(this.host.userId, this.holding);
     this.host.idle = () => this.service.idle();
     this.host.claimRestart = async (restart) => this.service.claimRestart(restart.chatId, this.host.userId, restart.session, restart.turn);
-  }
-
-  /** Switches "Hold writes during the engine run", as saving Settings → Writes does. */
-  holdWrites(on: boolean): void {
-    this.holding = on;
-    this.service.holdWrites(this.host.userId, on);
   }
 
   async newChat(greeting = "Morning, Sam."): Promise<ChatId> {

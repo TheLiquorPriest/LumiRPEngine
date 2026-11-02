@@ -263,6 +263,7 @@ describe("knowledge before the plan", () => {
       settings: settings.agents.roles.director,
       brief: null,
       readAs: () => none,
+      loads: { add: () => false },
     };
     return { learned, order, odds: await decideRun(rig.rt, task, ctx) };
   }

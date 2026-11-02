@@ -939,10 +939,10 @@ describe("the settings", () => {
     expect(read).toMatchObject({ loopRepeats: 3, clipChars: 4000, budget: { revisions: 2, toolTurns: "none", concurrency: 4 }, turn: { tokensIn: "none" }, acceptance: { estimateFactor: 2, connections: [{ id: "c1", only: false, tokensIn: 5, tokensOut: "none" }] }, throttles: [{ id: "c1", requestsPerMinute: "none", tokensPerMinute: 9000 }] });
   });
 
-  test("what the engine keeps in memory for agent turns is 64 turns, 256 gates and 256 watched chats; a count under 1 or not whole falls back", () => {
-    expect(defaultAgentSettings().kept).toEqual({ runs: 64, gates: 256, watchers: 256 });
-    expect(agentSettingsOf({ kept: { runs: 0, gates: -3, watchers: 2.5 } }).kept).toEqual({ runs: 64, gates: 256, watchers: 256 });
-    expect(agentSettingsOf({ kept: { runs: 1, gates: 8, watchers: 12 } }).kept).toEqual({ runs: 1, gates: 8, watchers: 12 });
+  test("what the engine keeps in memory for agent turns is 64 turns, 256 gates, 256 watched chats and 16 chats in the live view; a count under 1 or not whole falls back", () => {
+    expect(defaultAgentSettings().kept).toEqual({ runs: 64, gates: 256, watchers: 256, live: 16 });
+    expect(agentSettingsOf({ kept: { runs: 0, gates: -3, watchers: 2.5, live: 0 } }).kept).toEqual({ runs: 64, gates: 256, watchers: 256, live: 16 });
+    expect(agentSettingsOf({ kept: { runs: 1, gates: 8, watchers: 12, live: 3 } }).kept).toEqual({ runs: 1, gates: 8, watchers: 12, live: 3 });
   });
 
   test("Settings saves them as the other pages' settings: a list replaces whole, and a reset goes back to the default", async () => {

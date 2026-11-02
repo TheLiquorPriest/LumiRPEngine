@@ -1,7 +1,7 @@
 // The turn after a deleted message, and every way a turn the engine finished can miss its reply
-// (DESIGN §5.1): the turn after any deletion gets its reply; a Lumiverse page's settings save that
-// lands while the engine runs leaves the reply it prepared to start; and a prepared reply that can't
-// start any more says so on the chat, with a Retry that runs the engine again, never silently.
+// (DESIGN §5.1): the turn after any deletion gets its reply; a settings save, Lumiverse's or
+// RPEngine's, that lands while the engine runs leaves the reply it prepared to start; and a prepared
+// reply the chat changed under says so on the chat, with a Retry that runs the engine again, never silently.
 
 import { describe, expect, test } from "bun:test";
 import { toChain } from "../../src/backend/ledger-io";
@@ -84,14 +84,14 @@ describe("a turn the engine finished", () => {
     expect(await flagOf(rig, chatId)).toBeUndefined();
   });
 
-  test("a reply that can't start any more says so on the chat, with a Retry that runs the engine again and then the reply", async () => {
+  test("a reply the chat changed under says so on the chat, with a Retry that runs the engine again and then the reply", async () => {
     const rig = new Rig();
     const chatId = await playedChat(rig);
-    // The player's RPEngine settings changed while the engine ran: the sections it wrote follow the
-    // old ones, so the prepared reply goes.
+    // The player edits an earlier reply while the engine runs: the turn was planned on the old chain.
+    const earlier = rig.host.head(chatId)?.id ?? "";
     let changed = false;
     rig.host.quietReply = () => {
-      if (!changed) void rig.send({ type: "lre.settings.set", patch: { modelUse: { tokens: { sections: 3900 } } } });
+      if (!changed) rig.host.editMessage(chatId, earlier, "The square is empty (2).");
       changed = true;
       return "{}";
     };
@@ -101,40 +101,32 @@ describe("a turn the engine finished", () => {
     expect(stopped.halted).toBe("cancelled");
     expect(await flagOf(rig, chatId)).toMatchObject({ messageId: said, label: "The reply didn't start, so nothing was generated", actions: [{ id: "regenerate", label: "Retry" }, { id: "diagnostics", label: "Diagnostics" }] });
     // The flag names what changed, so the player knows why and the next report says which input moved.
-    expect(String((await flagOf(rig, chatId))?.detail)).toBe("Your RPEngine settings changed after the engine ran and before the reply started");
+    expect(String((await flagOf(rig, chatId))?.detail)).toBe("A message of the chat was sent, edited, swiped or deleted after the engine ran and before the reply started");
     const records = await rig.rt.diag.records(chatId, rig.host.userId);
     expect(records.some((r) => r.kind === "turn" && r.status === "failed" && /before the reply started/.test(r.reason ?? ""))).toBe(true);
     // Retry: the flag's Regenerate, which the host plays as a new reply after the player's message.
+    rig.host.quietReply = () => "{}";
     const reply = await rig.host.start(chatId, { type: "regenerate" });
     expect(reply.halted).toBeUndefined();
     await rig.host.finish(reply, "Someone waves back.");
     expect(await flagOf(rig, chatId)).toBeUndefined();
   });
 
-  test("saving a setting the turn doesn't read keeps the reply it prepared, while a step's model drops it", async () => {
+  test("saving RPEngine settings while the engine runs, a step's model or the swipe default, keeps the reply it prepared", async () => {
     const rig = new Rig();
     const chatId = await playedChat(rig);
-    // The swipe default and a new chat's check rules: neither is read by a turn already prepared.
-    let saved = false;
-    rig.host.quietReply = () => {
-      if (!saved) void rig.send({ type: "lre.settings.set", patch: { swipeDefault: "renarrate", overrideWorldAdjudication: true } });
-      saved = true;
-      return "{}";
-    };
-    const kept = await send(rig, chatId, "I wave.");
-    expect(kept.halted).toBeUndefined();
-    await rig.host.finish(kept, "Someone waves back.");
-    expect(await flagOf(rig, chatId)).toBeUndefined();
-    // A step's model is: the turn made on the old one goes.
-    let changed = false;
-    rig.host.quietReply = () => {
-      if (!changed) void rig.send({ type: "lre.settings.set", patch: { modelUse: { steps: { interpret: { route: { connectionId: "other", model: "other-model" } } } } } });
-      changed = true;
-      return "{}";
-    };
-    rig.host.sendUser(chatId, "I nod.");
-    await rig.host.settle();
-    expect((await rig.host.start(chatId, { type: "normal" })).halted).toBe("cancelled");
+    for (const patch of [{ swipeDefault: "renarrate", overrideWorldAdjudication: true }, { modelUse: { steps: { interpret: { route: { connectionId: "other", model: "other-model" } } } } }]) {
+      let saved = false;
+      rig.host.quietReply = () => {
+        if (!saved) void rig.send({ type: "lre.settings.set", patch });
+        saved = true;
+        return "{}";
+      };
+      const kept = await send(rig, chatId, "I wave.");
+      expect(kept.halted).toBeUndefined();
+      await rig.host.finish(kept, "Someone waves back.");
+      expect(await flagOf(rig, chatId)).toBeUndefined();
+    }
   });
 });
 
