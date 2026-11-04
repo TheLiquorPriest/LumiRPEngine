@@ -186,6 +186,7 @@ var DEFAULT_MIND_READS = Object.freeze({
   activated: { on: true, tokens: 1600 },
   reply: { on: true, tokens: "none" },
   message: { on: true, tokens: "none" },
+  things: { on: true, tokens: 300 },
   history: { on: false, messages: 8, tokens: 3000 },
   summary: { on: false, tokens: "none" },
   memory: { on: false, tokens: "none" },
@@ -193,6 +194,7 @@ var DEFAULT_MIND_READS = Object.freeze({
   recall: { on: false },
   routine: { on: true, tokens: 400 },
   plans: { on: true, tokens: 400 },
+  orgs: { on: true, tokens: 200 },
   life: { on: false, tokens: "none" },
   knowledge: { on: true }
 });
@@ -985,11 +987,12 @@ var ENGINE_VERSION = "0.1.0";
 var ACTIVITY_SPAN_OF = "_activity_span";
 var ACTIVITY_PLACE = "_activity_place";
 var ENGINE_FIELDS = { [ACTIVITY_SPAN_OF]: true, [ACTIVITY_PLACE]: true, _activity_offered: true };
+var DEFAULT_PLACE_CAPS = Object.freeze({ turn: 2, chat: 64 });
 
 // src/cli/version.ts
 var CLI_NAME = "lumirpengine";
 var CLI_VERSION = package_default.version;
-var BUILD = "5f679d03";
+var BUILD = "4515a4b7";
 function runtimeCannotFollow(bun) {
   if (bun === undefined)
     return null;
