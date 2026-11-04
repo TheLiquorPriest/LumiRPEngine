@@ -335,7 +335,7 @@ var TIMEOUTS = {
     group: "turn",
     limits: "The main agent's final review of the narrator's prompt, after the engine run makes the turn's sections and before the reply is generated (Settings → Agents → Main agent → Final review).",
     fires: "The review stops and its edits are dropped: the narrator gets the sections as the engine made them, with a Diagnostics record, or the turn stops with a Retry, as the review's failure setting says.",
-    defaultMs: 2 * MIN,
+    defaultMs: 5 * MIN,
     minMs: 1000,
     none: "the review takes as long as it needs (its budget still bounds it)"
   },
@@ -992,7 +992,7 @@ var DEFAULT_PLACE_CAPS = Object.freeze({ turn: 2, chat: 64 });
 // src/cli/version.ts
 var CLI_NAME = "lumirpengine";
 var CLI_VERSION = package_default.version;
-var BUILD = "465776e0";
+var BUILD = "4bacc027";
 function runtimeCannotFollow(bun) {
   if (bun === undefined)
     return null;

@@ -5285,6 +5285,9 @@ function positionsIn(v3) {
 var ACTS_FOR = "acts_for";
 var MEMBER_HOWS = ["member", "owner", "staff", "leader", ...PARTY_TIERS];
 var DUES_EVERY = ["week", "month", "year"];
+var WINDING_FIELD = "winding_up";
+var DISSOLVED_FIELD = "dissolved";
+var MERGED_INTO_FIELD = "merged_into";
 var AUDIENCES = ["owner", "members", "staff", "customers", "public"];
 var ORG_ACTIONS = {
   admit: "org_admit",
@@ -5296,6 +5299,8 @@ var ORG_ACTIONS = {
   delegate: "org_delegate",
   revoke: "org_revoke",
   rename: "org_rename",
+  windUp: "org_wind_up",
+  merge: "org_merge",
   found: "org_found",
   restructure: "org_restructure"
 };
@@ -5392,6 +5397,22 @@ function thingsConfigOf(world) {
     notWithYou: typeof raw.notWithYou === "number" && Number.isInteger(raw.notWithYou) && raw.notWithYou >= 0 ? raw.notWithYou : d3.notWithYou
   };
 }
+function stem(word) {
+  const parts = word.split("-");
+  const w3 = parts.pop() ?? "";
+  let s3 = w3;
+  if (w3.length > 3 && !/(?:ss|us|is)$/.test(w3)) {
+    if (w3.length > 4 && w3.endsWith("ies"))
+      s3 = `${w3.slice(0, -3)}i`;
+    else if (/(?:s|x|z|ch|sh)es$/.test(w3) || w3.length > 5 && w3.endsWith("oes"))
+      s3 = w3.slice(0, -2);
+    else if (w3.endsWith("s"))
+      s3 = w3.slice(0, -1);
+    if (s3.length > 3 && /(?:ie|y)$/.test(s3))
+      s3 = s3.replace(/(?:ie|y)$/, "i");
+  }
+  return [...parts, s3].join("-");
+}
 
 // src/shared/settings.ts
 var REASONING_CHOICES = ["inherit", "off", "auto", "minimal", "low", "medium", "high", "max", "xhigh"];
@@ -5440,7 +5461,7 @@ var SPEED_ACTIVITIES = ["sleep", "work_shift", "travel", "waiting"];
 var SPEED_DEFAULT = Object.freeze({ mode: "offer", thresholdMinutes: 30 });
 var SPEED_THRESHOLD_MINUTES = [1, 7 * 1440];
 var TIMELAPSE_REACH_MINUTES = 366 * 1440;
-var EXTRACTION_TYPES = ["time_advance", "location", "place_make", "condition", "knows", "purchase", "transfer", "regard", "quantity", "spawn", "life", "routine", "membership", "employment", "agenda", ...ITEM_CHANGES, "learn", "reveal"];
+var EXTRACTION_TYPES = ["time_advance", "location", "place_make", "condition", "knows", "purchase", "transfer", "regard", "quantity", "spawn", "life", "routine", "membership", "employment", "agenda", "vote", "approval", ...ITEM_CHANGES, "learn", "reveal"];
 var EXTRACTION_DEFAULTS = Object.freeze({
   time_advance: "auto",
   location: "auto",
@@ -5456,6 +5477,8 @@ var EXTRACTION_DEFAULTS = Object.freeze({
   membership: "confirm",
   employment: "confirm",
   agenda: "auto",
+  vote: "confirm",
+  approval: "confirm",
   item_move: "auto",
   item_hand: "auto",
   item_own: "confirm",
@@ -14442,7 +14465,7 @@ var TIMEOUTS = {
     group: "turn",
     limits: "The main agent's final review of the narrator's prompt, after the engine run makes the turn's sections and before the reply is generated (Settings → Agents → Main agent → Final review).",
     fires: "The review stops and its edits are dropped: the narrator gets the sections as the engine made them, with a Diagnostics record, or the turn stops with a Retry, as the review's failure setting says.",
-    defaultMs: 2 * MIN,
+    defaultMs: 5 * MIN,
     minMs: 1000,
     none: "the review takes as long as it needs (its budget still bounds it)"
   },
@@ -15388,7 +15411,7 @@ var READ_TOOL_TEXTS = [
     text: "One organization's page, whole: its type and level, the player character's place there, who runs it, every one of its people (with their titles, positions, jobs and shares), its positions and delegations, its money, property, ownership and taxes, its dues and its history, every secret marked. Give part for one part only.",
     args: [
       { path: "org", text: 'The organization: its id, or its name; the party is "your party".' },
-      { path: "part", text: "Only this part: overview, people, money, property, ownership, taxes, rules (positions, delegations and dues) or log (its history); leave it out for the whole page." }
+      { path: "part", text: "Only this part: overview, people, money, property, ownership, taxes, rules (positions, delegations and dues), decisions (how its decisions are made, its motions with each voter's vote, and its requests for approval with who may approve them, each by the id gm_org's vote, end_motion and answer name) or log (its history); leave it out for the whole page." }
     ]
   },
   {
@@ -15943,8 +15966,8 @@ var WRITE_TOOL_TEXTS = [
     name: "gm_org",
     family: "orgs",
     tier: "gm",
-    note: "Proposes one change to an organization: its members, positions, delegations, staff, shares or rules.",
-    text: `Propose one change to an organization (a company, a household, a group, a trust or the party), as the GM makes it: no one's powers are asked, and the change keeps its History line. The change is an object with its do and fields; people, organizations, jobs, accounts and places by id or name, money in minor units (2500 is 25.00), dates as YYYY-MM-DD. found {type: company or group, name, founder, kind?, structure?, capital?, from?, units?}; admit {org, who, title?, position?, why}; remove {org, who, why}; appoint {org, who, position or null, why}; title {org, who, title or null}; position {org, position: {title, id?, powers?, seats?, reports_to?, scope?: org or below, limits?: {payment?, month?}, successor?: next, vacant or someone, default?}}; unposition {org, position}; delegate {org, to, powers, payment?, month?, accounts?, until?, by}; revoke {org, to}; hire {org, who, position?, title?, basis?, rate?, hours?}; fire {job, why}; pay {job, rate or pct}; issue {org, to, units, price (a unit), class?, from?}; buy_back {org, from, units, price (a unit)}; transfer {org, from, to, units or pct, price? (in all; none is a gift)}; entry {place, entry: owner, members, staff, customers, public or null, keys?}; dues {org, cents or null, every?: week, month or year}; tier {who, tier: core, companion, hired, ally or null}; restructure {org, structure}; rename {org, name}. One that doesn't hold is refused with why. ${proposes} With dry set, it is only checked, and nothing is staged.`,
+    note: "Proposes one change to an organization: its members, positions, delegations, staff, shares, rules or decisions.",
+    text: `Propose one change to an organization (a company, a household, a group, a trust or the party), as the GM makes it: no one's powers are asked, and the change keeps its History line. The change is an object with its do and fields; people, organizations, jobs, accounts and places by id or name, money in minor units (2500 is 25.00), dates as YYYY-MM-DD. found {type: company or group, name, founder, kind?, structure?, capital?, from?, units?}; admit {org, who, title?, position?, why}; remove {org, who, why}; appoint {org, who, position or null, why}; title {org, who, title or null}; position {org, position: {title, id?, powers?, seats?, reports_to?, scope?: org or below, limits?: {payment?, month?}, successor?: next, vacant or someone, default?}}; unposition {org, position}; delegate {org, to, powers, payment?, month?, accounts?, until?, by}; revoke {org, to}; hire {org, who, position?, title?, basis?, rate?, hours?}; fire {job, why}; pay {job, rate or pct}; issue {org, to, units, price (a unit), class?, from?}; buy_back {org, from, units, price (a unit)}; transfer {org, from, to, units or pct, price? (in all; none is a gift)}; list {org, units, price? (a unit; else its books a unit), symbol?} (a C corporation on the market, new units sold to the public; listed already, more units at its market price); delist {org, price? (a unit; else its market price)} (every public unit bought back); trade {org, who, side: buy or sell, units, account?} (its stock on the market; units held on its cap table sell into its float); entry {place, entry: owner, members, staff, customers, public or null, keys?}; dues {org, cents or null, every?: week, month or year}; tier {who, tier: core, companion, hired, ally or null}; restructure {org, structure}; wind_up {org, stage?: all, begin, finish or resume, property?: distribute or sell, to?, why?} (a company's debts paid, the rest paid out by share, and it dissolved); merge {org, into, ratio? (into's units for each of org's), cash? (in all), from?, keep?: true keeps org as into's subsidiary, why?}; rename {org, name}; tax_status {org, status: charity, church or club (a row of the world's exempt table), or null} (exempt from income tax, and from FUTA and SUTA as the status says; not a household or the party); consolidate {org, elect: true or false} (a C corporation's one federal return with the corporations it holds 80% or more of). Decisions, motions and requests by the ids orgs_read's decisions part gives: propose {by, change, party?} puts a decision (change: an issue, buy_back, restructure, list, delist, wind_up or merge, as above) to a vote for by, who hasn't the votes to make it alone (party: an organization holder they decide as), their vote for it; vote {org, motion, who, vote: for, against or abstain}, cast for anyone with a vote on it, carries the motion out once it passes; end_motion {org, motion, how: close (on the votes cast now) or withdraw}; answer {org, request, answer: approve, deny or withdraw, by?, why?} (by: one up the requester's chain of command who may approve it, or the requester withdrawing; left out, the GM's), approving runs the act then as the requester's; decisions {org, vote_by?: shares or members, quorum?, pass? (percent), days?, approval_days? (null puts the default back)}. One that doesn't hold is refused with why. ${proposes} With dry set, it is only checked, and nothing is staged.`,
     args: [
       { path: "change", text: 'The change, written as a JSON object: {"do": "appoint", "org": "Alder Automotive", "who": "Danny Okafor", "position": "shop_foreman", "why": "Marcus made him foreman"}.' },
       { path: "dry", text: dry }
@@ -16470,6 +16493,7 @@ var DEFAULT_ACCEPTANCE = Object.freeze({ only: true, tokensIn: 300000, tokensOut
 function defaultAgentSettings() {
   return {
     thinkingInToolLoops: false,
+    stream: true,
     budget: { callTokensIn: "none", callTokensOut: HELPER_MAX_TOKENS, callMs: "none", callTools: "none", tokensIn: "none", tokensOut: "none", toolTurns: 10, wallMs: "none", revisions: 2, concurrency: 4 },
     turn: { tokensIn: "none", tokensOut: "none", toolTurns: "none", wallMs: "none" },
     loopRepeats: 3,
@@ -30711,6 +30735,7 @@ var MAIN_TEXT = {
   refusedAgent: "main.refused.agent",
   refusedRevisions: "main.refused.revisions",
   refusedCommitted: "main.refused.committed",
+  refusedReview: "main.refused.review",
   committed: "main.committed",
   brief: "main.brief",
   briefRevision: "main.brief.revision",
@@ -30848,7 +30873,7 @@ The reply: {{reply}}`, vars: [v3("n", "the reply's number in the chat"), v3("sai
   { id: MAIN_TEXT.tool(MAIN_TOOLS.revise), page, group: TOOLS, label: "revise: what it does", note: "The description of the revise tool.", text: "Send one of this stage's runs a revision: it runs again with your task and your message, and its new answer stands for the old. A run takes as many revisions as its role's budget allows.", vars: [] },
   { id: MAIN_TEXT.toolArg(MAIN_TOOLS.revise, "agentId"), page, group: TOOLS, label: "revise: agentId", note: "The description of revise's agentId argument.", text: "The run's agent id, as run_role gave it.", vars: [] },
   { id: MAIN_TEXT.toolArg(MAIN_TOOLS.revise, "message"), page, group: TOOLS, label: "revise: message", note: "The description of revise's message argument.", text: "What to change in the answer, and why.", vars: [] },
-  { id: MAIN_TEXT.tool(MAIN_TOOLS.commit), page, group: TOOLS, label: "commit: what it does", note: "The description of the commit tool.", text: "Hand the engine what this stage's runs answered, and end the stage. A request you didn't run goes on without its role.", vars: [] },
+  { id: MAIN_TEXT.tool(MAIN_TOOLS.commit), page, group: TOOLS, label: "commit: what it does", note: "The description of the commit tool. While the final review is on, the review's own (Final review: commit, in the review) follows it: every stage offers the same tools, the review's among them.", text: "Hand the engine what this stage's runs answered, and end the stage. A request you didn't run goes on without its role.", vars: [] },
   { id: MAIN_TEXT.tool(MAIN_TOOLS.summarize), page, group: TOOLS, label: "summarize: what it does", note: "The description of the summarize tool, offered while Settings → Agents → Compaction has it on.", text: "Summarize your session now: everything but your latest turns becomes one summary, which your next stages read instead. Use it when your session runs long.", vars: [] },
   { id: MAIN_TEXT.tool(MAIN_TOOLS.condense), page, group: TOOLS, label: "condense: what it does", note: "The description of the main agent's condense tool.", text: "Condense a long source (a workspace file, a turn's transcript among them, or a lore entry) into a short workspace note for a role, with one call of your own model, staged as that role's note for this turn: name the note in its task instead of handing it the whole source. The note opens with its source and the source's hash.", vars: [] },
   { id: MAIN_TEXT.toolArg(MAIN_TOOLS.condense, "source"), page, group: TOOLS, label: "condense: source", note: "The description of condense's source argument.", text: "The source: a workspace file's path, or a lore entry's id as the lore tools give it.", vars: [] },
@@ -30868,6 +30893,7 @@ The reply: {{reply}}`, vars: [v3("n", "the reply's number in the chat"), v3("sai
   { id: MAIN_TEXT.refusedAgent, page, group: ANSWERS, label: "No such run", note: "revise's answer for an agent id no run of this stage has.", text: "No run of this stage has the agent id {{agent}}. Its runs are {{agents}}.", vars: [v3("agent", "the id given"), v3("agents", "the stage's runs' agent ids, or none")] },
   { id: MAIN_TEXT.refusedRevisions, page, group: ANSWERS, label: "No revisions left", note: "revise's answer once a run has had the revisions its role's budget allows (Settings → Agents → Budgets).", text: "{{agent}} has had the {{limit}} {{revisions}} its role allows; its last answer stands.", vars: [v3("agent", "the run's agent id"), v3("limit", "the revisions its role allows"), v3("revisions", '"revision" for 1, else "revisions"')] },
   { id: MAIN_TEXT.refusedCommitted, page, group: ANSWERS, label: "The stage is committed", note: "The answer to a call after commit in the same stage.", text: "This stage is committed. The engine goes on, and opens the next stage when it gets there.", vars: [] },
+  { id: MAIN_TEXT.refusedReview, page, group: ANSWERS, label: "Not in the final review", note: "run_role's, revise's, summarize's and condense's answer in the final review of a turn the main agent decides: every stage offers the same tools, so that each call reads the prefix the provider cached, and the stages' own tools work only in their stages.", text: "{{tool}} works in the turn's other stages, not in its final review. Here, edit the narrator's prompt with review_replace, review_append and review_drop, read a part whole with review_read, then call commit.", vars: [v3("tool", "the tool called")] },
   { id: MAIN_TEXT.committed, page, group: ANSWERS, label: "Committed", note: "commit's answer: what the engine takes, and what it goes on without.", text: "Committed. The engine takes: {{ran}}. It goes on without: {{skipped}}.", vars: [v3("ran", "the roles whose answers it takes"), v3("skipped", "the requests no run answered")] },
   { id: MAIN_TEXT.brief, page, group: ROLES, label: "The main agent's task", note: "What a role run by the main agent is told of its task, after its own instructions. A prompt-only run is sent its classic prompt alone.", text: `The main agent's task for you this turn:
 {{task}}`, vars: [v3("task", "the task run_role gave", true)] },
@@ -31227,7 +31253,8 @@ Arguments (JSON Schema): {{parameters}}`,
 ];
 
 // src/shared/final-review.ts
-var REVIEW_TOOLS = { replace: "review_replace", append: "review_append", drop: "review_drop", commit: "commit" };
+var REVIEW_TOOLS = { replace: "review_replace", append: "review_append", drop: "review_drop", read: "review_read", commit: "commit" };
+var AROUND_EDIT = 2;
 var REVIEW_TEXT = {
   system: "main.review.system",
   stage: "main.review.stage",
@@ -31240,9 +31267,11 @@ var REVIEW_TEXT = {
   toolArg: (name, arg) => `main.tool.${name}.${arg}`,
   commit: "main.review.commit",
   edited: "main.review.edited",
+  dropped: "main.review.dropped",
   refusedPart: "main.review.refused.part",
   refusedLine: "main.review.refused.line",
   refusedText: "main.review.refused.text",
+  refusedStage: "main.review.refused.stage",
   committed: "main.review.committed",
   committedNone: "main.review.committed.none"
 };
@@ -31271,7 +31300,7 @@ Your tools read the world as it stands. Each turn's task says what changed since
     text: `{{stage}}
 Before the narrator writes its reply, review the prompt it gets: the engine's sections below, the Outline and its brief among them, and the narrator rules, as the narrator will read them. Check each line against the world as it stands and this turn: a fact that is wrong, one the reply needs that is missing, lines that contradict each other, guidance that would lead the narrator astray, a secret told as known where it should stay marked. The player's own words and rules come first: never undo what they asked for.
 
-Change only what needs it, a line at a time: review_replace rewrites a line, review_append adds lines at the end of a part, review_drop takes a line out. Each names a line by its number as its part reads now, and answers with the part as it reads after it. A fact's line starts with "- ". Then call commit, which hands the narrator the prompt as you leave it; with nothing to fix, call commit at once.
+Change only what needs it: review_replace rewrites a line, review_append adds lines at the end of a part, review_drop takes a line out, and with to, review_replace and review_drop take the whole block from line through to in one call. Each names a line by its number as its part reads now, and answers with the lines around its edit, numbered as its part reads after it; review_read shows a part whole. A fact's line starts with "- ". Then call commit, which hands the narrator the prompt as you leave it; with nothing to fix, call commit at once.
 
 {{parts}}`,
     vars: [v5("stage", "where the review stands in the turn, in the words below"), v5("parts", "each part of the prompt, as below", true)]
@@ -31283,29 +31312,36 @@ Change only what needs it, a line at a time: review_replace rewrites a line, rev
     page: page5,
     group: GROUP2,
     label: "A part of the prompt",
-    note: "One part of the narrator's prompt in the review's message and in its tools' answers: its id, which the tools take, its header as the narrator reads it, and its lines.",
+    note: "One part of the narrator's prompt in the review's message and in review_read's answer: its id, which the tools take, its header as the narrator reads it, and its lines.",
     text: `Part {{part}}: {{header}}
 {{lines}}`,
     vars: [v5("part", "the part's id, as the tools take it", true), v5("header", "its header as the narrator reads it, such as [Outcome], or its name when it has none"), v5("lines", "its lines, each numbered as below", true)]
   },
   { id: REVIEW_TEXT.line, page: page5, group: GROUP2, label: "A numbered line", note: "One line of a part, with the number the review's tools name it by.", text: "{{n}}: {{text}}", vars: [v5("n", "the line's number in its part, from 1", true), v5("text", "the line as the narrator reads it", true)] },
   { id: REVIEW_TEXT.empty, page: page5, group: GROUP2, label: "A part with no lines", note: "Stands in for the lines of a part that has none left.", text: "(no lines)", vars: [] },
-  { id: REVIEW_TEXT.tool(REVIEW_TOOLS.replace), page: page5, group: GROUP2, label: "review_replace: what it does", note: "The description of the review_replace tool.", text: "Rewrite one line of a part of the narrator's prompt: the line by its number as its part reads now, with your text in its place. Several lines in your text take its place together.", vars: [] },
+  { id: REVIEW_TEXT.tool(REVIEW_TOOLS.replace), page: page5, group: GROUP2, label: "review_replace: what it does", note: "The description of the review_replace tool.", text: "In the final review: rewrite a line of a part of the narrator's prompt, by its number as its part reads now, with your text in its place; with to, the whole block from line through to. Several lines in your text take its place together.", vars: [] },
   { id: REVIEW_TEXT.toolArg(REVIEW_TOOLS.replace, "part"), page: page5, group: GROUP2, label: "review_replace: part", note: "The description of review_replace's part argument.", text: "The part's id, as the review lists it.", vars: [] },
-  { id: REVIEW_TEXT.toolArg(REVIEW_TOOLS.replace, "line"), page: page5, group: GROUP2, label: "review_replace: line", note: "The description of review_replace's line argument.", text: "The line's number, as its part reads now.", vars: [] },
+  { id: REVIEW_TEXT.toolArg(REVIEW_TOOLS.replace, "line"), page: page5, group: GROUP2, label: "review_replace: line", note: "The description of review_replace's line argument.", text: "The line's number, as its part reads now; with to, the block's first.", vars: [] },
+  { id: REVIEW_TEXT.toolArg(REVIEW_TOOLS.replace, "to"), page: page5, group: GROUP2, label: "review_replace: to", note: "The description of review_replace's to argument: a block's last line.", text: "The block's last line, by its number as its part reads now, to rewrite every line from line through it as one; leave it out for line alone.", vars: [] },
   { id: REVIEW_TEXT.toolArg(REVIEW_TOOLS.replace, "text"), page: page5, group: GROUP2, label: "review_replace: text", note: "The description of review_replace's text argument.", text: "The line as the narrator should read it, whole.", vars: [] },
-  { id: REVIEW_TEXT.tool(REVIEW_TOOLS.append), page: page5, group: GROUP2, label: "review_append: what it does", note: "The description of the review_append tool.", text: "Add lines at the end of a part of the narrator's prompt: what the reply needs that the part doesn't say.", vars: [] },
+  { id: REVIEW_TEXT.tool(REVIEW_TOOLS.append), page: page5, group: GROUP2, label: "review_append: what it does", note: "The description of the review_append tool.", text: "In the final review: add lines at the end of a part of the narrator's prompt, what the reply needs that the part doesn't say.", vars: [] },
   { id: REVIEW_TEXT.toolArg(REVIEW_TOOLS.append, "part"), page: page5, group: GROUP2, label: "review_append: part", note: "The description of review_append's part argument.", text: "The part's id, as the review lists it.", vars: [] },
   { id: REVIEW_TEXT.toolArg(REVIEW_TOOLS.append, "text"), page: page5, group: GROUP2, label: "review_append: text", note: "The description of review_append's text argument.", text: "The line to add, as the narrator should read it; one per line break for several.", vars: [] },
-  { id: REVIEW_TEXT.tool(REVIEW_TOOLS.drop), page: page5, group: GROUP2, label: "review_drop: what it does", note: "The description of the review_drop tool.", text: "Take one line out of a part of the narrator's prompt, by its number as its part reads now.", vars: [] },
+  { id: REVIEW_TEXT.tool(REVIEW_TOOLS.drop), page: page5, group: GROUP2, label: "review_drop: what it does", note: "The description of the review_drop tool.", text: "In the final review: take a line out of a part of the narrator's prompt, by its number as its part reads now; with to, the whole block from line through to.", vars: [] },
   { id: REVIEW_TEXT.toolArg(REVIEW_TOOLS.drop, "part"), page: page5, group: GROUP2, label: "review_drop: part", note: "The description of review_drop's part argument.", text: "The part's id, as the review lists it.", vars: [] },
-  { id: REVIEW_TEXT.toolArg(REVIEW_TOOLS.drop, "line"), page: page5, group: GROUP2, label: "review_drop: line", note: "The description of review_drop's line argument.", text: "The line's number, as its part reads now.", vars: [] },
-  { id: REVIEW_TEXT.commit, page: page5, group: GROUP2, label: "commit, in the review: what it does", note: "The description of the commit tool in the final review.", text: "Hand the narrator the prompt as your edits leave it, and end the review.", vars: [] },
-  { id: REVIEW_TEXT.edited, page: page5, group: GROUP2, label: "An edit made", note: "review_replace's, review_append's and review_drop's answer: the part as it reads after the edit.", text: `Done. It now reads:
-{{part}}`, vars: [v5("part", "the part, as the review shows parts", true)] },
+  { id: REVIEW_TEXT.toolArg(REVIEW_TOOLS.drop, "line"), page: page5, group: GROUP2, label: "review_drop: line", note: "The description of review_drop's line argument.", text: "The line's number, as its part reads now; with to, the block's first.", vars: [] },
+  { id: REVIEW_TEXT.toolArg(REVIEW_TOOLS.drop, "to"), page: page5, group: GROUP2, label: "review_drop: to", note: "The description of review_drop's to argument: a block's last line.", text: "The block's last line, by its number as its part reads now, to take out every line from line through it; leave it out for line alone.", vars: [] },
+  { id: REVIEW_TEXT.tool(REVIEW_TOOLS.read), page: page5, group: GROUP2, label: "review_read: what it does", note: "The description of the review_read tool: an edit's answer shows only the lines around it.", text: "In the final review: read a part of the narrator's prompt whole, each line numbered as its part reads now. An edit answers with the lines around it alone.", vars: [] },
+  { id: REVIEW_TEXT.toolArg(REVIEW_TOOLS.read, "part"), page: page5, group: GROUP2, label: "review_read: part", note: "The description of review_read's part argument.", text: "The part's id, as the review lists it.", vars: [] },
+  { id: REVIEW_TEXT.commit, page: page5, group: GROUP2, label: "commit, in the review: what it does", note: "The description of the commit tool in the final review: the whole of it when the main agent works the review alone; after commit's own (Tools) in a turn a main agent decides, whose every stage offers the same tools.", text: "In the final review: hand the narrator the prompt as your edits leave it, and end the review.", vars: [] },
+  { id: REVIEW_TEXT.edited, page: page5, group: GROUP2, label: "An edit made", note: `review_replace's and review_append's answer: the lines the edit made, with up to ${AROUND_EDIT} either side, each numbered as its part reads after it. review_read shows a part whole.`, text: `Done. Part {{part}} now has {{count}} {{lines}}; around your edit it reads:
+{{excerpt}}`, vars: [PART_VAR, v5("count", "how many lines the part has now"), v5("lines", '"line" for 1, else "lines"'), v5("excerpt", "the lines around the edit, each numbered as the review numbers lines", true)] },
+  { id: REVIEW_TEXT.dropped, page: page5, group: GROUP2, label: "Lines taken out", note: `review_drop's answer: up to ${AROUND_EDIT} lines either side of where the lines it took out stood, each numbered as its part reads after it. review_read shows a part whole.`, text: `Done. Part {{part}} now has {{count}} {{lines}}; around the cut it reads:
+{{excerpt}}`, vars: [PART_VAR, v5("count", "how many lines the part has now"), v5("lines", '"line" for 1, else "lines"'), v5("excerpt", "the lines either side of where the lines stood, each numbered as the review numbers lines", true)] },
   { id: REVIEW_TEXT.refusedPart, page: page5, group: GROUP2, label: "No such part", note: "An edit's answer when no part of the prompt has the id it gave.", text: "No part of the narrator's prompt has the id {{part}}. Its parts are {{parts}}.", vars: [PART_VAR, v5("parts", "every part's id")] },
-  { id: REVIEW_TEXT.refusedLine, page: page5, group: GROUP2, label: "No such line", note: "review_replace's and review_drop's answer for a line number its part doesn't have.", text: "Part {{part}} has no line {{line}}: it has {{count}} {{lines}}.", vars: [PART_VAR, v5("line", "the number given"), v5("count", "how many lines it has"), v5("lines", '"line" for 1, else "lines"')] },
+  { id: REVIEW_TEXT.refusedLine, page: page5, group: GROUP2, label: "No such line", note: "review_replace's and review_drop's answer for a line number, or a block's last (to), that its part doesn't have.", text: "Part {{part}} has no line {{line}}: it has {{count}} {{lines}}.", vars: [PART_VAR, v5("line", "the number given"), v5("count", "how many lines it has"), v5("lines", '"line" for 1, else "lines"')] },
   { id: REVIEW_TEXT.refusedText, page: page5, group: GROUP2, label: "No text", note: "review_replace's and review_append's answer when the text given is empty.", text: "Give the line's text: an empty one says nothing. review_drop takes a line out.", vars: [] },
+  { id: REVIEW_TEXT.refusedStage, page: page5, group: GROUP2, label: "Not in this stage", note: "A review tool's answer in any other stage of a turn a main agent decides: every stage offers the same tools, so that each call reads the prefix the provider cached, and the review's tools work only in the review.", text: "{{tool}} edits the narrator's prompt, and works only in the final review that opens stage 6, once the engine has made the prompt. In this stage, run the roles you want, then call commit.", vars: [v5("tool", "the tool called")] },
   { id: REVIEW_TEXT.committed, page: page5, group: GROUP2, label: "Committed", note: "commit's answer in the final review, once it edited the prompt.", text: "Committed. The narrator gets the prompt with your {{count}} {{edits}}.", vars: [v5("count", "how many edits the review made", true), v5("edits", '"edit" for 1, else "edits"')] },
   { id: REVIEW_TEXT.committedNone, page: page5, group: GROUP2, label: "Committed, unchanged", note: "commit's answer in the final review when it edited nothing.", text: "Committed. The narrator gets the prompt as the engine made it.", vars: [] }
 ];
@@ -31631,12 +31667,13 @@ var EXTRACT_ITEM_RULES = [
 ].join(`
 `);
 var EXTRACT_ORG_TEXT = { facts: "extract.orgs.facts", rules: "extract.orgs.rules", plan: "extract.orgs.plan" };
-var EXTRACT_ORG_FACTS = "membership{who,org,change,position?,title?,by?,said} (change: join, leave, appoint or title; position: for appoint, or a join into one, one of the organization's positions, by its id or title; title: for title, or a join with one, the words they go by now; by: who made the change, when the reply says, never the one it happens to) · employment{who,change,org?,job?,title?,position?,rate?,pct?,hours?,basis?,by?,said} (change: hired, let_go, quit, raise, leave (goes on leave) or back (comes back from leave); org: the employer, by id or name: an organization, a person or the place they work at; job: the job's id, when the state lists it; title: a hire's job title; position: one of the employer's positions; rate: the new pay, as written; pct: a raise as a percentage instead; hours: hours a week; basis: hourly, salary, per_shift, commission, tips or stipend; by: who hired them, let them go or changed their pay, when the reply says) · agenda{id,status,said,org?} (an open item of the plans listed below the state that the reply moves along: its id; status: under_way, done, blocked or refused) · agenda{who,offer,said,org?,where?,when?} (someone other than the player character offers, in the reply, to do something for them: who, by id or name; offer: the task, in a few words; org: the organization it is for, when it isn't the party; where: the place it is done at, when said; when: YYYY-MM-DD HH:MM, when said). Each quotes the reply in said: its own words that state the change";
+var EXTRACT_ORG_FACTS = "membership{who,org,change,position?,title?,by?,said} (change: join, leave, appoint or title; position: for appoint, or a join into one, one of the organization's positions, by its id or title; title: for title, or a join with one, the words they go by now; by: who made the change, when the reply says, never the one it happens to) · employment{who,change,org?,job?,title?,position?,rate?,pct?,hours?,basis?,by?,said} (change: hired, let_go, quit, raise, leave (goes on leave) or back (comes back from leave); org: the employer, by id or name: an organization, a person or the place they work at; job: the job's id, when the state lists it; title: a hire's job title; position: one of the employer's positions; rate: the new pay, as written; pct: a raise as a percentage instead; hours: hours a week; basis: hourly, salary, per_shift, commission, tips or stipend; by: who hired them, let them go or changed their pay, when the reply says) · agenda{id,status,said,org?} (an open item of the plans listed below the state that the reply moves along: its id; status: under_way, done, blocked or refused) · agenda{who,offer,said,org?,where?,when?} (someone other than the player character offers, in the reply, to do something for them: who, by id or name; offer: the task, in a few words; org: the organization it is for, when it isn't the party; where: the place it is done at, when said; when: YYYY-MM-DD HH:MM, when said) · vote{who,org,motion,vote,said} (someone votes, in the reply, on an open motion listed below the state: who votes, by id or name; org: its organization; motion: its id; vote: for, against or abstain) · approval{who,org,request,answer,said} (someone answers, in the reply, an open request for approval listed below the state: who answers, by id or name; org: its organization; request: its id; answer: approve, deny, or withdraw when the one who asked takes it back). Each quotes the reply in said: its own words that state the change";
 var EXTRACT_ORG_RULES = [
   '- membership and employment only for a change the reply states as done: someone joins or leaves, is appointed, takes a title, is hired, is let go, quits, gets a raise, or goes on or comes back from leave; never one someone plans, offers, wishes, threatens or is thinking about ("thinking about quitting" is no quit), and never a question.',
   "- said is the reply's own words, copied exactly: a fact whose said isn't in the reply is left out.",
   "- An appointment names one of the organization's positions; when the reply names none it has, leave the appointment out.",
-  "- agenda with an id only for an item the open plan items list, as the reply moves it along; an offer only when someone other than the player character volunteers in the reply's words, never for the player character's own plans or orders."
+  "- agenda with an id only for an item the open plan items list, as the reply moves it along; an offer only when someone other than the player character volunteers in the reply's words, never for the player character's own plans or orders.",
+  "- vote and approval only for a motion or a request the open items list, by its id, when the reply has someone cast that vote or give that answer in so many words; never one they lean toward, promise, are asked for or are thinking about."
 ].join(`
 `);
 var EXTRACT_TYPES = `time_advance{minutes} · location{entity,place,parent?} (place: its id from Places, or its name as Places lists it; for a place Places doesn't list that the reply puts them in (a room, a booth, a new bar), only when nothing listed fits: its name in the reply's words, with parent: the id from Places of the place it is in or part of) · purchase{item,category,payer?,qty?,price?,method?,seller?,size?,at?} (payer: the person who pays, an entity id, never an account or a card; method: how the prose says they paid, in its words, naming the card or account when it names one, as in "her Amex", "the joint account" or "the card ending in 4417", else e.g. "cash", "debit card", "credit card" or "savings"; leave it out when not said; seller: the person or business selling it, an entity id, when the prose names one: what a seller hands over of their own changes hands, never a second; size: {{sizes}}, when the prose makes it plain; at: where it ends up when the prose says, a place's id from Places, or home) · transfer{from,to,amount,method?} (from and to: people, entity ids, or a person's own cash, checking, savings or card account, never things; method: "cash" when bills or coins change hands in person, as in "hands me $20" or "slips her a twenty"; leave it out for a bank transfer, an app payment or a card) · quantity{entity,item,delta} · condition{who,condition,minutes?,clear?} (a named condition such as tired or injured; clear:true when it ends) · regard{from,to,axis,delta} (axis {{axes}}; delta: as far as the prose moves it, inside the axis's range: worse negative, better positive) · knows{who,fact} (fact: the id of a person, thing or place the player character newly learns of, or the name of a place they first hear of; never a sentence) · spawn{kind,name,place?,role?} (a new character the reply introduces by name{{kinds}}; never a thing) · life{entity,state} (state: {{life}}) · routine{entity,change,label,days,start?,end?,minutes?,activity?,place?,with?,replaces?} (change: start for a new job, shift or habit, stop for one given up, move for a new home, its place the home; days: weekday names, weekdays, weekends or daily; start and end: HH:MM, or start morning|afternoon|evening|night; activity: work|school|exercise|leisure|socialize|errand; place: any place the prose names for it, as a place id, or in the prose's own words when nothing lists it ("the community pool"), left out only when the prose names none; with: people's ids; replaces: true only when the prose says it takes the place of what they did then) · {{items}}{{orgs}}`;
@@ -31706,10 +31743,10 @@ var READ_PROMPTS = [
   taskText("read", "extract", "Reading the reply", "types", { label: "Proposal types", note: "Each change the read may propose, with its fields. The axes, kinds, life states and sizes are the world's; the changes to things are the Thing facts text below, and those to organizations the Organization facts text.", text: EXTRACT_TYPES, vars: [{ name: "axes", text: "the world's regard axes, each with its range" }, { name: "kinds", text: 'the kinds a newcomer may be, after "; kind: "; empty when there are none' }, { name: "life", text: "the world's life states" }, { name: "sizes", text: "the sizes a thing may be, smallest first" }, { name: "items", text: "the changes to things (Thing facts, below)" }, { name: "orgs", text: 'the changes to organizations (Organization facts, below), after " · ", while one of their types is read; else empty' }] }),
   { id: EXTRACT_ITEM_TEXT.facts, page: rolePageId("read"), group: "Reading the reply", contract: roleContractId("read", "extract"), label: "Thing facts", note: "Each change to a thing the read may propose, with its fields: handed over, taken, put down, put somewhere, had now, owned, used up, worn, lost or damaged. The engine finds the thing each names, or makes it when the story acts on one the world doesn't have yet. Classic's extract step reads this text too.", text: EXTRACT_ITEM_FACTS, vars: [] },
   { id: EXTRACT_ITEM_TEXT.rules, page: rolePageId("read"), group: "Reading the reply", contract: roleContractId("read", "extract"), label: "Thing rules", note: "When the read proposes a change to a thing, and how it names the thing and says why, among the strict rules: one to a line. Classic's extract step reads this text too.", text: EXTRACT_ITEM_RULES, vars: [] },
-  { id: EXTRACT_ORG_TEXT.facts, page: rolePageId("read"), group: "Reading the reply", contract: roleContractId("read", "extract"), label: "Organization facts", note: "Each change to an organization the read may propose, with its fields: someone joins, leaves, is appointed or takes a title (membership); is hired, let go, quits, gets a raise or goes on leave (employment); an item on a plan moves along, or someone offers to do something (agenda). Classic's extract step reads this text too.", text: EXTRACT_ORG_FACTS, vars: [] },
+  { id: EXTRACT_ORG_TEXT.facts, page: rolePageId("read"), group: "Reading the reply", contract: roleContractId("read", "extract"), label: "Organization facts", note: "Each change to an organization the read may propose, with its fields: someone joins, leaves, is appointed or takes a title (membership); is hired, let go, quits, gets a raise or goes on leave (employment); an item on a plan moves along, or someone offers to do something (agenda); someone votes on an open motion (vote) or answers a request for approval (approval). Classic's extract step reads this text too.", text: EXTRACT_ORG_FACTS, vars: [] },
   { id: EXTRACT_ORG_TEXT.rules, page: rolePageId("read"), group: "Reading the reply", contract: roleContractId("read", "extract"), label: "Organization rules", note: "When the read proposes a change to an organization, and how it quotes the reply, among the strict rules: one to a line. Classic's extract step reads this text too.", text: EXTRACT_ORG_RULES, vars: [] },
-  { id: EXTRACT_ORG_TEXT.plan, page: rolePageId("read"), group: "Reading the reply", contract: roleContractId("read", "extract"), label: "Open plan items", note: "Gives the open goals and orders of the plans the player character is on, each by its id, below the state, so an agenda fact names one that is there. Classic's extract step reads this text too.", text: `Open plan items (an agenda fact names one by the id in brackets):
-{{lines}}`, vars: [{ name: "lines", text: "each open goal and order, one to a line", required: true }] },
+  { id: EXTRACT_ORG_TEXT.plan, page: rolePageId("read"), group: "Reading the reply", contract: roleContractId("read", "extract"), label: "Open plan items and decisions", note: "Gives the open goals and orders of the plans the player character is on, and the open motions and requests for approval they are in, each by its id, below the state, so an agenda, vote or approval fact names one that is there. Classic's extract step reads this text too.", text: `Open plan items, motions and requests for approval (an agenda, vote or approval fact names one by the id in brackets):
+{{lines}}`, vars: [{ name: "lines", text: "each open goal, order, motion and request, one to a line", required: true }] },
   taskText("read", "extract", "Reading the reply", "enabled", { label: "Enabled types", note: "Joins the task when only some types are read (Settings → Changes from the reply).", text: "Only these types are enabled: {{types}}.", vars: [{ name: "types", text: "the enabled types", required: true }] }),
   taskText("read", "extract", "Reading the reply", "where", { label: "Where it leaves the player character", note: "Joins the task while moves are read: a reply can take a move as given without telling it.", text: `Beside "proposals", give "where": the place where the reply leaves the player character at its end, whether it tells how they got there or takes it as given, as its id from Places (or its name as Places lists it); null when it doesn't say.`, vars: [] }),
   taskText("read", "extract", "Reading the reply", "usual_rule", { label: "Usual routines", note: "Joins the task when it is given the usual routines of the people with the player character.", text: `Usual routines are given below the state, only to tell where a move the reply describes is going: someone who heads out to their usual spot ("his usual lunch place", "off to her regular bar") moves to that place; give its id from their usual routine, or place "usual" when the reply doesn't say which. A usual routine is never a move by itself: no location for someone the reply doesn't describe leaving or arriving.`, vars: [] }),
@@ -32498,6 +32535,7 @@ var FINANCE_FEATURES = [
   "tax_brackets",
   "sales_tax",
   "business_tax",
+  "unemployment_tax",
   "capital_gains",
   "investments",
   "options",
@@ -32523,6 +32561,7 @@ var FEATURE_DEFS = Object.freeze({
   tax_brackets: { label: "Tax brackets", floor: 3, on: 4 },
   sales_tax: { label: "Sales tax", floor: 3, on: 4 },
   business_tax: { label: "Business taxes", floor: 3, on: 4 },
+  unemployment_tax: { label: "Unemployment taxes on payroll (FUTA and SUTA)", floor: 3, on: 4 },
   capital_gains: { label: "Capital gains", floor: 3, on: 4 },
   investments: { label: "Investments", floor: 3, on: 4 },
   options: { label: "Options", floor: 3, on: 4 },
@@ -32593,7 +32632,11 @@ var FINANCE_ACTIONS = {
   stakeSell: "stake_sell",
   sharesIssue: "shares_issue",
   sharesBuyBack: "shares_buy_back",
-  sharesClasses: "shares_classes"
+  sharesClasses: "shares_classes",
+  donate: "donate",
+  consolidate: "tax_consolidate",
+  sharesList: "shares_list",
+  sharesDelist: "shares_delist"
 };
 
 // src/packs/orgs/ui/edit.ts
@@ -33849,7 +33892,8 @@ var SECTION_FIELDS = {
   basics: ["structure", "industry", "place", "places", "open_at", "close_at", "trading_days"],
   people: ["owners"],
   money: ["operating_account", "payroll", "payroll_account", "dues", "distribution_pct", "distribution_every", "invoice_days", "late_fee_pct", "collects_sales_tax", "margin_pct"],
-  ownership: ["share_classes", "decide_pct"]
+  ownership: ["share_classes", "decide_pct"],
+  decisions: ["vote_by", "quorum_pct", "pass_pct", "motion_days", "vote_rules", "approval_days"]
 };
 function linksTo(doc, org, type) {
   return Object.entries(doc.entities).flatMap(([who, e3]) => e3.relations.flatMap((r3, index) => r3.type === type && r3.to === org ? [{ who, name: e3.name || who, index, fields: isRecord(r3.fields) ? r3.fields : {}, until: typeof r3.until === "number" ? r3.until : null }] : [])).sort((a3, b3) => a3.name.localeCompare(b3.name) || a3.who.localeCompare(b3.who));
@@ -34170,6 +34214,10 @@ function OrgEditor(props) {
         title: "Ownership",
         children: inputs(SECTION_FIELDS.ownership)
       }, undefined, false, undefined, this) : null,
+      /* @__PURE__ */ u3(Section, {
+        title: "Decisions",
+        children: inputs(SECTION_FIELDS.decisions)
+      }, undefined, false, undefined, this),
       /* @__PURE__ */ u3(Section, {
         title: "Property and entry",
         flush: true,
@@ -38952,6 +39000,8 @@ var EXTRACTION_LABEL = {
   membership: "Who belongs to organizations (joining, leaving, positions, titles)",
   employment: "Jobs (hired, let go, quitting, raises, leave)",
   agenda: "How organizations' plans go (under way, done, blocked)",
+  vote: "Votes on organizations' motions (for, against, abstaining)",
+  approval: "Answers to requests for approval (approved, denied, withdrawn)",
   item_move: "Where things are (picked up, put down, put away, fetched)",
   item_hand: "Handing things over (holding, lending, giving back)",
   item_own: "Whose things are (gifts, sales, trades)",
@@ -40275,6 +40325,10 @@ var REVIEW_HELP = {
   chips: "The turn goes on and the card waits under the reply; the narrator isn't told of a change until you apply it.",
   gate: "The turn waits after its plan, as at the outline gate, until you answer the card; then it goes on without asking any agent again."
 };
+var STREAM_HELP = {
+  on: "Every agent call takes its answer as Lumiverse streams it, as the model writes it, rather than all at once at the end, which a gateway or proxy between the model and Lumiverse may cut off on a long call.",
+  off: "Every agent call waits for Lumiverse to return its answer whole."
+};
 var RATIO_STEP = 0.5;
 function AgentTurnSettings(props) {
   const { agents, busy } = props;
@@ -41270,6 +41324,50 @@ function BudgetsSection(props) {
     ]
   }, undefined, true, undefined, this);
 }
+function StreamingSection(props) {
+  const { agents, busy } = props;
+  return /* @__PURE__ */ u3(Section, {
+    title: "Streaming",
+    flush: true,
+    children: /* @__PURE__ */ u3("div", {
+      class: "lre-set-rows",
+      children: /* @__PURE__ */ u3("div", {
+        class: "lre-set-ext lre-set-timeout",
+        "data-lre-agent-setting": "stream",
+        children: [
+          /* @__PURE__ */ u3("div", {
+            class: "lre-set-ext-head",
+            children: [
+              /* @__PURE__ */ u3("span", {
+                class: "lre-set-ext-title",
+                children: "Stream agent calls"
+              }, undefined, false, undefined, this),
+              agents.stream === DEFAULTS.stream ? null : defaultButton(`Reset streaming agent calls to its default, ${DEFAULTS.stream ? "on" : "off"}`, busy, () => props.patch({ agents: { stream: null } }))
+            ]
+          }, undefined, true, undefined, this),
+          /* @__PURE__ */ u3(HostSwitch, {
+            label: "Stream every agent call's answer",
+            checked: agents.stream,
+            disabled: busy,
+            onChange: (stream) => props.patch({ agents: { stream } })
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3("span", {
+            class: "lre-field-help",
+            children: agents.stream ? STREAM_HELP.on : STREAM_HELP.off
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3("span", {
+            class: "lre-small lre-muted",
+            children: [
+              "The answer reads the same either way, Cancel stops a call mid-stream, and every time limit still counts the whole call. Default ",
+              DEFAULTS.stream ? "on" : "off",
+              "."
+            ]
+          }, undefined, true, undefined, this)
+        ]
+      }, undefined, true, undefined, this)
+    }, undefined, false, undefined, this)
+  }, undefined, false, undefined, this);
+}
 function SystemInstructionsSection(props) {
   return /* @__PURE__ */ u3(Section, {
     title: "System instructions",
@@ -41303,7 +41401,7 @@ function AgentsSection(props) {
     children: [
       /* @__PURE__ */ u3("p", {
         class: "lre-set-lead",
-        children: "What the agent runtime runs under: how an agent turn runs, every agent's system instructions, its budgets, compaction, recording, throttles, caching and acceptance runs. No classic step reads any of these."
+        children: "What the agent runtime runs under: whether its calls stream, how an agent turn runs, every agent's system instructions, its budgets, compaction, recording, throttles, caching and acceptance runs. No classic step reads any of these."
       }, undefined, false, undefined, this),
       /* @__PURE__ */ u3(Section, {
         title: "Thinking in agent tool loops",
@@ -41324,6 +41422,11 @@ function AgentsSection(props) {
           }, undefined, true, undefined, this)
         ]
       }, undefined, true, undefined, this),
+      /* @__PURE__ */ u3(StreamingSection, {
+        agents,
+        patch: props.patch,
+        busy
+      }, undefined, false, undefined, this),
       /* @__PURE__ */ u3(AgentTurnSettings, {
         agents,
         patch: props.patch,
@@ -46343,6 +46446,24 @@ function NeedsPanel(props) {
   }, undefined, true, undefined, this);
 }
 
+// src/shared/org-motions.ts
+var DECISIONS_SECTION = "orgs.decisions";
+var DECISIONS_TAB = "orgs.decisions";
+var VOTES = ["for", "against", "abstain"];
+var VOTE_HOWS = ["own", "rule", "story", "gm"];
+var VOTE_BASES = ["shares", "members"];
+var STANDING_VOTES = ["for", "against", "abstain", "with"];
+var MOTION_STATUSES = ["open", "passed", "failed", "withdrawn"];
+var DECISION_DEFAULTS = Object.freeze({ quorum: 50, pass: 50, days: 7, approvalDays: 7 });
+var DECISION_RANGES = Object.freeze({ quorum: [0, 100], pass: [0, 99.9], days: [1, 365] });
+var DECISION_FIELDS = Object.freeze({ basis: "vote_by", quorum: "quorum_pct", pass: "pass_pct", days: "motion_days", standing: "vote_rules", approvalDays: "approval_days" });
+function pctWords(pct) {
+  const r3 = Math.round(pct * 10) / 10;
+  return `${Number.isInteger(r3) ? r3.toFixed(0) : r3.toFixed(1)}%`;
+}
+var DECISION_ACTIONS = { vote: "org_vote", end: "org_motion_end", approve: "org_approve", deny: "org_deny", rules: "org_decisions", standing: "org_vote_rule" };
+var DECISION_EFFECTS = { propose: "orgs.propose", vote: "orgs.vote", end: "orgs.motion_end", answer: "orgs.answer", rules: "orgs.decisions", standing: "orgs.vote_rule" };
+
 // src/shared/org-view.ts
 var ORGS_LIST_PANEL = "orgs.list";
 var ORGS_ORG_PANEL = "orgs.org";
@@ -48690,6 +48811,7 @@ function restoreObservations(state, data) {
 }
 
 // src/engine/selector.ts
+var COMPANY_KIND2 = "business";
 function stringsIn(v6) {
   return Array.isArray(v6) ? v6.filter((x2) => typeof x2 === "string") : null;
 }
@@ -49808,6 +49930,35 @@ var MARKET_CLOSE = 16 * 60;
 var SERIES = new WeakMap;
 var WALKS = new WeakMap;
 
+// src/packs/economy/core/assets.ts
+var LISTING_REVERSION = 2;
+
+// src/packs/economy/core/stakes.ts
+var valuing = new Set;
+
+// src/packs/economy/core/credit.ts
+var MONTH = 1440 * 30.4;
+
+// src/engine/places-in-play.ts
+var NONE = Object.freeze({});
+var BASES = new WeakMap;
+var PLAYED = new WeakMap;
+var ROOM_WORDS = Object.fromEntries(["room", "backroom", "kitchen", "bathroom", "bedroom", "office", "hall", "hallway", "corridor", "cellar", "basement", "attic", "garage", "closet", "pantry", "study", "lounge", "den", "loft", "lobby", "storeroom", "stockroom", "washroom", "restroom", "toilet", "stairwell", "landing", "nursery", "library", "parlor", "parlour", "workshop", "laundry"].map((w3) => [stem(w3), true]));
+
+// src/packs/economy/core/cycle.ts
+var STATEMENT_MINUTE = 9 * 60 - 30;
+var DUE_MINUTE = 23 * 60 + 59;
+
+// src/packs/economy/core/winding.ts
+var WIND_FIELDS = {
+  [WINDING_FIELD]: { type: "text", label: "Winding up since (YYYY-MM-DD)", domain: "money", level: 3 },
+  [DISSOLVED_FIELD]: { type: "text", label: "Dissolved on (YYYY-MM-DD)", domain: "money", level: 3 },
+  [MERGED_INTO_FIELD]: { type: "ref", label: "Merged into", ref: COMPANY_KIND2, domain: "money", level: 3 }
+};
+
+// src/packs/economy/core/shares.ts
+var SHARE_UNITS = 1000;
+
 // src/packs/economy/core/taxes.ts
 var CORPORATE_PCT = 21;
 var ESTIMATE_DUE = [
@@ -49821,11 +49972,8 @@ var ESTIMATE_SCHEDULE = { every: "year", months: ESTIMATE_DUE.map((d3) => d3.mon
 // src/packs/economy/core/employment.ts
 var ROUTINE_WINDOW = 14 * MINUTES_PER_DAY;
 
-// src/packs/economy/core/stakes.ts
-var valuing = new Set;
-
-// src/packs/economy/core/shares.ts
-var SHARE_UNITS = 1000;
+// src/packs/economy/core/listing.ts
+var LISTING_OFFER_CAP = 1;
 
 // src/packs/economy/ui/config.tsx
 function toggleOf(config, feature) {
@@ -50028,6 +50176,7 @@ var TAX_CHOICES = [
 var EXEMPT_NOTE = "A category exempt here is never taxed, wherever it's sold; a place can exempt more of its own.";
 function Taxes(props) {
   const [open, setOpen] = d2(false);
+  const currency = props.world.currency;
   const taxes = isRecord(props.config.taxes) ? props.config.taxes : {};
   const exempt = Array.isArray(taxes.exempt) ? taxes.exempt.filter((c3) => typeof c3 === "string") : [];
   const choices = exemptChoices(props.world, exempt);
@@ -50037,6 +50186,13 @@ function Taxes(props) {
     const next = on ? [...exempt.filter((c3) => c3 !== category), category] : exempt.filter((c3) => c3 !== category);
     props.onChange(withTax(props.config, "exempt", next.length > 0 ? next : undefined));
   };
+  const unemployment = props.world.tables["economy.finance"]?.rows.taxes_unemployment?.values;
+  const futa = isRecord(unemployment) && isRecord(unemployment.futa) ? unemployment.futa : {};
+  const regions = props.world.tables["economy.regions"]?.rows ?? {};
+  const region = regions[typeof props.config.region === "string" && hasOwn(regions, props.config.region) ? props.config.region : "us"];
+  const where = typeof region?.name === "string" && region.name !== "" ? region.name : "the national row";
+  const fromTable = (value, words3) => typeof value === "number" ? `Empty, it's the finance table's ${words3(value)}.` : "Empty, it's the finance table's, which this world's doesn't have yet: take its Data update.";
+  const setNumber = (key) => (v6) => props.onChange(withTax(props.config, key, typeof v6 === "number" ? v6 : undefined));
   return /* @__PURE__ */ u3(FormGroup, {
     title: "Taxes",
     children: [
@@ -50049,7 +50205,62 @@ function Taxes(props) {
         placeholder: String(CORPORATE_PCT),
         hint: `What a C corporation pays on its profit, with its state's rate. Empty, it's the federal rate, ${CORPORATE_PCT}%.`,
         issues: lintAt(props.lint, `${CONFIG}.taxes.corporatePct`),
-        onChange: (v6) => props.onChange(withTax(props.config, "corporatePct", typeof v6 === "number" ? v6 : undefined))
+        onChange: setNumber("corporatePct")
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(NumberInput, {
+        label: "FUTA rate before the credit (%)",
+        value: taxes.futaPct,
+        min: 0,
+        max: 100,
+        optional: true,
+        placeholder: typeof futa.gross_pct === "number" ? String(futa.gross_pct) : "The tables'",
+        hint: `The federal unemployment tax on each worker's pay up to its wage base, before the credit for state tax. ${fromTable(futa.gross_pct, (n4) => `${n4}%`)}`,
+        issues: lintAt(props.lint, `${CONFIG}.taxes.futaPct`),
+        onChange: setNumber("futaPct")
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(MinorMoneyInput, {
+        label: "FUTA wage base",
+        value: taxes.futaWageBase,
+        currency,
+        min: 1,
+        optional: true,
+        placeholder: typeof futa.wage_base_cents === "number" ? formatMoneyInput(futa.wage_base_cents, currency) : "The tables'",
+        hint: `The pay a year, per worker and employer, FUTA is paid on. ${fromTable(futa.wage_base_cents, (n4) => formatMoney(n4, currency))}`,
+        issues: lintAt(props.lint, `${CONFIG}.taxes.futaWageBase`),
+        onChange: setNumber("futaWageBase")
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(NumberInput, {
+        label: "FUTA credit for state tax (%)",
+        value: taxes.futaCreditPct,
+        min: 0,
+        max: 100,
+        optional: true,
+        placeholder: typeof futa.max_credit_pct === "number" ? String(futa.max_credit_pct) : "The tables'",
+        hint: `What an employer that pays state unemployment tax takes off FUTA's rate; a credit-reduction state's reduction cuts it. ${fromTable(futa.max_credit_pct, (n4) => `${n4}%`)}`,
+        issues: lintAt(props.lint, `${CONFIG}.taxes.futaCreditPct`),
+        onChange: setNumber("futaCreditPct")
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(NumberInput, {
+        label: "SUTA rate (%)",
+        value: taxes.sutaPct,
+        min: 0,
+        max: 100,
+        optional: true,
+        placeholder: "Each state's",
+        hint: `The state unemployment tax rate of an employer that sets none of its own. Empty, it's each employer's state's new-employer rate${typeof region?.suta_new_employer_pct === "number" ? ` (${where}: ${region.suta_new_employer_pct}%)` : ""}.`,
+        issues: lintAt(props.lint, `${CONFIG}.taxes.sutaPct`),
+        onChange: setNumber("sutaPct")
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(MinorMoneyInput, {
+        label: "SUTA wage base",
+        value: taxes.sutaWageBase,
+        currency,
+        min: 1,
+        optional: true,
+        placeholder: "Each state's",
+        hint: `The pay a year, per worker and employer, SUTA is paid on. Empty, it's each employer's state's${typeof region?.suta_wage_base_cents === "number" ? ` (${where}: ${formatMoney(region.suta_wage_base_cents, currency)})` : ""}.`,
+        issues: lintAt(props.lint, `${CONFIG}.taxes.sutaWageBase`),
+        onChange: setNumber("sutaWageBase")
       }, undefined, false, undefined, this),
       /* @__PURE__ */ u3("div", {
         class: "lre-form-items",
@@ -50121,18 +50332,68 @@ function Taxes(props) {
 function Shares(props) {
   return /* @__PURE__ */ u3(FormGroup, {
     title: "Shares",
-    children: /* @__PURE__ */ u3(NumberInput, {
-      label: "Units a company starts counting in",
-      value: props.config.shareUnits,
-      min: 1,
-      step: 1,
-      optional: true,
-      placeholder: String(SHARE_UNITS),
-      hint: `A company whose owners hold shares in percent counts them in this many units the first time it issues shares, buys some back or sets its classes, each owner's units their share of them. Empty, it's ${SHARE_UNITS.toLocaleString("en-US")}.`,
-      issues: lintAt(props.lint, `${CONFIG}.shareUnits`),
-      onChange: (v6) => props.onChange(withKey2(props.config, "shareUnits", typeof v6 === "number" ? Math.round(v6) : undefined))
-    }, undefined, false, undefined, this)
-  }, undefined, false, undefined, this);
+    children: [
+      /* @__PURE__ */ u3(NumberInput, {
+        label: "Units a company starts counting in",
+        value: props.config.shareUnits,
+        min: 1,
+        step: 1,
+        optional: true,
+        placeholder: String(SHARE_UNITS),
+        hint: `A company whose owners hold shares in percent counts them in this many units the first time it issues shares, buys some back or sets its classes, each owner's units their share of them. Empty, it's ${SHARE_UNITS.toLocaleString("en-US")}.`,
+        issues: lintAt(props.lint, `${CONFIG}.shareUnits`),
+        onChange: (v6) => props.onChange(withKey2(props.config, "shareUnits", typeof v6 === "number" ? Math.round(v6) : undefined))
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(NumberInput, {
+        label: "Listing: the most the public pays, times its worth a unit",
+        value: props.config.listingOfferCap,
+        min: 1,
+        max: 100,
+        step: 0.1,
+        optional: true,
+        placeholder: String(LISTING_OFFER_CAP),
+        hint: `The most the public pays a unit for a company's new units on the market, as a multiple of its books a unit (once it's listed, of its market price). Empty, it's ${LISTING_OFFER_CAP}: no more than they're worth.`,
+        issues: lintAt(props.lint, `${CONFIG}.listingOfferCap`),
+        onChange: (v6) => props.onChange(withKey2(props.config, "listingOfferCap", typeof v6 === "number" ? v6 : undefined))
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(NumberInput, {
+        label: "Listed prices: return to the books, a year",
+        value: props.config.listingReversion,
+        min: 0,
+        max: 50,
+        step: 0.1,
+        optional: true,
+        placeholder: String(LISTING_REVERSION),
+        hint: `How fast a listed company's price returns toward its books a unit: a gap halves in about 0.69 ÷ this many years. 0 lets it wander. Empty, it's ${LISTING_REVERSION}.`,
+        issues: lintAt(props.lint, `${CONFIG}.listingReversion`),
+        onChange: (v6) => props.onChange(withKey2(props.config, "listingReversion", typeof v6 === "number" ? v6 : undefined))
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(NumberInput, {
+        label: "Listed prices: swings, % a year",
+        value: props.config.listingVolatility,
+        min: 0,
+        max: 200,
+        step: 1,
+        optional: true,
+        placeholder: "As a single stock",
+        hint: "How much a listed company's price swings around its books. Empty, it swings as the finance tables' single stock does.",
+        issues: lintAt(props.lint, `${CONFIG}.listingVolatility`),
+        onChange: (v6) => props.onChange(withKey2(props.config, "listingVolatility", typeof v6 === "number" ? v6 : undefined))
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(NumberInput, {
+        label: "Listed prices: moving with the market, 0 to 1",
+        value: props.config.listingCorrelation,
+        min: 0,
+        max: 1,
+        step: 0.05,
+        optional: true,
+        placeholder: "As a single stock",
+        hint: "How closely a listed company's daily moves follow the stock market's (the index history where the world keeps it); 1 moves it by the market alone, the same in every chat. Empty, it's the finance tables' single stock's.",
+        issues: lintAt(props.lint, `${CONFIG}.listingCorrelation`),
+        onChange: (v6) => props.onChange(withKey2(props.config, "listingCorrelation", typeof v6 === "number" ? v6 : undefined))
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
 }
 var TOGGLE_CHOICES = [
   { value: "level", label: "By level" },
@@ -52416,7 +52677,17 @@ function ownerLine(o4) {
   const units = optNum(o4.units);
   const votes = optNum(o4.votes);
   const value = optNum(o4.value);
-  return { party, name: str(o4.name, party ?? "someone"), role: oneOf(o4.role, OWNER_ROLES, "owner"), share: num(o4.share), ...units !== undefined ? { units } : {}, ...typeof o4.class === "string" ? { class: o4.class } : {}, ...votes !== undefined ? { votes } : {}, ...value !== undefined ? { value } : {} };
+  return { party, name: str(o4.name, party ?? "someone"), role: oneOf(o4.role, OWNER_ROLES, "owner"), share: num(o4.share), ...units !== undefined ? { units } : {}, ...typeof o4.class === "string" ? { class: o4.class } : {}, ...votes !== undefined ? { votes } : {}, ...value !== undefined ? { value } : {}, ...o4.public === true ? { public: true } : {} };
+}
+function listingView(value) {
+  const l3 = obj(value);
+  if (!l3 || typeof l3.asset !== "string")
+    return null;
+  return { asset: l3.asset, symbol: str(l3.symbol, l3.asset), since: str(l3.since), price: num(l3.price), float: num(l3.float), held: num(l3.held), available: num(l3.available), marketCap: num(l3.marketCap), fair: nullableNum(l3.fair), performance: performance(l3.performance) };
+}
+function marketActs(value) {
+  const m2 = obj(value);
+  return m2 ? { list: nullableStr(m2.list), delist: nullableStr(m2.delist), offer: nullableStr(m2.offer), units: num(m2.units), ...m2.voteList === true ? { voteList: true } : {}, ...m2.voteDelist === true ? { voteDelist: true } : {} } : null;
 }
 function structureLink(o4) {
   return typeof o4.id === "string" ? { id: o4.id, name: str(o4.name, o4.id), share: num(o4.share), votes: num(o4.votes), controlled: o4.controlled === true, value: nullableNum(o4.value), cash: nullableNum(o4.cash), profit: nullableNum(o4.profit), children: list(o4.children, structureLink) } : null;
@@ -52813,9 +53084,46 @@ function decodeFinanceView(value) {
     ownKeys: strings(value.ownKeys)
   };
 }
+function decodeUnemployment(value) {
+  const o4 = obj(value);
+  if (!o4)
+    return null;
+  const f3 = obj(o4.futa);
+  const s3 = obj(o4.suta);
+  return { futa: f3 ? { pct: num(f3.pct), grossPct: num(f3.grossPct), creditPct: num(f3.creditPct), reductionPct: num(f3.reductionPct), base: num(f3.base) } : null, suta: s3 ? { pct: num(s3.pct), base: num(s3.base) } : null };
+}
 function decodePayroll(value) {
   const o4 = obj(value);
-  return o4 ? { headcount: num(o4.headcount), payroll: num(o4.payroll), employees: list(o4.employees, job) } : null;
+  if (!o4)
+    return null;
+  const u4 = obj(o4.unemployment);
+  return { headcount: num(o4.headcount), payroll: num(o4.payroll), employees: list(o4.employees, job), unemployment: u4 ? { futa: num(u4.futa), suta: num(u4.suta), rates: decodeUnemployment(u4.rates) } : null };
+}
+function decodeWinding(value) {
+  const o4 = obj(value);
+  if (!o4)
+    return null;
+  const into2 = obj(o4.mergedInto);
+  const line3 = (l3) => ({ label: str(l3.label), cents: num(l3.cents) });
+  return {
+    since: nullableStr(o4.since),
+    dissolved: nullableStr(o4.dissolved),
+    mergedInto: into2 ? { id: nullableStr(into2.id), name: str(into2.name, "another company") } : null,
+    why: nullableStr(o4.why),
+    cash: num(o4.cash),
+    debts: list(o4.debts, line3),
+    owed: list(o4.owed, line3),
+    assets: list(o4.assets, (x2) => typeof x2.id === "string" ? { id: x2.id, label: str(x2.label, x2.id), value: nullableNum(x2.value), goes: str(x2.goes) } : null),
+    staff: list(o4.staff, (s3) => ({ id: nullableStr(s3.id), name: str(s3.name, "someone") })),
+    payments: list(o4.payments, (p3) => typeof p3.id === "string" ? { id: p3.id, label: str(p3.label, p3.id) } : null),
+    payouts: list(o4.payouts, (p3) => ({ party: nullableStr(p3.party), name: str(p3.name, "someone"), share: num(p3.share), cents: num(p3.cents) })),
+    short: num(o4.short),
+    ...o4.vote === true ? { vote: true } : {}
+  };
+}
+function decodeMerge(value) {
+  const o4 = obj(value);
+  return o4 ? { why: nullableStr(o4.why), units: num(o4.units), perUnit: num(o4.perUnit), with: list(o4.with, (m2) => typeof m2.id === "string" ? { id: m2.id, name: str(m2.name, m2.id), units: num(m2.units), perUnit: num(m2.perUnit) } : null), ...o4.vote === true ? { vote: true } : {} } : null;
 }
 function decodeOwnership(value) {
   const o4 = obj(value);
@@ -52829,8 +53137,10 @@ function decodeOwnership(value) {
     owners: list(o4.owners, ownerLine),
     classes: Array.isArray(o4.classes) ? list(o4.classes, (k2) => typeof k2.id === "string" ? { id: k2.id, label: str(k2.label, k2.id), votes: num(k2.votes) } : null) : null,
     units: nullableNum(o4.units),
+    listing: listingView(o4.listing),
+    market: marketActs(o4.market),
     decidePct: optNum(o4.decidePct) ?? 50,
-    valuation: v6 ? { value: num(v6.value), set: v6.set === true, book: num(v6.book), profit: num(v6.profit), multiple: num(v6.multiple), perUnit: nullableNum(v6.perUnit) } : null,
+    valuation: v6 ? { value: num(v6.value), set: v6.set === true, book: num(v6.book), profit: num(v6.profit), multiple: num(v6.multiple), perUnit: nullableNum(v6.perUnit), ...obj(v6.market) ? { market: { price: num(obj(v6.market)?.price), units: num(obj(v6.market)?.units) } } : {} } : null,
     parents: list(o4.parents, structureLink),
     children: list(o4.children, structureLink),
     consolidated: c3 ? { cash: num(c3.cash), profit: num(c3.profit), netWorth: num(c3.netWorth), companies: num(c3.companies) } : null,
@@ -52838,7 +53148,9 @@ function decodeOwnership(value) {
     mayDraw: o4.mayDraw === true,
     route: distributionRoute(o4.route),
     votes: num(o4.votes),
-    acts: a3 ? { decide: nullableStr(a3.decide), restructure: nullableStr(a3.restructure), holdings: nullableStr(a3.holdings), found: nullableStr(a3.found), sources: list(a3.sources, (s3) => typeof s3.id === "string" ? { id: s3.id, name: str(s3.name, s3.id), balance: str(s3.balance) } : null) } : null
+    acts: a3 ? { decide: nullableStr(a3.decide), restructure: nullableStr(a3.restructure), vote: a3.vote === true, voteRestructure: a3.voteRestructure === true, holdings: nullableStr(a3.holdings), found: nullableStr(a3.found), sources: list(a3.sources, (s3) => typeof s3.id === "string" ? { id: s3.id, name: str(s3.name, s3.id), balance: str(s3.balance) } : null) } : null,
+    winding: decodeWinding(o4.winding),
+    merge: decodeMerge(o4.merge)
   };
 }
 function decodeTaxes(value) {
@@ -52847,15 +53159,25 @@ function decodeTaxes(value) {
     return null;
   const share = (x2) => ({ name: str(x2.name, "someone"), share: num(x2.share) });
   const p3 = obj(o4.pending);
+  const e3 = obj(o4.exempt);
+  const c3 = obj(o4.consolidation);
+  const a3 = obj(o4.acts);
   return {
-    income: o4.income === "corporate" || o4.income === "owners" ? o4.income : null,
-    years: list(o4.years, (y3) => ({ year: num(y3.year), salesCollected: num(y3.salesCollected), salesRemitted: num(y3.salesRemitted), withheld: num(y3.withheld), employerShare: num(y3.employerShare), income: num(y3.income), property: num(y3.property) })),
+    income: o4.income === "corporate" || o4.income === "owners" || o4.income === "exempt" ? o4.income : null,
+    years: list(o4.years, (y3) => ({ year: num(y3.year), salesCollected: num(y3.salesCollected), salesRemitted: num(y3.salesRemitted), withheld: num(y3.withheld), employerShare: num(y3.employerShare), futa: num(y3.futa), futaPaid: num(y3.futaPaid), suta: num(y3.suta), sutaPaid: num(y3.sutaPaid), income: num(y3.income), property: num(y3.property), donations: num(y3.donations) })),
     salesHeld: num(o4.salesHeld),
     incomeSoFar: nullableNum(o4.incomeSoFar),
     taxedTo: list(o4.taxedTo, share),
     untaxed: list(o4.untaxed, share),
+    exemptHolders: list(o4.exemptHolders, share),
     due: list(o4.due, (d3) => ({ label: str(d3.label), cents: nullableNum(d3.cents), at: str(d3.at) })),
-    pending: p3 ? { structure: str(p3.structure), from: str(p3.from) } : null
+    pending: p3 ? { structure: str(p3.structure), from: str(p3.from) } : null,
+    unemployment: decodeUnemployment(o4.unemployment),
+    exempt: e3 ? { status: str(e3.status), name: str(e3.name, str(e3.status)), code: str(e3.code), deductible: bool(e3.deductible), futa: bool(e3.futa), suta: bool(e3.suta) } : null,
+    statuses: Array.isArray(o4.statuses) ? list(o4.statuses, (s3) => typeof s3.id === "string" ? { id: s3.id, name: str(s3.name, s3.id), code: str(s3.code) } : null) : null,
+    consolidation: c3 ? { elected: bool(c3.elected), members: list(c3.members, (m2) => ({ name: str(m2.name, "a company"), votes: num(m2.votes), share: num(m2.share) })), profit: nullableNum(c3.profit), tax: nullableNum(c3.tax) } : null,
+    filedBy: typeof o4.filedBy === "string" ? o4.filedBy : null,
+    acts: a3 ? { consolidate: typeof a3.consolidate === "string" ? a3.consolidate : null } : null
   };
 }
 
@@ -59008,6 +59330,359 @@ function MoneyPanel(props) {
   }, undefined, false, undefined, this);
 }
 
+// src/packs/economy/ui/taxes.tsx
+function share(n4) {
+  return `${Math.round(n4 * 100) / 100}%`;
+}
+function rate(n4) {
+  return `${Math.round(n4 * 1000) / 1000}%`;
+}
+function yearRows(y3, held) {
+  return [
+    { k: "Sales tax collected", cents: y3.salesCollected },
+    { k: "Sales tax remitted", cents: y3.salesRemitted },
+    ...held !== null ? [{ k: "Sales tax held, to remit", cents: held }] : [],
+    { k: "Withheld from its staff's pay", cents: y3.withheld },
+    { k: "Its own share of payroll tax", cents: y3.employerShare },
+    { k: "Federal unemployment tax (FUTA)", cents: y3.futa },
+    { k: "FUTA paid", cents: y3.futaPaid },
+    { k: "State unemployment tax (SUTA)", cents: y3.suta },
+    { k: "SUTA paid", cents: y3.sutaPaid },
+    { k: "Income tax paid", cents: y3.income },
+    { k: "Property tax", cents: y3.property },
+    { k: "Donations received", cents: y3.donations }
+  ].filter((r3) => r3.cents !== 0);
+}
+function UnemploymentRows(props) {
+  const { futa, suta } = props.rates;
+  const spared = props.exempt ? `its exempt status as ${props.exempt.name} spares it` : "the world's tables set no rate";
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-stack",
+    "data-lre-taxes-unemployment": true,
+    children: [
+      futa ? /* @__PURE__ */ u3(Row, {
+        k: "Federal unemployment tax (FUTA)",
+        v: rate(futa.pct),
+        sub: [futa.creditPct > 0 ? `${rate(futa.grossPct)} less a ${rate(futa.creditPct)} credit for its state tax` : `${rate(futa.grossPct)}, with no credit: it pays no state unemployment tax`, futa.reductionPct > 0 ? `its state's ${rate(futa.reductionPct)} credit reduction due with the annual return` : null, `on the first ${formatMoney(futa.base, props.currency)} of each worker's pay a year`].filter((x2) => x2 !== null).join("; ")
+      }, undefined, false, undefined, this) : /* @__PURE__ */ u3(Row, {
+        k: "Federal unemployment tax (FUTA)",
+        v: "None",
+        sub: spared
+      }, undefined, false, undefined, this),
+      suta ? /* @__PURE__ */ u3(Row, {
+        k: "State unemployment tax (SUTA)",
+        v: rate(suta.pct),
+        sub: `on the first ${formatMoney(suta.base, props.currency)} of each worker's pay a year`
+      }, undefined, false, undefined, this) : /* @__PURE__ */ u3(Row, {
+        k: "State unemployment tax (SUTA)",
+        v: "None",
+        sub: spared
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+function ConsolidationPart(props) {
+  const c3 = props.consolidation;
+  const label = c3.elected ? "Stop filing one" : "File a consolidated return";
+  return /* @__PURE__ */ u3(Section, {
+    title: "Consolidated return",
+    flush: true,
+    children: [
+      /* @__PURE__ */ u3("div", {
+        class: "lre-stack",
+        "data-lre-taxes-consolidated": c3.elected ? "elected" : "open",
+        children: [
+          /* @__PURE__ */ u3(Row, {
+            k: c3.elected ? "It files one consolidated return" : "It may file one consolidated return",
+            sub: c3.elected ? "one federal return with the corporations below: their profits and losses offset, and it pays the group's tax; each state taxes its own" : "with the corporations below, which its group holds enough of by votes and by worth; until it does, each pays its own"
+          }, undefined, false, undefined, this),
+          c3.profit !== null ? /* @__PURE__ */ u3(Row, {
+            k: "The group's profit this year",
+            v: formatMoney(c3.profit, props.currency),
+            sub: "losses offset"
+          }, undefined, false, undefined, this) : null,
+          c3.tax !== null ? /* @__PURE__ */ u3(Row, {
+            k: "The group's tax so far",
+            v: formatMoney(c3.tax, props.currency)
+          }, undefined, false, undefined, this) : null
+        ]
+      }, undefined, true, undefined, this),
+      c3.members.length === 0 ? /* @__PURE__ */ u3(Empty, {
+        icon: "briefcase",
+        children: "No corporation it holds enough of to include."
+      }, undefined, false, undefined, this) : /* @__PURE__ */ u3(List, {
+        children: c3.members.map((m2) => /* @__PURE__ */ u3(ListRow, {
+          icon: "briefcase",
+          title: m2.name,
+          subtitle: `${share(m2.votes)} of its votes`,
+          value: share(m2.share)
+        }, m2.name, false, undefined, this))
+      }, undefined, false, undefined, this),
+      props.acts || props.gm ? /* @__PURE__ */ u3(Controls, {
+        name: "consolidate",
+        children: [
+          props.acts ? /* @__PURE__ */ u3(Button, {
+            icon: "layers",
+            disabled: props.why !== null || props.acts.busy,
+            onClick: () => props.acts?.consolidate(!c3.elected),
+            children: label
+          }, undefined, false, undefined, this) : null,
+          props.gm ? /* @__PURE__ */ u3(Button, {
+            icon: "layers",
+            disabled: props.gm.busy,
+            onClick: () => props.gm?.consolidate(!c3.elected),
+            children: `GM: ${label.charAt(0).toLowerCase()}${label.slice(1)}`
+          }, undefined, false, undefined, this) : null
+        ]
+      }, undefined, true, undefined, this) : null,
+      props.acts && props.why !== null ? /* @__PURE__ */ u3("span", {
+        class: "lre-field-help",
+        children: props.why
+      }, undefined, false, undefined, this) : null
+    ]
+  }, undefined, true, undefined, this);
+}
+function DonateForm(props) {
+  const [amount2, setAmount] = d2("");
+  const cents2 = parseMoneyInput(amount2, props.currency);
+  const ok = cents2 !== null && cents2 > 0 && !props.acts.busy;
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-stack",
+    "data-lre-taxes-donate": true,
+    children: [
+      /* @__PURE__ */ u3(AmountField, {
+        label: "Amount to donate",
+        value: amount2,
+        currency: props.currency,
+        onInput: setAmount,
+        invalid: amount2.trim() !== "" && (cents2 === null || cents2 <= 0),
+        help: props.exempt.deductible ? "Deductible: it comes off your taxable income, and what that saves you is refunded each 15 April." : `Not deductible: a gift to a ${props.exempt.name.toLowerCase()} comes off no one's income tax.`
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(Button, {
+        variant: "primary",
+        icon: "heart",
+        disabled: !ok,
+        onClick: () => ok && cents2 !== null ? void props.acts.donate(cents2).then((done) => done && setAmount("")) : undefined,
+        children: ok && cents2 !== null ? `Donate ${formatMoney(cents2, props.currency)}` : "Donate"
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+function GmStatus(props) {
+  const [status, setStatus] = d2(props.current);
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-stack",
+    "data-lre-gm-tax-status": true,
+    children: [
+      /* @__PURE__ */ u3(SelectField, {
+        label: "GM: tax-exempt status",
+        value: status,
+        empty: "Not exempt",
+        options: props.statuses.map((s3) => ({ value: s3.id, label: s3.code !== "" ? `${s3.name} (${s3.code})` : s3.name })),
+        onChange: setStatus,
+        help: props.statuses.length === 0 ? "The world's tables hold no exempt statuses: take the Data update for Tax-exempt organizations." : "Exempt, it pays no income tax and passes none to its owners, and owes FUTA and SUTA as its status says."
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(Button, {
+        variant: "primary",
+        disabled: props.gm.busy || status === props.current,
+        onClick: () => props.gm.status(status === "" ? null : status),
+        children: "Set the status"
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+function OrgTaxes(props) {
+  const { section, currency, acts: acts2, gm } = props;
+  const money2 = (cents2) => formatMoney(cents2, currency);
+  const exempt = section.exempt;
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-stack",
+    "data-lre-org-taxes": true,
+    children: [
+      exempt || gm && section.statuses ? /* @__PURE__ */ u3(Section, {
+        title: "Tax-exempt",
+        children: [
+          exempt ? /* @__PURE__ */ u3("div", {
+            class: "lre-stack",
+            "data-lre-taxes-exempt": exempt.status,
+            children: [
+              /* @__PURE__ */ u3(Row, {
+                k: "Exempt as",
+                v: exempt.name,
+                sub: exempt.code !== "" ? `IRC ${exempt.code}: it pays no income tax` : "it pays no income tax"
+              }, undefined, false, undefined, this),
+              /* @__PURE__ */ u3(Row, {
+                k: "Donations to it",
+                v: exempt.deductible ? "Deductible" : "Not deductible",
+                sub: exempt.deductible ? "a person's gifts come off their income tax" : "no one deducts a gift to it"
+              }, undefined, false, undefined, this),
+              /* @__PURE__ */ u3(Row, {
+                k: "Unemployment taxes it owes",
+                v: exempt.futa && exempt.suta ? "FUTA and SUTA" : exempt.suta ? "SUTA only" : exempt.futa ? "FUTA only" : "Neither"
+              }, undefined, false, undefined, this)
+            ]
+          }, undefined, true, undefined, this) : /* @__PURE__ */ u3("span", {
+            class: "lre-field-help",
+            children: "Not exempt: it pays its taxes as any organization does."
+          }, undefined, false, undefined, this),
+          gm && section.statuses ? /* @__PURE__ */ u3(GmStatus, {
+            statuses: section.statuses,
+            current: exempt?.status ?? "",
+            gm
+          }, exempt?.status ?? "", false, undefined, this) : null
+        ]
+      }, undefined, true, undefined, this) : null,
+      exempt && acts2 ? /* @__PURE__ */ u3(Section, {
+        title: "Donate",
+        children: /* @__PURE__ */ u3(DonateForm, {
+          exempt,
+          currency,
+          acts: acts2
+        }, undefined, false, undefined, this)
+      }, undefined, false, undefined, this) : null,
+      section.income !== null ? /* @__PURE__ */ u3(Section, {
+        title: "Income tax",
+        children: [
+          /* @__PURE__ */ u3("div", {
+            class: "lre-stack",
+            "data-lre-taxes-income": section.income,
+            children: [
+              section.income === "exempt" ? /* @__PURE__ */ u3(Row, {
+                k: "Exempt from income tax",
+                sub: "by its status: it pays none on its profit, and none passes to its owners"
+              }, undefined, false, undefined, this) : section.income === "corporate" ? section.filedBy !== null ? /* @__PURE__ */ u3(Row, {
+                k: "Filed on a consolidated return",
+                v: section.filedBy,
+                sub: "its parent's return pays the group's federal tax and its state tax: it pays none of its own while included"
+              }, undefined, false, undefined, this) : /* @__PURE__ */ u3(Row, {
+                k: "It pays corporate income tax",
+                v: section.incomeSoFar !== null ? money2(section.incomeSoFar) : undefined,
+                sub: "on this year's profit so far, and what its pass-through companies pass up to it"
+              }, undefined, false, undefined, this) : /* @__PURE__ */ u3(Row, {
+                k: "Taxed to its owners",
+                sub: "its profit is their income, through any companies between, in their estimated tax"
+              }, undefined, false, undefined, this),
+              section.pending ? /* @__PURE__ */ u3("span", {
+                "data-lre-taxes-pending": true,
+                children: `Taxed as ${STRUCTURE_WORDS[section.pending.structure] ?? section.pending.structure} from ${section.pending.from}.`
+              }, undefined, false, undefined, this) : null
+            ]
+          }, undefined, true, undefined, this),
+          section.taxedTo.length > 0 || section.untaxed.length > 0 || section.exemptHolders.length > 0 ? /* @__PURE__ */ u3(List, {
+            children: [
+              section.taxedTo.map((t3) => /* @__PURE__ */ u3(ListRow, {
+                icon: "user",
+                title: t3.name,
+                subtitle: "pays tax on its share",
+                value: share(t3.share)
+              }, `to:${t3.name}`, false, undefined, this)),
+              section.untaxed.map((t3) => /* @__PURE__ */ u3(ListRow, {
+                icon: "briefcase",
+                title: t3.name,
+                subtitle: "no one pays tax on this share",
+                value: share(t3.share),
+                valueTone: "warn"
+              }, `no:${t3.name}`, false, undefined, this)),
+              section.exemptHolders.map((t3) => /* @__PURE__ */ u3(ListRow, {
+                icon: "shield",
+                title: t3.name,
+                subtitle: "exempt: its exemption keeps this share untaxed",
+                value: share(t3.share)
+              }, `ex:${t3.name}`, false, undefined, this))
+            ]
+          }, undefined, true, undefined, this) : null
+        ]
+      }, undefined, true, undefined, this) : null,
+      section.consolidation ? /* @__PURE__ */ u3(ConsolidationPart, {
+        consolidation: section.consolidation,
+        why: section.acts?.consolidate ?? null,
+        currency,
+        ...acts2 && section.acts ? { acts: acts2 } : {},
+        ...gm ? { gm } : {}
+      }, undefined, false, undefined, this) : null,
+      section.unemployment ? /* @__PURE__ */ u3(Section, {
+        title: "Unemployment taxes",
+        children: /* @__PURE__ */ u3(UnemploymentRows, {
+          rates: section.unemployment,
+          exempt,
+          currency
+        }, undefined, false, undefined, this)
+      }, undefined, false, undefined, this) : null,
+      /* @__PURE__ */ u3(Section, {
+        title: "Due next",
+        flush: true,
+        children: section.due.length === 0 ? /* @__PURE__ */ u3(Empty, {
+          icon: "receipt",
+          children: "Nothing falls due."
+        }, undefined, false, undefined, this) : /* @__PURE__ */ u3(List, {
+          children: section.due.map((d3) => /* @__PURE__ */ u3(ListRow, {
+            icon: "receipt",
+            title: d3.label,
+            subtitle: d3.at,
+            value: d3.cents !== null ? money2(d3.cents) : undefined
+          }, `${d3.label}:${d3.at}`, false, undefined, this))
+        }, undefined, false, undefined, this)
+      }, undefined, false, undefined, this),
+      section.years.map((y3, i3) => {
+        const rows2 = yearRows(y3, i3 === 0 ? section.salesHeld : null);
+        return /* @__PURE__ */ u3(Section, {
+          title: i3 === 0 ? `This year, ${y3.year}` : `Last year, ${y3.year}`,
+          children: rows2.length === 0 ? /* @__PURE__ */ u3("span", {
+            class: "lre-field-help",
+            children: "Nothing yet."
+          }, undefined, false, undefined, this) : /* @__PURE__ */ u3("div", {
+            class: "lre-stack",
+            "data-lre-taxes-year": y3.year,
+            children: rows2.map((r3) => /* @__PURE__ */ u3(Row, {
+              k: r3.k,
+              v: money2(r3.cents)
+            }, r3.k, false, undefined, this))
+          }, undefined, false, undefined, this)
+        }, y3.year, false, undefined, this);
+      })
+    ]
+  }, undefined, true, undefined, this);
+}
+function taxesActs(org, controls) {
+  return {
+    busy: controls.busy,
+    consolidate: (elect) => void controls.act({ action: FINANCE_ACTIONS.consolidate, params: { org, elect: elect ? "yes" : "no" } }),
+    donate: (cents2) => controls.act({ action: FINANCE_ACTIONS.donate, params: { to: org, amount: cents2 } })
+  };
+}
+function taxesGm(org, gm) {
+  return {
+    busy: gm.busy,
+    status: (status) => void gm.edit([{ op: "org", change: { do: "tax_status", org, status } }]),
+    consolidate: (elect) => void gm.edit([{ op: "org", change: { do: "consolidate", org, elect } }])
+  };
+}
+function OrgTaxesTab(props) {
+  const controls = usePlayerControls(props.chatId, props.state);
+  const section = decodeTaxes(props.section);
+  if (!section)
+    return /* @__PURE__ */ u3(JsonView, {
+      value: props.section
+    }, undefined, false, undefined, this);
+  return /* @__PURE__ */ u3(OrgTaxes, {
+    section,
+    currency: props.state.currency ?? DEFAULT_CURRENCY,
+    acts: taxesActs(props.org.id, controls)
+  }, undefined, false, undefined, this);
+}
+function GmOrgTaxesTab(props) {
+  const section = decodeTaxes(props.section);
+  if (!section)
+    return /* @__PURE__ */ u3(JsonView, {
+      value: props.section
+    }, undefined, false, undefined, this);
+  return /* @__PURE__ */ u3(OrgTaxes, {
+    section,
+    currency: props.gm.currency,
+    gm: taxesGm(props.org.id, props.gm)
+  }, undefined, false, undefined, this);
+}
+
 // src/packs/economy/ui/orgs.tsx
 function useReader(props) {
   const app = useApp();
@@ -59068,7 +59743,8 @@ function PayAsPage(props) {
   const payees = payAs.entry.options.filter((o4) => o4.disabled === undefined && o4.next === undefined && typeof o4.params.to === "string");
   const option = payees.find((o4) => o4.params.to === props.to);
   const cents2 = amountOf(props.amount, controls.currency);
-  const problem = !option ? "Pick whom to pay." : amountProblem(props.amount, controls.currency, "the amount") ?? (payAs.limits && cents2 !== null ? overLimit(payAs.limits, cents2, null, org.name, controls.currency) : null);
+  const problem = !option ? "Pick whom to pay." : amountProblem(props.amount, controls.currency, "the amount");
+  const over = payAs.limits && cents2 !== null ? overLimit(payAs.limits, cents2, null, org.name, controls.currency) : null;
   const limit = payAs.limits?.payment;
   return /* @__PURE__ */ u3(ActionPage, {
     nav: props.nav,
@@ -59076,13 +59752,13 @@ function PayAsPage(props) {
     name: "pay-as",
     title: `Pay as ${org.name}`,
     subtitle: limit !== undefined ? `From its money, up to ${fmt(limit)} a payment` : "From its money",
-    go: cents2 !== null ? `Pay ${fmt(cents2)} as ${org.name}` : `Pay as ${org.name}`,
+    go: cents2 === null ? `Pay as ${org.name}` : over !== null ? `Ask for approval to pay ${fmt(cents2)}` : `Pay ${fmt(cents2)} as ${org.name}`,
     problem,
     submit: () => {
       if (!option || cents2 === null)
         return Promise.resolve(false);
       const request = paletteRequest(payAs.entry, [option], props.chatId, cents2, undefined, [], org.id);
-      return controls.act({ action: request.action, params: request.params });
+      return controls.act({ action: request.action, params: over !== null ? { ...request.params, ask: true } : request.params });
     },
     children: [
       /* @__PURE__ */ u3(SelectField, {
@@ -59098,7 +59774,12 @@ function PayAsPage(props) {
         currency: controls.currency,
         onInput: props.onAmount,
         invalid: props.amount.trim() !== "" && cents2 === null
-      }, undefined, false, undefined, this)
+      }, undefined, false, undefined, this),
+      over !== null ? /* @__PURE__ */ u3("span", {
+        class: "lre-field-help",
+        "data-lre-pay-as-over": true,
+        children: `${over}: it goes to whoever holds the power above you for approval, and is paid once they approve.`
+      }, undefined, false, undefined, this) : null
     ]
   }, undefined, true, undefined, this);
 }
@@ -59167,6 +59848,8 @@ function OrgPayroll(props) {
   const { org, section, reader, nav } = props;
   const theirs = theirBusiness(org, reader);
   const jobs = theirs?.employees ?? section.employees;
+  const u4 = section.unemployment;
+  const money2 = (cents2) => formatMoney(cents2, props.currency);
   return /* @__PURE__ */ u3("div", {
     class: "lre-stack",
     "data-lre-org-payroll": org.id,
@@ -59181,8 +59864,20 @@ function OrgPayroll(props) {
           /* @__PURE__ */ u3(ListRow, {
             icon: "coins",
             title: "Payroll this year",
-            value: formatMoney(section.payroll, props.currency)
-          }, undefined, false, undefined, this)
+            value: money2(section.payroll)
+          }, undefined, false, undefined, this),
+          u4 ? /* @__PURE__ */ u3(ListRow, {
+            icon: "receipt",
+            title: "FUTA this year",
+            subtitle: u4.rates?.futa ? `Federal unemployment tax: ${rate(u4.rates.futa.pct)} on the first ${money2(u4.rates.futa.base)} of each worker's pay` : "Federal unemployment tax: it owes none",
+            value: money2(u4.futa)
+          }, undefined, false, undefined, this) : null,
+          u4 ? /* @__PURE__ */ u3(ListRow, {
+            icon: "receipt",
+            title: "SUTA this year",
+            subtitle: u4.rates?.suta ? `State unemployment tax: ${rate(u4.rates.suta.pct)} on the first ${money2(u4.rates.suta.base)} of each worker's pay` : "State unemployment tax: it owes none",
+            value: money2(u4.suta)
+          }, undefined, false, undefined, this) : null
         ]
       }, undefined, true, undefined, this),
       jobs.length === 0 ? /* @__PURE__ */ u3(Empty, {
@@ -59287,11 +59982,19 @@ function Form(props) {
       children: [
         props.why !== null ? /* @__PURE__ */ u3("span", {
           class: "lre-field-help",
-          children: props.why
+          children: props.vote ? `${props.why}. You may put it to a vote: it is done if the vote passes.` : props.why
         }, undefined, false, undefined, this) : null,
         props.children
       ]
     }, undefined, true, undefined, this)
+  }, undefined, false, undefined, this);
+}
+function DecideButton(props) {
+  return /* @__PURE__ */ u3(Button, {
+    variant: props.variant ?? "primary",
+    disabled: !props.ok,
+    onClick: () => props.onGo(props.vote),
+    children: props.vote ? props.voteLabel ?? "Put it to a vote" : props.label
   }, undefined, false, undefined, this);
 }
 function IssueForm(props) {
@@ -59301,7 +60004,7 @@ function IssueForm(props) {
   const [cls, setCls] = d2("");
   const n4 = wholeOf(units);
   const each = price.trim() === "" ? null : parseMoneyInput(price, props.currency);
-  const ok = props.why === null && to !== "" && n4 !== null && (price.trim() === "" || each !== null && each >= 0);
+  const ok = (props.why === null || props.vote === true) && to !== "" && n4 !== null && (price.trim() === "" || each !== null && each >= 0);
   return /* @__PURE__ */ u3(M, {
     children: [
       props.to === undefined ? /* @__PURE__ */ u3(PickField3, {
@@ -59334,23 +60037,23 @@ function IssueForm(props) {
         empty: "As theirs, else the first",
         onChange: setCls
       }, undefined, false, undefined, this) : null,
-      /* @__PURE__ */ u3(Button, {
-        variant: "primary",
-        disabled: !ok,
-        onClick: () => props.act(FINANCE_ACTIONS.sharesIssue, { business: props.org.id, to, units: n4 ?? 0, ...each !== null ? { price: each } : {}, ...cls !== "" ? { class: cls } : {}, ...props.as ? { as: props.as } : {} }),
-        children: "Issue the shares"
+      /* @__PURE__ */ u3(DecideButton, {
+        ok,
+        vote: props.vote === true,
+        label: "Issue the shares",
+        onGo: (vote) => props.act(FINANCE_ACTIONS.sharesIssue, { business: props.org.id, to, units: n4 ?? 0, ...each !== null ? { price: each } : {}, ...cls !== "" ? { class: cls } : {}, ...props.as ? { as: props.as } : {}, ...vote ? { vote: true } : {} })
       }, undefined, false, undefined, this)
     ]
   }, undefined, true, undefined, this);
 }
 function BuyBackForm(props) {
-  const holders = props.section.owners.flatMap((o4) => o4.party !== null && (o4.units ?? 0) > 0 ? [{ value: o4.party, label: `${o4.name} (${o4.units} units)` }] : []);
+  const holders = props.section.owners.flatMap((o4) => o4.party !== null && o4.public !== true && (o4.units ?? 0) > 0 ? [{ value: o4.party, label: `${o4.name} (${o4.units} units)` }] : []);
   const [from, setFrom] = d2("");
   const [units, setUnits] = d2("");
   const [price, setPrice] = d2("");
   const n4 = wholeOf(units);
   const each = price.trim() === "" ? null : parseMoneyInput(price, props.currency);
-  const ok = props.why === null && from !== "" && n4 !== null && (price.trim() === "" || each !== null && each >= 0);
+  const ok = (props.why === null || props.vote === true) && from !== "" && n4 !== null && (price.trim() === "" || each !== null && each >= 0);
   return /* @__PURE__ */ u3(M, {
     children: [
       /* @__PURE__ */ u3(PickField3, {
@@ -59375,23 +60078,23 @@ function BuyBackForm(props) {
           onInput: setPrice
         }, undefined, false, undefined, this)
       }, undefined, false, undefined, this),
-      /* @__PURE__ */ u3(Button, {
-        variant: "primary",
-        disabled: !ok,
-        onClick: () => props.act(FINANCE_ACTIONS.sharesBuyBack, { business: props.org.id, from, units: n4 ?? 0, ...each !== null ? { price: each } : {} }),
-        children: "Buy them back"
+      /* @__PURE__ */ u3(DecideButton, {
+        ok,
+        vote: props.vote === true,
+        label: "Buy them back",
+        onGo: (vote) => props.act(FINANCE_ACTIONS.sharesBuyBack, { business: props.org.id, from, units: n4 ?? 0, ...each !== null ? { price: each } : {}, ...vote ? { vote: true } : {} })
       }, undefined, false, undefined, this)
     ]
   }, undefined, true, undefined, this);
 }
 function ClassesForm(props) {
-  const holders = props.section.owners.flatMap((o4) => o4.party !== null && ROLE_RIGHTS[o4.role].worth ? [{ value: o4.party, label: o4.name }] : []);
+  const holders = props.section.owners.flatMap((o4) => o4.party !== null && o4.public !== true && ROLE_RIGHTS[o4.role].worth ? [{ value: o4.party, label: o4.name }] : []);
   const [label, setLabel] = d2("");
   const [votes, setVotes] = d2("1");
   const [holder, setHolder] = d2("");
   const id = P2();
   const v6 = Number(votes);
-  const ok = props.why === null && label.trim() !== "" && votes.trim() !== "" && Number.isFinite(v6) && v6 >= 0;
+  const ok = (props.why === null || props.vote === true) && label.trim() !== "" && votes.trim() !== "" && Number.isFinite(v6) && v6 >= 0;
   return /* @__PURE__ */ u3(M, {
     children: [
       (props.section.classes ?? []).map((c3) => /* @__PURE__ */ u3(Row, {
@@ -59423,12 +60126,183 @@ function ClassesForm(props) {
         empty: "No one's",
         onChange: setHolder
       }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(DecideButton, {
+        ok,
+        vote: props.vote === true,
+        label: "Save the class",
+        onGo: (vote) => props.act(FINANCE_ACTIONS.sharesClasses, { business: props.org.id, label: label.trim(), votes: v6, ...holder !== "" ? { holder } : {}, ...vote ? { vote: true } : {} })
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+function ListForm(props) {
+  const listed = props.section.listing;
+  const [units, setUnits] = d2("");
+  const [price, setPrice] = d2("");
+  const [symbol, setSymbol] = d2("");
+  const id = P2();
+  const n4 = wholeOf(units);
+  const each = price.trim() === "" ? null : parseMoneyInput(price, props.currency);
+  const ok = (props.why === null || props.vote === true) && n4 !== null && (price.trim() === "" || each !== null && each > 0);
+  return /* @__PURE__ */ u3(M, {
+    children: [
+      /* @__PURE__ */ u3(UnitsField, {
+        label: "New units for the public",
+        value: units,
+        onInput: setUnits,
+        help: props.section.units !== null ? `It has ${props.section.units} now.` : "Its holders are counted in units first."
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(Field, {
+        label: "Price a unit",
+        help: listed ? `Empty: its market price, ${formatMoney(Math.round(listed.price), props.currency)}.` : "Empty: its books a unit.",
+        children: /* @__PURE__ */ u3(MoneyInput, {
+          currency: props.currency,
+          value: price,
+          label: "Price a unit",
+          onInput: setPrice
+        }, undefined, false, undefined, this)
+      }, undefined, false, undefined, this),
+      listed ? null : /* @__PURE__ */ u3(Field, {
+        label: "Ticker",
+        for: id,
+        help: "Empty: its initials.",
+        children: /* @__PURE__ */ u3("input", {
+          id,
+          class: "lre-input",
+          value: symbol,
+          maxLength: 6,
+          placeholder: "EMR",
+          onInput: (event) => setSymbol(event.currentTarget.value.toUpperCase())
+        }, undefined, false, undefined, this)
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(DecideButton, {
+        ok,
+        vote: props.vote === true,
+        label: listed ? "Offer them" : "List it",
+        onGo: (vote) => props.go({ units: n4 ?? 0, ...each !== null ? { price: each } : {}, ...!listed && symbol.trim() !== "" ? { symbol: symbol.trim() } : {} }, vote)
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+function OfferForm(props) {
+  const [units, setUnits] = d2("");
+  const n4 = wholeOf(units);
+  const ok = props.why === null && n4 !== null && n4 <= props.max;
+  return /* @__PURE__ */ u3(M, {
+    children: [
+      /* @__PURE__ */ u3(UnitsField, {
+        label: "Units",
+        value: units,
+        onInput: setUnits,
+        help: `Up to ${props.max}, at its market price, ${formatMoney(Math.round(props.listing.price), props.currency)} a unit.`
+      }, undefined, false, undefined, this),
       /* @__PURE__ */ u3(Button, {
         variant: "primary",
         disabled: !ok,
-        onClick: () => props.act(FINANCE_ACTIONS.sharesClasses, { business: props.org.id, label: label.trim(), votes: v6, ...holder !== "" ? { holder } : {} }),
-        children: "Save the class"
+        onClick: () => props.act(FINANCE_ACTIONS.stakeSell, { business: props.org.id, units: n4 ?? 0, price: 0 }),
+        children: "Sell them"
       }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+function DelistForm(props) {
+  const [price, setPrice] = d2("");
+  const market = Math.round(props.listing.price);
+  const each = price.trim() === "" ? null : parseMoneyInput(price, props.currency);
+  const ok = (props.why === null || props.vote === true) && (price.trim() === "" || each !== null && each >= market);
+  return /* @__PURE__ */ u3(M, {
+    children: [
+      /* @__PURE__ */ u3("span", {
+        class: "lre-field-help",
+        children: [
+          "It buys back all ",
+          props.listing.float,
+          " public units from its account: about ",
+          formatMoney((each ?? market) * props.listing.float, props.currency),
+          "."
+        ]
+      }, undefined, true, undefined, this),
+      /* @__PURE__ */ u3(Field, {
+        label: "Price a unit",
+        help: `Empty: its market price, ${formatMoney(market, props.currency)}; never less.`,
+        children: /* @__PURE__ */ u3(MoneyInput, {
+          currency: props.currency,
+          value: price,
+          label: "Price a unit",
+          onInput: setPrice
+        }, undefined, false, undefined, this)
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(DecideButton, {
+        ok,
+        vote: props.vote === true,
+        label: "Take it off the market",
+        onGo: (vote) => props.go(each !== null ? { price: each } : {}, vote)
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+function MarketRows(props) {
+  const l3 = props.listing;
+  const month = l3.performance?.month ?? null;
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-stack",
+    "data-lre-ownership-market": true,
+    children: [
+      /* @__PURE__ */ u3(Row, {
+        k: "Ticker",
+        v: l3.symbol,
+        sub: `Listed ${l3.since}`
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(Row, {
+        k: "Price a unit",
+        v: formatMoney(Math.round(l3.price), props.currency),
+        ...month !== null ? { sub: `${month >= 0 ? "+" : ""}${pct3(month)} this month`, tone: month >= 0 ? "pos" : "neg" } : {}
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(Row, {
+        k: "Market capitalization",
+        v: formatMoney(l3.marketCap, props.currency)
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(Row, {
+        k: "The public holds",
+        v: `${l3.float} units`,
+        sub: `${l3.held} of them in the world; ${l3.available} for sale`
+      }, undefined, false, undefined, this),
+      l3.fair !== null ? /* @__PURE__ */ u3(Row, {
+        k: "Its books a unit",
+        v: formatMoney(Math.round(l3.fair), props.currency),
+        sub: "Its price returns toward it"
+      }, undefined, false, undefined, this) : null
+    ]
+  }, undefined, true, undefined, this);
+}
+function GmMarket(props) {
+  const { org, section, gm } = props;
+  const edit = (change) => void gm.edit([{ op: "org", change }]);
+  const busy = gm.busy ? "Busy…" : null;
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-stack",
+    "data-lre-gm-market": org.id,
+    children: [
+      /* @__PURE__ */ u3(Form, {
+        summary: section.listing ? "GM: offer more units" : "GM: list on the market",
+        why: busy ?? (section.structure === "c_corp" ? null : `Only a C corporation lists on a market: change ${org.name}'s structure first`),
+        children: /* @__PURE__ */ u3(ListForm, {
+          section,
+          currency: props.currency,
+          why: busy ?? (section.structure === "c_corp" ? null : ""),
+          go: (p3) => edit({ do: "list", org: org.id, ...p3 })
+        }, undefined, false, undefined, this)
+      }, undefined, false, undefined, this),
+      section.listing ? /* @__PURE__ */ u3(Form, {
+        summary: "GM: take it off the market",
+        why: busy,
+        children: /* @__PURE__ */ u3(DelistForm, {
+          listing: section.listing,
+          currency: props.currency,
+          why: busy,
+          go: (p3) => edit({ do: "delist", org: org.id, ...p3 })
+        }, undefined, false, undefined, this)
+      }, undefined, false, undefined, this) : null
     ]
   }, undefined, true, undefined, this);
 }
@@ -59505,27 +60379,27 @@ function StructureForm(props) {
         class: "lre-field-help",
         children: "Draws and payouts change at once; its taxes from the next estimated-tax period."
       }, undefined, false, undefined, this),
-      /* @__PURE__ */ u3(Button, {
-        variant: "primary",
-        disabled: props.why !== null || structure === "",
-        onClick: () => props.act(ORG_ACTIONS.restructure, { org: props.org.id, structure }),
-        children: "Change it"
+      /* @__PURE__ */ u3(DecideButton, {
+        ok: (props.why === null || props.vote === true) && structure !== "",
+        vote: props.vote === true,
+        label: "Change it",
+        onGo: (vote) => props.act(ORG_ACTIONS.restructure, { org: props.org.id, structure, ...vote ? { vote: true } : {} })
       }, undefined, false, undefined, this)
     ]
   }, undefined, true, undefined, this);
 }
 function StakeForm(props) {
-  const [share, setShare] = d2("");
+  const [share2, setShare] = d2("");
   const [price, setPrice] = d2("");
   const [buyer, setBuyer] = d2("");
-  const s3 = Number(share);
+  const s3 = Number(share2);
   const cents2 = parseMoneyInput(price, props.currency);
-  const ok = share.trim() !== "" && s3 > 0 && s3 <= props.child.share + 0.000000001 && cents2 !== null && cents2 >= 0;
+  const ok = share2.trim() !== "" && s3 > 0 && s3 <= props.child.share + 0.000000001 && cents2 !== null && cents2 >= 0;
   return /* @__PURE__ */ u3(M, {
     children: [
       /* @__PURE__ */ u3(UnitsField, {
         label: "Share to sell (%)",
-        value: share,
+        value: share2,
         onInput: setShare,
         help: `It holds ${pct3(props.child.share)}.`
       }, undefined, false, undefined, this),
@@ -59622,11 +60496,11 @@ function OrgOwnership(props) {
           children: "No owners on record."
         }, undefined, false, undefined, this) : /* @__PURE__ */ u3(List, {
           children: section.owners.map((o4, i3) => /* @__PURE__ */ u3(ListRow, {
-            icon: "user",
+            icon: o4.public === true && o4.party === null ? "globe" : "user",
             title: o4.name,
-            subtitle: [o4.role !== "owner" ? o4.role.replace(/_/g, " ") : null, section.classes && o4.class ? o4.class : null, o4.units !== undefined ? `${o4.units} units` : null, o4.votes !== undefined && Math.abs(o4.votes - o4.share) > 0.005 ? `${pct3(o4.votes)} of the votes` : null].filter((x2) => x2 !== null).join(" · ") || undefined,
+            subtitle: [o4.public === true ? "on the market" : null, o4.role !== "owner" ? o4.role.replace(/_/g, " ") : null, section.classes && o4.class ? o4.class : null, o4.units !== undefined ? `${o4.units} units` : null, o4.votes !== undefined && Math.abs(o4.votes - o4.share) > 0.005 ? `${pct3(o4.votes)} of the votes` : null].filter((x2) => x2 !== null).join(" · ") || undefined,
             value: [o4.share > 0 ? pct3(o4.share) : null, o4.value !== undefined ? formatMoney(o4.value, currency) : null].filter((x2) => x2 !== null).join(" · ") || undefined
-          }, o4.party ?? `someone:${i3}`, false, undefined, this))
+          }, `${o4.public === true ? "market:" : ""}${o4.party ?? `someone:${i3}`}`, false, undefined, this))
         }, undefined, false, undefined, this)
       }, undefined, false, undefined, this),
       section.valuation ? /* @__PURE__ */ u3(Section, {
@@ -59638,7 +60512,7 @@ function OrgOwnership(props) {
             /* @__PURE__ */ u3(Row, {
               k: "Value",
               v: formatMoney(section.valuation.value, currency),
-              sub: section.valuation.set ? "Set for it" : `Its books, ${formatMoney(section.valuation.book, currency)}, and ${section.valuation.multiple} × the last 12 months' profit, ${formatMoney(section.valuation.profit, currency)}`
+              sub: section.valuation.market ? `At the market: ${formatMoney(Math.round(section.valuation.market.price), currency)} a unit × ${section.valuation.market.units} units; its books ${formatMoney(section.valuation.book, currency)} and ${section.valuation.multiple} × the last 12 months' profit, ${formatMoney(section.valuation.profit, currency)}` : section.valuation.set ? "Set for it" : `Its books, ${formatMoney(section.valuation.book, currency)}, and ${section.valuation.multiple} × the last 12 months' profit, ${formatMoney(section.valuation.profit, currency)}`
             }, undefined, false, undefined, this),
             section.valuation.perUnit !== null ? /* @__PURE__ */ u3(Row, {
               k: "A unit",
@@ -59647,6 +60521,69 @@ function OrgOwnership(props) {
           ]
         }, undefined, true, undefined, this)
       }, undefined, false, undefined, this) : null,
+      section.listing || act && section.market || props.gm ? /* @__PURE__ */ u3(Section, {
+        title: "Market",
+        children: [
+          section.listing ? /* @__PURE__ */ u3(MarketRows, {
+            listing: section.listing,
+            currency
+          }, undefined, false, undefined, this) : /* @__PURE__ */ u3("span", {
+            children: "Not on a market."
+          }, undefined, false, undefined, this),
+          act && section.market ? /* @__PURE__ */ u3("div", {
+            class: "lre-stack",
+            "data-lre-ownership-market-controls": org.id,
+            children: [
+              /* @__PURE__ */ u3(Form, {
+                summary: section.listing ? "Offer more units" : "List on the market",
+                why: section.market.list,
+                vote: section.market.voteList === true,
+                children: /* @__PURE__ */ u3(ListForm, {
+                  section,
+                  currency,
+                  why: section.market.list,
+                  vote: section.market.voteList === true,
+                  go: (p3, vote) => act(FINANCE_ACTIONS.sharesList, { business: org.id, ...p3, ...vote ? { vote: true } : {} })
+                }, undefined, false, undefined, this)
+              }, undefined, false, undefined, this),
+              section.listing ? /* @__PURE__ */ u3(M, {
+                children: [
+                  /* @__PURE__ */ u3(Form, {
+                    summary: "Sell on the market",
+                    why: section.market.offer,
+                    children: /* @__PURE__ */ u3(OfferForm, {
+                      org,
+                      listing: section.listing,
+                      max: section.market.units,
+                      currency,
+                      why: section.market.offer,
+                      act
+                    }, undefined, false, undefined, this)
+                  }, undefined, false, undefined, this),
+                  /* @__PURE__ */ u3(Form, {
+                    summary: "Take it off the market",
+                    why: section.market.delist,
+                    vote: section.market.voteDelist === true,
+                    children: /* @__PURE__ */ u3(DelistForm, {
+                      listing: section.listing,
+                      currency,
+                      why: section.market.delist,
+                      vote: section.market.voteDelist === true,
+                      go: (p3, vote) => act(FINANCE_ACTIONS.sharesDelist, { business: org.id, ...p3, ...vote ? { vote: true } : {} })
+                    }, undefined, false, undefined, this)
+                  }, undefined, false, undefined, this)
+                ]
+              }, undefined, true, undefined, this) : null
+            ]
+          }, undefined, true, undefined, this) : null,
+          props.gm ? /* @__PURE__ */ u3(GmMarket, {
+            org,
+            section,
+            currency,
+            gm: props.gm
+          }, undefined, false, undefined, this) : null
+        ]
+      }, undefined, true, undefined, this) : null,
       section.parents.length > 0 || section.children.length > 0 ? /* @__PURE__ */ u3(Section, {
         title: "Structure",
         flush: true,
@@ -59769,33 +60706,39 @@ function OrgOwnership(props) {
               /* @__PURE__ */ u3(Form, {
                 summary: "Issue shares",
                 why: acts2.decide,
+                vote: acts2.vote === true,
                 children: /* @__PURE__ */ u3(IssueForm, {
                   org,
                   section,
                   people: people2,
                   currency,
                   why: acts2.decide,
+                  vote: acts2.vote === true,
                   act
                 }, undefined, false, undefined, this)
               }, undefined, false, undefined, this),
               section.units !== null ? /* @__PURE__ */ u3(Form, {
                 summary: "Buy back",
                 why: acts2.decide,
+                vote: acts2.vote === true,
                 children: /* @__PURE__ */ u3(BuyBackForm, {
                   org,
                   section,
                   currency,
                   why: acts2.decide,
+                  vote: acts2.vote === true,
                   act
                 }, undefined, false, undefined, this)
               }, undefined, false, undefined, this) : null,
               /* @__PURE__ */ u3(Form, {
                 summary: "Classes",
                 why: acts2.decide,
+                vote: acts2.vote === true,
                 children: /* @__PURE__ */ u3(ClassesForm, {
                   org,
                   section,
                   why: acts2.decide,
+                  vote: acts2.vote === true,
                   act
                 }, undefined, false, undefined, this)
               }, undefined, false, undefined, this),
@@ -59812,19 +60755,247 @@ function OrgOwnership(props) {
               /* @__PURE__ */ u3(Form, {
                 summary: "Change structure",
                 why: acts2.restructure,
+                vote: acts2.voteRestructure === true,
                 children: /* @__PURE__ */ u3(StructureForm, {
                   org,
                   section,
                   why: acts2.restructure,
+                  vote: acts2.voteRestructure === true,
                   act
                 }, undefined, false, undefined, this)
               }, undefined, false, undefined, this)
             ]
           }, undefined, true, undefined, this) : null
         ]
-      }, undefined, true, undefined, this) : null
+      }, undefined, true, undefined, this) : null,
+      section.winding && section.winding.dissolved === null ? /* @__PURE__ */ u3(WindingPart, {
+        org,
+        winding: section.winding,
+        currency,
+        ...props.change ? { change: props.change } : {}
+      }, undefined, false, undefined, this) : null,
+      section.merge ? /* @__PURE__ */ u3(MergePart, {
+        org,
+        merge: section.merge,
+        currency,
+        ...props.change ? { change: props.change } : {}
+      }, undefined, false, undefined, this) : null
     ]
   }, undefined, true, undefined, this);
+}
+function lineRows(lines2, currency, tone) {
+  return lines2.map((l3, i3) => /* @__PURE__ */ u3(Row, {
+    k: l3.label,
+    v: formatMoney(l3.cents, currency),
+    ...tone ? { tone } : {}
+  }, `${l3.label}:${i3}`, false, undefined, this));
+}
+function WindingPart(props) {
+  const { org, winding: w3, currency } = props;
+  const [stage, setStage] = d2("all");
+  const [property2, setProperty] = d2("distribute");
+  const [to, setTo] = d2("");
+  const begun = w3.since !== null;
+  const holders = w3.payouts.flatMap((p3) => p3.party !== null ? [{ value: p3.party, label: p3.name }] : []);
+  const change = props.change;
+  const vote = props.winding.vote === true;
+  const go2 = (s3) => change?.({ do: "wind_up", org: org.id, stage: s3, ...s3 === "begin" || s3 === "resume" ? {} : { property: property2 }, ...to !== "" && s3 !== "begin" && s3 !== "resume" ? { to } : {} }, vote);
+  const barred = w3.why !== null && !vote;
+  const blocked = barred || w3.short > 0;
+  return /* @__PURE__ */ u3(Section, {
+    title: begun ? "Finish winding up" : "Wind up",
+    children: /* @__PURE__ */ u3("div", {
+      class: "lre-stack",
+      "data-lre-ownership-winding": org.id,
+      children: [
+        w3.why !== null ? /* @__PURE__ */ u3("span", {
+          class: "lre-field-help",
+          children: vote ? `${w3.why}. You may put it to a vote: it is done if the vote passes.` : w3.why
+        }, undefined, false, undefined, this) : null,
+        /* @__PURE__ */ u3(Row, {
+          k: "Cash, with what it would sell",
+          v: formatMoney(w3.cash, currency)
+        }, undefined, false, undefined, this),
+        w3.debts.length > 0 ? /* @__PURE__ */ u3(Disclosure, {
+          summary: `It would pay ${formatMoney(w3.debts.reduce((a3, d3) => a3 + d3.cents, 0), currency)} it owes`,
+          children: /* @__PURE__ */ u3("div", {
+            class: "lre-stack",
+            children: lineRows(w3.debts, currency, "neg")
+          }, undefined, false, undefined, this)
+        }, undefined, false, undefined, this) : null,
+        w3.owed.length > 0 ? /* @__PURE__ */ u3(Disclosure, {
+          summary: `It would write off ${formatMoney(w3.owed.reduce((a3, d3) => a3 + d3.cents, 0), currency)} owed it`,
+          children: /* @__PURE__ */ u3("div", {
+            class: "lre-stack",
+            children: lineRows(w3.owed, currency, "muted")
+          }, undefined, false, undefined, this)
+        }, undefined, false, undefined, this) : null,
+        w3.assets.length > 0 ? /* @__PURE__ */ u3(Disclosure, {
+          summary: "What it holds",
+          children: /* @__PURE__ */ u3(List, {
+            children: w3.assets.map((a3) => /* @__PURE__ */ u3(ListRow, {
+              icon: "box",
+              title: a3.label,
+              subtitle: a3.goes,
+              ...a3.value !== null ? { value: formatMoney(a3.value, currency) } : {}
+            }, a3.id, false, undefined, this))
+          }, undefined, false, undefined, this)
+        }, undefined, false, undefined, this) : null,
+        w3.staff.length > 0 ? /* @__PURE__ */ u3(Row, {
+          k: "Staff who would go",
+          v: w3.staff.map((s3) => s3.name).join(", ")
+        }, undefined, false, undefined, this) : null,
+        w3.payments.length > 0 ? /* @__PURE__ */ u3(Row, {
+          k: "Standing payments that would end",
+          v: w3.payments.map((p3) => p3.label).join(", ")
+        }, undefined, false, undefined, this) : null,
+        w3.payouts.length > 0 ? /* @__PURE__ */ u3(List, {
+          children: w3.payouts.map((p3, i3) => /* @__PURE__ */ u3(ListRow, {
+            icon: "user",
+            title: p3.name,
+            subtitle: `${pct3(p3.share)} of what is left`,
+            value: formatMoney(p3.cents, currency)
+          }, p3.party ?? `someone:${i3}`, false, undefined, this))
+        }, undefined, false, undefined, this) : null,
+        w3.short > 0 ? /* @__PURE__ */ u3(Banner, {
+          tone: "warn",
+          title: `It is ${formatMoney(w3.short, currency)} short`,
+          children: "It can't be wound up until it can pay what it owes: sell something as it first, or put money in."
+        }, undefined, false, undefined, this) : null,
+        change ? /* @__PURE__ */ u3(M, {
+          children: [
+            begun ? null : /* @__PURE__ */ u3(Seg, {
+              label: "How",
+              value: stage,
+              options: [{ value: "all", label: "All at once" }, { value: "begin", label: "Begin winding up" }],
+              onChange: setStage
+            }, undefined, false, undefined, this),
+            begun || stage === "all" ? /* @__PURE__ */ u3(Seg, {
+              label: "Its property",
+              value: property2,
+              options: [{ value: "distribute", label: "Hand to its owners" }, { value: "sell", label: "Sell it" }],
+              onChange: setProperty
+            }, undefined, false, undefined, this) : null,
+            (begun || stage === "all") && holders.length > 1 && w3.assets.some((a3) => a3.value === null) ? /* @__PURE__ */ u3(PickField3, {
+              label: "Its things go to",
+              value: to,
+              options: holders,
+              empty: "Its largest owner",
+              onChange: setTo
+            }, undefined, false, undefined, this) : null,
+            /* @__PURE__ */ u3(Controls, {
+              name: `${org.id}-winding`,
+              children: begun ? /* @__PURE__ */ u3(M, {
+                children: [
+                  /* @__PURE__ */ u3(DecideButton, {
+                    variant: "danger",
+                    ok: !blocked,
+                    vote,
+                    label: "Finish and dissolve",
+                    voteLabel: "Put finishing it to a vote",
+                    onGo: () => go2("finish")
+                  }, undefined, false, undefined, this),
+                  /* @__PURE__ */ u3(Button, {
+                    disabled: barred,
+                    onClick: () => go2("resume"),
+                    children: vote ? "Put resuming to a vote" : "Resume trading"
+                  }, undefined, false, undefined, this)
+                ]
+              }, undefined, true, undefined, this) : /* @__PURE__ */ u3(DecideButton, {
+                variant: "danger",
+                ok: stage === "all" ? !blocked : !barred,
+                vote,
+                label: stage === "all" ? "Wind it up" : "Begin winding up",
+                onGo: () => go2(stage)
+              }, undefined, false, undefined, this)
+            }, undefined, false, undefined, this)
+          ]
+        }, undefined, true, undefined, this) : null
+      ]
+    }, undefined, true, undefined, this)
+  }, undefined, false, undefined, this);
+}
+function MergePart(props) {
+  const { org, merge: m2, currency } = props;
+  const [other, setOther] = d2("");
+  const [way, setWay] = d2("in");
+  const [ratio, setRatio] = d2("");
+  const [cash, setCash] = d2("");
+  const chosen = m2.with.find((c3) => c3.id === other) ?? null;
+  const self = { id: org.id, name: org.name, units: m2.units, perUnit: m2.perUnit };
+  const [from, into2] = way === "out" ? [self, chosen] : [chosen, self];
+  const byValue = from && into2 && into2.perUnit > 0 ? from.perUnit / into2.perUnit : null;
+  const said = ratio.trim() === "" ? null : Number(ratio);
+  const cents2 = cash.trim() === "" ? null : parseMoneyInput(cash, currency);
+  const vote = m2.vote === true;
+  const ok = (m2.why === null || vote) && chosen !== null && from !== null && into2 !== null && (said === null || Number.isFinite(said) && said >= 0) && (cents2 === null || cents2 >= 0) && (said !== null || byValue !== null || (cents2 ?? 0) > 0);
+  const change = props.change;
+  return /* @__PURE__ */ u3(Form, {
+    summary: "Merge",
+    why: m2.why,
+    vote,
+    children: /* @__PURE__ */ u3("div", {
+      class: "lre-stack",
+      "data-lre-ownership-merge": org.id,
+      children: [
+        (m2.why === null || vote) && m2.with.length === 0 ? /* @__PURE__ */ u3("span", {
+          class: "lre-field-help",
+          children: "You decide for no other company to merge it with."
+        }, undefined, false, undefined, this) : null,
+        /* @__PURE__ */ u3(PickField3, {
+          label: "With",
+          value: other,
+          options: m2.with.map((c3) => ({ value: c3.id, label: c3.name })),
+          empty: "Choose a company",
+          onChange: setOther
+        }, undefined, false, undefined, this),
+        /* @__PURE__ */ u3(Seg, {
+          label: "Which way",
+          value: way,
+          options: [{ value: "in", label: "Fold it in here" }, { value: "out", label: `Fold ${org.name} into it` }, { value: "keep", label: "Take it over" }],
+          onChange: setWay
+        }, undefined, false, undefined, this),
+        /* @__PURE__ */ u3(Field, {
+          label: from && into2 ? `Units of ${into2.name} for each of ${from.name}'s` : "Units for each unit",
+          help: byValue !== null ? `Empty: by their values a unit, ${Math.round(byValue * 1e4) / 1e4}.` : "Empty: by their values a unit.",
+          children: /* @__PURE__ */ u3("input", {
+            class: "lre-input",
+            type: "number",
+            inputMode: "decimal",
+            min: 0,
+            step: "any",
+            value: ratio,
+            onInput: (event) => setRatio(event.currentTarget.value)
+          }, undefined, false, undefined, this)
+        }, undefined, false, undefined, this),
+        /* @__PURE__ */ u3(Field, {
+          label: "Cash to its holders, in all",
+          help: into2 ? `From ${into2.name}'s own account.` : undefined,
+          children: /* @__PURE__ */ u3(MoneyInput, {
+            currency,
+            value: cash,
+            label: "Cash to its holders",
+            onInput: setCash
+          }, undefined, false, undefined, this)
+        }, undefined, false, undefined, this),
+        change ? /* @__PURE__ */ u3(DecideButton, {
+          ok,
+          vote,
+          label: way === "keep" ? "Take it over" : "Merge them",
+          onGo: (v6) => from && into2 && change({ do: "merge", org: from.id, into: into2.id, ...said !== null ? { ratio: said } : {}, ...cents2 !== null && cents2 > 0 ? { cash: cents2 } : {}, ...way === "keep" ? { keep: true } : {} }, v6)
+        }, undefined, false, undefined, this) : null
+      ]
+    }, undefined, true, undefined, this)
+  }, undefined, false, undefined, this);
+}
+function asAction(act) {
+  return (op, vote) => {
+    const asked2 = vote === true ? { vote: true } : {};
+    if (op.do === "wind_up")
+      act(ORG_ACTIONS.windUp, { org: op.org, ...op.stage !== undefined ? { stage: op.stage } : {}, ...op.property !== undefined ? { property: op.property } : {}, ...op.to !== undefined ? { to: op.to } : {}, ...asked2 });
+    else if (op.do === "merge")
+      act(ORG_ACTIONS.merge, { org: op.org, into: op.into, ...op.ratio !== undefined ? { ratio: op.ratio } : {}, ...op.cash !== undefined ? { cash: op.cash } : {}, ...op.keep === true ? { keep: true } : {}, ...asked2 });
+  };
 }
 function OrgOwnershipTab(props) {
   const app = useApp();
@@ -59841,7 +61012,7 @@ function OrgOwnershipTab(props) {
     reader,
     nav: orgNav(props.org, reader, props.open, (to) => playElsewhere(app, to)),
     currency: props.state.currency ?? DEFAULT_CURRENCY,
-    ...act ? { act } : {},
+    ...act ? { act, change: asAction(act) } : {},
     open: props.open
   }, undefined, false, undefined, this);
 }
@@ -59863,7 +61034,10 @@ function GmOrgOwnershipTab(props) {
     section,
     reader: null,
     nav,
-    currency: props.gm.currency
+    currency: props.gm.currency,
+    change: (change) => void props.gm.edit([{ op: "org", change }]),
+    open: props.open,
+    gm: props.gm
   }, undefined, false, undefined, this);
 }
 
@@ -59942,123 +61116,6 @@ function AccountSheet(props) {
   return /* @__PURE__ */ u3(HubSheet, {
     ...props,
     kind: "account"
-  }, undefined, false, undefined, this);
-}
-
-// src/packs/economy/ui/taxes.tsx
-function yearRows(y3, held) {
-  return [
-    { k: "Sales tax collected", cents: y3.salesCollected },
-    { k: "Sales tax remitted", cents: y3.salesRemitted },
-    ...held !== null ? [{ k: "Sales tax held, to remit", cents: held }] : [],
-    { k: "Withheld from its staff's pay", cents: y3.withheld },
-    { k: "Its own share of payroll tax", cents: y3.employerShare },
-    { k: "Income tax paid", cents: y3.income },
-    { k: "Property tax", cents: y3.property }
-  ].filter((r3) => r3.cents !== 0);
-}
-function OrgTaxes(props) {
-  const { section, currency } = props;
-  const money2 = (cents2) => formatMoney(cents2, currency);
-  return /* @__PURE__ */ u3("div", {
-    class: "lre-stack",
-    "data-lre-org-taxes": true,
-    children: [
-      section.income !== null ? /* @__PURE__ */ u3(Section, {
-        title: "Income tax",
-        children: [
-          /* @__PURE__ */ u3("div", {
-            class: "lre-stack",
-            "data-lre-taxes-income": section.income,
-            children: [
-              section.income === "corporate" ? /* @__PURE__ */ u3(Row, {
-                k: "It pays corporate income tax",
-                v: section.incomeSoFar !== null ? money2(section.incomeSoFar) : undefined,
-                sub: "on this year's profit so far, and what its pass-through companies pass up to it"
-              }, undefined, false, undefined, this) : /* @__PURE__ */ u3(Row, {
-                k: "Taxed to its owners",
-                sub: "its profit is their income, through any companies between, in their estimated tax"
-              }, undefined, false, undefined, this),
-              section.pending ? /* @__PURE__ */ u3("span", {
-                "data-lre-taxes-pending": true,
-                children: `Taxed as ${STRUCTURE_WORDS[section.pending.structure] ?? section.pending.structure} from ${section.pending.from}.`
-              }, undefined, false, undefined, this) : null
-            ]
-          }, undefined, true, undefined, this),
-          section.taxedTo.length > 0 || section.untaxed.length > 0 ? /* @__PURE__ */ u3(List, {
-            children: [
-              section.taxedTo.map((t3) => /* @__PURE__ */ u3(ListRow, {
-                icon: "user",
-                title: t3.name,
-                subtitle: "pays tax on its share",
-                value: `${Math.round(t3.share * 100) / 100}%`
-              }, `to:${t3.name}`, false, undefined, this)),
-              section.untaxed.map((t3) => /* @__PURE__ */ u3(ListRow, {
-                icon: "briefcase",
-                title: t3.name,
-                subtitle: "no one pays tax on this share",
-                value: `${Math.round(t3.share * 100) / 100}%`,
-                valueTone: "warn"
-              }, `no:${t3.name}`, false, undefined, this))
-            ]
-          }, undefined, true, undefined, this) : null
-        ]
-      }, undefined, true, undefined, this) : null,
-      /* @__PURE__ */ u3(Section, {
-        title: "Due next",
-        flush: true,
-        children: section.due.length === 0 ? /* @__PURE__ */ u3(Empty, {
-          icon: "receipt",
-          children: "Nothing falls due."
-        }, undefined, false, undefined, this) : /* @__PURE__ */ u3(List, {
-          children: section.due.map((d3) => /* @__PURE__ */ u3(ListRow, {
-            icon: "receipt",
-            title: d3.label,
-            subtitle: d3.at,
-            value: d3.cents !== null ? money2(d3.cents) : undefined
-          }, `${d3.label}:${d3.at}`, false, undefined, this))
-        }, undefined, false, undefined, this)
-      }, undefined, false, undefined, this),
-      section.years.map((y3, i3) => {
-        const rows2 = yearRows(y3, i3 === 0 ? section.salesHeld : null);
-        return /* @__PURE__ */ u3(Section, {
-          title: i3 === 0 ? `This year, ${y3.year}` : `Last year, ${y3.year}`,
-          children: rows2.length === 0 ? /* @__PURE__ */ u3("span", {
-            class: "lre-field-help",
-            children: "Nothing yet."
-          }, undefined, false, undefined, this) : /* @__PURE__ */ u3("div", {
-            class: "lre-stack",
-            "data-lre-taxes-year": y3.year,
-            children: rows2.map((r3) => /* @__PURE__ */ u3(Row, {
-              k: r3.k,
-              v: money2(r3.cents)
-            }, r3.k, false, undefined, this))
-          }, undefined, false, undefined, this)
-        }, y3.year, false, undefined, this);
-      })
-    ]
-  }, undefined, true, undefined, this);
-}
-function OrgTaxesTab(props) {
-  const section = decodeTaxes(props.section);
-  if (!section)
-    return /* @__PURE__ */ u3(JsonView, {
-      value: props.section
-    }, undefined, false, undefined, this);
-  return /* @__PURE__ */ u3(OrgTaxes, {
-    section,
-    currency: props.state.currency ?? DEFAULT_CURRENCY
-  }, undefined, false, undefined, this);
-}
-function GmOrgTaxesTab(props) {
-  const section = decodeTaxes(props.section);
-  if (!section)
-    return /* @__PURE__ */ u3(JsonView, {
-      value: props.section
-    }, undefined, false, undefined, this);
-  return /* @__PURE__ */ u3(OrgTaxes, {
-    section,
-    currency: props.gm.currency
   }, undefined, false, undefined, this);
 }
 
@@ -63133,8 +64190,8 @@ var PLAN_TAB = "orgs.plan";
 var PLAN_ACTIONS = { goal: "org_goal", order: "org_order", status: "org_plan_status" };
 var PLAN_EFFECTS = { goal: "orgs.plan_goal", order: "orgs.plan_order", status: "orgs.plan_status" };
 var PLAN_TEXT_MAX = 300;
-var ALERT_TABS = ["overview", "people", "rules", "money", "plan"];
-var ALERT_KINDS = ["vacancy", "payroll_short", "delegation_ending", "dues_arrears", "negative_equity"];
+var ALERT_TABS = ["overview", "people", "rules", "money", "plan", "decisions"];
+var ALERT_KINDS = ["vacancy", "payroll_short", "delegation_ending", "dues_arrears", "negative_equity", "motion_open", "approval_waiting"];
 var COMING_KINDS = ["payday", "invoice", "dues", "lease"];
 var PLAN_STATUSES = ["open", "under_way", "done", "dropped", "blocked", "refused"];
 var PLAN_LIVE = ["open", "under_way", "blocked"];
@@ -63225,6 +64282,7 @@ function decodeOrgView(value) {
     badge: str(value.badge),
     level: num(value.level),
     exists: value.exists !== false,
+    ended: isRecord(value.ended) ? { winding: text(value.ended.winding), dissolved: text(value.ended.dissolved), mergedInto: isRecord(value.ended.mergedInto) ? ref(value.ended.mergedInto) : null } : null,
     you: {
       belongs: you.belongs === true,
       title: text(you.title),
@@ -63342,6 +64400,536 @@ function decodePlan(value) {
     people: list(value.people, ref)
   };
 }
+function tally(v6) {
+  const o4 = isRecord(v6) ? v6 : {};
+  return { for: num(o4.for), against: num(o4.against), abstain: num(o4.abstain), cast: num(o4.cast), remaining: num(o4.remaining), quorumMet: o4.quorumMet === true };
+}
+function motion(m2) {
+  if (typeof m2.id !== "string" || typeof m2.text !== "string")
+    return null;
+  return {
+    id: m2.id,
+    text: m2.text,
+    by: ref(m2.by),
+    at: num(m2.at),
+    closes: num(m2.closes),
+    closesText: str(m2.closesText),
+    status: oneOf(m2.status, MOTION_STATUSES, "open"),
+    why: text(m2.why),
+    basis: oneOf(m2.basis, VOTE_BASES, "shares"),
+    quorum: num(m2.quorum),
+    pass: num(m2.pass),
+    tally: tally(m2.tally),
+    voters: list(m2.voters, (v6) => {
+      const who = ref(v6.who);
+      return who ? { who, weight: num(v6.weight), vote: v6.vote === null || v6.vote === undefined ? null : oneOf(v6.vote, VOTES, "abstain"), how: v6.how === null || v6.how === undefined ? null : oneOf(v6.how, VOTE_HOWS, "own") } : null;
+    }),
+    public: num(m2.public),
+    cast: list(m2.cast, (c3) => typeof c3.voter === "string" ? { voter: c3.voter, name: str(c3.name, c3.voter), ...typeof c3.as === "string" ? { as: c3.as } : {}, vote: c3.vote === null || c3.vote === undefined ? null : oneOf(c3.vote, VOTES, "abstain") } : null),
+    mayWithdraw: m2.mayWithdraw === true
+  };
+}
+function request(r3) {
+  const by = ref(r3.by);
+  if (typeof r3.id !== "string" || typeof r3.text !== "string" || !by || !isOrgPower(r3.power))
+    return null;
+  const answered = isRecord(r3.answered) ? r3.answered : null;
+  return {
+    id: r3.id,
+    text: r3.text,
+    why: str(r3.why),
+    by,
+    power: r3.power,
+    cents: optNum(r3.cents) ?? null,
+    at: num(r3.at),
+    until: num(r3.until),
+    untilText: str(r3.untilText),
+    state: oneOf(r3.state, ["asked", "approved", "denied", "withdrawn", "lapsed"], "asked"),
+    approvers: list(r3.approvers, (a3) => ref(a3)),
+    answered: answered ? { by: ref(answered.by), at: num(answered.at), why: text(answered.why) } : null,
+    mayAnswer: r3.mayAnswer === true,
+    mayWithdraw: r3.mayWithdraw === true
+  };
+}
+function decodeDecisions(value) {
+  if (!isRecord(value) || !isRecord(value.rules) || !Array.isArray(value.open))
+    return null;
+  const rules = value.rules;
+  const standing = isRecord(value.standing) ? value.standing : null;
+  return {
+    rules: {
+      basis: oneOf(rules.basis, VOTE_BASES, "shares"),
+      quorum: num(rules.quorum),
+      pass: num(rules.pass),
+      days: num(rules.days),
+      approvalDays: num(rules.approvalDays),
+      standing: list(rules.standing, (s3) => {
+        const who = ref(s3.who);
+        return who ? { who, vote: oneOf(s3.vote, STANDING_VOTES, "abstain"), with: ref(s3.with) } : null;
+      })
+    },
+    open: list(value.open, motion),
+    closed: list(value.closed, motion),
+    waiting: list(value.waiting, request),
+    answered: list(value.answered, request),
+    rulesWhy: text(value.rulesWhy),
+    ...value.standing === null ? { standing: null } : standing && typeof standing.who === "string" ? { standing: { who: standing.who, vote: oneOf(standing.vote, STANDING_VOTES, "abstain"), ...typeof standing.with === "string" ? { with: standing.with } : {} } } : {}
+  };
+}
+
+// src/packs/orgs/ui/decisions.tsx
+var STATUS_TONE2 = { open: "accent", passed: "pos", failed: "neg", withdrawn: "neutral" };
+var STATE_TONE = { asked: "accent", approved: "pos", denied: "neg", withdrawn: "neutral", lapsed: "warn" };
+var HOW_WORDS = { own: "", rule: "by standing vote", story: "as the story told it", gm: "by the GM" };
+var VOTE_LABELS = { for: "For", against: "Against", abstain: "Abstain" };
+var VOTE_OPTIONS = ["for", "against", "abstain"].map((v6) => ({ value: v6, label: VOTE_LABELS[v6] }));
+function voteChange(org, m2, voter, vote, as) {
+  return { action: DECISION_ACTIONS.vote, params: { org, motion: m2.id, vote, ...as !== undefined ? { as } : {} }, effect: DECISION_EFFECTS.vote, gm: { org, motion: m2.id, vote, who: voter } };
+}
+function endChange(org, m2, how) {
+  return { action: DECISION_ACTIONS.end, params: { org, motion: m2.id }, effect: DECISION_EFFECTS.end, gm: { org, motion: m2.id, how } };
+}
+function answerChange(org, r3, answer, why2 = "") {
+  const words3 = why2.trim();
+  return { action: answer === "approve" ? DECISION_ACTIONS.approve : DECISION_ACTIONS.deny, params: { org, request: r3.id, ...words3 !== "" ? { why: words3 } : {} }, effect: DECISION_EFFECTS.answer, gm: { org, request: r3.id, answer, ...words3 !== "" ? { why: words3 } : {} } };
+}
+function rulesDraft(view) {
+  return { basis: view.rules.basis, quorum: String(view.rules.quorum), pass: String(view.rules.pass), days: String(view.rules.days), approvalDays: String(view.rules.approvalDays) };
+}
+function rulesProblem(d3) {
+  const bad = (text2, [lo, hi]) => text2.trim() !== "" && !(Number.isFinite(Number(text2)) && Number(text2) >= lo && Number(text2) <= hi);
+  if (bad(d3.quorum, DECISION_RANGES.quorum))
+    return "Quorum: a percentage from 0 to 100.";
+  if (bad(d3.pass, DECISION_RANGES.pass))
+    return "Passes with more than: a percentage from 0 to 99.9.";
+  if (bad(d3.days, DECISION_RANGES.days) || bad(d3.approvalDays, DECISION_RANGES.days))
+    return "Days: a whole number from 1 to 365.";
+  return null;
+}
+function rulesChange(org, view, d3) {
+  const params = {};
+  if (d3.basis !== view.rules.basis)
+    params.vote_by = d3.basis;
+  const numbers2 = [
+    ["quorum", "quorum", view.rules.quorum],
+    ["pass", "pass", view.rules.pass],
+    ["days", "days", view.rules.days],
+    ["approvalDays", "approval_days", view.rules.approvalDays]
+  ];
+  for (const [key, arg, was] of numbers2) {
+    const text2 = String(d3[key]).trim();
+    if (text2 === "")
+      params[arg] = "default";
+    else if (Number(text2) !== was)
+      params[arg] = Number(text2);
+  }
+  return Object.keys(params).length === 0 ? null : { action: DECISION_ACTIONS.rules, params: { org, ...params }, effect: DECISION_EFFECTS.rules, gm: { org, ...params } };
+}
+function standingChange(org, who, vote, follows = "") {
+  const params = { org, vote, ...vote === "with" && follows !== "" ? { with: follows } : {} };
+  return { action: DECISION_ACTIONS.standing, params, effect: DECISION_EFFECTS.standing, gm: { ...params, who } };
+}
+function decisionOps(change) {
+  return [{ op: "effect", effect: change.effect, args: change.gm }];
+}
+function tallyLine(m2) {
+  const t3 = m2.tally;
+  return [`For ${pctWords(t3.for)}`, `Against ${pctWords(t3.against)}`, `Abstain ${pctWords(t3.abstain)}`, ...t3.remaining > 0.0001 ? [`Not yet ${pctWords(t3.remaining)}`] : []].join(" · ");
+}
+function MotionCard(props) {
+  const { motion: m2, org } = props;
+  const open = m2.status === "open";
+  return /* @__PURE__ */ u3(Card, {
+    title: m2.text,
+    aside: /* @__PURE__ */ u3(Badge, {
+      tone: STATUS_TONE2[m2.status],
+      children: open ? "Open" : m2.status === "passed" ? "Carried" : m2.status === "failed" ? "Failed" : "Withdrawn"
+    }, undefined, false, undefined, this),
+    children: /* @__PURE__ */ u3("div", {
+      class: "lre-stack",
+      "data-lre-motion": m2.id,
+      children: [
+        /* @__PURE__ */ u3(Row, {
+          k: "Put by",
+          v: m2.by?.name ?? "the GM"
+        }, undefined, false, undefined, this),
+        /* @__PURE__ */ u3(Row, {
+          k: open ? "Closes" : "Closed",
+          v: open ? m2.closesText : m2.why ?? ""
+        }, undefined, false, undefined, this),
+        /* @__PURE__ */ u3(Row, {
+          k: "Votes",
+          v: tallyLine(m2),
+          sub: `Counted by ${m2.basis === "members" ? "members, one each" : "shares"}; needs ${pctWords(m2.quorum)} to take part and more than ${pctWords(m2.pass)} of the votes cast for it${m2.public > 0 ? `; the outside public's ${pctWords(m2.public)} counts as abstaining` : ""}.`
+        }, undefined, false, undefined, this),
+        /* @__PURE__ */ u3(List, {
+          children: m2.voters.map((v6) => /* @__PURE__ */ u3(ListRow, {
+            title: v6.who.name,
+            subtitle: v6.how !== null && HOW_WORDS[v6.how] !== "" ? HOW_WORDS[v6.how] : undefined,
+            value: `${pctWords(v6.weight)} · ${v6.vote !== null ? VOTE_LABELS[v6.vote] : "Not yet"}`
+          }, v6.who.id, false, undefined, this))
+        }, undefined, false, undefined, this),
+        open && !props.gm ? m2.cast.map((c3) => /* @__PURE__ */ u3(Field, {
+          label: c3.as !== undefined ? `Vote as ${c3.name}` : "Your vote",
+          help: "Your vote plays as your next turn.",
+          children: /* @__PURE__ */ u3(Seg, {
+            label: c3.as !== undefined ? `Vote as ${c3.name}` : "Your vote",
+            value: c3.vote,
+            options: VOTE_OPTIONS,
+            disabled: props.busy,
+            onChange: (vote) => props.onChange(voteChange(org.id, m2, c3.voter, vote, c3.as))
+          }, undefined, false, undefined, this)
+        }, c3.voter, false, undefined, this)) : null,
+        open && props.gm ? m2.voters.map((v6) => /* @__PURE__ */ u3(Field, {
+          label: `${v6.who.name}'s vote`,
+          children: /* @__PURE__ */ u3(Seg, {
+            label: `${v6.who.name}'s vote`,
+            value: v6.vote,
+            options: VOTE_OPTIONS,
+            disabled: props.busy,
+            onChange: (vote) => props.onChange(voteChange(org.id, m2, v6.who.id, vote))
+          }, undefined, false, undefined, this)
+        }, v6.who.id, false, undefined, this)) : null,
+        open && (m2.mayWithdraw || props.gm) ? /* @__PURE__ */ u3("div", {
+          class: "lre-actions",
+          children: [
+            props.gm ? /* @__PURE__ */ u3(Button, {
+              disabled: props.busy,
+              onClick: () => props.onChange(endChange(org.id, m2, "close")),
+              children: "Close it now"
+            }, undefined, false, undefined, this) : null,
+            /* @__PURE__ */ u3(Button, {
+              variant: "ghost",
+              disabled: props.busy,
+              onClick: () => props.onChange(endChange(org.id, m2, "withdraw")),
+              children: "Withdraw"
+            }, undefined, false, undefined, this)
+          ]
+        }, undefined, true, undefined, this) : null
+      ]
+    }, undefined, true, undefined, this)
+  }, undefined, false, undefined, this);
+}
+function RequestCard(props) {
+  const { request: r3, org } = props;
+  const [why2, setWhy] = d2("");
+  const waiting = r3.state === "asked";
+  const answers = waiting && (r3.mayAnswer || props.gm);
+  return /* @__PURE__ */ u3(Card, {
+    title: r3.text,
+    aside: /* @__PURE__ */ u3(Badge, {
+      tone: STATE_TONE[r3.state],
+      children: r3.state === "asked" ? "Waiting" : r3.state === "approved" ? "Approved" : r3.state === "denied" ? "Denied" : r3.state === "lapsed" ? "Lapsed" : "Withdrawn"
+    }, undefined, false, undefined, this),
+    children: /* @__PURE__ */ u3("div", {
+      class: "lre-stack",
+      "data-lre-request": r3.id,
+      children: [
+        /* @__PURE__ */ u3(Row, {
+          k: "Asked by",
+          v: r3.by.name,
+          sub: r3.why
+        }, undefined, false, undefined, this),
+        waiting ? /* @__PURE__ */ u3(Row, {
+          k: "May approve",
+          v: r3.approvers.length > 0 ? r3.approvers.map((a3) => a3.name).join(", ") : "No one now"
+        }, undefined, false, undefined, this) : null,
+        waiting ? /* @__PURE__ */ u3(Row, {
+          k: "Lapses",
+          v: r3.untilText
+        }, undefined, false, undefined, this) : null,
+        r3.answered ? /* @__PURE__ */ u3(Row, {
+          k: r3.state === "withdrawn" ? "Withdrawn" : "Answered by",
+          v: r3.answered.by?.name ?? "the GM",
+          sub: r3.answered.why ?? undefined
+        }, undefined, false, undefined, this) : null,
+        answers ? /* @__PURE__ */ u3(M, {
+          children: [
+            /* @__PURE__ */ u3(Field, {
+              label: "Why (if you deny it)",
+              children: /* @__PURE__ */ u3("input", {
+                class: "lre-input",
+                value: why2,
+                maxLength: 300,
+                onInput: (event) => setWhy(event.currentTarget.value)
+              }, undefined, false, undefined, this)
+            }, undefined, false, undefined, this),
+            /* @__PURE__ */ u3("div", {
+              class: "lre-actions",
+              children: [
+                /* @__PURE__ */ u3(Button, {
+                  variant: "primary",
+                  disabled: props.busy || !props.gm && !r3.mayAnswer,
+                  onClick: () => props.onChange(answerChange(org.id, r3, "approve")),
+                  children: "Approve"
+                }, undefined, false, undefined, this),
+                /* @__PURE__ */ u3(Button, {
+                  variant: "danger",
+                  disabled: props.busy,
+                  onClick: () => props.onChange(answerChange(org.id, r3, "deny", why2), () => setWhy("")),
+                  children: "Deny"
+                }, undefined, false, undefined, this)
+              ]
+            }, undefined, true, undefined, this)
+          ]
+        }, undefined, true, undefined, this) : null,
+        waiting && (r3.mayWithdraw || props.gm) ? /* @__PURE__ */ u3(Button, {
+          variant: "ghost",
+          disabled: props.busy,
+          onClick: () => props.onChange(answerChange(org.id, r3, "withdraw")),
+          children: "Withdraw"
+        }, undefined, false, undefined, this) : null
+      ]
+    }, undefined, true, undefined, this)
+  }, undefined, false, undefined, this);
+}
+function RulesPart(props) {
+  const { view, org } = props;
+  const [draft, setDraft] = d2(null);
+  const may = props.gm || view.rulesWhy === null;
+  const problem = draft ? rulesProblem(draft) : null;
+  const standing = (s3) => s3.vote === "with" ? `With ${s3.with?.name ?? "someone"}` : VOTE_LABELS[s3.vote];
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-stack",
+    "data-lre-decision-rules": org.id,
+    children: [
+      /* @__PURE__ */ u3(Row, {
+        k: "Votes are counted by",
+        v: view.rules.basis === "members" ? "Members, one each" : "Shares (each unit its class's votes)"
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(Row, {
+        k: "Quorum",
+        v: `${pctWords(view.rules.quorum)} of the votes take part`
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(Row, {
+        k: "Passes with",
+        v: `More than ${pctWords(view.rules.pass)} of the votes cast`
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(Row, {
+        k: "A motion stays open",
+        v: `${view.rules.days} days`
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(Row, {
+        k: "A request waits",
+        v: `${view.rules.approvalDays} days`
+      }, undefined, false, undefined, this),
+      view.rules.standing.length > 0 ? /* @__PURE__ */ u3(List, {
+        children: view.rules.standing.map((s3) => /* @__PURE__ */ u3(ListRow, {
+          title: s3.who.name,
+          subtitle: "Standing vote",
+          value: standing(s3)
+        }, s3.who.id, false, undefined, this))
+      }, undefined, false, undefined, this) : null,
+      may && draft === null ? /* @__PURE__ */ u3(Button, {
+        disabled: props.busy,
+        onClick: () => setDraft(rulesDraft(view)),
+        children: "Change how decisions are made"
+      }, undefined, false, undefined, this) : null,
+      !may && view.rulesWhy !== null ? /* @__PURE__ */ u3("span", {
+        class: "lre-field-help",
+        children: view.rulesWhy
+      }, undefined, false, undefined, this) : null,
+      draft ? /* @__PURE__ */ u3("div", {
+        class: "lre-stack",
+        "data-lre-decision-rules-form": true,
+        children: [
+          /* @__PURE__ */ u3(Field, {
+            label: "Votes are counted by",
+            children: /* @__PURE__ */ u3(Seg, {
+              label: "Votes are counted by",
+              value: draft.basis,
+              options: [{ value: "shares", label: "Shares" }, { value: "members", label: "Members" }],
+              onChange: (basis) => setDraft({ ...draft, basis })
+            }, undefined, false, undefined, this)
+          }, undefined, false, undefined, this),
+          [
+            ["quorum", "Quorum (% of the votes that take part)"],
+            ["pass", "Passes with more than (% of the votes cast)"],
+            ["days", "A motion stays open (days)"],
+            ["approvalDays", "A request for approval waits (days)"]
+          ].map(([key, label]) => /* @__PURE__ */ u3(Field, {
+            label,
+            help: "Empty: the default.",
+            children: /* @__PURE__ */ u3("input", {
+              class: "lre-input",
+              inputMode: "decimal",
+              value: draft[key],
+              onInput: (event) => setDraft({ ...draft, [key]: event.currentTarget.value })
+            }, undefined, false, undefined, this)
+          }, key, false, undefined, this)),
+          problem !== null ? /* @__PURE__ */ u3("span", {
+            class: "lre-field-help",
+            children: problem
+          }, undefined, false, undefined, this) : null,
+          /* @__PURE__ */ u3("div", {
+            class: "lre-actions",
+            children: [
+              /* @__PURE__ */ u3(Button, {
+                variant: "primary",
+                disabled: props.busy || problem !== null,
+                onClick: () => {
+                  const change = rulesChange(org.id, view, draft);
+                  if (change === null)
+                    setDraft(null);
+                  else
+                    props.onChange(change, () => setDraft(null));
+                },
+                children: "Save"
+              }, undefined, false, undefined, this),
+              /* @__PURE__ */ u3(Button, {
+                variant: "ghost",
+                onClick: () => setDraft(null),
+                children: "Cancel"
+              }, undefined, false, undefined, this)
+            ]
+          }, undefined, true, undefined, this)
+        ]
+      }, undefined, true, undefined, this) : null
+    ]
+  }, undefined, true, undefined, this);
+}
+function StandingPart(props) {
+  const mine = props.view.standing ?? null;
+  const [vote, setVote] = d2(mine?.vote ?? "none");
+  const [follows, setFollows] = d2(mine?.with ?? "");
+  const options = [{ value: "none", label: "None" }, ...VOTE_OPTIONS, { value: "with", label: "With…" }];
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-stack",
+    "data-lre-standing-vote": true,
+    children: [
+      /* @__PURE__ */ u3(Field, {
+        label: "When you don't vote yourself",
+        help: "A standing vote is cast for you as a motion opens, or as the voter you follow votes.",
+        children: /* @__PURE__ */ u3(Seg, {
+          label: "Standing vote",
+          value: vote,
+          options,
+          disabled: props.busy,
+          onChange: (v6) => setVote(v6)
+        }, undefined, false, undefined, this)
+      }, undefined, false, undefined, this),
+      vote === "with" ? /* @__PURE__ */ u3(Field, {
+        label: "Vote with",
+        children: /* @__PURE__ */ u3("select", {
+          class: "lre-input",
+          value: follows,
+          onChange: (event) => setFollows(event.currentTarget.value),
+          children: [
+            /* @__PURE__ */ u3("option", {
+              value: "",
+              children: "Choose someone"
+            }, undefined, false, undefined, this),
+            props.people.map((p3) => /* @__PURE__ */ u3("option", {
+              value: p3.id,
+              children: p3.name
+            }, p3.id, false, undefined, this))
+          ]
+        }, undefined, true, undefined, this)
+      }, undefined, false, undefined, this) : null,
+      /* @__PURE__ */ u3(Button, {
+        disabled: props.busy || vote === "with" && follows === "",
+        onClick: () => props.onChange(standingChange(props.org.id, props.who, vote, follows)),
+        children: "Save your standing vote"
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+function DecisionsBoard(props) {
+  const { view } = props;
+  const people2 = [...new Map([...view.open, ...view.closed].flatMap((m2) => m2.voters.map((v6) => [v6.who.id, v6.who]))).values()].filter((p3) => p3.id !== props.reader && !p3.id.startsWith("someone_"));
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-stack",
+    "data-lre-org-decisions": props.org.id,
+    children: [
+      /* @__PURE__ */ u3(Section, {
+        title: "To a vote",
+        children: view.open.length > 0 ? view.open.map((m2) => /* @__PURE__ */ u3(MotionCard, {
+          ...props,
+          motion: m2
+        }, m2.id, false, undefined, this)) : /* @__PURE__ */ u3(Empty, {
+          icon: "users",
+          children: "No motion is open. A decision your votes alone can't make is put to a vote from Ownership."
+        }, undefined, false, undefined, this)
+      }, undefined, false, undefined, this),
+      view.waiting.length > 0 ? /* @__PURE__ */ u3(Section, {
+        title: "Waiting for approval",
+        children: view.waiting.map((r3) => /* @__PURE__ */ u3(RequestCard, {
+          ...props,
+          request: r3
+        }, r3.id, false, undefined, this))
+      }, undefined, false, undefined, this) : null,
+      view.closed.length > 0 || view.answered.length > 0 ? /* @__PURE__ */ u3(Disclosure, {
+        summary: "Decided",
+        children: /* @__PURE__ */ u3("div", {
+          class: "lre-stack",
+          children: [
+            view.closed.map((m2) => /* @__PURE__ */ u3(MotionCard, {
+              ...props,
+              motion: m2
+            }, m2.id, false, undefined, this)),
+            view.answered.map((r3) => /* @__PURE__ */ u3(RequestCard, {
+              ...props,
+              request: r3
+            }, r3.id, false, undefined, this))
+          ]
+        }, undefined, true, undefined, this)
+      }, undefined, false, undefined, this) : null,
+      /* @__PURE__ */ u3(Section, {
+        title: "How decisions are made",
+        children: [
+          /* @__PURE__ */ u3(RulesPart, {
+            ...props
+          }, undefined, false, undefined, this),
+          view.standing !== undefined && props.reader !== null && !props.gm ? /* @__PURE__ */ u3(StandingPart, {
+            ...props,
+            who: props.reader,
+            people: people2
+          }, undefined, false, undefined, this) : null
+        ]
+      }, undefined, true, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+function OrgDecisionsTab(props) {
+  const app = useApp();
+  const [busy, run] = useBusy();
+  const view = decodeDecisions(props.section);
+  if (!view)
+    return /* @__PURE__ */ u3(JsonView, {
+      value: props.section
+    }, undefined, false, undefined, this);
+  const onChange = (change, done) => run(async () => {
+    const result = await app.request({ type: "lre.action", chatId: props.chatId, action: change.action, params: change.params, source: "palette" });
+    if (result && "pending" in result && result.pending)
+      app.toast("Saved — it applies when the reply finishes.", "info");
+    if (result)
+      done?.();
+  });
+  return /* @__PURE__ */ u3(DecisionsBoard, {
+    org: props.org,
+    view,
+    busy,
+    gm: false,
+    reader: props.org.people.find((p3) => p3.you)?.id ?? null,
+    onChange
+  }, undefined, false, undefined, this);
+}
+function GmOrgDecisionsTab(props) {
+  const view = decodeDecisions(props.section);
+  if (!view)
+    return /* @__PURE__ */ u3(JsonView, {
+      value: props.section
+    }, undefined, false, undefined, this);
+  return /* @__PURE__ */ u3(DecisionsBoard, {
+    org: props.org,
+    view,
+    busy: props.gm.busy,
+    gm: true,
+    reader: null,
+    onChange: (change, done) => void props.gm.edit(decisionOps(change)).then((ok) => ok && done?.())
+  }, undefined, false, undefined, this);
+}
+var DECISIONS_TAB_DEF = { id: DECISIONS_TAB, label: "Decisions", order: 85, section: DECISIONS_SECTION, component: OrgDecisionsTab, gm: GmOrgDecisionsTab };
 
 // src/packs/orgs/ui/member.tsx
 var HOW_LABELS = { member: "Member", owner: "Owner", staff: "Staff", leader: "Leader", core: "Core", companion: "Companion", hired: "Hired", ally: "Ally" };
@@ -63501,10 +65089,10 @@ function MemberForm(props) {
   const { org, person: person4, control, host } = props;
   const [position2, setPosition] = d2(person4.position?.id ?? "");
   const [title, setTitle] = d2(person4.title);
-  const [rate, setRate] = d2(props.job && props.job.rate > 0 ? formatMoneyInput(props.job.rate, host.currency) : "");
+  const [rate2, setRate] = d2(props.job && props.job.rate > 0 ? formatMoneyInput(props.job.rate, host.currency) : "");
   const [hours, setHours] = d2(props.job?.hoursPerWeek !== null && props.job?.hoursPerWeek !== undefined ? String(props.job.hoursPerWeek) : "");
   const job2 = person4.job ?? "";
-  const action = control === "appoint" ? appointAction(org, person4, position2) : control === "title" ? titleAction(org, person4, title) : control === "raise" ? raiseAction(job2, rate, host.currency) : hoursAction(job2, hours);
+  const action = control === "appoint" ? appointAction(org, person4, position2) : control === "title" ? titleAction(org, person4, title) : control === "raise" ? raiseAction(job2, rate2, host.currency) : hoursAction(job2, hours);
   const problem = action === null ? control === "raise" ? "Type the new rate." : "Hours a week are more than none and at most 168." : control === "appoint" && position2 === (person4.position?.id ?? "") ? "Choose another position." : control === "title" && title.trim() === person4.title ? "Type a new title, or none." : null;
   const go2 = { appoint: "Appoint", title: "Change title", raise: "Give the raise", hours: "Change hours" }[control];
   return /* @__PURE__ */ u3(EditFrame, {
@@ -63535,7 +65123,7 @@ function MemberForm(props) {
         label: props.job ? `New rate (now ${props.job.pay})` : "New rate",
         children: /* @__PURE__ */ u3(MoneyInput, {
           currency: host.currency,
-          value: rate,
+          value: rate2,
           label: "New rate",
           onInput: setRate
         }, undefined, false, undefined, this)
@@ -63678,7 +65266,7 @@ function HireSheet(props) {
           value: form.rate,
           label: "Rate",
           placeholder: "As their trade pays",
-          onInput: (rate) => set({ rate })
+          onInput: (rate2) => set({ rate: rate2 })
         }, undefined, false, undefined, this)
       }, undefined, false, undefined, this),
       /* @__PURE__ */ u3(TextField4, {
@@ -63810,7 +65398,7 @@ function OrgEditSheet(props) {
 }
 
 // src/packs/orgs/ui/feed.tsx
-var ALERT_TAB_IDS = { overview: "overview", people: "people", rules: "rules", money: "economy.money", plan: PLAN_TAB };
+var ALERT_TAB_IDS = { overview: "overview", people: "people", rules: "rules", money: "economy.money", plan: PLAN_TAB, decisions: DECISIONS_TAB };
 function OrgAlerts(props) {
   const { onTab } = props;
   return /* @__PURE__ */ u3("div", {
@@ -63934,7 +65522,7 @@ function OrgsGlance(props) {
 
 // src/packs/orgs/ui/party.tsx
 var SHARE_OUT_ACTION = "org_share_out";
-var BASES = [
+var BASES2 = [
   { id: "hourly", label: "By the hour" },
   { id: "per_shift", label: "By the shift" },
   { id: "salary", label: "A salary" },
@@ -64078,8 +65666,8 @@ function PartyControls(props) {
   const [shared, setShared] = d2("");
   const [hand, setHand] = d2("");
   const [title, setTitle] = d2("");
-  const [rate, setRate] = d2("");
-  const [basis, setBasis] = d2(BASES[0]?.id ?? "hourly");
+  const [rate2, setRate] = d2("");
+  const [basis, setBasis] = d2(BASES2[0]?.id ?? "hourly");
   const adding = add || section.candidates[0]?.id || "";
   const changing = who || people2[0]?.id || "";
   const source = from || section.sources[0]?.id || "";
@@ -64297,7 +65885,7 @@ function PartyControls(props) {
                   class: "lre-input",
                   value: basis,
                   onChange: (event) => setBasis(event.currentTarget.value),
-                  children: BASES.map((b3) => /* @__PURE__ */ u3("option", {
+                  children: BASES2.map((b3) => /* @__PURE__ */ u3("option", {
                     value: b3.id,
                     children: b3.label
                   }, b3.id, false, undefined, this))
@@ -64307,14 +65895,14 @@ function PartyControls(props) {
                 label: "Rate",
                 children: /* @__PURE__ */ u3(MoneyInput, {
                   currency,
-                  value: rate,
+                  value: rate2,
                   label: "Pay rate",
                   onInput: setRate
                 }, undefined, false, undefined, this)
               }, undefined, false, undefined, this),
               /* @__PURE__ */ u3(Button, {
-                disabled: hiring === "" || cents2(rate) === null,
-                onClick: () => act("party_hire", { worker: hiring, ...title.trim() !== "" ? { title: title.trim() } : {}, basis, rate: cents2(rate) ?? 0 }),
+                disabled: hiring === "" || cents2(rate2) === null,
+                onClick: () => act("party_hire", { worker: hiring, ...title.trim() !== "" ? { title: title.trim() } : {}, basis, rate: cents2(rate2) ?? 0 }),
                 children: "Hire them"
               }, undefined, false, undefined, this)
             ]
@@ -64724,6 +66312,23 @@ function OrgPage(props) {
       }, undefined, false, undefined, this),
       org.exists ? /* @__PURE__ */ u3(IdText, {
         id: org.id
+      }, undefined, false, undefined, this) : null,
+      org.ended ? /* @__PURE__ */ u3("div", {
+        "data-lre-org-ended": org.id,
+        children: /* @__PURE__ */ u3(Banner, {
+          tone: org.ended.dissolved !== null ? "neg" : "warn",
+          icon: org.ended.dissolved !== null ? "close" : "hourglass",
+          title: org.ended.dissolved !== null ? `Dissolved on ${org.ended.dissolved}` : `Winding up since ${org.ended.winding ?? ""}`,
+          ...org.ended.mergedInto ? { actions: /* @__PURE__ */ u3(Button, {
+            size: "sm",
+            onClick: () => props.open(orgRoute(org.ended?.mergedInto?.id ?? "")),
+            children: [
+              "Open ",
+              org.ended.mergedInto.name
+            ]
+          }, undefined, true, undefined, this) } : {},
+          children: org.ended.dissolved !== null ? org.ended.mergedInto ? `Merged into ${org.ended.mergedInto.name}.` : "Wound up: its debts paid and the rest paid out to its owners." : "It trades no more while it winds up."
+        }, undefined, false, undefined, this)
       }, undefined, false, undefined, this) : null,
       props.above,
       /* @__PURE__ */ u3(Tabs, {
@@ -65210,9 +66815,9 @@ function memberOps(org, who, form) {
 function memberRemoveOps(org, who) {
   return [{ op: "unlink", rel: "member_of", from: who, to: org }];
 }
-function ownerOps(org, owners, at2, role, share, rows2 = {}) {
+function ownerOps(org, owners, at2, role, share2, rows2 = {}) {
   const write = (o4) => {
-    const out = { ...o4, role, share };
+    const out = { ...o4, role, share: share2 };
     for (const key of ["units", "class"]) {
       const v6 = rows2[key];
       if (v6 === null)
@@ -65771,11 +67376,11 @@ function OwnerSheet(props) {
   const had = props.party === null ? undefined : owners.find((o4) => o4.party === props.party && ownerClassOf(o4) === props.heldClass);
   const [party, setParty] = d2(props.party ?? "");
   const [role, setRole] = d2(typeof had?.role === "string" ? had.role : "owner");
-  const [share, setShare] = d2(typeof had?.share === "number" ? String(had.share) : "");
+  const [share2, setShare] = d2(typeof had?.share === "number" ? String(had.share) : "");
   const [units, setUnits] = d2(typeof had?.units === "number" ? String(had.units) : "");
   const [shareClass, setShareClass] = d2(typeof had?.class === "string" ? had.class : "");
   const candidates = section.gm.entities.filter((e3) => !e3.gone && e3.id !== org.id && (e3.person || kindIs3(section.gm, e3.kind, "group") || kindIs3(section.gm, e3.kind, "trust")) && !owners.some((o4) => o4.party === e3.id)).sort((a3, b3) => a3.name.localeCompare(b3.name));
-  const percent2 = share.trim() === "" ? 0 : Number(share);
+  const percent2 = share2.trim() === "" ? 0 : Number(share2);
   const unitCount = units.trim() === "" ? null : Number(units);
   const ownerRole = OWNER_ROLES.find((r3) => r3 === role) ?? "owner";
   const name = section.gm.entities.find((e3) => e3.id === props.party)?.name ?? props.party ?? "";
@@ -65806,7 +67411,7 @@ function OwnerSheet(props) {
       }, undefined, false, undefined, this),
       /* @__PURE__ */ u3(TextInput2, {
         label: "Share (%)",
-        value: share,
+        value: share2,
         placeholder: "0",
         onInput: setShare
       }, undefined, false, undefined, this),
@@ -65831,9 +67436,9 @@ function NewJobSheet(props) {
   const [title, setTitle] = d2("");
   const [position2, setPosition] = d2("");
   const [basis, setBasis] = d2("hourly");
-  const [rate, setRate] = d2("");
+  const [rate2, setRate] = d2("");
   const [every, setEvery] = d2("biweekly");
-  const cents2 = parseMoneyInput(rate, section.currency);
+  const cents2 = parseMoneyInput(rate2, section.currency);
   const problem = worker === "" ? "Choose who works it." : cents2 === null || cents2 <= 0 ? "Type the rate." : null;
   const go2 = () => {
     if (cents2 === null)
@@ -65882,10 +67487,10 @@ function NewJobSheet(props) {
         label: "Rate (a year, an hour or a shift)",
         children: /* @__PURE__ */ u3(MoneyInput, {
           currency: section.currency,
-          value: rate,
+          value: rate2,
           onInput: setRate,
           label: "Rate",
-          invalid: rate.trim() !== "" && cents2 === null
+          invalid: rate2.trim() !== "" && cents2 === null
         }, undefined, false, undefined, this)
       }, undefined, false, undefined, this),
       /* @__PURE__ */ u3(RefPicker, {
@@ -66325,7 +67930,7 @@ function GmOrgsSection(props) {
 }
 
 // src/packs/orgs/ui/plan.tsx
-var STATUS_TONE2 = { open: "neutral", under_way: "accent", done: "pos", dropped: "neutral", blocked: "warn", refused: "neg" };
+var STATUS_TONE3 = { open: "neutral", under_way: "accent", done: "pos", dropped: "neutral", blocked: "warn", refused: "neg" };
 function goalDraft(g2) {
   const window2 = g2?.edit?.window ?? "";
   return { kind: "goal", id: g2?.id ?? null, text: g2?.text ?? "", by: window2 === "" ? "none" : window2 === "today" ? "today" : "date", date: window2 === "today" ? "" : window2, where: g2?.edit?.where ?? "" };
@@ -66451,7 +68056,7 @@ function PlanOrderItem(props) {
             children: o4.text
           }, undefined, false, undefined, this),
           /* @__PURE__ */ u3(Badge, {
-            tone: STATUS_TONE2[o4.status],
+            tone: STATUS_TONE3[o4.status],
             children: PLAN_STATUS_WORDS[o4.status]
           }, undefined, false, undefined, this),
           o4.late ? /* @__PURE__ */ u3(Badge, {
@@ -66572,7 +68177,7 @@ function PlanBoard(props) {
             class: "lre-inline",
             children: [
               /* @__PURE__ */ u3(Badge, {
-                tone: STATUS_TONE2[g2.status],
+                tone: STATUS_TONE3[g2.status],
                 children: PLAN_STATUS_WORDS[g2.status]
               }, undefined, false, undefined, this),
               g2.late ? /* @__PURE__ */ u3(Badge, {
@@ -67167,6 +68772,7 @@ var orgs = {
     r3.gm({ id: GM_ORGS_SECTION, label: "Orgs", icon: "briefcase", order: 28, component: GmOrgsSection });
     r3.orgTab(PROPERTY_TAB);
     r3.orgTab(PLAN_TAB_DEF);
+    r3.orgTab(DECISIONS_TAB_DEF);
     r3.glance({ id: "orgs.alerts", order: 76, panel: ORGS_LIST_PANEL, component: OrgsGlance });
     r3.orgTab({ id: "orgs.party_tiers", label: "What each tier means", order: 95, section: PARTY_SECTION, within: "rules", component: PartyTiers });
   }
@@ -74056,19 +75662,19 @@ function usageWords(u4) {
 }
 
 // src/frontend/gm/live.tsx
-function liveControls(chatId, request) {
+function liveControls(chatId, request2) {
   return {
     get: async () => {
-      const result = await request({ type: "lre.live", op: "get", chatId });
+      const result = await request2({ type: "lre.live", op: "get", chatId });
       return result === null ? undefined : result.live;
     },
     leave: async () => {
-      await request({ type: "lre.live", op: "leave", chatId });
+      await request2({ type: "lre.live", op: "leave", chatId });
     }
   };
 }
 var STATUS_WORDS2 = { working: "working", done: "done", failed: "failed", stopped: "stopped", cancelled: "cancelled" };
-var STATUS_TONE3 = { working: "accent", done: "pos", failed: "neg", stopped: "warn", cancelled: "neutral" };
+var STATUS_TONE4 = { working: "accent", done: "pos", failed: "neg", stopped: "warn", cancelled: "neutral" };
 var KIND_WORDS2 = { turn: "Agent turn", read: "The reply read again", reply: "A reply's read" };
 var seconds = (ms) => `${(ms / 1000).toFixed(1)} s`;
 function block(kind, summary, text3) {
@@ -74323,7 +75929,7 @@ function groupOf2(g2, view, open, onToggle) {
           class: "lre-live-group-head",
           children: [
             /* @__PURE__ */ u3(Badge, {
-              tone: STATUS_TONE3[g2.status],
+              tone: STATUS_TONE4[g2.status],
               children: STATUS_WORDS2[g2.status]
             }, undefined, false, undefined, this),
             /* @__PURE__ */ u3("strong", {
@@ -74718,9 +76324,9 @@ function fileChips(file) {
 }
 
 // src/frontend/gm/workspace.tsx
-function workspaceControls(chatId, request, out) {
+function workspaceControls(chatId, request2, out) {
   const change = async (body, text3, landed) => {
-    const result = await request(body);
+    const result = await request2(body);
     if (result === null)
       return false;
     if (result.files)
@@ -74730,9 +76336,9 @@ function workspaceControls(chatId, request, out) {
     return true;
   };
   return {
-    list: async () => (await request({ type: "lre.workspace", op: "list", chatId }))?.files ?? null,
+    list: async () => (await request2({ type: "lre.workspace", op: "list", chatId }))?.files ?? null,
     read: async (path2) => {
-      const result = await request({ type: "lre.workspace", op: "read", chatId, path: path2 });
+      const result = await request2({ type: "lre.workspace", op: "read", chatId, path: path2 });
       return result === null ? undefined : result.text ?? null;
     },
     create: (path2, landed) => change({ type: "lre.workspace", op: "write", chatId, path: path2, text: "" }, `Created ${path2}`, landed),
@@ -74740,8 +76346,8 @@ function workspaceControls(chatId, request, out) {
     pin: (path2, pinned, landed) => change({ type: "lre.workspace", op: "pin", chatId, path: path2, pinned }, `${pinned ? "Pinned" : "Unpinned"} ${path2}`, landed),
     move: (from, to, landed) => change({ type: "lre.workspace", op: "move", chatId, from, to }, `Moved ${from} to ${to}`, landed),
     remove: (path2, landed) => change({ type: "lre.workspace", op: "delete", chatId, path: path2 }, `Deleted ${path2}`, landed),
-    session: async () => (await request({ type: "lre.workspace", op: "session", chatId }))?.session ?? null,
-    rollback: async () => (await request({ type: "lre.workspace", op: "rollback", chatId }))?.session ?? null
+    session: async () => (await request2({ type: "lre.workspace", op: "session", chatId }))?.session ?? null,
+    rollback: async () => (await request2({ type: "lre.workspace", op: "rollback", chatId }))?.session ?? null
   };
 }
 function sizeWords(size) {
@@ -79591,7 +81197,7 @@ class ProtocolClient {
     this.schedule = options.schedule ?? ((fn) => queueMicrotask(fn));
     this.timers = options.timers ?? { set: (fn, ms) => setTimeout(fn, ms), clear: (handle) => clearTimeout(handle) };
     this.unsubscribe = transport.subscribe((payload) => this.receive(payload));
-    this.send = (request) => this.request(request);
+    this.send = (request2) => this.request(request2);
   }
   getState() {
     return this.state;
