@@ -1,9 +1,10 @@
 // What a role's run left the engine, in words (DESIGN §4.6, "What a run gave"): the changes it
 // staged, landing when the turn commits or held for the review card, and those it asked for that were
 // refused, each with why; and what of its answer the engine didn't take, and why: the knowledge step's refusals, the
-// read's proposals it didn't read and the things they name that the world has no entity for, the
-// scene's lore the world doesn't have, the director's lines flagged (and kept) for contradicting the
-// state it was given, or an answer that held nothing. Nothing a run answered drops silently: the main agent's
+// read's proposals it didn't read or held for the Curator and the things they name that the world has
+// no entity for, a Curator's run a round limit cut short, the scene's lore the world doesn't have,
+// the director's lines flagged (and kept) for contradicting the state it was given, or an answer
+// that held nothing. Nothing a run answered drops silently: the main agent's
 // run_role and revise answers carry these words, and Diagnostics and the host log carry the same, on
 // either pipeline. Every reason is a registry text on the Main agent page (`shared/agent-yield.ts`),
 // rendered in the user's own texts.
@@ -108,8 +109,11 @@ function lostOf(say: (id: string, vars?: Readonly<Record<string, string>>) => st
         const n = dropped?.why[why] ?? 0;
         return n > 0 ? [say(YIELD_TEXT.read(why), { count: String(n), types: dropped?.types.join(", ") ?? "" })] : [];
       });
-      // The Curator's work is what it staged: an answer with no facts is its usual one.
-      if (kind === "curate") return lost;
+      // A split read's changes of the Curator's types wait for it: they land only where its own work doesn't cover them.
+      const held = read.held ?? [];
+      if (held.length > 0) lost.push(say(YIELD_TEXT.readHeld, { count: String(held.length), types: [...new Set(held.map((p) => String(p.type)))].join(", ") }));
+      // The Curator's work is what it staged: an answer with no facts is its usual one, and one a round limit cut short says so.
+      if (kind === "curate") return read.short === "cut" ? [...lost, say(YIELD_TEXT.curatorCut)] : lost;
       const untracked = read.untracked ?? [];
       if (untracked.length > 0) lost.push(say(YIELD_TEXT.readUntracked, { count: String(untracked.length), things: [...new Set(untracked)].join(", ") }));
       if (lost.length === 0 && read.proposals.length === 0) lost.push(say(YIELD_TEXT.readEmpty));

@@ -38,7 +38,8 @@ export function storedRecordHash(rec: Rec): string {
 }
 
 export function isTombstoned(tombstones: readonly Tombstone[], messageId: string, rec: Rec): boolean {
-  if (tombstones.length === 0) return false;
+  // The record is hashed only when a tombstone names its message: a long chat's other records never are.
+  if (!tombstones.some((t) => t.messageId === messageId)) return false;
   const recHash = storedRecordHash(rec);
   return tombstones.some((t) => t.messageId === messageId && sameContent(t.swipeHash, rec.swipeHash) && t.recHash === recHash);
 }

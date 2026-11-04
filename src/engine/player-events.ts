@@ -623,8 +623,8 @@ function wordedLines(reg: Registry, world: WorldDoc, state: Readonly<WorldState>
     const text = banded === undefined ? rawLine(reg, world, state, pov, e, player, you) : banded;
     if (!text || lines.some((l) => l.text === text)) continue;
     if (player) {
-      // Text that must never reach a player line: unrevealed truths and gated secret lore, and hidden names.
-      secrets ??= [...unrevealedSecrets(reg, world, state), ...hiddenNames(reg, world, state, pov)];
+      // Text that must never reach a player line: unrevealed truths and gated secret lore, and hidden names. The same for every line of the pass.
+      secrets ??= passMemo([state, world], `player.secrets\u0000${pov}`, () => [...unrevealedSecrets(reg, world, state), ...hiddenNames(reg, world, state, pov)]);
       if (findLeaks(text, secrets).length > 0) continue;
     }
     lines.push({ at: i, rank: lineRank(reg, world, state, pov, e), text });

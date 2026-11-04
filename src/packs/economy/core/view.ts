@@ -26,6 +26,7 @@ import { opaqueId } from "../../../shared/hash";
 import { cardsOn, cardRoom, featureFor, isParty, overdraftRoom, tiersOf, toggles } from "./pay";
 import { netWorthParts } from "./worth";
 import { createRng } from "../../../engine/rng";
+import { passMemo } from "../../../engine/read-pass";
 
 const DAY = 1440;
 
@@ -509,8 +510,15 @@ function householdView(ctx: ReadContext, viewer: Viewer, household: EntityId, fl
   };
 }
 
-/** One party's money at its own level (DESIGN §25.11). */
+/**
+ * One party's money at its own level (DESIGN §25.11). Kept for the read pass: a party's money is read
+ * again by every organization page, Coming up, the founders' choices and the GM's money list.
+ */
 export function buildFinanceView(hooks: FinanceHooks, ctx: ReadContext, party: EntityId, player: boolean): FinanceView {
+  return passMemo([ctx.state, ctx.world, hooks], `economy.finance\u0000${player ? "p" : "g"}\u0000${party}`, () => financeView(hooks, ctx, party, player));
+}
+
+function financeView(hooks: FinanceHooks, ctx: ReadContext, party: EntityId, player: boolean): FinanceView {
   const pov = player ? ctx.world.pov : null;
   const viewer: Viewer = { pov, hidden: pov === null ? NO_HIDDEN : hiddenNames(ctx, pov) };
   // Each flow goes out once for the whole view, as the viewing party knows it (`flowView`), so every section that names it, its row, its coming-up lines and alerts, the household's and a business's, sends the same id and lets them do the same with it.

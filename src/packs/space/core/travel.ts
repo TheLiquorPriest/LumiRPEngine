@@ -145,6 +145,19 @@ interface Tree {
   prev: Map<PlaceId, Step>;
 }
 
+/** Where a drive's search arrives at a place: the node it reaches (the place or its way out) and in how many minutes. */
+interface Arrival {
+  node: PlaceId;
+  minutes: number;
+}
+
+/** One drive's search: its tree, how it costs legs, and where it arrives at each place asked, read once. */
+interface DriveSearch {
+  tree: Tree;
+  costing: Costing;
+  arrivals: Map<PlaceId, Arrival | null>;
+}
+
 /**
  * Dijkstra by minutes over the union of some modes' graphs, from `starts` (ties broken by node id),
  * until `stop` says a node ends it or 10,000 nodes are taken.
@@ -280,16 +293,21 @@ export function closedRoutes(ctx: Pick<ReadContext, "world" | "state">): Set<str
   return out;
 }
 
-/** The route a mode takes at the current level: closed routes from level 2; terrain and weather (factors, closed modes) from level 4; the world's speed for the mode, when it sets one (`mapSettings.travel`). */
+/**
+ * The route a mode takes at the current level: closed routes from level 2; terrain and weather (factors, closed modes) from level 4; the world's speed for the mode, when it sets one (`mapSettings.travel`).
+ * Kept for the read pass: the map's Go rows and each vehicle's trips ask the same walks.
+ */
 export function routeAt(ctx: ReadContext, from: PlaceId, to: PlaceId, mode: TravelMode): TravelPlan | null {
-  const level = ctx.levelOf(ctx.world.pov, "space");
-  if (level <= 1) return nominalRoute(ctx, from, to, mode);
-  const weather = level >= 4 ? optionalQuery(ctx, "weather.travel_factor") : null;
-  const closes = level >= 4 ? optionalQuery(ctx, "weather.closed_modes") : null;
-  if (closes && (closes(ctx, from).includes(mode) || closes(ctx, to).includes(mode))) return null;
-  const factor = weather ? Math.max(weather(ctx, from, mode), weather(ctx, to, mode)) : 1;
-  const speed = travelTuningOf(ctx.world).speeds[mode];
-  return findRoute(ctx.world, from, to, mode, { terrain: level >= 4, factor, closed: closedRoutes(ctx), ...(speed !== undefined ? { speed } : {}) });
+  return passMemo([ctx.state, ctx.state.entities, ctx.world], `space.route\u0000${mode}\u0000${from}\u0000${to}`, () => {
+    const level = ctx.levelOf(ctx.world.pov, "space");
+    if (level <= 1) return nominalRoute(ctx, from, to, mode);
+    const weather = level >= 4 ? optionalQuery(ctx, "weather.travel_factor") : null;
+    const closes = level >= 4 ? optionalQuery(ctx, "weather.closed_modes") : null;
+    if (closes && (closes(ctx, from).includes(mode) || closes(ctx, to).includes(mode))) return null;
+    const factor = weather ? Math.max(weather(ctx, from, mode), weather(ctx, to, mode)) : 1;
+    const speed = travelTuningOf(ctx.world).speeds[mode];
+    return findRoute(ctx.world, from, to, mode, { terrain: level >= 4, factor, closed: closedRoutes(ctx), ...(speed !== undefined ? { speed } : {}) });
+  });
 }
 
 /** Level 0–1 movement: any known place, instantly (0) or in a nominal move (1). */
@@ -371,8 +389,22 @@ export function vehicleTrips(ctx: ReadContext, ask: VehicleTripAsk, targets: rea
   const closed = closedRoutes(ctx);
   const startMinutes = Math.round(tuning.startMinutes);
   const parkMinutes = Math.round(tuning.parkMinutes);
-  // A search per set of open modes and weather, shared by the targets that have the same.
-  const searches = new Map<string, { tree: Tree; costing: Costing }>();
+  // A search per set of open modes and weather, shared by the targets that have the same, with where it arrives at each place, read once.
+  const searches = new Map<string, DriveSearch>();
+  // What each place is to every target alike, asked once: whether the vehicle may be left there, and its walking weather.
+  const places = Object.keys(ctx.world.places).sort();
+  const parks = new Map<PlaceId, boolean>();
+  const parksAt = (p: PlaceId): boolean => {
+    let ok = parks.get(p);
+    if (ok === undefined) parks.set(p, (ok = ask.canPark(p)));
+    return ok;
+  };
+  const walks = new Map<PlaceId, number>();
+  const walkAt = (p: PlaceId): number => {
+    let factor = walks.get(p);
+    if (factor === undefined) walks.set(p, (factor = weather ? weather(ctx, p, "walk") : 1));
+    return factor;
+  };
   for (const to of targets) {
     // Where the vehicle already is needs no drive: it would only be driven away to park and walked back from.
     if (to === ask.from || to === ask.at || !own(ctx.world.places, to)) continue;
@@ -382,28 +414,36 @@ export function vehicleTrips(ctx: ReadContext, ask: VehicleTripAsk, targets: rea
     const key = modes.map((m) => `${m}:${factors.get(m)}`).join(",");
     let search = searches.get(key);
     if (!search) {
-      const costing: Costing = { speed: (m) => ask.speed ?? tuning.speeds[m], terrain: level >= 4, factor: (m) => factors.get(m) ?? 1 };
-      search = { costing, tree: grow(modes.map((mode) => ({ mode, graph: edges(ctx.world, mode, closed) })), [ask.at], costing) };
+      // The drive's search reads the vehicle's place, speed, modes and their weather: the same for every trip that shares them in the pass.
+      search = passMemo([ctx.state, ctx.state.entities, ctx.world], `space.drive\u0000${ask.at}\u0000${ask.speed ?? ""}\u0000${key}`, (): DriveSearch => {
+        const costing: Costing = { speed: (m) => ask.speed ?? tuning.speeds[m], terrain: level >= 4, factor: (m) => factors.get(m) ?? 1 };
+        return { costing, tree: grow(modes.map((mode) => ({ mode, graph: edges(ctx.world, mode, closed) })), [ask.at], costing), arrivals: new Map() };
+      });
       searches.set(key, search);
     }
-    const { tree, costing } = search;
+    const { tree, costing, arrivals } = search;
     // The walk from each place to the destination, run back from it; the walk the trip takes is
-    // then the place's own route, so it reads exactly as a Go from there would.
+    // then the place's own route, so it reads exactly as a Go from there would. Every trip to the
+    // destination in the pass walks the same.
     const walkClosed = closes ? closes(ctx, to).includes("walk") : false;
-    const back = walkClosed ? null : grow([{ mode: "walk", graph: reverseEdges(ctx.world, closed) }], [to, `${to}${EXIT}`], { speed: (m) => tuning.speeds[m], terrain: level >= 4, factor: () => 1 });
-    const arrive = (p: PlaceId): { node: PlaceId; minutes: number } | null => {
-      const nodes = [p, `${p}${EXIT}`].filter((n) => tree.prev.has(n)).sort((a, b) => (tree.dist.get(a) ?? Infinity) - (tree.dist.get(b) ?? Infinity));
-      const node = nodes[0];
-      return node === undefined ? null : { node, minutes: tree.dist.get(node) ?? Infinity };
+    const back = walkClosed ? null : passMemo([ctx.state, ctx.state.entities, ctx.world], `space.walkback\u0000${to}`, () => grow([{ mode: "walk", graph: reverseEdges(ctx.world, closed) }], [to, `${to}${EXIT}`], { speed: (m) => tuning.speeds[m], terrain: level >= 4, factor: () => 1 }));
+    // Where the drive arrives at a place: the place itself or its way out, whichever it reaches sooner.
+    const arrive = (p: PlaceId): Arrival | null => {
+      const known = arrivals.get(p);
+      if (known !== undefined) return known;
+      const node = [p, `${p}${EXIT}`].filter((n) => tree.prev.has(n)).sort((a, b) => (tree.dist.get(a) ?? Infinity) - (tree.dist.get(b) ?? Infinity))[0];
+      const there = node === undefined ? null : { node, minutes: tree.dist.get(node) ?? Infinity };
+      arrivals.set(p, there);
+      return there;
     };
     let best: { park: PlaceId; node: PlaceId; minutes: number } | null = null;
     const around = new Set([...aroundOf(ctx.world, ask.at), ...aroundOf(ctx.world, to)]);
-    for (const p of [to, ...Object.keys(ctx.world.places).sort()]) {
+    for (const p of [to, ...places]) {
       // A place around the start or the destination is no place to leave it: the trip is inside it already.
-      if (p === ask.at || (p !== to && (!ask.canPark(p) || around.has(p)))) continue;
+      if (p === ask.at || (p !== to && (around.has(p) || !parksAt(p)))) continue;
       const there = arrive(p);
       if (!there) continue;
-      const walkWeather = weather ? Math.max(weather(ctx, p, "walk"), weather(ctx, to, "walk")) : 1;
+      const walkWeather = weather ? Math.max(walkAt(p), walkAt(to)) : 1;
       const rest = p === to ? 0 : (back?.dist.get(p) ?? Infinity) * walkWeather;
       const minutes = there.minutes + rest;
       // The destination itself first, then by id: the order the places are taken in.

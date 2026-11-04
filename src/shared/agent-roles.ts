@@ -82,13 +82,21 @@ const FAMILIES: Readonly<Record<RoleId, readonly ToolFamily[]>> = {
 };
 
 /**
+ * The Curator's own rounds of tool calls (its budget's Tool rounds per agent, over every agent's):
+ * its work is a round of lookups at most and a round of changes, with room for a refusal's retry,
+ * and a round limit that stops it leaves what it staged standing (ITEMS-SPEC §7.2).
+ */
+export const CURATOR_TOOL_TURNS = 6;
+
+/**
  * Every role's settings as a new user has them (§15): its classic step's connection, the effort its
  * connection sets, §6's families, the story's writes and none of the GM's, as an agent
  * with tools, and on a failure its classic step's own call, except the intent, without which the
- * turn can't be played as asked: it stops the turn.
+ * turn can't be played as asked: it stops the turn. Each role's budget is every agent's, but the
+ * Curator's rounds of tool calls (`CURATOR_TOOL_TURNS`).
  */
 export function defaultRoleSettings(): Record<RoleId, RoleSettings> {
   const out = {} as Record<RoleId, RoleSettings>;
-  for (const id of ROLE_IDS) out[id] = { connectionId: null, model: null, effort: "inherit", families: [...FAMILIES[id]], tier: "story", promptOnly: false, onFail: id === "intent" ? "stop" : "prompt_only", budget: {} };
+  for (const id of ROLE_IDS) out[id] = { connectionId: null, model: null, effort: "inherit", families: [...FAMILIES[id]], tier: "story", promptOnly: false, onFail: id === "intent" ? "stop" : "prompt_only", budget: id === "curator" ? { toolTurns: CURATOR_TOOL_TURNS } : {} };
   return out;
 }

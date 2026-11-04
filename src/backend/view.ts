@@ -225,6 +225,8 @@ export function palette(world: WorldDoc, state: WorldState, registry: Registry):
     const targets = offers.length > 0 || stats.length > 0 || rows.length > 0 ? [] : refParam ? paramCandidates(registry, world, state, action, refParam) : [null];
     // A second required ref (Drive's destination, Lend's borrower) is a nested pick.
     const secondParam = refParam ? Object.entries(action.params).find(([name, p]) => name !== refParam && p.type === "ref" && !p.optional)?.[0] : undefined;
+    // Its candidates are the same for every first pick, so they are found once.
+    let secondCandidates: string[] | undefined;
     // Take from a kit (gear): the pieces still in a kit are its second pick, with how many are left.
     const kitStatus = action.id === "take_piece" && action.params.piece?.type === "text" ? optionalQuery(ctx, "gear.kit_status") : undefined;
     const nameOf = (id: string): string => state.entities[id]?.name ?? world.places[id]?.name ?? id;
@@ -246,7 +248,7 @@ export function palette(world: WorldDoc, state: WorldState, registry: Registry):
     for (const target of targets.slice(0, 24)) {
       const params: JsonObject = refParam && target ? { [refParam]: target } : {};
       if (secondParam && target) {
-        const seconds = paramCandidates(registry, world, state, action, secondParam).filter((id) => id !== target).slice(0, 12);
+        const seconds = (secondCandidates ??= paramCandidates(registry, world, state, action, secondParam)).filter((id) => id !== target).slice(0, 12);
         const next = seconds.map((id) => {
           const final = pick({ ...params, [secondParam]: id }, nameOf(id));
           return { ...final, params: { [secondParam]: id } };

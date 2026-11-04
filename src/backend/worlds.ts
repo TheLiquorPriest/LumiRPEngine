@@ -16,7 +16,7 @@ import type { RevisionId, UserId, WorldId } from "../shared/ids";
 import { pathSafe } from "../shared/ids";
 import type { ChatRun } from "../shared/ledger";
 import type { JsonValue } from "../shared/json";
-import { hasOwn, isRecord, safeKey } from "../shared/json";
+import { hasOwn, isRecord, safeKey, shareAlike } from "../shared/json";
 import { applyPatch, isPrototypeKey, jsonEqual, measure, parsePointer, PatchError, readOp } from "../shared/json-patch";
 import type { EditorRequest, JsonPatchOp, LintIssue, ResultBodies, WorldCollection, WorldPart } from "../shared/protocol";
 import type { RevisionNote, RulesetDef, WorldDoc, WorldIndex } from "../shared/world";
@@ -152,7 +152,9 @@ export const WORLD_COLLECTIONS: Record<WorldCollection, true> = {
  * Loaded revisions kept across chats, least recently used first. A revision is several MB once parsed
  * (a 1.7 MB world is ~7 MB), so few are kept; an open chat pins the ones its ledger references, so
  * eviction never breaks a fold, and a revision evicted while a chat still pins it is found again
- * (`alive`) rather than read a second time.
+ * (`alive`) rather than read a second time. Each revision read holds the parts it has alike with the
+ * world's revision read before it as that one's own (`shareAlike`), so a chat Upgraded through many
+ * revisions pins about one world's worth, not one for each.
  */
 export const REVISION_CACHE_CAP = 8;
 
@@ -164,6 +166,8 @@ export class WorldStore {
   private readonly revisions = new Map<string, WorldDoc>();
   /** Each world's writes in turn, by `user \0 world`: the settling of the last one queued. */
   private readonly writes = new Map<string, Promise<void>>();
+  /** The revision of each world read last, by `user \0 world`, whose parts the next one read shares. */
+  private readonly lastRead = new Map<string, WeakRef<WorldDoc>>();
 
   constructor(
     private readonly host: HostPort,
@@ -277,7 +281,10 @@ export class WorldStore {
     if (known) return known;
     const raw = await this.readJson(revisionFile(worldId, revision), userId);
     if (!isWorldDoc(raw)) throw new WorldError("not_found", `revision ${revision} of ${worldId} not found`);
-    const doc = migrateWorld(raw);
+    const at = `${userId}\u0000${worldId}`;
+    const before = this.lastRead.get(at)?.deref();
+    const doc = before ? shareAlike(migrateWorld(raw), before) : migrateWorld(raw);
+    this.lastRead.set(at, new WeakRef(doc));
     this.remember(WorldStore.key(userId, worldId, revision), doc);
     return doc;
   }
@@ -289,6 +296,22 @@ export class WorldStore {
     const rev = revision ?? index.head;
     if (!index.revisions.includes(rev)) throw new WorldError("not_found", `revision ${rev} of ${worldId} not found`);
     return { world: await this.revision(worldId, rev, userId), revision: rev };
+  }
+
+  /** Each of `revisions` the world's index lists and that reads, in order, its index read once (a chat's pins); the rest left out. */
+  async getMany(worldId: WorldId, userId: UserId, revisions: Iterable<RevisionId>): Promise<Map<RevisionId, WorldDoc>> {
+    const out = new Map<RevisionId, WorldDoc>();
+    const index = await this.index(worldId, userId);
+    if (!index) return out;
+    for (const rev of revisions) {
+      if (!index.revisions.includes(rev)) continue;
+      try {
+        out.set(rev, await this.revision(worldId, rev, userId));
+      } catch {
+        // Unreadable: left out, as one the index doesn't list is.
+      }
+    }
+    return out;
   }
 
   /** Whether `revision` is one of this world's revisions (an Upgrade target). */

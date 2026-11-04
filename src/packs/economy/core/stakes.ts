@@ -14,6 +14,7 @@ import { countsUnits, FINANCE_ACTIONS, moveUnits, ownersJson, PARTY_KINDS, units
 import type { FieldDef } from "../../../shared/world";
 import { formatMoney } from "../../../shared/world";
 import { labelOf, numOf, objOf, optionalQuery, own, strOf } from "../../../engine/pack-kit";
+import { passMemo } from "../../../engine/read-pass";
 import type { EffectContext, EventTypeDef, ReadContext, Rejection } from "../../../engine/registry";
 import type { FinanceApi, FinanceRegistry } from "./module";
 import { holdingsRecord, holdingsSlice, reject } from "./assets";
@@ -35,11 +36,13 @@ const BUSINESS_FIELDS: Record<string, FieldDef> = {
 /** The businesses being valued right now: a business that (through others) owns itself is worth nothing more the second time round. */
 const valuing = new Set<EntityId>();
 
-/** Every business (a party of kind business), by id. */
+/** Every business (a party of kind business), by id. Kept for the read pass: every party's worth walks them. */
 export function businessIds(api: FinanceApi, ctx: ReadContext): EntityId[] {
-  return Object.keys(ctx.state.entities)
-    .filter((id) => api.partyKind(ctx, id) === "business")
-    .sort();
+  return passMemo([ctx.state, ctx.state.entities, ctx.world, api], "economy.businesses", () =>
+    Object.keys(ctx.state.entities)
+      .filter((id) => api.partyKind(ctx, id) === "business")
+      .sort(),
+  );
 }
 
 /** How a business's value is worked out (DESIGN §27.10): its set value, else its book value and its last year's profit times its multiple; never below nothing. */

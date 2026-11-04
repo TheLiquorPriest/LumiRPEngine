@@ -27,7 +27,7 @@ const SRC = resolve(import.meta.dir, "../../src");
 const PLAY_ZONES = ["engine", "backend", "worker", "packs"];
 
 /** A bare revision lookup: what reads a world document without the state it is played in. */
-const RAW = /\b(?:worldAt|worlds)\s*\(|\.worlds\.(?:get|cached)\s*\(/;
+const RAW = /\b(?:worldAt|worlds)\s*\(|\.worlds\.(?:get|getMany|cached)\s*\(/;
 
 /** Each bare lookup allowed: its file, a text its line holds, how many such lines, and why it may read a revision as authored. */
 const ALLOWED: readonly { file: string; has: string; count: number; why: string }[] = [
@@ -45,7 +45,7 @@ const ALLOWED: readonly { file: string; has: string; count: number; why: string 
   { file: "engine/upgrade.ts", has: "env.worlds(revision)", count: 1, why: "an Upgrade compares revisions as authored; its reads of the state go through `types.context`" },
   { file: "backend/runtime.ts", has: "this.worlds.get(run.worldId, userId, run.revision)).world;", count: 1, why: "the env's pinned revision" },
   { file: "backend/runtime.ts", has: "this.worlds.cached(userId, run.worldId, revision)", count: 1, why: "the env's lookup, by revision" },
-  { file: "backend/runtime.ts", has: "pinned.set(rev, (await this.worlds.get(", count: 1, why: "the env's pins" },
+  { file: "backend/runtime.ts", has: "await this.worlds.getMany(run.worldId, userId, wanted)", count: 1, why: "the env's pins, read together" },
   { file: "backend/runtime.ts", has: "sectionsOf((await this.worlds.get(", count: 2, why: "the world's sections, which name no place" },
   { file: "backend/runtime.ts", has: "world: (r) => core.worldAt(r)", count: 1, why: "`buildView`'s lookup, which it plays over the head state" },
   { file: "backend/dispatch.ts", has: "const { world } = await this.rt.worlds.get(worldId, userId);", count: 1, why: "the world's book follows its head revision as authored" },

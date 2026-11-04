@@ -13,7 +13,7 @@ import { FAMILIES, RoleCard, RolesBody, roleResetPatch, rolesSummary } from "../
 import { ContextBody, ContextCard, contextSummary, pinsOf } from "../../src/frontend/settings/context";
 import { type Connection, ConnectionSelect } from "../../src/frontend/settings/steps";
 import { Button, HostModelPicker, HostSwitch, NumberStepper, Seg } from "../../src/frontend/components";
-import { defaultRoleSettings, ROLE_IDS, ROLE_LABEL, type RoleId } from "../../src/shared/agent-roles";
+import { CURATOR_TOOL_TURNS, defaultRoleSettings, ROLE_IDS, ROLE_LABEL, type RoleId } from "../../src/shared/agent-roles";
 import { defaultContextSettings, sourceLabel } from "../../src/shared/agent-context";
 import type { AgentSettings } from "../../src/shared/agent-settings";
 import { defaultAgentSettings } from "../../src/shared/agent-settings";
@@ -279,11 +279,16 @@ describe("Settings → Agents → Roles", () => {
     expect(roleResetPatch("minds")).toEqual({ agents: { roles: { minds: null }, caching: { roles: { minds: null } } } });
   });
 
-  test("the Curator's card has its ops per turn, 24 by default, a count never lifted; changed, the card is its own, and its Default resets them with the role", () => {
+  test("the Curator's card has its ops per turn, 24 by default, a count never lifted, and tool rounds of its own; changed, the card is its own, and its Default resets them with the role", () => {
     const row = expand({ type: LimitRow, props: only(propsOf(roleCard(DEFAULTS, "curator"), LimitRow)) });
     expect(propsOf(row, HostSwitch)).toEqual([]);
     const stepper = labelled(row, NumberStepper, "Curator ops per turn");
     expect([stepper.value, stepper.min]).toEqual([24, 0]);
+    // Its shipped tool rounds are its own, below every agent's; Every agent's gives it theirs.
+    const rounds = ownRow(roleCard(DEFAULTS, "curator"), "toolTurns");
+    expect(labelled(rounds, NumberStepper, "Tool rounds per agent").value).toBe(CURATOR_TOOL_TURNS);
+    click(labelled(rounds, Button, "Use every agent's tool rounds per agent, 10"));
+    expect(take()).toEqual({ agents: { roles: { curator: { budget: { toolTurns: null } } } } });
     press(stepper, 12);
     expect(take()).toEqual({ agents: { curatorOps: 12 } });
     // No other role's card has it.

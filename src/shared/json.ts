@@ -38,3 +38,47 @@ export function deepFreeze<T>(value: T): T {
   for (const v of Object.values(value)) deepFreeze(v);
   return value;
 }
+
+/**
+ * `next` holding `prev`'s own copy of every part the two have alike (the same keys in the same
+ * order, the same array positions, the same values throughout), so two versions of a document that
+ * differ in a few places keep one copy of the rest: `prev` itself when they are alike throughout,
+ * else `next`, its parts swapped in place (one frozen is left as it is). Both are plain JSON that
+ * nothing changes afterwards: what one holds, the other may now hold too.
+ */
+export function shareAlike<T>(next: T, prev: T): T {
+  return alikePart(next, prev) as T;
+}
+
+function alikePart(next: unknown, prev: unknown): unknown {
+  if (next === prev) return prev;
+  if (typeof next !== "object" || next === null || typeof prev !== "object" || prev === null || Array.isArray(next) !== Array.isArray(prev)) return next;
+  const swap = !Object.isFrozen(next);
+  let alike = true;
+  if (Array.isArray(next) && Array.isArray(prev)) {
+    if (next.length !== prev.length) alike = false;
+    for (let i = 0; i < next.length; i++) {
+      const part = i < prev.length ? alikePart(next[i], prev[i]) : next[i];
+      if (part !== prev[i]) alike = false;
+      if (swap) next[i] = part;
+    }
+    return alike ? prev : next;
+  }
+  const n = next as Record<string, unknown>;
+  const p = prev as Record<string, unknown>;
+  const keys = Object.keys(n);
+  const before = Object.keys(p);
+  if (keys.length !== before.length) alike = false;
+  keys.forEach((key, i) => {
+    if (!hasOwn(p, key)) {
+      alike = false;
+      return;
+    }
+    if (before[i] !== key) alike = false;
+    const part = alikePart(n[key], p[key]);
+    if (part !== p[key]) alike = false;
+    // An own `__proto__` (parsed JSON can hold one) is compared, never assigned: that would set the prototype.
+    if (swap && key !== "__proto__") n[key] = part;
+  });
+  return alike ? prev : next;
+}

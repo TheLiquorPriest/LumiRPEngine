@@ -1,8 +1,9 @@
 // What a role's run gave the engine that the engine didn't take as given, and why (DESIGN §4.6, "What
 // a run gave"): nothing a run answered drops silently. The changes it staged (landing when the turn
 // commits, held for the review card, or refused), what the knowledge step refused of its answer, what
-// the read didn't read of its proposals and the things they name that the world has no entity for,
-// and the director's lines flagged (and kept) for contradicting the state it was given, each with how many.
+// the read didn't read of its proposals or held for the Curator and the things they name that the
+// world has no entity for, a Curator's run a round limit cut short, and the director's lines flagged
+// (and kept) for contradicting the state it was given, each with how many.
 // Each reason is a registry text on the Main agent page with its default and its reset, worded alike
 // in the main agent's run_role and revise answers, in Diagnostics and in the host log. Pure data.
 
@@ -37,6 +38,8 @@ export const YIELD_TEXT = {
   read: (kind: ReadDrop): string => `main.lost.read.${kind}`,
   readEmpty: "main.lost.read.empty",
   readUntracked: "main.lost.read.untracked",
+  readHeld: "main.lost.read.held",
+  curatorCut: "main.lost.curator.cut",
   sceneLore: "main.lost.scene.lore",
   prose: (kind: ProseClashKind): string => `main.lost.prose.${kind}`,
   proseAdvice: "main.lost.prose.advice",
@@ -102,6 +105,20 @@ export const AGENT_YIELD_PROMPTS: readonly PromptDef[] = [
     "A count of a thing (how many of it there are) that the world has no entity for, or none the player character knows of: it is only a Not tracked note to the player, since a count makes no thing. Every other change to a thing finds the thing the words mean, or makes it where the story acts on it.",
     "{{count}} count a thing the world doesn't have ({{things}}): each changes nothing but a Not tracked note, since a count makes no thing",
     [count, { name: "things", text: "each thing as the read named it; one named by an id the player character doesn't know, as something they don't know", required: true }],
+  ),
+  def(
+    YIELD_TEXT.readHeld,
+    "Read: held for the Curator",
+    "Changes of the Curator's types (a thing's, a purchase, a walk-on, a place made in play) that a read gave on an agent chat with the Curator on: held aside, each lands through the reconciler only where the Curator's own work doesn't cover it, when its agent failed, never ran or stopped at a round limit.",
+    "{{count}} held for the Curator ({{types}}): each lands only where the Curator's own work doesn't cover it",
+    [count, { name: "types", text: "the types it gave, each once", required: true }],
+  ),
+  def(
+    YIELD_TEXT.curatorCut,
+    "Curator: stopped at a round limit",
+    "A Curator run whose agent a limit on its rounds of tool calls (Tool rounds per agent, or per turn) stopped before it answered: what it staged and noted stands and lands with the turn, and the read's held changes land for what it didn't stage.",
+    "its agent stopped at a round limit before it answered: what it staged and noted stands, and the read's held changes land for what it didn't stage",
+    [],
   ),
   def(YIELD_TEXT.sceneLore, "Scene: lore it doesn't have", "Lore ids a scene run chose that the world has no entry for.", "{{count}} lore ids not taken (the world has no such entry: {{ids}})", [count, { name: "ids", text: "the ids it gave", required: true }]),
   ...Object.entries(PROSE).map(([kind, t]) => def(YIELD_TEXT.prose(kind as ProseClashKind), t.label, t.note, t.text, [count, lines])),

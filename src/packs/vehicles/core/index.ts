@@ -23,6 +23,7 @@ import type { Rng } from "../../../engine/rng";
 import { fieldDef, isGone, kindIs, placeOfEntity } from "../../../engine/scope";
 import { partyAt, relocate } from "../../../engine/relocate";
 import { ownsThrough } from "../../../engine/org";
+import { passMemo } from "../../../engine/read-pass";
 import { calendarOf, formatClock } from "../../../engine/calendar";
 import { sentence, thingDescription, thingDetails, thingName } from "../../../engine/thing-words";
 import { canSeeEntity, canSeeField, canSeePlace, knows } from "../../../engine/visibility";
@@ -365,8 +366,9 @@ function tripsFor(ctx: ReadContext, vehicle: EntityId, from: PlaceId, targets: r
   return plan(ctx, { from, at, modes: modesOf(ctx, vehicle), ...(speed !== undefined ? { speed } : {}), canPark: (p) => canSeePlace(ctx.registry, ctx.world, ctx.state, pov, p) }, targets);
 }
 
+/** One trip, kept for the read pass: Drive's options ask each one's fuel and minutes, through formulas of their own. */
 function tripFor(ctx: ReadContext, vehicle: EntityId, from: PlaceId, to: PlaceId): VehicleTrip | null {
-  return tripsFor(ctx, vehicle, from, [to]).get(to) ?? null;
+  return passMemo([ctx.state, ctx.state.entities, ctx.world], `vehicles.trip\u0000${vehicle}\u0000${from}\u0000${to}`, () => tripsFor(ctx, vehicle, from, [to]).get(to) ?? null);
 }
 
 /** The drive of a trip, as fuel and wear read it. */

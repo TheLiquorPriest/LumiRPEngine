@@ -251,17 +251,31 @@ export function positionsBelow(positions: readonly Position[], position: string)
 
 /** The delegations in force for `org` (§3.5): each `acts_for` link to it whose `until` hasn't passed, by delegate. */
 export function delegationsOf(ctx: OrgContext, org: EntityId): Delegation[] {
-  const out: Delegation[] = [];
-  for (const who of Object.keys(ctx.state.entities).sort()) {
-    if (isGone(ctx.state, who)) continue;
-    for (const r of own(ctx.state.entities, who)?.relations ?? []) {
-      if (r.type !== ACTS_FOR || r.to !== org || (typeof r.until === "number" && r.until < ctx.state.clock)) continue;
-      const f = objOf(r.fields);
-      const limits = limitsIn(f);
-      out.push({ who, org, powers: powersIn(f.powers), ...(limits ? { limits } : {}), ...(typeof f.by === "string" && f.by !== "" ? { by: f.by } : {}), ...(typeof r.until === "number" ? { until: r.until } : {}) });
+  return [...delegationsIn(ctx, org)];
+}
+
+/**
+ * `delegationsOf`, shared: every organization's delegations in force are read in one walk of the
+ * state, kept for the read pass, so a page or the GM view asking for each person's powers in each
+ * organization reads the links once, not once a person, power and organization.
+ */
+function delegationsIn(ctx: OrgContext, org: EntityId): readonly Delegation[] {
+  const byOrg = passMemo([ctx.state, ctx.state.entities], "orgs.delegations", () => {
+    const out = new Map<EntityId, Delegation[]>();
+    for (const who of Object.keys(ctx.state.entities).sort()) {
+      if (isGone(ctx.state, who)) continue;
+      for (const r of own(ctx.state.entities, who)?.relations ?? []) {
+        if (r.type !== ACTS_FOR || (typeof r.until === "number" && r.until < ctx.state.clock)) continue;
+        const f = objOf(r.fields);
+        const limits = limitsIn(f);
+        const list = out.get(r.to) ?? [];
+        list.push({ who, org: r.to, powers: powersIn(f.powers), ...(limits ? { limits } : {}), ...(typeof f.by === "string" && f.by !== "" ? { by: f.by } : {}), ...(typeof r.until === "number" ? { until: r.until } : {}) });
+        out.set(r.to, list);
+      }
     }
-  }
-  return out;
+    return out;
+  });
+  return byOrg.get(org) ?? [];
 }
 
 /** The powers a type's default gives how someone belongs (§3.4), without positions: none for staff, officers, the hired and allies; a member's assign and dispose reach only what is consumed in use. */
@@ -288,7 +302,7 @@ export function orgPower(ctx: OrgContext, who: EntityId, org: EntityId, power: O
   }
   const held = heldPositions(ctx, who, org).find((h) => h.position.powers.some((p) => powerCovers(p, power)));
   if (held) return { basis: "position", id: held.position.id };
-  const delegated = delegationsOf(ctx, org).find((d) => d.who === who && d.powers.some((p) => powerCovers(p, power)));
+  const delegated = delegationsIn(ctx, org).find((d) => d.who === who && d.powers.some((p) => powerCovers(p, power)));
   if (delegated) return delegated.by === undefined ? { basis: "delegate" } : { basis: "delegate", id: delegated.by };
   if (!isMemberOf(ctx, who, org)) return null;
   const consumable = thing !== undefined && own(ctx.state.entities, thing)?.fields.consumable === true;
@@ -352,7 +366,7 @@ export function mayAct(ctx: ReadContext, who: EntityId, org: EntityId, power: Or
     const held = heldPositions(ctx, who, org).find((h) => h.position.id === grant.id);
     limits = held?.position.limits;
     scoped = held?.position.scope === "below" ? held.position : undefined;
-  } else if (grant.basis === "delegate") limits = delegationsOf(ctx, org).find((d) => d.who === who && d.powers.some((p) => powerCovers(p, power)))?.limits;
+  } else if (grant.basis === "delegate") limits = delegationsIn(ctx, org).find((d) => d.who === who && d.powers.some((p) => powerCovers(p, power)))?.limits;
   const amount = ask.amount;
   if (limits && amount !== undefined) {
     const over = overLimit(limits, amount, limits.month !== undefined ? spentThisMonth(ctx, who, org) : null, name, ctx.world.currency);
@@ -383,11 +397,13 @@ export function placesOf(ctx: Pick<ReadContext, "state" | "world">, business: En
   return here ? [here] : [];
 }
 
-/** Every business still in the world, by id. */
+/** Every business still in the world, by id. Kept for the read pass: whose a place is asks it of every place. */
 export function businessIds(ctx: OrgContext): EntityId[] {
-  return Object.keys(ctx.state.entities)
-    .filter((id) => kindIs(ctx.registry, ctx.world, own(ctx.state.entities, id)?.kind ?? "", COMPANY_KIND) && !isGone(ctx.state, id))
-    .sort();
+  return passMemo([ctx.state, ctx.state.entities, ctx.world], "orgs.businesses", () =>
+    Object.keys(ctx.state.entities)
+      .filter((id) => kindIs(ctx.registry, ctx.world, own(ctx.state.entities, id)?.kind ?? "", COMPANY_KIND) && !isGone(ctx.state, id))
+      .sort(),
+  );
 }
 
 /** The business that trades at a place: the one whose place holds it most closely. */
@@ -408,21 +424,24 @@ export function businessAt(ctx: OrgContext, place: PlaceId | null): EntityId | n
 /**
  * The places that are an organization's (§3.9): a business's trading places; a household's members'
  * homes; and, for any of them, its own `places` and the places of the properties it holds a share
- * of. A place named as an employer is its own. Sorted by id, each once.
+ * of. A place named as an employer is its own. Sorted by id, each once. Kept for the read pass:
+ * whose a place is asks it of every organization, for every place.
  */
 export function orgPlaces(ctx: OrgContext, org: EntityId): PlaceId[] {
   if (own(ctx.world.places, org)) return [org];
-  const type = orgTypeOf(ctx, org);
-  const fields = own(ctx.state.entities, org)?.fields;
-  const listed = Array.isArray(fields?.places) ? fields.places.filter((p): p is string => typeof p === "string" && own(ctx.world.places, p) !== undefined) : [];
-  const out = new Set<PlaceId>(type === "company" ? placesOf(ctx, org) : listed);
-  for (const id of Object.keys(ctx.state.entities)) {
-    const e = own(ctx.state.entities, id);
-    if (!e || isGone(ctx.state, id)) continue;
-    if (type === "household" && typeof e.fields.home === "string" && own(ctx.world.places, e.fields.home) && kindIs(ctx.registry, ctx.world, e.kind, "person") && isMemberOf(ctx, id, org)) out.add(e.fields.home);
-    if (kindIs(ctx.registry, ctx.world, e.kind, "property") && typeof e.fields.place === "string" && own(ctx.world.places, e.fields.place) && (worthShares(ownersIn(e.fields))[org] ?? 0) > 0) out.add(e.fields.place);
-  }
-  return [...out].sort();
+  return passMemo([ctx.state, ctx.state.entities, ctx.world], `orgs.places:${org}`, () => {
+    const type = orgTypeOf(ctx, org);
+    const fields = own(ctx.state.entities, org)?.fields;
+    const listed = Array.isArray(fields?.places) ? fields.places.filter((p): p is string => typeof p === "string" && own(ctx.world.places, p) !== undefined) : [];
+    const out = new Set<PlaceId>(type === "company" ? placesOf(ctx, org) : listed);
+    for (const id of Object.keys(ctx.state.entities)) {
+      const e = own(ctx.state.entities, id);
+      if (!e || isGone(ctx.state, id)) continue;
+      if (type === "household" && typeof e.fields.home === "string" && own(ctx.world.places, e.fields.home) && kindIs(ctx.registry, ctx.world, e.kind, "person") && isMemberOf(ctx, id, org)) out.add(e.fields.home);
+      if (kindIs(ctx.registry, ctx.world, e.kind, "property") && typeof e.fields.place === "string" && own(ctx.world.places, e.fields.place) && (worthShares(ownersIn(e.fields))[org] ?? 0) > 0) out.add(e.fields.place);
+    }
+    return [...out].sort();
+  });
 }
 
 /** A business's trading days (0 is Sunday): its own list, else Monday to Friday. */

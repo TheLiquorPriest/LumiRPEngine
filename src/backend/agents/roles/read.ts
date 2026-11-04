@@ -5,10 +5,11 @@
 // minutes the turn's own actions took), which it measures narrated time against; the organization
 // facts and their rules while one of their types is read, and the plans' open items while agenda
 // is (ORG-SPEC §7.3). Its answer is classic's `ExtractRead`, by classic's own parser (enabled
-// channels only, narrated time beyond what the turn applied, money in minor units, duplicates gone),
-// with the things its changes name that the world has no entity for (`untracked`), which its run
-// reports; the engine then checks each proposal against the world and the player's settings, as it
-// does classic's.
+// channels only, narrated time beyond what the turn applied, money in minor units, duplicates gone;
+// on an agent chat with the Curator on, its changes of the Curator's types held aside for where the
+// Curator's own work doesn't cover them), with the things its changes name that the world has no
+// entity for (`untracked`), which its run reports; the engine then checks each proposal against the
+// world and the player's settings, as it does classic's.
 
 import { isRecord } from "../../../shared/json";
 import { EXTRACT_ITEM_TEXT, EXTRACT_ORG_TEXT, ORG_FACT_TYPES, roleTaskTextId } from "../../../shared/role-prompts";
@@ -78,7 +79,7 @@ export async function extractRun(rt: Runtime, task: ExtractTask, ctx: TurnAgentC
       // Classic's parser reads an answer that isn't one as no change; the role's contract is the proposals' list.
       check: (raw) => {
         if (!isRecord(raw) || !Array.isArray(raw.proposals)) return null;
-        const read = extractAnswer(raw, { world: i.world, appliedMinutes: i.appliedMinutes, channels: i.channels, moves });
+        const read = extractAnswer(raw, { world: i.world, appliedMinutes: i.appliedMinutes, channels: i.channels, moves, held: i.held ?? [] });
         // A change to a thing the world has no entity for lands only as a Not tracked note: its run says so.
         const untracked = rt.untrackedThings(task.world, task.state, read.proposals);
         return untracked.length > 0 ? { ...read, untracked } : read;

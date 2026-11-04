@@ -26,6 +26,7 @@ import { labelOf, numOf, objOf, strOf, own } from "../../../engine/pack-kit";
 import type { PackDef, ReadContext, Rejection } from "../../../engine/registry";
 import type { Rng } from "../../../engine/rng";
 import { evalExpr, kindIs, placeOfEntity, scopeEnv, truthy } from "../../../engine/scope";
+import { passMemo } from "../../../engine/read-pass";
 
 export type Season = "winter" | "spring" | "summer" | "autumn";
 
@@ -171,34 +172,47 @@ export function parseClimate(raw: JsonObject): Climate {
   return { label: strOf(raw.label, "Climate"), states, seasons, persist: numOf(raw.persist, DEFAULT_PERSIST) };
 }
 
+/** Each authored climate as parsed, beside the world's own record of it: a world's records never change, so each is parsed once. */
+const parsedClimates = new WeakMap<JsonObject, Climate>();
+
 function climateOf(ctx: Pick<ReadContext, "world" | "state">, region: EntityId): Climate {
   const id = strOf(own(ctx.state.entities, region)?.fields.climate, "temperate");
   const custom = ctx.world.packs.weather?.config.climates;
   const authored = Array.isArray(custom) ? custom.map((c) => objOf(c)).find((c) => strOf(c.id, strOf(c.region)) === id) : undefined;
-  return authored ? parseClimate(authored) : (own(CLIMATES, id) ?? (CLIMATES.temperate as Climate));
+  if (!authored) return own(CLIMATES, id) ?? (CLIMATES.temperate as Climate);
+  let climate = parsedClimates.get(authored);
+  if (!climate) {
+    climate = parseClimate(authored);
+    parsedClimates.set(authored, climate);
+  }
+  return climate;
 }
 
 function climateSeason(climate: Climate, month: number): ClimateSeason | null {
   return climate.seasons.find((s) => s.months.includes(month)) ?? climate.seasons[0] ?? null;
 }
 
-/** The region over a place: its `region` field or an ancestor's, else the first region entity. */
+/** The region over a place: its `region` field or an ancestor's, else the first region entity. Kept for the read pass, as a travel search asks it of every place. */
 export function regionOf(ctx: Pick<ReadContext, "world" | "state" | "registry">, place: PlaceId | null): EntityId | null {
-  let cur = place ?? undefined;
-  for (let guard = 0; cur && guard < 32; guard++) {
-    const r = own(ctx.world.places, cur)?.fields.region;
-    if (typeof r === "string" && own(ctx.state.entities, r)) return r;
-    cur = own(ctx.world.places, cur)?.parent;
-  }
-  return Object.keys(ctx.state.entities).sort().find((id) => kindIs(ctx.registry, ctx.world, own(ctx.state.entities, id)?.kind ?? "", "region")) ?? null;
+  return passMemo([ctx.state, ctx.state.entities, ctx.world], `weather.region\u0000${place ?? "\u0001"}`, () => {
+    let cur = place ?? undefined;
+    for (let guard = 0; cur && guard < 32; guard++) {
+      const r = own(ctx.world.places, cur)?.fields.region;
+      if (typeof r === "string" && own(ctx.state.entities, r)) return r;
+      cur = own(ctx.world.places, cur)?.parent;
+    }
+    return passMemo([ctx.state, ctx.state.entities, ctx.world], "weather.region", () => Object.keys(ctx.state.entities).sort().find((id) => kindIs(ctx.registry, ctx.world, own(ctx.state.entities, id)?.kind ?? "", "region")) ?? null);
+  });
 }
 
 /** The current climate state at a place's region, with its effects; null when there is none. */
 function stateAt(ctx: ReadContext, place: PlaceId | null): ClimateState | null {
-  const region = regionOf(ctx, place);
-  if (!region) return null;
-  const id = strOf(own(ctx.state.entities, region)?.fields.weather);
-  return climateOf(ctx, region).states.find((s) => s.id === id) ?? null;
+  return passMemo([ctx.state, ctx.state.entities, ctx.world], `weather.state\u0000${place ?? "\u0001"}`, () => {
+    const region = regionOf(ctx, place);
+    if (!region) return null;
+    const id = strOf(own(ctx.state.entities, region)?.fields.weather);
+    return climateOf(ctx, region).states.find((s) => s.id === id) ?? null;
+  });
 }
 
 export function buildWeatherView(ctx: ReadContext): WeatherView {

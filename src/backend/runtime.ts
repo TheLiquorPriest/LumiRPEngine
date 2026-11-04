@@ -113,7 +113,7 @@ import { checkQuestion, inferredChip, inferredOutcome } from "./inferred-words";
 import { playerReason, unplayedWords } from "./requirement-words";
 import { buildSections } from "./sections-build";
 import { routineAsks } from "./routine-ask";
-import { CallMeter, dedupeProposals, extract, interpret, NotNeeded, saidPayMethod, Steps, type InterpretContext, type InterpretRead, type ReadAction, type ThingSort } from "./steps";
+import { CallMeter, dedupeProposals, extract, type ExtractRead, interpret, NotNeeded, saidPayMethod, Steps, type InterpretContext, type InterpretRead, type ReadAction, type ThingSort } from "./steps";
 import { renderPrompt } from "./prompts";
 import { EXTRACT_ITEM_TEXT, EXTRACT_ORG_TEXT, ORG_FACT_TYPES } from "../shared/role-prompts";
 import { PlanNotes, type PlanLines } from "./plan-notes";
@@ -131,6 +131,7 @@ import { Diagnostics, type DiagAt } from "./diagnostics";
 import { Orchestrator, type TurnCalls } from "./agents/orchestrator";
 import { Review } from "./agents/review";
 import { LiveFeeds } from "./agents/live";
+import { uncurated } from "./agents/roles/curator";
 import { defaultAgentSettings, KEPT_FOLDS_DEFAULT } from "../shared/agent-settings";
 import type { ExtractInput, InterpretOutcome, ProseAsk } from "./agents/turn-ctx";
 import { outputsOf } from "../engine/outputs";
@@ -1147,14 +1148,14 @@ export class Runtime implements TurnHooks {
         return doc;
       },
       pin: async (revisions) => {
-        for (const rev of revisions) {
-          if (pinned.has(rev) || missing.has(rev)) continue;
-          try {
-            pinned.set(rev, (await this.worlds.get(run.worldId, userId, rev)).world);
-          } catch {
-            // Not one of the world's revisions: a fold that needs it reports the unknown revision.
-            missing.add(rev);
-          }
+        const wanted = [...revisions].filter((rev) => !pinned.has(rev) && !missing.has(rev));
+        if (wanted.length === 0) return;
+        const found = await this.worlds.getMany(run.worldId, userId, wanted);
+        for (const rev of wanted) {
+          const doc = found.get(rev);
+          // Not one of the world's revisions: a fold that needs it reports the unknown revision.
+          if (doc) pinned.set(rev, doc);
+          else missing.add(rev);
         }
       },
       run,
@@ -1789,8 +1790,9 @@ export class Runtime implements TurnHooks {
    * things the state shows it are the user's `shown` (ITEMS-SPEC §5.2). The
    * prepared read's, and Test's for the read role's texts. On an agent chat with the Curator on
    * (`split`), the read's change types leave out the Curator's (`CURATOR_FACTS`: the thing facts, a
-   * purchase, a walk-on, a place made in play), and the Curator's prompt-only read (`"curator"`) is
-   * told those alone (ITEMS-SPEC §6.4, one writer per domain).
+   * purchase, a walk-on, a place made in play), which it holds aside (`held`) for where the Curator's
+   * own work doesn't cover them, and the Curator's prompt-only read (`"curator"`) is told those alone
+   * (ITEMS-SPEC §6.4, one writer per domain).
    */
   extractInput(at: Pick<ReadInput, "world" | "state" | "pre">, input: { run: StepRun; text: string; said: string; vars: Readonly<Record<string, string>>; usual: readonly string[]; skipped: boolean; shown: number; split?: "read" | "curator" }): ExtractInput {
     const { world, state } = at;
@@ -1800,12 +1802,13 @@ export class Runtime implements TurnHooks {
     // The read gives facts: the change types' own (but the item change types, which the thing facts are settled into, ITEMS-SPEC §5.2–5.4), and the thing facts.
     const every: string[] = [...EXTRACTION_TYPES.filter((t) => !(KNOWLEDGE_CHANGES as readonly string[]).includes(t) && !isItemChange(t) && (t === "time_advance" ? !input.skipped : this.registry.proposals.has(t))), ...THING_FACTS];
     const channels = input.split === undefined ? every : every.filter((t) => CURATOR_FACTS.includes(t) === (input.split === "curator"));
+    const held = input.split === "read" ? every.filter((t) => CURATOR_FACTS.includes(t)) : [];
     // The engine's clock as the Scene tells it: when the player's message came, and now, after the minutes the turn's own actions took.
     const applied = clockMinutes(at.pre);
     const ctx = this.registry.context(world, state);
     // The plans' open items, each by its id, while the reply's agenda is read (ORG-SPEC §3.14, assess-party §6.2), so a status names an item that is there.
     const plan = channels.includes("agenda") ? planExtractLines(ctx) : [];
-    return { world: povWorld(this.registry, world, state), prefix: prefixSummary(this.registry, world, state, window), appliedMinutes: applied, clock: { start: sceneClock(ctx, state.clock - applied), now: sceneClock(ctx) }, channels, instructions: input.run.template ? renderTemplate(input.run.template.template, input.vars) : null, usual: input.usual, said: input.said, places, personKinds, plan };
+    return { world: povWorld(this.registry, world, state), prefix: prefixSummary(this.registry, world, state, window), appliedMinutes: applied, clock: { start: sceneClock(ctx, state.clock - applied), now: sceneClock(ctx) }, channels, ...(held.length > 0 ? { held } : {}), instructions: input.run.template ? renderTemplate(input.run.template.template, input.vars) : null, usual: input.usual, said: input.said, places, personKinds, plan };
   }
 
   /**
@@ -2510,17 +2513,17 @@ export class Runtime implements TurnHooks {
     const itemTexts = { facts: renderPrompt(EXTRACT_ITEM_TEXT.facts, settings.prompts.texts, {}), rules: renderPrompt(EXTRACT_ITEM_TEXT.rules, settings.prompts.texts, {}) };
     // The organization facts and their rules (ORG-SPEC §7.3); the plans' open items are each input's own.
     const orgTexts = { facts: renderPrompt(EXTRACT_ORG_TEXT.facts, settings.prompts.texts, {}), rules: renderPrompt(EXTRACT_ORG_TEXT.rules, settings.prompts.texts, {}) };
-    // Classic's own read of `input`'s change types: the read's prompt-only call, and the Curator's (classic's item read, I9).
-    const classicRead = (run: StepRun, input: ExtractInput) => (signal: AbortSignal) => extract(this.steps, text, input.world, input.prefix, input.appliedMinutes, input.channels, run.config, userId, signal, input.instructions ?? undefined, lore(run), run.guidance, input.usual, run.recent, input.said, input.places, input.personKinds, itemTexts, { ...orgTexts, plan: input.plan.length > 0 ? renderPrompt(EXTRACT_ORG_TEXT.plan, settings.prompts.texts, { lines: input.plan.join("\n") }) : "" });
+    // Classic's own read of `input`'s change types: the read's prompt-only call, and the Curator's (classic's item read, I9); a split read holds the Curator's aside (`input.held`).
+    const classicRead = (run: StepRun, input: ExtractInput) => (signal: AbortSignal) => extract(this.steps, text, input.world, input.prefix, input.appliedMinutes, input.channels, run.config, userId, signal, input.instructions ?? undefined, lore(run), run.guidance, input.usual, run.recent, input.said, input.places, input.personKinds, itemTexts, { ...orgTexts, plan: input.plan.length > 0 ? renderPrompt(EXTRACT_ORG_TEXT.plan, settings.prompts.texts, { lines: input.plan.join("\n") }) : "" }, input.held ?? []);
     // The read's call takes its one from the phase's budget. On an agent chat with the Curator on, the
     // Curator reads the reply's other half beside it under that same call, never one more of the
     // phase's: its own budget is its role's and its ops per turn (ITEMS-SPEC §7.2), so a Lean budget
     // still reads the reply's things, and the steps after the read keep their calls as on classic.
     const readCall = extractRun && extractInput && budget.take() ? { run: extractRun, input: extractInput } : null;
-    const extractTask = readCall ? calls.extract({ reply: text, world: live, state: context.state, input: readCall.input, classic: classicRead(readCall.run, readCall.input) }, budget.signal) : Promise.resolve({ proposals: [], where: null });
+    const extractTask = readCall ? calls.extract({ reply: text, world: live, state: context.state, input: readCall.input, classic: classicRead(readCall.run, readCall.input) }, budget.signal) : Promise.resolve<ExtractRead>({ proposals: [], where: null });
     const curatorInput = curated && readCall ? this.extractInput(context, { run: readCall.run, ...asked, split: "curator" }) : null;
-    // It is told what the turn did already, in the GM's words, so it does nothing twice.
-    const curateTask = readCall && curatorInput ? calls.curate({ reply: text, world: live, state: context.state, input: curatorInput, events: authorLines(this.registry, context.world, context.state, context.pre, context.pre.length), classic: classicRead(readCall.run, curatorInput) }, budget.signal) : Promise.resolve({ proposals: [], where: null });
+    // It is told what the turn did already, in the GM's words, so it does nothing twice. None when it failed or never ran.
+    const curateTask = readCall && curatorInput ? calls.curate({ reply: text, world: live, state: context.state, input: curatorInput, events: authorLines(this.registry, context.world, context.state, context.pre, context.pre.length), classic: classicRead(readCall.run, curatorInput) }, budget.signal) : Promise.resolve(null);
     const effectsTasks = (["extract", "choices"] as const).flatMap((purpose) => runsOf(modelUse, context.world, purpose, facts, { output: "effects", guidance })).map((r) => (budget.take() ? calls.effects({ template: r.template?.template ?? "", world: live, vars, currency: context.world.currency, classic: (signal) => promptedEffects(this.steps, r, vars, context.world.currency, userId, signal, lore(r, true)) }, budget.signal) : Promise.resolve([])));
     const npcRun = runsOf(modelUse, context.world, "npc.choose", facts, { guidance })[0];
     const offscreen = npcAsked(ties.offscreen);
@@ -2580,10 +2583,19 @@ export class Runtime implements TurnHooks {
     const typed = buyActions.flatMap((a) => (typeof a.params.price === "number" ? [a.params.price] : []));
     const typedItems = buyActions.flatMap((a) => (typeof a.params.item === "string" ? [a.params.item] : []));
     const unsure = new Set<JsonObject>();
+    // The read's changes of the Curator's types, held aside for it (ITEMS-SPEC §6.4): where the
+    // Curator's own work isn't whole (it failed or never ran, a round limit stopped its agent, or its
+    // prompt-only read stands in for a failed agent), each lands for what it didn't stage or answer;
+    // the rest, and all of them where its work is whole, are its own.
+    const held = extracted.held ?? [];
+    const short = curatedRead === null ? "it failed or never ran" : curatedRead.short === "cut" ? "a round limit stopped its agent" : curatedRead.short === "fallback" ? "its agent failed, and its prompt-only read stands in" : null;
+    const fallback = short === null ? [] : uncurated(this.registry, context.world, context.state, held, { staged: this.orchestrator.stagedBy(key, "curator"), answer: curatedRead?.proposals ?? [] });
+    if (held.length > 0 && short === null) this.host.log("info", `[LumiRPEngine] read ${messageId.slice(0, 8)}: the Curator's work is whole, so none of the ${held.length} change(s) the read held for it lands`, userId);
+    if (held.length > 0 && short !== null) this.host.log("warn", `[LumiRPEngine] read ${messageId.slice(0, 8)}: the Curator's work isn't whole (${short}): ${fallback.length} of the ${held.length} change(s) the read held for it land through the reconciler, the rest being what it staged or answered`, userId);
     // A move to someone's usual place ("usual") goes where their routine has them now, as the POV may
     // know it; one that resolves to none is left out (DESIGN §9.4).
     // The knowledge step's own change types (DESIGN §24.11) come only from it, never from a read.
-    const narrated = [...resolveUsualMoves(ctx, extracted.proposals), ...curatedRead.proposals, ...effects.flat()].filter((p) => !(KNOWLEDGE_CHANGES as readonly string[]).includes(String(p.type)));
+    const narrated = [...resolveUsualMoves(ctx, extracted.proposals), ...(curatedRead?.proposals ?? []), ...fallback, ...effects.flat()].filter((p) => !(KNOWLEDGE_CHANGES as readonly string[]).includes(String(p.type)));
     // Where the reply leaves the POV when no move says so is a guess (a flashback, a phone call, a look
     // across the street read as being there): whatever the location mode it waits for Apply, and its
     // chip is no outcome for the type's learning (DESIGN §9.4). `never` still ignores it.

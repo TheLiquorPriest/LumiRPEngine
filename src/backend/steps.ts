@@ -772,13 +772,28 @@ export function shippedOrgTexts(): ExtractOrgTexts {
  * proposals it didn't read, by why, with the types it gave that it doesn't read now (`dropped`,
  * absent when it read them all), and, from the read role, the things its changes name that the world
  * has no entity for the player character to know (`untracked`, as the read named them), each only a
- * Not tracked note when it lands; which a read role's run reports (`agents/yields.ts`).
+ * Not tracked note when it lands; which a read role's run reports (`agents/yields.ts`). A split read
+ * (an agent chat with the Curator on, ITEMS-SPEC §6.4) holds its changes of the Curator's types aside
+ * (`held`), and the Curator's answer says when its own work isn't whole (`short`).
  */
 export interface ExtractRead {
   proposals: JsonObject[];
   where: string | null;
   dropped?: { why: Counts<ReadDrop>; types: string[] };
   untracked?: string[];
+  /**
+   * A split read's changes of the Curator's types (`ExtractInput.held`: a thing's, a purchase, a
+   * walk-on, a place made in play), held aside rather than dropped: each lands through the reconciler
+   * only where the Curator's own work doesn't cover it (`short`, or no answer of its at all).
+   */
+  held?: JsonObject[];
+  /**
+   * The Curator's answer when its own work isn't whole: `cut`, a limit on its rounds of tool calls
+   * stopped its agent before it answered, and what it staged and noted stands; `fallback`, its agent
+   * failed and this is its prompt-only read. Either way the read's held facts land for what it
+   * doesn't cover. Absent on a whole answer, and on every other read.
+   */
+  short?: "cut" | "fallback";
 }
 
 /** A place the reply puts someone or something in that Places lacks (ITEMS-SPEC §6.2), for a read that has no `location` to say it with. */
@@ -790,7 +805,7 @@ const EXTRACT_WHERE = `Beside "proposals", give "where": the place where the rep
 /** How `extract` may use the usual routines it is given (DESIGN §9.4): to place a move the reply describes, never to make one. */
 const EXTRACT_USUAL = `Usual routines are given below the state, only to tell where a move the reply describes is going: someone who heads out to their usual spot ("his usual lunch place", "off to her regular bar") moves to that place; give its id from their usual routine, or place "usual" when the reply doesn't say which. A usual routine is never a move by itself: no location for someone the reply doesn't describe leaving or arriving.`;
 
-/** `extract`: proposals read from a reply (DESIGN §9.4), and where it leaves the player character (`where`, asked while `location` is a channel). `instructions` (a world text template) lead the prompt; the contract stays; the preset's guidance and the step's lore follow. `usual`: the usual routines of the people with the player character as it may know them, given while `location` is a channel, apart from any fact. `places`: the places it is offered (`placeMenu`); `personKinds`: the kinds a newcomer may be. Empty on failure. */
+/** `extract`: proposals read from a reply (DESIGN §9.4), and where it leaves the player character (`where`, asked while `location` is a channel). `instructions` (a world text template) lead the prompt; the contract stays; the preset's guidance and the step's lore follow. `usual`: the usual routines of the people with the player character as it may know them, given while `location` is a channel, apart from any fact. `places`: the places it is offered (`placeMenu`); `personKinds`: the kinds a newcomer may be; `held`: the change types it holds aside rather than drops (`ExtractRead.held`). Empty on failure. */
 export async function extract(
   steps: Steps,
   narration: string,
@@ -811,6 +826,7 @@ export async function extract(
   personKinds: readonly string[] = [],
   things: ExtractThingTexts = shippedThingTexts(),
   orgs: ExtractOrgTexts = shippedOrgTexts(),
+  held: readonly string[] = [],
 ): Promise<ExtractRead> {
   // The world's regard axes with their ranges (the relationships pack's own, or its world's set).
   const regardAxes = axesOf({ world })
@@ -837,7 +853,7 @@ export async function extract(
   const message = said.trim() !== "" ? `The player's message this reply answers (context only; propose only what the narration states happened):\n${said.trim()}\n` : "";
   const plan = orgs.plan.trim() !== "" ? `${orgs.plan.trim()}\n` : "";
   const raw = await steps.helperJson("extract", asked, `State before: ${JSON.stringify(prefix)}\n${routines ? `Usual routines (where a described move goes; never a move by itself):\n${usual.join("\n")}\n` : ""}${plan}${message}Narration:\n${narration}`, config, userId, signal, { lore, guidance, recent });
-  return extractAnswer(raw, { world, appliedMinutes, channels, moves });
+  return extractAnswer(raw, { world, appliedMinutes, channels, moves, held });
 }
 
 /**
@@ -845,12 +861,15 @@ export async function extract(
  * narrated time only beyond what the turn already applied, money in minor units, duplicates gone;
  * and, while `location` is a channel (`moves`), where the reply leaves the player character. An
  * answer that isn't one reads as no change. What it leaves out of the answer's proposals it counts,
- * by why (`ExtractRead.dropped`).
+ * by why (`ExtractRead.dropped`), but for one of a type it holds aside (`held`: a split read's of
+ * the Curator's types), which it keeps apart (`ExtractRead.held`); cash handed over among them is
+ * money paid, a transfer, which is a channel's of its own when it reads transfers.
  */
-export function extractAnswer(raw: JsonValue | null, o: { world: Pick<WorldDoc, "pov" | "currency">; appliedMinutes: number; channels: readonly string[]; moves: boolean }): ExtractRead {
-  const { world, appliedMinutes, channels, moves } = o;
+export function extractAnswer(raw: JsonValue | null, o: { world: Pick<WorldDoc, "pov" | "currency">; appliedMinutes: number; channels: readonly string[]; moves: boolean; held?: readonly string[] }): ExtractRead {
+  const { world, appliedMinutes, channels, moves, held = [] } = o;
   const list = isRecord(raw) && Array.isArray(raw.proposals) ? raw.proposals : Array.isArray(raw) ? raw : [];
   const proposals: JsonObject[] = [];
+  const aside: JsonObject[] = [];
   const why: Counts<ReadDrop> = {};
   const types = new Set<string>();
   const drop = (kind: ReadDrop): void => {
@@ -862,6 +881,13 @@ export function extractAnswer(raw: JsonValue | null, o: { world: Pick<WorldDoc, 
       continue;
     }
     if (channels.length > 0 && !channels.includes(p.type)) {
+      // A split read's change of the Curator's types is held for it (ITEMS-SPEC §6.4); cash handed
+      // over among them is money paid, a transfer, which is the read's own.
+      if (held.includes(p.type)) {
+        const q = inMinorUnits(JSON.parse(JSON.stringify(p)) as JsonObject, world.currency);
+        (channels.includes(String(q.type)) ? proposals : aside).push(q);
+        continue;
+      }
       drop("type");
       types.add(p.type);
       continue;
@@ -881,7 +907,7 @@ export function extractAnswer(raw: JsonValue | null, o: { world: Pick<WorldDoc, 
   const where = moves && isRecord(raw) && typeof raw.where === "string" && raw.where.trim() !== "" ? raw.where.trim() : null;
   const kept = dedupeProposals(proposals, world.pov);
   if (kept.length < proposals.length) why.same = proposals.length - kept.length;
-  return { proposals: kept, where, ...(Object.keys(why).length > 0 ? { dropped: { why, types: [...types] } } : {}) };
+  return { proposals: kept, where, ...(Object.keys(why).length > 0 ? { dropped: { why, types: [...types] } } : {}), ...(aside.length > 0 ? { held: dedupeProposals(aside, world.pov) } : {}) };
 }
 
 /**

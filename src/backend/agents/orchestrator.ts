@@ -15,7 +15,11 @@
 //   stops the read as its Cancel does (`roleStopped`), which leaves Retry read. A role that fails
 //   lands nothing it staged, whatever its `onFail`. Before the reply a stop ends the run at once: no
 //   later role runs and no gate shows. One whose phase's time ran out failed as classic's call does
-//   then: it answered nothing.
+//   then: it answered nothing. The Curator stopped at a round limit before it answered hasn't
+//   failed: its work is what it staged and noted, which stands, its answer cut short.
+// - On an agent chat with the Curator on, the read holds its changes of the Curator's types aside:
+//   where the Curator's own work isn't whole (its agent cut short, failed, or never run), they land
+//   for what it didn't stage or answer (`roles/curator.ts` `uncurated`, ITEMS-SPEC §6.4).
 // - Every read of a reply on an agent chat is the roles', in a run of its own where the read has
 //   none of its turn's: a Re-narrate's and a Continue's (`beginReply`), a Retry read's and a Re-read
 //   edit's (`beginRead`). No turn mixes classic's steps with the roles.
@@ -103,8 +107,12 @@ export interface TurnCalls {
   skip(task: SkipTask, signal: AbortSignal): Promise<SkipRun | null>;
   prose(task: ProseTask, signal: AbortSignal): Promise<DirectorProse>;
   extract(task: ExtractTask, signal: AbortSignal): Promise<ExtractRead>;
-  /** The Curator after the read, on an agent chat whose pipeline has it on (ITEMS-SPEC §7.1): the reply's things, places, walk-ons and purchases' goods. */
-  curate(task: CurateTask, signal: AbortSignal): Promise<ExtractRead>;
+  /**
+   * The Curator after the read, on an agent chat whose pipeline has it on (ITEMS-SPEC §7.1): the
+   * reply's things, places, walk-ons and purchases' goods; null when it failed or never ran, so
+   * nothing of its lands and the read's held facts land in its place.
+   */
+  curate(task: CurateTask, signal: AbortSignal): Promise<ExtractRead | null>;
   effects(task: EffectsTask, signal: AbortSignal): Promise<JsonObject[]>;
   /** The knowledge step after the read (an agent chat's own call; a classic chat's is inside `memory`, its whole post phase). */
   knowledge(task: KnowledgeTask, signal: AbortSignal): Promise<RunMindsResult>;
@@ -611,6 +619,11 @@ export class Orchestrator {
     };
   }
 
+  /** What `role` staged after the reply that stands, in staging order: what the read's held facts are checked against where the Curator's own work isn't whole (ITEMS-SPEC §6.4); none on a classic turn. */
+  stagedBy(generationId: string, role: RoleId): StagedOp[] {
+    return (this.runs.get(generationId)?.draft.pending() ?? []).filter((o) => o.role === role && o.phase === "post");
+  }
+
   /**
    * The reply's confirm chips on an agent turn: each that Apply and No answer whole joins the turn's
    * review card, its chip kept for the card's Apply and No and hidden from the chips area
@@ -911,7 +924,16 @@ export class Orchestrator {
       skip: (task, signal) => or("skip", "skip", "skip", r.skip.beats, task, signal, null),
       prose: (task, signal) => or<ProseTask, DirectorProse>("prose", "director", "prose", r.director.prose, task, signal, { prose: { brief: null, outline: [] } satisfies PlanProse }),
       extract: (task, signal) => or("extract", "read", "read", r.read.extract, task, signal, { proposals: [], where: null }),
-      curate: (task, signal) => or("curate", "curator", "read", r.curator.curate, task, signal, { proposals: [], where: null }),
+      curate: async (task, signal) => {
+        if (s.main) {
+          const got = await s.main.request("curate", r.curator.curate, task, signal);
+          return "out" in got ? got.out : null;
+        }
+        const out = await this.play(s, "curate", "curator", "read", r.curator.curate, task, signal);
+        if (!out.ok) return null;
+        // Its agent failed and its prompt-only read answered in its place: that read isn't its whole work, so the read's held facts land for what it doesn't cover.
+        return out.via === "prompt_only" && !s.settings.agents.roles.curator.promptOnly ? { ...out.out, short: "fallback" } : out.out;
+      },
       effects: (task, signal) => or("effects", "world", "read", r.world.effects, task, signal, []),
       knowledge: (task, signal) => or("knowledge", "knowledge", "read", r.knowledge, task, signal, NO_MINDS),
       offscreen: (task, signal) => or("offscreen", "director", "read", r.director.offscreen, task, signal, null),
@@ -929,7 +951,7 @@ export class Orchestrator {
    * prompt-only role stops as classic does; and once a role has stopped the turn, no later role runs.
    * A cancelled turn's role throws as classic's call would.
    */
-  private async play<T, O>(s: AgentRun, kind: MainRequestKind, role: RoleId, phase: DiagPhase, run: RoleRun<T, O>, task: T, signal: AbortSignal): Promise<{ ok: true; out: O } | { ok: false }> {
+  private async play<T, O>(s: AgentRun, kind: MainRequestKind, role: RoleId, phase: DiagPhase, run: RoleRun<T, O>, task: T, signal: AbortSignal): Promise<{ ok: true; out: O; via: "agent" | "prompt_only" } | { ok: false }> {
     this.goingOn(s);
     const settings = s.settings.agents.roles[role];
     const watched = settings.onFail === "stop" && s.phase !== "post" ? CLASSIC_PURPOSES[kind] : undefined;
@@ -952,7 +974,7 @@ export class Orchestrator {
     }
     if (result.ok) {
       recordYield(this.rt, s.at, phase, role, runYield(s.settings.prompts.texts, kind, result.out, s.draft.writesOf(agentId)));
-      return { ok: true, out: result.out };
+      return { ok: true, out: result.out, via };
     }
     if (settings.onFail === "stop") this.roleStopped(s.at, phase, role, result.reason);
     else this.rt.host.log("warn", `[LumiRPEngine] turn ${s.generationId.slice(0, 8)}: the ${ROLE_LABEL[role]} role failed (${result.code}: ${result.reason}); the turn goes on without it`, s.userId);

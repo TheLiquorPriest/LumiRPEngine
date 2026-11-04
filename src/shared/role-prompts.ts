@@ -507,13 +507,15 @@ const READ_PROMPTS: readonly PromptDef[] = [
 /** The Curator's rules (ITEMS-SPEC §7.4), one to a line: its instructions' substance. */
 const CURATOR_RULES = [
   "The reply is canon: make the world agree with it in the fewest changes.",
-  "Find before you make (items_find, places_find): never make a second of the same thing.",
+  "Work from what you are given: the Place, Gear and People sections are the scene's things and people as they stand. Name a thing, a person or a place they list as they name it, which your tools read; look up only what they don't show.",
+  "Find before you make: never make a second of the same thing. item_make and place_make look first themselves: one the world has is refused with its id, which you then use.",
+  "Make your changes as soon as you know them, several calls in one answer, and any lookups you need all together before them: each answer that calls tools is one of the few rounds you have.",
   "A handover keeps the owner unless the reply says given, sold, traded or kept: give it the basis the reply says (hold when it says none).",
   "A thing too big to carry (furniture, an appliance) is placed, never held.",
   "Say why in every change, in a few words.",
   "A hidden thing the reply reveals is found, never made again; one it doesn't reveal stays as it is.",
   "Make a place only when the reply puts someone or something there and nothing fits.",
-  "When unsure, change nothing.",
+  "When unsure, change nothing. Once the reply's things are right, stop and answer.",
 ];
 
 const CURATOR_TASK = [
@@ -522,7 +524,7 @@ const CURATOR_TASK = [
   "World: {{world}}. The player character is {{pov}} (id {{pov_id}}).",
   "What this turn did already, as the engine recorded it (never do it again):",
   "{{events}}",
-  "Make each change with your tools, one change a call: the engine checks it, stages it with the turn, or refuses it with why. Look a thing or a place up first (items_find, places_find) and use the id it gives; check a change you are unsure of with dry set first. Someone who walks on (person_add), a purchase (purchase) and a place someone is put in (place_make with entity) are noted, and land with the reply's other changes.",
+  "Make each change with your tools, one change a call: the engine checks it, stages it with the turn, or refuses it with why. The engine's sections below show the scene as it stands: name what they list as they name it, and look a thing or a place up (items_find, places_find) only when they don't show it, every lookup you need in one answer. Then make every change in one answer, several calls at once, checking one with dry set only when you are unsure. Someone who walks on (person_add), a purchase (purchase) and a place someone is put in (place_make with entity) are noted, and land with the reply's other changes. Your rounds of calls are few: make the changes the reply needs most first.",
   "{{message}}",
   "Narration:",
   "{{reply}}",

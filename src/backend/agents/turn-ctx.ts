@@ -254,6 +254,8 @@ export interface ExtractInput {
   clock: { start: string; now: string };
   /** The change types it may propose. */
   channels: string[];
+  /** The change types it holds aside rather than drops (`ExtractRead.held`): a split read's are the Curator's own (ITEMS-SPEC §6.4), which land where the Curator's work doesn't cover them; absent otherwise. */
+  held?: readonly string[];
   /** The world's or the user's own words for the extract step, filled in, which lead it; null for none. */
   instructions: string | null;
   /** The usual routines of the people with the player character, as it may know them. */

@@ -703,13 +703,27 @@ describe("what a run gave the engine", () => {
     expect(rig.rt.ledger.errors).toEqual([]);
   });
 
-  test("with the Curator on, a thing fact is the Curator's: the read's isn't read, and the Curator runs beside it (ITEMS-SPEC §6.4)", async () => {
+  test("with the Curator on, a thing fact is the Curator's: the read holds it for the Curator, which runs beside it, and none of it lands while the Curator's work is whole (ITEMS-SPEC §6.4)", async () => {
     const rig = new Rig({ shipped: true, minds: true });
     const chatId = await rolesChat(rig);
     const asked = agentModels(rig, { read: () => JSON.stringify({ proposals: [{ type: "take", entity: "pov", item: "pov_keys" }], where: null }) });
     await played(rig, chatId, "I pick up my keys.", "You pocket your keys.");
-    expect(ranOf(asked, "read")[0]).toContain("What the engine didn't take: 1 not read (take: not a change type the read takes now).");
+    expect(ranOf(asked, "read")[0]).toContain("What the engine didn't take: 1 held for the Curator (take): each lands only where the Curator's own work doesn't cover it.");
     expect(ranOf(asked, "curator").length).toBeGreaterThan(0);
+    expect(rig.host.logs.some((l) => l.includes("the Curator's work is whole, so none of the 1 change(s) the read held for it lands"))).toBe(true);
+    expect(rig.rt.ledger.errors).toEqual([]);
+  });
+
+  test("with the Curator on and the main agent never running it, the read's changes held for it land in its place", async () => {
+    const rig = new Rig({ shipped: true, minds: true });
+    const chatId = await rolesChat(rig);
+    // At the read's stage the main agent runs the read alone, then commits: the Curator never runs.
+    const asked = agentModels(rig, { read: () => JSON.stringify({ proposals: [{ type: "give", item: "pov_phone", from: "pov", to: DANNY, basis: "hold", why: "Jordan hands Danny his phone" }], where: null }) }, (req, n) => (stageNumber(req) === 7 && resultsOf(req).length === 0 ? { content: "", toolCalls: [call("run_role", { role: "read", task: "Read the reply." }, `c${n}_read`)] } : undefined));
+    await played(rig, chatId, "I hand Danny my phone.", "Danny takes your phone and squints at the cracked corner.");
+    expect(ranOf(asked, "curator")).toEqual([]);
+    const { state } = await stateOf(rig, chatId);
+    expect(state.entities.pov_phone?.relations.find((r) => r.type === "in")?.to).toBe(DANNY);
+    expect(rig.host.logs.some((l) => l.includes("the Curator's work isn't whole (it failed or never ran): 1 of the 1 change(s) the read held for it land"))).toBe(true);
     expect(rig.rt.ledger.errors).toEqual([]);
   });
 

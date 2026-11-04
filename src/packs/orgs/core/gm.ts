@@ -8,7 +8,7 @@ import { ownersIn, ROLE_RIGHTS, type OwnerRole } from "../../../shared/finance";
 import type { EntityId } from "../../../shared/ids";
 import { ORG_POWERS, POWER_WORDS, type OrgGrant, type OrgPower, type OrgType } from "../../../shared/org";
 import type { OrgGmView, OrgMayPowerView } from "../../../shared/org-view";
-import { defaultPowers, heldPositions, HOW_WORDS, orgPower, orgTypeOf } from "../../../engine/org";
+import { defaultPowers, delegationsOf, heldPositions, HOW_WORDS, orgPower, orgTypeOf } from "../../../engine/org";
 import { own } from "../../../engine/pack-kit";
 import type { ReadContext } from "../../../engine/registry";
 import { isGone, kindIs } from "../../../engine/scope";
@@ -88,7 +88,11 @@ export function buildOrgsGm(ctx: ReadContext): OrgGmView[] {
   return ids.flatMap((id) => {
     const page = buildOrgView(ctx, id, null);
     if (!page) return [];
+    // Only someone with a basis here can hold a power here: one of its rows (a member, through a
+    // member group, staff, the party's roster), an owner, or a delegate. Everyone else holds none.
+    const based = new Set([...rowsAt(ctx, id).map((r) => r.who), ...ownersIn(own(ctx.state.entities, id)?.fields ?? {}).map((o) => o.party), ...delegationsOf(ctx, id).map((d) => d.who)]);
     const may = people.flatMap((who) => {
+      if (!based.has(who)) return [];
       const powers: OrgMayPowerView[] = powersAt(ctx, id, who).map(({ power, grant }) => ({ power, basis: grant.basis, chain: chainOf(ctx, id, who, power, grant, 0) }));
       return powers.length > 0 ? [{ who: { id: who, name: nameOf(ctx, who) }, powers }] : [];
     });
