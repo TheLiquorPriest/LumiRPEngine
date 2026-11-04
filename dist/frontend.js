@@ -5000,6 +5000,8 @@ var KNOWLEDGE_TEXTS = Object.freeze({
   stepPresent: "Who could perceive it",
   stepPeople: "What each of them already knows, and has witnessed lately",
   stepFacts: "Facts in play (reuse these by id)",
+  stepMade: "Facts this turn already made (reuse these by id)",
+  stepReuse: "A fact listed above is one fact however it is worded: when what someone learns here is one of them, in its words or in others, have them learn that fact by its id, and never make it again as a new fact. Make a new fact only of what none of them says.",
   stepPerson: "{{name}} (id: {{id}})",
   stepYou: '{{name}} (id: {{id}}; the player character, "you")',
   stepSaid: "{{name}} said or did: {{text}}",
@@ -38301,7 +38303,7 @@ var TEXT_GROUP_NOTE = {
   mind: "The heading and lead over the facts a mind holds.",
   holding: "Each line a mind, the narrator and the knowledge step read for a fact someone holds, and the words for how they came by it.",
   narrator: "How Who knows what names a person's facts, what everyone here holds alike, and what someone doesn't know.",
-  step: "The headings of what the knowledge step is given."
+  step: "The headings of what the knowledge step is given, and what it is told of the facts it lists: each is one fact however it is worded, to be learned by its id rather than made again."
 };
 var TEXT_FIELD = {
   mindTitle: { group: "mind", label: "Heading" },
@@ -38324,6 +38326,8 @@ var TEXT_FIELD = {
   stepPresent: { group: "step", label: "Who could perceive it" },
   stepPeople: { group: "step", label: "What each already knows" },
   stepFacts: { group: "step", label: "Facts in play" },
+  stepMade: { group: "step", label: "Facts this turn already made" },
+  stepReuse: { group: "step", label: "Reusing a listed fact" },
   stepPerson: { group: "step", label: "A person" },
   stepYou: { group: "step", label: "The player character" },
   stepSaid: { group: "step", label: "What the player character said or did" },
@@ -38484,7 +38488,7 @@ function KnowledgeSection(props) {
               onChange: (batch) => set({ batch })
             }, undefined, false, undefined, this),
             /* @__PURE__ */ u3(Note, {
-              children: "One call per scene works out everyone who could perceive the turn at once. One call per character asks about each of them alone: closer reading, a call each."
+              children: "One call per scene works out everyone who could perceive the turn at once. One call per character asks about each of them alone, one after another, each shown the facts the ones before it made: closer reading, a call each."
             }, undefined, false, undefined, this)
           ]
         }, undefined, true, undefined, this),

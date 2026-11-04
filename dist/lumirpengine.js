@@ -221,6 +221,8 @@ var KNOWLEDGE_TEXTS = Object.freeze({
   stepPresent: "Who could perceive it",
   stepPeople: "What each of them already knows, and has witnessed lately",
   stepFacts: "Facts in play (reuse these by id)",
+  stepMade: "Facts this turn already made (reuse these by id)",
+  stepReuse: "A fact listed above is one fact however it is worded: when what someone learns here is one of them, in its words or in others, have them learn that fact by its id, and never make it again as a new fact. Make a new fact only of what none of them says.",
   stepPerson: "{{name}} (id: {{id}})",
   stepYou: '{{name}} (id: {{id}}; the player character, "you")',
   stepSaid: "{{name}} said or did: {{text}}",
@@ -992,7 +994,7 @@ var DEFAULT_PLACE_CAPS = Object.freeze({ turn: 2, chat: 64 });
 // src/cli/version.ts
 var CLI_NAME = "lumirpengine";
 var CLI_VERSION = package_default.version;
-var BUILD = "e7032ba9";
+var BUILD = "4629ecb0";
 function runtimeCannotFollow(bun) {
   if (bun === undefined)
     return null;

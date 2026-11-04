@@ -5019,6 +5019,8 @@ var KNOWLEDGE_TEXTS = Object.freeze({
   stepPresent: "Who could perceive it",
   stepPeople: "What each of them already knows, and has witnessed lately",
   stepFacts: "Facts in play (reuse these by id)",
+  stepMade: "Facts this turn already made (reuse these by id)",
+  stepReuse: "A fact listed above is one fact however it is worded: when what someone learns here is one of them, in its words or in others, have them learn that fact by its id, and never make it again as a new fact. Make a new fact only of what none of them says.",
   stepPerson: "{{name}} (id: {{id}})",
   stepYou: '{{name}} (id: {{id}}; the player character, "you")',
   stepSaid: "{{name}} said or did: {{text}}",
@@ -97438,7 +97440,7 @@ function label2(turn, id2) {
   const name = own(turn.state.entities, id2)?.name ?? id2;
   return fillText(knowledgeText(turn.settings, id2 === turn.world.pov ? "stepYou" : "stepPerson"), { name, id: id2 });
 }
-function knowledgeContext(turn, batch) {
+function knowledgeContext(turn, batch, spent = knowledgeSpent()) {
   const { world, state: state2, settings, presence: presence2 } = turn;
   const text6 = (id2) => knowledgeText(settings, id2);
   const cal = calendarOf(world);
@@ -97472,10 +97474,9 @@ ${lines2.join(`
   for (const [id2, f] of Object.entries(facts))
     if (f.source?.msg && play.recent.has(f.source.msg))
       inPlay2.add(id2);
-  const factLines = [...inPlay2].sort().map((id2) => {
-    const f = own(facts, id2);
-    return `- [${id2}] ${claim2(f, id2)}${f?.truth === "open" ? ` ${text6("stepOpen")}` : f?.truth === "false" ? ` ${text6("stepFalse")}` : ""}`;
-  });
+  const factLine = (id2, f) => `- [${id2}] ${claim2(f, id2)}${f?.truth === "open" ? ` ${text6("stepOpen")}` : f?.truth === "false" ? ` ${text6("stepFalse")}` : ""}`;
+  const factLines = [...inPlay2].sort().map((id2) => factLine(id2, own(facts, id2)));
+  const madeLines = [...spent.facts.values()].filter((f) => !inPlay2.has(f.id)).map((f) => factLine(f.id, f));
   const persons = batch.map((id2) => {
     const holdings = rankedHoldings(slice2, id2, play).map((h) => `- [${h.id}] ${holdingLine(claim2(h.fact, h.id), h.holding, words8)}`);
     const log = readCharacter(state2, id2).witness;
@@ -97487,6 +97488,8 @@ ${lines2.join(`
     happened(reply2),
     present2,
     block2(text6("stepFacts"), factLines),
+    block2(text6("stepMade"), madeLines),
+    factLines.length + madeLines.length > 0 ? text6("stepReuse") : "",
     block2(text6("stepPinned"), turn.pinned),
     block2(text6("stepPeople"), persons.map((p) => {
       const n = taken2.get(p.id) ?? { holdings: 0, witness: 0 };
@@ -99153,13 +99156,19 @@ async function knowledgeCalls(deps, settings, config3, turn, batches, ask) {
   const { reg, world, state: state2 } = turn;
   const { userId, signal: signal2, guidance } = ask;
   const scene2 = settings.minds.knowledge.batch === "scene";
-  const asked2 = batches.map(async (batch) => {
+  const w = new Working(reg, world, state2);
+  const out = { events: [], proposals: [], traces: [], connection: helperCallOf(config3, settings.helper).connectionId ?? null, refused: {}, failed: 0 };
+  const refused2 = (kind, n = 1) => {
+    out.refused[kind] = (out.refused[kind] ?? 0) + n;
+  };
+  const spent = knowledgeSpent();
+  for (const batch of batches) {
     const who = scene2 ? "" : own(state2.entities, batch[0] ?? "")?.name ?? batch[0] ?? "";
     const vars = { ...varsFor(world, state2, world.pov), character: who };
     const prompt = mindPrompt("knowledge", world, settings.minds, vars);
     const usage2 = { tokens: 0 };
     const t0 = performance.now();
-    const context = signal2.aborted ? "" : knowledgeContext(turn, batch);
+    const context = signal2.aborted ? "" : knowledgeContext(turn, batch, spent);
     const raw = signal2.aborted ? null : await askMind(deps.ask, {
       kind: "knowledge",
       who: scene2 ? null : batch[0] ?? null,
@@ -99172,16 +99181,8 @@ async function knowledgeCalls(deps, settings, config3, turn, batches, ask) {
       check: isRecord,
       classic: () => deps.steps.helperJson("knowledge", prompt.text, context, config3, userId, signal2, { guidance, usage: usage2 })
     });
-    return { batch, raw, who, ms: Math.round(performance.now() - t0), tokens: usage2.tokens, prompt: prompt.source };
-  });
-  const w = new Working(reg, world, state2);
-  const out = { events: [], proposals: [], traces: [], connection: helperCallOf(config3, settings.helper).connectionId ?? null, refused: {}, failed: 0 };
-  const refused2 = (kind, n = 1) => {
-    out.refused[kind] = (out.refused[kind] ?? 0) + n;
-  };
-  const spent = knowledgeSpent();
-  for (const call of await Promise.all(asked2)) {
-    const checked = call.raw === null ? null : checkKnowledge({ ...turn, state: w.state }, call.batch, call.raw, spent);
+    const ms = Math.round(performance.now() - t0);
+    const checked = raw === null ? null : checkKnowledge({ ...turn, state: w.state }, batch, raw, spent);
     if (!checked && !signal2.aborted)
       out.failed++;
     for (const why2 of checked?.refused ?? [])
@@ -99197,9 +99198,8 @@ async function knowledgeCalls(deps, settings, config3, turn, batches, ask) {
         out.events.push(event);
     }
     out.proposals.push(...checked?.proposals ?? []);
-    const id2 = call.batch[0] ?? "";
-    if (scene2 || traced(reg, world, state2, id2))
-      out.traces.push({ purpose: "knowledge", phase: ask.phase, who: call.who, level: null, outcome: checked ? "recorded" : "failed", ms: call.ms, tokens: call.tokens, prompt: call.prompt });
+    if (scene2 || traced(reg, world, state2, batch[0] ?? ""))
+      out.traces.push({ purpose: "knowledge", phase: ask.phase, who, level: null, outcome: checked ? "recorded" : "failed", ms, tokens: usage2.tokens, prompt: prompt.source });
   }
   return out;
 }
@@ -100639,9 +100639,9 @@ function thisBuild(moduleUrl = import.meta.url) {
   const dir = moduleUrl.replace(/[^/]*$/, "");
   const path2 = pathOfFileUrl(`${dir}${KIT_FILE}`);
   const core = pathOfFileUrl(`${dir}${CORE_FILE}`);
-  const sha256 = "d7ab46b24493f9570c6d792718e87fb0e2efe6ba523ee42164dbc621c4ab1512";
+  const sha256 = "628b73b097a7bf6a1619526b008841fbdd68a94f9dae1bcccca11b7c0b829f4b";
   const tools = ["3da7f5d8cff11524476d5a33c741833c", "8203ac33d22e6f25dedf1cd219d2441d"].filter((f) => f !== undefined);
-  return { id: "e7032ba9", kit: sha256 !== undefined && path2 !== null && core !== null ? { path: path2, core, sha256, api: KIT_API } : null, tools };
+  return { id: "4629ecb0", kit: sha256 !== undefined && path2 !== null && core !== null ? { path: path2, core, sha256, api: KIT_API } : null, tools };
 }
 var BUILD_FILE = "agents/build.json";
 var USER_FILE = "agents.json";
@@ -114332,7 +114332,7 @@ class Runtime {
   foldOf(userId) {
     let fold = this.folds.get(userId);
     if (!fold) {
-      fold = new LedgerFold(this.registry, { fingerprint: "e7032ba9", keep: () => this.settings.known(userId)?.agents.kept.folds ?? KEPT_FOLDS_DEFAULT });
+      fold = new LedgerFold(this.registry, { fingerprint: "4629ecb0", keep: () => this.settings.known(userId)?.agents.kept.folds ?? KEPT_FOLDS_DEFAULT });
       this.folds.set(userId, fold);
     }
     return fold;
