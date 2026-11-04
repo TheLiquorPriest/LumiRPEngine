@@ -995,7 +995,7 @@ var DEFAULT_PLACE_CAPS = Object.freeze({ turn: 2, chat: 64 });
 // src/cli/version.ts
 var CLI_NAME = "lumirpengine";
 var CLI_VERSION = package_default.version;
-var BUILD = "6229cc37";
+var BUILD = "c94df18b";
 function runtimeCannotFollow(bun) {
   if (bun === undefined)
     return null;
@@ -1197,7 +1197,7 @@ class McpSession {
     this.clock = options.clock ?? REAL_CLOCK;
     this.follower = new KitFollower(options.bundled, { pin: options.mcp.pin, cannotLoad: options.cannotLoad ?? null, identifier: ENGINE_EXTENSION, files: options.files, where: () => this.conn?.base ?? "your Lumiverse" });
     const queue = new Queue;
-    this.context = { readFile: (path) => options.io.readFile(path), readOnly: this.readOnly, connection: () => this.connection(), serialize: (key, work) => queue.run(key, work) };
+    this.context = { readFile: (path) => options.io.readFile(path), readOnly: this.readOnly, connection: () => this.connection(), serialize: (key, work) => queue.run(key, work), sandboxBudgetMs: options.mcp.sandboxBudgetMs };
     this.said = stanceOf(this.checkIn());
   }
   kit() {

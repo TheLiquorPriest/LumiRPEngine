@@ -620,6 +620,27 @@ function useApp() {
 function useView() {
   return useSelect(useApp().sync, (state) => state.view);
 }
+function useChatWorld(send) {
+  const view = useView();
+  const worldId = view?.worldId ?? null;
+  const revision = view?.revision ?? null;
+  const [doc, setDoc] = d2(null);
+  A(() => {
+    if (worldId === null)
+      return;
+    let live = true;
+    send({ type: "lre.world", op: "get", worldId, ...revision ? { revision } : {} }).then((m2) => {
+      if (!live || m2.type !== "lre.result" || m2.request !== "lre.world" || !m2.body.world)
+        return;
+      const world = m2.body.world;
+      setDoc({ ...world, kinds: { ...m2.body.packKinds, ...world.kinds } });
+    });
+    return () => {
+      live = false;
+    };
+  }, [worldId, revision]);
+  return doc;
+}
 function useUi(select) {
   return useSelect(useApp().ui, select);
 }
@@ -5478,7 +5499,7 @@ function impliedBy(power) {
 function powerCovers(held, power) {
   return held === power || impliedBy(power).includes(held);
 }
-var ORG_BASES = ["owner", "position", "delegate", "member"];
+var ORG_BASES = ["owner", "position", "delegate", "member", "control"];
 var POSITION_SCOPES = ["org", "below"];
 function positionIdOf(title) {
   return title.normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
@@ -5545,6 +5566,15 @@ var DUES_EVERY = ["week", "month", "year"];
 var WINDING_FIELD = "winding_up";
 var DISSOLVED_FIELD = "dissolved";
 var MERGED_INTO_FIELD = "merged_into";
+var TRUSTEES_DECIDE = ["each", "together"];
+var TRUST_FIELDS = {
+  settlor: { type: "ref", label: "Settlor (who made it: a person or an organization)" },
+  revocable: { type: "bool", label: "Revocable (its settlor may take it back)" },
+  purpose: { type: "text", label: "What it is for" },
+  until: { type: "date", label: "Until (the day it ends)" },
+  trustees_decide: { type: "enum", label: "Its trustees decide (each on their own unless set, or together)", values: [...TRUSTEES_DECIDE] }
+};
+var DIRECTOR = "director";
 var AUDIENCES = ["owner", "members", "staff", "customers", "public"];
 var ORG_ACTIONS = {
   admit: "org_admit",
@@ -5775,7 +5805,7 @@ var SPEED_ACTIVITIES = ["sleep", "work_shift", "travel", "waiting"];
 var SPEED_DEFAULT = Object.freeze({ mode: "offer", thresholdMinutes: 30 });
 var SPEED_THRESHOLD_MINUTES = [1, 7 * 1440];
 var TIMELAPSE_REACH_MINUTES = 366 * 1440;
-var EXTRACTION_TYPES = ["time_advance", "location", "place_make", "condition", "knows", "purchase", "transfer", "regard", "quantity", "spawn", "life", "routine", "membership", "employment", "agenda", "vote", "approval", ...ITEM_CHANGES, "learn", "reveal"];
+var EXTRACTION_TYPES = ["time_advance", "location", "place_make", "condition", "knows", "purchase", "transfer", "regard", "quantity", "spawn", "life", "routine", "membership", "employment", "agenda", "vote", "approval", "revenue", "project_note", ...ITEM_CHANGES, "learn", "reveal"];
 var EXTRACTION_DEFAULTS = Object.freeze({
   time_advance: "auto",
   location: "auto",
@@ -5801,6 +5831,8 @@ var EXTRACTION_DEFAULTS = Object.freeze({
   item_wear: "auto",
   item_condition: "auto",
   item_lose: "confirm",
+  revenue: "confirm",
+  project_note: "auto",
   learn: "auto",
   reveal: "confirm"
 });
@@ -5897,10 +5929,10 @@ var OFFSTAGE_GROUP_LABEL = {
 var OFFSTAGE_GROUP_HELP = {
   accounts: "Transfers between your accounts, card payments, cards, autopay, cash in and out",
   payments: "Paying someone, gifts, invoices you pay, standing payments, sharing out",
-  credit: "Applying for credit",
+  credit: "Applying for credit, lending money to someone",
   investing: "Trades, options, where dividends go",
   property: "Buying, selling and listing property, leases",
-  business: "Invoices, draws, profits, shares, stakes, consolidated returns",
+  business: "Invoices, draws, profits, shares, stakes, consolidated returns, projects",
   staff: "Hiring, raises, hours, leave, titles, positions, pay schedules",
   members: "Admitting, removing, appointing, delegating, dues, your party",
   structure: "Founding, renaming, restructuring, merging, winding up",
@@ -5929,6 +5961,7 @@ var OFFSTAGE_ACTIONS = Object.freeze({
   flow_delete: "payments",
   org_share_out: "payments",
   apply_credit: "credit",
+  lend_money: "credit",
   trade: "investing",
   exercise_option: "investing",
   route_distributions: "investing",
@@ -5948,6 +5981,11 @@ var OFFSTAGE_ACTIONS = Object.freeze({
   shares_delist: "business",
   shares_classes: "business",
   tax_consolidate: "business",
+  consent_dividend: "business",
+  project_start: "business",
+  project_pause: "business",
+  project_resume: "business",
+  project_drop: "business",
   job_hire: "staff",
   job_end: "staff",
   job_hours: "staff",
@@ -11420,8 +11458,9 @@ function routineShapeProblems(v3) {
 // src/frontend/build/owner-picker.tsx
 var GROUP_KIND2 = "group";
 var COMPANY_KIND = "business";
+var TRUST_KIND = "trust";
 function ownsAsGroup(doc, kind) {
-  return kindIs(doc, kind, GROUP_KIND2) && !kindIs(doc, kind, COMPANY_KIND);
+  return kindIs(doc, kind, GROUP_KIND2) && !kindIs(doc, kind, COMPANY_KIND) && !kindIs(doc, kind, TRUST_KIND);
 }
 var LEVELS = ["entity", "group", "kind", "selector", "none"];
 function ownerLevel(doc, owner) {
@@ -15952,10 +15991,10 @@ var READ_TOOL_TEXTS = [
     family: "orgs",
     tier: "read",
     note: "Reads an organization's page, or one part of it.",
-    text: "One organization's page, whole: its type and level, the player character's place there, who runs it, every one of its people (with their titles, positions, jobs and shares), its positions and delegations, its money, property, ownership and taxes, its dues and its history, every secret marked. Give part for one part only.",
+    text: "One organization's page, whole: its type and level, the player character's place there, who runs it, every one of its people (with their titles, positions, jobs and shares), its positions and delegations, its money, property, ownership and taxes, its production projects, its dues and its history, every secret marked. Give part for one part only.",
     args: [
       { path: "org", text: 'The organization: its id, or its name; the party is "your party".' },
-      { path: "part", text: "Only this part: overview, people, money, property, ownership, taxes, rules (positions, delegations and dues), decisions (how its decisions are made, its motions with each voter's vote, and its requests for approval with who may approve them, each by the id gm_org's vote, end_motion and answer name) or log (its history); leave it out for the whole page." }
+      { path: "part", text: "Only this part: overview, people, money, property, ownership, taxes, projects (its production projects: each step's days, cost, when it's paid, what it waits on and what it unlocks, where each stands and when it's due to be done, and the templates it may start from), rules (positions, delegations and dues), decisions (how its decisions are made, its motions with each voter's vote, and its requests for approval with who may approve them, each by the id gm_org's vote, end_motion and answer name) or log (its history); leave it out for the whole page." }
     ]
   },
   {
@@ -16507,14 +16546,77 @@ var WRITE_TOOL_TEXTS = [
     ]
   },
   {
+    name: "gm_revenue",
+    family: "money",
+    tier: "gm",
+    note: "Proposes a revenue stream earning more or less for a while, on a stream its author opened to the agents.",
+    text: `Propose that a revenue stream earn more or less for a while, as the GM decides it: a factor on each payment (0.25 to 4) or an amount added to or taken from each (at most one payment's own), for 1 to 31 days, and why. Only a stream whose author let the agents adjust it takes one, at most four at once, and what adjustments bring from outside in a month is at most the world's cap on unlisted prices. ${proposes}`,
+    args: [
+      { path: "stream", text: "The stream: its id or name." },
+      { path: "factor", text: "A factor on each payment while it lasts: 0.5 halves it, 2 doubles it; leave it out to give cents." },
+      { path: "cents", text: "Minor units added to each payment while it lasts (negative takes them off), at most one payment's own; leave it out to give a factor." },
+      { path: "days", text: "How many days it lasts, 1 to 31; 7 when left out." },
+      { path: "reason", text: "Why, in a few words for its History line." },
+      { path: "dry", text: dry }
+    ]
+  },
+  {
+    name: "revenue_note",
+    family: "money",
+    tier: "story",
+    note: "Notes what the reply says of a revenue stream earning more or less for a while.",
+    text: `Note what the reply says of a revenue stream earning more or less for a while ("the fair doubled the stall's takings this week"): a factor on each payment (0.25 to 4) or an amount on each (at most one payment's own), for 1 to 31 days, quoting the reply. It lands with the reply's changes under the revenue mode, which asks first. Only a stream its author opened to the agents takes one.`,
+    args: [
+      { path: "stream", text: "The stream: its id or name." },
+      { path: "factor", text: "A factor on each payment while it lasts; leave it out to give cents." },
+      { path: "cents", text: "Minor units on each payment while it lasts (negative takes them off); leave it out to give a factor." },
+      { path: "days", text: "How many days it lasts, 1 to 31; 7 when left out." },
+      { path: "said", text: "The reply's own words that say so, quoted." }
+    ]
+  },
+  {
     name: "gm_org",
     family: "orgs",
     tier: "gm",
     note: "Proposes one change to an organization: its members, positions, delegations, staff, shares, rules or decisions.",
-    text: `Propose one change to an organization (a company, a household, a group, a trust or the party), as the GM makes it: no one's powers are asked, and the change keeps its History line. The change is an object with its do and fields; people, organizations, jobs, accounts and places by id or name, money in minor units (2500 is 25.00), dates as YYYY-MM-DD. found {type: company or group, name, founder, kind?, structure?, capital?, from?, units?}; admit {org, who, title?, position?, why}; remove {org, who, why}; appoint {org, who, position or null, why}; title {org, who, title or null}; position {org, position: {title, id?, powers?, seats?, reports_to?, scope?: org or below, limits?: {payment?, month?}, successor?: next, vacant or someone, default?}}; unposition {org, position}; delegate {org, to, powers, payment?, month?, accounts?, until?, by}; revoke {org, to}; hire {org, who, position?, title?, basis?, rate?, hours?}; fire {job, why}; pay {job, rate or pct}; issue {org, to, units, price (a unit), class?, from?}; buy_back {org, from, units, price (a unit)}; transfer {org, from, to, units or pct, price? (in all; none is a gift)}; list {org, units, price? (a unit; else its books a unit), symbol?} (a C corporation on the market, new units sold to the public; listed already, more units at its market price); delist {org, price? (a unit; else its market price)} (every public unit bought back); trade {org, who, side: buy or sell, units, account?} (its stock on the market; units held on its cap table sell into its float); entry {place, entry: owner, members, staff, customers, public or null, keys?}; dues {org, cents or null, every?: week, month or year}; tier {who, tier: core, companion, hired, ally or null}; restructure {org, structure}; wind_up {org, stage?: all, begin, finish or resume, property?: distribute or sell, to?, why?} (a company's debts paid, the rest paid out by share, and it dissolved); merge {org, into, ratio? (into's units for each of org's), cash? (in all), from?, keep?: true keeps org as into's subsidiary, why?}; rename {org, name}; tax_status {org, status: charity, church or club (a row of the world's exempt table), or null} (exempt from income tax, and from FUTA and SUTA as the status says; not a household or the party); consolidate {org, elect: true or false} (a C corporation's one federal return with the corporations it holds 80% or more of). Decisions, motions and requests by the ids orgs_read's decisions part gives: propose {by, change, party?} puts a decision (change: an issue, buy_back, restructure, list, delist, wind_up or merge, as above) to a vote for by, who hasn't the votes to make it alone (party: an organization holder they decide as), their vote for it; vote {org, motion, who, vote: for, against or abstain}, cast for anyone with a vote on it, carries the motion out once it passes; end_motion {org, motion, how: close (on the votes cast now) or withdraw}; answer {org, request, answer: approve, deny or withdraw, by?, why?} (by: one up the requester's chain of command who may approve it, or the requester withdrawing; left out, the GM's), approving runs the act then as the requester's; decisions {org, vote_by?: shares or members, quorum?, pass? (percent), days?, approval_days? (null puts the default back)}. One that doesn't hold is refused with why. ${proposes} With dry set, it is only checked, and nothing is staged.`,
+    text: `Propose one change to an organization (a company, a household, a group, a trust or the party), as the GM makes it: no one's powers are asked, and the change keeps its History line. The change is an object with its do and fields; people, organizations, jobs, accounts and places by id or name, money in minor units (2500 is 25.00), dates as YYYY-MM-DD. found {type: company or group, name, founder, kind?, structure?, capital?, from?, units?}; admit {org, who, title?, position?, why}; remove {org, who, why}; appoint {org, who, position or null, why}; title {org, who, title or null}; position {org, position: {title, id?, powers?, seats?, reports_to?, scope?: org or below, limits?: {payment?, month?}, successor?: next, vacant or someone, default?}}; unposition {org, position}; delegate {org, to, powers, payment?, month?, accounts?, until?, by}; revoke {org, to}; hire {org, who, position?, title?, basis?, rate?, hours?}; fire {job, why}; pay {job, rate or pct}; issue {org, to, units, price (a unit), class?, from?}; buy_back {org, from, units, price (a unit)}; transfer {org, from, to, units or pct, price? (in all; none is a gift)}; list {org, units, price? (a unit; else its books a unit), symbol?} (a C corporation on the market, new units sold to the public; listed already, more units at its market price); delist {org, price? (a unit; else its market price)} (every public unit bought back); trade {org, who, side: buy or sell, units, account?} (its stock on the market; units held on its cap table sell into its float); entry {place, entry: owner, members, staff, customers, public or null, keys?}; dues {org, cents or null, every?: week, month or year}; tier {who, tier: core, companion, hired, ally or null}; restructure {org, structure}; wind_up {org, stage?: all, begin, finish or resume, property?: distribute or sell, to?, why?} (a company's debts paid, the rest paid out by share, and it dissolved); merge {org, into, ratio? (into's units for each of org's), cash? (in all), from?, keep?: true keeps org as into's subsidiary, why?}; rename {org, name}; tax_status {org, status: charity, church or club (a row of the world's exempt table), or null} (exempt from income tax, and from FUTA and SUTA as the status says; not a household or the party); consolidate {org, elect: true or false} (a C corporation's one federal return with the corporations it holds 80% or more of); project {org, act: start, pause, resume, drop or note, project?, template?, name?, account?, step?, days?, cents?, why?} (a production project, as gm_project makes it). Decisions, motions and requests by the ids orgs_read's decisions part gives: propose {by, change, party?} puts a decision (change: an issue, buy_back, restructure, list, delist, wind_up or merge, as above) to a vote for by, who hasn't the votes to make it alone (party: an organization holder they decide as), their vote for it; vote {org, motion, who, vote: for, against or abstain}, cast for anyone with a vote on it, carries the motion out once it passes; end_motion {org, motion, how: close (on the votes cast now) or withdraw}; answer {org, request, answer: approve, deny or withdraw, by?, why?} (by: one up the requester's chain of command who may approve it, or the requester withdrawing; left out, the GM's), approving runs the act then as the requester's; decisions {org, vote_by?: shares or members, quorum?, pass? (percent), days?, approval_days? (null puts the default back)}. One that doesn't hold is refused with why. ${proposes} With dry set, it is only checked, and nothing is staged.`,
     args: [
       { path: "change", text: 'The change, written as a JSON object: {"do": "appoint", "org": "Alder Automotive", "who": "Danny Okafor", "position": "shop_foreman", "why": "Marcus made him foreman"}.' },
       { path: "dry", text: dry }
+    ]
+  },
+  {
+    name: "gm_project",
+    family: "orgs",
+    tier: "gm",
+    note: "Proposes one change to a production project: one started from a template, paused, resumed or dropped, or a step set back.",
+    text: `Propose one change to a production project (a well, a foundry, a building, a farm season), as the GM makes it: no one's powers are asked, and it keeps its History line. act start begins one for org from one of the world's templates (orgs_read's projects part lists them), named name, paying from account, or sets a planned project going; pause stops its steps' clocks where they are; resume sets them going again; drop ends it unfinished (what it paid stays paid, what it made stays); note sets a step back by days or adds cents (minor units, 2500 is 25.00) to what it costs, for why. The engine starts and finishes each step on its day: no change marks a step done. ${proposes} With dry set, it is only checked, and nothing is staged.`,
+    args: [
+      { path: "act", text: "start, pause, resume, drop or note." },
+      { path: "org", text: "start: the organization that runs it and pays for it, by id or name." },
+      { path: "template", text: "start: the template's id (oil_well, water_well, foundry, building, farm_season, or one of the world's own)." },
+      { path: "project", text: "The project, by id or name; for start, a planned project to set going instead of a template." },
+      { path: "name", text: "start: its name; the template's when left out." },
+      { path: "account", text: "start: the account it pays from, by id or name; its operating account when left out." },
+      { path: "step", text: "note: the step, by id or name; the one under way when left out." },
+      { path: "days", text: "note: whole days it is set back." },
+      { path: "cents", text: "note: what it costs on top, in minor units (2500 is 25.00)." },
+      { path: "why", text: "Why, in a few words (a note needs it)." },
+      { path: "dry", text: dry }
+    ]
+  },
+  {
+    name: "project_note",
+    family: "orgs",
+    tier: "story",
+    note: "Notes a production project's step set back or costing more, as the reply tells it.",
+    text: "Note that the reply sets a production project's step back or makes it cost more (a breakdown, the weather, a part that had to be replaced): it lands with the reply's other changes under the project setbacks mode, with its receipt and Undo. At most 30 days, and what it costs on top at most the world's cap on unlisted prices. Never note a step done, started or dropped: the engine finishes each step on its day, and the player decides the rest.",
+    args: [
+      { path: "project", text: "The project, by id or name (orgs_read's projects part lists them)." },
+      { path: "step", text: "The step, by id or name; the one under way when left out." },
+      { path: "days", text: "Whole days it is set back, 1 to 30." },
+      { path: "amount", text: "What it costs on top, as a plain amount in the world's money (8000 for $8,000), when the reply says." },
+      { path: "why", text: "Why, in the reply's words." }
     ]
   },
   {
@@ -16939,9 +17041,107 @@ var CURATOR_TOOL_TURNS = 6;
 function defaultRoleSettings() {
   const out = {};
   for (const id of ROLE_IDS)
-    out[id] = { connectionId: null, model: null, effort: "inherit", families: [...FAMILIES[id]], tier: "story", promptOnly: false, onFail: id === "intent" ? "stop" : "prompt_only", budget: id === "curator" ? { toolTurns: CURATOR_TOOL_TURNS } : {} };
+    out[id] = { connectionId: null, model: null, effort: "inherit", families: [...FAMILIES[id]], tier: "story", promptOnly: false, onFail: id === "intent" ? "stop" : "prompt_only", run: "smart", budget: id === "curator" ? { toolTurns: CURATOR_TOOL_TURNS } : {} };
   return out;
 }
+
+// src/shared/role-routes.ts
+var ROLE_TASK_ROUTES = {
+  intent: [
+    { task: "interpret", steps: ["interpret"], stage: "intent" },
+    { task: "judge", steps: ["judge"], stage: "prepare" },
+    { task: "puzzle", steps: ["puzzle.answer"], stage: "prepare" }
+  ],
+  scene: [{ task: "scene", steps: [], stage: "prepare" }],
+  minds: [{ task: "mind", steps: ["mind"], stage: "prepare" }],
+  knowledge: [{ task: "knowledge", steps: ["knowledge"], stage: "read" }],
+  director: [
+    { task: "decisions", steps: ["npc.choose"], stage: "prepare" },
+    { task: "prose", steps: ["brief", "outline"], stage: "beats" },
+    { task: "choices", steps: ["choices"], stage: "read" }
+  ],
+  read: [{ task: "extract", steps: ["extract"], stage: "read" }],
+  curator: [{ task: "curate", steps: ["extract"], stage: "read" }],
+  memory: [
+    { task: "memory", steps: ["memory"], stage: "memory" },
+    { task: "consolidate", steps: ["consolidate"], stage: "memory" }
+  ],
+  skip: [
+    { task: "beats", steps: ["skip"], stage: "prepare" },
+    { task: "plan", steps: ["skip"], stage: "prepare" }
+  ],
+  world: [{ task: "effects", steps: ["extract"], stage: "read" }]
+};
+function taskStep(settings, task) {
+  return task.steps.find((s3) => stepConfigOf(settings.modelUse.steps, s3).enabled) ?? task.steps[0] ?? null;
+}
+function taskRoute(settings, role, own, task) {
+  const step = taskStep(settings, task);
+  if (own.connectionId !== null)
+    return { role, task: task.task, step, connectionId: own.connectionId, model: own.model, from: "role" };
+  const config = step ? stepConfigOf(settings.modelUse.steps, step) : null;
+  const call = helperCallOf(config, settings.helper);
+  const stepOwn = config?.route?.connectionId ?? null;
+  return { role, task: task.task, step, connectionId: call.connectionId, model: own.model ?? call.model, from: stepOwn !== null ? "step" : call.connectionId !== null ? "helper" : "default" };
+}
+function roleRoutes(settings, role, own) {
+  return ROLE_TASK_ROUTES[role].map((task) => taskRoute(settings, role, own, task));
+}
+function stepUsers(settings, roles, step) {
+  return ROLE_IDS.flatMap((role) => roleRoutes(settings, role, roles[role]).filter((r3) => r3.from !== "role" && (step === null ? r3.from === "helper" || r3.from === "default" : r3.step === step)));
+}
+
+// src/shared/agent-pipeline.ts
+var STAGE_MODES = ["main", "auto"];
+var MAIN_STAGES = ["intent", "prepare", "beats", "read", "memory"];
+function defaultStages() {
+  return { intent: "main", prepare: "main", beats: "main", read: "main", memory: "main" };
+}
+function stageOf(stage) {
+  return stage === "memory_before" ? "memory" : stage;
+}
+var STAGE_WORDS = {
+  intent: { number: 1, label: "Stage 1: the intent", holds: "What the player's message plays" },
+  prepare: { number: 3, label: "Stage 3: scene, minds and decisions", holds: "The scene's lore and notes, the minds of the people present, the director's decisions, the judge, a timelapse's skip" },
+  beats: { number: 5, label: "Stage 5: the beats", holds: "The director's brief and outline for the planned turn" },
+  read: { number: 7, label: "Stage 7: the read", holds: "The read of the reply, the Curator, the knowledge, a world step, the suggested choices" },
+  memory: { number: 8, label: "Stage 8: the memory", holds: "The minds' memory of the reply, and the memory the last turn left to this one" }
+};
+var STAGE_MODE_LABELS = { main: "The main agent decides", auto: "Runs on its own" };
+function roleStages(role) {
+  const own = new Set(ROLE_TASK_ROUTES[role].map((t3) => stageOf(t3.stage)));
+  return MAIN_STAGES.filter((s3) => own.has(s3));
+}
+function stageRoles(stage) {
+  return ROLE_IDS.filter((role) => roleStages(role).includes(stage));
+}
+var ROLE_RUNS = ["smart", "always", "off"];
+var PIPELINE_ROLES = {
+  intent: { keep: false, off: false },
+  scene: { keep: true, off: true },
+  minds: { keep: true, off: true },
+  knowledge: { keep: false, off: false },
+  director: { keep: false, off: true },
+  read: { keep: false, off: false },
+  curator: { keep: false, off: false },
+  memory: { keep: false, off: false },
+  skip: { keep: false, off: false },
+  world: { keep: false, off: false }
+};
+var NEVER_SKIPPED = ROLE_IDS.filter((r3) => !PIPELINE_ROLES[r3].keep && !PIPELINE_ROLES[r3].off);
+function roleRuns(role) {
+  const map = PIPELINE_ROLES[role];
+  return ROLE_RUNS.filter((r3) => r3 === "smart" || r3 === "always" && map.keep || r3 === "off" && map.off);
+}
+var ROLE_RUN_LABELS = { smart: "When the turn asks", always: "Every time, never kept", off: "Off" };
+function roleRunHelp(role, run) {
+  if (run === "off")
+    return `Never: the turn goes on without ${ROLE_LABEL[role]}, as when it fails and is skipped.`;
+  if (run === "always")
+    return "Whenever the turn asks, even while Smart persistence would keep its last answer.";
+  return PIPELINE_ROLES[role].keep ? "Whenever the turn asks; while Smart persistence is on and the scene is unchanged, its last answer is kept instead of asked again." : "Whenever the turn asks.";
+}
+var PLAN_STATUS_WORDS = { runs: "Runs", kept: "Kept", off: "Off", auto: "Auto", none: "None" };
 
 // src/shared/sections.ts
 var LINES_MARKER = "{{lines}}";
@@ -17032,6 +17232,7 @@ var PIPELINE_MODES = ["fixed", "main"];
 var MEMORY_PLACEMENTS = ["after_reply", "before_next"];
 var REVIEW_PLACEMENTS = ["chips", "gate"];
 var FINAL_REVIEW_ON_FAIL = ["send", "stop"];
+var FINAL_REVIEW_SCOPES = ["all", "changed"];
 var KEPT_FOLDS_DEFAULT = 65536;
 var DEFAULT_ACCEPTANCE = Object.freeze({ only: true, tokensIn: 300000, tokensOut: 30000 });
 function defaultAgentSettings() {
@@ -17048,9 +17249,10 @@ function defaultAgentSettings() {
     assistant: { connectionId: null, model: null, effort: "inherit", apply: "ask", historyTokens: 20000, budget: {} },
     pipeline: { mode: "fixed", memory: "after_reply", curator: true },
     roles: defaultRoleSettings(),
-    main: { connectionId: null, model: null, effort: "inherit", families: ["workspace"], budget: {}, digestTokens: 2000, pinsTokens: 2000 },
+    main: { connectionId: null, model: null, effort: "inherit", families: ["workspace"], budget: {}, digestTokens: 2000, pinsTokens: 2000, stages: defaultStages() },
     context: defaultContextSettings(),
-    finalReview: { on: true, onFail: "send", budget: {} },
+    finalReview: { on: true, onFail: "send", scope: "all", budget: {} },
+    persist: { on: false, turns: 3, minutes: 30 },
     gmOpsPerTurn: 10,
     curatorOps: 24,
     kept: { runs: 64, gates: 256, watchers: 256, live: 16, texts: 4000000, folds: KEPT_FOLDS_DEFAULT },
@@ -17121,6 +17323,12 @@ var PIPELINE_MODE_LABELS = { fixed: "A fixed pipeline", main: "A main agent deci
 var MEMORY_PLACEMENT_LABELS = { after_reply: "After the reply", before_next: "Before the next turn" };
 var REVIEW_PLACEMENT_LABELS = { chips: "On the review card after the reply", gate: "On the review card before the reply" };
 var FINAL_REVIEW_ON_FAIL_LABELS = { send: "Send the prompt unrevised", stop: "Stop the turn" };
+var FINAL_REVIEW_SCOPE_LABELS = { all: "Every part", changed: "Only what changed" };
+var PERSIST_DEFS = {
+  turns: { label: "Turns kept in a row", limits: "How many turns in a row a quiet scene's minds and scene notes may be kept before they are asked afresh.", fires: "The next turn asks them again, and the count starts over.", unit: "count", min: 1, none: null },
+  minutes: { label: "World minutes kept", limits: "How much of the world's time may pass in a quiet scene since its minds and scene notes were last asked afresh.", fires: "The next turn asks them again.", unit: "count", min: 1, none: null }
+};
+var AT_ONCE_DEF = { label: "Calls at once", limits: "How many of an agent turn's calls may be under way on this connection at once: every agent's and every prompt-only role's, through one gate.", fires: "A call past it waits until one under way ends; nothing is refused.", unit: "count", min: 1, none: null };
 var FAMILIES2 = Object.keys(TOOL_FAMILY_LABEL);
 var THROTTLE_MIN = 1;
 var CEILING_MIN = 0;
@@ -31355,7 +31563,10 @@ var MAIN_TEXT = {
   summarized: "main.summarized",
   summarizeNothing: "main.summarize.nothing",
   summarizeAgain: "main.summarize.again",
-  summarizeFailed: "main.summarize.failed"
+  summarizeFailed: "main.summarize.failed",
+  autoRan: "main.auto.ran",
+  autoLine: "main.auto.line",
+  autoFailed: "main.auto.failed"
 };
 var page = MAIN_AGENT_PAGE.id;
 var INSTRUCTIONS = "Instructions";
@@ -31456,6 +31667,10 @@ Run the roles you want with run_role, revise a run with revise if its answer nee
 {{reply}}`, vars: [v3("reply", "the reply as written", true)] },
   { id: MAIN_TEXT.engineRemember, page, group: STAGES, label: "What the minds remember", note: "Leads the message of the memory the last turn left to this one: the reply they remember.", text: `The last reply, which the minds remember now:
 {{reply}}`, vars: [v3("reply", "the last reply as written", true)] },
+  { id: MAIN_TEXT.autoRan, page, group: STAGES, label: "What ran on its own", note: "Leads the main agent's next message after a stage that runs on its own (Settings → Agents → Main agent → Stages): the roles the engine ran there without asking it, as the fixed pipeline runs them, and what each answered.", text: `Since your last message, these ran on their own, as the fixed pipeline runs them:
+{{ran}}`, vars: [v3("ran", "each run, one line each", true)] },
+  { id: MAIN_TEXT.autoLine, page, group: STAGES, label: "A run on its own", note: "One line of What ran on its own per run: its role, what the engine asked of it, and its answer whole.", text: "- {{role}} ({{what}}): {{answer}}", vars: [v3("role", "the role's id", true), v3("what", "what the engine asked, in the request's words"), v3("answer", "its answer whole, or why it failed", true)] },
+  { id: MAIN_TEXT.autoFailed, page, group: STAGES, label: "A run on its own failed", note: "Fills {{answer}} in A run on its own when the role answered nothing it could take: the turn went on without it, or its settings stopped the turn.", text: "it gave nothing the engine could take, so the turn went on without it", vars: [] },
   { id: MAIN_TEXT.open, page, group: REQUESTS, label: "A request", note: "One line of a stage's message per request: the role, as run_role takes it, and what the engine asks of it.", text: "- {{role}}: {{what}}", vars: [v3("role", "the role's id", true), v3("what", "what the engine asks, in the words below")] },
   { id: MAIN_TEXT.openEach, page, group: REQUESTS, label: "Its people, one call each", note: "Follows the line of a request whose calls are each about one person (the knowledge step, one call per character), naming them: each call answers for its person alone, so a task should say what concerns each.", text: "One call per person, each answered for that person alone: {{people}}", vars: [v3("people", "each person's name and id", true)] },
   { id: MAIN_TEXT.openScene, page, group: REQUESTS, label: "Its people, one call", note: "Follows the line of a request whose one call is about everyone there (the knowledge step, one call for the scene), naming them.", text: "One call for everyone there: {{people}}", vars: [v3("people", "each person's name and id", true)] },
@@ -32618,6 +32833,7 @@ var MARK_PROMPTS = [
     nonEmpty: true
   }
 ];
+var UNCHANGED_TEXT_ID = "narrator.unchanged";
 var FINAL_OUTPUT_PROMPTS = [
   { id: "narrator.source", page: FINAL_OUTPUT_PAGE.id, group: NARRATOR_GROUP, label: "Where the rules come from", note: "Opens the narrator rules: that LumiRPEngine sends them, and how its sections are marked.", text: NARRATOR_SOURCE, vars: [] },
   { id: "narrator.authority", page: FINAL_OUTPUT_PAGE.id, group: NARRATOR_GROUP, label: "Order of authority", note: "The narrator's top rule: whose word comes first. Every rule after it works under it.", text: NARRATOR_AUTHORITY, vars: [] },
@@ -32627,7 +32843,8 @@ var FINAL_OUTPUT_PROMPTS = [
   ...MARK_PROMPTS,
   ...SECTION_PROMPTS,
   ...OFFSTAGE_PROMPTS,
-  ...ELAPSED_PROMPTS
+  ...ELAPSED_PROMPTS,
+  { id: UNCHANGED_TEXT_ID, page: FINAL_OUTPUT_PAGE.id, group: SECTIONS_GROUP, label: "Kept unchanged", note: "Ends a Minds line, and the Scene's notes, that Smart persistence kept from the last turn (Settings → Agents → Pipeline): its roles weren't asked again, because the scene is unchanged.", text: "Unchanged since the last turn.", vars: [] }
 ];
 var GM_TEXT = {
   system: "gm.system",
@@ -33123,9 +33340,10 @@ var ACCOUNT_CLASSES = [
   "loan",
   "mortgage",
   "brokerage",
-  "retirement"
+  "retirement",
+  "note"
 ];
-var traits = (label, t3) => ({ label, cash: false, asset: false, liability: false, pays: false, depositRank: null, transactional: false, revolving: false, installment: false, investment: false, earns: false, locked: false, ...t3 });
+var traits = (label, t3) => ({ label, cash: false, asset: false, liability: false, pays: false, depositRank: null, transactional: false, revolving: false, installment: false, investment: false, earns: false, locked: false, receivable: false, ...t3 });
 var CLASS_TRAITS = Object.freeze({
   cash: traits("Cash", { cash: true, asset: true, pays: true, depositRank: 1 }),
   checking: traits("Checking", { asset: true, pays: true, depositRank: 0, transactional: true, earns: true }),
@@ -33141,7 +33359,8 @@ var CLASS_TRAITS = Object.freeze({
   loan: traits("Loan", { liability: true, installment: true }),
   mortgage: traits("Mortgage", { liability: true, installment: true }),
   brokerage: traits("Brokerage", { asset: true, depositRank: 5, investment: true }),
-  retirement: traits("Retirement", { asset: true, investment: true, locked: true })
+  retirement: traits("Retirement", { asset: true, investment: true, locked: true }),
+  note: traits("Loan made", { asset: true, receivable: true, locked: true })
 });
 function isAccountClass(v6) {
   return typeof v6 === "string" && ACCOUNT_CLASSES.includes(v6);
@@ -33172,6 +33391,17 @@ var ROLE_RIGHTS = Object.freeze({
 function isOwnerRole(v6) {
   return typeof v6 === "string" && OWNER_ROLES.includes(v6);
 }
+function worthShares(owners) {
+  const out = {};
+  const holders = owners.filter((o4) => ROLE_RIGHTS[o4.role].worth);
+  const given = holders.filter((o4) => typeof o4.share === "number" && Number.isFinite(o4.share) && o4.share > 0);
+  const total = given.reduce((a3, o4) => a3 + (o4.share ?? 0), 0);
+  for (const o4 of owners)
+    out[o4.party] = out[o4.party] ?? 0;
+  for (const o4 of holders)
+    out[o4.party] = (out[o4.party] ?? 0) + (given.length === 0 ? 100 / holders.length : given.includes(o4) ? (o4.share ?? 0) * 100 / total : 0);
+  return out;
+}
 function ownersIn(fields) {
   const list2 = fields.owners;
   if (Array.isArray(list2)) {
@@ -33190,6 +33420,22 @@ function ownersIn(fields) {
     return out;
   }
   return typeof fields.owner === "string" && fields.owner !== "" ? [{ party: fields.owner, role: "owner" }] : [];
+}
+function listingIn(fields) {
+  const l3 = fields.listing;
+  if (typeof l3 !== "object" || l3 === null || Array.isArray(l3))
+    return null;
+  const { asset, float } = l3;
+  if (typeof asset !== "string" || asset === "" || typeof float !== "number" || !Number.isSafeInteger(float) || float < 0)
+    return null;
+  return {
+    asset,
+    symbol: typeof l3.symbol === "string" && l3.symbol !== "" ? l3.symbol : asset,
+    float,
+    since: typeof l3.since === "number" && Number.isFinite(l3.since) ? l3.since : 0,
+    price: typeof l3.price === "number" && Number.isFinite(l3.price) && l3.price > 0 ? l3.price : 0,
+    ...typeof l3.class === "string" && l3.class !== "" ? { class: l3.class } : {}
+  };
 }
 var OVERDRAFT_POLICIES = ["decline", "fee", "linked"];
 var ACCOUNT_STATUSES = ["open", "frozen", "collections", "charged_off", "closed", "paid_off", "matured"];
@@ -33289,11 +33535,53 @@ var FINANCE_EVENTS = {
   spend: "economy.spend",
   open: "economy.open",
   status: "economy.status",
-  accrue: "economy.accrue"
+  accrue: "economy.accrue",
+  depreciate: "economy.depreciate"
 };
-var STRUCTURE_LABELS = Object.freeze({ sole_proprietorship: "Sole proprietorship", partnership: "Partnership", llc: "LLC", s_corp: "S corporation", c_corp: "C corporation" });
-var STRUCTURE_WORDS = Object.freeze({ sole_proprietorship: "a sole proprietorship", partnership: "a partnership", llc: "an LLC", s_corp: "an S corporation", c_corp: "a C corporation" });
+var STRUCTURE_LABELS = Object.freeze({ sole_proprietorship: "Sole proprietorship", partnership: "Partnership", llc: "LLC", s_corp: "S corporation", c_corp: "C corporation", nonprofit: "Nonprofit" });
+var STRUCTURE_WORDS = Object.freeze({ sole_proprietorship: "a sole proprietorship", partnership: "a partnership", llc: "an LLC", s_corp: "an S corporation", c_corp: "a C corporation", nonprofit: "a nonprofit" });
 var COMMON_CLASS = Object.freeze({ id: "common", label: "Common", votes: 1 });
+var DEPRECIATION_METHODS = ["none", "straight_line"];
+var DEPRECIATION_LABELS = Object.freeze({ none: "None: costs are expensed", straight_line: "Straight-line, with cost depletion" });
+var sc = (label, inClass, outClass, cash, inLabel) => ({ label, in: inClass, out: outClass, cash, ...inLabel !== undefined ? { inLabel } : {} });
+var STATEMENT_CATEGORIES = Object.freeze({
+  sales: sc("Sales", "revenue", "revenue", "operating"),
+  invoice: sc("Invoices", "revenue", "opex", "operating"),
+  royalties: sc("Royalties", "revenue", "revenue", "operating"),
+  fee_income: sc("Fees earned", "revenue", "revenue", "operating"),
+  other_income: sc("Other income", "revenue", "revenue", "operating"),
+  rent: sc("Rent", "revenue", "opex", "operating"),
+  income: sc("Income", "revenue", "opex", "operating"),
+  allowance: sc("Allowance", "revenue", "opex", "operating"),
+  dues: sc("Dues", "revenue", "opex", "operating"),
+  rewards: sc("Rewards", "revenue", "none", "operating"),
+  donations: sc("Gifts and grants", "revenue", "opex", "operating"),
+  cogs: sc("Cost of goods", "cogs", "cogs", "operating"),
+  royalty_deductions: sc("Royalty deductions", "cogs", "cogs", "operating"),
+  payroll: sc("Payroll", "revenue", "opex", "operating", "Pay"),
+  project: sc("Project costs", "opex", "opex", "operating"),
+  severance_tax: sc("Severance tax", "opex", "opex", "operating"),
+  property_tax: sc("Property tax", "opex", "opex", "operating"),
+  excise_tax: sc("Excise tax", "opex", "opex", "operating"),
+  interest: sc("Interest", "investment", "interest", "operating"),
+  dividends: sc("Dividends", "investment", "opex", "operating"),
+  business_tax: sc("Income tax", "income_tax", "income_tax", "operating"),
+  taxes: sc("Income tax", "income_tax", "income_tax", "operating"),
+  sales_tax: sc("Sales tax", "none", "none", "operating"),
+  draw: sc("Owner's draws", "revenue", "none", "owners"),
+  distribution: sc("Distributions", "revenue", "none", "owners"),
+  share_out: sc("Shared out", "revenue", "none", "owners"),
+  investment: sc("Investments", "none", "none", "investing"),
+  property: sc("Property", "none", "none", "investing"),
+  capex: sc("Built assets", "none", "none", "investing"),
+  lending: sc("Loans made", "none", "none", "investing"),
+  loan: sc("Borrowing", "none", "none", "financing"),
+  cash_advance: sc("Cash advances", "none", "none", "financing"),
+  transfer: sc("Transfers", "none", "none", "transfer"),
+  opening: sc("Opening balances", "none", "none", "opening"),
+  correction: sc("Corrections", "none", "none", "correction")
+});
+var STATEMENT_PERIODS = ["month", "last_month", "ytd", "twelve_months"];
 var FINANCE_ACTIONS = {
   buy: "buy",
   pay: "pay",
@@ -33335,7 +33623,264 @@ var FINANCE_ACTIONS = {
   donate: "donate",
   consolidate: "tax_consolidate",
   sharesList: "shares_list",
-  sharesDelist: "shares_delist"
+  sharesDelist: "shares_delist",
+  lend: "lend_money"
+};
+
+// src/shared/revenue.ts
+var REVENUE_TYPES = ["product", "catalog", "royalty", "fees", "custom"];
+var CATALOG_MAX = 50;
+var REVENUE_CATEGORIES = {
+  sales: "sales",
+  royalties: "royalties",
+  severance: "severance_tax",
+  deductions: "royalty_deductions",
+  fees: "fee_income",
+  other: "other_income"
+};
+var REVENUE_PROVIDER = "revenue";
+function finite(v6) {
+  return typeof v6 === "number" && Number.isFinite(v6) ? v6 : undefined;
+}
+function driverOf(v6) {
+  if (typeof v6 === "number" && Number.isFinite(v6))
+    return v6;
+  if (typeof v6 === "string" && v6.trim() !== "")
+    return v6.trim();
+  return;
+}
+function numbers(v6, length) {
+  if (!Array.isArray(v6) || v6.length === 0)
+    return;
+  const out = v6.map((x2) => typeof x2 === "number" && Number.isFinite(x2) ? x2 : 1);
+  return length === undefined ? out : out.length >= length ? out.slice(0, length) : [...out, ...Array.from({ length: length - out.length }, () => 1)];
+}
+function textOf(v6) {
+  return typeof v6 === "string" && v6.trim() !== "" ? v6.trim() : undefined;
+}
+function oneRecord(v6) {
+  if (isRecord(v6))
+    return v6;
+  if (Array.isArray(v6)) {
+    const first = v6.find((x2) => isRecord(x2));
+    return first ? first : null;
+  }
+  return null;
+}
+function productionOf(v6) {
+  if (typeof v6 === "number" && Number.isFinite(v6))
+    return Math.max(0, v6);
+  if (Array.isArray(v6))
+    return numbers(v6)?.map((x2) => Math.max(0, x2));
+  if (isRecord(v6)) {
+    const o4 = v6;
+    const qi = finite(o4.qi);
+    if (qi === undefined)
+      return;
+    const b3 = finite(o4.b);
+    return { qi: Math.max(0, qi), di_pct: Math.max(0, finite(o4.di_pct) ?? 0), ...b3 !== undefined ? { b: Math.min(2, Math.max(0, b3)) } : {} };
+  }
+  return;
+}
+function priceOf(v6, type) {
+  if (type === "royalty") {
+    if (typeof v6 === "number" && Number.isFinite(v6))
+      return v6;
+    if (Array.isArray(v6))
+      return numbers(v6);
+    if (isRecord(v6) && typeof v6.asset === "string" && v6.asset !== "")
+      return { asset: v6.asset };
+    return;
+  }
+  return driverOf(v6);
+}
+function itemOf(v6, i3) {
+  if (!isRecord(v6))
+    return null;
+  const o4 = v6;
+  const name = textOf(o4.name) ?? textOf(o4.id) ?? `Item ${i3 + 1}`;
+  const price = driverOf(o4.price);
+  if (price === undefined)
+    return null;
+  const season = numbers(o4.season, 12);
+  const margin = finite(o4.margin_pct);
+  const category = textOf(o4.category);
+  return { id: textOf(o4.id) ?? `item_${i3 + 1}`, name, price, units: driverOf(o4.units) ?? 1, ...season ? { season } : {}, ...margin !== undefined ? { margin_pct: Math.min(100, Math.max(0, margin)) } : {}, ...category ? { category } : {} };
+}
+function revenueOf(v6) {
+  const o4 = oneRecord(v6);
+  if (!o4 || typeof o4.type !== "string" || !REVENUE_TYPES.includes(o4.type))
+    return null;
+  const type = o4.type;
+  const out = { type };
+  const set = (k2, value) => {
+    if (value !== undefined)
+      out[k2] = value;
+  };
+  set("units", driverOf(o4.units));
+  set("price", priceOf(o4.price, type));
+  set("buyers", driverOf(o4.buyers));
+  set("season", typeof o4.season === "string" && o4.season.trim() !== "" ? o4.season.trim() : numbers(o4.season, 12));
+  set("weekdays", numbers(o4.weekdays, 7));
+  set("growth_pct", finite(o4.growth_pct));
+  const spread = finite(o4.spread_pct);
+  set("spread_pct", spread === undefined ? undefined : Math.min(100, Math.max(0, spread)));
+  const margin = finite(o4.margin_pct);
+  set("margin_pct", margin === undefined ? undefined : Math.min(100, Math.max(0, margin)));
+  set("category", textOf(o4.category));
+  if (Array.isArray(o4.items))
+    set("items", o4.items.flatMap((x2, i3) => itemOf(x2, i3) ?? []).slice(0, CATALOG_MAX));
+  set("production", productionOf(o4.production));
+  for (const k2 of ["share_pct", "deductions_pct", "severance_pct"]) {
+    const n3 = finite(o4[k2]);
+    set(k2, n3 === undefined ? undefined : Math.min(100, Math.max(0, n3)));
+  }
+  const lag = finite(o4.lag_months);
+  set("lag_months", lag === undefined ? undefined : Math.min(24, Math.max(0, Math.round(lag))));
+  set("unit", textOf(o4.unit));
+  set("formula", textOf(o4.formula));
+  set("ai", o4.ai === "bounded" ? "bounded" : undefined);
+  return out;
+}
+function revenueProblems(v6) {
+  const o4 = oneRecord(v6);
+  if (!o4)
+    return ["is not a stream's model (a record with a type)"];
+  if (typeof o4.type !== "string" || !REVENUE_TYPES.includes(o4.type))
+    return [`has no type (one of ${REVENUE_TYPES.join(", ")})`];
+  const m2 = revenueOf(v6);
+  if (!m2)
+    return [];
+  const out = [];
+  if (Array.isArray(o4.items) && o4.items.length > CATALOG_MAX)
+    out.push(`lists ${o4.items.length} items; a catalog sells at most ${CATALOG_MAX}`);
+  if (Array.isArray(o4.season) && o4.season.length !== 12)
+    out.push("has a season that isn't twelve monthly factors");
+  if (Array.isArray(o4.weekdays) && o4.weekdays.length !== 7)
+    out.push("has weekday factors that aren't seven, Sunday first");
+  if ((m2.type === "product" || m2.type === "fees") && m2.price === undefined)
+    out.push("has no price");
+  if (m2.type === "catalog" && (m2.items ?? []).length === 0)
+    out.push("sells no items");
+  if (m2.type === "royalty") {
+    if (m2.production === undefined)
+      out.push("has no production (a number a month, a series, or a decline {qi, di_pct, b})");
+    if (m2.price === undefined)
+      out.push("has no price (minor units a unit, a series, or {asset})");
+  }
+  if (m2.type === "custom" && m2.formula === undefined)
+    out.push("has no formula");
+  return out;
+}
+function seasonAt(season, month) {
+  const f3 = season?.[month - 1];
+  return typeof f3 === "number" && Number.isFinite(f3) ? Math.max(0, f3) : 1;
+}
+function weekdayAt(weekdays, weekday) {
+  const f3 = weekdays?.[weekday];
+  return typeof f3 === "number" && Number.isFinite(f3) ? Math.max(0, f3) : 1;
+}
+function growthAt(pct, years) {
+  return pct === undefined || pct === 0 || years <= 0 ? 1 : Math.max(0, 1 + pct / 100) ** years;
+}
+function declineAt(d3, t3) {
+  const rate = d3.di_pct / 100 / 12;
+  const b3 = d3.b ?? 0;
+  if (t3 <= 0 || rate === 0)
+    return d3.qi;
+  return b3 === 0 ? d3.qi * Math.exp(-rate * t3) : d3.qi / (1 + b3 * rate * t3) ** (1 / b3);
+}
+function productionAt(p3, t3) {
+  if (p3 === undefined || t3 < 0)
+    return 0;
+  if (typeof p3 === "number")
+    return p3;
+  if (Array.isArray(p3))
+    return p3[t3] ?? 0;
+  return declineAt(p3, t3);
+}
+function seriesAt(series, t3) {
+  if (series.length === 0)
+    return 0;
+  return series[Math.min(series.length - 1, Math.max(0, t3))] ?? 0;
+}
+function royaltyMonth(model, t3, fraction, price) {
+  const units = productionAt(model.production, t3) * Math.max(0, fraction);
+  const gross = Math.max(0, Math.round(units * price * (model.share_pct ?? 100) / 100));
+  const deductions = Math.round(gross * (model.deductions_pct ?? 0) / 100);
+  const severance = Math.round(gross * (model.severance_pct ?? 0) / 100);
+  return { units, gross, deductions, severance, net: gross - deductions - severance };
+}
+function royaltyPriceAt(price, t3) {
+  if (typeof price === "number")
+    return price;
+  if (Array.isArray(price))
+    return seriesAt(price, t3);
+  return null;
+}
+function driversAmount(units, price, buyers, factor) {
+  return Math.max(0, Math.round(units * price * buyers * factor));
+}
+var REVENUE_TEMPLATE_IDS = ["walk_in", "product", "catalog", "oil_royalty", "gas_royalty", "water_royalty", "fees", "custom"];
+var DAILY = { every: "day", at: "17:00" };
+var MONTHLY = { every: "month", days: [25], roll: "after" };
+var REVENUE_TEMPLATES = {
+  walk_in: {
+    label: "Walk-in customers",
+    hint: "Customers who come in each day, busier at weekends, each spending about the same.",
+    fields: { flow_kind: "income", from: "Walk-in customers", ...DAILY, category: REVENUE_CATEGORIES.sales, revenue: [{ type: "product", units: 1, price: 1200, buyers: 40, weekdays: [0.6, 0.9, 0.9, 1, 1, 1.3, 1.4], margin_pct: 60 }] }
+  },
+  product: {
+    label: "One product",
+    hint: "One thing sold every day: units × price × buyers.",
+    fields: { flow_kind: "income", from: "Customers", ...DAILY, category: REVENUE_CATEGORIES.sales, revenue: [{ type: "product", units: 1, price: 2500, buyers: 10, margin_pct: 50 }] }
+  },
+  catalog: {
+    label: "A catalog",
+    hint: "Several items, each with its own price, units, margin and tax category.",
+    fields: {
+      flow_kind: "income",
+      from: "Customers",
+      ...DAILY,
+      category: REVENUE_CATEGORIES.sales,
+      revenue: [
+        {
+          type: "catalog",
+          buyers: 20,
+          items: [
+            { id: "bread", name: "Bread", price: 450, units: 1, margin_pct: 40, category: "groceries" },
+            { id: "coffee", name: "Coffee", price: 350, units: 1, margin_pct: 70, category: "prepared_food" },
+            { id: "mug", name: "Mug", price: 1500, units: 0.1, margin_pct: 55, category: "general" }
+          ]
+        }
+      ]
+    }
+  },
+  oil_royalty: {
+    label: "Oil royalty",
+    hint: "A share of a well's oil, declining as wells do, paid two months after it is produced.",
+    fields: { flow_kind: "income", from: "Purchaser", ...MONTHLY, category: REVENUE_CATEGORIES.royalties, revenue: [{ type: "royalty", unit: "bbl", production: { qi: 3000, di_pct: 60, b: 1.1 }, price: 7000, share_pct: 12.5, severance_pct: 4.6, lag_months: 2 }] }
+  },
+  gas_royalty: {
+    label: "Gas royalty",
+    hint: "A share of a well's gas, with post-production deductions, paid three months after.",
+    fields: { flow_kind: "income", from: "Purchaser", ...MONTHLY, category: REVENUE_CATEGORIES.royalties, revenue: [{ type: "royalty", unit: "mcf", production: { qi: 30000, di_pct: 70, b: 1 }, price: 300, share_pct: 12.5, deductions_pct: 10, severance_pct: 7.5, lag_months: 3 }] }
+  },
+  water_royalty: {
+    label: "Water royalty",
+    hint: "A steady price a barrel for water taken from the land, paid the month after.",
+    fields: { flow_kind: "income", from: "Water buyer", ...MONTHLY, category: REVENUE_CATEGORIES.royalties, revenue: [{ type: "royalty", unit: "bbl", production: 20000, price: 50, share_pct: 100, lag_months: 1 }] }
+  },
+  fees: {
+    label: "Fees",
+    hint: "A fee charged to clients each month: units × price × clients.",
+    fields: { flow_kind: "income", from: "Clients", every: "month", days: [1], roll: "after", category: REVENUE_CATEGORIES.fees, revenue: [{ type: "fees", units: 1, price: 5000, buyers: 20 }] }
+  },
+  custom: {
+    label: "Custom",
+    hint: "Your own formula for each payment, in minor units; `season`, `growth` and the clock names are there to use.",
+    fields: { flow_kind: "income", from: "Customers", every: "month", days: [1], roll: "after", category: REVENUE_CATEGORIES.other, revenue: [{ type: "custom", formula: "100000 * season" }] }
+  }
 };
 
 // src/packs/orgs/ui/edit.ts
@@ -33345,7 +33890,7 @@ function isGmPage(org) {
 }
 var STAFF_ACTIONS = { hire: FINANCE_ACTIONS.hire, end: FINANCE_ACTIONS.fire, raise: FINANCE_ACTIONS.raise, hours: "job_hours", leave: "job_leave", back: "job_return", position: "job_position", title: "job_title", dues: "org_dues" };
 var GM_EFFECTS = { position: "orgs.position", delegate: "orgs.delegate", revoke: "orgs.revoke" };
-var ORG_EDIT_FORMS = ["member", "hire", "admit", "position", "delegate", "dues", "payout"];
+var ORG_EDIT_FORMS = ["member", "hire", "admit", "position", "under", "move", "appoint", "remove", "delegate", "dues", "payout"];
 function orgEditRoute(org, form, id = null) {
   return { kind: "org_edit", id: [org, form, ...id === null ? [] : [id]].map(encodeURIComponent).join("/") };
 }
@@ -33370,7 +33915,7 @@ function readerOf(org) {
 function peopleControls(org) {
   if (!org.exists || isGmPage(org) || org.type === "party")
     return { hire: false, admit: false, payout: false };
-  return { hire: org.level >= 3 && holds(org, "staff.hire"), admit: org.type !== "trust" && holds(org, "members.admit"), payout: org.type === "trust" && org.level >= 3 && holds(org, "money.payout") };
+  return { hire: org.level >= 3 && holds(org, "staff.hire"), admit: holds(org, "members.admit"), payout: org.type === "trust" && org.level >= 3 && holds(org, "money.payout") };
 }
 var MEMBER_CONTROL_LABELS = {
   appoint: "Appoint…",
@@ -33386,6 +33931,28 @@ var MEMBER_CONTROL_LABELS = {
 };
 function appointable(org) {
   return org.positions.filter((p3) => !p3.implied);
+}
+function positionsUnder(org, id) {
+  const under2 = new Set;
+  for (const p3 of org.positions) {
+    const seen = new Set;
+    for (let at2 = p3.reportsTo?.id;at2 !== undefined && !seen.has(at2); at2 = org.positions.find((q2) => q2.id === at2)?.reportsTo?.id) {
+      if (at2 === id) {
+        under2.add(p3.id);
+        break;
+      }
+      seen.add(at2);
+    }
+  }
+  return under2;
+}
+function moveTargets(org, id) {
+  const under2 = positionsUnder(org, id);
+  return appointable(org).filter((p3) => p3.id !== id && !under2.has(p3.id));
+}
+function appointees(org, id) {
+  const position = org.positions.find((p3) => p3.id === id);
+  return org.people.filter((p3) => !(position?.holders ?? []).includes(p3.id));
 }
 function memberControls(org, person3) {
   if (!org.exists || isGmPage(org))
@@ -33723,6 +34290,10 @@ function staffJobOf(org, job) {
 }
 
 // src/packs/orgs/ui/words.ts
+var TYPE_ICON = { household: "home", company: "briefcase", group: "flag", trust: "shield", party: "users" };
+function pct(n3) {
+  return `${Math.round(n3 * 100) / 100}%`;
+}
 function andList(items) {
   return items.length <= 1 ? items[0] ?? "" : `${items.slice(0, -1).join(", ")} and ${items.at(-1)}`;
 }
@@ -33778,10 +34349,36 @@ function basisWords(org, held) {
       const by = org.you.delegations.find((d3) => d3.by?.id === h3.id)?.by?.name;
       return by ? `by delegation from ${by}` : "by delegation";
     }
+    if (h3.basis === "control") {
+      const through = [...org.you.through, ...org.above].find((o4) => o4.id === h3.id)?.name;
+      return through ? `through ${through}` : "through who holds it";
+    }
     return "as a member";
   });
   const text = andList([...new Set(words3)]);
   return text === "" ? "" : text[0]?.toUpperCase() + text.slice(1);
+}
+function linkWords(link) {
+  const parts = [
+    link.share !== null && link.share > 0 ? pct(link.share) : null,
+    link.votes !== null && link.votes > 0 && (link.share === null || Math.abs(link.votes - link.share) > 0.005) ? `${pct(link.votes)} of the votes` : null,
+    link.role !== null && link.role !== "owner" ? OWNER_ROLE_LABELS[link.role].one : null,
+    link.position ? link.position.title : null,
+    link.delegation ? "Acts for it" : null
+  ];
+  return parts.filter((p3) => p3 !== null).join(" · ");
+}
+function throughWords(org) {
+  const through = org.you.through;
+  if (through.length === 0)
+    return null;
+  const control = org.you.powers.filter((p3) => p3.basis === "control");
+  const chain = through.map((o4) => o4.name).join(", then ");
+  if (control.some((p3) => p3.power === "org.govern"))
+    return `You run it through ${chain}`;
+  if (control.length > 0 && control.every((p3) => p3.power === "money.view"))
+    return `You see its money through ${chain}`;
+  return `You hold powers here through ${chain}`;
 }
 
 // src/packs/orgs/ui/rules.tsx
@@ -34225,7 +34822,7 @@ function PositionSheet(props) {
   const { org, host } = props;
   const view = props.id === null ? null : appointable(org).find((p3) => p3.id === props.id) ?? null;
   const before = view ? positionOfView(view) : null;
-  const [draft, setDraft] = d2(() => positionDraft(before, host.currency));
+  const [draft, setDraft] = d2(() => ({ ...positionDraft(before, host.currency), ...props.under !== undefined && before === null ? { reportsTo: props.under } : {} }));
   if (props.id !== null && !before) {
     return /* @__PURE__ */ u3("div", {
       class: "lre-stack",
@@ -34247,9 +34844,10 @@ function PositionSheet(props) {
     label: "Remove the position",
     onClick: () => void host.confirm("Remove position", `Remove ${before.title}? Those holding it stay, without it.`, "Remove").then((yes) => yes ? host.play(positionRemoveAction(org.id, before.id), host.back) : undefined)
   } : undefined;
+  const over = props.under === undefined ? undefined : appointable(org).find((p3) => p3.id === props.under)?.title;
   return /* @__PURE__ */ u3(EditFrame, {
     name: "position",
-    title: before ? before.title : "Add position",
+    title: before ? before.title : over ? `Add a position under ${over}` : "Add position",
     subtitle: org.name,
     onBack: host.back,
     go: before ? "Save" : "Add the position",
@@ -34266,6 +34864,128 @@ function PositionSheet(props) {
       offer: ORG_POWERS,
       currency: host.currency,
       onChange: setDraft
+    }, undefined, false, undefined, this)
+  }, undefined, false, undefined, this);
+}
+function chartPosition(org, id) {
+  const view = id === null ? undefined : appointable(org).find((p3) => p3.id === id);
+  return view ? positionOfView(view) : null;
+}
+function GonePosition(props) {
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-stack",
+    children: [
+      /* @__PURE__ */ u3(PageHeader, {
+        title: "Position",
+        subtitle: props.org.name,
+        onBack: props.onBack
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(Empty, {
+        icon: "scroll",
+        children: "It has no such position any more."
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+function MoveFields(props) {
+  return /* @__PURE__ */ u3(RefPicker, {
+    label: "Reports to",
+    value: props.value,
+    options: moveTargets(props.org, props.id).map((p3) => ({ value: p3.id, label: p3.title })),
+    none: "No one: it goes to the top",
+    onChange: props.onChange
+  }, undefined, false, undefined, this);
+}
+function MoveSheet(props) {
+  const { org, host } = props;
+  const before = chartPosition(org, props.id);
+  const [to, setTo] = d2(before?.reports_to ?? "");
+  if (!before)
+    return /* @__PURE__ */ u3(GonePosition, {
+      org,
+      onBack: host.back
+    }, undefined, false, undefined, this);
+  const draft = { ...positionDraft(before, host.currency), reportsTo: to };
+  const action = positionAction(org.id, draft, before, host.currency);
+  return /* @__PURE__ */ u3(EditFrame, {
+    name: "move",
+    title: `Move ${before.title}`,
+    subtitle: org.name,
+    onBack: host.back,
+    go: "Move it",
+    problem: to === (before.reports_to ?? "") ? "Choose where it goes." : positionProblem(draft, appointable(org).map(positionOfView), host.currency),
+    busy: host.busy,
+    note: AT_ONCE,
+    action,
+    onGo: (tell) => host.play(action, host.back, tell),
+    children: /* @__PURE__ */ u3(MoveFields, {
+      org,
+      id: before.id,
+      value: to,
+      onChange: setTo
+    }, undefined, false, undefined, this)
+  }, undefined, false, undefined, this);
+}
+function AppointFields(props) {
+  return /* @__PURE__ */ u3(RefPicker, {
+    label: "Whom",
+    value: props.value,
+    options: appointees(props.org, props.id).map((p3) => ({ value: p3.id, label: p3.you ? `${p3.name} (you)` : p3.name, ...p3.title !== "" ? { sublabel: p3.title } : {} })),
+    onChange: props.onChange
+  }, undefined, false, undefined, this);
+}
+function AppointSheet(props) {
+  const { org, host } = props;
+  const before = chartPosition(org, props.id);
+  const [who, setWho] = d2("");
+  if (!before)
+    return /* @__PURE__ */ u3(GonePosition, {
+      org,
+      onBack: host.back
+    }, undefined, false, undefined, this);
+  const person3 = org.people.find((p3) => p3.id === who);
+  const action = person3 ? appointAction(org, person3, before.id) : null;
+  return /* @__PURE__ */ u3(EditFrame, {
+    name: "appoint",
+    title: `Appoint to ${before.title}`,
+    subtitle: org.name,
+    onBack: host.back,
+    go: "Appoint",
+    problem: appointees(org, before.id).length === 0 ? "Everyone you know here holds it already." : person3 ? null : "Choose whom to appoint.",
+    busy: host.busy,
+    note: AT_ONCE,
+    action,
+    onGo: (tell) => action ? host.play(action, host.back, tell) : undefined,
+    children: /* @__PURE__ */ u3(AppointFields, {
+      org,
+      id: before.id,
+      value: who,
+      onChange: setWho
+    }, undefined, false, undefined, this)
+  }, undefined, false, undefined, this);
+}
+function RemovePositionSheet(props) {
+  const { org, host } = props;
+  const before = chartPosition(org, props.id);
+  if (!before)
+    return /* @__PURE__ */ u3(GonePosition, {
+      org,
+      onBack: host.back
+    }, undefined, false, undefined, this);
+  const action = positionRemoveAction(org.id, before.id);
+  return /* @__PURE__ */ u3(EditFrame, {
+    name: "remove",
+    title: `Remove ${before.title}`,
+    subtitle: org.name,
+    onBack: host.back,
+    go: "Remove the position",
+    problem: null,
+    busy: host.busy,
+    note: `Those holding it stay, without it; positions under it report to no one. ${AT_ONCE}`,
+    action,
+    onGo: (tell) => host.play(action, host.back, tell),
+    children: /* @__PURE__ */ u3("span", {
+      children: `${before.title} · ${powersText(before.powers)}`
     }, undefined, false, undefined, this)
   }, undefined, false, undefined, this);
 }
@@ -34367,6 +35087,4888 @@ function DuesSheet(props) {
       draft,
       currency: host.currency,
       onChange: setDraft
+    }, undefined, false, undefined, this)
+  }, undefined, false, undefined, this);
+}
+
+// src/frontend/build/org-convert.ts
+var KIND_OF = { company: "business", trust: "trust" };
+var MEMBER_OF = "member_of";
+function conversionTargets(doc, kind) {
+  if (kindIs(doc, kind, "trust"))
+    return ["company"];
+  return kindIs(doc, kind, "business") ? ["trust"] : [];
+}
+function rowWords2(o4, shares) {
+  const role = OWNER_ROLE_LABELS[o4.role].one;
+  return ROLE_RIGHTS[o4.role].worth ? `${role} (${round(shares[o4.party] ?? 0)}%)` : role;
+}
+function round(n3) {
+  return Math.round(n3 * 100) / 100;
+}
+function partiesOf(rows2) {
+  return [...new Set(rows2.map((o4) => o4.party))];
+}
+function dependents(doc, id, kind) {
+  return Object.entries(doc.entities).flatMap(([eid, e3]) => {
+    if (eid === id || !isRecord(e3.fields))
+      return [];
+    const defs = kindFields(doc, e3.kind);
+    const named = Object.entries(e3.fields).some(([f3, v6]) => {
+      const ref = defs[f3]?.type === "ref" ? defs[f3]?.ref : undefined;
+      return v6 === id && ref !== undefined && !kindIs(doc, kind, ref);
+    });
+    return named ? [e3.name || eid] : [];
+  });
+}
+function dependentWhy(doc, id, to) {
+  const names = dependents(doc, id, KIND_OF[to]);
+  if (names.length === 0)
+    return null;
+  const shown = names.length > 3 ? [...names.slice(0, 3), `${names.length - 3} more`] : names;
+  const list2 = shown.length === 1 ? shown[0] ?? "" : `${shown.slice(0, -1).join(", ")} and ${shown.at(-1) ?? ""}`;
+  return `${list2} ${names.length === 1 ? "names" : "name"} it where a ${to === "trust" ? "company" : "trust"} must stand: change or remove ${names.length === 1 ? "it" : "them"} first.`;
+}
+function onlyOf(doc, fields, from, to) {
+  const was = kindFields(doc, from);
+  const next = kindFields(doc, to);
+  const keys = Object.keys(fields).filter((k2) => (k2 in was) && !(k2 in next) && fields[k2] !== undefined);
+  return { keys, labels: keys.map((k2) => was[k2]?.label ?? k2) };
+}
+function peopleWords(doc, before, after, extra = {}) {
+  const was = worthShares(before);
+  const now = worthShares(after);
+  return [...new Set([...partiesOf(before), ...partiesOf(after)])].map((party) => {
+    const from = before.filter((o4) => o4.party === party).map((o4) => rowWords2(o4, was));
+    const to = [...after.filter((o4) => o4.party === party).map((o4) => rowWords2(o4, now)), ...extra[party] ? [extra[party]] : []];
+    return { name: doc.entities[party]?.name || party, from: from.join(" and ") || "Nothing", to: to.join(" and ") || "Nothing: dropped" };
+  });
+}
+function toTrust(doc, id, entity2, fields, owners) {
+  const out = { to: "trust", why: null, people: [], dropped: [], notes: [], ops: [] };
+  if (listingIn(fields))
+    return { ...out, why: "It is listed on a market: take it off the market first; a trust has no stockholders." };
+  const trustees = partiesOf(owners.filter((o4) => ROLE_RIGHTS[o4.role].manage));
+  if (trustees.length === 0)
+    return { ...out, why: "No owner manages it, so no one would be its trustee." };
+  const shares = worthShares(owners);
+  const beneficiaries = partiesOf(owners.filter((o4) => ROLE_RIGHTS[o4.role].worth && (shares[o4.party] ?? 0) > 0));
+  const after = [...trustees.map((party) => ({ party, role: "trustee" })), ...beneficiaries.map((party) => ({ party, role: "beneficiary", share: round(shares[party] ?? 0) }))];
+  const only = onlyOf(doc, fields, String(entity2.kind), KIND_OF.trust);
+  const next = { ...fields, owners: after.map((o4) => ({ ...o4 })) };
+  for (const k2 of only.keys)
+    delete next[k2];
+  const units = owners.some((o4) => o4.units !== undefined || o4.class !== undefined);
+  return {
+    ...out,
+    people: peopleWords(doc, owners, after),
+    dropped: only.labels,
+    notes: [...units ? ["Its units and share classes go: a trust's beneficiaries hold shares of its worth."] : [], "Its positions, members, staff and delegations stay."],
+    ops: entityPatch(id, entity2, { ...entity2, kind: KIND_OF.trust, fields: next })
+  };
+}
+function toCompany(doc, id, entity2, fields, owners) {
+  const out = { to: "company", why: null, people: [], dropped: [], notes: [], ops: [] };
+  const shares = worthShares(owners);
+  const beneficiaries = partiesOf(owners.filter((o4) => ROLE_RIGHTS[o4.role].worth && (shares[o4.party] ?? 0) > 0));
+  if (beneficiaries.length === 0)
+    return { ...out, why: "It has no beneficiary to own the company." };
+  const trustees = partiesOf(owners.filter((o4) => ROLE_RIGHTS[o4.role].manage && !ROLE_RIGHTS[o4.role].worth));
+  const after = beneficiaries.map((party) => ({ party, role: "owner", share: round(shares[party] ?? 0) }));
+  const positions = positionsIn(fields.positions);
+  const taken2 = new Set(positions.map((p3) => p3.id));
+  let seat = DIRECTOR;
+  for (let n3 = 2;taken2.has(seat); n3++)
+    seat = positionIdOf(`${DIRECTOR} ${n3}`);
+  const links = [];
+  const seated = {};
+  for (const party of trustees) {
+    const holder = doc.entities[party];
+    if (!holder)
+      continue;
+    const at2 = holder.relations.findIndex((r3) => r3.type === MEMBER_OF && r3.to === id);
+    const link = at2 < 0 ? undefined : holder.relations[at2];
+    const linked = isRecord(link?.fields) ? link.fields : {};
+    if (link && typeof linked.position === "string" && linked.position !== "") {
+      seated[party] = `keeps their seat (${positions.find((p3) => p3.id === linked.position)?.title ?? linked.position})`;
+      continue;
+    }
+    seated[party] = "Director";
+    const value = { type: MEMBER_OF, to: id, fields: { ...linked, position: seat }, ...link?.until !== undefined ? { until: link.until } : {} };
+    links.push(at2 < 0 ? { op: "add", path: pointerOf(["entities", party, "relations", "-"]), value } : { op: "replace", path: pointerOf(["entities", party, "relations", String(at2)]), value });
+  }
+  const director = Object.values(seated).some((s3) => s3 === "Director");
+  const only = onlyOf(doc, fields, String(entity2.kind), KIND_OF.company);
+  const next = { ...fields, owners: after.map((o4) => ({ ...o4 })), ...director ? { positions: [...Array.isArray(fields.positions) ? fields.positions : [], { id: seat, title: "Director", powers: [...ORG_POWERS], seats: 0 }] } : {} };
+  for (const k2 of only.keys)
+    delete next[k2];
+  const trusteeVotes = next.vote_by === "trustees";
+  if (trusteeVotes)
+    delete next.vote_by;
+  const dropped = owners.filter((o4) => !ROLE_RIGHTS[o4.role].worth && !ROLE_RIGHTS[o4.role].manage).map((o4) => o4.role);
+  return {
+    ...out,
+    people: peopleWords(doc, owners, after, seated),
+    dropped: [...only.labels, ...trusteeVotes ? ["Votes by its trustees"] : []],
+    notes: [...director ? ["Adds a Director position, with every power, which its trustees hold."] : [], ...dropped.length > 0 ? [`Its ${[...new Set(dropped)].map((r3) => OWNER_ROLE_LABELS[r3].many.toLowerCase()).join(" and ")} go: a company has owners.`] : [], "Its positions, members, staff and delegations stay; set its structure under Ownership."],
+    ops: [...entityPatch(id, entity2, { ...entity2, kind: KIND_OF.company, fields: next }), ...links]
+  };
+}
+function orgConversion(doc, id, to) {
+  const e3 = doc.entities[id];
+  const none = { to, why: null, people: [], dropped: [], notes: [], ops: [] };
+  if (!e3)
+    return { ...none, why: "It isn't in the draft any more." };
+  if (!conversionTargets(doc, e3.kind).includes(to))
+    return { ...none, why: `A ${doc.kinds[e3.kind]?.label ?? e3.kind} can't become a ${to}.` };
+  const entity2 = e3;
+  const fields = isRecord(e3.fields) ? e3.fields : {};
+  const owners = ownersIn(fields);
+  const out = to === "trust" ? toTrust(doc, id, entity2, fields, owners) : toCompany(doc, id, entity2, fields, owners);
+  const why2 = out.why ?? dependentWhy(doc, id, to);
+  return why2 === null ? out : { ...out, why: why2, ops: [] };
+}
+
+// src/shared/projects.ts
+var PROJECT_KIND = "project";
+var PROJECTS_SECTION = "projects";
+var PROJECTS_TABLE = "economy.projects";
+var PROJECT_EFFECTS = {
+  start: "economy.project_start",
+  pause: "economy.project_pause",
+  resume: "economy.project_resume",
+  drop: "economy.project_drop",
+  note: "economy.project_note"
+};
+var PROJECT_ACTIONS = { start: "project_start", pause: "project_pause", resume: "project_resume", drop: "project_drop" };
+var PROJECT_LIMITS = {
+  steps: 40,
+  unlocks: 8,
+  inputs: 20,
+  name: 80,
+  days: 3650,
+  noteDays: 30,
+  notes: 12,
+  recent: 10
+};
+var PROJECT_STATUS_WORDS = { planned: "Not started", active: "Under way", paused: "Paused", done: "Done", dropped: "Dropped" };
+var COST_WHEN = ["start", "end", "split"];
+var COST_WHEN_WORDS = { start: "paid as it starts", end: "paid when it's done", split: "half as it starts, half when it's done" };
+var num3 = (v6) => typeof v6 === "number" && Number.isFinite(v6) ? v6 : undefined;
+var str2 = (v6) => typeof v6 === "string" ? v6.trim() : "";
+var STEP_ID = /^[a-z0-9][a-z0-9_]{0,39}$/;
+function inputIn(v6) {
+  if (!isRecord(v6))
+    return null;
+  const name = str2(v6.name);
+  const qty = num3(v6.qty) ?? 1;
+  if (name === "" || !(qty > 0))
+    return null;
+  const cents2 = num3(v6.cents);
+  return { name: name.slice(0, PROJECT_LIMITS.name), qty, ...str2(v6.unit) !== "" ? { unit: str2(v6.unit) } : {}, ...cents2 !== undefined && cents2 >= 0 ? { cents: Math.round(cents2) } : {} };
+}
+function crewIn(v6) {
+  if (!isRecord(v6))
+    return;
+  const size = num3(v6.size);
+  const who = Array.isArray(v6.who) ? [...new Set(v6.who.filter((x2) => typeof x2 === "string" && x2 !== ""))] : [];
+  const crew = { ...size !== undefined && size >= 0 ? { size: Math.round(size) } : {}, ...str2(v6.role) !== "" ? { role: str2(v6.role) } : {}, ...who.length > 0 ? { who } : {} };
+  return Object.keys(crew).length > 0 ? crew : undefined;
+}
+function unlockIn(v6) {
+  if (!isRecord(v6))
+    return null;
+  if (isRecord(v6.stream))
+    return { stream: v6.stream, ...str2(v6.name) !== "" ? { name: str2(v6.name) } : {} };
+  if (str2(v6.flow) !== "")
+    return { flow: str2(v6.flow) };
+  if (isRecord(v6.make)) {
+    const m2 = v6.make;
+    const name = str2(m2.name);
+    if (name === "")
+      return null;
+    const life = num3(m2.life_months);
+    const salvage = num3(m2.salvage);
+    const value = m2.value === "cost" ? "cost" : num3(m2.value);
+    return { make: { name: name.slice(0, PROJECT_LIMITS.name), ...str2(m2.kind) !== "" ? { kind: str2(m2.kind) } : {}, ...isRecord(m2.fields) ? { fields: m2.fields } : {}, ...life !== undefined && life >= 1 ? { life_months: Math.round(life) } : {}, ...salvage !== undefined && salvage >= 0 ? { salvage: Math.round(salvage) } : {}, ...value !== undefined ? { value: value === "cost" ? "cost" : Math.max(0, Math.round(value)) } : {} } };
+  }
+  if (isRecord(v6.set)) {
+    const s3 = v6.set;
+    if (str2(s3.entity) === "" || str2(s3.field) === "" || !("value" in s3))
+      return null;
+    return { set: { entity: str2(s3.entity), field: str2(s3.field), value: s3.value ?? null } };
+  }
+  return null;
+}
+function stepIn(v6) {
+  if (!isRecord(v6))
+    return null;
+  const id = str2(v6.id);
+  const name = str2(v6.name) || id;
+  if (!STEP_ID.test(id) || name === "")
+    return null;
+  const days = num3(v6.days);
+  const business = num3(v6.business_days);
+  const whole3 = (n3) => n3 === undefined || Number.isInteger(n3) && n3 >= 0 && n3 <= PROJECT_LIMITS.days;
+  if (!whole3(days) || !whole3(business) || days !== undefined && business !== undefined)
+    return null;
+  const cost = num3(v6.cost);
+  const paid = typeof v6.paid === "string" && COST_WHEN.includes(v6.paid) ? v6.paid : undefined;
+  const after = Array.isArray(v6.after) ? [...new Set(v6.after.filter((x2) => typeof x2 === "string" && x2 !== "" && x2 !== id))] : [];
+  const inputs = Array.isArray(v6.inputs) ? v6.inputs.flatMap((x2) => inputIn(x2) ?? []).slice(0, PROJECT_LIMITS.inputs) : [];
+  const unlocks = Array.isArray(v6.unlocks) ? v6.unlocks.flatMap((x2) => unlockIn(x2) ?? []).slice(0, PROJECT_LIMITS.unlocks) : [];
+  const crew = crewIn(v6.crew);
+  return {
+    id,
+    name: name.slice(0, PROJECT_LIMITS.name),
+    ...business !== undefined ? { business_days: business } : { days: days ?? 0 },
+    ...cost !== undefined && cost > 0 ? { cost: Math.round(cost) } : {},
+    ...paid !== undefined ? { paid } : {},
+    ...after.length > 0 ? { after } : {},
+    ...inputs.length > 0 ? { inputs } : {},
+    ...crew ? { crew } : {},
+    ...v6.capitalize === true ? { capitalize: true } : {},
+    ...unlocks.length > 0 ? { unlocks } : {},
+    ...v6.done === true ? { done: true } : {}
+  };
+}
+function stepsIn(v6) {
+  if (!Array.isArray(v6))
+    return [];
+  const seen = new Set;
+  const out = [];
+  for (const raw of v6) {
+    const s3 = stepIn(raw);
+    if (!s3 || seen.has(s3.id))
+      continue;
+    seen.add(s3.id);
+    out.push(s3);
+    if (out.length >= PROJECT_LIMITS.steps)
+      break;
+  }
+  return out;
+}
+function stepCost(step) {
+  return (step.cost ?? 0) + (step.inputs ?? []).reduce((sum, i3) => sum + Math.round(i3.qty * (i3.cents ?? 0)), 0);
+}
+var STEP_STATE_WORDS = { pending: "Waiting on earlier steps", ready: "Starts next", waiting: "Waiting for money", running: "Under way", paused: "Paused", done: "Done" };
+function projectsViewIn(v6) {
+  return isRecord(v6) && typeof v6.org === "string" && Array.isArray(v6.projects) && Array.isArray(v6.templates) ? v6 : null;
+}
+
+// src/packs/orgs/ui/projects.tsx
+var PROJECTS_TAB = "economy.projects";
+var STATUS_TONE2 = { planned: "neutral", active: "accent", paused: "warn", done: "pos", dropped: "neutral" };
+var STATE_TONE = { pending: "neutral", ready: "neutral", waiting: "warn", running: "accent", paused: "warn", done: "pos" };
+function projectControls(p3) {
+  const out = [];
+  if (p3.can.start)
+    out.push({ act: "start", label: "Start" });
+  if (p3.can.pause)
+    out.push({ act: "pause", label: "Pause" });
+  if (p3.can.resume)
+    out.push({ act: "resume", label: "Resume" });
+  if (p3.can.drop)
+    out.push({ act: "drop", label: "Drop", danger: true });
+  return out;
+}
+function controlChange(org, p3, act) {
+  return { action: PROJECT_ACTIONS[act], params: act === "start" ? { org, project: p3.id } : { project: p3.id } };
+}
+function startChange(org, d3) {
+  if (d3.template === "")
+    return null;
+  return { action: PROJECT_ACTIONS.start, params: { org, template: d3.template, ...d3.name.trim() !== "" ? { name: d3.name.trim().slice(0, PROJECT_LIMITS.name) } : {}, ...d3.account !== "" ? { account: d3.account } : {} } };
+}
+var EFFECT_OF = { [PROJECT_ACTIONS.start]: PROJECT_EFFECTS.start, [PROJECT_ACTIONS.pause]: PROJECT_EFFECTS.pause, [PROJECT_ACTIONS.resume]: PROJECT_EFFECTS.resume, [PROJECT_ACTIONS.drop]: PROJECT_EFFECTS.drop };
+function projectOps(change) {
+  const effect = EFFECT_OF[change.action];
+  return effect === undefined ? [] : [{ op: "effect", effect, args: change.params }];
+}
+function noteProblem(d3, currency) {
+  const days = d3.days.trim() === "" ? 0 : Number(d3.days);
+  if (!Number.isInteger(days) || days < 0)
+    return "Days: a whole number.";
+  const cents2 = d3.amount.trim() === "" ? 0 : parseMoneyInput(d3.amount, currency);
+  if (cents2 === null || cents2 < 0)
+    return "What it costs on top: an amount.";
+  if (days === 0 && cents2 === 0)
+    return "Set it back some days, or add to what it costs.";
+  return d3.why.trim() === "" ? "Say why." : null;
+}
+function noteOps(project, d3, currency) {
+  const days = d3.days.trim() === "" ? 0 : Number(d3.days);
+  const cents2 = d3.amount.trim() === "" ? 0 : parseMoneyInput(d3.amount, currency) ?? 0;
+  return [{ op: "effect", effect: PROJECT_EFFECTS.note, args: { project, ...d3.step !== "" ? { step: d3.step } : {}, days, cents: cents2, text: d3.why.trim(), source: "gm" } }];
+}
+function StepItem(props) {
+  const s3 = props.step;
+  const time = s3.done ? `Done ${s3.done}` : s3.state === "running" || s3.state === "paused" ? `${s3.day !== undefined ? `Day ${s3.day} of ${s3.of}` : "Under way"}${s3.end ? `, ends ${s3.end}` : ""}` : null;
+  const extra = s3.extra > 0 || s3.delay > 0 ? ` (${[s3.delay > 0 ? `${s3.delay} ${s3.delay === 1 ? "day" : "days"} later` : "", s3.extra > 0 ? `${props.money(s3.extra)} more` : ""].filter((x2) => x2 !== "").join(", ")})` : "";
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-stack",
+    "data-lre-project-step": s3.id,
+    children: [
+      /* @__PURE__ */ u3("div", {
+        class: "lre-inline",
+        children: [
+          /* @__PURE__ */ u3("strong", {
+            children: s3.name
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3(Badge, {
+            tone: STATE_TONE[s3.state],
+            children: STEP_STATE_WORDS[s3.state]
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this),
+      /* @__PURE__ */ u3("span", {
+        class: "lre-small",
+        children: [
+          s3.length,
+          s3.cost > 0 ? ` · ${props.money(s3.cost)}, ${COST_WHEN_WORDS[s3.when]}` : " · no cost",
+          s3.paid > 0 && s3.paid < s3.cost ? ` · ${props.money(s3.paid)} paid` : "",
+          extra
+        ]
+      }, undefined, true, undefined, this),
+      time ? /* @__PURE__ */ u3("span", {
+        class: "lre-small",
+        children: time
+      }, undefined, false, undefined, this) : null,
+      s3.wait ? /* @__PURE__ */ u3("span", {
+        class: "lre-small",
+        "data-lre-project-wait": true,
+        children: [
+          "Waiting since ",
+          s3.wait.since,
+          " for ",
+          props.money(s3.wait.cents),
+          " to ",
+          s3.wait.side === "end" ? "finish" : "start",
+          "; it tries again as money comes in."
+        ]
+      }, undefined, true, undefined, this) : null,
+      s3.after.length > 0 ? /* @__PURE__ */ u3("span", {
+        class: "lre-small",
+        children: [
+          "After ",
+          s3.after.map((a3) => a3.name).join(" and ")
+        ]
+      }, undefined, true, undefined, this) : null,
+      s3.crew ? /* @__PURE__ */ u3("span", {
+        class: "lre-small",
+        children: [
+          "Crew: ",
+          s3.crew
+        ]
+      }, undefined, true, undefined, this) : null,
+      s3.inputs.length > 0 ? /* @__PURE__ */ u3("span", {
+        class: "lre-small",
+        children: [
+          "Uses: ",
+          s3.inputs.join("; ")
+        ]
+      }, undefined, true, undefined, this) : null,
+      s3.unlocks.map((u4) => /* @__PURE__ */ u3("span", {
+        class: "lre-small",
+        children: u4
+      }, u4, false, undefined, this)),
+      s3.notes.map((n3) => /* @__PURE__ */ u3("span", {
+        class: "lre-small",
+        children: [
+          [n3.days > 0 ? `${n3.days} ${n3.days === 1 ? "day" : "days"} later` : "", n3.cents > 0 ? `${props.money(n3.cents)} more` : ""].filter((x2) => x2 !== "").join(", "),
+          ": ",
+          n3.text,
+          " (",
+          n3.at,
+          ", ",
+          n3.source === "gm" ? "by the GM" : "from the story",
+          ")"
+        ]
+      }, `${n3.at}:${n3.text}`, true, undefined, this))
+    ]
+  }, undefined, true, undefined, this);
+}
+function ProjectCard(props) {
+  const p3 = props.project;
+  const controls = projectControls(p3);
+  const main = controls.find((c3) => !c3.danger);
+  const rest = controls.filter((c3) => c3 !== main);
+  return /* @__PURE__ */ u3(Card, {
+    title: /* @__PURE__ */ u3("span", {
+      class: "lre-inline",
+      children: [
+        p3.name,
+        /* @__PURE__ */ u3(Badge, {
+          tone: STATUS_TONE2[p3.status],
+          children: p3.statusWords
+        }, undefined, false, undefined, this)
+      ]
+    }, undefined, true, undefined, this),
+    aside: controls.length > 0 ? /* @__PURE__ */ u3("div", {
+      class: "lre-inline",
+      "data-lre-project-controls": p3.id,
+      children: [
+        main ? /* @__PURE__ */ u3(Button, {
+          size: "sm",
+          variant: "secondary",
+          disabled: props.busy,
+          onClick: () => props.onControl(main.act),
+          children: main.label
+        }, undefined, false, undefined, this) : null,
+        rest.length > 0 ? /* @__PURE__ */ u3(OverflowMenu, {
+          label: `${p3.name}: more`,
+          disabled: props.busy,
+          items: rest.map((c3) => ({ label: c3.label, ...c3.danger ? { danger: true } : {}, onSelect: () => props.onControl(c3.act) }))
+        }, undefined, false, undefined, this) : null
+      ]
+    }, undefined, true, undefined, this) : null,
+    children: /* @__PURE__ */ u3("div", {
+      class: "lre-stack",
+      "data-lre-project": p3.id,
+      children: [
+        p3.now ? /* @__PURE__ */ u3("span", {
+          children: p3.now
+        }, undefined, false, undefined, this) : null,
+        /* @__PURE__ */ u3(Meter, {
+          label: "Steps done",
+          value: p3.progress.done,
+          max: Math.max(1, p3.progress.total),
+          tone: p3.status === "done" ? "pos" : "accent",
+          showValue: true
+        }, undefined, false, undefined, this),
+        /* @__PURE__ */ u3("span", {
+          class: "lre-small",
+          children: [
+            props.money(p3.paid),
+            " paid of ",
+            props.money(p3.cost),
+            p3.left > 0 ? `, ${props.money(p3.left)} to come` : "",
+            p3.account ? ` · from ${p3.account.name}` : ""
+          ]
+        }, undefined, true, undefined, this),
+        p3.start ? /* @__PURE__ */ u3("span", {
+          class: "lre-small",
+          children: [
+            "Started ",
+            p3.start
+          ]
+        }, undefined, true, undefined, this) : null,
+        p3.due ? /* @__PURE__ */ u3("span", {
+          class: "lre-small",
+          children: [
+            "Due to be done ",
+            p3.due,
+            ", as things stand"
+          ]
+        }, undefined, true, undefined, this) : null,
+        p3.ended ? /* @__PURE__ */ u3("span", {
+          class: "lre-small",
+          children: [
+            p3.status === "done" ? "Done" : "Dropped",
+            " ",
+            p3.ended
+          ]
+        }, undefined, true, undefined, this) : null,
+        p3.made.length > 0 ? /* @__PURE__ */ u3("span", {
+          class: "lre-small",
+          children: [
+            "Made: ",
+            p3.made.map((m2) => m2.name).join(", ")
+          ]
+        }, undefined, true, undefined, this) : null,
+        /* @__PURE__ */ u3(Disclosure, {
+          summary: `Steps (${p3.progress.done} of ${p3.progress.total} done)`,
+          children: /* @__PURE__ */ u3("div", {
+            class: "lre-stack",
+            children: p3.steps.map((s3) => /* @__PURE__ */ u3(StepItem, {
+              step: s3,
+              money: props.money
+            }, s3.id, false, undefined, this))
+          }, undefined, false, undefined, this)
+        }, undefined, false, undefined, this),
+        props.extra
+      ]
+    }, undefined, true, undefined, this)
+  }, undefined, false, undefined, this);
+}
+function templateLine(t3, money) {
+  return `${t3.days.min}–${t3.days.max} days (about ${t3.days.typical}) · ${money(t3.cost.min)}–${money(t3.cost.max)} (about ${money(t3.cost.typical)}) · ${t3.steps} steps`;
+}
+function StartForm(props) {
+  const ids = { name: P2() };
+  const d3 = props.draft;
+  const chosen = props.view.templates.find((t3) => t3.id === d3.template);
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-stack",
+    "data-lre-project-start": true,
+    children: [
+      /* @__PURE__ */ u3(Field, {
+        label: "What to build",
+        children: /* @__PURE__ */ u3(RefPicker, {
+          label: "What to build",
+          value: d3.template,
+          placeholder: "Choose a template",
+          options: props.view.templates.map((t3) => ({ value: t3.id, label: t3.name, sublabel: templateLine(t3, props.money) })),
+          onChange: (template) => props.onDraft({ ...d3, template })
+        }, undefined, false, undefined, this)
+      }, undefined, false, undefined, this),
+      chosen ? /* @__PURE__ */ u3("div", {
+        class: "lre-stack",
+        "data-lre-project-template": chosen.id,
+        children: [
+          /* @__PURE__ */ u3("span", {
+            class: "lre-small",
+            children: chosen.description
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3("span", {
+            class: "lre-small",
+            children: templateLine(chosen, props.money)
+          }, undefined, false, undefined, this),
+          chosen.unlocks.map((u4) => /* @__PURE__ */ u3("span", {
+            class: "lre-small",
+            children: u4
+          }, u4, false, undefined, this))
+        ]
+      }, undefined, true, undefined, this) : null,
+      /* @__PURE__ */ u3(Field, {
+        label: "Name",
+        for: ids.name,
+        help: "Leave it empty for the template's name.",
+        children: /* @__PURE__ */ u3("input", {
+          id: ids.name,
+          class: "lre-input",
+          maxLength: PROJECT_LIMITS.name,
+          value: d3.name,
+          onInput: (event) => props.onDraft({ ...d3, name: event.currentTarget.value })
+        }, undefined, false, undefined, this)
+      }, undefined, false, undefined, this),
+      props.view.accounts.length > 1 ? /* @__PURE__ */ u3(Field, {
+        label: "Pays from",
+        children: /* @__PURE__ */ u3(RefPicker, {
+          label: "Pays from",
+          value: d3.account,
+          none: "Its operating account",
+          options: props.view.accounts.map((a3) => ({ value: a3.id, label: a3.name })),
+          onChange: (account) => props.onDraft({ ...d3, account })
+        }, undefined, false, undefined, this)
+      }, undefined, false, undefined, this) : null,
+      /* @__PURE__ */ u3("span", {
+        class: "lre-small",
+        children: "Its steps start at once and run day by day; each pays as it says. A step the account can't pay waits until it can."
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3("div", {
+        class: "lre-inline",
+        children: [
+          /* @__PURE__ */ u3(Button, {
+            variant: "primary",
+            disabled: props.busy || d3.template === "",
+            onClick: props.onStart,
+            children: "Start the project"
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3(Button, {
+            variant: "ghost",
+            disabled: props.busy,
+            onClick: props.onCancel,
+            children: "Cancel"
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+function NoteForm(props) {
+  const ids = { days: P2(), why: P2() };
+  const d3 = props.draft;
+  const problem = noteProblem(d3, props.currency);
+  const open = props.project.steps.filter((s3) => s3.state !== "done");
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-stack",
+    "data-lre-project-note": props.project.id,
+    children: [
+      /* @__PURE__ */ u3(Field, {
+        label: "Step",
+        children: /* @__PURE__ */ u3(RefPicker, {
+          label: "Step",
+          value: d3.step,
+          none: "The one under way",
+          options: open.map((s3) => ({ value: s3.id, label: s3.name })),
+          onChange: (step) => props.onDraft({ ...d3, step })
+        }, undefined, false, undefined, this)
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(Field, {
+        label: "Days later",
+        for: ids.days,
+        children: /* @__PURE__ */ u3("input", {
+          id: ids.days,
+          class: "lre-input",
+          inputMode: "numeric",
+          value: d3.days,
+          onInput: (event) => props.onDraft({ ...d3, days: event.currentTarget.value })
+        }, undefined, false, undefined, this)
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(Field, {
+        label: "Costs on top",
+        children: /* @__PURE__ */ u3(MoneyInput, {
+          label: "Costs on top",
+          currency: props.currency,
+          value: d3.amount,
+          onInput: (amount2) => props.onDraft({ ...d3, amount: amount2 })
+        }, undefined, false, undefined, this)
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(Field, {
+        label: "Why",
+        for: ids.why,
+        error: problem,
+        children: /* @__PURE__ */ u3("input", {
+          id: ids.why,
+          class: "lre-input",
+          maxLength: 300,
+          value: d3.why,
+          onInput: (event) => props.onDraft({ ...d3, why: event.currentTarget.value })
+        }, undefined, false, undefined, this)
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3("div", {
+        class: "lre-inline",
+        children: [
+          /* @__PURE__ */ u3(Button, {
+            variant: "primary",
+            disabled: props.busy || problem !== null,
+            onClick: props.onSave,
+            children: "Set it back"
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3(Button, {
+            variant: "ghost",
+            disabled: props.busy,
+            onClick: props.onCancel,
+            children: "Cancel"
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+var NO_START = { template: "", name: "", account: "" };
+var NO_NOTE = { step: "", days: "", amount: "", why: "" };
+function ProjectsBoard(props) {
+  const [start, setStart] = d2(null);
+  const [note, setNote] = d2(null);
+  const money = (cents2) => formatMoney(cents2, props.currency);
+  const v6 = props.view;
+  if (!v6.runs && v6.projects.length === 0 && v6.over.length === 0)
+    return /* @__PURE__ */ u3(Empty, {
+      icon: "briefcase",
+      title: "No projects",
+      children: "Projects run from Money 3."
+    }, undefined, false, undefined, this);
+  const startPart = v6.canStart ? start ? /* @__PURE__ */ u3(StartForm, {
+    view: v6,
+    draft: start,
+    money,
+    busy: props.busy,
+    onDraft: setStart,
+    onStart: () => props.onStart(start, () => setStart(null)),
+    onCancel: () => setStart(null)
+  }, undefined, false, undefined, this) : /* @__PURE__ */ u3(Button, {
+    variant: "secondary",
+    icon: "plus",
+    disabled: props.busy || v6.templates.length === 0,
+    onClick: () => setStart(NO_START),
+    children: "Start a project"
+  }, undefined, false, undefined, this) : null;
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-stack",
+    "data-lre-projects": v6.org,
+    children: [
+      v6.projects.length === 0 ? /* @__PURE__ */ u3(Empty, {
+        icon: "briefcase",
+        title: "No projects under way",
+        children: v6.canStart ? "Start one from a template: a well, a foundry, a building, a season's crop." : "None it runs now."
+      }, undefined, false, undefined, this) : v6.projects.map((p3) => {
+        const noting = note?.project === p3.id ? note : null;
+        const extra = props.onNote && p3.status !== "planned" ? noting ? /* @__PURE__ */ u3(NoteForm, {
+          project: p3,
+          draft: noting.draft,
+          currency: props.currency,
+          busy: props.busy,
+          onDraft: (draft) => setNote({ project: p3.id, draft }),
+          onSave: () => props.onNote?.(p3, noting.draft, () => setNote(null)),
+          onCancel: () => setNote(null)
+        }, undefined, false, undefined, this) : /* @__PURE__ */ u3(Button, {
+          size: "sm",
+          variant: "ghost",
+          disabled: props.busy,
+          onClick: () => setNote({ project: p3.id, draft: NO_NOTE }),
+          children: "Set a step back"
+        }, undefined, false, undefined, this) : null;
+        return /* @__PURE__ */ u3(ProjectCard, {
+          project: p3,
+          money,
+          busy: props.busy,
+          onControl: (act) => props.onControl(p3, act),
+          extra
+        }, p3.id, false, undefined, this);
+      }),
+      startPart,
+      v6.over.length > 0 ? /* @__PURE__ */ u3(Section, {
+        title: "Done and dropped",
+        children: /* @__PURE__ */ u3(List, {
+          children: v6.over.map((p3) => /* @__PURE__ */ u3(ListRow, {
+            title: p3.name,
+            subtitle: `${p3.statusWords}${p3.ended ? ` ${p3.ended}` : ""} · ${money(p3.paid)} paid${p3.made.length > 0 ? ` · made ${p3.made.map((m2) => m2.name).join(", ")}` : ""}`,
+            badge: /* @__PURE__ */ u3(Badge, {
+              tone: STATUS_TONE2[p3.status],
+              children: PROJECT_STATUS_WORDS[p3.status]
+            }, undefined, false, undefined, this)
+          }, p3.id, false, undefined, this))
+        }, undefined, false, undefined, this)
+      }, undefined, false, undefined, this) : null
+    ]
+  }, undefined, true, undefined, this);
+}
+function OrgProjectsTab(props) {
+  const app = useApp();
+  const [busy, run] = useBusy();
+  const view = projectsViewIn(props.section);
+  if (!view)
+    return /* @__PURE__ */ u3(JsonView, {
+      value: props.section
+    }, undefined, false, undefined, this);
+  const play = (change, done) => {
+    if (change === null)
+      return;
+    run(async () => {
+      const result = await app.request({ type: "lre.action", chatId: props.chatId, action: change.action, params: change.params, source: "palette" });
+      if (result && "pending" in result)
+        toastQueued(app, result);
+      if (result)
+        done?.();
+    });
+  };
+  return /* @__PURE__ */ u3(ProjectsBoard, {
+    view,
+    currency: props.state.currency ?? DEFAULT_CURRENCY,
+    busy,
+    onControl: (p3, act) => play(controlChange(props.org.id, p3, act)),
+    onStart: (d3, done) => play(startChange(props.org.id, d3), done)
+  }, undefined, false, undefined, this);
+}
+function GmOrgProjectsTab(props) {
+  const view = projectsViewIn(props.section);
+  if (!view)
+    return /* @__PURE__ */ u3(JsonView, {
+      value: props.section
+    }, undefined, false, undefined, this);
+  const edit = (ops, done) => {
+    if (ops.length > 0)
+      props.gm.edit(ops).then((ok) => ok && done?.());
+  };
+  return /* @__PURE__ */ u3(ProjectsBoard, {
+    view,
+    currency: props.gm.currency,
+    busy: props.gm.busy,
+    onControl: (p3, act) => edit(projectOps(controlChange(props.org.id, p3, act))),
+    onStart: (d3, done) => {
+      const change = startChange(props.org.id, d3);
+      if (change)
+        edit(projectOps(change), done);
+    },
+    onNote: (p3, d3, done) => {
+      if (noteProblem(d3, props.gm.currency) === null)
+        edit(noteOps(p3.id, d3, props.gm.currency), done);
+    }
+  }, undefined, false, undefined, this);
+}
+var PROJECTS_TAB_DEF = { id: PROJECTS_TAB, label: "Projects", order: 45, section: PROJECTS_SECTION, component: OrgProjectsTab, gm: GmOrgProjectsTab };
+function buildProjectRows(doc, org) {
+  return Object.values(doc.entities).filter((e3) => e3.kind === PROJECT_KIND && e3.fields.org === org).map((e3) => {
+    const steps = stepsIn(e3.fields.steps);
+    return { id: e3.id, name: e3.name, status: e3.fields.status === "active" ? "active" : "planned", start: typeof e3.fields.start === "string" && e3.fields.start !== "" ? e3.fields.start : null, steps: steps.length, cost: steps.reduce((n3, s3) => n3 + stepCost(s3), 0) };
+  }).sort((a3, b3) => a3.name.localeCompare(b3.name) || a3.id.localeCompare(b3.id));
+}
+function buildProjectProblem(d3) {
+  if (d3.template === "")
+    return "Choose a template.";
+  return d3.start.trim() === "" || /^\d{4}-\d{2}-\d{2}$/.test(d3.start.trim()) ? null : "Starts: a date, as YYYY-MM-DD.";
+}
+var slug = (text) => text.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 32) || "x";
+function buildProjectPatch(doc, org, d3, templates) {
+  const row = templates[d3.template];
+  if (!row)
+    return [];
+  const name = d3.name.trim().slice(0, PROJECT_LIMITS.name) || (typeof row.name === "string" ? row.name : "Project");
+  const base = `project_${slug(org)}_${slug(name)}`;
+  let id = base;
+  for (let n3 = 2;doc.entities[id]; n3++)
+    id = `${base}_${n3}`;
+  const fields = { org, template: d3.template, steps: Array.isArray(row.steps) ? row.steps : [], status: d3.status, ...d3.start.trim() !== "" ? { start: d3.start.trim() } : {}, ...typeof row.payee === "string" && row.payee !== "" ? { payee: row.payee } : {} };
+  return [{ op: "add", path: pointerOf(["entities", id]), value: { id, kind: PROJECT_KIND, name, tier: "background", fields, relations: [] } }];
+}
+function BuildOrgProjects(props) {
+  const [draft, setDraft] = d2(null);
+  const ids = { name: P2(), start: P2() };
+  const currency = props.doc.currency ?? DEFAULT_CURRENCY;
+  const money = (cents2) => formatMoney(cents2, currency);
+  const rows2 = buildProjectRows(props.doc, props.org);
+  const problem = draft ? buildProjectProblem(draft) : null;
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-stack",
+    "data-lre-build-projects": props.org,
+    children: [
+      rows2.length === 0 ? /* @__PURE__ */ u3("span", {
+        class: "lre-small",
+        children: "No projects. One added here is in the world from the start: planned, or under way as the story begins or from a date."
+      }, undefined, false, undefined, this) : /* @__PURE__ */ u3(List, {
+        children: rows2.map((r3) => /* @__PURE__ */ u3(ListRow, {
+          title: r3.name,
+          subtitle: `${r3.status === "active" ? r3.start ? `Under way from ${r3.start}` : "Under way as the story begins" : "Planned"} · ${r3.steps} steps · ${money(r3.cost)}`,
+          chevron: true,
+          onClick: () => props.onOpen(r3.id),
+          value: /* @__PURE__ */ u3(OverflowMenu, {
+            label: `${r3.name}: more`,
+            disabled: props.busy,
+            items: [{ label: "Remove", danger: true, onSelect: () => props.onPatch([{ op: "remove", path: pointerOf(["entities", r3.id]) }]) }]
+          }, undefined, false, undefined, this)
+        }, r3.id, false, undefined, this))
+      }, undefined, false, undefined, this),
+      draft ? /* @__PURE__ */ u3("div", {
+        class: "lre-stack",
+        "data-lre-build-project-form": true,
+        children: [
+          /* @__PURE__ */ u3(Field, {
+            label: "Template",
+            children: /* @__PURE__ */ u3(RefPicker, {
+              label: "Template",
+              value: draft.template,
+              placeholder: "Choose a template",
+              options: Object.entries(props.templates).map(([id, row]) => ({ value: id, label: typeof row.name === "string" ? row.name : id })),
+              onChange: (template) => setDraft({ ...draft, template })
+            }, undefined, false, undefined, this)
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3(Field, {
+            label: "Name",
+            for: ids.name,
+            help: "Leave it empty for the template's name.",
+            children: /* @__PURE__ */ u3("input", {
+              id: ids.name,
+              class: "lre-input",
+              maxLength: PROJECT_LIMITS.name,
+              value: draft.name,
+              onInput: (event) => setDraft({ ...draft, name: event.currentTarget.value })
+            }, undefined, false, undefined, this)
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3(Field, {
+            label: "When",
+            children: /* @__PURE__ */ u3(RefPicker, {
+              label: "When",
+              value: draft.status,
+              options: [{ value: "planned", label: "Planned: started in play" }, { value: "active", label: "Under way" }],
+              onChange: (status) => setDraft({ ...draft, status: status === "active" ? "active" : "planned" })
+            }, undefined, false, undefined, this)
+          }, undefined, false, undefined, this),
+          draft.status === "active" ? /* @__PURE__ */ u3(Field, {
+            label: "Starts",
+            for: ids.start,
+            help: "A date (YYYY-MM-DD), at 09:00; empty: as the story begins.",
+            error: problem,
+            children: /* @__PURE__ */ u3("input", {
+              id: ids.start,
+              class: "lre-input",
+              placeholder: "YYYY-MM-DD",
+              value: draft.start,
+              onInput: (event) => setDraft({ ...draft, start: event.currentTarget.value })
+            }, undefined, false, undefined, this)
+          }, undefined, false, undefined, this) : null,
+          /* @__PURE__ */ u3("div", {
+            class: "lre-inline",
+            children: [
+              /* @__PURE__ */ u3(Button, {
+                variant: "primary",
+                disabled: props.busy || problem !== null,
+                onClick: () => {
+                  props.onPatch(buildProjectPatch(props.doc, props.org, draft, props.templates));
+                  setDraft(null);
+                },
+                children: "Add the project"
+              }, undefined, false, undefined, this),
+              /* @__PURE__ */ u3(Button, {
+                variant: "ghost",
+                disabled: props.busy,
+                onClick: () => setDraft(null),
+                children: "Cancel"
+              }, undefined, false, undefined, this)
+            ]
+          }, undefined, true, undefined, this)
+        ]
+      }, undefined, true, undefined, this) : /* @__PURE__ */ u3(Button, {
+        variant: "secondary",
+        icon: "plus",
+        disabled: props.busy,
+        onClick: () => setDraft({ template: "", name: "", status: "planned", start: "" }),
+        children: "Add a project"
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+// src/packs/economy/core/tables/modern-us/projects.json
+var projects_default = {
+  id: "economy.projects",
+  pack: "economy",
+  schema: "lre-table/economy.projects/v1",
+  revision: "46bd6c11c3a35c528464d62990f8e500",
+  label: "Production project templates",
+  source: { dataPack: "modern-us", file: "us/projects.json", sourceSchema: "lre-data-src/us/projects/v1", reflectsPeriod: "2025-2026 (typical costs and lengths)", approximate: true, basis: "Typical lengths and costs of small production projects as the author knows them from public industry and agency figures (EIA and state drilling-cost reports for an onshore vertical oil well and a water supply well; RSMeans-style building cost guides for a small commercial building and a small iron foundry; USDA cost-and-returns estimates for a corn season), then rounded. The bands are an ordinary range, not extremes. Treat them as plausible defaults, not quotes." },
+  columns: {
+    name: { type: "text" },
+    description: { type: "text" },
+    payee: { type: "text", doc: "Who its costs are paid to, an outside payee's name." },
+    days: { type: "band", unit: "day", doc: "Its length in calendar days, start to its last step done; its steps give the typical case." },
+    cost_cents: { type: "band", unit: "cents", doc: "What it costs in all; its steps give the typical case." },
+    steps: { type: "json", doc: "Its steps as a project's own steps field holds them (shared/projects.ts stepsIn): id, name, days or business_days, cost, paid, after, inputs, crew, capitalize, unlocks." }
+  },
+  rows: {
+    oil_well: { name: "Oil well", description: "An onshore vertical oil well on a lease the party holds: permits, a pad and road, drilling, completion and a tank battery. Done, it is a well (a mineral property depreciated over ten years) and a monthly oil sales stream that starts two months after first production and declines year by year.", payee: "Drilling contractors", days: { min: 45, typical: 75, max: 150 }, cost_cents: { min: 120000000, typical: 255000000, max: 600000000 }, steps: [{ id: "permits", name: "Permits and survey", business_days: 15, cost: 2500000, paid: "start" }, { id: "site", name: "Pad and road", days: 10, cost: 12000000, paid: "split", after: ["permits"], capitalize: true, crew: { size: 6, role: "dirt crew" } }, { id: "drill", name: "Drilling", days: 25, cost: 95000000, paid: "split", after: ["site"], capitalize: true, inputs: [{ name: "Steel casing", qty: 9000, unit: "ft", cents: 4500 }], crew: { size: 12, role: "rig crew" } }, { id: "complete", name: "Completion and fracturing", days: 12, cost: 90000000, paid: "split", after: ["drill"], capitalize: true, crew: { size: 20, role: "frac crew" } }, { id: "hookup", name: "Tank battery and hookup", days: 7, cost: 15000000, paid: "end", after: ["complete"], capitalize: true, unlocks: [{ make: { name: "Oil well", kind: "property", life_months: 120, value: "cost", fields: { property_type: "mineral", reserves: 120000 } } }, { name: "Oil sales", stream: { flow_kind: "income", from: "Crude purchaser", every: "month", days: [25], revenue: [{ type: "royalty", production: { qi: 3000, di_pct: 60, b: 1 }, price: 7000, share_pct: 87.5, deductions_pct: 2, severance_pct: 4.6, lag_months: 2, unit: "bbl" }] } }] }] },
+    water_well: { name: "Water well", description: "A water supply well with its pump, tank and meter, selling water by the barrel to the operators nearby. Done, it is a well depreciated over twenty years and a steady monthly water sales stream.", payee: "Water well contractor", days: { min: 10, typical: 21, max: 60 }, cost_cents: { min: 1500000, typical: 4150000, max: 12000000 }, steps: [{ id: "permit", name: "Water rights and permit", business_days: 10, cost: 150000, paid: "start" }, { id: "drill", name: "Drilling", days: 4, cost: 2400000, paid: "split", after: ["permit"], capitalize: true, crew: { size: 3, role: "drill crew" } }, { id: "pump", name: "Pump, tank and meter", days: 3, cost: 1600000, paid: "end", after: ["drill"], capitalize: true, unlocks: [{ make: { name: "Water well", kind: "property", life_months: 240, value: "cost" } }, { name: "Water sales", stream: { flow_kind: "income", from: "Water buyers", every: "month", days: [25], revenue: [{ type: "royalty", production: 30000, price: 50, unit: "bbl" }] } }] }] },
+    foundry: { name: "Foundry", description: "A small iron foundry: permits, site works, the building, an induction furnace and molding line set up beside it, then commissioning. Done, it is a plant depreciated over twenty-five years and castings sold every Friday, about 12 tons a week; its staff and metal are the party's own costs.", payee: "Builders and suppliers", days: { min: 120, typical: 166, max: 365 }, cost_cents: { min: 150000000, typical: 338000000, max: 900000000 }, steps: [{ id: "permits", name: "Permits and design", business_days: 30, cost: 6000000, paid: "start", capitalize: true }, { id: "site", name: "Site works", days: 20, cost: 15000000, paid: "split", after: ["permits"], capitalize: true, crew: { size: 8, role: "site crew" } }, { id: "building", name: "Building", days: 90, cost: 180000000, paid: "split", after: ["site"], capitalize: true, crew: { size: 25, role: "construction crew" } }, { id: "furnace", name: "Furnace and molding line", days: 45, cost: 20000000, paid: "split", after: ["site"], capitalize: true, inputs: [{ name: "Induction furnace", qty: 1, cents: 65000000 }, { name: "Molding line", qty: 1, cents: 48000000 }] }, { id: "commission", name: "Commissioning and first pour", days: 14, cost: 4000000, paid: "end", after: ["building", "furnace"], capitalize: true, crew: { size: 18, role: "foundry hands" }, unlocks: [{ make: { name: "Foundry", kind: "property", life_months: 300, value: "cost" } }, { name: "Castings sales", stream: { flow_kind: "income", from: "Castings customers", every: "week", weekdays: [5], at: "17:00", revenue: [{ type: "product", units: 12, price: 500000, buyers: 1, margin_pct: 35 }] } }] }] },
+    building: { name: "Rental building", description: "A small commercial building of six units let to outside tenants: design and permits, the foundation, the frame and shell, fit-out and the occupancy inspection. Done, it is a property depreciated over thirty-nine years, and its rent comes in from the month it opens.", payee: "General contractor", days: { min: 120, typical: 174, max: 400 }, cost_cents: { min: 90000000, typical: 171500000, max: 500000000 }, steps: [{ id: "design", name: "Design and permits", business_days: 30, cost: 6000000, paid: "start", capitalize: true }, { id: "foundation", name: "Foundation", days: 20, cost: 25000000, paid: "split", after: ["design"], capitalize: true, crew: { size: 8, role: "concrete crew" } }, { id: "shell", name: "Frame and shell", days: 60, cost: 90000000, paid: "split", after: ["foundation"], capitalize: true, crew: { size: 15, role: "framers" } }, { id: "fitout", name: "Fit-out", days: 45, cost: 50000000, paid: "split", after: ["shell"], capitalize: true, crew: { size: 10, role: "trades" } }, { id: "inspect", name: "Inspection and occupancy", business_days: 5, cost: 500000, paid: "end", after: ["fitout"], unlocks: [{ make: { name: "Rental building", kind: "property", life_months: 468, value: "cost", fields: { units: 6, market_rent: 450000, managed: true, upkeep_pct: 1 } } }] }] },
+    farm_season: { name: "Farm season", description: "One season of corn on a mid-sized family farm (about 160 hectares): ground work and planting, the growing season and the harvest, its grain sold to the elevator over the three months after. Nothing is built: every cost is the season's own.", payee: "Farm suppliers", days: { min: 110, typical: 144, max: 180 }, cost_cents: { min: 15000000, typical: 22500000, max: 40000000 }, steps: [{ id: "plant", name: "Ground work and planting", days: 10, cost: 2000000, paid: "start", inputs: [{ name: "Seed corn", qty: 400, unit: "acre", cents: 12000 }, { name: "Fertilizer", qty: 400, unit: "acre", cents: 16000 }], crew: { size: 3, role: "farmhands" } }, { id: "grow", name: "Growing season", days: 120, cost: 4000000, paid: "split", after: ["plant"] }, { id: "harvest", name: "Harvest", days: 14, cost: 3500000, paid: "end", after: ["grow"], inputs: [{ name: "Drying and hauling", qty: 72000, unit: "bu", cents: 25 }], crew: { size: 4, role: "harvest crew" }, unlocks: [{ name: "Grain sales", stream: { flow_kind: "income", from: "Grain elevator", amount_cents: 10080000, every: "month", days: [15], count: 3, category: "sales" } }] }] }
+  }
+};
+
+// src/packs/economy/ui/projects.ts
+function projectTemplatesOf(doc) {
+  const own = doc.tables[PROJECTS_TABLE]?.rows;
+  if (own)
+    return own;
+  const table = projects_default;
+  return isRecord(table) && isRecord(table.rows) ? table.rows : {};
+}
+
+// src/engine/pack-kit.ts
+function numOf(v6, fallback = 0) {
+  return typeof v6 === "number" && Number.isFinite(v6) ? v6 : fallback;
+}
+function strOf(v6, fallback = "") {
+  return typeof v6 === "string" ? v6 : fallback;
+}
+function objOf(v6) {
+  return isRecord(v6) ? v6 : {};
+}
+function bandOfJson(v6) {
+  if (!isRecord(v6))
+    return null;
+  const o4 = v6;
+  return typeof o4.min === "number" && typeof o4.typical === "number" && typeof o4.max === "number" ? { min: o4.min, typical: o4.typical, max: o4.max } : null;
+}
+function own(map, key) {
+  return hasOwn(map, key) ? map[key] : undefined;
+}
+function labelOf(ctx, id) {
+  return own(ctx.state.entities, id)?.name ?? own(ctx.world.places, id)?.name ?? own(ctx.world.tracks, id)?.label ?? (id.replace(/_/g, " ").trim() || "nothing");
+}
+function sliceOf(state, pack) {
+  return state.packs[pack] ?? {};
+}
+function mutableSlice(state, pack) {
+  const s3 = state.packs[pack] ?? {};
+  state.packs[pack] = s3;
+  return s3;
+}
+function sliceRecord(state, pack, key) {
+  const s3 = mutableSlice(state, pack);
+  const v6 = s3[key];
+  if (isRecord(v6))
+    return v6;
+  const fresh = {};
+  s3[key] = fresh;
+  return fresh;
+}
+
+// src/engine/calendar.ts
+var MINUTES_PER_DAY = 1440;
+var DEFAULT_DAY_PARTS = [
+  { id: "night", label: "Night", start: "00:00" },
+  { id: "morning", label: "Morning", start: "06:00" },
+  { id: "afternoon", label: "Afternoon", start: "12:00" },
+  { id: "evening", label: "Evening", start: "18:00" }
+];
+var GREGORIAN_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+var GREGORIAN_WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+var GREGORIAN_MONTHS_FULL = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+var GREGORIAN_WEEKDAYS_FULL = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+var HHMM2 = /^(\d{1,2}):(\d{2})$/;
+var ISO_DATE = /^(-?\d{1,6})-(\d{2})-(\d{2})/;
+var ISO_LOCAL = /^(-?\d{1,6})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/;
+function floorDiv(a3, b3) {
+  return Math.floor(a3 / b3);
+}
+function mod(a3, b3) {
+  return (a3 % b3 + b3) % b3;
+}
+function parseHHMM(text) {
+  const m2 = HHMM2.exec(text.trim());
+  if (!m2)
+    throw new RangeError(`expected HH:MM, got ${text}`);
+  const h3 = Number(m2[1]);
+  const min = Number(m2[2]);
+  if (h3 > 24 || min > 59 || h3 === 24 && min !== 0)
+    throw new RangeError(`bad time ${text}`);
+  return h3 * 60 + min;
+}
+function formatTimeOfDay(minuteOfDay) {
+  const m2 = mod(minuteOfDay, MINUTES_PER_DAY);
+  const h3 = Math.floor(m2 / 60);
+  return `${h3 % 12 === 0 ? 12 : h3 % 12}:${String(m2 % 60).padStart(2, "0")} ${h3 < 12 ? "AM" : "PM"}`;
+}
+function daysFromCivil(y3, m2, d3) {
+  const yy = m2 <= 2 ? y3 - 1 : y3;
+  const era = floorDiv(yy, 400);
+  const yoe = yy - era * 400;
+  const doy = floorDiv(153 * (m2 + (m2 > 2 ? -3 : 9)) + 2, 5) + d3 - 1;
+  const doe = yoe * 365 + floorDiv(yoe, 4) - floorDiv(yoe, 100) + doy;
+  return era * 146097 + doe - 719468;
+}
+function civilFromDays(z0) {
+  const z3 = z0 + 719468;
+  const era = floorDiv(z3, 146097);
+  const doe = z3 - era * 146097;
+  const yoe = floorDiv(doe - floorDiv(doe, 1460) + floorDiv(doe, 36524) - floorDiv(doe, 146096), 365);
+  const y3 = yoe + era * 400;
+  const doy = doe - (365 * yoe + floorDiv(yoe, 4) - floorDiv(yoe, 100));
+  const mp = floorDiv(5 * doy + 2, 153);
+  const d3 = doy - floorDiv(153 * mp + 2, 5) + 1;
+  const m2 = mp < 10 ? mp + 3 : mp - 9;
+  return { year: m2 <= 2 ? y3 + 1 : y3, month: m2, day: d3 };
+}
+function gregorianMonthLength(year, month) {
+  return daysFromCivil(month === 12 ? year + 1 : year, month === 12 ? 1 : month + 1, 1) - daysFromCivil(year, month, 1);
+}
+var GREGORIAN = {
+  abs: daysFromCivil,
+  date: civilFromDays,
+  weekday: (abs) => mod(abs + 4, 7),
+  monthLength: gregorianMonthLength,
+  months: 12,
+  monthNames: GREGORIAN_MONTHS,
+  weekdayNames: GREGORIAN_WEEKDAYS,
+  fullMonthNames: GREGORIAN_MONTHS_FULL,
+  fullWeekdayNames: GREGORIAN_WEEKDAYS_FULL
+};
+function customSystem(def2) {
+  const lengths = def2.monthLengths.length > 0 ? def2.monthLengths.map((n3) => Math.max(1, Math.floor(n3))) : [30];
+  const yearLength = lengths.reduce((a3, b3) => a3 + b3, 0);
+  const months = def2.monthNames.length >= lengths.length ? def2.monthNames : lengths.map((_3, i3) => `M${i3 + 1}`);
+  const weekdays = def2.weekdayNames.length > 0 ? def2.weekdayNames : ["Day"];
+  return {
+    abs(year, month, day) {
+      let doy = day - 1;
+      for (let i3 = 0;i3 < month - 1 && i3 < lengths.length; i3++)
+        doy += lengths[i3] ?? 0;
+      return year * yearLength + doy;
+    },
+    date(abs) {
+      const year = floorDiv(abs, yearLength);
+      let doy = abs - year * yearLength;
+      let month = 1;
+      for (const len of lengths) {
+        if (doy < len)
+          break;
+        doy -= len;
+        month++;
+      }
+      return { year, month, day: doy + 1 };
+    },
+    weekday: (abs) => mod(abs, weekdays.length),
+    monthLength: (_year, month) => lengths[month - 1] ?? 0,
+    months: lengths.length,
+    monthNames: months,
+    weekdayNames: weekdays,
+    fullMonthNames: months,
+    fullWeekdayNames: weekdays
+  };
+}
+var cache = new WeakMap;
+function calendarOf(world) {
+  const def2 = world.calendar;
+  const hit = cache.get(def2);
+  if (hit)
+    return hit;
+  const system = def2.system === "custom" && def2.custom ? customSystem(def2.custom) : GREGORIAN;
+  const m2 = ISO_LOCAL.exec(def2.epoch);
+  if (!m2)
+    throw new RangeError(`calendar epoch must be YYYY-MM-DDTHH:MM, got ${def2.epoch}`);
+  const parts = [...def2.dayParts.length > 0 ? def2.dayParts : DEFAULT_DAY_PARTS].sort((a3, b3) => parseHHMM(a3.start) - parseHHMM(b3.start));
+  const cal = {
+    def: def2,
+    system,
+    epochAbs: system.abs(Number(m2[1]), Number(m2[2]), Number(m2[3])),
+    epochMinute: Number(m2[4]) * 60 + Number(m2[5]),
+    dayParts: parts,
+    partStarts: parts.map((p3) => parseHHMM(p3.start))
+  };
+  cache.set(def2, cal);
+  return cal;
+}
+function dateAt(cal, clock) {
+  const local = cal.epochMinute + Math.floor(clock);
+  const dayIndex = floorDiv(local, MINUTES_PER_DAY);
+  const abs = cal.epochAbs + dayIndex;
+  const d3 = cal.system.date(abs);
+  return { ...d3, weekday: cal.system.weekday(abs), dayIndex, minuteOfDay: local - dayIndex * MINUTES_PER_DAY };
+}
+function clockAt(cal, dayIndex, minuteOfDay) {
+  return dayIndex * MINUTES_PER_DAY + minuteOfDay - cal.epochMinute;
+}
+function dayIndexOf(cal, year, month, day) {
+  return cal.system.abs(year, month, day) - cal.epochAbs;
+}
+function clockOfLocal(cal, text) {
+  const full = ISO_LOCAL.exec(text);
+  const date = full ?? ISO_DATE.exec(text);
+  if (!date)
+    throw new RangeError(`expected YYYY-MM-DD[THH:MM], got ${text}`);
+  const minute = full ? Number(full[4]) * 60 + Number(full[5]) : 0;
+  return clockAt(cal, dayIndexOf(cal, Number(date[1]), Number(date[2]), Number(date[3])), minute);
+}
+function dayIndexOfText(cal, text) {
+  const m2 = ISO_DATE.exec(text);
+  if (!m2)
+    throw new RangeError(`expected YYYY-MM-DD, got ${text}`);
+  return dayIndexOf(cal, Number(m2[1]), Number(m2[2]), Number(m2[3]));
+}
+var NUMBER_WORDS = { a: 1, an: 1, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12 };
+var SPAN_MINUTES = { minute: 1, min: 1, hour: 60, hr: 60, day: MINUTES_PER_DAY, week: 7 * MINUTES_PER_DAY };
+var SPAN = new RegExp(`\\s(\\d+|${Object.keys(NUMBER_WORDS).join("|")})\\s+(minute|min|hour|hr|day|week)s?(?=\\s)`);
+function monthName(cal, month) {
+  return cal.system.monthNames[month - 1] ?? `M${month}`;
+}
+function weekdayName(cal, weekday) {
+  return cal.system.weekdayNames[weekday] ?? `D${weekday}`;
+}
+function formatClock(cal, clock, offsetMinutes = 0) {
+  const d3 = dateAt(cal, clock + offsetMinutes);
+  return `${weekdayName(cal, d3.weekday)} ${d3.day} ${monthName(cal, d3.month)} ${d3.year}, ${formatTimeOfDay(d3.minuteOfDay)}`;
+}
+function easterSunday(cal, year) {
+  const a3 = year % 19;
+  const b3 = Math.floor(year / 100);
+  const c3 = year % 100;
+  const d3 = Math.floor(b3 / 4);
+  const e3 = b3 % 4;
+  const f3 = Math.floor((b3 + 8) / 25);
+  const g2 = Math.floor((b3 - f3 + 1) / 3);
+  const h3 = (19 * a3 + b3 - d3 - g2 + 15) % 30;
+  const i3 = Math.floor(c3 / 4);
+  const k2 = c3 % 4;
+  const l3 = (32 + 2 * e3 + 2 * i3 - h3 - k2) % 7;
+  const m2 = Math.floor((a3 + 11 * h3 + 22 * l3) / 451);
+  const month = Math.floor((h3 + l3 - 7 * m2 + 114) / 31);
+  const day = (h3 + l3 - 7 * m2 + 114) % 31 + 1;
+  return cal.system.abs(year, month, day);
+}
+function ruleDay(cal, holidays, rule, year, depth) {
+  switch (rule.type) {
+    case "fixed":
+      return rule.day <= cal.system.monthLength(year, rule.month) ? cal.system.abs(year, rule.month, rule.day) : null;
+    case "nth_weekday": {
+      const len = cal.system.monthLength(year, rule.month);
+      if (len <= 0)
+        return null;
+      const wdCount = cal.system.weekdayNames.length;
+      if (rule.n >= 0) {
+        const first = cal.system.abs(year, rule.month, 1);
+        const offset = mod(rule.weekday - cal.system.weekday(first), wdCount);
+        const day2 = 1 + offset + (Math.max(1, rule.n) - 1) * wdCount;
+        return day2 <= len ? first + day2 - 1 : null;
+      }
+      const last = cal.system.abs(year, rule.month, len);
+      const back = mod(cal.system.weekday(last) - rule.weekday, wdCount);
+      const day = len - back - (Math.abs(rule.n) - 1) * wdCount;
+      return day >= 1 ? cal.system.abs(year, rule.month, day) : null;
+    }
+    case "relative": {
+      if (depth > 8)
+        return null;
+      const base = holidays.find((h3) => h3.id === rule.to);
+      const at2 = base ? ruleDay(cal, holidays, base.rule, year, depth + 1) : null;
+      return at2 === null ? null : at2 + rule.days;
+    }
+    case "easter":
+      return cal.def.system === "gregorian" ? easterSunday(cal, year) + rule.days : null;
+  }
+}
+function holidaysOn(cal, dayIndex, holidays = cal.def.holidays) {
+  const abs = cal.epochAbs + dayIndex;
+  const { year } = cal.system.date(abs);
+  return holidays.filter((h3) => ruleDay(cal, holidays, h3.rule, year, 0) === abs);
+}
+var ZONES = {
+  UTC: { standard: 0, dst: null },
+  "Etc/UTC": { standard: 0, dst: null },
+  "America/New_York": { standard: -300, dst: "us" },
+  "America/Detroit": { standard: -300, dst: "us" },
+  "America/Indiana/Indianapolis": { standard: -300, dst: "us" },
+  "America/Kentucky/Louisville": { standard: -300, dst: "us" },
+  "America/Chicago": { standard: -360, dst: "us" },
+  "America/Menominee": { standard: -360, dst: "us" },
+  "America/Denver": { standard: -420, dst: "us" },
+  "America/Boise": { standard: -420, dst: "us" },
+  "America/Phoenix": { standard: -420, dst: null },
+  "America/Los_Angeles": { standard: -480, dst: "us" },
+  "America/Anchorage": { standard: -540, dst: "us" },
+  "America/Juneau": { standard: -540, dst: "us" },
+  "America/Adak": { standard: -600, dst: "us" },
+  "Pacific/Honolulu": { standard: -600, dst: null },
+  "America/Puerto_Rico": { standard: -240, dst: null },
+  "Europe/London": { standard: 0, dst: "eu" },
+  "Europe/Dublin": { standard: 0, dst: "eu" },
+  "Europe/Paris": { standard: 60, dst: "eu" },
+  "Europe/Berlin": { standard: 60, dst: "eu" },
+  "Europe/Madrid": { standard: 60, dst: "eu" },
+  "Europe/Rome": { standard: 60, dst: "eu" },
+  "Europe/Athens": { standard: 120, dst: "eu" },
+  "Asia/Tokyo": { standard: 540, dst: null },
+  "Asia/Shanghai": { standard: 480, dst: null },
+  "Asia/Kolkata": { standard: 330, dst: null },
+  "Australia/Sydney": { standard: 600, dst: "south" }
+};
+function knownZone(zone) {
+  return Object.prototype.hasOwnProperty.call(ZONES, zone);
+}
+function zoneOffset(zone, year, month, day, minuteOfDay) {
+  const rule = own(ZONES, zone);
+  if (!rule)
+    return 0;
+  if (!rule.dst)
+    return rule.standard;
+  const abs = daysFromCivil(year, month, day);
+  const nthSunday = (m2, n3) => {
+    const first = daysFromCivil(year, m2, 1);
+    return first + mod(-mod(first + 4, 7), 7) + (n3 - 1) * 7;
+  };
+  const lastSunday = (m2) => {
+    const last = daysFromCivil(year, m2, gregorianMonthLength(year, m2));
+    return last - mod(last + 4, 7);
+  };
+  const at2 = (d3, minute) => abs > d3 || abs === d3 && minuteOfDay >= minute;
+  let summer;
+  if (rule.dst === "us")
+    summer = at2(nthSunday(3, 2), 120) && !at2(nthSunday(11, 1), 120);
+  else if (rule.dst === "eu")
+    summer = at2(lastSunday(3), 60 + rule.standard) && !at2(lastSunday(10), 60 + rule.standard);
+  else
+    summer = !(at2(nthSunday(4, 1), 180) && !at2(nthSunday(10, 1), 120));
+  return rule.standard + (summer ? 60 : 0);
+}
+function placeZone(world, placeId) {
+  let id = placeId ?? undefined;
+  for (let guard = 0;id && guard < 32; guard++) {
+    const place2 = own(world.places, id);
+    if (!place2)
+      break;
+    if (place2.timeZone)
+      return place2.timeZone;
+    id = place2.parent;
+  }
+  return world.calendar.timeZone;
+}
+function placeOffset(world, clock, placeId) {
+  const cal = calendarOf(world);
+  if (world.calendar.system !== "gregorian")
+    return 0;
+  const zone = placeZone(world, placeId);
+  if (zone === world.calendar.timeZone)
+    return 0;
+  const d3 = dateAt(cal, clock);
+  const home = zoneOffset(world.calendar.timeZone, d3.year, d3.month, d3.day, d3.minuteOfDay);
+  if (!knownZone(zone) || !knownZone(world.calendar.timeZone))
+    return 0;
+  return zoneOffset(zone, d3.year, d3.month, d3.day, d3.minuteOfDay) - home;
+}
+
+// src/engine/expr.ts
+class ExprError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = "ExprError";
+  }
+}
+
+class ExprLimitError extends ExprError {
+  limit;
+  max;
+  constructor(limit2, max) {
+    super(`Formula exceeds the ${LIMIT_NAMES[limit2]} limit of ${max}`);
+    this.name = "ExprLimitError";
+    this.limit = limit2;
+    this.max = max;
+  }
+}
+var LIMIT_NAMES = {
+  sourceLength: "source length",
+  depth: "nesting depth",
+  nodes: "node count",
+  steps: "evaluation step"
+};
+var DEFAULT_LIMITS = Object.freeze({
+  maxSourceLength: 4096,
+  maxDepth: 64,
+  maxNodes: 2048,
+  maxSteps: 1e5
+});
+function resolveLimits(overrides) {
+  const out = { ...DEFAULT_LIMITS };
+  if (overrides) {
+    for (const key of Object.keys(DEFAULT_LIMITS)) {
+      const v6 = overrides[key];
+      if (v6 === undefined)
+        continue;
+      if (!Number.isSafeInteger(v6) || v6 < 1)
+        throw new RangeError(`${key} must be a positive integer, got ${v6}`);
+      out[key] = v6;
+    }
+  }
+  return out;
+}
+
+class ExprBudget {
+  max;
+  left;
+  constructor(max = DEFAULT_LIMITS.maxSteps) {
+    if (!Number.isSafeInteger(max) || max < 1)
+      throw new RangeError(`budget must be a positive integer, got ${max}`);
+    this.max = max;
+    this.left = max;
+  }
+  get used() {
+    return this.max - this.left;
+  }
+  spend() {
+    if (this.left <= 0)
+      throw new ExprLimitError("steps", this.max);
+    this.left--;
+  }
+}
+var OPS = ["<=", ">=", "==", "!=", "&&", "||", "+", "-", "*", "/", "%", "<", ">", "!", "(", ")", ",", ".", "?", ":"];
+var isDigit = (c3) => c3 !== undefined && c3 >= "0" && c3 <= "9";
+var isIdStart = (c3) => c3 >= "A" && c3 <= "Z" || c3 >= "a" && c3 <= "z" || c3 === "_";
+var isIdPart = (c3) => isIdStart(c3) || isDigit(c3);
+function tokenize(src) {
+  const out = [];
+  let i3 = 0;
+  while (i3 < src.length) {
+    const c3 = src[i3];
+    if (/\s/.test(c3)) {
+      i3++;
+      continue;
+    }
+    if (isDigit(c3) || c3 === "." && isDigit(src[i3 + 1])) {
+      let j3 = i3;
+      while (isDigit(src[j3]))
+        j3++;
+      if (src[j3] === "." && isDigit(src[j3 + 1])) {
+        j3++;
+        while (isDigit(src[j3]))
+          j3++;
+      }
+      out.push({ t: "num", v: src.slice(i3, j3), at: i3 });
+      i3 = j3;
+      continue;
+    }
+    if (c3 === "'" || c3 === '"') {
+      let j3 = i3 + 1;
+      let s3 = "";
+      while (j3 < src.length && src[j3] !== c3) {
+        if (src[j3] === "\\" && j3 + 1 < src.length) {
+          s3 += src[j3 + 1];
+          j3 += 2;
+          continue;
+        }
+        s3 += src[j3++];
+      }
+      if (j3 >= src.length)
+        throw new ExprError(`Unclosed quote starting at character ${i3 + 1}`);
+      out.push({ t: "str", v: s3, at: i3 });
+      i3 = j3 + 1;
+      continue;
+    }
+    if (isIdStart(c3)) {
+      let j3 = i3 + 1;
+      while (j3 < src.length && isIdPart(src[j3]))
+        j3++;
+      out.push({ t: "id", v: src.slice(i3, j3), at: i3 });
+      i3 = j3;
+      continue;
+    }
+    const op = OPS.find((o4) => src.startsWith(o4, i3));
+    if (!op)
+      throw new ExprError(`Unexpected "${c3}" at character ${i3 + 1}`);
+    out.push({ t: "op", v: op, at: i3 });
+    i3 += op.length;
+  }
+  return out;
+}
+var hasOwn2 = (o4, k2) => Object.prototype.hasOwnProperty.call(o4, k2);
+var BP = {
+  or: 1,
+  "||": 1,
+  and: 2,
+  "&&": 2,
+  "==": 3,
+  "!=": 3,
+  "<": 4,
+  "<=": 4,
+  ">": 4,
+  ">=": 4,
+  "+": 5,
+  "-": 5,
+  "*": 6,
+  "/": 6,
+  "%": 6
+};
+
+class Parser {
+  toks;
+  limits;
+  i = 0;
+  depth = 0;
+  nodes = 0;
+  constructor(toks, limits) {
+    this.toks = toks;
+    this.limits = limits;
+  }
+  parse() {
+    const root = this.expr(0);
+    if (this.i < this.toks.length)
+      this.fail(`Unexpected "${this.toks[this.i].v}"`);
+    return { root, nodeCount: this.nodes };
+  }
+  peek() {
+    return this.toks[this.i];
+  }
+  fail(msg) {
+    const at2 = this.peek()?.at;
+    throw new ExprError(at2 === undefined ? `${msg} at end of expression` : `${msg} at character ${at2 + 1}`);
+  }
+  eat(v6) {
+    const t3 = this.peek();
+    if (!t3 || t3.v !== v6)
+      this.fail(`Expected "${v6}"`);
+    this.i++;
+  }
+  node(n3) {
+    if (++this.nodes > this.limits.maxNodes)
+      throw new ExprLimitError("nodes", this.limits.maxNodes);
+    return n3;
+  }
+  nest(fn) {
+    if (++this.depth > this.limits.maxDepth)
+      throw new ExprLimitError("depth", this.limits.maxDepth);
+    const r3 = fn();
+    this.depth--;
+    return r3;
+  }
+  binOp(t3) {
+    if (!t3)
+      return null;
+    if (t3.t === "op" && hasOwn2(BP, t3.v))
+      return t3.v;
+    if (t3.t === "id" && (t3.v === "and" || t3.v === "or"))
+      return t3.v;
+    return null;
+  }
+  expr(minBp) {
+    let left = this.unary();
+    for (;; ) {
+      const t3 = this.peek();
+      if (t3?.t === "op" && t3.v === "?" && minBp === 0) {
+        this.i++;
+        const a3 = this.nest(() => this.expr(0));
+        this.eat(":");
+        const b3 = this.nest(() => this.expr(0));
+        left = this.node({ k: "tern", c: left, a: a3, b: b3 });
+        continue;
+      }
+      const op = this.binOp(t3);
+      const bp = op === null ? 0 : BP[op];
+      if (op === null || bp <= minBp)
+        break;
+      this.i++;
+      const right = this.expr(bp);
+      left = this.node({ k: "bin", op: op === "&&" ? "and" : op === "||" ? "or" : op, a: left, b: right });
+    }
+    return left;
+  }
+  unary() {
+    const t3 = this.peek();
+    if (!t3)
+      this.fail("Expression ended too early");
+    if (t3.t === "op" && t3.v === "-") {
+      this.i++;
+      return this.node({ k: "un", op: "-", a: this.nest(() => this.unary()) });
+    }
+    if (t3.t === "op" && t3.v === "+") {
+      this.i++;
+      return this.nest(() => this.unary());
+    }
+    if (t3.t === "op" && t3.v === "!" || t3.t === "id" && t3.v === "not") {
+      this.i++;
+      return this.node({ k: "un", op: "not", a: this.nest(() => this.unary()) });
+    }
+    return this.primary();
+  }
+  primary() {
+    const t3 = this.peek();
+    if (!t3)
+      this.fail("Expression ended too early");
+    this.i++;
+    if (t3.t === "num") {
+      const v6 = Number(t3.v);
+      if (!Number.isFinite(v6))
+        throw new ExprError(`Number too large at character ${t3.at + 1}`);
+      return this.node({ k: "num", v: v6 });
+    }
+    if (t3.t === "str")
+      return this.node({ k: "str", v: t3.v });
+    if (t3.t === "op" && t3.v === "(") {
+      const n3 = this.nest(() => this.expr(0));
+      this.eat(")");
+      return n3;
+    }
+    if (t3.t === "id") {
+      if (t3.v === "true")
+        return this.node({ k: "lit", v: true });
+      if (t3.v === "false")
+        return this.node({ k: "lit", v: false });
+      if (t3.v === "null")
+        return this.node({ k: "lit", v: null });
+      if (this.peek()?.v === "(") {
+        this.i++;
+        const args = [];
+        if (this.peek()?.v !== ")") {
+          for (;; ) {
+            args.push(this.nest(() => this.expr(0)));
+            if (this.peek()?.v === ",") {
+              this.i++;
+              continue;
+            }
+            break;
+          }
+        }
+        this.eat(")");
+        return this.node({ k: "call", name: t3.v, args });
+      }
+      const path2 = [t3.v];
+      while (this.peek()?.v === ".") {
+        this.i++;
+        const next = this.peek();
+        if (!next || next.t !== "id")
+          this.fail('Expected a name after "."');
+        path2.push(next.v);
+        this.i++;
+      }
+      return this.node({ k: "id", path: path2 });
+    }
+    this.i--;
+    this.fail(`Unexpected "${t3.v}"`);
+  }
+}
+var PARSED = new Map;
+var PARSED_CAP = 4096;
+function compile(src, limits) {
+  const known = limits === undefined ? PARSED.get(src) : undefined;
+  if (known)
+    return known;
+  const lim = resolveLimits(limits);
+  if (typeof src !== "string")
+    throw new TypeError("formula must be a string");
+  if (src.length > lim.maxSourceLength)
+    throw new ExprLimitError("sourceLength", lim.maxSourceLength);
+  const source = src.trim();
+  const { root, nodeCount } = new Parser(tokenize(source), lim).parse();
+  const program = { source, root, nodeCount };
+  if (limits === undefined) {
+    if (PARSED.size >= PARSED_CAP)
+      PARSED.delete(PARSED.keys().next().value ?? "");
+    PARSED.set(src, program);
+  }
+  return program;
+}
+var MATH = {
+  min: (a3) => Math.min(...a3),
+  max: (a3) => Math.max(...a3),
+  clamp: ([v6, lo, hi]) => Math.min(hi, Math.max(lo, v6)),
+  floor: ([v6]) => Math.floor(v6),
+  ceil: ([v6]) => Math.ceil(v6),
+  round: ([v6]) => Math.round(v6),
+  abs: ([v6]) => Math.abs(v6)
+};
+var MATH_FUNCTIONS = Object.keys(MATH);
+function fin(x2) {
+  return Number.isFinite(x2) ? x2 : 0;
+}
+function num4(v6) {
+  if (typeof v6 === "number")
+    return fin(v6);
+  if (typeof v6 === "boolean")
+    return v6 ? 1 : 0;
+  if (v6 === null)
+    return 0;
+  const n3 = Number(v6);
+  return Number.isFinite(n3) ? n3 : 0;
+}
+function truthy(v6) {
+  return !(v6 === false || v6 === null || v6 === 0 || v6 === "");
+}
+function fromEnv(v6, what) {
+  switch (typeof v6) {
+    case "number":
+      return fin(v6);
+    case "string":
+    case "boolean":
+      return v6;
+    default:
+      if (v6 === null)
+        return v6;
+      throw new ExprError(`The environment returned an unsupported value for ${what}`);
+  }
+}
+function walk(n3, c3) {
+  c3.budget.spend();
+  switch (n3.k) {
+    case "num":
+    case "str":
+    case "lit":
+      return n3.v;
+    case "id": {
+      const v6 = c3.env.lookup(n3.path);
+      if (v6 === undefined) {
+        c3.opts.unknown?.add(n3.path.join("."));
+        return 0;
+      }
+      return fromEnv(v6, n3.path.join("."));
+    }
+    case "call": {
+      const args = n3.args.map((a3) => walk(a3, c3));
+      const math = hasOwn2(MATH, n3.name) ? MATH[n3.name] : undefined;
+      if (math)
+        return fin(math(args.map(num4)));
+      const v6 = c3.env.call?.(n3.name, args);
+      if (v6 === undefined) {
+        c3.opts.unknown?.add(`${n3.name}()`);
+        return 0;
+      }
+      return fromEnv(v6, `${n3.name}()`);
+    }
+    case "un": {
+      const a3 = walk(n3.a, c3);
+      return n3.op === "-" ? -num4(a3) : !truthy(a3);
+    }
+    case "tern": {
+      if (c3.opts.all) {
+        const cond = walk(n3.c, c3), a3 = walk(n3.a, c3), b3 = walk(n3.b, c3);
+        return truthy(cond) ? a3 : b3;
+      }
+      return truthy(walk(n3.c, c3)) ? walk(n3.a, c3) : walk(n3.b, c3);
+    }
+    case "bin": {
+      if (c3.opts.all && (n3.op === "and" || n3.op === "or")) {
+        const a4 = walk(n3.a, c3), b4 = walk(n3.b, c3);
+        return n3.op === "and" ? truthy(a4) ? b4 : a4 : truthy(a4) ? a4 : b4;
+      }
+      if (n3.op === "and") {
+        const a4 = walk(n3.a, c3);
+        return truthy(a4) ? walk(n3.b, c3) : a4;
+      }
+      if (n3.op === "or") {
+        const a4 = walk(n3.a, c3);
+        return truthy(a4) ? a4 : walk(n3.b, c3);
+      }
+      const a3 = walk(n3.a, c3);
+      const b3 = walk(n3.b, c3);
+      switch (n3.op) {
+        case "+":
+          return typeof a3 === "string" || typeof b3 === "string" ? `${a3 ?? ""}${b3 ?? ""}` : fin(num4(a3) + num4(b3));
+        case "-":
+          return fin(num4(a3) - num4(b3));
+        case "*":
+          return fin(num4(a3) * num4(b3));
+        case "/":
+          return fin(num4(a3) / num4(b3));
+        case "%":
+          return fin(num4(a3) % num4(b3));
+        case "<":
+          return num4(a3) < num4(b3);
+        case "<=":
+          return num4(a3) <= num4(b3);
+        case ">":
+          return num4(a3) > num4(b3);
+        case ">=":
+          return num4(a3) >= num4(b3);
+        case "==":
+          return typeof a3 === "string" || typeof b3 === "string" ? String(a3) === String(b3) : num4(a3) === num4(b3);
+        case "!=":
+          return typeof a3 === "string" || typeof b3 === "string" ? String(a3) !== String(b3) : num4(a3) !== num4(b3);
+      }
+      return null;
+    }
+  }
+}
+function runProgram(program, env, opts = {}) {
+  const budget = opts.budget ?? new ExprBudget(resolveLimits(opts.limits).maxSteps);
+  return walk(program.root, { env, opts, budget });
+}
+function evaluate(src, env, opts = {}) {
+  if (typeof src === "number" || typeof src === "boolean")
+    return src;
+  return runProgram(compile(src, opts.limits), env, opts);
+}
+function evalNumber(src, env, fallback = 0, opts = {}) {
+  if (src === undefined)
+    return fallback;
+  return num4(evaluate(src, env, opts));
+}
+function createEnv(vars, fns = {}) {
+  return {
+    lookup(path2) {
+      let cur = vars;
+      for (const seg of path2) {
+        if (cur === null || typeof cur !== "object" || !hasOwn2(cur, seg))
+          return;
+        cur = cur[seg];
+      }
+      return cur !== null && typeof cur === "object" ? undefined : cur;
+    },
+    call(name, args) {
+      return hasOwn2(fns, name) ? fns[name](...args) : undefined;
+    }
+  };
+}
+
+// src/engine/dice.ts
+var DICE_LIMITS = Object.freeze({
+  maxNotationLength: 128,
+  maxTerms: 16,
+  maxCount: 100,
+  minSides: 2,
+  maxSides: 1000,
+  maxFlat: 1e9,
+  maxExplodeExtra: 20,
+  maxExactWork: 20000000
+});
+var MAX_SAFE = BigInt(Number.MAX_SAFE_INTEGER);
+
+// src/engine/scope.ts
+function kindParent(reg, world, kind) {
+  return own(world.kinds, kind)?.extends ?? reg.kinds.get(kind)?.extends;
+}
+function kindIs2(reg, world, kind, ancestor) {
+  let id = kind;
+  for (let guard = 0;id && guard < 32; guard++) {
+    if (id === ancestor)
+      return true;
+    id = kindParent(reg, world, id);
+  }
+  return false;
+}
+function placeOfEntity(state, id) {
+  let cur = id;
+  for (let guard = 0;cur && guard < 32; guard++) {
+    const e3 = own(state.entities, cur);
+    if (!e3)
+      return null;
+    const p3 = e3.fields.place;
+    if (typeof p3 === "string" && p3 !== "")
+      return p3;
+    cur = e3.relations.find((r3) => r3.type === "in")?.to;
+  }
+  return null;
+}
+var GONE_FIELD = "gone";
+function isGone(state, id) {
+  let cur = id;
+  for (let guard = 0;cur && guard < 32; guard++) {
+    const e3 = own(state.entities, cur);
+    if (!e3)
+      return false;
+    if (e3.fields[GONE_FIELD] === true)
+      return true;
+    cur = e3.relations.find((r3) => r3.type === "in")?.to;
+  }
+  return false;
+}
+
+// src/engine/selector.ts
+var COMPANY_KIND2 = "business";
+function stringsIn(v6) {
+  return Array.isArray(v6) ? v6.filter((x2) => typeof x2 === "string") : null;
+}
+function classProblems(world, value, who) {
+  if (value === undefined)
+    return [];
+  if (!isRecord(value))
+    return [{ code: "unknown_facet", message: `${who}'s classification isn't a facet → values map.` }];
+  const out = [];
+  for (const [facet, raw] of Object.entries(value)) {
+    const def2 = hasOwn(world.classifications, facet) ? world.classifications[facet] : undefined;
+    if (!def2) {
+      out.push({ code: "unknown_facet", message: `${who} is classed under "${facet}", which isn't one of the world's classifications.` });
+      continue;
+    }
+    const values = stringsIn(raw);
+    if (values === null || values.length !== (Array.isArray(raw) ? raw.length : -1)) {
+      out.push({ code: "unknown_class", message: `${who}'s ${def2.label} isn't a list of values.` });
+      continue;
+    }
+    for (const v6 of values)
+      if (!hasOwn(def2.values, v6))
+        out.push({ code: "unknown_class", message: `${who} is classed as "${v6}", which isn't a value of ${def2.label}.` });
+    if (!def2.multiple && values.length > 1)
+      out.push({ code: "single_class", message: `${who} holds ${values.length} ${def2.label} values; ${def2.label} takes one.` });
+  }
+  return out;
+}
+function classOf(value) {
+  if (!isRecord(value))
+    return null;
+  const out = {};
+  for (const [facet, raw] of Object.entries(value)) {
+    if (!safeKey(facet))
+      return null;
+    const values = typeof raw === "string" ? [raw] : stringsIn(raw);
+    if (values === null)
+      return null;
+    if (values.length > 0)
+      out[facet] = [...new Set(values)];
+  }
+  return out;
+}
+
+// src/engine/seen.ts
+var PACK = "space";
+var SLICE = "seen";
+var PARTS2 = ["places", "people", "cells"];
+function writable(state, key) {
+  const seen = sliceRecord(state, PACK, SLICE);
+  const v6 = seen[key];
+  if (isRecord(v6))
+    return v6;
+  const fresh = {};
+  seen[key] = fresh;
+  return fresh;
+}
+function restoreObservations(state, data) {
+  for (const key of PARTS2) {
+    const diff = data[key];
+    if (!isRecord(diff))
+      continue;
+    const list2 = writable(state, key);
+    for (const [id, v6] of Object.entries(diff)) {
+      if (v6 === null)
+        delete list2[id];
+      else if (isRecord(v6))
+        list2[id] = structuredClone(v6);
+    }
+  }
+}
+
+// src/engine/visibility.ts
+var HIDDEN_PLACE_NAME = "Somewhere";
+var SPELT = new Map;
+var PATTERNS = new Map;
+
+// src/engine/player-events.ts
+var POV_ONLY = new Set(["castlife.need", "economy.anchor"]);
+
+// src/engine/lore.ts
+var STOP_WORDS = Object.fromEntries("the and for with that this from into onto have has had was were are you your yours my mine our ours his her hers their theirs them they she him its not but all any can will would could should about then than there here what when where which who whom how why just very some more most other out over under again also like get got one two too off own same such only each both few nor yet".split(" ").map((w3) => [w3, true]));
+
+// src/engine/time-limits.ts
+var TIME_LIMITS = Object.freeze({
+  tickMinutes: MINUTES_PER_DAY,
+  scale: [0.25, 10],
+  timelapseMinutes: TIMELAPSE_REACH_MINUTES,
+  unitCap: Object.freeze({ agentDays: 600, events: 5000 }),
+  thresholdMinutes: SPEED_THRESHOLD_MINUTES
+});
+
+// src/engine/world-state.ts
+var LOCAL_RE = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/;
+function minutesBetween(from, to) {
+  const a3 = LOCAL_RE.exec(from);
+  const b3 = LOCAL_RE.exec(to);
+  if (!a3 || !b3)
+    throw new RangeError(`expected YYYY-MM-DDTHH:MM, got ${!a3 ? from : to}`);
+  const ms = (m2) => Date.UTC(Number(m2[1]), Number(m2[2]) - 1, Number(m2[3]), Number(m2[4]), Number(m2[5]));
+  return Math.round((ms(b3) - ms(a3)) / 60000);
+}
+
+// src/shared/stores.ts
+var PATH_SEGMENT = /^[\p{L}\p{N}._-]+(?: [\p{L}\p{N}._-]+)*$/u;
+function isWorkspacePath(v6) {
+  if (!safeKey(v6))
+    return false;
+  return v6.split("/").every((name) => name !== "." && name !== ".." && PATH_SEGMENT.test(name));
+}
+var GLOBAL_PREFIX = "~/";
+function isGlobalPath(v6) {
+  return typeof v6 === "string" && v6.startsWith(GLOBAL_PREFIX) && isWorkspacePath(v6.slice(GLOBAL_PREFIX.length));
+}
+function isFilePath(v6) {
+  return isWorkspacePath(v6) || isGlobalPath(v6);
+}
+function levelPath(path2) {
+  return path2.startsWith(GLOBAL_PREFIX) ? path2.slice(GLOBAL_PREFIX.length) : path2;
+}
+var AGENTS_PATH = "AGENTS.md";
+var ROLES_DIR = "roles/";
+function isSystemPath(path2) {
+  const at2 = levelPath(path2);
+  return at2 === AGENTS_PATH || at2.startsWith(ROLES_DIR) && at2.endsWith(".md") && !at2.slice(ROLES_DIR.length).includes("/");
+}
+var LEARNED_DIR = "learned/";
+function isLearnedPath(path2) {
+  return path2.startsWith(LEARNED_DIR);
+}
+function isKeptPath(path2) {
+  return isLearnedPath(path2) || isGlobalPath(path2);
+}
+var PINS_PATH = ".pins.json";
+var TRANSCRIPTS_DIR = "transcripts/";
+function isTranscriptPath(path2) {
+  return path2.startsWith(TRANSCRIPTS_DIR);
+}
+var RETENTION_DEFAULTS = Object.freeze({ transcriptDays: 30, unreferencedDays: 7, sweepHours: 24, turnTranscripts: "none", turnTranscriptDays: "none" });
+var DAY_MS2 = 24 * 60 * 60 * 1000;
+var HOUR_MS = 60 * 60 * 1000;
+
+// src/engine/engine-pack.ts
+var LEVELS4 = [0, 1, 2, 3, 4];
+var ENGINE_PACK = "engine";
+var ENGINE_EVENTS = {
+  fired: "engine.fired",
+  signal: "engine.signal",
+  note: "engine.note",
+  beat: "engine.beat",
+  caught: "engine.caught",
+  cursor: "engine.cursor",
+  choice: "engine.choice",
+  attempt: "engine.attempt",
+  revealed: "engine.revealed",
+  hint: "engine.hint",
+  pause: "engine.pause",
+  check: "engine.check",
+  entity: "engine.entity",
+  classes: "engine.class",
+  observed: "engine.observed",
+  adjudged: "engine.adjudged",
+  life: "engine.life",
+  told: "engine.told",
+  rename: "engine.rename",
+  rewind: "engine.rewind"
+};
+function slice(state) {
+  const s3 = state.packs[ENGINE_PACK] ?? {};
+  state.packs[ENGINE_PACK] = s3;
+  return s3;
+}
+function sub(state, key) {
+  const s3 = slice(state);
+  const v6 = s3[key];
+  if (isRecord(v6))
+    return v6;
+  const fresh = {};
+  s3[key] = fresh;
+  return fresh;
+}
+function countStage(state, key, track3, stage, next) {
+  if (!safeKey(track3) || !safeKey(stage))
+    return;
+  const all = sub(state, key);
+  const row = isRecord(all[track3]) ? all[track3] : {};
+  const n3 = row[stage];
+  all[track3] = { ...row, [stage]: next(typeof n3 === "number" ? n3 : 0) };
+}
+function str3(e3, key) {
+  const v6 = e3.data[key];
+  return typeof v6 === "string" ? v6 : "";
+}
+function tagList(v6) {
+  if (!Array.isArray(v6))
+    return null;
+  const tags = v6.filter((t3) => typeof t3 === "string" && t3.trim() !== "");
+  return tags.length === v6.length ? tags : null;
+}
+function need(e3, ...keys) {
+  for (const k2 of keys)
+    if (typeof e3.data[k2] !== "string" || e3.data[k2] === "")
+      return { code: "bad_event", reason: `${e3.type} needs ${k2}` };
+  return null;
+}
+function signalOf(e3) {
+  if (e3.type !== ENGINE_EVENTS.signal || !e3.data)
+    return null;
+  const cls = e3.data.class;
+  if (typeof cls !== "string" || !INTERRUPT_CLASSES.includes(cls))
+    return null;
+  const vis = e3.data.visibility;
+  return {
+    class: cls,
+    text: typeof e3.data.text === "string" ? e3.data.text : "",
+    ...typeof e3.data.entity === "string" ? { entity: e3.data.entity } : {},
+    visibility: vis === undefined || vis === null || vis === "public" ? "public" : vis === "known_by" ? "known_by" : "secret",
+    ...e3.data.stops === false ? { stops: false } : {}
+  };
+}
+var noop = () => {
+  return;
+};
+var events = [
+  {
+    type: ENGINE_EVENTS.fired,
+    validate: (e3) => need(e3, "rule"),
+    apply: (e3, state) => {
+      const fired = sub(state, "fired");
+      const prev = fired[str3(e3, "rule")];
+      const n3 = isRecord(prev) && typeof prev.n === "number" ? prev.n : 0;
+      fired[str3(e3, "rule")] = { n: n3 + 1, last: state.clock };
+    },
+    describe: (e3) => `rule ${str3(e3, "rule")}`
+  },
+  {
+    type: ENGINE_EVENTS.signal,
+    validate: (e3) => signalOf(e3) ? null : { code: "bad_event", reason: "signal needs a known class" },
+    apply: noop,
+    describe: (e3) => str3(e3, "text")
+  },
+  { type: ENGINE_EVENTS.note, validate: () => null, apply: noop, describe: (e3) => str3(e3, "text") },
+  { type: ENGINE_EVENTS.beat, validate: () => null, apply: noop, describe: (e3) => str3(e3, "hint") },
+  {
+    type: ENGINE_EVENTS.caught,
+    validate: (e3, ctx) => {
+      const missing = need(e3, "agent");
+      if (missing)
+        return missing;
+      return typeof e3.data.slot === "number" && own(ctx.state.entities, str3(e3, "agent")) ? null : { code: "bad_event", reason: "caught needs an agent and a slot" };
+    },
+    apply: (e3, state) => {
+      const slot = e3.data.slot;
+      if (typeof slot === "number")
+        sub(state, "agents")[str3(e3, "agent")] = slot;
+    },
+    describe: (e3) => `${str3(e3, "agent")} caught up`
+  },
+  {
+    type: ENGINE_EVENTS.cursor,
+    validate: (e3) => typeof e3.data.rr === "number" ? null : { code: "bad_event", reason: "cursor needs rr" },
+    apply: (e3, state) => {
+      if (typeof e3.data.rr === "number")
+        slice(state).rr = e3.data.rr;
+    },
+    describe: () => "catch-up queue"
+  },
+  { type: ENGINE_EVENTS.choice, validate: (e3) => need(e3, "key", "choice"), apply: noop, describe: (e3) => `${str3(e3, "key")}: ${str3(e3, "choice")}` },
+  {
+    type: ENGINE_EVENTS.attempt,
+    validate: (e3, ctx) => own(ctx.world.tracks, str3(e3, "track")) ? null : { code: "missing_track", reason: `no track ${str3(e3, "track")}` },
+    apply: (e3, state) => {
+      const track3 = str3(e3, "track");
+      if (e3.data.correct === true)
+        sub(state, "solved")[track3] = str3(e3, "stage");
+      else {
+        const attempts = sub(state, "attempts");
+        const n3 = own(attempts, track3);
+        attempts[track3] = (typeof n3 === "number" ? n3 : 0) + 1;
+        countStage(state, "missed", track3, str3(e3, "stage"), (count3) => count3 + 1);
+      }
+    },
+    describe: (e3) => `attempt on ${str3(e3, "track")}`
+  },
+  {
+    type: ENGINE_EVENTS.hint,
+    validate: (e3, ctx) => {
+      const missing = need(e3, "track", "stage");
+      if (missing)
+        return missing;
+      const n3 = e3.data.n;
+      if (n3 !== undefined && !(typeof n3 === "number" && Number.isInteger(n3) && n3 >= 1))
+        return { code: "bad_event", reason: `${e3.type} needs n, a whole number from 1` };
+      const t3 = own(ctx.world.tracks, str3(e3, "track"));
+      return t3 && own(t3.stages, str3(e3, "stage")) ? null : { code: "missing_track", reason: `no stage ${str3(e3, "stage")} of track ${str3(e3, "track")}` };
+    },
+    apply: (e3, state) => {
+      const n3 = e3.data.n;
+      countStage(state, "hints", str3(e3, "track"), str3(e3, "stage"), (open) => typeof n3 === "number" ? open < n3 ? open + 1 : open : open + 1);
+    },
+    describe: (e3) => `hint opened on ${str3(e3, "track")}`
+  },
+  {
+    type: ENGINE_EVENTS.revealed,
+    validate: (e3) => need(e3, "track", "stage"),
+    apply: (e3, state) => {
+      const revealed = sub(state, "revealed");
+      const list2 = revealed[str3(e3, "track")];
+      const stages = Array.isArray(list2) ? list2.filter((x2) => typeof x2 === "string") : [];
+      if (!stages.includes(str3(e3, "stage")))
+        stages.push(str3(e3, "stage"));
+      revealed[str3(e3, "track")] = stages;
+    },
+    describe: (e3) => `${str3(e3, "track")} revealed`
+  },
+  {
+    type: ENGINE_EVENTS.pause,
+    validate: (e3) => typeof e3.data.scene === "string" || e3.data.scene === null ? null : { code: "bad_event", reason: "pause needs scene" },
+    apply: (e3, state) => {
+      slice(state).pauseScene = typeof e3.data.scene === "string" ? e3.data.scene : null;
+    },
+    describe: () => "clock pause"
+  },
+  {
+    type: ENGINE_EVENTS.rewind,
+    validate: (e3, ctx) => {
+      const minutes = e3.data.minutes;
+      if (typeof minutes !== "number" || !Number.isInteger(minutes) || minutes <= 0)
+        return { code: "bad_event", reason: "a clock set back needs whole minutes above zero" };
+      const start = minutesBetween(ctx.world.calendar.epoch, ctx.world.start.at);
+      if (ctx.state.clock - minutes >= start)
+        return null;
+      return { code: "before_start", reason: `the story starts at ${formatClock(calendarOf(ctx.world), start, placeOffset(ctx.world, start, placeOfEntity(ctx.state, ctx.world.pov)))}` };
+    },
+    apply: (e3, state) => {
+      const minutes = e3.data.minutes;
+      if (typeof minutes !== "number")
+        return;
+      const s3 = slice(state);
+      s3.reached = Math.max(typeof s3.reached === "number" ? s3.reached : state.clock, state.clock);
+      state.clock -= minutes;
+    },
+    describe: (e3) => `clock set back ${String(e3.data.minutes)} min`
+  },
+  {
+    type: ENGINE_EVENTS.check,
+    validate: (e3, ctx) => need(e3, "actor", "outcome") ?? (own(ctx.state.entities, str3(e3, "actor")) ? null : { code: "missing_entity", reason: `no entity ${str3(e3, "actor")}` }),
+    apply: noop,
+    describe: (e3) => {
+      const total = typeof e3.data.total === "number" ? ` (rolled ${e3.data.total}${typeof e3.data.dc === "number" ? ` against ${e3.data.dc}` : ""})` : "";
+      return `${str3(e3, "actor")}: ${str3(e3, "check").replace(/_/g, " ")}, ${str3(e3, "outcome").replace(/_/g, " ")}${total}`;
+    }
+  },
+  {
+    type: ENGINE_EVENTS.entity,
+    validate: (e3, ctx) => {
+      if (!own(ctx.state.entities, str3(e3, "entity")))
+        return { code: "missing_entity", reason: `no entity ${str3(e3, "entity")}` };
+      const { tier, agent, levels } = e3.data;
+      if (tier !== undefined && (typeof tier !== "string" || !(tierOf(ctx.world, tier) || isBand(tier))))
+        return { code: "bad_tier", reason: `no tier ${String(tier)}` };
+      if (agent !== undefined && typeof agent !== "boolean")
+        return { code: "bad_event", reason: "agent is yes or no" };
+      if (levels !== undefined && !(isRecord(levels) && Object.entries(levels).every(([d3, v6]) => DOMAINS.some((x2) => x2 === d3) && (v6 === null || typeof v6 === "number" && Number.isInteger(v6) && v6 >= 0 && v6 <= 4))))
+        return { code: "bad_level", reason: "a level is a whole number 0–4, or null to follow the tier" };
+      return null;
+    },
+    apply: (e3, state) => {
+      const ent = own(state.entities, str3(e3, "entity"));
+      if (!ent)
+        return;
+      if (typeof e3.data.tier === "string")
+        ent.tier = e3.data.tier;
+      if (typeof e3.data.agent === "boolean")
+        ent.agent = e3.data.agent;
+      const levels = e3.data.levels;
+      if (!isRecord(levels))
+        return;
+      for (const domain of DOMAINS) {
+        const v6 = levels[domain];
+        if (v6 === null)
+          delete ent.levels[domain];
+        else if (typeof v6 === "number" && Number.isInteger(v6) && v6 >= 0 && v6 <= 4)
+          ent.levels[domain] = v6;
+      }
+    },
+    touches: (e3) => {
+      const entity2 = str3(e3, "entity");
+      return ["tier", "agent", "levels"].filter((aspect) => e3.data[aspect] !== undefined).map((aspect) => ({ entity: entity2, aspect }));
+    },
+    describe: (e3, ctx) => {
+      const clauses = [];
+      if (typeof e3.data.tier === "string")
+        clauses.push(`is now in the ${tierLabel(ctx.world, e3.data.tier)} tier`);
+      if (typeof e3.data.agent === "boolean")
+        clauses.push(e3.data.agent ? "now lives their own life off-screen" : "no longer lives their own life off-screen");
+      const levels = e3.data.levels;
+      if (isRecord(levels))
+        for (const [d3, v6] of Object.entries(levels)) {
+          const domain = DOMAINS.find((x2) => x2 === d3);
+          const area = domain ? DOMAIN_LABEL[domain] : d3;
+          const level = LEVELS4.find((n3) => n3 === v6);
+          clauses.push(v6 === null ? `has ${area} detail from their tier again` : `now has ${area} detail at level ${String(v6)}${level !== undefined ? ` (${LEVEL_LABEL[level]})` : ""}`);
+        }
+      return `${own(ctx.state.entities, str3(e3, "entity"))?.name ?? str3(e3, "entity")} ${listWords2(clauses)}`;
+    }
+  },
+  {
+    type: ENGINE_EVENTS.classes,
+    validate: (e3, ctx) => {
+      const ent = own(ctx.state.entities, str3(e3, "entity"));
+      if (!ent)
+        return { code: "missing_entity", reason: `no entity ${str3(e3, "entity")}` };
+      const classes = classOf(e3.data.class);
+      if (!classes)
+        return { code: "bad_event", reason: "a classification is facet → values" };
+      const problem = classProblems(ctx.world, classes, ent.name)[0];
+      if (problem)
+        return { code: problem.code, reason: problem.message };
+      if (e3.data.was !== undefined && !classOf(e3.data.was))
+        return { code: "bad_event", reason: "the classification before is facet → values" };
+      return tagList(e3.data.tags) ? null : { code: "bad_event", reason: "tags are a list of words" };
+    },
+    apply: (e3, state) => {
+      const ent = own(state.entities, str3(e3, "entity"));
+      if (!ent)
+        return;
+      ent.class = classOf(e3.data.class) ?? {};
+      ent.tags = tagList(e3.data.tags) ?? [];
+    },
+    touches: (e3) => [{ entity: str3(e3, "entity"), aspect: "class" }],
+    describe: (e3, ctx, viewer) => {
+      const classes = classOf(e3.data.class) ?? {};
+      const name = own(ctx.state.entities, str3(e3, "entity"))?.name ?? str3(e3, "entity");
+      const valuesOf = (f3, values) => values.length > 0 ? listWords2(values.map((v6) => own(f3.values, v6)?.label ?? v6)) : "none";
+      const facetLine = (f3, values) => `${possessive(name)} ${fieldNoun(f3.label, "").noun} is now ${valuesOf(f3, values)}`;
+      if (viewer !== undefined) {
+        const was = classOf(e3.data.was);
+        if (!was)
+          return "";
+        const same = (a3, b3) => a3.length === b3.length && a3.every((x2) => b3.includes(x2));
+        const changed = facetsInOrder(ctx.world).filter(([id, f3]) => f3.shown === true && !same(own(classes, id) ?? [], own(was, id) ?? [])).map(([id, f3]) => facetLine(f3, own(classes, id) ?? []));
+        return changed.join("; ");
+      }
+      const parts = facetsInOrder(ctx.world).flatMap(([id, f3]) => {
+        const values = own(classes, id) ?? [];
+        return values.length > 0 ? [facetLine(f3, values)] : [];
+      });
+      const tags = tagList(e3.data.tags) ?? [];
+      if (tags.length > 0)
+        parts.push(`${possessive(name)} tags are now ${listWords2(tags)}`);
+      return parts.length > 0 ? parts.join("; ") : `${name} now has no classes and no tags`;
+    }
+  },
+  {
+    type: ENGINE_EVENTS.rename,
+    validate: (e3, ctx) => {
+      const name = str3(e3, "name");
+      if (!own(ctx.state.entities, str3(e3, "entity")))
+        return { code: "missing_entity", reason: `no entity ${str3(e3, "entity")}` };
+      return name.trim() !== "" && name.length <= THING_NAME_MAX ? null : { code: "bad_name", reason: `a name is 1–${THING_NAME_MAX} characters` };
+    },
+    apply: (e3, state) => {
+      const ent = own(state.entities, str3(e3, "entity"));
+      if (ent)
+        ent.name = str3(e3, "name");
+    },
+    touches: (e3) => [{ entity: str3(e3, "entity"), aspect: "name" }],
+    describe: (e3, ctx) => `${str3(e3, "was") || str3(e3, "entity")} is now called ${str3(e3, "name")}`,
+    coarsen: { key: (e3) => str3(e3, "entity"), merge: (earlier, later) => ({ ...later, data: { ...later.data, was: earlier.data.was ?? null } }) }
+  },
+  {
+    type: ENGINE_EVENTS.observed,
+    validate: (e3) => Object.values(e3.data).every(isRecord) ? null : { code: "bad_event", reason: "observed needs places and people" },
+    apply: (e3, state) => restoreObservations(state, e3.data),
+    describe: () => "what you saw meanwhile"
+  },
+  {
+    type: ENGINE_EVENTS.adjudged,
+    validate: (e3, ctx) => need(e3, "actor", "action", "outcome") ?? (own(ctx.state.entities, str3(e3, "actor")) ? null : { code: "missing_entity", reason: `no entity ${str3(e3, "actor")}` }),
+    apply: (e3, state) => {
+      const key = e3.data.key;
+      if (typeof key !== "string" || !safeKey(key))
+        return;
+      const { place: place2, round: round2 } = e3.data;
+      sub(state, "tries")[key] = { at: state.clock, place: typeof place2 === "string" ? place2 : null, outcome: str3(e3, "outcome"), failed: e3.data.failed === true, odds: str3(e3, "odds"), ...typeof round2 === "string" ? { round: round2 } : {} };
+    },
+    describe: (e3) => `${str3(e3, "actor")}: ${str3(e3, "action").replace(/_/g, " ")}, ${str3(e3, "outcome").replace(/_/g, " ")}${e3.data.rolled === true ? "" : ` (no roll: ${str3(e3, "why")})`}`
+  },
+  {
+    type: ENGINE_EVENTS.life,
+    validate: (e3, ctx) => {
+      const ent = own(ctx.state.entities, str3(e3, "entity"));
+      if (!ent)
+        return { code: "missing_entity", reason: `no entity ${str3(e3, "entity")}` };
+      if (!isLifeState(ctx.world, str3(e3, "to")))
+        return { code: "bad_life", reason: `there's no life state ${str3(e3, "to")}` };
+      const seen = e3.data.witnesses;
+      if (seen !== undefined && !(Array.isArray(seen) && seen.every((id) => typeof id === "string")))
+        return { code: "bad_event", reason: "a life change's witnesses are entity ids" };
+      return lifeOf(ctx.state, str3(e3, "entity")) === str3(e3, "to") ? { code: "no_change", reason: `${ent.name} is already ${lifeStateOf(ctx.world, str3(e3, "to")).label.toLowerCase()}` } : null;
+    },
+    apply: (e3, state, ctx) => applyLife(state, ctx, str3(e3, "entity"), str3(e3, "to"), witnessesOf(e3)),
+    touches: (e3) => [{ entity: str3(e3, "entity"), aspect: "life" }],
+    describe: (e3, ctx, viewer) => {
+      const id = str3(e3, "entity");
+      const def2 = lifeStateOf(ctx.world, str3(e3, "to"));
+      const name = own(ctx.state.entities, id)?.name ?? id;
+      const state = def2.label.toLowerCase();
+      if (viewer === undefined)
+        return `${name} is now ${state}`;
+      if (id === viewer)
+        return `You are now ${state}`;
+      return witnessesOf(e3)?.includes(viewer) === true ? `${name} ${def2.reads}` : "";
+    }
+  },
+  {
+    type: ENGINE_EVENTS.told,
+    validate: (e3, ctx) => {
+      if (!own(ctx.state.entities, str3(e3, "entity")))
+        return { code: "missing_entity", reason: `no entity ${str3(e3, "entity")}` };
+      const who = e3.data.who;
+      return Array.isArray(who) && who.length > 0 && who.every((id) => typeof id === "string" && own(ctx.state.entities, id)) ? null : { code: "bad_event", reason: "told needs the people told" };
+    },
+    apply: (e3, state) => tellLife(state, str3(e3, "entity"), Array.isArray(e3.data.who) ? e3.data.who.filter((id) => typeof id === "string") : []),
+    describe: (e3, ctx, viewer) => {
+      const id = str3(e3, "entity");
+      const name = own(ctx.state.entities, id)?.name ?? id;
+      const who = Array.isArray(e3.data.who) ? e3.data.who.filter((x2) => typeof x2 === "string") : [];
+      if (viewer === undefined)
+        return `${listWords2(who.map((w3) => own(ctx.state.entities, w3)?.name ?? w3))} now ${who.length === 1 ? "knows" : "know"} that ${name} ${lifeStateOf(ctx.world, lifeOf(ctx.state, id)).reads}`;
+      return who.includes(viewer) ? `${name} ${lifeStateOf(ctx.world, lifeKnownTo(ctx.state, id, viewer)).reads}` : "";
+    }
+  }
+];
+function witnessesOf(e3) {
+  const seen = e3.data.witnesses;
+  return Array.isArray(seen) ? seen.filter((id) => typeof id === "string") : null;
+}
+
+// src/engine/life.ts
+var PACK2 = "engine";
+var SLICE2 = "life";
+function lifeOf(state, id) {
+  return own(state.entities, id)?.life ?? ALIVE;
+}
+function entryOf(state, subject) {
+  const all = state.packs[PACK2]?.[SLICE2];
+  const entry = isRecord(all) ? own(all, subject) : undefined;
+  return isRecord(entry) && typeof entry.base === "string" && isRecord(entry.by) ? { base: entry.base, by: entry.by } : null;
+}
+function lifeKnownTo(state, subject, knower) {
+  const entry = knower === subject ? null : entryOf(state, subject);
+  if (!entry)
+    return lifeOf(state, subject);
+  const learned = own(entry.by, knower);
+  return typeof learned === "string" ? learned : entry.base;
+}
+function isPerson(reg, world, state, id) {
+  const e3 = own(state.entities, id);
+  return !!e3 && kindIs2(reg, world, e3.kind, "person") && !isGone(state, id);
+}
+function learners(state, subject, base) {
+  const slice2 = state.packs[PACK2] ?? {};
+  state.packs[PACK2] = slice2;
+  const all = isRecord(slice2[SLICE2]) ? slice2[SLICE2] : {};
+  slice2[SLICE2] = all;
+  const found = own(all, subject);
+  if (isRecord(found) && typeof found.base === "string" && isRecord(found.by))
+    return found.by;
+  const by = {};
+  all[subject] = { base, by };
+  return by;
+}
+function peopleAt(reg, world, state, place2) {
+  return Object.keys(state.entities).sort().filter((id) => placeOfEntity(state, id) === place2 && isPerson(reg, world, state, id));
+}
+function witnessesOf2(reg, world, state, subject) {
+  const place2 = placeOfEntity(state, subject);
+  return place2 === null ? [] : peopleAt(reg, world, state, place2).filter((id) => id !== subject);
+}
+function applyLife(state, ctx, subject, to, witnesses) {
+  const e3 = own(state.entities, subject);
+  if (!e3)
+    return;
+  const by = learners(state, subject, lifeOf(state, subject));
+  const seen = witnesses ?? witnessesOf2(ctx.registry, ctx.world, state, subject);
+  if (to === ALIVE)
+    delete e3.life;
+  else
+    e3.life = to;
+  for (const id of seen)
+    if (id !== subject && own(state.entities, id))
+      by[id] = to;
+}
+function tellLife(state, subject, who) {
+  const entry = entryOf(state, subject);
+  if (!entry)
+    return;
+  const truth = lifeOf(state, subject);
+  const by = learners(state, subject, entry.base);
+  for (const id of who)
+    if (id !== subject && own(state.entities, id))
+      by[id] = truth;
+}
+
+// src/engine/presence.ts
+var spreadOf = new WeakMap;
+
+// src/engine/events.ts
+var EXTERNAL_ACCOUNT_PREFIX = "economy.external:";
+var TIME_BOUNDS = Object.freeze({ tick: [0, 1440], scale: [0.25, 10], thresholdMinutes: SPEED_THRESHOLD_MINUTES, agentDays: [1, 600], events: [1, 5000] });
+
+// src/packs/economy/core/model.ts
+var CORRECTION_ACCOUNT = `${EXTERNAL_ACCOUNT_PREFIX}correction`;
+var BANK_PREFIX = `${EXTERNAL_ACCOUNT_PREFIX}bank:`;
+function external(id) {
+  return `${EXTERNAL_ACCOUNT_PREFIX}${id}`;
+}
+var WORLD_ACCOUNT = external("world");
+var WEALTH_BANDS = [
+  { label: "broke", min: -Infinity, max: 1e4, typical: 5000 },
+  { label: "poor", min: 1e4, max: 200000, typical: 45000 },
+  { label: "modest", min: 200000, max: 2000000, typical: 630000 },
+  { label: "comfortable", min: 2000000, max: 20000000, typical: 6300000 },
+  { label: "rich", min: 20000000, max: 200000000, typical: 63000000 },
+  { label: "wealthy", min: 200000000, max: Infinity, typical: 500000000 }
+];
+function worldProducts(world) {
+  const raw = objOf(objOf(world.packs.economy?.config).products);
+  const out = {};
+  for (const [id, p3] of Object.entries(raw)) {
+    const def2 = objOf(p3);
+    if (isAccountClass(def2.class))
+      out[id] = def2;
+  }
+  return out;
+}
+function classOf2(books, id) {
+  const e3 = own(books.state.entities, id);
+  if (!e3 || e3.kind !== "account")
+    return null;
+  const product = strOf(e3.fields.product);
+  if (product !== "") {
+    const def2 = objOf(own(objOf(objOf(books.world.packs.economy?.config).products), product));
+    if (isAccountClass(def2.class))
+      return def2.class;
+    if (isAccountClass(product))
+      return product;
+  }
+  return own(LEGACY_TYPE_CLASS, strOf(e3.fields.type)) ?? null;
+}
+function traitsOf(books, id) {
+  const c3 = classOf2(books, id);
+  return c3 ? CLASS_TRAITS[c3] : null;
+}
+var DEBIT_PURCHASE_LIMIT = 300000;
+var DEBIT_ATM_LIMIT = 50000;
+var DEPOSIT_HOLD_DAYS = 2;
+var OVERDRAFT_LIMIT = 50000;
+function typical(v6, fallback) {
+  if (typeof v6 === "number" && Number.isFinite(v6))
+    return v6;
+  const o4 = objOf(v6);
+  return typeof o4.typical === "number" ? o4.typical : fallback;
+}
+function classDefaults(books, cls) {
+  const rows2 = books.tables.get("economy.finance")?.rows ?? {};
+  const card = objOf(rows2.credit_card?.values);
+  const deposits = objOf(rows2.deposit_accounts?.values);
+  const fees = objOf(deposits.checking_fees_cents);
+  const loans = objOf(rows2.loans?.values);
+  const personal = objOf(loans.personal);
+  const mortgage = objOf(loans.mortgage);
+  const minimum = objOf(objOf(card.minimum_payment).default);
+  const lateFees = objOf(card.late_fee_cents);
+  const advance = objOf(card.cash_advance_fee);
+  const cardMinimum = { pct: numOf(minimum.principal_pct, 1), floor: numOf(minimum.floor_cents, 3500), plus_interest: minimum.includes_interest_and_fees !== false };
+  const noFees = { annual: 0, late_first: 0, late_repeat: 0, overdraft: 0, nsf: 0, atm: 0, cash_advance_pct: 0, cash_advance_min: 0, maintenance: 0, maintenance_waive: 0, card_replacement: 0 };
+  const creditFees = { ...noFees, late_first: numOf(lateFees.first, 3200), late_repeat: numOf(lateFees.repeat, 4300), nsf: typical(card.returned_payment_fee_cents, 3200), cash_advance_pct: numOf(advance.pct, 5), cash_advance_min: numOf(advance.minimum_cents, 1000) };
+  const bankFees = {
+    ...noFees,
+    overdraft: typical(fees.overdraft, 2700),
+    nsf: typical(fees.nsf_returned_item, 1700),
+    atm: typical(fees.atm_out_of_network_total, 473),
+    maintenance: typical(fees.monthly_maintenance, 500),
+    maintenance_waive: typical(fees.minimum_balance_to_waive_cents, 150000),
+    card_replacement: typical(fees.debit_card_replacement, 0)
+  };
+  const base = {
+    class: cls,
+    limit: null,
+    apr_pct: 0,
+    apy_pct: 0,
+    interest: "average_daily",
+    penalty_apr_pct: 0,
+    cash_advance_apr_pct: 0,
+    due_days: typical(card.grace_period_days, 25),
+    statement_day: 1,
+    minimum: cardMinimum,
+    fees: noFees,
+    rewards_pct: 0,
+    daily_purchase_limit: null,
+    daily_atm_limit: null,
+    hold_days: DEPOSIT_HOLD_DAYS,
+    overdraft: "decline",
+    overdraft_limit: OVERDRAFT_LIMIT,
+    term_months: null,
+    secured: false
+  };
+  const savings = objOf(deposits.savings_apy_pct);
+  switch (cls) {
+    case "checking":
+    case "business_checking":
+      return { ...base, apy_pct: typical(deposits.checking_apy_pct, 0.07), fees: bankFees, daily_purchase_limit: DEBIT_PURCHASE_LIMIT, daily_atm_limit: DEBIT_ATM_LIMIT };
+    case "savings":
+    case "trust":
+      return { ...base, apy_pct: typical(savings.regular_national_average, 0.4), fees: { ...bankFees, maintenance: 0 } };
+    case "money_market":
+      return { ...base, apy_pct: typical(deposits.money_market_apy_pct, 3.5), fees: { ...bankFees, maintenance: 0 } };
+    case "cd":
+      return { ...base, apy_pct: typical(deposits.cd_12_month_apy_pct, 4), term_months: 12 };
+    case "credit_card":
+      return { ...base, limit: typical(objOf(card.credit_limit_cents), 1e6), apr_pct: typical(card.apr_pct, 22), penalty_apr_pct: numOf(card.penalty_apr_pct, 29.99), cash_advance_apr_pct: numOf(advance.apr_pct_typical, 27), fees: creditFees };
+    case "charge_card":
+      return { ...base, minimum: { pct: 100, floor: 0, plus_interest: false }, fees: { ...creditFees, annual: numOf(objOf(card.annual_fee_cents).rewards_typical, 9500) } };
+    case "line_of_credit":
+      return { ...base, limit: typical(personal.amount_cents, 800000), apr_pct: typical(personal.apr_pct, 12.3), penalty_apr_pct: numOf(card.penalty_apr_pct, 29.99), fees: creditFees };
+    case "loan":
+      return { ...base, apr_pct: typical(personal.apr_pct, 12.3), term_months: typical(personal.term_months, 36), fees: { ...creditFees, nsf: 0 } };
+    case "mortgage":
+      return { ...base, apr_pct: typical(mortgage.apr_pct_30yr_fixed, 6.4), term_months: typical(mortgage.term_months, 360), secured: true, fees: { ...creditFees, nsf: 0 } };
+    default:
+      return base;
+  }
+}
+function productOf(books, id) {
+  const cls = classOf2(books, id);
+  const e3 = own(books.state.entities, id);
+  if (!cls || !e3)
+    return null;
+  const productId = strOf(e3.fields.product) || cls;
+  const def2 = own(worldProducts(books.world), productId) ?? {};
+  const base = classDefaults(books, cls);
+  const f3 = e3.fields;
+  const num5 = (field2, fallback) => numOf(f3[field2], fallback);
+  const fees = { ...base.fees, ...objOf(def2.fees) };
+  const minimum = { ...base.minimum, ...def2.minimum ?? {} };
+  if (typeof f3.min_pct === "number")
+    minimum.pct = f3.min_pct;
+  if (typeof f3.min_floor === "number")
+    minimum.floor = f3.min_floor;
+  const limit2 = typeof f3.limit === "number" ? f3.limit : def2.limit === null ? null : typeof def2.limit === "number" ? def2.limit : base.limit;
+  const policy = strOf(f3.overdraft, def2.overdraft ?? base.overdraft);
+  return {
+    id: productId,
+    label: def2.label ?? CLASS_TRAITS[cls].label,
+    class: cls,
+    institution: strOf(f3.institution, def2.institution ?? ""),
+    limit: limit2,
+    apr_pct: CLASS_TRAITS[cls].asset ? 0 : num5("apr_pct", def2.apr_pct ?? base.apr_pct),
+    apy_pct: CLASS_TRAITS[cls].asset ? num5("apy_pct", typeof f3.apr_pct === "number" ? f3.apr_pct : def2.apy_pct ?? base.apy_pct) : 0,
+    interest: def2.interest ?? base.interest,
+    penalty_apr_pct: def2.penalty_apr_pct ?? base.penalty_apr_pct,
+    cash_advance_apr_pct: def2.cash_advance_apr_pct ?? base.cash_advance_apr_pct,
+    due_days: num5("due_days", def2.due_days ?? base.due_days),
+    statement_day: num5("statement_day", def2.statement_day ?? base.statement_day),
+    minimum,
+    fees,
+    rewards_pct: def2.rewards_pct ?? base.rewards_pct,
+    daily_purchase_limit: def2.daily_purchase_limit ?? base.daily_purchase_limit,
+    daily_atm_limit: def2.daily_atm_limit ?? base.daily_atm_limit,
+    hold_days: def2.hold_days ?? base.hold_days,
+    overdraft: policy === "fee" || policy === "linked" ? policy : "decline",
+    overdraft_limit: num5("overdraft_limit", def2.overdraft_limit ?? base.overdraft_limit),
+    term_months: typeof f3.term_months === "number" ? f3.term_months : def2.term_months ?? base.term_months,
+    secured: def2.secured ?? base.secured
+  };
+}
+function ownersOf(state, id) {
+  const e3 = own(state.entities, id);
+  return e3 ? ownersIn(e3.fields) : [];
+}
+function holdersOf(state, id) {
+  return [...new Set(ownersOf(state, id).map((o4) => o4.party))];
+}
+function balance(state, account) {
+  return own(state.accounts, account) ?? 0;
+}
+function holdsOn(state, account) {
+  const raw = objOf(own(objOf(sliceOf(state, "economy").holds), account));
+  const out = [];
+  for (const [id, h3] of Object.entries(raw)) {
+    const o4 = objOf(h3);
+    const until2 = numOf(o4.until);
+    if (until2 > state.clock)
+      out.push({ id, account, cents: Math.round(numOf(o4.cents)), until: until2, kind: o4.kind === "authorization" ? "authorization" : "deposit", memo: strOf(o4.memo) });
+  }
+  return out.sort((a3, b3) => a3.until - b3.until || a3.id.localeCompare(b3.id));
+}
+function availableOf(books, account) {
+  const t3 = traitsOf(books, account);
+  if (!t3)
+    return 0;
+  const b3 = balance(books.state, account);
+  if (t3.liability) {
+    const p3 = productOf(books, account);
+    if (p3?.class === "charge_card" && p3.limit === null)
+      return Number.MAX_SAFE_INTEGER;
+    return (p3?.limit ?? 0) + b3;
+  }
+  return b3 - holdsOn(books.state, account).reduce((a3, h3) => a3 + h3.cents, 0);
+}
+function derivedUnpricedCap(world) {
+  let top = 0;
+  for (const table of ["economy.catalog", "economy.categories"])
+    for (const row of Object.values(world.tables[table]?.rows ?? {}))
+      top = Math.max(top, bandOfJson(row.price_cents)?.max ?? 0);
+  return top > 0 ? Math.round(top) : 500 * 10 ** Math.max(0, Math.min(6, Math.trunc(world.currency.decimals)));
+}
+function derivedClaimCap(world) {
+  const meal = bandOfJson(world.tables["economy.categories"]?.rows.meals_out?.price_cents)?.typical ?? 0;
+  return meal > 0 ? Math.round(meal * 2) : 25 * 10 ** Math.max(0, Math.min(6, Math.trunc(world.currency.decimals)));
+}
+
+// src/packs/economy/core/journal.ts
+var JOURNAL_CAP = 40;
+var NOTES_CAP = 12;
+var MONTHS_KEPT = 13;
+var CREDIT_CAP = 60;
+var SCORES_KEPT = 24;
+var STATEMENTS_KEPT = 6;
+var UNSIDED_KINDS = new Set(["opening", "adjustment"]);
+function reject(code, reason) {
+  return { code, reason };
+}
+function str4(e3, k2) {
+  return typeof e3.data[k2] === "string" ? e3.data[k2] : "";
+}
+function monthKey(ctx, at2) {
+  const d3 = dateAt(calendarOf(ctx.world), at2);
+  return `${String(d3.year).padStart(4, "0")}-${String(d3.month).padStart(2, "0")}`;
+}
+function pushCapped(list2, entry, cap) {
+  return [...Array.isArray(list2) ? list2.slice(-(cap - 1)) : [], entry];
+}
+function partyOfSide(state, side) {
+  if (own(state.entities, side)?.kind === "account")
+    return holdersOf(state, side).find((h3) => own(state.entities, h3)) ?? side;
+  const bare = side.startsWith(EXTERNAL_ACCOUNT_PREFIX) ? side.slice(EXTERNAL_ACCOUNT_PREFIX.length) : "";
+  return bare !== "" && own(state.entities, bare) ? bare : side;
+}
+function fileLine(state, ctx, account, amount2, at2, data, other, seq) {
+  const journal = sliceRecord(state, "economy", "journal");
+  const status = data.status === "pending" ? "pending" : "posted";
+  const entry = { id: `j${seq}`, at: at2, account, cents: amount2, memo: strOf(data.memo), status };
+  for (const k2 of ["kind", "category", "card", "flow"])
+    if (typeof data[k2] === "string" && data[k2] !== "")
+      entry[k2] = data[k2];
+  if (typeof data.by === "string" && data.by !== "" && typeof data.as === "string" && holdersOf(state, account).includes(data.as))
+    entry.by = data.by;
+  if (other !== "")
+    entry.counterparty = other;
+  if (status === "pending" && typeof data.settles === "number")
+    entry.settles = data.settles;
+  journal[account] = pushCapped(journal[account], entry, JOURNAL_CAP);
+  const totals = sliceRecord(state, "economy", "totals");
+  const months = objOf(totals[account]);
+  const key = monthKey(ctx, at2);
+  const month = objOf(months[key]);
+  const category = strOf(data.category) || "other";
+  const cell = objOf(month[category]);
+  month[category] = { in: numOf(cell.in) + Math.max(0, amount2), out: numOf(cell.out) + Math.max(0, -amount2) };
+  months[key] = month;
+  for (const old of Object.keys(months).sort().slice(0, -MONTHS_KEPT))
+    delete months[old];
+  totals[account] = months;
+  if (data.kind === "interest") {
+    const latest = sliceRecord(state, "economy", "interest");
+    const before = objOf(latest[account]);
+    latest[account] = { cents: (numOf(before.at, NaN) === at2 ? numOf(before.cents) : 0) + amount2, at: at2 };
+  }
+}
+function accrue(state, account, amount2, at2, use) {
+  const adb = sliceRecord(state, "economy", "adb");
+  const cur = objOf(adb[account]);
+  const before = balance(state, account) - amount2;
+  const spent = use === "purchase" ? -amount2 : 0;
+  const drawn = use === "advance" ? -amount2 : 0;
+  const since = typeof cur.from === "number" ? cur.from : at2;
+  const advanced = numOf(cur.advanced) + drawn;
+  const advances = advanced !== 0 ? { advanced, advanced_at: numOf(cur.advanced_at) + drawn * (at2 - since) } : {};
+  if (typeof cur.from !== "number") {
+    adb[account] = { from: at2, at: at2, sum: 0, spent, ...advances };
+    return;
+  }
+  const last = numOf(cur.at, cur.from);
+  const dt = Math.max(0, at2 - last);
+  const period = { ...typeof cur.paid === "number" ? { paid: cur.paid } : {}, ...typeof cur.owed === "number" ? { owed: cur.owed } : {} };
+  adb[account] = { from: cur.from, at: Math.max(last, at2), sum: numOf(cur.sum) + before * dt, spent: numOf(cur.spent) + spent, ...advances, ...period };
+}
+function isCreditAccount(ctx, account) {
+  const c3 = classOf2(ctx, account);
+  return c3 !== null && isCredit(c3);
+}
+var STAGE_WORDS2 = { current: "up to date", late: "late", "30": "30 days past due", "60": "60 days past due", "90": "90 days past due", "120": "120 days past due", collections: "in collections", charged_off: "charged off" };
+var STATUS_WORDS = { open: "open", frozen: "frozen", collections: "in collections", charged_off: "charged off", closed: "closed", paid_off: "paid off", matured: "matured" };
+var CREDIT_WORDS = { inquiry: "a credit inquiry", opened: "a new account", on_time: "a payment on time", late: "a late payment", collections: "an account in collections", charged_off: "an account charged off", closed: "a closed account", paid_off: "an account paid off", declined: "a declined application" };
+function whoseFor(ctx, viewer, person3) {
+  return viewer === person3 ? "Your" : `${own(ctx.state.entities, person3)?.name ?? person3}'s`;
+}
+function wordsOf2(words3, id) {
+  return own(words3, id) ?? id.replace(/_/g, " ");
+}
+var EVENTS = [
+  {
+    type: FINANCE_EVENTS.anchor,
+    validate: (e3, ctx) => own(ctx.state.entities, str4(e3, "entity")) && typeof e3.data.typical === "number" && typeof e3.data.base === "number" ? null : reject("bad_event", "anchor needs entity, typical and base"),
+    apply: (e3, state) => {
+      sliceRecord(state, "economy", "anchors")[str4(e3, "entity")] = { band: str4(e3, "band"), typical: numOf(e3.data.typical), base: numOf(e3.data.base) };
+    },
+    describe: (e3) => `${str4(e3, "entity")} is ${str4(e3, "band")}`,
+    coarsen: { key: (e3) => str4(e3, "entity"), merge: (_a, b3) => b3 }
+  },
+  {
+    type: FINANCE_EVENTS.txn,
+    validate: () => null,
+    apply: (e3, state, ctx) => {
+      const lines2 = Array.isArray(e3.data.lines) ? e3.data.lines.map((l3) => objOf(l3)) : [];
+      const at2 = typeof e3.data.at === "number" ? e3.data.at : state.clock;
+      const s3 = mutableSlice(state, "economy");
+      let seq = numOf(s3.seq);
+      const totals = new Map;
+      for (const l3 of lines2) {
+        const account = strOf(l3.account);
+        if (!own(state.entities, account))
+          continue;
+        totals.set(account, (totals.get(account) ?? 0) + Math.round(numOf(l3.amount)));
+      }
+      const sided = !UNSIDED_KINDS.has(strOf(e3.data.kind));
+      const payee = sided ? strOf(e3.data.counterparty) : "";
+      const paidMost = [...totals].reduce((top, l3) => l3[1] < 0 && (top === undefined || l3[1] < top[1]) ? l3 : top, undefined)?.[0];
+      const payer = sided ? strOf(e3.data.payer) || (paidMost ?? payee) : "";
+      for (const [account, amount2] of totals) {
+        seq += 1;
+        fileLine(state, ctx, account, amount2, at2, e3.data, partyOfSide(state, amount2 < 0 ? payee : payer), seq);
+        const use = !isCreditAccount(ctx, account) ? null : e3.data.kind === "purchase" ? "purchase" : e3.data.category === "cash_advance" && e3.data.kind !== "fee" && amount2 < 0 ? "advance" : null;
+        accrue(state, account, amount2, at2, use);
+      }
+      mutableSlice(state, "economy").seq = seq;
+    },
+    describe: (e3) => str4(e3, "memo")
+  },
+  {
+    type: FINANCE_EVENTS.note,
+    validate: (e3, ctx) => own(ctx.state.entities, str4(e3, "entity")) && str4(e3, "text") !== "" ? null : reject("bad_event", "a money note needs a party and its text"),
+    apply: (e3, state) => {
+      const notes = sliceRecord(state, "economy", "notes");
+      notes[str4(e3, "entity")] = pushCapped(notes[str4(e3, "entity")], { at: typeof e3.data.at === "number" ? e3.data.at : state.clock, class: str4(e3, "class"), text: str4(e3, "text") }, NOTES_CAP);
+    },
+    describe: (e3) => str4(e3, "text")
+  },
+  {
+    type: FINANCE_EVENTS.modifier,
+    validate: (e3) => str4(e3, "id") !== "" && (e3.data.mult === undefined || typeof e3.data.mult === "number" && e3.data.mult > 0) ? null : reject("bad_event", "a price modifier needs an id and a positive multiplier"),
+    apply: (e3, state) => {
+      const mods = sliceRecord(state, "economy", "modifiers");
+      if (typeof e3.data.mult !== "number")
+        delete mods[str4(e3, "id")];
+      else
+        mods[str4(e3, "id")] = { scope: strOf(e3.data.scope, "all"), place: strOf(e3.data.place), mult: e3.data.mult, ...typeof e3.data.until === "number" ? { until: e3.data.until } : {} };
+    },
+    describe: (e3) => typeof e3.data.mult === "number" ? `Prices ×${e3.data.mult}` : "Prices back to normal"
+  },
+  {
+    type: FINANCE_EVENTS.statement,
+    validate: (e3, ctx) => isCreditAccount(ctx, str4(e3, "account")) ? null : reject("bad_event", "statements are for credit accounts"),
+    apply: (e3, state) => {
+      const account = str4(e3, "account");
+      const at2 = typeof e3.data.at === "number" ? e3.data.at : state.clock;
+      const d3 = e3.data;
+      const cycle = { closing: numOf(d3.closing), interest: numOf(d3.interest), fees: numOf(d3.fees), minimum: numOf(d3.minimum), due: numOf(d3.due), paid: 0, at: at2, apr: numOf(d3.apr), stage: strOf(d3.stage, "current"), grace: d3.grace !== false, past_due: numOf(d3.past_due), lates: numOf(d3.lates), penalty: d3.penalty === true };
+      for (const k2 of ["months_left", "streak", "ontime", "late30", "late60", "late90"])
+        if (typeof d3[k2] === "number")
+          cycle[k2] = d3[k2];
+      const cycles = sliceRecord(state, "economy", "cycles");
+      if (cycles[account] !== undefined) {
+        const past = sliceRecord(state, "economy", "statements");
+        past[account] = pushCapped(past[account], cycles[account], STATEMENTS_KEPT);
+      }
+      cycles[account] = cycle;
+      sliceRecord(state, "economy", "adb")[account] = { from: at2, at: at2, sum: 0, spent: 0 };
+    },
+    describe: (e3, ctx) => `The statement closed at ${formatMoney(numOf(e3.data.closing), ctx.world.currency)}, with at least ${formatMoney(numOf(e3.data.minimum), ctx.world.currency)} due`
+  },
+  {
+    type: FINANCE_EVENTS.cardPaid,
+    validate: (e3, ctx) => isCreditAccount(ctx, str4(e3, "account")) ? null : reject("bad_event", "statement payments are for credit accounts"),
+    apply: (e3, state) => {
+      const cycles = sliceRecord(state, "economy", "cycles");
+      const account = str4(e3, "account");
+      const cur = objOf(cycles[account]);
+      if (Object.keys(cur).length > 0)
+        cycles[account] = { ...cur, paid: numOf(cur.paid) + numOf(e3.data.cents) };
+      const period = objOf(own(objOf(sliceOf(state, "economy").adb), account));
+      if (typeof period.owed === "number")
+        sliceRecord(state, "economy", "adb")[account] = { ...period, paid: numOf(period.paid) + numOf(e3.data.cents) };
+    },
+    describe: (e3, ctx) => `A card payment of ${formatMoney(numOf(e3.data.cents), ctx.world.currency)} was made`
+  },
+  {
+    type: FINANCE_EVENTS.delinquency,
+    validate: (e3, ctx) => isCreditAccount(ctx, str4(e3, "account")) && DELINQUENCY_STAGES.includes(str4(e3, "stage")) ? null : reject("bad_event", "a delinquency stage needs a credit account and a stage"),
+    apply: (e3, state) => {
+      const cycles = sliceRecord(state, "economy", "cycles");
+      const account = str4(e3, "account");
+      const cur = objOf(cycles[account]);
+      const next = { ...cur, stage: str4(e3, "stage"), past_due: numOf(e3.data.past_due), lates: numOf(e3.data.lates), penalty: e3.data.penalty === true };
+      for (const k2 of ["streak", "ontime", "late30", "late60", "late90"])
+        if (typeof e3.data[k2] === "number")
+          next[k2] = e3.data[k2];
+      cycles[account] = next;
+    },
+    describe: (e3, ctx) => `${own(ctx.state.entities, str4(e3, "account"))?.name ?? str4(e3, "account")}'s payments are now ${wordsOf2(STAGE_WORDS2, str4(e3, "stage"))}`,
+    coarsen: { key: (e3) => str4(e3, "account"), merge: (_a, b3) => b3 }
+  },
+  {
+    type: FINANCE_EVENTS.flowRun,
+    validate: (e3) => str4(e3, "flow") !== "" && typeof e3.data.state === "object" ? null : reject("bad_event", "a flow run needs its flow and state"),
+    apply: (e3, state) => {
+      sliceRecord(state, "economy", "flows")[str4(e3, "flow")] = objOf(e3.data.state);
+    },
+    describe: (e3) => `${str4(e3, "label") || str4(e3, "flow")}: ${str4(e3, "outcome")}`,
+    coarsen: { key: (e3) => str4(e3, "flow"), merge: (_a, b3) => b3 }
+  },
+  {
+    type: FINANCE_EVENTS.flowRenamed,
+    validate: (e3, ctx) => {
+      const name = str4(e3, "name");
+      return own(ctx.state.entities, str4(e3, "flow"))?.kind === "flow" && name.trim() !== "" && name.length <= 80 ? null : reject("bad_event", "a rename needs a standing payment and a name of up to 80 characters");
+    },
+    apply: (e3, state) => {
+      const flow = own(state.entities, str4(e3, "flow"));
+      if (flow)
+        flow.name = str4(e3, "name");
+    },
+    describe: (e3, _ctx, viewer) => viewer ? "" : `Standing payment renamed ${str4(e3, "name")}`,
+    touches: (e3) => [{ entity: str4(e3, "flow"), aspect: "name" }],
+    coarsen: { key: (e3) => str4(e3, "flow"), merge: (_a, b3) => b3 }
+  },
+  {
+    type: FINANCE_EVENTS.hold,
+    validate: (e3, ctx) => {
+      const account = str4(e3, "account");
+      if (!own(ctx.state.entities, account) || str4(e3, "id") === "")
+        return reject("bad_event", "a hold needs an account and an id");
+      if (e3.data.release === true)
+        return null;
+      const cents2 = numOf(e3.data.cents);
+      if (!(cents2 > 0) || typeof e3.data.until !== "number")
+        return reject("bad_event", "a hold needs an amount and an end");
+      return e3.data.kind === "authorization" && availableOf(ctx, account) < cents2 ? reject("declined", `${own(ctx.state.entities, account)?.name ?? account} can't cover ${formatMoney(cents2, ctx.world.currency)}`) : null;
+    },
+    apply: (e3, state) => {
+      const holds2 = sliceRecord(state, "economy", "holds");
+      const account = str4(e3, "account");
+      const mine = objOf(holds2[account]);
+      for (const [id, h3] of Object.entries(mine))
+        if (numOf(objOf(h3).until) <= state.clock)
+          delete mine[id];
+      if (e3.data.release === true)
+        delete mine[str4(e3, "id")];
+      else
+        mine[str4(e3, "id")] = { cents: Math.round(numOf(e3.data.cents)), until: numOf(e3.data.until), kind: e3.data.kind === "authorization" ? "authorization" : "deposit", memo: str4(e3, "memo") };
+      holds2[account] = mine;
+    },
+    describe: (e3, ctx) => e3.data.release === true ? "Hold released" : `Hold of ${formatMoney(numOf(e3.data.cents), ctx.world.currency)}`
+  },
+  {
+    type: FINANCE_EVENTS.settle,
+    validate: (e3, ctx) => own(ctx.state.entities, str4(e3, "account")) && typeof e3.data.upto === "number" ? null : reject("bad_event", "settling needs an account and a time"),
+    apply: (e3, state) => {
+      const journal = sliceRecord(state, "economy", "journal");
+      const account = str4(e3, "account");
+      const upto = numOf(e3.data.upto);
+      const list2 = Array.isArray(journal[account]) ? journal[account] : [];
+      journal[account] = list2.map((x2) => {
+        const o4 = objOf(x2);
+        if (o4.status !== "pending" || numOf(o4.settles) > upto)
+          return x2;
+        const { settles: _settles, ...rest } = o4;
+        return { ...rest, status: "posted" };
+      });
+    },
+    describe: () => "Card payments posted",
+    coarsen: { key: (e3) => str4(e3, "account"), merge: (_a, b3) => b3 }
+  },
+  {
+    type: FINANCE_EVENTS.credit,
+    validate: (e3, ctx) => own(ctx.state.entities, str4(e3, "person")) && str4(e3, "kind") !== "" ? null : reject("bad_event", "a credit entry needs a person and a kind"),
+    apply: (e3, state) => {
+      const credit = sliceRecord(state, "economy", "credit");
+      const person3 = str4(e3, "person");
+      const cur = objOf(credit[person3]);
+      const { person: _person, ...entry } = e3.data;
+      credit[person3] = { ...cur, entries: pushCapped(cur.entries, { ...entry, at: typeof e3.data.at === "number" ? e3.data.at : state.clock }, CREDIT_CAP) };
+    },
+    describe: (e3, ctx, viewer) => viewer !== undefined && viewer !== str4(e3, "person") ? "" : `${whoseFor(ctx, viewer, str4(e3, "person"))} credit report now shows ${wordsOf2(CREDIT_WORDS, str4(e3, "kind"))}`
+  },
+  {
+    type: FINANCE_EVENTS.score,
+    validate: (e3, ctx) => own(ctx.state.entities, str4(e3, "person")) && typeof e3.data.score === "number" ? null : reject("bad_event", "a score needs a person and a number"),
+    apply: (e3, state) => {
+      const credit = sliceRecord(state, "economy", "credit");
+      const person3 = str4(e3, "person");
+      const cur = objOf(credit[person3]);
+      const at2 = typeof e3.data.at === "number" ? e3.data.at : state.clock;
+      credit[person3] = { ...cur, score: numOf(e3.data.score), factors: objOf(e3.data.factors), at: at2, history: pushCapped(cur.history, { at: at2, score: numOf(e3.data.score) }, SCORES_KEPT) };
+    },
+    describe: (e3, ctx, viewer) => viewer !== undefined && viewer !== str4(e3, "person") ? "" : `${whoseFor(ctx, viewer, str4(e3, "person"))} credit score is now ${numOf(e3.data.score)}`
+  },
+  {
+    type: FINANCE_EVENTS.spend,
+    validate: (e3, ctx) => own(ctx.state.entities, str4(e3, "card")) && typeof e3.data.day === "number" ? null : reject("bad_event", "card spending needs a card and a day"),
+    apply: (e3, state) => {
+      sliceRecord(state, "economy", "spend")[str4(e3, "card")] = { day: numOf(e3.data.day), purchase: numOf(e3.data.purchase), atm: numOf(e3.data.atm) };
+    },
+    describe: () => "Card spending",
+    coarsen: { key: (e3) => str4(e3, "card"), merge: (_a, b3) => b3 }
+  },
+  {
+    type: FINANCE_EVENTS.open,
+    validate: (e3, ctx) => {
+      const list2 = Array.isArray(e3.data.accounts) ? e3.data.accounts : [];
+      const opened = objOf(sliceOf(ctx.state, "economy").opened);
+      for (const a3 of list2) {
+        if (typeof a3 !== "string" || !own(ctx.state.entities, a3))
+          return reject("bad_event", "only accounts open");
+        if (own(opened, a3) === true)
+          return reject("opened", `${own(ctx.state.entities, a3)?.name ?? a3} is already open`);
+      }
+      return list2.length > 0 ? null : reject("bad_event", "nothing to open");
+    },
+    apply: (e3, state) => {
+      const opened = sliceRecord(state, "economy", "opened");
+      for (const a3 of Array.isArray(e3.data.accounts) ? e3.data.accounts : [])
+        if (typeof a3 === "string")
+          opened[a3] = true;
+    },
+    describe: () => "Accounts opened"
+  },
+  {
+    type: FINANCE_EVENTS.status,
+    validate: (e3, ctx) => own(ctx.state.entities, str4(e3, "account"))?.kind === "account" && ACCOUNT_STATUSES.includes(str4(e3, "status")) ? null : reject("bad_event", "a status needs an account and a status"),
+    apply: (e3, state) => {
+      sliceRecord(state, "economy", "status")[str4(e3, "account")] = str4(e3, "status");
+    },
+    describe: (e3, ctx) => `${own(ctx.state.entities, str4(e3, "account"))?.name ?? str4(e3, "account")} is now ${wordsOf2(STATUS_WORDS, str4(e3, "status"))}`,
+    coarsen: { key: (e3) => str4(e3, "account"), merge: (_a, b3) => b3 }
+  },
+  {
+    type: FINANCE_EVENTS.accrue,
+    validate: (e3, ctx) => own(ctx.state.entities, str4(e3, "account")) && typeof e3.data.at === "number" && (e3.data.owed === undefined || typeof e3.data.owed === "number" && Number.isFinite(e3.data.owed)) ? null : reject("bad_event", "an accrual needs an account and a time"),
+    apply: (e3, state) => {
+      const at2 = numOf(e3.data.at);
+      sliceRecord(state, "economy", "adb")[str4(e3, "account")] = { from: at2, at: at2, sum: 0, spent: 0, ...typeof e3.data.owed === "number" ? { owed: e3.data.owed } : {} };
+    },
+    describe: () => "Interest period"
+  },
+  { type: FINANCE_EVENTS.decline, validate: () => null, apply: () => {
+    return;
+  }, describe: (e3) => `${str4(e3, "memo")} was declined` }
+];
+
+// src/packs/economy/core/flows.ts
+var DEFAULT_FLOW_MINUTE = 9 * 60;
+function isBusinessDay(cal, day) {
+  const weekday = dateAt(cal, clockAt(cal, day, 0)).weekday;
+  if (cal.def.system === "gregorian" && (weekday === 0 || weekday === 6))
+    return false;
+  return !holidaysOn(cal, day).some((h3) => h3.dayOff);
+}
+function businessDay(cal, day, roll) {
+  let d3 = day;
+  for (let guard = 0;guard < 14 && !isBusinessDay(cal, d3); guard++)
+    d3 += roll === "before" ? -1 : 1;
+  return d3;
+}
+function safeDay(cal, text) {
+  if (!text)
+    return null;
+  try {
+    return dayIndexOfText(cal, text.slice(0, 10));
+  } catch {
+    return null;
+  }
+}
+function dayMatches(cal, days, d3) {
+  const date = dateAt(cal, clockAt(cal, d3, 0));
+  const len = cal.system.monthLength(date.year, date.month);
+  return days.some((n3) => n3 > 0 ? Math.min(n3, len) === date.day : n3 < 0 && len + n3 + 1 === date.day);
+}
+function falls(cal, s3, d3, anchor) {
+  const interval = Math.max(1, Math.round(s3.interval ?? 1));
+  const date = dateAt(cal, clockAt(cal, d3, 0));
+  const start = dateAt(cal, clockAt(cal, anchor, 0));
+  switch (s3.every) {
+    case "day":
+      return d3 >= anchor && (d3 - anchor) % interval === 0;
+    case "week": {
+      const weekdays = s3.weekdays && s3.weekdays.length > 0 ? s3.weekdays : [start.weekday];
+      if (!weekdays.includes(date.weekday))
+        return false;
+      const weekStart = anchor - start.weekday;
+      return d3 >= weekStart && Math.floor((d3 - weekStart) / 7) % interval === 0;
+    }
+    case "month": {
+      if (!dayMatches(cal, s3.days && s3.days.length > 0 ? s3.days : [start.day], d3))
+        return false;
+      const months = date.year * 12 + date.month - (start.year * 12 + start.month);
+      return months >= 0 && months % interval === 0;
+    }
+    case "year": {
+      const months = s3.months && s3.months.length > 0 ? s3.months : [start.month];
+      if (!months.includes(date.month) || !dayMatches(cal, s3.days && s3.days.length > 0 ? s3.days : [start.day], d3))
+        return false;
+      const years = date.year - start.year;
+      return years >= 0 && years % interval === 0;
+    }
+    default:
+      return false;
+  }
+}
+function occurrences(ctx, s3, from, to, start, end) {
+  if (to <= from)
+    return [];
+  const cal = calendarOf(ctx.world);
+  if (s3.once !== undefined && s3.once !== "") {
+    let at2 = null;
+    if (typeof s3.once === "number")
+      at2 = s3.once;
+    else {
+      try {
+        at2 = clockOfLocal(cal, s3.once);
+      } catch {
+        at2 = null;
+      }
+    }
+    return at2 !== null && at2 > from && at2 <= to ? [{ at: at2, day: dateAt(cal, at2).dayIndex }] : [];
+  }
+  if (!s3.every)
+    return [];
+  let minute = DEFAULT_FLOW_MINUTE;
+  if (s3.at) {
+    try {
+      minute = parseHHMM(s3.at);
+    } catch {
+      minute = DEFAULT_FLOW_MINUTE;
+    }
+  }
+  const startDay = safeDay(cal, start);
+  const endDay = safeDay(cal, end);
+  const anchor = startDay ?? 0;
+  const roll = s3.roll === "before" || s3.roll === "after" ? s3.roll : null;
+  const margin = roll ? 10 : 1;
+  const out = [];
+  for (let d3 = dateAt(cal, from).dayIndex - margin;d3 <= dateAt(cal, to).dayIndex + margin; d3++) {
+    if (startDay !== null && d3 < startDay || endDay !== null && d3 > endDay)
+      continue;
+    if (!falls(cal, s3, d3, anchor))
+      continue;
+    if (s3.except && s3.except.length > 0 && holidaysOn(cal, d3).some((h3) => s3.except?.includes(h3.id)))
+      continue;
+    const at2 = clockAt(cal, roll ? businessDay(cal, d3, roll) : d3, minute);
+    if (at2 > from && at2 <= to)
+      out.push({ at: at2, day: d3 });
+  }
+  return out.sort((a3, b3) => a3.at - b3.at || a3.day - b3.day);
+}
+function present(v6) {
+  return v6 !== undefined && v6 !== null && v6 !== "" && !(Array.isArray(v6) && v6.length === 0);
+}
+function nums(v6) {
+  return Array.isArray(v6) && v6.length > 0 ? v6.filter((x2) => typeof x2 === "number" && Number.isFinite(x2)) : undefined;
+}
+function strs(v6) {
+  return Array.isArray(v6) && v6.length > 0 ? v6.filter((x2) => typeof x2 === "string" && x2 !== "") : undefined;
+}
+function amountOfFields(f3) {
+  if (present(f3.amount_cents))
+    return { fixed: Math.round(numOf(f3.amount_cents)) };
+  if (present(f3.amount_formula))
+    return { formula: strOf(f3.amount_formula) };
+  if (present(f3.amount_table)) {
+    const [table, row, column] = splitTableRef(strOf(f3.amount_table));
+    return table ? { table, row, ...column ? { column } : {} } : null;
+  }
+  if (present(f3.amount_min) || present(f3.amount_max))
+    return { range: { min: Math.round(numOf(f3.amount_min)), max: Math.round(numOf(f3.amount_max, numOf(f3.amount_min))) } };
+  if (present(f3.amount_pct))
+    return { percent: numOf(f3.amount_pct), ...present(f3.amount_of) ? { of: strOf(f3.amount_of) } : {} };
+  if (f3.amount_due === "minimum" || f3.amount_due === "statement" || f3.amount_due === "balance")
+    return { due: f3.amount_due };
+  return null;
+}
+function splitTableRef(ref) {
+  const parts = ref.split(".");
+  return parts.length >= 3 ? [`${parts[0]}.${parts[1]}`, parts[2] ?? "", parts.length > 3 ? parts.slice(3).join(".") : undefined] : ["", "", undefined];
+}
+function isFlowKind(v6) {
+  return typeof v6 === "string" && FLOW_KINDS.includes(v6);
+}
+function isShortfall(v6) {
+  return typeof v6 === "string" && FLOW_SHORTFALLS.includes(v6);
+}
+function flowOfEntity(ctx, id) {
+  const e3 = own(ctx.state.entities, id);
+  if (!e3 || e3.kind !== "flow" || isGone(ctx.state, id))
+    return null;
+  const f3 = e3.fields;
+  const amount2 = revenueOf(f3.revenue) ? { provider: REVENUE_PROVIDER, args: { stream: id } } : amountOfFields(f3);
+  const from = strOf(f3.from);
+  const to = strOf(f3.to);
+  if (!amount2 || from === "" || to === "")
+    return null;
+  const every = f3.every === "day" || f3.every === "week" || f3.every === "month" || f3.every === "year" ? f3.every : undefined;
+  const schedule = {
+    ...every ? { every } : {},
+    ...present(f3.interval) ? { interval: numOf(f3.interval, 1) } : {},
+    ...nums(f3.weekdays) ? { weekdays: nums(f3.weekdays) } : {},
+    ...nums(f3.days) ? { days: nums(f3.days) } : {},
+    ...nums(f3.months) ? { months: nums(f3.months) } : {},
+    ...strs(f3.except) ? { except: strs(f3.except) } : {},
+    ...f3.roll === "before" || f3.roll === "after" ? { roll: f3.roll } : {},
+    ...present(f3.at) ? { at: strOf(f3.at) } : {},
+    ...present(f3.once) ? { once: typeof f3.once === "number" ? f3.once : strOf(f3.once) } : {}
+  };
+  const splits = Array.isArray(f3.splits) ? f3.splits.map((x2) => objOf(x2)).filter((x2) => strOf(x2.to) !== "").map((x2) => ({ to: strOf(x2.to), ...typeof x2.cents === "number" ? { cents: x2.cents } : {}, ...typeof x2.pct === "number" ? { pct: x2.pct } : {} })) : [];
+  const shares = Array.isArray(f3.shares) ? f3.shares.map((x2) => objOf(x2)).filter((x2) => strOf(x2.party) !== "").map((x2) => ({ party: strOf(x2.party), pct: numOf(x2.pct), ...present(x2.from) ? { from: strOf(x2.from) } : {} })) : [];
+  const status = f3.status === "paused" || f3.status === "ended" ? f3.status : "active";
+  return {
+    id,
+    label: e3.name,
+    kind: isFlowKind(f3.flow_kind) ? f3.flow_kind : "bill",
+    from,
+    to,
+    ...splits.length > 0 ? { splits } : {},
+    ...shares.length > 0 ? { shares } : {},
+    amount: amount2,
+    schedule,
+    ...present(f3.start) ? { start: strOf(f3.start) } : {},
+    ...present(f3.end) ? { end: strOf(f3.end) } : {},
+    ...present(f3.count) ? { count: numOf(f3.count) } : {},
+    shortfall: isShortfall(f3.shortfall) ? f3.shortfall : "skip",
+    ...present(f3.retry_days) ? { retry_days: numOf(f3.retry_days) } : {},
+    ...present(f3.retries) ? { retries: numOf(f3.retries) } : {},
+    ...present(f3.fallback) ? { fallback: strOf(f3.fallback) } : {},
+    ...present(f3.category) ? { category: strOf(f3.category) } : {},
+    ...present(f3.link) ? { link: strOf(f3.link) } : {},
+    status,
+    ...present(f3.method) ? { method: strOf(f3.method) } : {},
+    source: "entity"
+  };
+}
+
+// src/packs/economy/core/pricing.ts
+var YEAR_MINUTES = 365 * 1440;
+var MARKET_CLOSE = 16 * 60;
+
+// src/packs/economy/core/history.ts
+var SERIES = new WeakMap;
+var WALKS = new WeakMap;
+
+// src/packs/economy/core/assets.ts
+var LISTING_REVERSION = 2;
+
+// src/packs/economy/core/books.ts
+function monthOf(world, clock) {
+  const d3 = dateAt(calendarOf(world), clock);
+  return `${String(d3.year).padStart(4, "0")}-${String(d3.month).padStart(2, "0")}`;
+}
+
+// src/shared/org-motions.ts
+var DECISIONS_SECTION = "orgs.decisions";
+var DECISIONS_TAB = "orgs.decisions";
+var VOTES = ["for", "against", "abstain"];
+var VOTE_HOWS = ["own", "rule", "story", "gm"];
+var VOTE_BASES = ["shares", "members", "trustees"];
+var STANDING_VOTES = ["for", "against", "abstain", "with"];
+var MOTION_STATUSES = ["open", "passed", "failed", "withdrawn"];
+var DECISION_DEFAULTS = Object.freeze({ quorum: 50, pass: 50, days: 7, approvalDays: 7 });
+var DECISION_RANGES = Object.freeze({ quorum: [0, 100], pass: [0, 99.9], days: [1, 365] });
+var DECISION_FIELDS = Object.freeze({ basis: "vote_by", quorum: "quorum_pct", pass: "pass_pct", days: "motion_days", standing: "vote_rules", approvalDays: "approval_days" });
+function pctWords(pct2) {
+  const r3 = Math.round(pct2 * 10) / 10;
+  return `${Number.isInteger(r3) ? r3.toFixed(0) : r3.toFixed(1)}%`;
+}
+var DECISION_ACTIONS = { vote: "org_vote", end: "org_motion_end", approve: "org_approve", deny: "org_deny", rules: "org_decisions", standing: "org_vote_rule" };
+var DECISION_EFFECTS = { propose: "orgs.propose", vote: "orgs.vote", end: "orgs.motion_end", answer: "orgs.answer", rules: "orgs.decisions", standing: "orgs.vote_rule" };
+
+// src/packs/economy/core/stakes.ts
+var valuing = new Set;
+
+// src/packs/economy/core/credit.ts
+var MONTH = 1440 * 30.4;
+
+// src/engine/places-in-play.ts
+var NONE = Object.freeze({});
+var BASES = new WeakMap;
+var PLAYED = new WeakMap;
+var ROOM_WORDS = Object.fromEntries(["room", "backroom", "kitchen", "bathroom", "bedroom", "office", "hall", "hallway", "corridor", "cellar", "basement", "attic", "garage", "closet", "pantry", "study", "lounge", "den", "loft", "lobby", "storeroom", "stockroom", "washroom", "restroom", "toilet", "stairwell", "landing", "nursery", "library", "parlor", "parlour", "workshop", "laundry"].map((w3) => [stem(w3), true]));
+
+// src/packs/economy/core/depreciation.ts
+var MONTHS_KEPT2 = 25;
+var ORG_DEPRECIATION_FIELD = {
+  depreciation: { type: "enum", label: "Depreciation", values: ["world", ...DEPRECIATION_METHODS], default: "world", domain: "money", level: 3 }
+};
+function recoveredOf(state, asset) {
+  return numOf(objOf(own(objOf(sliceOf(state, "economy").depreciated), asset)).cents);
+}
+function bookRecovery(state, party, month, kind, cents2) {
+  const books = sliceRecord(state, "economy", "depreciation");
+  const months = objOf(own(books, party));
+  const cell = objOf(own(months, month));
+  months[month] = { ...cell, [kind]: numOf(cell[kind]) + Math.round(cents2) };
+  for (const old of Object.keys(months).sort().slice(0, -MONTHS_KEPT2))
+    delete months[old];
+  books[party] = months;
+}
+var DEPRECIATE_EVENT = {
+  type: FINANCE_EVENTS.depreciate,
+  validate: (e3, ctx) => own(ctx.state.entities, str4(e3, "asset")) && /^\d{4}-\d{2}$/.test(str4(e3, "month")) && typeof e3.data.cents === "number" && Array.isArray(e3.data.parts) ? null : { code: "bad_event", reason: "a depreciation needs its asset, its month, its amount and its parts" },
+  apply: (e3, state) => {
+    const asset = str4(e3, "asset");
+    const month = str4(e3, "month");
+    const kind = e3.data.kind === "depletion" ? "depletion" : "depreciation";
+    const recovered = sliceRecord(state, "economy", "depreciated");
+    recovered[asset] = { cents: recoveredOf(state, asset) + Math.round(numOf(e3.data.cents)), through: month };
+    for (const raw of Array.isArray(e3.data.parts) ? e3.data.parts : []) {
+      const part = objOf(raw);
+      const party = strOf(part.party);
+      if (party !== "")
+        bookRecovery(state, party, month, kind, numOf(part.cents));
+    }
+  },
+  describe: (e3, ctx, viewer) => viewer ? "" : `${e3.data.kind === "depletion" ? "Depletion" : "Depreciation"} of ${labelOf(ctx, str4(e3, "asset"))} for ${str4(e3, "month")}`
+};
+
+// src/packs/economy/core/cycle.ts
+var STATEMENT_MINUTE = 9 * 60 - 30;
+var DUE_MINUTE = 23 * 60 + 59;
+var SWEEP_MINUTE = 23 * 60 + 58;
+
+// src/packs/economy/core/winding.ts
+var WIND_FIELDS = {
+  [WINDING_FIELD]: { type: "text", label: "Winding up since (YYYY-MM-DD)", domain: "money", level: 3 },
+  [DISSOLVED_FIELD]: { type: "text", label: "Dissolved on (YYYY-MM-DD)", domain: "money", level: 3 },
+  [MERGED_INTO_FIELD]: { type: "ref", label: "Merged into", ref: COMPANY_KIND2, domain: "money", level: 3 }
+};
+
+// src/packs/economy/core/shares.ts
+var SHARE_UNITS = 1000;
+
+// src/packs/economy/core/taxes.ts
+var CORPORATE_PCT = 21;
+var ESTIMATE_DUE = [
+  { month: 1, months: [9, 10, 11, 12], lastYear: true },
+  { month: 4, months: [1, 2, 3], lastYear: false },
+  { month: 6, months: [4, 5], lastYear: false },
+  { month: 9, months: [6, 7, 8], lastYear: false }
+];
+var ESTIMATE_SCHEDULE = { every: "year", months: ESTIMATE_DUE.map((d3) => d3.month), days: [15], roll: "after" };
+var PERIOD_MONTHS = [...ESTIMATE_DUE].sort((a3, b3) => (a3.months[0] ?? 0) - (b3.months[0] ?? 0)).map((d3) => d3.months);
+
+// src/packs/economy/core/employment.ts
+var ROUTINE_WINDOW = 14 * MINUTES_PER_DAY;
+
+// src/packs/economy/core/revenue.ts
+var MINUTES_A_YEAR = 365 * 1440;
+function clockVars(cal, at2) {
+  const d3 = dateAt(cal, at2);
+  return { clock: at2, minute: d3.minuteOfDay, hour: Math.floor(d3.minuteOfDay / 60), day: d3.dayIndex, weekday: d3.weekday, date: d3.day, month: d3.month, year: d3.year };
+}
+function previewReader(world) {
+  const cal = calendarOf(world);
+  return {
+    world,
+    formula: (src, at2, vars) => evalNumber(src.replace(/^=/, ""), createEnv({ ...clockVars(cal, at2), ...vars }), 0),
+    assetPrice: (asset) => {
+      const price = objOf(own(objOf(world.packs.economy?.config.assets), asset)).price;
+      return typeof price === "number" && Number.isFinite(price) ? price : null;
+    },
+    rows: (table) => objOf(own(world.tables, table)?.rows)
+  };
+}
+function monthNumber2(cal, clock) {
+  const d3 = dateAt(cal, clock);
+  return d3.year * cal.system.months + d3.month - 1;
+}
+function nextMonthStart(cal, clock) {
+  const d3 = dateAt(cal, clock);
+  const last = d3.month >= cal.system.months;
+  return clockAt(cal, dayIndexOf(cal, last ? d3.year + 1 : d3.year, last ? 1 : d3.month + 1, 1), 0);
+}
+function startOf2(world, flow) {
+  const cal = calendarOf(world);
+  for (const [text, dated] of [[flow.start ? `${flow.start.slice(0, 10)}T00:00` : "", true], [world.start.at, false]]) {
+    if (text === "")
+      continue;
+    try {
+      return { at: clockOfLocal(cal, text), dated };
+    } catch {}
+  }
+  return { at: 0, dated: false };
+}
+function seasonOf(rd, model) {
+  if (typeof model.season !== "string")
+    return model.season;
+  const rows2 = rd.rows(model.season);
+  return rows2 ? Array.from({ length: 12 }, (_3, i3) => numOf(objOf(own(rows2, String(i3 + 1))).factor, 1)) : undefined;
+}
+function earnedAt(rd, flow, model, at2, factor = 1, add = 0) {
+  const cal = calendarOf(rd.world);
+  const d3 = dateAt(cal, at2);
+  const start = startOf2(rd.world, flow);
+  const t3 = monthNumber2(cal, at2) - monthNumber2(cal, start.at);
+  const vars = { season: seasonAt(seasonOf(rd, model), d3.month), weekday_factor: weekdayAt(model.weekdays, d3.weekday), growth: growthAt(model.growth_pct, (at2 - start.at) / MINUTES_A_YEAR), t: t3 };
+  const formula = (src, fallback) => {
+    const n3 = rd.formula(src, at2, vars);
+    return Number.isFinite(n3) ? n3 : fallback;
+  };
+  const driver = (v6, fallback) => typeof v6 === "number" ? v6 : typeof v6 === "string" ? formula(v6, fallback) : fallback;
+  const shaped = vars.weekday_factor * vars.growth * factor;
+  switch (model.type) {
+    case "royalty": {
+      const month = t3 - (model.lag_months ?? 0);
+      if (month < 0)
+        return null;
+      const first = dateAt(cal, start.at);
+      const length = cal.system.monthLength(first.year, first.month);
+      const fraction = month === 0 && start.dated ? (length - first.day + 1) / length : 1;
+      const asset = typeof model.price === "object" && !Array.isArray(model.price) ? model.price.asset : null;
+      const price = royaltyPriceAt(model.price, month) ?? (asset ? rd.assetPrice(asset, at2) : null) ?? 0;
+      const base = royaltyMonth(model, month, fraction * factor, price);
+      const gross = Math.max(0, base.gross + add);
+      const deductions = Math.round(gross * (model.deductions_pct ?? 0) / 100);
+      const severance = Math.round(gross * (model.severance_pct ?? 0) / 100);
+      return { cents: gross, units: base.units, lines: [], royalty: { units: base.units, gross, deductions, severance, net: gross - deductions - severance } };
+    }
+    case "catalog": {
+      const buyers = driver(model.buyers, 1);
+      let units = 0;
+      const lines2 = (model.items ?? []).map((item2, i3) => {
+        const each = driver(item2.units, 1);
+        const factorOf = (item2.season ? seasonAt(item2.season, d3.month) : vars.season) * shaped;
+        units += each * buyers * factorOf;
+        return { cents: Math.max(0, driversAmount(each, driver(item2.price, 0), buyers, factorOf) + (i3 === 0 ? add : 0)), margin: item2.margin_pct ?? model.margin_pct ?? null, category: item2.category ?? null };
+      });
+      return { cents: lines2.reduce((a3, l3) => a3 + l3.cents, 0), units, lines: lines2, royalty: null };
+    }
+    case "custom": {
+      const cents2 = Math.max(0, Math.round(formula(model.formula ?? "0", 0) * factor) + add);
+      return { cents: cents2, units: 0, lines: [], royalty: null };
+    }
+    case "product":
+    case "fees": {
+      const units = driver(model.units, 1);
+      const buyers = driver(model.buyers, 1);
+      const cents2 = Math.max(0, driversAmount(units, driver(model.price, 0), buyers, vars.season * shaped) + add);
+      return { cents: cents2, units: units * buyers * vars.season * shaped, lines: model.type === "product" ? [{ cents: cents2, margin: model.margin_pct ?? null, category: model.category ?? null }] : [], royalty: null };
+    }
+  }
+}
+function streamMonths(rd, stream, from, count3, paid = () => false) {
+  const cal = calendarOf(rd.world);
+  const { flow, model } = stream;
+  const out = [];
+  let lo = from;
+  for (let i3 = 0;i3 < count3; i3++) {
+    const hi = nextMonthStart(cal, lo + 1);
+    const month = monthOf(rd.world, lo + 1);
+    const row = { month, cents: 0, net: 0, units: 0 };
+    if (flow.status === "active") {
+      let royaltyPaid = model.type === "royalty" && paid(month);
+      for (const o4 of occurrences({ world: rd.world }, flow.schedule, lo, hi - 1, flow.start, flow.end)) {
+        if (royaltyPaid)
+          break;
+        const e3 = earnedAt(rd, flow, model, o4.at);
+        if (!e3)
+          continue;
+        row.cents += e3.cents;
+        row.net += e3.royalty ? e3.royalty.net : e3.cents;
+        row.units += e3.units;
+        if (model.type === "royalty")
+          royaltyPaid = true;
+      }
+    }
+    out.push(row);
+    lo = hi - 1;
+  }
+  return out;
+}
+function draftPreview(world, draft) {
+  const model = revenueOf(draft.fields.revenue);
+  const state = { entities: { [draft.id]: { id: draft.id, kind: "flow", name: draft.name, tier: "background", fields: draft.fields, relations: [] } } };
+  const flow = model ? flowOfEntity({ state }, draft.id) : null;
+  if (!flow || !model)
+    return [];
+  try {
+    const from = clockOfLocal(calendarOf(world), world.start.at);
+    return streamMonths(previewReader(world), { flow, model }, from, 12).map((m2) => ({ month: m2.month, cents: m2.cents }));
+  } catch {
+    return [];
+  }
+}
+
+// src/packs/economy/ui/nav.tsx
+function sectionPage(...path2) {
+  return { type: "section", path: path2 };
+}
+function detailPage(thing2, id) {
+  return { type: "detail", path: [thing2, id] };
+}
+function actionPage(...path2) {
+  return { type: "action", path: path2 };
+}
+function MoneyPage(props) {
+  const { nav } = props;
+  if (nav.frame === "gm") {
+    return /* @__PURE__ */ u3(GmPage, {
+      name: props.name,
+      title: props.title,
+      subtitle: props.subtitle,
+      backLabel: nav.backLabel ?? "Money",
+      onBack: nav.back,
+      actions: props.actions,
+      children: /* @__PURE__ */ u3("div", {
+        class: "lre-money-page-body",
+        "data-lre-money-page": props.name,
+        children: props.children
+      }, undefined, false, undefined, this)
+    }, undefined, false, undefined, this);
+  }
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-money-page",
+    "data-lre-money-page": props.name,
+    children: [
+      /* @__PURE__ */ u3(PageHeader, {
+        title: props.title,
+        subtitle: props.subtitle,
+        onBack: nav.back,
+        backLabel: nav.backLabel ?? undefined,
+        actions: props.actions
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3("div", {
+        class: "lre-money-page-body",
+        children: props.children
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+function Hero(props) {
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-money-hero",
+    children: [
+      /* @__PURE__ */ u3("div", {
+        class: "lre-money-hero-main",
+        children: [
+          /* @__PURE__ */ u3(Stat, {
+            label: props.label,
+            value: props.value,
+            sub: props.sub,
+            tone: props.tone
+          }, undefined, false, undefined, this),
+          props.badges !== undefined ? /* @__PURE__ */ u3("span", {
+            class: "lre-money-hero-badges",
+            children: props.badges
+          }, undefined, false, undefined, this) : null
+        ]
+      }, undefined, true, undefined, this),
+      props.children
+    ]
+  }, undefined, true, undefined, this);
+}
+function Controls(props) {
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-money-controls",
+    "data-lre-money-controls": props.name,
+    children: props.children
+  }, undefined, false, undefined, this);
+}
+function Note(props) {
+  return /* @__PURE__ */ u3("p", {
+    class: "lre-money-note",
+    children: props.children
+  }, undefined, false, undefined, this);
+}
+function Gone(props) {
+  return /* @__PURE__ */ u3(MoneyPage, {
+    nav: props.nav,
+    name: props.name,
+    title: props.title,
+    children: /* @__PURE__ */ u3(Empty, {
+      icon: props.icon,
+      children: props.children
+    }, undefined, false, undefined, this)
+  }, undefined, false, undefined, this);
+}
+
+// src/packs/economy/ui/requests.ts
+function actionRequest(chatId, body) {
+  return { type: "lre.action", chatId, action: body.action, params: body.params, source: "palette" };
+}
+function amountOf(text, currency) {
+  const cents2 = parseMoneyInput(text, currency);
+  return cents2 !== null && cents2 > 0 ? cents2 : null;
+}
+function transferAction(from, to, cents2) {
+  return { action: FINANCE_ACTIONS.transfer, params: { from, to, amount: cents2 } };
+}
+function payCardAction(account, from, cents2) {
+  const params = { card: account };
+  if (from)
+    params.from = from;
+  if (cents2 !== null)
+    params.amount = cents2;
+  return { action: FINANCE_ACTIONS.payCard, params };
+}
+function cashAction(kind, account, cents2) {
+  return { action: kind === "withdraw" ? FINANCE_ACTIONS.withdraw : FINANCE_ACTIONS.deposit, params: { account, amount: cents2 } };
+}
+function autopayAction(account, mode, from, cents2) {
+  const params = { account, mode };
+  if (mode !== "none" && from)
+    params.from = from;
+  if (mode === "fixed" && cents2 !== null)
+    params.amount = cents2;
+  return { action: FINANCE_ACTIONS.autopay, params };
+}
+function autopayOps(account, was, mode, from, cents2) {
+  const ops = [];
+  if (was?.mode !== mode)
+    ops.push({ op: "set", entity: account, field: "autopay", value: mode });
+  if (mode !== "none" && from && was?.from !== from)
+    ops.push({ op: "set", entity: account, field: "autopay_from", value: from });
+  if (mode === "fixed" && cents2 !== null && was?.cents !== cents2)
+    ops.push({ op: "set", entity: account, field: "autopay_cents", value: cents2 });
+  return ops;
+}
+function cardChanges(state) {
+  switch (state) {
+    case "active":
+      return ["freeze", "lost", "replace"];
+    case "frozen":
+      return ["unfreeze", "lost", "replace"];
+    case "lost":
+      return ["replace"];
+    case "cancelled":
+      return [];
+  }
+}
+function cardAction(card, change) {
+  const action = { freeze: FINANCE_ACTIONS.cardFreeze, unfreeze: FINANCE_ACTIONS.cardUnfreeze, lost: FINANCE_ACTIONS.cardLost, replace: FINANCE_ACTIONS.cardReplace }[change];
+  return { action, params: { card } };
+}
+function blankFlowForm(from) {
+  return { label: "", kind: "transfer", from, to: "", amount: "", every: "month", interval: 1, day: 1, weekday: null, month: null, at: "", start: "", end: "", count: null, roll: "", shortfall: "skip", retryDays: null, retries: null, fallback: "", category: "" };
+}
+function flowFormOf(flow, currency) {
+  const s3 = flow.schedule;
+  const once = typeof s3.once === "string" && s3.once !== "" ? s3.once : null;
+  const fixed = "fixed" in flow.amount ? flow.amount.fixed : null;
+  const decimals = Math.max(0, Math.min(6, Math.trunc(currency.decimals)));
+  return {
+    label: flow.label,
+    kind: flow.kind,
+    from: flow.from,
+    to: flow.to,
+    amount: fixed === null ? "" : (fixed / 10 ** decimals).toFixed(decimals),
+    every: once ? "once" : s3.every ?? "month",
+    interval: s3.interval ?? 1,
+    day: s3.days?.[0] ?? null,
+    weekday: s3.weekdays?.[0] ?? null,
+    month: s3.months?.[0] ?? null,
+    at: once ? once.slice(11, 16) : s3.at ?? "",
+    start: once ? once.slice(0, 10) : flow.start ?? "",
+    end: flow.end ?? "",
+    count: flow.count ?? null,
+    roll: s3.roll ?? "",
+    shortfall: flow.shortfall,
+    retryDays: flow.retry_days ?? null,
+    retries: flow.retries ?? null,
+    fallback: flow.fallback ?? "",
+    category: flow.category ?? ""
+  };
+}
+function flowFormProblem(form, currency, requireAmount) {
+  if (form.label.trim() === "")
+    return "Give it a name.";
+  if (form.from.trim() === "" || form.to.trim() === "")
+    return "Say where the money comes from and where it goes.";
+  if (form.from === form.to)
+    return "It can't pay itself.";
+  if ((requireAmount || form.amount.trim() !== "") && amountOf(form.amount, currency) === null)
+    return "Type an amount above zero.";
+  if (form.every === "once" && !/^\d{4}-\d{2}-\d{2}$/.test(form.start))
+    return "Pick the day it happens.";
+  if (!Number.isInteger(form.interval) || form.interval < 1)
+    return "Repeat every 1 or more.";
+  if ((form.every === "month" || form.every === "year") && form.day !== null && !(form.day === -1 || Number.isInteger(form.day) && form.day >= 1 && form.day <= 31))
+    return "A day of the month is 1–31, or the last day.";
+  if (form.every === "week" && form.weekday === null)
+    return "Pick a weekday.";
+  if (form.every === "year" && form.month === null)
+    return "Pick a month.";
+  if (form.at !== "" && !/^([01]\d|2[0-3]):[0-5]\d$/.test(form.at))
+    return "A time is HH:MM.";
+  if (form.every !== "once" && form.start !== "" && form.end !== "" && form.end < form.start)
+    return "It ends before it starts.";
+  if (form.count !== null && !(Number.isInteger(form.count) && form.count >= 1))
+    return "A count is a whole number from 1.";
+  if (form.shortfall === "fallback" && form.fallback === "")
+    return "Pick the account that pays when this one can't.";
+  if (form.shortfall === "retry" && (form.retryDays !== null && !(Number.isInteger(form.retryDays) && form.retryDays >= 1) || form.retries !== null && !(Number.isInteger(form.retries) && form.retries >= 1)))
+    return "Retries are whole numbers from 1.";
+  return null;
+}
+function flowParams(form, currency) {
+  const params = { label: form.label.trim(), kind: form.kind, from: form.from, to: form.to.trim(), every: form.every, shortfall: form.shortfall };
+  const cents2 = amountOf(form.amount, currency);
+  if (cents2 !== null)
+    params.amount = cents2;
+  if (form.every === "once")
+    params.once = `${form.start}T${form.at || "09:00"}`;
+  else {
+    params.interval = form.interval;
+    if ((form.every === "month" || form.every === "year") && form.day !== null)
+      params.day = form.day;
+    if (form.every === "week" && form.weekday !== null)
+      params.weekday = form.weekday;
+    if (form.every === "year" && form.month !== null)
+      params.month = form.month;
+    if (form.at !== "")
+      params.at = form.at;
+    if (form.start !== "")
+      params.start = form.start;
+    if (form.end !== "")
+      params.end = form.end;
+    if (form.count !== null)
+      params.count = form.count;
+    if (form.roll !== "")
+      params.roll = form.roll;
+  }
+  if (form.shortfall === "retry") {
+    if (form.retryDays !== null)
+      params.retry_days = form.retryDays;
+    if (form.retries !== null)
+      params.retries = form.retries;
+  }
+  if (form.shortfall === "fallback" && form.fallback !== "")
+    params.fallback = form.fallback;
+  if (form.category.trim() !== "")
+    params.category = form.category.trim();
+  return params;
+}
+function flowCreateAction(form, currency) {
+  return { action: FINANCE_ACTIONS.flowCreate, params: flowParams(form, currency) };
+}
+var SCHEDULE_PARAMS = ["every", "interval", "day", "weekday", "month", "at", "once", "roll"];
+var FLOW_CLEARABLE = ["at", "start", "end", "count", "roll", "retry_days", "retries", "fallback", "category"];
+function flowUpdateAction(flow, form, currency) {
+  const was = flowParams(flowFormOf(flow, currency), currency);
+  const now = flowParams(form, currency);
+  const changed = {};
+  for (const [key, value] of Object.entries(now))
+    if (JSON.stringify(was[key] ?? null) !== JSON.stringify(value))
+      changed[key] = value;
+  if (SCHEDULE_PARAMS.some((key) => (key in changed))) {
+    for (const key of SCHEDULE_PARAMS)
+      if (now[key] !== undefined)
+        changed[key] = now[key];
+  }
+  const clear = FLOW_CLEARABLE.filter((key) => was[key] !== undefined && now[key] === undefined);
+  if (clear.length > 0)
+    changed.clear = clear.join(",");
+  return Object.keys(changed).length === 0 ? null : { action: FINANCE_ACTIONS.flowUpdate, params: { flow: flow.id, ...changed } };
+}
+function flowStatusAction(flow, change) {
+  return { action: change === "pause" ? FINANCE_ACTIONS.flowPause : change === "resume" ? FINANCE_ACTIONS.flowResume : FINANCE_ACTIONS.flowDelete, params: { flow } };
+}
+function flowFieldsOf(form, currency) {
+  const fields = { flow_kind: form.kind, from: form.from, to: form.to.trim(), shortfall: form.shortfall };
+  const cents2 = amountOf(form.amount, currency);
+  if (cents2 !== null)
+    fields.amount_cents = cents2;
+  if (form.every === "once")
+    fields.once = `${form.start}T${form.at || "09:00"}`;
+  else {
+    fields.every = form.every;
+    fields.interval = form.interval;
+    if ((form.every === "month" || form.every === "year") && form.day !== null)
+      fields.days = [form.day];
+    if (form.every === "week" && form.weekday !== null)
+      fields.weekdays = [form.weekday];
+    if (form.every === "year" && form.month !== null)
+      fields.months = [form.month];
+    if (form.at !== "")
+      fields.at = form.at;
+    if (form.start !== "")
+      fields.start = form.start;
+    if (form.end !== "")
+      fields.end = form.end;
+    if (form.count !== null)
+      fields.count = form.count;
+    if (form.roll !== "")
+      fields.roll = form.roll;
+  }
+  if (form.shortfall === "retry") {
+    if (form.retryDays !== null)
+      fields.retry_days = form.retryDays;
+    if (form.retries !== null)
+      fields.retries = form.retries;
+  }
+  if (form.shortfall === "fallback" && form.fallback !== "")
+    fields.fallback = form.fallback;
+  if (form.category.trim() !== "")
+    fields.category = form.category.trim();
+  return fields;
+}
+function newIdFor(prefix, label, taken2) {
+  const base = `${prefix}_${label.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 32) || "new"}`;
+  if (!taken2.has(base))
+    return base;
+  for (let n3 = 2;; n3 += 1)
+    if (!taken2.has(`${base}_${n3}`))
+      return `${base}_${n3}`;
+}
+function flowSpawnOps(id, form, currency) {
+  const fields = { ...flowFieldsOf(form, currency), status: "active" };
+  return [{ op: "spawn", kind: "flow", name: form.label.trim(), id }, ...Object.entries(fields).map(([field2, value]) => ({ op: "set", entity: id, field: field2, value }))];
+}
+function flowEditOps(flow, form, currency) {
+  const was = flowFieldsOf(flowFormOf(flow, currency), currency);
+  const now = flowFieldsOf(form, currency);
+  const ops = [];
+  for (const [field2, value] of Object.entries(now))
+    if (JSON.stringify(was[field2] ?? null) !== JSON.stringify(value))
+      ops.push({ op: "set", entity: flow.id, field: field2, value });
+  for (const field2 of ["weekdays", "days", "months"])
+    if (was[field2] !== undefined && now[field2] === undefined)
+      ops.push({ op: "set", entity: flow.id, field: field2, value: [] });
+  if (was.once !== undefined && now.once === undefined)
+    ops.push({ op: "set", entity: flow.id, field: "once", value: "" });
+  const name = form.label.trim();
+  const renamed = name !== "" && name !== flow.label;
+  const clear = FLOW_CLEARABLE.filter((key) => was[key] !== undefined && now[key] === undefined);
+  if (renamed || clear.length > 0)
+    ops.push({ op: "effect", effect: "economy.flow_edit", args: { flow: flow.id, ...renamed ? { name } : {}, ...clear.length > 0 ? { clear: clear.join(",") } : {} } });
+  return ops;
+}
+function flowStatusOps(flow, status) {
+  return [{ op: "set", entity: flow, field: "status", value: status }];
+}
+function applyCreditAction(product, cents2) {
+  return { action: FINANCE_ACTIONS.applyCredit, params: cents2 === null ? { product } : { product, amount: cents2 } };
+}
+function payTiersValue(tiers) {
+  return tiers.map((t3) => ({ use: t3.use, ...t3.min !== undefined ? { min: t3.min } : {}, ...t3.max !== undefined ? { max: t3.max } : {}, ...t3.categories && t3.categories.length > 0 ? { categories: [...t3.categories] } : {}, ...t3.except && t3.except.length > 0 ? { except: [...t3.except] } : {} }));
+}
+function payPrefsAction(tiers) {
+  return { action: FINANCE_ACTIONS.payPrefs, params: { tiers: JSON.stringify(payTiersValue(tiers)) } };
+}
+function payPrefsOps(person3, tiers) {
+  return [{ op: "set", entity: person3, field: "pay_prefs", value: payTiersValue(tiers) }];
+}
+function jobEndAction(job) {
+  return { action: FINANCE_ACTIONS.fire, params: { job } };
+}
+function raiseAction2(job, rate) {
+  return { action: FINANCE_ACTIONS.raise, params: { job, rate } };
+}
+function invoiceIssueAction(business, customer, cents2, memo, days) {
+  const params = { business, ..."id" in customer ? { customer: customer.id } : { customer_name: customer.name.trim() }, amount: cents2 };
+  if (memo.trim() !== "")
+    params.memo = memo.trim();
+  if (days !== null)
+    params.days = days;
+  return { action: FINANCE_ACTIONS.invoiceIssue, params };
+}
+function invoiceAction(invoice, change) {
+  return { action: change === "pay" ? FINANCE_ACTIONS.invoicePay : FINANCE_ACTIONS.invoiceVoid, params: { invoice } };
+}
+function drawAction(business, cents2) {
+  return { action: FINANCE_ACTIONS.draw, params: { business, amount: cents2 } };
+}
+function distributeAction(business, cents2) {
+  return { action: FINANCE_ACTIONS.distribute, params: cents2 === null ? { business } : { business, amount: cents2 } };
+}
+function tradeAction(form, currency) {
+  const params = { side: form.side };
+  if (form.holding !== "")
+    params.holding = form.holding;
+  else if (form.side === "sell")
+    return "Pick what to sell.";
+  else if (form.asset === "")
+    return "Pick what to buy.";
+  else {
+    params.asset = form.asset;
+    if (form.account !== "")
+      params.account = form.account;
+  }
+  if (form.qty !== null) {
+    if (!(form.qty > 0))
+      return "A quantity is above zero.";
+    params.qty = form.qty;
+  } else if (form.amount.trim() !== "") {
+    const cents2 = amountOf(form.amount, currency);
+    if (cents2 === null)
+      return "Type an amount above zero.";
+    params.amount = cents2;
+  } else if (form.side === "buy")
+    return "Say how many, or how much to spend.";
+  if (form.side === "buy" && form.from !== "")
+    params.from = form.from;
+  if (form.side === "sell" && form.to !== "")
+    params.to = form.to;
+  if (form.option && form.holding === "") {
+    const strike = amountOf(form.option.strike, currency);
+    if (strike === null || !/^\d{4}-\d{2}-\d{2}$/.test(form.option.expiry))
+      return "An option needs a strike and an expiry date.";
+    params.right = form.option.right;
+    params.strike = strike;
+    params.expiry = form.option.expiry;
+  }
+  return { action: FINANCE_ACTIONS.trade, params };
+}
+function exerciseAction(holding, qty, opts = {}) {
+  return { action: FINANCE_ACTIONS.exercise, params: { holding, ...qty !== null ? { qty } : {}, ...opts.from ? { from: opts.from } : {}, ...opts.to ? { to: opts.to } : {} } };
+}
+function routeAction(target, to) {
+  return { action: FINANCE_ACTIONS.route, params: { ...target, to } };
+}
+function routeOps(target, party, to) {
+  return [{ op: "effect", effect: "economy.route", args: { ...target, party, to } }];
+}
+function propertyBuyAction(property, price, opts = {}) {
+  return { action: FINANCE_ACTIONS.propertyBuy, params: { property, price, ...opts.from ? { from: opts.from } : {}, ...opts.down !== undefined ? { down: opts.down } : {}, ...opts.termMonths !== undefined ? { term_months: opts.termMonths } : {} } };
+}
+function propertySellAction(property, price, opts = {}) {
+  return { action: FINANCE_ACTIONS.propertySell, params: { property, price, ...opts.buyer ? { buyer: opts.buyer } : {}, ...opts.to ? { to: opts.to } : {} } };
+}
+function leaseStartAction(property, tenant, rent, opts = {}) {
+  return { action: FINANCE_ACTIONS.leaseStart, params: { property, tenant, rent, ...opts.months !== undefined ? { months: opts.months } : {}, ...opts.day !== undefined ? { day: opts.day } : {}, ...opts.unit ? { unit: opts.unit } : {} } };
+}
+function leaseEndAction(lease, on) {
+  return { action: FINANCE_ACTIONS.leaseEnd, params: on ? { lease, on } : { lease } };
+}
+function stakeSellAction(business, share, price, buyer) {
+  return { action: FINANCE_ACTIONS.stakeSell, params: { business, share, price, ...buyer ? { buyer } : {} } };
+}
+function stakeSellUnitsAction(business, units, price, buyer) {
+  return { action: FINANCE_ACTIONS.stakeSell, params: { business, units, price, ...buyer ? { buyer } : {} } };
+}
+function setPriceOps(asset, price) {
+  return [{ op: "effect", effect: "economy.set_price", args: { asset, price } }];
+}
+function closeAccountOps(account) {
+  return [{ op: "effect", effect: "economy.close_account", args: { account } }];
+}
+function releaseHoldOps(account, hold) {
+  return [{ op: "effect", effect: "economy.release_hold", args: { account, hold } }];
+}
+function accountStatusOps(account, status) {
+  return [{ op: "effect", effect: "economy.set_status", args: { account, status } }];
+}
+function jobSpawnOps(id, name, fields) {
+  return [{ op: "spawn", kind: "job", name, id }, ...Object.entries({ ...fields, status: "active" }).map(([field2, value]) => ({ op: "set", entity: id, field: field2, value }))];
+}
+function propertySpawnOps(id, name, owner, value) {
+  return [
+    { op: "spawn", kind: "property", name, id },
+    { op: "set", entity: id, field: "owners", value: [{ party: owner, role: "owner", share: 100 }] },
+    { op: "set", entity: id, field: "value", value }
+  ];
+}
+
+// src/packs/economy/ui/forms.tsx
+function SelectField(props) {
+  const id = P2();
+  return /* @__PURE__ */ u3(Field, {
+    label: props.label,
+    help: props.help,
+    for: id,
+    children: /* @__PURE__ */ u3("select", {
+      id,
+      class: "lre-input",
+      value: props.value,
+      disabled: props.disabled,
+      onChange: (event) => props.onChange(event.currentTarget.value),
+      children: [
+        props.empty !== undefined ? /* @__PURE__ */ u3("option", {
+          value: "",
+          children: props.empty
+        }, undefined, false, undefined, this) : null,
+        props.options.map((o4) => /* @__PURE__ */ u3("option", {
+          value: o4.value,
+          children: o4.label
+        }, o4.value, false, undefined, this))
+      ]
+    }, undefined, true, undefined, this)
+  }, undefined, false, undefined, this);
+}
+function TextField3(props) {
+  const id = P2();
+  return /* @__PURE__ */ u3(Field, {
+    label: props.label,
+    help: props.help,
+    for: id,
+    children: props.type === "date" || props.type === "time" ? /* @__PURE__ */ u3("input", {
+      id,
+      class: "lre-input",
+      type: props.type,
+      value: props.value,
+      onInput: (event) => props.onInput(event.currentTarget.value)
+    }, undefined, false, undefined, this) : /* @__PURE__ */ u3("input", {
+      id,
+      class: "lre-input",
+      type: "text",
+      list: props.list,
+      placeholder: props.placeholder,
+      value: props.value,
+      onInput: (event) => props.onInput(event.currentTarget.value)
+    }, undefined, false, undefined, this)
+  }, undefined, false, undefined, this);
+}
+var FieldValidity = K(null);
+function numberProblem2(label, min, max) {
+  const name = label.replace(/\s*\([^()]*\)$/, "");
+  const range = min !== undefined && max !== undefined ? ` from ${min} to ${max}` : min !== undefined ? ` of ${min} or more` : max !== undefined ? ` of ${max} or less` : "";
+  return `“${name}” takes a number${range}.`;
+}
+function NumberField2(props) {
+  const id = P2();
+  const [text, setText] = d2(props.value === null ? "" : String(props.value));
+  const parsed = text.trim() === "" ? null : Number(text);
+  const bad = parsed !== null && (!Number.isFinite(parsed) || props.min !== undefined && parsed < props.min || props.max !== undefined && parsed > props.max);
+  const reason = bad ? numberProblem2(props.label, props.min, props.max) : null;
+  const mark = w2(FieldValidity);
+  A(() => {
+    mark?.(id, reason);
+    return () => mark?.(id, null);
+  }, [mark, id, reason]);
+  return /* @__PURE__ */ u3(Field, {
+    label: props.label,
+    help: props.help,
+    for: id,
+    children: /* @__PURE__ */ u3("input", {
+      id,
+      class: bad ? "lre-input invalid" : "lre-input",
+      inputMode: "decimal",
+      "aria-invalid": bad || undefined,
+      placeholder: props.placeholder,
+      value: text,
+      onInput: (event) => {
+        const next = event.currentTarget.value;
+        setText(next);
+        const n3 = next.trim() === "" ? null : Number(next);
+        if (n3 === null)
+          props.onChange(null);
+        else if (Number.isFinite(n3) && (props.min === undefined || n3 >= props.min) && (props.max === undefined || n3 <= props.max))
+          props.onChange(n3);
+      }
+    }, undefined, false, undefined, this)
+  }, undefined, false, undefined, this);
+}
+function AmountField(props) {
+  return /* @__PURE__ */ u3(Field, {
+    label: props.label,
+    help: props.help,
+    children: /* @__PURE__ */ u3(MoneyInput, {
+      currency: props.currency,
+      value: props.value,
+      onInput: props.onInput,
+      label: props.label,
+      invalid: props.invalid,
+      placeholder: props.placeholder,
+      unit: props.unit
+    }, undefined, false, undefined, this)
+  }, undefined, false, undefined, this);
+}
+function ChoiceField(props) {
+  const name = P2();
+  return /* @__PURE__ */ u3("fieldset", {
+    class: "lre-money-choices",
+    disabled: props.disabled,
+    children: [
+      /* @__PURE__ */ u3("legend", {
+        class: "lre-money-choices-label",
+        children: props.label
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3("div", {
+        class: "lre-money-choice-list",
+        children: props.options.map((o4) => /* @__PURE__ */ u3("label", {
+          class: "lre-money-choice",
+          children: [
+            /* @__PURE__ */ u3("input", {
+              type: "radio",
+              name,
+              value: o4.value,
+              checked: props.value === o4.value,
+              onChange: () => props.onChange(o4.value)
+            }, undefined, false, undefined, this),
+            /* @__PURE__ */ u3("span", {
+              class: "lre-money-choice-text",
+              children: [
+                /* @__PURE__ */ u3("span", {
+                  class: "lre-money-choice-label",
+                  children: o4.label
+                }, undefined, false, undefined, this),
+                o4.detail !== undefined ? /* @__PURE__ */ u3("span", {
+                  class: "lre-money-choice-detail",
+                  children: o4.detail
+                }, undefined, false, undefined, this) : null
+              ]
+            }, undefined, true, undefined, this)
+          ]
+        }, o4.value, true, undefined, this))
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+function ToggleField(props) {
+  return /* @__PURE__ */ u3("label", {
+    class: "lre-money-toggle",
+    children: [
+      /* @__PURE__ */ u3("span", {
+        class: "lre-money-toggle-text",
+        children: [
+          /* @__PURE__ */ u3("span", {
+            children: props.label
+          }, undefined, false, undefined, this),
+          props.help !== undefined ? /* @__PURE__ */ u3("span", {
+            class: "lre-field-help",
+            children: props.help
+          }, undefined, false, undefined, this) : null
+        ]
+      }, undefined, true, undefined, this),
+      /* @__PURE__ */ u3("span", {
+        class: "lre-check",
+        children: /* @__PURE__ */ u3("input", {
+          type: "checkbox",
+          checked: props.checked,
+          disabled: props.disabled,
+          onChange: (event) => props.onChange(event.currentTarget.checked)
+        }, undefined, false, undefined, this)
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+function ActionPage(props) {
+  const { nav, controls } = props;
+  const [fields, setFields] = d2(() => new Map);
+  const mark = j2((field2, reason) => {
+    setFields((was) => {
+      if ((was.get(field2) ?? null) === reason)
+        return was;
+      const next = new Map(was);
+      if (reason === null)
+        next.delete(field2);
+      else
+        next.set(field2, reason);
+      return next;
+    });
+  }, []);
+  const offstage = useView()?.controls?.offstage ?? OFFSTAGE_DEFAULTS;
+  const [told, setTold] = d2(null);
+  const preset = controls.mode === "player" && props.action ? tellPreset(props.action.action, props.action.params, offstage, controls.currency.decimals) : null;
+  const tell = preset === null ? undefined : told ?? preset;
+  const reasons = [...new Set([...fields.values(), ...props.problem ? [props.problem] : []])];
+  const blocked = reasons.length > 0;
+  return /* @__PURE__ */ u3(MoneyPage, {
+    nav,
+    name: props.name,
+    title: props.title,
+    subtitle: props.subtitle,
+    children: /* @__PURE__ */ u3(FieldValidity.Provider, {
+      value: mark,
+      children: /* @__PURE__ */ u3("form", {
+        class: "lre-money-form",
+        "data-lre-money-action": props.name,
+        onSubmit: (event) => {
+          event.preventDefault();
+          if (controls.busy || blocked)
+            return;
+          props.submit(tell).then((ok) => ok && nav.back());
+        },
+        children: [
+          props.children,
+          tell !== undefined ? /* @__PURE__ */ u3(ToggleField, {
+            label: TELL_LABEL,
+            help: TELL_HELP,
+            checked: tell,
+            disabled: controls.busy,
+            onChange: setTold
+          }, undefined, false, undefined, this) : null,
+          reasons.map((r3) => /* @__PURE__ */ u3("p", {
+            class: "lre-money-problem",
+            children: r3
+          }, r3, false, undefined, this)),
+          /* @__PURE__ */ u3(Button, {
+            type: "submit",
+            variant: props.danger ? "danger" : "primary",
+            block: true,
+            busy: controls.busy,
+            disabled: blocked,
+            children: props.go
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this)
+    }, undefined, false, undefined, this)
+  }, undefined, false, undefined, this);
+}
+function amountProblem(text, currency, what, needed = true) {
+  if (text.trim() === "")
+    return needed ? `Type ${what}.` : null;
+  return amountOf(text, currency) === null ? "Type an amount above zero." : null;
+}
+function unchangedProblem(now, what) {
+  return `It's ${humanize(now).toLowerCase()} now: pick another ${what}.`;
+}
+function AmountPage(props) {
+  const { controls } = props;
+  const [text, setText] = d2(props.initial ?? "");
+  const empty = text.trim() === "";
+  const cents2 = empty ? null : amountOf(text, controls.currency);
+  return /* @__PURE__ */ u3(ActionPage, {
+    nav: props.nav,
+    controls,
+    name: props.name,
+    title: props.title,
+    subtitle: props.subtitle,
+    go: props.go,
+    danger: props.danger,
+    problem: amountProblem(text, controls.currency, "an amount", props.optional === undefined),
+    action: props.action?.(cents2) ?? null,
+    submit: (tell) => props.submit(cents2, tell),
+    children: [
+      props.children,
+      /* @__PURE__ */ u3(AmountField, {
+        label: props.label,
+        value: text,
+        currency: controls.currency,
+        onInput: setText,
+        invalid: !empty && cents2 === null,
+        placeholder: props.optional,
+        help: props.help
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+var WEEKDAY_CHOICES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"].map((label, i3) => ({ value: String(i3), label }));
+var MONTH_CHOICES = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"].map((label, i3) => ({ value: String(i3 + 1), label }));
+
+// src/packs/economy/ui/revenue.tsx
+var TYPE_LABELS = { product: "One product", catalog: "Catalog", royalty: "Royalty", fees: "Fees", custom: "Custom formula" };
+function modelRecord(draft) {
+  return oneRecord(draft.fields.revenue) ?? { type: "product" };
+}
+function withModel(draft, patch) {
+  const next = { ...modelRecord(draft) };
+  for (const [k2, v6] of Object.entries(patch)) {
+    if (v6 === undefined)
+      delete next[k2];
+    else
+      next[k2] = v6;
+  }
+  return { ...draft, fields: { ...draft.fields, revenue: [next] } };
+}
+function withFields(draft, patch) {
+  const fields = { ...draft.fields };
+  for (const [k2, v6] of Object.entries(patch)) {
+    if (v6 === undefined)
+      delete fields[k2];
+    else
+      fields[k2] = v6;
+  }
+  return { ...draft, fields };
+}
+function driverText(v6) {
+  return typeof v6 === "number" ? String(v6) : typeof v6 === "string" ? v6 : "";
+}
+function driverValue(text) {
+  const t3 = text.trim();
+  if (t3 === "")
+    return;
+  const n3 = Number(t3);
+  return Number.isFinite(n3) ? n3 : t3;
+}
+function streamFromTemplate(template, earner, taken2) {
+  const t3 = REVENUE_TEMPLATES[template];
+  return { id: newIdFor("stream", `${earner} ${t3.label}`, taken2), name: t3.label, fields: { ...structuredClone(t3.fields), to: earner, status: "active" } };
+}
+function revenueSpawnOps(draft) {
+  return [{ op: "spawn", kind: "flow", name: draft.name.trim(), id: draft.id }, ...Object.entries(draft.fields).map(([field2, value]) => ({ op: "set", entity: draft.id, field: field2, value }))];
+}
+function revenueEditOps(was, now) {
+  const ops = [];
+  for (const [field2, value] of Object.entries(now.fields))
+    if (JSON.stringify(was.fields[field2] ?? null) !== JSON.stringify(value))
+      ops.push({ op: "set", entity: now.id, field: field2, value });
+  const emptied = Object.keys(was.fields).filter((field2) => !hasOwn(now.fields, field2) && was.fields[field2] !== null);
+  for (const field2 of emptied)
+    if (Array.isArray(was.fields[field2]) && was.fields[field2].length > 0)
+      ops.push({ op: "set", entity: now.id, field: field2, value: [] });
+  const clear = FLOW_CLEARABLE.filter((field2) => emptied.includes(field2));
+  const name = now.name.trim();
+  const renamed = name !== "" && name !== was.name;
+  if (renamed || clear.length > 0)
+    ops.push({ op: "effect", effect: "economy.flow_edit", args: { flow: now.id, ...renamed ? { name } : {}, ...clear.length > 0 ? { clear: clear.join(",") } : {} } });
+  return ops;
+}
+function gmStreamDrafts(gm, streams) {
+  return streams.flatMap((s3) => {
+    const e3 = gm.entities.find((x2) => x2.id === s3.id);
+    if (!e3 || e3.gone)
+      return [];
+    const fields = {};
+    for (const f3 of e3.fields)
+      if (f3.derived === undefined && f3.value !== null)
+        fields[f3.id] = f3.value;
+    return [{ id: e3.id, name: e3.name, fields }];
+  }).sort((a3, b3) => a3.name.localeCompare(b3.name) || a3.id.localeCompare(b3.id));
+}
+function monthLabel(month) {
+  const [y3, m2] = month.split("-");
+  return `${MONTH_CHOICES[Number(m2) - 1]?.label.slice(0, 3) ?? m2} ${y3 ?? ""}`;
+}
+function PreviewList(props) {
+  const total = props.months.reduce((a3, m2) => a3 + m2.cents, 0);
+  return /* @__PURE__ */ u3(Section, {
+    title: props.title,
+    aside: formatMoney(total, props.currency),
+    children: /* @__PURE__ */ u3(List, {
+      children: props.months.map((m2) => /* @__PURE__ */ u3(ListRow, {
+        title: monthLabel(m2.month),
+        value: formatMoney(m2.cents, props.currency),
+        valueTone: m2.cents > 0 ? undefined : "muted"
+      }, m2.month, false, undefined, this))
+    }, undefined, false, undefined, this)
+  }, undefined, false, undefined, this);
+}
+function MoneyInput2(props) {
+  const [text, setText] = d2(props.cents === undefined ? "" : formatMoneyInput(props.cents, props.currency));
+  return /* @__PURE__ */ u3(TextField3, {
+    label: props.label,
+    value: text,
+    help: props.help,
+    onInput: (t3) => {
+      setText(t3);
+      props.onChange(t3.trim() === "" ? undefined : parseMoneyInput(t3, props.currency) ?? props.cents);
+    }
+  }, undefined, false, undefined, this);
+}
+function PctField(props) {
+  return /* @__PURE__ */ u3(NumberField2, {
+    label: props.label,
+    value: typeof props.value === "number" ? props.value : null,
+    min: 0,
+    max: 100,
+    step: 0.1,
+    help: props.help,
+    onChange: (v6) => props.onChange(v6 ?? undefined)
+  }, undefined, false, undefined, this);
+}
+function FactorFields(props) {
+  const list2 = Array.isArray(props.value) ? props.value : [];
+  const at2 = (i3) => typeof list2[i3] === "number" ? list2[i3] : 1;
+  return /* @__PURE__ */ u3(Disclosure, {
+    summary: props.summary,
+    children: props.labels.map((label, i3) => /* @__PURE__ */ u3(NumberField2, {
+      label,
+      value: at2(i3),
+      min: 0,
+      step: 0.05,
+      onChange: (v6) => {
+        const next = props.labels.map((_3, j3) => j3 === i3 ? v6 ?? 1 : at2(j3));
+        props.onChange(next.every((x2) => x2 === 1) ? undefined : next);
+      }
+    }, label, false, undefined, this))
+  }, undefined, false, undefined, this);
+}
+function DriverFields(props) {
+  const m2 = modelRecord(props.draft);
+  const fees = m2.type === "fees";
+  return /* @__PURE__ */ u3(M, {
+    children: [
+      /* @__PURE__ */ u3(MoneyInput2, {
+        label: fees ? "Fee" : "Price a unit",
+        cents: typeof m2.price === "number" ? m2.price : undefined,
+        currency: props.currency,
+        onChange: (price) => props.set({ price })
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(TextField3, {
+        label: "Units each buyer takes",
+        value: driverText(m2.units),
+        placeholder: "1",
+        help: "A number, or a formula (=…) read when it pays.",
+        onInput: (t3) => props.set({ units: driverValue(t3) })
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(TextField3, {
+        label: fees ? "Clients" : "Buyers each time",
+        value: driverText(m2.buyers),
+        placeholder: "1",
+        help: "A number, or a formula (=…) read when it pays.",
+        onInput: (t3) => props.set({ buyers: driverValue(t3) })
+      }, undefined, false, undefined, this),
+      fees ? null : /* @__PURE__ */ u3(PctField, {
+        label: "Margin kept %",
+        value: m2.margin_pct,
+        help: "The rest is the cost of the goods, owed to suppliers. Unset: the business's own.",
+        onChange: (v6) => props.set({ margin_pct: v6 })
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(TextField3, {
+        label: fees ? "Category" : "Tax category",
+        value: typeof m2.category === "string" ? m2.category : "",
+        placeholder: fees ? "fee_income" : "general",
+        onInput: (t3) => props.set({ category: t3.trim() === "" ? undefined : t3.trim() })
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+function CatalogFields(props) {
+  const m2 = modelRecord(props.draft);
+  const items = (Array.isArray(m2.items) ? m2.items : []).filter((x2) => typeof x2 === "object" && x2 !== null && !Array.isArray(x2));
+  const setItem = (i3, patch) => props.set({ items: items.map((x2, j3) => j3 === i3 ? { ...x2, ...patch } : x2) });
+  return /* @__PURE__ */ u3(M, {
+    children: [
+      /* @__PURE__ */ u3(TextField3, {
+        label: "Buyers each time",
+        value: driverText(m2.buyers),
+        placeholder: "1",
+        help: "A number, or a formula (=…) read when it pays.",
+        onInput: (t3) => props.set({ buyers: driverValue(t3) })
+      }, undefined, false, undefined, this),
+      items.map((item2, i3) => /* @__PURE__ */ u3(Disclosure, {
+        summary: `${typeof item2.name === "string" && item2.name !== "" ? item2.name : `Item ${i3 + 1}`}${typeof item2.price === "number" ? `, ${formatMoney(item2.price, props.currency)}` : ""}`,
+        children: [
+          /* @__PURE__ */ u3(TextField3, {
+            label: "Name",
+            value: typeof item2.name === "string" ? item2.name : "",
+            onInput: (name) => setItem(i3, { name })
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3(MoneyInput2, {
+            label: "Price a unit",
+            cents: typeof item2.price === "number" ? item2.price : undefined,
+            currency: props.currency,
+            onChange: (price) => setItem(i3, { price: price ?? 0 })
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3(TextField3, {
+            label: "Units each buyer takes",
+            value: driverText(item2.units),
+            placeholder: "1",
+            onInput: (t3) => setItem(i3, { units: driverValue(t3) ?? 1 })
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3(PctField, {
+            label: "Margin kept %",
+            value: item2.margin_pct,
+            onChange: (v6) => setItem(i3, v6 === undefined ? {} : { margin_pct: v6 })
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3(TextField3, {
+            label: "Tax category",
+            value: typeof item2.category === "string" ? item2.category : "",
+            placeholder: "groceries",
+            help: "Untaxed where the region exempts the category.",
+            onInput: (t3) => setItem(i3, { category: t3.trim() })
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3(Button, {
+            variant: "ghost",
+            size: "sm",
+            icon: "trash",
+            onClick: () => props.set({ items: items.filter((_3, j3) => j3 !== i3) }),
+            children: [
+              "Remove ",
+              typeof item2.name === "string" && item2.name !== "" ? item2.name : "this item"
+            ]
+          }, undefined, true, undefined, this)
+        ]
+      }, String(item2.id ?? i3), true, undefined, this)),
+      /* @__PURE__ */ u3(Button, {
+        variant: "secondary",
+        size: "sm",
+        icon: "plus",
+        disabled: items.length >= CATALOG_MAX,
+        onClick: () => props.set({ items: [...items, { id: `item_${items.length + 1}`, name: `Item ${items.length + 1}`, price: 1000, units: 1 }] }),
+        children: items.length >= CATALOG_MAX ? `A catalog sells at most ${CATALOG_MAX}` : "Add an item"
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+function listText(v6) {
+  return Array.isArray(v6) ? v6.map(String).join(", ") : "";
+}
+function listValue(text) {
+  const out = text.split(/[,\s]+/).map((s3) => Number(s3)).filter((n3) => Number.isFinite(n3));
+  return out.length > 0 ? out : undefined;
+}
+function RoyaltyFields(props) {
+  const m2 = modelRecord(props.draft);
+  const p3 = m2.production;
+  const pmode = Array.isArray(p3) ? "series" : typeof p3 === "object" && p3 !== null ? "decline" : "steady";
+  const decline = pmode === "decline" ? p3 : {};
+  const price = m2.price;
+  const qmode = Array.isArray(price) ? "series" : typeof price === "object" && price !== null ? "asset" : "fixed";
+  const unit2 = typeof m2.unit === "string" && m2.unit !== "" ? m2.unit : "unit";
+  const assets = Object.keys(props.world.packs.economy?.config.assets ?? {}).sort();
+  const setDecline = (patch) => props.set({ production: { qi: 1000, di_pct: 50, ...decline, ...patch } });
+  return /* @__PURE__ */ u3(M, {
+    children: [
+      /* @__PURE__ */ u3(TextField3, {
+        label: "Counted in",
+        value: typeof m2.unit === "string" ? m2.unit : "",
+        placeholder: "bbl",
+        onInput: (t3) => props.set({ unit: t3.trim() === "" ? undefined : t3.trim() })
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(SelectField, {
+        label: "Production",
+        value: pmode,
+        options: [
+          { value: "steady", label: "The same each month" },
+          { value: "decline", label: "Declining, as a well does" },
+          { value: "series", label: "Month by month" }
+        ],
+        onChange: (v6) => props.set({ production: v6 === "steady" ? 1000 : v6 === "decline" ? { qi: 1000, di_pct: 50, b: 1 } : [1000, 900, 800] })
+      }, undefined, false, undefined, this),
+      pmode === "steady" ? /* @__PURE__ */ u3(NumberField2, {
+        label: `${unit2} a month`,
+        value: typeof p3 === "number" ? p3 : null,
+        min: 0,
+        onChange: (v6) => props.set({ production: v6 ?? 0 })
+      }, undefined, false, undefined, this) : null,
+      pmode === "decline" ? /* @__PURE__ */ u3(M, {
+        children: [
+          /* @__PURE__ */ u3(NumberField2, {
+            label: `First month, ${unit2}`,
+            value: typeof decline.qi === "number" ? decline.qi : null,
+            min: 0,
+            onChange: (v6) => setDecline({ qi: v6 ?? 0 })
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3(NumberField2, {
+            label: "Falls by % a year",
+            value: typeof decline.di_pct === "number" ? decline.di_pct : null,
+            min: 0,
+            help: "The nominal decline rate.",
+            onChange: (v6) => setDecline({ di_pct: v6 ?? 0 })
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3(NumberField2, {
+            label: "Curve (b)",
+            value: typeof decline.b === "number" ? decline.b : 0,
+            min: 0,
+            max: 2,
+            step: 0.1,
+            help: "0 falls steadily (exponential), 1 flattens out (harmonic), between is hyperbolic.",
+            onChange: (v6) => setDecline({ b: v6 ?? 0 })
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this) : null,
+      pmode === "series" ? /* @__PURE__ */ u3(TextField3, {
+        label: `${unit2} each month from the start`,
+        value: listText(p3),
+        placeholder: "1000, 950, 900",
+        onInput: (t3) => props.set({ production: listValue(t3) ?? [] })
+      }, undefined, false, undefined, this) : null,
+      /* @__PURE__ */ u3(SelectField, {
+        label: "Price",
+        value: qmode,
+        options: [
+          { value: "fixed", label: "A set price" },
+          { value: "series", label: "Month by month" },
+          ...assets.length > 0 ? [{ value: "asset", label: "An asset's market price" }] : []
+        ],
+        onChange: (v6) => props.set({ price: v6 === "fixed" ? 5000 : v6 === "series" ? [5000] : { asset: assets[0] ?? "" } })
+      }, undefined, false, undefined, this),
+      qmode === "fixed" ? /* @__PURE__ */ u3(MoneyInput2, {
+        label: `Price a ${unit2}`,
+        cents: typeof price === "number" ? price : undefined,
+        currency: props.world.currency,
+        onChange: (v6) => props.set({ price: v6 ?? 0 })
+      }, undefined, false, undefined, this) : null,
+      qmode === "series" ? /* @__PURE__ */ u3(TextField3, {
+        label: `Price a ${unit2} each month, minor units`,
+        value: listText(price),
+        placeholder: "7000, 7100, 6900",
+        onInput: (t3) => props.set({ price: listValue(t3) ?? [] })
+      }, undefined, false, undefined, this) : null,
+      qmode === "asset" ? /* @__PURE__ */ u3(SelectField, {
+        label: "Asset",
+        value: typeof price === "object" && price !== null && !Array.isArray(price) ? String(price.asset ?? "") : "",
+        options: assets.map((a3) => ({ value: a3, label: a3 })),
+        onChange: (asset) => props.set({ price: { asset } })
+      }, undefined, false, undefined, this) : null,
+      /* @__PURE__ */ u3(PctField, {
+        label: "Royalty share %",
+        value: m2.share_pct,
+        help: "The share of production's value it pays.",
+        onChange: (v6) => props.set({ share_pct: v6 })
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(PctField, {
+        label: "Deductions %",
+        value: m2.deductions_pct,
+        help: "Post-production costs taken off the gross.",
+        onChange: (v6) => props.set({ deductions_pct: v6 })
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(PctField, {
+        label: "Severance tax %",
+        value: m2.severance_pct,
+        onChange: (v6) => props.set({ severance_pct: v6 })
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(NumberField2, {
+        label: "Paid months after production",
+        value: typeof m2.lag_months === "number" ? m2.lag_months : 0,
+        min: 0,
+        max: 24,
+        onChange: (v6) => props.set({ lag_months: v6 ?? undefined })
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+function ScheduleFields(props) {
+  const f3 = props.draft.fields;
+  const every = typeof f3.every === "string" ? f3.every : "day";
+  const day = Array.isArray(f3.days) && typeof f3.days[0] === "number" ? f3.days[0] : 1;
+  const weekday = Array.isArray(f3.weekdays) && typeof f3.weekdays[0] === "number" ? f3.weekdays[0] : 5;
+  return /* @__PURE__ */ u3(M, {
+    children: [
+      /* @__PURE__ */ u3(ChoiceField, {
+        label: "Pays",
+        value: every,
+        options: [
+          { value: "day", label: "Every day" },
+          { value: "week", label: "Every week" },
+          { value: "month", label: "Every month" }
+        ],
+        onChange: (v6) => props.setFields({ every: v6, days: v6 === "month" ? [day] : undefined, weekdays: v6 === "week" ? [weekday] : undefined })
+      }, undefined, false, undefined, this),
+      every === "month" ? /* @__PURE__ */ u3(NumberField2, {
+        label: "On day of the month",
+        value: day,
+        min: 1,
+        max: 31,
+        onChange: (v6) => props.setFields({ days: [v6 ?? 1] })
+      }, undefined, false, undefined, this) : null,
+      every === "week" ? /* @__PURE__ */ u3(SelectField, {
+        label: "On",
+        value: String(weekday),
+        options: WEEKDAY_CHOICES,
+        onChange: (v6) => props.setFields({ weekdays: [Number(v6)] })
+      }, undefined, false, undefined, this) : null,
+      /* @__PURE__ */ u3(TextField3, {
+        label: "At",
+        type: "time",
+        value: typeof f3.at === "string" ? f3.at : "09:00",
+        onInput: (at2) => props.setFields({ at: at2 === "" ? undefined : at2 })
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(TextField3, {
+        label: "Starts",
+        type: "date",
+        value: typeof f3.start === "string" ? f3.start : "",
+        help: "Growth counts from here, and a royalty's production.",
+        onInput: (start) => props.setFields({ start: start === "" ? undefined : start })
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+var MONTH_LABELS = MONTH_CHOICES.map((c3) => c3.label);
+var WEEKDAY_LABELS = WEEKDAY_CHOICES.map((c3) => c3.label);
+function StreamForm(props) {
+  const { draft, world } = props;
+  const m2 = modelRecord(draft);
+  const type = typeof m2.type === "string" ? m2.type : "product";
+  const set = (patch) => props.onChange(withModel(draft, patch));
+  const setFields = (patch) => props.onChange(withFields(draft, patch));
+  const problems = revenueProblems(draft.fields.revenue);
+  const months = draftPreview(world, draft);
+  const shaped = type === "product" || type === "catalog" || type === "fees";
+  return /* @__PURE__ */ u3(M, {
+    children: [
+      /* @__PURE__ */ u3(Section, {
+        title: TYPE_LABELS[type],
+        children: [
+          /* @__PURE__ */ u3(TextField3, {
+            label: "Name",
+            value: draft.name,
+            onInput: (name) => props.onChange({ ...draft, name })
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3(TextField3, {
+            label: "Paid by",
+            value: typeof draft.fields.from === "string" ? draft.fields.from : "",
+            placeholder: "Customers",
+            help: "Who pays: an outside name, or an account or party in the world.",
+            onInput: (from) => setFields({ from })
+          }, undefined, false, undefined, this),
+          type === "product" || type === "fees" ? /* @__PURE__ */ u3(DriverFields, {
+            draft,
+            currency: world.currency,
+            set
+          }, undefined, false, undefined, this) : null,
+          type === "catalog" ? /* @__PURE__ */ u3(CatalogFields, {
+            draft,
+            currency: world.currency,
+            set
+          }, undefined, false, undefined, this) : null,
+          type === "royalty" ? /* @__PURE__ */ u3(RoyaltyFields, {
+            world,
+            draft,
+            set
+          }, undefined, false, undefined, this) : null,
+          type === "custom" ? /* @__PURE__ */ u3(TextField3, {
+            label: "Each payment, minor units",
+            value: typeof m2.formula === "string" ? m2.formula : "",
+            placeholder: "100000 * season",
+            help: "A formula: `season`, `growth`, `weekday_factor`, `t` (months since it started) and the clock names are there; `self` is whoever earns it.",
+            onInput: (t3) => set({ formula: t3.trim() === "" ? undefined : t3 })
+          }, undefined, false, undefined, this) : null
+        ]
+      }, undefined, true, undefined, this),
+      shaped ? /* @__PURE__ */ u3(Section, {
+        title: "How it swings",
+        children: [
+          /* @__PURE__ */ u3(FactorFields, {
+            summary: "Busier and quieter months",
+            labels: MONTH_LABELS,
+            value: m2.season,
+            onChange: (season) => set({ season })
+          }, undefined, false, undefined, this),
+          type !== "fees" ? /* @__PURE__ */ u3(FactorFields, {
+            summary: "Busier and quieter days",
+            labels: WEEKDAY_LABELS,
+            value: m2.weekdays,
+            onChange: (weekdays) => set({ weekdays })
+          }, undefined, false, undefined, this) : null,
+          /* @__PURE__ */ u3(NumberField2, {
+            label: "Grows by % a year",
+            value: typeof m2.growth_pct === "number" ? m2.growth_pct : null,
+            step: 0.5,
+            onChange: (v6) => set({ growth_pct: v6 ?? undefined })
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3(NumberField2, {
+            label: "Varies by up to ± %",
+            value: typeof m2.spread_pct === "number" ? m2.spread_pct : 0,
+            min: 0,
+            max: 100,
+            help: "0: every payment is exactly what the model gives.",
+            onChange: (v6) => set({ spread_pct: v6 ? v6 : undefined })
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this) : null,
+      /* @__PURE__ */ u3(Section, {
+        title: "When it pays",
+        children: /* @__PURE__ */ u3(ScheduleFields, {
+          draft,
+          setFields
+        }, undefined, false, undefined, this)
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(Section, {
+        title: "In play",
+        children: /* @__PURE__ */ u3(ToggleField, {
+          label: "The agents may adjust it",
+          help: "Within bounds: a factor of 0.25 to 4 or one period's amount, for up to 31 days, at most four at once; what the story says asks you first.",
+          checked: m2.ai === "bounded",
+          onChange: (on) => set({ ai: on ? "bounded" : undefined })
+        }, undefined, false, undefined, this)
+      }, undefined, false, undefined, this),
+      problems.length > 0 ? /* @__PURE__ */ u3(Section, {
+        title: "To fix",
+        children: /* @__PURE__ */ u3(List, {
+          children: problems.map((p3) => /* @__PURE__ */ u3(ListRow, {
+            title: `It ${p3}.`,
+            icon: "alert"
+          }, p3, false, undefined, this))
+        }, undefined, false, undefined, this)
+      }, undefined, false, undefined, this) : null,
+      props.preview && props.preview.length > 0 ? /* @__PURE__ */ u3(PreviewList, {
+        title: "Next twelve months, as it stands in play",
+        currency: world.currency,
+        months: props.preview.map((cents2, i3) => ({ month: months[i3]?.month ?? String(i3 + 1), cents: cents2 }))
+      }, undefined, false, undefined, this) : months.length > 0 ? /* @__PURE__ */ u3(PreviewList, {
+        title: "Its first twelve months",
+        currency: world.currency,
+        months
+      }, undefined, false, undefined, this) : null,
+      /* @__PURE__ */ u3("div", {
+        class: "lre-form-actions",
+        children: [
+          /* @__PURE__ */ u3(Button, {
+            variant: "primary",
+            busy: props.saving,
+            disabled: problems.length > 0 || draft.name.trim() === "",
+            onClick: props.onSave,
+            children: [
+              "Save ",
+              draft.name.trim() || "the stream"
+            ]
+          }, undefined, true, undefined, this),
+          /* @__PURE__ */ u3(Button, {
+            variant: "ghost",
+            onClick: props.onCancel,
+            children: "Cancel"
+          }, undefined, false, undefined, this),
+          props.onRemove ? /* @__PURE__ */ u3(Button, {
+            variant: "danger",
+            icon: "trash",
+            onClick: props.onRemove,
+            children: "Remove it"
+          }, undefined, false, undefined, this) : null
+        ]
+      }, undefined, true, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+function aMonth(months) {
+  return months.length === 0 ? 0 : Math.round(months.reduce((a3, m2) => a3 + m2.cents, 0) / months.length);
+}
+function RevenueEditor(props) {
+  const [draft, setDraft] = d2(null);
+  const [was, setWas] = d2(null);
+  const [template, setTemplate] = d2(null);
+  const currency = props.world.currency;
+  if (draft) {
+    const view = props.views?.find((v6) => v6.id === draft.id);
+    const unchanged = was !== null && JSON.stringify(was) === JSON.stringify(draft);
+    return /* @__PURE__ */ u3(StreamForm, {
+      world: props.world,
+      draft,
+      ...view && unchanged ? { preview: view.preview } : {},
+      saving: props.saving,
+      onChange: setDraft,
+      onCancel: () => {
+        setDraft(null);
+        setWas(null);
+      },
+      onSave: () => {
+        props.save(draft, was);
+        setDraft(null);
+        setWas(null);
+      },
+      ...was && props.remove ? { onRemove: () => (props.remove?.(was.id), setDraft(null), setWas(null)) } : {}
+    }, undefined, false, undefined, this);
+  }
+  if (template) {
+    const t3 = REVENUE_TEMPLATES[template];
+    return /* @__PURE__ */ u3(Section, {
+      title: "Add a stream",
+      children: [
+        /* @__PURE__ */ u3(ChoiceField, {
+          label: "Start from",
+          value: template,
+          options: REVENUE_TEMPLATE_IDS.map((id) => ({ value: id, label: REVENUE_TEMPLATES[id].label, detail: REVENUE_TEMPLATES[id].hint })),
+          onChange: (v6) => setTemplate(v6)
+        }, undefined, false, undefined, this),
+        /* @__PURE__ */ u3("p", {
+          class: "lre-field-help",
+          children: t3.hint
+        }, undefined, false, undefined, this),
+        /* @__PURE__ */ u3("div", {
+          class: "lre-form-actions",
+          children: [
+            /* @__PURE__ */ u3(Button, {
+              variant: "primary",
+              onClick: () => {
+                setDraft(streamFromTemplate(template, props.earner.id, new Set([...Object.keys(props.world.entities), ...props.streams.map((s3) => s3.id), ...props.taken ?? []])));
+                setWas(null);
+                setTemplate(null);
+              },
+              children: [
+                "Start from ",
+                t3.label.toLowerCase()
+              ]
+            }, undefined, true, undefined, this),
+            /* @__PURE__ */ u3(Button, {
+              variant: "ghost",
+              onClick: () => setTemplate(null),
+              children: "Cancel"
+            }, undefined, false, undefined, this)
+          ]
+        }, undefined, true, undefined, this)
+      ]
+    }, undefined, true, undefined, this);
+  }
+  return /* @__PURE__ */ u3(Section, {
+    title: "Revenue streams",
+    aside: /* @__PURE__ */ u3(Button, {
+      variant: "secondary",
+      size: "sm",
+      icon: "plus",
+      onClick: () => setTemplate("walk_in"),
+      children: "Add a stream"
+    }, undefined, false, undefined, this),
+    children: props.streams.length === 0 ? /* @__PURE__ */ u3(Empty, {
+      icon: "briefcase",
+      title: `Nothing earns for ${props.earner.name} yet`,
+      children: "A stream is income worked out each time it pays: walk-in customers, a product, a catalog, a royalty, fees or your own formula."
+    }, undefined, false, undefined, this) : /* @__PURE__ */ u3(List, {
+      children: props.streams.map((s3) => {
+        const model = revenueOf(s3.fields.revenue);
+        const view = props.views?.find((v6) => v6.id === s3.id);
+        const month = view ? aMonth(view.preview.map((cents2) => ({ cents: cents2 }))) : aMonth(draftPreview(props.world, s3));
+        return /* @__PURE__ */ u3(ListRow, {
+          title: s3.name,
+          subtitle: model ? TYPE_LABELS[model.type] : "Not a stream's model yet",
+          value: `${formatMoney(month, currency)} a month`,
+          badge: view && view.adjustments.length > 0 ? /* @__PURE__ */ u3(Badge, {
+            tone: "warn",
+            children: "Adjusted"
+          }, undefined, false, undefined, this) : model?.ai === "bounded" ? /* @__PURE__ */ u3(Badge, {
+            tone: "accent",
+            children: "Agents may adjust"
+          }, undefined, false, undefined, this) : undefined,
+          chevron: true,
+          onClick: () => {
+            setDraft(s3);
+            setWas(s3);
+          }
+        }, s3.id, false, undefined, this);
+      })
+    }, undefined, false, undefined, this)
+  }, undefined, false, undefined, this);
+}
+function RevenueStreams(props) {
+  if (props.streams.length === 0)
+    return null;
+  return /* @__PURE__ */ u3(Section, {
+    title: "Revenue streams",
+    children: /* @__PURE__ */ u3(List, {
+      children: props.streams.map((s3) => {
+        const now = s3.months[s3.months.length - 1];
+        const last = s3.months[s3.months.length - 2];
+        const ahead = s3.preview.reduce((a3, c3) => a3 + c3, 0);
+        return /* @__PURE__ */ u3(Disclosure, {
+          summary: /* @__PURE__ */ u3(ListRow, {
+            title: s3.label,
+            subtitle: `${TYPE_LABELS[s3.type]}${s3.status !== "active" ? `, ${s3.status}` : ""}${last ? ` · last month ${formatMoney(last.cents, props.currency)}` : ""}`,
+            value: now ? formatMoney(now.cents, props.currency) : formatMoney(0, props.currency),
+            badge: s3.adjustments.length > 0 ? /* @__PURE__ */ u3(Badge, {
+              tone: "warn",
+              children: "Adjusted"
+            }, undefined, false, undefined, this) : s3.ai === "bounded" ? /* @__PURE__ */ u3(Badge, {
+              tone: "neutral",
+              children: "Agents may adjust"
+            }, undefined, false, undefined, this) : undefined
+          }, undefined, false, undefined, this),
+          children: /* @__PURE__ */ u3(List, {
+            children: [
+              s3.adjustments.map((a3) => /* @__PURE__ */ u3(ListRow, {
+                title: a3.factor !== undefined ? `×${a3.factor}` : formatMoney(a3.cents ?? 0, props.currency),
+                subtitle: a3.reason,
+                icon: "alert"
+              }, a3.id, false, undefined, this)),
+              /* @__PURE__ */ u3(ListRow, {
+                title: "Next twelve months",
+                value: formatMoney(ahead, props.currency)
+              }, undefined, false, undefined, this),
+              s3.months.slice(-12).map((m2) => /* @__PURE__ */ u3(ListRow, {
+                title: monthLabel(m2.month),
+                subtitle: s3.type === "royalty" && m2.units > 0 ? `${Math.round(m2.units).toLocaleString()} ${s3.unit ?? "units"} counted, ${formatMoney(m2.net, props.currency)} after deductions and tax` : undefined,
+                value: formatMoney(m2.cents, props.currency)
+              }, m2.month, false, undefined, this))
+            ]
+          }, undefined, true, undefined, this)
+        }, s3.id, false, undefined, this);
+      })
     }, undefined, false, undefined, this)
   }, undefined, false, undefined, this);
 }
@@ -34622,7 +40224,7 @@ var SECTION_FIELDS = {
 function linksTo(doc, org, type) {
   return Object.entries(doc.entities).flatMap(([who, e3]) => e3.relations.flatMap((r3, index) => r3.type === type && r3.to === org ? [{ who, name: e3.name || who, index, fields: isRecord(r3.fields) ? r3.fields : {}, until: typeof r3.until === "number" ? r3.until : null }] : [])).sort((a3, b3) => a3.name.localeCompare(b3.name) || a3.who.localeCompare(b3.who));
 }
-function heldBy(doc, org, kind) {
+function heldBy2(doc, org, kind) {
   return Object.entries(doc.entities).filter(([, e3]) => kindIs(doc, e3.kind, kind) && (kind === "job" ? e3.fields.employer === org : Array.isArray(e3.fields.owners) && e3.fields.owners.some((o4) => isRecord(o4) && o4.party === org))).map(([id, e3]) => ({ id, name: e3.name || id, fields: e3.fields })).sort((a3, b3) => a3.name.localeCompare(b3.name));
 }
 function memberLinkOps(org, who, index, until2, form) {
@@ -34686,10 +40288,10 @@ function OrgEditor(props) {
   const [busy, run] = useBusy();
   useHeld(value, setValue, initial, `${props.world.id}/entities/${id}`, JSON.stringify(stored ?? null));
   const formDoc = b2(() => ({ ...props.world, kinds: playedKinds(draft?.packKinds, props.world.kinds), relations: { ...draft?.packRelations, ...props.world.relations } }), [props.world, draft?.packKinds, draft?.packRelations]);
-  const identifiers = b2(() => worldIdentifiers(props.world), [props.world]);
+  const identifiers2 = b2(() => worldIdentifiers(props.world), [props.world]);
   const path2 = `entities.${id}`;
   const lint = draft?.lint ?? [];
-  const ctx = { doc: formDoc, lint, path: path2, identifiers, functions: draft?.functions ?? [], fieldEditors: app.catalog.fields };
+  const ctx = { doc: formDoc, lint, path: path2, identifiers: identifiers2, functions: draft?.functions ?? [], fieldEditors: app.catalog.fields };
   const kind = typeof value.kind === "string" ? value.kind : "";
   const type = orgTypeOfKind(formDoc, kind);
   const defs = kindFields(formDoc, kind);
@@ -34777,9 +40379,9 @@ function OrgEditor(props) {
   }
   const members = linksTo(formDoc, id, "member_of");
   const delegations = linksTo(formDoc, id, ACTS_FOR);
-  const jobs = heldBy(formDoc, id, "job");
-  const accounts = heldBy(formDoc, id, "account");
-  const properties = heldBy(formDoc, id, "property");
+  const jobs = heldBy2(formDoc, id, "job");
+  const accounts = heldBy2(formDoc, id, "account");
+  const properties = heldBy2(formDoc, id, "property");
   const places2 = [...new Set([...typeof fields.place === "string" ? [fields.place] : [], ...Array.isArray(fields.places) ? fields.places.filter((p3) => typeof p3 === "string") : []])];
   const open = (to, collection = "entities") => go(app, { view: "item", worldId: props.world.id, collection, id: to });
   const titled = (o4) => [typeof o4.fields.role === "string" ? o4.fields.role : null, positions.find((p3) => p3.id === o4.fields.position)?.title ?? null, typeof o4.fields.rank === "number" ? `rank ${o4.fields.rank}` : null, typeof o4.fields.since === "string" ? `since ${o4.fields.since}` : null].filter((part) => part !== null).join(" · ") || "Member";
@@ -34808,7 +40410,15 @@ function OrgEditor(props) {
             ctx,
             onChange: setValue
           }, undefined, false, undefined, this),
-          inputs(SECTION_FIELDS.basics)
+          inputs(SECTION_FIELDS.basics),
+          /* @__PURE__ */ u3(ChangeWhatItIs, {
+            doc: formDoc,
+            id,
+            kind,
+            unsaved: changed,
+            busy,
+            onApply: patch
+          }, undefined, false, undefined, this)
         ]
       }, undefined, true, undefined, this),
       /* @__PURE__ */ u3("div", {
@@ -34827,12 +40437,12 @@ function OrgEditor(props) {
                   chevron: true,
                   onClick: () => setSheet({ kind: "member", link: m2 })
                 }, `${m2.who}:${m2.index}`, false, undefined, this)),
-                type !== "trust" ? /* @__PURE__ */ u3(ListRow, {
+                /* @__PURE__ */ u3(ListRow, {
                   icon: "user-plus",
-                  title: "Add a member",
+                  title: type === "trust" ? "Add an officer or director" : "Add a member",
                   chevron: true,
                   onClick: () => setSheet({ kind: "member", link: null })
-                }, undefined, false, undefined, this) : null
+                }, undefined, false, undefined, this)
               ]
             }, undefined, true, undefined, this)
           }, undefined, false, undefined, this),
@@ -34934,9 +40544,31 @@ function OrgEditor(props) {
           ]
         }, undefined, true, undefined, this)
       }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3("div", {
+        "data-lre-org-build": "revenue",
+        children: /* @__PURE__ */ u3(RevenueEditor, {
+          world: formDoc,
+          earner: { id, name },
+          streams: revenueStreamsOf(formDoc, id, accounts.map((a3) => a3.id)),
+          save: (stream, was) => patch(revenueStreamPatch(stream, was)),
+          remove: (sid) => patch([{ op: "remove", path: pointerOf(["entities", sid]) }]),
+          saving: busy
+        }, undefined, false, undefined, this)
+      }, undefined, false, undefined, this),
       type === "company" ? /* @__PURE__ */ u3(Section, {
         title: "Ownership",
         children: inputs(SECTION_FIELDS.ownership)
+      }, undefined, false, undefined, this) : null,
+      type === "company" || type === "group" || type === "trust" ? /* @__PURE__ */ u3(Section, {
+        title: "Projects",
+        children: /* @__PURE__ */ u3(BuildOrgProjects, {
+          doc: props.world,
+          org: id,
+          templates: projectTemplatesOf(props.world),
+          busy,
+          onPatch: (ops) => run(async () => void await props.send({ type: "lre.editor", worldId: props.world.id, base: null, op: "patch", ops })),
+          onOpen: (to) => open(to)
+        }, undefined, false, undefined, this)
       }, undefined, false, undefined, this) : null,
       /* @__PURE__ */ u3(Section, {
         title: "Decisions",
@@ -35000,6 +40632,76 @@ function OrgEditor(props) {
       }, undefined, true, undefined, this)
     ]
   }, undefined, true, undefined, this);
+}
+function revenueStreamsOf(doc, org, accounts) {
+  return Object.entries(doc.entities).filter(([, e3]) => kindIs(doc, e3.kind, "flow") && oneRecord(e3.fields.revenue) !== null && typeof e3.fields.to === "string" && (e3.fields.to === org || accounts.includes(e3.fields.to))).map(([sid, e3]) => ({ id: sid, name: e3.name || sid, fields: e3.fields })).sort((a3, b3) => a3.name.localeCompare(b3.name) || a3.id.localeCompare(b3.id));
+}
+function revenueStreamPatch(stream, was) {
+  const name = stream.name.trim();
+  if (was === null)
+    return [{ op: "add", path: pointerOf(["entities", stream.id]), value: { id: stream.id, kind: "flow", name, tier: "background", fields: stream.fields, relations: [] } }];
+  return [
+    { op: "replace", path: pointerOf(["entities", stream.id, "name"]), value: name },
+    { op: "replace", path: pointerOf(["entities", stream.id, "fields"]), value: stream.fields }
+  ];
+}
+function ChangeWhatItIs(props) {
+  const targets = conversionTargets(props.doc, props.kind);
+  if (targets.length === 0)
+    return null;
+  return /* @__PURE__ */ u3("div", {
+    "data-lre-org-convert": true,
+    children: /* @__PURE__ */ u3(Disclosure, {
+      summary: "Change what it is",
+      children: /* @__PURE__ */ u3("div", {
+        class: "lre-stack",
+        children: targets.map((to) => {
+          const c3 = orgConversion(props.doc, props.id, to);
+          const noun = to === "trust" ? "a trust" : "a company";
+          return /* @__PURE__ */ u3("div", {
+            class: "lre-stack",
+            "data-lre-org-convert-to": to,
+            children: [
+              /* @__PURE__ */ u3("span", {
+                class: "lre-small lre-muted",
+                children: `As ${noun}, from the next revision; a chat takes it with its Upgrade.`
+              }, undefined, false, undefined, this),
+              c3.why !== null ? /* @__PURE__ */ u3(Banner, {
+                tone: "warn",
+                children: c3.why
+              }, undefined, false, undefined, this) : null,
+              c3.people.length > 0 ? /* @__PURE__ */ u3(List, {
+                children: c3.people.map((p3) => /* @__PURE__ */ u3(ListRow, {
+                  icon: "user",
+                  title: p3.name,
+                  subtitle: `${p3.from} → ${p3.to}`
+                }, p3.name, false, undefined, this))
+              }, undefined, false, undefined, this) : null,
+              c3.dropped.length > 0 ? /* @__PURE__ */ u3("span", {
+                children: `Dropped: ${c3.dropped.join(", ")}.`
+              }, undefined, false, undefined, this) : null,
+              c3.notes.map((note) => /* @__PURE__ */ u3("span", {
+                class: "lre-small",
+                children: note
+              }, note, false, undefined, this)),
+              props.unsaved ? /* @__PURE__ */ u3("span", {
+                class: "lre-small lre-muted",
+                children: "Save or revert your changes first."
+              }, undefined, false, undefined, this) : null,
+              /* @__PURE__ */ u3(Button, {
+                variant: "primary",
+                block: true,
+                disabled: props.unsaved || c3.why !== null || c3.ops.length === 0,
+                busy: props.busy,
+                onClick: () => props.onApply(c3.ops),
+                children: `Make it ${noun}`
+              }, undefined, false, undefined, this)
+            ]
+          }, to, true, undefined, this);
+        })
+      }, undefined, false, undefined, this)
+    }, undefined, false, undefined, this)
+  }, undefined, false, undefined, this);
 }
 function PositionSheet2(props) {
   const currency = props.currency ?? DEFAULT_CURRENCY;
@@ -35259,7 +40961,7 @@ var GROUPS3 = [
   { title: "Engine", rows: [{ collection: "tables" }, { collection: "sections" }, { collection: "steps" }, { collection: "packs" }] },
   { title: "Advanced", rows: [{ collection: "entities" }] }
 ];
-var PARTS2 = Object.keys(PART_INFO);
+var PARTS3 = Object.keys(PART_INFO);
 var TOOLS2 = ["import_lore", "index_text", "refine", "describe_map", "propose_routines", "playtest", "check_world"];
 function Build() {
   const route = useUi((ui) => ui.build);
@@ -35826,7 +41528,7 @@ function WorldHome() {
         }, undefined, false, undefined, this),
         flush: true,
         children: /* @__PURE__ */ u3(List, {
-          children: PARTS2.map((part) => /* @__PURE__ */ u3(ListRow, {
+          children: PARTS3.map((part) => /* @__PURE__ */ u3(ListRow, {
             icon: PART_INFO[part].icon,
             title: PART_INFO[part].label,
             subtitle: PART_INFO[part].hint,
@@ -36148,7 +41850,7 @@ function SchemaEditor(props) {
   const [value, setValue] = d2(initial);
   const [busy, run] = useBusy();
   useHeld(value, setValue, initial, `${props.world.id}/${props.collection}/${props.id ?? ""}`, JSON.stringify(stored ?? null));
-  const identifiers = b2(() => worldIdentifiers(props.world), [props.world]);
+  const identifiers2 = b2(() => worldIdentifiers(props.world), [props.world]);
   const formDoc = b2(() => ({ ...props.world, kinds: playedKinds(draft?.packKinds, props.world.kinds), relations: { ...draft?.packRelations, ...props.world.relations } }), [props.world, draft?.packKinds, draft?.packRelations]);
   const path2 = `${props.collection}.${id}`;
   const changed = JSON.stringify(value) !== JSON.stringify(isRecord(stored) ? stored : null);
@@ -36212,7 +41914,7 @@ function SchemaEditor(props) {
       /* @__PURE__ */ u3(SchemaFields, {
         specs: props.collection === "entities" ? entityFormSpecs(formDoc, value) : COLLECTION_SPECS[props.collection],
         value,
-        ctx: { doc: formDoc, lint: draft?.lint ?? [], path: path2, identifiers, functions: draft?.functions ?? [], fieldEditors: app.catalog.fields },
+        ctx: { doc: formDoc, lint: draft?.lint ?? [], path: path2, identifiers: identifiers2, functions: draft?.functions ?? [], fieldEditors: app.catalog.fields },
         onChange: setValue
       }, undefined, false, undefined, this),
       props.collection === "entities" ? /* @__PURE__ */ u3(RevealItem, {
@@ -36389,7 +42091,7 @@ function SchemaPartView(props) {
   const [value, setValue] = d2(initial);
   const [busy, run] = useBusy();
   useHeld(value, setValue, initial, `${draft?.worldId ?? ""}/${props.part}`);
-  const identifiers = b2(() => draft ? worldIdentifiers(draft.doc) : [], [draft?.doc]);
+  const identifiers2 = b2(() => draft ? worldIdentifiers(draft.doc) : [], [draft?.doc]);
   if (!draft)
     return null;
   const changed = JSON.stringify(value) !== JSON.stringify(initial);
@@ -36405,7 +42107,7 @@ function SchemaPartView(props) {
       /* @__PURE__ */ u3(SchemaFields, {
         specs: PART_SPECS[props.part],
         value,
-        ctx: { doc: draft.doc, lint: draft.lint, path: props.part, identifiers, functions: draft.functions },
+        ctx: { doc: draft.doc, lint: draft.lint, path: props.part, identifiers: identifiers2, functions: draft.functions },
         onChange: setValue
       }, undefined, false, undefined, this),
       /* @__PURE__ */ u3(SaveBar, {
@@ -37042,7 +42744,7 @@ function TimeControlsEditor(props) {
             step: 500,
             integer: true,
             disabled: props.disabled,
-            onChange: (events) => props.onChange({ control: "unit_cap", scope: { all: true }, to: { agentDays: values.unitCap.agentDays, events } })
+            onChange: (events2) => props.onChange({ control: "unit_cap", scope: { all: true }, to: { agentDays: values.unitCap.agentDays, events: events2 } })
           }, undefined, false, undefined, this)
         ]
       }, undefined, true, undefined, this)
@@ -37584,7 +43286,7 @@ function ownSources(sources, section) {
 function sourcesTaken(feed, sources, section) {
   return feed.include ?? ownSources(sources, section);
 }
-function chatFeedOf(draft, picked, own) {
+function chatFeedOf(draft, picked, own2) {
   const to = {};
   if (draft.enabled === false)
     to.enabled = false;
@@ -37594,13 +43296,13 @@ function chatFeedOf(draft, picked, own) {
     to.maxLines = draft.maxLines;
   if (draft.maxTokens !== undefined)
     to.maxTokens = draft.maxTokens;
-  const same = picked.length === own.length && own.every((id) => picked.includes(id));
+  const same = picked.length === own2.length && own2.every((id) => picked.includes(id));
   if (!same && picked.length > 0)
     to.include = [...picked];
   return to;
 }
-function sourcesMissing(draft, picked, own) {
-  return draft.enabled !== false && own.length > 0 && picked.length === 0;
+function sourcesMissing(draft, picked, own2) {
+  return draft.enabled !== false && own2.length > 0 && picked.length === 0;
 }
 var CAP_START = { maxLines: 12, maxTokens: 400 };
 function SectionFeedForm(props) {
@@ -37608,7 +43310,7 @@ function SectionFeedForm(props) {
   const [busy, run] = useBusy();
   const start = props.row.chat ?? props.row.world;
   const [draft, setDraft] = d2(start);
-  const own = ownSources(props.sources, props.row.id);
+  const own2 = ownSources(props.sources, props.row.id);
   const [picked, setPicked] = d2(sourcesTaken(start, props.sources, props.row.id));
   const set = (patch) => setDraft((d3) => ({ ...d3, ...patch }));
   const offered = [...props.sources.filter((s3) => s3.slot === props.row.id), ...props.sources.filter((s3) => s3.slot !== props.row.id)];
@@ -37618,7 +43320,7 @@ function SectionFeedForm(props) {
     if (result)
       props.onDone(result.undo !== null ? { text: feedSentence(props.row.label, to), undo: [result.undo] } : null);
   });
-  const noneTaken = sourcesMissing(draft, picked, own);
+  const noneTaken = sourcesMissing(draft, picked, own2);
   return /* @__PURE__ */ u3("div", {
     class: "lre-stack",
     "data-lre-feed-form": props.row.id,
@@ -37681,13 +43383,13 @@ function SectionFeedForm(props) {
           class: "lre-stack",
           "data-lre-feed-sources": true,
           children: [
-            own.length === 0 ? /* @__PURE__ */ u3("span", {
+            own2.length === 0 ? /* @__PURE__ */ u3("span", {
               class: "lre-small lre-muted",
               children: "No source fills this section by itself (the turn writes Outline and Montage). A source you tick here adds its lines."
             }, undefined, false, undefined, this) : null,
             offered.map((s3) => /* @__PURE__ */ u3(CheckField, {
               label: s3.label,
-              help: own.includes(s3.id) ? "Its own" : undefined,
+              help: own2.includes(s3.id) ? "Its own" : undefined,
               checked: picked.includes(s3.id),
               onChange: (on) => setPicked((p3) => on ? [...p3, s3.id] : p3.filter((id) => id !== s3.id))
             }, s3.id, false, undefined, this))
@@ -37705,7 +43407,7 @@ function SectionFeedForm(props) {
             variant: "primary",
             busy,
             disabled: noneTaken,
-            onClick: () => send(chatFeedOf(draft, picked, own)),
+            onClick: () => send(chatFeedOf(draft, picked, own2)),
             children: "Save for this chat"
           }, undefined, false, undefined, this),
           /* @__PURE__ */ u3(Button, {
@@ -38825,7 +44527,7 @@ var PROMPT_NOTE = {
   consolidate: "Folds a character's faded and surplus notes into their summary.",
   knowledge: "After the reply, one call per scene, or one per character as set in Knowledge: who learned what, what they worked out and what they now doubt."
 };
-function Note(props) {
+function Note2(props) {
   return /* @__PURE__ */ u3("p", {
     class: "lre-minds-note",
     children: props.children
@@ -38887,7 +44589,7 @@ function ReadSources(props) {
             class: "lre-minds-group-title",
             children: GROUP_TITLE[group]
           }, undefined, false, undefined, this),
-          note ? /* @__PURE__ */ u3(Note, {
+          note ? /* @__PURE__ */ u3(Note2, {
             children: note
           }, undefined, false, undefined, this) : null,
           MIND_SOURCES.filter((s3) => READ_GROUP[s3] === group).map((source) => /* @__PURE__ */ u3(ReadRow, {
@@ -38929,7 +44631,7 @@ function LimitField(props) {
 }
 function MemoryOverride(props) {
   const { field: field2, busy } = props;
-  const own = memoryOverride(props.memory, field2);
+  const own2 = memoryOverride(props.memory, field2);
   const builtIn = memoryValue(DEFAULT_MINDS_MEMORY, field2);
   const id = `${field2.part}.${field2.key}`;
   const set = (value) => {
@@ -38943,13 +44645,13 @@ function MemoryOverride(props) {
     children: [
       field2.none ? /* @__PURE__ */ u3(HostSwitch, {
         label: `${field2.label}: ${field2.none}`,
-        checked: own === "none" || own === undefined && builtIn === "none",
+        checked: own2 === "none" || own2 === undefined && builtIn === "none",
         disabled: busy,
         onChange: (none) => set(none ? "none" : typeof builtIn === "number" ? builtIn : field2.range?.[0] ?? 0)
       }, undefined, false, undefined, this) : null,
-      field2.range && own !== "none" ? /* @__PURE__ */ u3(NumberStepper, {
+      field2.range && own2 !== "none" ? /* @__PURE__ */ u3(NumberStepper, {
         label: field2.label,
-        value: typeof own === "number" ? own : null,
+        value: typeof own2 === "number" ? own2 : null,
         min: field2.range[0],
         max: field2.range[1],
         step: field2.step ?? 1,
@@ -38958,13 +44660,13 @@ function MemoryOverride(props) {
         onChange: set
       }, undefined, false, undefined, this) : field2.range ? null : /* @__PURE__ */ u3(HostSwitch, {
         label: field2.label,
-        checked: typeof own === "boolean" ? own : builtIn === true,
+        checked: typeof own2 === "boolean" ? own2 : builtIn === true,
         disabled: busy,
         onChange: set
       }, undefined, false, undefined, this),
       /* @__PURE__ */ u3("div", {
         class: "lre-minds-override-foot",
-        children: own === undefined ? /* @__PURE__ */ u3("span", {
+        children: own2 === undefined ? /* @__PURE__ */ u3("span", {
           class: "lre-minds-note",
           children: [
             "The world's applies (built in: ",
@@ -39019,7 +44721,7 @@ function ReadRow(props) {
             busy,
             patch: props.patch
           }, undefined, false, undefined, this),
-          props.knowledge.enabled ? null : /* @__PURE__ */ u3(Note, {
+          props.knowledge.enabled ? null : /* @__PURE__ */ u3(Note2, {
             children: "Track who knows what is off (Knowledge, below), so this reads nothing unless a chat turns it on in GM → This chat."
           }, undefined, false, undefined, this)
         ]
@@ -39046,7 +44748,7 @@ function ReadRow(props) {
           }, undefined, false, undefined, this)
         ]
       }, undefined, true, undefined, this),
-      /* @__PURE__ */ u3(Note, {
+      /* @__PURE__ */ u3(Note2, {
         children: READ_NOTE[source]
       }, undefined, false, undefined, this)
     ]
@@ -39105,7 +44807,7 @@ function KnowledgeLimitRow(props) {
         busy: props.busy,
         patch: props.patch
       }, undefined, false, undefined, this),
-      /* @__PURE__ */ u3(Note, {
+      /* @__PURE__ */ u3(Note2, {
         children: LIMIT_FIELD[props.limit].note
       }, undefined, false, undefined, this)
     ]
@@ -39277,7 +44979,7 @@ function KnowledgeSection(props) {
           disabled: busy,
           onChange: (enabled) => set({ enabled })
         }, undefined, false, undefined, this),
-        /* @__PURE__ */ u3(Note, {
+        /* @__PURE__ */ u3(Note2, {
           children: "On, each character holds the facts they know. After each reply the knowledge step works out who learned what; minds read what they know, the narrator gets Who knows what, and Play shows What you know. A chat's own switch in GM → This chat wins."
         }, undefined, false, undefined, this),
         /* @__PURE__ */ u3(NumberStepper, {
@@ -39290,7 +44992,7 @@ function KnowledgeSection(props) {
           disabled: busy,
           onChange: (percent2) => set({ threshold: percent2 / 100 })
         }, undefined, false, undefined, this),
-        /* @__PURE__ */ u3(Note, {
+        /* @__PURE__ */ u3(Note2, {
           children: "A fact someone holds less surely than this is a suspicion, not something they know."
         }, undefined, false, undefined, this),
         /* @__PURE__ */ u3("div", {
@@ -39307,7 +45009,7 @@ function KnowledgeSection(props) {
               disabled: busy,
               onChange: (batch) => set({ batch })
             }, undefined, false, undefined, this),
-            /* @__PURE__ */ u3(Note, {
+            /* @__PURE__ */ u3(Note2, {
               children: "One call per scene works out everyone who could perceive the turn at once. One call per character asks about each of them alone, one after another, each shown the facts the ones before it made: closer reading, a call each."
             }, undefined, false, undefined, this)
           ]
@@ -39349,7 +45051,7 @@ function KnowledgeSection(props) {
               class: "lre-minds-group-title",
               children: "Texts"
             }, undefined, false, undefined, this),
-            /* @__PURE__ */ u3(Note, {
+            /* @__PURE__ */ u3(Note2, {
               children: "The words knowledge sends a model, besides the knowledge step's own prompt (under Prompts). Yours replaces the shipped text; Reset goes back to it."
             }, undefined, false, undefined, this),
             TEXT_GROUPS.map((group) => /* @__PURE__ */ u3(Disclosure, {
@@ -39366,7 +45068,7 @@ function KnowledgeSection(props) {
                 ]
               }, undefined, true, undefined, this),
               children: [
-                /* @__PURE__ */ u3(Note, {
+                /* @__PURE__ */ u3(Note2, {
                   children: TEXT_GROUP_NOTE[group]
                 }, undefined, false, undefined, this),
                 KNOWLEDGE_TEXT_IDS.filter((id) => TEXT_FIELD[id].group === group).map((id) => /* @__PURE__ */ u3(KnowledgeTextField, {
@@ -39406,7 +45108,7 @@ function MindsSection(props) {
               disabled: busy,
               onChange: (enabled) => policy({ enabled })
             }, undefined, false, undefined, this),
-            /* @__PURE__ */ u3(Note, {
+            /* @__PURE__ */ u3(Note2, {
               children: "Picking a Model use preset sets everything here but what a mind reads, knowledge, your prompts and memory overrides; changing any of the rest makes it Custom."
             }, undefined, false, undefined, this)
           ]
@@ -39429,7 +45131,7 @@ function MindsSection(props) {
                   disabled: busy,
                   onChange: (liveLimit) => policy({ liveLimit })
                 }, undefined, false, undefined, this),
-                /* @__PURE__ */ u3(Note, {
+                /* @__PURE__ */ u3(Note2, {
                   children: "Live characters think every turn, best score first; past the limit they wait for a Near refresh."
                 }, undefined, false, undefined, this),
                 /* @__PURE__ */ u3(LimitField, {
@@ -39442,10 +45144,10 @@ function MindsSection(props) {
                   disabled: busy,
                   onChange: (refreshLimit) => policy({ refreshLimit })
                 }, undefined, false, undefined, this),
-                /* @__PURE__ */ u3(Note, {
+                /* @__PURE__ */ u3(Note2, {
                   children: "Besides the Live minds, the most pressing first. A refresh you ask for in GM mode always runs."
                 }, undefined, false, undefined, this),
-                /* @__PURE__ */ u3(Note, {
+                /* @__PURE__ */ u3(Note2, {
                   children: "Background characters never get a mind; they follow their routine."
                 }, undefined, false, undefined, this)
               ]
@@ -39456,7 +45158,7 @@ function MindsSection(props) {
             children: /* @__PURE__ */ u3("div", {
               class: "lre-minds-body",
               children: [
-                /* @__PURE__ */ u3(Note, {
+                /* @__PURE__ */ u3(Note2, {
                   children: "A Near character thinks again when one of these calls for it."
                 }, undefined, false, undefined, this),
                 /* @__PURE__ */ u3(HostSwitch, {
@@ -39500,7 +45202,7 @@ function MindsSection(props) {
             children: /* @__PURE__ */ u3("div", {
               class: "lre-minds-body",
               children: [
-                /* @__PURE__ */ u3(Note, {
+                /* @__PURE__ */ u3(Note2, {
                   children: "A Far character thinks now and then, on game time."
                 }, undefined, false, undefined, this),
                 /* @__PURE__ */ u3(LimitField, {
@@ -39522,7 +45224,7 @@ function MindsSection(props) {
             children: /* @__PURE__ */ u3("div", {
               class: "lre-minds-body",
               children: [
-                /* @__PURE__ */ u3(Note, {
+                /* @__PURE__ */ u3(Note2, {
                   children: "Which of the characters who heard your message take notes, commitments and plans from the reply."
                 }, undefined, false, undefined, this),
                 FIDELITIES.filter((f3) => f3 !== "background").map((level) => /* @__PURE__ */ u3(HostSwitch, {
@@ -39539,7 +45241,7 @@ function MindsSection(props) {
             children: /* @__PURE__ */ u3("div", {
               class: "lre-minds-body",
               children: [
-                /* @__PURE__ */ u3(Note, {
+                /* @__PURE__ */ u3(Note2, {
                   children: "Who they are (their own sheet, aims and secrets), where they are and whom they see there, and what they mean to do are always in it. Each source below is yours to switch on or off and to limit; within its limit it comes whole, and nothing else cuts it."
                 }, undefined, false, undefined, this),
                 /* @__PURE__ */ u3(ReadSources, {
@@ -39572,7 +45274,7 @@ function MindsSection(props) {
                       disabled: busy,
                       onChange: (tokens) => policy({ tokens })
                     }, undefined, false, undefined, this),
-                    /* @__PURE__ */ u3(Note, {
+                    /* @__PURE__ */ u3(Note2, {
                       children: "The narrator's Minds section has its own budget, apart from the engine's section budget, so minds never crowd out Scene or People."
                     }, undefined, false, undefined, this)
                   ]
@@ -39621,7 +45323,7 @@ function MindsSection(props) {
         children: /* @__PURE__ */ u3("div", {
           class: "lre-minds-body",
           children: [
-            /* @__PURE__ */ u3(Note, {
+            /* @__PURE__ */ u3(Note2, {
               children: "Each world sets how its characters remember (Build → World → Minds); what you set here wins in every world."
             }, undefined, false, undefined, this),
             /* @__PURE__ */ u3(Disclosure, {
@@ -39826,6 +45528,8 @@ var EXTRACTION_LABEL = {
   agenda: "How organizations' plans go (under way, done, blocked)",
   vote: "Votes on organizations' motions (for, against, abstaining)",
   approval: "Answers to requests for approval (approved, denied, withdrawn)",
+  revenue: "A stream earning more or less for a while, as the story tells it",
+  project_note: "A project's step set back or costing more, as the story tells it",
   item_move: "Where things are (picked up, put down, put away, fetched)",
   item_hand: "Handing things over (holding, lending, giving back)",
   item_own: "Whose things are (gifts, sales, trades)",
@@ -40066,52 +45770,6 @@ function SwipesPage(props) {
   }, undefined, true, undefined, this);
 }
 
-// src/shared/role-routes.ts
-var ROLE_TASK_ROUTES = {
-  intent: [
-    { task: "interpret", steps: ["interpret"], stage: "intent" },
-    { task: "judge", steps: ["judge"], stage: "prepare" },
-    { task: "puzzle", steps: ["puzzle.answer"], stage: "prepare" }
-  ],
-  scene: [{ task: "scene", steps: [], stage: "prepare" }],
-  minds: [{ task: "mind", steps: ["mind"], stage: "prepare" }],
-  knowledge: [{ task: "knowledge", steps: ["knowledge"], stage: "read" }],
-  director: [
-    { task: "decisions", steps: ["npc.choose"], stage: "prepare" },
-    { task: "prose", steps: ["brief", "outline"], stage: "beats" },
-    { task: "choices", steps: ["choices"], stage: "read" }
-  ],
-  read: [{ task: "extract", steps: ["extract"], stage: "read" }],
-  curator: [{ task: "curate", steps: ["extract"], stage: "read" }],
-  memory: [
-    { task: "memory", steps: ["memory"], stage: "memory" },
-    { task: "consolidate", steps: ["consolidate"], stage: "memory" }
-  ],
-  skip: [
-    { task: "beats", steps: ["skip"], stage: "prepare" },
-    { task: "plan", steps: ["skip"], stage: "prepare" }
-  ],
-  world: [{ task: "effects", steps: ["extract"], stage: "read" }]
-};
-function taskStep(settings, task) {
-  return task.steps.find((s3) => stepConfigOf(settings.modelUse.steps, s3).enabled) ?? task.steps[0] ?? null;
-}
-function taskRoute(settings, role, own, task) {
-  const step = taskStep(settings, task);
-  if (own.connectionId !== null)
-    return { role, task: task.task, step, connectionId: own.connectionId, model: own.model, from: "role" };
-  const config = step ? stepConfigOf(settings.modelUse.steps, step) : null;
-  const call = helperCallOf(config, settings.helper);
-  const stepOwn = config?.route?.connectionId ?? null;
-  return { role, task: task.task, step, connectionId: call.connectionId, model: own.model ?? call.model, from: stepOwn !== null ? "step" : call.connectionId !== null ? "helper" : "default" };
-}
-function roleRoutes(settings, role, own) {
-  return ROLE_TASK_ROUTES[role].map((task) => taskRoute(settings, role, own, task));
-}
-function stepUsers(settings, roles, step) {
-  return ROLE_IDS.flatMap((role) => roleRoutes(settings, role, roles[role]).filter((r3) => r3.from !== "role" && (step === null ? r3.from === "helper" || r3.from === "default" : r3.step === step)));
-}
-
 // src/frontend/settings/labels.ts
 var AGENTS_SUBS = ["pipeline", "review", "system", "budgets", "compaction", "recording", "throttles", "caching", "acceptance"];
 var AGENTS_SUB = {
@@ -40150,8 +45808,8 @@ var TASK_LABEL = {
   world: { effects: "The world's own steps" }
 };
 function taskLabel(role, task) {
-  const own = TASK_LABEL[role];
-  return hasOwn(own, task) ? own[task] ?? ROLE_LABEL[role] : ROLE_LABEL[role];
+  const own2 = TASK_LABEL[role];
+  return hasOwn(own2, task) ? own2[task] ?? ROLE_LABEL[role] : ROLE_LABEL[role];
 }
 var ROUTE_FROM = { role: "its own", step: "from Steps", helper: "from Helper model", default: "Lumiverse's default" };
 var STAGE_LABEL = {
@@ -40677,9 +46335,9 @@ function agentUsersText(settings, roles, step) {
     const tasks = users.filter((u4) => u4.role === role);
     return tasks.length === 0 ? [] : [`${ROLE_LABEL[role]} (${tasks.map((t3) => taskLabel(role, t3.task).toLowerCase()).join(", ")})`];
   });
-  const own = step === null ? [] : ROLE_IDS.filter((role) => roles[role].connectionId !== null && ROLE_TASK_ROUTES[role].some((t3) => taskStep(settings, t3) === step)).map((role) => ROLE_LABEL[role]);
+  const own2 = step === null ? [] : ROLE_IDS.filter((role) => roles[role].connectionId !== null && ROLE_TASK_ROUTES[role].some((t3) => taskStep(settings, t3) === step)).map((role) => ROLE_LABEL[role]);
   const runs = byRole.length === 0 ? "" : `On agent chats, ${byRole.join(", ")} ${byRole.length === 1 ? "runs" : "run"} ${step === null ? "on the helper model, while neither their step nor their role sets a connection" : "where this step does"}.`;
-  const apart = own.length === 0 ? "" : `${own.join(", ")} ${own.length === 1 ? "sets its" : "set their"} own (Settings → Agents → Roles).`;
+  const apart = own2.length === 0 ? "" : `${own2.join(", ")} ${own2.length === 1 ? "sets its" : "set their"} own (Settings → Agents → Roles).`;
   const text = [runs, apart].filter((t3) => t3 !== "").join(" ");
   return text === "" ? null : text;
 }
@@ -40874,8 +46532,8 @@ var STEP_PROMPT_MAX = 20000;
 function stepPromptPatch(purpose, text, builtIn) {
   if (text !== null && text.length > STEP_PROMPT_MAX)
     return null;
-  const own = text === null || text.trim() === "" || builtIn !== undefined && text.trim() === builtIn.trim() ? null : text;
-  return { modelUse: { steps: { [purpose]: { template: own } } } };
+  const own2 = text === null || text.trim() === "" || builtIn !== undefined && text.trim() === builtIn.trim() ? null : text;
+  return { modelUse: { steps: { [purpose]: { template: own2 } } } };
 }
 function stepBuiltIn(purpose) {
   if (purpose === "interpret" || purpose === "extract")
@@ -40898,7 +46556,7 @@ function StepPrompts(props) {
   const built = stepBuiltIn(purpose);
   const builtIn = built.use === "replaced" ? built.text : undefined;
   const adds = built.use === "added" ? built.text : undefined;
-  const own = /* @__PURE__ */ u3(PromptEditor, {
+  const own2 = /* @__PURE__ */ u3(PromptEditor, {
     id: purpose === "skip" ? "skip_plan" : purpose,
     label: purpose === "skip" ? "The skip plan" : "Your prompt",
     note: purpose === "skip" ? "As a time skip starts, how the people the model plans spend it. Replaces the built-in instructions; the answer format stays." : `${PROMPT_EFFECT[purpose]} It wins over the world's step template.`,
@@ -40919,9 +46577,9 @@ function StepPrompts(props) {
         busy,
         patch: props.patch
       }, undefined, false, undefined, this),
-      own
+      own2
     ]
-  }, undefined, true, undefined, this) : own;
+  }, undefined, true, undefined, this) : own2;
 }
 function StepCard(props) {
   const { purpose, config, busy, update } = props;
@@ -41197,17 +46855,17 @@ var TIMEOUTS2 = defaultTimeouts();
 function fieldsChanged(value, standard) {
   return Object.keys(standard).filter((key) => value[key] !== standard[key]).length;
 }
-function ownChanged(own, standard) {
-  const keys = new Set([...Object.keys(own), ...Object.keys(standard)]);
-  return [...keys].filter((key) => own[key] !== standard[key]).length;
+function ownChanged(own2, standard) {
+  const keys = new Set([...Object.keys(own2), ...Object.keys(standard)]);
+  return [...keys].filter((key) => own2[key] !== standard[key]).length;
 }
 function sameSet(a3, b3) {
   return a3.length === b3.length && a3.every((x2) => b3.includes(x2));
 }
-function agentsSubChanged(agents, sub) {
-  switch (sub) {
+function agentsSubChanged(agents, sub2) {
+  switch (sub2) {
     case "pipeline":
-      return fieldsChanged(agents.pipeline, DEFAULTS.pipeline);
+      return fieldsChanged(agents.pipeline, DEFAULTS.pipeline) + fieldsChanged(agents.persist, DEFAULTS.persist);
     case "review":
       return fieldsChanged(agents.review, DEFAULTS.review);
     case "system":
@@ -41227,7 +46885,7 @@ function agentsSubChanged(agents, sub) {
   }
 }
 function agentsChanged(agents) {
-  return AGENTS_SUBS.reduce((sum, sub) => sum + agentsSubChanged(agents, sub), 0) + [agents.stream !== DEFAULTS.stream, agents.thinkingInToolLoops !== DEFAULTS.thinkingInToolLoops].filter(Boolean).length;
+  return AGENTS_SUBS.reduce((sum, sub2) => sum + agentsSubChanged(agents, sub2), 0) + [agents.stream !== DEFAULTS.stream, agents.thinkingInToolLoops !== DEFAULTS.thinkingInToolLoops].filter(Boolean).length;
 }
 function contextChanged(agents, id) {
   const c3 = agents.context.roles[id];
@@ -41237,7 +46895,7 @@ function contextChanged(agents, id) {
 function roleChanged(agents, id) {
   const r3 = agents.roles[id];
   const d3 = DEFAULTS.roles[id];
-  const settings = [r3.connectionId !== d3.connectionId || r3.model !== d3.model, r3.effort !== d3.effort, !sameSet(r3.families, d3.families), r3.tier !== d3.tier, r3.promptOnly !== d3.promptOnly, r3.onFail !== d3.onFail, hasOwn(agents.caching.roles, id), id === "curator" && agents.curatorOps !== DEFAULTS.curatorOps];
+  const settings = [r3.connectionId !== d3.connectionId || r3.model !== d3.model, r3.effort !== d3.effort, !sameSet(r3.families, d3.families), r3.tier !== d3.tier, r3.promptOnly !== d3.promptOnly, r3.onFail !== d3.onFail, r3.run !== d3.run, hasOwn(agents.caching.roles, id), id === "curator" && agents.curatorOps !== DEFAULTS.curatorOps];
   return settings.filter(Boolean).length + ownChanged(r3.budget, d3.budget) + contextChanged(agents, id);
 }
 function rolesChanged(agents) {
@@ -41249,7 +46907,7 @@ function mainChanged(agents, timeouts) {
   const r3 = agents.finalReview;
   const dr = DEFAULTS.finalReview;
   const settings = [m2.connectionId !== d3.connectionId || m2.model !== d3.model, m2.effort !== d3.effort, !sameSet(m2.families, d3.families), m2.digestTokens !== d3.digestTokens, m2.pinsTokens !== d3.pinsTokens, hasOwn(agents.caching.roles, "main"), r3.on !== dr.on, r3.onFail !== dr.onFail, timeouts.finalReviewMs !== TIMEOUTS2.finalReviewMs];
-  return settings.filter(Boolean).length + ownChanged(m2.budget, d3.budget) + ownChanged(r3.budget, dr.budget);
+  return settings.filter(Boolean).length + fieldsChanged(m2.stages, d3.stages) + (r3.scope !== dr.scope ? 1 : 0) + ownChanged(m2.budget, d3.budget) + ownChanged(r3.budget, dr.budget);
 }
 function assistantChanged(agents) {
   const a3 = agents.assistant;
@@ -41262,12 +46920,12 @@ function assistantChanged(agents) {
 var STEP2 = { tokens: 1000, ms: 5, count: 1, chars: 500 };
 var PICK_START = { tokens: 1e5, ms: 60000, count: 10, chars: 4000 };
 var n3 = (value) => value.toLocaleString("en-US");
-function amountText2(value, unit) {
+function amountText2(value, unit2) {
   if (value === "none")
     return "No limit";
-  if (unit === "ms")
+  if (unit2 === "ms")
     return formatMs(value);
-  return unit === "tokens" ? `${n3(value)} ${nounFor(value, "token", "tokens")}` : unit === "chars" ? `${n3(value)} ${nounFor(value, "character", "characters")}` : n3(value);
+  return unit2 === "tokens" ? `${n3(value)} ${nounFor(value, "token", "tokens")}` : unit2 === "chars" ? `${n3(value)} ${nounFor(value, "character", "characters")}` : n3(value);
 }
 function freshNonce() {
   const bytes = crypto.getRandomValues(new Uint8Array(16));
@@ -41459,13 +47117,13 @@ function LimitRow(props) {
   }, undefined, false, undefined, this);
 }
 function OwnLimitRow(props) {
-  const { def: def2, own, every } = props;
+  const { def: def2, own: own2, every } = props;
   const fallback = props.fallback ?? "every agent's";
   const Fallback = fallback.charAt(0).toUpperCase() + fallback.slice(1);
   return /* @__PURE__ */ u3(FoldRow, {
     id: props.id,
     label: def2.label,
-    value: amountText2(own, def2.unit),
+    value: amountText2(own2, def2.unit),
     changed: props.changed,
     open: props.open,
     children: /* @__PURE__ */ u3("div", {
@@ -41477,12 +47135,12 @@ function OwnLimitRow(props) {
         }, undefined, false, undefined, this),
         /* @__PURE__ */ u3(LimitControls, {
           def: def2,
-          value: own,
+          value: own2,
           onValue: every === "none" ? def2.min : every,
           busy: props.busy,
           set: props.set
         }, undefined, false, undefined, this),
-        own === "none" && def2.none ? /* @__PURE__ */ u3("span", {
+        own2 === "none" && def2.none ? /* @__PURE__ */ u3("span", {
           class: "lre-small lre-muted",
           children: props.outsideTurn && def2.turnBound ? "No limit at all: it runs outside any turn." : `No limit: ${def2.none}.`
         }, undefined, false, undefined, this) : null,
@@ -41822,14 +47480,14 @@ function FamiliesSetting(props) {
   }, undefined, false, undefined, this);
 }
 function CachingSetting(props) {
-  const own = hasOwn(props.agents.caching.roles, props.id);
+  const own2 = hasOwn(props.agents.caching.roles, props.id);
   const now = roleCaching(props.agents, props.id);
   const set = (value) => props.patch({ agents: { caching: { roles: { [props.id]: value } } } });
   return /* @__PURE__ */ u3(SettingRow, {
     id: "caching",
     label: "Prompt caching",
     bare: true,
-    changed: own,
+    changed: own2,
     help: "Marks where the provider may keep the start of its prompts, so its next call that starts the same reads it for less. Bust makes its next calls miss the cache once.",
     reset: { label: `Reset ${props.owner}'s caching to every role's`, to: `every role's (${props.agents.caching.on ? "on" : "off"})`, onClick: () => set(null) },
     busy: props.busy,
@@ -41856,12 +47514,12 @@ function CachingSetting(props) {
   }, undefined, true, undefined, this);
 }
 function PromptsLink(props) {
-  const own = ownTexts(props.prompts, props.page);
+  const own2 = ownTexts(props.prompts, props.page);
   return /* @__PURE__ */ u3(NavRow, {
     id: `prompts-${props.page}`,
     icon: "edit",
     title: `${props.owner}'s prompts`,
-    subtitle: own === 0 ? "Every text as shipped" : `${own} ${own === 1 ? "text" : "texts"} of your own`,
+    subtitle: own2 === 0 ? "Every text as shipped" : `${own2} ${own2 === 1 ? "text" : "texts"} of your own`,
     changed: 0,
     onOpen: () => props.go({ page: "prompts", open: { page: props.page } })
   }, undefined, false, undefined, this);
@@ -42031,7 +47689,7 @@ function RolePage(props) {
     {
       id: "when",
       title: "When it runs and fails",
-      changed: (r3.promptOnly !== d3.promptOnly ? 1 : 0) + (r3.onFail !== d3.onFail ? 1 : 0),
+      changed: (r3.promptOnly !== d3.promptOnly ? 1 : 0) + (r3.onFail !== d3.onFail ? 1 : 0) + (r3.run !== d3.run ? 1 : 0),
       body: /* @__PURE__ */ u3("div", {
         class: "lre-set-rows",
         children: [
@@ -42043,6 +47701,13 @@ function RolePage(props) {
             changed: 0,
             onOpen: () => props.go({ page: "agents", sub: "pipeline" })
           }, undefined, false, undefined, this) : null,
+          /* @__PURE__ */ u3(RunSetting, {
+            id,
+            agents,
+            busy,
+            set,
+            go: props.go
+          }, undefined, false, undefined, this),
           /* @__PURE__ */ u3(SettingRow, {
             id: "promptOnly",
             label: "One call, no tools",
@@ -42141,6 +47806,52 @@ function RolePage(props) {
     reset: () => props.patch(roleResetPatch(id))
   }, undefined, false, undefined, this);
 }
+function RunSetting(props) {
+  const { id, agents, busy } = props;
+  const label = ROLE_LABEL[id];
+  const run = agents.roles[id].run;
+  const standard = DEFAULTS2.roles[id].run;
+  const runs = roleRuns(id);
+  const main = agents.pipeline.mode === "main";
+  const stages = roleStages(id).map((s3) => `${STAGE_WORDS[s3].label} (${agents.main.stages[s3] === "auto" ? "runs on its own" : "the main agent decides"})`);
+  const kept2 = PIPELINE_ROLES[id].keep ? agents.persist.on ? " Smart persistence is on." : " Smart persistence is off, so nothing is kept now: Settings → Agents → Pipeline." : "";
+  const help = /* @__PURE__ */ u3(M, {
+    children: [
+      roleRunHelp(id, run),
+      kept2,
+      main ? ` With a main agent deciding the turn, it works in ${stages.join(", ")}.` : "",
+      runs.length === 1 ? " The engine never skips it." : ""
+    ]
+  }, undefined, true, undefined, this);
+  return /* @__PURE__ */ u3(SettingRow, {
+    id: "run",
+    label: "When it runs",
+    changed: run !== standard,
+    help,
+    reset: { label: `Reset when ${label} runs to its default, ${ROLE_RUN_LABELS[standard]}`, to: ROLE_RUN_LABELS[standard], onClick: () => props.set({ run: null }) },
+    busy,
+    children: [
+      runs.length > 1 ? /* @__PURE__ */ u3(Seg, {
+        label: `${label}: when it runs`,
+        value: run,
+        options: runs.map((value) => ({ value, label: ROLE_RUN_LABELS[value] })),
+        disabled: busy,
+        onChange: (next) => props.set({ run: next })
+      }, undefined, false, undefined, this) : /* @__PURE__ */ u3("span", {
+        class: "lre-set-note",
+        children: ROLE_RUN_LABELS.smart
+      }, undefined, false, undefined, this),
+      main ? /* @__PURE__ */ u3(NavRow, {
+        id: "stages",
+        icon: "branch",
+        title: "Its stages",
+        subtitle: "Settings → Agents → Main agent → Stages",
+        changed: 0,
+        onOpen: () => props.go({ page: "main", at: "stages" })
+      }, undefined, false, undefined, this) : null
+    ]
+  }, undefined, true, undefined, this);
+}
 
 // src/frontend/settings/agents.tsx
 var DEFAULTS3 = defaultAgentSettings();
@@ -42155,8 +47866,8 @@ function agentsSummary(agents) {
   const changed = agentsChanged(agents);
   return `${PIPELINE_MODE_LABELS[agents.pipeline.mode]}${changed > 0 ? ` · ${changed} changed` : ""}`;
 }
-function agentsSubSummary(sub, agents, connections) {
-  switch (sub) {
+function agentsSubSummary(sub2, agents, connections) {
+  switch (sub2) {
     case "pipeline":
       return `${PIPELINE_MODE_LABELS[agents.pipeline.mode]} · memory ${MEMORY_PLACEMENT_LABELS[agents.pipeline.memory].toLowerCase()} · Curator ${onOff(agents.pipeline.curator)}`;
     case "review":
@@ -42174,8 +47885,8 @@ function agentsSubSummary(sub, agents, connections) {
     case "throttles":
       return agents.throttles.length === 0 ? "None: no connection waits" : agents.throttles.map((t3) => nameOf3(t3.id, connections)).join(", ");
     case "caching": {
-      const own = Object.keys(agents.caching.roles).length;
-      return `${agents.caching.on ? "On" : "Off"} for every role${own > 0 ? ` · ${own} with ${own === 1 ? "its" : "their"} own` : ""}`;
+      const own2 = Object.keys(agents.caching.roles).length;
+      return `${agents.caching.on ? "On" : "Off"} for every role${own2 > 0 ? ` · ${own2} with ${own2 === 1 ? "its" : "their"} own` : ""}`;
     }
     case "acceptance":
       return agents.acceptance.connections.length === 0 ? "No connection guarded" : `${agents.acceptance.connections.length} guarded: ${agents.acceptance.connections.map((c3) => nameOf3(c3.id, connections)).join(", ")}`;
@@ -42187,16 +47898,17 @@ function roleHow(agents, id) {
 function turnGlance(agents, routes, connections) {
   const memory = agents.pipeline.memory === "before_next" ? "memory_before" : "memory";
   const order = ["intent", "prepare", "beats", "review", "read", memory];
+  const main = agents.pipeline.mode === "main";
   return order.map((stage) => {
     if (stage === "review") {
       const route = routeText({ connectionId: agents.main.connectionId, model: agents.main.model, from: agents.main.connectionId === null ? "default" : "role" }, connections);
-      return { id: stage, number: 6, label: "Final review", rows: agents.finalReview.on ? [{ roles: [MAIN_AGENT_ROLE], route, how: null }] : [], off: agents.finalReview.on ? null : "Off: the narrator gets the prompt as the engine made it" };
+      return { id: stage, number: 6, label: "Final review", mode: null, rows: agents.finalReview.on ? [{ roles: [MAIN_AGENT_ROLE], route, how: null }] : [], off: agents.finalReview.on ? null : "Off: the narrator gets the prompt as the engine made it" };
     }
-    const at2 = stage === "memory_before" ? "memory" : stage;
+    const at2 = stageOf(stage);
     const rows2 = [];
     for (const id of ROLE_IDS) {
       const tasks = ROLE_TASK_ROUTES[id].filter((t3) => t3.stage === at2);
-      if (tasks.length === 0 || id === "curator" && !agents.pipeline.curator)
+      if (tasks.length === 0 || agents.roles[id].run === "off" || id === "curator" && !agents.pipeline.curator)
         continue;
       const places2 = [...new Set(tasks.map((t3) => routeText(taskRoute(routes, id, agents.roles[id], t3), connections)))];
       const route = places2.length === 1 ? places2[0] ?? "" : `${places2.length} connections, by task`;
@@ -42208,13 +47920,14 @@ function turnGlance(agents, routes, connections) {
         rows2.push({ roles: [id], route, how });
     }
     const label = STAGE_LABEL[stage];
-    return { id: stage, number: label.number, label: label.label, rows: rows2, off: rows2.length === 0 ? "Nothing runs" : null };
+    return { id: stage, number: label.number, label: label.label, mode: main ? agents.main.stages[at2] : null, rows: rows2, off: rows2.length === 0 ? "Nothing runs" : null };
   });
 }
 function TurnGlance(props) {
   const { agents } = props;
   const stages = turnGlance(agents, props.routes, props.connections);
   const main = agents.pipeline.mode === "main";
+  const auto = stages.some((s3) => s3.mode === "auto");
   return /* @__PURE__ */ u3(Section, {
     title: "A turn at a glance",
     aside: /* @__PURE__ */ u3(Badge, {
@@ -42228,13 +47941,14 @@ function TurnGlance(props) {
       children: [
         /* @__PURE__ */ u3("p", {
           class: "lre-set-note",
-          children: main ? "The main agent decides which roles run in each stage, and what to tell them." : "Each stage runs its roles in the steps' own order, every turn they have work."
+          children: main ? `The main agent decides which roles run in each stage, and what to tell them${auto ? "; a stage on its own runs its roles as the fixed pipeline does, and the main agent's next message says what ran" : ""}.` : "Each stage runs its roles in the steps' own order, every turn they have work."
         }, undefined, false, undefined, this),
         /* @__PURE__ */ u3("ol", {
           class: "lre-set-glance",
           children: stages.map((s3) => /* @__PURE__ */ u3("li", {
             class: "lre-set-glance-stage",
             "data-lre-glance-stage": s3.id,
+            "data-mode": s3.mode ?? undefined,
             children: [
               /* @__PURE__ */ u3("span", {
                 class: "lre-set-glance-num",
@@ -42246,8 +47960,19 @@ function TurnGlance(props) {
                 children: [
                   /* @__PURE__ */ u3("span", {
                     class: "lre-set-glance-title",
-                    children: s3.label
-                  }, undefined, false, undefined, this),
+                    children: [
+                      s3.label,
+                      s3.mode ? /* @__PURE__ */ u3(M, {
+                        children: [
+                          " ",
+                          /* @__PURE__ */ u3(Badge, {
+                            tone: s3.mode === "auto" ? "accent" : "neutral",
+                            children: STAGE_MODE_LABELS[s3.mode]
+                          }, undefined, false, undefined, this)
+                        ]
+                      }, undefined, true, undefined, this) : null
+                    ]
+                  }, undefined, true, undefined, this),
                   s3.off !== null ? /* @__PURE__ */ u3("span", {
                     class: "lre-set-glance-row lre-muted",
                     children: s3.off
@@ -42349,14 +48074,14 @@ function AgentsHub(props) {
         title: "Sections",
         flush: true,
         children: /* @__PURE__ */ u3(List, {
-          children: AGENTS_SUBS.map((sub) => /* @__PURE__ */ u3(NavRow, {
-            id: sub,
-            icon: AGENTS_SUB[sub].icon,
-            title: AGENTS_SUB[sub].title,
-            subtitle: agentsSubSummary(sub, agents, props.connections),
-            changed: agentsSubChanged(agents, sub),
-            onOpen: () => props.go({ page: "agents", sub })
-          }, sub, false, undefined, this))
+          children: AGENTS_SUBS.map((sub2) => /* @__PURE__ */ u3(NavRow, {
+            id: sub2,
+            icon: AGENTS_SUB[sub2].icon,
+            title: AGENTS_SUB[sub2].title,
+            subtitle: agentsSubSummary(sub2, agents, props.connections),
+            changed: agentsSubChanged(agents, sub2),
+            onOpen: () => props.go({ page: "agents", sub: sub2 })
+          }, sub2, false, undefined, this))
         }, undefined, false, undefined, this)
       }, undefined, false, undefined, this)
     ]
@@ -42420,7 +48145,68 @@ function PipelineSection(props) {
           disabled: busy,
           onChange: (curator) => set({ curator })
         }, undefined, false, undefined, this)
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(PersistRows, {
+        agents,
+        busy,
+        patch: props.patch
       }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+var KEEPS = ROLE_IDS.filter((r3) => PIPELINE_ROLES[r3].keep).map((r3) => ROLE_LABEL[r3]);
+var NEVER2 = NEVER_SKIPPED.map((r3) => ROLE_LABEL[r3]);
+function PersistRows(props) {
+  const { busy } = props;
+  const s3 = props.agents.persist;
+  const d3 = DEFAULTS3.persist;
+  const set = (fields) => props.patch({ agents: { persist: fields } });
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-set-rows",
+    "data-lre-agents-persist": true,
+    children: [
+      /* @__PURE__ */ u3(SettingRow, {
+        id: "persist-on",
+        label: "Smart persistence",
+        bare: true,
+        changed: s3.on !== d3.on,
+        help: /* @__PURE__ */ u3(M, {
+          children: [
+            s3.on ? `On: while a scene is unchanged since the last turn (the place, who is here and where, the time of day, the world's revision and live lore, the things here and on everyone present, how they regard each other, and no GM fix or marker since), its quiet Live minds and the scene's lore and notes (${KEEPS.join(", ")}) are kept from the last turn instead of asked again, and the narrator is told they are unchanged. A Re-run, a swipe, a Continue, a timelapse, a mind's first thoughts, one the GM asked to refresh and one the player names always ask afresh.` : "Off: every role runs every turn it is asked.",
+            " ",
+            `Never kept: ${NEVER2.join(", ")}.`,
+            " Each role's page sets whether it may be kept (When it runs); Main agent → Final review can then send only what changed."
+          ]
+        }, undefined, true, undefined, this),
+        reset: { label: `Reset Smart persistence to its default, ${onOff(d3.on)}`, to: onOff(d3.on), onClick: () => set({ on: null }) },
+        busy,
+        children: /* @__PURE__ */ u3(HostSwitch, {
+          label: "Smart persistence: keep a quiet scene's minds and notes",
+          checked: s3.on,
+          disabled: busy,
+          onChange: (on) => set({ on })
+        }, undefined, false, undefined, this)
+      }, undefined, false, undefined, this),
+      s3.on || s3.turns !== d3.turns || s3.minutes !== d3.minutes ? /* @__PURE__ */ u3(M, {
+        children: [
+          /* @__PURE__ */ u3(LimitRow, {
+            id: "persist-turns",
+            def: PERSIST_DEFS.turns,
+            value: s3.turns,
+            standard: d3.turns,
+            busy,
+            set: (turns) => set({ turns })
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3(LimitRow, {
+            id: "persist-minutes",
+            def: PERSIST_DEFS.minutes,
+            value: s3.minutes,
+            standard: d3.minutes,
+            busy,
+            set: (minutes) => set({ minutes })
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this) : null
     ]
   }, undefined, true, undefined, this);
 }
@@ -42671,7 +48457,7 @@ function AddConnection(props) {
   }, undefined, true, undefined, this);
 }
 function ThrottlesSection(props) {
-  const save = (next) => props.patch({ agents: { throttles: next.map((t3) => ({ id: t3.id, requestsPerMinute: t3.requestsPerMinute, tokensPerMinute: t3.tokensPerMinute })) } });
+  const save = (next) => props.patch({ agents: { throttles: next.map((t3) => ({ id: t3.id, requestsPerMinute: t3.requestsPerMinute, tokensPerMinute: t3.tokensPerMinute, atOnce: t3.atOnce })) } });
   const change = (id, part) => save(props.throttles.map((t3) => t3.id === id ? { ...t3, ...part } : t3));
   return /* @__PURE__ */ u3("div", {
     class: "lre-set-rows",
@@ -42679,7 +48465,7 @@ function ThrottlesSection(props) {
     children: [
       /* @__PURE__ */ u3("p", {
         class: "lre-set-note",
-        children: "How many requests and tokens (sent and written) the agents may use each minute on a connection; a call past either waits for the minute to turn. A connection not listed has none."
+        children: "How many requests and tokens (sent and written) the agents may use each minute on a connection, a call past either waiting for the minute to turn; and how many calls may be under way on it at once, every agent's and every prompt-only role's through one gate, a call past it waiting for one to end. A connection not listed has none."
       }, undefined, false, undefined, this),
       props.throttles.map((t3) => {
         const name = nameOf3(t3.id, props.connections);
@@ -42724,6 +48510,16 @@ function ThrottlesSection(props) {
               step: STEP2.tokens,
               busy: props.busy,
               set: (tokensPerMinute) => change(t3.id, { tokensPerMinute })
+            }, undefined, false, undefined, this),
+            /* @__PURE__ */ u3(OptionalLimit, {
+              label: `${name}: ${AT_ONCE_DEF.label.toLowerCase()}`,
+              offLabel: "no limit",
+              value: t3.atOnce,
+              min: AT_ONCE_DEF.min,
+              onValue: 2,
+              step: STEP2.count,
+              busy: props.busy,
+              set: (atOnce) => change(t3.id, { atOnce })
             }, undefined, false, undefined, this)
           ]
         }, t3.id, true, undefined, this);
@@ -42733,7 +48529,7 @@ function ThrottlesSection(props) {
         connections: props.connections,
         action: "Add a throttle",
         busy: props.busy,
-        add: (id) => save([...props.throttles, { id, requestsPerMinute: "none", tokensPerMinute: "none" }])
+        add: (id) => save([...props.throttles, { id, requestsPerMinute: "none", tokensPerMinute: "none", atOnce: "none" }])
       }, undefined, false, undefined, this)
     ]
   }, undefined, true, undefined, this);
@@ -42743,7 +48539,7 @@ function agentName(id) {
 }
 function CachingSection(props) {
   const { caching } = props.agents;
-  const own = Object.keys(caching.roles);
+  const own2 = Object.keys(caching.roles);
   return /* @__PURE__ */ u3("div", {
     class: "lre-set-rows",
     "data-lre-agent-caching": true,
@@ -42781,12 +48577,12 @@ function CachingSection(props) {
           }, undefined, false, undefined, this)
         ]
       }, undefined, true, undefined, this),
-      own.length === 0 ? /* @__PURE__ */ u3("p", {
+      own2.length === 0 ? /* @__PURE__ */ u3("p", {
         class: "lre-set-note",
         children: "No agent has caching of its own: each one's page can give it some."
       }, undefined, false, undefined, this) : null,
-      own.length > 0 ? /* @__PURE__ */ u3(List, {
-        children: own.map((id) => /* @__PURE__ */ u3(NavRow, {
+      own2.length > 0 ? /* @__PURE__ */ u3(List, {
+        children: own2.map((id) => /* @__PURE__ */ u3(NavRow, {
           id: `caching-${id}`,
           title: agentName(id),
           subtitle: `Its own: ${caching.roles[id]?.on ? "on" : "off"}`,
@@ -43414,8 +49210,8 @@ function AssistantPage(props) {
 // src/frontend/settings/context.tsx
 function contextSummary(agents) {
   const starting = ROLE_IDS.filter((id) => agents.context.roles[id].start.length > 0).length;
-  const own = ROLE_IDS.filter((id) => contextChanged(agents, id) > 0).length;
-  return `${starting} of ${ROLE_IDS.length} roles start with sections${own > 0 ? ` · ${own} changed` : ""}`;
+  const own2 = ROLE_IDS.filter((id) => contextChanged(agents, id) > 0).length;
+  return `${starting} of ${ROLE_IDS.length} roles start with sections${own2 > 0 ? ` · ${own2} changed` : ""}`;
 }
 function ContextPage(props) {
   const { agents } = props;
@@ -43756,9 +49552,19 @@ function MainAgentPage(props) {
       }, undefined, false, undefined, this)
     },
     {
+      id: "stages",
+      title: "Stages",
+      changed: MAIN_STAGES.filter((s3) => m2.stages[s3] !== d3.stages[s3]).length,
+      body: /* @__PURE__ */ u3(StagesRows, {
+        agents,
+        busy,
+        set
+      }, undefined, false, undefined, this)
+    },
+    {
       id: "review",
       title: "Final review",
-      changed: (r3.on !== dr.on ? 1 : 0) + (r3.onFail !== dr.onFail ? 1 : 0) + (props.timeouts.finalReviewMs !== FINAL_REVIEW_MS ? 1 : 0) + ownChanged(r3.budget, dr.budget),
+      changed: (r3.on !== dr.on ? 1 : 0) + (r3.onFail !== dr.onFail ? 1 : 0) + (r3.scope !== dr.scope ? 1 : 0) + (props.timeouts.finalReviewMs !== FINAL_REVIEW_MS ? 1 : 0) + ownChanged(r3.budget, dr.budget),
       body: /* @__PURE__ */ u3("div", {
         class: "lre-set-rows",
         "data-lre-main-setting": "final-review",
@@ -43776,6 +49582,21 @@ function MainAgentPage(props) {
               checked: r3.on,
               disabled: busy,
               onChange: (on) => setReview({ on })
+            }, undefined, false, undefined, this)
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3(SettingRow, {
+            id: "review-scope",
+            label: "What it is sent",
+            changed: r3.scope !== dr.scope,
+            help: r3.scope === "changed" ? `Only the parts of the narrator's prompt that changed since the last turn's review; on the rest, that review's edits are made again, and when nothing changed no review is sent.${agents.persist.on ? "" : " It takes effect while Smart persistence is on (Settings → Agents → Pipeline); until then every part is sent."}` : "Every part of the narrator's prompt, every turn.",
+            reset: { label: `Reset what the final review is sent to its default, ${FINAL_REVIEW_SCOPE_LABELS[dr.scope]}`, to: FINAL_REVIEW_SCOPE_LABELS[dr.scope], onClick: () => setReview({ scope: null }) },
+            busy,
+            children: /* @__PURE__ */ u3(Seg, {
+              label: "What the final review is sent",
+              value: r3.scope,
+              options: FINAL_REVIEW_SCOPES.map((value) => ({ value, label: FINAL_REVIEW_SCOPE_LABELS[value] })),
+              disabled: busy,
+              onChange: (scope) => setReview({ scope })
             }, undefined, false, undefined, this)
           }, undefined, false, undefined, this),
           /* @__PURE__ */ u3(SettingRow, {
@@ -43866,12 +49687,51 @@ function MainAgentPage(props) {
     reset: () => props.patch(mainResetPatch())
   }, undefined, false, undefined, this);
 }
+function StagesRows(props) {
+  const { agents, busy } = props;
+  const stages = agents.main.stages;
+  const standard = DEFAULTS5.main.stages;
+  const deciding = agents.pipeline.mode === "main";
+  const auto = MAIN_STAGES.filter((s3) => stages[s3] === "auto").length;
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-set-rows",
+    "data-lre-main-setting": "stages",
+    children: [
+      /* @__PURE__ */ u3("p", {
+        class: "lre-set-note",
+        children: [
+          deciding ? `The main agent decides ${MAIN_STAGES.length - auto === MAIN_STAGES.length ? "every stage" : `${MAIN_STAGES.length - auto} of ${MAIN_STAGES.length} stages`}.` : "These take effect while a main agent decides the turn (Settings → Agents → Pipeline).",
+          " A stage on its own makes no message to the main agent: its roles run as the fixed pipeline runs them, each by its own When it fails, and the main agent's next message lists what ran and what each answered. With stage 3 on its own, the minds start as the turn starts."
+        ]
+      }, undefined, true, undefined, this),
+      MAIN_STAGES.map((stage) => {
+        const words3 = STAGE_WORDS[stage];
+        const roles = stageRoles(stage).map((r3) => ROLE_LABEL[r3]).join(", ");
+        return /* @__PURE__ */ u3(SettingRow, {
+          id: `stage-${stage}`,
+          label: words3.label,
+          changed: stages[stage] !== standard[stage],
+          help: `${words3.holds}. Roles: ${roles}.`,
+          reset: { label: `Reset ${words3.label.toLowerCase()} to its default, ${STAGE_MODE_LABELS[standard[stage]]}`, to: STAGE_MODE_LABELS[standard[stage]], onClick: () => props.set({ stages: { [stage]: null } }) },
+          busy,
+          children: /* @__PURE__ */ u3(Seg, {
+            label: `${words3.label}: how it runs`,
+            value: stages[stage],
+            options: STAGE_MODES.map((value) => ({ value, label: STAGE_MODE_LABELS[value] })),
+            disabled: busy,
+            onChange: (mode) => props.set({ stages: { [stage]: mode } })
+          }, undefined, false, undefined, this)
+        }, stage, false, undefined, this);
+      })
+    ]
+  }, undefined, true, undefined, this);
+}
 
 // src/frontend/settings/roles.tsx
 var DEFAULTS6 = defaultAgentSettings();
 function rolesSummary(agents) {
-  const own = rolesChanged(agents);
-  return own === 0 ? `${ROLE_IDS.length} roles, each on its defaults` : `${ROLE_IDS.length} roles · ${own} changed`;
+  const own2 = rolesChanged(agents);
+  return own2 === 0 ? `${ROLE_IDS.length} roles, each on its defaults` : `${ROLE_IDS.length} roles · ${own2} changed`;
 }
 function routesLine(routes, connections) {
   const places2 = [...new Set(routes.map((r3) => routeText(r3, connections)))];
@@ -43934,45 +49794,6 @@ function RolesPage(props) {
   }, undefined, true, undefined, this);
 }
 
-// src/shared/stores.ts
-var PATH_SEGMENT = /^[\p{L}\p{N}._-]+(?: [\p{L}\p{N}._-]+)*$/u;
-function isWorkspacePath(v6) {
-  if (!safeKey(v6))
-    return false;
-  return v6.split("/").every((name) => name !== "." && name !== ".." && PATH_SEGMENT.test(name));
-}
-var GLOBAL_PREFIX = "~/";
-function isGlobalPath(v6) {
-  return typeof v6 === "string" && v6.startsWith(GLOBAL_PREFIX) && isWorkspacePath(v6.slice(GLOBAL_PREFIX.length));
-}
-function isFilePath(v6) {
-  return isWorkspacePath(v6) || isGlobalPath(v6);
-}
-function levelPath(path2) {
-  return path2.startsWith(GLOBAL_PREFIX) ? path2.slice(GLOBAL_PREFIX.length) : path2;
-}
-var AGENTS_PATH = "AGENTS.md";
-var ROLES_DIR = "roles/";
-function isSystemPath(path2) {
-  const at2 = levelPath(path2);
-  return at2 === AGENTS_PATH || at2.startsWith(ROLES_DIR) && at2.endsWith(".md") && !at2.slice(ROLES_DIR.length).includes("/");
-}
-var LEARNED_DIR = "learned/";
-function isLearnedPath(path2) {
-  return path2.startsWith(LEARNED_DIR);
-}
-function isKeptPath(path2) {
-  return isLearnedPath(path2) || isGlobalPath(path2);
-}
-var PINS_PATH = ".pins.json";
-var TRANSCRIPTS_DIR = "transcripts/";
-function isTranscriptPath(path2) {
-  return path2.startsWith(TRANSCRIPTS_DIR);
-}
-var RETENTION_DEFAULTS = Object.freeze({ transcriptDays: 30, unreferencedDays: 7, sweepHours: 24, turnTranscripts: "none", turnTranscriptDays: "none" });
-var DAY_MS2 = 24 * 60 * 60 * 1000;
-var HOUR_MS = 60 * 60 * 1000;
-
 // src/frontend/settings/retention.tsx
 var TRANSCRIPT_ROWS = [
   {
@@ -44021,8 +49842,8 @@ var ROWS = [
     none: { word: "Never", means: "nothing is removed" }
   }
 ];
-function count3(n5, unit) {
-  return `${n5} ${unit}${n5 === 1 ? "" : "s"}`;
+function count3(n5, unit2) {
+  return `${n5} ${unit2}${n5 === 1 ? "" : "s"}`;
 }
 function retentionSummary(r3) {
   const kept2 = [r3.turnTranscripts === "none" ? null : `latest ${count3(r3.turnTranscripts, "turn")}`, r3.turnTranscriptDays === "none" ? null : count3(r3.turnTranscriptDays, "day")].filter((part) => part !== null);
@@ -44653,7 +50474,7 @@ function promptIndex(prompts) {
 }
 var PAGE_BY_ID = new Map(PROMPT_PAGES.map((p3) => [p3.id, p3]));
 var HAYS = new Map(PROMPTS.map((d3) => [d3.id, { id: d3.id.toLowerCase(), label: d3.label.toLowerCase(), where: `${d3.group ?? ""} · ${PAGE_BY_ID.get(d3.page)?.label ?? ""}`.toLowerCase(), note: d3.note.toLowerCase(), words: d3.text.toLowerCase() }]));
-function termScore(hay, own, term) {
+function termScore(hay, own2, term) {
   if (hay.id === term)
     return 1000;
   if (hay.label === term)
@@ -44668,22 +50489,22 @@ function termScore(hay, own, term) {
     return 40;
   if (hay.note.includes(term))
     return 20;
-  return hay.words.includes(term) || own !== undefined && own.includes(term) ? 10 : 0;
+  return hay.words.includes(term) || own2 !== undefined && own2.includes(term) ? 10 : 0;
 }
 function findTexts(query, filter, prompts) {
   const terms = query.toLowerCase().split(/\s+/).filter((t3) => t3 !== "");
   const phrase = terms.join(" ");
   const found = [];
   for (const [at2, def2] of PROMPTS.entries()) {
-    const own = hasOwn(prompts.texts, def2.id) ? prompts.texts[def2.id] : undefined;
-    if (filter === "yours" && own === undefined)
+    const own2 = hasOwn(prompts.texts, def2.id) ? prompts.texts[def2.id] : undefined;
+    if (filter === "yours" && own2 === undefined)
       continue;
     if (filter === "fix" && savedProblems(def2, prompts).length === 0)
       continue;
     const hay = HAYS.get(def2.id);
     if (!hay)
       continue;
-    const ownWords = own?.toLowerCase();
+    const ownWords = own2?.toLowerCase();
     let score = 0;
     for (const term of terms) {
       const s3 = termScore(hay, ownWords, term);
@@ -44867,7 +50688,7 @@ function foundView(found, props) {
 function pageView(page7, props) {
   const groups = promptGroups(page7);
   const count4 = groups.reduce((n5, g2) => n5 + g2.defs.length, 0);
-  const own = groups.reduce((n5, g2) => n5 + g2.defs.filter((d3) => hasOwn(props.prompts.texts, d3.id)).length, 0);
+  const own2 = groups.reduce((n5, g2) => n5 + g2.defs.filter((d3) => hasOwn(props.prompts.texts, d3.id)).length, 0);
   return /* @__PURE__ */ u3(M, {
     children: [
       /* @__PURE__ */ u3("div", {
@@ -44891,7 +50712,7 @@ function pageView(page7, props) {
           }, undefined, false, undefined, this),
           /* @__PURE__ */ u3("p", {
             class: "lre-minds-note",
-            children: `${textsWord(count4)}${own > 0 ? `, ${own.toLocaleString()} your own` : ""}. ${page7.note}`
+            children: `${textsWord(count4)}${own2 > 0 ? `, ${own2.toLocaleString()} your own` : ""}. ${page7.note}`
           }, undefined, false, undefined, this)
         ]
       }, undefined, true, undefined, this),
@@ -44945,7 +50766,7 @@ function indexView(props) {
   }, undefined, true, undefined, this);
 }
 function PromptsView(props) {
-  const own = ownTextCount(props.prompts);
+  const own2 = ownTextCount(props.prompts);
   const fix = fixCount(props.prompts);
   const searching = props.query.trim() !== "" || props.filter !== "all";
   const found = searching ? findTexts(props.query, props.filter, props.prompts) : [];
@@ -44978,9 +50799,9 @@ function PromptsView(props) {
           }, undefined, false, undefined, this),
           /* @__PURE__ */ u3(Chip, {
             pressed: props.filter === "yours",
-            disabled: own === 0 && props.filter !== "yours",
+            disabled: own2 === 0 && props.filter !== "yours",
             onToggle: () => pick("yours"),
-            children: `Yours (${own.toLocaleString()})`
+            children: `Yours (${own2.toLocaleString()})`
           }, undefined, false, undefined, this),
           /* @__PURE__ */ u3(Chip, {
             pressed: props.filter === "fix",
@@ -45159,24 +50980,24 @@ var STATIC_CAVEATS = [
   "Undo covers the latest reply; earlier changes go through Keep or Discard."
 ];
 function subOf(route) {
-  const sub = route.sub;
-  if (sub === undefined)
+  const sub2 = route.sub;
+  if (sub2 === undefined)
     return null;
   if (route.page === "agents")
-    return AGENTS_SUBS.includes(sub) ? { agents: sub } : null;
+    return AGENTS_SUBS.includes(sub2) ? { agents: sub2 } : null;
   if (route.page === "roles" || route.page === "context")
-    return ROLE_IDS.includes(sub) ? { role: sub } : null;
+    return ROLE_IDS.includes(sub2) ? { role: sub2 } : null;
   return null;
 }
 function settingsHeader(route) {
   if (route.page === "home")
     return null;
-  const sub = subOf(route);
-  if (sub === null)
+  const sub2 = subOf(route);
+  if (sub2 === null)
     return { ...PAGE2[route.page], backLabel: "Settings" };
-  if ("agents" in sub)
-    return { title: AGENTS_SUB[sub.agents].title, subtitle: AGENTS_SUB[sub.agents].subtitle, backLabel: PAGE2[route.page].title };
-  return { title: ROLE_LABEL[sub.role], subtitle: ROLE_PLAIN[sub.role], backLabel: PAGE2[route.page].title };
+  if ("agents" in sub2)
+    return { title: AGENTS_SUB[sub2.agents].title, subtitle: AGENTS_SUB[sub2.agents].subtitle, backLabel: PAGE2[route.page].title };
+  return { title: ROLE_LABEL[sub2.role], subtitle: ROLE_PLAIN[sub2.role], backLabel: PAGE2[route.page].title };
 }
 function settingsKeyDown(event, back) {
   if (event.key !== "Escape" || event.defaultPrevented)
@@ -45248,8 +51069,8 @@ function summaryOf(page7, data, caveats, showIds, connections) {
     case "mcp":
       return { subtitle: "The setup that follows LumiRPEngine, and each server's state" };
     case "prompts": {
-      const own = ownTextCount(settings.prompts);
-      return { subtitle: own === 0 ? "Every text as shipped" : `${own} ${own === 1 ? "text" : "texts"} of your own` };
+      const own2 = ownTextCount(settings.prompts);
+      return { subtitle: own2 === 0 ? "Every text as shipped" : `${own2} ${own2 === 1 ? "text" : "texts"} of your own` };
     }
     case "retention":
       return { subtitle: retentionSummary(settings.retention) };
@@ -45367,19 +51188,19 @@ function SettingsBody(props) {
   const { settings } = data;
   const { busy, patch, go: go2, connections } = ctx;
   const routes = { modelUse: settings.modelUse, helper: settings.helper };
-  const sub = subOf(route);
-  if (sub !== null && "agents" in sub)
+  const sub2 = subOf(route);
+  if (sub2 !== null && "agents" in sub2)
     return /* @__PURE__ */ u3(AgentsSubPage, {
-      sub: sub.agents,
+      sub: sub2.agents,
       agents: settings.agents,
       connections,
       busy,
       patch,
       go: go2
     }, undefined, false, undefined, this);
-  if (sub !== null)
+  if (sub2 !== null)
     return /* @__PURE__ */ u3(RolePage, {
-      id: sub.role,
+      id: sub2.role,
       agents: settings.agents,
       routes,
       prompts: settings.prompts,
@@ -47038,11 +52859,11 @@ function TimelapsePanel(props) {
   const read = edit && isRecord(edit.params.target) && typeof edit.params.target.type === "string" ? edit.params.target : null;
   const [target, setTarget] = d2(read);
   const [custom, setCustom] = d2("");
-  const [unit, setUnit] = d2("h");
+  const [unit2, setUnit] = d2("h");
   const [overrides, setOverrides] = d2({});
   const [follow, setFollow] = d2(typeof edit?.params.followRoutine === "boolean" ? edit.params.followRoutine : timelapse.followRoutine);
   const [busy, run] = useBusy();
-  const customMinutes = /^\d+(\.\d+)?$/.test(custom.trim()) ? Number(custom) * UNIT_MINUTES2[unit] : null;
+  const customMinutes = /^\d+(\.\d+)?$/.test(custom.trim()) ? Number(custom) * UNIT_MINUTES2[unit2] : null;
   const chosen = customMinutes !== null && customMinutes > 0 ? { type: "duration", minutes: customMinutes } : target;
   const sameTarget = (a3, b3) => a3 !== null && JSON.stringify(a3) === JSON.stringify(b3);
   const changed = Object.entries(overrides).filter(([cls, policy]) => timelapse.interrupts[cls] !== policy).length;
@@ -47097,7 +52918,7 @@ function TimelapsePanel(props) {
                   }, undefined, false, undefined, this),
                   /* @__PURE__ */ u3(Seg, {
                     label: "Unit",
-                    value: unit,
+                    value: unit2,
                     options: [
                       { value: "min", label: "min" },
                       { value: "h", label: "hours" },
@@ -48094,24 +53915,6 @@ function NeedsPanel(props) {
   }, undefined, true, undefined, this);
 }
 
-// src/shared/org-motions.ts
-var DECISIONS_SECTION = "orgs.decisions";
-var DECISIONS_TAB = "orgs.decisions";
-var VOTES = ["for", "against", "abstain"];
-var VOTE_HOWS = ["own", "rule", "story", "gm"];
-var VOTE_BASES = ["shares", "members"];
-var STANDING_VOTES = ["for", "against", "abstain", "with"];
-var MOTION_STATUSES = ["open", "passed", "failed", "withdrawn"];
-var DECISION_DEFAULTS = Object.freeze({ quorum: 50, pass: 50, days: 7, approvalDays: 7 });
-var DECISION_RANGES = Object.freeze({ quorum: [0, 100], pass: [0, 99.9], days: [1, 365] });
-var DECISION_FIELDS = Object.freeze({ basis: "vote_by", quorum: "quorum_pct", pass: "pass_pct", days: "motion_days", standing: "vote_rules", approvalDays: "approval_days" });
-function pctWords(pct) {
-  const r3 = Math.round(pct * 10) / 10;
-  return `${Number.isInteger(r3) ? r3.toFixed(0) : r3.toFixed(1)}%`;
-}
-var DECISION_ACTIONS = { vote: "org_vote", end: "org_motion_end", approve: "org_approve", deny: "org_deny", rules: "org_decisions", standing: "org_vote_rule" };
-var DECISION_EFFECTS = { propose: "orgs.propose", vote: "orgs.vote", end: "orgs.motion_end", answer: "orgs.answer", rules: "orgs.decisions", standing: "orgs.vote_rule" };
-
 // src/shared/org-view.ts
 var ORGS_LIST_PANEL = "orgs.list";
 var ORGS_ORG_PANEL = "orgs.org";
@@ -48492,10 +54295,10 @@ function Timeline(props) {
       /* @__PURE__ */ u3(List, {
         children: props.slots.map((s3, i3) => {
           const kind = SLOT_LABEL[s3.kind];
-          const sub = why2 && s3.reasons.length > 0 ? s3.reasons.join(", ") : s3.label.toLowerCase() === kind.toLowerCase() ? undefined : kind;
+          const sub2 = why2 && s3.reasons.length > 0 ? s3.reasons.join(", ") : s3.label.toLowerCase() === kind.toLowerCase() ? undefined : kind;
           return /* @__PURE__ */ u3(ListRow, {
             title: s3.label,
-            subtitle: sub,
+            subtitle: sub2,
             value: `${s3.start}–${s3.end}`,
             valueTone: "muted"
           }, i3, false, undefined, this);
@@ -48612,24 +54415,24 @@ function PersonSheet2(props) {
   const view = decodeCastView(props.state.panels["castlife.cast"]);
   const person3 = view?.people.find((p3) => p3.id === props.id);
   if (!view || !person3) {
-    const present = props.state.scene?.present.find((p3) => p3.id === props.id);
+    const present2 = props.state.scene?.present.find((p3) => p3.id === props.id);
     return /* @__PURE__ */ u3("div", {
       class: "lre-stack lre-world",
       children: [
         /* @__PURE__ */ u3(PageHeader, {
-          title: present?.name ?? "Person",
-          subtitle: present?.label || undefined,
+          title: present2?.name ?? "Person",
+          subtitle: present2?.label || undefined,
           onBack: props.close
         }, undefined, false, undefined, this),
-        present?.life ? /* @__PURE__ */ u3("div", {
+        present2?.life ? /* @__PURE__ */ u3("div", {
           children: /* @__PURE__ */ u3(Badge, {
             tone: "neg",
-            children: present.life
+            children: present2.life
           }, undefined, false, undefined, this)
         }, undefined, false, undefined, this) : null,
         /* @__PURE__ */ u3(Empty, {
           icon: "user",
-          children: present ? "You don't know much about them yet." : "They aren't among the people you know any more."
+          children: present2 ? "You don't know much about them yet." : "They aren't among the people you know any more."
         }, undefined, false, undefined, this)
       ]
     }, undefined, true, undefined, this);
@@ -49761,27 +55564,6 @@ function FollowPage(props) {
     ]
   }, undefined, true, undefined, this);
 }
-function useChatWorld(send) {
-  const view = useView();
-  const worldId = view?.worldId ?? null;
-  const revision = view?.revision ?? null;
-  const [doc, setDoc] = d2(null);
-  A(() => {
-    if (worldId === null)
-      return;
-    let live = true;
-    send({ type: "lre.world", op: "get", worldId, ...revision ? { revision } : {} }).then((m2) => {
-      if (!live || m2.type !== "lre.result" || m2.request !== "lre.world" || !m2.body.world)
-        return;
-      const world = m2.body.world;
-      setDoc({ ...world, kinds: { ...m2.body.packKinds, ...world.kinds } });
-    });
-    return () => {
-      live = false;
-    };
-  }, [worldId, revision]);
-  return doc;
-}
 function SourceRow(props) {
   const app = useApp();
   const worldId = useView()?.worldId ?? null;
@@ -49945,8 +55727,8 @@ function SchedulePage(props) {
   const [how, setHow] = d2(s3.chat && "off" in s3.chat ? "off" : "own");
   const [draft, setDraft] = d2(() => scheduleDraft(s3, view.entity));
   const [hours, setHours] = d2(s3.chat && "off" in s3.chat && s3.chat.until !== null ? Math.max(1, Math.round((s3.chat.until - now) / 60)) : null);
-  const own = scheduleOwnOp(view.entity, s3.schedule, draft.slots, draft.recurrence, s3.recurrence);
-  const op = how === "own" ? "op" in own ? own.op : null : scheduleOffOp(view.entity, s3.schedule, hours === null ? null : now + hours * 60);
+  const own2 = scheduleOwnOp(view.entity, s3.schedule, draft.slots, draft.recurrence, s3.recurrence);
+  const op = how === "own" ? "op" in own2 ? own2.op : null : scheduleOffOp(view.entity, s3.schedule, hours === null ? null : now + hours * 60);
   const over = scheduleRows(view).find((r3) => r3.schedule.schedule === s3.schedule)?.over ?? [];
   return /* @__PURE__ */ u3(ChangePage, {
     name: "routine-schedule",
@@ -50063,7 +55845,7 @@ function SchedulePage(props) {
           /* @__PURE__ */ u3(Submit, {
             busy: ctx.busy || how === "own" && doc === null,
             ready: op !== null,
-            problems: how === "own" && "problems" in own ? own.problems : undefined,
+            problems: how === "own" && "problems" in own2 ? own2.problems : undefined,
             children: "Save for this chat"
           }, undefined, false, undefined, this)
         ]
@@ -50098,1533 +55880,6 @@ var castlife = {
   }
 };
 var ui_default3 = castlife;
-
-// src/engine/pack-kit.ts
-function numOf(v6, fallback = 0) {
-  return typeof v6 === "number" && Number.isFinite(v6) ? v6 : fallback;
-}
-function strOf(v6, fallback = "") {
-  return typeof v6 === "string" ? v6 : fallback;
-}
-function objOf(v6) {
-  return isRecord(v6) ? v6 : {};
-}
-function bandOfJson(v6) {
-  if (!isRecord(v6))
-    return null;
-  const o4 = v6;
-  return typeof o4.min === "number" && typeof o4.typical === "number" && typeof o4.max === "number" ? { min: o4.min, typical: o4.typical, max: o4.max } : null;
-}
-function own(map, key) {
-  return hasOwn(map, key) ? map[key] : undefined;
-}
-function sliceOf(state, pack) {
-  return state.packs[pack] ?? {};
-}
-function mutableSlice(state, pack) {
-  const s3 = state.packs[pack] ?? {};
-  state.packs[pack] = s3;
-  return s3;
-}
-function sliceRecord(state, pack, key) {
-  const s3 = mutableSlice(state, pack);
-  const v6 = s3[key];
-  if (isRecord(v6))
-    return v6;
-  const fresh = {};
-  s3[key] = fresh;
-  return fresh;
-}
-
-// src/engine/calendar.ts
-var MINUTES_PER_DAY = 1440;
-var DEFAULT_DAY_PARTS = [
-  { id: "night", label: "Night", start: "00:00" },
-  { id: "morning", label: "Morning", start: "06:00" },
-  { id: "afternoon", label: "Afternoon", start: "12:00" },
-  { id: "evening", label: "Evening", start: "18:00" }
-];
-var GREGORIAN_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-var GREGORIAN_WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-var GREGORIAN_MONTHS_FULL = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
-var GREGORIAN_WEEKDAYS_FULL = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
-var HHMM2 = /^(\d{1,2}):(\d{2})$/;
-var ISO_LOCAL = /^(-?\d{1,6})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/;
-function floorDiv(a3, b3) {
-  return Math.floor(a3 / b3);
-}
-function mod(a3, b3) {
-  return (a3 % b3 + b3) % b3;
-}
-function parseHHMM(text) {
-  const m2 = HHMM2.exec(text.trim());
-  if (!m2)
-    throw new RangeError(`expected HH:MM, got ${text}`);
-  const h3 = Number(m2[1]);
-  const min = Number(m2[2]);
-  if (h3 > 24 || min > 59 || h3 === 24 && min !== 0)
-    throw new RangeError(`bad time ${text}`);
-  return h3 * 60 + min;
-}
-function formatTimeOfDay(minuteOfDay) {
-  const m2 = mod(minuteOfDay, MINUTES_PER_DAY);
-  const h3 = Math.floor(m2 / 60);
-  return `${h3 % 12 === 0 ? 12 : h3 % 12}:${String(m2 % 60).padStart(2, "0")} ${h3 < 12 ? "AM" : "PM"}`;
-}
-function daysFromCivil(y3, m2, d3) {
-  const yy = m2 <= 2 ? y3 - 1 : y3;
-  const era = floorDiv(yy, 400);
-  const yoe = yy - era * 400;
-  const doy = floorDiv(153 * (m2 + (m2 > 2 ? -3 : 9)) + 2, 5) + d3 - 1;
-  const doe = yoe * 365 + floorDiv(yoe, 4) - floorDiv(yoe, 100) + doy;
-  return era * 146097 + doe - 719468;
-}
-function civilFromDays(z0) {
-  const z3 = z0 + 719468;
-  const era = floorDiv(z3, 146097);
-  const doe = z3 - era * 146097;
-  const yoe = floorDiv(doe - floorDiv(doe, 1460) + floorDiv(doe, 36524) - floorDiv(doe, 146096), 365);
-  const y3 = yoe + era * 400;
-  const doy = doe - (365 * yoe + floorDiv(yoe, 4) - floorDiv(yoe, 100));
-  const mp = floorDiv(5 * doy + 2, 153);
-  const d3 = doy - floorDiv(153 * mp + 2, 5) + 1;
-  const m2 = mp < 10 ? mp + 3 : mp - 9;
-  return { year: m2 <= 2 ? y3 + 1 : y3, month: m2, day: d3 };
-}
-function gregorianMonthLength(year, month) {
-  return daysFromCivil(month === 12 ? year + 1 : year, month === 12 ? 1 : month + 1, 1) - daysFromCivil(year, month, 1);
-}
-var GREGORIAN = {
-  abs: daysFromCivil,
-  date: civilFromDays,
-  weekday: (abs) => mod(abs + 4, 7),
-  monthLength: gregorianMonthLength,
-  months: 12,
-  monthNames: GREGORIAN_MONTHS,
-  weekdayNames: GREGORIAN_WEEKDAYS,
-  fullMonthNames: GREGORIAN_MONTHS_FULL,
-  fullWeekdayNames: GREGORIAN_WEEKDAYS_FULL
-};
-function customSystem(def2) {
-  const lengths = def2.monthLengths.length > 0 ? def2.monthLengths.map((n5) => Math.max(1, Math.floor(n5))) : [30];
-  const yearLength = lengths.reduce((a3, b3) => a3 + b3, 0);
-  const months = def2.monthNames.length >= lengths.length ? def2.monthNames : lengths.map((_3, i3) => `M${i3 + 1}`);
-  const weekdays = def2.weekdayNames.length > 0 ? def2.weekdayNames : ["Day"];
-  return {
-    abs(year, month, day) {
-      let doy = day - 1;
-      for (let i3 = 0;i3 < month - 1 && i3 < lengths.length; i3++)
-        doy += lengths[i3] ?? 0;
-      return year * yearLength + doy;
-    },
-    date(abs) {
-      const year = floorDiv(abs, yearLength);
-      let doy = abs - year * yearLength;
-      let month = 1;
-      for (const len of lengths) {
-        if (doy < len)
-          break;
-        doy -= len;
-        month++;
-      }
-      return { year, month, day: doy + 1 };
-    },
-    weekday: (abs) => mod(abs, weekdays.length),
-    monthLength: (_year, month) => lengths[month - 1] ?? 0,
-    months: lengths.length,
-    monthNames: months,
-    weekdayNames: weekdays,
-    fullMonthNames: months,
-    fullWeekdayNames: weekdays
-  };
-}
-var cache = new WeakMap;
-function calendarOf(world) {
-  const def2 = world.calendar;
-  const hit = cache.get(def2);
-  if (hit)
-    return hit;
-  const system = def2.system === "custom" && def2.custom ? customSystem(def2.custom) : GREGORIAN;
-  const m2 = ISO_LOCAL.exec(def2.epoch);
-  if (!m2)
-    throw new RangeError(`calendar epoch must be YYYY-MM-DDTHH:MM, got ${def2.epoch}`);
-  const parts = [...def2.dayParts.length > 0 ? def2.dayParts : DEFAULT_DAY_PARTS].sort((a3, b3) => parseHHMM(a3.start) - parseHHMM(b3.start));
-  const cal = {
-    def: def2,
-    system,
-    epochAbs: system.abs(Number(m2[1]), Number(m2[2]), Number(m2[3])),
-    epochMinute: Number(m2[4]) * 60 + Number(m2[5]),
-    dayParts: parts,
-    partStarts: parts.map((p3) => parseHHMM(p3.start))
-  };
-  cache.set(def2, cal);
-  return cal;
-}
-function dateAt(cal, clock) {
-  const local = cal.epochMinute + Math.floor(clock);
-  const dayIndex = floorDiv(local, MINUTES_PER_DAY);
-  const abs = cal.epochAbs + dayIndex;
-  const d3 = cal.system.date(abs);
-  return { ...d3, weekday: cal.system.weekday(abs), dayIndex, minuteOfDay: local - dayIndex * MINUTES_PER_DAY };
-}
-var NUMBER_WORDS = { a: 1, an: 1, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12 };
-var SPAN_MINUTES = { minute: 1, min: 1, hour: 60, hr: 60, day: MINUTES_PER_DAY, week: 7 * MINUTES_PER_DAY };
-var SPAN = new RegExp(`\\s(\\d+|${Object.keys(NUMBER_WORDS).join("|")})\\s+(minute|min|hour|hr|day|week)s?(?=\\s)`);
-function monthName(cal, month) {
-  return cal.system.monthNames[month - 1] ?? `M${month}`;
-}
-function weekdayName(cal, weekday) {
-  return cal.system.weekdayNames[weekday] ?? `D${weekday}`;
-}
-function formatClock(cal, clock, offsetMinutes = 0) {
-  const d3 = dateAt(cal, clock + offsetMinutes);
-  return `${weekdayName(cal, d3.weekday)} ${d3.day} ${monthName(cal, d3.month)} ${d3.year}, ${formatTimeOfDay(d3.minuteOfDay)}`;
-}
-var ZONES = {
-  UTC: { standard: 0, dst: null },
-  "Etc/UTC": { standard: 0, dst: null },
-  "America/New_York": { standard: -300, dst: "us" },
-  "America/Detroit": { standard: -300, dst: "us" },
-  "America/Indiana/Indianapolis": { standard: -300, dst: "us" },
-  "America/Kentucky/Louisville": { standard: -300, dst: "us" },
-  "America/Chicago": { standard: -360, dst: "us" },
-  "America/Menominee": { standard: -360, dst: "us" },
-  "America/Denver": { standard: -420, dst: "us" },
-  "America/Boise": { standard: -420, dst: "us" },
-  "America/Phoenix": { standard: -420, dst: null },
-  "America/Los_Angeles": { standard: -480, dst: "us" },
-  "America/Anchorage": { standard: -540, dst: "us" },
-  "America/Juneau": { standard: -540, dst: "us" },
-  "America/Adak": { standard: -600, dst: "us" },
-  "Pacific/Honolulu": { standard: -600, dst: null },
-  "America/Puerto_Rico": { standard: -240, dst: null },
-  "Europe/London": { standard: 0, dst: "eu" },
-  "Europe/Dublin": { standard: 0, dst: "eu" },
-  "Europe/Paris": { standard: 60, dst: "eu" },
-  "Europe/Berlin": { standard: 60, dst: "eu" },
-  "Europe/Madrid": { standard: 60, dst: "eu" },
-  "Europe/Rome": { standard: 60, dst: "eu" },
-  "Europe/Athens": { standard: 120, dst: "eu" },
-  "Asia/Tokyo": { standard: 540, dst: null },
-  "Asia/Shanghai": { standard: 480, dst: null },
-  "Asia/Kolkata": { standard: 330, dst: null },
-  "Australia/Sydney": { standard: 600, dst: "south" }
-};
-function knownZone(zone) {
-  return Object.prototype.hasOwnProperty.call(ZONES, zone);
-}
-function zoneOffset(zone, year, month, day, minuteOfDay) {
-  const rule = own(ZONES, zone);
-  if (!rule)
-    return 0;
-  if (!rule.dst)
-    return rule.standard;
-  const abs = daysFromCivil(year, month, day);
-  const nthSunday = (m2, n5) => {
-    const first = daysFromCivil(year, m2, 1);
-    return first + mod(-mod(first + 4, 7), 7) + (n5 - 1) * 7;
-  };
-  const lastSunday = (m2) => {
-    const last = daysFromCivil(year, m2, gregorianMonthLength(year, m2));
-    return last - mod(last + 4, 7);
-  };
-  const at2 = (d3, minute) => abs > d3 || abs === d3 && minuteOfDay >= minute;
-  let summer;
-  if (rule.dst === "us")
-    summer = at2(nthSunday(3, 2), 120) && !at2(nthSunday(11, 1), 120);
-  else if (rule.dst === "eu")
-    summer = at2(lastSunday(3), 60 + rule.standard) && !at2(lastSunday(10), 60 + rule.standard);
-  else
-    summer = !(at2(nthSunday(4, 1), 180) && !at2(nthSunday(10, 1), 120));
-  return rule.standard + (summer ? 60 : 0);
-}
-function placeZone(world, placeId) {
-  let id = placeId ?? undefined;
-  for (let guard = 0;id && guard < 32; guard++) {
-    const place2 = own(world.places, id);
-    if (!place2)
-      break;
-    if (place2.timeZone)
-      return place2.timeZone;
-    id = place2.parent;
-  }
-  return world.calendar.timeZone;
-}
-function placeOffset(world, clock, placeId) {
-  const cal = calendarOf(world);
-  if (world.calendar.system !== "gregorian")
-    return 0;
-  const zone = placeZone(world, placeId);
-  if (zone === world.calendar.timeZone)
-    return 0;
-  const d3 = dateAt(cal, clock);
-  const home = zoneOffset(world.calendar.timeZone, d3.year, d3.month, d3.day, d3.minuteOfDay);
-  if (!knownZone(zone) || !knownZone(world.calendar.timeZone))
-    return 0;
-  return zoneOffset(zone, d3.year, d3.month, d3.day, d3.minuteOfDay) - home;
-}
-
-// src/engine/dice.ts
-var DICE_LIMITS = Object.freeze({
-  maxNotationLength: 128,
-  maxTerms: 16,
-  maxCount: 100,
-  minSides: 2,
-  maxSides: 1000,
-  maxFlat: 1e9,
-  maxExplodeExtra: 20,
-  maxExactWork: 20000000
-});
-var MAX_SAFE = BigInt(Number.MAX_SAFE_INTEGER);
-
-// src/engine/expr.ts
-var DEFAULT_LIMITS = Object.freeze({
-  maxSourceLength: 4096,
-  maxDepth: 64,
-  maxNodes: 2048,
-  maxSteps: 1e5
-});
-var PARSED = new Map;
-var MATH = {
-  min: (a3) => Math.min(...a3),
-  max: (a3) => Math.max(...a3),
-  clamp: ([v6, lo, hi]) => Math.min(hi, Math.max(lo, v6)),
-  floor: ([v6]) => Math.floor(v6),
-  ceil: ([v6]) => Math.ceil(v6),
-  round: ([v6]) => Math.round(v6),
-  abs: ([v6]) => Math.abs(v6)
-};
-var MATH_FUNCTIONS = Object.keys(MATH);
-
-// src/engine/scope.ts
-function kindParent(reg, world, kind) {
-  return own(world.kinds, kind)?.extends ?? reg.kinds.get(kind)?.extends;
-}
-function kindIs2(reg, world, kind, ancestor) {
-  let id = kind;
-  for (let guard = 0;id && guard < 32; guard++) {
-    if (id === ancestor)
-      return true;
-    id = kindParent(reg, world, id);
-  }
-  return false;
-}
-function placeOfEntity(state, id) {
-  let cur = id;
-  for (let guard = 0;cur && guard < 32; guard++) {
-    const e3 = own(state.entities, cur);
-    if (!e3)
-      return null;
-    const p3 = e3.fields.place;
-    if (typeof p3 === "string" && p3 !== "")
-      return p3;
-    cur = e3.relations.find((r3) => r3.type === "in")?.to;
-  }
-  return null;
-}
-var GONE_FIELD = "gone";
-function isGone(state, id) {
-  let cur = id;
-  for (let guard = 0;cur && guard < 32; guard++) {
-    const e3 = own(state.entities, cur);
-    if (!e3)
-      return false;
-    if (e3.fields[GONE_FIELD] === true)
-      return true;
-    cur = e3.relations.find((r3) => r3.type === "in")?.to;
-  }
-  return false;
-}
-
-// src/engine/seen.ts
-var PACK = "space";
-var SLICE = "seen";
-var PARTS3 = ["places", "people", "cells"];
-function writable(state, key) {
-  const seen = sliceRecord(state, PACK, SLICE);
-  const v6 = seen[key];
-  if (isRecord(v6))
-    return v6;
-  const fresh = {};
-  seen[key] = fresh;
-  return fresh;
-}
-function restoreObservations(state, data) {
-  for (const key of PARTS3) {
-    const diff = data[key];
-    if (!isRecord(diff))
-      continue;
-    const list2 = writable(state, key);
-    for (const [id, v6] of Object.entries(diff)) {
-      if (v6 === null)
-        delete list2[id];
-      else if (isRecord(v6))
-        list2[id] = structuredClone(v6);
-    }
-  }
-}
-
-// src/engine/selector.ts
-var COMPANY_KIND2 = "business";
-function stringsIn(v6) {
-  return Array.isArray(v6) ? v6.filter((x2) => typeof x2 === "string") : null;
-}
-function classProblems(world, value, who) {
-  if (value === undefined)
-    return [];
-  if (!isRecord(value))
-    return [{ code: "unknown_facet", message: `${who}'s classification isn't a facet → values map.` }];
-  const out = [];
-  for (const [facet, raw] of Object.entries(value)) {
-    const def2 = hasOwn(world.classifications, facet) ? world.classifications[facet] : undefined;
-    if (!def2) {
-      out.push({ code: "unknown_facet", message: `${who} is classed under "${facet}", which isn't one of the world's classifications.` });
-      continue;
-    }
-    const values = stringsIn(raw);
-    if (values === null || values.length !== (Array.isArray(raw) ? raw.length : -1)) {
-      out.push({ code: "unknown_class", message: `${who}'s ${def2.label} isn't a list of values.` });
-      continue;
-    }
-    for (const v6 of values)
-      if (!hasOwn(def2.values, v6))
-        out.push({ code: "unknown_class", message: `${who} is classed as "${v6}", which isn't a value of ${def2.label}.` });
-    if (!def2.multiple && values.length > 1)
-      out.push({ code: "single_class", message: `${who} holds ${values.length} ${def2.label} values; ${def2.label} takes one.` });
-  }
-  return out;
-}
-function classOf(value) {
-  if (!isRecord(value))
-    return null;
-  const out = {};
-  for (const [facet, raw] of Object.entries(value)) {
-    if (!safeKey(facet))
-      return null;
-    const values = typeof raw === "string" ? [raw] : stringsIn(raw);
-    if (values === null)
-      return null;
-    if (values.length > 0)
-      out[facet] = [...new Set(values)];
-  }
-  return out;
-}
-
-// src/engine/visibility.ts
-var HIDDEN_PLACE_NAME = "Somewhere";
-var SPELT = new Map;
-var PATTERNS = new Map;
-
-// src/engine/life.ts
-var PACK2 = "engine";
-var SLICE2 = "life";
-function lifeOf(state, id) {
-  return own(state.entities, id)?.life ?? ALIVE;
-}
-function entryOf(state, subject) {
-  const all = state.packs[PACK2]?.[SLICE2];
-  const entry = isRecord(all) ? own(all, subject) : undefined;
-  return isRecord(entry) && typeof entry.base === "string" && isRecord(entry.by) ? { base: entry.base, by: entry.by } : null;
-}
-function lifeKnownTo(state, subject, knower) {
-  const entry = knower === subject ? null : entryOf(state, subject);
-  if (!entry)
-    return lifeOf(state, subject);
-  const learned = own(entry.by, knower);
-  return typeof learned === "string" ? learned : entry.base;
-}
-function isPerson(reg, world, state, id) {
-  const e3 = own(state.entities, id);
-  return !!e3 && kindIs2(reg, world, e3.kind, "person") && !isGone(state, id);
-}
-function learners(state, subject, base) {
-  const slice = state.packs[PACK2] ?? {};
-  state.packs[PACK2] = slice;
-  const all = isRecord(slice[SLICE2]) ? slice[SLICE2] : {};
-  slice[SLICE2] = all;
-  const found = own(all, subject);
-  if (isRecord(found) && typeof found.base === "string" && isRecord(found.by))
-    return found.by;
-  const by = {};
-  all[subject] = { base, by };
-  return by;
-}
-function peopleAt(reg, world, state, place2) {
-  return Object.keys(state.entities).sort().filter((id) => placeOfEntity(state, id) === place2 && isPerson(reg, world, state, id));
-}
-function witnessesOf(reg, world, state, subject) {
-  const place2 = placeOfEntity(state, subject);
-  return place2 === null ? [] : peopleAt(reg, world, state, place2).filter((id) => id !== subject);
-}
-function applyLife(state, ctx, subject, to, witnesses) {
-  const e3 = own(state.entities, subject);
-  if (!e3)
-    return;
-  const by = learners(state, subject, lifeOf(state, subject));
-  const seen = witnesses ?? witnessesOf(ctx.registry, ctx.world, state, subject);
-  if (to === ALIVE)
-    delete e3.life;
-  else
-    e3.life = to;
-  for (const id of seen)
-    if (id !== subject && own(state.entities, id))
-      by[id] = to;
-}
-function tellLife(state, subject, who) {
-  const entry = entryOf(state, subject);
-  if (!entry)
-    return;
-  const truth = lifeOf(state, subject);
-  const by = learners(state, subject, entry.base);
-  for (const id of who)
-    if (id !== subject && own(state.entities, id))
-      by[id] = truth;
-}
-
-// src/engine/player-events.ts
-var POV_ONLY = new Set(["castlife.need", "economy.anchor"]);
-
-// src/engine/lore.ts
-var STOP_WORDS = Object.fromEntries("the and for with that this from into onto have has had was were are you your yours my mine our ours his her hers their theirs them they she him its not but all any can will would could should about then than there here what when where which who whom how why just very some more most other out over under again also like get got one two too off own same such only each both few nor yet".split(" ").map((w3) => [w3, true]));
-
-// src/engine/presence.ts
-var spreadOf = new WeakMap;
-
-// src/engine/time-limits.ts
-var TIME_LIMITS = Object.freeze({
-  tickMinutes: MINUTES_PER_DAY,
-  scale: [0.25, 10],
-  timelapseMinutes: TIMELAPSE_REACH_MINUTES,
-  unitCap: Object.freeze({ agentDays: 600, events: 5000 }),
-  thresholdMinutes: SPEED_THRESHOLD_MINUTES
-});
-
-// src/engine/world-state.ts
-var LOCAL_RE = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/;
-function minutesBetween(from, to) {
-  const a3 = LOCAL_RE.exec(from);
-  const b3 = LOCAL_RE.exec(to);
-  if (!a3 || !b3)
-    throw new RangeError(`expected YYYY-MM-DDTHH:MM, got ${!a3 ? from : to}`);
-  const ms = (m2) => Date.UTC(Number(m2[1]), Number(m2[2]) - 1, Number(m2[3]), Number(m2[4]), Number(m2[5]));
-  return Math.round((ms(b3) - ms(a3)) / 60000);
-}
-
-// src/engine/engine-pack.ts
-var LEVELS4 = [0, 1, 2, 3, 4];
-var ENGINE_PACK = "engine";
-var ENGINE_EVENTS = {
-  fired: "engine.fired",
-  signal: "engine.signal",
-  note: "engine.note",
-  beat: "engine.beat",
-  caught: "engine.caught",
-  cursor: "engine.cursor",
-  choice: "engine.choice",
-  attempt: "engine.attempt",
-  revealed: "engine.revealed",
-  hint: "engine.hint",
-  pause: "engine.pause",
-  check: "engine.check",
-  entity: "engine.entity",
-  classes: "engine.class",
-  observed: "engine.observed",
-  adjudged: "engine.adjudged",
-  life: "engine.life",
-  told: "engine.told",
-  rename: "engine.rename",
-  rewind: "engine.rewind"
-};
-function slice(state) {
-  const s3 = state.packs[ENGINE_PACK] ?? {};
-  state.packs[ENGINE_PACK] = s3;
-  return s3;
-}
-function sub(state, key) {
-  const s3 = slice(state);
-  const v6 = s3[key];
-  if (isRecord(v6))
-    return v6;
-  const fresh = {};
-  s3[key] = fresh;
-  return fresh;
-}
-function countStage(state, key, track3, stage, next) {
-  if (!safeKey(track3) || !safeKey(stage))
-    return;
-  const all = sub(state, key);
-  const row = isRecord(all[track3]) ? all[track3] : {};
-  const n5 = row[stage];
-  all[track3] = { ...row, [stage]: next(typeof n5 === "number" ? n5 : 0) };
-}
-function str2(e3, key) {
-  const v6 = e3.data[key];
-  return typeof v6 === "string" ? v6 : "";
-}
-function tagList(v6) {
-  if (!Array.isArray(v6))
-    return null;
-  const tags = v6.filter((t3) => typeof t3 === "string" && t3.trim() !== "");
-  return tags.length === v6.length ? tags : null;
-}
-function need(e3, ...keys) {
-  for (const k2 of keys)
-    if (typeof e3.data[k2] !== "string" || e3.data[k2] === "")
-      return { code: "bad_event", reason: `${e3.type} needs ${k2}` };
-  return null;
-}
-function signalOf(e3) {
-  if (e3.type !== ENGINE_EVENTS.signal || !e3.data)
-    return null;
-  const cls = e3.data.class;
-  if (typeof cls !== "string" || !INTERRUPT_CLASSES.includes(cls))
-    return null;
-  const vis = e3.data.visibility;
-  return {
-    class: cls,
-    text: typeof e3.data.text === "string" ? e3.data.text : "",
-    ...typeof e3.data.entity === "string" ? { entity: e3.data.entity } : {},
-    visibility: vis === undefined || vis === null || vis === "public" ? "public" : vis === "known_by" ? "known_by" : "secret",
-    ...e3.data.stops === false ? { stops: false } : {}
-  };
-}
-var noop = () => {
-  return;
-};
-var events = [
-  {
-    type: ENGINE_EVENTS.fired,
-    validate: (e3) => need(e3, "rule"),
-    apply: (e3, state) => {
-      const fired = sub(state, "fired");
-      const prev = fired[str2(e3, "rule")];
-      const n5 = isRecord(prev) && typeof prev.n === "number" ? prev.n : 0;
-      fired[str2(e3, "rule")] = { n: n5 + 1, last: state.clock };
-    },
-    describe: (e3) => `rule ${str2(e3, "rule")}`
-  },
-  {
-    type: ENGINE_EVENTS.signal,
-    validate: (e3) => signalOf(e3) ? null : { code: "bad_event", reason: "signal needs a known class" },
-    apply: noop,
-    describe: (e3) => str2(e3, "text")
-  },
-  { type: ENGINE_EVENTS.note, validate: () => null, apply: noop, describe: (e3) => str2(e3, "text") },
-  { type: ENGINE_EVENTS.beat, validate: () => null, apply: noop, describe: (e3) => str2(e3, "hint") },
-  {
-    type: ENGINE_EVENTS.caught,
-    validate: (e3, ctx) => {
-      const missing = need(e3, "agent");
-      if (missing)
-        return missing;
-      return typeof e3.data.slot === "number" && own(ctx.state.entities, str2(e3, "agent")) ? null : { code: "bad_event", reason: "caught needs an agent and a slot" };
-    },
-    apply: (e3, state) => {
-      const slot = e3.data.slot;
-      if (typeof slot === "number")
-        sub(state, "agents")[str2(e3, "agent")] = slot;
-    },
-    describe: (e3) => `${str2(e3, "agent")} caught up`
-  },
-  {
-    type: ENGINE_EVENTS.cursor,
-    validate: (e3) => typeof e3.data.rr === "number" ? null : { code: "bad_event", reason: "cursor needs rr" },
-    apply: (e3, state) => {
-      if (typeof e3.data.rr === "number")
-        slice(state).rr = e3.data.rr;
-    },
-    describe: () => "catch-up queue"
-  },
-  { type: ENGINE_EVENTS.choice, validate: (e3) => need(e3, "key", "choice"), apply: noop, describe: (e3) => `${str2(e3, "key")}: ${str2(e3, "choice")}` },
-  {
-    type: ENGINE_EVENTS.attempt,
-    validate: (e3, ctx) => own(ctx.world.tracks, str2(e3, "track")) ? null : { code: "missing_track", reason: `no track ${str2(e3, "track")}` },
-    apply: (e3, state) => {
-      const track3 = str2(e3, "track");
-      if (e3.data.correct === true)
-        sub(state, "solved")[track3] = str2(e3, "stage");
-      else {
-        const attempts = sub(state, "attempts");
-        const n5 = own(attempts, track3);
-        attempts[track3] = (typeof n5 === "number" ? n5 : 0) + 1;
-        countStage(state, "missed", track3, str2(e3, "stage"), (count4) => count4 + 1);
-      }
-    },
-    describe: (e3) => `attempt on ${str2(e3, "track")}`
-  },
-  {
-    type: ENGINE_EVENTS.hint,
-    validate: (e3, ctx) => {
-      const missing = need(e3, "track", "stage");
-      if (missing)
-        return missing;
-      const n5 = e3.data.n;
-      if (n5 !== undefined && !(typeof n5 === "number" && Number.isInteger(n5) && n5 >= 1))
-        return { code: "bad_event", reason: `${e3.type} needs n, a whole number from 1` };
-      const t3 = own(ctx.world.tracks, str2(e3, "track"));
-      return t3 && own(t3.stages, str2(e3, "stage")) ? null : { code: "missing_track", reason: `no stage ${str2(e3, "stage")} of track ${str2(e3, "track")}` };
-    },
-    apply: (e3, state) => {
-      const n5 = e3.data.n;
-      countStage(state, "hints", str2(e3, "track"), str2(e3, "stage"), (open) => typeof n5 === "number" ? open < n5 ? open + 1 : open : open + 1);
-    },
-    describe: (e3) => `hint opened on ${str2(e3, "track")}`
-  },
-  {
-    type: ENGINE_EVENTS.revealed,
-    validate: (e3) => need(e3, "track", "stage"),
-    apply: (e3, state) => {
-      const revealed = sub(state, "revealed");
-      const list2 = revealed[str2(e3, "track")];
-      const stages = Array.isArray(list2) ? list2.filter((x2) => typeof x2 === "string") : [];
-      if (!stages.includes(str2(e3, "stage")))
-        stages.push(str2(e3, "stage"));
-      revealed[str2(e3, "track")] = stages;
-    },
-    describe: (e3) => `${str2(e3, "track")} revealed`
-  },
-  {
-    type: ENGINE_EVENTS.pause,
-    validate: (e3) => typeof e3.data.scene === "string" || e3.data.scene === null ? null : { code: "bad_event", reason: "pause needs scene" },
-    apply: (e3, state) => {
-      slice(state).pauseScene = typeof e3.data.scene === "string" ? e3.data.scene : null;
-    },
-    describe: () => "clock pause"
-  },
-  {
-    type: ENGINE_EVENTS.rewind,
-    validate: (e3, ctx) => {
-      const minutes = e3.data.minutes;
-      if (typeof minutes !== "number" || !Number.isInteger(minutes) || minutes <= 0)
-        return { code: "bad_event", reason: "a clock set back needs whole minutes above zero" };
-      const start = minutesBetween(ctx.world.calendar.epoch, ctx.world.start.at);
-      if (ctx.state.clock - minutes >= start)
-        return null;
-      return { code: "before_start", reason: `the story starts at ${formatClock(calendarOf(ctx.world), start, placeOffset(ctx.world, start, placeOfEntity(ctx.state, ctx.world.pov)))}` };
-    },
-    apply: (e3, state) => {
-      const minutes = e3.data.minutes;
-      if (typeof minutes !== "number")
-        return;
-      const s3 = slice(state);
-      s3.reached = Math.max(typeof s3.reached === "number" ? s3.reached : state.clock, state.clock);
-      state.clock -= minutes;
-    },
-    describe: (e3) => `clock set back ${String(e3.data.minutes)} min`
-  },
-  {
-    type: ENGINE_EVENTS.check,
-    validate: (e3, ctx) => need(e3, "actor", "outcome") ?? (own(ctx.state.entities, str2(e3, "actor")) ? null : { code: "missing_entity", reason: `no entity ${str2(e3, "actor")}` }),
-    apply: noop,
-    describe: (e3) => {
-      const total = typeof e3.data.total === "number" ? ` (rolled ${e3.data.total}${typeof e3.data.dc === "number" ? ` against ${e3.data.dc}` : ""})` : "";
-      return `${str2(e3, "actor")}: ${str2(e3, "check").replace(/_/g, " ")}, ${str2(e3, "outcome").replace(/_/g, " ")}${total}`;
-    }
-  },
-  {
-    type: ENGINE_EVENTS.entity,
-    validate: (e3, ctx) => {
-      if (!own(ctx.state.entities, str2(e3, "entity")))
-        return { code: "missing_entity", reason: `no entity ${str2(e3, "entity")}` };
-      const { tier, agent, levels } = e3.data;
-      if (tier !== undefined && (typeof tier !== "string" || !(tierOf(ctx.world, tier) || isBand(tier))))
-        return { code: "bad_tier", reason: `no tier ${String(tier)}` };
-      if (agent !== undefined && typeof agent !== "boolean")
-        return { code: "bad_event", reason: "agent is yes or no" };
-      if (levels !== undefined && !(isRecord(levels) && Object.entries(levels).every(([d3, v6]) => DOMAINS.some((x2) => x2 === d3) && (v6 === null || typeof v6 === "number" && Number.isInteger(v6) && v6 >= 0 && v6 <= 4))))
-        return { code: "bad_level", reason: "a level is a whole number 0–4, or null to follow the tier" };
-      return null;
-    },
-    apply: (e3, state) => {
-      const ent = own(state.entities, str2(e3, "entity"));
-      if (!ent)
-        return;
-      if (typeof e3.data.tier === "string")
-        ent.tier = e3.data.tier;
-      if (typeof e3.data.agent === "boolean")
-        ent.agent = e3.data.agent;
-      const levels = e3.data.levels;
-      if (!isRecord(levels))
-        return;
-      for (const domain of DOMAINS) {
-        const v6 = levels[domain];
-        if (v6 === null)
-          delete ent.levels[domain];
-        else if (typeof v6 === "number" && Number.isInteger(v6) && v6 >= 0 && v6 <= 4)
-          ent.levels[domain] = v6;
-      }
-    },
-    touches: (e3) => {
-      const entity2 = str2(e3, "entity");
-      return ["tier", "agent", "levels"].filter((aspect) => e3.data[aspect] !== undefined).map((aspect) => ({ entity: entity2, aspect }));
-    },
-    describe: (e3, ctx) => {
-      const clauses = [];
-      if (typeof e3.data.tier === "string")
-        clauses.push(`is now in the ${tierLabel(ctx.world, e3.data.tier)} tier`);
-      if (typeof e3.data.agent === "boolean")
-        clauses.push(e3.data.agent ? "now lives their own life off-screen" : "no longer lives their own life off-screen");
-      const levels = e3.data.levels;
-      if (isRecord(levels))
-        for (const [d3, v6] of Object.entries(levels)) {
-          const domain = DOMAINS.find((x2) => x2 === d3);
-          const area = domain ? DOMAIN_LABEL[domain] : d3;
-          const level = LEVELS4.find((n5) => n5 === v6);
-          clauses.push(v6 === null ? `has ${area} detail from their tier again` : `now has ${area} detail at level ${String(v6)}${level !== undefined ? ` (${LEVEL_LABEL[level]})` : ""}`);
-        }
-      return `${own(ctx.state.entities, str2(e3, "entity"))?.name ?? str2(e3, "entity")} ${listWords2(clauses)}`;
-    }
-  },
-  {
-    type: ENGINE_EVENTS.classes,
-    validate: (e3, ctx) => {
-      const ent = own(ctx.state.entities, str2(e3, "entity"));
-      if (!ent)
-        return { code: "missing_entity", reason: `no entity ${str2(e3, "entity")}` };
-      const classes = classOf(e3.data.class);
-      if (!classes)
-        return { code: "bad_event", reason: "a classification is facet → values" };
-      const problem = classProblems(ctx.world, classes, ent.name)[0];
-      if (problem)
-        return { code: problem.code, reason: problem.message };
-      if (e3.data.was !== undefined && !classOf(e3.data.was))
-        return { code: "bad_event", reason: "the classification before is facet → values" };
-      return tagList(e3.data.tags) ? null : { code: "bad_event", reason: "tags are a list of words" };
-    },
-    apply: (e3, state) => {
-      const ent = own(state.entities, str2(e3, "entity"));
-      if (!ent)
-        return;
-      ent.class = classOf(e3.data.class) ?? {};
-      ent.tags = tagList(e3.data.tags) ?? [];
-    },
-    touches: (e3) => [{ entity: str2(e3, "entity"), aspect: "class" }],
-    describe: (e3, ctx, viewer) => {
-      const classes = classOf(e3.data.class) ?? {};
-      const name = own(ctx.state.entities, str2(e3, "entity"))?.name ?? str2(e3, "entity");
-      const valuesOf = (f3, values) => values.length > 0 ? listWords2(values.map((v6) => own(f3.values, v6)?.label ?? v6)) : "none";
-      const facetLine = (f3, values) => `${possessive(name)} ${fieldNoun(f3.label, "").noun} is now ${valuesOf(f3, values)}`;
-      if (viewer !== undefined) {
-        const was = classOf(e3.data.was);
-        if (!was)
-          return "";
-        const same = (a3, b3) => a3.length === b3.length && a3.every((x2) => b3.includes(x2));
-        const changed = facetsInOrder(ctx.world).filter(([id, f3]) => f3.shown === true && !same(own(classes, id) ?? [], own(was, id) ?? [])).map(([id, f3]) => facetLine(f3, own(classes, id) ?? []));
-        return changed.join("; ");
-      }
-      const parts = facetsInOrder(ctx.world).flatMap(([id, f3]) => {
-        const values = own(classes, id) ?? [];
-        return values.length > 0 ? [facetLine(f3, values)] : [];
-      });
-      const tags = tagList(e3.data.tags) ?? [];
-      if (tags.length > 0)
-        parts.push(`${possessive(name)} tags are now ${listWords2(tags)}`);
-      return parts.length > 0 ? parts.join("; ") : `${name} now has no classes and no tags`;
-    }
-  },
-  {
-    type: ENGINE_EVENTS.rename,
-    validate: (e3, ctx) => {
-      const name = str2(e3, "name");
-      if (!own(ctx.state.entities, str2(e3, "entity")))
-        return { code: "missing_entity", reason: `no entity ${str2(e3, "entity")}` };
-      return name.trim() !== "" && name.length <= THING_NAME_MAX ? null : { code: "bad_name", reason: `a name is 1–${THING_NAME_MAX} characters` };
-    },
-    apply: (e3, state) => {
-      const ent = own(state.entities, str2(e3, "entity"));
-      if (ent)
-        ent.name = str2(e3, "name");
-    },
-    touches: (e3) => [{ entity: str2(e3, "entity"), aspect: "name" }],
-    describe: (e3, ctx) => `${str2(e3, "was") || str2(e3, "entity")} is now called ${str2(e3, "name")}`,
-    coarsen: { key: (e3) => str2(e3, "entity"), merge: (earlier, later) => ({ ...later, data: { ...later.data, was: earlier.data.was ?? null } }) }
-  },
-  {
-    type: ENGINE_EVENTS.observed,
-    validate: (e3) => Object.values(e3.data).every(isRecord) ? null : { code: "bad_event", reason: "observed needs places and people" },
-    apply: (e3, state) => restoreObservations(state, e3.data),
-    describe: () => "what you saw meanwhile"
-  },
-  {
-    type: ENGINE_EVENTS.adjudged,
-    validate: (e3, ctx) => need(e3, "actor", "action", "outcome") ?? (own(ctx.state.entities, str2(e3, "actor")) ? null : { code: "missing_entity", reason: `no entity ${str2(e3, "actor")}` }),
-    apply: (e3, state) => {
-      const key = e3.data.key;
-      if (typeof key !== "string" || !safeKey(key))
-        return;
-      const { place: place2, round } = e3.data;
-      sub(state, "tries")[key] = { at: state.clock, place: typeof place2 === "string" ? place2 : null, outcome: str2(e3, "outcome"), failed: e3.data.failed === true, odds: str2(e3, "odds"), ...typeof round === "string" ? { round } : {} };
-    },
-    describe: (e3) => `${str2(e3, "actor")}: ${str2(e3, "action").replace(/_/g, " ")}, ${str2(e3, "outcome").replace(/_/g, " ")}${e3.data.rolled === true ? "" : ` (no roll: ${str2(e3, "why")})`}`
-  },
-  {
-    type: ENGINE_EVENTS.life,
-    validate: (e3, ctx) => {
-      const ent = own(ctx.state.entities, str2(e3, "entity"));
-      if (!ent)
-        return { code: "missing_entity", reason: `no entity ${str2(e3, "entity")}` };
-      if (!isLifeState(ctx.world, str2(e3, "to")))
-        return { code: "bad_life", reason: `there's no life state ${str2(e3, "to")}` };
-      const seen = e3.data.witnesses;
-      if (seen !== undefined && !(Array.isArray(seen) && seen.every((id) => typeof id === "string")))
-        return { code: "bad_event", reason: "a life change's witnesses are entity ids" };
-      return lifeOf(ctx.state, str2(e3, "entity")) === str2(e3, "to") ? { code: "no_change", reason: `${ent.name} is already ${lifeStateOf(ctx.world, str2(e3, "to")).label.toLowerCase()}` } : null;
-    },
-    apply: (e3, state, ctx) => applyLife(state, ctx, str2(e3, "entity"), str2(e3, "to"), witnessesOf2(e3)),
-    touches: (e3) => [{ entity: str2(e3, "entity"), aspect: "life" }],
-    describe: (e3, ctx, viewer) => {
-      const id = str2(e3, "entity");
-      const def2 = lifeStateOf(ctx.world, str2(e3, "to"));
-      const name = own(ctx.state.entities, id)?.name ?? id;
-      const state = def2.label.toLowerCase();
-      if (viewer === undefined)
-        return `${name} is now ${state}`;
-      if (id === viewer)
-        return `You are now ${state}`;
-      return witnessesOf2(e3)?.includes(viewer) === true ? `${name} ${def2.reads}` : "";
-    }
-  },
-  {
-    type: ENGINE_EVENTS.told,
-    validate: (e3, ctx) => {
-      if (!own(ctx.state.entities, str2(e3, "entity")))
-        return { code: "missing_entity", reason: `no entity ${str2(e3, "entity")}` };
-      const who = e3.data.who;
-      return Array.isArray(who) && who.length > 0 && who.every((id) => typeof id === "string" && own(ctx.state.entities, id)) ? null : { code: "bad_event", reason: "told needs the people told" };
-    },
-    apply: (e3, state) => tellLife(state, str2(e3, "entity"), Array.isArray(e3.data.who) ? e3.data.who.filter((id) => typeof id === "string") : []),
-    describe: (e3, ctx, viewer) => {
-      const id = str2(e3, "entity");
-      const name = own(ctx.state.entities, id)?.name ?? id;
-      const who = Array.isArray(e3.data.who) ? e3.data.who.filter((x2) => typeof x2 === "string") : [];
-      if (viewer === undefined)
-        return `${listWords2(who.map((w3) => own(ctx.state.entities, w3)?.name ?? w3))} now ${who.length === 1 ? "knows" : "know"} that ${name} ${lifeStateOf(ctx.world, lifeOf(ctx.state, id)).reads}`;
-      return who.includes(viewer) ? `${name} ${lifeStateOf(ctx.world, lifeKnownTo(ctx.state, id, viewer)).reads}` : "";
-    }
-  }
-];
-function witnessesOf2(e3) {
-  const seen = e3.data.witnesses;
-  return Array.isArray(seen) ? seen.filter((id) => typeof id === "string") : null;
-}
-
-// src/engine/events.ts
-var EXTERNAL_ACCOUNT_PREFIX = "economy.external:";
-var TIME_BOUNDS = Object.freeze({ tick: [0, 1440], scale: [0.25, 10], thresholdMinutes: SPEED_THRESHOLD_MINUTES, agentDays: [1, 600], events: [1, 5000] });
-
-// src/packs/economy/core/model.ts
-var CORRECTION_ACCOUNT = `${EXTERNAL_ACCOUNT_PREFIX}correction`;
-var BANK_PREFIX = `${EXTERNAL_ACCOUNT_PREFIX}bank:`;
-function external(id) {
-  return `${EXTERNAL_ACCOUNT_PREFIX}${id}`;
-}
-var WORLD_ACCOUNT = external("world");
-var WEALTH_BANDS = [
-  { label: "broke", min: -Infinity, max: 1e4, typical: 5000 },
-  { label: "poor", min: 1e4, max: 200000, typical: 45000 },
-  { label: "modest", min: 200000, max: 2000000, typical: 630000 },
-  { label: "comfortable", min: 2000000, max: 20000000, typical: 6300000 },
-  { label: "rich", min: 20000000, max: 200000000, typical: 63000000 },
-  { label: "wealthy", min: 200000000, max: Infinity, typical: 500000000 }
-];
-function worldProducts(world) {
-  const raw = objOf(objOf(world.packs.economy?.config).products);
-  const out = {};
-  for (const [id, p3] of Object.entries(raw)) {
-    const def2 = objOf(p3);
-    if (isAccountClass(def2.class))
-      out[id] = def2;
-  }
-  return out;
-}
-function classOf2(books, id) {
-  const e3 = own(books.state.entities, id);
-  if (!e3 || e3.kind !== "account")
-    return null;
-  const product = strOf(e3.fields.product);
-  if (product !== "") {
-    const def2 = objOf(own(objOf(objOf(books.world.packs.economy?.config).products), product));
-    if (isAccountClass(def2.class))
-      return def2.class;
-    if (isAccountClass(product))
-      return product;
-  }
-  return own(LEGACY_TYPE_CLASS, strOf(e3.fields.type)) ?? null;
-}
-function traitsOf(books, id) {
-  const c3 = classOf2(books, id);
-  return c3 ? CLASS_TRAITS[c3] : null;
-}
-var DEBIT_PURCHASE_LIMIT = 300000;
-var DEBIT_ATM_LIMIT = 50000;
-var DEPOSIT_HOLD_DAYS = 2;
-var OVERDRAFT_LIMIT = 50000;
-function typical(v6, fallback) {
-  if (typeof v6 === "number" && Number.isFinite(v6))
-    return v6;
-  const o4 = objOf(v6);
-  return typeof o4.typical === "number" ? o4.typical : fallback;
-}
-function classDefaults(books, cls) {
-  const rows2 = books.tables.get("economy.finance")?.rows ?? {};
-  const card = objOf(rows2.credit_card?.values);
-  const deposits = objOf(rows2.deposit_accounts?.values);
-  const fees = objOf(deposits.checking_fees_cents);
-  const loans = objOf(rows2.loans?.values);
-  const personal = objOf(loans.personal);
-  const mortgage = objOf(loans.mortgage);
-  const minimum = objOf(objOf(card.minimum_payment).default);
-  const lateFees = objOf(card.late_fee_cents);
-  const advance = objOf(card.cash_advance_fee);
-  const cardMinimum = { pct: numOf(minimum.principal_pct, 1), floor: numOf(minimum.floor_cents, 3500), plus_interest: minimum.includes_interest_and_fees !== false };
-  const noFees = { annual: 0, late_first: 0, late_repeat: 0, overdraft: 0, nsf: 0, atm: 0, cash_advance_pct: 0, cash_advance_min: 0, maintenance: 0, maintenance_waive: 0, card_replacement: 0 };
-  const creditFees = { ...noFees, late_first: numOf(lateFees.first, 3200), late_repeat: numOf(lateFees.repeat, 4300), nsf: typical(card.returned_payment_fee_cents, 3200), cash_advance_pct: numOf(advance.pct, 5), cash_advance_min: numOf(advance.minimum_cents, 1000) };
-  const bankFees = {
-    ...noFees,
-    overdraft: typical(fees.overdraft, 2700),
-    nsf: typical(fees.nsf_returned_item, 1700),
-    atm: typical(fees.atm_out_of_network_total, 473),
-    maintenance: typical(fees.monthly_maintenance, 500),
-    maintenance_waive: typical(fees.minimum_balance_to_waive_cents, 150000),
-    card_replacement: typical(fees.debit_card_replacement, 0)
-  };
-  const base = {
-    class: cls,
-    limit: null,
-    apr_pct: 0,
-    apy_pct: 0,
-    interest: "average_daily",
-    penalty_apr_pct: 0,
-    cash_advance_apr_pct: 0,
-    due_days: typical(card.grace_period_days, 25),
-    statement_day: 1,
-    minimum: cardMinimum,
-    fees: noFees,
-    rewards_pct: 0,
-    daily_purchase_limit: null,
-    daily_atm_limit: null,
-    hold_days: DEPOSIT_HOLD_DAYS,
-    overdraft: "decline",
-    overdraft_limit: OVERDRAFT_LIMIT,
-    term_months: null,
-    secured: false
-  };
-  const savings = objOf(deposits.savings_apy_pct);
-  switch (cls) {
-    case "checking":
-    case "business_checking":
-      return { ...base, apy_pct: typical(deposits.checking_apy_pct, 0.07), fees: bankFees, daily_purchase_limit: DEBIT_PURCHASE_LIMIT, daily_atm_limit: DEBIT_ATM_LIMIT };
-    case "savings":
-    case "trust":
-      return { ...base, apy_pct: typical(savings.regular_national_average, 0.4), fees: { ...bankFees, maintenance: 0 } };
-    case "money_market":
-      return { ...base, apy_pct: typical(deposits.money_market_apy_pct, 3.5), fees: { ...bankFees, maintenance: 0 } };
-    case "cd":
-      return { ...base, apy_pct: typical(deposits.cd_12_month_apy_pct, 4), term_months: 12 };
-    case "credit_card":
-      return { ...base, limit: typical(objOf(card.credit_limit_cents), 1e6), apr_pct: typical(card.apr_pct, 22), penalty_apr_pct: numOf(card.penalty_apr_pct, 29.99), cash_advance_apr_pct: numOf(advance.apr_pct_typical, 27), fees: creditFees };
-    case "charge_card":
-      return { ...base, minimum: { pct: 100, floor: 0, plus_interest: false }, fees: { ...creditFees, annual: numOf(objOf(card.annual_fee_cents).rewards_typical, 9500) } };
-    case "line_of_credit":
-      return { ...base, limit: typical(personal.amount_cents, 800000), apr_pct: typical(personal.apr_pct, 12.3), penalty_apr_pct: numOf(card.penalty_apr_pct, 29.99), fees: creditFees };
-    case "loan":
-      return { ...base, apr_pct: typical(personal.apr_pct, 12.3), term_months: typical(personal.term_months, 36), fees: { ...creditFees, nsf: 0 } };
-    case "mortgage":
-      return { ...base, apr_pct: typical(mortgage.apr_pct_30yr_fixed, 6.4), term_months: typical(mortgage.term_months, 360), secured: true, fees: { ...creditFees, nsf: 0 } };
-    default:
-      return base;
-  }
-}
-function productOf(books, id) {
-  const cls = classOf2(books, id);
-  const e3 = own(books.state.entities, id);
-  if (!cls || !e3)
-    return null;
-  const productId = strOf(e3.fields.product) || cls;
-  const def2 = own(worldProducts(books.world), productId) ?? {};
-  const base = classDefaults(books, cls);
-  const f3 = e3.fields;
-  const num3 = (field2, fallback) => numOf(f3[field2], fallback);
-  const fees = { ...base.fees, ...objOf(def2.fees) };
-  const minimum = { ...base.minimum, ...def2.minimum ?? {} };
-  if (typeof f3.min_pct === "number")
-    minimum.pct = f3.min_pct;
-  if (typeof f3.min_floor === "number")
-    minimum.floor = f3.min_floor;
-  const limit2 = typeof f3.limit === "number" ? f3.limit : def2.limit === null ? null : typeof def2.limit === "number" ? def2.limit : base.limit;
-  const policy = strOf(f3.overdraft, def2.overdraft ?? base.overdraft);
-  return {
-    id: productId,
-    label: def2.label ?? CLASS_TRAITS[cls].label,
-    class: cls,
-    institution: strOf(f3.institution, def2.institution ?? ""),
-    limit: limit2,
-    apr_pct: CLASS_TRAITS[cls].asset ? 0 : num3("apr_pct", def2.apr_pct ?? base.apr_pct),
-    apy_pct: CLASS_TRAITS[cls].asset ? num3("apy_pct", typeof f3.apr_pct === "number" ? f3.apr_pct : def2.apy_pct ?? base.apy_pct) : 0,
-    interest: def2.interest ?? base.interest,
-    penalty_apr_pct: def2.penalty_apr_pct ?? base.penalty_apr_pct,
-    cash_advance_apr_pct: def2.cash_advance_apr_pct ?? base.cash_advance_apr_pct,
-    due_days: num3("due_days", def2.due_days ?? base.due_days),
-    statement_day: num3("statement_day", def2.statement_day ?? base.statement_day),
-    minimum,
-    fees,
-    rewards_pct: def2.rewards_pct ?? base.rewards_pct,
-    daily_purchase_limit: def2.daily_purchase_limit ?? base.daily_purchase_limit,
-    daily_atm_limit: def2.daily_atm_limit ?? base.daily_atm_limit,
-    hold_days: def2.hold_days ?? base.hold_days,
-    overdraft: policy === "fee" || policy === "linked" ? policy : "decline",
-    overdraft_limit: num3("overdraft_limit", def2.overdraft_limit ?? base.overdraft_limit),
-    term_months: typeof f3.term_months === "number" ? f3.term_months : def2.term_months ?? base.term_months,
-    secured: def2.secured ?? base.secured
-  };
-}
-function ownersOf(state, id) {
-  const e3 = own(state.entities, id);
-  return e3 ? ownersIn(e3.fields) : [];
-}
-function holdersOf(state, id) {
-  return [...new Set(ownersOf(state, id).map((o4) => o4.party))];
-}
-function balance(state, account) {
-  return own(state.accounts, account) ?? 0;
-}
-function holdsOn(state, account) {
-  const raw = objOf(own(objOf(sliceOf(state, "economy").holds), account));
-  const out = [];
-  for (const [id, h3] of Object.entries(raw)) {
-    const o4 = objOf(h3);
-    const until2 = numOf(o4.until);
-    if (until2 > state.clock)
-      out.push({ id, account, cents: Math.round(numOf(o4.cents)), until: until2, kind: o4.kind === "authorization" ? "authorization" : "deposit", memo: strOf(o4.memo) });
-  }
-  return out.sort((a3, b3) => a3.until - b3.until || a3.id.localeCompare(b3.id));
-}
-function availableOf(books, account) {
-  const t3 = traitsOf(books, account);
-  if (!t3)
-    return 0;
-  const b3 = balance(books.state, account);
-  if (t3.liability) {
-    const p3 = productOf(books, account);
-    if (p3?.class === "charge_card" && p3.limit === null)
-      return Number.MAX_SAFE_INTEGER;
-    return (p3?.limit ?? 0) + b3;
-  }
-  return b3 - holdsOn(books.state, account).reduce((a3, h3) => a3 + h3.cents, 0);
-}
-function derivedUnpricedCap(world) {
-  let top = 0;
-  for (const table of ["economy.catalog", "economy.categories"])
-    for (const row of Object.values(world.tables[table]?.rows ?? {}))
-      top = Math.max(top, bandOfJson(row.price_cents)?.max ?? 0);
-  return top > 0 ? Math.round(top) : 500 * 10 ** Math.max(0, Math.min(6, Math.trunc(world.currency.decimals)));
-}
-function derivedClaimCap(world) {
-  const meal = bandOfJson(world.tables["economy.categories"]?.rows.meals_out?.price_cents)?.typical ?? 0;
-  return meal > 0 ? Math.round(meal * 2) : 25 * 10 ** Math.max(0, Math.min(6, Math.trunc(world.currency.decimals)));
-}
-
-// src/packs/economy/core/journal.ts
-var JOURNAL_CAP = 40;
-var NOTES_CAP = 12;
-var MONTHS_KEPT = 13;
-var CREDIT_CAP = 60;
-var SCORES_KEPT = 24;
-var STATEMENTS_KEPT = 6;
-var UNSIDED_KINDS = new Set(["opening", "adjustment"]);
-function reject(code, reason) {
-  return { code, reason };
-}
-function str3(e3, k2) {
-  return typeof e3.data[k2] === "string" ? e3.data[k2] : "";
-}
-function monthKey(ctx, at2) {
-  const d3 = dateAt(calendarOf(ctx.world), at2);
-  return `${String(d3.year).padStart(4, "0")}-${String(d3.month).padStart(2, "0")}`;
-}
-function pushCapped(list2, entry, cap2) {
-  return [...Array.isArray(list2) ? list2.slice(-(cap2 - 1)) : [], entry];
-}
-function partyOfSide(state, side) {
-  if (own(state.entities, side)?.kind === "account")
-    return holdersOf(state, side).find((h3) => own(state.entities, h3)) ?? side;
-  const bare = side.startsWith(EXTERNAL_ACCOUNT_PREFIX) ? side.slice(EXTERNAL_ACCOUNT_PREFIX.length) : "";
-  return bare !== "" && own(state.entities, bare) ? bare : side;
-}
-function fileLine(state, ctx, account, amount2, at2, data, other, seq) {
-  const journal = sliceRecord(state, "economy", "journal");
-  const status = data.status === "pending" ? "pending" : "posted";
-  const entry = { id: `j${seq}`, at: at2, account, cents: amount2, memo: strOf(data.memo), status };
-  for (const k2 of ["kind", "category", "card", "flow"])
-    if (typeof data[k2] === "string" && data[k2] !== "")
-      entry[k2] = data[k2];
-  if (typeof data.by === "string" && data.by !== "" && typeof data.as === "string" && holdersOf(state, account).includes(data.as))
-    entry.by = data.by;
-  if (other !== "")
-    entry.counterparty = other;
-  if (status === "pending" && typeof data.settles === "number")
-    entry.settles = data.settles;
-  journal[account] = pushCapped(journal[account], entry, JOURNAL_CAP);
-  const totals = sliceRecord(state, "economy", "totals");
-  const months = objOf(totals[account]);
-  const key = monthKey(ctx, at2);
-  const month = objOf(months[key]);
-  const category = strOf(data.category) || "other";
-  const cell = objOf(month[category]);
-  month[category] = { in: numOf(cell.in) + Math.max(0, amount2), out: numOf(cell.out) + Math.max(0, -amount2) };
-  months[key] = month;
-  for (const old of Object.keys(months).sort().slice(0, -MONTHS_KEPT))
-    delete months[old];
-  totals[account] = months;
-  if (data.kind === "interest") {
-    const latest = sliceRecord(state, "economy", "interest");
-    const before = objOf(latest[account]);
-    latest[account] = { cents: (numOf(before.at, NaN) === at2 ? numOf(before.cents) : 0) + amount2, at: at2 };
-  }
-}
-function accrue(state, account, amount2, at2, use) {
-  const adb = sliceRecord(state, "economy", "adb");
-  const cur = objOf(adb[account]);
-  const before = balance(state, account) - amount2;
-  const spent = use === "purchase" ? -amount2 : 0;
-  const drawn = use === "advance" ? -amount2 : 0;
-  const since = typeof cur.from === "number" ? cur.from : at2;
-  const advanced = numOf(cur.advanced) + drawn;
-  const advances = advanced !== 0 ? { advanced, advanced_at: numOf(cur.advanced_at) + drawn * (at2 - since) } : {};
-  if (typeof cur.from !== "number") {
-    adb[account] = { from: at2, at: at2, sum: 0, spent, ...advances };
-    return;
-  }
-  const last = numOf(cur.at, cur.from);
-  const dt = Math.max(0, at2 - last);
-  const period = { ...typeof cur.paid === "number" ? { paid: cur.paid } : {}, ...typeof cur.owed === "number" ? { owed: cur.owed } : {} };
-  adb[account] = { from: cur.from, at: Math.max(last, at2), sum: numOf(cur.sum) + before * dt, spent: numOf(cur.spent) + spent, ...advances, ...period };
-}
-function isCreditAccount(ctx, account) {
-  const c3 = classOf2(ctx, account);
-  return c3 !== null && isCredit(c3);
-}
-var STAGE_WORDS = { current: "up to date", late: "late", "30": "30 days past due", "60": "60 days past due", "90": "90 days past due", "120": "120 days past due", collections: "in collections", charged_off: "charged off" };
-var STATUS_WORDS = { open: "open", frozen: "frozen", collections: "in collections", charged_off: "charged off", closed: "closed", paid_off: "paid off", matured: "matured" };
-var CREDIT_WORDS = { inquiry: "a credit inquiry", opened: "a new account", on_time: "a payment on time", late: "a late payment", collections: "an account in collections", charged_off: "an account charged off", closed: "a closed account", paid_off: "an account paid off", declined: "a declined application" };
-function whoseFor(ctx, viewer, person3) {
-  return viewer === person3 ? "Your" : `${own(ctx.state.entities, person3)?.name ?? person3}'s`;
-}
-function wordsOf2(words3, id) {
-  return own(words3, id) ?? id.replace(/_/g, " ");
-}
-var EVENTS = [
-  {
-    type: FINANCE_EVENTS.anchor,
-    validate: (e3, ctx) => own(ctx.state.entities, str3(e3, "entity")) && typeof e3.data.typical === "number" && typeof e3.data.base === "number" ? null : reject("bad_event", "anchor needs entity, typical and base"),
-    apply: (e3, state) => {
-      sliceRecord(state, "economy", "anchors")[str3(e3, "entity")] = { band: str3(e3, "band"), typical: numOf(e3.data.typical), base: numOf(e3.data.base) };
-    },
-    describe: (e3) => `${str3(e3, "entity")} is ${str3(e3, "band")}`,
-    coarsen: { key: (e3) => str3(e3, "entity"), merge: (_a, b3) => b3 }
-  },
-  {
-    type: FINANCE_EVENTS.txn,
-    validate: () => null,
-    apply: (e3, state, ctx) => {
-      const lines2 = Array.isArray(e3.data.lines) ? e3.data.lines.map((l3) => objOf(l3)) : [];
-      const at2 = typeof e3.data.at === "number" ? e3.data.at : state.clock;
-      const s3 = mutableSlice(state, "economy");
-      let seq = numOf(s3.seq);
-      const totals = new Map;
-      for (const l3 of lines2) {
-        const account = strOf(l3.account);
-        if (!own(state.entities, account))
-          continue;
-        totals.set(account, (totals.get(account) ?? 0) + Math.round(numOf(l3.amount)));
-      }
-      const sided = !UNSIDED_KINDS.has(strOf(e3.data.kind));
-      const payee = sided ? strOf(e3.data.counterparty) : "";
-      const paidMost = [...totals].reduce((top, l3) => l3[1] < 0 && (top === undefined || l3[1] < top[1]) ? l3 : top, undefined)?.[0];
-      const payer = sided ? strOf(e3.data.payer) || (paidMost ?? payee) : "";
-      for (const [account, amount2] of totals) {
-        seq += 1;
-        fileLine(state, ctx, account, amount2, at2, e3.data, partyOfSide(state, amount2 < 0 ? payee : payer), seq);
-        const use = !isCreditAccount(ctx, account) ? null : e3.data.kind === "purchase" ? "purchase" : e3.data.category === "cash_advance" && e3.data.kind !== "fee" && amount2 < 0 ? "advance" : null;
-        accrue(state, account, amount2, at2, use);
-      }
-      mutableSlice(state, "economy").seq = seq;
-    },
-    describe: (e3) => str3(e3, "memo")
-  },
-  {
-    type: FINANCE_EVENTS.note,
-    validate: (e3, ctx) => own(ctx.state.entities, str3(e3, "entity")) && str3(e3, "text") !== "" ? null : reject("bad_event", "a money note needs a party and its text"),
-    apply: (e3, state) => {
-      const notes = sliceRecord(state, "economy", "notes");
-      notes[str3(e3, "entity")] = pushCapped(notes[str3(e3, "entity")], { at: typeof e3.data.at === "number" ? e3.data.at : state.clock, class: str3(e3, "class"), text: str3(e3, "text") }, NOTES_CAP);
-    },
-    describe: (e3) => str3(e3, "text")
-  },
-  {
-    type: FINANCE_EVENTS.modifier,
-    validate: (e3) => str3(e3, "id") !== "" && (e3.data.mult === undefined || typeof e3.data.mult === "number" && e3.data.mult > 0) ? null : reject("bad_event", "a price modifier needs an id and a positive multiplier"),
-    apply: (e3, state) => {
-      const mods = sliceRecord(state, "economy", "modifiers");
-      if (typeof e3.data.mult !== "number")
-        delete mods[str3(e3, "id")];
-      else
-        mods[str3(e3, "id")] = { scope: strOf(e3.data.scope, "all"), place: strOf(e3.data.place), mult: e3.data.mult, ...typeof e3.data.until === "number" ? { until: e3.data.until } : {} };
-    },
-    describe: (e3) => typeof e3.data.mult === "number" ? `Prices ×${e3.data.mult}` : "Prices back to normal"
-  },
-  {
-    type: FINANCE_EVENTS.statement,
-    validate: (e3, ctx) => isCreditAccount(ctx, str3(e3, "account")) ? null : reject("bad_event", "statements are for credit accounts"),
-    apply: (e3, state) => {
-      const account = str3(e3, "account");
-      const at2 = typeof e3.data.at === "number" ? e3.data.at : state.clock;
-      const d3 = e3.data;
-      const cycle = { closing: numOf(d3.closing), interest: numOf(d3.interest), fees: numOf(d3.fees), minimum: numOf(d3.minimum), due: numOf(d3.due), paid: 0, at: at2, apr: numOf(d3.apr), stage: strOf(d3.stage, "current"), grace: d3.grace !== false, past_due: numOf(d3.past_due), lates: numOf(d3.lates), penalty: d3.penalty === true };
-      for (const k2 of ["months_left", "streak", "ontime", "late30", "late60", "late90"])
-        if (typeof d3[k2] === "number")
-          cycle[k2] = d3[k2];
-      const cycles = sliceRecord(state, "economy", "cycles");
-      if (cycles[account] !== undefined) {
-        const past = sliceRecord(state, "economy", "statements");
-        past[account] = pushCapped(past[account], cycles[account], STATEMENTS_KEPT);
-      }
-      cycles[account] = cycle;
-      sliceRecord(state, "economy", "adb")[account] = { from: at2, at: at2, sum: 0, spent: 0 };
-    },
-    describe: (e3, ctx) => `The statement closed at ${formatMoney(numOf(e3.data.closing), ctx.world.currency)}, with at least ${formatMoney(numOf(e3.data.minimum), ctx.world.currency)} due`
-  },
-  {
-    type: FINANCE_EVENTS.cardPaid,
-    validate: (e3, ctx) => isCreditAccount(ctx, str3(e3, "account")) ? null : reject("bad_event", "statement payments are for credit accounts"),
-    apply: (e3, state) => {
-      const cycles = sliceRecord(state, "economy", "cycles");
-      const account = str3(e3, "account");
-      const cur = objOf(cycles[account]);
-      if (Object.keys(cur).length > 0)
-        cycles[account] = { ...cur, paid: numOf(cur.paid) + numOf(e3.data.cents) };
-      const period = objOf(own(objOf(sliceOf(state, "economy").adb), account));
-      if (typeof period.owed === "number")
-        sliceRecord(state, "economy", "adb")[account] = { ...period, paid: numOf(period.paid) + numOf(e3.data.cents) };
-    },
-    describe: (e3, ctx) => `A card payment of ${formatMoney(numOf(e3.data.cents), ctx.world.currency)} was made`
-  },
-  {
-    type: FINANCE_EVENTS.delinquency,
-    validate: (e3, ctx) => isCreditAccount(ctx, str3(e3, "account")) && DELINQUENCY_STAGES.includes(str3(e3, "stage")) ? null : reject("bad_event", "a delinquency stage needs a credit account and a stage"),
-    apply: (e3, state) => {
-      const cycles = sliceRecord(state, "economy", "cycles");
-      const account = str3(e3, "account");
-      const cur = objOf(cycles[account]);
-      const next = { ...cur, stage: str3(e3, "stage"), past_due: numOf(e3.data.past_due), lates: numOf(e3.data.lates), penalty: e3.data.penalty === true };
-      for (const k2 of ["streak", "ontime", "late30", "late60", "late90"])
-        if (typeof e3.data[k2] === "number")
-          next[k2] = e3.data[k2];
-      cycles[account] = next;
-    },
-    describe: (e3, ctx) => `${own(ctx.state.entities, str3(e3, "account"))?.name ?? str3(e3, "account")}'s payments are now ${wordsOf2(STAGE_WORDS, str3(e3, "stage"))}`,
-    coarsen: { key: (e3) => str3(e3, "account"), merge: (_a, b3) => b3 }
-  },
-  {
-    type: FINANCE_EVENTS.flowRun,
-    validate: (e3) => str3(e3, "flow") !== "" && typeof e3.data.state === "object" ? null : reject("bad_event", "a flow run needs its flow and state"),
-    apply: (e3, state) => {
-      sliceRecord(state, "economy", "flows")[str3(e3, "flow")] = objOf(e3.data.state);
-    },
-    describe: (e3) => `${str3(e3, "label") || str3(e3, "flow")}: ${str3(e3, "outcome")}`,
-    coarsen: { key: (e3) => str3(e3, "flow"), merge: (_a, b3) => b3 }
-  },
-  {
-    type: FINANCE_EVENTS.flowRenamed,
-    validate: (e3, ctx) => {
-      const name = str3(e3, "name");
-      return own(ctx.state.entities, str3(e3, "flow"))?.kind === "flow" && name.trim() !== "" && name.length <= 80 ? null : reject("bad_event", "a rename needs a standing payment and a name of up to 80 characters");
-    },
-    apply: (e3, state) => {
-      const flow = own(state.entities, str3(e3, "flow"));
-      if (flow)
-        flow.name = str3(e3, "name");
-    },
-    describe: (e3, _ctx, viewer) => viewer ? "" : `Standing payment renamed ${str3(e3, "name")}`,
-    touches: (e3) => [{ entity: str3(e3, "flow"), aspect: "name" }],
-    coarsen: { key: (e3) => str3(e3, "flow"), merge: (_a, b3) => b3 }
-  },
-  {
-    type: FINANCE_EVENTS.hold,
-    validate: (e3, ctx) => {
-      const account = str3(e3, "account");
-      if (!own(ctx.state.entities, account) || str3(e3, "id") === "")
-        return reject("bad_event", "a hold needs an account and an id");
-      if (e3.data.release === true)
-        return null;
-      const cents2 = numOf(e3.data.cents);
-      if (!(cents2 > 0) || typeof e3.data.until !== "number")
-        return reject("bad_event", "a hold needs an amount and an end");
-      return e3.data.kind === "authorization" && availableOf(ctx, account) < cents2 ? reject("declined", `${own(ctx.state.entities, account)?.name ?? account} can't cover ${formatMoney(cents2, ctx.world.currency)}`) : null;
-    },
-    apply: (e3, state) => {
-      const holds2 = sliceRecord(state, "economy", "holds");
-      const account = str3(e3, "account");
-      const mine = objOf(holds2[account]);
-      for (const [id, h3] of Object.entries(mine))
-        if (numOf(objOf(h3).until) <= state.clock)
-          delete mine[id];
-      if (e3.data.release === true)
-        delete mine[str3(e3, "id")];
-      else
-        mine[str3(e3, "id")] = { cents: Math.round(numOf(e3.data.cents)), until: numOf(e3.data.until), kind: e3.data.kind === "authorization" ? "authorization" : "deposit", memo: str3(e3, "memo") };
-      holds2[account] = mine;
-    },
-    describe: (e3, ctx) => e3.data.release === true ? "Hold released" : `Hold of ${formatMoney(numOf(e3.data.cents), ctx.world.currency)}`
-  },
-  {
-    type: FINANCE_EVENTS.settle,
-    validate: (e3, ctx) => own(ctx.state.entities, str3(e3, "account")) && typeof e3.data.upto === "number" ? null : reject("bad_event", "settling needs an account and a time"),
-    apply: (e3, state) => {
-      const journal = sliceRecord(state, "economy", "journal");
-      const account = str3(e3, "account");
-      const upto = numOf(e3.data.upto);
-      const list2 = Array.isArray(journal[account]) ? journal[account] : [];
-      journal[account] = list2.map((x2) => {
-        const o4 = objOf(x2);
-        if (o4.status !== "pending" || numOf(o4.settles) > upto)
-          return x2;
-        const { settles: _settles, ...rest } = o4;
-        return { ...rest, status: "posted" };
-      });
-    },
-    describe: () => "Card payments posted",
-    coarsen: { key: (e3) => str3(e3, "account"), merge: (_a, b3) => b3 }
-  },
-  {
-    type: FINANCE_EVENTS.credit,
-    validate: (e3, ctx) => own(ctx.state.entities, str3(e3, "person")) && str3(e3, "kind") !== "" ? null : reject("bad_event", "a credit entry needs a person and a kind"),
-    apply: (e3, state) => {
-      const credit = sliceRecord(state, "economy", "credit");
-      const person3 = str3(e3, "person");
-      const cur = objOf(credit[person3]);
-      const { person: _person, ...entry } = e3.data;
-      credit[person3] = { ...cur, entries: pushCapped(cur.entries, { ...entry, at: typeof e3.data.at === "number" ? e3.data.at : state.clock }, CREDIT_CAP) };
-    },
-    describe: (e3, ctx, viewer) => viewer !== undefined && viewer !== str3(e3, "person") ? "" : `${whoseFor(ctx, viewer, str3(e3, "person"))} credit report now shows ${wordsOf2(CREDIT_WORDS, str3(e3, "kind"))}`
-  },
-  {
-    type: FINANCE_EVENTS.score,
-    validate: (e3, ctx) => own(ctx.state.entities, str3(e3, "person")) && typeof e3.data.score === "number" ? null : reject("bad_event", "a score needs a person and a number"),
-    apply: (e3, state) => {
-      const credit = sliceRecord(state, "economy", "credit");
-      const person3 = str3(e3, "person");
-      const cur = objOf(credit[person3]);
-      const at2 = typeof e3.data.at === "number" ? e3.data.at : state.clock;
-      credit[person3] = { ...cur, score: numOf(e3.data.score), factors: objOf(e3.data.factors), at: at2, history: pushCapped(cur.history, { at: at2, score: numOf(e3.data.score) }, SCORES_KEPT) };
-    },
-    describe: (e3, ctx, viewer) => viewer !== undefined && viewer !== str3(e3, "person") ? "" : `${whoseFor(ctx, viewer, str3(e3, "person"))} credit score is now ${numOf(e3.data.score)}`
-  },
-  {
-    type: FINANCE_EVENTS.spend,
-    validate: (e3, ctx) => own(ctx.state.entities, str3(e3, "card")) && typeof e3.data.day === "number" ? null : reject("bad_event", "card spending needs a card and a day"),
-    apply: (e3, state) => {
-      sliceRecord(state, "economy", "spend")[str3(e3, "card")] = { day: numOf(e3.data.day), purchase: numOf(e3.data.purchase), atm: numOf(e3.data.atm) };
-    },
-    describe: () => "Card spending",
-    coarsen: { key: (e3) => str3(e3, "card"), merge: (_a, b3) => b3 }
-  },
-  {
-    type: FINANCE_EVENTS.open,
-    validate: (e3, ctx) => {
-      const list2 = Array.isArray(e3.data.accounts) ? e3.data.accounts : [];
-      const opened = objOf(sliceOf(ctx.state, "economy").opened);
-      for (const a3 of list2) {
-        if (typeof a3 !== "string" || !own(ctx.state.entities, a3))
-          return reject("bad_event", "only accounts open");
-        if (own(opened, a3) === true)
-          return reject("opened", `${own(ctx.state.entities, a3)?.name ?? a3} is already open`);
-      }
-      return list2.length > 0 ? null : reject("bad_event", "nothing to open");
-    },
-    apply: (e3, state) => {
-      const opened = sliceRecord(state, "economy", "opened");
-      for (const a3 of Array.isArray(e3.data.accounts) ? e3.data.accounts : [])
-        if (typeof a3 === "string")
-          opened[a3] = true;
-    },
-    describe: () => "Accounts opened"
-  },
-  {
-    type: FINANCE_EVENTS.status,
-    validate: (e3, ctx) => own(ctx.state.entities, str3(e3, "account"))?.kind === "account" && ACCOUNT_STATUSES.includes(str3(e3, "status")) ? null : reject("bad_event", "a status needs an account and a status"),
-    apply: (e3, state) => {
-      sliceRecord(state, "economy", "status")[str3(e3, "account")] = str3(e3, "status");
-    },
-    describe: (e3, ctx) => `${own(ctx.state.entities, str3(e3, "account"))?.name ?? str3(e3, "account")} is now ${wordsOf2(STATUS_WORDS, str3(e3, "status"))}`,
-    coarsen: { key: (e3) => str3(e3, "account"), merge: (_a, b3) => b3 }
-  },
-  {
-    type: FINANCE_EVENTS.accrue,
-    validate: (e3, ctx) => own(ctx.state.entities, str3(e3, "account")) && typeof e3.data.at === "number" && (e3.data.owed === undefined || typeof e3.data.owed === "number" && Number.isFinite(e3.data.owed)) ? null : reject("bad_event", "an accrual needs an account and a time"),
-    apply: (e3, state) => {
-      const at2 = numOf(e3.data.at);
-      sliceRecord(state, "economy", "adb")[str3(e3, "account")] = { from: at2, at: at2, sum: 0, spent: 0, ...typeof e3.data.owed === "number" ? { owed: e3.data.owed } : {} };
-    },
-    describe: () => "Interest period"
-  },
-  { type: FINANCE_EVENTS.decline, validate: () => null, apply: () => {
-    return;
-  }, describe: (e3) => `${str3(e3, "memo")} was declined` }
-];
-
-// src/packs/economy/core/flows.ts
-var DEFAULT_FLOW_MINUTE = 9 * 60;
-
-// src/packs/economy/core/pricing.ts
-var YEAR_MINUTES = 365 * 1440;
-var MARKET_CLOSE = 16 * 60;
-
-// src/packs/economy/core/history.ts
-var SERIES = new WeakMap;
-var WALKS = new WeakMap;
-
-// src/packs/economy/core/assets.ts
-var LISTING_REVERSION = 2;
-
-// src/packs/economy/core/stakes.ts
-var valuing = new Set;
-
-// src/packs/economy/core/credit.ts
-var MONTH = 1440 * 30.4;
-
-// src/engine/places-in-play.ts
-var NONE = Object.freeze({});
-var BASES = new WeakMap;
-var PLAYED = new WeakMap;
-var ROOM_WORDS = Object.fromEntries(["room", "backroom", "kitchen", "bathroom", "bedroom", "office", "hall", "hallway", "corridor", "cellar", "basement", "attic", "garage", "closet", "pantry", "study", "lounge", "den", "loft", "lobby", "storeroom", "stockroom", "washroom", "restroom", "toilet", "stairwell", "landing", "nursery", "library", "parlor", "parlour", "workshop", "laundry"].map((w3) => [stem(w3), true]));
-
-// src/packs/economy/core/cycle.ts
-var STATEMENT_MINUTE = 9 * 60 - 30;
-var DUE_MINUTE = 23 * 60 + 59;
-
-// src/packs/economy/core/winding.ts
-var WIND_FIELDS = {
-  [WINDING_FIELD]: { type: "text", label: "Winding up since (YYYY-MM-DD)", domain: "money", level: 3 },
-  [DISSOLVED_FIELD]: { type: "text", label: "Dissolved on (YYYY-MM-DD)", domain: "money", level: 3 },
-  [MERGED_INTO_FIELD]: { type: "ref", label: "Merged into", ref: COMPANY_KIND2, domain: "money", level: 3 }
-};
-
-// src/packs/economy/core/shares.ts
-var SHARE_UNITS = 1000;
-
-// src/packs/economy/core/taxes.ts
-var CORPORATE_PCT = 21;
-var ESTIMATE_DUE = [
-  { month: 1, months: [9, 10, 11, 12], lastYear: true },
-  { month: 4, months: [1, 2, 3], lastYear: false },
-  { month: 6, months: [4, 5], lastYear: false },
-  { month: 9, months: [6, 7, 8], lastYear: false }
-];
-var ESTIMATE_SCHEDULE = { every: "year", months: ESTIMATE_DUE.map((d3) => d3.month), days: [15], roll: "after" };
-
-// src/packs/economy/core/employment.ts
-var ROUTINE_WINDOW = 14 * MINUTES_PER_DAY;
 
 // src/packs/economy/core/listing.ts
 var LISTING_OFFER_CAP = 1;
@@ -51687,29 +55942,29 @@ function withKey2(values, key, next) {
   return out;
 }
 var money = (key, label) => ({ kind: "money", key, label, min: 0, optional: true });
-var pct = (key, label) => ({ kind: "number", key, label: `${label} (%)`, min: 0, optional: true });
+var pct2 = (key, label) => ({ kind: "number", key, label: `${label} (%)`, min: 0, optional: true });
 var PRODUCT_HEAD = [
   { kind: "text", key: "label", label: "Name" },
   { kind: "enum", key: "class", label: "Class", values: ACCOUNT_CLASSES },
   { kind: "text", key: "institution", label: "Institution", optional: true }
 ];
 var PRODUCT_TAIL = [
-  pct("apr_pct", "APR"),
-  pct("apy_pct", "APY"),
+  pct2("apr_pct", "APR"),
+  pct2("apy_pct", "APY"),
   { kind: "enum", key: "interest", label: "Interest method", values: ["monthly_simple", "average_daily"], optional: true },
-  pct("penalty_apr_pct", "Penalty APR, from 60 days late"),
-  pct("cash_advance_apr_pct", "Cash advance APR"),
+  pct2("penalty_apr_pct", "Penalty APR, from 60 days late"),
+  pct2("cash_advance_apr_pct", "Cash advance APR"),
   { kind: "number", key: "statement_day", label: "Statement day", min: 1, max: 28, step: 1, optional: true },
   { kind: "number", key: "due_days", label: "Days from statement to due date", min: 0, step: 1, optional: true },
-  { kind: "object", key: "minimum", label: "Minimum payment", optional: true, fields: [pct("pct", "Of the statement balance"), money("floor", "At least"), { kind: "bool", key: "plus_interest", label: "Plus the cycle's interest and fees" }] },
+  { kind: "object", key: "minimum", label: "Minimum payment", optional: true, fields: [pct2("pct", "Of the statement balance"), money("floor", "At least"), { kind: "bool", key: "plus_interest", label: "Plus the cycle's interest and fees" }] },
   {
     kind: "object",
     key: "fees",
     label: "Fees",
     optional: true,
-    fields: [money("annual", "Annual"), money("late_first", "Late, first"), money("late_repeat", "Late, again within six cycles"), money("overdraft", "Overdraft item"), money("nsf", "Returned item"), money("atm", "Other banks' machines"), pct("cash_advance_pct", "Cash advance"), money("cash_advance_min", "Cash advance at least"), money("maintenance", "Monthly maintenance"), money("maintenance_waive", "Maintenance waived from a balance of"), money("card_replacement", "Card replacement")]
+    fields: [money("annual", "Annual"), money("late_first", "Late, first"), money("late_repeat", "Late, again within six cycles"), money("overdraft", "Overdraft item"), money("nsf", "Returned item"), money("atm", "Other banks' machines"), pct2("cash_advance_pct", "Cash advance"), money("cash_advance_min", "Cash advance at least"), money("maintenance", "Monthly maintenance"), money("maintenance_waive", "Maintenance waived from a balance of"), money("card_replacement", "Card replacement")]
   },
-  pct("rewards_pct", "Rewards on purchases"),
+  pct2("rewards_pct", "Rewards on purchases"),
   money("daily_purchase_limit", "Daily card purchases"),
   money("daily_atm_limit", "Daily cash machine withdrawals"),
   { kind: "number", key: "hold_days", label: "Days a machine deposit stays on hold", min: 0, step: 1, optional: true },
@@ -51725,12 +55980,12 @@ var ASSET_HEAD = [
   money("price", "Price per unit at the start"),
   { kind: "text", key: "model", label: "Price path", optional: true, hint: "A finance table recipe; empty: the class's" },
   { kind: "number", key: "annual_return_pct", label: "Return a year (%)", optional: true },
-  pct("annual_volatility_pct", "Volatility a year"),
-  pct("yield_pct", "Pays out a year, of its value"),
+  pct2("annual_volatility_pct", "Volatility a year"),
+  pct2("yield_pct", "Pays out a year, of its value"),
   { kind: "number", key: "pays_per_year", label: "Payouts a year", min: 0, step: 1, optional: true },
   { kind: "number", key: "correlation", label: "Follows its class's market (0–1)", min: 0, max: 1, step: 0.05, optional: true },
   money("face", "Bond: face value"),
-  pct("coupon_pct", "Bond: coupon")
+  pct2("coupon_pct", "Bond: coupon")
 ];
 var ASSET_OPTION = [{ kind: "text", key: "underlying", label: "Option: underlying asset id", optional: true }, money("strike", "Option: strike")];
 var ASSET_TAIL = [
@@ -51860,6 +56115,17 @@ function Taxes(props) {
         hint: `What a C corporation pays on its profit, with its state's rate. Empty, it's the federal rate, ${CORPORATE_PCT}%.`,
         issues: lintAt(props.lint, `${CONFIG}.taxes.corporatePct`),
         onChange: setNumber("corporatePct")
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(ChoiceInput, {
+        label: "Tax on kept earnings",
+        value: taxes.penaltyTaxes === true ? "on" : "off",
+        options: [
+          { value: "off", label: "Off" },
+          { value: "on", label: "On" }
+        ],
+        hint: "On: a C corporation that keeps its earnings pays 20% on them each 15 April for the year before: as a personal holding company when 60% of its income is passive and five or fewer people hold over half of it, else above its $250,000 accumulated earnings credit. Its holders can consent to a dividend to clear it. Off, the default: neither tax.",
+        issues: lintAt(props.lint, `${CONFIG}.taxes.penaltyTaxes`),
+        onChange: (next) => props.onChange(withTax(props.config, "penaltyTaxes", next === "on" ? true : undefined))
       }, undefined, false, undefined, this),
       /* @__PURE__ */ u3(NumberInput, {
         label: "FUTA rate before the credit (%)",
@@ -52362,6 +56628,23 @@ function Definitions(props) {
     ]
   }, undefined, true, undefined, this);
 }
+function Books(props) {
+  const value = props.config.depreciation === "straight_line" ? "straight_line" : "none";
+  return /* @__PURE__ */ u3(FormGroup, {
+    title: "Books",
+    children: /* @__PURE__ */ u3(ChoiceInput, {
+      label: "Depreciation",
+      value,
+      options: [
+        { value: "none", label: DEPRECIATION_LABELS.none },
+        { value: "straight_line", label: DEPRECIATION_LABELS.straight_line }
+      ],
+      hint: "None: a project's costs are expenses when paid, so EBITDA equals operating income. Straight-line: what projects capitalize is spread over the asset's useful life from the month after it goes into service, and a mineral interest's cost is depleted by what it produces. Each organization may choose its own.",
+      issues: lintAt(props.lint, `${CONFIG}.depreciation`),
+      onChange: (next) => props.onChange(withKey2(props.config, "depreciation", next === "straight_line" ? "straight_line" : undefined))
+    }, undefined, false, undefined, this)
+  }, undefined, false, undefined, this);
+}
 function EconomyConfig(props) {
   const currency = props.world.currency;
   const calendar2 = props.world.calendar;
@@ -52379,6 +56662,9 @@ function EconomyConfig(props) {
         ...props
       }, undefined, false, undefined, this),
       /* @__PURE__ */ u3(Shares, {
+        ...props
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(Books, {
         ...props
       }, undefined, false, undefined, this),
       /* @__PURE__ */ u3(CashRule, {
@@ -52470,753 +56756,6 @@ function EconomyConfig(props) {
     ]
   }, undefined, true, undefined, this);
 }
-
-// src/packs/economy/ui/nav.tsx
-function sectionPage(...path2) {
-  return { type: "section", path: path2 };
-}
-function detailPage(thing2, id) {
-  return { type: "detail", path: [thing2, id] };
-}
-function actionPage(...path2) {
-  return { type: "action", path: path2 };
-}
-function MoneyPage(props) {
-  const { nav } = props;
-  if (nav.frame === "gm") {
-    return /* @__PURE__ */ u3(GmPage, {
-      name: props.name,
-      title: props.title,
-      subtitle: props.subtitle,
-      backLabel: nav.backLabel ?? "Money",
-      onBack: nav.back,
-      actions: props.actions,
-      children: /* @__PURE__ */ u3("div", {
-        class: "lre-money-page-body",
-        "data-lre-money-page": props.name,
-        children: props.children
-      }, undefined, false, undefined, this)
-    }, undefined, false, undefined, this);
-  }
-  return /* @__PURE__ */ u3("div", {
-    class: "lre-money-page",
-    "data-lre-money-page": props.name,
-    children: [
-      /* @__PURE__ */ u3(PageHeader, {
-        title: props.title,
-        subtitle: props.subtitle,
-        onBack: nav.back,
-        backLabel: nav.backLabel ?? undefined,
-        actions: props.actions
-      }, undefined, false, undefined, this),
-      /* @__PURE__ */ u3("div", {
-        class: "lre-money-page-body",
-        children: props.children
-      }, undefined, false, undefined, this)
-    ]
-  }, undefined, true, undefined, this);
-}
-function Hero(props) {
-  return /* @__PURE__ */ u3("div", {
-    class: "lre-money-hero",
-    children: [
-      /* @__PURE__ */ u3("div", {
-        class: "lre-money-hero-main",
-        children: [
-          /* @__PURE__ */ u3(Stat, {
-            label: props.label,
-            value: props.value,
-            sub: props.sub,
-            tone: props.tone
-          }, undefined, false, undefined, this),
-          props.badges !== undefined ? /* @__PURE__ */ u3("span", {
-            class: "lre-money-hero-badges",
-            children: props.badges
-          }, undefined, false, undefined, this) : null
-        ]
-      }, undefined, true, undefined, this),
-      props.children
-    ]
-  }, undefined, true, undefined, this);
-}
-function Controls(props) {
-  return /* @__PURE__ */ u3("div", {
-    class: "lre-money-controls",
-    "data-lre-money-controls": props.name,
-    children: props.children
-  }, undefined, false, undefined, this);
-}
-function Note2(props) {
-  return /* @__PURE__ */ u3("p", {
-    class: "lre-money-note",
-    children: props.children
-  }, undefined, false, undefined, this);
-}
-function Gone(props) {
-  return /* @__PURE__ */ u3(MoneyPage, {
-    nav: props.nav,
-    name: props.name,
-    title: props.title,
-    children: /* @__PURE__ */ u3(Empty, {
-      icon: props.icon,
-      children: props.children
-    }, undefined, false, undefined, this)
-  }, undefined, false, undefined, this);
-}
-
-// src/packs/economy/ui/requests.ts
-function actionRequest(chatId, body) {
-  return { type: "lre.action", chatId, action: body.action, params: body.params, source: "palette" };
-}
-function amountOf(text, currency) {
-  const cents2 = parseMoneyInput(text, currency);
-  return cents2 !== null && cents2 > 0 ? cents2 : null;
-}
-function transferAction(from, to, cents2) {
-  return { action: FINANCE_ACTIONS.transfer, params: { from, to, amount: cents2 } };
-}
-function payCardAction(account, from, cents2) {
-  const params = { card: account };
-  if (from)
-    params.from = from;
-  if (cents2 !== null)
-    params.amount = cents2;
-  return { action: FINANCE_ACTIONS.payCard, params };
-}
-function cashAction(kind, account, cents2) {
-  return { action: kind === "withdraw" ? FINANCE_ACTIONS.withdraw : FINANCE_ACTIONS.deposit, params: { account, amount: cents2 } };
-}
-function autopayAction(account, mode, from, cents2) {
-  const params = { account, mode };
-  if (mode !== "none" && from)
-    params.from = from;
-  if (mode === "fixed" && cents2 !== null)
-    params.amount = cents2;
-  return { action: FINANCE_ACTIONS.autopay, params };
-}
-function autopayOps(account, was, mode, from, cents2) {
-  const ops = [];
-  if (was?.mode !== mode)
-    ops.push({ op: "set", entity: account, field: "autopay", value: mode });
-  if (mode !== "none" && from && was?.from !== from)
-    ops.push({ op: "set", entity: account, field: "autopay_from", value: from });
-  if (mode === "fixed" && cents2 !== null && was?.cents !== cents2)
-    ops.push({ op: "set", entity: account, field: "autopay_cents", value: cents2 });
-  return ops;
-}
-function cardChanges(state) {
-  switch (state) {
-    case "active":
-      return ["freeze", "lost", "replace"];
-    case "frozen":
-      return ["unfreeze", "lost", "replace"];
-    case "lost":
-      return ["replace"];
-    case "cancelled":
-      return [];
-  }
-}
-function cardAction(card, change) {
-  const action = { freeze: FINANCE_ACTIONS.cardFreeze, unfreeze: FINANCE_ACTIONS.cardUnfreeze, lost: FINANCE_ACTIONS.cardLost, replace: FINANCE_ACTIONS.cardReplace }[change];
-  return { action, params: { card } };
-}
-function blankFlowForm(from) {
-  return { label: "", kind: "transfer", from, to: "", amount: "", every: "month", interval: 1, day: 1, weekday: null, month: null, at: "", start: "", end: "", count: null, roll: "", shortfall: "skip", retryDays: null, retries: null, fallback: "", category: "" };
-}
-function flowFormOf(flow, currency) {
-  const s3 = flow.schedule;
-  const once = typeof s3.once === "string" && s3.once !== "" ? s3.once : null;
-  const fixed = "fixed" in flow.amount ? flow.amount.fixed : null;
-  const decimals = Math.max(0, Math.min(6, Math.trunc(currency.decimals)));
-  return {
-    label: flow.label,
-    kind: flow.kind,
-    from: flow.from,
-    to: flow.to,
-    amount: fixed === null ? "" : (fixed / 10 ** decimals).toFixed(decimals),
-    every: once ? "once" : s3.every ?? "month",
-    interval: s3.interval ?? 1,
-    day: s3.days?.[0] ?? null,
-    weekday: s3.weekdays?.[0] ?? null,
-    month: s3.months?.[0] ?? null,
-    at: once ? once.slice(11, 16) : s3.at ?? "",
-    start: once ? once.slice(0, 10) : flow.start ?? "",
-    end: flow.end ?? "",
-    count: flow.count ?? null,
-    roll: s3.roll ?? "",
-    shortfall: flow.shortfall,
-    retryDays: flow.retry_days ?? null,
-    retries: flow.retries ?? null,
-    fallback: flow.fallback ?? "",
-    category: flow.category ?? ""
-  };
-}
-function flowFormProblem(form, currency, requireAmount) {
-  if (form.label.trim() === "")
-    return "Give it a name.";
-  if (form.from.trim() === "" || form.to.trim() === "")
-    return "Say where the money comes from and where it goes.";
-  if (form.from === form.to)
-    return "It can't pay itself.";
-  if ((requireAmount || form.amount.trim() !== "") && amountOf(form.amount, currency) === null)
-    return "Type an amount above zero.";
-  if (form.every === "once" && !/^\d{4}-\d{2}-\d{2}$/.test(form.start))
-    return "Pick the day it happens.";
-  if (!Number.isInteger(form.interval) || form.interval < 1)
-    return "Repeat every 1 or more.";
-  if ((form.every === "month" || form.every === "year") && form.day !== null && !(form.day === -1 || Number.isInteger(form.day) && form.day >= 1 && form.day <= 31))
-    return "A day of the month is 1–31, or the last day.";
-  if (form.every === "week" && form.weekday === null)
-    return "Pick a weekday.";
-  if (form.every === "year" && form.month === null)
-    return "Pick a month.";
-  if (form.at !== "" && !/^([01]\d|2[0-3]):[0-5]\d$/.test(form.at))
-    return "A time is HH:MM.";
-  if (form.every !== "once" && form.start !== "" && form.end !== "" && form.end < form.start)
-    return "It ends before it starts.";
-  if (form.count !== null && !(Number.isInteger(form.count) && form.count >= 1))
-    return "A count is a whole number from 1.";
-  if (form.shortfall === "fallback" && form.fallback === "")
-    return "Pick the account that pays when this one can't.";
-  if (form.shortfall === "retry" && (form.retryDays !== null && !(Number.isInteger(form.retryDays) && form.retryDays >= 1) || form.retries !== null && !(Number.isInteger(form.retries) && form.retries >= 1)))
-    return "Retries are whole numbers from 1.";
-  return null;
-}
-function flowParams(form, currency) {
-  const params = { label: form.label.trim(), kind: form.kind, from: form.from, to: form.to.trim(), every: form.every, shortfall: form.shortfall };
-  const cents2 = amountOf(form.amount, currency);
-  if (cents2 !== null)
-    params.amount = cents2;
-  if (form.every === "once")
-    params.once = `${form.start}T${form.at || "09:00"}`;
-  else {
-    params.interval = form.interval;
-    if ((form.every === "month" || form.every === "year") && form.day !== null)
-      params.day = form.day;
-    if (form.every === "week" && form.weekday !== null)
-      params.weekday = form.weekday;
-    if (form.every === "year" && form.month !== null)
-      params.month = form.month;
-    if (form.at !== "")
-      params.at = form.at;
-    if (form.start !== "")
-      params.start = form.start;
-    if (form.end !== "")
-      params.end = form.end;
-    if (form.count !== null)
-      params.count = form.count;
-    if (form.roll !== "")
-      params.roll = form.roll;
-  }
-  if (form.shortfall === "retry") {
-    if (form.retryDays !== null)
-      params.retry_days = form.retryDays;
-    if (form.retries !== null)
-      params.retries = form.retries;
-  }
-  if (form.shortfall === "fallback" && form.fallback !== "")
-    params.fallback = form.fallback;
-  if (form.category.trim() !== "")
-    params.category = form.category.trim();
-  return params;
-}
-function flowCreateAction(form, currency) {
-  return { action: FINANCE_ACTIONS.flowCreate, params: flowParams(form, currency) };
-}
-var SCHEDULE_PARAMS = ["every", "interval", "day", "weekday", "month", "at", "once", "roll"];
-var CLEARABLE = ["at", "start", "end", "count", "roll", "retry_days", "retries", "fallback", "category"];
-function flowUpdateAction(flow, form, currency) {
-  const was = flowParams(flowFormOf(flow, currency), currency);
-  const now = flowParams(form, currency);
-  const changed = {};
-  for (const [key, value] of Object.entries(now))
-    if (JSON.stringify(was[key] ?? null) !== JSON.stringify(value))
-      changed[key] = value;
-  if (SCHEDULE_PARAMS.some((key) => (key in changed))) {
-    for (const key of SCHEDULE_PARAMS)
-      if (now[key] !== undefined)
-        changed[key] = now[key];
-  }
-  const clear = CLEARABLE.filter((key) => was[key] !== undefined && now[key] === undefined);
-  if (clear.length > 0)
-    changed.clear = clear.join(",");
-  return Object.keys(changed).length === 0 ? null : { action: FINANCE_ACTIONS.flowUpdate, params: { flow: flow.id, ...changed } };
-}
-function flowStatusAction(flow, change) {
-  return { action: change === "pause" ? FINANCE_ACTIONS.flowPause : change === "resume" ? FINANCE_ACTIONS.flowResume : FINANCE_ACTIONS.flowDelete, params: { flow } };
-}
-function flowFieldsOf(form, currency) {
-  const fields = { flow_kind: form.kind, from: form.from, to: form.to.trim(), shortfall: form.shortfall };
-  const cents2 = amountOf(form.amount, currency);
-  if (cents2 !== null)
-    fields.amount_cents = cents2;
-  if (form.every === "once")
-    fields.once = `${form.start}T${form.at || "09:00"}`;
-  else {
-    fields.every = form.every;
-    fields.interval = form.interval;
-    if ((form.every === "month" || form.every === "year") && form.day !== null)
-      fields.days = [form.day];
-    if (form.every === "week" && form.weekday !== null)
-      fields.weekdays = [form.weekday];
-    if (form.every === "year" && form.month !== null)
-      fields.months = [form.month];
-    if (form.at !== "")
-      fields.at = form.at;
-    if (form.start !== "")
-      fields.start = form.start;
-    if (form.end !== "")
-      fields.end = form.end;
-    if (form.count !== null)
-      fields.count = form.count;
-    if (form.roll !== "")
-      fields.roll = form.roll;
-  }
-  if (form.shortfall === "retry") {
-    if (form.retryDays !== null)
-      fields.retry_days = form.retryDays;
-    if (form.retries !== null)
-      fields.retries = form.retries;
-  }
-  if (form.shortfall === "fallback" && form.fallback !== "")
-    fields.fallback = form.fallback;
-  if (form.category.trim() !== "")
-    fields.category = form.category.trim();
-  return fields;
-}
-function newIdFor(prefix, label, taken2) {
-  const base = `${prefix}_${label.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 32) || "new"}`;
-  if (!taken2.has(base))
-    return base;
-  for (let n5 = 2;; n5 += 1)
-    if (!taken2.has(`${base}_${n5}`))
-      return `${base}_${n5}`;
-}
-function flowSpawnOps(id, form, currency) {
-  const fields = { ...flowFieldsOf(form, currency), status: "active" };
-  return [{ op: "spawn", kind: "flow", name: form.label.trim(), id }, ...Object.entries(fields).map(([field2, value]) => ({ op: "set", entity: id, field: field2, value }))];
-}
-function flowEditOps(flow, form, currency) {
-  const was = flowFieldsOf(flowFormOf(flow, currency), currency);
-  const now = flowFieldsOf(form, currency);
-  const ops = [];
-  for (const [field2, value] of Object.entries(now))
-    if (JSON.stringify(was[field2] ?? null) !== JSON.stringify(value))
-      ops.push({ op: "set", entity: flow.id, field: field2, value });
-  for (const field2 of ["weekdays", "days", "months"])
-    if (was[field2] !== undefined && now[field2] === undefined)
-      ops.push({ op: "set", entity: flow.id, field: field2, value: [] });
-  if (was.once !== undefined && now.once === undefined)
-    ops.push({ op: "set", entity: flow.id, field: "once", value: "" });
-  const name = form.label.trim();
-  const renamed = name !== "" && name !== flow.label;
-  const clear = CLEARABLE.filter((key) => was[key] !== undefined && now[key] === undefined);
-  if (renamed || clear.length > 0)
-    ops.push({ op: "effect", effect: "economy.flow_edit", args: { flow: flow.id, ...renamed ? { name } : {}, ...clear.length > 0 ? { clear: clear.join(",") } : {} } });
-  return ops;
-}
-function flowStatusOps(flow, status) {
-  return [{ op: "set", entity: flow, field: "status", value: status }];
-}
-function applyCreditAction(product, cents2) {
-  return { action: FINANCE_ACTIONS.applyCredit, params: cents2 === null ? { product } : { product, amount: cents2 } };
-}
-function payTiersValue(tiers) {
-  return tiers.map((t3) => ({ use: t3.use, ...t3.min !== undefined ? { min: t3.min } : {}, ...t3.max !== undefined ? { max: t3.max } : {}, ...t3.categories && t3.categories.length > 0 ? { categories: [...t3.categories] } : {}, ...t3.except && t3.except.length > 0 ? { except: [...t3.except] } : {} }));
-}
-function payPrefsAction(tiers) {
-  return { action: FINANCE_ACTIONS.payPrefs, params: { tiers: JSON.stringify(payTiersValue(tiers)) } };
-}
-function payPrefsOps(person3, tiers) {
-  return [{ op: "set", entity: person3, field: "pay_prefs", value: payTiersValue(tiers) }];
-}
-function jobEndAction(job) {
-  return { action: FINANCE_ACTIONS.fire, params: { job } };
-}
-function raiseAction2(job, rate) {
-  return { action: FINANCE_ACTIONS.raise, params: { job, rate } };
-}
-function invoiceIssueAction(business, customer, cents2, memo, days) {
-  const params = { business, ..."id" in customer ? { customer: customer.id } : { customer_name: customer.name.trim() }, amount: cents2 };
-  if (memo.trim() !== "")
-    params.memo = memo.trim();
-  if (days !== null)
-    params.days = days;
-  return { action: FINANCE_ACTIONS.invoiceIssue, params };
-}
-function invoiceAction(invoice, change) {
-  return { action: change === "pay" ? FINANCE_ACTIONS.invoicePay : FINANCE_ACTIONS.invoiceVoid, params: { invoice } };
-}
-function drawAction(business, cents2) {
-  return { action: FINANCE_ACTIONS.draw, params: { business, amount: cents2 } };
-}
-function distributeAction(business, cents2) {
-  return { action: FINANCE_ACTIONS.distribute, params: cents2 === null ? { business } : { business, amount: cents2 } };
-}
-function tradeAction(form, currency) {
-  const params = { side: form.side };
-  if (form.holding !== "")
-    params.holding = form.holding;
-  else if (form.side === "sell")
-    return "Pick what to sell.";
-  else if (form.asset === "")
-    return "Pick what to buy.";
-  else {
-    params.asset = form.asset;
-    if (form.account !== "")
-      params.account = form.account;
-  }
-  if (form.qty !== null) {
-    if (!(form.qty > 0))
-      return "A quantity is above zero.";
-    params.qty = form.qty;
-  } else if (form.amount.trim() !== "") {
-    const cents2 = amountOf(form.amount, currency);
-    if (cents2 === null)
-      return "Type an amount above zero.";
-    params.amount = cents2;
-  } else if (form.side === "buy")
-    return "Say how many, or how much to spend.";
-  if (form.side === "buy" && form.from !== "")
-    params.from = form.from;
-  if (form.side === "sell" && form.to !== "")
-    params.to = form.to;
-  if (form.option && form.holding === "") {
-    const strike = amountOf(form.option.strike, currency);
-    if (strike === null || !/^\d{4}-\d{2}-\d{2}$/.test(form.option.expiry))
-      return "An option needs a strike and an expiry date.";
-    params.right = form.option.right;
-    params.strike = strike;
-    params.expiry = form.option.expiry;
-  }
-  return { action: FINANCE_ACTIONS.trade, params };
-}
-function exerciseAction(holding, qty, opts = {}) {
-  return { action: FINANCE_ACTIONS.exercise, params: { holding, ...qty !== null ? { qty } : {}, ...opts.from ? { from: opts.from } : {}, ...opts.to ? { to: opts.to } : {} } };
-}
-function routeAction(target, to) {
-  return { action: FINANCE_ACTIONS.route, params: { ...target, to } };
-}
-function routeOps(target, party, to) {
-  return [{ op: "effect", effect: "economy.route", args: { ...target, party, to } }];
-}
-function propertyBuyAction(property, price, opts = {}) {
-  return { action: FINANCE_ACTIONS.propertyBuy, params: { property, price, ...opts.from ? { from: opts.from } : {}, ...opts.down !== undefined ? { down: opts.down } : {}, ...opts.termMonths !== undefined ? { term_months: opts.termMonths } : {} } };
-}
-function propertySellAction(property, price, opts = {}) {
-  return { action: FINANCE_ACTIONS.propertySell, params: { property, price, ...opts.buyer ? { buyer: opts.buyer } : {}, ...opts.to ? { to: opts.to } : {} } };
-}
-function leaseStartAction(property, tenant, rent, opts = {}) {
-  return { action: FINANCE_ACTIONS.leaseStart, params: { property, tenant, rent, ...opts.months !== undefined ? { months: opts.months } : {}, ...opts.day !== undefined ? { day: opts.day } : {}, ...opts.unit ? { unit: opts.unit } : {} } };
-}
-function leaseEndAction(lease, on) {
-  return { action: FINANCE_ACTIONS.leaseEnd, params: on ? { lease, on } : { lease } };
-}
-function stakeSellAction(business, share, price, buyer) {
-  return { action: FINANCE_ACTIONS.stakeSell, params: { business, share, price, ...buyer ? { buyer } : {} } };
-}
-function stakeSellUnitsAction(business, units, price, buyer) {
-  return { action: FINANCE_ACTIONS.stakeSell, params: { business, units, price, ...buyer ? { buyer } : {} } };
-}
-function setPriceOps(asset, price) {
-  return [{ op: "effect", effect: "economy.set_price", args: { asset, price } }];
-}
-function closeAccountOps(account) {
-  return [{ op: "effect", effect: "economy.close_account", args: { account } }];
-}
-function releaseHoldOps(account, hold) {
-  return [{ op: "effect", effect: "economy.release_hold", args: { account, hold } }];
-}
-function accountStatusOps(account, status) {
-  return [{ op: "effect", effect: "economy.set_status", args: { account, status } }];
-}
-function jobSpawnOps(id, name, fields) {
-  return [{ op: "spawn", kind: "job", name, id }, ...Object.entries({ ...fields, status: "active" }).map(([field2, value]) => ({ op: "set", entity: id, field: field2, value }))];
-}
-function propertySpawnOps(id, name, owner, value) {
-  return [
-    { op: "spawn", kind: "property", name, id },
-    { op: "set", entity: id, field: "owners", value: [{ party: owner, role: "owner", share: 100 }] },
-    { op: "set", entity: id, field: "value", value }
-  ];
-}
-
-// src/packs/economy/ui/forms.tsx
-function SelectField(props) {
-  const id = P2();
-  return /* @__PURE__ */ u3(Field, {
-    label: props.label,
-    help: props.help,
-    for: id,
-    children: /* @__PURE__ */ u3("select", {
-      id,
-      class: "lre-input",
-      value: props.value,
-      disabled: props.disabled,
-      onChange: (event) => props.onChange(event.currentTarget.value),
-      children: [
-        props.empty !== undefined ? /* @__PURE__ */ u3("option", {
-          value: "",
-          children: props.empty
-        }, undefined, false, undefined, this) : null,
-        props.options.map((o4) => /* @__PURE__ */ u3("option", {
-          value: o4.value,
-          children: o4.label
-        }, o4.value, false, undefined, this))
-      ]
-    }, undefined, true, undefined, this)
-  }, undefined, false, undefined, this);
-}
-function TextField3(props) {
-  const id = P2();
-  return /* @__PURE__ */ u3(Field, {
-    label: props.label,
-    help: props.help,
-    for: id,
-    children: props.type === "date" || props.type === "time" ? /* @__PURE__ */ u3("input", {
-      id,
-      class: "lre-input",
-      type: props.type,
-      value: props.value,
-      onInput: (event) => props.onInput(event.currentTarget.value)
-    }, undefined, false, undefined, this) : /* @__PURE__ */ u3("input", {
-      id,
-      class: "lre-input",
-      type: "text",
-      list: props.list,
-      placeholder: props.placeholder,
-      value: props.value,
-      onInput: (event) => props.onInput(event.currentTarget.value)
-    }, undefined, false, undefined, this)
-  }, undefined, false, undefined, this);
-}
-var FieldValidity = K(null);
-function numberProblem2(label, min, max) {
-  const name = label.replace(/\s*\([^()]*\)$/, "");
-  const range = min !== undefined && max !== undefined ? ` from ${min} to ${max}` : min !== undefined ? ` of ${min} or more` : max !== undefined ? ` of ${max} or less` : "";
-  return `“${name}” takes a number${range}.`;
-}
-function NumberField2(props) {
-  const id = P2();
-  const [text, setText] = d2(props.value === null ? "" : String(props.value));
-  const parsed = text.trim() === "" ? null : Number(text);
-  const bad = parsed !== null && (!Number.isFinite(parsed) || props.min !== undefined && parsed < props.min || props.max !== undefined && parsed > props.max);
-  const reason = bad ? numberProblem2(props.label, props.min, props.max) : null;
-  const mark = w2(FieldValidity);
-  A(() => {
-    mark?.(id, reason);
-    return () => mark?.(id, null);
-  }, [mark, id, reason]);
-  return /* @__PURE__ */ u3(Field, {
-    label: props.label,
-    help: props.help,
-    for: id,
-    children: /* @__PURE__ */ u3("input", {
-      id,
-      class: bad ? "lre-input invalid" : "lre-input",
-      inputMode: "decimal",
-      "aria-invalid": bad || undefined,
-      placeholder: props.placeholder,
-      value: text,
-      onInput: (event) => {
-        const next = event.currentTarget.value;
-        setText(next);
-        const n5 = next.trim() === "" ? null : Number(next);
-        if (n5 === null)
-          props.onChange(null);
-        else if (Number.isFinite(n5) && (props.min === undefined || n5 >= props.min) && (props.max === undefined || n5 <= props.max))
-          props.onChange(n5);
-      }
-    }, undefined, false, undefined, this)
-  }, undefined, false, undefined, this);
-}
-function AmountField(props) {
-  return /* @__PURE__ */ u3(Field, {
-    label: props.label,
-    help: props.help,
-    children: /* @__PURE__ */ u3(MoneyInput, {
-      currency: props.currency,
-      value: props.value,
-      onInput: props.onInput,
-      label: props.label,
-      invalid: props.invalid,
-      placeholder: props.placeholder,
-      unit: props.unit
-    }, undefined, false, undefined, this)
-  }, undefined, false, undefined, this);
-}
-function ChoiceField(props) {
-  const name = P2();
-  return /* @__PURE__ */ u3("fieldset", {
-    class: "lre-money-choices",
-    disabled: props.disabled,
-    children: [
-      /* @__PURE__ */ u3("legend", {
-        class: "lre-money-choices-label",
-        children: props.label
-      }, undefined, false, undefined, this),
-      /* @__PURE__ */ u3("div", {
-        class: "lre-money-choice-list",
-        children: props.options.map((o4) => /* @__PURE__ */ u3("label", {
-          class: "lre-money-choice",
-          children: [
-            /* @__PURE__ */ u3("input", {
-              type: "radio",
-              name,
-              value: o4.value,
-              checked: props.value === o4.value,
-              onChange: () => props.onChange(o4.value)
-            }, undefined, false, undefined, this),
-            /* @__PURE__ */ u3("span", {
-              class: "lre-money-choice-text",
-              children: [
-                /* @__PURE__ */ u3("span", {
-                  class: "lre-money-choice-label",
-                  children: o4.label
-                }, undefined, false, undefined, this),
-                o4.detail !== undefined ? /* @__PURE__ */ u3("span", {
-                  class: "lre-money-choice-detail",
-                  children: o4.detail
-                }, undefined, false, undefined, this) : null
-              ]
-            }, undefined, true, undefined, this)
-          ]
-        }, o4.value, true, undefined, this))
-      }, undefined, false, undefined, this)
-    ]
-  }, undefined, true, undefined, this);
-}
-function ToggleField(props) {
-  return /* @__PURE__ */ u3("label", {
-    class: "lre-money-toggle",
-    children: [
-      /* @__PURE__ */ u3("span", {
-        class: "lre-money-toggle-text",
-        children: [
-          /* @__PURE__ */ u3("span", {
-            children: props.label
-          }, undefined, false, undefined, this),
-          props.help !== undefined ? /* @__PURE__ */ u3("span", {
-            class: "lre-field-help",
-            children: props.help
-          }, undefined, false, undefined, this) : null
-        ]
-      }, undefined, true, undefined, this),
-      /* @__PURE__ */ u3("span", {
-        class: "lre-check",
-        children: /* @__PURE__ */ u3("input", {
-          type: "checkbox",
-          checked: props.checked,
-          disabled: props.disabled,
-          onChange: (event) => props.onChange(event.currentTarget.checked)
-        }, undefined, false, undefined, this)
-      }, undefined, false, undefined, this)
-    ]
-  }, undefined, true, undefined, this);
-}
-function ActionPage(props) {
-  const { nav, controls } = props;
-  const [fields, setFields] = d2(() => new Map);
-  const mark = j2((field2, reason) => {
-    setFields((was) => {
-      if ((was.get(field2) ?? null) === reason)
-        return was;
-      const next = new Map(was);
-      if (reason === null)
-        next.delete(field2);
-      else
-        next.set(field2, reason);
-      return next;
-    });
-  }, []);
-  const offstage = useView()?.controls?.offstage ?? OFFSTAGE_DEFAULTS;
-  const [told, setTold] = d2(null);
-  const preset = controls.mode === "player" && props.action ? tellPreset(props.action.action, props.action.params, offstage, controls.currency.decimals) : null;
-  const tell = preset === null ? undefined : told ?? preset;
-  const reasons = [...new Set([...fields.values(), ...props.problem ? [props.problem] : []])];
-  const blocked = reasons.length > 0;
-  return /* @__PURE__ */ u3(MoneyPage, {
-    nav,
-    name: props.name,
-    title: props.title,
-    subtitle: props.subtitle,
-    children: /* @__PURE__ */ u3(FieldValidity.Provider, {
-      value: mark,
-      children: /* @__PURE__ */ u3("form", {
-        class: "lre-money-form",
-        "data-lre-money-action": props.name,
-        onSubmit: (event) => {
-          event.preventDefault();
-          if (controls.busy || blocked)
-            return;
-          props.submit(tell).then((ok) => ok && nav.back());
-        },
-        children: [
-          props.children,
-          tell !== undefined ? /* @__PURE__ */ u3(ToggleField, {
-            label: TELL_LABEL,
-            help: TELL_HELP,
-            checked: tell,
-            disabled: controls.busy,
-            onChange: setTold
-          }, undefined, false, undefined, this) : null,
-          reasons.map((r3) => /* @__PURE__ */ u3("p", {
-            class: "lre-money-problem",
-            children: r3
-          }, r3, false, undefined, this)),
-          /* @__PURE__ */ u3(Button, {
-            type: "submit",
-            variant: props.danger ? "danger" : "primary",
-            block: true,
-            busy: controls.busy,
-            disabled: blocked,
-            children: props.go
-          }, undefined, false, undefined, this)
-        ]
-      }, undefined, true, undefined, this)
-    }, undefined, false, undefined, this)
-  }, undefined, false, undefined, this);
-}
-function amountProblem(text, currency, what, needed = true) {
-  if (text.trim() === "")
-    return needed ? `Type ${what}.` : null;
-  return amountOf(text, currency) === null ? "Type an amount above zero." : null;
-}
-function unchangedProblem(now, what) {
-  return `It's ${humanize(now).toLowerCase()} now: pick another ${what}.`;
-}
-function AmountPage(props) {
-  const { controls } = props;
-  const [text, setText] = d2(props.initial ?? "");
-  const empty = text.trim() === "";
-  const cents2 = empty ? null : amountOf(text, controls.currency);
-  return /* @__PURE__ */ u3(ActionPage, {
-    nav: props.nav,
-    controls,
-    name: props.name,
-    title: props.title,
-    subtitle: props.subtitle,
-    go: props.go,
-    danger: props.danger,
-    problem: amountProblem(text, controls.currency, "an amount", props.optional === undefined),
-    action: props.action?.(cents2) ?? null,
-    submit: (tell) => props.submit(cents2, tell),
-    children: [
-      props.children,
-      /* @__PURE__ */ u3(AmountField, {
-        label: props.label,
-        value: text,
-        currency: controls.currency,
-        onInput: setText,
-        invalid: !empty && cents2 === null,
-        placeholder: props.optional,
-        help: props.help
-      }, undefined, false, undefined, this)
-    ]
-  }, undefined, true, undefined, this);
-}
-var WEEKDAY_CHOICES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"].map((label, i3) => ({ value: String(i3), label }));
-var MONTH_CHOICES = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"].map((label, i3) => ({ value: String(i3 + 1), label }));
 
 // src/packs/economy/ui/pay-prefs.tsx
 var PAY_METHODS = [
@@ -53447,7 +56986,7 @@ function monthDays(text) {
   const days = parts.map(Number);
   return days.every((d3) => Number.isInteger(d3) && (d3 === -1 || d3 >= 1 && d3 <= 31)) ? [...new Set(days)].sort((a3, b3) => a3 - b3) : null;
 }
-var textOf = (v6) => typeof v6 === "string" ? v6 : "";
+var textOf2 = (v6) => typeof v6 === "string" ? v6 : "";
 var isObject2 = (v6) => isRecord(v6);
 function nameOf5(doc, id) {
   return (hasOwn(doc.entities, id) ? doc.entities[id]?.name : undefined) || id;
@@ -53653,13 +57192,13 @@ function OwnersField(p3) {
     noun: "owner",
     blank: { party: "", role: "owner" },
     keys: ["party", "role", "share"],
-    title: (o4, i3) => textOf(o4.party) ? nameOf5(p3.doc, textOf(o4.party)) : `Owner ${i3 + 1}`,
-    summary: (o4) => line2(humanize(textOf(o4.role) || "owner"), typeof o4.share === "number" ? `${o4.share}% of its worth` : null),
+    title: (o4, i3) => textOf2(o4.party) ? nameOf5(p3.doc, textOf2(o4.party)) : `Owner ${i3 + 1}`,
+    summary: (o4) => line2(humanize(textOf2(o4.role) || "owner"), typeof o4.share === "number" ? `${o4.share}% of its worth` : null),
     sheet: (o4, set, path2) => /* @__PURE__ */ u3(M, {
       children: [
         /* @__PURE__ */ u3(PickField, {
           label: "Who",
-          value: textOf(o4.party),
+          value: textOf2(o4.party),
           options: parties,
           placeholder: "Choose who",
           issues: lintAt(p3.lint, `${path2}.party`),
@@ -53667,7 +57206,7 @@ function OwnersField(p3) {
         }, undefined, false, undefined, this),
         /* @__PURE__ */ u3(ChoiceInput, {
           label: "Role",
-          value: textOf(o4.role) || "owner",
+          value: textOf2(o4.role) || "owner",
           options: OWNER_ROLE_CHOICES,
           issues: lintAt(p3.lint, `${path2}.role`),
           onChange: (role) => {
@@ -53694,7 +57233,7 @@ function ProductField(p3) {
   const products = p3.doc.packs.economy?.config.products;
   const own2 = isRecord(products) ? Object.entries(products).map(([id, def2]) => ({ value: id, label: isRecord(def2) && typeof def2.label === "string" ? def2.label : id, sublabel: "The world's" })) : [];
   const classes = ACCOUNT_CLASSES.map((c3) => ({ value: c3, label: CLASS_TRAITS[c3].label, sublabel: "Built in" }));
-  const value = textOf(p3.value);
+  const value = textOf2(p3.value);
   const known = value === "" || [...own2, ...classes].some((c3) => c3.value === value);
   return /* @__PURE__ */ u3(PickField, {
     label: labelOf2(p3, true),
@@ -53716,13 +57255,13 @@ function SplitsField(p3) {
     blank: { to: "", pct: 10 },
     keys: ["to", "cents", "pct"],
     help: "Fixed amounts go first, then percentages of what's left; the rest goes to the main account",
-    title: (s3, i3) => textOf(s3.to) ? nameOf5(p3.doc, textOf(s3.to)) : `Split ${i3 + 1}`,
+    title: (s3, i3) => textOf2(s3.to) ? nameOf5(p3.doc, textOf2(s3.to)) : `Split ${i3 + 1}`,
     summary: (s3) => typeof s3.cents === "number" ? formatMoney(s3.cents, currency) : typeof s3.pct === "number" ? `${s3.pct}% of what's left` : "",
     sheet: (s3, set, path2) => /* @__PURE__ */ u3(M, {
       children: [
         /* @__PURE__ */ u3(PickField, {
           label: "To",
-          value: textOf(s3.to),
+          value: textOf2(s3.to),
           options: accounts,
           placeholder: "Choose an account",
           issues: lintAt(p3.lint, `${path2}.to`),
@@ -53745,7 +57284,7 @@ function SplitsField(p3) {
           optional: true,
           hint: "Of what's left after the fixed amounts; setting one clears the other",
           issues: lintAt(p3.lint, `${path2}.pct`),
-          onChange: (pct2) => set(compact3({ ...s3, pct: pct2, cents: pct2 === undefined ? s3.cents : undefined }))
+          onChange: (pct3) => set(compact3({ ...s3, pct: pct3, cents: pct3 === undefined ? s3.cents : undefined }))
         }, undefined, false, undefined, this)
       ]
     }, undefined, true, undefined, this),
@@ -53787,13 +57326,13 @@ function SharesField(p3) {
     foot: entries.length > 0 ? /* @__PURE__ */ u3(SharesTotal, {
       total
     }, undefined, false, undefined, this) : null,
-    title: (s3, i3) => textOf(s3.party) ? nameOf5(p3.doc, textOf(s3.party)) : `Share ${i3 + 1}`,
-    summary: (s3) => line2(`${typeof s3.pct === "number" ? s3.pct : 0}%`, textOf(s3.from) ? `paid from ${nameOf5(p3.doc, textOf(s3.from))}` : null),
+    title: (s3, i3) => textOf2(s3.party) ? nameOf5(p3.doc, textOf2(s3.party)) : `Share ${i3 + 1}`,
+    summary: (s3) => line2(`${typeof s3.pct === "number" ? s3.pct : 0}%`, textOf2(s3.from) ? `paid from ${nameOf5(p3.doc, textOf2(s3.from))}` : null),
     sheet: (s3, set, path2) => /* @__PURE__ */ u3(M, {
       children: [
         /* @__PURE__ */ u3(PickField, {
           label: "Who",
-          value: textOf(s3.party),
+          value: textOf2(s3.party),
           options: parties,
           placeholder: "Choose who",
           issues: lintAt(p3.lint, `${path2}.party`),
@@ -53807,11 +57346,11 @@ function SharesField(p3) {
           optional: true,
           hint: "Empty is 0",
           issues: lintAt(p3.lint, `${path2}.pct`),
-          onChange: (pct2) => set({ ...s3, pct: typeof pct2 === "number" ? pct2 : 0 })
+          onChange: (pct3) => set({ ...s3, pct: typeof pct3 === "number" ? pct3 : 0 })
         }, undefined, false, undefined, this),
         /* @__PURE__ */ u3(PickField, {
           label: "Paid from",
-          value: textOf(s3.from),
+          value: textOf2(s3.from),
           none: "As their preferences choose",
           options: accounts,
           issues: lintAt(p3.lint, `${path2}.from`),
@@ -53934,7 +57473,7 @@ function LotsField(p3) {
     blank: { qty: 1, cost: 0, at: p3.doc.start.at.slice(0, 10) },
     keys: ["qty", "cost", "at"],
     title: (l3, i3) => typeof l3.qty === "number" ? `${l3.qty} ${l3.qty === 1 ? "unit" : "units"}` : `Lot ${i3 + 1}`,
-    summary: (l3) => line2(typeof l3.cost === "number" ? `${formatMoney(l3.cost, currency)} in all` : null, textOf(l3.at) ? `bought ${textOf(l3.at).slice(0, 10)}` : null),
+    summary: (l3) => line2(typeof l3.cost === "number" ? `${formatMoney(l3.cost, currency)} in all` : null, textOf2(l3.at) ? `bought ${textOf2(l3.at).slice(0, 10)}` : null),
     sheet: (l3, set, path2) => /* @__PURE__ */ u3(M, {
       children: [
         /* @__PURE__ */ u3(NumberInput, {
@@ -53956,10 +57495,10 @@ function LotsField(p3) {
         }, undefined, false, undefined, this),
         /* @__PURE__ */ u3(DateInput, {
           label: "Bought",
-          value: textOf(l3.at).slice(0, 10),
+          value: textOf2(l3.at).slice(0, 10),
           calendar: p3.doc.calendar,
           issues: lintAt(p3.lint, `${path2}.at`),
-          onChange: (at2) => set({ ...l3, at: textOf(at2) })
+          onChange: (at2) => set({ ...l3, at: textOf2(at2) })
         }, undefined, false, undefined, this)
       ]
     }, undefined, true, undefined, this),
@@ -53970,7 +57509,7 @@ function RouteField(p3) {
   const accounts = entityChoices(p3.doc, ["account"]);
   return /* @__PURE__ */ u3(PickField, {
     label: labelOf2(p3, true),
-    value: textOf(p3.value),
+    value: textOf2(p3.value),
     none: "The usual place (its account's cash, else the deposit account)",
     options: [{ value: "reinvest", label: "Reinvested" }, ...accounts],
     help: helpOf(notesOf(p3.def)),
@@ -53981,7 +57520,7 @@ function RouteField(p3) {
 function AssetField(p3) {
   const assets = p3.doc.packs.economy?.config.assets;
   const own2 = isRecord(assets) ? Object.entries(assets).map(([id, def2]) => ({ value: id, label: isRecord(def2) && typeof def2.label === "string" ? def2.label : id, ...isRecord(def2) && typeof def2.class === "string" ? { sublabel: humanize(def2.class) } : {} })) : [];
-  const value = textOf(p3.value);
+  const value = textOf2(p3.value);
   return /* @__PURE__ */ u3(PickField, {
     label: labelOf2(p3),
     value,
@@ -54002,19 +57541,19 @@ function DeductionsField(p3) {
     noun: "deduction",
     blank: { label: "401(k)", kind: "retirement", pretax: true, pct: 5 },
     keys: ["label", "kind", "pretax", "cents", "pct", "match_pct", "to"],
-    title: (d3, i3) => textOf(d3.label) || `Deduction ${i3 + 1}`,
-    summary: (d3) => line2(humanize(textOf(d3.kind) || "other"), typeof d3.cents === "number" ? `${formatMoney(d3.cents, currency)} a payday` : typeof d3.pct === "number" ? `${d3.pct}% of pay` : null, d3.pretax === true ? "before income tax" : null, typeof d3.match_pct === "number" ? `matched ${d3.match_pct}%` : null, textOf(d3.to) ? `to ${nameOf5(p3.doc, textOf(d3.to))}` : null),
+    title: (d3, i3) => textOf2(d3.label) || `Deduction ${i3 + 1}`,
+    summary: (d3) => line2(humanize(textOf2(d3.kind) || "other"), typeof d3.cents === "number" ? `${formatMoney(d3.cents, currency)} a payday` : typeof d3.pct === "number" ? `${d3.pct}% of pay` : null, d3.pretax === true ? "before income tax" : null, typeof d3.match_pct === "number" ? `matched ${d3.match_pct}%` : null, textOf2(d3.to) ? `to ${nameOf5(p3.doc, textOf2(d3.to))}` : null),
     sheet: (d3, set, path2) => /* @__PURE__ */ u3(M, {
       children: [
         /* @__PURE__ */ u3(TextInput, {
           label: "Name",
           value: d3.label,
           issues: lintAt(p3.lint, `${path2}.label`),
-          onChange: (name) => set({ ...d3, label: textOf(name) })
+          onChange: (name) => set({ ...d3, label: textOf2(name) })
         }, undefined, false, undefined, this),
         /* @__PURE__ */ u3(ChoiceInput, {
           label: "Kind",
-          value: textOf(d3.kind) || "other",
+          value: textOf2(d3.kind) || "other",
           options: DEDUCTION_KINDS,
           issues: lintAt(p3.lint, `${path2}.kind`),
           onChange: (kind) => {
@@ -54045,7 +57584,7 @@ function DeductionsField(p3) {
           optional: true,
           hint: "Setting one clears the other",
           issues: lintAt(p3.lint, `${path2}.pct`),
-          onChange: (pct2) => set(compact3({ ...d3, pct: pct2, cents: pct2 === undefined ? d3.cents : undefined }))
+          onChange: (pct3) => set(compact3({ ...d3, pct: pct3, cents: pct3 === undefined ? d3.cents : undefined }))
         }, undefined, false, undefined, this),
         /* @__PURE__ */ u3(NumberInput, {
           label: "Employer match (% of pay)",
@@ -54058,7 +57597,7 @@ function DeductionsField(p3) {
         }, undefined, false, undefined, this),
         /* @__PURE__ */ u3(PickField, {
           label: "Goes to",
-          value: textOf(d3.to),
+          value: textOf2(d3.to),
           none: "An outside payee",
           options: accounts,
           issues: lintAt(p3.lint, `${path2}.to`),
@@ -54193,10 +57732,10 @@ function PayPrefsField(p3) {
   }, undefined, false, undefined, this);
 }
 function draftClassOf(doc, fields) {
-  const product = textOf(fields.product);
+  const product = textOf2(fields.product);
   const products = doc.packs.economy?.config.products;
   const def2 = isRecord(products) && product !== "" ? products[product] : undefined;
-  const cls = isRecord(def2) ? def2.class : product !== "" ? product : LEGACY_TYPE_CLASS[textOf(fields.type)];
+  const cls = isRecord(def2) ? def2.class : product !== "" ? product : LEGACY_TYPE_CLASS[textOf2(fields.type)];
   return isAccountClass(cls) ? cls : null;
 }
 function OpeningField(p3) {
@@ -54290,7 +57829,7 @@ function AtmField(p3) {
         value: atm.bank,
         hint: "Its customers pay no out-of-network fee",
         issues: lintAt(p3.lint, `${p3.path}.bank`),
-        onChange: (bank) => set({ bank: textOf(bank) })
+        onChange: (bank) => set({ bank: textOf2(bank) })
       }, undefined, false, undefined, this),
       /* @__PURE__ */ u3(MinorMoneyInput, {
         label: "Surcharge",
@@ -54351,7 +57890,7 @@ function BranchField(p3) {
         value: branch.bank,
         hint: "Its customers withdraw and deposit at the counter",
         issues: lintAt(p3.lint, `${p3.path}.bank`),
-        onChange: (bank) => p3.onChange({ bank: textOf(bank) })
+        onChange: (bank) => p3.onChange({ bank: textOf2(bank) })
       }, undefined, false, undefined, this),
       /* @__PURE__ */ u3(Issues, {
         issues: p3.lint.filter((issue) => !under2(issue, `${p3.path}.bank`))
@@ -54374,6 +57913,42 @@ var MONEY_PLACE_FIELDS = [
   { field: "branch", label: "Bank branch", component: BranchField }
 ];
 
+// src/shared/tax-year.ts
+var objOf2 = (v6) => typeof v6 === "object" && v6 !== null && !Array.isArray(v6) ? v6 : null;
+var n5 = (v6) => typeof v6 === "number" && Number.isFinite(v6) ? v6 : 0;
+function decodeTaxesExtra(value) {
+  const o4 = objOf2(value) ?? {};
+  const p3 = objOf2(o4.penalty);
+  const last = objOf2(p3?.last);
+  const c3 = objOf2(o4.carry);
+  const f3 = objOf2(o4.foundation);
+  const fl = objOf2(f3?.last);
+  const s3 = objOf2(o4.scorp);
+  return {
+    penalty: p3 ? {
+      on: p3.on === true,
+      last: last ? { year: n5(last.year), kind: last.kind === "phc" ? "phc" : "aet", kept: n5(last.kept), credit: n5(last.credit), base: n5(last.base), cents: n5(last.cents), consent: n5(last.consent), passivePct: n5(last.passivePct), top5: n5(last.top5), paid: last.paid === true } : null,
+      ep: n5(p3.ep)
+    } : null,
+    carry: c3 ? { nol: n5(c3.nol), capitalLoss: n5(c3.capitalLoss), gifts: n5(c3.gifts) } : null,
+    foundation: f3 ? {
+      payoutPct: n5(f3.payoutPct),
+      excisePct: n5(f3.excisePct),
+      undistributedPct: n5(f3.undistributedPct),
+      donorLimitPct: n5(f3.donorLimitPct),
+      year: n5(f3.year),
+      assets: n5(f3.assets),
+      payoutSoFar: n5(f3.payoutSoFar),
+      granted: n5(f3.granted),
+      lastShortfall: n5(f3.lastShortfall),
+      leftOfLast: n5(f3.leftOfLast),
+      last: fl ? { year: n5(fl.year), assets: n5(fl.assets), payout: n5(fl.payout), grants: n5(fl.grants), shortfall: n5(fl.shortfall), nii: n5(fl.nii), excise: n5(fl.excise), undistributed: n5(fl.undistributed), tax: n5(fl.tax) } : null,
+      due: typeof f3.due === "number" ? f3.due : null
+    } : null,
+    scorp: s3 ? { holders: n5(s3.holders), max: n5(s3.max), problem: typeof s3.problem === "string" ? s3.problem : null } : null
+  };
+}
+
 // src/packs/economy/ui/decode.ts
 function nullableNum(value) {
   return optNum(value) ?? null;
@@ -54384,7 +57959,47 @@ function nullableStr(value) {
 function nullableOf(value, values) {
   return values.find((v6) => v6 === value) ?? null;
 }
-function numbers(value) {
+var INCOME_CLASSES = ["revenue", "cogs", "opex", "interest", "investment", "income_tax", "depreciation", "depletion"];
+var CASH_LINE_SECTIONS = ["operating", "investing", "financing", "owners", "correction", "opening"];
+function incomeStatement(i3) {
+  const r3 = i3 ?? {};
+  const m2 = obj(r3.margins) ?? {};
+  return {
+    revenue: num(r3.revenue),
+    cogs: num(r3.cogs),
+    grossProfit: num(r3.grossProfit),
+    opex: num(r3.opex),
+    depreciation: num(r3.depreciation),
+    depletion: num(r3.depletion),
+    operatingIncome: num(r3.operatingIncome),
+    ebitda: num(r3.ebitda),
+    interest: num(r3.interest),
+    investmentIncome: num(r3.investmentIncome),
+    preTax: num(r3.preTax),
+    tax: num(r3.tax),
+    netIncome: num(r3.netIncome),
+    margins: { gross: nullableNum(m2.gross), operating: nullableNum(m2.operating), ebitda: nullableNum(m2.ebitda), net: nullableNum(m2.net) },
+    lines: list(r3.lines, (l3) => ({ category: str(l3.category), label: str(l3.label), class: oneOf(l3.class, INCOME_CLASSES, "opex"), cents: num(l3.cents) }))
+  };
+}
+function cashFlowStatement(c3) {
+  const r3 = c3 ?? {};
+  return { operating: num(r3.operating), investing: num(r3.investing), financing: num(r3.financing), owners: num(r3.owners), corrections: num(r3.corrections), openings: num(r3.openings), change: num(r3.change), start: num(r3.start), end: num(r3.end), lines: list(r3.lines, (l3) => ({ section: oneOf(l3.section, CASH_LINE_SECTIONS, "operating"), label: str(l3.label), cents: num(l3.cents) })) };
+}
+function decodeStatements(value) {
+  const s3 = obj(value);
+  if (!s3)
+    return;
+  const balance2 = obj(s3.balance) ?? {};
+  return {
+    kind: s3.kind === "personal" ? "personal" : "books",
+    depreciation: oneOf(s3.depreciation, DEPRECIATION_METHODS, "none"),
+    ebitdaNote: nullableStr(s3.ebitdaNote),
+    periods: list(s3.periods, (p3) => ({ id: oneOf(p3.id, STATEMENT_PERIODS, "month"), label: str(p3.label), from: str(p3.from), to: str(p3.to), income: incomeStatement(obj(p3.income)), cash: cashFlowStatement(obj(p3.cash)) })),
+    balance: { assets: num(balance2.assets), liabilities: num(balance2.liabilities), equity: num(balance2.equity), lines: list(balance2.lines, (b3) => ({ label: str(b3.label), cents: num(b3.cents), ...b3.vehicle === true ? { vehicle: true } : {} })) }
+  };
+}
+function numbers2(value) {
   return Array.isArray(value) ? value.filter((v6) => typeof v6 === "number" && Number.isFinite(v6)) : [];
 }
 function idName(value) {
@@ -54536,11 +58151,11 @@ function flowSchedule(value) {
   if (typeof o4.interval === "number")
     out.interval = o4.interval;
   if (Array.isArray(o4.weekdays))
-    out.weekdays = numbers(o4.weekdays);
+    out.weekdays = numbers2(o4.weekdays);
   if (Array.isArray(o4.days))
-    out.days = numbers(o4.days);
+    out.days = numbers2(o4.days);
   if (Array.isArray(o4.months))
-    out.months = numbers(o4.months);
+    out.months = numbers2(o4.months);
   if (Array.isArray(o4.except))
     out.except = strings(o4.except);
   const roll = nullableOf(o4.roll, ["none", "before", "after"]);
@@ -54724,6 +58339,10 @@ function payTier(o4) {
     ...Array.isArray(o4.except) ? { except: strings(o4.except) } : {}
   };
 }
+function statementsField(value) {
+  const statements = decodeStatements(value);
+  return statements ? { statements } : {};
+}
 function decodeFinanceView(value) {
   if (!isRecord(value) || typeof value.party !== "string" || typeof value.level !== "number")
     return null;
@@ -54792,7 +58411,8 @@ function decodeFinanceView(value) {
         } : null),
         employees: list(b3.employees, job),
         taxes: list(b3.taxes, (t3) => ({ label: str(t3.label), cents: num(t3.cents), due: nullableStr(t3.due) })),
-        route: distributionRoute(b3.route)
+        route: distributionRoute(b3.route),
+        ...statementsField(b3.statements)
       };
     }),
     investments: investments ? {
@@ -54820,10 +58440,12 @@ function decodeFinanceView(value) {
       monthly: { total: num(obj(household.monthly)?.total), parts: list(obj(household.monthly)?.parts, (p3) => typeof p3.id === "string" || p3.id === null ? { id: typeof p3.id === "string" ? p3.id : null, name: str(p3.name, typeof p3.id === "string" ? p3.id : "someone"), cents: num(p3.cents) } : null) }
     } : null,
     recent: list(value.recent, journalLine),
-    notes: list(value.notes, (n5) => ({ at: str(n5.at), text: str(n5.text) })),
+    notes: list(value.notes, (n6) => ({ at: str(n6.at), text: str(n6.text) })),
     payPrefs: list(value.payPrefs, payTier),
     paysFor: list(value.paysFor, (p3) => typeof p3.from === "string" ? { from: p3.from, to: strings(p3.to) } : null),
-    ownKeys: strings(value.ownKeys)
+    ownKeys: strings(value.ownKeys),
+    ...statementsField(value.statements),
+    ...Array.isArray(value.streams) ? { streams: value.streams.filter(isRecord) } : {}
   };
 }
 function decodeUnemployment(value) {
@@ -54920,7 +58542,8 @@ function decodeTaxes(value) {
     statuses: Array.isArray(o4.statuses) ? list(o4.statuses, (s3) => typeof s3.id === "string" ? { id: s3.id, name: str(s3.name, s3.id), code: str(s3.code) } : null) : null,
     consolidation: c3 ? { elected: bool(c3.elected), members: list(c3.members, (m2) => ({ name: str(m2.name, "a company"), votes: num(m2.votes), share: num(m2.share) })), profit: nullableNum(c3.profit), tax: nullableNum(c3.tax) } : null,
     filedBy: typeof o4.filedBy === "string" ? o4.filedBy : null,
-    acts: a3 ? { consolidate: typeof a3.consolidate === "string" ? a3.consolidate : null } : null
+    acts: a3 ? { consolidate: typeof a3.consolidate === "string" ? a3.consolidate : null } : null,
+    ...decodeTaxesExtra(o4)
   };
 }
 
@@ -55042,7 +58665,7 @@ function standingPayments(view) {
 function invoicesToPay(view) {
   return view.flows.filter((f3) => f3.source === "invoice" && f3.payer === view.party);
 }
-var GROUP_LABELS = { cash: "Cash", banking: "Bank accounts", credit: "Cards and credit lines", loans: "Loans", investing: "Investment accounts" };
+var GROUP_LABELS = { cash: "Cash", banking: "Bank accounts", credit: "Cards and credit lines", loans: "Loans", lent: "Loans you made", investing: "Investment accounts" };
 function groupOf(account2) {
   const t3 = CLASS_TRAITS[account2.class];
   if (t3.cash)
@@ -55053,10 +58676,12 @@ function groupOf(account2) {
     return "loans";
   if (t3.revolving)
     return "credit";
+  if (t3.receivable)
+    return "lent";
   return "banking";
 }
 function accountGroups(accounts) {
-  const order = ["cash", "banking", "credit", "loans", "investing"];
+  const order = ["cash", "banking", "credit", "loans", "lent", "investing"];
   return order.map((group) => ({ group, label: GROUP_LABELS[group], accounts: accounts.filter((a3) => groupOf(a3) === group) })).filter((g2) => g2.accounts.length > 0);
 }
 function viewAccounts(view) {
@@ -55213,8 +58838,8 @@ function endableLeases(view, property2) {
 }
 function mortgageTermChoices(property2) {
   return (property2.mortgageTerms ?? []).map((t3) => {
-    const [n5, unit2] = t3.months % 12 === 0 ? [t3.months / 12, "year"] : [t3.months, "month"];
-    return { value: String(t3.months), label: `${n5} ${unit2}${n5 === 1 ? "" : "s"}`, ...t3.usual ? { detail: "The usual" } : {} };
+    const [n6, unit2] = t3.months % 12 === 0 ? [t3.months / 12, "year"] : [t3.months, "month"];
+    return { value: String(t3.months), label: `${n6} ${unit2}${n6 === 1 ? "" : "s"}`, ...t3.usual ? { detail: "The usual" } : {} };
   });
 }
 function flowSources(view) {
@@ -55496,7 +59121,7 @@ function shown(field2, editor) {
     return value ? "Yes" : "No";
   return typeof value === "string" ? value : JSON.stringify(value);
 }
-function textOf2(field2, currency) {
+function textOf3(field2, currency) {
   const value = field2.value;
   if (field2.type === "money" && typeof value === "number")
     return formatMoneyInput(value, currency);
@@ -55519,7 +59144,7 @@ function parse(entity2, field2, text, currency) {
 function boundsOf(field2, currency) {
   if (field2.min === undefined && field2.max === undefined)
     return null;
-  const end = (n5) => n5 === undefined ? "…" : field2.type === "money" ? formatMoney(n5, currency) : String(n5);
+  const end = (n6) => n6 === undefined ? "…" : field2.type === "money" ? formatMoney(n6, currency) : String(n6);
   return `${end(field2.min)}–${end(field2.max)}`;
 }
 function FieldRow(props) {
@@ -55544,7 +59169,7 @@ function FieldRow(props) {
     const edit = field2.derived || field2.follows !== undefined ? undefined : /* @__PURE__ */ u3(IconButton, {
       icon: "edit",
       label: `Edit ${field2.label}`,
-      onClick: () => setText(textOf2(field2, editor.currency))
+      onClick: () => setText(textOf3(field2, editor.currency))
     }, undefined, false, undefined, this);
     return /* @__PURE__ */ u3(ActionRow, {
       title: label,
@@ -55662,10 +59287,10 @@ function FieldRow(props) {
 }
 function AddToValue(props) {
   const { entity: entity2, editor } = props;
-  const numbers2 = entity2.fields.filter((f3) => !f3.derived && f3.follows === undefined && (f3.type === "number" || f3.type === "money" || f3.type === "duration"));
-  const [fieldId, setFieldId] = d2(numbers2[0]?.id ?? "");
+  const numbers3 = entity2.fields.filter((f3) => !f3.derived && f3.follows === undefined && (f3.type === "number" || f3.type === "money" || f3.type === "duration"));
+  const [fieldId, setFieldId] = d2(numbers3[0]?.id ?? "");
   const [delta, setDelta] = d2("");
-  const field2 = numbers2.find((f3) => f3.id === fieldId) ?? numbers2[0];
+  const field2 = numbers3.find((f3) => f3.id === fieldId) ?? numbers3[0];
   if (!field2)
     return null;
   const amount2 = field2.type === "money" ? parseMoneyInput(delta, editor.currency) : delta.trim() === "" || !Number.isFinite(Number(delta)) ? null : Number(delta);
@@ -55686,7 +59311,7 @@ function AddToValue(props) {
             "aria-label": "Value to add to",
             value: field2.id,
             onChange: (event) => (setFieldId(event.currentTarget.value), setDelta("")),
-            children: numbers2.map((f3) => /* @__PURE__ */ u3("option", {
+            children: numbers3.map((f3) => /* @__PURE__ */ u3("option", {
               value: f3.id,
               children: f3.label
             }, f3.id, false, undefined, this))
@@ -56069,14 +59694,14 @@ function Simulation(props) {
                     value: "",
                     children: "From the tier"
                   }, undefined, false, undefined, this),
-                  LEVELS5.map((n5) => /* @__PURE__ */ u3("option", {
-                    value: String(n5),
+                  LEVELS5.map((n6) => /* @__PURE__ */ u3("option", {
+                    value: String(n6),
                     children: [
-                      n5,
+                      n6,
                       " · ",
-                      LEVEL_LABEL[n5]
+                      LEVEL_LABEL[n6]
                     ]
-                  }, n5, true, undefined, this))
+                  }, n6, true, undefined, this))
                 ]
               }, undefined, true, undefined, this)
             ]
@@ -56475,8 +60100,291 @@ function FieldsPage(props) {
   }, undefined, false, undefined, this);
 }
 
+// src/packs/economy/ui/statements.tsx
+var PERIOD_SHORT = { month: "Month", last_month: "Last month", ytd: "Year", twelve_months: "12 months" };
+var CASH_LABELS = { operating: "Operating", investing: "Investing", financing: "Financing", owners: "With the owners" };
+function tone(cents2) {
+  return cents2 > 0 ? "pos" : cents2 < 0 ? "neg" : undefined;
+}
+function margin(pct3) {
+  return pct3 === null ? undefined : `${pct3}% of revenue`;
+}
+function LineRows(props) {
+  return /* @__PURE__ */ u3(M, {
+    children: props.lines.filter((l3) => props.classes.includes(l3.class)).map((l3) => /* @__PURE__ */ u3(ListRow, {
+      title: l3.label,
+      value: props.fmt(l3.cents),
+      valueTone: "muted"
+    }, `${l3.class}:${l3.category}`, false, undefined, this))
+  }, undefined, false, undefined, this);
+}
+function BooksIncome(props) {
+  const { income: i3, fmt } = props;
+  const writedowns = props.on || i3.depreciation !== 0 || i3.depletion !== 0;
+  return /* @__PURE__ */ u3(Section, {
+    title: `Income statement · ${props.label}`,
+    flush: true,
+    children: [
+      /* @__PURE__ */ u3(List, {
+        children: [
+          /* @__PURE__ */ u3(ListRow, {
+            title: "Revenue",
+            value: fmt(i3.revenue),
+            valueTone: tone(i3.revenue)
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3(LineRows, {
+            lines: i3.lines,
+            classes: ["revenue"],
+            fmt
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3(ListRow, {
+            title: "Cost of revenue",
+            value: fmt(-i3.cogs),
+            valueTone: tone(-i3.cogs)
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3(ListRow, {
+            title: "Gross profit",
+            subtitle: margin(i3.margins.gross),
+            value: fmt(i3.grossProfit),
+            valueTone: tone(i3.grossProfit)
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3(ListRow, {
+            title: "Operating expenses",
+            value: fmt(-i3.opex),
+            valueTone: tone(-i3.opex)
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3(LineRows, {
+            lines: i3.lines,
+            classes: ["opex"],
+            fmt
+          }, undefined, false, undefined, this),
+          writedowns ? /* @__PURE__ */ u3(ListRow, {
+            title: "Depreciation",
+            value: fmt(-i3.depreciation),
+            valueTone: tone(-i3.depreciation)
+          }, undefined, false, undefined, this) : null,
+          writedowns ? /* @__PURE__ */ u3(ListRow, {
+            title: "Depletion",
+            value: fmt(-i3.depletion),
+            valueTone: tone(-i3.depletion)
+          }, undefined, false, undefined, this) : null,
+          /* @__PURE__ */ u3(ListRow, {
+            title: "Operating income (EBIT)",
+            subtitle: margin(i3.margins.operating),
+            value: fmt(i3.operatingIncome),
+            valueTone: tone(i3.operatingIncome)
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3(ListRow, {
+            title: "EBITDA",
+            subtitle: margin(i3.margins.ebitda),
+            value: fmt(i3.ebitda),
+            valueTone: tone(i3.ebitda)
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3(ListRow, {
+            title: "Interest",
+            value: fmt(-i3.interest),
+            valueTone: tone(-i3.interest)
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3(ListRow, {
+            title: "Investment income",
+            value: fmt(i3.investmentIncome),
+            valueTone: tone(i3.investmentIncome)
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3(ListRow, {
+            title: "Profit before tax",
+            value: fmt(i3.preTax),
+            valueTone: tone(i3.preTax)
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3(ListRow, {
+            title: "Income tax",
+            value: fmt(-i3.tax),
+            valueTone: tone(-i3.tax)
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3(ListRow, {
+            title: "Net income",
+            subtitle: margin(i3.margins.net),
+            value: fmt(i3.netIncome),
+            valueTone: tone(i3.netIncome)
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this),
+      props.note !== null ? /* @__PURE__ */ u3(Note, {
+        children: props.note
+      }, undefined, false, undefined, this) : null
+    ]
+  }, undefined, true, undefined, this);
+}
+function PersonalIncome(props) {
+  const { income: i3, fmt } = props;
+  return /* @__PURE__ */ u3(Section, {
+    title: `Income and spending · ${props.label}`,
+    flush: true,
+    children: /* @__PURE__ */ u3(List, {
+      children: [
+        /* @__PURE__ */ u3(ListRow, {
+          title: "Income",
+          value: fmt(i3.revenue),
+          valueTone: tone(i3.revenue)
+        }, undefined, false, undefined, this),
+        /* @__PURE__ */ u3(LineRows, {
+          lines: i3.lines,
+          classes: ["revenue"],
+          fmt
+        }, undefined, false, undefined, this),
+        /* @__PURE__ */ u3(ListRow, {
+          title: "Spending",
+          value: fmt(-i3.opex),
+          valueTone: tone(-i3.opex)
+        }, undefined, false, undefined, this),
+        /* @__PURE__ */ u3(LineRows, {
+          lines: i3.lines,
+          classes: ["opex", "cogs"],
+          fmt
+        }, undefined, false, undefined, this),
+        i3.interest !== 0 ? /* @__PURE__ */ u3(ListRow, {
+          title: "Interest paid",
+          value: fmt(-i3.interest),
+          valueTone: tone(-i3.interest)
+        }, undefined, false, undefined, this) : null,
+        i3.investmentIncome !== 0 ? /* @__PURE__ */ u3(ListRow, {
+          title: "From investments and interest",
+          value: fmt(i3.investmentIncome),
+          valueTone: tone(i3.investmentIncome)
+        }, undefined, false, undefined, this) : null,
+        i3.tax !== 0 ? /* @__PURE__ */ u3(ListRow, {
+          title: "Taxes",
+          value: fmt(-i3.tax),
+          valueTone: tone(-i3.tax)
+        }, undefined, false, undefined, this) : null,
+        /* @__PURE__ */ u3(ListRow, {
+          title: "Left over",
+          value: fmt(i3.netIncome),
+          valueTone: tone(i3.netIncome)
+        }, undefined, false, undefined, this)
+      ]
+    }, undefined, true, undefined, this)
+  }, undefined, false, undefined, this);
+}
+function CashFlow(props) {
+  const { cash: c3, fmt } = props;
+  const sections = ["operating", "investing", "financing", "owners"].filter((s3) => c3[s3] !== 0 || c3.lines.some((l3) => l3.section === s3));
+  return /* @__PURE__ */ u3(Section, {
+    title: "Cash flow",
+    flush: true,
+    children: /* @__PURE__ */ u3(List, {
+      children: [
+        /* @__PURE__ */ u3(ListRow, {
+          title: "Cash at the start",
+          value: fmt(c3.start),
+          valueTone: "muted"
+        }, undefined, false, undefined, this),
+        sections.map((s3) => /* @__PURE__ */ u3(M, {
+          children: [
+            /* @__PURE__ */ u3(ListRow, {
+              title: CASH_LABELS[s3],
+              value: fmt(c3[s3]),
+              valueTone: tone(c3[s3])
+            }, undefined, false, undefined, this),
+            c3.lines.filter((l3) => l3.section === s3).map((l3) => /* @__PURE__ */ u3(ListRow, {
+              title: l3.label,
+              value: fmt(l3.cents),
+              valueTone: "muted"
+            }, `${s3}:${l3.label}`, false, undefined, this))
+          ]
+        }, s3, true, undefined, this)),
+        c3.corrections !== 0 ? /* @__PURE__ */ u3(ListRow, {
+          title: "Corrections",
+          subtitle: "Balances put right, not money made or spent",
+          value: fmt(c3.corrections),
+          valueTone: "muted"
+        }, undefined, false, undefined, this) : null,
+        c3.openings !== 0 ? /* @__PURE__ */ u3(ListRow, {
+          title: "Opening balances",
+          value: fmt(c3.openings),
+          valueTone: "muted"
+        }, undefined, false, undefined, this) : null,
+        /* @__PURE__ */ u3(ListRow, {
+          title: "Change in cash",
+          value: fmt(c3.change),
+          valueTone: tone(c3.change)
+        }, undefined, false, undefined, this),
+        /* @__PURE__ */ u3(ListRow, {
+          title: "Cash at the end",
+          value: fmt(c3.end),
+          valueTone: "muted"
+        }, undefined, false, undefined, this)
+      ]
+    }, undefined, true, undefined, this)
+  }, undefined, false, undefined, this);
+}
+function StatementsBlock(props) {
+  const { statements: s3 } = props;
+  const [picked, setPicked] = d2("month");
+  const period = s3.periods.find((p3) => p3.id === picked) ?? s3.periods[0];
+  if (!period)
+    return null;
+  const fmt = (cents2) => formatMoney(cents2, props.currency);
+  return /* @__PURE__ */ u3("div", {
+    "data-lre-statements": s3.kind,
+    children: [
+      /* @__PURE__ */ u3(Section, {
+        title: s3.kind === "personal" ? "Income and spending" : "Statements",
+        children: /* @__PURE__ */ u3(Seg, {
+          label: "Period",
+          value: period.id,
+          options: s3.periods.map((p3) => ({ value: p3.id, label: PERIOD_SHORT[p3.id], title: p3.label })),
+          onChange: setPicked
+        }, undefined, false, undefined, this)
+      }, undefined, false, undefined, this),
+      s3.kind === "personal" ? /* @__PURE__ */ u3(PersonalIncome, {
+        income: period.income,
+        label: period.label,
+        fmt
+      }, undefined, false, undefined, this) : /* @__PURE__ */ u3(BooksIncome, {
+        income: period.income,
+        label: period.label,
+        on: s3.depreciation === "straight_line",
+        note: s3.ebitdaNote,
+        fmt
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(CashFlow, {
+        cash: period.cash,
+        fmt
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(Section, {
+        title: "Balance sheet · now",
+        flush: true,
+        children: /* @__PURE__ */ u3(List, {
+          children: [
+            /* @__PURE__ */ u3(ListRow, {
+              title: "Assets",
+              value: fmt(s3.balance.assets),
+              valueTone: "pos"
+            }, undefined, false, undefined, this),
+            /* @__PURE__ */ u3(ListRow, {
+              title: "Liabilities",
+              value: fmt(-s3.balance.liabilities),
+              valueTone: s3.balance.liabilities > 0 ? "neg" : undefined
+            }, undefined, false, undefined, this),
+            s3.balance.lines.map((l3) => /* @__PURE__ */ u3(ListRow, {
+              title: l3.label,
+              value: fmt(l3.cents),
+              valueTone: "muted"
+            }, l3.label, false, undefined, this)),
+            /* @__PURE__ */ u3(ListRow, {
+              title: s3.kind === "personal" ? "Net worth" : "Equity (net worth)",
+              value: fmt(s3.balance.equity),
+              valueTone: tone(s3.balance.equity)
+            }, undefined, false, undefined, this)
+          ]
+        }, undefined, true, undefined, this)
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+
 // src/packs/economy/ui/accounts.tsx
-var GROUP_ICON = { cash: "wallet", banking: "bank", credit: "card", loans: "receipt", investing: "layers" };
+var GROUP_ICON = { cash: "wallet", banking: "bank", credit: "card", loans: "receipt", lent: "receipt", investing: "layers" };
 var CARD_CHANGE = {
   freeze: { go: "Freeze", title: "Freeze the card" },
   unfreeze: { go: "Unfreeze", title: "Unfreeze the card" },
@@ -56648,18 +60556,27 @@ function AccountsSegment(props) {
   const groups = accountGroups(accounts);
   const loose = view.cards.filter((c3) => !view.accounts.some((a3) => a3.id === c3.account));
   const moves = controls.mode === "player" ? MOVE_CONTROLS.filter((c3) => moveFrom(view, c3).length > 0) : [];
+  const lends = controls.mode === "player" && view.level >= 3 && lendSources(view).length > 0 && lendTargets(controls, view.party).length > 0;
+  const income = view.statements && !own2 ? view.statements.periods[0]?.income : undefined;
   return /* @__PURE__ */ u3(M, {
     children: [
-      moves.length > 0 ? /* @__PURE__ */ u3(Section, {
+      moves.length > 0 || lends ? /* @__PURE__ */ u3(Section, {
         title: "Move money",
         children: /* @__PURE__ */ u3(Controls, {
           name: "move",
-          children: moves.map((c3) => /* @__PURE__ */ u3(Button, {
-            icon: MOVE[c3].icon,
-            onClick: () => nav.open(actionPage("accounts", c3)),
-            children: MOVE[c3].label
-          }, c3, false, undefined, this))
-        }, undefined, false, undefined, this)
+          children: [
+            moves.map((c3) => /* @__PURE__ */ u3(Button, {
+              icon: MOVE[c3].icon,
+              onClick: () => nav.open(actionPage("accounts", c3)),
+              children: MOVE[c3].label
+            }, c3, false, undefined, this)),
+            lends ? /* @__PURE__ */ u3(Button, {
+              icon: "receipt",
+              onClick: () => nav.open(actionPage("accounts", "lend")),
+              children: "Lend money"
+            }, undefined, false, undefined, this) : null
+          ]
+        }, undefined, true, undefined, this)
       }, undefined, false, undefined, this) : null,
       groups.length === 0 ? /* @__PURE__ */ u3(Empty, {
         icon: "bank",
@@ -56696,6 +60613,21 @@ function AccountsSegment(props) {
             card: c3,
             onOpen: () => nav.open(detailPage("card", c3.id))
           }, c3.id, false, undefined, this))
+        }, undefined, false, undefined, this)
+      }, undefined, false, undefined, this) : null,
+      view.statements && income ? /* @__PURE__ */ u3(Section, {
+        title: view.statements.kind === "personal" ? "Income and spending" : "Statements",
+        flush: true,
+        children: /* @__PURE__ */ u3(List, {
+          children: /* @__PURE__ */ u3(ListRow, {
+            icon: "receipt",
+            title: "This month",
+            subtitle: `${formatMoney(income.revenue, controls.currency)} in · ${formatMoney(-income.opex - income.cogs, controls.currency)} out`,
+            value: formatMoney(income.netIncome, controls.currency),
+            valueTone: income.netIncome < 0 ? "neg" : "pos",
+            chevron: true,
+            onClick: () => nav.open(detailPage("statements", view.party))
+          }, undefined, false, undefined, this)
         }, undefined, false, undefined, this)
       }, undefined, false, undefined, this) : null,
       /* @__PURE__ */ u3(ActivitySection, {
@@ -56818,7 +60750,7 @@ function AccountPage(props) {
           tone: used > 30 ? "warn" : "accent"
         }, undefined, false, undefined, this) : null
       }, undefined, false, undefined, this),
-      runFor ? /* @__PURE__ */ u3(Note2, {
+      runFor ? /* @__PURE__ */ u3(Note, {
         children: `${possessive2(runFor.name, false)} own account, which ${controls.mode === "player" ? "you manage" : `${view.name} manages`} for the business.`
       }, undefined, false, undefined, this) : null,
       controls.mode === "player" && (can.some((c3) => c3 !== "autopay") || newFlow) ? /* @__PURE__ */ u3(Controls, {
@@ -57125,6 +61057,82 @@ function MovePage(props) {
     pick
   }, account2.id, false, undefined, this);
 }
+function lendSources(view) {
+  return view.accounts.filter((a3) => a3.spends && a3.status === "open" && CLASS_TRAITS[a3.class].pays && !CLASS_TRAITS[a3.class].liability && !CLASS_TRAITS[a3.class].cash);
+}
+function lendTargets(controls, party) {
+  const pay = controls.palette?.entries.find((e3) => e3.action === FINANCE_ACTIONS.pay);
+  const seen = new Set;
+  return (pay?.options ?? []).flatMap((o4) => {
+    const to = o4.params.to;
+    if (typeof to !== "string" || to === party || to.startsWith("economy.external:") || seen.has(to))
+      return [];
+    seen.add(to);
+    return [{ value: to, label: o4.label }];
+  });
+}
+function LendPage(props) {
+  const { view, controls } = props;
+  const fmt = (cents3) => formatMoney(cents3, controls.currency);
+  const sources = lendSources(view);
+  const targets = lendTargets(controls, view.party);
+  const [to, setTo] = d2(targets[0]?.value ?? "");
+  const [from, setFrom] = d2(sources[0]?.id ?? "");
+  const [text, setText] = d2("");
+  const [apr, setApr] = d2(0);
+  const [months, setMonths] = d2(12);
+  const cents2 = amountOf(text, controls.currency);
+  const source = sources.find((a3) => a3.id === from);
+  const problem = to === "" ? "Pick who borrows it." : !source ? "Pick the account it comes from." : amountProblem(text, controls.currency, "an amount") ?? (apr === null || apr < 0 ? "Interest is a yearly percentage, 0 or more." : months === null || months < 1 || !Number.isInteger(months) ? "Months is a whole number, 1 or more." : null);
+  const body = problem === null && cents2 !== null && apr !== null && months !== null ? { action: FINANCE_ACTIONS.lend, params: { to, amount: cents2, apr, months, from, ...view.partyKind === "person" ? {} : { as: view.party } } } : null;
+  return /* @__PURE__ */ u3(ActionPage, {
+    nav: props.nav,
+    controls,
+    name: "lend",
+    title: "Lend money",
+    subtitle: source ? `From ${source.name} · ${fmt(source.available ?? source.cents)} available` : undefined,
+    go: cents2 !== null ? `Lend ${fmt(cents2)}` : "Lend",
+    problem,
+    action: body,
+    submit: (tell) => body === null ? Promise.resolve(false) : controls.act(body, tell),
+    children: [
+      /* @__PURE__ */ u3(SelectField, {
+        label: "Lend to",
+        value: to,
+        options: targets,
+        onChange: setTo
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(SelectField, {
+        label: "From",
+        value: from,
+        options: sources.map((a3) => ({ value: a3.id, label: a3.name })),
+        onChange: setFrom
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(AmountField, {
+        label: "Amount",
+        value: text,
+        currency: controls.currency,
+        onInput: setText,
+        invalid: text.trim() !== "" && cents2 === null
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(NumberField2, {
+        label: "Interest a year, %",
+        value: apr,
+        min: 0,
+        step: 0.1,
+        onChange: setApr
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(NumberField2, {
+        label: "Over how many months",
+        value: months,
+        min: 1,
+        step: 1,
+        onChange: setMonths,
+        help: "Repaid monthly by autopay from where the money lands; a payment reaches you the day it's made."
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
 function AutopayPage(props) {
   const { account: a3, controls } = props;
   const was = a3.autopay;
@@ -57229,7 +61237,7 @@ function ClosePage(props) {
     danger: true,
     problem,
     submit: () => controls.edit(closeAccountOps(a3.id)),
-    children: /* @__PURE__ */ u3(Note2, {
+    children: /* @__PURE__ */ u3(Note, {
       children: [
         "Close ",
         a3.name,
@@ -57248,7 +61256,7 @@ function ReleasePage(props) {
     subtitle: a3.name,
     go: "Release",
     submit: () => controls.edit(releaseHoldOps(a3.id, h3.id)),
-    children: /* @__PURE__ */ u3(Note2, {
+    children: /* @__PURE__ */ u3(Note, {
       children: [
         h3.memo,
         ": ",
@@ -57567,7 +61575,7 @@ function accountActionPage(props, a3, action, within) {
   }
 }
 var accountPages = {
-  heads: ["accounts", "account", "card"],
+  heads: ["accounts", "account", "card", "statements"],
   render(page7, props) {
     const { view, controls, nav } = props;
     const [head, id, action, within] = page7.path;
@@ -57585,6 +61593,12 @@ var accountPages = {
           ...props,
           controls
         }, undefined, false, undefined, this) : null;
+      if (id === "lend")
+        return controls.mode === "player" && view.level >= 3 && lendSources(view).length > 0 ? /* @__PURE__ */ u3(LendPage, {
+          view,
+          controls,
+          nav
+        }, undefined, false, undefined, this) : null;
       const move = MOVE_CONTROLS.find((c3) => c3 === id);
       const from = move ? moveFrom(view, move) : [];
       return move && controls.mode === "player" && from.length > 0 ? /* @__PURE__ */ u3(MovePage, {
@@ -57593,6 +61607,19 @@ var accountPages = {
         nav,
         control: move,
         from
+      }, undefined, false, undefined, this) : null;
+    }
+    if (head === "statements") {
+      const s3 = view.statements;
+      return s3 && page7.type === "detail" ? /* @__PURE__ */ u3(MoneyPage, {
+        nav,
+        name: "statements",
+        title: s3.kind === "personal" ? "Income and spending" : "Statements",
+        subtitle: view.name,
+        children: /* @__PURE__ */ u3(StatementsBlock, {
+          statements: s3,
+          currency: controls.currency
+        }, undefined, false, undefined, this)
       }, undefined, false, undefined, this) : null;
     }
     if (head === "account") {
@@ -57774,7 +61801,7 @@ function FlowPage(props) {
           onClick: () => nav.open(actionPage("flow", f3.id, c3)),
           children: CONTROL[c3].label
         }, c3, false, undefined, this))
-      }, undefined, false, undefined, this) : /* @__PURE__ */ u3(Note2, {
+      }, undefined, false, undefined, this) : /* @__PURE__ */ u3(Note, {
         children: f3.source === "entity" ? "Only whoever pays it can change it." : `Set by its ${humanize(f3.source).toLowerCase()}; change it there.`
       }, undefined, false, undefined, this) : controls.mode === "gm" ? f3.source === "entity" ? /* @__PURE__ */ u3(Controls, {
         name: f3.id,
@@ -57801,7 +61828,7 @@ function FlowPage(props) {
             children: "Delete"
           }, undefined, false, undefined, this)
         ]
-      }, undefined, true, undefined, this) : /* @__PURE__ */ u3(Note2, {
+      }, undefined, true, undefined, this) : /* @__PURE__ */ u3(Note, {
         children: [
           "Derived from its ",
           humanize(f3.source).toLowerCase(),
@@ -57974,7 +62001,7 @@ function FlowFormPage(props) {
                 label: "Every Nth time (2 with weekly is every other week)",
                 value: form.interval,
                 min: 1,
-                onChange: (n5) => set({ interval: n5 ?? 1 })
+                onChange: (n6) => set({ interval: n6 ?? 1 })
               }, undefined, false, undefined, this),
               /* @__PURE__ */ u3(TextField3, {
                 label: "At (time of day)",
@@ -58092,7 +62119,7 @@ function FlowControlPage(props) {
       /* @__PURE__ */ u3(FlowLine, {
         flow: f3
       }, undefined, false, undefined, this),
-      /* @__PURE__ */ u3(Note2, {
+      /* @__PURE__ */ u3(Note, {
         children: page7.text
       }, undefined, false, undefined, this)
     ]
@@ -58296,12 +62323,12 @@ function Sparkline(props) {
     }, undefined, false, undefined, this)
   }, undefined, false, undefined, this);
 }
-function changeText2(pct2) {
-  const r3 = Math.round(pct2 * 10) / 10;
+function changeText2(pct3) {
+  const r3 = Math.round(pct3 * 10) / 10;
   return `${r3 > 0 ? "+" : ""}${r3.toFixed(1)}%`;
 }
-function changeTone(pct2) {
-  const r3 = Math.round(pct2 * 10) / 10;
+function changeTone(pct3) {
+  const r3 = Math.round(pct3 * 10) / 10;
   return r3 > 0 ? "pos" : r3 < 0 ? "neg" : undefined;
 }
 function ChangeRows(props) {
@@ -58311,11 +62338,11 @@ function ChangeRows(props) {
     ["12 months", props.twelve, props.through ? `to the end of ${props.through}` : undefined]
   ];
   return /* @__PURE__ */ u3(List, {
-    children: rows2.map(([title, pct2, subtitle]) => pct2 !== null ? /* @__PURE__ */ u3(ListRow, {
+    children: rows2.map(([title, pct3, subtitle]) => pct3 !== null ? /* @__PURE__ */ u3(ListRow, {
       title,
       subtitle,
-      value: changeText2(pct2),
-      valueTone: changeTone(pct2)
+      value: changeText2(pct3),
+      valueTone: changeTone(pct3)
     }, title, false, undefined, this) : null)
   }, undefined, false, undefined, this);
 }
@@ -58344,7 +62371,7 @@ function MarketSection(props) {
         }, undefined, false, undefined, this),
         /* @__PURE__ */ u3("div", {
           class: "lre-money-spark-note",
-          children: /* @__PURE__ */ u3(Note2, {
+          children: /* @__PURE__ */ u3(Note, {
             children: m2.history ? `It moves as the stock market did: ${m2.source}, month-end closes ${m2.from} to ${m2.to}.` : `Outside ${m2.from} to ${m2.to} the market walks at random, with the swings it had then (${m2.source}).`
           }, undefined, false, undefined, this)
         }, undefined, false, undefined, this)
@@ -58377,7 +62404,7 @@ function PerformanceSection(props) {
           through: p3.points[p3.points.length - 2]?.at ?? null
         }, undefined, false, undefined, this) : /* @__PURE__ */ u3("div", {
           class: "lre-money-spark-note",
-          children: /* @__PURE__ */ u3(Note2, {
+          children: /* @__PURE__ */ u3(Note, {
             children: "How it has done shows once the market has closed a month with it."
           }, undefined, false, undefined, this)
         }, undefined, false, undefined, this)
@@ -58867,7 +62894,7 @@ function NewPropertyPage(props) {
         onInput: setValue,
         invalid: value.trim() !== "" && cents2 === null
       }, undefined, false, undefined, this),
-      /* @__PURE__ */ u3(Note2, {
+      /* @__PURE__ */ u3(Note, {
         children: `${view.name} owns it whole.`
       }, undefined, false, undefined, this)
     ]
@@ -59084,7 +63111,7 @@ function SellPropertyPage(props) {
         options: knownPeople(controls.palette).map((k2) => ({ value: k2.id, label: k2.label })),
         onChange: setBuyer
       }, undefined, false, undefined, this),
-      /* @__PURE__ */ u3(Note2, {
+      /* @__PURE__ */ u3(Note, {
         children: "A mortgage on it is paid off from the price first."
       }, undefined, false, undefined, this)
     ]
@@ -59169,7 +63196,7 @@ function EndLeasePage(props) {
           }, undefined, false, undefined, this)
         }, undefined, false, undefined, this)
       }, undefined, false, undefined, this),
-      /* @__PURE__ */ u3(Note2, {
+      /* @__PURE__ */ u3(Note, {
         children: `End ${l3.tenant}'s lease?`
       }, undefined, false, undefined, this)
     ]
@@ -59313,7 +63340,7 @@ var assetPages = {
 };
 
 // src/packs/economy/ui/credit.tsx
-function pct2(part) {
+function pct3(part) {
   return `${Math.round(part * 100)}%`;
 }
 function OfferRow(props) {
@@ -59368,25 +63395,25 @@ function CreditSegment(props) {
           children: [
             /* @__PURE__ */ u3(ListRow, {
               title: "Paying on time",
-              value: pct2(c3.factors.payment)
+              value: pct3(c3.factors.payment)
             }, undefined, false, undefined, this),
             /* @__PURE__ */ u3(ListRow, {
               title: "Credit used",
               subtitle: `${c3.utilisationPct}% of limits`,
-              value: pct2(c3.factors.utilisation)
+              value: pct3(c3.factors.utilisation)
             }, undefined, false, undefined, this),
             /* @__PURE__ */ u3(ListRow, {
               title: "Age of accounts",
               subtitle: `${c3.ageMonths} months on average`,
-              value: pct2(c3.factors.age)
+              value: pct3(c3.factors.age)
             }, undefined, false, undefined, this),
             /* @__PURE__ */ u3(ListRow, {
               title: "Mix of credit",
-              value: pct2(c3.factors.mix)
+              value: pct3(c3.factors.mix)
             }, undefined, false, undefined, this),
             /* @__PURE__ */ u3(ListRow, {
               title: "New credit",
-              value: pct2(c3.factors.recent)
+              value: pct3(c3.factors.recent)
             }, undefined, false, undefined, this)
           ]
         }, undefined, true, undefined, this)
@@ -59454,21 +63481,21 @@ function ReportPage(props) {
         title: "Inquiries",
         flush: true,
         children: /* @__PURE__ */ u3(List, {
-          children: c3.inquiries.map((i3, n5) => /* @__PURE__ */ u3(ListRow, {
+          children: c3.inquiries.map((i3, n6) => /* @__PURE__ */ u3(ListRow, {
             title: i3.note,
             subtitle: i3.at
-          }, `${i3.at}:${n5}`, false, undefined, this))
+          }, `${i3.at}:${n6}`, false, undefined, this))
         }, undefined, false, undefined, this)
       }, undefined, false, undefined, this) : null,
       c3.marks.length > 0 ? /* @__PURE__ */ u3(Section, {
         title: "Marks",
         flush: true,
         children: /* @__PURE__ */ u3(List, {
-          children: c3.marks.map((m2, n5) => /* @__PURE__ */ u3(ListRow, {
+          children: c3.marks.map((m2, n6) => /* @__PURE__ */ u3(ListRow, {
             icon: "alert",
             title: humanize(m2.kind),
             subtitle: `${m2.at} · ${m2.note}`
-          }, `${m2.at}:${n5}`, false, undefined, this))
+          }, `${m2.at}:${n6}`, false, undefined, this))
         }, undefined, false, undefined, this)
       }, undefined, false, undefined, this) : null
     ]
@@ -59709,7 +63736,7 @@ function JobEndPage(props) {
     danger: true,
     action: jobEndAction(j3.id),
     submit,
-    children: /* @__PURE__ */ u3(Note2, {
+    children: /* @__PURE__ */ u3(Note, {
       children: `${words3}: ${j3.title || "the job"} at ${j3.employer}?`
     }, undefined, false, undefined, this)
   }, undefined, false, undefined, this);
@@ -59904,6 +63931,10 @@ function BooksSegment(props) {
           max: 10,
           currency: controls.currency
         }, undefined, false, undefined, this)
+      }, undefined, false, undefined, this) : null,
+      b3.statements ? /* @__PURE__ */ u3(StatementsBlock, {
+        statements: b3.statements,
+        currency: controls.currency
       }, undefined, false, undefined, this) : null
     ]
   }, undefined, true, undefined, this);
@@ -60110,7 +64141,7 @@ function InvoiceControlPage(props) {
         invoice: i3,
         currency: controls.currency
       }, undefined, false, undefined, this),
-      /* @__PURE__ */ u3(Note2, {
+      /* @__PURE__ */ u3(Note, {
         children: control === "void" ? `Void the invoice to ${i3.customerName}?` : "Otherwise it's paid when it falls due, if the money's there."
       }, undefined, false, undefined, this)
     ]
@@ -60740,10 +64771,10 @@ function SummarySegment(props) {
         title: "Notes",
         flush: true,
         children: /* @__PURE__ */ u3(List, {
-          children: view.notes.map((n5, i3) => /* @__PURE__ */ u3(ListRow, {
-            title: n5.text,
-            subtitle: n5.at
-          }, `${n5.at}:${i3}`, false, undefined, this))
+          children: view.notes.map((n6, i3) => /* @__PURE__ */ u3(ListRow, {
+            title: n6.text,
+            subtitle: n6.at
+          }, `${n6.at}:${i3}`, false, undefined, this))
         }, undefined, false, undefined, this)
       }, undefined, false, undefined, this) : null,
       theirs.length > 0 ? /* @__PURE__ */ u3(Section, {
@@ -61234,11 +65265,11 @@ function MoneyPanel(props) {
 }
 
 // src/packs/economy/ui/taxes.tsx
-function share(n5) {
-  return `${Math.round(n5 * 100) / 100}%`;
+function share(n6) {
+  return `${Math.round(n6 * 100) / 100}%`;
 }
-function rate(n5) {
-  return `${Math.round(n5 * 1000) / 1000}%`;
+function rate(n6) {
+  return `${Math.round(n6 * 1000) / 1000}%`;
 }
 function yearRows(y3, held) {
   return [
@@ -61408,6 +65439,7 @@ function OrgTaxes(props) {
   const { section, currency, acts: acts2, gm } = props;
   const money2 = (cents2) => formatMoney(cents2, currency);
   const exempt = section.exempt;
+  const { penalty, carry, foundation, scorp } = section;
   return /* @__PURE__ */ u3("div", {
     class: "lre-stack",
     "data-lre-org-taxes": true,
@@ -61513,6 +65545,106 @@ function OrgTaxes(props) {
         ...acts2 && section.acts ? { acts: acts2 } : {},
         ...gm ? { gm } : {}
       }, undefined, false, undefined, this) : null,
+      penalty && (penalty.on || penalty.last) ? /* @__PURE__ */ u3(Section, {
+        title: "Tax on kept earnings",
+        children: [
+          /* @__PURE__ */ u3(Row, {
+            k: "Earnings and profits kept, start of the year",
+            v: money2(penalty.ep)
+          }, undefined, false, undefined, this),
+          penalty.last ? /* @__PURE__ */ u3(M, {
+            children: [
+              /* @__PURE__ */ u3(Row, {
+                k: `${penalty.last.year}: ${penalty.last.kind === "phc" ? "personal holding company tax" : "accumulated earnings tax"}`,
+                v: `${money2(penalty.last.cents)}${penalty.last.paid ? ", paid" : ", due 15 April"}`
+              }, undefined, false, undefined, this),
+              /* @__PURE__ */ u3(Row, {
+                k: "What it kept after tax and dividends",
+                v: money2(penalty.last.kept)
+              }, undefined, false, undefined, this),
+              penalty.last.kind === "aet" ? /* @__PURE__ */ u3(Row, {
+                k: "Its credit",
+                v: money2(penalty.last.credit)
+              }, undefined, false, undefined, this) : null,
+              /* @__PURE__ */ u3(Row, {
+                k: "Passive income, and held by five or fewer people",
+                v: `${penalty.last.passivePct}%, ${penalty.last.top5}%`
+              }, undefined, false, undefined, this),
+              penalty.last.consent > 0 ? /* @__PURE__ */ u3(Row, {
+                k: "Consent dividends for it",
+                v: money2(penalty.last.consent)
+              }, undefined, false, undefined, this) : null
+            ]
+          }, undefined, true, undefined, this) : /* @__PURE__ */ u3(Empty, {
+            children: "Its first year closes on 1 January."
+          }, undefined, false, undefined, this),
+          penalty.on ? null : /* @__PURE__ */ u3(Empty, {
+            children: "This world doesn't tax kept earnings (Build → Packs → economy → Taxes)."
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this) : null,
+      carry ? /* @__PURE__ */ u3(Section, {
+        title: "Carried forward",
+        children: [
+          carry.nol > 0 ? /* @__PURE__ */ u3(Row, {
+            k: "Net operating loss (up to 80% of a year's income)",
+            v: money2(carry.nol)
+          }, undefined, false, undefined, this) : null,
+          carry.capitalLoss > 0 ? /* @__PURE__ */ u3(Row, {
+            k: "Capital loss",
+            v: money2(carry.capitalLoss)
+          }, undefined, false, undefined, this) : null,
+          carry.gifts > 0 ? /* @__PURE__ */ u3(Row, {
+            k: "Gifts over the 10% cap (five years)",
+            v: money2(carry.gifts)
+          }, undefined, false, undefined, this) : null
+        ]
+      }, undefined, true, undefined, this) : null,
+      foundation ? /* @__PURE__ */ u3(Section, {
+        title: "Foundation payout",
+        children: [
+          /* @__PURE__ */ u3(Row, {
+            k: `Payout, ${foundation.payoutPct}% of its assets less its excise`,
+            v: `${money2(foundation.payoutSoFar)} so far this year`
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3(Row, {
+            k: "Granted this year",
+            v: money2(foundation.granted)
+          }, undefined, false, undefined, this),
+          foundation.lastShortfall > 0 ? /* @__PURE__ */ u3(Row, {
+            k: `Still to grant for ${foundation.year - 1}, by 31 Dec`,
+            v: money2(foundation.leftOfLast)
+          }, undefined, false, undefined, this) : null,
+          foundation.last ? /* @__PURE__ */ u3(Row, {
+            k: `${foundation.last.year}: excise (${foundation.excisePct}% of ${money2(foundation.last.nii)})`,
+            v: money2(foundation.last.excise)
+          }, undefined, false, undefined, this) : null,
+          foundation.last && foundation.last.tax > 0 ? /* @__PURE__ */ u3(Row, {
+            k: `${foundation.last.year}: ${foundation.undistributedPct}% on payout never granted`,
+            v: money2(foundation.last.tax)
+          }, undefined, false, undefined, this) : null,
+          foundation.due !== null ? /* @__PURE__ */ u3(Row, {
+            k: "Due with its return, 15 May",
+            v: money2(foundation.due)
+          }, undefined, false, undefined, this) : null,
+          /* @__PURE__ */ u3(Row, {
+            k: "A person's gifts to it, deductible up to",
+            v: `${foundation.donorLimitPct}% of their income`
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this) : null,
+      scorp ? /* @__PURE__ */ u3(Section, {
+        title: "S corporation",
+        children: [
+          /* @__PURE__ */ u3(Row, {
+            k: "Shareholders",
+            v: `${scorp.holders} of at most ${scorp.max}`
+          }, undefined, false, undefined, this),
+          scorp.problem ? /* @__PURE__ */ u3(Empty, {
+            children: scorp.problem
+          }, undefined, false, undefined, this) : null
+        ]
+      }, undefined, true, undefined, this) : null,
       section.unemployment ? /* @__PURE__ */ u3(Section, {
         title: "Unemployment taxes",
         children: /* @__PURE__ */ u3(UnemploymentRows, {
@@ -61728,20 +65860,26 @@ function OrgMoneyTab(props) {
   return /* @__PURE__ */ u3("div", {
     class: "lre-money-root",
     "data-lre-org-money": props.org.id,
-    children: /* @__PURE__ */ u3(OrgMoney, {
-      view,
-      reader,
-      nav,
-      currency: props.state.currency ?? DEFAULT_CURRENCY,
-      segment,
-      onSegment: setSegment,
-      filter,
-      onFilter: setFilter,
-      now: props.state.hud?.clock.minutes ?? null,
-      panelId,
-      ...payAs ? { onPayAs: () => setPaying({ to: "", amount: "" }) } : {}
-    }, undefined, false, undefined, this)
-  }, undefined, false, undefined, this);
+    children: [
+      /* @__PURE__ */ u3(OrgMoney, {
+        view,
+        reader,
+        nav,
+        currency: props.state.currency ?? DEFAULT_CURRENCY,
+        segment,
+        onSegment: setSegment,
+        filter,
+        onFilter: setFilter,
+        now: props.state.hud?.clock.minutes ?? null,
+        panelId,
+        ...payAs ? { onPayAs: () => setPaying({ to: "", amount: "" }) } : {}
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(RevenueStreams, {
+        streams: view.streams ?? [],
+        currency: props.state.currency ?? DEFAULT_CURRENCY
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
 }
 function GmOrgMoneyTab(props) {
   const { gm } = props;
@@ -61750,10 +65888,42 @@ function GmOrgMoneyTab(props) {
     return /* @__PURE__ */ u3(JsonView, {
       value: props.section
     }, undefined, false, undefined, this);
-  return /* @__PURE__ */ u3(GmHub, {
-    view,
-    controls: { mode: "gm", busy: gm.busy, currency: gm.currency, edit: gm.edit, gm: gm.gm }
-  }, view.party, false, undefined, this);
+  return /* @__PURE__ */ u3(M, {
+    children: [
+      /* @__PURE__ */ u3(GmHub, {
+        view,
+        controls: { mode: "gm", busy: gm.busy, currency: gm.currency, edit: gm.edit, gm: gm.gm }
+      }, view.party, false, undefined, this),
+      /* @__PURE__ */ u3(GmOrgRevenue, {
+        org: props.org,
+        streams: view.streams ?? [],
+        gm
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+function GmOrgRevenue(props) {
+  const { gm, streams } = props;
+  const world = useChatWorld(gm.send);
+  if (!world)
+    return /* @__PURE__ */ u3(RevenueStreams, {
+      streams,
+      currency: gm.currency
+    }, undefined, false, undefined, this);
+  return /* @__PURE__ */ u3(RevenueEditor, {
+    world,
+    earner: { id: props.org.id, name: props.org.name },
+    streams: gmStreamDrafts(gm.gm, streams),
+    views: streams,
+    taken: new Set(gm.gm.entities.map((e3) => e3.id)),
+    saving: gm.busy,
+    save: (draft, was) => {
+      const ops = was === null ? revenueSpawnOps(draft) : revenueEditOps(was, draft);
+      if (ops.length > 0)
+        gm.edit(ops);
+    },
+    remove: (id) => void gm.edit([{ op: "despawn", entity: id }])
+  }, undefined, false, undefined, this);
 }
 function OrgPayroll(props) {
   const { org, section, reader, nav } = props;
@@ -61836,12 +66006,12 @@ function GmOrgPayrollPart(props) {
 }
 
 // src/packs/economy/ui/ownership.tsx
-function pct3(n5) {
-  return `${Math.round(n5 * 100) / 100}%`;
+function pct4(n6) {
+  return `${Math.round(n6 * 100) / 100}%`;
 }
 function wholeOf(text) {
-  const n5 = Number(text);
-  return text.trim() !== "" && Number.isSafeInteger(n5) && n5 > 0 ? n5 : null;
+  const n6 = Number(text);
+  return text.trim() !== "" && Number.isSafeInteger(n6) && n6 > 0 ? n6 : null;
 }
 function UnitsField(props) {
   const id = P2();
@@ -61913,9 +66083,9 @@ function IssueForm(props) {
   const [units, setUnits] = d2("");
   const [price, setPrice] = d2("");
   const [cls, setCls] = d2("");
-  const n5 = wholeOf(units);
+  const n6 = wholeOf(units);
   const each = price.trim() === "" ? null : parseMoneyInput(price, props.currency);
-  const ok = (props.why === null || props.vote === true) && to !== "" && n5 !== null && (price.trim() === "" || each !== null && each >= 0);
+  const ok = (props.why === null || props.vote === true) && to !== "" && n6 !== null && (price.trim() === "" || each !== null && each >= 0);
   return /* @__PURE__ */ u3(M, {
     children: [
       props.to === undefined ? /* @__PURE__ */ u3(PickField3, {
@@ -61952,7 +66122,7 @@ function IssueForm(props) {
         ok,
         vote: props.vote === true,
         label: "Issue the shares",
-        onGo: (vote) => props.act(FINANCE_ACTIONS.sharesIssue, { business: props.org.id, to, units: n5 ?? 0, ...each !== null ? { price: each } : {}, ...cls !== "" ? { class: cls } : {}, ...props.as ? { as: props.as } : {}, ...vote ? { vote: true } : {} })
+        onGo: (vote) => props.act(FINANCE_ACTIONS.sharesIssue, { business: props.org.id, to, units: n6 ?? 0, ...each !== null ? { price: each } : {}, ...cls !== "" ? { class: cls } : {}, ...props.as ? { as: props.as } : {}, ...vote ? { vote: true } : {} })
       }, undefined, false, undefined, this)
     ]
   }, undefined, true, undefined, this);
@@ -61962,9 +66132,9 @@ function BuyBackForm(props) {
   const [from, setFrom] = d2("");
   const [units, setUnits] = d2("");
   const [price, setPrice] = d2("");
-  const n5 = wholeOf(units);
+  const n6 = wholeOf(units);
   const each = price.trim() === "" ? null : parseMoneyInput(price, props.currency);
-  const ok = (props.why === null || props.vote === true) && from !== "" && n5 !== null && (price.trim() === "" || each !== null && each >= 0);
+  const ok = (props.why === null || props.vote === true) && from !== "" && n6 !== null && (price.trim() === "" || each !== null && each >= 0);
   return /* @__PURE__ */ u3(M, {
     children: [
       /* @__PURE__ */ u3(PickField3, {
@@ -61993,7 +66163,7 @@ function BuyBackForm(props) {
         ok,
         vote: props.vote === true,
         label: "Buy them back",
-        onGo: (vote) => props.act(FINANCE_ACTIONS.sharesBuyBack, { business: props.org.id, from, units: n5 ?? 0, ...each !== null ? { price: each } : {}, ...vote ? { vote: true } : {} })
+        onGo: (vote) => props.act(FINANCE_ACTIONS.sharesBuyBack, { business: props.org.id, from, units: n6 ?? 0, ...each !== null ? { price: each } : {}, ...vote ? { vote: true } : {} })
       }, undefined, false, undefined, this)
     ]
   }, undefined, true, undefined, this);
@@ -62052,9 +66222,9 @@ function ListForm(props) {
   const [price, setPrice] = d2("");
   const [symbol, setSymbol] = d2("");
   const id = P2();
-  const n5 = wholeOf(units);
+  const n6 = wholeOf(units);
   const each = price.trim() === "" ? null : parseMoneyInput(price, props.currency);
-  const ok = (props.why === null || props.vote === true) && n5 !== null && (price.trim() === "" || each !== null && each > 0);
+  const ok = (props.why === null || props.vote === true) && n6 !== null && (price.trim() === "" || each !== null && each > 0);
   return /* @__PURE__ */ u3(M, {
     children: [
       /* @__PURE__ */ u3(UnitsField, {
@@ -62090,15 +66260,15 @@ function ListForm(props) {
         ok,
         vote: props.vote === true,
         label: listed ? "Offer them" : "List it",
-        onGo: (vote) => props.go({ units: n5 ?? 0, ...each !== null ? { price: each } : {}, ...!listed && symbol.trim() !== "" ? { symbol: symbol.trim() } : {} }, vote)
+        onGo: (vote) => props.go({ units: n6 ?? 0, ...each !== null ? { price: each } : {}, ...!listed && symbol.trim() !== "" ? { symbol: symbol.trim() } : {} }, vote)
       }, undefined, false, undefined, this)
     ]
   }, undefined, true, undefined, this);
 }
 function OfferForm(props) {
   const [units, setUnits] = d2("");
-  const n5 = wholeOf(units);
-  const ok = props.why === null && n5 !== null && n5 <= props.max;
+  const n6 = wholeOf(units);
+  const ok = props.why === null && n6 !== null && n6 <= props.max;
   return /* @__PURE__ */ u3(M, {
     children: [
       /* @__PURE__ */ u3(UnitsField, {
@@ -62110,7 +66280,7 @@ function OfferForm(props) {
       /* @__PURE__ */ u3(Button, {
         variant: "primary",
         disabled: !ok,
-        onClick: () => props.act(FINANCE_ACTIONS.stakeSell, { business: props.org.id, units: n5 ?? 0, price: 0 }),
+        onClick: () => props.act(FINANCE_ACTIONS.stakeSell, { business: props.org.id, units: n6 ?? 0, price: 0 }),
         children: "Sell them"
       }, undefined, false, undefined, this)
     ]
@@ -62167,7 +66337,7 @@ function MarketRows(props) {
       /* @__PURE__ */ u3(Row, {
         k: "Price a unit",
         v: formatMoney(Math.round(l3.price), props.currency),
-        ...month !== null ? { sub: `${month >= 0 ? "+" : ""}${pct3(month)} this month`, tone: month >= 0 ? "pos" : "neg" } : {}
+        ...month !== null ? { sub: `${month >= 0 ? "+" : ""}${pct4(month)} this month`, tone: month >= 0 ? "pos" : "neg" } : {}
       }, undefined, false, undefined, this),
       /* @__PURE__ */ u3(Row, {
         k: "Market capitalization",
@@ -62226,8 +66396,8 @@ function SubsidiaryForm(props) {
   const id = P2();
   const cents2 = parseMoneyInput(capital, props.currency);
   const source = from || acts2?.sources[0]?.id || "";
-  const n5 = wholeOf(units);
-  const ok = acts2?.found === null && name.trim() !== "" && cents2 !== null && cents2 > 0 && source !== "" && (units.trim() === "" || n5 !== null);
+  const n6 = wholeOf(units);
+  const ok = acts2?.found === null && name.trim() !== "" && cents2 !== null && cents2 > 0 && source !== "" && (units.trim() === "" || n6 !== null);
   return /* @__PURE__ */ u3(M, {
     children: [
       /* @__PURE__ */ u3(Field, {
@@ -62268,8 +66438,87 @@ function SubsidiaryForm(props) {
       /* @__PURE__ */ u3(Button, {
         variant: "primary",
         disabled: !ok,
-        onClick: () => props.act(ORG_ACTIONS.found, { type: "company", name: name.trim(), amount: cents2 ?? 0, from: source, ...n5 !== null ? { units: n5 } : {}, as: props.org.id }),
+        onClick: () => props.act(ORG_ACTIONS.found, { type: "company", name: name.trim(), amount: cents2 ?? 0, from: source, ...n6 !== null ? { units: n6 } : {}, as: props.org.id }),
         children: "Start it"
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+function SettleForm(props) {
+  const acts2 = props.section.acts;
+  const [name, setName] = d2("");
+  const [amount2, setAmount] = d2("");
+  const [from, setFrom] = d2("");
+  const [purpose, setPurpose] = d2("");
+  const [revocable, setRevocable] = d2(false);
+  const ids = { name: P2(), purpose: P2(), revocable: P2() };
+  const cents2 = amount2.trim() === "" ? 0 : parseMoneyInput(amount2, props.currency);
+  const source = from || acts2?.sources[0]?.id || "";
+  const ok = acts2?.found === null && name.trim() !== "" && cents2 !== null && cents2 >= 0 && (cents2 === 0 || source !== "");
+  return /* @__PURE__ */ u3(M, {
+    children: [
+      /* @__PURE__ */ u3(Field, {
+        label: "Its name",
+        for: ids.name,
+        children: /* @__PURE__ */ u3("input", {
+          id: ids.name,
+          class: "lre-input",
+          value: name,
+          maxLength: 60,
+          placeholder: "Alder Employees' Trust",
+          onInput: (event) => setName(event.currentTarget.value)
+        }, undefined, false, undefined, this)
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(Field, {
+        label: "Put in",
+        help: `Optional, from ${props.org.name}'s own money. ${props.org.name} is its first trustee and beneficiary.`,
+        children: /* @__PURE__ */ u3(MoneyInput, {
+          currency: props.currency,
+          value: amount2,
+          label: "Put in",
+          onInput: setAmount
+        }, undefined, false, undefined, this)
+      }, undefined, false, undefined, this),
+      (acts2?.sources.length ?? 0) > 1 ? /* @__PURE__ */ u3(PickField3, {
+        label: "From",
+        value: source,
+        options: (acts2?.sources ?? []).map((s3) => ({ value: s3.id, label: `${s3.name} (${s3.balance})` })),
+        empty: "Its first account",
+        onChange: setFrom
+      }, undefined, false, undefined, this) : null,
+      /* @__PURE__ */ u3(Field, {
+        label: "What it is for",
+        for: ids.purpose,
+        children: /* @__PURE__ */ u3("input", {
+          id: ids.purpose,
+          class: "lre-input",
+          value: purpose,
+          maxLength: 200,
+          onInput: (event) => setPurpose(event.currentTarget.value)
+        }, undefined, false, undefined, this)
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3("label", {
+        class: "lre-field",
+        for: ids.revocable,
+        children: /* @__PURE__ */ u3("span", {
+          children: [
+            /* @__PURE__ */ u3("input", {
+              id: ids.revocable,
+              type: "checkbox",
+              checked: revocable,
+              onChange: (event) => setRevocable(event.currentTarget.checked)
+            }, undefined, false, undefined, this),
+            " Revocable: ",
+            props.org.name,
+            " may take it back"
+          ]
+        }, undefined, true, undefined, this)
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(Button, {
+        variant: "primary",
+        disabled: !ok,
+        onClick: () => props.act(ORG_ACTIONS.found, { type: "trust", name: name.trim(), ...cents2 !== null && cents2 > 0 ? { amount: cents2, from: source } : {}, ...purpose.trim() !== "" ? { purpose: purpose.trim() } : {}, ...revocable ? { revocable: true } : {}, as: props.org.id }),
+        children: "Settle it"
       }, undefined, false, undefined, this)
     ]
   }, undefined, true, undefined, this);
@@ -62312,7 +66561,7 @@ function StakeForm(props) {
         label: "Share to sell (%)",
         value: share2,
         onInput: setShare,
-        help: `It holds ${pct3(props.child.share)}.`
+        help: `It holds ${pct4(props.child.share)}.`
       }, undefined, false, undefined, this),
       /* @__PURE__ */ u3(Field, {
         label: "Price",
@@ -62349,8 +66598,8 @@ function ChildRows(props) {
         id: l3.id,
         icon: l3.trust ? "shield" : "briefcase",
         title: `${"· ".repeat(props.depth)}${l3.name}`,
-        subtitle: [l3.trust ? `Trust · ${OWNER_ROLE_LABELS[l3.trust.role].one}` : l3.controlled ? "Controlled" : `${pct3(l3.votes)} of its votes`, ...figures].join(" · "),
-        value: l3.share > 0 ? pct3(l3.share) : undefined,
+        subtitle: [l3.trust ? `Trust · ${OWNER_ROLE_LABELS[l3.trust.role].one}` : l3.controlled ? "Controlled" : `${pct4(l3.votes)} of its votes`, ...figures].join(" · "),
+        value: l3.share > 0 ? pct4(l3.share) : undefined,
         chevron: true,
         onClick: () => props.open(orgRoute(l3.id))
       }, undefined, false, undefined, this),
@@ -62377,7 +66626,7 @@ function OrgOwnership(props) {
   });
   const known = reader ? knownPeople(reader.controls.palette).map((p3) => ({ value: p3.id, label: p3.label })) : [];
   const people2 = [...known, ...section.owners.flatMap((o4) => o4.party !== null && !known.some((k2) => k2.value === o4.party) ? [{ value: o4.party, label: o4.name }] : [])];
-  const head = [STRUCTURE_LABELS[section.structure] ?? section.structure, section.units !== null ? `${section.units} units` : "not counted in units", `decisions need more than ${section.decidePct === 50 ? "half" : pct3(section.decidePct)} of the votes`];
+  const head = [STRUCTURE_LABELS[section.structure] ?? section.structure, section.units !== null ? `${section.units} units` : "not counted in units", `decisions need more than ${section.decidePct === 50 ? "half" : pct4(section.decidePct)} of the votes`];
   const valuation = section.valuation;
   const books = valuation ? `its net worth, ${formatMoney(valuation.book, currency)}, and ${valuation.multiple} × the last 12 months' operating profit, ${formatMoney(valuation.profit, currency)}` : "";
   return /* @__PURE__ */ u3("div", {
@@ -62395,7 +66644,7 @@ function OrgOwnership(props) {
             acts2 !== null && section.votes > 0 ? /* @__PURE__ */ u3("span", {
               children: [
                 "You hold ",
-                pct3(section.votes),
+                pct4(section.votes),
                 " of the votes."
               ]
             }, undefined, true, undefined, this) : null
@@ -62412,8 +66661,8 @@ function OrgOwnership(props) {
           children: section.owners.map((o4, i3) => /* @__PURE__ */ u3(ListRow, {
             icon: o4.public === true && o4.party === null ? "globe" : "user",
             title: o4.name,
-            subtitle: [o4.public === true ? "on the market" : null, o4.role !== "owner" ? OWNER_ROLE_LABELS[o4.role].one : null, section.classes && o4.class ? o4.class : null, o4.units !== undefined ? `${o4.units} units` : null, o4.votes !== undefined && Math.abs(o4.votes - o4.share) > 0.005 ? `${pct3(o4.votes)} of the votes` : null].filter((x2) => x2 !== null).join(" · ") || undefined,
-            value: [ROLE_RIGHTS[o4.role].worth && o4.share > 0 ? pct3(o4.share) : null, o4.value !== undefined ? `shares worth ${formatMoney(o4.value, currency)}` : null].filter((x2) => x2 !== null).join(" · ") || undefined
+            subtitle: [o4.public === true ? "on the market" : null, o4.role !== "owner" ? OWNER_ROLE_LABELS[o4.role].one : null, section.classes && o4.class ? o4.class : null, o4.units !== undefined ? `${o4.units} units` : null, o4.votes !== undefined && Math.abs(o4.votes - o4.share) > 0.005 ? `${pct4(o4.votes)} of the votes` : null].filter((x2) => x2 !== null).join(" · ") || undefined,
+            value: [ROLE_RIGHTS[o4.role].worth && o4.share > 0 ? pct4(o4.share) : null, o4.value !== undefined ? `shares worth ${formatMoney(o4.value, currency)}` : null].filter((x2) => x2 !== null).join(" · ") || undefined
           }, `${o4.public === true ? "market:" : ""}${o4.party ?? `someone:${i3}`}`, false, undefined, this))
         }, undefined, false, undefined, this)
       }, undefined, false, undefined, this),
@@ -62515,7 +66764,7 @@ function OrgOwnership(props) {
                 icon: "briefcase",
                 title: p3.name,
                 subtitle: p3.controlled ? "Owns it, and controls it" : "Owns part of it",
-                value: pct3(p3.share),
+                value: pct4(p3.share),
                 chevron: true,
                 onClick: () => open(orgRoute(p3.id))
               }, p3.id, false, undefined, this)),
@@ -62675,6 +66924,16 @@ function OrgOwnership(props) {
                 }, undefined, false, undefined, this)
               }, undefined, false, undefined, this),
               /* @__PURE__ */ u3(Form, {
+                summary: "Settle a trust",
+                why: acts2.found,
+                children: /* @__PURE__ */ u3(SettleForm, {
+                  org,
+                  section,
+                  currency,
+                  act
+                }, undefined, false, undefined, this)
+              }, undefined, false, undefined, this),
+              /* @__PURE__ */ u3(Form, {
                 summary: "Change structure",
                 why: acts2.restructure,
                 vote: acts2.voteRestructure === true,
@@ -62705,11 +66964,11 @@ function OrgOwnership(props) {
     ]
   }, undefined, true, undefined, this);
 }
-function lineRows(lines2, currency, tone) {
+function lineRows(lines2, currency, tone2) {
   return lines2.map((l3, i3) => /* @__PURE__ */ u3(Row, {
     k: l3.label,
     v: formatMoney(l3.cents, currency),
-    ...tone ? { tone } : {}
+    ...tone2 ? { tone: tone2 } : {}
   }, `${l3.label}:${i3}`, false, undefined, this));
 }
 function WindingPart(props) {
@@ -62775,7 +67034,7 @@ function WindingPart(props) {
           children: w3.payouts.map((p3, i3) => /* @__PURE__ */ u3(ListRow, {
             icon: "user",
             title: p3.name,
-            subtitle: `${pct3(p3.share)} of what is left`,
+            subtitle: `${pct4(p3.share)} of what is left`,
             value: formatMoney(p3.cents, currency)
           }, p3.party ?? `someone:${i3}`, false, undefined, this))
         }, undefined, false, undefined, this) : null,
@@ -63612,17 +67871,17 @@ function holdersFor(view, item2) {
     if (!skip.has(holder.id))
       out.set(holder.id, holder);
   };
-  const walk = (things) => {
+  const walk2 = (things) => {
     for (const t3 of things) {
       if (t3.holds !== undefined && t3.mine === true)
         add({ id: t3.id, name: t3.name });
-      walk(t3.children ?? []);
+      walk2(t3.children ?? []);
     }
   };
-  walk(view.carried);
+  walk2(view.carried);
   if (view.here) {
-    walk(view.here.room);
-    walk(view.here.lying);
+    walk2(view.here.room);
+    walk2(view.here.lying);
     for (const h3 of view.here.inside)
       add(h3.holder);
   }
@@ -64173,15 +68432,15 @@ function GearPanel(props) {
 // src/packs/gear/ui/glance.tsx
 function overdueLoans(view) {
   const seen = new Map;
-  const walk = (items) => {
+  const walk2 = (items) => {
     for (const item2 of items) {
       if (item2.lent?.overdue && !seen.has(item2.id))
         seen.set(item2.id, item2);
-      walk(item2.children ?? []);
+      walk2(item2.children ?? []);
     }
   };
   for (const section of SECTIONS)
-    walk(view[section]);
+    walk2(view[section]);
   return [...seen.values()];
 }
 function GearGlance(props) {
@@ -65199,7 +69458,7 @@ function CharacterPages2(props) {
   const change = changes.page;
   const plan2 = change?.kind === "plan" && change.id !== null ? c3.plans.find((p3) => p3.id === change.id) : undefined;
   const commitment = change?.kind === "commitment" && change.id !== null ? c3.commitments.find((x2) => x2.id === change.id) : undefined;
-  const note = change?.kind === "note" && change.id !== null ? c3.notes.find((n5) => n5.id === change.id) : undefined;
+  const note = change?.kind === "note" && change.id !== null ? c3.notes.find((n6) => n6.id === change.id) : undefined;
   const holding2 = change?.kind === "holding" && change.fact !== null ? c3.holdings.find((h3) => h3.fact === change.fact) : undefined;
   const gone = change !== null && (("id" in change) && change.id !== null && plan2 === undefined && commitment === undefined && note === undefined || change.kind === "holding" && change.fact !== null && holding2 === undefined);
   A(() => {
@@ -65706,7 +69965,7 @@ function Notes(props) {
     title: "Memory notes",
     aside: /* @__PURE__ */ u3(Badge, {
       children: [
-        c3.notes.filter((n5) => !n5.faded).length,
+        c3.notes.filter((n6) => !n6.faded).length,
         " remembered"
       ]
     }, undefined, true, undefined, this),
@@ -65717,17 +69976,17 @@ function Notes(props) {
       }, undefined, false, undefined, this) : null,
       /* @__PURE__ */ u3(List, {
         children: [
-          c3.notes.map((n5) => /* @__PURE__ */ u3(ListRow, {
-            id: n5.id,
-            title: n5.text,
-            subtitle: `${n5.clock} · salience ${n5.salience}, now ${n5.now.toFixed(1)}`,
-            badge: n5.faded ? /* @__PURE__ */ u3(Badge, {
+          c3.notes.map((n6) => /* @__PURE__ */ u3(ListRow, {
+            id: n6.id,
+            title: n6.text,
+            subtitle: `${n6.clock} · salience ${n6.salience}, now ${n6.now.toFixed(1)}`,
+            badge: n6.faded ? /* @__PURE__ */ u3(Badge, {
               children: "Faded"
             }, undefined, false, undefined, this) : undefined,
             chevron: true,
             disabled: props.busy,
-            onClick: () => props.open({ kind: "note", id: n5.id })
-          }, n5.id, false, undefined, this)),
+            onClick: () => props.open({ kind: "note", id: n6.id })
+          }, n6.id, false, undefined, this)),
           /* @__PURE__ */ u3(ListRow, {
             icon: "plus",
             title: "Add a note",
@@ -66910,7 +71169,7 @@ var PLAN_LIVE = ["open", "under_way", "blocked"];
 function isPlanStatusLive(status) {
   return PLAN_LIVE.includes(status);
 }
-var PLAN_STATUS_WORDS = { open: "Open", under_way: "Under way", done: "Done", dropped: "Dropped", blocked: "Blocked", refused: "Refused" };
+var PLAN_STATUS_WORDS2 = { open: "Open", under_way: "Under way", done: "Done", dropped: "Dropped", blocked: "Blocked", refused: "Refused" };
 
 // src/packs/orgs/ui/decode.ts
 function ref(v6) {
@@ -66921,6 +71180,26 @@ function text(v6) {
 }
 function idTitle(v6) {
   return isRecord(v6) && typeof v6.id === "string" ? { id: v6.id, title: str(v6.title, v6.id) } : null;
+}
+function link(l3) {
+  if (typeof l3.id !== "string")
+    return null;
+  return {
+    id: l3.id,
+    name: str(l3.name, l3.id),
+    type: oneOf(l3.type, ORG_TYPES, "group"),
+    share: optNum(l3.share) ?? null,
+    votes: optNum(l3.votes) ?? null,
+    controlled: l3.controlled === true,
+    role: isOwnerRole(l3.role) ? l3.role : null,
+    position: idTitle(l3.position),
+    delegation: l3.delegation === true
+  };
+}
+function trust(v6) {
+  if (!isRecord(v6))
+    return null;
+  return { settlor: ref(v6.settlor), revocable: v6.revocable === true, purpose: text(v6.purpose), until: text(v6.until), decide: oneOf(v6.decide, TRUSTEES_DECIDE, "each") };
 }
 function delegation(d3) {
   const who = ref(d3.who);
@@ -66950,7 +71229,8 @@ function person3(p3) {
     share: optNum(p3.share) ?? null,
     via: ref(p3.via),
     powers: list(p3.powers, power),
-    you: p3.you === true
+    you: p3.you === true,
+    org: p3.org === null || p3.org === undefined ? null : oneOf(p3.org, ORG_TYPES, "group")
   };
 }
 function position(p3) {
@@ -67002,7 +71282,8 @@ function decodeOrgView(value) {
       since: text(you.since),
       reportsTo: list(you.reportsTo, ref),
       powers: list(you.powers, power),
-      delegations: list(you.delegations, delegation)
+      delegations: list(you.delegations, delegation),
+      through: list(you.through, ref)
     },
     runBy: list(value.runBy, ref),
     people: list(value.people, person3),
@@ -67013,7 +71294,12 @@ function decodeOrgView(value) {
     dues: dues(value.dues),
     history: list(value.history, historyLine),
     candidates: list(value.candidates, ref),
-    sections: isRecord(value.sections) ? value.sections : {}
+    sections: isRecord(value.sections) ? value.sections : {},
+    above: list(value.above, link),
+    below: list(value.below, link),
+    belowHidden: num(value.belowHidden),
+    trust: trust(value.trust),
+    nonprofit: value.nonprofit === true
   };
 }
 function decodeOrgPage(pages, id) {
@@ -67021,14 +71307,19 @@ function decodeOrgPage(pages, id) {
   return page7?.id === id ? page7 : null;
 }
 function row(r3) {
-  return typeof r3.id === "string" ? { id: r3.id, name: str(r3.name, r3.id), type: oneOf(r3.type, ORG_TYPES, "group"), kind: str(r3.kind), title: text(r3.title), figure: text(r3.figure) } : null;
+  return typeof r3.id === "string" ? { id: r3.id, name: str(r3.name, r3.id), type: oneOf(r3.type, ORG_TYPES, "group"), kind: str(r3.kind), title: text(r3.title), figure: text(r3.figure), under: text(r3.under), via: isRecord(r3.via) ? link(r3.via) : null } : null;
+}
+function founding(v6, off) {
+  const s3 = isRecord(v6) ? v6 : {};
+  return { why: isRecord(v6) ? text(s3.why) : off, sources: list(s3.sources, (a3) => typeof a3.id === "string" ? { id: a3.id, name: str(a3.name, a3.id), balance: str(a3.balance) } : null) };
 }
 function start(v6) {
   const s3 = isRecord(v6) ? v6 : {};
-  const company = isRecord(s3.company) ? s3.company : {};
   const kinds = isRecord(s3.group) ? list(s3.group.kinds, (k2) => typeof k2.id === "string" ? { id: k2.id, label: str(k2.label, k2.id) } : null) : [];
   return {
-    company: { why: isRecord(s3.company) ? text(company.why) : "Starting a company isn't open here", sources: list(company.sources, (a3) => typeof a3.id === "string" ? { id: a3.id, name: str(a3.name, a3.id), balance: str(a3.balance) } : null) },
+    company: founding(s3.company, "Starting a company isn't open here"),
+    trust: founding(s3.trust, "Settling a trust isn't open here"),
+    nonprofit: founding(s3.nonprofit, "Starting a nonprofit isn't open here"),
     group: kinds.length > 0 ? { kinds } : null
   };
 }
@@ -67190,8 +71481,8 @@ function decodeDecisions(value) {
 }
 
 // src/packs/orgs/ui/decisions.tsx
-var STATUS_TONE2 = { open: "accent", passed: "pos", failed: "neg", withdrawn: "neutral" };
-var STATE_TONE = { asked: "accent", approved: "pos", denied: "neg", withdrawn: "neutral", lapsed: "warn" };
+var STATUS_TONE3 = { open: "accent", passed: "pos", failed: "neg", withdrawn: "neutral" };
+var STATE_TONE2 = { asked: "accent", approved: "pos", denied: "neg", withdrawn: "neutral", lapsed: "warn" };
 var HOW_WORDS = { own: "", rule: "by standing vote", story: "as the story told it", gm: "by the GM" };
 var VOTE_LABELS = { for: "For", against: "Against", abstain: "Abstain" };
 var VOTE_OPTIONS = ["for", "against", "abstain"].map((v6) => ({ value: v6, label: VOTE_LABELS[v6] }));
@@ -67222,13 +71513,13 @@ function rulesChange(org, view, d3) {
   const params = {};
   if (d3.basis !== view.rules.basis)
     params.vote_by = d3.basis;
-  const numbers2 = [
+  const numbers3 = [
     ["quorum", "quorum", view.rules.quorum],
     ["pass", "pass", view.rules.pass],
     ["days", "days", view.rules.days],
     ["approvalDays", "approval_days", view.rules.approvalDays]
   ];
-  for (const [key, arg, was] of numbers2) {
+  for (const [key, arg, was] of numbers3) {
     const text2 = String(d3[key]).trim();
     if (text2 === "")
       params[arg] = "default";
@@ -67254,7 +71545,7 @@ function MotionCard(props) {
   return /* @__PURE__ */ u3(Card, {
     title: m2.text,
     aside: /* @__PURE__ */ u3(Badge, {
-      tone: STATUS_TONE2[m2.status],
+      tone: STATUS_TONE3[m2.status],
       children: open ? "Open" : m2.status === "passed" ? "Carried" : m2.status === "failed" ? "Failed" : "Withdrawn"
     }, undefined, false, undefined, this),
     children: /* @__PURE__ */ u3("div", {
@@ -67330,7 +71621,7 @@ function RequestCard(props) {
   return /* @__PURE__ */ u3(Card, {
     title: r3.text,
     aside: /* @__PURE__ */ u3(Badge, {
-      tone: STATE_TONE[r3.state],
+      tone: STATE_TONE2[r3.state],
       children: r3.state === "asked" ? "Waiting" : r3.state === "approved" ? "Approved" : r3.state === "denied" ? "Denied" : r3.state === "lapsed" ? "Lapsed" : "Withdrawn"
     }, undefined, false, undefined, this),
     children: /* @__PURE__ */ u3("div", {
@@ -67642,6 +71933,246 @@ function GmOrgDecisionsTab(props) {
 }
 var DECISIONS_TAB_DEF = { id: DECISIONS_TAB, label: "Decisions", order: 85, section: DECISIONS_SECTION, component: OrgDecisionsTab, gm: GmOrgDecisionsTab };
 
+// src/packs/orgs/ui/chart-model.ts
+var CHART_DEPTH = 4;
+var CHART_OPEN = 2;
+var CONTROL_DEPTH2 = 8;
+function node(key, label, icon, rest = {}) {
+  return { key, label, icon, detail: rest.detail ?? null, value: rest.value ?? null, badges: rest.badges ?? [], open: rest.open ?? null, actions: rest.actions ?? [], children: rest.children ?? [], ...rest.muted ? { muted: true } : {}, ...rest.current ? { current: true } : {} };
+}
+function defaultOpen(nodes, depth = 1) {
+  if (depth >= CHART_OPEN)
+    return [];
+  return nodes.flatMap((n6) => n6.children.length > 0 ? [n6.key, ...defaultOpen(n6.children, depth + 1)] : []);
+}
+function treeRows(nodes, open, depth = 1, parent = null) {
+  return nodes.flatMap((n6, i3) => {
+    const deep = depth >= CHART_DEPTH && n6.children.length > 0;
+    const isOpen = !deep && n6.children.length > 0 && open.has(n6.key);
+    const row2 = { node: n6, depth, parent, setSize: nodes.length, posInSet: i3 + 1, open: isOpen, deep };
+    return [row2, ...isOpen ? treeRows(n6.children, open, depth + 1, n6.key) : []];
+  });
+}
+function pathTo(nodes, key) {
+  for (const n6 of nodes) {
+    if (n6.key === key)
+      return [n6];
+    const below = pathTo(n6.children, key);
+    if (below.length > 0)
+      return [n6, ...below];
+  }
+  return [];
+}
+function rerooted(nodes, root) {
+  if (root === null)
+    return { nodes, path: [] };
+  const path2 = pathTo(nodes, root);
+  const at2 = path2.at(-1);
+  return at2 ? { nodes: [at2], path: path2 } : { nodes, path: [] };
+}
+function rowPress(row2) {
+  const n6 = row2.node;
+  if (n6.open !== null && n6.actions.length === 0)
+    return "open";
+  if (n6.actions.length > 0 || n6.open !== null)
+    return "menu";
+  if (row2.deep)
+    return "reroot";
+  return n6.children.length > 0 ? "toggle" : null;
+}
+function rowMenu(row2) {
+  const n6 = row2.node;
+  return [...n6.open !== null ? [{ id: "open", label: "Open", icon: "chevron-right", route: n6.open }] : [], ...n6.actions, ...row2.deep ? [{ id: "reroot", label: "Show from here", icon: "branch", reroot: true }] : []];
+}
+function reportingParents(positions) {
+  const ids = new Set(positions.map((p3) => p3.id));
+  const parent = new Map(positions.map((p3) => [p3.id, p3.reportsTo && p3.reportsTo.id !== p3.id && ids.has(p3.reportsTo.id) ? p3.reportsTo.id : null]));
+  const loops = new Set;
+  for (const p3 of positions) {
+    const seen = [];
+    let at2 = p3.id;
+    while (at2 !== null && !seen.includes(at2)) {
+      seen.push(at2);
+      at2 = parent.get(at2) ?? null;
+    }
+    if (at2 === null)
+      continue;
+    const cycle = seen.slice(seen.indexOf(at2));
+    const first = positions.find((q2) => cycle.includes(q2.id))?.id ?? at2;
+    parent.set(first, null);
+    loops.add(first);
+  }
+  return { parent, loops };
+}
+function fillOf(org) {
+  if (!org.exists || org.type === "party")
+    return { appoint: false, admit: false, hire: false };
+  if (isGmPage(org))
+    return { appoint: true, admit: true, hire: org.type === "company" };
+  return { appoint: holds(org, "members.appoint"), admit: holds(org, "members.admit"), hire: org.level >= 3 && holds(org, "staff.hire") };
+}
+function admitLabel(org) {
+  return org.type === "trust" ? "Add an officer or director" : "Admit a member";
+}
+function fillActions(org, p3, fill) {
+  if (p3.implied || p3.seats > 0 && p3.filled >= p3.seats)
+    return [];
+  const appointees2 = isGmPage(org) || org.people.some((person4) => !p3.holders.includes(person4.id));
+  return [
+    ...fill.appoint && appointees2 ? [{ id: "appoint", label: "Appoint someone to it", icon: "user", route: orgEditRoute(org.id, "appoint", p3.id) }] : [],
+    ...fill.admit ? [{ id: "admit", label: org.type === "trust" ? "Add an officer or director in it" : "Admit someone into it", icon: "user-plus", route: orgEditRoute(org.id, "admit", p3.id) }] : [],
+    ...fill.hire ? [{ id: "hire", label: "Hire someone into it", icon: "briefcase", route: orgEditRoute(org.id, "hire", p3.id) }] : []
+  ];
+}
+function positionActions(org, p3, positions) {
+  if (!positions || p3.implied)
+    return [];
+  const elsewhere = org.positions.some((q2) => !q2.implied && q2.id !== p3.id) || p3.reportsTo !== null;
+  return [
+    { id: "edit", label: "Edit the position", icon: "edit", route: orgEditRoute(org.id, "position", p3.id) },
+    { id: "under", label: "Add a position under it", icon: "plus", route: orgEditRoute(org.id, "under", p3.id) },
+    ...elsewhere ? [{ id: "move", label: "Move it", icon: "branch", route: orgEditRoute(org.id, "move", p3.id) }] : [],
+    { id: "remove", label: "Remove the position", icon: "trash", danger: true, route: orgEditRoute(org.id, "remove", p3.id) }
+  ];
+}
+function personNode(org, key, p3, detail, value = null) {
+  return node(key, p3.you ? `${p3.name} (you)` : p3.name, p3.org !== null ? TYPE_ICON[p3.org] : "user", {
+    detail,
+    value,
+    open: orgEditRoute(org.id, "member", p3.id),
+    actions: p3.org !== null ? [{ id: "page", label: `Open ${p3.name}'s page`, icon: TYPE_ICON[p3.org], route: orgRoute(p3.id, "chart") }] : []
+  });
+}
+function holderDetail(p3, position2) {
+  const title = p3.title !== "" && p3.title.toLowerCase() !== position2.title.toLowerCase() ? p3.title : null;
+  const where = p3.you || p3.org !== null ? null : p3.here ? "Here" : "Away";
+  return [title, where].filter((part) => part !== null).join(" · ") || null;
+}
+function positionNode(org, p3, under3, loops, fill, positions) {
+  const byId = new Map(org.people.map((x2) => [x2.id, x2]));
+  const holders = p3.holders.flatMap((id) => {
+    const person4 = byId.get(id);
+    return person4 ? [personNode(org, `p:${p3.id}/h:${id}`, person4, holderDetail(person4, p3))] : [];
+  });
+  const fills = fillActions(org, p3, fill);
+  const free = p3.seats === 0 ? 0 : Math.max(0, p3.seats - p3.filled);
+  const rows2 = [
+    ...holders,
+    ...p3.hidden > 0 ? [node(`p:${p3.id}/hidden`, `${count2(p3.hidden, "other", "others")} you don't know`, "user", { muted: true })] : [],
+    ...free > 0 ? [node(`p:${p3.id}/vacant`, free === 1 ? "Vacant seat" : `${free} vacant seats`, "user", { muted: true, actions: fills })] : [],
+    ...under3
+  ];
+  const mine = org.you.position?.id === p3.id || org.people.some((x2) => x2.you && p3.holders.includes(x2.id));
+  const badges = [
+    ...mine ? [{ text: "Yours", tone: "accent" }] : [],
+    ...p3.filled === 0 && p3.hidden === 0 && !p3.implied ? [{ text: "Vacant", tone: "warn" }] : [],
+    ...loops.has(p3.id) ? [{ text: "Reports in a loop", tone: "warn" }] : [],
+    ...p3.implied ? [{ text: "Built in", tone: "neutral" }] : [],
+    ...p3.joinsIn ? [{ text: "New members", tone: "neutral" }] : []
+  ];
+  const detail = [seatWords(p3), p3.scope === "below" ? "reaches only below it" : null].filter((part) => part !== null).join(" · ");
+  return node(`p:${p3.id}`, p3.title, "scroll", { detail, badges, children: rows2, actions: [...positionActions(org, p3, positions), ...fills] });
+}
+function ownerGroups(org) {
+  const owners = org.people.filter((p3) => p3.hows.includes("owner"));
+  return Object.keys(OWNER_ROLE_LABELS).flatMap((role) => {
+    const rows2 = owners.filter((p3) => (p3.role ?? "owner") === role);
+    if (rows2.length === 0)
+      return [];
+    const title = org.type === "trust" && role === "owner" ? "Owners" : OWNER_ROLE_LABELS[role].many;
+    return [node(`g:owner:${role}`, title, "users", { detail: count2(rows2.length, "holder", "holders"), children: rows2.map((p3) => personNode(org, `g:owner:${role}/${p3.id}`, p3, p3.via ? `through ${p3.via.name}` : null, p3.share !== null && p3.share > 0 ? pct(p3.share) : null)) })];
+  });
+}
+function delegationGroup(org) {
+  if (org.delegations.length === 0)
+    return [];
+  const can = rulesControls(org);
+  const rows2 = org.delegations.map((d3, i3) => node(`g:delegations/${d3.who.id}:${i3}`, d3.who.name, "key", {
+    detail: [powersText(d3.powers), d3.by ? `granted by ${d3.by.name}` : null].filter((part) => part !== null).join(" · "),
+    value: d3.until ? `until ${d3.until}` : "until revoked",
+    open: can.delegate || mayRevoke(org, d3) ? orgEditRoute(org.id, "delegate", d3.who.id) : null
+  }));
+  return [node("g:delegations", "Acting for it", "key", { detail: count2(rows2.length, "delegation", "delegations"), children: rows2, actions: can.delegate ? [{ id: "delegate", label: "Delegate…", icon: "key", route: orgEditRoute(org.id, "delegate") }] : [] })];
+}
+function reportingTree(org) {
+  const { parent, loops } = reportingParents(org.positions);
+  const fill = fillOf(org);
+  const can = rulesControls(org);
+  const build = (p3) => positionNode(org, p3, org.positions.filter((q2) => parent.get(q2.id) === p3.id).map(build), loops, fill, can.positions);
+  const roots = org.positions.filter((p3) => parent.get(p3.id) === null).map(build);
+  const placed = new Set(org.positions.flatMap((p3) => p3.holders));
+  const unplaced = org.people.filter((p3) => !placed.has(p3.id));
+  const group = (key, title, people2, actions = []) => people2.length === 0 ? [] : [node(`g:${key}`, title, "users", { detail: count2(people2.length, "person", "people"), actions, children: people2.map((p3) => personNode(org, `g:${key}/${p3.id}`, p3, [p3.title || null, p3.via ? `through ${p3.via.name}` : null].filter((part) => part !== null).join(" · ") || null)) })];
+  const staff = group("staff", "Staff", unplaced.filter((p3) => p3.hows.includes("staff")), fill.hire ? [{ id: "hire", label: "Hire someone", icon: "user-plus", route: orgEditRoute(org.id, "hire") }] : []);
+  const members = org.type === "party" ? PARTY_TIERS.flatMap((tier) => group(tier, TIER_HEADINGS[tier], unplaced.filter((p3) => p3.hows.includes(tier)))) : group("members", org.type === "company" || org.type === "trust" ? "Board and officers" : "Members", unplaced.filter((p3) => p3.hows.some((h3) => h3 === "member" || h3 === "leader" || isPartyTier(h3))), fill.admit ? [{ id: "admit", label: admitLabel(org), icon: "user-plus", route: orgEditRoute(org.id, "admit") }] : []);
+  return [...roots, ...staff, ...members, ...ownerGroups(org), ...delegationGroup(org)];
+}
+function mainHolder(above) {
+  return [...above].sort((a3, b3) => Number(b3.controlled) - Number(a3.controlled) || (b3.share ?? 0) - (a3.share ?? 0) || a3.id.localeCompare(b3.id))[0] ?? null;
+}
+function controlChain(org, pageOf2) {
+  const chain = [{ id: org.id, name: org.name }];
+  let at2 = org;
+  while (at2 && chain.length <= CONTROL_DEPTH2) {
+    const up = mainHolder(at2.above);
+    if (!up || chain.some((c3) => c3.id === up.id))
+      break;
+    chain.unshift({ id: up.id, name: up.name });
+    at2 = pageOf2(up.id);
+  }
+  return chain;
+}
+function linkBadges(link2) {
+  return [
+    ...link2.controlled ? [{ text: "Controlled", tone: "accent" }] : [],
+    ...link2.role !== null && link2.role !== "owner" ? [{ text: OWNER_ROLE_LABELS[link2.role].one, tone: "neutral" }] : [],
+    ...link2.position ? [{ text: link2.position.title, tone: "neutral" }] : []
+  ];
+}
+function holdingActions(holder, child, here, ownershipTab) {
+  if (!holder || child.share === null || child.share <= 0)
+    return [];
+  if (isGmPage(holder))
+    return [{ id: "owners", label: "Edit its owners", icon: "users", route: orgRoute(child.id, "people") }];
+  const tab = ownershipTab(holder);
+  if (child.type !== "company" || tab === null || !holds(holder, "shares.manage"))
+    return [];
+  return [holder.id === here.id ? { id: "stake", label: "Sell part, or put more in", icon: "coins", tab } : { id: "stake", label: "Sell part, or put more in", icon: "coins", route: orgRoute(holder.id, tab) }];
+}
+function foundActions(org, ownershipTab) {
+  const tab = ownershipTab(org);
+  if (org.type !== "company" || org.ended !== null || isGmPage(org) || tab === null || !holds(org, "org.govern"))
+    return [];
+  return [
+    { id: "subsidiary", label: "Start a subsidiary", icon: "briefcase", tab },
+    { id: "settle", label: "Settle a trust", icon: "shield", tab }
+  ];
+}
+function controlTree(org, pageOf2, root, ownershipTab) {
+  const pageFor = (id) => id === org.id ? org : pageOf2(id);
+  const top = pageFor(root);
+  if (!top)
+    return [];
+  const walk2 = (page7, ref2, key, link2, holder, seen, depth) => {
+    const below = page7 && depth < CONTROL_DEPTH2 ? page7.below.filter((l3) => !seen.has(l3.id)) : [];
+    const children = below.map((l3) => walk2(pageFor(l3.id), l3, `${key}/o:${l3.id}`, l3, page7, new Set([...seen, l3.id]), depth + 1));
+    const hidden = page7 && page7.belowHidden > 0 ? [node(`${key}/hidden`, `${page7.belowHidden} you don't know`, "briefcase", { muted: true })] : [];
+    const here = ref2.id === org.id;
+    return node(key, ref2.name, TYPE_ICON[ref2.type], {
+      detail: link2 ? linkWords(link2) || null : here ? "This organization" : null,
+      badges: link2 ? linkBadges(link2) : [],
+      open: here ? null : orgRoute(ref2.id, "chart"),
+      actions: [...link2 ? holdingActions(holder, link2, org, ownershipTab) : [], ...here ? foundActions(org, ownershipTab) : []],
+      children: [...children, ...hidden],
+      ...here ? { current: true } : {}
+    });
+  };
+  return [walk2(top, top, `o:${top.id}`, null, null, new Set([top.id]), 1)];
+}
+function hasChart(org) {
+  return org.positions.some((p3) => !p3.implied) || org.above.length > 0 || org.below.length > 0 || org.belowHidden > 0;
+}
+
 // src/packs/orgs/ui/member.tsx
 var HOW_LABELS = { member: "Member", owner: "Owner", staff: "Staff", leader: "Leader", core: "Core", companion: "Companion", hired: "Hired", ally: "Ally" };
 function heldWords(org, person4, held) {
@@ -67653,6 +72184,10 @@ function heldWords(org, person4, held) {
     if (h3.basis === "delegate") {
       const by = org.delegations.find((d3) => d3.who.id === person4.id && d3.by?.id === h3.id)?.by?.name;
       return by ? `by delegation from ${by}` : "by delegation";
+    }
+    if (h3.basis === "control") {
+      const through = org.above.find((o4) => o4.id === h3.id)?.name;
+      return through ? `through ${through}` : "through who holds it";
     }
     return "as a member";
   });
@@ -67920,9 +72455,9 @@ function MemberSheet(props) {
       }, undefined, false, undefined, this) : null,
       !person4.you ? /* @__PURE__ */ u3(Button, {
         variant: "ghost",
-        icon: "user",
+        icon: person4.org !== null ? "briefcase" : "user",
         block: true,
-        onClick: () => props.open({ kind: "person", id: person4.id }),
+        onClick: () => props.open(person4.org !== null ? orgRoute(person4.id) : { kind: "person", id: person4.id }),
         children: `${person4.name}'s page`
       }, undefined, false, undefined, this) : null
     ]
@@ -67931,7 +72466,7 @@ function MemberSheet(props) {
 var BASIS_LABELS = { salary: "A salary", hourly: "By the hour", per_shift: "By the shift", commission: "On commission", tips: "On tips", stipend: "A stipend" };
 function HireSheet(props) {
   const { org, host } = props;
-  const [form, setForm] = d2({ worker: "", title: "", position: "", basis: "hourly", rate: "", hours: "", every: "" });
+  const [form, setForm] = d2({ worker: "", title: "", position: props.position ?? "", basis: "hourly", rate: "", hours: "", every: "" });
   const set = (patch) => setForm((f3) => ({ ...f3, ...patch }));
   const people2 = newcomers(org, "hire");
   const action = hireAction(org, form, host.currency);
@@ -68001,14 +72536,14 @@ function HireSheet(props) {
 }
 function AdmitSheet(props) {
   const { org, host } = props;
-  const [form, setForm] = d2({ who: "", title: "", position: "" });
+  const [form, setForm] = d2({ who: "", title: "", position: props.position ?? "" });
   const set = (patch) => setForm((f3) => ({ ...f3, ...patch }));
   const people2 = newcomers(org, "admit");
   const action = admitAction(org, form);
   const joins = appointable(org).find((p3) => p3.id === org.defaultPosition)?.title;
   return /* @__PURE__ */ u3(EditFrame, {
     name: "admit",
-    title: "Admit a member",
+    title: admitLabel(org),
     subtitle: org.name,
     onBack: host.back,
     go: "Admit",
@@ -68122,15 +72657,42 @@ function OrgEditSheet(props) {
     case "hire":
       return /* @__PURE__ */ u3(HireSheet, {
         org,
+        position: target.id,
         host
       }, undefined, false, undefined, this);
     case "admit":
       return /* @__PURE__ */ u3(AdmitSheet, {
         org,
+        position: target.id,
         host
       }, undefined, false, undefined, this);
     case "position":
       return /* @__PURE__ */ u3(PositionSheet, {
+        org,
+        id: target.id,
+        host
+      }, undefined, false, undefined, this);
+    case "under":
+      return /* @__PURE__ */ u3(PositionSheet, {
+        org,
+        id: null,
+        ...target.id !== null ? { under: target.id } : {},
+        host
+      }, undefined, false, undefined, this);
+    case "move":
+      return /* @__PURE__ */ u3(MoveSheet, {
+        org,
+        id: target.id,
+        host
+      }, undefined, false, undefined, this);
+    case "appoint":
+      return /* @__PURE__ */ u3(AppointSheet, {
+        org,
+        id: target.id,
+        host
+      }, undefined, false, undefined, this);
+    case "remove":
+      return /* @__PURE__ */ u3(RemovePositionSheet, {
         org,
         id: target.id,
         host
@@ -68152,6 +72714,436 @@ function OrgEditSheet(props) {
         host
       }, undefined, false, undefined, this);
   }
+}
+
+// src/packs/orgs/ui/chart.tsx
+function treeStart(nodes) {
+  return { open: new Set(defaultOpen(nodes)), focus: null, menu: null, root: null };
+}
+function itemOf2(tree, key) {
+  for (const el of tree.querySelectorAll("[data-lre-tree-key]"))
+    if (el.dataset.lreTreeKey === key)
+      return el;
+  return null;
+}
+function TreeItem(props) {
+  const { row: row2, state } = props;
+  const n6 = row2.node;
+  const press = rowPress(row2);
+  const menu = state.menu === n6.key ? rowMenu(row2) : null;
+  const kids = props.rows.filter((r3) => r3.parent === n6.key);
+  const set = (patch) => props.onState({ ...state, ...patch });
+  const toggle = () => {
+    const open = new Set(state.open);
+    if (open.has(n6.key))
+      open.delete(n6.key);
+    else
+      open.add(n6.key);
+    set({ open, focus: n6.key, menu: null });
+  };
+  const activate = () => {
+    if (press === "open" && n6.open)
+      props.onGo({ id: "open", label: "Open", route: n6.open });
+    else if (press === "menu")
+      set({ menu: state.menu === n6.key ? null : n6.key, focus: n6.key });
+    else if (press === "reroot")
+      set({ root: n6.key, focus: n6.key, menu: null });
+    else if (press === "toggle")
+      toggle();
+  };
+  const trail2 = press === "open" ? "chevron-right" : press === "menu" ? "more" : null;
+  return /* @__PURE__ */ u3("li", {
+    role: "treeitem",
+    class: n6.muted ? "lre-tree-item muted" : "lre-tree-item",
+    style: { "--lre-tree-indent": `${(row2.depth - 1) * 12}px` },
+    "aria-level": row2.depth,
+    "aria-setsize": row2.setSize,
+    "aria-posinset": row2.posInSet,
+    "aria-expanded": n6.children.length > 0 && !row2.deep ? row2.open : undefined,
+    "aria-current": n6.current ? "true" : undefined,
+    "aria-label": [n6.label, n6.detail, n6.value, ...n6.badges.map((b3) => b3.text)].filter((part) => part).join(", "),
+    tabIndex: props.tabStop === n6.key ? 0 : -1,
+    "data-lre-tree-key": n6.key,
+    onFocus: (event) => {
+      if (event.target === event.currentTarget && state.focus !== n6.key)
+        set({ focus: n6.key });
+    },
+    children: [
+      /* @__PURE__ */ u3("div", {
+        class: ["lre-tree-row", n6.current ? "current" : null, press === null ? "inert" : null].filter((c3) => c3 !== null).join(" "),
+        onClick: activate,
+        children: [
+          n6.children.length > 0 ? /* @__PURE__ */ u3("span", {
+            class: "lre-tree-toggle",
+            "aria-hidden": "true",
+            title: row2.deep ? "Show from here" : row2.open ? "Close" : "Open",
+            onClick: (event) => {
+              event.stopPropagation();
+              if (row2.deep)
+                set({ root: n6.key, focus: n6.key, menu: null });
+              else
+                toggle();
+            },
+            children: /* @__PURE__ */ u3(Icon, {
+              name: row2.deep ? "branch" : row2.open ? "chevron-down" : "chevron-right",
+              size: 16
+            }, undefined, false, undefined, this)
+          }, undefined, false, undefined, this) : /* @__PURE__ */ u3("span", {
+            class: "lre-tree-toggle",
+            "aria-hidden": "true"
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3("span", {
+            class: "lre-tree-icon",
+            "aria-hidden": "true",
+            children: /* @__PURE__ */ u3(Icon, {
+              name: n6.icon,
+              size: 18
+            }, undefined, false, undefined, this)
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3("span", {
+            class: "lre-tree-text",
+            "aria-hidden": "true",
+            children: [
+              /* @__PURE__ */ u3("span", {
+                class: "lre-tree-label",
+                children: n6.label
+              }, undefined, false, undefined, this),
+              n6.detail !== null ? /* @__PURE__ */ u3("span", {
+                class: "lre-tree-detail",
+                children: n6.detail
+              }, undefined, false, undefined, this) : null,
+              n6.badges.length > 0 ? /* @__PURE__ */ u3("span", {
+                class: "lre-tree-badges",
+                children: n6.badges.map((b3) => /* @__PURE__ */ u3(Badge, {
+                  tone: b3.tone,
+                  children: b3.text
+                }, b3.text, false, undefined, this))
+              }, undefined, false, undefined, this) : null
+            ]
+          }, undefined, true, undefined, this),
+          n6.value !== null ? /* @__PURE__ */ u3("span", {
+            class: "lre-tree-value",
+            "aria-hidden": "true",
+            children: n6.value
+          }, undefined, false, undefined, this) : null,
+          trail2 ? /* @__PURE__ */ u3(Icon, {
+            name: trail2,
+            size: 16,
+            class: "lre-tree-trail"
+          }, undefined, false, undefined, this) : null
+        ]
+      }, undefined, true, undefined, this),
+      menu ? /* @__PURE__ */ u3("div", {
+        class: "lre-tree-menu",
+        role: "group",
+        "aria-label": `${n6.label}: what you may do`,
+        "data-lre-tree-menu": n6.key,
+        children: menu.map((action, i3) => /* @__PURE__ */ u3("button", {
+          type: "button",
+          class: action.danger ? "lre-tree-action danger" : "lre-tree-action",
+          "data-lre-tree-action": action.id,
+          ref: i3 === 0 ? (el) => {
+            if (el && !el.parentElement?.contains(document.activeElement))
+              el.focus();
+          } : undefined,
+          onClick: (event) => {
+            event.stopPropagation();
+            if (action.reroot)
+              set({ root: n6.key, focus: n6.key, menu: null });
+            else {
+              set({ menu: null });
+              props.onGo(action);
+            }
+          },
+          children: [
+            action.icon ? /* @__PURE__ */ u3(Icon, {
+              name: action.icon,
+              size: 16
+            }, undefined, false, undefined, this) : null,
+            /* @__PURE__ */ u3("span", {
+              children: action.label
+            }, undefined, false, undefined, this)
+          ]
+        }, action.id, true, undefined, this))
+      }, undefined, false, undefined, this) : null,
+      row2.open && kids.length > 0 ? /* @__PURE__ */ u3("ul", {
+        role: "group",
+        class: "lre-tree-group",
+        children: kids.map((kid) => /* @__PURE__ */ u3(TreeItem, {
+          ...props,
+          row: kid
+        }, kid.node.key, false, undefined, this))
+      }, undefined, false, undefined, this) : null
+    ]
+  }, undefined, true, undefined, this);
+}
+function TreeView(props) {
+  const { state } = props;
+  const shown2 = rerooted(props.nodes, state.root);
+  const rows2 = treeRows(shown2.nodes, state.open);
+  const tabStop = rows2.some((r3) => r3.node.key === state.focus) ? state.focus : rows2[0]?.node.key ?? null;
+  const set = (patch) => props.onState({ ...state, ...patch });
+  const onKeyDown = (event) => {
+    const tree = event.currentTarget;
+    const at2 = rows2.findIndex((r3) => r3.node.key === tabStop);
+    const row2 = rows2[at2];
+    if (!row2)
+      return;
+    const move = (to) => {
+      if (!to)
+        return;
+      set({ focus: to.node.key, menu: null });
+      itemOf2(tree, to.node.key)?.focus();
+    };
+    const inMenu = event.target.closest?.("[data-lre-tree-menu]") !== null;
+    if (event.key === "Escape" && state.menu !== null) {
+      event.preventDefault();
+      const key = state.menu;
+      set({ menu: null, focus: key });
+      itemOf2(tree, key)?.focus();
+      return;
+    }
+    if (inMenu)
+      return;
+    const keys = {
+      ArrowDown: () => move(rows2[at2 + 1]),
+      ArrowUp: () => move(rows2[at2 - 1]),
+      Home: () => move(rows2[0]),
+      End: () => move(rows2.at(-1)),
+      ArrowRight: () => {
+        if (row2.deep)
+          set({ root: row2.node.key, focus: row2.node.key, menu: null });
+        else if (row2.node.children.length > 0 && !row2.open)
+          set({ open: new Set([...state.open, row2.node.key]) });
+        else if (row2.open)
+          move(rows2[at2 + 1]);
+      },
+      ArrowLeft: () => {
+        if (row2.open)
+          set({ open: new Set([...state.open].filter((k2) => k2 !== row2.node.key)) });
+        else
+          move(rows2.find((r3) => r3.node.key === row2.parent));
+      },
+      Enter: () => (itemOf2(tree, row2.node.key)?.querySelector(".lre-tree-row") ?? null)?.click(),
+      " ": () => (itemOf2(tree, row2.node.key)?.querySelector(".lre-tree-row") ?? null)?.click()
+    };
+    const go2 = keys[event.key];
+    if (!go2 || event.target !== itemOf2(tree, row2.node.key))
+      return;
+    event.preventDefault();
+    go2();
+  };
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-tree-frame",
+    children: [
+      shown2.path.length > 0 ? /* @__PURE__ */ u3("nav", {
+        class: "lre-tree-crumbs",
+        "aria-label": `${props.label}: where this is`,
+        "data-lre-tree-crumbs": true,
+        children: [
+          /* @__PURE__ */ u3("button", {
+            type: "button",
+            class: "lre-tree-crumb",
+            onClick: () => set({ root: null, menu: null }),
+            children: props.top
+          }, undefined, false, undefined, this),
+          shown2.path.map((n6, i3) => /* @__PURE__ */ u3("span", {
+            class: "lre-tree-crumb-step",
+            children: [
+              /* @__PURE__ */ u3(Icon, {
+                name: "chevron-right",
+                size: 14,
+                class: "lre-tree-crumb-sep"
+              }, undefined, false, undefined, this),
+              i3 === shown2.path.length - 1 ? /* @__PURE__ */ u3("span", {
+                class: "lre-tree-crumb current",
+                "aria-current": "location",
+                children: n6.label
+              }, undefined, false, undefined, this) : /* @__PURE__ */ u3("button", {
+                type: "button",
+                class: "lre-tree-crumb",
+                onClick: () => set({ root: n6.key, menu: null }),
+                children: n6.label
+              }, undefined, false, undefined, this)
+            ]
+          }, n6.key, true, undefined, this))
+        ]
+      }, undefined, true, undefined, this) : null,
+      /* @__PURE__ */ u3("ul", {
+        role: "tree",
+        class: "lre-tree",
+        "aria-label": props.label,
+        onKeyDown,
+        children: rows2.filter((r3) => r3.parent === null).map((r3) => /* @__PURE__ */ u3(TreeItem, {
+          ...props,
+          row: r3,
+          rows: rows2,
+          tabStop
+        }, r3.node.key, false, undefined, this))
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+function Tree(props) {
+  const [state, setState] = d2(null);
+  return /* @__PURE__ */ u3(TreeView, {
+    ...props,
+    state: state ?? treeStart(props.nodes),
+    onState: setState
+  }, undefined, false, undefined, this);
+}
+function goTo(props, action) {
+  if (action.route)
+    props.open(action.route);
+  else if (action.tab)
+    props.onTab(action.tab);
+}
+function ControlPart(props) {
+  const { org } = props;
+  const chain = controlChain(org, props.pageOf);
+  const nodes = controlTree(org, props.pageOf, props.root, props.ownershipTab);
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-stack",
+    "data-lre-chart-control": org.id,
+    children: [
+      chain.length > 1 ? /* @__PURE__ */ u3("nav", {
+        class: "lre-tree-crumbs",
+        "aria-label": "Up to the ultimate parent",
+        "data-lre-chart-chain": true,
+        children: chain.map((c3, i3) => /* @__PURE__ */ u3("span", {
+          class: "lre-tree-crumb-step",
+          children: [
+            i3 > 0 ? /* @__PURE__ */ u3(Icon, {
+              name: "chevron-right",
+              size: 14,
+              class: "lre-tree-crumb-sep"
+            }, undefined, false, undefined, this) : null,
+            c3.id === props.root ? /* @__PURE__ */ u3("span", {
+              class: "lre-tree-crumb current",
+              "aria-current": "location",
+              children: c3.name
+            }, undefined, false, undefined, this) : /* @__PURE__ */ u3("button", {
+              type: "button",
+              class: "lre-tree-crumb",
+              onClick: () => props.onRoot(c3.id),
+              children: c3.name
+            }, undefined, false, undefined, this)
+          ]
+        }, c3.id, true, undefined, this))
+      }, undefined, false, undefined, this) : null,
+      org.above.length > 0 ? /* @__PURE__ */ u3("ul", {
+        class: "lre-tree lre-tree-flat",
+        "aria-label": "Held by",
+        "data-lre-chart-above": true,
+        children: org.above.map((l3) => /* @__PURE__ */ u3("li", {
+          class: "lre-tree-item",
+          children: /* @__PURE__ */ u3("button", {
+            type: "button",
+            class: "lre-tree-row",
+            style: { "--lre-tree-indent": "0px" },
+            onClick: () => props.open(orgRoute(l3.id, "chart")),
+            children: [
+              /* @__PURE__ */ u3("span", {
+                class: "lre-tree-toggle",
+                "aria-hidden": "true",
+                children: /* @__PURE__ */ u3(Icon, {
+                  name: "chevron-up",
+                  size: 16
+                }, undefined, false, undefined, this)
+              }, undefined, false, undefined, this),
+              /* @__PURE__ */ u3("span", {
+                class: "lre-tree-text",
+                children: [
+                  /* @__PURE__ */ u3("span", {
+                    class: "lre-tree-label",
+                    children: l3.name
+                  }, undefined, false, undefined, this),
+                  /* @__PURE__ */ u3("span", {
+                    class: "lre-tree-detail",
+                    children: ["Holds it", linkWords(l3)].filter((part) => part !== "").join(" · ")
+                  }, undefined, false, undefined, this)
+                ]
+              }, undefined, true, undefined, this),
+              l3.controlled ? /* @__PURE__ */ u3(Badge, {
+                tone: "accent",
+                children: "Controls it"
+              }, undefined, false, undefined, this) : null,
+              /* @__PURE__ */ u3(Icon, {
+                name: "chevron-right",
+                size: 16,
+                class: "lre-tree-trail"
+              }, undefined, false, undefined, this)
+            ]
+          }, undefined, true, undefined, this)
+        }, l3.id, false, undefined, this))
+      }, undefined, false, undefined, this) : null,
+      nodes.length > 0 ? /* @__PURE__ */ u3(TreeView, {
+        label: "Ownership and control",
+        top: nodes[0]?.label ?? org.name,
+        nodes,
+        state: props.tree ?? treeStart(nodes),
+        onState: props.onTree,
+        onGo: (a3) => goTo(props, a3)
+      }, props.root, false, undefined, this) : null
+    ]
+  }, undefined, true, undefined, this);
+}
+function OrgChart(props) {
+  const { org } = props;
+  const [reporting, setReporting] = d2(null);
+  const [control, setControl] = d2(null);
+  const [root, setRoot] = d2(org.id);
+  const report = reportingTree(org);
+  const structure = org.above.length > 0 || org.below.length > 0 || org.belowHidden > 0;
+  const add = rulesControls(org).positions;
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-stack",
+    "data-lre-org-chart": org.id,
+    children: [
+      /* @__PURE__ */ u3("div", {
+        "data-lre-chart": "reporting",
+        children: /* @__PURE__ */ u3(Section, {
+          title: "Reporting",
+          aside: add ? /* @__PURE__ */ u3(Button, {
+            variant: "ghost",
+            size: "sm",
+            icon: "plus",
+            onClick: () => props.open(orgEditRoute(org.id, "position")),
+            children: "Add position"
+          }, undefined, false, undefined, this) : undefined,
+          flush: true,
+          children: report.length > 0 ? /* @__PURE__ */ u3(TreeView, {
+            label: "Reporting lines",
+            top: "Everyone",
+            nodes: report,
+            state: reporting ?? treeStart(report),
+            onState: setReporting,
+            onGo: (a3) => goTo(props, a3)
+          }, undefined, false, undefined, this) : /* @__PURE__ */ u3("span", {
+            class: "lre-small lre-muted",
+            children: "No one is on its chart yet."
+          }, undefined, false, undefined, this)
+        }, undefined, false, undefined, this)
+      }, undefined, false, undefined, this),
+      structure ? /* @__PURE__ */ u3("div", {
+        "data-lre-chart": "control",
+        children: /* @__PURE__ */ u3(Section, {
+          title: "Ownership and control",
+          flush: true,
+          children: /* @__PURE__ */ u3(ControlPart, {
+            ...props,
+            root,
+            onRoot: (id) => {
+              setRoot(id);
+              setControl(null);
+            },
+            tree: control,
+            onTree: setControl
+          }, undefined, false, undefined, this)
+        }, undefined, false, undefined, this)
+      }, undefined, false, undefined, this) : null
+    ]
+  }, undefined, true, undefined, this);
 }
 
 // src/packs/orgs/ui/feed.tsx
@@ -68241,17 +73233,17 @@ function OrgsGlanceCard(props) {
     title: "Organizations",
     panel: ORGS_LIST_PANEL,
     children: [
-      needs.map((n5) => /* @__PURE__ */ u3(ListRow, {
+      needs.map((n6) => /* @__PURE__ */ u3(ListRow, {
         icon: "briefcase",
-        title: `${n5.name}: ${n5.alert.short}`,
+        title: `${n6.name}: ${n6.alert.short}`,
         badge: /* @__PURE__ */ u3("span", {
           class: "lre-dot",
           role: "img",
           "aria-label": "Needs you"
         }, undefined, false, undefined, this),
         chevron: true,
-        onClick: () => props.onOpen(n5.org, ALERT_TAB_IDS[n5.alert.tab])
-      }, `${n5.org}:${n5.alert.id}`, false, undefined, this)),
+        onClick: () => props.onOpen(n6.org, ALERT_TAB_IDS[n6.alert.tab])
+      }, `${n6.org}:${n6.alert.id}`, false, undefined, this)),
       plan2 && needs.length < GLANCE_ROWS ? /* @__PURE__ */ u3(ListRow, {
         icon: "flag",
         title: plan2.line,
@@ -68431,8 +73423,8 @@ function PartyControls(props) {
   const hands = [...section.candidates, ...people2.filter((p3) => !p3.hows.includes("hired")).map((p3) => ({ id: p3.id, name: p3.name }))].sort((a3, b3) => a3.name.localeCompare(b3.name));
   const hiring = hand || hands[0]?.id || "";
   const cents2 = (text2) => {
-    const n5 = parseMoneyInput(text2, currency);
-    return n5 !== null && n5 > 0 ? n5 : null;
+    const n6 = parseMoneyInput(text2, currency);
+    return n6 !== null && n6 > 0 ? n6 : null;
   };
   return /* @__PURE__ */ u3("div", {
     class: "lre-stack",
@@ -68757,7 +73749,8 @@ function OrgOverview(props) {
   const others = org.people.filter((p3) => !p3.you);
   const here = others.filter((p3) => p3.here).length;
   const place2 = placeLine(org);
-  const headline = [org.type === "party" ? hereAway(here, others.length - here) ?? "Just you" : null, props.figure, you.belongs ? null : place2].filter((line3) => line3 !== null);
+  const through = throughWords(org);
+  const headline = [org.type === "party" ? hereAway(here, others.length - here) ?? "Just you" : null, props.figure, you.belongs ? null : place2, you.belongs ? null : through].filter((line3) => line3 !== null);
   const families = powerFamilies(you.powers.map((p3) => p3.power));
   const alerts = decodeAlerts(org.sections[ALERTS_SECTION]);
   const coming = decodeComing(org.sections[COMING_SECTION]);
@@ -68794,6 +73787,10 @@ function OrgOverview(props) {
               "data-lre-org-place": true,
               children: place2
             }, undefined, false, undefined, this) : null,
+            through !== null ? /* @__PURE__ */ u3("span", {
+              "data-lre-org-through": true,
+              children: through
+            }, undefined, false, undefined, this) : null,
             you.position && you.position.title.toLowerCase() !== (you.title ?? "").toLowerCase() ? /* @__PURE__ */ u3(Row, {
               k: "Position",
               v: you.position.title
@@ -68805,7 +73802,7 @@ function OrgOverview(props) {
           ]
         }, undefined, true, undefined, this)
       }, undefined, false, undefined, this) : null,
-      you.belongs ? /* @__PURE__ */ u3(Section, {
+      you.belongs || you.powers.length > 0 ? /* @__PURE__ */ u3(Section, {
         title: "What you may do",
         flush: true,
         children: /* @__PURE__ */ u3(List, {
@@ -68817,6 +73814,37 @@ function OrgOverview(props) {
             value: basisWords(org, you.powers.filter((p3) => f3.powers.includes(p3.power))),
             valueTone: "muted"
           }, f3.family, false, undefined, this))
+        }, undefined, false, undefined, this)
+      }, undefined, false, undefined, this) : null,
+      org.trust ? /* @__PURE__ */ u3("div", {
+        "data-lre-org-trust": org.id,
+        children: /* @__PURE__ */ u3(Section, {
+          title: "Its terms",
+          children: /* @__PURE__ */ u3("div", {
+            class: "lre-stack",
+            children: [
+              org.trust.settlor ? /* @__PURE__ */ u3(Row, {
+                k: "Settled by",
+                v: org.trust.settlor.name
+              }, undefined, false, undefined, this) : null,
+              /* @__PURE__ */ u3(Row, {
+                k: "Can be taken back",
+                v: org.trust.revocable ? "Yes: its settlor may revoke it" : "No: it is irrevocable"
+              }, undefined, false, undefined, this),
+              org.trust.purpose ? /* @__PURE__ */ u3(Row, {
+                k: "For",
+                v: org.trust.purpose
+              }, undefined, false, undefined, this) : null,
+              org.trust.until ? /* @__PURE__ */ u3(Row, {
+                k: "Ends",
+                v: org.trust.until
+              }, undefined, false, undefined, this) : null,
+              /* @__PURE__ */ u3(Row, {
+                k: "Its trustees decide",
+                v: org.trust.decide === "together" ? "Together, by vote" : "Each alone"
+              }, undefined, false, undefined, this)
+            ]
+          }, undefined, true, undefined, this)
         }, undefined, false, undefined, this)
       }, undefined, false, undefined, this) : null,
       you.delegations.length > 0 ? /* @__PURE__ */ u3(Section, {
@@ -68843,10 +73871,10 @@ function OrgOverview(props) {
 function memberRow(org, p3, subtitle, value, open) {
   return /* @__PURE__ */ u3(ListRow, {
     id: p3.id,
-    icon: "user",
+    icon: p3.org !== null ? TYPE_ICON[p3.org] : "user",
     title: p3.you ? `${p3.name} (you)` : p3.name,
     subtitle,
-    value: value ?? (p3.you ? undefined : p3.here ? "Here" : "Away"),
+    value: value ?? (p3.you || p3.org !== null ? undefined : p3.here ? "Here" : "Away"),
     valueTone: "muted",
     chevron: true,
     onClick: () => open(orgEditRoute(org.id, "member", p3.id))
@@ -68886,7 +73914,7 @@ function OrgPeople(props) {
         icon: "user-plus",
         block: true,
         onClick: () => props.open(orgEditRoute(org.id, "admit")),
-        children: "Admit a member"
+        children: admitLabel(org)
       }, undefined, false, undefined, this) : null,
       can.payout ? /* @__PURE__ */ u3(Button, {
         icon: "coins",
@@ -68937,7 +73965,7 @@ function OrgPeople(props) {
         }, position2.id, false, undefined, this);
       }),
       group("staff", "Staff", unplaced.filter((p3) => p3.hows.includes("staff"))),
-      org.type === "party" ? PARTY_TIERS.map((tier) => group(tier, TIER_HEADINGS[tier], unplaced.filter((p3) => p3.hows.includes(tier)))) : group("members", org.type === "company" ? "Board and officers" : "Members", unplaced.filter((p3) => p3.hows.some((h3) => h3 === "member" || h3 === "leader" || isPartyTier(h3)))),
+      org.type === "party" ? PARTY_TIERS.map((tier) => group(tier, TIER_HEADINGS[tier], unplaced.filter((p3) => p3.hows.includes(tier)))) : group("members", org.type === "company" || org.type === "trust" ? "Board and officers" : "Members", unplaced.filter((p3) => p3.hows.some((h3) => h3 === "member" || h3 === "leader" || isPartyTier(h3)))),
       owners.length > 0 ? /* @__PURE__ */ u3("div", {
         "data-lre-org-people": "owners",
         children: /* @__PURE__ */ u3(Section, {
@@ -68967,11 +73995,13 @@ function OrgPeople(props) {
 var SHELL_TABS = [
   { id: "overview", label: "Overview", order: 10 },
   { id: "people", label: "People", order: 20 },
+  { id: "chart", label: "Chart", order: 25 },
   { id: "rules", label: "Rules", order: 90 }
 ];
 function orgTabs(org, defs) {
   const packs = defs.filter((d3) => d3.within === undefined && org.sections[d3.section] !== undefined);
-  return [...SHELL_TABS.map((t3) => ({ ...t3, def: null })), ...packs.map((def2) => ({ id: def2.id, label: def2.label, order: def2.order, def: def2 }))].sort((a3, b3) => a3.order - b3.order || a3.id.localeCompare(b3.id)).map(({ id, label, def: def2 }) => ({ id, label, def: def2 }));
+  const shell = SHELL_TABS.filter((t3) => t3.id !== "chart" || hasChart(org));
+  return [...shell.map((t3) => ({ ...t3, def: null })), ...packs.map((def2) => ({ id: def2.id, label: def2.label, order: def2.order, def: def2 }))].sort((a3, b3) => a3.order - b3.order || a3.id.localeCompare(b3.id)).map(({ id, label, def: def2 }) => ({ id, label, def: def2 }));
 }
 function orgMenu(org, actions) {
   const governs = org.exists && org.you.powers.some((p3) => p3.power === "org.govern");
@@ -69041,11 +74071,19 @@ function OrgPage(props) {
     open: props.open
   }, undefined, false, undefined, this);
   const ownership = tabs.find((t3) => t3.def?.section === "ownership")?.id;
+  const ownershipDef = defs.find((d3) => d3.section === "ownership" && d3.within === undefined);
+  const pageOf2 = (id) => id === org.id ? org : props.pageOf?.(id) ?? null;
   const body = def2 ? draw(def2) : current2 === "people" ? /* @__PURE__ */ u3(OrgPeople, {
     org,
     ownership: ownership === undefined ? null : () => props.onTab(ownership),
     open: props.open
-  }, undefined, false, undefined, this) : current2 === "rules" ? /* @__PURE__ */ u3(OrgRules, {
+  }, undefined, false, undefined, this) : current2 === "chart" ? /* @__PURE__ */ u3(OrgChart, {
+    org,
+    pageOf: pageOf2,
+    ownershipTab: (o4) => ownershipDef && o4.sections[ownershipDef.section] !== undefined ? ownershipDef.id : null,
+    open: props.open,
+    onTab: props.onTab
+  }, org.id, false, undefined, this) : current2 === "rules" ? /* @__PURE__ */ u3(OrgRules, {
     org,
     currency: props.state.currency ?? null,
     open: props.open
@@ -69166,6 +74204,12 @@ function OrgSheet(props) {
     onSave: (name) => act(ORG_ACTIONS.rename, { org: org.id, name }, () => setRenaming(false)),
     onCancel: () => setRenaming(false)
   }, undefined, false, undefined, this) : null;
+  const pages = new Map;
+  const pageOf2 = (id) => {
+    if (!pages.has(id))
+      pages.set(id, decodeOrgPage(props.state.panels[ORGS_ORG_PANEL], id));
+    return pages.get(id) ?? null;
+  };
   return /* @__PURE__ */ u3(OrgPage, {
     org,
     figure,
@@ -69180,315 +74224,8 @@ function OrgSheet(props) {
     open: props.open,
     menu,
     above,
-    act: playOrgAction(app, props.chatId)
-  }, undefined, false, undefined, this);
-}
-
-// src/packs/orgs/ui/home.tsx
-var TYPE_ICON = { household: "home", company: "briefcase", group: "flag", trust: "shield", party: "users" };
-var BELONG_GROUPS = [
-  { type: "household", label: "Households" },
-  { type: "company", label: "Companies" },
-  { type: "group", label: "Groups" },
-  { type: "trust", label: "Trusts" }
-];
-function typeWord(row2) {
-  return row2.type === "group" ? row2.kind || "Group" : row2.type === "company" ? "Company" : row2.type === "household" ? "Household" : row2.type === "trust" ? "Trust" : "Party";
-}
-function partyLines(party) {
-  const { members, hidden } = party;
-  if (members.length === 0 && hidden === 0)
-    return { who: "Just you", where: null };
-  const names = members.slice(0, 3).map((m2) => m2.name.split(/\s+/)[0] || m2.name);
-  const more = members.length - names.length + hidden;
-  const who = andList(more > 0 ? [...names, count2(more, "other", "others")] : names);
-  const tiers = PARTY_TIERS.flatMap((tier) => {
-    const n5 = members.filter((m2) => m2.tier === tier).length;
-    return n5 > 0 ? [count2(n5, ...TIER_NOUNS[tier])] : [];
-  });
-  const here = members.filter((m2) => m2.here).length;
-  return { who: [who, ...tiers].join(" · "), where: hereAway(here, members.length - here) };
-}
-function StartSomething(props) {
-  const { list: list2, currency, act } = props;
-  const { company, group } = list2.start;
-  const field2 = { company: P2(), from: P2(), units: P2(), group: P2(), kind: P2(), party: P2() };
-  const [companyName, setCompanyName] = d2("");
-  const [capital, setCapital] = d2("");
-  const [from, setFrom] = d2("");
-  const [units, setUnits] = d2("");
-  const [groupName, setGroupName] = d2("");
-  const [kind, setKind] = d2("");
-  const [partyName, setPartyName] = d2("");
-  const cents2 = currency ? parseMoneyInput(capital, currency) : null;
-  const source = from || company.sources[0]?.id || "";
-  const ofKind = kind || group?.kinds[0]?.id || "";
-  const count4 = units.trim() === "" ? null : Number(units);
-  const countOk = count4 === null || Number.isSafeInteger(count4) && count4 > 0;
-  return /* @__PURE__ */ u3("div", {
-    "data-lre-orgs-start": true,
-    children: /* @__PURE__ */ u3(Section, {
-      title: "Start something…",
-      children: /* @__PURE__ */ u3("div", {
-        class: "lre-stack",
-        children: [
-          currency ? /* @__PURE__ */ u3(Disclosure, {
-            summary: "Start a company",
-            children: /* @__PURE__ */ u3("div", {
-              class: "lre-stack",
-              "data-lre-orgs-start-kind": "company",
-              children: [
-                /* @__PURE__ */ u3(Field, {
-                  label: "Its name",
-                  for: field2.company,
-                  children: /* @__PURE__ */ u3("input", {
-                    id: field2.company,
-                    class: "lre-input",
-                    value: companyName,
-                    maxLength: 60,
-                    placeholder: "Ellis Mobile Repair",
-                    onInput: (event) => setCompanyName(event.currentTarget.value)
-                  }, undefined, false, undefined, this)
-                }, undefined, false, undefined, this),
-                /* @__PURE__ */ u3(Field, {
-                  label: "Capital",
-                  help: company.why ?? "You put it in, and you own all of it.",
-                  children: /* @__PURE__ */ u3(MoneyInput, {
-                    currency,
-                    value: capital,
-                    label: "Capital",
-                    onInput: setCapital
-                  }, undefined, false, undefined, this)
-                }, undefined, false, undefined, this),
-                company.sources.length > 1 ? /* @__PURE__ */ u3(Field, {
-                  label: "From",
-                  for: field2.from,
-                  children: /* @__PURE__ */ u3("select", {
-                    id: field2.from,
-                    class: "lre-input",
-                    value: source,
-                    onChange: (event) => setFrom(event.currentTarget.value),
-                    children: company.sources.map((s3) => /* @__PURE__ */ u3("option", {
-                      value: s3.id,
-                      children: [
-                        s3.name,
-                        " (",
-                        s3.balance,
-                        ")"
-                      ]
-                    }, s3.id, true, undefined, this))
-                  }, undefined, false, undefined, this)
-                }, undefined, false, undefined, this) : null,
-                /* @__PURE__ */ u3(Field, {
-                  label: "Units",
-                  for: field2.units,
-                  help: "Optional: count its shares in units, so partners can buy in by the unit later. Empty, you simply own all of it.",
-                  children: /* @__PURE__ */ u3("input", {
-                    id: field2.units,
-                    class: "lre-input",
-                    type: "number",
-                    inputMode: "numeric",
-                    min: 1,
-                    step: 1,
-                    value: units,
-                    placeholder: "1000",
-                    "aria-invalid": !countOk,
-                    onInput: (event) => setUnits(event.currentTarget.value)
-                  }, undefined, false, undefined, this)
-                }, undefined, false, undefined, this),
-                /* @__PURE__ */ u3(Button, {
-                  variant: "primary",
-                  disabled: company.why !== null || companyName.trim() === "" || cents2 === null || cents2 <= 0 || source === "" || !countOk,
-                  onClick: () => act(ORG_ACTIONS.found, { type: "company", name: companyName.trim(), amount: cents2 ?? 0, from: source, ...count4 !== null ? { units: count4 } : {} }),
-                  children: "Start the company"
-                }, undefined, false, undefined, this)
-              ]
-            }, undefined, true, undefined, this)
-          }, undefined, false, undefined, this) : null,
-          group ? /* @__PURE__ */ u3(Disclosure, {
-            summary: "Start a group",
-            children: /* @__PURE__ */ u3("div", {
-              class: "lre-stack",
-              "data-lre-orgs-start-kind": "group",
-              children: [
-                /* @__PURE__ */ u3(Field, {
-                  label: "Its name",
-                  for: field2.group,
-                  children: /* @__PURE__ */ u3("input", {
-                    id: field2.group,
-                    class: "lre-input",
-                    value: groupName,
-                    maxLength: 60,
-                    onInput: (event) => setGroupName(event.currentTarget.value)
-                  }, undefined, false, undefined, this)
-                }, undefined, false, undefined, this),
-                /* @__PURE__ */ u3(Field, {
-                  label: "Kind",
-                  for: field2.kind,
-                  help: "You lead it, with every power over it.",
-                  children: /* @__PURE__ */ u3("select", {
-                    id: field2.kind,
-                    class: "lre-input",
-                    value: ofKind,
-                    onChange: (event) => setKind(event.currentTarget.value),
-                    children: group.kinds.map((k2) => /* @__PURE__ */ u3("option", {
-                      value: k2.id,
-                      children: k2.label
-                    }, k2.id, false, undefined, this))
-                  }, undefined, false, undefined, this)
-                }, undefined, false, undefined, this),
-                /* @__PURE__ */ u3(Button, {
-                  variant: "primary",
-                  disabled: groupName.trim() === "" || ofKind === "",
-                  onClick: () => act(ORG_ACTIONS.found, { type: "group", name: groupName.trim(), kind: ofKind }),
-                  children: "Start the group"
-                }, undefined, false, undefined, this)
-              ]
-            }, undefined, true, undefined, this)
-          }, undefined, false, undefined, this) : null,
-          /* @__PURE__ */ u3(Disclosure, {
-            summary: "Name your party",
-            children: /* @__PURE__ */ u3("div", {
-              class: "lre-stack",
-              "data-lre-orgs-start-kind": "party",
-              children: [
-                /* @__PURE__ */ u3(Field, {
-                  label: "Its name",
-                  for: field2.party,
-                  children: /* @__PURE__ */ u3("input", {
-                    id: field2.party,
-                    class: "lre-input",
-                    value: partyName,
-                    maxLength: 60,
-                    placeholder: list2.party.name,
-                    onInput: (event) => setPartyName(event.currentTarget.value)
-                  }, undefined, false, undefined, this)
-                }, undefined, false, undefined, this),
-                /* @__PURE__ */ u3(Button, {
-                  disabled: partyName.trim() === "",
-                  onClick: () => act("party_name", { name: partyName.trim() }),
-                  children: "Name it"
-                }, undefined, false, undefined, this)
-              ]
-            }, undefined, true, undefined, this)
-          }, undefined, false, undefined, this)
-        ]
-      }, undefined, true, undefined, this)
-    }, undefined, false, undefined, this)
-  }, undefined, false, undefined, this);
-}
-function needsDot(needs, id) {
-  return needs?.has(id) ? /* @__PURE__ */ u3("span", {
-    class: "lre-dot",
-    role: "img",
-    "aria-label": "Needs you"
-  }, undefined, false, undefined, this) : undefined;
-}
-function OrgsHome(props) {
-  const { party, belong, known } = props.list;
-  const lines2 = partyLines(party);
-  const row2 = (r3, subtitle) => /* @__PURE__ */ u3(ListRow, {
-    id: r3.id,
-    icon: TYPE_ICON[r3.type],
-    title: r3.name,
-    subtitle,
-    value: r3.title ?? undefined,
-    valueTone: "muted",
-    badge: needsDot(props.needs, r3.id),
-    chevron: true,
-    onClick: () => props.onOpen(r3.id)
-  }, r3.id, false, undefined, this);
-  return /* @__PURE__ */ u3("div", {
-    class: "lre-stack",
-    "data-lre-panel": "orgs.list",
-    children: [
-      /* @__PURE__ */ u3("div", {
-        "data-lre-orgs-party": party.id,
-        children: /* @__PURE__ */ u3(Section, {
-          flush: true,
-          children: /* @__PURE__ */ u3(List, {
-            children: [
-              /* @__PURE__ */ u3(ListRow, {
-                icon: TYPE_ICON.party,
-                title: party.name,
-                subtitle: lines2.who,
-                value: lines2.where ?? undefined,
-                valueTone: "muted",
-                badge: needsDot(props.needs, party.id),
-                chevron: true,
-                id: party.exists ? party.id : undefined,
-                onClick: () => props.onOpen(party.id)
-              }, undefined, false, undefined, this),
-              party.purse !== null ? /* @__PURE__ */ u3(ListRow, {
-                icon: "wallet",
-                title: "Purse",
-                value: party.purse,
-                onClick: () => props.onOpen(party.id)
-              }, undefined, false, undefined, this) : null
-            ]
-          }, undefined, true, undefined, this)
-        }, undefined, false, undefined, this)
-      }, undefined, false, undefined, this),
-      belong.length === 0 ? /* @__PURE__ */ u3(Empty, {
-        icon: "briefcase",
-        children: "You don't belong to any organization yet."
-      }, undefined, false, undefined, this) : null,
-      BELONG_GROUPS.map(({ type, label }) => {
-        const rows2 = belong.filter((r3) => r3.type === type);
-        return rows2.length === 0 ? null : /* @__PURE__ */ u3("div", {
-          "data-lre-orgs-group": type,
-          children: /* @__PURE__ */ u3(Section, {
-            title: label,
-            flush: true,
-            children: /* @__PURE__ */ u3(List, {
-              children: rows2.map((r3) => row2(r3, [type === "group" ? typeWord(r3) : null, r3.figure].filter((p3) => p3 !== null).join(" · ") || undefined))
-            }, undefined, false, undefined, this)
-          }, undefined, false, undefined, this)
-        }, type, false, undefined, this);
-      }),
-      known.length > 0 ? /* @__PURE__ */ u3("div", {
-        "data-lre-orgs-known": true,
-        children: /* @__PURE__ */ u3(Disclosure, {
-          summary: /* @__PURE__ */ u3("span", {
-            children: [
-              "Known organizations ",
-              /* @__PURE__ */ u3(Badge, {
-                children: known.length
-              }, undefined, false, undefined, this)
-            ]
-          }, undefined, true, undefined, this),
-          children: /* @__PURE__ */ u3(List, {
-            children: known.map((r3) => row2(r3, [typeWord(r3), r3.whom.length > 0 ? `You know ${andList(r3.whom.map((p3) => p3.name))}` : null].filter((p3) => p3 !== null).join(" · ")))
-          }, undefined, false, undefined, this)
-        }, undefined, false, undefined, this)
-      }, undefined, false, undefined, this) : null,
-      props.act ? /* @__PURE__ */ u3(StartSomething, {
-        list: props.list,
-        currency: props.currency ?? null,
-        act: props.act
-      }, undefined, false, undefined, this) : null
-    ]
-  }, undefined, true, undefined, this);
-}
-function OrgsPanel(props) {
-  const app = useApp();
-  if (props.view === null || props.view === undefined)
-    return /* @__PURE__ */ u3(Empty, {
-      icon: "briefcase",
-      children: "No organizations here."
-    }, undefined, false, undefined, this);
-  const list2 = decodeOrgList(props.view);
-  if (!list2)
-    return /* @__PURE__ */ u3(JsonView, {
-      value: props.view
-    }, undefined, false, undefined, this);
-  const needs = new Set(needsYouOf(props.state.panels[ORGS_ORG_PANEL]).map((n5) => n5.org));
-  return /* @__PURE__ */ u3(OrgsHome, {
-    list: list2,
-    onOpen: (id) => app.ui.update((ui) => pushSheet(ui, orgRoute(id))),
     act: playOrgAction(app, props.chatId),
-    currency: props.state.currency,
-    needs
+    pageOf: pageOf2
   }, undefined, false, undefined, this);
 }
 
@@ -69536,8 +74273,8 @@ function fieldValue(entity2, field2) {
   return entity2?.fields.find((f3) => f3.id === field2)?.value;
 }
 function memberLink(gm, who, org) {
-  const link = gm.entities.find((e3) => e3.id === who)?.relations.find((r3) => r3.type === "member_of" && r3.to === org);
-  return link ? link.fields ?? {} : null;
+  const link2 = gm.entities.find((e3) => e3.id === who)?.relations.find((r3) => r3.type === "member_of" && r3.to === org);
+  return link2 ? link2.fields ?? {} : null;
 }
 function ownersOf2(gm, org) {
   const value = fieldValue(gm.entities.find((e3) => e3.id === org), "owners");
@@ -69555,13 +74292,13 @@ function jobsOf(gm, org) {
 }
 function gmControlsFor(org) {
   const real = org.exists && org.type !== "party";
-  return { members: real && org.type !== "trust", owners: real && (org.type === "company" || org.type === "trust"), jobs: real && org.type === "company" };
+  return { members: real, owners: real && (org.type === "company" || org.type === "trust"), jobs: real && org.type === "company" };
 }
 function rankOf(text2) {
   if (text2.trim() === "")
     return;
-  const n5 = Number(text2);
-  return Number.isFinite(n5) ? n5 : null;
+  const n6 = Number(text2);
+  return Number.isFinite(n6) ? n6 : null;
 }
 function memberOps(org, who, form) {
   const rank = rankOf(form.rank);
@@ -69599,9 +74336,9 @@ function jobIdFor(words3, taken2) {
   const base = `job_${words3.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 32) || "new"}`;
   if (!taken2.has(base))
     return base;
-  for (let n5 = 2;; n5 += 1)
-    if (!taken2.has(`${base}_${n5}`))
-      return `${base}_${n5}`;
+  for (let n6 = 2;; n6 += 1)
+    if (!taken2.has(`${base}_${n6}`))
+      return `${base}_${n6}`;
 }
 function jobAddOps(org, id, form) {
   const title = form.title.trim();
@@ -69615,7 +74352,7 @@ function GmOrgsList(props) {
   const q2 = props.query.trim().toLowerCase();
   const person4 = props.person;
   const shown2 = props.orgs.filter(({ page: page7 }) => (q2 === "" || page7.name.toLowerCase().includes(q2) || page7.id.toLowerCase().includes(q2)) && (props.type === null || page7.type === props.type) && (person4 === null || page7.people.some((p3) => p3.id === person4.id)));
-  const present = TYPES2.filter((t3) => props.orgs.some((o4) => o4.page.type === t3.type));
+  const present2 = TYPES2.filter((t3) => props.orgs.some((o4) => o4.page.type === t3.type));
   return /* @__PURE__ */ u3("div", {
     class: "lre-stack",
     "data-lre-gm-orgs-list": true,
@@ -69645,7 +74382,7 @@ function GmOrgsList(props) {
         role: "group",
         "aria-label": "Types",
         children: [
-          present.map((t3) => /* @__PURE__ */ u3(Chip, {
+          present2.map((t3) => /* @__PURE__ */ u3(Chip, {
             pressed: props.type === t3.type,
             onToggle: () => props.onType(props.type === t3.type ? null : t3.type),
             children: t3.label
@@ -70085,24 +74822,24 @@ async function save(props, ops) {
 }
 function MemberSheet2(props) {
   const { org, section } = props;
-  const link = props.who === null ? null : memberLink(section.gm, props.who, org.id);
+  const link2 = props.who === null ? null : memberLink(section.gm, props.who, org.id);
   const [who, setWho] = d2(props.who ?? "");
-  const [form, setForm] = d2({ title: typeof link?.role === "string" ? link.role : "", position: typeof link?.position === "string" ? link.position : "", rank: typeof link?.rank === "number" ? String(link.rank) : "", since: typeof link?.since === "string" ? link.since : "" });
+  const [form, setForm] = d2({ title: typeof link2?.role === "string" ? link2.role : "", position: typeof link2?.position === "string" ? link2.position : props.position ?? "", rank: typeof link2?.rank === "number" ? String(link2.rank) : "", since: typeof link2?.since === "string" ? link2.since : "" });
   const set = (patch) => setForm((f3) => ({ ...f3, ...patch }));
   const candidates = section.gm.entities.filter((e3) => !e3.gone && e3.id !== org.id && (e3.person || kindIs3(section.gm, e3.kind, "group")) && memberLink(section.gm, e3.id, org.id) === null).sort((a3, b3) => a3.name.localeCompare(b3.name));
   const name = section.gm.entities.find((e3) => e3.id === props.who)?.name ?? props.who ?? "";
   const problem = who === "" ? "Choose who joins." : rankOf(form.rank) === null ? "A rank is a number." : null;
   return /* @__PURE__ */ u3(SheetForm, {
-    name: link === null ? "org-member-add" : "org-member",
+    name: link2 === null ? "org-member-add" : "org-member",
     title: props.who === null ? "Add a member" : name,
-    subtitle: link === null && props.who !== null ? `A member of ${org.name}` : org.name,
+    subtitle: link2 === null && props.who !== null ? `A member of ${org.name}` : org.name,
     backLabel: org.name,
     onBack: props.back,
-    go: link === null ? "Add" : "Save",
+    go: link2 === null ? "Add" : "Save",
     problem,
     busy: section.busy,
     onGo: () => void save(props, memberOps(org.id, who, form)),
-    danger: link === null ? undefined : { label: `Remove from ${org.name}`, onClick: () => void save(props, memberRemoveOps(org.id, who)) },
+    danger: link2 === null ? undefined : { label: `Remove from ${org.name}`, onClick: () => void save(props, memberRemoveOps(org.id, who)) },
     children: [
       props.who === null ? /* @__PURE__ */ u3(RefPicker, {
         label: "Who",
@@ -70201,7 +74938,7 @@ function NewJobSheet(props) {
   const { org, section } = props;
   const [worker, setWorker] = d2("");
   const [title, setTitle] = d2("");
-  const [position2, setPosition] = d2("");
+  const [position2, setPosition] = d2(props.position ?? "");
   const [basis, setBasis] = d2("hourly");
   const [rate2, setRate] = d2("");
   const [every, setEvery] = d2("biweekly");
@@ -70358,8 +75095,8 @@ function JobSheet(props) {
   }, undefined, false, undefined, this);
 }
 function delegationLink(gm, who, org) {
-  const link = gm.entities.find((e3) => e3.id === who)?.relations.find((r3) => r3.type === "acts_for" && r3.to === org);
-  return link ? { fields: link.fields ?? {}, until: link.until ?? null } : null;
+  const link2 = gm.entities.find((e3) => e3.id === who)?.relations.find((r3) => r3.type === "acts_for" && r3.to === org);
+  return link2 ? { fields: link2.fields ?? {}, until: link2.until ?? null } : null;
 }
 function refsIn(gm) {
   return peopleIn(gm).map((e3) => ({ id: e3.id, name: e3.name }));
@@ -70379,12 +75116,12 @@ function PersonSheet3(props) {
   const gm = section.gm;
   const person4 = org.people.find((p3) => p3.id === props.who);
   const name = gm.entities.find((e3) => e3.id === props.who)?.name ?? person4?.name ?? props.who;
-  const link = memberLink(gm, props.who, org.id);
+  const link2 = memberLink(gm, props.who, org.id);
   const jobs = jobsOf(gm, org.id).filter((j3) => fieldValue(j3, "worker") === props.who);
   const holdings = ownersOf2(gm, org.id).filter((o4) => o4.party === props.who);
   const acts2 = delegationLink(gm, props.who, org.id);
   const has = gmControlsFor(org);
-  const linkWords = link ? [typeof link.role === "string" ? link.role : null, org.positions.find((p3) => p3.id === link.position)?.title ?? null].filter((p3) => p3 !== null).join(" · ") || "Member" : "Not linked as a member";
+  const linkWords2 = link2 ? [typeof link2.role === "string" ? link2.role : null, org.positions.find((p3) => p3.id === link2.position)?.title ?? null].filter((p3) => p3 !== null).join(" · ") || "Member" : "Not linked as a member";
   return /* @__PURE__ */ u3(GmPage, {
     name: "org-person",
     title: name,
@@ -70407,8 +75144,8 @@ function PersonSheet3(props) {
             children: [
               has.members ? /* @__PURE__ */ u3(ListRow, {
                 icon: "users",
-                title: link ? "Membership" : "Make them a member",
-                subtitle: linkWords,
+                title: link2 ? "Membership" : "Make them a member",
+                subtitle: linkWords2,
                 chevron: true,
                 onClick: () => open({ kind: "member", who: props.who })
               }, undefined, false, undefined, this) : null,
@@ -70452,7 +75189,7 @@ function GmPositionSheet(props) {
   const { org, section } = props;
   const positions = positionsIn(fieldValue(section.gm.entities.find((e3) => e3.id === org.id), "positions"));
   const before = props.id === null ? null : positions.find((p3) => p3.id === props.id) ?? null;
-  const [draft, setDraft] = d2(() => positionDraft(before, section.currency));
+  const [draft, setDraft] = d2(() => ({ ...positionDraft(before, section.currency), ...props.under !== undefined && before === null ? { reportsTo: props.under } : {} }));
   return /* @__PURE__ */ u3(SheetForm, {
     name: "org-position",
     title: before ? before.title : "Add position",
@@ -70474,11 +75211,88 @@ function GmPositionSheet(props) {
     }, undefined, false, undefined, this)
   }, undefined, false, undefined, this);
 }
+function gmPosition(props, id) {
+  return positionsIn(fieldValue(props.section.gm.entities.find((e3) => e3.id === props.org.id), "positions")).find((p3) => p3.id === id) ?? null;
+}
+function GmMoveSheet(props) {
+  const { org, section } = props;
+  const before = gmPosition(props, props.id);
+  const [to, setTo] = d2(before?.reports_to ?? "");
+  const draft = before ? { ...positionDraft(before, section.currency), reportsTo: to } : null;
+  const positions = positionsIn(fieldValue(section.gm.entities.find((e3) => e3.id === org.id), "positions"));
+  return /* @__PURE__ */ u3(SheetForm, {
+    name: "org-move",
+    title: before ? `Move ${before.title}` : "Position",
+    subtitle: org.name,
+    backLabel: org.name,
+    onBack: props.back,
+    go: "Move it",
+    problem: !before || !draft ? "It has no such position any more." : to === (before.reports_to ?? "") ? "Choose where it goes." : positionProblem(draft, positions, section.currency),
+    busy: section.busy,
+    onGo: () => before && draft ? void save(props, positionEditOps(org.id, draft, before, section.currency)) : undefined,
+    children: before ? /* @__PURE__ */ u3(MoveFields, {
+      org,
+      id: before.id,
+      value: to,
+      onChange: setTo
+    }, undefined, false, undefined, this) : null
+  }, undefined, false, undefined, this);
+}
+function GmAppointSheet(props) {
+  const { org, section } = props;
+  const before = gmPosition(props, props.id);
+  const [who, setWho] = d2("");
+  const link2 = who === "" ? null : memberLink(section.gm, who, org.id);
+  const job2 = who === "" || link2 !== null ? undefined : jobsOf(section.gm, org.id).find((j3) => fieldValue(j3, "worker") === who && fieldValue(j3, "status") !== "ended");
+  const text2 = (v6) => typeof v6 === "string" ? v6 : "";
+  const ops = () => {
+    if (!before)
+      return [];
+    if (job2)
+      return jobTitleOps(job2, text2(fieldValue(job2, "title")), before.id);
+    return memberOps(org.id, who, { title: text2(link2?.role), position: before.id, rank: typeof link2?.rank === "number" ? String(link2.rank) : "", since: text2(link2?.since) });
+  };
+  return /* @__PURE__ */ u3(SheetForm, {
+    name: "org-appoint",
+    title: before ? `Appoint to ${before.title}` : "Position",
+    subtitle: org.name,
+    backLabel: org.name,
+    onBack: props.back,
+    go: "Appoint",
+    problem: !before ? "It has no such position any more." : who === "" ? "Choose whom to appoint." : null,
+    busy: section.busy,
+    onGo: () => void save(props, ops()),
+    children: before ? /* @__PURE__ */ u3(AppointFields, {
+      org,
+      id: before.id,
+      value: who,
+      onChange: setWho
+    }, undefined, false, undefined, this) : null
+  }, undefined, false, undefined, this);
+}
+function GmRemoveSheet(props) {
+  const { org, section } = props;
+  const before = gmPosition(props, props.id);
+  return /* @__PURE__ */ u3(SheetForm, {
+    name: "org-remove",
+    title: before ? `Remove ${before.title}` : "Position",
+    subtitle: org.name,
+    backLabel: org.name,
+    onBack: props.back,
+    go: "Remove the position",
+    problem: before ? null : "It has no such position any more.",
+    busy: section.busy,
+    onGo: () => before ? void save(props, positionRemoveOps(org.id, before.id)) : undefined,
+    children: before ? /* @__PURE__ */ u3("span", {
+      children: `${before.title} · ${powersText(before.powers)}. Those holding it stay, without it; positions under it report to no one.`
+    }, undefined, false, undefined, this) : null
+  }, undefined, false, undefined, this);
+}
 function GmDelegationSheet(props) {
   const { org, section } = props;
-  const link = props.who === null ? null : delegationLink(section.gm, props.who, org.id);
-  const f3 = link?.fields ?? {};
-  const [draft, setDraft] = d2(() => delegationDraft(props.who ?? "", link ? { powers: powersIn(f3.powers), ...typeof f3.payment === "number" ? { payment: f3.payment } : {}, ...typeof f3.month === "number" ? { month: f3.month } : {}, until: link.until, by: typeof f3.by === "string" ? f3.by : null } : null, section.currency));
+  const link2 = props.who === null ? null : delegationLink(section.gm, props.who, org.id);
+  const f3 = link2?.fields ?? {};
+  const [draft, setDraft] = d2(() => delegationDraft(props.who ?? "", link2 ? { powers: powersIn(f3.powers), ...typeof f3.payment === "number" ? { payment: f3.payment } : {}, ...typeof f3.month === "number" ? { month: f3.month } : {}, until: link2.until, by: typeof f3.by === "string" ? f3.by : null } : null, section.currency));
   const name = section.gm.entities.find((e3) => e3.id === props.who)?.name ?? props.who;
   const kept2 = org.delegations.find((d3) => d3.who.id === props.who)?.until ?? null;
   return /* @__PURE__ */ u3(SheetForm, {
@@ -70487,11 +75301,11 @@ function GmDelegationSheet(props) {
     subtitle: org.name,
     backLabel: org.name,
     onBack: props.back,
-    go: link ? "Save" : "Delegate",
+    go: link2 ? "Save" : "Delegate",
     problem: delegationProblem(draft, section.currency),
     busy: section.busy,
     onGo: () => void save(props, delegationEditOps(org.id, draft, section.currency)),
-    ...link && props.who !== null ? { danger: { label: "Revoke", onClick: () => void save(props, delegationRevokeOps(org.id, props.who ?? "")) } } : {},
+    ...link2 && props.who !== null ? { danger: { label: "Revoke", onClick: () => void save(props, delegationRevokeOps(org.id, props.who ?? "")) } } : {},
     children: /* @__PURE__ */ u3(DelegationFields, {
       draft,
       people: props.who === null ? refsIn(section.gm) : null,
@@ -70565,7 +75379,8 @@ function SheetView(props) {
     case "member":
       return /* @__PURE__ */ u3(MemberSheet2, {
         ...props,
-        who: sheet.who
+        who: sheet.who,
+        ...sheet.position !== undefined ? { position: sheet.position } : {}
       }, undefined, false, undefined, this);
     case "owner":
       return /* @__PURE__ */ u3(OwnerSheet, {
@@ -70575,7 +75390,8 @@ function SheetView(props) {
       }, undefined, false, undefined, this);
     case "job":
       return sheet.id === null ? /* @__PURE__ */ u3(NewJobSheet, {
-        ...props
+        ...props,
+        ...sheet.position !== undefined ? { position: sheet.position } : {}
       }, undefined, false, undefined, this) : /* @__PURE__ */ u3(JobSheet, {
         ...props,
         id: sheet.id
@@ -70587,6 +75403,22 @@ function SheetView(props) {
       }, undefined, false, undefined, this);
     case "position":
       return /* @__PURE__ */ u3(GmPositionSheet, {
+        ...props,
+        id: sheet.id,
+        ...sheet.under !== undefined ? { under: sheet.under } : {}
+      }, undefined, false, undefined, this);
+    case "move":
+      return /* @__PURE__ */ u3(GmMoveSheet, {
+        ...props,
+        id: sheet.id
+      }, undefined, false, undefined, this);
+    case "appoint":
+      return /* @__PURE__ */ u3(GmAppointSheet, {
+        ...props,
+        id: sheet.id
+      }, undefined, false, undefined, this);
+    case "remove":
+      return /* @__PURE__ */ u3(GmRemoveSheet, {
         ...props,
         id: sheet.id
       }, undefined, false, undefined, this);
@@ -70611,11 +75443,18 @@ function gmSheetFor(route) {
   const target = orgEditOf(route.id);
   if (!target)
     return null;
+  const position2 = target.id === null ? {} : { position: target.id };
   switch (target.form) {
     case "member":
       return target.id === null ? null : { kind: "person", who: target.id };
     case "position":
       return { kind: "position", id: target.id };
+    case "under":
+      return { kind: "position", id: null, ...target.id !== null ? { under: target.id } : {} };
+    case "move":
+    case "appoint":
+    case "remove":
+      return target.id === null ? null : { kind: target.form, id: target.id };
     case "delegate":
       return { kind: "delegation", who: target.id };
     case "dues":
@@ -70623,9 +75462,9 @@ function gmSheetFor(route) {
     case "payout":
       return { kind: "payout" };
     case "hire":
-      return { kind: "job", id: null };
+      return { kind: "job", id: null, ...position2 };
     case "admit":
-      return { kind: "member", who: null };
+      return { kind: "member", who: null, ...position2 };
   }
 }
 function GmOrgsSection(props) {
@@ -70711,7 +75550,11 @@ function GmOrgsSection(props) {
                   chatId: props.chatId,
                   state,
                   send: props.send,
-                  open
+                  open,
+                  pageOf: (id) => {
+                    const other = orgs.find((o4) => o4.page.id === id)?.page;
+                    return other ? gmPage(other) : null;
+                  }
                 }, undefined, false, undefined, this)
               }, undefined, false, undefined, this)
             }, undefined, false, undefined, this),
@@ -70738,8 +75581,516 @@ function GmOrgsSection(props) {
   }, undefined, true, undefined, this);
 }
 
+// src/packs/orgs/ui/home.tsx
+var BELONG_GROUPS = [
+  { type: "household", label: "Households" },
+  { type: "company", label: "Companies" },
+  { type: "group", label: "Groups" },
+  { type: "trust", label: "Trusts" }
+];
+function typeWord(row2) {
+  return row2.type === "group" ? row2.kind || "Group" : row2.type === "company" ? "Company" : row2.type === "household" ? "Household" : row2.type === "trust" ? "Trust" : "Party";
+}
+function homeTree(rows2, needs) {
+  const ids = new Set(rows2.map((r3) => r3.id));
+  const parent = new Map;
+  for (const r3 of rows2) {
+    const seen = new Set([r3.id]);
+    let up = r3.under !== null && ids.has(r3.under) ? r3.under : null;
+    for (let at2 = up;at2 !== null; at2 = parent.get(at2) ?? null) {
+      if (seen.has(at2)) {
+        up = null;
+        break;
+      }
+      seen.add(at2);
+    }
+    parent.set(r3.id, up);
+  }
+  const build = (r3) => {
+    const nested = parent.get(r3.id) !== null;
+    const via = nested && r3.via ? linkWords(r3.via) : "";
+    const whom = r3.whom && r3.whom.length > 0 ? `You know ${andList(r3.whom.map((p3) => p3.name))}` : null;
+    return {
+      key: r3.id,
+      label: r3.name,
+      detail: [nested || r3.type === "group" || r3.whom !== undefined ? typeWord(r3) : null, via || null, r3.figure, whom].filter((part) => part !== null).join(" · ") || null,
+      value: r3.title,
+      icon: TYPE_ICON[r3.type],
+      badges: [...nested && r3.via?.controlled ? [{ text: "Controlled", tone: "neutral" }] : [], ...needs?.has(r3.id) ? [{ text: "Needs you", tone: "accent" }] : []],
+      open: orgRoute(r3.id),
+      actions: [],
+      children: rows2.filter((c3) => parent.get(c3.id) === r3.id).map(build)
+    };
+  };
+  return rows2.filter((r3) => parent.get(r3.id) === null).map(build);
+}
+function partyLines(party) {
+  const { members, hidden } = party;
+  if (members.length === 0 && hidden === 0)
+    return { who: "Just you", where: null };
+  const names = members.slice(0, 3).map((m2) => m2.name.split(/\s+/)[0] || m2.name);
+  const more = members.length - names.length + hidden;
+  const who = andList(more > 0 ? [...names, count2(more, "other", "others")] : names);
+  const tiers = PARTY_TIERS.flatMap((tier) => {
+    const n6 = members.filter((m2) => m2.tier === tier).length;
+    return n6 > 0 ? [count2(n6, ...TIER_NOUNS[tier])] : [];
+  });
+  const here = members.filter((m2) => m2.here).length;
+  return { who: [who, ...tiers].join(" · "), where: hereAway(here, members.length - here) };
+}
+function FundFields(props) {
+  const id = P2();
+  return /* @__PURE__ */ u3(M, {
+    children: [
+      /* @__PURE__ */ u3(Field, {
+        label: props.label,
+        help: props.help,
+        children: /* @__PURE__ */ u3(MoneyInput, {
+          currency: props.currency,
+          value: props.amount,
+          label: props.label,
+          onInput: props.onAmount
+        }, undefined, false, undefined, this)
+      }, undefined, false, undefined, this),
+      props.sources.length > 1 ? /* @__PURE__ */ u3(Field, {
+        label: "From",
+        for: id,
+        children: /* @__PURE__ */ u3("select", {
+          id,
+          class: "lre-input",
+          value: props.from || props.sources[0]?.id,
+          onChange: (event) => props.onFrom(event.currentTarget.value),
+          children: props.sources.map((s3) => /* @__PURE__ */ u3("option", {
+            value: s3.id,
+            children: [
+              s3.name,
+              " (",
+              s3.balance,
+              ")"
+            ]
+          }, s3.id, true, undefined, this))
+        }, undefined, false, undefined, this)
+      }, undefined, false, undefined, this) : null
+    ]
+  }, undefined, true, undefined, this);
+}
+function TrustStart(props) {
+  const { start: start2, currency } = props;
+  const ids = { name: P2(), purpose: P2(), until: P2() };
+  const [name, setName] = d2("");
+  const [amount2, setAmount] = d2("");
+  const [from, setFrom] = d2("");
+  const [purpose, setPurpose] = d2("");
+  const [until2, setUntil] = d2("");
+  const [revocable, setRevocable] = d2(false);
+  const cents2 = amount2.trim() === "" ? 0 : parseMoneyInput(amount2, currency);
+  const source = from || start2.sources[0]?.id || "";
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-stack",
+    "data-lre-orgs-start-kind": "trust",
+    children: [
+      /* @__PURE__ */ u3(Field, {
+        label: "Its name",
+        for: ids.name,
+        children: /* @__PURE__ */ u3("input", {
+          id: ids.name,
+          class: "lre-input",
+          value: name,
+          maxLength: 60,
+          placeholder: "The Ellis Family Trust",
+          onInput: (event) => setName(event.currentTarget.value)
+        }, undefined, false, undefined, this)
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(FundFields, {
+        currency,
+        label: "Put in",
+        help: start2.why ?? "Optional. You are its first trustee and its beneficiary; add others as its officers and owners later.",
+        amount: amount2,
+        onAmount: setAmount,
+        sources: start2.sources,
+        from,
+        onFrom: setFrom
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(Field, {
+        label: "What it is for",
+        for: ids.purpose,
+        children: /* @__PURE__ */ u3("input", {
+          id: ids.purpose,
+          class: "lre-input",
+          value: purpose,
+          maxLength: 200,
+          placeholder: "The children's schooling",
+          onInput: (event) => setPurpose(event.currentTarget.value)
+        }, undefined, false, undefined, this)
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(Field, {
+        label: "Ends on",
+        for: ids.until,
+        help: "Optional: the day it ends.",
+        children: /* @__PURE__ */ u3("input", {
+          id: ids.until,
+          class: "lre-input",
+          type: "date",
+          value: until2,
+          onInput: (event) => setUntil(event.currentTarget.value)
+        }, undefined, false, undefined, this)
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(CheckField, {
+        label: "Revocable",
+        help: "You may take it back.",
+        checked: revocable,
+        onChange: setRevocable
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(Button, {
+        variant: "primary",
+        disabled: start2.why !== null || name.trim() === "" || cents2 === null || cents2 < 0 || cents2 > 0 && source === "",
+        onClick: () => props.act(ORG_ACTIONS.found, { type: "trust", name: name.trim(), ...cents2 !== null && cents2 > 0 ? { amount: cents2, from: source } : {}, ...purpose.trim() !== "" ? { purpose: purpose.trim() } : {}, ...until2 !== "" ? { until: until2 } : {}, ...revocable ? { revocable: true } : {} }),
+        children: "Settle the trust"
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+function NonprofitStart(props) {
+  const { start: start2, currency } = props;
+  const id = P2();
+  const [name, setName] = d2("");
+  const [amount2, setAmount] = d2("");
+  const [from, setFrom] = d2("");
+  const cents2 = amount2.trim() === "" ? 0 : parseMoneyInput(amount2, currency);
+  const source = from || start2.sources[0]?.id || "";
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-stack",
+    "data-lre-orgs-start-kind": "nonprofit",
+    children: [
+      /* @__PURE__ */ u3(Field, {
+        label: "Its name",
+        for: id,
+        children: /* @__PURE__ */ u3("input", {
+          id,
+          class: "lre-input",
+          value: name,
+          maxLength: 60,
+          placeholder: "Port Alder Food Bank",
+          onInput: (event) => setName(event.currentTarget.value)
+        }, undefined, false, undefined, this)
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(FundFields, {
+        currency,
+        label: "Give it",
+        help: start2.why ?? "Optional: a gift into its account. No one owns its worth; you are its Director.",
+        amount: amount2,
+        onAmount: setAmount,
+        sources: start2.sources,
+        from,
+        onFrom: setFrom
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(Button, {
+        variant: "primary",
+        disabled: start2.why !== null || name.trim() === "" || cents2 === null || cents2 < 0 || cents2 > 0 && source === "",
+        onClick: () => props.act(ORG_ACTIONS.found, { type: "nonprofit", name: name.trim(), ...cents2 !== null && cents2 > 0 ? { amount: cents2, from: source } : {} }),
+        children: "Start the nonprofit"
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+function StartSomething(props) {
+  const { list: list2, currency, act } = props;
+  const { company, group } = list2.start;
+  const field2 = { company: P2(), from: P2(), units: P2(), group: P2(), kind: P2(), party: P2() };
+  const [companyName, setCompanyName] = d2("");
+  const [capital, setCapital] = d2("");
+  const [from, setFrom] = d2("");
+  const [units, setUnits] = d2("");
+  const [groupName, setGroupName] = d2("");
+  const [kind, setKind] = d2("");
+  const [partyName, setPartyName] = d2("");
+  const cents2 = currency ? parseMoneyInput(capital, currency) : null;
+  const source = from || company.sources[0]?.id || "";
+  const ofKind = kind || group?.kinds[0]?.id || "";
+  const count4 = units.trim() === "" ? null : Number(units);
+  const countOk = count4 === null || Number.isSafeInteger(count4) && count4 > 0;
+  return /* @__PURE__ */ u3("div", {
+    "data-lre-orgs-start": true,
+    children: /* @__PURE__ */ u3(Section, {
+      title: "Start something…",
+      children: /* @__PURE__ */ u3("div", {
+        class: "lre-stack",
+        children: [
+          currency ? /* @__PURE__ */ u3(Disclosure, {
+            summary: "Start a company",
+            children: /* @__PURE__ */ u3("div", {
+              class: "lre-stack",
+              "data-lre-orgs-start-kind": "company",
+              children: [
+                /* @__PURE__ */ u3(Field, {
+                  label: "Its name",
+                  for: field2.company,
+                  children: /* @__PURE__ */ u3("input", {
+                    id: field2.company,
+                    class: "lre-input",
+                    value: companyName,
+                    maxLength: 60,
+                    placeholder: "Ellis Mobile Repair",
+                    onInput: (event) => setCompanyName(event.currentTarget.value)
+                  }, undefined, false, undefined, this)
+                }, undefined, false, undefined, this),
+                /* @__PURE__ */ u3(Field, {
+                  label: "Capital",
+                  help: company.why ?? "You put it in, and you own all of it.",
+                  children: /* @__PURE__ */ u3(MoneyInput, {
+                    currency,
+                    value: capital,
+                    label: "Capital",
+                    onInput: setCapital
+                  }, undefined, false, undefined, this)
+                }, undefined, false, undefined, this),
+                company.sources.length > 1 ? /* @__PURE__ */ u3(Field, {
+                  label: "From",
+                  for: field2.from,
+                  children: /* @__PURE__ */ u3("select", {
+                    id: field2.from,
+                    class: "lre-input",
+                    value: source,
+                    onChange: (event) => setFrom(event.currentTarget.value),
+                    children: company.sources.map((s3) => /* @__PURE__ */ u3("option", {
+                      value: s3.id,
+                      children: [
+                        s3.name,
+                        " (",
+                        s3.balance,
+                        ")"
+                      ]
+                    }, s3.id, true, undefined, this))
+                  }, undefined, false, undefined, this)
+                }, undefined, false, undefined, this) : null,
+                /* @__PURE__ */ u3(Field, {
+                  label: "Units",
+                  for: field2.units,
+                  help: "Optional: count its shares in units, so partners can buy in by the unit later. Empty, you simply own all of it.",
+                  children: /* @__PURE__ */ u3("input", {
+                    id: field2.units,
+                    class: "lre-input",
+                    type: "number",
+                    inputMode: "numeric",
+                    min: 1,
+                    step: 1,
+                    value: units,
+                    placeholder: "1000",
+                    "aria-invalid": !countOk,
+                    onInput: (event) => setUnits(event.currentTarget.value)
+                  }, undefined, false, undefined, this)
+                }, undefined, false, undefined, this),
+                /* @__PURE__ */ u3(Button, {
+                  variant: "primary",
+                  disabled: company.why !== null || companyName.trim() === "" || cents2 === null || cents2 <= 0 || source === "" || !countOk,
+                  onClick: () => act(ORG_ACTIONS.found, { type: "company", name: companyName.trim(), amount: cents2 ?? 0, from: source, ...count4 !== null ? { units: count4 } : {} }),
+                  children: "Start the company"
+                }, undefined, false, undefined, this)
+              ]
+            }, undefined, true, undefined, this)
+          }, undefined, false, undefined, this) : null,
+          currency ? /* @__PURE__ */ u3(Disclosure, {
+            summary: "Settle a trust",
+            children: /* @__PURE__ */ u3(TrustStart, {
+              start: list2.start.trust,
+              currency,
+              act
+            }, undefined, false, undefined, this)
+          }, undefined, false, undefined, this) : null,
+          currency ? /* @__PURE__ */ u3(Disclosure, {
+            summary: "Start a nonprofit",
+            children: /* @__PURE__ */ u3(NonprofitStart, {
+              start: list2.start.nonprofit,
+              currency,
+              act
+            }, undefined, false, undefined, this)
+          }, undefined, false, undefined, this) : null,
+          group ? /* @__PURE__ */ u3(Disclosure, {
+            summary: "Start a group",
+            children: /* @__PURE__ */ u3("div", {
+              class: "lre-stack",
+              "data-lre-orgs-start-kind": "group",
+              children: [
+                /* @__PURE__ */ u3(Field, {
+                  label: "Its name",
+                  for: field2.group,
+                  children: /* @__PURE__ */ u3("input", {
+                    id: field2.group,
+                    class: "lre-input",
+                    value: groupName,
+                    maxLength: 60,
+                    onInput: (event) => setGroupName(event.currentTarget.value)
+                  }, undefined, false, undefined, this)
+                }, undefined, false, undefined, this),
+                /* @__PURE__ */ u3(Field, {
+                  label: "Kind",
+                  for: field2.kind,
+                  help: "You lead it, with every power over it.",
+                  children: /* @__PURE__ */ u3("select", {
+                    id: field2.kind,
+                    class: "lre-input",
+                    value: ofKind,
+                    onChange: (event) => setKind(event.currentTarget.value),
+                    children: group.kinds.map((k2) => /* @__PURE__ */ u3("option", {
+                      value: k2.id,
+                      children: k2.label
+                    }, k2.id, false, undefined, this))
+                  }, undefined, false, undefined, this)
+                }, undefined, false, undefined, this),
+                /* @__PURE__ */ u3(Button, {
+                  variant: "primary",
+                  disabled: groupName.trim() === "" || ofKind === "",
+                  onClick: () => act(ORG_ACTIONS.found, { type: "group", name: groupName.trim(), kind: ofKind }),
+                  children: "Start the group"
+                }, undefined, false, undefined, this)
+              ]
+            }, undefined, true, undefined, this)
+          }, undefined, false, undefined, this) : null,
+          /* @__PURE__ */ u3(Disclosure, {
+            summary: "Name your party",
+            children: /* @__PURE__ */ u3("div", {
+              class: "lre-stack",
+              "data-lre-orgs-start-kind": "party",
+              children: [
+                /* @__PURE__ */ u3(Field, {
+                  label: "Its name",
+                  for: field2.party,
+                  children: /* @__PURE__ */ u3("input", {
+                    id: field2.party,
+                    class: "lre-input",
+                    value: partyName,
+                    maxLength: 60,
+                    placeholder: list2.party.name,
+                    onInput: (event) => setPartyName(event.currentTarget.value)
+                  }, undefined, false, undefined, this)
+                }, undefined, false, undefined, this),
+                /* @__PURE__ */ u3(Button, {
+                  disabled: partyName.trim() === "",
+                  onClick: () => act("party_name", { name: partyName.trim() }),
+                  children: "Name it"
+                }, undefined, false, undefined, this)
+              ]
+            }, undefined, true, undefined, this)
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this)
+    }, undefined, false, undefined, this)
+  }, undefined, false, undefined, this);
+}
+function needsDot(needs, id) {
+  return needs?.has(id) ? /* @__PURE__ */ u3("span", {
+    class: "lre-dot",
+    role: "img",
+    "aria-label": "Needs you"
+  }, undefined, false, undefined, this) : undefined;
+}
+function OrgsHome(props) {
+  const { party, belong, known } = props.list;
+  const lines2 = partyLines(party);
+  const roots = homeTree(belong, props.needs);
+  const go2 = (a3) => a3.route ? props.onOpen(orgRouteOf(a3.route.id).org) : undefined;
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-stack",
+    "data-lre-panel": "orgs.list",
+    children: [
+      /* @__PURE__ */ u3("div", {
+        "data-lre-orgs-party": party.id,
+        children: /* @__PURE__ */ u3(Section, {
+          flush: true,
+          children: /* @__PURE__ */ u3(List, {
+            children: [
+              /* @__PURE__ */ u3(ListRow, {
+                icon: TYPE_ICON.party,
+                title: party.name,
+                subtitle: lines2.who,
+                value: lines2.where ?? undefined,
+                valueTone: "muted",
+                badge: needsDot(props.needs, party.id),
+                chevron: true,
+                id: party.exists ? party.id : undefined,
+                onClick: () => props.onOpen(party.id)
+              }, undefined, false, undefined, this),
+              party.purse !== null ? /* @__PURE__ */ u3(ListRow, {
+                icon: "wallet",
+                title: "Purse",
+                value: party.purse,
+                onClick: () => props.onOpen(party.id)
+              }, undefined, false, undefined, this) : null
+            ]
+          }, undefined, true, undefined, this)
+        }, undefined, false, undefined, this)
+      }, undefined, false, undefined, this),
+      belong.length === 0 ? /* @__PURE__ */ u3(Empty, {
+        icon: "briefcase",
+        children: "You don't belong to any organization yet."
+      }, undefined, false, undefined, this) : null,
+      BELONG_GROUPS.map(({ type, label }) => {
+        const nodes = roots.filter((n6) => belong.find((r3) => r3.id === n6.key)?.type === type);
+        return nodes.length === 0 ? null : /* @__PURE__ */ u3("div", {
+          "data-lre-orgs-group": type,
+          children: /* @__PURE__ */ u3(Section, {
+            title: label,
+            flush: true,
+            children: /* @__PURE__ */ u3(Tree, {
+              label,
+              top: label,
+              nodes,
+              onGo: go2
+            }, undefined, false, undefined, this)
+          }, undefined, false, undefined, this)
+        }, type, false, undefined, this);
+      }),
+      known.length > 0 ? /* @__PURE__ */ u3("div", {
+        "data-lre-orgs-known": true,
+        children: /* @__PURE__ */ u3(Disclosure, {
+          summary: /* @__PURE__ */ u3("span", {
+            children: [
+              "Known organizations ",
+              /* @__PURE__ */ u3(Badge, {
+                children: known.length
+              }, undefined, false, undefined, this)
+            ]
+          }, undefined, true, undefined, this),
+          children: /* @__PURE__ */ u3(Tree, {
+            label: "Known organizations",
+            top: "Known organizations",
+            nodes: homeTree(known, props.needs),
+            onGo: go2
+          }, undefined, false, undefined, this)
+        }, undefined, false, undefined, this)
+      }, undefined, false, undefined, this) : null,
+      props.act ? /* @__PURE__ */ u3(StartSomething, {
+        list: props.list,
+        currency: props.currency ?? null,
+        act: props.act
+      }, undefined, false, undefined, this) : null
+    ]
+  }, undefined, true, undefined, this);
+}
+function OrgsPanel(props) {
+  const app = useApp();
+  if (props.view === null || props.view === undefined)
+    return /* @__PURE__ */ u3(Empty, {
+      icon: "briefcase",
+      children: "No organizations here."
+    }, undefined, false, undefined, this);
+  const list2 = decodeOrgList(props.view);
+  if (!list2)
+    return /* @__PURE__ */ u3(JsonView, {
+      value: props.view
+    }, undefined, false, undefined, this);
+  const needs = new Set(needsYouOf(props.state.panels[ORGS_ORG_PANEL]).map((n6) => n6.org));
+  return /* @__PURE__ */ u3(OrgsHome, {
+    list: list2,
+    onOpen: (id) => app.ui.update((ui) => pushSheet(ui, orgRoute(id))),
+    act: playOrgAction(app, props.chatId),
+    currency: props.state.currency,
+    needs
+  }, undefined, false, undefined, this);
+}
+
 // src/packs/orgs/ui/plan.tsx
-var STATUS_TONE3 = { open: "neutral", under_way: "accent", done: "pos", dropped: "neutral", blocked: "warn", refused: "neg" };
+var STATUS_TONE4 = { open: "neutral", under_way: "accent", done: "pos", dropped: "neutral", blocked: "warn", refused: "neg" };
 function goalDraft(g2) {
   const window2 = g2?.edit?.window ?? "";
   return { kind: "goal", id: g2?.id ?? null, text: g2?.text ?? "", by: window2 === "" ? "none" : window2 === "today" ? "today" : "date", date: window2 === "today" ? "" : window2, where: g2?.edit?.where ?? "" };
@@ -70796,9 +76147,9 @@ function planChange(org, d3, view) {
 function statusChange(org, id, status) {
   return { action: PLAN_ACTIONS.status, params: { org, id, status } };
 }
-var EFFECT_OF = { [PLAN_ACTIONS.goal]: PLAN_EFFECTS.goal, [PLAN_ACTIONS.order]: PLAN_EFFECTS.order, [PLAN_ACTIONS.status]: PLAN_EFFECTS.status };
+var EFFECT_OF2 = { [PLAN_ACTIONS.goal]: PLAN_EFFECTS.goal, [PLAN_ACTIONS.order]: PLAN_EFFECTS.order, [PLAN_ACTIONS.status]: PLAN_EFFECTS.status };
 function planOps(change) {
-  const effect = EFFECT_OF[change.action];
+  const effect = EFFECT_OF2[change.action];
   return effect === undefined ? [] : [{ op: "effect", effect, args: change.params }];
 }
 function orderControls(o4) {
@@ -70865,8 +76216,8 @@ function PlanOrderItem(props) {
             children: o4.text
           }, undefined, false, undefined, this),
           /* @__PURE__ */ u3(Badge, {
-            tone: STATUS_TONE3[o4.status],
-            children: PLAN_STATUS_WORDS[o4.status]
+            tone: STATUS_TONE4[o4.status],
+            children: PLAN_STATUS_WORDS2[o4.status]
           }, undefined, false, undefined, this),
           o4.late ? /* @__PURE__ */ u3(Badge, {
             tone: "warn",
@@ -70986,8 +76337,8 @@ function PlanBoard(props) {
             class: "lre-inline",
             children: [
               /* @__PURE__ */ u3(Badge, {
-                tone: STATUS_TONE3[g2.status],
-                children: PLAN_STATUS_WORDS[g2.status]
+                tone: STATUS_TONE4[g2.status],
+                children: PLAN_STATUS_WORDS2[g2.status]
               }, undefined, false, undefined, this),
               g2.late ? /* @__PURE__ */ u3(Badge, {
                 tone: "warn",
@@ -71040,7 +76391,7 @@ function PlanBoard(props) {
             children: view.recent.map((c3) => /* @__PURE__ */ u3(ListRow, {
               icon: c3.kind === "goal" ? "flag" : "checklist",
               title: c3.text,
-              subtitle: [PLAN_STATUS_WORDS[c3.status], c3.when].filter((p3) => p3 !== null).join(" · "),
+              subtitle: [PLAN_STATUS_WORDS2[c3.status], c3.when].filter((p3) => p3 !== null).join(" · "),
               badge: view.mayGive ? /* @__PURE__ */ u3(Button, {
                 size: "sm",
                 variant: "ghost",
@@ -71582,6 +76933,7 @@ var orgs = {
     r3.orgTab(PROPERTY_TAB);
     r3.orgTab(PLAN_TAB_DEF);
     r3.orgTab(DECISIONS_TAB_DEF);
+    r3.orgTab(PROJECTS_TAB_DEF);
     r3.glance({ id: "orgs.alerts", order: 76, panel: ORGS_LIST_PANEL, component: OrgsGlance });
     r3.orgTab({ id: "orgs.party_tiers", label: "What each tier means", order: 95, section: PARTY_SECTION, within: "rules", component: PartyTiers });
   }
@@ -71719,7 +77071,7 @@ class GestureTracker {
 
 // src/packs/space/ui/canvas-theme.ts
 var TOKENS = { bg: "--lre-canvas-bg", ink: "--lre-canvas-ink", muted: "--lre-canvas-muted", line: "--lre-canvas-line", pov: "--lre-canvas-pov", fog: "--lre-canvas-fog", item: "--lre-canvas-item" };
-var SERIES2 = [1, 2, 3, 4, 5, 6].map((n5) => `--lre-series-${n5}`);
+var SERIES2 = [1, 2, 3, 4, 5, 6].map((n6) => `--lre-series-${n6}`);
 var scratch;
 function accepts(g2, value) {
   if (value === "")
@@ -71858,13 +77210,13 @@ function segmentHits(p3, q2, b3) {
     [-dy, p3.y - b3.y],
     [dy, b3.y + b3.h - p3.y]
   ];
-  for (const [d3, n5] of edges) {
+  for (const [d3, n6] of edges) {
     if (d3 === 0) {
-      if (n5 < 0)
+      if (n6 < 0)
         return false;
       continue;
     }
-    const t3 = n5 / d3;
+    const t3 = n6 / d3;
     if (d3 < 0)
       t0 = Math.max(t0, t3);
     else
@@ -73025,8 +78377,8 @@ function PlaceEditor(props) {
 // src/packs/space/ui/view.ts
 var TRAVEL_MODES2 = ["walk", "road", "offroad", "water"];
 var TRIP_PARTS = ["fetch", "start", "drive", "park", "walk"];
-function numbers2(value) {
-  return Array.isArray(value) ? value.filter((n5) => typeof n5 === "number") : [];
+function numbers3(value) {
+  return Array.isArray(value) ? value.filter((n6) => typeof n6 === "number") : [];
 }
 function decodePlace(p3) {
   return typeof p3.id === "string" ? { id: p3.id, name: str(p3.name, p3.id), x: num(p3.x), y: num(p3.y), kind: optStr(p3.kind), known: p3.known !== false, visited: p3.visited !== false } : null;
@@ -73057,8 +78409,8 @@ function decodeGrid(value) {
     height: num(grid.height, 1),
     cellMeters: optNum(grid.cellMeters),
     terrain: strings(grid.terrain),
-    blocked: numbers2(grid.blocked),
-    areas: areas ? Object.fromEntries(Object.entries(areas).map(([id, cells]) => [id, numbers2(cells)])) : {},
+    blocked: numbers3(grid.blocked),
+    areas: areas ? Object.fromEntries(Object.entries(areas).map(([id, cells]) => [id, numbers3(cells)])) : {},
     pov: pov ? { x: num(pov.x), y: num(pov.y) } : undefined,
     seen: optStr(grid.seen),
     items: list(grid.items, decodeItem2)
@@ -73517,7 +78869,7 @@ function MapCanvas(props) {
   const grid = scope?.grid;
   const walkable = view.movement && grid?.pov !== undefined;
   const pov = grid?.pov;
-  const [walk, setWalk] = d2(null);
+  const [walk2, setWalk] = d2(null);
   A(() => {
     setWalk(null);
     if (!cell || !walkable || !pov)
@@ -73701,8 +79053,8 @@ function MapCanvas(props) {
               children: /* @__PURE__ */ u3(ListRow, {
                 icon: MODE_ICON.walk,
                 title: "Walk here",
-                subtitle: walk === null ? "…" : walk.disabled ?? formatMinutes(walk.minutes),
-                disabled: busy || walk === null || walk.disabled !== undefined,
+                subtitle: walk2 === null ? "…" : walk2.disabled ?? formatMinutes(walk2.minutes),
+                disabled: busy || walk2 === null || walk2.disabled !== undefined,
                 onClick: () => run(async () => {
                   const result = await app.request(travelRequest("step", { x: cell.x, y: cell.y }, props.chatId));
                   if (result) {
@@ -73796,10 +79148,10 @@ function childOf(world, scope, place2) {
 function ring(ids, frame) {
   const step = Math.min(frame.width, frame.height) / 100;
   const r3 = Math.min(frame.width, frame.height) / 3;
-  const round = (v6) => Math.round(v6 / step) * step;
+  const round2 = (v6) => Math.round(v6 / step) * step;
   return new Map(ids.map((id, i3) => {
     const angle = 2 * Math.PI * i3 / Math.max(1, ids.length);
-    return [id, { x: round(frame.width / 2 + r3 * Math.cos(angle)), y: round(frame.height / 2 + r3 * Math.sin(angle)) }];
+    return [id, { x: round2(frame.width / 2 + r3 * Math.cos(angle)), y: round2(frame.height / 2 + r3 * Math.sin(angle)) }];
   }));
 }
 function scopeView(world, scope, filter, opts) {
@@ -73957,9 +79309,9 @@ function previewMarks(value, problems) {
       if (isRecord(place2) && typeof place2.id === "string")
         out.push({ severity: p3.severity, place: place2.id });
     } else if (mark.kind === "link") {
-      const link = links[mark.index];
-      if (isRecord(link) && typeof link.from === "string" && typeof link.to === "string")
-        out.push({ severity: p3.severity, link: [link.from, link.to] });
+      const link2 = links[mark.index];
+      if (isRecord(link2) && typeof link2.from === "string" && typeof link2.to === "string")
+        out.push({ severity: p3.severity, link: [link2.from, link2.to] });
     }
   }
   return out;
@@ -74201,12 +79553,12 @@ function fillCells(layout, start2) {
   const queue = [start2];
   for (let next = queue.shift();next; next = queue.shift()) {
     out.push(next);
-    for (const n5 of [{ x: next.x + 1, y: next.y }, { x: next.x - 1, y: next.y }, { x: next.x, y: next.y + 1 }, { x: next.x, y: next.y - 1 }]) {
-      const index = n5.y * width + n5.x;
-      if (n5.x < 0 || n5.y < 0 || n5.x >= width || n5.y >= height || seen.has(index) || at2(n5) !== ch)
+    for (const n6 of [{ x: next.x + 1, y: next.y }, { x: next.x - 1, y: next.y }, { x: next.x, y: next.y + 1 }, { x: next.x, y: next.y - 1 }]) {
+      const index = n6.y * width + n6.x;
+      if (n6.x < 0 || n6.y < 0 || n6.x >= width || n6.y >= height || seen.has(index) || at2(n6) !== ch)
         continue;
       seen.add(index);
-      queue.push(n5);
+      queue.push(n6);
     }
   }
   return out;
@@ -74535,16 +79887,16 @@ function drawNodeMap(g2, model, view, width, height, palette, overlay) {
     return p3 ? screen(p3) : null;
   };
   g2.font = `11px ${palette.font}`;
-  for (const link of model.links) {
-    const pa = at2(link.from);
-    const pb = at2(link.to);
+  for (const link2 of model.links) {
+    const pa = at2(link2.from);
+    const pb = at2(link2.to);
     if (!pa || !pb)
       continue;
-    const isSelected = overlay.selected?.kind === "link" && overlay.selected.index === link.index;
-    g2.strokeStyle = isSelected ? palette.item : link.mode === "water" ? palette.series[1] ?? palette.pov : palette.ink;
+    const isSelected = overlay.selected?.kind === "link" && overlay.selected.index === link2.index;
+    g2.strokeStyle = isSelected ? palette.item : link2.mode === "water" ? palette.series[1] ?? palette.pov : palette.ink;
     g2.globalAlpha = isSelected ? 1 : 0.55;
-    g2.lineWidth = isSelected ? 4 : link.mode === "road" ? 3 : 2;
-    g2.setLineDash(LINK_DASH[link.mode]);
+    g2.lineWidth = isSelected ? 4 : link2.mode === "road" ? 3 : 2;
+    g2.setLineDash(LINK_DASH[link2.mode]);
     g2.beginPath();
     g2.moveTo(pa.x, pa.y);
     g2.lineTo(pb.x, pb.y);
@@ -74552,7 +79904,7 @@ function drawNodeMap(g2, model, view, width, height, palette, overlay) {
     g2.setLineDash([]);
     g2.globalAlpha = 1;
     if (Math.hypot(pb.x - pa.x, pb.y - pa.y) > 90) {
-      const text3 = `${link.minutes} min`;
+      const text3 = `${link2.minutes} min`;
       const w3 = g2.measureText(text3).width + 8;
       const mx = (pa.x + pb.x) / 2;
       const my = (pa.y + pb.y) / 2;
@@ -75154,14 +80506,14 @@ function MapEditor(props) {
     const linkUnder = (p3, t3) => {
       let best = null;
       let distance = 14;
-      for (const link of model2.links) {
-        const a3 = positions.get(link.from);
-        const b3 = positions.get(link.to);
+      for (const link2 of model2.links) {
+        const a3 = positions.get(link2.from);
+        const b3 = positions.get(link2.to);
         if (!a3 || !b3)
           continue;
         const d3 = segmentDistance(p3, toScreen(t3, { x: a3.x * unit2, y: a3.y * unit2 }), toScreen(t3, { x: b3.x * unit2, y: b3.y * unit2 }));
         if (d3 <= distance) {
-          best = link.index;
+          best = link2.index;
           distance = d3;
         }
       }
@@ -75169,8 +80521,8 @@ function MapEditor(props) {
     };
     const tapSelect = (p3, t3) => {
       const place2 = placeUnder(p3, t3);
-      const link = place2 ? null : linkUnder(p3, t3);
-      setSelected(place2 ? { kind: "place", id: place2 } : link !== null ? { kind: "link", index: link } : null);
+      const link2 = place2 ? null : linkUnder(p3, t3);
+      setSelected(place2 ? { kind: "place", id: place2 } : link2 !== null ? { kind: "link", index: link2 } : null);
     };
     if (nodeTool === "add") {
       return {
@@ -75539,9 +80891,9 @@ function NodeDraw(props) {
 }
 function PlacesPanel(props) {
   const { model, facts } = props;
-  const count4 = (n5) => n5 > 0 ? /* @__PURE__ */ u3(Badge, {
+  const count4 = (n6) => n6 > 0 ? /* @__PURE__ */ u3(Badge, {
     tone: "warn",
-    children: n5
+    children: n6
   }, undefined, false, undefined, this) : undefined;
   return /* @__PURE__ */ u3(M, {
     children: [
@@ -75718,8 +81070,8 @@ function MapSheet(props) {
       confirm: (title, message) => app.host.confirm(title, message, "danger", "Remove")
     }, undefined, false, undefined, this);
   }
-  const link = sheet.kind === "link" ? model.links.find((l3) => l3.index === sheet.index) : undefined;
-  if (sheet.kind === "link" && !link)
+  const link2 = sheet.kind === "link" ? model.links.find((l3) => l3.index === sheet.index) : undefined;
+  if (sheet.kind === "link" && !link2)
     return /* @__PURE__ */ u3(FormSheet, {
       title: "Way",
       backLabel: "Map",
@@ -75729,10 +81081,10 @@ function MapSheet(props) {
       }, undefined, false, undefined, this)
     }, undefined, false, undefined, this);
   return /* @__PURE__ */ u3(LinkSheet, {
-    link: link ?? null,
+    link: link2 ?? null,
     options: [...mapPlaces, ...worldPlaces],
     placeName: props.placeName,
-    issues: link ? props.issuesAt(["links", link.index]) : [],
+    issues: link2 ? props.issuesAt(["links", link2.index]) : [],
     edit: props.edit,
     onClose: props.onClose,
     onCreated: (index) => props.onSelect({ kind: "link", index })
@@ -75795,8 +81147,8 @@ function SettingsSheet(props) {
               inputMode: "decimal",
               value: typeof value.cellMeters === "number" ? String(value.cellMeters) : "",
               onChange: (event) => {
-                const n5 = Number(event.currentTarget.value);
-                props.edit((map) => patched(map, { cellMeters: event.currentTarget.value.trim() && Number.isFinite(n5) && n5 > 0 ? n5 : undefined }));
+                const n6 = Number(event.currentTarget.value);
+                props.edit((map) => patched(map, { cellMeters: event.currentTarget.value.trim() && Number.isFinite(n6) && n6 > 0 ? n6 : undefined }));
               }
             }, undefined, false, undefined, this)
           }, undefined, false, undefined, this),
@@ -76216,9 +81568,9 @@ function LegendSheet(props) {
   }, undefined, true, undefined, this);
 }
 function LinkSheet(props) {
-  const link = props.link;
+  const link2 = props.link;
   const [draft, setDraft] = d2({ from: props.options[0]?.value ?? "", to: props.options[1]?.value ?? "", minutes: 5 });
-  if (!link) {
+  if (!link2) {
     return /* @__PURE__ */ u3(FormSheet, {
       title: "New way",
       backLabel: "Map",
@@ -76265,9 +81617,9 @@ function LinkSheet(props) {
       ]
     }, undefined, true, undefined, this);
   }
-  const set = (patch) => props.edit((map) => patchLink(map, link.index, patch));
+  const set = (patch) => props.edit((map) => patchLink(map, link2.index, patch));
   return /* @__PURE__ */ u3(FormSheet, {
-    title: `${props.placeName(link.from)} ${link.both ? "↔" : "→"} ${props.placeName(link.to)}`,
+    title: `${props.placeName(link2.from)} ${link2.both ? "↔" : "→"} ${props.placeName(link2.to)}`,
     subtitle: "A way between two places",
     backLabel: "Map",
     onClose: props.onClose,
@@ -76277,19 +81629,19 @@ function LinkSheet(props) {
       }, undefined, false, undefined, this),
       /* @__PURE__ */ u3(RefPicker, {
         label: "From",
-        value: link.from,
+        value: link2.from,
         options: props.options,
         onChange: (from) => set({ from })
       }, undefined, false, undefined, this),
       /* @__PURE__ */ u3(RefPicker, {
         label: "To",
-        value: link.to,
+        value: link2.to,
         options: props.options,
         onChange: (to) => set({ to })
       }, undefined, false, undefined, this),
       /* @__PURE__ */ u3(NumberStepper, {
         label: "Minutes",
-        value: link.minutes,
+        value: link2.minutes,
         min: 1,
         max: 1e5,
         onChange: (minutes) => set({ minutes })
@@ -76298,7 +81650,7 @@ function LinkSheet(props) {
         label: "By",
         children: /* @__PURE__ */ u3(Seg, {
           label: "By",
-          value: link.mode,
+          value: link2.mode,
           options: MODES3.map((mode) => ({ value: mode, label: MODE_LABEL[mode] })),
           onChange: (mode) => set({ mode: mode === "walk" ? undefined : mode })
         }, undefined, false, undefined, this)
@@ -76306,7 +81658,7 @@ function LinkSheet(props) {
       /* @__PURE__ */ u3(CheckField, {
         label: "Both ways",
         help: "Off: only from the first place to the second.",
-        checked: link.both,
+        checked: link2.both,
         onChange: (both) => set({ bidirectional: both ? undefined : false })
       }, undefined, false, undefined, this),
       /* @__PURE__ */ u3("div", {
@@ -76315,7 +81667,7 @@ function LinkSheet(props) {
           variant: "danger",
           icon: "trash",
           onClick: () => {
-            props.edit((map) => ({ ...map, links: listOf2(map, "links").filter((_3, i3) => i3 !== link.index) }));
+            props.edit((map) => ({ ...map, links: listOf2(map, "links").filter((_3, i3) => i3 !== link2.index) }));
             props.onClose();
           },
           children: "Remove the way"
@@ -76616,7 +81968,7 @@ function removeStage(track3, id) {
   for (const [sid, s3] of Object.entries(track3.stages)) {
     if (sid === id)
       continue;
-    stages[sid] = { ...s3, next: s3.next.filter((n5) => n5.to !== id), fail: s3.fail?.to === id ? undefined : s3.fail };
+    stages[sid] = { ...s3, next: s3.next.filter((n6) => n6.to !== id), fail: s3.fail?.to === id ? undefined : s3.fail };
   }
   return { ...track3, stages };
 }
@@ -76639,9 +81991,9 @@ var VISIBILITY2 = [
 function TrackGraph(props) {
   const { nodes, edges } = layoutTrack(props.track);
   const arrow = P2();
-  const pos = new Map(nodes.map((n5) => [n5.id, { x: 8 + n5.row * (NODE_W + GAP_X), y: 8 + n5.layer * (NODE_H + GAP_Y) }]));
-  const width = 16 + (Math.max(0, ...nodes.map((n5) => n5.row)) + 1) * (NODE_W + GAP_X) - GAP_X + LOOP;
-  const height = 16 + (Math.max(0, ...nodes.map((n5) => n5.layer)) + 1) * (NODE_H + GAP_Y) - GAP_Y;
+  const pos = new Map(nodes.map((n6) => [n6.id, { x: 8 + n6.row * (NODE_W + GAP_X), y: 8 + n6.layer * (NODE_H + GAP_Y) }]));
+  const width = 16 + (Math.max(0, ...nodes.map((n6) => n6.row)) + 1) * (NODE_W + GAP_X) - GAP_X + LOOP;
+  const height = 16 + (Math.max(0, ...nodes.map((n6) => n6.layer)) + 1) * (NODE_H + GAP_Y) - GAP_Y;
   return /* @__PURE__ */ u3("div", {
     class: "lre-ve-graph",
     "data-lre-track-graph": true,
@@ -76698,25 +82050,25 @@ function TrackGraph(props) {
             "marker-end": `url(#${arrow}-${e3.fail ? "f" : "n"})`
           }, i3, false, undefined, this);
         }),
-        nodes.map((n5) => {
-          const p3 = pos.get(n5.id);
-          const stage = props.track.stages[n5.id];
+        nodes.map((n6) => {
+          const p3 = pos.get(n6.id);
+          const stage = props.track.stages[n6.id];
           if (!p3 || !stage)
             return null;
-          const isStart = n5.id === props.track.start;
-          const label = stage.label || nameOfId(n5.id);
+          const isStart = n6.id === props.track.start;
+          const label = stage.label || nameOfId(n6.id);
           return /* @__PURE__ */ u3("g", {
-            class: ["node", isStart ? "start" : "", n5.reachable ? "" : "lost", n5.id === props.current ? "current" : ""].filter(Boolean).join(" "),
+            class: ["node", isStart ? "start" : "", n6.reachable ? "" : "lost", n6.id === props.current ? "current" : ""].filter(Boolean).join(" "),
             transform: `translate(${p3.x},${p3.y})`,
             role: "button",
             tabIndex: 0,
-            "aria-label": `Stage ${label}${isStart ? ", the start" : ""}${n5.reachable ? "" : ", can't be reached"}`,
-            onClick: () => props.onOpen(n5.id),
+            "aria-label": `Stage ${label}${isStart ? ", the start" : ""}${n6.reachable ? "" : ", can't be reached"}`,
+            onClick: () => props.onOpen(n6.id),
             onKeyDown: (event) => {
               if (event.key !== "Enter" && event.key !== " ")
                 return;
               event.preventDefault();
-              props.onOpen(n5.id);
+              props.onOpen(n6.id);
             },
             children: [
               /* @__PURE__ */ u3("title", {
@@ -76737,10 +82089,10 @@ function TrackGraph(props) {
                 class: "meta",
                 x: 10,
                 y: 37,
-                children: isStart ? "Start" : n5.reachable ? `${stage.next.length} next${stage.fail ? " · can fail" : ""}` : "Can't be reached"
+                children: isStart ? "Start" : n6.reachable ? `${stage.next.length} next${stage.fail ? " · can fail" : ""}` : "Can't be reached"
               }, undefined, false, undefined, this)
             ]
-          }, n5.id, true, undefined, this);
+          }, n6.id, true, undefined, this);
         })
       ]
     }, undefined, true, undefined, this)
@@ -76919,7 +82271,7 @@ function StageSheet(props) {
             class: "lre-small lre-muted",
             children: "None: the track ends here."
           }, undefined, false, undefined, this) : null,
-          stage.next.map((n5, i3) => /* @__PURE__ */ u3("div", {
+          stage.next.map((n6, i3) => /* @__PURE__ */ u3("div", {
             class: "lre-ve-transition",
             children: [
               /* @__PURE__ */ u3("div", {
@@ -76930,7 +82282,7 @@ function StageSheet(props) {
                     children: [
                       i3 + 1,
                       ". To ",
-                      track3.stages[n5.to]?.label || nameOfId(n5.to)
+                      track3.stages[n6.to]?.label || nameOfId(n6.to)
                     ]
                   }, undefined, true, undefined, this),
                   /* @__PURE__ */ u3(IconButton, {
@@ -76947,20 +82299,20 @@ function StageSheet(props) {
                   }, undefined, false, undefined, this),
                   /* @__PURE__ */ u3(IconButton, {
                     icon: "trash",
-                    label: `Remove the way to ${track3.stages[n5.to]?.label || n5.to}`,
+                    label: `Remove the way to ${track3.stages[n6.to]?.label || n6.to}`,
                     onClick: () => set({ ...stage, next: stage.next.filter((_3, j3) => j3 !== i3) })
                   }, undefined, false, undefined, this)
                 ]
               }, undefined, true, undefined, this),
               /* @__PURE__ */ u3(RefPicker, {
                 label: "Goes to",
-                value: n5.to,
+                value: n6.to,
                 options: others,
                 onChange: (to) => set({ ...stage, next: stage.next.map((x2, j3) => j3 === i3 ? { ...x2, to } : x2) })
               }, undefined, false, undefined, this),
               /* @__PURE__ */ u3(ExprEditor, {
                 label: "When",
-                value: n5.when,
+                value: n6.when,
                 identifiers: props.identifiers,
                 functions: props.functions,
                 doc: props.world,
@@ -76973,10 +82325,10 @@ function StageSheet(props) {
                   size: "sm",
                   variant: "ghost",
                   iconAfter: "chevron-right",
-                  onClick: () => props.onOpen(n5.to),
+                  onClick: () => props.onOpen(n6.to),
                   children: [
                     "Open ",
-                    track3.stages[n5.to]?.label || nameOfId(n5.to)
+                    track3.stages[n6.to]?.label || nameOfId(n6.to)
                   ]
                 }, undefined, true, undefined, this)
               }, undefined, false, undefined, this)
@@ -77141,7 +82493,7 @@ function TrackEditor(props) {
     }, undefined, false, undefined, this);
   const shown2 = view ?? (mobile ? "list" : "graph");
   const order = stageOrder(track3);
-  const unreachable = order.filter((n5) => !n5.reachable).length;
+  const unreachable = order.filter((n6) => !n6.reachable).length;
   const changed = JSON.stringify(track3) !== JSON.stringify(stored ?? null);
   const lint = lintAt(draft?.lint ?? [], `tracks.${id}`);
   const functions = draft?.functions ?? [];
@@ -77264,23 +82616,23 @@ function TrackEditor(props) {
             }, undefined, true, undefined, this) : /* @__PURE__ */ u3("div", {
               class: "lre-form-items",
               "data-lre-stage-list": true,
-              children: order.map((n5) => {
-                const stage = track3.stages[n5.id];
+              children: order.map((n6) => {
+                const stage = track3.stages[n6.id];
                 if (!stage)
                   return null;
                 const next = stage.next.map((x2) => track3.stages[x2.to]?.label || nameOfId(x2.to));
-                const issues = lintAt(lint, `tracks.${id}.stages.${n5.id}`).length;
+                const issues = lintAt(lint, `tracks.${id}.stages.${n6.id}`).length;
                 return /* @__PURE__ */ u3(ItemRow, {
-                  title: stage.label || nameOfId(n5.id),
+                  title: stage.label || nameOfId(n6.id),
                   subtitle: [next.length > 0 ? `Next: ${next.join(", ")}` : "Ends here", stage.fail ? `fails to ${track3.stages[stage.fail.to]?.label || nameOfId(stage.fail.to)}` : ""].filter(Boolean).join(" · "),
                   badge: /* @__PURE__ */ u3("span", {
                     class: "lre-inline",
                     children: [
-                      n5.id === track3.start ? /* @__PURE__ */ u3(Badge, {
+                      n6.id === track3.start ? /* @__PURE__ */ u3(Badge, {
                         tone: "pos",
                         children: "Start"
                       }, undefined, false, undefined, this) : null,
-                      !n5.reachable ? /* @__PURE__ */ u3(Badge, {
+                      !n6.reachable ? /* @__PURE__ */ u3(Badge, {
                         tone: "neg",
                         children: "Can't be reached"
                       }, undefined, false, undefined, this) : null,
@@ -77290,9 +82642,9 @@ function TrackEditor(props) {
                       }, undefined, false, undefined, this) : null
                     ]
                   }, undefined, true, undefined, this),
-                  openLabel: `Edit the stage ${stage.label || n5.id}`,
-                  onOpen: () => openStage(n5.id)
-                }, n5.id, false, undefined, this);
+                  openLabel: `Edit the stage ${stage.label || n6.id}`,
+                  onOpen: () => openStage(n6.id)
+                }, n6.id, false, undefined, this);
               })
             }, undefined, false, undefined, this),
             /* @__PURE__ */ u3("div", {
@@ -77743,15 +83095,15 @@ function inline(text3, depth) {
       i3 += image[0].length;
       continue;
     }
-    const link = c3 === "[" ? readAt(LINK, text3, i3) : null;
-    if (link) {
-      const words3 = link[1] ?? "";
-      const address = link[2] ?? "";
+    const link2 = c3 === "[" ? readAt(LINK, text3, i3) : null;
+    if (link2) {
+      const words3 = link2[1] ?? "";
+      const address = link2[2] ?? "";
       flush();
       out.push(...inner(words3));
       if (address !== "" && address !== words3)
         plain2 += ` (${address})`;
-      i3 += link[0].length;
+      i3 += link2[0].length;
       continue;
     }
     plain2 += c3;
@@ -77777,16 +83129,16 @@ function blocksView(blocks) {
         }, at2, false, undefined, this);
       case "ul":
         return /* @__PURE__ */ u3("ul", {
-          children: b3.items.map((item2, n5) => /* @__PURE__ */ u3("li", {
+          children: b3.items.map((item2, n6) => /* @__PURE__ */ u3("li", {
             children: inlineMarkdown(item2)
-          }, n5, false, undefined, this))
+          }, n6, false, undefined, this))
         }, at2, false, undefined, this);
       case "ol":
         return /* @__PURE__ */ u3("ol", {
           ...b3.start !== 1 ? { start: b3.start } : {},
-          children: b3.items.map((item2, n5) => /* @__PURE__ */ u3("li", {
+          children: b3.items.map((item2, n6) => /* @__PURE__ */ u3("li", {
             children: inlineMarkdown(item2)
-          }, n5, false, undefined, this))
+          }, n6, false, undefined, this))
         }, at2, false, undefined, this);
       case "code":
         return /* @__PURE__ */ u3("pre", {
@@ -77816,7 +83168,7 @@ var ENDED = {
   cancelled: { text: "Cancelled", tone: "neutral" },
   failed: { text: "Failed", tone: "neg" }
 };
-var n5 = (value) => value.toLocaleString("en-US");
+var n6 = (value) => value.toLocaleString("en-US");
 function assistantHandlers(chatId, io) {
   return {
     draft: (text3) => io.setDraft(text3),
@@ -77888,7 +83240,7 @@ function Trace(props) {
   }, undefined, false, undefined, this);
 }
 function usageNote(u4) {
-  const parts = [...u4.cached > 0 ? [`${n5(u4.cached)} cached`] : [], ...u4.written !== undefined ? [`${n5(u4.written)} written`] : []];
+  const parts = [...u4.cached > 0 ? [`${n6(u4.cached)} cached`] : [], ...u4.written !== undefined ? [`${n6(u4.written)} written`] : []];
   return parts.length > 0 ? ` (${parts.join(", ")})` : "";
 }
 function MessageView(props) {
@@ -77934,7 +83286,7 @@ function MessageView(props) {
       }, undefined, false, undefined, this) : null,
       !mine && m2.usage ? /* @__PURE__ */ u3("span", {
         class: "lre-gm-assist-msg-usage",
-        children: `${n5(m2.usage.in)} tokens in${usageNote(m2.usage)} · ${n5(m2.usage.out)} out`
+        children: `${n6(m2.usage.in)} tokens in${usageNote(m2.usage)} · ${n6(m2.usage.out)} out`
       }, undefined, false, undefined, this) : null,
       props.children
     ]
@@ -78103,7 +83455,7 @@ function RunningRow(props) {
           }, undefined, false, undefined, this),
           /* @__PURE__ */ u3("span", {
             class: "lre-gm-assist-run-tokens",
-            children: tokens.in === 0 && tokens.out === 0 ? "No tokens spent yet" : `${n5(tokens.in)} tokens in · ${n5(tokens.out)} out so far`
+            children: tokens.in === 0 && tokens.out === 0 ? "No tokens spent yet" : `${n6(tokens.in)} tokens in · ${n6(tokens.out)} out so far`
           }, undefined, false, undefined, this)
         ]
       }, undefined, true, undefined, this),
@@ -78370,6 +83722,7 @@ function liveItems(view) {
       case "wait":
       case "resume":
       case "review":
+      case "plan":
         marks.push({ type: "mark", entry: e3 });
         break;
       case "run": {
@@ -78470,7 +83823,7 @@ function reviewEditWords(e3) {
     return `${e3.label}: took out “${e3.line ?? ""}”`;
   return `${e3.label}: “${e3.line ?? ""}” → “${e3.text ?? ""}”`;
 }
-var count4 = (n6) => n6.toLocaleString("en-US");
+var count4 = (n7) => n7.toLocaleString("en-US");
 function usageWords(u4) {
   const cached = u4.cachedIn ? ` (${count4(u4.cachedIn)} cached)` : "";
   const reasoning = u4.reasoningOut ? ` (${count4(u4.reasoningOut)} reasoning)` : "";
@@ -78490,7 +83843,7 @@ function liveControls(chatId, request2) {
   };
 }
 var STATUS_WORDS2 = { working: "working", done: "done", failed: "failed", stopped: "stopped", cancelled: "cancelled" };
-var STATUS_TONE4 = { working: "accent", done: "pos", failed: "neg", stopped: "warn", cancelled: "neutral" };
+var STATUS_TONE5 = { working: "accent", done: "pos", failed: "neg", stopped: "warn", cancelled: "neutral" };
 var KIND_WORDS2 = { turn: "Agent turn", read: "The reply read again", reply: "A reply's read" };
 var seconds = (ms) => `${(ms / 1000).toFixed(1)} s`;
 function block(kind, summary, text3) {
@@ -78745,7 +84098,7 @@ function groupOf2(g2, view, open, onToggle) {
           class: "lre-live-group-head",
           children: [
             /* @__PURE__ */ u3(Badge, {
-              tone: STATUS_TONE4[g2.status],
+              tone: STATUS_TONE5[g2.status],
               children: STATUS_WORDS2[g2.status]
             }, undefined, false, undefined, this),
             /* @__PURE__ */ u3("strong", {
@@ -78794,8 +84147,48 @@ function groupOf2(g2, view, open, onToggle) {
     }, undefined, true, undefined, this)
   }, g2.key, false, undefined, this);
 }
+var PLAN_TONE2 = { runs: "accent", kept: "pos", off: "warn", auto: "accent", none: "neutral" };
 function markOf2(item2) {
   const e3 = item2.entry;
+  if (e3.kind === "plan") {
+    const kept2 = e3.rows.filter((r3) => r3.status === "kept").length;
+    const skipped = e3.rows.filter((r3) => r3.status === "off" || r3.status === "none").length;
+    return /* @__PURE__ */ u3("li", {
+      class: "lre-live-mark plan",
+      "data-lre-live-mark": "plan",
+      children: /* @__PURE__ */ u3("details", {
+        children: [
+          /* @__PURE__ */ u3("summary", {
+            children: `This turn's plan: ${e3.rows.length - kept2 - skipped} run, ${kept2} kept, ${skipped} not asked or off`
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3("ul", {
+            class: "lre-live-plan",
+            "aria-label": "This turn's plan",
+            children: e3.rows.map((r3) => /* @__PURE__ */ u3("li", {
+              "data-lre-plan-role": r3.role,
+              "data-status": r3.status,
+              children: [
+                /* @__PURE__ */ u3("span", {
+                  class: "lre-live-plan-role",
+                  children: agentLabel(r3.role)
+                }, undefined, false, undefined, this),
+                " ",
+                /* @__PURE__ */ u3(Badge, {
+                  tone: PLAN_TONE2[r3.status],
+                  children: PLAN_STATUS_WORDS[r3.status]
+                }, undefined, false, undefined, this),
+                " ",
+                /* @__PURE__ */ u3("span", {
+                  class: "lre-live-plan-why",
+                  children: r3.why
+                }, undefined, false, undefined, this)
+              ]
+            }, r3.role, true, undefined, this))
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this)
+    }, `mark-${e3.seq}`, false, undefined, this);
+  }
   if (e3.kind === "review") {
     const failed2 = e3.outcome === "unrevised" || e3.outcome === "stopped";
     return /* @__PURE__ */ u3("li", {
@@ -79477,13 +84870,13 @@ function treeList(nodes, props, label) {
   return /* @__PURE__ */ u3("ul", {
     class: "lre-ws-tree",
     "aria-label": label,
-    children: nodes.map((n6) => n6.kind === "file" ? fileRow(n6.file, n6.name, props) : /* @__PURE__ */ u3("li", {
+    children: nodes.map((n7) => n7.kind === "file" ? fileRow(n7.file, n7.name, props) : /* @__PURE__ */ u3("li", {
       class: "lre-ws-item",
       children: /* @__PURE__ */ u3("details", {
         class: "lre-ws-folder",
-        "data-lre-ws-folder": n6.path,
-        open: props.open(`folder:${n6.path}`, true),
-        onToggle: (event) => props.onToggle(`folder:${n6.path}`, event.currentTarget.open),
+        "data-lre-ws-folder": n7.path,
+        open: props.open(`folder:${n7.path}`, true),
+        onToggle: (event) => props.onToggle(`folder:${n7.path}`, event.currentTarget.open),
         children: [
           /* @__PURE__ */ u3("summary", {
             class: "lre-ws-folder-head",
@@ -79495,18 +84888,18 @@ function treeList(nodes, props, label) {
               }, undefined, false, undefined, this),
               /* @__PURE__ */ u3("span", {
                 class: "lre-ws-row-name",
-                children: n6.name
+                children: n7.name
               }, undefined, false, undefined, this),
               /* @__PURE__ */ u3("span", {
                 class: "lre-ws-row-size",
-                children: `${n6.count} file${n6.count === 1 ? "" : "s"}`
+                children: `${n7.count} file${n7.count === 1 ? "" : "s"}`
               }, undefined, false, undefined, this)
             ]
           }, undefined, true, undefined, this),
-          treeList(n6.children, props)
+          treeList(n7.children, props)
         ]
       }, undefined, true, undefined, this)
-    }, n6.path, false, undefined, this))
+    }, n7.path, false, undefined, this))
   }, undefined, false, undefined, this);
 }
 function sessionRow(props) {
@@ -80232,16 +85625,16 @@ function ContextPanel(props) {
                     }, `e${j3}`, false, undefined, this))
                   ]
                 }, undefined, true, undefined, this),
-                t3.notes.map((n6) => /* @__PURE__ */ u3("p", {
+                t3.notes.map((n7) => /* @__PURE__ */ u3("p", {
                   class: "lre-gm-warnline",
                   children: [
                     /* @__PURE__ */ u3(Icon, {
                       name: "alert",
                       size: 16
                     }, undefined, false, undefined, this),
-                    n6
+                    n7
                   ]
-                }, n6, true, undefined, this))
+                }, n7, true, undefined, this))
               ]
             }, `${t3.phase}:${t3.step}:${i3}`, true, undefined, this))
           }, undefined, false, undefined, this) : null,
@@ -80298,16 +85691,16 @@ function ContextPanel(props) {
                         m2.history === 1 ? "" : "s"
                       ]
                     }, undefined, true, undefined, this) : null,
-                    (m2.notes ?? []).map((n6) => /* @__PURE__ */ u3("p", {
+                    (m2.notes ?? []).map((n7) => /* @__PURE__ */ u3("p", {
                       class: "lre-gm-warnline",
                       children: [
                         /* @__PURE__ */ u3(Icon, {
                           name: "alert",
                           size: 16
                         }, undefined, false, undefined, this),
-                        n6
+                        n7
                       ]
-                    }, n6, true, undefined, this))
+                    }, n7, true, undefined, this))
                   ]
                 }, undefined, true, undefined, this) : null
               }, `${m2.phase}:${m2.purpose}:${i3}`, false, undefined, this))
@@ -80684,45 +86077,45 @@ var IN_THE_ROOM = { furniture: true, builtin: true, vehicle: true };
 function hereSections(rows2, here) {
   return placeSections(rows2, { within: here }).map((s3) => {
     const out = { path: s3.path.slice(Math.max(0, s3.path.findIndex((step) => step.id === here))), room: [], lying: [], people: [] };
-    for (const node of s3.nodes) {
-      if ("holder" in node) {
-        if (node.holder.is === "person")
-          out.people.push(node);
+    for (const node2 of s3.nodes) {
+      if ("holder" in node2) {
+        if (node2.holder.is === "person")
+          out.people.push(node2);
         else
-          out.lying.push(node);
+          out.lying.push(node2);
       } else
-        (IN_THE_ROOM[node.thing.size] ? out.room : out.lying).push(node);
+        (IN_THE_ROOM[node2.thing.size] ? out.room : out.lying).push(node2);
     }
     return out;
   });
 }
 function WhyRows(props) {
   return /* @__PURE__ */ u3(M, {
-    children: props.nodes.map((node) => {
-      if ("holder" in node)
+    children: props.nodes.map((node2) => {
+      if ("holder" in node2)
         return /* @__PURE__ */ u3(TreeRows, {
-          nodes: [node],
+          nodes: [node2],
           depth: 0,
           open: props.open,
           problems: NO_PROBLEMS,
           picked: props.picked,
           onToggle: props.onToggle,
           onOpen: props.onOpen
-        }, node.holder.id, false, undefined, this);
-      const open = props.open.has(node.thing.id);
+        }, node2.holder.id, false, undefined, this);
+      const open = props.open.has(node2.thing.id);
       return /* @__PURE__ */ u3("div", {
         class: "lre-thing-node",
         children: [
           /* @__PURE__ */ u3(ThingRowView, {
-            row: node.thing,
-            sub: props.why[node.thing.id],
+            row: node2.thing,
+            sub: props.why[node2.thing.id],
             expanded: open,
-            picked: props.picked?.has(node.thing.id),
-            onToggle: node.children.length > 0 ? () => props.onToggle(node.thing.id) : undefined,
+            picked: props.picked?.has(node2.thing.id),
+            onToggle: node2.children.length > 0 ? () => props.onToggle(node2.thing.id) : undefined,
             onOpen: props.onOpen
           }, undefined, false, undefined, this),
           open ? /* @__PURE__ */ u3(TreeRows, {
-            nodes: node.children,
+            nodes: node2.children,
             depth: 1,
             open: props.open,
             problems: NO_PROBLEMS,
@@ -80731,7 +86124,7 @@ function WhyRows(props) {
             onOpen: props.onOpen
           }, undefined, false, undefined, this) : null
         ]
-      }, node.thing.id, true, undefined, this);
+      }, node2.thing.id, true, undefined, this);
     })
   }, undefined, false, undefined, this);
 }
@@ -81071,10 +86464,10 @@ function KeepList(props) {
                 children: s3.reason
               }, s3.id, false, undefined, this))
             }, undefined, false, undefined, this) : null,
-            kept2.notes.map((n6) => /* @__PURE__ */ u3("span", {
+            kept2.notes.map((n7) => /* @__PURE__ */ u3("span", {
               class: "lre-small lre-gm-keep-line",
-              children: n6
-            }, n6, false, undefined, this))
+              children: n7
+            }, n7, false, undefined, this))
           ]
         }, undefined, true, undefined, this) : null
       ]
@@ -81167,7 +86560,7 @@ function TidyPanel(props) {
     ]
   }, undefined, true, undefined, this);
 }
-var counted2 = (n6) => n6 === 1 ? "1 thing" : `${n6} things`;
+var counted2 = (n7) => n7 === 1 ? "1 thing" : `${n7} things`;
 function named2(rows2, verb) {
   const who = rows2.length <= 3 ? listWords2(rows2.map((r3) => r3.name)) : counted2(rows2.length);
   return `${who} ${rows2.length === 1 ? verb.one : verb.many}`;
@@ -81354,7 +86747,7 @@ function RemoveSheet(props) {
   }, undefined, false, undefined, this);
 }
 function treeIds(nodes) {
-  return nodes.flatMap((n6) => [..."thing" in n6 ? [n6.thing.id] : [], ...treeIds(n6.children)]);
+  return nodes.flatMap((n7) => [..."thing" in n7 ? [n7.thing.id] : [], ...treeIds(n7.children)]);
 }
 function ThingsSection(props) {
   const app = useApp();
@@ -82462,7 +87855,7 @@ function BatchPage(props) {
   };
   const tierOf3 = (id) => gm.tiers.find((t3) => t3.id === id)?.label ?? id;
   const levelOf = (e3) => {
-    const level = LEVELS6.find((n6) => n6 === e3.levels.find((l3) => l3.domain === choices.domain)?.override);
+    const level = LEVELS6.find((n7) => n7 === e3.levels.find((l3) => l3.domain === choices.domain)?.override);
     return level === undefined ? "from the tier" : `set to ${level} · ${LEVEL_LABEL[level]}`;
   };
   const routineOf = (id) => {
@@ -82569,7 +87962,7 @@ function BatchPage(props) {
                 id: field2.level,
                 class: "lre-input",
                 value: choices.level === null ? "" : String(choices.level),
-                onChange: (event) => choose({ level: event.currentTarget.value === "tier" ? "tier" : LEVELS6.find((n6) => String(n6) === event.currentTarget.value) ?? null }),
+                onChange: (event) => choose({ level: event.currentTarget.value === "tier" ? "tier" : LEVELS6.find((n7) => String(n7) === event.currentTarget.value) ?? null }),
                 children: [
                   /* @__PURE__ */ u3("option", {
                     value: "",
@@ -82579,14 +87972,14 @@ function BatchPage(props) {
                     value: "tier",
                     children: "From the tier"
                   }, undefined, false, undefined, this),
-                  LEVELS6.map((n6) => /* @__PURE__ */ u3("option", {
-                    value: String(n6),
+                  LEVELS6.map((n7) => /* @__PURE__ */ u3("option", {
+                    value: String(n7),
                     children: [
-                      n6,
+                      n7,
                       " · ",
-                      LEVEL_LABEL[n6]
+                      LEVEL_LABEL[n7]
                     ]
-                  }, n6, true, undefined, this))
+                  }, n7, true, undefined, this))
                 ]
               }, undefined, true, undefined, this)
             }, undefined, false, undefined, this),
@@ -84086,7 +89479,7 @@ function Here(props) {
   const app = useApp();
   const { state } = props;
   const [busy, run] = useBusy();
-  const present = state.scene?.present ?? [];
+  const present2 = state.scene?.present ?? [];
   const open = (entity2) => {
     if (app.catalog.sheets.has("person")) {
       app.ui.update((ui) => pushSheet(ui, { kind: "person", id: entity2 }));
@@ -84104,15 +89497,15 @@ function Here(props) {
     class: "lre-play-here",
     children: /* @__PURE__ */ u3(Section, {
       title: "Here",
-      aside: present.length > 0 ? /* @__PURE__ */ u3(Badge, {
-        children: present.length
+      aside: present2.length > 0 ? /* @__PURE__ */ u3(Badge, {
+        children: present2.length
       }, undefined, false, undefined, this) : undefined,
       flush: true,
-      children: present.length === 0 ? /* @__PURE__ */ u3("p", {
+      children: present2.length === 0 ? /* @__PURE__ */ u3("p", {
         class: "lre-play-none",
         children: "Nobody else is here."
       }, undefined, false, undefined, this) : /* @__PURE__ */ u3(List, {
-        children: present.map((person4) => {
+        children: present2.map((person4) => {
           const pending = state.pending.some((mark) => mark.entity === person4.id);
           return /* @__PURE__ */ u3(ListRow, {
             leading: /* @__PURE__ */ u3(Avatar, {
@@ -84262,6 +89655,7 @@ var REQUEST_TYPES = {
   "lre.edit": true,
   "lre.gm": true,
   "lre.gm.part": true,
+  "lre.chat.export": true,
   "lre.sections": true,
   "lre.state.get": true,
   "lre.marker": true,
@@ -85713,6 +91107,12 @@ var LIVE_CSS = `
 .lre-live-mark.review{color:var(--lre-fg);text-align:left}
 .lre-live-mark.review.failed{color:var(--lre-neg)}
 .lre-live-review{margin:var(--lre-s1) 0 0;padding-left:var(--lre-s3);color:var(--lre-fg);overflow-wrap:anywhere}
+.lre-live-mark.plan{color:var(--lre-fg);text-align:left}
+.lre-live-mark.plan>details>summary{cursor:pointer;min-height:44px;display:flex;align-items:center;color:var(--lre-muted)}
+.lre-live-plan{margin:var(--lre-s1) 0 0;padding:0;list-style:none;display:grid;gap:var(--lre-s1)}
+.lre-live-plan>li{overflow-wrap:anywhere}
+.lre-live-plan-role{font-weight:600}
+.lre-live-plan-why{color:var(--lre-muted)}
 .lre-live-follow{position:sticky;bottom:var(--lre-s2);display:flex;justify-content:center;pointer-events:none}
 .lre-live-follow>.lre-btn{pointer-events:auto}
 `;
@@ -86035,6 +91435,40 @@ button.lre-world-pill:hover{background:linear-gradient(var(--lre-hover),var(--lr
 .lre-world-budgets,.lre-world-moves,.lre-world-log{display:flex;flex-direction:column;gap:var(--lre-s2);padding-top:var(--lre-s3);border-top:1px solid var(--lre-hairline)}
 .lre-world-sublabel{font-size:var(--lre-fs-sm);color:var(--lre-muted)}
 .lre-world-log>p{margin:0;font-size:var(--lre-fs-sm);overflow-wrap:anywhere}
+.lre-tree-frame{display:flex;flex-direction:column;min-width:0}
+.lre-tree,.lre-tree-group{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;min-width:0}
+.lre-tree-item{min-width:0;outline:none}
+.lre-tree-item:focus-visible>.lre-tree-row{outline:2px solid var(--lre-accent);outline-offset:-2px}
+.lre-tree-row{display:flex;align-items:center;gap:var(--lre-s2);width:100%;min-width:0;min-height:var(--lre-tap-lg);padding:var(--lre-s1) var(--lre-s3) var(--lre-s1) calc(var(--lre-s1) + var(--lre-tree-indent,0px));border:0;border-top:1px solid var(--lre-hairline);background:transparent;color:inherit;font:inherit;text-align:left;cursor:pointer;transition:background-color var(--lre-fast)}
+.lre-tree>.lre-tree-item:first-child>.lre-tree-row{border-top:0}
+.lre-tree-row:hover{background:var(--lre-hover)}
+.lre-tree-row.inert{cursor:default}
+.lre-tree-row.inert:hover{background:transparent}
+.lre-tree-row.current{background:var(--lre-accent-soft);box-shadow:inset 3px 0 0 var(--lre-accent)}
+.lre-tree-item.muted>.lre-tree-row{color:var(--lre-muted)}
+.lre-tree-item.muted>.lre-tree-row .lre-tree-label{font-weight:400;font-style:italic}
+.lre-tree-toggle{flex:none;display:inline-flex;align-items:center;justify-content:center;width:28px;align-self:stretch;margin:calc(-1 * var(--lre-s1)) 0;color:var(--lre-muted)}
+.lre-tree-icon{flex:none;display:inline-flex;color:var(--lre-muted)}
+.lre-tree-text{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px;padding:2px 0}
+.lre-tree-label{font-size:var(--lre-fs-md);font-weight:500;overflow-wrap:anywhere}
+.lre-tree-detail{font-size:var(--lre-fs-sm);color:var(--lre-muted);overflow-wrap:anywhere}
+.lre-tree-badges{display:flex;flex-wrap:wrap;gap:var(--lre-s1);min-width:0}
+.lre-tree-value{flex:0 1 auto;max-width:38%;font-size:var(--lre-fs-sm);font-weight:500;color:var(--lre-muted);text-align:right;overflow-wrap:anywhere}
+.lre-tree-trail{flex:none;color:var(--lre-dim)}
+.lre-tree-menu{display:flex;flex-direction:column;margin:0 var(--lre-s3) var(--lre-s2) calc(var(--lre-s3) + 28px + var(--lre-tree-indent,0px));border:1px solid var(--lre-border);border-radius:var(--lre-r-lg);background:var(--lre-card);box-shadow:var(--lre-shadow-sm);overflow:hidden}
+.lre-tree-action{display:flex;align-items:center;gap:var(--lre-s2);min-height:var(--lre-tap-lg);padding:0 var(--lre-s3);border:0;background:transparent;color:inherit;font:inherit;text-align:left;cursor:pointer;transition:background-color var(--lre-fast)}
+.lre-tree-action+.lre-tree-action{border-top:1px solid var(--lre-hairline)}
+.lre-tree-action:hover{background:var(--lre-hover)}
+.lre-tree-action:focus-visible{outline-offset:-2px}
+.lre-tree-action>.lre-icon{flex:none;color:var(--lre-muted)}
+.lre-tree-action.danger,.lre-tree-action.danger>.lre-icon{color:var(--lre-neg)}
+.lre-tree-crumbs{display:flex;align-items:center;flex-wrap:wrap;gap:2px;min-width:0;padding:var(--lre-s1) var(--lre-s2);border-bottom:1px solid var(--lre-hairline);font-size:var(--lre-fs-sm)}
+.lre-tree-crumb-step{display:inline-flex;align-items:center;gap:2px;min-width:0}
+.lre-tree-crumb{display:inline-flex;align-items:center;min-height:var(--lre-tap-lg);max-width:100%;padding:0 var(--lre-s2);border:0;border-radius:var(--lre-r-pill);background:transparent;color:var(--lre-accent-text);font:inherit;font-weight:500;text-align:left;overflow-wrap:anywhere;cursor:pointer}
+button.lre-tree-crumb:hover{background:var(--lre-hover)}
+.lre-tree-crumb.current{color:var(--lre-fg);font-weight:600;cursor:default}
+.lre-tree-crumb-sep{flex:none;color:var(--lre-muted)}
+.lre-tree-flat{border-bottom:1px solid var(--lre-hairline)}
 `;
 
 // src/frontend/styles/play.ts
@@ -86656,11 +92090,11 @@ function setup(ctx) {
   }));
   const toasts = createStore([]);
   let toastId = 0;
-  const toast = (text3, tone = "info") => {
+  const toast = (text3, tone2 = "info") => {
     toastId += 1;
     const id = toastId;
-    toasts.update((all) => [...all.slice(-2), { id, text: text3, tone }]);
-    setTimeout(() => toasts.update((all) => all.filter((entry) => entry.id !== id)), tone === "error" ? 6000 : 3500);
+    toasts.update((all) => [...all.slice(-2), { id, text: text3, tone: tone2 }]);
+    setTimeout(() => toasts.update((all) => all.filter((entry) => entry.id !== id)), tone2 === "error" ? 6000 : 3500);
   };
   cleanups.push(client.onError((error) => toast(error.message, "error")));
   client.visible = () => document.visibilityState === "visible";
