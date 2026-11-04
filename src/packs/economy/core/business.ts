@@ -30,6 +30,7 @@ import type { FinanceApi, FinanceRegistry, FlowPosting } from "./module";
 import { hiddenFrom, managesParty, shownLabel, unpricedCap } from "./model";
 import { actAs, moneyWords } from "./acting";
 import { corporateTax, salesTaxAccount, salesTaxOn, salesTaxPct, structureOf, taxExempt, taxRegionOf } from "./taxes";
+import { trustDistribution } from "./gains";
 
 /** The foundation's invoice kind (`kinds.ts`): one invoice a business issued. */
 export const INVOICE_KIND = "invoice";
@@ -191,7 +192,8 @@ function settleFlows(ctx: ReadContext, api: FinanceApi, business: EntityId): Flo
   const deposit = operatingAccount(api, ctx, business);
   if (!deposit) return [];
   const out: Flow[] = [];
-  if (marginOf(ctx.state, business) < 100) out.push({ id: `suppliers:${business}`, label: "Suppliers", kind: "bill", from: deposit, to: "Suppliers", amount: { provider: "settle", args: { business, what: "suppliers" } }, schedule: { every: "month", days: [10], roll: "after" }, shortfall: "skip", category: "cogs", link: business, status: "active", source: "business" });
+  // A stream's own margin can leave it owing its suppliers even where its own `margin_pct` keeps everything.
+  if (marginOf(ctx.state, business) < 100 || payablesOf(ctx.state, business).suppliers > 0) out.push({ id: `suppliers:${business}`, label: "Suppliers", kind: "bill", from: deposit, to: "Suppliers", amount: { provider: "settle", args: { business, what: "suppliers" } }, schedule: { every: "month", days: [10], roll: "after" }, shortfall: "skip", category: "cogs", link: business, status: "active", source: "business" });
   // The tax is paid to its region's authority, which the flow names as the account its posting pays.
   if (own(ctx.state.entities, business)?.fields.collects_sales_tax !== false) out.push({ id: `salestax:${business}`, label: "Sales tax", kind: "tax", from: deposit, to: `tax:sales:${taxRegionOf(ctx, placesOf(ctx, business)[0] ?? null)}`, amount: { provider: "settle", args: { business, what: "sales_tax" } }, schedule: { every: "month", days: [20], roll: "after" }, shortfall: "skip", category: "sales_tax", link: business, status: "active", source: "business" });
   return out;
@@ -483,10 +485,11 @@ function distribution(ctx: ReadContext, api: FinanceApi, business: EntityId, mon
   const pub = trust ? null : (optionalService(ctx, "economy.public_payout")?.(ctx, business, total) ?? null);
   const owed = total - (pub?.cents ?? 0);
   const route = trust ? undefined : optionalQuery(ctx, "economy.stake_route");
-  // A business's payout is its owners' income from it; what a trust pays out is taxed as trusts are, not as a business's profit.
+  // A business's payout is its owners' income from it; what a trust pays out carries its income out to its beneficiaries as trusts are taxed (§26.3), not as a business's profit.
   const stakePaid = trust ? undefined : optionalService(ctx, "economy.stake_paid");
   const lines: PostingLine[] = [];
   const extra: LedgerEvent[] = [];
+  const parts: { party: EntityId; cents: number }[] = [];
   let given = 0;
   let paid = 0;
   for (const [i, o] of owners.entries()) {
@@ -502,8 +505,10 @@ function distribution(ctx: ReadContext, api: FinanceApi, business: EntityId, mon
       else lines.push({ account: to, amount: cents });
       paid += cents;
     }
+    if (trust) parts.push({ party: o.party, cents });
     extra.push(...(stakePaid?.(ctx, o.party, business, cents, reinvest) ?? []));
   }
+  extra.push(...trustDistribution(business, parts));
   if (pub) {
     for (const l of pub.lines) {
       const line = lines.find((x) => x.account === l.account);

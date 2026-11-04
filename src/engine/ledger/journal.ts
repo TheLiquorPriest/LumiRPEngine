@@ -697,9 +697,12 @@ export class LedgerCore {
     if (from.dropped) p.dropped = from.dropped;
     if (from.prompts) p.prompts = from.prompts;
     if (from.agents) p.agents = from.agents;
-    // What its final review changed in the prompt it was made with goes with the turn its reply takes.
+    // What its final review changed in the prompt it was made with goes with the turn its reply takes,
+    // and so do the parts it saw, which the next turn's review scoped to what changed compares with.
     if (from.finalEdits) p.finalEdits = from.finalEdits;
     else delete p.finalEdits;
+    if (from.finalParts) p.finalParts = from.finalParts;
+    else delete p.finalParts;
     return true;
   }
 
@@ -1230,6 +1233,7 @@ export class LedgerCore {
     if (p.memoryNext) rec.memoryNext = true;
     if (p.agents && p.agents.length > 0) rec.agents = structuredClone(p.agents);
     if (p.finalEdits && p.finalEdits.length > 0) rec.finalEdits = structuredClone(p.finalEdits);
+    if (p.finalParts) rec.finalParts = { ...p.finalParts };
     if (p.copies) {
       // P3: the new reply is read on the same fold prefix as its source's was (its `pre` after the
       // source's markers), and the copies, keeping their seqs and undos, are carried after that read:

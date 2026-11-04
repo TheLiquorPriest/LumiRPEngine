@@ -9,7 +9,9 @@ import { MONEY_WRITES } from "./money";
 import { ORGS_WRITES } from "./orgs";
 import { PEOPLE_WRITES } from "./people";
 import { PLACES_WRITES } from "./places";
+import { PROJECTS_WRITES } from "./projects";
 import { QUESTS_WRITES } from "./quests";
+import { REVENUE_WRITES } from "./revenue";
 import { TIME_WRITES } from "./time";
 
-export const WRITE_TOOLS: readonly ToolDefinition[] = [...PEOPLE_WRITES, ...PLACES_WRITES, ...ITEMS_WRITES, ...MONEY_WRITES, ...ORGS_WRITES, ...QUESTS_WRITES, ...KNOWLEDGE_WRITES, ...MINDS_WRITES, ...TIME_WRITES];
+export const WRITE_TOOLS: readonly ToolDefinition[] = [...PEOPLE_WRITES, ...PLACES_WRITES, ...ITEMS_WRITES, ...MONEY_WRITES, ...REVENUE_WRITES, ...ORGS_WRITES, ...PROJECTS_WRITES, ...QUESTS_WRITES, ...KNOWLEDGE_WRITES, ...MINDS_WRITES, ...TIME_WRITES];

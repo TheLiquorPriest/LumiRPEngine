@@ -17,8 +17,7 @@ import type { ActionDef, ParamDef } from "../../../shared/world";
 import { formatMoney } from "../../../shared/world";
 import { calendarOf, clockAt, dateAt, dayIndexOfText } from "../../../engine/calendar";
 import { ENGINE_EVENTS } from "../../../engine/engine-pack";
-import { acts } from "../../../engine/life";
-import { delegationsOf, directMembers, heldPositions, mayAct, orgPower, orgTypeOf, positionsBelow, positionsOf } from "../../../engine/org";
+import { delegationsOf, directMembers, heldPositions, mayAct, orgPower, orgTypeOf, positionsBelow, positionsOf, seatFilled } from "../../../engine/org";
 import { labelOf, objOf, own, strOf } from "../../../engine/pack-kit";
 import type { CoreRegistry, EffectContext, ReadContext, Rejection } from "../../../engine/registry";
 import { linkEvents } from "../../../engine/relations";
@@ -72,10 +71,10 @@ function mayReach(ctx: ReadContext, by: EntityId, org: EntityId, power: OrgPower
   return reached.length > 0 && reached.every((p) => below.includes(p)) ? null : refuse("not_allowed", `${labelOf(ctx, who)} isn't below ${mine.title} at ${labelOf(ctx, org)}`);
 }
 
-/** A seat free in `position` for `who` (§3.3): fewer holders who act than its seats, `who` aside; 0 seats is any number. */
+/** A seat free in `position` for `who` (§3.3): fewer holders filling a seat than its seats (`seatFilled`: an organization seated there fills one while it stands), `who` aside; 0 seats is any number. */
 function seatFree(ctx: ReadContext, org: EntityId, position: Position, who: EntityId): Rejection | null {
   if (position.seats === 0) return null;
-  const holders = new Set(directMembers(ctx, org).filter((r) => r.position === position.id && r.who !== who && acts(ctx.world, ctx.state, r.who)).map((r) => r.who));
+  const holders = new Set(directMembers(ctx, org).filter((r) => r.position === position.id && r.who !== who && seatFilled(ctx, r.who)).map((r) => r.who));
   return holders.size < position.seats ? null : refuse("no_seat", `${position.title} at ${labelOf(ctx, org)} has no seat free`);
 }
 

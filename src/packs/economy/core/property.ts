@@ -10,7 +10,9 @@
 // rent of its day, with a vacancy between tenants drawn from the property's and unit's ids, so it is
 // the same on every fold. A unit to let without a lease is vacant; a house its owner lives in has
 // none to let. Buying and selling settle the mortgages the property secures, move its leases to the
-// new owner and realise the seller's gain.
+// new owner and realise the seller's gain. A mineral or royalty interest (`property_type: mineral`)
+// has no insurance or upkeep and no housing swings; a property with a `valuation` (a mineral interest
+// by default) is worth what its linked revenue streams are projected to pay (`revenue.ts`).
 
 import type { EntityId } from "../../../shared/ids";
 import type { JsonObject, JsonValue } from "../../../shared/json";
@@ -36,6 +38,7 @@ import { openerOf } from "./model";
 import { byShare } from "./records";
 import { correlated, gbmStep, normal } from "./pricing";
 import { actAs, asParam, mayAs } from "./acting";
+import { incomeValue } from "./revenue";
 
 export const PROPERTY_COST_PROVIDER = "property_cost";
 const COSTS = ["tax", "insurance", "upkeep"] as const;
@@ -54,7 +57,15 @@ const PROPERTY_FIELDS: Record<string, FieldDef> = {
   asking_price: { type: "money", label: "Asking price (for sale)", min: 0, domain: "money", level: 3 },
   volatility_pct: { type: "number", label: "Value swings, % a year", min: 0, domain: "money", level: 4 },
   tax_installments: { type: "number", label: "Property tax bills a year", min: 1, max: 12, default: 2, domain: "money", level: 3 },
+  // Valued from income (§27.9): a mineral or royalty interest has no insurance or upkeep, and is worth what its linked streams pay.
+  property_type: { type: "enum", label: "What it is (mineral: a mineral or royalty interest)", values: ["building", "land", "mineral"], domain: "money", level: 3 },
+  valuation: { type: "list", label: "Valued from its streams' income ({method: pv, cap or multiple, discount_pct, cap_rate_pct, multiple, horizon_months}, one record)", domain: "money", level: 4 },
 };
+
+/** Whether a property is a mineral or royalty interest: no insurance or upkeep, and no housing swings. */
+function isMineral(state: Readonly<WorldState>, id: EntityId): boolean {
+  return fieldsOf(state, id).property_type === "mineral";
+}
 
 /** The upkeep a year when a property names none: about 1 % of its value. */
 const UPKEEP_PCT = 1;
@@ -197,7 +208,11 @@ function followed(api: FinanceApi, ctx: ReadContext, id: EntityId): boolean {
   return owners.length > 0 ? owners.some((o) => own(ctx.state.entities, o.party) && api.feature(ctx, o.party, "property")) : api.feature(ctx, ctx.world.pov, "property");
 }
 
-/** The month's values (midnight on the 1st): one housing shock, each property its own. */
+/**
+ * The month's values (midnight on the 1st): one housing shock, each property its own. A property
+ * valued from income is worth what its streams are then projected to pay; a mineral interest none
+ * values keeps its value, as no housing market moves it.
+ */
 function valueStep(api: FinanceApi, ctx: ReadContext, slot: SlotInfo, rng: (label: string) => Rng): LedgerEvent[] {
   const at = instantIn(ctx, slot, 0);
   if (!at || at.date.day !== 1) return [];
@@ -205,7 +220,13 @@ function valueStep(api: FinanceApi, ctx: ReadContext, slot: SlotInfo, rng: (labe
   let factor: number | null = null;
   for (const id of propertyIds(ctx.state)) {
     const value = propertyValue(ctx.state, id);
-    if (value <= 0 || !followed(api, ctx, id)) continue;
+    if (!followed(api, ctx, id)) continue;
+    const fromIncome = incomeValue(api, ctx, id, at.at);
+    if (fromIncome !== null) {
+      if (fromIncome !== value) out.push({ type: "add", entity: id, field: "value", delta: fromIncome - value });
+      continue;
+    }
+    if (value <= 0 || isMineral(ctx.state, id)) continue;
     factor ??= normal(rng("market:housing"));
     const m = housingModel(ctx, id);
     const next = Math.round(gbmStep(value, m.drift, m.vol, 1 / 12, correlated(factor, normal(rng(`property:${id}`)), m.rho)));
@@ -214,7 +235,7 @@ function valueStep(api: FinanceApi, ctx: ReadContext, slot: SlotInfo, rng: (labe
   return out;
 }
 
-/** A property's cost flows: property tax in installments, insurance and upkeep a month. */
+/** A property's cost flows: property tax in installments, insurance and upkeep a month (a mineral interest only its tax). */
 function costFlows(api: FinanceApi, ctx: ReadContext, id: EntityId): Flow[] {
   if (propertyValue(ctx.state, id) <= 0 || !followed(api, ctx, id)) return [];
   const { owners, shares } = payers(api, ctx.state, id);
@@ -225,8 +246,10 @@ function costFlows(api: FinanceApi, ctx: ReadContext, id: EntityId): Flow[] {
   const cal = calendarOf(ctx.world);
   const common = { ...side, link: id, status: "active" as const, method: "account", source: "property" };
   const amount = (cost: Cost): Flow["amount"] => ({ provider: PROPERTY_COST_PROVIDER, args: { property: id, cost } });
+  const tax: Flow = { ...common, id: `property_tax:${id}`, label: `Property tax, ${name}`, kind: "tax", to: `tax:property:${regionOf(ctx, id)}`, amount: amount("tax"), schedule: { every: "year", months: paymentMonths(numOf(f.tax_installments, 2), cal.system.months, cal.system.months), days: [1], roll: "after" }, shortfall: "defer", category: "property_tax" };
+  if (isMineral(ctx.state, id)) return [tax];
   return [
-    { ...common, id: `property_tax:${id}`, label: `Property tax, ${name}`, kind: "tax", to: `tax:property:${regionOf(ctx, id)}`, amount: amount("tax"), schedule: { every: "year", months: paymentMonths(numOf(f.tax_installments, 2), cal.system.months, cal.system.months), days: [1], roll: "after" }, shortfall: "defer", category: "property_tax" },
+    tax,
     { ...common, id: `property_insurance:${id}`, label: `Insurance, ${name}`, kind: "premium", to: "insurance:property", amount: amount("insurance"), schedule: { every: "month", days: [1], roll: "after" }, shortfall: "retry", retry_days: 7, retries: 2, category: "insurance" },
     { ...common, id: `property_upkeep:${id}`, label: `Upkeep, ${name}`, kind: "bill", to: "upkeep:property", amount: amount("upkeep"), schedule: { every: "month", days: [15], roll: "after" }, shortfall: "skip", category: "home_maintenance" },
   ];

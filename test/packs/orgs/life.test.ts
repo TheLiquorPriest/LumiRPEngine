@@ -3,9 +3,10 @@
 // the Thornes' History says so and the People line reads "(master of Harrowmere)", and the signal to
 // a member names him only where the player character may see him; succession follows the world's
 // switch and this chat's own; Danny's mind reads Your organizations: his position, whom he reports to
-// and his limit. Alerts (a vacancy, a delegation ending, someone's hidden by name and id) and the
-// Plan (assess-party §6.2): goals and orders set at once, moved along by those they're asked of, read
-// by the page, the narrator and the minds they name, and from the player's own message.
+// and his limit. Alerts (a vacancy, the seat of a company wound up falling vacant, a delegation
+// ending, someone's hidden by name and id) and the Plan (assess-party §6.2): goals and orders set at
+// once, moved along by those they're asked of, read by the page, the narrator and the minds they
+// name, and from the player's own message.
 
 import { describe, expect, test } from "bun:test";
 import { opaqueId } from "../../../src/shared/hash";
@@ -14,7 +15,7 @@ import type { LedgerEvent } from "../../../src/shared/ledger";
 import { ALERTS_SECTION, PLAN_SECTION, type OrgAlertView, type OrgPlanView } from "../../../src/shared/org-feed";
 import type { WorldDoc } from "../../../src/shared/world";
 import { applyEffects } from "../../../src/engine/effects";
-import { heldPositions } from "../../../src/engine/org";
+import { heldPositions, orgPower } from "../../../src/engine/org";
 import { createRegistry } from "../../../src/engine/registry-impl";
 import { resolveAction, type Resolution } from "../../../src/engine/resolve";
 import { createRng } from "../../../src/engine/rng";
@@ -188,6 +189,22 @@ describe("alerts (ORG-SPEC §3.14)", () => {
     expect(JSON.stringify(alaric)).not.toMatch(/verity/i);
     // The GM reads whose it is.
     expect(ending(null)).toMatchObject({ id: "delegation:verity_lorne", text: expect.stringMatching(/^Verity Lorne's delegation ends/) });
+  });
+
+  test("a company seated as the Thorne Trust's Director holds the seat while it stands; wound up, its seat falls vacant and its owner's powers there end", () => {
+    const w = starter("mystery_manor", "Harrowmere", (world) => {
+      world.entities.thorne_estates = { id: "thorne_estates", kind: "business", name: "Thorne Estates", tier: "background", fields: { owners: [{ party: RUPERT, role: "owner", share: 100 }], structure: "llc" }, relations: [{ type: "member_of", to: "thorne_trust", fields: { position: "director" } }] };
+      const trust = world.entities.thorne_trust;
+      if (trust) trust.fields = { ...trust.fields, positions: [{ id: "director", title: "Director", powers: ["money.view", "money.spend"] }] };
+    });
+    const alerts = (): string[] => ((buildOrgView(w.ctx, "thorne_trust", null)?.sections[ALERTS_SECTION] ?? []) as unknown as OrgAlertView[]).map((a) => a.text);
+    expect(heldPositions(w.ctx, "thorne_estates", "thorne_trust").map((h) => h.position.id)).toEqual(["director"]);
+    expect(alerts()).not.toContain("Director is vacant.");
+    expect(orgPower(w.ctx, RUPERT, "thorne_trust", "money.spend")).toEqual({ basis: "control", id: "thorne_estates", through: ["thorne_estates"] });
+    effect(w, "set", { entity: "thorne_estates", field: "dissolved", value: "2026-09-14" });
+    expect(heldPositions(w.ctx, "thorne_estates", "thorne_trust")).toEqual([]);
+    expect(alerts()).toContain("Director is vacant.");
+    expect(orgPower(w.ctx, RUPERT, "thorne_trust", "money.spend")).toBeNull();
   });
 });
 

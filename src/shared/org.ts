@@ -74,15 +74,34 @@ export function powerCovers(held: OrgPower, power: OrgPower): boolean {
   return held === power || impliedBy(power).includes(held);
 }
 
-/** What a power rests on: an owner role, a position held, a delegation (`acts_for`), or the type's default for a member. */
-export const ORG_BASES = ["owner", "position", "delegate", "member"] as const;
+/**
+ * What a power rests on: an owner role, a position held, a delegation (`acts_for`), the type's
+ * default for a member, or control: a power held at an organization holding this one (by a stake, a
+ * position it holds here or a delegation to it) that flows down to it (§29.3 Control), the last basis.
+ */
+export const ORG_BASES = ["owner", "position", "delegate", "member", "control"] as const;
 export type OrgBasis = (typeof ORG_BASES)[number];
 
-/** A power held: its basis, and the position that gives it, or the granter of the delegation that does. */
+/**
+ * A power held: its basis, and the position that gives it, or the granter of the delegation that
+ * does. Held through control, `id` is the organization where its holder holds it on their own basis
+ * and `through` the organizations it flows down through, from that one to the one holding this.
+ */
 export interface OrgGrant {
   basis: OrgBasis;
   id?: EntityId;
+  through?: EntityId[];
 }
+
+/** How deep powers flow down a chain of organizations (§29.3 Control): the organizations from the one where someone holds a power on their own basis down to the one they use it at, at most. */
+export const CONTROL_DEPTH = 8;
+
+/**
+ * What a holding organization passes down to an organization that seats its own officers whatever
+ * those officers hold (§29.3 Control, fork 3): seeing its money, changing its board and officers,
+ * its ownership and its structure. Its officers take the rest of their positions' powers.
+ */
+export const CONTROL_KEEPS: readonly OrgPower[] = ["money.view", "members.admit", "members.remove", "members.appoint", "shares.manage", "org.govern"];
 
 /** Whom a position's staff and member powers reach: the whole organization, or only the positions below it. */
 export const POSITION_SCOPES = ["org", "below"] as const;
@@ -273,7 +292,7 @@ export type WindStage = (typeof WIND_STAGES)[number];
 export const WIND_PROPERTY = ["distribute", "sell"] as const;
 export type WindProperty = (typeof WIND_PROPERTY)[number];
 
-/** The fields every organization has (§3.17): on the base `group` kind, and on `trust`, which is no group. */
+/** The fields every organization has (§3.17): on the base `group` kind, which a trust extends too. */
 export const ORG_FIELDS: Readonly<Record<string, FieldDef>> = {
   positions: { type: "list", label: "Positions ({id, title, powers, seats?, reports_to?, scope?, limits?, successor?, default?, no_dues?})" },
   places: { type: "list", label: "Its places", of: "ref" },
@@ -283,13 +302,36 @@ export const ORG_FIELDS: Readonly<Record<string, FieldDef>> = {
   tax_exempt: { type: "text", label: "Tax-exempt status (a row of the exempt table: charity, church, club)", table: "economy.exempt", domain: "money", level: 3 },
   suta_pct: { type: "number", label: "Its state unemployment tax rate (%), when it isn't its state's new-employer rate", min: 0, max: 100, domain: "money", level: 3 },
   // Its decisions (ORG-SPEC Phase 5, `shared/org-motions.ts`): how votes are counted, the quorum and pass mark of a motion, how long it stays open, the standing votes, and how long a request for approval waits.
-  vote_by: { type: "enum", label: "Votes are counted by (shares, or one each for members; a company counts shares unless set)", values: ["shares", "members"] },
+  vote_by: { type: "enum", label: "Votes are counted by (shares, one each for members, or one each for its trustees; a company counts shares unless set)", values: ["shares", "members", "trustees"] },
   quorum_pct: { type: "number", label: "A motion needs at least % of the votes to take part (50 unless set)", min: 0, max: 100 },
   pass_pct: { type: "number", label: "A motion passes with more than % of the votes cast for or against (50 unless set)", min: 0, max: 99.9 },
   motion_days: { type: "number", label: "A motion stays open for days (7 unless set)", min: 1, max: 365 },
   vote_rules: { type: "list", label: "Standing votes ({who, vote: for, against, abstain or with, with?})" },
   approval_days: { type: "number", label: "A request for approval waits for days (7 unless set)", min: 1, max: 365, domain: "money", level: 2 },
 };
+
+/** How a trust's trustees decide (§29.1 Trusts): each on their own (the rule unless set), or together, where one trustee's act beyond seeing its money waits for a co-trustee's approval. */
+export const TRUSTEES_DECIDE = ["each", "together"] as const;
+export type TrusteesDecide = (typeof TRUSTEES_DECIDE)[number];
+
+/** How a trust's trustees decide, as its fields hold it: `each` unless it says `together`. */
+export function trusteesDecideIn(fields: Readonly<Record<string, JsonValue>>): TrusteesDecide {
+  return fields.trustees_decide === "together" ? "together" : "each";
+}
+
+/** A trust's own fields (§29.1 Trusts): who settled it, whether they may take it back, what it is for, the day it ends, and how its trustees decide. */
+export const TRUST_FIELDS: Readonly<Record<string, FieldDef>> = {
+  settlor: { type: "ref", label: "Settlor (who made it: a person or an organization)" },
+  revocable: { type: "bool", label: "Revocable (its settlor may take it back)" },
+  purpose: { type: "text", label: "What it is for" },
+  until: { type: "date", label: "Until (the day it ends)" },
+  trustees_decide: { type: "enum", label: "Its trustees decide (each on their own unless set, or together)", values: [...TRUSTEES_DECIDE] },
+};
+
+/** A company's structure as a nonprofit (§29.1 Nonprofits): positions and no owners of its worth, its founder its Director. */
+export const NONPROFIT_STRUCTURE = "nonprofit";
+/** The position a nonprofit's founder holds, with every power. */
+export const DIRECTOR = "director";
 
 /**
  * Who a thing's `access` or a place's `entry` admits, counted from the owner: each step admits

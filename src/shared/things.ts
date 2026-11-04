@@ -96,8 +96,8 @@ export type HandoverBasis = (typeof HANDOVER_BASES)[number];
 export const GRANT_BASES = ["hold", "loan", "assign"] as const;
 export type GrantBasis = (typeof GRANT_BASES)[number];
 
-/** Why someone may use or dispose of a thing (§3.4, a fixed value). */
-export const ACCESS_BASES = ["owner", "member", "position", "delegate", "grant", "permit", "household", "housemate", "partner", "family", "staff", "customer", "public"] as const;
+/** Why someone may use or dispose of a thing (§3.4, a fixed value); `control`, a power held at an organization holding its owner (DESIGN §29.3). */
+export const ACCESS_BASES = ["owner", "member", "position", "delegate", "control", "grant", "permit", "household", "housemate", "partner", "family", "staff", "customer", "public"] as const;
 export type AccessBasis = (typeof ACCESS_BASES)[number];
 
 /** How far a `permits` reaches: all the permitter's things, or those at their home. */

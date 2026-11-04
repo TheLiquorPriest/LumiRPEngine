@@ -15,8 +15,7 @@ import type { LedgerEvent, PackEvent } from "../../../shared/ledger";
 import type { OrgMember, Position } from "../../../shared/org";
 import { calendarOf, dateAt } from "../../../engine/calendar";
 import { ENGINE_EVENTS } from "../../../engine/engine-pack";
-import { acts } from "../../../engine/life";
-import { belongsTo, directMembers, orgTypeOf, positionsOf } from "../../../engine/org";
+import { belongsTo, directMembers, orgTypeOf, positionsOf, seatFilled } from "../../../engine/org";
 import { objOf, own, sliceOf, sliceRecord, strOf } from "../../../engine/pack-kit";
 import type { EffectDef, EventTypeDef, ProcessDef, ReadContext } from "../../../engine/registry";
 import { linkEvents } from "../../../engine/relations";
@@ -40,11 +39,6 @@ export function successionOn(ctx: Pick<ReadContext, "world" | "state">): boolean
   return orgsSetting(ctx, "succession") !== false;
 }
 
-/** Whether someone holds a seat in fact: alive, acting and still in the world. */
-function seated(ctx: ReadContext, who: EntityId): boolean {
-  return !isGone(ctx.state, who) && acts(ctx.world, ctx.state, who);
-}
-
 /** Today in the world's calendar, as a membership's `since` writes it (`YYYY-MM-DD`). */
 function today(ctx: ReadContext): string {
   const d = dateAt(calendarOf(ctx.world), ctx.state.clock);
@@ -65,7 +59,7 @@ function holdersOf(rows: readonly OrgMember[], position: string): OrgMember[] {
 
 /** How many of a position's seats a holder who no longer acts has left empty: none while enough holders act (0 seats: any one). */
 function vacantSeats(ctx: ReadContext, p: Position, holders: readonly OrgMember[]): number {
-  const acting = holders.filter((r) => seated(ctx, r.who)).length;
+  const acting = holders.filter((r) => seatFilled(ctx, r.who)).length;
   const lapsed = holders.length - acting;
   if (p.seats === 0) return acting === 0 && lapsed > 0 ? 1 : 0;
   return Math.min(lapsed, Math.max(0, p.seats - acting));
@@ -77,7 +71,7 @@ function vacantSeats(ctx: ReadContext, p: Position, holders: readonly OrgMember[
  * slot has already seated.
  */
 function successorFor(ctx: ReadContext, org: EntityId, p: Position, positions: readonly Position[], rows: readonly OrgMember[], taken: ReadonlySet<EntityId>): EntityId | null {
-  const free = (who: EntityId): boolean => seated(ctx, who) && !taken.has(who) && !rows.some((r) => r.who === who && r.position === p.id);
+  const free = (who: EntityId): boolean => seatFilled(ctx, who) && !taken.has(who) && !rows.some((r) => r.who === who && r.position === p.id);
   if (p.successor === "vacant") return null;
   if (p.successor !== "next") return own(ctx.state.entities, p.successor) && orgTypeOf(ctx, p.successor) === null && free(p.successor) ? p.successor : null;
   const below = positions.filter((q) => q.reports_to === p.id).map((q) => q.id);
@@ -111,7 +105,7 @@ function succeed(ctx: ReadContext, org: EntityId): LedgerEvent[] {
   for (const p of positions) {
     if (p.successor === "vacant") continue;
     const holders = holdersOf(rows, p.id);
-    const lapsed = holders.filter((r) => !seated(ctx, r.who));
+    const lapsed = holders.filter((r) => !seatFilled(ctx, r.who));
     for (let seat = 0, n = vacantSeats(ctx, p, holders); seat < n; seat++) {
       const who = successorFor(ctx, org, p, positions, rows, taken);
       if (who === null) break;

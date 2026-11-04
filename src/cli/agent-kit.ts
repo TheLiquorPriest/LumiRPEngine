@@ -22,6 +22,7 @@ function toolContext(ctx: KitContext): ToolContext {
   const context: ToolContext = {
     readFile: (path) => ctx.readFile(path),
     readOnly: ctx.readOnly,
+    sandboxBudgetMs: ctx.sandboxBudgetMs,
     serialize: (key, work) => ctx.serialize(key, work),
     live: () => {
       const conn = ctx.connection();

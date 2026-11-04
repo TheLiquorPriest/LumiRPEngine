@@ -26,16 +26,15 @@ import type { GmSectionProps, OrgTabDef, OrgTabProps } from "../../../frontend/r
 import { OWNER_ROLES, PAY_BASES, PAY_CHOICE_LABELS, PAY_CHOICES, UNPAID, type OwnerRole } from "../../../shared/finance";
 import { isRecord, type JsonObject, type JsonValue } from "../../../shared/json";
 import { parseMoneyInput } from "../../../shared/money";
-import { ORG_BASES, ORG_POWER_FAMILIES, ORG_POWERS, POWER_FAMILY_LABELS, POWER_WORDS, isOrgPower, positionsIn, powersIn, type OrgPower, type OrgPowerFamily, type OrgType } from "../../../shared/org";
+import { ORG_BASES, ORG_POWER_FAMILIES, ORG_POWERS, POWER_FAMILY_LABELS, POWER_WORDS, isOrgPower, positionsIn, powersIn, type OrgPower, type OrgPowerFamily, type OrgType, type Position } from "../../../shared/org";
 import type { OrgGmView, OrgMayPowerView, OrgRef, OrgView } from "../../../shared/org-view";
 import type { EditOp } from "../../../shared/protocol";
 import type { GmEntity, GmView } from "../../../shared/state-view";
 import { delegationDraft, delegationEditOps, delegationProblem, delegationRevokeOps, duesDraft, duesEditOps, duesProblem, GM_PART, orgEditOf, payoutOps, payoutProblem, positionDraft, positionEditOps, positionProblem, positionRemoveOps, staffJobOf } from "./edit";
 import { MemberDetails } from "./member";
 import { OrgPage } from "./org";
-import { TYPE_ICON } from "./home";
-import { DelegationFields, DuesFields, PositionFields } from "./rules";
-import { count, powersText } from "./words";
+import { AppointFields, DelegationFields, DuesFields, MoveFields, PositionFields } from "./rules";
+import { count, powersText, TYPE_ICON } from "./words";
 
 /** The GM tab's id (`r.gm`). */
 export const GM_ORGS_SECTION = "orgs.orgs";
@@ -54,11 +53,24 @@ const ROLE_LABELS: Readonly<Record<OwnerRole, string>> = { owner: "Owner", joint
 
 /**
  * What opens over an organization's page: a member's, an owner's or a job's sheet, or one adding each
- * (`null`); someone's every way of belonging there; a position (`null` adds one), a delegation
- * (`null` grants one) and the dues. An owner's sheet is one holding of theirs: their row for `class`
- * (none: their row that names no class), since someone issued another class holds a row for each.
+ * (`null`; a member or a job into `position`, when the Org Chart names one); someone's every way of
+ * belonging there; a position (`null` adds one, under `under` when the chart names one), moving one,
+ * appointing someone to one or removing one (the chart's menus), a delegation (`null` grants one) and
+ * the dues. An owner's sheet is one holding of theirs: their row for `class` (none: their row that
+ * names no class), since someone issued another class holds a row for each.
  */
-export type GmOrgSheet = { kind: "member"; who: string | null } | { kind: "owner"; party: string | null; class?: string } | { kind: "job"; id: string | null } | { kind: "person"; who: string } | { kind: "position"; id: string | null } | { kind: "delegation"; who: string | null } | { kind: "dues" } | { kind: "payout" };
+export type GmOrgSheet =
+  | { kind: "member"; who: string | null; position?: string }
+  | { kind: "owner"; party: string | null; class?: string }
+  | { kind: "job"; id: string | null; position?: string }
+  | { kind: "person"; who: string }
+  | { kind: "position"; id: string | null; under?: string }
+  | { kind: "move"; id: string }
+  | { kind: "appoint"; id: string }
+  | { kind: "remove"; id: string }
+  | { kind: "delegation"; who: string | null }
+  | { kind: "dues" }
+  | { kind: "payout" };
 
 // ---------------------------------------------------------------- reading the GM view
 
@@ -132,10 +144,10 @@ export function jobsOf(gm: GmView, org: string): GmEntity[] {
     .sort((a, b) => Number(fieldValue(a, "status") === "ended") - Number(fieldValue(b, "status") === "ended") || a.name.localeCompare(b.name));
 }
 
-/** Which of the GM's People controls a type takes: members by `member_of` (any group: a household, a group, a company's officers), owners (a company, a trust), jobs (a company). */
+/** Which of the GM's People controls a type takes: members by `member_of` (any group: a household, a group, a company's or a trust's officers and directors), owners (a company, a trust), jobs (a company). */
 export function gmControlsFor(org: OrgView): { members: boolean; owners: boolean; jobs: boolean } {
   const real = org.exists && org.type !== "party";
-  return { members: real && org.type !== "trust", owners: real && (org.type === "company" || org.type === "trust"), jobs: real && org.type === "company" };
+  return { members: real, owners: real && (org.type === "company" || org.type === "trust"), jobs: real && org.type === "company" };
 }
 
 // ---------------------------------------------------------------- the edits
@@ -626,11 +638,11 @@ async function save(props: SheetProps, ops: EditOp[]): Promise<void> {
 }
 
 /** A member's sheet: who (when adding), their title, position, rank and since; Remove for one already in. Opened on someone not yet linked, it links them. */
-function MemberSheet(props: SheetProps & { who: string | null }) {
+function MemberSheet(props: SheetProps & { who: string | null; position?: string }) {
   const { org, section } = props;
   const link = props.who === null ? null : memberLink(section.gm, props.who, org.id);
   const [who, setWho] = useState(props.who ?? "");
-  const [form, setForm] = useState<MemberForm>({ title: typeof link?.role === "string" ? link.role : "", position: typeof link?.position === "string" ? link.position : "", rank: typeof link?.rank === "number" ? String(link.rank) : "", since: typeof link?.since === "string" ? link.since : "" });
+  const [form, setForm] = useState<MemberForm>({ title: typeof link?.role === "string" ? link.role : "", position: typeof link?.position === "string" ? link.position : (props.position ?? ""), rank: typeof link?.rank === "number" ? String(link.rank) : "", since: typeof link?.since === "string" ? link.since : "" });
   const set = (patch: Partial<MemberForm>) => setForm((f) => ({ ...f, ...patch }));
   const candidates = section.gm.entities.filter((e) => !e.gone && e.id !== org.id && (e.person || kindIs(section.gm, e.kind, "group")) && memberLink(section.gm, e.id, org.id) === null).sort((a, b) => a.name.localeCompare(b.name));
   const name = section.gm.entities.find((e) => e.id === props.who)?.name ?? props.who ?? "";
@@ -696,11 +708,11 @@ function OwnerSheet(props: SheetProps & { party: string | null; heldClass: strin
 }
 
 /** A new job: the worker, the title, the position, how it pays, the rate and how often. */
-function NewJobSheet(props: SheetProps) {
+function NewJobSheet(props: SheetProps & { position?: string }) {
   const { org, section } = props;
   const [worker, setWorker] = useState("");
   const [title, setTitle] = useState("");
-  const [position, setPosition] = useState("");
+  const [position, setPosition] = useState(props.position ?? "");
   const [basis, setBasis] = useState<string>("hourly");
   const [rate, setRate] = useState("");
   const [every, setEvery] = useState<string>("biweekly");
@@ -839,11 +851,11 @@ function PersonSheet(props: SheetProps & { who: string }) {
 }
 
 /** A position as the GM adds or changes it, or removes it: the organization's own effect, its History line and checks with it. */
-function GmPositionSheet(props: SheetProps & { id: string | null }) {
+function GmPositionSheet(props: SheetProps & { id: string | null; under?: string }) {
   const { org, section } = props;
   const positions = positionsIn(fieldValue(section.gm.entities.find((e) => e.id === org.id), "positions"));
   const before = props.id === null ? null : (positions.find((p) => p.id === props.id) ?? null);
-  const [draft, setDraft] = useState(() => positionDraft(before, section.currency));
+  const [draft, setDraft] = useState(() => ({ ...positionDraft(before, section.currency), ...(props.under !== undefined && before === null ? { reportsTo: props.under } : {}) }));
   return (
     <SheetForm
       name="org-position"
@@ -858,6 +870,60 @@ function GmPositionSheet(props: SheetProps & { id: string | null }) {
       {...(before ? { danger: { label: "Remove the position", onClick: () => void save(props, positionRemoveOps(org.id, before.id)) } } : {})}
     >
       <PositionFields draft={draft} positions={positions} people={refsIn(section.gm)} offer={ORG_POWERS} currency={section.currency} onChange={setDraft} />
+    </SheetForm>
+  );
+}
+
+/** The position a chart sheet names, as the GM view's record of it; null once it is gone. */
+function gmPosition(props: SheetProps, id: string): Position | null {
+  return positionsIn(fieldValue(props.section.gm.entities.find((e) => e.id === props.org.id), "positions")).find((p) => p.id === id) ?? null;
+}
+
+/** Move it (the Org Chart's menu): whom the position reports to, nothing else changed; the organization's own effect, as one edit. */
+function GmMoveSheet(props: SheetProps & { id: string }) {
+  const { org, section } = props;
+  const before = gmPosition(props, props.id);
+  const [to, setTo] = useState(before?.reports_to ?? "");
+  const draft = before ? { ...positionDraft(before, section.currency), reportsTo: to } : null;
+  const positions = positionsIn(fieldValue(section.gm.entities.find((e) => e.id === org.id), "positions"));
+  return (
+    <SheetForm name="org-move" title={before ? `Move ${before.title}` : "Position"} subtitle={org.name} backLabel={org.name} onBack={props.back} go="Move it" problem={!before || !draft ? "It has no such position any more." : to === (before.reports_to ?? "") ? "Choose where it goes." : positionProblem(draft, positions, section.currency)} busy={section.busy} onGo={() => (before && draft ? void save(props, positionEditOps(org.id, draft, before, section.currency)) : undefined)}>
+      {before ? <MoveFields org={org} id={before.id} value={to} onChange={setTo} /> : null}
+    </SheetForm>
+  );
+}
+
+/**
+ * Appoint someone to it (the Org Chart's menu): one of its people or organizations into the
+ * position, as the GM's own sheets set it: staff who aren't members by their job's position, anyone
+ * else by their membership link (made when they have none), its other fields kept.
+ */
+function GmAppointSheet(props: SheetProps & { id: string }) {
+  const { org, section } = props;
+  const before = gmPosition(props, props.id);
+  const [who, setWho] = useState("");
+  const link = who === "" ? null : memberLink(section.gm, who, org.id);
+  const job = who === "" || link !== null ? undefined : jobsOf(section.gm, org.id).find((j) => fieldValue(j, "worker") === who && fieldValue(j, "status") !== "ended");
+  const text = (v: JsonValue | undefined): string => (typeof v === "string" ? v : "");
+  const ops = (): EditOp[] => {
+    if (!before) return [];
+    if (job) return jobTitleOps(job, text(fieldValue(job, "title")), before.id);
+    return memberOps(org.id, who, { title: text(link?.role), position: before.id, rank: typeof link?.rank === "number" ? String(link.rank) : "", since: text(link?.since) });
+  };
+  return (
+    <SheetForm name="org-appoint" title={before ? `Appoint to ${before.title}` : "Position"} subtitle={org.name} backLabel={org.name} onBack={props.back} go="Appoint" problem={!before ? "It has no such position any more." : who === "" ? "Choose whom to appoint." : null} busy={section.busy} onGo={() => void save(props, ops())}>
+      {before ? <AppointFields org={org} id={before.id} value={who} onChange={setWho} /> : null}
+    </SheetForm>
+  );
+}
+
+/** Remove the position (the Org Chart's menu): its holders stay without it, and those under it report to no one. */
+function GmRemoveSheet(props: SheetProps & { id: string }) {
+  const { org, section } = props;
+  const before = gmPosition(props, props.id);
+  return (
+    <SheetForm name="org-remove" title={before ? `Remove ${before.title}` : "Position"} subtitle={org.name} backLabel={org.name} onBack={props.back} go="Remove the position" problem={before ? null : "It has no such position any more."} busy={section.busy} onGo={() => (before ? void save(props, positionRemoveOps(org.id, before.id)) : undefined)}>
+      {before ? <span>{`${before.title} · ${powersText(before.powers)}. Those holding it stay, without it; positions under it report to no one.`}</span> : null}
     </SheetForm>
   );
 }
@@ -924,15 +990,21 @@ function SheetView(props: SheetProps & { sheet: GmOrgSheet; open(sheet: GmOrgShe
   const { sheet } = props;
   switch (sheet.kind) {
     case "member":
-      return <MemberSheet {...props} who={sheet.who} />;
+      return <MemberSheet {...props} who={sheet.who} {...(sheet.position !== undefined ? { position: sheet.position } : {})} />;
     case "owner":
       return <OwnerSheet {...props} party={sheet.party} heldClass={sheet.class ?? null} />;
     case "job":
-      return sheet.id === null ? <NewJobSheet {...props} /> : <JobSheet {...props} id={sheet.id} />;
+      return sheet.id === null ? <NewJobSheet {...props} {...(sheet.position !== undefined ? { position: sheet.position } : {})} /> : <JobSheet {...props} id={sheet.id} />;
     case "person":
       return <PersonSheet {...props} who={sheet.who} />;
     case "position":
-      return <GmPositionSheet {...props} id={sheet.id} />;
+      return <GmPositionSheet {...props} id={sheet.id} {...(sheet.under !== undefined ? { under: sheet.under } : {})} />;
+    case "move":
+      return <GmMoveSheet {...props} id={sheet.id} />;
+    case "appoint":
+      return <GmAppointSheet {...props} id={sheet.id} />;
+    case "remove":
+      return <GmRemoveSheet {...props} id={sheet.id} />;
     case "delegation":
       return <GmDelegationSheet {...props} who={sheet.who} />;
     case "dues":
@@ -942,16 +1014,28 @@ function SheetView(props: SheetProps & { sheet: GmOrgSheet; open(sheet: GmOrgShe
   }
 }
 
-/** The GM's sheet for one of Play's editors (`org_edit`) on GM → Orgs' page: a member's sheet is their every way of belonging there; a position, a delegation and the dues their own; Hire someone and Admit a member are People's Add a job and Add a member. Null for any other route. */
+/**
+ * The GM's sheet for one of Play's editors (`org_edit`) on GM → Orgs' page: a member's sheet is their
+ * every way of belonging there; a position (one added under another), moving one, appointing to one,
+ * removing one, a delegation and the dues their own; Hire someone and Admit a member are People's
+ * Add a job and Add a member, into the position the chart names. Null for any other route.
+ */
 export function gmSheetFor(route: SheetRoute): GmOrgSheet | null {
   if (route.kind !== "org_edit") return null;
   const target = orgEditOf(route.id);
   if (!target) return null;
+  const position = target.id === null ? {} : { position: target.id };
   switch (target.form) {
     case "member":
       return target.id === null ? null : { kind: "person", who: target.id };
     case "position":
       return { kind: "position", id: target.id };
+    case "under":
+      return { kind: "position", id: null, ...(target.id !== null ? { under: target.id } : {}) };
+    case "move":
+    case "appoint":
+    case "remove":
+      return target.id === null ? null : { kind: target.form, id: target.id };
     case "delegate":
       return { kind: "delegation", who: target.id };
     case "dues":
@@ -959,9 +1043,9 @@ export function gmSheetFor(route: SheetRoute): GmOrgSheet | null {
     case "payout":
       return { kind: "payout" };
     case "hire":
-      return { kind: "job", id: null };
+      return { kind: "job", id: null, ...position };
     case "admit":
-      return { kind: "member", who: null };
+      return { kind: "member", who: null, ...position };
   }
 }
 
@@ -1016,7 +1100,7 @@ export function GmOrgsSection(props: GmSectionProps) {
             <div ref={sheets.host.ref} onKeyDown={sheets.host.onKeyDown}>
               <div hidden={sheets.page !== null}>
                 <GmOrgContext.Provider value={{ entry, section: props, open: sheets.open }}>
-                  <OrgPage org={gmPage(entry.page)} figure={null} defs={gmPageDefs(entry.page, app.catalog.orgTabs)} tab={tab} panelId={panelId} onTab={setTab} onBack={back} chatId={props.chatId} state={state} send={props.send} open={open} />
+                  <OrgPage org={gmPage(entry.page)} figure={null} defs={gmPageDefs(entry.page, app.catalog.orgTabs)} tab={tab} panelId={panelId} onTab={setTab} onBack={back} chatId={props.chatId} state={state} send={props.send} open={open} pageOf={(id) => { const other = orgs.find((o) => o.page.id === id)?.page; return other ? gmPage(other) : null; }} />
                 </GmOrgContext.Provider>
               </div>
               {sheets.page !== null ? <SheetView key={JSON.stringify(sheets.page)} sheet={sheets.page} org={entry.page} section={props} back={sheets.back} open={sheets.open} /> : null}

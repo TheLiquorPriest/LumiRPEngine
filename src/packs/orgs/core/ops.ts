@@ -123,9 +123,10 @@ export function compileOrgOp(ctx: ReadContext, op: OrgOp): EffectSpec[] | Reject
     case "found": {
       const missing = needs(ctx, "orgs.found", "found an organization");
       if (missing) return missing;
-      // A company founding another names itself as `founder` (a subsidiary; no actor, so no power or votes asked); a person founds as themselves.
+      // An organization founding another names itself as `founder` (a subsidiary, a trust it settles, a nonprofit; no actor, so no power or votes asked); a person founds as themselves.
       const founder: JsonObject = orgTypeOf(ctx, op.founder) !== null ? { founder: op.founder } : { by: op.founder };
-      return [{ type: "orgs.found", args: { type: op.type, name: plainWords(op.name), ...(op.kind !== undefined ? { kind: op.kind } : {}), ...(op.structure !== undefined ? { structure: op.structure } : {}), ...(op.capital !== undefined ? { cents: Math.round(op.capital) } : {}), ...(op.from !== undefined ? { from: op.from } : {}), ...(op.units !== undefined ? { units: Math.round(op.units) } : {}), ...founder } }];
+      const terms: JsonObject = { ...(op.trustee !== undefined ? { trustee: op.trustee } : {}), ...(op.beneficiary !== undefined ? { beneficiary: op.beneficiary } : {}), ...(op.revocable !== undefined ? { revocable: op.revocable } : {}), ...(op.purpose !== undefined ? { purpose: plainWords(op.purpose) } : {}), ...(op.until !== undefined ? { until: op.until } : {}) };
+      return [{ type: "orgs.found", args: { type: op.type, name: plainWords(op.name), ...(op.kind !== undefined ? { kind: op.kind } : {}), ...(op.structure !== undefined ? { structure: op.structure } : {}), ...(op.capital !== undefined ? { cents: Math.round(op.capital) } : {}), ...(op.from !== undefined ? { from: op.from } : {}), ...(op.units !== undefined ? { units: Math.round(op.units) } : {}), ...terms, ...founder } }];
     }
     case "admit": {
       const bad = orgProblem(ctx, op.org);
@@ -327,6 +328,17 @@ export function compileOrgOp(ctx: ReadContext, op: OrgOp): EffectSpec[] | Reject
       if (bad) return bad;
       const { do: _do, org, ...rules } = op;
       return [{ type: DECISION_EFFECTS.rules, args: { org, ...rules } }];
+    }
+    case "project": {
+      // The projects' own effects write their History lines.
+      const missing = orgProblem(ctx, op.org) ?? needs(ctx, "economy.project_start", "run production projects");
+      if (missing) return missing;
+      return [{ type: `economy.project_${op.act}`, args: { org: op.org, ...(op.project !== undefined ? { project: op.project } : {}), ...(op.template !== undefined ? { template: op.template } : {}), ...(op.name !== undefined ? { name: plainWords(op.name) } : {}), ...(op.account !== undefined ? { account: op.account } : {}), ...(op.step !== undefined ? { step: op.step } : {}), ...(op.days !== undefined ? { days: Math.round(op.days) } : {}), ...(op.cents !== undefined ? { cents: Math.round(op.cents) } : {}), ...(op.why !== undefined ? { text: plainWords(op.why) } : {}), ...(op.act === "note" ? { source: "gm" } : {}) } }];
+    }
+    case "lend": {
+      const missing = orgProblem(ctx, op.org) ?? needs(ctx, "economy.lend", "lend money");
+      if (missing) return missing;
+      return [{ type: "economy.lend", args: { who: op.org, to: op.to, cents: Math.round(op.cents), ...(op.apr !== undefined ? { apr: op.apr } : {}), ...(op.months !== undefined ? { months: op.months } : {}), ...(op.from !== undefined ? { from: op.from } : {}) } }, historyLine(op.org, `Lent ${money(ctx, op.cents)} to ${name(op.to)}`, { names: [op.to] })];
     }
   }
 }

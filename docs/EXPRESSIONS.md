@@ -21,6 +21,7 @@ What a formula can read depends on where it sits: `self` is whoever it is about,
 | A track stage's objectives | The track's owner (else the POV) | Nothing more: write them with `self`, since `owner` and `track.*` aren't there |
 | A progression's `onLevel` effects | The entity that levelled up | `level` (the level reached) and `from` (the level before) |
 | A designed sheet's formula row | The entity whose sheet it is | |
+| A revenue stream's formulas: its `units`, `price` and `buyers` (each a number or a formula) and a custom stream's `formula` (DESIGN §26.2) | The earner (the stream's `to`) | `season` (this month's factor), `growth` (its growth since the stream started), `weekday_factor` (the day's) and `t` (months since the stream started); the clock names read the occurrence's own instant |
 
 ## Syntax
 
@@ -59,7 +60,7 @@ A name is looked up in this order; the first that knows it answers.
 3. **`pov`:** the POV, read like a binding (`pov.cash`).
 4. **`here`:** the place `self` is at (through whatever holds it); `here.security` reads a field of that place.
 5. **`stage.<track>`:** a track's current stage (its start before it moves). **`level.<domain>`:** `self`'s effective level in a realism domain (`level.money`).
-6. **The clock:** `clock` (game minutes since the calendar's epoch), `minute` (of the day), `hour`, `day` (days since the epoch's date), `weekday` (0 is Sunday), `date` (the day of the month), `month`, `year` and `daypart` (the id of the current part of the day).
+6. **The clock:** `clock` (game minutes since the calendar's epoch), `minute` (of the day), `hour`, `day` (days since the epoch's date), `weekday` (0 is Sunday), `date` (the day of the month), `month`, `year` and `daypart` (the id of the current part of the day). These, and `today_at`, `next_time`, `since` and `holiday`, read the instant the caller gives (a flow's occurrence reads its own, so a revenue stream's formula sees the day it pays), else the state's clock.
 7. **Any entity or place by its id:** `npc_dev.mood`, `harbor.security`.
 
 **Parameters.** A scalar parameter reads by its bare name (`qty`) and as `params.qty`. One the player left out reads 0 by its bare name and null as `params.qty`. Since `==` compares null as 0, `params.days == null` holds for zero days too; to tell "none" from zero, compare it as text: `params.days + '' == ''` holds only when it was left out. A ref parameter is a binding, so `target.cash` reads the target's cash.

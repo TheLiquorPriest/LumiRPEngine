@@ -16,11 +16,11 @@ import type { ChipAction, ChipInput, ContextGeneration, ContextView, LoreStepTra
 import type { ActionDef, AdjudicationDef, LoreEntryDef, ParamDef, SectionTemplate, StepPurpose, WorldDoc } from "../shared/world";
 import { formatMoney, offersAction, trackOwner } from "../shared/world";
 import { counted, fieldNoun, possessive } from "../shared/words";
-import { applyFinalEdits, FINAL_REVIEW_STEP, finalEditsOf, partOf, partText, type PromptPart, RULES_PART } from "../shared/final-review";
+import { applyFinalEdits, changedScope, FINAL_REVIEW_STEP, type FinalEdit, finalEditsOf, finalPartsOf, partHash, partOf, partText, type PromptPart, RULES_PART } from "../shared/final-review";
 import { LORE_AUDIENCE } from "../shared/lore";
 import { isMindPurpose, KNOWLEDGE_CHANGES, MINDS_EVENTS, MINDS_SLOT, type MindCallTrace, type MindEventData } from "../shared/minds";
 import { firedTimeout, TimeoutFired, TIMEOUTS, timerMs } from "../shared/timeouts";
-import { mindsOn, mindsStepConfig, postKnowledge, postMemory, postMinds, postMindsInput, postOpening, preMinds, runMinds, type MindsDeps, type PreMindsInput, type RunMindsResult } from "./minds";
+import { KEPT_MIND_REASON, mindsOn, mindsStepConfig, postKnowledge, postMemory, postMinds, postMindsInput, postOpening, preMinds, runMinds, type MindsDeps, type PreMindsInput, type RunMindsResult } from "./minds";
 import { runSkip, type BeatMinds, type SkipRun } from "./skip";
 import { planSkip } from "./skip-plan";
 import { mindLines } from "../packs/minds/core/section";
@@ -83,7 +83,7 @@ import { Agents, type BuildInfo, thisBuild } from "./agents";
 import { AgentAccounts } from "./agents/provider";
 import { EngineBook, narratorRules, sectionsOf, sectionTokens } from "./book";
 import { DEFAULT_SECTIONS } from "../shared/sections";
-import type { PromptTexts } from "../shared/prompts";
+import { type PromptTexts, UNCHANGED_TEXT_ID } from "../shared/prompts";
 import { holdsSecretMark, type SecretMarkWording, secretMarkText } from "../shared/secret-marks";
 import { markWording, PromptSets, sourceTexts, turnPromptSet } from "./prompts";
 import { ChatPrefs } from "./chat-prefs";
@@ -97,7 +97,7 @@ import { ChatKnowledge, chatKnowledgePrefsOf, knowledgeOn, narratorView, tidyOn 
 import { ChipStore, type StoredChip } from "./chips";
 import type { DryRun, HostPort } from "./host";
 import { EngineFailure, LedgerService, OPEN_CHATS_CAP, toChain, type Delivered, type PreOutcome, type RunOutcome, type TurnContext, type TurnGone, type TurnHooks } from "./ledger-io";
-import { outsideTurns, type TurnFrame } from "./turn-frame";
+import { outsideTurns, turnFrame, type TurnFrame } from "./turn-frame";
 import type { TrimReport } from "./memory-budget";
 import { MessageCache } from "./message-cache";
 import { StatePush } from "./push";
@@ -134,7 +134,9 @@ import { Review } from "./agents/review";
 import { LiveFeeds } from "./agents/live";
 import { uncurated } from "./agents/roles/curator";
 import { defaultAgentSettings, KEPT_FOLDS_DEFAULT } from "../shared/agent-settings";
-import type { ExtractInput, InterpretOutcome, ProseAsk } from "./agents/turn-ctx";
+import type { ExtractInput, InterpretOutcome, ProseAsk, SceneOut } from "./agents/turn-ctx";
+import { chainMarks, sceneBasis, ScenePersistence } from "./agents/persist";
+import type { RoleId } from "../shared/agent-roles";
 import { outputsOf } from "../engine/outputs";
 import { CANNOT_STOP, DIAG_RING, STEP_LABEL, type DiagPhase } from "../shared/diagnostics";
 import { RETENTION_DEFAULTS } from "../shared/stores";
@@ -866,6 +868,8 @@ export class Runtime implements TurnHooks {
   readonly live: LiveFeeds;
   /** The agent turn loop (INC2-SPEC lane T1): a chat on agents plays each turn through its roles. */
   readonly orchestrator: Orchestrator;
+  /** Smart persistence (Settings → Agents → Pipeline): each chat's last agent turn's scene, which its next turn's quiet minds and scene notes are kept by. */
+  readonly persistence = new ScenePersistence();
   /** Each chat's agent metadata: the learned area's index, the GM assistant's thread and a session rollback asked for (DESIGN §4.4). */
   readonly chatAgents: ChatAgentMeta;
   /** Each user's global workspace (`~/`, DESIGN §4.4): the files every chat of theirs shares, kept apart from every chat's story. */
@@ -994,6 +998,13 @@ export class Runtime implements TurnHooks {
     this.diag = new Diagnostics(this.host, { blobs: this.blobs, ring: (userId) => this.settings.known(userId)?.diagnostics.recordsPerChat ?? DIAG_RING, transcriptDays: (userId) => this.settings.known(userId)?.retention.transcriptDays ?? RETENTION_DEFAULTS.transcriptDays });
     this.steps.onCall = (userId, call) => this.diag.call(userId, call);
     this.steps.onCallStart = (userId, purpose) => this.diag.callStart(userId, purpose);
+    // An agent turn's prompt-only calls take their place among their connection's calls at once
+    // with its agents' (Settings → Agents → Throttles), through the same gate; any other call takes none.
+    this.steps.gate = async (userId, connectionId, signal) => {
+      const frame = turnFrame();
+      if (!frame || frame.userId !== userId || (await this.chatKnowledge.engine(frame.chatId, userId)) !== "agents") return () => undefined;
+      return this.agentAccounts.atOnce(userId, connectionId ?? (await this.activeConnectionId(userId)), frame.settings.agents.throttles, signal);
+    };
     this.toolSupport = new ToolSupport(this.host);
     this.loreRouting = new LoreRouting(this.host, this.settings, this.worlds, this.bookReads);
     this.minds = { host: this.host, registry: this.registry, steps: this.steps, settings: this.settings, presets: this.presets, loreEntry: (userId, id) => this.loreRouting.ids.entryOf(userId, id) };
@@ -1305,8 +1316,14 @@ export class Runtime implements TurnHooks {
     this.keptMinds.delete(input.chatId);
     if (kept && kept.key !== mindsKey) kept.stop?.abort(new NotNeeded("the turn they were thinking for changed"));
     const same = kept?.key === mindsKey ? kept : undefined;
+    // Smart persistence (Settings → Agents → Pipeline): on an agent turn whose scene is the last
+    // turn's, the quiet Live minds and the scene's notes are kept (`agents/persist.ts`). The basis is
+    // the head's, before this turn's own memory and tidying.
+    const basis = agent ? sceneBasis(this.registry, render.world, folded.state, chainMarks(input.core, before)) : null;
+    const persist = basis ? this.persistence.hold(input.chatId, { settings: settings.agents.persist, kind: p.kind, after: lastReply ? { messageId: lastReply.id, swipeId: lastReply.swipeId } : null, basis, clock: folded.state.clock }) : null;
+    const keepScene = persist?.holds === true && settings.agents.roles.scene.run === "smart" && lastReply ? this.keptScene(input.core, lastReply) : null;
     // A Regenerate's or swipe's minds read the chat up to the reply it replaces, never that reply again.
-    const asking = { chatId: input.chatId, userId: input.userId, world: render.world, state: render.state, user: text, reply: lastReply ? (lastReply.swipes[lastReply.swipeId] ?? "") : "", guidance: preset.guidance.mind ?? "", knowledge: knowing, ...(p.messageId ? { replaces: p.messageId } : {}) };
+    const asking = { chatId: input.chatId, userId: input.userId, world: render.world, state: render.state, user: text, reply: lastReply ? (lastReply.swipes[lastReply.swipeId] ?? "") : "", guidance: preset.guidance.mind ?? "", knowledge: knowing, ...(p.messageId ? { replaces: p.messageId } : {}), ...(persist?.holds === true && settings.agents.roles.minds.run === "smart" ? { persist: true } : {}) };
     const readTimelapse = (): boolean => bridge.intentOf(text)?.action === TIMELAPSE_ACTION;
     const known = text.trim() === "" || bridge.hasIntent(text) || bridge.isHeld(text);
     let thinking = shown ? null : this.thinkMinds(asking, known ? readTimelapse() : facts.timelapse, budget.signal, same, calls);
@@ -1336,6 +1353,15 @@ export class Runtime implements TurnHooks {
     // whose outline the player let through plays the plan it was shown, so it chooses nothing again.
     // A main agent's turn keeps C14's order: its decisions come with the scene and minds, after the gates.
     const gating = shown || this.orchestrator.ordered(p.generationId) || (settings.gates.intent && typed && !bridge.intentPassed(text));
+    // An agent turn's scene role (its lore and notes are told the narrator with the turn's lines). On
+    // the fixed pipeline it starts with the intent while no gate can hold the turn, since it reads only
+    // the scene and the player's words; a claim or check that holds it after all stops it. A scene
+    // Smart persistence keeps waits for the read, as a timelapse keeps none, and costs no call.
+    const sceneAsk = { text, world: render.world, state: render.state, classic: async () => ({ lore: [], notes: [] }) };
+    const sceneStop = new AbortController();
+    const sceneEarly = agent && !gating && !keepScene ? this.orchestrator.scene(p.generationId, sceneAsk, AbortSignal.any([budget.signal, sceneStop.signal])) : null;
+    // Stopped at a gate or by a halt, nobody awaits it: its rejection is no one's.
+    sceneEarly?.catch(() => undefined);
     const [, early] = await Promise.all([intentTask, choose && !gating && budget.take(judging ? 1 : 0) ? choose() : null]);
     // A role that stopped the turn before the gates stops it here: no gate shows, and no later role runs.
     this.haltStopped(runAt);
@@ -1354,7 +1380,10 @@ export class Runtime implements TurnHooks {
     }
     // A claim, a suggested check or the intent gate waits on the player (`previewGates`): nothing is generated.
     const waiting = await this.previewGates({ chatId: input.chatId, userId: input.userId, bridge, text, lastUser, settings, render, typed, shown, mindsKey, thinking });
-    if (waiting) return waiting;
+    if (waiting) {
+      sceneStop.abort(new NotNeeded("the turn waits on you at a gate"));
+      return waiting;
+    }
     // The gates let the turn play: a main agent's stage 3 opens (INC2-SPEC C14).
     this.orchestrator.played(p.generationId);
     this.prePhase.set(p.generationId, { chatId: input.chatId, facts, text, start: { place: placeOfEntity(render.state, render.world.pov), clock: render.state.clock }, connectionId: input.connectionId, preset });
@@ -1362,8 +1391,7 @@ export class Runtime implements TurnHooks {
     // Let through the outline gate, the turn plays the plan the player was shown (`TurnBridge.plan`):
     // its minds, decisions and skip are that plan's, so nothing more is asked.
     if (!thinking) return;
-    // An agent turn's scene role, once the turn plays: its lore and notes are told the narrator with the turn's lines.
-    const scene = (): Promise<void> => (agent ? this.orchestrator.scene(p.generationId, { text, world: render.world, state: render.state, classic: async () => ({ lore: [], notes: [] }) }, budget.signal) : Promise.resolve());
+    const scene = (): Promise<void> => (agent ? this.orchestrator.scene(p.generationId, sceneAsk, budget.signal, keepScene && !readTimelapse() ? keepScene : null) : Promise.resolve());
     const judged = async (): Promise<void> => {
       await this.judgeAnswer(bridge, text, render, settings, facts, budget, at, calls);
       if (described) await this.judgeApproach(bridge, text, render, settings, facts, budget, at, calls);
@@ -1373,8 +1401,8 @@ export class Runtime implements TurnHooks {
       // A main agent gets the stage's requests together, the minds' among them, one call kept free for the judge as above.
       [, , decisions] = await Promise.all([scene(), judged(), choose && budget.take(judging ? 1 : 0) ? choose() : []]);
     } else {
-      await scene();
-      await judged();
+      // The scene runs beside the judge, from the intent on where it started then.
+      await Promise.all([sceneEarly ?? scene(), judged()]);
       decisions = early ?? (choose && budget.take() ? await choose() : []);
     }
     bridge.setDecisions(text, decisions);
@@ -1383,6 +1411,20 @@ export class Runtime implements TurnHooks {
     this.addMindTraces(input.chatId, p.generationId, minds.traces, true);
     lruSet(this.answeredMinds, p.generationId, { key: mindsKey, minds: mindsAnswered(minds.events) }, 64);
     this.mindsMissed(runAt, "pre", minds, agent, settings);
+    if (basis) {
+      // The turn's scene, which the next turn's Smart persistence compares with, and its plan for GM → Live.
+      const keptMinds = minds.events.filter((e) => e.type === MINDS_EVENTS.mind && "data" in e && isRecord(e.data) && e.data.reason === KEPT_MIND_REASON).length;
+      this.persistence.begin(p.generationId, input.chatId, basis, folded.state.clock);
+      if (keptMinds > 0 || (keepScene && !readTimelapse())) this.persistence.keptIn(p.generationId);
+      const mindsOff = mindsOn(settings) ? null : "Character minds are off: Settings → Minds.";
+      const asked: Partial<Record<RoleId, string | null>> = {
+        minds: mindsOff ?? (readTimelapse() ? "The turn plays a timelapse: its minds think at the skip's beats." : (minds.report ?? []).length === 0 ? "No mind is due this turn." : null),
+        skip: readTimelapse() ? null : "The turn plays no timelapse.",
+        knowledge: knowing ? null : "The chat doesn't track knowledge: GM → This chat.",
+        memory: mindsOff,
+      };
+      this.orchestrator.plan(p.generationId, { persist, keptMinds, dueMinds: (minds.report ?? []).length, asked });
+    }
     this.haltStopped(runAt);
     if (text.trim() !== "") this.host.log("info", `[LumiRPEngine] plan ${String(input.generationId).slice(0, 8)}: intent ${bridge.intentOf(text)?.action ?? "none"} ${JSON.stringify(bridge.intentOf(text)?.params ?? {}).slice(0, 240)}, ${decisions.length} npc decision(s), ${minds.traces.length} mind(s), ${budget.spent} pre call(s)`, input.userId);
     const intent = bridge.intentOf(text);
@@ -1487,6 +1529,13 @@ export class Runtime implements TurnHooks {
   private haltStopped(at: DiagAt): void {
     const stop = this.diag.stopped(at);
     if (stop) throw new EngineFailure(stop.step, stop.reason);
+  }
+
+  /** The scene the last turn's scene role gave its narrator, as that reply's record keeps it, which Smart persistence keeps; null when it recorded no narrator lines (a classic turn's). */
+  private keptScene(core: LedgerCore, reply: ChainMessage): SceneOut | null {
+    const rec = activeRecord(reply, core.journal.tombstones);
+    const out = rec ? outputsOf(rec.events.slice(0, rec.pre)) : null;
+    return out ? { lore: out.scene.lore, notes: out.scene.notes } : null;
   }
 
   /**
@@ -2970,6 +3019,8 @@ export class Runtime implements TurnHooks {
 
   async afterCommit(input: TurnContext): Promise<void> {
     this.meter.close(input.userId);
+    // Smart persistence: the chat's last scene is this turn's now, on the reply it wrote; a Continue's turn keeps its own.
+    if (input.kind !== "continue") this.persistence.closed(input.generationId, { messageId: input.messageId, swipeId: input.swipeId }, chainMarks(input.core, input.observed));
     const bridge = this.bridges.get(input.chatId);
     if (!bridge) return await this.orchestrator.closed(input);
     const rec = input.core.chain(input.observed).find((x) => x.id === input.messageId)?.ledger?.swipes[String(input.swipeId)] ?? input.core.journal.messages[input.messageId]?.ledger.swipes[String(input.swipeId)];
@@ -3646,7 +3697,10 @@ export class Runtime implements TurnHooks {
     // the sections mark where they carry a secret. An id the turn recorded for an earlier
     // build's copy of a World Info entry reads as that entry, as the copy's pins do, each entry once.
     const scene = recorded ? [...new Set(recorded.scene.lore.map((id) => recordedLoreId(folded, id)))].flatMap((id) => { const entry = world.lore[id]; return entry && loreReadable(this.registry, world, state, entry, "brief") ? [`${entry.title}: ${entry.content}`] : []; }) : [];
-    const planned = { outcome: [...(turnLines?.outcome ?? [])], montage: [...(turnLines?.montage ?? [])], scene, ...(recorded && recorded.scene.notes.length > 0 ? { notes: recorded.scene.notes } : {}) };
+    // A scene Smart persistence kept says so, in the turn's own wording, when it tells anything.
+    const unchanged = recorded?.scene.kept && (scene.length > 0 || recorded.scene.notes.length > 0) ? renderPrompt(UNCHANGED_TEXT_ID, texts, {}).trim() : "";
+    const notes = recorded ? [...recorded.scene.notes, ...(unchanged !== "" ? [unchanged] : [])] : [];
+    const planned = { outcome: [...(turnLines?.outcome ?? [])], montage: [...(turnLines?.montage ?? [])], scene, ...(notes.length > 0 ? { notes } : {}) };
     // The preset the reply assembles with: the one the pre phase read, else read now (a Continue).
     const preset = this.prePhase.get(input.generationId)?.preset ?? (await this.presets.current(input.chatId, input.userId));
     // Time the player's message lets pass after its actions (DESIGN §9.2), when every one of them
@@ -3763,11 +3817,48 @@ export class Runtime implements TurnHooks {
     // A Continue has no run before its reply: its review, of its own sections, starts one.
     if (pending?.kind === "continue") await this.orchestrator.beginContinue({ chatId: input.chatId, userId: input.userId, generationId: input.generationId, core: input.core, observed: input.observed });
     if (!this.orchestrator.reviews(input.generationId)) return input.delivered;
-    const outcome = await this.diag.step(at, "sections", FINAL_REVIEW_STEP, () => this.orchestrator.finalReview({ generationId: input.generationId, core: input.core, observed: input.observed, parts, signal: input.signal }), (o) => (o === null || o.reviewed ? null : { status: "failed", reason: o.stopped ? o.reason : `${o.reason}; the narrator gets the prompt as the engine made it`, ...(o.fix ? { fix: o.fix } : {}) }));
-    if (!outcome?.reviewed || outcome.edits.length === 0) return input.delivered;
-    if (pending) pending.finalEdits = outcome.edits;
-    this.diag.yielded(at, "sections", FINAL_REVIEW_STEP, `the main agent revised the narrator's prompt: ${counted(outcome.edits.length, "edit", "edits")} (GM → Live shows each)`, false);
-    return this.revised(input, outcome.parts);
+    // Scoped to what changed (with Smart persistence on, on a new turn): a part that reads as the last
+    // turn's review saw it gets that review's edits again, and only the parts that changed are sent.
+    const last = pending?.kind === "normal" && this.orchestrator.reviewsChanged(input.generationId) ? this.lastReviewed(input.core, input.observed) : null;
+    const scoped = last ? changedScope(parts, last) : null;
+    const whole = (reviewed: readonly PromptPart[]): PromptPart[] => {
+      const byId = new Map([...(scoped?.kept ?? []), ...reviewed].map((p) => [p.id, p]));
+      return parts.map((p) => byId.get(p.id) ?? p);
+    };
+    // The parts a review saw go on the record as made, so the next turn's review can tell what changed:
+    // every part (`all`) once this turn's review is done, else only those reading as the last turn's
+    // review saw them, so a part no review saw is sent to the next.
+    const seen = (all: boolean): void => {
+      if (!pending) return;
+      const kept = new Set((scoped?.kept ?? []).map((p) => p.id));
+      const saw = all ? parts : parts.filter((p) => kept.has(p.id));
+      if (saw.length > 0) pending.finalParts = Object.fromEntries(saw.map((p) => [p.id, partHash(p)]));
+      else delete pending.finalParts;
+    };
+    if (scoped && scoped.changed.length === 0) {
+      // Every part reads as the last turn's review saw it.
+      seen(false);
+      if (pending && scoped.applied.length > 0) pending.finalEdits = scoped.applied;
+      this.orchestrator.reviewKept(input.generationId, parts, scoped.applied);
+      this.diag.yielded(at, "sections", FINAL_REVIEW_STEP, `nothing the final review sees changed since the last turn's, so none was sent: ${counted(scoped.applied.length, "edit", "edits")} of that review made again`, false);
+      return scoped.applied.length > 0 ? this.revised(input, whole([])) : input.delivered;
+    }
+    const outcome = await this.diag.step(at, "sections", FINAL_REVIEW_STEP, () => this.orchestrator.finalReview({ generationId: input.generationId, core: input.core, observed: input.observed, parts: scoped?.changed ?? parts, signal: input.signal }), (o) => (o === null || o.reviewed ? null : { status: "failed", reason: o.stopped ? o.reason : `${o.reason}; the narrator gets the prompt as the engine made it`, ...(o.fix ? { fix: o.fix } : {}) }));
+    seen(outcome?.reviewed === true);
+    const edits = [...(scoped?.applied ?? []), ...(outcome?.reviewed ? outcome.edits : [])];
+    if (edits.length === 0) return input.delivered;
+    if (pending) pending.finalEdits = edits;
+    if (scoped && scoped.applied.length > 0) this.diag.yielded(at, "sections", FINAL_REVIEW_STEP, `${counted(scoped.changed.length, "part", "parts")} of the narrator's prompt changed since the last turn's review and went to this one; ${counted(scoped.applied.length, "edit", "edits")} of that review made again on the rest`, false);
+    if (outcome?.reviewed && outcome.edits.length > 0) this.diag.yielded(at, "sections", FINAL_REVIEW_STEP, `the main agent revised the narrator's prompt: ${counted(outcome.edits.length, "edit", "edits")} (GM → Live shows each)`, false);
+    return this.revised(input, whole(outcome?.reviewed ? outcome.parts : (scoped?.changed ?? parts)));
+  }
+
+  /** What the last turn's final review saw and did, from the reply before this turn: null when its record kept no parts (no review, or one before parts were kept). */
+  private lastReviewed(core: LedgerCore, observed: readonly ChainMessage[]): { parts: Record<string, string>; edits: FinalEdit[] } | null {
+    const reply = core.chain(observed).findLast((m) => !m.isUser);
+    const rec = reply ? activeRecord(reply, core.journal.tombstones) : null;
+    const seen = finalPartsOf(rec?.finalParts);
+    return rec && Object.keys(seen).length > 0 ? { parts: seen, edits: finalEditsOf(rec.finalEdits) } : null;
   }
 
   /** The prompt with `parts` in place of what `deliver` made: each part's entry takes its text, and the turn's inspector record counts each part it changed again. */
@@ -3929,6 +4020,7 @@ export class Runtime implements TurnHooks {
    */
   async adopted(chatId: ChatId, userId: UserId, from: string, to: string): Promise<void> {
     rekey(this.preBudgets, from, to);
+    this.persistence.adopted(from, to);
     rekey(this.prePhase, from, to);
     await this.orchestrator.adopted(chatId, userId, from, to);
     // An outline let through is for the one turn it was shown for: once that turn is taken, a Re-run
@@ -4305,6 +4397,8 @@ export const TYPE_LABELS: Record<ExtractionType, string> = {
   agenda: "Plans",
   vote: "Votes on motions",
   approval: "Answers to requests for approval",
+  revenue: "Changes to revenue streams",
+  project_note: "Project delays and costs",
   item_move: "Things moved, picked up or put down",
   item_hand: "Things handed over, lent or given back",
   item_own: "Things changing owner",

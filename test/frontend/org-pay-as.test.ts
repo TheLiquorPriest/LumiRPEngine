@@ -89,7 +89,7 @@ function shopPage(over: Partial<OrgView["you"]> = {}, positions: OrgView["positi
     level: 3,
     exists: true,
     ended: null,
-    you: { belongs: true, title: "Mechanic", position: null, since: null, reportsTo: [], powers: [], delegations: [], ...over },
+    you: { belongs: true, title: "Mechanic", position: null, since: null, reportsTo: [], powers: [], delegations: [], through: [], ...over },
     runBy: [],
     people: [],
     hidden: { count: 0, ids: [] },
@@ -100,6 +100,11 @@ function shopPage(over: Partial<OrgView["you"]> = {}, positions: OrgView["positi
     history: [],
     candidates: [],
     sections: {},
+    above: [],
+    below: [],
+    belowHidden: 0,
+    trust: null,
+    nonprofit: false,
   };
 }
 

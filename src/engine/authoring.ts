@@ -379,10 +379,20 @@ export interface PlaytestTurn {
 export interface PlaytestStep {
   turn: PlaytestTurn;
   state: WorldState;
+  /** The events that applied, in order: the plan's, then the post pass's (a dropped one left out). */
+  events: LedgerEvent[];
 }
 
-/** Applies events in order, keeping each that validates; returns the dropped ones' reasons. */
-function applyAll(registry: Registry, world: WorldDoc, state: WorldState, events: readonly LedgerEvent[]): string[] {
+/** What a Check world day found, as its notes word each: the events it dropped, what failed (the day's simulation, a section), and the leaks. */
+export interface DayFindings {
+  dropped: string[];
+  failed: string[];
+  leaks: string[];
+}
+
+/** Applies events in order, keeping each that validates: those that applied, and the dropped ones' reasons. */
+function applyAll(registry: Registry, world: WorldDoc, state: WorldState, events: readonly LedgerEvent[]): { applied: LedgerEvent[]; dropped: string[] } {
+  const applied: LedgerEvent[] = [];
   const dropped: string[] = [];
   for (const e of events) {
     const ctx = registry.context(world, state);
@@ -392,8 +402,9 @@ function applyAll(registry: Registry, world: WorldDoc, state: WorldState, events
       continue;
     }
     applyEvent(registry, e, state, ctx);
+    applied.push(e);
   }
-  return dropped;
+  return { applied, dropped };
 }
 
 export function playtestStart(registry: Registry, world: WorldDoc, revision: string): WorldState {
@@ -409,12 +420,12 @@ export function playtestTurn(registry: Registry, pipeline: TurnPipeline, world: 
   const next = structuredClone(state);
   const intent = typedIntent(registry, world, next, user);
   const plan = pipeline.plan({ registry, world, state: next, runSeed, seed: `${runSeed}:playtest:${index}`, kind: "normal", userTexts: [user], intent });
-  const notes = applyAll(registry, world, next, plan.events);
+  const planned = applyAll(registry, world, next, plan.events);
   const post = pipeline.post({ registry, world, state: next, runSeed, seed: `${runSeed}:playtest:${index}:post`, appliedMinutes: plan.elapsedMinutes, extracted: [] });
-  notes.push(...applyAll(registry, world, next, post));
+  const posted = applyAll(registry, world, next, post);
   const lines = playerLines(registry, world, next, world.pov, [...plan.events, ...post], 40);
   const action = intent?.action ? [`read as ${registry.actions.get(intent.action)?.label ?? world.actions[intent.action]?.label ?? intent.action}`] : ["not an action"];
-  return { turn: { user, reply: lines.length > 0 ? lines.join("\n") : "(nothing changed)", notes: [`+${plan.elapsedMinutes} min`, ...action, ...notes] }, state: next };
+  return { turn: { user, reply: lines.length > 0 ? lines.join("\n") : "(nothing changed)", notes: [`+${plan.elapsedMinutes} min`, ...action, ...planned.dropped, ...posted.dropped] }, state: next, events: [...planned.applied, ...posted.applied] };
 }
 
 /** Check world's timelapse length per step: one day. */
@@ -424,35 +435,48 @@ export const CHECK_DAY_MINUTES = 24 * 60;
  * One Check world day: a one-day timelapse with every interrupt class at `note`, so processes,
  * agents, tracks and rules all run. Reports dropped events, failures and narrator-facing leaks; the
  * transcript is the author's view of the day: every event, unmet people's and secrets included,
- * worded with names like Playtest's (no ids or bookkeeping).
+ * worded with names like Playtest's (no ids or bookkeeping). `intent` is the day's timelapse; a
+ * sandbox's advance gives each day its own target. `leaks: false` leaves the sections unread (a
+ * sandbox's advance reads them at each month's end), so no leak or section failure is reported.
  */
-export function checkWorldDay(registry: Registry, pipeline: TurnPipeline, world: WorldDoc, state: WorldState, runSeed: string, day: number, intent: InterpretOutput): PlaytestStep {
+export function checkWorldDay(registry: Registry, pipeline: TurnPipeline, world: WorldDoc, state: WorldState, runSeed: string, day: number, intent: InterpretOutput, options: { leaks?: boolean } = {}): PlaytestStep & { findings: DayFindings } {
   const next = structuredClone(state);
   const label = `Day ${day + 1}`;
   const notes: string[] = [];
+  const findings: DayFindings = { dropped: [], failed: [], leaks: [] };
   let events: LedgerEvent[] = [];
+  let applied: LedgerEvent[] = [];
+  const note = (kind: keyof DayFindings, text: string): void => {
+    findings[kind].push(text);
+    notes.push(text);
+  };
   try {
     const plan = pipeline.plan({ registry, world, state: next, runSeed, seed: `${runSeed}:check:${day}`, kind: "normal", userTexts: [`(Timelapse: ${label})`], intent });
-    notes.push(...applyAll(registry, world, next, plan.events));
+    const planned = applyAll(registry, world, next, plan.events);
+    for (const text of planned.dropped) note("dropped", text);
     const post = pipeline.post({ registry, world, state: next, runSeed, seed: `${runSeed}:check:${day}:post`, appliedMinutes: plan.elapsedMinutes, extracted: [] });
-    notes.push(...applyAll(registry, world, next, post));
+    const posted = applyAll(registry, world, next, post);
+    for (const text of posted.dropped) note("dropped", text);
     events = [...plan.events, ...post];
+    applied = [...planned.applied, ...posted.applied];
     notes.unshift(`+${plan.elapsedMinutes} min, ${events.length} events`);
   } catch (error) {
-    notes.push(`failed: ${error instanceof Error ? error.message : String(error)}`);
-    return { turn: { user: label, reply: "(the simulation failed)", notes }, state };
+    note("failed", `failed: ${error instanceof Error ? error.message : String(error)}`);
+    return { turn: { user: label, reply: "(the simulation failed)", notes }, state, events: [], findings };
   }
-  const secrets = unrevealedSecrets(registry, world, next);
-  const ctx = registry.context(world, next);
-  for (const r of registry.renderers) {
-    try {
-      for (const line of r.render(ctx)) for (const leak of findLeaks(line, secrets)) notes.push(`leak in ${r.slot}: "${leak}"`);
-    } catch (error) {
-      notes.push(`section ${r.slot} failed: ${error instanceof Error ? error.message : String(error)}`);
+  if (options.leaks !== false) {
+    const secrets = unrevealedSecrets(registry, world, next);
+    const ctx = registry.context(world, next);
+    for (const r of registry.renderers) {
+      try {
+        for (const line of r.render(ctx)) for (const leak of findLeaks(line, secrets)) note("leaks", `leak in ${r.slot}: "${leak}"`);
+      } catch (error) {
+        note("failed", `section ${r.slot} failed: ${error instanceof Error ? error.message : String(error)}`);
+      }
     }
   }
   const lines = authorLines(registry, world, next, events, 40);
-  return { turn: { user: label, reply: lines.length > 0 ? lines.join("\n") : "(nothing happened)", notes }, state: next };
+  return { turn: { user: label, reply: lines.length > 0 ? lines.join("\n") : "(nothing happened)", notes }, state: next, events: applied, findings };
 }
 
 /**

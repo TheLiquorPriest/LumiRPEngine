@@ -29,8 +29,14 @@ export interface PositionInput {
 }
 
 export type OrgOp =
-  /** A company (from Money 3) or a group of one of the world's group kinds, its founder its only owner or its Leader; `capital` in minor units from the founder's account `from`. */
-  | { do: "found"; type: "company" | "group"; name: string; kind?: string; structure?: string; founder: EntityId; capital?: number; from?: EntityId; units?: number }
+  /**
+   * A company (from Money 3), a trust settled, a nonprofit or a group of one of the world's group
+   * kinds: a company's founder its only owner, a trust's trustee and beneficiary its settlor unless
+   * named, a nonprofit's founder its Director, a group's its Leader; `capital` in minor units from the
+   * founder's account `from` (a trust's or a nonprofit's optional).
+   */
+  | { do: "found"; type: "company" | "group" | "trust" | "nonprofit"; name: string; kind?: string; structure?: string; founder: EntityId; capital?: number; from?: EntityId; units?: number; trustee?: EntityId; beneficiary?: EntityId; revocable?: boolean; purpose?: string; until?: string }
+  /** `who`, a person or an organization (an officer or director that is an entity), admitted, removed, appointed or titled. */
   | { do: "admit"; org: EntityId; who: EntityId; title?: string; position?: string; why: string }
   | { do: "remove"; org: EntityId; who: EntityId; why: string }
   /** Into a position, or out of theirs (`null`): a member's link, or a staff member's job. */
@@ -84,12 +90,16 @@ export type OrgOp =
   /** Its tax-exempt status, a row of the world's exempt table (`charity`, `church`, `club`); `null` takes it off (ORG-SPEC §3.11, Phase 5). */
   | { do: "tax_status"; org: EntityId; status: string | null }
   /** A C corporation's election to file one consolidated return with the corporations it holds 80 % or more of, or its end. */
-  | { do: "consolidate"; org: EntityId; elect: boolean };
+  | { do: "consolidate"; org: EntityId; elect: boolean }
+  /** A production project (DESIGN §26.5): one started from a template of the world's projects table (or a planned one, by id), paused, resumed or dropped; `step`'s delay in days or extra cost in minor units (`note`). */
+  | { do: "project"; org: EntityId; act: "start" | "pause" | "resume" | "drop" | "note"; project?: EntityId; template?: string; name?: string; account?: EntityId; step?: string; days?: number; cents?: number; why?: string }
+  /** A loan from an organization (or anyone) to another party: a note for the lender, a loan for the borrower, the cash moved (§25.4); `cents` in minor units. */
+  | { do: "lend"; org: EntityId; to: EntityId; cents: number; apr?: number; months?: number; from?: EntityId };
 
 export type OrgOpDo = OrgOp["do"];
 
 /** Every op, in the order the spec lists them. */
-export const ORG_OP_DOS: readonly OrgOpDo[] = ["found", "admit", "remove", "appoint", "title", "position", "unposition", "delegate", "revoke", "hire", "fire", "pay", "issue", "buy_back", "transfer", "list", "delist", "trade", "entry", "dues", "tier", "restructure", "wind_up", "merge", "rename", "propose", "vote", "end_motion", "answer", "decisions", "tax_status", "consolidate"];
+export const ORG_OP_DOS: readonly OrgOpDo[] = ["found", "admit", "remove", "appoint", "title", "position", "unposition", "delegate", "revoke", "hire", "fire", "pay", "issue", "buy_back", "transfer", "list", "delist", "trade", "entry", "dues", "tier", "restructure", "wind_up", "merge", "rename", "propose", "vote", "end_motion", "answer", "decisions", "tax_status", "consolidate", "project", "lend"];
 
 /** The change types an agent's organization op lands under (§7.3). */
 export const ORG_CHANGES = ["org_people", "org_powers", "org_shares", "org_rules"] as const;
@@ -129,6 +139,8 @@ export const ORG_OP_CHANGE: Readonly<Record<OrgOpDo, OrgChange>> = {
   decisions: "org_rules",
   tax_status: "org_shares",
   consolidate: "org_shares",
+  project: "org_rules",
+  lend: "org_shares",
 };
 
 /** What an id an op names must be: a person, any entity (an organization, a job, an account), a place, or a list of entities. */
@@ -136,11 +148,11 @@ export type OrgSlot = "person" | "entity" | "place" | "entities";
 
 /** The ids each op names, by field and what each must be. */
 export const ORG_OP_SLOTS: Readonly<Record<OrgOpDo, Readonly<Record<string, OrgSlot>>>> = {
-  found: { founder: "entity", from: "entity" },
-  admit: { org: "entity", who: "person" },
-  remove: { org: "entity", who: "person" },
-  appoint: { org: "entity", who: "person" },
-  title: { org: "entity", who: "person" },
+  found: { founder: "entity", from: "entity", trustee: "entity", beneficiary: "entity" },
+  admit: { org: "entity", who: "entity" },
+  remove: { org: "entity", who: "entity" },
+  appoint: { org: "entity", who: "entity" },
+  title: { org: "entity", who: "entity" },
   position: { org: "entity" },
   unposition: { org: "entity" },
   delegate: { org: "entity", to: "entity", by: "entity", accounts: "entities" },
@@ -168,6 +180,8 @@ export const ORG_OP_SLOTS: Readonly<Record<OrgOpDo, Readonly<Record<string, OrgS
   decisions: { org: "entity" },
   tax_status: { org: "entity" },
   consolidate: { org: "entity" },
+  project: { org: "entity", project: "entity", account: "entity" },
+  lend: { org: "entity", to: "entity", from: "entity" },
 };
 
 /** The ids an op names, by what each must be: people, entities and places; a proposal's, with its decision's. */
@@ -221,8 +235,23 @@ export function parseOrgOp(o: unknown): OrgOp | null {
   if (!isRecord(o)) return null;
   switch (o.do) {
     case "found":
-      if ((o.type !== "company" && o.type !== "group") || !str(o.name) || !str(o.founder) || !opt(str, o.kind) || !opt(str, o.structure) || !opt(num, o.capital) || !opt(str, o.from) || !opt(num, o.units)) return null;
-      return { do: "found", type: o.type, name: o.name.trim(), founder: o.founder, ...(str(o.kind) ? { kind: o.kind } : {}), ...(str(o.structure) ? { structure: o.structure } : {}), ...(num(o.capital) ? { capital: o.capital } : {}), ...(str(o.from) ? { from: o.from } : {}), ...(num(o.units) ? { units: o.units } : {}) };
+      if (!["company", "group", "trust", "nonprofit"].includes(String(o.type)) || !str(o.name) || !str(o.founder) || !opt(str, o.kind) || !opt(str, o.structure) || !opt(num, o.capital) || !opt(str, o.from) || !opt(num, o.units) || !opt(str, o.trustee) || !opt(str, o.beneficiary) || !(o.revocable === undefined || typeof o.revocable === "boolean") || !opt(str, o.purpose) || !opt(str, o.until)) return null;
+      return {
+        do: "found",
+        type: o.type as "company" | "group" | "trust" | "nonprofit",
+        name: o.name.trim(),
+        founder: o.founder,
+        ...(str(o.kind) ? { kind: o.kind } : {}),
+        ...(str(o.structure) ? { structure: o.structure } : {}),
+        ...(num(o.capital) ? { capital: o.capital } : {}),
+        ...(str(o.from) ? { from: o.from } : {}),
+        ...(num(o.units) ? { units: o.units } : {}),
+        ...(str(o.trustee) ? { trustee: o.trustee } : {}),
+        ...(str(o.beneficiary) ? { beneficiary: o.beneficiary } : {}),
+        ...(typeof o.revocable === "boolean" ? { revocable: o.revocable } : {}),
+        ...(str(o.purpose) ? { purpose: o.purpose.trim() } : {}),
+        ...(str(o.until) ? { until: o.until.trim() } : {}),
+      };
     case "admit":
       if (!str(o.org) || !str(o.who) || !str(o.why) || !opt(str, o.title) || !opt(str, o.position)) return null;
       return { do: "admit", org: o.org, who: o.who, why: o.why.trim(), ...(str(o.title) ? { title: o.title.trim() } : {}), ...(str(o.position) ? { position: o.position } : {}) };
@@ -311,6 +340,14 @@ export function parseOrgOp(o: unknown): OrgOp | null {
       return str(o.org) && (o.status === null || str(o.status)) ? { do: "tax_status", org: o.org, status: o.status === null ? null : o.status.trim() } : null;
     case "consolidate":
       return str(o.org) && typeof o.elect === "boolean" ? { do: "consolidate", org: o.org, elect: o.elect } : null;
+    case "project": {
+      const act = (["start", "pause", "resume", "drop", "note"] as const).find((a) => a === o.act);
+      if (!str(o.org) || act === undefined || !opt(str, o.project) || !opt(str, o.template) || !opt(str, o.name) || !opt(str, o.account) || !opt(str, o.step) || !opt(num, o.days) || !opt(num, o.cents) || !opt(str, o.why)) return null;
+      return { do: "project", org: o.org, act, ...(str(o.project) ? { project: o.project } : {}), ...(str(o.template) ? { template: o.template } : {}), ...(str(o.name) ? { name: o.name.trim() } : {}), ...(str(o.account) ? { account: o.account } : {}), ...(str(o.step) ? { step: o.step } : {}), ...(num(o.days) ? { days: o.days } : {}), ...(num(o.cents) ? { cents: o.cents } : {}), ...(str(o.why) ? { why: o.why.trim() } : {}) };
+    }
+    case "lend":
+      if (!str(o.org) || !str(o.to) || !num(o.cents) || !opt(num, o.apr) || !opt(num, o.months) || !opt(str, o.from)) return null;
+      return { do: "lend", org: o.org, to: o.to, cents: o.cents, ...(num(o.apr) ? { apr: o.apr } : {}), ...(num(o.months) ? { months: o.months } : {}), ...(str(o.from) ? { from: o.from } : {}) };
     default:
       return null;
   }

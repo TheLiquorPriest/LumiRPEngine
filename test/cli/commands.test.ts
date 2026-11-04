@@ -1,6 +1,7 @@
 // The commands as the entry runs them (`run`), over a fake Lumiverse and sign-ins kept in memory:
 // what each refuses before anything is sent, what a running `mcp` server does when the sign-in
-// changes under it, and what logout says when the host didn't confirm.
+// changes under it, what it gives its tools as the sandbox's budget, and what logout says when the
+// host didn't confirm.
 
 import { describe, expect, test } from "bun:test";
 import { kit } from "../../src/cli/agent-kit";
@@ -145,6 +146,30 @@ describe("a running mcp server", () => {
     const flagged = await serverOf(["mcp", "--read-only"], terminal(fake).io);
     expect(await toolNames(flagged.mcp)).not.toContain("lre_edit");
     flagged.close();
+  });
+
+  test("--sandbox-budget (or LRE_SANDBOX_BUDGET) is how long a sandbox advance runs a call, in seconds or none; anything else refuses to start", async () => {
+    const fake = new FakeLumiverse();
+    /** What the session gives each call's tools, as the core serves `mcp` with what the command line read. */
+    const budget = async (argv: string[], env: Record<string, string> = {}): Promise<number | null | undefined> => {
+      const io = terminal(fake, { env }).io;
+      const result = await run(argv, io);
+      if (!("mcp" in result)) throw new Error(`mcp didn't start: exit ${result.code}`);
+      const session = new McpSession({ bundled: kit, mcp: result.mcp, io, files: { realpath: nowhere, stat: nowhere, read: nowhere, uid: null }, host: "test-host", log: () => undefined });
+      session.close();
+      return session.context.sandboxBudgetMs;
+    };
+    // Unsaid, the kit's own default holds (SANDBOX_BUDGET_MS).
+    expect(await budget(["mcp"])).toBeUndefined();
+    expect(await budget(["mcp", "--sandbox-budget", "45"])).toBe(45_000);
+    expect(await budget(["mcp", "--sandbox-budget=2.5"], { LRE_SANDBOX_BUDGET: "none" })).toBe(2_500);
+    expect(await budget(["mcp"], { LRE_SANDBOX_BUDGET: "None" })).toBeNull();
+    for (const value of ["0", "soon"]) {
+      const t = terminal(fake);
+      expect(await run(["mcp", "--sandbox-budget", value], t.io)).toEqual({ code: 2 });
+      expect(t.err.join("\n")).toContain(`--sandbox-budget (or LRE_SANDBOX_BUDGET) is "${value}"`);
+    }
+    expect(fake.requests).toEqual([]);
   });
 });
 

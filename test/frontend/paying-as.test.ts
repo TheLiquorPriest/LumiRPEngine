@@ -61,11 +61,12 @@ describe("the palette's Paying as", () => {
     for (const action of ["pay", "buy"]) expect(entryOf(w, action).acting).toBeUndefined();
   });
 
-  test("with Marcus's delegation of money.spend, Jordan's Pay and Buy offer Alder Automotive; an action needing another power doesn't", () => {
+  test("with Marcus's delegation of money.spend, Jordan's Pay, Buy, Lend money and Donate offer Alder Automotive; an action needing another power doesn't", () => {
     const w = delegated();
-    for (const action of ["pay", "buy"]) expect(entryOf(w, action).acting).toEqual({ param: "as", label: "Paying as", options: [SHOP_OPTION] });
+    const spending = ["pay", "buy", "lend_money", "donate"];
+    for (const action of spending) expect(entryOf(w, action).acting).toEqual({ param: "as", label: "Paying as", options: [SHOP_OPTION] });
     // Every other entry with an `as` needs a power other than money.spend, which he doesn't hold.
-    for (const entry of palette(w.world, w.state, reg).entries) if (entry.action !== "pay" && entry.action !== "buy") expect(entry.acting).toBeUndefined();
+    for (const entry of palette(w.world, w.state, reg).entries) if (!spending.includes(entry.action)) expect(entry.acting).toBeUndefined();
   });
 
   test("Marcus, its owner, may spend for Alder Automotive: his Pay offers it", () => {

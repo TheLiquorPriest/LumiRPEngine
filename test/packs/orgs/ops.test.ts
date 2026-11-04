@@ -1,8 +1,9 @@
 // An organization op (ORG-SPEC §7.2) as the GM edit `{op: "org", change}` runs it, on Port Alder:
 // the History lines its ops write name the people they are about by id, so with Danny hidden from
 // Jordan, Jordan's Alder Automotive reads "someone" where the GM's reads Danny Okafor; an entry
-// change's line says a key Jordan can't see as "a key"; and dues changed by their amount alone keep
-// the cadence and the day they fall on.
+// change's line says a key Jordan can't see as "a key"; dues changed by their amount alone keep
+// the cadence and the day they fall on; and a company admitted as a trust's Director (an officer
+// that is an entity, DESIGN §29.1) sits in it, its owner acting through it.
 
 import { describe, expect, test } from "bun:test";
 import type { JsonValue } from "../../../src/shared/json";
@@ -10,6 +11,7 @@ import type { OrgOp } from "../../../src/shared/org-ops";
 import type { EditOp } from "../../../src/shared/protocol";
 import type { WorldDoc } from "../../../src/shared/world";
 import { resolveEdit } from "../../../src/engine/edits";
+import { orgPower } from "../../../src/engine/org";
 import { createRegistry } from "../../../src/engine/registry-impl";
 import { Working } from "../../../src/engine/working";
 import { orgHistory } from "../../../src/packs/orgs/core/log";
@@ -96,5 +98,24 @@ describe("dues (ORG-SPEC §3.8, §7.2)", () => {
     expect(orgHistory(w.state, HOUSEHOLD)[0]?.text).toBe("Set dues of $60.00 a month");
     org(w, { do: "dues", org: HOUSEHOLD, cents: null });
     expect(dues()).toBeNull();
+  });
+});
+
+describe("an organization as an officer (DESIGN §29.1)", () => {
+  test("Alder Automotive admitted as a trust's Director: seated by its membership, on the trust's page as a company, its owner acting for the trust through it", () => {
+    const w = portAlder((world) => {
+      world.entities.alder_trust = { id: "alder_trust", kind: "trust", name: "Alder Family Trust", tier: "background", fields: { owners: [{ party: "pov", role: "beneficiary", share: 100 }], positions: [{ id: "director", title: "Director", powers: ["money.view", "money.spend", "members.admit"] }] }, relations: [] };
+    });
+    org(w, { do: "admit", org: "alder_trust", who: SHOP, position: "director", why: "the shop sits on its board" });
+    expect(w.state.entities[SHOP]?.relations.find((r) => r.type === "member_of" && r.to === "alder_trust")?.fields).toMatchObject({ position: "director" });
+    expect(history(w, "alder_trust", null)[0]).toBe("Admitted Alder Automotive as Director: the shop sits on its board");
+    const page = buildOrgView(w.ctx, "alder_trust", null);
+    expect(page?.people.find((p) => p.id === SHOP)).toMatchObject({ org: "company", position: { id: "director", title: "Director" } });
+    expect(page?.positions.find((p) => p.id === "director")?.holders).toEqual([SHOP]);
+    expect(page?.above).toEqual([{ id: SHOP, name: "Alder Automotive", type: "company", share: null, votes: null, controlled: false, role: null, position: { id: "director", title: "Director" }, delegation: false }]);
+    expect(orgPower(w.ctx, "marcus_delgado", "alder_trust", "money.spend")).toEqual({ basis: "control", id: SHOP, through: [SHOP] });
+    // Removed, it holds nothing there.
+    org(w, { do: "remove", org: "alder_trust", who: SHOP, why: "it stepped down" });
+    expect(orgPower(w.ctx, "marcus_delgado", "alder_trust", "money.spend")).toBeNull();
   });
 });

@@ -56,7 +56,6 @@ export async function curateRun(rt: Runtime, task: CurateTask, ctx: TurnAgentCtx
   const said = i.said.trim();
   const answered = await runRoleAgent(rt, ctx, {
     sub: "curate",
-    purpose: "extract",
     phase: "read",
     names: { world: i.world.name, pov: own(i.world.entities, i.world.pov)?.name ?? i.world.pov },
     vars: {

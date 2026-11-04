@@ -11,6 +11,7 @@
 import { describe, expect, test } from "bun:test";
 import type { VNode } from "preact";
 import type { TaxesView } from "../../src/shared/finance";
+import type { TaxesExtra } from "../../src/shared/tax-year";
 import type { EntityId } from "../../src/shared/ids";
 import type { JsonValue } from "../../src/shared/json";
 import { ORG_POWERS } from "../../src/shared/org";
@@ -80,12 +81,12 @@ function gmPage(w: Working, id: EntityId): OrgView {
   return JSON.parse(JSON.stringify(page)) as OrgView;
 }
 
-/** A Taxes section as it arrives, decoded; it must read back whole. */
-function decoded(section: JsonValue | undefined): TaxesView {
+/** A Taxes section as it arrives, decoded; it must read back whole, the year close's parts with it. */
+function decoded(section: JsonValue | undefined): TaxesView & TaxesExtra {
   const raw = JSON.parse(JSON.stringify(section ?? null)) as unknown;
   const view = decodeTaxes(raw);
   if (!view) throw new Error("no taxes section");
-  expect(view).toEqual(raw as TaxesView);
+  expect(view).toEqual(raw as TaxesView & TaxesExtra);
   return view;
 }
 
@@ -227,6 +228,7 @@ describe("an exempt organization", () => {
       { id: "charity", name: "Charity or nonprofit", code: "501(c)(3)" },
       { id: "church", name: "Church or religious organization", code: "501(c)(3)" },
       { id: "club", name: "Social club", code: "501(c)(7)" },
+      { id: "private_foundation", name: "Private foundation", code: "501(c)(3)" },
     ]);
     expect(picker?.current).toBe("");
     (picker?.gm as TaxesGm).status("church");

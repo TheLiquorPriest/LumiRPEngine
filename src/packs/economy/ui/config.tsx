@@ -16,7 +16,7 @@ import type { ComponentChildren } from "preact";
 import { useState } from "preact/hooks";
 import type { JsonObject, JsonValue } from "../../../shared/json";
 import { hasOwn, isRecord } from "../../../shared/json";
-import { ACCOUNT_CLASSES, ASSET_CLASSES, CLASS_TRAITS, FEATURE_DEFS, FINANCE_FEATURES, isAccountClass, OVERDRAFT_POLICIES, type FinanceFeature } from "../../../shared/finance";
+import { ACCOUNT_CLASSES, ASSET_CLASSES, CLASS_TRAITS, DEPRECIATION_LABELS, FEATURE_DEFS, FINANCE_FEATURES, isAccountClass, OVERDRAFT_POLICIES, type FinanceFeature } from "../../../shared/finance";
 import type { LintIssue } from "../../../shared/protocol";
 import { formatMoneyInput } from "../../../shared/money";
 import { formatMoney, type WorldCurrency, type WorldDoc } from "../../../shared/world";
@@ -72,8 +72,8 @@ export function withLivingCost(config: Readonly<JsonObject>, band: string, cents
   return Object.keys(costs).length > 0 ? { ...rest, livingCosts: costs } : { ...rest };
 }
 
-/** The economy config's tax settings (`taxes`): the categories sales tax spares, the corporate rate, and the unemployment taxes' rates and wage bases (ORG-SPEC §3.11, Phase 5). */
-export type TaxSetting = "exempt" | "corporatePct" | "futaPct" | "futaWageBase" | "futaCreditPct" | "sutaPct" | "sutaWageBase";
+/** The economy config's tax settings (`taxes`): the categories sales tax spares, the corporate rate, the unemployment taxes' rates and wage bases (ORG-SPEC §3.11, Phase 5), and whether corporations pay tax on the earnings they keep (`penaltyTaxes`, DESIGN §26.3). */
+export type TaxSetting = "exempt" | "corporatePct" | "futaPct" | "futaWageBase" | "futaCreditPct" | "sutaPct" | "sutaWageBase" | "penaltyTaxes";
 
 /** The config with one of its tax settings set, or removed (undefined); with none left, `taxes` goes too. */
 export function withTax(config: Readonly<JsonObject>, key: TaxSetting, value: JsonValue | undefined): JsonObject {
@@ -279,6 +279,17 @@ function Taxes(props: PackConfigProps) {
         hint={`What a C corporation pays on its profit, with its state's rate. Empty, it's the federal rate, ${CORPORATE_PCT}%.`}
         issues={lintAt(props.lint, `${CONFIG}.taxes.corporatePct`)}
         onChange={setNumber("corporatePct")}
+      />
+      <ChoiceInput
+        label="Tax on kept earnings"
+        value={taxes.penaltyTaxes === true ? "on" : "off"}
+        options={[
+          { value: "off", label: "Off" },
+          { value: "on", label: "On" },
+        ]}
+        hint="On: a C corporation that keeps its earnings pays 20% on them each 15 April for the year before: as a personal holding company when 60% of its income is passive and five or fewer people hold over half of it, else above its $250,000 accumulated earnings credit. Its holders can consent to a dividend to clear it. Off, the default: neither tax."
+        issues={lintAt(props.lint, `${CONFIG}.taxes.penaltyTaxes`)}
+        onChange={(next) => props.onChange(withTax(props.config, "penaltyTaxes", next === "on" ? true : undefined))}
       />
       <NumberInput
         label="FUTA rate before the credit (%)"
@@ -666,6 +677,26 @@ function Definitions(props: {
   );
 }
 
+/** How organizations' books recover what their projects build and their mineral interests cost (DESIGN §26.5); each organization may say otherwise (its Depreciation field). */
+function Books(props: PackConfigProps) {
+  const value = props.config.depreciation === "straight_line" ? "straight_line" : "none";
+  return (
+    <FormGroup title="Books">
+      <ChoiceInput
+        label="Depreciation"
+        value={value}
+        options={[
+          { value: "none", label: DEPRECIATION_LABELS.none },
+          { value: "straight_line", label: DEPRECIATION_LABELS.straight_line },
+        ]}
+        hint="None: a project's costs are expenses when paid, so EBITDA equals operating income. Straight-line: what projects capitalize is spread over the asset's useful life from the month after it goes into service, and a mineral interest's cost is depleted by what it produces. Each organization may choose its own."
+        issues={lintAt(props.lint, `${CONFIG}.depreciation`)}
+        onChange={(next) => props.onChange(withKey(props.config, "depreciation", next === "straight_line" ? "straight_line" : undefined))}
+      />
+    </FormGroup>
+  );
+}
+
 export function EconomyConfig(props: PackConfigProps) {
   const currency = props.world.currency;
   const calendar = props.world.calendar;
@@ -675,6 +706,7 @@ export function EconomyConfig(props: PackConfigProps) {
       <LivingCosts {...props} />
       <Taxes {...props} />
       <Shares {...props} />
+      <Books {...props} />
       <CashRule {...props} />
       <FeatureToggles {...props} />
       <Definitions

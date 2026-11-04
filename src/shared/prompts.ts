@@ -250,6 +250,9 @@ const MARK_PROMPTS: readonly PromptDef[] = [
   },
 ];
 
+/** The narrator's word for a mind or scene note Smart persistence kept from the last turn. */
+export const UNCHANGED_TEXT_ID = "narrator.unchanged";
+
 /** The final output's texts: the narrator rules' parts, how a secret is marked, each section's guidance, the line that tells an out-of-play action ahead of the Outcome's own, then the line that ends the Scene with the turn's time. */
 export const FINAL_OUTPUT_PROMPTS: readonly PromptDef[] = [
   { id: "narrator.source", page: FINAL_OUTPUT_PAGE.id, group: NARRATOR_GROUP, label: "Where the rules come from", note: "Opens the narrator rules: that LumiRPEngine sends them, and how its sections are marked.", text: NARRATOR_SOURCE, vars: [] },
@@ -261,6 +264,7 @@ export const FINAL_OUTPUT_PROMPTS: readonly PromptDef[] = [
   ...SECTION_PROMPTS,
   ...OFFSTAGE_PROMPTS,
   ...ELAPSED_PROMPTS,
+  { id: UNCHANGED_TEXT_ID, page: FINAL_OUTPUT_PAGE.id, group: SECTIONS_GROUP, label: "Kept unchanged", note: "Ends a Minds line, and the Scene's notes, that Smart persistence kept from the last turn (Settings → Agents → Pipeline): its roles weren't asked again, because the scene is unchanged.", text: "Unchanged since the last turn.", vars: [] },
 ];
 
 /** The GM agent's text ids, so code names them once. */

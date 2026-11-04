@@ -14,21 +14,22 @@
 // cards and standing payments, but no spending, which follows the party's own role on an account.
 
 import { useState } from "preact/hooks";
-import { ACCOUNT_STATUSES, AUTOPAY_MODES, CARD_STATES, CLASS_TRAITS, DEFAULT_ACCOUNT_PRODUCT, type AccountClass, type AccountView, type AutopayMode, type CardState, type CardView, type FinanceView, type InterestView, type PartyKind, type PayTier } from "../../../shared/finance";
+import { ACCOUNT_STATUSES, AUTOPAY_MODES, CARD_STATES, CLASS_TRAITS, DEFAULT_ACCOUNT_PRODUCT, FINANCE_ACTIONS, type AccountClass, type AccountView, type AutopayMode, type CardState, type CardView, type FinanceView, type InterestView, type PartyKind, type PayTier } from "../../../shared/finance";
 import type { EditOp } from "../../../shared/protocol";
 import { formatMoney, type WorldCurrency } from "../../../shared/world";
 import { Badge, Button, Empty, IdText, List, ListRow, Meter, Section } from "../../../frontend/components";
 import { humanize } from "../../../frontend/format";
 import type { IconName } from "../../../frontend/icons";
-import { ActionPage, AmountField, AmountPage, amountProblem, ChoiceField, SelectField, TextField, unchangedProblem, type Choice } from "./forms";
+import { ActionPage, AmountField, AmountPage, amountProblem, ChoiceField, NumberField, SelectField, TextField, unchangedProblem, type Choice } from "./forms";
 import type { GmControls, PlayerControls, SectionProps, SegmentProps } from "./hub";
 import { accountBlocks, accountControls, accountGroups, activityChoices, activityOf, autopaySources, businessAccounts, cardControls, cardLimitsShown, findAccount, findCard, flowSources, gmAutopaySources, groupOf, MOVE_CONTROLS, moveFrom, overviewBlocks, ownBusiness, paySources, possessive, transferTargets, utilisation, type AccountGroup, type MoveControl } from "./layout";
 import { FieldsPage, MoneyFilters, OwnerRows, TxnRows } from "./lines";
 import { actionPage, Controls, detailPage, Hero, MoneyPage, Note, type HubNav, type HubPages } from "./nav";
 import { PayTiersEditor, tierText } from "./pay-prefs";
-import { accountStatusOps, amountOf, autopayAction, autopayOps, cardAction, cashAction, closeAccountOps, payCardAction, payPrefsAction, payPrefsOps, releaseHoldOps, transferAction, type CardChange } from "./requests";
+import { accountStatusOps, amountOf, autopayAction, autopayOps, cardAction, cashAction, closeAccountOps, payCardAction, payPrefsAction, payPrefsOps, releaseHoldOps, transferAction, type ActionBody, type CardChange } from "./requests";
+import { StatementsBlock } from "./statements";
 
-const GROUP_ICON: Readonly<Record<AccountGroup, IconName>> = { cash: "wallet", banking: "bank", credit: "card", loans: "receipt", investing: "layers" };
+const GROUP_ICON: Readonly<Record<AccountGroup, IconName>> = { cash: "wallet", banking: "bank", credit: "card", loans: "receipt", lent: "receipt", investing: "layers" };
 
 const CARD_CHANGE: Readonly<Record<CardChange, { go: string; title: string }>> = {
   freeze: { go: "Freeze", title: "Freeze the card" },
@@ -187,9 +188,11 @@ export function AccountsSegment(props: SegmentProps) {
   // Cards the party holds on someone else's account (an authorised user's) have no account page here.
   const loose = view.cards.filter((c) => !view.accounts.some((a) => a.id === c.account));
   const moves = controls.mode === "player" ? MOVE_CONTROLS.filter((c) => moveFrom(view, c).length > 0) : [];
+  const lends = controls.mode === "player" && view.level >= 3 && lendSources(view).length > 0 && lendTargets(controls, view.party).length > 0;
+  const income = view.statements && !own ? view.statements.periods[0]?.income : undefined;
   return (
     <>
-      {moves.length > 0 ? (
+      {moves.length > 0 || lends ? (
         <Section title="Move money">
           <Controls name="move">
             {moves.map((c) => (
@@ -197,6 +200,11 @@ export function AccountsSegment(props: SegmentProps) {
                 {MOVE[c].label}
               </Button>
             ))}
+            {lends ? (
+              <Button icon="receipt" onClick={() => nav.open(actionPage("accounts", "lend"))}>
+                Lend money
+              </Button>
+            ) : null}
           </Controls>
         </Section>
       ) : null}
@@ -225,6 +233,13 @@ export function AccountsSegment(props: SegmentProps) {
             {loose.map((c) => (
               <CardRow key={c.id} view={view} card={c} onOpen={() => nav.open(detailPage("card", c.id))} />
             ))}
+          </List>
+        </Section>
+      ) : null}
+      {view.statements && income ? (
+        <Section title={view.statements.kind === "personal" ? "Income and spending" : "Statements"} flush>
+          <List>
+            <ListRow icon="receipt" title="This month" subtitle={`${formatMoney(income.revenue, controls.currency)} in · ${formatMoney(-income.opex - income.cogs, controls.currency)} out`} value={formatMoney(income.netIncome, controls.currency)} valueTone={income.netIncome < 0 ? "neg" : "pos"} chevron onClick={() => nav.open(detailPage("statements", view.party))} />
           </List>
         </Section>
       ) : null}
@@ -502,6 +517,53 @@ function MovePage(props: { view: FinanceView; controls: PlayerControls; nav: Hub
   return <CashPage key={account.id} view={view} account={account} controls={controls} nav={nav} kind={control} pick={pick} />;
 }
 
+/** The accounts a loan may be paid out of: open accounts the party spends that pay and aren't credit or cash. */
+function lendSources(view: FinanceView): AccountView[] {
+  return view.accounts.filter((a) => a.spends && a.status === "open" && CLASS_TRAITS[a.class].pays && !CLASS_TRAITS[a.class].liability && !CLASS_TRAITS[a.class].cash);
+}
+
+/** Whom the party may lend to: those the palette's Pay offers, in the world, the party itself aside. */
+function lendTargets(controls: PlayerControls, party: string): Choice[] {
+  const pay = controls.palette?.entries.find((e) => e.action === FINANCE_ACTIONS.pay);
+  const seen = new Set<string>();
+  return (pay?.options ?? []).flatMap((o) => {
+    const to = o.params.to;
+    if (typeof to !== "string" || to === party || to.startsWith("economy.external:") || seen.has(to)) return [];
+    seen.add(to);
+    return [{ value: to, label: o.label }];
+  });
+}
+
+/**
+ * Lending money (§25.4): to someone in the world, from an account the party spends, at a yearly rate
+ * over months. The lender holds a loan made, the borrower a loan repaid monthly by autopay; an
+ * organization's page lends as it.
+ */
+function LendPage(props: { view: FinanceView; controls: PlayerControls; nav: HubNav }) {
+  const { view, controls } = props;
+  const fmt = (cents: number): string => formatMoney(cents, controls.currency);
+  const sources = lendSources(view);
+  const targets = lendTargets(controls, view.party);
+  const [to, setTo] = useState(targets[0]?.value ?? "");
+  const [from, setFrom] = useState(sources[0]?.id ?? "");
+  const [text, setText] = useState("");
+  const [apr, setApr] = useState<number | null>(0);
+  const [months, setMonths] = useState<number | null>(12);
+  const cents = amountOf(text, controls.currency);
+  const source = sources.find((a) => a.id === from);
+  const problem = to === "" ? "Pick who borrows it." : !source ? "Pick the account it comes from." : (amountProblem(text, controls.currency, "an amount") ?? (apr === null || apr < 0 ? "Interest is a yearly percentage, 0 or more." : months === null || months < 1 || !Number.isInteger(months) ? "Months is a whole number, 1 or more." : null));
+  const body: ActionBody | null = problem === null && cents !== null && apr !== null && months !== null ? { action: FINANCE_ACTIONS.lend, params: { to, amount: cents, apr, months, from, ...(view.partyKind === "person" ? {} : { as: view.party }) } } : null;
+  return (
+    <ActionPage nav={props.nav} controls={controls} name="lend" title="Lend money" subtitle={source ? `From ${source.name} · ${fmt(source.available ?? source.cents)} available` : undefined} go={cents !== null ? `Lend ${fmt(cents)}` : "Lend"} problem={problem} action={body} submit={(tell) => (body === null ? Promise.resolve(false) : controls.act(body, tell))}>
+      <SelectField label="Lend to" value={to} options={targets} onChange={setTo} />
+      <SelectField label="From" value={from} options={sources.map((a) => ({ value: a.id, label: a.name }))} onChange={setFrom} />
+      <AmountField label="Amount" value={text} currency={controls.currency} onInput={setText} invalid={text.trim() !== "" && cents === null} />
+      <NumberField label="Interest a year, %" value={apr} min={0} step={0.1} onChange={setApr} />
+      <NumberField label="Over how many months" value={months} min={1} step={1} onChange={setMonths} help="Repaid monthly by autopay from where the money lands; a payment reaches you the day it's made." />
+    </ActionPage>
+  );
+}
+
 /**
  * Autopay's mode, the account it pays from and a fixed amount: an action for the player, the
  * account's fields for the GM, who gets the debtor's sources whichever party's page the account was
@@ -755,9 +817,9 @@ function accountActionPage(props: SectionProps, a: AccountView, action: string |
   }
 }
 
-/** Accounts' pages: Move money's, how the party pays, each account and card, and each control's page. What the view no longer holds, or the mode may not do, draws nothing (gone). */
+/** Accounts' pages: Move money's (Lend money among them), how the party pays, each account and card, each control's page, and the party's statements. What the view no longer holds, or the mode may not do, draws nothing (gone). */
 export const accountPages: HubPages = {
-  heads: ["accounts", "account", "card"],
+  heads: ["accounts", "account", "card", "statements"],
   render(page, props) {
     const { view, controls, nav } = props;
     const [head, id, action, within] = page.path;
@@ -766,9 +828,18 @@ export const accountPages: HubPages = {
       if (page.type === "action" && id === "open") return controls.mode === "gm" && view.partyKind !== "person" ? <OpenAccountPage view={view} controls={controls} nav={nav} /> : null;
       if (page.type !== "action") return null;
       if (id === "pay-prefs") return payPrefsShown(view) && controls.mode !== "read" ? <PayPrefsPage {...props} controls={controls} /> : null;
+      if (id === "lend") return controls.mode === "player" && view.level >= 3 && lendSources(view).length > 0 ? <LendPage view={view} controls={controls} nav={nav} /> : null;
       const move = MOVE_CONTROLS.find((c) => c === id);
       const from = move ? moveFrom(view, move) : [];
       return move && controls.mode === "player" && from.length > 0 ? <MovePage view={view} controls={controls} nav={nav} control={move} from={from} /> : null;
+    }
+    if (head === "statements") {
+      const s = view.statements;
+      return s && page.type === "detail" ? (
+        <MoneyPage nav={nav} name="statements" title={s.kind === "personal" ? "Income and spending" : "Statements"} subtitle={view.name}>
+          <StatementsBlock statements={s} currency={controls.currency} />
+        </MoneyPage>
+      ) : null;
     }
     if (head === "account") {
       const account = findAccount(view, id);

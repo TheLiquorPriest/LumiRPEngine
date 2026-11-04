@@ -21,7 +21,7 @@ import { DECISION_ACTIONS, DECISION_EFFECTS, DECISION_FIELDS, DECISION_RANGES, d
 import { parseOrgOp } from "../../../shared/org-ops";
 import type { ActionDef, ParamDef } from "../../../shared/world";
 import { calendarOf, formatStamp } from "../../../engine/calendar";
-import { mayAct, membersOfOrg, orgTypeOf } from "../../../engine/org";
+import { mayAct, membersOfOrg, orgTypeOf, trusteesOf } from "../../../engine/org";
 import { labelOf, objOf, optionalQuery, own, sliceOf, sliceRecord, strOf } from "../../../engine/pack-kit";
 import type { CoreRegistry, EffectContext, EventTypeDef, ProcessDef, ReadContext, Rejection } from "../../../engine/registry";
 import type { Rng } from "../../../engine/rng";
@@ -113,7 +113,9 @@ export function rulesOf(ctx: Pick<ReadContext, "registry" | "world" | "state">, 
 /**
  * Who votes on `org`'s motions, each with their weight in percent of all the votes, and the votes no
  * one here casts: a company's holders by its decision votes (`economy.votes`), a listed company's
- * outside public the rest; any other organization's members who are people, one each.
+ * outside public the rest; a trust counting by trustees (`vote_by: trustees`, DESIGN §29.1), its
+ * trustees who act, one each (an organization trustee's cast by whoever manages its shares); any
+ * other organization's members who are people, one each.
  */
 export function electorateOf(ctx: ReadContext, org: EntityId): { weights: Record<EntityId, number>; public: number } {
   if (orgTypeOf(ctx, org) === "company") {
@@ -123,6 +125,10 @@ export function electorateOf(ctx: ReadContext, org: EntityId): { weights: Record
     const sum = Object.values(weights).reduce((a, w) => a + w, 0);
     const rest = 100 - sum;
     return { weights, public: sum > 0 && rest > 1e-6 ? rest : 0 };
+  }
+  if (orgTypeOf(ctx, org) === "trust" && rulesOf(ctx, org).basis === "trustees") {
+    const trustees = trusteesOf(ctx, org);
+    return { weights: Object.fromEntries(trustees.map((t) => [t, 100 / trustees.length])), public: 0 };
   }
   const people = [...new Set(membersOfOrg(ctx, org).filter((r) => r.how !== "staff" && kindIs(ctx.registry, ctx.world, own(ctx.state.entities, r.who)?.kind ?? "", "person")).map((r) => r.who))].sort();
   return { weights: Object.fromEntries(people.map((p) => [p, 100 / people.length])), public: 0 };
@@ -369,7 +375,8 @@ export function rulesEvents(ctx: EffectContext, a: Args): LedgerEvent[] | Reject
   };
   const basis = a.vote_by;
   if (basis !== undefined && basis !== "") {
-    if (basis !== null && basis !== "default" && !isVoteBasis(basis)) return refuse("bad_args", "votes are counted by shares or by members");
+    if (basis !== null && basis !== "default" && !isVoteBasis(basis)) return refuse("bad_args", "votes are counted by shares, by members or by trustees");
+    if (basis === "trustees" && orgTypeOf(ctx, org) !== "trust") return refuse("bad_args", `only a trust counts its trustees' votes; ${labelOf(ctx, org)} isn't one`);
     put(DECISION_FIELDS.basis, isVoteBasis(basis) ? basis : null, isVoteBasis(basis) ? `votes counted by ${basis}` : "votes counted as its type counts them");
   }
   // Each number: its argument, its field, its range, its words set, and its words put back to the default.

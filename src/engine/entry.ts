@@ -23,8 +23,8 @@ import { canSeeEntity } from "./visibility";
 
 type EntryContext = Pick<ReadContext, "registry" | "world" | "state" | "tables">;
 
-/** What someone's leave to enter rests on: anyone's; living there; an owner's power (owner, position, delegate, member); a member of the owner or of a person owner's household; working for them; a customer; a key they carry. */
-export const ENTRY_BASES = ["public", "resident", "owner", "position", "delegate", "member", "household", "staff", "customer", "key"] as const;
+/** What someone's leave to enter rests on: anyone's; living there; an owner's power (owner, position, delegate, member, or control through an organization holding it); a member of the owner or of a person owner's household; working for them; a customer; a key they carry. */
+export const ENTRY_BASES = ["public", "resident", "owner", "position", "delegate", "member", "control", "household", "staff", "customer", "key"] as const;
 export type EntryBasis = (typeof ENTRY_BASES)[number];
 
 /** Someone's leave to enter a place: what it rests on, the owner it is through, and the position, job or key that gives it. */

@@ -1,16 +1,20 @@
 // Build → Organizations (ORG-SPEC §6.3), mobile first: the world home's list of organizations, in
 // Companies, Households, Groups and Trusts (and a party a world authors), each with how many it
 // holds and its issues, with + New (a type, a group's kind, a name), and an organization's editor:
-// - Basics: its name, kind, structure, places, hours and who knows of it;
-// - People: its members by `member_of` (title, position, rank, since), its staff as jobs (Add a
-//   job), its owners (role, share, units, class) and who acts for it (`acts_for`);
+// - Basics: its name, kind, structure, places, hours and who knows of it, and Change what it is (a
+//   company into a trust, a trust into a company: previewed, then one draft patch, 6.16);
+// - People: its members by `member_of` (title, position, rank, since; a trust's officers and
+//   directors), its staff as jobs (Add a job), its owners (role, share, units, class) and who acts
+//   for it (`acts_for`);
 // - Positions: title, powers by family, seats, reports to, reach, limits, successor, new members;
 // - Money: its accounts as the Money records list them, its pay schedule and account, dues, payouts
-//   and invoice terms;
+//   and invoice terms, and its revenue streams (the economy's editor: each a `flow` with a `revenue`
+//   model, paid to it or one of its accounts);
 // - Ownership: share classes and the votes a decision needs;
 // - Decisions: how its motions count votes, their quorum, pass mark and days, standing votes, and
 //   how long a request for approval waits (ORG-SPEC Phase 5);
 // - Property and entry: its properties, and its places with who may enter them;
+// - Projects (a company, a group or a trust): its production projects, added from a template;
 // - All fields.
 // The organization's own fields save with Save to draft, as a patch of only what changed; a
 // member's link, a job and a delegation are other entities', each saved to the draft from its sheet.
@@ -24,6 +28,7 @@ import { ACTS_FOR, limitsIn, ORG_POWERS, positionsIn, powersIn, type OrgType, ty
 import type { OrgRef } from "../../shared/org-view";
 import type { JsonPatchOp, LintIssue } from "../../shared/protocol";
 import { PAY_BASES } from "../../shared/finance";
+import { oneRecord } from "../../shared/revenue";
 import { DEFAULT_CURRENCY, playedKinds, type WorldDoc } from "../../shared/world";
 import { useApp } from "../app";
 import { Badge, Banner, Button, Disclosure, Empty, Field, List, ListRow, PageHeader, SaveBar, Section, Seg, useBusy } from "../components";
@@ -35,6 +40,10 @@ import { useSelect } from "../store";
 import { delegationDraft, delegationProblem, positionDraft, positionProblem, positionRecord, type DelegationDraft, type PositionDraft } from "../../packs/orgs/ui/edit";
 import { DelegationFields, PositionFields } from "../../packs/orgs/ui/rules";
 import { limitWords, powersText } from "../../packs/orgs/ui/words";
+import { conversionTargets, orgConversion } from "./org-convert";
+import { BuildOrgProjects } from "../../packs/orgs/ui/projects";
+import { projectTemplatesOf } from "../../packs/economy/ui/projects";
+import { RevenueEditor, type RevenueStreamDraft } from "../../packs/economy/ui/revenue";
 import { entityPatch } from "./character-model";
 import { deleteItem, go, ItemHeader } from "./chrome";
 import { FormSheet, RefPicker } from "./form-kit";
@@ -433,6 +442,7 @@ export function OrgEditor(props: EditorProps) {
       <Section title="Basics">
         <SchemaFields specs={COLLECTION_SPECS.entities.filter((s) => BASIC_KEYS.has(s.key))} value={value} ctx={ctx} onChange={setValue} />
         {inputs(SECTION_FIELDS.basics)}
+        <ChangeWhatItIs doc={formDoc} id={id} kind={kind} unsaved={changed} busy={busy} onApply={patch} />
       </Section>
       <div data-lre-org-build="people">
         <Section title="People" flush>
@@ -440,7 +450,7 @@ export function OrgEditor(props: EditorProps) {
             {members.map((m) => (
               <ListRow key={`${m.who}:${m.index}`} id={m.who} icon="user" title={m.name} subtitle={titled(m)} chevron onClick={() => setSheet({ kind: "member", link: m })} />
             ))}
-            {type !== "trust" ? <ListRow icon="user-plus" title="Add a member" chevron onClick={() => setSheet({ kind: "member", link: null })} /> : null}
+            <ListRow icon="user-plus" title={type === "trust" ? "Add an officer or director" : "Add a member"} chevron onClick={() => setSheet({ kind: "member", link: null })} />
           </List>
         </Section>
         {type !== "trust" || jobs.length > 0 ? (
@@ -487,7 +497,15 @@ export function OrgEditor(props: EditorProps) {
           {inputs(SECTION_FIELDS.money)}
         </div>
       </Section>
+      <div data-lre-org-build="revenue">
+        <RevenueEditor world={formDoc} earner={{ id, name }} streams={revenueStreamsOf(formDoc, id, accounts.map((a) => a.id))} save={(stream, was) => patch(revenueStreamPatch(stream, was))} remove={(sid) => patch([{ op: "remove", path: pointerOf(["entities", sid]) }])} saving={busy} />
+      </div>
       {type === "company" ? <Section title="Ownership">{inputs(SECTION_FIELDS.ownership)}</Section> : null}
+      {type === "company" || type === "group" || type === "trust" ? (
+        <Section title="Projects">
+          <BuildOrgProjects doc={props.world} org={id} templates={projectTemplatesOf(props.world)} busy={busy} onPatch={(ops) => run(async () => void (await props.send({ type: "lre.editor", worldId: props.world.id, base: null, op: "patch", ops })))} onOpen={(to) => open(to)} />
+        </Section>
+      ) : null}
       <Section title="Decisions">{inputs(SECTION_FIELDS.decisions)}</Section>
       <Section title="Property and entry" flush>
         <List>
@@ -518,6 +536,69 @@ export function OrgEditor(props: EditorProps) {
 }
 
 // ---------------------------------------------------------------- the editor's sheets
+
+/** The draft's revenue streams paid to `org` or one of its `accounts`: each `flow` with a `revenue` model (one record, or a one-record list as the editor writes it), as the economy's editor edits them. */
+export function revenueStreamsOf(doc: WorldDoc, org: string, accounts: readonly string[]): RevenueStreamDraft[] {
+  return Object.entries(doc.entities)
+    .filter(([, e]) => kindIs(doc, e.kind, "flow") && oneRecord(e.fields.revenue) !== null && typeof e.fields.to === "string" && (e.fields.to === org || accounts.includes(e.fields.to)))
+    .map(([sid, e]) => ({ id: sid, name: e.name || sid, fields: e.fields as JsonObject }))
+    .sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
+}
+
+/** A stream the economy's editor saved, into the draft: a new one as a `flow` entity of its own; a changed one's name and fields over what it had, its tier and links kept. */
+export function revenueStreamPatch(stream: RevenueStreamDraft, was: RevenueStreamDraft | null): JsonPatchOp[] {
+  const name = stream.name.trim();
+  if (was === null) return [{ op: "add", path: pointerOf(["entities", stream.id]), value: { id: stream.id, kind: "flow", name, tier: "background", fields: stream.fields, relations: [] } }];
+  return [
+    { op: "replace", path: pointerOf(["entities", stream.id, "name"]), value: name },
+    { op: "replace", path: pointerOf(["entities", stream.id, "fields"]), value: stream.fields },
+  ];
+}
+
+/**
+ * Basics → Change what it is (6.16): what it may become, each previewed (who becomes what, the fields
+ * the new kind doesn't read, dropped, and what else changes, or why it can't), then written to the
+ * draft as one patch. A chat takes it with its Upgrade, as one change; nothing changes in play.
+ */
+export function ChangeWhatItIs(props: { doc: WorldDoc; id: string; kind: string; unsaved: boolean; busy: boolean; onApply(ops: JsonPatchOp[]): void }) {
+  const targets = conversionTargets(props.doc, props.kind);
+  if (targets.length === 0) return null;
+  return (
+    <div data-lre-org-convert>
+      <Disclosure summary="Change what it is">
+        <div class="lre-stack">
+          {targets.map((to) => {
+            const c = orgConversion(props.doc, props.id, to);
+            const noun = to === "trust" ? "a trust" : "a company";
+            return (
+              <div key={to} class="lre-stack" data-lre-org-convert-to={to}>
+                <span class="lre-small lre-muted">{`As ${noun}, from the next revision; a chat takes it with its Upgrade.`}</span>
+                {c.why !== null ? <Banner tone="warn">{c.why}</Banner> : null}
+                {c.people.length > 0 ? (
+                  <List>
+                    {c.people.map((p) => (
+                      <ListRow key={p.name} icon="user" title={p.name} subtitle={`${p.from} → ${p.to}`} />
+                    ))}
+                  </List>
+                ) : null}
+                {c.dropped.length > 0 ? <span>{`Dropped: ${c.dropped.join(", ")}.`}</span> : null}
+                {c.notes.map((note) => (
+                  <span key={note} class="lre-small">
+                    {note}
+                  </span>
+                ))}
+                {props.unsaved ? <span class="lre-small lre-muted">Save or revert your changes first.</span> : null}
+                <Button variant="primary" block disabled={props.unsaved || c.why !== null || c.ops.length === 0} busy={props.busy} onClick={() => props.onApply(c.ops)}>
+                  {`Make it ${noun}`}
+                </Button>
+              </div>
+            );
+          })}
+        </div>
+      </Disclosure>
+    </div>
+  );
+}
 
 /** A position, added or edited into the organization's positions (saved with the organization), or removed. */
 function PositionSheet(props: { positions: readonly Position[]; id: string | null; people: readonly OrgRef[]; currency: WorldDoc["currency"]; onClose(): void; onDone(list: JsonValue[]): void }) {

@@ -43,7 +43,7 @@ import { findLeaks, loreGateReader, unrevealedSecrets } from "../engine/visibili
 import { acts } from "../engine/life";
 import { Working } from "../engine/working";
 import { capText } from "../packs/minds/core/edit";
-import { fidelityOf, pickMinds } from "../packs/minds/core/fidelity";
+import { fidelityOf, type MindPick, pickMinds, quietMind } from "../packs/minds/core/fidelity";
 import { faded, readCharacter, readSlice, salienceNow } from "../packs/minds/core/state";
 import { sectionsOf } from "./book";
 import type { HostMessage, HostPort } from "./host";
@@ -487,6 +487,22 @@ export interface PreMindsInput {
   replaces?: MessageId;
   /** Whether the chat tracks knowledge (`knowledgeOn`): recorded when it changes, and each mind reads what it holds. */
   knowledge?: boolean;
+  /**
+   * Smart persistence holds this turn's scene (`backend/agents/persist.ts`): each quiet Live mind
+   * (`quietMind`) is kept, its last thoughts recorded again as this turn's with the reason `kept`,
+   * and makes no call.
+   */
+  persist?: boolean;
+}
+
+/** The reason a mind Smart persistence kept is recorded with: the Minds section tells it as unchanged. */
+export const KEPT_MIND_REASON = "kept";
+
+/** A quiet Live mind's last thoughts, recorded again as this turn's (`KEPT_MIND_REASON`): where and at what level it is now, at this turn's clock. */
+function keptMind(state: Readonly<WorldState>, pick: MindPick): MindEventData | null {
+  const m = readCharacter(state, pick.entity).mind;
+  if (!m) return null;
+  return { entity: pick.entity, at: state.clock, place: placeOfEntity(state, pick.entity), level: pick.level, moment: "turn", reason: KEPT_MIND_REASON, monologue: m.monologue, depiction: m.depiction, intent: m.intent, reactions: [...m.reactions], mood: m.mood, interrupt: null, withheld: m.withheld };
 }
 
 /**
@@ -542,9 +558,18 @@ export async function preMinds(deps: MindsDeps, input: PreMindsInput): Promise<R
     levels[p.entity] = p.level;
     reasons[p.entity] = p.reason;
   }
+  // While Smart persistence holds the scene, each quiet Live mind keeps its last thoughts and makes no call.
+  const kept = new Map(input.kept ?? []);
+  if (input.persist) {
+    for (const p of calls) {
+      if (kept.has(p.entity) || !quietMind(ctx, p, texts)) continue;
+      const copy = keptMind(thinking.state, p);
+      if (copy) kept.set(p.entity, copy);
+    }
+  }
   // Each thinks for their own refresh reason; the moment itself is the player's message.
   const moment: MindMoment = { kind: "turn", at: thinking.state.clock, reason: "", user: input.user, reply: input.reply };
-  const ran = await runMinds(deps, { chatId: input.chatId, userId: input.userId, world: input.world, state: thinking.state, who: calls.map((p) => p.entity), moment, levels, reasons, signal: input.signal, ...(input.guidance !== undefined ? { guidance: input.guidance } : {}), ...(input.kept ? { kept: input.kept } : {}), ...(input.replaces !== undefined ? { replaces: input.replaces } : {}), ...(input.knowledge === true ? { knowledge: settings.minds.knowledge } : {}), phase: "pre", spared: true });
+  const ran = await runMinds(deps, { chatId: input.chatId, userId: input.userId, world: input.world, state: thinking.state, who: calls.map((p) => p.entity), moment, levels, reasons, signal: input.signal, ...(input.guidance !== undefined ? { guidance: input.guidance } : {}), ...(kept.size > 0 ? { kept } : {}), ...(input.replaces !== undefined ? { replaces: input.replaces } : {}), ...(input.knowledge === true ? { knowledge: settings.minds.knowledge } : {}), phase: "pre", spared: true });
   return { events: [...tracking, opened, ...ran.events], traces: ran.traces, ...(ran.report ? { report: ran.report } : {}) };
 }
 

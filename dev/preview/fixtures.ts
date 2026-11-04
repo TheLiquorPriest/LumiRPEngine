@@ -1402,7 +1402,7 @@ export function settingsFixture(): UserSettings {
   };
 }
 
-const DEFAULTS: Record<ExtractionType, ExtractionModeView["mode"]> = { time_advance: "auto", location: "auto", place_make: "auto", condition: "auto", routine: "auto", knows: "confirm", purchase: "confirm", transfer: "confirm", regard: "confirm", quantity: "confirm", spawn: "confirm", life: "confirm", membership: "confirm", employment: "confirm", agenda: "auto", vote: "confirm", approval: "confirm", item_move: "auto", item_hand: "auto", item_own: "confirm", item_make: "auto", item_use: "auto", item_wear: "auto", item_condition: "auto", item_lose: "confirm", learn: "auto", reveal: "confirm" };
+const DEFAULTS: Record<ExtractionType, ExtractionModeView["mode"]> = { time_advance: "auto", location: "auto", place_make: "auto", condition: "auto", routine: "auto", knows: "confirm", purchase: "confirm", transfer: "confirm", regard: "confirm", quantity: "confirm", spawn: "confirm", life: "confirm", membership: "confirm", employment: "confirm", agenda: "auto", vote: "confirm", approval: "confirm", revenue: "confirm", project_note: "auto", item_move: "auto", item_hand: "auto", item_own: "confirm", item_make: "auto", item_use: "auto", item_wear: "auto", item_condition: "auto", item_lose: "confirm", learn: "auto", reveal: "confirm" };
 
 /** What the backend would derive: pins first, then learning on the connection, then D4 defaults; the GM assistant's change types pinned or at their defaults. */
 export function extractionView(settings: UserSettings): Record<ChangeType, ExtractionModeView> {

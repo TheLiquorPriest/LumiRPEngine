@@ -203,10 +203,10 @@ export const READ_TOOL_TEXTS: readonly ToolText[] = [
     family: "orgs",
     tier: "read",
     note: "Reads an organization's page, or one part of it.",
-    text: "One organization's page, whole: its type and level, the player character's place there, who runs it, every one of its people (with their titles, positions, jobs and shares), its positions and delegations, its money, property, ownership and taxes, its dues and its history, every secret marked. Give part for one part only.",
+    text: "One organization's page, whole: its type and level, the player character's place there, who runs it, every one of its people (with their titles, positions, jobs and shares), its positions and delegations, its money, property, ownership and taxes, its production projects, its dues and its history, every secret marked. Give part for one part only.",
     args: [
       { path: "org", text: "The organization: its id, or its name; the party is \"your party\"." },
-      { path: "part", text: "Only this part: overview, people, money, property, ownership, taxes, rules (positions, delegations and dues), decisions (how its decisions are made, its motions with each voter's vote, and its requests for approval with who may approve them, each by the id gm_org's vote, end_motion and answer name) or log (its history); leave it out for the whole page." },
+      { path: "part", text: "Only this part: overview, people, money, property, ownership, taxes, projects (its production projects: each step's days, cost, when it's paid, what it waits on and what it unlocks, where each stands and when it's due to be done, and the templates it may start from), rules (positions, delegations and dues), decisions (how its decisions are made, its motions with each voter's vote, and its requests for approval with who may approve them, each by the id gm_org's vote, end_motion and answer name) or log (its history); leave it out for the whole page." },
     ],
   },
   {

@@ -1,8 +1,10 @@
 // World packs: the map (`.lre-map` base rules; also the map overlay's frame and
 // Build's previews, which add rules under their own classes), its bar, zoom, list, dock and
 // Known/Fog control; People's list and filters; the person sheet with its day timeline; the place
-// and quest sheets; the Calendar; the Encounter. Tokens only. Controls laid over the map canvas sit
-// on the opaque bar background, so they read over any part of the drawing in either theme.
+// and quest sheets; the Calendar; the Encounter; the Orgs trees (the home's, the Org Chart's), each
+// row 44 px, indented 12 px a level (`--lre-tree-indent`), with its inline menu and breadcrumb.
+// Tokens only. Controls laid over the map canvas sit on the opaque bar background, so they read over
+// any part of the drawing in either theme.
 
 export const PACKS_WORLD_CSS = `
 .lre-map{position:relative;width:100%;height:100%;min-height:0;overflow:hidden;touch-action:none;user-select:none;-webkit-user-select:none;background:var(--lre-bar-bg);border:1px solid var(--lre-hairline);border-radius:var(--lre-r-xl);color:var(--lre-fg)}
@@ -80,4 +82,38 @@ button.lre-world-pill:hover{background:linear-gradient(var(--lre-hover),var(--lr
 .lre-world-budgets,.lre-world-moves,.lre-world-log{display:flex;flex-direction:column;gap:var(--lre-s2);padding-top:var(--lre-s3);border-top:1px solid var(--lre-hairline)}
 .lre-world-sublabel{font-size:var(--lre-fs-sm);color:var(--lre-muted)}
 .lre-world-log>p{margin:0;font-size:var(--lre-fs-sm);overflow-wrap:anywhere}
+.lre-tree-frame{display:flex;flex-direction:column;min-width:0}
+.lre-tree,.lre-tree-group{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;min-width:0}
+.lre-tree-item{min-width:0;outline:none}
+.lre-tree-item:focus-visible>.lre-tree-row{outline:2px solid var(--lre-accent);outline-offset:-2px}
+.lre-tree-row{display:flex;align-items:center;gap:var(--lre-s2);width:100%;min-width:0;min-height:var(--lre-tap-lg);padding:var(--lre-s1) var(--lre-s3) var(--lre-s1) calc(var(--lre-s1) + var(--lre-tree-indent,0px));border:0;border-top:1px solid var(--lre-hairline);background:transparent;color:inherit;font:inherit;text-align:left;cursor:pointer;transition:background-color var(--lre-fast)}
+.lre-tree>.lre-tree-item:first-child>.lre-tree-row{border-top:0}
+.lre-tree-row:hover{background:var(--lre-hover)}
+.lre-tree-row.inert{cursor:default}
+.lre-tree-row.inert:hover{background:transparent}
+.lre-tree-row.current{background:var(--lre-accent-soft);box-shadow:inset 3px 0 0 var(--lre-accent)}
+.lre-tree-item.muted>.lre-tree-row{color:var(--lre-muted)}
+.lre-tree-item.muted>.lre-tree-row .lre-tree-label{font-weight:400;font-style:italic}
+.lre-tree-toggle{flex:none;display:inline-flex;align-items:center;justify-content:center;width:28px;align-self:stretch;margin:calc(-1 * var(--lre-s1)) 0;color:var(--lre-muted)}
+.lre-tree-icon{flex:none;display:inline-flex;color:var(--lre-muted)}
+.lre-tree-text{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px;padding:2px 0}
+.lre-tree-label{font-size:var(--lre-fs-md);font-weight:500;overflow-wrap:anywhere}
+.lre-tree-detail{font-size:var(--lre-fs-sm);color:var(--lre-muted);overflow-wrap:anywhere}
+.lre-tree-badges{display:flex;flex-wrap:wrap;gap:var(--lre-s1);min-width:0}
+.lre-tree-value{flex:0 1 auto;max-width:38%;font-size:var(--lre-fs-sm);font-weight:500;color:var(--lre-muted);text-align:right;overflow-wrap:anywhere}
+.lre-tree-trail{flex:none;color:var(--lre-dim)}
+.lre-tree-menu{display:flex;flex-direction:column;margin:0 var(--lre-s3) var(--lre-s2) calc(var(--lre-s3) + 28px + var(--lre-tree-indent,0px));border:1px solid var(--lre-border);border-radius:var(--lre-r-lg);background:var(--lre-card);box-shadow:var(--lre-shadow-sm);overflow:hidden}
+.lre-tree-action{display:flex;align-items:center;gap:var(--lre-s2);min-height:var(--lre-tap-lg);padding:0 var(--lre-s3);border:0;background:transparent;color:inherit;font:inherit;text-align:left;cursor:pointer;transition:background-color var(--lre-fast)}
+.lre-tree-action+.lre-tree-action{border-top:1px solid var(--lre-hairline)}
+.lre-tree-action:hover{background:var(--lre-hover)}
+.lre-tree-action:focus-visible{outline-offset:-2px}
+.lre-tree-action>.lre-icon{flex:none;color:var(--lre-muted)}
+.lre-tree-action.danger,.lre-tree-action.danger>.lre-icon{color:var(--lre-neg)}
+.lre-tree-crumbs{display:flex;align-items:center;flex-wrap:wrap;gap:2px;min-width:0;padding:var(--lre-s1) var(--lre-s2);border-bottom:1px solid var(--lre-hairline);font-size:var(--lre-fs-sm)}
+.lre-tree-crumb-step{display:inline-flex;align-items:center;gap:2px;min-width:0}
+.lre-tree-crumb{display:inline-flex;align-items:center;min-height:var(--lre-tap-lg);max-width:100%;padding:0 var(--lre-s2);border:0;border-radius:var(--lre-r-pill);background:transparent;color:var(--lre-accent-text);font:inherit;font-weight:500;text-align:left;overflow-wrap:anywhere;cursor:pointer}
+button.lre-tree-crumb:hover{background:var(--lre-hover)}
+.lre-tree-crumb.current{color:var(--lre-fg);font-weight:600;cursor:default}
+.lre-tree-crumb-sep{flex:none;color:var(--lre-muted)}
+.lre-tree-flat{border-bottom:1px solid var(--lre-hairline)}
 `;

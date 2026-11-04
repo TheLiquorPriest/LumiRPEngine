@@ -106,8 +106,8 @@ describe("Play: Alder Automotive → Property", () => {
     const view = reg.views.find((v) => v.panel === "orgs.org");
     const page = decodeOrgPage(readPass(() => view?.build(portAlder("pov").ctx, { mapDisplay: null })), SHOP);
     if (!page) throw new Error("no page");
-    expect(orgTabs(page, defs).map((t) => t.label)).toEqual(["Overview", "People", "Property", "Rules"]);
-    expect(orgTabs({ ...page, sections: {} }, defs).map((t) => t.label)).toEqual(["Overview", "People", "Rules"]);
+    expect(orgTabs(page, defs).map((t) => t.label)).toEqual(["Overview", "People", "Chart", "Property", "Rules"]);
+    expect(orgTabs({ ...page, sections: {} }, defs).map((t) => t.label)).toEqual(["Overview", "People", "Chart", "Rules"]);
   });
 
   test("the shop in words; Jordan, a mechanic, may not change its entry", () => {

@@ -158,11 +158,13 @@ describe("a stop before the reply", () => {
     expect(turn.failed[0]).toContain("Scene");
   });
 
-  test("the intent role failing under its default stop: no other role runs, and no gate shows", async () => {
+  test("the intent role failing under its default stop: no later role runs, nothing the scene beside it staged lands, and no gate shows", async () => {
     const rig = new Rig({ shipped: true });
     const chatId = await agentsChat(rig, { agents: { roles: { intent: { promptOnly: false }, scene: { tier: "gm" } }, review: { placement: "gate" } } });
+    const before = await cashOf(rig, chatId);
     const roles = classicRoles();
     let scene = 0;
+    let prose = 0;
     rig.rt.orchestrator.roles = {
       ...roles,
       intent: {
@@ -178,10 +180,19 @@ describe("a stop before the reply", () => {
         await ctx.writer.apply([spend(100)], "scene");
         return roles.scene(task, ctx);
       },
+      director: {
+        ...roles.director,
+        prose: async (task, ctx) => {
+          prose++;
+          return roles.director.prose(task, ctx);
+        },
+      },
     };
     const turn = await attempt(rig, chatId, "I check my wallet.");
     const cards = rig.body(await rig.send({ type: "lre.review", chatId, op: "get" })).cards as ReviewCardView[];
-    expect({ halted: turn.halted, failed: turn.failed.length, scene, cards: cards.length }).toEqual({ halted: true, failed: 1, scene: 0, cards: 0 });
+    expect({ halted: turn.halted, failed: turn.failed.length, prose, cards: cards.length, spent: before - (await cashOf(rig, chatId)) }).toEqual({ halted: true, failed: 1, prose: 0, cards: 0, spent: 0 });
+    // On the fixed pipeline the scene starts with the intent while no gate can hold the turn (N3 B7): at most that one run.
+    expect(scene).toBeLessThanOrEqual(1);
     expect(turn.failed[0]).toContain("Intent");
   });
 

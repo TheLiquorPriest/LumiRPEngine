@@ -7,7 +7,7 @@ import { ALL_PACKS } from "../packs/index";
 import type { JsonObject, JsonValue } from "../shared/json";
 import { hasOwn, isRecord } from "../shared/json";
 import { planProfile, PROFILE_IDS, PROFILES, type ProfileChoice, type ProfileId } from "../shared/profiles/index";
-import type { JsonPatchOp, ResultBodies } from "../shared/protocol";
+import type { JsonPatchOp, LintIssue, ResultBodies } from "../shared/protocol";
 import { FIDELITIES } from "../shared/minds";
 import { NARRATOR_KNOWLEDGE, NARRATOR_SECRETS, narratorViewOf, type NarratorView } from "../shared/settings";
 import { DEFAULT_ROUTINE_SETTINGS, ROUTINE_SETTING_VALUES, routineSettingsOf, routineSettingsProblems } from "../shared/routines";
@@ -18,7 +18,7 @@ import { LreError } from "./connection";
 import { changesBetween, countsOf } from "./diff";
 import { readAt } from "./read";
 import type { ToolResult } from "./report";
-import { json, lintSummary } from "./report";
+import { json, lintDiff, lintSummary, ranked } from "./report";
 import type { ToolModule } from "./tool-module";
 import { object } from "./tool-module";
 import type { ToolContext } from "./tools";
@@ -36,6 +36,52 @@ const ROUTINE_SETTINGS_TAKEN = Object.entries(ROUTINE_SETTING_VALUES)
 let packs: Registry | null = null;
 
 const worldIdOf = (args: Args): string => neededText(args, "worldId", "the world's id (lre_worlds lists them)");
+
+const SEVERITIES: readonly LintIssue["severity"][] = ["error", "warning", "info"];
+/** How many issues lre_lint lists in a page, by default and at most. */
+const LINT_PAGE = 30;
+const LINT_PAGE_MAX = 200;
+const SOURCE_WORDS = '"draft" (the working copy Build and lre_edit share), "head" (the committed world), or a revision id, or a unique prefix of 6+ characters of one (lre_history lists them)';
+
+/**
+ * One version's lint as LumiRPEngine lints it (the head unless `source` says), against another
+ * (`against`: the head when the version read isn't it): the new issues first, then errors, warnings
+ * and infos; cut to a severity or a code, and paged. `new` and `fixed` count the issues the cut keeps.
+ */
+async function lintTool(args: Args, ctx: ToolContext): Promise<ToolResult> {
+  const worldId = worldIdOf(args);
+  const source = textArg(args, "source") ?? "head";
+  const severity = textArg(args, "severity");
+  if (severity !== undefined && !SEVERITIES.some((s) => s === severity)) throw new ToolError(`severity is one of ${SEVERITIES.join(", ")}.`);
+  const code = textArg(args, "code");
+  const offset = intArg(args, "offset", 0, Number.MAX_SAFE_INTEGER) ?? 0;
+  const limit = intArg(args, "limit", 1, LINT_PAGE_MAX) ?? LINT_PAGE;
+  const against = textArg(args, "against") ?? (source === "head" ? undefined : "head");
+  const live = ctx.live();
+  const [read, base] = await Promise.all([live.lint(worldId, source), against === undefined ? null : live.lint(worldId, against)]);
+  const kept = (i: LintIssue): boolean => (severity === undefined || i.severity === severity) && (code === undefined || i.code === code);
+  const diff = base === null ? null : lintDiff(base.lint, read.lint);
+  const fresh = new Set(diff?.introduced ?? []);
+  const matching = ranked(read.lint.filter(kept), fresh);
+  const page = matching.slice(offset, offset + limit);
+  const fixed = ranked(diff?.fixed.filter(kept) ?? []);
+  const { errors, warnings, infos } = lintSummary(read.lint, 0);
+  return {
+    text: json({
+      worldId,
+      name: read.name,
+      source: read.label,
+      ...(base !== null ? { against: base.label } : {}),
+      lint: { errors, warnings, infos },
+      ...(severity !== undefined || code !== undefined ? { matching: matching.length } : {}),
+      ...(diff !== null ? { new: matching.filter((i) => fresh.has(i)).length, fixed: fixed.length } : {}),
+      offset,
+      issues: page.map((i) => (fresh.has(i) ? { ...i, new: true } : i)),
+      next: offset + page.length < matching.length ? offset + page.length : null,
+      ...(fixed.length > 0 ? { fixedIssues: fixed.slice(0, 12), moreFixed: Math.max(0, fixed.length - 12) } : {}),
+    }),
+  };
+}
 
 async function profileTool(args: Args, ctx: ToolContext): Promise<ToolResult> {
   const worldId = worldIdOf(args);
@@ -105,16 +151,22 @@ function chatKnowledgeChange(args: Args): { knowledge?: boolean | null; narrator
 export const BUILD_TOOLS: readonly ToolModule[] = [
   {
     name: "lre_lint",
-    description: "Lint a world's head revision as LumiRPEngine does on your Lumiverse, with every rule of the engine and its packs: errors first. lre_draft lints the draft; lre_check lints a file on this machine.",
-    inputSchema: object({ worldId: WORLD_ID }, ["worldId"]),
+    description: `Lint one version of a world as LumiRPEngine does on your Lumiverse, with every rule of the engine and its packs: the head by default, or the draft or a revision (source), against another (against: the head by default when source isn't the head), so what's new since the last save comes first, each marked new, then errors, warnings and infos. fixed counts what the other version had that this one doesn't (the first are listed). severity and code cut the list; offset and limit page it (next says where the next page begins). lre_check lints a file on this machine.`,
+    inputSchema: object(
+      {
+        worldId: WORLD_ID,
+        source: { type: "string", description: `The version to lint: ${SOURCE_WORDS}. Default "head".` },
+        against: { type: "string", description: `The version its issues are new against, the same way. Default "head" when source isn't the head; none when it is.` },
+        severity: { type: "string", enum: [...SEVERITIES], description: "Only issues of this severity." },
+        code: { type: "string", description: "Only issues with this code (each issue names its code)." },
+        offset: { type: "integer", minimum: 0, description: "List from this issue (0 is the first)." },
+        limit: { type: "integer", minimum: 1, maximum: LINT_PAGE_MAX, description: `At most this many issues (default ${LINT_PAGE}).` },
+      },
+      ["worldId"],
+    ),
     write: false,
-    run: async (args, ctx) => {
-      const worldId = worldIdOf(args);
-      const live = ctx.live();
-      const [index, body] = await Promise.all([live.index(worldId), live.conn.request("lre.world", { op: "lint", worldId })]);
-      return { text: json({ worldId, name: index.name, revision: index.head, lint: lintSummary(body.lint ?? [], 30) }) };
-    },
-    cli: { command: "lint", section: "Build", usage: "lint <worldId>", summary: "Lint the head revision on your Lumiverse", positionals: ["worldId"], needs: 1 },
+    run: lintTool,
+    cli: { command: "lint", section: "Build", usage: "lint <worldId> [--source <s>] [--against <s>] [--severity <s>] [--code <c>] [--offset <n>] [--limit <n>]", summary: "Lint a version on your Lumiverse, what's new against another first", positionals: ["worldId"], needs: 1, options: { "--source": { arg: "source", as: "text" }, "--against": { arg: "against", as: "text" }, "--severity": { arg: "severity", as: "text" }, "--code": { arg: "code", as: "text" }, "--offset": { arg: "offset", as: "int" }, "--limit": { arg: "limit", as: "int" } } },
   },
   {
     name: "lre_sheet",

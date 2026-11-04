@@ -27,8 +27,8 @@ import type { DiagPhase } from "../../../shared/diagnostics";
 import type { JsonValue } from "../../../shared/json";
 import type { PromptTexts } from "../../../shared/prompts";
 import { ROLES_TEXT, roleTaskTextId, roleTextId } from "../../../shared/role-prompts";
-import { helperCallOf, stepConfigOf } from "../../../shared/settings";
-import type { StepPurpose, WorldDoc } from "../../../shared/world";
+import { ROLE_TASK_ROUTES, taskRoute } from "../../../shared/role-routes";
+import type { WorldDoc } from "../../../shared/world";
 import { firedTimeout } from "../../../shared/timeouts";
 import { GUIDANCE_PREFIX, GUIDANCE_TARGETS, type GuidanceTarget } from "../../preset-binding";
 import { renderPrompt } from "../../prompts";
@@ -66,10 +66,8 @@ const FABRIC_ROLE: RoleId = "curator";
 
 /** One task of a role, as its agent is asked to work it. */
 export interface RoleAsk<O> {
-  /** Which of its role's tasks it is (`ROLE_TASKS`): the texts it is told. */
+  /** Which of its role's tasks it is (`ROLE_TASKS`): the texts it is told, and where it runs (`role-routes`' task map: its role's connection, else its step's, else the helper model's, §15). */
   sub: string;
-  /** The classic step it stands in for: its connection and model while the role names none (§15); null for a task no classic step works, which runs on the helper's. */
-  purpose: StepPurpose | null;
   /** Where in the turn its calls are recorded. */
   phase: DiagPhase;
   /** The player character's name, and the world's: every role text may name them. */
@@ -126,8 +124,9 @@ const ROLE_PINS_TEXTS: PinsTexts = { pins: ROLES_TEXT.pins, file: ROLES_TEXT.pin
 
 /**
  * Works one task of `ctx`'s role with an agent and checks its answer with classic's own validator
- * (`ask.check`): classic's type, or why the answer isn't one. A role naming no connection runs on its
- * classic step's, else the helper's (§15). `ctx.texts`, where given, stands in for the user's own texts
+ * (`ask.check`): classic's type, or why the answer isn't one. It runs where `role-routes` says the
+ * task does (`taskRoute`), the route Settings shows: the role's own connection, else its step's,
+ * else the helper model's (§15). `ctx.texts`, where given, stands in for the user's own texts
  * (Test runs a role with the text it checks). A task whose phase's time ran out (Settings →
  * Timeouts) failed, as classic's call answers nothing then; a cancelled turn's task throws, as
  * classic's call would.
@@ -137,8 +136,10 @@ export async function runRoleAgent<O>(rt: Runtime, ctx: TurnAgentCtx, ask: RoleA
   const own = ctx.texts ?? settings.prompts.texts;
   const role = ctx.role;
   const context = settings.agents.context.roles[role];
-  const step = helperCallOf(ask.purpose ? stepConfigOf(settings.modelUse.steps, ask.purpose) : null, settings.helper);
-  const at = ctx.settings.connectionId !== null ? ctx : { ...ctx, settings: { ...ctx.settings, connectionId: step.connectionId, model: ctx.settings.model ?? step.model } };
+  const task = ROLE_TASK_ROUTES[role].find((t) => t.task === ask.sub);
+  if (!task) throw new Error(`the ${ROLE_LABEL[role]} role has no task "${ask.sub}"`);
+  const route = taskRoute(settings, role, ctx.settings, task);
+  const at = { ...ctx, settings: { ...ctx.settings, connectionId: route.connectionId, model: route.model } };
   // Its perspective is a hint in its system prompt; its tools read the same whatever it is.
   const perspective = renderPrompt(ROLES_TEXT.sees[context.perspective], own, ask.names);
   const system = renderPrompt(roleTextId(role, "system"), own, { ...ask.names, knowledge: perspective });

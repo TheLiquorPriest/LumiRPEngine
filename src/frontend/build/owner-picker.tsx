@@ -18,12 +18,13 @@ export type OwnerLevel = "entity" | "group" | "kind" | "selector" | "none";
 
 /** The kind every group extends (the space pack's `group`). */
 const GROUP_KIND = "group";
-/** A business is a group, but a schedule it owns is its own, not its members' (ORG-SPEC §3.2): it is picked as an entity. */
+/** A business and a trust are groups, but a schedule either owns is its own, not its members' (ORG-SPEC §3.2, DESIGN §29.1): each is picked as an entity. */
 const COMPANY_KIND = "business";
+const TRUST_KIND = "trust";
 
-/** Whether a schedule this entity owns applies to its members: a group's, but not a business's. */
+/** Whether a schedule this entity owns applies to its members: a group's, but not a business's or a trust's. */
 function ownsAsGroup(doc: WorldDoc, kind: string): boolean {
-  return kindIs(doc, kind, GROUP_KIND) && !kindIs(doc, kind, COMPANY_KIND);
+  return kindIs(doc, kind, GROUP_KIND) && !kindIs(doc, kind, COMPANY_KIND) && !kindIs(doc, kind, TRUST_KIND);
 }
 
 const LEVELS: readonly OwnerLevel[] = ["entity", "group", "kind", "selector", "none"];

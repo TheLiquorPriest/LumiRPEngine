@@ -19,7 +19,9 @@ import type { OrgRef, OrgView } from "../../../shared/org-view";
 import { DEFAULT_CURRENCY, type WorldCurrency } from "../../../shared/world";
 import { OFFSTAGE_DEFAULTS, OFFSTAGE_NOTE, TELL_HELP, TELL_LABEL, tellPreset } from "../../../shared/offstage";
 import {
+  appointAction,
   appointable,
+  appointees,
   delegateAction,
   delegationDraft,
   delegationProblem,
@@ -29,6 +31,7 @@ import {
   duesWords,
   givable,
   mayRevoke,
+  moveTargets,
   orgEditRoute,
   positionAction,
   positionDraft,
@@ -332,12 +335,12 @@ export function EditFrame(props: { name: string; title: string; subtitle?: strin
 /** When an editor's change plays (§4.6; DESIGN §11): every one is done at once, off screen, with its Undo; typed words play it as a turn. */
 export const AT_ONCE = "Done at once, off screen, with Undo.";
 
-/** Add position, or a position's Edit (`org_position`, at once), with Remove. */
-export function PositionSheet(props: { org: OrgView; id: string | null; host: PlayHost }) {
+/** Add position (under the position `under`, when the chart names one), or a position's Edit (`org_position`, at once), with Remove. */
+export function PositionSheet(props: { org: OrgView; id: string | null; under?: string; host: PlayHost }) {
   const { org, host } = props;
   const view = props.id === null ? null : (appointable(org).find((p) => p.id === props.id) ?? null);
   const before = view ? positionOfView(view) : null;
-  const [draft, setDraft] = useState(() => positionDraft(before, host.currency));
+  const [draft, setDraft] = useState(() => ({ ...positionDraft(before, host.currency), ...(props.under !== undefined && before === null ? { reportsTo: props.under } : {}) }));
   if (props.id !== null && !before) {
     return (
       <div class="lre-stack">
@@ -353,9 +356,79 @@ export function PositionSheet(props: { org: OrgView; id: string | null; host: Pl
         onClick: () => void host.confirm("Remove position", `Remove ${before.title}? Those holding it stay, without it.`, "Remove").then((yes) => (yes ? host.play(positionRemoveAction(org.id, before.id), host.back) : undefined)),
       }
     : undefined;
+  const over = props.under === undefined ? undefined : appointable(org).find((p) => p.id === props.under)?.title;
   return (
-    <EditFrame name="position" title={before ? before.title : "Add position"} subtitle={org.name} onBack={host.back} go={before ? "Save" : "Add the position"} problem={positionProblem(draft, positions, host.currency)} busy={host.busy} note={AT_ONCE} action={positionAction(org.id, draft, before, host.currency)} onGo={(tell) => host.play(positionAction(org.id, draft, before, host.currency), host.back, tell)} {...(remove ? { danger: remove } : {})}>
+    <EditFrame name="position" title={before ? before.title : over ? `Add a position under ${over}` : "Add position"} subtitle={org.name} onBack={host.back} go={before ? "Save" : "Add the position"} problem={positionProblem(draft, positions, host.currency)} busy={host.busy} note={AT_ONCE} action={positionAction(org.id, draft, before, host.currency)} onGo={(tell) => host.play(positionAction(org.id, draft, before, host.currency), host.back, tell)} {...(remove ? { danger: remove } : {})}>
       <PositionFields draft={draft} positions={positions} people={org.people.map((p) => ({ id: p.id, name: p.name }))} offer={ORG_POWERS} currency={host.currency} onChange={setDraft} />
+    </EditFrame>
+  );
+}
+
+/** A position the chart's sheets name, as the record it was read from; null once it is gone. */
+function chartPosition(org: OrgView, id: string | null): Position | null {
+  const view = id === null ? undefined : appointable(org).find((p) => p.id === id);
+  return view ? positionOfView(view) : null;
+}
+
+/** A position gone since its sheet was opened. */
+function GonePosition(props: { org: OrgView; onBack(): void }) {
+  return (
+    <div class="lre-stack">
+      <PageHeader title="Position" subtitle={props.org.name} onBack={props.onBack} />
+      <Empty icon="scroll">It has no such position any more.</Empty>
+    </div>
+  );
+}
+
+/** Where a position goes in the chart: the positions it may report to (never one under it), or no one. */
+export function MoveFields(props: { org: OrgView; id: string; value: string; onChange(to: string): void }) {
+  return <RefPicker label="Reports to" value={props.value} options={moveTargets(props.org, props.id).map((p) => ({ value: p.id, label: p.title }))} none="No one: it goes to the top" onChange={props.onChange} />;
+}
+
+/** Move it (the chart's menu): whom the position reports to, nothing else changed (`org_position`, at once). */
+export function MoveSheet(props: { org: OrgView; id: string | null; host: PlayHost }) {
+  const { org, host } = props;
+  const before = chartPosition(org, props.id);
+  const [to, setTo] = useState(before?.reports_to ?? "");
+  if (!before) return <GonePosition org={org} onBack={host.back} />;
+  const draft = { ...positionDraft(before, host.currency), reportsTo: to };
+  const action = positionAction(org.id, draft, before, host.currency);
+  return (
+    <EditFrame name="move" title={`Move ${before.title}`} subtitle={org.name} onBack={host.back} go="Move it" problem={to === (before.reports_to ?? "") ? "Choose where it goes." : positionProblem(draft, appointable(org).map(positionOfView), host.currency)} busy={host.busy} note={AT_ONCE} action={action} onGo={(tell) => host.play(action, host.back, tell)}>
+      <MoveFields org={org} id={before.id} value={to} onChange={setTo} />
+    </EditFrame>
+  );
+}
+
+/** Whom a position may be given to, as a picker: the people and organizations on the page who don't hold it. */
+export function AppointFields(props: { org: OrgView; id: string; value: string; onChange(who: string): void }) {
+  return <RefPicker label="Whom" value={props.value} options={appointees(props.org, props.id).map((p) => ({ value: p.id, label: p.you ? `${p.name} (you)` : p.name, ...(p.title !== "" ? { sublabel: p.title } : {}) }))} onChange={props.onChange} />;
+}
+
+/** Appoint someone to it (the chart's menu): one of its people or organizations into the position, by their membership or their job (`org_appoint`, `job_position`). */
+export function AppointSheet(props: { org: OrgView; id: string | null; host: PlayHost }) {
+  const { org, host } = props;
+  const before = chartPosition(org, props.id);
+  const [who, setWho] = useState("");
+  if (!before) return <GonePosition org={org} onBack={host.back} />;
+  const person = org.people.find((p) => p.id === who);
+  const action = person ? appointAction(org, person, before.id) : null;
+  return (
+    <EditFrame name="appoint" title={`Appoint to ${before.title}`} subtitle={org.name} onBack={host.back} go="Appoint" problem={appointees(org, before.id).length === 0 ? "Everyone you know here holds it already." : person ? null : "Choose whom to appoint."} busy={host.busy} note={AT_ONCE} action={action} onGo={(tell) => (action ? host.play(action, host.back, tell) : undefined)}>
+      <AppointFields org={org} id={before.id} value={who} onChange={setWho} />
+    </EditFrame>
+  );
+}
+
+/** Remove the position (the chart's menu): its holders stay without it, and those under it report to no one. */
+export function RemovePositionSheet(props: { org: OrgView; id: string | null; host: PlayHost }) {
+  const { org, host } = props;
+  const before = chartPosition(org, props.id);
+  if (!before) return <GonePosition org={org} onBack={host.back} />;
+  const action = positionRemoveAction(org.id, before.id);
+  return (
+    <EditFrame name="remove" title={`Remove ${before.title}`} subtitle={org.name} onBack={host.back} go="Remove the position" problem={null} busy={host.busy} note={`Those holding it stay, without it; positions under it report to no one. ${AT_ONCE}`} action={action} onGo={(tell) => host.play(action, host.back, tell)}>
+      <span>{`${before.title} · ${powersText(before.powers)}`}</span>
     </EditFrame>
   );
 }

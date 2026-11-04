@@ -49,6 +49,11 @@ export interface ScopeInput {
   vars?: EnvVars;
   /** The effect's own generator: only effect arguments get one, and with it `roll()` (DESIGN §11). */
   rng?: Rng;
+  /**
+   * The instant the clock names read (`clock`, `month`, `weekday`, `today_at`, …): a flow
+   * occurrence's own, when it is worked out ahead of the state's clock; the state's clock without one.
+   */
+  at?: number;
 }
 
 /**
@@ -249,6 +254,7 @@ export function scopeEnv(input: ScopeInput): ExprEnv {
   const bindings: Record<string, EntityId> = { self: world.pov, ...input.bindings };
   const vars = input.vars ?? {};
   const self = bindings.self ?? world.pov;
+  const now = input.at ?? state.clock;
   let derivedDepth = 0;
 
   const entityValue = (id: EntityId, rest: readonly string[]): Value | undefined => {
@@ -271,7 +277,7 @@ export function scopeEnv(input: ScopeInput): ExprEnv {
       if (derivedDepth > 8) return 0;
       derivedDepth++;
       try {
-        return runProgram(compile(def.derived), scopeEnv({ reg, ctx, bindings: { self: id } }));
+        return runProgram(compile(def.derived), scopeEnv({ reg, ctx, bindings: { self: id }, ...(input.at !== undefined ? { at: input.at } : {}) }));
       } finally {
         derivedDepth--;
       }
@@ -288,10 +294,10 @@ export function scopeEnv(input: ScopeInput): ExprEnv {
 
   const clockValue = (name: string): Value | undefined => {
     const cal = calendarOf(world);
-    const d = dateAt(cal, state.clock);
+    const d = dateAt(cal, now);
     switch (name) {
       case "clock":
-        return state.clock;
+        return now;
       case "minute":
         return d.minuteOfDay;
       case "hour":
@@ -307,7 +313,7 @@ export function scopeEnv(input: ScopeInput): ExprEnv {
       case "year":
         return d.year;
       case "daypart":
-        return dayPartAt(cal, state.clock).id;
+        return dayPartAt(cal, now).id;
       default:
         return undefined;
     }
@@ -377,7 +383,7 @@ export function scopeEnv(input: ScopeInput): ExprEnv {
         return own(state.tracks, str(a0))?.stage ?? own(world.tracks, str(a0))?.start ?? null;
       case "since": {
         const t = own(state.tracks, str(a0));
-        return t ? state.clock - t.since : state.clock;
+        return t ? now - t.since : now;
       }
       case "place":
         return placeOfEntity(state, str(a0));
@@ -410,17 +416,17 @@ export function scopeEnv(input: ScopeInput): ExprEnv {
       }
       case "next_time": {
         try {
-          return nextTimeOfDay(calendarOf(world), state.clock, parseHHMM(str(a0)));
+          return nextTimeOfDay(calendarOf(world), now, parseHHMM(str(a0)));
         } catch {
-          return state.clock;
+          return now;
         }
       }
       case "today_at": {
         try {
           const cal = calendarOf(world);
-          return clockAt(cal, dateAt(cal, state.clock).dayIndex, parseHHMM(str(a0)));
+          return clockAt(cal, dateAt(cal, now).dayIndex, parseHHMM(str(a0)));
         } catch {
-          return state.clock;
+          return now;
         }
       }
       case "hours":
@@ -429,7 +435,7 @@ export function scopeEnv(input: ScopeInput): ExprEnv {
         return num(a0) * 1440;
       case "holiday": {
         const cal = calendarOf(world);
-        return holidaysOn(cal, dateAt(cal, state.clock).dayIndex)[0]?.label ?? "";
+        return holidaysOn(cal, dateAt(cal, now).dayIndex)[0]?.label ?? "";
       }
       case "count_at": {
         // count_at(place, kind?): entities at a place, optionally of a kind (with inheritance)

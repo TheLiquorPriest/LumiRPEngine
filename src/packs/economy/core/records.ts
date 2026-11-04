@@ -81,13 +81,14 @@ export function realisedSales(state: Readonly<WorldState>, party: EntityId): { a
     .reverse();
 }
 
-export const INCOME_KINDS = ["dividend", "interest", "profit"] as const;
+/** Kinds of income a party's year keeps: a holding's dividend or interest, a business's profit share, and a royalty (a mineral or rights interest's share of what it produces, ordinary income). */
+export const INCOME_KINDS = ["dividend", "interest", "profit", "royalty"] as const;
 export type IncomeKind = (typeof INCOME_KINDS)[number];
 
-/** Adds income to a party's year, by kind (`income[party][year][kind]`). */
-export function recordIncome(state: WorldState, world: ReadContext["world"], party: EntityId, kind: IncomeKind, cents: number): void {
+/** Adds income to a party's year, by kind (`income[party][year][kind]`): the clock's year, or `forYear` (a consent dividend counts in the year its corporation names). */
+export function recordIncome(state: WorldState, world: ReadContext["world"], party: EntityId, kind: IncomeKind, cents: number, forYear?: number): void {
   if (!safeKey(party) || cents === 0) return;
-  const year = yearOf(world, state.clock);
+  const year = forYear !== undefined ? String(forYear) : yearOf(world, state.clock);
   const income = holdingsRecord(state, "income");
   const mine = objOf(own(income, party));
   const y = objOf(own(mine, year));
@@ -98,7 +99,7 @@ export function recordIncome(state: WorldState, world: ReadContext["world"], par
 /** A party's investment income in a year, by kind. */
 export function incomeIn(state: Readonly<WorldState>, party: EntityId, year: number): Record<IncomeKind, number> {
   const y = objOf(own(objOf(own(objOf(holdingsSlice(state).income), party)), String(year)));
-  return { dividend: numOf(y.dividend), interest: numOf(y.interest), profit: numOf(y.profit) };
+  return { dividend: numOf(y.dividend), interest: numOf(y.interest), profit: numOf(y.profit), royalty: numOf(y.royalty) };
 }
 
 /**

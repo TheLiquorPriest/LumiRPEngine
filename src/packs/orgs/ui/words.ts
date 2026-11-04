@@ -1,11 +1,22 @@
 // The Orgs tab's words (ORG-SPEC §4.2-4.4) for what its views hold: lists of names, counts, the
 // party's tiers, the page's first line, here and away, a position's seats, limits and successor,
-// and powers by family with what each rests on. Pure.
+// powers by family with what each rests on, each type's icon, and how one organization holds
+// another (a stake, votes, a role, a seat) and whom your powers pass through. Pure.
 
 import { formatCents } from "../../../frontend/format";
-import { ORG_POWER_FAMILIES, ORG_POWERS, POWER_FAMILY_LABELS, POWER_WORDS, type OrgLimits, type OrgPower, type OrgPowerFamily } from "../../../shared/org";
-import type { OrgPositionView, OrgPowerView, OrgRef, OrgView } from "../../../shared/org-view";
+import type { IconName } from "../../../frontend/icons";
+import { OWNER_ROLE_LABELS } from "../../../shared/finance";
+import { ORG_POWER_FAMILIES, ORG_POWERS, POWER_FAMILY_LABELS, POWER_WORDS, type OrgLimits, type OrgPower, type OrgPowerFamily, type OrgType } from "../../../shared/org";
+import type { OrgLinkView, OrgPositionView, OrgPowerView, OrgRef, OrgView } from "../../../shared/org-view";
 import type { PartyTier } from "../../../shared/party";
+
+/** Each type's icon. */
+export const TYPE_ICON: Readonly<Record<OrgType, IconName>> = { household: "home", company: "briefcase", group: "flag", trust: "shield", party: "users" };
+
+/** A percent as a page shows it: "60%", "33.33%". */
+export function pct(n: number): string {
+  return `${Math.round(n * 100) / 100}%`;
+}
 
 /** "Danny", "Danny and Jess", "Danny, Jess and Maddie". */
 export function andList(items: readonly string[]): string {
@@ -75,7 +86,7 @@ export function powersText(powers: readonly OrgPower[]): string {
   return families.length === 0 ? "None" : families.map((f) => (f.words.length > 0 ? `${f.family}: ${f.words.join(", ")}` : f.family)).join("; ");
 }
 
-/** What the powers held rest on, in words, each basis once: "As owner", "As Head and by delegation from Marcus Delgado", "As a member". */
+/** What the powers held rest on, in words, each basis once: "As owner", "As Head and by delegation from Marcus Delgado", "As a member", "Through Alder Holdings". */
 export function basisWords(org: OrgView, held: readonly OrgPowerView[]): string {
   const words = held.map((h) => {
     if (h.basis === "owner") return "as owner";
@@ -84,8 +95,44 @@ export function basisWords(org: OrgView, held: readonly OrgPowerView[]): string 
       const by = org.you.delegations.find((d) => d.by?.id === h.id)?.by?.name;
       return by ? `by delegation from ${by}` : "by delegation";
     }
+    if (h.basis === "control") {
+      const through = [...org.you.through, ...org.above].find((o) => o.id === h.id)?.name;
+      return through ? `through ${through}` : "through who holds it";
+    }
     return "as a member";
   });
   const text = andList([...new Set(words)]);
   return text === "" ? "" : text[0]?.toUpperCase() + text.slice(1);
+}
+
+/**
+ * How one organization holds another, in words (the Org Chart, the home's tree): its stake, its
+ * share of the votes where that differs, its role on a trust, the seat it holds, a delegation:
+ * "60% · 75% of the votes", "Trustee", "Director", "Acts for it". "" when nothing is known.
+ */
+export function linkWords(link: OrgLinkView): string {
+  const parts = [
+    link.share !== null && link.share > 0 ? pct(link.share) : null,
+    link.votes !== null && link.votes > 0 && (link.share === null || Math.abs(link.votes - link.share) > 0.005) ? `${pct(link.votes)} of the votes` : null,
+    link.role !== null && link.role !== "owner" ? OWNER_ROLE_LABELS[link.role].one : null,
+    link.position ? link.position.title : null,
+    link.delegation ? "Acts for it" : null,
+  ];
+  return parts.filter((p) => p !== null).join(" · ");
+}
+
+/**
+ * The Overview's line for powers that pass down to the reader through the organizations that hold
+ * it (`you.through`, nearest the reader first): "You run it through Alder Holdings", "You run it
+ * through Alder Holdings, then Alder Towing"; where they may only see its money, "You see its money
+ * through …"; any other powers, "You hold powers here through …". Null when none pass through one.
+ */
+export function throughWords(org: OrgView): string | null {
+  const through = org.you.through;
+  if (through.length === 0) return null;
+  const control = org.you.powers.filter((p) => p.basis === "control");
+  const chain = through.map((o) => o.name).join(", then ");
+  if (control.some((p) => p.power === "org.govern")) return `You run it through ${chain}`;
+  if (control.length > 0 && control.every((p) => p.power === "money.view")) return `You see its money through ${chain}`;
+  return `You hold powers here through ${chain}`;
 }

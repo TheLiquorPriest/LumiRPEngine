@@ -21,11 +21,12 @@ import { isGone, placeOfEntity } from "../../../engine/scope";
 import { canSeeEntity, findLeaks, unrevealedSecrets } from "../../../engine/visibility";
 import { readSlice } from "./state";
 
-/** One line of the Minds section, and whose mind it tells: their id, and their name as the line gives it (by name, or "Someone"). */
+/** One line of the Minds section, and whose mind it tells: their id, and their name as the line gives it (by name, or "Someone"); `kept` when Smart persistence kept their last thoughts this turn, which the narrator is told are unchanged. */
 export interface MindLine {
   entity: EntityId;
   name: string;
   line: string;
+  kept?: true;
 }
 
 /** Text as one clause: whitespace collapsed, no trailing full stop. */
@@ -68,12 +69,12 @@ export function mindLines(ctx: ReadContext): MindLine[] {
       if (m.mood) parts.push(`Mood: ${clause(m.mood)}.`);
       if (m.depiction !== "") parts.push(`Shows: ${clause(m.depiction)}.`);
       if (m.interrupt) parts.push(`Interrupts the skip: ${clause(m.interrupt)}.`);
-      out.push({ entity: id, name, line: parts.join(" ") });
+      out.push({ entity: id, name, line: parts.join(" "), ...(m.reason === "kept" ? { kept: true as const } : {}) });
       continue;
     }
     if (m.withheld || m.depiction.trim() === "" || !safe(m.depiction)) continue;
     const interrupt = m.interrupt && safe(m.interrupt) ? ` Interrupts the skip: ${clause(m.interrupt)}.` : "";
-    out.push({ entity: id, name, line: `${name}: ${clause(m.depiction)}.${interrupt}` });
+    out.push({ entity: id, name, line: `${name}: ${clause(m.depiction)}.${interrupt}`, ...(m.reason === "kept" ? { kept: true as const } : {}) });
   }
   return out;
 }

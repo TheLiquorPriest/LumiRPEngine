@@ -803,7 +803,8 @@ function registerRest(r: CoreRegistry, hooks: FinanceHooks): void {
             const v = strOf(e.fields[side]);
             if (ID_SHAPED.test(v) && !own(world.entities, v)) issues.push({ severity: "warning" as const, code: "economy.accounts", message: `Flow ${e.name}'s ${side} "${v}" names no entity; it's read as an outside party by that name.`, path: `entities.${e.id}.fields.${side}` });
           }
-          const amount = ["amount_cents", "amount_formula", "amount_table", "amount_min", "amount_pct", "amount_due"].some((k) => e.fields[k] !== undefined && e.fields[k] !== "");
+          // A revenue stream's model is its amount (the revenue module lints the model itself).
+          const amount = ["amount_cents", "amount_formula", "amount_table", "amount_min", "amount_pct", "amount_due", "revenue"].some((k) => e.fields[k] !== undefined && e.fields[k] !== "");
           if (!amount) issues.push({ severity: "error" as const, code: "economy.accounts", message: `Flow ${e.name} has no amount.`, path: `entities.${e.id}.fields.amount_cents` });
           if ((e.fields.every === undefined || e.fields.every === "") && (e.fields.once === undefined || e.fields.once === "")) issues.push({ severity: "error" as const, code: "economy.accounts", message: `Flow ${e.name} has no schedule: give it "every" or "once".`, path: `entities.${e.id}.fields.every` });
           const link = strOf(e.fields.link);

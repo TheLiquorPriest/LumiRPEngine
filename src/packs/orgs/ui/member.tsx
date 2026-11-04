@@ -4,14 +4,16 @@
 //   status, where the reader may see its money); then each control the reader may use there:
 //   Appoint…, Change title…, Delegate…, Revoke…, Raise, Change hours, Put on leave (Back from
 //   leave), Let go and Remove;
-// - Hire someone and Admit a member;
-// - a position, a delegation and the dues (Rules' editors).
+// - Hire someone and Admit a member (an officer or director on a trust), into a position when the
+//   Org Chart names one;
+// - a position (added under another from the chart), moving one, appointing someone to one and
+//   removing one (the chart's menus), a delegation and the dues (Rules' editors).
 // Each plays as the reader's action, through the palette's request: bookkeeping at once with its
 // Undo, anything done to or with another person staged as their next turn. The engine judges each
 // again, in its own words.
 
 import { useId, useState } from "preact/hooks";
-import { useApp, type SheetRoute } from "../../../frontend/app";
+import { orgRoute, useApp, type SheetRoute } from "../../../frontend/app";
 import { RefPicker } from "../../../frontend/build/form-kit";
 import { Button, Card, Empty, Field, List, ListRow, PageHeader, Row, Section, useBusy } from "../../../frontend/components";
 import { humanize } from "../../../frontend/format";
@@ -50,13 +52,14 @@ import {
   type MemberControl,
   type StaffJobInfo,
 } from "./edit";
-import { AT_ONCE, DelegateSheet, DuesSheet, EditFrame, PositionSheet, type PlayHost } from "./rules";
+import { admitLabel } from "./chart-model";
+import { AppointSheet, AT_ONCE, DelegateSheet, DuesSheet, EditFrame, MoveSheet, PositionSheet, RemovePositionSheet, type PlayHost } from "./rules";
 import { andList, limitWords, powerFamilies, powersText } from "./words";
 
 /** How someone belongs there, in words: "Owner (100%)", "Staff", "Member", a party tier. */
 const HOW_LABELS: Readonly<Record<string, string>> = { member: "Member", owner: "Owner", staff: "Staff", leader: "Leader", core: "Core", companion: "Companion", hired: "Hired", ally: "Ally" };
 
-/** What a person's powers rest on, in words, each basis once: "as owner", "as Shop foreman", "by delegation from Marcus Delgado", "as a member". */
+/** What a person's powers rest on, in words, each basis once: "as owner", "as Shop foreman", "by delegation from Marcus Delgado", "through Alder Holdings", "as a member". */
 export function heldWords(org: OrgView, person: OrgPersonView, held: readonly OrgPowerView[]): string {
   const words = held.map((h) => {
     if (h.basis === "owner") return "as owner";
@@ -64,6 +67,10 @@ export function heldWords(org: OrgView, person: OrgPersonView, held: readonly Or
     if (h.basis === "delegate") {
       const by = org.delegations.find((d) => d.who.id === person.id && d.by?.id === h.id)?.by?.name;
       return by ? `by delegation from ${by}` : "by delegation";
+    }
+    if (h.basis === "control") {
+      const through = org.above.find((o) => o.id === h.id)?.name;
+      return through ? `through ${through}` : "through who holds it";
     }
     return "as a member";
   });
@@ -223,7 +230,7 @@ function MemberSheet(props: { org: OrgView; who: string | null; host: PlayHost; 
         </div>
       ) : null}
       {!person.you ? (
-        <Button variant="ghost" icon="user" block onClick={() => props.open({ kind: "person", id: person.id })}>
+        <Button variant="ghost" icon={person.org !== null ? "briefcase" : "user"} block onClick={() => props.open(person.org !== null ? orgRoute(person.id) : { kind: "person", id: person.id })}>
           {`${person.name}'s page`}
         </Button>
       ) : null}
@@ -233,10 +240,10 @@ function MemberSheet(props: { org: OrgView; who: string | null; host: PlayHost; 
 
 const BASIS_LABELS: Readonly<Record<string, string>> = { salary: "A salary", hourly: "By the hour", per_shift: "By the shift", commission: "On commission", tips: "On tips", stipend: "A stipend" };
 
-/** Hire someone (`job_hire`, as a turn): whom, as what, in which position, and their pay; what it leaves out comes from their occupation and the employer's pay schedule. */
-function HireSheet(props: { org: OrgView; host: PlayHost }) {
+/** Hire someone (`job_hire`, as a turn): whom, as what, in which position (the one the chart named, at first), and their pay; what it leaves out comes from their occupation and the employer's pay schedule. */
+function HireSheet(props: { org: OrgView; position: string | null; host: PlayHost }) {
   const { org, host } = props;
-  const [form, setForm] = useState<HireForm>({ worker: "", title: "", position: "", basis: "hourly", rate: "", hours: "", every: "" });
+  const [form, setForm] = useState<HireForm>({ worker: "", title: "", position: props.position ?? "", basis: "hourly", rate: "", hours: "", every: "" });
   const set = (patch: Partial<HireForm>) => setForm((f) => ({ ...f, ...patch }));
   const people = newcomers(org, "hire");
   const action = hireAction(org, form, host.currency);
@@ -255,16 +262,16 @@ function HireSheet(props: { org: OrgView; host: PlayHost }) {
   );
 }
 
-/** Admit a member (`org_admit`, as a turn): whom, with a title of their own, into a position or its default one. */
-function AdmitSheet(props: { org: OrgView; host: PlayHost }) {
+/** Admit a member, on a trust an officer or director (`org_admit`, as a turn): whom, with a title of their own, into a position (the one the chart named, at first) or its default one. */
+function AdmitSheet(props: { org: OrgView; position: string | null; host: PlayHost }) {
   const { org, host } = props;
-  const [form, setForm] = useState<AdmitForm>({ who: "", title: "", position: "" });
+  const [form, setForm] = useState<AdmitForm>({ who: "", title: "", position: props.position ?? "" });
   const set = (patch: Partial<AdmitForm>) => setForm((f) => ({ ...f, ...patch }));
   const people = newcomers(org, "admit");
   const action = admitAction(org, form);
   const joins = appointable(org).find((p) => p.id === org.defaultPosition)?.title;
   return (
-    <EditFrame name="admit" title="Admit a member" subtitle={org.name} onBack={host.back} go="Admit" problem={people.length === 0 ? "There's no one you know to admit." : form.who === "" ? "Choose whom to admit." : null} busy={host.busy} note={AT_ONCE} action={action} onGo={(tell) => (action ? host.play(action, host.back, tell) : undefined)}>
+    <EditFrame name="admit" title={admitLabel(org)} subtitle={org.name} onBack={host.back} go="Admit" problem={people.length === 0 ? "There's no one you know to admit." : form.who === "" ? "Choose whom to admit." : null} busy={host.busy} note={AT_ONCE} action={action} onGo={(tell) => (action ? host.play(action, host.back, tell) : undefined)}>
       <RefPicker label="Whom" value={form.who} options={people.map((p) => ({ value: p.id, label: p.name }))} onChange={(who) => set({ who })} />
       <TextField label="Title" value={form.title} placeholder="Member" onInput={(title) => set({ title })} />
       {appointable(org).length > 0 ? <RefPicker label="Position" value={form.position} options={appointable(org).map((p) => ({ value: p.id, label: p.title }))} none={joins ? `${joins}, as new members join` : "No position"} onChange={(position) => set({ position })} /> : null}
@@ -324,11 +331,19 @@ export function OrgEditSheet(props: SheetProps) {
     case "member":
       return <MemberSheet org={org} who={target.id} host={host} open={props.open} />;
     case "hire":
-      return <HireSheet org={org} host={host} />;
+      return <HireSheet org={org} position={target.id} host={host} />;
     case "admit":
-      return <AdmitSheet org={org} host={host} />;
+      return <AdmitSheet org={org} position={target.id} host={host} />;
     case "position":
       return <PositionSheet org={org} id={target.id} host={host} />;
+    case "under":
+      return <PositionSheet org={org} id={null} {...(target.id !== null ? { under: target.id } : {})} host={host} />;
+    case "move":
+      return <MoveSheet org={org} id={target.id} host={host} />;
+    case "appoint":
+      return <AppointSheet org={org} id={target.id} host={host} />;
+    case "remove":
+      return <RemovePositionSheet org={org} id={target.id} host={host} />;
     case "delegate":
       return <DelegateSheet org={org} who={target.id} host={host} />;
     case "dues":

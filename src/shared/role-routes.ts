@@ -3,8 +3,10 @@
 // agent's stage it works in, and the route that resolves from them. A role that names a connection
 // runs every task there; one that names none runs each task on its step's connection and model
 // (Settings → Steps and connections), else the helper model's, else Lumiverse's default connection.
-// Settings → Agents shows these ("Runs on", a turn at a glance, Steps' "On agent chats"); a test pins
-// the map to the role runs' own. Nothing here is read by a turn on the steps engine.
+// Settings → Agents shows these ("Runs on", a turn at a glance, Steps' "On agent chats"), and each
+// role's run reads them (`runRoleAgent`), so a task runs where Settings says it does; the stages each
+// role works in come from them too (`shared/agent-pipeline.ts`). Nothing here is read by a turn on the
+// steps engine.
 
 import { ROLE_IDS, type RoleId, type RoleSettings } from "./agent-roles";
 import type { MainRoleStage } from "./main-agent-prompts";

@@ -17,8 +17,10 @@ import { formatMoney } from "../../../shared/world";
 import { calendarOf, clockAt, dateAt, type Calendar } from "../../../engine/calendar";
 import { labelOf, numOf, own, strOf } from "../../../engine/pack-kit";
 import type { ReadContext } from "../../../engine/registry";
+import { depreciateMonth, depreciationDue } from "./depreciation";
 import { accrualOf, averageBalance, cycleOf, journalOf } from "./journal";
 import { balance, bankSide, holdersOf, productOf, statusOf, traitsOf } from "./model";
+import { noteOf, sweepNote } from "./notes";
 import { accountLevel, asUnit, isParty, posting, signal, toggles } from "./pay";
 import type { Run } from "./run";
 
@@ -28,6 +30,10 @@ const DUE_MINUTE = 23 * 60 + 59;
 const INTEREST_MINUTE = 30;
 /** An installment loan bills just after midnight on its due day, so the day's autopay finds the bill. */
 const LOAN_BILL_MINUTE = 1;
+/** What a project built and a mineral interest lose for the month just ended posts early on the 1st. */
+const DEPRECIATION_MINUTE = 15;
+/** A loan made's sweep lands the day's payments with the lender at the end of the day, after the day's autopay. */
+const SWEEP_MINUTE = 23 * 60 + 58;
 
 /** One thing the cycle engine does at an instant. */
 export interface CycleTask {
@@ -80,6 +86,16 @@ function monthlyAt(cal: Calendar, from: number, to: number, dom: number, minute:
   return out;
 }
 
+/** Each day's `minute` in `(from, to]`. */
+function dailyAt(cal: Calendar, from: number, to: number, minute: number): number[] {
+  const out: number[] = [];
+  for (let d = dateAt(cal, from).dayIndex; d <= dateAt(cal, to).dayIndex; d++) {
+    const at = clockAt(cal, d, minute);
+    if (inSlot(at, from, to)) out.push(at);
+  }
+  return out;
+}
+
 const NEXT_STAGE: Record<DelinquencyStage, DelinquencyStage> = { current: "late", late: "30", "30": "60", "60": "90", "90": "120", "120": "collections", collections: "charged_off", charged_off: "charged_off" };
 
 /** The tasks the cycle engine has in `(from, to]`, read from the state before the slot. */
@@ -111,8 +127,10 @@ export function cycleTasks(ctx: ReadContext, from: number, to: number): CycleTas
       const dueDay = dateAt(cal, cycle.due).dayIndex;
       const morning = clockAt(cal, dueDay, 9 * 60 + 30);
       if (inSlot(morning, from, to) && strOf(e.fields.autopay, "none") === "none") tasks.push({ at: morning, rank: 4, key: `remind:${id}`, run: (run) => remind(run, id) });
-      if (inSlot(cycle.due, from, to) && feature(ctx, id, "delinquency")) tasks.push({ at: cycle.due, rank: 5, key: `due:${id}`, run: (run) => dueCheck(run, id, cycle.due) });
+      // A loan between parties takes no late fee and no delinquency: what it hasn't been paid it still owes.
+      if (inSlot(cycle.due, from, to) && feature(ctx, id, "delinquency") && noteOf(ctx, id) === null) tasks.push({ at: cycle.due, rank: 5, key: `due:${id}`, run: (run) => dueCheck(run, id, cycle.due) });
     }
+    if (t.receivable) for (const at of dailyAt(cal, from, to, SWEEP_MINUTE)) tasks.push({ at, rank: 6, key: `sweep:${id}`, run: (run) => sweepNote(run, id, at) });
     if (t.earns && feature(ctx, id, "interest") && (p.apy_pct > 0 || p.fees.maintenance > 0)) {
       for (const at of monthlyAt(cal, from, to, 1, INTEREST_MINUTE)) tasks.push({ at, rank: 2, key: `interest:${id}`, run: (run) => monthEnd(run, id, at) });
     } else if (t.transactional && feature(ctx, id, "fees") && p.fees.maintenance > 0) {
@@ -124,6 +142,7 @@ export function cycleTasks(ctx: ReadContext, from: number, to: number): CycleTas
       tasks.push({ at: Math.max(from + 1, Math.min(to, upto)), rank: 0, key: `settle:${id}`, run: (run) => void run.emit([{ type: FINANCE_EVENTS.settle, data: { account: id, upto } }]) });
     }
   }
+  if (depreciationDue(ctx)) for (const at of monthlyAt(cal, from, to, 1, DEPRECIATION_MINUTE)) tasks.push({ at, rank: 3, key: "depreciation", run: (run) => depreciateMonth(run, at) });
   return tasks;
 }
 
@@ -291,8 +310,10 @@ function billInstallment(run: Run, account: EntityId, at: number): void {
   if (!p || !e) return;
   const prev = cycleOf(ctx.state, account);
   const owed = Math.max(0, -balance(ctx.state, account));
+  // A loan between parties owes its lender's note, not a bank: no credit report hears of it.
+  const note = noteOf(ctx, account);
   if (owed <= 0) {
-    run.emit([{ type: FINANCE_EVENTS.status, data: { account, status: "paid_off" } }, ...creditEntries(ctx, account, "paid_off", at)]);
+    run.emit([{ type: FINANCE_EVENTS.status, data: { account, status: "paid_off" } }, ...(note === null ? creditEntries(ctx, account, "paid_off", at) : [])]);
     return;
   }
   const authoredMonths = numOf(e.fields.months_left, numOf(e.fields.remaining_months, p.term_months ?? 0));
@@ -301,7 +322,12 @@ function billInstallment(run: Run, account: EntityId, at: number): void {
   const rate = feature(ctx, account, "interest") ? apr / 100 / 12 : 0;
   const interest = Math.round(owed * rate);
   const name = labelOf(ctx, account);
-  if (interest > 0) run.emit(asUnit(posting(bankLines(account, p.institution, interest), { memo: `${name} interest`, kind: "interest", category: "interest", at })));
+  if (interest > 0) {
+    // Its interest is the lender's as much as the borrower's: equal and opposite on the note.
+    const lines = note === null ? bankLines(account, p.institution, interest) : [{ account, amount: -interest }, { account: note, amount: interest }];
+    const sides = note === null ? {} : { counterparty: holdersOf(ctx.state, note)[0] ?? note, payer: holdersOf(ctx.state, account)[0] ?? account };
+    run.emit(asUnit(posting(lines, { memo: `${name} interest`, kind: "interest", category: "interest", ...sides, at })));
+  }
   const total = owed + interest;
   const payment = typeof e.fields.payment === "number" && e.fields.payment > 0 ? e.fields.payment : Math.round(amortized(owed, rate, months));
   // The last month takes what's left, so a loan finishes at its term.

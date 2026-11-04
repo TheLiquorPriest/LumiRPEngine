@@ -42,7 +42,7 @@ export type MonthBook = Record<BookKey, number>;
  * books itself; transfers between its own accounts; and balance-sheet moves (money borrowed, and
  * investments and property bought and sold), which change what it holds, not what it makes.
  */
-export const BOOKED_CATEGORIES: readonly string[] = ["sales", "cogs", "sales_tax", "invoice", "payroll", "business_tax", "draw", "distribution", "transfer", "loan", "investment", "property"];
+export const BOOKED_CATEGORIES: readonly string[] = ["sales", "cogs", "sales_tax", "invoice", "payroll", "business_tax", "draw", "distribution", "transfer", "loan", "investment", "property", "lending", "capex"];
 
 /**
  * Journal categories of income from what a business holds rather than from its trade: its
@@ -50,6 +50,9 @@ export const BOOKED_CATEGORIES: readonly string[] = ["sales", "cogs", "sales_tax
  * profit, which values a business beside what it holds at market (§27.10), so nothing counts twice.
  */
 export const INVESTMENT_INCOME: readonly string[] = ["dividends", "interest"];
+
+/** Journal categories of revenue the books list on their own lines: a stream's royalties and fees, never what a sale at a till brings in. */
+const OWN_REVENUE: readonly string[] = ["royalties", "fee_income", "other_income"];
 
 /** Months of books kept per business: two years and the month under way. */
 const MONTHS_KEPT = 25;
@@ -123,6 +126,12 @@ export function totalsOf(state: Readonly<WorldState>, account: EntityId, month: 
   return out;
 }
 
+/** What `party`'s books took in a month for depreciation and depletion (the economy slice's `depreciation`, DESIGN §26.5). */
+export function depreciationIn(state: Readonly<WorldState>, party: EntityId, month: string): { depreciation: number; depletion: number } {
+  const m = objOf(own(objOf(own(objOf(sliceOf(state, "economy").depreciation), party)), month));
+  return { depreciation: numOf(m.depreciation), depletion: numOf(m.depletion) };
+}
+
 /**
  * The first month a business's books, or the journal of any account counting toward it, recorded
  * anything (its accounts' openings among it): the chat's first month for a business it starts
@@ -161,6 +170,9 @@ export interface BooksDetail {
   payables: number;
   payroll: number;
   taxes: number;
+  /** What its assets lost in its books (§26.5), among the expenses: straight-line depreciation and cost depletion; 0 where nothing depreciates. */
+  depreciation: number;
+  depletion: number;
   /** Revenue (positive) and expenses (negative) by line. */
   lines: { category: string; cents: number }[];
   draws: number;
@@ -179,15 +191,22 @@ export function businessBooks(api: FinanceApi, books: Books, business: EntityId,
   for (const k of BOOK_KEYS) sum[k] = 0;
   let otherIn = 0;
   let investment = 0;
+  let depreciation = 0;
+  let depletion = 0;
+  const ownIn: Record<string, number> = {};
   const otherOut: Record<string, number> = {};
   for (const month of monthsBetween(books.world, from, to)) {
     const b = monthBook(books.state, business, month);
     for (const k of BOOK_KEYS) sum[k] += b[k];
+    const lost = depreciationIn(books.state, business, month);
+    depreciation += lost.depreciation;
+    depletion += lost.depletion;
     for (const account of accounts) {
       for (const [category, t] of Object.entries(totalsOf(books.state, account, month))) {
         // An account's opening balance is what the business started with, not money it made or spent; a correction puts a balance right.
         if (BOOKED_CATEGORIES.includes(category) || category === "opening" || isCorrection({ category })) continue;
         if (INVESTMENT_INCOME.includes(category)) investment += t.in;
+        else if (OWN_REVENUE.includes(category)) ownIn[category] = (ownIn[category] ?? 0) + t.in;
         else otherIn += t.in;
         if (t.out > 0) otherOut[category] = (otherOut[category] ?? 0) + t.out;
       }
@@ -195,13 +214,15 @@ export function businessBooks(api: FinanceApi, books: Books, business: EntityId,
   }
   // Sales through the purchase path land under the goods' own categories; their takings are booked already.
   const otherIncome = Math.max(0, otherIn - sum.takings);
+  const ownLines = OWN_REVENUE.filter((c) => (ownIn[c] ?? 0) !== 0).map((c) => ({ category: c, cents: ownIn[c] ?? 0 }));
   const expenseLines = Object.entries(otherOut).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
-  const revenue = sum.sales + sum.invoices + otherIncome + investment;
-  const expenses = sum.cogs + sum.payroll + sum.business_tax + sum.bills + expenseLines.reduce((a, [, c]) => a + c, 0);
+  const revenue = sum.sales + sum.invoices + otherIncome + ownLines.reduce((a, l) => a + l.cents, 0) + investment;
+  const expenses = sum.cogs + sum.payroll + sum.business_tax + sum.bills + expenseLines.reduce((a, [, c]) => a + c, 0) + depreciation + depletion;
   const owed = owedOf(books.state, business);
   const lines = [
     { category: "sales", cents: sum.sales },
     { category: "invoices", cents: sum.invoices },
+    ...ownLines,
     { category: "other income", cents: otherIncome },
     { category: "investment income", cents: investment },
     { category: "cost of goods", cents: -sum.cogs },
@@ -209,9 +230,11 @@ export function businessBooks(api: FinanceApi, books: Books, business: EntityId,
     { category: "bills", cents: -sum.bills },
     { category: "income tax", cents: -sum.business_tax },
     ...expenseLines.map(([category, c]) => ({ category, cents: -c })),
+    { category: "depreciation", cents: -depreciation },
+    { category: "depletion", cents: -depletion },
   ].filter((l) => l.cents !== 0);
   const profit = revenue - expenses;
-  return { revenue, expenses, profit, investment, operating: profit - investment, receivables: owed.receivables, payables: owed.payables, payroll: sum.payroll, taxes: sum.business_tax, lines, draws: sum.draws, distributions: sum.distributions };
+  return { revenue, expenses, profit, investment, operating: profit - investment, receivables: owed.receivables, payables: owed.payables, payroll: sum.payroll, taxes: sum.business_tax, depreciation, depletion, lines, draws: sum.draws, distributions: sum.distributions };
 }
 
 /** What a business is owed now (its open and late invoices) and what it owes (invoices billed to it, sales tax it collected, its suppliers): its net worth counts both (§27.10). */

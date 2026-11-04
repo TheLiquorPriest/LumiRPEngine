@@ -55,7 +55,7 @@ describe("Data updates", () => {
   test("a Port Alder made on the old tables gets each changed table as an update and the index's history as missing", () => {
     const updates = tableUpdates(oldPortAlder(), reg.tables);
     // The unemployment taxes' rows and columns and the tax-exempt statuses (ORG-SPEC §3.11, Phase 5) came after 58b2ac44 too.
-    expect(Object.fromEntries(updates.map((u) => [u.table, u.status]))).toEqual({ "economy.catalog": "update", "economy.categories": "update", "economy.exempt": "missing", "economy.finance": "update", "economy.regions": "update", "economy.index_history": "missing", "gear.items": "update", "gear.containers": "update" });
+    expect(Object.fromEntries(updates.map((u) => [u.table, u.status]))).toEqual({ "economy.catalog": "update", "economy.categories": "update", "economy.exempt": "missing", "economy.finance": "update", "economy.regions": "update", "economy.index_history": "missing", "economy.projects": "missing", "gear.items": "update", "gear.containers": "update" });
     const catalog = updates.find((u) => u.table === "economy.catalog");
     expect(catalog?.label).toBe("Price catalog");
     expect(catalog?.shipped.columns.added).toEqual(["aliases", "size", "holds"]);
@@ -108,6 +108,7 @@ describe("Data updates", () => {
         "economy.finance": ["update", "packs"],
         "economy.regions": ["update", "packs"],
         "economy.index_history": ["missing", "packs"],
+        "economy.projects": ["missing", "packs"],
         "gear.items": ["update", name],
         "gear.containers": ["update", "packs"],
       });
@@ -121,9 +122,9 @@ describe("Data updates", () => {
         expect(ownTable(id, table).revision).not.toBe(reg.tables.get(table)?.defaults?.revision);
       }
       expect(shippedVersion(world, reg.tables, STARTER_TABLES, "gear.containers")).toBe(reg.tables.get("gear.containers")?.defaults ?? null);
-      expect(statuses({ tables: { ...world.tables, "economy.catalog": ownTable(id, "economy.catalog"), "gear.items": ownTable(id, "gear.items") } })).toEqual({ "economy.exempt": "missing", "economy.finance": "update", "economy.regions": "update", "economy.index_history": "missing", "gear.containers": "update" });
+      expect(statuses({ tables: { ...world.tables, "economy.catalog": ownTable(id, "economy.catalog"), "gear.items": ownTable(id, "gear.items") } })).toEqual({ "economy.exempt": "missing", "economy.finance": "update", "economy.regions": "update", "economy.index_history": "missing", "economy.projects": "missing", "gear.containers": "update" });
       // Without the starters' histories, their copies are the world's own, as before they shipped.
-      expect(Object.fromEntries(tableUpdates(world, reg.tables).map((u) => [u.table, u.status]))).toEqual({ "economy.exempt": "missing", "economy.finance": "update", "economy.regions": "update", "economy.index_history": "missing", "gear.containers": "update" });
+      expect(Object.fromEntries(tableUpdates(world, reg.tables).map((u) => [u.table, u.status]))).toEqual({ "economy.exempt": "missing", "economy.finance": "update", "economy.regions": "update", "economy.index_history": "missing", "economy.projects": "missing", "gear.containers": "update" });
     }
   });
 

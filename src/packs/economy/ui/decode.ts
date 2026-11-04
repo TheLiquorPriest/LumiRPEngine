@@ -15,6 +15,7 @@ import {
   CARD_STATES,
   CREDIT_TIERS,
   DELINQUENCY_STAGES,
+  DEPRECIATION_METHODS,
   FINANCE_FEATURES,
   FLOW_KINDS,
   FLOW_SHORTFALLS,
@@ -24,7 +25,11 @@ import {
   PARTY_KINDS,
   PAY_BASES,
   PAY_CHOICES,
+  STATEMENT_PERIODS,
   TXN_KINDS,
+  type CashFlowStatement,
+  type IncomeStatement,
+  type StatementsView,
   type AccountView,
   type DistributionRoute,
   type OwnerRole,
@@ -56,6 +61,8 @@ import {
   type WindingView,
   type WindLine,
 } from "../../../shared/finance";
+import type { RevenueStreamView } from "../../../shared/revenue";
+import { decodeTaxesExtra, type TaxesExtra } from "../../../shared/tax-year";
 import { bool, list, num, obj, oneOf, optNum, str, strings, type Obj } from "../../../frontend/decode";
 
 function nullableNum(value: unknown): number | null {
@@ -69,6 +76,50 @@ function nullableStr(value: unknown): string | null {
 /** One of `values`, or null when the value isn't one. */
 function nullableOf<T extends string>(value: unknown, values: readonly T[]): T | null {
   return values.find((v) => v === value) ?? null;
+}
+
+const INCOME_CLASSES = ["revenue", "cogs", "opex", "interest", "investment", "income_tax", "depreciation", "depletion"] as const;
+const CASH_LINE_SECTIONS = ["operating", "investing", "financing", "owners", "correction", "opening"] as const;
+
+function incomeStatement(i: Obj | null): IncomeStatement {
+  const r = i ?? {};
+  const m = obj(r.margins) ?? {};
+  return {
+    revenue: num(r.revenue),
+    cogs: num(r.cogs),
+    grossProfit: num(r.grossProfit),
+    opex: num(r.opex),
+    depreciation: num(r.depreciation),
+    depletion: num(r.depletion),
+    operatingIncome: num(r.operatingIncome),
+    ebitda: num(r.ebitda),
+    interest: num(r.interest),
+    investmentIncome: num(r.investmentIncome),
+    preTax: num(r.preTax),
+    tax: num(r.tax),
+    netIncome: num(r.netIncome),
+    margins: { gross: nullableNum(m.gross), operating: nullableNum(m.operating), ebitda: nullableNum(m.ebitda), net: nullableNum(m.net) },
+    lines: list(r.lines, (l) => ({ category: str(l.category), label: str(l.label), class: oneOf(l.class, INCOME_CLASSES, "opex"), cents: num(l.cents) })),
+  };
+}
+
+function cashFlowStatement(c: Obj | null): CashFlowStatement {
+  const r = c ?? {};
+  return { operating: num(r.operating), investing: num(r.investing), financing: num(r.financing), owners: num(r.owners), corrections: num(r.corrections), openings: num(r.openings), change: num(r.change), start: num(r.start), end: num(r.end), lines: list(r.lines, (l) => ({ section: oneOf(l.section, CASH_LINE_SECTIONS, "operating"), label: str(l.label), cents: num(l.cents) })) };
+}
+
+/** A party's statements (§26.5), or undefined when the value isn't one. */
+export function decodeStatements(value: unknown): StatementsView | undefined {
+  const s = obj(value);
+  if (!s) return undefined;
+  const balance = obj(s.balance) ?? {};
+  return {
+    kind: s.kind === "personal" ? "personal" : "books",
+    depreciation: oneOf(s.depreciation, DEPRECIATION_METHODS, "none"),
+    ebitdaNote: nullableStr(s.ebitdaNote),
+    periods: list(s.periods, (p) => ({ id: oneOf(p.id, STATEMENT_PERIODS, "month"), label: str(p.label), from: str(p.from), to: str(p.to), income: incomeStatement(obj(p.income)), cash: cashFlowStatement(obj(p.cash)) })),
+    balance: { assets: num(balance.assets), liabilities: num(balance.liabilities), equity: num(balance.equity), lines: list(balance.lines, (b) => ({ label: str(b.label), cents: num(b.cents), ...(b.vehicle === true ? { vehicle: true as const } : {}) })) },
+  };
 }
 
 function numbers(value: unknown): number[] {
@@ -416,6 +467,12 @@ function payTier(o: Obj): PayTier | null {
   };
 }
 
+/** A view's `statements`, as an optional field: absent when the value isn't statements. */
+function statementsField(value: unknown): { statements?: StatementsView } {
+  const statements = decodeStatements(value);
+  return statements ? { statements } : {};
+}
+
 /** A party's money view, or null when the value isn't one (the panel then shows the JSON). */
 export function decodeFinanceView(value: unknown): FinanceView | null {
   if (!isRecord(value) || typeof value.party !== "string" || typeof value.level !== "number") return null;
@@ -490,6 +547,7 @@ export function decodeFinanceView(value: unknown): FinanceView | null {
         employees: list(b.employees, job),
         taxes: list(b.taxes, (t) => ({ label: str(t.label), cents: num(t.cents), due: nullableStr(t.due) })),
         route: distributionRoute(b.route),
+        ...statementsField(b.statements),
       };
     }),
     investments: investments
@@ -526,6 +584,8 @@ export function decodeFinanceView(value: unknown): FinanceView | null {
     payPrefs: list(value.payPrefs, payTier),
     paysFor: list(value.paysFor, (p) => (typeof p.from === "string" ? { from: p.from, to: strings(p.to) } : null)),
     ownKeys: strings(value.ownKeys),
+    ...statementsField(value.statements),
+    ...(Array.isArray(value.streams) ? { streams: value.streams.filter(isRecord) as unknown as RevenueStreamView[] } : {}),
   };
 }
 
@@ -613,7 +673,7 @@ export function decodeOwnership(value: unknown): OwnershipView | null {
 }
 
 /** An organization's Taxes in Orgs (the economy's `taxes` section, `TaxesView`). */
-export function decodeTaxes(value: unknown): TaxesView | null {
+export function decodeTaxes(value: unknown): (TaxesView & TaxesExtra) | null {
   const o = obj(value);
   if (!o) return null;
   const share = (x: Obj): { name: string; share: number } => ({ name: str(x.name, "someone"), share: num(x.share) });
@@ -637,5 +697,6 @@ export function decodeTaxes(value: unknown): TaxesView | null {
     consolidation: c ? { elected: bool(c.elected), members: list(c.members, (m) => ({ name: str(m.name, "a company"), votes: num(m.votes), share: num(m.share) })), profit: nullableNum(c.profit), tax: nullableNum(c.tax) } : null,
     filedBy: typeof o.filedBy === "string" ? o.filedBy : null,
     acts: a ? { consolidate: typeof a.consolidate === "string" ? a.consolidate : null } : null,
+    ...decodeTaxesExtra(o),
   };
 }

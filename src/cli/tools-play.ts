@@ -11,7 +11,7 @@ import type { InferredChecks } from "../shared/inferred";
 import type { JsonObject, JsonValue } from "../shared/json";
 import { hasOwn, isRecord } from "../shared/json";
 import { parsePointer } from "../shared/json-patch";
-import { GM_KEYED_PARTS, GM_OUTLINE, GM_PARTS, keyedItem, type GmKeyedPart, type GmOutline, type QueuedOn } from "../shared/gm-parts";
+import { GM_KEYED_PARTS, GM_OUTLINE, GM_PARTS, keyedItem, type GmKeyedPart, type GmOutline, type GmPart, type QueuedOn } from "../shared/gm-parts";
 import type { EventRef, ResolveScope, TimeControl, TimeScope } from "../shared/ledger";
 import type { MindEditOp } from "../shared/minds";
 import type { RoutineEditOp } from "../shared/routines";
@@ -43,12 +43,26 @@ const MAX_OFFSET = Number.MAX_SAFE_INTEGER;
 const CHAT_ID: JsonObject = { type: "string", description: "The chat's id (lre_chats lists the chats that play a world)." };
 const POINTER: JsonObject = { type: "string", description: 'A JSON Pointer into it (RFC 6901): "" for an outline of the whole, "/hud" for one part. A token on a list is an index or, keyed, an item\'s id or name ("/money/danny_okafor", "/orgs/Alder Automotive"). In a key, "~1" stands for "/" and "~0" for "~".' };
 const OFFSET: JsonObject = { type: "integer", minimum: 0, description: "Read the value's JSON text from this character instead of outlining it; each page says where the next begins." };
-const SPOILERS: JsonObject = { type: "boolean", description: "Must be true: this shows (or answers with) what the player isn't meant to know. Pass it only when the user asked to see behind the curtain." };
+export const SPOILERS: JsonObject = { type: "boolean", description: "Must be true: this shows (or answers with) what the player isn't meant to know. Pass it only when the user asked to see behind the curtain." };
 const FROM: JsonObject = { type: "integer", minimum: 0, description: "Read a list's or an object's entries from this one (0 is the first): whole when they fit, else outlined; each page says where the next begins." };
 const LIMIT: JsonObject = { type: "integer", minimum: 1, description: "With from (0 by default), at most this many entries." };
+/** The paging arguments of a read tool. */
+export const PAGING: JsonObject = { pointer: POINTER, offset: OFFSET, from: FROM, limit: LIMIT };
 /** The command line's paging flags of a read tool, and how its usage shows them. */
-const PAGING_OPTIONS: NonNullable<CliMirror["options"]> = { "--pointer": { arg: "pointer", as: "text" }, "--offset": { arg: "offset", as: "int" }, "--from": { arg: "from", as: "int" }, "--limit": { arg: "limit", as: "int" } };
-const PAGING_USAGE = "[--pointer <p>] [--offset <n> | --from <n> [--limit <n>]]";
+export const PAGING_OPTIONS: NonNullable<CliMirror["options"]> = { "--pointer": { arg: "pointer", as: "text" }, "--offset": { arg: "offset", as: "int" }, "--from": { arg: "from", as: "int" }, "--limit": { arg: "limit", as: "int" } };
+export const PAGING_USAGE = "[--pointer <p>] [--offset <n> | --from <n> [--limit <n>]]";
+/** What a GM read picks besides its part (`gmRead`): one entity, party's money or organization, the entities of a kind, compact entities; its paging after them. */
+export const GM_PICKS: JsonObject = {
+  entity: { type: "string", description: "One entity, by id or name." },
+  party: { type: "string", description: "One party's money (a person, household, business, trust or group), by id or name." },
+  account: { type: "string", description: "With party: only this account of theirs (id or name), its cards, lines and standing payments." },
+  org: { type: "string", description: "One organization as GM → Orgs shows it, by id or name." },
+  kind: { type: "string", description: "Only entities of this kind, or of a kind extending it." },
+  compact: { type: "boolean", description: "Entities with each field's definition once per kind (/fieldDefs), each field's value alone." },
+  ...PAGING,
+};
+/** The command line's flags for `GM_PICKS`. */
+export const GM_PICK_OPTIONS: NonNullable<CliMirror["options"]> = { "--entity": { arg: "entity", as: "text" }, "--party": { arg: "party", as: "text" }, "--account": { arg: "account", as: "text" }, "--org": { arg: "org", as: "text" }, "--kind": { arg: "kind", as: "text" }, "--compact": { arg: "compact", as: "flag" }, ...PAGING_OPTIONS };
 
 /** What a held write waits on, as its answer tells it (`queued`): it lands once that turn is over. */
 const QUEUED: Record<QueuedOn, string> = {
@@ -71,7 +85,7 @@ const REPLY =
 const chatIdOf = (args: Args): string => neededText(args, "chatId", "the chat's id (lre_chats lists the chats that play a world)");
 
 /** Refuses a spoiler-gated tool unless the caller said `spoilers: true`, before anything is asked of the host. */
-function gate(args: Args, name: string, shows: string): void {
+export function gate(args: Args, name: string, shows: string): void {
   if (!boolArg(args, "spoilers")) throw new ToolError(`${name} ${shows}, which the player isn't meant to know. Call it again with spoilers: true, only if the user asked you to look behind the curtain.`);
 }
 
@@ -87,7 +101,7 @@ async function ask<T extends RequestType>(ctx: ToolContext, chatId: string, type
 }
 
 /** A read tool's answer: the value at a pointer, outlined or paged as lre_world reads a world. */
-function readOut(root: unknown, what: string, args: Args): ToolResult {
+export function readOut(root: unknown, what: string, args: Args): ToolResult {
   const read = readAt(root, { what, pointer: textArg(args, "pointer") ?? "", offset: intArg(args, "offset", 0, MAX_OFFSET), from: intArg(args, "from", 0, MAX_OFFSET), limit: intArg(args, "limit", 1, MAX_OFFSET) });
   return read.ok ? { text: read.text } : { text: read.text, isError: true };
 }
@@ -151,20 +165,55 @@ async function inspector(args: Args, ctx: ToolContext): Promise<ToolResult> {
 const PICKS = { entity: "entities", party: "money", org: "orgs" } as const satisfies Record<string, GmKeyedPart>;
 
 /** lre_gm's part that reads the whole view at once: on a large world it is many megabytes, so a bare call reads the view's outline instead. */
-const GM_ALL = "all";
+export const GM_ALL = "all";
 
 /**
- * The GM view's outline, one part of it built alone (`lre.gm.part`), or the whole view (part
- * `all`): `part`; one entity, one party's money (cut to one account with `account`) or one
- * organization, by id or name; the entities of a kind; the entities with their fields' definitions
- * once (`compact`). With none of them, a pointer whose first token is a part reads that part alone,
- * and a keyed token after it (`/money/danny_okafor`) builds that one only, so a pointer reads the
- * same however much of the view it asks for; with no pointer either, the outline: how many each
- * part holds, and how to read it.
+ * Where a GM read comes from: a chat on the host (`lre.gm.part`, `lre.gm`), or a sandbox on this
+ * machine (DESIGN §23), which has the world's parts alone. `what` is how its answers name it.
  */
+export interface GmSource {
+  what: string;
+  /** The parts it has, in the view's order. */
+  parts: readonly GmPart[];
+  /** One part, built alone; with `id`, of the entities, money or organizations only that one (an empty list when there is none). A name several share is refused. */
+  part(part: GmPart, id?: string): Promise<{ id: string | null; value: unknown }>;
+  /** How many each part holds. */
+  outline(): Promise<GmOutline>;
+  /** Every part at once. */
+  whole(): Promise<unknown>;
+  /** Why it holds no entity, party or organization by those words. */
+  noneNamed(part: GmKeyedPart, said: string): string;
+}
+
+/** A chat's GM view on the host, behind the GM gate. */
+function chatGm(ctx: ToolContext, chatId: string): GmSource {
+  return {
+    what: `the GM view of chat ${chatId}`,
+    parts: GM_PARTS,
+    part: async (part, id) => {
+      const read = await ask(ctx, chatId, "lre.gm.part", { chatId, part, ...(id !== undefined ? { id } : {}) });
+      return { id: read.id, value: read.value };
+    },
+    outline: async () => (await ask(ctx, chatId, "lre.gm.part", { chatId, part: GM_OUTLINE })).value as GmOutline,
+    whole: () => ask(ctx, chatId, "lre.gm", { chatId }),
+    noneNamed: (part, said) => noneNamed(part, said, `chat ${chatId}`),
+  };
+}
+
 async function gmView(args: Args, ctx: ToolContext): Promise<ToolResult> {
   gate(args, "lre_gm", "shows everything in the chat, secrets, hidden people and places and characters' minds included");
-  const chatId = chatIdOf(args);
+  return gmRead(args, chatGm(ctx, chatIdOf(args)));
+}
+
+/**
+ * The GM view's outline, one part of it built alone, or the whole view (part `all`): `part`; one
+ * entity, one party's money (cut to one account with `account`) or one organization, by id or name;
+ * the entities of a kind; the entities with their fields' definitions once (`compact`). With none of
+ * them, a pointer whose first token is a part reads that part alone, and a keyed token after it
+ * (`/money/danny_okafor`) builds that one only, so a pointer reads the same however much of the view
+ * it asks for; with no pointer either, the outline: how many each part holds, and how to read it.
+ */
+export async function gmRead(args: Args, source: GmSource): Promise<ToolResult> {
   const asked = textArg(args, "part");
   const kind = textArg(args, "kind");
   const account = textArg(args, "account");
@@ -175,24 +224,24 @@ async function gmView(args: Args, ctx: ToolContext): Promise<ToolResult> {
   });
   const pick = picked[0];
   if (picked.length + (asked !== undefined ? 1 : 0) > 1) throw new ToolError("Give at most one of part, entity, party and org.");
-  const part = asked === undefined ? undefined : asked.trim() === GM_ALL ? GM_ALL : GM_PARTS.find((p) => p === asked.trim());
-  if (asked !== undefined && part === undefined) throw new ToolError(`part is one of ${GM_PARTS.join(", ")} or ${GM_ALL}, not ${JSON.stringify(asked)}.`);
+  const part = asked === undefined ? undefined : asked.trim() === GM_ALL ? GM_ALL : source.parts.find((p) => p === asked.trim());
+  if (asked !== undefined && part === undefined) throw new ToolError(`part is one of ${source.parts.join(", ")} or ${GM_ALL}, not ${JSON.stringify(asked)}.`);
   if (account !== undefined && pick?.arg !== "party") throw new ToolError("account cuts one party's money to one account: give party with it.");
   if ((kind !== undefined || compact) && (pick ? pick.part !== "entities" : part !== undefined && part !== "entities")) throw new ToolError("kind and compact read the entities: give them with part entities, entity, or neither.");
-  const what = `the GM view of chat ${chatId}`;
+  const { what } = source;
   if (pick) {
-    const { id, value } = await ask(ctx, chatId, "lre.gm.part", { chatId, part: pick.part, id: pick.said });
+    const { id, value } = await source.part(pick.part, pick.said);
     const [one] = value as JsonValue[];
-    if (one === undefined) throw new ToolError(noneNamed(pick.part, pick.said, chatId));
+    if (one === undefined) throw new ToolError(source.noneNamed(pick.part, pick.said));
     const root = pick.part === "entities" && compact ? compacted([one as unknown as GmEntity]) : pick.part === "money" && account !== undefined ? onlyAccount(one as JsonObject, account, `${pick.said}'s money`) : one;
     return readOut(root, `${what}: ${pick.part === "money" ? `the money of ${id}${account !== undefined ? `, account ${account} alone` : ""}` : `${pick.part === "orgs" ? "organization" : "entity"} ${id}`}`, args);
   }
-  if (part === GM_ALL) return readOut(await ask(ctx, chatId, "lre.gm", { chatId }), `${what}: everything as it stands, secrets included`, args);
+  if (part === GM_ALL) return readOut(await source.whole(), `${what}: everything as it stands, secrets included`, args);
   if (part !== undefined || kind !== undefined || compact) {
     const read = part ?? "entities";
-    let value = (await ask(ctx, chatId, "lre.gm.part", { chatId, part: read })).value as unknown;
+    let value = (await source.part(read)).value;
     if (read === "entities" && kind !== undefined) {
-      const { value: kinds } = await ask(ctx, chatId, "lre.gm.part", { chatId, part: "kinds" });
+      const { value: kinds } = await source.part("kinds");
       const parents = new Map((kinds as GmView["kinds"]).map((k) => [k.id, k.extends]));
       // A kind matches what it is or extends, as the engine's `kindIs` walks the chain.
       const isKind = (k: string): boolean => {
@@ -215,25 +264,26 @@ async function gmView(args: Args, ctx: ToolContext): Promise<ToolResult> {
   } catch {
     // readOut says what is wrong with it.
   }
-  const first = GM_PARTS.find((p) => p === tokens[0]);
+  const first = source.parts.find((p) => p === tokens[0]);
   if (first !== undefined) {
     const second = tokens[1];
-    const keyed = GM_KEYED_PARTS.find((p) => p === first) !== undefined && second !== undefined && !/^(0|[1-9]\d*)$/.test(second) ? second : undefined;
-    const { value } = await ask(ctx, chatId, "lre.gm.part", { chatId, part: first, ...(keyed !== undefined ? { id: keyed } : {}) });
-    if (keyed !== undefined && Array.isArray(value) && value.length === 0) throw new ToolError(noneNamed(first as GmKeyedPart, keyed, chatId));
+    const keyed = GM_KEYED_PARTS.find((p) => p === first);
+    const id = keyed !== undefined && second !== undefined && !/^(0|[1-9]\d*)$/.test(second) ? second : undefined;
+    const { value } = await source.part(first, id);
+    if (keyed !== undefined && id !== undefined && Array.isArray(value) && value.length === 0) throw new ToolError(source.noneNamed(keyed, id));
     return readOut({ [first]: value }, `${what}: everything as it stands, secrets included`, args);
   }
-  if (tokens.length > 0) throw new ToolError(`The GM view has no part ${JSON.stringify(tokens[0])}: its parts are ${GM_PARTS.join(", ")}. Read one with part, or pointer "/<part>"; part ${GM_ALL} reads the whole view.`);
+  if (tokens.length > 0) throw new ToolError(`The GM view has no part ${JSON.stringify(tokens[0])}: its parts are ${source.parts.join(", ")}. Read one with part, or pointer "/<part>"; part ${GM_ALL} reads the whole view.`);
   // The outline: how many each part holds, and how to read them.
-  const { value } = await ask(ctx, chatId, "lre.gm.part", { chatId, part: GM_OUTLINE });
+  const outline = await source.outline();
   const how = `Read a part with part, or pointer "/<part>", which goes deeper too ("/money/<party id or name>/accounts"). One entity, one party's money or one organization: entity, party or org, by id or name. The entities of a kind: kind; with each field's definition once per kind: compact. The whole view at once, every part above, which on a large world is many megabytes: part "${GM_ALL}".`;
-  return readOut({ parts: Object.fromEntries((value as GmOutline).map((p) => [p.part, p.count])), read: how }, `${what}: its outline, how many each part holds`, args);
+  return readOut({ parts: Object.fromEntries(outline.map((p) => [p.part, p.count])), read: how }, `${what}: its outline, how many each part holds`, args);
 }
 
-/** Why lre_gm read no entity, party or organization by those words. */
-function noneNamed(part: GmKeyedPart, said: string, chatId: string): string {
+/** Why a GM read found no entity, party or organization by those words, in `where` ("chat c_1", "sandbox sb1"). */
+export function noneNamed(part: GmKeyedPart, said: string, where: string): string {
   const noun = part === "money" ? "party" : part === "orgs" ? "organization" : "entity";
-  return `No ${noun} ${JSON.stringify(said)} in chat ${chatId}, by id or by name: lre_gm with part ${part} lists them${part === "orgs" ? "" : ", and lre_items_find finds things by the words that name them"}.`;
+  return `No ${noun} ${JSON.stringify(said)} in ${where}, by id or by name: lre_gm with part ${part} lists them${part === "orgs" ? "" : ", and lre_items_find finds things by the words that name them"}.`;
 }
 
 /**
@@ -641,10 +691,10 @@ export const PLAY_TOOLS: readonly ToolModule[] = [
     name: "lre_gm",
     description:
       "A chat's GM view: everything as it stands, secrets included. Every entity (/entities: fields, relations, levels, classes, life state, who knows it), kinds, tiers, places, tracks with their stages and truths, relation types, everyone's money (/money, the POV first), every organization as GM → Orgs shows it (/orgs), the fight as the GM sees it, the ✎ fixes and GM edits in force (/edits), refused writes, the writes waiting for a turn under way with what each waits on (/held), and character minds (/minds). Ids from here are what lre_gm_edit's operations name. The whole view is many megabytes on a large world, so with no part, entity, party or org and no pointer it answers the view's outline: how many each part holds, and how to read them; part all reads the whole view at once. part (one of the parts above) builds and sends that part alone; entity, party or org (an id, or a name: an ambiguous one is refused, listing the ids) one entity, one party's money or one organization, and account (with party) that money cut to one account; kind (with part entities, or alone) the entities of that kind or a kind extending it; compact the entities with each field's definition once per kind (/fieldDefs) and their fields as values alone. A pointer whose first token is a part reads that part alone too, and a token on a list may be an item's id or name: /money/danny_okafor/accounts, /orgs/Alder Automotive, /entities/pov. A large value comes back as an outline: page its entries with from and limit, or its JSON with offset. Needs spoilers: true.",
-    inputSchema: object({ chatId: CHAT_ID, spoilers: SPOILERS, part: { type: "string", enum: [...GM_PARTS, GM_ALL], description: `Only this part, built alone; ${GM_ALL}: the whole view at once (many megabytes on a large world). Left out, with no entity, party, org or pointer either: the view's outline.` }, entity: { type: "string", description: "One entity, by id or name." }, party: { type: "string", description: "One party's money (a person, household, business, trust or group), by id or name." }, account: { type: "string", description: "With party: only this account of theirs (id or name), its cards, lines and standing payments." }, org: { type: "string", description: "One organization as GM → Orgs shows it, by id or name." }, kind: { type: "string", description: "Only entities of this kind, or of a kind extending it." }, compact: { type: "boolean", description: "Entities with each field's definition once per kind (/fieldDefs), each field's value alone." }, pointer: POINTER, offset: OFFSET, from: FROM, limit: LIMIT }, ["chatId", "spoilers"]),
+    inputSchema: object({ chatId: CHAT_ID, spoilers: SPOILERS, part: { type: "string", enum: [...GM_PARTS, GM_ALL], description: `Only this part, built alone; ${GM_ALL}: the whole view at once (many megabytes on a large world). Left out, with no entity, party, org or pointer either: the view's outline.` }, ...GM_PICKS }, ["chatId", "spoilers"]),
     write: false,
     run: gmView,
-    cli: { command: "gm", section: SECTION, usage: `gm <chatId> --spoilers [--part <part|${GM_ALL}> | --entity <id|name> | --party <id|name> [--account <id|name>] | --org <id|name>] [--kind <kind>] [--compact] ${PAGING_USAGE}`, summary: "A chat's GM view: its outline, one part of it, or all of it, secrets included", positionals: ["chatId"], needs: 1, options: { "--spoilers": { arg: "spoilers", as: "flag" }, "--part": { arg: "part", as: "text" }, "--entity": { arg: "entity", as: "text" }, "--party": { arg: "party", as: "text" }, "--account": { arg: "account", as: "text" }, "--org": { arg: "org", as: "text" }, "--kind": { arg: "kind", as: "text" }, "--compact": { arg: "compact", as: "flag" }, ...PAGING_OPTIONS } },
+    cli: { command: "gm", section: SECTION, usage: `gm <chatId> --spoilers [--part <part|${GM_ALL}> | --entity <id|name> | --party <id|name> [--account <id|name>] | --org <id|name>] [--kind <kind>] [--compact] ${PAGING_USAGE}`, summary: "A chat's GM view: its outline, one part of it, or all of it, secrets included", positionals: ["chatId"], needs: 1, options: { "--spoilers": { arg: "spoilers", as: "flag" }, "--part": { arg: "part", as: "text" }, ...GM_PICK_OPTIONS } },
   },
   {
     name: "lre_sections",
@@ -675,7 +725,7 @@ export const PLAY_TOOLS: readonly ToolModule[] = [
   {
     name: "lre_orgs",
     description:
-      "A chat's organizations (ORG-SPEC §7.5): with no org, the player character's Orgs home (the party, where they belong, the organizations they know of); with org (its id or name; \"party\" for the party; a name several share is refused, listing their ids), its page as their Orgs tab reads it (their place there, who runs it, its people with titles, positions and jobs, positions and delegations, its money, premises, ownership and taxes where they may see them, its decisions, its History), or one part of it: overview, people, money, property, ownership, taxes, rules, decisions (how its decisions are made, its motions with each voter's vote and its requests for approval, each by the id lre_gm_edit's vote, end_motion and answer name) or log. account (with org) cuts its money to one account (id or name): its lines, cards and standing payments. Members the player character can't see are only counted. With spoilers: true, GM → Orgs instead, read from that part of the GM view alone: every organization, every member named, and who holds each power there and why. Ids from here are what lre_gm_edit's org op names. The answer is whole JSON when it fits; a larger one, or one read with pointer, offset, from or limit, reads as lre_gm's do: an outline to read deeper from by pointer (a token on a list may be an item's id or name), its entries page by page from from, or its JSON from offset.",
+      "A chat's organizations (ORG-SPEC §7.5): with no org, the player character's Orgs home (the party, where they belong, the organizations they know of); with org (its id or name; \"party\" for the party; a name several share is refused, listing their ids), its page as their Orgs tab reads it (their place there, who runs it, its people with titles, positions and jobs, positions and delegations, its money, premises, ownership and taxes where they may see them, its decisions, its History), or one part of it: overview, people, money, property, ownership, taxes, projects (its production projects: each step's days, cost, when it's paid, what it waits on and what it unlocks; where each stands, what it has paid and when it's due to be done), rules, decisions (how its decisions are made, its motions with each voter's vote and its requests for approval, each by the id lre_gm_edit's vote, end_motion and answer name) or log. account (with org) cuts its money to one account (id or name): its lines, cards and standing payments. Members the player character can't see are only counted. With spoilers: true, GM → Orgs instead, read from that part of the GM view alone: every organization, every member named, and who holds each power there and why. Ids from here are what lre_gm_edit's org op names. The answer is whole JSON when it fits; a larger one, or one read with pointer, offset, from or limit, reads as lre_gm's do: an outline to read deeper from by pointer (a token on a list may be an item's id or name), its entries page by page from from, or its JSON from offset.",
     inputSchema: object({ chatId: CHAT_ID, org: { type: "string", description: 'The organization: its id or its name ("Alder Automotive"), or "party"; leave it out for the list.' }, part: { type: "string", enum: [...ORG_PARTS], description: "Only this part of its page; needs org." }, account: { type: "string", description: "With org: its money cut to this account (id or name)." }, spoilers: { type: "boolean", description: "true: read GM → Orgs, everyone named and every power's holders, which the player isn't meant to know. Pass it only when the user asked to see behind the curtain." }, pointer: POINTER, offset: OFFSET, from: FROM, limit: LIMIT }, ["chatId"]),
     write: false,
     run: orgsRead,

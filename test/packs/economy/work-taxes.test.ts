@@ -1,10 +1,13 @@
 // Taxes on work (DESIGN §26.3), folded through Riverton: withholding on paychecks, and the
-// estimated tax on income nobody withholds from.
+// estimated tax on income nobody withholds from. Then on Port Alder: a person's royalties, and a
+// C corporation's gains and the dividends it receives, deducted by its stake in the payer.
 
 import { describe, expect, test } from "bun:test";
 import { calendarOf, clockOfLocal } from "../../../src/engine/calendar";
 import { investmentTax } from "../../../src/packs/economy/core/gains";
 import { incomeIn } from "../../../src/packs/economy/core/records";
+import { corporateTax } from "../../../src/packs/economy/core/taxes";
+import * as PA from "./tax-world";
 import { act, entity, ext, lapse, line, paid, paychecks, posts, setup } from "./work-world";
 
 const DAY = 1440;
@@ -73,5 +76,43 @@ describe("work taxes: business income", () => {
     // The federal 21% and Ohio's 1.4%.
     const [tax] = posts(w, /^Corporate income tax/);
     expect(tax?.lines).toEqual([{ account: "db_operating", amount: -Math.round((books.profit * 22.4) / 100) }, { account: ext("tax:federal"), amount: Math.round((books.profit * 22.4) / 100) }]);
+  });
+});
+
+describe("work taxes: royalties, a company's gains and the dividends it receives (§26.3)", () => {
+  test("a person's royalties are ordinary income with NIIT: taxed as interest is, and they bring the yearly flow", () => {
+    const royalty = PA.portAlder();
+    const interest = PA.portAlder();
+    const before = investmentTax(royalty.ctx, PA.JORDAN, 2026).cents;
+    expect(royalty.apply({ type: "economy.income", data: { source: PA.SAVINGS, party: PA.JORDAN, cents: 30_000_000, kind: "royalty" } })).toBeNull();
+    expect(interest.apply({ type: "economy.income", data: { source: PA.SAVINGS, party: PA.JORDAN, cents: 30_000_000, kind: "interest" } })).toBeNull();
+    expect(incomeIn(royalty.state, PA.JORDAN, 2026).royalty).toBe(30_000_000);
+    const taxed = investmentTax(royalty.ctx, PA.JORDAN, 2026).cents;
+    expect(taxed).toBe(investmentTax(interest.ctx, PA.JORDAN, 2026).cents);
+    // $300,000 over the $200,000 threshold: the NIIT's 3.8% is among it.
+    expect(taxed - before).toBeGreaterThan(Math.round(30_000_000 * 0.038));
+    expect(royalty.ctx.query("economy.finance")(royalty.ctx, PA.JORDAN, false).flows.map((f) => f.id)).toContain(`investment_tax:${PA.JORDAN}`);
+  });
+
+  test("a company's gain is taxed; a dividend from a company it holds all of is deducted whole, one it holds 30% of at 65%", () => {
+    const w = PA.portAlder();
+    const holdings = PA.corporation(w, "Harbor Holdings");
+    PA.income(w, PA.operating(w, holdings), 1_000_000, "services");
+    expect(PA.gm(w, "orgs.found", { type: "company", name: "Harbor Towing", structure: "c_corp", cents: 50_000, from: PA.operating(w, holdings), founder: holdings })).toBe("");
+    const towing = PA.named(w, "Harbor Towing");
+    PA.income(w, PA.operating(w, towing), 5_000_000, "services");
+    const soFar = (): number => PA.taxesOf(w, holdings).incomeSoFar ?? 0;
+    const start = soFar();
+    expect(start).toBeGreaterThan(0);
+    // Its subsidiary's $10,000 dividend: all of it deducted.
+    expect(PA.gm(w, "economy.distribute", { business: towing, cents: 1_000_000 })).toBe("");
+    expect(soFar()).toBe(start);
+    // 70% of it sold to Jordan for $1,000: the gain on its $350 basis is taxed.
+    expect(PA.gm(w, "economy.stake_sell", { business: towing, share: 70, price: 100_000, buyer: PA.JORDAN, party: holdings })).toBe("");
+    const sold = soFar();
+    expect(Math.abs(sold - start - corporateTax(w.ctx, holdings, 65_000))).toBeLessThanOrEqual(1);
+    // Holding 30%, its $3,000 of the next $10,000 is taxed on the 35% the deduction leaves.
+    expect(PA.gm(w, "economy.distribute", { business: towing, cents: 1_000_000 })).toBe("");
+    expect(Math.abs(soFar() - sold - corporateTax(w.ctx, holdings, 105_000))).toBeLessThanOrEqual(1);
   });
 });

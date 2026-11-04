@@ -1,20 +1,22 @@
 // The Orgs tab's views (ORG-SPEC §4.2-4.4, §3.16): the home (`orgs.list`: the party, where the
-// player character belongs, the organizations they know of) and each organization's page
-// (`orgs.org`: their place there, who runs it, its people, positions and delegations, and the packs'
-// sections behind their powers). The party is always there: before it has an entity of its own its
-// page is read from the leader's roster, under the id it would take (`party_<leader>`). Members the
-// reader can't see are counted and stand in under an opaque id; the GM (`viewer` null) sees all. Pure.
+// player character belongs or what they run through another organization, the organizations they
+// know of, each nested under the listed one holding it) and each organization's page (`orgs.org`:
+// their place there and what their powers flow down through, who runs it, its people, positions and
+// delegations, the organizations holding it and held by it, a trust's terms, and the packs' sections
+// behind their powers). The party is always there: before it has an entity of its own its page is
+// read from the leader's roster, under the id it would take (`party_<leader>`). Members the reader
+// can't see are counted and stand in under an opaque id; the GM (`viewer` null) sees all. Pure.
 
 import { opaqueId } from "../../../shared/hash";
 import { STRUCTURE_LABELS } from "../../../shared/finance";
 import type { EntityId } from "../../../shared/ids";
 import { isRecord, type JsonValue } from "../../../shared/json";
-import { DUES_EVERY, MERGED_INTO_FIELD, ORG_POWER_FAMILIES, ORG_POWERS, POWER_WORDS, type Delegation, type MemberHow, type OrgGrant, type OrgMember, type OrgPower, type OrgType, type Position } from "../../../shared/org";
-import type { OrgDelegationView, OrgDuesView, OrgEndedView, OrgHistoryLineView, OrgListView, OrgPersonView, OrgPositionView, OrgPowerView, OrgRef, OrgRowView, OrgView, PartyMemberView } from "../../../shared/org-view";
+import { DUES_EVERY, MERGED_INTO_FIELD, NONPROFIT_STRUCTURE, ORG_POWER_FAMILIES, ORG_POWERS, POWER_WORDS, trusteesDecideIn, type Delegation, type MemberHow, type OrgGrant, type OrgMember, type OrgPower, type OrgType, type Position } from "../../../shared/org";
+import type { OrgDelegationView, OrgDuesView, OrgEndedView, OrgHistoryLineView, OrgLinkView, OrgListView, OrgPersonView, OrgPositionView, OrgPowerView, OrgRef, OrgRowView, OrgTrustView, OrgView, PartyMemberView } from "../../../shared/org-view";
 import { isPartyTier, PARTY_KIND, PARTY_SECTION } from "../../../shared/party";
 import { formatMoney } from "../../../shared/world";
 import { calendarOf, clockAt, dateAt, dayIndexOf, formatClock } from "../../../engine/calendar";
-import { dayWords, defaultPowers, delegationsOf, dissolvedOn, heldPositions, HOW_WORDS, LEADER, membersOfOrg, orgPower, orgPowers, orgTitle, orgTypeOf, partyRoster, positionsOf, windingUpSince, type HeldPosition } from "../../../engine/org";
+import { controlThrough, dayWords, defaultPowers, delegationsOf, dissolvedOn, heldPositions, holdersOf, holdsOf, HOW_WORDS, LEADER, membersOfOrg, orgPower, orgPowers, orgTitle, orgTypeOf, partyRoster, positionsOf, windingUpSince, type HeldPosition, type OrgHold } from "../../../engine/org";
 import { acts } from "../../../engine/life";
 import { optionalQuery, own } from "../../../engine/pack-kit";
 import { povMayKnow } from "../../../engine/player-events";
@@ -38,9 +40,11 @@ export function dateWords(ctx: ReadContext, text: string): string {
 /** The party the player character leads: its entity when it has one, else the id it will take. */
 export function partyIdOf(ctx: ReadContext): { id: EntityId; exists: boolean } {
   const pov = ctx.world.pov;
-  const id = Object.keys(ctx.state.entities)
-    .sort()
-    .find((p) => !isGone(ctx.state, p) && orgTypeOf(ctx, p) === "party" && own(ctx.state.entities, p)?.fields.leader === pov);
+  // The first in id order: whom it leads read first, since few lead anyone and a kind's chain is long to walk.
+  let id: EntityId | undefined;
+  for (const p of Object.keys(ctx.state.entities)) {
+    if ((id === undefined || p < id) && own(ctx.state.entities, p)?.fields.leader === pov && !isGone(ctx.state, p) && orgTypeOf(ctx, p) === "party") id = p;
+  }
   return id === undefined ? { id: `${PARTY_KIND}_${pov}`, exists: false } : { id, exists: true };
 }
 
@@ -147,9 +151,10 @@ class Page {
       role: owner?.role ?? null,
       share: owner ? rows.filter((r) => r.how === "owner").reduce((a, r) => a + (r.share ?? 0), 0) : null,
       via: via === undefined ? null : this.ref(via),
-      // A delegation's granter stands under their opaque id for a reader who can't see them.
-      powers: this.powersOf(who).map(({ power, grant }) => ({ power, basis: grant.basis, id: grant.id === undefined ? null : grant.basis === "delegate" ? this.ref(grant.id).id : grant.id, words: POWER_WORDS[power] })),
+      // A delegation's granter, and the organization a power flows down from, stand under their opaque id for a reader who can't see them.
+      powers: this.powersOf(who).map(({ power, grant }) => ({ power, basis: grant.basis, id: grant.id === undefined ? null : grant.basis === "delegate" || grant.basis === "control" ? this.ref(grant.id).id : grant.id, words: POWER_WORDS[power] })),
       you: who === this.viewer,
+      org: orgTypeOf(this.ctx, who),
     };
   }
 
@@ -158,13 +163,11 @@ class Page {
   }
 }
 
-/** The people on a page, each once with every way they belong; those the reader can't see, apart. */
+/** The people on a page, each once with every way they belong, and the organizations seated in its positions (entity officers and directors); those the reader can't see, apart. A member group or an owning organization is no row of its own: its people count through it, and its hold shows among the organizations above. */
 function peopleOf(page: Page): { people: OrgPersonView[]; hidden: EntityId[] } {
   const byWho = new Map<EntityId, OrgMember[]>();
-  for (const row of page.subject.rows) {
-    if (orgTypeOf(page.ctx, row.who) !== null) continue;
-    byWho.set(row.who, [...(byWho.get(row.who) ?? []), row]);
-  }
+  for (const row of page.subject.rows) byWho.set(row.who, [...(byWho.get(row.who) ?? []), row]);
+  for (const [who, rows] of byWho) if (orgTypeOf(page.ctx, who) !== null && (rows.some((r) => r.via !== undefined) || page.positionsHeld(who).length === 0)) byWho.delete(who);
   const people: OrgPersonView[] = [];
   const hidden: EntityId[] = [];
   for (const who of [...byWho.keys()].sort()) {
@@ -210,14 +213,56 @@ function levelOf(ctx: ReadContext, subject: Subject): number {
   return Math.max(own, ...members.map((m) => ctx.levelOf(m, "money")));
 }
 
-/** The header's words for what it is: its type, a company's structure, a group's kind. */
+/** The header's words for what it is: its type, a company's structure (a nonprofit's its own), a group's kind. */
 function header(ctx: ReadContext, subject: Subject): { name: string; kind: string; structure: string | null; badge: string } {
   const e = own(ctx.state.entities, subject.id);
   const kind = e ? (kindDef(ctx.registry, ctx.world, e.kind)?.label ?? e.kind) : "Party";
   const raw = e?.fields.structure;
-  const structure = subject.type === "company" && typeof raw === "string" ? (STRUCTURE_LABELS[raw] ?? null) : null;
-  const badge = subject.type === "company" ? (structure ? `Company · ${structure}` : "Company") : subject.type === "group" ? (kind === "Group" ? "Group" : `Group · ${kind}`) : subject.type === "household" ? "Household" : subject.type === "trust" ? "Trust" : "Party";
+  const nonprofit = subject.type === "company" && raw === NONPROFIT_STRUCTURE;
+  const structure = nonprofit ? "Nonprofit" : subject.type === "company" && typeof raw === "string" ? (STRUCTURE_LABELS[raw] ?? null) : null;
+  const badge = nonprofit ? "Nonprofit" : subject.type === "company" ? (structure ? `Company · ${structure}` : "Company") : subject.type === "group" ? (kind === "Group" ? "Group" : `Group · ${kind}`) : subject.type === "household" ? "Household" : subject.type === "trust" ? "Trust" : "Party";
   return { name: e?.name ?? "Your party", kind, structure, badge };
+}
+
+/** One organization's link to another (§29.3 Control): every way one holds the other, in one record. */
+function linkOf(ctx: ReadContext, id: EntityId, holds: readonly OrgHold[]): OrgLinkView {
+  const stake = holds.find((h) => h.how === "stake");
+  const position = holds.find((h) => h.how === "position")?.position;
+  return {
+    id,
+    name: own(ctx.state.entities, id)?.name ?? id,
+    type: orgTypeOf(ctx, id) ?? "group",
+    share: stake?.share ?? null,
+    votes: stake?.votes ?? null,
+    controlled: stake?.controlled === true,
+    role: stake?.role ?? null,
+    position: position ? { id: position.id, title: position.title } : null,
+    delegation: holds.some((h) => h.how === "delegate"),
+  };
+}
+
+/** The organizations on one side of a page's holds (those holding it, or those it holds: `other` names which), one link each, in id order, as the reader may see them; those they can't, counted. */
+function linksOf(page: Page, holds: readonly OrgHold[], other: (h: OrgHold) => EntityId): { links: OrgLinkView[]; hidden: number } {
+  const byId = new Map<EntityId, OrgHold[]>();
+  for (const h of holds) byId.set(other(h), [...(byId.get(other(h)) ?? []), h]);
+  const links: OrgLinkView[] = [];
+  let hidden = 0;
+  for (const id of [...byId.keys()].sort()) {
+    if (page.seen(id)) links.push(linkOf(page.ctx, id, byId.get(id) ?? []));
+    else hidden++;
+  }
+  return { links, hidden };
+}
+
+/** A trust's terms (§29.1 Trusts): its settlor as the reader may see them, whether it may be taken back, its purpose, the day it ends in the calendar's words, and how its trustees decide; null for anything else. */
+function trustOf(page: Page): OrgTrustView | null {
+  const { ctx, subject } = page;
+  if (!subject.exists || subject.type !== "trust") return null;
+  const f = own(ctx.state.entities, subject.id)?.fields ?? {};
+  const text = (v: JsonValue | undefined): string | null => (typeof v === "string" && v.trim() !== "" ? v.trim() : null);
+  const settlor = text(f.settlor);
+  const until = text(f.until);
+  return { settlor: settlor === null ? null : page.ref(settlor), revocable: f.revocable === true, purpose: text(f.purpose), until: until === null ? null : dateWords(ctx, until), decide: trusteesDecideIn(f) };
 }
 
 /**
@@ -274,6 +319,9 @@ export function buildOrgView(ctx: ReadContext, id: EntityId, viewer: EntityId | 
   const reports = held?.position.reports_to;
   const delegations = subject.exists ? delegationsOf(ctx, subject.id) : [];
   const powers: OrgPowerView[] = viewer === null ? [] : page.powersOf(viewer).map(({ power, grant }) => ({ power, basis: grant.basis, id: grant.id ?? null, words: POWER_WORDS[power] }));
+  // The organizations holding it and those it holds (§29.3 Control): a secret one below it counted, never named.
+  const above = subject.exists ? linksOf(page, holdersOf(ctx, subject.id), (h) => h.holder) : { links: [], hidden: 0 };
+  const below = subject.exists ? linksOf(page, holdsOf(ctx, subject.id), (h) => h.org) : { links: [], hidden: 0 };
   const sections: Record<string, JsonValue> = {};
   // The party's page is there before its entity is (§3.12): then only the sections no power guards
   // build for it (its own `party`), since every power over it needs its entity.
@@ -301,6 +349,7 @@ export function buildOrgView(ctx: ReadContext, id: EntityId, viewer: EntityId | 
       reportsTo: reports === undefined ? [] : everyone.filter((who) => page.positionsHeld(who).some((h) => h.position.id === reports)).map((who) => page.ref(who)),
       powers,
       delegations: delegations.filter((d) => d.who === viewer).map((d) => page.delegation(d)),
+      through: viewer === null || !subject.exists ? [] : controlThrough(ctx, viewer, subject.id).map((o) => page.ref(o)),
     },
     runBy,
     people,
@@ -314,6 +363,11 @@ export function buildOrgView(ctx: ReadContext, id: EntityId, viewer: EntityId | 
     history: viewer === null || mine.length > 0 || powers.length > 0 || named ? historyOf(page) : [],
     candidates: candidatesOf(ctx, subject, viewer, powers),
     sections,
+    above: above.links,
+    below: below.links,
+    belowHidden: below.hidden,
+    trust: trustOf(page),
+    nonprofit: subject.type === "company" && own(ctx.state.entities, subject.id)?.fields.structure === NONPROFIT_STRUCTURE,
   };
 }
 
@@ -360,7 +414,12 @@ function figureOf(ctx: ReadContext, org: EntityId, type: OrgType, viewer: Entity
   return null;
 }
 
-/** The organizations the player character may see, besides the party: every one they belong to (secret ones too), and those they can see, in id order. */
+/**
+ * The organizations the player character may see, besides the party: every one they belong to
+ * (secret ones too), those they hold a power in through another organization (§29.3 Control: listed
+ * with the ones they belong to, a secret one only when they may see it), and those they can see, in
+ * id order.
+ */
 function shownOrgs(ctx: ReadContext): { id: EntityId; type: OrgType; belongs: boolean }[] {
   const pov = ctx.world.pov;
   return Object.keys(ctx.state.entities)
@@ -368,9 +427,39 @@ function shownOrgs(ctx: ReadContext): { id: EntityId; type: OrgType; belongs: bo
     .flatMap((id) => {
       const type = orgTypeOf(ctx, id);
       if (type === null || type === "party" || isGone(ctx.state, id)) return [];
-      const belongs = isMemberOf(ctx, pov, id);
-      return belongs || canSeeEntity(ctx.registry, ctx.world, ctx.state, pov, id) ? [{ id, type, belongs }] : [];
+      const member = isMemberOf(ctx, pov, id);
+      const visible = canSeeEntity(ctx.registry, ctx.world, ctx.state, pov, id);
+      const runs = !member && visible && holdersOf(ctx, id).length > 0 && controlThrough(ctx, pov, id).length > 0;
+      return member || visible ? [{ id, type, belongs: member || runs }] : [];
     });
+}
+
+/**
+ * Where each listed organization nests on the home (§29.3 Control): under the listed organization
+ * holding it (its controlling holder, else its largest stake, else the first by id), with how that
+ * one holds it; a root where none listed holds it. A cross-holding nests nothing under itself: the
+ * loop is cut at its first organization by id.
+ */
+function nestingOf(ctx: ReadContext, ids: readonly EntityId[]): Map<EntityId, { under: EntityId | null; via: OrgLinkView | null }> {
+  const listed = new Set(ids);
+  const out = new Map<EntityId, { under: EntityId | null; via: OrgLinkView | null }>();
+  for (const id of ids) {
+    const holds = holdersOf(ctx, id).filter((h) => listed.has(h.holder));
+    const stakes = holds.filter((h) => h.how === "stake");
+    const pick = stakes.find((h) => h.controlled) ?? [...stakes].sort((a, b) => (b.share ?? 0) - (a.share ?? 0) || a.holder.localeCompare(b.holder))[0] ?? holds[0];
+    out.set(id, pick ? { under: pick.holder, via: linkOf(ctx, pick.holder, holds.filter((h) => h.holder === pick.holder)) } : { under: null, via: null });
+  }
+  for (const id of ids) {
+    const chain = [id];
+    let at = out.get(id)?.under ?? null;
+    while (at !== null && !chain.includes(at)) {
+      chain.push(at);
+      at = out.get(at)?.under ?? null;
+    }
+    const root = at === null ? undefined : chain.slice(chain.indexOf(at)).sort()[0];
+    if (root !== undefined) out.set(root, { under: null, via: null });
+  }
+  return out;
 }
 
 /** The Orgs home (`orgs.list`). */
@@ -385,8 +474,9 @@ export function buildOrgList(ctx: ReadContext): OrgListView {
     if (page.seen(r.who)) members.push({ ...page.ref(r.who), tier: r.how, here: page.here(r.who) });
     else hidden++;
   }
-  const row = (id: EntityId, type: OrgType, belongs: boolean): OrgRowView => ({ id, name: own(ctx.state.entities, id)?.name ?? id, type, kind: header(ctx, { id, type, exists: true, rows: [] }).kind, title: belongs ? orgTitle(ctx, pov, id) : null, figure: figureOf(ctx, id, type, pov) });
   const orgs = shownOrgs(ctx).sort((a, b) => TYPE_ORDER.indexOf(a.type) - TYPE_ORDER.indexOf(b.type) || a.id.localeCompare(b.id));
+  const nesting = nestingOf(ctx, orgs.map((o) => o.id));
+  const row = (id: EntityId, type: OrgType, belongs: boolean): OrgRowView => ({ id, name: own(ctx.state.entities, id)?.name ?? id, type, kind: header(ctx, { id, type, exists: true, rows: [] }).kind, title: belongs ? orgTitle(ctx, pov, id) : null, figure: figureOf(ctx, id, type, pov), under: nesting.get(id)?.under ?? null, via: nesting.get(id)?.via ?? null });
   // The card's purse line, as the party's own section reads it for the player character (§4.2).
   const section = ctx.registry.orgSections.find((d) => d.id === PARTY_SECTION)?.build(ctx, party.id, pov);
   const purse = isRecord(section) && isRecord(section.purse) && typeof section.purse.balance === "string" ? section.purse.balance : null;

@@ -84,6 +84,9 @@ export const MAIN_TEXT = {
   summarizeNothing: "main.summarize.nothing",
   summarizeAgain: "main.summarize.again",
   summarizeFailed: "main.summarize.failed",
+  autoRan: "main.auto.ran",
+  autoLine: "main.auto.line",
+  autoFailed: "main.auto.failed",
 } as const;
 
 const page = MAIN_AGENT_PAGE.id;
@@ -171,6 +174,9 @@ export const MAIN_AGENT_PROMPTS: readonly PromptDef[] = [
   { id: MAIN_TEXT.engineBeats, page, group: STAGES, label: "What the engine did: the plan", note: "Leads stage 5's message: what the engine planned, as the narrator is told it.", text: "The engine planned the turn:\n{{lines}}", vars: [v("lines", "the plan's outcome, montage and beat lines", true)] },
   { id: MAIN_TEXT.engineReply, page, group: STAGES, label: "What the engine did: the reply", note: "Leads stage 7's message, and ends a turn's session with the reply when no stage showed it.", text: "The narrator's reply:\n{{reply}}", vars: [v("reply", "the reply as written", true)] },
   { id: MAIN_TEXT.engineRemember, page, group: STAGES, label: "What the minds remember", note: "Leads the message of the memory the last turn left to this one: the reply they remember.", text: "The last reply, which the minds remember now:\n{{reply}}", vars: [v("reply", "the last reply as written", true)] },
+  { id: MAIN_TEXT.autoRan, page, group: STAGES, label: "What ran on its own", note: "Leads the main agent's next message after a stage that runs on its own (Settings → Agents → Main agent → Stages): the roles the engine ran there without asking it, as the fixed pipeline runs them, and what each answered.", text: "Since your last message, these ran on their own, as the fixed pipeline runs them:\n{{ran}}", vars: [v("ran", "each run, one line each", true)] },
+  { id: MAIN_TEXT.autoLine, page, group: STAGES, label: "A run on its own", note: "One line of What ran on its own per run: its role, what the engine asked of it, and its answer whole.", text: "- {{role}} ({{what}}): {{answer}}", vars: [v("role", "the role's id", true), v("what", "what the engine asked, in the request's words"), v("answer", "its answer whole, or why it failed", true)] },
+  { id: MAIN_TEXT.autoFailed, page, group: STAGES, label: "A run on its own failed", note: "Fills {{answer}} in A run on its own when the role answered nothing it could take: the turn went on without it, or its settings stopped the turn.", text: "it gave nothing the engine could take, so the turn went on without it", vars: [] },
   { id: MAIN_TEXT.open, page, group: REQUESTS, label: "A request", note: "One line of a stage's message per request: the role, as run_role takes it, and what the engine asks of it.", text: "- {{role}}: {{what}}", vars: [v("role", "the role's id", true), v("what", "what the engine asks, in the words below")] },
   { id: MAIN_TEXT.openEach, page, group: REQUESTS, label: "Its people, one call each", note: "Follows the line of a request whose calls are each about one person (the knowledge step, one call per character), naming them: each call answers for its person alone, so a task should say what concerns each.", text: "One call per person, each answered for that person alone: {{people}}", vars: [v("people", "each person's name and id", true)] },
   { id: MAIN_TEXT.openScene, page, group: REQUESTS, label: "Its people, one call", note: "Follows the line of a request whose one call is about everyone there (the knowledge step, one call for the scene), naming them.", text: "One call for everyone there: {{people}}", vars: [v("people", "each person's name and id", true)] },

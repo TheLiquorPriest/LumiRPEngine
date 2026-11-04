@@ -4,8 +4,8 @@
 
 import { isOwnerRole } from "../../../shared/finance";
 import { isRecord, type JsonValue } from "../../../shared/json";
-import { DUES_EVERY, isOrgPower, limitsIn, MEMBER_HOWS, ORG_BASES, ORG_TYPES, POSITION_SCOPES, powersIn, type MemberHow } from "../../../shared/org";
-import type { OrgDelegationView, OrgDuesView, OrgHistoryLineView, OrgListView, OrgPersonView, OrgPositionView, OrgPowerView, OrgRef, OrgRowView, OrgStartView, OrgView, PartyMemberView } from "../../../shared/org-view";
+import { DUES_EVERY, isOrgPower, limitsIn, MEMBER_HOWS, ORG_BASES, ORG_TYPES, POSITION_SCOPES, powersIn, TRUSTEES_DECIDE, type MemberHow } from "../../../shared/org";
+import type { OrgDelegationView, OrgDuesView, OrgHistoryLineView, OrgLinkView, OrgListView, OrgPersonView, OrgPositionView, OrgPowerView, OrgRef, OrgRowView, OrgStartView, OrgTrustView, OrgView, PartyMemberView } from "../../../shared/org-view";
 import { ALERT_KINDS, ALERT_TABS, COMING_KINDS, PLAN_STATUSES, type OrgAlertView, type OrgComingView, type OrgPlanView, type PlanClosedView, type PlanGoalView, type PlanOrderView } from "../../../shared/org-feed";
 import { isPartyTier } from "../../../shared/party";
 import { MOTION_STATUSES, STANDING_VOTES, VOTE_BASES, VOTE_HOWS, VOTES, type DecisionsView, type MotionView, type RequestView, type Tally } from "../../../shared/org-motions";
@@ -21,6 +21,27 @@ function text(v: unknown): string | null {
 
 function idTitle(v: unknown): { id: string; title: string } | null {
   return isRecord(v) && typeof v.id === "string" ? { id: v.id, title: str(v.title, v.id) } : null;
+}
+
+/** How one organization holds another; null for a shape it isn't. */
+function link(l: Obj): OrgLinkView | null {
+  if (typeof l.id !== "string") return null;
+  return {
+    id: l.id,
+    name: str(l.name, l.id),
+    type: oneOf(l.type, ORG_TYPES, "group"),
+    share: optNum(l.share) ?? null,
+    votes: optNum(l.votes) ?? null,
+    controlled: l.controlled === true,
+    role: isOwnerRole(l.role) ? l.role : null,
+    position: idTitle(l.position),
+    delegation: l.delegation === true,
+  };
+}
+
+function trust(v: unknown): OrgTrustView | null {
+  if (!isRecord(v)) return null;
+  return { settlor: ref(v.settlor), revocable: v.revocable === true, purpose: text(v.purpose), until: text(v.until), decide: oneOf(v.decide, TRUSTEES_DECIDE, "each") };
 }
 
 function delegation(d: Obj): OrgDelegationView | null {
@@ -52,6 +73,7 @@ function person(p: Obj): OrgPersonView | null {
     via: ref(p.via),
     powers: list(p.powers, power),
     you: p.you === true,
+    org: p.org === null || p.org === undefined ? null : oneOf(p.org, ORG_TYPES, "group"),
   };
 }
 
@@ -107,6 +129,7 @@ export function decodeOrgView(value: unknown): OrgView | null {
       reportsTo: list(you.reportsTo, ref),
       powers: list(you.powers, power),
       delegations: list(you.delegations, delegation),
+      through: list(you.through, ref),
     },
     runBy: list(value.runBy, ref),
     people: list(value.people, person),
@@ -119,6 +142,11 @@ export function decodeOrgView(value: unknown): OrgView | null {
     candidates: list(value.candidates, ref),
     // The packs' own shapes, each read by the tab that draws it (`r.orgTab`).
     sections: isRecord(value.sections) ? (value.sections as Record<string, JsonValue>) : {},
+    above: list(value.above, link),
+    below: list(value.below, link),
+    belowHidden: num(value.belowHidden),
+    trust: trust(value.trust),
+    nonprofit: value.nonprofit === true,
   };
 }
 
@@ -129,16 +157,23 @@ export function decodeOrgPage(pages: unknown, id: string): OrgView | null {
 }
 
 function row(r: Obj): OrgRowView | null {
-  return typeof r.id === "string" ? { id: r.id, name: str(r.name, r.id), type: oneOf(r.type, ORG_TYPES, "group"), kind: str(r.kind), title: text(r.title), figure: text(r.figure) } : null;
+  return typeof r.id === "string" ? { id: r.id, name: str(r.name, r.id), type: oneOf(r.type, ORG_TYPES, "group"), kind: str(r.kind), title: text(r.title), figure: text(r.figure), under: text(r.under), via: isRecord(r.via) ? link(r.via) : null } : null;
 }
 
-/** Start something…; a company off without a reason it can say, and no group, for a shape it isn't. */
+/** One of Start something…'s foundings: why it is off, and the accounts its money may come from; off with words of its own for a shape it isn't. */
+function founding(v: unknown, off: string): OrgStartView["company"] {
+  const s = isRecord(v) ? v : {};
+  return { why: isRecord(v) ? text(s.why) : off, sources: list(s.sources, (a) => (typeof a.id === "string" ? { id: a.id, name: str(a.name, a.id), balance: str(a.balance) } : null)) };
+}
+
+/** Start something…; a founding off without a reason it can say, and no group, for a shape it isn't. */
 function start(v: unknown): OrgStartView {
   const s = isRecord(v) ? v : {};
-  const company = isRecord(s.company) ? s.company : {};
   const kinds = isRecord(s.group) ? list(s.group.kinds, (k) => (typeof k.id === "string" ? { id: k.id, label: str(k.label, k.id) } : null)) : [];
   return {
-    company: { why: isRecord(s.company) ? text(company.why) : "Starting a company isn't open here", sources: list(company.sources, (a) => (typeof a.id === "string" ? { id: a.id, name: str(a.name, a.id), balance: str(a.balance) } : null)) },
+    company: founding(s.company, "Starting a company isn't open here"),
+    trust: founding(s.trust, "Settling a trust isn't open here"),
+    nonprofit: founding(s.nonprofit, "Starting a nonprofit isn't open here"),
     group: kinds.length > 0 ? { kinds } : null,
   };
 }

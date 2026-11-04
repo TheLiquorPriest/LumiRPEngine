@@ -12,6 +12,7 @@ import { HostConnection, LiveError, sessionOf, signIn, signOut } from "./connect
 import type { McpOptions } from "./kit-api";
 import { Live, resolveRevision } from "./live";
 import { templateFile } from "./offline";
+import { SANDBOX_BUDGET_MS } from "./sandbox";
 import type { ToolModule } from "./tool-module";
 import type { ToolContext } from "./tools";
 import { callTool, findTool, KeyedQueue, MODULE_TOOLS } from "./tools";
@@ -78,8 +79,11 @@ Your worlds on Lumiverse
   attach <worldId> <chatId>                   A chat plays the world
   upgrade <chatId> [--to <revision>] [--preview] [--spoilers]
 
-${moduleUsage()}  mcp [--read-only] [--pin]                   All of it as an MCP server on stdio, following LumiRPEngine's own
-                                              tools (--pin, or LRE_PIN_KIT=1: keep these)
+${moduleUsage()}  mcp [--read-only] [--pin] [--sandbox-budget <seconds|none>]
+                                              All of it as an MCP server on stdio, following LumiRPEngine's own
+                                              tools (--pin, or LRE_PIN_KIT=1: keep these). A sandbox advance stops
+                                              with a cursor to go on from once a call has run --sandbox-budget
+                                              seconds (or LRE_SANDBOX_BUDGET; ${SANDBOX_BUDGET_MS / 1000} by default, none for no limit)
   version, --version                          ${CLI_NAME}, engine, world format and agent API versions
 
   <s> is draft, head or a revision. Everywhere: --url <base> (or LUMIVERSE_URL) picks the Lumiverse when you
@@ -185,7 +189,7 @@ const MIRRORS: Readonly<Record<string, Mirror>> = {
   schema: { tool: "lre_schema", options: ["--map", "--offset"], needs: 0, usage: "schema [<pointer>] [--map] [--offset <n>]", args: (p) => ({ ...(pos(p, 0) !== undefined ? { pointer: pos(p, 0) } : {}), ...(p.flags["--map"] ? { schema: "map" } : {}), ...(number(p, "--offset") !== undefined ? { offset: number(p, "--offset") } : {}) }) },
   templates: { tool: "lre_templates", options: [], needs: 0, usage: "templates", args: () => ({}) },
   template: { tool: "lre_template", options: ["--out", "--pointer", "--offset"], needs: 1, usage: "template <id> [--out <file>] [--pointer <p>] [--offset <n>]", args: (p) => ({ id: pos(p, 0), ...pointerAndOffset(p) }) },
-  check: { tool: "lre_check", options: [], needs: 1, usage: "check <file>", args: (p) => ({ path: pos(p, 0) }) },
+  check: { tool: "lre_check", options: ["--world", "--source"], needs: 0, usage: "check (<file> | --world <id> [--source <s>])", args: (p) => runFrom(p) },
   playtest: { tool: "lre_playtest", options: ["--turn", "--world", "--source"], needs: 0, usage: "playtest (<file> | --world <id> [--source <s>]) --turn <text> [--turn …]", args: (p) => ({ ...runFrom(p), turns: p.values["--turn"] ?? [] }) },
   "check-world": { tool: "lre_check_world", options: ["--days", "--world", "--source"], needs: 0, usage: "check-world (<file> | --world <id> [--source <s>]) [--days <n>]", args: (p) => ({ ...runFrom(p), ...(number(p, "--days") !== undefined ? { days: number(p, "--days") } : {}) }) },
   status: { tool: "lre_status", options: [], needs: 0, usage: "status", args: () => ({}) },
@@ -309,17 +313,22 @@ function chooseBase(p: Parsed, io: CliIO): string {
   throw new LiveError("login", `Signed in to several Lumiverses (${stored.join(", ")}): pick one with --url or LUMIVERSE_URL.`);
 }
 
+/** A limit an option (else its environment variable) gives in seconds or "none": milliseconds, null for none, undefined when neither says. */
+function limitOf(p: Parsed, env: CliIO["env"], option: string, variable: string): number | null | undefined {
+  const raw = one(p, option) ?? env[variable];
+  if (raw === undefined || raw.trim() === "") return undefined;
+  if (raw.trim().toLowerCase() === "none") return null;
+  const seconds = Number(raw);
+  if (!Number.isFinite(seconds) || seconds <= 0) throw new UsageError(`${option} (or ${variable}) is ${JSON.stringify(raw)}: give a number of seconds above 0, or none for no limit.`);
+  return Math.round(seconds * 1000);
+}
+
 /**
  * How long each request to LumiRPEngine (and the socket's opening) may take: `--timeout`, else
  * `LRE_TIMEOUT`, in seconds or "none"; else the client's default. Null is no limit.
  */
 function timeoutOf(p: Parsed, env: CliIO["env"]): number | null | undefined {
-  const raw = one(p, "--timeout") ?? env.LRE_TIMEOUT;
-  if (raw === undefined || raw.trim() === "") return undefined;
-  if (raw.trim().toLowerCase() === "none") return null;
-  const seconds = Number(raw);
-  if (!Number.isFinite(seconds) || seconds <= 0) throw new UsageError(`--timeout (or LRE_TIMEOUT) is ${JSON.stringify(raw)}: give a number of seconds above 0, or none for no limit.`);
-  return Math.round(seconds * 1000);
+  return limitOf(p, env, "--timeout", "LRE_TIMEOUT");
 }
 
 function liveFor(base: string, io: CliIO, timeoutMs: number | null | undefined): Live {
@@ -344,6 +353,8 @@ function sessionFor(p: Parsed, io: CliIO, readOnly: boolean): Session {
     readOnly,
     live: () => (live ??= liveFor(chooseBase(p, io), io, timeoutMs)),
     serialize: (key, work) => queue.run(key, work),
+    // A sandbox lasts this one command, so an advance runs whole: a cursor would have nothing to go on with.
+    sandboxBudgetMs: null,
   };
   return { ctx, close: () => live?.conn.close() };
 }
@@ -462,8 +473,8 @@ export async function run(argv: readonly string[], io: CliIO): Promise<RunResult
     const readOnly = readOnlyOf(p, io.env);
     if (command === "mcp") {
       // Checked like any command's: a misspelled --read-only must refuse to start, never serve the write tools.
-      onlyOptions("mcp", p, ["--url", "--read-only", "--timeout", "--pin"], "mcp [--read-only] [--pin] [--url <base>] [--timeout <seconds|none>]", false);
-      return { mcp: { readOnly, pin: pinOf(p, io.env), base: () => chooseBase(p, io), timeoutMs: timeoutOf(p, io.env) } };
+      onlyOptions("mcp", p, ["--url", "--read-only", "--timeout", "--pin", "--sandbox-budget"], "mcp [--read-only] [--pin] [--url <base>] [--timeout <seconds|none>] [--sandbox-budget <seconds|none>]", false);
+      return { mcp: { readOnly, pin: pinOf(p, io.env), base: () => chooseBase(p, io), timeoutMs: timeoutOf(p, io.env), sandboxBudgetMs: limitOf(p, io.env, "--sandbox-budget", "LRE_SANDBOX_BUDGET") } };
     }
     session = sessionFor(p, io, readOnly);
     if (command === "login") {

@@ -244,6 +244,31 @@ export interface GmPartRequest extends Request<"lre.gm.part"> {
 }
 
 /**
+ * A chat's folded head as one document (DESIGN §23), for a scratch copy an outside client plays on
+ * its own engine (the command line's sandbox): behind the GM gate, as `lre.gm` is, since it holds
+ * everything, secrets included. Nothing is written.
+ */
+export interface ChatExportRequest extends Request<"lre.chat.export"> {
+  chatId: ChatId;
+}
+
+/**
+ * What `lre.chat.export` answers: the head as `renderState` folds it (the world as played and its
+ * state, plain JSON), the world revision in force, the engine that folded it, the chat run's seed
+ * (which samples on-demand detail) and the clock.
+ */
+export interface ChatExport {
+  chatId: ChatId;
+  worldId: WorldId;
+  revision: RevisionId;
+  engine: string;
+  runSeed: string;
+  clock: number;
+  world: WorldDoc;
+  state: JsonObject;
+}
+
+/**
  * GM → This chat → Sections' preview (DESIGN §6.11): every section as the next turn would give it to
  * the narrator now, built the way a turn builds it. Behind the GM gate: it holds marked facts.
  */
@@ -614,7 +639,7 @@ export type WorldRequest = Request<"lre.world"> &
     | { op: "commit"; worldId: WorldId; base: RevisionId | null; note?: string; version?: number }
     | { op: "import"; file: JsonValue }
     | { op: "export"; worldId: WorldId; revision?: RevisionId }
-    | { op: "lint"; worldId: WorldId }
+    | { op: "lint"; worldId: WorldId; revision?: RevisionId }
     | { op: "attach"; worldId: WorldId; chatId: ChatId }
     | { op: "upgrade"; chatId: ChatId; to: RevisionId; merge?: UpgradePicks }
     | { op: "sheet"; worldId: WorldId; ruleset: JsonValue; entity?: EntityId }
@@ -1184,6 +1209,7 @@ export type FrontendToBackend =
   | EditRequest
   | GmRequest
   | GmPartRequest
+  | ChatExportRequest
   | SectionsRequest
   | MarkerRequest
   | KeepRequest
@@ -1270,6 +1296,7 @@ export interface ResultBodies {
   "lre.edit": { pending: boolean; queued?: QueuedOn; undo: string | null };
   "lre.gm": GmView;
   "lre.gm.part": GmPartAnswer;
+  "lre.chat.export": ChatExport;
   /** Every section in prompt order, and the section budget: the shared one, what the sent sections spend of it, and the Minds section's own. */
   "lre.sections": { sections: SectionPreview[]; budget: { sections: number; used: number; minds: number } };
   /** The chat's state view now, and its activity line (null when idle). */

@@ -1,9 +1,11 @@
 // What a turn waits for (DESIGN §5.1, §24.1, §24.4, §5.3): character minds think while `interpret`
 // reads the player's message, and a read that makes them pointless (a timelapse) or a preview gate's
-// Cancel stops them; a gate's Play takes the minds its held run started. Consolidation runs beside
-// the memories, and asks again after a memory that rewrote the summary; it runs only while something
-// reads what it folds, and minds only while something reads them. Memory, consolidation and the time
-// skip's steps don't reason unless the user sets an effort on their cards.
+// Cancel stops them; a gate's Play takes the minds its held run started. On an agent chat's fixed
+// pipeline the scene role starts with the read and runs beside the judge, unless a gate may hold the
+// turn. Consolidation runs beside the memories, and asks again after a memory that rewrote the
+// summary; it runs only while something reads what it folds, and minds only while something reads
+// them. Memory, consolidation and the time skip's steps don't reason unless the user sets an effort
+// on their cards.
 
 import { describe, expect, test } from "bun:test";
 import type { QuietRequest } from "../../src/backend/host";
@@ -13,6 +15,7 @@ import { editRequest } from "../../src/frontend/requests";
 import { placeOfEntity } from "../../src/engine/scope";
 import { noteOp, refreshOp } from "../../src/packs/minds/ui/ops";
 import { readCharacter } from "../../src/packs/minds/core/state";
+import { presetAdjudication } from "../../src/shared/adjudication";
 import type { JsonObject } from "../../src/shared/json";
 import type { EditOp } from "../../src/shared/protocol";
 import { SETTINGS_DEFAULTS_REV, type UserSettings } from "../../src/shared/settings";
@@ -182,6 +185,81 @@ describe("minds beside the read", () => {
     await edit(rig, chatId, refreshOp("danny_okafor"));
     await rig.turn(chatId, "So, any news?", "Danny shrugs.");
     expect(asked(MIND, rig.host.quietCalls)).toEqual(["Danny Okafor"]);
+  });
+});
+
+describe("an agent turn's scene beside the read and the judge (N3 B7)", () => {
+  const SCENE = "You are the scene agent of LumiRPEngine";
+  const JUDGE = "Rate the approach";
+  const isScene = (req: QuietRequest): boolean => (req.messages[0]?.content ?? "").includes(SCENE);
+  const isJudge = (req: QuietRequest): boolean => req.messages.some((m) => m.content.includes(JUDGE));
+
+  /** A test-world chat on agents' fixed pipeline with a coin-flip climb the judge rates; every role prompt-only but the scene, an agent; `gates` joins the settings. */
+  async function climbChat(rig: Rig, gates: JsonObject = {}): Promise<string> {
+    const worldId = await rig.newWorld();
+    const draft = rig.body(await rig.send({ type: "lre.editor", op: "get", worldId, base: null }));
+    const climb: JsonObject = { id: "climb", label: "Climb the wall", lexicon: ["climb"], params: {}, requires: [], check: { id: "climb", dice: "d20", dc: "11" }, outcomes: { success: [], failure: [] }, duration: "5" };
+    rig.body(await rig.send({ type: "lre.editor", op: "put", worldId, base: draft.base, collection: "actions", id: "climb", value: climb }));
+    rig.body(await rig.send({ type: "lre.editor", op: "set", worldId, base: draft.base, part: "ruleset", value: { adjudication: presetAdjudication("balanced") as unknown as JsonObject } }));
+    rig.body(await rig.send({ type: "lre.world", op: "commit", worldId, base: draft.base }));
+    const chatId = rig.host.createChat("Morning, Sam.");
+    rig.body(await rig.send({ type: "lre.world", op: "attach", worldId, chatId }));
+    const roles = Object.fromEntries(["intent", "minds", "knowledge", "director", "read", "curator", "memory", "skip", "world"].map((role) => [role, { promptOnly: true }]));
+    rig.body(await rig.send({ type: "lre.settings.set", patch: { agents: { roles, finalReview: { on: false } }, ...gates } }));
+    expect(rig.body(await rig.send({ type: "lre.chat.knowledge", chatId, engine: "agents" })).engine).toBe("agents");
+    return chatId;
+  }
+
+  test("on the fixed pipeline the scene goes out before interpret answers, and is still under way while the judge is asked", async () => {
+    const rig = new Rig();
+    const chatId = await climbChat(rig);
+    const seen = { sceneBeforeRead: false, judgeWhileScene: false };
+    rig.host.quietReply = async (req) => {
+      const system = req.messages[0]?.content ?? "";
+      if (system.includes(INTERPRET)) {
+        await until(() => rig.host.quietCalls.some(isScene));
+        seen.sceneBeforeRead = rig.host.quietCalls.some(isScene);
+        return JSON.stringify({ action: "climb", params: {}, confidence: 0.95 });
+      }
+      if (isScene(req)) {
+        await until(() => rig.host.quietCalls.some(isJudge));
+        seen.judgeWhileScene = rig.host.quietCalls.some(isJudge);
+        return JSON.stringify({ lore: [], notes: ["The wall is wet."] });
+      }
+      if (isJudge(req)) return JSON.stringify({ rating: 2, reason: "a rope" });
+      return JSON.stringify({ proposals: [] });
+    };
+    rig.host.sendUser(chatId, "I climb the wall with a rope.");
+    await rig.host.settle();
+    const reply = await rig.host.start(chatId, { type: "normal" });
+    expect(reply.halted).toBeUndefined();
+    expect(seen).toEqual({ sceneBeforeRead: true, judgeWhileScene: true });
+    // One scene call, whose notes the narrator is told.
+    expect(rig.host.quietCalls.filter(isScene)).toHaveLength(1);
+    expect(rig.host.section("Scene")).toContain("The wall is wet.");
+    await rig.host.finish(reply, "You climb.");
+    expect(rig.rt.ledger.errors).toEqual([]);
+  });
+
+  test("a turn the intent gate may hold asks the scene only once the gate lets it play", async () => {
+    const rig = new Rig();
+    const chatId = await climbChat(rig, { gates: { intent: true } });
+    rig.host.quietReply = (req) => {
+      if ((req.messages[0]?.content ?? "").includes(INTERPRET)) return JSON.stringify({ action: "climb", params: {}, confidence: 0.95 });
+      if (isScene(req)) return JSON.stringify({ lore: [], notes: [] });
+      if (isJudge(req)) return JSON.stringify({ rating: 2, reason: "a rope" });
+      return JSON.stringify({ proposals: [] });
+    };
+    rig.host.sendUser(chatId, "I climb the wall with a rope.");
+    await rig.host.settle();
+    expect((await rig.host.start(chatId, { type: "normal" })).halted).toBe("cancelled");
+    expect(rig.host.quietCalls.filter(isScene)).toHaveLength(0);
+    const gate = (await rig.rt.view(chatId, rig.host.userId)).chips.find((c) => c.kind === "intent_gate");
+    rig.body(await rig.send({ type: "lre.chip", chatId, chip: gate?.id, choice: "play" }));
+    const reply = await rig.host.start(chatId, { type: "regenerate" });
+    expect(reply.halted).toBeUndefined();
+    expect(rig.host.quietCalls.filter(isScene)).toHaveLength(1);
+    await rig.host.finish(reply, "You climb.");
   });
 });
 

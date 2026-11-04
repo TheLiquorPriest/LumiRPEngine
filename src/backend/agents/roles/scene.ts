@@ -49,7 +49,6 @@ async function liveLoreIds(reader: ToolReader, world: Pick<WorldDoc, "lore">, re
 export async function sceneRun(rt: Runtime, task: SceneTask, ctx: TurnAgentCtx): Promise<RoleAnswer<SceneOut>> {
   const answer = await runRoleAgent(rt, ctx, {
     sub: "scene",
-    purpose: null,
     phase: "pre",
     names: namesOf(task.world, task.state),
     // Where the player character is and who is with them, as the player may know them: what it chooses for starts there.

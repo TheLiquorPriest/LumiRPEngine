@@ -46,6 +46,20 @@ export function isExempt(ctx: Pick<ReadContext, "state" | "tables">, org: Entity
   return exemptStatusOf(ctx, org) !== null;
 }
 
+/** A private foundation's terms (§26.3): its status's row's payout, excise, tax on a late payout and donor limit, in percent; null for any other organization. */
+export function foundationTerms(ctx: Pick<ReadContext, "state" | "tables">, org: EntityId): { payoutPct: number; excisePct: number; undistributedPct: number; donorLimitPct: number } | null {
+  const status = exemptStatusOf(ctx, org);
+  const row = status ? rowOf(ctx, EXEMPT_TABLE, status.status) : null;
+  if (!row || !(typeof row.payout_pct === "number" && row.payout_pct > 0)) return null;
+  return { payoutPct: row.payout_pct, excisePct: numOf(row.excise_pct), undistributedPct: numOf(row.undistributed_tax_pct), donorLimitPct: numOf(row.donor_limit_pct, 60) };
+}
+
+/** Whether an organization's status lets it hold an S corporation's shares (a 501(c)(3)'s row says so, `s_corp_holder`). */
+export function holdsSCorpShares(ctx: Pick<ReadContext, "state" | "tables">, org: EntityId): boolean {
+  const status = exemptStatusOf(ctx, org);
+  return status !== null && rowOf(ctx, EXEMPT_TABLE, status.status)?.s_corp_holder === true;
+}
+
 /** The statuses the world's exempt table holds that exempt an organization from income tax, in the table's order: what GM → Orgs offers. */
 export function exemptStatuses(ctx: Pick<ReadContext, "tables">): { id: string; name: string; code: string }[] {
   return Object.entries(ctx.tables.get(EXEMPT_TABLE)?.rows ?? {}).flatMap(([id, row]) => (row.income_tax_exempt === false ? [] : [{ id, name: strOf(row.name, id), code: strOf(row.code) }]));
@@ -61,6 +75,11 @@ function donations(state: Readonly<WorldState>, side: "given" | "received", part
 export function donationsGiven(state: Readonly<WorldState>, donor: EntityId, year: number): { deductible: number; other: number } {
   const y = objOf(own(donations(state, "given", donor), String(year)));
   return { deductible: numOf(y.deductible), other: numOf(y.other) };
+}
+
+/** A donor's deductible gifts to private foundations in a year, among their deductible ones: their limit is lower. */
+export function foundationGifts(state: Readonly<WorldState>, donor: EntityId, year: number): number {
+  return numOf(objOf(own(donations(state, "given", donor), String(year))).foundation);
 }
 
 /** What an organization received in gifts in a year. */
@@ -91,7 +110,7 @@ function str(e: PackEvent, k: string): string {
   return typeof e.data[k] === "string" ? (e.data[k] as string) : "";
 }
 
-/** `economy.donation`: a gift's amount added to its donor's year (deductible or not, as it was when given) and to its receiver's. Its posting travels beside it in one unit. */
+/** `economy.donation`: a gift's amount added to its donor's year (deductible or not, as it was when given; a private foundation's apart, `pf`) and to its receiver's. Its posting travels beside it in one unit. */
 export const DONATION_EVENT: EventTypeDef<PackEvent> = {
   type: DONATION,
   validate: (e, ctx) => (own(ctx.state.entities, str(e, "donor")) && own(ctx.state.entities, str(e, "org")) && typeof e.data.cents === "number" && typeof e.data.year === "number" ? null : ({ code: "bad_event", reason: "a donation needs its donor, its receiver, its amount and its year" } satisfies Rejection)),
@@ -99,7 +118,8 @@ export const DONATION_EVENT: EventTypeDef<PackEvent> = {
     const cents = numOf(e.data.cents);
     const year = numOf(e.data.year);
     const key = e.data.deductible === true ? "deductible" : "other";
-    addDonation(state, "given", str(e, "donor"), year, (was) => ({ ...objOf(was), [key]: numOf(objOf(was)[key]) + cents }));
+    const foundation = e.data.deductible === true && e.data.pf === true;
+    addDonation(state, "given", str(e, "donor"), year, (was) => ({ ...objOf(was), [key]: numOf(objOf(was)[key]) + cents, ...(foundation ? { foundation: numOf(objOf(was).foundation) + cents } : {}) }));
     addDonation(state, "received", str(e, "org"), year, (was) => numOf(was) + cents);
   },
   describe: (e, ctx, viewer) => (viewer ? "" : `Donation: ${labelOf(ctx, str(e, "donor"))} to ${labelOf(ctx, str(e, "org"))}`),
@@ -108,22 +128,27 @@ export const DONATION_EVENT: EventTypeDef<PackEvent> = {
 /**
  * `economy.donate`: `from` (a party, or an organization given for, `by` acting) gives `to`, an
  * organization, `cents`: paid as the giver pays (or by `method`), filed under `donations`, with its
- * `economy.donation`. Deductible when the giver is a person and the receiver's status says gifts are.
+ * `economy.donation`. Deductible when the giver is a person and the receiver's status says gifts are
+ * (a private foundation's marked apart, `pf`, for its lower limit). An exempt organization may also
+ * grant to a person (a foundation's grant, a charity's help), never deductible.
  */
 function donateEvents(api: FinanceApi, ctx: EffectContext, a: Record<string, JsonValue>): LedgerEvent[] | Rejection {
   const to = strOf(a.to);
   const by = strOf(a.by);
   const from = strOf(a.from) || by || ctx.world.pov;
   const cents = Math.round(numOf(a.cents));
-  if (orgTypeOf(ctx, to) === null || isGone(ctx.state, to)) return { code: "not_an_organization", reason: `${labelOf(ctx, to)} isn't an organization to give to` };
+  const grant = api.partyKind(ctx, to) === "person" && !isGone(ctx.state, to);
+  if (grant && !isExempt(ctx, from)) return { code: "not_an_organization", reason: `${labelOf(ctx, to)} is a person: only an exempt organization grants to someone, and ${labelOf(ctx, from)} isn't one` };
+  if (!grant && (orgTypeOf(ctx, to) === null || isGone(ctx.state, to))) return { code: "not_an_organization", reason: `${labelOf(ctx, to)} isn't an organization to give to` };
   if (from === to) return { code: "bad_target", reason: "an organization doesn't give to itself" };
   if (cents <= 0) return { code: "bad_amount", reason: "a gift is more than nothing" };
   const method = strOf(a.method);
-  return actAs(ctx, { by, party: from, power: "money.spend", target: to, amount: cents, line: () => `Gave ${labelOf(ctx, to)} ${moneyWords(ctx, cents)}`, names: [to] }, () => {
-    const paid = api.pay(ctx, { from, to, cents, memo: `Donation to ${labelOf(ctx, to)}`, kind: "payment", category: "donations", ...(method !== "" ? { method } : {}) });
+  return actAs(ctx, { by, party: from, power: "money.spend", target: to, amount: cents, line: () => `${grant ? "Granted" : "Gave"} ${labelOf(ctx, to)} ${moneyWords(ctx, cents)}`, names: [to] }, () => {
+    const paid = api.pay(ctx, { from, to, cents, memo: `${grant ? "Grant" : "Donation"} to ${labelOf(ctx, to)}`, kind: "payment", category: "donations", ...(method !== "" ? { method } : {}) });
     if (!Array.isArray(paid)) return paid;
-    const deductible = api.partyKind(ctx, from) === "person" && exemptStatusOf(ctx, to)?.deductible === true;
-    return [...paid, { type: DONATION, data: { donor: from, org: to, cents, year: dateAt(calendarOf(ctx.world), ctx.state.clock).year, deductible } }];
+    const deductible = !grant && api.partyKind(ctx, from) === "person" && exemptStatusOf(ctx, to)?.deductible === true;
+    const pf = deductible && foundationTerms(ctx, to) !== null;
+    return [...paid, { type: DONATION, data: { donor: from, org: to, cents, year: dateAt(calendarOf(ctx.world), ctx.state.clock).year, deductible, ...(pf ? { pf: true } : {}) } }];
   });
 }
 
@@ -156,10 +181,10 @@ export function registerExempt(r: FinanceRegistry): void {
   core.action({
     id: FINANCE_ACTIONS.donate,
     label: "Donate",
-    description: "Give money to an organization: a charity, a church, a club. A person's gift to a charity or a church is deductible from their income tax.",
+    description: "Give money to an organization: a charity, a church, a club, a foundation. A person's gift to a charity, a church or a foundation is deductible from their income tax. An exempt organization (a foundation, a charity) may also grant money to a person.",
     pack: "economy",
     params: {
-      to: { type: "ref", of: { kind: [GROUP_KIND, "trust"] }, label: "To" },
+      to: { type: "ref", of: { kind: [GROUP_KIND, "trust", "person"] }, label: "To" },
       amount: { type: "money" },
       method: { type: "text", optional: true, label: "Paid with (cash, card, debit or savings, or the card or account the input names, in its words)" },
       as: asParam("money.spend", "Giving as: an organization you may spend for, only when the input gives from its money; left out, you give"),

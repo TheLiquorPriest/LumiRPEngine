@@ -103,6 +103,11 @@ const REQUESTS: Readonly<Record<MainRequestKind, { role: RoleId; stage: MainRole
   memory: { role: "memory", stage: "memory" },
 };
 
+/** The stage a request is worked in: a memory asked before the plan is the last turn's (`memory_before`). */
+export function requestStage(kind: MainRequestKind, phase: StagePhase): MainRoleStage {
+  return kind === "memory" && phase === "pre" ? "memory_before" : REQUESTS[kind].stage;
+}
+
 /** The stages a role works in, in the turn's order. */
 const ORDER: readonly MainRoleStage[] = ["memory_before", "intent", "prepare", "beats", "read", "memory"];
 
@@ -231,6 +236,8 @@ export class MainTurn {
   private readonly sent: AgentHistoryMessage[] = [];
   private readonly kept: MainMessage[] = [];
   private replyShown = false;
+  /** What ran on its own since the main agent's last message (`autoRan`), one line each: its next send leads with them. */
+  private readonly auto: string[] = [];
 
   constructor(
     private readonly host: MainHost,
@@ -263,7 +270,7 @@ export class MainTurn {
     if (this.failure !== null) return Promise.resolve({ failed: true });
     if (signal.aborted) return firedTimeout(signal) ? Promise.resolve({ failed: true }) : Promise.reject(signal.reason);
     const { role } = REQUESTS[kind];
-    const stage = kind === "memory" && this.host.phase() === "pre" ? "memory_before" : REQUESTS[kind].stage;
+    const stage = requestStage(kind, this.host.phase());
     const { promise, resolve, reject } = Promise.withResolvers<RequestOutcome<O>>();
     const abandon = (): void => r.settle(firedTimeout(signal) ? { failed: true } : { abandoned: signal.reason });
     const r: Request = {
@@ -308,10 +315,28 @@ export class MainTurn {
     this.wake();
   }
 
-  /** The turn's messages for its session segment, the reply after them when no stage showed it; null when the main agent never worked a stage. */
+  /**
+   * A request its stage ran on its own (`main.stages`: auto), as the fixed pipeline runs it: the main
+   * agent's next send leads with it and its answer whole, or the turn's session does when none follows.
+   */
+  autoRan(kind: MainRequestKind, task: unknown, out: { ok: true; out: unknown } | { ok: false }): void {
+    const answer = out.ok ? JSON.stringify(this.answerOf({ kind, task }, out.out)) : this.text(MAIN_TEXT.autoFailed);
+    this.auto.push(this.text(MAIN_TEXT.autoLine, { role: REQUESTS[kind].role, what: this.text(MAIN_TEXT.request(kind)), answer }));
+  }
+
+  /** What ran on its own since the last send, as the next message leads with it, and none from then on; empty when nothing did. */
+  private takeAuto(): string {
+    if (this.auto.length === 0) return "";
+    const note = this.text(MAIN_TEXT.autoRan, { ran: this.auto.join("\n") });
+    this.auto.length = 0;
+    return note;
+  }
+
+  /** The turn's messages for its session segment, what ran on its own since its last send and the reply after them when no stage showed it; null when the main agent never worked a stage. */
   segment(reply: string): MainMessage[] | null {
     if (this.kept.length === 0) return null;
-    return this.replyShown || reply.trim() === "" ? [...this.kept] : [...this.kept, { role: "user", content: this.text(MAIN_TEXT.engineReply, { reply }), by: MAIN_BY }];
+    const tail = [this.takeAuto(), this.replyShown || reply.trim() === "" ? "" : this.text(MAIN_TEXT.engineReply, { reply })].filter((t) => t !== "");
+    return tail.length === 0 ? [...this.kept] : [...this.kept, { role: "user", content: tail.join("\n\n"), by: MAIN_BY }];
   }
 
   /** The compaction or rollback the turn made, for its record; or, when the main agent never read its session, the rollback asked for, made now. */
@@ -398,7 +423,9 @@ export class MainTurn {
     try {
       const first = this.session === null;
       if (first) await (alone ? this.prepareAlone() : this.prepare(stop));
-      const message = reviewMessage(this.texts, draft, alone ? REVIEW_TEXT.stageFixed : REVIEW_TEXT.stageMain);
+      const auto = this.takeAuto();
+      const reviewing = reviewMessage(this.texts, draft, alone ? REVIEW_TEXT.stageFixed : REVIEW_TEXT.stageMain);
+      const message = auto === "" ? reviewing : `${auto}\n\n${reviewing}`;
       const sent = first ? `${this.task}\n\n${message}` : message;
       const history = this.history();
       // The session's last message is the engine's: it leads this one.
@@ -572,7 +599,10 @@ export class MainTurn {
         return people === "" ? line : `${line}\n  ${people}`;
       })
       .join("\n");
-    return tidy(this.text(MAIN_TEXT.stage, { number: String(NUMBER[stage]), stage: this.text(MAIN_TEXT.stageLabel(stage)), engine: this.engineNote(stage, requests), open }));
+    const message = tidy(this.text(MAIN_TEXT.stage, { number: String(NUMBER[stage]), stage: this.text(MAIN_TEXT.stageLabel(stage)), engine: this.engineNote(stage, requests), open }));
+    // What ran on its own since the last send leads it (`autoRan`).
+    const auto = this.takeAuto();
+    return auto === "" ? message : `${auto}\n\n${message}`;
   }
 
   /** Whom a request's calls are about, as its line follows it: the knowledge step's people, each call one person's or one for them all; nothing for any other request. */
@@ -609,7 +639,7 @@ export class MainTurn {
   }
 
   /** A run's answer as the main agent sees it: the answer's shape and its content, whole, a line carrying a secret marked (a brief or outline line is marked as it is written, `ProseMark`). */
-  private answerOf(r: Request, out: unknown): JsonValue {
+  private answerOf(r: Pick<Request, "kind" | "task">, out: unknown): JsonValue {
     switch (r.kind) {
       case "interpret": {
         const read = out as InterpretRead | null;

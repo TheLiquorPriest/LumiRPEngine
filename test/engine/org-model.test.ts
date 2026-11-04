@@ -2,8 +2,9 @@
 // power in Alder Automotive and the Kowalczyks and why, who works where (a place employer too), the
 // places that are an organization's, the household Head by her title, a company's things never its
 // staff's, membership through a job, the party and position selectors, a position's and a
-// delegation's limits; and, on every starter, Cast's groups change only by the companies people own
-// or work for, and every schedule's owners are unchanged.
+// delegation's limits, a company holding a trust's position (an officer that is an entity, DESIGN
+// §29.1); and, on every starter, Cast's groups change only by the companies people own or work for
+// (a trust, a group since §29.1, joins none), and every schedule's owners are unchanged.
 
 import { describe, expect, test } from "bun:test";
 import { ownersIn } from "../../src/shared/finance";
@@ -12,7 +13,7 @@ import type { EntityDef, WorldDoc } from "../../src/shared/world";
 import { owns } from "../../src/engine/access";
 import { migrateWorld } from "../../src/engine/authoring";
 import { acts } from "../../src/engine/life";
-import { headOf, isStaff, mayAct, membersOfOrg, orgPlaces, orgPower, orgPowers, orgTitle, orgTypeOf } from "../../src/engine/org";
+import { headOf, heldPositions, isStaff, mayAct, membersOfOrg, orgPlaces, orgPower, orgPowers, orgTitle, orgTypeOf } from "../../src/engine/org";
 import { createRegistry } from "../../src/engine/registry-impl";
 import { allSchedules, scheduleOwners } from "../../src/engine/schedules";
 import { isGone, kindIs } from "../../src/engine/scope";
@@ -173,6 +174,19 @@ describe("the organization model on Port Alder", () => {
     const later = new Working(reg, w.world, { ...w.state, clock: 8 * 1440 });
     expect(orgPower(later.ctx, JORDAN, SHOP, "money.spend")).toBeNull();
   });
+
+  test("a company holds a trust's position: its owner acts for the trust through it, within the position's powers", () => {
+    const w = portAlder((world) => {
+      world.entities.alder_trust = { id: "alder_trust", kind: "trust", name: "Alder Family Trust", tier: "background", fields: { owners: [{ party: JORDAN, role: "beneficiary", share: 100 }], positions: [{ id: "director", title: "Director", powers: ["money.view", "money.spend"] }] }, relations: [] };
+      entity(world, SHOP).relations.push({ type: "member_of", to: "alder_trust", fields: { position: "director" } });
+    });
+    expect(orgTypeOf(w.ctx, "alder_trust")).toBe("trust");
+    expect(heldPositions(w.ctx, SHOP, "alder_trust").map((h) => h.position.id)).toEqual(["director"]);
+    expect(membersOfOrg(w.ctx, "alder_trust").find((r) => r.who === SHOP)).toMatchObject({ how: "member", position: "director" });
+    expect(orgPower(w.ctx, SHOP, "alder_trust", "money.spend")).toEqual({ basis: "position", id: "director" });
+    expect(orgPower(w.ctx, MARCUS, "alder_trust", "money.spend")).toEqual({ basis: "control", id: SHOP, through: [SHOP] });
+    expect(orgPower(w.ctx, MARCUS, "alder_trust", "staff.hire")).toBeNull();
+  });
 });
 
 describe("on every starter, membership follows organizations and schedules keep their owners", () => {
@@ -183,7 +197,8 @@ describe("on every starter, membership follows organizations and schedules keep 
       const { state } = w;
       const company = (id: string): boolean => orgTypeOf(w.ctx, id) === "company";
       const shown = (id: string): boolean => canSeeEntity(reg, w.world, state, world.pov, id) && !isGone(state, id);
-      const groupBefore = (id: string): boolean => kindIs(reg, w.world, state.entities[id]?.kind ?? "", GROUP_KIND) && !company(id);
+      // What read as a group of people before trusts were groups: a group kind, neither a company nor a trust.
+      const groupBefore = (id: string): boolean => kindIs(reg, w.world, state.entities[id]?.kind ?? "", GROUP_KIND) && !company(id) && orgTypeOf(w.ctx, id) !== "trust";
       const theirs = (who: string, org: string): boolean => ownersIn(state.entities[org]?.fields ?? {}).some((o) => o.party === who) || isStaff(w.ctx, who, org) !== null;
       const expected = (who: string): string[] =>
         Object.keys(state.entities)

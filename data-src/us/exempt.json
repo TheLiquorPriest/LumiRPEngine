@@ -6,7 +6,7 @@
   "currency": "USD",
   "money_unit": "integer cents",
   "reflects_period": "2025-2026 (point-in-time rules)",
-  "basis": "The common kinds of tax-exempt organization and how the Internal Revenue Code treats each, as recalled from IRS Publications 557 (Tax-Exempt Status for Your Organization), 526 (Charitable Contributions) and 15 (Employer's Tax Guide), and the FUTA and state unemployment exclusions (IRC sections 3306(c)(8) and 3309(b)(1)); not queried live. Treat as plausible defaults, not legal advice.",
+  "basis": "The common kinds of tax-exempt organization and how the Internal Revenue Code treats each, as recalled from IRS Publications 557 (Tax-Exempt Status for Your Organization), 526 (Charitable Contributions) and 15 (Employer's Tax Guide), and the FUTA and state unemployment exclusions (IRC sections 3306(c)(8) and 3309(b)(1)); a private foundation's payout, excise and donor limit from IRC sections 4940, 4942 and 170(b)(1)(B) and the Instructions for Form 990-PF; who may hold an S corporation's shares from IRC section 1361(c)(6); not queried live. Treat as plausible defaults, not legal advice.",
   "fields": {
     "id": "Lower-snake stable key: the value an organization's tax_exempt field names.",
     "name": "The status in words.",
@@ -15,6 +15,11 @@
     "donations_deductible": "Whether a person's cash gifts to it are deductible (IRC section 170).",
     "futa": "Whether it owes federal unemployment tax (FUTA) on its staff's wages.",
     "suta": "Whether it owes state unemployment tax (SUTA) on its staff's wages.",
+    "s_corp_holder": "Whether it may hold an S corporation's shares (IRC section 1361(c)(6): 501(c)(3) organizations may).",
+    "payout_pct": "A private foundation's minimum payout: the share of the average value of its assets it grants out each year, by the end of the next (IRC section 4942(e)). Absent for every other status.",
+    "excise_pct": "A private foundation's excise on its net investment income (IRC section 4940(a)).",
+    "undistributed_tax_pct": "A private foundation's tax on a year's payout it still hasn't granted by the end of the next year (IRC section 4942(a)).",
+    "donor_limit_pct": "The share of a person's income their deductible cash gifts to it may come to, when lower than the usual 60% (IRC section 170(b)(1)(B): 30% to a private foundation).",
     "description": "What kind of organization holds the status."
   },
   "entries": [
@@ -26,6 +31,7 @@
       "donations_deductible": true,
       "futa": false,
       "suta": true,
+      "s_corp_holder": true,
       "description": "A public charity or other nonprofit organized for charitable, educational, scientific or literary purposes: a food bank, a shelter, a school, a museum. Gifts to it are deductible; it owes no FUTA but pays state unemployment tax."
     },
     {
@@ -36,6 +42,7 @@
       "donations_deductible": true,
       "futa": false,
       "suta": false,
+      "s_corp_holder": true,
       "description": "A church, synagogue, mosque, temple or other religious organization, exempt without applying. Gifts to it are deductible; it owes neither FUTA nor state unemployment tax."
     },
     {
@@ -46,7 +53,23 @@
       "donations_deductible": false,
       "futa": true,
       "suta": true,
+      "s_corp_holder": false,
       "description": "A club organized for pleasure and recreation, supported by its members' dues: a country club, a hobby or sports club, a fraternal lodge's social arm. Exempt on its members' money, but gifts to it are not deductible, and it pays unemployment taxes like any employer."
+    },
+    {
+      "id": "private_foundation",
+      "name": "Private foundation",
+      "code": "501(c)(3)",
+      "income_tax_exempt": true,
+      "donations_deductible": true,
+      "futa": false,
+      "suta": true,
+      "s_corp_holder": true,
+      "payout_pct": 5,
+      "excise_pct": 1.39,
+      "undistributed_tax_pct": 30,
+      "donor_limit_pct": 30,
+      "description": "A charity funded by one family, company or founder rather than the public: a family foundation, a company's foundation. It grants out at least 5% of the average value of its assets each year, by the end of the next, last year's shortfall first; it pays 1.39% on its net investment income and 30% on a payout still ungranted a year late, both with its return on 15 May. A person deducts gifts to it up to 30% of their income."
     }
   ]
 }

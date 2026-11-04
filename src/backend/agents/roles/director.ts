@@ -95,7 +95,6 @@ export async function decideRun(rt: Runtime, task: ChooseTask, ctx: TurnAgentCtx
         ctx,
         {
           sub: "decisions",
-          purpose: "npc.choose",
           phase: task.phase === "pre" ? "pre" : "read",
           names,
           vars: {
@@ -155,7 +154,6 @@ export async function proseRun(rt: Runtime, task: ProseTask, ctx: TurnAgentCtx):
     ctx,
     {
       sub: "prose",
-      purpose: brief ? "brief" : "outline",
       phase: "prose",
       names: namesOf(task.world, task.state),
       vars: { ...vars, ...proseData(vars), asks: [brief ? rule("brief", brief) : "", outline ? rule("outline", outline) : ""].filter((t) => t !== "").join("\n\n"), sections: outline?.vars.sections ?? "" },
@@ -196,7 +194,6 @@ export async function choicesRun(rt: Runtime, task: ChoicesTask, ctx: TurnAgentC
     ctx,
     {
       sub: "choices",
-      purpose: "choices",
       phase: "read",
       names: { world: task.vars.world ?? "", pov: task.vars.pov ?? "" },
       vars: { ...task.vars, ...proseData(task.vars), rule: renderPrompt(ruleId, ownTexts, task.vars, task.template !== null ? { [ruleId]: task.template } : null), reply: task.reply },

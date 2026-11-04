@@ -45,7 +45,7 @@ import { createRng, type Rng } from "../../../engine/rng";
 import { calendarOf, dateAt } from "../../../engine/calendar";
 import type { WorldState } from "../../../engine/state";
 import { kindIs, placeOfEntity } from "../../../engine/scope";
-import { COMPANY_KIND, GROUP_KIND, MEMBER_OF, membersOf } from "../../../engine/selector";
+import { COMPANY_KIND, GROUP_KIND, MEMBER_OF, membersOf, TRUST_KIND } from "../../../engine/selector";
 import { mayAct } from "../../../engine/org";
 import { canSeeEntity, canSeePlace } from "../../../engine/visibility";
 
@@ -438,7 +438,7 @@ export function managesAccount(ctx: ReadContext, account: EntityId, who: EntityI
 export function moneyLevel(ctx: Pick<ReadContext, "registry" | "world" | "state" | "levelOf">, party: EntityId): number {
   const level = ctx.levelOf(party, "money");
   const kind = own(ctx.state.entities, party)?.kind ?? "";
-  if (kind === "" || !kindIs(ctx.registry, ctx.world, kind, GROUP_KIND) || kindIs(ctx.registry, ctx.world, kind, COMPANY_KIND)) return level;
+  if (kind === "" || !kindIs(ctx.registry, ctx.world, kind, GROUP_KIND) || kindIs(ctx.registry, ctx.world, kind, COMPANY_KIND) || kindIs(ctx.registry, ctx.world, kind, TRUST_KIND)) return level;
   return passMemo([ctx.state, ctx.state.entities, ctx.world], `economy.level:${party}`, () => Math.max(level, ...membersOf(ctx.registry, ctx.world, ctx.state, party).map((m) => ctx.levelOf(m, "money"))));
 }
 

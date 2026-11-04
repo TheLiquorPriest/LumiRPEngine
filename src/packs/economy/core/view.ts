@@ -24,6 +24,7 @@ import { cycleOf, flowRunOf, interestInYear, isOpened, journalOf, lastInterestOf
 import { accountsOf, availableOf, balance, canSpend, classOf, holdersOf, holdsOn, householdOf, managesAccount, managesParty, moneyLevel, openerOf, outsideHidden, outsideName, ownersOf, productOf, rightsOf, seenBy, shareOf, statusOf, traitsOf, wealthBand } from "./model";
 import { opaqueId } from "../../../shared/hash";
 import { cardsOn, cardRoom, featureFor, isParty, overdraftRoom, tiersOf, toggles } from "./pay";
+import { statementsOf } from "./statements";
 import { netWorthParts } from "./worth";
 import { createRng } from "../../../engine/rng";
 import { passMemo } from "../../../engine/read-pass";
@@ -680,6 +681,7 @@ function financeView(hooks: FinanceHooks, ctx: ReadContext, party: EntityId, pla
     if (extra.businesses) view.businesses.push(...extra.businesses.map((b) => ({ ...b, invoices: b.invoices.map((i) => (i.flow === undefined ? i : { ...i, flow: shownId(i.flow) ?? i.flow })) })));
     if (extra.investments) view.investments = extra.investments;
     if (extra.properties) view.properties.push(...extra.properties);
+    if (extra.streams) view.streams = [...(view.streams ?? []), ...extra.streams.map((s) => ({ ...s, id: shownId(s.id) ?? s.id }))];
     if (extra.upcoming && view.overview) view.overview.upcoming = [...view.overview.upcoming, ...extra.upcoming.map((u) => ({ ...u, flow: u.flow === null ? null : shownId(u.flow) }))].sort((a, b) => a.clock - b.clock).slice(0, 20);
     if (extra.alerts && view.overview) view.overview.alerts.push(...extra.alerts.map(shownAlert));
   }
@@ -688,6 +690,12 @@ function financeView(hooks: FinanceHooks, ctx: ReadContext, party: EntityId, pla
     b.accounts = b.accounts.filter((id) => visible(ctx, viewer, id));
     // Its accounts its owner manages without a role of their own on them are on its page, not among theirs.
     b.managed = level >= 3 ? b.accounts.filter((id) => !mine.includes(id) && managesAccount(ctx, id, party)).map((id) => accountView(ctx, viewer, party, id, level, detail)) : [];
+  }
+  // Statements (§26.5) from Money 3: the party's own, and each business's on its page, worked out once a pass for each.
+  if (level >= 3) {
+    const statementsFor = (id: EntityId) => passMemo([ctx.state, ctx.world, hooks], `economy.statements\u0000${id}`, () => statementsOf(hooks, ctx, id));
+    view.statements = statementsFor(party);
+    for (const b of view.businesses) b.statements = statementsFor(b.id);
   }
   // What each account's controls may draw on, by the actions' own rules: its autopay's sources, and what may back a standing payment from it.
   const listed = [...view.accounts, ...view.businesses.flatMap((b) => b.managed)];

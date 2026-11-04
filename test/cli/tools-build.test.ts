@@ -120,6 +120,50 @@ describe("the rest of Build through the tools", () => {
     expect(read).toMatchObject({ worldId, lint: { errors: 0 } });
   });
 
+  test("what's new since the last save: lre_edit says what it introduced and fixed, lre_lint and lre_draft list the draft's new issues first, cut and paged; lre_check reads a world on the host", async () => {
+    const { call, raw } = await cliRig({ shipped: true });
+    const records = (v: unknown): Record<string, unknown>[] => (Array.isArray(v) ? v.filter(isRecord) : []);
+    const worldId = String((await call("lre_world_create", { name: "Port Alder", template: "modern_slice_of_life" })).worldId);
+    const head = await call("lre_lint", { worldId });
+    expect(head).toMatchObject({ worldId, name: "Port Alder", source: expect.stringContaining("the head, revision"), lint: { errors: 0 }, offset: 0 });
+    expect([head.against, head.new, head.fixed]).toEqual([undefined, undefined, undefined]);
+    // An edit that breaks the point of view: its answer names what it brought in.
+    const broke = await call("lre_edit", { worldId, ops: [{ op: "replace", path: "/pov", value: "nobody" }] });
+    const introduced = records(broke.introduced).map((i) => [i.severity, i.code]);
+    expect(introduced).toContainEqual(["error", "missing_pov"]);
+    expect(broke.fixed).toBe(0);
+    const draft = await call("lre_lint", { worldId, source: "draft" });
+    expect(draft).toMatchObject({ source: expect.stringContaining("the draft, version 1"), against: expect.stringContaining("the head"), fixed: 0 });
+    expect(draft.new).toBe(introduced.length);
+    const issues = records(draft.issues);
+    // The new first, each marked; errors first among them.
+    expect(issues.slice(0, introduced.length).every((i) => i.new === true)).toBe(true);
+    expect(issues[0]).toMatchObject({ severity: "error", new: true });
+    expect(issues.slice(introduced.length).some((i) => i.new === true)).toBe(false);
+    // Cut by code and by severity; paged.
+    const cut = await call("lre_lint", { worldId, source: "draft", code: "missing_pov" });
+    expect(cut).toMatchObject({ matching: 1, new: 1, issues: [{ code: "missing_pov", new: true }], next: null });
+    const errors = await call("lre_lint", { worldId, source: "draft", severity: "error" });
+    expect(records(errors.issues).every((i) => i.severity === "error")).toBe(true);
+    const page = await call("lre_lint", { worldId, source: "draft", limit: 1 });
+    expect(records(page.issues)).toHaveLength(1);
+    expect(page.next).toBe(issues.length > 1 ? 1 : null);
+    expect((await raw("lre_lint", { worldId, severity: "fatal" })).text).toContain("severity is one of error, warning, info");
+    // The head against the draft: what the draft lacks is the head's own.
+    expect((await call("lre_lint", { worldId, against: "draft" })).fixed).toBe(introduced.length);
+    // lre_draft: the counts and the first new ones.
+    const read = await call("lre_draft", { worldId });
+    expect(read.sinceHead).toMatchObject({ new: introduced.length, fixed: 0, moreNew: 0 });
+    expect(isRecord(read.sinceHead) ? records(read.sinceHead.newIssues).map((i) => i.code) : []).toContain("missing_pov");
+    // lre_check on the draft and on the head, by the engine here.
+    expect(await call("lre_check", { worldId, source: "draft" })).toMatchObject({ ok: false, loads: true, from: expect.stringContaining("the draft of “Port Alder”") });
+    expect(await call("lre_check", { worldId, source: "head" })).toMatchObject({ ok: true, from: expect.stringContaining("the head of “Port Alder”") });
+    // Put back, the edit fixed what it broke and brought in nothing.
+    const fixed = await call("lre_edit", { worldId, ops: [{ op: "replace", path: "/pov", value: "pov" }] });
+    expect([fixed.introduced, fixed.fixed]).toEqual([[], introduced.length]);
+    expect((await call("lre_draft", { worldId })).sinceHead).toMatchObject({ new: 0, fixed: 0 });
+  });
+
   test("the sheet preview builds the draft's ruleset on the point of view", async () => {
     const { call, raw } = await cliRig({ shipped: true });
     const worldId = String((await call("lre_world_create", { name: "Brindle", template: "fantasy_town" })).worldId);

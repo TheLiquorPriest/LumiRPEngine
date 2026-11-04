@@ -55,6 +55,12 @@ export const LIVE_CSS = `
 .lre-live-mark.review{color:var(--lre-fg);text-align:left}
 .lre-live-mark.review.failed{color:var(--lre-neg)}
 .lre-live-review{margin:var(--lre-s1) 0 0;padding-left:var(--lre-s3);color:var(--lre-fg);overflow-wrap:anywhere}
+.lre-live-mark.plan{color:var(--lre-fg);text-align:left}
+.lre-live-mark.plan>details>summary{cursor:pointer;min-height:44px;display:flex;align-items:center;color:var(--lre-muted)}
+.lre-live-plan{margin:var(--lre-s1) 0 0;padding:0;list-style:none;display:grid;gap:var(--lre-s1)}
+.lre-live-plan>li{overflow-wrap:anywhere}
+.lre-live-plan-role{font-weight:600}
+.lre-live-plan-why{color:var(--lre-muted)}
 .lre-live-follow{position:sticky;bottom:var(--lre-s2);display:flex;justify-content:center;pointer-events:none}
 .lre-live-follow>.lre-btn{pointer-events:auto}
 `;

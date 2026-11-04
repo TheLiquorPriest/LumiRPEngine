@@ -63,26 +63,6 @@ export function testRoleText(def: PromptDef, text: string, input: { maxChars: nu
   return testPrompt(def, text, { maxChars: input.maxChars, contract: def.contract ? roleContract(def.contract) : null, run: async (t) => (await input.run({ ...input.texts, [def.id]: t })).text });
 }
 
-/** The classic step whose connection a task's Test runs on while its role names none (§15), as the task's run in play does; by its contract. */
-const TEST_PURPOSE: Readonly<Record<string, StepPurpose | null>> = {
-  [roleContractId("intent", "interpret")]: "interpret",
-  [roleContractId("intent", "judge")]: "judge",
-  [roleContractId("intent", "puzzle")]: "puzzle.answer",
-  [roleContractId("scene", "scene")]: null,
-  [roleContractId("minds", "mind")]: "mind",
-  [roleContractId("knowledge", "knowledge")]: "knowledge",
-  [roleContractId("director", "decisions")]: "npc.choose",
-  [roleContractId("director", "prose")]: "brief",
-  [roleContractId("director", "choices")]: "choices",
-  [roleContractId("read", "extract")]: "extract",
-  [roleContractId("curator", "curate")]: "extract",
-  [roleContractId("memory", "memory")]: "memory",
-  [roleContractId("memory", "consolidate")]: "consolidate",
-  [roleContractId("skip", "beats")]: "skip",
-  [roleContractId("skip", "plan")]: "skip",
-  [roleContractId("world", "effects")]: "extract",
-};
-
 /** The role whose page `def` is on, when it is a role's text with a task's contract: what Test runs. */
 export function testedRole(def: PromptDef): RoleId | null {
   return def.contract === undefined ? null : (ROLE_IDS.find((role) => def.page === rolePageId(role)) ?? null);
@@ -305,7 +285,7 @@ const ALONE = "the rest of its task: it ran on the role's texts alone, named for
 function textsAlone(rt: Runtime, ctx: TurnAgentCtx, m: Moment, def: PromptDef, contract: string): Promise<RoleAnswer<JsonValue>> {
   const sub = contract.slice(roleContractId(ctx.role, "").length);
   const part = def.id.startsWith(`${contract}.answer`) ? def.id.slice(contract.length + 1) : "answer";
-  return runRoleAgent(rt, ctx, { sub, purpose: TEST_PURPOSE[contract] ?? null, phase: "pre", names: namesOf(m.head.world, m.head.state), vars: {}, answer: { part }, tools: null, check: (raw) => raw });
+  return runRoleAgent(rt, ctx, { sub, phase: "pre", names: namesOf(m.head.world, m.head.state), vars: {}, answer: { part }, tools: null, check: (raw) => raw });
 }
 
 /**

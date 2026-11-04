@@ -32,7 +32,7 @@ import { own } from "../engine/pack-kit";
 import type { ReadContext } from "../engine/registry";
 import type { Registry } from "../engine/registry-impl";
 import { fieldDef, isGone, kindIs, placeOfEntity, placeWithin } from "../engine/scope";
-import { isGroup, isMemberOf, membersOf } from "../engine/selector";
+import { isGroup, isMemberOf, membersOf, TRUST_KIND } from "../engine/selector";
 import type { WorldState } from "../engine/state";
 import { entityVisibility, findLeaks, loreGateReader, namesAny, unrevealedSecrets, unseenPlaceNames, visibilityOf } from "../engine/visibility";
 import { initialState, minutesBetween } from "../engine/world-state";
@@ -128,7 +128,8 @@ export function routineScope(reg: Registry, world: WorldDoc): RoutineScope {
   for (const id of Object.keys(world.entities)) {
     const e = own(state.entities, id);
     if (!e || isGone(state, id) || entityVisibility(world, state, id) === "secret") continue;
-    if (isGroup(reg, world, state, id)) groups.add(id);
+    // A trust is a group of its own type (DESIGN §29.1), never a group whose people's routines it reads.
+    if (isGroup(reg, world, state, id) && !kindIs(reg, world, e.kind, TRUST_KIND)) groups.add(id);
     else if (kindIs(reg, world, e.kind, "person") && acts(world, state, id)) people.add(id);
   }
   let start: number | null;

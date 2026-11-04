@@ -1,0 +1,147 @@
+{
+  "schema": "lre-data-src/us/projects/v1",
+  "table": "projects",
+  "approximate": true,
+  "country": "US",
+  "currency": "USD",
+  "money_unit": "integer cents",
+  "reflects_period": "2025-2026 (typical costs and lengths)",
+  "basis": "Typical lengths and costs of small production projects as the author knows them from public industry and agency figures (EIA and state drilling-cost reports for an onshore vertical oil well and a water supply well; RSMeans-style building cost guides for a small commercial building and a small iron foundry; USDA cost-and-returns estimates for a corn season), then rounded. The bands are an ordinary range, not extremes. Treat them as plausible defaults, not quotes.",
+  "fields": {
+    "id": "Lower-snake stable key: the template a project names.",
+    "name": "What it builds, in words.",
+    "description": "What the project is and what it brings in, in a sentence or two.",
+    "payee": "Who its costs are paid to, an outside payee's name.",
+    "days": "Its length in calendar days from start to its last step done: {min, typical, max}; its steps give the typical case.",
+    "cost_cents": "What it costs in all, integer cents: {min, typical, max}; its steps give the typical case.",
+    "steps": "Its steps, in order: each {id, name, days or business_days, cost (cents), paid (start, end or split), after (step ids), inputs ({name, qty, unit, cents each}), crew ({size, role}), capitalize, unlocks}. An unlock makes a thing ({make: {name, kind, life_months, value: \"cost\", fields}}), starts a stream (a flow's fields, B3's revenue model among them) or sets a field."
+  },
+  "entries": [
+    {
+      "id": "oil_well",
+      "name": "Oil well",
+      "description": "An onshore vertical oil well on a lease the party holds: permits, a pad and road, drilling, completion and a tank battery. Done, it is a well (a mineral property depreciated over ten years) and a monthly oil sales stream that starts two months after first production and declines year by year.",
+      "payee": "Drilling contractors",
+      "days": { "min": 45, "typical": 75, "max": 150 },
+      "cost_cents": { "min": 120000000, "typical": 255000000, "max": 600000000 },
+      "steps": [
+        { "id": "permits", "name": "Permits and survey", "business_days": 15, "cost": 2500000, "paid": "start" },
+        { "id": "site", "name": "Pad and road", "days": 10, "cost": 12000000, "paid": "split", "after": ["permits"], "capitalize": true, "crew": { "size": 6, "role": "dirt crew" } },
+        { "id": "drill", "name": "Drilling", "days": 25, "cost": 95000000, "paid": "split", "after": ["site"], "capitalize": true, "inputs": [{ "name": "Steel casing", "qty": 9000, "unit": "ft", "cents": 4500 }], "crew": { "size": 12, "role": "rig crew" } },
+        { "id": "complete", "name": "Completion and fracturing", "days": 12, "cost": 90000000, "paid": "split", "after": ["drill"], "capitalize": true, "crew": { "size": 20, "role": "frac crew" } },
+        {
+          "id": "hookup",
+          "name": "Tank battery and hookup",
+          "days": 7,
+          "cost": 15000000,
+          "paid": "end",
+          "after": ["complete"],
+          "capitalize": true,
+          "unlocks": [
+            { "make": { "name": "Oil well", "kind": "property", "life_months": 120, "value": "cost", "fields": { "property_type": "mineral", "reserves": 120000 } } },
+            { "name": "Oil sales", "stream": { "flow_kind": "income", "from": "Crude purchaser", "every": "month", "days": [25], "revenue": [{ "type": "royalty", "production": { "qi": 3000, "di_pct": 60, "b": 1 }, "price": 7000, "share_pct": 87.5, "deductions_pct": 2, "severance_pct": 4.6, "lag_months": 2, "unit": "bbl" }] } }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "water_well",
+      "name": "Water well",
+      "description": "A water supply well with its pump, tank and meter, selling water by the barrel to the operators nearby. Done, it is a well depreciated over twenty years and a steady monthly water sales stream.",
+      "payee": "Water well contractor",
+      "days": { "min": 10, "typical": 21, "max": 60 },
+      "cost_cents": { "min": 1500000, "typical": 4150000, "max": 12000000 },
+      "steps": [
+        { "id": "permit", "name": "Water rights and permit", "business_days": 10, "cost": 150000, "paid": "start" },
+        { "id": "drill", "name": "Drilling", "days": 4, "cost": 2400000, "paid": "split", "after": ["permit"], "capitalize": true, "crew": { "size": 3, "role": "drill crew" } },
+        {
+          "id": "pump",
+          "name": "Pump, tank and meter",
+          "days": 3,
+          "cost": 1600000,
+          "paid": "end",
+          "after": ["drill"],
+          "capitalize": true,
+          "unlocks": [
+            { "make": { "name": "Water well", "kind": "property", "life_months": 240, "value": "cost" } },
+            { "name": "Water sales", "stream": { "flow_kind": "income", "from": "Water buyers", "every": "month", "days": [25], "revenue": [{ "type": "royalty", "production": 30000, "price": 50, "unit": "bbl" }] } }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "foundry",
+      "name": "Foundry",
+      "description": "A small iron foundry: permits, site works, the building, an induction furnace and molding line set up beside it, then commissioning. Done, it is a plant depreciated over twenty-five years and castings sold every Friday, about 12 tons a week; its staff and metal are the party's own costs.",
+      "payee": "Builders and suppliers",
+      "days": { "min": 120, "typical": 166, "max": 365 },
+      "cost_cents": { "min": 150000000, "typical": 338000000, "max": 900000000 },
+      "steps": [
+        { "id": "permits", "name": "Permits and design", "business_days": 30, "cost": 6000000, "paid": "start", "capitalize": true },
+        { "id": "site", "name": "Site works", "days": 20, "cost": 15000000, "paid": "split", "after": ["permits"], "capitalize": true, "crew": { "size": 8, "role": "site crew" } },
+        { "id": "building", "name": "Building", "days": 90, "cost": 180000000, "paid": "split", "after": ["site"], "capitalize": true, "crew": { "size": 25, "role": "construction crew" } },
+        { "id": "furnace", "name": "Furnace and molding line", "days": 45, "cost": 20000000, "paid": "split", "after": ["site"], "capitalize": true, "inputs": [{ "name": "Induction furnace", "qty": 1, "cents": 65000000 }, { "name": "Molding line", "qty": 1, "cents": 48000000 }] },
+        {
+          "id": "commission",
+          "name": "Commissioning and first pour",
+          "days": 14,
+          "cost": 4000000,
+          "paid": "end",
+          "after": ["building", "furnace"],
+          "capitalize": true,
+          "crew": { "size": 18, "role": "foundry hands" },
+          "unlocks": [
+            { "make": { "name": "Foundry", "kind": "property", "life_months": 300, "value": "cost" } },
+            { "name": "Castings sales", "stream": { "flow_kind": "income", "from": "Castings customers", "every": "week", "weekdays": [5], "at": "17:00", "revenue": [{ "type": "product", "units": 12, "price": 500000, "buyers": 1, "margin_pct": 35 }] } }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "building",
+      "name": "Rental building",
+      "description": "A small commercial building of six units let to outside tenants: design and permits, the foundation, the frame and shell, fit-out and the occupancy inspection. Done, it is a property depreciated over thirty-nine years, and its rent comes in from the month it opens.",
+      "payee": "General contractor",
+      "days": { "min": 120, "typical": 174, "max": 400 },
+      "cost_cents": { "min": 90000000, "typical": 171500000, "max": 500000000 },
+      "steps": [
+        { "id": "design", "name": "Design and permits", "business_days": 30, "cost": 6000000, "paid": "start", "capitalize": true },
+        { "id": "foundation", "name": "Foundation", "days": 20, "cost": 25000000, "paid": "split", "after": ["design"], "capitalize": true, "crew": { "size": 8, "role": "concrete crew" } },
+        { "id": "shell", "name": "Frame and shell", "days": 60, "cost": 90000000, "paid": "split", "after": ["foundation"], "capitalize": true, "crew": { "size": 15, "role": "framers" } },
+        { "id": "fitout", "name": "Fit-out", "days": 45, "cost": 50000000, "paid": "split", "after": ["shell"], "capitalize": true, "crew": { "size": 10, "role": "trades" } },
+        {
+          "id": "inspect",
+          "name": "Inspection and occupancy",
+          "business_days": 5,
+          "cost": 500000,
+          "paid": "end",
+          "after": ["fitout"],
+          "unlocks": [{ "make": { "name": "Rental building", "kind": "property", "life_months": 468, "value": "cost", "fields": { "units": 6, "market_rent": 450000, "managed": true, "upkeep_pct": 1 } } }]
+        }
+      ]
+    },
+    {
+      "id": "farm_season",
+      "name": "Farm season",
+      "description": "One season of corn on a mid-sized family farm (about 160 hectares): ground work and planting, the growing season and the harvest, its grain sold to the elevator over the three months after. Nothing is built: every cost is the season's own.",
+      "payee": "Farm suppliers",
+      "days": { "min": 110, "typical": 144, "max": 180 },
+      "cost_cents": { "min": 15000000, "typical": 22500000, "max": 40000000 },
+      "steps": [
+        { "id": "plant", "name": "Ground work and planting", "days": 10, "cost": 2000000, "paid": "start", "inputs": [{ "name": "Seed corn", "qty": 400, "unit": "acre", "cents": 12000 }, { "name": "Fertilizer", "qty": 400, "unit": "acre", "cents": 16000 }], "crew": { "size": 3, "role": "farmhands" } },
+        { "id": "grow", "name": "Growing season", "days": 120, "cost": 4000000, "paid": "split", "after": ["plant"] },
+        {
+          "id": "harvest",
+          "name": "Harvest",
+          "days": 14,
+          "cost": 3500000,
+          "paid": "end",
+          "after": ["grow"],
+          "inputs": [{ "name": "Drying and hauling", "qty": 72000, "unit": "bu", "cents": 25 }],
+          "crew": { "size": 4, "role": "harvest crew" },
+          "unlocks": [{ "name": "Grain sales", "stream": { "flow_kind": "income", "from": "Grain elevator", "amount_cents": 10080000, "every": "month", "days": [15], "count": 3, "category": "sales" } }]
+        }
+      ]
+    }
+  ]
+}

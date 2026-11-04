@@ -8,7 +8,7 @@ import { PRICES_SOURCE } from "../shared/finance";
 import { holdsSecretMark, secretMarkText, type SecretMarkWording } from "../shared/secret-marks";
 import type { NarratorView } from "../shared/settings";
 import type { ContextGeneration } from "../shared/state-view";
-import type { PromptTexts } from "../shared/prompts";
+import { type PromptTexts, UNCHANGED_TEXT_ID } from "../shared/prompts";
 import type { FeedScope, SectionFeed, SectionTemplate, WorldDoc } from "../shared/world";
 import { feedOf, linesOf, markedText, renderersOf, sectionScope, secretLineText, sourceOf } from "../engine/feed";
 import { optionalQuery } from "../engine/pack-kit";
@@ -17,10 +17,11 @@ import type { Registry } from "../engine/registry-impl";
 import type { WorldState } from "../engine/state";
 import { findLeaks } from "../engine/visibility";
 import { hiddenNameCheck } from "../engine/player-events";
-import { fitMindLines, mindLines } from "../packs/minds/core/section";
 import { renderSection, sectionsOf } from "./book";
+import { fitMindLines, type MindLine, mindLines } from "../packs/minds/core/section";
 import { missingSections, withoutMissing } from "./section-refs";
 import { turnTimeLine } from "./turn-steps";
+import { renderPrompt } from "./prompts";
 
 export interface SectionsInput {
   registry: Registry;
@@ -183,7 +184,10 @@ export function buildSections(input: SectionsInput): SectionsBuilt {
     const mindsOn = mindsSection !== undefined && mindsFeed?.enabled !== false && input.hasEntry(mindsSection);
     const read = registry.context(world, state);
     const hidden = hiddenNameCheck(registry, world, state, world.pov);
-    const allMinds = mindsOn ? mindLines(read).flatMap((l) => (!carries(l.line) && !hidden(l.line) ? [l] : marking ? [{ ...l, line: secretMarkText(l.line, [l.name], [pov], input.wording) }] : [])) : [];
+    // A mind Smart persistence kept from the last turn says so, in the turn's own wording.
+    const unchanged = renderPrompt(UNCHANGED_TEXT_ID, input.texts, {}).trim();
+    const told = (l: MindLine): MindLine => (l.kept && unchanged !== "" ? { ...l, line: `${l.line} ${unchanged}` } : l);
+    const allMinds = mindsOn ? mindLines(read).map(told).flatMap((l) => (!carries(l.line) && !hidden(l.line) ? [l] : marking ? [{ ...l, line: secretMarkText(l.line, [l.name], [pov], input.wording) }] : [])) : [];
     const ladder = (optionalQuery(read, "minds.fidelity")?.(read, { user: input.said, reply: "" }) ?? []).map((s) => s.entity);
     const mindsCap = Math.min(mindsBudget, mindsFeed?.maxTokens ?? Number.POSITIVE_INFINITY);
     const mindsFit = mindsSection && mindsOn ? fitMindLines(allMinds, ladder, mindsCap, (kept) => input.cost(renderSection(mindsSection.label, mindsSection.template, kept.map((l) => l.line)))).slice(0, mindsFeed?.maxLines ?? Number.POSITIVE_INFINITY) : [];

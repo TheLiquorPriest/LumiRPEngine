@@ -291,7 +291,7 @@ function useChips(ctx: ReadContext, thing: EntityId): AccessChip[] {
     const use = accessFor(ctx, who, thing).use;
     if (!use || use.basis === "grant") continue;
     // Grounds an organization gives are one chip for all it covers; a person's own ground, one per person.
-    const key = use.basis === "public" ? "public" : use.basis === "member" || use.basis === "staff" || use.basis === "customer" ? `${use.basis}:${use.via ?? ""}` : use.basis === "owner" || use.basis === "position" || use.basis === "delegate" ? `${use.basis}:${use.via ?? ""}:${who}` : `${use.basis}:${use.via ?? ""}`;
+    const key = use.basis === "public" ? "public" : use.basis === "member" || use.basis === "staff" || use.basis === "customer" ? `${use.basis}:${use.via ?? ""}` : use.basis === "owner" || use.basis === "position" || use.basis === "delegate" || use.basis === "control" ? `${use.basis}:${use.via ?? ""}:${who}` : `${use.basis}:${use.via ?? ""}`;
     const chip = chips.get(key);
     const name = own(ctx.state.entities, who)?.name ?? who;
     if (chip) chip.who.push(name);
@@ -325,6 +325,8 @@ function useChips(ctx: ReadContext, thing: EntityId): AccessChip[] {
         return { basis: "partner", label: `${chipNames(who)} · partner`, who };
       case "family":
         return { basis: "family", label: `${chipNames(who)} · family`, who };
+      case "control":
+        return { basis: "control", label: `${chipNames(who)} · ${nameOf(via)} through ${nameOf(answer.by)}`, who };
       default:
         return { basis: answer.basis, label: `${chipNames(who)} · ${answer.basis} in ${nameOf(via)}`, who };
     }

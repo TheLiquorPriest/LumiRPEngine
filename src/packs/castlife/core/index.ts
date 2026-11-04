@@ -51,7 +51,7 @@ import { fieldDef, isGone, kindDef, kindIs, placeOfEntity } from "../../../engin
 import { povLead, together } from "../../../engine/presence";
 import { relocate } from "../../../engine/relocate";
 import { acts as lifeActs, povLife } from "../../../engine/life";
-import { classValues, isGroup, isMemberOf, MEMBER_OF, selectEntities } from "../../../engine/selector";
+import { classValues, isGroup, isMemberOf, MEMBER_OF, selectEntities, TRUST_KIND } from "../../../engine/selector";
 import type { WorldState } from "../../../engine/state";
 import { agendaFor } from "../../../engine/tracks";
 import { lastSighting } from "../../../engine/seen";
@@ -1485,11 +1485,11 @@ export function buildCastView(ctx: ReadContext): CastView {
   const cal = calendarOf(ctx.world);
   const here = placeOfEntity(ctx.state, pov);
   const view = optionalQuery(ctx, "relationships.view");
-  // Who the POV can see: the groups shown, and the people present (the shared rules, `isGone` included).
+  // Who the POV can see: the groups shown (a trust is a group of its own type, never one of the cast's), and the people present (the shared rules, `isGone` included).
   const shown = (id: EntityId): boolean => canSeeEntity(ctx.registry, ctx.world, ctx.state, pov, id);
   const groupIds = Object.keys(ctx.state.entities)
     .sort()
-    .filter((id) => isGroup(ctx.registry, ctx.world, ctx.state, id) && shown(id));
+    .filter((id) => isGroup(ctx.registry, ctx.world, ctx.state, id) && !kindIs(ctx.registry, ctx.world, own(ctx.state.entities, id)?.kind ?? "", TRUST_KIND) && shown(id));
   const membershipsOf = (who: EntityId): { id: EntityId; role?: string; rank?: number; since?: string }[] =>
     groupIds
       .filter((g) => isMemberOf(ctx, who, g))

@@ -257,11 +257,14 @@ export interface TimeSettings {
  * someone is hired, let go, quits, gets a raise or goes on leave. `agenda` is an organization's plan
  * item the reply says is under way, done, blocked or refused (ORG-SPEC §3.14). `vote` and `approval`
  * are its decisions as the story tells them (ORG-SPEC Phase 5): someone's vote on an open motion, and
- * an answer to a request for approval. `learn` and `reveal` are the knowledge step's (DESIGN §24.11):
- * what the player character learns, and a secret the story reveals to them; the reply's read never
- * proposes them.
+ * an answer to a request for approval. `revenue` is a revenue stream earning more or less for a while
+ * (a factor or an amount, up to 31 days), as the story tells it, on a stream its author opened to the
+ * agents (DESIGN §26.2). `project_note` is a production project's step set back (up to 30 days) or
+ * costing more (up to the narrated-price cap), as the story tells it. `learn` and `reveal` are the
+ * knowledge step's (DESIGN §24.11): what the player character learns, and a secret the story reveals
+ * to them; the reply's read never proposes them.
  */
-export const EXTRACTION_TYPES = ["time_advance", "location", "place_make", "condition", "knows", "purchase", "transfer", "regard", "quantity", "spawn", "life", "routine", "membership", "employment", "agenda", "vote", "approval", ...ITEM_CHANGES, "learn", "reveal"] as const;
+export const EXTRACTION_TYPES = ["time_advance", "location", "place_make", "condition", "knows", "purchase", "transfer", "regard", "quantity", "spawn", "life", "routine", "membership", "employment", "agenda", "vote", "approval", "revenue", "project_note", ...ITEM_CHANGES, "learn", "reveal"] as const;
 export type ExtractionType = (typeof EXTRACTION_TYPES)[number];
 
 /**
@@ -301,6 +304,10 @@ export const EXTRACTION_DEFAULTS: Readonly<Partial<Record<ExtractionType, BoundM
   item_wear: "auto",
   item_condition: "auto",
   item_lose: "confirm",
+  // Revenue (DESIGN §26.2): a stream earning more or less for a while, as the story tells it, asks first.
+  revenue: "confirm",
+  // A project's delay or extra cost the story tells (DESIGN §26.5): lands with its receipt and Undo, within its bounds.
+  project_note: "auto",
   // Knowledge (DESIGN §24.11): what the player character learns applies, with its Undo; a secret's reveal asks first.
   learn: "auto",
   reveal: "confirm",

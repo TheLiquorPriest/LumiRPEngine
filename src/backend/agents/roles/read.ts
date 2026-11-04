@@ -39,7 +39,6 @@ export async function extractRun(rt: Runtime, task: ExtractTask, ctx: TurnAgentC
     ctx,
     {
       sub: "extract",
-      purpose: "extract",
       phase: "read",
       names: { world: i.world.name, pov: own(i.world.entities, i.world.pov)?.name ?? i.world.pov },
       vars: {

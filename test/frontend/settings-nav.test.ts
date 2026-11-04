@@ -20,6 +20,7 @@ import { SettingsBody, settingsHeader, settingsKeyDown } from "../../src/fronten
 import { agentUsersText, type Connection } from "../../src/frontend/settings/steps";
 import { defaultAgentSettings, type AgentSettings } from "../../src/shared/agent-settings";
 import { defaultRoleSettings, ROLE_IDS } from "../../src/shared/agent-roles";
+import { roleRuns } from "../../src/shared/agent-pipeline";
 import type { SettingsResult } from "../../src/shared/protocol";
 import type { RouteSettings } from "../../src/shared/role-routes";
 import { rendered, texts } from "../support/settings-tree";
@@ -114,11 +115,12 @@ describe("what the Agents pages say", () => {
   const changed = (() => {
     const a = structuredClone(defaultAgentSettings());
     a.pipeline = { mode: "main", memory: "before_next", curator: false };
-    for (const id of ROLE_IDS) a.roles[id] = { ...defaultRoleSettings()[id], connectionId: "deepseek", effort: "high", tier: "gm", promptOnly: true, onFail: "skip", budget: { toolTurns: 3, wallMs: "none" } };
-    a.main = { ...a.main, connectionId: "deepseek", budget: { revisions: 1 } };
-    a.finalReview = { on: false, onFail: "stop", budget: { toolTurns: 2 } };
+    for (const id of ROLE_IDS) a.roles[id] = { ...defaultRoleSettings()[id], connectionId: "deepseek", effort: "high", tier: "gm", promptOnly: true, onFail: "skip", run: roleRuns(id).at(-1) ?? "smart", budget: { toolTurns: 3, wallMs: "none" } };
+    a.main = { ...a.main, connectionId: "deepseek", budget: { revisions: 1 }, stages: { ...a.main.stages, prepare: "auto", memory: "auto" } };
+    a.finalReview = { on: false, onFail: "stop", scope: "changed", budget: { toolTurns: 2 } };
+    a.persist = { on: true, turns: 2, minutes: 45 };
     a.assistant = { ...a.assistant, apply: "at_once", budget: { callMs: 30_000 } };
-    a.throttles = [{ id: "deepseek", requestsPerMinute: 30, tokensPerMinute: "none" }];
+    a.throttles = [{ id: "deepseek", requestsPerMinute: 30, tokensPerMinute: "none", atOnce: 2 }];
     a.caching = { on: false, nonce: "", roles: { intent: { on: true, nonce: "" } } };
     a.vsClassic = 1.5;
     return a;

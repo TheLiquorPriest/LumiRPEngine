@@ -14,6 +14,7 @@
 
 import { describe, expect, test } from "bun:test";
 import type { VNode } from "preact";
+import { lintWorld } from "../../src/engine/authoring";
 import { resolveEdit } from "../../src/engine/edits";
 import { buildGmWorld } from "../../src/engine/gm-view";
 import { materializeAll, materializeIfNeeded } from "../../src/engine/materialize";
@@ -25,6 +26,8 @@ import { Working } from "../../src/engine/working";
 import type { SheetRoute } from "../../src/frontend/app";
 import type { GmSectionProps } from "../../src/frontend/registry";
 import { delegationLinkOps, groupKinds, newOrgKind, orgRows, orgTypeOfKind, positionsWith } from "../../src/frontend/build/organizations";
+import { conversionTargets, orgConversion } from "../../src/frontend/build/org-convert";
+import { ownersIn } from "../../src/shared/finance";
 import { Button, ListRow, Section } from "../../src/frontend/components";
 import { ALL_PACKS, STARTER_WORLDS } from "../../src/packs/index";
 import { ORG_LINTS } from "../../src/packs/orgs/core/lint";
@@ -271,16 +274,16 @@ describe("a trust's People and payout (DESIGN §29.7)", () => {
   }
   const titles = (tree: unknown): unknown[] => elements(tree).filter((v) => v.type === Section).map((v) => v.props.title);
 
-  test("a trustee reads Trustees and beneficiaries and pays a stated amount out by share; a beneficiary may not", () => {
+  test("a trustee reads Trustees and beneficiaries, may add an officer or director, and pays a stated amount out by share; a beneficiary may not", () => {
     const w = manor("sir_alaric");
     const org = page(w, TRUST);
-    expect(peopleControls(org)).toEqual({ hire: true, admit: false, payout: true });
+    expect(peopleControls(org)).toEqual({ hire: true, admit: true, payout: true });
     const opened: SheetRoute[] = [];
     const tree = OrgPeople({ org, ownership: null, open: (r) => opened.push(r) });
     expect(titles(tree)).toContain("Trustees and beneficiaries");
-    expect(buttons(tree)).toEqual(["Hire someone", "Pay out to its beneficiaries"]);
+    expect(buttons(tree)).toEqual(["Hire someone", "Add an officer or director", "Pay out to its beneficiaries"]);
     for (const b of elements(tree).filter((v) => v.type === Button)) (b.props.onClick as () => void)();
-    expect(opened.slice(0, 2)).toEqual([orgEditRoute(TRUST, "hire"), orgEditRoute(TRUST, "payout")]);
+    expect(opened.slice(0, 3)).toEqual([orgEditRoute(TRUST, "hire"), orgEditRoute(TRUST, "admit"), orgEditRoute(TRUST, "payout")]);
     expect(orgEditOf(orgEditRoute(TRUST, "payout").id)).toEqual({ org: TRUST, form: "payout", id: null });
     // A trust pays out what it holds, so it asks how much.
     expect(payoutProblem("", USD)).not.toBeNull();
@@ -352,6 +355,61 @@ describe("Build → Organizations", () => {
     expect(delegationLinkOps(doc, SHOP, 2, delegation)).toEqual([{ op: "replace", path: "/entities/pov/relations/2", value: { type: "acts_for", to: SHOP, fields: { powers: ["money.spend"], payment: 25000, accounts: ["acct_marcus_shop"], by: "marcus_delgado" } } }]);
     // One with no such limit writes none.
     expect(delegationLinkOps(doc, SHOP, null, { ...delegation, accounts: null })).toEqual([{ op: "add", path: "/entities/pov/relations/-", value: { type: "acts_for", to: SHOP, fields: { powers: ["money.spend"], payment: 25000, by: "marcus_delgado" } } }]);
+  });
+
+  /** The world with an entity added, and its played kinds. */
+  const withEntity = (base: WorldDoc, e: WorldDoc["entities"][string]): WorldDoc => ({ ...base, entities: { ...base.entities, [e.id]: e } });
+  const played = (w: WorldDoc): WorldDoc => ({ ...w, kinds: playedKinds(Object.fromEntries(reg.kinds), w.kinds) });
+  /** Errors anywhere, and the organization's own issues, as codes: a conversion adds none to what it had (a new company's missing account it had already). */
+  const errorsOf = (w: WorldDoc) => lintWorld(w, reg).filter((i) => i.severity === "error" || (i.severity === "warning" && i.path.startsWith("entities.alder_holdings_co"))).map((i) => i.code);
+  const HOLDINGS = { id: "alder_holdings_co", kind: "business", name: "Alder Holdings", tier: "background", fields: { owners: [{ party: "marcus_delgado", role: "owner", share: 60 }, { party: "pov", role: "owner", share: 40 }], structure: "llc", industry: "holdings", decide_pct: 50 }, relations: [] } as WorldDoc["entities"][string];
+
+  test("Change what it is: a company becomes a trust, its managing owners trustees and its worth owners beneficiaries, the company-only fields dropped; the world lints clean", () => {
+    const world = withEntity(make("pa", "Port Alder"), HOLDINGS);
+    expect(conversionTargets(played(world), "business")).toEqual(["trust"]);
+    const c = orgConversion(played(world), HOLDINGS.id, "trust");
+    expect(c.why).toBeNull();
+    expect(c.people).toEqual([
+      { name: "Marcus Delgado", from: "Owner (60%)", to: "Trustee and Beneficiary (60%)" },
+      { name: "Jordan Ellis", from: "Owner (40%)", to: "Trustee and Beneficiary (40%)" },
+    ]);
+    expect(c.dropped).toEqual(["Structure", "Industry", "Ownership decisions need more than % of the votes"]);
+    const after = applyPatch(world as unknown as JsonValue, c.ops) as unknown as WorldDoc;
+    const trust = after.entities[HOLDINGS.id];
+    expect(trust?.kind).toBe("trust");
+    expect(trust?.fields).toEqual({ owners: [{ party: "marcus_delgado", role: "trustee" }, { party: "pov", role: "trustee" }, { party: "marcus_delgado", role: "beneficiary", share: 60 }, { party: "pov", role: "beneficiary", share: 40 }] });
+    expect(errorsOf(after)).toEqual(errorsOf(world));
+  });
+
+  test("and back: a trust becomes a company, its beneficiaries owners by share and its trustees seated as Director, with a membership each; the world lints clean", () => {
+    const world = withEntity(make("pa", "Port Alder"), HOLDINGS);
+    const trust = applyPatch(world as unknown as JsonValue, orgConversion(played(world), HOLDINGS.id, "trust").ops) as unknown as WorldDoc;
+    expect(conversionTargets(played(trust), "trust")).toEqual(["company"]);
+    const c = orgConversion(played(trust), HOLDINGS.id, "company");
+    expect(c.why).toBeNull();
+    expect(c.people).toEqual([
+      { name: "Marcus Delgado", from: "Trustee and Beneficiary (60%)", to: "Owner (60%) and Director" },
+      { name: "Jordan Ellis", from: "Trustee and Beneficiary (40%)", to: "Owner (40%) and Director" },
+    ]);
+    expect(c.notes[0]).toBe("Adds a Director position, with every power, which its trustees hold.");
+    const back = applyPatch(trust as unknown as JsonValue, c.ops) as unknown as WorldDoc;
+    const company = back.entities[HOLDINGS.id];
+    expect(company?.kind).toBe("business");
+    expect(ownersIn(company?.fields ?? {})).toEqual([{ party: "marcus_delgado", role: "owner", share: 60 }, { party: "pov", role: "owner", share: 40 }]);
+    expect(positionsIn(company?.fields.positions).map((p) => [p.id, p.title, p.powers.length])).toEqual([["director", "Director", 21]]);
+    for (const who of ["marcus_delgado", "pov"]) expect(back.entities[who]?.relations.find((r) => r.type === "member_of" && r.to === HOLDINGS.id)?.fields).toEqual({ position: "director" });
+    expect(errorsOf(back)).toEqual(errorsOf(world));
+  });
+
+  test("refused, with why: a listed company, one whose invoices need a company, a trust with no beneficiary, and any other kind", () => {
+    const world = make("pa", "Port Alder");
+    const listed = withEntity(world, { ...HOLDINGS, fields: { ...HOLDINGS.fields, listing: { asset: "stock_alder", float: 100 } } });
+    expect(orgConversion(played(listed), HOLDINGS.id, "trust")).toMatchObject({ why: "It is listed on a market: take it off the market first; a trust has no stockholders.", ops: [] });
+    expect(orgConversion(played(world), SHOP, "trust").why).toMatch(/ names? it where a company must stand: change or remove (it|them) first\.$/);
+    const bare = withEntity(world, { ...HOLDINGS, kind: "trust", fields: { owners: [{ party: "marcus_delgado", role: "trustee" }] } });
+    expect(orgConversion(played(bare), HOLDINGS.id, "company").why).toBe("It has no beneficiary to own the company.");
+    expect(conversionTargets(played(world), "household")).toEqual([]);
+    expect(orgConversion(played(world), HOUSEHOLD, "trust").why).toBe("A Household can't become a trust.");
   });
 });
 

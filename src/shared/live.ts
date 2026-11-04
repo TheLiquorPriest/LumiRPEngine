@@ -7,9 +7,11 @@
 // surface: the drawer's activity line (`Activity.agents`) stays as coarse as it was.
 //
 // The same entries make the turn's transcript (`transcriptText`), which its record keeps and GM →
-// Workspace lists under `transcripts/`.
+// Workspace lists under `transcripts/`. Each turn's plan (`plan`) says, once its pre phase knows it,
+// how each role stands: it runs, is kept, off, auto or none, with why (`shared/agent-pipeline.ts`).
 
 import { agentLabel } from "./agent-settings";
+import { PLAN_STATUS_WORDS, type PlanRow } from "./agent-pipeline";
 import type { JsonObject } from "./json";
 
 /** What an agent's call spent: tokens sent (of which read from the provider's cache) and written (of which reasoning). */
@@ -80,7 +82,9 @@ export type LiveEntryBody =
   /** The gate's resume took the turn up again. */
   | { kind: "resume" }
   /** The final review ended: how, each edit it made to the narrator's prompt, and why it failed when it did. */
-  | { kind: "review"; outcome: LiveReviewOutcome; edits: LiveReviewEdit[]; reason?: string };
+  | { kind: "review"; outcome: LiveReviewOutcome; edits: LiveReviewEdit[]; reason?: string }
+  /** The turn's plan, once its pre phase knows it: each role's line (`turnPlan`). */
+  | { kind: "plan"; rows: PlanRow[] };
 
 /** An entry with its place in the run's order and when it happened (epoch ms). */
 export type LiveEntry = LiveEntryBody & { seq: number; at: number };
@@ -173,10 +177,10 @@ export interface LiveGroup {
   status: LiveStatus;
 }
 
-/** A mark between groups: the turn's phase moving on, what stopped it, its wait at a gate and its resume, and how its final review ended. */
+/** A mark between groups: the turn's phase moving on, what stopped it, its wait at a gate and its resume, how its final review ended, and its plan. */
 export interface LiveMark {
   type: "mark";
-  entry: Of<"phase"> | Of<"failed"> | Of<"wait"> | Of<"resume"> | Of<"review">;
+  entry: Of<"phase"> | Of<"failed"> | Of<"wait"> | Of<"resume"> | Of<"review"> | Of<"plan">;
 }
 
 export type LiveItem = LiveGroup | LiveMark;
@@ -206,6 +210,7 @@ export function liveItems(view: LiveView): LiveItem[] {
       case "wait":
       case "resume":
       case "review":
+      case "plan":
         marks.push({ type: "mark", entry: e });
         break;
       case "run": {
@@ -357,6 +362,7 @@ export function transcriptText(view: LiveView): string {
       else if (e.kind === "failed") out.push(`!!! The turn stopped at ${e.step}: ${e.reason}`);
       else if (e.kind === "wait") out.push(`--- Waiting on the player at a gate (+${seconds(e.at - view.startedAt)}) ---`);
       else if (e.kind === "resume") out.push(`--- Resumed (+${seconds(e.at - view.startedAt)}) ---`);
+      else if (e.kind === "plan") out.push([`--- This turn's plan (+${seconds(e.at - view.startedAt)}) ---`, ...e.rows.map((r) => `- ${agentLabel(r.role)}: ${PLAN_STATUS_WORDS[r.status]}. ${r.why}`)].join("\n"));
       else out.push([`--- ${REVIEW_OUTCOME_WORDS[e.outcome]}${e.reason ? `: ${e.reason}` : ""} (+${seconds(e.at - view.startedAt)}) ---`, ...e.edits.map((edit) => `- ${reviewEditWords(edit)}`)].join("\n"));
       continue;
     }

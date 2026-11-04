@@ -49,7 +49,7 @@ import { moveLeases, propertyIds, propertyValue, sellProperty } from "./property
 import { openingEvent } from "./process";
 import { counted, decisionRefusal } from "./shares";
 import { businessIds as companyIds, orgValue, sellStake } from "./stakes";
-import { taxStillOwed } from "./taxes";
+import { sCorpRefusal, structureOf, taxStillOwed } from "./taxes";
 import { UNEMPLOYMENT_ACCRUED } from "./unemployment";
 
 /** What a step said, for the History the orgs pack writes: its words, and the people they name. */
@@ -617,7 +617,7 @@ function finish(api: FinanceApi, w: Working, business: EntityId, plan: WindPlan,
   );
   if (ended) return ended;
 
-  // The rest of its cash paid out to its owners by share; each realises their gain on all of it.
+  // The rest of its cash paid out to its owners by share; each realises their gain on all of it, except a corporation holding 80% or more of it, whose subsidiary's liquidation is no sale (§26.3, IRC section 332).
   const left = gather === null ? 0 : Math.max(0, api.balance(w.ctx.state, gather));
   const parts = splitByShare(left, holders);
   for (const part of parts) {
@@ -627,7 +627,9 @@ function finish(api: FinanceApi, w: Working, business: EntityId, plan: WindPlan,
       const failed = run(api.pay(w.ctx, { from: gather, to: part.party, cents: part.cents, memo: `${bizName} wound up: a share of what was left`, deposit: into, kind: "purchase", category: "investment" }));
       if (failed) return failed;
     }
-    const failed = applied(w, [disposal(business, part.party, 100, part.cents + (inKind.get(part.party) ?? 0), `${bizName} wound up`)]);
+    const parent = (holders.find((h) => h.party === part.party)?.share ?? 0) + 1e-9 >= 80 && api.partyKind(w.ctx, part.party) === "business" && structureOf(w.ctx.state, part.party) === "c_corp";
+    const proceeds = parent ? basisOf(api, w.ctx, business, part.party).basis : part.cents + (inKind.get(part.party) ?? 0);
+    const failed = applied(w, [disposal(business, part.party, 100, proceeds, `${bizName} wound up`)]);
     if (failed) return failed;
   }
   if (left > 0) for (const p of parts) said.push({ text: `Paid ${labelOf(w.ctx, p.party)} ${money(p.cents)} (${Math.round((holders.find((h) => h.party === p.party)?.share ?? 0) * 100) / 100}%) of what was left`, names: [p.party] });
@@ -754,13 +756,18 @@ function merge(api: FinanceApi, ctx: ReadContext, business: EntityId, into: Enti
       const row = next.find((o) => o.party === party && ROLE_RIGHTS[o.role].worth);
       next = row ? next.map((o) => (o === row ? { ...o, units: (o.units ?? 0) + got } : o)) : [...next, { party, role: "owner" as const, units: got }];
     }
+    // An S corporation surviving takes only holders who may hold its shares, no more than its limit (§26.3).
+    const scorp = sCorpRefusal(api, ctx, into, next.filter((o) => (o.units ?? 0) > 0 || (o.share ?? 0) > 0).map((o) => o.party));
+    if (scorp) return scorp;
     const failed = applied(w, [{ type: "set", entity: into, field: "owners", value: ownersJson(withUnitShares(next)) as unknown as JsonValue }]);
     if (failed) return failed;
   }
   const deal = [issued > 0 ? `${Math.round(ratio * 10000) / 10000} of its units for each of theirs (${issued} in all)` : null, cash > 0 ? money(cash) : null].filter((x): x is string => x !== null).join(" and ");
 
   if (terms.keep) {
-    // Kept: the survivor holds all of it, its own stake and every holder's, at what it gave for them.
+    // Kept: the survivor holds all of it, its own stake and every holder's, at what it gave for them. A company can't hold an S corporation's shares.
+    const scorp = sCorpRefusal(api, ctx, business, [into]);
+    if (scorp) return scorp;
     let next = b.owners;
     for (const h of holders) next = moveUnits(next, h.party, into, unitsOf(next, h.party));
     const failed = applied(w, [{ type: "set", entity: business, field: "owners", value: ownersJson(withUnitShares(next)) as unknown as JsonValue }, acquisition(business, into, Math.round(issued * a.perUnit) + cash)]);

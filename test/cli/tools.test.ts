@@ -653,3 +653,28 @@ describe("offline tools", () => {
     for (const answer of [guide, template]) expect(answer.text.length).toBeLessThanOrEqual(24_000);
   });
 });
+
+describe("what's new since the last save", () => {
+  test("lre_lint asks the host to lint the version named (a revision by prefix sends its id, the head none) against the head; lre_check checks a world read from the host", async () => {
+    const fake = new FakeLumiverse();
+    const w = fake.lre.seed("Alpha");
+    const worldId = w.index.id;
+    const first = w.index.head;
+    const { ctx } = client(fake);
+    await call(ctx, "lre_edit", { worldId, ops: [{ op: "add", path: "/entities/mara", value: person("mara", "Mara") }] });
+    await call(ctx, "lre_commit", { worldId, note: "Add Mara" });
+    const head = fake.lre.world(worldId).index.head;
+    expect(head).not.toBe(first);
+    const old = await call(ctx, "lre_lint", { worldId, source: first.slice(0, 8) });
+    expect(old.data).toMatchObject({ worldId, name: "Alpha", source: `revision ${first}`, against: `the head, revision ${head}`, new: expect.any(Number), fixed: expect.any(Number) });
+    const linted = fake.lre.sent("lre.world", "lint");
+    expect(linted).toHaveLength(2);
+    expect(linted).toEqual(expect.arrayContaining([{ type: "lre.world", op: "lint", worldId, revision: first }, { type: "lre.world", op: "lint", worldId }]));
+    const unknown = await call(ctx, "lre_lint", { worldId, source: "zzzzzzzz" });
+    expect(unknown.isError).toBe(true);
+    expect(unknown.text).toContain("has no revision zzzzzzzz");
+    const checked = await call(ctx, "lre_check", { worldId, source: "head" });
+    expect(checked.data).toMatchObject({ loads: true, from: `the head of “Alpha” (${worldId}), revision ${head}` });
+    expect((await call(ctx, "lre_check", { worldId, path: "world.json" })).text).toContain("Give the world one way");
+  });
+});

@@ -12,7 +12,7 @@ import { routineSettingsOf } from "../shared/routines";
 import type { EventRef, FixDirective, HeldWrite, LedgerEvent, MarkerBody, Rec } from "../shared/ledger";
 import { LEDGER_NAMESPACE } from "../shared/ledger";
 import type { ActionDef, RulesetDef, WorldDoc } from "../shared/world";
-import { formatMoney } from "../shared/world";
+import { ENGINE_VERSION, formatMoney } from "../shared/world";
 import { OFFSTAGE_ORIGIN, ORIGIN_FIELD, playsOffstage, toldByDefault } from "../shared/offstage";
 import { parseItemFix } from "../shared/things";
 import { actionWords, toldAction } from "../engine/action-words";
@@ -598,6 +598,17 @@ export class Dispatcher {
         reply("lre.gm.part", part);
         return;
       }
+      case "lre.chat.export": {
+        // The chat's head as one document, for an outside client's scratch copy (the command line's
+        // sandbox, DESIGN §23): behind the GM gate, as `lre.gm` is (everything, secrets included).
+        await this.requireWorldChat(r.chatId, userId);
+        const run = await this.rt.runOf(r.chatId, userId);
+        if (!run) throw new RequestError("not_world_chat", "this chat is not attached to a world");
+        const { world, state } = await this.head(r.chatId, userId);
+        // `renderState` folded a copy of its own: plain JSON, sent as it is.
+        reply("lre.chat.export", { chatId: r.chatId, worldId: run.worldId, revision: state.revision, engine: ENGINE_VERSION, runSeed: this.runSeedOf(r.chatId), clock: state.clock, world, state: state as unknown as JsonObject });
+        return;
+      }
       case "lre.sections": {
         // GM → This chat → Sections' preview: behind the GM gate, as `lre.gm` is (marked facts included).
         await this.requireWorldChat(r.chatId, userId);
@@ -1031,7 +1042,7 @@ export class Dispatcher {
       case "export":
         return { file: await store.exportFile(r.worldId, userId, r.revision) };
       case "lint": {
-        const { world } = await store.get(r.worldId, userId);
+        const { world } = await store.get(r.worldId, userId, r.revision);
         return { lint: store.lint(world) };
       }
       case "attach": {

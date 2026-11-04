@@ -19,8 +19,10 @@ export interface WorthParts {
 
 const GROUPS: { label: string; test: (cls: AccountClass) => boolean }[] = [
   { label: "Cash", test: (c) => CLASS_TRAITS[c].cash },
-  { label: "Bank accounts", test: (c) => CLASS_TRAITS[c].asset && !CLASS_TRAITS[c].cash && !CLASS_TRAITS[c].investment },
+  { label: "Bank accounts", test: (c) => CLASS_TRAITS[c].asset && !CLASS_TRAITS[c].cash && !CLASS_TRAITS[c].investment && !CLASS_TRAITS[c].receivable },
   { label: "Investment accounts", test: (c) => CLASS_TRAITS[c].investment },
+  // What others owe the party on loans it made (§25.4): an asset, never cash.
+  { label: "Loans made", test: (c) => CLASS_TRAITS[c].receivable },
   { label: "Cards and credit lines", test: (c) => CLASS_TRAITS[c].revolving },
   { label: "Loans", test: (c) => CLASS_TRAITS[c].installment },
 ];

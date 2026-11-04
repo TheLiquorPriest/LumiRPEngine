@@ -18,8 +18,7 @@ import { ALERTS_SECTION, COMING_SECTION, type OrgAlertView, type OrgComingView }
 import { formatMoney } from "../../../shared/world";
 import { calendarOf, clockAt, dateAt, dayIndexOf, dayIndexOfText, formatClock } from "../../../engine/calendar";
 import { chatFeed, worldFeed } from "../../../engine/feed";
-import { delegationsOf, directMembers, heldPositions, HOW_WORDS, jobsAt, membersOfOrg, orgPowers, orgTitle, orgTypeOf, partyRoster, positionsOf } from "../../../engine/org";
-import { acts } from "../../../engine/life";
+import { delegationsOf, directMembers, heldPositions, HOW_WORDS, jobsAt, membersOfOrg, orgPowers, orgTitle, orgTypeOf, partyRoster, positionsOf, seatFilled } from "../../../engine/org";
 import { kindIs, isGone } from "../../../engine/scope";
 import { numOf, objOf, optionalQuery, own, sliceOf, strOf } from "../../../engine/pack-kit";
 import { passMemo } from "../../../engine/read-pass";
@@ -138,7 +137,7 @@ export function orgAlerts(ctx: ReadContext, org: EntityId, viewer: EntityId | nu
   const rows = directMembers(ctx, org).filter((r) => r.via === undefined);
   for (const p of positionsOf(ctx, org)) {
     if (p.seats === 0) continue;
-    const acting = new Set(rows.filter((r) => r.position === p.id && !isGone(ctx.state, r.who) && acts(ctx.world, ctx.state, r.who)).map((r) => r.who)).size;
+    const acting = new Set(rows.filter((r) => r.position === p.id && seatFilled(ctx, r.who)).map((r) => r.who)).size;
     if (acting >= p.seats) continue;
     out.push({ id: `vacancy:${p.id}`, kind: "vacancy", tone: "warn", text: p.seats === 1 ? `${p.title} is vacant.` : `${p.title}: ${acting} of ${p.seats} seats filled.`, short: `${p.title} vacant`, tab: "people", needsYou: viewer !== null && holds(ctx, org, viewer, "members.appoint") });
   }

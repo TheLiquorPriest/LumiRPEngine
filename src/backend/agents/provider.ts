@@ -382,6 +382,54 @@ export const ACCEPTANCE_PATH = "agent-acceptance.json";
 /** A throttle's period: its settings are per minute. */
 const MINUTE_MS = 60_000;
 
+/** What a call holds of its connection's calls at once when the connection has no such limit: nothing to free. */
+const NOTHING_HELD = (): void => undefined;
+
+/**
+ * A connection's calls under way at once (`ConnectionThrottle.atOnce`), one gate for agents' calls
+ * and an agent turn's prompt-only calls: each takes a place, one past the limit waits, in the order
+ * they came, for a place to free, and one whose signal aborts while it waits leaves the line.
+ */
+export class ConnectionGate {
+  running = 0;
+  private readonly queue: (() => void)[] = [];
+
+  /** A place among the calls under way, once there is room for one under `most`; its release, which frees it once, wakes the next in line. */
+  async take(most: number, signal: AbortSignal): Promise<() => void> {
+    while (this.running >= most) await this.wait(signal);
+    this.running++;
+    let held = true;
+    return () => {
+      if (!held) return;
+      held = false;
+      this.running--;
+      this.queue.shift()?.();
+    };
+  }
+
+  /** How many calls wait for a place. */
+  get waiting(): number {
+    return this.queue.length;
+  }
+
+  private wait(signal: AbortSignal): Promise<void> {
+    signal.throwIfAborted();
+    const { promise, resolve, reject } = Promise.withResolvers<void>();
+    const wake = (): void => {
+      signal.removeEventListener("abort", abort);
+      resolve();
+    };
+    const abort = (): void => {
+      const at = this.queue.indexOf(wake);
+      if (at >= 0) this.queue.splice(at, 1);
+      reject(signal.reason);
+    };
+    this.queue.push(wake);
+    signal.addEventListener("abort", abort, { once: true });
+    return promise;
+  }
+}
+
 interface StoredRun {
   label: string;
   openedAt: number;
@@ -428,6 +476,8 @@ export interface Reservation {
   entry: { at: number; tokens: number };
   /** The accounts it holds on: the user's, or the stand-in while their file couldn't be read. */
   accounts: UserAccounts;
+  /** Frees its place among the connection's calls at once (`AgentAccounts.atOnce`); settling the call frees it. */
+  release: () => void;
 }
 
 const emptySpend = (): AcceptanceSpend => ({ tokensIn: 0, cachedIn: 0, tokensOut: 0, calls: 0, refused: 0, estimated: false });
@@ -466,6 +516,8 @@ export class AgentAccounts {
   private readonly listeners = new Set<(userId: UserId) => void>();
   /** The stand-in accounts serving each user's calls while their file can't be read (`forCall`). */
   private readonly unread = new Map<UserId, UserAccounts>();
+  /** Each user's connections' calls under way at once (`atOnce`), by user and connection. */
+  private readonly gates = new Map<string, ConnectionGate>();
 
   constructor(
     private readonly host: Pick<HostPort, "storage" | "log">,
@@ -672,22 +724,30 @@ export class AgentAccounts {
     }
     if (entry?.only && !u.run) throw new AgentStop("acceptance", { id: STOP_TEXT.acceptanceClosed, vars: { connection } });
     const throttle = settings.throttles.find((t) => t.id === connection);
-    await this.throttle(u, connection, input.tokensIn + input.tokensOut, throttle, input.signal);
-    const factor = u.calibration.get(`${connection}\u0000${input.model}`) ?? settings.acceptance.estimateFactor;
-    const tokensIn = Math.ceil(input.tokensIn * factor);
+    // A place among the connection's calls at once first, so a call waiting for one holds nothing of its minute.
+    const release = await this.atOnce(userId, connection, settings.throttles, input.signal);
+    let tokensIn: number;
     const run = u.run;
-    if (run && entry) {
-      const spent = run.spend[connection] ?? emptySpend();
-      const held = u.held.get(connection) ?? { tokensIn: 0, tokensOut: 0 };
-      const over = (spentNow: number, heldNow: number, more: number, ceiling: Limit): boolean => spentNow + heldNow + more > limitOf(ceiling);
-      const code = over(spent.tokensIn, held.tokensIn, tokensIn, entry.tokensIn) ? "ceiling_in" : over(spent.tokensOut, held.tokensOut, input.tokensOut, entry.tokensOut) ? "ceiling_out" : null;
-      if (code) {
-        run.spend[connection] = { ...spent, refused: spent.refused + 1 };
-        void this.save(userId, u);
-        this.changed(userId);
-        const vars = code === "ceiling_in" ? { connection, ceiling: counted(limitOf(entry.tokensIn), "prompt token", "prompt tokens"), used: String(spent.tokensIn + held.tokensIn), needs: String(tokensIn) } : { connection, ceiling: counted(limitOf(entry.tokensOut), "answer token", "answer tokens"), used: String(spent.tokensOut + held.tokensOut), needs: String(input.tokensOut) };
-        throw new AgentStop(code, { id: code === "ceiling_in" ? STOP_TEXT.ceilingIn : STOP_TEXT.ceilingOut, vars });
+    try {
+      await this.throttle(u, connection, input.tokensIn + input.tokensOut, throttle, input.signal);
+      const factor = u.calibration.get(`${connection}\u0000${input.model}`) ?? settings.acceptance.estimateFactor;
+      tokensIn = Math.ceil(input.tokensIn * factor);
+      if (run && entry) {
+        const spent = run.spend[connection] ?? emptySpend();
+        const held = u.held.get(connection) ?? { tokensIn: 0, tokensOut: 0 };
+        const over = (spentNow: number, heldNow: number, more: number, ceiling: Limit): boolean => spentNow + heldNow + more > limitOf(ceiling);
+        const code = over(spent.tokensIn, held.tokensIn, tokensIn, entry.tokensIn) ? "ceiling_in" : over(spent.tokensOut, held.tokensOut, input.tokensOut, entry.tokensOut) ? "ceiling_out" : null;
+        if (code) {
+          run.spend[connection] = { ...spent, refused: spent.refused + 1 };
+          void this.save(userId, u);
+          this.changed(userId);
+          const vars = code === "ceiling_in" ? { connection, ceiling: counted(limitOf(entry.tokensIn), "prompt token", "prompt tokens"), used: String(spent.tokensIn + held.tokensIn), needs: String(tokensIn) } : { connection, ceiling: counted(limitOf(entry.tokensOut), "answer token", "answer tokens"), used: String(spent.tokensOut + held.tokensOut), needs: String(input.tokensOut) };
+          throw new AgentStop(code, { id: code === "ceiling_in" ? STOP_TEXT.ceilingIn : STOP_TEXT.ceilingOut, vars });
+        }
       }
+    } catch (error) {
+      release();
+      throw error;
     }
     const held = u.held.get(connection) ?? { tokensIn: 0, tokensOut: 0 };
     u.held.set(connection, { tokensIn: held.tokensIn + tokensIn, tokensOut: held.tokensOut + input.tokensOut });
@@ -695,7 +755,26 @@ export class AgentAccounts {
     const entryAt = { at: this.clock.now(), tokens: input.tokensIn + input.tokensOut };
     if (throttle) u.window.set(connection, [...(u.window.get(connection) ?? []), entryAt]);
     if (run) this.changed(userId);
-    return { userId, connection, model: input.model, estimate: input.tokensIn, tokensIn, tokensOut: input.tokensOut, run, entry: entryAt, accounts: u };
+    return { userId, connection, model: input.model, estimate: input.tokensIn, tokensIn, tokensOut: input.tokensOut, run, entry: entryAt, accounts: u, release };
+  }
+
+  /**
+   * A place among the connection's calls under way at once (Settings → Agents → Throttles, `atOnce`):
+   * every agent's call takes one as it is reserved, and an agent turn's prompt-only call as it is made
+   * (`Steps.gate`), through the same gate; past the limit a call waits for one to free, and one whose
+   * signal aborts meanwhile throws its reason. Its release frees it. A connection with no limit holds
+   * nothing.
+   */
+  async atOnce(userId: UserId, connection: string, throttles: readonly ConnectionThrottle[], signal: AbortSignal): Promise<() => void> {
+    const most = limitOf(throttles.find((t) => t.id === connection)?.atOnce ?? "none");
+    if (most === Number.POSITIVE_INFINITY) return NOTHING_HELD;
+    const key = `${userId}\u0000${connection}`;
+    let gate = this.gates.get(key);
+    if (!gate) {
+      gate = new ConnectionGate();
+      this.gates.set(key, gate);
+    }
+    return gate.take(most, signal);
   }
 
   /**
@@ -704,6 +783,7 @@ export class AgentAccounts {
    */
   settle(r: Reservation, usage: CallUsage | null): void {
     const u = r.accounts;
+    r.release();
     const held = u.held.get(r.connection) ?? { tokensIn: 0, tokensOut: 0 };
     u.held.set(r.connection, { tokensIn: Math.max(0, held.tokensIn - r.tokensIn), tokensOut: Math.max(0, held.tokensOut - r.tokensOut) });
     if (usage) {

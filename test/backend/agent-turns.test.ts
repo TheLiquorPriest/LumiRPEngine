@@ -275,6 +275,31 @@ describe("the Engine switch", () => {
   });
 });
 
+describe("where a role's task runs (shared/role-routes.ts)", () => {
+  const INTENT_AGENT = "You are the intent agent of LumiRPEngine";
+
+  test("an agent role naming no connection runs each task where Settings says it does, its step's connection and model; naming one, on its own", async () => {
+    const rig = new Rig({ shipped: true });
+    rig.host.connectionProfiles.push({ id: "conn-step", name: "Step", models: ["step-model"] }, { id: "conn-own", name: "Own", models: ["own-model"] });
+    const { agents } = await pair(rig);
+    rig.body(await rig.send({ type: "lre.settings.set", patch: { agents: { roles: { intent: { promptOnly: false } }, finalReview: { on: false } }, modelUse: { preset: "custom", steps: { interpret: { route: { provider: "helper", connectionId: "conn-step", model: "step-model" } } } } } }));
+    rig.host.quietReply = (req: QuietRequest) => {
+      const prompt = req.messages[0]?.content ?? "";
+      if (prompt.includes(INTENT_AGENT) || prompt.includes(INTERPRET_MARK)) return JSON.stringify({ action: null, params: {}, confidence: 0.9 });
+      if (prompt.includes(EXTRACT_MARK)) return JSON.stringify({ proposals: [] });
+      return "{}";
+    };
+    const intentCalls = (): QuietRequest[] => rig.host.quietCalls.filter((c) => (c.messages[0]?.content ?? "").includes(INTENT_AGENT));
+    await played(rig, agents, "I look out over the harbor.", "Gulls wheel over the water.");
+    expect(intentCalls().map((c) => [c.connectionId, c.model])).toEqual([["conn-step", "step-model"]]);
+    // Its own connection wins for every task; its own model with it.
+    rig.body(await rig.send({ type: "lre.settings.set", patch: { agents: { roles: { intent: { connectionId: "conn-own", model: "own-model" } } } } }));
+    await played(rig, agents, "I stretch.", "You stretch.");
+    expect(intentCalls().slice(1).map((c) => [c.connectionId, c.model])).toEqual([["conn-own", "own-model"]]);
+    expect(rig.rt.ledger.errors).toEqual([]);
+  });
+});
+
 describe("what an agent turn's roles write", () => {
   test("a role without the GM tier can't make a GM edit; the turn plays on without it", async () => {
     const rig = new Rig({ shipped: true });

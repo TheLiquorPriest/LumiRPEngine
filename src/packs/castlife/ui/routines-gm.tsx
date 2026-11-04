@@ -18,8 +18,8 @@ import type { EditOp } from "../../../shared/protocol";
 import type { EffectiveBlock, EffectiveSchedule, InvitationView, RoutineAwareness, RoutineBlock, RoutineBlockId, RoutineChangeSummary, RoutineGmView, RoutineMode, RoutineRole, SkipLife, SourceView } from "../../../shared/routines";
 import { AWARENESS_LABEL, BLOCK_KIND_LABEL, isOff, ROUTINE_AWARENESS, ROUTINE_MODE_LABEL, ROUTINE_MODES, ROUTINE_ROLE_LABEL, ROUTINE_ROLES, routineSettingsOf, SKIP_LIFE_LABEL, SKIP_LIVES, storySourceLabel } from "../../../shared/routines";
 import type { GmView } from "../../../shared/state-view";
-import type { ScheduleDef, WorldDoc } from "../../../shared/world";
-import { useApp, useView } from "../../../frontend/app";
+import type { ScheduleDef } from "../../../shared/world";
+import { useApp, useChatWorld, useView } from "../../../frontend/app";
 import { blankBlock, RoutineBlockForm } from "../../../frontend/build/routine-editor";
 import { EVERY, ScheduleForm } from "../../../frontend/build/schedule-form";
 import { deriveId } from "../../../frontend/build/schema";
@@ -676,27 +676,6 @@ function FollowPage(props: { ctx: Ctx; view: RoutineGmView; onBack(): void }) {
       ) : null}
     </ChangePage>
   );
-}
-
-/** The chat's world, as its revision has it, with the packs' kinds: what Build's forms read for places, owners and fields. */
-function useChatWorld(send: Send): WorldDoc | null {
-  const view = useView();
-  const worldId = view?.worldId ?? null;
-  const revision = view?.revision ?? null;
-  const [doc, setDoc] = useState<WorldDoc | null>(null);
-  useEffect(() => {
-    if (worldId === null) return;
-    let live = true;
-    void send({ type: "lre.world", op: "get", worldId, ...(revision ? { revision } : {}) }).then((m) => {
-      if (!live || m.type !== "lre.result" || m.request !== "lre.world" || !m.body.world) return;
-      const world = m.body.world;
-      setDoc({ ...world, kinds: { ...m.body.packKinds, ...world.kinds } });
-    });
-    return () => {
-      live = false;
-    };
-  }, [worldId, revision]);
-  return doc;
 }
 
 /** What a block or schedule rests on, and the way to its lore entry or sheet in Build. */

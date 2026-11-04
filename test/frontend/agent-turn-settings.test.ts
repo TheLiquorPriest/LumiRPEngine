@@ -10,8 +10,8 @@
 import { describe, expect, test } from "bun:test";
 import { defaultSettings } from "../../src/backend/settings-store";
 import { Button, HostModelPicker, HostSwitch, NumberStepper, Seg } from "../../src/frontend/components";
-import { AcceptanceSection, AgentsHub, agentsSummary, BudgetsSection, CallSwitches, CompactionSection, PipelineSection, RecordingSection, ReviewSection, SystemSection, turnGlance } from "../../src/frontend/settings/agents";
-import { roleChanged } from "../../src/frontend/settings/changed";
+import { AcceptanceSection, AgentsHub, agentsSummary, BudgetsSection, CallSwitches, CompactionSection, PipelineSection, RecordingSection, ReviewSection, SystemSection, TurnGlance, turnGlance } from "../../src/frontend/settings/agents";
+import { mainChanged, roleChanged } from "../../src/frontend/settings/changed";
 import { ContextPage, contextSummary } from "../../src/frontend/settings/context";
 import { amountText, NavRow, ToggleChips } from "../../src/frontend/settings/kit";
 import { MainAgentPage, mainPatch, mainResetPatch, mainSummary } from "../../src/frontend/settings/main-agent";
@@ -19,7 +19,7 @@ import { FAMILIES, pinsOf, RolePage, roleResetPatch } from "../../src/frontend/s
 import { RolesPage, rolesSummary } from "../../src/frontend/settings/roles";
 import { type Connection, ConnectionSelect } from "../../src/frontend/settings/steps";
 import { defaultContextSettings, sourceLabel } from "../../src/shared/agent-context";
-import { CURATOR_TOOL_TURNS, defaultRoleSettings, ROLE_IDS, type RoleId } from "../../src/shared/agent-roles";
+import { CURATOR_TOOL_TURNS, defaultRoleSettings, ROLE_IDS, ROLE_LABEL, type RoleId } from "../../src/shared/agent-roles";
 import type { AgentSettings } from "../../src/shared/agent-settings";
 import { defaultAgentSettings } from "../../src/shared/agent-settings";
 import type { JsonObject } from "../../src/shared/json";
@@ -138,6 +138,38 @@ describe("Settings → Agents: the hub", () => {
     ]);
     expect(stages.map((s) => s.id)).toEqual(["intent", "prepare", "beats", "review", "read", "memory_before"]);
     expect(only(stages.filter((s) => s.id === "review")).off).toBe("Off: the narrator gets the prompt as the engine made it");
+    // On the fixed pipeline no stage has a mode.
+    expect(stages.map((s) => s.mode)).toEqual(stages.map(() => null));
+  });
+
+  test("with a main agent deciding, the glance says how each stage runs; a role switched off has no row", () => {
+    const main = agentsWith((a) => {
+      a.pipeline.mode = "main";
+      a.main.stages.prepare = "auto";
+      a.roles.director.run = "off";
+    });
+    const stages = turnGlance(main, ROUTES, CONNECTIONS);
+    expect(stages.map((s) => [s.id, s.mode])).toEqual([
+      ["intent", "main"],
+      ["prepare", "auto"],
+      ["beats", "main"],
+      ["review", null],
+      ["read", "main"],
+      ["memory", "main"],
+    ]);
+    // The director, switched off, works in no stage: the beats' only role, so nothing runs there.
+    expect(only(stages.filter((s) => s.id === "prepare")).rows.map((r) => r.roles.join(","))).toEqual(["intent,scene,minds", "skip"]);
+    expect(only(stages.filter((s) => s.id === "beats")).off).toBe("Nothing runs");
+    // The memory left to the next turn follows the memory's mode.
+    const before = turnGlance(agentsWith((a) => ((a.pipeline.mode = "main"), (a.pipeline.memory = "before_next"), (a.main.stages.memory = "auto")), main), ROUTES, CONNECTIONS);
+    expect(only(before.filter((s) => s.id === "memory_before")).mode).toBe("auto");
+    // Shown: each stage's mode in words, and what a stage on its own does.
+    const glance = rendered(TurnGlance({ agents: main, routes: ROUTES, connections: CONNECTIONS, go }));
+    const shown = texts(glance);
+    expect(shown.filter((t) => t === "Runs on its own")).toHaveLength(1);
+    expect(shown.filter((t) => t === "The main agent decides")).toHaveLength(4);
+    expect(shown.some((t) => t.includes("a stage on its own runs its roles as the fixed pipeline does"))).toBe(true);
+    expect(texts(rendered(TurnGlance({ agents: DEFAULTS, routes: ROUTES, connections: CONNECTIONS, go }))).some((t) => t === "Runs on its own" || t === "The main agent decides")).toBe(false);
   });
 
   test("a row per section, under today's names, each opening its page; at the defaults nothing says Changed", () => {
@@ -157,15 +189,22 @@ describe("Settings → Agents: the hub", () => {
     const changed = agentsWith((a) => {
       a.pipeline.mode = "main";
       a.pipeline.memory = "before_next";
+      // Smart persistence is Pipeline's: its switch and each of its limits count there.
+      a.persist.on = true;
+      a.persist.minutes = 45;
       a.budget.toolTurns = 4;
-      a.throttles = [{ id: "harbor", requestsPerMinute: 30, tokensPerMinute: "none" }];
+      // A connection's throttle is one row however many of its limits it sets.
+      a.throttles = [{ id: "harbor", requestsPerMinute: 30, tokensPerMinute: "none", atOnce: 2 }];
       a.caching.on = false;
       a.stream = false;
       a.roles.intent.connectionId = "deepseek";
+      // A role's run and a stage's mode count on their own pages.
+      a.roles.minds.run = "always";
+      a.main.stages.read = "auto";
     });
     const tree = hub(changed);
     expect(propsOf(tree, NavRow).map((r) => [r.title, r.changed])).toEqual([
-      ["Pipeline", 2],
+      ["Pipeline", 4],
       ["Review card", 0],
       ["System instructions", 0],
       ["Budgets", 1],
@@ -177,7 +216,7 @@ describe("Settings → Agents: the hub", () => {
     ]);
     expect(only(propsOf(tree, NavRow).filter((r) => r.title === "Throttles")).subtitle).toBe("Harbor relay");
     // A role's own settings count on its own page, not the hub's.
-    expect(agentsSummary(changed)).toBe("A main agent decides · 6 changed");
+    expect(agentsSummary(changed)).toBe("A main agent decides · 8 changed");
     const intent = propsOf(tree, "button").filter((b) => b.children === "Intent")[0] ?? {};
     click(intent);
     expect(went).toEqual({ page: "roles", sub: "intent" });
@@ -199,6 +238,30 @@ describe("Settings → Agents: each section's page", () => {
     expect(curator.checked).toBe(true);
     press(curator, false);
     expect(take()).toEqual({ agents: { pipeline: { curator: false } } });
+    // Smart persistence: off, with no limits shown, until switched on.
+    const persist = labelled(pipeline(DEFAULTS), HostSwitch, "Smart persistence: keep a quiet scene's minds and notes");
+    expect(persist.checked).toBe(false);
+    expect(propsOf(pipeline(DEFAULTS), NumberStepper).map((p) => p.label)).toEqual([]);
+    press(persist, true);
+    expect(take()).toEqual({ agents: { persist: { on: true } } });
+    const on = pipeline(agentsWith((a) => (a.persist.on = true)));
+    expect(propsOf(on, NumberStepper).map((p) => [p.label, p.value])).toEqual([
+      ["Turns kept in a row", 3],
+      ["World minutes kept", 30],
+    ]);
+    press(labelled(on, NumberStepper, "Turns kept in a row"), 5);
+    expect(take()).toEqual({ agents: { persist: { turns: 5 } } });
+    press(labelled(on, NumberStepper, "World minutes kept"), 45);
+    expect(take()).toEqual({ agents: { persist: { minutes: 45 } } });
+    // Its help names what is never kept.
+    expect(texts(pipeline(DEFAULTS)).some((t) => t.includes("Never kept: Intent, Knowledge, Read, Curator, Memory, Skip beats, World steps."))).toBe(true);
+    // Off, a limit still changed shows, with its Default, as the hub's count says it is.
+    const kept = pipeline(agentsWith((a) => (a.persist.minutes = 45)));
+    expect(propsOf(kept, NumberStepper).map((p) => [p.label, p.value])).toEqual([
+      ["Turns kept in a row", 3],
+      ["World minutes kept", 45],
+    ]);
+    expect(labels(kept)).toEqual(["Reset World minutes kept to its default, 30"]);
     const placement = labelled(review(DEFAULTS), Seg, "Where an agent turn's changes that ask first wait");
     expect(placement.value).toBe("chips");
     press(placement, "gate");
@@ -254,6 +317,7 @@ describe("Settings → Agents: each section's page", () => {
     for (const page of SECTIONS) expect(labels(page(DEFAULTS)).filter((l) => String(l).startsWith("Reset"))).toEqual([]);
     const changed = agentsWith((a) => {
       a.pipeline = { mode: "main", memory: "before_next", curator: false };
+      a.persist = { on: true, turns: 5, minutes: 45 };
       a.review.placement = "gate";
       a.compaction = { atTokens: 48_000, keepTurns: 5, summarizeTool: false };
       a.recording.outputChars = 1500;
@@ -267,6 +331,9 @@ describe("Settings → Agents: each section's page", () => {
       [pipeline, "Reset how a turn is run to its default, A fixed pipeline", { pipeline: { mode: null } }],
       [pipeline, "Reset when memory runs to its default, After the reply", { pipeline: { memory: null } }],
       [pipeline, "Reset the Curator to its default, on", { pipeline: { curator: null } }],
+      [pipeline, "Reset Smart persistence to its default, off", { persist: { on: null } }],
+      [pipeline, "Reset Turns kept in a row to its default, 3", { persist: { turns: null } }],
+      [pipeline, "Reset World minutes kept to its default, 30", { persist: { minutes: null } }],
       [review, "Reset where changes that ask first wait to its default, On the review card after the reply", { review: { placement: null } }],
       [compaction, "Reset Compact the session past to its default, 32,000 tokens", { compaction: { atTokens: null } }],
       [compaction, "Reset Recent turns kept whole to its default, 3", { compaction: { keepTurns: null } }],
@@ -358,11 +425,11 @@ describe("a role's page", () => {
       expect(labels(rolePage(DEFAULTS, id))).toEqual([...(id === "curator" ? ["Use every agent's tool rounds per agent, 10"] : []), `Bust ${name}'s cache`]);
     }
     const changed = agentsWith((a) => {
-      a.roles.minds = { ...a.roles.minds, connectionId: "deepseek", effort: "low", tier: "read", promptOnly: true, onFail: "stop" };
+      a.roles.minds = { ...a.roles.minds, connectionId: "deepseek", effort: "low", tier: "read", promptOnly: true, onFail: "stop", run: "always" };
       a.context.roles.minds = { ...a.context.roles.minds, perspective: "gm", pins: ["notes/harbor.md"] };
     });
     const tree = rolePage(changed, "minds");
-    expect(roleChanged(changed, "minds")).toBe(7);
+    expect(roleChanged(changed, "minds")).toBe(8);
     const resets: [string, JsonObject][] = [
       ["Reset Minds's connection and model to their default, each task on its step's", { agents: { roles: { minds: { connectionId: null, model: null } } } }],
       ["Reset Minds's effort to its default, Connection's own", { agents: { roles: { minds: { effort: null } } } }],
@@ -371,6 +438,7 @@ describe("a role's page", () => {
       ["Reset Minds's pinned files to none", { agents: { context: { roles: { minds: { pins: null } } } } }],
       ["Reset Minds's one call to its default, off", { agents: { roles: { minds: { promptOnly: null } } } }],
       ["Reset what Minds does when it fails to its default, Run its step's one call", { agents: { roles: { minds: { onFail: null } } } }],
+      ["Reset when Minds runs to its default, When the turn asks", { agents: { roles: { minds: { run: null } } } }],
     ];
     for (const [label, body] of resets) {
       click(labelled(tree, Button, label));
@@ -379,6 +447,34 @@ describe("a role's page", () => {
     click(labelled(tree, Button, "Reset Minds to its shipped defaults"));
     expect(take()).toEqual(roleResetPatch("minds"));
     expect(roleResetPatch("minds")).toEqual({ agents: { roles: { minds: null }, context: { roles: { minds: null } }, caching: { roles: { minds: null } } } });
+  });
+
+  test("When it runs offers what the pipeline map lets the role take: minds and the scene may be kept or off, the director only off, the rest never skipped", () => {
+    const runs = (id: RoleId) => propsOf(rolePage(DEFAULTS, id), Seg).find((p) => p.label === `${ROLE_LABEL[id]}: when it runs`);
+    expect(runs("minds")?.options).toEqual([
+      { value: "smart", label: "When the turn asks" },
+      { value: "always", label: "Every time, never kept" },
+      { value: "off", label: "Off" },
+    ]);
+    expect((runs("scene")?.options as unknown[]).length).toBe(3);
+    expect(runs("director")?.options).toEqual([
+      { value: "smart", label: "When the turn asks" },
+      { value: "off", label: "Off" },
+    ]);
+    for (const id of ["intent", "knowledge", "read", "curator", "memory", "skip", "world"] as const) {
+      expect(runs(id)).toBeUndefined();
+      expect(texts(rolePage(DEFAULTS, id)).some((t) => t.includes("The engine never skips it."))).toBe(true);
+    }
+    press(runs("minds") ?? {}, "off");
+    expect(take()).toEqual({ agents: { roles: { minds: { run: "off" } } } });
+    press(runs("director") ?? {}, "off");
+    expect(take()).toEqual({ agents: { roles: { director: { run: "off" } } } });
+    // While persistence is off, a role it may keep says nothing is kept now; with a main agent deciding, its stages and how each runs.
+    expect(texts(rolePage(DEFAULTS, "minds")).some((t) => t.includes("Smart persistence is off, so nothing is kept now"))).toBe(true);
+    const main = rolePage(agentsWith((a) => ((a.pipeline.mode = "main"), (a.main.stages.prepare = "auto"))), "director");
+    expect(texts(main).some((t) => t.includes("it works in Stage 3: scene, minds and decisions (runs on its own), Stage 5: the beats (the main agent decides), Stage 7: the read (the main agent decides)"))).toBe(true);
+    (only(propsOf(main, NavRow).filter((r) => r.id === "stages")).onOpen as () => void)();
+    expect(went).toEqual({ page: "main", at: "stages" });
   });
 
   test("the Curator's page has its ops per turn and its own shipped tool rounds, which aren't a change; Reset resets them with the role", () => {
@@ -472,6 +568,17 @@ describe("Settings → Agents → Main agent", () => {
     expect(take()).toEqual({ agents: { finalReview: { on: false } } });
     press(labelled(tree, Seg, "What a final review that fails does"), "stop");
     expect(take()).toEqual({ agents: { finalReview: { onFail: "stop" } } });
+    // What the review is sent: every part, or only what changed.
+    const scope = labelled(tree, Seg, "What the final review is sent");
+    expect([scope.value, scope.options]).toEqual(["all", [{ value: "all", label: "Every part" }, { value: "changed", label: "Only what changed" }]]);
+    press(scope, "changed");
+    expect(take()).toEqual({ agents: { finalReview: { scope: "changed" } } });
+    // Each stage: the main agent decides it, or its roles run on their own.
+    const prepare = labelled(tree, Seg, "Stage 3: scene, minds and decisions: how it runs");
+    expect([prepare.value, prepare.options]).toEqual(["main", [{ value: "main", label: "The main agent decides" }, { value: "auto", label: "Runs on its own" }]]);
+    press(prepare, "auto");
+    expect(take()).toEqual(mainPatch({ stages: { prepare: "auto" } }));
+    expect(propsOf(tree, Seg).filter((p) => String(p.label).endsWith(": how it runs")).map((p) => p.label)).toEqual(["Stage 1: the intent: how it runs", "Stage 3: scene, minds and decisions: how it runs", "Stage 5: the beats: how it runs", "Stage 7: the read: how it runs", "Stage 8: the memory: how it runs"]);
     // Its pickers offer no limit only a turn role takes.
     const pickers = propsOf(tree, "select").filter((s) => String(s["aria-label"]).endsWith("set a limit of its own"));
     expect(pickers.map((p) => p["aria-label"])).toEqual(["The final review: set a limit of its own", "The main agent: set a limit of its own"]);
@@ -481,6 +588,13 @@ describe("Settings → Agents → Main agent", () => {
     expect(labels(tree)).toEqual(["Bust the main agent's cache"]);
     const changed = agentsWith((a) => (a.main = { ...a.main, connectionId: "deepseek", effort: "high", families: ["people"] }));
     expect(labels(mainPage(changed))).toEqual(["Reset the main agent's connection and model to their default, Lumiverse's default connection", "Reset the main agent's effort to its default, Connection's own", "Reset the main agent's tools to their default, Workspace", "Bust the main agent's cache", "Reset the main agent to its defaults"]);
+    // A stage on its own and the review's scope count, each with its Default.
+    const staged = agentsWith((a) => ((a.main.stages.prepare = "auto"), (a.main.stages.memory = "auto"), (a.finalReview.scope = "changed")));
+    expect(mainChanged(staged, TIMEOUTS)).toBe(3);
+    click(labelled(mainPage(staged), Button, "Reset stage 3: scene, minds and decisions to its default, The main agent decides"));
+    expect(take()).toEqual(mainPatch({ stages: { prepare: null } }));
+    click(labelled(mainPage(staged), Button, "Reset what the final review is sent to its default, Every part"));
+    expect(take()).toEqual({ agents: { finalReview: { scope: null } } });
   });
 });
 
@@ -500,6 +614,12 @@ describe("the agents' settings in the settings store", () => {
     agents = await save();
     press(labelled(acceptance(agents), NumberStepper, "Tokens against the steps engine (times)"), 1.5);
     agents = await save();
+    // Smart persistence, switched on and a limit raised.
+    press(labelled(pipeline(agents), HostSwitch, "Smart persistence: keep a quiet scene's minds and notes"), true);
+    agents = await save();
+    press(labelled(pipeline(agents), NumberStepper, "World minutes kept"), 45);
+    agents = await save();
+    expect(agents.persist).toEqual({ on: true, turns: 3, minutes: 45 });
     // A role, across its page.
     press(only(propsOf(rolePage(agents, "director"), "select").filter((s) => s["aria-label"] === "Director: reasoning effort")), { currentTarget: { value: "high" } });
     agents = await save();
@@ -511,7 +631,9 @@ describe("the agents' settings in the settings store", () => {
     agents = await save();
     press(labelled(rolePage(agents, "director"), HostSwitch, "Caching for Director"), false);
     agents = await save();
-    expect(agents.roles.director).toEqual({ ...defaultRoleSettings().director, effort: "high", tier: "gm", budget: { toolTurns: 10 } });
+    press(labelled(rolePage(agents, "director"), Seg, "Director: when it runs"), "off");
+    agents = await save();
+    expect(agents.roles.director).toEqual({ ...defaultRoleSettings().director, effort: "high", tier: "gm", run: "off", budget: { toolTurns: 10 } });
     expect(agents.context.roles.director.perspective).toBe("gm");
     expect(agents.caching.roles.director).toEqual({ on: false, nonce: "" });
     for (const id of ROLE_IDS.filter((r) => r !== "director")) expect(agents.roles[id]).toEqual(defaultRoleSettings()[id]);
@@ -520,7 +642,11 @@ describe("the agents' settings in the settings store", () => {
     agents = await save();
     press(labelled(mainPage(agents), HostSwitch, "The main agent reviews the narrator's prompt before each reply"), false);
     agents = await save();
-    expect([agents.main.pinsTokens, agents.finalReview.on]).toEqual([1000, false]);
+    press(labelled(mainPage(agents), Seg, "Stage 3: scene, minds and decisions: how it runs"), "auto");
+    agents = await save();
+    press(labelled(mainPage(agents), Seg, "What the final review is sent"), "changed");
+    agents = await save();
+    expect([agents.main.pinsTokens, agents.finalReview.on, agents.main.stages, agents.finalReview.scope]).toEqual([1000, false, { ...DEFAULTS.main.stages, prepare: "auto" }, "changed"]);
     // Every Default on the sections, then each page's Reset.
     for (const page of SECTIONS) {
       for (const label of labels(page(agents)).filter((l) => String(l).startsWith("Reset"))) {

@@ -30,10 +30,12 @@ export type MembershipContext = Pick<ReadContext, "registry" | "world" | "state"
 
 /** The relation that makes an entity a member of a group. */
 export const MEMBER_OF = "member_of";
-/** The kind every group extends: factions, families, households, companies and an author's own. */
+/** The kind every group extends: factions, families, households, companies, trusts and an author's own. */
 export const GROUP_KIND = "group";
 /** The kind a company is: the economy's business and every kind extending it. */
 export const COMPANY_KIND = "business";
+/** The kind a trust is (a group since DESIGN §29.1): like a company, an organization of its own type, whose schedules, Cast and routines read it as no group of people. */
+export const TRUST_KIND = "trust";
 /** How deep group nesting is followed (a crew in a guild in a city's council). */
 const MEMBERSHIP_DEPTH = 8;
 
@@ -152,9 +154,11 @@ export function isGroup(reg: Registry, world: WorldDoc, state: Readonly<WorldSta
 /** A group's members that aren't groups themselves (people, things), directly or through member groups, in id order; removed ones aren't members. */
 export function membersOf(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, group: EntityId): EntityId[] {
   const ctx: MembershipContext = { registry: reg, world, state };
+  // Who is tied to the group reads the whole state, so the walk reads it once (`isMemberOf` per entity would read it for each).
+  let tied: ReadonlySet<EntityId> | undefined;
   return Object.keys(state.entities)
     .sort()
-    .filter((id) => id !== group && !isGroup(reg, world, state, id) && !isGone(state, id) && isMemberOf(ctx, id, group));
+    .filter((id) => id !== group && !isGroup(reg, world, state, id) && !isGone(state, id) && (linkedMemberOf(state, id, group) || (tied ??= tiedTo(ctx, group)).has(id)));
 }
 
 /** Whether `id` is in the player character's party (`travels_with` it) in one of `tiers`; the leader is in none. */

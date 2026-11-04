@@ -44,12 +44,21 @@
 // the turn's stages in C14's order, with the decisions after the gates and the stage's requests
 // together (`ordered`, `stage`), and the main agent runs the roles it chooses, each once as below,
 // with its task for it (`TurnAgentCtx.brief`) and never by its `onFail`. Its failure stops the turn.
+// A stage set to run on its own (`main.stages`: auto) takes none of its requests to the main agent:
+// its roles run as the fixed pipeline runs them, each by its `onFail`, and the main agent's next send
+// lists what ran (`MainTurn.autoRan`); with the scene's stage on its own, the minds start at once.
+//
+// On either pipeline a role switched off (`roles[].run: off`) runs no call: the turn goes on without
+// it. While Smart persistence holds the scene (`persist.ts`), the scene role's lore and notes are the
+// last turn's, recorded again marked kept, with no call. GM → Live shows the turn's plan once the
+// gates let it play (`played`): each role runs, is kept, off, auto or none, with why.
 
 import { ROLE_LABEL, type RoleId, type RoleSettings } from "../../shared/agent-roles";
 import type { DiagPhase } from "../../shared/diagnostics";
 import type { ChatId, MessageId, UserId } from "../../shared/ids";
 import { isRecord, type JsonObject, type JsonValue } from "../../shared/json";
 import { MAIN_TEXT, type MainRequestKind } from "../../shared/main-agent-prompts";
+import { type PlanInput, stageOf, turnPlan } from "../../shared/agent-pipeline";
 import type { GenerationKind, LedgerEvent, PackEvent, Rec, RecAgent, RecSession } from "../../shared/ledger";
 import type { ExtractionLearning, UserSettings } from "../../shared/settings";
 import type { KeptFile } from "../../shared/stores";
@@ -76,7 +85,7 @@ import type { LiveEndState, LiveView } from "../../shared/live";
 import { counted } from "../../shared/words";
 import { isMainMessage, MAIN_BY, rolledBack } from "./compaction";
 import { liveEdits } from "./final-review";
-import { type MainHost, MainTurn } from "./main-agent";
+import { type MainHost, MainTurn, requestStage } from "./main-agent";
 import { agentRoles } from "./roles/index";
 import type { Review, StoredReviewItem } from "./review";
 import { AgentTurn } from "./runtime";
@@ -202,6 +211,8 @@ interface AgentRun {
   /** The reply's own confirm proposals the card lists, by their chips. */
   read: StoredReviewItem[];
   scene: SceneOut | null;
+  /** Its scene's lore and notes are the last turn's, kept by Smart persistence: recorded marked kept. */
+  sceneKept: boolean;
   /** The lore its agents loaded into its reply (`lore_load`), by lore id, each once in the order loaded: recorded with the scene's lore. */
   loads: string[];
   /** Its narrator-facing lines are recorded: lore loaded from now on can't reach its reply. */
@@ -408,6 +419,7 @@ export class Orchestrator {
       approved: [],
       read: [],
       scene: null,
+      sceneKept: false,
       loads: [],
       told: false,
       memoryLater: false,
@@ -438,6 +450,20 @@ export class Orchestrator {
     this.runs.get(generationId)?.main?.open("prepare");
   }
 
+  /**
+   * The turn's plan for GM → Live (`turnPlan`), once its pre phase knows it: each role runs, is kept,
+   * off, auto or none, with why, from the turn's settings and what the runtime found (`facts`):
+   * whether Smart persistence held the scene, how many of the minds due it kept, and what the turn
+   * asks of each role.
+   */
+  plan(generationId: string, facts: Pick<PlanInput, "persist" | "asked"> & { keptMinds: number; dueMinds: number }): void {
+    const s = this.runs.get(generationId);
+    if (!s) return;
+    const agents = s.settings.agents;
+    const runs = Object.fromEntries(Object.entries(agents.roles).map(([role, r]) => [role, r.run])) as PlanInput["runs"];
+    s.live.add({ kind: "plan", rows: turnPlan({ main: s.main !== null, stages: agents.main.stages, runs, curator: agents.pipeline.curator, persist: facts.persist, kept: { minds: facts.keptMinds, due: facts.dueMinds, scene: s.sceneKept }, asked: facts.asked }) });
+  }
+
   /** The turn's calls: its roles' on an agent turn, else classic's. */
   calls(generationId: string): TurnCalls {
     const s = this.runs.get(generationId);
@@ -466,16 +492,20 @@ export class Orchestrator {
     return reply !== undefined && activeRecord(reply, core.journal.tombstones)?.memoryNext === true;
   }
 
-  /** The scene role, once the turn is set to play: its lore and notes are recorded for the narrator with the turn's other lines. */
-  async scene(generationId: string, task: SceneTask, signal: AbortSignal): Promise<void> {
+  /**
+   * The scene role, once the turn is set to play: its lore and notes are recorded for the narrator
+   * with the turn's other lines. Switched off, it runs nothing. With `kept` (Smart persistence held
+   * the scene), they are the last turn's, recorded marked kept, and nothing runs.
+   */
+  async scene(generationId: string, task: SceneTask, signal: AbortSignal, kept: SceneOut | null = null): Promise<void> {
     const s = this.runs.get(generationId);
     if (!s) return;
-    if (s.main) {
-      const got = await s.main.request("scene", this.roles.scene, task, signal);
-      s.scene = "out" in got && (got.out.lore.length > 0 || got.out.notes.length > 0) ? got.out : null;
+    if (kept) {
+      s.scene = { lore: [...kept.lore], notes: [...kept.notes] };
+      s.sceneKept = true;
       return;
     }
-    const out = await this.play(s, "scene", "scene", "pre", this.roles.scene, task, signal);
+    const out = await this.call(s, "scene", "scene", "pre", this.roles.scene, task, signal);
     s.scene = out.ok && (out.out.lore.length > 0 || out.out.notes.length > 0) ? out.out : null;
   }
 
@@ -550,7 +580,7 @@ export class Orchestrator {
     if (lines.brief) events.push(outLines("brief", [fit(lines.brief)]));
     // What its agents loaded joins the scene's lore (DESIGN §4.6): delivery tells each entry in the Scene section as the narrator may read it.
     const lore = [...new Set([...(s.scene?.lore ?? []), ...s.loads])];
-    if (s.scene || lore.length > 0) events.push(outScene(lore, (s.scene?.notes ?? []).map(fit)));
+    if (s.scene || lore.length > 0) events.push(outScene(lore, (s.scene?.notes ?? []).map(fit), s.sceneKept));
     // An agent turn records the outcome even when it has none, so its narrator is told the turn's own lines and never another's.
     if (events.length === 0) events.push(outLines("outcome", []));
     if (cut > 0) this.rt.host.log("info", `[LumiRPEngine] turn ${s.generationId.slice(0, 8)}: ${counted(cut, "narrator line", "narrator lines")} cut to ${counted(limit, "character", "characters")} (Settings → Agents → Recording)`, s.userId);
@@ -562,6 +592,18 @@ export class Orchestrator {
   /** Whether the turn gets a final review: it is an agent turn, and the review was on as the turn read its settings. */
   reviews(generationId: string): boolean {
     return this.runs.get(generationId)?.settings.agents.finalReview.on === true;
+  }
+
+  /** Whether the turn's review is sent only the parts that changed since the last turn's (`finalReview.scope: changed`), which holds only while Smart persistence is on. */
+  reviewsChanged(generationId: string): boolean {
+    const agents = this.runs.get(generationId)?.settings.agents;
+    return agents?.finalReview.scope === "changed" && agents.persist.on;
+  }
+
+  /** GM → Live hears that nothing the review would see changed since the last turn's: none was sent, and that review's edits (`edits`, on `parts`) were made again. */
+  reviewKept(generationId: string, parts: readonly PromptPart[], edits: readonly FinalEdit[]): void {
+    const label = (id: string): string => parts.find((p) => p.id === id)?.label ?? id;
+    this.runs.get(generationId)?.live.add({ kind: "review", outcome: edits.length > 0 ? "revised" : "unchanged", edits: edits.map((e) => ({ part: e.part, label: label(e.part), op: e.op, ...(e.op === "append" ? {} : { line: e.line }), ...(e.op === "drop" ? {} : { text: e.text }) })), reason: "nothing it would see changed since the last turn's review, so none was sent: that review's edits were made again" });
   }
 
   /**
@@ -898,23 +940,15 @@ export class Orchestrator {
 
   private agentCalls(s: AgentRun): TurnCalls {
     const r = this.roles;
-    // With a main agent, a call is its request (`kind`), and the flow gets the answer it committed, or the call's none.
+    // A call answers what its role gave, else the call's none.
     const or = async <T, O>(kind: MainRequestKind, role: RoleId, phase: DiagPhase, run: RoleRun<T, O>, task: T, signal: AbortSignal, none: O): Promise<O> => {
-      if (s.main) {
-        const got = await s.main.request(kind, run, task, signal);
-        return "out" in got ? got.out : none;
-      }
-      const out = await this.play(s, kind, role, phase, run, task, signal);
+      const out = await this.call(s, kind, role, phase, run, task, signal);
       return out.ok ? out.out : none;
     };
     return {
       interpret: async (task, signal) => {
-        if (s.main) {
-          const got = await s.main.request("interpret", r.intent.interpret, task, signal);
-          return "out" in got ? { read: got.out, failed: false } : { read: null, failed: got.failed };
-        }
-        const out = await this.play(s, "interpret", "intent", "pre", r.intent.interpret, task, signal);
-        return out.ok ? { read: out.out, failed: false } : { read: null, failed: true };
+        const out = await this.call(s, "interpret", "intent", "pre", r.intent.interpret, task, signal);
+        return out.ok ? { read: out.out, failed: false } : { read: null, failed: out.failed };
       },
       judge: (task, signal) => or("judge", "intent", "pre", r.intent.judge, task, signal, null),
       puzzle: (task, signal) => or("puzzle", "intent", "pre", r.intent.puzzle, task, signal, null),
@@ -925,11 +959,7 @@ export class Orchestrator {
       prose: (task, signal) => or<ProseTask, DirectorProse>("prose", "director", "prose", r.director.prose, task, signal, { prose: { brief: null, outline: [] } satisfies PlanProse }),
       extract: (task, signal) => or("extract", "read", "read", r.read.extract, task, signal, { proposals: [], where: null }),
       curate: async (task, signal) => {
-        if (s.main) {
-          const got = await s.main.request("curate", r.curator.curate, task, signal);
-          return "out" in got ? got.out : null;
-        }
-        const out = await this.play(s, "curate", "curator", "read", r.curator.curate, task, signal);
+        const out = await this.call(s, "curate", "curator", "read", r.curator.curate, task, signal);
         if (!out.ok) return null;
         // Its agent failed and its prompt-only read answered in its place: that read isn't its whole work, so the read's held facts land for what it doesn't cover.
         return out.via === "prompt_only" && !s.settings.agents.roles.curator.promptOnly ? { ...out.out, short: "fallback" } : out.out;
@@ -940,6 +970,24 @@ export class Orchestrator {
       choices: (task, signal) => or("choices", "director", "read", r.director.choices, task, signal, []),
       memory: (task, signal) => or("memory", "memory", "memory", r.memory, task, signal, NO_MINDS),
     };
+  }
+
+  /**
+   * One call of the turn as its pipeline runs it: none while its role is switched off
+   * (`roles[].run`), which fails nothing; the main agent's request in a stage it decides, whose answer
+   * is what it committed; else its role run as the fixed pipeline runs it (`play`), which a main
+   * agent's next send lists when its stage runs on its own. `via` is the main agent's run's
+   * (`agent`) for a request.
+   */
+  private async call<T, O>(s: AgentRun, kind: MainRequestKind, role: RoleId, phase: DiagPhase, run: RoleRun<T, O>, task: T, signal: AbortSignal): Promise<{ ok: true; out: O; via: "agent" | "prompt_only" } | { ok: false; failed: boolean }> {
+    if (s.settings.agents.roles[role].run === "off") return { ok: false, failed: false };
+    if (s.main && s.settings.agents.main.stages[stageOf(requestStage(kind, s.phase))] === "main") {
+      const got = await s.main.request(kind, run, task, signal);
+      return "out" in got ? { ok: true, out: got.out, via: "agent" } : { ok: false, failed: got.failed };
+    }
+    const out = await this.play(s, kind, role, phase, run, task, signal);
+    s.main?.autoRan(kind, task, out);
+    return out.ok ? out : { ok: false, failed: true };
   }
 
   /**

@@ -23,6 +23,7 @@ import { CONFIG_TOOLS } from "./tools-config";
 import { JOB_TOOLS } from "./tools-jobs";
 import { LORE_TOOLS } from "./tools-lore";
 import { PLAY_TOOLS } from "./tools-play";
+import { SANDBOX_TOOLS } from "./tools-sandbox";
 
 /** How a write tool changes things, for MCP's tool annotations (a client may ask the user before a destructive call). */
 export interface WriteHints {
@@ -53,6 +54,12 @@ export interface ToolContext {
   readOnly: boolean;
   /** Runs one world's (or chat's) writes one at a time; calls in parallel are fine otherwise. A function, not a method: tools take it on its own. */
   readonly serialize: Serialize;
+  /**
+   * How long one sandbox advance runs before it stops with a cursor (DESIGN §23): an MCP server's
+   * `--sandbox-budget`, SANDBOX_BUDGET_MS when not given; null for no limit, as on the command line,
+   * where a sandbox lasts one command and a cursor would have nothing to go on with.
+   */
+  sandboxBudgetMs?: number | null;
 }
 
 /** Runs work by key one after another, keys side by side. */
@@ -85,7 +92,7 @@ const RUN_FROM = { path: PATH, world: WORLD, worldId: { type: "string", descript
 const EXPECT_VERSION: JsonObject = { type: "integer", minimum: 0, description: "The draft version you last read (lre_world, lre_draft and lre_worlds say it, stored or not): refused if the draft has moved on since, so a change you haven't seen is never overwritten, committed or thrown away." };
 
 /** The tools kept in files of their own (tool-module.ts), each with its implementation and command, after the ones below. */
-export const MODULE_TOOLS: readonly ToolModule[] = [...CONFIG_TOOLS, ...LORE_TOOLS, ...JOB_TOOLS, ...BUILD_TOOLS, ...PLAY_TOOLS];
+export const MODULE_TOOLS: readonly ToolModule[] = [...CONFIG_TOOLS, ...LORE_TOOLS, ...JOB_TOOLS, ...BUILD_TOOLS, ...PLAY_TOOLS, ...SANDBOX_TOOLS];
 
 export const TOOLS: readonly ToolDef[] = [
   {
@@ -120,8 +127,8 @@ export const TOOLS: readonly ToolDef[] = [
   },
   {
     name: "lre_check",
-    description: "Check a world the way LumiRPEngine loads it, on this machine: the shape, migration to this engine, every lint rule of the engine and its packs, and the host macro hazards in authored text (lore, section and step templates). It counts the world's items and its entities by kind, which is where its accounts, flows, jobs and holdings show. Errors block a commit and an import.",
-    inputSchema: object({ path: PATH, world: WORLD }),
+    description: "Check a world the way LumiRPEngine loads it, on this machine: the shape, migration to this engine, every lint rule of the engine and its packs, and the host macro hazards in authored text (lore, section and step templates). It counts the world's items and its entities by kind, which is where its accounts, flows, jobs and holdings show. Errors block a commit and an import. The world comes from a file, inline, or from your Lumiverse (worldId with source, the draft by default).",
+    inputSchema: object(RUN_FROM),
     write: false,
   },
   {
@@ -185,7 +192,7 @@ export const TOOLS: readonly ToolDef[] = [
   {
     name: "lre_edit",
     description:
-      'Change a world\'s draft with JSON Patch (RFC 6902): add, remove, replace, move, copy and test, each path a JSON Pointer into the whole world ("/entities/mara/fields/place"). All the operations apply or none do. The draft is the user\'s Build draft too. Pass expectVersion (the draft version you last read) so that a change made since is refused, not overwritten. Without it, when someone writes the draft between this call\'s read and its patch, the patch still goes on top of their write if that write changed none of the items the patch touches (the answer\'s meanwhile lists what it changed); if it did, the edit is refused and names those items. Answers the new version, what changed per collection, the first lint issues and any macro hazards the edit brought in.',
+      'Change a world\'s draft with JSON Patch (RFC 6902): add, remove, replace, move, copy and test, each path a JSON Pointer into the whole world ("/entities/mara/fields/place"). All the operations apply or none do. The draft is the user\'s Build draft too. Pass expectVersion (the draft version you last read) so that a change made since is refused, not overwritten. Without it, when someone writes the draft between this call\'s read and its patch, the patch still goes on top of their write if that write changed none of the items the patch touches (the answer\'s meanwhile lists what it changed); if it did, the edit is refused and names those items. Answers the new version, what changed per collection, the first lint issues, the issues this edit introduced (errors first) and how many it fixed, and any macro hazards the edit brought in.',
     inputSchema: object(
       {
         worldId: WORLD_ID,
@@ -204,7 +211,7 @@ export const TOOLS: readonly ToolDef[] = [
   },
   {
     name: "lre_draft",
-    description: "A world's draft: whether one is stored, its version and the revision it began from, its lint summary, and what it changes against the head.",
+    description: "A world's draft: whether one is stored, its version and the revision it began from, its lint summary, what's new since the last save (sinceHead: how many issues it has that the head hasn't, how many of the head's it fixed, and the first new ones, errors first; lre_lint with source draft lists them all), and what it changes against the head.",
     inputSchema: object({ worldId: WORLD_ID }, ["worldId"]),
     write: false,
   },
@@ -344,7 +351,7 @@ async function dispatch(def: ToolDef, args: Args, ctx: ToolContext): Promise<Too
     case "lre_template":
       return templateTool(args);
     case "lre_check":
-      return checkTool(args, ctx.readFile);
+      return checkTool(args, ctx);
     case "lre_playtest":
       return runTool("playtest", args, ctx);
     case "lre_check_world":

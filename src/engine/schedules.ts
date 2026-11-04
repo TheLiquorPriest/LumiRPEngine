@@ -27,7 +27,7 @@ import { acts } from "./life";
 import { optionalQuery, own } from "./pack-kit";
 import { fieldDef, isGone, kindIs, placeOfEntity } from "./scope";
 import { relocate } from "./relocate";
-import { COMPANY_KIND, GROUP_KIND, membersOf, selectEntities } from "./selector";
+import { COMPANY_KIND, GROUP_KIND, membersOf, selectEntities, TRUST_KIND } from "./selector";
 import type { WorldState } from "./state";
 import { initialState, minutesBetween } from "./world-state";
 
@@ -104,9 +104,9 @@ function handedOver(world: WorldDoc, instant: ScheduleInstant): boolean {
   });
 }
 
-/** Whether a schedule an entity of this kind owns applies to its members: a group's, but not a business's, whose schedules are its own (ORG-SPEC §3.2). */
+/** Whether a schedule an entity of this kind owns applies to its members: a group's, but not a business's or a trust's, whose schedules are their own (ORG-SPEC §3.2, DESIGN §29.1). */
 function ownsAsGroup(reg: Registry, world: WorldDoc, kind: string): boolean {
-  return kindIs(reg, world, kind, GROUP_KIND) && !kindIs(reg, world, kind, COMPANY_KIND);
+  return kindIs(reg, world, kind, GROUP_KIND) && !kindIs(reg, world, kind, COMPANY_KIND) && !kindIs(reg, world, kind, TRUST_KIND);
 }
 
 /**

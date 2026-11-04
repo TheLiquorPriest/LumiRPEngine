@@ -42,8 +42,8 @@ export function isVoteHow(v: unknown): v is VoteHow {
   return typeof v === "string" && (VOTE_HOWS as readonly string[]).includes(v);
 }
 
-/** How an organization counts its votes: by its shares (each unit its class's votes, else each owner's share of its worth), or one holder or member, one vote. */
-export const VOTE_BASES = ["shares", "members"] as const;
+/** How an organization counts its votes: by its shares (each unit its class's votes, else each owner's share of its worth), one holder or member, one vote, or (a trust's) one trustee, one vote. */
+export const VOTE_BASES = ["shares", "members", "trustees"] as const;
 export type VoteBasis = (typeof VOTE_BASES)[number];
 
 export function isVoteBasis(v: unknown): v is VoteBasis {

@@ -2,9 +2,9 @@
   "id": "economy.exempt",
   "pack": "economy",
   "schema": "lre-table/economy.exempt/v1",
-  "revision": "6a6ce568ab95c880347cc8cd6bd5dbe3",
+  "revision": "f6de734f9c98da99975b404f3c0094cf",
   "label": "Tax-exempt organizations",
-  "source": {"dataPack":"modern-us","file":"us/exempt.json","sourceSchema":"lre-data-src/us/exempt/v1","reflectsPeriod":"2025-2026 (point-in-time rules)","approximate":true,"basis":"The common kinds of tax-exempt organization and how the Internal Revenue Code treats each, as recalled from IRS Publications 557 (Tax-Exempt Status for Your Organization), 526 (Charitable Contributions) and 15 (Employer's Tax Guide), and the FUTA and state unemployment exclusions (IRC sections 3306(c)(8) and 3309(b)(1)); not queried live. Treat as plausible defaults, not legal advice."},
+  "source": {"dataPack":"modern-us","file":"us/exempt.json","sourceSchema":"lre-data-src/us/exempt/v1","reflectsPeriod":"2025-2026 (point-in-time rules)","approximate":true,"basis":"The common kinds of tax-exempt organization and how the Internal Revenue Code treats each, as recalled from IRS Publications 557 (Tax-Exempt Status for Your Organization), 526 (Charitable Contributions) and 15 (Employer's Tax Guide), and the FUTA and state unemployment exclusions (IRC sections 3306(c)(8) and 3309(b)(1)); a private foundation's payout, excise and donor limit from IRC sections 4940, 4942 and 170(b)(1)(B) and the Instructions for Form 990-PF; who may hold an S corporation's shares from IRC section 1361(c)(6); not queried live. Treat as plausible defaults, not legal advice."},
   "columns": {
     "name": {"type":"text"},
     "code": {"type":"text","doc":"The Internal Revenue Code section that exempts it."},
@@ -12,11 +12,17 @@
     "donations_deductible": {"type":"bool","doc":"A person's cash gifts to it are deductible."},
     "futa": {"type":"bool","doc":"Owes federal unemployment tax on its staff's wages."},
     "suta": {"type":"bool","doc":"Owes state unemployment tax on its staff's wages."},
+    "s_corp_holder": {"type":"bool","doc":"May hold an S corporation's shares (IRC section 1361(c)(6)).","optional":true},
+    "payout_pct": {"type":"number","unit":"pct","doc":"A private foundation's minimum payout a year, of the average value of its assets (IRC section 4942(e)).","optional":true},
+    "excise_pct": {"type":"number","unit":"pct","doc":"A private foundation's excise on its net investment income (IRC section 4940(a)).","optional":true},
+    "undistributed_tax_pct": {"type":"number","unit":"pct","doc":"A private foundation's tax on a payout still ungranted a year late (IRC section 4942(a)).","optional":true},
+    "donor_limit_pct": {"type":"number","unit":"pct","doc":"The share of a person's income their deductible gifts to it may come to (IRC section 170(b)(1)(B)).","optional":true},
     "description": {"type":"text"}
   },
   "rows": {
-    "charity": {"name":"Charity or nonprofit","code":"501(c)(3)","income_tax_exempt":true,"donations_deductible":true,"futa":false,"suta":true,"description":"A public charity or other nonprofit organized for charitable, educational, scientific or literary purposes: a food bank, a shelter, a school, a museum. Gifts to it are deductible; it owes no FUTA but pays state unemployment tax."},
-    "church": {"name":"Church or religious organization","code":"501(c)(3)","income_tax_exempt":true,"donations_deductible":true,"futa":false,"suta":false,"description":"A church, synagogue, mosque, temple or other religious organization, exempt without applying. Gifts to it are deductible; it owes neither FUTA nor state unemployment tax."},
-    "club": {"name":"Social club","code":"501(c)(7)","income_tax_exempt":true,"donations_deductible":false,"futa":true,"suta":true,"description":"A club organized for pleasure and recreation, supported by its members' dues: a country club, a hobby or sports club, a fraternal lodge's social arm. Exempt on its members' money, but gifts to it are not deductible, and it pays unemployment taxes like any employer."}
+    "charity": {"name":"Charity or nonprofit","code":"501(c)(3)","income_tax_exempt":true,"donations_deductible":true,"futa":false,"suta":true,"s_corp_holder":true,"description":"A public charity or other nonprofit organized for charitable, educational, scientific or literary purposes: a food bank, a shelter, a school, a museum. Gifts to it are deductible; it owes no FUTA but pays state unemployment tax."},
+    "church": {"name":"Church or religious organization","code":"501(c)(3)","income_tax_exempt":true,"donations_deductible":true,"futa":false,"suta":false,"s_corp_holder":true,"description":"A church, synagogue, mosque, temple or other religious organization, exempt without applying. Gifts to it are deductible; it owes neither FUTA nor state unemployment tax."},
+    "club": {"name":"Social club","code":"501(c)(7)","income_tax_exempt":true,"donations_deductible":false,"futa":true,"suta":true,"s_corp_holder":false,"description":"A club organized for pleasure and recreation, supported by its members' dues: a country club, a hobby or sports club, a fraternal lodge's social arm. Exempt on its members' money, but gifts to it are not deductible, and it pays unemployment taxes like any employer."},
+    "private_foundation": {"name":"Private foundation","code":"501(c)(3)","income_tax_exempt":true,"donations_deductible":true,"futa":false,"suta":true,"s_corp_holder":true,"payout_pct":5,"excise_pct":1.39,"undistributed_tax_pct":30,"donor_limit_pct":30,"description":"A charity funded by one family, company or founder rather than the public: a family foundation, a company's foundation. It grants out at least 5% of the average value of its assets each year, by the end of the next, last year's shortfall first; it pays 1.39% on its net investment income and 30% on a payout still ungranted a year late, both with its return on 15 May. A person deducts gifts to it up to 30% of their income."}
   }
 }

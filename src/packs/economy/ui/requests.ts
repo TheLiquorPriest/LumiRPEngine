@@ -221,7 +221,7 @@ const SCHEDULE_PARAMS = ["every", "interval", "day", "weekday", "month", "at", "
  * empty number or choice, so an edit names what it empties (`clear`) instead. The params and the
  * fields they set share these names.
  */
-const CLEARABLE = ["at", "start", "end", "count", "roll", "retry_days", "retries", "fallback", "category"];
+export const FLOW_CLEARABLE = ["at", "start", "end", "count", "roll", "retry_days", "retries", "fallback", "category"];
 
 /** The changes a flow form makes to a stored flow (an omitted param leaves its part as it is, `clear` empties those it names); null when nothing changes. */
 export function flowUpdateAction(flow: Flow, form: FlowForm, currency: WorldCurrency): ActionBody | null {
@@ -230,7 +230,7 @@ export function flowUpdateAction(flow: Flow, form: FlowForm, currency: WorldCurr
   const changed: JsonObject = {};
   for (const [key, value] of Object.entries(now)) if (JSON.stringify(was[key] ?? null) !== JSON.stringify(value)) changed[key] = value;
   if (SCHEDULE_PARAMS.some((key) => key in changed)) for (const key of SCHEDULE_PARAMS) if (now[key] !== undefined) changed[key] = now[key] as JsonValue;
-  const clear = CLEARABLE.filter((key) => was[key] !== undefined && now[key] === undefined);
+  const clear = FLOW_CLEARABLE.filter((key) => was[key] !== undefined && now[key] === undefined);
   if (clear.length > 0) changed.clear = clear.join(",");
   return Object.keys(changed).length === 0 ? null : { action: FINANCE_ACTIONS.flowUpdate, params: { flow: flow.id, ...changed } };
 }
@@ -294,7 +294,7 @@ export function flowEditOps(flow: Flow, form: FlowForm, currency: WorldCurrency)
   if (was.once !== undefined && now.once === undefined) ops.push({ op: "set", entity: flow.id, field: "once", value: "" });
   const name = form.label.trim();
   const renamed = name !== "" && name !== flow.label;
-  const clear = CLEARABLE.filter((key) => was[key] !== undefined && now[key] === undefined);
+  const clear = FLOW_CLEARABLE.filter((key) => was[key] !== undefined && now[key] === undefined);
   if (renamed || clear.length > 0) ops.push({ op: "effect", effect: "economy.flow_edit", args: { flow: flow.id, ...(renamed ? { name } : {}), ...(clear.length > 0 ? { clear: clear.join(",") } : {}) } });
   return ops;
 }

@@ -21,6 +21,7 @@ import { businessControls, findJob, gmParties, invoiceControls, jobControls, kno
 import { FieldsPage, OwnerRows, TxnRows } from "./lines";
 import { actionPage, Controls, Hero, MoneyPage, Note, type HubPage, type HubPages } from "./nav";
 import { amountOf, distributeAction, drawAction, invoiceAction, invoiceIssueAction, jobEndAction, jobSpawnOps, newIdFor, raiseAction, stakeSellAction, stakeSellUnitsAction } from "./requests";
+import { StatementsBlock } from "./statements";
 
 type Invoice = BusinessView["invoices"][number];
 
@@ -227,7 +228,7 @@ function jobPage(control: string | undefined, props: SectionProps, job: JobView,
 
 // ---------------------------------------------------------------- a business's books and invoices
 
-/** A business's own money's Books (ORG-SPEC §5.1, in Orgs): the year's books by category in the full books, month by month and its sales where they show. */
+/** A business's own money's Books (ORG-SPEC §5.1, in Orgs): the year's books by category in the full books, month by month, its sales where they show, and its statements from Money 3 (§26.5). */
 export function BooksSegment(props: SegmentProps) {
   const { view, controls } = props;
   const b = ownBusiness(view);
@@ -265,6 +266,7 @@ export function BooksSegment(props: SegmentProps) {
           <TxnRows lines={b.sales} max={10} currency={controls.currency} />
         </Section>
       ) : null}
+      {b.statements ? <StatementsBlock statements={b.statements} currency={controls.currency} /> : null}
     </>
   );
 }

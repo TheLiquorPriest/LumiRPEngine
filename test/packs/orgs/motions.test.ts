@@ -25,7 +25,7 @@ import type { WorldState } from "../../../src/engine/state";
 import { Working } from "../../../src/engine/working";
 import { decisionLabel } from "../../../src/packs/orgs/core/decisions";
 import { orgHistory } from "../../../src/packs/orgs/core/log";
-import { motionsOf, stepMotions } from "../../../src/packs/orgs/core/motions";
+import { motionsOf, openMotion, stepMotions } from "../../../src/packs/orgs/core/motions";
 import { ALL_PACKS, STARTER_WORLDS } from "../../../src/packs/index";
 import { startState } from "../support";
 
@@ -331,5 +331,25 @@ describe("replay", () => {
     expect(applyValidUnits(reg, w.events, again, (s) => reg.context(w.world, s))).toHaveLength(w.events.length);
     expect(sliceOf(again, "orgs").motions).toEqual(sliceOf(w.state, "orgs").motions);
     expect(again.entities[EMR]?.fields.owners).toEqual(w.state.entities[EMR]?.fields.owners);
+  });
+});
+
+describe("a trust's trustees vote (DESIGN §29.1)", () => {
+  test("a trust settled counts its trustees' votes, one each, its beneficiary none; both trustees for carries it", () => {
+    const w = portAlder();
+    expect(why(act(w, JORDAN, "org_found", { type: "trust", name: "Ellis Family Trust", beneficiary: PRIYA }))).toBe("");
+    const TRUST = "ellis_family_trust";
+    expect(gm(w, "set", { entity: TRUST, field: "owners", value: [{ party: JORDAN, role: "trustee" }, { party: DANNY, role: "trustee" }, { party: PRIYA, role: "beneficiary", share: 100 }] })).toBe("");
+    const events = openMotion(w.ctx, createRng("trust-motion"), { org: TRUST, by: JORDAN, party: JORDAN, text: "Grant the shop's apprentices a bursary", what: { type: "orgs.note", args: { org: TRUST, text: "The trustees agreed a bursary" } } });
+    if (!Array.isArray(events)) throw new Error(events.reason);
+    for (const e of events) expect(w.apply(e)).toBeNull();
+    const [m] = motionsOf(w.state, TRUST);
+    expect(m).toMatchObject({ basis: "trustees", electorate: { [JORDAN]: 50, [DANNY]: 50 }, status: "open" });
+    expect(m?.electorate[PRIYA]).toBeUndefined();
+    expect(gm(w, "orgs.vote", { org: TRUST, motion: m?.id ?? "", who: DANNY, vote: "for" })).toBe("");
+    expect(motionsOf(w.state, TRUST)[0]).toMatchObject({ status: "passed", why: "carried: 100% for, 0% against" });
+    expect(orgHistory(w.state, TRUST).map((l) => l.text)).toContain("The trustees agreed a bursary");
+    // Only a trust counts by trustees.
+    expect(gm(w, "orgs.decisions", { org: "alder_automotive_co", vote_by: "trustees" })).toBe("only a trust counts its trustees' votes; Alder Automotive isn't one");
   });
 });

@@ -3,6 +3,9 @@
 // those he knows; his Alder Automotive page reads "Mechanic since 12 Jan 2026, Marcus Delgado runs
 // it", lists Marcus (Owner), Danny (Mechanic) and him (Mechanic), and has no money section, while
 // Marcus's has money, ownership and taxes; a member Jordan can't see is counted under an opaque id.
+// Through control (DESIGN §29.3): a subsidiary Marcus runs through Alder Automotive is listed where
+// he belongs, nested under it (`under`, `via`), its page saying what it runs through, while a secret
+// one is counted below the shop's page, never named.
 
 import { describe, expect, test } from "bun:test";
 import { opaqueId } from "../../../src/shared/hash";
@@ -117,5 +120,25 @@ describe("the Orgs views on Port Alder", () => {
       ["pov", "Leader"],
     ]);
     expect(view.you.powers).toHaveLength(21);
+  });
+});
+
+describe("organizations held through control", () => {
+  test("Marcus's home nests the shop's subsidiary under it; its page runs through the shop; a secret one is counted, not named", () => {
+    const company = (id: string, name: string, secret = false): WorldDoc["entities"][string] => ({ id, kind: "business", name, tier: "background", fields: { owners: [{ party: SHOP, role: "owner", share: 100 }], structure: "llc" }, relations: [], ...(secret ? { visibility: "secret" as const } : {}) });
+    const w = portAlder("marcus_delgado", (world) => {
+      world.entities.alder_towing = company("alder_towing", "Alder Towing");
+      world.entities.alder_offshore = company("alder_offshore", "Alder Offshore", true);
+    });
+    const home = panel(w, "orgs.list") as unknown as OrgListView;
+    const towing = home.belong.find((o) => o.id === "alder_towing");
+    expect(towing).toMatchObject({ under: SHOP, via: { id: SHOP, name: "Alder Automotive", type: "company", share: 100, votes: 100, controlled: true, role: "owner", position: null, delegation: false } });
+    expect(home.belong.find((o) => o.id === SHOP)?.under).toBeNull();
+    expect([...home.belong, ...home.known].map((o) => o.id)).not.toContain("alder_offshore");
+    expect(page(w, "alder_towing").you.through).toEqual([{ id: SHOP, name: "Alder Automotive" }]);
+    const shop = page(w, SHOP);
+    expect(shop.below.map((l) => l.id)).toEqual(["alder_towing"]);
+    expect(shop.belowHidden).toBe(1);
+    expect(JSON.stringify(shop)).not.toContain("Offshore");
   });
 });

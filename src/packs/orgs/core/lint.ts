@@ -166,22 +166,27 @@ function exemptRow(world: WorldDoc, id: EntityId): Record<string, JsonValue> | u
 
 /**
  * A pass-through company (any structure but a C corporation's) whose owners include an organization
- * that is neither a person nor a company (a household, a group, a trust, the party): its profit, and
+ * that is neither a person, a company nor a trust (a household, a group, the party): its profit, and
  * what companies under it pass up, reaches that holder, and no one pays income tax on that share
- * (§3.11). A company holder passes it on up, or as a C corporation pays it, so it is told where it
- * holds; an exempt holder, or an exempt company, keeps it untaxed by its exemption (Phase 5).
+ * (§3.11). A company holder passes it on up, or as a C corporation pays it, and a trust pays it (its
+ * brackets on what it keeps, or its settlor's where it is a grantor trust, DESIGN §26.3), so it is
+ * told where it holds; an exempt holder, or an exempt company, keeps it untaxed by its exemption
+ * (Phase 5).
  */
 function untaxedIssues(world: WorldDoc, ctx: ReadContext): LintIssue[] {
   const out: LintIssue[] = [];
   for (const id of Object.keys(world.entities).sort()) {
     const e = own(world.entities, id);
     if (!e || orgTypeOf(ctx, id) !== "company" || e.fields.structure === "c_corp" || exemptRow(world, id)) continue;
-    const untaxed = Object.entries(worthShares(ownersIn(e.fields))).filter(([holder, share]) => share > 0 && holder !== id && orgTypeOf(ctx, holder) !== null && orgTypeOf(ctx, holder) !== "company" && !exemptRow(world, holder));
+    const untaxed = Object.entries(worthShares(ownersIn(e.fields))).filter(([holder, share]) => {
+      const type = orgTypeOf(ctx, holder);
+      return share > 0 && holder !== id && type !== null && type !== "company" && type !== "trust" && !exemptRow(world, holder);
+    });
     if (untaxed.length === 0) continue;
     const names = untaxed.map(([holder, share]) => `${nameOf(world, holder)} (${Math.round(share * 100) / 100}%)`);
     const who = names.length === 1 ? names[0] : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
     const one = names.length === 1;
-    out.push({ severity: "warning", code: ORG_LINT.profitUntaxed, path: `entities.${id}.fields.owners`, message: `${e.name} passes its profit through to its owners, and ${who} ${one ? "pays" : "pay"} no income tax on ${one ? "its share" : "their shares"}, so no one does: only people and C corporations pay it.` });
+    out.push({ severity: "warning", code: ORG_LINT.profitUntaxed, path: `entities.${id}.fields.owners`, message: `${e.name} passes its profit through to its owners, and ${who} ${one ? "pays" : "pay"} no income tax on ${one ? "its share" : "their shares"}, so no one does: only people, trusts and C corporations pay it.` });
   }
   return out;
 }

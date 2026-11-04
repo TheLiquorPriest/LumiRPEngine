@@ -4,7 +4,7 @@
 // destination with its sub-tabs and sheet stack, GM's gate, Build's route and Settings' page.
 
 import { createContext } from "preact";
-import { useContext } from "preact/hooks";
+import { useContext, useEffect, useState } from "preact/hooks";
 import type { SpindleComponentsHelper } from "lumiverse-spindle-types";
 import type { AgentsView } from "../shared/agents";
 import type { ChatId, MessageId, PanelId, RevisionId, WorldId } from "../shared/ids";
@@ -279,6 +279,27 @@ export function useApp(): App {
 
 export function useView(): StateView | null {
   return useSelect(useApp().sync, (state) => state.view);
+}
+
+/** The chat's world, as its revision has it, with the packs' kinds: what Build's forms read in GM mode (places, owners, fields, a preview's calendar and tables); null until it is read. */
+export function useChatWorld(send: Send): WorldDoc | null {
+  const view = useView();
+  const worldId = view?.worldId ?? null;
+  const revision = view?.revision ?? null;
+  const [doc, setDoc] = useState<WorldDoc | null>(null);
+  useEffect(() => {
+    if (worldId === null) return;
+    let live = true;
+    void send({ type: "lre.world", op: "get", worldId, ...(revision ? { revision } : {}) }).then((m) => {
+      if (!live || m.type !== "lre.result" || m.request !== "lre.world" || !m.body.world) return;
+      const world = m.body.world;
+      setDoc({ ...world, kinds: { ...m.body.packKinds, ...world.kinds } });
+    });
+    return () => {
+      live = false;
+    };
+  }, [worldId, revision]);
+  return doc;
 }
 
 export function useUi<S>(select: (state: UiState) => S): S {

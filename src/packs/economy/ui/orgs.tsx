@@ -11,18 +11,19 @@
 //   with Raise and Let go. Hiring is People's Hire someone (the orgs pack's).
 // Ownership and Taxes are `ownership.tsx` and `taxes.tsx`. Every control is the POV's in-world
 // action, as their own role on the business allows it, as it was from Money. In GM → Orgs each draws
-// the GM's version (`gm`): Money as GM → Money draws a party, with the GM's edits, and the rest as
-// they read.
+// the GM's version (`gm`): Money as GM → Money draws a party, with the GM's edits, then its revenue
+// streams in the economy's editor (`revenue.tsx`), and the rest as they read.
 
 import { useEffect, useId, useState } from "preact/hooks";
 import { FINANCE_ACTIONS } from "../../../shared/finance";
 import { overLimit, powerCovers, type OrgLimits } from "../../../shared/org";
 import type { OrgView } from "../../../shared/org-view";
+import type { RevenueStreamView } from "../../../shared/revenue";
 import type { PaletteEntry, PaletteView } from "../../../shared/state-view";
 import { DEFAULT_CURRENCY, formatMoney, type WorldCurrency } from "../../../shared/world";
-import { useApp, type SheetRoute } from "../../../frontend/app";
+import { useApp, useChatWorld, type SheetRoute } from "../../../frontend/app";
 import { Button, Empty, JsonView, List, ListRow } from "../../../frontend/components";
-import type { OrgGmTabProps, OrgTabProps } from "../../../frontend/registry";
+import type { GmSectionProps, OrgGmTabProps, OrgTabProps } from "../../../frontend/registry";
 import { paletteRequest } from "../../../frontend/requests";
 import { decodeFinanceView, decodePayroll, type PayrollSection } from "./decode";
 import { ActionPage, AmountField, amountProblem, SelectField } from "./forms";
@@ -32,6 +33,7 @@ import { ALL_ACTIVITY, businessControls, type ActivityFilter, type MoneySegment 
 import { actionPage, Controls, detailPage, type Elsewhere, type HubNav } from "./nav";
 import { observeMoney, playElsewhere, usePlayerControls } from "./panel";
 import { amountOf } from "./requests";
+import { gmStreamDrafts, RevenueEditor, RevenueStreams, revenueEditOps, revenueSpawnOps } from "./revenue";
 import { routeFrom } from "./routes";
 import { rate } from "./taxes";
 import { JobListRow } from "./work";
@@ -161,16 +163,49 @@ export function OrgMoneyTab(props: OrgTabProps) {
   return (
     <div class="lre-money-root" data-lre-org-money={props.org.id}>
       <OrgMoney view={view} reader={reader} nav={nav} currency={props.state.currency ?? DEFAULT_CURRENCY} segment={segment} onSegment={setSegment} filter={filter} onFilter={setFilter} now={props.state.hud?.clock.minutes ?? null} panelId={panelId} {...(payAs ? { onPayAs: () => setPaying({ to: "", amount: "" }) } : {})} />
+      <RevenueStreams streams={view.streams ?? []} currency={props.state.currency ?? DEFAULT_CURRENCY} />
     </div>
   );
 }
 
-/** Money in GM → Orgs: the organization's money as GM → Money draws a party, with the GM's edits, its pages stacked in the page. */
+/** Money in GM → Orgs: the organization's money as GM → Money draws a party, with the GM's edits, its pages stacked in the page; then its revenue streams in the economy's editor. */
 export function GmOrgMoneyTab(props: OrgGmTabProps) {
   const { gm } = props;
   const view = gm.gm.money.find((m) => m.party === props.org.id) ?? decodeFinanceView(props.section);
   if (!view) return <JsonView value={props.section} />;
-  return <GmHub key={view.party} view={view} controls={{ mode: "gm", busy: gm.busy, currency: gm.currency, edit: gm.edit, gm: gm.gm }} />;
+  return (
+    <>
+      <GmHub key={view.party} view={view} controls={{ mode: "gm", busy: gm.busy, currency: gm.currency, edit: gm.edit, gm: gm.gm }} />
+      <GmOrgRevenue org={props.org} streams={view.streams ?? []} gm={gm} />
+    </>
+  );
+}
+
+/**
+ * The organization's revenue streams in GM → Orgs → Money: the economy's editor over the streams its
+ * money view lists, each as the GM view holds it, previewed on the chat's world; a new one is
+ * spawned, a change set, and Remove takes it out of the world, each one GM edit with its Undo. Until
+ * the world is read, the streams as Play lists them.
+ */
+function GmOrgRevenue(props: { org: OrgView; streams: readonly RevenueStreamView[]; gm: GmSectionProps }) {
+  const { gm, streams } = props;
+  const world = useChatWorld(gm.send);
+  if (!world) return <RevenueStreams streams={streams} currency={gm.currency} />;
+  return (
+    <RevenueEditor
+      world={world}
+      earner={{ id: props.org.id, name: props.org.name }}
+      streams={gmStreamDrafts(gm.gm, streams)}
+      views={streams}
+      taken={new Set(gm.gm.entities.map((e) => e.id))}
+      saving={gm.busy}
+      save={(draft, was) => {
+        const ops = was === null ? revenueSpawnOps(draft) : revenueEditOps(was, draft);
+        if (ops.length > 0) void gm.edit(ops);
+      }}
+      remove={(id) => void gm.edit([{ op: "despawn", entity: id }])}
+    />
+  );
 }
 
 // ---------------------------------------------------------------- Payroll

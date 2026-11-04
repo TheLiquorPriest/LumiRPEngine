@@ -32,6 +32,8 @@ export interface KitContext {
   readOnly: boolean;
   /** Runs one world's (or chat's) writes one at a time; the session's own, so a reload never reorders them. */
   serialize<T>(key: string, work: () => Promise<T>): Promise<T>;
+  /** How long a sandbox advance runs before it stops with a cursor: `McpOptions.sandboxBudgetMs`. A core from before it gives none, and the kit's default holds. */
+  sandboxBudgetMs?: number | null;
 }
 
 export interface AgentKit {
@@ -63,6 +65,8 @@ export interface McpOptions {
   base(): string;
   /** Each request's limit: null for none, undefined for the default. */
   timeoutMs: number | null | undefined;
+  /** `--sandbox-budget` (or LRE_SANDBOX_BUDGET): how long a sandbox advance runs before it stops with a cursor; null for no limit, undefined for the default. */
+  sandboxBudgetMs?: number | null;
 }
 
 /** A module's kit, or why it has none this core can use. */

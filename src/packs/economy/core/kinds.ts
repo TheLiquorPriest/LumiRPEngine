@@ -1,11 +1,12 @@
 // The kinds the money foundation registers (DESIGN §25.1): accounts, payment cards, flows and the
-// parties beyond people (businesses and trusts; a household is the relationships pack's group kind),
-// plus the record kinds whose shapes the finance contract fixes for the work and holdings modules
-// (jobs, holdings, property). Every money field is declared here, so Build forms, the GM view's
-// edits and lint read it; the modules add their own through `FinanceRegistry.fields`.
+// parties beyond people (businesses and trusts, each a kind of group; a household is the
+// relationships pack's group kind), plus the record kinds whose shapes the finance contract fixes
+// for the work and holdings modules (jobs, holdings, property). Every money field is declared here,
+// so Build forms, the GM view's edits and lint read it; the modules add their own through
+// `FinanceRegistry.fields`.
 
 import type { FieldDef, KindDef } from "../../../shared/world";
-import { ORG_FIELDS } from "../../../shared/org";
+import { NONPROFIT_STRUCTURE, TRUST_FIELDS } from "../../../shared/org";
 import { ACCOUNT_CLASSES, ACCOUNT_STATUSES, AUTOPAY_MODES, CARD_NETWORKS, CARD_STATES, FLOW_KINDS, FLOW_SHORTFALLS, FLOW_STATUSES, INVOICE_STATES, OVERDRAFT_POLICIES, PAY_BASES, PAY_CHOICES } from "../../../shared/finance";
 import type { FinanceKind } from "./module";
 
@@ -93,7 +94,7 @@ const BUSINESS_FIELDS: Record<string, FieldDef> = {
   operating_account: { type: "ref", label: "Operating account", ref: "account", domain: "money", level: 3 },
   industry: { type: "text", label: "Industry", domain: "money", level: 3 },
   margin_pct: { type: "number", label: "Margin %", min: 0, max: 100, domain: "money", level: 4 },
-  structure: { type: "enum", label: "Structure", values: ["sole_proprietorship", "partnership", "llc", "s_corp", "c_corp"], domain: "money", level: 4 },
+  structure: { type: "enum", label: "Structure", values: ["sole_proprietorship", "partnership", "llc", "s_corp", "c_corp", NONPROFIT_STRUCTURE], domain: "money", level: 4 },
   invoice_days: { type: "number", label: "Invoice terms (days)", min: 0, domain: "money", level: 3 },
   late_fee_pct: { type: "number", label: "Late fee %", min: 0, domain: "money", level: 4 },
   distribution_pct: { type: "number", label: "Profit paid out %", min: 0, max: 100, domain: "money", level: 4 },
@@ -182,8 +183,8 @@ const BASE: Record<FinanceKind, Omit<KindDef, "fields"> & { fields: Record<strin
   account: { id: "account", label: "Account", pack: "economy", fields: ACCOUNT_FIELDS },
   card: { id: "card", label: "Payment card", pack: "economy", fields: CARD_FIELDS },
   flow: { id: "flow", label: "Money flow", pack: "economy", fields: FLOW_FIELDS },
-  // A trust is an organization but no group (ORG-SPEC §3.1): it has every organization's fields of its own.
-  trust: { id: "trust", label: "Trust", extends: "thing", pack: "economy", fields: { owners: OWNERS, ...ORG_FIELDS } },
+  // A trust is a group (ORG-SPEC §3.1; DESIGN §29.1), as a business is: every organization's fields, officers and directors by `member_of`, and its own terms; its type stays its own (`orgTypeOf`), and what reads groups leaves trusts out as it does companies.
+  trust: { id: "trust", label: "Trust", extends: "group", pack: "economy", fields: { owners: OWNERS, ...TRUST_FIELDS } },
   // A business is a group (ORG-SPEC §3.1): a company, whose owners and staff are its members.
   business: { id: "business", label: "Business", extends: "group", pack: "economy", fields: BUSINESS_FIELDS },
   job: { id: "job", label: "Job", pack: "economy", fields: JOB_FIELDS },

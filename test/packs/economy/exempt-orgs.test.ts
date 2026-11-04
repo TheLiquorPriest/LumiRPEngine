@@ -24,7 +24,9 @@ import { createRng } from "../../../src/engine/rng";
 import type { WorldState } from "../../../src/engine/state";
 import { runTimelapse } from "../../../src/engine/time";
 import { Working } from "../../../src/engine/working";
-import { donationsGiven, donationsReceived } from "../../../src/packs/economy/core/exempt";
+import { donationsGiven, donationsReceived, foundationGifts } from "../../../src/packs/economy/core/exempt";
+import { closedYear } from "../../../src/packs/economy/core/year-close";
+import * as PA from "./tax-world";
 import { ORG_LINTS } from "../../../src/packs/orgs/core/lint";
 import { orgHistory } from "../../../src/packs/orgs/core/log";
 import { buildOrgView } from "../../../src/packs/orgs/core/view";
@@ -195,5 +197,57 @@ describe("exempt organizations: the tax_status op", () => {
     expect(run({ do: "tax_status", org: HOUSEHOLD, status: "charity" })).toContain("can't hold a tax exemption");
     expect(run({ do: "tax_status", org: CLUB })).toBe("malformed");
     expect(parseOrgOp({ do: "consolidate", org: SHOP, elect: "yes" })).toBeNull();
+  });
+});
+
+describe("a private foundation (§26.3)", () => {
+  const FOUNDATION = "harbor_foundation";
+  /** The Harbor Foundation, Jordan a member, with $1,000,000 and $20,000 of interest this year. */
+  function foundation(): Working {
+    const w = PA.portAlder((world) => {
+      world.entities[FOUNDATION] = org(FOUNDATION, "Harbor Foundation", { tax_exempt: "private_foundation" });
+      world.entities.acct_foundation = bank("acct_foundation", FOUNDATION);
+      const pov = world.entities[JORDAN]!;
+      world.entities[JORDAN] = { ...pov, relations: [...pov.relations, { type: "member_of", to: FOUNDATION, fields: {} }] };
+    });
+    PA.income(w, "acct_foundation", 100_000_000, "transfer");
+    PA.income(w, "acct_foundation", 2_000_000, "interest");
+    return w;
+  }
+  const alerts = (w: Working): string[] => (w.ctx.query("economy.finance")(w.ctx, FOUNDATION, false).overview?.alerts ?? []).map((a) => a.text);
+
+  test("its payout is 5% of its assets less its excise of 1.39% on its investment income, paid 15 May; grants cover last year's shortfall first, and what's left is taxed 30%", () => {
+    const jan = PA.closeYear(foundation(), 2026);
+    const rec = closedYear(jan.state, FOUNDATION, 2026);
+    const nii = Number(rec?.nii);
+    expect(nii).toBeGreaterThanOrEqual(2_000_000);
+    expect(rec).toMatchObject({ excise: Math.round(nii * 0.0139), grants: 0, toPrior: 0, undistributed: 0, tax: 0 });
+    expect(rec?.payout).toBe(Math.round(Number(rec?.assets) * 0.05) - Number(rec?.excise));
+    expect(rec?.shortfall).toBe(rec?.payout);
+    expect(alerts(jan).join(" ")).toContain("fall due on 15 May");
+    expect(alerts(jan).join(" ")).toContain("more by 31 Dec 2027 to meet 2026's payout");
+    // 15 May 2027 is a Saturday: the return rolls to Monday the 17th.
+    const may = PA.at(jan, "2027-05-13T08:00");
+    PA.lapseTo(may, "2027-05-18T12:00");
+    expect(posts(may, /^Foundation excise tax, 2026$/)[0]?.lines[1]).toEqual({ account: "economy.external:tax:federal", amount: Number(rec?.excise) });
+    // Grants in 2027, to the church and to a person, cover 2026's shortfall first; a person can't grant as a foundation does.
+    expect(PA.gm(may, "economy.donate", { to: CHURCH, cents: 3_000_000, from: FOUNDATION })).toBe("");
+    expect(PA.gm(may, "economy.donate", { to: MARCUS, cents: 100_000, from: FOUNDATION })).toBe("");
+    expect(PA.gm(may, "economy.donate", { to: MARCUS, cents: 1_000, from: JORDAN })).toContain("only an exempt organization grants to someone");
+    const next = PA.closeYear(may, 2027);
+    const later = closedYear(next.state, FOUNDATION, 2027);
+    const left = Number(rec?.shortfall) - 3_100_000;
+    expect(later).toMatchObject({ grants: 3_100_000, toPrior: 3_100_000, undistributed: left, tax: Math.round(left * 0.3) });
+    expect(taxesOf(next, FOUNDATION)).toMatchObject({ foundation: { payoutPct: 5, excisePct: 1.39, last: { year: 2027, undistributed: left }, due: Number(later?.excise) + Math.round(left * 0.3) } });
+  });
+
+  test("a person's gifts to it are deductible up to 30% of their income; the donation is marked a foundation's", () => {
+    const w = foundation();
+    yearOfPay(w);
+    expect(why(act(w, JORDAN, "donate", { to: FOUNDATION, amount: 5_000 }))).toBe("");
+    expect(foundationGifts(w.state, JORDAN, 2026)).toBe(5_000);
+    expect(w.apply({ type: "economy.donation", data: { donor: JORDAN, org: FOUNDATION, cents: 3_000_000, year: 2026, deductible: true, pf: true } })).toBeNull();
+    // $30,050 given, $18,000 deducted: 30% of $60,000.
+    expect(taxable(w)).toBe(6_000_000 - 1_800_000);
   });
 });

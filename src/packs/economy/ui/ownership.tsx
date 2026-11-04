@@ -287,6 +287,41 @@ function SubsidiaryForm(props: { org: OrgView; section: OwnershipView; currency:
   );
 }
 
+/** Settle a trust as the company (`org_found` with `type: "trust"` and `as`): its name, what the company puts in (none is fine) from its own account, what it is for and whether it may take it back; the company is its first trustee and beneficiary. */
+function SettleForm(props: { org: OrgView; section: OwnershipView; currency: WorldCurrency; act: OwnershipAct }) {
+  const acts = props.section.acts;
+  const [name, setName] = useState("");
+  const [amount, setAmount] = useState("");
+  const [from, setFrom] = useState("");
+  const [purpose, setPurpose] = useState("");
+  const [revocable, setRevocable] = useState(false);
+  const ids = { name: useId(), purpose: useId(), revocable: useId() };
+  const cents = amount.trim() === "" ? 0 : parseMoneyInput(amount, props.currency);
+  const source = from || acts?.sources[0]?.id || "";
+  const ok = acts?.found === null && name.trim() !== "" && cents !== null && cents >= 0 && (cents === 0 || source !== "");
+  return (
+    <>
+      <Field label="Its name" for={ids.name}>
+        <input id={ids.name} class="lre-input" value={name} maxLength={60} placeholder="Alder Employees' Trust" onInput={(event) => setName(event.currentTarget.value)} />
+      </Field>
+      <Field label="Put in" help={`Optional, from ${props.org.name}'s own money. ${props.org.name} is its first trustee and beneficiary.`}>
+        <MoneyInput currency={props.currency} value={amount} label="Put in" onInput={setAmount} />
+      </Field>
+      {(acts?.sources.length ?? 0) > 1 ? <PickField label="From" value={source} options={(acts?.sources ?? []).map((s) => ({ value: s.id, label: `${s.name} (${s.balance})` }))} empty="Its first account" onChange={setFrom} /> : null}
+      <Field label="What it is for" for={ids.purpose}>
+        <input id={ids.purpose} class="lre-input" value={purpose} maxLength={200} onInput={(event) => setPurpose(event.currentTarget.value)} />
+      </Field>
+      <label class="lre-field" for={ids.revocable}>
+        <span>
+          <input id={ids.revocable} type="checkbox" checked={revocable} onChange={(event) => setRevocable(event.currentTarget.checked)} /> Revocable: {props.org.name} may take it back
+        </span>
+      </label>
+      <Button variant="primary" disabled={!ok} onClick={() => props.act(ORG_ACTIONS.found, { type: "trust", name: name.trim(), ...(cents !== null && cents > 0 ? { amount: cents, from: source } : {}), ...(purpose.trim() !== "" ? { purpose: purpose.trim() } : {}), ...(revocable ? { revocable: true } : {}), as: props.org.id })}>
+        Settle it
+      </Button>
+    </>
+  );
+}
 /** Change structure: one of the five; its taxes follow from the next estimated-tax period. */
 function StructureForm(props: { org: OrgView; section: OwnershipView; why: string | null; vote?: boolean; act: OwnershipAct }) {
   const [structure, setStructure] = useState("");
@@ -491,6 +526,9 @@ export function OrgOwnership(props: { org: OrgView; section: OwnershipView; read
               </Form>
               <Form summary="Start a subsidiary" why={acts.found}>
                 <SubsidiaryForm org={org} section={section} currency={currency} act={act} />
+              </Form>
+              <Form summary="Settle a trust" why={acts.found}>
+                <SettleForm org={org} section={section} currency={currency} act={act} />
               </Form>
               <Form summary="Change structure" why={acts.restructure} vote={acts.voteRestructure === true}>
                 <StructureForm org={org} section={section} why={acts.restructure} vote={acts.voteRestructure === true} act={act} />

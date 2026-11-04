@@ -1,20 +1,23 @@
 // An organization's People (ORG-SPEC §4.4): at the top, by power, Hire someone (`staff.hire`),
-// Admit a member (`members.admit`) and a trust's Pay out (`money.payout`); the chart, each position with its seats filled of total and
-// whom it reports to, its holders under it; then staff without a position, members without one (the
-// party's by tier) and the owners with their share, which link to a company's Ownership; and how
-// many in it the reader doesn't know. A row is a name, a title and here or away, and opens the
-// person's member sheet (`org_edit`), with what the reader may do there; in GM → Orgs, the GM's.
+// Admit a member (`members.admit`; on a trust, Add an officer or director) and a trust's Pay out
+// (`money.payout`); each position with its seats filled of total and whom it reports to, its holders
+// under it (the Chart tab draws them as a tree); then staff without a position, members without one
+// (Board and officers on a company or a trust, the party's by tier) and the owners with their share,
+// which link to a company's Ownership; and how many in it the reader doesn't know. A row is a name
+// (an organization seated or belonging here by its type's icon), a title and here or away, and
+// opens the member sheet (`org_edit`), with what the reader may do there; in GM → Orgs, the GM's.
 
 import type { SheetRoute } from "../../../frontend/app";
 import { Button, Empty, List, ListRow, Section } from "../../../frontend/components";
 import type { OrgPersonView, OrgView } from "../../../shared/org-view";
 import { isPartyTier, PARTY_TIERS } from "../../../shared/party";
+import { admitLabel } from "./chart-model";
 import { orgEditRoute, peopleControls } from "./edit";
-import { count, seatWords, TIER_HEADINGS } from "./words";
+import { count, seatWords, TIER_HEADINGS, TYPE_ICON } from "./words";
 
 /** Someone on the page as a row: their title (or what `subtitle` says), Here or Away (or `value`); it opens their member sheet. */
 function memberRow(org: OrgView, p: OrgPersonView, subtitle: string | undefined, value: string | undefined, open: (route: SheetRoute) => void) {
-  return <ListRow key={p.id} id={p.id} icon="user" title={p.you ? `${p.name} (you)` : p.name} subtitle={subtitle} value={value ?? (p.you ? undefined : p.here ? "Here" : "Away")} valueTone="muted" chevron onClick={() => open(orgEditRoute(org.id, "member", p.id))} />;
+  return <ListRow key={p.id} id={p.id} icon={p.org !== null ? TYPE_ICON[p.org] : "user"} title={p.you ? `${p.name} (you)` : p.name} subtitle={subtitle} value={value ?? (p.you || p.org !== null ? undefined : p.here ? "Here" : "Away")} valueTone="muted" chevron onClick={() => open(orgEditRoute(org.id, "member", p.id))} />;
 }
 
 /** `ownership` switches the page to its Ownership tab, when it has one. */
@@ -45,7 +48,7 @@ export function OrgPeople(props: { org: OrgView; ownership: (() => void) | null;
         ) : null}
         {can.admit ? (
           <Button icon="user-plus" block onClick={() => props.open(orgEditRoute(org.id, "admit"))}>
-            Admit a member
+            {admitLabel(org)}
           </Button>
         ) : null}
         {can.payout ? (
@@ -95,7 +98,7 @@ export function OrgPeople(props: { org: OrgView; ownership: (() => void) | null;
           )
         : group(
             "members",
-            org.type === "company" ? "Board and officers" : "Members",
+            org.type === "company" || org.type === "trust" ? "Board and officers" : "Members",
             unplaced.filter((p) => p.hows.some((h) => h === "member" || h === "leader" || isPartyTier(h))),
           )}
       {owners.length > 0 ? (

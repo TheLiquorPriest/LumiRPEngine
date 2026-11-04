@@ -17,6 +17,7 @@
 
 import type { EntityId, Level } from "./ids";
 import { hasOwn, type JsonObject } from "./json";
+import type { RevenueStreamView } from "./revenue";
 
 // ---------------------------------------------------------------- account classes
 
@@ -36,6 +37,8 @@ export const ACCOUNT_CLASSES = [
   "mortgage",
   "brokerage",
   "retirement",
+  /** A loan its holder made to another party (an intercompany loan): what the borrower owes them. */
+  "note",
 ] as const;
 export type AccountClass = (typeof ACCOUNT_CLASSES)[number];
 
@@ -64,9 +67,11 @@ export interface ClassTraits {
   earns: boolean;
   /** Its money can't be moved out before its term (a CD) or retirement, except by its own module. */
   locked: boolean;
+  /** Money owed to its holder (a loan they made): an asset, but never cash, so nothing pays from it or into it but the loan it is owed by. */
+  receivable: boolean;
 }
 
-const traits = (label: string, t: Partial<Omit<ClassTraits, "label">>): ClassTraits => ({ label, cash: false, asset: false, liability: false, pays: false, depositRank: null, transactional: false, revolving: false, installment: false, investment: false, earns: false, locked: false, ...t });
+const traits = (label: string, t: Partial<Omit<ClassTraits, "label">>): ClassTraits => ({ label, cash: false, asset: false, liability: false, pays: false, depositRank: null, transactional: false, revolving: false, installment: false, investment: false, earns: false, locked: false, receivable: false, ...t });
 
 export const CLASS_TRAITS: Readonly<Record<AccountClass, ClassTraits>> = Object.freeze({
   cash: traits("Cash", { cash: true, asset: true, pays: true, depositRank: 1 }),
@@ -84,6 +89,7 @@ export const CLASS_TRAITS: Readonly<Record<AccountClass, ClassTraits>> = Object.
   mortgage: traits("Mortgage", { liability: true, installment: true }),
   brokerage: traits("Brokerage", { asset: true, depositRank: 5, investment: true }),
   retirement: traits("Retirement", { asset: true, investment: true, locked: true }),
+  note: traits("Loan made", { asset: true, receivable: true, locked: true }),
 });
 
 export function isAccountClass(v: unknown): v is AccountClass {
@@ -1247,6 +1253,7 @@ export const FINANCE_EVENTS = {
   open: "economy.open",
   status: "economy.status",
   accrue: "economy.accrue",
+  depreciate: "economy.depreciate",
 } as const;
 
 /** `economy.open`: accounts whose opening balances have posted (a joint account opens once, with whichever holder's money opens first). */
@@ -1635,13 +1642,15 @@ export interface BusinessView {
   taxes: { label: string; cents: number; due: string | null }[];
   /** Where the viewer's share of its profit goes; null when they hold no share of its worth. */
   route: DistributionRoute | null;
+  /** Its statements (§26.5): income, cash flow and balance sheet, from Money 3; the view fills them once the modules' sections are in. */
+  statements?: StatementsView;
 }
 
 /** A company's structures (DESIGN §26.3) as people say them. */
-export const STRUCTURE_LABELS: Readonly<Record<string, string>> = Object.freeze({ sole_proprietorship: "Sole proprietorship", partnership: "Partnership", llc: "LLC", s_corp: "S corporation", c_corp: "C corporation" });
+export const STRUCTURE_LABELS: Readonly<Record<string, string>> = Object.freeze({ sole_proprietorship: "Sole proprietorship", partnership: "Partnership", llc: "LLC", s_corp: "S corporation", c_corp: "C corporation", nonprofit: "Nonprofit" });
 
 /** A company's structures as a sentence names one ("became an LLC", "taxed as a C corporation"). */
-export const STRUCTURE_WORDS: Readonly<Record<string, string>> = Object.freeze({ sole_proprietorship: "a sole proprietorship", partnership: "a partnership", llc: "an LLC", s_corp: "an S corporation", c_corp: "a C corporation" });
+export const STRUCTURE_WORDS: Readonly<Record<string, string>> = Object.freeze({ sole_proprietorship: "a sole proprietorship", partnership: "a partnership", llc: "an LLC", s_corp: "an S corporation", c_corp: "a C corporation", nonprofit: "a nonprofit" });
 
 /** A company's share class (ORG-SPEC §3.10): classes differ only in the votes a unit carries. */
 export interface ShareClass {
@@ -2076,6 +2085,10 @@ export interface FinanceView {
   paysFor: { from: EntityId; to: EntityId[] }[];
   /** The keys (`payeeKey`) a typed payee is the party's own by: their id's and name's, and their household's where the viewer can see it. */
   ownKeys: string[];
+  /** The party's own statements (§26.5) from Money 3: a person's Income and spending, an organization's books. */
+  statements?: StatementsView;
+  /** Revenue streams the party earns (shared/revenue.ts). */
+  streams?: RevenueStreamView[];
 }
 
 /** The plain-language money summary a character's mind reads (`economy.summary`). */
@@ -2087,6 +2100,181 @@ export interface MoneySummary {
   spendable: number | null;
   /** Money owed that's due or past due soon. */
   pressing: { label: string; cents: number; at: string }[];
+}
+
+// ---------------------------------------------------------------- statements and depreciation (DESIGN §26.5)
+
+/**
+ * How an organization's assets lose value in its books: `none`, so what its projects build is
+ * expensed as it is paid and its EBITDA is its operating income; or `straight_line`, where a cost
+ * its projects capitalize (`capex`) is spread over the asset's life and a mineral interest's cost is
+ * depleted by what it produces, one `economy.depreciate` per asset a month. The world's
+ * `packs.economy.config.depreciation` sets it (`none` when unset); an organization's own
+ * `depreciation` field overrides it.
+ */
+export const DEPRECIATION_METHODS = ["none", "straight_line"] as const;
+export type DepreciationMethod = (typeof DEPRECIATION_METHODS)[number];
+export const DEPRECIATION_LABELS: Readonly<Record<DepreciationMethod, string>> = Object.freeze({ none: "None: costs are expensed", straight_line: "Straight-line, with cost depletion" });
+
+/** Where an amount stands in an income statement: revenue, cost of revenue, an operating expense, interest paid, income from what is held, income tax; `none` is in no line (money moved, borrowed, invested, put right). */
+export type StatementClass = "revenue" | "cogs" | "opex" | "interest" | "investment" | "income_tax" | "none";
+/** Where an amount of cash stands in a cash-flow statement: one of its four sections, or apart from them (a transfer between the party's own accounts, a correction, an opening balance). */
+export type CashSection = "operating" | "investing" | "financing" | "owners" | "transfer" | "correction" | "opening";
+export const CASH_SECTIONS: readonly CashSection[] = ["operating", "investing", "financing", "owners"];
+
+/** A journal category's place in the statements: its words, its class for money in and for money out, and its cash-flow section. */
+export interface StatementCategory {
+  label: string;
+  /** Its words for money in, where they differ ("Pay" beside "Payroll"). */
+  inLabel?: string;
+  in: StatementClass;
+  out: StatementClass;
+  cash: CashSection;
+}
+
+const sc = (label: string, inClass: StatementClass, outClass: StatementClass, cash: CashSection, inLabel?: string): StatementCategory => ({ label, in: inClass, out: outClass, cash, ...(inLabel !== undefined ? { inLabel } : {}) });
+
+/**
+ * The category-class table: every journal category the statements place, the work, holdings,
+ * revenue, projects and tax modules' included. A category it doesn't list is revenue as money in
+ * and an operating expense as money out, operating cash either way (`statementCategory`).
+ */
+export const STATEMENT_CATEGORIES: Readonly<Record<string, StatementCategory>> = Object.freeze({
+  sales: sc("Sales", "revenue", "revenue", "operating"),
+  invoice: sc("Invoices", "revenue", "opex", "operating"),
+  royalties: sc("Royalties", "revenue", "revenue", "operating"),
+  fee_income: sc("Fees earned", "revenue", "revenue", "operating"),
+  other_income: sc("Other income", "revenue", "revenue", "operating"),
+  rent: sc("Rent", "revenue", "opex", "operating"),
+  income: sc("Income", "revenue", "opex", "operating"),
+  allowance: sc("Allowance", "revenue", "opex", "operating"),
+  dues: sc("Dues", "revenue", "opex", "operating"),
+  rewards: sc("Rewards", "revenue", "none", "operating"),
+  donations: sc("Gifts and grants", "revenue", "opex", "operating"),
+  cogs: sc("Cost of goods", "cogs", "cogs", "operating"),
+  royalty_deductions: sc("Royalty deductions", "cogs", "cogs", "operating"),
+  payroll: sc("Payroll", "revenue", "opex", "operating", "Pay"),
+  project: sc("Project costs", "opex", "opex", "operating"),
+  severance_tax: sc("Severance tax", "opex", "opex", "operating"),
+  property_tax: sc("Property tax", "opex", "opex", "operating"),
+  excise_tax: sc("Excise tax", "opex", "opex", "operating"),
+  interest: sc("Interest", "investment", "interest", "operating"),
+  dividends: sc("Dividends", "investment", "opex", "operating"),
+  business_tax: sc("Income tax", "income_tax", "income_tax", "operating"),
+  taxes: sc("Income tax", "income_tax", "income_tax", "operating"),
+  sales_tax: sc("Sales tax", "none", "none", "operating"),
+  draw: sc("Owner's draws", "revenue", "none", "owners"),
+  distribution: sc("Distributions", "revenue", "none", "owners"),
+  share_out: sc("Shared out", "revenue", "none", "owners"),
+  investment: sc("Investments", "none", "none", "investing"),
+  property: sc("Property", "none", "none", "investing"),
+  capex: sc("Built assets", "none", "none", "investing"),
+  lending: sc("Loans made", "none", "none", "investing"),
+  loan: sc("Borrowing", "none", "none", "financing"),
+  cash_advance: sc("Cash advances", "none", "none", "financing"),
+  transfer: sc("Transfers", "none", "none", "transfer"),
+  opening: sc("Opening balances", "none", "none", "opening"),
+  correction: sc("Corrections", "none", "none", "correction"),
+});
+
+/** A journal category's place in the statements (`STATEMENT_CATEGORIES`), else revenue in, an operating expense out, operating cash. */
+export function statementCategory(category: string): StatementCategory {
+  return hasOwn(STATEMENT_CATEGORIES, category) ? (STATEMENT_CATEGORIES[category] as StatementCategory) : { label: category.replace(/_/g, " ").replace(/^./, (c) => c.toUpperCase()), in: "revenue", out: "opex", cash: "operating" };
+}
+
+/** A line of an income statement: its category's words, its place, and its amount (revenue positive, costs negative). */
+export interface IncomeLine {
+  category: string;
+  label: string;
+  class: Exclude<StatementClass, "none"> | "depreciation" | "depletion";
+  cents: number;
+}
+
+/**
+ * An income statement over a period: revenue, its cost and the gross profit, operating expenses,
+ * depreciation and depletion, operating income (EBIT) and EBITDA (EBIT before depreciation and
+ * depletion), interest paid, income from what is held, the profit before tax, income tax and net
+ * income, each a positive amount but the profits; margins in percent of revenue (null without
+ * revenue). A business's net income is its books' profit.
+ */
+export interface IncomeStatement {
+  revenue: number;
+  cogs: number;
+  grossProfit: number;
+  opex: number;
+  depreciation: number;
+  depletion: number;
+  operatingIncome: number;
+  ebitda: number;
+  interest: number;
+  investmentIncome: number;
+  preTax: number;
+  tax: number;
+  netIncome: number;
+  margins: { gross: number | null; operating: number | null; ebitda: number | null; net: number | null };
+  lines: IncomeLine[];
+}
+
+/** A line of a cash-flow statement: its section, its words and the cash it moved (in positive). */
+export interface CashLine {
+  section: Exclude<CashSection, "transfer">;
+  label: string;
+  cents: number;
+}
+
+/**
+ * Cash in and out over a period, of the accounts whose balances are money (every asset account but
+ * a loan made): operating, investing, financing and with the owners, then corrections and opening
+ * balances apart. They add up to the change in cash; a transfer between the party's own accounts
+ * moves none of them.
+ */
+export interface CashFlowStatement {
+  operating: number;
+  investing: number;
+  financing: number;
+  owners: number;
+  corrections: number;
+  openings: number;
+  change: number;
+  start: number;
+  end: number;
+  lines: CashLine[];
+}
+
+/** What a party has and owes now, by its net worth's parts: its equity is its net worth. */
+export interface BalanceSheet {
+  assets: number;
+  liabilities: number;
+  equity: number;
+  lines: WorthLine[];
+}
+
+export const STATEMENT_PERIODS = ["month", "last_month", "ytd", "twelve_months"] as const;
+export type StatementPeriodId = (typeof STATEMENT_PERIODS)[number];
+
+/** One period's statements: this month, last month, the year to date, the last twelve months (this one among them). */
+export interface StatementPeriod {
+  id: StatementPeriodId;
+  label: string;
+  /** `YYYY-MM` of its first month and its last. */
+  from: string;
+  to: string;
+  income: IncomeStatement;
+  cash: CashFlowStatement;
+}
+
+/**
+ * A party's statements (Books in Orgs; a person's Income and spending): `books` for an
+ * organization, `personal` for a person, whose revenue is their income and whose operating expenses
+ * are their spending. `depreciation` is the method its books follow, and `ebitdaNote` says why
+ * EBITDA equals operating income when nothing depreciates.
+ */
+export interface StatementsView {
+  kind: "books" | "personal";
+  depreciation: DepreciationMethod;
+  ebitdaNote: string | null;
+  periods: StatementPeriod[];
+  balance: BalanceSheet;
 }
 
 // ---------------------------------------------------------------- player actions
@@ -2138,4 +2326,6 @@ export const FINANCE_ACTIONS = {
   consolidate: "tax_consolidate",
   sharesList: "shares_list",
   sharesDelist: "shares_delist",
+  /** Lending money (§25.4); `lend` is the gear pack's, lending a thing. */
+  lend: "lend_money",
 } as const;

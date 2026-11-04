@@ -9,8 +9,10 @@
 // Default sends null, so the store reads the default back. Hook-free (`MainAgentPage`), so tests
 // press it without a DOM. Styles: styles/settings.ts.
 
-import type { AgentSettings, FinalReviewOnFail } from "../../shared/agent-settings";
-import { BUDGET_DEFS, defaultAgentSettings, FINAL_REVIEW_ON_FAIL, FINAL_REVIEW_ON_FAIL_LABELS, MAIN_AGENT_ROLE, MAIN_DEFS, mainBudget, PIPELINE_MODE_LABELS } from "../../shared/agent-settings";
+import type { AgentSettings, FinalReviewOnFail, FinalReviewScope } from "../../shared/agent-settings";
+import { BUDGET_DEFS, defaultAgentSettings, FINAL_REVIEW_ON_FAIL, FINAL_REVIEW_ON_FAIL_LABELS, FINAL_REVIEW_SCOPE_LABELS, FINAL_REVIEW_SCOPES, MAIN_AGENT_ROLE, MAIN_DEFS, mainBudget, PIPELINE_MODE_LABELS } from "../../shared/agent-settings";
+import { MAIN_STAGES, type MainStage, STAGE_MODE_LABELS, STAGE_MODES, STAGE_WORDS, type StageMode, stageRoles } from "../../shared/agent-pipeline";
+import { ROLE_LABEL } from "../../shared/agent-roles";
 import type { JsonObject } from "../../shared/json";
 import { MAIN_AGENT_PAGE } from "../../shared/main-agent-prompts";
 import type { PromptSettings } from "../../shared/prompts";
@@ -110,13 +112,22 @@ export function MainAgentPage(props: { agents: AgentSettings; timeouts: TimeoutS
       body: <NavRow id="pipeline" icon="branch" title={deciding ? "Decides each turn" : "Decides no turn: the pipeline is fixed"} subtitle={`Pipeline: ${PIPELINE_MODE_LABELS[agents.pipeline.mode]}. It keeps a session from turn to turn, which GM → Workspace shows.`} changed={0} onOpen={() => props.go({ page: "agents", sub: "pipeline" })} />,
     },
     {
+      id: "stages",
+      title: "Stages",
+      changed: MAIN_STAGES.filter((s) => m.stages[s] !== d.stages[s]).length,
+      body: <StagesRows agents={agents} busy={busy} set={set} />,
+    },
+    {
       id: "review",
       title: "Final review",
-      changed: (r.on !== dr.on ? 1 : 0) + (r.onFail !== dr.onFail ? 1 : 0) + (props.timeouts.finalReviewMs !== FINAL_REVIEW_MS ? 1 : 0) + ownChanged(r.budget, dr.budget),
+      changed: (r.on !== dr.on ? 1 : 0) + (r.onFail !== dr.onFail ? 1 : 0) + (r.scope !== dr.scope ? 1 : 0) + (props.timeouts.finalReviewMs !== FINAL_REVIEW_MS ? 1 : 0) + ownChanged(r.budget, dr.budget),
       body: (
         <div class="lre-set-rows" data-lre-main-setting="final-review">
           <SettingRow id="review-on" label="Review the narrator's prompt" bare changed={r.on !== dr.on} help="Before each reply of an agent chat, in either pipeline, it reviews the prompt the narrator gets against the world and the turn, and may fix it a line at a time. GM → Live shows each edit; a Re-narrate tells the same prompt again." reset={{ label: `Reset the final review to its default, ${dr.on ? "on" : "off"}`, to: dr.on ? "on" : "off", onClick: () => setReview({ on: null }) }} busy={busy}>
             <HostSwitch label="The main agent reviews the narrator's prompt before each reply" checked={r.on} disabled={busy} onChange={(on) => setReview({ on })} />
+          </SettingRow>
+          <SettingRow id="review-scope" label="What it is sent" changed={r.scope !== dr.scope} help={r.scope === "changed" ? `Only the parts of the narrator's prompt that changed since the last turn's review; on the rest, that review's edits are made again, and when nothing changed no review is sent.${agents.persist.on ? "" : " It takes effect while Smart persistence is on (Settings → Agents → Pipeline); until then every part is sent."}` : "Every part of the narrator's prompt, every turn."} reset={{ label: `Reset what the final review is sent to its default, ${FINAL_REVIEW_SCOPE_LABELS[dr.scope]}`, to: FINAL_REVIEW_SCOPE_LABELS[dr.scope], onClick: () => setReview({ scope: null }) }} busy={busy}>
+            <Seg<FinalReviewScope> label="What the final review is sent" value={r.scope} options={FINAL_REVIEW_SCOPES.map((value) => ({ value, label: FINAL_REVIEW_SCOPE_LABELS[value] }))} disabled={busy} onChange={(scope) => setReview({ scope })} />
           </SettingRow>
           <SettingRow id="review-fail" label="When the review fails" changed={r.onFail !== dr.onFail} help={`${FINAL_REVIEW_FAIL_HELP[r.onFail]} It fails when it runs out of time or budget, or its call fails.`} reset={{ label: `Reset what a failed review does to its default, ${FINAL_REVIEW_ON_FAIL_LABELS[dr.onFail]}`, to: FINAL_REVIEW_ON_FAIL_LABELS[dr.onFail], onClick: () => setReview({ onFail: null }) }} busy={busy}>
             <Seg<FinalReviewOnFail> label="What a final review that fails does" value={r.onFail} options={FINAL_REVIEW_ON_FAIL.map((value) => ({ value, label: FINAL_REVIEW_ON_FAIL_LABELS[value] }))} disabled={busy} onChange={(onFail) => setReview({ onFail })} />
@@ -165,5 +176,35 @@ export function MainAgentPage(props: { agents: AgentSettings; timeouts: TimeoutS
       busy={busy}
       reset={() => props.patch(mainResetPatch())}
     />
+  );
+}
+
+/**
+ * Main agent → Stages: how each stage of a turn the main agent decides runs. The main agent decides
+ * it in a message of its own, or its roles run on their own, as the fixed pipeline runs them: no
+ * message, so the turn is faster, and the main agent's next message lists what ran. With stage 3 on
+ * its own, the minds start as the turn does. Hook-free.
+ */
+export function StagesRows(props: { agents: AgentSettings; busy: boolean; set(fields: JsonObject): void }) {
+  const { agents, busy } = props;
+  const stages = agents.main.stages;
+  const standard = DEFAULTS.main.stages;
+  const deciding = agents.pipeline.mode === "main";
+  const auto = MAIN_STAGES.filter((s) => stages[s] === "auto").length;
+  return (
+    <div class="lre-set-rows" data-lre-main-setting="stages">
+      <p class="lre-set-note">
+        {deciding ? `The main agent decides ${MAIN_STAGES.length - auto === MAIN_STAGES.length ? "every stage" : `${MAIN_STAGES.length - auto} of ${MAIN_STAGES.length} stages`}.` : "These take effect while a main agent decides the turn (Settings → Agents → Pipeline)."} A stage on its own makes no message to the main agent: its roles run as the fixed pipeline runs them, each by its own When it fails, and the main agent's next message lists what ran and what each answered. With stage 3 on its own, the minds start as the turn starts.
+      </p>
+      {MAIN_STAGES.map((stage: MainStage) => {
+        const words = STAGE_WORDS[stage];
+        const roles = stageRoles(stage).map((r) => ROLE_LABEL[r]).join(", ");
+        return (
+          <SettingRow key={stage} id={`stage-${stage}`} label={words.label} changed={stages[stage] !== standard[stage]} help={`${words.holds}. Roles: ${roles}.`} reset={{ label: `Reset ${words.label.toLowerCase()} to its default, ${STAGE_MODE_LABELS[standard[stage]]}`, to: STAGE_MODE_LABELS[standard[stage]], onClick: () => props.set({ stages: { [stage]: null } }) }} busy={busy}>
+            <Seg<StageMode> label={`${words.label}: how it runs`} value={stages[stage]} options={STAGE_MODES.map((value) => ({ value, label: STAGE_MODE_LABELS[value] }))} disabled={busy} onChange={(mode) => props.set({ stages: { [stage]: mode } })} />
+          </SettingRow>
+        );
+      })}
+    </div>
   );
 }

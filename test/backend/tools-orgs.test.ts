@@ -3,7 +3,8 @@
 // knowledge and with their visibility under the GM's (secrecy is marks, never a filter); who may
 // hire there, Marcus as its owner and Danny by his Shop foreman position; and gm_org's appointment,
 // checked by its dry run, proposed as org_people at confirm, and applied as one GM edit whose one
-// Undo takes it back.
+// Undo takes it back. Then gm_revenue on the shop's counter takings: refused on a stream kept from
+// the agents, held to its bounds by its dry run, and an adjustment within them applied as a GM edit.
 
 import { describe, expect, test } from "bun:test";
 import { outsideReader } from "../../src/backend/agents/tools/read-view";
@@ -11,6 +12,7 @@ import { toolsFor } from "../../src/backend/agents/tools/registry";
 import { chatHead } from "../../src/backend/agents/tools/workspace";
 import { type AgentOp, type OpPreview, opKey, outsideWriter } from "../../src/backend/agents/tools/writer";
 import { STARTER_WORLDS } from "../../src/packs/index";
+import { objOf } from "../../src/engine/pack-kit";
 import type { JsonObject } from "../../src/shared/json";
 import { SECRET_MARK_WORDING, secretMarkText } from "../../src/shared/secret-marks";
 import type { WorldDoc } from "../../src/shared/world";
@@ -120,6 +122,50 @@ describe("the organizations tools on Port Alder", () => {
     expect(rig.body(await rig.send({ type: "lre.chip", chatId, chip: chipId, choice: "undo" }))).toEqual({ applied: true, pending: false });
     expect(await jordanPosition()).toBe("mechanic");
     expect(await fixes()).toEqual([]);
+    expect(rig.rt.ledger.errors).toEqual([]);
+  });
+});
+
+/** The shop's counter takings: a revenue stream its author opened to the agents (or, `off`, didn't). */
+function takings(ai: "bounded" | "off"): JsonObject {
+  return { id: "shop_takings", kind: "flow", name: "Counter takings", tier: "background", fields: { flow_kind: "income", from: "Customers", to: SHOP, every: "day", at: "17:00", revenue: [{ type: "product", units: 1, price: 15000, buyers: 6, ...(ai === "bounded" ? { ai } : {}) }] }, relations: [] };
+}
+
+describe("the revenue tools on Port Alder", () => {
+  async function gmRevenue(ai: "bounded" | "off") {
+    const { rig, chatId } = await alderChat({ put: { entities: { shop_takings: takings(ai) } } });
+    const base = { userId: rig.host.userId, chatId, knowledge: "gm" as const };
+    const reader = outsideReader(rig.rt, base);
+    const agent = { ...base, reader, agent: { role: "assistant", id: "agent_test" }, signal: new AbortController().signal };
+    const writer = outsideWriter(rig.rt, { ...agent, connectionId: null });
+    const tools = toolsFor({ world: (await reader.view()).world, tiers: ["read", "gm"], texts: {}, env: { ...agent, writer } });
+    const tool = tools.find((t) => t.name === "gm_revenue");
+    if (!tool) throw new Error("no gm_revenue at the GM tier");
+    const call = { signal: new AbortController().signal, agentId: "agent_test", role: "assistant", callId: "call_gm_revenue" };
+    const run = async (args: JsonObject) => JSON.parse((await tool.run(args, call)).text) as GmOrgAnswer & { refused?: { code: string; reason: string } };
+    const adjustments = async (): Promise<unknown> => objOf((await chatHead(rig.rt, chatId, rig.host.userId))?.state.packs.economy?.revenue_adj).shop_takings;
+    return { rig, run, writer, adjustments };
+  }
+
+  test("gm_revenue is refused on a stream its author kept from the agents", async () => {
+    const { run } = await gmRevenue("off");
+    expect((await run({ stream: "Counter takings", factor: 2, reason: "A rally in town", dry: true })).refused?.code).toBe("not_open");
+  });
+
+  test("gm_revenue's dry run holds it to its bounds, and an adjustment within them is proposed, then applied as one GM edit", async () => {
+    const { rig, run, writer, adjustments } = await gmRevenue("bounded");
+    expect((await run({ stream: "Counter takings", factor: 5, reason: "A rally in town", dry: true })).refused?.code).toBe("out_of_bounds");
+    expect((await run({ stream: "Counter takings", cents: 90_001, reason: "A rally in town", dry: true })).refused?.code).toBe("out_of_bounds");
+    const dry = await run({ stream: "Counter takings", factor: 1.5, days: 10, reason: "A rally in town", dry: true });
+    expect(dry.checked?.lines.length).toBeGreaterThan(0);
+    const proposed = (await run({ stream: "Counter takings", factor: 1.5, days: 10, reason: "A rally in town" })).proposed;
+    expect(proposed?.key).toBe(dry.checked?.key);
+    expect(await adjustments()).toBeUndefined();
+    const op: AgentOp = { kind: "gm_edit", op: { op: "effect", effect: "economy.revenue_adjust", args: { stream: "shop_takings", reason: "A rally in town", factor: 1.5, days: 10 } } };
+    expect(opKey(op)).toBe(proposed?.key ?? "");
+    const result = await writer.apply([op], "Busier for the rally");
+    expect([result.applied, result.refused]).toEqual([[opKey(op)], []]);
+    expect(await adjustments()).toEqual([expect.objectContaining({ factor: 1.5, reason: "A rally in town" })]);
     expect(rig.rt.ledger.errors).toEqual([]);
   });
 });

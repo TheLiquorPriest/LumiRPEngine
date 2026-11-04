@@ -171,6 +171,13 @@ export class FakeLre {
         const revision = typeof r.revision === "string" ? r.revision : w.index.head;
         return { file: { format: "lre-world-export-v1", world: structuredClone(w.revisions.get(revision) ?? null) } };
       }
+      case "lint": {
+        const w = this.world(r.worldId);
+        const revision = typeof r.revision === "string" ? r.revision : w.index.head;
+        const doc = w.revisions.get(revision);
+        if (!doc) throw new Refusal("not_found", `revision ${revision} not found`);
+        return { lint: lint(doc) };
+      }
       case "templates":
         return { templates: [...STARTER_INFO] };
       case "chats":

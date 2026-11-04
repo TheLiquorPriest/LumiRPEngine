@@ -3,7 +3,7 @@
 // turn reads any of it. Every limit the runtime keeps is a setting here, with its default and the
 // words its page shows (`BUDGET_DEFS`, `TURN_DEFS`, `LOOP_DEFS`, `GM_OPS_DEF`, `CURATOR_OPS_DEF`, `KEPT_DEFS`, `COMPACTION_DEFS`, `MAIN_DEFS`, `OUTPUT_CHARS_DEF`, `SYSTEM_TOKENS_DEF`), and so is
 // everything the GM assistant runs with (`assistant`: Settings → Agents → Assistant), everything
-// an agent turn runs with (`pipeline`, `roles`, `main`, `context`, `finalReview`, `gmOpsPerTurn`, `curatorOps`, `kept`, `compaction`, `recording`,
+// an agent turn runs with (`pipeline`, `roles`, `main`, `context`, `finalReview`, `persist`, `gmOpsPerTurn`, `curatorOps`, `kept`, `compaction`, `recording`,
 // `review` and `vsClassic`), whether its calls stream (`stream`), and how much every agent's system files may take (`systemTokens`); the
 // values that stay fixed are §16's: the effort levels, "set by the model" as the host's
 // `{source: "custom", effort: "auto"}`, and Anthropic's 4 cache breakpoints per request, which the
@@ -11,6 +11,7 @@
 
 import type { AgentKnowledge, ToolFamily } from "./agent-tools";
 import { AGENT_KNOWLEDGE, TOOL_FAMILY_LABEL } from "./agent-tools";
+import { defaultStages, MAIN_STAGES, type MainStages, roleRunOf, STAGE_MODES } from "./agent-pipeline";
 import { defaultRoleSettings, ROLE_IDS, ROLE_LABEL, ROLE_ON_FAIL, ROLE_TIERS, type RoleId, type RoleSettings } from "./agent-roles";
 import { type ContextSettings, contextSettingsOf, defaultContextSettings } from "./agent-context";
 import { hasOwn, isRecord, safeKey } from "./json";
@@ -64,12 +65,14 @@ export interface TurnBudget {
   wallMs: Limit;
 }
 
-/** A connection's throttle, per minute: requests sent, and tokens sent and written. "none" is off. */
+/** A connection's throttle: requests sent and tokens sent and written, per minute, and its calls under way at once, agent and prompt-only calls alike. "none" is off. */
 export interface ConnectionThrottle {
   /** The connection's id. */
   id: string;
   requestsPerMinute: Limit;
   tokensPerMinute: Limit;
+  /** Its agent turns' calls under way at once, agents' and prompt-only roles' through one gate; a call past it waits for one to end. */
+  atOnce: Limit;
 }
 
 /**
@@ -154,16 +157,34 @@ export interface ReviewSettings {
 export type FinalReviewOnFail = "send" | "stop";
 export const FINAL_REVIEW_ON_FAIL: readonly FinalReviewOnFail[] = ["send", "stop"];
 
+/** What the final review is sent: every part of the narrator's prompt (`all`), or, while Smart persistence is on, only the parts that changed since the last turn, the last turn's edits made again on the rest (`changed`). */
+export type FinalReviewScope = "all" | "changed";
+export const FINAL_REVIEW_SCOPES: readonly FinalReviewScope[] = ["all", "changed"];
+
 /**
  * The final review (DESIGN §4.6; Settings → Agents → Main agent → Final review): while on, before
  * every reply of an agent chat the main agent reviews the narrator's prompt and may revise it, in
- * either pipeline; what a review that fails does; and its own limits over the main agent's budget
- * for a stage. Its time is Settings → Timeouts → Final review.
+ * either pipeline; what a review that fails does; what it is sent; and its own limits over the main
+ * agent's budget for a stage. Its time is Settings → Timeouts → Final review.
  */
 export interface FinalReviewSettings {
   on: boolean;
   onFail: FinalReviewOnFail;
+  scope: FinalReviewScope;
   budget: Partial<AgentBudget>;
+}
+
+/**
+ * Smart persistence (Settings → Agents → Pipeline; opt-in, for every agent chat): while a scene is
+ * unchanged since the last turn (`SceneBasis`), for at most `turns` turns in a row and `minutes` of
+ * the world's time since its roles last ran afresh, the in-scene Live minds and the scene role's lore
+ * and notes are kept instead of asked again, recorded as this turn's, the narrator told they are
+ * unchanged.
+ */
+export interface PersistSettings {
+  on: boolean;
+  turns: number;
+  minutes: number;
 }
 
 /**
@@ -207,6 +228,8 @@ export interface MainAgentSettings {
   budget: Partial<AgentBudget>;
   digestTokens: number;
   pinsTokens: number;
+  /** How each stage runs (Settings → Agents → Main agent → Stages): the main agent decides it, or its roles run on their own and the next send says what ran. */
+  stages: MainStages;
 }
 
 export interface AgentSettings {
@@ -255,6 +278,8 @@ export interface AgentSettings {
   context: ContextSettings;
   /** The final review of the narrator's prompt before each reply (Settings → Agents → Main agent → Final review). */
   finalReview: FinalReviewSettings;
+  /** Smart persistence (Settings → Agents → Pipeline): a quiet scene's minds and scene notes kept from the last turn. */
+  persist: PersistSettings;
   /** The GM's edits a turn's agents may stage in all, per turn (Settings → Agents → Budgets). */
   gmOpsPerTurn: number;
   /** The changes to things and places the Curator may stage in a turn (Settings → Agents → Roles, Curator ops per turn). */
@@ -295,10 +320,12 @@ export function defaultAgentSettings(): AgentSettings {
     pipeline: { mode: "fixed", memory: "after_reply", curator: true },
     roles: defaultRoleSettings(),
     // The main agent reads the workspace, everything secrets marked as every turn agent does; its digest and pins, 2,000 tokens each (§15).
-    main: { connectionId: null, model: null, effort: "inherit", families: ["workspace"], budget: {}, digestTokens: 2000, pinsTokens: 2000 },
+    main: { connectionId: null, model: null, effort: "inherit", families: ["workspace"], budget: {}, digestTokens: 2000, pinsTokens: 2000, stages: defaultStages() },
     context: defaultContextSettings(),
-    // The final review is on, and a review that fails sends the sections unrevised; its budget is the main agent's.
-    finalReview: { on: true, onFail: "send", budget: {} },
+    // The final review is on, sees every part, and a review that fails sends the sections unrevised; its budget is the main agent's.
+    finalReview: { on: true, onFail: "send", scope: "all", budget: {} },
+    // Opt-in: every role runs every turn it is asked until you turn it on (B decision 6).
+    persist: { on: false, turns: 3, minutes: 30 },
     gmOpsPerTurn: 10,
     curatorOps: 24,
     kept: { runs: 64, gates: 256, watchers: 256, live: 16, texts: 4_000_000, folds: KEPT_FOLDS_DEFAULT },
@@ -443,6 +470,18 @@ export const REVIEW_PLACEMENT_LABELS: Readonly<Record<ReviewPlacement, string>> 
 /** Settings → Agents → Main agent → Final review's words for what a review that fails does. */
 export const FINAL_REVIEW_ON_FAIL_LABELS: Readonly<Record<FinalReviewOnFail, string>> = { send: "Send the prompt unrevised", stop: "Stop the turn" };
 
+/** Settings → Agents → Main agent → Final review's words for what the review is sent. */
+export const FINAL_REVIEW_SCOPE_LABELS: Readonly<Record<FinalReviewScope, string>> = { all: "Every part", changed: "Only what changed" };
+
+/** Settings → Agents → Pipeline → Smart persistence: how long a quiet scene is kept. */
+export const PERSIST_DEFS: Readonly<Record<"turns" | "minutes", AgentLimitDef>> = {
+  turns: { label: "Turns kept in a row", limits: "How many turns in a row a quiet scene's minds and scene notes may be kept before they are asked afresh.", fires: "The next turn asks them again, and the count starts over.", unit: "count", min: 1, none: null },
+  minutes: { label: "World minutes kept", limits: "How much of the world's time may pass in a quiet scene since its minds and scene notes were last asked afresh.", fires: "The next turn asks them again.", unit: "count", min: 1, none: null },
+};
+
+/** Settings → Agents → Throttles: a connection's calls under way at once. */
+export const AT_ONCE_DEF: AgentLimitDef = { label: "Calls at once", limits: "How many of an agent turn's calls may be under way on this connection at once: every agent's and every prompt-only role's, through one gate.", fires: "A call past it waits until one under way ends; nothing is refused.", unit: "count", min: 1, none: null };
+
 // ---------------------------------------------------------------- reading stored settings
 
 const whole = (v: unknown, lo: number): number | undefined => (typeof v === "number" && Number.isInteger(v) && v >= lo && v <= Number.MAX_SAFE_INTEGER ? v : undefined);
@@ -520,17 +559,26 @@ function mainOf(v: unknown, d: Readonly<MainAgentSettings>): MainAgentSettings {
     budget: ownBudgetOf(m.budget, d.budget),
     digestTokens: whole(m.digestTokens, MAIN_DEFS.digestTokens.min) ?? d.digestTokens,
     pinsTokens: whole(m.pinsTokens, MAIN_DEFS.pinsTokens.min) ?? d.pinsTokens,
+    stages: stagesOf(m.stages, d.stages),
   };
+}
+
+/** Each stage's mode as stored, else `d`'s. */
+function stagesOf(v: unknown, d: Readonly<MainStages>): MainStages {
+  const raw = isRecord(v) ? v : {};
+  const out = { ...d };
+  for (const stage of MAIN_STAGES) out[stage] = oneOf(raw[stage], STAGE_MODES, d[stage]);
+  return out;
 }
 
 /** The final review's settings as stored: each field checked, else `d`'s. */
 function finalReviewOf(v: unknown, d: Readonly<FinalReviewSettings>): FinalReviewSettings {
   const r = isRecord(v) ? v : {};
-  return { on: typeof r.on === "boolean" ? r.on : d.on, onFail: oneOf(r.onFail, FINAL_REVIEW_ON_FAIL, d.onFail), budget: ownBudgetOf(r.budget, d.budget) };
+  return { on: typeof r.on === "boolean" ? r.on : d.on, onFail: oneOf(r.onFail, FINAL_REVIEW_ON_FAIL, d.onFail), scope: oneOf(r.scope, FINAL_REVIEW_SCOPES, d.scope), budget: ownBudgetOf(r.budget, d.budget) };
 }
 
-/** A role's settings as stored: each field checked, else `d`'s; a connection or model cleared with null follows its classic step's. */
-function roleOf(v: unknown, d: Readonly<RoleSettings>): RoleSettings {
+/** A role's settings as stored: each field checked, else `d`'s; a connection or model cleared with null follows its classic step's; a run the pipeline map doesn't let it take reads as the run every role takes. */
+function roleOf(id: RoleId, v: unknown, d: Readonly<RoleSettings>): RoleSettings {
   const r = isRecord(v) ? v : {};
   const families = Array.isArray(r.families) ? [...new Set(r.families.filter((f): f is ToolFamily => typeof f === "string" && (FAMILIES as readonly string[]).includes(f)))] : [...d.families];
   return {
@@ -541,6 +589,7 @@ function roleOf(v: unknown, d: Readonly<RoleSettings>): RoleSettings {
     tier: oneOf(r.tier, ROLE_TIERS, d.tier),
     promptOnly: typeof r.promptOnly === "boolean" ? r.promptOnly : d.promptOnly,
     onFail: oneOf(r.onFail, ROLE_ON_FAIL, d.onFail),
+    run: roleRunOf(id, r.run, d.run),
     budget: ownBudgetOf(r.budget, d.budget),
   };
 }
@@ -549,7 +598,7 @@ function roleOf(v: unknown, d: Readonly<RoleSettings>): RoleSettings {
 function rolesOf(v: unknown, d: Readonly<Record<RoleId, RoleSettings>>): Record<RoleId, RoleSettings> {
   const raw = isRecord(v) ? v : {};
   const out = {} as Record<RoleId, RoleSettings>;
-  for (const id of ROLE_IDS) out[id] = roleOf(hasOwn(raw, id) ? raw[id] : undefined, d[id]);
+  for (const id of ROLE_IDS) out[id] = roleOf(id, hasOwn(raw, id) ? raw[id] : undefined, d[id]);
   return out;
 }
 
@@ -594,6 +643,7 @@ export function agentSettingsOf(raw: unknown, d: Readonly<AgentSettings> = defau
   const recording = isRecord(a.recording) ? a.recording : {};
   const review = isRecord(a.review) ? a.review : {};
   const kept = isRecord(a.kept) ? a.kept : {};
+  const persist = isRecord(a.persist) ? a.persist : {};
   return {
     thinkingInToolLoops: typeof a.thinkingInToolLoops === "boolean" ? a.thinkingInToolLoops : d.thinkingInToolLoops,
     stream: typeof a.stream === "boolean" ? a.stream : d.stream,
@@ -601,7 +651,7 @@ export function agentSettingsOf(raw: unknown, d: Readonly<AgentSettings> = defau
     turn: turnOf(a.turn, d.turn),
     loopRepeats: whole(a.loopRepeats, LOOP_DEFS.loopRepeats.min) ?? d.loopRepeats,
     clipChars: whole(a.clipChars, LOOP_DEFS.clipChars.min) ?? d.clipChars,
-    throttles: listOf(a.throttles, d.throttles, (t, id) => ({ id, requestsPerMinute: limitIn(t.requestsPerMinute, THROTTLE_MIN, Number.MAX_SAFE_INTEGER, "none"), tokensPerMinute: limitIn(t.tokensPerMinute, THROTTLE_MIN, Number.MAX_SAFE_INTEGER, "none") })),
+    throttles: listOf(a.throttles, d.throttles, (t, id) => ({ id, requestsPerMinute: limitIn(t.requestsPerMinute, THROTTLE_MIN, Number.MAX_SAFE_INTEGER, "none"), tokensPerMinute: limitIn(t.tokensPerMinute, THROTTLE_MIN, Number.MAX_SAFE_INTEGER, "none"), atOnce: limitIn(t.atOnce, AT_ONCE_DEF.min, Number.MAX_SAFE_INTEGER, "none") })),
     caching: { on: typeof caching.on === "boolean" ? caching.on : d.caching.on, nonce: cacheNonce(caching.nonce, d.caching.nonce), roles },
     acceptance: {
       connections: acceptanceConnectionsOf(acceptance.connections, d.acceptance.connections),
@@ -613,6 +663,7 @@ export function agentSettingsOf(raw: unknown, d: Readonly<AgentSettings> = defau
     main: mainOf(a.main, d.main),
     context: contextSettingsOf(a.context, d.context),
     finalReview: finalReviewOf(a.finalReview, d.finalReview),
+    persist: { on: typeof persist.on === "boolean" ? persist.on : d.persist.on, turns: whole(persist.turns, PERSIST_DEFS.turns.min) ?? d.persist.turns, minutes: whole(persist.minutes, PERSIST_DEFS.minutes.min) ?? d.persist.minutes },
     gmOpsPerTurn: whole(a.gmOpsPerTurn, GM_OPS_DEF.min) ?? d.gmOpsPerTurn,
     curatorOps: whole(a.curatorOps, CURATOR_OPS_DEF.min) ?? d.curatorOps,
     kept: { runs: whole(kept.runs, KEPT_DEFS.runs.min) ?? d.kept.runs, gates: whole(kept.gates, KEPT_DEFS.gates.min) ?? d.kept.gates, watchers: whole(kept.watchers, KEPT_DEFS.watchers.min) ?? d.kept.watchers, live: whole(kept.live, KEPT_DEFS.live.min) ?? d.kept.live, texts: whole(kept.texts, KEPT_DEFS.texts.min) ?? d.kept.texts, folds: whole(kept.folds, KEPT_DEFS.folds.min) ?? d.kept.folds },

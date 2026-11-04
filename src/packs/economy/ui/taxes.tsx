@@ -14,6 +14,7 @@
 import { useState } from "preact/hooks";
 import { FINANCE_ACTIONS, STRUCTURE_WORDS, type ConsolidationView, type ExemptView, type TaxesView, type TaxYearView, type UnemploymentView } from "../../../shared/finance";
 import type { EntityId } from "../../../shared/ids";
+import type { TaxesExtra } from "../../../shared/tax-year";
 import { parseMoneyInput } from "../../../shared/money";
 import { DEFAULT_CURRENCY, formatMoney, type WorldCurrency } from "../../../shared/world";
 import { OFFSTAGE_DEFAULTS, TELL_HELP, TELL_LABEL, tellPreset } from "../../../shared/offstage";
@@ -174,10 +175,11 @@ export function GmStatus(props: { statuses: readonly { id: string; name: string;
 }
 
 /** An organization's Taxes, from its section; with `acts` (Play) the reader's controls, with `gm` (GM → Orgs) the GM's. */
-export function OrgTaxes(props: { section: TaxesView; currency: WorldCurrency; acts?: TaxesActs; gm?: TaxesGm }) {
+export function OrgTaxes(props: { section: TaxesView & Partial<TaxesExtra>; currency: WorldCurrency; acts?: TaxesActs; gm?: TaxesGm }) {
   const { section, currency, acts, gm } = props;
   const money = (cents: number): string => formatMoney(cents, currency);
   const exempt = section.exempt;
+  const { penalty, carry, foundation, scorp } = section;
   return (
     <div class="lre-stack" data-lre-org-taxes>
       {exempt || (gm && section.statuses) ? (
@@ -231,6 +233,47 @@ export function OrgTaxes(props: { section: TaxesView; currency: WorldCurrency; a
         </Section>
       ) : null}
       {section.consolidation ? <ConsolidationPart consolidation={section.consolidation} why={section.acts?.consolidate ?? null} currency={currency} {...(acts && section.acts ? { acts } : {})} {...(gm ? { gm } : {})} /> : null}
+      {penalty && (penalty.on || penalty.last) ? (
+        <Section title="Tax on kept earnings">
+          <Row k="Earnings and profits kept, start of the year" v={money(penalty.ep)} />
+          {penalty.last ? (
+            <>
+              <Row k={`${penalty.last.year}: ${penalty.last.kind === "phc" ? "personal holding company tax" : "accumulated earnings tax"}`} v={`${money(penalty.last.cents)}${penalty.last.paid ? ", paid" : ", due 15 April"}`} />
+              <Row k="What it kept after tax and dividends" v={money(penalty.last.kept)} />
+              {penalty.last.kind === "aet" ? <Row k="Its credit" v={money(penalty.last.credit)} /> : null}
+              <Row k="Passive income, and held by five or fewer people" v={`${penalty.last.passivePct}%, ${penalty.last.top5}%`} />
+              {penalty.last.consent > 0 ? <Row k="Consent dividends for it" v={money(penalty.last.consent)} /> : null}
+            </>
+          ) : (
+            <Empty>Its first year closes on 1 January.</Empty>
+          )}
+          {penalty.on ? null : <Empty>This world doesn't tax kept earnings (Build → Packs → economy → Taxes).</Empty>}
+        </Section>
+      ) : null}
+      {carry ? (
+        <Section title="Carried forward">
+          {carry.nol > 0 ? <Row k="Net operating loss (up to 80% of a year's income)" v={money(carry.nol)} /> : null}
+          {carry.capitalLoss > 0 ? <Row k="Capital loss" v={money(carry.capitalLoss)} /> : null}
+          {carry.gifts > 0 ? <Row k="Gifts over the 10% cap (five years)" v={money(carry.gifts)} /> : null}
+        </Section>
+      ) : null}
+      {foundation ? (
+        <Section title="Foundation payout">
+          <Row k={`Payout, ${foundation.payoutPct}% of its assets less its excise`} v={`${money(foundation.payoutSoFar)} so far this year`} />
+          <Row k="Granted this year" v={money(foundation.granted)} />
+          {foundation.lastShortfall > 0 ? <Row k={`Still to grant for ${foundation.year - 1}, by 31 Dec`} v={money(foundation.leftOfLast)} /> : null}
+          {foundation.last ? <Row k={`${foundation.last.year}: excise (${foundation.excisePct}% of ${money(foundation.last.nii)})`} v={money(foundation.last.excise)} /> : null}
+          {foundation.last && foundation.last.tax > 0 ? <Row k={`${foundation.last.year}: ${foundation.undistributedPct}% on payout never granted`} v={money(foundation.last.tax)} /> : null}
+          {foundation.due !== null ? <Row k="Due with its return, 15 May" v={money(foundation.due)} /> : null}
+          <Row k="A person's gifts to it, deductible up to" v={`${foundation.donorLimitPct}% of their income`} />
+        </Section>
+      ) : null}
+      {scorp ? (
+        <Section title="S corporation">
+          <Row k="Shareholders" v={`${scorp.holders} of at most ${scorp.max}`} />
+          {scorp.problem ? <Empty>{scorp.problem}</Empty> : null}
+        </Section>
+      ) : null}
       {section.unemployment ? (
         <Section title="Unemployment taxes">
           <UnemploymentRows rates={section.unemployment} exempt={exempt} currency={currency} />

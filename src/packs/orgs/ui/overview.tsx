@@ -3,8 +3,9 @@
 // alerts under it, each with Open to the tab that deals with it (`feed.tsx`), the party's own part
 // (its roster by tier, a hired hand's way out, its purse and the leader's controls, `party.tsx`), and
 // your place here: your title and since when and who runs it ("Mechanic since 12 Jan 2026; Marcus
-// Delgado runs it"), your position and whom it reports to, what you may do in words with what each
-// rests on, and the delegations you hold until when; then Coming up (paydays, invoices due, dues and
+// Delgado runs it"), whom your powers pass down through ("You run it through Alder Holdings"), your
+// position and whom it reports to, what you may do in words with what each rests on, and the
+// delegations you hold until when; a trust's terms; then Coming up (paydays, invoices due, dues and
 // lease ends) and its History, the latest 5 lines with the rest under More.
 
 import { useState } from "preact/hooks";
@@ -16,7 +17,7 @@ import type { WorldCurrency } from "../../../shared/world";
 import { decodeAlerts, decodeComing } from "./decode";
 import { ComingUp, OrgAlerts } from "./feed";
 import { PartyOverview, type PartyAct } from "./party";
-import { andList, basisWords, hereAway, limitWords, placeLine, powerFamilies, powersText } from "./words";
+import { andList, basisWords, hereAway, limitWords, placeLine, powerFamilies, powersText, throughWords } from "./words";
 
 /** History lines the Overview shows before More. */
 export const HISTORY_SHOWN = 5;
@@ -73,7 +74,8 @@ export function OrgOverview(props: { org: OrgView; figure: string | null; curren
   const others = org.people.filter((p) => !p.you);
   const here = others.filter((p) => p.here).length;
   const place = placeLine(org);
-  const headline = [org.type === "party" ? (hereAway(here, others.length - here) ?? "Just you") : null, props.figure, you.belongs ? null : place].filter((line) => line !== null);
+  const through = throughWords(org);
+  const headline = [org.type === "party" ? (hereAway(here, others.length - here) ?? "Just you") : null, props.figure, you.belongs ? null : place, you.belongs ? null : through].filter((line) => line !== null);
   const families = powerFamilies(you.powers.map((p) => p.power));
   const alerts = decodeAlerts(org.sections[ALERTS_SECTION]);
   const coming = decodeComing(org.sections[COMING_SECTION]);
@@ -94,12 +96,13 @@ export function OrgOverview(props: { org: OrgView; figure: string | null; curren
         <Section title="Your place here">
           <div class="lre-stack">
             {place !== null ? <span data-lre-org-place>{place}</span> : null}
+            {through !== null ? <span data-lre-org-through>{through}</span> : null}
             {you.position && you.position.title.toLowerCase() !== (you.title ?? "").toLowerCase() ? <Row k="Position" v={you.position.title} /> : null}
             {you.reportsTo.length > 0 ? <Row k="Reports to" v={andList(you.reportsTo.map((r) => r.name))} /> : null}
           </div>
         </Section>
       ) : null}
-      {you.belongs ? (
+      {you.belongs || you.powers.length > 0 ? (
         <Section title="What you may do" flush>
           <List>
             {families.length === 0 ? (
@@ -109,6 +112,19 @@ export function OrgOverview(props: { org: OrgView; figure: string | null; curren
             )}
           </List>
         </Section>
+      ) : null}
+      {org.trust ? (
+        <div data-lre-org-trust={org.id}>
+          <Section title="Its terms">
+            <div class="lre-stack">
+              {org.trust.settlor ? <Row k="Settled by" v={org.trust.settlor.name} /> : null}
+              <Row k="Can be taken back" v={org.trust.revocable ? "Yes: its settlor may revoke it" : "No: it is irrevocable"} />
+              {org.trust.purpose ? <Row k="For" v={org.trust.purpose} /> : null}
+              {org.trust.until ? <Row k="Ends" v={org.trust.until} /> : null}
+              <Row k="Its trustees decide" v={org.trust.decide === "together" ? "Together, by vote" : "Each alone"} />
+            </div>
+          </Section>
+        </div>
       ) : null}
       {you.delegations.length > 0 ? (
         <Section title="Delegations you hold" flush>

@@ -31,10 +31,10 @@ export const OFFSTAGE_GROUP_LABEL: Readonly<Record<OffstageGroup, string>> = {
 export const OFFSTAGE_GROUP_HELP: Readonly<Record<OffstageGroup, string>> = {
   accounts: "Transfers between your accounts, card payments, cards, autopay, cash in and out",
   payments: "Paying someone, gifts, invoices you pay, standing payments, sharing out",
-  credit: "Applying for credit",
+  credit: "Applying for credit, lending money to someone",
   investing: "Trades, options, where dividends go",
   property: "Buying, selling and listing property, leases",
-  business: "Invoices, draws, profits, shares, stakes, consolidated returns",
+  business: "Invoices, draws, profits, shares, stakes, consolidated returns, projects",
   staff: "Hiring, raises, hours, leave, titles, positions, pay schedules",
   members: "Admitting, removing, appointing, delegating, dues, your party",
   structure: "Founding, renaming, restructuring, merging, winding up",
@@ -68,6 +68,7 @@ export const OFFSTAGE_ACTIONS: Readonly<Record<string, OffstageGroup>> = Object.
   org_share_out: "payments",
   // Credit.
   apply_credit: "credit",
+  lend_money: "credit",
   // Investing.
   trade: "investing",
   exercise_option: "investing",
@@ -90,6 +91,11 @@ export const OFFSTAGE_ACTIONS: Readonly<Record<string, OffstageGroup>> = Object.
   shares_delist: "business",
   shares_classes: "business",
   tax_consolidate: "business",
+  consent_dividend: "business",
+  project_start: "business",
+  project_pause: "business",
+  project_resume: "business",
+  project_drop: "business",
   // Staff.
   job_hire: "staff",
   job_end: "staff",

@@ -6,7 +6,7 @@
 
 import type { EntityId, PlaceId } from "./ids";
 import type { JsonValue } from "./json";
-import type { Audience, DUES_EVERY, MemberHow, OrgBasis, OrgLimits, OrgPower, OrgType, PositionScope } from "./org";
+import type { Audience, DUES_EVERY, MemberHow, OrgBasis, OrgLimits, OrgPower, OrgType, PositionScope, TrusteesDecide } from "./org";
 import type { OwnerRole } from "./finance";
 import { DECISIONS_SECTION } from "./org-motions";
 import type { PartyTier } from "./party";
@@ -21,12 +21,38 @@ export interface OrgRef {
   name: string;
 }
 
-/** A power someone holds, what it rests on (the position, or the delegation's granter), and what it lets them do, in words. */
+/** A power someone holds, what it rests on (the position, the delegation's granter, or, through control, the organization they hold it at on their own), and what it lets them do, in words. */
 export interface OrgPowerView {
   power: OrgPower;
   basis: OrgBasis;
   id: string | null;
   words: string;
+}
+
+/**
+ * How one organization holds another (§29.3 Control), as the reader may see it: by a stake (its
+ * share of the worth and its votes, whether it controls, its role on a trust), a position it holds
+ * there, or a delegation to it.
+ */
+export interface OrgLinkView {
+  id: EntityId;
+  name: string;
+  type: OrgType;
+  share: number | null;
+  votes: number | null;
+  controlled: boolean;
+  role: OwnerRole | null;
+  position: { id: string; title: string } | null;
+  delegation: boolean;
+}
+
+/** A trust's own terms (§29.1 Trusts): who settled it, whether it may be taken back, what it is for, the day it ends (in the calendar's words), and how its trustees decide. */
+export interface OrgTrustView {
+  settlor: OrgRef | null;
+  revocable: boolean;
+  purpose: string | null;
+  until: string | null;
+  decide: TrusteesDecide;
 }
 
 /** A delegation in force (§3.5): who acts for the organization, with what powers and limits, until when, granted by whom. */
@@ -63,6 +89,8 @@ export interface OrgPersonView {
   /** The powers they hold there, each with what it rests on (a delegation's granter the reader can't see under an opaque id). */
   powers: OrgPowerView[];
   you: boolean;
+  /** An organization belonging or seated here (a member group, an entity officer or director): its type, so its page opens; null for a person. */
+  org: OrgType | null;
 }
 
 /** A position, with its holders the reader can see and a count of those they can't. */
@@ -98,6 +126,8 @@ export interface OrgYouView {
   powers: OrgPowerView[];
   /** The delegations they hold there. */
   delegations: OrgDelegationView[];
+  /** The organizations their powers here flow down through (§29.3 Control), nearest them first; none when they hold none that way. */
+  through: OrgRef[];
 }
 
 /** A line of an organization's History (`orgs.log`, §4.4) as the reader may read it: anyone they can't see named "someone". */
@@ -159,6 +189,14 @@ export interface OrgView {
   candidates: OrgRef[];
   /** The packs' sections the reader may see (`r.orgSection`), by id: money, payroll, ownership, taxes. */
   sections: Record<string, JsonValue>;
+  /** The organizations holding it (by a stake, a position here or a delegation), and those it holds (its subsidiaries, the trusts it holds a role on, the positions it holds elsewhere), as the reader may see them; those below it they can't, counted. */
+  above: OrgLinkView[];
+  below: OrgLinkView[];
+  belowHidden: number;
+  /** A trust's terms; null for anything else. */
+  trust: OrgTrustView | null;
+  /** A company that is a nonprofit (no owners of its worth). */
+  nonprofit: boolean;
 }
 
 /** A row of the Orgs home: an organization, the reader's title there, and one figure they may see. */
@@ -170,6 +208,9 @@ export interface OrgRowView {
   title: string | null;
   /** A company's profit this month, a household's shared costs and the reader's share, a group's members, a trust's worth; null when the reader may see none. */
   figure: string | null;
+  /** The listed organization it nests under on the home (its controlling holder, else its largest stake, else the first by id), and how that one holds it; null at a root, or when that holder isn't listed. */
+  under: EntityId | null;
+  via: OrgLinkView | null;
 }
 
 /** Someone in the party, in their tier. */
@@ -179,12 +220,14 @@ export interface PartyMemberView extends OrgRef {
 }
 
 /**
- * What Orgs' Start something… offers (§4.2, §3.13): a company, off with why while the player
- * character may not start one, and the accounts its capital may come from; a group, of one of the
- * world's group kinds, or null when the world has none.
+ * What Orgs' Start something… offers (§4.2, §3.13): a company, a trust settled and a nonprofit, each
+ * off with why while the player character may not start one, and the accounts what goes into it may
+ * come from; a group, of one of the world's group kinds, or null when the world has none.
  */
 export interface OrgStartView {
   company: { why: string | null; sources: { id: EntityId; name: string; balance: string }[] };
+  trust: { why: string | null; sources: { id: EntityId; name: string; balance: string }[] };
+  nonprofit: { why: string | null; sources: { id: EntityId; name: string; balance: string }[] };
   group: { kinds: { id: string; label: string }[] } | null;
 }
 
@@ -258,19 +301,20 @@ export interface GmPlaceEntry extends PremiseView {
 }
 
 /** The parts of an organization's page an agent or an outside client reads on its own (ORG-SPEC §7.1, §7.5). */
-export const ORG_PARTS = ["overview", "people", "money", "property", "ownership", "taxes", "rules", "decisions", "log"] as const;
+export const ORG_PARTS = ["overview", "people", "money", "property", "ownership", "taxes", "projects", "rules", "decisions", "log"] as const;
 export type OrgPart = (typeof ORG_PARTS)[number];
 
 /**
- * One part of a page (`orgs_read`, `lre_orgs`): what it is and your place there, its people (with
- * those not shown counted and Payroll), its sections (Money, Premises, Ownership, Taxes, Decisions;
- * null where the reader may see none), its positions and delegations, or its History. Pure.
+ * One part of a page (`orgs_read`, `lre_orgs`): what it is and your place there, with the
+ * organizations holding it and held by it and a trust's terms, its people (with those not shown
+ * counted and Payroll), its sections (Money, Premises, Ownership, Taxes, Projects, Decisions; null
+ * where the reader may see none), its positions and delegations, or its History. Pure.
  */
 export function orgPart(page: OrgView, part: OrgPart): Record<string, unknown> {
   const s = page.sections;
   switch (part) {
     case "overview":
-      return { type: page.type, kind: page.kind, badge: page.badge, structure: page.structure, level: page.level, exists: page.exists, you: page.you, runBy: page.runBy, counts: { people: page.people.length, hidden: page.hidden.count, positions: page.positions.length, delegations: page.delegations.length } };
+      return { type: page.type, kind: page.kind, badge: page.badge, structure: page.structure, level: page.level, exists: page.exists, you: page.you, runBy: page.runBy, counts: { people: page.people.length, hidden: page.hidden.count, positions: page.positions.length, delegations: page.delegations.length }, above: page.above, below: page.below, belowHidden: page.belowHidden, trust: page.trust, nonprofit: page.nonprofit };
     case "people":
       return { people: page.people, hidden: page.hidden, payroll: s.payroll ?? null };
     case "money":
@@ -281,6 +325,8 @@ export function orgPart(page: OrgView, part: OrgPart): Record<string, unknown> {
       return { ownership: s.ownership ?? null };
     case "taxes":
       return { taxes: s.taxes ?? null };
+    case "projects":
+      return { projects: s.projects ?? null };
     case "rules":
       return { positions: page.positions, delegations: page.delegations, defaultPosition: page.defaultPosition };
     case "decisions":

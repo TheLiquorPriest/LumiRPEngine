@@ -728,10 +728,12 @@ export function charge(hooks: FinanceHooks, ctx: ReadContext, payer: EntityId, r
   const total = cents + tax + cashback;
   const overdraft = opts.overdraft !== false;
   const out: LedgerEvent[] = [];
+  // Where it lands, worked out first: the payer never pays from that account (a parent paying its subsidiary, on whose account it is an authorized user).
+  const dest = terms?.seller ? payeeSide(ctx, { payee: terms.seller, ...(terms.deposit ? { deposit: terms.deposit } : {}) }, cents) : payeeSide(ctx, opts, cents);
   let source: string;
   let picked: Picked | null = null;
   if (hasLedger(ctx, payer)) {
-    const p = chooseSource(ctx, payer, total, { method: opts.method, source: opts.source, category: opts.category, till: opts.sale !== undefined, overdraft, story: opts.story === true });
+    const p = chooseSource(ctx, payer, total, { method: opts.method, source: opts.source, category: opts.category, except: dest.account, till: opts.sale !== undefined, overdraft, story: opts.story === true });
     if ("code" in p) return opts.story === true && opts.kind === "purchase" && p.code === NO_WAY_TO_PAY ? [txn([], { memo, kind: "purchase", ...(opts.category ? { category: opts.category } : {}), payer, unpaid: total })] : p;
     picked = p;
     source = p.account;
@@ -742,7 +744,6 @@ export function charge(hooks: FinanceHooks, ctx: ReadContext, payer: EntityId, r
     source = external(payer);
     out.push(...l1Move(ctx.state, payer, -total));
   }
-  const dest = terms?.seller ? payeeSide(ctx, { payee: terms.seller, ...(terms.deposit ? { deposit: terms.deposit } : {}) }, cents) : payeeSide(ctx, opts, cents);
   const wallet = cashback > 0 ? cashAccount(ctx, payer) : null;
   if (cashback > 0 && !wallet) return reject("no_cashback", `${labelOf(ctx, payer)} has nowhere to carry cash`);
   const lines = merged([
@@ -796,6 +797,7 @@ export function mayUse(ctx: ReadContext, party: EntityId, account: EntityId, sid
   }
   if (status === "closed") return reject("declined", `${labelOf(ctx, account)} is closed`);
   if (rightsOf(ctx.state, account, party) === null) return reject("not_owner", `${labelOf(ctx, account)} isn't ${labelOf(ctx, party)}'s`);
+  if (t.receivable) return reject("locked", `${labelOf(ctx, account)} is a loan made: only its borrower's payments reach it`);
   return classOf(ctx, account) === "cd" ? reject("locked", `${labelOf(ctx, account)} takes nothing in after it opens`) : null;
 }
 

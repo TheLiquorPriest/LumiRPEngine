@@ -211,6 +211,10 @@ function issueShares(api: FinanceApi, ctx: ReadContext, a: Args): LedgerEvent[] 
   const row = owners.find((o) => o.party === to && ROLE_RIGHTS[o.role].worth && (named === "" || rowClass(o, classes).id === named));
   const cls = named !== "" ? named : row?.class;
   const next = row ? owners.map((o) => (o === row ? { ...o, units: (o.units ?? 0) + units } : o)) : [...owners, { party: to, role: "owner" as const, units, ...(cls !== undefined && cls !== COMMON_CLASS.id ? { class: cls } : {}) }];
+  // An S corporation's holders after the issue, as its taxes allow them (DESIGN §26.3; the taxes module's check).
+  const holders = [...new Set(next.filter((o) => ROLE_RIGHTS[o.role].worth && (o.units ?? 0) > 0).map((o) => o.party))];
+  const scorp = optionalService(ctx, "economy.scorp_holders")?.(ctx, business, holders) ?? null;
+  if (scorp) return scorp;
   const memo = `${units} units of ${name} at ${moneyWords(ctx, price.each)} a unit`;
   const events: LedgerEvent[] = [];
   if (price.cents > 0) {

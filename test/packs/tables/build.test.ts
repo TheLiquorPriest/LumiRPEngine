@@ -22,6 +22,7 @@ const EXPECTED: Record<string, string> = {
   "economy.regions": "us/regions.json",
   "economy.finance": "us/finance.json",
   "economy.exempt": "us/exempt.json",
+  "economy.projects": "us/projects.json",
   "economy.index_history": "us/index-history.json",
   "vehicles.classes": "us/vehicles.json",
   "vehicles.factors": "us/vehicles.json",

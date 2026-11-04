@@ -90,7 +90,7 @@ function registeredTypes(): string[] {
   return types;
 }
 
-/** A world where every event type has something to act on: an inn on a grid, accounts, a route, a quest and a fight. */
+/** A world where every event type has something to act on: an inn on a grid, accounts, a route, a quest, a fight, a trust, a revenue stream and a project. */
 function everythingWorld(): WorldDoc {
   const w = blankWorld("w_all", "Everything");
   w.mapSettings = { display: "knowledge", grid: { movement: true, sightRadius: 3 } };
@@ -125,6 +125,26 @@ function everythingWorld(): WorldDoc {
   w.entities.hold_call = { id: "hold_call", kind: "holding", name: "IDX call", tier: "background", fields: { account: "acct", asset: "opt:idx:call:10000:2026-11-20", lots: [{ qty: 1, cost: 20000, at: 0 }] }, relations: [] };
   w.entities.house = { id: "house", kind: "property", name: "House", tier: "background", fields: { place: "inn", owners: [{ party: "you", role: "owner", share: 100 }], value: 30000000 }, relations: [] };
   w.entities.gym = { id: "gym", kind: "flow", name: "Harbor Gym", tier: "background", fields: { flow_kind: "subscription", from: "acct", to: "Harbor Gym", amount_cents: 4000, every: "month", days: [5], status: "active" }, relations: [] };
+  // A brewery the Taproom holds, a trust and a stream of the Taproom's ale sales open to adjustment in play, for the year close's, the trusts' and the streams' events.
+  w.entities.brewery = { id: "brewery", kind: "business", name: "Gull Brewery", tier: "background", fields: { owners: [{ party: "shop", role: "owner", share: 100 }] }, relations: [] };
+  w.entities.trust = { id: "trust", kind: "trust", name: "Gull Trust", tier: "background", fields: {}, relations: [] };
+  w.entities.ales = { id: "ales", kind: "flow", name: "Ale sales", tier: "background", fields: { flow_kind: "income", from: "Customers", to: "shop", every: "day", status: "active", revenue: [{ type: "product", units: 20, price: 600, buyers: 1, ai: "bounded" }] }, relations: [] };
+  // The Taproom's well, planned: dug at its start, then a pump fitted, paid as each finishes.
+  w.entities.well = {
+    id: "well",
+    kind: "project",
+    name: "Gull well",
+    tier: "background",
+    fields: {
+      org: "shop",
+      status: "planned",
+      steps: [
+        { id: "dig", name: "Dig the well", days: 2, cost: 100000, paid: "start" },
+        { id: "pump", name: "Fit the pump", days: 1, cost: 20000, paid: "end", after: ["dig"] },
+      ],
+    },
+    relations: [],
+  };
   w.tracks.heist = { id: "heist", kind: "quest", label: "The heist", start: "idea", visibility: "public", stages: { idea: { label: "An idea", next: [] }, on: { label: "Underway", next: [] } } };
   w.checks.initiative = { id: "initiative", dice: "d20" };
   w.ruleset = { combat: { initiative: "initiative", economy: { action: { label: "Action" } }, hp: "hp" } };
@@ -222,6 +242,25 @@ const EVERY_TYPE: LedgerEvent[] = [
   { type: "economy.stake_route", data: { business: "shop", owner: "you", to: "acct" } },
   // The chat's own cash rule is the economy slice's (DESIGN §25.8), never an entity's definition.
   { type: "economy.config", data: { atm: true } },
+  // A year's close, a foundation's marks and taxes, a corporation's dividends received and penalty taxes, a trust's distributions and an asset's recovery are the economy slice's records (DESIGN §26.3, §26.4), never an entity's definition.
+  { type: "economy.year_close", data: { party: "shop", year: 2025, record: { taxable: 0, tax: 0 } } },
+  { type: "economy.foundation_mark", data: { org: "shop", month: "2026-01", cents: 500000 } },
+  { type: "economy.dividend_received", data: { party: "shop", source: "brewery", cents: 1000, deducted: 1000 } },
+  { type: "economy.consent_dividend", data: { org: "shop", year: 2025, cents: 2000, parts: [{ party: "dev", cents: 1000 }, { party: "you", cents: 1000 }] } },
+  { type: "economy.penalty_tax", data: { party: "shop", year: 2025, kind: "aet", cents: 400 } },
+  { type: "economy.foundation_tax", data: { org: "shop", year: 2025, excise: 70, tax: 0, cents: 70 } },
+  { type: "economy.trust_distribution", data: { trust: "trust", parts: [{ party: "dev", cents: 1000 }] } },
+  { type: "economy.depreciate", data: { asset: "house", month: "2026-01", cents: 1000, kind: "depreciation", parts: [{ party: "you", cents: 1000 }] } },
+  // A stream's months and the adjustments in force on it are the economy slice's (DESIGN §26.2).
+  { type: "economy.revenue", data: { stream: "ales", month: "2026-01", cents: 12000, net: 7200, units: 20 } },
+  { type: "economy.revenue_adjusted", data: { stream: "ales", id: "adj_1", from: 0, until: 10080, factor: 1.5, reason: "Fair week", by: "gm" } },
+  // What has happened to a project is the economy slice's `projects` record (DESIGN §26.5), never its definition.
+  { type: "economy.project_begin", data: { project: "well", at: 0 } },
+  { type: "economy.project_step", data: { project: "well", step: "dig", phase: "start", at: 0, end: 2880, paid: 100000 } },
+  { type: "economy.project_note", data: { project: "well", step: "dig", days: 1, cents: 0, at: 0, end: 4320, text: "Rain", source: "gm" } },
+  { type: "economy.project_pause", data: { project: "well", at: 10, left: { dig: 4310 } } },
+  { type: "economy.project_resume", data: { project: "well", at: 20, ends: { dig: 4330 } } },
+  { type: "economy.project_drop", data: { project: "well", at: 30 } },
   // An organization's History and what was spent for it are the orgs slice's (ORG-SPEC §3.17), never an entity's definition.
   { type: "orgs.log", data: { org: "shop", text: "Paid Dev $1.00", by: "you", at: 0 } },
   { type: "orgs.spent", data: { org: "shop", who: "you", month: "2026-01", cents: 100 } },

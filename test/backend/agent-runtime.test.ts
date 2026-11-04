@@ -502,12 +502,88 @@ describe("budgets and ceilings", () => {
     const host = new FakeHost();
     const accounts = new AgentAccounts(host, c);
     const signal = new AbortController().signal;
-    const settings = settingsWith((s) => (s.throttles = [{ id: MAIN, requestsPerMinute: 1, tokensPerMinute: 100 }]));
+    const settings = settingsWith((s) => (s.throttles = [{ id: MAIN, requestsPerMinute: 1, tokensPerMinute: 100, atOnce: "none" }]));
     const hold = (tokensIn: number) => accounts.reserve({ userId: host.userId, connection: MAIN, model: "m", tokensIn, tokensOut: 10, settings, signal });
     await hold(10);
     await hold(10);
     expect(c.slept).toEqual([60_000]);
     await expect(hold(95)).rejects.toMatchObject({ code: "throttle" });
+  });
+
+  /** Yields the event loop `turns` times: what a release wakes has run by then. */
+  const flush = async (turns = 20): Promise<void> => {
+    for (let i = 0; i < turns; i++) {
+      const { promise, resolve } = Promise.withResolvers<void>();
+      setImmediate(resolve);
+      await promise;
+    }
+  };
+
+  test("calls at once: at 2, a connection's third call waits for one under way to end, in the order they came; one whose signal aborts leaves the line; a prompt-only call's place is taken through the same gate; another connection never waits", async () => {
+    const host = new FakeHost();
+    const accounts = new AgentAccounts(host, clock());
+    const signal = new AbortController().signal;
+    const settings = settingsWith((s) => (s.throttles = [{ id: MAIN, requestsPerMinute: "none", tokensPerMinute: "none", atOnce: 2 }]));
+    const hold = (connection = MAIN, stop = signal) => accounts.reserve({ userId: host.userId, connection, model: "m", tokensIn: 10, tokensOut: 10, settings, signal: stop });
+    const placed: string[] = [];
+    const first = await hold();
+    const second = await hold();
+    const third = hold().then((r) => (placed.push("third"), r));
+    const quit = new AbortController();
+    const quitter = hold(MAIN, quit.signal);
+    const fourth = hold().then((r) => (placed.push("fourth"), r));
+    await flush();
+    // A prompt-only role's call (`Steps.gate`) waits in the same line, after them.
+    const prompt = accounts.atOnce(host.userId, MAIN, settings.throttles, signal).then((release) => (placed.push("prompt-only"), release));
+    await flush();
+    expect(placed).toEqual([]);
+    // Another connection, which has no such limit, never waits.
+    accounts.settle(await hold(CLAUDE), null);
+    quit.abort(new Error("cancelled while it waited"));
+    await expect(quitter).rejects.toThrow("cancelled while it waited");
+    accounts.settle(first, null);
+    await flush();
+    expect(placed).toEqual(["third"]);
+    accounts.settle(second, null);
+    await flush();
+    expect(placed).toEqual(["third", "fourth"]);
+    accounts.settle(await third, null);
+    const release = await prompt;
+    expect(placed).toEqual(["third", "fourth", "prompt-only"]);
+    // A release frees its place once: the next waits until another one ends.
+    release();
+    release();
+    const fifth = hold().then((r) => (placed.push("fifth"), r));
+    const sixth = hold().then((r) => (placed.push("sixth"), r));
+    await flush();
+    expect(placed.slice(3)).toEqual(["fifth"]);
+    accounts.settle(await fourth, null);
+    accounts.settle(await sixth, null);
+    accounts.settle(await fifth, null);
+    // With no limit, as the default has none, nothing waits.
+    const none = settingsWith();
+    const free = await Promise.all([1, 2, 3, 4].map(() => accounts.reserve({ userId: host.userId, connection: MAIN, model: "m", tokensIn: 10, tokensOut: 10, settings: none, signal })));
+    expect(free).toHaveLength(4);
+  });
+
+  test("calls at once: an agent's model call past the limit waits to be sent until one under way ends", async () => {
+    const answered: (() => void)[] = [];
+    const settings = settingsWith((s) => (s.throttles = [{ id: MAIN, requestsPerMinute: "none", tokensPerMinute: "none", atOnce: 1 }]));
+    const r = rig(() => {
+      const { promise, resolve } = Promise.withResolvers<QuietScript>();
+      answered.push(() => resolve("Done."));
+      return promise;
+    }, settings);
+    const one = r.start().send("First?");
+    const two = r.start().send("Second?");
+    await flush();
+    expect(r.host.quietCalls).toHaveLength(1);
+    answered[0]?.();
+    expect(await one).toMatchObject({ status: "answered" });
+    await flush();
+    expect(r.host.quietCalls).toHaveLength(2);
+    answered[1]?.();
+    expect(await two).toMatchObject({ status: "answered" });
   });
 });
 
@@ -1213,7 +1289,7 @@ describe("the settings", () => {
   test("Settings saves them as the other pages' settings: a list replaces whole, and a reset goes back to the default", async () => {
     const rig = new Rig();
     const set = async (patch: JsonObject) => settingsOf(rig.body(await rig.send({ type: "lre.settings.set", patch: { agents: patch } }))).agents;
-    expect((await set({ throttles: [{ id: MAIN, requestsPerMinute: 30, tokensPerMinute: "none" }] })).throttles).toEqual([{ id: MAIN, requestsPerMinute: 30, tokensPerMinute: "none" }]);
+    expect((await set({ throttles: [{ id: MAIN, requestsPerMinute: 30, tokensPerMinute: "none" }] })).throttles).toEqual([{ id: MAIN, requestsPerMinute: 30, tokensPerMinute: "none", atOnce: "none" }]);
     expect((await set({ throttles: [] })).throttles).toEqual([]);
     expect((await set({ turn: { tokensOut: 20_000 } })).turn.tokensOut).toBe(20_000);
     expect((await set({ turn: { tokensOut: null } })).turn.tokensOut).toBe("none");

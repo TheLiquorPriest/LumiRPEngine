@@ -3,9 +3,9 @@
 // (the main agent's stage, then the role run it started, with its agent), with each message, the
 // reasoning, each tool call as a card holding its arguments and its result, its caret's state
 // (running, done, failed, none), the writes and what came of them, tokens and times, the turn's
-// phases and how it ended; the role filter shows one role's groups; Cancel shows while the turn can
-// be stopped; and GM → Workspace's session panel shows the session whole, as message bubbles,
-// saying what the main agent doesn't read now.
+// phases and how it ended, and its plan, each role's line with why; the role filter shows one role's
+// groups; Cancel shows while the turn can be stopped; and GM → Workspace's session panel shows the
+// session whole, as message bubbles, saying what the main agent doesn't read now.
 
 import { describe, expect, test } from "bun:test";
 import type { VNode } from "preact";
@@ -13,6 +13,7 @@ import { Button, Seg } from "../../src/frontend/components";
 import { LiveFeed, liveControls, type LiveBody, toolCardState } from "../../src/frontend/gm/live";
 import { SessionPanel } from "../../src/frontend/gm/workspace";
 import { followLive, liveItems, type LiveEntry, type LiveView } from "../../src/shared/live";
+import type { PlanRow } from "../../src/shared/agent-pipeline";
 import type { SessionView } from "../../src/shared/protocol";
 import { press, propsOf, type Props } from "../support/tree";
 
@@ -168,6 +169,27 @@ describe("the feed", () => {
 
   test("with no run since the engine started, says where the turns' transcripts are", () => {
     expect(textOf(feed(null))).toContain("transcripts/");
+  });
+
+  test("the turn's plan is a mark that folds: how many roles run, are kept and aren't asked or are off, then each role's line, how it stands and why", () => {
+    const rows: PlanRow[] = [
+      { role: "intent", status: "runs", why: "The fixed pipeline runs it when the turn asks." },
+      { role: "scene", status: "kept", why: "Its lore and notes are kept: the scene is unchanged since the last turn (Smart persistence)." },
+      { role: "minds", status: "auto", why: "Its stage runs on its own, as the fixed pipeline runs it: Settings → Agents → Main agent → Stages." },
+      { role: "knowledge", status: "none", why: "The chat doesn't track knowledge: GM → This chat." },
+      { role: "director", status: "off", why: "Switched off on its page: Settings → Agents → Roles, When it runs." },
+    ];
+    const planned: LiveView = { ...RUNNING, entries: [...ENTRIES, { seq: 10, at: 2500, kind: "plan", rows }] };
+    expect(liveItems(planned).map((i) => (i.type === "group" ? `${i.role}:${i.status}` : i.entry.kind))).toEqual(["main:working", "scene:working", "plan"]);
+    const tree = feed(planned);
+    const [mark] = propsOf(tree, "li").filter((p) => p["data-lre-live-mark"] === "plan");
+    if (!mark) throw new Error("no plan mark");
+    expect(textOf(mark.children)).toContain("This turn's plan: 2 run, 1 kept, 2 not asked or off");
+    const lines = propsOf(mark.children, "li");
+    expect(lines.map((l) => [l["data-lre-plan-role"], l["data-status"]])).toEqual(rows.map((r) => [r.role, r.status]));
+    expect(lines.map((l) => textOf(l.children))).toEqual(["Intent Runs The fixed pipeline runs it when the turn asks.", `Scene and lore Kept ${rows[1]?.why}`, `Minds Auto ${rows[2]?.why}`, `Knowledge None ${rows[3]?.why}`, `Director Off ${rows[4]?.why}`]);
+    // Its list is named for a screen reader.
+    expect(propsOf(mark.children, "ul")[0]?.["aria-label"]).toBe("This turn's plan");
   });
 });
 

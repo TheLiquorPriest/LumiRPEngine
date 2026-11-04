@@ -14,8 +14,10 @@
 import type { JsonObject, JsonValue } from "../../../shared/json";
 import type { EntityId, PlaceId } from "../../../shared/ids";
 import type { LedgerEvent, PackEvent } from "../../../shared/ledger";
-import { FILING_STATUSES, FINANCE_ACTIONS, STRUCTURE_WORDS, type ConsolidationView, type FilingStatus, type Flow, type FlowSchedule, type TaxesView, type TaxYearView } from "../../../shared/finance";
-import type { FieldDef } from "../../../shared/world";
+import { FILING_STATUSES, FINANCE_ACTIONS, ownersIn, STRUCTURE_WORDS, type ConsolidationView, type FilingStatus, type Flow, type FlowSchedule, type TaxesView, type TaxYearView } from "../../../shared/finance";
+import type { FieldDef, WorldDoc } from "../../../shared/world";
+import type { LintIssue } from "../../../shared/protocol";
+import type { Registry } from "../../../engine/registry-impl";
 import { calendarOf, clockAt, dateAt, dayIndexOf, dayIndexOfText, MINUTES_PER_DAY, monthName } from "../../../engine/calendar";
 import { dissolvedOn, jobsAt, mayAct, orgTypeOf } from "../../../engine/org";
 import { labelOf, numOf, objOf, optionalService, own, rowOf, sliceOf, sliceRecord, strOf } from "../../../engine/pack-kit";
@@ -24,17 +26,24 @@ import { passMemo } from "../../../engine/read-pass";
 import { isGone, kindIs } from "../../../engine/scope";
 import { COMPANY_KIND } from "../../../engine/selector";
 import type { WorldState } from "../../../engine/state";
-import { addToBooks, businessBooks, monthBook, monthOf, operatingAccount, payablesOf, totalsOf } from "./books";
-import { deductibleDonors, donationsGiven, donationsReceived, exemptStatuses, exemptStatusOf, isExempt } from "./exempt";
+import { NONPROFIT_STRUCTURE } from "../../../shared/org";
+import { addToBooks, businessBooks, monthBook, monthOf, monthsBetween, operatingAccount, payablesOf, totalsOf } from "./books";
+import { deductibleDonors, donationsGiven, donationsReceived, exemptStatuses, exemptStatusOf, foundationGifts, foundationTerms, holdsSCorpShares, isExempt } from "./exempt";
 import { hiddenFrom, holdersOf, moneyLevel, regionRow } from "./model";
 import type { FinanceApi, FinanceRegistry, FlowPosting } from "./module";
+import { gainsIn, incomeIn } from "./records";
 import { votesIn } from "./shares";
 import { unemploymentDueAt, unemploymentTotals, unemploymentView } from "./unemployment";
+import { carriedInto, closedYear, dividendsReceived, earningsAndProfits, foundationProgress, foundationTaxFor, penaltyTables, penaltyTaxesOn, penaltyTaxFor, registerYearClose, taxPaidFor, type CorporateYear } from "./year-close";
+import { grantorOf } from "./gains";
+import type { TaxesExtra } from "../../../shared/tax-year";
 
 declare module "../../../engine/registry" {
   interface ServiceMap {
     /** A change of a company's structure as the bookkeeping writes it, taxed from the next estimated-tax period (ORG-SPEC §3.13); nothing when it is so already. */
     "economy.restructure": (ctx: ReadContext, business: EntityId, structure: string) => LedgerEvent[] | Rejection;
+    /** Why an S corporation may not have `holders` (every worth holder after a change), in words; null when it may, or isn't an S corporation (§26.3). */
+    "economy.scorp_holders": (ctx: ReadContext, business: EntityId, holders: readonly EntityId[]) => Rejection | null;
   }
 }
 
@@ -244,9 +253,10 @@ export function payTaxes(ctx: Ctx, person: EntityId, input: PayTaxInput): PayTax
 export const STRUCTURES = ["sole_proprietorship", "partnership", "llc", "s_corp", "c_corp"] as const;
 export type Structure = (typeof STRUCTURES)[number];
 
-/** A business's legal structure; an LLC by default. */
+/** A business's legal structure; an LLC by default. A nonprofit, with no owners, is taxed as a corporation unless its exempt status spares it. */
 export function structureOf(state: Readonly<WorldState>, business: EntityId): Structure {
   const s = strOf(own(state.entities, business)?.fields.structure);
+  if (s === NONPROFIT_STRUCTURE) return "c_corp";
   return (STRUCTURES as readonly string[]).includes(s) ? (s as Structure) : "llc";
 }
 
@@ -395,6 +405,13 @@ function pathsByHolder(ctx: ReadContext, api: FinanceApi): Map<EntityId, ProfitP
             const held = out.get(holder);
             if (held) held.push(reached);
             else out.set(holder, [reached]);
+            // A grantor trust's share is its settlor's (§26.3): the profit reaches them as if they held it.
+            const settlor = api.partyKind(ctx, holder) === "trust" ? grantorOf(ctx, holder) : null;
+            if (settlor !== null && settlor !== id && !path.via.includes(settlor)) {
+              const theirs = out.get(settlor);
+              if (theirs) theirs.push({ ...reached });
+              else out.set(settlor, [{ ...reached }]);
+            }
             if (company(holder)) next.push({ ...reached, via: [...path.via, holder] });
           }
         }
@@ -444,16 +461,27 @@ export function ordinaryIncome(api: FinanceApi, ctx: ReadContext, person: Entity
 /**
  * A person's deduction for a year (§3.11, Phase 5): the standard deduction for their filing status,
  * with the charitable allowance someone who doesn't itemize takes (from its year, up to their
- * deductible gifts), or, when more, their deductible gifts themselves up to the AGI limit, as the only
- * itemized deduction this engine keeps.
+ * deductible gifts to public charities), or, when more, their deductible gifts themselves up to the
+ * AGI limit, as the only itemized deduction this engine keeps; gifts to a private foundation within
+ * its row's lower limit (30%) and what the AGI limit leaves of it.
  */
 function deductionFor(ctx: ReadContext, person: EntityId, year: number, filing: FilingStatus, agi: number): number {
   const t = federalTables(ctx);
   const given = donationsGiven(ctx.state, person, year).deductible;
   if (given <= 0) return t.standardDeduction[filing];
-  const allowance = year >= t.charitable.nonItemizerFrom ? Math.min(given, t.charitable.nonItemizer[filing]) : 0;
-  const itemized = Math.min(given, (Math.max(0, agi) * t.charitable.agiLimitPct) / 100);
-  return Math.max(t.standardDeduction[filing] + allowance, itemized);
+  const toFoundations = Math.min(given, foundationGifts(ctx.state, person, year));
+  const toPublic = given - toFoundations;
+  const allowance = year >= t.charitable.nonItemizerFrom ? Math.min(toPublic, t.charitable.nonItemizer[filing]) : 0;
+  const limit = (Math.max(0, agi) * t.charitable.agiLimitPct) / 100;
+  const fromPublic = Math.min(toPublic, limit);
+  const foundationLimit = Math.min((Math.max(0, agi) * foundationDonorLimit(ctx)) / 100, Math.max(0, limit - fromPublic));
+  return Math.max(t.standardDeduction[filing] + allowance, fromPublic + Math.min(toFoundations, foundationLimit));
+}
+
+/** The limit on a person's gifts to private foundations, percent of their income: the exempt table's private foundation row's, else 30. */
+function foundationDonorLimit(ctx: Pick<ReadContext, "tables">): number {
+  const rows = Object.values(ctx.tables.get("economy.exempt")?.rows ?? {});
+  return numOf(rows.find((row) => typeof row.payout_pct === "number" && row.payout_pct > 0)?.donor_limit_pct, 30);
 }
 
 /**
@@ -500,10 +528,175 @@ export function estimatedTax(api: FinanceApi, ctx: ReadContext, person: EntityId
   return { cents: Math.round(federal + se + state), income };
 }
 
-/** A C corporation's taxable profit for a span: its own, and what pass-through businesses it owns (through others too) pass up to it (§3.11). */
-function corporateProfit(ctx: ReadContext, api: FinanceApi, business: EntityId, span: { from: number; to: number }): number {
+/** The corporate parameters of the finance table's federal section (§26.3): the dividends-received deduction by stake (highest band first), the NOL's limit, and the cap on gifts and how long their excess carries. */
+interface CorporateTables {
+  drd: { from: number; pct: number }[];
+  nolPct: number;
+  giftPct: number;
+  giftYears: number;
+}
+
+function corporateTables(ctx: Tables): CorporateTables {
+  const v = objOf(ctx.tables.get("economy.finance")?.rows.taxes_federal?.values);
+  const raw = objOf(v.dividends_received_deduction).bands;
+  const bands = Array.isArray(raw) ? raw.map((b) => ({ from: numOf(objOf(b).from_pct), pct: numOf(objOf(b).deduction_pct) })) : [];
+  return {
+    drd: (bands.length > 0 ? bands : [{ from: 0, pct: 50 }, { from: 20, pct: 65 }, { from: 80, pct: 100 }]).sort((a, b) => b.from - a.from),
+    nolPct: numOf(objOf(v.net_operating_loss).limit_pct, 80),
+    giftPct: numOf(objOf(v.corporate_charitable).limit_pct, 10),
+    giftYears: numOf(objOf(v.corporate_charitable).carryforward_years, 5),
+  };
+}
+
+/** The months of a year each estimated-tax period covers, in the year's order. */
+const PERIOD_MONTHS: readonly (readonly number[])[] = [...ESTIMATE_DUE].sort((a, b) => (a.months[0] ?? 0) - (b.months[0] ?? 0)).map((d) => d.months);
+
+/** What a party's accounts took in (`in`) or paid out (`out`) under a journal category over some months. */
+function journalTotal(api: FinanceApi, ctx: ReadContext, party: EntityId, months: readonly string[], category: string, side: "in" | "out"): number {
+  let total = 0;
+  for (const account of api.accountsOf(ctx, party, "worth")) for (const m of months) total += totalsOf(ctx.state, account, m)[category]?.[side] ?? 0;
+  return total;
+}
+
+/** The share of a dividend a corporation deducts (§26.3, IRC section 243): all of it from a company in its own consolidated return, else by its stake in the payer. */
+function drdPct(ctx: ReadContext, api: FinanceApi, t: CorporateTables, receiver: EntityId, payer: EntityId, clock: number): number {
+  const filers = consolidatedFilers(ctx, api, clock);
+  if ((filers.has(receiver) || filers.has(payer)) && (filers.get(receiver) ?? receiver) === (filers.get(payer) ?? payer)) return 100;
+  const share = api.shareOf(ctx.state, payer, receiver);
+  return t.drd.find((b) => share + 1e-9 >= b.from)?.pct ?? 0;
+}
+
+/** A C corporation's taxable income for a span and how it got there: the dividends it deducted, the gains it was charged, its gifts over the cap, and what it used of the loss and the gifts it carried in. */
+interface CorporateSpan {
+  taxable: number;
+  dividends: number;
+  drd: number;
+  gains: number;
+  giftsOver: number;
+  carryUsed: number;
+  nolUsed: number;
+}
+
+/**
+ * A C corporation's taxable income for a span (§3.11, §26.3): its books' profit and what pass-through
+ * businesses it owns pass up to it; the dividends from its stakes (its books keep payouts apart) less
+ * the dividends-received deduction on them and on its holdings' dividends (50%, the smallest stake's);
+ * its capital gains, netted over the year less the capital loss it carried in and charged with the
+ * span that ends the year (or with the one under way, `final`, as it goes or as Taxes reads it so far);
+ * its gifts only up to 10% of its income without them, then what it carried of earlier years' excess;
+ * and, off what is left, its net operating loss up to 80%. What earlier periods of the year used of
+ * what it carried in is spent. Kept for a read pass.
+ */
+function corporateSpan(ctx: ReadContext, api: FinanceApi, business: EntityId, span: { from: number; to: number }, final = false): CorporateSpan {
+  const memo = passMemo([ctx.state, ctx.world, api], "economy.corporate_span", () => new Map<string, CorporateSpan>());
+  const key = `${business}|${span.from}|${span.to}|${final}`;
+  const known = memo.get(key);
+  if (known) return known;
+  const t = corporateTables(ctx);
+  const cal = calendarOf(ctx.world);
+  const year = dateAt(cal, span.from).year;
+  const months = monthsBetween(ctx.world, span.from, span.to);
   const through = passedThrough(ctx, api, business, span);
-  return businessBooks(api, ctx, business, span.from, span.to).profit + through.selfEmployed + through.other;
+  // Dividends from its stakes (its books keep payouts apart), with what was deducted of each as its stake stood when paid.
+  const received = dividendsReceived(ctx.state, business, months);
+  const dividends = received.cents;
+  let drd = received.deducted;
+  drd += (journalTotal(api, ctx, business, months, "dividends", "in") * (t.drd[t.drd.length - 1]?.pct ?? 0)) / 100;
+  const carried = carriedInto(ctx.state, business, year, t.giftYears);
+  const g = final || span.to >= clockAt(cal, dayIndexOf(cal, year + 1, 1, 1), 0) ? gainsIn(ctx.state, business, year) : null;
+  const gains = g ? Math.max(0, g.short + g.long - carried.capLoss) : 0;
+  const gifts = journalTotal(api, ctx, business, months, "donations", "out");
+  const pre = businessBooks(api, ctx, business, span.from, span.to).profit + through.selfEmployed + through.other + dividends - Math.round(drd) + gains + gifts;
+  let nolLeft = carried.nol;
+  let carryLeft = carried.gifts.reduce((a, x) => a + x.cents, 0);
+  for (const p of PERIOD_MONTHS) {
+    const earlier = monthsSpan(ctx, year, p);
+    if (earlier.to > span.from) break;
+    const used = corporateSpan(ctx, api, business, earlier);
+    nolLeft -= used.nolUsed;
+    carryLeft -= used.carryUsed;
+  }
+  const cap = Math.floor((Math.max(0, pre) * t.giftPct) / 100);
+  const allowed = Math.min(gifts, cap);
+  const carryUsed = Math.max(0, Math.min(carryLeft, cap - allowed));
+  const afterGifts = pre - allowed - carryUsed;
+  const nolUsed = Math.max(0, Math.min(nolLeft, Math.floor((Math.max(0, afterGifts) * t.nolPct) / 100)));
+  const out: CorporateSpan = { taxable: afterGifts - nolUsed, dividends, drd: Math.round(drd), gains, giftsOver: gifts - allowed, carryUsed, nolUsed };
+  memo.set(key, out);
+  return out;
+}
+
+/** A C corporation's taxable profit for a span (`corporateSpan`). */
+function corporateProfit(ctx: ReadContext, api: FinanceApi, business: EntityId, span: { from: number; to: number }, final = false): number {
+  return corporateSpan(ctx, api, business, span, final).taxable;
+}
+
+/**
+ * A C corporation's year as its close records it (§26.3): its taxable income and federal tax, period by
+ * period as its estimated payments work them out; the net operating loss the year made and what it
+ * carries on; its capital loss; its gifts over the cap still within their years (what it used first,
+ * oldest first); the dividends it paid; its passive income (dividends, interest, royalties) against its
+ * gross income; what its five largest individual holders hold, directly or through other companies;
+ * and its earnings and profits, its books' profit after the taxes it paid less what it paid out.
+ */
+export function corporateYear(api: FinanceApi, ctx: ReadContext, business: EntityId, year: number): CorporateYear | null {
+  if (!own(ctx.state.entities, business)) return null;
+  const t = corporateTables(ctx);
+  const fed = federalCorporatePct(ctx);
+  let taxable = 0;
+  let tax = 0;
+  let nolUsed = 0;
+  let carryUsed = 0;
+  let over = 0;
+  let dividendsIn = 0;
+  for (const p of PERIOD_MONTHS) {
+    const s = corporateSpan(ctx, api, business, monthsSpan(ctx, year, p));
+    taxable += s.taxable;
+    tax += Math.round((Math.max(0, s.taxable) * fed) / 100);
+    nolUsed += s.nolUsed;
+    carryUsed += s.carryUsed;
+    over += s.giftsOver;
+    dividendsIn += s.dividends;
+  }
+  const span = monthsSpan(ctx, year, [1, 12]);
+  const months = monthsBetween(ctx.world, span.from, span.to);
+  const books = businessBooks(api, ctx, business, span.from, span.to);
+  const through = passedThrough(ctx, api, business, span);
+  const carried = carriedInto(ctx.state, business, year, t.giftYears);
+  const g = gainsIn(ctx.state, business, year);
+  const net = g.short + g.long;
+  const gifts: { year: number; cents: number }[] = [];
+  let use = carryUsed;
+  for (const x of carried.gifts) {
+    const take = Math.min(use, x.cents);
+    use -= take;
+    if (x.cents - take > 0) gifts.push({ year: x.year, cents: x.cents - take });
+  }
+  if (over > 0) gifts.push({ year, cents: over });
+  const passive = journalTotal(api, ctx, business, months, "dividends", "in") + journalTotal(api, ctx, business, months, "interest", "in") + journalTotal(api, ctx, business, months, "royalties", "in") + dividendsIn;
+  const people: number[] = [];
+  for (const [holder, paths] of pathsByHolder(ctx, api)) {
+    if (!kindIs(ctx.registry, ctx.world, own(ctx.state.entities, holder)?.kind ?? "", "person")) continue;
+    const share = paths.filter((p) => p.source === business).reduce((a, p) => a + p.share, 0);
+    if (share > 0) people.push(share);
+  }
+  const top5 = people.sort((a, b) => b - a).slice(0, penaltyTables(ctx).phc.holders).reduce((a, s) => a + s, 0);
+  const epStart = earningsAndProfits(ctx.state, business, year);
+  const loss = Math.max(0, -taxable);
+  return {
+    taxable,
+    tax,
+    loss,
+    nol: Math.max(0, carried.nol - nolUsed) + loss,
+    capLoss: net >= 0 ? Math.max(0, carried.capLoss - net) : carried.capLoss - net,
+    gifts,
+    dividends: books.distributions,
+    passive,
+    gross: books.revenue + dividendsIn + Math.max(0, through.selfEmployed + through.other),
+    top5: Math.round(top5 * 100) / 100,
+    epStart,
+    ep: epStart + books.profit + through.selfEmployed + through.other + dividendsIn + net - books.distributions,
+  };
 }
 
 /** Whether a company may be in a consolidated return at `clock` (§3.11, Phase 5): taxed as a C corporation then, not exempt, and not yet wound up then (its periods before it was dissolved stay its return's). */
@@ -595,11 +788,11 @@ function membersOf(ctx: ReadContext, api: FinanceApi, parent: EntityId, clock: n
  * taxable profit, one member's loss offsetting another's profit, and each member's state rate on its
  * own profit, as the states tax each apart.
  */
-function consolidatedTax(ctx: ReadContext, api: FinanceApi, parent: EntityId, members: readonly EntityId[], span: { from: number; to: number }): { profit: number; tax: number } {
+function consolidatedTax(ctx: ReadContext, api: FinanceApi, parent: EntityId, members: readonly EntityId[], span: { from: number; to: number }, final = false): { profit: number; tax: number } {
   let combined = 0;
   let state = 0;
   for (const b of [parent, ...members]) {
-    const profit = corporateProfit(ctx, api, b, span);
+    const profit = corporateProfit(ctx, api, b, span, final);
     combined += profit;
     state += (Math.max(0, profit) * numOf(regionRow(ctx, b).state_income_tax_effective_pct)) / 100;
   }
@@ -626,9 +819,83 @@ function restructureEvents(api: FinanceApi, ctx: ReadContext, business: EntityId
   if (structure === structureOf(ctx.state, business)) return [];
   const holders = api.ownersOf(ctx.state, business).filter((o) => api.shareOf(ctx.state, business, o.party) > 0);
   if (structure === "sole_proprietorship" && new Set(holders.map((o) => o.party)).size !== 1) return { code: "owners", reason: `A sole proprietorship has exactly one owner; ${labelOf(ctx, business)} has ${new Set(holders.map((o) => o.party)).size}` };
+  const scorp = structure === "s_corp" ? sCorpProblem(api, ctx, business, holders.map((o) => o.party)) : null;
+  if (scorp !== null) return { code: "scorp_holders", reason: `${labelOf(ctx, business)} can't become an S corporation: ${scorp}` };
   const taxed = taxStructureAt(ctx, business, ctx.state.clock);
   const set = (field: string, value: string): LedgerEvent => ({ type: "set", entity: business, field, value });
   return [set("structure", structure), ...(taxed === structure ? [set("structure_before", ""), set("structure_from", "")] : [set("structure_before", taxed), set("structure_from", nextTaxPeriod(ctx, ctx.state.clock))])];
+}
+
+/** The most shareholders an S corporation may have (the finance table's `s_corporation.max_holders`, 100 by default; IRC section 1361(b)(1)(A)). */
+function sCorpMax(ctx: Tables): number {
+  return numOf(objOf(objOf(ctx.tables.get("economy.finance")?.rows.taxes_federal?.values).s_corporation).max_holders, 100);
+}
+
+/** Whether a trust may hold an S corporation's shares: a grantor trust (revocable, its settlor a person), or one whose beneficiaries are all people (as an electing small business trust). */
+function eligibleTrust(api: FinanceApi, ctx: ReadContext, trust: EntityId): boolean {
+  const f = own(ctx.state.entities, trust)?.fields;
+  const settlor = strOf(f?.settlor);
+  if (f?.revocable === true && settlor !== "" && api.partyKind(ctx, settlor) === "person") return true;
+  const beneficiaries = api.ownersOf(ctx.state, trust).filter((o) => api.shareOf(ctx.state, trust, o.party) > 0);
+  return beneficiaries.length > 0 && beneficiaries.every((o) => api.partyKind(ctx, o.party) === "person");
+}
+
+/**
+ * Why an S corporation can't have these worth holders (§26.3, IRC section 1361), in words: one that
+ * isn't a person, an eligible trust or an organization whose exempt status may hold its shares (a
+ * 501(c)(3)'s), or more of them than the table's limit; null when it may.
+ */
+export function sCorpProblem(api: FinanceApi, ctx: ReadContext, business: EntityId, holders: readonly EntityId[]): string | null {
+  const all = [...new Set(holders)].filter((h) => h !== business).sort();
+  for (const h of all) {
+    const kind = api.partyKind(ctx, h);
+    if (kind === "person" || (kind === "trust" && eligibleTrust(api, ctx, h)) || holdsSCorpShares(ctx, h)) continue;
+    const what = kind === "business" ? "a company" : kind === "trust" ? "a trust that isn't a grantor trust and has beneficiaries other than people" : "an organization whose status can't hold one";
+    return `${labelOf(ctx, h)} is ${what}, and an S corporation's shareholders are people, eligible trusts and charities (501(c)(3) organizations)`;
+  }
+  const max = sCorpMax(ctx);
+  return all.length > max ? `it would have ${all.length} shareholders, and an S corporation has at most ${max}` : null;
+}
+
+/** An S corporation's check of its holders after a change, as a refusal (`economy.scorp_holders`); null when it may have them, or isn't an S corporation. */
+export function sCorpRefusal(api: FinanceApi, ctx: ReadContext, business: EntityId, holders: readonly EntityId[]): Rejection | null {
+  if (structureOf(ctx.state, business) !== "s_corp") return null;
+  const problem = sCorpProblem(api, ctx, business, holders);
+  return problem === null ? null : { code: "scorp_holders", reason: `${labelOf(ctx, business)} is an S corporation: ${problem}` };
+}
+
+/**
+ * Lint (`economy.scorp_holders`, a warning on its owners): an S corporation the world authors with a
+ * holder who can't hold its shares, or more holders than the table allows, each said in words. The
+ * acts that change its holders refuse the same (`economy.scorp_holders`).
+ */
+function sCorpIssues(world: WorldDoc, registry: Registry | undefined): LintIssue[] {
+  const is = (kind: string, base: string): boolean => (registry ? kindIs(registry, world, kind, base) : kind === base);
+  const statuses = world.tables["economy.exempt"]?.rows ?? {};
+  const max = numOf(objOf(objOf(world.tables["economy.finance"]?.rows.taxes_federal?.values).s_corporation).max_holders, 100);
+  const holding = (fields: Readonly<JsonObject>): EntityId[] => [...new Set(ownersIn(fields).filter((o) => (o.share ?? 0) > 0 || o.role === "owner" || o.role === "joint").map((o) => o.party))];
+  const person = (id: EntityId): boolean => is(own(world.entities, id)?.kind ?? "", "person");
+  const out: LintIssue[] = [];
+  for (const id of Object.keys(world.entities).sort()) {
+    const e = own(world.entities, id);
+    if (!e || !is(e.kind, "business") || e.fields.structure !== "s_corp") continue;
+    const holders = holding(e.fields).filter((h) => h !== id);
+    const path = `entities.${id}.fields.owners`;
+    for (const h of holders) {
+      const he = own(world.entities, h);
+      if (!he || person(h)) continue;
+      const status = own(statuses, strOf(he.fields.tax_exempt));
+      if (status?.s_corp_holder === true) continue;
+      if (is(he.kind, "trust")) {
+        const settlor = strOf(he.fields.settlor);
+        const beneficiaries = holding(he.fields);
+        if ((he.fields.revocable === true && person(settlor)) || (beneficiaries.length > 0 && beneficiaries.every(person))) continue;
+      }
+      out.push({ severity: "warning", code: "economy.scorp_holders", path, message: `${e.name} is an S corporation, but ${he.name} can't hold its shares: an S corporation's shareholders are people, eligible trusts (a grantor trust, or one whose beneficiaries are all people) and charities (501(c)(3) organizations). Make it a C corporation, or move ${he.name}'s share to someone who may hold it.` });
+    }
+    if (holders.length > max) out.push({ severity: "warning", code: "economy.scorp_holders", path, message: `${e.name} is an S corporation with ${holders.length} shareholders: it may have at most ${max}.` });
+  }
+  return out;
 }
 
 // ---------------------------------------------------------------- sales tax
@@ -809,7 +1076,9 @@ function estimatedDue(api: FinanceApi, ctx: ReadContext, party: EntityId, busine
     const filed = consolidatedFilers(ctx, api, span.from).has(party);
     if (filed && !alone) continue;
     const members = filed ? [] : membersOf(ctx, api, party, span.from);
-    const tax = members.length > 0 ? consolidatedTax(ctx, api, party, members, span).tax : corporateTax(ctx, party, corporateProfit(ctx, api, party, span));
+    // As it goes (`alone`), the period under way is its last: its gains so far are charged with it.
+    const final = alone && span.from <= ctx.state.clock && ctx.state.clock < span.to;
+    const tax = members.length > 0 ? consolidatedTax(ctx, api, party, members, span, final).tax : corporateTax(ctx, party, corporateProfit(ctx, api, party, span, final));
     const due = tax - [party, ...members].reduce((a, m) => a + numOf(own(objOf(own(all, m)), p.key)), 0);
     if (due > 0) periods.push({ key: p.key, cents: due, members, span });
   }
@@ -836,7 +1105,7 @@ export function taxStillOwed(api: FinanceApi, ctx: ReadContext, business: Entity
   const cents = periods.reduce((a, p) => a + p.cents, 0);
   if (cents <= 0) return null;
   const members = [...new Set(periods.flatMap((p) => p.members))].sort();
-  const credited: LedgerEvent[] = members.map((m) => ({ type: "economy.estimated_tax", data: { party: m, periods: periods.filter((p) => p.members.includes(m)).map((p) => ({ key: p.key, cents: corporateTax(ctx, m, corporateProfit(ctx, api, m, p.span)) })) } }));
+  const credited: LedgerEvent[] = members.map((m) => ({ type: "economy.estimated_tax", data: { party: m, periods: periods.filter((p) => p.members.includes(m)).map((p) => ({ key: p.key, cents: corporateTax(ctx, m, corporateProfit(ctx, api, m, p.span, p.span.from <= ctx.state.clock && ctx.state.clock < p.span.to)) })) } }));
   return { cents, extra: [{ type: "economy.estimated_tax", data: { party: business, periods: periods.map((p) => ({ key: p.key, cents: p.cents })), business: true } }, ...credited] };
 }
 
@@ -865,7 +1134,7 @@ export function payrollTaxesIn(state: Readonly<WorldState>, employer: EntityId, 
  * statuses the world's table offers, unless it's a household or the party, which hold none); what
  * falls due next; a change of structure waiting; and what the viewer may do.
  */
-export function taxesView(api: FinanceApi, ctx: ReadContext, org: EntityId, viewer: EntityId | null): TaxesView {
+export function taxesView(api: FinanceApi, ctx: ReadContext, org: EntityId, viewer: EntityId | null): TaxesView & TaxesExtra {
   const cal = calendarOf(ctx.world);
   const now = ctx.state.clock;
   const year = dateAt(cal, now).year;
@@ -899,7 +1168,10 @@ export function taxesView(api: FinanceApi, ctx: ReadContext, org: EntityId, view
       if (share <= 0) continue;
       const kind = own(ctx.state.entities, holder)?.kind ?? "";
       const name = named(holder, "someone");
-      if (kindIs(ctx.registry, ctx.world, kind, "person")) taxedTo.push({ name, share });
+      // A trust pays on its share as trusts are taxed (§26.3), unless it is exempt; a grantor trust's is its settlor's, listed under them.
+      const trust = api.partyKind(ctx, holder) === "trust";
+      if (trust && grantorOf(ctx, holder) !== null) continue;
+      if (kindIs(ctx.registry, ctx.world, kind, "person") || (trust && !isExempt(ctx, holder))) taxedTo.push({ name, share });
       else if (isExempt(ctx, holder)) exemptHolders.push({ name, share });
       else if (!kindIs(ctx.registry, ctx.world, kind, "business")) untaxed.push({ name, share });
     }
@@ -912,7 +1184,7 @@ export function taxesView(api: FinanceApi, ctx: ReadContext, org: EntityId, view
   const elected = own(ctx.state.entities, org)?.fields.consolidated_return === true;
   const group = corporate && filer === undefined ? affiliatedGroup(ctx, api, org, now) : [];
   const listed = elected ? group.filter((g) => members.includes(g.id)) : group;
-  const together = members.length > 0 && values ? consolidatedTax(ctx, api, org, members, yearSpan) : null;
+  const together = members.length > 0 && values ? consolidatedTax(ctx, api, org, members, yearSpan, true) : null;
   const pct = (n: number): number => Math.round(n * 100) / 100;
   const consolidation: ConsolidationView | null = corporate && filer === undefined && (elected || listed.length > 0) ? { elected, members: listed.map((g) => ({ name: named(g.id, "a company"), votes: pct(g.votes), share: pct(g.share) })), profit: together?.profit ?? null, tax: together?.tax ?? null } : null;
   const due: TaxesView["due"] = [];
@@ -938,7 +1210,7 @@ export function taxesView(api: FinanceApi, ctx: ReadContext, org: EntityId, view
     income: exempt ? "exempt" : company ? (corporate ? "corporate" : "owners") : null,
     years,
     salesHeld: company ? Math.max(0, payablesOf(ctx.state, org).sales_tax) : 0,
-    incomeSoFar: corporate && values && filer === undefined ? (together?.tax ?? corporateTax(ctx, org, corporateProfit(ctx, api, org, yearSpan))) : null,
+    incomeSoFar: corporate && values && filer === undefined ? (together?.tax ?? corporateTax(ctx, org, corporateProfit(ctx, api, org, yearSpan, true))) : null,
     taxedTo,
     untaxed,
     exemptHolders,
@@ -950,6 +1222,44 @@ export function taxesView(api: FinanceApi, ctx: ReadContext, org: EntityId, view
     consolidation,
     filedBy: filer !== undefined ? named(filer, "its parent") : null,
     acts: viewer === null ? null : { consolidate },
+    ...taxesExtra(api, ctx, org, corporate && values, viewer),
+  };
+}
+
+/**
+ * What Taxes adds for the year close (§26.3): a C corporation's penalty taxes (last year's as its
+ * close and consent dividends read them, and its earnings and profits now) and what it carries in; a
+ * private foundation's payout, grants and taxes; and an S corporation's holders against its limit.
+ */
+function taxesExtra(api: FinanceApi, ctx: ReadContext, org: EntityId, corporate: boolean, viewer: EntityId | null): TaxesExtra {
+  const year = dateAt(calendarOf(ctx.world), ctx.state.clock).year;
+  const last = corporate ? penaltyTaxFor(ctx, org, year - 1) : null;
+  const carried = corporate ? carriedInto(ctx.state, org, year, corporateTables(ctx).giftYears) : null;
+  const gifts = carried?.gifts.reduce((a, g) => a + g.cents, 0) ?? 0;
+  const terms = foundationTerms(ctx, org);
+  const progress = terms ? foundationProgress(api, ctx, org) : null;
+  const close = terms ? closedYear(ctx.state, org, year - 1) : null;
+  const holders = structureOf(ctx.state, org) === "s_corp" && kindIs(ctx.registry, ctx.world, own(ctx.state.entities, org)?.kind ?? "", "business") ? [...new Set(api.ownersOf(ctx.state, org).filter((o) => api.shareOf(ctx.state, org, o.party) > 0).map((o) => o.party))] : null;
+  const problem = holders ? sCorpProblem(api, ctx, org, holders) : null;
+  return {
+    penalty: corporate ? { on: penaltyTaxesOn(ctx), last: last ? { ...last, paid: taxPaidFor(ctx.state, "penalty_taxes", org, year - 1) !== null } : null, ep: earningsAndProfits(ctx.state, org, year) } : null,
+    carry: carried && (carried.nol > 0 || carried.capLoss > 0 || gifts > 0) ? { nol: carried.nol, capitalLoss: carried.capLoss, gifts } : null,
+    foundation:
+      terms && progress
+        ? {
+            ...terms,
+            year: progress.year,
+            assets: progress.assets,
+            payoutSoFar: progress.payoutSoFar,
+            granted: progress.granted,
+            lastShortfall: progress.lastShortfall,
+            leftOfLast: progress.leftOfLast,
+            last: close ? { year: year - 1, assets: numOf(close.assets), payout: numOf(close.payout), grants: numOf(close.grants), shortfall: numOf(close.shortfall), nii: numOf(close.nii), excise: numOf(close.excise), undistributed: numOf(close.undistributed), tax: numOf(close.tax) } : null,
+            due: foundationTaxFor(ctx, org, year - 1)?.cents ?? null,
+          }
+        : null,
+    // A hidden holder's eligibility names them only to the GM.
+    scorp: holders ? { holders: holders.length, max: sCorpMax(ctx), problem: problem !== null && viewer !== null && holders.some((h) => hiddenFrom(ctx, viewer, h)) ? "One of its holders can't hold an S corporation's shares" : problem } : null,
   };
 }
 
@@ -977,6 +1287,7 @@ const TAX_FIELDS: Record<string, FieldDef> = {
   structure_before: { type: "text", label: "Taxed as, until the change of structure (sole_proprietorship, partnership, llc, s_corp or c_corp)", domain: "money", level: 4 },
   structure_from: { type: "text", label: "Its structure is taxed from (YYYY-MM-DD)", domain: "money", level: 4 },
   consolidated_return: { type: "bool", label: "Files one consolidated federal return with the corporations it holds 80% or more of (an election)", domain: "money", level: 3 },
+  opening_ep: { type: "money", label: "Earnings and profits it had kept when the story begins (the accumulated earnings tax's credit reads it)", domain: "money", level: 4 },
 };
 
 /** Estimated tax: a flow per person with contract pay or pass-through profit and per C corporation, its provider, and the tax queries the holdings module shares; changes of structure; an organization's Taxes. */
@@ -1022,6 +1333,10 @@ export function registerTaxes(r: FinanceRegistry): void {
   core.query("economy.ordinary_income", (ctx, person, year) => ordinaryIncome(api, ctx, person, year));
   core.query("economy.income_tax", (ctx, filing, taxable) => bracketTax(federalTables(ctx).brackets[filing], taxable));
   core.service("economy.restructure", (ctx, business, structure) => restructureEvents(api, ctx, business, structure));
+  core.service("economy.scorp_holders", (ctx, business, holders) => sCorpRefusal(api, ctx, business, holders));
+  core.lint({ code: "economy.scorp_holders", check: (world, registry) => sCorpIssues(world, registry) });
+  // The year close, penalty taxes, consent dividends and a private foundation's money read a corporation's year from here.
+  registerYearClose(r, { corporateYear: (ctx, business, year) => corporateYear(api, ctx, business, year), corporation: (ctx, business, clock) => taxStructureAt(ctx, business, clock) === "c_corp" && !isExempt(ctx, business), deductionPct: (ctx, receiver, payer) => dividendDeductionPct(api, ctx, receiver, payer) });
   // What a person's deductible gifts saved them, refunded each April at the top level (Phase 5).
   r.flows({
     id: "donation_refund",
@@ -1071,4 +1386,9 @@ export function registerTaxes(r: FinanceRegistry): void {
       return (company && level >= 3) || (level >= 3 && exemptStatusOf(ctx, org) !== null) || employs || statusable ? (taxesView(api, ctx, org, viewer) as unknown as JsonValue) : null;
     },
   });
+}
+
+/** The share of a dividend a corporation deducts from a payer as things stand now (§26.3, IRC section 243): all of it within its consolidated return, else by its stake. */
+export function dividendDeductionPct(api: FinanceApi, ctx: ReadContext, receiver: EntityId, payer: EntityId): number {
+  return drdPct(ctx, api, corporateTables(ctx), receiver, payer, ctx.state.clock);
 }

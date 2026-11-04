@@ -1,8 +1,9 @@
 // Settings → Agents (AGENT-LOOP-PLAN §12, §15; INC1-SPEC R1; INC2-SPEC C12): the hub of what the
-// agent runtime runs under. It opens with a turn at a glance (each stage of a turn, the roles that work
-// in it, where each runs and how), then every agent call's two switches (streaming, and thinking in
-// tool loops), then a row for each of its sections, each a page of its own under its name, saying what
-// it holds and how many of its settings are changed: Pipeline, Review card, System instructions,
+// agent runtime runs under. It opens with a turn at a glance (each stage of a turn, how it runs while a
+// main agent decides the turn, the roles that work in it, where each runs and how), then every agent
+// call's two switches (streaming, and thinking in tool loops), then a row for each of its sections,
+// each a page of its own under its name, saying what it holds and how many of its settings are
+// changed: Pipeline, Review card, System instructions,
 // Budgets, Compaction, Recording, Throttles, Caching and Acceptance runs. A role's own settings are
 // its page's (role-page.tsx), the main agent's Main agent's. Every number and word a limit shows comes
 // from shared/agent-settings.ts. Settings save as a merge patch, so a Default sends null, the
@@ -13,7 +14,8 @@
 import { useEffect, useId, useState } from "preact/hooks";
 import { ROLE_IDS, ROLE_LABEL, type RoleId } from "../../shared/agent-roles";
 import type { AcceptanceConnection, AcceptanceRunView, AcceptanceState, AgentBudget, AgentSettings, ConnectionThrottle, KeptSettings, MemoryPlacement, PipelineMode, ReviewPlacement, TurnBudget } from "../../shared/agent-settings";
-import { BUDGET_DEFS, CEILING_MIN, COMPACTION_DEFS, DEFAULT_ACCEPTANCE, defaultAgentSettings, ESTIMATE_FACTOR_MIN, GM_OPS_DEF, KEPT_DEFS, LOOP_DEFS, MAIN_AGENT_ROLE, MEMORY_PLACEMENT_LABELS, MEMORY_PLACEMENTS, OUTPUT_CHARS_DEF, PIPELINE_MODE_LABELS, PIPELINE_MODES, REVIEW_PLACEMENT_LABELS, REVIEW_PLACEMENTS, SYSTEM_TOKENS_DEF, THROTTLE_MIN, TURN_DEFS } from "../../shared/agent-settings";
+import { AT_ONCE_DEF, BUDGET_DEFS, CEILING_MIN, COMPACTION_DEFS, DEFAULT_ACCEPTANCE, defaultAgentSettings, ESTIMATE_FACTOR_MIN, GM_OPS_DEF, KEPT_DEFS, LOOP_DEFS, MAIN_AGENT_ROLE, MEMORY_PLACEMENT_LABELS, MEMORY_PLACEMENTS, OUTPUT_CHARS_DEF, PERSIST_DEFS, PIPELINE_MODE_LABELS, PIPELINE_MODES, REVIEW_PLACEMENT_LABELS, REVIEW_PLACEMENTS, SYSTEM_TOKENS_DEF, THROTTLE_MIN, TURN_DEFS } from "../../shared/agent-settings";
+import { NEVER_SKIPPED, PIPELINE_ROLES, STAGE_MODE_LABELS, stageOf, type StageMode } from "../../shared/agent-pipeline";
 import { hasOwn, type JsonObject } from "../../shared/json";
 import type { MainRoleStage } from "../../shared/main-agent-prompts";
 import type { Limit } from "../../shared/minds";
@@ -88,11 +90,12 @@ export interface GlanceRow {
   how: string | null;
 }
 
-/** One stage of a turn: its number and name, and its roles' rows; `off` says why it runs nothing. */
+/** One stage of a turn: its number and name, how it runs while a main agent decides the turn (`mode`: null on the fixed pipeline, and for the final review, which is the main agent's own), and its roles' rows; `off` says why it runs nothing. */
 export interface GlanceStage {
   id: MainRoleStage | "review";
   number: number;
   label: string;
+  mode: StageMode | null;
   rows: GlanceRow[];
   off: string | null;
 }
@@ -103,23 +106,26 @@ function roleHow(agents: AgentSettings, id: RoleId): string | null {
 }
 
 /**
- * A turn at a glance: each stage in the order a turn plays them, with the roles whose tasks work in
- * it, where each runs (its tasks' routes in that stage) and how; roles alike share a row. The final
- * review is the main agent's; the memory moves to the next turn's start while it is left to it.
+ * A turn at a glance: each stage in the order a turn plays them, how it runs while a main agent
+ * decides the turn (Main agent → Stages), with the roles whose tasks work in it, where each runs (its
+ * tasks' routes in that stage) and how; roles alike share a row, and a role switched off (When it
+ * runs) or the Curator off in Pipeline has none. The final review is the main agent's; the memory
+ * moves to the next turn's start while it is left to it.
  */
 export function turnGlance(agents: AgentSettings, routes: RouteSettings, connections: readonly Connection[]): GlanceStage[] {
   const memory: MainRoleStage = agents.pipeline.memory === "before_next" ? "memory_before" : "memory";
   const order: (MainRoleStage | "review")[] = ["intent", "prepare", "beats", "review", "read", memory];
+  const main = agents.pipeline.mode === "main";
   return order.map((stage): GlanceStage => {
     if (stage === "review") {
       const route = routeText({ connectionId: agents.main.connectionId, model: agents.main.model, from: agents.main.connectionId === null ? "default" : "role" }, connections);
-      return { id: stage, number: 6, label: "Final review", rows: agents.finalReview.on ? [{ roles: [MAIN_AGENT_ROLE], route, how: null }] : [], off: agents.finalReview.on ? null : "Off: the narrator gets the prompt as the engine made it" };
+      return { id: stage, number: 6, label: "Final review", mode: null, rows: agents.finalReview.on ? [{ roles: [MAIN_AGENT_ROLE], route, how: null }] : [], off: agents.finalReview.on ? null : "Off: the narrator gets the prompt as the engine made it" };
     }
-    const at = stage === "memory_before" ? "memory" : stage;
+    const at = stageOf(stage);
     const rows: GlanceRow[] = [];
     for (const id of ROLE_IDS) {
       const tasks = ROLE_TASK_ROUTES[id].filter((t) => t.stage === at);
-      if (tasks.length === 0 || (id === "curator" && !agents.pipeline.curator)) continue;
+      if (tasks.length === 0 || agents.roles[id].run === "off" || (id === "curator" && !agents.pipeline.curator)) continue;
       const places = [...new Set(tasks.map((t) => routeText(taskRoute(routes, id, agents.roles[id], t), connections)))];
       const route = places.length === 1 ? (places[0] ?? "") : `${places.length} connections, by task`;
       const how = roleHow(agents, id);
@@ -128,27 +134,36 @@ export function turnGlance(agents: AgentSettings, routes: RouteSettings, connect
       else rows.push({ roles: [id], route, how });
     }
     const label = STAGE_LABEL[stage];
-    return { id: stage, number: label.number, label: label.label, rows, off: rows.length === 0 ? "Nothing runs" : null };
+    return { id: stage, number: label.number, label: label.label, mode: main ? agents.main.stages[at] : null, rows, off: rows.length === 0 ? "Nothing runs" : null };
   });
 }
 
-/** The glance, without hooks: each stage numbered, each row its roles (each opens its page), where they run and how. */
+/** The glance, without hooks: each stage numbered, how it runs while a main agent decides the turn, each row its roles (each opens its page), where they run and how. */
 export function TurnGlance(props: { agents: AgentSettings; routes: RouteSettings; connections: readonly Connection[]; go(route: SettingsRoute): void }) {
   const { agents } = props;
   const stages = turnGlance(agents, props.routes, props.connections);
   const main = agents.pipeline.mode === "main";
+  const auto = stages.some((s) => s.mode === "auto");
   return (
     <Section title="A turn at a glance" aside={<Badge tone={main ? "accent" : "neutral"}>{PIPELINE_MODE_LABELS[agents.pipeline.mode]}</Badge>} flush>
       <div class="lre-set-glance-wrap" data-lre-glance>
-        <p class="lre-set-note">{main ? "The main agent decides which roles run in each stage, and what to tell them." : "Each stage runs its roles in the steps' own order, every turn they have work."}</p>
+        <p class="lre-set-note">{main ? `The main agent decides which roles run in each stage, and what to tell them${auto ? "; a stage on its own runs its roles as the fixed pipeline does, and the main agent's next message says what ran" : ""}.` : "Each stage runs its roles in the steps' own order, every turn they have work."}</p>
         <ol class="lre-set-glance">
           {stages.map((s) => (
-            <li key={s.id} class="lre-set-glance-stage" data-lre-glance-stage={s.id}>
+            <li key={s.id} class="lre-set-glance-stage" data-lre-glance-stage={s.id} data-mode={s.mode ?? undefined}>
               <span class="lre-set-glance-num" aria-hidden="true">
                 {s.number}
               </span>
               <div class="lre-set-glance-body">
-                <span class="lre-set-glance-title">{s.label}</span>
+                <span class="lre-set-glance-title">
+                  {s.label}
+                  {s.mode ? (
+                    <>
+                      {" "}
+                      <Badge tone={s.mode === "auto" ? "accent" : "neutral"}>{STAGE_MODE_LABELS[s.mode]}</Badge>
+                    </>
+                  ) : null}
+                </span>
                 {s.off !== null ? <span class="lre-set-glance-row lre-muted">{s.off}</span> : null}
                 {s.rows.map((row) => (
                   <span key={row.roles.join(",")} class="lre-set-glance-row" data-lre-glance-row={row.roles.join(",")}>
@@ -229,6 +244,44 @@ export function PipelineSection(props: { agents: AgentSettings; busy: boolean; p
       <SettingRow id="pipeline-curator" label="The Curator" bare changed={p.curator !== d.curator} help={<>{p.curator ? CURATOR_HELP.on : CURATOR_HELP.off} Its tools, tier and budget are on its page in Roles.</>} reset={{ label: `Reset the Curator to its default, ${onOff(d.curator)}`, to: onOff(d.curator), onClick: () => set({ curator: null }) }} busy={busy}>
         <HostSwitch label="The Curator keeps the world's things and places" checked={p.curator} disabled={busy} onChange={(curator) => set({ curator })} />
       </SettingRow>
+      <PersistRows agents={agents} busy={busy} patch={props.patch} />
+    </div>
+  );
+}
+
+/** The roles Smart persistence may keep, and those it never skips, in words. */
+const KEEPS = ROLE_IDS.filter((r) => PIPELINE_ROLES[r].keep).map((r) => ROLE_LABEL[r]);
+const NEVER = NEVER_SKIPPED.map((r) => ROLE_LABEL[r]);
+
+/** Pipeline → Smart persistence: opt-in, for every agent chat; while on, how long a quiet scene is kept, and while off a limit still changed, so the page shows what its count does and its Default stays at hand. Hook-free. */
+export function PersistRows(props: { agents: AgentSettings; busy: boolean; patch(patch: JsonObject): void }) {
+  const { busy } = props;
+  const s = props.agents.persist;
+  const d = DEFAULTS.persist;
+  const set = (fields: JsonObject) => props.patch({ agents: { persist: fields } });
+  return (
+    <div class="lre-set-rows" data-lre-agents-persist>
+      <SettingRow
+        id="persist-on"
+        label="Smart persistence"
+        bare
+        changed={s.on !== d.on}
+        help={
+          <>
+            {s.on ? `On: while a scene is unchanged since the last turn (the place, who is here and where, the time of day, the world's revision and live lore, the things here and on everyone present, how they regard each other, and no GM fix or marker since), its quiet Live minds and the scene's lore and notes (${KEEPS.join(", ")}) are kept from the last turn instead of asked again, and the narrator is told they are unchanged. A Re-run, a swipe, a Continue, a timelapse, a mind's first thoughts, one the GM asked to refresh and one the player names always ask afresh.` : "Off: every role runs every turn it is asked."} {`Never kept: ${NEVER.join(", ")}.`} Each role's page sets whether it may be kept (When it runs); Main agent → Final review can then send only what changed.
+          </>
+        }
+        reset={{ label: `Reset Smart persistence to its default, ${onOff(d.on)}`, to: onOff(d.on), onClick: () => set({ on: null }) }}
+        busy={busy}
+      >
+        <HostSwitch label="Smart persistence: keep a quiet scene's minds and notes" checked={s.on} disabled={busy} onChange={(on) => set({ on })} />
+      </SettingRow>
+      {s.on || s.turns !== d.turns || s.minutes !== d.minutes ? (
+        <>
+          <LimitRow id="persist-turns" def={PERSIST_DEFS.turns} value={s.turns} standard={d.turns} busy={busy} set={(turns) => set({ turns })} />
+          <LimitRow id="persist-minutes" def={PERSIST_DEFS.minutes} value={s.minutes} standard={d.minutes} busy={busy} set={(minutes) => set({ minutes })} />
+        </>
+      ) : null}
     </div>
   );
 }
@@ -339,14 +392,14 @@ function AddConnection(props: { taken: readonly string[]; connections: readonly 
   );
 }
 
-/** Throttles: per connection, requests and tokens per minute. Hook-free but its picker. */
+/** Throttles: per connection, requests and tokens per minute, and calls at once. Hook-free but its picker. */
 export function ThrottlesSection(props: { throttles: readonly ConnectionThrottle[]; connections: readonly Connection[]; busy: boolean; patch(patch: JsonObject): void }) {
   // The list goes whole: a merge patch replaces an array, it never merges one.
-  const save = (next: readonly ConnectionThrottle[]) => props.patch({ agents: { throttles: next.map((t) => ({ id: t.id, requestsPerMinute: t.requestsPerMinute, tokensPerMinute: t.tokensPerMinute })) } });
+  const save = (next: readonly ConnectionThrottle[]) => props.patch({ agents: { throttles: next.map((t) => ({ id: t.id, requestsPerMinute: t.requestsPerMinute, tokensPerMinute: t.tokensPerMinute, atOnce: t.atOnce })) } });
   const change = (id: string, part: Partial<Omit<ConnectionThrottle, "id">>) => save(props.throttles.map((t) => (t.id === id ? { ...t, ...part } : t)));
   return (
     <div class="lre-set-rows" data-lre-agent-throttles>
-      <p class="lre-set-note">How many requests and tokens (sent and written) the agents may use each minute on a connection; a call past either waits for the minute to turn. A connection not listed has none.</p>
+      <p class="lre-set-note">How many requests and tokens (sent and written) the agents may use each minute on a connection, a call past either waiting for the minute to turn; and how many calls may be under way on it at once, every agent's and every prompt-only role's through one gate, a call past it waiting for one to end. A connection not listed has none.</p>
       {props.throttles.map((t) => {
         const name = nameOf(t.id, props.connections);
         return (
@@ -359,10 +412,11 @@ export function ThrottlesSection(props: { throttles: readonly ConnectionThrottle
             </div>
             <OptionalLimit label={`${name}: requests per minute`} offLabel="off" value={t.requestsPerMinute} min={THROTTLE_MIN} onValue={THROTTLE_MIN} step={STEP.count} busy={props.busy} set={(requestsPerMinute) => change(t.id, { requestsPerMinute })} />
             <OptionalLimit label={`${name}: tokens per minute`} offLabel="off" value={t.tokensPerMinute} min={THROTTLE_MIN} onValue={THROTTLE_MIN} step={STEP.tokens} busy={props.busy} set={(tokensPerMinute) => change(t.id, { tokensPerMinute })} />
+            <OptionalLimit label={`${name}: ${AT_ONCE_DEF.label.toLowerCase()}`} offLabel="no limit" value={t.atOnce} min={AT_ONCE_DEF.min} onValue={2} step={STEP.count} busy={props.busy} set={(atOnce) => change(t.id, { atOnce })} />
           </div>
         );
       })}
-      <AddConnection taken={props.throttles.map((t) => t.id)} connections={props.connections} action="Add a throttle" busy={props.busy} add={(id) => save([...props.throttles, { id, requestsPerMinute: "none", tokensPerMinute: "none" }])} />
+      <AddConnection taken={props.throttles.map((t) => t.id)} connections={props.connections} action="Add a throttle" busy={props.busy} add={(id) => save([...props.throttles, { id, requestsPerMinute: "none", tokensPerMinute: "none", atOnce: "none" }])} />
     </div>
   );
 }

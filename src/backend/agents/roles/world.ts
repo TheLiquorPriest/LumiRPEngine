@@ -19,7 +19,6 @@ export async function effectsRun(rt: Runtime, task: EffectsTask, ctx: TurnAgentC
     ctx,
     {
       sub: "effects",
-      purpose: "extract",
       phase: "read",
       names: { world: task.vars.world ?? "", pov: task.vars.pov ?? "" },
       vars: { ...task.vars, template: renderTemplate(task.template, task.vars) },

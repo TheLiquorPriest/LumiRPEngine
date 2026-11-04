@@ -29,7 +29,8 @@ import { orgLog } from "../../src/packs/orgs/core/log";
 import { ALL_PACKS, STARTER_WORLDS } from "../../src/packs/index";
 import { decodeAlerts, decodeComing, decodeOrgList, decodeOrgPage, decodePlan } from "../../src/packs/orgs/ui/decode";
 import { ALERT_TAB_IDS, ComingUp, comingValue, needsYouOf, OrgAlerts, OrgsGlanceCard, planGlanceLine } from "../../src/packs/orgs/ui/feed";
-import { OrgsHome } from "../../src/packs/orgs/ui/home";
+import { homeTree, OrgsHome } from "../../src/packs/orgs/ui/home";
+import type { ChartNode } from "../../src/packs/orgs/ui/chart-model";
 import orgsUi from "../../src/packs/orgs/ui/index";
 import { OrgPage, orgTabs, type OrgPageProps } from "../../src/packs/orgs/ui/org";
 import { OrgHistory, OrgOverview } from "../../src/packs/orgs/ui/overview";
@@ -183,7 +184,7 @@ describe("alerts under the Overview's headline (ORG-SPEC §3.14, §4.4)", () => 
     expect(tabs).toEqual(["people"]);
   });
 
-  test("a delegation ending within 3 days needs its delegate: Needs you, no Open (it is about the Overview); the home's row carries the dot, and Now lists it", () => {
+  test("a delegation ending within 3 days needs its delegate: Needs you, no Open (it is about the Overview); the home's row says so, and Now lists it", () => {
     const w = vacantHarrowmere("verity_lorne");
     effect(w, "orgs.delegate", { org: THORNES, to: "verity_lorne", powers: "money.view", until: w.state.clock + 2 * DAY });
     const org = page(w, THORNES);
@@ -192,16 +193,18 @@ describe("alerts under the Overview's headline (ORG-SPEC §3.14, §4.4)", () => 
     const banner = find(marked(pageRig(org).tree, "data-lre-org-alert", alert?.id ?? ""), Banner)[0];
     expect([banner?.title, textOf(banner?.children)]).toEqual(["Needs you", alert?.text]);
     expect(banner?.actions).toBeUndefined();
-    // The home: the dot on the Thornes' row, and on no other.
+    // The home: Needs you on the Thornes' row, and on no other.
     const pages = panel(w, "orgs.org");
     const needs = needsYouOf(pages);
     expect(needs.map((n) => [n.org, n.name, n.alert.short])).toEqual([[THORNES, "The Thornes", "your delegation ends soon"]]);
     const list = decodeOrgList(panel(w, "orgs.list"));
     if (!list) throw new Error("the home didn't read");
-    const home = OrgsHome({ list, onOpen: () => undefined, needs: new Set(needs.map((n) => n.org)) });
-    const dotted = find(home, ListRow).filter((r) => r.badge !== undefined);
-    expect(dotted.map((r) => [r.title, (r.badge as VNode<Props>).props["aria-label"]])).toEqual([["The Thornes", "Needs you"]]);
-    expect(find(OrgsHome({ list, onOpen: () => undefined }), ListRow).filter((r) => r.badge !== undefined)).toEqual([]);
+    const flagged = (needing?: ReadonlySet<string>) => homeTree([...list.belong, ...list.known], needing).flatMap(function all(n): ChartNode[] {
+      return [n, ...n.children.flatMap(all)];
+    }).filter((n) => n.badges.some((b) => b.text === "Needs you"));
+    expect(flagged(new Set(needs.map((n) => n.org))).map((n) => n.label)).toEqual(["The Thornes"]);
+    expect(flagged()).toEqual([]);
+    expect(find(OrgsHome({ list, onOpen: () => undefined, needs: new Set(needs.map((n) => n.org)) }), ListRow).filter((r) => r.badge !== undefined)).toEqual([]);
     // Now: "The Thornes: your delegation ends soon", opening its page.
     const opened: [string, string][] = [];
     const glance = OrgsGlanceCard({ needs, plan: null, onOpen: (o, tab) => opened.push([o, tab]) });
@@ -275,7 +278,7 @@ describe("the Plan tab (assess-party §6.2, for any organization)", () => {
     const { w } = partyPlan();
     expect(orgTabs(page(w, PARTY), DEFS).map((t) => t.label)).toEqual(["Overview", "People", "Plan", "Rules"]);
     const marcus = starter("modern_slice_of_life", "Port Alder", "marcus_delgado");
-    expect(orgTabs(page(marcus, SHOP), DEFS).map((t) => t.label)).toEqual(["Overview", "People", "Plan", "Money", "Property", "Ownership", "Taxes", "Decisions", "Rules"]);
+    expect(orgTabs(page(marcus, SHOP), DEFS).map((t) => t.label)).toEqual(["Overview", "People", "Chart", "Plan", "Money", "Projects", "Property", "Ownership", "Taxes", "Decisions", "Rules"]);
     // A page draws the tab's component over its section; a shape it isn't reads as none.
     const drawn = pageRig(page(w, PARTY), PLAN_TAB).tree;
     expect(marked(drawn, "data-lre-org-tab").props["data-lre-org-tab"]).toBe(PLAN_TAB);

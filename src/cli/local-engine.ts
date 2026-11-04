@@ -1,6 +1,7 @@
 // The engine on this machine, for the command line's offline commands and the agent kit (DESIGN
-// §13): load, validate, lint, migrate, a new world, Check world and Playtest, the export file, and
-// the schema reader for the published schemas. Pure: pack cores and the engine only, no host.
+// §13): load, validate, lint, migrate, a new world, Check world and Playtest, the export file, the
+// schema reader for the published schemas, and a sandbox's turns, days and GM reads on a chat's
+// exported head. Pure: pack cores and the engine only, no host.
 
 import { hashJson } from "../shared/hash";
 import { isRecord } from "../shared/json";
@@ -8,9 +9,12 @@ import type { JsonValue } from "../shared/json";
 import type { LintIssue } from "../shared/protocol";
 import { MAP_SCHEMA } from "../shared/maps";
 import { checkSchema, pathText, type Schema } from "../shared/schema-check";
+import type { GmView } from "../shared/state-view";
 import type { WorldDoc } from "../shared/world";
 import { ENGINE_VERSION, EXPORT_FORMAT } from "../shared/world";
-import { checkWorldDay, isWorldDoc, lintWorld, migrateWorld, newBlankWorld, playtestStart, playtestTurn, shapeIssues, type PlaytestTurn } from "../engine/authoring";
+import { checkWorldDay, isWorldDoc, lintWorld, migrateWorld, newBlankWorld, playtestStart, playtestTurn, shapeIssues, type DayFindings, type PlaytestStep, type PlaytestTurn } from "../engine/authoring";
+import { buildGmWorld, buildGmWorldPart, gmWorldPartCount, type GmWorldPart } from "../engine/gm-view";
+import { readPass } from "../engine/read-pass";
 import { createRegistry, type Registry } from "../engine/registry-impl";
 import type { WorldState } from "../engine/state";
 import { planTurn, postTurn, timelapseIntent } from "../engine/turn";
@@ -106,4 +110,37 @@ export function checkWorld(world: WorldDoc, days = 3, runSeed = "offline"): RunR
     out.push(step.turn);
   }
   return { turns: out, lint: lint(world) };
+}
+
+// ---------------------------------------------------------------- a sandbox (DESIGN §23)
+
+/** One typed turn on a chat's state, as Playtest plays one: the words become an action by its lexicon, the names it says and the money it names; no narrator, no model. */
+export function sandboxTurn(world: WorldDoc, state: WorldState, user: string, runSeed: string, index: number): PlaytestStep {
+  return playtestTurn(registryOf(), pipeline, world, state, user, runSeed, index);
+}
+
+/**
+ * One span of a sandbox's advance, as a Check world day runs: a timelapse to `at` with every
+ * interrupt class at `note`, the world's and the chat's, so nothing stops it. With `leaks`, the
+ * narrator's sections are read for leaks after it.
+ */
+export function sandboxSpan(world: WorldDoc, state: WorldState, runSeed: string, index: number, at: number, leaks: boolean): PlaytestStep & { findings: DayFindings } {
+  const overrides: Record<string, string> = {};
+  for (const id of [...Object.keys(world.time.interrupts), ...Object.keys(state.time.interrupts)]) overrides[id] = "note";
+  return checkWorldDay(registryOf(), pipeline, world, state, runSeed, index, timelapseIntent({ type: "at", at }, overrides), { leaks });
+}
+
+/** One world part of the GM view on a sandbox's state, built alone; with `id`, of the entities, money or organizations only that one. */
+export function sandboxGmPart<P extends GmWorldPart>(world: WorldDoc, state: WorldState, part: P, id?: string): GmView[P] {
+  return readPass(() => buildGmWorldPart(registryOf(), world, state, part, id));
+}
+
+/** Every world part of the GM view on a sandbox's state. */
+export function sandboxGmWorld(world: WorldDoc, state: WorldState): Pick<GmView, GmWorldPart> {
+  return readPass(() => buildGmWorld(registryOf(), world, state));
+}
+
+/** How many one world part holds, for a sandbox's outline. */
+export function sandboxGmCount(world: WorldDoc, state: WorldState, part: GmWorldPart): number {
+  return readPass(() => gmWorldPartCount(registryOf(), world, state, part));
 }

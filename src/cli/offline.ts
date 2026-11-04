@@ -1,6 +1,6 @@
 // The tools that need no Lumiverse: the agent guide and the docs, the published schemas, the
 // starter worlds, and the engine run on this machine (`local-engine.ts`): load (shape, migration,
-// lint), Playtest and Check world.
+// lint), Playtest and Check world. Check reads a world on the user's Lumiverse too, when named.
 
 import worldSchemaJson from "../../schemas/lre-world-v1.schema.json";
 import { macrosIn } from "../engine/authoring";
@@ -16,6 +16,7 @@ import { BODY_LIMIT, clip, readAt } from "./read";
 import type { ToolResult } from "./report";
 import { contentsOf, entityKindsOf, json, lintSummary, schemaIssues } from "./report";
 import { docs, DOCS, guide } from "./texts";
+import type { ToolContext } from "./tools";
 
 const STARTER_IDS = STARTER_INFO.filter((t) => hasOwn(STARTER_WORLDS, t.id)).map((t) => t.id);
 
@@ -107,9 +108,18 @@ export function loadWorld(value: string | JsonValue): Loaded {
   }
 }
 
-export function checkTool(args: Args, readFile: (path: string) => string): ToolResult {
-  const input = worldInput(args, readFile);
-  if (input === null) throw new ToolError("Give the world to check: path (a file) or world (inline).");
+/** lre_check: a file, a world given inline, or a world on the host by id at `source` (the draft by default), checked by the bundled engine. */
+export async function checkTool(args: Args, ctx: Pick<ToolContext, "readFile" | "live">): Promise<ToolResult> {
+  const worldId = textArg(args, "worldId");
+  // Said before a file is read: one that isn't there is no reason to try.
+  if (worldId !== undefined && (args.path !== undefined || args.world !== undefined)) throw new ToolError("Give the world one way: path, world or worldId.");
+  const given = worldInput(args, ctx.readFile);
+  let input: WorldInput;
+  if (given !== null) input = given;
+  else if (worldId !== undefined) {
+    const source = await ctx.live().source(worldId, textArg(args, "source") ?? "draft");
+    input = { value: JSON.parse(JSON.stringify(source.world)) as JsonValue, from: source.label };
+  } else throw new ToolError("Give the world to check: path (a file), world (inline), or worldId (a world on your Lumiverse, with source).");
   const { result, writtenBy } = loadWorld(input.value);
   if (!result.ok) {
     const lint = lintSummary(result.issues, 60);
@@ -146,8 +156,8 @@ export function checkTool(args: Args, readFile: (path: string) => string): ToolR
   return { text: json(report), ...(report.ok ? {} : { failed: true as const }) };
 }
 
-/** A turn within its share of the answer: the reply first, then as many notes as fit. */
-function fitTurn(turn: PlaytestTurn, room: number): { user: string; reply: string; notes: string[] } {
+/** A turn within its share of an answer (`room` characters): the reply first, then as many notes as fit. */
+export function fitTurn(turn: PlaytestTurn, room: number): { user: string; reply: string; notes: string[] } {
   const reply = clip(turn.reply, Math.max(200, Math.floor(room * 0.6)));
   const notes: string[] = [];
   let used = 0;

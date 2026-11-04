@@ -1,16 +1,17 @@
 // Organizations (ORG-SPEC §3): what an organization is (`orgTypeOf`), who belongs to it and how
 // (`membersOfOrg`, over each kind's membership provider), its positions and the titles its people go
-// by, the powers someone holds in it and why (`orgPower`), whether they may use one now (`mayAct`:
-// limits, scope and the fiduciary rule), who works for it (`isStaff`), the places that are its
-// (`orgPlaces`), the business trading at a place (`businessAt`), whether a business trades at a time
-// (`trading`) and whom a place's entry admits (`placeEntry`). Each is pure and read when asked, never
-// in the fold; nothing here is written. With no positions authored, the defaults give today's rights
-// (§3.4), the household Head their one addition.
+// by, the powers someone holds in it and why (`orgPower`: their own bases, then control, the powers
+// held at an organization holding it flowing down the chain, `controlPathOf`), whether they may use
+// one now (`mayAct`: limits, scope and the fiduciary rule), who works for it (`isStaff`), the places
+// that are its (`orgPlaces`), the business trading at a place (`businessAt`), whether a business
+// trades at a time (`trading`) and whom a place's entry admits (`placeEntry`). Each is pure and read
+// when asked, never in the fold; nothing here is written. With no positions authored, the defaults
+// give today's rights (§3.4), the household Head their one addition.
 
-import { OWNER_ROLE_LABELS, ownersIn, ROLE_RIGHTS, worthShares } from "../shared/finance";
+import { classesIn, OWNER_ROLE_LABELS, ownersIn, ROLE_RIGHTS, votePcts, worthShares, type OwnerRole } from "../shared/finance";
 import type { EntityId, PlaceId } from "../shared/ids";
 import type { JsonValue } from "../shared/json";
-import { ACTS_FOR, DISSOLVED_FIELD, isAudience, limitsIn, ORG_POWERS, overLimit, positionsIn, powerCovers, powersIn, POWER_WORDS, WINDING_FIELD, type Audience, type Delegation, type OrgGrant, type OrgLimits, type OrgMember, type OrgPower, type OrgType, type Position } from "../shared/org";
+import { ACTS_FOR, CONTROL_DEPTH, CONTROL_KEEPS, DISSOLVED_FIELD, isAudience, limitsIn, ORG_POWERS, overLimit, positionsIn, powerCovers, powersIn, POWER_WORDS, trusteesDecideIn, WINDING_FIELD, type Audience, type Delegation, type OrgGrant, type OrgLimits, type OrgMember, type OrgPower, type OrgType, type Position } from "../shared/org";
 import { PARTY_KIND, PARTY_RELATION, partyTierOf } from "../shared/party";
 import { calendarOf, dateAt, dayIndexOfText, holidaysOn, monthName, parseHHMM, placeOffset } from "./calendar";
 import { acts } from "./life";
@@ -198,6 +199,8 @@ export interface HeldPosition {
  * own, the party's Leader.
  */
 export function heldPositions(ctx: OrgContext, who: EntityId, org: EntityId): HeldPosition[] {
+  // An organization wound up or merged away holds no seat any more: its seats fall vacant.
+  if (orgTypeOf(ctx, who) !== null && dissolvedOn(ctx.state, who) !== null) return [];
   const defined = positionsOf(ctx, org);
   const rows = directMembers(ctx, org).filter((r) => r.who === who);
   const out: HeldPosition[] = [];
@@ -212,6 +215,11 @@ export function heldPositions(ctx: OrgContext, who: EntityId, org: EntityId): He
   const leader = rows.find((r) => r.how === "leader");
   if (type === "party" && leader && !defined.some((d) => d.id === LEADER)) out.push({ position: all(LEADER, "Leader"), row: leader });
   return out;
+}
+
+/** Whether a seat's holder still fills it (§3.14): someone who acts and isn't gone; an organization seated there (an officer or director that is an entity) only while it stands, so a dissolved holder's seat falls vacant. */
+export function seatFilled(ctx: OrgContext, who: EntityId): boolean {
+  return !isGone(ctx.state, who) && acts(ctx.world, ctx.state, who) && (orgTypeOf(ctx, who) === null || dissolvedOn(ctx.state, who) === null);
 }
 
 /** The type's word for how someone belongs, when nothing else titles them (§3.3). */
@@ -292,10 +300,20 @@ export function defaultPowers(type: OrgType, how: OrgMember["how"]): readonly Or
 /**
  * The power `who` holds over `org`, and why, or null (§3.4): an owner role (a managing role on a
  * company or a trust gives every power; any other, seeing its money), a position held, a delegation in
- * force, then the type's default for how they belong. A held power gives those it implies. A member's
- * default lends out or disposes of only what is consumed in use (`thing` consumable).
+ * force, the type's default for how they belong, then control (§29.3): a power they hold at an
+ * organization holding this one that flows down to it. A held power gives those it implies. A
+ * member's default lends out or disposes of only what is consumed in use (`thing` consumable).
  */
 export function orgPower(ctx: OrgContext, who: EntityId, org: EntityId, power: OrgPower, thing?: EntityId): OrgGrant | null {
+  if (orgTypeOf(ctx, org) === null || isGone(ctx.state, who)) return null;
+  const own = ownPower(ctx, who, org, power, thing);
+  if (own) return own;
+  const path = controlPathOf(ctx, who, org, power, thing);
+  return path ? { basis: "control", id: path.top, through: path.steps.map((s) => s.holder) } : null;
+}
+
+/** The power `who` holds over `org` on a basis of their own there (an owner role, a position, a delegation, a member's default), never through another organization. */
+function ownPower(ctx: OrgContext, who: EntityId, org: EntityId, power: OrgPower, thing?: EntityId): OrgGrant | null {
   const type = orgTypeOf(ctx, org);
   if (type === null || isGone(ctx.state, who)) return null;
   const e = own(ctx.state.entities, org);
@@ -312,6 +330,147 @@ export function orgPower(ctx: OrgContext, who: EntityId, org: EntityId, power: O
   const covered = membersOfOrg(ctx, org).some((r) => r.who === who && defaultPowers(type, r.how).includes(power));
   if (!covered) return null;
   return power === "assets.assign" || power === "assets.dispose" ? (consumable ? { basis: "member" } : null) : { basis: "member" };
+}
+
+// ---------------------------------------------------------------- control (§29.3 Control)
+
+/**
+ * One way an organization holds another (§29.3 Control), and the powers it passes down to it: a
+ * stake (its rows on the owners list: a controlling one, by more than the decision threshold of its
+ * votes or a managing role on a trust, passes every power its own seated officers don't take, and
+ * any other stake in its worth, seeing its money), a position it holds there (that position's
+ * powers, within its limits and scope), or a delegation to it (its powers, within its limits).
+ */
+export interface OrgHold {
+  holder: EntityId;
+  org: EntityId;
+  how: "stake" | "position" | "delegate";
+  powers: readonly OrgPower[];
+  /** A stake: its first row's role, its share of the worth and (a company's) votes in percent, and whether it controls. */
+  role?: OwnerRole;
+  share?: number;
+  votes?: number;
+  controlled?: boolean;
+  /** A position it holds there. */
+  position?: Position;
+  /** A delegation's limits. */
+  limits?: OrgLimits;
+}
+
+/** Whether an organization still holds what it holds: in the world, and neither gone nor wound up. */
+function holds(ctx: OrgContext, id: EntityId): boolean {
+  return orgTypeOf(ctx, id) !== null && !isGone(ctx.state, id) && dissolvedOn(ctx.state, id) === null;
+}
+
+/** Each holder's votes in a company as its decisions count them (the economy's `economy.votes`), else by its owners' units and classes. */
+function votesAt(ctx: OrgContext, org: EntityId, fields: Readonly<Record<string, JsonValue>>): Record<EntityId, number> {
+  const full = ctx as Partial<ReadContext>;
+  const query = typeof full.query === "function" ? optionalQuery(full as ReadContext, "economy.votes") : null;
+  return query ? query(full as ReadContext, org) : votePcts(ownersIn(fields), classesIn(fields));
+}
+
+/**
+ * The organizations holding `org` (§29.3 Control), each way it holds it, by holder: stakes, then
+ * the positions it holds, then delegations to it. Kept for the read pass. At an organization that
+ * seats its own officers, a controlling stake passes only what those officers' positions don't hold,
+ * besides seeing its money and its board, ownership and structure (`CONTROL_KEEPS`, fork 3).
+ */
+export function holdersOf(ctx: OrgContext, org: EntityId): readonly OrgHold[] {
+  return passMemo([ctx.state, ctx.state.entities, ctx.world], `orgs.holders:${org}`, (): OrgHold[] => {
+    const e = own(ctx.state.entities, org);
+    const type = orgTypeOf(ctx, org);
+    if (!e || type === null) return [];
+    const owners = ownersIn(e.fields);
+    const stakeHolders = [...new Set(owners.map((o) => o.party))].filter((id) => id !== org && holds(ctx, id)).sort();
+    const rows = directMembers(ctx, org);
+    const seatHolders = [...new Set(rows.filter((r) => r.position !== undefined && r.who !== org && holds(ctx, r.who)).map((r) => r.who))].sort();
+    const delegates = delegationsIn(ctx, org).filter((d) => d.who !== org && holds(ctx, d.who));
+    if (stakeHolders.length === 0 && seatHolders.length === 0 && delegates.length === 0) return [];
+    const out: OrgHold[] = [];
+    if (stakeHolders.length > 0) {
+      const shares = worthShares(owners);
+      const votes = type === "company" ? votesAt(ctx, org, e.fields) : {};
+      const decide = Math.min(100, Math.max(0, numOf(e.fields.decide_pct, 50)));
+      // The powers each holder of a position here takes as its own (a seat whose holder acts, or an organization still standing).
+      const seated = new Map<EntityId, OrgPower[]>();
+      for (const who of [...new Set(rows.filter((r) => !isGone(ctx.state, r.who)).map((r) => r.who))]) {
+        const powers = heldPositions(ctx, who, org).flatMap((h) => h.position.powers);
+        if (powers.length > 0) seated.set(who, powers);
+      }
+      for (const holder of stakeHolders) {
+        const mine = owners.filter((o) => o.party === holder);
+        const v = votes[holder] ?? 0;
+        const controlled = type === "company" ? v > decide + 1e-9 : mine.some((o) => ROLE_RIGHTS[o.role].manage);
+        if (!controlled && !mine.some((o) => ROLE_RIGHTS[o.role].worth)) continue;
+        const taken = [...seated].filter(([who]) => who !== holder).flatMap(([, powers]) => powers);
+        const powers = controlled ? ORG_POWERS.filter((p) => CONTROL_KEEPS.includes(p) || !taken.some((t) => powerCovers(t, p))) : (["money.view"] as const);
+        out.push({ holder, org, how: "stake", powers, role: mine[0]?.role ?? "owner", share: shares[holder] ?? 0, ...(type === "company" ? { votes: v } : {}), controlled });
+      }
+    }
+    for (const holder of seatHolders) for (const h of heldPositions(ctx, holder, org)) out.push({ holder, org, how: "position", powers: h.position.powers, position: h.position, ...(h.position.limits ? { limits: h.position.limits } : {}) });
+    for (const d of delegates) out.push({ holder: d.who, org, how: "delegate", powers: d.powers, ...(d.limits ? { limits: d.limits } : {}) });
+    return out;
+  });
+}
+
+/** What `holder` holds (§29.3 Control): each of its holds on another organization, in that one's id order. Kept for the read pass. */
+export function holdsOf(ctx: OrgContext, holder: EntityId): readonly OrgHold[] {
+  const byHolder = passMemo([ctx.state, ctx.state.entities, ctx.world], "orgs.holds", () => {
+    const out = new Map<EntityId, OrgHold[]>();
+    for (const id of Object.keys(ctx.state.entities).sort()) {
+      if (isGone(ctx.state, id) || orgTypeOf(ctx, id) === null) continue;
+      for (const h of holdersOf(ctx, id)) out.set(h.holder, [...(out.get(h.holder) ?? []), h]);
+    }
+    return out;
+  });
+  return byHolder.get(holder) ?? [];
+}
+
+/** A power held through control: the organization where its holder holds it on a basis of their own (`top`, with that grant), and each hold it flows down through, the top's first (`steps[0].holder` is `top`), the hold on the organization it reaches last. */
+export interface ControlPath {
+  top: EntityId;
+  root: OrgGrant;
+  steps: OrgHold[];
+}
+
+/**
+ * How `who` holds `power` over `org` through control (§29.3): the nearest chain of holds passing it
+ * down (fewest organizations, at most `CONTROL_DEPTH` of them, the top and `org` included), each
+ * organization's holders in id order; a holder met twice (cross-holdings) is passed by. Null when no
+ * chain passes it down to them. Kept for the read pass.
+ */
+export function controlPathOf(ctx: OrgContext, who: EntityId, org: EntityId, power: OrgPower, thing?: EntityId): ControlPath | null {
+  return passMemo([ctx.state, ctx.state.entities, ctx.world], `orgs.control:${who}:${org}:${power}:${thing ?? ""}`, (): ControlPath | null => {
+    if (isGone(ctx.state, who)) return null;
+    let frontier: { org: EntityId; steps: OrgHold[] }[] = [{ org, steps: [] }];
+    const seen = new Set<EntityId>([org]);
+    for (let depth = 1; frontier.length > 0 && depth < CONTROL_DEPTH; depth++) {
+      const next: { org: EntityId; steps: OrgHold[] }[] = [];
+      for (const node of frontier) {
+        for (const hold of holdersOf(ctx, node.org)) {
+          if (seen.has(hold.holder) || !hold.powers.some((p) => powerCovers(p, power))) continue;
+          seen.add(hold.holder);
+          const steps = [hold, ...node.steps];
+          const root = hold.holder === who ? null : ownPower(ctx, who, hold.holder, power, thing);
+          if (root) return { top: hold.holder, root, steps };
+          if (hold.holder !== who) next.push({ org: hold.holder, steps });
+        }
+      }
+      frontier = next;
+    }
+    return null;
+  });
+}
+
+/** The organizations whose powers flow to `who` at `org` (§29.3 Control), nearest them first: those of every power they hold there through control, each once. */
+export function controlThrough(ctx: OrgContext, who: EntityId, org: EntityId): EntityId[] {
+  const out: EntityId[] = [];
+  for (const power of ORG_POWERS) {
+    const grant = orgPower(ctx, who, org, power);
+    if (grant?.basis !== "control") continue;
+    for (const id of grant.through ?? []) if (!out.includes(id)) out.push(id);
+  }
+  return out;
 }
 
 /** Every power `who` holds over `org`, each with its basis, in the families' order. */
@@ -337,6 +496,8 @@ export interface ActAsk {
   amount?: number;
   account?: EntityId;
   target?: EntityId;
+  /** Asked of someone approving another's act (§29.20): a co-trustee's approval is the trustees acting together, so that rule asks nothing more of them. */
+  approving?: true;
 }
 
 /** The calendar month spending is counted in (`packs.orgs.spent`), as `YYYY-MM`: the world calendar's month of `clock`. */
@@ -353,11 +514,30 @@ function spentThisMonth(ctx: OrgContext, who: EntityId, org: EntityId): number {
 /** The staff and member powers a position's `scope` can confine to the positions below it. */
 const SCOPED: readonly OrgPower[] = ["members.admit", "members.remove", "members.appoint", "staff.hire", "staff.fire", "staff.pay"];
 
+/** What a trust's trustee does only with a co-trustee's approval where its trustees decide together (§29.1 Trusts): pay, move or pay out its money, borrow, deal in property. */
+export const TOGETHER_POWERS: readonly OrgPower[] = ["money.spend", "money.manage", "money.payout", "money.borrow", "property.trade"];
+
+/** The trustees of a trust who act: its owners by the trustee role, neither gone nor wound up, in id order. */
+export function trusteesOf(ctx: OrgContext, trust: EntityId): EntityId[] {
+  const rows = ownersIn(own(ctx.state.entities, trust)?.fields ?? {}).filter((o) => o.role === "trustee");
+  return [...new Set(rows.map((o) => o.party))].filter((id) => !isGone(ctx.state, id) && (orgTypeOf(ctx, id) === null || dissolvedOn(ctx.state, id) === null)).sort();
+}
+
+/** A limit one use of a power is held to (a position's or a delegation's), with the organizations whose spending this month counts toward it. */
+interface LimitCheck {
+  limits: OrgLimits;
+  spentAt: EntityId[];
+}
+
 /**
  * Whether `who` may use `power` for `org` now (§3.4): they hold it, within the limits of the
  * position or delegation it rests on (each payment, the calendar month, the accounts), within the
  * position's scope over `target`, and never paying, out of money they only manage, themselves, their
- * household or what any of them owns (the fiduciary rule, `economy.interests`). A refusal says why.
+ * household or what any of them owns (the fiduciary rule, `economy.interests`). Held through control
+ * (§29.3), every limit and scope on the chain applies: the top's own position or delegation, and each
+ * position or delegation an organization holds on the way down; the fiduciary rule always does. A
+ * trustee of a trust whose trustees decide together pays, moves or pays out its money, borrows and
+ * deals in its property only with a co-trustee's approval (a limit a request may lift). A refusal says why.
  */
 export function mayAct(ctx: ReadContext, who: EntityId, org: EntityId, power: OrgPower, ask: ActAsk = {}): MayAct {
   const name = labelOf(ctx, org);
@@ -365,27 +545,59 @@ export function mayAct(ctx: ReadContext, who: EntityId, org: EntityId, power: Or
   if (ended !== null) return { ok: false, reason: ended };
   const grant = orgPower(ctx, who, org, power);
   if (!grant) return { ok: false, reason: `${name}: you may not ${POWER_WORDS[power]}` };
-  let limits: OrgLimits | undefined;
-  let scoped: Position | undefined;
-  if (grant.basis === "position") {
-    const held = heldPositions(ctx, who, org).find((h) => h.position.id === grant.id);
-    limits = held?.position.limits;
-    scoped = held?.position.scope === "below" ? held.position : undefined;
-  } else if (grant.basis === "delegate") limits = delegationsIn(ctx, org).find((d) => d.who === who && d.powers.some((p) => powerCovers(p, power)))?.limits;
+  const checks: LimitCheck[] = [];
+  const scopes: { position: Position; at: EntityId }[] = [];
+  // The trustee acting for a trust: themselves by their own role, or the organization whose trustee role it flows down through.
+  let trustee: EntityId | null = null;
+  // The position or delegation a power rests on at `at`, its limits counting the spending at `spentAt`.
+  const rests = (basis: OrgGrant, at: EntityId, spentAt: EntityId[]): void => {
+    if (basis.basis === "position") {
+      const held = heldPositions(ctx, who, at).find((h) => h.position.id === basis.id);
+      if (held?.position.limits) checks.push({ limits: held.position.limits, spentAt });
+      if (held?.position.scope === "below") scopes.push({ position: held.position, at });
+    } else if (basis.basis === "delegate") {
+      const limits = delegationsIn(ctx, at).find((d) => d.who === who && d.powers.some((p) => powerCovers(p, power)))?.limits;
+      if (limits) checks.push({ limits, spentAt });
+    }
+  };
+  if (grant.basis === "control") {
+    const path = controlPathOf(ctx, who, org, power);
+    if (!path) return { ok: false, reason: `${name}: you may not ${POWER_WORDS[power]}` };
+    const chain = [path.top, ...path.steps.map((s) => s.org)];
+    rests(path.root, path.top, chain);
+    for (const step of path.steps) {
+      if (step.limits) checks.push({ limits: step.limits, spentAt: chain });
+      if (step.position?.scope === "below") scopes.push({ position: step.position, at: step.org });
+    }
+    const last = path.steps[path.steps.length - 1];
+    if (last?.how === "stake" && last.role === "trustee") trustee = last.holder;
+  } else rests(grant, org, [org]);
   const amount = ask.amount;
-  if (limits && amount !== undefined) {
-    const over = overLimit(limits, amount, limits.month !== undefined ? spentThisMonth(ctx, who, org) : null, name, ctx.world.currency);
-    if (over !== null) return { ok: false, reason: over, limit: true };
+  for (const { limits, spentAt } of checks) {
+    if (amount !== undefined) {
+      const spent = limits.month !== undefined ? spentAt.reduce((sum, at) => sum + spentThisMonth(ctx, who, at), 0) : null;
+      const over = overLimit(limits, amount, spent, name, ctx.world.currency);
+      if (over !== null) return { ok: false, reason: over, limit: true };
+    }
+    if (limits.accounts && ask.account !== undefined && !limits.accounts.includes(ask.account)) return { ok: false, reason: `${labelOf(ctx, ask.account)} isn't one of the accounts you may use for ${name}`, limit: true };
   }
-  if (limits?.accounts && ask.account !== undefined && !limits.accounts.includes(ask.account)) return { ok: false, reason: `${labelOf(ctx, ask.account)} isn't one of the accounts you may use for ${name}`, limit: true };
-  if (scoped && ask.target !== undefined && SCOPED.includes(power)) {
-    const below = positionsBelow(positionsOf(ctx, org), scoped.id);
-    if (!heldPositions(ctx, ask.target, org).some((h) => below.includes(h.position.id))) return { ok: false, reason: `${labelOf(ctx, ask.target)} isn't below ${scoped.title} at ${name}` };
+  const target = ask.target;
+  if (target !== undefined && SCOPED.includes(power)) {
+    for (const { position, at } of scopes) {
+      const below = positionsBelow(positionsOf(ctx, at), position.id);
+      if (!heldPositions(ctx, target, at).some((h) => below.includes(h.position.id))) return { ok: false, reason: `${labelOf(ctx, target)} isn't below ${position.title} at ${labelOf(ctx, at)}` };
+    }
   }
-  const worth = grant.basis === "owner" && ownersIn(own(ctx.state.entities, org)?.fields ?? {}).some((o) => o.party === who && ROLE_RIGHTS[o.role].worth);
-  if (ask.target !== undefined && !worth && (power === "money.spend" || power === "money.payout")) {
+  const rows = grant.basis === "owner" ? ownersIn(own(ctx.state.entities, org)?.fields ?? {}).filter((o) => o.party === who) : [];
+  const worth = rows.some((o) => ROLE_RIGHTS[o.role].worth);
+  if (target !== undefined && !worth && (power === "money.spend" || power === "money.payout")) {
     const interests = optionalQuery(ctx, "economy.interests")?.(ctx, who) ?? [who];
-    if (interests.includes(ask.target)) return { ok: false, reason: `${name}'s money pays for ${name}, not for ${labelOf(ctx, ask.target)}` };
+    if (interests.includes(target)) return { ok: false, reason: `${name}'s money pays for ${name}, not for ${labelOf(ctx, target)}` };
+  }
+  if (rows.some((o) => o.role === "trustee")) trustee = who;
+  // A trustee acting alone where the trustees decide together (§29.1 Trusts): a co-trustee approves it.
+  if (ask.approving !== true && trustee !== null && TOGETHER_POWERS.includes(power) && orgTypeOf(ctx, org) === "trust" && trusteesDecideIn(own(ctx.state.entities, org)?.fields ?? {}) === "together" && trusteesOf(ctx, org).some((t) => t !== trustee)) {
+    return { ok: false, reason: `The trustees of ${name} decide together: another trustee approves this`, limit: true };
   }
   return { ok: true, grant };
 }

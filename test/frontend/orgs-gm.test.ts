@@ -164,7 +164,7 @@ describe("every organization", () => {
       ["Jordan Ellis", "Mechanic"],
     ]);
     expect(shop.hidden.count).toBe(0);
-    expect(Object.keys(shop.sections).sort()).toEqual(["money", "orgs.alerts", "orgs.coming", "orgs.decisions", "orgs.plan", "ownership", "payroll", "premises", "taxes"]);
+    expect(Object.keys(shop.sections).sort()).toEqual(["money", "orgs.alerts", "orgs.coming", "orgs.decisions", "orgs.plan", "ownership", "payroll", "premises", "projects", "taxes"]);
     // The GM is no reader: no place of theirs on any page.
     expect(gm.orgs.every((o) => !o.page.you.belongs && o.page.you.powers.length === 0)).toBe(true);
   });
@@ -214,7 +214,7 @@ describe("an organization's page in GM", () => {
 
   test("the packs' tabs, then Rules, Who may…, History and Fields; People holds the GM's parts by type", () => {
     const shop = entryOf(gm, SHOP);
-    expect(find(pageTree(shop), Tabs)[0]?.tabs).toEqual(["Overview", "People", "Money", "Ownership", "Taxes", "Rules", "Who may…", "History", "Fields"].map((label) => expect.objectContaining({ label })));
+    expect(find(pageTree(shop), Tabs)[0]?.tabs).toEqual(["Overview", "People", "Chart", "Money", "Ownership", "Taxes", "Rules", "Who may…", "History", "Fields"].map((label) => expect.objectContaining({ label })));
     const parts = (entry: OrgGmView) => elements(pageTree(entry, "people")).flatMap((v) => (typeof v.props["data-lre-org-part"] === "string" ? [v.props["data-lre-org-part"]] : []));
     expect(parts(shop)).toEqual(["orgs.gm_members", "orgs.gm_owners", "orgs.gm_jobs", "economy.payroll"]);
     expect(parts(entryOf(gm, HOUSEHOLD))).toEqual(["orgs.gm_members"]);

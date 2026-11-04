@@ -3,7 +3,8 @@
 // all its agents have spent this turn, and nothing else: never a row per agent (whose count would tell
 // how many people a role works for, off-screen or unseen ones too), a tool's name or arguments, nor a
 // task the main agent wrote. A role's row goes once none of its agents works, and every row with the turn.
-// Cancel on a row is the line's own `lre.cancel`. The models are scripted, as in the main agent's tests.
+// Cancel on a row is the line's own `lre.cancel`. The turn's plan (N3 B7) is GM → Live's and its
+// transcript's, never the line's. The models are scripted, as in the main agent's tests.
 
 import { describe, expect, test } from "bun:test";
 import type { QuietRequest, QuietToolCall } from "../../src/backend/host";
@@ -11,6 +12,7 @@ import { ROLE_IDS, ROLE_LABEL } from "../../src/shared/agent-roles";
 import { AGENT_ROLES, agentLabel, MAIN_AGENT_ROLE } from "../../src/shared/agent-settings";
 import type { Activity } from "../../src/shared/diagnostics";
 import type { JsonObject } from "../../src/shared/json";
+import { liveItems, transcriptText } from "../../src/shared/live";
 import { Rig } from "../support/rig";
 
 const INTERPRET_MARK = "You map a player's typed input";
@@ -126,5 +128,37 @@ describe("the live trace", () => {
     expect(lines(rig, chatId).at(-1)?.agents).toEqual(rig.rt.diag.activityOf(chatId)?.agents);
     rig.rt.diag.end(at);
     expect(rig.rt.diag.activityOf(chatId)).toBeNull();
+  });
+
+  test("the turn's plan goes to GM → Live once its pre phase knows it, a row per role, and into the turn's transcript; never to the drawer's line", async () => {
+    const rig = new Rig({ shipped: true });
+    const chatId = await mainChat(rig);
+    models(rig);
+    rig.host.sendUser(chatId, "I look out over the harbor.");
+    await rig.host.settle();
+    const g = await rig.host.start(chatId, { type: "normal" });
+    await rig.host.finish(g, "Gulls wheel over the water.");
+    const view = rig.rt.live.view(chatId, rig.host.userId);
+    if (!view) throw new Error("no live view");
+    const plans = view.entries.filter((e) => e.kind === "plan");
+    expect(plans).toHaveLength(1);
+    const [plan] = plans;
+    if (plan?.kind !== "plan") throw new Error("no plan");
+    expect(plan.rows.map((r) => r.role)).toEqual([...ROLE_IDS]);
+    expect(plan.rows.find((r) => r.role === "intent")).toEqual({ role: "intent", status: "runs", why: "The main agent decides it in stage 1, stage 3." });
+    expect(plan.rows.find((r) => r.role === "skip")).toEqual({ role: "skip", status: "none", why: "The turn plays no timelapse." });
+    // A mark between the groups, after the pre phase's work and before the plan is made.
+    const marks = liveItems(view).filter((i) => i.type === "mark").map((i) => (i.type === "mark" ? i.entry.kind : ""));
+    expect(marks).toContain("plan");
+    const planned = view.entries.findIndex((e) => e.kind === "phase" && e.phase === "plan");
+    if (planned >= 0) expect(view.entries.indexOf(plan)).toBeLessThan(planned);
+    // The transcript tells it, each role's line in words.
+    const transcript = transcriptText(view);
+    expect(transcript).toContain("--- This turn's plan (+");
+    expect(transcript).toContain(`- ${ROLE_LABEL.intent}: Runs. The main agent decides it in stage 1, stage 3.`);
+    expect(transcript).toContain(`- ${ROLE_LABEL.skip}: None. The turn plays no timelapse.`);
+    // The drawer's line says nothing of it.
+    for (const line of lines(rig, chatId)) expect(JSON.stringify(line)).not.toContain("The turn plays no timelapse");
+    expect(rig.rt.ledger.errors).toEqual([]);
   });
 });

@@ -1,12 +1,13 @@
 // Character minds around real turns on the fake host (DESIGN §24): one call per mind, blind to the
 // others; the Minds section in the prompt under each secrecy; memory written after the reply; recall
 // holding only the turns a character was there for; Re-narrate reusing the pre phase's minds and
-// Re-run asking again; the inspector's traces; and a mind's secret kept from every player surface.
+// Re-run asking again; the inspector's traces; a mind's secret kept from every player surface; and
+// which minds Smart persistence may keep (`quietMind`).
 
 import { describe, expect, test } from "bun:test";
 import type { JsonObject } from "../../src/shared/json";
 import type { LedgerEvent } from "../../src/shared/ledger";
-import { DEFAULT_MIND_READS, DEFAULT_MINDS_MEMORY, MINDS_PRESETS, type MindMoment, type MindsReads } from "../../src/shared/minds";
+import { DEFAULT_MIND_READS, DEFAULT_MINDS_MEMORY, MINDS_EVENTS, MINDS_PRESETS, type MindMoment, type MindsReads } from "../../src/shared/minds";
 import type { UserSettings } from "../../src/shared/settings";
 import { sectionTokens } from "../../src/backend/book";
 import type { WorldDoc } from "../../src/shared/world";
@@ -23,7 +24,11 @@ import type { WorldState } from "../../src/engine/state";
 import { planTurn, postTurn } from "../../src/engine/turn";
 import { unrevealedSecrets } from "../../src/engine/visibility";
 import { intentLines } from "../../src/packs/minds/core/intent";
+import { type MindPick, quietMind } from "../../src/packs/minds/core/fidelity";
 import { readCharacter, readSlice } from "../../src/packs/minds/core/state";
+import { refreshOp } from "../../src/packs/minds/ui/ops";
+import type { ReadContext } from "../../src/engine/registry";
+import { Working } from "../../src/engine/working";
 import { STARTER_WORLDS } from "../../src/packs/index";
 import { placeOfEntity } from "../../src/engine/scope";
 import { Rig } from "../support/rig";
@@ -799,3 +804,59 @@ describe("determinism", () => {
   });
 });
 
+describe("Smart persistence's quiet minds (N3 B7)", () => {
+  /** The context the next turn's minds think on: the chat's head with that turn's round opened. */
+  async function nextRound(rig: Rig, chatId: string, change: (w: Working) => void = () => undefined): Promise<ReadContext> {
+    const { state, world } = await stateOf(rig, chatId);
+    const w = new Working(rig.rt.registry, world, state);
+    change(w);
+    w.apply({ type: MINDS_EVENTS.round, data: { at: w.state.clock, on: true } });
+    return rig.rt.registry.context(world, w.state);
+  }
+  const live = (entity: string, level: MindPick["level"] = "live"): MindPick => ({ entity, level, reason: "live", call: true });
+  const QUIET = { user: "I wait by the counter.", reply: "The shop is quiet." };
+
+  test("a quiet Live mind is kept; a named, first, promoted, refreshed, interrupting or absent one never is", async () => {
+    const rig = new Rig({ shipped: true, minds: true });
+    fakeModels(rig);
+    const chatId = await alderChat(rig, {}, ["danny_okafor", "priya_nair"]);
+    // Before any turn, every mind is a first one.
+    expect(quietMind(await nextRound(rig, chatId), live("danny_okafor"), QUIET)).toBe(false);
+    await rig.turn(chatId, "I look around the shop.", "The shop is quiet.");
+    const ctx = await nextRound(rig, chatId);
+    expect([quietMind(ctx, live("danny_okafor"), QUIET), quietMind(ctx, live("priya_nair"), QUIET)]).toEqual([true, true]);
+    // Named by the player's message, or by the reply before it.
+    expect(quietMind(ctx, live("danny_okafor"), { ...QUIET, user: "I ask Danny about the van." })).toBe(false);
+    expect(quietMind(ctx, live("danny_okafor"), { ...QUIET, reply: "Danny shrugs." })).toBe(false);
+    // Promoted (due at another level than it last thought at), or due for another reason than Live's every turn.
+    expect(quietMind(ctx, live("danny_okafor", "near"), QUIET)).toBe(false);
+    expect(quietMind(ctx, { ...live("danny_okafor"), reason: "promoted" }, QUIET)).toBe(false);
+    expect(quietMind(ctx, { ...live("danny_okafor"), call: false }, QUIET)).toBe(false);
+    // A first mind: Marcus has thought nothing yet.
+    expect(quietMind(ctx, live("marcus_delgado"), QUIET)).toBe(false);
+    // A mind whose last round wasn't the turn before: one more round since.
+    const later = await nextRound(rig, chatId, (w) => w.apply({ type: MINDS_EVENTS.round, data: { at: w.state.clock, on: true } }));
+    expect(quietMind(later, live("danny_okafor"), QUIET)).toBe(false);
+    // One that interrupted: its last mind carries the interrupt.
+    const last = readCharacter(ctx.state, "danny_okafor").mind;
+    if (!last) throw new Error("Danny has no mind");
+    const interrupted = await nextRound(rig, chatId, (w) => {
+      w.apply({ type: MINDS_EVENTS.round, data: { at: w.state.clock, on: true } });
+      w.apply({ type: MINDS_EVENTS.mind, data: { entity: "danny_okafor", at: w.state.clock, place: last.place, level: last.level, moment: "turn", reason: "live", monologue: last.monologue, depiction: last.depiction, intent: last.intent, reactions: [], mood: last.mood, interrupt: { reason: "The van is here." }, withheld: false } });
+    });
+    expect(quietMind(interrupted, live("danny_okafor"), QUIET)).toBe(false);
+    // Refreshed by the GM: asked afresh, the other kept.
+    const refresh = refreshOp("danny_okafor");
+    if (!refresh) throw new Error("the form refused it");
+    rig.body(await rig.send(editRequest(chatId, [refresh]) as unknown as Record<string, unknown>));
+    const refreshed = await nextRound(rig, chatId);
+    expect([quietMind(refreshed, live("danny_okafor"), QUIET), quietMind(refreshed, live("priya_nair"), QUIET)]).toEqual([false, true]);
+    // Out of the player character's scene.
+    const away = await nextRound(rig, chatId, (w) => {
+      const priya = w.state.entities.priya_nair;
+      const elsewhere = Object.keys(w.world.places).find((p) => p !== placeOfEntity(w.state, "pov"));
+      if (priya && elsewhere) priya.fields = { ...priya.fields, place: elsewhere };
+    });
+    expect(quietMind(away, live("priya_nair"), QUIET)).toBe(false);
+  });
+});

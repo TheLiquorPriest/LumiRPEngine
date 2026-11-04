@@ -18,7 +18,7 @@
 
 import { buildOrgsGm } from "../../../../packs/orgs/core/gm";
 import { dateWords, partyIdOf, powersAt, rowsAt, buildOrgView } from "../../../../packs/orgs/core/view";
-import { delegationsOf, heldPositions, HOW_WORDS, mayAct, orgTitle, orgTypeOf } from "../../../../engine/org";
+import { controlThrough, delegationsOf, heldPositions, HOW_WORDS, mayAct, orgTitle, orgTypeOf } from "../../../../engine/org";
 import { own } from "../../../../engine/pack-kit";
 import { isGone } from "../../../../engine/scope";
 import { TOOL_NOTE } from "../../../../shared/agent-tools";
@@ -158,6 +158,7 @@ function youOf(view: ToolReadView, page: OrgView): OrgYouView {
     reportsTo: above.map((id) => ({ id, name: view.name(id) })),
     powers: powersAt(view.ctx, page.id, view.pov).map(({ power, grant }) => ({ power, basis: grant.basis, id: grant.id ?? null, words: POWER_WORDS[power] })),
     delegations: page.delegations.filter((d) => d.who.id === view.pov),
+    through: controlThrough(view.ctx, view.pov, page.id).map((id) => ({ id, name: view.name(id) })),
   };
 }
 

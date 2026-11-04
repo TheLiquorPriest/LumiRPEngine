@@ -11,6 +11,7 @@ import type { LedgerEvent, PostingLine } from "../../../shared/ledger";
 import { FINANCE_EVENTS, FLOW_KINDS, FLOW_SHORTFALLS, featureOn, type Flow, type FlowAmount, type FlowKind, type FlowOutcome, type FlowRunState, type FlowSchedule, type FlowShortfall, type FlowSplit } from "../../../shared/finance";
 import { formatMoney } from "../../../shared/world";
 import { OFFSTAGE_ORIGIN, ORIGIN_FIELD } from "../../../shared/offstage";
+import { REVENUE_PROVIDER, revenueOf } from "../../../shared/revenue";
 import { calendarOf, clockAt, clockOfLocal, dateAt, dayIndexOfText, holidaysOn, parseHHMM, type Calendar } from "../../../engine/calendar";
 import { EXTERNAL_ACCOUNT_PREFIX } from "../../../engine/events";
 import { evalNumber } from "../../../engine/expr";
@@ -183,12 +184,12 @@ function isShortfall(v: unknown): v is FlowShortfall {
   return typeof v === "string" && (FLOW_SHORTFALLS as readonly string[]).includes(v);
 }
 
-/** A flow entity as a flow; null when it names no amount or no sides. */
+/** A flow entity as a flow; null when it names no amount or no sides. A stream's `revenue` model is its amount, whatever amount fields it has besides. */
 export function flowOfEntity(ctx: Pick<ReadContext, "state">, id: EntityId): Flow | null {
   const e = own(ctx.state.entities, id);
   if (!e || e.kind !== "flow" || isGone(ctx.state, id)) return null;
   const f = e.fields;
-  const amount = amountOfFields(f);
+  const amount: FlowAmount | null = revenueOf(f.revenue) ? { provider: REVENUE_PROVIDER, args: { stream: id } } : amountOfFields(f);
   const from = strOf(f.from);
   const to = strOf(f.to);
   if (!amount || from === "" || to === "") return null;

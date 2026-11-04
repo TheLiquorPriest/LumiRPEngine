@@ -6,12 +6,14 @@
 // the agent was sent, its reasoning, its answers (long texts folded), each tool call as a card that
 // folds over its arguments and its result, its caret's colour and words saying how the call stands,
 // its stop, and the writes its run staged with what came of them. The turn's
-// phases, a wait at a gate and what stopped it sit between the groups. The feed follows the newest
+// phases, a wait at a gate and what stopped it sit between the groups, and so does the turn's plan,
+// once its pre phase knows it: each role runs, is kept, off, auto or none, with why. The feed follows the newest
 // unless you've scrolled up; a filter shows one role's work; Cancel stops the turn while it can be
 // stopped. Once the turn ends, the view stays as that turn's record until the next one starts.
 
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { agentLabel } from "../../shared/agent-settings";
+import { PLAN_STATUS_WORDS, type PlanStatus } from "../../shared/agent-pipeline";
 import type { ChatId } from "../../shared/ids";
 import { agentModel, DROP_WORDS, END_WORDS, followLive, groupSpent, type LiveAgentView, type LiveGroup, type LiveItem, liveItems, type LiveStatus, type LiveView, PHASE_WORDS, REVIEW_OUTCOME_WORDS, reviewEditWords, usageWords, WRITE_OUTCOME_WORDS } from "../../shared/live";
 import { useApp } from "../app";
@@ -187,9 +189,30 @@ function groupOf(g: LiveGroup, view: LiveView, open: boolean, onToggle: (open: b
   );
 }
 
-/** A mark between groups; the final review's says how it ended, with each edit it made to the narrator's prompt. */
+/** How each plan status reads at a glance. */
+const PLAN_TONE: Readonly<Record<PlanStatus, "neutral" | "accent" | "pos" | "warn">> = { runs: "accent", kept: "pos", off: "warn", auto: "accent", none: "neutral" };
+
+/** A mark between groups; the final review's says how it ended, with each edit it made to the narrator's prompt; the plan's lists each role, how it stands and why. */
 function markOf(item: Extract<LiveItem, { type: "mark" }>) {
   const e = item.entry;
+  if (e.kind === "plan") {
+    const kept = e.rows.filter((r) => r.status === "kept").length;
+    const skipped = e.rows.filter((r) => r.status === "off" || r.status === "none").length;
+    return (
+      <li key={`mark-${e.seq}`} class="lre-live-mark plan" data-lre-live-mark="plan">
+        <details>
+          <summary>{`This turn's plan: ${e.rows.length - kept - skipped} run, ${kept} kept, ${skipped} not asked or off`}</summary>
+          <ul class="lre-live-plan" aria-label="This turn's plan">
+            {e.rows.map((r) => (
+              <li key={r.role} data-lre-plan-role={r.role} data-status={r.status}>
+                <span class="lre-live-plan-role">{agentLabel(r.role)}</span> <Badge tone={PLAN_TONE[r.status]}>{PLAN_STATUS_WORDS[r.status]}</Badge> <span class="lre-live-plan-why">{r.why}</span>
+              </li>
+            ))}
+          </ul>
+        </details>
+      </li>
+    );
+  }
   if (e.kind === "review") {
     const failed = e.outcome === "unrevised" || e.outcome === "stopped";
     return (

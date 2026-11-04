@@ -10,7 +10,7 @@ import { kindIs } from "../engine/scope";
 import { ALL_PACKS } from "../packs/index";
 import type { JsonValue } from "../shared/json";
 import { hasOwn, isRecord } from "../shared/json";
-import type { JsonPatchOp, MarkerPreview, ResultBodies } from "../shared/protocol";
+import type { JsonPatchOp, LintIssue, MarkerPreview, ResultBodies } from "../shared/protocol";
 import type { RevisionNote, WorldDoc, WorldIndex } from "../shared/world";
 import type { Args } from "./args";
 import { boolArg, intArg, neededText, textArg, textsArg, ToolError } from "./args";
@@ -22,7 +22,7 @@ import { loadWorld, worldInput } from "./offline";
 import { getAt, jsonEqual, parsePointer } from "../shared/json-patch";
 import { BODY_LIMIT, clip, jsonText, readAt } from "./read";
 import type { ToolResult } from "./report";
-import { contentsOf, entityKindsOf, json, lintSummary, newHazards, schemaIssues } from "./report";
+import { contentsOf, entityKindsOf, json, lintDiff, lintSummary, newHazards, ranked, schemaIssues } from "./report";
 import { rank, searchItems, searchWords } from "./search";
 import type { ScoredHit } from "./search";
 
@@ -117,6 +117,22 @@ export class Live {
     const revision = source === "head" ? index.head : resolveRevision(index, source);
     const label = revision === index.head ? `the head of ${world}, revision ${revision}` : `revision ${revision} of ${world}`;
     return { world: await this.revision(worldId, revision), index, label };
+  }
+
+  /**
+   * One version's lint as LumiRPEngine lints it on the host, with how answers name that version and
+   * the world's name: "draft" (the stored draft's; the head's when none is stored), "head", or a
+   * revision id (a unique prefix of 6 or more characters will do).
+   */
+  async lint(worldId: string, source: string): Promise<{ label: string; lint: LintIssue[]; name: string }> {
+    const index = await this.index(worldId);
+    if (source === "draft") {
+      const draft = await this.draft(worldId);
+      return { label: draft.stored ? `the draft, version ${draft.version}` : `the draft, version ${draft.version}: none is stored, so the head, revision ${index.head}`, lint: draft.lint, name: index.name };
+    }
+    const revision = source === "head" ? index.head : resolveRevision(index, source);
+    const body = await this.conn.request("lre.world", revision === index.head ? { op: "lint", worldId } : { op: "lint", worldId, revision });
+    return { label: revision === index.head ? `the head, revision ${revision}` : `revision ${revision}`, lint: body.lint ?? [], name: index.name };
   }
 }
 
@@ -330,6 +346,8 @@ export function editTool(live: Live, args: Args, serialize: Serialize): Promise<
       }
     }
     const changes = changesBetween(onto.draft, after.draft);
+    // What this edit brought into lint, and what it cleared, against the draft it went onto.
+    const since = lintDiff(onto.lint, after.lint);
     return {
       text: json({
         worldId,
@@ -339,9 +357,11 @@ export function editTool(live: Live, args: Args, serialize: Serialize): Promise<
         items: changes.slice(0, 40),
         moreItems: Math.max(0, changes.length - 40),
         lint: lintSummary(after.lint, 12),
+        introduced: ranked(since.introduced).slice(0, 12),
+        moreIntroduced: Math.max(0, since.introduced.length - 12),
+        fixed: since.fixed.length,
         schema: lintSummary(schemaIssues(after.draft), 12),
         macroHazards: newHazards(onto.draft, after.draft),
-        ...(changes.length === 0 ? { note: "The patch applied, but the draft is the same as before." } : {}),
         // Said, not hidden: someone else is working in this draft right now.
         ...(onto !== read
           ? { meanwhile: { note: `The draft went from version ${read.version} to ${onto.version} while this edit was on its way (the user in Build, or another agent). That write touched nothing this patch does, so the patch went on top of it.`, items: meanwhile.slice(0, 20).map((c) => c.label), more: Math.max(0, meanwhile.length - 20) } }
@@ -356,8 +376,11 @@ export async function draftTool(live: Live, args: Args): Promise<ToolResult> {
   const [draft, index] = await Promise.all([live.draft(worldId), live.index(worldId)]);
   const lint = lintSummary(draft.lint, 12);
   if (!draft.stored) return { text: json({ worldId, name: index.name, stored: false, version: draft.version, base: draft.base, head: index.head, lint, note: "No draft is stored: the draft is the head. lre_edit starts one." }) };
-  const changes = changesBetween(await live.revision(worldId, index.head), draft.draft);
+  const [head, headLint] = await Promise.all([live.revision(worldId, index.head), live.conn.request("lre.world", { op: "lint", worldId })]);
+  const changes = changesBetween(head, draft.draft);
   const headMoved = draft.base !== index.head;
+  // What's new since the last save: the draft's lint against the head's.
+  const since = lintDiff(headLint.lint ?? [], draft.lint);
   return {
     text: json({
       worldId,
@@ -368,6 +391,7 @@ export async function draftTool(live: Live, args: Args): Promise<ToolResult> {
       head: index.head,
       headMoved,
       lint,
+      sinceHead: { new: since.introduced.length, fixed: since.fixed.length, newIssues: ranked(since.introduced).slice(0, 12), moreNew: Math.max(0, since.introduced.length - 12) },
       changes: { counts: countsOf(changes), items: changes.slice(0, 60), more: Math.max(0, changes.length - 60) },
       ...(headMoved ? { note: "The head moved since this draft began, so LumiRPEngine will refuse to commit it. See the difference with lre_diff, then lre_discard and redo the changes on the new head." } : {}),
     }),

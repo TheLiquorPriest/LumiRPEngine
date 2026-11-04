@@ -3,9 +3,12 @@
 // prompt as the narrator will read it (every engine section, the Outline with the brief, and the
 // narrator rules) and may revise it a line at a time. Here: the prompt as the review sees it (each
 // part's header and lines), the review's edits and how they apply, the record of them a turn keeps
-// (`Rec.finalEdits`, outside every hash) so a Re-narrate tells the same prompt, and every text the
-// review sends a model, on the Main agent page of Settings → Agents → Prompts.
+// (`Rec.finalEdits`, outside every hash) so a Re-narrate tells the same prompt, the parts it saw as
+// made (`Rec.finalParts`), which a review scoped to what changed compares the next turn's with
+// (`changedScope`), and every text the review sends a model, on the Main agent page of Settings →
+// Agents → Prompts.
 
+import { hashParts } from "./hash";
 import { MAIN_AGENT_PAGE } from "./main-agent-prompts";
 import { neutralizeMacros } from "./macros";
 import type { PromptDef, PromptVar } from "./prompts";
@@ -96,6 +99,29 @@ export function applyFinalEdits(parts: readonly PromptPart[], edits: readonly Fi
     else missed.push(edit);
   }
   return { parts: out, applied, missed };
+}
+
+/** A part as a turn's record keeps it (`Rec.finalParts`): the fingerprint of its text as the engine made it. */
+export function partHash(part: PromptPart): string {
+  return hashParts("lre.final-part", part.id, partText(part));
+}
+
+/** A turn's parts as stored: each part id with its fingerprint; anything else (none, or another build's) reads as none. */
+export function finalPartsOf(raw: unknown): Record<string, string> {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return {};
+  return Object.fromEntries(Object.entries(raw).filter((e): e is [string, string] => typeof e[1] === "string"));
+}
+
+/**
+ * A review scoped to what changed (Settings → Agents → Main agent → Final review, while Smart
+ * persistence is on): each part that reads as it did when the last turn's review saw it (`last.parts`)
+ * gets that review's edits made again (`kept`, with those that found their line in `applied`), and
+ * only the parts that changed are sent (`changed`), in the prompt's order.
+ */
+export function changedScope(parts: readonly PromptPart[], last: { parts: Readonly<Record<string, string>>; edits: readonly FinalEdit[] }): { kept: PromptPart[]; applied: FinalEdit[]; changed: PromptPart[] } {
+  const same = new Set(parts.filter((p) => last.parts[p.id] === partHash(p)).map((p) => p.id));
+  const told = applyFinalEdits(parts.filter((p) => same.has(p.id)), last.edits.filter((e) => same.has(e.part)));
+  return { kept: told.parts, applied: told.applied, changed: parts.filter((p) => !same.has(p.id)).map((p) => ({ ...p, lines: [...p.lines] })) };
 }
 
 /** Why the review's draft refused an edit: no such part, no such line (`line`, the number given that its part doesn't have), or no text. */

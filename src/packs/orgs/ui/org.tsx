@@ -1,12 +1,13 @@
 // An organization's page (ORG-SPEC §4.3; the `org` sheet): Back, its name, its type badge and your
-// title there, then a tab row with only the tabs it has and you may see: Overview, People and Rules,
-// drawn here, and the packs' tabs (`r.orgTab`: Money, Ownership, Taxes…), each while the page holds
-// the section it draws, which the backend builds only for a reader who holds its power. A pack's part
-// of one of the three (People's Payroll) follows that tab's own content. The page is the `orgs.org`
-// view's, as the player character may see the organization, opened on the tab its route names
-// (`orgRoute`), else on Overview. The header's overflow holds Rename where you may govern it and
-// Leave where you're a member of your own (each done at once, off screen, with Undo: DESIGN §11) and
-// Open in GM, which shows it in GM → Orgs.
+// title there, then a tab row with only the tabs it has and you may see: Overview, People, Chart
+// (where it has positions of its own or organizations above or below it, item 8) and Rules, drawn
+// here, and the packs' tabs (`r.orgTab`: Money, Ownership, Taxes…), each while the page holds the
+// section it draws, which the backend builds only for a reader who holds its power. A pack's part of
+// one of the shell's tabs (People's Payroll) follows that tab's own content. The page is the
+// `orgs.org` view's, as the player character may see the organization, opened on the tab its route
+// names (`orgRoute`), else on Overview. The header's overflow holds Rename where you may govern it
+// and Leave where you're a member of your own (each done at once, off screen, with Undo: DESIGN §11)
+// and Open in GM, which shows it in GM → Orgs.
 
 import type { ComponentChildren } from "preact";
 import { useId, useState } from "preact/hooks";
@@ -22,6 +23,8 @@ import { ORGS_LIST_PANEL, ORGS_ORG_PANEL, type OrgView } from "../../../shared/o
 import type { StateView } from "../../../shared/state-view";
 import { OFFSTAGE_NOTE } from "../../../shared/offstage";
 import { toastQueued } from "../../../frontend/queued";
+import { hasChart } from "./chart-model";
+import { OrgChart } from "./chart";
 import { decodeOrgList, decodeOrgPage } from "./decode";
 import { GM_ORGS_SECTION } from "./gm";
 import { OrgOverview } from "./overview";
@@ -29,17 +32,19 @@ import type { PartyAct } from "./party";
 import { OrgPeople } from "./people";
 import { OrgRules } from "./rules";
 
-/** The page's own tabs, placed among the packs' by `order`. */
-const SHELL_TABS: readonly { id: OrgShellTab; label: string; order: number }[] = [
+/** The page's own tabs, placed among the packs' by `order`; the Chart only where the page has one. */
+const SHELL_TABS: readonly { id: OrgShellTab | "chart"; label: string; order: number }[] = [
   { id: "overview", label: "Overview", order: 10 },
   { id: "people", label: "People", order: 20 },
+  { id: "chart", label: "Chart", order: 25 },
   { id: "rules", label: "Rules", order: 90 },
 ];
 
-/** The tabs a page shows, in order: its own three, and each pack's whose section it holds. */
+/** The tabs a page shows, in order: its own (the Chart where it has one), and each pack's whose section it holds. */
 export function orgTabs(org: OrgView, defs: readonly OrgTabDef[]): { id: string; label: string; def: OrgTabDef | null }[] {
   const packs = defs.filter((d) => d.within === undefined && org.sections[d.section] !== undefined);
-  return [...SHELL_TABS.map((t) => ({ ...t, def: null })), ...packs.map((def) => ({ id: def.id, label: def.label, order: def.order, def }))]
+  const shell = SHELL_TABS.filter((t) => t.id !== "chart" || hasChart(org));
+  return [...shell.map((t) => ({ ...t, def: null })), ...packs.map((def) => ({ id: def.id, label: def.label, order: def.order, def }))]
     .sort((a, b) => a.order - b.order || a.id.localeCompare(b.id))
     .map(({ id, label, def }) => ({ id, label, def }));
 }
@@ -65,6 +70,8 @@ export interface OrgPageProps {
   above?: ComponentChildren;
   /** Plays one of the party's own controls (Play's sheet); absent, the party's page reads only, as GM → Orgs draws it. */
   act?: PartyAct;
+  /** Another organization's page as the reader holds it, for the Chart's ownership tree (Play's `orgs.org`, GM → Orgs' every page); absent, only this one's. */
+  pageOf?(id: string): OrgView | null;
 }
 
 /** What the header's overflow does, as the sheet wires it. */
@@ -125,10 +132,15 @@ export function OrgPage(props: OrgPageProps) {
   const def = tabs.find((t) => t.id === current)?.def ?? null;
   const draw = (d: OrgTabDef) => <d.component chatId={props.chatId} org={org} section={org.sections[d.section] ?? null} state={props.state} send={props.send} open={props.open} />;
   const ownership = tabs.find((t) => t.def?.section === "ownership")?.id;
+  // Where another page's Ownership forms are: the tab drawing the economy's `ownership` section, while that page holds it.
+  const ownershipDef = defs.find((d) => d.section === "ownership" && d.within === undefined);
+  const pageOf = (id: string): OrgView | null => (id === org.id ? org : (props.pageOf?.(id) ?? null));
   const body = def ? (
     draw(def)
   ) : current === "people" ? (
     <OrgPeople org={org} ownership={ownership === undefined ? null : () => props.onTab(ownership)} open={props.open} />
+  ) : current === "chart" ? (
+    <OrgChart key={org.id} org={org} pageOf={pageOf} ownershipTab={(o) => (ownershipDef && o.sections[ownershipDef.section] !== undefined ? ownershipDef.id : null)} open={props.open} onTab={props.onTab} />
   ) : current === "rules" ? (
     <OrgRules org={org} currency={props.state.currency ?? null} open={props.open} />
   ) : (
@@ -203,5 +215,11 @@ export function OrgSheet(props: SheetProps) {
     openInGm: () => app.ui.update((ui) => ({ ...gmOpen(ui, GM_ORGS_SECTION, org.id), mode: "gm" })),
   });
   const above = renaming ? <OrgRenameForm name={org.name} busy={busy} onSave={(name) => act(ORG_ACTIONS.rename, { org: org.id, name }, () => setRenaming(false))} onCancel={() => setRenaming(false)} /> : null;
-  return <OrgPage org={org} figure={figure} defs={app.catalog.orgTabs} tab={tab} panelId={panelId} onTab={setTab} onBack={props.close} chatId={props.chatId} state={props.state} send={props.send} open={props.open} menu={menu} above={above} act={playOrgAction(app, props.chatId)} />;
+  // The other pages the Chart's ownership tree walks, each read once a render.
+  const pages = new Map<string, OrgView | null>();
+  const pageOf = (id: string): OrgView | null => {
+    if (!pages.has(id)) pages.set(id, decodeOrgPage(props.state.panels[ORGS_ORG_PANEL], id));
+    return pages.get(id) ?? null;
+  };
+  return <OrgPage org={org} figure={figure} defs={app.catalog.orgTabs} tab={tab} panelId={panelId} onTab={setTab} onBack={props.close} chatId={props.chatId} state={props.state} send={props.send} open={props.open} menu={menu} above={above} act={playOrgAction(app, props.chatId)} pageOf={pageOf} />;
 }

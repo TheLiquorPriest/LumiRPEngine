@@ -111,10 +111,11 @@
       "calendar.work": "790bee504417a877b2adc3b5d3c4368a",
       "economy.catalog": "acce89ae165a4fe873899b9cd8b84cac",
       "economy.categories": "0e5202e0d1140576442d90298cdad64a",
-      "economy.exempt": "6a6ce568ab95c880347cc8cd6bd5dbe3",
-      "economy.finance": "cf2f58746b64d1e0adaa4b8409dc6c63",
+      "economy.exempt": "f6de734f9c98da99975b404f3c0094cf",
+      "economy.finance": "95fc3e111986ca615e4c8a75c8f42960",
       "economy.index_history": "65038a8238d1241b4aa53ea1bdbbf2c2",
       "economy.occupations": "fe82950d08d32866585e8d92ca6c866a",
+      "economy.projects": "46bd6c11c3a35c528464d62990f8e500",
       "economy.regions": "0a14f13dda6e977fe0243eaaca5d1790",
       "gear.containers": "29334aeff91f1b6b9e99db08972661f1",
       "gear.items": "a799c31ed29573302a62b08a89edcf94",
@@ -6147,7 +6148,7 @@
       "id": "economy.finance",
       "pack": "economy",
       "schema": "lre-table/economy.finance/v1",
-      "revision": "cf2f58746b64d1e0adaa4b8409dc6c63",
+      "revision": "95fc3e111986ca615e4c8a75c8f42960",
       "label": "Finance parameters",
       "source": {
         "dataPack": "modern-us",
@@ -6435,14 +6436,16 @@
               "thresholds_single_cents": [4835000, 53340000],
               "thresholds_married_filing_jointly_cents": [9670000, 60005000],
               "thresholds_head_of_household_cents": [6475000, 56670000],
-              "note": "2025 taxable-income thresholds at which the 15% and 20% rates begin (IRS Rev. Proc. 2024-40); long gains and qualified dividends stack on top of ordinary income."
+              "thresholds_trust_cents": [325000, 1590000],
+              "note": "2025 taxable-income thresholds at which the 15% and 20% rates begin (IRS Rev. Proc. 2024-40); long gains and qualified dividends stack on top of ordinary income. A trust's or an estate's are compressed: 15% from $3,250 and 20% from $15,900 (2025 Instructions for Form 1041)."
             },
             "net_investment_income_tax": {
               "pct": 3.8,
               "threshold_single_cents": 20000000,
               "threshold_married_filing_jointly_cents": 25000000,
               "threshold_head_of_household_cents": 20000000,
-              "note": "On the lesser of net investment income and modified AGI over the threshold; the thresholds are not indexed."
+              "threshold_trust_cents": 1565000,
+              "note": "On the lesser of net investment income and modified AGI over the threshold; the thresholds are not indexed. A trust pays it on the lesser of its undistributed net investment income and its income over the start of its top bracket ($15,650 for 2025, IRC section 1411(a)(2))."
             },
             "capital_loss_limit_cents": 300000,
             "home_sale_exclusion_cents": {
@@ -6459,6 +6462,43 @@
             },
             "consolidated_return_ownership_pct": 80,
             "consolidated_return_note": "An affiliated group may file one consolidated federal income tax return: a parent corporation and each corporation of which it and the others in the group hold at least 80% of the voting power and of the value of the stock (IRC section 1504(a)(2)). Their profits and losses offset; each state taxes its own.",
+            "brackets_trust": [
+              {"from_cents": 0, "to_cents": 315000, "rate_pct": 10},
+              {"from_cents": 315000, "to_cents": 1145000, "rate_pct": 24},
+              {"from_cents": 1145000, "to_cents": 1565000, "rate_pct": 35},
+              {"from_cents": 1565000, "to_cents": null, "rate_pct": 37}
+            ],
+            "brackets_trust_note": "2025 brackets of a non-grantor trust or an estate on the income it keeps (IRS Rev. Proc. 2024-40; 2025 Instructions for Form 1041). What it distributes, up to its distributable net income, is its beneficiaries' income instead (IRC sections 651, 652, 661, 662). A grantor trust (revocable, IRC sections 671-677) pays none: its income is its settlor's.",
+            "dividends_received_deduction": {
+              "bands": [{"from_pct": 0, "deduction_pct": 50}, {"from_pct": 20, "deduction_pct": 65}, {"from_pct": 80, "deduction_pct": 100}],
+              "note": "A corporation deducts this share of the dividends it receives from another corporation, by its stake in the payer's votes and worth: 50% under 20%, 65% from 20%, 100% from 80% or within an affiliated group (IRC section 243)."
+            },
+            "net_operating_loss": {
+              "limit_pct": 80,
+              "note": "A corporation's net operating loss from 2018 on carries forward without limit, and comes off at most 80% of a later year's taxable income (IRC section 172(a)(2), (b)(1)(A))."
+            },
+            "corporate_charitable": {
+              "limit_pct": 10,
+              "carryforward_years": 5,
+              "note": "A corporation deducts its gifts up to 10% of its taxable income figured without them; the rest carries forward five years, oldest first (IRC section 170(b)(2)(A), (d)(2))."
+            },
+            "personal_holding_company": {
+              "tax_pct": 20,
+              "passive_income_pct": 60,
+              "holders": 5,
+              "held_pct": 50,
+              "note": "A corporation at least 60% of whose adjusted ordinary gross income is personal holding company income (dividends, interest, royalties) and more than 50% of whose stock, by value, five or fewer individuals hold, directly or through others, pays 20% on its undistributed personal holding company income (IRC sections 541-547). It then owes no accumulated earnings tax (section 532(b)(1))."
+            },
+            "accumulated_earnings": {
+              "tax_pct": 20,
+              "credit_cents": 25000000,
+              "note": "A corporation that keeps its earnings rather than paying them out pays 20% on its accumulated taxable income: its taxable income less its federal income tax, the dividends it paid (consent dividends among them) and its credit, the $250,000 its accumulated earnings and profits haven't reached yet (IRC sections 531-537; $150,000 for a personal service corporation). The engine doesn't judge the reasonable needs of the business."
+            },
+            "consent_dividends_note": "Holders may consent to treat an amount as a dividend paid on the last day of the corporation's year, filed with its return: no money moves, the corporation deducts it as a dividend paid, and each holder takes it as income and adds it to their basis (IRC section 565).",
+            "s_corporation": {
+              "max_holders": 100,
+              "note": "An S corporation has at most 100 shareholders, each an individual, an estate, an eligible trust (a grantor trust, a qualified subchapter S trust or an electing small business trust) or a 501(c)(3) organization; never a corporation or a partnership (IRC section 1361(b), (c)(2), (c)(6))."
+            },
             "irs_standard_mileage_cents_per_mile_2025": 70,
             "effective_withholding_note": "occupations.json withholding_rate_pct was computed from these parameters."
           }
@@ -6484,7 +6524,7 @@
       "id": "economy.exempt",
       "pack": "economy",
       "schema": "lre-table/economy.exempt/v1",
-      "revision": "6a6ce568ab95c880347cc8cd6bd5dbe3",
+      "revision": "f6de734f9c98da99975b404f3c0094cf",
       "label": "Tax-exempt organizations",
       "source": {
         "dataPack": "modern-us",
@@ -6492,7 +6532,7 @@
         "sourceSchema": "lre-data-src/us/exempt/v1",
         "reflectsPeriod": "2025-2026 (point-in-time rules)",
         "approximate": true,
-        "basis": "The common kinds of tax-exempt organization and how the Internal Revenue Code treats each, as recalled from IRS Publications 557 (Tax-Exempt Status for Your Organization), 526 (Charitable Contributions) and 15 (Employer's Tax Guide), and the FUTA and state unemployment exclusions (IRC sections 3306(c)(8) and 3309(b)(1)); not queried live. Treat as plausible defaults, not legal advice."
+        "basis": "The common kinds of tax-exempt organization and how the Internal Revenue Code treats each, as recalled from IRS Publications 557 (Tax-Exempt Status for Your Organization), 526 (Charitable Contributions) and 15 (Employer's Tax Guide), and the FUTA and state unemployment exclusions (IRC sections 3306(c)(8) and 3309(b)(1)); a private foundation's payout, excise and donor limit from IRC sections 4940, 4942 and 170(b)(1)(B) and the Instructions for Form 990-PF; who may hold an S corporation's shares from IRC section 1361(c)(6); not queried live. Treat as plausible defaults, not legal advice."
       },
       "columns": {
         "name": {"type": "text"},
@@ -6501,6 +6541,31 @@
         "donations_deductible": {"type": "bool", "doc": "A person's cash gifts to it are deductible."},
         "futa": {"type": "bool", "doc": "Owes federal unemployment tax on its staff's wages."},
         "suta": {"type": "bool", "doc": "Owes state unemployment tax on its staff's wages."},
+        "s_corp_holder": {"type": "bool", "doc": "May hold an S corporation's shares (IRC section 1361(c)(6)).", "optional": true},
+        "payout_pct": {
+          "type": "number",
+          "unit": "pct",
+          "doc": "A private foundation's minimum payout a year, of the average value of its assets (IRC section 4942(e)).",
+          "optional": true
+        },
+        "excise_pct": {
+          "type": "number",
+          "unit": "pct",
+          "doc": "A private foundation's excise on its net investment income (IRC section 4940(a)).",
+          "optional": true
+        },
+        "undistributed_tax_pct": {
+          "type": "number",
+          "unit": "pct",
+          "doc": "A private foundation's tax on a payout still ungranted a year late (IRC section 4942(a)).",
+          "optional": true
+        },
+        "donor_limit_pct": {
+          "type": "number",
+          "unit": "pct",
+          "doc": "The share of a person's income their deductible gifts to it may come to (IRC section 170(b)(1)(B)).",
+          "optional": true
+        },
         "description": {"type": "text"}
       },
       "rows": {
@@ -6511,6 +6576,7 @@
           "donations_deductible": true,
           "futa": false,
           "suta": true,
+          "s_corp_holder": true,
           "description": "A public charity or other nonprofit organized for charitable, educational, scientific or literary purposes: a food bank, a shelter, a school, a museum. Gifts to it are deductible; it owes no FUTA but pays state unemployment tax."
         },
         "church": {
@@ -6520,6 +6586,7 @@
           "donations_deductible": true,
           "futa": false,
           "suta": false,
+          "s_corp_holder": true,
           "description": "A church, synagogue, mosque, temple or other religious organization, exempt without applying. Gifts to it are deductible; it owes neither FUTA nor state unemployment tax."
         },
         "club": {
@@ -6529,7 +6596,22 @@
           "donations_deductible": false,
           "futa": true,
           "suta": true,
+          "s_corp_holder": false,
           "description": "A club organized for pleasure and recreation, supported by its members' dues: a country club, a hobby or sports club, a fraternal lodge's social arm. Exempt on its members' money, but gifts to it are not deductible, and it pays unemployment taxes like any employer."
+        },
+        "private_foundation": {
+          "name": "Private foundation",
+          "code": "501(c)(3)",
+          "income_tax_exempt": true,
+          "donations_deductible": true,
+          "futa": false,
+          "suta": true,
+          "s_corp_holder": true,
+          "payout_pct": 5,
+          "excise_pct": 1.39,
+          "undistributed_tax_pct": 30,
+          "donor_limit_pct": 30,
+          "description": "A charity funded by one family, company or founder rather than the public: a family foundation, a company's foundation. It grants out at least 5% of the average value of its assets each year, by the end of the next, last year's shortfall first; it pays 1.39% on its net investment income and 30% on a payout still ungranted a year late, both with its return on 15 May. A person deducts gifts to it up to 30% of their income."
         }
       }
     },
@@ -6843,6 +6925,324 @@
         "2026-08": {"date": "2026-08-31", "level": 123.8857},
         "2026-09": {"date": "2026-09-30", "level": 123.4567},
         "2026-10": {"date": "2026-10-30", "level": 122.3804}
+      }
+    },
+    "economy.projects": {
+      "id": "economy.projects",
+      "pack": "economy",
+      "schema": "lre-table/economy.projects/v1",
+      "revision": "46bd6c11c3a35c528464d62990f8e500",
+      "label": "Production project templates",
+      "source": {
+        "dataPack": "modern-us",
+        "file": "us/projects.json",
+        "sourceSchema": "lre-data-src/us/projects/v1",
+        "reflectsPeriod": "2025-2026 (typical costs and lengths)",
+        "approximate": true,
+        "basis": "Typical lengths and costs of small production projects as the author knows them from public industry and agency figures (EIA and state drilling-cost reports for an onshore vertical oil well and a water supply well; RSMeans-style building cost guides for a small commercial building and a small iron foundry; USDA cost-and-returns estimates for a corn season), then rounded. The bands are an ordinary range, not extremes. Treat them as plausible defaults, not quotes."
+      },
+      "columns": {
+        "name": {"type": "text"},
+        "description": {"type": "text"},
+        "payee": {"type": "text", "doc": "Who its costs are paid to, an outside payee's name."},
+        "days": {"type": "band", "unit": "day", "doc": "Its length in calendar days, start to its last step done; its steps give the typical case."},
+        "cost_cents": {"type": "band", "unit": "cents", "doc": "What it costs in all; its steps give the typical case."},
+        "steps": {
+          "type": "json",
+          "doc": "Its steps as a project's own steps field holds them (shared/projects.ts stepsIn): id, name, days or business_days, cost, paid, after, inputs, crew, capitalize, unlocks."
+        }
+      },
+      "rows": {
+        "oil_well": {
+          "name": "Oil well",
+          "description": "An onshore vertical oil well on a lease the party holds: permits, a pad and road, drilling, completion and a tank battery. Done, it is a well (a mineral property depreciated over ten years) and a monthly oil sales stream that starts two months after first production and declines year by year.",
+          "payee": "Drilling contractors",
+          "days": {"min": 45, "typical": 75, "max": 150},
+          "cost_cents": {"min": 120000000, "typical": 255000000, "max": 600000000},
+          "steps": [
+            {"id": "permits", "name": "Permits and survey", "business_days": 15, "cost": 2500000, "paid": "start"},
+            {
+              "id": "site",
+              "name": "Pad and road",
+              "days": 10,
+              "cost": 12000000,
+              "paid": "split",
+              "after": ["permits"],
+              "capitalize": true,
+              "crew": {"size": 6, "role": "dirt crew"}
+            },
+            {
+              "id": "drill",
+              "name": "Drilling",
+              "days": 25,
+              "cost": 95000000,
+              "paid": "split",
+              "after": ["site"],
+              "capitalize": true,
+              "inputs": [{"name": "Steel casing", "qty": 9000, "unit": "ft", "cents": 4500}],
+              "crew": {"size": 12, "role": "rig crew"}
+            },
+            {
+              "id": "complete",
+              "name": "Completion and fracturing",
+              "days": 12,
+              "cost": 90000000,
+              "paid": "split",
+              "after": ["drill"],
+              "capitalize": true,
+              "crew": {"size": 20, "role": "frac crew"}
+            },
+            {
+              "id": "hookup",
+              "name": "Tank battery and hookup",
+              "days": 7,
+              "cost": 15000000,
+              "paid": "end",
+              "after": ["complete"],
+              "capitalize": true,
+              "unlocks": [
+                {
+                  "make": {
+                    "name": "Oil well",
+                    "kind": "property",
+                    "life_months": 120,
+                    "value": "cost",
+                    "fields": {"property_type": "mineral", "reserves": 120000}
+                  }
+                },
+                {
+                  "name": "Oil sales",
+                  "stream": {
+                    "flow_kind": "income",
+                    "from": "Crude purchaser",
+                    "every": "month",
+                    "days": [25],
+                    "revenue": [
+                      {
+                        "type": "royalty",
+                        "production": {"qi": 3000, "di_pct": 60, "b": 1},
+                        "price": 7000,
+                        "share_pct": 87.5,
+                        "deductions_pct": 2,
+                        "severance_pct": 4.6,
+                        "lag_months": 2,
+                        "unit": "bbl"
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        "water_well": {
+          "name": "Water well",
+          "description": "A water supply well with its pump, tank and meter, selling water by the barrel to the operators nearby. Done, it is a well depreciated over twenty years and a steady monthly water sales stream.",
+          "payee": "Water well contractor",
+          "days": {"min": 10, "typical": 21, "max": 60},
+          "cost_cents": {"min": 1500000, "typical": 4150000, "max": 12000000},
+          "steps": [
+            {"id": "permit", "name": "Water rights and permit", "business_days": 10, "cost": 150000, "paid": "start"},
+            {
+              "id": "drill",
+              "name": "Drilling",
+              "days": 4,
+              "cost": 2400000,
+              "paid": "split",
+              "after": ["permit"],
+              "capitalize": true,
+              "crew": {"size": 3, "role": "drill crew"}
+            },
+            {
+              "id": "pump",
+              "name": "Pump, tank and meter",
+              "days": 3,
+              "cost": 1600000,
+              "paid": "end",
+              "after": ["drill"],
+              "capitalize": true,
+              "unlocks": [
+                {"make": {"name": "Water well", "kind": "property", "life_months": 240, "value": "cost"}},
+                {
+                  "name": "Water sales",
+                  "stream": {
+                    "flow_kind": "income",
+                    "from": "Water buyers",
+                    "every": "month",
+                    "days": [25],
+                    "revenue": [{"type": "royalty", "production": 30000, "price": 50, "unit": "bbl"}]
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        "foundry": {
+          "name": "Foundry",
+          "description": "A small iron foundry: permits, site works, the building, an induction furnace and molding line set up beside it, then commissioning. Done, it is a plant depreciated over twenty-five years and castings sold every Friday, about 12 tons a week; its staff and metal are the party's own costs.",
+          "payee": "Builders and suppliers",
+          "days": {"min": 120, "typical": 166, "max": 365},
+          "cost_cents": {"min": 150000000, "typical": 338000000, "max": 900000000},
+          "steps": [
+            {"id": "permits", "name": "Permits and design", "business_days": 30, "cost": 6000000, "paid": "start", "capitalize": true},
+            {
+              "id": "site",
+              "name": "Site works",
+              "days": 20,
+              "cost": 15000000,
+              "paid": "split",
+              "after": ["permits"],
+              "capitalize": true,
+              "crew": {"size": 8, "role": "site crew"}
+            },
+            {
+              "id": "building",
+              "name": "Building",
+              "days": 90,
+              "cost": 180000000,
+              "paid": "split",
+              "after": ["site"],
+              "capitalize": true,
+              "crew": {"size": 25, "role": "construction crew"}
+            },
+            {
+              "id": "furnace",
+              "name": "Furnace and molding line",
+              "days": 45,
+              "cost": 20000000,
+              "paid": "split",
+              "after": ["site"],
+              "capitalize": true,
+              "inputs": [{"name": "Induction furnace", "qty": 1, "cents": 65000000}, {"name": "Molding line", "qty": 1, "cents": 48000000}]
+            },
+            {
+              "id": "commission",
+              "name": "Commissioning and first pour",
+              "days": 14,
+              "cost": 4000000,
+              "paid": "end",
+              "after": ["building", "furnace"],
+              "capitalize": true,
+              "crew": {"size": 18, "role": "foundry hands"},
+              "unlocks": [
+                {"make": {"name": "Foundry", "kind": "property", "life_months": 300, "value": "cost"}},
+                {
+                  "name": "Castings sales",
+                  "stream": {
+                    "flow_kind": "income",
+                    "from": "Castings customers",
+                    "every": "week",
+                    "weekdays": [5],
+                    "at": "17:00",
+                    "revenue": [{"type": "product", "units": 12, "price": 500000, "buyers": 1, "margin_pct": 35}]
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        "building": {
+          "name": "Rental building",
+          "description": "A small commercial building of six units let to outside tenants: design and permits, the foundation, the frame and shell, fit-out and the occupancy inspection. Done, it is a property depreciated over thirty-nine years, and its rent comes in from the month it opens.",
+          "payee": "General contractor",
+          "days": {"min": 120, "typical": 174, "max": 400},
+          "cost_cents": {"min": 90000000, "typical": 171500000, "max": 500000000},
+          "steps": [
+            {"id": "design", "name": "Design and permits", "business_days": 30, "cost": 6000000, "paid": "start", "capitalize": true},
+            {
+              "id": "foundation",
+              "name": "Foundation",
+              "days": 20,
+              "cost": 25000000,
+              "paid": "split",
+              "after": ["design"],
+              "capitalize": true,
+              "crew": {"size": 8, "role": "concrete crew"}
+            },
+            {
+              "id": "shell",
+              "name": "Frame and shell",
+              "days": 60,
+              "cost": 90000000,
+              "paid": "split",
+              "after": ["foundation"],
+              "capitalize": true,
+              "crew": {"size": 15, "role": "framers"}
+            },
+            {
+              "id": "fitout",
+              "name": "Fit-out",
+              "days": 45,
+              "cost": 50000000,
+              "paid": "split",
+              "after": ["shell"],
+              "capitalize": true,
+              "crew": {"size": 10, "role": "trades"}
+            },
+            {
+              "id": "inspect",
+              "name": "Inspection and occupancy",
+              "business_days": 5,
+              "cost": 500000,
+              "paid": "end",
+              "after": ["fitout"],
+              "unlocks": [
+                {
+                  "make": {
+                    "name": "Rental building",
+                    "kind": "property",
+                    "life_months": 468,
+                    "value": "cost",
+                    "fields": {"units": 6, "market_rent": 450000, "managed": true, "upkeep_pct": 1}
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        "farm_season": {
+          "name": "Farm season",
+          "description": "One season of corn on a mid-sized family farm (about 160 hectares): ground work and planting, the growing season and the harvest, its grain sold to the elevator over the three months after. Nothing is built: every cost is the season's own.",
+          "payee": "Farm suppliers",
+          "days": {"min": 110, "typical": 144, "max": 180},
+          "cost_cents": {"min": 15000000, "typical": 22500000, "max": 40000000},
+          "steps": [
+            {
+              "id": "plant",
+              "name": "Ground work and planting",
+              "days": 10,
+              "cost": 2000000,
+              "paid": "start",
+              "inputs": [{"name": "Seed corn", "qty": 400, "unit": "acre", "cents": 12000}, {"name": "Fertilizer", "qty": 400, "unit": "acre", "cents": 16000}],
+              "crew": {"size": 3, "role": "farmhands"}
+            },
+            {"id": "grow", "name": "Growing season", "days": 120, "cost": 4000000, "paid": "split", "after": ["plant"]},
+            {
+              "id": "harvest",
+              "name": "Harvest",
+              "days": 14,
+              "cost": 3500000,
+              "paid": "end",
+              "after": ["grow"],
+              "inputs": [{"name": "Drying and hauling", "qty": 72000, "unit": "bu", "cents": 25}],
+              "crew": {"size": 4, "role": "harvest crew"},
+              "unlocks": [
+                {
+                  "name": "Grain sales",
+                  "stream": {
+                    "flow_kind": "income",
+                    "from": "Grain elevator",
+                    "amount_cents": 10080000,
+                    "every": "month",
+                    "days": [15],
+                    "count": 3,
+                    "category": "sales"
+                  }
+                }
+              ]
+            }
+          ]
+        }
       }
     },
     "gear.items": {

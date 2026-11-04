@@ -276,6 +276,13 @@ export class Steps {
   onCall: ((userId: UserId, call: DiagCall) => void) | null = null;
   /** A model call is starting (the activity line says what the engine is asking); the runtime sets it. */
   onCallStart: ((userId: UserId, purpose: StepPurpose) => void) | null = null;
+  /**
+   * A place among the call's connection's calls at once (Settings → Agents → Throttles), taken before
+   * each attempt is sent and freed once it ends, so an agent turn's prompt-only calls share one gate
+   * with its agents' calls; the runtime sets it, and it holds nothing outside an agent turn. Its wait
+   * is no part of the call's time; a signal that aborts meanwhile throws.
+   */
+  gate: ((userId: UserId, connectionId: string | null, signal: AbortSignal) => Promise<() => void>) | null = null;
 
   /** `helperOf` reads the user's helper model (Settings → Helper model), which every helper call without a connection of its own runs on. */
   constructor(
@@ -292,6 +299,9 @@ export class Steps {
    * `retried`, and the last carries how many came before it.
    */
   private async quiet(purpose: StepPurpose, request: QuietRequest, userId: UserId, signal: AbortSignal, o: { lookup: boolean; spared?: boolean }, attempt = 0): Promise<QuietResult | Error> {
+    const placed = this.gate ? await this.gate(userId, request.connectionId ?? null, signal).catch((error: unknown) => (error instanceof Error ? error : new Error(String(error)))) : null;
+    if (placed instanceof Error) return placed;
+    const release = placed ?? (() => undefined);
     const t0 = performance.now();
     const lookup = o.lookup ? { lookup: true } : {};
     const tried = attempt > 0 ? { retries: attempt } : {};
@@ -316,8 +326,12 @@ export class Steps {
       this.onCall?.(userId, { ...route, ...(unneeded ? { spared: true } : {}), model: request.model ?? "default", tokensIn: null, tokensOut: null, finishReason: "", ms, ok: false, error: unneeded ? `not needed: ${unneeded.message}` : fired ? `${fired.message} (${why})` : signal.aborted ? `aborted: the step's time ran out (${why})` : why, ...tried, ...(again ? { retried: true } : {}) });
       if (!unneeded) this.host.log("warn", `[LumiRPEngine] ${purpose} helper call failed${again ? ", asking again" : ""}: ${why}`, userId);
       if (!again) return error instanceof Error ? error : new Error(why);
+      // The place goes before the pause, so the next attempt waits its turn as any call does.
+      release();
       await pause(RETRY_PAUSE_MS * 2 ** attempt, signal);
       return signal.aborted ? (error instanceof Error ? error : new Error(why)) : this.quiet(purpose, request, userId, signal, o, attempt + 1);
+    } finally {
+      release();
     }
   }
 

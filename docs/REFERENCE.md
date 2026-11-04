@@ -358,7 +358,7 @@ Version 1 · realism domain `money` · requires `space`.
 | `overdraft_link` | Overdraft from | ref → account |  |  |  |  | live from money 2 |
 | `owners` | Owners ({party, role, share?, units?, class?}) | list |  |  |  |  | live from money 1 |
 | `payment` | Monthly payment (loans) | money | ≥ 0 |  |  |  | live from money 3 |
-| `product` | Product (a world product, or a class: cash, checking, business_checking, savings, money_market, cd, trust, escrow, credit_card, charge_card, line_of_credit, loan, mortgage, brokerage, retirement) | text |  |  |  |  | live from money 2 |
+| `product` | Product (a world product, or a class: cash, checking, business_checking, savings, money_market, cd, trust, escrow, credit_card, charge_card, line_of_credit, loan, mortgage, brokerage, retirement, note) | text |  |  |  |  | live from money 2 |
 | `secured_by` | Secured by | ref |  |  |  |  | live from money 3 |
 | `statement_day` | Statement day | number | 1 … 28 |  |  |  | live from money 3 |
 | `status` | Status | enum: open, frozen, collections, charged_off, closed, paid_off, matured |  | `"open"` |  |  | live from money 2 |
@@ -375,6 +375,7 @@ Extends `group`.
 | `consolidated_return` | Files one consolidated federal return with the corporations it holds 80% or more of (an election) | bool |  |  |  |  | live from money 3 |
 | `daily_sales` | Walk-in takings a trading day | money | ≥ 0 |  |  |  | live from money 3 |
 | `decide_pct` | Ownership decisions need more than % of the votes | number | 0 … 100 | `50` |  |  | live from money 4 |
+| `depreciation` | Depreciation | enum: world, none, straight_line |  | `"world"` |  |  | live from money 3 |
 | `dissolved` | Dissolved on (YYYY-MM-DD) | text |  |  |  |  | live from money 3 |
 | `distribution_every` | Paid out every | enum: month, quarter, year |  |  |  |  | live from money 4 |
 | `distribution_pct` | Profit paid out % | number | 0 … 100 |  |  |  | live from money 4 |
@@ -384,12 +385,13 @@ Extends `group`.
 | `margin_pct` | Margin % | number | 0 … 100 |  |  |  | live from money 4 |
 | `merged_into` | Merged into | ref → business |  |  |  |  | live from money 3 |
 | `open_at` | Opens at (HH:MM) | text |  |  |  |  | live from money 3 |
+| `opening_ep` | Earnings and profits it had kept when the story begins (the accumulated earnings tax's credit reads it) | money |  |  |  |  | live from money 4 |
 | `operating_account` | Operating account | ref → account |  |  |  |  | live from money 3 |
 | `owners` | Owners ({party, role, share?, units?, class?}) | list |  |  |  |  | live from money 1 |
 | `places` | Places it trades at | list of ref |  |  |  |  | live from money 3 |
 | `sales_spread_pct` | Takings vary by up to ± % | number | 0 … 100 | `30` |  |  | live from money 3 |
 | `share_classes` | Share classes ({id, label, votes}) | list |  |  |  |  | live from money 4 |
-| `structure` | Structure | enum: sole_proprietorship, partnership, llc, s_corp, c_corp |  |  |  |  | live from money 4 |
+| `structure` | Structure | enum: sole_proprietorship, partnership, llc, s_corp, c_corp, nonprofit |  |  |  |  | live from money 4 |
 | `structure_before` | Taxed as, until the change of structure (sole_proprietorship, partnership, llc, s_corp or c_corp) | text |  |  |  |  | live from money 4 |
 | `structure_from` | Its structure is taxed from (YYYY-MM-DD) | text |  |  |  |  | live from money 4 |
 | `trading_days` | Trading days (0 is Sunday) | list of number |  |  |  |  | live from money 3 |
@@ -441,6 +443,7 @@ Extends `group`.
 | `once` | Once, at (YYYY-MM-DDTHH:MM) | text |  |  |  |  | live from money 2 |
 | `retries` | Retries | number | ≥ 0 |  |  |  | live from money 3 |
 | `retry_days` | Retry after days | number | ≥ 1 |  |  |  | live from money 3 |
+| `revenue` | Revenue model ({type, …}, one record: units × price × buyers, a catalog, a royalty, fees or a formula) | list |  |  |  |  | live from money 3 |
 | `roll` | Off a business day | enum: none, before, after |  | `"none"` |  |  | live from money 3 |
 | `shares` | Shares ({party, pct, from?}) | list |  |  |  |  | live from money 3 |
 | `shortfall` | When the money isn't there | enum: skip, partial, retry, fallback, overdraft, defer |  | `"skip"` |  |  | live from money 3 |
@@ -516,6 +519,18 @@ Extends `group`.
 | `worker` | Worker | ref → person |  |  |  |  | live from money 3 |
 | `workplace` | Workplace | ref |  |  |  |  | live from money 3 |
 
+#### `project`: Project
+
+| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |
+|---|---|---|---|---|---|---|---|
+| `account` | Paid from (its party's operating account when left out) | ref → account |  |  |  |  | live from money 3 |
+| `org` | Whose project (the organization or person that runs and pays for it) | ref |  |  |  |  | live from money 3 |
+| `payee` | Paid to (Contractors when left out) | text |  |  |  |  | live from money 3 |
+| `start` | Starts (as the story begins when left out) | date |  |  |  |  | live from money 3 |
+| `status` | Status | enum: planned, active |  | `"planned"` |  |  | live from money 3 |
+| `steps` | Steps ({id, name, days or business_days, cost, paid: start, end or split, after, inputs, crew, capitalize, unlocks, done}) | list |  |  |  |  | live from money 3 |
+| `template` | Template | text (row of economy.projects) |  |  |  |  | live from money 3 |
+
 #### `property`: Property
 
 Extends `thing`.
@@ -524,46 +539,47 @@ Extends `thing`.
 |---|---|---|---|---|---|---|---|
 | `appreciation_pct` | Appreciation % a year | number |  |  |  |  | live from money 4 |
 | `asking_price` | Asking price (for sale) | money | ≥ 0 |  |  |  | live from money 3 |
+| `built_by` | Built by the project | ref → project |  |  |  |  | live from money 3 |
+| `capital_cost` | Capital cost | money | ≥ 0 |  |  |  | live from money 3 |
+| `in_service` | In service from | date |  |  |  |  | live from money 3 |
 | `insurance` | Insurance a month | money | ≥ 0 |  |  |  | live from money 4 |
 | `lease_months` | Lease term, months | number | ≥ 1 | `12` |  |  | live from money 3 |
 | `let_from` | Let since | date |  |  |  |  | live from money 3 |
+| `life_months` | Useful life (months) | number | ≥ 1 |  |  |  | live from money 3 |
 | `managed` | Let to outside tenants | bool |  | `false` |  |  | live from money 3 |
 | `market_rent` | Market rent, a unit a month | money | ≥ 0 |  |  |  | live from money 3 |
 | `mortgage` | Mortgage | ref → account |  |  |  |  | live from money 3 |
 | `owners` | Owners ({party, role, share?, units?, class?}) | list |  |  |  |  | live from money 1 |
 | `place` | Place | ref |  |  |  |  | live from money 3 |
+| `property_type` | What it is (mineral: a mineral or royalty interest) | enum: building, land, mineral |  |  |  |  | live from money 3 |
 | `purchase_price` | Purchase price | money | ≥ 0 |  |  |  | live from money 4 |
 | `purchased` | Purchased | date |  |  |  |  | live from money 4 |
 | `region` | Region (for its property tax) | text (row of economy.regions) |  |  |  |  | live from money 3 |
 | `rent_to` | Rent paid into | ref → account |  |  |  |  | live from money 3 |
+| `reserves` | Reserves (units) | number | ≥ 0 |  |  |  | live from money 3 |
+| `salvage` | Salvage value | money | ≥ 0 |  |  |  | live from money 3 |
 | `tax_installments` | Property tax bills a year | number | 1 … 12 | `2` |  |  | live from money 3 |
 | `tax_pct` | Property tax % a year | number | ≥ 0 |  |  |  | live from money 4 |
 | `units` | Units to let | number | ≥ 1 | `1` |  |  | live from money 3 |
 | `upkeep_pct` | Upkeep % a year | number | ≥ 0 |  |  |  | live from money 4 |
 | `vacancy_months` | Months empty between tenants, on average | number | ≥ 0 | `1` |  |  | live from money 3 |
+| `valuation` | Valued from its streams' income ({method: pv, cap or multiple, discount_pct, cap_rate_pct, multiple, horizon_months}, one record) | list |  |  |  |  | live from money 4 |
 | `value` | Value | money | ≥ 0 |  |  |  | live from money 3 |
 | `volatility_pct` | Value swings, % a year | number | ≥ 0 |  |  |  | live from money 4 |
 
 #### `trust`: Trust
 
-Extends `thing`.
+Extends `group`.
 
 | Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |
 |---|---|---|---|---|---|---|---|
-| `approval_days` | A request for approval waits for days (7 unless set) | number | 1 … 365 |  |  |  | live from money 2 |
-| `dues` | Dues ({cents, every, day?}) | list |  |  |  |  | live from money 3 |
-| `motion_days` | A motion stays open for days (7 unless set) | number | 1 … 365 |  |  |  |  |
+| `depreciation` | Depreciation | enum: world, none, straight_line |  | `"world"` |  |  | live from money 3 |
 | `owners` | Owners ({party, role, share?, units?, class?}) | list |  |  |  |  | live from money 1 |
-| `pass_pct` | A motion passes with more than % of the votes cast for or against (50 unless set) | number | 0 … 99.9 |  |  |  |  |
-| `payroll` | Pay schedule ({every, anchor, weekday, days}) | list |  |  |  |  | live from money 3 |
-| `payroll_account` | Payroll account | ref → account |  |  |  |  | live from money 3 |
-| `places` | Its places | list of ref |  |  |  |  |  |
-| `positions` | Positions ({id, title, powers, seats?, reports_to?, scope?, limits?, successor?, default?, no_dues?}) | list |  |  |  |  |  |
-| `quorum_pct` | A motion needs at least % of the votes to take part (50 unless set) | number | 0 … 100 |  |  |  |  |
-| `suta_pct` | Its state unemployment tax rate (%), when it isn't its state's new-employer rate | number | 0 … 100 |  |  |  | live from money 3 |
-| `tax_exempt` | Tax-exempt status (a row of the exempt table: charity, church, club) | text (row of economy.exempt) |  |  |  |  | live from money 3 |
-| `vote_by` | Votes are counted by (shares, or one each for members; a company counts shares unless set) | enum: shares, members |  |  |  |  |  |
-| `vote_rules` | Standing votes ({who, vote: for, against, abstain or with, with?}) | list |  |  |  |  |  |
+| `purpose` | What it is for | text |  |  |  |  |  |
+| `revocable` | Revocable (its settlor may take it back) | bool |  |  |  |  |  |
+| `settlor` | Settlor (who made it: a person or an organization) | ref |  |  |  |  |  |
+| `trustees_decide` | Its trustees decide (each on their own unless set, or together) | enum: each, together |  |  |  |  |  |
+| `until` | Until (the day it ends) | date |  |  |  |  |  |
 
 ### Effects
 
@@ -575,6 +591,7 @@ Extends `thing`.
 | `economy.card_state` | `card`, `state`, `who?`, `by?` |
 | `economy.cash_rule` | `atm` |
 | `economy.close_account` | `account` |
+| `economy.consent_dividend` | `org`, `cents`, `year?`, `by?` |
 | `economy.consolidate` | `org`, `elect?`, `by?` |
 | `economy.delist` | `business`, `price?`, `party?`, `by?` |
 | `economy.deposit` | `account`, `cents`, `who?`, `by?` |
@@ -598,6 +615,7 @@ Extends `thing`.
 | `economy.job_title` | `job`, `title?`, `by?` |
 | `economy.lease_end` | `lease`, `on?`, `party?`, `by?` |
 | `economy.lease_start` | `property`, `tenant`, `rent`, `months?`, `day?`, `unit?`, `from?`, `party?`, `by?` |
+| `economy.lend` | `to`, `cents`, `from?`, `into?`, `apr?`, `months?`, `payment?`, `due_day?`, `who?`, `by?` |
 | `economy.list` | `business`, `units`, `price?`, `symbol?`, `class?`, `party?`, `by?` |
 | `economy.lose` | `item`, `thief?` |
 | `economy.move` | `from`, `to`, `cents`, `memo?`, `by?`, `party?` |
@@ -606,10 +624,16 @@ Extends `thing`.
 | `economy.pay_card` | `card`, `from?`, `cents?`, `who?`, `by?` |
 | `economy.pay_schedule` | `org`, `every`, `weekday?`, `anchor?`, `days?`, `by?` |
 | `economy.price_modifier` | `percent`, `scope?`, `place?`, `minutes?`, `id?`, `clear?` |
+| `economy.project_drop` | `project`, `org?`, `text?`, `by?` |
+| `economy.project_note` | `project`, `org?`, `step?`, `days?`, `cents?`, `text`, `source?`, `by?` |
+| `economy.project_pause` | `project`, `org?`, `by?` |
+| `economy.project_resume` | `project`, `org?`, `by?` |
+| `economy.project_start` | `org?`, `template?`, `project?`, `name?`, `account?`, `payee?`, `steps?`, `by?` |
 | `economy.property_buy` | `property`, `price?`, `from?`, `down?`, `term_months?`, `party?`, `by?` |
 | `economy.property_list` | `property`, `price?`, `party?`, `by?` |
 | `economy.property_sell` | `property`, `price`, `buyer?`, `to?`, `party?`, `by?` |
 | `economy.release_hold` | `account`, `hold` |
+| `economy.revenue_adjust` | `stream`, `factor?`, `cents?`, `days?`, `reason`, `by?`, `story?` |
 | `economy.route` | `holding?`, `property?`, `business?`, `to?`, `party?`, `by?` |
 | `economy.set_autopay` | `account`, `mode`, `from?`, `cents?`, `who?`, `by?` |
 | `economy.set_pay_prefs` | `tiers`, `who?` |
@@ -656,9 +680,10 @@ Extends `thing`.
 | `card_replace` | Replace card | Order a replacement card. | `card: ref → card`, `as?: ref` |  | `default` | `2` | replace my card, order a new card |
 | `card_report_lost` | Report card lost | Report a card lost or stolen. | `card: ref → card`, `as?: ref` |  | `default` | `2` | report my card lost, my card was stolen, cancel my card |
 | `card_unfreeze` | Unfreeze card | Unfreeze a frozen card. | `card: ref → card`, `as?: ref` |  | `default` | `2` | unfreeze my card, unlock my card |
+| `consent_dividend` | Declare a consent dividend | For a C corporation you govern: its holders agree to count an amount as a dividend paid for the year, with no money moving, so the corporation keeps its cash but owes no tax on keeping its earnings (the accumulated earnings and personal holding company taxes). Each holder takes their part as income for that year and adds it to what their shares cost them. | `org: ref → business`, `amount: money`, `year?: number` |  | `default` | `15` | declare a consent dividend, consent dividend, treat it as a dividend paid, clear the accumulated earnings tax |
 | `deposit_cash` | Deposit cash | Put cash into a bank account. | `account: ref → account`, `amount: money`, `as?: ref` |  | `default` | `3` | deposit, pay in cash, bank the cash |
 | `distribute_profit` | Distribute profit | Pay a business's profit out to its owners, or a stated amount of a trust's money to its beneficiaries, by their shares. | `business: ref`, `amount?: money` |  | `default` | `10` | distribute profit, pay dividends, pay out the owners, pay the beneficiaries |
-| `donate` | Donate | Give money to an organization: a charity, a church, a club. A person's gift to a charity or a church is deductible from their income tax. | `to: ref`, `amount: money`, `method?: text`, `as?: ref` |  | `default` | `5` | donate, make a donation, give to charity, tithe, put money in the collection plate, sponsor |
+| `donate` | Donate | Give money to an organization: a charity, a church, a club, a foundation. A person's gift to a charity, a church or a foundation is deductible from their income tax. An exempt organization (a foundation, a charity) may also grant money to a person. | `to: ref`, `amount: money`, `method?: text`, `as?: ref` |  | `default` | `5` | donate, make a donation, give to charity, tithe, put money in the collection plate, sponsor |
 | `exercise_option` | Exercise an option | Exercise an option contract you hold. | `holding: ref → holding`, `qty?: number`, `from?: ref → account`, `to?: ref → account`, `as?: ref` |  | `default` | `2` | exercise the option, exercise my calls, exercise my puts |
 | `flow_create` | Set up a standing payment | Set up a standing payment: a bill, a regular transfer, an allowance. | `label?: text`, `kind?: text`, `from?: ref → account`, `to?: text`, `amount?: money`, `every?: text`, `interval?: number`, `weekday?: number`, `day?: number`, `month?: number`, `at?: text`, `once?: text`, `start?: text`, `end?: text`, `count?: number`, `shortfall?: text`, `retry_days?: number`, `retries?: number`, `fallback?: text`, `roll?: text`, `category?: text`, `as?: ref` |  | `default` | `2` | set up a standing order, schedule a payment, set up a recurring transfer |
 | `flow_delete` | Cancel a standing payment | Cancel a standing payment. | `flow: ref → flow`, `as?: ref` |  | `default` | `2` | cancel the standing order, stop the recurring payment |
@@ -678,6 +703,7 @@ Extends `thing`.
 | `job_title` | Change title | Change the title a job goes by: your own, or that of someone who works for you or an organization you appoint for. | `job: ref → job`, `title?: text` |  | `default` | `5` | change the job title, retitle |
 | `lease_end` | End a lease | End a tenant's lease. | `lease: ref → flow`, `on?: text`, `as?: ref` |  | `default` | `10` | end the lease, give notice, move out |
 | `lease_start` | Let a unit | Let a unit of a property you own to a tenant, for rent each month. | `property: ref → property`, `tenant: ref → person`, `rent: money`, `months?: number`, `day?: number`, `unit?: text`, `as?: ref` |  | `default` | `20` | rent out, sign a lease, let the apartment |
+| `lend_money` | Lend money | Lend money to someone in the world (a company to its subsidiary, a person to a friend's business): a loan they repay with interest, monthly, by autopay. | `to: ref`, `amount: money`, `apr?: number`, `months?: number`, `from?: ref → account`, `as?: ref` |  | `default` | `10` | lend money to, make a loan to, loan the company |
 | `move_money` | Transfer between accounts | Move money between your own accounts: checking, savings, cash. | `from: ref → account`, `to: ref → account`, `amount: money`, `as?: ref`, `ask?: bool` |  | `default` | `2` | transfer, move money, put into savings |
 | `org_dues` | Set dues | Set what each member pays into an organization's money, and how often; nothing ends them. | `org: ref`, `amount: money`, `every?: text`, `day?: number` |  | `default` | `2` | set dues, membership fee, everyone chips in |
 | `org_pay_schedule` | Change pay schedule | Set how often an organization you set staff pay for pays its staff, moving every job there to it. | `org: ref`, `every: text`, `weekday?: number`, `anchor?: text` |  | `default` | `2` | pay schedule, change payday, pay every other week |
@@ -685,6 +711,10 @@ Extends `thing`.
 | `owner_draw` | Take an owner's draw | Take money out of a business you own, for yourself. | `business: ref → business`, `amount: money` |  | `default` | `5` | take a draw, pay myself, take money out of the business |
 | `pay` | Pay | Give someone money: settle up, pay them back, tip them. | `to: ref, outside: economy.external:world`, `amount: money`, `method?: text`, `as?: ref`, `ask?: bool` |  | `default` | `1` | pay, give money, send money, venmo |
 | `pay_card` | Pay card or loan | Pay off some or all of a card or loan balance. | `card: ref → account`, `from?: ref → account`, `amount?: money`, `as?: ref` |  | `default` | `2` | pay off the card, pay the card, pay my credit card, make a loan payment |
+| `project_drop` | Drop a project | Give up a project: nothing more is paid or done; what it paid stays paid and what it made stays. | `project: ref` |  | `default` | `2` | drop the project, abandon the well, cancel the build |
+| `project_pause` | Pause a project | Pause a project under way: its steps stop where they are and keep the work they have left. | `project: ref` |  | `default` | `2` | pause the project, halt work, stop drilling |
+| `project_resume` | Resume a project | Set a paused project going again: each step under way finishes the work it had left. | `project: ref` |  | `default` | `2` | resume the project, restart work |
+| `project_start` | Start a project | Start a production project for an organization: from one of the world's templates (a well, a foundry, a building, a farm season), or a planned one. Its steps run day by day and pay from its account; what it builds comes in as each is done. | `org: ref`, `template?: text`, `project?: ref`, `name?: text`, `account?: ref → account` |  | `default` | `2` | start a project, drill a well, build a foundry, put up a building, plant the crop |
 | `property_buy` | Buy a property | Buy a property, outright or with a mortgage. | `property: ref → property`, `price?: money`, `from?: ref → account`, `down?: money`, `term_months?: number`, `as?: ref` |  | `default` | `60` | buy the house, buy the property, make an offer on |
 | `property_list` | List a property for sale | Put a property you own up for sale at an asking price, or take it off the market. | `property: ref → property`, `price?: money`, `as?: ref` |  | `default` | `5` | put the house on the market, list the property, take it off the market |
 | `property_sell` | Sell a property | Sell a property you own. | `property: ref → property`, `price: money`, `buyer?: ref → person`, `to?: ref → account`, `as?: ref` |  | `default` | `60` | sell the house, sell the property |
@@ -703,7 +733,7 @@ Extends `thing`.
 
 ### Events
 
-Its own: `economy.accrue`, `economy.acquire`, `economy.anchor`, `economy.card_paid`, `economy.closes`, `economy.commission`, `economy.config`, `economy.credit`, `economy.decline`, `economy.delinquency`, `economy.dispose`, `economy.donation`, `economy.estimated_tax`, `economy.exercise`, `economy.flow_renamed`, `economy.flow_run`, `economy.hold`, `economy.income`, `economy.invoice_paid`, `economy.lots`, `economy.mint`, `economy.modifier`, `economy.note`, `economy.open`, `economy.payout`, `economy.payslip`, `economy.price`, `economy.quote`, `economy.remit`, `economy.sale`, `economy.score`, `economy.settle`, `economy.spend`, `economy.stake_route`, `economy.statement`, `economy.status`, `economy.timesheet`, `economy.txn`, `economy.unemployment_accrued`, `economy.unemployment_paid`.
+Its own: `economy.accrue`, `economy.acquire`, `economy.anchor`, `economy.card_paid`, `economy.closes`, `economy.commission`, `economy.config`, `economy.consent_dividend`, `economy.credit`, `economy.decline`, `economy.delinquency`, `economy.depreciate`, `economy.dispose`, `economy.dividend_received`, `economy.donation`, `economy.estimated_tax`, `economy.exercise`, `economy.flow_renamed`, `economy.flow_run`, `economy.foundation_mark`, `economy.foundation_tax`, `economy.hold`, `economy.income`, `economy.invoice_paid`, `economy.lots`, `economy.mint`, `economy.modifier`, `economy.note`, `economy.open`, `economy.payout`, `economy.payslip`, `economy.penalty_tax`, `economy.price`, `economy.project_begin`, `economy.project_drop`, `economy.project_note`, `economy.project_pause`, `economy.project_resume`, `economy.project_step`, `economy.quote`, `economy.remit`, `economy.revenue`, `economy.revenue_adjusted`, `economy.sale`, `economy.score`, `economy.settle`, `economy.spend`, `economy.stake_route`, `economy.statement`, `economy.status`, `economy.timesheet`, `economy.trust_distribution`, `economy.txn`, `economy.unemployment_accrued`, `economy.unemployment_paid`, `economy.year_close`.
 
 Checks it adds to: `post`.
 
@@ -711,12 +741,14 @@ Checks it adds to: `post`.
 
 | Proposal | Bound by |
 |---|---|
+| `project_note` | `money` |
 | `purchase` | `money` |
+| `revenue` | `money` |
 | `transfer` | `money` |
 
 ### Panels and slots
 
-Panels: `economy.money`. Slots it writes: `money`, `property`.
+Panels: `economy.money`. Slots it writes: `money`, `property`, `quest`.
 
 ### Simulation
 
@@ -727,9 +759,11 @@ Panels: `economy.money`. Slots it writes: `money`, `property`.
 | `economy.markets` | `money` | 3 | the world |
 | `economy.money` | `money` | 2 | the world |
 | `economy.plans` | `money` | 0 | the world |
+| `economy.projects` | `money` | 3 | the world |
 | `economy.property_values` | `money` | 3 | the world |
 | `economy.settlements` | `money` | 3 | the world |
 | `economy.timesheet` | `money` | 3 | the world |
+| `economy.year_close` | `money` | 3 | the world |
 
 Detail on demand: `money` (version 2).
 
@@ -739,15 +773,16 @@ Detail on demand: `money` (version 2).
 |---|---|---|---|---|
 | `economy.catalog` | Price catalog | `lre-table/economy.catalog/v1` | name (text), aliases (list, optional), category (ref), unit (text), size (enum, optional), holds (enum, optional), price_cents (band), notes (text, optional) | 358 |
 | `economy.categories` | Price categories | `lre-table/economy.categories/v1` | name (text), basis (text), notes (text, optional), price_unit_note (text, optional), item_count (int), price_cents (band) | 20 |
-| `economy.exempt` | Tax-exempt organizations | `lre-table/economy.exempt/v1` | name (text), code (text), income_tax_exempt (bool), donations_deductible (bool), futa (bool), suta (bool), description (text) | 3 |
+| `economy.exempt` | Tax-exempt organizations | `lre-table/economy.exempt/v1` | name (text), code (text), income_tax_exempt (bool), donations_deductible (bool), futa (bool), suta (bool), s_corp_holder (bool, optional), payout_pct (number, optional), excise_pct (number, optional), undistributed_tax_pct (number, optional), donor_limit_pct (number, optional), description (text) | 4 |
 | `economy.finance` | Finance parameters | `lre-table/economy.finance/v1` | title (text), values (json) | 8 |
 | `economy.index_history` | Stock index history (total return, month-end closes) | `lre-table/economy.index_history/v1` | date (text), level (number) | 282 |
 | `economy.occupations` | Occupations and pay | `lre-table/economy.occupations/v1` | title (text), category (enum), median_cents_per_h (int), median_cents_per_year (int), typical_earnings_cents_per_year (int), schedule_pattern (ref), typical_hours_per_week (number), weeks_per_year (number), weekend_work (enum), shifts (list), pay_frequency (enum), benefits (enum), benefits_note (text), withholding_rate_pct (number), description (text), wage_basis (text), tipped (bool, optional), tipped_cash_wage_cents_per_h (int, optional), self_employed (bool, optional), fica_exempt (bool, optional), estimated_tax_set_aside_pct (number, optional), withholding_note (text, optional) | 56 |
+| `economy.projects` | Production project templates | `lre-table/economy.projects/v1` | name (text), description (text), payee (text), days (band), cost_cents (band), steps (json) | 5 |
 | `economy.regions` | Regions (US states, DC and the national baseline) | `lre-table/economy.regions/v1` | name (text), abbr (text), scope (enum), census_region (enum, optional), census_division (enum, optional), time_zones (list, optional), observes_dst (bool, optional), state_income_tax_effective_pct (number, optional), local_income_tax_pct_typical (number, optional), sales_tax_combined_avg_pct (number), property_tax_effective_pct (number, optional), suta_wage_base_cents (int), suta_new_employer_pct (number), futa_credit_reduction_pct (number, optional), cost_of_living_multiplier (number), median_rent_1br_cents_per_month (int), median_rent_2br_cents_per_month (int), residential_electricity_cents_per_kwh (number), minimum_wage_cents_per_h (int), tipped_minimum_wage_cents_per_h (int, optional), notes (text, optional) | 52 |
 
 ### Lint codes
 
-`economy.accounts`, `economy.assets`, `economy.business`, `economy.claim_cap`, `economy.holdings`, `economy.listing`, `economy.property`, `economy.unpriced_cap`.
+`economy.accounts`, `economy.assets`, `economy.business`, `economy.claim_cap`, `economy.depreciation`, `economy.holdings`, `economy.listing`, `economy.notes`, `economy.projects`, `economy.property`, `economy.revenue`, `economy.scorp_holders`, `economy.unpriced_cap`.
 
 ## Gear & containers pack (`gear`)
 
@@ -978,7 +1013,7 @@ Version 1 · realism domain none · requires `economy`, `relationships`, `space`
 | `orgs.decisions` | `org`, `vote_by?`, `quorum?`, `pass?`, `days?`, `approval_days?`, `by?` |
 | `orgs.delegate` | `org`, `to`, `powers`, `payment?`, `month?`, `until?`, `by?` |
 | `orgs.entry` | `place`, `entry?`, `keys?`, `org?`, `by?` |
-| `orgs.found` | `type`, `name`, `kind?`, `cents?`, `from?`, `structure?`, `units?`, `classes?`, `founder?`, `by?` |
+| `orgs.found` | `type`, `name`, `kind?`, `cents?`, `from?`, `structure?`, `units?`, `classes?`, `trustee?`, `beneficiary?`, `revocable?`, `purpose?`, `until?`, `founder?`, `by?` |
 | `orgs.leave` | `org`, `who`, `why?` |
 | `orgs.merge` | `org`, `into`, `ratio?`, `cash?`, `from?`, `keep?`, `why?`, `by?` |
 | `orgs.motion_end` | `org`, `motion`, `how?`, `by?` |
@@ -1013,7 +1048,7 @@ Version 1 · realism domain none · requires `economy`, `relationships`, `space`
 | `org_delegate` | Delegate | Let someone act for an organization with some of your powers there, within limits, until a date. | `org: ref`, `to: ref`, `powers: text`, `payment?: money`, `month?: money`, `until?: date` |  | `default` | `10` | let them act for, delegate, give them authority |
 | `org_deny` | Deny | Deny a request for approval made for an organization (your own request: withdraw it). | `org: ref`, `request: text`, `why?: text` |  | `default` | `5` | deny the request, turn it down, withdraw my request |
 | `org_entry` | Change entry | Change who may enter one of an organization's places, and its keys. | `org: ref → thing`, `place: ref → place`, `entry: text`, `keys?: text` |  | `default` | `0` |  |
-| `org_found` | Start an organization | Found a company (from Money 3: you its only owner, with capital from an account of yours, counted in units when you say how many; or, for an organization you govern, its subsidiary from its money) or a group of one of the world's kinds, which you lead. | `type: text`, `name: text`, `kind?: text`, `amount?: money`, `from?: ref → account`, `structure?: text`, `units?: number`, `as?: ref` |  | `default` | `30` | start a company, found a business, set up a company, start a group, found a club, form a crew, start a subsidiary |
+| `org_found` | Start an organization | Found a company (from Money 3: you its only owner, with capital from an account of yours, counted in units when you say how many; or, for an organization you govern, its subsidiary from its money), settle a trust (from Money 3: its trustee and beneficiary you unless named, with what you put in), start a nonprofit (from Money 3: no owners, you its Director, with what you give it), or a group of one of the world's kinds, which you lead. An organization you govern may settle a trust or start a nonprofit too. | `type: text`, `name: text`, `kind?: text`, `amount?: money`, `from?: ref → account`, `structure?: text`, `units?: number`, `trustee?: ref`, `beneficiary?: ref`, `revocable?: bool`, `purpose?: text`, `until?: text`, `as?: ref` |  | `default` | `30` | start a company, found a business, set up a company, start a group, found a club, form a crew, start a subsidiary, settle a trust, set up a trust, start a charity, start a nonprofit, set up a foundation |
 | `org_goal` | Set a goal | Add a goal to an organization's plan, or change one. | `org: text`, `id?: text`, `text?: text`, `window?: text`, `where?: text` |  | `default` | `2` | set a goal, add to the plan |
 | `org_leave` | Leave | Leave an organization you're a member of. | `org: ref` |  | `default` | `5` | leave the group, quit the club, resign from |
 | `org_merge` | Merge companies | Fold one company into another (from Money 3): its holders get the other's units at a ratio (by their values unless you say) and any cash it pays, and its accounts, property, staff and positions move over; or, kept, the other takes all of it as its subsidiary. You decide for both, with more than half the votes of each (yours, or an organization's you govern). | `org: ref → business`, `into: ref → business`, `ratio?: number`, `cash?: money`, `from?: ref → account`, `keep?: bool`, `vote?: bool` |  | `default` | `60` | merge the companies, fold it into, take over the company, buy out the company, acquire the business |
@@ -1204,7 +1239,7 @@ Extends `thing`.
 | `quorum_pct` | A motion needs at least % of the votes to take part (50 unless set) | number | 0 … 100 |  |  |  |  |
 | `suta_pct` | Its state unemployment tax rate (%), when it isn't its state's new-employer rate | number | 0 … 100 |  |  |  | live from money 3 |
 | `tax_exempt` | Tax-exempt status (a row of the exempt table: charity, church, club) | text (row of economy.exempt) |  |  |  |  | live from money 3 |
-| `vote_by` | Votes are counted by (shares, or one each for members; a company counts shares unless set) | enum: shares, members |  |  |  |  |  |
+| `vote_by` | Votes are counted by (shares, one each for members, or one each for its trustees; a company counts shares unless set) | enum: shares, members, trustees |  |  |  |  |  |
 | `vote_rules` | Standing votes ({who, vote: for, against, abstain or with, with?}) | list |  |  |  |  |  |
 
 #### `party`: Party

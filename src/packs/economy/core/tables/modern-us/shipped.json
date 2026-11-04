@@ -567,6 +567,16 @@
       "columns": {
         "title": "36de7a58",
         "values": "ef317d91"
+      },
+      "changed": {
+        "taxes_federal": "12cbbdb4"
+      }
+    },
+    {
+      "revision": "95fc3e111986ca615e4c8a75c8f42960",
+      "columns": {
+        "title": "36de7a58",
+        "values": "ef317d91"
       }
     }
   ],
@@ -581,6 +591,58 @@
         "futa": "6edc70b4",
         "suta": "d7f46101",
         "description": "36de7a58"
+      },
+      "changed": {
+        "charity": "73a7392c",
+        "church": "bb32b57f",
+        "club": "2c7bce37"
+      },
+      "added": [
+        "private_foundation"
+      ]
+    },
+    {
+      "revision": "f6de734f9c98da99975b404f3c0094cf",
+      "columns": {
+        "name": "36de7a58",
+        "code": "72ad2c74",
+        "income_tax_exempt": "ad5d42db",
+        "donations_deductible": "f0f4d4e6",
+        "futa": "6edc70b4",
+        "suta": "d7f46101",
+        "s_corp_holder": "cc75b323",
+        "payout_pct": "39ab5faf",
+        "excise_pct": "5a276af2",
+        "undistributed_tax_pct": "7d4e14ed",
+        "donor_limit_pct": "ed097ce3",
+        "description": "36de7a58"
+      }
+    }
+  ],
+  "economy.projects": [
+    {
+      "revision": "1ca236c8d9925547360e7365d9c53c2d",
+      "columns": {
+        "name": "36de7a58",
+        "description": "36de7a58",
+        "payee": "5e14f0dc",
+        "days": "46c7b610",
+        "cost_cents": "9e5baaed",
+        "steps": "91f886cf"
+      },
+      "changed": {
+        "farm_season": "6a692e01"
+      }
+    },
+    {
+      "revision": "46bd6c11c3a35c528464d62990f8e500",
+      "columns": {
+        "name": "36de7a58",
+        "description": "36de7a58",
+        "payee": "5e14f0dc",
+        "days": "46c7b610",
+        "cost_cents": "9e5baaed",
+        "steps": "91f886cf"
       }
     }
   ],

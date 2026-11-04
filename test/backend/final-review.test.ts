@@ -18,7 +18,7 @@ import type { QuietRequest, QuietToolCall } from "../../src/backend/host";
 import { cacheBreakpoints } from "../../src/backend/spindle-host";
 import { ROLE_IDS } from "../../src/shared/agent-roles";
 import { defaultAgentSettings } from "../../src/shared/agent-settings";
-import { applyFinalEdits, partOf, partText, ReviewDraft } from "../../src/shared/final-review";
+import { applyFinalEdits, changedScope, type FinalEdit, finalPartsOf, partHash, partOf, partText, ReviewDraft, RULES_PART } from "../../src/shared/final-review";
 import type { JsonObject } from "../../src/shared/json";
 import type { Rec } from "../../src/shared/ledger";
 import type { QuietScript } from "../support/fake-host";
@@ -165,6 +165,30 @@ describe("the review's draft", () => {
     ]);
     const again = applyFinalEdits([scene], draft.edits);
     expect([again.missed, partText(again.parts[0] ?? scene)]).toEqual([[], partText(draft.parts[0] ?? scene)]);
+  });
+
+  test("scoped to what changed (`changedScope`): a part that reads as the last review saw it gets that review's edits made again; only the parts that changed are sent; nothing changed sends nothing", () => {
+    const rules = partOf(RULES_PART, "Narrator rules", "[Narrator rules]\n- Write in the second person.");
+    const scene = partOf("scene", "Scene", "[Scene]\nWhere you are.\n- At the harbor.");
+    const before = partOf("scene", "Scene", "[Scene]\nWhere you are.\n- At the pier.");
+    const edits: FinalEdit[] = [
+      { op: "append", part: RULES_PART, text: "- Keep it brief." },
+      { op: "append", part: "scene", text: "- A gull." },
+    ];
+    const last = { parts: { [RULES_PART]: partHash(rules), scene: partHash(before) }, edits };
+    const scoped = changedScope([rules, scene], last);
+    expect(scoped.kept.map((p) => [p.id, p.lines])).toEqual([[RULES_PART, ["- Write in the second person.", "- Keep it brief."]]]);
+    expect(scoped.applied).toEqual([edits[0]]);
+    expect(scoped.changed).toEqual([scene]);
+    // The parts given are left as they were.
+    expect(rules.lines).toEqual(["- Write in the second person."]);
+    // Nothing changed: nothing to send, and every edit made again.
+    const same = changedScope([rules, before], last);
+    expect([same.changed, same.applied]).toEqual([[], edits]);
+    // A part the last review never saw is sent.
+    expect(changedScope([rules, scene], { parts: {}, edits }).changed.map((p) => p.id)).toEqual([RULES_PART, "scene"]);
+    // A record's parts read leniently: anything but fingerprints by part reads as none of them.
+    expect([finalPartsOf(null), finalPartsOf(["x"]), finalPartsOf({ scene: "h1", rules: 3 })]).toEqual([{}, {}, { scene: "h1" }]);
   });
 });
 
@@ -345,6 +369,64 @@ describe("the final review", () => {
     expect(reviews).toHaveLength(1);
     await rig.host.finish(g, "The gulls wheel on.");
     expect((await lastRecord(rig, chatId)).finalEdits).toEqual(first.rec.finalEdits);
+    expect(rig.rt.ledger.errors).toEqual([]);
+  });
+
+  test("scoped to what changed, with Smart persistence on: a part that reads as the last turn's review saw it gets that review's edits again and isn't sent; scoped to every part, each turn's review is sent all", async () => {
+    const RULE = "- RULE-MARK: keep it brief.";
+    const turns = async (scope: "all" | "changed") => {
+      const rig = new Rig({ shipped: true });
+      const chatId = await agentsChat(rig, { agents: { persist: { on: true }, finalReview: { scope } } });
+      // The first review adds a rule; the next adds nothing.
+      const reviews = models(rig, (req) => (reviews.length === 1 ? { content: "", toolCalls: [call("review_append", { part: RULES_PART, text: RULE }, "edit"), call("commit", {}, "done")] } : { content: "", toolCalls: [call("commit", {}, "done")] }));
+      const first = await played(rig, chatId, "I look out over the harbor.", "Gulls wheel over the water.");
+      const second = await played(rig, chatId, "I watch the boats come in.", "The boats come in.");
+      return { reviews, first, second, rules: rig.host.section("Narrator rules"), errors: rig.rt.ledger.errors };
+    };
+    const changed = await turns("changed");
+    // Each turn's record keeps the parts its review saw.
+    expect(Object.keys(changed.first.rec.finalParts ?? {})).toContain(RULES_PART);
+    expect(changed.first.rec.finalParts).toEqual(expect.objectContaining({ [RULES_PART]: expect.any(String) }));
+    expect(changed.reviews).toHaveLength(2);
+    expect(sentOf(changed.reviews[0] as QuietRequest)).toContain(`Part ${RULES_PART}: [Narrator rules]`);
+    // The rules read as they did: not sent again, the rule made again, on the prompt and the record.
+    expect(sentOf(changed.reviews[1] as QuietRequest)).not.toContain(`Part ${RULES_PART}: [Narrator rules]`);
+    expect(sentOf(changed.reviews[1] as QuietRequest)).toContain("Part scene: [Scene]");
+    expect(changed.rules).toContain(RULE);
+    expect(changed.second.rec.finalEdits).toEqual([{ op: "append", part: RULES_PART, text: RULE }]);
+    expect(changed.errors).toEqual([]);
+    // Every part: the second review is sent the rules again, and no edit is made for it.
+    const all = await turns("all");
+    expect(all.reviews).toHaveLength(2);
+    expect(sentOf(all.reviews[1] as QuietRequest)).toContain(`Part ${RULES_PART}: [Narrator rules]`);
+    expect(all.rules).not.toContain(RULE);
+    expect(all.second.rec.finalEdits).toBeUndefined();
+    expect(all.errors).toEqual([]);
+  });
+
+  test("regression: scoped to what changed, a review that fails keeps on its record only the parts an earlier review saw as they read, so the next turn's review is sent the rest", async () => {
+    const rig = new Rig({ shipped: true });
+    const chatId = await agentsChat(rig, { agents: { persist: { on: true }, finalReview: { scope: "changed" } } });
+    // The provider is down for the first turn's review and the third's.
+    let down = true;
+    const reviews = models(rig, () => {
+      if (down) throw new Error("the provider is down");
+      return { content: "", toolCalls: [call("commit", {}, "done")] };
+    });
+    const first = await played(rig, chatId, "I look out over the harbor.", "Gulls wheel over the water.");
+    expect(first.rec.finalParts).toBeUndefined();
+    // The rules read as they did, but no review saw them: this one is sent them, and keeps every part.
+    down = false;
+    const sent = reviews.length;
+    const second = await played(rig, chatId, "I watch the boats come in.", "The boats come in.");
+    expect(reviews.length).toBeGreaterThan(sent);
+    expect(sentOf(reviews.at(-1) as QuietRequest)).toContain(`Part ${RULES_PART}: [Narrator rules]`);
+    expect(Object.keys(second.rec.finalParts ?? {})).toEqual(expect.arrayContaining([RULES_PART, "scene"]));
+    // Failing again, it keeps the rules as the second review saw them, and not the Scene, which changed.
+    down = true;
+    const third = await played(rig, chatId, "I wave to the harbormaster.", "He waves back.");
+    expect(third.rec.finalParts?.[RULES_PART]).toBe(second.rec.finalParts?.[RULES_PART]);
+    expect(Object.keys(third.rec.finalParts ?? {})).not.toContain("scene");
     expect(rig.rt.ledger.errors).toEqual([]);
   });
 

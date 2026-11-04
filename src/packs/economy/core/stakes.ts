@@ -25,7 +25,8 @@ import { acquisition, disposal } from "./gains";
 import { unit } from "./holdings";
 import { incomeFor } from "./income";
 import { YEAR_MINUTES } from "./pricing";
-import { structureOf } from "./taxes";
+import { dividendDeductionPct, sCorpRefusal, structureOf } from "./taxes";
+import { dividendReceived } from "./year-close";
 import { actAs, asParam, mayAs, moneyWords } from "./acting";
 
 /** What a business is worth beyond its books, in years of profit, when it names no multiple of its own. */
@@ -253,6 +254,9 @@ export function sellStake(api: FinanceApi, ctx: EffectContext | ReadContext, x: 
     }
     if (x.buyer && !next.some((o) => o.party === x.buyer)) next.push({ party: x.buyer, role: "owner", share: Math.round(share * 10000) / 10000 });
   }
+  // An S corporation's buyer must be one who may hold its shares, and its holders no more than its limit (§26.3).
+  const scorp = sCorpRefusal(api, ctx, x.business, next.filter((o) => (o.share ?? 0) > 0 || (o.units ?? 0) > 0).map((o) => o.party));
+  if (scorp) return scorp;
   return unit([
     ...events,
     disposal(x.business, x.party, units !== undefined ? (units / heldUnits) * 100 : (share / held) * 100, price, memo),
@@ -266,8 +270,11 @@ export function registerStakes(r: FinanceRegistry): void {
   r.fields("business", BUSINESS_FIELDS);
   r.core.event(routeEvent);
   r.core.query("economy.stake_route", stakeRoute);
-  // A pass-through business's profit is its owners' income through estimated tax; a C corporation's payout is a dividend, which the investment tax covers.
-  r.core.service("economy.stake_paid", (ctx, owner, business, cents, reinvested) => incomeFor(business, owner, Math.round(cents), structureOf(ctx.state, business) === "c_corp" ? "dividend" : "profit", reinvested));
+  // A pass-through business's profit is its owners' income through estimated tax; a C corporation's payout is a dividend, which the investment tax covers, and a corporation holding it deducts it by its stake (§26.3).
+  r.core.service("economy.stake_paid", (ctx, owner, business, cents, reinvested) => {
+    const dividend = structureOf(ctx.state, business) === "c_corp";
+    return [...incomeFor(business, owner, Math.round(cents), dividend ? "dividend" : "profit", reinvested), ...(dividend ? dividendReceived(ctx, owner, business, cents, dividendDeductionPct(r.api, ctx, owner, business)) : [])];
+  });
   // Sold `as` an organization (ORG-SPEC §3.6): its stake, by someone who manages its shares (`shares.manage`). The GM's (and agents' `transfer`) names the holder as `party`, with no `by`.
   r.core.effect({
     type: "economy.stake_sell",

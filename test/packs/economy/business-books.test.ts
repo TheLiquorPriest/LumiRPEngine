@@ -3,10 +3,13 @@
 
 import { describe, expect, test } from "bun:test";
 import type { BusinessView, FinanceView } from "../../../src/shared/finance";
+import type { JsonObject } from "../../../src/shared/json";
+import type { WorldDoc } from "../../../src/shared/world";
 import { calendarOf, clockOfLocal, dateAt } from "../../../src/engine/calendar";
 import { optionalService } from "../../../src/engine/pack-kit";
+import { runTimelapse } from "../../../src/engine/time";
 import type { Working } from "../../../src/engine/working";
-import { account, act, entity, ext, lapse, line, packEvents, posts, setup } from "./work-world";
+import { account, act, entity, ext, lapse, line, packEvents, posts, reg, setup } from "./work-world";
 
 const DAY = 1440;
 
@@ -177,5 +180,48 @@ describe("business books: dashboards", () => {
     const months = cafe(w, true)?.months ?? [];
     expect(months.map((m) => m.period)).toEqual(["2026-11", "2026-10"]);
     expect(months[1]?.revenue).toBeGreaterThan(0);
+  });
+});
+
+describe("business books: revenue streams", () => {
+  /** The café's counter: a product stream, every day at closing, with no walk-in takings of its own. */
+  const counter = (model: JsonObject) => (wd: WorldDoc) => {
+    wd.entities.counter = entity("counter", "flow", "Counter sales", { flow_kind: "income", from: "Walk-in customers", to: "daybreak", every: "day", at: "17:00", revenue: [{ type: "product", ...model }] });
+  };
+
+  test("a sales stream books as walk-in takings do: the sale, its sales tax on top and the cost of goods at the café's margin", () => {
+    const { w } = setup(counter({ units: 1, price: 1_250, buyers: 30 }));
+    lapse(w, 3 * DAY);
+    const sales = packEvents(w, "economy.sale").filter((e) => e.data.memo === "Counter sales").map((e) => e.data);
+    expect(sales.length).toBe(3);
+    for (const s of sales) expect(s).toMatchObject({ business: "daybreak", cents: 37_500, tax: 2_625, cogs: 15_000, takings: 0, walkin: true });
+    const cal = calendarOf(w.world);
+    const books = w.ctx.query("economy.business_books")(w.ctx, "daybreak", clockOfLocal(cal, "2026-10-01T00:00"), clockOfLocal(cal, "2026-11-01T00:00"));
+    expect(books.revenue).toBe(3 * 37_500);
+    expect(books.expenses).toBe(3 * 15_000);
+  });
+
+  test("a season shapes each month: a November factor of 2 sells twice what October does", () => {
+    const season = [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 1];
+    const { w } = setup(counter({ units: 1, price: 1_000, buyers: 25, season }));
+    lapse(w, 20 * DAY);
+    const runs = packEvents(w, "economy.flow_run").filter((e) => e.data.flow === "counter");
+    const cal = calendarOf(w.world);
+    const inMonth = (month: number) => runs.filter((e) => dateAt(cal, e.data.at as number).month === month).map((e) => e.data.cents);
+    // With the café's 7% sales tax on top of each.
+    expect(inMonth(10)[0]).toBe(25_000 + 1_750);
+    expect(inMonth(11)[0]).toBe(50_000 + 3_500);
+  });
+
+  test("without a spread nothing is drawn, so two run seeds post the same takings", () => {
+    const run = (seed: string) => {
+      const { w } = setup(counter({ units: 1, price: 1_250, buyers: 30, weekdays: [0, 1, 1, 1, 1, 1.25, 1.5] }));
+      const out = runTimelapse(reg, w, { type: "duration", minutes: 10 * DAY }, { runSeed: seed, overrides: { invitation: "note", decline: "note", incident: "note", quest: "note", arrival: "note" } });
+      if ("code" in out) throw new Error(out.reason);
+      return posts(w, /^Counter sales/).map((p) => p.lines);
+    };
+    const one = run("one");
+    expect(one.length).toBeGreaterThan(0);
+    expect(run("two")).toEqual(one);
   });
 });

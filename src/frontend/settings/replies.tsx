@@ -30,6 +30,8 @@ const EXTRACTION_LABEL: Record<ExtractionType, string> = {
   agenda: "How organizations' plans go (under way, done, blocked)",
   vote: "Votes on organizations' motions (for, against, abstaining)",
   approval: "Answers to requests for approval (approved, denied, withdrawn)",
+  revenue: "A stream earning more or less for a while, as the story tells it",
+  project_note: "A project's step set back or costing more, as the story tells it",
   item_move: "Where things are (picked up, put down, put away, fetched)",
   item_hand: "Handing things over (holding, lending, giving back)",
   item_own: "Whose things are (gifts, sales, trades)",

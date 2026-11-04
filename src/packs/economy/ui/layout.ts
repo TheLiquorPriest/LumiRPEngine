@@ -211,9 +211,9 @@ export function invoicesToPay(view: FinanceView): FlowView[] {
   return view.flows.filter((f) => f.source === "invoice" && f.payer === view.party);
 }
 
-export type AccountGroup = "cash" | "banking" | "credit" | "loans" | "investing";
+export type AccountGroup = "cash" | "banking" | "credit" | "loans" | "lent" | "investing";
 
-export const GROUP_LABELS: Readonly<Record<AccountGroup, string>> = { cash: "Cash", banking: "Bank accounts", credit: "Cards and credit lines", loans: "Loans", investing: "Investment accounts" };
+export const GROUP_LABELS: Readonly<Record<AccountGroup, string>> = { cash: "Cash", banking: "Bank accounts", credit: "Cards and credit lines", loans: "Loans", lent: "Loans you made", investing: "Investment accounts" };
 
 export function groupOf(account: AccountView): AccountGroup {
   const t = CLASS_TRAITS[account.class];
@@ -221,12 +221,13 @@ export function groupOf(account: AccountView): AccountGroup {
   if (t.investment) return "investing";
   if (t.installment) return "loans";
   if (t.revolving) return "credit";
+  if (t.receivable) return "lent";
   return "banking";
 }
 
 /** Accounts by group, in the groups' order, each group's accounts as the view lists them. */
 export function accountGroups(accounts: readonly AccountView[]): { group: AccountGroup; label: string; accounts: AccountView[] }[] {
-  const order: AccountGroup[] = ["cash", "banking", "credit", "loans", "investing"];
+  const order: AccountGroup[] = ["cash", "banking", "credit", "loans", "lent", "investing"];
   return order.map((group) => ({ group, label: GROUP_LABELS[group], accounts: accounts.filter((a) => groupOf(a) === group) })).filter((g) => g.accounts.length > 0);
 }
 

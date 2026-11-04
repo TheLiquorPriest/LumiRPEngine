@@ -12,6 +12,7 @@
 import type { ComponentChildren } from "preact";
 import { CONTEXT_SOURCES, defaultContextSettings, PERSPECTIVE_LABEL, ROLE_PERSPECTIVES, type RolePerspective, SOURCE_USE_LABEL, SOURCE_USES, type SourceUse, sourceLabel, sourceUse, withSourceUse } from "../../shared/agent-context";
 import { ROLE_LABEL, ROLE_ON_FAIL, ROLE_TIERS, type RoleId, type RoleOnFail, type RoleTier } from "../../shared/agent-roles";
+import { PIPELINE_ROLES, ROLE_RUN_LABELS, type RoleRun, roleRunHelp, roleRuns, roleStages, STAGE_WORDS } from "../../shared/agent-pipeline";
 import { AGENT_EFFORTS, BUDGET_DEFS, CURATOR_OPS_DEF, defaultAgentSettings, roleCaching, type AgentBudget, type AgentEffort, type AgentSettings } from "../../shared/agent-settings";
 import { TOOL_FAMILY_LABEL, type ToolFamily } from "../../shared/agent-tools";
 import { hasOwn, type JsonObject } from "../../shared/json";
@@ -42,7 +43,7 @@ function cap(owner: string): string {
 export const BUDGET_KEYS = Object.keys(BUDGET_DEFS) as (keyof AgentBudget)[];
 
 /** A page's sections, by id: what Context's rows open a role's page at (`at`). */
-export type AgentSection = "runs" | "may" | "reads" | "when" | "review" | "budget" | "caching" | "prompts";
+export type AgentSection = "runs" | "may" | "reads" | "when" | "stages" | "review" | "budget" | "caching" | "prompts";
 
 /** The settings patch (`lre.settings.set`) for some of a role's settings; a field sent as null is deleted, so the store reads its default. */
 export function rolePatch(id: RoleId, fields: JsonObject): JsonObject {
@@ -276,12 +277,13 @@ export function RolePage(props: { id: RoleId; agents: AgentSettings; routes: Rou
     {
       id: "when",
       title: "When it runs and fails",
-      changed: (r.promptOnly !== d.promptOnly ? 1 : 0) + (r.onFail !== d.onFail ? 1 : 0),
+      changed: (r.promptOnly !== d.promptOnly ? 1 : 0) + (r.onFail !== d.onFail ? 1 : 0) + (r.run !== d.run ? 1 : 0),
       body: (
         <div class="lre-set-rows">
           {curator ? (
             <NavRow id="pipeline" icon="branch" title={agents.pipeline.curator ? "Runs after each reply, beside the read" : "Off: the read does its work"} subtitle="Switched in Settings → Agents → Pipeline" changed={0} onOpen={() => props.go({ page: "agents", sub: "pipeline" })} />
           ) : null}
+          <RunSetting id={id} agents={agents} busy={busy} set={set} go={props.go} />
           <SettingRow id="promptOnly" label="One call, no tools" bare changed={r.promptOnly !== d.promptOnly} help="On, it makes its step's own call, with that step's prompt and answer format: one call, and no tools." reset={{ label: `Reset ${label}'s one call to its default, ${d.promptOnly ? "on" : "off"}`, to: d.promptOnly ? "on" : "off", onClick: () => set({ promptOnly: null }) }} busy={busy}>
             <HostSwitch label={`${label}: one call, no tools`} checked={r.promptOnly} disabled={busy} onChange={(promptOnly) => set({ promptOnly })} />
           </SettingRow>
@@ -325,4 +327,30 @@ export function RolePage(props: { id: RoleId; agents: AgentSettings; routes: Rou
   ];
   // Its job is its page's subtitle (Settings' header), so the page needs no lead of its own.
   return <AgentPage id={`role-${id}`} lead={null} sections={sections} changed={roleChanged(agents, id)} resetLabel={`Reset ${label} to its shipped defaults`} busy={busy} reset={() => props.patch(roleResetPatch(id))} />;
+}
+
+/** When a role runs (`roles[].run`): the choices the pipeline map lets it take, with what each means, and while a main agent decides the turn, the stages it works in and how each runs. */
+export function RunSetting(props: { id: RoleId; agents: AgentSettings; busy: boolean; set(fields: JsonObject): void; go(route: SettingsRoute): void }) {
+  const { id, agents, busy } = props;
+  const label = ROLE_LABEL[id];
+  const run = agents.roles[id].run;
+  const standard = DEFAULTS.roles[id].run;
+  const runs = roleRuns(id);
+  const main = agents.pipeline.mode === "main";
+  const stages = roleStages(id).map((s) => `${STAGE_WORDS[s].label} (${agents.main.stages[s] === "auto" ? "runs on its own" : "the main agent decides"})`);
+  const kept = PIPELINE_ROLES[id].keep ? (agents.persist.on ? " Smart persistence is on." : " Smart persistence is off, so nothing is kept now: Settings → Agents → Pipeline.") : "";
+  const help = (
+    <>
+      {roleRunHelp(id, run)}
+      {kept}
+      {main ? ` With a main agent deciding the turn, it works in ${stages.join(", ")}.` : ""}
+      {runs.length === 1 ? " The engine never skips it." : ""}
+    </>
+  );
+  return (
+    <SettingRow id="run" label="When it runs" changed={run !== standard} help={help} reset={{ label: `Reset when ${label} runs to its default, ${ROLE_RUN_LABELS[standard]}`, to: ROLE_RUN_LABELS[standard], onClick: () => props.set({ run: null }) }} busy={busy}>
+      {runs.length > 1 ? <Seg<RoleRun> label={`${label}: when it runs`} value={run} options={runs.map((value) => ({ value, label: ROLE_RUN_LABELS[value] }))} disabled={busy} onChange={(next) => props.set({ run: next })} /> : <span class="lre-set-note">{ROLE_RUN_LABELS.smart}</span>}
+      {main ? <NavRow id="stages" icon="branch" title="Its stages" subtitle="Settings → Agents → Main agent → Stages" changed={0} onOpen={() => props.go({ page: "main", at: "stages" })} /> : null}
+    </SettingRow>
+  );
 }

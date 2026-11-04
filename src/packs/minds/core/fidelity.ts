@@ -317,3 +317,20 @@ export function pickMinds(ctx: ReadContext, scores: readonly FidelityScore[], te
   const chosen = [...called.filter((r) => r.reason === "gm"), ...called.filter((r) => r.reason !== "gm").slice(0, limitOf(settings.refreshLimit)), ...sorted.filter((r) => !r.call)];
   return [...live, ...chosen.map(({ entity, level, reason: r, call }) => ({ entity, level, reason: r, call }))];
 }
+
+/**
+ * Whether Smart persistence may keep a due mind's last thoughts this turn instead of calling it
+ * (`backend/agents/persist.ts`): a Live one in the POV's scene, called every turn (`reason: live`),
+ * whose last mind is the round before this one's, thought on a turn at the level and place it has
+ * now, with no interrupt; that no GM asked to refresh, and that neither the player's message nor the
+ * reply before it names. A first mind, a promoted one, a refreshed one or one that interrupted is
+ * always called. `ctx` is the state the round's minds think on, the round's own event applied.
+ */
+export function quietMind(ctx: ReadContext, pick: MindPick, texts: FidelityTexts): boolean {
+  if (pick.reason !== "live" || !pick.call || !inPovScene(ctx.world, ctx.state, pick.entity)) return false;
+  const c = readCharacter(ctx.state, pick.entity);
+  const m = c.mind;
+  if (!m || c.refresh || m.moment !== "turn" || m.interrupt !== null || m.level !== pick.level || m.round !== readSlice(ctx.state).round - 1) return false;
+  if (m.place !== placeOfEntity(ctx.state, pick.entity)) return false;
+  return !namedIn(own(ctx.state.entities, pick.entity)?.name ?? "", words(`${texts.user}\n${texts.reply}`));
+}

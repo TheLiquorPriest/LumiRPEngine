@@ -15,20 +15,19 @@ import type { JsonValue } from "../../../shared/json";
 import { knowledgeText } from "../../../shared/minds";
 import { ROLES_TEXT, roleTaskTextId } from "../../../shared/role-prompts";
 import { renderPrompt } from "../../prompts";
-import type { StepPurpose } from "../../../shared/world";
 import type { MindAsk, MindCall, MindCallKind } from "../../mind-ask";
 import type { Runtime } from "../../runtime";
 import type { TurnAgentCtx } from "../turn-ctx";
 import { type RoleAnswer, roleCtx, runRoleAgent } from "./agent";
 
-/** Each call's role and task, and the classic step whose connection it runs on while the role names none. */
-const KINDS: Readonly<Record<MindCallKind, { role: RoleId; sub: string; purpose: StepPurpose }>> = {
-  mind: { role: "minds", sub: "mind", purpose: "mind" },
-  memory: { role: "memory", sub: "memory", purpose: "memory" },
-  consolidate: { role: "memory", sub: "consolidate", purpose: "consolidate" },
-  knowledge: { role: "knowledge", sub: "knowledge", purpose: "knowledge" },
-  skip: { role: "skip", sub: "beats", purpose: "skip" },
-  skip_plan: { role: "skip", sub: "plan", purpose: "skip" },
+/** Each call's role and task: `role-routes`' task map says where it runs while the role names no connection. */
+const KINDS: Readonly<Record<MindCallKind, { role: RoleId; sub: string }>> = {
+  mind: { role: "minds", sub: "mind" },
+  memory: { role: "memory", sub: "memory" },
+  consolidate: { role: "memory", sub: "consolidate" },
+  knowledge: { role: "knowledge", sub: "knowledge" },
+  skip: { role: "skip", sub: "beats" },
+  skip_plan: { role: "skip", sub: "plan" },
 };
 
 /**
@@ -49,7 +48,6 @@ export async function mindRun(rt: Runtime, ctx: TurnAgentCtx, call: MindCall, ph
   const framing = ctx.brief && call.who !== null && (call.kind === "mind" || call.kind === "knowledge") ? renderPrompt(ROLES_TEXT.call[call.kind], ctx.texts ?? settings.prompts.texts, { character: call.vars.character || call.who }) : "";
   return runRoleAgent(rt, framing === "" ? ctx : { ...ctx, brief: `${framing}\n\n${ctx.brief}` }, {
     sub: kind.sub,
-    purpose: kind.purpose,
     phase,
     names: { world: call.vars.world ?? "", pov: call.vars.pov ?? "" },
     vars: call.vars,

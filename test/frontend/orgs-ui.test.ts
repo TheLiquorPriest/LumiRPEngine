@@ -1,12 +1,13 @@
-// Play → Orgs (ORG-SPEC §4, §11 Phase 1, lane U), its trees walked without a DOM from what the orgs
-// views read on Port Alder:
+// Play → Orgs (ORG-SPEC §4, §11 Phase 1, lane U; item 8), its trees walked without a DOM from what
+// the orgs views read on Port Alder:
 // - the home: the party card, Alder Automotive under Companies with Jordan's title, the Kowalczyks
-//   under Known organizations;
-// - Alder Automotive's page: its badge and Jordan's title, Overview, People and Rules with no Money,
-//   its first line "Mechanic since 12 Jan 2026; Marcus Delgado runs it", Marcus (Owner), Danny
+//   under Known organizations; a subsidiary nested under its parent, any type under any type;
+// - Alder Automotive's page: its badge and Jordan's title, Overview, People, Chart and Rules with no
+//   Money, its first line "Mechanic since 12 Jan 2026; Marcus Delgado runs it", Marcus (Owner), Danny
 //   (Mechanic) and Jordan (Mechanic) in People, and someone hidden counted;
 // - Marcus's page: the packs' tabs (`r.orgTab`) in order with their sections, and People's part;
-// - Helen's household: her implied Head in the chart and in Rules;
+// - Helen's household: her implied Head in People and in Rules, and no Chart; nor a party without
+//   positions;
 // - the party's page from its roster;
 // - the person sheet's Organizations, and Cast's Your groups opening Orgs.
 
@@ -24,7 +25,9 @@ import { personOrgs } from "../../src/packs/castlife/ui/person";
 import { ALL_PACKS, STARTER_WORLDS } from "../../src/packs/index";
 import { decodeOrgList, decodeOrgPage } from "../../src/packs/orgs/ui/decode";
 import orgsUi from "../../src/packs/orgs/ui/index";
-import { OrgsHome, partyLines, StartSomething } from "../../src/packs/orgs/ui/home";
+import { homeTree, OrgsHome, partyLines, StartSomething } from "../../src/packs/orgs/ui/home";
+import { Tree } from "../../src/packs/orgs/ui/chart";
+import type { ChartAction, ChartNode } from "../../src/packs/orgs/ui/chart-model";
 import { OrgPage, orgTabs, type OrgPageProps } from "../../src/packs/orgs/ui/org";
 import { OrgOverview, PersonRow } from "../../src/packs/orgs/ui/overview";
 import { PartyControls, PartyOffers, PartyOverview, PartyRoster, PartyTiers } from "../../src/packs/orgs/ui/party";
@@ -98,6 +101,23 @@ function rows(node: unknown): unknown[][] {
   return find(node, ListRow).map((p) => [p.title, p.subtitle, p.value]);
 }
 
+/** Each row of the trees drawn (the home's, the Chart's), depth first, as [label, detail, value]. */
+function treeRows(node: unknown): unknown[][] {
+  const walk = (nodes: readonly ChartNode[]): unknown[][] => nodes.flatMap((n) => [[n.label, n.detail, n.value], ...walk(n.children)]);
+  return find(node, Tree).flatMap((p) => walk(p.nodes as ChartNode[]));
+}
+
+/** Opens every row of the trees drawn, as a tap on it would. */
+function openTrees(node: unknown): void {
+  const walk = (nodes: readonly ChartNode[], go: (a: ChartAction) => void): void => {
+    for (const n of nodes) {
+      if (n.open) go({ id: "open", label: "Open", route: n.open });
+      walk(n.children, go);
+    }
+  };
+  for (const p of find(node, Tree)) walk(p.nodes as ChartNode[], p.onGo as (a: ChartAction) => void);
+}
+
 /** The one element carrying `attr` (with `value`, when given). */
 function marked(node: unknown, attr: string, value?: string): VNode<Props> {
   const found = elements(node).filter((v) => attr in v.props && (value === undefined || v.props[attr] === value));
@@ -137,19 +157,20 @@ describe("the Orgs home", () => {
     expect(marked(tree, "data-lre-orgs-party").props["data-lre-orgs-party"]).toBe("party_pov");
     expect(rows(marked(tree, "data-lre-orgs-party"))).toEqual([["Your party", "Just you", undefined]]);
     expect(find(tree, Section).map((s) => s.title)).toEqual([undefined, "Companies"]);
-    expect(rows(marked(tree, "data-lre-orgs-group", "company"))).toEqual([["Alder Automotive", undefined, "Mechanic"]]);
+    expect(treeRows(marked(tree, "data-lre-orgs-group", "company"))).toEqual([["Alder Automotive", null, "Mechanic"]]);
     expect(find(tree, Empty)).toEqual([]);
     const known = find(marked(tree, "data-lre-orgs-known"), Disclosure)[0];
     expect(textOf(known?.summary)).toBe("Known organizations 1");
-    expect(rows(known?.children)).toEqual([["The Kowalczyks", "Household · You know Helen Kowalczyk, Jess Kowalczyk and Maddie Kowalczyk", undefined]]);
+    expect(treeRows(known?.children)).toEqual([["The Kowalczyks", "Household · You know Helen Kowalczyk, Jess Kowalczyk and Maddie Kowalczyk", null]]);
     for (const row of find(tree, ListRow)) (row.onClick as () => void)();
+    openTrees(tree);
     expect(opened).toEqual(["party_pov", SHOP, HOUSEHOLD]);
   });
 
   test("Marcus's row shows the month's profit he may see; with nothing to list, the home says so under the party", () => {
     const list = decodeOrgList(panel(portAlder("marcus_delgado"), "orgs.list"));
     if (!list) throw new Error("the home didn't read");
-    expect(rows(marked(OrgsHome({ list, onOpen: () => undefined }), "data-lre-orgs-group", "company"))[0]).toEqual(["Alder Automotive", expect.stringMatching(/^(Profit|Loss) this month: \$/), "Owner"]);
+    expect(treeRows(marked(OrgsHome({ list, onOpen: () => undefined }), "data-lre-orgs-group", "company"))[0]).toEqual(["Alder Automotive", expect.stringMatching(/^(Profit|Loss) this month: \$/), "Owner"]);
     const alone = OrgsHome({ list: { ...list, belong: [], known: [] }, onOpen: () => undefined });
     expect(find(alone, Empty).map((p) => textOf(p.children))).toEqual(["You don't belong to any organization yet."]);
     expect(find(alone, Disclosure)).toEqual([]);
@@ -199,7 +220,7 @@ describe("an organization's page", () => {
     const org = page(portAlder("pov"), SHOP);
     const { tree } = pageRig(org);
     expect(find(tree, PageHeader).map((p) => [p.title, p.subtitle])).toEqual([["Alder Automotive", "Company · LLC · Mechanic"]]);
-    expect((find(tree, Tabs)[0]?.tabs as { label: string }[]).map((t) => t.label)).toEqual(["Overview", "People", "Rules"]);
+    expect((find(tree, Tabs)[0]?.tabs as { label: string }[]).map((t) => t.label)).toEqual(["Overview", "People", "Chart", "Rules"]);
     // No figure he may see heads it.
     expect(elements(tree).some((v) => "data-lre-org-headline" in v.props)).toBe(false);
     expect(find(tree, Section).map((s) => s.title)).toEqual(["Your place here", "What you may do"]);
@@ -277,7 +298,7 @@ describe("an organization's page", () => {
   test("Marcus's: the packs' tabs in their order, each drawing its own section; People's part follows the chart; Owners links to Ownership", () => {
     const org = page(portAlder("marcus_delgado"), SHOP);
     expect(Object.keys(org.sections)).toEqual(expect.arrayContaining(["money", "ownership", "taxes", "payroll"]));
-    expect(orgTabs(org, ECONOMY_TABS).map((t) => t.label)).toEqual(["Overview", "People", "Money", "Ownership", "Taxes", "Rules"]);
+    expect(orgTabs(org, ECONOMY_TABS).map((t) => t.label)).toEqual(["Overview", "People", "Chart", "Money", "Ownership", "Taxes", "Rules"]);
     const money = pageRig(org, "economy.money").tree;
     expect(marked(money, "data-lre-org-tab").props["data-lre-org-tab"]).toBe("economy.money");
     expect(find(money, SectionStub).map((p) => p.section)).toEqual([org.sections.money]);

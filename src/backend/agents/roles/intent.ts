@@ -29,7 +29,6 @@ export async function interpretRun(rt: Runtime, task: InterpretTask, ctx: TurnAg
     ctx,
     {
       sub: "interpret",
-      purpose: "interpret",
       phase: "pre",
       names: { world: world.name, pov: pov.name },
       vars: {
@@ -62,7 +61,6 @@ export async function judgeRun(rt: Runtime, task: JudgeTask, ctx: TurnAgentCtx):
     ctx,
     {
       sub: "judge",
-      purpose: "judge",
       phase: "pre",
       names: namesOf(task.world, task.state),
       vars: {
@@ -90,7 +88,6 @@ export async function puzzleRun(rt: Runtime, task: PuzzleTask, ctx: TurnAgentCtx
     ctx,
     {
       sub: "puzzle",
-      purpose: "puzzle.answer",
       phase: "pre",
       names: namesOf(task.world, task.state),
       vars: { question: renderPrompt(question, own, {}, task.template !== null ? { [question]: task.template } : null), puzzle: task.question, accepted: JSON.stringify(task.accepted), answer: task.answer },

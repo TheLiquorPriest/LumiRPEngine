@@ -5,6 +5,7 @@
 // and the perspective it works from are its context (`agent-context.ts`, Settings → Agents → Context).
 // Nothing here is read by a classic turn.
 
+import type { RoleRun } from "./agent-pipeline";
 import type { AgentBudget, AgentEffort } from "./agent-settings";
 import type { ToolFamily } from "./agent-tools";
 
@@ -48,6 +49,8 @@ export interface RoleSettings {
   /** One call with the role's JSON contract and no tools, which is its classic step's own prompt and contract (§8). */
   promptOnly: boolean;
   onFail: RoleOnFail;
+  /** When it runs in an agent turn (`RoleRun`): whenever the turn asks, kept or not by Smart persistence, or never; what the pipeline map lets it take. */
+  run: RoleRun;
   /** Its own limits over every agent's (`AgentSettings.budget`): each one set here stands in for that one. */
   budget: Partial<AgentBudget>;
 }
@@ -97,6 +100,6 @@ export const CURATOR_TOOL_TURNS = 6;
  */
 export function defaultRoleSettings(): Record<RoleId, RoleSettings> {
   const out = {} as Record<RoleId, RoleSettings>;
-  for (const id of ROLE_IDS) out[id] = { connectionId: null, model: null, effort: "inherit", families: [...FAMILIES[id]], tier: "story", promptOnly: false, onFail: id === "intent" ? "stop" : "prompt_only", budget: id === "curator" ? { toolTurns: CURATOR_TOOL_TURNS } : {} };
+  for (const id of ROLE_IDS) out[id] = { connectionId: null, model: null, effort: "inherit", families: [...FAMILIES[id]], tier: "story", promptOnly: false, onFail: id === "intent" ? "stop" : "prompt_only", run: "smart", budget: id === "curator" ? { toolTurns: CURATOR_TOOL_TURNS } : {} };
   return out;
 }

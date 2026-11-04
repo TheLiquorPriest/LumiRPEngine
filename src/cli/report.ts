@@ -7,8 +7,8 @@ import { macrosIn } from "../engine/authoring";
 import { isRecord } from "../shared/json";
 import type { LintIssue } from "../shared/protocol";
 import type { WorldDoc } from "../shared/world";
-import { checkSchema, MAP_SCHEMA, pathText } from "./local-engine";
-import type { Schema } from "./local-engine";
+import { MAP_SCHEMA } from "../shared/maps";
+import { checkSchema, pathText, type Schema } from "../shared/schema-check";
 import { isCollection } from "./diff";
 
 // A JSON module's inferred type spells out every node, which `Schema` describes in general.
@@ -45,7 +45,7 @@ export interface LintSummary {
 }
 
 export function lintSummary(issues: readonly LintIssue[], shown = 12): LintSummary {
-  const sorted = [...issues].sort((a, b) => RANK[a.severity] - RANK[b.severity]);
+  const sorted = ranked(issues);
   return {
     errors: issues.filter((i) => i.severity === "error").length,
     warnings: issues.filter((i) => i.severity === "warning").length,
@@ -53,6 +53,46 @@ export function lintSummary(issues: readonly LintIssue[], shown = 12): LintSumma
     first: sorted.slice(0, shown),
     more: Math.max(0, sorted.length - shown),
   };
+}
+
+/** Issues as an answer lists them: errors, then warnings, then infos, each in the engine's order; those `first` holds lead (the new ones). */
+export function ranked(issues: readonly LintIssue[], first?: ReadonlySet<LintIssue>): LintIssue[] {
+  return [...issues].sort((a, b) => Number(first?.has(b) === true) - Number(first?.has(a) === true) || RANK[a.severity] - RANK[b.severity]);
+}
+
+/** What lint found before and after a change: the issues after brought in, those it no longer has, and how many it kept. */
+export interface LintDiff {
+  introduced: LintIssue[];
+  fixed: LintIssue[];
+  kept: number;
+}
+
+const issueKey = (i: LintIssue, words: boolean): string => `${i.severity}\u0000${i.code}\u0000${i.path}${words ? `\u0000${i.message}` : ""}`;
+
+/**
+ * Lint of two versions of a world, the older first (the head and the draft: what's new since the
+ * last save; a draft before and after an edit). An issue is the same one when its severity, code and
+ * path match, its words first where several do, since a count in the words moves with the world;
+ * each is matched once. In the engine's order.
+ */
+export function lintDiff(before: readonly LintIssue[], after: readonly LintIssue[]): LintDiff {
+  const open = new Set(after.keys());
+  const match = (issues: readonly LintIssue[], words: boolean): LintIssue[] => {
+    const waiting = new Map<string, number[]>();
+    for (const i of open) {
+      const key = issueKey(after[i] as LintIssue, words);
+      waiting.set(key, [...(waiting.get(key) ?? []), i]);
+    }
+    return issues.filter((issue) => {
+      const at = waiting.get(issueKey(issue, words))?.shift();
+      if (at === undefined) return true;
+      open.delete(at);
+      return false;
+    });
+  };
+  const fixed = match(match(before, true), false);
+  const introduced = after.filter((_, i) => open.has(i));
+  return { introduced, fixed, kept: after.length - introduced.length };
 }
 
 export interface Hazard {

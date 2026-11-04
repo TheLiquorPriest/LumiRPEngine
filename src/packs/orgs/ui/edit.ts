@@ -32,8 +32,14 @@ export const GM_EFFECTS = { position: "orgs.position", delegate: "orgs.delegate"
 
 // ---------------------------------------------------------------- routes
 
-/** What an `org_edit` sheet shows: a member's sheet (by who), Hire someone, Admit a member, a position (by id; none adds one), a delegation (by who; none grants one), the dues, a trust's payout. */
-export const ORG_EDIT_FORMS = ["member", "hire", "admit", "position", "delegate", "dues", "payout"] as const;
+/**
+ * What an `org_edit` sheet shows: a member's sheet (by who), Hire someone and Admit a member (into
+ * the position by id, when one is named), a position (by id; none adds one), a position added under
+ * another (`under`, by the other's id), moving a position (`move`), appointing someone to one
+ * (`appoint`), removing one (`remove`), a delegation (by who; none grants one), the dues, a trust's
+ * payout. The Org Chart's menus open the position ones.
+ */
+export const ORG_EDIT_FORMS = ["member", "hire", "admit", "position", "under", "move", "appoint", "remove", "delegate", "dues", "payout"] as const;
 export type OrgEditForm = (typeof ORG_EDIT_FORMS)[number];
 
 export interface OrgEditTarget {
@@ -74,13 +80,13 @@ function readerOf(org: OrgView): string | null {
 
 /**
  * People's controls at its top (§4.4), by power: Hire someone (`staff.hire`, from Money 3, where work
- * is actions), Admit a member (`members.admit`; a trust's members are its owners) and a trust's Pay
- * out (`money.payout`, from Money 3). The party has its own (Hire a hand, Add someone you know);
- * GM → Orgs, its GM parts.
+ * is actions), Admit a member (`members.admit`; a trust's are its officers and directors) and a
+ * trust's Pay out (`money.payout`, from Money 3). The party has its own (Hire a hand, Add someone you
+ * know); GM → Orgs, its GM parts.
  */
 export function peopleControls(org: OrgView): { hire: boolean; admit: boolean; payout: boolean } {
   if (!org.exists || isGmPage(org) || org.type === "party") return { hire: false, admit: false, payout: false };
-  return { hire: org.level >= 3 && holds(org, "staff.hire"), admit: org.type !== "trust" && holds(org, "members.admit"), payout: org.type === "trust" && org.level >= 3 && holds(org, "money.payout") };
+  return { hire: org.level >= 3 && holds(org, "staff.hire"), admit: holds(org, "members.admit"), payout: org.type === "trust" && org.level >= 3 && holds(org, "money.payout") };
 }
 
 export type MemberControl = "appoint" | "title" | "delegate" | "revoke" | "raise" | "hours" | "leave" | "back" | "let_go" | "remove";
@@ -102,6 +108,34 @@ export const MEMBER_CONTROL_LABELS: Readonly<Record<MemberControl, string>> = {
 /** The positions one may be appointed to there: those it defines, not a type's own (a household's Head, the party's Leader). */
 export function appointable(org: OrgView): OrgPositionView[] {
   return org.positions.filter((p) => !p.implied);
+}
+
+/** The positions under `id` (those whose line of reports reaches it), never round a loop. */
+export function positionsUnder(org: OrgView, id: string): Set<string> {
+  const under = new Set<string>();
+  for (const p of org.positions) {
+    const seen = new Set<string>();
+    for (let at = p.reportsTo?.id; at !== undefined && !seen.has(at); at = org.positions.find((q) => q.id === at)?.reportsTo?.id) {
+      if (at === id) {
+        under.add(p.id);
+        break;
+      }
+      seen.add(at);
+    }
+  }
+  return under;
+}
+
+/** Where a position may move to: any other position it defines but those under it (they'd report to it in a loop). */
+export function moveTargets(org: OrgView, id: string): OrgPositionView[] {
+  const under = positionsUnder(org, id);
+  return appointable(org).filter((p) => p.id !== id && !under.has(p.id));
+}
+
+/** Whom a position may be given to: the people and organizations on the page who don't hold it yet. */
+export function appointees(org: OrgView, id: string): OrgPersonView[] {
+  const position = org.positions.find((p) => p.id === id);
+  return org.people.filter((p) => !(position?.holders ?? []).includes(p.id));
 }
 
 /**

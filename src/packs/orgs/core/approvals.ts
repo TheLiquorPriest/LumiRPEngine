@@ -21,7 +21,7 @@ import { DECISION_ACTIONS, DECISION_EFFECTS, isRequestStatus, type ApprovalReque
 import type { ActionDef, ParamDef } from "../../../shared/world";
 import { calendarOf, formatStamp } from "../../../engine/calendar";
 import { acts } from "../../../engine/life";
-import { directMembers, heldPositions, mayAct, orgPower, positionsOf } from "../../../engine/org";
+import { controlPathOf, directMembers, heldPositions, mayAct, orgPower, orgTypeOf, positionsOf } from "../../../engine/org";
 import { labelOf, objOf, own, sliceOf, sliceRecord, strOf } from "../../../engine/pack-kit";
 import type { CoreRegistry, EffectContext, EventTypeDef, ReadContext, Rejection } from "../../../engine/registry";
 import { isGone, kindIs } from "../../../engine/scope";
@@ -101,7 +101,9 @@ interface Ask {
  * The asker's chain of command at `org` (§29.20), nearest first, the asker left out: the granter of
  * the delegation their power rests on; the holders of the positions above theirs, up each one's
  * `reports_to` (the position the power rests on first); then the organization's governors (`org.govern`
- * as an owner or by a position, as Run by reads them) and its owners, by id.
+ * as an owner or by a position, as Run by reads them) and its owners, by id; at a trust, those
+ * acting through an organization that is one of its trustees too (DESIGN §29.1), so a co-trustee
+ * that is a company approves through its people.
  */
 function chainOf(ctx: ReadContext, org: EntityId, ask: Ask): EntityId[] {
   const near: EntityId[] = [];
@@ -120,17 +122,24 @@ function chainOf(ctx: ReadContext, org: EntityId, ask: Ask): EntityId[] {
     }
   }
   const governors = people.filter((p) => ["owner", "position"].includes(orgPower(ctx, p, org, "org.govern")?.basis ?? ""));
-  const top = [...new Set([...governors, ...ownersIn(own(ctx.state.entities, org)?.fields ?? {}).map((o) => o.party)])].sort();
+  const owners = ownersIn(own(ctx.state.entities, org)?.fields ?? {});
+  const trustees = orgTypeOf(ctx, org) === "trust" ? owners.filter((o) => o.role === "trustee" && orgTypeOf(ctx, o.party) !== null).map((o) => o.party) : [];
+  // The trustee each acts through, so no one approves an act done through the same trustee as theirs.
+  const trusteeOf = (p: EntityId): EntityId => controlPathOf(ctx, p, org, ask.power)?.steps.at(-1)?.holder ?? "";
+  const asker = trustees.length === 0 ? "" : trusteeOf(ask.by);
+  const through = trustees.length === 0 ? [] : Object.keys(ctx.state.entities).filter((p) => kindIs(ctx.registry, ctx.world, own(ctx.state.entities, p)?.kind ?? "", "person") && trustees.includes(trusteeOf(p)) && trusteeOf(p) !== asker);
+  const top = [...new Set([...governors, ...owners.map((o) => o.party), ...through])].sort();
   return [...new Set([...near, ...top])].filter((c) => c !== ask.by);
 }
 
 /**
  * Who may approve an act of `ask.by`'s for `org` (§29.20): up their chain of command only (`chainOf`),
  * nearest first, the people there who act and may do it themselves within their own limits (`mayAct`
- * for the same amount, account and payee). No one else may, however high their own limit.
+ * for the same amount, account and payee, as one approving: a co-trustee where the trustees decide
+ * together). No one else may, however high their own limit.
  */
 export function approversOf(ctx: ReadContext, org: EntityId, ask: Ask): EntityId[] {
-  const limits = { ...(ask.cents !== undefined ? { amount: ask.cents } : {}), ...(ask.account !== undefined ? { account: ask.account } : {}), ...(ask.target !== undefined ? { target: ask.target } : {}) };
+  const limits = { ...(ask.cents !== undefined ? { amount: ask.cents } : {}), ...(ask.account !== undefined ? { account: ask.account } : {}), ...(ask.target !== undefined ? { target: ask.target } : {}), approving: true as const };
   return chainOf(ctx, org, ask).filter((c) => !isGone(ctx.state, c) && kindIs(ctx.registry, ctx.world, own(ctx.state.entities, c)?.kind ?? "", "person") && acts(ctx.world, ctx.state, c) && mayAct(ctx, c, org, ask.power, limits).ok);
 }
 

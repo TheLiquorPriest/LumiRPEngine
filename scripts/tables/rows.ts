@@ -252,8 +252,19 @@ export const ROW_SPECS: Record<string, RowSpec> = {
         donations_deductible: f.take("donations_deductible"),
         futa: f.take("futa"),
         suta: f.take("suta"),
+        s_corp_holder: f.take("s_corp_holder"),
+        payout_pct: f.take("payout_pct"),
+        excise_pct: f.take("excise_pct"),
+        undistributed_tax_pct: f.take("undistributed_tax_pct"),
+        donor_limit_pct: f.take("donor_limit_pct"),
         description: f.take("description"),
       };
+    },
+  },
+
+  "economy.projects": {
+    row(f) {
+      return { name: f.take("name"), description: f.take("description"), payee: f.take("payee"), days: f.take("days"), cost_cents: f.take("cost_cents"), steps: f.take("steps") };
     },
   },
 

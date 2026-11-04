@@ -125,6 +125,23 @@ describe("a subsidiary", () => {
     // Its capital comes from its own money: Ellis Towing's account, where it is an authorized user, isn't Ellis Mobile Repair's to start another with.
     expect(ownership.acts?.sources.map((s) => s.id)).toEqual([account(w, EMR)]);
   });
+
+  test("its controller issues units in its own subsidiary, deciding as that one's parent at any depth (DESIGN §29.3 Control)", () => {
+    const w = portAlder();
+    founded(w);
+    expect(why(act(w, JORDAN, "org_found", { type: "company", name: "Ellis Towing", amount: 50_000, as: EMR }))).toBe("");
+    // Jordan governs Ellis Towing through Ellis Mobile Repair, so Ellis Towing starts one of its own.
+    expect(why(act(w, JORDAN, "org_found", { type: "company", name: "Ellis Parts", amount: 20_000, as: TOW }))).toBe("");
+    const PARTS = "ellis_parts_co";
+    expect(w.state.entities[PARTS]?.fields.owners).toEqual([{ party: TOW, role: "owner", share: 100 }]);
+    // His own votes in it are none, nor Ellis Mobile Repair's: its holder, Ellis Towing, decides.
+    expect(why(act(w, JORDAN, "shares_issue", { business: PARTS, to: TOW, units: 100, price: 100 }))).toContain("Jordan Ellis holds 0%");
+    expect(why(act(w, JORDAN, "shares_issue", { business: PARTS, to: TOW, units: 100, price: 100, as: EMR }))).toContain("Ellis Mobile Repair holds 0%");
+    const issued = act(w, JORDAN, "shares_issue", { business: PARTS, to: TOW, units: 100, price: 100, as: TOW });
+    expect(why(issued)).toBe("");
+    expect(ownersIn(w.state.entities[PARTS]?.fields ?? {})).toEqual([{ party: TOW, role: "owner", share: 100, units: 1100 }]);
+    expect(orgHistory(w.state, PARTS)[0]).toMatchObject({ by: JORDAN });
+  });
 });
 
 describe("look-through", () => {
@@ -165,10 +182,17 @@ describe("look-through", () => {
     };
     const untaxed = (w: Working) => ORG_LINTS.flatMap((rule) => rule.check(w.world, reg)).filter((i) => i.code === "orgs.profit_untaxed");
     const llc = portAlder(held("llc"));
-    expect(untaxed(llc)).toEqual([{ severity: "warning", code: "orgs.profit_untaxed", path: `entities.${SHOP}.fields.owners`, message: "Alder Automotive passes its profit through to its owners, and The Kowalczyks (40%) pays no income tax on its share, so no one does: only people and C corporations pay it." }]);
+    expect(untaxed(llc)).toEqual([{ severity: "warning", code: "orgs.profit_untaxed", path: `entities.${SHOP}.fields.owners`, message: "Alder Automotive passes its profit through to its owners, and The Kowalczyks (40%) pays no income tax on its share, so no one does: only people, trusts and C corporations pay it." }]);
     expect(section<TaxesView>(llc, SHOP, "taxes")).toMatchObject({ income: "owners", taxedTo: [{ name: "Marcus Delgado", share: 60 }], untaxed: [{ name: "The Kowalczyks", share: 40 }] });
     // A C corporation pays its own.
     expect(untaxed(portAlder(held("c_corp")))).toEqual([]);
+    // A trust holding the share pays tax on it (its brackets, or its settlor's), so lint says nothing.
+    const trusted = portAlder((world) => {
+      world.entities.kowalczyk_trust = { id: "kowalczyk_trust", kind: "trust", name: "Kowalczyk Trust", tier: "background", fields: { owners: [{ party: "helen_kowalczyk", role: "trustee" }, { party: HOUSEHOLD, role: "beneficiary", share: 100 }] }, relations: [] };
+      held("llc")(world);
+      Object.assign(world.entities[SHOP]?.fields ?? {}, { owners: [{ party: MARCUS, role: "owner", share: 60 }, { party: "kowalczyk_trust", role: "owner", share: 40 }] });
+    });
+    expect(untaxed(trusted)).toEqual([]);
   });
 });
 

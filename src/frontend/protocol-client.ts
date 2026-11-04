@@ -117,6 +117,7 @@ const REQUEST_TYPES: Record<keyof ResultBodies, true> = {
   "lre.edit": true,
   "lre.gm": true,
   "lre.gm.part": true,
+  "lre.chat.export": true,
   "lre.sections": true,
   "lre.state.get": true,
   "lre.marker": true,

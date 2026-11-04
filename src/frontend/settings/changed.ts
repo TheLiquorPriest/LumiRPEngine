@@ -34,7 +34,7 @@ function sameSet(a: readonly string[], b: readonly string[]): boolean {
 export function agentsSubChanged(agents: Readonly<AgentSettings>, sub: AgentsSub): number {
   switch (sub) {
     case "pipeline":
-      return fieldsChanged(agents.pipeline, DEFAULTS.pipeline);
+      return fieldsChanged(agents.pipeline, DEFAULTS.pipeline) + fieldsChanged(agents.persist, DEFAULTS.persist);
     case "review":
       return fieldsChanged(agents.review, DEFAULTS.review);
     case "system":
@@ -70,7 +70,7 @@ export function contextChanged(agents: Readonly<AgentSettings>, id: RoleId): num
 export function roleChanged(agents: Readonly<AgentSettings>, id: RoleId): number {
   const r = agents.roles[id];
   const d = DEFAULTS.roles[id];
-  const settings = [r.connectionId !== d.connectionId || r.model !== d.model, r.effort !== d.effort, !sameSet(r.families, d.families), r.tier !== d.tier, r.promptOnly !== d.promptOnly, r.onFail !== d.onFail, hasOwn(agents.caching.roles, id), id === "curator" && agents.curatorOps !== DEFAULTS.curatorOps];
+  const settings = [r.connectionId !== d.connectionId || r.model !== d.model, r.effort !== d.effort, !sameSet(r.families, d.families), r.tier !== d.tier, r.promptOnly !== d.promptOnly, r.onFail !== d.onFail, r.run !== d.run, hasOwn(agents.caching.roles, id), id === "curator" && agents.curatorOps !== DEFAULTS.curatorOps];
   return settings.filter(Boolean).length + ownChanged(r.budget, d.budget) + contextChanged(agents, id);
 }
 
@@ -86,7 +86,7 @@ export function mainChanged(agents: Readonly<AgentSettings>, timeouts: Readonly<
   const r = agents.finalReview;
   const dr = DEFAULTS.finalReview;
   const settings = [m.connectionId !== d.connectionId || m.model !== d.model, m.effort !== d.effort, !sameSet(m.families, d.families), m.digestTokens !== d.digestTokens, m.pinsTokens !== d.pinsTokens, hasOwn(agents.caching.roles, "main"), r.on !== dr.on, r.onFail !== dr.onFail, timeouts.finalReviewMs !== TIMEOUTS.finalReviewMs];
-  return settings.filter(Boolean).length + ownChanged(m.budget, d.budget) + ownChanged(r.budget, dr.budget);
+  return settings.filter(Boolean).length + fieldsChanged(m.stages, d.stages) + (r.scope !== dr.scope ? 1 : 0) + ownChanged(m.budget, d.budget) + ownChanged(r.budget, dr.budget);
 }
 
 /** The GM assistant's page: where it runs, its effort, how its changes land, its history, its own limits and its caching. */

@@ -13,6 +13,7 @@
 import type { EntityId } from "../../../shared/ids";
 import type { LedgerEvent, PostingLine } from "../../../shared/ledger";
 import type { AccountClass, AlertLine, ClassTraits, CreditApplication, FilingStatus, FinanceFeature, FinanceView, Flow, FlowSchedule, FlowSplit, MoneySummary, Owner, PartyKind, ResolvedProduct, TxnKind, UpcomingLine, WorthLine } from "../../../shared/finance";
+import type { RevenueStreamView } from "../../../shared/revenue";
 import type { FieldDef } from "../../../shared/world";
 import type { CoreRegistry, ReadContext, Rejection } from "../../../engine/registry";
 import type { WorldState } from "../../../engine/state";
@@ -84,6 +85,8 @@ export type SaleHook = (ctx: ReadContext, sale: Sale) => SaleTerms | null;
 export interface ViewSectionResult extends Partial<Pick<FinanceView, "jobs" | "businesses" | "investments" | "properties">> {
   upcoming?: UpcomingLine[];
   alerts?: AlertLine[];
+  /** Revenue streams the party earns (`revenue.ts`). */
+  streams?: RevenueStreamView[];
 }
 
 /**

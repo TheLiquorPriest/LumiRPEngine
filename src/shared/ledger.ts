@@ -483,6 +483,13 @@ export interface Rec {
    * and read leniently (`finalEditsOf`), so a damaged one costs only the edits, never the turn.
    */
   finalEdits?: FinalEdit[];
+  /**
+   * Each part of the narrator's prompt the turn's final review saw, by part id, as the engine made it
+   * (`hashParts` of its text), so the next turn's review, scoped to what changed (Settings → Agents →
+   * Main agent → Final review), makes this one's edits again on a part that reads the same: outside
+   * every hash but the tombstone's, read leniently (`finalPartsOf`), a damaged one costing only that.
+   */
+  finalParts?: Record<string, string>;
 }
 
 /** `spindle_metadata.lumi_rp_engine` on an assistant message. Swipe keys are decimal indexes. */
@@ -622,6 +629,8 @@ export interface PendingTurn {
   agents?: RecAgent[];
   /** What the turn's final review changed in the narrator's prompt (`Rec.finalEdits`), recorded on its record at commit; a Re-narrate copies its source's and keeps those it told again. */
   finalEdits?: FinalEdit[];
+  /** Each part the turn's final review saw, as made (`Rec.finalParts`), recorded on its record at commit. */
+  finalParts?: Record<string, string>;
 }
 
 /** Latest journal state of one message's ledger. */

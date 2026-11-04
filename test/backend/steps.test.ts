@@ -1,13 +1,16 @@
 // Model calls per turn by preset (DESIGN §5.3) on one typed turn that fires every signal: typed
 // input, open ties for an agent with the POV and one elsewhere, a reply. Also: routes reach
 // the host, prose steps never see a secret (secrecy batching rule), a suggestion too long for a chip
-// is dropped, never cut, and a brief is checked whole for a secret before it's cut.
+// is dropped, never cut, a brief is checked whole for a secret before it's cut, and an agent turn's
+// prompt-only calls wait their turn among their connection's calls at once.
 
 import { describe, expect, test } from "bun:test";
 import type { Answers } from "../../src/engine/decide";
 import type { DecideRequest, QuietRequest } from "../../src/backend/host";
 import type { JsonObject } from "../../src/shared/json";
 import { BRIEF_CHARS } from "../../src/backend/turn-steps";
+import { ROLE_IDS } from "../../src/shared/agent-roles";
+import { alderChat, DANNY, MARCUS, PRIYA } from "../support/mind-chat";
 import { Rig } from "../support/rig";
 
 const TRUTH = "the ferryman sank the old boat";
@@ -294,5 +297,54 @@ describe("interpret money params", () => {
     const before = Number(await rig.cashOf(chatId));
     await rig.turn(chatId, "I tip the waiter $2.", "He nods.");
     expect(Number(await rig.cashOf(chatId))).toBe(before - 200);
+  });
+});
+
+describe("calls at once on an agent chat (Settings → Agents → Throttles)", () => {
+  const MIND = /You are the private mind of (.+?) in the roleplay world/;
+  /** Every role prompt-only: each makes its step's own call, through `Steps`. */
+  const PROMPT_ONLY = { agents: { roles: Object.fromEntries(ROLE_IDS.map((id) => [id, { promptOnly: true }])), finalReview: { on: false }, throttles: [{ id: "conn-main", requestsPerMinute: "none", tokensPerMinute: "none", atOnce: 2 }] } };
+
+  /**
+   * Port Alder with Danny, Priya and Marcus beside the player character, on the user's default
+   * connection, which takes 2 calls at once: three minds a turn. Every call takes a few turns of the
+   * event loop to answer, and the most under way at once is counted.
+   */
+  async function crowded(engine: "agents" | null): Promise<{ rig: Rig; chatId: string; seen: { most: number; minds: number } }> {
+    const rig = new Rig({ shipped: true, minds: true });
+    rig.host.activeConnection = { id: "conn-main", name: "Main" };
+    const chatId = await alderChat(rig, async () => {}, [DANNY, PRIYA, MARCUS]);
+    rig.body(await rig.send({ type: "lre.settings.set", patch: PROMPT_ONLY }));
+    if (engine) expect(rig.body(await rig.send({ type: "lre.chat.knowledge", chatId, engine })).engine).toBe(engine);
+    const seen = { most: 0, minds: 0 };
+    let now = 0;
+    rig.host.quietReply = async (req) => {
+      now++;
+      seen.most = Math.max(seen.most, now);
+      for (let i = 0; i < 5; i++) {
+        const { promise, resolve } = Promise.withResolvers<void>();
+        setImmediate(resolve);
+        await promise;
+      }
+      now--;
+      const system = req.messages[0]?.content ?? "";
+      const mind = MIND.exec(system)?.[1];
+      if (mind) {
+        seen.minds++;
+        return JSON.stringify({ monologue: "Nothing yet.", depiction: `${mind} looks up`, intent: "Wait.", reactions: [], mood: "calm" });
+      }
+      return quiet(req);
+    };
+    return { rig, chatId, seen };
+  }
+
+  test("an agent turn's prompt-only calls take their places among the connection's calls at once: at 2, the third waits; a classic chat's never do", async () => {
+    const agents = await crowded("agents");
+    await agents.rig.turn(agents.chatId, "Morning, everyone.", "They all nod.");
+    expect(agents.seen).toEqual({ most: 2, minds: 3 });
+    const classic = await crowded(null);
+    await classic.rig.turn(classic.chatId, "Morning, everyone.", "They all nod.");
+    expect(classic.seen.minds).toBe(3);
+    expect(classic.seen.most).toBeGreaterThanOrEqual(3);
   });
 });

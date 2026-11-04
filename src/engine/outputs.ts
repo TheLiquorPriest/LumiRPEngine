@@ -33,8 +33,9 @@ export function outLines(kind: OutputKind, lines: readonly string[]): PackEvent 
   return { type: OUT_LINES, data: { kind, lines: [...lines] } };
 }
 
-export function outScene(lore: readonly string[], notes: readonly string[]): PackEvent {
-  return { type: OUT_SCENE, data: { lore: [...lore], notes: [...notes] } };
+/** The scene's lore and notes; `kept` when Smart persistence kept the last turn's instead of asking the scene role again (an older record has none, so it folds as it did). */
+export function outScene(lore: readonly string[], notes: readonly string[], kept = false): PackEvent {
+  return { type: OUT_SCENE, data: { lore: [...lore], notes: [...notes], ...(kept ? { kept: true } : {}) } };
 }
 
 /** `engine.out.lines`: lines the turn tells its narrator; nothing in the world changes. */
@@ -63,17 +64,18 @@ export interface TurnOutputs {
   montage: string[];
   outline: string[];
   brief: string | null;
-  scene: { lore: string[]; notes: string[] };
+  scene: { lore: string[]; notes: string[]; kept: boolean };
 }
 
 export function outputsOf(events: readonly LedgerEvent[]): TurnOutputs | null {
   let out: TurnOutputs | null = null;
   for (const e of events) {
     if ((e.type !== OUT_LINES && e.type !== OUT_SCENE) || !("data" in e) || !isRecord(e.data)) continue;
-    out ??= { outcome: [], montage: [], outline: [], brief: null, scene: { lore: [], notes: [] } };
+    out ??= { outcome: [], montage: [], outline: [], brief: null, scene: { lore: [], notes: [], kept: false } };
     if (e.type === OUT_SCENE) {
       if (strings(e.data.lore)) out.scene.lore.push(...e.data.lore);
       if (strings(e.data.notes)) out.scene.notes.push(...e.data.notes);
+      if (e.data.kept === true) out.scene.kept = true;
       continue;
     }
     if (!strings(e.data.lines)) continue;

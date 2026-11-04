@@ -228,6 +228,74 @@ describe("the main agent's turn", () => {
   });
 });
 
+describe("each stage's mode (Settings → Agents → Main agent → Stages)", () => {
+  /** What leads a send that follows stages run on their own, as shipped. */
+  const AUTO_MARK = "Since your last message, these ran on their own, as the fixed pipeline runs them:";
+  const MIND = /You are the private mind of (.+?) in the roleplay world/;
+  const mindsAsked = (rig: Rig): string[] => rig.host.quietCalls.flatMap((c) => MIND.exec(c.messages[0]?.content ?? "")?.[1] ?? []).sort();
+
+  /** Yields the event loop, at most `turns` times, until `done`: a call the engine starts at once has started within a few. */
+  async function until(done: () => boolean, turns = 500): Promise<void> {
+    for (let i = 0; i < turns && !done(); i++) {
+      const { promise, resolve } = Promise.withResolvers<void>();
+      setImmediate(resolve);
+      await promise;
+    }
+  }
+
+  test("a stage on its own makes no send: its roles run as the fixed pipeline runs them, and the next send names each with its answer", async () => {
+    const rig = new Rig({ shipped: true });
+    const chatId = await mainChat(rig, { agents: { main: { stages: { intent: "auto" } } } });
+    const asked = models(rig);
+    const rec = await played(rig, chatId, "I look out over the harbor.", "Gulls wheel over the water.");
+    const stages = asked.map(stageNumber);
+    expect(new Set(stages)).toEqual(new Set([3, 5, 7, 8]));
+    // The intent ran once, with no main agent's task, and the first send says so before its stage.
+    expect(rig.host.quietCalls.filter((c) => (c.messages[0]?.content ?? "").includes(INTERPRET_MARK))).toHaveLength(1);
+    const first = sentOf(asked[0] as QuietRequest);
+    expect(first).toContain(AUTO_MARK);
+    expect(first).toMatch(/^- intent \(.+\): \{/m);
+    expect(first.indexOf(AUTO_MARK)).toBeLessThan(first.indexOf("Stage 3 of 8"));
+    // Said once: no later send names it again.
+    expect(asked.slice(1).some((req) => stageOf(req).includes(AUTO_MARK))).toBe(false);
+    expect(typeof rec.session?.segment).toBe("string");
+    // GM → Live's plan says the intent works in stage 1 on its own and stage 3 by the main agent.
+    const plan = rig.rt.live.view(chatId, rig.host.userId)?.entries.find((e) => e.kind === "plan");
+    expect(plan?.kind === "plan" ? plan.rows.find((r) => r.role === "intent") : null).toMatchObject({ status: "runs", why: "The main agent decides it in stage 1, stage 3; stage 1 runs on its own." });
+    expect(rig.rt.ledger.errors).toEqual([]);
+  });
+
+  test("with stage 3 on its own the minds start as the turn starts, beside the read of the message; every stage the main agent's keeps them for stage 3", async () => {
+    for (const prepare of ["auto", "main"] as const) {
+      const rig = new Rig({ shipped: true, minds: true });
+      const chatId = await alderChat(rig, async () => {}, [DANNY, PRIYA]);
+      rig.body(await rig.send({ type: "lre.settings.set", patch: { agents: { pipeline: { mode: "main" }, roles: PROMPT_ONLY, main: { stages: { prepare } }, turn: { tokensIn: "none", tokensOut: "none" } } } }));
+      expect(rig.body(await rig.send({ type: "lre.chat.knowledge", chatId, engine: "agents" })).engine).toBe("agents");
+      let whileReading: string[] = [];
+      const asked = models(rig);
+      const scripted = rig.host.quietReply;
+      if (!scripted) throw new Error("no models");
+      rig.host.quietReply = async (req) => {
+        if (MIND.test(req.messages[0]?.content ?? "")) return JSON.stringify({ monologue: "Nothing yet.", depiction: "looks up", intent: "Wait.", reactions: [], mood: "calm" });
+        // The main agent's stage 1 waits for minds that started beside it, as long as a few hundred turns of the event loop.
+        if (isMain(req) && stageNumber(req) === 1 && resultsOf(req).length === 0) {
+          await until(() => mindsAsked(rig).length === 2);
+          whileReading = mindsAsked(rig);
+        }
+        return scripted(req);
+      };
+      await played(rig, chatId, "Morning, both of you.", "They nod.");
+      expect(whileReading).toEqual(prepare === "auto" ? ["Danny Okafor", "Priya Nair"] : []);
+      expect(mindsAsked(rig)).toEqual(["Danny Okafor", "Priya Nair"]);
+      // On its own, stage 3 makes no send, and the next one names what ran; else stage 3 is the main agent's.
+      const stages = asked.map(stageNumber);
+      expect(stages.includes(3)).toBe(prepare === "main");
+      expect(asked.some((req) => sentOf(req).includes(AUTO_MARK))).toBe(prepare === "auto");
+      expect(rig.rt.ledger.errors).toEqual([]);
+    }
+  });
+});
+
 describe("the main agent's system files", () => {
   test("AGENTS.md and roles/main.md follow its system prompt in every call, the global workspace's before the chat's; a role's own file and a system file listed in .pins.json are no part of its turn task", async () => {
     const rig = new Rig({ shipped: true });

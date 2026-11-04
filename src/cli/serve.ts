@@ -111,7 +111,7 @@ export class McpSession implements ToolHost {
     this.clock = options.clock ?? REAL_CLOCK;
     this.follower = new KitFollower(options.bundled, { pin: options.mcp.pin, cannotLoad: options.cannotLoad ?? null, identifier: ENGINE_EXTENSION, files: options.files, where: () => this.conn?.base ?? "your Lumiverse" });
     const queue = new Queue();
-    this.context = { readFile: (path) => options.io.readFile(path), readOnly: this.readOnly, connection: () => this.connection(), serialize: (key, work) => queue.run(key, work) };
+    this.context = { readFile: (path) => options.io.readFile(path), readOnly: this.readOnly, connection: () => this.connection(), serialize: (key, work) => queue.run(key, work), sandboxBudgetMs: options.mcp.sandboxBudgetMs };
     this.said = stanceOf(this.checkIn());
   }
 
