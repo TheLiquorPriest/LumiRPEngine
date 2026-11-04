@@ -119,8 +119,8 @@ describe("paying a card in Play → Money while the engine runs a turn", () => {
       const before = await chat.hub();
       const { g, answer } = await playWhile(rig, chatId, "I check the news on my phone.", () => rig.send(actionRequest(chatId, payCardAction(CARD, CHECKING, chat.cents("200")))));
       expect(g.halted).toBeUndefined();
-      // The payment waits for the turn, changing nothing yet.
-      expect(rig.body(answer)).toEqual({ applied: true, pending: true });
+      // The payment waits for the turn the engine is preparing, changing nothing yet; its Undo comes once it lands.
+      expect(rig.body(answer)).toEqual({ applied: true, pending: true, queued: "engine", undo: null });
       expect(account(await chat.hub(), CARD).cents).toBe(account(before, CARD).cents);
       await rig.host.finish(g, "The headlines scroll past.");
       expect(await flagged(rig, chatId)).toBeNull();
@@ -200,7 +200,7 @@ describe("a chip's Apply while a turn is under way", () => {
     if (!chip) throw new Error("no confirm chip");
     // The player continues the reply: the engine runs for the Continue, and its reply waits to start.
     expect((await rig.host.begin(chatId, { type: "continue" })).halted).toBe("cancelled");
-    expect(rig.body(await rig.send({ type: "lre.chip", chatId, chip: chip.id, choice: "confirm" }))).toEqual({ applied: false, pending: true });
+    expect(rig.body(await rig.send({ type: "lre.chip", chatId, chip: chip.id, choice: "confirm" }))).toEqual({ applied: false, pending: true, queued: "page" });
     // Waiting, it is on the record not yet.
     expect((await headRecord(rig, chatId)).post.some((p) => p.kind === "confirm")).toBe(false);
     const g = await rig.host.begin(chatId, { type: "continue" });

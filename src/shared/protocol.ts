@@ -13,7 +13,7 @@ import type { InferredChecks, SheetSkill } from "./inferred";
 import type { BookFieldsEdit, BookLoreFields, LoreIndexAddition } from "./lore";
 import type { Limit, MindEditOp, MindsRunView } from "./minds";
 import type { RoutineEditOp, RoutineRead, RoutineReadResult } from "./routines";
-import type { ItemOp, PlaceOp } from "./things";
+import type { ItemFix, ItemOp, PlaceOp } from "./things";
 import type { OrgOp } from "./org-ops";
 import type { CharacterResult } from "./character";
 import type { PersonThings, ThingPage, ThingPicks, ThingsList, ThingType } from "./thing-view";
@@ -25,6 +25,7 @@ import type { Activity, DiagRecord } from "./diagnostics";
 import type { LiveChange, LiveView } from "./live";
 import type { GmView, SheetSectionView, StateView } from "./state-view";
 import type { AdjudicationDef, FacetId, FacetValueId, FeedScope, KindDef, LifeStateId, LorePin, MapDisplay, RelationTypeDef, RevisionNote, SectionFeed, StepPurpose, WorldDoc, WorldIndex } from "./world";
+import type { GM_OUTLINE, GmPart, GmPartAnswer, QueuedOn } from "./gm-parts";
 
 export const PROTOCOL_VERSION = 1;
 
@@ -105,9 +106,12 @@ export interface RestartRequest extends Request<"lre.restart"> {
 }
 
 /**
- * A palette, map, command or chip action. From the palette, a panel or the map with no words it is
- * staged for the player's next message (DESIGN §11), and the same tap again clears it; `now` plays it
- * at once, as a chip or a command does: the backend appends a user message with `intent` and triggers a generation.
+ * A palette, map, command or chip action. A money or organization action tapped with no words is
+ * done at once, off screen (DESIGN §11, `shared/offstage.ts`): no message, turn or clock time,
+ * recorded on the head as a ✎ fix is, with its Undo. Any other tap from the palette, a panel or the
+ * map with no words is staged for the player's next message, and the same tap again clears it;
+ * `now` plays it at once as a turn, as a chip or a command does: the backend appends a user message
+ * with `intent` and triggers a generation. Words always play it as a turn.
  */
 export interface ActionRequest extends Request<"lre.action"> {
   chatId: ChatId;
@@ -116,8 +120,12 @@ export interface ActionRequest extends Request<"lre.action"> {
   source: "palette" | "map" | "command" | "chip";
   /** Optional user-visible text for the appended message. */
   text?: string;
-  /** Play it at once rather than stage it (the staged action's Send now). */
+  /** Play it at once as a turn rather than stage it or do it off screen (the staged action's Send now). */
   now?: boolean;
+  /** Done at once, off screen, for an action of the table that only its surface does so (Gear → Manage's gear actions). */
+  offstage?: true;
+  /** Whether the next turn's narrator is told of the action done off screen; absent, Settings → Narrator → Out-of-play actions decides by its group. */
+  tell?: boolean;
 }
 
 export interface ChipRequest extends Request<"lre.chip"> {
@@ -139,9 +147,11 @@ export interface ViewOpenRequest extends Request<"lre.view.open"> {
  * A ✎ fix on the head, written as a `post` entry of kind `fix`: one typed `set` of a field
  * (`EditOp`; locked fields are refused), the clock set to `time`, a date and time of day in the
  * world's calendar (`YYYY-MM-DD HH:MM`) at the POV's place, as the HUD reads it (DESIGN §9.2, §12),
- * or the next hint the player has earned at a quest log row opened (`hint`, the row's id: DESIGN §10).
+ * the next hint the player has earned at a quest log row opened (`hint`, the row's id: DESIGN §10),
+ * or a change to one of the player's own things (`thing`: `fix_item`, under the player's rules).
+ * `undo` is the chip of the entry just written, null while it waits for a reply in flight.
  */
-export type FixRequest = Request<"lre.fix"> & { chatId: ChatId } & ({ entity: EntityId; field: FieldId; value: JsonValue } | { time: string } | { hint: string });
+export type FixRequest = Request<"lre.fix"> & { chatId: ChatId } & ({ entity: EntityId; field: FieldId; value: JsonValue } | { time: string } | { hint: string } | { thing: ItemFix });
 
 /**
  * One typed edit (DESIGN §7 GM edits, §12 ✎ fixes). Each is checked against what it touches (a
@@ -219,6 +229,18 @@ export const EDIT_OPS_MAX = 64;
 /** The GM view's data (DESIGN §7), asked for when the GM view opens: never in a state push. */
 export interface GmRequest extends Request<"lre.gm"> {
   chatId: ChatId;
+}
+
+/**
+ * One part of the GM view (DESIGN §7), built alone (`GmPartView`): a client reading one part (the
+ * MCP server's `lre_gm`) needn't have the whole view built and sent. With `id`, of `entities`,
+ * `money` or `orgs` only that one, by its id or its name (an ambiguous name is refused, listing the
+ * ids). `outline` (`GM_OUTLINE`) reads how many each part holds instead (`GmOutline`).
+ */
+export interface GmPartRequest extends Request<"lre.gm.part"> {
+  chatId: ChatId;
+  part: GmPart | typeof GM_OUTLINE;
+  id?: string;
 }
 
 /**
@@ -1161,6 +1183,7 @@ export type FrontendToBackend =
   | FixRequest
   | EditRequest
   | GmRequest
+  | GmPartRequest
   | SectionsRequest
   | MarkerRequest
   | KeepRequest
@@ -1237,20 +1260,22 @@ export interface ResultBodies {
   "lre.state.resync": { accepted: true };
   "lre.restart": { start: boolean };
   "lre.page": { accepted: true };
-  /** The player's message the action plays as; for a mechanical action sent with no words (`ActionDef.mechanical`), its bookkeeping recorded on the head with no message and no reply (`pending` while a reply is in flight); or, staged for the next message, whether it is staged now (false: the same tap cleared it). */
-  "lre.action": { messageId: MessageId } | { applied: true; pending: boolean } | { staged: boolean };
-  "lre.chip": { applied: boolean; pending: boolean };
-  "lre.view.open": { materialized: boolean; pending: boolean };
-  "lre.fix": { pending: boolean };
+  /** The player's message the action plays as; for an action done at once, off screen (DESIGN §11), its bookkeeping recorded on the head with no message and no reply (`pending` while a reply is in flight, `queued` what the held write waits on; `undo` its chip, null while pending); or, staged for the next message, whether it is staged now (false: the same tap cleared it). */
+  "lre.action": { messageId: MessageId } | { applied: true; pending: boolean; queued?: QueuedOn; undo?: string | null } | { staged: boolean };
+  /** With `pending`, `queued` says what the held write waits on (engine, page or reply), as on every write's answer. */
+  "lre.chip": { applied: boolean; pending: boolean; queued?: QueuedOn };
+  "lre.view.open": { materialized: boolean; pending: boolean; queued?: QueuedOn };
+  "lre.fix": { pending: boolean; queued?: QueuedOn; undo?: string | null };
   /** `undo`: the chip that undoes the edit just written (the chat's GM edit chip for it), null while it waits for a reply in flight or when it changed nothing. */
-  "lre.edit": { pending: boolean; undo: string | null };
+  "lre.edit": { pending: boolean; queued?: QueuedOn; undo: string | null };
   "lre.gm": GmView;
+  "lre.gm.part": GmPartAnswer;
   /** Every section in prompt order, and the section budget: the shared one, what the sent sections spend of it, and the Minds section's own. */
   "lre.sections": { sections: SectionPreview[]; budget: { sections: number; used: number; minds: number } };
   /** The chat's state view now, and its activity line (null when idle). */
   "lre.state.get": { view: StateView; activity: Activity | null };
-  "lre.marker": { pending: boolean; preview?: MarkerPreview };
-  "lre.keep": { pending: boolean };
+  "lre.marker": { pending: boolean; queued?: QueuedOn; preview?: MarkerPreview };
+  "lre.keep": { pending: boolean; queued?: QueuedOn };
   "lre.settings.get": SettingsResult;
   "lre.settings.set": SettingsResult;
   "lre.settings.caveats": { caveats: { code: string; message: string }[] };

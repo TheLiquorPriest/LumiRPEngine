@@ -138,3 +138,29 @@ describe('"key" never names a turkey sandwich', () => {
     expect(hasItem(w.ctx, JORDAN, "torque wrench")).toBe(false);
   });
 });
+
+describe("the names the world's sizes by name give a thing its row names no other way (N3)", () => {
+  /** Port Alder, its price catalog an older copy with no aliases column and rows of its own; a refrigerator and two TVs of those rows on Jordan. */
+  function bought(): Working {
+    return portAlder(
+      [thing("fridge", "Refrigerator", { catalog: "pa_fridge", owner: JORDAN }, [{ type: "in", to: JORDAN }]), thing("tv_a", "Flat-screen television, 55 in", { catalog: "pa_tv", owner: JORDAN }, [{ type: "in", to: JORDAN }]), thing("tv_b", "Flat-screen television, 55 in", { catalog: "pa_tv", owner: JORDAN }, [{ type: "in", to: JORDAN }]), thing("remote", "TV remote", { catalog: "pa_remote", owner: JORDAN }, [{ type: "in", to: JORDAN }])],
+      (world) => {
+        const catalog = world.tables["economy.catalog"];
+        if (!catalog) throw new Error("no catalog");
+        delete catalog.columns.aliases;
+        for (const row of Object.values(catalog.rows)) delete row.aliases;
+        catalog.rows.pa_fridge = { name: "Refrigerator", category: "household_goods", unit: "each" };
+        catalog.rows.pa_tv = { name: "Flat-screen television, 55 in", category: "electronics", unit: "each" };
+        catalog.rows.pa_remote = { name: "TV remote", category: "electronics", unit: "each" };
+      },
+    );
+  }
+
+  test('"the fridge" is the refrigerator, and "the TVs" both televisions, never the remote', () => {
+    const w = bought();
+    expect(resolveThing(w.ctx, "the fridge", { actor: JORDAN, viewer: JORDAN })).toEqual({ id: "fridge", secret: false });
+    expect(findThings(w.ctx, "the TVs", { actor: JORDAN, viewer: JORDAN }).filter((c) => c.full).map((c) => c.id)).toEqual(["tv_a", "tv_b"]);
+    expect(resolveThing(w.ctx, "the TV", { actor: JORDAN, viewer: JORDAN })).toEqual({ ambiguous: ["tv_a", "tv_b"], secret: [] });
+    expect(resolveThing(w.ctx, "the television", { actor: JORDAN, viewer: JORDAN })).toEqual({ ambiguous: ["tv_a", "tv_b"], secret: [] });
+  });
+});

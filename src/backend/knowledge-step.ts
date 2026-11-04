@@ -18,17 +18,24 @@
 //                     a fact the chat holds or another of the turn's calls made is that fact, its
 //                     learners joining those who hold it; a witnessing reaches everyone there
 //                     throughout but whom the answer says missed it, and no one there for only part
-//                     of the turn; a teller holds what they tell; an inference rests only on facts
-//                     its person holds and lines of their own witness log; a confidence runs from 0
-//                     to 1. An inference under the threshold is kept, as a suspicion. Within the
-//                     user's limits (`factsPerTurn`, `learningsPerTurn`, `factsPerChat`, `holdersPerFact`,
-//                     `claimChars`). It returns the learnings of everyone but the player character as
+//                     of the turn; a teller holds what they tell, and one there throughout witnessed
+//                     what the turn made; an inference rests only on facts its person holds and lines
+//                     of their own witness log; a confidence runs from 0 to 1. An inference under the
+//                     threshold is kept, as a suspicion. Within the user's limits (`factsPerTurn`,
+//                     `learningsPerTurn`, `factsPerChat`, `holdersPerFact`, `claimChars`): a new fact
+//                     is charged, and kept, only once a learning lands on it; one no one learns is
+//                     counted (`unlearned`), never made. Tellings are checked after everything else
+//                     the answer learned. Every learner it names is recorded or counted: one with a
+//                     call of their own (`own_call`), one no call is about (`not_this_call`). It
+//                     returns the learnings of everyone but the player character as
 //                     events, each whole with the facts it names that the turn didn't start with, and
 //                     the player character's own as `learn` and `reveal` changes (C4), whose modes decide
 //                     them (`backend/runtime.ts`). With knowledge on, telling is this step's alone: a told
 //                     learning adds the listener's `told` witness entry, and the memory step records none.
 // Every name the model gives is resolved to someone in the world (`named`), "you" being the player
-// character, who never infers or doubts here: what they make of things is the player's.
+// character, who never infers or doubts here: what they make of things is the player's. A lore id
+// (a world lore entry, a book entry or its mark, by its short id too) names the chat's fact of it
+// (`lore`); one the chat holds no fact of is refused, and nothing is made of its prose.
 
 import type { Counts, KnowledgeRefusal } from "../shared/agent-yield";
 import type { EntityId, MessageId } from "../shared/ids";
@@ -77,6 +84,10 @@ export interface KnowledgeTurn {
   pinned: readonly string[];
   /** A person a model named: by id, whole name, or a word of their name no one else has. */
   named(name: string): EntityId | null;
+  /** Everyone a call of this step is about: after the reply everyone who could perceive the turn (the default), before the plan those a decision turns on. */
+  asked?: readonly EntityId[];
+  /** The fact each lore id the answer gave names (`loreRefs` in `backend/minds.ts`): a world lore entry's, a book entry's or one of its marks', by a short id (with `#n`), `bookId/entryId` or its lore id. */
+  lore?: ReadonlyMap<string, FactId>;
 }
 
 /** Everyone who could perceive the turn: the player character, then whoever was there, each once. */
@@ -103,9 +114,10 @@ function label(turn: Pick<KnowledgeTurn, "state" | "world" | "settings">, id: En
  * person's holdings, witness log and traits. Within `stepTokens`: what happened and who perceived it
  * come first, then every person's lines one round at a time (their best holding, their latest
  * witness line, their next…), so the limit cuts each person's least, and the reply's beginning goes
- * first when even that is over it.
+ * first when even that is over it. It says what the turn can still record (`stepBudget`): the new
+ * facts and learnings its limits leave, less what the calls before this one spent.
  */
-export function knowledgeContext(turn: KnowledgeTurn, batch: readonly EntityId[], spent: Pick<KnowledgeSpent, "facts"> = knowledgeSpent()): string {
+export function knowledgeContext(turn: KnowledgeTurn, batch: readonly EntityId[], spent: Pick<KnowledgeSpent, "facts" | "learnings"> = knowledgeSpent()): string {
   const { world, state, settings, presence } = turn;
   const text = (id: KnowledgeTextId): string => knowledgeText(settings, id);
   const cal = calendarOf(world);
@@ -156,6 +168,10 @@ export function knowledgeContext(turn: KnowledgeTurn, batch: readonly EntityId[]
     const traits = id === pov ? [] : sheetLines({ reg: turn.reg, world, state, who: id });
     return { id, traits, holdings, witness };
   });
+  // What the turn can still record: a new fact counts once someone learns it, against the turn's limit and the chat's.
+  const claims = Object.values(readKnowledge(turn.before).facts).filter((f) => f.kind === "claim").length;
+  const left = (n: number): string => String(Math.max(0, n));
+  const budget = fillText(text("stepBudget"), { facts: left(settings.factsPerTurn - spent.facts.size), chat: left(settings.factsPerChat - claims - spent.facts.size), learnings: left(settings.learningsPerTurn - spent.learnings) });
   const render = (reply: string, taken: Map<EntityId, { holdings: number; witness: number }>): string =>
     [
       happened(reply),
@@ -163,6 +179,7 @@ export function knowledgeContext(turn: KnowledgeTurn, batch: readonly EntityId[]
       block(text("stepFacts"), factLines),
       block(text("stepMade"), madeLines),
       factLines.length + madeLines.length > 0 ? text("stepReuse") : "",
+      budget,
       block(text("stepPinned"), turn.pinned),
       block(
         text("stepPeople"),
@@ -212,21 +229,24 @@ const str = (v: JsonValue | undefined): string => (typeof v === "string" ? v.tri
 const list = (v: JsonValue | undefined): JsonValue[] => (Array.isArray(v) ? v : []);
 
 /**
- * What a turn's knowledge step has spent of its limits, across its calls: the new facts it made, by
- * what each says (`claimKey`), which each later call reads (`knowledgeContext`) and may name by id,
- * and which one that makes a fact again in the same words names, spending nothing (`factsPerTurn`,
- * `factsPerChat`); its learnings (`learningsPerTurn`), and the facts whose witnessing it has
- * charged, each once in the turn, however many calls give it.
+ * What a turn's knowledge step has spent of its limits, across its calls: the new facts learnings
+ * landed on, by what each says (`claimKey`), which each later call reads (`knowledgeContext`) and may
+ * name by id, and which one that makes a fact again in the same words names, spending nothing
+ * (`factsPerTurn`, `factsPerChat`); the new facts its calls made that no learning has landed on
+ * (`unlearned`, by `claimKey`), never charged or listed, which the step counts once its calls are
+ * done; its learnings (`learningsPerTurn`), and the facts whose witnessing it has charged, each once
+ * in the turn, however many calls give it.
  */
 export interface KnowledgeSpent {
   facts: Map<string, KnowledgeFact>;
+  unlearned: Map<string, KnowledgeFact>;
   learnings: number;
   witnessed: Set<FactId>;
 }
 
 /** A turn's knowledge step before its first call: nothing spent. */
 export function knowledgeSpent(): KnowledgeSpent {
-  return { facts: new Map(), learnings: 0, witnessed: new Set() };
+  return { facts: new Map(), unlearned: new Map(), learnings: 0, witnessed: new Set() };
 }
 
 /**
@@ -292,6 +312,10 @@ export function checkKnowledge(turn: KnowledgeTurn, batch: readonly EntityId[], 
     if (key !== "" && (there === undefined || count(f.id) > count(there) || (count(f.id) === count(there) && f.id < there))) said.set(key, f.id);
   }
   for (const [key, f] of spent.facts) said.set(key, f.id);
+  // One an earlier call made that no one learned yet keeps the id it was made with, when said again.
+  for (const [key, f] of spent.unlearned) if (!said.has(key)) said.set(key, f.id);
+  // The new facts this answer made, by id with what each says: none is charged until a learning lands on it (`fits`, `charge`).
+  const pending = new Map<FactId, string>();
   for (const f of list(raw.facts)) {
     if (!isRecord(f)) continue;
     const claim = capText(str(f.claim), settings.claimChars);
@@ -307,10 +331,7 @@ export function checkKnowledge(turn: KnowledgeTurn, batch: readonly EntityId[], 
         refuse("matters", `a new fact that doesn't say why it matters, or to whom: "${claim}"`);
         continue;
       }
-      if (spent.facts.size >= settings.factsPerTurn || claims + spent.facts.size >= settings.factsPerChat) {
-        refuse("facts_limit", `a new fact past the limit of new facts a turn or a chat: "${claim}"`);
-        continue;
-      }
+      // The turn's and the chat's limits are checked once a learning lands on it (`fits`).
       const about = [...new Set(list(f.about).flatMap((n) => {
         const name = str(n);
         const person = name === "" ? null : who(name);
@@ -320,7 +341,8 @@ export function checkKnowledge(turn: KnowledgeTurn, batch: readonly EntityId[], 
       const truth: FactTruth = (FACT_TRUTHS as readonly string[]).includes(str(f.truth)) ? (str(f.truth) as FactTruth) : "true";
       const fact: KnowledgeFact = { id, kind: "claim", claim, about, truth, source: { msg: turn.messageId, at }, matters };
       facts.set(id, fact);
-      spent.facts.set(key, fact);
+      pending.set(id, key);
+      spent.unlearned.set(key, fact);
       said.set(key, id);
     }
     // Only a fact the turn may name is the answer's to refer to by its ref.
@@ -328,10 +350,44 @@ export function checkKnowledge(turn: KnowledgeTurn, batch: readonly EntityId[], 
     if (ref !== "") refs.set(ref, id);
     written.set(id, str(f.claim));
   }
+  // A fact the answer gave (by its ref) or the chat holds (by its id); a lore id names the chat's fact of its entry.
   const factOf = (v: JsonValue | undefined): FactId | null => {
     const id = idOf(v);
-    return refs.get(id) ?? (facts.has(id) ? id : null);
+    const lore = turn.lore?.get(id);
+    return refs.get(id) ?? (facts.has(id) ? id : lore !== undefined && facts.has(lore) ? lore : null);
   };
+  /** Why a learning, an inference or a doubt names no fact: a lore entry the chat holds no fact of gets its guidance; anything else is `kind`. */
+  const unknown = (v: JsonValue | undefined, kind: KnowledgeRefusal, why: string): void => {
+    const lore = turn.lore?.get(idOf(v));
+    if (lore === undefined || facts.has(lore)) refuse(kind, why);
+    else refuse("lore_entry", `${idOf(v)} names a lore entry the chat holds no fact of (${lore}), and nothing is made of an entry's prose: make what was learned a new fact in the answer's own words`);
+  };
+  // A new fact is charged once, when the first learning lands on it, whoever learns it: the turn's limit and the chat's are checked then.
+  const fits = (ids: readonly string[], label: string): boolean => {
+    const fresh = new Set(ids.filter((id) => pending.has(id))).size;
+    if (fresh === 0) return true;
+    if (spent.facts.size + fresh > settings.factsPerTurn) {
+      refuse("facts_limit", `a new fact past this turn's limit of ${settings.factsPerTurn} new facts: ${label}`);
+      return false;
+    }
+    if (claims + spent.facts.size + fresh > settings.factsPerChat) {
+      refuse("facts_chat", `a new fact past this chat's limit of ${settings.factsPerChat} facts made in play: ${label}`);
+      return false;
+    }
+    return true;
+  };
+  const charge = (ids: readonly string[]): void => {
+    for (const id of ids) {
+      const key = pending.get(id);
+      const fact = facts.get(id);
+      if (key === undefined || !fact) continue;
+      pending.delete(id);
+      spent.unlearned.delete(key);
+      spent.facts.set(key, fact);
+    }
+  };
+  // A fact the turn made: by this answer, or by the turn's calls before it.
+  const madeNow = (id: FactId): boolean => pending.has(id) || [...spent.facts.values()].some((f) => f.id === id);
   // What a learning needs besides itself: each fact it names that the turn didn't start with.
   const carried = (ids: readonly string[]): KnowledgeFact[] => ids.flatMap((id) => (own(begun, id) === undefined && facts.has(id) ? [facts.get(id) as KnowledgeFact] : []));
   // What the player character learns reaches their screens, as the chip's words and in What you know
@@ -344,10 +400,11 @@ export function checkKnowledge(turn: KnowledgeTurn, batch: readonly EntityId[], 
   // a witnessing, which reaches everyone there, once for its fact, which its caller charges (`whole`).
   const record = (data: LearnEventData, label: string, whole = false): void => {
     const learners = whole ? data.who : data.who.slice(0, Math.max(0, settings.learningsPerTurn - spent.learnings));
-    if (learners.length < data.who.length) refuse("learnings_limit", `learnings past the limit a turn: ${label}`);
+    if (learners.length < data.who.length) refuse("learnings_limit", `learnings past this turn's limit of ${settings.learningsPerTurn} learnings: ${label}`);
     if (learners.length === 0) return;
     if (!whole) spent.learnings += learners.length;
     const needs = carried([data.fact, ...data.evidence.filter((ref) => !isWitnessRef(ref))]);
+    charge(needs.map((f) => f.id));
     const line = learnedWitness(data);
     for (const id of learners) {
       heldBy(id).set(data.fact, { how: data.how, by: data.by, evidence: data.evidence, since: { msg: data.msg, at: data.at }, belief: data.belief, confidence: data.confidence, ...(data.keptFrom ? { keptFrom: data.keptFrom } : {}) });
@@ -388,17 +445,24 @@ export function checkKnowledge(turn: KnowledgeTurn, batch: readonly EntityId[], 
   const holders = (fact: FactId): number => [...new Set([...Object.keys(k.holdings).filter((id) => own(own(k.holdings, id) ?? {}, fact) !== undefined), ...[...holding].filter(([, h]) => h.has(fact)).map(([id]) => id)])].length;
   // Who was there for only part of the turn: whoever left partway, or came in during it or was met at its end.
   const partTime = (id: EntityId): boolean => id !== pov && (turn.presence.left.includes(id) || ((turn.presence.met?.who ?? []).includes(id) && !turn.presence.said.who.includes(id)));
-  for (const l of list(raw.learned)) {
+  // Whom some call of this step is about: one there whom this call isn't about has their own call, or none.
+  const asked = new Set(turn.asked ?? perceivers(turn));
+  // Tellings last: a teller may be one of those the answer has witness the fact, further down it.
+  const learned = list(raw.learned);
+  for (const l of [...learned.filter((x) => !isRecord(x) || x.how !== "told"), ...learned.filter((x) => isRecord(x) && x.how === "told")]) {
     if (!isRecord(l)) continue;
     const fact = factOf(l.fact);
     const how = l.how === "told" ? "told" : l.how === "witnessed" ? "witnessed" : null;
     if (fact === null || how === null) {
-      refuse("no_fact", `a learning of a fact the step didn't give or make, or not witnessed or told: ${JSON.stringify(l.fact ?? null)}`);
+      unknown(l.fact, "no_fact", `a learning of a fact the step didn't give or make, or not witnessed or told: ${JSON.stringify(l.fact ?? null)}`);
       continue;
     }
     const claim = facts.get(fact)?.claim ?? fact;
     const by = how === "told" ? who(str(l.by)) : null;
-    const teller = by === null ? undefined : heldBy(by).get(fact);
+    // A teller there throughout the turn witnessed what the turn made, though a call about someone
+    // else never records it of them: they hold it as a witness would, for this telling.
+    const witnessed: Holding | undefined = by !== null && madeNow(fact) && present.has(by) && !partTime(by) ? { how: "witnessed", by: null, evidence: [], since: { msg: turn.messageId, at }, belief: facts.get(fact)?.truth === "open" ? "uncertain" : "true", confidence: 1 } : undefined;
+    const teller = by === null ? undefined : (heldBy(by).get(fact) ?? witnessed);
     if (how === "told" && (by === null || teller === undefined)) {
       refuse("teller", `${by === null ? "a telling with no teller in the world" : `${nameOf(by)} told what they don't hold`}: "${claim}"`);
       continue;
@@ -450,8 +514,12 @@ export function checkKnowledge(turn: KnowledgeTurn, batch: readonly EntityId[], 
         refuse("absent", `neither ${nameOf(id)} nor ${nameOf(by ?? "")} was there for the telling: "${claim}"`);
         continue;
       }
-      // A call about one person answers for them alone; one about the scene, for everyone there and anyone a teller there reached.
-      if (!batch.includes(id) && (present.has(id) || settings.batch === "character")) continue;
+      // A call about one person answers for them alone, and one about the scene for everyone there;
+      // someone who perceived nothing is told from whichever call has the telling.
+      if (!batch.includes(id) && present.has(id)) {
+        refuse(asked.has(id) ? "own_call" : "not_this_call", `${nameOf(id)} ${asked.has(id) ? "is left to their own call" : "isn't someone the step's calls are about"}: "${claim}"`);
+        continue;
+      }
       let target = fact;
       if (id === pov) {
         mine ??= forPov(fact);
@@ -473,13 +541,14 @@ export function checkKnowledge(turn: KnowledgeTurn, batch: readonly EntityId[], 
       learning.set(id, target);
     }
     if (learning.size === 0) continue;
+    if (!fits([...learning.values()], `"${claim}"`)) continue;
     // A witnessing counts once in the turn, however many were there and however many calls give it
     // (one per person, `batch: "character"`): a crowded scene's never crowds out the tellings and
     // secrets after it, and never reaches some of those there but not the rest.
     const whole = how === "witnessed";
     if (whole && !spent.witnessed.has(fact)) {
       if (spent.learnings >= settings.learningsPerTurn) {
-        refuse("learnings_limit", `learnings past the limit a turn: "${claim}"`);
+        refuse("learnings_limit", `learnings past this turn's limit of ${settings.learningsPerTurn} learnings: "${claim}"`);
         continue;
       }
       spent.learnings += 1;
@@ -513,7 +582,9 @@ export function checkKnowledge(turn: KnowledgeTurn, batch: readonly EntityId[], 
     const fact = factOf(i.fact);
     const claim = fact === null ? str(i.fact) : (facts.get(fact)?.claim ?? fact);
     if (id === null || fact === null || id === pov || !batch.includes(id)) {
-      refuse("inference", `an inference by no one the step was about, of no fact it gave or made, or by the player character: "${claim}"`);
+      const why = `an inference by no one the step was about, of no fact it gave or made, or by the player character: "${claim}"`;
+      if (fact === null) unknown(i.fact, "inference", why);
+      else refuse("inference", why);
       continue;
     }
     if (!isConfidence(i.confidence)) {
@@ -538,6 +609,7 @@ export function checkKnowledge(turn: KnowledgeTurn, batch: readonly EntityId[], 
       continue;
     }
     const belief: HoldingBelief = (HOLDING_BELIEFS as readonly string[]).includes(str(i.belief)) ? (str(i.belief) as HoldingBelief) : "true";
+    if (!fits([fact], `"${claim}"`)) continue;
     // Under the threshold it is kept as it is: a suspicion (`isSuspicion`).
     record({ who: [id], fact, how: "inferred", by: null, evidence: [...new Set(evidence)], belief, confidence: i.confidence, ...(already?.keptFrom ? { keptFrom: already.keptFrom } : {}), msg: turn.messageId, at }, `"${claim}"`);
   }
@@ -548,7 +620,9 @@ export function checkKnowledge(turn: KnowledgeTurn, batch: readonly EntityId[], 
     const held = id !== null && fact !== null ? heldBy(id).get(fact) : undefined;
     const claim = fact === null ? str(d.fact) : (facts.get(fact)?.claim ?? fact);
     if (id === null || fact === null || id === pov || !batch.includes(id) || !held) {
-      refuse("doubt", `a doubt of what they don't hold, or the player character's: "${claim}"`);
+      const why = `a doubt of what they don't hold, or the player character's: "${claim}"`;
+      if (fact === null) unknown(d.fact, "doubt", why);
+      else refuse("doubt", why);
       continue;
     }
     if (!isConfidence(d.confidence)) {

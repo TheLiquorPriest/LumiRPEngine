@@ -12,6 +12,7 @@
 import type { ComponentChildren } from "preact";
 import { useId, useState } from "preact/hooks";
 import { useApp } from "../../../frontend/app";
+import { toastQueued } from "../../../frontend/queued";
 import { OverflowMenu } from "../../../frontend/build/chrome";
 import { Chip, RefPicker } from "../../../frontend/build/form-kit";
 import { Badge, Button, Card, Disclosure, Empty, Field, JsonView, List, ListRow, Section, Seg, useBusy } from "../../../frontend/components";
@@ -409,7 +410,7 @@ export function OrgPlanTab(props: OrgTabProps) {
     }
     run(async () => {
       const result = await app.request({ type: "lre.action", chatId: props.chatId, action: change.action, params: change.params, source: "palette" });
-      if (result && "pending" in result && result.pending) app.toast("Saved — it applies when the reply finishes.", "info");
+      if (result && "pending" in result) toastQueued(app, result);
       if (result) done?.();
     });
   };

@@ -135,7 +135,7 @@ describe("a typed skip to Friday at 6 PM", () => {
     rig.rt.beatMinds = minds;
     reading = { action: "timelapse", params: { at: "2026-09-18 18:00" }, confidence: 0.9 };
     await rig.turn(chatId, "I put in my shifts at the garage all week. Skip ahead to Friday at 6 PM.", "The week goes by.");
-    expect(prompts.at(-1)).toContain('or at a stated day and time, as "YYYY-MM-DD HH:MM" (it is now Mon 2026-09-14 06:');
+    expect(prompts.at(-1)).toContain('or at, only a stated day and time, written exactly "YYYY-MM-DD HH:MM" (it is now Mon 2026-09-14 06:');
     const { state, record } = await folded(rig, chatId);
     expect(record?.status).toBe("ok");
     expect(state.clock).toBe(friday);

@@ -3,16 +3,23 @@
 // elsewhere with where each is, what it has lent out and what it has borrowed, as item trees sorted
 // by `gearOf`. Each item says whose it is, why the POV has it, where it is kept and where it is now,
 // as the POV may know them. Gear 1 shows only things in play on it and elsewhere (`inPlay`); what
-// changed hands always shows. Kits and slots from Gear 3.
+// changed hands always shows. Kits and slots from Gear 3. Manage's groups, derived and never stored:
+// the outfit (worn, by slot), what is carried and not worn, the wardrobe (their clothing at home, by
+// what keeps it), and the things where they are (furnishings, what lies loose, what is in holders
+// they may use); below Gear 3 everything on them is carried.
 
-import type { EntityId } from "../../../shared/ids";
-import { gotOf, type GotHow } from "../../../shared/things";
+import type { EntityId, PlaceId } from "../../../shared/ids";
+import { gotOf, type GotHow, type Size, type SizeClass } from "../../../shared/things";
 import type { ReadContext } from "../../../engine/registry";
+import { accessFor } from "../../../engine/access";
 import { calendarOf, formatClock } from "../../../engine/calendar";
 import { numOf, strOf, own } from "../../../engine/pack-kit";
+import { together } from "../../../engine/presence";
 import { readPass } from "../../../engine/read-pass";
+import { isGone, placeOfEntity, placeWithin } from "../../../engine/scope";
+import { thingIndex } from "../../../engine/thing-index";
 import { canSeeEntity, canSeePlace } from "../../../engine/visibility";
-import { contentsOf, holderOf, holdersOf, restOf, whoseOf } from "../../../engine/things";
+import { contentsOf, holderOf, holdersOf, holdsOf, keptCategoryOf, mayFixThing, possessorOf, restOf, sizeOf, slotOf, whoseOf } from "../../../engine/things";
 import { whereWords, whoseWords } from "../../../engine/thing-words";
 import { gearOf, inPlay, wornAs, type GrantOn, type WornAs } from "./feed";
 import { kitStatus, loadOf } from "./model";
@@ -25,6 +32,14 @@ export interface GearItem {
   slot?: string;
   /** How it is on you, where slots are tracked (Gear 3): worn, in a pocket, in hand. */
   as?: WornAs;
+  /** Its size (ITEMS-SPEC §4.1), when anything gives it. */
+  size?: SizeClass;
+  /** The largest size it takes, for what holds things: somewhere to Put it in. */
+  holds?: Size;
+  /** It is worn in a slot, where slots are tracked (Gear 3). */
+  wearable?: true;
+  /** Yours to move or change: yours (or your household's), or nobody's here at a place you own or live in (`mayFixThing`). */
+  mine?: true;
   load?: { used: number; capacity: number; unit: "l" };
   kit?: { complete: boolean; present: number; total: number; missing: string[] };
   /** Whose it is, as you may know it ("yours", "Danny Okafor's", "nobody's"). */
@@ -42,6 +57,27 @@ export interface GearItem {
   children?: GearItem[];
 }
 
+/** A holder Manage names: its id and name. */
+export interface GearHolder {
+  id: EntityId;
+  name: string;
+}
+
+/** The player character's clothing at home kept in one holder (a wardrobe, a dresser), or lying loose there (`holder` null), and the name of where it is. */
+export interface WardrobeGroup {
+  holder: GearHolder | null;
+  where: string;
+  items: GearItem[];
+}
+
+/** The things where the player character is: the furnishings (Furniture or larger), what lies loose, and what is in each holder here they may use. */
+export interface GearHere {
+  place: string;
+  room: GearItem[];
+  lying: GearItem[];
+  inside: { holder: GearHolder; items: GearItem[] }[];
+}
+
 export interface GearView {
   level: number;
   /** Yours on you: worn, in your pockets and hands, in your bags. */
@@ -54,6 +90,14 @@ export interface GearView {
   lent: GearItem[];
   /** On loan or assigned to you. */
   borrowed: GearItem[];
+  /** What you wear or have in hand, by slot (Gear 3), with what is in it; empty below Gear 3. */
+  outfit: GearItem[];
+  /** What is on you and not worn, with what is in it; below Gear 3, everything on you. */
+  carried: GearItem[];
+  /** Your clothing at home, by what keeps it (Gear 3); empty below Gear 3. */
+  wardrobe: WardrobeGroup[];
+  /** The things where you are; null when you are nowhere. */
+  here: GearHere | null;
 }
 
 /** How a thing came to its possessor (`got.how`), said to the player character as the one who has it; `from` names whom it came from. */
@@ -113,6 +157,12 @@ export function buildGearView(ctx: ReadContext): GearView {
       if (level >= 3 && strOf(e.fields.slot) && onYou(id)) out.slot = strOf(e.fields.slot).replace(/_/g, " ");
       const as = level >= 3 ? wornAs(ctx, id, pov) : null;
       if (as) out.as = as;
+      const size = sizeOf(ctx, id).size;
+      if (size !== "unknown") out.size = size;
+      const holds = holdsOf(ctx, id);
+      if (holds !== null) out.holds = holds;
+      if (level >= 3 && slotOf(ctx, e.fields) !== null) out.wearable = true;
+      if (mayFixThing(ctx, pov, id)) out.mine = true;
       if (level >= 2 && typeof e.fields.capacity_l === "number") {
         const load = loadOf(ctx.state, id);
         out.load = { used: Math.round(load.usedL * 100) / 100, capacity: load.capacityL ?? 0, unit: "l" };
@@ -141,6 +191,59 @@ export function buildGearView(ctx: ReadContext): GearView {
     const roots = (ids: readonly EntityId[]): EntityId[] => ids.filter((id) => !ids.includes(holderOf(ctx.state, id) ?? ""));
     // On you is your own things only: someone else's in your bag is in Holding for others or Borrowed, with what it is in.
     const yoursShown = (id: EntityId): boolean => gear.on.includes(id) && shown(id);
+    // Manage's groups. The outfit: what you wear or hold in hand, by the slots' order (what is in a pocket is carried); carried is the rest on you.
+    const slots = Object.keys(ctx.tables.get("gear.slots")?.rows ?? {});
+    const wornSlot = (id: EntityId): string | null => {
+      const r = own(ctx.state.entities, id)?.relations.find((x) => (x.type === "worn_by" || x.type === "equipped") && x.to === pov);
+      const slot = !r ? null : typeof r.fields?.slot === "string" && r.fields.slot !== "" ? r.fields.slot : (slotOf(ctx, own(ctx.state.entities, id)?.fields ?? {}) ?? "worn");
+      return slot === "pocket" || slot === "pocket_or_bag" ? null : slot;
+    };
+    const mine = contentsOf(ctx.state, pov).filter(shown);
+    const slotRank = (slot: string): number => (slots.includes(slot) ? slots.indexOf(slot) : slots.length);
+    const outfit = (level < 3 ? [] : mine)
+      .flatMap((id) => {
+        const slot = wornSlot(id);
+        return slot !== null ? [{ id, slot }] : [];
+      })
+      .sort((a, b) => slotRank(a.slot) - slotRank(b.slot) || a.id.localeCompare(b.id));
+    const outfitIds = new Set(outfit.map((o) => o.id));
+    const home = own(ctx.state.entities, pov)?.fields.home;
+    const homePlace = typeof home === "string" && own(ctx.world.places, home) ? home : null;
+    const atHome = (place: PlaceId | null): boolean => place !== null && homePlace !== null && placeWithin(ctx.world, place, homePlace) && together(ctx.world, place, homePlace);
+    const placeName = (place: PlaceId): string => own(ctx.world.places, place)?.name ?? place;
+    // The wardrobe: your clothing at home that nobody has, by what holds it, loose last.
+    const wardrobe: WardrobeGroup[] = [];
+    if (level >= 3 && homePlace !== null) {
+      const groups = new Map<string, WardrobeGroup>();
+      for (const id of thingIndex(ctx).things) {
+        const e = own(ctx.state.entities, id);
+        if (!e || isGone(ctx.state, id) || !listed(id) || possessorOf(ctx, id) !== null || keptCategoryOf(ctx, e.fields) !== "clothing" || !whoseOf(ctx, id).owners.includes(pov)) continue;
+        const at = placeOfEntity(ctx.state, id);
+        if (!atHome(at) || at === null) continue;
+        const holder = holderOf(ctx.state, id);
+        const by = holder !== null && see(holder) ? holder : null;
+        const key = by ?? `place:${at}`;
+        const group = groups.get(key) ?? { holder: by !== null ? { id: by, name: nameOf(by) } : null, where: placeName(placeOfEntity(ctx.state, by ?? id) ?? at), items: [] };
+        group.items.push(item(id, 0, listed));
+        groups.set(key, group);
+      }
+      wardrobe.push(...[...groups.values()].sort((a, b) => Number(a.holder === null) - Number(b.holder === null) || (a.holder?.name ?? a.where).localeCompare(b.holder?.name ?? b.where)));
+    }
+    // Where you are: what lies here, the furnishings apart, and what is in what holds things here that you may use.
+    const herePlace = placeOfEntity(ctx.state, pov);
+    let here: GearHere | null = null;
+    if (herePlace !== null && canSeePlace(ctx.registry, ctx.world, ctx.state, pov, herePlace)) {
+      const loose = (thingIndex(ctx).loose.get(herePlace) ?? []).filter((id) => listed(id) && !isGone(ctx.state, id));
+      const big = (id: EntityId): boolean => {
+        const size = sizeOf(ctx, id).size;
+        return size === "furniture" || size === "builtin" || size === "part" || size === "vehicle";
+      };
+      const inside = loose.filter((id) => holdsOf(ctx, id) !== null && accessFor(ctx, pov, id).use !== null).flatMap((id) => {
+        const items = contentsOf(ctx.state, id).filter(listed).map((kid) => item(kid, 0, listed));
+        return items.length > 0 ? [{ holder: { id, name: nameOf(id) }, items }] : [];
+      });
+      here = { place: placeName(herePlace), room: loose.filter(big).map((id) => item(id, 0, listed)), lying: loose.filter((id) => !big(id)).map((id) => item(id, 0, listed)), inside };
+    }
     return {
       level,
       on: contentsOf(ctx.state, pov)
@@ -159,6 +262,10 @@ export function buildGearView(ctx: ReadContext): GearView {
         const where = onYou(g.thing) ? inside(g.thing) : away(g.thing);
         return where !== undefined ? { ...out, where } : out;
       }),
+      outfit: outfit.map(({ id, slot }) => ({ ...item(id, 0, shown), slot: slot.replace(/_/g, " ") })),
+      carried: mine.filter((id) => !outfitIds.has(id)).map((id) => item(id, 0, shown)),
+      wardrobe,
+      here,
     };
   });
 }

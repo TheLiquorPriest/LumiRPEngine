@@ -1,5 +1,5 @@
 // The read families' texts as shipped (AGENT-LOOP-PLAN §6; INC1-SPEC R3a): each tool's description
-// and its arguments', registry texts on the GM agent page (`shared/agent-tools.ts`). What each tool
+// and its arguments', registry texts on the Every agent page (`shared/agent-tools.ts`). What each tool
 // answers is `backend/agents/tools/read/<family>.ts`; every answer is filtered by the agent's
 // knowledge, so each description says what it gives without promising what a knowledge setting hides.
 
@@ -175,7 +175,7 @@ export const READ_TOOL_TEXTS: readonly ToolText[] = [
     family: "money",
     tier: "read",
     note: "Reads someone's money: accounts, balances, debts and how well off they are.",
-    text: "Someone's money: their accounts with each balance (a negative balance is owed), their cash, and how well off they are. Works for a person or a business; leave person out for the player character.",
+    text: "Someone's money: their accounts with each balance (a negative balance is owed), their cash, how well off they are, and their standing payments and income, each with where it came from (made: world, authored in the world, an Upgrade's among them, so no story set it up; play, set up in play; else the engine's own). Works for a person or a business; leave person out for the player character.",
     args: [{ path: "person", text: "Whose money: a person's or a business's id or name; leave it out for the player character's." }],
   },
   {
@@ -253,7 +253,7 @@ export const READ_TOOL_TEXTS: readonly ToolText[] = [
     tier: "read",
     note: "Says who knows a fact, and how.",
     text: "Who knows a fact. Find facts by words of what they claim, by a fact's id, or by a person, place, thing or quest they are about. Gives each fact with everyone who holds it: how they came by it and from whom, since when, what they take it to be, how sure they are, and whom they keep it from.",
-    args: [{ path: "about", text: "Words of the fact's claim, a fact id, or the id or name of a person, place, thing or quest it is about." }],
+    args: [{ path: "about", text: "Words of the fact's claim, a fact id, a lore entry's id (its short id, a mark's with #n, or bookId/entryId), or the id or name of a person, place, thing or quest it is about." }],
   },
   {
     name: "knowledge_what_knows",
@@ -263,7 +263,7 @@ export const READ_TOOL_TEXTS: readonly ToolText[] = [
     text: "What a person knows: each fact they hold, with how they came by it and from whom, since when, what they take it to be, how sure they are, and whom they keep it from.",
     args: [
       { path: "person", text: person },
-      { path: "about", text: "Only facts matching these words, or about this person, place, thing or quest; leave it out for all they know." },
+      { path: "about", text: "Only facts matching these words, of this lore entry (any id of it), or about this person, place, thing or quest; leave it out for all they know." },
     ],
   },
   // ---------------------------------------------------------------- time

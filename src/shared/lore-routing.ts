@@ -3,7 +3,7 @@
 // with nothing copied. Each entry goes by a short id: the World Info key of its own that matches the
 // tag pattern (`lr0101`), else one LRE gave it and keeps for good (`lre0001`, `backend/lore-ids.ts`).
 // Here: an index's shape, how an entry's tag and its holds line are read, and the registry texts it
-// is worded in (the GM agent page's "Lore index" group), each with a reset. Pure.
+// is worded in (the Every agent page's "Lore index" group), each with a reset. Pure.
 
 import type { PromptDef, PromptVar } from "./prompts";
 
@@ -83,7 +83,7 @@ const BOOKS: PromptVar = { name: "books", text: "a line per book, each as below"
 const ID: PromptVar = { name: "id", text: "the entry's short id: its tag, else the id LRE gave it", required: true };
 const TITLE: PromptVar = { name: "title", text: "the entry's title: its comment, else its first words" };
 
-/** The index's texts, on `page` (the GM agent page, beside the tools' texts and answers). */
+/** The index's texts, on `page` (the Every agent page, beside the tools' texts and answers). */
 export function loreIndexPrompts(page: string): PromptDef[] {
   return [
     {

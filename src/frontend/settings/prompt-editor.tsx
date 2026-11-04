@@ -2,7 +2,8 @@
 // Settings → Steps and connections and Settings → Agents → Prompts share, and the vars panel shown
 // beside every template editor (those, and Build's step templates), read from the one table of what
 // each step is given (`STEP_VARS`), or for a text of the prompts registry from its own placeholders
-// (`PromptDef.vars`, DESIGN §6.12). Styles: styles/minds.ts.
+// (`PromptDef.vars`, DESIGN §6.12). Every editor with a built-in compares the text as written with
+// it, line by line (`TextDiff`). Styles: styles/minds.ts.
 
 import type { ComponentChildren } from "preact";
 import { useEffect, useState } from "preact/hooks";
@@ -12,7 +13,7 @@ import { STEP_VARS, VAR_TEXT } from "../../shared/steps";
 import type { PromptVar } from "../../shared/prompts";
 import { placeholder } from "../../shared/prompts";
 import type { StepPurpose, StepTemplateDef } from "../../shared/world";
-import { Badge, Button, Disclosure } from "../components";
+import { Badge, Button, Disclosure, TextDiff } from "../components";
 import { Icon } from "../icons";
 
 /** Which step's placeholders: a purpose, or the skip plan. */
@@ -72,33 +73,81 @@ export function PromptVarsPanel(props: { vars: readonly PromptVar[] }) {
 }
 
 /**
+ * A prompt's heading: its name, what it does and its badges, read alike in its editor's summary and
+ * in a closed row of the Prompts page. Hook-free.
+ */
+export function PromptHead(props: { label: string; note: string; badges?: ComponentChildren }) {
+  return (
+    <span class="lre-minds-prompt-head">
+      <span class="lre-minds-prompt-text">
+        <span class="lre-minds-prompt-title">{props.label}</span>
+        <span class="lre-minds-prompt-sub">{props.note}</span>
+      </span>
+      {props.badges}
+    </span>
+  );
+}
+
+/**
  * One prompt of the user's own for a step: the text saved, else the built-in to start from, with
  * Save, Revert and Reset. Every step's editor reads alike: a line on what the prompt does, then, folded
- * and read-only, the built-in it replaces (`builtIn`) or, for a step whose prompt goes before
- * instructions it keeps, what those hold (`adds`), since they're made fresh each turn. `vars` is a
- * step's (its vars panel) or a registry text's own placeholders; `problems` says what is wrong with
- * the text as written (a placeholder it doesn't have, one it must keep), each shown under it. `save`
- * turns the text (null to reset) into the settings patch, or null when it can't be saved. `test`,
- * where the text can be tested (a role's, on Settings → Agents → Prompts), is its Test control for
- * the text as written.
+ * and read-only, the text as written compared with the built-in (Compare with shipped, a line diff)
+ * and the built-in itself (`builtIn`), or, for a step whose prompt goes before instructions it keeps,
+ * what those hold (`adds`), since they're made fresh each turn. `vars` is a step's (its vars panel)
+ * or a registry text's own placeholders; `problems` says what is wrong with the text as written (a
+ * placeholder it doesn't have, one it must keep), each shown under it. `save` turns the text (null
+ * to reset) into the settings patch, or null when it can't be saved. `test`, where the text can be
+ * tested (a role's, on Settings → Agents → Prompts), is its Test control for the text as written.
+ *
+ * Alone, an editor opens and closes by itself and keeps the text as written. In a list that opens
+ * one at a time (Settings → Agents → Prompts), `open` and `onOpenChange` say whether it is open and
+ * hear it open or close, and `text` and `onText` hold the text as written, so a text left unsaved
+ * stays as written while another is open.
  */
-export function PromptEditor(props: { id: string; label: string; note: string; builtIn?: string; adds?: string; value: string | undefined; max: number; vars: VarsKey | readonly PromptVar[]; problems?(text: string): readonly string[]; busy: boolean; save(text: string | null): JsonObject | null; patch(patch: JsonObject): void; test?(text: string): ComponentChildren; children?: ComponentChildren }) {
+export function PromptEditor(props: {
+  id: string;
+  label: string;
+  note: string;
+  builtIn?: string;
+  adds?: string;
+  value: string | undefined;
+  max: number;
+  vars: VarsKey | readonly PromptVar[];
+  problems?(text: string): readonly string[];
+  busy: boolean;
+  save(text: string | null): JsonObject | null;
+  patch(patch: JsonObject): void;
+  test?(text: string): ComponentChildren;
+  open?: boolean;
+  onOpenChange?(open: boolean): void;
+  text?: string;
+  onText?(text: string): void;
+  children?: ComponentChildren;
+}) {
   const saved = props.value ?? props.builtIn ?? "";
-  const [text, setText] = useState(saved);
-  useEffect(() => setText(saved), [saved]);
+  const [own, setOwn] = useState(saved);
+  useEffect(() => setOwn(saved), [saved]);
+  const [comparing, setComparing] = useState(false);
+  const text = props.text ?? own;
+  const setText = props.onText ?? setOwn;
   const save = props.save(text);
   const problems = props.problems ? props.problems(text) : [];
+  const onOpenChange = props.onOpenChange;
   return (
     <div class="lre-minds-prompt" data-lre-minds-prompt={props.id}>
       <Disclosure
+        {...(props.open !== undefined && onOpenChange ? { open: props.open, onToggle: onOpenChange } : {})}
         summary={
-          <span class="lre-minds-prompt-head">
-            <span class="lre-minds-prompt-text">
-              <span class="lre-minds-prompt-title">{props.label}</span>
-              <span class="lre-minds-prompt-sub">{props.note}</span>
-            </span>
-            {props.value !== undefined ? <Badge tone="accent">Your own</Badge> : props.builtIn !== undefined ? <Badge>Built-in</Badge> : <Badge>None added</Badge>}
-          </span>
+          <PromptHead
+            label={props.label}
+            note={props.note}
+            badges={
+              <>
+                {text !== saved ? <Badge tone="warn">Not saved</Badge> : null}
+                {props.value !== undefined ? <Badge tone="accent">Your own</Badge> : props.builtIn !== undefined ? <Badge>Built-in</Badge> : <Badge>None added</Badge>}
+              </>
+            }
+          />
         }
       >
         <textarea class="lre-input lre-minds-prompt-input" rows={10} aria-label={`${props.label} prompt`} placeholder={props.builtIn === undefined ? "Nothing added: the built-in instructions run alone." : undefined} value={text} disabled={props.busy} onInput={(event) => setText(event.currentTarget.value)} />
@@ -128,12 +177,19 @@ export function PromptEditor(props: { id: string; label: string; note: string; b
         {props.test ? props.test(text) : null}
         {typeof props.vars === "string" ? <VarsPanel step={props.vars} /> : <PromptVarsPanel vars={props.vars} />}
         {props.builtIn !== undefined ? (
-          <div class="lre-minds-default" data-lre-built-in="replaced">
-            <Disclosure summary="The built-in prompt (read-only)">
-              <p class="lre-minds-note">Your prompt starts from this and replaces it; Reset to the default goes back to it.</p>
-              <pre class="lre-minds-code">{props.builtIn}</pre>
-            </Disclosure>
-          </div>
+          <>
+            <div class="lre-minds-default" data-lre-compare>
+              <Disclosure summary="Compare with shipped" open={comparing} onToggle={setComparing}>
+                <TextDiff before={props.builtIn} after={text} named={{ before: "the shipped text", after: "yours" }} />
+              </Disclosure>
+            </div>
+            <div class="lre-minds-default" data-lre-built-in="replaced">
+              <Disclosure summary="The built-in prompt (read-only)">
+                <p class="lre-minds-note">Your prompt starts from this and replaces it; Reset to the default goes back to it.</p>
+                <pre class="lre-minds-code">{props.builtIn}</pre>
+              </Disclosure>
+            </div>
+          </>
         ) : props.adds !== undefined ? (
           <div class="lre-minds-default" data-lre-built-in="added">
             <Disclosure summary="The built-in instructions (read-only)">

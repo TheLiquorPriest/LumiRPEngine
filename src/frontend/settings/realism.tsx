@@ -17,6 +17,7 @@ import type { RealismSettings } from "../../shared/settings";
 import type { ControlsView } from "../../shared/state-view";
 import { BAND_LABEL } from "../../shared/tiers";
 import { useApp } from "../app";
+import { QUEUED_TOAST } from "../queued";
 import { Banner, Button, Empty, HostSlider, HostSwitch, Seg, useBusy } from "../components";
 import type { IconName } from "../icons";
 import { Icon } from "../icons";
@@ -236,7 +237,7 @@ export function RealismThisChat(props: { chatId: string; controls: ControlsView 
       if (!pending) return;
       const result = await app.request(resolveMarker(props.chatId, pending.domain, pending.scope, pending.to));
       if (result) {
-        app.toast(result.pending ? "Saved — the change applies when the reply finishes." : `${DOMAIN_LABEL[pending.domain]} is now ${LEVEL_LABEL[pending.to]}.`, "info");
+        app.toast(result.pending ? QUEUED_TOAST : `${DOMAIN_LABEL[pending.domain]} is now ${LEVEL_LABEL[pending.to]}.`, "info");
         setPending(null);
       }
     });
@@ -245,7 +246,7 @@ export function RealismThisChat(props: { chatId: string; controls: ControlsView 
     run(async () => {
       const change = chatClaimsChange(props.chatId, realism.claims, next);
       const result = change ? await app.request(change) : null;
-      if (result) app.toast(result.pending ? "Saved — the change applies when the reply finishes." : `This chat plays claims as ${CLAIM_MODE_LABEL[next.mode]} from the next turn.`, "info");
+      if (result) app.toast(result.pending ? QUEUED_TOAST : `This chat plays claims as ${CLAIM_MODE_LABEL[next.mode]} from the next turn.`, "info");
     });
   // Which of the world's tiers the chosen band's caps reach, unless that is just the band itself.
   const reached = scope === "all" ? [] : realism.bandTiers[scope];

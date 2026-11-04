@@ -119,9 +119,25 @@ export function toggles(world: ReadContext["world"]): JsonObject {
   return objOf(objOf(world.packs.economy?.config).features);
 }
 
-/** Whether a feature runs for a party at its Money level (`moneyLevel`: an organization's is its most closely followed member's) and the world's toggles. */
+/** The key of the economy's state slice holding this chat's own rules (`economy.config`, `cash-rule.ts`). */
+export const CHAT_RULES = "chat";
+
+/** This chat's own cash rule (GM → This chat → Money): true or false, or null where the world's switch stands. */
+export function chatCashRule(state: Readonly<WorldState>): boolean | null {
+  const v = objOf(objOf(state.packs.economy)[CHAT_RULES]).atm;
+  return typeof v === "boolean" ? v : null;
+}
+
+/** The world's toggles with this chat's own rules over them: its cash rule over `features.atm`. */
+export function chatToggles(ctx: Pick<ReadContext, "world" | "state">): JsonObject {
+  const atm = chatCashRule(ctx.state);
+  const world = toggles(ctx.world);
+  return atm === null ? world : { ...world, atm };
+}
+
+/** Whether a feature runs for a party at its Money level (`moneyLevel`: an organization's is its most closely followed member's) and the world's toggles, under this chat's own cash rule. */
 export function featureFor(ctx: ReadContext, party: EntityId, feature: FinanceFeature): boolean {
-  return featureOn(moneyLevel(ctx, party), feature, toggles(ctx.world));
+  return featureOn(moneyLevel(ctx, party), feature, feature === "atm" ? chatToggles(ctx) : toggles(ctx.world));
 }
 
 /** An account's Money level: the highest among the parties who can spend from it (else who hold it), each at its own (`moneyLevel`), 0 with none in the world. */

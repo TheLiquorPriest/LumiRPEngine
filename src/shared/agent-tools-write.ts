@@ -1,6 +1,6 @@
 // The write tools' texts as shipped (AGENT-LOOP-PLAN §6; INC1-SPEC R3b): the GM-tier edits, the
 // workspace's tools and the lore's, each tool's description and its arguments', and the answers the
-// writer and these tools give, all registry texts on the GM agent page (`shared/agent-tools.ts`).
+// writer and these tools give, all registry texts on the Every agent page (`shared/agent-tools.ts`).
 // What each tool does is `backend/agents/tools/write/*.ts`, `tools/workspace.ts` and `tools/lore.ts`.
 // Outside a turn a write is only proposed (`tools/writer.ts`, a dry run): the engine checks it and
 // says what it would change, and nothing changes until it is applied. Inside a turn it is staged

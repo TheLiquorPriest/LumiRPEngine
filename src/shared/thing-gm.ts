@@ -16,8 +16,8 @@ import type { Spot } from "./things";
 export interface RestView {
   owner: boolean;
   where: WhereStep[];
-  /** Its own `home`, where the world document puts it, or what play infers (everyday carry, a fixture, a purchase, where it was made). */
-  from: "home" | "authored" | "carry" | "fixture" | "bought" | "made";
+  /** Its own `home`, where the world document puts it, or what play infers (everyday carry, what keeps its kind at its owner's home, a fixture, a purchase, where it was made). */
+  from: "home" | "authored" | "carry" | "stored" | "fixture" | "bought" | "made";
 }
 
 /** Who changed a thing in one entry of its history: the turn before its reply (an action, the engine's processes), the reply's read (the story), the GM, a ✎ fix, or an agent. */
@@ -67,7 +67,7 @@ export interface GmThingsList {
 // ---------------------------------------------------------------- Tidy up
 
 /** The kinds of finding Tidy up looks for (ITEMS-SPEC §7.5), in the order it lists them. */
-export const TIDY_KINDS = ["too_big", "two_places", "handover_owner", "duplicate", "size_unknown"] as const;
+export const TIDY_KINDS = ["too_big", "two_places", "worn_elsewhere", "handover_owner", "duplicate", "size_unknown", "final_dropped"] as const;
 export type TidyKind = (typeof TIDY_KINDS)[number];
 
 /** One way to fix a finding: its button's words, the GM edit's operations, and the sentence the edit's notice says. */

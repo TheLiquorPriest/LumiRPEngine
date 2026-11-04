@@ -1,8 +1,10 @@
 // Business stakes (DESIGN §27.10). An owner of a business holds a stake: their share (the business's
-// `owners`) of its value. The value is the business's own `value` when its author or the GM set one;
-// otherwise its book value (its net worth: its accounts, holdings, property and stakes, less what it
-// owes, plus what its customers owe it less what it owes its suppliers, from the work module's
-// books) and its last twelve months' profit times its valuation multiple. The work module pays
+// `owners`) of its value, and a beneficiary of a trust their share of the trust's. One worth,
+// `orgValue`: a company is its own `value` when its author or the GM set one, else its market
+// capitalization while it is listed, else its book value (its net worth: its accounts, holdings,
+// property and stakes, less what it owes, with what its customers owe it less what it owes its
+// suppliers) and its last twelve months' operating profit (its trade's, never what it holds already
+// counted at market) times its valuation multiple; a trust is its net worth. The work module pays
 // profit out by share; where each owner's share lands is theirs to route here (an account, or kept
 // in the business, which adds to their stake), and each payout is income for their year. Selling
 // part of a stake moves the share and realises the seller's gain against what they put in.
@@ -18,6 +20,7 @@ import { passMemo } from "../../../engine/read-pass";
 import type { EffectContext, EventTypeDef, ReadContext, Rejection } from "../../../engine/registry";
 import type { FinanceApi, FinanceRegistry } from "./module";
 import { holdingsRecord, holdingsSlice, quoteOf, reject } from "./assets";
+import { businessBooks } from "./books";
 import { acquisition, disposal } from "./gains";
 import { unit } from "./holdings";
 import { incomeFor } from "./income";
@@ -33,7 +36,7 @@ const BUSINESS_FIELDS: Record<string, FieldDef> = {
   valuation_multiple: { type: "number", label: "Valued at this many years of profit, over its books", min: 0, default: VALUATION_MULTIPLE, domain: "money", level: 4 },
 };
 
-/** The businesses being valued right now: a business that (through others) owns itself is worth nothing more the second time round. */
+/** The companies and trusts being valued right now: one that (through others) holds itself is worth nothing more the second time round. */
 const valuing = new Set<EntityId>();
 
 /** Every business (a party of kind business), by id. Kept for the read pass: every party's worth walks them. */
@@ -45,16 +48,34 @@ export function businessIds(api: FinanceApi, ctx: ReadContext): EntityId[] {
   );
 }
 
-/** How a business's value is worked out (DESIGN §27.10): its set value, else its book value and its last year's profit times its multiple; never below nothing. A listed company's is the market's. */
+/** Every company and trust (a party of kind business or trust), by id: what a party may hold a share of the worth of. Kept for the read pass. */
+export function ownedOrgIds(api: FinanceApi, ctx: ReadContext): EntityId[] {
+  return passMemo([ctx.state, ctx.state.entities, ctx.world, api], "economy.owned_orgs", () =>
+    Object.keys(ctx.state.entities)
+      .filter((id) => {
+        const kind = api.partyKind(ctx, id);
+        return kind === "business" || kind === "trust";
+      })
+      .sort(),
+  );
+}
+
+/** How a company's or a trust's value is worked out (DESIGN §27.10, `orgValue`), its parts as they add up; never below nothing. */
 export interface Valuation {
   value: number;
   /** Its author or the GM set it (`value`). */
   set: boolean;
+  /** Its net worth, what its customers owe it and what it owes among it. */
   book: number;
+  /** Its last twelve months' operating profit, never below nothing: the profit of its trade, without its investment income. */
   profit: number;
   multiple: number;
   /** A listed company's (§27.10 Listing): its value is its price a unit times all its units, and `book`, `profit` and `multiple` are its books', the price's anchor. */
   market?: { price: number; units: number };
+  /** A trust: its net worth, with no multiple. */
+  trust?: true;
+  /** Its books came to less than nothing, its net worth below zero: limited liability keeps its value, the value of its shares, at nothing rather than less. */
+  floored?: true;
 }
 
 /** A listed company's market: its price a unit now and all its units (its owners' and the public's); null for a company not on a market. */
@@ -66,45 +87,55 @@ export function marketValueOf(ctx: ReadContext, business: EntityId): { price: nu
   return price !== null && price > 0 ? { price, units: allUnits(f) } : null;
 }
 
-/** A business's valuation, its parts as they add up: a listed company's at its market price, with its books beside it. */
-export function valuationOf(api: FinanceApi, ctx: ReadContext, business: EntityId): Valuation {
-  const books = bookValuationOf(api, ctx, business);
-  const market = marketValueOf(ctx, business);
-  return market ? { ...books, value: Math.max(0, Math.round(market.price * market.units)), set: false, market } : books;
+/** A company's or a trust's valuation, its parts as they add up: a listed company's at its market price, with its books beside it. */
+export function valuationOf(api: FinanceApi, ctx: ReadContext, org: EntityId): Valuation {
+  const books = bookValuationOf(api, ctx, org);
+  const market = books.set || books.trust ? null : marketValueOf(ctx, org);
+  if (!market) return books;
+  // The market's price is never below nothing, so nothing floors it.
+  const { floored: _floored, ...anchor } = books;
+  return { ...anchor, value: Math.max(0, Math.round(market.price * market.units)), set: false, market };
 }
 
-/** A business's valuation by its books: its set value, else its book value and its last year's profit times its multiple; never below nothing. A listed company's price follows it. */
-export function bookValuationOf(api: FinanceApi, ctx: ReadContext, business: EntityId): Valuation {
-  const f = own(ctx.state.entities, business)?.fields ?? {};
-  const multiple = Math.max(0, numOf(f.valuation_multiple, VALUATION_MULTIPLE));
-  if (typeof f.value === "number" && Number.isFinite(f.value)) return { value: Math.max(0, Math.round(f.value)), set: true, book: 0, profit: 0, multiple };
-  if (valuing.has(business)) return { value: 0, set: false, book: 0, profit: 0, multiple };
-  valuing.add(business);
+/**
+ * A company's valuation by its books: its set value, else its book value (its net worth, which
+ * counts what its customers owe it and what it owes) and its last year's operating profit times its
+ * multiple; a trust's, its net worth. Never below nothing (`floored` where its books come to less).
+ * A listed company's price follows it.
+ */
+export function bookValuationOf(api: FinanceApi, ctx: ReadContext, org: EntityId): Valuation {
+  const f = own(ctx.state.entities, org)?.fields ?? {};
+  const trust = api.partyKind(ctx, org) === "trust";
+  const multiple = trust ? 0 : Math.max(0, numOf(f.valuation_multiple, VALUATION_MULTIPLE));
+  if (!trust && typeof f.value === "number" && Number.isFinite(f.value)) return { value: Math.max(0, Math.round(f.value)), set: true, book: 0, profit: 0, multiple };
+  if (valuing.has(org)) return { value: 0, set: false, book: 0, profit: 0, multiple, ...(trust ? { trust: true as const } : {}) };
+  valuing.add(org);
   try {
-    const books = optionalQuery(ctx, "economy.business_books")?.(ctx, business, ctx.state.clock - YEAR_MINUTES, ctx.state.clock);
-    const book = api.netWorth(ctx, business) + (books ? books.receivables - books.payables : 0);
-    const profit = Math.max(0, books?.profit ?? 0);
-    return { value: Math.max(0, Math.round(book + profit * multiple)), set: false, book: Math.round(book), profit, multiple };
+    const book = Math.round(api.netWorth(ctx, org));
+    if (trust) return { value: Math.max(0, book), set: false, book, profit: 0, multiple, trust: true, ...(book < 0 ? { floored: true as const } : {}) };
+    const books = optionalQuery(ctx, "economy.business_books") ? businessBooks(api, ctx, org, ctx.state.clock - YEAR_MINUTES, ctx.state.clock) : null;
+    const profit = Math.max(0, books?.operating ?? 0);
+    const worked = Math.round(book + profit * multiple);
+    return { value: Math.max(0, worked), set: false, book, profit, multiple, ...(worked < 0 ? { floored: true as const } : {}) };
   } finally {
-    valuing.delete(business);
+    valuing.delete(org);
   }
 }
 
-/** What a business is worth: a listed company's price a unit times all its units; any other's set value, else its books and a multiple of its last year's profit; never below nothing. */
-export function businessValue(api: FinanceApi, ctx: ReadContext, business: EntityId): number {
-  const market = marketValueOf(ctx, business);
-  return market ? Math.max(0, Math.round(market.price * market.units)) : bookValuationOf(api, ctx, business).value;
+/** What a company or a trust is worth (`orgValue`, §27.10): a company's set value, else its market capitalization while listed, else its books and a multiple of its last year's operating profit; a trust's net worth. Never below nothing. */
+export function orgValue(api: FinanceApi, ctx: ReadContext, org: EntityId): number {
+  return valuationOf(api, ctx, org).value;
 }
 
-/** A party's share of every business they own, a line each. */
+/** A party's share of every company and trust it holds a share of the worth of, a line each. */
 export function stakeWorth(api: FinanceApi, ctx: ReadContext, party: EntityId): { assets: number; lines: { label: string; cents: number }[] } {
   const lines: { label: string; cents: number }[] = [];
   let assets = 0;
-  for (const id of businessIds(api, ctx)) {
+  for (const id of ownedOrgIds(api, ctx)) {
     if (id === party) continue;
     const share = api.shareOf(ctx.state, id, party);
     if (share <= 0) continue;
-    const cents = Math.round((businessValue(api, ctx, id) * share) / 100);
+    const cents = Math.round((orgValue(api, ctx, id) * share) / 100);
     if (cents === 0) continue;
     assets += cents;
     lines.push({ label: `${labelOf(ctx, id)} (${Math.round(share * 100) / 100}%)`, cents });
@@ -196,7 +227,7 @@ export function sellStake(api: FinanceApi, ctx: EffectContext | ReadContext, x: 
   const whole = units !== undefined ? units === heldUnits : Math.abs(share - held) < 1e-9;
   if (x.buyer === undefined && !(whole && held >= 100 - 1e-9)) return reject("needs_buyer", `selling part of ${name} needs a buyer in the world`);
   // A buyer outside the world pays what the market does: no more than the business is worth.
-  const worth = businessValue(api, ctx, x.business);
+  const worth = orgValue(api, ctx, x.business);
   if (x.buyer === undefined && price > worth) return reject("declined", `no buyer outside the world pays more than ${formatMoney(worth, ctx.world.currency)} for ${name}`);
   const to = x.to ?? api.depositAccount(ctx, x.party);
   if (!to) return reject("no_account", `${labelOf(ctx, x.party)} has no account the money could go to`);
@@ -275,5 +306,5 @@ export function registerStakes(r: FinanceRegistry): void {
     lexicon: ["sell my share of the business", "sell the shop", "sell my shares"],
     observable: "signs a stack of papers",
   });
-  r.core.formula("business_value", (ctx, id) => businessValue(r.api, ctx, String(id ?? "")));
+  r.core.formula("business_value", (ctx, id) => orgValue(r.api, ctx, String(id ?? "")));
 }

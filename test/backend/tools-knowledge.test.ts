@@ -145,4 +145,23 @@ describe("knowledge_who_knows and knowledge_what_knows: who knows the shop's deb
       expect(missing.text).toStartWith("knowledge_who_knows needs about:");
     }
   });
+
+  test("about takes a book entry by any of its lore ids: its short id, a mark's with #n, or its book and entry", async () => {
+    const { rig, chatId } = await alderChat();
+    const { at } = await now(rig, chatId);
+    const mark = factId({ kind: "wi", book: "harbor_book", entry: "entry_1", mark: 1 });
+    const breakwater: KnowledgeFact = { id: mark, kind: "wi", claim: `${MARK}: the breakwater was rebuilt after the storm`, about: [], truth: "true" };
+    await recordFix(rig, chatId, "seed-lore", [fact(breakwater), learn({ who: ["marcus_delgado"], fact: mark, how: "authored", by: null, evidence: [], belief: "true", confidence: 1, at })]);
+    const ids = await rig.rt.loreRouting.ids.assign(rig.host.userId, [{ bookId: "harbor_book", entryId: "entry_1", keys: [] }], (await rig.rt.settings.get(rig.host.userId)).loreIndex);
+    const short = ids.get("harbor_book/entry_1") ?? "";
+    expect(short).not.toBe("");
+    // The mark by its short id and number, the entry whole (its marks), by its book and entry: each finds Marcus's fact.
+    for (const about of [`${short}#2`, short, "harbor_book/entry_1", "harbor_book/entry_1#2"]) {
+      const found = await answerOf<{ facts: { fact: string }[] }>(rig, chatId, "gm", "knowledge_who_knows", { about });
+      expect([about, found.facts.map((f) => f.fact)]).toEqual([about, [mark]]);
+    }
+    expect((await answerOf<{ facts: { fact: string }[] }>(rig, chatId, "gm", "knowledge_what_knows", { person: "Marcus", about: `${short}#2` })).facts.map((f) => f.fact)).toEqual([mark]);
+    // Another mark of it, which no one holds, finds nothing.
+    expect(await answerOf(rig, chatId, "gm", "knowledge_who_knows", { about: `${short}#1` })).toEqual({ facts: [] });
+  });
 });

@@ -35,7 +35,7 @@ test("the chat commands send their tools' requests; gm without --spoilers and fi
   const fake = new FakeLumiverse();
   const help = signedIn(fake);
   expect(await run(["help"], help.io)).toEqual({ code: 0 });
-  expect(help.out.join("\n")).toContain("Playing a chat on Lumiverse\n  chat <chatId> [--pointer <p>] [--offset <n>]");
+  expect(help.out.join("\n")).toContain("Playing a chat on Lumiverse\n  chat <chatId> [--pointer <p>] [--offset <n> | --from <n> [--limit <n>]]");
 
   // The fake LumiRPEngine answers none of these, so each exits 1; what it received is the point.
   await run(["fix", "c1", "--entity", "pov", "--field", "mood", "--value", '"calm"'], signedIn(fake).io);

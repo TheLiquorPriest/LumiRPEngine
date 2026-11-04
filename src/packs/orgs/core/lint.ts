@@ -17,7 +17,9 @@ import { objOf, own } from "../../../engine/pack-kit";
 import { ACTS_FOR, isOrgPower, ORG_POWERS, positionIn, positionsIn, POWER_WORDS, type OrgPower } from "../../../shared/org";
 import type { LintFix, LintIssue } from "../../../shared/protocol";
 import type { WorldDoc } from "../../../shared/world";
-import { headOf, HEAD, jobsAt, orgPower, orgTypeOf, positionsOf } from "../../../engine/org";
+import { headOf, HEAD, jobsAt, orgPower, orgTypeOf, placesOf, positionsOf } from "../../../engine/org";
+import { siteOf } from "../../../engine/presence";
+import { placeWithin } from "../../../engine/scope";
 import type { LintRule, ReadContext } from "../../../engine/registry";
 import type { Registry } from "../../../engine/registry-impl";
 import { kindIs } from "../../../engine/scope";
@@ -49,6 +51,7 @@ export const ORG_LINT = {
   exemptUnknown: "orgs.exempt_unknown",
   exemptType: "orgs.exempt_type",
   exemptOwners: "orgs.exempt_owners",
+  placeSpans: "orgs.place_spans",
 } as const;
 
 /** The world as a chat starts on it. */
@@ -235,6 +238,26 @@ function kindIssues(world: WorldDoc, ctx: ReadContext): LintIssue[] {
   return out;
 }
 
+/**
+ * A business trading at a place that takes in other buildings or sites (a whole town): a purchase is
+ * its sale only within the same building or site as one of its places (`businessAt`), so its
+ * author should name the buildings it trades in. Past sales stay as they were.
+ */
+function spanIssues(world: WorldDoc, ctx: ReadContext): LintIssue[] {
+  const out: LintIssue[] = [];
+  for (const id of Object.keys(world.entities).sort()) {
+    if (orgTypeOf(ctx, id) !== "company") continue;
+    for (const place of placesOf(ctx, id)) {
+      const site = siteOf(world, place);
+      const others = Object.keys(world.places).filter((p) => p !== place && placeWithin(world, p, place) && siteOf(world, p) !== site);
+      if (others.length === 0) continue;
+      const name = own(world.places, place)?.name ?? place;
+      out.push({ severity: "warning", code: ORG_LINT.placeSpans, path: `entities.${id}.fields.places`, message: `${nameOf(world, id)} trades at ${name}, which takes in other buildings (${others.slice(0, 3).map((p) => own(world.places, p)?.name ?? p).join(", ")}${others.length > 3 ? ", …" : ""}): a purchase counts as its sale only in its own building or site. Name the buildings it trades in.` });
+    }
+  }
+  return out;
+}
+
 /** The organizations' lint rules. */
 export const ORG_LINTS: readonly LintRule[] = [
   {
@@ -247,6 +270,13 @@ export const ORG_LINTS: readonly LintRule[] = [
   },
   { code: "orgs.delegations", check: (world, registry) => (registry ? delegationIssues(world, startOf(world, registry)) : []) },
   { code: "orgs.owners", check: (world, registry) => [...unitIssues(world), ...(registry ? untaxedIssues(world, startOf(world, registry)) : [])] },
-  { code: "orgs.kinds", check: (world, registry) => (registry ? kindIssues(world, startOf(world, registry)) : []) },
+  {
+    code: "orgs.kinds",
+    check(world, registry) {
+      if (!registry) return [];
+      const ctx = startOf(world, registry);
+      return [...kindIssues(world, ctx), ...spanIssues(world, ctx)];
+    },
+  },
   { code: "orgs.taxes", check: (world, registry) => (registry ? exemptIssues(world, startOf(world, registry)) : []) },
 ];

@@ -48,7 +48,7 @@ import type { FinanceApi, FinanceKind, FinanceRegistry, FlowPosting } from "./mo
 import { moveLeases, propertyIds, propertyValue, sellProperty } from "./property";
 import { openingEvent } from "./process";
 import { counted, decisionRefusal } from "./shares";
-import { businessIds as companyIds, businessValue, sellStake } from "./stakes";
+import { businessIds as companyIds, orgValue, sellStake } from "./stakes";
 import { taxStillOwed } from "./taxes";
 import { UNEMPLOYMENT_ACCRUED } from "./unemployment";
 
@@ -430,7 +430,7 @@ function heldAssets(api: FinanceApi, ctx: ReadContext, business: EntityId, sell:
     .map((id) => ({ id, sold: sell && soleHolder(api, ctx, id, business) && api.feature(ctx, business, "property") && propertyValue(ctx.state, id) > 0 }));
   const stakes = companyIds(api, ctx)
     .filter((c) => c !== business && dissolvedOn(ctx.state, c) === null && api.shareOf(ctx.state, c, business) > 0)
-    .map((id) => ({ id, sold: sell && soleHolder(api, ctx, id, business) && businessValue(api, ctx, id) > 0 }));
+    .map((id) => ({ id, sold: sell && soleHolder(api, ctx, id, business) && orgValue(api, ctx, id) > 0 }));
   return { properties, stakes };
 }
 
@@ -449,7 +449,7 @@ function assetsOf(api: FinanceApi, ctx: ReadContext, business: EntityId, plan: P
   return [
     ...soleHoldings(api, ctx, business).map((h) => ({ ...shown(h, "A holding"), value: holdingValue(ctx, h), goes: "sold at the market" })),
     ...properties.map((p) => ({ ...shown(p.id, "A property"), value: Math.round((propertyValue(ctx.state, p.id) * api.shareOf(ctx.state, p.id, business)) / 100), goes: p.sold ? "sold at its value" : "to its owners by share" })),
-    ...stakes.map((s) => ({ ...shown(s.id, "A stake in another company"), value: Math.round((businessValue(api, ctx, s.id) * api.shareOf(ctx.state, s.id, business)) / 100), goes: s.sold ? "sold at its value" : "to its owners by share" })),
+    ...stakes.map((s) => ({ ...shown(s.id, "A stake in another company"), value: Math.round((orgValue(api, ctx, s.id) * api.shareOf(ctx.state, s.id, business)) / 100), goes: s.sold ? "sold at its value" : "to its owners by share" })),
     ...ownedThings(ctx, business).map((t) => ({ ...shown(t, "Something it owns"), value: null, goes })),
   ];
 }
@@ -483,7 +483,7 @@ function finish(api: FinanceApi, w: Working, business: EntityId, plan: WindPlan,
     else if (applied(w, sold)) return reject("declined", `${labelOf(w.ctx, p.id)} couldn't be sold`);
   }
   for (const s of stakes.filter((x) => x.sold)) {
-    const sold = sellStake(api, w.ctx, { party: business, business: s.id, share: 100, price: businessValue(api, w.ctx, s.id) });
+    const sold = sellStake(api, w.ctx, { party: business, business: s.id, share: 100, price: orgValue(api, w.ctx, s.id) });
     if (isRejection(sold)) s.sold = false;
     else if (applied(w, sold)) return reject("declined", `${bizName}'s stake in ${labelOf(w.ctx, s.id)} couldn't be sold`);
   }
@@ -588,7 +588,7 @@ function finish(api: FinanceApi, w: Working, business: EntityId, plan: WindPlan,
       const split = unitsByShare(unitsOf(owners, business), holders);
       for (const h of holders) next = moveUnits(next, business, h.party, split.get(h.party) ?? 0);
     } else next = rowsHandedOut(owners, business, holders);
-    const failed = handOut(s.id, next, (businessValue(api, w.ctx, s.id) * share) / 100, []);
+    const failed = handOut(s.id, next, (orgValue(api, w.ctx, s.id) * share) / 100, []);
     if (failed) return failed;
     said.push({ text: `Handed its stake in ${labelOf(w.ctx, s.id)} to its owners`, names: [] });
   }
@@ -689,7 +689,7 @@ export function windingView(api: FinanceApi, ctx: ReadContext, business: EntityI
 function unitValue(api: FinanceApi, ctx: ReadContext, business: EntityId): { owners: Owner[]; units: number; perUnit: number } {
   const owners = counted(api, ctx, business);
   const units = unitsOf(owners);
-  return { owners, units, perUnit: units > 0 ? businessValue(api, ctx, business) / units : 0 };
+  return { owners, units, perUnit: units > 0 ? orgValue(api, ctx, business) / units : 0 };
 }
 
 /** `economy.merge`: `business` folded into `into`, or taken whole as its subsidiary (§3.13). */

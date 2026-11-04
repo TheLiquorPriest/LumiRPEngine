@@ -180,14 +180,16 @@ describe("Port Alder's holdings and property", () => {
     const books = w.ctx.query("economy.business_books")(w.ctx, shop, w.state.clock - 525_600, w.state.clock);
     // Three days of walk-in takings and no payday yet: a profit so far.
     expect(books.profit).toBeGreaterThan(0);
-    // Its lift loan outweighs its account: on its books alone it is worth less than nothing.
-    const book = worth(w, shop) + books.receivables - books.payables;
+    // Its lift loan outweighs its account: on its books alone (its net worth, which counts what its
+    // customers owe it and what it owes, DESIGN §27.10) it is worth less than nothing.
+    const book = worth(w, shop);
     expect(book).toBeLessThan(0);
     const stake = (): number => (w.ctx.query("economy.finance")(w.ctx, "marcus_delgado", false).overview?.breakdown ?? []).find((l) => l.label.startsWith("Alder Automotive"))?.cents ?? 0;
     const at = (multiple: number): number => {
       w.apply({ type: "set", entity: shop, field: "valuation_multiple", value: multiple });
       return stake();
     };
+    // Its profit is all its trade's (it holds nothing that pays), so the multiple takes all of it.
     const valued = stake();
     expect(valued).toBe(Math.max(0, Math.round(book + 3 * books.profit)));
     expect(at(0)).toBe(0);

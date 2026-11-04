@@ -20,6 +20,7 @@ import { HOST_LIMITS, hostBound } from "../shared/timeouts";
 import { validMarkerBody } from "../engine/events";
 import type { ChainMessage, FoldSnapshot, SnapshotStore } from "../engine/ledger/chain";
 import { emptyJournal, LedgerCore, type LedgerEnv, type WriteResult } from "../engine/ledger/journal";
+import type { QueuedOn } from "../shared/gm-parts";
 import type { WorldState } from "../engine/state";
 import type { WorldDoc } from "../shared/world";
 import type { LedgerFold } from "../engine/ledger/fold";
@@ -1742,9 +1743,11 @@ export class LedgerService {
    * reply's window closing lands it, over what the turn did, or the run ending without a reply
    * (`endRun`). Any other lands at once, and a turn kept from a failed reply goes with it.
    */
-  async write(chatId: ChatId, userId: UserId, w: HeldWrite): Promise<WriteResult> {
+  async write(chatId: ChatId, userId: UserId, w: HeldWrite): Promise<WriteResult & { queued?: QueuedOn }> {
     const gate = this.gates.get(chatId);
     const early = gate !== undefined && (gate.running !== null || (gate.prepared !== null && gate.prepared.kept === null) || gate.taken !== null);
+    // What a write held now waits on, as it is made: a window that opened since is a reply's.
+    const on = this.queuedOn(chatId);
     if (!early) this.wrote(chatId);
     let result: WriteResult = { applied: false, pending: false, reason: "not a world chat" };
     await this.run(
@@ -1762,7 +1765,58 @@ export class LedgerService {
       },
       w,
     );
+    return result.pending ? { ...result, queued: on ?? "reply" } : result;
+  }
+
+  /**
+   * Writes that land together, at once, in one operation on the chat's queue (Tell or Don't tell,
+   * DESIGN §11: an entry taken back, then made again): `make` reads the chat as that operation finds
+   * it and answers the writes, none (nothing to do), or its own refusal. Each is made only once the
+   * one before it applied, and nothing lands between them. None is ever held, which would land one
+   * and not the next: `make` refuses while a turn is queued or under way (`queuedOn`), and a reply's
+   * window found open refuses them all the same.
+   */
+  async writeTogether<E>(chatId: ChatId, userId: UserId, make: (core: LedgerCore, observed: ChainMessage[]) => readonly HeldWrite[] | { refused: E }): Promise<WriteResult | { refused: E }> {
+    let result: WriteResult | { refused: E } = { applied: false, pending: false, reason: "not a world chat" };
+    await this.run(chatId, userId, async (core, observed) => {
+      core.sync(observed);
+      const made = make(core, observed);
+      if ("refused" in made) {
+        result = made;
+        return;
+      }
+      if (made.length === 0) {
+        result = { applied: false, pending: false };
+        return;
+      }
+      if (core.journal.windows.length > 0) {
+        result = { applied: false, pending: false, reason: "a reply is under way" };
+        return;
+      }
+      this.wrote(chatId);
+      const landed: HeldWrite[] = [];
+      for (const w of made) {
+        result = core.write(w, observed);
+        if (!result.applied) break;
+        landed.push(w);
+      }
+      if (landed.length > 0) await this.hooks?.writesLanded({ chatId, userId, core, observed, writes: landed, refused: [] });
+    });
     return result;
+  }
+
+  /**
+   * What a write made now would wait on (DESIGN §5.1, P2), or null when it would land at once: the
+   * engine run planning the chat's turn; the page that starts the reply of a turn the engine
+   * prepared (none may be open: the turn then waits until the chat is opened in Lumiverse); or a
+   * reply under way, this backend's or one whose window the journal holds.
+   */
+  queuedOn(chatId: ChatId): QueuedOn | null {
+    const gate = this.gates.get(chatId);
+    if (gate?.running) return "engine";
+    if (gate?.prepared && gate.prepared.kept === null) return gate.prepared.generationId === null ? "page" : "reply";
+    if (gate?.taken) return "reply";
+    return (this.chats.get(chatId)?.core.journal.windows.length ?? 0) > 0 ? "reply" : null;
   }
 
   /** Restart recovery and chat open: classify against the snapshot, and close the windows a stopped backend left open (never a turn under way here). */

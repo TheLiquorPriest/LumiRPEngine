@@ -228,7 +228,7 @@ describe("a narrated time skip a Re-read reads", () => {
     await got.rig.host.settle();
     const g = await got.rig.host.start(got.chatId, { type: "normal" });
     reads(got.rig, twoDays);
-    expect(got.rig.body(await got.rig.send({ type: "lre.chip", chatId: got.chatId, chip: told, choice: "reread" }))).toEqual({ applied: false, pending: true });
+    expect(got.rig.body(await got.rig.send({ type: "lre.chip", chatId: got.chatId, chip: told, choice: "reread" }))).toEqual({ applied: false, pending: true, queued: "reply" });
     expect(await offers(got.rig, got.chatId, head.id)).toEqual([]);
     reads(got.rig, []);
     await got.rig.host.finish(g, "Danny asks how you've been.");

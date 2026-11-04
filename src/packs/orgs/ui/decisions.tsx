@@ -7,8 +7,8 @@
 // requester's chain of command and Withdraw for whoever asked; the latest closed and answered; and How decisions are made
 // (how votes are counted, the quorum, the pass mark, how long a motion stays open and a request
 // waits, the standing votes), with an editor for whoever governs it and one's own standing vote. A
-// vote, an approval and a denial play as turns; the rules and a withdrawal are bookkeeping, at once
-// with Undo. In GM → Orgs each is the GM's edit of the effect it plays, the GM voting for anyone.
+// vote, an approval, a denial, the rules and a withdrawal are each done at once, off screen, with
+// Undo (DESIGN §11). In GM → Orgs each is the GM's edit of the effect it plays, the GM voting for anyone.
 
 import { useState } from "preact/hooks";
 import { useApp } from "../../../frontend/app";
@@ -19,6 +19,7 @@ import { DECISION_ACTIONS, DECISION_EFFECTS, DECISION_RANGES, DECISIONS_SECTION,
 import type { OrgRef } from "../../../shared/org-view";
 import type { EditOp } from "../../../shared/protocol";
 import { decodeDecisions } from "./decode";
+import { toastQueued } from "../../../frontend/queued";
 
 const STATUS_TONE: Readonly<Record<MotionView["status"], "neutral" | "accent" | "pos" | "neg">> = { open: "accent", passed: "pos", failed: "neg", withdrawn: "neutral" };
 const STATE_TONE: Readonly<Record<RequestView["state"], "neutral" | "accent" | "pos" | "neg" | "warn">> = { asked: "accent", approved: "pos", denied: "neg", withdrawn: "neutral", lapsed: "warn" };
@@ -135,7 +136,7 @@ export function MotionCard(props: DecisionsBoardProps & { motion: MotionView }) 
         </List>
         {open && !props.gm
           ? m.cast.map((c) => (
-              <Field key={c.voter} label={c.as !== undefined ? `Vote as ${c.name}` : "Your vote"} help="Your vote plays as your next turn.">
+              <Field key={c.voter} label={c.as !== undefined ? `Vote as ${c.name}` : "Your vote"} help="Your vote is cast at once, off screen, with Undo.">
                 <Seg label={c.as !== undefined ? `Vote as ${c.name}` : "Your vote"} value={c.vote} options={VOTE_OPTIONS} disabled={props.busy} onChange={(vote) => props.onChange(voteChange(org.id, m, c.voter, vote, c.as))} />
               </Field>
             ))
@@ -335,7 +336,7 @@ export function DecisionsBoard(props: DecisionsBoardProps & { reader: string | n
 
 // ---------------------------------------------------------------- the tab
 
-/** Play's Decisions: votes, approvals and denials play as the next turn; the rules, one's standing vote and a withdrawal at once, with Undo. */
+/** Play's Decisions: votes, approvals, denials, the rules, one's standing vote and a withdrawal, each done at once, off screen, with Undo. */
 export function OrgDecisionsTab(props: OrgTabProps) {
   const app = useApp();
   const [busy, run] = useBusy();
@@ -344,7 +345,7 @@ export function OrgDecisionsTab(props: OrgTabProps) {
   const onChange = (change: DecisionChange, done?: () => void): void =>
     run(async () => {
       const result = await app.request({ type: "lre.action", chatId: props.chatId, action: change.action, params: change.params, source: "palette" });
-      if (result && "pending" in result && result.pending) app.toast("Saved — it applies when the reply finishes.", "info");
+      toastQueued(app, result && "pending" in result ? result : null);
       if (result) done?.();
     });
   return <DecisionsBoard org={props.org} view={view} busy={busy} gm={false} reader={props.org.people.find((p) => p.you)?.id ?? null} onChange={onChange} />;

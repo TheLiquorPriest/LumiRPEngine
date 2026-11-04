@@ -8,8 +8,9 @@
 import { describe, expect, test } from "bun:test";
 import type { EntityId } from "../../src/shared/ids";
 import type { JsonObject } from "../../src/shared/json";
-import { GRANT_BASES, HANDOVER_BASES, PERMIT_SCOPES, SIZES, type ItemOp, type Rest, type Spot } from "../../src/shared/things";
+import { GRANT_BASES, HANDOVER_BASES, PERMIT_SCOPES, SIZES, type ItemFix, type ItemOp, type Rest, type Spot } from "../../src/shared/things";
 import type { EntityDef, RelationInstance, WorldDoc } from "../../src/shared/world";
+import { resolveEdit } from "../../src/engine/edits";
 import { createRegistry } from "../../src/engine/registry-impl";
 import { createRng, type Rng } from "../../src/engine/rng";
 import { isGone } from "../../src/engine/scope";
@@ -234,5 +235,103 @@ describe("a merge never puts a thing inside itself (ITEMS-SPEC §3.3, §7.5)", (
     expect(duplicates()).toEqual([]);
     expect(applyItemOp(w, { do: "move", item: "pouch", to: { place: "harbor_street_114" }, why: "taken out" }, GM)).toEqual({});
     expect(duplicates()).toEqual(["duplicate:duffel+pouch"]);
+  });
+});
+
+describe("wearing takes off what holds the slot, and a thing worn but lying elsewhere is a finding (N3)", () => {
+  /** Port Alder with a rain jacket and a denim jacket on Jordan, the rain jacket worn, and a cap and a watch for the slots pockets and heads keep. */
+  function dressed(): Working {
+    return portAlder((world) => {
+      world.entities.rain_jacket = thing("rain_jacket", "Rain jacket", { owner: JORDAN, slot: "torso_outer" }, [{ type: "in", to: JORDAN }, { type: "worn_by", to: JORDAN, fields: { slot: "torso_outer" } }]);
+      world.entities.denim_jacket = thing("denim_jacket", "Denim jacket", { owner: JORDAN, slot: "torso_outer" }, [{ type: "in", to: JORDAN }]);
+      world.entities.coin = thing("coin", "Lucky coin", { owner: JORDAN, slot: "pocket" }, [{ type: "in", to: JORDAN }, { type: "worn_by", to: JORDAN, fields: { slot: "pocket" } }]);
+      world.entities.token = thing("token", "Arcade token", { owner: JORDAN, slot: "pocket" }, [{ type: "in", to: JORDAN }]);
+    });
+  }
+  const wornBy = (w: Working, id: string): string[] => (w.state.entities[id]?.relations ?? []).filter((r) => r.type === "worn_by").map((r) => r.to);
+
+  test("an occupied slot swaps: the denim jacket goes on, the rain jacket comes off and stays carried", () => {
+    const w = dressed();
+    expect(applyItemOp(w, { do: "wear", item: "denim_jacket", who: JORDAN }, STORY)).toEqual({});
+    expect(wornBy(w, "denim_jacket")).toEqual([JORDAN]);
+    expect(wornBy(w, "rain_jacket")).toEqual([]);
+    expect(spotOf(w.state, "rain_jacket")).toEqual({ in: JORDAN });
+    // A pocket holds several: nothing comes out of it.
+    expect(applyItemOp(w, { do: "wear", item: "token", who: JORDAN }, STORY)).toEqual({});
+    expect(wornBy(w, "coin")).toEqual([JORDAN]);
+    expect(wornBy(w, "token")).toEqual([JORDAN]);
+  });
+
+  test("a jacket worn by Jordan but lying at 114 Harbor Street is a finding whose fix takes it off him, and it is gone once fixed", () => {
+    const w = portAlder((world) => {
+      world.entities.rain_jacket = thing("rain_jacket", "Rain jacket", { owner: JORDAN, slot: "torso_outer", place: "harbor_street_114" }, [{ type: "worn_by", to: JORDAN, fields: { slot: "torso_outer" } }]);
+    });
+    const finding = tidyFindings(w.ctx, []).find((f) => f.kind === "worn_elsewhere");
+    expect(finding?.key).toBe("worn_elsewhere:rain_jacket");
+    expect(finding?.text).toBe("Rain jacket lies at 114 Harbor Street, yet Jordan Ellis still wears it.");
+    expect(finding?.fix?.ops).toEqual([{ op: "item", change: { do: "wear", item: "rain_jacket", who: JORDAN, off: true } }]);
+    const change = finding?.fix?.ops[0];
+    if (change?.op !== "item" || change.change.do === "remove") throw new Error("no item op");
+    expect(applyItemOp(w, change.change, GM)).toEqual({});
+    expect(wornBy(w, "rain_jacket")).toEqual([]);
+    expect(spotOf(w.state, "rain_jacket")).toEqual({ place: "harbor_street_114" });
+    expect(tidyFindings(w.ctx, []).some((f) => f.kind === "worn_elsewhere")).toBe(false);
+  });
+});
+
+describe("a Gear or Place line the final review took out is a finding (N3)", () => {
+  test("the head turn's dropped and rewritten Gear lines each read as one, naming the things they name; a Rules edit or an append is none", () => {
+    const w = portAlder();
+    const finalEdits = [
+      { op: "drop" as const, part: "gear", at: 2, line: "- Truck keys (Danny Okafor's), in hand" },
+      { op: "replace" as const, part: "place", at: 0, line: "In the room: a sofa", text: "In the room: a worn sofa" },
+      { op: "drop" as const, part: "narrator_rules", at: 0, line: "Keep it short." },
+      { op: "append" as const, part: "gear", text: "- A new line" },
+    ];
+    const found = tidyFindings(w.ctx, [], { finalEdits }).filter((f) => f.kind === "final_dropped");
+    expect(found.map((f) => [f.things, f.fix, f.key.startsWith("final_dropped:")])).toEqual([
+      [[], null, true],
+      [["danny_keys", "pov_keys"], null, true],
+    ]);
+    expect(found[1]?.text).toBe('The last turn\'s final review took this line out of the narrator\'s Gear section: "- Truck keys (Danny Okafor\'s), in hand". A line it can\'t use often means the things are wrong: look at what it names.');
+    // Without the head turn's edits, there is none.
+    expect(tidyFindings(w.ctx, []).some((f) => f.kind === "final_dropped")).toBe(false);
+  });
+});
+
+describe("a player's ✎ on a thing of theirs (fix_item, N3)", () => {
+  /** Port Alder with Jordan at Alder Market, his TV on him, Danny's thermos at home and a wardrobe there. */
+  function market(): Working {
+    return portAlder((world) => {
+      const pov = world.entities[JORDAN];
+      if (pov) pov.fields.place = "alder_market";
+      world.entities.tv = thing("tv", "Television", { owner: JORDAN }, [{ type: "in", to: JORDAN }]);
+      world.entities.thermos = thing("thermos", "Thermos", { owner: DANNY, place: "harbor_street_114" });
+      world.entities.wardrobe = thing("wardrobe", "Wardrobe", { owner: JORDAN, place: "harbor_street_114" });
+    });
+  }
+  const fix = (w: Working, change: ItemFix): string | null => {
+    const out = resolveEdit(reg, w.world, w.state, [{ op: "fix_item", change }], { gm: false, runSeed: "fix" });
+    if ("rejection" in out) return out.rejection.code;
+    w.applyAll(out.events);
+    return null;
+  };
+
+  test("his own TV moves home, and its size can be set and left to its name again", () => {
+    const w = market();
+    expect(fix(w, { do: "move", item: "tv", to: { place: "harbor_street_114" } })).toBeNull();
+    expect(spotOf(w.state, "tv")).toEqual({ place: "harbor_street_114" });
+    expect(fix(w, { do: "size", item: "tv", size: "armful" })).toBeNull();
+    expect(w.state.entities.tv?.fields.size).toBe("armful");
+    expect(fix(w, { do: "size", item: "tv", size: null })).toBeNull();
+    expect(w.state.entities.tv?.fields.size ?? null).toBeNull();
+  });
+
+  test("refused: someone else's thing, a place he can't see, another person as the holder", () => {
+    const w = market();
+    expect(fix(w, { do: "move", item: "thermos", to: { place: "alder_market" } })).toBe("not_yours");
+    expect(fix(w, { do: "move", item: "tv", to: { in: DANNY } })).toBe("not_yours");
+    expect(fix(w, { do: "move", item: "tv", to: { place: "no_such_place" } })).toBe("missing_place");
+    expect(spotOf(w.state, "tv")).toEqual({ in: JORDAN });
   });
 });

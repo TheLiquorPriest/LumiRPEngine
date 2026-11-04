@@ -17,7 +17,9 @@ import { Button, Card, Empty, Field, List, ListRow, PageHeader, Row, Section, us
 import { humanize } from "../../../frontend/format";
 import { MoneyInput } from "../../../frontend/money-input";
 import type { SheetProps } from "../../../frontend/registry";
-import { PAY_BASES, PAY_EVERY } from "../../../shared/finance";
+import { PAY_BASES, PAY_CHOICE_LABELS, PAY_CHOICES } from "../../../shared/finance";
+import { OFFSTAGE_NOTE } from "../../../shared/offstage";
+import { toastQueued } from "../../../frontend/queued";
 import { formatMoneyInput } from "../../../shared/money";
 import type { OrgPowerView, OrgPersonView, OrgView } from "../../../shared/org-view";
 import { ORGS_ORG_PANEL } from "../../../shared/org-view";
@@ -36,6 +38,8 @@ import {
   newcomers,
   orgEditOf,
   orgEditRoute,
+  payoutAction,
+  payoutProblem,
   raiseAction,
   removeAction,
   revokeAction,
@@ -46,7 +50,7 @@ import {
   type MemberControl,
   type StaffJobInfo,
 } from "./edit";
-import { AS_TURN, DelegateSheet, DuesSheet, EditFrame, PositionSheet, type PlayHost } from "./rules";
+import { AT_ONCE, DelegateSheet, DuesSheet, EditFrame, PositionSheet, type PlayHost } from "./rules";
 import { andList, limitWords, powerFamilies, powersText } from "./words";
 
 /** How someone belongs there, in words: "Owner (100%)", "Staff", "Member", a party tier. */
@@ -166,7 +170,7 @@ function MemberForm(props: { org: OrgView; person: OrgPersonView; control: "appo
     action === null ? (control === "raise" ? "Type the new rate." : "Hours a week are more than none and at most 168.") : control === "appoint" && position === (person.position?.id ?? "") ? "Choose another position." : control === "title" && title.trim() === person.title ? "Type a new title, or none." : null;
   const go = { appoint: "Appoint", title: "Change title", raise: "Give the raise", hours: "Change hours" }[control];
   return (
-    <EditFrame name={`member-${control}`} title={MEMBER_CONTROL_LABELS[control].replace("…", "")} subtitle={`${person.name} · ${org.name}`} onBack={props.onBack} go={go} problem={problem} busy={host.busy} note={AS_TURN} onGo={() => (action ? host.play(action, props.onBack) : undefined)}>
+    <EditFrame name={`member-${control}`} title={MEMBER_CONTROL_LABELS[control].replace("…", "")} subtitle={`${person.name} · ${org.name}`} onBack={props.onBack} go={go} problem={problem} busy={host.busy} note={AT_ONCE} action={action} onGo={(tell) => (action ? host.play(action, props.onBack, tell) : undefined)}>
       {control === "appoint" ? <RefPicker label="Position" value={position} options={appointable(org).map((p) => ({ value: p.id, label: p.title }))} none="No position" onChange={setPosition} /> : null}
       {control === "title" ? <TextField label="Title" value={title} help="Empty, they go by their position's title, or their job's." onInput={setTitle} /> : null}
       {control === "raise" ? (
@@ -199,7 +203,7 @@ function MemberSheet(props: { org: OrgView; who: string | null; host: PlayHost; 
     if (control === "appoint" || control === "title" || control === "raise" || control === "hours") return setDoing(control);
     if (control === "delegate") return props.open(orgEditRoute(org.id, "delegate", person.id));
     const action = control === "revoke" ? revokeAction(org, person.id) : control === "remove" ? removeAction(org, person.id) : jobAction(control, person.job ?? "");
-    void host.confirm(MEMBER_CONTROL_LABELS[control].replace("…", ""), `${confirmWords(control, person, org)} It plays as your next turn.`, MEMBER_CONTROL_LABELS[control].replace("…", "")).then((yes) => (yes ? host.play(action) : undefined));
+    void host.confirm(MEMBER_CONTROL_LABELS[control].replace("…", ""), `${confirmWords(control, person, org)} ${OFFSTAGE_NOTE}`, MEMBER_CONTROL_LABELS[control].replace("…", "")).then((yes) => (yes ? host.play(action) : undefined));
   };
   return (
     <div class="lre-stack" data-lre-org-member={person.id}>
@@ -237,7 +241,7 @@ function HireSheet(props: { org: OrgView; host: PlayHost }) {
   const people = newcomers(org, "hire");
   const action = hireAction(org, form, host.currency);
   return (
-    <EditFrame name="hire" title="Hire someone" subtitle={org.name} onBack={host.back} go="Hire" problem={people.length === 0 ? "There's no one you know to hire." : hireProblem(form, host.currency)} busy={host.busy} note={AS_TURN} onGo={() => (action ? host.play(action, host.back) : undefined)}>
+    <EditFrame name="hire" title="Hire someone" subtitle={org.name} onBack={host.back} go="Hire" problem={people.length === 0 ? "There's no one you know to hire." : hireProblem(form, host.currency)} busy={host.busy} note={AT_ONCE} action={action} onGo={(tell) => (action ? host.play(action, host.back, tell) : undefined)}>
       <RefPicker label="Whom" value={form.worker} options={people.map((p) => ({ value: p.id, label: p.name }))} onChange={(worker) => set({ worker })} />
       <TextField label="As" value={form.title} placeholder="Receptionist" onInput={(title) => set({ title })} />
       {appointable(org).length > 0 ? <RefPicker label="Position" value={form.position} options={appointable(org).map((p) => ({ value: p.id, label: p.title }))} none="No position" onChange={(position) => set({ position })} /> : null}
@@ -246,7 +250,7 @@ function HireSheet(props: { org: OrgView; host: PlayHost }) {
         <MoneyInput currency={host.currency} value={form.rate} label="Rate" placeholder="As their trade pays" onInput={(rate) => set({ rate })} />
       </Field>
       <TextField label="Hours a week" type="number" value={form.hours} placeholder="As their trade works" onInput={(hours) => set({ hours })} />
-      <RefPicker label="Paydays" value={form.every} options={PAY_EVERY.filter((e) => e !== "custom").map((e) => ({ value: e, label: humanize(e) }))} none="As the others are paid" onChange={(every) => set({ every })} />
+      <RefPicker label="Paydays" value={form.every} options={PAY_CHOICES.filter((e) => e !== "custom").map((e) => ({ value: e, label: PAY_CHOICE_LABELS[e] }))} none="As the others are paid" onChange={(every) => set({ every })} />
     </EditFrame>
   );
 }
@@ -260,10 +264,32 @@ function AdmitSheet(props: { org: OrgView; host: PlayHost }) {
   const action = admitAction(org, form);
   const joins = appointable(org).find((p) => p.id === org.defaultPosition)?.title;
   return (
-    <EditFrame name="admit" title="Admit a member" subtitle={org.name} onBack={host.back} go="Admit" problem={people.length === 0 ? "There's no one you know to admit." : form.who === "" ? "Choose whom to admit." : null} busy={host.busy} note={AS_TURN} onGo={() => (action ? host.play(action, host.back) : undefined)}>
+    <EditFrame name="admit" title="Admit a member" subtitle={org.name} onBack={host.back} go="Admit" problem={people.length === 0 ? "There's no one you know to admit." : form.who === "" ? "Choose whom to admit." : null} busy={host.busy} note={AT_ONCE} action={action} onGo={(tell) => (action ? host.play(action, host.back, tell) : undefined)}>
       <RefPicker label="Whom" value={form.who} options={people.map((p) => ({ value: p.id, label: p.name }))} onChange={(who) => set({ who })} />
       <TextField label="Title" value={form.title} placeholder="Member" onInput={(title) => set({ title })} />
       {appointable(org).length > 0 ? <RefPicker label="Position" value={form.position} options={appointable(org).map((p) => ({ value: p.id, label: p.title }))} none={joins ? `${joins}, as new members join` : "No position"} onChange={(position) => set({ position })} /> : null}
+    </EditFrame>
+  );
+}
+
+/** A trust's payout (`distribute_profit` with an amount, DESIGN §29.7): a stated amount of its money, to its beneficiaries by their shares. */
+function PayoutSheet(props: { org: OrgView; host: PlayHost }) {
+  const { org, host } = props;
+  const [text, setText] = useState("");
+  const beneficiaries = org.people.filter((p) => p.role === "beneficiary");
+  const action = payoutAction(org.id, text, host.currency);
+  return (
+    <EditFrame name="payout" title="Pay out to its beneficiaries" subtitle={org.name} onBack={host.back} go="Pay it out by share" problem={payoutProblem(text, host.currency)} busy={host.busy} note={AT_ONCE} action={action} onGo={(tell) => (action ? host.play(action, host.back, tell) : undefined)}>
+      {beneficiaries.length > 0 ? (
+        <List>
+          {beneficiaries.map((p) => (
+            <ListRow key={p.id} icon="user" title={p.you ? `${p.name} (you)` : p.name} value={p.share !== null ? `${Number(p.share.toFixed(2))}%` : undefined} valueTone="muted" />
+          ))}
+        </List>
+      ) : null}
+      <Field label="Amount">
+        <MoneyInput currency={host.currency} value={text} label="Amount" onInput={setText} invalid={text.trim() !== "" && action === null} />
+      </Field>
     </EditFrame>
   );
 }
@@ -285,10 +311,10 @@ export function OrgEditSheet(props: SheetProps) {
   const host: PlayHost = {
     currency: props.state.currency ?? DEFAULT_CURRENCY,
     busy,
-    play: (a, done) =>
+    play: (a, done, tell) =>
       run(async () => {
-        const result = await app.request({ type: "lre.action", chatId: props.chatId, action: a.action, params: a.params, source: "palette" });
-        if (result && "pending" in result && result.pending) app.toast("Saved — it applies when the reply finishes.", "info");
+        const result = await app.request({ type: "lre.action", chatId: props.chatId, action: a.action, params: a.params, source: "palette", ...(tell !== undefined ? { tell } : {}) });
+        if (result && "pending" in result) toastQueued(app, result);
         if (result !== null) done?.();
       }),
     confirm: (title, message, ok) => app.host.confirm(title, message, "danger", ok),
@@ -307,5 +333,7 @@ export function OrgEditSheet(props: SheetProps) {
       return <DelegateSheet org={org} who={target.id} host={host} />;
     case "dues":
       return <DuesSheet org={org} host={host} />;
+    case "payout":
+      return <PayoutSheet org={org} host={host} />;
   }
 }

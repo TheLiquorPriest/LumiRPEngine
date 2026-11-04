@@ -7,6 +7,7 @@ import type { InferredChecks, SheetSkill } from "./inferred";
 import type { JsonObject, JsonValue } from "./json";
 import type { MindCallTrace, MindsGmView } from "./minds";
 import type { GenerateAs } from "./protocol";
+import type { GmHeldWrite } from "./gm-parts";
 import type {
   ActionId,
   Band,
@@ -33,6 +34,7 @@ import type { JournalNote, KeepLine, TimelapseTarget } from "./ledger";
 import type { RoutineRole } from "./routines";
 import type { AdjudicationDef, FacetDef, FacetId, FacetValueId, FieldType, SectionFeed, StepPurpose, WorldCurrency } from "./world";
 import type { LorePolicy, NarratorView } from "./settings";
+import type { OffstageSettings } from "./offstage";
 import type { PlaceRef } from "./character";
 
 export type ChatStatus = "not_world" | "idle" | "in_flight" | "paused";
@@ -385,6 +387,14 @@ export interface ControlsView {
   things: {
     tidy: { chat: boolean | null; world: boolean };
   };
+  /**
+   * Where cash needs a machine or a branch (GM → This chat → Money, DESIGN §25.8): the chat's own
+   * rule (null where it follows the world's) beside the world's switch (`features.atm`: on, off, or
+   * null for its usual Money level), and the player character's Money level; null in a world without money.
+   */
+  cash?: { chat: boolean | null; world: boolean | null; level: number; usual: number } | null;
+  /** Settings → Narrator → Out-of-play actions, the user's: what each confirm step's Tell switch starts from (DESIGN §11). */
+  offstage: OffstageSettings;
 }
 
 export interface StateView {
@@ -524,6 +534,8 @@ export interface GmView {
   edits: { messageId: string; seq: number; lines: string[]; by?: string; undo: string | null }[];
   /** Writes held during a reply that didn't apply when it finished, with the validator's reason. */
   refused: { id: string; reason: string }[];
+  /** Writes made while a turn was under way and waiting for it (DESIGN §5.1, P2), oldest first: what each does, worded, and what it waits on. */
+  held: GmHeldWrite[];
   /** Character minds (DESIGN §24.9): every character's fidelity and why, their latest mind, plans, notes, commitments and summary. */
   minds: MindsGmView;
 }

@@ -1,11 +1,12 @@
-// Money → In & out (ORG-SPEC §5.1): what comes in and goes out. A person's Income, each job with
-// its next payday and what it last paid, opening the job (its pay, payslip, deductions, where the
-// pay goes, Quit); their standing payments by status, with New; the invoices billed to them, each
-// opening its Pay now where they may pay it; their share of their household's costs, which opens
-// the household in Orgs; and the accounts autopay runs on, each opening its autopay. A household's
-// own money lists who pays what of its shared costs, its shared accounts and the costs; a
-// business's own lists its trade among its standing payments, and the invoices it issued and is
-// billed.
+// Money → In & out (ORG-SPEC §5.1): what comes in and goes out, under Money's one filter bar (In or
+// Out, whose money it is, one account's). A person's Income, each job with its next payday and what
+// it last paid, opening the job (its pay, payslip, deductions, where the pay goes, Quit); their
+// standing payments by status, with New; the invoices billed to them, each opening its Pay now where
+// they may pay it; their share of their household's costs, which opens the household in Orgs; and
+// the accounts autopay runs on, each opening its autopay. A household's own money lists who pays
+// what of its shared costs, its shared accounts and the costs; a business's own lists its trade
+// among its standing payments, and the invoices it issued and is billed. Direction shows only what
+// comes in or goes out; Whose and Account pick among the standing payments.
 
 import { formatMoney } from "../../../shared/world";
 import type { HouseholdView } from "../../../shared/finance";
@@ -14,7 +15,8 @@ import { humanize } from "../../../frontend/format";
 import { autopayText } from "./accounts";
 import { FlowListRow, playerFlowControls, StandingPayments } from "./flows";
 import type { SectionProps, SegmentProps } from "./hub";
-import { accountControls, householdRows, invoicesToPay, ownBusiness, possessive, sharedAccounts, standingPayments } from "./layout";
+import { accountControls, flowKept, householdRows, inOutChoices, invoicesToPay, ownBusiness, possessive, sharedAccounts, standingPayments } from "./layout";
+import { MoneyFilters } from "./lines";
 import { actionPage, detailPage } from "./nav";
 import { IssuedInvoices, jobTitle } from "./work";
 
@@ -166,20 +168,29 @@ function Autopay(props: SectionProps) {
   );
 }
 
-/** In & out, as the party's kind has it: a household's shared costs, a person's income and household, a business's invoices, and everyone's standing payments, bills and autopay. */
+/** In & out, as the party's kind has it: a household's shared costs, a person's income and household, a business's invoices, and everyone's standing payments, bills and autopay, as the filter bar picks them. */
 export function InOutSegment(props: SegmentProps) {
-  const { view } = props;
+  const { view, filter } = props;
   const own = ownBusiness(view);
   const household = view.household !== null && view.household.id === view.party ? view.household : null;
+  const choices = inOutChoices(view);
+  const shows = (direction: "in" | "out"): boolean => filter.direction === "" || filter.direction === direction;
+  // What isn't a standing payment is the party's own, on its own accounts: it shows while Whose and Account pick nothing else.
+  const unpicked = filter.account === "" && (filter.whose === "" || filter.whose === view.party);
   return (
     <>
-      {household ? <SharedCosts {...props} household={household} /> : null}
-      {view.partyKind === "person" ? <Income {...props} /> : null}
-      <StandingPayments {...props} flows={standingPayments(view)} />
-      <InvoicesToPay {...props} />
-      {own ? <IssuedInvoices {...props} business={own} /> : null}
-      {view.partyKind === "person" ? <Household {...props} /> : null}
-      <Autopay {...props} />
+      {view.flows.length > 0 ? (
+        <Section flush>
+          <MoneyFilters filter={filter} onFilter={props.onFilter} whose={choices.whose} accounts={choices.accounts} />
+        </Section>
+      ) : null}
+      {household && unpicked && shows("out") ? <SharedCosts {...props} household={household} /> : null}
+      {view.partyKind === "person" && unpicked && shows("in") ? <Income {...props} /> : null}
+      <StandingPayments {...props} flows={standingPayments(view).filter((f) => flowKept(f, filter))} />
+      {unpicked && shows("out") ? <InvoicesToPay {...props} /> : null}
+      {own && unpicked && shows("in") ? <IssuedInvoices {...props} business={own} /> : null}
+      {view.partyKind === "person" && unpicked && shows("out") ? <Household {...props} /> : null}
+      {unpicked && shows("out") ? <Autopay {...props} /> : null}
     </>
   );
 }

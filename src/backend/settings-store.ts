@@ -24,6 +24,7 @@ import { type AcceptanceConnection, agentSettingsOf, defaultAgentSettings } from
 import { MARK_TEXT_IDS, PROMPT_SETTINGS_DEFAULTS, promptSettingsOf, promptsWritten, SWIPE_TEXTS } from "../shared/prompts";
 import { DIAGNOSTICS_DEFAULTS, diagnosticsSettingsOf } from "../shared/diagnostics";
 import { RETENTION_DEFAULTS, retentionOf } from "../shared/stores";
+import { OFFSTAGE_DEFAULTS, offstageSettingsOf } from "../shared/offstage";
 import type { HostPort } from "./host";
 import { readStoredJson } from "./stored-json";
 import { turnFrame } from "./turn-frame";
@@ -282,6 +283,8 @@ export function defaultSettings(): UserSettings {
     narrator: { ...NARRATOR_DEFAULTS },
     // The narrator is given the prices the engine charges and told to state them.
     statePrices: true,
+    // Out-of-play actions are told as a turn would have narrated them: payments to others at any amount, credit, property, business, staff, members and structure.
+    offstage: { tell: { ...OFFSTAGE_DEFAULTS.tell }, paymentsFrom: OFFSTAGE_DEFAULTS.paymentsFrom },
     // Tidy up shows 50 findings a run.
     tidy: { ...TIDY_DEFAULTS },
   };
@@ -621,6 +624,7 @@ function conform(v: JsonObject, d: UserSettings): UserSettings {
     diagnostics: diagnosticsSettingsOf(v.diagnostics, d.diagnostics),
     narrator: narratorSettingsOf(v.narrator, d.narrator),
     statePrices: typeof v.statePrices === "boolean" ? v.statePrices : d.statePrices,
+    offstage: offstageSettingsOf(v.offstage, d.offstage),
     tidy: tidySettingsOf(v.tidy, d.tidy),
   };
 }

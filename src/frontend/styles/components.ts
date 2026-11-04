@@ -132,6 +132,22 @@ button.lre-item:hover:not(:disabled){background:var(--lre-hover)}
 textarea.lre-input{min-height:80px;resize:vertical;font-family:var(--lre-mono);font-size:var(--lre-fs-sm)}
 select.lre-input{appearance:auto}
 .lre-input.invalid{border-color:var(--lre-neg)}
+.lre-search{position:relative;display:flex;align-items:center;min-width:0}
+.lre-search>.lre-search-icon{position:absolute;top:50%;left:var(--lre-s3);transform:translateY(-50%);color:var(--lre-muted);pointer-events:none}
+.lre-search>.lre-search-input{padding-left:calc(var(--lre-s3) + 16px + var(--lre-s2));padding-right:var(--lre-tap);-webkit-appearance:none;appearance:none}
+.lre-search>.lre-search-input::-webkit-search-cancel-button,.lre-search>.lre-search-input::-webkit-search-decoration{-webkit-appearance:none;appearance:none}
+.lre-search>.lre-iconbtn{position:absolute;top:50%;right:0;transform:translateY(-50%)}
+.lre-diff{display:flex;flex-direction:column;gap:var(--lre-s1);min-width:0}
+.lre-diff-summary,.lre-diff-none{margin:0;font-size:var(--lre-fs-sm);line-height:1.4;color:var(--lre-muted);overflow-wrap:anywhere}
+.lre-diff-lines{max-height:min(50vh,360px);overflow:auto;overscroll-behavior:contain;padding:var(--lre-s1) 0;border-radius:var(--lre-r);background:var(--lre-well);font:var(--lre-fs-sm)/1.45 var(--lre-mono)}
+.lre-diff-line{display:flex;gap:var(--lre-s2);min-width:0;min-height:1.45em;padding:0 var(--lre-s3);color:var(--lre-fg);text-decoration:none}
+.lre-diff-mark{flex:none;width:1ch;text-align:center;color:var(--lre-muted)}
+.lre-diff-text{flex:1;min-width:0;white-space:pre-wrap;overflow-wrap:anywhere}
+.lre-diff-line.del{background:var(--lre-neg-soft)}
+.lre-diff-line.del>.lre-diff-mark{color:var(--lre-neg)}
+.lre-diff-line.add{background:var(--lre-pos-soft)}
+.lre-diff-line.add>.lre-diff-mark{color:var(--lre-pos)}
+.lre-diff-skip{padding:var(--lre-s1) var(--lre-s3);color:var(--lre-muted);font-family:var(--lre-font);font-style:italic}
 .lre-check{display:inline-flex;align-items:center;justify-content:center;flex:0 0 auto;min-width:var(--lre-tap);min-height:var(--lre-tap);cursor:pointer}
 .lre-check>input{width:22px;height:22px;margin:0;cursor:pointer;accent-color:var(--lre-accent)}
 .lre-stepper{display:inline-flex;align-items:center;gap:var(--lre-s1);margin-left:auto;max-width:100%;min-width:0}

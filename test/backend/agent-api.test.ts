@@ -532,7 +532,7 @@ describe("templates and chats", () => {
     rig.host.sendUser(chatId, "look around");
     await rig.host.settle();
     const g = await rig.host.start(chatId, { type: "normal" });
-    expect(rig.body(await rig.send({ type: "lre.world", op: "upgrade", chatId, to }))).toEqual({ revision: to, pending: true });
+    expect(rig.body(await rig.send({ type: "lre.world", op: "upgrade", chatId, to }))).toEqual({ revision: to, pending: true, queued: "reply" });
     await rig.host.finish(g, "Quiet.");
     expect(rig.body(await rig.send({ type: "lre.world", op: "chats", chatId })).chats).toEqual([expect.objectContaining({ chatId, revision: to, behind: false })]);
   });

@@ -315,13 +315,19 @@ const ANCHOR_SPAN = new RegExp(` (?:until|till|til|to|by)(?: the| my| our)? (${l
  * - the next shift or commitment: "until my next shift", "till work", "until my appointment".
  *
  * It is read only once `interpret` has chosen to let time pass, so it never decides whether typed
- * text is a time skip. Words that also name a day and time ("Friday at 6 PM") are left to the
- * read's stated time; words that name no span ("for some time"), or two different ones, read as none.
+ * text is a time skip. Words that also name a day and time ("Friday at 6 PM", "Tuesday, June 25",
+ * a weekday or a month by its short name or in full) are left to the read's stated time; words that
+ * name no span ("for some time"), or two different ones, read as none. Speech in quotes is no span
+ * of the player's ("'See you this afternoon,' she says" names no afternoon), though words quoted
+ * whole are read as they are.
  */
 export function typedSpan(cal: Calendar, now: number, words: string, anchorAt?: (anchor: SpanAnchor) => number | null): TimelapseTarget | null {
+  // Speech in quotes goes, each quote a break; a span the read quoted whole is its words.
+  const whole = /^\s*["“«]([^"“”«»]*)["”»]\s*$/.exec(words);
+  const unquoted = whole ? (whole[1] ?? "") : words.replace(/"[^"]*(?:"|$)|“[^”]*(?:”|$)|«[^»]*(?:»|$)/g, " | ");
   // A sentence's or a clause's end stays as a break ("|"), so lengths either side of it never add up;
   // a decimal point stays as it is.
-  const t = ` ${words
+  const t = ` ${unquoted
     .toLowerCase()
     .replace(/([ap])\.\s?m\.?/g, "$1m")
     .replace(/(?<!\d)[.,;!?]|[.,;!?](?!\d)/g, " | ")
@@ -330,8 +336,9 @@ export function typedSpan(cal: Calendar, now: number, words: string, anchorAt?: 
     .trim()} `
     .replace(/ (?:a |an )?half (?:an? )?hour(?= )/g, " 30 minutes")
     .replace(/ (?:a |an )?quarter (?:of )?(?:an? )?hour(?= )/g, " 15 minutes");
-  const weekdays = cal.system.weekdayNames.map(plain).filter((n) => n.length > 3);
-  const months = cal.system.monthNames.map(plain).filter((n) => n !== "");
+  // A day named by its weekday or its month, short or in full ("tue", "tuesday", "jun 25", "june 25").
+  const weekdays = [...cal.system.weekdayNames, ...cal.system.fullWeekdayNames].map(plain).filter((n) => n.length > 3);
+  const months = [...new Set([...cal.system.monthNames, ...cal.system.fullMonthNames].map(plain).filter((n) => n !== ""))];
   if (STATED_TIME.test(t) || weekdays.some((d) => t.includes(` ${d} `)) || months.some((m) => new RegExp(` (?:${m} \\d|\\d+ (?:of )?${m} )`).test(t))) return null;
   const found: TimelapseTarget[] = [];
   const lengths: { start: number; end: number; minutes: number }[] = [];

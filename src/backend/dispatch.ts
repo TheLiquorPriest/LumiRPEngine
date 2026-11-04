@@ -2,7 +2,7 @@
 // `lre.error` with its `reqId`. Ledger writes go through the queue and are held inside open
 // windows (P2: `pending: true`).
 
-import type { Band, ChatId, DomainId, RevisionId, UserId, WorldId } from "../shared/ids";
+import type { Band, ChatId, DomainId, MessageId, RevisionId, UserId, WorldId } from "../shared/ids";
 import { CLAIM_MODE_LABEL } from "../shared/claims";
 import { INFER_MODE_LABEL } from "../shared/inferred";
 import { DOMAINS, pathSafe } from "../shared/ids";
@@ -11,8 +11,12 @@ import { hasOwn, isRecord, safeKey } from "../shared/json";
 import { routineSettingsOf } from "../shared/routines";
 import type { EventRef, FixDirective, HeldWrite, LedgerEvent, MarkerBody, Rec } from "../shared/ledger";
 import { LEDGER_NAMESPACE } from "../shared/ledger";
-import type { RulesetDef, WorldDoc } from "../shared/world";
+import type { ActionDef, RulesetDef, WorldDoc } from "../shared/world";
 import { formatMoney } from "../shared/world";
+import { OFFSTAGE_ORIGIN, ORIGIN_FIELD, playsOffstage, toldByDefault } from "../shared/offstage";
+import { parseItemFix } from "../shared/things";
+import { actionWords, toldAction } from "../engine/action-words";
+import { placeOfEntity } from "../engine/scope";
 import { previewSheet, previewSkills } from "../engine/authoring";
 import { parseEditOps, resolveEdit } from "../engine/edits";
 import { routineChanges, routineGmView, routinePlayerView } from "../packs/castlife/core/view";
@@ -58,8 +62,9 @@ import { playerReason } from "./requirement-words";
 import { recordOutcome, undoModeChange, type ModeChange } from "./settings-store";
 import { applyProposals } from "./turn-model";
 import { upgradePreview } from "./upgrade-preview";
-import { fixChip, recentLines, TIMELAPSE_ACTION } from "./view";
-import { buildGmView, gmThings, gmThingsHead, keepInWorld, madeInPlay } from "./gm";
+import { appliedEvents, doneAfter, fixChip, fixLines, recentLines, TIMELAPSE_ACTION, toldWords } from "./view";
+import { buildGmPart, buildGmView, gmThings, gmThingsHead, keepInWorld, madeInPlay } from "./gm";
+import type { QueuedOn } from "../shared/gm-parts";
 import type { KeepResult } from "../shared/thing-gm";
 import { buildCharacter } from "../engine/character";
 import { buildContext, findThingIds, personThings, thingPage, thingPicks, thingsList, thingTypes } from "../engine/thing-view";
@@ -89,6 +94,11 @@ const BAND_WHO: Record<Band, string> = { principal: "leads", supporting: "suppor
 
 function isRequest(raw: unknown): raw is FrontendToBackend {
   return isRecord(raw) && raw.lre === PROTOCOL_VERSION && typeof raw.type === "string" && typeof raw.reqId === "string";
+}
+
+/** What a write's answer says of it (DESIGN §5.1, P2): whether it waits for a turn under way, and what it waits on (`queued`). */
+function waits(result: { pending: boolean; queued?: QueuedOn }): { pending: boolean; queued?: QueuedOn } {
+  return result.queued !== undefined ? { pending: result.pending, queued: result.queued } : { pending: result.pending };
 }
 
 /** Refuses a settings write that would change what acceptance runs guard (AGENT-LOOP-PLAN §12): an outside client's, however its patch says it. */
@@ -196,13 +206,13 @@ export class Dispatcher {
     if (!(await this.rt.runOf(chatId, userId)) || !(await this.rt.ledger.core(chatId, userId))) throw new RequestError("not_world_chat", "this chat is not attached to a world");
   }
 
-  private async write(chatId: ChatId, userId: UserId, w: HeldWrite): Promise<{ applied: boolean; pending: boolean; posted?: { messageId: string; swipeId: number; seq: number } }> {
+  private async write(chatId: ChatId, userId: UserId, w: HeldWrite): Promise<{ applied: boolean; pending: boolean; queued?: QueuedOn; posted?: { messageId: string; swipeId: number; seq: number } }> {
     await this.requireWorldChat(chatId, userId);
     const result = await this.rt.ledger.write(chatId, userId, w);
     if (result.reason === "paused") throw new RequestError("paused", "an earlier message was edited: Keep or Discard first");
     if (!result.applied && !result.pending) throw new RequestError("bad_request", result.reason ?? "the write was refused");
     this.rt.push.changed(chatId, userId);
-    return { applied: result.applied, pending: result.pending, ...(result.posted ? { posted: result.posted } : {}) };
+    return { applied: result.applied, ...waits(result), ...(result.posted ? { posted: result.posted } : {}) };
   }
 
   private async head(chatId: ChatId, userId: UserId): Promise<{ state: Working["state"]; world: Working["world"] }> {
@@ -267,6 +277,36 @@ export class Dispatcher {
   }
 
   /**
+   * An action done at once, off screen (DESIGN §11): resolved on the head as the player character's,
+   * recorded as a `fix` entry `by` the action, with its Undo, and no message, reply or clock time.
+   * One whose requirement or effect fails, or that changes nothing, records nothing and says why;
+   * cash handed to someone who isn't there is refused. Told to the story (the request's Tell, else
+   * Settings → Narrator → Out-of-play actions by its group), the fix records what the next turn's
+   * Outcome says of it (`by.told`), in its words as they read now.
+   */
+  private async offstage(chatId: ChatId, userId: UserId, world: WorldDoc, state: Working["state"], action: ActionDef, r: Extract<FrontendToBackend, { type: "lre.action" }>, label: string): Promise<ResultBodies["lre.action"]> {
+    const runSeed = this.runSeedOf(chatId);
+    const w = new Working(this.rt.registry, world, state);
+    const absent = optionalQuery(w.ctx, "economy.offstage_refusal")?.(w.ctx, r.action, r.params, world.pov) ?? null;
+    if (absent !== null) throw new RequestError("validation", absent);
+    const pov = state.entities[world.pov];
+    const before = { picks: actionWords(this.rt.registry, world, state, action, r.params), from: placeOfEntity(state, world.pov), fields: { ...(pov?.fields ?? {}) } };
+    const res = resolveAction(this.rt.registry, w, { action, actor: world.pov, params: r.params }, createRng(hashParts("lre.mechanical", runSeed, r.action, JSON.stringify(r.params), String(state.clock))), { runSeed });
+    if (!res.ok && res.failed) throw new RequestError("validation", playerReason(res.failed));
+    const refused = res.rejected[0];
+    if (refused) throw new RequestError("validation", refused.rejection.reason);
+    if (res.events.length === 0) throw new RequestError("validation", "That changes nothing.");
+    const tell = typeof r.tell === "boolean" ? r.tell : toldByDefault(r.action, r.params, (await this.rt.settings.get(userId)).offstage, world.currency.decimals);
+    const said = tell ? toldAction(this.rt.registry, world, w.state, res, before) : null;
+    const by = { action: r.action, label: neutralizeMacros(label), ...(said ? { told: neutralizeMacros(toldWords(said.what, said.changes)) } : {}) };
+    // Recorded as a fix (its Undo, its carry to a new swipe), but as the player's own action, not a
+    // correction; a standing payment it sets up says it was set up off screen when it pays (`provenance`).
+    const events = res.events.map((e) => (e.type === "spawn" && e.entity.kind === "flow" ? { ...e, entity: { ...e.entity, fields: { ...e.entity.fields, [ORIGIN_FIELD]: OFFSTAGE_ORIGIN } } } : e));
+    const written = await this.write(chatId, userId, { kind: "post", id: this.nextId(), target: "head", entry: { kind: "fix", events, by } });
+    return { applied: true, ...waits(written), undo: written.posted ? fixChip(written.posted.messageId, written.posted.swipeId, written.posted.seq) : null };
+  }
+
+  /**
    * A chip-applied change with what follows from it on the head (DESIGN §4.3, §9.4): the rules its
    * events fire (`rules`: a narrated time skip's own catch-up ran its rules already) and the tracks
    * it advances, recorded in the same `confirm` entry, as an automatic read's post pass does, so a
@@ -296,7 +336,7 @@ export class Dispatcher {
     const [outcome] = applyProposals(this.rt.registry, w, [priced], typeof chip.payload.seed === "string" ? chip.payload.seed : `${id}:${choice}`, this.runSeedOf(chatId));
     if (!outcome || outcome.rejection || outcome.events.length === 0) throw new RequestError("validation", outcome?.rejection?.reason ?? "the purchase no longer applies");
     const result = await this.write(chatId, userId, { kind: "post", id: this.nextId(), target: "head", entry: { kind: "confirm", events: this.consequences(w, [...outcome.materialized, ...outcome.events], `${id}:${choice}`, true) } });
-    return { applied: result.applied, pending: result.pending };
+    return { applied: result.applied, ...waits(result) };
   }
 
   /**
@@ -410,19 +450,11 @@ export class Dispatcher {
             return [state.entities[v]?.name ?? (hasOwn(world.places, v) ? world.places[v]?.name : undefined) ?? v];
           });
           label = picked.length > 0 ? `${action.label}: ${picked.join(", ")}` : action.label;
-          // Bookkeeping the player does alone, tapped with no words, is no turn: nothing in it needs
-          // telling, so it is recorded on the head as a ✎ fix is, with its Undo, and no message, reply or clock time.
-          if (action.mechanical === true && said === "") {
-            const runSeed = this.runSeedOf(r.chatId);
-            const w = new Working(this.rt.registry, world, state);
-            const res = resolveAction(this.rt.registry, w, { action, actor: world.pov, params: r.params }, createRng(hashParts("lre.mechanical", runSeed, r.action, JSON.stringify(r.params), String(state.clock))), { runSeed });
-            if (!res.ok && res.failed) throw new RequestError("validation", playerReason(res.failed));
-            const refused = res.rejected[0];
-            if (refused) throw new RequestError("validation", refused.rejection.reason);
-            if (res.events.length === 0) throw new RequestError("validation", "That changes nothing.");
-            // Recorded as a fix (its Undo, its carry to a new swipe), but as the player's own action, not a correction.
-            const written = await this.write(r.chatId, userId, { kind: "post", id: this.nextId(), target: "head", entry: { kind: "fix", events: res.events, by: { action: r.action, label: neutralizeMacros(label) } } });
-            reply("lre.action", { applied: true, pending: written.pending });
+          // Out of play (DESIGN §11, `shared/offstage.ts`): a money or organization action, Gear →
+          // Manage's gear, or bookkeeping (`mechanical`), tapped with no words and no Send now, is no
+          // turn: it is recorded on the head as a ✎ fix is, with its Undo, and no message, reply or clock time.
+          if (playsOffstage(r.action, r, action.mechanical === true)) {
+            reply("lre.action", await this.offstage(r.chatId, userId, world, state, action, r, label));
             return;
           }
           text ||= `(${neutralizeMacros(action.label)})`;
@@ -477,7 +509,7 @@ export class Dispatcher {
           return;
         }
         const result = await this.write(r.chatId, userId, { kind: "post", id: this.nextId(), target: "head", entry: { kind: "materialize", events: [event] } });
-        reply("lre.view.open", { materialized: true, pending: result.pending });
+        reply("lre.view.open", { materialized: true, ...waits(result) });
         return;
       }
       case "lre.fix": {
@@ -505,6 +537,15 @@ export class Dispatcher {
           if ("code" in fixed) throw new RequestError("validation", fixed.reason);
           events = fixed.events;
           asked = { clock: r.time };
+        } else if ("thing" in r) {
+          // ✎ on one of the player's own things (ITEMS-SPEC; A2's `fix_item`): where it is, its home, worn or not, its size, under the player's rules.
+          const change = parseItemFix(r.thing);
+          if (!change) throw new RequestError("bad_request", "not a change to a thing");
+          const ops = [{ op: "fix_item" as const, change }];
+          const edit = resolveEdit(this.rt.registry, world, state, ops, { gm: false, runSeed: this.runSeedOf(r.chatId) });
+          if ("rejection" in edit) throw new RequestError("validation", edit.rejection.reason);
+          events = edit.events;
+          asked = { ops };
         } else {
           const set = { op: "set" as const, entity: r.entity, field: r.field, value: r.value };
           // A place fixed with ✎ (the player character's, or where someone in People is) is a real move
@@ -521,7 +562,8 @@ export class Dispatcher {
           asked = { ops };
         }
         const result = events.length > 0 ? await this.write(r.chatId, userId, { kind: "post", id: this.nextId(), target: "head", entry: { kind: "fix", events, ...(by ? { by } : {}), ...(asked ? { edit: asked } : {}) } }) : { pending: false };
-        reply("lre.fix", { pending: result.pending });
+        const posted = "posted" in result ? result.posted : undefined;
+        reply("lre.fix", { ...waits(result), undo: posted ? fixChip(posted.messageId, posted.swipeId, posted.seq) : null });
         return;
       }
       case "lre.edit": {
@@ -534,16 +576,26 @@ export class Dispatcher {
         const result = edit.events.length > 0 ? await this.write(r.chatId, userId, { kind: "post", id: this.nextId(), target: "head", entry: { kind: "fix", gm: true, events: edit.events, edit: { ops } } }) : { pending: false };
         // The chip of the entry this edit wrote, so the GM view's Undo takes back this edit and nothing that landed meanwhile.
         const posted = "posted" in result ? result.posted : undefined;
-        reply("lre.edit", { pending: result.pending, undo: posted ? fixChip(posted.messageId, posted.swipeId, posted.seq) : null });
+        reply("lre.edit", { ...waits(result), undo: posted ? fixChip(posted.messageId, posted.swipeId, posted.seq) : null });
         return;
       }
       case "lre.gm": {
         // Asked for when the GM view opens: everything, secrets included, never in a state push.
         await this.requireWorldChat(r.chatId, userId);
         const core = await this.rt.ledger.core(r.chatId, userId);
-        const view = core ? buildGmView(core, toChain(await this.rt.host.chats.messages(r.chatId, userId)), this.rt.registry, (await this.rt.settings.get(userId)).minds) : null;
+        const view = core ? buildGmView(core, toChain(await this.rt.host.chats.messages(r.chatId, userId)), this.rt.registry, (await this.rt.settings.get(userId)).minds, this.rt.ledger.queuedOn(r.chatId)) : null;
         if (!view) throw new RequestError("unavailable", "the chat's world revision is not loaded");
         reply("lre.gm", view);
+        return;
+      }
+      case "lre.gm.part": {
+        // One part of the GM view, built alone (`lre_gm`'s part, party, org and entity): behind the GM gate, as `lre.gm` is.
+        await this.requireWorldChat(r.chatId, userId);
+        const core = await this.rt.ledger.core(r.chatId, userId);
+        const part = core ? buildGmPart(core, toChain(await this.rt.host.chats.messages(r.chatId, userId)), this.rt.registry, (await this.rt.settings.get(userId)).minds, this.rt.ledger.queuedOn(r.chatId), r.part, r.id) : null;
+        if (!part) throw new RequestError("unavailable", "the chat's world revision is not loaded");
+        if ("refused" in part) throw new RequestError("bad_request", part.refused);
+        reply("lre.gm.part", part);
         return;
       }
       case "lre.sections": {
@@ -652,7 +704,7 @@ export class Dispatcher {
           return;
         }
         const result = await this.write(r.chatId, userId, { kind: "marker", id: this.nextId(), target: "head", body });
-        reply("lre.marker", { pending: result.pending });
+        reply("lre.marker", waits(result));
         return;
       }
       case "lre.keep": {
@@ -663,7 +715,7 @@ export class Dispatcher {
               ? { kind: "keep", id: this.nextId(), messageId: r.messageId, parentPath: "", convert: [] }
               : { kind: "keep", id: this.nextId(), messageId: r.messageId, parentPath: r.parentPath, convert: r.refs };
         const result = await this.write(r.chatId, userId, w);
-        reply("lre.keep", { pending: result.pending });
+        reply("lre.keep", waits(result));
         return;
       }
       case "lre.settings.get":
@@ -1012,7 +1064,7 @@ export class Dispatcher {
         const result = await this.write(r.chatId, userId, { kind: "marker", id: this.nextId(), target: "head", body });
         await this.syncBook(before.worldId, userId);
         // Mid-turn, the marker is held and lands when the turn ends (P2).
-        return { revision: r.to, pending: result.pending };
+        return { revision: r.to, ...waits(result) };
       }
       case "sheet": {
         // The Sheet Designer's live preview: the draft with the unsaved ruleset, as a chat would start.
@@ -1168,7 +1220,7 @@ export class Dispatcher {
           if (stopped?.aborted) throw new RequestError("unavailable", `${stopped.reason instanceof Error ? stopped.reason.message : "a role stopped the read"}, so ${kind === "reread" ? "the edit stays unread; Re-read edit reads it again" : "the reply stays unread; Retry read reads it again"}`);
           // What it read is offered once it lands, at once or behind a reply in flight (`writesLanded`).
           const result = await this.write(chatId, userId, { kind, id: this.nextId(), messageId, swipeId: Number(swipe) });
-          return { applied: result.applied, pending: result.pending };
+          return { applied: result.applied, ...waits(result) };
         } catch (error) {
           // An agent chat's Retry read or Re-read edit that lands nothing ends its run, and the chips its read stored go.
           if (stopped) await this.rt.readDropped(chatId, userId, key);
@@ -1206,7 +1258,7 @@ export class Dispatcher {
     if (kind === "pause") {
       const w: HeldWrite = choice === "discard" ? { kind: "discard", id: this.nextId(), after: messageId } : { kind: "keep", id: this.nextId(), messageId, parentPath: "", convert: [] };
       const result = await this.write(chatId, userId, w);
-      return { applied: result.applied, pending: result.pending };
+      return { applied: result.applied, ...waits(result) };
     }
     if (kind === "review") {
       // An agent turn's review card (INC2-SPEC C13): Apply all or No answers it, and the card stays
@@ -1227,6 +1279,8 @@ export class Dispatcher {
       // holds when the undo lands, which an Undo or a Re-read journaled since the tap may have worked
       // out again from its request (DESIGN §11 Undo).
       const seq = Number(id.split(":")[3]);
+      // Tell or Don't tell on an action done off screen, one at a time per chat (`retell`): a double tap changes it once.
+      if (choice === "tell" || choice === "untell") return this.locked(`${userId}\u0000${chatId}`, () => this.retell(chatId, userId, messageId, swipe, seq, choice));
       const core = await this.rt.ledger.core(chatId, userId);
       const m = core?.chain(observed).find((x) => x.id === messageId);
       const rec = m && core ? activeRecord(m, core.journal.tombstones) : null;
@@ -1238,7 +1292,7 @@ export class Dispatcher {
       if (entry.agent?.role === ASSISTANT_ROLE && (result.applied || result.pending)) await this.assistant.undone(chatId, userId, id);
       // An agent turn's change applied from its review card: its Undo counts toward its role's learning.
       else if (entry.agent && (result.applied || result.pending)) await this.review.undone(chatId, userId, id);
-      return { applied: result.applied, pending: result.pending };
+      return { applied: result.applied, ...waits(result) };
     }
     if (kind === "refused") {
       // Dismiss on the notice of a held write that didn't apply (P2).
@@ -1264,6 +1318,48 @@ export class Dispatcher {
       await this.rt.takeChip(chatId, userId, id);
       return result;
     });
+  }
+
+  /**
+   * Tell or Don't tell on an action done off screen (DESIGN §11): until the next turn the player may
+   * change whether its narrator hears of it. Its entry is taken back and made again with the other
+   * choice (append-only: no recorded entry changes), its events as they stand, the two writes landing
+   * together (`writeTogether`) and the second made only once the first applied. Made again, it folds
+   * after whatever was done since and would undo that (a pause made again after its resume pauses the
+   * payment again), so only the head's last change can be (`doneAfter`); and a turn queued or under
+   * way already took it as it stood, so none changes then. One already as asked (the second tap of a
+   * double tap) changes nothing.
+   */
+  private async retell(chatId: ChatId, userId: UserId, messageId: MessageId, swipe: string, seq: number, choice: "tell" | "untell"): Promise<ResultBodies["lre.chip"]> {
+    const result = await this.rt.ledger.writeTogether(chatId, userId, (core, observed): HeldWrite[] | { refused: RequestError } => {
+      const chain = core.chain(observed);
+      const index = chain.findIndex((x) => x.id === messageId);
+      const m = chain[index];
+      const rec = m ? activeRecord(m, core.journal.tombstones) : null;
+      const entry = rec?.post.find((p) => p.seq === seq && p.kind === "fix");
+      if (!m || !rec || !entry || String(m.swipeId) !== swipe) return { refused: new RequestError("not_found", "the correction is gone") };
+      const by = entry.by;
+      if (!by || by.action === "hint") return { refused: new RequestError("bad_request", "only an action done off screen is told or not") };
+      if (core.journal.pauses.length > 0) return { refused: new RequestError("paused", "an earlier message was edited: Keep or Discard first") };
+      const fold = core.fold(observed);
+      // What it applies as the fold has it: nothing once undone, never what an Undo took back.
+      const stands = appliedEvents(rec, fold, index).fixes.find((f) => f.seq === seq);
+      if (!stands || (by.told !== undefined) === (choice === "tell")) return [];
+      if (this.rt.ledger.queuedOn(chatId) !== null) return { refused: new RequestError("unavailable", "The next turn is already under way, so whether this is told can't change now.") };
+      if (index !== chain.findLastIndex((x) => !x.isUser)) return { refused: new RequestError("bad_request", "The next turn has already come, so whether this was told can't change now.") };
+      if (doneAfter(chain, fold, rec, index, seq)) return { refused: new RequestError("bad_request", "Something changed after this, so whether it's told can't change now: only the last thing done can be told or not.") };
+      const render = core.renderState(observed);
+      const told = choice === "tell" && render ? neutralizeMacros(toldWords(by.label, fixLines(this.rt.registry, render.world, render.state, stands.events))) : undefined;
+      return [
+        { kind: "undo", id: this.nextId(), messageId: m.id, swipeId: m.swipeId, refs: [], entry: seq },
+        { kind: "post", id: this.nextId(), target: "head", entry: { kind: "fix", events: stands.events, by: { action: by.action, label: by.label, ...(told !== undefined ? { told } : {}) } } },
+      ];
+    });
+    if ("refused" in result) throw result.refused;
+    if (result.reason === "paused") throw new RequestError("paused", "an earlier message was edited: Keep or Discard first");
+    if (!result.applied && result.reason !== undefined) throw new RequestError("bad_request", result.reason);
+    if (result.applied) this.rt.push.changed(chatId, userId);
+    return { applied: result.applied, pending: false };
   }
 
   private async locked<T>(key: string, fn: () => Promise<T>): Promise<T> {
@@ -1360,7 +1456,7 @@ export class Dispatcher {
           await this.rt.chips.add(chatId, userId, [unpricedChip(id.replace(/^confirm:/, "unpriced:"), { messageId: chip.messageId, ...(chip.swipeId !== undefined ? { swipeId: chip.swipeId } : {}) }, proposal, w.ctx, entry, { connection })]);
           this.rt.push.changed(chatId, userId);
         }
-        return { applied: result.applied, pending: result.pending };
+        return { applied: result.applied, ...waits(result) };
       }
       case "undo": {
         const core = await this.rt.ledger.core(chatId, userId);
@@ -1396,7 +1492,7 @@ export class Dispatcher {
           }
           const result = repriced.length > 0 ? await this.write(chatId, userId, { kind: "post", id: this.nextId(), target: "head", entry: { kind: "confirm", events: repriced } }) : { applied: false, pending: false };
           await settle("accepted");
-          return { applied: result.applied, pending: result.pending };
+          return { applied: result.applied, ...waits(result) };
         }
         if (choice === "other") {
           // Pay another way on a payment that applied (DESIGN §9.5): what it drew goes back to the
@@ -1415,12 +1511,12 @@ export class Dispatcher {
           }
           const result = await this.write(chatId, userId, { kind: "post", id: this.nextId(), target: "head", entry: { kind: "confirm", events: way.repay } });
           await settle("accepted");
-          return { applied: result.applied, pending: result.pending };
+          return { applied: result.applied, ...waits(result) };
         }
         if (refs.length === 0) return { applied: false, pending: false };
         const result = await this.write(chatId, userId, { kind: "undo", id: this.nextId(), messageId: m.id, swipeId: m.swipeId, refs });
         await settle("rejected");
-        return { applied: result.applied, pending: result.pending };
+        return { applied: result.applied, ...waits(result) };
       }
       case "mode_change": {
         const raw = chip.payload.change;
@@ -1456,7 +1552,7 @@ export class Dispatcher {
         const refs = Runtime.refsOf(rec, Array.isArray(chip.payload.events) ? chip.payload.events : [], 0);
         if (refs.length === 0) return { applied: false, pending: false };
         const result = await this.write(chatId, userId, { kind: "undo", id: this.nextId(), messageId: m.id, swipeId: m.swipeId, refs });
-        return { applied: result.applied, pending: result.pending };
+        return { applied: result.applied, ...waits(result) };
       }
       case "claim":
       case "check": {
@@ -1531,7 +1627,7 @@ export class Dispatcher {
         const refs = Runtime.refsOf(rec, Array.isArray(chip.payload.events) ? chip.payload.events : [], 0);
         if (refs.length === 0) return { applied: false, pending: false };
         const result = await this.write(chatId, userId, { kind: "undo", id: this.nextId(), messageId: m.id, swipeId: m.swipeId, refs });
-        return { applied: result.applied, pending: result.pending };
+        return { applied: result.applied, ...waits(result) };
       }
       case "routine_ask": {
         // The player's answer to a routine change their own message stated (DESIGN §9.4). No drops it.
@@ -1560,7 +1656,7 @@ export class Dispatcher {
         await this.rt.chips.add(chatId, userId, [{ id: id.replace(/^routine_ask:/, "routine_added:"), kind: "routine_added", messageId: chip.messageId, label: added, ...(chip.detail !== undefined ? { detail: chip.detail } : {}), actions: [{ id: "undo", label: "Undo", style: "danger" }], expires: "next_send", payload: { events: JSON.parse(JSON.stringify(events)) as JsonValue } }]);
         // The state the write pushed may predate its Undo chip: push again, so every view shows both.
         this.rt.push.changed(chatId, userId);
-        return { applied: result.applied, pending: result.pending };
+        return { applied: result.applied, ...waits(result) };
       }
       case "routine_added": {
         // Undo of a routine change the player said yes to: the confirmed entry it was written as stops
@@ -1574,7 +1670,7 @@ export class Dispatcher {
           if (!rec || !entry) continue;
           if (entry.events.every((_, index) => rec.undone.some((u) => u.in === "post" && u.seq === entry.seq && u.index === index))) return { applied: false, pending: false };
           const result = await this.write(chatId, userId, { kind: "undo", id: this.nextId(), messageId: m.id, swipeId: m.swipeId, refs: [], entry: entry.seq });
-          return { applied: result.applied, pending: result.pending };
+          return { applied: result.applied, ...waits(result) };
         }
         throw new RequestError("not_found", "the routine change is gone");
       }

@@ -2,18 +2,26 @@
 // you have it and where it is kept (ITEMS-SPEC §10.3), its condition, slot and quantity, a kit's
 // pieces, a loan, and its contents with the load; and what you can do with it from here: Fetch,
 // Put away, Give back and Hand to…, each staged as its palette tap is, from the palette's own
-// options for this thing. Opening it is a player-facing observation of the item (DESIGN §9.2), sent
-// once on mount; for a container that may bring its contents into view.
+// options for this thing. A thing of your own has two ✎ corrections besides, out of the story: Where
+// is it? (on you, in a holder you may use, at a place you know) and Size, each with its Undo.
+// Opening the sheet is a player-facing observation of the item (DESIGN §9.2), sent once on mount;
+// for a container that may bring its contents into view.
 
 import { useEffect, useState } from "preact/hooks";
-import type { PaletteEntry, PaletteOption } from "../../../shared/state-view";
+import type { PaletteEntry, PaletteOption, StateView } from "../../../shared/state-view";
+import type { ItemFix } from "../../../shared/things";
 import { useApp } from "../../../frontend/app";
+import { SizeChoices } from "../../../frontend/build/things";
+import { PlaceSheet } from "../../../frontend/character/place-picker";
 import { Badge, Banner, Button, Empty, IdText, List, ListRow, Meter, PageHeader, Section, useBusy } from "../../../frontend/components";
 import type { SheetProps } from "../../../frontend/registry";
 import { paletteRequest } from "../../../frontend/requests";
+import { toastQueued } from "../../../frontend/queued";
+import { sizeLabel } from "../../../shared/thing-view";
 import type { GearItem, GearView } from "../core/view";
+import { AS_LABEL, holdersFor, ManageNotice, useManage } from "./manage";
 import type { GearSection } from "./panel";
-import { AS_LABEL, borrowedText, decodeGearView, itemBadge, lentText, SECTION_LABEL, SECTIONS } from "./panel";
+import { borrowedText, decodeGearView, itemBadge, lentText, SECTION_LABEL, SECTIONS } from "./panel";
 
 export interface FoundItem {
   item: GearItem;
@@ -97,14 +105,71 @@ function ItemActions(props: { chatId: string; entries: readonly PaletteEntry[]; 
   );
 }
 
+/**
+ * ✎ on a thing of your own (`GearItem.mine`): Where is it? (on you, in a holder you may use, or at a
+ * place you know of, from the place ✎'s list) and Size, each a `lre.fix` of the thing with its
+ * Corrected chip and Undo, which the notice here offers too. The engine refuses someone else's thing,
+ * a place you can't know and another person as the holder.
+ */
+function ThingFixes(props: { chatId: string; item: GearItem; section: GearSection; view: GearView; state: StateView }) {
+  const { item } = props;
+  const fix = useManage(props.chatId);
+  const [open, setOpen] = useState<"where" | "size" | null>(null);
+  const [picking, setPicking] = useState(false);
+  // The place ✎'s target: whom "On you" means, and the places you may know of.
+  const placeFix = props.state.hud?.fixes.place;
+  const pov = placeFix?.entity ?? null;
+  const places = placeFix?.places ?? [];
+  const here = places.find((p) => p.id === props.state.hud?.place?.id);
+  const holders = holdersFor(props.view, item);
+  const send = (thing: ItemFix, text: string) =>
+    fix.send({ type: "lre.fix", chatId: props.chatId, thing }, text, () => {
+      setOpen(null);
+      setPicking(false);
+    });
+  return (
+    <Section title="Not right?">
+      <div class="lre-stack" data-lre-item-fixes={item.id}>
+        <ManageNotice title="Corrected" done={fix.done} busy={fix.busy} onUndo={fix.undo} onDismiss={fix.dismiss} />
+        <div class="lre-inline">
+          <Button size="sm" icon="edit" disabled={fix.busy} onClick={() => setOpen(open === "where" ? null : "where")}>
+            Where is it?
+          </Button>
+          <Button size="sm" icon="edit" disabled={fix.busy} onClick={() => setOpen(open === "size" ? null : "size")}>
+            Size
+          </Button>
+        </div>
+        {open === "where" ? (
+          <div class="lre-stack" data-lre-fix-where="">
+            <span class="lre-small lre-muted">Where it really is, said out of the story: on you, in something of yours or that you may use, or at a place you know.</span>
+            <List>
+              {pov !== null && props.section !== "on" ? <ListRow icon="user" title="On you" onClick={() => send({ do: "move", item: item.id, to: { in: pov } }, `${item.name} is on you.`)} /> : null}
+              {holders.map((h) => (
+                <ListRow key={h.id} icon="box" title={`In ${h.name}`} onClick={() => send({ do: "move", item: item.id, to: { in: h.id } }, `${item.name} is in ${h.name}.`)} />
+              ))}
+              {places.length > 0 ? <ListRow icon="pin" title="At a place…" chevron onClick={() => setPicking(true)} /> : null}
+            </List>
+          </div>
+        ) : null}
+        {open === "size" ? (
+          <div class="lre-stack" data-lre-fix-size="">
+            <span class="lre-small lre-muted">{item.size !== undefined ? `Now ${sizeLabel(item.size)}. ` : ""}What you can't carry (Heavy or bigger) is put down where it belongs on the next turn.</span>
+            <SizeChoices value={null} onPick={(size) => send({ do: "size", item: item.id, size }, `${item.name} is ${sizeLabel(size)}.`)} />
+          </div>
+        ) : null}
+        {picking ? <PlaceSheet places={places} value={null} title={`Where is ${item.name}?`} suggestions={here ? [{ label: "Where you are", place: here }] : []} onClose={() => setPicking(false)} onPick={(place) => (place ? send({ do: "move", item: item.id, to: { place: place.id } }, `${item.name} is at ${place.name}.`) : setPicking(false))} /> : null}
+      </div>
+    </Section>
+  );
+}
+
 export function ItemSheet(props: SheetProps) {
   const app = useApp();
   const [nothingMore, setNothingMore] = useState(false);
   useEffect(() => {
     setNothingMore(false);
     void app.request({ type: "lre.view.open", chatId: props.chatId, panel: "gear.gear", entity: props.id }).then((result) => {
-      if (result?.pending) app.toast("Details appear when the reply finishes.", "info");
-      else if (result && !result.materialized) setNothingMore(true);
+      if (!toastQueued(app, result) && result && !result.materialized) setNothingMore(true);
     });
   }, [props.chatId, props.id]);
   const view = decodeGearView(props.state.panels["gear.gear"]);
@@ -142,12 +207,14 @@ export function ItemSheet(props: SheetProps) {
           {item.why !== undefined ? <ListRow icon="info" title="Why you have it" subtitle={item.why} /> : null}
           {item.kept !== undefined ? <ListRow icon="home" title="Kept at" value={item.kept} /> : null}
           {item.slot ? <ListRow icon="shield" title="Slot" value={item.slot} /> : null}
+          {item.size !== undefined ? <ListRow icon="box" title="Size" value={sizeLabel(item.size)} /> : null}
           {item.qty !== undefined ? <ListRow icon="layers" title="Quantity" value={String(item.qty)} /> : null}
           {item.lent ? <ListRow icon="user-plus" title="Lent out" subtitle={lentText(item.lent)} badge={item.lent.overdue ? <Badge tone="warn">Overdue</Badge> : undefined} /> : null}
           {item.borrowed ? <ListRow icon="user-plus" title="Borrowed" subtitle={borrowedText(item.borrowed)} badge={item.borrowed.overdue ? <Badge tone="warn">Overdue</Badge> : undefined} /> : null}
         </List>
       </Section>
       <ItemActions chatId={props.chatId} entries={props.state.palette?.entries ?? []} id={item.id} />
+      {item.mine === true && view ? <ThingFixes chatId={props.chatId} item={item} section={section} view={view} state={props.state} /> : null}
       {item.condition !== undefined ? (
         <Section>
           <Meter label={`Condition ${Math.round(item.condition)}%`} value={Math.round(item.condition)} max={100} tone={item.condition <= 25 ? "neg" : "accent"} />

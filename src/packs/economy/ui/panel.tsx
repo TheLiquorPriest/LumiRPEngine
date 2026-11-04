@@ -1,7 +1,8 @@
 // Play → Me → Money (DESIGN §12, §25; ORG-SPEC §5.1): the POV's own money, as its segments under
 // Me's tabs. The view (`FinanceView`) is already at the POV's Money level; the segments lay it out,
 // and each page they open rides the sheet stack. Each control is an in-world action sent like a
-// palette pick, so it plays as the next turn and the narrator hears of it.
+// palette pick: done at once, off screen, with its Undo (DESIGN §11), told to the next reply or not
+// as Settings → Narrator → Out-of-play actions has it; `buy` and typed words still play as a turn.
 
 import { useId, useState } from "preact/hooks";
 import type { ChatId } from "../../../shared/ids";
@@ -16,6 +17,7 @@ import { ALL_ACTIVITY, type ActivityFilter, type MoneySegment } from "./layout";
 import type { Elsewhere, HubNav } from "./nav";
 import { actionRequest } from "./requests";
 import { routeOf } from "./routes";
+import { toastQueued } from "../../../frontend/queued";
 
 /** The player's controls in a chat: each an in-world action, one at a time. */
 export function usePlayerControls(chatId: ChatId, state: StateView): PlayerControls {
@@ -26,14 +28,14 @@ export function usePlayerControls(chatId: ChatId, state: StateView): PlayerContr
     busy,
     currency: state.currency ?? DEFAULT_CURRENCY,
     palette: state.palette,
-    act: (body) => {
+    act: (body, tell) => {
       // A tap while one is in flight is dropped (useBusy), so it answers false rather than never.
       if (busy) return Promise.resolve(false);
       const { promise, resolve } = Promise.withResolvers<boolean>();
       run(async () => {
-        const result = await app.request(actionRequest(chatId, body));
-        // Bookkeeping recorded at once (`mechanical`) waits for a reply already under way, as a ✎ fix does.
-        if (result && "pending" in result && result.pending) app.toast("Saved — it applies when the reply finishes.", "info");
+        const result = await app.request({ ...actionRequest(chatId, body), ...(tell !== undefined ? { tell } : {}) });
+        // Done at once (DESIGN §11), it waits for a reply already under way, as a ✎ fix does.
+        if (result && "pending" in result) toastQueued(app, result);
         resolve(result !== null);
       });
       return promise;
@@ -48,7 +50,7 @@ export function usePlayerControls(chatId: ChatId, state: StateView): PlayerContr
  */
 export function observeMoney(app: App, chatId: ChatId): void {
   void app.request({ type: "lre.view.open", chatId, panel: "economy.money", entity: null }).then((result) => {
-    if (result?.pending) app.toast("Details appear when the reply finishes.", "info");
+    toastQueued(app, result);
   });
 }
 

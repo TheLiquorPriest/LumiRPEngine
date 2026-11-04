@@ -439,6 +439,32 @@ const TOGGLE_CHOICES: readonly SegOption<ToggleState>[] = [
 
 const FEATURES_NOTE = "Each runs from its usual Money level; switch one on to run it from its lowest level, or off. The money hub shows each one's detail wherever it runs; the rest of the full books show only at the top level.";
 
+const CASH_CHOICES: readonly { value: ToggleState; label: string }[] = [
+  { value: "level", label: `From Money ${FEATURE_DEFS.atm.on}` },
+  { value: "on", label: "Needs a machine" },
+  { value: "off", label: "Anywhere" },
+];
+
+const CASH_HELP: Record<ToggleState, string> = {
+  level: `Cash needs a cash machine or a branch of the account's bank from Money ${FEATURE_DEFS.atm.on}; below that it moves freely.`,
+  on: `Cash needs a cash machine or a branch of the account's bank from Money ${FEATURE_DEFS.atm.floor}, with a card for a machine, its limits and fees.`,
+  off: "Cash comes and goes anywhere, at every Money level.",
+};
+
+/** Where cash needs a machine or a branch (`features.atm`), the world's rule, as its own control; a chat may set its own in GM → This chat → Money. */
+function CashRule(props: PackConfigProps) {
+  const state = toggleOf(props.config, "atm");
+  return (
+    <FormGroup title="Cash">
+      <div class="lre-field" data-lre-money-cash={state}>
+        <span class="label">{FEATURE_DEFS.atm.label}</span>
+        <Seg<ToggleState> label={FEATURE_DEFS.atm.label} value={state} options={CASH_CHOICES} onChange={(next) => props.onChange(withToggle(props.config, "atm", next))} />
+        <span class="lre-field-help">{`${CASH_HELP[state]} Only a world that places cash machines or branches asks for one. A chat may set its own in GM → This chat → Money.`}</span>
+      </div>
+    </FormGroup>
+  );
+}
+
 /** The Custom toggles, under any preset: a row naming the ones switched, which opens them all on a page of their own. */
 function FeatureToggles(props: PackConfigProps) {
   const [open, setOpen] = useState(false);
@@ -649,6 +675,7 @@ export function EconomyConfig(props: PackConfigProps) {
       <LivingCosts {...props} />
       <Taxes {...props} />
       <Shares {...props} />
+      <CashRule {...props} />
       <FeatureToggles {...props} />
       <Definitions
         config={props.config}

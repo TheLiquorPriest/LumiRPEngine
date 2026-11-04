@@ -14,6 +14,7 @@ import type { GmEntity, GmField, GmView } from "../shared/state-view";
 import { tiersInOrder } from "../shared/tiers";
 import type { FieldDef, FieldType, WorldDoc } from "../shared/world";
 import { BUILTIN_RELATIONS, ENGINE_FIELDS, GM_OWNER, GM_OWNER_NAME, lifeStateOf, lifeStatesOf } from "../shared/world";
+import { PARTY_KINDS } from "../shared/finance";
 import { fieldBounds } from "./effects";
 import { optionalQuery, own } from "./pack-kit";
 import type { ReadContext } from "./registry";
@@ -105,31 +106,34 @@ function entityOf(reg: Registry, ctx: ReadContext, id: string): GmEntity | null 
   };
 }
 
-/** Everything the GM view shows but its list of edits, which the chain holds, and the minds, which need the user's settings. */
-export function buildGmWorld(reg: Registry, world: WorldDoc, state: Readonly<WorldState>): Omit<GmView, "edits" | "refused" | "minds"> {
-  const ctx = reg.context(world, state);
-  const relationTypes = new Map<string, GmView["relationTypes"][number]>();
-  for (const def of [...reg.relations.values(), ...Object.values(world.relations)]) {
-    relationTypes.set(def.id, { id: def.id, label: def.label, from: def.from, to: def.to, fields: Object.entries(isRecord(def.fields) ? def.fields : {}).map(([id, f]) => ({ id, label: f.label ?? id.replace(/_/g, " "), type: f.type, ...(f.min !== undefined ? { min: f.min } : {}), ...(f.max !== undefined ? { max: f.max } : {}), ...(f.values ? { values: f.values } : {}) })) });
-  }
-  for (const id of BUILTIN_RELATIONS) if (!relationTypes.has(id)) relationTypes.set(id, { id, label: id.replace(/_/g, " "), from: "*", to: "*", fields: [] });
+/** The parts of the GM view the world as it stands gives: all but the edits and the refused and held writes, which the chain and the journal hold, and the minds, which need the user's settings. */
+export type GmWorldPart = Exclude<keyof GmView, "edits" | "refused" | "held" | "minds">;
+
+/**
+ * Each world part, built alone (`lre.gm.part`), in the view's order. With `id`, of the entities and
+ * the money only that one, by id (none when there is no such entity or party); of the organizations,
+ * that one, read from them all.
+ */
+const WORLD_PARTS: { [P in GmWorldPart]: (reg: Registry, ctx: ReadContext, id?: string) => GmView[P] } = {
+  entities: (reg, ctx, id) => (id !== undefined ? [id] : Object.keys(ctx.state.entities).sort()).flatMap((e) => entityOf(reg, ctx, e) ?? []),
   // The world's own kinds lie over built-in ones of the same id, as `kindParent` resolves them: its label, its Extends if it gives one.
-  const kinds = new Map<string, { label: string; extends: string | null }>();
-  for (const k of reg.kinds.values()) kinds.set(k.id, { label: k.label, extends: k.extends ?? null });
-  for (const k of Object.values(world.kinds)) kinds.set(k.id, { label: k.label, extends: kindParent(reg, world, k.id) ?? null });
-  // Who may enter each place and whose it is (the orgs pack's GM → Places control).
-  const entry = optionalQuery(ctx, "orgs.place_entry");
-  return {
-    entities: Object.keys(state.entities)
-      .sort()
-      .flatMap((id) => entityOf(reg, ctx, id) ?? []),
-    kinds: [...kinds].map(([id, k]) => ({ id, label: k.label, extends: k.extends })).sort((a, b) => a.label.localeCompare(b.label)),
-    tiers: tiersInOrder(world).map(([id, t]) => ({ id, label: t.label })),
-    lifeStates: lifeStatesOf(world).map(([id, def]) => ({ id, label: def.label, acts: def.acts })),
-    domains: DOMAINS.map((id) => ({ id, label: reg.packs.find((p) => p.domain === id)?.label ?? id })),
-    classifications: world.classifications,
-    places: Object.values(world.places).map((p) => ({ id: p.id, name: p.name, visibility: p.visibility ?? "public", parent: p.parent ?? null, pins: own(lorePinsOf(world).places, p.id)?.length ?? 0, ...(entry ? { entry: entry(ctx, p.id) } : {}) })),
-    tracks: Object.values(world.tracks).map((t) => ({
+  kinds: (reg, { world }) => {
+    const kinds = new Map<string, { label: string; extends: string | null }>();
+    for (const k of reg.kinds.values()) kinds.set(k.id, { label: k.label, extends: k.extends ?? null });
+    for (const k of Object.values(world.kinds)) kinds.set(k.id, { label: k.label, extends: kindParent(reg, world, k.id) ?? null });
+    return [...kinds].map(([id, k]) => ({ id, label: k.label, extends: k.extends })).sort((a, b) => a.label.localeCompare(b.label));
+  },
+  tiers: (_reg, { world }) => tiersInOrder(world).map(([id, t]) => ({ id, label: t.label })),
+  lifeStates: (_reg, { world }) => lifeStatesOf(world).map(([id, def]) => ({ id, label: def.label, acts: def.acts })),
+  domains: (reg) => DOMAINS.map((id) => ({ id, label: reg.packs.find((p) => p.domain === id)?.label ?? id })),
+  classifications: (_reg, { world }) => world.classifications,
+  places: (_reg, ctx) => {
+    // Who may enter each place and whose it is (the orgs pack's GM → Places control).
+    const entry = optionalQuery(ctx, "orgs.place_entry");
+    return Object.values(ctx.world.places).map((p) => ({ id: p.id, name: p.name, visibility: p.visibility ?? "public", parent: p.parent ?? null, pins: own(lorePinsOf(ctx.world).places, p.id)?.length ?? 0, ...(entry ? { entry: entry(ctx, p.id) } : {}) }));
+  },
+  tracks: (_reg, { world, state }) =>
+    Object.values(world.tracks).map((t) => ({
       id: t.id,
       label: t.label,
       kind: t.kind,
@@ -138,12 +142,61 @@ export function buildGmWorld(reg: Registry, world: WorldDoc, state: Readonly<Wor
       stage: own(state.tracks, t.id)?.stage ?? t.start,
       stages: Object.entries(t.stages).map(([id, s]) => ({ id, label: s.label, ...(s.truth ? { truth: s.truth } : {}) })),
     })),
-    relationTypes: [...relationTypes.values()].sort((a, b) => a.label.localeCompare(b.label)),
-    money: optionalQuery(ctx, "economy.people_money")?.(ctx) ?? [],
-    // Every organization as the GM sees it, with who holds each power there (the orgs pack's GM → Orgs).
-    orgs: optionalQuery(ctx, "orgs.gm")?.(ctx) ?? [],
-    // The fight under way, as only the GM sees it (the combat pack); its view model is plain JSON.
-    encounter: (optionalQuery(ctx, "combat.gm")?.(ctx) ?? null) as unknown as JsonValue | null,
-    routineRoles: optionalQuery(ctx, "castlife.chat_roles")?.(ctx) ?? [],
-  };
+  relationTypes: (reg, { world }) => {
+    const relationTypes = new Map<string, GmView["relationTypes"][number]>();
+    for (const def of [...reg.relations.values(), ...Object.values(world.relations)]) {
+      relationTypes.set(def.id, { id: def.id, label: def.label, from: def.from, to: def.to, fields: Object.entries(isRecord(def.fields) ? def.fields : {}).map(([id, f]) => ({ id, label: f.label ?? id.replace(/_/g, " "), type: f.type, ...(f.min !== undefined ? { min: f.min } : {}), ...(f.max !== undefined ? { max: f.max } : {}), ...(f.values ? { values: f.values } : {}) })) });
+    }
+    for (const id of BUILTIN_RELATIONS) if (!relationTypes.has(id)) relationTypes.set(id, { id, label: id.replace(/_/g, " "), from: "*", to: "*", fields: [] });
+    return [...relationTypes.values()].sort((a, b) => a.label.localeCompare(b.label));
+  },
+  // Everyone's money, or one party's, as the economy pack's GM page builds it.
+  money: (reg, ctx, id) => {
+    if (id === undefined) return optionalQuery(ctx, "economy.people_money")?.(ctx) ?? [];
+    const e = own(ctx.state.entities, id);
+    const finance = optionalQuery(ctx, "economy.finance");
+    return e && finance && PARTY_KINDS.some((k) => kindIs(reg, ctx.world, e.kind, k)) ? [finance(ctx, id, false)] : [];
+  },
+  // Every organization as the GM sees it, with who holds each power there (the orgs pack's GM → Orgs).
+  orgs: (_reg, ctx, id) => {
+    const all = optionalQuery(ctx, "orgs.gm")?.(ctx) ?? [];
+    return id === undefined ? all : all.filter((o) => o.page.id === id);
+  },
+  // The fight under way, as only the GM sees it (the combat pack); its view model is plain JSON.
+  encounter: (_reg, ctx) => (optionalQuery(ctx, "combat.gm")?.(ctx) ?? null) as unknown as JsonValue | null,
+  routineRoles: (_reg, ctx) => optionalQuery(ctx, "castlife.chat_roles")?.(ctx) ?? [],
+};
+
+/** One world part of the GM view, built alone; with `id`, of the entities, money or organizations only that one. */
+export function buildGmWorldPart<P extends GmWorldPart>(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, part: P, id?: string): GmView[P] {
+  return WORLD_PARTS[part](reg, reg.context(world, state), id);
+}
+
+/**
+ * How many one world part of the GM view holds, for its outline (`GmOutline`): the entities,
+ * places, tracks and classification facets counted where the part reads them, without building
+ * them; any other part built and counted (its items, or the fight 1 while one is under way).
+ */
+export function gmWorldPartCount(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, part: GmWorldPart): number {
+  const ctx = reg.context(world, state);
+  switch (part) {
+    case "entities":
+      return Object.keys(ctx.state.entities).length;
+    case "places":
+      return Object.keys(ctx.world.places).length;
+    case "tracks":
+      return Object.keys(ctx.world.tracks).length;
+    case "classifications":
+      return Object.keys(ctx.world.classifications).length;
+    default: {
+      const value: unknown = WORLD_PARTS[part](reg, ctx);
+      return Array.isArray(value) ? value.length : value === null ? 0 : 1;
+    }
+  }
+}
+
+/** Everything the GM view shows but its list of edits, which the chain holds, the refused and held writes, which the journal holds, and the minds, which need the user's settings. */
+export function buildGmWorld(reg: Registry, world: WorldDoc, state: Readonly<WorldState>): Pick<GmView, GmWorldPart> {
+  const ctx = reg.context(world, state);
+  return Object.fromEntries(Object.entries(WORLD_PARTS).map(([part, build]) => [part, build(reg, ctx)])) as Pick<GmView, GmWorldPart>;
 }

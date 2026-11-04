@@ -10,6 +10,10 @@
 
 import { useEffect, useState } from "preact/hooks";
 import type { JsonObject } from "../../shared/json";
+import { ROLE_IDS, ROLE_LABEL, type RoleId, type RoleSettings } from "../../shared/agent-roles";
+import type { AgentSettings } from "../../shared/agent-settings";
+import { ROLE_TASK_ROUTES, stepUsers, taskStep, type RouteSettings } from "../../shared/role-routes";
+import { taskLabel } from "./labels";
 import type { ModelUsePresetId } from "../../shared/ids";
 import { PROSE_STEPS } from "../../shared/lore";
 import { isMindPurpose, MIND_PROMPT_DEFAULTS } from "../../shared/minds";
@@ -284,14 +288,38 @@ export function ConnectionSelect(props: { value: string | null; connections: rea
   );
 }
 
+/**
+ * Which roles of an agent chat (GM → This chat → Engine on agents) run where a step does, or on the
+ * helper model (`step` null): each task whose role names no connection of its own takes its step's
+ * route, else the helper's (shared/role-routes.ts); the roles that name their own are said apart.
+ */
+export function agentUsersText(settings: RouteSettings, roles: Readonly<Record<RoleId, RoleSettings>>, step: StepPurpose | null): string | null {
+  const users = stepUsers(settings, roles, step);
+  const byRole = ROLE_IDS.flatMap((role) => {
+    const tasks = users.filter((u) => u.role === role);
+    return tasks.length === 0 ? [] : [`${ROLE_LABEL[role]} (${tasks.map((t) => taskLabel(role, t.task).toLowerCase()).join(", ")})`];
+  });
+  const own = step === null ? [] : ROLE_IDS.filter((role) => roles[role].connectionId !== null && ROLE_TASK_ROUTES[role].some((t) => taskStep(settings, t) === step)).map((role) => ROLE_LABEL[role]);
+  const runs = byRole.length === 0 ? "" : `On agent chats, ${byRole.join(", ")} ${byRole.length === 1 ? "runs" : "run"} ${step === null ? "on the helper model, while neither their step nor their role sets a connection" : "where this step does"}.`;
+  const apart = own.length === 0 ? "" : `${own.join(", ")} ${own.length === 1 ? "sets its" : "set their"} own (Settings → Agents → Roles).`;
+  const text = [runs, apart].filter((t) => t !== "").join(" ");
+  return text === "" ? null : text;
+}
+
 /** Settings → Helper model: the connection, model and parameters every helper call runs with unless its step sets its own. */
-export function HelperSection(props: { helper: HelperDefault; patch(patch: JsonObject): void; busy: boolean }) {
+export function HelperSection(props: { helper: HelperDefault; modelUse: ModelUseSettings; agents: AgentSettings; patch(patch: JsonObject): void; busy: boolean }) {
   const { helper, busy } = props;
   const connections = useConnections();
   const set = (next: JsonObject) => props.patch({ helper: next });
+  const agentUsers = agentUsersText({ modelUse: props.modelUse, helper }, props.agents.roles, null);
   return (
     <div class="lre-stack" data-lre-settings-page="helper">
       <p class="lre-set-lead">Every call the engine makes to a model for itself (reading your actions and the reply, deciding for people, judging, minds and their memory, time skips, lore lookups) runs on the helper model, unless its card in Steps and connections sets its own. Picking a preset never changes it.</p>
+      {agentUsers !== null ? (
+        <p class="lre-set-note" data-lre-agent-users>
+          {agentUsers}
+        </p>
+      ) : null}
       <Section title="Connection and model">
         <ConnectionSelect value={helper.connectionId} connections={connections} firstLabel="None: Lumiverse's default connection" help="None runs each call on the connection Lumiverse marks as your default, with that connection's model and settings." disabled={busy} onChange={(connectionId) => set({ connectionId, model: null })} />
         {helper.connectionId ? (
@@ -320,9 +348,10 @@ export function HelperSection(props: { helper: HelperDefault; patch(patch: JsonO
   );
 }
 
-export function StepsSection(props: { modelUse: ModelUseSettings; helper: HelperDefault; jobs: JobSettings; gates: GateSettings; prompts: MindsSettings["prompts"]; patch(patch: JsonObject): void; openHelper(): void; busy: boolean }) {
+export function StepsSection(props: { modelUse: ModelUseSettings; helper: HelperDefault; agents: AgentSettings; jobs: JobSettings; gates: GateSettings; prompts: MindsSettings["prompts"]; patch(patch: JsonObject): void; openHelper(): void; busy: boolean }) {
   const connections = useConnections();
   const update = (purpose: StepPurpose, next: StepConfig) => props.patch(stepUpdatePatch(purpose, next));
+  const routes: RouteSettings = { modelUse: props.modelUse, helper: props.helper };
   return (
     <div class="lre-stack" data-lre-settings-page="steps">
       <p class="lre-set-lead">Each step is one small job a model can do. A helper step runs on the helper model, unless you set its own connection, model or parameters here. Changing a step makes your model use Custom; your own prompts stay whatever preset you pick.</p>
@@ -338,7 +367,7 @@ export function StepsSection(props: { modelUse: ModelUseSettings; helper: Helper
         </p>
       </Section>
       {(Object.keys(STEP_LABEL) as StepPurpose[]).map((purpose) => (
-        <StepCard key={purpose} purpose={purpose} config={stepConfigOf(props.modelUse.steps, purpose)} helper={props.helper} connections={connections} busy={props.busy} update={(next) => update(purpose, next)}>
+        <StepCard key={purpose} purpose={purpose} config={stepConfigOf(props.modelUse.steps, purpose)} helper={props.helper} connections={connections} agentUsers={agentUsersText(routes, props.agents.roles, purpose)} busy={props.busy} update={(next) => update(purpose, next)}>
           <StepPrompts purpose={purpose} config={stepConfigOf(props.modelUse.steps, purpose)} prompts={props.prompts} busy={props.busy} patch={props.patch} />
         </StepCard>
       ))}
@@ -420,7 +449,7 @@ function StepPrompts(props: { purpose: StepPurpose; config: StepConfig; prompts:
   );
 }
 
-function StepCard(props: { purpose: StepPurpose; config: StepConfig; helper: HelperDefault; connections: readonly Connection[]; busy: boolean; update(next: StepConfig): void; children?: ComponentChildren }) {
+function StepCard(props: { purpose: StepPurpose; config: StepConfig; helper: HelperDefault; connections: readonly Connection[]; agentUsers: string | null; busy: boolean; update(next: StepConfig): void; children?: ComponentChildren }) {
   const { purpose, config, busy, update } = props;
   const route: StepRoute = config.route ?? { provider: purpose === "npc.choose" ? "decision" : "helper", connectionId: null, model: null };
   const call = helperCallOf({ ...config, route }, props.helper);
@@ -457,6 +486,11 @@ function StepCard(props: { purpose: StepPurpose; config: StepConfig; helper: Hel
         <p class="lre-small lre-muted" style={{ margin: 0 }}>
           {STEP_PLAIN[purpose]}
         </p>
+        {props.agentUsers !== null ? (
+          <p class="lre-small lre-muted" style={{ margin: 0 }} data-lre-agent-users>
+            {props.agentUsers}
+          </p>
+        ) : null}
         <HostSwitch label="Enabled" checked={config.enabled} disabled={busy} onChange={(enabled) => update({ ...config, enabled })} />
         <Field label="Provider" help={route.provider === "decision" ? "Lumiverse's Decisions API, which takes no reasoning effort, max tokens or sampling parameters; if a call fails, the helper model answers instead." : "A small JSON call, on the helper model unless you set this step's own below."}>
           <Seg<"decision" | "helper">

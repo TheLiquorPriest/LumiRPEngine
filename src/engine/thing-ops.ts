@@ -9,22 +9,23 @@
 
 import { ownersIn } from "../shared/finance";
 import { hashParts } from "../shared/hash";
-import type { EntityId } from "../shared/ids";
+import type { EntityId, PlaceId } from "../shared/ids";
 import type { JsonObject, JsonValue } from "../shared/json";
+import { hasOwn } from "../shared/json";
 import type { LedgerEvent } from "../shared/ledger";
 import type { Got, GotHow, ItemOp, Rest, SizeClass, Spot } from "../shared/things";
 import { typeFields } from "../shared/items-build";
-import { sizeRank, SIZE_LABELS, THING_NAME_MAX } from "../shared/things";
+import { nameKey, sizeRank, SIZE_LABELS, THING_NAME_MAX } from "../shared/things";
 import type { EntityDef } from "../shared/world";
 import { accessFor, assignFor } from "./access";
 import { ENGINE_EVENTS } from "./engine-pack";
 import { orgPower, orgTypeOf } from "./org";
-import { labelOf, optionalService, own } from "./pack-kit";
+import { labelOf, optionalQuery, optionalService, own } from "./pack-kit";
 import type { ReadContext, Rejection } from "./registry";
 import { fieldDef, GONE_FIELD, isGone, kindIs, placeOfEntity } from "./scope";
 import { typeRowOf } from "./thing-index";
-import { findThings } from "./thing-resolve";
-import { contentsOf, holdersOf, holdsOf, isThing, possessorOf, sizeOf, sizeOfDef, spotOf, whoseOf } from "./things";
+import { findThings, meets } from "./thing-resolve";
+import { contentsOf, holdersOf, holdsOf, isThing, possessorOf, SHARED_SLOTS, sizeOf, sizeOfDef, spotOf, whoseOf } from "./things";
 import { isDiscoverable, knows } from "./visibility";
 import type { Working } from "./working";
 
@@ -211,6 +212,38 @@ function restProblem(ctx: ReadContext, rest: Rest): Rejection | null {
   return own(ctx.state.entities, rest.in) && holdsOf(ctx, rest.in) !== null ? null : reject("cant_hold", `${labelOf(ctx, rest.in)} can't hold anything`);
 }
 
+/**
+ * A made thing's type (§5.3 step 3): a gear row of its noun naming it in full, else the price
+ * catalog's row (`economy.thing_type`: goods, food and drink, never a service), else a gear row of
+ * its noun; with the row's price where it is made, and whether it is food or drink. The reconciler's
+ * makes read it, and so does `make` given neither a type nor a size.
+ */
+export function thingTypeFor(ctx: ReadContext, name: string, place: PlaceId | null): { type?: string; cents: number | null; food: boolean } {
+  const key = nameKey(name);
+  if (!key) return { cents: null, food: false };
+  let full: string | undefined;
+  let head: { id: string; score: number } | undefined;
+  for (const table of ["gear.items", "gear.containers"]) {
+    for (const [id, row] of Object.entries(ctx.tables.get(table)?.rows ?? {}).sort(([a], [b]) => a.localeCompare(b))) {
+      const rowKey = nameKey(typeof row.name === "string" ? row.name : id);
+      const m = rowKey ? meets(key, rowKey) : null;
+      if (!m || !rowKey) continue;
+      if (m === "full" && full === undefined) full = id;
+      const score = key.words.filter((w) => rowKey.words.includes(w)).length;
+      if (!head || score > head.score) head = { id, score };
+    }
+  }
+  const gearCents = (id: string): number | null => {
+    const band = typeRowOf(ctx, { catalog: id })?.row.price_cents;
+    const typical = band && typeof band === "object" && !Array.isArray(band) ? (band as JsonObject).typical : undefined;
+    return typeof typical === "number" ? typical : null;
+  };
+  if (full !== undefined) return { type: full, cents: gearCents(full), food: false };
+  const sold = optionalQuery(ctx, "economy.thing_type")?.(ctx, name, place) ?? null;
+  if (sold) return { type: sold.catalog, cents: sold.cents, food: sold.food };
+  return head ? { type: head.id, cents: gearCents(head.id), food: false } : { cents: null, food: false };
+}
+
 function make(w: Working, op: Extract<ItemOp, { do: "make" }>, opts: ItemOpOptions): ItemOpApplied | ItemOpRefusal {
   const ctx = w.ctx;
   const name = op.name.trim();
@@ -226,9 +259,11 @@ function make(w: Working, op: Extract<ItemOp, { do: "make" }>, opts: ItemOpOptio
   const found = findThings(ctx, name, { actor: near ?? viewer, viewer, scope: near !== null ? "on" : "all", ...(op.owner !== undefined ? { owner: op.owner } : {}) }).filter((c) => c.full && (near !== null || (place !== null && placeOfEntity(ctx.state, c.id) === place)));
   const seen = found.find((c) => !c.secret);
   if (seen) return { ...reject("exists", `${labelOf(ctx, seen.id)} is already there`), exists: seen.id };
-  const row = op.type !== undefined ? typeRowOf(ctx, { catalog: op.type }) : null;
+  // A make that gives neither a type nor a size takes the type its name reads as (`thingTypeFor`), as the reply's read does.
+  const type = op.type ?? (op.size === undefined ? thingTypeFor(ctx, name, place).type : undefined);
+  const row = type !== undefined ? typeRowOf(ctx, { catalog: type }) : null;
   if (op.type !== undefined && !row) return reject("missing_type", `no type ${op.type} in the catalogs`);
-  const typed = row && op.type !== undefined ? typeFields(row.table, op.type, row.row) : null;
+  const typed = row && type !== undefined ? typeFields(row.table, type, row.row) : null;
   const kind = typed?.kind ?? "item";
   const fields: JsonObject = { ...typed?.fields };
   if (op.owner !== undefined) fields.owner = op.owner;
@@ -242,7 +277,7 @@ function make(w: Working, op: Extract<ItemOp, { do: "make" }>, opts: ItemOpOptio
   const maybe = found.find((c) => c.secret);
   if (maybe) fields.maybe_same_as = maybe.id;
   if ("in" in op.at && !own(ctx.state.entities, op.at.in)) return reject("missing_entity", `no holder ${labelOf(ctx, op.at.in)}`);
-  const where = landing(ctx, name, sizeOfDef(ctx, kind, fields).size, op.at, opts, false);
+  const where = landing(ctx, name, sizeOfDef(ctx, kind, fields, name).size, op.at, opts, false);
   if ("code" in where) return where;
   const id = madeId(ctx, name, opts.salt);
   fields.made = { by: opts.by, at: where.spot } as unknown as JsonValue;
@@ -325,7 +360,10 @@ function wear(w: Working, op: Extract<ItemOp, { do: "wear" }>, opts: ItemOpOptio
     if ("code" in moved) return moved;
     if (moved.placed) return reject("too_big", `${e.name} is too big to wear`);
   }
-  return applyAll(w, [{ type: "link", rel: slot === "hand_held" ? "equipped" : "worn_by", from: op.item, to: op.who, fields: { slot } }]) ?? {};
+  // Whatever holds the slot already comes off and stays carried (§10.3); pockets and hands hold several.
+  const rel = slot === "hand_held" ? "equipped" : "worn_by";
+  const taken = hasOwn(SHARED_SLOTS, slot) ? [] : Object.keys(ctx.state.entities).sort().filter((id) => id !== op.item && own(ctx.state.entities, id)?.relations.some((r) => r.type === rel && r.to === op.who && r.fields?.slot === slot));
+  return applyAll(w, [...taken.map((id): LedgerEvent => ({ type: "unlink", rel, from: id, to: op.who })), { type: "link", rel, from: op.item, to: op.who, fields: { slot } }]) ?? {};
 }
 
 function merge(w: Working, op: Extract<ItemOp, { do: "merge" }>, opts: ItemOpOptions): ItemOpApplied | Rejection {

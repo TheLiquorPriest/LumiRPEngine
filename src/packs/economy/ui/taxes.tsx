@@ -8,7 +8,7 @@
 // estimated-tax period, its unemployment taxes' rates and wage bases, what falls due next, and this
 // year and last: sales tax collected, remitted and held, payroll withholding and its own share, FUTA
 // and SUTA accrued and paid, income tax, property tax and the donations it received. A reader gives
-// to an exempt organization from here (Donate), and elects or ends a return, each played as a turn.
+// to an exempt organization from here (Donate), and elects or ends a return, each done at once, off screen.
 // GM → Orgs draws the same, with the GM's own status and election as GM edits.
 
 import { useState } from "preact/hooks";
@@ -16,19 +16,21 @@ import { FINANCE_ACTIONS, STRUCTURE_WORDS, type ConsolidationView, type ExemptVi
 import type { EntityId } from "../../../shared/ids";
 import { parseMoneyInput } from "../../../shared/money";
 import { DEFAULT_CURRENCY, formatMoney, type WorldCurrency } from "../../../shared/world";
+import { OFFSTAGE_DEFAULTS, TELL_HELP, TELL_LABEL, tellPreset } from "../../../shared/offstage";
+import { useView } from "../../../frontend/app";
 import { Button, Empty, JsonView, List, ListRow, Row, Section } from "../../../frontend/components";
 import type { GmSectionProps, OrgGmTabProps, OrgTabProps } from "../../../frontend/registry";
 import { decodeTaxes } from "./decode";
-import { AmountField, SelectField } from "./forms";
+import { AmountField, SelectField, ToggleField } from "./forms";
 import type { PlayerControls } from "./hub";
 import { Controls } from "./nav";
 import { usePlayerControls } from "./panel";
 
-/** What the reader does from the Taxes tab, each played as a turn: elect or end a consolidated return, and give to the organization (true once the turn took it). */
+/** What the reader does from the Taxes tab, each done at once, off screen (DESIGN §11): elect or end a consolidated return, and give to the organization, with its Tell switch's setting (true once it was taken). */
 export interface TaxesActs {
   busy: boolean;
   consolidate(elect: boolean): void;
-  donate(cents: number): Promise<boolean>;
+  donate(cents: number, tell?: boolean): Promise<boolean>;
 }
 
 /** The GM's own changes from GM → Orgs → Taxes, each a GM edit: the exempt status (null: none) and the consolidated-return election. */
@@ -125,11 +127,14 @@ function ConsolidationPart(props: { consolidation: ConsolidationView; why: strin
   );
 }
 
-/** Donate: an amount from the reader, as they pay, to an exempt organization; deductible as its status says. Once the gift is played, the amount clears. */
+/** Donate: an amount from the reader, as they pay, to an exempt organization; deductible as its status says, with the Tell switch a gift to someone else starts with (Settings → Narrator → Out-of-play actions). Once the gift is taken, the amount clears. */
 export function DonateForm(props: { exempt: ExemptView; currency: WorldCurrency; acts: TaxesActs }) {
   const [amount, setAmount] = useState("");
+  const [told, setTold] = useState<boolean | null>(null);
+  const offstage = useView()?.controls?.offstage ?? OFFSTAGE_DEFAULTS;
   const cents = parseMoneyInput(amount, props.currency);
   const ok = cents !== null && cents > 0 && !props.acts.busy;
+  const tell = told ?? tellPreset(FINANCE_ACTIONS.donate, { amount: cents ?? 0 }, offstage, props.currency.decimals) ?? undefined;
   return (
     <div class="lre-stack" data-lre-taxes-donate>
       <AmountField
@@ -140,7 +145,8 @@ export function DonateForm(props: { exempt: ExemptView; currency: WorldCurrency;
         invalid={amount.trim() !== "" && (cents === null || cents <= 0)}
         help={props.exempt.deductible ? "Deductible: it comes off your taxable income, and what that saves you is refunded each 15 April." : `Not deductible: a gift to a ${props.exempt.name.toLowerCase()} comes off no one's income tax.`}
       />
-      <Button variant="primary" icon="heart" disabled={!ok} onClick={() => (ok && cents !== null ? void props.acts.donate(cents).then((done) => done && setAmount("")) : undefined)}>
+      {tell !== undefined ? <ToggleField label={TELL_LABEL} help={TELL_HELP} checked={tell} disabled={props.acts.busy} onChange={setTold} /> : null}
+      <Button variant="primary" icon="heart" disabled={!ok} onClick={() => (ok && cents !== null ? void props.acts.donate(cents, tell).then((done) => done && setAmount("")) : undefined)}>
         {ok && cents !== null ? `Donate ${formatMoney(cents, props.currency)}` : "Donate"}
       </Button>
     </div>
@@ -261,12 +267,12 @@ export function OrgTaxes(props: { section: TaxesView; currency: WorldCurrency; a
   );
 }
 
-/** The reader's Taxes controls on an organization, each sent as its in-world action, played as a turn: `tax_consolidate` and `donate`. */
+/** The reader's Taxes controls on an organization, each sent as its in-world action, done at once, off screen: `tax_consolidate` and `donate`. */
 export function taxesActs(org: EntityId, controls: Pick<PlayerControls, "busy" | "act">): TaxesActs {
   return {
     busy: controls.busy,
     consolidate: (elect) => void controls.act({ action: FINANCE_ACTIONS.consolidate, params: { org, elect: elect ? "yes" : "no" } }),
-    donate: (cents) => controls.act({ action: FINANCE_ACTIONS.donate, params: { to: org, amount: cents } }),
+    donate: (cents, tell) => controls.act({ action: FINANCE_ACTIONS.donate, params: { to: org, amount: cents } }, tell),
   };
 }
 

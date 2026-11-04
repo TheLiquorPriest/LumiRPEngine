@@ -1,6 +1,7 @@
 // The place sheet: a place from the map, with its exact travel options (mode,
 // time, cost, or why not), whether the POV is there, has been there or has only heard of it, and
-// ways back to the map: open its own map, or show it where it lies. A place the POV can't see goes
+// ways back to the map: open its own map, or show it where it lies; then the parts other packs add
+// (`r.placePart`: the gear pack's Things here, where the POV is). A place the POV can't see goes
 // by "Somewhere" and offers nothing. Places aren't entities, so opening one observes nothing new
 // (the map was observed when its destination opened). The same details show in the map overlay's
 // dock, where no sheet stack is.
@@ -158,6 +159,9 @@ export function PlaceSheet(props: SheetProps) {
           app.overlays.closeMap();
         }}
       />
+      {place.known
+        ? app.catalog.placeParts.map((part) => <part.component key={part.id} chatId={props.chatId} place={place.id} here={place.id === view.here} state={props.state} send={props.send} open={props.open} />)
+        : null}
     </div>
   );
 }

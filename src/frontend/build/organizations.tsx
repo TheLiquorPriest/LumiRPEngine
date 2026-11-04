@@ -440,10 +440,10 @@ export function OrgEditor(props: EditorProps) {
             {members.map((m) => (
               <ListRow key={`${m.who}:${m.index}`} id={m.who} icon="user" title={m.name} subtitle={titled(m)} chevron onClick={() => setSheet({ kind: "member", link: m })} />
             ))}
-            <ListRow icon="user-plus" title="Add a member" chevron onClick={() => setSheet({ kind: "member", link: null })} />
+            {type !== "trust" ? <ListRow icon="user-plus" title="Add a member" chevron onClick={() => setSheet({ kind: "member", link: null })} /> : null}
           </List>
         </Section>
-        {type !== "trust" ? (
+        {type !== "trust" || jobs.length > 0 ? (
           <Section title="Staff" flush>
             <List>
               {jobs.map((j) => (

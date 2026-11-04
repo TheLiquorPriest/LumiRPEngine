@@ -10,6 +10,7 @@
 
 import type { JsonObject } from "../../../shared/json";
 import type { EntityId } from "../../../shared/ids";
+import { isCorrection } from "../../../shared/finance";
 import { calendarOf, dateAt } from "../../../engine/calendar";
 import { numOf, objOf, own, sliceOf, sliceRecord, strOf } from "../../../engine/pack-kit";
 import type { WorldState } from "../../../engine/state";
@@ -42,6 +43,13 @@ export type MonthBook = Record<BookKey, number>;
  * investments and property bought and sold), which change what it holds, not what it makes.
  */
 export const BOOKED_CATEGORIES: readonly string[] = ["sales", "cogs", "sales_tax", "invoice", "payroll", "business_tax", "draw", "distribution", "transfer", "loan", "investment", "property"];
+
+/**
+ * Journal categories of income from what a business holds rather than from its trade: its
+ * holdings' dividends and interest, and a deposit's interest. They are profit, but not operating
+ * profit, which values a business beside what it holds at market (§27.10), so nothing counts twice.
+ */
+export const INVESTMENT_INCOME: readonly string[] = ["dividends", "interest"];
 
 /** Months of books kept per business: two years and the month under way. */
 const MONTHS_KEPT = 25;
@@ -143,6 +151,10 @@ export interface BooksDetail {
   revenue: number;
   expenses: number;
   profit: number;
+  /** Income from what it holds (`INVESTMENT_INCOME`), among the revenue. */
+  investment: number;
+  /** The profit from its trade: the profit less its investment income. */
+  operating: number;
   /** What its open and late invoices are owed it. */
   receivables: number;
   /** What it owes: invoices it hasn't paid, sales tax it collected, its suppliers. */
@@ -158,22 +170,25 @@ export interface BooksDetail {
 /**
  * A business's books over the months from the one holding `from` to the one holding `to - 1`
  * (DESIGN §26.2): revenue and expenses, the profit, and what it is owed and owes now. Owner draws,
- * distributions, transfers between its own accounts and sales tax (passed through) are in neither.
+ * distributions, transfers between its own accounts, sales tax (passed through) and corrections
+ * (a balance put right, `isCorrection`) are in neither.
  */
 export function businessBooks(api: FinanceApi, books: Books, business: EntityId, from: number, to: number): BooksDetail {
   const accounts = api.accountsOf(books, business, "worth");
   const sum = {} as MonthBook;
   for (const k of BOOK_KEYS) sum[k] = 0;
   let otherIn = 0;
+  let investment = 0;
   const otherOut: Record<string, number> = {};
   for (const month of monthsBetween(books.world, from, to)) {
     const b = monthBook(books.state, business, month);
     for (const k of BOOK_KEYS) sum[k] += b[k];
     for (const account of accounts) {
       for (const [category, t] of Object.entries(totalsOf(books.state, account, month))) {
-        // An account's opening balance is what the business started with, not money it made or spent.
-        if (BOOKED_CATEGORIES.includes(category) || category === "opening") continue;
-        otherIn += t.in;
+        // An account's opening balance is what the business started with, not money it made or spent; a correction puts a balance right.
+        if (BOOKED_CATEGORIES.includes(category) || category === "opening" || isCorrection({ category })) continue;
+        if (INVESTMENT_INCOME.includes(category)) investment += t.in;
+        else otherIn += t.in;
         if (t.out > 0) otherOut[category] = (otherOut[category] ?? 0) + t.out;
       }
     }
@@ -181,21 +196,29 @@ export function businessBooks(api: FinanceApi, books: Books, business: EntityId,
   // Sales through the purchase path land under the goods' own categories; their takings are booked already.
   const otherIncome = Math.max(0, otherIn - sum.takings);
   const expenseLines = Object.entries(otherOut).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
-  const revenue = sum.sales + sum.invoices + otherIncome;
+  const revenue = sum.sales + sum.invoices + otherIncome + investment;
   const expenses = sum.cogs + sum.payroll + sum.business_tax + sum.bills + expenseLines.reduce((a, [, c]) => a + c, 0);
-  const owed = invoicesOwed(books.state, business);
-  const payables = payablesOf(books.state, business);
+  const owed = owedOf(books.state, business);
   const lines = [
     { category: "sales", cents: sum.sales },
     { category: "invoices", cents: sum.invoices },
     { category: "other income", cents: otherIncome },
+    { category: "investment income", cents: investment },
     { category: "cost of goods", cents: -sum.cogs },
     { category: "payroll", cents: -sum.payroll },
     { category: "bills", cents: -sum.bills },
     { category: "income tax", cents: -sum.business_tax },
     ...expenseLines.map(([category, c]) => ({ category, cents: -c })),
   ].filter((l) => l.cents !== 0);
-  return { revenue, expenses, profit: revenue - expenses, receivables: owed.receivable, payables: owed.payable + Math.max(0, payables.sales_tax) + Math.max(0, payables.suppliers), payroll: sum.payroll, taxes: sum.business_tax, lines, draws: sum.draws, distributions: sum.distributions };
+  const profit = revenue - expenses;
+  return { revenue, expenses, profit, investment, operating: profit - investment, receivables: owed.receivables, payables: owed.payables, payroll: sum.payroll, taxes: sum.business_tax, lines, draws: sum.draws, distributions: sum.distributions };
+}
+
+/** What a business is owed now (its open and late invoices) and what it owes (invoices billed to it, sales tax it collected, its suppliers): its net worth counts both (§27.10). */
+export function owedOf(state: Readonly<WorldState>, business: EntityId): { receivables: number; payables: number } {
+  const owed = invoicesOwed(state, business);
+  const payables = payablesOf(state, business);
+  return { receivables: owed.receivable, payables: owed.payable + Math.max(0, payables.sales_tax) + Math.max(0, payables.suppliers) };
 }
 
 /** What a business's open and late invoices come to: those it issued (owed to it) and those billed to it (owed by it). */

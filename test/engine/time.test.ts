@@ -5,7 +5,8 @@ import type { PackDef } from "../../src/engine/registry";
 import type { Registry } from "../../src/engine/registry-impl";
 import { createRng } from "../../src/engine/rng";
 import type { WorldState } from "../../src/engine/state";
-import { applyTimeAdvance, buildMontage, clockFix, clockPaused, minimumUnitCap, parseTarget, pauseBookkeeping, resolveTarget, runTimelapse, speedThrough, tickMinutes, turnElapsed } from "../../src/engine/time";
+import { applyTimeAdvance, buildMontage, clockFix, clockPaused, minimumUnitCap, parseTarget, pauseBookkeeping, resolveTarget, runTimelapse, speedThrough, tickMinutes, turnElapsed, typedSpan } from "../../src/engine/time";
+import { calendarOf, clockOfStamp } from "../../src/engine/calendar";
 import { planTurn, postTurn, timelapseIntent } from "../../src/engine/turn";
 import { ALL_NOTE, ranTo } from "../../src/engine/simulate";
 import { placeOfEntity } from "../../src/engine/scope";
@@ -323,5 +324,21 @@ describe("post steps and the montage filter", () => {
     ], "key");
     expect(m.groups.flatMap((g) => g.lines)).toEqual(["public news"]);
     void createRng;
+  });
+});
+
+describe("typed spans (DESIGN §9.2)", () => {
+  test("speech in quotes names no span, a day named in full or short is a stated time, and the old readings stand", () => {
+    const cal = calendarOf(timeWorld());
+    const now = clockOfStamp(cal, "2026-06-23 09:00") ?? 0;
+    const read = (words: string) => typedSpan(cal, now, words);
+    expect(read("until this afternoon")).toEqual({ type: "day_part", dayPart: "afternoon" });
+    expect(read("over the next two hours")).toEqual({ type: "duration", minutes: 120 });
+    expect(read('"See you this afternoon," she says')).toBeNull();
+    expect(read("“See you this afternoon,” she says, and we talk for forty minutes")).toEqual({ type: "duration", minutes: 40 });
+    expect(read('"over the next hour"')).toEqual({ type: "duration", minutes: 60 });
+    expect(read("Tuesday, June 25, in the afternoon")).toBeNull();
+    expect(read("on June 25 this afternoon")).toBeNull();
+    expect(read("Tue 25 Jun this afternoon")).toBeNull();
   });
 });

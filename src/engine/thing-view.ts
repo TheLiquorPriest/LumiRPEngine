@@ -10,9 +10,9 @@
 import type { EntityId, PlaceId } from "../shared/ids";
 import { hasOwn } from "../shared/json";
 import { TYPE_TABLES, typeFields } from "../shared/items-build";
-import type { AccessChip, GrantView, OwnerGroup, PartyRef, PersonThings, Presumption, ThingPage, ThingPicks, ThingRow, ThingsList, ThingType, WhereChoice, WhereStep, WhoseView } from "../shared/thing-view";
+import type { AccessChip, GrantView, OwnerGroup, PartyRef, PersonThings, Presumption, ThingPage, ThingPicks, ThingRow, ThingsList, ThingType, WardrobeRows, WhereChoice, WhereStep, WhoseView } from "../shared/thing-view";
 import { partyPossessive } from "../shared/thing-view";
-import type { Rest } from "../shared/things";
+import type { Rest, Spot } from "../shared/things";
 import { grantBasisOf, nameTokens, thingsConfigOf } from "../shared/things";
 import type { WorldDoc } from "../shared/world";
 import { listWords } from "../shared/words";
@@ -26,7 +26,7 @@ import type { Registry } from "./registry-impl";
 import { isGone, kindDef, kindIs, placeOfEntity, placeWithin } from "./scope";
 import { thingIndex, typeRowOf } from "./thing-index";
 import { findThings } from "./thing-resolve";
-import { contentsOf, holderOf, holdsOf, isThing, possessorOf, presumedAt, restOf, sizeOf, sizeOfDef, whoseOf, type Whose } from "./things";
+import { contentsOf, holderOf, holdersOf, holdsOf, isThing, keptCategoryOf, possessorOf, presumedAt, restOf, sizeOf, sizeOfDef, slotOf, whoseOf, type Whose } from "./things";
 import { initialState } from "./world-state";
 
 /** How far up a chain of places or holders is followed. */
@@ -121,6 +121,14 @@ export function thingVisibility(ctx: ReadContext, id: EntityId): unknown {
   return own(ctx.world.entities, id)?.visibility ?? own(ctx.state.entities, id)?.fields.visibility;
 }
 
+/** Where Put away takes a thing (its rest): a place, or a holder; on its owner, the owner. Null when nothing says. */
+function restSpot(ctx: ReadContext, id: EntityId): Spot | null {
+  const rest = restOf(ctx, id).rest;
+  if (rest !== "owner") return rest;
+  const owner = whoseOf(ctx, id).owners[0];
+  return owner !== undefined && own(ctx.state.entities, owner) ? { in: owner } : null;
+}
+
 /** A thing as a list shows it. */
 export function thingRow(ctx: ReadContext, id: EntityId): ThingRow {
   const e = own(ctx.state.entities, id);
@@ -138,6 +146,8 @@ export function thingRow(ctx: ReadContext, id: EntityId): ThingRow {
     whose: whoseView(ctx, whoseOf(ctx, id), placeOfEntity(ctx.state, id)),
     with: possessorOf(ctx, id),
     worn: worn ? (typeof worn.fields?.slot === "string" ? worn.fields.slot : typeof fields.slot === "string" ? fields.slot : "worn") : null,
+    slot: slotOf(ctx, fields),
+    rest: restSpot(ctx, id),
     holds: holdsOf(ctx, id),
     // Things only: a cash account in a wallet is the money's, not a thing in it.
     inside: contentsOf(ctx.state, id).filter((c) => isThing(ctx, c) && !isGone(ctx.state, c)).length,
@@ -360,25 +370,53 @@ export function thingPage(ctx: ReadContext, id: EntityId): ThingPage | null {
 /**
  * A person's things in the Character page's groups (ITEMS-SPEC §10.1): theirs (or nobody's) that
  * they have; others' that they have; theirs someone else has; theirs at home; theirs elsewhere.
- * Null for an id that isn't a person.
+ * Then, derived, what they wear (by slot) and what they carry and don't wear, and their clothing at
+ * home by what holds it, from Gear 3 (below it everything on them is carried). Null for an id that
+ * isn't a person.
  */
 export function personThings(ctx: ReadContext, person: EntityId): PersonThings | null {
   if (!isPerson(ctx, person) || isGone(ctx.state, person)) return null;
   return readPass(() => {
-    const out: PersonThings = { on: [], home: [], away: [], lent: [], holding: [] };
+    const out: PersonThings = { on: [], home: [], away: [], lent: [], holding: [], outfit: [], carried: [], wardrobe: [] };
     const home = own(ctx.state.entities, person)?.fields.home;
+    const slotted = ctx.levelOf(person, "gear") >= 3;
+    const slots = Object.keys(ctx.tables.get("gear.slots")?.rows ?? {});
+    const outfit: { row: ThingRow; rank: number }[] = [];
+    const wardrobe = new Map<string, WardrobeRows>();
     for (const id of things(ctx)) {
       const has = possessorOf(ctx, id);
       const whose = whoseOf(ctx, id);
       const stated = whose.presumed === undefined ? whose.owners : [];
       if (has === person) {
-        (stated.length === 0 || stated.includes(person) ? out.on : out.holding).push(thingRow(ctx, id));
+        const row = thingRow(ctx, id);
+        (stated.length === 0 || stated.includes(person) ? out.on : out.holding).push(row);
+        if (holderOf(ctx.state, id) !== person) continue;
+        const worn = slotted && row.worn !== null && row.worn !== "pocket" && row.worn !== "pocket_or_bag" && holdersOf(ctx.state, id).includes(person);
+        if (worn) outfit.push({ row, rank: slots.includes(row.worn ?? "") ? slots.indexOf(row.worn ?? "") : slots.length });
+        else out.carried.push(row);
         continue;
       }
       if (!stated.includes(person)) continue;
-      if (has !== null) out.lent.push(thingRow(ctx, id));
-      else (atHome(ctx, placeOfEntity(ctx.state, id), home) ? out.home : out.away).push(thingRow(ctx, id));
+      if (has !== null) {
+        out.lent.push(thingRow(ctx, id));
+        continue;
+      }
+      const at = placeOfEntity(ctx.state, id);
+      const row = thingRow(ctx, id);
+      if (!atHome(ctx, at, home)) {
+        out.away.push(row);
+        continue;
+      }
+      out.home.push(row);
+      if (!slotted || keptCategoryOf(ctx, own(ctx.state.entities, id)?.fields ?? {}) !== "clothing") continue;
+      const holder = holderOf(ctx.state, id);
+      const key = holder ?? "";
+      const group = wardrobe.get(key) ?? { holder: holder !== null ? { id: holder, name: own(ctx.state.entities, holder)?.name ?? holder, is: "thing" as const } : null, rows: [] };
+      group.rows.push(row);
+      wardrobe.set(key, group);
     }
+    out.outfit = outfit.sort((a, b) => a.rank - b.rank || a.row.id.localeCompare(b.row.id)).map((o) => o.row);
+    out.wardrobe = [...wardrobe.values()].sort((a, b) => Number(a.holder === null) - Number(b.holder === null) || (a.holder?.name ?? "").localeCompare(b.holder?.name ?? ""));
     return out;
   });
 }

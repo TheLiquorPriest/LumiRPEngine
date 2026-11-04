@@ -31,6 +31,9 @@ const DEFAULT_DAY_PARTS: readonly DayPart[] = [
 
 const GREGORIAN_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const GREGORIAN_WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+/** The names as a player types them in full ("Tuesday, June 25"), which typed time reads as a stated day (`typedSpan`). */
+const GREGORIAN_MONTHS_FULL = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+const GREGORIAN_WEEKDAYS_FULL = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
 const HHMM = /^(\d{1,2}):(\d{2})$/;
 const ISO_DATE = /^(-?\d{1,6})-(\d{2})-(\d{2})/;
@@ -109,6 +112,9 @@ interface System {
   months: number;
   monthNames: readonly string[];
   weekdayNames: readonly string[];
+  /** The same names in full, as typed: a custom calendar's own are its names. */
+  fullMonthNames: readonly string[];
+  fullWeekdayNames: readonly string[];
 }
 
 const GREGORIAN: System = {
@@ -119,11 +125,14 @@ const GREGORIAN: System = {
   months: 12,
   monthNames: GREGORIAN_MONTHS,
   weekdayNames: GREGORIAN_WEEKDAYS,
+  fullMonthNames: GREGORIAN_MONTHS_FULL,
+  fullWeekdayNames: GREGORIAN_WEEKDAYS_FULL,
 };
 
 function customSystem(def: NonNullable<CalendarDef["custom"]>): System {
   const lengths = def.monthLengths.length > 0 ? def.monthLengths.map((n) => Math.max(1, Math.floor(n))) : [30];
   const yearLength = lengths.reduce((a, b) => a + b, 0);
+  const months = def.monthNames.length >= lengths.length ? def.monthNames : lengths.map((_, i) => `M${i + 1}`);
   const weekdays = def.weekdayNames.length > 0 ? def.weekdayNames : ["Day"];
   return {
     abs(year, month, day) {
@@ -145,8 +154,10 @@ function customSystem(def: NonNullable<CalendarDef["custom"]>): System {
     weekday: (abs) => mod(abs, weekdays.length),
     monthLength: (_year, month) => lengths[month - 1] ?? 0,
     months: lengths.length,
-    monthNames: def.monthNames.length >= lengths.length ? def.monthNames : lengths.map((_, i) => `M${i + 1}`),
+    monthNames: months,
     weekdayNames: weekdays,
+    fullMonthNames: months,
+    fullWeekdayNames: weekdays,
   };
 }
 

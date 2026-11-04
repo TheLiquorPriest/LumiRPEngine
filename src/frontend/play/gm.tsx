@@ -26,6 +26,7 @@ import { EditNoticeBar } from "../gm/ui";
 import { WorldSection } from "../gm/world";
 import type { PanelProps } from "../registry";
 import { editRequest } from "../requests";
+import { QUEUED_TOAST, toastQueued } from "../queued";
 
 /**
  * What the GM view is loaded again on: the chat moving on (a turn, an edit, an undo), as the
@@ -75,8 +76,8 @@ export function GmPanel(props: PanelProps) {
     const { promise, resolve } = Promise.withResolvers<{ applied: number; of: number }>();
     run(async () => {
       const sent = await sendEdits(sendAll, (ops) => app.request(editRequest(props.chatId, ops)));
-      // An edit made while a reply is being written lands when it finishes: there's no Undo to show yet.
-      if (sent.held) app.toast("Saved — it applies when the reply finishes.", "info");
+      // An edit made during a turn lands after it: there's no Undo to show yet.
+      if (sent.held) app.toast(QUEUED_TOAST, "info");
       if (sent.applied > 0) {
         const view = await load();
         if (sent.undo.length > 0) setNotice(editNotice(sent.undo, view?.edits ?? [], done?.(sent.count)));
@@ -100,7 +101,7 @@ export function GmPanel(props: PanelProps) {
     });
   /** A change sent through a request of its own (GM → Workspace's writes): reloads, then says what it did with its Undo, as `commit` does for an edit. */
   const changed = async (text: string, result: { pending?: boolean; undo?: string | null }): Promise<void> => {
-    if (result.pending) app.toast("Saved — it applies when the reply finishes.", "info");
+    toastQueued(app, result);
     const view = await load();
     if (view && result.undo) setNotice(editNotice([result.undo], view.edits, text));
   };

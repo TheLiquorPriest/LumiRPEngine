@@ -44,7 +44,7 @@ import { calendarOf, clockOfStamp, dateAt, formatClock, formatHHMM, formatTimeOf
 import type { ChainMessage } from "../engine/ledger/chain";
 import { LedgerFold } from "../engine/ledger/fold";
 import type { LedgerCore, LedgerEnv } from "../engine/ledger/journal";
-import { activeText, isTombstoned, ownMessage } from "../engine/ledger/path";
+import { activeRecord, activeText, isTombstoned, ownMessage } from "../engine/ledger/path";
 import { optionalQuery, own } from "../engine/pack-kit";
 import type { PackDef, ReadContext } from "../engine/registry";
 import { createRegistry, type Registry } from "../engine/registry-impl";
@@ -62,7 +62,7 @@ import type { InterpretOutput, QueuedAction } from "../engine/steps";
 import { checkAnswer } from "../engine/tracks";
 import { loreReadable, namesHiddenOrSecretLore, secretLoreNames } from "../engine/lore";
 import { pinsFor, type PinnedText } from "../engine/lore-pins";
-import { authorLines, hiddenNameCheck, namesHidden, povMayKnow } from "../engine/player-events";
+import { authorLines, hiddenNameCheck, namesHidden, playerLines, povMayKnow } from "../engine/player-events";
 import { canSeeEntity, canSeePlace, findLeaks, loreGateReader, playerTrack, povPlace, shownTrackId, unrevealedSecrets, unseenPlaceNames } from "../engine/visibility";
 import { feedOf, renderersOf } from "../engine/feed";
 import { answerParams, answerWords, expectedAnswers, openPuzzle, ownAnswer, saysAmount } from "../packs/story/core/index";
@@ -74,9 +74,9 @@ import { PLAN_TAB } from "../shared/org-feed";
 import { orgKnown, quotesReply, statesChange } from "../packs/orgs/core/story";
 import { positionsOf } from "../engine/org";
 import { Working } from "../engine/working";
-import { TIDIED_GROUP, tidyOnce } from "../engine/thing-tidy";
-import { pathEvents, tidiedOn } from "./gm";
-import { fixLines, unseenFixLine } from "./view";
+import { isTidiedGroup, tidyTurn } from "../engine/thing-tidy";
+import { pathEvents } from "./gm";
+import { offstageLines, unseenFixLine } from "./view";
 import type { GenerateAs, PresetCard, ResultBodies, TemplateInfo } from "../shared/protocol";
 import type { StarterTable } from "../shared/tables";
 import { Agents, type BuildInfo, thisBuild } from "./agents";
@@ -996,7 +996,7 @@ export class Runtime implements TurnHooks {
     this.steps.onCallStart = (userId, purpose) => this.diag.callStart(userId, purpose);
     this.toolSupport = new ToolSupport(this.host);
     this.loreRouting = new LoreRouting(this.host, this.settings, this.worlds, this.bookReads);
-    this.minds = { host: this.host, registry: this.registry, steps: this.steps, settings: this.settings, presets: this.presets };
+    this.minds = { host: this.host, registry: this.registry, steps: this.steps, settings: this.settings, presets: this.presets, loreEntry: (userId, id) => this.loreRouting.ids.entryOf(userId, id) };
     // Each user's chats fold on their own fold, its caches within their Settings → Agents → Budgets.
     this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), (userId) => this.foldOf(userId), (chatId) => this.messages.forget(chatId));
     this.sessions = new Sessions(this.blobs, this.ledger);
@@ -1283,13 +1283,18 @@ export class Runtime implements TurnHooks {
       w.applyAll(remembered);
       render.state = w.state;
     }
-    // Once, an older chat's first turn puts down what someone has on them that is too big to carry
-    // (ITEMS-SPEC §9, Tidy up's first kind), first after the memory, so all the turn reads is tidied;
-    // its chip after the turn has Undo. A chain that holds the fix, undone or not, records it no
-    // more, and the chat's own switch (GM → This chat → Things), else the world's `tidy.auto`, turns it off.
-    if (tidyOn(await this.chatKnowledge.get(input.chatId, input.userId), render.world) && !tidiedOn(input.core, before)) {
+    // Every turn puts right what play can't have (ITEMS-SPEC §9, Tidy up's first and third kinds):
+    // something too big to carry on someone, something worn but lying elsewhere. It runs first after
+    // the memory, so all the turn reads is tidied; each one is its own unit, and its chip after the turn
+    // has Undo. What the player undid stays while it stays on that person, a finding left (Leave it)
+    // stays, and the chat's own switch (GM → This chat → Things), else the world's `tidy.auto`, turns it off.
+    if (tidyOn(await this.chatKnowledge.get(input.chatId, input.userId), render.world)) {
       const w = new Working(this.registry, render.world, render.state);
-      const tidied = tidyOnce(w, pathEvents(input.core, before));
+      const records = input.core.chain(before).flatMap((m) => {
+        const r = m.isUser ? null : activeRecord(m, input.core.journal.tombstones);
+        return r ? [r] : [];
+      });
+      const tidied = tidyTurn(w, { path: () => pathEvents(input.core, before), left: await this.chatPrefs.tidyLeft(input.chatId, input.userId), records });
       bridge.setTidied(text, tidied);
       if (tidied.length > 0) render.state = w.state;
     } else bridge.setTidied(text, []);
@@ -1590,16 +1595,22 @@ export class Runtime implements TurnHooks {
       await this.orchestrator.planned(input.generationId, { core: input.core, observed: input.observed, lines: null, replaying: true, outline: false, anchor: null, as: input.as });
       return;
     }
+    const settings = await this.settings.get(input.userId);
+    // The engine's lines for the narrator: the Outcome led by what the player saw to off screen since
+    // the last turn and asked to be told (`offstageLines`, A1), once, then the plan's own; a Re-narrate
+    // reads them from the record or the plan's notes, never again from here.
+    const offstage = offstageLines(input.core, input.observed, target < 0 ? input.observed.length : target, settings.prompts.texts);
+    const planned = plan ? planLines(plan, render.world, render.state, this.registry) : null;
+    const engineLines = planned ? { outcome: [...offstage, ...planned.outcome], montage: planned.montage } : { outcome: [], montage: [] };
     if (shown) {
       if (!agent) {
-        this.keepRunLines(input.generationId, p.seed, plan, render, { brief: null, outline: [] }, [...shown]);
+        this.keepRunLines(input.generationId, p.seed, plan, engineLines, { brief: null, outline: [] }, [...shown]);
         return;
       }
       // An agent turn's review gate waits after its outline gate (AGENT-LOOP-PLAN §7): on this resume.
-      const waiting = await this.orchestrator.planned(input.generationId, { core: input.core, observed: input.observed, lines: plan ? { ...planLines(plan, render.world, render.state, this.registry), outline: [...shown], brief: null } : null, replaying: false, outline: false, anchor: anchor?.id ?? null, as: input.as });
+      const waiting = await this.orchestrator.planned(input.generationId, { core: input.core, observed: input.observed, lines: plan ? { ...engineLines, outline: [...shown], brief: null } : null, replaying: false, outline: false, anchor: anchor?.id ?? null, as: input.as });
       return waiting ? { waiting } : undefined;
     }
-    const settings = await this.settings.get(input.userId);
     const facts: SignalFacts = { ...pre.facts, ...planFacts(render.world, pre.start, render.state, plan) };
     const briefRuns = runsOf(settings.modelUse, render.world, "brief", facts, { output: "text", guidance: pre.preset.guidance });
     const outlineRuns = runsOf(settings.modelUse, render.world, "outline", facts, { output: "text", guidance: pre.preset.guidance });
@@ -1610,7 +1621,7 @@ export class Runtime implements TurnHooks {
       const budget = proseBudget;
       if (!budget || (briefRuns.length === 0 && outlineRuns.length === 0)) return { brief: null, outline: [] };
       const recent = recentLines(input.core, input.observed, target < 0 ? input.observed.length : target, this.registry);
-      const vars = safeVars(this.stepVars(render.world, render.state, plan, pre.text, "", "", recent), secrets);
+      const vars = safeVars({ ...this.stepVars(render.world, render.state, plan, pre.text, "", "", recent), outcome: engineLines.outcome.join("\n") }, secrets);
       const inputs = { text: [pre.text, vars.outcome ?? "", vars.beats ?? "", this.trackWords(render.world, render.state)].join("\n"), links: this.sceneLinks(render.world, render.state) };
       const at = await this.lorePhase("pre", input.generationId, input.chatId, input.userId, render.world, render.state, budget, pre.text, pre.preset.guidance);
       // A brief or an outline line that carries a secret or names someone or something hidden goes on
@@ -1631,7 +1642,6 @@ export class Runtime implements TurnHooks {
       this.host.log("info", `[LumiRPEngine] plan ${input.generationId.slice(0, 8)}: brief ${brief === "" ? "none" : "yes"}, ${outline.length} outline line(s), ${budget.spent} pre call(s)`, input.userId);
       return { brief: brief === "" ? null : brief, outline };
     };
-    const engineLines = plan ? planLines(plan, render.world, render.state, this.registry) : { outcome: [], montage: [] };
     // What the director role is asked on an agent turn: each prose step that would run, as classic would ask it (its facts, its own words, how its lines are marked), with how long the turn took on the engine's clock.
     let asks: { brief: ProseAsk | null; outline: ProseAsk | null } = { brief: null, outline: null };
     if (agent && proseBudget && (briefRuns.length > 0 || outlineRuns.length > 0)) {
@@ -1655,7 +1665,7 @@ export class Runtime implements TurnHooks {
     if (agent) {
       const waiting = await this.orchestrator.planned(input.generationId, { core: input.core, observed: input.observed, lines: plan ? { outcome: directed.lines?.outcome ?? engineLines.outcome, montage: directed.lines?.montage ?? engineLines.montage, outline: directed.lines?.outline ?? planOutline(plan, prose), brief: prose.brief } : null, replaying: false, outline: outlineGate, anchor: anchor?.id ?? null, as: input.as });
       if (waiting) return { waiting };
-    } else this.keepRunLines(input.generationId, p.seed, plan, render, prose);
+    } else this.keepRunLines(input.generationId, p.seed, plan, engineLines, prose);
     if (!outlineGate || !anchor) return;
     // A line carrying a secret: one with a secret's words, or one a prose step marked (a hidden name).
     const wording = markWording(settings.prompts.texts);
@@ -1712,9 +1722,9 @@ export class Runtime implements TurnHooks {
   }
 
   /** The sections a run's plan feeds the narrator, kept under the run until a generation takes its turn (`adopted`); `outline` is the one the player let through the outline gate. */
-  private keepRunLines(turn: string, seed: string, plan: EngineTurnPlan | undefined, render: { world: WorldDoc; state: WorldState }, prose: PlanProse, outline?: string[]): void {
+  private keepRunLines(turn: string, seed: string, plan: EngineTurnPlan | undefined, lines: { outcome: string[]; montage: string[] }, prose: PlanProse, outline?: string[]): void {
     if (!plan) return;
-    lruSet(this.runLines, turn, { seed, prose, lines: { ...planLines(plan, render.world, render.state, this.registry), outline: outline ?? planOutline(plan, prose) } }, 64);
+    lruSet(this.runLines, turn, { seed, prose, lines: { outcome: [...lines.outcome], montage: [...lines.montage], outline: outline ?? planOutline(plan, prose) } }, 64);
   }
 
   /**
@@ -3010,14 +3020,12 @@ export class Runtime implements TurnHooks {
         stored.push({ id: `not_action:${at}`, kind: "not_action", ...base, label: "Not an action?", detail: `Read as ${done.map((res) => `"${labelOf(res)}"`).join(", then ")}. Undo it if you only meant to say it.`, actions: [{ id: "undo", label: "Not an action", style: "danger" }], expires: "next_send", payload: { text: userText, events: JSON.parse(JSON.stringify(inRecordOrder(plan?.events ?? [], done.flatMap((res) => res.events)))) as JsonValue } });
       }
     }
-    // An older chat's one-time Things tidied fix, recorded first in this turn's plan (ITEMS-SPEC §9): its Undo puts back what it put down.
-    const tidied = rec && input.kind !== "renarrate" && input.kind !== "continue" ? rec.events.slice(0, rec.pre).filter((e) => e.group === TIDIED_GROUP) : [];
+    // The impossible holds this turn put right, recorded first in its plan (ITEMS-SPEC §9): its Undo puts back what it put right.
+    const tidied = rec && input.kind !== "renarrate" && input.kind !== "continue" ? rec.events.slice(0, rec.pre).filter((e) => isTidiedGroup(e.group)) : [];
     if (tidied.length > 0) {
       const head = input.core.fold(input.observed).state;
       const world = input.core.playedAt(head) ?? input.core.playedAt(head, rec?.defHash ?? "");
-      const lines = world ? fixLines(this.registry, world, head, tidied) : [];
-      const what = lines.length > 0 ? lines.join(" · ") : world ? unseenFixLine(this.registry, world, head, tidied) : "Behind the scenes";
-      stored.push({ id: `tidied:${at}`, kind: "tidied", ...base, label: "Things tidied", detail: `Too big to carry, so put down: ${what}. Undo puts them back as they were.`, actions: [{ id: "undo", label: "Undo", style: "danger" }], expires: "next_send", payload: { events: JSON.parse(JSON.stringify(tidied)) as JsonValue } });
+      stored.push({ id: `tidied:${at}`, kind: "tidied", ...base, label: "Things tidied", detail: tidiedDetail(this.registry, world, head, tidied), actions: [{ id: "undo", label: "Undo", style: "danger" }], expires: "next_send", payload: { events: JSON.parse(JSON.stringify(tidied)) as JsonValue } });
     }
     // The plan the player's message gave (assess-party §6.2), as the turn's plan added it: its receipt
     // (`planReceipt`). A Re-narrate tells the same plan again, so its swipe gets the same receipt.
@@ -3629,7 +3637,10 @@ export class Runtime implements TurnHooks {
     const own = plan && !renarrated && !recorded ? this.runLines.get(input.generationId) : undefined;
     const turnPlan = plan && !renarrated && !own && !recorded ? this.bridges.get(input.chatId)?.planFor(plan.seed) : undefined;
     const kept = plan && renarrated && !recorded ? await this.planNotes.get(input.chatId, input.userId, plan.seed) : null;
-    const turnLines = recorded ?? own?.lines ?? (turnPlan ? { ...planLines(turnPlan, world, state, this.registry), outline: planOutline(turnPlan, undefined) } : kept);
+    // A turn whose prose phase kept no lines makes them now, its Outcome led by what was seen to off screen, as `prose` leads it.
+    const reply = plan?.messageId == null ? -1 : input.observed.findIndex((m) => m.id === plan.messageId);
+    const fresh = turnPlan ? planLines(turnPlan, world, state, this.registry) : null;
+    const turnLines = recorded ?? own?.lines ?? (turnPlan && fresh ? { outcome: [...offstageLines(input.core, input.observed, reply < 0 ? input.observed.length : reply, texts), ...fresh.outcome], montage: fresh.montage, outline: planOutline(turnPlan, undefined) } : kept);
     const outline = turnLines?.outline ?? [];
     // The scene an agent turn's scene role gave its narrator: the lore it may read, then its notes, which
     // the sections mark where they carry a secret. An id the turn recorded for an earlier
@@ -4204,7 +4215,7 @@ export class Runtime implements TurnHooks {
       memo = new ViewMemo();
       this.viewMemos.set(core, memo);
     }
-    const view = buildView({ chatId, run, core, observed, registry: this.registry, world: (r) => core.worldAt(r), stored, meter: this.meter.view(userId), mapDisplay, knowledge, memo });
+    const view = buildView({ chatId, run, core, observed, registry: this.registry, world: (r) => core.worldAt(r), stored, meter: this.meter.view(userId), mapDisplay, knowledge, offstage: settings.offstage, memo });
     view.panels["core.context"] = this.inspectorView(chatId, userId);
     // A turn kept from a reply that failed waits on the player (DESIGN §5.1): its card shows while it lasts.
     const kept = this.ledger.keptOf(chatId);
@@ -4311,7 +4322,9 @@ export const TYPE_LABELS: Record<ExtractionType, string> = {
  * own words for how long or until when, read the same way every time (`typedSpan`); else `at` a
  * stated day and time ("YYYY-MM-DD HH:MM", local to where the POV is, as the HUD shows it); else
  * `until`, in the player's words ("later that evening", "tomorrow morning") or as a day part (or
- * the next one), shift or commitment; else `minutes`. A stated time that has passed is still the
+ * the next one), shift or commitment; else `minutes`. A `span` longer than one sentence holds more
+ * than the length (the read gave it the player's message), so it yields to `minutes`, `at` and
+ * `until`, and is read only when none of them says. A stated time that has passed is still the
  * target, so the turn refuses it with its note as it does any target it can't reach, and one beyond a
  * timelapse's reach is run toward a reach at a time; text that isn't a day and time the calendar has
  * is no stated time. With the registry, "until dinner" and the other anchors run to the POV's own
@@ -4321,28 +4334,34 @@ export function interpretedTarget(params: JsonObject, world: WorldDoc, state: Re
   const cal = calendarOf(world);
   const now = state.clock;
   const anchorAt = reg ? planAnchors(reg, world, state) : undefined;
-  const said = typeof params.span === "string" ? typedSpan(cal, now, params.span, anchorAt) : null;
+  const span = typeof params.span === "string" ? params.span : null;
+  // More than one sentence: a sentence's end followed by more words.
+  const long = span !== null && /[.!?…]["”’)\]]*\s+\S/.test(span.trim());
+  const said = span !== null && !long ? typedSpan(cal, now, span, anchorAt) : null;
   if (said) return said;
-  const local = typeof params.at === "string" ? clockOfStamp(cal, params.at) : null;
-  if (local !== null) return { type: "at", at: local - placeOffset(world, local, placeOfEntity(state, world.pov)) };
-  const raw = typeof params.until === "string" ? params.until.trim().toLowerCase() : "";
-  const spoken = raw === "" ? null : typedSpan(cal, now, raw, anchorAt);
-  if (spoken) return spoken;
-  const next = /^(the\s+)?(next|tomorrow)\b/.test(raw);
-  const until = raw.replace(/^(the\s+)?(next|tomorrow)\s*/, "");
-  const idx = cal.dayParts.findIndex((d) => d.id.toLowerCase() === until || d.label.toLowerCase() === until);
-  const part = cal.dayParts[idx];
-  if (part) {
-    // The model may drop the "next" the player typed ("…sleep until the next morning" → until "morning").
-    const words = [until, part.label.toLowerCase()].map((w) => w.replace(/[^a-z0-9 ]/g, "")).filter((w) => w !== "");
-    if (next || /\btomorrow\b/i.test(text) || new RegExp(`\\bnext\\s+(${words.join("|")})\\b`, "i").test(text)) return nextDayPart(cal, now, idx);
-    return { type: "day_part", dayPart: part.id };
-  }
-  if (until === "shift" || until === "commitment") return { type: until };
-  // A number, or one written as text ("90").
-  const given = typeof params.minutes === "string" && /^\s*\d+(?:\.\d+)?\s*$/.test(params.minutes) ? Number(params.minutes) : params.minutes;
-  const minutes = typeof given === "number" && Number.isFinite(given) ? Math.round(given) : 0;
-  return minutes > 0 ? { type: "duration", minutes } : null;
+  const stated = ((): TimelapseTarget | null => {
+    const local = typeof params.at === "string" ? clockOfStamp(cal, params.at) : null;
+    if (local !== null) return { type: "at", at: local - placeOffset(world, local, placeOfEntity(state, world.pov)) };
+    const raw = typeof params.until === "string" ? params.until.trim().toLowerCase() : "";
+    const spoken = raw === "" ? null : typedSpan(cal, now, raw, anchorAt);
+    if (spoken) return spoken;
+    const next = /^(the\s+)?(next|tomorrow)\b/.test(raw);
+    const until = raw.replace(/^(the\s+)?(next|tomorrow)\s*/, "");
+    const idx = cal.dayParts.findIndex((d) => d.id.toLowerCase() === until || d.label.toLowerCase() === until);
+    const part = cal.dayParts[idx];
+    if (part) {
+      // The model may drop the "next" the player typed ("…sleep until the next morning" → until "morning").
+      const words = [until, part.label.toLowerCase()].map((w) => w.replace(/[^a-z0-9 ]/g, "")).filter((w) => w !== "");
+      if (next || /\btomorrow\b/i.test(text) || new RegExp(`\\bnext\\s+(${words.join("|")})\\b`, "i").test(text)) return nextDayPart(cal, now, idx);
+      return { type: "day_part", dayPart: part.id };
+    }
+    if (until === "shift" || until === "commitment") return { type: until };
+    // A number, or one written as text ("90").
+    const given = typeof params.minutes === "string" && /^\s*\d+(?:\.\d+)?\s*$/.test(params.minutes) ? Number(params.minutes) : params.minutes;
+    const minutes = typeof given === "number" && Number.isFinite(given) ? Math.round(given) : 0;
+    return minutes > 0 ? { type: "duration", minutes } : null;
+  })();
+  return stated ?? (long && span !== null ? typedSpan(cal, now, span, anchorAt) : null);
 }
 
 /** The block of the POV's day an anchor starts: a meal, or bed for bedtime. */
@@ -4774,6 +4793,18 @@ function claimedWords(claimed: NonNullable<Resolution["claimed"]>, where: string
   }
   const label = claimed.cents !== undefined ? `Added: ${claimed.name} in cash` : `Added: ${/^[aeiou]/i.test(claimed.name) ? "an" : "a"} ${claimed.name}`;
   return { label, detail: "You said you had it, so the world has it now. Undo takes it back, with what you did with it." };
+}
+
+/**
+ * The Things tidied chip's detail (DESIGN §28.13), a line each: why, then every move it made as the
+ * player may know it, never cut short (the chip shows its first lines and folds the rest under "+N
+ * more"), then what Undo does; with no move the POV may see (or no world to word them in), who it
+ * was about as far as the POV knows them.
+ */
+export function tidiedDetail(registry: Registry, world: WorldDoc | undefined, state: Readonly<WorldState>, events: readonly LedgerEvent[]): string {
+  const lines = world ? playerLines(registry, world, state, world.pov, events, events.length) : [];
+  const moves = lines.length > 0 ? lines : [world ? unseenFixLine(registry, world, state, events) : "Behind the scenes"];
+  return ["Put right, as play can't have them:", ...moves, "Undo puts them back as they were."].join("\n");
 }
 
 /**

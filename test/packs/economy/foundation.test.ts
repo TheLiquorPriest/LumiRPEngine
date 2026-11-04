@@ -9,6 +9,7 @@ import type { JsonObject } from "../../../src/shared/json";
 import type { LedgerEvent, PostEvent } from "../../../src/shared/ledger";
 import type { EntityDef, WorldDoc } from "../../../src/shared/world";
 import { lintWorld } from "../../../src/engine/authoring";
+import { calendarOf, dateAt } from "../../../src/engine/calendar";
 import { materializeAll } from "../../../src/engine/materialize";
 import { migrateMoney } from "../../../src/engine/money-migrate";
 import { createRegistry, type Registry } from "../../../src/engine/registry-impl";
@@ -106,6 +107,27 @@ describe("money foundation: one statement cycle", () => {
     expect(w.state.accounts.loan).toBe(0);
     const payments = w.events.filter((e): e is PostEvent => e.type === "post" && e.lines.some((l) => l.account === "loan" && l.amount > 0));
     expect(payments).toHaveLength(3);
+  });
+
+  test("at Money 3 a loan starts billing on its first due day and pays once a month on it; nothing on it is available", () => {
+    const w = setup((world) => {
+      world.realism.levels.money = 3;
+      world.entities.loan = entity("loan", "account", { owners: [{ party: "you", role: "owner" }], product: "loan", institution: "Riverton Savings", opening: -90000, apr_pct: 6, term_months: 3, months_left: 3, due_day: 5, autopay: "minimum", autopay_from: "checking" });
+    });
+    expect(accountView(w, "loan")?.available).toBeNull();
+    const cal = calendarOf(w.world);
+    const paid = (): number => w.events.filter((e) => e.type === "post" && e.lines.some((l) => l.account === "loan" && l.amount > 0)).length;
+    // A day at a time, midnight to midnight: the day of the month each payment was made on.
+    lapse(w, (DAY - dateAt(cal, w.state.clock).minuteOfDay) / DAY);
+    const days: number[] = [];
+    for (let i = 0; i < 120 && w.state.accounts.loan !== 0; i++) {
+      const before = paid();
+      lapse(w, 1);
+      if (paid() > before) days.push(dateAt(cal, w.state.clock - 1).day);
+    }
+    expect(days).toEqual([5, 5, 5]);
+    expect(w.state.accounts.loan).toBe(0);
+    expect(trialBalance(w.state)).toBe(0);
   });
 
   test("a bank's interest names the bank on the account's lines: by its name, or as a bank where it has none", () => {

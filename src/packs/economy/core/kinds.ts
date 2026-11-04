@@ -6,7 +6,7 @@
 
 import type { FieldDef, KindDef } from "../../../shared/world";
 import { ORG_FIELDS } from "../../../shared/org";
-import { ACCOUNT_CLASSES, ACCOUNT_STATUSES, AUTOPAY_MODES, CARD_NETWORKS, CARD_STATES, FLOW_KINDS, FLOW_SHORTFALLS, FLOW_STATUSES, INVOICE_STATES, OVERDRAFT_POLICIES, PAY_BASES, PAY_EVERY } from "../../../shared/finance";
+import { ACCOUNT_CLASSES, ACCOUNT_STATUSES, AUTOPAY_MODES, CARD_NETWORKS, CARD_STATES, FLOW_KINDS, FLOW_SHORTFALLS, FLOW_STATUSES, INVOICE_STATES, OVERDRAFT_POLICIES, PAY_BASES, PAY_CHOICES } from "../../../shared/finance";
 import type { FinanceKind } from "./module";
 
 const OWNERS: FieldDef = { type: "list", label: "Owners ({party, role, share?, units?, class?})", domain: "money", level: 1 };
@@ -122,7 +122,8 @@ const JOB_FIELDS: Record<string, FieldDef> = {
   contractor: { type: "bool", label: "Contractor (nothing withheld)", domain: "money", level: 4 },
   season_from: { type: "text", label: "Season from (MM-DD)", domain: "money", level: 3 },
   season_to: { type: "text", label: "Season to (MM-DD)", domain: "money", level: 3 },
-  pay_every: { type: "enum", label: "Paid", values: [...PAY_EVERY], default: "monthly", domain: "money", level: 3 },
+  pay_every: { type: "enum", label: "Paid (none: an unpaid title)", values: [...PAY_CHOICES], default: "monthly", domain: "money", level: 3 },
+  pay_from: { type: "date", label: "Pay starts", domain: "money", level: 3 },
   pay_anchor: { type: "date", label: "First payday", domain: "money", level: 3 },
   pay_days: { type: "list", label: "Paydays of the month", of: "number", domain: "money", level: 3 },
   pay_weekday: { type: "number", label: "Payday weekday (0 = Sunday)", min: 0, max: 6, domain: "money", level: 3 },

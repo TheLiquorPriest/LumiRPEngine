@@ -57,6 +57,35 @@ export interface GmState {
 
 export type SettingsPage = "home" | "helper" | "model" | "steps" | "minds" | "narrator" | "timeouts" | "agents" | "roles" | "context" | "main" | "assistant" | "prompts" | "retention" | "realism" | "checks" | "time" | "extraction" | "swipes" | "preset" | "lore" | "display" | "caveats" | "diagnostics" | "mcp";
 
+/**
+ * Where Settings is: a page, and on a page with pages of its own one of them (`sub`: one of the
+ * Agents page's sections, a role on Roles or on Context); `at`, a part of it to open at (a role
+ * page's section); `open`, the Prompts page and text to open.
+ */
+export interface SettingsRoute {
+  page: SettingsPage;
+  sub?: string;
+  at?: string;
+  open?: { page: string; text?: string };
+}
+
+/** Back from `route`: a page within a page goes to that page, a page to Settings home. */
+export function settingsBack(route: SettingsRoute): SettingsRoute {
+  return route.sub !== undefined ? { page: route.page } : { page: "home" };
+}
+
+/**
+ * What takes focus once Settings has gone from `from` to `to`: Back put it on the row that opened the
+ * page left (home's row for a page, the page's row for a page within it); going in, the part of the
+ * new page it opens at (`at`), else its Back, at its header. `reveal` is how the scroller brings it
+ * into view.
+ */
+export function settingsFocus(from: SettingsRoute | null, to: SettingsRoute): { selector: string; reveal: "start" | "nearest" } {
+  const up = from !== null && (to.page === "home" ? from.page !== "home" : from.page === to.page && from.sub !== undefined && to.sub === undefined);
+  if (!up || from === null) return to.at !== undefined ? { selector: `[data-lre-agent-section="${to.at}"]`, reveal: "start" } : { selector: ".lre-page-header button", reveal: "start" };
+  return to.page === "home" ? { selector: `[data-lre-settings="${from.page}"] button`, reveal: "nearest" } : { selector: `[data-lre-settings-sub="${from.sub}"] button`, reveal: "nearest" };
+}
+
 /** The world home's lists of entities (ITEMS-SPEC §10.1): characters, organizations, things and money records. */
 export type EntityGroup = "people" | "orgs" | "things" | "money";
 
@@ -79,7 +108,7 @@ export interface UiState {
   play: PlayState;
   gm: GmState;
   build: BuildRoute;
-  settings: { page: SettingsPage };
+  settings: SettingsRoute;
   /** The float overlay that is open; one at a time. */
   overlay: "map" | "palette" | "world" | null;
   /** Ids show beside names everywhere (Settings → Display); kept on this device under SHOW_IDS_KEY. */

@@ -105,8 +105,9 @@ export function payAsOf(org: OrgView, palette: PaletteView | null): PayAs | null
 /**
  * Pay as…'s page, without hooks (`to` and `amount` kept by the tab): whom, from the palette's Pay,
  * and how much. Go pays as the palette's Pay with Paying as does: the organization's money pays,
- * played as the next turn. A payment over the reader's limit for it asks for approval instead (ORG-SPEC
- * Phase 5: Pay with `ask`), put to whoever holds the power above, and is paid once they approve.
+ * done at once, off screen, with its Undo and the Tell switch (DESIGN §11). A payment over the
+ * reader's limit for it asks for approval instead (ORG-SPEC Phase 5: Pay with `ask`), put to whoever
+ * holds the power above, and is paid once they approve.
  */
 export function PayAsPage(props: { org: OrgView; payAs: PayAs; chatId: string; to: string; amount: string; onTo(id: string): void; onAmount(text: string): void; controls: PlayerControls; nav: HubNav }) {
   const { org, payAs, controls } = props;
@@ -117,6 +118,8 @@ export function PayAsPage(props: { org: OrgView; payAs: PayAs; chatId: string; t
   const problem = !option ? "Pick whom to pay." : amountProblem(props.amount, controls.currency, "the amount");
   const over = payAs.limits && cents !== null ? overLimit(payAs.limits, cents, null, org.name, controls.currency) : null;
   const limit = payAs.limits?.payment;
+  const request = option && cents !== null ? paletteRequest(payAs.entry, [option], props.chatId, cents, undefined, [], org.id) : null;
+  const body = request ? { action: request.action, params: over !== null ? { ...request.params, ask: true } : request.params } : null;
   return (
     <ActionPage
       nav={props.nav}
@@ -126,11 +129,8 @@ export function PayAsPage(props: { org: OrgView; payAs: PayAs; chatId: string; t
       subtitle={limit !== undefined ? `From its money, up to ${fmt(limit)} a payment` : "From its money"}
       go={cents === null ? `Pay as ${org.name}` : over !== null ? `Ask for approval to pay ${fmt(cents)}` : `Pay ${fmt(cents)} as ${org.name}`}
       problem={problem}
-      submit={() => {
-        if (!option || cents === null) return Promise.resolve(false);
-        const request = paletteRequest(payAs.entry, [option], props.chatId, cents, undefined, [], org.id);
-        return controls.act({ action: request.action, params: over !== null ? { ...request.params, ask: true } : request.params });
-      }}
+      action={body}
+      submit={(tell) => (body === null ? Promise.resolve(false) : controls.act(body, tell))}
     >
       <SelectField label="Pay" value={option ? props.to : ""} empty="Choose someone" options={payees.map((o) => ({ value: String(o.params.to), label: o.label }))} onChange={props.onTo} />
       <AmountField label="Amount" value={props.amount} currency={controls.currency} onInput={props.onAmount} invalid={props.amount.trim() !== "" && cents === null} />

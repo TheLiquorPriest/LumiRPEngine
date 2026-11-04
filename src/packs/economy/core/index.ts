@@ -22,7 +22,9 @@ import type { JsonObject, JsonValue } from "../../../shared/json";
 import { hasOwn } from "../../../shared/json";
 import type { EntityId } from "../../../shared/ids";
 import type { LedgerEvent, PostingLine } from "../../../shared/ledger";
-import { FEATURE_DEFS, FINANCE_FEATURES, isAccountClass, isOwnerRole, ownersIn, heldBy, PARTY_KINDS, PRICES_SOURCE, worthShares, type FinanceFeature, type FinanceView, type MoneySummary, type PartyKind } from "../../../shared/finance";
+import { CLASS_TRAITS, DEFAULT_ACCOUNT_PRODUCT, FEATURE_DEFS, FINANCE_FEATURES, isAccountClass, isOwnerRole, LEGACY_TYPE_CLASS, ownersIn, heldBy, PARTY_KINDS, PRICES_SOURCE, UNPAID, worthShares, type FinanceFeature, type FinanceView, type MoneySummary, type PartyKind } from "../../../shared/finance";
+import { pointerOf } from "../../../shared/json-patch";
+import type { LintIssue } from "../../../shared/protocol";
 import type { OrgMember } from "../../../shared/org";
 import { formatMoney } from "../../../shared/world";
 import { minorUnitPlural } from "../../../shared/money";
@@ -96,6 +98,7 @@ import occupations from "./tables/modern-us/occupations.json";
 import regions from "./tables/modern-us/regions.json";
 import shipped from "./tables/modern-us/shipped.json";
 import type { DataTable, ShippedRevision } from "../../../shared/tables";
+import { registerCashRule } from "./cash-rule";
 
 const TABLES: DataTable[] = [catalog, categories, occupations, regions, finance, exempt, history] as unknown as DataTable[];
 /** Every revision each table has shipped as (the table build's record). */
@@ -468,10 +471,10 @@ function soldThing(ctx: ReadContext, seller: EntityId, words: string, payer: Ent
 /**
  * Where a new thing bought ends up (ITEMS-SPEC §4.1, §5.3 step 4): where the purchase says (`at`: a
  * place by id or name, or "home"); else on the buyer when they can carry it, at the buyer's home when
- * it is too big to carry (where they stand when they have no home), and where they stand when
- * nothing says how big it is.
+ * it is too big to carry (by its type, volume, name or category; where they stand when they have no
+ * home), and where they stand when nothing says how big it is.
  */
-function boughtSpot(ctx: ReadContext, payer: EntityId, fields: JsonObject, atWords: string): { in: EntityId } | { place: string } {
+function boughtSpot(ctx: ReadContext, payer: EntityId, fields: JsonObject, atWords: string, name: string): { in: EntityId } | { place: string } {
   const here = placeOfEntity(ctx.state, payer);
   const homeOf = own(ctx.state.entities, payer)?.fields.home;
   const home = typeof homeOf === "string" && own(ctx.world.places, homeOf) ? homeOf : null;
@@ -487,7 +490,7 @@ function boughtSpot(ctx: ReadContext, payer: EntityId, fields: JsonObject, atWor
     const place = placeSaid(ctx.registry, ctx.world, ctx.state, said);
     if (place !== null) return { place };
   }
-  const size = sizeOfDef(ctx, "item", fields).size;
+  const size = sizeOfDef(ctx, "item", fields, name).size;
   const ceiling = thingsConfigOf(ctx.world).sizes.ceiling;
   if (size === "unknown") return here !== null ? { place: here } : { in: payer };
   if (size === "part" || size === "vehicle" || sizeRank(size) > sizeRank(ceiling)) {
@@ -753,7 +756,7 @@ function registerRest(r: CoreRegistry, hooks: FinanceHooks): void {
   r.lint({
     code: "economy.accounts",
     check(world) {
-      const issues = [];
+      const issues: LintIssue[] = [];
       const isPartyDef = (id: string): boolean => {
         const e = own(world.entities, id);
         return !!e && e.kind !== "account" && e.kind !== "card" && e.kind !== "flow";
@@ -772,6 +775,16 @@ function registerRest(r: CoreRegistry, hooks: FinanceHooks): void {
           const v = strOf(e.fields[field]);
           if (v !== "" && !own(world.entities, v)) issues.push({ severity: "error" as const, code: "economy.accounts", message: `Account ${e.name}'s ${field.replace(/_/g, " ")} names "${v}", which isn't in the world.`, path: `entities.${e.id}.fields.${field}` });
         }
+        // A loan's, a card's or a line's opening is what's owed, a negative amount: entered positive, it opens in credit, owes nothing and closes as paid off at its first bill.
+        const productClass = objOf(own(products, product)).class;
+        const cls = isAccountClass(productClass) ? productClass : isAccountClass(product) ? product : LEGACY_TYPE_CLASS[strOf(e.fields.type)];
+        const opening = e.fields.opening;
+        if (cls !== undefined && CLASS_TRAITS[cls].liability && typeof opening === "number" && opening > 0) {
+          const owed = formatMoney(opening, world.currency);
+          issues.push({ severity: "warning", code: "economy.accounts", message: `Account ${e.name} is a ${CLASS_TRAITS[cls].label.toLowerCase()} opened in credit by ${owed}: what's owed on it is a negative opening, so as written it owes nothing and closes as paid off at its first bill.`, path: `entities.${e.id}.fields.opening`, fix: { label: `Make it ${owed} owed`, ops: [{ op: "add", path: pointerOf(["entities", e.id, "fields", "opening"]), value: -opening }] } });
+        }
+        // How a loan is paid back, when its author says nothing of it: on its product's statement day, over its product's term, or all at its first bill where the product sets none.
+        if (cls !== undefined && CLASS_TRAITS[cls].installment && ["due_day", "payment", "months_left"].every((k) => e.fields[k] === undefined || e.fields[k] === "")) issues.push({ severity: "info", code: "economy.accounts", message: `Loan ${e.name} sets no due day, payment or months left: it bills on its product's statement day, paying it off over its product's term, or all at its first bill where the product sets no term.`, path: `entities.${e.id}.fields.due_day` });
       }
       for (const [id, p] of Object.entries(products)) if (!isAccountClass(objOf(p).class)) issues.push({ severity: "error" as const, code: "economy.accounts", message: `Product ${id} has no class the engine knows.`, path: `packs.economy.config.products.${id}.class` });
       for (const key of Object.keys(objOf(objOf(world.packs.economy?.config).features))) if (!(key in FEATURE_DEFS)) issues.push({ severity: "warning" as const, code: "economy.accounts", message: `There's no money feature "${key}"; the toggle does nothing.`, path: `packs.economy.config.features.${key}` });
@@ -803,6 +816,9 @@ function registerRest(r: CoreRegistry, hooks: FinanceHooks): void {
           // An employer is a business, a place (the business there), or an outside employer named in words.
           const employer = strOf(e.fields.employer);
           if (ID_SHAPED.test(employer) && !own(world.entities, employer) && !own(world.places, employer)) issues.push({ severity: "warning" as const, code: "economy.accounts", message: `Job ${e.name}'s employer "${employer}" names no one and no place; it's read as an outside employer by that name.`, path: `entities.${e.id}.fields.employer` });
+          // A title nobody is paid for (a director, a trustee) is Unpaid: a job at a rate of nothing still runs a payroll of $0 paydays.
+          const tipped = numOf(e.fields.tips_per_hour) > 0 || (strOf(e.fields.basis) === "commission" && numOf(e.fields.commission_pct) > 0);
+          if (e.fields.rate === 0 && strOf(e.fields.pay_every) !== UNPAID && !tipped) issues.push({ severity: "info", code: "economy.accounts", message: `Job ${e.name} pays a rate of nothing, so it runs a payroll of empty paydays. Make it an unpaid title?`, path: `entities.${e.id}.fields.pay_every`, fix: { label: "Make it unpaid", ops: [{ op: "add", path: pointerOf(["entities", e.id, "fields", "pay_every"]), value: UNPAID }] } });
         }
       }
       return issues;
@@ -888,7 +904,7 @@ function registerEffects(r: CoreRegistry, hooks: FinanceHooks): void {
         const thing = priced ? PHYSICAL.has(priced.price.category) || (story && priced.price.category === "misc") : story;
         const spawn = args.keep !== false && thing ? optionalService(ctx, "gear.spawn") : null;
         if (spawn && ctx.levelOf(buyer, "gear") >= 1) {
-          const where = boughtSpot(ctx, buyer, { ...(priced?.row ? { catalog: priced.row } : {}), ...(priced ? { category: priced.price.category } : {}), ...(isSize(args.size) ? { size: args.size } : {}) }, strOf(args.at));
+          const where = boughtSpot(ctx, buyer, { ...(priced?.row ? { catalog: priced.row } : {}), ...(priced ? { category: priced.price.category } : {}), ...(isSize(args.size) ? { size: args.size } : {}) }, strOf(args.at), name);
           const bought = { got: { how: "bought", at: ctx.state.clock }, made: { by: story ? "story" : buyer, at: "in" in where ? { in: where.in } : { place: where.place } } } as unknown as JsonObject;
           // A second of the same thing on them joins the stack the payer has (gear's stacking, DESIGN §9.4).
           const made = spawn(ctx, { name, owner: payer, ...("in" in where ? { holder: where.in } : { holder: null, place: where.place }), ...(priced?.row ? { catalog: priced.row } : {}), ...(priced ? { category: priced.price.category } : {}), qty, salt: `buy:${ctx.rng.seed}`, stack: "in" in where, ...(isSize(args.size) ? { size: args.size } : {}), fields: bought });
@@ -988,11 +1004,24 @@ function registerEffects(r: CoreRegistry, hooks: FinanceHooks): void {
       ),
   });
   r.effect({ type: "economy.set_pay_prefs", args: ["tiers", "who?"], resolve: (a, ctx) => setPayPrefs(ctx, actor(ctx, a), a.tiers) });
-  // The GM's controls that aren't fields (DESIGN §7): close an account, set its status, release a hold.
+  // The GM's controls that aren't fields (DESIGN §7): open or close an account, set its status, release a hold.
+  r.effect({ type: "economy.open_account", args: ["party", "product?", "name?"], gm: true, resolve: (a, ctx) => gmOpenAccount(ctx, strOf(a.party), strOf(a.product), strOf(a.name)) });
   r.effect({ type: "economy.close_account", args: ["account"], gm: true, resolve: (a, ctx) => closeAccount(ctx, strOf(a.account)) });
   r.effect({ type: "economy.flow_edit", args: ["flow", "name?", "clear?"], gm: true, resolve: (a, ctx) => editFlow(ctx, strOf(a.flow), typeof a.name === "string" ? a.name : undefined, a.clear) });
   r.effect({ type: "economy.set_status", args: ["account", "status"], gm: true, resolve: (a, ctx) => setStatus(ctx, strOf(a.account), strOf(a.status)) });
   r.effect({ type: "economy.release_hold", args: ["account", "hold"], gm: true, resolve: (a, ctx) => releaseHold(ctx, strOf(a.account), strOf(a.hold)) });
+}
+
+/**
+ * The GM's Open an account (6.15): an empty account the party owns, of the product given, else its
+ * kind's (`DEFAULT_ACCOUNT_PRODUCT`), named as given, else after the party and its product.
+ */
+function gmOpenAccount(ctx: ReadContext, party: EntityId, product: string, name: string): LedgerEvent[] | Rejection {
+  const kind = partyKindOf(ctx, party);
+  if (!kind) return reject("missing_entity", `${labelOf(ctx, party)} can't hold money`);
+  const p = product.trim() || DEFAULT_ACCOUNT_PRODUCT[kind];
+  const words = p === "business_checking" ? "checking" : p === "trust" ? "trust account" : p.replace(/_/g, " ");
+  return openAccount(ctx, { name: name.trim() || `${labelOf(ctx, party)} ${words}`, product: p, owners: [{ party, role: "owner" }] });
 }
 
 function registerActions(r: CoreRegistry): void {
@@ -1062,6 +1091,7 @@ export const economyPack: PackDef = {
   register(r) {
     for (const t of TABLES) r.table({ id: t.id, schema: t.schema, columns: t.columns, defaults: t, shipped: SHIPPED[t.id] ?? [] });
     for (const def of EVENTS) r.event(def);
+    registerCashRule(r);
     const hooks = emptyHooks();
     const api = makeApi(hooks);
     const registry: FinanceRegistry = {

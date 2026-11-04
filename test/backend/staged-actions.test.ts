@@ -1,7 +1,8 @@
 // A palette, panel or map tap with no words is staged for the player's next message (DESIGN §11),
 // never played blind: no message and no generation until the player sends one, which then plays the
 // action with its words as the described approach, recorded on it so a Re-run plays it alike. The
-// same tap again clears the stage, Send now plays it at once, and a mechanical action stays immediate.
+// same tap again clears the stage, and Send now plays it at once. A money or organization action is
+// no such tap: it is done at once, off screen, and stays immediate; `buy` stays in the world.
 
 import { describe, expect, test } from "bun:test";
 import { LEDGER_NAMESPACE } from "../../src/shared/ledger";
@@ -10,8 +11,8 @@ import { account, MoneyChat } from "../support/money-chat";
 
 const CHECKING = "acct_pov_checking";
 const SAVINGS = "acct_pov_savings";
-/** Paying Danny: not mechanical, since someone else is in it. */
-const PAY: ActionBody = { action: "pay", params: { to: "danny_okafor", amount: 2000 } };
+/** A coffee at its stated price: a purchase plays in the world, so its tap is staged. */
+const COFFEE: ActionBody = { action: "buy", params: { item: "coffee", price: 450 } };
 
 function messages(chat: MoneyChat) {
   return chat.rig.host.chat(chat.chatId).messages;
@@ -38,31 +39,30 @@ describe("a tap with no words waits for the player's next message", () => {
   test("it stages, and the next message plays it with its words as the approach; a Re-run plays it again", async () => {
     const chat = await MoneyChat.start();
     const count = messages(chat).length;
-    expect(await tap(chat, PAY)).toEqual({ staged: true });
+    expect(await tap(chat, COFFEE)).toEqual({ staged: true });
     expect(messages(chat).length).toBe(count);
     expect(chat.rig.host.restarts).toEqual([]);
-    expect((await chat.state()).staged).toMatchObject({ action: "pay", params: PAY.params, label: expect.stringContaining("Danny") });
+    expect((await chat.state()).staged).toMatchObject({ action: "buy", params: COFFEE.params, label: expect.stringContaining("coffee") });
 
-    const outcome = await say(chat, "I slide Danny twenty for the gas, no fuss.");
+    const outcome = await say(chat, "I grab a coffee on the way out, no fuss.");
     const sent = messages(chat).findLast((m) => m.isUser);
-    expect(sent?.swipes[sent.swipeId]).toBe("I slide Danny twenty for the gas, no fuss.");
-    expect(sent?.bag[LEDGER_NAMESPACE]).toMatchObject({ action: "pay", params: PAY.params, described: true });
-    expect(outcome).toContain("Pay");
-    // The staged amount is the player's pick, in cents: $20, never read again as written ($2,000).
-    expect(outcome).toContain("Pay (Danny Okafor, $20.00)");
+    expect(sent?.swipes[sent.swipeId]).toBe("I grab a coffee on the way out, no fuss.");
+    expect(sent?.bag[LEDGER_NAMESPACE]).toMatchObject({ action: "buy", params: COFFEE.params, described: true });
+    // The staged price is the player's pick, in cents: $4.50, never read again as written ($450.00).
+    expect(outcome).toContain("Buy (coffee, $4.50)");
     expect((await chat.state()).staged ?? null).toBeNull();
 
     // A Re-run of that message plays the same action.
     chat.rig.rt.setSwipeChoice(chat.chatId, "rerun");
     const again = await chat.rig.host.start(chat.chatId, { type: "swipe" });
-    expect(chat.rig.host.section("Outcome")).toContain("Pay");
+    expect(chat.rig.host.section("Outcome")).toContain("Buy (coffee, $4.50)");
     await chat.rig.host.finish(again, "Done again.");
   });
 
   test("the same tap again clears it, and the next message plays as typed text", async () => {
     const chat = await MoneyChat.start();
-    expect(await tap(chat, PAY)).toEqual({ staged: true });
-    expect(await tap(chat, PAY)).toEqual({ staged: false });
+    expect(await tap(chat, COFFEE)).toEqual({ staged: true });
+    expect(await tap(chat, COFFEE)).toEqual({ staged: false });
     expect((await chat.state()).staged ?? null).toBeNull();
     await say(chat, "I look around the room.");
     expect(messages(chat).findLast((m) => m.isUser)?.bag[LEDGER_NAMESPACE]).toBeUndefined();
@@ -71,19 +71,19 @@ describe("a tap with no words waits for the player's next message", () => {
   test("Send now plays it at once, and the stage goes with it", async () => {
     const chat = await MoneyChat.start();
     const count = messages(chat).length;
-    await tap(chat, PAY);
-    const sent = await tap(chat, PAY, true);
+    await tap(chat, COFFEE);
+    const sent = await tap(chat, COFFEE, true);
     expect(sent.messageId).toEqual(expect.any(String));
     expect(messages(chat).length).toBe(count + 1);
-    expect(messages(chat).at(-1)?.bag[LEDGER_NAMESPACE]).toMatchObject({ action: "pay" });
+    expect(messages(chat).at(-1)?.bag[LEDGER_NAMESPACE]).toMatchObject({ action: "buy" });
     expect((await chat.state()).staged ?? null).toBeNull();
   });
 
-  test("a mechanical action stays immediate", async () => {
+  test("a money action done off screen stays immediate", async () => {
     const chat = await MoneyChat.start();
     const count = messages(chat).length;
     const before = account(await chat.hub(), SAVINGS).cents;
-    expect(await tap(chat, transferAction(CHECKING, SAVINGS, 1000))).toEqual({ applied: true, pending: false });
+    expect(await tap(chat, transferAction(CHECKING, SAVINGS, 1000))).toEqual({ applied: true, pending: false, undo: expect.stringMatching(/^fix:/) });
     expect(messages(chat).length).toBe(count);
     expect(account(await chat.hub(), SAVINGS).cents).toBe(before + 1000);
     expect((await chat.state()).staged ?? null).toBeNull();
@@ -91,11 +91,11 @@ describe("a tap with no words waits for the player's next message", () => {
 
   test("the staged action is the player's pick, held to its requirements: one they can't afford is refused, never played as roleplay", async () => {
     const chat = await MoneyChat.start();
-    expect(await tap(chat, { action: "pay", params: { to: "danny_okafor", amount: 100_000_000 } })).toEqual({ staged: true });
-    const outcome = await say(chat, "I hand Danny the money.");
-    const chips = (await chat.rig.rt.view(chat.chatId, chat.rig.host.userId)).chips.filter((c) => c.label.startsWith("Pay"));
+    expect(await tap(chat, { action: "buy", params: { item: "sailboat", price: 100_000_000 } })).toEqual({ staged: true });
+    const outcome = await say(chat, "I buy the sailboat outright.");
+    const chips = (await chat.rig.rt.view(chat.chatId, chat.rig.host.userId)).chips.filter((c) => c.label.startsWith("Buy"));
     expect(chips.map((c) => c.kind)).toEqual(["decline"]);
-    expect(outcome).toContain("Pay");
+    expect(outcome).toContain("Buy (sailboat, $1,000,000.00): it didn't go through");
   });
 });
 

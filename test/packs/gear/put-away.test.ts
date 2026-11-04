@@ -139,3 +139,17 @@ describe("the put-away process", () => {
     expect(thingsConfigOf({ packs: { gear: { version: 1, config: { putAway: { on: false, hours: 6, minLevel: 2 }, tidy: { auto: false } } } } })).toMatchObject({ putAway: { on: false, hours: 6, minLevel: 2 }, tidy: { auto: false } });
   });
 });
+
+describe("clothing goes back into what keeps it at home (N3)", () => {
+  test("Marcus's shirt, left at the shop, goes back into the wardrobe at his home; one lying at his home goes in too", () => {
+    // Made in play, so where it rests is read, not authored: in what keeps clothing at his home.
+    const shirt = thing("Flannel shirt", { owner: MARCUS, category: "clothing", place: SHOP });
+    const socks = thing("Wool socks", { owner: MARCUS, catalog: "socks_wool_pair", place: MARCUS_HOME });
+    const wardrobe = thing("Oak wardrobe", { owner: MARCUS, place: MARCUS_HOME });
+    const w = leftAtShop({ marcus_shirt: shirt, marcus_socks: socks, marcus_wardrobe: wardrobe });
+    after(w, 26);
+    expect(where(w, "marcus_shirt")).toBe("in marcus_wardrobe");
+    expect(where(w, "marcus_socks")).toBe("in marcus_wardrobe");
+    expect(where(w, "marcus_wardrobe")).toBe(MARCUS_HOME);
+  });
+});

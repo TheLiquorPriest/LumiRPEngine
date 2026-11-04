@@ -123,6 +123,23 @@ describe("a span in the player's own words", () => {
     expect(interpretedTarget({ until: "later that evening" }, world, state, "")).toEqual({ type: "day_part", dayPart: "evening" });
     expect(interpretedTarget({ minutes: "90" }, world, state, "")).toEqual({ type: "duration", minutes: 90 });
   });
+
+  test("speech in quotes names no span, a day named in full is the read's stated time, and a span past one sentence yields to the read's own length", () => {
+    const { world, state } = monday();
+    const read = (params: JsonObject) => interpretedTarget(params, world, state, "");
+    // "This afternoon" said aloud is no skip to the afternoon; a span the read quoted whole is still its words.
+    expect(read({ span: '"I\'ll see you this afternoon," Priya says.' })).toBeNull();
+    expect(read({ span: "“See you this afternoon,” Danny calls" })).toBeNull();
+    expect(read({ span: '"over the next hour"' })).toEqual({ type: "duration", minutes: 60 });
+    // A weekday or a month named in full is a stated day, never half-read as a part of the day.
+    expect(read({ span: "Tuesday, June 25, this afternoon" })).toBeNull();
+    expect(read({ span: "until June 25 in the afternoon" })).toBeNull();
+    // The read gave its span the player's whole message: the 40 minutes it stated stand, not hours to the evening.
+    expect(read({ span: "We sit on the bench and talk it through. Later that evening we head home.", minutes: 40 })).toEqual({ type: "duration", minutes: 40 });
+    expect(read({ span: 'We talk by the water. "Come by this afternoon," Priya says, and we keep at it.', minutes: 40 })).toEqual({ type: "duration", minutes: 40 });
+    // And it is read when nothing else says.
+    expect(read({ span: "We talk on the bench. Over the next hour we sort the stock." })).toEqual({ type: "duration", minutes: 60 });
+  });
 });
 
 describe("an out-of-character instruction that states a span", () => {

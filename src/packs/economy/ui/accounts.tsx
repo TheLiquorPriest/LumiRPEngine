@@ -9,20 +9,21 @@
 // autopay, takes cash out and puts it in, sets up a standing payment from it, and freezes,
 // unfreezes, reports lost and replaces a card (on the card's own page, the change picked there),
 // each an in-world action; the GM adds or takes money, sets the status, autopay, card states and
-// every declared field, releases holds and closes an account. The same pages serve a business's
+// every declared field, releases holds, closes an account and opens one for an organization. The same pages serve a business's
 // own accounts, which its owner manages from the business's Money in Orgs (`managed`): autopay,
 // cards and standing payments, but no spending, which follows the party's own role on an account.
 
 import { useState } from "preact/hooks";
-import { ACCOUNT_STATUSES, AUTOPAY_MODES, CARD_STATES, CLASS_TRAITS, type AccountView, type AutopayMode, type CardState, type CardView, type FinanceView, type InterestView, type PayTier } from "../../../shared/finance";
+import { ACCOUNT_STATUSES, AUTOPAY_MODES, CARD_STATES, CLASS_TRAITS, DEFAULT_ACCOUNT_PRODUCT, type AccountClass, type AccountView, type AutopayMode, type CardState, type CardView, type FinanceView, type InterestView, type PartyKind, type PayTier } from "../../../shared/finance";
+import type { EditOp } from "../../../shared/protocol";
 import { formatMoney, type WorldCurrency } from "../../../shared/world";
 import { Badge, Button, Empty, IdText, List, ListRow, Meter, Section } from "../../../frontend/components";
 import { humanize } from "../../../frontend/format";
 import type { IconName } from "../../../frontend/icons";
-import { ActionPage, AmountField, AmountPage, amountProblem, ChoiceField, SelectField, unchangedProblem, type Choice } from "./forms";
+import { ActionPage, AmountField, AmountPage, amountProblem, ChoiceField, SelectField, TextField, unchangedProblem, type Choice } from "./forms";
 import type { GmControls, PlayerControls, SectionProps, SegmentProps } from "./hub";
 import { accountBlocks, accountControls, accountGroups, activityChoices, activityOf, autopaySources, businessAccounts, cardControls, cardLimitsShown, findAccount, findCard, flowSources, gmAutopaySources, groupOf, MOVE_CONTROLS, moveFrom, overviewBlocks, ownBusiness, paySources, possessive, transferTargets, utilisation, type AccountGroup, type MoveControl } from "./layout";
-import { FieldsPage, OwnerRows, TxnRows } from "./lines";
+import { FieldsPage, MoneyFilters, OwnerRows, TxnRows } from "./lines";
 import { actionPage, Controls, detailPage, Hero, MoneyPage, Note, type HubNav, type HubPages } from "./nav";
 import { PayTiersEditor, tierText } from "./pay-prefs";
 import { accountStatusOps, amountOf, autopayAction, autopayOps, cardAction, cashAction, closeAccountOps, payCardAction, payPrefsAction, payPrefsOps, releaseHoldOps, transferAction, type CardChange } from "./requests";
@@ -139,7 +140,7 @@ function PayPrefsSection(props: SectionProps) {
   );
 }
 
-/** Activity: every line across the party's accounts, newest first, by account and category as the filter picks, with what's still pending and the holds where holds run. */
+/** Activity: every line across the party's accounts, newest first, by direction, account and category as the filter picks, with what's still pending and the holds where holds run. */
 function ActivitySection(props: SegmentProps) {
   const { view, controls, filter } = props;
   if (view.level < 2) return null;
@@ -149,12 +150,7 @@ function ActivitySection(props: SegmentProps) {
   return (
     <div class="lre-stack" data-lre-money-activity>
       <Section title="Activity" flush>
-        {choices.accounts.length > 1 || choices.categories.length > 0 ? (
-          <div class="lre-money-filters">
-            {choices.accounts.length > 1 ? <SelectField label="Account" value={filter.account} empty="Every account" options={choices.accounts} onChange={(account) => props.onFilter({ ...filter, account })} /> : null}
-            {choices.categories.length > 0 ? <SelectField label="Category" value={filter.category} empty="Every category" options={choices.categories.map((c) => ({ value: c.value, label: humanize(c.label) }))} onChange={(category) => props.onFilter({ ...filter, category })} /> : null}
-          </div>
-        ) : null}
+        {view.recent.length > 0 ? <MoneyFilters filter={filter} onFilter={props.onFilter} accounts={choices.accounts} categories={choices.categories} /> : null}
         <TxnRows lines={shown.lines} max={overviewBlocks(view).recent} currency={controls.currency} account />
       </Section>
       {shown.pending.length > 0 ? (
@@ -205,6 +201,13 @@ export function AccountsSegment(props: SegmentProps) {
         </Section>
       ) : null}
       {groups.length === 0 ? <Empty icon="bank">No accounts.</Empty> : null}
+      {controls.mode === "gm" && view.partyKind !== "person" ? (
+        <Controls name="open-account">
+          <Button icon="bank" onClick={() => nav.open(actionPage("accounts", "open"))}>
+            Open an account
+          </Button>
+        </Controls>
+      ) : null}
       {groups.map((g) => (
         <Section key={g.group} title={g.label} flush>
           <div data-lre-account-group={g.group}>
@@ -316,10 +319,10 @@ function AccountPage(props: SectionProps & { account: AccountView }) {
       {controls.mode === "gm" ? (
         <Controls name={a.id}>
           <Button icon="plus" onClick={() => act("add")}>
-            Add money
+            {adjustWords(a).add}
           </Button>
           <Button icon="minus" onClick={() => act("take")}>
-            Take money
+            {adjustWords(a).take}
           </Button>
           <Button icon="sliders" onClick={() => act("status")}>
             Status
@@ -427,8 +430,9 @@ function PayPage(props: { view: FinanceView; account: AccountView; controls: Pla
   // The whole balance travels as no amount, so the engine pays what's owed when it runs.
   const cents = how === "due" && a.due ? a.due.cents : how === "other" ? typed : null;
   const problem = from === "" ? "Pick the account it's paid from." : how === "other" && typed === null ? (text.trim() === "" ? "Type the amount." : "Type an amount above zero.") : null;
+  const body = payCardAction(a.id, from || null, cents);
   return (
-    <ActionPage nav={props.nav} controls={controls} name="pay" title={`Pay ${a.name}`} subtitle={`${fmt(balance)} owed`} go={`Pay ${fmt(cents ?? balance)}`} problem={problem} submit={() => controls.act(payCardAction(a.id, from || null, cents))}>
+    <ActionPage nav={props.nav} controls={controls} name="pay" title={`Pay ${a.name}`} subtitle={`${fmt(balance)} owed`} go={`Pay ${fmt(cents ?? balance)}`} problem={problem} action={body} submit={(tell) => controls.act(body, tell)}>
       <PickField pick={props.pick} />
       <SelectField label="From" value={from} options={sources.map((x) => ({ value: x.id, label: `${x.name} (${fmt(x.available ?? x.cents)})` }))} onChange={setFrom} />
       <ChoiceField
@@ -450,8 +454,9 @@ function TransferPage(props: { view: FinanceView; account: AccountView; controls
   const [text, setText] = useState("");
   const cents = amountOf(text, controls.currency);
   const problem = to === "" ? "Pick where it goes." : amountProblem(text, controls.currency, "an amount");
+  const body = cents === null ? null : transferAction(a.id, to, cents);
   return (
-    <ActionPage nav={props.nav} controls={controls} name="transfer" title="Transfer" subtitle={`From ${a.name} · ${fmt(a.available ?? a.cents)} available`} go={cents !== null ? `Transfer ${fmt(cents)}` : "Transfer"} problem={problem} submit={() => (cents === null ? Promise.resolve(false) : controls.act(transferAction(a.id, to, cents)))}>
+    <ActionPage nav={props.nav} controls={controls} name="transfer" title="Transfer" subtitle={`From ${a.name} · ${fmt(a.available ?? a.cents)} available`} go={cents !== null ? `Transfer ${fmt(cents)}` : "Transfer"} problem={problem} action={body} submit={(tell) => (body === null ? Promise.resolve(false) : controls.act(body, tell))}>
       <PickField pick={props.pick} />
       <SelectField label="To" value={to} options={targets.map((x) => ({ value: x.id, label: x.name }))} onChange={setTo} />
       <AmountField label="Amount" value={text} currency={controls.currency} onInput={setText} invalid={text.trim() !== "" && cents === null} />
@@ -476,7 +481,8 @@ function CashPage(props: { view: FinanceView; account: AccountView; controls: Pl
       label="Amount"
       go={kind === "withdraw" ? "Withdraw" : "Deposit"}
       help={machines ? (kind === "withdraw" ? `Where this world has bank branches or cash machines, you need one where you are: a branch of ${bank}, or a cash machine, which takes a card on this account (another bank's may charge a fee).` : `Where this world has bank branches or cash machines, you need one where you are: a branch of ${bank}, or one of its machines that takes deposits, which may hold the money for a few days.`) : undefined}
-      submit={(cents) => (cents === null ? Promise.resolve(false) : controls.act(cashAction(kind, a.id, cents)))}
+      action={(cents) => (cents === null ? null : cashAction(kind, a.id, cents))}
+      submit={(cents, tell) => (cents === null ? Promise.resolve(false) : controls.act(cashAction(kind, a.id, cents), tell))}
     >
       <PickField pick={props.pick} />
     </AmountPage>
@@ -513,13 +519,14 @@ function AutopayPage(props: { view: FinanceView; account: AccountView; controls:
   const offered = from === "" || sources.some((s) => s.value === from);
   const choices = offered ? sources : [...sources, { value: from, label: was?.from === from ? (was.fromName ?? "Its account now") : "Its account now" }];
   const problem = mode === "none" ? null : from === "" ? "Pick the account it pays from." : !offered && controls.mode === "player" ? "That account can't pay it: pick one of these." : mode === "fixed" && cents === null ? "Type the amount it pays each month." : null;
-  const submit = (): Promise<boolean> => {
-    if (controls.mode === "player") return controls.act(autopayAction(a.id, mode, from || null, cents));
+  const body = autopayAction(a.id, mode, from || null, cents);
+  const submit = (tell?: boolean): Promise<boolean> => {
+    if (controls.mode === "player") return controls.act(body, tell);
     const ops = autopayOps(a.id, was, mode, from || null, cents);
     return ops.length === 0 ? Promise.resolve(true) : controls.edit(ops);
   };
   return (
-    <ActionPage nav={props.nav} controls={controls} name="autopay" title="Autopay" subtitle={a.name} go="Save autopay" problem={problem} submit={submit}>
+    <ActionPage nav={props.nav} controls={controls} name="autopay" title="Autopay" subtitle={a.name} go="Save autopay" problem={problem} action={body} submit={submit}>
       <ChoiceField label="Pays" value={mode} options={AUTOPAY_MODES.map((m) => ({ value: m, label: AUTOPAY_LABEL[m] }))} onChange={(v) => setMode(AUTOPAY_MODES.find((m) => m === v) ?? "none")} />
       {mode !== "none" ? <SelectField label="From" value={from} empty="Choose an account" options={choices} onChange={setFrom} /> : null}
       {mode === "fixed" ? <AmountField label="Amount each month" value={amount} currency={controls.currency} onInput={setAmount} invalid={amount.trim() !== "" && cents === null} /> : null}
@@ -529,18 +536,25 @@ function AutopayPage(props: { view: FinanceView; account: AccountView; controls:
 
 // ---------------------------------------------------------------- the GM's account actions
 
+/** The GM's two corrections on an account as its class reads them: on a loan, a card or a line, money in pays it down and money out adds to what's owed. */
+export function adjustWords(a: Pick<AccountView, "class">): { add: string; take: string } {
+  return CLASS_TRAITS[a.class].liability ? { add: "Pay down", take: "Add to what's owed" } : { add: "Add money", take: "Take money" };
+}
+
 function AdjustPage(props: { account: AccountView; controls: GmControls; nav: HubNav; take: boolean }) {
   const { account: a, controls, take } = props;
+  const words = adjustWords(a);
+  const owed = CLASS_TRAITS[a.class].liability;
   return (
     <AmountPage
       nav={props.nav}
       controls={controls}
       name={take ? "take" : "add"}
-      title={take ? "Take money" : "Add money"}
-      subtitle={`${a.name} · ${formatMoney(a.cents, controls.currency)}`}
+      title={take ? words.take : words.add}
+      subtitle={`${a.name} · ${owed ? `${formatMoney(Math.max(0, -a.cents), controls.currency)} owed` : formatMoney(a.cents, controls.currency)}`}
       label="Amount"
-      go={take ? "Take" : "Add"}
-      help="A correction against an outside account, so the books still balance."
+      go={take ? (owed ? "Add it" : "Take") : owed ? "Pay it down" : "Add"}
+      help="A correction against an outside account, so the books still balance; it isn't income or spending."
       submit={(cents) => (cents === null ? Promise.resolve(false) : controls.edit([{ op: "adjust", account: a.id, cents: take ? -cents : cents }]))}
     />
   );
@@ -574,6 +588,30 @@ function ReleasePage(props: { account: AccountView; hold: AccountView["holds"][n
       <Note>
         {h.memo}: {formatMoney(h.cents, controls.currency)} {h.kind === "deposit" ? "on hold" : "held"} until {h.until}. Release it now?
       </Note>
+    </ActionPage>
+  );
+}
+
+/** The products Open an account offers a party: its kind's own first, then checking and savings. */
+export function openProducts(kind: PartyKind): AccountClass[] {
+  const first = DEFAULT_ACCOUNT_PRODUCT[kind];
+  return [first, ...(["checking", "savings"] as const).filter((c) => c !== first)];
+}
+
+/** The GM's new account for a party: one `economy.open_account`, empty, owned by it; with no name, the engine names it after the party and its product. */
+export function openAccountOps(party: string, product: AccountClass, name: string): EditOp[] {
+  return [{ op: "effect", effect: "economy.open_account", args: { party, product, ...(name.trim() !== "" ? { name: name.trim() } : {}) } }];
+}
+
+function OpenAccountPage(props: { view: FinanceView; controls: GmControls; nav: HubNav }) {
+  const { view, controls } = props;
+  const products = openProducts(view.partyKind);
+  const [product, setProduct] = useState<AccountClass>(products[0] ?? "checking");
+  const [name, setName] = useState("");
+  return (
+    <ActionPage nav={props.nav} controls={controls} name="open-account" title="Open an account" subtitle={view.name} go="Open it" submit={() => controls.edit(openAccountOps(view.party, product, name))}>
+      <ChoiceField label="Kind" value={product} options={products.map((c) => ({ value: c, label: CLASS_TRAITS[c].label }))} onChange={(v) => setProduct(products.find((c) => c === v) ?? product)} />
+      <TextField label="Name" value={name} placeholder={`${view.name} ${product === "business_checking" ? "checking" : product === "trust" ? "trust account" : product}`} onInput={setName} help="It opens empty, owned by it." />
     </ActionPage>
   );
 }
@@ -620,7 +658,7 @@ function CardChangePage(props: { view: FinanceView; card: CardView; changes: rea
   const picked = changes.includes(change) ? change : (changes[0] ?? "freeze");
   const account = findAccount(view, card.account);
   return (
-    <ActionPage nav={nav} controls={controls} name="card" title={card.name} subtitle={cardLine(view, card)} go={CARD_CHANGE[picked].go} danger={picked === "lost"} submit={() => controls.act(cardAction(card.id, picked))}>
+    <ActionPage nav={nav} controls={controls} name="card" title={card.name} subtitle={cardLine(view, card)} go={CARD_CHANGE[picked].go} danger={picked === "lost"} action={cardAction(card.id, picked)} submit={(tell) => controls.act(cardAction(card.id, picked), tell)}>
       <IdText id={card.id} />
       <CardDetails view={view} card={card} currency={controls.currency} nav={nav} />
       <ChoiceField label="Change" value={picked} options={changes.map((c) => ({ value: c, label: CARD_CHANGE[c].title, detail: changeText(c, card, account) }))} onChange={(v) => setChange(changes.find((c) => c === v) ?? picked)} />
@@ -668,7 +706,7 @@ function PayPrefsPage(props: SectionProps & { controls: PlayerControls | GmContr
   const [draft, setDraft] = useState<PayTier[]>(() => [...view.payPrefs]);
   const categories = [...new Set([...(view.overview?.cashFlow?.byCategory ?? []).map((b) => b.category), ...view.recent.flatMap((t) => (t.category ? [t.category] : []))])].sort();
   return (
-    <ActionPage nav={nav} controls={controls} name="pay-prefs" title={controls.mode === "player" ? "How you pay" : "How they pay"} subtitle={controls.mode === "gm" ? view.name : undefined} go="Save" submit={() => (controls.mode === "player" ? controls.act(payPrefsAction(draft)) : controls.edit(payPrefsOps(view.party, draft)))}>
+    <ActionPage nav={nav} controls={controls} name="pay-prefs" title={controls.mode === "player" ? "How you pay" : "How they pay"} subtitle={controls.mode === "gm" ? view.name : undefined} go="Save" action={payPrefsAction(draft)} submit={(tell) => (controls.mode === "player" ? controls.act(payPrefsAction(draft), tell) : controls.edit(payPrefsOps(view.party, draft)))}>
       <PayTiersEditor value={draft} uses={payUses(view)} categories={categories} currency={controls.currency} onChange={setDraft} />
     </ActionPage>
   );
@@ -724,6 +762,8 @@ export const accountPages: HubPages = {
     const { view, controls, nav } = props;
     const [head, id, action, within] = page.path;
     if (head === "accounts") {
+      // The GM opens an organization's accounts, in GM → Orgs → Money (6.15).
+      if (page.type === "action" && id === "open") return controls.mode === "gm" && view.partyKind !== "person" ? <OpenAccountPage view={view} controls={controls} nav={nav} /> : null;
       if (page.type !== "action") return null;
       if (id === "pay-prefs") return payPrefsShown(view) && controls.mode !== "read" ? <PayPrefsPage {...props} controls={controls} /> : null;
       const move = MOVE_CONTROLS.find((c) => c === id);

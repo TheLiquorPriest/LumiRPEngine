@@ -8,7 +8,7 @@
 // delegations they hold, after the orders asked of them). Money's parts follow the organization's
 // Money level, as Money's do. Pure.
 
-import { ownersIn } from "../../../shared/finance";
+import { OWNER_ROLE_LABELS, ownersIn } from "../../../shared/finance";
 import type { FinanceView, FlowView } from "../../../shared/finance";
 import { opaqueId } from "../../../shared/hash";
 import type { EntityId } from "../../../shared/ids";
@@ -190,6 +190,13 @@ export function orgAlerts(ctx: ReadContext, org: EntityId, viewer: EntityId | nu
       out.push({ id: "negative_equity", kind: "negative_equity", tone: "neg", text: `Negative equity two months running: it owes ${money(ctx, -worth)} more than it owns.`, short: "negative equity", tab: "money", needsYou: viewer !== null && (holds(ctx, org, viewer, "money.manage") || holds(ctx, org, viewer, "org.govern")) });
     }
   }
+  // No bank account (from Money 2): a company's takings and anyone's payroll have no account to land in or come from, nor a trust's money (6.15).
+  const operating = optionalQuery(ctx, "economy.operating_account");
+  const employs = jobsAt(ctx, org).length > 0;
+  if (level >= 2 && seesMoney && operating && (type === "company" || type === "trust" || employs) && operating(ctx, org) === null) {
+    const why = type === "company" ? "its takings leave the world and its payroll is paid from nowhere" : employs ? "its payroll is paid from nowhere" : "its money has nowhere to be";
+    out.push({ id: "no_account", kind: "no_account", tone: "warn", text: `No bank account: ${why}.`, short: "no bank account", tab: "money", needsYou: viewer !== null && (holds(ctx, org, viewer, "money.manage") || holds(ctx, org, viewer, "org.govern")) });
+  }
   // A motion open for the reader's vote, a request waiting on their approval (ORG-SPEC Phase 5).
   out.push(...decisionAlerts(ctx, org, viewer));
   return out.length > 0 ? out : null;
@@ -283,6 +290,9 @@ function lowerFirst(text: string): string {
 /** At most this many titles on one person's line. */
 const TITLES_KEPT = 2;
 
+/** The bare words for how someone belongs (Member, Staff, Owner), an owner's role among them ("Trustee", "Beneficiary", as `orgTitle` gives it), lowered. */
+const BARE_TITLES: ReadonlySet<string> = new Set([...Object.values(HOW_WORDS), ...Object.values(OWNER_ROLE_LABELS).map((l) => l.one)].map((word) => word.toLowerCase()));
+
 /**
  * Someone's titles where an organization relates to the player character (§3.15): each one the
  * player character belongs to or can see (never the party, whose tier marks it), where the person
@@ -304,8 +314,8 @@ export function personTitles(ctx: ReadContext, who: EntityId): string[] {
     if (mine.length === 0 && !canSeeEntity(ctx.registry, ctx.world, ctx.state, pov, org)) continue;
     const given = orgTitle(ctx, who, org);
     if (given === null || given.trim() === "") continue;
-    // A bare word for how they belong (Owner, Member, Staff) tells something only where the player character belongs too; an owner's is their role there.
-    const bare = Object.values(HOW_WORDS).some((word) => word.toLowerCase() === given.trim().toLowerCase());
+    // A bare word for how they belong (Owner, Member, Staff, an owner's role) tells something only where the player character belongs too; an owner's is their role there.
+    const bare = BARE_TITLES.has(given.trim().toLowerCase());
     if (bare && mine.length === 0) continue;
     const role = given === HOW_WORDS.owner ? theirs.find((r) => r.how === "owner")?.role : undefined;
     const title = role !== undefined && role !== "owner" ? role.replace(/_/g, " ") : given;

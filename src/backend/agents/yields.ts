@@ -10,7 +10,7 @@
 // rendered in the user's own texts.
 
 import { ROLE_LABEL, type RoleId } from "../../shared/agent-roles";
-import { KNOWLEDGE_REFUSALS, PROSE_CLASHES, READ_DROPS, YIELD_TEXT } from "../../shared/agent-yield";
+import { KNOWLEDGE_REFUSALS, type KnowledgeRefusal, PROSE_CLASHES, READ_DROPS, YIELD_TEXT } from "../../shared/agent-yield";
 import type { DiagPhase } from "../../shared/diagnostics";
 import type { MainRequestKind } from "../../shared/main-agent-prompts";
 import { MINDS_EVENTS } from "../../shared/minds";
@@ -93,9 +93,11 @@ function lostOf(say: (id: string, vars?: Readonly<Record<string, string>>) => st
     case "knowledge": {
       const k = (out as RunMindsResult).knowledge;
       if (!k) return [say(YIELD_TEXT.knowledgeOff)];
+      // A limit's refusal names the limit, as the user set it.
+      const limits: Partial<Record<KnowledgeRefusal, number | undefined>> = { facts_limit: k.limits?.factsPerTurn, facts_chat: k.limits?.factsPerChat, learnings_limit: k.limits?.learningsPerTurn };
       const lost = KNOWLEDGE_REFUSALS.flatMap((why) => {
         const n = k.refused?.[why] ?? 0;
-        return n > 0 ? [say(YIELD_TEXT.knowledge(why), { count: String(n) })] : [];
+        return n > 0 ? [say(YIELD_TEXT.knowledge(why), { count: String(n), limit: String(limits[why] ?? "") })] : [];
       });
       if ((k.failed ?? 0) > 0) lost.push(say(YIELD_TEXT.knowledgeCalls, { count: String(k.failed) }));
       if (lost.length === 0 && k.events.length === 0 && k.proposals.length === 0) lost.push(say(YIELD_TEXT.knowledgeEmpty));
@@ -136,18 +138,23 @@ function lostOf(say: (id: string, vars?: Readonly<Record<string, string>>) => st
   }
 }
 
-/** The run's facts and learnings as the main agent sees a knowledge run's answer: the new facts they rest on, everyone else's learnings, and the player character's own changes. */
-export function knowledgeAnswer(out: RunMindsResult): { facts: number; learnings: number; yours: number } {
+/**
+ * A knowledge run's answer as the main agent sees it, by id: the new facts its learnings rest on,
+ * with what each says; everyone else's learnings, each its fact, who learned it and how; and the
+ * player character's own changes, each its fact and whether it is a reveal.
+ */
+export function knowledgeAnswer(out: RunMindsResult): { facts: { id: string; claim: string }[]; learnings: { fact: string; who: string[]; how: string }[]; yours: { fact: string; type: string }[] } {
   const k = out.knowledge;
-  if (!k) return { facts: 0, learnings: 0, yours: 0 };
-  const facts = new Set<string>();
-  let learnings = 0;
+  if (!k) return { facts: [], learnings: [], yours: [] };
+  const facts = new Map<string, string>();
+  const learnings: { fact: string; who: string[]; how: string }[] = [];
   for (const e of k.events) {
     if (!("data" in e)) continue;
-    const data = e.data as { fact?: { id?: unknown }; who?: unknown };
-    if (e.type === MINDS_EVENTS.fact && typeof data.fact?.id === "string") facts.add(data.fact.id);
-    if (e.type === MINDS_EVENTS.learn && Array.isArray(data.who)) learnings += data.who.length;
+    const data = e.data as { fact?: unknown; who?: unknown; how?: unknown };
+    const made = data.fact as { id?: unknown; claim?: unknown } | undefined;
+    if (e.type === MINDS_EVENTS.fact && typeof made?.id === "string") facts.set(made.id, typeof made.claim === "string" ? made.claim : "");
+    if (e.type === MINDS_EVENTS.learn && typeof data.fact === "string" && Array.isArray(data.who)) learnings.push({ fact: data.fact, who: data.who.filter((w): w is string => typeof w === "string"), how: typeof data.how === "string" ? data.how : "" });
   }
-  for (const p of k.proposals) for (const f of p.facts) facts.add(f.id);
-  return { facts: facts.size, learnings, yours: k.proposals.length };
+  for (const p of k.proposals) for (const f of p.facts) facts.set(f.id, f.claim);
+  return { facts: [...facts].map(([id, claim]) => ({ id, claim })), learnings, yours: k.proposals.map((p) => ({ fact: p.learn.fact, type: p.type })) };
 }

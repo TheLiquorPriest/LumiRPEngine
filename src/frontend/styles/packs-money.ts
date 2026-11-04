@@ -44,6 +44,7 @@ export const PACKS_MONEY_CSS = `
 .lre .lre-money-form>.lre-btn[type=submit]{margin-top:var(--lre-s1)}
 .lre .lre-money-choices{margin:0;padding:0;border:0;min-width:0;display:flex;flex-direction:column;gap:var(--lre-s1)}
 .lre .lre-money-choices-label{padding:0;font-size:var(--lre-fs-sm);font-weight:500;color:var(--lre-muted)}
+.lre .lre-money-owner-role{padding:var(--lre-s2) var(--lre-s3) 0;font-size:var(--lre-fs-sm);font-weight:500;color:var(--lre-muted)}
 .lre .lre-money-choice-list{display:flex;flex-direction:column;min-width:0;border:1px solid var(--lre-hairline);border-radius:var(--lre-r-lg);background:var(--lre-card);overflow:hidden}
 .lre .lre-money-choice{display:flex;align-items:center;gap:var(--lre-s3);min-height:var(--lre-tap-lg);padding:var(--lre-s2) var(--lre-s3);cursor:pointer;transition:background-color var(--lre-fast)}
 .lre .lre-money-choice+.lre-money-choice{border-top:1px solid var(--lre-hairline)}

@@ -11,6 +11,7 @@ import type { MarkerPreview } from "../../shared/protocol";
 import type { UserSettings } from "../../shared/settings";
 import type { ControlsView } from "../../shared/state-view";
 import { useApp } from "../app";
+import { QUEUED_TOAST } from "../queued";
 import { Banner, Button, Seg, useBusy } from "../components";
 import { InferredForm } from "../inferred-form";
 import { inferMarker, type Req } from "../requests";
@@ -80,7 +81,7 @@ export function InferredThisChat(props: { chatId: string; controls: ControlsView
     run(async () => {
       const result = change ? await app.request(change) : null;
       if (result) {
-        app.toast(result.pending ? "Saved — the change applies when the reply finishes." : `This chat reads typed attempts as checks this way (${INFER_MODE_LABEL[next.mode].toLowerCase()}) from the next turn.`, "info");
+        app.toast(result.pending ? QUEUED_TOAST : `This chat reads typed attempts as checks this way (${INFER_MODE_LABEL[next.mode].toLowerCase()}) from the next turn.`, "info");
         cancel();
       }
     });

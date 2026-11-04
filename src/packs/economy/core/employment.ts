@@ -23,7 +23,7 @@ import type { JsonObject, JsonValue } from "../../../shared/json";
 import type { EntityId, PlaceId } from "../../../shared/ids";
 import type { LedgerEvent, PackEvent, PostingLine } from "../../../shared/ledger";
 import type { EntityDef } from "../../../shared/world";
-import { PARTY_KINDS, PAY_BASES, PAY_EVERY, type Deduction, type Flow, type FlowSchedule, type FlowSplit, type JobFields, type JobView, type PayBasis, type PayEvery } from "../../../shared/finance";
+import { PARTY_KINDS, PAY_BASES, PAY_EVERY, UNPAID, type Deduction, type Flow, type FlowSchedule, type FlowSplit, type JobFields, type JobView, type PayBasis, type PayEvery } from "../../../shared/finance";
 import { hashParts, opaqueId } from "../../../shared/hash";
 import type { OrgMember, OrgPower } from "../../../shared/org";
 import { calendarOf, clockAt, dateAt, dayIndexOf, dayIndexOfText, formatClock, MINUTES_PER_DAY, type Calendar } from "../../../engine/calendar";
@@ -69,8 +69,10 @@ export interface Job {
   weeksPerYear: number;
   commissionPct: number;
   tipsPerHour: number;
-  /** Null: work that isn't paid. */
+  /** Null: work that isn't paid (`pay_every: "none"`, or an occupation that pays nothing). */
   every: PayEvery | null;
+  /** The day pay starts from (`pay_from`, a day index): a raise on an unpaid title pays from the raise. */
+  payFrom: number | null;
   /** The payday weekday of a weekly or biweekly cycle with no anchor (0 is Sunday). */
   weekday: number;
   /** When weekly and biweekly cycles count from (a day index). */
@@ -182,7 +184,7 @@ export function readJob(ctx: Pick<ReadContext, "registry" | "world" | "state" | 
   const workplace = strOf(f.workplace);
   const workplaces = own(ctx.world.places, workplace) ? [workplace] : business ? placesOf(ctx, business) : party ? orgPlaces(ctx, party) : own(ctx.world.places, employer) ? [employer] : [];
   const status: JobStatus = f.status === "leave" || f.status === "ended" ? f.status : "active";
-  const every = (PAY_EVERY as readonly string[]).includes(strOf(f.pay_every)) ? (strOf(f.pay_every) as PayEvery) : everyOfOccupation(freq);
+  const every = strOf(f.pay_every) === UNPAID ? null : (PAY_EVERY as readonly string[]).includes(strOf(f.pay_every)) ? (strOf(f.pay_every) as PayEvery) : everyOfOccupation(freq);
   const roll: Roll = f.pay_roll === "after" || f.pay_roll === "none" ? f.pay_roll : "before";
   const unit = f.pay_unit === "day" || f.pay_unit === "week" || f.pay_unit === "month" || f.pay_unit === "year" ? f.pay_unit : "month";
   const start = dayOfField(cal, f.start);
@@ -211,6 +213,7 @@ export function readJob(ctx: Pick<ReadContext, "registry" | "world" | "state" | 
     roll,
     start,
     end: dayOfField(cal, f.end),
+    payFrom: dayOfField(cal, f.pay_from),
     season: from !== null && to !== null ? { from, to } : null,
     deductions: deductionsOf(f.deductions),
     splits: splitsOf(f.splits),
@@ -549,7 +552,9 @@ function emptyCheck(job: Job, from: number, to: number, work: Work): Paycheck {
  * payout. Salary and a stipend pay each scheduled period they close, prorated by the days the job
  * counted. A period on leave is covered and pays nothing.
  */
-export function paycheckFor(ctx: ReadContext, api: FinanceApi, job: Job, at: number, from: string): Paycheck | null {
+export function paycheckFor(ctx: ReadContext, api: FinanceApi, found: Job, at: number, from: string): Paycheck | null {
+  // Pay that starts later than the job (a raise on an unpaid title) counts only the days from it.
+  const job = found.payFrom !== null && (found.start === null || found.payFrom > found.start) ? { ...found, start: found.payFrom } : found;
   if (job.every === null || (job.status === "ended" && job.end === null)) return null;
   const cal = calendarOf(ctx.world);
   const payDay = dateAt(cal, at).dayIndex;
@@ -1003,7 +1008,13 @@ function raise(api: FinanceApi, args: Record<string, JsonValue>, ctx: EffectCont
   if (problem !== null) return reject("not_owner", problem);
   const rate = typeof args.rate === "number" && args.rate > 0 ? Math.round(args.rate) : typeof args.pct === "number" && args.pct > -100 ? Math.round(job.rate * (1 + args.pct / 100)) : NaN;
   if (!(rate > 0)) return reject("bad_amount", "a raise needs a new rate above nothing, or a percentage");
-  return [{ type: "set", entity: job.id, field: "rate", value: rate }, ...acted(ctx, job.party, by, "staff.pay", `Set ${labelOf(ctx, job.worker)}'s pay to ${api.money(ctx, rate)} ${BASIS_WORDS[job.basis]}`, [job.worker])];
+  const said = [{ type: "set", entity: job.id, field: "rate", value: rate }, ...acted(ctx, job.party, by, "staff.pay", `Set ${labelOf(ctx, job.worker)}'s pay to ${api.money(ctx, rate)} ${BASIS_WORDS[job.basis]}`, [job.worker])] as LedgerEvent[];
+  if (strOf(own(ctx.state.entities, job.id)?.fields.pay_every) !== UNPAID) return said;
+  // An unpaid title starts to pay from today, never back to its start: on the employer's pay schedule, else its staff's own cycle, else monthly.
+  const cal = calendarOf(ctx.world);
+  const peer = allJobs(ctx).find((j) => j.party === job.party && j.id !== job.id && j.status === "active" && j.every !== null);
+  const cadence: JsonObject = (job.party !== null ? payScheduleOf(ctx, job.party) : null) ?? (peer?.every ? { pay_every: peer.every, ...(peer.anchor !== null && (peer.every === "weekly" || peer.every === "biweekly") ? { pay_anchor: dateText(cal, peer.anchor) } : {}), ...(peer.custom.days ? { pay_days: peer.custom.days } : {}) } : { pay_every: "monthly" });
+  return [...said, ...Object.entries({ ...cadence, pay_from: dateText(cal, today(ctx)) }).map(([field, value]): LedgerEvent => ({ type: "set", entity: job.id, field, value }))];
 }
 
 /** `economy.job_hours`: the hours a week a job counts from now on (its pay, where hours pay it). Changing them sets the worker's pay, so the self-dealing guard holds. */
@@ -1126,9 +1137,9 @@ export function jobView(ctx: ReadContext, api: FinanceApi, job: Job, viewer: Ent
     worker: shownLabel(ctx, viewer, job.worker),
     workerId: job.worker,
     basis: job.basis,
-    pay: job.basis === "commission" ? `${job.commissionPct || job.rate}% commission` : `${money(job.rate)} ${BASIS_WORDS[job.basis]}${job.tipsPerHour > 0 ? ` plus about ${money(job.tipsPerHour)} an hour in tips` : ""}${job.commissionPct > 0 ? ` plus ${job.commissionPct}% commission` : ""}`,
+    pay: job.every === null ? "Unpaid" : job.basis === "commission" ? `${job.commissionPct || job.rate}% commission` : `${money(job.rate)} ${BASIS_WORDS[job.basis]}${job.tipsPerHour > 0 ? ` plus about ${money(job.tipsPerHour)} an hour in tips` : ""}${job.commissionPct > 0 ? ` plus ${job.commissionPct}% commission` : ""}`,
     rate: job.rate,
-    payEvery: job.every ?? "custom",
+    payEvery: job.every ?? UNPAID,
     schedule: job.every === null ? "unpaid" : job.every.replace("_", " "),
     nextPay: next === null ? null : formatClock(cal, next),
     grossPerPeriod: job.basis === "salary" ? Math.round(job.rate / periodsPerYear(ctx, api, job)) : job.basis === "stipend" ? job.rate : null,

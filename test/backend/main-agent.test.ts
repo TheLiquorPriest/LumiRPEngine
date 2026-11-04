@@ -183,6 +183,49 @@ describe("the main agent's turn", () => {
     expect(rig.host.quietCalls.filter((c) => (c.messages[0]?.content ?? "").includes(INTERPRET_MARK))).toHaveLength(2);
     expect(rig.rt.ledger.errors).toEqual([]);
   });
+
+  test("a run past its revisions runs afresh within its role's fresh runs: the fresh run drops the old one's changes and starts its revisions again, and one past them is refused, saying what's left", async () => {
+    const rig = new Rig({ shipped: true });
+    const chatId = await mainChat(rig, { agents: { roles: { intent: { budget: { revisions: 1 } } } } });
+    const briefs: (string | null)[] = [];
+    const roles = classicRoles();
+    rig.rt.orchestrator.roles = {
+      ...roles,
+      intent: {
+        ...roles.intent,
+        interpret: (task, ctx) => {
+          briefs.push(ctx.brief);
+          return roles.intent.interpret(task, ctx);
+        },
+      },
+    };
+    let agent = "";
+    const asked = models(rig, {
+      script: (req, n) => {
+        if (n === 0) return { content: "", toolCalls: [call("run_role", { role: "intent", task: "Read the harbor look." }, "first")] };
+        if (n === 1) agent = /^(\S+): the intent role/m.exec(resultsOf(req).join("\n"))?.[1] ?? "";
+        if (n === 1) return { content: "", toolCalls: [call("revise", { agentId: agent, message: "Is a look an action?" }, "again")] };
+        if (n === 2) return { content: "", toolCalls: [call("revise", { agentId: agent, message: "Once more." }, "past")] };
+        if (n === 3) return { content: "", toolCalls: [call("run_role", { role: "intent", task: "Read it afresh." }, "fresh")] };
+        if (n === 4) return { content: "", toolCalls: [call("revise", { agentId: agent, message: "Shorter." }, "revised")] };
+        if (n === 5) return { content: "", toolCalls: [call("run_role", { role: "intent", task: "And again." }, "past_fresh")] };
+        if (n === 6) return { content: "", toolCalls: [call("commit", {}, "done")] };
+        return undefined;
+      },
+    });
+    await played(rig, chatId, "I look out over the harbor.", "Gulls wheel over the water.");
+    // Past its revisions, the refusal says a fresh run is left; the fresh run and its revision answer.
+    expect(resultsOf(asked[3] as QuietRequest).join("\n")).toContain(`${agent} has had the 1 revision its role allows; its last answer stands. run_role starts its role afresh on the request with a new task, dropping what this run staged (1 fresh run left).`);
+    expect(resultsOf(asked[4] as QuietRequest).join("\n")).toContain(`${agent}: the intent role answered`);
+    expect(resultsOf(asked[5] as QuietRequest).join("\n")).toContain(`${agent}: the intent role answered`);
+    // Past its fresh runs too: what's left is a revision, none here, or commit.
+    expect(resultsOf(asked[6] as QuietRequest).join("\n")).toContain(`The intent role has run in this stage, and had the 1 fresh run a request allows: revise its run (${agent}, 0 revisions left) to change its answer, or commit.`);
+    // Four runs: the first, its revision, the fresh run with its own task and none of the old revisions, and the fresh run's revision.
+    expect(briefs).toHaveLength(4);
+    expect([briefs[2]?.includes("Read it afresh."), briefs[2]?.includes("Is a look an action?"), briefs[3]?.includes("Shorter.")]).toEqual([true, false, true]);
+    expect(rig.host.quietCalls.filter((c) => (c.messages[0]?.content ?? "").includes(INTERPRET_MARK))).toHaveLength(4);
+    expect(rig.rt.ledger.errors).toEqual([]);
+  });
 });
 
 describe("the main agent's system files", () => {
@@ -511,10 +554,34 @@ describe("what a run gave the engine", () => {
     const quit = Object.values(factsOf(slice)).find((f) => f.claim === QUIT)?.id ?? "";
     expect(knowersOf(slice, quit)).toEqual(expect.arrayContaining([DANNY, PRIYA, "pov"]));
     const [ran = ""] = ranOf(asked, "knowledge");
-    expect(ran).toContain('"facts":1');
-    expect(ran).toContain('"yours":1');
+    expect(ran).toContain(`"facts":[{"id":"${quit}","claim":"${QUIT}"}]`);
+    expect(ran).toContain(`"yours":[{"fact":"${quit}","type":"learn"}]`);
+    expect(ran).toContain(`"learnings":[{"fact":"${quit}","who":["${DANNY}"],"how":"witnessed"}`);
     expect(ran).not.toContain('"events"');
     expect(ran).not.toContain("What the engine didn't take");
+    expect(rig.rt.ledger.errors).toEqual([]);
+  });
+
+  test("a knowledge request one call per person names its people, and each call frames the main agent's task as its person's alone", async () => {
+    const rig = new Rig({ shipped: true, minds: true });
+    const chatId = await rolesChat(rig, { minds: { knowledge: { batch: "character" } } });
+    const calls: string[] = [];
+    const asked = agentModels(rig, {
+      knowledge: (req) => {
+        calls.push(sentOf(req));
+        return JSON.stringify({ facts: [], learned: [], inferred: [], doubted: [] });
+      },
+    });
+    await played(rig, chatId, "Morning, Danny.", "Danny waves from the dock.");
+    const stage = asked.map(stageOf).find((s) => s.includes("- knowledge:")) ?? "";
+    expect(stage).toMatch(/- knowledge: [^\n]+\n {2}One call per person, each answered for that person alone: /);
+    for (const id of [DANNY, PRIYA]) expect(stage).toContain(`(${id})`);
+    // The main agent's runs: each call framed as its person's, one call per person there (a decision's knowledge before the plan runs on its own, with no task of the main agent's).
+    const run = calls.filter((c) => c.includes("Do the knowledge work."));
+    for (const c of run) expect(c).toMatch(/This call is [^\n]+'s alone: answer only for /);
+    const people = (/One call per person, each answered for that person alone: ([^\n]+)/.exec(stage)?.[1] ?? "").split(", ");
+    expect(new Set(run.map((c) => /This call is ([^\n]+?)'s alone/.exec(c)?.[1])).size).toBe(people.length);
+    expect(run.some((c) => c.includes("This call is Danny Okafor's alone: answer only for Danny Okafor"))).toBe(true);
     expect(rig.rt.ledger.errors).toEqual([]);
   });
 
@@ -525,7 +592,7 @@ describe("what a run gave the engine", () => {
     const asked = agentModels(rig, { knowledge: () => JSON.stringify({ facts: [{ ref: "n1", claim: QUIT, about: ["Danny Okafor"], truth: "true" }], learned: [{ fact: "n1", how: "witnessed" }], inferred: [], doubted: [] }) });
     await played(rig, chatId, "Morning, Danny.", "Danny says he's taking the marina job at the end of the month.");
     const [ran = ""] = ranOf(asked, "knowledge");
-    expect(ran).toContain('"facts":0');
+    expect(ran).toContain('"facts":[]');
     expect(ran).toContain("What the engine didn't take: 1 refused (no matters: a new fact says why it matters and to whom); 1 refused (a learning of no fact");
     const records = await rig.rt.diag.records(chatId, rig.host.userId);
     expect(records.some((r) => r.step === ROLE_LABEL.knowledge && r.level === "warn" && (r.reason ?? "").includes("1 refused (no matters"))).toBe(true);

@@ -1,28 +1,37 @@
-// Play → Me → Gear (DESIGN §12; ITEMS-SPEC §10.3): On you (worn, in pockets, in hand, in bags) ·
-// Holding for others · Yours elsewhere, with where · Lent out · Borrowed, each a section of item
-// trees, the empty ones but On you left out. Containers nest their contents with a load meter;
-// kits show completeness and missing pieces; lent and borrowed things show the grant and are
-// flagged once overdue (DESIGN §9.3). Each item opens its item sheet. The view model is the gear
-// core's `GearView`.
+// Play → Me → Gear (DESIGN §12; ITEMS-SPEC §10.3): What you have, by who has it: On you (worn, in
+// pockets, in hand, in bags) · Holding for others · Yours elsewhere, with where · Lent out ·
+// Borrowed, each a section of item trees, the empty ones but On you left out. Containers nest their
+// contents with a load meter; kits show completeness and missing pieces; lent and borrowed things
+// show the grant and are flagged once overdue (DESIGN §9.3). Each item opens its item sheet. Manage
+// (`manage.tsx`) is the same things by Outfit, Carried and Wardrobe, with the controls that change
+// them at once, off screen. The view model is the gear core's `GearView`.
 
 import { useState } from "preact/hooks";
 import { isRecord } from "../../../shared/json";
+import { isSize, SIZES, type SizeClass } from "../../../shared/things";
 import { pushSheet, useApp } from "../../../frontend/app";
-import { Badge, Button, Empty, IdText, JsonView, Meter, Section, useBusy } from "../../../frontend/components";
+import { Badge, Button, Empty, IdText, JsonView, Meter, Section, Seg, useBusy } from "../../../frontend/components";
 import { list, num, obj, optNum, optStr, str, strings } from "../../../frontend/decode";
 import { Icon } from "../../../frontend/icons";
+import { toastQueued } from "../../../frontend/queued";
 import type { PanelProps } from "../../../frontend/registry";
 import type { WornAs } from "../core/feed";
 import type { GearItem, GearView } from "../core/view";
+import { AS_LABEL, GearManage } from "./manage";
 
 export const SECTIONS = ["on", "holding", "elsewhere", "lent", "borrowed"] as const;
 export type GearSection = (typeof SECTIONS)[number];
 export const SECTION_LABEL: Record<GearSection, string> = { on: "On you", holding: "Holding for others", elsewhere: "Yours elsewhere", lent: "Lent out", borrowed: "Borrowed" };
 
-/** How a thing is on you, as its row says it. */
-export const AS_LABEL: Record<WornAs, string> = { worn: "worn", pocket: "in a pocket", hand: "in hand" };
-
 const AS_VALUES: readonly WornAs[] = ["worn", "pocket", "hand"];
+
+const SIZE_CLASSES: readonly SizeClass[] = [...SIZES, "part", "vehicle", "unknown"];
+
+/** A holder as the view names it: a wardrobe, a dresser, a bag. */
+function decodeHolder(value: unknown): { id: string; name: string } | null {
+  const holder = obj(value);
+  return holder && typeof holder.id === "string" ? { id: holder.id, name: str(holder.name, holder.id) } : null;
+}
 
 function decodeItem(entry: Record<string, unknown>): GearItem | null {
   if (typeof entry.id !== "string") return null;
@@ -46,13 +55,39 @@ function decodeItem(entry: Record<string, unknown>): GearItem | null {
     where: optStr(entry.where),
     lent: lent ? { to: str(lent.to), until: optStr(lent.until), overdue: lent.overdue === true, ...(lent.hold === true ? { hold: true as const } : {}) } : undefined,
     borrowed: borrowed ? { from: str(borrowed.from), until: optStr(borrowed.until), overdue: borrowed.overdue === true, ...(borrowed.assigned === true ? { assigned: true as const } : {}) } : undefined,
+    ...(entry.wearable === true ? { wearable: true as const } : {}),
+    ...(isSize(entry.holds) ? { holds: entry.holds } : {}),
+    ...(SIZE_CLASSES.some((s) => s === entry.size) ? { size: entry.size as SizeClass } : {}),
+    ...(entry.mine === true ? { mine: true as const } : {}),
     children: children.length > 0 ? children : undefined,
   };
 }
 
 export function decodeGearView(value: unknown): GearView | null {
   if (!isRecord(value) || !SECTIONS.some((section) => Array.isArray(value[section]))) return null;
-  return { level: num(value.level, 1), on: list(value.on, decodeItem), holding: list(value.holding, decodeItem), elsewhere: list(value.elsewhere, decodeItem), lent: list(value.lent, decodeItem), borrowed: list(value.borrowed, decodeItem) };
+  const here = obj(value.here);
+  return {
+    level: num(value.level, 1),
+    on: list(value.on, decodeItem),
+    holding: list(value.holding, decodeItem),
+    elsewhere: list(value.elsewhere, decodeItem),
+    lent: list(value.lent, decodeItem),
+    borrowed: list(value.borrowed, decodeItem),
+    outfit: list(value.outfit, decodeItem),
+    carried: list(value.carried, decodeItem),
+    wardrobe: list(value.wardrobe, (w) => ({ holder: decodeHolder(w.holder), where: str(w.where), items: list(w.items, decodeItem) })),
+    here: here
+      ? {
+          place: str(here.place),
+          room: list(here.room, decodeItem),
+          lying: list(here.lying, decodeItem),
+          inside: list(here.inside, (h) => {
+            const holder = decodeHolder(h.holder);
+            return holder ? { holder, items: list(h.items, decodeItem) } : null;
+          }),
+        }
+      : null,
+  };
 }
 
 /** Who has a thing of yours, until when: lent to them, or holding it for you. */
@@ -83,8 +118,7 @@ function ItemRow(props: { item: GearItem; depth: number; chatId: string }) {
   const lookInside = () =>
     run(async () => {
       const result = await app.request({ type: "lre.view.open", chatId: props.chatId, panel: "gear.gear", entity: item.id });
-      if (result?.pending) app.toast("The contents appear when the reply finishes.", "info");
-      else if (result && !result.materialized) app.toast(`Nothing more inside ${item.name}.`, "info");
+      if (!toastQueued(app, result) && result && !result.materialized) app.toast(`Nothing more inside ${item.name}.`, "info");
       setOpen(true);
     });
   // An incomplete kit's count shows on its meter below, so the line names only what's missing.
@@ -139,25 +173,42 @@ function ItemRow(props: { item: GearItem; depth: number; chatId: string }) {
   );
 }
 
+/** The panel's two views of the same things: by who has them, or Manage's groups with their controls. */
+type GearMode = "have" | "manage";
+
 export function GearPanel(props: PanelProps) {
+  const [mode, setMode] = useState<GearMode>("have");
   const view = decodeGearView(props.view);
   if (props.view === null || props.view === undefined) return <Empty icon="bag">Gear is off in this world.</Empty>;
   if (!view) return <JsonView value={props.view} />;
   return (
-    <div class="lre-stack lre-me" data-lre-panel="gear.gear">
-      {SECTIONS.filter((section) => section === "on" || view[section].length > 0).map((section) => (
-        <Section key={section} title={SECTION_LABEL[section]} aside={<Badge>{view[section].length}</Badge>} flush>
-          {view[section].length === 0 ? (
-            <Empty icon="bag">Nothing on you.</Empty>
-          ) : (
-            <div class="lre-me-items" role="list" aria-label={SECTION_LABEL[section]} data-lre-gear-section={section}>
-              {view[section].map((item) => (
-                <ItemRow key={item.id} item={item} depth={0} chatId={props.chatId} />
-              ))}
-            </div>
-          )}
-        </Section>
-      ))}
+    <div class="lre-stack lre-me" data-lre-panel="gear.gear" data-lre-gear-mode={mode}>
+      <Seg<GearMode>
+        label="Show gear"
+        value={mode}
+        options={[
+          { value: "have", label: "What you have" },
+          { value: "manage", label: "Manage" },
+        ]}
+        onChange={setMode}
+      />
+      {mode === "manage" ? (
+        <GearManage chatId={props.chatId} view={view} entries={props.state.palette?.entries ?? []} />
+      ) : (
+        SECTIONS.filter((section) => section === "on" || view[section].length > 0).map((section) => (
+          <Section key={section} title={SECTION_LABEL[section]} aside={<Badge>{view[section].length}</Badge>} flush>
+            {view[section].length === 0 ? (
+              <Empty icon="bag">Nothing on you.</Empty>
+            ) : (
+              <div class="lre-me-items" role="list" aria-label={SECTION_LABEL[section]} data-lre-gear-section={section}>
+                {view[section].map((item) => (
+                  <ItemRow key={item.id} item={item} depth={0} chatId={props.chatId} />
+                ))}
+              </div>
+            )}
+          </Section>
+        ))
+      )}
     </div>
   );
 }

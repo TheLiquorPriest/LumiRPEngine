@@ -483,3 +483,18 @@ describe("the Curator's item and place tools in a turn (ITEMS-SPEC §12 Phase 3)
     expect([holderOf(state, "pov_milk"), holderOf(state, "mug_b"), holderOf(state, "mug_a")]).toEqual([fridge, fridge, POV]);
   });
 });
+
+describe("a make that gives neither a type nor a size takes its type (N3)", () => {
+  test("a typeless Refrigerator made on Jordan gets the catalog's refrigerator type, asks first, and is made at home", async () => {
+    const { rig, chatId } = await alderChat();
+    const turn = await curatorTurn(rig, chatId);
+    expect((await turn.call("item_make", { name: "Refrigerator", in: JORDAN, why: "Jordan and Danny carry a new fridge in" })).staged).toMatchObject({ changeType: "item_make", mode: "confirm" });
+    const { out, applied, state } = await turn.land(true);
+    expect(out.confirm.map((o) => o.changeType)).toEqual(["item_make"]);
+    expect(applied?.committed).toHaveLength(1);
+    const [fridge = "", ...more] = named(state, "Refrigerator");
+    expect(more).toEqual([]);
+    expect(state.entities[fridge]?.fields).toMatchObject({ place: HOME, catalog: "refrigerator" });
+    expect(holderOf(state, fridge)).toBeUndefined();
+  });
+});

@@ -2,18 +2,22 @@
 // on its head, behind the gate with the rest of the truth, read through `lre.things` in GM scope.
 // Here: where the player character is, what is in the room (furniture, built-in things and vehicles,
 // what is in them nested), what lies there, and what the people there have, with why each has it.
-// By place and By owner: Build's trees. Tidy up: the audit's findings, each with the one GM edit that
+// By place and By owner: Build's trees. Select makes those lists choose: the bulk bar under them
+// moves, puts in, puts away (each to where it rests), makes theirs, sizes or removes every thing
+// picked as one GM edit with one Undo. Tidy up: the audit's findings, each with the one GM edit that
 // fixes it or the fixes to choose from, Leave it (kept beside the chat; Show N left brings one back),
 // Ask the Curator (the GM assistant), and how many a run shows; then Keep in the world, which copies
 // what the chat made in play into its world's draft. A thing's page, from here or from World: where
 // it is and why whoever has it has it, where it rests and Put it away, Move to…, Put in…, Hand to…,
-// Kept at…, whose it is and who may use it, what it is and holds, its secrecy, its history in this
-// chat and every field under Advanced; never a simulation level, a life or a tier. Each control is
-// one GM edit with its own Undo, its notice saying what it did.
+// Kept at…, Wear and Take off, whose it is and who may use it, what it is and holds, its secrecy, its
+// history in this chat and every field under Advanced; never a simulation level, a life or a tier.
+// A person's things on their GM page: Outfit, Carried and Wardrobe first. Each control is one GM
+// edit with its own Undo, its notice saying what it did.
 
 import { useEffect, useMemo, useState } from "preact/hooks";
 import type { EntityId } from "../../shared/ids";
 import type { EditOp, GmThingsRead, ResultBodies } from "../../shared/protocol";
+import { EDIT_OPS_MAX } from "../../shared/protocol";
 import { TIDY_BOUNDS } from "../../shared/settings";
 import type { GmEntity, GmView } from "../../shared/state-view";
 import type { GmThingExtras, HistorySource, KeepResult, LoanChoice, MadeInPlay, RestView, TidyFinding, TidyFix, TidyKind, TidyRun } from "../../shared/thing-gm";
@@ -24,12 +28,14 @@ import { GRANT_WORDS, partyPossessive, presumedLine, SIZE_FROM_WORDS, SIZE_WORDS
 import { listWords } from "../../shared/words";
 import { useApp } from "../app";
 import { AddPicker, CheckField, FormSheet, RefPicker, type RefOption } from "../build/form-kit";
-import { HoldsSection, OwnerList, PlaceTree, SizeChoices, ThingChips, ThingRowView, TreeRows, whereWords } from "../build/things";
+import type { MenuItem } from "../build/chrome";
+import { HoldsSection, OwnerList, PersonGroups, PlaceTree, SizeChoices, ThingChips, ThingRowView, TreeRows, whereWords, type PersonBucket } from "../build/things";
 import { placeSections, type TreeNode } from "../build/things-model";
 import { TextListEditor } from "../character/text-list";
+import { wordsOf } from "../character/places";
 import { Badge, Banner, Button, Disclosure, Empty, HostSelect, IdText, List, ListRow, NumberStepper, Section, Seg, useBusy } from "../components";
 import { Icon } from "../icons";
-import { PickBox } from "../multi-select";
+import { PickBox, SelectBar, useSelection, type Selection } from "../multi-select";
 import { gmThingsRequest } from "../requests";
 import { cannotHold, pathText, stepWords } from "../things/where";
 import { WhereSheet, type WhereExtra, type WherePick } from "../things/where-picker";
@@ -111,17 +117,17 @@ export function hereSections(rows: readonly ThingRow[], here: string): HereSecti
   });
 }
 
-/** Rows of things someone has, each with why they have it on its second line; what is in them under them once opened. */
-function WhyRows(props: { nodes: readonly TreeNode[]; why: Readonly<Record<string, string>>; open: ReadonlySet<string>; onToggle(id: string): void; onOpen(id: EntityId): void }) {
+/** Rows of things someone has, each with why they have it on its second line; what is in them under them once opened; `picked` while choosing. */
+function WhyRows(props: { nodes: readonly TreeNode[]; why: Readonly<Record<string, string>>; open: ReadonlySet<string>; picked?: ReadonlySet<string>; onToggle(id: string): void; onOpen(id: EntityId): void }) {
   return (
     <>
       {props.nodes.map((node) => {
-        if ("holder" in node) return <TreeRows key={node.holder.id} nodes={[node]} depth={0} open={props.open} problems={NO_PROBLEMS} onToggle={props.onToggle} onOpen={props.onOpen} />;
+        if ("holder" in node) return <TreeRows key={node.holder.id} nodes={[node]} depth={0} open={props.open} problems={NO_PROBLEMS} picked={props.picked} onToggle={props.onToggle} onOpen={props.onOpen} />;
         const open = props.open.has(node.thing.id);
         return (
           <div key={node.thing.id} class="lre-thing-node">
-            <ThingRowView row={node.thing} sub={props.why[node.thing.id]} expanded={open} onToggle={node.children.length > 0 ? () => props.onToggle(node.thing.id) : undefined} onOpen={props.onOpen} />
-            {open ? <TreeRows nodes={node.children} depth={1} open={props.open} problems={NO_PROBLEMS} onToggle={props.onToggle} onOpen={props.onOpen} /> : null}
+            <ThingRowView row={node.thing} sub={props.why[node.thing.id]} expanded={open} picked={props.picked?.has(node.thing.id)} onToggle={node.children.length > 0 ? () => props.onToggle(node.thing.id) : undefined} onOpen={props.onOpen} />
+            {open ? <TreeRows nodes={node.children} depth={1} open={props.open} problems={NO_PROBLEMS} picked={props.picked} onToggle={props.onToggle} onOpen={props.onOpen} /> : null}
           </div>
         );
       })}
@@ -129,8 +135,8 @@ function WhyRows(props: { nodes: readonly TreeNode[]; why: Readonly<Record<strin
   );
 }
 
-/** Here's places: each headed by its path, then In the room, Lying here and On the people here, each person with Open (their sheet in World). */
-export function HereView(props: { sections: readonly HereSection[]; why: Readonly<Record<string, string>>; open: ReadonlySet<string>; onToggle(id: string): void; onOpen(id: EntityId): void; onPerson(id: EntityId): void }) {
+/** Here's places: each headed by its path, then In the room, Lying here and On the people here, each person with Open (their sheet in World); `picked` while choosing. */
+export function HereView(props: { sections: readonly HereSection[]; why: Readonly<Record<string, string>>; open: ReadonlySet<string>; picked?: ReadonlySet<string>; onToggle(id: string): void; onOpen(id: EntityId): void; onPerson(id: EntityId): void }) {
   return (
     <div class="lre-thing-tree" data-lre-by="here">
       {props.sections.map((s) => {
@@ -144,7 +150,7 @@ export function HereView(props: { sections: readonly HereSection[]; why: Readonl
               <div class="lre-thing-bucket" data-lre-here-group="room">
                 <div class="lre-thing-bucket-head">In the room</div>
                 <div role="list">
-                  <TreeRows nodes={s.room} depth={0} open={props.open} problems={NO_PROBLEMS} onToggle={props.onToggle} onOpen={props.onOpen} />
+                  <TreeRows nodes={s.room} depth={0} open={props.open} problems={NO_PROBLEMS} picked={props.picked} onToggle={props.onToggle} onOpen={props.onOpen} />
                 </div>
               </div>
             ) : null}
@@ -152,7 +158,7 @@ export function HereView(props: { sections: readonly HereSection[]; why: Readonl
               <div class="lre-thing-bucket" data-lre-here-group="lying">
                 <div class="lre-thing-bucket-head">Lying here</div>
                 <div role="list">
-                  <TreeRows nodes={s.lying} depth={0} open={props.open} problems={NO_PROBLEMS} onToggle={props.onToggle} onOpen={props.onOpen} />
+                  <TreeRows nodes={s.lying} depth={0} open={props.open} problems={NO_PROBLEMS} picked={props.picked} onToggle={props.onToggle} onOpen={props.onOpen} />
                 </div>
               </div>
             ) : null}
@@ -171,7 +177,7 @@ export function HereView(props: { sections: readonly HereSection[]; why: Readonl
                       </Button>
                     </div>
                     <div role="list">
-                      <WhyRows nodes={p.children} why={props.why} open={props.open} onToggle={props.onToggle} onOpen={props.onOpen} />
+                      <WhyRows nodes={p.children} why={props.why} open={props.open} picked={props.picked} onToggle={props.onToggle} onOpen={props.onOpen} />
                     </div>
                   </div>
                 ))}
@@ -190,9 +196,11 @@ export function HereView(props: { sections: readonly HereSection[]; why: Readonl
 const TIDY_TITLES: Readonly<Record<TidyKind, string>> = {
   too_big: "Too big to carry",
   two_places: "In two places at once",
+  worn_elsewhere: "Worn but lying elsewhere",
   handover_owner: "An owner a handover changed",
   duplicate: "Maybe the same thing",
   size_unknown: "Size unknown",
+  final_dropped: "Dropped by the final review",
 };
 
 /**
@@ -420,11 +428,162 @@ function TidyPanel(props: { chatId: string; editor: Editor; names: ReadonlyMap<s
   );
 }
 
+// ---------------------------------------------------------------- Select: the bulk bar
+
+/** The sheets the bulk bar opens. */
+export type BulkSheet = "move" | "put" | "own" | "size" | "remove";
+
+/** One change the bulk bar makes to every thing picked: `words` says where a move takes them ("at the Garage", "in the Wardrobe"). */
+export type BulkChange = { do: "move"; to: Spot; words: string } | { do: "away" } | { do: "own"; owner: PartyRef | null } | { do: "size"; size: Size } | { do: "remove" };
+
+/** "1 thing", "3 things". */
+const counted = (n: number): string => (n === 1 ? "1 thing" : `${n} things`);
+
+/** The things a notice names: up to three by name, more by how many, with the verb that agrees. */
+function named(rows: readonly ThingRow[], verb: { one: string; many: string }): string {
+  const who = rows.length <= 3 ? listWords(rows.map((r) => r.name)) : counted(rows.length);
+  return `${who} ${rows.length === 1 ? verb.one : verb.many}`;
+}
+
+const IS = { one: "is", many: "are" } as const;
+
+/** Whether a thing is where a spot says already: lying at the place, or directly in the holder. */
+function isAt(row: ThingRow, spot: Spot): boolean {
+  const at = row.where.at(-1);
+  return "place" in spot ? at?.is === "place" && at.id === spot.place : at?.id === spot.in;
+}
+
+/**
+ * The one GM edit a bulk change makes to the things picked (ITEMS-SPEC §10.2), with its notice: Move
+ * to a place, Put in a holder, Put away (each to where it rests, `ThingRow.rest`), Make it theirs, a
+ * size, or Remove; each thing one op, as its own page's control sends it. A thing already so is left
+ * out (and a Put away says how many stay); null when that leaves nothing to change.
+ */
+export function bulkEdit(change: BulkChange, rows: readonly ThingRow[]): { ops: EditOp[]; done: string } | null {
+  switch (change.do) {
+    case "move": {
+      const moving = rows.filter((r) => !isAt(r, change.to));
+      const why = "place" in change.to ? "The GM moved it" : "The GM put it there";
+      return moving.length === 0 ? null : { ops: moving.map((r) => item({ do: "move", item: r.id, to: change.to, why })), done: `${named(moving, IS)} ${change.words} now.` };
+    }
+    case "away": {
+      const going = rows.flatMap((r) => (r.rest !== null && !isAt(r, r.rest) ? [{ row: r, rest: r.rest }] : []));
+      if (going.length === 0) return null;
+      const stay = rows.length - going.length;
+      const staying = stay === 0 ? "" : ` ${counted(stay)} ${stay === 1 ? "stays" : "stay"}: already where it is kept, or kept nowhere.`;
+      return { ops: going.map((g) => item({ do: "move", item: g.row.id, to: g.rest, why: "Put away" })), done: `${named(going.map((g) => g.row), IS)} put away, each where it is kept.${staying}` };
+    }
+    case "own": {
+      const owner = change.owner;
+      // A stated owner already theirs (or, for nobody, none stated) is no change.
+      const changing = rows.filter((r) => (owner === null ? r.whose.presumed === null : !(r.whose.presumed === null && r.whose.owners.length === 1 && r.whose.owners[0]?.id === owner.id)));
+      if (changing.length === 0) return null;
+      return { ops: changing.map((r) => item({ do: "own", item: r.id, owner: owner?.id ?? null, why: "The GM made it so" })), done: `${named(changing, IS)} ${owner ? partyPossessive(owner) : "nobody's"} now.` };
+    }
+    case "size": {
+      const changing = rows.filter((r) => r.size !== change.size);
+      return changing.length === 0 ? null : { ops: changing.map((r) => item({ do: "label", item: r.id, size: change.size })), done: `${named(changing, IS)} ${SIZE_LABELS[change.size]} now.` };
+    }
+    case "remove":
+      return rows.length === 0 ? null : { ops: rows.map((r) => item({ do: "remove", item: r.id, why: "The GM removed it" })), done: `${named(rows, IS)} out of the world.` };
+  }
+}
+
+/** The biggest of the things picked, for what can't hold them: a vehicle over every size, the size ladder's largest otherwise. */
+function biggest(rows: readonly ThingRow[]): SizeClass | null {
+  if (rows.some((r) => r.size === "vehicle")) return "vehicle";
+  const rank = (size: SizeClass): number => SIZES.findIndex((s) => s === size);
+  return rows.reduce<SizeClass | null>((top, r) => (top === null || rank(r.size) > rank(top) ? r.size : top), null);
+}
+
+/**
+ * The bar under GM → Things while it chooses: how many are picked, Select all and Clear, and what to
+ * do to every thing picked: Move to…, Put in…, Put away (each to where it rests), Make it theirs…,
+ * Size… and Remove…, each one GM edit of one op a thing with one Undo, so at most `EDIT_OPS_MAX` at a
+ * time. Put away sends at once; the rest open their sheets.
+ */
+export function ThingsBulkBar(props: { selection: Selection; all: readonly string[]; shown: readonly string[]; rows: readonly ThingRow[]; editor: Editor; onSheet(sheet: BulkSheet): void }) {
+  const { rows, editor } = props;
+  const over = rows.length > EDIT_OPS_MAX;
+  const off = editor.busy || rows.length === 0 || over;
+  const away = bulkEdit({ do: "away" }, rows);
+  return (
+    <SelectBar label="Things picked" selection={props.selection} all={props.all} shown={props.shown}>
+      {over ? <span class="lre-small lre-muted" data-lre-bulk-over="">{`One edit holds at most ${EDIT_OPS_MAX} changes: pick fewer.`}</span> : null}
+      <Button size="sm" icon="pin" disabled={off} onClick={() => props.onSheet("move")}>
+        Move to…
+      </Button>
+      <Button size="sm" icon="box" disabled={off} onClick={() => props.onSheet("put")}>
+        Put in…
+      </Button>
+      <Button size="sm" icon="home" disabled={off || away === null} title={away === null && rows.length > 0 ? "Each is where it is kept already, or kept nowhere" : undefined} onClick={() => away && void editor.edit(away.ops, away.done)}>
+        Put away
+      </Button>
+      <Button size="sm" icon="user" disabled={off} onClick={() => props.onSheet("own")}>
+        Make it theirs…
+      </Button>
+      <Button size="sm" icon="layers" disabled={off} onClick={() => props.onSheet("size")}>
+        Size…
+      </Button>
+      <Button size="sm" variant="danger" icon="trash" disabled={off} onClick={() => props.onSheet("remove")}>
+        Remove…
+      </Button>
+    </SelectBar>
+  );
+}
+
+/** Make it theirs… for the things picked: a person or an organization, searched by name, or Nobody. */
+function PartySheet(props: { subtitle: string; parties: readonly PartyRef[]; onPick(party: PartyRef | null): void; onClose(): void }) {
+  const [query, setQuery] = useState("");
+  const want = wordsOf(query);
+  const shown = props.parties.filter((p) => want.every((q) => wordsOf(p.name).some((w) => w.startsWith(q))));
+  return (
+    <FormSheet title="Make it theirs" subtitle={props.subtitle} onClose={props.onClose}>
+      <div class="lre-cp-sheet" data-lre-bulk-own="">
+        <label class="lre-cp-search">
+          <Icon name="search" size={16} />
+          <input class="lre-input" type="search" placeholder="Search people and organizations" aria-label="Search people and organizations" value={query} onInput={(event) => setQuery(event.currentTarget.value)} />
+        </label>
+        <List>
+          {want.length === 0 ? <ListRow icon="minus" title="Nobody" subtitle="Nobody's: anyone's to use" onClick={() => props.onPick(null)} /> : null}
+          {shown.map((p) => (
+            <ListRow key={p.id} icon={p.is === "person" ? "user" : "users"} title={p.name} subtitle={p.is === "person" ? undefined : p.is === "company" ? "A business" : `A ${p.is}`} onClick={() => props.onPick(p)} />
+          ))}
+        </List>
+        {shown.length === 0 ? <Empty icon="search">No one is called that.</Empty> : null}
+      </div>
+    </FormSheet>
+  );
+}
+
+/** Remove… for the things picked: what it does, and the one button that does it. */
+function RemoveSheet(props: { rows: readonly ThingRow[]; busy: boolean; onRemove(): void; onClose(): void }) {
+  return (
+    <FormSheet title="Remove from the world" subtitle={counted(props.rows.length)} onClose={props.onClose}>
+      <div class="lre-stack" data-lre-bulk-remove="">
+        <span class="lre-field-help">{`Takes ${props.rows.length <= 3 ? listWords(props.rows.map((r) => r.name)) : counted(props.rows.length)} out of the world; what is in them stays where it is. The edit's Undo brings them back.`}</span>
+        <Button variant="danger" icon="trash" disabled={props.busy} onClick={props.onRemove}>
+          {props.rows.length === 1 ? "Remove it from the world" : `Remove ${props.rows.length} from the world`}
+        </Button>
+      </div>
+    </FormSheet>
+  );
+}
+
+/** The things a tree shows, its holders' contents included, in order. */
+function treeIds(nodes: readonly TreeNode[]): string[] {
+  return nodes.flatMap((n) => [...("thing" in n ? [n.thing.id] : []), ...treeIds(n.children)]);
+}
+
 // ---------------------------------------------------------------- the Things section
 
 type ThingsView = "here" | "place" | "owner" | "tidy";
 
-/** GM → Things: search, Here · By place · By owner · Tidy up, and a thing's page over the list. */
+/**
+ * GM → Things: search, Here · By place · By owner · Tidy up, and a thing's page over the list.
+ * Select turns the lists to choosing: a row's tap picks it, and the bulk bar under them changes every
+ * thing picked in one GM edit.
+ */
 export function ThingsSection(props: { editor: BulkEditor; chatId: string }) {
   const app = useApp();
   const { editor, chatId } = props;
@@ -436,6 +595,8 @@ export function ThingsSection(props: { editor: BulkEditor; chatId: string }) {
   const [found, setFound] = useState<{ words: string; ids: EntityId[] } | null>(null);
   const [open, setOpen] = useState<ReadonlySet<string>>(new Set());
   const [owners, setOwners] = useState<ReadonlySet<string> | null>(null);
+  const selection = useSelection();
+  const [bulk, setBulk] = useState<BulkSheet | null>(null);
   const words = query.trim();
   useEffect(() => {
     if (words === "") return;
@@ -469,13 +630,43 @@ export function ThingsSection(props: { editor: BulkEditor; chatId: string }) {
   const ownersOpen = owners ?? new Set([editor.gm.entities.find((e) => e.pov)?.id ?? ""]);
   const results = found && found.words === words ? found.ids.flatMap((id) => rows.get(id) ?? []) : null;
   const pov = editor.gm.entities.find((e) => e.pov);
+  // While choosing, a row's tap picks it; the bar's Select all takes what the list shows now. Tidy up's cards are no list to choose from.
+  const listing = words !== "" || view !== "tidy";
+  const choosing = selection.on && listing;
+  const picked = choosing ? new Set(selection.ids) : undefined;
+  const tap = (id: EntityId): void => (choosing ? selection.toggle(id) : openThing(id));
+  const shown = words !== "" ? (results ?? []).map((r) => r.id) : view === "here" ? hereAt.flatMap((s) => [...treeIds(s.room), ...treeIds(s.lying), ...treeIds(s.people)]) : view === "place" ? sections.flatMap((s) => treeIds(s.nodes)) : (list?.owners ?? []).filter((g) => ownersOpen.has(g.owner?.id ?? "")).flatMap((g) => [...g.on, ...g.home, ...g.away]);
+  const chosen = selection.ids.flatMap((id) => rows.get(id) ?? []);
+  const pick = list?.pick ?? null;
+  const chosenIds = new Set(chosen.map((r) => r.id));
+  const closeBulk = () => setBulk(null);
+  /** One bulk change as one GM edit; its sheet closes once it applied. */
+  const change = (next: BulkChange): void => {
+    const edit = bulkEdit(next, chosen);
+    if (!edit) {
+      app.toast("Nothing to change: each one is so already.", "info");
+      return closeBulk();
+    }
+    void editor.edit(edit.ops, edit.done).then((ok) => {
+      if (!ok) return;
+      closeBulk();
+      if (next.do === "remove") selection.set([]);
+    });
+  };
   return (
     <div ref={pages.host.ref} class="lre-gm-pages" onKeyDown={pages.host.onKeyDown}>
-      <div class="lre-stack lre-gm-list lre-gm-things" hidden={page !== null} data-lre-gm-things={view}>
-        <label class="lre-gm-search">
-          <Icon name="search" size={16} />
-          <input class="lre-input" type="search" aria-label="Search things" placeholder="Search things: “Marcus's key”, “the fridge”" value={query} onInput={(event) => setQuery(event.currentTarget.value)} />
-        </label>
+      <div class="lre-stack lre-gm-list lre-gm-things" hidden={page !== null} data-lre-gm-things={view} data-lre-choosing={choosing ? "" : undefined}>
+        <div class="lre-gm-things-top">
+          <label class="lre-gm-search">
+            <Icon name="search" size={16} />
+            <input class="lre-input" type="search" aria-label="Search things" placeholder="Search things: “Marcus's key”, “the fridge”" value={query} onInput={(event) => setQuery(event.currentTarget.value)} />
+          </label>
+          {listing ? (
+            <Button size="sm" variant={choosing ? "primary" : "secondary"} icon={choosing ? "check" : "checklist"} title={choosing ? undefined : "Choose things to change together"} onClick={() => (choosing ? selection.stop() : selection.start())}>
+              {choosing ? "Done" : "Select"}
+            </Button>
+          ) : null}
+        </div>
         {words !== "" ? (
           results === null ? (
             <Empty icon="hourglass">Searching…</Empty>
@@ -484,10 +675,10 @@ export function ThingsSection(props: { editor: BulkEditor; chatId: string }) {
               No thing is called “{words}”, or has a name starting with it.
             </Empty>
           ) : (
-            <Section title={results.length === 1 ? "1 thing" : `${results.length} things`} flush>
+            <Section title={counted(results.length)} flush>
               <div class="lre-thing-tree" role="list" data-lre-found="">
                 {results.map((row) => (
-                  <ThingRowView key={row.id} row={row} sub={whereWords(row)} onOpen={openThing} />
+                  <ThingRowView key={row.id} row={row} sub={whereWords(row)} picked={picked?.has(row.id)} onOpen={tap} />
                 ))}
               </div>
             </Section>
@@ -517,16 +708,26 @@ export function ThingsSection(props: { editor: BulkEditor; chatId: string }) {
               ) : hereAt.length === 0 ? (
                 <Empty icon="box">Nothing lies here, and nobody here has anything.</Empty>
               ) : (
-                <HereView sections={hereAt} why={here.why} open={open} onToggle={(id) => setOpen(toggle(open, id))} onOpen={openThing} onPerson={openPerson} />
+                <HereView sections={hereAt} why={here.why} open={open} picked={picked} onToggle={(id) => setOpen(toggle(open, id))} onOpen={tap} onPerson={openPerson} />
               )
             ) : view === "place" ? (
-              <PlaceTree sections={sections} open={open} problems={NO_PROBLEMS} onToggle={(id) => setOpen(toggle(open, id))} onOpen={openThing} />
+              <PlaceTree sections={sections} open={open} problems={NO_PROBLEMS} picked={picked} onToggle={(id) => setOpen(toggle(open, id))} onOpen={tap} />
             ) : (
-              <OwnerList groups={list.owners} rows={rows} open={ownersOpen} problems={NO_PROBLEMS} onToggle={(key) => setOwners(toggle(ownersOpen, key))} onOpen={openThing} onParty={(party) => openPerson(party.id)} />
+              <OwnerList groups={list.owners} rows={rows} open={ownersOpen} problems={NO_PROBLEMS} picked={picked} onToggle={(key) => setOwners(toggle(ownersOpen, key))} onOpen={tap} onParty={(party) => openPerson(party.id)} />
             )}
           </>
         )}
+        {choosing ? <ThingsBulkBar selection={selection} all={[...rows.keys()]} shown={shown} rows={chosen} editor={editor} onSheet={setBulk} /> : null}
       </div>
+      {bulk === "move" && pick ? <WhereSheet title="Move to" choices={pick.where.filter((c) => c.is === "place")} value={null} size={biggest(chosen)} onClose={closeBulk} onPick={(next) => next && "choice" in next && change({ do: "move", to: { place: next.choice.id }, words: `at ${next.choice.name}` })} /> : null}
+      {bulk === "put" && pick ? <WhereSheet title="Put in" choices={pick.where.filter((c) => c.is === "thing" && !chosenIds.has(c.id) && !c.path.some((s) => chosenIds.has(s.id)))} value={null} size={biggest(chosen)} empty="Nothing picked" onClose={closeBulk} onPick={(next) => next && "choice" in next && change({ do: "move", to: { in: next.choice.id }, words: `in ${next.choice.name}` })} /> : null}
+      {bulk === "own" && pick ? <PartySheet subtitle={counted(chosen.length)} parties={pick.parties} onClose={closeBulk} onPick={(owner) => change({ do: "own", owner })} /> : null}
+      {bulk === "size" ? (
+        <FormSheet title="Size" subtitle={counted(chosen.length)} onClose={closeBulk}>
+          <SizeChoices value={null} onPick={(size) => change({ do: "size", size })} />
+        </FormSheet>
+      ) : null}
+      {bulk === "remove" ? <RemoveSheet rows={chosen} busy={editor.busy} onClose={closeBulk} onRemove={() => change({ do: "remove" })} /> : null}
       {page ? <GmThingPage key={page.thing} chatId={chatId} id={page.thing} editor={editor} backLabel="Things" onBack={pages.back} onOpen={(id) => (isThingKind(editor.gm.kinds, editor.gm.entities.find((e) => e.id === id)?.kind ?? "") ? openThing(id) : openPerson(id))} /> : null}
     </div>
   );
@@ -542,13 +743,14 @@ const REST_FROM: Readonly<Record<RestView["from"], string>> = {
   fixture: "A fixture: it stays where it stands",
   bought: "Bought: it goes to the buyer's",
   made: "Where it was made",
+  stored: "Kept with their things at home: what keeps its kind there (a wardrobe for clothing)",
 };
 
 /** Who made each entry of a thing's history. */
 const SOURCE_WORDS: Readonly<Record<HistorySource, string>> = { turn: "the turn", story: "the story", gm: "the GM", fix: "a ✎ fix", agent: "an agent" };
 
 /** The sheets a thing's page opens. */
-export type ThingSheet = "move" | "put" | "hand" | "kept" | "inside";
+export type ThingSheet = "move" | "put" | "hand" | "kept" | "inside" | "wear";
 
 /** Where a thing rests, in words: on its owner, a place or what holds it, or where it is. */
 function restWords(rest: RestView | null): string {
@@ -606,6 +808,9 @@ export function GmThingBody(props: GmThingBodyProps) {
   const presumes = presumedLine(row.whose);
   const hiddenWords = row.hidden ? (gm.found ? "Hidden until searched; the player character has found it" : "Hidden until searched") : row.secret ? (gm.found ? "Secret; the player character knows of it" : "Secret") : "Public: anyone may know of it";
   const putAway = gm.putAway;
+  // Who has it, by name: whom Wear puts it on and Take off takes it from.
+  const holder = row.with;
+  const holderName = holder !== null ? (pick.where.find((c) => c.id === holder)?.name ?? partyName(holder)) : null;
   return (
     <div class="lre-gm-entity lre-gm-thing" data-lre-gm-thing={id}>
       {gm.findings.map((f) => (
@@ -640,6 +845,19 @@ export function GmThingBody(props: GmThingBodyProps) {
           <Button size="sm" icon="home" disabled={busy} onClick={() => props.onSheet("kept")}>
             Kept at…
           </Button>
+          {row.worn !== null && holder !== null ? (
+            <Button size="sm" icon="close" disabled={busy} onClick={() => void editor.edit([item({ do: "wear", item: id, who: holder, off: true })], `${holderName ?? holder} takes off ${name}; it stays with them.`)}>
+              Take off
+            </Button>
+          ) : row.slot !== null && holder !== null ? (
+            <Button size="sm" icon="shield" disabled={busy} title={`Put it on ${holderName ?? holder}`} onClick={() => void editor.edit([item({ do: "wear", item: id, who: holder })], `${holderName ?? holder} wears ${name} now.`)}>
+              Wear
+            </Button>
+          ) : row.slot !== null ? (
+            <Button size="sm" icon="shield" disabled={busy} onClick={() => props.onSheet("wear")}>
+              Wear…
+            </Button>
+          ) : null}
         </div>
       </Section>
       <Section title="Whose">
@@ -990,6 +1208,56 @@ export function GmThingPage(props: { chatId: string; id: EntityId; editor: Edito
         />
       ) : null}
       {sheet === "inside" && page ? <AddInsideSheet holder={id} owner={sole?.id ?? null} busy={editor.busy} onClose={close} onMake={(op, done) => send([op], done)} /> : null}
+      {sheet === "wear" && page && pick ? (
+        <FormSheet title="Wear" subtitle={name} onClose={close}>
+          <List>
+            {pick.where
+              .filter((c) => c.is === "person")
+              .map((p) => {
+                const at = p.path.at(-1);
+                return <ListRow key={p.id} icon="user" title={p.name} subtitle={cannotHold(p, page.row.size) ?? (at ? stepWords(at) : undefined)} chevron onClick={() => send([item({ do: "wear", item: id, who: p.id })], `${p.name} wears ${name} now.`)} />;
+              })}
+          </List>
+        </FormSheet>
+      ) : null}
     </GmPage>
+  );
+}
+
+// ---------------------------------------------------------------- a person's things
+
+/**
+ * A row's GM controls on a person's page: Take off what they wear; Wear what has a slot and is with
+ * them, held for someone or kept in their wardrobe; Put it away for what isn't where it rests; each
+ * one GM edit with its Undo.
+ */
+export function personThingMenu(row: ThingRow, bucket: PersonBucket["key"], person: { id: EntityId; name: string }, editor: Editor): MenuItem[] {
+  const out: MenuItem[] = [];
+  if (bucket === "outfit") out.push({ label: "Take off", icon: "close", disabled: editor.busy, onSelect: () => void editor.edit([item({ do: "wear", item: row.id, who: person.id, off: true })], `${person.name} takes off ${row.name}; it stays with them.`) });
+  else if (row.slot !== null && (bucket === "carried" || bucket === "wardrobe" || bucket === "holding")) out.push({ label: "Wear", icon: "shield", disabled: editor.busy, onSelect: () => void editor.edit([item({ do: "wear", item: row.id, who: person.id })], `${person.name} wears ${row.name} now.`) });
+  const away = bulkEdit({ do: "away" }, [row]);
+  if (away) out.push({ label: "Put it away", icon: "home", disabled: editor.busy, onSelect: () => void editor.edit(away.ops, away.done) });
+  return out;
+}
+
+/**
+ * A person's things on their GM page (ITEMS-SPEC §10.2): Outfit, Carried and Wardrobe, then the rest
+ * of theirs and what they hold for others, as Build's Character page groups them, read from the
+ * chat's head and again after every edit; a row opens its thing page, and its menu is
+ * `personThingMenu`'s.
+ */
+export function GmPersonThings(props: { chatId: string; person: { id: EntityId; name: string }; editor: Editor; onOpen(id: EntityId): void }) {
+  const { body, failed } = useGmThings(props.chatId, { op: "person", entity: props.person.id }, props.editor.gm);
+  const groups = body?.person ?? null;
+  return (
+    <Section title="Things">
+      {failed ? (
+        <Empty icon="alert">Their things couldn't be read.</Empty>
+      ) : groups ? (
+        <PersonGroups person={props.person.id} groups={groups} problems={NO_PROBLEMS} menu={(row, bucket) => personThingMenu(row, bucket, props.person, props.editor)} onOpen={props.onOpen} />
+      ) : (
+        <span class="lre-small lre-muted">Reading their things…</span>
+      )}
+    </Section>
   );
 }

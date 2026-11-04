@@ -10,6 +10,7 @@ import type { EntityId } from "../../../shared/ids";
 import type { LedgerEvent, PostingLine } from "../../../shared/ledger";
 import { FINANCE_EVENTS, FLOW_KINDS, FLOW_SHORTFALLS, featureOn, type Flow, type FlowAmount, type FlowKind, type FlowOutcome, type FlowRunState, type FlowSchedule, type FlowShortfall, type FlowSplit } from "../../../shared/finance";
 import { formatMoney } from "../../../shared/world";
+import { OFFSTAGE_ORIGIN, ORIGIN_FIELD } from "../../../shared/offstage";
 import { calendarOf, clockAt, clockOfLocal, dateAt, dayIndexOfText, holidaysOn, parseHHMM, type Calendar } from "../../../engine/calendar";
 import { EXTERNAL_ACCOUNT_PREFIX } from "../../../engine/events";
 import { evalNumber } from "../../../engine/expr";
@@ -619,7 +620,7 @@ export function runOccurrence(hooks: FinanceHooks, run: Run, flow: Flow, at: num
       // A module's own posting can't take what was carried; it waits for an occurrence that can.
       const next: FlowRunState = { done: before.done + 1, missed: before.missed, ...pending, ...(own_lines && before.deferred ? { deferred: before.deferred } : {}), ended: ended(before.done + 1, before.missed) };
       run.emit([runEvent(flow, at, "paid", attempt.paid, next)]);
-      if (who && flow.kind !== "living" && amount.posting?.quiet !== true && attempt.paid > 0) run.emit([signal("bill", `${flow.label}: ${money(attempt.paid)} ${flowIsIncome(ctx, flow, who) ? "received" : "paid"}.`, who, at)]);
+      if (who && flow.kind !== "living" && amount.posting?.quiet !== true && attempt.paid > 0) run.emit([signal("bill", `${flow.label}: ${money(attempt.paid)} ${flowIsIncome(ctx, flow, who) ? "received" : "paid"}${provenance(ctx, flow.id)}.`, who, at)]);
       return { outcome: "paid", reason: null };
     }
   }
@@ -685,6 +686,16 @@ export function runOccurrence(hooks: FinanceHooks, run: Run, flow: Flow, at: num
 function flowIsIncome(ctx: ReadContext, flow: Flow, who: EntityId): boolean {
   const from = sideOf(ctx, flow.from);
   return !(("account" in from && from.party === who) || ("party" in from && !("account" in from) && from.party === who));
+}
+
+/**
+ * Where a standing payment came from, for its "…: $X paid." line (Journal, Montage, Outline): set up
+ * off screen (an action done at once), or authored in the world (its definition, an Upgrade's among
+ * them); "" for one the story made in play, which the story already told.
+ */
+export function provenance(ctx: Pick<ReadContext, "world" | "state">, flow: EntityId): string {
+  if (own(ctx.state.entities, flow)?.fields[ORIGIN_FIELD] === OFFSTAGE_ORIGIN) return " (set up off screen)";
+  return own(ctx.world.entities, flow) ? " (set up in the world)" : "";
 }
 
 /**

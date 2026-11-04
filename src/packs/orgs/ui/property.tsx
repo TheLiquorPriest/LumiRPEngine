@@ -9,6 +9,7 @@ import { isRecord, type JsonObject } from "../../../shared/json";
 import { AUDIENCES, ORG_ENTRY_ACTION } from "../../../shared/org";
 import type { PremiseView, PremisesView } from "../../../shared/org-view";
 import { useApp } from "../../../frontend/app";
+import { toastQueued } from "../../../frontend/queued";
 import { Badge, Button, Card, Empty, JsonView, Section, useBusy } from "../../../frontend/components";
 import { list, num, str, strings } from "../../../frontend/decode";
 import { entryArgs, entryDraft, EntryForm, entryOps, PremiseRows, type EntryDraft } from "../../../frontend/place-entry";
@@ -104,7 +105,7 @@ export function OrgPropertyTab(props: OrgTabProps) {
     if (params === null) return;
     run(async () => {
       const result = await app.request({ type: "lre.action", chatId: props.chatId, action: ORG_ENTRY_ACTION, params, source: "palette" });
-      if (result && "pending" in result && result.pending) app.toast("Saved — it applies when the reply finishes.", "info");
+      if (result && "pending" in result) toastQueued(app, result);
       if (result) setDraft(null);
     });
   };

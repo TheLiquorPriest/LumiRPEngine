@@ -8,7 +8,7 @@
 
 import type { EntityId, KindId } from "./ids";
 import type { OrgType } from "./org";
-import type { AccessBasis, GrantBasis, Size, SizeClass, SizeFrom } from "./things";
+import type { AccessBasis, GrantBasis, Size, SizeClass, SizeFrom, Spot } from "./things";
 import { SIZE_LABELS } from "./things";
 import { listWords, possessive } from "./words";
 
@@ -59,6 +59,10 @@ export interface ThingRow {
   with: EntityId | null;
   /** The slot it is worn in, when it is worn. */
   worn: string | null;
+  /** The slot it takes, when it is worn at all: its own `slot`, else its type row's `equip_slot`. */
+  slot: string | null;
+  /** Where Put away takes it (its rest, ITEMS-SPEC §4.3): a place, or a holder (its owner, when it rests on them); null when nothing says. */
+  rest: Spot | null;
   /** The largest size it takes, for what holds things. */
   holds: Size | null;
   /** How many things are directly in it. */
@@ -139,6 +143,12 @@ export interface ThingPage {
   contents: ThingRow[];
 }
 
+/** A person's clothing at home in one holder (a wardrobe, a dresser), or lying loose there (`holder` null). */
+export interface WardrobeRows {
+  holder: WhereStep | null;
+  rows: ThingRow[];
+}
+
 /** A person's things, in Build's Character page groups. */
 export interface PersonThings {
   /** Theirs (or nobody else's) that they have. */
@@ -151,6 +161,12 @@ export interface PersonThings {
   lent: ThingRow[];
   /** Someone else's that they have. */
   holding: ThingRow[];
+  /** What they wear or hold in hand, by slot (Gear 3); empty below Gear 3. Derived, never stored. */
+  outfit: ThingRow[];
+  /** What they have on them and don't wear, directly; below Gear 3, everything directly on them. */
+  carried: ThingRow[];
+  /** Their clothing at home that nobody has, by what holds it (Gear 3); empty below Gear 3. */
+  wardrobe: WardrobeRows[];
 }
 
 /** A catalog type as Add a thing offers it: its row, its name and category, and the size it gives. */
@@ -188,6 +204,7 @@ export const SIZE_FROM_WORDS: Readonly<Record<SizeFrom, string>> = {
   row: "from its type",
   location: "from where its type stands",
   volume: "from its volume",
+  name: "from its name",
   category: "from its category",
   unknown: "nothing says",
 };

@@ -23,7 +23,7 @@ import {
   OWNER_ROLES,
   PARTY_KINDS,
   PAY_BASES,
-  PAY_EVERY,
+  PAY_CHOICES,
   TXN_KINDS,
   type AccountView,
   type DistributionRoute,
@@ -121,7 +121,9 @@ function marketActs(value: unknown): MarketActs | null {
 }
 
 function structureLink(o: Obj): StructureLink | null {
-  return typeof o.id === "string" ? { id: o.id, name: str(o.name, o.id), share: num(o.share), votes: num(o.votes), controlled: o.controlled === true, value: nullableNum(o.value), cash: nullableNum(o.cash), profit: nullableNum(o.profit), children: list(o.children, structureLink) } : null;
+  const trust = obj(o.trust);
+  const role = trust ? oneOf(trust.role, OWNER_ROLES, "beneficiary") : null;
+  return typeof o.id === "string" ? { id: o.id, name: str(o.name, o.id), share: num(o.share), votes: num(o.votes), controlled: o.controlled === true, value: nullableNum(o.value), netWorth: nullableNum(o.netWorth), cash: nullableNum(o.cash), profit: nullableNum(o.profit), children: list(o.children, structureLink), ...(role !== null ? { trust: { role } } : {}) } : null;
 }
 
 function card(o: Obj): CardView | null {
@@ -277,6 +279,9 @@ function flowView(o: Obj): FlowView | null {
     category: nullableStr(o.category),
     link: idName(o.link),
     payer: nullableStr(o.payer),
+    payee: nullableStr(o.payee),
+    direction: o.direction === "in" || o.direction === "out" ? o.direction : null,
+    whose: idName(o.whose),
     editable: bool(o.editable),
     source: str(o.source, "entity"),
     done: num(o.done),
@@ -287,7 +292,7 @@ function flowView(o: Obj): FlowView | null {
 }
 
 function jobSpec(o: Obj): JobFields {
-  const spec: JobFields = { worker: str(o.worker), employer: str(o.employer), basis: oneOf(o.basis, PAY_BASES, "salary"), rate: num(o.rate), pay_every: oneOf(o.pay_every, PAY_EVERY, "biweekly") };
+  const spec: JobFields = { worker: str(o.worker), employer: str(o.employer), basis: oneOf(o.basis, PAY_BASES, "salary"), rate: num(o.rate), pay_every: oneOf(o.pay_every, PAY_CHOICES, "biweekly") };
   // The rest are plain values of the job's declared fields; the GM's edit form shows them as stored.
   for (const [key, value] of Object.entries(o)) if (!(key in spec) && value !== undefined) (spec as unknown as JsonObject)[key] = JSON.parse(JSON.stringify(value)) as JsonObject[string];
   return spec;
@@ -307,7 +312,7 @@ function job(o: Obj): JobView | null {
     basis: oneOf(o.basis, PAY_BASES, "salary"),
     pay: str(o.pay),
     rate: num(o.rate),
-    payEvery: oneOf(o.payEvery, PAY_EVERY, "biweekly"),
+    payEvery: oneOf(o.payEvery, PAY_CHOICES, "biweekly"),
     schedule: str(o.schedule),
     nextPay: nullableStr(o.nextPay),
     grossPerPeriod: nullableNum(o.grossPerPeriod),
@@ -592,7 +597,8 @@ export function decodeOwnership(value: unknown): OwnershipView | null {
     listing: listingView(o.listing),
     market: marketActs(o.market),
     decidePct: optNum(o.decidePct) ?? 50,
-    valuation: v ? { value: num(v.value), set: v.set === true, book: num(v.book), profit: num(v.profit), multiple: num(v.multiple), perUnit: nullableNum(v.perUnit), ...(obj(v.market) ? { market: { price: num(obj(v.market)?.price), units: num(obj(v.market)?.units) } } : {}) } : null,
+    netWorth: nullableNum(o.netWorth),
+    valuation: v ? { value: num(v.value), set: v.set === true, book: num(v.book), profit: num(v.profit), multiple: num(v.multiple), perUnit: nullableNum(v.perUnit), floored: v.floored === true, ...(obj(v.market) ? { market: { price: num(obj(v.market)?.price), units: num(obj(v.market)?.units) } } : {}) } : null,
     parents: list(o.parents, structureLink),
     children: list(o.children, structureLink),
     consolidated: c ? { cash: num(c.cash), profit: num(c.profit), netWorth: num(c.netWorth), companies: num(c.companies) } : null,

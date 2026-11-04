@@ -9,6 +9,7 @@ import type { UserSettings } from "../../shared/settings";
 import type { ControlsView } from "../../shared/state-view";
 import type { AdjudicationDef } from "../../shared/world";
 import { useApp } from "../app";
+import { QUEUED_TOAST } from "../queued";
 import { AdjudicationForm } from "../adjudication-form";
 import { Button, Empty, HostSwitch, useBusy } from "../components";
 import { adjudicateMarker } from "../requests";
@@ -40,7 +41,7 @@ export function AdjudicationThisChat(props: { chatId: string; controls: Controls
       if (!draft) return;
       const result = await app.request(adjudicateMarker(props.chatId, draft));
       if (result) {
-        app.toast(result.pending ? "Saved — the change applies when the reply finishes." : "This chat decides checks this way from the next turn.", "info");
+        app.toast(result.pending ? QUEUED_TOAST : "This chat decides checks this way from the next turn.", "info");
         setDraft(null);
       }
     });

@@ -23,6 +23,7 @@ import { TextListEditor } from "../character/text-list";
 import { wordsOf } from "../character/places";
 import { Badge, Banner, Button, Disclosure, Empty, HostSelect, IconButton, List, ListRow, PageHeader, SaveBar, Section, Seg, useBusy } from "../components";
 import { Icon } from "../icons";
+import { PickBox } from "../multi-select";
 import type { EditorProps, Send } from "../registry";
 import { thingsRequest } from "../requests";
 import { useSelect } from "../store";
@@ -96,28 +97,43 @@ export function ThingChips(props: { row: ThingRow; problem?: "error" | "warning"
 /**
  * One thing as a list row: its name (and how many things are in it), its chips on the line under
  * it, the whole row opening its page; `toggle` shows or hides what it holds; `menu` its actions.
+ * `picked` set (a list's Select mode): the row shows its box, and its tap picks it (`onOpen`, which
+ * the list makes its toggle) instead of opening it.
  */
-export function ThingRowView(props: { row: ThingRow; depth?: number; sub?: ComponentChildren; problem?: "error" | "warning"; whose?: boolean; expanded?: boolean; onToggle?(): void; onOpen(id: EntityId): void; menu?: readonly MenuItem[] }) {
+export function ThingRowView(props: { row: ThingRow; depth?: number; sub?: ComponentChildren; problem?: "error" | "warning"; whose?: boolean; expanded?: boolean; picked?: boolean; onToggle?(): void; onOpen(id: EntityId): void; menu?: readonly MenuItem[] }) {
   const { row } = props;
   const onToggle = props.onToggle;
+  const picking = props.picked !== undefined;
+  const text = (
+    <>
+      <span class="lre-thing-name">
+        {row.name}
+        {row.inside > 0 ? <span class="lre-thing-count"> ({row.inside})</span> : null}
+      </span>
+      {props.sub !== undefined ? <span class="lre-thing-sub">{props.sub}</span> : null}
+      <ThingChips row={row} problem={props.problem} whose={props.whose} />
+    </>
+  );
   return (
-    <div class="lre-thing-row" role="listitem" data-lre-thing={row.id} style={{ "--lre-depth": String(Math.min(props.depth ?? 0, 4)) }}>
+    <div class={`lre-thing-row${props.picked ? " picked" : ""}`} role="listitem" data-lre-thing={row.id} style={{ "--lre-depth": String(Math.min(props.depth ?? 0, 4)) }}>
       {onToggle ? <IconButton icon={props.expanded ? "chevron-down" : "chevron-right"} label={`${props.expanded ? "Hide" : "Show"} what is in ${row.name}`} pressed={props.expanded} onClick={onToggle} /> : <span class="lre-thing-gap" aria-hidden="true" />}
-      <button type="button" class="lre-thing-open" aria-label={`Open ${row.name}`} onClick={() => props.onOpen(row.id)}>
-        <span class="lre-thing-name">
-          {row.name}
-          {row.inside > 0 ? <span class="lre-thing-count"> ({row.inside})</span> : null}
-        </span>
-        {props.sub !== undefined ? <span class="lre-thing-sub">{props.sub}</span> : null}
-        <ThingChips row={row} problem={props.problem} whose={props.whose} />
+      <button type="button" class={picking ? "lre-thing-open picking" : "lre-thing-open"} aria-label={picking ? `Pick ${row.name}` : `Open ${row.name}`} aria-pressed={picking ? props.picked : undefined} onClick={() => props.onOpen(row.id)}>
+        {picking ? (
+          <>
+            <PickBox label={`Pick ${row.name}`} checked={props.picked === true} />
+            <span class="lre-thing-text">{text}</span>
+          </>
+        ) : (
+          text
+        )}
       </button>
-      {props.menu && props.menu.length > 0 ? <OverflowMenu label={`${row.name}: actions`} items={props.menu} /> : null}
+      {!picking && props.menu && props.menu.length > 0 ? <OverflowMenu label={`${row.name}: actions`} items={props.menu} /> : null}
     </div>
   );
 }
 
-/** A tree's nodes as rows, nested: a holder's contents under it while it is open; someone holding things heads what they hold. */
-export function TreeRows(props: { nodes: readonly TreeNode[]; depth: number; open: ReadonlySet<string>; problems: ReadonlyMap<string, "error" | "warning">; onToggle(id: string): void; onOpen(id: EntityId): void }) {
+/** A tree's nodes as rows, nested: a holder's contents under it while it is open; someone holding things heads what they hold. `picked`: the list is choosing. */
+export function TreeRows(props: { nodes: readonly TreeNode[]; depth: number; open: ReadonlySet<string>; problems: ReadonlyMap<string, "error" | "warning">; picked?: ReadonlySet<string>; onToggle(id: string): void; onOpen(id: EntityId): void }) {
   return (
     <>
       {props.nodes.map((node) => {
@@ -128,15 +144,15 @@ export function TreeRows(props: { nodes: readonly TreeNode[]; depth: number; ope
                 <Icon name={node.holder.is === "person" ? "user" : "box"} size={14} />
                 {node.holder.is === "person" ? `On ${node.holder.name}` : `In ${node.holder.name}`}
               </div>
-              <TreeRows nodes={node.children} depth={props.depth + 1} open={props.open} problems={props.problems} onToggle={props.onToggle} onOpen={props.onOpen} />
+              <TreeRows nodes={node.children} depth={props.depth + 1} open={props.open} problems={props.problems} picked={props.picked} onToggle={props.onToggle} onOpen={props.onOpen} />
             </div>
           );
         }
         const open = props.open.has(node.thing.id);
         return (
           <div key={node.thing.id} class="lre-thing-node">
-            <ThingRowView row={node.thing} depth={props.depth} problem={props.problems.get(node.thing.id)} expanded={open} onToggle={node.children.length > 0 ? () => props.onToggle(node.thing.id) : undefined} onOpen={props.onOpen} />
-            {open ? <TreeRows nodes={node.children} depth={props.depth + 1} open={props.open} problems={props.problems} onToggle={props.onToggle} onOpen={props.onOpen} /> : null}
+            <ThingRowView row={node.thing} depth={props.depth} problem={props.problems.get(node.thing.id)} expanded={open} picked={props.picked?.has(node.thing.id)} onToggle={node.children.length > 0 ? () => props.onToggle(node.thing.id) : undefined} onOpen={props.onOpen} />
+            {open ? <TreeRows nodes={node.children} depth={props.depth + 1} open={props.open} problems={props.problems} picked={props.picked} onToggle={props.onToggle} onOpen={props.onOpen} /> : null}
           </div>
         );
       })}
@@ -145,7 +161,7 @@ export function TreeRows(props: { nodes: readonly TreeNode[]; depth: number; ope
 }
 
 /** By place: each place that has things, headed by its path, its tree under it. */
-export function PlaceTree(props: { sections: readonly PlaceSection[]; open: ReadonlySet<string>; problems: ReadonlyMap<string, "error" | "warning">; from?: number; onToggle(id: string): void; onOpen(id: EntityId): void }) {
+export function PlaceTree(props: { sections: readonly PlaceSection[]; open: ReadonlySet<string>; problems: ReadonlyMap<string, "error" | "warning">; from?: number; picked?: ReadonlySet<string>; onToggle(id: string): void; onOpen(id: EntityId): void }) {
   return (
     <div class="lre-thing-tree" data-lre-by="place">
       {props.sections.map((s) => {
@@ -172,7 +188,7 @@ export function PlaceTree(props: { sections: readonly PlaceSection[]; open: Read
               <span class="lre-thing-place-count">{treeCount(s.nodes)}</span>
             </h3>
             <div role="list">
-              <TreeRows nodes={s.nodes} depth={0} open={props.open} problems={props.problems} onToggle={props.onToggle} onOpen={props.onOpen} />
+              <TreeRows nodes={s.nodes} depth={0} open={props.open} problems={props.problems} picked={props.picked} onToggle={props.onToggle} onOpen={props.onOpen} />
             </div>
           </section>
         );
@@ -182,7 +198,7 @@ export function PlaceTree(props: { sections: readonly PlaceSection[]; open: Read
 }
 
 /** By owner: each owner with their counts and a link to their page, opened to their things on them, at home and elsewhere. */
-export function OwnerList(props: { groups: readonly OwnerGroup[]; rows: ReadonlyMap<string, ThingRow>; open: ReadonlySet<string>; problems: ReadonlyMap<string, "error" | "warning">; onToggle(key: string): void; onOpen(id: EntityId): void; onParty(party: PartyRef): void }) {
+export function OwnerList(props: { groups: readonly OwnerGroup[]; rows: ReadonlyMap<string, ThingRow>; open: ReadonlySet<string>; problems: ReadonlyMap<string, "error" | "warning">; picked?: ReadonlySet<string>; onToggle(key: string): void; onOpen(id: EntityId): void; onParty(party: PartyRef): void }) {
   return (
     <div class="lre-thing-tree" data-lre-by="owner">
       {props.groups.map((g) => {
@@ -216,7 +232,7 @@ export function OwnerList(props: { groups: readonly OwnerGroup[]; rows: Readonly
                       <div role="list">
                         {b.ids.map((id) => {
                           const row = props.rows.get(id);
-                          return row ? <ThingRowView key={id} row={row} sub={whereWords(row)} whose={false} problem={props.problems.get(id)} onOpen={props.onOpen} /> : null;
+                          return row ? <ThingRowView key={id} row={row} sub={whereWords(row)} whose={false} problem={props.problems.get(id)} picked={props.picked?.has(id)} onOpen={props.onOpen} /> : null;
                         })}
                       </div>
                     </div>
@@ -834,40 +850,59 @@ export function ThingPage(props: EditorProps) {
 
 // ---------------------------------------------------------------- a person's things, a place's
 
-/** The Character page's groups, in order, as they are named. */
-const PERSON_GROUPS: readonly { key: keyof PersonThings; title: string; none: string }[] = [
-  { key: "on", title: "On them", none: "" },
-  { key: "home", title: "At home", none: "" },
-  { key: "away", title: "Elsewhere", none: "" },
-  { key: "lent", title: "Lent out", none: "" },
-  { key: "holding", title: "Holding for others", none: "" },
-];
-
-/** How a thing is on someone, as an On them row says it: worn, in a bag, or carried. */
-function onWords(row: ThingRow, person: EntityId): string {
-  if (row.worn !== null) return row.worn === "worn" ? "Worn" : `Worn · ${row.worn}`;
+/** How a thing is carried on someone, as a Carried row says it: in a pocket, in a bag, or carried. */
+function carriedWords(row: ThingRow, person: EntityId): string {
+  if (row.worn === "pocket") return "In a pocket";
   const at = row.where.at(-1);
   return at && at.id !== person ? `In ${at.name}` : "Carried";
 }
 
-/** A person's things in groups, each row with its actions. */
-export function PersonGroups(props: { person: EntityId; groups: PersonThings; problems: ReadonlyMap<string, "error" | "warning">; menu(row: ThingRow): readonly MenuItem[]; onOpen(id: EntityId): void }) {
-  const empty = PERSON_GROUPS.every((g) => props.groups[g.key].length === 0);
+/** One group of a person's things as their page lists it: its key and title (a Wardrobe group's names its holder), its rows with each one's second line, and whether a row says whose it is. */
+export interface PersonBucket {
+  key: "outfit" | "carried" | "wardrobe" | "home" | "away" | "lent" | "holding";
+  title: string;
+  rows: { row: ThingRow; sub: string | undefined }[];
+  /** Whose a row is shows in this group (someone else's things they hold, what they carry). */
+  whose: boolean;
+}
+
+/**
+ * A person's things as their page groups them (ITEMS-SPEC §10.1, §10.3): Outfit (what they wear, by
+ * slot), Carried (on them, not worn), Wardrobe (their clothing at home, a group per holder), At home
+ * (the rest of theirs there), Elsewhere, Lent out and Holding for others; each row once, the empty
+ * groups left out. Below Gear 3 nothing is worn and everything on them is Carried.
+ */
+export function personBuckets(groups: PersonThings, person: EntityId): PersonBucket[] {
+  const holding = new Set(groups.holding.map((r) => r.id));
+  const kept = new Set(groups.wardrobe.flatMap((w) => w.rows.map((r) => r.id)));
+  const out: PersonBucket[] = [
+    { key: "outfit", title: "Outfit", whose: false, rows: groups.outfit.map((row) => ({ row, sub: row.worn !== null && row.worn !== "worn" ? `Worn · ${row.worn.replace(/_/g, " ")}` : "Worn" })) },
+    { key: "carried", title: "Carried", whose: true, rows: groups.carried.filter((r) => !holding.has(r.id)).map((row) => ({ row, sub: carriedWords(row, person) })) },
+    ...groups.wardrobe.map((w): PersonBucket => ({ key: "wardrobe", title: `Wardrobe · ${w.holder ? w.holder.name : "loose at home"}`, whose: false, rows: w.rows.map((row) => ({ row, sub: row.slot !== null ? `Worn · ${row.slot.replace(/_/g, " ")}` : undefined })) })),
+    { key: "home", title: "At home", whose: false, rows: groups.home.filter((r) => !kept.has(r.id)).map((row) => ({ row, sub: whereWords(row) })) },
+    { key: "away", title: "Elsewhere", whose: false, rows: groups.away.map((row) => ({ row, sub: whereWords(row) })) },
+    { key: "lent", title: "Lent out", whose: false, rows: groups.lent.map((row) => ({ row, sub: row.with !== null ? `With ${row.where.find((s) => s.id === row.with)?.name ?? "someone"}` : whereWords(row) })) },
+    { key: "holding", title: "Holding for others", whose: true, rows: groups.holding.map((row) => ({ row, sub: whereWords(row) })) },
+  ];
+  return out.filter((b) => b.rows.length > 0);
+}
+
+/** A person's things in groups, each row with its actions (`menu`, by the row and the group it is in). */
+export function PersonGroups(props: { person: EntityId; groups: PersonThings; problems: ReadonlyMap<string, "error" | "warning">; menu(row: ThingRow, bucket: PersonBucket["key"]): readonly MenuItem[]; onOpen(id: EntityId): void }) {
+  const buckets = personBuckets(props.groups, props.person);
   return (
     <div class="lre-thing-tree" data-lre-person-things={props.person}>
-      {empty ? <span class="lre-small lre-muted">Nothing yet: they have nothing, and nothing anywhere is theirs.</span> : null}
-      {PERSON_GROUPS.map((g) =>
-        props.groups[g.key].length === 0 ? null : (
-          <div key={g.key} class="lre-thing-bucket" data-lre-bucket={g.key}>
-            <div class="lre-thing-bucket-head">{g.title}</div>
-            <div role="list">
-              {props.groups[g.key].map((row) => (
-                <ThingRowView key={row.id} row={row} whose={g.key === "holding" || g.key === "on"} sub={g.key === "on" ? onWords(row, props.person) : g.key === "lent" && row.with !== null ? `With ${row.where.find((s) => s.id === row.with)?.name ?? "someone"}` : whereWords(row)} problem={props.problems.get(row.id)} menu={props.menu(row)} onOpen={props.onOpen} />
-              ))}
-            </div>
+      {buckets.length === 0 ? <span class="lre-small lre-muted">Nothing yet: they have nothing, and nothing anywhere is theirs.</span> : null}
+      {buckets.map((b, i) => (
+        <div key={`${b.key}:${i}`} class="lre-thing-bucket" data-lre-bucket={b.key}>
+          <div class="lre-thing-bucket-head">{b.title}</div>
+          <div role="list">
+            {b.rows.map(({ row, sub }) => (
+              <ThingRowView key={row.id} row={row} whose={b.whose} sub={sub} problem={props.problems.get(row.id)} menu={props.menu(row, b.key)} onOpen={props.onOpen} />
+            ))}
           </div>
-        ),
-      )}
+        </div>
+      ))}
     </div>
   );
 }
@@ -900,9 +935,9 @@ function PersonSheet(props: { title: string; people: readonly WhereChoice[]; siz
 }
 
 /**
- * The Character page's Things they have (ITEMS-SPEC §10.1): On them (worn, in pockets, hands and
- * bags), At home, Elsewhere, Lent out and Holding for others; each row's Move…, Give…, Lend… and
- * Remove; + Give them a thing opens Add a thing, on them and theirs.
+ * The Character page's Things they have (ITEMS-SPEC §10.1): Outfit, Carried, Wardrobe (their
+ * clothing at home, by holder), At home, Elsewhere, Lent out and Holding for others; each row's
+ * Move…, Give…, Lend… and Remove; + Give them a thing opens Add a thing, on them and theirs.
  */
 export function PersonThingsSection(props: { world: WorldDoc; id: EntityId; send: Send }) {
   const app = useApp();

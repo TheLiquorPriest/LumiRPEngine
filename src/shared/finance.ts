@@ -106,9 +106,20 @@ export const LEGACY_TYPE_CLASS: Readonly<Record<string, AccountClass>> = Object.
  */
 export const PARTY_KINDS = ["person", "business", "trust", "household", "group"] as const;
 export type PartyKind = (typeof PARTY_KINDS)[number];
+/** The account a party of each kind opens when nothing else is said (6.15): a company's business checking, a trust's trust account, anyone else's checking. */
+export const DEFAULT_ACCOUNT_PRODUCT: Readonly<Record<PartyKind, AccountClass>> = Object.freeze({ person: "checking", business: "business_checking", trust: "trust", household: "checking", group: "checking" });
 
 export const OWNER_ROLES = ["owner", "joint", "custodian", "beneficiary", "trustee", "authorized_user"] as const;
 export type OwnerRole = (typeof OWNER_ROLES)[number];
+/** Each role as a title ("Trustee") and as a group's heading ("Trustees"), in the order the groups show. */
+export const OWNER_ROLE_LABELS: Readonly<Record<OwnerRole, { one: string; many: string }>> = Object.freeze({
+  owner: { one: "Owner", many: "Owners" },
+  joint: { one: "Joint owner", many: "Joint owners" },
+  trustee: { one: "Trustee", many: "Trustees" },
+  beneficiary: { one: "Beneficiary", many: "Beneficiaries" },
+  custodian: { one: "Custodian", many: "Custodians" },
+  authorized_user: { one: "Authorized user", many: "Authorized users" },
+});
 
 /**
  * One holder of an account or an asset (an `owners` list on accounts, businesses, holdings and
@@ -731,6 +742,18 @@ export interface JournalEntry {
   settles?: number;
 }
 
+/** The category a correction posts under (a ✎ cash fix, a GM money edit, cash the player said they had), against the outside correction account. */
+export const CORRECTION_CATEGORY = "correction";
+
+/**
+ * Whether a journal line, or a month's category of them, is a correction (DESIGN §25.6): bookkeeping
+ * that puts a balance right, not money made, spent or moved. The books, cash flow, In & out and
+ * profit leave it out; Activity lists it with a Correction badge.
+ */
+export function isCorrection(line: { category?: string | null }): boolean {
+  return line.category === CORRECTION_CATEGORY;
+}
+
 /**
  * Money set aside on an account: a deposit not yet available, or a card authorisation not yet
  * settled. It lowers what's available, never the balance; it lapses at `until`.
@@ -985,6 +1008,12 @@ export type PayBasis = (typeof PAY_BASES)[number];
 /** `per_job` pays at the end of each shift or gig. */
 export const PAY_EVERY = ["weekly", "biweekly", "semimonthly", "monthly", "per_job", "custom"] as const;
 export type PayEvery = (typeof PAY_EVERY)[number];
+/** A job's `pay_every` for an unpaid title (a director, a trustee, a volunteer): no payroll flow and no payslip (DESIGN §26.1). */
+export const UNPAID = "none";
+/** How often a job pays as its editors offer it: each cycle, then Unpaid. */
+export const PAY_CHOICES = [...PAY_EVERY, UNPAID] as const;
+export type PayChoice = (typeof PAY_CHOICES)[number];
+export const PAY_CHOICE_LABELS: Readonly<Record<PayChoice, string>> = Object.freeze({ weekly: "Weekly", biweekly: "Biweekly", semimonthly: "Semimonthly", monthly: "Monthly", per_job: "Per job", custom: "Custom", none: "Unpaid" });
 export const FILING_STATUSES = ["single", "married_filing_jointly", "head_of_household"] as const;
 export type FilingStatus = (typeof FILING_STATUSES)[number];
 
@@ -1030,7 +1059,10 @@ export interface JobFields {
   /** A recurring season, `MM-DD` to `MM-DD` (a summer job). */
   season_from?: string;
   season_to?: string;
-  pay_every: PayEvery;
+  /** `none`: unpaid (`UNPAID`). */
+  pay_every: PayChoice;
+  /** The day pay starts from (`YYYY-MM-DD`): a raise on an unpaid title pays from the raise, never back to the job's start. */
+  pay_from?: string;
   /** The first payday (weekly and biweekly count from it). */
   pay_anchor?: string;
   /** Semimonthly and monthly: the days of the month. */
@@ -1507,6 +1539,12 @@ export interface FlowView {
   link: { id: EntityId; name: string } | null;
   /** Who pays: the flow's `from` id when it's an entity the viewer can see, else null. */
   payer: EntityId | null;
+  /** Who is paid: the flow's `to` id when it's an entity the viewer can see, else null. */
+  payee: EntityId | null;
+  /** In & out's Direction: money coming in to one of the viewer's own (them, or a party whose money they manage), going out of one, or null when it moves between their own. */
+  direction: "in" | "out" | null;
+  /** In & out's Whose: the party on the viewer's side whose money it is (them, their household, a company or trust they manage), when the viewer can see it; null otherwise. */
+  whose: { id: EntityId; name: string } | null;
   /** Whether the viewer may change it; a derived flow is changed at its source (`source`). */
   editable: boolean;
   source: string;
@@ -1547,7 +1585,7 @@ export interface JobView {
   /** The pay in words ("$23.50 an hour"). */
   pay: string;
   rate: number;
-  payEvery: PayEvery;
+  payEvery: PayChoice;
   schedule: string;
   nextPay: string | null;
   grossPerPeriod: number | null;
@@ -1616,10 +1654,12 @@ export interface ShareClass {
 export const COMMON_CLASS: ShareClass = Object.freeze({ id: "common", label: "Common", votes: 1 });
 
 /**
- * A company in another's Structure (§3.10): a parent among its owners, or a subsidiary it holds a
- * share of, with that share of its worth and of its votes, whether the holder controls it (more than
- * its decision threshold of the votes), and its value, cash and profit this year where the reader
- * may see them (null otherwise); a subsidiary's own subsidiaries under it.
+ * A company or a trust in another's Structure (§3.10): a parent among its owners, or a company or a
+ * trust it holds a share of or a role on, with that share of its worth and of its votes, whether the
+ * holder controls it (more than its decision threshold of the votes), and its value (the value of
+ * its shares, never below nothing), its net worth (below zero where it owes more than it holds),
+ * cash and profit this year where the reader may see them (null otherwise); a subsidiary's own
+ * subsidiaries under it.
  */
 export interface StructureLink {
   id: EntityId;
@@ -1628,12 +1668,15 @@ export interface StructureLink {
   votes: number;
   controlled: boolean;
   value: number | null;
+  netWorth: number | null;
   cash: number | null;
   profit: number | null;
   children: StructureLink[];
+  /** A trust (a company has none): the holder's role on it ("Trustee", "Beneficiary"). */
+  trust?: { role: OwnerRole };
 }
 
-/** A parent's figures with the companies it controls added (§3.10), worked out when read: their cash and this year's profit in full, its net worth with its stakes in them at their books. */
+/** A parent's figures with the companies it controls added (§3.10), worked out when read: their cash and this year's profit in full, its net worth with its stakes in them at their net worth rather than the value of their shares (so below zero where theirs is). */
 export interface ConsolidatedView {
   cash: number;
   profit: number;
@@ -1726,9 +1769,9 @@ export interface MergeView {
 /**
  * A company's Ownership in Orgs (§4.4, the economy's `ownership` section): its structure, its cap
  * table (each owner with their role and share, and in a company counting units their class, units,
- * votes and, at Money 4, value), its classes, its valuation and value per unit (Money 4), its
- * parents and subsidiaries with the figures consolidated, the reader's own role, draw and route,
- * their votes, and what they may do.
+ * votes and, at Money 4, value), its classes, its net worth (Money 3), its valuation, the value of
+ * its shares, and value per unit (Money 4), its parents and subsidiaries with the figures
+ * consolidated, the reader's own role, draw and route, their votes, and what they may do.
  */
 export interface OwnershipView {
   structure: string;
@@ -1743,8 +1786,13 @@ export interface OwnershipView {
   market: MarketActs | null;
   /** An ownership decision needs more than this percent of the votes. */
   decidePct: number;
-  /** Its value and its parts; a listed company's is its market capitalization (`market`: its price a unit and all its units), its books then the price's anchor. */
-  valuation: { value: number; set: boolean; book: number; profit: number; multiple: number; perUnit: number | null; market?: { price: number; units: number } } | null;
+  /** Its net worth, as its Summary has it: what it holds less what it owes, below zero where it owes more. From Money 3; null below. */
+  netWorth: number | null;
+  /**
+   * The value of its shares and its parts; a listed company's is its market capitalization (`market`: its price a unit and all its units), its books then the price's anchor.
+   * `floored`: its books came to less than nothing, its net worth below zero, and limited liability keeps the value of its shares at nothing rather than less.
+   */
+  valuation: { value: number; set: boolean; book: number; profit: number; multiple: number; perUnit: number | null; floored: boolean; market?: { price: number; units: number } } | null;
   parents: StructureLink[];
   children: StructureLink[];
   consolidated: ConsolidatedView | null;

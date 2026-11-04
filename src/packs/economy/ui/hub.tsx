@@ -25,13 +25,15 @@ import type { ActionBody } from "./requests";
 import { BooksSegment } from "./work";
 
 /**
- * How a party's money pages reach the backend. The player's are in-world actions (`lre.action`,
- * played as a turn like any other); the GM's are edits (`lre.edit`, each one correction with its
- * own Undo); an organization's own money in Play has none of its own yet (`read`). A page offers
- * only the controls of its mode.
+ * How a party's money pages reach the backend. The player's are in-world actions (`lre.action`): a
+ * money or organization action is done at once, off screen, with its Undo (DESIGN §11), told to the
+ * next reply or not as its confirm step's Tell switch says (`tell`; absent, as Settings → Narrator →
+ * Out-of-play actions has it); the GM's are edits (`lre.edit`, each one correction with its own
+ * Undo); an organization's own money in Play has none of its own yet (`read`). A page offers only
+ * the controls of its mode.
  */
 export type HubControls =
-  | { mode: "player"; busy: boolean; currency: WorldCurrency; act(body: ActionBody): Promise<boolean>; palette: PaletteView | null }
+  | { mode: "player"; busy: boolean; currency: WorldCurrency; act(body: ActionBody, tell?: boolean): Promise<boolean>; palette: PaletteView | null }
   | { mode: "gm"; busy: boolean; currency: WorldCurrency; edit(ops: EditOp[]): Promise<boolean>; gm: GmView }
   | { mode: "read"; busy: false; currency: WorldCurrency };
 

@@ -1,5 +1,5 @@
-// An organization's People (ORG-SPEC §4.4): at the top, by power, Hire someone (`staff.hire`) and
-// Admit a member (`members.admit`); the chart, each position with its seats filled of total and
+// An organization's People (ORG-SPEC §4.4): at the top, by power, Hire someone (`staff.hire`),
+// Admit a member (`members.admit`) and a trust's Pay out (`money.payout`); the chart, each position with its seats filled of total and
 // whom it reports to, its holders under it; then staff without a position, members without one (the
 // party's by tier) and the owners with their share, which link to a company's Ownership; and how
 // many in it the reader doesn't know. A row is a name, a title and here or away, and opens the
@@ -36,7 +36,7 @@ export function OrgPeople(props: { org: OrgView; ownership: (() => void) | null;
   const owners = org.people.filter((p) => p.hows.includes("owner"));
   const hidden = org.hidden.count;
   const actions =
-    can.hire || can.admit ? (
+    can.hire || can.admit || can.payout ? (
       <div class="lre-stack" data-lre-org-people-actions>
         {can.hire ? (
           <Button variant="primary" icon="user-plus" block onClick={() => props.open(orgEditRoute(org.id, "hire"))}>
@@ -46,6 +46,11 @@ export function OrgPeople(props: { org: OrgView; ownership: (() => void) | null;
         {can.admit ? (
           <Button icon="user-plus" block onClick={() => props.open(orgEditRoute(org.id, "admit"))}>
             Admit a member
+          </Button>
+        ) : null}
+        {can.payout ? (
+          <Button icon="coins" block onClick={() => props.open(orgEditRoute(org.id, "payout"))}>
+            Pay out to its beneficiaries
           </Button>
         ) : null}
       </div>
@@ -90,13 +95,13 @@ export function OrgPeople(props: { org: OrgView; ownership: (() => void) | null;
           )
         : group(
             "members",
-            "Members",
+            org.type === "company" ? "Board and officers" : "Members",
             unplaced.filter((p) => p.hows.some((h) => h === "member" || h === "leader" || isPartyTier(h))),
           )}
       {owners.length > 0 ? (
         <div data-lre-org-people="owners">
           <Section
-            title="Owners"
+            title={org.type === "trust" ? "Trustees and beneficiaries" : "Owners"}
             aside={
               props.ownership ? (
                 <Button variant="ghost" size="sm" iconAfter="chevron-right" onClick={props.ownership}>

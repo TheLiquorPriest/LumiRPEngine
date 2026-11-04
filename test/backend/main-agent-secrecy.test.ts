@@ -142,15 +142,18 @@ describe("a decision the main agent runs again (correctness M6)", () => {
         },
       },
     };
-    // At the decisions' stage the main agent runs the director, runs it again once it failed, revises the run that answered, then commits.
+    // At the decisions' stage the main agent runs the director, runs it again once it failed, revises
+    // the run that answered, then commits: a run_role now would be a fresh run (Fresh runs per
+    // request), replacing the revised one.
     let step = 0;
     models(rig, {
       script: (req, n) => {
-        if (!/^- director:/m.test(stageOf(req)) || step >= 3) return undefined;
+        if (!/^- director:/m.test(stageOf(req)) || step >= 4) return undefined;
         step++;
         if (step === 1) return { content: "", toolCalls: [call("run_role", { role: "director", task: "Decide." }, `c${n}_d`)] };
         if (step === 2) return { content: "", toolCalls: [call("run_role", { role: "director", task: "Decide again." }, `c${n}_d`)] };
-        return { content: "", toolCalls: [call("revise", { agentId: /director:[\w-]+:\d+/.exec(resultsOf(req).join("\n"))?.[0] ?? "", message: "Weigh it once more." }, `c${n}_r`)] };
+        if (step === 3) return { content: "", toolCalls: [call("revise", { agentId: /director:[\w-]+:\d+/.exec(resultsOf(req).join("\n"))?.[0] ?? "", message: "Weigh it once more." }, `c${n}_r`)] };
+        return { content: "", toolCalls: [call("commit", {}, `c${n}_c`)] };
       },
     });
     rig.host.sendUser(chatId, "I walk to the ferry and wait.");

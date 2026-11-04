@@ -10,13 +10,14 @@
 
 import type { ComponentChildren } from "preact";
 import { useId, useState } from "preact/hooks";
-import type { SheetRoute } from "../../../frontend/app";
+import { useView, type SheetRoute } from "../../../frontend/app";
 import { CheckField, Chip, FormGroup, RefPicker } from "../../../frontend/build/form-kit";
 import { Badge, Button, Card, Empty, Field, List, ListRow, PageHeader, Row, Section, Seg } from "../../../frontend/components";
 import { MoneyInput } from "../../../frontend/money-input";
 import { DUES_EVERY, ORG_POWER_FAMILIES, ORG_POWERS, POWER_FAMILY_LABELS, POWER_WORDS, type OrgPower, type OrgPowerFamily, type Position } from "../../../shared/org";
 import type { OrgRef, OrgView } from "../../../shared/org-view";
 import { DEFAULT_CURRENCY, type WorldCurrency } from "../../../shared/world";
+import { OFFSTAGE_DEFAULTS, OFFSTAGE_NOTE, TELL_HELP, TELL_LABEL, tellPreset } from "../../../shared/offstage";
 import {
   appointable,
   delegateAction,
@@ -280,14 +281,23 @@ export function DuesFields(props: { draft: DuesDraft; currency: WorldCurrency; o
 export interface PlayHost {
   currency: WorldCurrency;
   busy: boolean;
-  /** Plays `action`; `done` once it was taken. */
-  play(action: OrgAction, done?: () => void): void;
+  /** Plays `action`; `done` once it was taken; `tell`, its confirm step's Tell switch, when it has one. */
+  play(action: OrgAction, done?: () => void, tell?: boolean): void;
   confirm(title: string, message: string, ok: string): Promise<boolean>;
   back(): void;
 }
 
-/** An editor's page: Back, its fields, why it can't be sent yet, when it plays, its button and, for one that has one, its danger button. */
-export function EditFrame(props: { name: string; title: string; subtitle?: string; onBack(): void; go: string; problem: string | null; busy: boolean; note: string; onGo(): void; danger?: { label: string; onClick(): void }; children: ComponentChildren }) {
+/**
+ * An editor's page: Back, its fields, why it can't be sent yet, when it plays, its button and, for
+ * one that has one, its danger button. Naming the action it sends (`action`), one done at once, off
+ * screen (DESIGN §11), it shows the Tell switch above its button, preset from Settings → Narrator →
+ * Out-of-play actions until it is pressed; its setting goes to `onGo`.
+ */
+export function EditFrame(props: { name: string; title: string; subtitle?: string; onBack(): void; go: string; problem: string | null; busy: boolean; note: string; action?: OrgAction | null; onGo(tell?: boolean): void; danger?: { label: string; onClick(): void }; children: ComponentChildren }) {
+  const view = useView();
+  const [told, setTold] = useState<boolean | null>(null);
+  const preset = props.action ? tellPreset(props.action.action, props.action.params, view?.controls?.offstage ?? OFFSTAGE_DEFAULTS, (view?.currency ?? DEFAULT_CURRENCY).decimals) : null;
+  const tell = preset === null ? undefined : (told ?? preset);
   return (
     <div class="lre-stack" data-lre-org-edit={props.name}>
       <PageHeader title={props.title} subtitle={props.subtitle} onBack={props.onBack} />
@@ -295,7 +305,7 @@ export function EditFrame(props: { name: string; title: string; subtitle?: strin
         class="lre-stack"
         onSubmit={(event) => {
           event.preventDefault();
-          if (props.problem === null) props.onGo();
+          if (props.problem === null) props.onGo(tell);
         }}
       >
         {props.children}
@@ -305,6 +315,7 @@ export function EditFrame(props: { name: string; title: string; subtitle?: strin
           </span>
         ) : null}
         <span class="lre-small lre-muted">{props.note}</span>
+        {tell !== undefined ? <CheckField label={TELL_LABEL} help={TELL_HELP} checked={tell} disabled={props.busy} onChange={setTold} /> : null}
         <Button type="submit" variant="primary" block disabled={props.busy || props.problem !== null}>
           {props.go}
         </Button>
@@ -318,9 +329,8 @@ export function EditFrame(props: { name: string; title: string; subtitle?: strin
   );
 }
 
-/** When an editor's change plays (§4.6). */
-export const AT_ONCE = "Applies at once, with Undo.";
-export const AS_TURN = "Plays as your next turn.";
+/** When an editor's change plays (§4.6; DESIGN §11): every one is done at once, off screen, with its Undo; typed words play it as a turn. */
+export const AT_ONCE = "Done at once, off screen, with Undo.";
 
 /** Add position, or a position's Edit (`org_position`, at once), with Remove. */
 export function PositionSheet(props: { org: OrgView; id: string | null; host: PlayHost }) {
@@ -344,7 +354,7 @@ export function PositionSheet(props: { org: OrgView; id: string | null; host: Pl
       }
     : undefined;
   return (
-    <EditFrame name="position" title={before ? before.title : "Add position"} subtitle={org.name} onBack={host.back} go={before ? "Save" : "Add the position"} problem={positionProblem(draft, positions, host.currency)} busy={host.busy} note={AT_ONCE} onGo={() => host.play(positionAction(org.id, draft, before, host.currency), host.back)} {...(remove ? { danger: remove } : {})}>
+    <EditFrame name="position" title={before ? before.title : "Add position"} subtitle={org.name} onBack={host.back} go={before ? "Save" : "Add the position"} problem={positionProblem(draft, positions, host.currency)} busy={host.busy} note={AT_ONCE} action={positionAction(org.id, draft, before, host.currency)} onGo={(tell) => host.play(positionAction(org.id, draft, before, host.currency), host.back, tell)} {...(remove ? { danger: remove } : {})}>
       <PositionFields draft={draft} positions={positions} people={org.people.map((p) => ({ id: p.id, name: p.name }))} offer={ORG_POWERS} currency={host.currency} onChange={setDraft} />
     </EditFrame>
   );
@@ -361,7 +371,7 @@ export function DelegateSheet(props: { org: OrgView; who: string | null; host: P
   const [draft, setDraft] = useState(() => delegationDraft(props.who ?? "", existing ? { powers: existing.powers, ...(existing.limits?.payment !== undefined ? { payment: existing.limits.payment } : {}), ...(existing.limits?.month !== undefined ? { month: existing.limits.month } : {}) } : null, host.currency));
   const can = rulesControls(org);
   const name = existing?.who.name ?? org.people.find((p) => p.id === props.who)?.name ?? org.candidates.find((c) => c.id === props.who)?.name ?? null;
-  const revoke = existing && mayRevoke(org, existing) ? { label: "Revoke", onClick: () => void host.confirm("Revoke", `End ${existing.who.name}'s delegation? It plays as your next turn.`, "Revoke").then((yes) => (yes ? host.play(revokeAction(org, existing.who.id), host.back) : undefined)) } : undefined;
+  const revoke = existing && mayRevoke(org, existing) ? { label: "Revoke", onClick: () => void host.confirm("Revoke", `End ${existing.who.name}'s delegation? ${OFFSTAGE_NOTE}`, "Revoke").then((yes) => (yes ? host.play(revokeAction(org, existing.who.id), host.back) : undefined)) } : undefined;
   const title = name ? `${name} acts for it` : "Delegate";
   if (!can.delegate) {
     if (!existing) return null;
@@ -386,7 +396,7 @@ export function DelegateSheet(props: { org: OrgView; who: string | null; host: P
   }
   const people = props.who === null ? [...new Map([...org.people.filter((p) => !p.you).map((p): OrgRef => ({ id: p.id, name: p.name })), ...org.candidates].map((p) => [p.id, p])).values()].sort((a, b) => a.name.localeCompare(b.name)) : null;
   return (
-    <EditFrame name="delegation" title={title} subtitle={org.name} onBack={host.back} go={existing ? "Change it" : "Delegate"} problem={delegationProblem(draft, host.currency)} busy={host.busy} note={AS_TURN} onGo={() => host.play(delegateAction(org.id, draft, host.currency), host.back)} {...(revoke ? { danger: revoke } : {})}>
+    <EditFrame name="delegation" title={title} subtitle={org.name} onBack={host.back} go={existing ? "Change it" : "Delegate"} problem={delegationProblem(draft, host.currency)} busy={host.busy} note={AT_ONCE} action={delegateAction(org.id, draft, host.currency)} onGo={(tell) => host.play(delegateAction(org.id, draft, host.currency), host.back, tell)} {...(revoke ? { danger: revoke } : {})}>
       <DelegationFields draft={draft} people={people} offer={givable(org)} granters={null} kept={existing?.until ?? null} currency={host.currency} onChange={setDraft} />
     </EditFrame>
   );
@@ -398,7 +408,7 @@ export function DuesSheet(props: { org: OrgView; host: PlayHost }) {
   const [draft, setDraft] = useState(() => duesDraft(org.dues, host.currency));
   const none = org.dues ? { label: "No dues", onClick: () => host.play(duesAction(org.id, { ...draft, amount: "" }, host.currency), host.back) } : undefined;
   return (
-    <EditFrame name="dues" title="Dues" subtitle={org.name} onBack={host.back} go="Set dues" problem={duesProblem(draft, host.currency)} busy={host.busy} note={AT_ONCE} onGo={() => host.play(duesAction(org.id, draft, host.currency), host.back)} {...(none ? { danger: none } : {})}>
+    <EditFrame name="dues" title="Dues" subtitle={org.name} onBack={host.back} go="Set dues" problem={duesProblem(draft, host.currency)} busy={host.busy} note={AT_ONCE} action={duesAction(org.id, draft, host.currency)} onGo={(tell) => host.play(duesAction(org.id, draft, host.currency), host.back, tell)} {...(none ? { danger: none } : {})}>
       <DuesFields draft={draft} currency={host.currency} onChange={setDraft} />
     </EditFrame>
   );

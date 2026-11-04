@@ -21,7 +21,7 @@ import { hiddenFrom } from "./model";
 import { registerOptions } from "./options";
 import { monthlyRent, propertyIds, propertyValue, propertyView, propertyWorth, registerProperty, routeRent, securedLoans, visibleProperties } from "./property";
 import { gainsIn, incomeIn } from "./records";
-import { businessIds, businessValue, registerStakes, setStakeRoute, stakeWorth } from "./stakes";
+import { businessIds, registerStakes, setStakeRoute, stakeWorth, valuationOf } from "./stakes";
 import { actAs, asParam } from "./acting";
 
 /** Where a property's rent lands (`economy.route` with a property): an account of the owner's, or back to the owners' accounts. */
@@ -119,7 +119,9 @@ function summaryLines(api: FinanceApi, ctx: ReadContext, who: EntityId): string[
   for (const id of businessIds(api, ctx)) {
     const share = api.shareOf(ctx.state, id, who);
     if (share <= 0 || id === who) continue;
-    out.push(`Owns ${share < 100 ? `${Math.round(share)}% of ` : ""}${labelOf(ctx, id)} (worth about ${about(ctx, Math.round((businessValue(api, ctx, id) * share) / 100))}).`);
+    // What the shares are worth, never below nothing (limited liability): one whose net worth is below zero says so.
+    const value = valuationOf(api, ctx, id);
+    out.push(`Owns ${share < 100 ? `${Math.round(share)}% of ` : ""}${labelOf(ctx, id)} (${value.floored ? "the shares worth nothing: its net worth is below zero" : `the shares worth about ${about(ctx, Math.round((value.value * share) / 100))}`}).`);
   }
   return out;
 }

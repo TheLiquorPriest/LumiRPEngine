@@ -56,6 +56,7 @@ import type { Judgement } from "../../engine/adjudication";
 import type { ChainMessage } from "../../engine/ledger/chain";
 import type { LedgerCore } from "../../engine/ledger/journal";
 import type { DiagAt } from "../diagnostics";
+import { perceivers } from "../knowledge-step";
 import type { RunMindsResult } from "../minds";
 import { markWording, renderPrompt } from "../prompts";
 import type { Runtime } from "../runtime";
@@ -76,7 +77,7 @@ import { systemInstructions, withInstructions } from "./system-files";
 import type { LiveRun } from "./live";
 import { commitReview, reviewCommitTool, reviewMessage, reviewTools, type ReviewWork } from "./final-review";
 import { knowledgeAnswer, recordYield, type RunWrites, runYield } from "./yields";
-import type { ChoicesTask, ChooseTask, DirectorProse, ExtractTask, MemoryTask, ProseTask, RoleResult, RoleRun, SceneOut } from "./turn-ctx";
+import type { ChoicesTask, ChooseTask, DirectorProse, ExtractTask, KnowledgeTask, MemoryTask, ProseTask, RoleResult, RoleRun, SceneOut } from "./turn-ctx";
 import { digestOf, MAIN_PINS, MAIN_PINS_TEXTS, pinnedFiles, tidy, turnTask } from "./turn-task";
 import type { StagePhase } from "./turn-writer";
 import { emptyUsage } from "./usage";
@@ -143,6 +144,8 @@ interface Request {
   current: Run | null;
   /** A run of it is under way. A request runs once at a time: the calls of one answer run together, and two runs of it would stage together, both landing. */
   busy: boolean;
+  /** Fresh runs it has had: run_role on it once a run answered, within its role's Fresh runs per request. */
+  reruns: number;
   round: Round | null;
   done: boolean;
   settle(outcome: RequestOutcome<unknown> | { abandoned: unknown }): void;
@@ -273,6 +276,7 @@ export class MainTurn {
       handle: null,
       current: null,
       busy: false,
+      reruns: 0,
       round: null,
       done: false,
       settle: (outcome) => {
@@ -561,8 +565,23 @@ export class MainTurn {
   // ---------------------------------------------------------------- what a stage says
 
   private stageMessage(stage: MainRoleStage, requests: readonly Request[]): string {
-    const open = requests.map((r) => this.text(MAIN_TEXT.open, { role: r.role, what: this.text(MAIN_TEXT.request(r.kind)) })).join("\n");
+    const open = requests
+      .map((r) => {
+        const line = this.text(MAIN_TEXT.open, { role: r.role, what: this.text(MAIN_TEXT.request(r.kind)) });
+        const people = this.peopleOf(r);
+        return people === "" ? line : `${line}\n  ${people}`;
+      })
+      .join("\n");
     return tidy(this.text(MAIN_TEXT.stage, { number: String(NUMBER[stage]), stage: this.text(MAIN_TEXT.stageLabel(stage)), engine: this.engineNote(stage, requests), open }));
+  }
+
+  /** Whom a request's calls are about, as its line follows it: the knowledge step's people, each call one person's or one for them all; nothing for any other request. */
+  private peopleOf(r: Request): string {
+    if (r.kind !== "knowledge") return "";
+    const task = r.task as KnowledgeTask;
+    const people = perceivers({ world: task.input.world, presence: task.opening.presence }).map((id) => `${task.opening.state.entities[id]?.name ?? id} (${id})`);
+    if (people.length === 0) return "";
+    return this.text(this.host.settings.minds.knowledge.batch === "character" ? MAIN_TEXT.openEach : MAIN_TEXT.openScene, { people: people.join(", ") });
   }
 
   /** What the engine did since the main agent's last stage, from what this stage's requests carry. */
@@ -756,18 +775,37 @@ export class MainTurn {
     return this.refuse(MAIN_TEXT.refusedOver, { role });
   }
 
-  /** `run_role`: each of the stage's open requests of the role that hasn't answered and has no run under way runs, with the main agent's task. */
+  /**
+   * `run_role`: each of the stage's open requests of the role that hasn't answered and has no run
+   * under way runs, with the main agent's task. Once every one has answered, each runs afresh within
+   * its role's fresh runs (Fresh runs per request): what its last run staged goes, and its revisions
+   * start again; past them, the refusal says what's left.
+   */
   private async runRole(round: Round, args: JsonObject): Promise<ToolOutcome> {
     if (round.committed) return this.refuse(MAIN_TEXT.refusedCommitted);
     const role = typeof args.role === "string" ? args.role : "";
     if (!(ROLE_IDS as readonly string[]).includes(role)) return this.refuse(MAIN_TEXT.refusedRole, { role, roles: ROLE_IDS.join(", ") });
     const open = round.requests.filter((r) => r.role === role && !r.done);
     if (open.length === 0) return this.notNow(role as RoleId, round.stage);
-    // A run that answered stands until a revision; one that failed may run again, prompt-only too. A
-    // request runs once at a time: one whose run another call of this answer started isn't run again.
-    const due = open.filter((r) => !r.busy && (r.current === null || !r.current.result.ok));
-    if (due.length === 0) return open.some((r) => r.busy) ? this.refuse(MAIN_TEXT.refusedRunning, { role }) : this.refuse(MAIN_TEXT.refusedRan, { role, agents: open.map((r) => r.handle ?? "").join(", ") });
+    // A run that failed may run again, prompt-only too. A request runs once at a time: one whose run
+    // another call of this answer started isn't run again.
     const task = typeof args.task === "string" ? args.task : "";
+    const due = open.filter((r) => !r.busy && (r.current === null || !r.current.result.ok));
+    if (due.length === 0) {
+      if (open.some((r) => r.busy)) return this.refuse(MAIN_TEXT.refusedRunning, { role });
+      const budget = roleBudget(this.host.settings.agents, role as RoleId);
+      const fresh = open.filter((r) => r.reruns < budget.reruns);
+      if (fresh.length === 0) {
+        const agents = open.map((r) => {
+          const left = Math.max(0, budget.revisions - (r.current?.revisions.length ?? 0));
+          return this.text(MAIN_TEXT.runLeft, { agent: r.handle ?? "", count: String(left), revisions: nounFor(left, "revision", "revisions") });
+        });
+        return this.refuse(MAIN_TEXT.refusedRan, { role, limit: String(budget.reruns), runs: nounFor(budget.reruns, "run", "runs"), agents: agents.join("; ") });
+      }
+      for (const r of fresh) r.reruns += 1;
+      await Promise.all(fresh.map((r) => this.attempt(round, r, task, [], args.prompt_only === true)));
+      return { text: fresh.map((r) => this.ran(r)).join("\n") };
+    }
     await Promise.all(due.map((r) => this.attempt(round, r, task, [], args.prompt_only === true)));
     return { text: due.map((r) => this.ran(r)).join("\n") };
   }
@@ -780,8 +818,14 @@ export class MainTurn {
     if (!r?.current) return this.refuse(MAIN_TEXT.refusedAgent, { agent, agents: round.requests.flatMap((q) => (q.handle && !q.done ? [q.handle] : [])).join(", ") || this.text(MAIN_TEXT.none) });
     // A request runs once at a time: a revision of one whose run another call of this answer started is refused.
     if (r.busy) return this.refuse(MAIN_TEXT.refusedRunning, { role: r.role });
-    const limit = roleBudget(this.host.settings.agents, r.role).revisions;
-    if (r.current.revisions.length >= limit) return this.refuse(MAIN_TEXT.refusedRevisions, { agent, limit: String(limit), revisions: nounFor(limit, "revision", "revisions") });
+    const budget = roleBudget(this.host.settings.agents, r.role);
+    const limit = budget.revisions;
+    if (r.current.revisions.length >= limit) {
+      // What's left: a fresh run, within its role's fresh runs, or commit.
+      const reruns = Math.max(0, budget.reruns - r.reruns);
+      const fresh = reruns > 0 ? this.text(MAIN_TEXT.freshLeft, { count: String(reruns), runs: nounFor(reruns, "run", "runs") }) : this.text(MAIN_TEXT.freshNone);
+      return this.refuse(MAIN_TEXT.refusedRevisions, { agent, limit: String(limit), revisions: nounFor(limit, "revision", "revisions"), fresh });
+    }
     await this.attempt(round, r, r.current.task, [...r.current.revisions, typeof args.message === "string" ? args.message : ""], r.current.promptOnly);
     return { text: this.ran(r) };
   }

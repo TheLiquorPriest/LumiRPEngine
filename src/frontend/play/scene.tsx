@@ -17,6 +17,7 @@ import type { IconName } from "../icons";
 import { Icon } from "../icons";
 import type { PanelDef, PanelProps } from "../registry";
 import { NeedsYou, QuickActions, StatusBanners } from "./now";
+import { toastQueued } from "../queued";
 import { visiblePanels } from "./play";
 
 type FixKey = "time" | "place" | "weather" | "cash" | "scene";
@@ -186,7 +187,7 @@ function Here(props: { state: StateView }) {
       const cast = app.catalog.panels.find((panel) => panel.id === "castlife.cast");
       const result = await app.request({ type: "lre.view.open", chatId: state.chatId, panel: cast ? cast.id : "core.scene", entity });
       if (result && cast) app.ui.update((ui) => playAt(ui, "people", cast.id));
-      if (result?.pending) app.toast("Details appear when the reply finishes.", "info");
+      toastQueued(app, result);
     });
   };
   return (

@@ -13,7 +13,8 @@ import { ROLE_LABEL } from "../../../shared/agent-roles";
 import type { DiagPhase } from "../../../shared/diagnostics";
 import type { JsonValue } from "../../../shared/json";
 import { knowledgeText } from "../../../shared/minds";
-import { roleTaskTextId } from "../../../shared/role-prompts";
+import { ROLES_TEXT, roleTaskTextId } from "../../../shared/role-prompts";
+import { renderPrompt } from "../../prompts";
 import type { StepPurpose } from "../../../shared/world";
 import type { MindAsk, MindCall, MindCallKind } from "../../mind-ask";
 import type { Runtime } from "../../runtime";
@@ -34,7 +35,9 @@ const KINDS: Readonly<Record<MindCallKind, { role: RoleId; sub: string; purpose:
  * One minds call as its role's agent works it, on `ctx`, that role's context: the call's own task,
  * placeholders, wording and context, with its role's tools, and its answer as classic's own check
  * takes it, or why not, with the answer as written. The minds family's asker runs each call so; Test for a
- * minds role's text runs one.
+ * minds role's text runs one. A mind's call, and a knowledge call about one person, frame the main
+ * agent's task as theirs (`ROLES_TEXT.call`): that task is one for every call of the role, and each
+ * call answers for its own person alone.
  */
 export async function mindRun(rt: Runtime, ctx: TurnAgentCtx, call: MindCall, phase: DiagPhase): Promise<RoleAnswer<JsonValue>> {
   const kind = KINDS[call.kind];
@@ -43,7 +46,8 @@ export async function mindRun(rt: Runtime, ctx: TurnAgentCtx, call: MindCall, ph
   // Its tools' schemas are the world's as the head it reads holds it; none while that world isn't loaded.
   const world = (await ctx.reader.view().catch(() => null))?.world ?? null;
   const answer = call.knowing ? { part: "answer_knowing" } : call.kind === "knowledge" ? { part: "answer", vars: { lists: knowledgeText(settings.minds.knowledge, "stepAnswer") } } : undefined;
-  return runRoleAgent(rt, ctx, {
+  const framing = ctx.brief && call.who !== null && (call.kind === "mind" || call.kind === "knowledge") ? renderPrompt(ROLES_TEXT.call[call.kind], ctx.texts ?? settings.prompts.texts, { character: call.vars.character || call.who }) : "";
+  return runRoleAgent(rt, framing === "" ? ctx : { ...ctx, brief: `${framing}\n\n${ctx.brief}` }, {
     sub: kind.sub,
     purpose: kind.purpose,
     phase,

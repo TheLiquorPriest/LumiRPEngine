@@ -10,9 +10,25 @@
 import type { UserId } from "../shared/ids";
 import { hasOwn, isRecord, safeKey } from "../shared/json";
 import { entryKey, tagOf } from "../shared/lore-routing";
+import { factId, type FactId, wiFactIdOfLiveLore } from "../shared/minds";
 import { isShortId, type LoreIndexSettings, tagPatternOf } from "../shared/settings";
+import type { WorldDoc } from "../shared/world";
 import type { HostPort } from "./host";
 import { readStoredJson } from "./stored-json";
+
+/**
+ * The fact a lore id names (DESIGN §24.11), as the knowledge step and the knowledge tools read one:
+ * a world lore entry's (`lore:<id>`); a book entry's, or one of its marks' (`#n`, from 1), by its
+ * lore id (`book:<bookId>/<entryId>`), its book and entry (`bookId/entryId`) or its short id, which
+ * `entryOf` looks up in the user's id map; null for anything else.
+ */
+export async function loreFactOf(world: Pick<WorldDoc, "lore">, ref: string, entryOf: (id: string) => Promise<string | null>): Promise<FactId | null> {
+  if (hasOwn(world.lore, ref)) return factId({ kind: "lore", lore: ref });
+  const hash = ref.indexOf("#");
+  const base = hash < 0 ? ref : ref.slice(0, hash);
+  const key = base.startsWith("book:") ? base.slice("book:".length) : base.includes("/") ? base : isShortId(base) ? await entryOf(base) : null;
+  return key === null ? null : wiFactIdOfLiveLore(`book:${key}${hash < 0 ? "" : ref.slice(hash)}`);
+}
 
 /** Where the ids are kept (`userStorage/lore-ids.json`). */
 export const LORE_IDS_PATH = "lore-ids.json";

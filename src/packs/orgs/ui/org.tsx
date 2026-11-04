@@ -4,9 +4,9 @@
 // the section it draws, which the backend builds only for a reader who holds its power. A pack's part
 // of one of the three (People's Payroll) follows that tab's own content. The page is the `orgs.org`
 // view's, as the player character may see the organization, opened on the tab its route names
-// (`orgRoute`), else on Overview. The header's overflow holds Rename where you may govern it (at
-// once), Leave where you're a member of your own (as a turn) and Open in GM, which shows it in
-// GM → Orgs.
+// (`orgRoute`), else on Overview. The header's overflow holds Rename where you may govern it and
+// Leave where you're a member of your own (each done at once, off screen, with Undo: DESIGN §11) and
+// Open in GM, which shows it in GM → Orgs.
 
 import type { ComponentChildren } from "preact";
 import { useId, useState } from "preact/hooks";
@@ -20,6 +20,8 @@ import type { JsonObject } from "../../../shared/json";
 import { ORG_ACTIONS } from "../../../shared/org";
 import { ORGS_LIST_PANEL, ORGS_ORG_PANEL, type OrgView } from "../../../shared/org-view";
 import type { StateView } from "../../../shared/state-view";
+import { OFFSTAGE_NOTE } from "../../../shared/offstage";
+import { toastQueued } from "../../../frontend/queued";
 import { decodeOrgList, decodeOrgPage } from "./decode";
 import { GM_ORGS_SECTION } from "./gm";
 import { OrgOverview } from "./overview";
@@ -159,13 +161,13 @@ export function OrgPage(props: OrgPageProps) {
 }
 
 /**
- * Plays a control of the party's page or of Start something… as the palette plays an action:
- * bookkeeping at once with its Undo, a hire, a share-out or a founding staged for the next message.
+ * Plays a control of the party's page or of Start something… as the palette plays an action: done at
+ * once, off screen, with its Undo (DESIGN §11).
  */
 export function playOrgAction(app: App, chatId: ChatId): PartyAct {
   return (action, params) =>
     void app.request({ type: "lre.action", chatId, action, params, source: "palette" }).then((result) => {
-      if (result && "pending" in result && result.pending) app.toast("Saved — it applies when the reply finishes.", "info");
+      toastQueued(app, result && "pending" in result ? result : null);
     });
 }
 
@@ -188,16 +190,16 @@ export function OrgSheet(props: SheetProps) {
   }
   const list = decodeOrgList(props.state.panels[ORGS_LIST_PANEL]);
   const figure = [...(list?.belong ?? []), ...(list?.known ?? [])].find((r) => r.id === org.id)?.figure ?? null;
-  // Rename applies at once (bookkeeping, §4.6); Leave is staged to play as the next turn.
+  // Rename and Leave are done at once, off screen, with Undo (§4.6; DESIGN §11).
   const act = (action: string, params: JsonObject, done?: () => void) =>
     run(async () => {
       const result = await app.request({ type: "lre.action", chatId: props.chatId, action, params, source: "palette" });
-      if (result && "pending" in result && result.pending) app.toast("Saved — it applies when the reply finishes.", "info");
+      toastQueued(app, result && "pending" in result ? result : null);
       if (result !== null) done?.();
     });
   const menu = orgMenu(org, {
     rename: () => setRenaming(true),
-    leave: () => void app.host.confirm("Leave", `Leave ${org.name}? It plays as your next turn.`, "danger", "Leave").then((yes) => (yes ? act(ORG_ACTIONS.leave, { org: org.id }) : undefined)),
+    leave: () => void app.host.confirm("Leave", `Leave ${org.name}? ${OFFSTAGE_NOTE}`, "danger", "Leave").then((yes) => (yes ? act(ORG_ACTIONS.leave, { org: org.id }) : undefined)),
     openInGm: () => app.ui.update((ui) => ({ ...gmOpen(ui, GM_ORGS_SECTION, org.id), mode: "gm" })),
   });
   const above = renaming ? <OrgRenameForm name={org.name} busy={busy} onSave={(name) => act(ORG_ACTIONS.rename, { org: org.id, name }, () => setRenaming(false))} onCancel={() => setRenaming(false)} /> : null;

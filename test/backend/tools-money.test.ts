@@ -65,6 +65,15 @@ describe("money_balances", () => {
     }
   });
 
+  test("lists the party's standing payments and income, each with where it came from: the world's author, or the engine's own", async () => {
+    const { rig, chatId } = await alderChat();
+    const m = await answerOf<Balances & { flows?: { id: string; label: string; made: string }[] }>(rig, chatId, "gm", "money_balances");
+    // Port Alder authors Jordan's savings transfer: no story set it up.
+    expect(m.flows?.find((f) => f.id === "flow_pov_savings")).toMatchObject({ made: "world" });
+    // A flow the engine derives (a loan's autopay) says so.
+    expect((m.flows ?? []).filter((f) => f.id.startsWith("autopay:")).every((f) => f.made === "autopay")).toBe(true);
+  });
+
   test("the narrator and the GM read Marcus's checking and the mortgage he owes", async () => {
     const { rig, chatId } = await alderChat();
     const view = await toolEnv(rig, chatId, "gm").reader.view();

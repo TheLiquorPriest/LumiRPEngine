@@ -24,6 +24,7 @@ const catalog: UiCatalog = {
   sheets: new Map(),
   glances: [],
   orgTabs: [],
+  placeParts: [],
   packs: [],
 };
 const state = (panels: Record<string, unknown>, pending: { panel: string; entity: string | null }[] = []) => ({ panels, pending }) as unknown as StateView;

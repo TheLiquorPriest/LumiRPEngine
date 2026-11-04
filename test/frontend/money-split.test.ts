@@ -54,7 +54,7 @@ function account(over: Partial<AccountView> & Pick<AccountView, "id" | "class">)
 
 function flow(over: Partial<FlowView> & Pick<FlowView, "id">): FlowView {
   const label = over.label ?? over.id;
-  return { label, kind: "bill", from: "Checking", to: "Landlord", amount: "$10.00", cents: 1000, schedule: "monthly", next: null, shortfall: "skip", status: "active", category: null, link: null, editable: true, source: "entity", payer: "pov", done: 0, missed: 0, deferred: 0, spec: { id: over.id, label, kind: "bill", from: "chk", to: "landlord", amount: { fixed: 1000 }, schedule: { every: "month" }, shortfall: "skip", status: "active", source: "entity" }, ...over };
+  return { label, kind: "bill", from: "Checking", to: "Landlord", amount: "$10.00", cents: 1000, schedule: "monthly", next: null, shortfall: "skip", status: "active", category: null, link: null, editable: true, source: "entity", payer: "pov", payee: null, direction: "out", whose: null, done: 0, missed: 0, deferred: 0, spec: { id: over.id, label, kind: "bill", from: "chk", to: "landlord", amount: { fixed: 1000 }, schedule: { every: "month" }, shortfall: "skip", status: "active", source: "entity" }, ...over };
 }
 
 function job(over: Partial<JobView> & Pick<JobView, "id" | "workerId">): JobView {

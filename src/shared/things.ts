@@ -36,8 +36,8 @@ export function sizeRank(size: Size): number {
  */
 export type SizeClass = Size | "part" | "vehicle" | "unknown";
 
-/** Where an inferred size came from, first answer first (§4.1). */
-export type SizeFrom = "size" | "fixed" | "part" | "vehicle" | "row" | "location" | "volume" | "category" | "unknown";
+/** Where an inferred size came from, first answer first (§4.1): `name` is the world's sizes by name (`sizes.byName`). */
+export type SizeFrom = "size" | "fixed" | "part" | "vehicle" | "row" | "location" | "volume" | "name" | "category" | "unknown";
 
 /** The sizes the volume bounds part (upper bounds in litres); anything larger is Furniture. */
 export const VOLUME_SIZES = ["pocket", "hand", "armful", "heavy"] as const;
@@ -258,6 +258,34 @@ export function parsePlaceOp(o: unknown): PlaceOp | null {
   }
 }
 
+/**
+ * A player's ✎ fix to a thing of theirs (`fix_item`, ITEMS-SPEC §10.3): where it is, where it is
+ * kept, whether the player character wears it, and its size (null: what its type or name gives).
+ * `engine/edits` resolves it under the player's rules.
+ */
+export type ItemFix =
+  | { do: "move"; item: EntityId; to: Spot }
+  | { do: "home"; item: EntityId; home: Rest | null }
+  | { do: "wear"; item: EntityId; off?: boolean }
+  | { do: "size"; item: EntityId; size: Size | null };
+
+/** A ✎ fix to a thing from outside data, checked for shape as `parseItemOp` checks an item op. */
+export function parseItemFix(o: unknown): ItemFix | null {
+  if (!isRecord(o) || !id(o.item)) return null;
+  switch (o.do) {
+    case "move":
+      return isSpot(o.to) ? { do: "move", item: o.item, to: o.to } : null;
+    case "home":
+      return o.home === null || isRest(o.home) ? { do: "home", item: o.item, home: o.home } : null;
+    case "wear":
+      return optional(o.off, (v) => typeof v === "boolean") ? { do: "wear", item: o.item, ...(o.off === true ? { off: true } : {}) } : null;
+    case "size":
+      return o.size === null || isSize(o.size) ? { do: "size", item: o.item, size: o.size } : null;
+    default:
+      return null;
+  }
+}
+
 // ---------------------------------------------------------------- the world's things config
 
 /** The implied access rules a world switches on or off (§3.4). */
@@ -273,6 +301,18 @@ export interface CarryRule {
   types: string[];
 }
 
+/**
+ * How a name sizes a thing (`sizes.byName`, §4.1): its size; the other names it goes by, which the
+ * name resolver hears too where the world's rows give no aliases; and, for storage furniture, the
+ * largest size it holds and the categories whose things rest in it at home ("clothing" in a wardrobe).
+ */
+export interface NameSize {
+  size: Size;
+  also: readonly string[];
+  holds?: Size;
+  keeps?: readonly string[];
+}
+
 /** `packs.gear.config` as the engine plays it (§3.5, §11). */
 export interface ThingsConfig {
   sizes: {
@@ -282,6 +322,8 @@ export interface ThingsConfig {
     byCategory: Readonly<Record<string, Size>>;
     /** Upper bounds in litres; above the last, Furniture. */
     byVolume: Readonly<Record<VolumeSize, number>>;
+    /** A head noun's (or a head phrase's) size, for a thing its type and volume don't size, before its category: "TV remote" is a remote. */
+    byName: Readonly<Record<string, NameSize>>;
   };
   access: Readonly<Record<ImpliedRule, boolean>>;
   carry: readonly CarryRule[];
@@ -289,7 +331,7 @@ export interface ThingsConfig {
   fetchMinutes: number;
   /** The put-away process: on, after how many hours untouched, from which Gear level. */
   putAway: { on: boolean; hours: number; minLevel: Level };
-  /** Tidy impossible holds automatically. */
+  /** Tidy impossible holds every turn. */
   tidy: { auto: boolean };
   /** How many lines of the Gear section tell the player character's own things that aren't with them ("Not with you", §5.5). */
   notWithYou: number;
@@ -317,8 +359,40 @@ const MODERN_US_CATEGORY_SIZES: Readonly<Record<string, Size>> = {
   home_furnishings: "furniture",
 };
 
+/**
+ * The Modern US sizes by name: household appliances and furniture are Furniture, a TV Heavy, and
+ * storage furniture holds things, clothing resting in a wardrobe, a dresser or an armoire. The
+ * longer phrases keep smaller things that end in one of those nouns at their own size.
+ */
+const MODERN_US_NAME_SIZES: Readonly<Record<string, NameSize>> = {
+  fridge: { size: "furniture", also: ["refrigerator"], holds: "armful" },
+  freezer: { size: "furniture", also: [], holds: "armful" },
+  washer: { size: "furniture", also: ["washing machine"] },
+  dryer: { size: "furniture", also: ["clothes dryer", "tumble dryer"] },
+  stove: { size: "furniture", also: ["range", "oven", "cooker"] },
+  dishwasher: { size: "furniture", also: [] },
+  "water heater": { size: "furniture", also: [] },
+  wardrobe: { size: "furniture", also: [], holds: "armful", keeps: ["clothing"] },
+  dresser: { size: "furniture", also: [], holds: "hand", keeps: ["clothing"] },
+  armoire: { size: "furniture", also: [], holds: "armful", keeps: ["clothing"] },
+  sofa: { size: "furniture", also: ["couch"] },
+  bed: { size: "furniture", also: [] },
+  desk: { size: "furniture", also: [], holds: "hand" },
+  bookcase: { size: "furniture", also: ["bookshelf"], holds: "hand" },
+  tv: { size: "heavy", also: ["television"] },
+  "mini fridge": { size: "heavy", also: [] },
+  "microwave oven": { size: "armful", also: ["microwave"] },
+  "toaster oven": { size: "armful", also: [] },
+  "dutch oven": { size: "hand", also: [] },
+  "camp stove": { size: "armful", also: ["camping stove", "portable stove"] },
+  "hair dryer": { size: "hand", also: ["blow dryer"] },
+  "pressure washer": { size: "heavy", also: [] },
+  "dog bed": { size: "armful", also: [] },
+  "cat bed": { size: "armful", also: [] },
+};
+
 export const DEFAULT_THINGS_CONFIG: Readonly<ThingsConfig> = Object.freeze<ThingsConfig>({
-  sizes: { ceiling: "armful", byCategory: MODERN_US_CATEGORY_SIZES, byVolume: { pocket: 0.5, hand: 5, armful: 40, heavy: 400 } },
+  sizes: { ceiling: "armful", byCategory: MODERN_US_CATEGORY_SIZES, byVolume: { pocket: 0.5, hand: 5, armful: 40, heavy: 400 }, byName: MODERN_US_NAME_SIZES },
   access: { household: true, housemates: true, partners: true, family: false, staff: true, customers: true },
   carry: [{ who: { kind: ["person"] }, types: ["wallet", "keys_set", "smartphone"] }],
   fetchMinutes: 3,
@@ -331,11 +405,23 @@ const obj = (v: unknown): Record<string, unknown> => (isRecord(v) ? v : {});
 const flag = (v: unknown, fallback: boolean): boolean => (typeof v === "boolean" ? v : fallback);
 const atLeast = (v: unknown, floor: number, fallback: number): number => (typeof v === "number" && Number.isFinite(v) && v >= floor ? v : fallback);
 
+/** A name entry as a world writes it (a size, or `{ size, also, holds, keeps }`), each part it leaves out the entry's it overrides; null when it gives no size. */
+function nameSizeFrom(raw: unknown, was: NameSize | undefined): NameSize | null {
+  const entry = isSize(raw) ? { size: raw } : isRecord(raw) ? raw : null;
+  const size = isSize(entry?.size) ? entry.size : was?.size;
+  if (!entry || size === undefined) return null;
+  const words = (v: unknown): string[] | undefined => (strings(v) ? [...new Set(v.map((s) => s.trim().toLowerCase()).filter((s) => s !== ""))] : undefined);
+  const also = words(entry.also) ?? was?.also ?? [];
+  const holds = entry.holds === null ? undefined : isSize(entry.holds) ? entry.holds : was?.holds;
+  const keeps = entry.keeps === null ? undefined : (words(entry.keeps) ?? was?.keeps);
+  return { size, also, ...(holds !== undefined ? { holds } : {}), ...(keeps !== undefined && keeps.length > 0 ? { keeps } : {}) };
+}
+
 /**
  * A world's things config as the engine reads it (`packs.gear.config`): every part it leaves out,
- * or gets wrong, reads as the default, as `worldMindsOf` reads minds. A category the world sizes
- * wins over the default's, and one it sets to null is unsized; volume bounds out of order are put
- * in order; an empty carry list carries nothing.
+ * or gets wrong, reads as the default, as `worldMindsOf` reads minds. A category or a name the world
+ * sizes wins over the default's (a name entry's parts it leaves out kept), and one it sets to null
+ * is unsized; volume bounds out of order are put in order; an empty carry list carries nothing.
  */
 export function thingsConfigOf(world: Pick<WorldDoc, "packs">): ThingsConfig {
   const raw = obj(hasOwn(world.packs, "gear") ? world.packs.gear?.config : undefined);
@@ -346,6 +432,22 @@ export function thingsConfigOf(world: Pick<WorldDoc, "packs">): ThingsConfig {
     if (!safeKey(category)) continue;
     if (size === null) delete byCategory[category];
     else if (isSize(size)) byCategory[category] = size;
+  }
+  const named = Object.entries(obj(sizes.byName));
+  let byName = d.sizes.byName;
+  if (named.length > 0) {
+    const out: Record<string, NameSize> = { ...d.sizes.byName };
+    for (const [written, entry] of named) {
+      const name = written.trim().toLowerCase().replace(/\s+/g, " ");
+      if (name === "" || !safeKey(name)) continue;
+      if (entry === null) {
+        delete out[name];
+        continue;
+      }
+      const read = nameSizeFrom(entry, hasOwn(out, name) ? out[name] : undefined);
+      if (read) out[name] = read;
+    }
+    byName = out;
   }
   const volume = obj(sizes.byVolume);
   const byVolume = { ...d.sizes.byVolume };
@@ -364,7 +466,7 @@ export function thingsConfigOf(world: Pick<WorldDoc, "packs">): ThingsConfig {
   const putAway = obj(raw.putAway);
   const minLevel = putAway.minLevel;
   return {
-    sizes: { ceiling: isSize(sizes.ceiling) ? sizes.ceiling : d.sizes.ceiling, byCategory, byVolume },
+    sizes: { ceiling: isSize(sizes.ceiling) ? sizes.ceiling : d.sizes.ceiling, byCategory, byVolume, byName },
     access: { household: flag(access.household, d.access.household), housemates: flag(access.housemates, d.access.housemates), partners: flag(access.partners, d.access.partners), family: flag(access.family, d.access.family), staff: flag(access.staff, d.access.staff), customers: flag(access.customers, d.access.customers) },
     carry: Array.isArray(raw.carry) ? carry : d.carry,
     fetchMinutes: atLeast(raw.fetchMinutes, 0, d.fetchMinutes),
@@ -400,7 +502,7 @@ export function stem(word: string): string {
     else if (/(?:s|x|z|ch|sh)es$/.test(w) || (w.length > 5 && w.endsWith("oes"))) s = w.slice(0, -2);
     else if (w.endsWith("s")) s = w.slice(0, -1);
     if (s.length > 3 && /(?:ie|y)$/.test(s)) s = s.replace(/(?:ie|y)$/, "i");
-  }
+  } else if (/^[a-z][b-df-hj-np-tv-z]s$/.test(w)) s = w.slice(0, -1); // "TVs", "PCs": a short word's plural
   return [...parts, s].join("-");
 }
 
@@ -465,4 +567,85 @@ export function nameKey(text: string): NameKey | null {
   if (heads.length === 0) return null;
   const words = [...noun, ...qualifier].filter((w) => w !== "of" && !DETERMINERS[w]).flatMap(forms);
   return { heads: [...new Set(heads)], words: [...new Set(words)] };
+}
+
+// ---------------------------------------------------------------- sizes by name
+
+/**
+ * A name's head phrase as the size map reads it (§4.1): its noun's words up to the head noun, each
+ * stemmed, hyphenated words apart ("mini-fridge" is a mini fridge); "X of Y" is X ("box of washers"
+ * is a box), unless X collects Y ("set of plates"); a collection ("TV set") is what it collects; a
+ * qualifier and a trailing phrase are cut. Null when no word names a thing.
+ */
+function headPhrase(text: string): string[] | null {
+  const lower = text.toLowerCase();
+  const cut = lower.search(/[,(]/);
+  const base = nameTokens(cut < 0 ? lower : lower.slice(0, cut)).flatMap((t) => t.split("-"));
+  let start = 0;
+  while (start < base.length && DETERMINERS[base[start] ?? ""]) start++;
+  const phrase = base.slice(start);
+  const at = phrase.findIndex((w, i) => i > 0 && TRAILING[w] === true);
+  let noun = at < 0 ? phrase : phrase.slice(0, at);
+  const of = noun.indexOf("of");
+  if (of > 0 && of < noun.length - 1) {
+    const first = noun.slice(0, of);
+    const head = lastNoun(first);
+    noun = head !== undefined && COLLECTIONS[stem(head)] ? noun.slice(of + 1).filter((w) => !DETERMINERS[w]) : first;
+  }
+  const head = noun.findLastIndex((w) => /[a-z]/.test(w));
+  if (head < 0) return null;
+  const words = noun.slice(0, head + 1).map(stem);
+  return words.length > 1 && COLLECTIONS[words.at(-1) ?? ""] ? words.slice(0, -1) : words;
+}
+
+/** One phrase of the size map: its words (the last in its singular and plural stems), and the entry it names. */
+interface NamePhrase {
+  words: string[];
+  last: string[];
+  name: string;
+  entry: NameSize;
+}
+
+const PHRASES = new WeakMap<object, NamePhrase[]>();
+
+/** The size map's phrases, every entry's name and its other names, read once per map. */
+function phrasesOf(byName: Readonly<Record<string, NameSize>>): NamePhrase[] {
+  const known = PHRASES.get(byName);
+  if (known) return known;
+  const out: NamePhrase[] = [];
+  for (const [name, entry] of Object.entries(byName)) {
+    for (const said of [name, ...entry.also]) {
+      const words = nameTokens(said).flatMap((t) => t.split("-"));
+      const last = words.at(-1);
+      if (last === undefined) continue;
+      out.push({ words: words.map(stem), last: [...new Set([stem(last), stem(`${last}s`)])], name, entry });
+    }
+  }
+  PHRASES.set(byName, out);
+  return out;
+}
+
+/**
+ * The size map's entry a thing's names give (§4.1): the first of `names` (its own, its aliases, its
+ * type row's name and aliases) whose head phrase ends in an entry's words, the longest phrase first
+ * and of two as long the later; null when none does. The head-noun rule holds: "TV remote" is a
+ * remote, "TVs" are TVs.
+ */
+export function nameSizeOf(byName: Readonly<Record<string, NameSize>>, names: readonly string[]): { name: string; entry: NameSize } | null {
+  const phrases = phrasesOf(byName);
+  if (phrases.length === 0) return null;
+  for (const text of names) {
+    const words = headPhrase(text);
+    if (!words) continue;
+    let best: NamePhrase | null = null;
+    for (const p of phrases) {
+      const n = p.words.length;
+      if (n > words.length || (best !== null && n < best.words.length)) continue;
+      const tail = words.slice(words.length - n);
+      if (!p.last.includes(tail[n - 1] ?? "") || !p.words.slice(0, -1).every((w, i) => tail[i] === w)) continue;
+      best = p;
+    }
+    if (best) return { name: best.name, entry: best.entry };
+  }
+  return null;
 }

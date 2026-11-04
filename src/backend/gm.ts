@@ -8,10 +8,13 @@
 
 import type { GmThingsRead, JsonPatchOp, ResultBodies } from "../shared/protocol";
 import type { GmView } from "../shared/state-view";
+import { GM_KEYED_PARTS, GM_OUTLINE, GM_PARTS, keyedItem, type GmHeldWrite, type GmOutline, type GmPart, type GmPartAnswer, type GmPartView, type QueuedOn } from "../shared/gm-parts";
 import { effectiveMemory, knowledgeThreshold, type MindsSettings } from "../shared/minds";
 import type { HistorySource, KeepResult, MadeInPlay } from "../shared/thing-gm";
 import type { WorldDoc } from "../shared/world";
-import { buildGmWorld } from "../engine/gm-view";
+import type { WorldState } from "../engine/state";
+import { finalEditsOf, type FinalEdit } from "../shared/final-review";
+import { buildGmWorld, buildGmWorldPart, gmWorldPartCount, type GmWorldPart } from "../engine/gm-view";
 import { buildMindsGm } from "../packs/minds/core/gm";
 import type { ChainMessage } from "../engine/ledger/chain";
 import type { LedgerCore } from "../engine/ledger/journal";
@@ -21,7 +24,7 @@ import { readPass } from "../engine/read-pass";
 import type { ReadContext } from "../engine/registry";
 import type { Registry } from "../engine/registry-impl";
 import { gmThingExtras, gmThingsList, keepPlaces, keepThings, madePlaceViews, madeThings, type PathEvent } from "../engine/thing-gm";
-import { TIDIED_GROUP, tidyFindings, tidyRun } from "../engine/thing-tidy";
+import { tidyFindings, tidyRun } from "../engine/thing-tidy";
 import { findThingIds, personThings, thingPage, thingPicks, thingsList, thingTypes } from "../engine/thing-view";
 import { appliedEvents, clockFixLine, fixChip } from "./view";
 
@@ -31,13 +34,21 @@ const GM_EDITS = 40;
 /** How many entries a thing's History strip shows, newest first. */
 const HISTORY = 12;
 
-export function buildGmView(core: LedgerCore, observed: readonly ChainMessage[], registry: Registry, minds: MindsSettings): GmView | null {
-  const render = core.renderState(observed);
-  if (!render) return null;
-  const fold = core.fold(observed);
-  const chain = core.chain(observed);
-  // Everything else only reads the folded states, many times over: one read pass (DESIGN §9.6).
-  return readPass(() => {
+/** What building the GM view's parts reads: the chat's head as it renders, its chain and journal, the user's minds settings, and what a held write waits on now. */
+interface GmHead {
+  core: LedgerCore;
+  observed: readonly ChainMessage[];
+  registry: Registry;
+  render: { state: WorldState; world: WorldDoc };
+  minds: MindsSettings;
+  waitsOn: QueuedOn | null;
+}
+
+/** The GM view's parts the chain, the journal and the user's settings give, each built alone. */
+const CHAT_PARTS: { [P in Exclude<GmPart, GmWorldPart>]: (head: GmHead) => GmView[P] } = {
+  edits: ({ core, observed, registry, render }) => {
+    const fold = core.fold(observed);
+    const chain = core.chain(observed);
     const edits: GmView["edits"] = [];
     // Undo covers the latest reply (DESIGN §12): its edits carry the chat's chip for them.
     const head = chain.findLastIndex((m) => !m.isUser);
@@ -50,14 +61,78 @@ export function buildGmView(core: LedgerCore, observed: readonly ChainMessage[],
         edits.push({ messageId: m.id, seq: fix.seq, lines: [...(clock ? [clock] : []), ...authorLines(registry, render.world, render.state, fix.events, 12)], ...(fix.by ? { by: fix.by.label } : {}), undo: i === head ? fixChip(m.id, m.swipeId, fix.seq) : null });
       }
     });
-    return {
-      ...buildGmWorld(registry, render.world, render.state),
-      edits: edits.reverse().slice(0, GM_EDITS),
-      refused: (core.journal.refused ?? []).map((r) => ({ id: r.write.id, reason: r.reason })),
-      // Fidelity reads the chat's latest message and reply, as the next turn's would; a holding under the threshold the chat recorded reads as a suspicion, as on the player's screens.
-      minds: buildMindsGm(registry.context(render.world, render.state), latestTexts(observed), minds.enabled, effectiveMemory(render.world, minds), knowledgeThreshold(render.state.packs.minds)),
-    };
+    return edits.reverse().slice(0, GM_EDITS);
+  },
+  refused: ({ core }) => (core.journal.refused ?? []).map((r) => ({ id: r.write.id, reason: r.reason })),
+  // Writes made while a turn was under way, oldest first, each worded as the edits are; what they wait on is the chat's turn, so it is one for all.
+  held: ({ core, registry, render, waitsOn }) =>
+    core.journal.held.map(({ write }): GmHeldWrite => {
+      const post = write.kind === "post" ? write.entry : null;
+      return { id: write.id, kind: post ? post.kind : write.kind, lines: post && post.events.length > 0 ? authorLines(registry, render.world, render.state, post.events, 12) : [], ...(post?.by ? { by: post.by.label } : {}), waitsOn: waitsOn ?? "reply" };
+    }),
+  // Fidelity reads the chat's latest message and reply, as the next turn's would; a holding under the threshold the chat recorded reads as a suspicion, as on the player's screens.
+  minds: ({ observed, registry, render, minds }) => buildMindsGm(registry.context(render.world, render.state), latestTexts(observed), minds.enabled, effectiveMemory(render.world, minds), knowledgeThreshold(render.state.packs.minds)),
+};
+
+export function buildGmView(core: LedgerCore, observed: readonly ChainMessage[], registry: Registry, minds: MindsSettings, waitsOn: QueuedOn | null): GmView | null {
+  const render = core.renderState(observed);
+  if (!render) return null;
+  const head: GmHead = { core, observed, registry, render, minds, waitsOn };
+  // Everything else only reads the folded states, many times over: one read pass (DESIGN §9.6).
+  return readPass(() => ({ ...buildGmWorld(registry, render.world, render.state), edits: CHAT_PARTS.edits(head), refused: CHAT_PARTS.refused(head), held: CHAT_PARTS.held(head), minds: CHAT_PARTS.minds(head) }));
+}
+
+/**
+ * One part of the GM view (`lre.gm.part`), built alone, as the whole view holds it. With `id`, of
+ * the entities, money or organizations only that one, named by its id or by its name (read without
+ * case): a list of it, empty when there is none, and refused when several have that name, with
+ * their ids. `outline` (`GM_OUTLINE`) is how many each part holds, as the whole view would hold it:
+ * a world part counted as `gmWorldPartCount` counts it, the chain's and the journal's built and
+ * counted, the minds by their characters. Null when the chat's world isn't loaded.
+ */
+export function buildGmPart(core: LedgerCore, observed: readonly ChainMessage[], registry: Registry, minds: MindsSettings, waitsOn: QueuedOn | null, part: string, id?: string): GmPartAnswer | { refused: string } | null {
+  if (part === GM_OUTLINE) {
+    if (id !== undefined) return { refused: `the outline is read whole; only ${GM_KEYED_PARTS.join(", ")} take an id` };
+    const render = core.renderState(observed);
+    if (!render) return null;
+    const head: GmHead = { core, observed, registry, render, minds, waitsOn };
+    const outline = readPass((): GmOutline => GM_PARTS.map((p) => ({ part: p, count: !hasOwnPart(CHAT_PARTS, p) ? gmWorldPartCount(registry, render.world, render.state, p) : p === "minds" ? CHAT_PARTS.minds(head).characters.length : CHAT_PARTS[p](head).length })));
+    return { part: GM_OUTLINE, id: null, value: outline };
+  }
+  const asked = GM_PARTS.find((p) => p === part);
+  if (asked === undefined) return { refused: `part is one of ${GM_PARTS.join(", ")} or ${GM_OUTLINE}, not ${JSON.stringify(part)}` };
+  const keyed = GM_KEYED_PARTS.find((p) => p === asked);
+  if (id !== undefined && keyed === undefined) return { refused: `only ${GM_KEYED_PARTS.join(", ")} take an id; ${asked} is read whole` };
+  const render = core.renderState(observed);
+  if (!render) return null;
+  const { world, state } = render;
+  return readPass((): GmPartView | { refused: string } => {
+    if (keyed === undefined || id === undefined) {
+      const value = hasOwnPart(CHAT_PARTS, asked) ? CHAT_PARTS[asked]({ core, observed, registry, render, minds, waitsOn }) : buildGmWorldPart(registry, world, state, asked);
+      return { part: asked, id: null, value } as GmPartView;
+    }
+    // An organization is named as its page names it; an entity or a party as the world does.
+    const orgs = keyed === "orgs" ? buildGmWorldPart(registry, world, state, "orgs") : [];
+    const named =
+      keyed === "orgs"
+        ? keyedItem(orgs, id, (o) => o.page.id, (o) => o.page.name)
+        : keyedItem(
+            Object.entries(state.entities).map(([e, def]) => ({ id: e, name: def.name })),
+            id,
+            (e) => e.id,
+            (e) => e.name,
+          );
+    if (named && "ambiguous" in named) return { refused: `${named.ambiguous.length} have the name ${JSON.stringify(id)}: ${named.ambiguous.join(", ")}; name one by its id` };
+    if (!named) return { part: keyed, id, value: [] } as GmPartView;
+    const found = "page" in named.item ? named.item.page.id : named.item.id;
+    const value = keyed === "orgs" ? orgs.filter((o) => o.page.id === found) : buildGmWorldPart(registry, world, state, keyed, found);
+    return { part: keyed, id: found, value } as GmPartView;
   });
+}
+
+/** Whether a part is one the chain, the journal or the settings give (`CHAT_PARTS`). */
+function hasOwnPart(parts: typeof CHAT_PARTS, part: GmPart): part is Exclude<GmPart, GmWorldPart> {
+  return Object.prototype.hasOwnProperty.call(parts, part);
 }
 
 /**
@@ -99,15 +174,12 @@ export function pathEvents(core: LedgerCore, observed: readonly ChainMessage[]):
   return out;
 }
 
-/** Whether a record on the chain holds the one-time Things tidied fix (`TIDIED_GROUP`), undone or not: its chain is tidied no more. */
-export function tidiedOn(core: LedgerCore, chain: readonly ChainMessage[]): boolean {
-  return core.chain(chain).some((m) => !m.isUser && (activeRecord(m, core.journal.tombstones)?.events.some((e) => e.group === TIDIED_GROUP) ?? false));
-}
-
-/** The chat's head as GM → Things reads it: its read context (the world as played, places made in play overlaid), and the events on its path. */
-export function gmThingsHead(core: LedgerCore, observed: readonly ChainMessage[], registry: Registry): { ctx: ReadContext; path: PathEvent[] } | null {
+/** The chat's head as GM → Things reads it: its read context (the world as played, places made in play overlaid), the events on its path, and its head turn's final review edits (Tidy up's seventh kind). */
+export function gmThingsHead(core: LedgerCore, observed: readonly ChainMessage[], registry: Registry): { ctx: ReadContext; path: PathEvent[]; finalEdits: FinalEdit[] } | null {
   const render = core.renderState(observed);
-  return render ? { ctx: registry.context(render.world, render.state), path: pathEvents(core, observed) } : null;
+  const reply = core.chain(observed).findLast((m) => !m.isUser);
+  const rec = reply ? activeRecord(reply, core.journal.tombstones) : null;
+  return render ? { ctx: registry.context(render.world, render.state), path: pathEvents(core, observed), finalEdits: finalEditsOf(rec?.finalEdits) } : null;
 }
 
 /**
@@ -117,7 +189,7 @@ export function gmThingsHead(core: LedgerCore, observed: readonly ChainMessage[]
  * Tidy up's run (at most `tidy.limit` findings, those left out). Null for a thing or person the
  * head doesn't have.
  */
-export function gmThings(registry: Registry, head: { ctx: ReadContext; path: readonly PathEvent[] }, read: Exclude<GmThingsRead, { op: "leave" | "made" | "keep" }>, tidy: { limit: number; left: ReadonlySet<string> }): ResultBodies["lre.things"] | null {
+export function gmThings(registry: Registry, head: { ctx: ReadContext; path: readonly PathEvent[]; finalEdits?: readonly FinalEdit[] }, read: Exclude<GmThingsRead, { op: "leave" | "made" | "keep" }>, tidy: { limit: number; left: ReadonlySet<string> }): ResultBodies["lre.things"] | null {
   const { ctx, path } = head;
   return readPass(() => {
     switch (read.op) {
@@ -128,7 +200,7 @@ export function gmThings(registry: Registry, head: { ctx: ReadContext; path: rea
       case "types":
         return { types: thingTypes(ctx) };
       case "tidy":
-        return { tidy: tidyRun(tidyFindings(ctx, path), tidy.left, tidy.limit) };
+        return { tidy: tidyRun(tidyFindings(ctx, path, { finalEdits: head.finalEdits ?? [] }), tidy.left, tidy.limit) };
       case "person": {
         const person = personThings(ctx, read.entity);
         return person ? { person, pick: thingPicks(ctx) } : null;

@@ -249,6 +249,19 @@ describe("an organization's page", () => {
     expect(JSON.stringify(rows(tree))).not.toContain("Danny");
   });
 
+  test("a company's members read Board and officers, and its owners Owners", () => {
+    const org = page(
+      portAlder("pov", (world) => {
+        world.entities.priya_nair?.relations.push({ type: "member_of", to: SHOP, fields: { role: "member", title: "Director" } });
+      }),
+      SHOP,
+    );
+    const { tree } = pageRig(org, "people");
+    expect(find(marked(tree, "data-lre-org-people", "members"), Section).map((s) => s.title)).toEqual(["Board and officers"]);
+    expect(rows(marked(tree, "data-lre-org-people", "members")).map((r) => r[0])).toEqual(["Priya Nair"]);
+    expect(find(marked(tree, "data-lre-org-people", "owners"), Section).map((s) => s.title)).toEqual(["Owners"]);
+  });
+
   test("Jordan's Rules: its Mechanic position, which carries no power, and no delegation", () => {
     const { tree } = pageRig(page(portAlder("pov"), SHOP), "rules");
     expect(find(tree, Empty)).toEqual([]);

@@ -6,7 +6,7 @@
 // surface a party the POV can't see is "someone".
 
 import type { EntityId } from "../../../shared/ids";
-import { AUTOPAY_MODES, CLASS_TRAITS, FINANCE_FEATURES, featureOn, ownersIn, payeeKey, worthShares, type AccountView, type AutopayMode, type CycleState, type AlertLine, type CardView, type FinanceView, type Flow, type FlowView, type HouseholdView, type InterestView, type JournalEntry, type JournalLine, type OverviewView, type PartyKind, type StatementView, type UpcomingLine } from "../../../shared/finance";
+import { AUTOPAY_MODES, CLASS_TRAITS, FINANCE_FEATURES, featureOn, isCorrection, ownersIn, payeeKey, ROLE_RIGHTS, worthShares, type AccountView, type AutopayMode, type CycleState, type AlertLine, type CardView, type FinanceView, type Flow, type FlowView, type HouseholdView, type InterestView, type JournalEntry, type JournalLine, type OverviewView, type PartyKind, type StatementView, type UpcomingLine } from "../../../shared/finance";
 import { formatMoney } from "../../../shared/world";
 import { calendarOf, dateAt, formatClock, monthName, weekdayName } from "../../../engine/calendar";
 import { EXTERNAL_ACCOUNT_PREFIX } from "../../../engine/events";
@@ -332,7 +332,8 @@ function accountView(ctx: ReadContext, viewer: Viewer, party: EntityId, account:
     institution: p?.institution || null,
     status: statusOf(ctx.state, account),
     cents,
-    available: level >= 2 ? (t.liability ? (p?.limit === null && cls === "charge_card" ? null : shownAvailable(ctx, account)) : shownAvailable(ctx, account) + overdraftRoom(ctx, account)) : null,
+    // A loan's balance is what's owed: nothing on it can be spent or drawn again.
+    available: level >= 2 && !t.installment ? (t.liability ? (p?.limit === null && cls === "charge_card" ? null : shownAvailable(ctx, account)) : shownAvailable(ctx, account) + overdraftRoom(ctx, account)) : null,
     owners: owners.map((o) => ({ party: idFor(ctx, viewer, o.party), name: nameFor(ctx, viewer, o.party), role: o.role, share: Math.round((own(shares, o.party) ?? 0) * 100) / 100 })),
     role,
     manages: managesAccount(ctx, account, party),
@@ -423,6 +424,32 @@ function linkView(ctx: ReadContext, viewer: Viewer, link: string | undefined): {
 }
 
 /**
+ * In & out's reading of a flow for `party` (DESIGN §25.11): money coming in to one of its own (the
+ * party, its household, or a party or account whose money it manages), going out of one, or moving
+ * between them (null); and whose money that is, the party on its side, when the viewer can see it. A
+ * share of a cost someone else pays for it goes out too.
+ */
+function flowSides(ctx: ReadContext, viewer: Viewer, f: Flow, party: EntityId): Pick<FlowView, "direction" | "whose"> {
+  const home = householdOf(ctx, party);
+  const ours = (id: string): boolean => {
+    if (id === "" || id === party) return id === party;
+    if (own(ctx.state.entities, id)?.kind === "account") return rightsOf(ctx.state, id, party)?.worth === true || managesAccount(ctx, id, party) || (home !== null && rightsOf(ctx.state, id, home) !== null);
+    return id === home || managesParty(ctx.state, id, party);
+  };
+  // The party whose money a side is: itself, or an account's holder (its first owner whose role counts its worth).
+  const holder = (id: string): EntityId | null => {
+    if (own(ctx.state.entities, id)?.kind !== "account") return isParty(ctx, id) ? id : null;
+    const owners = ownersOf(ctx.state, id);
+    return (owners.find((o) => ROLE_RIGHTS[o.role].worth) ?? owners[0])?.party ?? null;
+  };
+  const into = ours(f.to) ? f.to : (f.splits ?? []).find((s) => ours(s.to))?.to;
+  const out = ours(f.from);
+  const direction = out && into === undefined ? "out" : !out && into !== undefined ? "in" : !out && (f.shares ?? []).some((s) => s.party === party || s.party === home) ? "out" : null;
+  const side = direction === "in" && into !== undefined ? holder(into) : holder(f.from);
+  return { direction, whose: side !== null && visible(ctx, viewer, side) ? { id: side, name: nameFor(ctx, viewer, side) } : null };
+}
+
+/**
  * A flow as `party` knows it. `runsFlows` is whether standing payments run for them (the `flows`
  * feature), as the actions that change one require (`money_feature('flows', self)`): where they
  * don't, no section offers a flow as theirs to change, though the household's still lists its
@@ -463,6 +490,8 @@ function flowView(hooks: FinanceHooks, ctx: ReadContext, viewer: Viewer, party: 
     category: f.category ?? null,
     link: linkView(ctx, viewer, f.link),
     payer: fromSide && visible(ctx, viewer, f.from) ? f.from : null,
+    payee: own(ctx.state.entities, f.to) && visible(ctx, viewer, f.to) ? f.to : null,
+    ...flowSides(ctx, viewer, f, party),
     editable,
     source: f.source,
     done: run.done,
@@ -581,6 +610,8 @@ function financeView(hooks: FinanceHooks, ctx: ReadContext, party: EntityId, pla
     const cycle = cycleOf(ctx.state, a.id);
     if (cycle && cycle.stage !== "current") alerts.push({ tone: "neg", text: `${a.name} is ${cycle.stage === "late" ? "past due" : `${cycle.stage} days past due`}.`, account: a.id });
     else if (a.due && cycle && cycle.due > now && cycle.due - now <= 3 * DAY) alerts.push({ tone: "warn", text: `${a.name}: ${money(ctx, a.due.cents)} due ${a.due.at}.`, account: a.id });
+    // A loan opened in credit (its opening entered as a positive amount) owes nothing and is closed as paid off at its next bill.
+    if (CLASS_TRAITS[a.class].installment && a.cents > 0 && a.status === "open") alerts.push({ tone: "warn", text: `${a.name} is in credit by ${money(ctx, a.cents)}: it owes nothing, and closes as paid off at its next bill.`, account: a.id });
     if (!CLASS_TRAITS[a.class].liability && a.cents < 0) alerts.push({ tone: "neg", text: `${a.name} is overdrawn by ${money(ctx, -a.cents)}.`, account: a.id });
     // A debt the story ran past a card's limit (DESIGN §25.10) reads as it stands.
     if (CLASS_TRAITS[a.class].revolving && a.limit !== null && -a.cents > a.limit) alerts.push({ tone: "neg", text: `${a.name} is over its limit by ${money(ctx, -a.cents - a.limit)}.`, account: a.id });
@@ -591,14 +622,14 @@ function financeView(hooks: FinanceHooks, ctx: ReadContext, party: EntityId, pla
     const v = flowViews[i];
     if (v && v.missed > 0 && v.status === "active" && (flowRunOf(ctx.state, f.id).last ?? -Infinity) > now - 31 * DAY) alerts.push({ tone: "warn", text: `${v.label} was missed.`, flow: v.id });
   }
-  // Money in and out over the last 30 days, by category, from the journal of the accounts shown.
+  // Money in and out over the last 30 days, by category, from the journal of the accounts shown: none of it moves between its own accounts, opens one or puts a balance right.
   const since = now - 30 * DAY;
   let pastIn = 0;
   let pastOut = 0;
   const byCategory = new Map<string, number>();
   for (const id of shownAccounts) {
     for (const j of journalOf(ctx.state, id)) {
-      if (j.at <= since || j.category === "transfer" || j.kind === "opening") continue;
+      if (j.at <= since || j.category === "transfer" || j.kind === "opening" || j.category === "opening" || isCorrection(j)) continue;
       if (j.cents > 0) pastIn += j.cents;
       else pastOut -= j.cents;
       byCategory.set(j.category ?? "other", (byCategory.get(j.category ?? "other") ?? 0) + j.cents);
@@ -615,10 +646,10 @@ function financeView(hooks: FinanceHooks, ctx: ReadContext, party: EntityId, pla
     upcoming: level >= 3 ? upcoming.sort((a, b) => a.clock - b.clock).slice(0, 20) : [],
     alerts: level >= 3 ? alerts : [],
   };
+  // Every line of every account shown, newest first, for Activity to filter: each account keeps its latest (`JOURNAL_CAP`).
   const recent = shownAccounts
     .flatMap((id) => journalOf(ctx.state, id))
     .sort((a, b) => b.at - a.at || (a.id < b.id ? 1 : -1))
-    .slice(0, 10)
     .map((j) => journalLine(ctx, viewer, party, j));
   const notesRaw = own(objOf(sliceOf(ctx.state, "economy").notes), party);
   const notes = player ? [] : (Array.isArray(notesRaw) ? notesRaw : []).slice(-NOTES_CAP).map((n) => objOf(n)).reverse().map((n) => ({ at: when(ctx, numOf(n.at)), text: strOf(n.text) }));

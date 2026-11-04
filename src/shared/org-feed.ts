@@ -24,8 +24,8 @@ export const PLAN_TEXT_MAX = 300;
 export const ALERT_TABS = ["overview", "people", "rules", "money", "plan", "decisions"] as const;
 export type AlertTab = (typeof ALERT_TABS)[number];
 
-/** What an alert is about (§3.14). */
-export const ALERT_KINDS = ["vacancy", "payroll_short", "delegation_ending", "dues_arrears", "negative_equity", "motion_open", "approval_waiting"] as const;
+/** What an alert is about (§3.14); `no_account`, an organization whose money has no account to be in (its takings, its payroll). */
+export const ALERT_KINDS = ["vacancy", "payroll_short", "delegation_ending", "dues_arrears", "negative_equity", "motion_open", "approval_waiting", "no_account"] as const;
 export type AlertKind = (typeof ALERT_KINDS)[number];
 
 /** One alert, as the reader may see it. */

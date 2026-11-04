@@ -328,7 +328,7 @@ function endedOf(page: Page): OrgEndedView | null {
   return { winding: winding === null ? null : dayWords(ctx.world, winding), dissolved: dissolved === null ? null : dayWords(ctx.world, dissolved), mergedInto: typeof into === "string" && into !== "" ? page.ref(into) : null };
 }
 
-/** The one figure a row shows that the reader may see (§4.2): a company's profit this month, a household's shared costs and their share, a group's members, a trust's worth. */
+/** The one figure a row shows that the reader may see (§4.2): a company's profit this month, a household's shared costs and their share, a group's members, a trust's net worth. */
 function figureOf(ctx: ReadContext, org: EntityId, type: OrgType, viewer: EntityId): string | null {
   const money = (cents: number): string => formatMoney(cents, ctx.world.currency);
   const dissolved = dissolvedOn(ctx.state, org);
@@ -355,7 +355,7 @@ function figureOf(ctx: ReadContext, org: EntityId, type: OrgType, viewer: Entity
   }
   if (type === "trust") {
     const worth = optionalQuery(ctx, "economy.net_worth")?.(ctx, org);
-    return worth === null || worth === undefined ? null : `Worth ${money(worth)}`;
+    return worth === null || worth === undefined ? null : `Net worth ${money(worth)}`;
   }
   return null;
 }

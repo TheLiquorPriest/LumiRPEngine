@@ -356,7 +356,7 @@ describe("what a party's roles allow", () => {
     expect(autopaySources(v, loan).map((a) => a.id)).toEqual(["till", "reserve"]);
   });
 
-  const flow = (over: Partial<FlowView> & Pick<FlowView, "id" | "spec">): FlowView => ({ label: over.id, kind: "bill", from: "", to: "", amount: "", cents: null, schedule: "", next: null, shortfall: "skip", status: "active", category: null, link: null, payer: over.spec?.from ?? null, editable: false, source: "entity", done: 0, missed: 0, deferred: 0, ...over });
+  const flow = (over: Partial<FlowView> & Pick<FlowView, "id" | "spec">): FlowView => ({ label: over.id, kind: "bill", from: "", to: "", amount: "", cents: null, schedule: "", next: null, shortfall: "skip", status: "active", category: null, link: null, payer: over.spec?.from ?? null, payee: null, direction: null, whose: null, editable: false, source: "entity", done: 0, missed: 0, deferred: 0, ...over });
   const bill = (from: string): Flow => ({ id: "invoice:inv1", label: "Invoice", kind: "bill", from, to: "theirs", amount: { fixed: 5000 }, schedule: { once: "2026-10-01T09:00" }, shortfall: "skip", status: "active", source: "invoice" });
 
   test("an invoice billed to the party or to a business they run is theirs to pay now; one billed to someone else isn't", () => {

@@ -16,19 +16,21 @@ import { describe, expect, test } from "bun:test";
 import type { VNode } from "preact";
 import { resolveEdit } from "../../src/engine/edits";
 import { buildGmWorld } from "../../src/engine/gm-view";
+import { materializeAll, materializeIfNeeded } from "../../src/engine/materialize";
 import { readPass } from "../../src/engine/read-pass";
 import { createRegistry } from "../../src/engine/registry-impl";
 import { resolveAction } from "../../src/engine/resolve";
 import { createRng } from "../../src/engine/rng";
 import { Working } from "../../src/engine/working";
 import type { SheetRoute } from "../../src/frontend/app";
+import type { GmSectionProps } from "../../src/frontend/registry";
 import { delegationLinkOps, groupKinds, newOrgKind, orgRows, orgTypeOfKind, positionsWith } from "../../src/frontend/build/organizations";
-import { Button, ListRow } from "../../src/frontend/components";
+import { Button, ListRow, Section } from "../../src/frontend/components";
 import { ALL_PACKS, STARTER_WORLDS } from "../../src/packs/index";
 import { ORG_LINTS } from "../../src/packs/orgs/core/lint";
 import { decodeOrgPage } from "../../src/packs/orgs/ui/decode";
-import { appointAction, delegationDraft, delegationEditOps, givable, hireAction, isGmPage, memberControls, newcomers, orgEditOf, orgEditRoute, peopleControls, positionArgs, positionDraft, positionEditOps, positionOfView, positionProblem, rulesControls, titleAction, type OrgAction } from "../../src/packs/orgs/ui/edit";
-import { gmPage, gmSheetFor, jobTitleOps } from "../../src/packs/orgs/ui/gm";
+import { appointAction, delegationDraft, delegationEditOps, givable, hireAction, isGmPage, memberControls, newcomers, orgEditOf, orgEditRoute, payoutAction, payoutOps, payoutProblem, peopleControls, positionArgs, positionDraft, positionEditOps, positionOfView, positionProblem, rulesControls, titleAction, type OrgAction } from "../../src/packs/orgs/ui/edit";
+import { GmOwners, gmPage, gmSheetFor, jobTitleOps, type GmOrgSheet } from "../../src/packs/orgs/ui/gm";
 import { MemberDetails } from "../../src/packs/orgs/ui/member";
 import { OrgPeople } from "../../src/packs/orgs/ui/people";
 import { OrgRules } from "../../src/packs/orgs/ui/rules";
@@ -83,7 +85,7 @@ function page(w: Working, org: string): OrgView {
 }
 
 function gmView(w: Working): GmView {
-  return { ...readPass(() => buildGmWorld(reg, w.world, w.state)), edits: [], refused: [], minds: {} as GmView["minds"] };
+  return { ...readPass(() => buildGmWorld(reg, w.world, w.state)), edits: [], refused: [], held: [], minds: {} as GmView["minds"] };
 }
 
 function elements(node: unknown): VNode<Props>[] {
@@ -129,7 +131,7 @@ describe("routes", () => {
 describe("Play: People, a member's sheet and Rules, by power", () => {
   test("Marcus may hire and admit at Alder Automotive; Jordan may neither, and his rows only open sheets", () => {
     const marcus = page(portAlder("marcus_delgado"), SHOP);
-    expect(peopleControls(marcus)).toEqual({ hire: true, admit: true });
+    expect(peopleControls(marcus)).toEqual({ hire: true, admit: true, payout: false });
     const opened: SheetRoute[] = [];
     const tree = OrgPeople({ org: marcus, ownership: null, open: (r) => opened.push(r) });
     expect(buttons(tree).slice(0, 2)).toEqual(["Hire someone", "Admit a member"]);
@@ -137,7 +139,7 @@ describe("Play: People, a member's sheet and Rules, by power", () => {
     expect(opened.slice(0, 2)).toEqual([orgEditRoute(SHOP, "hire"), orgEditRoute(SHOP, "admit")]);
     expect(newcomers(marcus, "hire").map((c) => c.id)).toContain("priya_nair");
     expect(newcomers(marcus, "hire").map((c) => c.id)).not.toContain("danny_okafor");
-    expect(peopleControls(page(portAlder("pov"), SHOP))).toEqual({ hire: false, admit: false });
+    expect(peopleControls(page(portAlder("pov"), SHOP))).toEqual({ hire: false, admit: false, payout: false });
   });
 
   test("Danny's sheet as Marcus reads it: his position, powers and job, and every staff control; Jordan's own sheet as he reads it offers his title", () => {
@@ -247,8 +249,67 @@ describe("GM → Orgs", () => {
     const org = gmPage(entry.page);
     expect(isGmPage(org)).toBe(true);
     expect(rulesControls(org)).toEqual({ positions: true, delegate: true, dues: false });
-    expect(peopleControls(org)).toEqual({ hire: false, admit: false });
+    expect(peopleControls(org)).toEqual({ hire: false, admit: false, payout: false });
     expect(memberControls(org, person(org, "pov"))).toEqual([]);
+  });
+});
+
+describe("a trust's People and payout (DESIGN §29.7)", () => {
+  const TRUST = "thorne_trust";
+  /** Harrowmere at Money 3, where a payout is an action, its money open. */
+  function manor(pov: string): Working {
+    const make = STARTER_WORLDS.mystery_manor;
+    if (!make) throw new Error("no Harrowmere starter");
+    const world = make("mm", "Harrowmere");
+    world.pov = pov;
+    world.realism.levels.money = 3;
+    const w = new Working(reg, world, startState(world, reg));
+    materializeAll(reg, w, pov, "run");
+    // Its money opens as anyone's does when the story first reads it.
+    materializeIfNeeded(reg, w, TRUST, "money", "run");
+    return w;
+  }
+  const titles = (tree: unknown): unknown[] => elements(tree).filter((v) => v.type === Section).map((v) => v.props.title);
+
+  test("a trustee reads Trustees and beneficiaries and pays a stated amount out by share; a beneficiary may not", () => {
+    const w = manor("sir_alaric");
+    const org = page(w, TRUST);
+    expect(peopleControls(org)).toEqual({ hire: true, admit: false, payout: true });
+    const opened: SheetRoute[] = [];
+    const tree = OrgPeople({ org, ownership: null, open: (r) => opened.push(r) });
+    expect(titles(tree)).toContain("Trustees and beneficiaries");
+    expect(buttons(tree)).toEqual(["Hire someone", "Pay out to its beneficiaries"]);
+    for (const b of elements(tree).filter((v) => v.type === Button)) (b.props.onClick as () => void)();
+    expect(opened.slice(0, 2)).toEqual([orgEditRoute(TRUST, "hire"), orgEditRoute(TRUST, "payout")]);
+    expect(orgEditOf(orgEditRoute(TRUST, "payout").id)).toEqual({ org: TRUST, form: "payout", id: null });
+    // A trust pays out what it holds, so it asks how much.
+    expect(payoutProblem("", USD)).not.toBeNull();
+    expect(payoutAction(TRUST, "", USD)).toBeNull();
+    const payout = payoutAction(TRUST, "100", USD);
+    expect(payout).toEqual({ action: "distribute_profit", params: { business: TRUST, amount: 10_000 } });
+    if (!payout) throw new Error("no payout");
+    const before = w.state.accounts.acct_thorne_trust ?? 0;
+    expect(play(w, "sir_alaric", payout)).toBe("");
+    expect(w.state.accounts.acct_thorne_trust).toBe(before - 10_000);
+    expect(peopleControls(page(manor("lady_honoria"), TRUST)).payout).toBe(false);
+  });
+
+  test("GM → Orgs: the trust's owners offer Pay out, Play's route opens the GM's sheet, and the GM's edit pays out", () => {
+    const w = manor("sir_alaric");
+    expect(gmSheetFor(orgEditRoute(TRUST, "payout"))).toEqual({ kind: "payout" });
+    const gm = gmView(w);
+    const entry = gm.orgs.find((o) => o.page.id === TRUST);
+    if (!entry) throw new Error("no trust in GM → Orgs");
+    const section: GmSectionProps = { chatId: "c", gm, currency: USD, reloadKey: "", busy: false, edit: () => Promise.resolve(true), reload: () => Promise.resolve(), changed: () => Promise.resolve(), send: () => Promise.reject(new Error("no backend")) };
+    const opened: GmOrgSheet[] = [];
+    const tree = GmOwners({ entry, section, open: (s) => opened.push(s) });
+    const pay = elements(tree).find((v) => v.type === Button && textOf(v.props.children) === "Pay out to its beneficiaries");
+    (pay?.props.onClick as () => void)();
+    expect(opened).toEqual([{ kind: "payout" }]);
+    expect(payoutOps(TRUST, "50", USD)).toEqual([{ op: "effect", effect: "economy.distribute", args: { business: TRUST, cents: 5_000 } }]);
+    const before = w.state.accounts.acct_thorne_trust ?? 0;
+    edit(w, payoutOps(TRUST, "50", USD));
+    expect(w.state.accounts.acct_thorne_trust).toBe(before - 5_000);
   });
 });
 

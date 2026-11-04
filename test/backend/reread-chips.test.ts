@@ -97,7 +97,7 @@ describe("a Re-read held behind a reply in flight", () => {
     await rig.host.settle();
     const g = await rig.host.start(chatId, { type: "normal" });
     told.proposals = TWO_DAYS;
-    expect(rig.body(await rig.send({ type: "lre.chip", chatId, chip, choice: "reread" }))).toEqual({ applied: false, pending: true });
+    expect(rig.body(await rig.send({ type: "lre.chip", chatId, chip, choice: "reread" }))).toEqual({ applied: false, pending: true, queued: "reply" });
     told.proposals = [];
     await rig.host.stop(g, "Danny looks up.");
     expect(await skips()).toEqual([SKIPPED]);

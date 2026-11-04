@@ -13,8 +13,9 @@
 // DESIGN §4.4) and the clock set as its ✎ fix sets it, each as the events those make, in order.
 // A thing's changes are the things model's item ops (ITEMS-SPEC §3.5, `engine/thing-ops`), and so
 // is any move of a thing an older operation asks for (`put`, `move`, `link in`, `unlink in`, `set
-// place`): through the one location writer and its size rules. A place made in play is the space
-// pack's (`space.place_op`), and an organization's change the orgs pack's (`orgs.op`, ORG-SPEC §7.2).
+// place`): through the one location writer and its size rules; a player's ✎ on a thing of theirs
+// (`fix_item`) is one too, under the player's rules. A place made in play is the space pack's
+// (`space.place_op`), and an organization's change the orgs pack's (`orgs.op`, ORG-SPEC §7.2).
 
 import { hashParts } from "../shared/hash";
 import type { EntityId, FieldId } from "../shared/ids";
@@ -31,7 +32,7 @@ import { ROUTINE_AWARENESS, ROUTINE_MODES, ROUTINE_ROLES, SKIP_LIVES } from "../
 import { isBand, tierOf } from "../shared/tiers";
 import type { EffectSpec, FieldDef, FieldType, WorldDoc } from "../shared/world";
 import { BUILTIN_RELATIONS, formatMoney, readSectionFeed, spanRecords } from "../shared/world";
-import { parseItemOp, parsePlaceOp, type Spot } from "../shared/things";
+import { parseItemFix, parseItemOp, parsePlaceOp, type ItemFix, type Spot } from "../shared/things";
 import { parseOrgOp } from "../shared/org-ops";
 import { FEED_EVENT } from "./feed";
 import { calendarOf, slotIndexAt } from "./calendar";
@@ -44,7 +45,7 @@ import type { Rejection } from "./registry";
 import type { Registry } from "./registry-impl";
 import { materializeIfNeeded } from "./materialize";
 import { createRng, type Rng } from "./rng";
-import { fieldDef, GONE_FIELD, kindDef, kindIs, placeOfEntity } from "./scope";
+import { fieldDef, GONE_FIELD, isGone, kindDef, kindIs, placeOfEntity } from "./scope";
 import { classOf, classProblems, classValues, tagsOf } from "./selector";
 import type { WorldState } from "./state";
 import { clockFix } from "./time";
@@ -52,7 +53,9 @@ import { moveTrack } from "./tracks";
 import { Working } from "./working";
 import { workspaceOf, workspacePins, wsDelete, wsPin, wsWrite } from "./workspace";
 import { applyItemOp, type ItemOpOptions } from "./thing-ops";
-import { isThing } from "./things";
+import { accessFor } from "./access";
+import { isThing, mayFixThing } from "./things";
+import { canSeeEntity, canSeePlace } from "./visibility";
 
 export interface EditOptions {
   /** The GM editor writes locked fields too; a player's ✎ fix can't. */
@@ -167,6 +170,42 @@ function itemOptions(opts: EditOptions, rng: Rng): ItemOpOptions {
 function thingMove(w: Working, thing: EntityId, to: Spot, opts: EditOptions, rng: Rng): Rejection | null {
   const out = applyItemOp(w, { do: "move", item: thing, to, why: "" }, itemOptions(opts, rng));
   return "code" in out ? out : null;
+}
+
+/**
+ * A player's ✎ on a thing (`fix_item`, ITEMS-SPEC §10.3), under the player's rules whatever the
+ * edit's: a thing of theirs they can see (`mayFixThing`), moved or kept only where they can see,
+ * never on another person and never in a holder they may not use; worn or taken off by them; sized,
+ * or its size left to its type or name again. Never a confirmed change: a Built-in thing stays.
+ */
+function fixItemOp(reg: Registry, w: Working, change: ItemFix, opts: EditOptions, rng: Rng): Rejection | null {
+  const pov = w.world.pov;
+  const item = change.item;
+  if (!isThing(w.ctx, item) || isGone(w.state, item) || !canSeeEntity(reg, w.world, w.state, pov, item)) return reject("missing_entity", `no thing ${labelOf(w, item)}`);
+  if (!mayFixThing(w.ctx, pov, item)) return reject("not_yours", `${labelOf(w, item)} isn't yours to change`);
+  const spotProblem = (spot: Spot): Rejection | null => {
+    if ("place" in spot) return canSeePlace(reg, w.world, w.state, pov, spot.place) ? null : reject("missing_place", "no such place");
+    if (spot.in === pov) return null;
+    const holder = own(w.state.entities, spot.in);
+    if (!holder || isGone(w.state, spot.in) || !canSeeEntity(reg, w.world, w.state, pov, spot.in)) return reject("missing_entity", "no such holder");
+    if (kindIs(reg, w.world, holder.kind, "person")) return reject("not_yours", `${holder.name} isn't yours to put things on`);
+    return accessFor(w.ctx, pov, spot.in).use !== null ? null : reject("not_yours", `${holder.name} isn't yours to use`);
+  };
+  const options = itemOptions({ ...opts, gm: false, confirmed: false }, rng);
+  const applied = (() => {
+    switch (change.do) {
+      case "move":
+        return spotProblem(change.to) ?? applyItemOp(w, { do: "move", item, to: change.to, why: "" }, options);
+      case "home":
+        return (change.home !== null && change.home !== "owner" ? spotProblem(change.home) : null) ?? applyItemOp(w, { do: "home", item, home: change.home }, options);
+      case "wear":
+        return applyItemOp(w, { do: "wear", item, who: pov, ...(change.off === true ? { off: true } : {}) }, options);
+      case "size":
+        if (change.size !== null) return applyItemOp(w, { do: "label", item, size: change.size }, options);
+        return own(w.state.entities, item)?.fields.size === undefined ? reject("no_change", "nothing sets its size") : (w.apply({ type: "set", entity: item, field: "size", value: null }) ?? {});
+    }
+  })();
+  return "code" in applied ? applied : null;
 }
 
 /** The checks every field write shares: a field the kind may hold, never derived, locked only for the GM. */
@@ -457,6 +496,8 @@ function applyOp(reg: Registry, w: Working, op: FixOp, opts: EditOptions, rng: R
     case "fix_set":
       // A field as the player's ✎ fix sets it, under the player's rules whatever the edit's (DESIGN §7.2).
       return setField(reg, w, op.entity, op.field, op.value, { ...opts, gm: false }, rng);
+    case "fix_item":
+      return fixItemOp(reg, w, op.change, opts, rng);
     case "add":
       return addField(reg, w, op.entity, op.field, op.delta, opts, rng);
     case "link":
@@ -654,6 +695,10 @@ export function parseFixOps(raw: unknown): FixOp[] | null {
         return str(o.time) ? { op: "clock", time: o.time } : null;
       case "fix_set":
         return str(o.entity) && str(o.field) && o.value !== undefined ? { op: "fix_set", entity: o.entity, field: o.field, value: o.value as JsonValue } : null;
+      case "fix_item": {
+        const change = parseItemFix(o.change);
+        return change ? { op: "fix_item", change } : null;
+      }
       default:
         return parseEditOp(o);
     }

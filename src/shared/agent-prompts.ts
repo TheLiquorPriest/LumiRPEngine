@@ -2,11 +2,12 @@
 // editable): the built-in `scratch_read` tool, the notes it puts on tool results, the text form a
 // connection that refuses native tools is offered them in, and the framing of the system files every
 // agent's prompt carries (AGENTS.md and roles/<role>.md). Each is a registry text with the shipped
-// default, reset per item on Settings → Agents → Prompts (R5), under the page "Every agent".
+// default, reset per item on Settings → Agents → Prompts (R5), under the page "Every agent", which also
+// holds the texts every agent's tools are sent with (`TOOL_PROMPTS`) and the lore index's.
 
 import type { PromptDef, PromptPage } from "./prompts";
 
-export const RUNTIME_PROMPT_PAGE: PromptPage = { id: "runtime", label: "Every agent", note: "What the agent runtime says to any agent's model besides its role's own prompts: the scratch_read tool, the notes on tool results, tools offered as text, and how the workspace's system files (AGENTS.md, roles/<role>.md) are framed." };
+export const RUNTIME_PROMPT_PAGE: PromptPage = { id: "runtime", label: "Every agent", note: "What any agent's model is told besides its role's own prompts: the scratch_read tool, the notes on tool results, tools offered as text, and how the workspace's system files (AGENTS.md, roles/<role>.md) are framed; then every tool's description and its arguments', the notes the tools answer with, and the lore index, which the GM assistant, the main agent and each turn role are all sent." };
 
 /** The runtime's text ids, so code names them once. */
 export const RUNTIME_TEXT = {

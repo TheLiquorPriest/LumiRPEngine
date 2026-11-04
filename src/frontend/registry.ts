@@ -221,6 +221,27 @@ export interface OrgTabDef {
   gm?: ComponentType<OrgGmTabProps>;
 }
 
+/** What a pack's part of Play's place sheet gets: the place, whether the player character is there, and the sheet's own props. */
+export interface PlacePartProps {
+  chatId: ChatId;
+  place: string;
+  /** The player character is at this very place (the map's `here`). */
+  here: boolean;
+  state: StateView;
+  send: Send;
+  /** Opens a sheet over the place sheet. */
+  open(route: SheetRoute): void;
+}
+
+/** A part a pack adds to Play's place sheet, under its own details (the gear pack's Things here); it draws nothing where it has nothing to say. */
+export interface PlacePartDef {
+  /** Unique across packs, with a dot (`gear.here`). */
+  id: `${string}.${string}`;
+  /** Order among the parts, ties by id. */
+  order: number;
+  component: ComponentType<PlacePartProps>;
+}
+
 export interface UiRegistry {
   panel(def: PanelDef): void;
   editor(def: EditorDef): void;
@@ -242,6 +263,8 @@ export interface UiRegistry {
   glance(def: GlanceDef): void;
   /** A tab, or a part of one of the shell's tabs, on an organization's page in Orgs; ids are unique across packs. */
   orgTab(def: OrgTabDef): void;
+  /** A part of Play's place sheet, under the place's details; ids are unique across packs. */
+  placePart(def: PlacePartDef): void;
 }
 
 export interface UiPackDef {

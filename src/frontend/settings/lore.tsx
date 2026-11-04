@@ -15,7 +15,7 @@ import { useApp } from "../app";
 import { Badge, Button, HostSelect, NumberStepper, Section, Seg } from "../components";
 import { bookLabels } from "../build/book-lore";
 import { CheckField } from "../build/form-kit";
-import { defaultButton } from "./agents";
+import { defaultButton } from "./kit";
 
 type BooksMode = "auto" | "list";
 

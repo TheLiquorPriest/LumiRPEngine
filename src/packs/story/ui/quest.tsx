@@ -6,6 +6,7 @@
 // an entity, so opening the sheet observes nothing new.
 
 import { useApp } from "../../../frontend/app";
+import { toastQueued } from "../../../frontend/queued";
 import { Badge, Button, Empty, IdText, List, ListRow, PageHeader, Section, useBusy } from "../../../frontend/components";
 import { Icon } from "../../../frontend/icons";
 import type { SheetProps } from "../../../frontend/registry";
@@ -28,7 +29,7 @@ export function QuestSheet(props: SheetProps) {
   const reveal = () =>
     run(async () => {
       const result = await app.request(hintRequest(track.id, props.chatId));
-      if (result?.pending) app.toast("Hint saved — it shows when the reply finishes.", "info");
+      toastQueued(app, result);
     });
   return (
     <div class="lre-stack lre-world" data-lre-sheet-quest={track.id}>

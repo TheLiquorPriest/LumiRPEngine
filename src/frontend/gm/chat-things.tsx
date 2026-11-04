@@ -1,5 +1,5 @@
 // GM → This chat → Things (ITEMS-SPEC §9, §11): this chat's own Tidy up switch, whether its
-// impossible holds are tidied automatically (an older chat's one-time Things tidied fix), beside the
+// impossible holds are tidied every turn (Things tidied, before the turn's story), beside the
 // world's (Build → Packs → gear → Tidy up), which it follows while it has none of its own. Kept in the
 // chat's metadata with its knowledge choices (`lre.chat.knowledge`'s `tidy`), not as a GM edit: no
 // Undo, no recorded turn changes, and a Branch of the chat keeps it. `TidySwitch` and `tidyRequest`
@@ -17,9 +17,9 @@ export function tidyInForce(tidy: Tidy): boolean {
   return tidy.chat ?? tidy.world;
 }
 
-/** This chat's row in GM → This chat: whether it tidies, and whose setting that is. */
+/** This chat's row in GM → This chat: whether it tidies every turn, and whose setting that is. */
 export function thingsSummary(tidy: Tidy): string {
-  return `Tidy impossible holds automatically ${tidyInForce(tidy) ? "on" : "off"} · ${tidy.chat === null ? "the world's setting" : "this chat's own"}`;
+  return `Tidy impossible holds every turn: ${tidyInForce(tidy) ? "on" : "off"} · ${tidy.chat === null ? "the world's setting" : "this chat's own"}`;
 }
 
 /** The request that sets this chat's switch: on, off, or null to follow the world's again. */
@@ -32,14 +32,14 @@ export function TidySwitch(props: { tidy: Tidy; busy: boolean; onChange(tidy: bo
   const { tidy } = props;
   return (
     <div class="lre-stack" data-lre-chat-tidy={tidyInForce(tidy) ? "on" : "off"}>
-      <p class="lre-gm-note">Once, on its first turn under this build, an older chat puts down what someone has on them that is too big to carry (a fridge in someone's hands): at the buyer's home when it was bought, else where they stand, as Things tidied with its Undo. Everything else waits in GM → Things → Tidy up.</p>
+      <p class="lre-gm-note">Every turn, before the story goes on, what someone has on them that is too big to carry (a fridge in someone's hands) is put down: at the buyer's home when it was bought, else where they stand, as Things tidied with its Undo. Everything else waits in GM → Things → Tidy up.</p>
       <HostSwitch label="This chat has its own setting" checked={tidy.chat !== null} disabled={props.busy} onChange={(on) => props.onChange(on ? tidy.world : null)} />
       {tidy.chat !== null ? (
-        <HostSwitch label="Tidy impossible holds automatically in this chat" checked={tidy.chat} disabled={props.busy} onChange={(on) => props.onChange(on)} />
+        <HostSwitch label="Tidy impossible holds every turn in this chat" checked={tidy.chat} disabled={props.busy} onChange={(on) => props.onChange(on)} />
       ) : (
         <span class="lre-field-help">{`It follows the world's setting (Build → Packs → gear → Tidy up), now ${tidy.world ? "On" : "Off"}.`}</span>
       )}
-      <span class="lre-small lre-muted">A change applies from the next turn. A chat tidied once is tidied no more, even after its Undo; a Branch of the chat keeps this.</span>
+      <span class="lre-small lre-muted">A change applies from the next turn. A thing whose tidy you undid stays where it is while its holder keeps it, and a finding you left in Tidy up is left alone. A Branch of the chat keeps this.</span>
     </div>
   );
 }

@@ -1,51 +1,59 @@
-// Settings (DESIGN §12): a home list of pages in groups, each page under a header with
-// Back. Getting started: Helper model, Model use, Steps and connections, Minds, Narrator, Timeouts.
-// Agents: Agents (how an agent turn runs, the agent runtime's budgets, compaction, recording,
-// throttles, caching and acceptance runs), Roles (each turn role's model, knowledge, tools, tier and
-// budget), Main agent (the main agent's model, knowledge, tools, turn task and budget), Assistant
-// (the GM assistant's connection, knowledge, how its changes land, its history and budget), Prompts,
-// every text sent to a model (DESIGN §6.12), Writes (what waits while the engine runs) and Retention
-// (how long the agents' stored texts are kept). Defaults for new chats: Realism, Checks, Time.
-// Replies: Changes from the reply, Swipes. Your preset. Display: Show ids. About: Caveats, fetched on
-// their own (a dry run of the chat) by home and the Caveats page, and Diagnostics (each turn's steps,
-// model calls and failures; behind its own curtain).
-// The page is UI state (`ui.settings.page`), so it holds while the drawer switches modes. A running
-// chat's own rules (realism, checks, time, pins and Upgrade) live in GM → This chat.
+// Settings (DESIGN §12): a home list of pages in groups, each page under a header with Back, and a
+// page with pages of its own opening each under its own header. Getting started: Helper model, Model
+// use, Steps and connections, Minds, Narrator, Timeouts. Agents: Agents (a turn at a glance, every
+// agent call's switches, and its sections, each a page of its own: Pipeline, Review card, System
+// instructions, Budgets, Compaction, Recording, Throttles, Caching, Acceptance runs), Roles (a row
+// per role, each opening the role's page), Context (what each role starts with, each row opening the
+// role's page at What it reads), Main agent and Assistant (on the role page's template), Prompts,
+// every text sent to a model (DESIGN §6.12), and Retention (how long the agents' stored texts are
+// kept). Defaults for new chats: Realism, Checks, Time. Replies: Changes from the reply, Swipes. Your
+// preset. Display: Show ids. About: Caveats, fetched on their own (a dry run of the chat) by home
+// and the Caveats page, and Diagnostics (each turn's steps, model calls and failures; behind its own
+// curtain). Where Settings is, is UI state (`ui.settings`, a `SettingsRoute`), so it holds while the
+// drawer switches modes; Back and Escape go up one level (`settingsBack`), and focus returns to the
+// row that opened the page left (`settingsFocus`). A running chat's own rules (realism, checks, time,
+// pins and Upgrade) live in GM → This chat.
 
 import type { ComponentChildren } from "preact";
 import { useEffect, useRef, useState } from "preact/hooks";
+import { ROLE_IDS, ROLE_LABEL, type RoleId } from "../../shared/agent-roles";
 import { hasOwn, type JsonObject, type JsonValue } from "../../shared/json";
 import { mergeAdjusted, type MergeAdjustment } from "../../shared/json-patch";
-import type { SettingsResult } from "../../shared/protocol";
+import type { PromptDef } from "../../shared/prompts";
+import type { PromptTestView, SettingsResult } from "../../shared/protocol";
+import type { RouteSettings } from "../../shared/role-routes";
 import { CHANGE_TYPES, stepConfigOf } from "../../shared/settings";
+import type { StateView } from "../../shared/state-view";
 import type { StepPurpose } from "../../shared/world";
 import { ADJUDICATION_PRESET_LABEL } from "../../shared/adjudication";
-import type { SettingsPage } from "../app";
-import { useApp, useUi, useView } from "../app";
+import { STEP_LABEL } from "../../shared/steps";
+import type { SettingsPage, SettingsRoute } from "../app";
+import { settingsBack, settingsFocus, useApp, useUi, useView } from "../app";
 import { Badge, Banner, Button, Empty, HostSwitch, List, ListRow, PageHeader, Section, useBusy, useShowIds } from "../components";
 import { humanize } from "../format";
 import type { IconName } from "../icons";
 import { revealInScroller } from "../scroll";
+import { useSelect } from "../store";
+import { DiagnosticsPage } from "../diagnostics";
+import { McpServerPage } from "../agents";
 import { ChecksPage, RealismPage, TimePage } from "./defaults";
 import { MindsSection } from "./minds";
 import { NarratorPage, narratorViewSummary } from "./narrator";
 import { PresetPage } from "./preset";
 import { ExtractionPage, SwipesPage } from "./replies";
 import { type Connection, HelperSection, helperSummary, ModelUseSection, StepsSection, useConnections } from "./steps";
-import { STEP_LABEL } from "../../shared/steps";
-import { AgentsSection, agentsSummary } from "./agents";
+import { AgentsHub, AgentsSubPage, agentsSummary } from "./agents";
 import { AssistantPage, assistantSummary } from "./assistant";
 import { ContextPage, contextSummary } from "./context";
 import { MainAgentPage, mainSummary } from "./main-agent";
+import { RolePage } from "./role-page";
 import { RolesPage, rolesSummary } from "./roles";
+import { assistantChanged, mainChanged, agentsChanged, rolesChanged } from "./changed";
+import { adjustedText, AGENTS_SUB, AGENTS_SUBS, ROLE_PLAIN, type AgentsSub } from "./labels";
 import { limitText, TimeoutsSection } from "./timeouts";
 import { RetentionPage, retentionSummary } from "./retention";
-import { DiagnosticsPage } from "../diagnostics";
-import { McpServerPage } from "../agents";
 import { LorePage, loreSummary } from "./lore";
 import { ownTextCount, promptTestRequest, PromptsPage } from "./agent-prompts";
-import type { PromptDef } from "../../shared/prompts";
-import { useSelect } from "../store";
 
 type Page = Exclude<SettingsPage, "home">;
 type Caveat = { code: string; message: string };
@@ -63,10 +71,10 @@ const PAGE: Record<Page, { title: string; subtitle: string; icon: IconName }> = 
   minds: { title: "Minds", subtitle: "How characters think and remember", icon: "sparkle" },
   narrator: { title: "Narrator", subtitle: "What the narrator knows, and what of a secret", icon: "eye" },
   timeouts: { title: "Timeouts", subtitle: "How long each wait may run", icon: "hourglass" },
-  agents: { title: "Agents", subtitle: "How agent turns run, and the runtime's budgets, caching and acceptance runs", icon: "function" },
-  roles: { title: "Roles", subtitle: "What each role of an agent turn runs with", icon: "branch" },
-  context: { title: "Context", subtitle: "What each role starts with, and how the main agent briefs it", icon: "layers" },
-  main: { title: "Main agent", subtitle: "The agent that decides each turn, when the pipeline has one", icon: "sparkle" },
+  agents: { title: "Agents", subtitle: "A turn at a glance, and what every agent runs under", icon: "function" },
+  roles: { title: "Roles", subtitle: "Each part of an agent turn, and where it runs", icon: "branch" },
+  context: { title: "Context", subtitle: "What each role starts with", icon: "layers" },
+  main: { title: "Main agent", subtitle: "Decides each turn, when the pipeline has one, and reviews the narrator's prompt", icon: "sparkle" },
   assistant: { title: "Assistant", subtitle: "The GM assistant's model and budget", icon: "message" },
   realism: { title: "Realism", subtitle: "For new chats", icon: "layers" },
   checks: { title: "Checks", subtitle: "For new chats", icon: "dice" },
@@ -103,9 +111,35 @@ const STATIC_CAVEATS = [
   "Undo covers the latest reply; earlier changes go through Keep or Discard.",
 ];
 
-/** Each home row's one-line summary of the page behind it; `caveats` is null while they're checked. */
+/** A page within a page that names one of its own: an Agents section, or a role on Roles or Context. */
+function subOf(route: SettingsRoute): { agents: AgentsSub } | { role: RoleId } | null {
+  const sub = route.sub;
+  if (sub === undefined) return null;
+  if (route.page === "agents") return (AGENTS_SUBS as readonly string[]).includes(sub) ? { agents: sub as AgentsSub } : null;
+  if (route.page === "roles" || route.page === "context") return (ROLE_IDS as readonly string[]).includes(sub) ? { role: sub as RoleId } : null;
+  return null;
+}
+
+/** A page's header: its title and subtitle, and what its Back goes back to. Home has none. */
+export function settingsHeader(route: SettingsRoute): { title: string; subtitle: string; backLabel: string } | null {
+  if (route.page === "home") return null;
+  const sub = subOf(route);
+  if (sub === null) return { ...PAGE[route.page], backLabel: "Settings" };
+  if ("agents" in sub) return { title: AGENTS_SUB[sub.agents].title, subtitle: AGENTS_SUB[sub.agents].subtitle, backLabel: PAGE[route.page].title };
+  return { title: ROLE_LABEL[sub.role], subtitle: ROLE_PLAIN[sub.role], backLabel: PAGE[route.page].title };
+}
+
+/** What a key press on a page does: Escape goes back, as it pops a sheet in Play, unless a control handled it first. */
+export function settingsKeyDown(event: { key: string; defaultPrevented: boolean; preventDefault(): void }, back: () => void): void {
+  if (event.key !== "Escape" || event.defaultPrevented) return;
+  event.preventDefault();
+  back();
+}
+
+/** Each home row's one-line summary of the page behind it, and how many of its settings are changed; `caveats` is null while they're checked. */
 function summaryOf(page: Page, data: SettingsResult, caveats: readonly Caveat[] | null, showIds: boolean, connections: readonly Connection[]): { subtitle?: string; value?: string; badge?: ComponentChildren } {
   const { settings } = data;
+  const changed = (count: number) => (count > 0 ? { badge: <Badge tone="accent">{`${count} changed`}</Badge> } : {});
   switch (page) {
     case "helper":
       return { subtitle: helperSummary(settings.helper, connections) };
@@ -118,15 +152,15 @@ function summaryOf(page: Page, data: SettingsResult, caveats: readonly Caveat[] 
     case "timeouts":
       return { subtitle: `Engine run ${limitText(settings.timeouts.engineRunMs)} · reading the reply ${limitText(settings.timeouts.postReplyMs)}` };
     case "agents":
-      return { subtitle: agentsSummary(settings.agents) };
+      return { subtitle: agentsSummary(settings.agents), ...changed(agentsChanged(settings.agents)) };
     case "roles":
-      return { subtitle: rolesSummary(settings.agents) };
+      return { subtitle: rolesSummary(settings.agents), ...changed(rolesChanged(settings.agents)) };
     case "context":
       return { subtitle: contextSummary(settings.agents) };
     case "main":
-      return { subtitle: mainSummary(settings.agents, connections) };
+      return { subtitle: mainSummary(settings.agents, connections), ...changed(mainChanged(settings.agents, settings.timeouts)) };
     case "assistant":
-      return { subtitle: assistantSummary(settings.agents.assistant, connections) };
+      return { subtitle: assistantSummary(settings.agents.assistant, connections), ...changed(assistantChanged(settings.agents)) };
     case "steps": {
       const purposes = Object.keys(STEP_LABEL) as StepPurpose[];
       const on = purposes.filter((purpose) => stepConfigOf(settings.modelUse.steps, purpose).enabled).length;
@@ -169,9 +203,8 @@ function summaryOf(page: Page, data: SettingsResult, caveats: readonly Caveat[] 
   }
 }
 
-function Home(props: { data: SettingsResult; caveats: readonly Caveat[] | null; open(page: Page): void }) {
+function Home(props: { data: SettingsResult; caveats: readonly Caveat[] | null; connections: readonly Connection[]; open(page: Page): void }) {
   const showIds = useShowIds();
-  const connections = useConnections();
   return (
     <div class="lre-stack lre-set-home" data-lre-settings-page="home">
       <PageHeader title="Settings" subtitle="Yours, for every world chat" />
@@ -179,7 +212,7 @@ function Home(props: { data: SettingsResult; caveats: readonly Caveat[] | null; 
         <Section key={group.title} title={group.title} flush>
           <List>
             {group.pages.map((page) => {
-              const summary = summaryOf(page, props.data, props.caveats, showIds, connections);
+              const summary = summaryOf(page, props.data, props.caveats, showIds, props.connections);
               return (
                 <div key={page} class="lre-set-home-row" data-lre-settings={page}>
                   <ListRow icon={PAGE[page].icon} title={PAGE[page].title} subtitle={summary.subtitle} value={summary.value} valueTone="muted" badge={summary.badge} chevron onClick={() => props.open(page)} />
@@ -249,12 +282,87 @@ function CaveatsPage(props: { caveats: readonly Caveat[] | null; open(page: Page
   );
 }
 
+/** What a page needs besides the settings: the connections, the caveats, the open chat's view and Test, and the way to another page. */
+export interface BodyContext {
+  connections: readonly Connection[];
+  caveats: readonly Caveat[] | null;
+  view: StateView | null;
+  test?: (def: PromptDef, text: string) => Promise<PromptTestView | null>;
+  busy: boolean;
+  patch(patch: JsonObject): void;
+  go(route: SettingsRoute): void;
+}
+
+/** The body of the page `route` names, without hooks of its own: a page within a page where the route names one it has, else the page itself. */
+export function SettingsBody(props: { route: SettingsRoute; data: SettingsResult; ctx: BodyContext }) {
+  const { route, data, ctx } = props;
+  const { settings } = data;
+  const { busy, patch, go, connections } = ctx;
+  const routes: RouteSettings = { modelUse: settings.modelUse, helper: settings.helper };
+  const sub = subOf(route);
+  if (sub !== null && "agents" in sub) return <AgentsSubPage sub={sub.agents} agents={settings.agents} connections={connections} busy={busy} patch={patch} go={go} />;
+  if (sub !== null) return <RolePage id={sub.role} agents={settings.agents} routes={routes} prompts={settings.prompts} connections={connections} busy={busy} patch={patch} go={go} />;
+  switch (route.page) {
+    case "home":
+      return null;
+    case "helper":
+      return <HelperSection helper={settings.helper} modelUse={settings.modelUse} agents={settings.agents} patch={patch} busy={busy} />;
+    case "model":
+      return <ModelUseSection modelUse={settings.modelUse} meter={ctx.view?.meter ?? null} patch={patch} openTimeouts={() => go({ page: "timeouts" })} busy={busy} />;
+    case "steps":
+      return <StepsSection modelUse={settings.modelUse} helper={settings.helper} agents={settings.agents} jobs={settings.jobs} gates={settings.gates} prompts={settings.minds.prompts} patch={patch} openHelper={() => go({ page: "helper" })} busy={busy} />;
+    case "minds":
+      return <MindsSection minds={settings.minds} patch={patch} busy={busy} />;
+    case "narrator":
+      return <NarratorPage narrator={settings.narrator} statePrices={settings.statePrices} offstage={settings.offstage} patch={patch} busy={busy} />;
+    case "timeouts":
+      return <TimeoutsSection timeouts={settings.timeouts} patch={patch} busy={busy} />;
+    case "agents":
+      return <AgentsHub agents={settings.agents} routes={routes} connections={connections} busy={busy} patch={patch} go={go} />;
+    case "roles":
+      return <RolesPage agents={settings.agents} timeouts={settings.timeouts} routes={routes} connections={connections} go={go} />;
+    case "context":
+      return <ContextPage agents={settings.agents} go={go} />;
+    case "main":
+      return <MainAgentPage agents={settings.agents} timeouts={settings.timeouts} prompts={settings.prompts} connections={connections} busy={busy} patch={patch} go={go} />;
+    case "assistant":
+      return <AssistantPage agents={settings.agents} prompts={settings.prompts} connections={connections} busy={busy} patch={patch} go={go} />;
+    case "realism":
+      return <RealismPage settings={settings} patch={patch} busy={busy} />;
+    case "checks":
+      return <ChecksPage settings={settings} skills={ctx.view?.controls?.skills ?? []} patch={patch} busy={busy} />;
+    case "time":
+      return <TimePage settings={settings} patch={patch} busy={busy} />;
+    case "extraction":
+      return <ExtractionPage data={data} patch={patch} busy={busy} />;
+    case "swipes":
+      return <SwipesPage value={settings.swipeDefault} texts={settings.swipeTexts} patch={patch} busy={busy} />;
+    case "preset":
+      return <PresetPage hideJsonBlocks={settings.hideJsonBlocks} patch={patch} busy={busy} />;
+    case "lore":
+      return <LorePage loreBooks={settings.loreBooks} loreIndex={settings.loreIndex} patch={patch} busy={busy} />;
+    case "display":
+      return <DisplayPage />;
+    case "diagnostics":
+      return <DiagnosticsPage diagnostics={settings.diagnostics} patch={patch} busy={busy} />;
+    case "mcp":
+      return <McpServerPage />;
+    case "prompts":
+      return <PromptsPage prompts={settings.prompts} patch={patch} busy={busy} {...(ctx.test ? { test: ctx.test } : {})} {...(route.open ? { open: route.open } : {})} />;
+    case "retention":
+      return <RetentionPage retention={settings.retention} patch={patch} busy={busy} />;
+    case "caveats":
+      return <CaveatsPage caveats={ctx.caveats} open={(page) => go({ page })} />;
+  }
+}
+
 export function Settings() {
   const app = useApp();
   const view = useView();
   // The open chat, which a role text's Test on Prompts runs on.
   const chatId = useSelect(app.sync, (state) => state.chatId);
-  const page = useUi((ui) => ui.settings.page);
+  const route = useUi((ui) => ui.settings);
+  const connections = useConnections();
   const [data, setData] = useState<SettingsResult | null>(null);
   const [failed, setFailed] = useState(false);
   // The preset caveats, checked apart from settings (a dry run of the chat takes long on a long chat): null while checking.
@@ -262,10 +370,11 @@ export function Settings() {
   const caveatsAsked = useRef(0);
   const [busy, run] = useBusy();
   const [adjusted, setAdjusted] = useState<MergeAdjustment[]>([]);
-  useEffect(() => setAdjusted([]), [page]);
+  const where = `${route.page}/${route.sub ?? ""}/${route.at ?? ""}`;
+  useEffect(() => setAdjusted([]), [where]);
   const root = useRef<HTMLDivElement>(null);
-  // The page last opened from home, so Back returns focus to its row.
-  const opener = useRef<Page | null>(null);
+  // Where Settings was before, so Back returns focus to the row that opened the page left.
+  const last = useRef<SettingsRoute | null>(null);
   useEffect(() => {
     void app.request({ type: "lre.settings.get" }).then((result) => {
       if (result) setData(result);
@@ -274,119 +383,53 @@ export function Settings() {
   }, []);
   // Home and Caveats ask for the caveats each time they open; the latest ask wins.
   useEffect(() => {
-    if (page !== "home" && page !== "caveats") return;
+    if (route.page !== "home" && route.page !== "caveats") return;
     const asked = (caveatsAsked.current += 1);
     setCaveats(null);
     void app.request({ type: "lre.settings.caveats" }).then((result) => {
       if (asked !== caveatsAsked.current) return;
       setCaveats(result ? result.caveats : [{ code: "preset_lint_failed", message: "The preset check didn't answer, so its warnings aren't known. Open Caveats again to retry." }]);
     });
-  }, [page]);
+  }, [route.page]);
   useEffect(() => {
     const el = root.current;
     if (!el || !data) return;
-    // A page opens at its header, with focus on Back; returning home puts focus back on the row that opened it.
-    const target = page === "home" ? (opener.current ? el.querySelector<HTMLElement>(`[data-lre-settings="${opener.current}"] button`) : null) : el.querySelector<HTMLElement>(".lre-page-header button");
+    const focus = settingsFocus(last.current, route);
+    last.current = route;
+    const target = el.querySelector<HTMLElement>(focus.selector);
     if (!target) return;
     target.focus({ preventScroll: true });
-    revealInScroller(page === "home" ? target : (target.closest(".lre-page-header") ?? target), page === "home" ? "nearest" : "start");
-  }, [page, data !== null]);
-  const go = (next: SettingsPage) => app.ui.update((ui) => ({ ...ui, settings: { page: next } }));
+    revealInScroller(focus.selector === ".lre-page-header button" ? (target.closest(".lre-page-header") ?? target) : target, focus.reveal);
+  }, [where, data !== null]);
+  const go = (next: SettingsRoute) => app.ui.update((ui) => ({ ...ui, settings: next }));
   const patch = (body: JsonObject) =>
     run(async () => {
       const result = await app.request({ type: "lre.settings.set", patch: body });
       if (!result) return;
       setData(result);
-      // What came out other than sent (a value out of range, of the wrong kind, a key it doesn't know), said here as the MCP tools say it.
+      // What came out other than sent (a value out of range, of the wrong kind, a key it doesn't know), said here by each setting's name.
       setAdjusted(mergeAdjusted(body, result.settings as unknown as JsonValue));
     });
   if (!data) return failed ? <Empty icon="alert">Settings could not be loaded.</Empty> : <Empty>Loading settings…</Empty>;
-  if (page === "home") {
+  const header = settingsHeader(route);
+  if (header === null) {
     return (
       <div ref={root} class="lre-set" data-lre-section="settings">
-        <Home
-          data={data}
-          caveats={caveats}
-          open={(next) => {
-            opener.current = next;
-            go(next);
-          }}
-        />
+        <Home data={data} caveats={caveats} connections={connections} open={(page) => go({ page })} />
       </div>
     );
   }
-  const { settings } = data;
-  const body =
-    page === "helper" ? (
-      <HelperSection helper={settings.helper} patch={patch} busy={busy} />
-    ) : page === "model" ? (
-      <ModelUseSection modelUse={settings.modelUse} meter={view?.meter ?? null} patch={patch} openTimeouts={() => go("timeouts")} busy={busy} />
-    ) : page === "steps" ? (
-      <StepsSection modelUse={settings.modelUse} helper={settings.helper} jobs={settings.jobs} gates={settings.gates} prompts={settings.minds.prompts} patch={patch} openHelper={() => go("helper")} busy={busy} />
-    ) : page === "minds" ? (
-      <MindsSection minds={settings.minds} patch={patch} busy={busy} />
-    ) : page === "narrator" ? (
-      <NarratorPage narrator={settings.narrator} statePrices={settings.statePrices} patch={patch} busy={busy} />
-    ) : page === "timeouts" ? (
-      <TimeoutsSection timeouts={settings.timeouts} patch={patch} busy={busy} />
-    ) : page === "agents" ? (
-      <AgentsSection agents={settings.agents} patch={patch} busy={busy} />
-    ) : page === "roles" ? (
-      <RolesPage agents={settings.agents} patch={patch} busy={busy} />
-    ) : page === "context" ? (
-      <ContextPage agents={settings.agents} patch={patch} busy={busy} />
-    ) : page === "main" ? (
-      <MainAgentPage agents={settings.agents} timeouts={settings.timeouts} patch={patch} busy={busy} />
-    ) : page === "assistant" ? (
-      <AssistantPage agents={settings.agents} patch={patch} busy={busy} />
-    ) : page === "realism" ? (
-      <RealismPage settings={settings} patch={patch} busy={busy} />
-    ) : page === "checks" ? (
-      <ChecksPage settings={settings} skills={view?.controls?.skills ?? []} patch={patch} busy={busy} />
-    ) : page === "time" ? (
-      <TimePage settings={settings} patch={patch} busy={busy} />
-    ) : page === "extraction" ? (
-      <ExtractionPage data={data} patch={patch} busy={busy} />
-    ) : page === "swipes" ? (
-      <SwipesPage value={settings.swipeDefault} texts={settings.swipeTexts} patch={patch} busy={busy} />
-    ) : page === "preset" ? (
-      <PresetPage hideJsonBlocks={settings.hideJsonBlocks} patch={patch} busy={busy} />
-    ) : page === "lore" ? (
-      <LorePage loreBooks={settings.loreBooks} loreIndex={settings.loreIndex} patch={patch} busy={busy} />
-    ) : page === "display" ? (
-      <DisplayPage />
-    ) : page === "diagnostics" ? (
-      <DiagnosticsPage diagnostics={settings.diagnostics} patch={patch} busy={busy} />
-    ) : page === "mcp" ? (
-      <McpServerPage />
-    ) : page === "prompts" ? (
-      <PromptsPage prompts={settings.prompts} patch={patch} busy={busy} {...(chatId ? { test: async (def: PromptDef, text: string) => (await app.request<"lre.prompts">(promptTestRequest(chatId, def.id, text)))?.test ?? null } : {})} />
-    ) : page === "retention" ? (
-      <RetentionPage retention={settings.retention} patch={patch} busy={busy} />
-    ) : (
-      <CaveatsPage caveats={caveats} open={go} />
-    );
+  const back = () => go(settingsBack(route));
+  const test = chatId ? async (def: PromptDef, text: string) => (await app.request<"lre.prompts">(promptTestRequest(chatId, def.id, text)))?.test ?? null : undefined;
   return (
-    <div
-      ref={root}
-      class="lre-set"
-      data-lre-section="settings"
-      onKeyDown={(event) => {
-        // Escape goes back home, as it pops a sheet in Play; a control that handled it first keeps it.
-        if (event.key !== "Escape" || event.defaultPrevented) return;
-        event.preventDefault();
-        go("home");
-      }}
-    >
-      <PageHeader title={PAGE[page].title} subtitle={PAGE[page].subtitle} onBack={() => go("home")} backLabel="Settings" />
+    <div ref={root} class="lre-set" data-lre-section="settings" data-lre-settings-at={route.sub ?? route.page} onKeyDown={(event) => settingsKeyDown(event, back)}>
+      <PageHeader title={header.title} subtitle={header.subtitle} onBack={back} backLabel={header.backLabel} />
       {adjusted.length > 0 ? (
         <Banner tone="info">
-          <span data-lre-settings-adjusted>
-            Saved, kept within what each setting takes: {adjusted.map((a) => `${a.pointer.slice(1).replace(/\//g, " → ")} is ${a.now === undefined ? "not set" : JSON.stringify(a.now)}, not ${JSON.stringify(a.sent)}`).join("; ")}.
-          </span>
+          <span data-lre-settings-adjusted>{adjustedText(adjusted)}</span>
         </Banner>
       ) : null}
-      {body}
+      <SettingsBody route={route} data={data} ctx={{ connections, caveats, view, ...(test ? { test } : {}), busy, patch, go }} />
     </div>
   );
 }

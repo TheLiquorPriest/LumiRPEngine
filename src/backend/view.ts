@@ -48,6 +48,11 @@ import { thingsConfigOf } from "../shared/things";
 import type { ChatKnowledgePrefs } from "./chat-knowledge-prefs";
 import type { StoredChip } from "./chips";
 import type { ReplyFailure } from "./ledger-io";
+import { OFFSTAGE_TEXT_ID, type PromptTexts } from "../shared/prompts";
+import { TELL_LABEL, type OffstageSettings } from "../shared/offstage";
+import { renderPrompt } from "./prompts";
+import { chatCashRule, toggles } from "../packs/economy/core/pay";
+import { FEATURE_DEFS } from "../shared/finance";
 
 /** The palette's timelapse action; its params are `{target, overrides}`. */
 export const TIMELAPSE_ACTION = "timelapse";
@@ -310,7 +315,7 @@ export function palette(world: WorldDoc, state: WorldState, registry: Registry):
   return { entries, timelapse, ...(encounter ? { encounter } : {}) };
 }
 
-function controls(world: WorldDoc, state: WorldState, sceneType: string, registry: Registry, knowledge: ViewInput["knowledge"]): ControlsView {
+function controls(world: WorldDoc, state: WorldState, sceneType: string, registry: Registry, knowledge: ViewInput["knowledge"], offstage: OffstageSettings): ControlsView {
   return {
     // The chat's own preset: a new chat may start from the user's settings, and This chat changes it.
     realism: { preset: presetOf(state.realism), levels: { ...state.realism.levels }, tierCaps: structuredClone(state.realism.tierCaps), bandTiers: bandTiers(world), floors: levelFloors(world), claims: claimsOf(world, state) },
@@ -335,7 +340,17 @@ function controls(world: WorldDoc, state: WorldState, sceneType: string, registr
       narrator: { chat: knowledge.chat.narrator ?? null, world: narratorViewOf(world.narrator), user: knowledge.narrator },
     },
     things: { tidy: { chat: knowledge.chat.tidy ?? null, world: thingsConfigOf(world).tidy.auto } },
+    cash: cashControls(registry, world, state),
+    offstage,
   };
+}
+
+/** Where cash needs a machine (GM → This chat → Money): the chat's own rule beside the world's switch, at the player character's Money level; null where money is off. */
+function cashControls(registry: Registry, world: WorldDoc, state: WorldState): ControlsView["cash"] {
+  const level = registry.context(world, state).levelOf(world.pov, "money");
+  if (!(level > 0)) return null;
+  const set = toggles(world).atm;
+  return { chat: chatCashRule(state), world: typeof set === "boolean" ? set : null, level, usual: FEATURE_DEFS.atm.on };
 }
 
 /** Turns in the Journal (D8: player-known results), oldest first; the latest 100. */
@@ -406,7 +421,7 @@ function refKey(ref: EventRef): string {
  * agents' writer finds a role's latest write for its retry check. `pre` counts the leading `events`
  * the turn planned before its reply (its actions and processes); the rest are the reply's read.
  */
-export function appliedEvents(rec: Rec, fold: FoldOutput, index: number): { events: LedgerEvent[]; pre: number; post: LedgerEvent[]; fixes: { seq: number; events: LedgerEvent[]; by?: { action: string; label: string }; gm?: true; agent?: NonNullable<PostEntry["agent"]> }[]; agents: { seq: number; events: LedgerEvent[]; agent: NonNullable<PostEntry["agent"]> }[] } {
+export function appliedEvents(rec: Rec, fold: FoldOutput, index: number): { events: LedgerEvent[]; pre: number; post: LedgerEvent[]; fixes: { seq: number; events: LedgerEvent[]; by?: NonNullable<PostEntry["by"]>; gm?: true; agent?: NonNullable<PostEntry["agent"]> }[]; agents: { seq: number; events: LedgerEvent[]; agent: NonNullable<PostEntry["agent"]> }[] } {
   const result = fold.messages[index];
   // A bare record folds as a plain message, and its live entries apply all the same.
   if (!result || (result.fold !== "on_path" && result.fold !== "view" && result.fold !== "plain")) return { events: [], pre: 0, post: [], fixes: [], agents: [] };
@@ -429,10 +444,33 @@ export function appliedEvents(rec: Rec, fold: FoldOutput, index: number): { even
 }
 
 /**
+ * Whether anything was done on reply `index` of `chain` (the journal's) after its entry `seq`
+ * (DESIGN §11): a later live entry on its record that an Undo hasn't taken back whole, or a later
+ * marker on its message that folds after the record's events (a setting, an Upgrade). Tell or Don't
+ * tell takes the entry back and makes it again last, so only one nothing came after can change: made
+ * again after a later change, it would undo that change (a pause made again after its resume pauses
+ * the payment again).
+ */
+export function doneAfter(chain: readonly ChainMessage[], fold: FoldOutput, rec: Rec, index: number, seq: number): boolean {
+  const parent = fold.messages[index]?.parentPath;
+  if (parent === undefined) return true;
+  const recPath = turnPath(rec);
+  const undone = new Set(rec.undone.map(refKey));
+  // An entry stands while one of its refs (its first, for one with no events of its own) isn't undone.
+  if (rec.post.some((p) => p.seq > seq && isLive(p.at, parent, recPath) && Array.from({ length: Math.max(1, p.events.length) }, (_, i) => refKey({ in: "post", seq: p.seq, index: i })).some((k) => !undone.has(k)))) return true;
+  // A marker up to `markersApplied` folds before the record's events, so before every entry.
+  return (chain[index]?.ledger?.markers ?? []).some((mk) => mk.seq > Math.max(seq, rec.markersApplied) && isLive(mk.at, parent, recPath));
+}
+
+/** An action done off screen with a change after it (`doneAfter`): its chip says why its Tell or Don't tell is gone. */
+export const TELL_FIXED = "Something changed after it, so whether it's told can't change now";
+
+/**
  * The Journal's turn entries: what each folded turn applied, in player-facing lines (only events
  * the POV may see, about things it has met, worded with labels, leak-checked). They are `note`
- * entries, each followed by a `fix` note per ✎ fix or GM edit the player may see; the fold's own
- * notes follow them. The latest `keep` of them.
+ * entries, each followed by a `fix` note per ✎ fix or GM edit the player may see, and per action
+ * the player did off screen (DESIGN §11), which reads as itself where it changed nothing they see
+ * (a standing payment set up, someone hired); the fold's own notes follow them. The latest `keep` of them.
  */
 function turnNotes(chain: readonly ChainMessage[], fold: FoldOutput, core: LedgerCore, registry: Registry, world: WorldDoc, state: WorldState, keep = JOURNAL_TURNS): JournalNote[] {
   const out: JournalNote[] = [];
@@ -446,8 +484,11 @@ function turnNotes(chain: readonly ChainMessage[], fold: FoldOutput, core: Ledge
     if (minutes > 0 && fold.messages[i]?.fold !== "plain") lines.push(`${spanText(minutes)} passed`);
     if (lines.length > 0) out.push({ kind: "note", messageId: m.id, ref: null, text: lines.join(" · ") });
     for (const fix of applied.fixes) {
-      const fixed = fixLines(registry, world, state, fix.events);
-      if (fixed.length > 0) out.push({ kind: "fix", messageId: m.id, ref: { in: "post", seq: fix.seq, index: 0 }, text: fixed.join(" · ") });
+      const seen = fixLines(registry, world, state, fix.events);
+      const fixed = seen.length > 0 || !fix.by || fix.by.action === "hint" ? seen : [fix.by.label];
+      // Who made it, for the main agent's digest (DESIGN §11): the player out of play, told or not, or the GM (an edit, a review card's Apply).
+      const source = fix.by ? (fix.by.told !== undefined ? "told" : "untold") : fix.gm || fix.agent ? "gm" : undefined;
+      if (fixed.length > 0) out.push({ kind: "fix", messageId: m.id, ref: { in: "post", seq: fix.seq, index: 0 }, text: fixed.join(" · "), ...(source ? { source } : {}) });
     }
   });
   return out.slice(-keep);
@@ -463,6 +504,38 @@ export function journalNotes(core: LedgerCore, observed: readonly ChainMessage[]
   const world = core.playedAt(fold.state);
   if (!world) return [];
   return turnNotes(core.chain(prefix), fold, core, registry, world, fold.state, Number.POSITIVE_INFINITY);
+}
+
+/**
+ * What the player did off screen before a turn and told to the story (DESIGN §11): each told fix on
+ * the record of the reply the turn follows, standing (an undone one tells nothing), oldest first, as
+ * recorded (`by.told`, the Outcome's words). `index` is where the turn's reply is in `observed` (its
+ * length for a new reply), so a Re-run of the turn tells them again and the next turn, which follows
+ * another reply, doesn't.
+ */
+export function toldOffstage(core: LedgerCore, observed: readonly ChainMessage[], index: number): string[] {
+  const prefix = observed.slice(0, Math.max(0, index));
+  const chain = core.chain(prefix);
+  const at = chain.findLastIndex((m) => !m.isUser);
+  const m = chain[at];
+  const rec = m ? activeRecord(m, core.journal.tombstones) : null;
+  if (!m || !rec || !rec.post.some((p) => p.kind === "fix" && p.by?.told !== undefined)) return [];
+  return appliedEvents(rec, core.fold(prefix), at).fixes.flatMap((f) => (f.by?.told !== undefined && f.by.told !== "" ? [f.by.told] : []));
+}
+
+/**
+ * The Outcome's lines a turn leads with (DESIGN §6.2, §11): one per told off-screen fix before it
+ * (`toldOffstage`), in the text `outcome.offstage` of the turn's prompt set. Recorded with the turn's
+ * other Outcome lines, so a Re-narrate tells them as the turn did.
+ */
+export function offstageLines(core: LedgerCore, observed: readonly ChainMessage[], index: number, texts: PromptTexts): string[] {
+  return toldOffstage(core, observed, index).map((what) => renderPrompt(OFFSTAGE_TEXT_ID, texts, { what }));
+}
+
+/** An out-of-play action's words for the Outcome (`by.told`): what it was, with its picks, then what it changed as the player saw it. */
+export function toldWords(what: string, changes: readonly string[]): string {
+  const said = what.trim().replace(/[.\s]+$/, "");
+  return changes.length > 0 ? `${said}. What changed: ${changes.join("; ")}` : said;
 }
 
 /** Turns `{{recent}}` holds (DESIGN §5.2). */
@@ -643,7 +716,15 @@ function derivedChips(chain: readonly ChainMessage[], fold: FoldOutput, keepRepo
       // A mechanical action of the player's (DESIGN §11), or a hint they opened, is named as theirs,
       // never as a correction: its label says what they did, so nothing they can't see is summed up.
       const detail = fixed.length > 0 ? fixed.join(" · ") : fix.by ? null : unseenFixLine(registry, world, state, fix.events);
-      chips.push({ id: fixChip(m.id, m.swipeId, fix.seq), kind: "fix", messageId: m.id, label: fix.by?.label ?? (fix.gm ? "GM edit" : "Corrected"), ...(detail !== null ? { detail } : {}), actions: [{ id: "undo", label: "Undo", style: "danger" }], expires: "next_send" });
+      // An out-of-play action's chip on the head says whether the story hears of it, and changes that
+      // until the next turn while it is the last thing done there (DESIGN §11); one with a change after
+      // it (`doneAfter`) says why it can't.
+      const offstage = fix.by && i === headIndex && fix.by.action !== "hint" ? fix.by : null;
+      const told = offstage ? (offstage.told !== undefined ? "Told in the next reply" : "Not told to the story") : null;
+      const settled = offstage !== null && doneAfter(chain, fold, rec, i, fix.seq);
+      const shown = [detail, told, settled ? TELL_FIXED : null].filter((s): s is string => s !== null).join(" · ");
+      const tell = offstage && !settled ? [offstage.told !== undefined ? { id: "untell", label: "Don't tell" } : { id: "tell", label: TELL_LABEL }] : [];
+      chips.push({ id: fixChip(m.id, m.swipeId, fix.seq), kind: "fix", messageId: m.id, label: fix.by?.label ?? (fix.gm ? "GM edit" : "Corrected"), ...(shown !== "" ? { detail: shown } : {}), actions: [...tell, { id: "undo", label: "Undo", style: "danger" }], expires: "next_send" });
     }
     chips.push(...overdueChips(m.id, ctx, state, world));
   });
@@ -746,6 +827,8 @@ export interface ViewInput {
   mapDisplay?: MapDisplay | null;
   /** The chat's own knowledge choices (`ChatKnowledge`), beside the user's: knowledge tracking and the narrator's knowledge. */
   knowledge: { chat: ChatKnowledgePrefs; tracking: boolean; narrator: NarratorView };
+  /** Settings → Narrator → Out-of-play actions, the user's: what each confirm step's Tell switch starts from (`ControlsView.offstage`). */
+  offstage: OffstageSettings;
   /** What the chat's views share between builds (`ViewMemo`). */
   memo: ViewMemo;
 }
@@ -770,7 +853,7 @@ export function buildView(input: ViewInput): StateView {
   // record, that includes the starting markers (the world's defaults, the user's settings filling
   // in), which the head fold doesn't hold yet; while a planned turn is in flight, its plan.
   const paletteKey = `${core.renderKey(observed, keys)}\u0000${stateKey}`;
-  const controlsKey = (sceneType: string): string => `${paletteKey}\u0000${sceneType}\u0000${JSON.stringify(input.knowledge)}`;
+  const controlsKey = (sceneType: string): string => `${paletteKey}\u0000${sceneType}\u0000${JSON.stringify(input.knowledge)}\u0000${JSON.stringify(input.offstage)}`;
   const paletteHit = memo.palette?.key === paletteKey ? memo.palette : null;
   const controlsHit = chainHit && memo.controls?.key === controlsKey(chainHit.scene.sceneType) ? memo.controls : null;
   let next: WorldState | null = null;
@@ -817,7 +900,7 @@ export function buildView(input: ViewInput): StateView {
     }
     const sceneType = read.scene.sceneType;
     const shownPalette = paletteHit ?? (memo.palette = { key: paletteKey, palette: kept(palette(world, nextState(), registry)) });
-    const shownControls = controlsHit ?? (memo.controls = { key: controlsKey(sceneType), controls: kept(controls(world, nextState(), sceneType, registry, input.knowledge)) });
+    const shownControls = controlsHit ?? (memo.controls = { key: controlsKey(sceneType), controls: kept(controls(world, nextState(), sceneType, registry, input.knowledge, input.offstage)) });
     const pending: PendingMark[] = journal.held.map((h) => ({ panel: "*", entity: h.write.kind === "post" ? povEntity(world) : null }));
     const packs: Record<PackId, number> = {};
     for (const pack of registry.packs) packs[pack.id] = pack.version;

@@ -50,6 +50,8 @@ export interface AgentBudget {
   wallMs: Limit;
   /** Messages it may be sent after its first answer (§2's revision cap). */
   revisions: number;
+  /** Fresh runs the main agent's run_role may start of a request whose run answered (a turn role's only): each drops what the run before it staged, and its revisions start again. */
+  reruns: number;
   /** Its tool calls run at once, at most. */
   concurrency: number;
 }
@@ -280,7 +282,7 @@ export function defaultAgentSettings(): AgentSettings {
   return {
     thinkingInToolLoops: false,
     stream: true,
-    budget: { callTokensIn: "none", callTokensOut: HELPER_MAX_TOKENS, callMs: "none", callTools: "none", tokensIn: "none", tokensOut: "none", toolTurns: 10, wallMs: "none", revisions: 2, concurrency: 4 },
+    budget: { callTokensIn: "none", callTokensOut: HELPER_MAX_TOKENS, callMs: "none", callTools: "none", tokensIn: "none", tokensOut: "none", toolTurns: 10, wallMs: "none", revisions: 2, reruns: 1, concurrency: 4 },
     // No turn-wide limit: a fixed pipeline on a long chat sends well past any number that fits a short one, and each agent's own limits stand.
     turn: { tokensIn: "none", tokensOut: "none", toolTurns: "none", wallMs: "none" },
     loopRepeats: 3,
@@ -360,6 +362,8 @@ export interface AgentLimitDef {
   min: number;
   /** Whether it may be "none", and what that means. */
   none: string | null;
+  /** Read only for a turn role's requests (the main agent's run_role), so the GM assistant's, the main agent's and the final review's pages leave it out. */
+  roleOnly?: true;
   /** Its "none" leans on a turn's own bounds, which an agent outside a turn (the GM assistant) has none of: there it is no limit at all. */
   turnBound?: true;
 }
@@ -374,6 +378,7 @@ export const BUDGET_DEFS: Readonly<Record<keyof AgentBudget, AgentLimitDef>> = {
   toolTurns: { label: "Tool rounds per agent", limits: "How many of one agent's answers may call tools.", fires: "The calls past it aren't run, and the agent stops.", unit: "count", min: 0, none: "as many rounds as the tokens allow" },
   wallMs: { label: "Time per agent", limits: "How long one agent may work, from its first message.", fires: "Its call is stopped, and it stops with what it has.", unit: "ms", min: 1000, none: "the turn's timeouts bound it", turnBound: true },
   revisions: { label: "Revisions per agent", limits: "How many more messages an agent may be sent after its first answer.", fires: "The message isn't sent; the agent's last answer stands.", unit: "count", min: 0, none: null },
+  reruns: { label: "Fresh runs per request", limits: "How many times the main agent may run a role afresh on a request it already answered (run_role again): the fresh run drops what the run before it staged, and its revisions start again.", fires: "run_role is refused, saying what is left: the run's revisions, or commit.", unit: "count", min: 0, none: null, roleOnly: true },
   concurrency: { label: "Tool calls at once", limits: "How many of one answer's tool calls run at the same time.", fires: "The rest wait their turn.", unit: "count", min: 1, none: null },
 };
 
@@ -429,7 +434,7 @@ export const OUTPUT_CHARS_DEF: AgentLimitDef = { label: "Narrator-facing output,
 export const SYSTEM_TOKENS_DEF: AgentLimitDef = { label: "System instructions", limits: "How much of each agent's prompt its system files may take together: AGENTS.md and roles/<role>.md, the global workspace's (~/) and this chat's.", fires: "The files past it are cut at a line, and the agent is told which were cut.", unit: "tokens", min: 0, none: null };
 
 /** Settings → Agents → Pipeline's words for each choice. */
-export const PIPELINE_MODE_LABELS: Readonly<Record<PipelineMode, string>> = { fixed: "A fixed pipeline, in classic's order", main: "A main agent decides" };
+export const PIPELINE_MODE_LABELS: Readonly<Record<PipelineMode, string>> = { fixed: "A fixed pipeline", main: "A main agent decides" };
 export const MEMORY_PLACEMENT_LABELS: Readonly<Record<MemoryPlacement, string>> = { after_reply: "After the reply", before_next: "Before the next turn" };
 
 /** Settings → Agents → Review card's words for where an agent turn's changes that ask first wait. */
@@ -457,6 +462,7 @@ function budgetOf(v: unknown, d: Readonly<AgentBudget>): AgentBudget {
     toolTurns: limit(b.toolTurns, BUDGET_DEFS.toolTurns, d.toolTurns),
     wallMs: limit(b.wallMs, BUDGET_DEFS.wallMs, d.wallMs),
     revisions: whole(b.revisions, BUDGET_DEFS.revisions.min) ?? d.revisions,
+    reruns: whole(b.reruns, BUDGET_DEFS.reruns.min) ?? d.reruns,
     concurrency: whole(b.concurrency, BUDGET_DEFS.concurrency.min) ?? d.concurrency,
   };
 }

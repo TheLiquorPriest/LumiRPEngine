@@ -15,6 +15,7 @@ import { Button, Field, useBusy } from "./components";
 import { Icon } from "./icons";
 import { MoneyInput } from "./money-input";
 import { fixRequest, timeFixRequest, type Req } from "./requests";
+import { toastQueued } from "./queued";
 import { PlaceSheet } from "./character/place-picker";
 
 function initialText(target: FixTarget, currency: WorldCurrency): string {
@@ -165,7 +166,7 @@ export function FixEditor(props: { label: string; title?: string; target: FixTar
     run(async () => {
       const result = await app.request(request);
       if (result) {
-        if (result.pending) app.toast("Fix saved — it applies when the reply finishes.", "info");
+        toastQueued(app, result);
         props.onDone();
       }
     });

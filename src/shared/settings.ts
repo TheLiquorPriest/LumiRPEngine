@@ -16,6 +16,7 @@ import type { PromptSettings, SwipeTexts } from "./prompts";
 import type { DiagnosticsSettings } from "./diagnostics";
 import type { RetentionSettings } from "./stores";
 import { ITEM_CHANGES } from "./things";
+import type { OffstageSettings } from "./offstage";
 
 /**
  * How hard a model reasons on a call (Lumiverse's per-request reasoning override): `inherit` leaves
@@ -648,6 +649,13 @@ export interface UserSettings {
    * price comes up (Settings → Narrator → Prices, DESIGN §9.5). Off, neither is sent.
    */
   statePrices: boolean;
+  /**
+   * Out-of-play actions (Settings → Narrator → Out-of-play actions, DESIGN §11): whether a money,
+   * organization or Gear → Manage action done at once is told to the next turn's narrator, by its
+   * group, and the amount from which a payment to someone else is. Each action's confirm step and its
+   * chip start from these; the choice is recorded on the action when it is done.
+   */
+  offstage: OffstageSettings;
   /** Tidy up (GM → Things → Tidy up, ITEMS-SPEC §7.5, §11): how many findings one run shows. */
   tidy: TidySettings;
 }

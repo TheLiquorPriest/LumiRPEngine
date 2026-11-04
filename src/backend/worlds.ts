@@ -506,7 +506,8 @@ export class WorldStore {
         }
         what = `${request.collection} ${request.id}`;
         const tables = request.collection === "tables" ? { ...doc.tables } : null;
-        if (request.op === "put") collection[request.id] = request.value;
+        // A new item written without its id takes its key, so the id isn't typed twice.
+        if (request.op === "put") collection[request.id] = current === undefined ? keyed(request.collection, request.id, request.value) : request.value;
         else delete collection[request.id];
         try {
           doc = compileMaps(doc);
@@ -599,6 +600,8 @@ export class WorldStore {
       const next = isRecord(now) ? now : {};
       for (const id of new Set([...Object.keys(prior), ...Object.keys(next)])) {
         const from = hasOwn(prior, id) ? prior[id] : undefined;
+        // A new item added without its id takes its key, as a collection write's does.
+        if (from === undefined && hasOwn(next, id)) next[id] = keyed(name as WorldCollection, id, next[id]);
         const to = hasOwn(next, id) ? next[id] : undefined;
         if (jsonEqual(from, to)) continue;
         if (isRecord(from) && typeof from.map === "string") throw refusal([name, id], `${name} ${id} is drawn by the map ${from.map}; edit it there`);
@@ -712,6 +715,17 @@ function settingsProblem(value: unknown): string | null {
 function needsProblem(value: unknown): string | null {
   const problems = needsSettingsProblems(value);
   return problems.length === 0 ? null : `needs settings: ${problems.join("; ")}`;
+}
+
+/** The collections whose items carry no `id` of their own: a world's maps and its packs' settings. */
+const ID_FREE: Partial<Record<WorldCollection, true>> = { maps: true, packs: true };
+
+/**
+ * A new collection item as it is stored: one sent without an `id` takes its key. One that has an id
+ * keeps it as sent, so an id other than its key is still `id_mismatch`.
+ */
+function keyed<T>(collection: WorldCollection, key: string, value: T): T {
+  return !hasOwn(ID_FREE, collection) && isRecord(value) && !hasOwn(value, "id") ? ({ id: key, ...value } as T) : value;
 }
 
 /** A collection of the document as a mutable JSON record (the editors write raw JSON values). */

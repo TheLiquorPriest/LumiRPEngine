@@ -9,7 +9,7 @@ import type { EntityId, PlaceId } from "../shared/ids";
 import type { JsonObject } from "../shared/json";
 import type { TableRow } from "../shared/tables";
 import { TYPE_TABLES, type TypeTable } from "../shared/items-build";
-import { nameKey, type NameKey } from "../shared/things";
+import { nameKey, nameSizeOf, thingsConfigOf, type NameKey } from "../shared/things";
 import { own, rowOf } from "./pack-kit";
 import { passMemo } from "./read-pass";
 import type { ReadContext } from "./registry";
@@ -33,7 +33,7 @@ export interface ThingIndex extends ContentsIndex {
   owned: ReadonlyMap<EntityId, readonly EntityId[]>;
   /** Head noun → the things one of whose names is it, in id order. */
   heads: ReadonlyMap<string, readonly EntityId[]>;
-  /** Each thing's names: its own, then each alias, then its type row's. */
+  /** Each thing's names: its own, then each alias, then its type row's (or, a row giving no other names, those the world's sizes by name give its kind). */
   names: ReadonlyMap<EntityId, readonly ThingName[]>;
   /** Every thing (an item or anything that extends one: containers, kits, vehicles), in id order. */
   things: readonly EntityId[];
@@ -74,6 +74,7 @@ export function thingIndex(ctx: Pick<ReadContext, "registry" | "world" | "state"
     const names = new Map<EntityId, ThingName[]>();
     const things: EntityId[] = [];
     const isThing = new Map<string, boolean>();
+    const byName = thingsConfigOf(ctx.world).sizes.byName;
     for (const id of Object.keys(ctx.state.entities).sort()) {
       const e = own(ctx.state.entities, id);
       if (!e) continue;
@@ -96,8 +97,15 @@ export function thingIndex(ctx: Pick<ReadContext, "registry" | "world" | "state"
       add(e.name, "name");
       for (const alias of aliases) add(alias, "alias");
       // Its type row's name, and each other name the row goes by ("TV" for a television).
-      if (typeof type?.name === "string") add(type.name, "type");
-      for (const alias of Array.isArray(type?.aliases) ? type.aliases : []) if (typeof alias === "string") add(alias, "type");
+      const rowName = typeof type?.name === "string" ? type.name : null;
+      if (rowName !== null) add(rowName, "type");
+      const rowAliases = Array.isArray(type?.aliases) ? type.aliases.filter((a): a is string => typeof a === "string") : [];
+      for (const alias of rowAliases) add(alias, "type");
+      // A row that gives no other names (a world's own catalog), or none: the names the world's sizes by name give its kind ("fridge" for a refrigerator).
+      if (rowAliases.length === 0) {
+        const match = nameSizeOf(byName, [e.name, ...aliases, ...(rowName !== null ? [rowName] : [])]);
+        for (const other of match ? [match.name, ...match.entry.also] : []) add(other, "type");
+      }
       names.set(id, named);
       for (const head of new Set(named.flatMap((k) => k.heads))) push(heads, head, id);
     }

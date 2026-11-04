@@ -6,7 +6,8 @@
 //   their net worth and what they owe, from the economy's view of a party's money at its own Money
 //   level (`economy.finance`: the Money panel's, and the GM's): the party's whole view, unmasked
 //   (`player: false`), each account and owner named as the view names it (marked, or with its
-//   visibility); `gm` adds the economy's notes.
+//   visibility); their standing payments and income, each with where it came from (`made`: the
+//   world's author, an Upgrade's among them, or play, or the engine's own); `gm` adds the economy's notes.
 // - `money_prices`: what a catalog item costs at a place (`priceOf`; an item in words is the catalog
 //   item a purchase of it would be, `matchCatalog`), with its band and whether the place sells it;
 //   with no item, everything the place sells (`placeTrade`), priced there, in the order the Buy
@@ -68,6 +69,27 @@ interface Owed extends ViewRef, Amount {
   due?: Amount & { label: string; at: string };
 }
 
+/**
+ * A standing payment or income of the party's, as the Money panel lists it: who pays whom, how much
+ * and when, its state, and where it came from (`made`): `world`, authored in the world (by its
+ * author, an Upgrade's among them), so no story set it up; `play`, set up in play; else the engine's
+ * own, derived from something else (`autopay`, `living` costs, a `vehicle`'s cover, a mind's plan:
+ * `minds`…).
+ */
+interface FlowRead {
+  id: string;
+  label: string;
+  kind: string;
+  from: string;
+  to: string;
+  amount: string;
+  cents?: number;
+  schedule: string;
+  next: string | null;
+  status: string;
+  made: string;
+}
+
 interface BalancesAnswer {
   party: ViewRef;
   /** What kind of party it is, its Money level, wealth, cash and worth. */
@@ -78,6 +100,8 @@ interface BalancesAnswer {
   netWorth?: Amount;
   accounts: AccountRead[];
   owes: Owed[];
+  /** Its standing payments and income (`FlowRead`), each with where it came from. */
+  flows?: FlowRead[];
   /** Under `gm`: the economy's private notes on the party (paydays, bills, declines). */
   notes?: { at: string; text: string }[];
 }
@@ -164,6 +188,7 @@ function wholeMoney(view: ToolReadView, party: ViewRef, money: FinanceView): Bal
     netWorth: worth === null ? undefined : amount(view, worth),
     accounts: accountReads(view, party, money.accounts),
     owes: owedOn(view, money.accounts),
+    flows: money.flows.map((f): FlowRead => ({ id: f.id, label: f.label, kind: f.kind, from: f.from, to: f.to, amount: f.amount, ...(f.cents === null ? {} : { cents: f.cents }), schedule: f.schedule, next: f.next, status: f.status, made: f.source !== "entity" ? f.source : own(view.world.entities, f.id) !== undefined ? "world" : "play" })),
     notes: view.knowledge === "gm" ? money.notes : undefined,
   };
 }

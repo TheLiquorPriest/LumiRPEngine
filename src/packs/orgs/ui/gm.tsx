@@ -23,14 +23,14 @@ import { ActionRow, ActionRows, GmPage, useGmFocus, usePages } from "../../../fr
 import { Icon } from "../../../frontend/icons";
 import { MoneyInput } from "../../../frontend/money-input";
 import type { GmSectionProps, OrgTabDef, OrgTabProps } from "../../../frontend/registry";
-import { OWNER_ROLES, PAY_BASES, PAY_EVERY, type OwnerRole } from "../../../shared/finance";
+import { OWNER_ROLES, PAY_BASES, PAY_CHOICE_LABELS, PAY_CHOICES, UNPAID, type OwnerRole } from "../../../shared/finance";
 import { isRecord, type JsonObject, type JsonValue } from "../../../shared/json";
 import { parseMoneyInput } from "../../../shared/money";
 import { ORG_BASES, ORG_POWER_FAMILIES, ORG_POWERS, POWER_FAMILY_LABELS, POWER_WORDS, isOrgPower, positionsIn, powersIn, type OrgPower, type OrgPowerFamily, type OrgType } from "../../../shared/org";
 import type { OrgGmView, OrgMayPowerView, OrgRef, OrgView } from "../../../shared/org-view";
 import type { EditOp } from "../../../shared/protocol";
 import type { GmEntity, GmView } from "../../../shared/state-view";
-import { delegationDraft, delegationEditOps, delegationProblem, delegationRevokeOps, duesDraft, duesEditOps, duesProblem, GM_PART, orgEditOf, positionDraft, positionEditOps, positionProblem, positionRemoveOps, staffJobOf } from "./edit";
+import { delegationDraft, delegationEditOps, delegationProblem, delegationRevokeOps, duesDraft, duesEditOps, duesProblem, GM_PART, orgEditOf, payoutOps, payoutProblem, positionDraft, positionEditOps, positionProblem, positionRemoveOps, staffJobOf } from "./edit";
 import { MemberDetails } from "./member";
 import { OrgPage } from "./org";
 import { TYPE_ICON } from "./home";
@@ -58,7 +58,7 @@ const ROLE_LABELS: Readonly<Record<OwnerRole, string>> = { owner: "Owner", joint
  * (`null` grants one) and the dues. An owner's sheet is one holding of theirs: their row for `class`
  * (none: their row that names no class), since someone issued another class holds a row for each.
  */
-export type GmOrgSheet = { kind: "member"; who: string | null } | { kind: "owner"; party: string | null; class?: string } | { kind: "job"; id: string | null } | { kind: "person"; who: string } | { kind: "position"; id: string | null } | { kind: "delegation"; who: string | null } | { kind: "dues" };
+export type GmOrgSheet = { kind: "member"; who: string | null } | { kind: "owner"; party: string | null; class?: string } | { kind: "job"; id: string | null } | { kind: "person"; who: string } | { kind: "position"; id: string | null } | { kind: "delegation"; who: string | null } | { kind: "dues" } | { kind: "payout" };
 
 // ---------------------------------------------------------------- reading the GM view
 
@@ -213,10 +213,10 @@ export function jobIdFor(words: string, taken: ReadonlySet<string>): string {
   for (let n = 2; ; n += 1) if (!taken.has(`${base}_${n}`)) return `${base}_${n}`;
 }
 
-/** A new job at `org`: spawned under its title and employer, its fields set, active, in one edit. */
+/** A new job at `org`: spawned under its title and employer, its fields set, active, in one edit. An unpaid title sets no rate. */
 export function jobAddOps(org: OrgView, id: string, form: JobForm): EditOp[] {
   const title = form.title.trim();
-  const fields: JsonObject = { worker: form.worker, employer: org.id, ...(title !== "" ? { title } : {}), ...(form.position !== "" ? { position: form.position } : {}), basis: form.basis, rate: form.rate, pay_every: form.every, status: "active" };
+  const fields: JsonObject = { worker: form.worker, employer: org.id, ...(title !== "" ? { title } : {}), ...(form.position !== "" ? { position: form.position } : {}), basis: form.basis, ...(form.every !== UNPAID ? { rate: form.rate } : {}), pay_every: form.every, status: "active" };
   return [{ op: "spawn", kind: "job", name: `${title || humanize(form.basis)} at ${org.name}`, id }, ...Object.entries(fields).map(([field, value]): EditOp => ({ op: "set", entity: id, field, value }))];
 }
 
@@ -354,6 +354,11 @@ export function GmOwners(props: GmOrgBodyProps) {
       <Button icon="user-plus" disabled={section.busy} onClick={() => props.open({ kind: "owner", party: null })}>
         Add an owner
       </Button>
+      {org.type === "trust" ? (
+        <Button icon="coins" disabled={section.busy} onClick={() => props.open({ kind: "payout" })}>
+          Pay out to its beneficiaries
+        </Button>
+      ) : null}
     </div>
   );
 }
@@ -700,12 +705,12 @@ function NewJobSheet(props: SheetProps) {
   const [rate, setRate] = useState("");
   const [every, setEvery] = useState<string>("biweekly");
   const cents = parseMoneyInput(rate, section.currency);
-  const problem = worker === "" ? "Choose who works it." : cents === null || cents <= 0 ? "Type the rate." : null;
+  const problem = worker === "" ? "Choose who works it." : every !== UNPAID && (cents === null || cents <= 0) ? "Type the rate." : null;
   const go = () => {
-    if (cents === null) return;
+    if (cents === null && every !== UNPAID) return;
     const workerName = section.gm.entities.find((e) => e.id === worker)?.name ?? worker;
     const id = jobIdFor(`${workerName} ${title || basis}`, new Set(section.gm.entities.map((e) => e.id)));
-    void save(props, jobAddOps(org, id, { worker, title, position, basis, rate: cents, every }));
+    void save(props, jobAddOps(org, id, { worker, title, position, basis, rate: cents ?? 0, every }));
   };
   return (
     <SheetForm name="org-job-add" title="Add a job" subtitle={org.name} backLabel={org.name} onBack={props.back} go="Add the job" problem={problem} busy={section.busy} onGo={go}>
@@ -716,7 +721,7 @@ function NewJobSheet(props: SheetProps) {
       <Field label="Rate (a year, an hour or a shift)">
         <MoneyInput currency={section.currency} value={rate} onInput={setRate} label="Rate" invalid={rate.trim() !== "" && cents === null} />
       </Field>
-      <RefPicker label="Paid" value={every} options={PAY_EVERY.map((p) => ({ value: p, label: humanize(p) }))} onChange={setEvery} />
+      <RefPicker label="Paid" value={every} options={PAY_CHOICES.map((p) => ({ value: p, label: PAY_CHOICE_LABELS[p] }))} onChange={setEvery} />
     </SheetForm>
   );
 }
@@ -896,6 +901,25 @@ function GmDuesSheet(props: SheetProps) {
   );
 }
 
+/** A trust's payout as the GM makes it (`economy.distribute`, DESIGN §29.7): a stated amount of its money, to its beneficiaries by their shares. */
+function GmPayoutSheet(props: SheetProps) {
+  const { org, section } = props;
+  const [text, setText] = useState("");
+  const beneficiaries = ownersOf(section.gm, org.id).filter((o) => o.role === "beneficiary" && typeof o.party === "string");
+  return (
+    <SheetForm name="org-payout" title="Pay out to its beneficiaries" subtitle={org.name} backLabel={org.name} onBack={props.back} go="Pay it out by share" problem={beneficiaries.length === 0 ? "It has no beneficiaries." : payoutProblem(text, section.currency)} busy={section.busy} onGo={() => void save(props, payoutOps(org.id, text, section.currency))}>
+      <List>
+        {beneficiaries.map((o) => (
+          <ListRow key={String(o.party)} icon="user" title={section.gm.entities.find((e) => e.id === o.party)?.name ?? String(o.party)} value={typeof o.share === "number" ? `${o.share}%` : undefined} valueTone="muted" />
+        ))}
+      </List>
+      <Field label="Amount">
+        <MoneyInput currency={section.currency} value={text} label="Amount" onInput={setText} invalid={text.trim() !== "" && payoutProblem(text, section.currency) !== null} />
+      </Field>
+    </SheetForm>
+  );
+}
+
 function SheetView(props: SheetProps & { sheet: GmOrgSheet; open(sheet: GmOrgSheet): void }) {
   const { sheet } = props;
   switch (sheet.kind) {
@@ -913,6 +937,8 @@ function SheetView(props: SheetProps & { sheet: GmOrgSheet; open(sheet: GmOrgShe
       return <GmDelegationSheet {...props} who={sheet.who} />;
     case "dues":
       return <GmDuesSheet {...props} />;
+    case "payout":
+      return <GmPayoutSheet {...props} />;
   }
 }
 
@@ -930,6 +956,8 @@ export function gmSheetFor(route: SheetRoute): GmOrgSheet | null {
       return { kind: "delegation", who: target.id };
     case "dues":
       return { kind: "dues" };
+    case "payout":
+      return { kind: "payout" };
     case "hire":
       return { kind: "job", id: null };
     case "admit":

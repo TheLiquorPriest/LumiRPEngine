@@ -220,14 +220,15 @@ describe("the pages, rendered", () => {
     expect(dropped).toBe("danny_okafor");
   });
 
-  test("a person's things in the Character page's groups, each with Move, Give, Lend and Remove", () => {
+  test("a person's things in the Character page's groups (Outfit, Carried, At home…), each with Move, Give, Lend and Remove", () => {
     const groups = personThings(ctxOf(), "pov");
     if (!groups) throw new Error("no groups");
     const tree = PersonGroups({ person: "pov", groups, problems: new Map(), menu: () => [{ label: "Move…", onSelect: () => undefined }, { label: "Give…", onSelect: () => undefined }, { label: "Lend…", onSelect: () => undefined }, { label: "Remove", onSelect: () => undefined }], onOpen: () => undefined });
-    expect(textOf(tree)).toContain("On them");
+    expect(textOf(tree)).toContain("Outfit");
+    expect(textOf(tree)).toContain("Carried");
     expect(textOf(tree)).toContain("At home");
     const keys = propsOf(tree, ThingRowView).find((p) => (p.row as ThingRow).id === "pov_keys");
-    expect(keys?.sub).toBe("Worn · pocket");
+    expect(keys?.sub).toBe("In a pocket");
     expect((keys?.menu as { label: string }[]).map((m) => m.label)).toEqual(["Move…", "Give…", "Lend…", "Remove"]);
   });
 

@@ -10,6 +10,7 @@ import { useContext, useEffect, useId, useLayoutEffect, useRef, useState } from 
 import type { JsonValue } from "../shared/json";
 import { isRecord } from "../shared/json";
 import type { OutcomeOdds } from "../shared/state-view";
+import { diffCounts, diffRows, lineDiff } from "../shared/text-diff";
 import { useApp, useUi } from "./app";
 import { formatOdds } from "./format";
 import type { IconName } from "./icons";
@@ -362,8 +363,8 @@ export function List(props: { children: ComponentChildren }) {
   );
 }
 
-/** One row of a List, 44 px tall at least: a button when it has `onClick`. With `id`, the id shows under the title while Show ids is on. */
-export function ListRow(props: { title: ComponentChildren; subtitle?: ComponentChildren; icon?: IconName; leading?: ComponentChildren; value?: ComponentChildren; valueTone?: "pos" | "neg" | "warn" | "muted"; badge?: ComponentChildren; chevron?: boolean; current?: boolean; disabled?: boolean; id?: string; onClick?(): void }) {
+/** One row of a List, 44 px tall at least: a button when it has `onClick`. With `id`, the id shows under the title while Show ids is on; `row` marks it (`data-lre-row`), so its page can find it, to put focus back on it. */
+export function ListRow(props: { title: ComponentChildren; subtitle?: ComponentChildren; icon?: IconName; leading?: ComponentChildren; value?: ComponentChildren; valueTone?: "pos" | "neg" | "warn" | "muted"; badge?: ComponentChildren; chevron?: boolean; current?: boolean; disabled?: boolean; id?: string; row?: string; onClick?(): void }) {
   const lead = props.leading ?? (props.icon ? <Icon name={props.icon} /> : null);
   const inner = (
     <>
@@ -382,7 +383,7 @@ export function ListRow(props: { title: ComponentChildren; subtitle?: ComponentC
   );
   const onClick = props.onClick;
   return (
-    <div class="lre-listrow" role="listitem">
+    <div class="lre-listrow" role="listitem" data-lre-row={props.row}>
       {onClick ? (
         <button type="button" class="lre-listrow-hit" aria-current={props.current || undefined} disabled={props.disabled} onClick={() => onClick()}>
           {inner}
@@ -452,16 +453,103 @@ export function Banner(props: { tone: "info" | "warn" | "neg" | "gm"; icon?: Ico
   );
 }
 
-/** Details on request: a native disclosure, so keyboard and screen readers work as they expect. */
-export function Disclosure(props: { summary: ComponentChildren; defaultOpen?: boolean; children: ComponentChildren }) {
+/**
+ * Details on request: a native disclosure, so keyboard and screen readers work as they expect. With
+ * `open` it is controlled: `onToggle` hears each open and close, and the details are rendered only
+ * while it is open, so a closed one costs nothing however much it holds.
+ */
+export function Disclosure(props: { summary: ComponentChildren; defaultOpen?: boolean; open?: boolean; onToggle?(open: boolean): void; children?: ComponentChildren }) {
+  const onToggle = props.onToggle;
   return (
-    <details class="lre-disclosure" open={props.defaultOpen}>
+    <details class="lre-disclosure" open={props.open ?? props.defaultOpen} onToggle={onToggle ? (event) => onToggle(event.currentTarget.open) : undefined}>
       <summary>
         <span class="lre-disclosure-label">{props.summary}</span>
         <Icon name="chevron-down" size={16} />
       </summary>
-      <div class="lre-disclosure-body">{props.children}</div>
+      {props.open === false ? null : <div class="lre-disclosure-body">{props.children}</div>}
     </details>
+  );
+}
+
+/**
+ * A search box: the query as typed, a clear button while it holds any, and Escape to clear it (only
+ * then, so Escape still goes back where nothing is typed). `status` says what the query finds, read
+ * out to assistive tech as it changes.
+ */
+export function SearchField(props: { value: string; label: string; placeholder?: string; status?: string; disabled?: boolean; onInput(value: string): void }) {
+  const onInput = props.onInput;
+  return (
+    <div class="lre-search" role="search">
+      <Icon name="search" size={16} class="lre-search-icon" />
+      <input
+        class="lre-input lre-search-input"
+        type="search"
+        enterKeyHint="search"
+        aria-label={props.label}
+        placeholder={props.placeholder}
+        value={props.value}
+        disabled={props.disabled}
+        onInput={(event) => onInput(event.currentTarget.value)}
+        onKeyDown={(event) => {
+          if (event.key !== "Escape" || props.value === "") return;
+          event.preventDefault();
+          event.stopPropagation();
+          onInput("");
+        }}
+      />
+      {props.value !== "" ? <IconButton icon="close" label={`Clear ${props.label.charAt(0).toLowerCase()}${props.label.slice(1)}`} disabled={props.disabled} onClick={() => onInput("")} /> : null}
+      {props.status !== undefined ? (
+        <span class="lre-sr" role="status">
+          {props.status}
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * Two texts compared line by line (`lineDiff`): what `after` takes out of `before` and adds, each
+ * change with two unchanged lines either side and the longer unchanged runs between folded to a
+ * count. `named` names the two in its counts and when nothing differs: `{ before: "the shipped
+ * text", after: "yours" }`.
+ */
+export function TextDiff(props: { before: string; after: string; named: { before: string; after: string } }) {
+  const lines = lineDiff(props.before, props.after);
+  const { removed, added } = diffCounts(lines);
+  if (removed === 0 && added === 0) return <p class="lre-diff-none">{`No difference: ${props.named.after} is ${props.named.before}, line for line.`}</p>;
+  const count = (n: number) => `${n.toLocaleString()} ${n === 1 ? "line" : "lines"}`;
+  return (
+    <div class="lre-diff" data-lre-diff={`${removed}-${added}`}>
+      <p class="lre-diff-summary">{`Against ${props.named.before}, ${props.named.after} takes out ${count(removed)} and adds ${count(added)}.`}</p>
+      <div class="lre-diff-lines">
+        {diffRows(lines).map((row, i) =>
+          row.kind === "skip" ? (
+            <div key={i} class="lre-diff-skip">{`… ${count(row.count)} the same …`}</div>
+          ) : row.kind === "same" ? (
+            <div key={i} class="lre-diff-line">
+              <span class="lre-diff-mark" aria-hidden="true" />
+              <span class="lre-diff-text">{row.text}</span>
+            </div>
+          ) : row.kind === "del" ? (
+            <del key={i} class="lre-diff-line del">
+              <span class="lre-diff-mark" aria-hidden="true">
+                −
+              </span>
+              <span class="lre-sr">Taken out: </span>
+              <span class="lre-diff-text">{row.text}</span>
+            </del>
+          ) : (
+            <ins key={i} class="lre-diff-line add">
+              <span class="lre-diff-mark" aria-hidden="true">
+                +
+              </span>
+              <span class="lre-sr">Added: </span>
+              <span class="lre-diff-text">{row.text}</span>
+            </ins>
+          ),
+        )}
+      </div>
+    </div>
   );
 }
 

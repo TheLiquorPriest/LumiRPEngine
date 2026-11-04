@@ -20,6 +20,7 @@ import type { ChatId, EntityId } from "../../../shared/ids";
 import { isRecord } from "../../../shared/json";
 import { ORGS_ORG_PANEL } from "../../../shared/org-view";
 import type { PlayerBlock, RoutinePlayerView } from "../../../shared/routines";
+import { toastQueued } from "../../../frontend/queued";
 import { decodeCastView, SLOT_KINDS, whereabouts, type CastPerson, type CastView, type SlotKind } from "./panel";
 
 /** Each kind of plan block in words, and its categorical fill (a `--lre-series-*` token). */
@@ -204,7 +205,7 @@ export function PersonSheet(props: SheetProps) {
   const [fixingWhere, setFixingWhere] = useState(false);
   useEffect(() => {
     void app.request({ type: "lre.view.open", chatId: props.chatId, panel: "castlife.cast", entity: props.id }).then((result) => {
-      if (result?.pending) app.toast("Details appear when the reply finishes.", "info");
+      toastQueued(app, result);
     });
   }, [props.chatId, props.id]);
   const view = decodeCastView(props.state.panels["castlife.cast"]);

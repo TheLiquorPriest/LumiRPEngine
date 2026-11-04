@@ -7,7 +7,7 @@ import { resolveAction } from "../../../src/engine/resolve";
 import { createRng } from "../../../src/engine/rng";
 import { runTimelapse } from "../../../src/engine/time";
 import { Working } from "../../../src/engine/working";
-import { ALL_PACKS } from "../../../src/packs/index";
+import { ALL_PACKS, STARTER_WORLDS } from "../../../src/packs/index";
 import { modernUsWorld } from "../riverton";
 import { kitStatus, overdueFor } from "../../../src/packs/gear/core/model";
 import { cashGift } from "../../../src/packs/gear/core/index";
@@ -242,5 +242,45 @@ describe("gear: containment, slots and use grants", () => {
     expect(applyEffects(reg, w, give.toEffects(p, w.ctx), { bindings: {}, rng: createRng("g") }).rejected).toEqual([]);
     expect(Object.keys(w.state.entities).length).toBe(count);
     expect(w.state.entities.brass_key?.relations).toContainEqual({ type: "in", to: "you" });
+  });
+});
+
+describe("gear: Put in (N3)", () => {
+  /** Port Alder with Jordan at home, a flannel shirt on him, a wardrobe and a refrigerator there, and Danny's dresser beside them. */
+  function home(): Working {
+    const make = STARTER_WORLDS.modern_slice_of_life;
+    if (!make) throw new Error("no Port Alder starter");
+    const world = make("pa", "Port Alder");
+    const pov = world.entities.pov;
+    if (!pov) throw new Error("no Jordan");
+    pov.fields.place = "harbor_street_114";
+    const item = (id: string, name: string, fields: Record<string, string>, on?: string): void => {
+      world.entities[id] = { id, kind: "item", name, tier: "background", fields: on ? fields : { place: "harbor_street_114", ...fields }, relations: on ? [{ type: "in", to: on }] : [] };
+    };
+    item("shirt", "Flannel shirt", { owner: "pov", category: "clothing", slot: "torso_base" }, "pov");
+    item("wardrobe", "Wardrobe", { owner: "pov" });
+    item("fridge", "Refrigerator", { owner: "pov" });
+    item("dresser", "Dresser", { owner: "danny_okafor" });
+    item("far_wardrobe", "Wardrobe", { owner: "pov", place: "alder_market" });
+    return new Working(reg, world, startState(world, reg));
+  }
+  const put = (w: Working, item: string, into: string) => resolveAction(reg, w, { action: "put_in", params: { item, into } }, createRng(`put:${item}:${into}`));
+
+  test("something carried goes into a holder here that takes it and that you may use", () => {
+    const w = home();
+    expect(put(w, "shirt", "wardrobe").ok).toBe(true);
+    expect(w.state.entities.shirt?.relations).toEqual([{ type: "in", to: "wardrobe" }]);
+    // And out again: what lies in a holder here goes into another.
+    expect(put(w, "shirt", "fridge").ok).toBe(true);
+    expect(w.state.entities.shirt?.relations).toEqual([{ type: "in", to: "fridge" }]);
+  });
+
+  test("never what doesn't fit, into a holder you may not use, or into one that isn't here", () => {
+    const w = home();
+    expect(put(w, "fridge", "wardrobe").ok).toBe(false);
+    expect(put(w, "shirt", "dresser").ok).toBe(false);
+    expect(put(w, "shirt", "far_wardrobe").ok).toBe(false);
+    expect(put(w, "shirt", "shirt").ok).toBe(false);
+    expect(w.state.entities.shirt?.relations).toEqual([{ type: "in", to: "pov" }]);
   });
 });

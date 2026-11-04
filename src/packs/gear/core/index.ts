@@ -24,7 +24,7 @@ import { hashParts } from "../../../shared/hash";
 import type { LedgerEvent } from "../../../shared/ledger";
 import type { DataTable, ShippedRevision } from "../../../shared/tables";
 import { AUDIENCES } from "../../../shared/org";
-import { GRANT_BASES, HANDOVER_BASES, isItemChange, ITEM_CHANGES, PERMIT_SCOPES, SIZES, THING_FACTS, thingsConfigOf, type HandoverBasis, type ItemOp, type Size } from "../../../shared/things";
+import { GRANT_BASES, HANDOVER_BASES, isItemChange, ITEM_CHANGES, PERMIT_SCOPES, SIZES, sizeRank, THING_FACTS, thingsConfigOf, type HandoverBasis, type ItemOp, type Size } from "../../../shared/things";
 import { requirementExpr, type ActionDef, type EntityDef, type KindDef, type WorldCurrency, type WorldDoc } from "../../../shared/world";
 import { accessFor, assignFor, reachOf } from "../../../engine/access";
 import { calendarOf, clockOfPhrase } from "../../../engine/calendar";
@@ -38,7 +38,7 @@ import { GONE_FIELD, isGone, kindIs, placeOfEntity } from "../../../engine/scope
 import { applyItemOp } from "../../../engine/thing-ops";
 import { carriedBy, findPiece, fitProblem, fitsOn, fixedOf, goesIn, grants, hasItem, holdProblem, holdsAs, isInside, kindGoesIn, kindHoldsAs, kitStatus, overdueFor, takenOf, weightOf, type Grant, type KitStatus } from "./model";
 import { putAwayEvents } from "./put-away";
-import { contentsOf, holderOf, possessorOf, restOf, spotOf, whoseOf } from "../../../engine/things";
+import { contentsOf, holderOf, holdsOf, possessorOf, restOf, sizeOf, spotOf, whoseOf } from "../../../engine/things";
 import { sentence, thingName, thingText } from "../../../engine/thing-words";
 import { canSeeEntity, isDiscoverable, knows } from "../../../engine/visibility";
 import { together } from "../../../engine/presence";
@@ -708,6 +708,14 @@ export const gearPack: PackDef = {
     r.formula("possessor", (ctx, thing) => possessorOf(ctx, String(thing ?? "")));
     // Whether a person may carry it (§3.2): the person ceiling's size or smaller, or unknown.
     r.formula("fits_on", (ctx, _who, thing) => fitsOn(ctx, String(thing ?? "")));
+    // Whether a thing goes into a holder (§3.2): it holds things, and the thing is no bigger than it takes (a size nothing says counts as fitting) and goes into things at all.
+    r.formula("fits_in", (ctx, thing, holder) => {
+      const id = String(thing ?? "");
+      const into = String(holder ?? "");
+      const holds = holdsOf(ctx, into);
+      const size = sizeOf(ctx, id).size;
+      return id !== into && holds !== null && holdProblem(ctx, id, into) === null && (size === "unknown" || (size !== "vehicle" && size !== "part" && sizeRank(size) <= sizeRank(holds)));
+    });
     // How far a thing is from someone (§4.5): "on", "here", "nearby" (a fetch away) or "away"; and a fetch's minutes on foot.
     r.formula("reach_of", (ctx, who, thing) => reachOf(ctx, String(who ?? ""), String(thing ?? "")).reach);
     r.formula("fetch_minutes", (ctx, who, thing) => reachOf(ctx, String(who ?? ""), String(thing ?? "")).minutes ?? 0);
@@ -745,6 +753,8 @@ export const gearPack: PackDef = {
       const op: Exclude<ItemOp, { do: "remove" }> = rest === "owner" ? { do: "hand", item, to: owner ?? "", basis: "return", why: "" } : { do: "move", item, to: rest, why: "" };
       return itemOpEvents(ctx, op, strOf(a.by) || ctx.world.pov, ctx.rng.seed);
     });
+    // Into a holder carried or here (§3.3): through the one location writer and its size rules.
+    wrap("gear.put_in", ["item", "into", "by?"], (a, ctx) => itemOpEvents(ctx, { do: "move", item: strOf(a.item), to: { in: strOf(a.into) }, why: "" }, strOf(a.by) || ctx.world.pov, ctx.rng.seed));
     // An NPC hands over something the world hadn't tracked yet: it comes into being, held by the recipient.
     wrap("gear.receive", ["name", "to", "from?"], (a, ctx) => spawn(ctx, { name: strOf(a.name), owner: strOf(a.to), holder: strOf(a.to), salt: `give:${strOf(a.from)}:${ctx.state.clock}`, stack: true }));
     wrap("gear.search", ["who", "target?"], (a, ctx) => search(ctx, strOf(a.who) || ctx.world.pov, strOf(a.target) || null));
@@ -834,6 +844,8 @@ export const gearPack: PackDef = {
     // A thing of yours, or one you may use, a short walk away (ITEMS-SPEC §4.5): the walk is the action's time.
     r.action({ id: "fetch", label: "Fetch", description: "Go and get something of yours, or something you may use, from close by.", pack: "gear", params: { item: { type: "ref", ref: "item", nearby: true } }, requires: ["reach_of(self, item) == 'nearby'", "may_use(self, item)", "movable(item)", "fits_on(self, item)"], outcomes: { default: [{ type: "gear.fetch", args: { item: "item", to: "self" } }] }, duration: "1 + fetch_minutes(self, item)", lexicon: ["fetch", "go get", "go and get"], observable: "goes to get something" });
     r.action({ id: "put_away", label: "Put away", description: "Put something back where it's kept.", pack: "gear", params: { item: { type: "ref", ref: "item" } }, requires: ["carries(self, item) or (place(item) == here and reach(self, item))", "movable(item)", "rest_near(self, item)"], outcomes: { default: [{ type: "gear.put_away", args: { item: "item", by: "self" } }] }, duration: "2", lexicon: ["put away", "put back", "tidy away"], observable: "puts something away" });
+    // Put in (§3.3): something carried or here, into a holder carried or here that you may use, when it fits.
+    r.action({ id: "put_in", label: "Put in", description: "Put something you carry, or that is here, into a bag, a box or a piece of furniture here.", pack: "gear", params: { item: { type: "ref", ref: "item" }, into: { type: "ref", ref: "item", label: "Into" } }, requires: ["carries(self, item) or (place(item) == here and reach(self, item))", "carries(self, into) or (place(into) == here and reach(self, into))", "movable(item)", "may_use(self, into)", "fits_in(item, into)"], outcomes: { default: [{ type: "gear.put_in", args: { item: "item", into: "into", by: "self" } }] }, duration: "1", lexicon: ["put in", "put into", "stash in", "pack in", "store in"], observable: "puts something away" });
     // Days or a said end, at least one: interpret fills whichever the player said ("until 7 tonight");
     // the palette always sends days.
     r.action({ id: "lend", label: "Lend", description: "Lend something to someone, for some days or until a time.", pack: "gear", params: { item: { type: "ref", ref: "item" }, to: { type: "ref", ref: "person" }, days: { type: "number", optional: true }, until: { type: "text", optional: true, label: "Until (a time: 7 pm, tonight, tomorrow)" } }, requires: ["may_assign(self, item)", "days > 0 or params.until != null", "at(to, here) or at(item, here)"], outcomes: { default: [{ type: "gear.lend", args: { item: "item", to: "to", until: "=days > 0 ? clock + days(days) : 0", said: "=params.until" } }] }, duration: "2", lexicon: ["lend", "loan", "let borrow"], observable: "lends something" });

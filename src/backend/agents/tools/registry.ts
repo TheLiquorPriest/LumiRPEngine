@@ -3,7 +3,7 @@
 // `AgentTool`). Each tool reads through one `ToolReadView` (`env.reader`, `tools/read-view.ts`),
 // everything in it marked as its view marks it, and writes, at the GM tier, through `env.writer` (C7). A tool's
 // description and each argument's are registry texts (`tool.<name>`, `tool.<name>.<path>`, Settings →
-// Agents → Prompts, GM agent page, group "Tools"), sent in the user's own words where they wrote them;
+// Agents → Prompts, Every agent page, group "Tools"), sent in the user's own words where they wrote them;
 // its JSON Schema is hand-written with the world's enums filled in (`tools/schema.ts`).
 
 import type { ToolFamily, ToolTier, ToolView } from "../../../shared/agent-tools";
@@ -76,7 +76,7 @@ export interface ToolDefinition {
   summarizes?: true;
   /** Given only to an agent that notes facts for the reply's read (`ToolEnv.notes`): the Curator working a turn. */
   notes?: true;
-  /** Its description is the registry text `tool.<name>` (R5, GM agent page, group "Tools"): editable, with a reset. */
+  /** Its description is the registry text `tool.<name>` (R5, Every agent page, group "Tools"): editable, with a reset. */
   parameters(world: WorldDoc): JsonObject; // hand-written JSON Schema, with the world's enums filled in
   run(args: JsonObject, env: ToolEnv): Promise<ToolOutcome>;
 }

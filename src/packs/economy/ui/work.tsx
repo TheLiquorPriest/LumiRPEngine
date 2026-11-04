@@ -164,9 +164,9 @@ function JobEndPage(props: SectionProps & { job: JobView; control: "quit" | "let
   const { controls, nav, job: j, control } = props;
   const words = control === "quit" ? "Quit" : control === "let_go" ? "Let go" : "End the job";
   if (controls.mode === "read") return null;
-  const submit = (): Promise<boolean> => (controls.mode === "player" ? controls.act(jobEndAction(j.id)) : controls.edit([{ op: "set", entity: j.id, field: "status", value: "ended" }]));
+  const submit = (tell?: boolean): Promise<boolean> => (controls.mode === "player" ? controls.act(jobEndAction(j.id), tell) : controls.edit([{ op: "set", entity: j.id, field: "status", value: "ended" }]));
   return (
-    <ActionPage nav={nav} controls={controls} name={`job-${control}`} title={words} subtitle={control === "quit" ? jobTitle(j) : `${j.worker} · ${jobTitle(j)}`} go={words} danger submit={submit}>
+    <ActionPage nav={nav} controls={controls} name={`job-${control}`} title={words} subtitle={control === "quit" ? jobTitle(j) : `${j.worker} · ${jobTitle(j)}`} go={words} danger action={jobEndAction(j.id)} submit={submit}>
       <Note>{`${words}: ${j.title || "the job"} at ${j.employer}?`}</Note>
     </ActionPage>
   );
@@ -217,7 +217,7 @@ function jobPage(control: string | undefined, props: SectionProps, job: JobView,
     case "end":
       return controls.mode === "gm" && job.status !== "ended" ? <JobEndPage {...props} job={job} control="end" /> : null;
     case "raise":
-      return can.includes("raise") && controls.mode === "player" ? <AmountPage nav={nav} controls={controls} name="job-raise" title="Raise" subtitle={`${job.worker} · ${jobTitle(job)}`} label={`New rate (now ${job.pay})`} go="Give the raise" submit={(cents) => (cents === null ? Promise.resolve(false) : controls.act(raiseAction(job.id, cents)))} /> : null;
+      return can.includes("raise") && controls.mode === "player" ? <AmountPage nav={nav} controls={controls} name="job-raise" title="Raise" subtitle={`${job.worker} · ${jobTitle(job)}`} label={`New rate (now ${job.pay})`} go="Give the raise" action={(cents) => (cents === null ? null : raiseAction(job.id, cents))} submit={(cents, tell) => (cents === null ? Promise.resolve(false) : controls.act(raiseAction(job.id, cents), tell))} /> : null;
     case "fields":
       return <FieldsPage nav={nav} controls={controls} name="job-fields" title="Job fields" subtitle={jobTitle(job)} entity={job.id} />;
     default:
@@ -342,8 +342,9 @@ function IssueInvoicePage(props: SectionProps & { business: BusinessView }) {
   if (controls.mode !== "player") return null;
   const cents = amountOf(amount, controls.currency);
   const who = customer === OUTSIDE ? (outside.trim() !== "" ? { name: outside } : null) : customer !== "" ? { id: customer } : null;
+  const body = who === null || cents === null ? null : invoiceIssueAction(b.id, who, cents, memo, days);
   return (
-    <ActionPage nav={nav} controls={controls} name="business-invoice" title={BUSINESS_CONTROL.invoice} subtitle={b.name} go="Issue the invoice" problem={customer === "" ? "Choose a customer." : who === null ? "Type the customer's name." : amountProblem(amount, controls.currency, "the amount")} submit={() => (who === null || cents === null ? Promise.resolve(false) : controls.act(invoiceIssueAction(b.id, who, cents, memo, days)))}>
+    <ActionPage nav={nav} controls={controls} name="business-invoice" title={BUSINESS_CONTROL.invoice} subtitle={b.name} go="Issue the invoice" problem={customer === "" ? "Choose a customer." : who === null ? "Type the customer's name." : amountProblem(amount, controls.currency, "the amount")} action={body} submit={(tell) => (body === null ? Promise.resolve(false) : controls.act(body, tell))}>
       <SelectField label="To" value={customer} empty="Choose a customer" options={[...people(controls), { value: OUTSIDE, label: "Someone else (type the name)" }]} onChange={setCustomer} />
       {customer === OUTSIDE ? <TextField label="Customer's name" value={outside} onInput={setOutside} /> : null}
       <AmountField label="Amount" value={amount} currency={controls.currency} onInput={setAmount} invalid={amount.trim() !== "" && cents === null} />
@@ -366,7 +367,7 @@ function StakeSalePage(props: SectionProps & { business: BusinessView }) {
   const problem = share === null ? (units ? "Type the units to sell." : "Type the share to sell.") : share <= 0 ? (units ? "Sell at least a unit." : "Sell a share above 0%.") : units && (!Number.isInteger(share) || share > held) ? `You hold ${held} units.` : amountProblem(price, controls.currency, "the price");
   const body = share === null || cents === null ? null : units ? stakeSellUnitsAction(b.id, share, cents, buyer || undefined) : stakeSellAction(b.id, share, cents, buyer || undefined);
   return (
-    <ActionPage nav={nav} controls={controls} name="business-stake" title={BUSINESS_CONTROL.stake} subtitle={b.name} go="Sell the shares" problem={problem} submit={() => (body === null || problem !== null ? Promise.resolve(false) : controls.act(body))}>
+    <ActionPage nav={nav} controls={controls} name="business-stake" title={BUSINESS_CONTROL.stake} subtitle={b.name} go="Sell the shares" problem={problem} action={body} submit={(tell) => (body === null || problem !== null ? Promise.resolve(false) : controls.act(body, tell))}>
       {units ? <NumberField label={`Units to sell (you hold ${held})`} value={share} min={1} max={held} onChange={setShare} /> : <NumberField label="Share to sell (%)" value={share} min={0} max={100} onChange={setShare} />}
       <AmountField label="Price" value={price} currency={controls.currency} onInput={setPrice} invalid={price.trim() !== "" && cents === null} />
       <SelectField label="Buyer" value={buyer} empty="Whoever buys" options={people(controls)} onChange={setBuyer} />
@@ -390,7 +391,7 @@ function InvoiceControlPage(props: SectionProps & { business: BusinessView; invo
   const { controls, nav, business: b, invoice: i, control } = props;
   if (controls.mode !== "player") return null;
   return (
-    <ActionPage nav={nav} controls={controls} name={`invoice-${control}`} title={INVOICE_CONTROL[control].title} subtitle={b.name} go={INVOICE_CONTROL[control].go} danger={control === "void"} submit={() => controls.act(invoiceAction(i.id, control))}>
+    <ActionPage nav={nav} controls={controls} name={`invoice-${control}`} title={INVOICE_CONTROL[control].title} subtitle={b.name} go={INVOICE_CONTROL[control].go} danger={control === "void"} action={invoiceAction(i.id, control)} submit={(tell) => controls.act(invoiceAction(i.id, control), tell)}>
       <InvoiceLine invoice={i} currency={controls.currency} />
       <Note>{control === "void" ? `Void the invoice to ${i.customerName}?` : "Otherwise it's paid when it falls due, if the money's there."}</Note>
     </ActionPage>
@@ -453,9 +454,9 @@ function businessPage(control: string | undefined, inner: string | undefined, pr
     case "stake":
       return can.includes(control) ? <StakeSalePage {...props} business={b} /> : null;
     case "draw":
-      return can.includes(control) && controls.mode === "player" ? <AmountPage nav={nav} controls={controls} name="business-draw" title={BUSINESS_CONTROL.draw} subtitle={b.name} label="Amount" go="Draw it" submit={(cents) => (cents === null ? Promise.resolve(false) : controls.act(drawAction(b.id, cents)))} /> : null;
+      return can.includes(control) && controls.mode === "player" ? <AmountPage nav={nav} controls={controls} name="business-draw" title={BUSINESS_CONTROL.draw} subtitle={b.name} label="Amount" go="Draw it" action={(cents) => (cents === null ? null : drawAction(b.id, cents))} submit={(cents, tell) => (cents === null ? Promise.resolve(false) : controls.act(drawAction(b.id, cents), tell))} /> : null;
     case "distribute":
-      return can.includes(control) && controls.mode === "player" ? <AmountPage nav={nav} controls={controls} name="business-distribute" title={BUSINESS_CONTROL.distribute} subtitle={b.name} label="Amount" go="Pay it out by share" optional="Its share of the profit since the last" submit={(cents) => controls.act(distributeAction(b.id, cents))} /> : null;
+      return can.includes(control) && controls.mode === "player" ? <AmountPage nav={nav} controls={controls} name="business-distribute" title={BUSINESS_CONTROL.distribute} subtitle={b.name} label="Amount" go="Pay it out by share" optional="Its share of the profit since the last" action={(cents) => distributeAction(b.id, cents)} submit={(cents, tell) => controls.act(distributeAction(b.id, cents), tell)} /> : null;
     default:
       return null;
   }

@@ -8,9 +8,13 @@ import { describe, expect, test } from "bun:test";
 import { hashJson } from "../../src/shared/hash";
 import { isRecord } from "../../src/shared/json";
 import type { HeldWrite } from "../../src/shared/ledger";
+import type { QueuedOn } from "../../src/shared/gm-parts";
 import type { WriteResult } from "../../src/engine/ledger/journal";
 import { Harness } from "../support/harness";
 import { POV } from "../support/test-pack";
+
+/** A write's answer, as the ledger service gives it: with `pending`, what it waits on (`queued`). */
+type Written = WriteResult & { queued?: QueuedOn };
 
 async function expectAgree(h: Harness, chatId: string): Promise<void> {
   const { reference, optimized } = await h.folds(chatId);
@@ -60,7 +64,7 @@ describe("writes made while the engine runs a turn before its reply", () => {
   test("a GM agent's write waits for the turn and lands after its reply, over what the turn did; the turn plays", async () => {
     const h = new Harness();
     const { chat } = await waiting(h, "buy:lamp:20");
-    const made: Promise<WriteResult>[] = [];
+    const made: Promise<Written>[] = [];
     // Sam has no lamp to lose until the turn buys it.
     const lose: HeldWrite = { kind: "post", id: "gm-1", target: "head", entry: { kind: "fix", gm: true, events: [{ type: "test.lose", data: { item: "lamp" } }] } };
     h.duringRun = (chatId) => {
@@ -70,7 +74,7 @@ describe("writes made while the engine runs a turn before its reply", () => {
     // The turn wasn't thrown away: its reply runs, and the write waits for it.
     expect(g.halted).toBeUndefined();
     expect(h.failures).toEqual([]);
-    expect(await Promise.all(made)).toEqual([{ applied: false, pending: true }]);
+    expect(await Promise.all(made)).toEqual([{ applied: false, pending: true, queued: "engine" }]);
     expect(await owns(h, chat, "lamp")).toBe(false);
     await h.host.finish(g, "You pay for the lamp.");
     // It landed on the turn's own record, after the turn's events: the lamp the turn bought is lost.
@@ -88,14 +92,14 @@ describe("writes made while the engine runs a turn before its reply", () => {
   test("a ✎ fix waits for the turn, which plays, and lands after its reply", async () => {
     const h = new Harness();
     const { chat } = await waiting(h, "earn:5");
-    const made: Promise<WriteResult>[] = [];
+    const made: Promise<Written>[] = [];
     h.duringRun = (chatId) => {
       made.push(h.service.write(chatId, h.host.userId, moodFix("fix-1", "calm")));
     };
     const g = await h.host.start(chat, { type: "normal" });
     expect(g.halted).toBeUndefined();
     expect(h.failures).toEqual([]);
-    expect(await Promise.all(made)).toEqual([{ applied: false, pending: true }]);
+    expect(await Promise.all(made)).toEqual([{ applied: false, pending: true, queued: "engine" }]);
     expect(await mood(h, chat)).toBe("fine");
     await h.host.finish(g, "Paid.");
     const rec = await recordOn(h, chat, h.host.head(chat)?.id ?? "");
@@ -108,7 +112,7 @@ describe("writes made while the engine runs a turn before its reply", () => {
     for (const now of [true, false]) {
       const h = new Harness();
       const { chat, before } = await waiting(h, "earn:5");
-      const made: Promise<WriteResult>[] = [];
+      const made: Promise<Written>[] = [];
       h.duringRun = (chatId) => {
         made.push(h.service.write(chatId, h.host.userId, moodFix("gm-1", "calm")));
         h.host.editMessage(chatId, before, "Payday, a good one.");
@@ -134,13 +138,13 @@ describe("writes made while the engine runs a turn before its reply", () => {
     const chat = await h.newChat();
     await h.send(chat, "earn:10", "Payday.");
     const payday = h.host.head(chat)?.id ?? "";
-    const made: Promise<WriteResult>[] = [];
+    const made: Promise<Written>[] = [];
     h.duringRun = (chatId) => {
       made.push(h.service.write(chatId, h.host.userId, moodFix("gm-1", "calm")));
     };
     // A Re-run of the reply is planned and waits for its reply; the player sends a new message instead.
     expect((await h.host.begin(chat, { type: "swipe", messageId: payday })).halted).toBe("cancelled");
-    expect(await Promise.all(made)).toEqual([{ applied: false, pending: true }]);
+    expect(await Promise.all(made)).toEqual([{ applied: false, pending: true, queued: "engine" }]);
     h.host.restarts.length = 0;
     h.host.sendUser(chat, "earn:5");
     await h.host.settle();
@@ -160,12 +164,12 @@ describe("writes made while the engine runs a turn before its reply", () => {
   test("a backend restart while the turn waits for its reply lands what its window held", async () => {
     const h = new Harness();
     const { chat, before } = await waiting(h, "earn:5");
-    const made: Promise<WriteResult>[] = [];
+    const made: Promise<Written>[] = [];
     h.duringRun = (chatId) => {
       made.push(h.service.write(chatId, h.host.userId, moodFix("gm-1", "calm")));
     };
     expect((await h.host.begin(chat, { type: "normal" })).halted).toBe("cancelled");
-    expect(await Promise.all(made)).toEqual([{ applied: false, pending: true }]);
+    expect(await Promise.all(made)).toEqual([{ applied: false, pending: true, queued: "engine" }]);
     // The journal keeps the window and what it holds; the turn lived in the backend's memory only.
     expect((await h.core(chat)).journal.prereply).toHaveLength(1);
     await h.restart();

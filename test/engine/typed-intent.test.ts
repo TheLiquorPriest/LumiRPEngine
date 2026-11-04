@@ -79,6 +79,25 @@ describe("typed intent (Playtest, no model)", () => {
     expect(typedIntent(reg, world, state, "I can't find my wallet")?.action).toBe("lose");
   });
 
+  test("an amount in the world's currency with a money verb is a Pay, though no phrase of Pay's is said; a transfer between one's own accounts stays a move", () => {
+    const world = portAlder();
+    const state = initialState(world, "r", reg);
+    const read = (line: string) => typedIntent(reg, world, state, line);
+    const paid = (amount: number) => ({ action: "pay", params: { to: "danny_okafor", amount } });
+    expect(read("Send $500 to Danny")).toMatchObject(paid(50_000));
+    expect(read("I wire Danny $1,200.50")).toMatchObject(paid(120_050));
+    expect(read("Give Danny 20 dollars")).toMatchObject(paid(2_000));
+    expect(read("I'll tip Danny $5")).toMatchObject(paid(500));
+    expect(read("Lend Danny $2k")).toMatchObject(paid(200_000));
+    // Danny's own accounts are no account of the player's to move money between.
+    expect(read("Transfer $300 to Danny")).toMatchObject(paid(30_000));
+    expect(read("Transfer $300 from checking to savings")).toMatchObject({ action: "move_money", params: { from: "acct_pov_checking", to: "acct_pov_savings", amount: 30_000 } });
+    // A bare number is still an amount in the currency, as before.
+    expect(read("I pay Danny 20")).toMatchObject(paid(2_000));
+    // Only the player's own doing, with an amount said: not a negation, someone else, or a text.
+    for (const line of ["I don't send Danny $5", "Danny sends me $5", "I send a text to Danny"]) expect({ line, intent: read(line) }).toEqual({ line, intent: null });
+  });
+
   test("Playtest leaves the player where they are for a negated move", () => {
     const world = portAlder();
     const start = playtestStart(reg, world, "r");

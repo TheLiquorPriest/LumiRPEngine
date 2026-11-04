@@ -131,22 +131,30 @@ export function sectionPromptId(slot: SlotId): string {
  */
 export const ELAPSED_TEXT_IDS = { none: "scene.elapsed.none", took: "scene.elapsed.took", span: "scene.elapsed.span" } as const;
 
+/**
+ * The registry id of the line that leads a turn's Outcome for each out-of-play action the player
+ * chose to tell (Settings → Narrator → Out-of-play actions): what they saw to off screen before the
+ * turn, in the Outcome's words recorded on the action when it was done (`{{what}}`), told once.
+ */
+export const OFFSTAGE_TEXT_ID = "outcome.offstage";
+
 export const FINAL_OUTPUT_PAGE: PromptPage = {
   id: "final",
   label: "Final output",
-  note: "What LumiRPEngine puts into the narrator's prompt: the narrator rules, how a secret is marked, the guidance that leads each section's lines, and the line that ends the Scene with how long the turn took. A world's own wording of a section (Build → Sections) comes before yours in its chats.",
+  note: "What LumiRPEngine puts into the narrator's prompt: the narrator rules, how a secret is marked, the guidance that leads each section's lines, the line that tells an out-of-play action you chose to tell, and the line that ends the Scene with how long the turn took. A world's own wording of a section (Build → Sections) comes before yours in its chats.",
 };
 
 export const GM_AGENT_PAGE: PromptPage = {
   id: "gm",
   label: "GM agent",
-  note: "The game master's assistant (GM → Assistant), outside the story: its system prompt, its instructions, the descriptions of its tools and the notes its tools answer with.",
+  note: "The game master's assistant (GM → Assistant), outside the story: its system prompt, its instructions and what leads the conversation when earlier messages are left out. Its tools' descriptions and answers, and the lore index, are every agent's: Every agent holds them.",
 };
 
 const NARRATOR_GROUP = "Narrator rules";
 const MARKS_GROUP = "Secret marks";
 const SECTIONS_GROUP = "Sections";
 const ELAPSED_GROUP = "Elapsed time";
+const OFFSTAGE_GROUP = "Out-of-play actions";
 
 /** Every built-in section's guidance, the Minds section's and any later built-in's included. */
 const SECTION_PROMPTS: readonly PromptDef[] = Object.values(DEFAULT_SECTIONS).map((s): PromptDef => ({
@@ -178,6 +186,19 @@ const ELAPSED_PROMPTS: readonly PromptDef[] = [
   },
 ];
 
+/** The Outcome's line for an out-of-play action the player chose to tell, ahead of the turn's own lines; the Outcome is never cut, so it is always sent. */
+const OFFSTAGE_PROMPTS: readonly PromptDef[] = [
+  {
+    id: OFFSTAGE_TEXT_ID,
+    page: FINAL_OUTPUT_PAGE.id,
+    group: OFFSTAGE_GROUP,
+    label: "Done off screen",
+    note: "Leads the next turn's Outcome, once, for each action done at once off screen that you chose to tell (Settings → Narrator → Out-of-play actions), ahead of the turn's own lines. The narrator, the director and the final review read it.",
+    text: "Off screen before this turn, you saw to this yourself: {{what}}. It is already done: mention it as done if the story touches it; don't play it out now.",
+    vars: [{ name: "what", text: "what you did, in the Outcome's words: the action, its picks and what it changed (recorded on the action when it was done)", required: true }],
+  },
+];
+
 const TOOLS_GROUP = "Tools";
 const TOOL_ANSWERS_GROUP = "Tool answers";
 
@@ -186,15 +207,16 @@ const TOOL_TIER_NOTE: Readonly<Record<ToolTier, string>> = { read: "reads only",
 
 /**
  * Each tool's description and its arguments', made from the tools' own texts (`TOOL_TEXTS`) as the
- * sections' guidance is made from the sections, so the GM agent page lists exactly the tools there
- * are; then the notes the tool layer answers with (`TOOL_NOTES`).
+ * sections' guidance is made from the sections, so the Every agent page lists exactly the tools there
+ * are; then the notes the tool layer answers with (`TOOL_NOTES`). Every agent that takes a tool is
+ * sent them: the GM assistant, the main agent and each turn role alike.
  */
 export const TOOL_PROMPTS: readonly PromptDef[] = [
   ...TOOL_TEXTS.flatMap((t): PromptDef[] => [
-    { id: toolTextId(t.name), page: GM_AGENT_PAGE.id, group: TOOLS_GROUP, label: `${t.name}: what it does`, note: `${t.note} ${TOOL_FAMILY_LABEL[t.family]}; ${TOOL_TIER_NOTE[t.tier]}.`, text: t.text, vars: [] },
-    ...t.args.map((a): PromptDef => ({ id: toolArgTextId(t.name, a.path), page: GM_AGENT_PAGE.id, group: TOOLS_GROUP, label: `${t.name}: ${a.path}`, note: `The description of ${t.name}'s ${a.path} argument.`, text: a.text, vars: [] })),
+    { id: toolTextId(t.name), page: RUNTIME_PROMPT_PAGE.id, group: TOOLS_GROUP, label: `${t.name}: what it does`, note: `${t.note} ${TOOL_FAMILY_LABEL[t.family]}; ${TOOL_TIER_NOTE[t.tier]}.`, text: t.text, vars: [] },
+    ...t.args.map((a): PromptDef => ({ id: toolArgTextId(t.name, a.path), page: RUNTIME_PROMPT_PAGE.id, group: TOOLS_GROUP, label: `${t.name}: ${a.path}`, note: `The description of ${t.name}'s ${a.path} argument.`, text: a.text, vars: [] })),
   ]),
-  ...TOOL_NOTES.map((n): PromptDef => ({ ...n, page: GM_AGENT_PAGE.id, group: TOOL_ANSWERS_GROUP })),
+  ...TOOL_NOTES.map((n): PromptDef => ({ ...n, page: RUNTIME_PROMPT_PAGE.id, group: TOOL_ANSWERS_GROUP })),
 ];
 
 /** What a mark's placeholders hold; each part needs those it has. */
@@ -228,7 +250,7 @@ const MARK_PROMPTS: readonly PromptDef[] = [
   },
 ];
 
-/** The final output's texts: the narrator rules' parts, how a secret is marked, each section's guidance, then the line that ends the Scene with the turn's time. */
+/** The final output's texts: the narrator rules' parts, how a secret is marked, each section's guidance, the line that tells an out-of-play action ahead of the Outcome's own, then the line that ends the Scene with the turn's time. */
 export const FINAL_OUTPUT_PROMPTS: readonly PromptDef[] = [
   { id: "narrator.source", page: FINAL_OUTPUT_PAGE.id, group: NARRATOR_GROUP, label: "Where the rules come from", note: "Opens the narrator rules: that LumiRPEngine sends them, and how its sections are marked.", text: NARRATOR_SOURCE, vars: [] },
   { id: "narrator.authority", page: FINAL_OUTPUT_PAGE.id, group: NARRATOR_GROUP, label: "Order of authority", note: "The narrator's top rule: whose word comes first. Every rule after it works under it.", text: NARRATOR_AUTHORITY, vars: [] },
@@ -237,6 +259,7 @@ export const FINAL_OUTPUT_PROMPTS: readonly PromptDef[] = [
   { id: PRESET_RULES_LEAD_ID, page: FINAL_OUTPUT_PAGE.id, group: NARRATOR_GROUP, label: "Before your preset's rules", note: "Leads the rules of your preset's RPEngine · narrator block, when it has them.", text: PRESET_RULES_LEAD, vars: [] },
   ...MARK_PROMPTS,
   ...SECTION_PROMPTS,
+  ...OFFSTAGE_PROMPTS,
   ...ELAPSED_PROMPTS,
 ];
 
@@ -256,7 +279,7 @@ const GM_VARS: readonly PromptVar[] = [
 const GM_INSTRUCTIONS = "Instructions";
 const GM_THREAD = "The conversation";
 
-/** The GM agent's own texts; its tools' descriptions join them with the tools. */
+/** The GM agent's own texts; the tools' texts it is sent with them are every agent's (`TOOL_PROMPTS`). */
 export const GM_AGENT_PROMPTS: readonly PromptDef[] = [
   {
     id: GM_TEXT.system,
@@ -290,8 +313,8 @@ export const GM_AGENT_PROMPTS: readonly PromptDef[] = [
 /** The Prompts pages, in the order Settings lists them. */
 export const PROMPT_PAGES: readonly PromptPage[] = [FINAL_OUTPUT_PAGE, GM_AGENT_PAGE, MAIN_AGENT_PAGE, RUNTIME_PROMPT_PAGE, ...ROLE_PROMPT_PAGES];
 
-/** Every editable text. */
-export const PROMPTS: readonly PromptDef[] = [...FINAL_OUTPUT_PROMPTS, ...GM_AGENT_PROMPTS, ...TOOL_PROMPTS, ...loreIndexPrompts(GM_AGENT_PAGE.id), ...MAIN_AGENT_PROMPTS, ...FINAL_REVIEW_PROMPTS, ...AGENT_FAILURE_PROMPTS, ...AGENT_YIELD_PROMPTS, ...RUNTIME_PROMPTS, ...ROLE_PROMPTS];
+/** Every editable text, each page's after the one before it: the Every agent page's own texts lead the tools' texts and answers and the lore index it holds for every agent. */
+export const PROMPTS: readonly PromptDef[] = [...FINAL_OUTPUT_PROMPTS, ...GM_AGENT_PROMPTS, ...MAIN_AGENT_PROMPTS, ...FINAL_REVIEW_PROMPTS, ...AGENT_FAILURE_PROMPTS, ...AGENT_YIELD_PROMPTS, ...RUNTIME_PROMPTS, ...TOOL_PROMPTS, ...loreIndexPrompts(RUNTIME_PROMPT_PAGE.id), ...ROLE_PROMPTS];
 
 /** The pages whose texts a turn's prompt set records (DESIGN §6.12): what the narrator's prompt is made from. */
 export const TURN_PROMPT_PAGES: readonly string[] = [FINAL_OUTPUT_PAGE.id];

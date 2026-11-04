@@ -101,6 +101,22 @@ describe("the chat tools", () => {
     expect(await read("lre_gm", { spoilers: true, pointer: "/edits" })).toHaveLength(1);
   });
 
+  test("lre_gm with no part answers how many each part holds, never the whole view; part all reads it whole", async () => {
+    const { rig, chatId, raw, read } = await portAlder();
+    const answered = (from: number): string[] => rig.host.sent.slice(from).flatMap((m) => (m.type === "lre.result" ? [m.request] : []));
+    const before = rig.host.sent.length;
+    const outline = await read("lre_gm", { spoilers: true });
+    expect(answered(before)).toEqual(["lre.gm.part"]);
+    const whole = rig.body(await rig.send({ type: "lre.gm", chatId }));
+    const count = (key: string): number => (Array.isArray(whole[key]) ? whole[key].length : -1);
+    expect(isRecord(outline) ? outline.parts : null).toMatchObject({ entities: count("entities"), money: count("money"), orgs: count("orgs"), places: count("places"), held: 0, encounter: 0 });
+    expect(isRecord(outline) ? outline.read : null).toContain('part "all"');
+    const all = await raw("lre_gm", { chatId, spoilers: true, part: "all" });
+    expect(all.text).toContain("too big for one answer");
+    expect(all.text).toContain(`- entities: a list of ${count("entities")}`);
+    expect((await raw("lre_gm", { chatId, spoilers: true, pointer: "/everything" })).text).toContain('The GM view has no part "everything"');
+  });
+
   test("lre_gm_edit takes a thing's and a place's typed ops (ITEMS-SPEC §7.5): a thing moved, a place made, and the same place made again refused as there already", async () => {
     const { rig, chatId, call, raw } = await portAlder();
     const take = [{ op: "item", change: { do: "move", item: "pov_flashlight", to: { in: "pov" }, why: "Jordan takes the flashlight from the glovebox" } }];
@@ -197,7 +213,7 @@ describe("the chat tools", () => {
   });
 
   test("lre_timelapse and lre_action post the player's turn as the palette does; the engine prepares it and the page's reply plays it", async () => {
-    const { rig, chatId, call, read } = await portAlder();
+    const { rig, chatId, call, raw, read } = await portAlder();
     expect(await read("lre_inspector", { pointer: "/generations" })).toHaveLength(1);
     const start = Number(await read("lre_chat_state", { pointer: "/hud/clock/minutes" }));
     const skip = await call("lre_timelapse", { chatId, target: { type: "duration", minutes: 60 } });
@@ -210,14 +226,41 @@ describe("the chat tools", () => {
     };
     await reply("An hour slips by on the porch.");
     expect(Number(await read("lre_chat_state", { pointer: "/hud/clock/minutes" })) - start).toBeGreaterThanOrEqual(60);
-    // Withdrawing needs a cash machine, and there is none on Harbor Street: the action is played, and declined, in the 3 minutes it takes.
-    const withdraw = await call("lre_action", { chatId, action: "withdraw_cash", params: { account: "acct_pov_checking", amount: 2000 } });
+    // A money action with no words is done at once, off screen: refused here, with no message posted, since Harbor Street has no cash machine.
+    const atOnce = await raw("lre_action", { chatId, action: "withdraw_cash", params: { account: "acct_pov_checking", amount: 2000 } });
+    expect({ isError: atOnce.isError, says: atOnce.text.includes("no cash machine") }).toEqual({ isError: true, says: true });
+    // With words it plays as the player's turn, and is declined in the 3 minutes it takes.
+    const withdraw = await call("lre_action", { chatId, action: "withdraw_cash", params: { account: "acct_pov_checking", amount: 2000 }, text: "I look for a cash machine to take out $20." });
     expectMatch(withdraw, { action: "withdraw_cash", messageId: expect.any(String) });
     const before = Number(await read("lre_chat_state", { pointer: "/hud/clock/minutes" }));
     await reply("You look around for a cash machine.");
     expect(Number(await read("lre_chat_state", { pointer: "/hud/clock/minutes" })) - before).toBe(3);
     const declined = (await call("lre_chips", { chatId })).chips;
     expect(declined).toContainEqual(expect.objectContaining({ kind: "decline", label: "Withdraw cash: declined" }));
+  });
+
+  test("lre_gm reads money by id or name, cut to one account; lre_orgs pages; a write made while a turn waits for the page is queued, listed in /held, then lands", async () => {
+    const { rig, chatId, call, raw, read } = await portAlder();
+    expect(await read("lre_gm", { spoilers: true, pointer: "/money/danny_okafor/party" })).toBe("danny_okafor");
+    expect(await read("lre_gm", { spoilers: true, pointer: "/money/Danny Okafor/party" })).toBe("danny_okafor");
+    expect(await read("lre_gm", { spoilers: true, party: "Danny Okafor", pointer: "/party" })).toBe("danny_okafor");
+    const accounts = await read("lre_gm", { spoilers: true, party: "pov", account: "acct_pov_checking", pointer: "/accounts" });
+    expect(Array.isArray(accounts) ? accounts.map((a: unknown) => (isRecord(a) ? a.id : null)) : null).toEqual(["acct_pov_checking"]);
+    const paged = await raw("lre_orgs", { chatId, spoilers: true, pointer: "/organizations", from: 0, limit: 1 });
+    expect(paged.text).toMatch(/entries 0–0 of \d+/);
+    // The turn is prepared and waits for a page to start its reply (the desk's): a ✎ fix now waits for it.
+    await call("lre_timelapse", { chatId, target: { type: "duration", minutes: 30 } });
+    expect((await rig.host.begin(chatId, { type: "normal", session: "desk" })).halted).toBe("cancelled");
+    const [offered] = rig.host.restarts.splice(0);
+    expect(await call("lre_fix", { chatId, fix: "weather", value: "rain" })).toMatchObject({ pending: true, queued: "page" });
+    expect(await read("lre_gm", { spoilers: true, part: "held" })).toEqual([expect.objectContaining({ waitsOn: "page" })]);
+    expect(await read("lre_chat_state", { pointer: "/hud/weather" })).toBe("Clear");
+    // The page starts the reply; once it is in, the fix lands.
+    expect(rig.body(await rig.send({ type: "lre.restart", chatId, turn: offered?.turn ?? "" }, "desk")).start).toBe(true);
+    const g = await rig.host.start(chatId, { type: "normal", session: "desk" });
+    await rig.host.finish(g, "Half an hour passes on the porch.");
+    expect(await read("lre_gm", { spoilers: true, part: "held" })).toEqual([]);
+    expect(await read("lre_chat_state", { pointer: "/hud/weather" })).toBe("Rain");
   });
 
   test("the minds tools read, pin, run and cancel characters' minds behind spoilers", async () => {

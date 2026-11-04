@@ -613,6 +613,8 @@ export class MockBackend {
             view.chips.push({ id: `fix:m4:0:hint${String(row.opened)}`, kind: "fix", messageId: "m4", label: `Opened a hint: ${String(row.label)}`, actions: [{ id: "undo", label: "Undo", style: "danger" }], expires: "next_send" });
             return;
           }
+          // ✎ on a thing of one's own: the preview records nothing of it.
+          if ("thing" in message) return;
           if (!view.hud) return;
           // The clock's ✎: the pill reads the date and time set, as the backend's would.
           if ("time" in message) {

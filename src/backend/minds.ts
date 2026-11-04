@@ -23,7 +23,7 @@ import type { JsonObject, JsonValue } from "../shared/json";
 import { isRecord } from "../shared/json";
 import type { LedgerEvent } from "../shared/ledger";
 import type { CommitmentKind, FactId, Fidelity, KnowledgeProposal, KnowledgeSettings, Limit, MemoryEventData, MindCallTrace, MindCommitment, MindEventData, MindMoment, MindNote, MindPlan, MindPurpose, MindsRunEntry, MindsSettings, PinnedTrace, PlanKind, PresenceEventData } from "../shared/minds";
-import { COMMITMENT_KINDS, effectiveMemory, knowledgeAnswerFormat, knowledgeThreshold, knowledgeTracked, MEMORY_ANSWER_V2, MIND_ANSWER_FORMATS, MIND_PROMPT_DEFAULTS, MIND_TEXT_CAPS, MINDS_EVENTS, MINDS_SLOT, PLAN_KINDS, PLAN_PRIORITY, sharedPlanId, sharesPlan, worldMindsOf, worldMindTemplate } from "../shared/minds";
+import { COMMITMENT_KINDS, effectiveMemory, knowledgeAnswerFormat, knowledgeThreshold, knowledgeTracked, MEMORY_ANSWER_V2, MIND_ANSWER_FORMATS, MIND_PROMPT_DEFAULTS, MIND_TEXT_CAPS, MINDS_EVENTS, MINDS_SLOT, parseFactId, PLAN_KINDS, PLAN_PRIORITY, sharedPlanId, sharesPlan, worldMindsOf, worldMindTemplate } from "../shared/minds";
 import type { ModelUseSettings, StepConfig, UserSettings } from "../shared/settings";
 import { helperCallOf, stepConfigOf } from "../shared/settings";
 import type { StepPurpose, WorldDoc } from "../shared/world";
@@ -51,6 +51,7 @@ import { seedKnowledge } from "./knowledge-seed";
 import { checkKnowledge, knowledgeBatches, knowledgeContext, knowledgeSpent, type KnowledgeTurn } from "./knowledge-step";
 import { askMind, type MindAsk } from "./mind-ask";
 import { pinReader, readPins } from "./lore-pins";
+import { loreFactOf } from "./lore-ids";
 import { consolidateContext, memoryContext, mindContext, pinnedLines, povLabel, type GivenLore, type MindContextReport, type MindScope } from "./minds-context";
 import type { PresetBinding } from "./preset-binding";
 import type { SettingsStore } from "./settings-store";
@@ -66,6 +67,8 @@ export interface MindsDeps {
   presets: PresetBinding;
   /** Who answers the calls: none, the classic steps themselves; an agent turn's roles (`askMind`). */
   ask?: MindAsk;
+  /** The book entry a lore index short id names, as `bookId/entryId` (Settings → Lore); null for one never given. */
+  loreEntry?(userId: UserId, id: string): Promise<string | null>;
 }
 
 export interface RunMindsInput {
@@ -121,7 +124,7 @@ export interface RunMindsResult {
    * didn't take of its calls' answers: how many it refused, by why, and how many calls gave no answer
    * it takes, which a role's run reports (`agents/yields.ts`).
    */
-  knowledge?: { proposals: KnowledgeProposal[]; events: LedgerEvent[]; connection: string | null; refused?: Counts<KnowledgeRefusal>; failed?: number };
+  knowledge?: { proposals: KnowledgeProposal[]; events: LedgerEvent[]; connection: string | null; refused?: Counts<KnowledgeRefusal>; failed?: number; limits?: Pick<KnowledgeSettings, "factsPerTurn" | "factsPerChat" | "learningsPerTurn"> };
 }
 
 /** The step card a minds purpose runs with (`stepConfigOf`: on with the helper's tokens while unsaved); null when the user saved it off. */
@@ -668,7 +671,8 @@ const CONSOLIDATIONS_PER_TURN = 2;
 /**
  * What the knowledge step gives a turn: everyone else's learnings as events, the player character's
  * own as changes, its calls' traces, the connection it ran on, and what it didn't take: how many it
- * refused, by why, and how many of its calls gave no answer it takes.
+ * refused, by why (and the limits it refused by, as the yield names them), and how many of its calls
+ * gave no answer it takes.
  */
 interface KnowledgeRan {
   events: LedgerEvent[];
@@ -677,6 +681,31 @@ interface KnowledgeRan {
   connection: string | null;
   refused: Counts<KnowledgeRefusal>;
   failed: number;
+  limits: Pick<KnowledgeSettings, "factsPerTurn" | "factsPerChat" | "learningsPerTurn">;
+}
+
+/**
+ * The fact each lore id an answer gives names (`loreFactOf`: a world lore entry, a book entry or its
+ * mark, by its short id too), for `checkKnowledge`. Only the ids the answer names that aren't a
+ * fact's id already, each looked up once.
+ */
+async function loreRefs(deps: MindsDeps, world: WorldDoc, userId: UserId, raw: JsonValue): Promise<Map<string, FactId>> {
+  const out = new Map<string, FactId>();
+  if (!isRecord(raw)) return out;
+  const named = new Set<string>();
+  const add = (v: JsonValue | undefined): void => {
+    const id = typeof v === "string" ? v.trim().replace(/^\[([^[\]]+)\]$/, "$1").trim() : "";
+    if (id !== "" && parseFactId(id) === null) named.add(id);
+  };
+  const items = (v: JsonValue | undefined): JsonObject[] => (Array.isArray(v) ? v.filter((x): x is JsonObject => isRecord(x)) : []);
+  for (const l of items(raw.learned)) add(l.fact);
+  for (const i of items(raw.inferred)) for (const ref of [i.fact, ...(Array.isArray(i.evidence) ? i.evidence : [])]) add(ref);
+  for (const d of items(raw.doubted)) add(d.fact);
+  for (const ref of named) {
+    const fact = await loreFactOf(world, ref, async (id) => (await deps.loreEntry?.(userId, id)) ?? null);
+    if (fact !== null) out.set(ref, fact);
+  }
+  return out;
 }
 
 /** What the knowledge step's calls are asked with: whose they are, their clock, the preset's guidance for the step, and the phase their traces name. */
@@ -699,7 +728,8 @@ async function knowledgeCalls(deps: MindsDeps, settings: UserSettings, config: S
   const { userId, signal, guidance } = ask;
   const scene = settings.minds.knowledge.batch === "scene";
   const w = new Working(reg, world, state);
-  const out: KnowledgeRan = { events: [], proposals: [], traces: [], connection: helperCallOf(config, settings.helper).connectionId ?? null, refused: {}, failed: 0 };
+  const { factsPerTurn, factsPerChat, learningsPerTurn } = settings.minds.knowledge;
+  const out: KnowledgeRan = { events: [], proposals: [], traces: [], connection: helperCallOf(config, settings.helper).connectionId ?? null, refused: {}, failed: 0, limits: { factsPerTurn, factsPerChat, learningsPerTurn } };
   const refused = (kind: KnowledgeRefusal, n = 1): void => {
     out.refused[kind] = (out.refused[kind] ?? 0) + n;
   };
@@ -729,7 +759,8 @@ async function knowledgeCalls(deps: MindsDeps, settings: UserSettings, config: S
           classic: () => deps.steps.helperJson("knowledge", prompt.text, context, config, userId, signal, { guidance, usage }),
         });
     const ms = Math.round(performance.now() - t0);
-    const checked = raw === null ? null : checkKnowledge({ ...turn, state: w.state }, batch, raw, spent);
+    const lore = raw === null ? null : await loreRefs(deps, world, userId, raw);
+    const checked = raw === null ? null : checkKnowledge({ ...turn, state: w.state, ...(lore && lore.size > 0 ? { lore } : {}) }, batch, raw, spent);
     if (!checked && !signal.aborted) out.failed++;
     for (const why of checked?.refused ?? []) deps.host.log("info", `[LumiRPEngine] knowledge ${turn.messageId.slice(0, 8)}: refused ${why}`, userId);
     for (const [kind, n] of Object.entries(checked?.refusedAs ?? {})) refused(kind as KnowledgeRefusal, n);
@@ -744,6 +775,9 @@ async function knowledgeCalls(deps: MindsDeps, settings: UserSettings, config: S
     // A scene's call thinks for no one; one person's is listed only when the player may know of them.
     if (scene || traced(reg, world, state, batch[0] ?? "")) out.traces.push({ purpose: "knowledge", phase: ask.phase, who, level: null, outcome: checked ? "recorded" : "failed", ms, tokens: usage.tokens, prompt: prompt.source });
   }
+  // A new fact no one learned is made of nothing: counted once the calls are done, since a later call may learn it.
+  for (const f of spent.unlearned.values()) deps.host.log("info", `[LumiRPEngine] knowledge ${turn.messageId.slice(0, 8)}: a new fact no one learned, not made: "${f.claim}"`, userId);
+  if (spent.unlearned.size > 0) refused("unlearned", spent.unlearned.size);
   return out;
 }
 
@@ -804,7 +838,7 @@ export async function preKnowledge(deps: MindsDeps, input: PreKnowledgeInput): P
   if (!config || who.length === 0 || input.user.trim() === "") return { events: [], traces: [], connection: null };
   const presence: KnowledgeTurn["presence"] = { said: { msg: input.messageId, at: state.clock, place: placeOfEntity(state, world.pov), who: heard, saw: [] }, met: null, left: [] };
   const pinned = await knowledgePins(deps, settings, world, state, userId);
-  const turn: KnowledgeTurn = { reg, world, state, before: state, messageId: input.messageId, user: input.user, reply: "", presence, happened: [], settings: settings.minds.knowledge, memory: effectiveMemory(world, settings.minds), hideJson: settings.hideJsonBlocks, pinned, named: (name) => personNamed(reg, world, state, name) };
+  const turn: KnowledgeTurn = { reg, world, state, before: state, messageId: input.messageId, user: input.user, reply: "", presence, happened: [], settings: settings.minds.knowledge, memory: effectiveMemory(world, settings.minds), hideJson: settings.hideJsonBlocks, pinned, named: (name) => personNamed(reg, world, state, name), asked: who };
   const batches = settings.minds.knowledge.batch === "character" ? who.map((id) => [id]) : [who];
   const ran = await knowledgeCalls(deps, settings, config, turn, batches, { userId, signal: input.signal, guidance: input.guidance ?? deps.presets.last(userId).guidance.knowledge ?? "", phase: "pre" });
   return { events: ran.events, traces: ran.traces, connection: ran.connection };

@@ -19,7 +19,8 @@ import { Button, Disclosure, HostSwitch, ListRow, NumberStepper, Section } from 
 import { thingsSummary, tidyRequest, TidySwitch } from "../../src/frontend/gm/chat-things";
 import type { Editor } from "../../src/frontend/gm/editor";
 import { FieldRow, Relations } from "../../src/frontend/gm/entity";
-import { GmThingBody, HereView, KeepList, TidyCard, TidyList, hereSections, isThingKind, keepKey, type GmThingBodyProps, type ThingSheet } from "../../src/frontend/gm/things";
+import { bulkEdit, GmThingBody, HereView, KeepList, ThingsBulkBar, TidyCard, TidyList, hereSections, isThingKind, keepKey, type GmThingBodyProps, type ThingSheet } from "../../src/frontend/gm/things";
+import type { Selection } from "../../src/frontend/multi-select";
 import { ActionRow, GmCard } from "../../src/frontend/gm/ui";
 import type { EditOp } from "../../src/shared/protocol";
 import type { GmView } from "../../src/shared/state-view";
@@ -80,7 +81,7 @@ function click(tree: unknown, text: string): void {
 /** The GM view of a chat starting on `world`, and an editor that keeps what it is asked to send. */
 function editorOf(world: WorldDoc = portAlder): { gm: GmView; editor: Editor; sent: { ops: EditOp[]; done?: string }[] } {
   const ctx = ctxOf(world);
-  const gm: GmView = { ...buildGmWorld(reg, world, ctx.state), edits: [], refused: [], minds: {} as GmView["minds"] };
+  const gm: GmView = { ...buildGmWorld(reg, world, ctx.state), edits: [], refused: [], held: [], minds: {} as GmView["minds"] };
   const sent: { ops: EditOp[]; done?: string }[] = [];
   const editor: Editor = {
     gm,
@@ -289,23 +290,61 @@ describe("the GM thing page", () => {
   });
 });
 
+describe("Select and the bulk bar", () => {
+  const ctx = ctxOf();
+  const rows = thingsList(ctx).rows;
+  const pick = (ids: readonly string[]) => ids.map((id) => rows.find((r) => r.id === id) ?? ((): never => { throw new Error(`no ${id}`); })());
+  const selection: Selection = { on: true, ids: [], start: () => undefined, stop: () => undefined, toggle: () => undefined, set: () => undefined };
+
+  test("Select 3 + Put away sends one request with 3 move ops, each to where it rests", () => {
+    const { editor, sent } = editorOf();
+    const three = pick(["pov_wallet", "pov_keys", "pov_phone"]).map((r) => ({ ...r, where: [{ id: "alder_market", name: "Alder Market", is: "place" as const }], rest: { in: "pov" } }));
+    click(ThingsBulkBar({ selection, all: rows.map((r) => r.id), shown: [], rows: three, editor, onSheet: () => undefined }), "Put away");
+    expect(sent.length).toBe(1);
+    expect(sent[0]?.ops).toEqual(three.map((r) => ({ op: "item", change: { do: "move", item: r.id, to: { in: "pov" }, why: "Put away" } })));
+  });
+
+  test("one edit a change: Move to, Make it theirs, Size and Remove; what is so already is left out; over 64 picked, nothing is offered", () => {
+    const two = pick(["pov_wallet", "pov_toolbox"]);
+    expect(bulkEdit({ do: "move", to: { place: "harbor_street_114" }, words: "at 114 Harbor Street" }, two)?.ops.length).toBe(2);
+    expect(bulkEdit({ do: "own", owner: { id: "danny_okafor", name: "Danny Okafor", is: "person" } }, two)?.done).toBe("Wallet and Mechanic's toolbox are Danny Okafor's now.");
+    expect(bulkEdit({ do: "size", size: two[0]!.size as "pocket" }, [two[0]!])).toBeNull();
+    expect(bulkEdit({ do: "remove" }, two)?.ops).toEqual(two.map((r) => ({ op: "item", change: { do: "remove", item: r.id, why: "The GM removed it" } })));
+    const { editor } = editorOf();
+    const many = Array.from({ length: 65 }, (_, i) => ({ ...two[0]!, id: `t${i}` }));
+    const bar = ThingsBulkBar({ selection, all: [], shown: [], rows: many, editor, onSheet: () => undefined });
+    expect(find(bar, Button).filter((p) => textOf(p.children) !== "Clear" && !textOf(p.children).startsWith("Select all")).every((p) => p.disabled === true)).toBe(true);
+  });
+
+  test("Wear sends do: wear on whoever has it, and Take off what they wear", () => {
+    const page = thingPage(ctx, "pov_watch");
+    if (!page) throw new Error("no watch");
+    const extras = gmThingExtras(reg, ctx, [], "pov_watch", [], 12);
+    const { gm, editor, sent } = editorOf();
+    const body = (row: typeof page.row) => GmThingBody({ page: { ...page, row }, gm: extras, pick: thingPicks(ctx), entity: gm.entities.find((e) => e.id === "pov_watch"), editor, onSheet: () => undefined, onOpen: () => undefined });
+    click(body(page.row), "Take off");
+    click(body({ ...page.row, worn: null, slot: "wrist" }), "Wear");
+    expect(sent.map((s) => s.ops)).toEqual([[{ op: "item", change: { do: "wear", item: "pov_watch", who: "pov", off: true } }], [{ op: "item", change: { do: "wear", item: "pov_watch", who: "pov" } }]]);
+  });
+});
+
 describe("GM → This chat → Things", () => {
   test("following the world's setting, it says so; its own setting starts from the world's and sends lre.chat.knowledge with tidy, null to follow again", () => {
     const sent: (boolean | null)[] = [];
     const following = TidySwitch({ tidy: { chat: null, world: true }, busy: false, onChange: (tidy) => sent.push(tidy) });
     expect(find(following, HostSwitch).map((p) => [p.label, p.checked])).toEqual([["This chat has its own setting", false]]);
     expect(textOf(following)).toContain("It follows the world's setting (Build → Packs → gear → Tidy up), now On.");
-    expect(thingsSummary({ chat: null, world: true })).toBe("Tidy impossible holds automatically on · the world's setting");
+    expect(thingsSummary({ chat: null, world: true })).toBe("Tidy impossible holds every turn: on · the world's setting");
     press(labelled(following, HostSwitch, "This chat has its own setting"), true);
     const own = TidySwitch({ tidy: { chat: true, world: true }, busy: false, onChange: (tidy) => sent.push(tidy) });
     expect(find(own, HostSwitch).map((p) => [p.label, p.checked])).toEqual([
       ["This chat has its own setting", true],
-      ["Tidy impossible holds automatically in this chat", true],
+      ["Tidy impossible holds every turn in this chat", true],
     ]);
-    press(labelled(own, HostSwitch, "Tidy impossible holds automatically in this chat"), false);
+    press(labelled(own, HostSwitch, "Tidy impossible holds every turn in this chat"), false);
     press(labelled(own, HostSwitch, "This chat has its own setting"), false);
     expect(sent).toEqual([true, false, null]);
-    expect(thingsSummary({ chat: false, world: true })).toBe("Tidy impossible holds automatically off · this chat's own");
+    expect(thingsSummary({ chat: false, world: true })).toBe("Tidy impossible holds every turn: off · this chat's own");
     expect(tidyRequest("chat_1", false)).toEqual({ type: "lre.chat.knowledge", chatId: "chat_1", tidy: false });
     expect(tidyRequest("chat_1", null)).toEqual({ type: "lre.chat.knowledge", chatId: "chat_1", tidy: null });
     // A world that has it off: the chat's own setting starts off too.

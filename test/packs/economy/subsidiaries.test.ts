@@ -119,7 +119,7 @@ describe("a subsidiary", () => {
     expect(orgHistory(w.state, EMR)[0]).toMatchObject({ text: "Started Ellis Towing, its subsidiary, with $500.00.", by: JORDAN });
 
     const ownership = section<OwnershipView>(w, EMR, "ownership");
-    expect(ownership.children).toEqual([{ id: TOW, name: "Ellis Towing", share: 100, votes: 100, controlled: true, value: 50_000, cash: 50_000, profit: 0, children: [] }]);
+    expect(ownership.children).toEqual([{ id: TOW, name: "Ellis Towing", share: 100, votes: 100, controlled: true, value: 50_000, netWorth: 50_000, cash: 50_000, profit: 0, children: [] }]);
     expect(ownership.consolidated).toEqual({ cash, profit: 0, netWorth: cash, companies: 1 });
     expect(netWorth(w)).toBe(worth);
     // Its capital comes from its own money: Ellis Towing's account, where it is an authorized user, isn't Ellis Mobile Repair's to start another with.

@@ -257,6 +257,7 @@ const TEXT_FIELD: Record<KnowledgeTextId, { group: TextGroup; label: string }> =
   stepFacts: { group: "step", label: "Facts in play" },
   stepMade: { group: "step", label: "Facts this turn already made" },
   stepReuse: { group: "step", label: "Reusing a listed fact" },
+  stepBudget: { group: "step", label: "What the turn can still record" },
   stepPerson: { group: "step", label: "A person" },
   stepYou: { group: "step", label: "The player character" },
   stepSaid: { group: "step", label: "What the player character said or did" },

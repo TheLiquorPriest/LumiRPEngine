@@ -26,6 +26,7 @@ import { Icon } from "./icons";
 import { MoneyInput } from "./money-input";
 import type { ChipProps } from "./registry";
 import { chipIntent, convertRequest } from "./requests";
+import { toastQueued } from "./queued";
 import { followReview, ReviewCard, reviewHandlers, ReviewUnread } from "./review-card";
 
 const CHIP_ICON: Record<ChipKind, IconName> = {
@@ -182,7 +183,7 @@ export async function sendChipChoice(app: App, chip: Chip, choice: string, chatI
       app.toast(message.message, "error");
       return false;
     }
-    if (message.request === "lre.chip" && message.body.pending && intent.start === null) app.toast("Saved — it applies when the reply finishes.", "info");
+    if (message.request === "lre.chip" && intent.start === null) toastQueued(app, message.body);
   }
   await startGeneration(app, intent.start);
   return true;
@@ -338,6 +339,28 @@ function ChipInputForm(props: { action: ChipAction; input: Exclude<ChipInput, { 
   );
 }
 
+/** How many lines of a chip's detail show before the rest fold under "+N more". */
+const DETAIL_LINES = 8;
+
+/**
+ * A chip's detail, a line each: past `DETAIL_LINES` lines the rest fold under "+N more", which
+ * opens them, so a long list (every move a Things tidied chip made) is all there without crowding
+ * the receipt.
+ */
+export function ChipDetail(props: { detail: string }) {
+  const lines = props.detail.split("\n");
+  if (lines.length <= DETAIL_LINES) return <span class="lre-chip-detail">{props.detail}</span>;
+  return (
+    <div class="lre-chip-detail">
+      {lines.slice(0, DETAIL_LINES).join("\n")}
+      <details class="lre-chip-more" data-lre-chip-more>
+        <summary>{`+${lines.length - DETAIL_LINES} more`}</summary>
+        {lines.slice(DETAIL_LINES).join("\n")}
+      </details>
+    </div>
+  );
+}
+
 /** A chip in full, as the receipt's list shows it: its icon, label and detail, its buttons and any open form. */
 export function DefaultChip(props: ChipProps) {
   const { chip } = props;
@@ -348,7 +371,7 @@ export function DefaultChip(props: ChipProps) {
         <Icon name={CHIP_ICON[chip.kind]} size={16} class="lre-chip-icon" />
         <div class="lre-chip-text">
           <span class="lre-chip-label">{chip.label}</span>
-          {chip.detail ? <span class="lre-chip-detail">{chip.detail}</span> : null}
+          {chip.detail ? <ChipDetail detail={chip.detail} /> : null}
         </div>
         {chip.actions.length > 0 ? (
           <div class="lre-chat-actions">

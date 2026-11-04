@@ -45,6 +45,8 @@ export const CHAT_CSS = `
 .lre .lre-chip-text{flex:1 1 12em;min-width:0;display:flex;flex-direction:column;gap:2px}
 .lre .lre-chip-label{color:var(--lre-fg);font-weight:500;overflow-wrap:anywhere}
 .lre .lre-chip-detail{color:var(--lre-muted);overflow-wrap:anywhere;white-space:pre-line}
+.lre .lre-chip-more>summary{display:inline-flex;margin-top:2px;color:var(--lre-accent-text);font-size:var(--lre-fs-sm);cursor:pointer;list-style:none}
+.lre .lre-chip-more>summary::-webkit-details-marker{display:none}
 .lre .lre-chat-form{display:flex;flex-direction:column;gap:var(--lre-s2);min-width:0;padding:var(--lre-s3);border-radius:var(--lre-r-lg);background:var(--lre-well)}
 .lre .lre-chat-decision{flex:1 1 100%;display:flex;flex-direction:column;gap:var(--lre-s2);min-width:0;padding:var(--lre-s3);border:1px solid color-mix(in srgb,var(--lre-warning) 40%,transparent);border-radius:var(--lre-r-xl);background:var(--lre-warn-soft)}
 .lre .lre-chat-decision[data-tone=neg]{border-color:color-mix(in srgb,var(--lre-danger) 40%,transparent);background:var(--lre-neg-soft)}

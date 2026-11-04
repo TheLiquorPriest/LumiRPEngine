@@ -6,13 +6,15 @@
 import { createContext, type ComponentChildren } from "preact";
 import { useCallback, useContext, useEffect, useId, useState } from "preact/hooks";
 import type { MoneyUnit } from "../../../shared/money";
+import { OFFSTAGE_DEFAULTS, TELL_HELP, TELL_LABEL, tellPreset } from "../../../shared/offstage";
 import type { WorldCurrency } from "../../../shared/world";
+import { useView } from "../../../frontend/app";
 import { Button, Field } from "../../../frontend/components";
 import { humanize } from "../../../frontend/format";
 import { MoneyInput } from "../../../frontend/money-input";
 import type { HubControls } from "./hub";
 import { MoneyPage, type HubNav } from "./nav";
-import { amountOf } from "./requests";
+import { amountOf, type ActionBody } from "./requests";
 
 export interface Choice {
   value: string;
@@ -153,9 +155,12 @@ export function ToggleField(props: { label: ComponentChildren; help?: ComponentC
  * stays, and the toast says why. The button is held only for a reason the page shows above it:
  * `problem`, what the page says is missing, and each number field's text it can't send, which
  * names the field, so the reason is in sight though the field is folded away. A one-tap action's
- * page states what it does in its children, which is its confirmation.
+ * page states what it does in its children, which is its confirmation. In Play, a page that names
+ * the action it sends (`action`), one done at once, off screen (DESIGN §11), shows the Tell switch
+ * above its button, preset from Settings → Narrator → Out-of-play actions until it is pressed; its
+ * setting goes to `submit`, which sends it with the action.
  */
-export function ActionPage(props: { nav: HubNav; controls: HubControls; name: string; title: ComponentChildren; subtitle?: ComponentChildren; go: ComponentChildren; danger?: boolean; problem?: string | null; submit(): Promise<boolean>; children?: ComponentChildren }) {
+export function ActionPage(props: { nav: HubNav; controls: HubControls; name: string; title: ComponentChildren; subtitle?: ComponentChildren; go: ComponentChildren; danger?: boolean; problem?: string | null; action?: ActionBody | null; submit(tell?: boolean): Promise<boolean>; children?: ComponentChildren }) {
   const { nav, controls } = props;
   const [fields, setFields] = useState<ReadonlyMap<string, string>>(() => new Map());
   const mark = useCallback((field: string, reason: string | null) => {
@@ -167,6 +172,11 @@ export function ActionPage(props: { nav: HubNav; controls: HubControls; name: st
       return next;
     });
   }, []);
+  // Before the chat's view arrives, the shipped defaults.
+  const offstage = useView()?.controls?.offstage ?? OFFSTAGE_DEFAULTS;
+  const [told, setTold] = useState<boolean | null>(null);
+  const preset = controls.mode === "player" && props.action ? tellPreset(props.action.action, props.action.params, offstage, controls.currency.decimals) : null;
+  const tell = preset === null ? undefined : (told ?? preset);
   const reasons = [...new Set([...fields.values(), ...(props.problem ? [props.problem] : [])])];
   const blocked = reasons.length > 0;
   return (
@@ -178,10 +188,11 @@ export function ActionPage(props: { nav: HubNav; controls: HubControls; name: st
           onSubmit={(event) => {
             event.preventDefault();
             if (controls.busy || blocked) return;
-            void props.submit().then((ok) => ok && nav.back());
+            void props.submit(tell).then((ok) => ok && nav.back());
           }}
         >
           {props.children}
+          {tell !== undefined ? <ToggleField label={TELL_LABEL} help={TELL_HELP} checked={tell} disabled={controls.busy} onChange={setTold} /> : null}
           {reasons.map((r) => (
             <p key={r} class="lre-money-problem">
               {r}
@@ -207,14 +218,14 @@ export function unchangedProblem(now: string, what: string): string {
   return `It's ${humanize(now).toLowerCase()} now: pick another ${what}.`;
 }
 
-/** An action page whose field is an amount: required, or empty only with `optional`, the words for what an empty amount means ("The whole balance"). */
-export function AmountPage(props: { nav: HubNav; controls: HubControls; name: string; title: ComponentChildren; subtitle?: ComponentChildren; label: string; go: ComponentChildren; danger?: boolean; optional?: string; initial?: string; help?: ComponentChildren; submit(cents: number | null): Promise<boolean>; children?: ComponentChildren }) {
+/** An action page whose field is an amount: required, or empty only with `optional`, the words for what an empty amount means ("The whole balance"); the action it sends for that amount (`action`) gets the Tell switch. */
+export function AmountPage(props: { nav: HubNav; controls: HubControls; name: string; title: ComponentChildren; subtitle?: ComponentChildren; label: string; go: ComponentChildren; danger?: boolean; optional?: string; initial?: string; help?: ComponentChildren; action?(cents: number | null): ActionBody | null; submit(cents: number | null, tell?: boolean): Promise<boolean>; children?: ComponentChildren }) {
   const { controls } = props;
   const [text, setText] = useState(props.initial ?? "");
   const empty = text.trim() === "";
   const cents = empty ? null : amountOf(text, controls.currency);
   return (
-    <ActionPage nav={props.nav} controls={controls} name={props.name} title={props.title} subtitle={props.subtitle} go={props.go} danger={props.danger} problem={amountProblem(text, controls.currency, "an amount", props.optional === undefined)} submit={() => props.submit(cents)}>
+    <ActionPage nav={props.nav} controls={controls} name={props.name} title={props.title} subtitle={props.subtitle} go={props.go} danger={props.danger} problem={amountProblem(text, controls.currency, "an amount", props.optional === undefined)} action={props.action?.(cents) ?? null} submit={(tell) => props.submit(cents, tell)}>
       {props.children}
       <AmountField label={props.label} value={text} currency={controls.currency} onInput={setText} invalid={!empty && cents === null} placeholder={props.optional} help={props.help} />
     </ActionPage>

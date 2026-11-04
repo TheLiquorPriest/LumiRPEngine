@@ -1,8 +1,10 @@
 // A company's Ownership tab in Orgs (ORG-SPEC §4.4, §3.10, §3.13; `r.orgTab`, the economy's
 // `ownership` section): its structure and how its decisions are made, the cap table (each holder's
-// class, units, share of the worth, votes and, at Money 4, value), its classes, its valuation and
-// value a unit, its Structure (who owns it, the subsidiaries it holds and what they add up to
-// together), the reader's payouts (Pay out profit, an owner's draw, where their share goes), and its
+// class, units, share of the worth, votes and, at Money 4, what their shares are worth), its classes,
+// its Worth (from Money 3 its net worth, below zero where it owes more; at Money 4 the value of its
+// shares, never below nothing, and a unit), its Structure (who owns it, the subsidiaries it holds,
+// each with its net worth and the value of its shares, and what they add up to together), the
+// reader's payouts (Pay out profit, an owner's draw, where their share goes), and its
 // share and corporate controls: Sell shares (the reader's own stake), Issue shares, Buy back,
 // Classes, Start a subsidiary and Change structure, each off with why where the reader may not, and
 // on each subsidiary, selling part of the stake or putting more in, as the company. Its Market
@@ -13,7 +15,7 @@
 
 import type { ComponentChildren } from "preact";
 import { useId, useState } from "preact/hooks";
-import { FINANCE_ACTIONS, ROLE_RIGHTS, STRUCTURE_LABELS, type ListingView, type MergeView, type OwnershipView, type StructureLink, type WindingView, type WindLine } from "../../../shared/finance";
+import { FINANCE_ACTIONS, OWNER_ROLE_LABELS, ROLE_RIGHTS, STRUCTURE_LABELS, type ListingView, type MergeView, type OwnershipView, type StructureLink, type WindingView, type WindLine } from "../../../shared/finance";
 import type { JsonObject } from "../../../shared/json";
 import { parseMoneyInput } from "../../../shared/money";
 import { ORG_ACTIONS } from "../../../shared/org";
@@ -320,13 +322,18 @@ function StakeForm(props: { parent: string; child: StructureLink; people: readon
   );
 }
 
-/** A subsidiary's row in Structure and its own below it, indented; with what it adds where values show. */
+/**
+ * A subsidiary's row in Structure and its own below it, indented; with what it adds where values
+ * show: its net worth, below zero where it owes more than it holds, beside the value of its shares,
+ * never below nothing (a trust's worth is its net worth alone), so the two read apart.
+ */
 function ChildRows(props: { link: StructureLink; depth: number; currency: WorldCurrency; open(route: SheetRoute): void }): ComponentChildren {
   const l = props.link;
-  const figures = [l.value !== null ? `worth ${formatMoney(l.value, props.currency)}` : null, l.cash !== null ? `cash ${formatMoney(l.cash, props.currency)}` : null, l.profit !== null ? `profit ${formatMoney(l.profit, props.currency)}` : null].filter((x) => x !== null);
+  const money = (cents: number): string => formatMoney(cents, props.currency);
+  const figures = [l.netWorth !== null ? `net worth ${money(l.netWorth)}` : null, l.value !== null && !l.trust ? `value of the shares ${money(l.value)}` : null, l.cash !== null ? `cash ${money(l.cash)}` : null, l.profit !== null ? `profit ${money(l.profit)}` : null].filter((x) => x !== null);
   return (
     <>
-      <ListRow id={l.id} icon="briefcase" title={`${"· ".repeat(props.depth)}${l.name}`} subtitle={[l.controlled ? "Controlled" : `${pct(l.votes)} of its votes`, ...figures].join(" · ")} value={pct(l.share)} chevron onClick={() => props.open(orgRoute(l.id))} />
+      <ListRow id={l.id} icon={l.trust ? "shield" : "briefcase"} title={`${"· ".repeat(props.depth)}${l.name}`} subtitle={[l.trust ? `Trust · ${OWNER_ROLE_LABELS[l.trust.role].one}` : l.controlled ? "Controlled" : `${pct(l.votes)} of its votes`, ...figures].join(" · ")} value={l.share > 0 ? pct(l.share) : undefined} chevron onClick={() => props.open(orgRoute(l.id))} />
       {l.children.map((c) => (
         <ChildRows key={c.id} link={c} depth={props.depth + 1} currency={props.currency} open={props.open} />
       ))}
@@ -352,6 +359,10 @@ export function OrgOwnership(props: { org: OrgView; section: OwnershipView; read
   const known = reader ? knownPeople(reader.controls.palette).map((p) => ({ value: p.id, label: p.label })) : [];
   const people = [...known, ...section.owners.flatMap((o) => (o.party !== null && !known.some((k) => k.value === o.party) ? [{ value: o.party, label: o.name }] : []))];
   const head = [STRUCTURE_LABELS[section.structure] ?? section.structure, section.units !== null ? `${section.units} units` : "not counted in units", `decisions need more than ${section.decidePct === 50 ? "half" : pct(section.decidePct)} of the votes`];
+  // Two figures read apart (DESIGN §27.10): its net worth, below zero where it owes more than it
+  // holds, and the value of its shares, never below nothing (limited liability).
+  const valuation = section.valuation;
+  const books = valuation ? `its net worth, ${formatMoney(valuation.book, currency)}, and ${valuation.multiple} × the last 12 months' operating profit, ${formatMoney(valuation.profit, currency)}` : "";
   return (
     <div class="lre-stack" data-lre-org-ownership={org.id}>
       <Section>
@@ -370,18 +381,19 @@ export function OrgOwnership(props: { org: OrgView; section: OwnershipView; read
                 key={`${o.public === true ? "market:" : ""}${o.party ?? `someone:${i}`}`}
                 icon={o.public === true && o.party === null ? "globe" : "user"}
                 title={o.name}
-                subtitle={[o.public === true ? "on the market" : null, o.role !== "owner" ? o.role.replace(/_/g, " ") : null, section.classes && o.class ? o.class : null, o.units !== undefined ? `${o.units} units` : null, o.votes !== undefined && Math.abs(o.votes - o.share) > 0.005 ? `${pct(o.votes)} of the votes` : null].filter((x) => x !== null).join(" · ") || undefined}
-                value={[o.share > 0 ? pct(o.share) : null, o.value !== undefined ? formatMoney(o.value, currency) : null].filter((x) => x !== null).join(" · ") || undefined}
+                subtitle={[o.public === true ? "on the market" : null, o.role !== "owner" ? OWNER_ROLE_LABELS[o.role].one : null, section.classes && o.class ? o.class : null, o.units !== undefined ? `${o.units} units` : null, o.votes !== undefined && Math.abs(o.votes - o.share) > 0.005 ? `${pct(o.votes)} of the votes` : null].filter((x) => x !== null).join(" · ") || undefined}
+                value={[ROLE_RIGHTS[o.role].worth && o.share > 0 ? pct(o.share) : null, o.value !== undefined ? `shares worth ${formatMoney(o.value, currency)}` : null].filter((x) => x !== null).join(" · ") || undefined}
               />
             ))}
           </List>
         )}
       </Section>
-      {section.valuation ? (
-        <Section title="Valuation">
+      {section.netWorth !== null || valuation ? (
+        <Section title="Worth">
           <div class="lre-stack" data-lre-ownership-valuation>
-            <Row k="Value" v={formatMoney(section.valuation.value, currency)} sub={section.valuation.market ? `At the market: ${formatMoney(Math.round(section.valuation.market.price), currency)} a unit × ${section.valuation.market.units} units; its books ${formatMoney(section.valuation.book, currency)} and ${section.valuation.multiple} × the last 12 months' profit, ${formatMoney(section.valuation.profit, currency)}` : section.valuation.set ? "Set for it" : `Its books, ${formatMoney(section.valuation.book, currency)}, and ${section.valuation.multiple} × the last 12 months' profit, ${formatMoney(section.valuation.profit, currency)}`} />
-            {section.valuation.perUnit !== null ? <Row k="A unit" v={formatMoney(Math.round(section.valuation.perUnit), currency)} /> : null}
+            {section.netWorth !== null ? <Row k="Net worth" v={formatMoney(section.netWorth, currency)} sub="What it holds, less what it owes" {...(section.netWorth < 0 ? { tone: "neg" as const } : {})} /> : null}
+            {valuation ? <Row k="Value of the shares" v={formatMoney(valuation.value, currency)} sub={valuation.market ? `At the market: ${formatMoney(Math.round(valuation.market.price), currency)} a unit × ${valuation.market.units} units; ${books}` : valuation.set ? "Set for it" : valuation.floored ? `Net worth is below zero: ${books} come to less than nothing, and limited liability keeps the shares at ${formatMoney(0, currency)}, never less` : `From ${books}`} /> : null}
+            {valuation && valuation.perUnit !== null ? <Row k="A unit" v={formatMoney(Math.round(valuation.perUnit), currency)} /> : null}
           </div>
         </Section>
       ) : null}
@@ -423,7 +435,7 @@ export function OrgOwnership(props: { org: OrgView; section: OwnershipView; read
             <div class="lre-stack" data-lre-ownership-consolidated>
               <Row k="Cash, with its subsidiaries" v={formatMoney(section.consolidated.cash, currency)} />
               <Row k="Profit this year, with them" v={formatMoney(section.consolidated.profit, currency)} />
-              <Row k="Net worth, with them at their books" v={formatMoney(section.consolidated.netWorth, currency)} />
+              <Row k="Net worth with its subsidiaries" v={formatMoney(section.consolidated.netWorth, currency)} sub="Each company it controls at its net worth, not the value of its shares (a value set for it, or the market's, stays)" {...(section.consolidated.netWorth < 0 ? { tone: "neg" as const } : {})} />
             </div>
           ) : null}
           {act && acts?.holdings === null

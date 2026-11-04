@@ -313,8 +313,8 @@ describe("Keep in the world", () => {
   });
 });
 
-describe("the one-time Things tidied fix (ITEMS-SPEC §9, §12 Phase 4)", () => {
-  test("an old chat's first turn records it once, before the turn reads, with Undo: the bought fridge an earlier build put on Jordan goes to 114 Harbor Street", async () => {
+describe("every turn's Things tidied fix (ITEMS-SPEC §9, §12 Phase 4; N3)", () => {
+  test("an old chat's next turn records it before the turn reads, with Undo: the bought fridge an earlier build put on Jordan goes to 114 Harbor Street", async () => {
     const { rig, chatId } = await oldChat(RECORDED.events);
     await rig.turn(chatId, "I look over the produce.", "You look over the produce at Alder Market.");
     const fixed = await headState(rig, chatId);
@@ -327,7 +327,7 @@ describe("the one-time Things tidied fix (ITEMS-SPEC §9, §12 Phase 4)", () => 
     rig.body(await rig.send({ type: "lre.chip", chatId, chip: chips[0]?.id ?? "", choice: "undo" }));
     const undone = await headState(rig, chatId);
     expect(undone.state.entities[FRIDGE]?.relations).toEqual([{ type: "in", to: "pov" }]);
-    // Once: the next turn records nothing more, and the finding waits in Tidy up.
+    // The player's Undo holds: while the fridge stays on him, the next turn leaves it there, and the finding waits in Tidy up.
     await rig.turn(chatId, "I head for the checkout.", "You queue at the checkout.");
     expect((await headState(rig, chatId)).state.entities[FRIDGE]?.relations).toEqual([{ type: "in", to: "pov" }]);
     expect((await rig.rt.view(chatId, rig.host.userId)).chips.some((c) => c.kind === "tidied")).toBe(false);
@@ -396,5 +396,76 @@ describe("the one-time Things tidied fix (ITEMS-SPEC §9, §12 Phase 4)", () => 
     expect(fixed.state.entities[FRIDGE]?.fields.place).toBe("harbor_street_114");
     expect(fixed.state.entities[FRIDGE]?.relations.some((r) => r.type === "in")).toBe(false);
     expect((await rig.rt.view(chatId, rig.host.userId)).chips.filter((c) => c.kind === "tidied").map((c) => c.label)).toEqual(["Things tidied"]);
+  });
+});
+
+/** A TV an earlier build put on Jordan when he bought it, as it recorded the purchase's thing. */
+const TV = "item:tv55recorded";
+const BOUGHT_TV: LedgerEvent = { type: "spawn", entity: { id: TV, kind: "item", name: "Television, 55 in 4K", tier: "background", fields: { notable: true, owner: "pov", catalog: "tv_55_4k", category: "electronics", got: { how: "bought", at: 1 } }, relations: [{ type: "in", to: "pov" }] } } as LedgerEvent;
+
+describe("every turn's tidy, turn after turn (N3)", () => {
+  test("the fridge and the TV of a world whose catalog has no size column go to Jordan's home on the next turn, under one chip whose Undo puts both back", async () => {
+    // The world's own catalog as an older build copied it: no size, aliases or holds on these rows.
+    const first = new Rig({ shipped: true });
+    const worldId = await first.newWorld("Port Alder", "modern_slice_of_life");
+    const draft = first.body(await first.send({ type: "lre.editor", op: "get", worldId, base: null }));
+    const strip = [...["size", "aliases", "holds"].map((c) => `/tables/economy.catalog/rows/refrigerator/${c}`), ...["size", "aliases"].map((c) => `/tables/economy.catalog/rows/tv_55_4k/${c}`)].map((path) => ({ op: "remove", path }));
+    first.body(await first.send({ type: "lre.editor", op: "patch", worldId, base: draft.base, ops: strip }));
+    first.body(await first.send({ type: "lre.world", op: "commit", worldId, base: draft.base }));
+    const chatId = first.host.createChat("Morning.");
+    first.body(await first.send({ type: "lre.world", op: "attach", worldId, chatId }));
+    await first.turn(chatId, "I head out to the market.", "You drive to Alder Market.");
+    await recordRead(first, chatId, [...RECORDED.events, BOUGHT_TV]);
+    const rig = first.restart();
+    expect((await headState(rig, chatId)).state.entities[TV]?.relations).toEqual([{ type: "in", to: "pov" }]);
+    await rig.turn(chatId, "I look over the produce.", "You look over the produce at Alder Market.");
+    const fixed = await headState(rig, chatId);
+    for (const id of [FRIDGE, TV]) {
+      expect(fixed.state.entities[id]?.fields.place).toBe("harbor_street_114");
+      expect(fixed.state.entities[id]?.relations.some((r) => r.type === "in")).toBe(false);
+    }
+    const chips = (await rig.rt.view(chatId, rig.host.userId)).chips.filter((c) => c.kind === "tidied");
+    expect(chips.map((c) => c.label)).toEqual(["Things tidied"]);
+    rig.body(await rig.send({ type: "lre.chip", chatId, chip: chips[0]?.id ?? "", choice: "undo" }));
+    const undone = await headState(rig, chatId);
+    for (const id of [FRIDGE, TV]) expect(undone.state.entities[id]?.relations).toEqual([{ type: "in", to: "pov" }]);
+  });
+
+  test("a later impossible hold is tidied on the turn after it, the earlier one staying home", async () => {
+    const { rig, chatId } = await oldChat(RECORDED.events);
+    await rig.turn(chatId, "I look over the produce.", "You look over the produce at Alder Market.");
+    expect((await headState(rig, chatId)).state.entities[FRIDGE]?.fields.place).toBe("harbor_street_114");
+    // The next reply's read, as an earlier build recorded it, puts a TV he bought on him; the chat opened again by this build.
+    await recordRead(rig, chatId, [BOUGHT_TV]);
+    const next = rig.restart();
+    expect((await headState(next, chatId)).state.entities[TV]?.relations).toEqual([{ type: "in", to: "pov" }]);
+    await next.turn(chatId, "I head for the checkout.", "You queue at the checkout.");
+    const head = await headState(next, chatId);
+    expect(head.state.entities[TV]?.fields.place).toBe("harbor_street_114");
+    expect(head.state.entities[FRIDGE]?.fields.place).toBe("harbor_street_114");
+    expect((await next.rt.view(chatId, next.host.userId)).chips.filter((c) => c.kind === "tidied").map((c) => c.label)).toEqual(["Things tidied"]);
+  });
+
+  test("the chip's detail lists every move, a line each, past the eight lines a change chip keeps", async () => {
+    const bought = (n: number): LedgerEvent => ({ type: "spawn", entity: { id: `${TV}_${n}`, kind: "item", name: `Television, 55 in 4K no. ${n}`, tier: "background", fields: { notable: true, owner: "pov", catalog: "tv_55_4k", category: "electronics", got: { how: "bought", at: 1 } }, relations: [{ type: "in", to: "pov" }] } }) as LedgerEvent;
+    const { rig, chatId } = await oldChat([...RECORDED.events, BOUGHT_TV, bought(2), bought(3), bought(4)]);
+    await rig.turn(chatId, "I look over the produce.", "You look over the produce at Alder Market.");
+    const [chip, ...more] = (await rig.rt.view(chatId, rig.host.userId)).chips.filter((c) => c.kind === "tidied");
+    expect(more).toEqual([]);
+    const lines = (chip?.detail ?? "").split("\n");
+    expect([lines[0], lines.at(-1)]).toEqual(["Put right, as play can't have them:", "Undo puts them back as they were."]);
+    // Five things put down, each no longer carried and now at home: ten moves, none cut.
+    expect(lines.length).toBe(12);
+    for (const n of [2, 3, 4]) expect(lines.filter((l) => l.startsWith(`Television, 55 in 4K no. ${n} `))).toHaveLength(2);
+  });
+
+  test("a finding left as it is (Leave it) is never tidied, and a turn with nothing else to tidy records no chip", async () => {
+    const { rig, chatId } = await oldChat(RECORDED.events);
+    const finding = (await tidy(rig, chatId)).findings.find((f) => f.kind === "too_big" && f.things.includes(FRIDGE));
+    if (!finding) throw new Error("no finding");
+    await things(rig, chatId, { op: "leave", key: finding.key, left: true });
+    await rig.turn(chatId, "I look over the produce.", "You look over the produce at Alder Market.");
+    expect((await headState(rig, chatId)).state.entities[FRIDGE]?.relations).toEqual([{ type: "in", to: "pov" }]);
+    expect((await rig.rt.view(chatId, rig.host.userId)).chips.some((c) => c.kind === "tidied")).toBe(false);
   });
 });

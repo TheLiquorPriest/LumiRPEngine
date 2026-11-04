@@ -5,7 +5,7 @@
 // left out what the level doesn't simulate, and nothing here shows detail the view marks as below
 // the top level.
 
-import { CLASS_TRAITS, payeeKey, ROLE_RIGHTS, type AccountView, type AlertLine, type BusinessView, type CardView, type DistributionRoute, type FinanceFeature, type FinanceView, type FlowView, type HoldingView, type HouseholdView, type Invoice, type JobView, type JournalLine, type OwnerRole, type PartyKind, type PropertyView, type RoleRights, type UpcomingLine } from "../../../shared/finance";
+import { CLASS_TRAITS, isCorrection, payeeKey, ROLE_RIGHTS, type AccountView, type AlertLine, type BusinessView, type CardView, type DistributionRoute, type FinanceFeature, type FinanceView, type FlowView, type HoldingView, type HouseholdView, type Invoice, type JobView, type JournalLine, type OwnerRole, type PartyKind, type PropertyView, type RoleRights, type UpcomingLine } from "../../../shared/finance";
 import type { EntityId } from "../../../shared/ids";
 import type { GmView, PaletteView } from "../../../shared/state-view";
 import { cardChanges, type CardChange } from "./requests";
@@ -145,27 +145,32 @@ export function moveFrom(view: FinanceView, control: MoveControl): AccountView[]
   return view.accounts.filter((a) => accountControls(view, a).includes(control));
 }
 
-/** Activity's filter: one account's lines, one category's, or (empty) all. */
+/** Money's one filter bar (ORG-SPEC §5.1), kept by the hub's frame for Activity and In & out alike: money in or out, whose it is, one account's, one category's; empty is all. */
 export interface ActivityFilter {
   account: string;
   category: string;
+  direction: "" | "in" | "out";
+  /** In & out: the party whose money it is (`FlowView.whose`). */
+  whose: string;
 }
 
-export const ALL_ACTIVITY: ActivityFilter = { account: "", category: "" };
+export const ALL_ACTIVITY: ActivityFilter = { account: "", category: "", direction: "", whose: "" };
 
 /**
  * Activity (ORG-SPEC §5.1): every line across the party's accounts the view carries, newest first,
- * of the account and the category the filter names; where holds run, the lines still pending and
- * the holds on each account too (a hold has no category, so a category's lines leave them out).
+ * of the account, the category and the direction the filter names; where holds run, the lines still
+ * pending and the holds on each account too (a hold has no category or direction, so a category's or
+ * a direction's lines leave them out).
  */
 export function activityOf(view: FinanceView, filter: ActivityFilter): { lines: JournalLine[]; pending: JournalLine[]; holds: { account: AccountView; hold: AccountView["holds"][number] }[] } {
   const accounts = view.accounts.filter((a) => filter.account === "" || a.id === filter.account);
-  const kept = (l: JournalLine): boolean => (filter.account === "" || l.accountId === filter.account) && (filter.category === "" || l.category === filter.category);
+  // Money in or out as Direction asks: a correction is neither, as it only puts a balance right.
+  const kept = (l: JournalLine): boolean => (filter.account === "" || l.accountId === filter.account) && (filter.category === "" || l.category === filter.category) && (filter.direction === "" || (!isCorrection(l) && (filter.direction === "in" ? l.cents > 0 : l.cents < 0)));
   const holds = shows(view, "holds");
   return {
     lines: view.recent.filter(kept),
     pending: holds ? accounts.flatMap((a) => a.pending).filter(kept) : [],
-    holds: holds && filter.category === "" ? accounts.flatMap((a) => a.holds.map((hold) => ({ account: a, hold }))) : [],
+    holds: holds && filter.category === "" && filter.direction === "" ? accounts.flatMap((a) => a.holds.map((hold) => ({ account: a, hold }))) : [],
   };
 }
 
@@ -173,6 +178,22 @@ export function activityOf(view: FinanceView, filter: ActivityFilter): { lines: 
 export function activityChoices(view: FinanceView): { accounts: { value: string; label: string }[]; categories: { value: string; label: string }[] } {
   const categories = [...new Set([...view.recent, ...view.accounts.flatMap((a) => a.pending)].flatMap((l) => (l.category ? [l.category] : [])))].sort();
   return { accounts: view.accounts.map((a) => ({ value: a.id, label: a.name })), categories: categories.map((c) => ({ value: c, label: c })) };
+}
+
+/** Whether a flow is In & out's as the filter asks: its direction, whose money it is, and the account on the party's side (what pays it, or what it pays into). */
+export function flowKept(f: FlowView, filter: ActivityFilter): boolean {
+  return (filter.direction === "" || f.direction === filter.direction) && (filter.whose === "" || f.whose?.id === filter.whose) && (filter.account === "" || f.payer === filter.account || f.payee === filter.account);
+}
+
+/** What In & out's filter offers: whose money its flows are and the accounts they pay from or into, each once, by name; one choice alone is no choice. */
+export function inOutChoices(view: FinanceView): { whose: { value: string; label: string }[]; accounts: { value: string; label: string }[] } {
+  const whose = new Map<string, string>();
+  for (const f of view.flows) if (f.whose) whose.set(f.whose.id, f.whose.id === view.party ? "Yours" : f.whose.name);
+  const named = new Map([...view.accounts, ...view.businesses.flatMap((b) => b.managed)].map((a) => [a.id, a.name]));
+  const accounts = new Map<string, string>();
+  for (const f of view.flows) for (const id of [f.payer, f.payee]) if (id !== null && named.has(id)) accounts.set(id, named.get(id) ?? id);
+  const list = (m: Map<string, string>): { value: string; label: string }[] => (m.size > 1 ? [...m].map(([value, label]) => ({ value, label })) : []);
+  return { whose: list(whose), accounts: list(accounts) };
 }
 
 /**

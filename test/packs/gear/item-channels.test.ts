@@ -141,3 +141,28 @@ describe("the reply's thing facts on the starter worlds", () => {
     expect(Object.keys(w.state.entities).sort()).toEqual(before);
   });
 });
+
+describe("a purchase too big to carry, by its name (N3)", () => {
+  test("a refrigerator bought at the market from a catalog with no size column lands at the buyer's home; a TV remote stays on him", () => {
+    const make = STARTER_WORLDS.modern_slice_of_life;
+    if (!make) throw new Error("no Port Alder starter");
+    const world = make("w", "Port Alder");
+    const catalog = world.tables["economy.catalog"];
+    if (!catalog) throw new Error("no catalog");
+    for (const column of ["size", "aliases", "holds"]) delete catalog.columns[column];
+    for (const row of Object.values(catalog.rows)) for (const column of ["size", "aliases", "holds"]) delete row[column];
+    catalog.rows.pa_fridge = { name: "Refrigerator", category: "household_goods", unit: "each", price_cents: { min: 50000, typical: 90000, max: 200000 } };
+    catalog.rows.pa_remote = { name: "TV remote", category: "electronics", unit: "each", price_cents: { min: 1000, typical: 2000, max: 4000 } };
+    const w = new Working(reg, world, startState(world, reg));
+    moveTo(w, "pov", "alder_market");
+    const before = new Set(Object.keys(w.state.entities));
+    expect(play(w, { type: "purchase", payer: "pov", item: "pa_fridge", price: 900 })).toBeNull();
+    expect(play(w, { type: "purchase", payer: "pov", item: "pa_remote", price: 20 })).toBeNull();
+    const made = Object.keys(w.state.entities).filter((id) => !before.has(id) && w.state.entities[id]?.kind === "item");
+    const fridge = made.find((id) => w.state.entities[id]?.name === "Refrigerator") ?? "";
+    const remote = made.find((id) => w.state.entities[id]?.name === "TV remote") ?? "";
+    expect(w.state.entities[fridge]?.fields.place).toBe("harbor_street_114");
+    expect(holder(w, fridge)).toBeUndefined();
+    expect(holder(w, remote)).toBe("pov");
+  });
+});

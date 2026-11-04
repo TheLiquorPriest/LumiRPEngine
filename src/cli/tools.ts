@@ -15,6 +15,7 @@ import type { Loaded, RunKind } from "./offline";
 import { ANSWER_LIMIT, clip } from "./read";
 import type { ToolResult } from "./report";
 import { json, lintSummary } from "./report";
+import { DOCS } from "./texts";
 import { VERSIONS } from "./version";
 import type { ToolModule } from "./tool-module";
 import { BUILD_TOOLS } from "./tools-build";
@@ -95,8 +96,8 @@ export const TOOLS: readonly ToolDef[] = [
   },
   {
     name: "lre_docs",
-    description: "Look things up in LumiRPEngine's docs, best-matching sections first: the reference (every kind and field, relation type, effect, formula function, action, event and lint code), the expression language, the recipes, the design, the user guide and presets.",
-    inputSchema: object({ query: { type: "string", description: 'A few words: a kind, field, effect, function or lint code, or a question ("account opening", "stage formula").' }, doc: { type: "string", enum: ["reference", "expressions", "recipes", "design", "user-guide", "presets"], description: "Only this doc." } }, ["query"]),
+    description: "Look things up in LumiRPEngine's docs, best-matching sections first (ranked by BM25: headings count most, stopwords such as \"the\" and \"how\" are left out, \"bills\", \"billing\" and \"billed\" are one word, and an id such as due_day is matched whole): the reference (every kind and field, relation type, effect, formula function, action, event and lint code), the expression language, the recipes, the design, the user guide, presets, the agent guide (lre_guide's) and the command line and MCP tools.",
+    inputSchema: object({ query: { type: "string", description: 'A few words: a kind, field, effect, function or lint code, or a question ("account opening", "when does a loan bill").' }, doc: { type: "string", enum: Object.keys(DOCS), description: "Only this doc." } }, ["query"]),
     write: false,
   },
   {

@@ -58,7 +58,7 @@ function premisesOf(w: Working): PremisesView {
 }
 
 function gmOf(w: Working): GmView {
-  return { ...readPass(() => buildGmWorld(reg, w.world, w.state)), edits: [], refused: [], minds: {} as GmView["minds"] };
+  return { ...readPass(() => buildGmWorld(reg, w.world, w.state)), edits: [], refused: [], held: [], minds: {} as GmView["minds"] };
 }
 
 function edit(w: Working, ops: EditOp[]): void {

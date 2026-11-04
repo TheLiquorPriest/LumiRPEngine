@@ -6,15 +6,17 @@
 import { ownersIn } from "../shared/finance";
 import type { EntityId, PlaceId } from "../shared/ids";
 import { hasOwn, type JsonObject } from "../shared/json";
-import type { Rest, SizeClass, SizeFrom, Spot } from "../shared/things";
-import { gotOf, holdsOfVolume, isRest, isSize, madeOf, sizeOfVolume, thingsConfigOf, type Size } from "../shared/things";
+import type { NameSize, Rest, SizeClass, SizeFrom, Spot } from "../shared/things";
+import { gotOf, holdsOfVolume, isRest, isSize, madeOf, nameSizeOf, sizeOfVolume, sizeRank, thingsConfigOf, type Size } from "../shared/things";
+import type { TableRow } from "../shared/tables";
 import { businessAt, orgTypeOf } from "./org";
 import { own } from "./pack-kit";
 import { together } from "./presence";
+import { passMemo } from "./read-pass";
 import type { ReadContext } from "./registry";
-import { isGone, kindIs } from "./scope";
+import { isGone, kindIs, placeOfEntity, placeWithin } from "./scope";
 import { isMemberOf, selectorMatches } from "./selector";
-import { contentsIndex, typeRowOf } from "./thing-index";
+import { contentsIndex, thingIndex, typeRowOf } from "./thing-index";
 
 /** What the things model reads: the registry, the world and its tables, and the state. */
 export type ThingContext = Pick<ReadContext, "registry" | "world" | "state" | "tables">;
@@ -38,16 +40,27 @@ const isPerson = (ctx: Pick<ReadContext, "registry" | "world" | "state">, id: En
 /**
  * A thing's size (§4.1), the first that answers: its own `size`; Built-in when `fixed`; `part` when
  * marked so or its containers row is built into a vehicle; a vehicle; its type row's `size`; a
- * containers row that stands as furniture; its volume against the size bounds; its category's size;
- * otherwise unknown.
+ * containers row that stands as furniture; its volume against the size bounds; its name, by the
+ * world's sizes by name; its category's size; otherwise unknown.
  */
 export function sizeOf(ctx: ThingContext, id: EntityId): { size: SizeClass; from: SizeFrom } {
   const e = own(ctx.state.entities, id);
-  return e ? sizeOfDef(ctx, e.kind, e.fields) : { size: "unknown", from: "unknown" };
+  return e ? sizeOfDef(ctx, e.kind, e.fields, e.name) : { size: "unknown", from: "unknown" };
 }
 
-/** The size a thing of `kind` with these fields has (`sizeOf`), before it is in the world. */
-export function sizeOfDef(ctx: Pick<ThingContext, "registry" | "world" | "tables">, kind: string, f: Readonly<JsonObject>): { size: SizeClass; from: SizeFrom } {
+/** The names the size map reads of a thing (§4.1): its own name, its aliases, then its type row's name and aliases. */
+export function namesOf(f: Readonly<JsonObject>, name: string | undefined, row: TableRow | undefined): string[] {
+  const texts = (v: unknown): string[] => (Array.isArray(v) ? v.filter((a): a is string => typeof a === "string") : []);
+  return [...(name !== undefined ? [name] : []), ...texts(f.aliases), ...(typeof row?.name === "string" ? [row.name] : []), ...texts(row?.aliases)];
+}
+
+/** The world's size map entry a thing's names give (`sizes.byName`, §4.1), or null. */
+export function nameEntryOf(ctx: Pick<ThingContext, "world" | "tables">, f: Readonly<JsonObject>, name: string | undefined): NameSize | null {
+  return nameSizeOf(thingsConfigOf(ctx.world).sizes.byName, namesOf(f, name, typeRowOf(ctx, f)?.row))?.entry ?? null;
+}
+
+/** The size a thing of `kind` with these fields and this name has (`sizeOf`), before it is in the world. */
+export function sizeOfDef(ctx: Pick<ThingContext, "registry" | "world" | "tables">, kind: string, f: Readonly<JsonObject>, name?: string): { size: SizeClass; from: SizeFrom } {
   if (isSize(f.size)) return { size: f.size, from: "size" };
   if (f.fixed === true) return { size: "builtin", from: "fixed" };
   const type = typeRowOf(ctx, f);
@@ -57,6 +70,8 @@ export function sizeOfDef(ctx: Pick<ThingContext, "registry" | "world" | "tables
   if (type?.table === "gear.containers" && type.row.location === "furniture") return { size: "furniture", from: "location" };
   const config = thingsConfigOf(ctx.world);
   if (typeof f.volume_l === "number" && Number.isFinite(f.volume_l) && f.volume_l > 0) return { size: sizeOfVolume(f.volume_l, config.sizes.byVolume), from: "volume" };
+  const named = nameSizeOf(config.sizes.byName, namesOf(f, name, type?.row));
+  if (named) return { size: named.entry.size, from: "name" };
   const category = typeof f.category === "string" ? f.category : typeof type?.row.category === "string" ? type.row.category : "";
   if (category !== "" && hasOwn(config.sizes.byCategory, category)) {
     const size = config.sizes.byCategory[category];
@@ -68,18 +83,20 @@ export function sizeOfDef(ctx: Pick<ThingContext, "registry" | "world" | "tables
 /**
  * The largest size a holder takes (§4.1), or null for what holds nothing: a person, up to the
  * person ceiling; a vehicle, its own `holds`, else Furniture; any other container its own `holds`,
- * else its row's, else its capacity against the size bounds, else Hand.
+ * else its row's, else its capacity against the size bounds, else Hand; a plain thing its own
+ * `holds`, else its row's, else what its name holds by the world's sizes by name (a wardrobe).
  */
 export function holdsOf(ctx: ThingContext, holder: EntityId): Size | null {
   const e = own(ctx.state.entities, holder);
   if (!e) return null;
   const config = thingsConfigOf(ctx.world);
   if (kindIs(ctx.registry, ctx.world, e.kind, "person")) return config.sizes.ceiling;
+  if (!kindIs(ctx.registry, ctx.world, e.kind, "item")) return null;
   const vehicle = kindIs(ctx.registry, ctx.world, e.kind, "vehicle");
-  if (!vehicle && !kindIs(ctx.registry, ctx.world, e.kind, "container")) return null;
   if (isSize(e.fields.holds)) return e.fields.holds;
   if (vehicle) return "furniture";
   const row = typeRowOf(ctx, e.fields)?.row;
+  if (!kindIs(ctx.registry, ctx.world, e.kind, "container")) return isSize(row?.holds) ? row.holds : (nameEntryOf(ctx, e.fields, e.name)?.holds ?? null);
   if (isSize(row?.holds)) return row.holds;
   const capacity = typeof e.fields.capacity_l === "number" ? e.fields.capacity_l : row?.capacity_l;
   return typeof capacity === "number" && Number.isFinite(capacity) && capacity > 0 ? holdsOfVolume(capacity, config.sizes.byVolume) : "hand";
@@ -188,10 +205,27 @@ export function presumedAt(ctx: ThingContext, place: PlaceId): Whose {
   return owners.size > 0 ? { owners: [...owners], presumed: "property" } : { owners: living.residents, presumed: "residents" };
 }
 
+/**
+ * Whether the player character may ✎ or dispose of a thing (`fix_item`, ITEMS-SPEC §10.3): one
+ * stated theirs (or their household's); else, nobody's stated, one they have, or one at a place they
+ * live in or own.
+ */
+export function mayFixThing(ctx: ThingContext, pov: EntityId, item: EntityId): boolean {
+  const ours = (party: EntityId): boolean => party === pov || (orgTypeOf(ctx, party) === "household" && isMemberOf(ctx, pov, party));
+  const stated = ownersIn(own(ctx.state.entities, item)?.fields ?? {}).map((o) => o.party);
+  if (stated.length > 0) return stated.some(ours);
+  if (possessorOf(ctx, item) === pov) return true;
+  const at = placeOfEntity(ctx.state, item);
+  const home = own(ctx.state.entities, pov)?.fields.home;
+  if (at === null) return false;
+  if (typeof home === "string" && own(ctx.world.places, home) && placeWithin(ctx.world, at, home) && together(ctx.world, at, home)) return true;
+  return presumedAt(ctx, at).owners.some(ours);
+}
+
 // ---------------------------------------------------------------- where it rests
 
-/** Where a rest came from: the thing's own `home`, the world's placing of it, or the inference for things made in play. */
-export type RestFrom = "home" | "authored" | "carry" | "fixture" | "bought" | "made" | "none";
+/** Where a rest came from: the thing's own `home`, the world's placing of it, or the inference for things made in play (`stored`: what keeps its kind at its owner's home, a wardrobe for clothing). */
+export type RestFrom = "home" | "authored" | "carry" | "stored" | "fixture" | "bought" | "made" | "none";
 
 /** A rest as a thing's `home` field stores it: a place's id, a holder's id, "owner", or a spot. */
 export function readRest(value: unknown, ctx: Pick<ReadContext, "world" | "state">): Rest | null {
@@ -207,11 +241,68 @@ function everyday(ctx: ThingContext, id: EntityId, owner: EntityId | undefined):
   return thingsConfigOf(ctx.world).carry.some((rule) => rule.types.includes(type) && selectorMatches(ctx.registry, ctx.world, ctx.state, rule.who, owner));
 }
 
+/** The slots that carry rather than dress (§10.3): never an outfit's, and never what makes a thing clothing. */
+const CARRY_SLOTS: Readonly<Record<string, true>> = { none: true, pocket: true, pocket_or_bag: true, hand_held: true, back: true, shoulder: true };
+
+/** The slots several things share at once (pockets, hands): wearing one there takes nothing else off. */
+export const SHARED_SLOTS: Readonly<Record<string, true>> = { pocket: true, pocket_or_bag: true, hand_held: true };
+
+/** The slot a thing is worn in (§10.3): its own `slot`, else its type row's `equip_slot`; null when it isn't worn. */
+export function slotOf(ctx: Pick<ThingContext, "tables">, f: Readonly<JsonObject>): string | null {
+  const slot = typeof f.slot === "string" && f.slot !== "" ? f.slot : typeRowOf(ctx, f)?.row.equip_slot;
+  return typeof slot === "string" && slot !== "" && slot !== "none" ? slot : null;
+}
+
+/** A thing's category as the sizes by name's `keeps` reads it: its own, else its type row's; a thing worn on the body is clothing. */
+export function keptCategoryOf(ctx: Pick<ThingContext, "tables">, f: Readonly<JsonObject>): string | null {
+  const category = typeof f.category === "string" && f.category !== "" ? f.category : typeRowOf(ctx, f)?.row.category;
+  if (typeof category === "string" && category !== "") return category;
+  const slot = slotOf(ctx, f);
+  return slot !== null && !hasOwn(CARRY_SLOTS, slot) ? "clothing" : null;
+}
+
+/** Things lying at a place whose names keep a category's things (a wardrobe keeps clothing), each category's in id order, from the pass's state. */
+function keepersOf(ctx: ThingContext): ReadonlyMap<string, readonly { id: EntityId; place: PlaceId }[]> {
+  return passMemo([ctx.state, ctx.state.entities, ctx.world], "things.keepers", () => {
+    const out = new Map<string, { id: EntityId; place: PlaceId }[]>();
+    for (const id of thingIndex(ctx).things) {
+      const e = own(ctx.state.entities, id);
+      const place = e?.fields.place;
+      if (!e || typeof place !== "string" || place === "" || isGone(ctx.state, id)) continue;
+      for (const category of nameEntryOf(ctx, e.fields, e.name)?.keeps ?? []) out.set(category, [...(out.get(category) ?? []), { id, place }]);
+    }
+    return out;
+  });
+}
+
+/**
+ * What keeps a thing of `category` at its owner's home (§4.3): a holder there that keeps the
+ * category by the sizes by name and takes the thing's size, the owner's own first, never someone
+ * else's (a housemate's wardrobe); null when their home has none, or they have no home.
+ */
+export function keeperAt(ctx: ThingContext, owner: EntityId, thing: EntityId, category: string): EntityId | null {
+  const home = own(ctx.state.entities, owner)?.fields.home;
+  if (typeof home !== "string" || !own(ctx.world.places, home)) return null;
+  const size = sizeOf(ctx, thing).size;
+  let best: { id: EntityId; theirs: boolean } | null = null;
+  for (const k of keepersOf(ctx).get(category) ?? []) {
+    if (k.id === thing || !placeWithin(ctx.world, k.place, home) || !together(ctx.world, k.place, home)) continue;
+    const holds = holdsOf(ctx, k.id);
+    if (holds === null || (isSize(size) && sizeRank(size) > sizeRank(holds))) continue;
+    const stated = ownersIn(own(ctx.state.entities, k.id)?.fields ?? {}).map((o) => o.party);
+    const theirs = stated.some((p) => p === owner || isMemberOf(ctx, owner, p));
+    if (stated.length > 0 && !theirs) continue;
+    if (!best || (theirs && !best.theirs)) best = { id: k.id, theirs };
+  }
+  return best?.id ?? null;
+}
+
 /**
  * Where a thing rests (§4.3): its `home`; unset, an authored thing rests where the world document
- * puts it; one made in play rests on its owner when it is everyday carry or worn, where it is when
- * it is Furniture or built in, at the buyer's home when it was bought (a Pocket thing on the buyer),
- * else where it was made. Null when nothing says.
+ * puts it; one made in play rests on its owner when it is everyday carry or worn, in what keeps its
+ * kind at its owner's home (clothing in their wardrobe), where it is when it is Furniture or built in
+ * (unless that is on a person, which can't be), at the buyer's home when it was bought (a Pocket
+ * thing on the buyer), else where it was made. Null when nothing says.
  */
 export function restOf(ctx: ThingContext, id: EntityId): { rest: Rest | null; from: RestFrom } {
   const e = own(ctx.state.entities, id);
@@ -230,10 +321,14 @@ export function restOf(ctx: ThingContext, id: EntityId): { rest: Rest | null; fr
   const owner = ownersIn(e.fields)[0]?.party;
   const worn = e.relations.some((r) => r.type === "worn_by" || r.type === "equipped");
   if (owner !== undefined && (worn || everyday(ctx, id, owner))) return { rest: "owner", from: "carry" };
+  const category = owner !== undefined ? keptCategoryOf(ctx, e.fields) : null;
+  const keeper = owner !== undefined && category !== null ? keeperAt(ctx, owner, id, category) : null;
+  if (keeper !== null) return { rest: { in: keeper }, from: "stored" };
   const size = sizeOf(ctx, id).size;
   if (size === "furniture" || size === "builtin" || size === "part" || size === "vehicle") {
     const here = spotOf(ctx.state, id);
-    return { rest: here, from: here ? "fixture" : "none" };
+    const onPerson = here !== null && "in" in here && isPerson(ctx, here.in);
+    if (!onPerson) return { rest: here, from: here ? "fixture" : "none" };
   }
   if (gotOf(e.fields.got)?.how === "bought" && owner !== undefined) {
     if (size === "pocket") return { rest: "owner", from: "bought" };

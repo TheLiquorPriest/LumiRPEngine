@@ -54,7 +54,7 @@ function chat(): { w: Working; edit(ops: EditOp[]): void; gm(): GmView } {
         if (refused) throw new Error(`dropped: ${refused.reason}`);
       }
     },
-    gm: () => ({ ...readPass(() => buildGmWorld(reg, w.world, w.state)), edits: [], refused: [], minds: {} as GmView["minds"] }),
+    gm: () => ({ ...readPass(() => buildGmWorld(reg, w.world, w.state)), edits: [], refused: [], held: [], minds: {} as GmView["minds"] }),
   };
 }
 

@@ -12,6 +12,7 @@ import { MINDS_EVENTS } from "../../../shared/minds";
 import type { EntityDef } from "../../../shared/world";
 import { isMaterialized, pinnedVersion, tablesRevision } from "../../../engine/materialize";
 import { numOf, own, strOf } from "../../../engine/pack-kit";
+import { readPass } from "../../../engine/read-pass";
 import type { ReadContext, SlotInfo } from "../../../engine/registry";
 import { rulesetFloor } from "../../../engine/registry-impl";
 import type { Rng } from "../../../engine/rng";
@@ -21,11 +22,11 @@ import { cycleTasks, type CycleTask } from "./cycle";
 import { hasCreditFile, monthlyScore, scoreInstants } from "./credit";
 import { allFlows, flowLevel, occurrences, planPayments, runOccurrence } from "./flows";
 import { flowRunOf, isOpened } from "./journal";
-import { accountsOf, bandByLabel, external, moneyLevel, openerOf } from "./model";
+import { accountsOf, bandByLabel, external, ledgerHolders, moneyLevel, openerOf } from "./model";
 import { featureFor, isParty, toggles } from "./pay";
 import { Run } from "./run";
 
-/** Every party with authored accounts that hasn't opened them, in id order. */
+/** Every party that isn't gone, in id order. */
 function parties(ctx: ReadContext): EntityId[] {
   return Object.keys(ctx.state.entities)
     .sort()
@@ -57,18 +58,28 @@ export function openingBalances(entity: EntityId, ctx: ReadContext, claimed?: Se
  * Opens the authored accounts of everyone the money processes act for (Money 3+, an organization's
  * its most closely followed member's): in the first slot that steps them at that level, their
  * opening balances post as the same `materialize` event a view would record, so their flows draw on
- * the money the author gave them.
+ * the money the author gave them. It runs every slot, so it asks least first: only a party holding an
+ * account can open one, so it reads the holders, in id order, from one walk of the accounts kept for
+ * the pass; then whether the party opened already, and whether an account of theirs is left to open;
+ * and only then their money level, which for an organization walks its members. A world whose
+ * accounts are open costs one walk a slot, whatever its size, with the events a walk over every
+ * party gave.
  */
 export function openAccounts(ctx: ReadContext): LedgerEvent[] {
-  const out: LedgerEvent[] = [];
-  // Every party here opens from the same state, so an account two of them hold goes with the first only.
-  const claimed = new Set<EntityId>();
-  for (const who of parties(ctx)) {
-    if (moneyLevel(ctx, who) < 3 || isMaterialized(ctx.state, who, "money")) continue;
-    const opening = openingEvent(ctx, who, claimed);
-    if (opening) out.push(opening);
-  }
-  return out;
+  return readPass(() => {
+    const s = ctx.state;
+    const out: LedgerEvent[] = [];
+    // Every party here opens from the same state, so an account two of them hold goes with the first only.
+    const claimed = new Set<EntityId>();
+    for (const who of [...ledgerHolders(ctx)].sort()) {
+      if (isMaterialized(s, who, "money") || !isParty(ctx, who) || isGone(s, who)) continue;
+      if (!accountsOf(ctx, who).some((id) => !claimed.has(id) && !isOpened(s, id, openerOf(s, id) === who ? null : openerOf(s, id)))) continue;
+      if (moneyLevel(ctx, who) < 3) continue;
+      const opening = openingEvent(ctx, who, claimed);
+      if (opening) out.push(opening);
+    }
+    return out;
+  });
 }
 
 /** A party's opening balances as the `materialize` event a view records when it first shows them; null when nothing is left to open. */

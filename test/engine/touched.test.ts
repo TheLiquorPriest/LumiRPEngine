@@ -220,6 +220,8 @@ const EVERY_TYPE: LedgerEvent[] = [
   { type: "economy.acquire", data: { entity: "house", party: "you", cents: 25000000 } },
   { type: "economy.dispose", data: { entity: "house", party: "you", pct: 50, proceeds: 15000000, label: "Sold half the house" } },
   { type: "economy.stake_route", data: { business: "shop", owner: "you", to: "acct" } },
+  // The chat's own cash rule is the economy slice's (DESIGN §25.8), never an entity's definition.
+  { type: "economy.config", data: { atm: true } },
   // An organization's History and what was spent for it are the orgs slice's (ORG-SPEC §3.17), never an entity's definition.
   { type: "orgs.log", data: { org: "shop", text: "Paid Dev $1.00", by: "you", at: 0 } },
   { type: "orgs.spent", data: { org: "shop", who: "you", month: "2026-01", cents: 100 } },

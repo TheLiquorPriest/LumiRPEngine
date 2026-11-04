@@ -5,6 +5,7 @@ import { featureOn, FINANCE_FEATURES, payeeKey, type AccountView, type CardView,
 import { DOMAINS, INTERRUPT_CLASSES } from "../../src/shared/ids";
 import type { DomainId, InterruptClass, InterruptPolicy } from "../../src/shared/ids";
 import type { JsonValue } from "../../src/shared/json";
+import { OFFSTAGE_DEFAULTS } from "../../src/shared/offstage";
 import type { AssistantProposalOp, AssistantView, ExtractionModeView, TraceRow, UpgradePreview, WorkspaceFileView } from "../../src/shared/protocol";
 import type { ChangeType, ExtractionType, UserSettings } from "../../src/shared/settings";
 import { AGENT_CHANGE_DEFAULTS, AGENT_CHANGE_TYPES, LORE_INDEX_DEFAULTS, NARRATOR_DEFAULTS, SETTINGS_DEFAULTS_REV } from "../../src/shared/settings";
@@ -477,6 +478,8 @@ export function stateFixture(chatId: string): StateView {
       knowledge: { tracking: { chat: false, user: true }, narrator: { chat: null, world: { knowledge: "pov", secrets: "marked" }, user: { ...NARRATOR_DEFAULTS } } },
       // The world tidies an older chat's impossible holds; this chat follows it.
       things: { tidy: { chat: null, world: true } },
+      // The user's out-of-play Tell defaults, as shipped.
+      offstage: { tell: { ...OFFSTAGE_DEFAULTS.tell }, paymentsFrom: OFFSTAGE_DEFAULTS.paymentsFrom },
     },
     meter: { turn: { calls: 3, tokens: 2140, ms: 6200, lookups: 1 }, average: { calls: 2.4, tokens: 1890, ms: 5100, lookups: 0.4 }, p95: { calls: 5, tokens: 3900, ms: 11800, lookups: 2 } },
     currency: { code: "USD", symbol: "$", minorUnit: "cent", decimals: 2, format: "{sign}{symbol}{amount}" },
@@ -586,7 +589,11 @@ function samMoney(): FinanceView {
   const line = (id: string, at: string, memo: string, cents: number, accountId: string, account: string, category: string): JournalLine => ({ id, at, memo, cents, account, accountId, kind: cents > 0 ? "income" : "purchase", category, counterparty: null, card: null, status: "posted" });
   const account = (id: string, name: string, cls: AccountView["class"], classLabel: string, cents: number, rest: Partial<AccountView> = {}): AccountView => ({ id, name, class: cls, classLabel, product: { id: cls, label: classLabel }, institution: cls === "cash" ? null : "Maple Credit Union", status: "open", cents, available: cents, owners: [{ party: "pov", name: "Sam Rivera", role: "owner", share: 1 }], role: "owner", manages: true, spends: true, autopayFrom: [], fallbacks: [], limit: null, interest: null, terms: [], autopay: null, due: null, statements: [], cards: [], pending: [], holds: [], transactions: [], securedBy: null, loan: null, ...rest });
   const card = (id: string, name: string, network: CardView["network"], accountId: string, last4: string): CardView => ({ id, name, network, state: "active", holder: "Sam Rivera", holderId: "pov", account: accountId, last4, item: null, dailyPurchaseLimit: null, dailyAtmLimit: network === "debit" ? 50000 : null, spentToday: 325 });
-  const flow = (spec: Flow, amount: string, cents: number, schedule: string, next: string, from: string, to: string): FlowView => ({ id: spec.id, label: spec.label, kind: spec.kind, from, to, amount, cents, schedule, next, shortfall: spec.shortfall, status: spec.status, category: spec.category ?? null, link: null, payer: spec.from, editable: spec.source === "entity", source: spec.source, done: 3, missed: 0, deferred: 0, spec });
+  // In & out reads a flow paid into one of Sam's accounts (payday) as In, with that account as its payee; the rest go Out to someone who isn't an entity.
+  const flow = (spec: Flow, amount: string, cents: number, schedule: string, next: string, from: string, to: string): FlowView => {
+    const into = accounts.some((a) => a.id === spec.to);
+    return { id: spec.id, label: spec.label, kind: spec.kind, from, to, amount, cents, schedule, next, shortfall: spec.shortfall, status: spec.status, category: spec.category ?? null, link: null, payer: spec.from, payee: into ? spec.to : null, direction: into ? "in" : "out", whose: { id: "pov", name: "Sam Rivera" }, editable: spec.source === "entity", source: spec.source, done: 3, missed: 0, deferred: 0, spec };
+  };
   const recent = [
     line("v:1", "Tue 07:40", "Rosie's · coffee", -325, "visa", "Visa ··4421", "food"),
     line("v:0", "Mon 18:12", "Shell Route 9 · 9.2 gal", -3211, "visa", "Visa ··4421", "fuel"),
@@ -668,7 +675,7 @@ function starterMoney(template: string): JsonValue {
  * POV (`pov`) a job, investments and a credit score. Play → Orgs is that party's too (`orgs`: the
  * orgs pack's panels as the engine builds them). Null for a party the world doesn't have.
  */
-export function portAlderMoney(party: string): { play: JsonValue; gm: Omit<GmView, "edits" | "refused" | "minds">; orgs: Record<string, JsonValue> } | null {
+export function portAlderMoney(party: string): { play: JsonValue; gm: Omit<GmView, "edits" | "refused" | "held" | "minds">; orgs: Record<string, JsonValue> } | null {
   const world = STARTER_WORLDS.modern_slice_of_life?.("preview", "modern_slice_of_life");
   const harbor = world?.entities.prop_harbor_114;
   if (!world || !harbor || !Object.hasOwn(world.entities, party)) return null;
@@ -1088,6 +1095,7 @@ export function gmFixture(): GmView {
       { messageId: "m2", seq: 7, lines: ["Vic Moreau is gone"], undo: null },
     ],
     refused: [{ id: "w-17", reason: "Dev Patel's energy must be between 0 and 100." }],
+    held: [],
     minds: gmMinds(),
   };
 }
@@ -1389,6 +1397,7 @@ export function settingsFixture(): UserSettings {
     diagnostics: { recordsPerChat: 400 },
     narrator: { ...NARRATOR_DEFAULTS },
     statePrices: true,
+    offstage: { tell: { ...OFFSTAGE_DEFAULTS.tell }, paymentsFrom: OFFSTAGE_DEFAULTS.paymentsFrom },
     tidy: { findings: 50 },
   };
 }

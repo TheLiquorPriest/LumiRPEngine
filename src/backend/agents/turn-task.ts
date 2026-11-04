@@ -18,8 +18,15 @@
 //   system file (`AGENTS.md`, `roles/<role>.md`, at either level) is ever one: a system file is
 //   already in the agent's system prompt (`system-files.ts`).
 
+import { hashJson } from "../../shared/hash";
 import { isRecord, safeKey } from "../../shared/json";
+import type { Marker } from "../../shared/ledger";
+import type { EntityDef } from "../../shared/world";
 import { own } from "../../engine/pack-kit";
+import { isGone } from "../../engine/scope";
+import type { EntityState, WorldState } from "../../engine/state";
+import { migrate, planUpgrade, type MarkerEnv } from "../../engine/upgrade";
+import { canSeeEntity } from "../../engine/visibility";
 import { MAIN_TEXT } from "../../shared/main-agent-prompts";
 import type { PromptTexts } from "../../shared/prompts";
 import { isFilePath, isSystemPath, PINS_PATH } from "../../shared/stores";
@@ -143,15 +150,92 @@ export interface DigestInput {
   texts: PromptTexts;
 }
 
+/** An entity as an Upgrade changes it, to compare across one: as the state holds it, its classes and tags as read (its own, else its revision's). */
+function upgradeShape(e: EntityState | undefined, def: EntityDef | undefined): unknown {
+  return e ? { ...e, class: e.class ?? def?.class ?? {}, tags: e.tags ?? def?.tags ?? [] } : null;
+}
+
+/**
+ * What the chat's Upgrades since the main agent's last turn brought in (DESIGN §4.3 `migrate`), one
+ * line each: the entities its picks took, new, changed or removed, money first, each by its name as
+ * the player character knows it (the rest counted), so a payment an author wrote into the world is
+ * never taken for the story's or the engine's own doing. What one took is its plan applied as the
+ * fold applies it, the parts its picks leave to their defaults included (`migrate`), from the chat
+ * as it stood before the message it is on; one made on another branch took nothing.
+ */
+function upgradeLines(d: DigestInput, chain: readonly ChainMessage[]): string[] {
+  const head = d.core.renderState(d.observed);
+  if (!head) return [];
+  const fold = d.core.fold(d.observed);
+  const env: MarkerEnv = { worlds: (revision) => d.core.worldAt(revision), types: d.registry };
+  const pov = head.world.pov;
+  const out: string[] = [];
+  chain.forEach((m, i) => {
+    if (d.last !== null && i < d.last) return;
+    const inert = new Set(fold.notes.flatMap((n) => (n.kind === "inert" && n.messageId === m.id && n.ref !== null && "marker" in n.ref ? [n.ref.marker] : [])));
+    const migrates = (m.ledger?.markers ?? []).filter((mk): mk is Extract<Marker, { kind: "migrate" }> => mk.kind === "migrate" && !inert.has(mk.seq)).sort((a, b) => a.seq - b.seq);
+    if (!migrates.some((mk) => mk.merge !== undefined && mk.start !== true)) return;
+    // Each in turn, so a second Upgrade on the message brings in only what the first didn't.
+    let before: Readonly<WorldState> = d.core.fold(d.observed.slice(0, i)).state;
+    for (const mk of migrates) {
+      const after = structuredClone(before) as WorldState;
+      const plan = mk.merge !== undefined && mk.start !== true ? planUpgrade(before, env, mk.to) : null;
+      migrate(after, mk, env);
+      if (plan) {
+        const rows: { money: boolean; text: string }[] = [];
+        let unseen = 0;
+        const was = env.worlds(before.revision);
+        const now = env.worlds(after.revision);
+        const knew = d.core.playedAt(before);
+        for (const p of plan.entities) {
+          const held = own(before.entities, p.id);
+          const taken = own(after.entities, p.id);
+          // One picked to stay out of the chat took nothing.
+          if (!taken) continue;
+          let how: "new" | "changed" | "removed" | null;
+          if (!held) how = "new";
+          else if (p.status === "removed") how = isGone(after, p.id) && !isGone(before, p.id) ? "removed" : null;
+          else how = hashJson(upgradeShape(held, was ? own(was.entities, p.id) : undefined)) !== hashJson(upgradeShape(taken, now ? own(now.entities, p.id) : undefined)) ? "changed" : null;
+          if (how === null) continue;
+          // Someone taken out of the world is judged as the player character knew them before.
+          const seen = how === "removed" ? knew !== undefined && canSeeEntity(d.registry, knew, before, pov, p.id) : canSeeEntity(d.registry, head.world, head.state, pov, p.id);
+          if (!seen) {
+            unseen++;
+            continue;
+          }
+          const kind = d.registry.kinds.get(taken.kind) ?? own(head.world.kinds, taken.kind);
+          rows.push({ money: kind?.pack === "economy", text: `${taken.name} (${(kind?.label ?? taken.kind).toLowerCase()}, ${how})` });
+        }
+        rows.sort((a, b) => Number(b.money) - Number(a.money));
+        const parts = [...rows.map((r) => r.text), ...(unseen > 0 ? [`${unseen} ${nounFor(unseen, "change", "changes")} the player character doesn't know of`] : [])];
+        if (parts.length > 0) out.push(renderPrompt(MAIN_TEXT.digestUpgrade, d.texts, { changed: parts.join("; ") }));
+      }
+      before = after;
+    }
+  });
+  return out;
+}
+
 /**
  * The turn task's digest (see the header), framed: since the main agent's last turn, or, for a fresh
- * session, the chat so far. Empty for a fresh session in a chat with nothing in it yet.
+ * session, the chat so far. Empty for a fresh session in a chat with nothing in it yet. What the
+ * player did out of play and what the GM applied since come apart from what landed of the turn
+ * (DESIGN §11): the player's told arrangements, their bookkeeping not for the story, the GM's
+ * changes, then each Upgrade of the world, money first.
  */
 export function digestOf(d: DigestInput): string {
   const { texts } = d;
   const chain = d.core.chain(d.observed);
   const lines = new Map<string, string[]>();
-  for (const note of journalNotes(d.core, d.observed, d.observed.length, d.registry)) lines.set(note.messageId, [...(lines.get(note.messageId) ?? []), note.text]);
+  const apart: Record<"told" | "untold" | "gm", string[]> = { told: [], untold: [], gm: [] };
+  const indexOf = new Map(chain.map((m, i) => [m.id, i]));
+  for (const note of journalNotes(d.core, d.observed, d.observed.length, d.registry)) {
+    if (note.kind === "fix" && note.source !== undefined) {
+      if (d.last === null || (indexOf.get(note.messageId) ?? -1) >= d.last) apart[note.source].push(note.text);
+      continue;
+    }
+    lines.set(note.messageId, [...(lines.get(note.messageId) ?? []), note.text]);
+  }
   const none = renderPrompt(MAIN_TEXT.none, texts, {});
   const entries: string[] = [];
   let replies = 0;
@@ -165,14 +249,24 @@ export function digestOf(d: DigestInput): string {
   });
   const last = d.last === null ? undefined : chain[d.last];
   const landed = last ? (lines.get(last.id) ?? []) : [];
-  const head = landed.length > 0 ? renderPrompt(MAIN_TEXT.digestLanded, texts, { changed: landed.join(" · ") }) : null;
+  const heads = [
+    ...(landed.length > 0 ? [renderPrompt(MAIN_TEXT.digestLanded, texts, { changed: landed.join(" · ") })] : []),
+    ...(apart.told.length > 0 ? [renderPrompt(MAIN_TEXT.digestTold, texts, { changed: apart.told.join(" · ") })] : []),
+    ...(apart.untold.length > 0 ? [renderPrompt(MAIN_TEXT.digestBookkeeping, texts, { changed: apart.untold.join(" · ") })] : []),
+    ...(apart.gm.length > 0 ? [renderPrompt(MAIN_TEXT.digestGm, texts, { changed: apart.gm.join(" · ") })] : []),
+    ...upgradeLines(d, chain),
+  ];
   const framing = d.fresh ? MAIN_TEXT.digestFresh : MAIN_TEXT.digest;
-  if (entries.length === 0 && head === null) return d.fresh ? "" : renderPrompt(MAIN_TEXT.digestNothing, texts, {});
+  if (entries.length === 0 && heads.length === 0) return d.fresh ? "" : renderPrompt(MAIN_TEXT.digestNothing, texts, {});
   // The newest replies first, within the digest's tokens: the framing and a left-out count go first,
-  // then what landed of the last turn; a reply too long for all that is left is cut when none newer is in.
+  // then what landed of the last turn and what came apart from it; a reply too long for all that is left is cut when none newer is in.
   let left = d.tokens - tokensOf(renderPrompt(framing, texts, { turns: "" })) - tokensOf(renderPrompt(MAIN_TEXT.digestLeftOut, texts, { count: String(entries.length), replies: nounFor(entries.length, "reply", "replies") }));
-  const shownHead = head !== null && tokensOf(head) <= left ? head : null;
-  if (shownHead) left -= tokensOf(shownHead);
+  const shownHeads: string[] = [];
+  for (const head of heads) {
+    if (tokensOf(head) > left) continue;
+    shownHeads.push(head);
+    left -= tokensOf(head);
+  }
   const kept: string[] = [];
   let next = entries.length - 1;
   while (next >= 0) {
@@ -190,7 +284,7 @@ export function digestOf(d: DigestInput): string {
     break;
   }
   const leftOut = next + 1;
-  return renderPrompt(framing, texts, { turns: [...(leftOut > 0 ? [renderPrompt(MAIN_TEXT.digestLeftOut, texts, { count: String(leftOut), replies: nounFor(leftOut, "reply", "replies") })] : []), ...(shownHead ? [shownHead] : []), ...kept].join("\n\n") });
+  return renderPrompt(framing, texts, { turns: [...(leftOut > 0 ? [renderPrompt(MAIN_TEXT.digestLeftOut, texts, { count: String(leftOut), replies: nounFor(leftOut, "reply", "replies") })] : []), ...shownHeads, ...kept].join("\n\n") });
 }
 
 /** Blank lines a missing part leaves, closed up. */

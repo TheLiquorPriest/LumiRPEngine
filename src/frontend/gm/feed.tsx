@@ -11,6 +11,7 @@ import { useApp } from "../app";
 import { CheckField } from "../build/form-kit";
 import { Button, Empty, HostSelect, HostSwitch, List, ListRow, NumberStepper, Section, useBusy } from "../components";
 import { editRequest } from "../requests";
+import { toastQueued } from "../queued";
 import type { EditNotice } from "./editor";
 import { EditNoticeBar, GmPage, usePages } from "./ui";
 import { PreviewAll, SectionHolds, useSectionsPreview } from "./section-preview";
@@ -98,8 +99,8 @@ function SectionFeedForm(props: { chatId: string; row: SectionRow; sources: read
   const send = (to: SectionFeed | null): void =>
     run(async () => {
       const result = await app.request(editRequest(props.chatId, [{ op: "feed", section: props.row.id, to }]));
-      // One made while a reply is being written lands when it finishes: there's no Undo to show yet.
-      if (result?.pending) app.toast("Saved — it applies when the reply finishes.", "info");
+      // One made during a turn lands after it: there's no Undo to show yet.
+      toastQueued(app, result);
       if (result) props.onDone(result.undo !== null ? { text: feedSentence(props.row.label, to), undo: [result.undo] } : null);
     });
   const noneTaken = sourcesMissing(draft, picked, own);

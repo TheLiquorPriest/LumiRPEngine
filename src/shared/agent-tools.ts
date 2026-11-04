@@ -2,7 +2,7 @@
 // knowledge a tool is given under, and every text a tool shows a model. Each tool's description, the
 // description of each of its arguments and the notes the tool layer answers with are registry texts
 // (`shared/prompts.ts` makes them from `TOOL_TEXTS` and `TOOL_NOTES`, the way it makes each section's
-// guidance), edited on Settings → Agents → Prompts on the GM agent page: so the page lists exactly the
+// guidance), edited on Settings → Agents → Prompts on the Every agent page: so the page lists exactly the
 // tools there are, and the backend (`backend/agents/tools/registry.ts`, `toolsFor`) sends each one with
 // the user's own text where they wrote one. The JSON Schemas themselves are fixed output contracts
 // (§16): only their descriptions are texts.
@@ -83,7 +83,7 @@ export interface ToolText {
   args: readonly ToolArgText[];
 }
 
-/** A note the tool layer answers with (not found, several match, …): a registry text of the GM agent page's "Tool answers". */
+/** A note the tool layer answers with (not found, several match, …): a registry text of the Every agent page's "Tool answers". */
 export interface ToolNote {
   id: string;
   label: string;

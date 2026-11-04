@@ -251,6 +251,44 @@ describe("the final review", () => {
     expect(rig.rt.ledger.errors).toEqual([]);
   });
 
+  test("it may fix, rewrite or take out an Outcome or Montage line: the narrator gets the edit and the record keeps it, while the ledger keeps what the engine did", async () => {
+    const FIXED = "- An hour passes quietly at the harbor.";
+    const skip = JSON.stringify({ action: "timelapse", params: { span: "over the next hour" }, confidence: 0.9 });
+    const turn = async (review: (req: QuietRequest) => QuietScript): Promise<{ outcome: string; montage: string; rec: Rec; shown: { outcome: string[]; montage: string[] } }> => {
+      const rig = new Rig({ shipped: true });
+      const chatId = await agentsChat(rig);
+      const shown = { outcome: [] as string[], montage: [] as string[] };
+      models(rig, (req) => {
+        shown.outcome = shownLines(req, "outcome");
+        shown.montage = shownLines(req, "montage");
+        return review(req);
+      });
+      const base = rig.host.quietReply;
+      rig.host.quietReply = (req) => ((req.messages[0]?.content ?? "").includes(INTERPRET_MARK) ? skip : base ? base(req) : "{}");
+      rig.host.sendUser(chatId, "OOC: skip ahead an hour.");
+      await rig.host.settle();
+      const g = await rig.host.start(chatId, { type: "normal" });
+      expect(g.halted).toBeUndefined();
+      const outcome = rig.host.section("Outcome") ?? "";
+      const montage = rig.host.section("Montage") ?? "";
+      await rig.host.finish(g, "An hour goes by.");
+      expect(rig.rt.ledger.errors).toEqual([]);
+      return { outcome, montage, rec: await lastRecord(rig, chatId), shown };
+    };
+    // The review rewrites the Outcome's first line, and takes the Montage's first out where it has one.
+    const edited = await turn((req) => ({ content: "", toolCalls: [call("review_replace", { part: "outcome", line: 1, text: FIXED }, "fix"), ...(shownLines(req, "montage").length > 0 ? [call("review_drop", { part: "montage", line: 1 }, "drop")] : []), call("commit", {}, "done")] }));
+    const [first = ""] = edited.shown.outcome;
+    expect(first).not.toBe("");
+    expect([edited.outcome.includes(FIXED), edited.outcome.includes(first)]).toEqual([true, false]);
+    expect(edited.rec.finalEdits?.[0]).toEqual({ op: "replace", part: "outcome", at: 0, line: first, text: FIXED });
+    const [gone] = edited.shown.montage;
+    if (gone !== undefined) expect([edited.rec.finalEdits?.[1], edited.montage.includes(gone)]).toEqual([{ op: "drop", part: "montage", at: 0, line: gone }, false]);
+    // The same turn with nothing edited: the engine's events are the same, edit or none.
+    const plain = await turn(() => ({ content: "", toolCalls: [call("commit", {}, "done")] }));
+    expect(plain.outcome).toContain(first);
+    expect(JSON.stringify(edited.rec.events)).toBe(JSON.stringify(plain.rec.events));
+  });
+
   test("regression: with a main agent deciding, every call of its turn is offered the same tools and system prompt, so the review's first call opens with the prompt its last stage's call cached", async () => {
     const rig = new Rig({ shipped: true });
     // An Anthropic connection that caches: its cache keys on the tools, then the system prompt, then the messages up to a breakpoint.

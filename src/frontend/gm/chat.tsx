@@ -1,5 +1,5 @@
 // GM → This chat: this chat's rules (its engine, Realism and Checks for this chat, the time
-// controls, the sections' feed, its knowledge choices, its things choices, Pins and upgrade), the Edits log behind the gate, and the Inspector with the call meter;
+// controls, the sections' feed, its knowledge choices, its things choices, its money rules, Pins and upgrade), the Edits log behind the gate, and the Inspector with the call meter;
 // a grouped list where each opens as a page. The rules and the Inspector show nothing the player
 // mayn't see, so they don't wait behind the gate; Edits is the truth's (the `core.gm` panel).
 
@@ -19,10 +19,12 @@ import { PinsAndUpgrade } from "./pins";
 import { FeedThisChat } from "./feed";
 import { KnowledgeThisChat, knowledgeSummary } from "./chat-knowledge";
 import { thingsSummary, ThingsThisChat } from "./chat-things";
+import { cashSummary, MoneyThisChat } from "./chat-money";
+import { toastQueued } from "../queued";
 import { EngineThisChat } from "./engine";
 import { GmPage, usePages } from "./ui";
 
-type ChatPage = "engine" | "realism" | "checks" | "time" | "sections" | "knowledge" | "things" | "pins" | "edits" | { panel: PanelDef };
+type ChatPage = "engine" | "realism" | "checks" | "time" | "sections" | "knowledge" | "things" | "money" | "pins" | "edits" | { panel: PanelDef };
 
 /** This chat's time controls as `time` markers on the running chat (moved here from Play → Calendar). */
 function TimeThisChat(props: { view: StateView }) {
@@ -39,8 +41,7 @@ function TimeThisChat(props: { view: StateView }) {
         disabled={busy}
         onChange={(change) =>
           run(async () => {
-            const result = await app.request(timeMarker(props.view.chatId, change.control, change.scope, change.to));
-            if (result?.pending) app.toast("Saved — it applies when the reply finishes.", "info");
+            toastQueued(app, await app.request(timeMarker(props.view.chatId, change.control, change.scope, change.to)));
           })
         }
       />
@@ -73,7 +74,8 @@ export function ThisChat(props: { view: StateView; truth: PanelDef | undefined; 
             <ListRow icon="clock" title="Time" subtitle={controls ? `${controls.time.scale}× time scale · montage ${controls.time.montage === "key" ? "by key events" : `per ${controls.time.montage}`}${controls.time.paused ? " · clock paused" : ""}` : "Ticks, interrupts, Speed through, Montage"} chevron onClick={() => pages.open("time")} />
             <ListRow icon="scroll" title="Sections" subtitle="What goes into each section the narrator reads, and whose knowledge" chevron onClick={() => pages.open("sections")} />
             <ListRow icon="eye" title="Knowledge" subtitle={controls ? knowledgeSummary(controls.knowledge) : "Knowledge tracking, and what the narrator knows"} chevron onClick={() => pages.open("knowledge")} />
-            <ListRow icon="box" title="Things" subtitle={controls ? thingsSummary(controls.things.tidy) : "Whether impossible holds are tidied automatically"} chevron onClick={() => pages.open("things")} />
+            <ListRow icon="box" title="Things" subtitle={controls ? thingsSummary(controls.things.tidy) : "Whether impossible holds are tidied every turn"} chevron onClick={() => pages.open("things")} />
+            {controls?.cash ? <ListRow icon="coins" title="Money" subtitle={cashSummary(controls.cash)} chevron onClick={() => pages.open("money")} /> : null}
             <ListRow icon="layers" title="Pins and upgrade" subtitle="World revision, tables and generators" chevron onClick={() => pages.open("pins")} />
           </List>
         </Section>
@@ -122,6 +124,10 @@ export function ThisChat(props: { view: StateView; truth: PanelDef | undefined; 
       ) : page === "things" ? (
         <GmPage name="things" title="Things" subtitle="This chat" backLabel="This chat" onBack={pages.back}>
           <ThingsThisChat chatId={view.chatId} controls={controls} />
+        </GmPage>
+      ) : page === "money" ? (
+        <GmPage name="money" title="Money" subtitle="This chat" backLabel="This chat" onBack={pages.back}>
+          <MoneyThisChat chatId={view.chatId} controls={controls} />
         </GmPage>
       ) : page === "pins" ? (
         <GmPage name="pins" title="Pins and upgrade" subtitle="This chat" backLabel="This chat" onBack={pages.back}>

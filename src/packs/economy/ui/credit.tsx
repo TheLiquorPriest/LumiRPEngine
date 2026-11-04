@@ -125,7 +125,7 @@ export const creditPages: HubPages = {
     const offer = id === "apply" ? view.credit?.offers.find((o) => o.product === inner) : undefined;
     if (!offer || controls.mode !== "player") return null;
     return (
-      <AmountPage nav={nav} controls={controls} name="credit-apply" title="Apply" subtitle={offer.label} label="How much" go="Apply" optional="What they offer" submit={(cents) => controls.act(applyCreditAction(offer.product, cents))}>
+      <AmountPage nav={nav} controls={controls} name="credit-apply" title="Apply" subtitle={offer.label} label="How much" go="Apply" optional="What they offer" action={(cents) => applyCreditAction(offer.product, cents)} submit={(cents, tell) => controls.act(applyCreditAction(offer.product, cents), tell)}>
         <Section flush>
           <List>
             <OfferRow offer={offer} currency={controls.currency} />

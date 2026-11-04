@@ -12,7 +12,7 @@
 import type { EntityId } from "../../../shared/ids";
 import type { JsonValue } from "../../../shared/json";
 import type { LedgerEvent } from "../../../shared/ledger";
-import { classesIn, COMMON_CLASS, countedIn, countsUnits, FINANCE_ACTIONS, FINANCE_EVENTS, listingIn, ownersIn, ownersJson, PARTY_KINDS, ROLE_RIGHTS, rowClass, unitsOf, votePcts, withUnitShares, worthShares, type ConsolidatedView, type DistributionRoute, type Owner, type OwnerLine, type OwnershipActs, type OwnershipView, type ShareClass, type StructureLink } from "../../../shared/finance";
+import { classesIn, COMMON_CLASS, countedIn, countsUnits, FINANCE_ACTIONS, FINANCE_EVENTS, listingIn, ownersIn, ownersJson, PARTY_KINDS, ROLE_RIGHTS, rowClass, unitsOf, votePcts, withUnitShares, worthShares, type ConsolidatedView, type DistributionRoute, type Owner, type OwnerLine, type OwnerRole, type OwnershipActs, type OwnershipView, type ShareClass, type StructureLink } from "../../../shared/finance";
 import { positionIdOf, type OrgPower } from "../../../shared/org";
 import { calendarOf, clockAt, dateAt, dayIndexOf } from "../../../engine/calendar";
 import { businessIds, mayAct, orgTypeOf } from "../../../engine/org";
@@ -28,7 +28,7 @@ import { acquisition, disposal } from "./gains";
 import { stockHolders, unit } from "./holdings";
 import { hiddenFrom } from "./model";
 import type { FinanceApi, FinanceRegistry } from "./module";
-import { businessValue, marketValueOf, stakeRoute, valuationOf } from "./stakes";
+import { marketValueOf, orgValue, ownedOrgIds, stakeRoute, valuationOf } from "./stakes";
 import { deciderFor, mergeView, windingView } from "./winding";
 
 declare module "../../../engine/registry" {
@@ -171,7 +171,7 @@ function priced(api: FinanceApi, ctx: ReadContext, business: EntityId, owners: r
   if (market) return { each: Math.round(market.price), cents: Math.round(market.price * units) };
   const total = unitsOf(owners);
   if (total <= 0) return reject("bad_amount", `${labelOf(ctx, business)} has no units to value one by: say the price a unit`);
-  const value = businessValue(api, ctx, business);
+  const value = orgValue(api, ctx, business);
   return { each: Math.round(value / total), cents: Math.round((value * units) / total) };
 }
 
@@ -368,8 +368,8 @@ export function subsidiariesOf(api: FinanceApi, ctx: ReadContext, parent: Entity
  * A parent with the companies it controls (more than their threshold of their votes, through others
  * too, four deep), worked out when read (§3.10): their cash and this year's profit added in full, and
  * its net worth with each stake in them counted at its share of their own (so consolidated) worth
- * rather than their value; invoices between them cancel in profit, and payouts between them are in
- * no company's books. Null when it controls none.
+ * rather than their value, unless that value is set or the market's, which it keeps; invoices between
+ * them cancel in profit, and payouts between them are in no company's books. Null when it controls none.
  */
 export function consolidated(api: FinanceApi, ctx: ReadContext, parent: EntityId): ConsolidatedView | null {
   const walk = (id: EntityId, seen: ReadonlySet<EntityId>, depth: number): ConsolidatedView => {
@@ -383,7 +383,8 @@ export function consolidated(api: FinanceApi, ctx: ReadContext, parent: EntityId
         const c = walk(child.id, new Set([...seen, child.id]), depth + 1);
         cash += c.cash;
         profit += c.profit;
-        netWorth += Math.round((c.netWorth * child.share) / 100) - Math.round((businessValue(api, ctx, child.id) * child.share) / 100);
+        const value = valuationOf(api, ctx, child.id);
+        if (!value.set && !value.market) netWorth += Math.round((c.netWorth * child.share) / 100) - Math.round((value.value * child.share) / 100);
         companies += 1 + c.companies;
       }
     }
@@ -393,13 +394,29 @@ export function consolidated(api: FinanceApi, ctx: ReadContext, parent: EntityId
   return out.companies > 0 ? out : null;
 }
 
-/** The Structure's links below a company (its subsidiaries, theirs under them), as `viewer` may see them; figures where values show. */
+/** The trusts `holder` holds a role on, with its share of their worth (a beneficiary's) and that role, in id order. */
+function heldTrustsOf(api: FinanceApi, ctx: ReadContext, holder: EntityId): { id: EntityId; share: number; role: OwnerRole }[] {
+  return ownedOrgIds(api, ctx).flatMap((id) => {
+    if (id === holder || api.partyKind(ctx, id) !== "trust") return [];
+    const row = api.ownersOf(ctx.state, id).find((o) => o.party === holder);
+    return row ? [{ id, share: api.shareOf(ctx.state, id, holder), role: row.role }] : [];
+  });
+}
+
+/** The Structure's links below a company or a trust (its subsidiaries and the trusts it holds a role on, theirs under them), as `viewer` may see them; figures where values show, each one's net worth beside the value of its shares. */
 function childLinks(api: FinanceApi, ctx: ReadContext, parent: EntityId, viewer: EntityId | null, figures: boolean, seen: ReadonlySet<EntityId>, depth: number): StructureLink[] {
   if (depth >= STRUCTURE_DEPTH) return [];
-  return subsidiariesOf(api, ctx, parent).flatMap((s) => {
+  const below = (id: EntityId): StructureLink[] => childLinks(api, ctx, id, viewer, figures, new Set([...seen, id]), depth + 1);
+  const companies = subsidiariesOf(api, ctx, parent).flatMap((s): StructureLink[] => {
     if (seen.has(s.id) || hiddenFrom(ctx, viewer, s.id)) return [];
-    return [{ id: s.id, name: labelOf(ctx, s.id), share: s.share, votes: s.votes, controlled: s.controlled, value: figures ? businessValue(api, ctx, s.id) : null, cash: figures ? cashOf(api, ctx, s.id) : null, profit: figures ? profitThisYear(api, ctx, s.id) : null, children: childLinks(api, ctx, s.id, viewer, figures, new Set([...seen, s.id]), depth + 1) }];
+    return [{ id: s.id, name: labelOf(ctx, s.id), share: s.share, votes: s.votes, controlled: s.controlled, value: figures ? orgValue(api, ctx, s.id) : null, netWorth: figures ? Math.round(api.netWorth(ctx, s.id)) : null, cash: figures ? cashOf(api, ctx, s.id) : null, profit: figures ? profitThisYear(api, ctx, s.id) : null, children: below(s.id) }];
   });
+  // A trust is run by its trustees, not by votes: one the holder is a trustee of is theirs to run.
+  const trusts = heldTrustsOf(api, ctx, parent).flatMap((t): StructureLink[] => {
+    if (seen.has(t.id) || hiddenFrom(ctx, viewer, t.id)) return [];
+    return [{ id: t.id, name: labelOf(ctx, t.id), share: t.share, votes: 0, controlled: ROLE_RIGHTS[t.role].manage, value: figures ? orgValue(api, ctx, t.id) : null, netWorth: figures ? Math.round(api.netWorth(ctx, t.id)) : null, cash: figures ? cashOf(api, ctx, t.id) : null, profit: null, children: below(t.id), trust: { role: t.role } }];
+  });
+  return [...companies, ...trusts];
 }
 
 /** Why `viewer` may not use `power` at `business` from Money 3, or null. */
@@ -423,8 +440,10 @@ function capitalSources(api: FinanceApi, ctx: ReadContext, business: EntityId): 
 
 /**
  * A company's Ownership (§4.4) as `viewer` (the player character; null for the GM) may read it: its
- * cap table, with an owner they can't see named "an owner"; its classes and units; at Money 4 its
- * valuation, value per unit, each row's value and the figures of its parents and subsidiaries; the
+ * cap table, with an owner they can't see named "an owner"; its classes and units; from Money 3 its
+ * net worth, as its Summary has it (below zero where it owes more than it holds); at Money 4 its
+ * valuation, the value of its shares (never below nothing, `floored` where its net worth takes it
+ * there), value per unit, each row's value and the figures of its parents and subsidiaries; the
  * reader's role, draw and route, their votes, and what they may do.
  */
 export function ownershipView(api: FinanceApi, ctx: ReadContext, business: EntityId, viewer: EntityId | null): OwnershipView {
@@ -453,7 +472,7 @@ export function ownershipView(api: FinanceApi, ctx: ReadContext, business: Entit
       ...(valuation && worth ? { value: Math.round((valuation.value * share) / 100) } : {}),
     };
   });
-  const parents: StructureLink[] = [...new Set(owners.map((o) => o.party))].flatMap((p) => (orgTypeOf(ctx, p) !== null && !hiddenFrom(ctx, viewer, p) && (shares[p] ?? 0) > 0 ? [{ id: p, name: labelOf(ctx, p), share: api.shareOf(ctx.state, business, p), votes: votesIn(ctx.state, business)[p] ?? 0, controlled: (votesIn(ctx.state, business)[p] ?? 0) > decidePct(ctx.state, business) + 1e-9, value: null, cash: null, profit: null, children: [] }] : []));
+  const parents: StructureLink[] = [...new Set(owners.map((o) => o.party))].flatMap((p) => (orgTypeOf(ctx, p) !== null && !hiddenFrom(ctx, viewer, p) && (shares[p] ?? 0) > 0 ? [{ id: p, name: labelOf(ctx, p), share: api.shareOf(ctx.state, business, p), votes: votesIn(ctx.state, business)[p] ?? 0, controlled: (votesIn(ctx.state, business)[p] ?? 0) > decidePct(ctx.state, business) + 1e-9, value: null, netWorth: null, cash: null, profit: null, children: [] }] : []));
   const routed = viewer !== null && api.shareOf(ctx.state, business, viewer) > 0 ? stakeRoute(ctx, viewer, business) : undefined;
   const route: DistributionRoute | null = routed === undefined ? null : routed === null ? { to: null, reinvest: false } : "reinvest" in routed ? { to: null, reinvest: true } : { to: routed.account, reinvest: false };
   // Its market (§27.10 Listing): the listing, its holders on the market after the cap table's rows, and what the reader may do about it.
@@ -488,7 +507,8 @@ export function ownershipView(api: FinanceApi, ctx: ReadContext, business: Entit
     listing: market?.listing ?? null,
     market: market?.acts ?? null,
     decidePct: decidePct(ctx.state, business),
-    valuation: valuation ? { ...valuation, perUnit: counting && total > 0 ? valuation.value / total : null } : null,
+    netWorth: level >= 3 ? Math.round(api.netWorth(ctx, business)) : null,
+    valuation: valuation ? { value: valuation.value, set: valuation.set, book: valuation.book, profit: valuation.profit, multiple: valuation.multiple, perUnit: counting && total > 0 ? valuation.value / total : null, floored: valuation.floored === true, ...(valuation.market ? { market: valuation.market } : {}) } : null,
     parents,
     children: childLinks(api, ctx, business, viewer, values, new Set([business]), 0),
     consolidated: values ? consolidated(api, ctx, business) : null,

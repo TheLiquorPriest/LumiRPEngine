@@ -122,7 +122,8 @@ describe("people's money (Port Alder at Simulation over a month)", () => {
     expect(w.dropped).toEqual([]);
     expect(trialBalance(w.state)).toBe(0);
     const jess = gm(w).money.find((m) => m.party === "jess_kowalczyk");
-    expect(jess?.notes.some((n) => n.text.startsWith("First:") && n.text.endsWith("paid."))).toBe(true);
+    // Both bills are the world's own, and their lines say so (DESIGN §11 provenance).
+    expect(jess?.notes.some((n) => n.text.startsWith("First:") && n.text.endsWith("paid (set up in the world)."))).toBe(true);
     expect(jess?.notes.some((n) => n.text.startsWith("Second") && n.text.includes("declined"))).toBe(true);
   });
 

@@ -2,8 +2,9 @@
 // revenue and expenses, what it pays its owners, and how its dashboard names the people in it.
 
 import { describe, expect, test } from "bun:test";
-import type { BusinessView } from "../../../src/shared/finance";
+import type { BusinessView, FinanceView } from "../../../src/shared/finance";
 import { calendarOf, clockOfLocal, dateAt } from "../../../src/engine/calendar";
+import { optionalService } from "../../../src/engine/pack-kit";
 import type { Working } from "../../../src/engine/working";
 import { account, act, entity, ext, lapse, line, packEvents, posts, setup } from "./work-world";
 
@@ -77,6 +78,22 @@ describe("business books: payouts", () => {
     expect(payouts()).toEqual([profitOf(0), profitOf(1)]);
     // Nothing is left to pay out.
     expect(act(w, "economy.distribute", { business: "daybreak", by: "maya" }, "d3").rejected).toHaveLength(1);
+  });
+
+  test("a correction leaves profit, payout and tax alone", () => {
+    const { w } = setup();
+    // The GM puts $1,000 into the café's account and takes $300 out: bookkeeping, not trade.
+    for (const cents of [100_000, -30_000]) {
+      const events = optionalService(w.ctx, "economy.adjust")?.(w.ctx, "db_operating", cents);
+      if (!Array.isArray(events)) throw new Error("the correction was refused");
+      w.applyAll(events);
+    }
+    const books = w.ctx.query("economy.business_books")(w.ctx, "daybreak", w.state.clock - DAY, w.state.clock + 1);
+    expect(books).toMatchObject({ revenue: 0, expenses: 0, profit: 0 });
+    const cafe = (w.ctx.query("economy.finance")(w.ctx, "maya", false) as FinanceView).businesses.find((b) => b.id === "daybreak");
+    expect(cafe?.books).toMatchObject({ revenue: 0, expenses: 0, taxes: 0, profit: 0 });
+    // Nothing to pay out: the correction isn't profit.
+    expect(act(w, "economy.distribute", { business: "daybreak", by: "maya" }, "d").rejected.map((r) => r.rejection.code)).toEqual(["bad_amount"]);
   });
 });
 

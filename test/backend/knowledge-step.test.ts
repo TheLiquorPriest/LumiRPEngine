@@ -11,14 +11,16 @@
 // did before knowledge was tracked.
 
 import { describe, expect, test } from "bun:test";
+import { runYield } from "../../src/backend/agents/yields";
 import { liveLore } from "../../src/backend/book-lore";
+import { loreFactOf } from "../../src/backend/lore-ids";
 import { checkKnowledge, knowledgeBatches, knowledgeContext, knowledgeSpent, type KnowledgeChecked, type KnowledgeTurn } from "../../src/backend/knowledge-step";
 import { toChain } from "../../src/backend/ledger-io";
 import { personNamed, postKnowledge, postMinds, postOpening } from "../../src/backend/minds";
 import { buildSections } from "../../src/backend/sections-build";
 import { isRecord, type JsonObject, type JsonValue } from "../../src/shared/json";
 import { LEDGER_NAMESPACE, type LedgerEvent } from "../../src/shared/ledger";
-import { claimFactId, claimKey, DEFAULT_MINDS_MEMORY, factId, KNOWLEDGE_ANSWER_SHAPE, KNOWLEDGE_DEFAULTS, KNOWLEDGE_TEXTS, MEMORY_ANSWER_V2, MIND_ANSWER_FORMATS, MIND_PROMPT_DEFAULTS, MINDS_EVENTS, witnessRef, type Holding, type KnowledgeFact, type KnowledgeSettings, type KnownView, type LearnEventData, type MindsGmView, type MindsSlice } from "../../src/shared/minds";
+import { claimFactId, claimKey, DEFAULT_MINDS_MEMORY, factId, fillText, KNOWLEDGE_ANSWER_SHAPE, KNOWLEDGE_DEFAULTS, KNOWLEDGE_TEXTS, MEMORY_ANSWER_V2, MIND_ANSWER_FORMATS, MIND_PROMPT_DEFAULTS, MINDS_EVENTS, witnessRef, type Holding, type KnowledgeFact, type KnowledgeSettings, type KnownView, type LearnEventData, type MindsGmView, type MindsSlice } from "../../src/shared/minds";
 import { SECRET_MARK_WORDING, secretMarkText } from "../../src/shared/secret-marks";
 import type { NarratorView } from "../../src/shared/settings";
 import type { WorldDoc } from "../../src/shared/world";
@@ -924,12 +926,14 @@ describe("the review's fixes (Increment 0)", () => {
     expect(partway.refused).toEqual([expect.stringContaining("Danny Okafor was there for only part of the turn")]);
     expect(learnings(partway.events).map((l) => l.who)).toEqual([[MARCUS]]);
 
-    // L1: a new fact two calls both make counts once against the chat's limit.
+    // L1: a new fact two calls both make counts once against the chat's limit; a learning of one past it is refused, naming the chat's limit.
     const one = { ...turn, settings: { ...KNOWLEDGE_DEFAULTS, factsPerChat: 1 } };
     const spent = knowledgeSpent();
-    expect(checkKnowledge(one, [MARCUS], sawSedan, spent).refused).toEqual([]);
-    const again = checkKnowledge(one, [DANNY], saying({ ...sawSedan, facts: [...(sawSedan.facts as JsonObject[]), { ref: "r", claim: RUMOUR }] }), spent);
-    expect(again.refused).toEqual([expect.stringContaining(RUMOUR)]);
+    // Danny, named beside Marcus in Marcus's call, is left to his own call: counted, never recorded there.
+    expect(checkKnowledge(one, [MARCUS], sawSedan, spent).refusedAs).toEqual({ own_call: 1 });
+    const again = checkKnowledge(one, [DANNY], saying({ ...sawSedan, facts: [...(sawSedan.facts as JsonObject[]), { ref: "r", claim: RUMOUR }], learned: [...(sawSedan.learned as JsonObject[]), { fact: "r", how: "witnessed" }] }), spent);
+    expect(again.refusedAs).toEqual({ own_call: 1, facts_chat: 1 });
+    expect(again.refused).toContainEqual(`a new fact past this chat's limit of 1 facts made in play: "${RUMOUR}"`);
 
     // S1: what the player character would learn carrying the secret's words is a reveal of that secret, whose chip never words it.
     const truth = world.tracks.s_shop_trouble?.stages.truth?.truth ?? "";
@@ -1317,16 +1321,21 @@ describe("knowledge rides on the story (KN-SPEC)", () => {
     const { state, world } = await stateOf(rig, chatId);
     const turn = { ...shopTurn(rig, world, state, { ...KNOWLEDGE_DEFAULTS, factsPerTurn: 1 }), named: (name: string) => personNamed(rig.rt.registry, world, state, name) };
     const scene = knowledgeBatches(turn)[0] ?? [];
+    const DOOR = "The shop's back door was left unlocked overnight";
     const out = checkKnowledge(turn, scene, {
       facts: [
         { ref: "a", claim: SEDAN },
         { ref: "b", claim: QUIT, matters: "Marcus loses his mechanic" },
         { ref: "c", claim: LATCH, matters: "Helen will ask again" },
+        { ref: "d", claim: DOOR, matters: "Marcus will want to know who left it" },
       ],
       learned: [
         { fact: "a", how: "witnessed" },
         { fact: "b", how: "witnessed", missed: ["Jordan Elis"] },
         { fact: "b", how: "told", who: ["Danny Okafor"], by: "Priya Nair" },
+        // The turn makes one new fact: the first learned lands, the second is past it.
+        { fact: "c", how: "witnessed" },
+        { fact: "d", how: "witnessed" },
         { fact: "[nothing]", how: "witnessed" },
       ],
       inferred: [{ who: "Danny Okafor", fact: DEBT, confidence: 2, evidence: [] }],
@@ -1632,5 +1641,106 @@ describe("one fact per real fact", () => {
     w.applyAll(out.events);
     expect(knowersOf(readSlice(w.state), twice.id).sort()).toEqual([DANNY, MARCUS, PRIYA].sort());
     expect(knowersOf(readSlice(w.state), once.id)).toEqual([DANNY]);
+  });
+});
+
+describe("the knowledge step's limits, lore ids, tellings and counts (N3)", () => {
+  const QUIT = "Danny is leaving the shop at the end of the month for a job at the marina";
+  const LATCH = "Helen said the bathroom window latch hasn't seated in eleven years";
+  const SEDAN = "A black sedan idled outside the shop at dawn";
+  /** What the turn can still record, as the context says it. */
+  const budget = (facts: number, chat: number, learnings: number): string => fillText(KNOWLEDGE_TEXTS.stepBudget, { facts: String(facts), chat: String(chat), learnings: String(learnings) });
+
+  test("a new fact is charged only once a learning lands on it: one no one learns spends nothing, is never listed to the calls after, and is counted once the step is done; the budget line shrinks", async () => {
+    const rig = new Rig({ shipped: true, minds: true });
+    models(rig, onReply({ UNLEARNED: { facts: [{ ref: "u", claim: LATCH }], learned: [] } }));
+    const chatId = await shopChat(rig);
+    await rig.turn(chatId, "I open the shutters.", "Marcus counts the till.");
+    const { state, world } = await stateOf(rig, chatId);
+    const turn = shopTurn(rig, world, state, { ...KNOWLEDGE_DEFAULTS, factsPerTurn: 1 });
+    const scene = knowledgeBatches(turn)[0] ?? [];
+    const spent = knowledgeSpent();
+    expect(knowledgeContext(turn, scene, spent)).toContain(budget(1, KNOWLEDGE_DEFAULTS.factsPerChat, KNOWLEDGE_DEFAULTS.learningsPerTurn));
+    // Two new facts and one learned: the one no one learns spends nothing, so the learned one fits the turn's one.
+    const out = checkKnowledge(turn, scene, saying({ facts: [{ ref: "u", claim: LATCH }, { ref: "q", claim: QUIT }], learned: [{ fact: "q", how: "witnessed" }] }), spent);
+    expect([out.refused, [...spent.facts.values()].map((f) => f.claim), [...spent.unlearned.values()].map((f) => f.claim)]).toEqual([[], [QUIT], [LATCH]]);
+    expect(out.events.filter((e) => e.type === MINDS_EVENTS.fact && "data" in e && JSON.stringify(e.data).includes(LATCH))).toEqual([]);
+    // The call after it is shown the learned fact, never the other, and what is left: no new fact this turn, one witnessing spent.
+    const next = knowledgeContext(turn, scene, spent);
+    expect([next.includes(QUIT), next.includes(LATCH)]).toEqual([true, false]);
+    expect(next).toContain(budget(0, KNOWLEDGE_DEFAULTS.factsPerChat - 1, KNOWLEDGE_DEFAULTS.learningsPerTurn - 1));
+    // Played: a fact no one learned is made of nothing, and the host log counts it.
+    await atShop(rig, chatId);
+    await rig.turn(chatId, "Morning, Helen.", "Helen mentions the latch again. UNLEARNED");
+    expect(rig.host.logs.some((l) => l.includes(`a new fact no one learned, not made: "${LATCH}"`))).toBe(true);
+    expect(Object.values(factsOf(readSlice((await stateOf(rig, chatId)).state))).some((f) => f.claim === LATCH)).toBe(false);
+    expect(rig.rt.ledger.errors).toEqual([]);
+  });
+
+  test("a refusal at a limit names it, the turn's or the chat's, in the host log's line and in the run's answer", async () => {
+    const rig = new Rig({ shipped: true, minds: true });
+    models(rig, () => ({}));
+    const chatId = await shopChat(rig);
+    await rig.turn(chatId, "I open the shutters.", "Marcus counts the till.");
+    const { state, world } = await stateOf(rig, chatId);
+    const turn = shopTurn(rig, world, state, { ...KNOWLEDGE_DEFAULTS, factsPerTurn: 1 });
+    const two = checkKnowledge(turn, knowledgeBatches(turn)[0] ?? [], saying({ facts: [{ ref: "a", claim: LATCH }, { ref: "b", claim: QUIT }], learned: [{ fact: "a", how: "witnessed" }, { fact: "b", how: "witnessed" }] }));
+    expect([two.refusedAs, two.refused]).toEqual([{ facts_limit: 1 }, [`a new fact past this turn's limit of 1 new facts: "${QUIT}"`]]);
+    const ran = runYield({}, "knowledge", { events: [], traces: [], knowledge: { events: [], proposals: [], connection: null, refused: { facts_limit: 1, facts_chat: 2, learnings_limit: 1 }, limits: { factsPerTurn: 1, factsPerChat: 40, learningsPerTurn: 6 } } }, { staged: [], refused: [] });
+    expect(ran.lost).toContain("1 refused (past this turn's limit of 1 new facts, Settings → Minds → Knowledge)");
+    expect(ran.lost).toContain("2 refused (past this chat's limit of 40 facts made in play, Settings → Minds → Knowledge)");
+    expect(ran.lost).toContain("1 refused (past this turn's limit of 6 learnings, Settings → Minds → Knowledge)");
+  });
+
+  test("a lore id names the chat's fact of its entry: a short id with #n resolves, and an entry the chat holds no fact of is refused with guidance", async () => {
+    // The ids: a short id through the user's map, with a mark's number from 1; a book entry; a world lore entry.
+    const entryOf = async (id: string): Promise<string | null> => (id === "L0007" ? "harbor_book/entry_1" : null);
+    const lore = { lore: { port_history: {} } } as unknown as Pick<WorldDoc, "lore">;
+    expect(await loreFactOf(lore, "L0007#2", entryOf)).toBe(factId({ kind: "wi", book: "harbor_book", entry: "entry_1", mark: 1 }));
+    expect(await loreFactOf(lore, "L0007", entryOf)).toBe(factId({ kind: "wi", book: "harbor_book", entry: "entry_1", mark: null }));
+    expect(await loreFactOf(lore, "harbor_book/entry_1#1", entryOf)).toBe(factId({ kind: "wi", book: "harbor_book", entry: "entry_1", mark: 0 }));
+    expect(await loreFactOf(lore, "port_history", entryOf)).toBe(factId({ kind: "lore", lore: "port_history" }));
+    expect(await loreFactOf(lore, "L0009", entryOf)).toBeNull();
+    // In an answer: one naming a fact the chat holds lands on it; one the chat holds no fact of is refused, saying what to do instead.
+    const rig = new Rig({ shipped: true, minds: true });
+    models(rig, () => ({}));
+    const chatId = await shopChat(rig, { minds: { holdings: MARCUS_KEEPS } });
+    await rig.turn(chatId, "I open the shutters.", "Marcus counts the till.");
+    const { state, world } = await stateOf(rig, chatId);
+    const unrecorded = factId({ kind: "wi", book: "harbor_book", entry: "entry_9", mark: null });
+    const turn = { ...shopTurn(rig, world, state), lore: new Map([["L0007#2", DEBT], ["L0009", unrecorded]]) };
+    const out = checkKnowledge(turn, knowledgeBatches(turn)[0] ?? [], { learned: [{ fact: "L0007#2", how: "told", by: "Marcus Delgado", who: ["Danny Okafor"] }, { fact: "[L0009]", how: "witnessed" }] });
+    expect(learnings(out.events).map((l) => [l.fact, l.who])).toEqual([[DEBT, [DANNY]]]);
+    expect(out.refusedAs).toEqual({ lore_entry: 1 });
+    expect(out.refused).toEqual([`L0009 names a lore entry the chat holds no fact of (${unrecorded}), and nothing is made of an entry's prose: make what was learned a new fact in the answer's own words`]);
+  });
+
+  test("a teller there throughout told what the turn made, in a call about the listener; tellings come after the witnessings they rest on; one there for part of the turn is refused; every learner named is recorded or counted", async () => {
+    const rig = new Rig({ shipped: true, minds: true });
+    models(rig, () => ({}));
+    const chatId = await shopChat(rig);
+    await rig.turn(chatId, "I open the shutters.", "Marcus counts the till.");
+    const { state, world } = await stateOf(rig, chatId);
+    const each = shopTurn(rig, world, state, { ...KNOWLEDGE_DEFAULTS, batch: "character" });
+    // Danny's call: Marcus, there throughout, told him what the turn made; Marcus's own call answers for Marcus.
+    const told = saying({ facts: [{ ref: "s", claim: SEDAN }], learned: [{ fact: "s", how: "told", by: "Marcus Delgado", who: ["Danny Okafor"] }] });
+    const danny = checkKnowledge(each, [DANNY], told);
+    expect([danny.refused, learnings(danny.events).map((l) => [l.how, l.by, l.who])]).toEqual([[], [["told", MARCUS, [DANNY]]]]);
+    // Marcus there for only part of the turn witnessed none of it, so he told nothing of it.
+    expect(checkKnowledge({ ...each, presence: { ...each.presence, left: [MARCUS] } }, [DANNY], told).refusedAs).toEqual({ teller: 1 });
+    // A scene's answer listing a telling before the witnessing it rests on, of a fact the chat held: the telling is checked last.
+    const scene = shopTurn(rig, world, state);
+    const batch = knowledgeBatches(scene)[0] ?? [];
+    const made = checkKnowledge(scene, batch, saying({ facts: [{ ref: "l", claim: LATCH }], learned: [{ fact: "l", how: "witnessed", who: ["Marcus Delgado"] }] }));
+    const w = new Working(rig.rt.registry, world, state);
+    w.applyAll(made.events);
+    const latch = claimFactId(LATCH, scene.messageId);
+    const later = { ...scene, state: w.state, before: w.state };
+    const order = checkKnowledge(later, batch, { learned: [{ fact: latch, how: "told", by: "Danny Okafor", who: ["Priya Nair"] }, { fact: latch, how: "witnessed", who: ["Danny Okafor"] }] });
+    expect([order.refused, learnings(order.events).map((l) => [l.how, l.who])]).toEqual([[], [["witnessed", [DANNY]], ["told", [PRIYA]]]]);
+    // Every learner named: Danny, there and with a call of his own, is left to it; before the plan, someone no call is about is counted too.
+    const seen = saying({ facts: [{ ref: "s", claim: SEDAN }], learned: [{ who: ["Marcus Delgado", "Danny Okafor"], fact: "s", how: "witnessed" }] });
+    expect(checkKnowledge(each, [MARCUS], seen).refusedAs).toEqual({ own_call: 1 });
+    expect(checkKnowledge({ ...scene, asked: [MARCUS] }, [MARCUS], seen).refusedAs).toEqual({ not_this_call: 1 });
   });
 });

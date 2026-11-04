@@ -7,7 +7,7 @@
 // in the fold; nothing here is written. With no positions authored, the defaults give today's rights
 // (§3.4), the household Head their one addition.
 
-import { ownersIn, ROLE_RIGHTS, worthShares } from "../shared/finance";
+import { OWNER_ROLE_LABELS, ownersIn, ROLE_RIGHTS, worthShares } from "../shared/finance";
 import type { EntityId, PlaceId } from "../shared/ids";
 import type { JsonValue } from "../shared/json";
 import { ACTS_FOR, DISSOLVED_FIELD, isAudience, limitsIn, ORG_POWERS, overLimit, positionsIn, powerCovers, powersIn, POWER_WORDS, WINDING_FIELD, type Audience, type Delegation, type OrgGrant, type OrgLimits, type OrgMember, type OrgPower, type OrgType, type Position } from "../shared/org";
@@ -18,7 +18,7 @@ import { labelOf, numOf, objOf, optionalQuery, own, sliceOf } from "./pack-kit";
 import { passMemo } from "./read-pass";
 import type { ReadContext } from "./registry";
 import { isGone, kindIs, placeOfEntity, placeWithin } from "./scope";
-import { together } from "./presence";
+import { siteOf, together } from "./presence";
 import { COMPANY_KIND, GROUP_KIND, isMemberOf, linkedMemberOf, providersOf, type MembershipContext } from "./selector";
 
 type OrgContext = MembershipContext;
@@ -219,8 +219,9 @@ export const HOW_WORDS: Readonly<Record<OrgMember["how"], string>> = { member: "
 
 /**
  * The title `who` goes by in `org` (§3.3), the first that answers: their own (`member_of.role`),
- * their position's, their job's, then the type's word for how they belong (Member, Staff, Owner); null
- * for someone who doesn't belong.
+ * their position's, their job's, then the type's word for how they belong (Member, Staff, Owner), an
+ * owner by another role going by that role ("Trustee", "Beneficiary"); null for someone who doesn't
+ * belong.
  */
 export function orgTitle(ctx: OrgContext, who: EntityId, org: EntityId): string | null {
   const rows = directMembers(ctx, org).filter((r) => r.who === who);
@@ -231,6 +232,8 @@ export function orgTitle(ctx: OrgContext, who: EntityId, org: EntityId): string 
   if (held) return held.position.title;
   const job = rows.find((r) => r.how === "staff" && r.title !== undefined)?.title;
   if (job !== undefined) return job;
+  const owners = rows.filter((r) => r.how === "owner");
+  if (owners.length > 0 && !owners.some((r) => r.role === undefined || r.role === "owner")) return OWNER_ROLE_LABELS[owners[0]?.role ?? "owner"].one;
   const order: OrgMember["how"][] = ["owner", "leader", "staff", "member", "core", "companion", "hired", "ally"];
   const how = order.find((h) => rows.some((r) => r.how === h)) ?? "member";
   return HOW_WORDS[how];
@@ -441,13 +444,18 @@ export function businessIds(ctx: OrgContext): EntityId[] {
   );
 }
 
-/** The business that trades at a place: the one whose place holds it most closely. */
+/**
+ * The business that trades at a place: the one whose place holds it most closely, within the same
+ * building or site (`siteOf`), so a business whose place is a whole town takes no sale made in a
+ * shop of its own elsewhere in it.
+ */
 export function businessAt(ctx: OrgContext, place: PlaceId | null): EntityId | null {
   if (!place) return null;
+  const site = siteOf(ctx.world, place);
   let best: { id: EntityId; depth: number } | null = null;
   for (const id of businessIds(ctx)) {
     for (const p of placesOf(ctx, id)) {
-      if (!placeWithin(ctx.world, place, p)) continue;
+      if (!placeWithin(ctx.world, place, p) || siteOf(ctx.world, p) !== site) continue;
       let depth = 0;
       for (let cur = own(ctx.world.places, p)?.parent; cur && depth < 32; cur = own(ctx.world.places, cur)?.parent) depth++;
       if (!best || depth > best.depth) best = { id, depth };

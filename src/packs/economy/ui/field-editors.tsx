@@ -9,7 +9,7 @@
 
 import type { ComponentChildren } from "preact";
 import { useId, useState } from "preact/hooks";
-import { ACCOUNT_CLASSES, CLASS_TRAITS, OWNER_ROLES, type PayTier } from "../../../shared/finance";
+import { ACCOUNT_CLASSES, CLASS_TRAITS, isAccountClass, LEGACY_TYPE_CLASS, OWNER_ROLES, type AccountClass, type PayTier } from "../../../shared/finance";
 import { hasOwn, isRecord } from "../../../shared/json";
 import type { JsonObject, JsonValue } from "../../../shared/json";
 import type { LintIssue } from "../../../shared/protocol";
@@ -631,9 +631,31 @@ function PayPrefsField(p: FieldEditorProps) {
   );
 }
 
+/** The class an account's product gives it, as the draft says: a class named outright, a world product's class, or an older world's `type`. */
+export function draftClassOf(doc: WorldDoc, fields: JsonObject): AccountClass | null {
+  const product = textOf(fields.product);
+  const products = doc.packs.economy?.config.products;
+  const def = isRecord(products) && product !== "" ? products[product] : undefined;
+  const cls = isRecord(def) ? def.class : product !== "" ? product : LEGACY_TYPE_CLASS[textOf(fields.type)];
+  return isAccountClass(cls) ? cls : null;
+}
+
+/**
+ * An account's opening balance. On a loan, a card or a line it is what's owed: typed as a positive
+ * "Amount owed" and stored negative, as the ledger keeps a debt (DESIGN §25.1), so a loan is never
+ * opened in credit by mistake.
+ */
+function OpeningField(p: FieldEditorProps) {
+  const cls = draftClassOf(p.doc, p.entity.fields);
+  if (cls === null || !CLASS_TRAITS[cls].liability) return <MinorMoneyInput label={labelOf(p, true)} value={p.value} currency={p.doc.currency} optional hint={helpOf(notesOf(p.def))} issues={p.lint} onChange={p.onChange} />;
+  const owed = typeof p.value === "number" ? -p.value : p.value;
+  return <MinorMoneyInput label="Amount owed" value={owed} currency={p.doc.currency} min={0} optional hint={helpOf("What's owed on it when the story starts; kept as a debt", notesOf(p.def))} issues={p.lint} onChange={(next) => p.onChange(typeof next === "number" && next !== 0 ? -next : next)} />;
+}
+
 /** Every structured money field and its editor; the kinds are the foundation's (and `person`, whose payment preferences the economy declares). */
 export const MONEY_FIELD_EDITORS: readonly FieldEditorDef[] = [
   ...["account", "business", "holding", "property", "trust"].map((kind) => ({ kind, field: "owners", component: OwnersField })),
+  { kind: "account", field: "opening", component: OpeningField },
   { kind: "account", field: "product", component: ProductField },
   { kind: "flow", field: "splits", component: SplitsField },
   { kind: "job", field: "splits", component: SplitsField },

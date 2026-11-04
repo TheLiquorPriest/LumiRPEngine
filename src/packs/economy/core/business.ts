@@ -3,22 +3,27 @@
 // outside the world bring it takings on its trading days; it pays its suppliers monthly for what it
 // sold; it issues invoices, paid as flows, that go late with a fee; it pays its staff (`employment`)
 // and its expenses (flows its owners set up); and it pays its owners by draws, or distributions by
-// share. Every money movement here goes through the foundation's flows and postings.
+// share, as a trust pays its beneficiaries a stated amount by share (§29.7). Its net worth counts
+// what its customers owe it and what it owes (§27.10). Every money movement here goes through the
+// foundation's flows and postings.
 
 import type { JsonObject, JsonValue } from "../../../shared/json";
 import type { EntityId } from "../../../shared/ids";
 import type { LedgerEvent, PackEvent, PostingLine } from "../../../shared/ledger";
-import type { EntityDef, FieldDef } from "../../../shared/world";
-import { INVOICE_STATES, type AlertLine, type BusinessView, type Flow, type FlowSchedule, type Invoice, type InvoiceState, type JournalLine, type OwnerLine } from "../../../shared/finance";
+import type { EntityDef, FieldDef, WorldDoc } from "../../../shared/world";
+import { DEFAULT_ACCOUNT_PRODUCT, INVOICE_STATES, ownersIn, type AlertLine, type BusinessView, type Flow, type FlowSchedule, type Invoice, type InvoiceState, type JournalLine, type OwnerLine } from "../../../shared/finance";
+import { pointerOf } from "../../../shared/json-patch";
+import type { LintIssue } from "../../../shared/protocol";
 import { hashParts } from "../../../shared/hash";
 import { calendarOf, clockAt, clockOfLocal, dateAt, dayIndexOf, formatClock, MINUTES_PER_DAY } from "../../../engine/calendar";
 import { labelOf, numOf, objOf, optionalQuery, optionalService, own, sliceOf, sliceRecord, strOf } from "../../../engine/pack-kit";
 import { passMemo } from "../../../engine/read-pass";
 import type { EffectContext, EventTypeDef, ReadContext, Rejection, SlotInfo } from "../../../engine/registry";
+import type { Registry } from "../../../engine/registry-impl";
 import type { Rng } from "../../../engine/rng";
 import { isGone, kindIs, placeOfEntity, placeWithin } from "../../../engine/scope";
 import type { WorldState } from "../../../engine/state";
-import { addToBooks, addToPayables, businessBooks, firstBookedMonth, monthBook, monthOf, monthsBetween, operatingAccount, payablesOf } from "./books";
+import { addToBooks, addToPayables, businessBooks, firstBookedMonth, monthBook, monthOf, monthsBetween, operatingAccount, owedOf, payablesOf } from "./books";
 import { allJobs, jobBlocks, payrollProblem, staffViews, type Job } from "./employment";
 import { businessAt, businessIds, orgTypeOf, placesOf, tradingDays, windingUpSince } from "../../../engine/org";
 import type { FinanceApi, FinanceRegistry, FlowPosting } from "./module";
@@ -461,23 +466,25 @@ function undistributed(api: FinanceApi, ctx: ReadContext, business: EntityId, fr
 
 /**
  * A distribution from a business's operating account to its owners by their share of its worth,
- * paying `months` of its profit. Each owner's part goes where the holdings module routes their
- * stake (an account of theirs, else their deposit account); a part they reinvest stays in the
- * business and only its stake records it. A listed company's public holds the float's part (§27.10
- * Listing): its holders in the world are paid it by their units, the market the rest. Null when
- * there is nothing to pay or no account to pay from.
+ * paying `months` of its profit, or a trust's stated amount from its account to its beneficiaries by
+ * their shares (`trust`). Each owner's part goes where the holdings module routes their stake (an
+ * account of theirs, else their deposit account); a part they reinvest stays in the business and
+ * only its stake records it. A listed company's public holds the float's part (§27.10 Listing): its
+ * holders in the world are paid it by their units, the market the rest. Null when there is nothing
+ * to pay or no account to pay from.
  */
-function distribution(ctx: ReadContext, api: FinanceApi, business: EntityId, months: JsonObject): { lines: PostingLine[]; extra: LedgerEvent[]; paid: number } | null {
+function distribution(ctx: ReadContext, api: FinanceApi, business: EntityId, months: JsonObject, trust = false): { lines: PostingLine[]; extra: LedgerEvent[]; paid: number } | null {
   const total = Object.values(months).reduce((a: number, c) => a + numOf(c), 0);
   const from = operatingAccount(api, ctx, business);
   if (!from || total <= 0) return null;
   const owners = api.ownersOf(ctx.state, business).map((o) => ({ party: o.party, share: api.shareOf(ctx.state, business, o.party) })).filter((o) => o.share > 0);
   const shareSum = owners.reduce((a, o) => a + o.share, 0);
   if (owners.length === 0 || shareSum <= 0) return null;
-  const pub = optionalService(ctx, "economy.public_payout")?.(ctx, business, total) ?? null;
+  const pub = trust ? null : (optionalService(ctx, "economy.public_payout")?.(ctx, business, total) ?? null);
   const owed = total - (pub?.cents ?? 0);
-  const route = optionalQuery(ctx, "economy.stake_route");
-  const stakePaid = optionalService(ctx, "economy.stake_paid");
+  const route = trust ? undefined : optionalQuery(ctx, "economy.stake_route");
+  // A business's payout is its owners' income from it; what a trust pays out is taxed as trusts are, not as a business's profit.
+  const stakePaid = trust ? undefined : optionalService(ctx, "economy.stake_paid");
   const lines: PostingLine[] = [];
   const extra: LedgerEvent[] = [];
   let given = 0;
@@ -513,20 +520,24 @@ function distribution(ctx: ReadContext, api: FinanceApi, business: EntityId, mon
 
 function distribute(ctx: EffectContext, api: FinanceApi, args: Record<string, JsonValue>): LedgerEvent[] | Rejection {
   const business = strOf(args.business);
-  if (!isBusiness(ctx, business)) return reject("missing_entity", `no business ${labelOf(ctx, business)}`);
+  const trust = api.partyKind(ctx, business) === "trust" && !isGone(ctx.state, business);
+  if (!isBusiness(ctx, business) && !trust) return reject("missing_entity", `no business or trust ${labelOf(ctx, business)}`);
+  const stated = typeof args.cents === "number" && args.cents > 0 ? Math.round(args.cents) : null;
+  // A trust pays out what it holds, not a profit (§29.7): a stated amount, by its beneficiaries' shares.
+  if (trust && stated === null) return reject("bad_amount", `${labelOf(ctx, business)} pays out a stated amount: say how much goes to its beneficiaries`);
   // Paid out by someone who may pay out its profit (`money.payout`, ORG-SPEC §3.6), and told in its History.
   let total = 0;
-  return actAs(ctx, { by: strOf(args.by), party: business, power: "money.payout", line: () => `Paid ${moneyWords(ctx, total)} of profit out to its owners` }, () => {
+  return actAs(ctx, { by: strOf(args.by), party: business, power: "money.payout", line: () => (trust ? `Paid ${moneyWords(ctx, total)} out to its beneficiaries` : `Paid ${moneyWords(ctx, total)} of profit out to its owners`) }, () => {
     const since = numOf(own(objOf(sliceOf(ctx.state, "economy").distributed), business), monthStart(ctx, ctx.state.clock));
     const pct = numOf(own(ctx.state.entities, business)?.fields.distribution_pct, 100);
     // A stated amount pays out of this month; otherwise the profit of every month since the last payout that no payout has paid.
-    const months: JsonObject = typeof args.cents === "number" && args.cents > 0 ? { [monthOf(ctx.world, ctx.state.clock)]: Math.round(args.cents) } : undistributed(api, ctx, business, since, ctx.state.clock + 1, pct);
+    const months: JsonObject = stated !== null ? { [monthOf(ctx.world, ctx.state.clock)]: stated } : undistributed(api, ctx, business, since, ctx.state.clock + 1, pct);
     if (Object.keys(months).length === 0) return reject("bad_amount", `${labelOf(ctx, business)} has no profit to distribute`);
-    const d = distribution(ctx, api, business, months);
-    if (!d) return reject("no_owners", `${labelOf(ctx, business)} has no owners with a share, or no account to pay from`);
+    const d = distribution(ctx, api, business, months, trust);
+    if (!d) return reject("no_owners", trust ? `${labelOf(ctx, business)} has no beneficiaries with a share, or no account to pay from` : `${labelOf(ctx, business)} has no owners with a share, or no account to pay from`);
     total = d.paid;
     if (d.lines.length === 0) return d.extra;
-    const posted = api.post(ctx, d.lines, { memo: "Profit distribution", kind: "income", category: "distribution" });
+    const posted = api.post(ctx, d.lines, { memo: trust ? "Trust distribution" : "Profit distribution", kind: "income", category: "distribution" });
     if (!Array.isArray(posted)) return posted;
     return unit(posted, d.extra);
   });
@@ -726,20 +737,27 @@ export function registerBusiness(r: FinanceRegistry): void {
   core.effect({ type: "economy.invoice_pay", args: ["invoice", "by?"], resolve: (args, ctx) => payInvoice(ctx, api, args) });
   core.effect({ type: "economy.invoice_void", args: ["invoice", "by?"], resolve: (args, ctx) => voidInvoice(ctx, api, args) });
   core.effect({ type: "economy.owner_draw", args: ["business", "cents", "owner?", "by?"], resolve: (args, ctx) => ownerDraw(ctx, api, args) });
-  core.effect({ type: "economy.distribute", args: ["business", "cents?", "by?"], resolve: (args, ctx) => distribute(ctx, api, args) });
+  // The GM pays out too (GM → Orgs → People's Pay out on a trust): a GM edit runs it with no one acting for it.
+  core.effect({ type: "economy.distribute", args: ["business", "cents?", "by?"], gm: true, resolve: (args, ctx) => distribute(ctx, api, args) });
   core.formula("may_draw", (ctx, who, business) => mayDraw(api, ctx.state, String(who ?? ""), String(business ?? "")));
   // Who may do each for a business (ORG-SPEC §3.4, §3.6): whoever holds the power there; with no positions authored, its managing owners, as before.
   core.action({ id: "invoice_issue", label: "Send an invoice", description: "Bill a customer from a business you run.", pack: "economy", params: { business: { type: "ref", ref: "business" }, customer: { type: "ref", optional: true, label: "Bill (someone here)" }, customer_name: { type: "text", optional: true, label: "Or bill (a name)" }, amount: { type: "money" }, memo: { type: "text", optional: true, label: "For" }, days: { type: "number", optional: true, label: "Days to pay" } }, requires: ["may(self, business, 'money.invoice')", "amount > 0", "level.money >= 3"], outcomes: { default: [{ type: "economy.invoice_issue", args: { business: "business", customer: "=params.customer", customer_name: "=params.customer_name", cents: "=amount", memo: "=params.memo", days: "=params.days", by: "self" } }] }, duration: "10", lexicon: ["send an invoice", "invoice", "bill them"], observable: "does paperwork" });
   core.action({ id: "invoice_pay", label: "Pay an invoice", description: "Pay an invoice billed to you or to a business you run.", pack: "economy", params: { invoice: { type: "ref", ref: INVOICE_KIND } }, requires: ["invoice.customer == self or may(self, invoice.customer, 'money.spend')", "invoice.state == 'open' or invoice.state == 'late'", "level.money >= 3"], outcomes: { default: [{ type: "economy.invoice_pay", args: { invoice: "invoice", by: "self" } }] }, duration: "5", lexicon: ["pay the invoice", "settle the bill"], observable: "checks their phone" });
   core.action({ id: "invoice_void", label: "Void an invoice", description: "Cancel an invoice that a business you run sent.", pack: "economy", params: { invoice: { type: "ref", ref: INVOICE_KIND } }, requires: ["may(self, invoice.business, 'money.invoice')", "invoice.state == 'open' or invoice.state == 'late'", "level.money >= 3"], outcomes: { default: [{ type: "economy.invoice_void", args: { invoice: "invoice", by: "self" } }] }, duration: "5", lexicon: ["void the invoice", "cancel the invoice", "write it off"], observable: "does paperwork" });
   core.action({ id: "owner_draw", label: "Take an owner's draw", description: "Take money out of a business you own, for yourself.", pack: "economy", params: { business: { type: "ref", ref: "business" }, amount: { type: "money" } }, requires: ["may_draw(self, business)", "amount > 0", "level.money >= 3"], outcomes: { default: [{ type: "economy.owner_draw", args: { business: "business", cents: "=amount", owner: "self", by: "self" } }] }, duration: "5", lexicon: ["take a draw", "pay myself", "take money out of the business"], observable: "checks their phone" });
-  core.action({ id: "distribute_profit", label: "Distribute profit", description: "Pay a business's profit out to its owners.", pack: "economy", params: { business: { type: "ref", ref: "business" }, amount: { type: "money", optional: true, label: "Amount (else its share of the profit)" } }, requires: ["may(self, business, 'money.payout')", "level.money >= 3"], outcomes: { default: [{ type: "economy.distribute", args: { business: "business", cents: "=params.amount", by: "self" } }] }, duration: "10", lexicon: ["distribute profit", "pay dividends", "pay out the owners"], observable: "does paperwork" });
+  core.action({ id: "distribute_profit", label: "Distribute profit", description: "Pay a business's profit out to its owners, or a stated amount of a trust's money to its beneficiaries, by their shares.", pack: "economy", params: { business: { type: "ref", of: { kind: ["business", "trust"] }, label: "Business or trust" }, amount: { type: "money", optional: true, label: "Amount (a business: else its share of the profit)" } }, requires: ["may(self, business, 'money.payout')", "level.money >= 3"], outcomes: { default: [{ type: "economy.distribute", args: { business: "business", cents: "=params.amount", by: "self" } }] }, duration: "10", lexicon: ["distribute profit", "pay dividends", "pay out the owners", "pay the beneficiaries"], observable: "does paperwork" });
 
   core.query("economy.business_books", (ctx, business, from, to) => {
     const b = businessBooks(api, ctx, business, from, to);
     return { revenue: b.revenue, expenses: b.expenses, profit: b.profit, receivables: b.receivables, payables: b.payables };
   });
   core.query("economy.operating_account", (ctx, business) => operatingAccount(api, ctx, business));
+  // A company's net worth counts what its customers owe it and what it owes (§27.10), so its Summary is its Valuation's books.
+  r.worth((ctx, party) => {
+    if (!isBusiness(ctx, party)) return { assets: 0, liabilities: 0, lines: [] };
+    const { receivables, payables } = owedOf(ctx.state, party);
+    return { assets: receivables, liabilities: payables, lines: [...(receivables > 0 ? [{ label: "Owed to it", cents: receivables }] : []), ...(payables > 0 ? [{ label: "What it owes", cents: -payables }] : [])] };
+  });
 
   r.view((ctx, party, _view, viewer) => {
     const mine = businessesOf(ctx, api, party);
@@ -778,8 +796,8 @@ export function registerBusiness(r: FinanceRegistry): void {
 
   core.lint({
     code: "economy.business",
-    check(world) {
-      const issues = [];
+    check(world, registry) {
+      const issues: LintIssue[] = [];
       for (const e of Object.values(world.entities)) {
         if (e.kind === INVOICE_KIND) {
           if (typeof e.fields.business !== "string" || own(world.entities, e.fields.business)?.kind !== "business") issues.push({ severity: "error" as const, code: "economy.business", message: `Invoice ${e.name} isn't from a business.`, path: `entities.${e.id}.fields.business` });
@@ -794,8 +812,42 @@ export function registerBusiness(r: FinanceRegistry): void {
         const margin = e.fields.margin_pct;
         if (margin !== undefined && !(typeof margin === "number" && margin >= 0 && margin <= 100)) issues.push({ severity: "error" as const, code: "economy.business", message: `${e.name}'s margin must be a percentage from 0 to 100.`, path: `entities.${e.id}.fields.margin_pct` });
       }
+      issues.push(...noAccountIssues(world, registry));
       return issues;
     },
   });
+}
+
+/** The lint code for a company, a trust or an employer holding no account. */
+export const NO_ACCOUNT_LINT = "economy.no_account";
+
+/**
+ * A company or a trust, or any organization that employs someone, holding no account of its own
+ * (6.15): its takings would leave the world and its payroll be paid from nowhere. The Fix adds a
+ * checking account it owns, empty, so its money has somewhere to land.
+ */
+function noAccountIssues(world: WorldDoc, registry: Registry | undefined): LintIssue[] {
+  const is = (kind: string, base: string): boolean => (registry ? kindIs(registry, world, kind, base) : kind === base);
+  const held = new Set<EntityId>();
+  const employers = new Set<EntityId>();
+  for (const e of Object.values(world.entities)) {
+    if (e.kind === "account") for (const o of ownersIn(e.fields)) held.add(o.party);
+    if (is(e.kind, "job") && typeof e.fields.employer === "string" && e.fields.status !== "ended") employers.add(e.fields.employer);
+  }
+  const out: LintIssue[] = [];
+  for (const id of Object.keys(world.entities).sort()) {
+    const e = own(world.entities, id);
+    if (!e || held.has(id)) continue;
+    const company = is(e.kind, "business");
+    const trust = is(e.kind, "trust");
+    const employer = employers.has(id) && (is(e.kind, "group") || is(e.kind, "household"));
+    if (!company && !trust && !employer) continue;
+    let account = `${id}_checking`;
+    for (let n = 2; own(world.entities, account); n++) account = `${id}_checking_${n}`;
+    const def: EntityDef = { id: account, kind: "account", name: `${e.name} checking`, tier: "background", fields: { owners: [{ party: id, role: "owner" }], product: DEFAULT_ACCOUNT_PRODUCT[company ? "business" : trust ? "trust" : "group"], opening: 0 }, relations: [] };
+    const why = company ? "its takings leave the world and its payroll is paid from nowhere" : trust ? "what it holds and pays out has nowhere to be" : "its payroll is paid from nowhere";
+    out.push({ severity: "warning", code: NO_ACCOUNT_LINT, path: `entities.${id}`, message: `${e.name} holds no bank account, so ${why}. Open one for it?`, fix: { label: `Open ${def.name}`, ops: [{ op: "add", path: pointerOf(["entities", account]), value: def as unknown as JsonValue }] } });
+  }
+  return out;
 }
 

@@ -32,6 +32,7 @@ import type {
 } from "./ids";
 import type { EntityDef } from "./world";
 import type { EditOp } from "./protocol";
+import type { ItemFix } from "./things";
 
 export const LEDGER_NAMESPACE = "lumi_rp_engine";
 
@@ -242,8 +243,14 @@ export interface PostEntry {
   at: PathHash;
   kind: PostKind;
   events: LedgerEvent[];
-  /** A `fix` the player's own mechanical action made (DESIGN §11), not a correction: the action and how it reads ("Buy or sell investments: 10, …"). */
-  by?: { action: string; label: string };
+  /**
+   * A `fix` the player's own action made out of play (DESIGN §11), not a correction: the action and how
+   * it reads ("Buy or sell investments: 10, …"), and, when it is told to the story, what the next
+   * turn's Outcome says of it, in its words (`told`, recorded when it was done and never worked out
+   * again, so a later settings change leaves it alone). Without `told` it is bookkeeping the story
+   * doesn't hear of.
+   */
+  by?: { action: string; label: string; told?: string };
   /** A `fix` the GM made (`lre.edit`, a GM's minds run), not a ✎ correction of the player's: its chip says it was a GM edit (DESIGN §7). */
   gm?: true;
   /** An agent's write (AGENT-LOOP-PLAN §4): its role, its batch's key (of the operations it was asked for), the keys of those it applied, the label its writer gave it, and the knowledge it wrote under (absent: the GM's own); GM-level, never on a player surface. */
@@ -285,8 +292,18 @@ export interface FixSetOp {
   value: JsonValue;
 }
 
-/** What one `fix` entry asks for, in order: GM edits, plus an agent's workspace changes, clock sets and ✎ fixes. */
-export type FixOp = EditOp | WorkspaceOp | ClockOp | FixSetOp;
+/**
+ * A player's change to their own thing (✎ on a thing, `lre.fix`): where it is, its home, worn or not,
+ * its size, resolved under the player's rules (`engine/edits.ts`), so someone else's thing or a place
+ * the player character can't see is refused.
+ */
+export interface FixItemOp {
+  op: "fix_item";
+  change: ItemFix;
+}
+
+/** What one `fix` entry asks for, in order: GM edits, plus an agent's workspace changes, clock sets and ✎ fixes, a thing's among them. */
+export type FixOp = EditOp | WorkspaceOp | ClockOp | FixSetOp | FixItemOp;
 
 /** A GM edit's or ✎ fix's request, kept on its `fix` entry (`PostEntry.edit`). */
 export type FixDirective = { ops: FixOp[] } | { clock: string };
@@ -653,6 +670,8 @@ export interface JournalNote {
   messageId: MessageId;
   ref: EventRef | { marker: number } | null;
   text: string;
+  /** A `fix` note's maker, where the main agent's digest frames it apart (DESIGN §11): the player's out-of-play action told to the story or not, or the GM's (an edit, an applied review card). Absent: a ✎ correction. */
+  source?: "told" | "untold" | "gm";
 }
 
 /** One line of a Keep report (DESIGN §4.3). */

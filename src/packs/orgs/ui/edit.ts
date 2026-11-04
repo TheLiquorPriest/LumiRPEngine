@@ -7,7 +7,7 @@
 // Pure.
 
 import type { SheetRoute } from "../../../frontend/app";
-import { FINANCE_ACTIONS } from "../../../shared/finance";
+import { FINANCE_ACTIONS, UNPAID } from "../../../shared/finance";
 import type { JsonObject } from "../../../shared/json";
 import { isRecord } from "../../../shared/json";
 import { formatMoneyInput, parseMoneyInput } from "../../../shared/money";
@@ -32,8 +32,8 @@ export const GM_EFFECTS = { position: "orgs.position", delegate: "orgs.delegate"
 
 // ---------------------------------------------------------------- routes
 
-/** What an `org_edit` sheet shows: a member's sheet (by who), Hire someone, Admit a member, a position (by id; none adds one), a delegation (by who; none grants one), the dues. */
-export const ORG_EDIT_FORMS = ["member", "hire", "admit", "position", "delegate", "dues"] as const;
+/** What an `org_edit` sheet shows: a member's sheet (by who), Hire someone, Admit a member, a position (by id; none adds one), a delegation (by who; none grants one), the dues, a trust's payout. */
+export const ORG_EDIT_FORMS = ["member", "hire", "admit", "position", "delegate", "dues", "payout"] as const;
 export type OrgEditForm = (typeof ORG_EDIT_FORMS)[number];
 
 export interface OrgEditTarget {
@@ -74,12 +74,13 @@ function readerOf(org: OrgView): string | null {
 
 /**
  * People's controls at its top (§4.4), by power: Hire someone (`staff.hire`, from Money 3, where work
- * is actions) and Admit a member (`members.admit`; a trust's members are its owners). The party
- * has its own (Hire a hand, Add someone you know); GM → Orgs, its GM parts.
+ * is actions), Admit a member (`members.admit`; a trust's members are its owners) and a trust's Pay
+ * out (`money.payout`, from Money 3). The party has its own (Hire a hand, Add someone you know);
+ * GM → Orgs, its GM parts.
  */
-export function peopleControls(org: OrgView): { hire: boolean; admit: boolean } {
-  if (!org.exists || isGmPage(org) || org.type === "party") return { hire: false, admit: false };
-  return { hire: org.level >= 3 && holds(org, "staff.hire"), admit: org.type !== "trust" && holds(org, "members.admit") };
+export function peopleControls(org: OrgView): { hire: boolean; admit: boolean; payout: boolean } {
+  if (!org.exists || isGmPage(org) || org.type === "party") return { hire: false, admit: false, payout: false };
+  return { hire: org.level >= 3 && holds(org, "staff.hire"), admit: org.type !== "trust" && holds(org, "members.admit"), payout: org.type === "trust" && org.level >= 3 && holds(org, "money.payout") };
 }
 
 export type MemberControl = "appoint" | "title" | "delegate" | "revoke" | "raise" | "hours" | "leave" | "back" | "let_go" | "remove";
@@ -212,7 +213,7 @@ export interface HireForm {
 /** Why Hire someone can't be sent yet; null when it can. */
 export function hireProblem(form: HireForm, currency: WorldCurrency): string | null {
   if (form.worker === "") return "Choose whom to hire.";
-  if (amount(form.rate, currency) === null) return "Type the rate as an amount.";
+  if (form.every !== UNPAID && amount(form.rate, currency) === null) return "Type the rate as an amount.";
   if (form.hours.trim() !== "" && hoursAction("", form.hours) === null) return "Hours a week are more than none and at most 168.";
   return null;
 }
@@ -225,7 +226,8 @@ export function hireAction(org: OrgView, form: HireForm, currency: WorldCurrency
   if (form.title.trim() !== "") params.title = form.title.trim();
   if (form.position !== "") params.position = form.position;
   if (form.basis !== "") params.basis = form.basis;
-  if (typeof rate === "number" && rate > 0) params.rate = rate;
+  // Unpaid (a title with no pay): no rate, no payroll and no payslip.
+  if (typeof rate === "number" && rate > 0 && form.every !== UNPAID) params.rate = rate;
   if (form.hours.trim() !== "") params.hours_per_week = Number(form.hours);
   if (form.every !== "") params.pay_every = form.every;
   return { action: STAFF_ACTIONS.hire, params };
@@ -503,6 +505,26 @@ export function duesEditOps(org: string, draft: DuesDraft, currency: WorldCurren
   const cents = amount(draft.amount, currency);
   const record = typeof cents === "number" && cents > 0 ? [{ cents, every: draft.every, ...(draft.day.trim() !== "" ? { day: Number(draft.day) } : {}) }] : [];
   return [{ op: "set", entity: org, field: "dues", value: record }];
+}
+
+// ---------------------------------------------------------------- a trust's payout
+
+/** A trust's payout (DESIGN §29.7) needs an amount above nothing: it pays out what it holds, not a profit. */
+export function payoutProblem(text: string, currency: WorldCurrency): string | null {
+  const cents = amount(text, currency);
+  return typeof cents === "number" && cents > 0 ? null : "Type how much it pays out.";
+}
+
+/** Paying a trust's money out to its beneficiaries by their shares (`distribute_profit` with the amount, as a turn). */
+export function payoutAction(org: string, text: string, currency: WorldCurrency): OrgAction | null {
+  const cents = amount(text, currency);
+  return typeof cents === "number" && cents > 0 ? { action: FINANCE_ACTIONS.distribute, params: { business: org, amount: cents } } : null;
+}
+
+/** The GM's payout of a trust's money to its beneficiaries by their shares (`economy.distribute`, an effect). */
+export function payoutOps(org: string, text: string, currency: WorldCurrency): EditOp[] {
+  const cents = amount(text, currency);
+  return typeof cents === "number" && cents > 0 ? [{ op: "effect", effect: "economy.distribute", args: { business: org, cents } }] : [];
 }
 
 const ORDINAL_DAYS: Readonly<Record<number, string>> = { 1: "1st", 2: "2nd", 3: "3rd", 21: "21st", 22: "22nd", 23: "23rd", 31: "31st" };

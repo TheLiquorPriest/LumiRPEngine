@@ -1,193 +1,169 @@
-// Settings → Agents → Main agent (AGENT-LOOP-PLAN §15; INC2-SPEC C14): what the main agent runs with,
-// every setting kept under `agents.main` (shared/agent-settings.ts): the connection and model it runs
-// on, its effort, its tool families (it only reads, everything secrets marked: what it changes goes
-// through the roles it runs, and the prompt it reviews), its own limits over every agent's budget for
-// each stage it works, and its turn task's parts: the digest of what changed since its last turn, and
-// its pinned files where `.pins.json` sets no budget, which is every role's pins budget too. Then its
-// final review of the narrator's prompt before each reply, in either pipeline (`agents.finalReview`,
-// DESIGN §4.6): on or off, what a review that fails does, its time (Settings → Timeouts → Final
-// review, shown here too) and its own limits over the main agent's. Each shows its default; Default
-// sends null, so the store reads the default back. Its caching is Settings → Agents → Caching. What
-// renders and what is pressed (`MainAgentBody`, `FinalReviewSection`, `mainPatch`) is hook-free, so
-// tests press it without a DOM. Styles: styles/settings.ts.
+// Settings → Agents → Main agent (AGENT-LOOP-PLAN §15; INC2-SPEC C14; DESIGN §4.6), on the agent
+// page's template (role-page.tsx): where it runs, for each of its jobs (deciding each turn while the
+// pipeline has a main agent decide, and the final review in either pipeline); its effort and tools
+// (it only reads: what it changes goes through the roles it runs and the prompt it reviews); its turn
+// task's parts (the digest, and the pins budget every role shares); whether it decides turns; its
+// final review (on or off, what a review that fails does, its time, its own limits over the main
+// agent's); its own limits over every agent's; its caching and its prompts. Every setting is
+// `agents.main`, `agents.finalReview`, `timeouts.finalReviewMs` or `agents.caching.roles.main`; a
+// Default sends null, so the store reads the default back. Hook-free (`MainAgentPage`), so tests
+// press it without a DOM. Styles: styles/settings.ts.
 
-import type { AgentBudget, AgentSettings, FinalReviewOnFail, MainAgentSettings } from "../../shared/agent-settings";
-import { AGENT_EFFORTS, BUDGET_DEFS, defaultAgentSettings, FINAL_REVIEW_ON_FAIL, FINAL_REVIEW_ON_FAIL_LABELS, MAIN_DEFS, mainBudget, PIPELINE_MODE_LABELS } from "../../shared/agent-settings";
-import { TOOL_FAMILY_LABEL } from "../../shared/agent-tools";
+import type { AgentSettings, FinalReviewOnFail } from "../../shared/agent-settings";
+import { BUDGET_DEFS, defaultAgentSettings, FINAL_REVIEW_ON_FAIL, FINAL_REVIEW_ON_FAIL_LABELS, MAIN_AGENT_ROLE, MAIN_DEFS, mainBudget, PIPELINE_MODE_LABELS } from "../../shared/agent-settings";
 import type { JsonObject } from "../../shared/json";
-import type { TimeoutSettings } from "../../shared/timeouts";
-import { HostModelPicker, HostSwitch, Section, Seg } from "../components";
-import { defaultButton, LimitRow, OwnLimitRow } from "./agents";
-import { EFFORT_LABEL } from "./assistant";
-import { EFFORT_HELP, FAMILIES } from "./roles";
-import { type Connection, ConnectionSelect, placeOf, useConnections } from "./steps";
+import { MAIN_AGENT_PAGE } from "../../shared/main-agent-prompts";
+import type { PromptSettings } from "../../shared/prompts";
+import { defaultTimeouts, type TimeoutSettings } from "../../shared/timeouts";
+import type { SettingsRoute } from "../app";
+import { HostSwitch, Seg } from "../components";
+import { mainChanged, ownChanged } from "./changed";
+import { LimitRow, NavRow, OwnBudget, SettingRow } from "./kit";
+import { FINAL_REVIEW_FAIL_HELP } from "./labels";
+import { AgentPage, BUDGET_KEYS, CachingSetting, ConnectionSetting, EffortSetting, FamiliesSetting, PromptsLink, routeText, type PageSection } from "./role-page";
+import { type Connection, placeOf } from "./steps";
 import { TimeoutRow } from "./timeouts";
 
 /** What each Default resets to (a reset deletes the stored value, so the reader falls back to these). */
-const DEFAULTS: Readonly<MainAgentSettings> = defaultAgentSettings().main;
-const REVIEW_DEFAULTS = defaultAgentSettings().finalReview;
+const DEFAULTS = defaultAgentSettings();
+const FINAL_REVIEW_MS = defaultTimeouts().finalReviewMs;
 
-const DEFAULT_PLACE = placeOf(DEFAULTS, []);
+/** The limits the main agent and its final review may set of their own: a turn role's alone (its fresh runs) aren't theirs. */
+const MAIN_KEYS = BUDGET_KEYS.filter((key) => BUDGET_DEFS[key].roleOnly !== true);
 
 /** The settings patch (`lre.settings.set`) for some of the main agent's settings; a field sent as null is deleted, so the store reads its default. */
 export function mainPatch(fields: JsonObject): JsonObject {
   return { agents: { main: fields } };
 }
 
-/** Settings home's line for this page: where the main agent runs, and whether the pipeline has one. */
-export function mainSummary(agents: AgentSettings, connections: readonly Connection[]): string {
-  return `${placeOf(agents.main, connections)} · ${agents.pipeline.mode === "main" ? "deciding each agent turn" : `off: ${PIPELINE_MODE_LABELS[agents.pipeline.mode].toLowerCase()}`}`;
+/** The main agent's page put back: its settings, its final review, the review's time and its own caching. */
+export function mainResetPatch(): JsonObject {
+  return { agents: { main: null, finalReview: null, caching: { roles: { [MAIN_AGENT_ROLE]: null } } }, timeouts: { finalReviewMs: null } };
 }
-
-/** The page's controls, without hooks: each one patches `agents.main` through `patch`. */
-export function MainAgentBody(props: { agents: AgentSettings; connections: readonly Connection[]; patch(patch: JsonObject): void; busy: boolean }) {
-  const { agents, busy } = props;
-  const m = agents.main;
-  const set = (fields: JsonObject) => props.patch(mainPatch(fields));
-  const budgetKeys = Object.keys(BUDGET_DEFS) as (keyof AgentBudget)[];
-  const familiesDefault = m.families.length === DEFAULTS.families.length && m.families.every((f) => DEFAULTS.families.includes(f));
-  return (
-    <>
-      <Section title="Model" flush>
-        <div class="lre-set-rows">
-          <div class="lre-set-ext" data-lre-main-setting="connection">
-            <div class="lre-set-ext-head">
-              <span class="lre-set-ext-title">Connection and model</span>
-              {m.connectionId === DEFAULTS.connectionId && m.model === DEFAULTS.model ? null : defaultButton(`Reset the main agent's connection and model to their default, ${DEFAULT_PLACE}`, busy, () => set({ connectionId: null, model: null }))}
-            </div>
-            <ConnectionSelect value={m.connectionId} connections={props.connections} firstLabel="None: Lumiverse's default connection" help="None runs the main agent on the connection Lumiverse marks as your default, with that connection's model and settings." disabled={busy} onChange={(connectionId) => set({ connectionId, model: null })} />
-            {m.connectionId ? (
-              <>
-                <HostModelPicker connectionId={m.connectionId} value={m.model ?? ""} label="Main agent: model" onChange={(model) => set({ model: model || null })} />
-                <span class="lre-field-help">Pick from the connection's models, or type one. Empty uses the connection's own model.</span>
-              </>
-            ) : null}
-            <span class="lre-small lre-muted">Default: {DEFAULT_PLACE}, with that connection's model.</span>
-          </div>
-          <div class="lre-set-ext" data-lre-main-setting="effort">
-            <div class="lre-set-ext-head">
-              <span class="lre-set-ext-title">Reasoning</span>
-              {m.effort === DEFAULTS.effort ? null : defaultButton(`Reset the main agent's effort to its default, ${EFFORT_LABEL[DEFAULTS.effort]}`, busy, () => set({ effort: null }))}
-            </div>
-            <label class="lre-field">
-              <span class="label">Effort</span>
-              <select
-                class="lre-input"
-                aria-label="Main agent: reasoning effort"
-                value={m.effort}
-                disabled={busy}
-                onChange={(event) => {
-                  const effort = AGENT_EFFORTS.find((e) => e === event.currentTarget.value);
-                  if (effort) set({ effort });
-                }}
-              >
-                {AGENT_EFFORTS.map((e) => (
-                  <option key={e} value={e}>
-                    {EFFORT_LABEL[e]}
-                  </option>
-                ))}
-              </select>
-              <span class="lre-field-help">{EFFORT_HELP[m.effort]}</span>
-            </label>
-            <span class="lre-small lre-muted">Default {EFFORT_LABEL[DEFAULTS.effort]}.</span>
-          </div>
-        </div>
-      </Section>
-      <Section title="Tools" flush>
-        <div class="lre-set-rows">
-          <div class="lre-set-ext" data-lre-main-setting="families">
-            <div class="lre-set-ext-head">
-              <span class="lre-set-ext-title">Tools it reads with</span>
-              {familiesDefault ? null : defaultButton(`Reset the main agent's tools to their default, ${DEFAULTS.families.map((f) => TOOL_FAMILY_LABEL[f]).join(", ")}`, busy, () => set({ families: null }))}
-            </div>
-            <span class="lre-field-help">Read-only: what it changes, it changes through the roles it runs, and in the narrator's prompt through its final review.</span>
-            {FAMILIES.map((family) => (
-              <HostSwitch key={family} label={`Main agent: ${TOOL_FAMILY_LABEL[family]}`} checked={m.families.includes(family)} disabled={busy} onChange={(on) => set({ families: FAMILIES.filter((f) => (f === family ? on : m.families.includes(f))) })} />
-            ))}
-            <span class="lre-small lre-muted">Default: {DEFAULTS.families.map((f) => TOOL_FAMILY_LABEL[f]).join(", ")}.</span>
-          </div>
-        </div>
-      </Section>
-      <Section title="Turn task" flush>
-        <div class="lre-set-rows">
-          <LimitRow id="digestTokens" def={MAIN_DEFS.digestTokens} value={m.digestTokens} standard={DEFAULTS.digestTokens} busy={busy} set={(digestTokens) => set({ digestTokens })} />
-          <LimitRow id="pinsTokens" def={MAIN_DEFS.pinsTokens} value={m.pinsTokens} standard={DEFAULTS.pinsTokens} busy={busy} set={(pinsTokens) => set({ pinsTokens })} />
-        </div>
-      </Section>
-      <Section title="Budget" flush>
-        <div class="lre-set-rows lre-set-group" data-lre-agent-group="Main agent">
-          <p class="lre-set-timeout-lead">What the main agent may spend on each stage of a turn it works. Each limit is every agent's (Settings → Agents → Budgets) until you change it here; Every agent's goes back to that one.</p>
-          {budgetKeys.map((key) => (
-            <OwnLimitRow key={key} id={key} owner="The main agent's" def={BUDGET_DEFS[key]} own={m.budget[key]} every={agents.budget[key]} busy={busy} set={(value) => set({ budget: { [key]: value } })} />
-          ))}
-        </div>
-      </Section>
-    </>
-  );
-}
-
-const ON_FAIL_HELP: Record<FinalReviewOnFail, string> = {
-  send: "The narrator gets the prompt as the engine made it, and Settings → Diagnostics records why the review failed.",
-  stop: "The turn stops before its reply, as a role set to stop does: the chat says why, with a Retry.",
-};
 
 /**
- * The final review (DESIGN §4.6), without hooks: whether the main agent reviews the narrator's prompt
- * before each reply of an agent chat, in either pipeline; what a review that fails does; how long it
- * may take (Settings → Timeouts → Final review, the same setting); and its own limits over the main
- * agent's budget for a stage. Each patches `agents.finalReview`, the time `timeouts`.
+ * Settings home's line for the main agent: where it runs and what it does now. It works each agent
+ * turn's final review in either pipeline, so it is off only on a fixed pipeline with the review off.
  */
-export function FinalReviewSection(props: { agents: AgentSettings; timeouts: TimeoutSettings; patch(patch: JsonObject): void; busy: boolean }) {
-  const { agents, busy } = props;
-  const r = agents.finalReview;
-  const set = (fields: JsonObject) => props.patch({ agents: { finalReview: fields } });
-  const main = mainBudget(agents);
-  const budgetKeys = Object.keys(BUDGET_DEFS) as (keyof AgentBudget)[];
-  return (
-    <Section title="Final review" flush>
-      <div class="lre-set-rows" data-lre-main-setting="final-review">
-        <p class="lre-set-timeout-lead">Before each reply of an agent chat, the main agent reviews the prompt the narrator gets (every section, the outline with its brief, and the narrator rules) against the world and the turn, and may fix it a line at a time. It does so in either pipeline: on the fixed pipeline it runs for this alone, on the connection above. GM → Live shows each edit, the Prompt Breakdown shows the prompt as revised, and a Re-narrate tells the same prompt again.</p>
-        <div class="lre-set-ext">
-          <div class="lre-set-ext-head">
-            <span class="lre-set-ext-title">Review the narrator's prompt</span>
-            {r.on === REVIEW_DEFAULTS.on ? null : defaultButton(`Reset the final review to its default, ${REVIEW_DEFAULTS.on ? "on" : "off"}`, busy, () => set({ on: null }))}
-          </div>
-          <HostSwitch label="The main agent reviews the narrator's prompt before each reply" checked={r.on} disabled={busy} onChange={(on) => set({ on })} />
-          <span class="lre-small lre-muted">Off, nothing runs and the narrator gets the prompt as the engine made it. Default {REVIEW_DEFAULTS.on ? "on" : "off"}.</span>
-        </div>
-        <div class="lre-set-ext">
-          <div class="lre-set-ext-head">
-            <span class="lre-set-ext-title">When the review fails</span>
-            {r.onFail === REVIEW_DEFAULTS.onFail ? null : defaultButton(`Reset what a failed review does to its default, ${FINAL_REVIEW_ON_FAIL_LABELS[REVIEW_DEFAULTS.onFail]}`, busy, () => set({ onFail: null }))}
-          </div>
-          <div class="lre-field">
-            <Seg<FinalReviewOnFail> label="What a final review that fails does" value={r.onFail} options={FINAL_REVIEW_ON_FAIL.map((value) => ({ value, label: FINAL_REVIEW_ON_FAIL_LABELS[value] }))} disabled={busy} onChange={(onFail) => set({ onFail })} />
-            <span class="lre-field-help">{ON_FAIL_HELP[r.onFail]}</span>
-          </div>
-          <span class="lre-small lre-muted">A review fails when it runs out of time or budget, or its model call fails. Default {FINAL_REVIEW_ON_FAIL_LABELS[REVIEW_DEFAULTS.onFail]}.</span>
-        </div>
-        <TimeoutRow id="finalReviewMs" value={props.timeouts.finalReviewMs} busy={busy} set={(finalReviewMs) => props.patch({ timeouts: { finalReviewMs } })} />
-      </div>
-      <div class="lre-set-rows lre-set-group" data-lre-agent-group="Final review">
-        <p class="lre-set-timeout-lead">What the review may spend. Each limit is the main agent's for a stage (its Budget, above) until you change it here; The main agent's goes back to that one. What it spends counts toward the turn's, as every agent's does.</p>
-        {budgetKeys.map((key) => (
-          <OwnLimitRow key={key} id={key} owner="The final review's" fallback="the main agent's" def={BUDGET_DEFS[key]} own={r.budget[key]} every={main[key]} busy={busy} set={(value) => set({ budget: { [key]: value } })} />
-        ))}
-      </div>
-    </Section>
-  );
+export function mainSummary(agents: AgentSettings, connections: readonly Connection[]): string {
+  const place = placeOf(agents.main, connections);
+  const review = agents.finalReview.on;
+  if (agents.pipeline.mode === "main") return `${place} · decides each turn${review ? " and reviews the narrator's prompt" : ""}`;
+  return review ? `${place} · reviews the narrator's prompt` : `${place} · not used: ${PIPELINE_MODE_LABELS.fixed.toLowerCase()}, no final review`;
 }
 
-/** Settings → Agents → Main agent: what the main agent runs with, and its final review. */
-export function MainAgentPage(props: { agents: AgentSettings; timeouts: TimeoutSettings; patch(patch: JsonObject): void; busy: boolean }) {
-  const connections = useConnections();
+/** Settings → Agents → Main agent, without hooks. */
+export function MainAgentPage(props: { agents: AgentSettings; timeouts: TimeoutSettings; prompts: PromptSettings; connections: readonly Connection[]; busy: boolean; patch(patch: JsonObject): void; go(route: SettingsRoute): void }) {
+  const { agents, busy } = props;
+  const m = agents.main;
+  const d = DEFAULTS.main;
+  const r = agents.finalReview;
+  const dr = DEFAULTS.finalReview;
+  const set = (fields: JsonObject) => props.patch(mainPatch(fields));
+  const setReview = (fields: JsonObject) => props.patch({ agents: { finalReview: fields } });
+  const deciding = agents.pipeline.mode === "main";
+  const route = routeText({ connectionId: m.connectionId, model: m.model, from: m.connectionId === null ? "default" : "role" }, props.connections);
+  const familiesChanged = m.families.length !== d.families.length || m.families.some((f) => !d.families.includes(f));
+  const sections: PageSection[] = [
+    {
+      id: "runs",
+      title: "Runs on",
+      changed: (m.connectionId !== d.connectionId || m.model !== d.model ? 1 : 0) + (m.effort !== d.effort ? 1 : 0),
+      body: (
+        <div class="lre-set-rows">
+          <ul class="lre-set-routes">
+            <li class="lre-set-route" data-lre-route="decide">
+              <span class="lre-set-route-task">Deciding each turn</span>
+              <span class="lre-set-route-to">{deciding ? route : "Not now: the pipeline is fixed"}</span>
+            </li>
+            <li class="lre-set-route" data-lre-route="review">
+              <span class="lre-set-route-task">The final review</span>
+              <span class="lre-set-route-to">{r.on ? route : "Off"}</span>
+            </li>
+          </ul>
+          <ConnectionSetting id="connection" owner="the main agent" value={m} changed={m.connectionId !== d.connectionId || m.model !== d.model} noneLabel="None: Lumiverse's default connection" noneHelp="None runs it on the connection Lumiverse marks as your default, with that connection's model and settings." to={placeOf(d, [])} connections={props.connections} busy={busy} set={set} />
+          <EffortSetting owner="the main agent" value={m.effort} standard={d.effort} note={`While Thinking in tool loops (Settings → Agents) is off, its calls with tools go with reasoning off; it's ${agents.thinkingInToolLoops ? "on" : "off"} now.`} busy={busy} set={(effort) => set({ effort })} />
+        </div>
+      ),
+    },
+    {
+      id: "may",
+      title: "What it may do",
+      changed: familiesChanged ? 1 : 0,
+      body: <FamiliesSetting owner="the main agent" value={m.families} standard={d.families} help="It only reads: what it changes, it changes through the roles it runs, and in the narrator's prompt through its final review." busy={busy} set={(families) => set({ families })} />,
+    },
+    {
+      id: "reads",
+      title: "What it reads",
+      changed: (m.digestTokens !== d.digestTokens ? 1 : 0) + (m.pinsTokens !== d.pinsTokens ? 1 : 0),
+      body: (
+        <div class="lre-set-rows">
+          <LimitRow id="digestTokens" def={MAIN_DEFS.digestTokens} value={m.digestTokens} standard={d.digestTokens} busy={busy} set={(digestTokens) => set({ digestTokens })} />
+          <LimitRow id="pinsTokens" def={MAIN_DEFS.pinsTokens} value={m.pinsTokens} standard={d.pinsTokens} busy={busy} set={(pinsTokens) => set({ pinsTokens })} />
+        </div>
+      ),
+    },
+    {
+      id: "when",
+      title: "When it runs",
+      changed: 0,
+      body: <NavRow id="pipeline" icon="branch" title={deciding ? "Decides each turn" : "Decides no turn: the pipeline is fixed"} subtitle={`Pipeline: ${PIPELINE_MODE_LABELS[agents.pipeline.mode]}. It keeps a session from turn to turn, which GM → Workspace shows.`} changed={0} onOpen={() => props.go({ page: "agents", sub: "pipeline" })} />,
+    },
+    {
+      id: "review",
+      title: "Final review",
+      changed: (r.on !== dr.on ? 1 : 0) + (r.onFail !== dr.onFail ? 1 : 0) + (props.timeouts.finalReviewMs !== FINAL_REVIEW_MS ? 1 : 0) + ownChanged(r.budget, dr.budget),
+      body: (
+        <div class="lre-set-rows" data-lre-main-setting="final-review">
+          <SettingRow id="review-on" label="Review the narrator's prompt" bare changed={r.on !== dr.on} help="Before each reply of an agent chat, in either pipeline, it reviews the prompt the narrator gets against the world and the turn, and may fix it a line at a time. GM → Live shows each edit; a Re-narrate tells the same prompt again." reset={{ label: `Reset the final review to its default, ${dr.on ? "on" : "off"}`, to: dr.on ? "on" : "off", onClick: () => setReview({ on: null }) }} busy={busy}>
+            <HostSwitch label="The main agent reviews the narrator's prompt before each reply" checked={r.on} disabled={busy} onChange={(on) => setReview({ on })} />
+          </SettingRow>
+          <SettingRow id="review-fail" label="When the review fails" changed={r.onFail !== dr.onFail} help={`${FINAL_REVIEW_FAIL_HELP[r.onFail]} It fails when it runs out of time or budget, or its call fails.`} reset={{ label: `Reset what a failed review does to its default, ${FINAL_REVIEW_ON_FAIL_LABELS[dr.onFail]}`, to: FINAL_REVIEW_ON_FAIL_LABELS[dr.onFail], onClick: () => setReview({ onFail: null }) }} busy={busy}>
+            <Seg<FinalReviewOnFail> label="What a final review that fails does" value={r.onFail} options={FINAL_REVIEW_ON_FAIL.map((value) => ({ value, label: FINAL_REVIEW_ON_FAIL_LABELS[value] }))} disabled={busy} onChange={(onFail) => setReview({ onFail })} />
+          </SettingRow>
+          <TimeoutRow id="finalReviewMs" value={props.timeouts.finalReviewMs} busy={busy} set={(finalReviewMs) => props.patch({ timeouts: { finalReviewMs } })} />
+          <OwnBudget owner="The final review's" fallback="the main agent's" keys={MAIN_KEYS} defs={BUDGET_DEFS} own={r.budget} shipped={dr.budget} every={mainBudget(agents)} busy={busy} set={(key, value) => setReview({ budget: { [key]: value } })} follows="Every other limit is the main agent's, below; what the review spends counts toward the turn's." />
+        </div>
+      ),
+    },
+    {
+      id: "budget",
+      title: "Budget",
+      changed: ownChanged(m.budget, d.budget),
+      body: (
+        <OwnBudget
+          owner="The main agent's"
+          keys={MAIN_KEYS}
+          defs={BUDGET_DEFS}
+          own={m.budget}
+          shipped={d.budget}
+          every={agents.budget}
+          busy={busy}
+          set={(key, value) => set({ budget: { [key]: value } })}
+          follows={
+            <>
+              For each stage it works. Every other limit is every agent's:{" "}
+              <button type="button" class="lre-set-link" onClick={() => props.go({ page: "agents", sub: "budgets" })}>
+                Settings → Agents → Budgets
+              </button>
+              .
+            </>
+          }
+        />
+      ),
+    },
+    { id: "caching", title: "Caching", changed: agents.caching.roles[MAIN_AGENT_ROLE] === undefined ? 0 : 1, body: <CachingSetting id={MAIN_AGENT_ROLE} owner="the main agent" agents={agents} busy={busy} patch={props.patch} /> },
+    { id: "prompts", title: "Prompts", changed: 0, body: <PromptsLink page={MAIN_AGENT_PAGE.id} owner="The main agent" prompts={props.prompts} go={props.go} /> },
+  ];
   return (
-    <div class="lre-stack" data-lre-settings-page="main">
-      <p class="lre-set-lead">
-        What the main agent runs with. It decides each agent turn while Settings → Agents → Pipeline has a main agent decide ({props.agents.pipeline.mode === "main" ? "it does now" : "it doesn't now"}); it keeps a session from turn to turn, which GM → Workspace shows. In either pipeline it works each turn's final review, below.
-      </p>
-      <MainAgentBody agents={props.agents} connections={connections} patch={props.patch} busy={props.busy} />
-      <FinalReviewSection agents={props.agents} timeouts={props.timeouts} patch={props.patch} busy={props.busy} />
-    </div>
+    <AgentPage
+      id="main"
+      lead="The agent that decides each turn while the pipeline has a main agent decide, and works each turn's final review in either pipeline."
+      sections={sections}
+      changed={mainChanged(agents, props.timeouts)}
+      resetLabel="Reset the main agent to its defaults"
+      busy={busy}
+      reset={() => props.patch(mainResetPatch())}
+    />
   );
 }

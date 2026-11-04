@@ -17,7 +17,8 @@ import { lifeKnownTo } from "../engine/life";
 import { own } from "../engine/pack-kit";
 import type { Registry } from "../engine/registry-impl";
 import { relationDef } from "../engine/relations";
-import { fieldDef, kindDef } from "../engine/scope";
+import { fieldDef, kindDef, kindIs } from "../engine/scope";
+import { GROUP_KIND, MEMBER_OF } from "../engine/selector";
 import type { WorldState } from "../engine/state";
 import { PLACEMENT_FIELDS, type PartDiff, type RelationDiff, type UpgradePlan } from "../engine/upgrade";
 import { canSeeEntity, canSeePlace, trackKnown, visibilityOf } from "../engine/visibility";
@@ -80,6 +81,20 @@ export function upgradePreview(reg: Registry, plan: UpgradePlan, state: Readonly
     return valueText(v);
   };
   const linkText = (r: RelationInstance | null): string => (r ? (r.fields && Object.keys(r.fields).length > 0 ? clip(`linked, ${Object.entries(r.fields).map(([k, x]) => `${k.replace(/_/g, " ")} ${valueText(x)}`).join(", ")}`) : "linked") : "not linked");
+  /**
+   * A kind change in words: the new kind, and every link the new kind no longer reads, play's own
+   * included (a company's officers, as members, once it is a trust), so none is dropped unseen.
+   */
+  const kindChangeText = (id: string, diff: PartDiff): string => {
+    const to = aspectText("kind", diff.next);
+    const was = typeof diff.now === "string" ? diff.now : "";
+    const next = typeof diff.next === "string" ? diff.next : "";
+    if (!kindIs(reg, inForce, was, GROUP_KIND) || kindIs(reg, after, next, GROUP_KIND)) return to;
+    const links = Object.keys(state.entities)
+      .sort()
+      .flatMap((holder) => (own(state.entities, holder)?.relations ?? []).filter((r) => r.type === MEMBER_OF && r.to === id).map((r) => `${nameOf(holder) ?? holder}'s ${relationDef(reg, inForce, r.type)?.label ?? "member of"}${typeof r.fields?.role === "string" ? ` (${r.fields.role})` : ""}`));
+    return links.length === 0 ? to : `${to}; it no longer reads ${links.length === 1 ? "this link" : `these ${links.length} links`}: ${links.join(", ")}`;
+  };
 
   const rows: UpgradeEntityRow[] = [];
   const shown = new Set<string>();
@@ -108,7 +123,7 @@ export function upgradePreview(reg: Registry, plan: UpgradePlan, state: Readonly
       for (const aspect of UPGRADE_ASPECTS) {
         const diff: PartDiff | undefined = d.aspects[aspect];
         if (!diff) continue;
-        const change = marked({ id: `${d.id}:${aspect}`, label: ASPECT_LABEL[aspect], from: aspectText(aspect, diff.now), to: aspectText(aspect, diff.next), ...byDefault(diff.touched), targets: [{ entity: d.id, part: aspect }] });
+        const change = marked({ id: `${d.id}:${aspect}`, label: ASPECT_LABEL[aspect], from: aspectText(aspect, diff.now), to: aspect === "kind" ? kindChangeText(d.id, diff) : aspectText(aspect, diff.next), ...byDefault(diff.touched), targets: [{ entity: d.id, part: aspect }] });
         // A life change the player hasn't heard of is the GM's: it goes to a hidden row of its own, so
         // this row shows nothing of it, not even that something here is hidden.
         if (aspect === "life" && !secret && diff.now !== lifeKnownTo(state, d.id, pov)) unheard.push({ ...change, secret: true });

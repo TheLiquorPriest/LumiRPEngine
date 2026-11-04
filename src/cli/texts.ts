@@ -1,11 +1,13 @@
 // The texts an agent looks things up in, bundled into dist/lumirpengine.js as strings: the agent
-// guide (docs/AGENT-GUIDE.md) and the engine's docs. A lookup returns the sections that best match
-// a query, headings counting most, with long sections cut into parts first,
-// so a match deep in DESIGN.md comes back as the paragraphs around it, not as the section's start.
+// guide (docs/AGENT-GUIDE.md) and the engine's docs. A lookup ranks sections by BM25 (titles count
+// three times their words, stopwords dropped, words lightly stemmed, ids such as `due_day` kept
+// whole), with long sections cut into parts first, so a match deep in DESIGN.md comes back as the
+// paragraphs around it, not as the section's start.
 
 import guideText from "../../docs/AGENT-GUIDE.md" with { type: "text" };
 import designText from "../../docs/DESIGN.md" with { type: "text" };
 import expressionsText from "../../docs/EXPRESSIONS.md" with { type: "text" };
+import mcpText from "../../docs/MCP.md" with { type: "text" };
 import presetsText from "../../docs/PRESETS.md" with { type: "text" };
 import recipesText from "../../docs/RECIPES.md" with { type: "text" };
 import referenceText from "../../docs/REFERENCE.md" with { type: "text" };
@@ -23,6 +25,8 @@ export const DOCS: Readonly<Record<string, { file: string; text: string }>> = {
   design: { file: "DESIGN.md", text: designText },
   "user-guide": { file: "USER-GUIDE.md", text: userGuideText },
   presets: { file: "PRESETS.md", text: presetsText },
+  "agent-guide": { file: "AGENT-GUIDE.md", text: guideText },
+  mcp: { file: "MCP.md", text: mcpText },
 };
 
 export interface Section {
@@ -86,34 +90,100 @@ function partsOf(section: Section): Section[] {
   return parts;
 }
 
-function occurrences(haystack: string, needle: string): number {
-  let n = 0;
-  for (let at = haystack.indexOf(needle); at >= 0 && n < 20; at = haystack.indexOf(needle, at + needle.length)) n++;
-  return n;
+/** Words that say nothing of what a section is about: a lookup leaves them out. */
+const STOPWORDS: Readonly<Record<string, true>> = Object.fromEntries(
+  "a about after all an and any are as at be been before being but by can could did do does doing each for from had has have how i if in into is it its me my no nor not of on once only or other our out over own so some such than that the their them then there these they this those through to too under until up very was we were what when where which while who whom why will with would you your".split(" ").map((w) => [w, true]),
+);
+
+/** A term: a word, or an id (`due_day`, `economy.people_money`, `lre_gm`) whole. */
+const TERM = /[a-z0-9]+(?:[._][a-z0-9]+)*/g;
+
+/** A word's light stem: plurals, -ing and -ed taken off, so "bills", "billing" and "billed" are "bill". */
+export function stem(word: string): string {
+  if (word.length <= 3 || /[^a-z]/.test(word)) return word;
+  if (word.endsWith("ies") && word.length > 4) return `${word.slice(0, -3)}y`;
+  if (/(?:ss|x|ch|sh|z)es$/.test(word)) return word.slice(0, -2);
+  for (const suffix of ["ing", "ed"]) {
+    const base = word.slice(0, -suffix.length);
+    // A base with a vowel, so "string" and "speed" stay whole; a doubled last consonant goes ("stopped" is "stop"), but not ll, ss or ff ("billed" is "bill"), nor in a short base ("added" is "add").
+    if (word.endsWith(suffix) && !word.endsWith("eed") && base.length >= 3 && /[aeiouy]/.test(base)) return base.length > 3 && /([bdgmnprt])\1$/.test(base) ? base.slice(0, -1) : base;
+  }
+  return word.endsWith("s") && !/(?:ss|us|is)$/.test(word) ? word.slice(0, -1) : word;
 }
 
-/** The sections that best match the query, each clipped, within `budget` characters in all. */
+/** A text's terms, in order: lowercased, stopwords and one-letter words left out, words stemmed and ids whole. */
+export function termsOf(text: string): string[] {
+  const out: string[] = [];
+  for (const [term] of text.toLowerCase().matchAll(TERM)) {
+    if (term.length < 2 || hasOwn(STOPWORDS, term)) continue;
+    out.push(/[._]/.test(term) ? term : stem(term));
+  }
+  return out;
+}
+
+/** How much a word of a section's heading trail counts, against one of its body. */
+const TITLE_WEIGHT = 3;
+/** BM25's saturation and length normalization, at their usual values. */
+const K1 = 1.2;
+const B = 0.75;
+
+interface Index {
+  /** Per section, each term's weighted count and the section's weighted length. */
+  docs: { tf: Map<string, number>; length: number }[];
+  /** How many sections hold each term. */
+  df: Map<string, number>;
+  average: number;
+}
+
+/** Each corpus's index, made on its first lookup. */
+const indexes = new WeakMap<readonly Section[], Index>();
+
+function indexOf(sections: readonly Section[]): Index {
+  const known = indexes.get(sections);
+  if (known) return known;
+  const df = new Map<string, number>();
+  let total = 0;
+  const docs = sections.map((s) => {
+    const tf = new Map<string, number>();
+    const title = termsOf(s.title);
+    const body = termsOf(s.body);
+    for (const t of title) tf.set(t, (tf.get(t) ?? 0) + TITLE_WEIGHT);
+    for (const t of body) tf.set(t, (tf.get(t) ?? 0) + 1);
+    for (const t of tf.keys()) df.set(t, (df.get(t) ?? 0) + 1);
+    const length = TITLE_WEIGHT * title.length + body.length;
+    total += length;
+    return { tf, length };
+  });
+  const index: Index = { docs, df, average: docs.length > 0 ? total / docs.length : 0 };
+  indexes.set(sections, index);
+  return index;
+}
+
+/** The sections that best match the query by BM25, best first (ties in the corpus's order), each clipped, within `budget` characters in all. */
 export function lookup(sections: readonly Section[], query: string, limit = 5, budget = BODY_LIMIT): string {
-  const words = [...new Set(query.toLowerCase().split(/[^a-z0-9_.]+/).filter((t) => t.length >= 2))];
-  if (words.length === 0) return "Give a few words to look up (two letters or more each).";
-  const phrase = query.toLowerCase().trim();
-  const scored = sections
-    .map((s, i) => {
-      const title = s.title.toLowerCase();
-      const body = s.body.toLowerCase();
+  const words = [...new Set(termsOf(query))];
+  if (words.length === 0) return "Give a few words to look up (two letters or more each, not only words such as \"the\" or \"how\").";
+  const { docs, df, average } = indexOf(sections);
+  const idf = words.map((w) => {
+    const n = df.get(w) ?? 0;
+    return Math.log(1 + (docs.length - n + 0.5) / (n + 0.5));
+  });
+  const scored = docs
+    .map((d, i) => {
       let score = 0;
-      for (const w of words) score += 6 * occurrences(title, w) + Math.min(8, occurrences(body, w));
-      if (phrase.length > 3 && (title.includes(phrase) || body.includes(phrase))) score += 10;
-      // Every word present beats a few words many times.
-      if (words.every((w) => title.includes(w) || body.includes(w))) score += 4 * words.length;
-      return { s, i, score };
+      words.forEach((w, k) => {
+        const tf = d.tf.get(w) ?? 0;
+        if (tf > 0) score += ((idf[k] ?? 0) * tf * (K1 + 1)) / (tf + K1 * (1 - B + (B * d.length) / (average || 1)));
+      });
+      return { i, score };
     })
     .filter((x) => x.score > 0)
     .sort((a, b) => b.score - a.score || a.i - b.i)
-    .slice(0, limit);
+    .slice(0, limit)
+    .flatMap(({ i }) => sections[i] ?? []);
   if (scored.length === 0) return `Nothing matches "${query}". Try other words, or a kind, field, effect or function name.`;
   const each = Math.floor(budget / scored.length);
-  return scored.map(({ s }) => `## ${s.title}\n${s.body.length > each ? `${s.body.slice(0, each)}\n…` : s.body}`).join("\n\n");
+  return scored.map((s) => `## ${s.title}\n${s.body.length > each ? `${s.body.slice(0, each)}\n…` : s.body}`).join("\n\n");
 }
 
 const guideSections = sectionsOf(guideText);
@@ -139,6 +209,8 @@ const guideBlocks: { title: string; text: string }[] = [];
   close();
 }
 const docSections: Record<string, Section[]> = Object.fromEntries(Object.entries(DOCS).map(([name, d]) => [name, sectionsOf(d.text).flatMap(partsOf).map((s) => ({ ...s, title: `${d.file} › ${s.title}` }))]));
+/** Every doc's sections, one corpus, so its index is made once. */
+const allSections: readonly Section[] = Object.values(docSections).flat();
 
 /**
  * Sections the guide's first answer always holds, whatever their size: how a world is built and
@@ -188,6 +260,6 @@ export function guide(topic?: string): string {
 /** A lookup in the bundled docs, all of them or the one named. */
 export function docs(query: string, doc?: string): string {
   if (doc !== undefined && !hasOwn(docSections, doc)) return `There is no doc "${doc}". The docs: ${Object.keys(DOCS).join(", ")}.`;
-  const sections = doc === undefined ? Object.values(docSections).flat() : (docSections[doc] ?? []);
+  const sections = doc === undefined ? allSections : (docSections[doc] ?? []);
   return lookup(sections, query);
 }

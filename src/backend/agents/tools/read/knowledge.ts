@@ -11,15 +11,18 @@
 // - `gm`: everything, unmarked: each fact's kind, truth (the GM's: true, false or an open question)
 //   and what it is about, and what each holding rests on, as GM → Minds words it.
 //
-// What `about` asks for: a fact by its id; else the facts about what it names (a person, a thing, a
-// place or a quest the view may name, each kind tried in turn and none refused aloud, or a lore entry
-// by its id), and the facts whose claims share its words as the lore search reads words (`wordsOf`:
-// no stop words, no short ones, so a possessive's "s" aside): those about what it names first, then
-// those sharing the most words.
+// What `about` asks for: a fact by its id; a book entry by any lore id of it (its short id, a mark's
+// with `#n`, `bookId/entryId` or `book:<bookId>/<entryId>`: `loreFactOf`), the facts of that entry and
+// its marks; else the facts about what it names (a person, a thing, a place or a quest the view may
+// name, each kind tried in turn and none refused aloud, or a world lore entry by its id), and the
+// facts whose claims share its words as the lore search reads words (`wordsOf`: no stop words, no
+// short ones, so a possessive's "s" aside): those about what it names first, then those sharing the
+// most words.
 
 import { wordsOf } from "../../../../engine/lore";
 import { own } from "../../../../engine/pack-kit";
 import { holdingsView } from "../../../../packs/minds/core/gm";
+import { loreFactOf } from "../../../lore-ids";
 import { factsOf, knowersOf } from "../../../../packs/minds/core/knowledge";
 import { readCharacter, readSlice } from "../../../../packs/minds/core/state";
 import { TOOL_NOTE } from "../../../../shared/agent-tools";
@@ -135,8 +138,9 @@ function aboutIds(fact: Fact): string[] {
   return of === null ? [...fact.about] : [...fact.about, of];
 }
 
-/** The facts among `facts` that `about` asks for (see the header), best first and otherwise in their order; a fact id asks for that fact alone. */
-function matching<T extends Fact>(view: ToolReadView, about: string, facts: readonly T[]): T[] {
+/** The facts among `facts` that `about` asks for (see the header), best first and otherwise in their order; a fact id asks for that fact alone, and a book entry's lore id (`entry`) for its facts alone. */
+function matching<T extends Fact>(view: ToolReadView, about: string, facts: readonly T[], entry: FactId | null): T[] {
+  if (entry !== null) return facts.filter((f) => f.id === entry || f.id.startsWith(`${entry}:`));
   if (parseFactId(about) !== null) return facts.filter((f) => f.id === about);
   const named = namedBy(view, about);
   const words = [...new Set(wordsOf(about))];
@@ -148,6 +152,13 @@ function matching<T extends Fact>(view: ToolReadView, about: string, facts: read
     .filter((m) => m.names + m.words > 0)
     .sort((a, b) => b.names - a.names || b.words - a.words)
     .map((m) => m.fact);
+}
+
+/** The fact of the book entry `about` names by a lore id (`loreFactOf`); null for anything else, a world lore id among them, which `namedBy` reads. */
+async function entryNamed(view: ToolReadView, about: string): Promise<FactId | null> {
+  const ref = about.trim();
+  if (own(view.world.lore, ref) !== undefined || parseFactId(ref) !== null) return null;
+  return loreFactOf(view.world, ref, async (id) => (await view.routing?.entryOf(id)) ?? null);
 }
 
 /**
@@ -196,13 +207,14 @@ export const KNOWLEDGE_TOOLS: readonly ToolDefinition[] = [
       const view = await env.reader.view();
       const about = needText(view, "knowledge_who_knows", args, "about");
       if (typeof about !== "string") return about;
+      const entry = await entryNamed(view, about);
       return view.read(() => {
         const k = knowing(view);
         // Every fact the chat records, with everyone who holds it.
         const facts: (Fact & { holders: Held[] })[] = Object.values(k.facts).map((f) => ({ id: f.id, claim: f.claim, kind: f.kind, truth: f.truth, about: f.about, holders: k.holders(f.id) }));
         facts.sort((a, b) => a.claim.localeCompare(b.claim) || (a.id < b.id ? -1 : 1));
         return view.answer({
-          facts: matching(view, about, facts).map((f) => ({ ...factPart(view, f, () => factSecrecy(view, f.holders)), holders: f.holders.map(({ who, holding }) => ({ who, ...holdingPart(view, holding) })) })),
+          facts: matching(view, about, facts, entry).map((f) => ({ ...factPart(view, f, () => factSecrecy(view, f.holders)), holders: f.holders.map(({ who, holding }) => ({ who, ...holdingPart(view, holding) })) })),
         } satisfies WhoKnows);
       });
     },
@@ -217,6 +229,7 @@ export const KNOWLEDGE_TOOLS: readonly ToolDefinition[] = [
       const said = needText(view, "knowledge_what_knows", args, "person");
       if (typeof said !== "string") return said;
       const about = textArg(args, "about");
+      const entry = about === null ? null : await entryNamed(view, about);
       return view.read(() => {
         const person = resolvePerson(view, said);
         if ("refused" in person) return person.refused;
@@ -226,7 +239,7 @@ export const KNOWLEDGE_TOOLS: readonly ToolDefinition[] = [
         const held = k.heldBy(person.id).map(({ holding }) => ({ ...heldFact(k, holding), holding }));
         return view.answer({
           who,
-          facts: (about === null ? held : matching(view, about, held)).map((f) => ({ ...factPart(view, f, () => factSecrecy(view, k.holders(f.id))), ...holdingPart(view, f.holding) })),
+          facts: (about === null ? held : matching(view, about, held, entry)).map((f) => ({ ...factPart(view, f, () => factSecrecy(view, k.holders(f.id))), ...holdingPart(view, f.holding) })),
         } satisfies WhatKnows);
       });
     },

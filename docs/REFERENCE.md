@@ -492,8 +492,9 @@ Extends `group`.
 | `occupation` | Occupation | text (row of economy.occupations) |  |  |  |  | live from money 3 |
 | `pay_anchor` | First payday | date |  |  |  |  | live from money 3 |
 | `pay_days` | Paydays of the month | list of number |  |  |  |  | live from money 3 |
-| `pay_every` | Paid | enum: weekly, biweekly, semimonthly, monthly, per_job, custom |  | `"monthly"` |  |  | live from money 3 |
+| `pay_every` | Paid (none: an unpaid title) | enum: weekly, biweekly, semimonthly, monthly, per_job, custom, none |  | `"monthly"` |  |  | live from money 3 |
 | `pay_except` | Custom pay: except holidays | list of text |  |  |  |  | live from money 3 |
+| `pay_from` | Pay starts | date |  |  |  |  | live from money 3 |
 | `pay_interval` | Custom pay: every Nth | number | ≥ 1 |  |  |  | live from money 3 |
 | `pay_months` | Custom pay: months | list of number |  |  |  |  | live from money 3 |
 | `pay_roll` | Payday off a business day | enum: none, before, after |  | `"before"` |  |  | live from money 3 |
@@ -572,6 +573,7 @@ Extends `thing`.
 | `economy.buy` | `item?`, `category?`, `qty?`, `price?`, `exact?`, `stated?`, `name?`, `payer?`, `method?`, `from?`, `payee?`, `keep?`, `cashback?`, `story?`, `seller?`, `size?`, `at?`, `by?` |
 | `economy.card_replace` | `card`, `who?`, `by?` |
 | `economy.card_state` | `card`, `state`, `who?`, `by?` |
+| `economy.cash_rule` | `atm` |
 | `economy.close_account` | `account` |
 | `economy.consolidate` | `org`, `elect?`, `by?` |
 | `economy.delist` | `business`, `price?`, `party?`, `by?` |
@@ -599,6 +601,7 @@ Extends `thing`.
 | `economy.list` | `business`, `units`, `price?`, `symbol?`, `class?`, `party?`, `by?` |
 | `economy.lose` | `item`, `thief?` |
 | `economy.move` | `from`, `to`, `cents`, `memo?`, `by?`, `party?` |
+| `economy.open_account` | `party`, `product?`, `name?` |
 | `economy.owner_draw` | `business`, `cents`, `owner?`, `by?` |
 | `economy.pay_card` | `card`, `from?`, `cents?`, `who?`, `by?` |
 | `economy.pay_schedule` | `org`, `every`, `weekday?`, `anchor?`, `days?`, `by?` |
@@ -654,7 +657,7 @@ Extends `thing`.
 | `card_report_lost` | Report card lost | Report a card lost or stolen. | `card: ref → card`, `as?: ref` |  | `default` | `2` | report my card lost, my card was stolen, cancel my card |
 | `card_unfreeze` | Unfreeze card | Unfreeze a frozen card. | `card: ref → card`, `as?: ref` |  | `default` | `2` | unfreeze my card, unlock my card |
 | `deposit_cash` | Deposit cash | Put cash into a bank account. | `account: ref → account`, `amount: money`, `as?: ref` |  | `default` | `3` | deposit, pay in cash, bank the cash |
-| `distribute_profit` | Distribute profit | Pay a business's profit out to its owners. | `business: ref → business`, `amount?: money` |  | `default` | `10` | distribute profit, pay dividends, pay out the owners |
+| `distribute_profit` | Distribute profit | Pay a business's profit out to its owners, or a stated amount of a trust's money to its beneficiaries, by their shares. | `business: ref`, `amount?: money` |  | `default` | `10` | distribute profit, pay dividends, pay out the owners, pay the beneficiaries |
 | `donate` | Donate | Give money to an organization: a charity, a church, a club. A person's gift to a charity or a church is deductible from their income tax. | `to: ref`, `amount: money`, `method?: text`, `as?: ref` |  | `default` | `5` | donate, make a donation, give to charity, tithe, put money in the collection plate, sponsor |
 | `exercise_option` | Exercise an option | Exercise an option contract you hold. | `holding: ref → holding`, `qty?: number`, `from?: ref → account`, `to?: ref → account`, `as?: ref` |  | `default` | `2` | exercise the option, exercise my calls, exercise my puts |
 | `flow_create` | Set up a standing payment | Set up a standing payment: a bill, a regular transfer, an allowance. | `label?: text`, `kind?: text`, `from?: ref → account`, `to?: text`, `amount?: money`, `every?: text`, `interval?: number`, `weekday?: number`, `day?: number`, `month?: number`, `at?: text`, `once?: text`, `start?: text`, `end?: text`, `count?: number`, `shortfall?: text`, `retry_days?: number`, `retries?: number`, `fallback?: text`, `roll?: text`, `category?: text`, `as?: ref` |  | `default` | `2` | set up a standing order, schedule a payment, set up a recurring transfer |
@@ -700,7 +703,7 @@ Extends `thing`.
 
 ### Events
 
-Its own: `economy.accrue`, `economy.acquire`, `economy.anchor`, `economy.card_paid`, `economy.closes`, `economy.commission`, `economy.credit`, `economy.decline`, `economy.delinquency`, `economy.dispose`, `economy.donation`, `economy.estimated_tax`, `economy.exercise`, `economy.flow_renamed`, `economy.flow_run`, `economy.hold`, `economy.income`, `economy.invoice_paid`, `economy.lots`, `economy.mint`, `economy.modifier`, `economy.note`, `economy.open`, `economy.payout`, `economy.payslip`, `economy.price`, `economy.quote`, `economy.remit`, `economy.sale`, `economy.score`, `economy.settle`, `economy.spend`, `economy.stake_route`, `economy.statement`, `economy.status`, `economy.timesheet`, `economy.txn`, `economy.unemployment_accrued`, `economy.unemployment_paid`.
+Its own: `economy.accrue`, `economy.acquire`, `economy.anchor`, `economy.card_paid`, `economy.closes`, `economy.commission`, `economy.config`, `economy.credit`, `economy.decline`, `economy.delinquency`, `economy.dispose`, `economy.donation`, `economy.estimated_tax`, `economy.exercise`, `economy.flow_renamed`, `economy.flow_run`, `economy.hold`, `economy.income`, `economy.invoice_paid`, `economy.lots`, `economy.mint`, `economy.modifier`, `economy.note`, `economy.open`, `economy.payout`, `economy.payslip`, `economy.price`, `economy.quote`, `economy.remit`, `economy.sale`, `economy.score`, `economy.settle`, `economy.spend`, `economy.stake_route`, `economy.statement`, `economy.status`, `economy.timesheet`, `economy.txn`, `economy.unemployment_accrued`, `economy.unemployment_paid`.
 
 Checks it adds to: `post`.
 
@@ -825,6 +828,7 @@ Extends `container`.
 | `gear.lend` | `item`, `to`, `until?`, `said?` |
 | `gear.lose` | `item`, `thief?` |
 | `gear.put_away` | `item`, `by?` |
+| `gear.put_in` | `item`, `into`, `by?` |
 | `gear.receive` | `name`, `to`, `from?` |
 | `gear.remove` | `item` |
 | `gear.retrieve` | `item` |
@@ -841,6 +845,7 @@ Extends `container`.
 - `carried_kg(holder)`
 - `carries(holder, item)`
 - `fetch_minutes(who, thing)`
+- `fits_in(thing, holder)`
 - `fits_on(_who, thing)`
 - `has_item(holder, what)`
 - `kit_complete(kit)`
@@ -866,6 +871,7 @@ Extends `container`.
 | `lend` | Lend | Lend something to someone, for some days or until a time. | `item: ref → item`, `to: ref → person`, `days?: number`, `until?: text` |  | `default` | `2` | lend, loan, let borrow |
 | `lose` | Lose something | Something you own or carry is lost or gone, whereabouts unknown. | `item: ref → item` |  | `default` | `1` | lost my, lose, can't find my, is gone, is missing |
 | `put_away` | Put away | Put something back where it's kept. | `item: ref → item` |  | `default` | `2` | put away, put back, tidy away |
+| `put_in` | Put in | Put something you carry, or that is here, into a bag, a box or a piece of furniture here. | `item: ref → item`, `into: ref → item` |  | `default` | `1` | put in, put into, stash in, pack in, store in |
 | `reclaim` | Take back | Take back something of yours that you lent out. | `item: ref → item` |  | `default` | `5` | take back, get back, reclaim |
 | `remove` | Take off | Take off something you wear or have equipped. | `item: ref → item` |  | `default` | `2` | take off, remove, unequip |
 | `search` | Search | Search where you are, or look through a container, for what isn't in plain sight. | `target?: ref → item` |  | `default` | `5` | search, look around, examine, look through, look inside, open, rummage |

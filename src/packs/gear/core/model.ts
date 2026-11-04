@@ -21,7 +21,7 @@ import { kindIs } from "../../../engine/scope";
 import { readPass } from "../../../engine/read-pass";
 import type { WorldState } from "../../../engine/state";
 import { nameMeets, namesThing } from "../../../engine/thing-resolve";
-import { contentsOf, holderOf, sizeOf } from "../../../engine/things";
+import { contentsOf, holderOf, holdsOf, sizeOf } from "../../../engine/things";
 
 /** Whether a person may carry a thing (ITEMS-SPEC §3.2): its size is the person ceiling's or smaller, or unknown; never a vehicle, a part or a fixture. */
 export function fitsOn(ctx: ReadContext, thing: EntityId): boolean {
@@ -110,10 +110,11 @@ export function kindHoldsAs(reg: Registry, world: WorldDoc, kind: KindId): "pers
   return kindIs(reg, world, kind, "container") ? "container" : null;
 }
 
-/** What a thing holds as, by its kind (`kindHoldsAs`); null for no such thing. */
+/** What a thing holds as, by its kind (`kindHoldsAs`), a plain thing that holds things by its name (a wardrobe) as a container; null for no such thing. */
 export function holdsAs(ctx: ReadContext, id: EntityId): "person" | "vehicle" | "container" | null {
   const e = own(ctx.state.entities, id);
-  return e ? kindHoldsAs(ctx.registry, ctx.world, e.kind) : null;
+  if (!e) return null;
+  return kindHoldsAs(ctx.registry, ctx.world, e.kind) ?? (holdsOf(ctx, id) !== null ? "container" : null);
 }
 
 /**

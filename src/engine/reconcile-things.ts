@@ -14,7 +14,7 @@ import { ownersIn } from "../shared/finance";
 import type { EntityId, PlaceId } from "../shared/ids";
 import type { JsonObject, JsonValue } from "../shared/json";
 import type { HandoverBasis, ItemChange, ItemOp, SizeClass, Spot, ThingFact } from "../shared/things";
-import { HANDOVER_BASES, isItemChange, isThingFact, nameKey, nameTokens, sizeRank, thingsConfigOf } from "../shared/things";
+import { HANDOVER_BASES, isItemChange, isThingFact, nameTokens, sizeRank, thingsConfigOf } from "../shared/things";
 import { reachOf } from "./access";
 import { calendarOf, clockOfPhrase } from "./calendar";
 import { businessAt, isStaff, orgPower, orgTypeOf } from "./org";
@@ -23,8 +23,8 @@ import { placeSaid } from "./place-names";
 import type { ReadContext, Rejection } from "./registry";
 import { isGone, kindIs, placeOfEntity } from "./scope";
 import { typeRowOf } from "./thing-index";
-import { applyItemOp, type ItemOpOptions } from "./thing-ops";
-import { findThings, meets, type ThingCandidate, type ThingScope } from "./thing-resolve";
+import { applyItemOp, thingTypeFor, type ItemOpOptions } from "./thing-ops";
+import { findThings, type ThingCandidate, type ThingScope } from "./thing-resolve";
 import { holdersOf, holdsOf, isThing, possessorOf, sizeOf, whoseOf } from "./things";
 import { canSeeEntity, isDiscoverable, knows } from "./visibility";
 import type { Working } from "./working";
@@ -172,37 +172,6 @@ export function madeName(ctx: ReadContext, words: string): string {
   return name.charAt(0).toUpperCase() + name.slice(1);
 }
 
-/**
- * A made thing's type (§5.3 step 3): a gear row of its noun naming it in full, else the price
- * catalog's row (`economy.thing_type`: goods, food and drink, never a service), else a gear row of
- * its noun; with the row's price where it is made, and whether it is food or drink.
- */
-function typeFor(ctx: ReadContext, name: string, place: PlaceId | null): { type?: string; cents: number | null; food: boolean } {
-  const key = nameKey(name);
-  if (!key) return { cents: null, food: false };
-  let full: string | undefined;
-  let head: { id: string; score: number } | undefined;
-  for (const table of ["gear.items", "gear.containers"]) {
-    for (const [id, row] of Object.entries(ctx.tables.get(table)?.rows ?? {}).sort(([a], [b]) => a.localeCompare(b))) {
-      const rowKey = nameKey(typeof row.name === "string" ? row.name : id);
-      const m = rowKey ? meets(key, rowKey) : null;
-      if (!m || !rowKey) continue;
-      if (m === "full" && full === undefined) full = id;
-      const score = key.words.filter((w) => rowKey.words.includes(w)).length;
-      if (!head || score > head.score) head = { id, score };
-    }
-  }
-  const gearCents = (id: string): number | null => {
-    const band = typeRowOf(ctx, { catalog: id })?.row.price_cents;
-    const typical = band && typeof band === "object" && !Array.isArray(band) ? (band as JsonObject).typical : undefined;
-    return typeof typical === "number" ? typical : null;
-  };
-  if (full !== undefined) return { type: full, cents: gearCents(full), food: false };
-  const sold = optionalQuery(ctx, "economy.thing_type")?.(ctx, name, place) ?? null;
-  if (sold) return { type: sold.catalog, cents: sold.cents, food: sold.food };
-  return head ? { type: head.id, cents: gearCents(head.id), food: false } : { cents: null, food: false };
-}
-
 /** What a fact applies on `w`: its ops in order, each validated against what the ones before it left, and what they made and found. */
 class Settling {
   readonly made: MadeThing[] = [];
@@ -231,7 +200,7 @@ class Settling {
     if (extra.named !== undefined) return reject("not_here", `${labelOf(ctx, extra.named)} isn't where that could happen`);
     if (this.opts.makes !== undefined && this.made.length >= this.opts.makes) return reject("thing_cap", "the reply has made as many things as one reply may (Settings → Changes from the reply)");
     const name = madeName(ctx, words);
-    const typed = typeFor(ctx, name, "place" in at ? at.place : placeOfEntity(ctx.state, at.in));
+    const typed = thingTypeFor(ctx, name, "place" in at ? at.place : placeOfEntity(ctx.state, at.in));
     const out = this.apply({ do: "make", name, at, why: this.why, ...(typed.type !== undefined ? { type: typed.type } : {}), ...(extra.owner !== undefined ? { owner: extra.owner } : {}) });
     if ("code" in out) return out;
     const id = out.made;
@@ -545,7 +514,7 @@ function give(s: Settling, p: JsonObject, item: string): Reconciled {
   // Only someone other than the player character hands over what the world lacks: the player character can't give what it doesn't have.
   if (from === "" || from === viewer || !isPerson(ctx, from)) return refused("missing_entity", "the world has no such thing to hand over");
   const place = placeOfEntity(ctx.state, from);
-  const food = typeFor(ctx, madeName(ctx, item), place).food;
+  const food = thingTypeFor(ctx, madeName(ctx, item), place).food;
   const told = basisOf(ctx, [], to, p.basis, food);
   const keeps = told === "gift" || told === "sale" || told === "trade";
   const basis: HandoverBasis = keeps ? told : told === "loan" ? "loan" : "hold";

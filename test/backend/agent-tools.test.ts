@@ -1,9 +1,10 @@
-// The agent tool layer's registry and read view (INC1-SPEC C6, R3a): the GM agent page lists exactly
-// the tools there are, each with its description and its arguments'; an edited text reaches the tool
-// `toolsFor` gives, and its reset brings the shipped one back; a place argument offers every place
-// in every view; the resolver names everything the world has, a secret too, so only a name the world
-// lacks is refused; and a World Info entry's text reaches each view with its marks marked, in the
-// user's wording.
+// The agent tool layer's registry and read view (INC1-SPEC C6, R3a): the Every agent page lists
+// exactly the tools there are, each with its description and its arguments', and holds the tools'
+// answers and the lore index beside them (moved from the GM agent page, ids and saved texts as they
+// were); an edited text reaches the tool `toolsFor` gives, and its reset brings the shipped one back;
+// a place argument offers every place in every view; the resolver names everything the world has, a
+// secret too, so only a name the world lacks is refused; and a World Info entry's text reaches each
+// view with its marks marked, in the user's wording.
 
 import { describe, expect, test } from "bun:test";
 import { type Resolved, resolvePerson, resolvePlace, resolveTrack } from "../../src/backend/agents/tools/resolve";
@@ -14,7 +15,9 @@ import { TOOL_DEFINITIONS, toolsFor } from "../../src/backend/agents/tools/regis
 import { promptGroups } from "../../src/frontend/settings/agent-prompts";
 import { TOOL_NOTE, TOOL_NOTES, TOOL_TEXTS, type ToolView, toolArgTextId, toolText, toolTextId } from "../../src/shared/agent-tools";
 import type { JsonObject } from "../../src/shared/json";
-import { GM_AGENT_PAGE, promptDef } from "../../src/shared/prompts";
+import { RUNTIME_PROMPT_PAGE } from "../../src/shared/agent-prompts";
+import { LORE_INDEX_TEXT } from "../../src/shared/lore-routing";
+import { GM_AGENT_PAGE, PROMPTS, promptDef, promptSettingsOf } from "../../src/shared/prompts";
 import { SECRET_MARK_WORDING, secretMarkText } from "../../src/shared/secret-marks";
 import { agentTools, alderChat, HOME, KNOWLEDGE, toolEnv } from "../support/tools";
 
@@ -61,9 +64,9 @@ function geminiRefuses(node: unknown, at = "$"): string[] {
   return [...own, ...properties, ...items, ...more];
 }
 
-describe("the GM agent page lists exactly the tools", () => {
+describe("the Every agent page lists exactly the tools", () => {
   test("each tool's description and each of its arguments' are texts of the page's Tools group, and nothing else is", () => {
-    const listed = promptGroups(GM_AGENT_PAGE).find((g) => g.title === "Tools")?.defs.map((d) => d.id) ?? [];
+    const listed = promptGroups(RUNTIME_PROMPT_PAGE).find((g) => g.title === "Tools")?.defs.map((d) => d.id) ?? [];
     const tools = TOOL_DEFINITIONS.flatMap((def) => [toolTextId(def.name), ...(toolText(def.name)?.args ?? []).map((a) => toolArgTextId(def.name, a.path))]);
     expect([...listed].sort()).toEqual([...tools].sort());
     expect(TOOL_TEXTS.map((t) => t.name).sort()).toEqual(TOOL_DEFINITIONS.map((d) => d.name).sort());
@@ -73,8 +76,21 @@ describe("the GM agent page lists exactly the tools", () => {
   });
 
   test("the notes the tools answer with are the page's Tool answers", () => {
-    const listed = promptGroups(GM_AGENT_PAGE).find((g) => g.title === "Tool answers")?.defs.map((d) => d.id) ?? [];
+    const listed = promptGroups(RUNTIME_PROMPT_PAGE).find((g) => g.title === "Tool answers")?.defs.map((d) => d.id) ?? [];
     expect([...listed].sort()).toEqual(TOOL_NOTES.map((n) => n.id).sort());
+  });
+
+  test("the tools' texts, their answers and the lore index moved there from the GM agent page, after the page's own texts; ids and saved texts are as they were", () => {
+    // The GM agent page keeps only the assistant's own texts.
+    expect(promptGroups(GM_AGENT_PAGE).map((g) => g.title)).toEqual(["Instructions", "The conversation"]);
+    expect(PROMPTS.filter((d) => d.page === GM_AGENT_PAGE.id).map((d) => d.id)).toEqual(["gm.system", "gm.instructions", "gm.history_note"]);
+    const titles = promptGroups(RUNTIME_PROMPT_PAGE).map((g) => g.title);
+    expect(titles.slice(-3)).toEqual(["Tools", "Tool answers", "Lore index"]);
+    expect(titles[0]).toBe(RUNTIME_PROMPT_PAGE.label);
+    for (const id of [toolTextId("people_where"), toolArgTextId("people_where", "person"), TOOL_NOTE.badValue, ...Object.values(LORE_INDEX_TEXT)]) expect({ id, page: promptDef(id)?.page }).toEqual({ id, page: RUNTIME_PROMPT_PAGE.id });
+    // A text saved under a moved id before the move is still the user's own.
+    const saved = { [toolTextId("people_where")]: "Where is someone now?", [LORE_INDEX_TEXT.separator]: " / " };
+    expect(promptSettingsOf({ texts: saved, maxChars: 20_000 }).texts).toEqual(saved);
   });
 
   test("each tool's schema has exactly the arguments its texts describe, and no description of its own, in every view", async () => {

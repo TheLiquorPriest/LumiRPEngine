@@ -19,7 +19,7 @@ import type { GmControls, HubControls, PlayerControls, SectionProps } from "./hu
 import { fallbackSources, findAccount, findFlow, flowControls, flowSources, flowTargets, gmParties, payeeProblem, viewAccounts, type FlowControl } from "./layout";
 import { FieldsPage } from "./lines";
 import { actionPage, Controls, detailPage, Hero, MoneyPage, Note, type HubNav, type HubPages } from "./nav";
-import { amountOf, blankFlowForm, flowCreateAction, flowEditOps, flowFormOf, flowFormProblem, flowSpawnOps, flowStatusAction, flowStatusOps, flowUpdateAction, invoiceAction, leaseEndAction, newIdFor, type FlowEvery, type FlowForm } from "./requests";
+import { amountOf, blankFlowForm, flowCreateAction, flowEditOps, flowFormOf, flowFormProblem, flowSpawnOps, flowStatusAction, flowStatusOps, flowUpdateAction, invoiceAction, leaseEndAction, newIdFor, type ActionBody, type FlowEvery, type FlowForm } from "./requests";
 
 const EVERY: readonly Choice[] = [
   { value: "once", label: "Once" },
@@ -225,12 +225,10 @@ function FlowFormPage(props: { view: FinanceView; controls: PlayerControls | GmC
   const backed = form.fallback === "" || backs.some((b) => b.value === form.fallback);
   const fallbackChoices = backed ? backs : [...backs, { value: form.fallback, label: findAccount(view, form.fallback)?.name ?? "another account" }];
   const problem = (controls.mode === "player" ? payeeProblem(view, payers, form.to) : null) ?? (form.shortfall === "fallback" && !backed ? "That account can't back this one: pick one its payer may spend from." : null) ?? flowFormProblem(form, controls.currency, flow === undefined || "fixed" in flow.spec.amount);
-  const submit = async (): Promise<boolean> => {
-    if (controls.mode === "player") {
-      if (!flow) return controls.act(flowCreateAction(form, controls.currency));
-      const update = flowUpdateAction(flow.spec, form, controls.currency);
-      return update === null || controls.act(update);
-    }
+  // The player's action: a new one, or the change to one (none when nothing changed).
+  const played = controls.mode === "player" ? (flow ? flowUpdateAction(flow.spec, form, controls.currency) : flowCreateAction(form, controls.currency)) : null;
+  const submit = async (tell?: boolean): Promise<boolean> => {
+    if (controls.mode === "player") return played === null || controls.act(played, tell);
     if (!flow) return controls.edit(flowSpawnOps(newIdFor("flow", form.label, new Set(controls.gm.entities.map((e) => e.id))), form, controls.currency));
     const ops = flowEditOps(flow.spec, form, controls.currency);
     return ops.length === 0 || controls.edit(ops);
@@ -244,6 +242,7 @@ function FlowFormPage(props: { view: FinanceView; controls: PlayerControls | GmC
       subtitle={flow?.label}
       go={flow ? "Save" : form.every === "once" ? "Schedule it" : "Set it up"}
       problem={problem}
+      action={played}
       submit={submit}
     >
       <TextField label="Name" value={form.label} onInput={(label) => set({ label })} placeholder="Rent, Savings, Allowance…" />
@@ -311,18 +310,21 @@ function FlowLine(props: { flow: FlowView }) {
 function FlowControlPage(props: SectionProps & { flow: FlowView; control: Exclude<FlowControl, "edit"> }) {
   const { controls, nav, flow: f, control } = props;
   const link = f.link?.id ?? null;
-  let page: { text: string; go: string; danger: boolean; submit(): Promise<boolean> } | null = null;
+  let page: { text: string; go: string; danger: boolean; action?: ActionBody; submit(tell?: boolean): Promise<boolean> } | null = null;
   if (controls.mode === "gm") {
     if (control === "delete") page = { text: `Delete ${f.label}? It won't run again.`, go: "Delete", danger: true, submit: () => controls.edit([{ op: "despawn", entity: f.id }]) };
-  } else if (controls.mode !== "player") page = null;
-  else if (control === "pause") page = { text: "It won't run until you resume it.", go: "Pause", danger: false, submit: () => controls.act(flowStatusAction(f.id, "pause")) };
-  else if (control === "resume") page = { text: "It runs again on its schedule.", go: "Resume", danger: false, submit: () => controls.act(flowStatusAction(f.id, "resume")) };
-  else if (control === "end_lease") page = { text: `Give notice on ${f.label}? It ends today.`, go: "End it", danger: true, submit: () => controls.act(leaseEndAction(f.id)) };
-  else if (control === "delete") page = { text: `Delete ${f.label}? It won't run again.`, go: "Delete", danger: true, submit: () => controls.act(flowStatusAction(f.id, "delete")) };
-  else if (link !== null) page = { text: "Otherwise it's paid when it falls due, if the money's there.", go: "Pay now", danger: false, submit: () => controls.act(invoiceAction(link, "pay")) };
+  } else if (controls.mode === "player") {
+    // The player's control is an action, sent with its Tell switch.
+    const act = (action: ActionBody) => ({ action, submit: (tell?: boolean) => controls.act(action, tell) });
+    if (control === "pause") page = { text: "It won't run until you resume it.", go: "Pause", danger: false, ...act(flowStatusAction(f.id, "pause")) };
+    else if (control === "resume") page = { text: "It runs again on its schedule.", go: "Resume", danger: false, ...act(flowStatusAction(f.id, "resume")) };
+    else if (control === "end_lease") page = { text: `Give notice on ${f.label}? It ends today.`, go: "End it", danger: true, ...act(leaseEndAction(f.id)) };
+    else if (control === "delete") page = { text: `Delete ${f.label}? It won't run again.`, go: "Delete", danger: true, ...act(flowStatusAction(f.id, "delete")) };
+    else if (link !== null) page = { text: "Otherwise it's paid when it falls due, if the money's there.", go: "Pay now", danger: false, ...act(invoiceAction(link, "pay")) };
+  }
   if (page === null) return null;
   return (
-    <ActionPage nav={nav} controls={controls} name={`flow-${control}`} title={CONTROL[control].label} subtitle={f.label} go={page.go} danger={page.danger} submit={page.submit}>
+    <ActionPage nav={nav} controls={controls} name={`flow-${control}`} title={CONTROL[control].label} subtitle={f.label} go={page.go} danger={page.danger} action={page.action ?? null} submit={page.submit}>
       <FlowLine flow={f} />
       <Note>{page.text}</Note>
     </ActionPage>

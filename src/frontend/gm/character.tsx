@@ -1,10 +1,10 @@
 // GM → a character's sheet (the Character model, DESIGN §7): a person as the GM runs them, in place
 // of the generic entity sheet. What they're doing now and where, with moves and the party; where
-// they live and sleep; their mind and routine, each linking to its own GM page; what they carry,
-// their money and relations; then the existing Simulation, Life, Classes and tags and Remove; and
-// every field last, folded, under plain labels. It reads the character from `lre.character` (GM
-// scope, behind the gate as `lre.gm` is) and asks again whenever the GM view reloads. Every change
-// is one `lre.edit` with its own Undo.
+// they live and sleep; their mind and routine, each linking to its own GM page; their things (Outfit,
+// Carried, Wardrobe and the rest, GM → Things' groups), their money and relations; then the existing
+// Simulation, Life, Classes and tags and Remove; and every field last, folded, under plain labels.
+// It reads the character from `lre.character` (GM scope, behind the gate as `lre.gm` is) and asks
+// again whenever the GM view reloads. Every change is one `lre.edit` with its own Undo.
 
 import { useEffect, useState } from "preact/hooks";
 import type { CharacterBed, CharacterResult, PlaceRef } from "../../shared/character";
@@ -25,6 +25,7 @@ import { nameOf } from "./editor";
 import { Classification, FieldRow, Life, PartyField, Relations, Simulation } from "./entity";
 import { gmOpen } from "./gate";
 import { ActionRow, ActionRows, GmPage } from "./ui";
+import { GmPersonThings } from "./things";
 
 /** A place as the sheet says it: its path, outermost first, ending in its name. */
 export function placePath(place: PlaceRef | null): string {
@@ -47,26 +48,6 @@ const STANDING_NOTE: Record<Exclude<RoutineStanding, "held" | "living">, string>
   context: "Their routine is context only: the narrator and their mind may draw on it, but it never moves them. What they're doing is above, under Now.",
   elsewhere: "They aren't where their routine has them right now.",
 };
-
-/** What a person holds on them: worn or equipped first, then carried, by name. */
-function carried(entity: GmEntity, editor: Editor): { id: string; name: string; how: string }[] {
-  const how = (e: GmEntity): string | null => {
-    for (const r of e.relations) {
-      if (r.to !== entity.id) continue;
-      if (r.type === "worn_by") return "worn";
-      if (r.type === "equipped") return "equipped";
-      if (r.type === "in") return "carried";
-    }
-    return null;
-  };
-  const order: Record<string, number> = { worn: 0, equipped: 1, carried: 2 };
-  return editor.gm.entities
-    .flatMap((e) => {
-      const h = e.gone ? null : how(e);
-      return h ? [{ id: e.id, name: e.name, how: h }] : [];
-    })
-    .sort((a, b) => (order[a.how] ?? 3) - (order[b.how] ?? 3) || a.name.localeCompare(b.name));
-}
 
 /** The character's GM page, over World's list (or wherever a person's GM page opens). */
 export function CharacterSheet(props: { entity: GmEntity; editor: Editor; chatId: string; onBack(): void; backLabel?: string; onOpen?(entity: string): void }) {
@@ -98,7 +79,6 @@ export function CharacterSheet(props: { entity: GmEntity; editor: Editor; chatId
   const bring = bringOp(entity, editor.gm);
   const mind = editor.gm.minds.characters.find((c) => c.entity === entity.id) ?? null;
   const money = editor.gm.money.find((m) => m.party === entity.id) ?? null;
-  const things = carried(entity, editor);
   const character = read?.character ?? null;
   const places = read?.places ?? [];
   const placeOf = (id: string | null): PlaceRef | null => (id === null ? null : (places.find((p) => p.id === id) ?? null));
@@ -230,28 +210,7 @@ export function CharacterSheet(props: { entity: GmEntity; editor: Editor; chatId
             </Button>
           </Section>
         )}
-        <Section title="Carrying">
-          {things.length === 0 ? (
-            <p class="lre-gm-none">Nothing.</p>
-          ) : (
-            <ActionRows label="Carrying">
-              {things.map((t) => (
-                <ActionRow
-                  key={t.id}
-                  title={t.name}
-                  value={t.how}
-                  actions={
-                    props.onOpen ? (
-                      <Button size="sm" variant="ghost" onClick={() => props.onOpen?.(t.id)}>
-                        Open
-                      </Button>
-                    ) : undefined
-                  }
-                />
-              ))}
-            </ActionRows>
-          )}
-        </Section>
+        <GmPersonThings chatId={props.chatId} person={entity} editor={editor} onOpen={(id) => props.onOpen?.(id)} />
         {money ? (
           <Section title="Money">
             <ActionRows label="Money">
