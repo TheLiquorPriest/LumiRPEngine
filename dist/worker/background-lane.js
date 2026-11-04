@@ -9247,7 +9247,7 @@ function isWorkspacePath(v) {
     return false;
   return v.split("/").every((name) => name !== "." && name !== ".." && PATH_SEGMENT.test(name));
 }
-var RETENTION_DEFAULTS = Object.freeze({ transcriptDays: 30, unreferencedDays: 7, sweepHours: 24 });
+var RETENTION_DEFAULTS = Object.freeze({ transcriptDays: 30, unreferencedDays: 7, sweepHours: 24, turnTranscripts: "none", turnTranscriptDays: "none" });
 var DAY_MS = 24 * 60 * 60 * 1000;
 var HOUR_MS = 60 * 60 * 1000;
 

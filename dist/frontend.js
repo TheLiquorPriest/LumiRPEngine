@@ -42872,11 +42872,31 @@ var TRANSCRIPTS_DIR = "transcripts/";
 function isTranscriptPath(path2) {
   return path2.startsWith(TRANSCRIPTS_DIR);
 }
-var RETENTION_DEFAULTS = Object.freeze({ transcriptDays: 30, unreferencedDays: 7, sweepHours: 24 });
+var RETENTION_DEFAULTS = Object.freeze({ transcriptDays: 30, unreferencedDays: 7, sweepHours: 24, turnTranscripts: "none", turnTranscriptDays: "none" });
 var DAY_MS2 = 24 * 60 * 60 * 1000;
 var HOUR_MS = 60 * 60 * 1000;
 
 // src/frontend/settings/retention.tsx
+var TRANSCRIPT_ROWS = [
+  {
+    id: "turnTranscripts",
+    title: "Turn transcripts",
+    does: "How many of a chat's latest turns keep their transcript: everything the turn's agents did, as GM → Live showed it, which GM → Workspace lists under transcripts/ and every agent reads. After each turn, an older turn's transcript is no longer listed, and a sweep removes it once nothing else uses it (Unused texts, below). Each chat counts its own turns, a Branch too.",
+    unit: "turn",
+    min: 1,
+    none: { word: "No limit", means: "every turn keeps its transcript" },
+    start: 50
+  },
+  {
+    id: "turnTranscriptDays",
+    title: "Turn transcript age",
+    does: "How long a turn's transcript is kept after it was written. An older one is no longer listed, and a sweep removes it once nothing else uses it. A transcript written before this setting came has no time to count from, so only Turn transcripts above takes it away.",
+    unit: "day",
+    min: 1,
+    none: { word: "No limit", means: "a transcript is kept however old it is" },
+    start: 30
+  }
+];
 var ROWS = [
   {
     id: "transcriptDays",
@@ -42890,7 +42910,7 @@ var ROWS = [
   {
     id: "unreferencedDays",
     title: "Unused texts",
-    does: "How long a stored text nothing uses any more is kept before a sweep removes it: one only a deleted reply, swipe or chat used, or a call's text past the limit above. It counts from the first sweep that finds it unused. A text that a reply in any of your world chats, a chat's learned files, Diagnostics or a turn under way still uses is never removed.",
+    does: "How long a stored text nothing uses any more is kept before a sweep removes it: one only a deleted reply, swipe or chat used, a turn's transcript past the limits above, or a call's text past its limit. It counts from the first sweep that finds it unused. A text that a reply in any of your world chats, a chat's learned files, Diagnostics or a turn under way still uses is never removed.",
     unit: "day",
     min: 0,
     zero: "the sweep after the one that finds a text unused removes it"
@@ -42908,9 +42928,10 @@ function count3(n4, unit) {
   return `${n4} ${unit}${n4 === 1 ? "" : "s"}`;
 }
 function retentionSummary(r3) {
+  const kept = [r3.turnTranscripts === "none" ? null : `latest ${count3(r3.turnTranscripts, "turn")}`, r3.turnTranscriptDays === "none" ? null : count3(r3.turnTranscriptDays, "day")].filter((part) => part !== null);
   const texts = r3.transcriptDays === "none" ? "with their rows" : count3(r3.transcriptDays, "day");
   const sweep = r3.sweepHours === "none" ? "never swept" : `swept every ${count3(r3.sweepHours, "hour")}`;
-  return `Call texts ${texts} · unused ${count3(r3.unreferencedDays, "day")} · ${sweep}`;
+  return `Transcripts: ${kept.length === 0 ? "all" : kept.join(", ")} · call texts ${texts} · unused ${count3(r3.unreferencedDays, "day")} · ${sweep}`;
 }
 function RetentionRow(props) {
   const { row, value } = props;
@@ -42946,7 +42967,7 @@ function RetentionRow(props) {
         label: `${row.title}: ${row.none.word.toLowerCase()}`,
         checked: value === "none",
         disabled: props.busy,
-        onChange: (none) => props.set(none ? "none" : typeof fallback === "number" ? fallback : row.min)
+        onChange: (none) => props.set(none ? "none" : typeof fallback === "number" ? fallback : row.start ?? row.min)
       }, undefined, false, undefined, this) : null,
       value === "none" ? null : /* @__PURE__ */ u3(NumberStepper, {
         label: `${row.title} (${row.unit}s)`,
@@ -42971,25 +42992,32 @@ function RetentionRow(props) {
 }
 function RetentionPage(props) {
   const set = (id) => (value) => props.patch({ retention: { [id]: value } });
+  const rows2 = (defs) => /* @__PURE__ */ u3("div", {
+    class: "lre-set-rows",
+    children: defs.map((row) => /* @__PURE__ */ u3(RetentionRow, {
+      row,
+      value: props.retention[row.id],
+      busy: props.busy,
+      set: set(row.id)
+    }, row.id, false, undefined, this))
+  }, undefined, false, undefined, this);
   return /* @__PURE__ */ u3("div", {
     class: "lre-stack",
     "data-lre-settings-page": "retention",
     children: [
       /* @__PURE__ */ u3("p", {
         class: "lre-set-lead",
-        children: "The agents keep what they write (each turn's part of their session, their workspace and learned files, what each call was sent and answered) once in your storage, shared by all your chats, so a swipe, a Re-run or a Branch costs nothing. These say how long a text stays once nothing needs it."
+        children: "The agents keep what they write (each turn's part of their session and its transcript, their workspace and learned files, what each call was sent and answered) once in your storage, shared by all your chats, so a swipe, a Re-run or a Branch costs nothing. These say which turns keep their transcripts, and how long a text stays once nothing needs it."
       }, undefined, false, undefined, this),
       /* @__PURE__ */ u3(Section, {
+        title: "Turn transcripts",
         flush: true,
-        children: /* @__PURE__ */ u3("div", {
-          class: "lre-set-rows",
-          children: ROWS.map((row) => /* @__PURE__ */ u3(RetentionRow, {
-            row,
-            value: props.retention[row.id],
-            busy: props.busy,
-            set: set(row.id)
-          }, row.id, false, undefined, this))
-        }, undefined, false, undefined, this)
+        children: rows2(TRANSCRIPT_ROWS)
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(Section, {
+        title: "Stored texts",
+        flush: true,
+        children: rows2(ROWS)
       }, undefined, false, undefined, this)
     ]
   }, undefined, true, undefined, this);
@@ -43613,7 +43641,7 @@ var PAGE2 = {
   diagnostics: { title: "Diagnostics", subtitle: "What the engine did each turn, and what failed", icon: "list" },
   mcp: { title: "MCP server", subtitle: "Your agent's lumirpengine, and how it follows updates", icon: "branch" },
   prompts: { title: "Prompts", subtitle: "Every text sent to a model, yours to edit", icon: "edit" },
-  retention: { title: "Retention", subtitle: "How long the agents' stored texts are kept", icon: "box" }
+  retention: { title: "Retention", subtitle: "Which turns keep their transcripts, and how long the agents' stored texts are kept", icon: "box" }
 };
 var GROUPS5 = [
   { title: "Getting started", pages: ["helper", "model", "steps", "minds", "narrator", "timeouts"] },
@@ -76026,7 +76054,7 @@ function LiveFeed(props) {
     return /* @__PURE__ */ u3(Empty, {
       icon: "pulse",
       title: "No agent turn yet",
-      children: "Live shows an agent turn as its agents work it: every agent's messages, reasoning, tool calls and results, and the writes they stage. Nothing has run in this chat since the engine started. Each turn's transcript stays in Workspace, under transcripts/."
+      children: "Live shows an agent turn as its agents work it: every agent's messages, reasoning, tool calls and results, and the writes they stage. Nothing has run in this chat since the engine started. Each turn's transcript stays in Workspace, under transcripts/, for as long as Settings → Agents → Retention keeps it (every one, by default)."
     }, undefined, false, undefined, this);
   const items = liveItems(view);
   const roles = [...new Set(items.flatMap((i3) => i3.type === "group" ? [i3.role] : []))];
@@ -76235,7 +76263,7 @@ var WORKSPACE_AREAS = ["notes", "learned", "transcripts", "pins", "global"];
 var AREA_WORDS = {
   notes: { title: "Notes", note: "What the agents and you keep for this chat. They follow the story: a swipe back past a reply takes what it wrote." },
   learned: { title: "Learned", note: "Kept apart from the story: a swipe, a Re-run or an Undo never changes them, and a change lands at once." },
-  transcripts: { title: "Transcripts", note: "Everything each turn's agents did, as Live showed it. Read-only; every agent reads them." },
+  transcripts: { title: "Transcripts", note: "Everything each turn's agents did, as Live showed it, for the turns Settings → Agents → Retention keeps (every one, by default). Read-only; every agent reads them." },
   pins: { title: "Pins file", note: "Which files each role is shown first, and how much of them." },
   global: { title: "Global (~/)", note: "Your own workspace, which every chat of yours shares: kept apart from the story, and a change lands at once. Its AGENTS.md and roles/ come before this chat's." }
 };

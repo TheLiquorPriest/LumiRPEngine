@@ -5315,6 +5315,9 @@ function claimFactId(claim, msg) {
   const words = claim.normalize("NFKC").toLowerCase().replace(/\s+/g, " ").trim().replace(/[\s.!?;:,]+$/u, "");
   return factId({ kind: "claim", hash: hashParts("minds.claim", words, msg ?? "").slice(0, 10) });
 }
+function claimKey(claim) {
+  return claim.normalize("NFKC").toLowerCase().replace(/[\p{P}\s]+/gu, " ").trim();
+}
 function witnessRef(entry) {
   return `witness:${hashParts("minds.witness", String(entry.at), entry.how, entry.by ?? "", entry.place ?? "", entry.what).slice(0, 10)}`;
 }
@@ -10097,14 +10100,16 @@ function isTranscriptPath(path2) {
 function transcriptPath(turn) {
   return `${TRANSCRIPTS_DIR}reply-${String(turn).padStart(4, "0")}.md`;
 }
-var RETENTION_DEFAULTS = Object.freeze({ transcriptDays: 30, unreferencedDays: 7, sweepHours: 24 });
+var RETENTION_DEFAULTS = Object.freeze({ transcriptDays: 30, unreferencedDays: 7, sweepHours: 24, turnTranscripts: "none", turnTranscriptDays: "none" });
 function retentionOf(raw, base = RETENTION_DEFAULTS) {
   const r = isRecord(raw) ? raw : {};
   const days = r.unreferencedDays;
   return {
     transcriptDays: limitIn(r.transcriptDays, 0, Number.MAX_SAFE_INTEGER, base.transcriptDays),
     unreferencedDays: typeof days === "number" && Number.isInteger(days) && days >= 0 ? days : base.unreferencedDays,
-    sweepHours: limitIn(r.sweepHours, 1, Number.MAX_SAFE_INTEGER, base.sweepHours)
+    sweepHours: limitIn(r.sweepHours, 1, Number.MAX_SAFE_INTEGER, base.sweepHours),
+    turnTranscripts: limitIn(r.turnTranscripts, 1, Number.MAX_SAFE_INTEGER, base.turnTranscripts),
+    turnTranscriptDays: limitIn(r.turnTranscriptDays, 1, Number.MAX_SAFE_INTEGER, base.turnTranscriptDays)
   };
 }
 var DAY_MS = 24 * 60 * 60 * 1000;
@@ -84837,6 +84842,11 @@ class LedgerCore {
         return "the transcript's length isn't a count of its characters";
       parts.transcriptChars = session.transcriptChars;
     }
+    if (session.transcriptAt !== undefined) {
+      if (parts.transcript === undefined || !Number.isSafeInteger(session.transcriptAt) || session.transcriptAt < 0)
+        return "the transcript's time isn't a moment in milliseconds";
+      parts.transcriptAt = session.transcriptAt;
+    }
     const chain = this.chain(observed);
     const index = chain.findLastIndex((m) => !m.isUser);
     const head = chain[index];
@@ -97511,7 +97521,10 @@ ${lines2.join(`
 }
 var str24 = (v4) => typeof v4 === "string" ? v4.trim() : "";
 var list2 = (v4) => Array.isArray(v4) ? v4 : [];
-function checkKnowledge(turn, batch, raw, spent = { facts: new Set, learnings: 0, witnessed: new Set }) {
+function knowledgeSpent() {
+  return { facts: new Map, learnings: 0, witnessed: new Set };
+}
+function checkKnowledge(turn, batch, raw, spent = knowledgeSpent()) {
   const out = { events: [], proposals: [], refused: [], refusedAs: {} };
   if (!isRecord(raw))
     return out;
@@ -97529,6 +97542,9 @@ function checkKnowledge(turn, batch, raw, spent = { facts: new Set, learnings: 0
     out.refusedAs[kind] = (out.refusedAs[kind] ?? 0) + 1;
   };
   const facts = new Map(Object.entries(k.facts));
+  for (const f of spent.facts.values())
+    if (!facts.has(f.id))
+      facts.set(f.id, f);
   const holding = new Map;
   const heldBy2 = (id2) => {
     const known = holding.get(id2) ?? new Map(Object.entries(own(k.holdings, id2) ?? {}));
@@ -97545,20 +97561,36 @@ function checkKnowledge(turn, batch, raw, spent = { facts: new Set, learnings: 0
   const written = new Map;
   const idOf = (v4) => str24(v4).replace(/^\[([^[\]]+)\]$/, "$1").trim();
   const claims = Object.values(begun).filter((f) => f.kind === "claim").length;
+  const heldCount = new Map;
+  for (const held3 of Object.values(k.holdings))
+    for (const id2 of Object.keys(held3))
+      heldCount.set(id2, (heldCount.get(id2) ?? 0) + 1);
+  const count2 = (id2) => heldCount.get(id2) ?? 0;
+  const said2 = new Map;
+  for (const f of Object.values(k.facts)) {
+    const key = claimKey(f.claim);
+    const there = said2.get(key);
+    if (key !== "" && (there === undefined || count2(f.id) > count2(there) || count2(f.id) === count2(there) && f.id < there))
+      said2.set(key, f.id);
+  }
+  for (const [key, f] of spent.facts)
+    said2.set(key, f.id);
   for (const f of list2(raw.facts)) {
     if (!isRecord(f))
       continue;
     const claim2 = capText(str24(f.claim), settings.claimChars);
     if (claim2 === "")
       continue;
-    const id2 = claimFactId(claim2, turn.messageId);
+    const made = claimFactId(claim2, turn.messageId);
+    const key = claimKey(claim2) || made;
+    const id2 = said2.get(key) ?? made;
     if (!facts.has(id2)) {
       const matters = capText(str24(f.matters), settings.claimChars);
       if (matters === "") {
         refuse10("matters", `a new fact that doesn't say why it matters, or to whom: "${claim2}"`);
         continue;
       }
-      if (!spent.facts.has(id2) && (spent.facts.size >= settings.factsPerTurn || claims + spent.facts.size >= settings.factsPerChat)) {
+      if (spent.facts.size >= settings.factsPerTurn || claims + spent.facts.size >= settings.factsPerChat) {
         refuse10("facts_limit", `a new fact past the limit of new facts a turn or a chat: "${claim2}"`);
         continue;
       }
@@ -97569,8 +97601,10 @@ function checkKnowledge(turn, batch, raw, spent = { facts: new Set, learnings: 0
         return person5 ? [person5] : place2 ? [place2] : [];
       }))];
       const truth = FACT_TRUTHS.includes(str24(f.truth)) ? str24(f.truth) : "true";
-      facts.set(id2, { id: id2, kind: "claim", claim: claim2, about: about2, truth, source: { msg: turn.messageId, at: at2 }, matters });
-      spent.facts.add(id2);
+      const fact = { id: id2, kind: "claim", claim: claim2, about: about2, truth, source: { msg: turn.messageId, at: at2 }, matters };
+      facts.set(id2, fact);
+      spent.facts.set(key, fact);
+      said2.set(key, id2);
     }
     const ref = idOf(f.ref);
     if (ref !== "")
@@ -99145,7 +99179,7 @@ async function knowledgeCalls(deps, settings, config3, turn, batches, ask) {
   const refused2 = (kind, n = 1) => {
     out.refused[kind] = (out.refused[kind] ?? 0) + n;
   };
-  const spent = { facts: new Set, learnings: 0, witnessed: new Set };
+  const spent = knowledgeSpent();
   for (const call of await Promise.all(asked2)) {
     const checked = call.raw === null ? null : checkKnowledge({ ...turn, state: w.state }, call.batch, call.raw, spent);
     if (!checked && !signal2.aborted)
@@ -100605,9 +100639,9 @@ function thisBuild(moduleUrl = import.meta.url) {
   const dir = moduleUrl.replace(/[^/]*$/, "");
   const path2 = pathOfFileUrl(`${dir}${KIT_FILE}`);
   const core = pathOfFileUrl(`${dir}${CORE_FILE}`);
-  const sha256 = "25c4aa6f5daa6b0a04f190e4397eb937dce8732886bcbe864d34c2f8dc9c7ada";
-  const tools = ["3be1b9b96d0bd8269c312fe59727afa3", "8276fbcb3372ac95b1ab148979a5cd5f"].filter((f) => f !== undefined);
-  return { id: "4bacc027", kit: sha256 !== undefined && path2 !== null && core !== null ? { path: path2, core, sha256, api: KIT_API } : null, tools };
+  const sha256 = "d7ab46b24493f9570c6d792718e87fb0e2efe6ba523ee42164dbc621c4ab1512";
+  const tools = ["3da7f5d8cff11524476d5a33c741833c", "8203ac33d22e6f25dedf1cd219d2441d"].filter((f) => f !== undefined);
+  return { id: "e7032ba9", kit: sha256 !== undefined && path2 !== null && core !== null ? { path: path2, core, sha256, api: KIT_API } : null, tools };
 }
 var BUILD_FILE = "agents/build.json";
 var USER_FILE = "agents.json";
@@ -102046,14 +102080,21 @@ function recordSessionOf(rec) {
     if (isBlobHash(hash))
       out[part] = hash;
   }
-  const chars = raw.transcriptChars;
-  if (out.transcript !== undefined && typeof chars === "number" && Number.isInteger(chars) && chars >= 0)
+  if (out.transcript === undefined)
+    return out;
+  const { transcriptChars: chars, transcriptAt: at2 } = raw;
+  if (typeof chars === "number" && Number.isInteger(chars) && chars >= 0)
     out.transcriptChars = chars;
+  if (typeof at2 === "number" && Number.isSafeInteger(at2) && at2 >= 0)
+    out.transcriptAt = at2;
   return out;
 }
-function sessionRefsOf(rec) {
+function sessionRefsOf(rec, transcript) {
   const session = recordSessionOf(rec);
-  return REC_SESSION_PARTS.flatMap((part) => session[part] ?? []);
+  return REC_SESSION_PARTS.flatMap((part) => {
+    const hash = session[part];
+    return hash === undefined || part === "transcript" && !transcript(session.transcriptAt) ? [] : [hash];
+  });
 }
 function sessionAt(chain, tombstones) {
   const segments = [];
@@ -102174,6 +102215,38 @@ class Sessions {
   }
 }
 
+// src/backend/agents/tools/transcript-files.ts
+function repliesFromEnd(messages) {
+  const out = new Map;
+  for (let i = messages.length - 1;i >= 0; i--) {
+    const m = messages[i];
+    if (m && !m.isUser)
+      out.set(m.id, out.size);
+  }
+  return out;
+}
+function transcriptKept(keep, fromEnd, at2) {
+  const { turnTranscripts: turns, turnTranscriptDays: days } = keep.retention;
+  return !(turns !== "none" && fromEnd !== null && fromEnd >= turns) && !(days !== "none" && at2 !== undefined && keep.now - at2 > days * DAY_MS);
+}
+function transcriptFiles(head, keep) {
+  const chain = head.core.chain(head.observed);
+  const places2 = repliesFromEnd(chain);
+  const out = [];
+  let turn = 0;
+  for (const m of chain) {
+    if (m.isUser)
+      continue;
+    turn++;
+    const rec = activeRecord(m, head.core.journal.tombstones);
+    const { transcript, transcriptChars, transcriptAt } = recordSessionOf(rec);
+    if (transcript === undefined || !transcriptKept(keep, places2.get(m.id) ?? null, transcriptAt))
+      continue;
+    out.push({ path: transcriptPath(turn), hash: transcript, size: transcriptChars ?? 0, pinned: false, learned: false, transcript: true, provenance: { turn } });
+  }
+  return out;
+}
+
 // src/backend/agents/sweep.ts
 var SWEEP_PATH = "agents/sweep.json";
 var CHUNK_PREFIX2 = `${LEDGER_NAMESPACE}:`;
@@ -102186,8 +102259,8 @@ function eventRefs(events3, into2) {
     for (const hash of workspaceRefs(events3))
       into2.blobs.add(hash);
 }
-function recordRefs(rec, into2) {
-  for (const hash of sessionRefsOf(rec))
+function recordRefs(rec, into2, transcript) {
+  for (const hash of sessionRefsOf(rec, transcript))
     into2.blobs.add(hash);
   const { summary, archived } = recordSessionOf(rec);
   for (const base of [summary, archived])
@@ -102202,7 +102275,7 @@ function recordRefs(rec, into2) {
         eventRefs(entry.events, into2);
   }
 }
-function ledgerRefs(bag, into2) {
+function ledgerRefs(bag, into2, transcript) {
   let raw = bag[LEDGER_NAMESPACE];
   if (isRecord(raw) && typeof raw.chunks === "number" && typeof raw.hash === "string") {
     if (!Number.isInteger(raw.chunks) || raw.chunks < 1)
@@ -102225,18 +102298,18 @@ function ledgerRefs(bag, into2) {
   const swipes = isRecord(raw) ? raw.swipes : undefined;
   if (isRecord(swipes))
     for (const rec of Object.values(swipes))
-      recordRefs(rec, into2);
+      recordRefs(rec, into2, transcript);
   return true;
 }
-function journalRefs(journal, into2) {
+function journalRefs(journal, into2, transcript) {
   if (!isRecord(journal))
     return;
   if (isRecord(journal.messages)) {
-    for (const m of Object.values(journal.messages)) {
+    for (const [id2, m] of Object.entries(journal.messages)) {
       const swipes = isRecord(m) && isRecord(m.ledger) ? m.ledger.swipes : undefined;
       if (isRecord(swipes))
         for (const rec of Object.values(swipes))
-          recordRefs(rec, into2);
+          recordRefs(rec, into2, transcript(id2));
     }
   }
   if (isRecord(journal.pending)) {
@@ -102364,8 +102437,9 @@ class Sweep {
         state2.unreferenced = {};
         return { ran: true, stored: 0, referenced: 0, found: 0, removed: 0 };
       }
-      const { unreferencedDays } = await this.deps.retention(userId);
-      const read = await this.references(userId, stored);
+      const retention = await this.deps.retention(userId);
+      const { unreferencedDays } = retention;
+      const read = await this.references(userId, stored, { retention, now: began });
       const held3 = this.deps.blobs.held(userId);
       const marks = state2.unreferenced;
       for (const hash of Object.keys(marks))
@@ -102417,9 +102491,11 @@ class Sweep {
         this.sweeping.delete(userId);
     }
   }
-  async references(userId, stored) {
+  async references(userId, stored, keep) {
     const { host, blobs } = this.deps;
     const found = { blobs: new Set, bases: new Set };
+    const places2 = new Map;
+    const keeps2 = (chatId, messageId) => (at2) => transcriptKept(keep, places2.get(chatId)?.get(messageId) ?? null, at2);
     let reading = "the global workspace";
     try {
       for (const hash of await this.deps.global(userId))
@@ -102430,14 +102506,17 @@ class Sweep {
         for (const hash of agentRefs(chat.metadata))
           found.blobs.add(hash);
         reading = `chat ${chat.id}'s messages`;
-        for (const m of await this.deps.messages(chat.id, userId))
-          if (!ledgerRefs(m.metadata, found))
+        const messages = await this.deps.messages(chat.id, userId);
+        if (keep.retention.turnTranscripts !== "none")
+          places2.set(chat.id, repliesFromEnd(messages));
+        for (const m of messages)
+          if (!ledgerRefs(m.metadata, found, keeps2(chat.id, m.id)))
             return { refs: found.blobs, unknown: `chat ${chat.id}: the engine data on message ${m.id} can't be read` };
       }
       const open = new Set;
       for (const journal of this.deps.journals(userId)) {
         open.add(journal.chatId);
-        journalRefs(journal, found);
+        journalRefs(journal, found, (id2) => keeps2(journal.chatId, id2));
       }
       for (const chat of chats) {
         if (open.has(chat.id))
@@ -102445,7 +102524,7 @@ class Sweep {
         reading = `chat ${chat.id}'s journal`;
         const text6 = await host.storage.read(journalPath(chat.id), userId);
         if (text6 !== null)
-          journalRefs(parsed(text6), found);
+          journalRefs(parsed(text6), found, (id2) => keeps2(chat.id, id2));
       }
       for (const chat of chats) {
         reading = `chat ${chat.id}'s diagnostics`;
@@ -105451,23 +105530,6 @@ function nullableObject(args, key) {
   return isRecord(v4) ? v4 : undefined;
 }
 
-// src/backend/agents/tools/transcript-files.ts
-function transcriptFiles(head) {
-  const out = [];
-  let turn = 0;
-  for (const m of head.core.chain(head.observed)) {
-    if (m.isUser)
-      continue;
-    turn++;
-    const rec = activeRecord(m, head.core.journal.tombstones);
-    const { transcript, transcriptChars } = recordSessionOf(rec);
-    if (transcript === undefined)
-      continue;
-    out.push({ path: transcriptPath(turn), hash: transcript, size: transcriptChars ?? 0, pinned: false, learned: false, transcript: true, provenance: { turn } });
-  }
-  return out;
-}
-
 // src/backend/agents/tools/workspace.ts
 async function chatHead(rt, chatId, userId) {
   const run2 = await rt.runOf(chatId, userId);
@@ -105516,7 +105578,7 @@ async function keptFiles(rt, chatId, userId) {
   const [{ learned }, global] = await Promise.all([rt.chatAgents.get(chatId, userId), rt.globalFiles.get(userId)]);
   return { ...learned, ...global };
 }
-function filesOf(head, kept3, staged = new Map) {
+function filesOf(head, kept3, keep, staged = new Map) {
   const out = new Map;
   const sources = fileSources(head);
   const pins = workspacePins(head.state);
@@ -105528,15 +105590,16 @@ function filesOf(head, kept3, staged = new Map) {
   for (const [path2, file] of Object.entries(kept3)) {
     out.set(path2, { path: path2, hash: file.hash, pinned: file.pinned === true, learned: isLearnedPath(path2), provenance: { ...file.role !== undefined ? { role: file.role } : {}, turn: null } });
   }
-  for (const file of transcriptFiles(head))
+  for (const file of transcriptFiles(head, keep))
     out.set(file.path, file);
   return out;
 }
 async function allFiles(rt, env, at3) {
+  const keep = { retention: (await rt.settings.get(env.userId)).retention, now: Date.now() };
   if (at3)
-    return filesOf(at3.head, at3.kept, at3.staged);
+    return filesOf(at3.head, at3.kept, keep, at3.staged);
   const head = await chatHead(rt, env.chatId, env.userId);
-  return head ? filesOf(head, await keptFiles(rt, env.chatId, env.userId)) : new Map;
+  return head ? filesOf(head, await keptFiles(rt, env.chatId, env.userId), keep) : new Map;
 }
 async function listWorkspace(rt, env, at3) {
   const files = [...(await allFiles(rt, env, at3)).values()].sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0);
@@ -105546,7 +105609,7 @@ async function readWorkspaceFile(rt, env, path2) {
   const head = await chatHead(rt, env.chatId, env.userId);
   if (!head)
     return null;
-  const hash = isKeptPath(path2) ? own(await keptFiles(rt, env.chatId, env.userId), path2)?.hash : isTranscriptPath(path2) ? transcriptFiles(head).find((f) => f.path === path2)?.hash : own(workspaceOf(head.state), path2);
+  const hash = isKeptPath(path2) ? own(await keptFiles(rt, env.chatId, env.userId), path2)?.hash : isTranscriptPath(path2) ? transcriptFiles(head, { retention: (await rt.settings.get(env.userId)).retention, now: Date.now() }).find((f) => f.path === path2)?.hash : own(workspaceOf(head.state), path2);
   return hash === undefined ? null : rt.blobs.get(env.userId, hash);
 }
 async function fileText(view, path2) {
@@ -112708,7 +112771,7 @@ class Orchestrator {
     const before = kept3 ? await this.rt.blobs.get(s.userId, kept3) : null;
     const text8 = before ? `${before}
 ${s.live.transcript()}` : s.live.transcript();
-    return { transcript: await this.rt.blobs.put(s.userId, text8, holder), transcriptChars: text8.length };
+    return { transcript: await this.rt.blobs.put(s.userId, text8, holder), transcriptChars: text8.length, transcriptAt: Date.now() };
   }
   async keepTranscript(s, at3, key) {
     const holder = `session:${key}`;
@@ -114269,7 +114332,7 @@ class Runtime {
   foldOf(userId) {
     let fold = this.folds.get(userId);
     if (!fold) {
-      fold = new LedgerFold(this.registry, { fingerprint: "4bacc027", keep: () => this.settings.known(userId)?.agents.kept.folds ?? KEPT_FOLDS_DEFAULT });
+      fold = new LedgerFold(this.registry, { fingerprint: "e7032ba9", keep: () => this.settings.known(userId)?.agents.kept.folds ?? KEPT_FOLDS_DEFAULT });
       this.folds.set(userId, fold);
     }
     return fold;
