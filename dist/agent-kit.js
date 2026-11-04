@@ -8423,7 +8423,7 @@ function wordedLines(reg, world, state, pov, events, max, player, you = "You") {
     if (!text || lines.some((l) => l.text === text))
       continue;
     if (player) {
-      secrets ??= [...unrevealedSecrets(reg, world, state), ...hiddenNames(reg, world, state, pov)];
+      secrets ??= passMemo([state, world], `player.secrets\x00${pov}`, () => [...unrevealedSecrets(reg, world, state), ...hiddenNames(reg, world, state, pov)]);
       if (findLeaks(text, secrets).length > 0)
         continue;
     }
@@ -9307,19 +9307,27 @@ function positionsBelow(positions, position) {
   return out;
 }
 function delegationsOf(ctx, org) {
-  const out = [];
-  for (const who of Object.keys(ctx.state.entities).sort()) {
-    if (isGone(ctx.state, who))
-      continue;
-    for (const r of own(ctx.state.entities, who)?.relations ?? []) {
-      if (r.type !== ACTS_FOR || r.to !== org || typeof r.until === "number" && r.until < ctx.state.clock)
+  return [...delegationsIn(ctx, org)];
+}
+function delegationsIn(ctx, org) {
+  const byOrg = passMemo([ctx.state, ctx.state.entities], "orgs.delegations", () => {
+    const out = new Map;
+    for (const who of Object.keys(ctx.state.entities).sort()) {
+      if (isGone(ctx.state, who))
         continue;
-      const f = objOf(r.fields);
-      const limits = limitsIn(f);
-      out.push({ who, org, powers: powersIn(f.powers), ...limits ? { limits } : {}, ...typeof f.by === "string" && f.by !== "" ? { by: f.by } : {}, ...typeof r.until === "number" ? { until: r.until } : {} });
+      for (const r of own(ctx.state.entities, who)?.relations ?? []) {
+        if (r.type !== ACTS_FOR || typeof r.until === "number" && r.until < ctx.state.clock)
+          continue;
+        const f = objOf(r.fields);
+        const limits = limitsIn(f);
+        const list = out.get(r.to) ?? [];
+        list.push({ who, org: r.to, powers: powersIn(f.powers), ...limits ? { limits } : {}, ...typeof f.by === "string" && f.by !== "" ? { by: f.by } : {}, ...typeof r.until === "number" ? { until: r.until } : {} });
+        out.set(r.to, list);
+      }
     }
-  }
-  return out;
+    return out;
+  });
+  return byOrg.get(org) ?? [];
 }
 function defaultPowers(type, how) {
   if (how === "member" && (type === "household" || type === "group"))
@@ -9343,7 +9351,7 @@ function orgPower(ctx, who, org, power, thing) {
   const held = heldPositions(ctx, who, org).find((h) => h.position.powers.some((p) => powerCovers(p, power)));
   if (held)
     return { basis: "position", id: held.position.id };
-  const delegated = delegationsOf(ctx, org).find((d) => d.who === who && d.powers.some((p) => powerCovers(p, power)));
+  const delegated = delegationsIn(ctx, org).find((d) => d.who === who && d.powers.some((p) => powerCovers(p, power)));
   if (delegated)
     return delegated.by === undefined ? { basis: "delegate" } : { basis: "delegate", id: delegated.by };
   if (!isMemberOf(ctx, who, org))
@@ -9383,7 +9391,7 @@ function mayAct(ctx, who, org, power, ask = {}) {
     limits = held?.position.limits;
     scoped = held?.position.scope === "below" ? held.position : undefined;
   } else if (grant.basis === "delegate")
-    limits = delegationsOf(ctx, org).find((d) => d.who === who && d.powers.some((p) => powerCovers(p, power)))?.limits;
+    limits = delegationsIn(ctx, org).find((d) => d.who === who && d.powers.some((p) => powerCovers(p, power)))?.limits;
   const amount = ask.amount;
   if (limits && amount !== undefined) {
     const over = overLimit(limits, amount, limits.month !== undefined ? spentThisMonth(ctx, who, org) : null, name, ctx.world.currency);
@@ -9416,7 +9424,7 @@ function placesOf(ctx, business) {
   return here ? [here] : [];
 }
 function businessIds(ctx) {
-  return Object.keys(ctx.state.entities).filter((id) => kindIs(ctx.registry, ctx.world, own(ctx.state.entities, id)?.kind ?? "", COMPANY_KIND) && !isGone(ctx.state, id)).sort();
+  return passMemo([ctx.state, ctx.state.entities, ctx.world], "orgs.businesses", () => Object.keys(ctx.state.entities).filter((id) => kindIs(ctx.registry, ctx.world, own(ctx.state.entities, id)?.kind ?? "", COMPANY_KIND) && !isGone(ctx.state, id)).sort());
 }
 function businessAt(ctx, place) {
   if (!place)
@@ -9438,20 +9446,22 @@ function businessAt(ctx, place) {
 function orgPlaces(ctx, org) {
   if (own(ctx.world.places, org))
     return [org];
-  const type = orgTypeOf(ctx, org);
-  const fields = own(ctx.state.entities, org)?.fields;
-  const listed = Array.isArray(fields?.places) ? fields.places.filter((p) => typeof p === "string" && own(ctx.world.places, p) !== undefined) : [];
-  const out = new Set(type === "company" ? placesOf(ctx, org) : listed);
-  for (const id of Object.keys(ctx.state.entities)) {
-    const e = own(ctx.state.entities, id);
-    if (!e || isGone(ctx.state, id))
-      continue;
-    if (type === "household" && typeof e.fields.home === "string" && own(ctx.world.places, e.fields.home) && kindIs(ctx.registry, ctx.world, e.kind, "person") && isMemberOf(ctx, id, org))
-      out.add(e.fields.home);
-    if (kindIs(ctx.registry, ctx.world, e.kind, "property") && typeof e.fields.place === "string" && own(ctx.world.places, e.fields.place) && (worthShares(ownersIn(e.fields))[org] ?? 0) > 0)
-      out.add(e.fields.place);
-  }
-  return [...out].sort();
+  return passMemo([ctx.state, ctx.state.entities, ctx.world], `orgs.places:${org}`, () => {
+    const type = orgTypeOf(ctx, org);
+    const fields = own(ctx.state.entities, org)?.fields;
+    const listed = Array.isArray(fields?.places) ? fields.places.filter((p) => typeof p === "string" && own(ctx.world.places, p) !== undefined) : [];
+    const out = new Set(type === "company" ? placesOf(ctx, org) : listed);
+    for (const id of Object.keys(ctx.state.entities)) {
+      const e = own(ctx.state.entities, id);
+      if (!e || isGone(ctx.state, id))
+        continue;
+      if (type === "household" && typeof e.fields.home === "string" && own(ctx.world.places, e.fields.home) && kindIs(ctx.registry, ctx.world, e.kind, "person") && isMemberOf(ctx, id, org))
+        out.add(e.fields.home);
+      if (kindIs(ctx.registry, ctx.world, e.kind, "property") && typeof e.fields.place === "string" && own(ctx.world.places, e.fields.place) && (worthShares(ownersIn(e.fields))[org] ?? 0) > 0)
+        out.add(e.fields.place);
+    }
+    return [...out].sort();
+  });
 }
 function tradingDays(state, business) {
   const v = own(state.entities, business)?.fields.trading_days;
@@ -16450,16 +16460,18 @@ function closedRoutes(ctx) {
   return out;
 }
 function routeAt(ctx, from, to, mode) {
-  const level = ctx.levelOf(ctx.world.pov, "space");
-  if (level <= 1)
-    return nominalRoute(ctx, from, to, mode);
-  const weather = level >= 4 ? optionalQuery(ctx, "weather.travel_factor") : null;
-  const closes = level >= 4 ? optionalQuery(ctx, "weather.closed_modes") : null;
-  if (closes && (closes(ctx, from).includes(mode) || closes(ctx, to).includes(mode)))
-    return null;
-  const factor = weather ? Math.max(weather(ctx, from, mode), weather(ctx, to, mode)) : 1;
-  const speed = travelTuningOf(ctx.world).speeds[mode];
-  return findRoute(ctx.world, from, to, mode, { terrain: level >= 4, factor, closed: closedRoutes(ctx), ...speed !== undefined ? { speed } : {} });
+  return passMemo([ctx.state, ctx.state.entities, ctx.world], `space.route\x00${mode}\x00${from}\x00${to}`, () => {
+    const level = ctx.levelOf(ctx.world.pov, "space");
+    if (level <= 1)
+      return nominalRoute(ctx, from, to, mode);
+    const weather = level >= 4 ? optionalQuery(ctx, "weather.travel_factor") : null;
+    const closes = level >= 4 ? optionalQuery(ctx, "weather.closed_modes") : null;
+    if (closes && (closes(ctx, from).includes(mode) || closes(ctx, to).includes(mode)))
+      return null;
+    const factor = weather ? Math.max(weather(ctx, from, mode), weather(ctx, to, mode)) : 1;
+    const speed = travelTuningOf(ctx.world).speeds[mode];
+    return findRoute(ctx.world, from, to, mode, { terrain: level >= 4, factor, closed: closedRoutes(ctx), ...speed !== undefined ? { speed } : {} });
+  });
 }
 function nominalRoute(ctx, from, to, mode) {
   if (!own(ctx.world.places, to))
@@ -16528,6 +16540,21 @@ function vehicleTrips(ctx, ask, targets) {
   const startMinutes = Math.round(tuning.startMinutes);
   const parkMinutes = Math.round(tuning.parkMinutes);
   const searches = new Map;
+  const places = Object.keys(ctx.world.places).sort();
+  const parks = new Map;
+  const parksAt = (p) => {
+    let ok = parks.get(p);
+    if (ok === undefined)
+      parks.set(p, ok = ask.canPark(p));
+    return ok;
+  };
+  const walks = new Map;
+  const walkAt = (p) => {
+    let factor = walks.get(p);
+    if (factor === undefined)
+      walks.set(p, factor = weather ? weather(ctx, p, "walk") : 1);
+    return factor;
+  };
   for (const to of targets) {
     if (to === ask.from || to === ask.at || !own(ctx.world.places, to))
       continue;
@@ -16538,27 +16565,33 @@ function vehicleTrips(ctx, ask, targets) {
     const key = modes.map((m) => `${m}:${factors.get(m)}`).join(",");
     let search = searches.get(key);
     if (!search) {
-      const costing2 = { speed: (m) => ask.speed ?? tuning.speeds[m], terrain: level >= 4, factor: (m) => factors.get(m) ?? 1 };
-      search = { costing: costing2, tree: grow(modes.map((mode) => ({ mode, graph: edges(ctx.world, mode, closed) })), [ask.at], costing2) };
+      search = passMemo([ctx.state, ctx.state.entities, ctx.world], `space.drive\x00${ask.at}\x00${ask.speed ?? ""}\x00${key}`, () => {
+        const costing2 = { speed: (m) => ask.speed ?? tuning.speeds[m], terrain: level >= 4, factor: (m) => factors.get(m) ?? 1 };
+        return { costing: costing2, tree: grow(modes.map((mode) => ({ mode, graph: edges(ctx.world, mode, closed) })), [ask.at], costing2), arrivals: new Map };
+      });
       searches.set(key, search);
     }
-    const { tree, costing } = search;
+    const { tree, costing, arrivals } = search;
     const walkClosed = closes ? closes(ctx, to).includes("walk") : false;
-    const back = walkClosed ? null : grow([{ mode: "walk", graph: reverseEdges(ctx.world, closed) }], [to, `${to}${EXIT}`], { speed: (m) => tuning.speeds[m], terrain: level >= 4, factor: () => 1 });
+    const back = walkClosed ? null : passMemo([ctx.state, ctx.state.entities, ctx.world], `space.walkback\x00${to}`, () => grow([{ mode: "walk", graph: reverseEdges(ctx.world, closed) }], [to, `${to}${EXIT}`], { speed: (m) => tuning.speeds[m], terrain: level >= 4, factor: () => 1 }));
     const arrive = (p) => {
-      const nodes = [p, `${p}${EXIT}`].filter((n) => tree.prev.has(n)).sort((a, b) => (tree.dist.get(a) ?? Infinity) - (tree.dist.get(b) ?? Infinity));
-      const node = nodes[0];
-      return node === undefined ? null : { node, minutes: tree.dist.get(node) ?? Infinity };
+      const known = arrivals.get(p);
+      if (known !== undefined)
+        return known;
+      const node = [p, `${p}${EXIT}`].filter((n) => tree.prev.has(n)).sort((a, b) => (tree.dist.get(a) ?? Infinity) - (tree.dist.get(b) ?? Infinity))[0];
+      const there = node === undefined ? null : { node, minutes: tree.dist.get(node) ?? Infinity };
+      arrivals.set(p, there);
+      return there;
     };
     let best = null;
     const around = new Set([...aroundOf(ctx.world, ask.at), ...aroundOf(ctx.world, to)]);
-    for (const p of [to, ...Object.keys(ctx.world.places).sort()]) {
-      if (p === ask.at || p !== to && (!ask.canPark(p) || around.has(p)))
+    for (const p of [to, ...places]) {
+      if (p === ask.at || p !== to && (around.has(p) || !parksAt(p)))
         continue;
       const there = arrive(p);
       if (!there)
         continue;
-      const walkWeather = weather ? Math.max(weather(ctx, p, "walk"), weather(ctx, to, "walk")) : 1;
+      const walkWeather = weather ? Math.max(walkAt(p), walkAt(to)) : 1;
       const rest = p === to ? 0 : (back?.dist.get(p) ?? Infinity) * walkWeather;
       const minutes = there.minutes + rest;
       if (Number.isFinite(minutes) && (best === null || minutes < best.minutes))
@@ -25787,7 +25820,7 @@ var BUSINESS_FIELDS2 = {
 };
 var valuing = new Set;
 function businessIds2(api, ctx) {
-  return Object.keys(ctx.state.entities).filter((id) => api.partyKind(ctx, id) === "business").sort();
+  return passMemo([ctx.state, ctx.state.entities, ctx.world, api], "economy.businesses", () => Object.keys(ctx.state.entities).filter((id) => api.partyKind(ctx, id) === "business").sort());
 }
 function valuationOf(api, ctx, business) {
   const f = own(ctx.state.entities, business)?.fields ?? {};
@@ -28977,6 +29010,9 @@ function householdView(ctx, viewer, household, flows, viewOf) {
   };
 }
 function buildFinanceView(hooks, ctx, party, player) {
+  return passMemo([ctx.state, ctx.world, hooks], `economy.finance\x00${player ? "p" : "g"}\x00${party}`, () => financeView(hooks, ctx, party, player));
+}
+function financeView(hooks, ctx, party, player) {
   const pov = player ? ctx.world.pov : null;
   const viewer = { pov, hidden: pov === null ? NO_HIDDEN : hiddenNames2(ctx, pov) };
   const runsFlows = featureFor(ctx, party, "flows");
@@ -35604,7 +35640,7 @@ function tripsFor(ctx, vehicle, from, targets) {
   return plan2(ctx, { from, at: at2, modes: modesOf(ctx, vehicle), ...speed !== undefined ? { speed } : {}, canPark: (p) => canSeePlace(ctx.registry, ctx.world, ctx.state, pov, p) }, targets);
 }
 function tripFor(ctx, vehicle, from, to) {
-  return tripsFor(ctx, vehicle, from, [to]).get(to) ?? null;
+  return passMemo([ctx.state, ctx.state.entities, ctx.world], `vehicles.trip\x00${vehicle}\x00${from}\x00${to}`, () => tripsFor(ctx, vehicle, from, [to]).get(to) ?? null);
 }
 function legOf(trip) {
   return { minutes: trip.drive.minutes, distanceKm: trip.drive.distanceKm, terrain: trip.drive.legs.find((l) => l.terrain)?.terrain ?? null, mode: trip.drive.mode };
@@ -35982,31 +36018,43 @@ function parseClimate(raw) {
   });
   return { label: strOf(raw.label, "Climate"), states, seasons, persist: numOf(raw.persist, DEFAULT_PERSIST) };
 }
+var parsedClimates = new WeakMap;
 function climateOf(ctx, region) {
   const id = strOf(own(ctx.state.entities, region)?.fields.climate, "temperate");
   const custom = ctx.world.packs.weather?.config.climates;
   const authored = Array.isArray(custom) ? custom.map((c) => objOf(c)).find((c) => strOf(c.id, strOf(c.region)) === id) : undefined;
-  return authored ? parseClimate(authored) : own(CLIMATES, id) ?? CLIMATES.temperate;
+  if (!authored)
+    return own(CLIMATES, id) ?? CLIMATES.temperate;
+  let climate = parsedClimates.get(authored);
+  if (!climate) {
+    climate = parseClimate(authored);
+    parsedClimates.set(authored, climate);
+  }
+  return climate;
 }
 function climateSeason(climate, month) {
   return climate.seasons.find((s) => s.months.includes(month)) ?? climate.seasons[0] ?? null;
 }
 function regionOf2(ctx, place2) {
-  let cur = place2 ?? undefined;
-  for (let guard = 0;cur && guard < 32; guard++) {
-    const r = own(ctx.world.places, cur)?.fields.region;
-    if (typeof r === "string" && own(ctx.state.entities, r))
-      return r;
-    cur = own(ctx.world.places, cur)?.parent;
-  }
-  return Object.keys(ctx.state.entities).sort().find((id) => kindIs(ctx.registry, ctx.world, own(ctx.state.entities, id)?.kind ?? "", "region")) ?? null;
+  return passMemo([ctx.state, ctx.state.entities, ctx.world], `weather.region\x00${place2 ?? "\x01"}`, () => {
+    let cur = place2 ?? undefined;
+    for (let guard = 0;cur && guard < 32; guard++) {
+      const r = own(ctx.world.places, cur)?.fields.region;
+      if (typeof r === "string" && own(ctx.state.entities, r))
+        return r;
+      cur = own(ctx.world.places, cur)?.parent;
+    }
+    return passMemo([ctx.state, ctx.state.entities, ctx.world], "weather.region", () => Object.keys(ctx.state.entities).sort().find((id) => kindIs(ctx.registry, ctx.world, own(ctx.state.entities, id)?.kind ?? "", "region")) ?? null);
+  });
 }
 function stateAt(ctx, place2) {
-  const region = regionOf2(ctx, place2);
-  if (!region)
-    return null;
-  const id = strOf(own(ctx.state.entities, region)?.fields.weather);
-  return climateOf(ctx, region).states.find((s) => s.id === id) ?? null;
+  return passMemo([ctx.state, ctx.state.entities, ctx.world], `weather.state\x00${place2 ?? "\x01"}`, () => {
+    const region = regionOf2(ctx, place2);
+    if (!region)
+      return null;
+    const id = strOf(own(ctx.state.entities, region)?.fields.weather);
+    return climateOf(ctx, region).states.find((s) => s.id === id) ?? null;
+  });
 }
 function buildWeatherView(ctx) {
   const level = ctx.levelOf(ctx.world.pov, "weather");
@@ -44368,7 +44416,10 @@ function buildOrgsGm(ctx) {
     const page = buildOrgView(ctx, id, null);
     if (!page)
       return [];
+    const based = new Set([...rowsAt(ctx, id).map((r) => r.who), ...ownersIn(own(ctx.state.entities, id)?.fields ?? {}).map((o) => o.party), ...delegationsOf(ctx, id).map((d) => d.who)]);
     const may = people.flatMap((who) => {
+      if (!based.has(who))
+        return [];
       const powers = powersAt(ctx, id, who).map(({ power, grant: grant2 }) => ({ power, basis: grant2.basis, chain: chainOf(ctx, id, who, power, grant2, 0) }));
       return powers.length > 0 ? [{ who: { id: who, name: nameOf6(ctx, who) }, powers }] : [];
     });
@@ -78113,11 +78164,13 @@ I then re-measured with the engine's own \`extract\` step as shipped (strict rul
     Once a chat is open, no drawer request, turn, reply or helper call reads it again (\`scripts/perf/chat-reads.ts\`, on an 870-message chat whose rows carry 185 KB of reasoning each: one read at the open, none in a typed turn or a Send after a reply, where every turn read it once before). The blob sweep (§4.4), which passes through every chat of the user's, reads each without keeping a copy (\`MessageCache.glance\`), so the chat in use is never evicted and read whole again after it.
   - **Memory budget.** The host gives an extension no sign of memory pressure, and a whole read of such a chat raises this process's RSS by about 520 MB at once (the allocator keeps those pages). Each whole read's garbage is collected once it has landed, so the next read reuses its pages (the second of two such chats peaks 120–160 MB lower). Past 768 MB of RSS (\`MEMORY_LIMIT_BYTES\`: above the about 710 MB two such reads take with the backend's own 48 MB), looked at after each whole read and every minute, the engine lets go of what it builds again for every chat not in use (no page shows it on screen, it holds no turn or operation, and it isn't its user's latest read): its copy of the messages, its open ledger with the revisions that pins, and its last pushed view; then it collects. It does so again only once the RSS has grown another 64 MB or fallen back below the limit.
   - **Read passes.** A view, the GM view, the fact lines and the engine run's sections are each built in a read pass (\`readPass\`), after the folds, with synchronous reads only. Within a pass, each of these is gathered once (\`passMemo\`), keyed by the state and world it reads:
-    - each travel mode's route graph;
-    - the economy's flows, account holders, pass-through shares and contract work;
-    - the hidden-name check.
+    - each travel mode's route graph, each route asked for (\`routeAt\`), each drive's search from where a vehicle stands, each walk back from a destination, and each vehicle's trip;
+    - the economy's flows, account holders, pass-through shares and contract work, its businesses, and each party's money as a view reads it (\`buildFinanceView\`);
+    - every organization's delegations in force (one walk for all of them), its places, and the businesses;
+    - each place's region and sky, and each authored climate as parsed (kept with the world's own record of it);
+    - the hidden-name check, and the words no player line may hold.
 
-    Applying an event to a state drops what was kept for it. Nothing is kept outside a pass, so a simulation that changes its states in place always reads them afresh.
+    So a part that asks the same of every person, place or destination asks it once: GM → Orgs' Who may… asks for the powers of only those with a basis in each organization (its rows, its owners, its delegates). On a large private world (a 1,058-message chat, 61 revisions) the GM view went from 12 s to 0.7 s and a view rebuilt after a turn from 3.7 s to 0.5 s; \`test/backend/state-view-perf.test.ts\` holds both to growing about as the world does. Applying an event to a state drops what was kept for it. Nothing is kept outside a pass, so a simulation that changes its states in place always reads them afresh.
   - **Pure memos.** Each of these is a pure function of its text, so it is kept across passes, with the oldest dropped first:
     - content ids, 4,096 kept;
     - name spellings and compiled name patterns, 8,192 kept;
@@ -79407,12 +79460,12 @@ Each fact is one unit under its change type's mode (\`ITEM_CHANGES\`, §11): \`i
 - **Kept in the world:** GM → Things → *Keep in the world* (§28.12) copies made places into the world's draft under their own ids.
 
 ### 28.11 The Curator
-A turn role (\`curator\`, Settings → Agents → Roles) that keeps the world's fabric true to the reply on an agent chat: its things, the places it makes, its walk-on people and a purchase's goods. It runs in the post phase beside the read, under the read's own call, and commits after the read in role order; Re-narrate, Re-run and Re-read edit treat it as the read. While it runs (Settings → Agents → Pipeline, *The Curator keeps the world's things and places*, on by default) the read proposes none of those facts (\`CURATOR_FACTS\`); off, or on a classic chat, the read keeps them and the reconciler applies them.
-- **Its context:** the GM's view with every secret marked; the reply, the turn's own changes in words (so it never makes one twice), and the Place, Gear and People sections; never minds.
+A turn role (\`curator\`, Settings → Agents → Roles) that keeps the world's fabric true to the reply on an agent chat: its things, the places it makes, its walk-on people and a purchase's goods. It runs in the post phase beside the read, under the read's own call, and commits after the read in role order; Re-narrate, Re-run and Re-read edit treat it as the read. While it runs (Settings → Agents → Pipeline, *The Curator keeps the world's things and places*, on by default) the read proposes none of those facts (\`CURATOR_FACTS\`): what it gives of them it holds aside (\`ExtractRead.held\`; cash handed over is its own transfer), and they land through the reconciler only where the Curator's own work isn't whole (it failed or never ran, a round limit cut its agent short, or its prompt-only read stands in for a failed agent), for what the Curator didn't stage or answer (\`uncurated\`: its staged changes and answer facts settled first; a held thing fact is the Curator's when the reconciler finds a thing they made or changed, or nothing left to change; a purchase, a walk-on or a place made by name), each logged; while its work is whole none lands. Off, or on a classic chat, the read keeps them and the reconciler applies them.
+- **Its context:** the GM's view with every secret marked; the reply, the turn's own changes in words (so it never makes one twice), and the Place, Gear and People sections, which list the scene's things and people by the names its writes read; never minds.
 - **Its tools** (families items and places to write, people and money to read; tier story): the reads \`items_find\`, \`items_at\`, \`items_of\`, \`items_read\`, \`items_access\` and \`places_find\`, beside the existing ones; one write per op (\`item_make\` … \`item_merge\`, \`place_make\`, \`place_label\`), each checked with \`dry\` first if it likes, staged in the turn, refused with its reason; \`person_add\` and \`purchase\` noted for the read's own path (the spawn cap, its dedupe, the purchase channel). \`item_remove\` is the GM tier's. A write names its thing, and the thing something goes into (\`in\`, or a made thing's \`home\`), as \`items_find\` reads words: its id or its whole name when that names one thing only, else through the one name resolver (§28.7: name, alias or type row, the head noun always, an owner and a place or holder narrowing it, nearest the player character first), on the view with what the agent staged earlier in the turn on top, so "put the milk in the fridge" finds the Refrigerator it has just made; a person \`in\` names is a person by name first. Words that fit several things standing first together are refused with each of them by name and id (\`tool.note.ambiguous\`), never guessed.
-- **Its rules** (\`role.curator.*\`, registry texts with their Reset): the reply is canon, change the fewest things; find before you make; a handover keeps the owner unless the reply says given, sold, traded or kept; a thing too big to carry is placed, never held; say why in every change; a hidden thing the reply reveals is found, one it doesn't stays as it is; make a place only when the reply puts someone or something there and nothing fits; when unsure, change nothing.
-- **Bounds:** *Curator ops per turn* (24), the user's *Things made from a reply* and the world's places per turn; each staged op is validated again at commit, in order, and refused with its reason when it no longer holds; an op asked twice is staged once.
-- **Prompt-only** (its on-fail default, or set so): one call of classic's read on the Curator's facts alone, whose answer the reconciler settles exactly as classic's.
+- **Its rules** (\`role.curator.*\`, registry texts with their Reset): the reply is canon, change the fewest things; work from the sections, naming what they list as they name it, looking up only what they don't show; find before you make (a make looks first itself); make the changes as soon as they are known, several calls in one answer, lookups together before them; a handover keeps the owner unless the reply says given, sold, traded or kept; a thing too big to carry is placed, never held; say why in every change; a hidden thing the reply reveals is found, one it doesn't stays as it is; make a place only when the reply puts someone or something there and nothing fits; when unsure, change nothing, and stop once the reply's things are right.
+- **Bounds:** *Curator ops per turn* (24), its own *Tool rounds per agent* (6, \`CURATOR_TOOL_TURNS\`, over every agent's 10), the user's *Things made from a reply* and the world's places per turn; each staged op is validated again at commit, in order, and refused with its reason when it no longer holds; an op asked twice is staged once. A round limit (its own or the turn's) that stops its agent before it answers is no failure: what it staged and noted stands, its answer cut short (\`short: "cut"\`), and its run's yield is a Diagnostics warning (\`main.lost.curator.cut\`).
+- **Prompt-only** (its on-fail default, or set so): one call of classic's read on the Curator's facts alone, whose answer the reconciler settles exactly as classic's; run in place of a failed agent, the read's held facts land beside it for what it doesn't cover.
 
 ### 28.12 Build → Things, GM → Things, Tidy up and Keep in the world
 **Build → Things** (\`frontend/build/things.tsx\`, read through \`lre.things\` with \`scope: "build"\` from the draft as a chat would start, \`engine/thing-view.ts\`; each change one draft patch) lists the world's things **By place** (a tree of places, what lies there and what holds what, each row with its size, whose and its badges) and **By owner** (each owner's things on them, at home and elsewhere, organizations included), with a search through the name resolver, then names starting with the words. **Add a thing** takes four fields: a name; what it is (a type from either catalog, which fills its size and details, or a size in words); where it is (one picker: places by path, people, holders with whose and where); and whose (a person, a household, a business, a group or nobody, with whose a thing nobody owns is presumed there); *Kept at* follows where it is unless changed. A thing's page has **Where it is** and **Kept at**, **Whose**, **Who may use it** (each person the resolver lets use it, grouped by ground, and the grants), **What it is**, **Holds** (with + Add inside and what it takes), its secrecy and every field under Advanced, never a tier or a life. A character's **Things they have** groups theirs (on them, at home, elsewhere, lent out, holding for others) with Move, Give, Lend and Remove; a place's **Things here** lists its furnishings and loose things. Problems reads the things lint (\`gear.too_big\` and \`gear.two_places\`, each with a one-press fix; \`gear.size_unknown\`, a note).
@@ -80867,7 +80920,7 @@ A sweep never removes a text anything still points at: a record on any swipe of 
 
 **Settings → Agents → Roles** lists the roles of an agent turn in the order they commit (**Intent**, **Scene and lore**, **Minds**, **Knowledge**, **Director**, **Read**, **Curator**, **Memory**, **Skip beats**, **World steps**), each on its shipped defaults until you change it, with **Default** to put the whole role back: its **connection** and **model** (its classic step's connection unless you pick one); its **reasoning effort** (*Connection's own*); its **tools**, one switch per family; **what it may change**: *Nothing*, *The story's changes* (the default) or *The GM's edits too*; **prompt-only** (off: on, it makes its classic step's one call and behaves exactly as classic); **when it fails**: *Run its classic call* (the default), *Go on without it*, or *Stop the turn* (the intent's default; after the reply it stops reading the reply instead, which then waits unread with **Retry read**), which the main agent decides for itself when it runs the turn. Whichever you pick, nothing a failed run wanted to change lands. *Stop the turn* stops it there, before any other role runs or any gate shows, and the card says what stopped it; a prompt-only role set so stops the turn where classic would (its step's call failing, or a mind that didn't answer). Then its **caching**, with **Bust**; and its **budget**, every agent's until you set a limit of its own (**Every agent's** goes back). Every role's tools read everything, each secret marked with whom it is known to and kept from: what a role works from is a hint on the **Context** page, never a screen.
 
-**The Curator** keeps the world's things and places true to the reply on a chat on agents: who has what and whose it is, the rooms and spots the reply puts people in, the people who walk on, and what a purchase brings. It works after the reply, beside the read, which leaves all of that to it, from the GM's view with every secret marked, the turn's own changes in words and the Place, Gear and People sections (never minds). Each change is one call of one of its tools: making a thing (it looks first, and is refused when the thing is already there), moving it, handing it over (to hold, as a loan, back, or for keeps), making it someone's, letting someone use it, where it's kept, using it up, wearing it, wearing it down, losing it, renaming it, merging two that are one; making or renaming a place; adding a walk-on; a purchase. Each is checked and staged with the turn, lands after the read's, and asks first or applies by the reply's types' modes ([Extraction modes](#extraction-modes)). Its rules, editable in **Prompts → Curator**, say: the reply is canon, change as little as makes the world agree; find before you make; a handover keeps the owner unless the reply says given, sold, traded or kept; a thing too big to carry is placed, never held; say why; a hidden thing the reply reveals is found; make a place only when the reply puts someone there and nothing fits; when unsure, change nothing. Its card on this page adds **Curator ops per turn** (24): past it, its changes are refused, and it is told so. Taking a thing out of the world needs *The GM's edits too*. Switch the Curator off under **Pipeline** (**The Curator keeps the world's things and places**, on by default), and the read reads things, places, walk-ons and purchases itself, as classic does; prompt-only, it is one call of classic's reading of those alone.
+**The Curator** keeps the world's things and places true to the reply on a chat on agents: who has what and whose it is, the rooms and spots the reply puts people in, the people who walk on, and what a purchase brings. It works after the reply, beside the read, which leaves all of that to it, from the GM's view with every secret marked, the turn's own changes in words and the Place, Gear and People sections (never minds), which list the scene's things and people by the names its tools read, so it names what they show and looks up only what they don't. Each change is one call of one of its tools: making a thing (it looks first, and is refused when the thing is already there), moving it, handing it over (to hold, as a loan, back, or for keeps), making it someone's, letting someone use it, where it's kept, using it up, wearing it, wearing it down, losing it, renaming it, merging two that are one; making or renaming a place; adding a walk-on; a purchase. Each is checked and staged with the turn, lands after the read's, and asks first or applies by the reply's types' modes ([Extraction modes](#extraction-modes)). Its rules, editable in **Prompts → Curator**, say: the reply is canon, change as little as makes the world agree; work from the sections, naming what they list as they name it; find before you make (a make looks first itself); make the changes as soon as you know them, several calls in one answer, lookups together before them; a handover keeps the owner unless the reply says given, sold, traded or kept; a thing too big to carry is placed, never held; say why; a hidden thing the reply reveals is found; make a place only when the reply puts someone there and nothing fits; when unsure, change nothing, and stop once the things are right. Its card on this page adds **Curator ops per turn** (24): past it, its changes are refused, and it is told so; and its budget ships with **Tool rounds per agent** of its own, 6 (every agent's is 10): when its rounds run out before it answers, what it staged and noted still lands, and Diagnostics warns that it stopped short. Taking a thing out of the world needs *The GM's edits too*. The read still gives the things, places, walk-ons and purchases it sees, but holds them aside for the Curator: they land only where the Curator's own work doesn't cover them, when its rounds ran out, its agent failed (beside its prompt-only read), or it never ran (a main agent that didn't run it), each once, never what the Curator staged already; while its work is whole, none of them lands. Switch the Curator off under **Pipeline** (**The Curator keeps the world's things and places**, on by default), and the read reads things, places, walk-ons and purchases itself, as classic does; prompt-only, it is one call of classic's reading of those alone.
 
 **Settings → Agents → Context** says what each role starts with, and is the guide the main agent briefs the roles by. For each role, with its default beside each setting and **Default** for the whole role: its **perspective**, *Your character's*, *Everyone's, secrets marked*, *The GM's* or *Its character's own* (the character its task is about, as a mind works), a hint in its system prompt that never changes what its tools read; how it gets each source, the **Lore index** and each of the narrator's sections (the Scene, the Minds, the Outcome and the rest, as the narrator would get them then, secrets marked): **Starts with** (in its prompt from the start, in either pipeline), **When needed** (the default: the main agent may give it when the task needs it, and its tools can read it) or **Never** (the main agent is told never to give it); and its **pinned files**, workspace paths one a line, read whole within its pins budget before those \`.pins.json\` lists for it and those you pinned in GM → Workspace (a path the chat has no file at is passed over). By default the **Director**, which briefs and outlines the reply, starts with the **Scene** (with the scene role's lore and notes so far) and the **Minds**, and the **Curator** with **Place**, **Gear** and **People**, never the **Minds**; every other role starts with its task alone; the intent works from your character's perspective, the minds and the memory from their own character's, the Curator from the GM's, and the rest from everyone's. A role never gets less than this page gives it, whichever pipeline runs it; with a main agent deciding, the main agent is told every role's settings here and decides what else each is told.
 
@@ -82718,7 +82771,7 @@ var package_default = {
 // src/cli/version.ts
 var CLI_NAME = "lumirpengine";
 var CLI_VERSION = package_default.version;
-var BUILD = "4515a4b7";
+var BUILD = "465776e0";
 function runtimeCannotFollow(bun) {
   if (bun === undefined)
     return null;

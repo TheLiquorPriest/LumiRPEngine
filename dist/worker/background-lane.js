@@ -6566,7 +6566,7 @@ function wordedLines(reg, world, state, pov, events, max, player, you = "You") {
     if (!text || lines.some((l) => l.text === text))
       continue;
     if (player) {
-      secrets ??= [...unrevealedSecrets(reg, world, state), ...hiddenNames(reg, world, state, pov)];
+      secrets ??= passMemo([state, world], `player.secrets\x00${pov}`, () => [...unrevealedSecrets(reg, world, state), ...hiddenNames(reg, world, state, pov)]);
       if (findLeaks(text, secrets).length > 0)
         continue;
     }
@@ -7434,19 +7434,27 @@ function positionsBelow(positions, position) {
   return out;
 }
 function delegationsOf(ctx, org) {
-  const out = [];
-  for (const who of Object.keys(ctx.state.entities).sort()) {
-    if (isGone(ctx.state, who))
-      continue;
-    for (const r of own(ctx.state.entities, who)?.relations ?? []) {
-      if (r.type !== ACTS_FOR || r.to !== org || typeof r.until === "number" && r.until < ctx.state.clock)
+  return [...delegationsIn(ctx, org)];
+}
+function delegationsIn(ctx, org) {
+  const byOrg = passMemo([ctx.state, ctx.state.entities], "orgs.delegations", () => {
+    const out = new Map;
+    for (const who of Object.keys(ctx.state.entities).sort()) {
+      if (isGone(ctx.state, who))
         continue;
-      const f = objOf(r.fields);
-      const limits = limitsIn(f);
-      out.push({ who, org, powers: powersIn(f.powers), ...limits ? { limits } : {}, ...typeof f.by === "string" && f.by !== "" ? { by: f.by } : {}, ...typeof r.until === "number" ? { until: r.until } : {} });
+      for (const r of own(ctx.state.entities, who)?.relations ?? []) {
+        if (r.type !== ACTS_FOR || typeof r.until === "number" && r.until < ctx.state.clock)
+          continue;
+        const f = objOf(r.fields);
+        const limits = limitsIn(f);
+        const list = out.get(r.to) ?? [];
+        list.push({ who, org: r.to, powers: powersIn(f.powers), ...limits ? { limits } : {}, ...typeof f.by === "string" && f.by !== "" ? { by: f.by } : {}, ...typeof r.until === "number" ? { until: r.until } : {} });
+        out.set(r.to, list);
+      }
     }
-  }
-  return out;
+    return out;
+  });
+  return byOrg.get(org) ?? [];
 }
 function defaultPowers(type, how) {
   if (how === "member" && (type === "household" || type === "group"))
@@ -7470,7 +7478,7 @@ function orgPower(ctx, who, org, power, thing) {
   const held = heldPositions(ctx, who, org).find((h) => h.position.powers.some((p) => powerCovers(p, power)));
   if (held)
     return { basis: "position", id: held.position.id };
-  const delegated = delegationsOf(ctx, org).find((d) => d.who === who && d.powers.some((p) => powerCovers(p, power)));
+  const delegated = delegationsIn(ctx, org).find((d) => d.who === who && d.powers.some((p) => powerCovers(p, power)));
   if (delegated)
     return delegated.by === undefined ? { basis: "delegate" } : { basis: "delegate", id: delegated.by };
   if (!isMemberOf(ctx, who, org))
@@ -7510,7 +7518,7 @@ function mayAct(ctx, who, org, power, ask = {}) {
     limits = held?.position.limits;
     scoped = held?.position.scope === "below" ? held.position : undefined;
   } else if (grant.basis === "delegate")
-    limits = delegationsOf(ctx, org).find((d) => d.who === who && d.powers.some((p) => powerCovers(p, power)))?.limits;
+    limits = delegationsIn(ctx, org).find((d) => d.who === who && d.powers.some((p) => powerCovers(p, power)))?.limits;
   const amount = ask.amount;
   if (limits && amount !== undefined) {
     const over = overLimit(limits, amount, limits.month !== undefined ? spentThisMonth(ctx, who, org) : null, name, ctx.world.currency);
@@ -7543,7 +7551,7 @@ function placesOf(ctx, business) {
   return here ? [here] : [];
 }
 function businessIds(ctx) {
-  return Object.keys(ctx.state.entities).filter((id) => kindIs(ctx.registry, ctx.world, own(ctx.state.entities, id)?.kind ?? "", COMPANY_KIND) && !isGone(ctx.state, id)).sort();
+  return passMemo([ctx.state, ctx.state.entities, ctx.world], "orgs.businesses", () => Object.keys(ctx.state.entities).filter((id) => kindIs(ctx.registry, ctx.world, own(ctx.state.entities, id)?.kind ?? "", COMPANY_KIND) && !isGone(ctx.state, id)).sort());
 }
 function businessAt(ctx, place) {
   if (!place)
@@ -7565,20 +7573,22 @@ function businessAt(ctx, place) {
 function orgPlaces(ctx, org) {
   if (own(ctx.world.places, org))
     return [org];
-  const type = orgTypeOf(ctx, org);
-  const fields = own(ctx.state.entities, org)?.fields;
-  const listed = Array.isArray(fields?.places) ? fields.places.filter((p) => typeof p === "string" && own(ctx.world.places, p) !== undefined) : [];
-  const out = new Set(type === "company" ? placesOf(ctx, org) : listed);
-  for (const id of Object.keys(ctx.state.entities)) {
-    const e = own(ctx.state.entities, id);
-    if (!e || isGone(ctx.state, id))
-      continue;
-    if (type === "household" && typeof e.fields.home === "string" && own(ctx.world.places, e.fields.home) && kindIs(ctx.registry, ctx.world, e.kind, "person") && isMemberOf(ctx, id, org))
-      out.add(e.fields.home);
-    if (kindIs(ctx.registry, ctx.world, e.kind, "property") && typeof e.fields.place === "string" && own(ctx.world.places, e.fields.place) && (worthShares(ownersIn(e.fields))[org] ?? 0) > 0)
-      out.add(e.fields.place);
-  }
-  return [...out].sort();
+  return passMemo([ctx.state, ctx.state.entities, ctx.world], `orgs.places:${org}`, () => {
+    const type = orgTypeOf(ctx, org);
+    const fields = own(ctx.state.entities, org)?.fields;
+    const listed = Array.isArray(fields?.places) ? fields.places.filter((p) => typeof p === "string" && own(ctx.world.places, p) !== undefined) : [];
+    const out = new Set(type === "company" ? placesOf(ctx, org) : listed);
+    for (const id of Object.keys(ctx.state.entities)) {
+      const e = own(ctx.state.entities, id);
+      if (!e || isGone(ctx.state, id))
+        continue;
+      if (type === "household" && typeof e.fields.home === "string" && own(ctx.world.places, e.fields.home) && kindIs(ctx.registry, ctx.world, e.kind, "person") && isMemberOf(ctx, id, org))
+        out.add(e.fields.home);
+      if (kindIs(ctx.registry, ctx.world, e.kind, "property") && typeof e.fields.place === "string" && own(ctx.world.places, e.fields.place) && (worthShares(ownersIn(e.fields))[org] ?? 0) > 0)
+        out.add(e.fields.place);
+    }
+    return [...out].sort();
+  });
 }
 function tradingDays(state, business) {
   const v = own(state.entities, business)?.fields.trading_days;
@@ -17791,16 +17801,18 @@ function closedRoutes(ctx) {
   return out;
 }
 function routeAt(ctx, from, to, mode) {
-  const level = ctx.levelOf(ctx.world.pov, "space");
-  if (level <= 1)
-    return nominalRoute(ctx, from, to, mode);
-  const weather = level >= 4 ? optionalQuery(ctx, "weather.travel_factor") : null;
-  const closes = level >= 4 ? optionalQuery(ctx, "weather.closed_modes") : null;
-  if (closes && (closes(ctx, from).includes(mode) || closes(ctx, to).includes(mode)))
-    return null;
-  const factor = weather ? Math.max(weather(ctx, from, mode), weather(ctx, to, mode)) : 1;
-  const speed = travelTuningOf(ctx.world).speeds[mode];
-  return findRoute(ctx.world, from, to, mode, { terrain: level >= 4, factor, closed: closedRoutes(ctx), ...speed !== undefined ? { speed } : {} });
+  return passMemo([ctx.state, ctx.state.entities, ctx.world], `space.route\x00${mode}\x00${from}\x00${to}`, () => {
+    const level = ctx.levelOf(ctx.world.pov, "space");
+    if (level <= 1)
+      return nominalRoute(ctx, from, to, mode);
+    const weather = level >= 4 ? optionalQuery(ctx, "weather.travel_factor") : null;
+    const closes = level >= 4 ? optionalQuery(ctx, "weather.closed_modes") : null;
+    if (closes && (closes(ctx, from).includes(mode) || closes(ctx, to).includes(mode)))
+      return null;
+    const factor = weather ? Math.max(weather(ctx, from, mode), weather(ctx, to, mode)) : 1;
+    const speed = travelTuningOf(ctx.world).speeds[mode];
+    return findRoute(ctx.world, from, to, mode, { terrain: level >= 4, factor, closed: closedRoutes(ctx), ...speed !== undefined ? { speed } : {} });
+  });
 }
 function nominalRoute(ctx, from, to, mode) {
   if (!own(ctx.world.places, to))
@@ -17869,6 +17881,21 @@ function vehicleTrips(ctx, ask, targets) {
   const startMinutes = Math.round(tuning.startMinutes);
   const parkMinutes = Math.round(tuning.parkMinutes);
   const searches = new Map;
+  const places = Object.keys(ctx.world.places).sort();
+  const parks = new Map;
+  const parksAt = (p) => {
+    let ok = parks.get(p);
+    if (ok === undefined)
+      parks.set(p, ok = ask.canPark(p));
+    return ok;
+  };
+  const walks = new Map;
+  const walkAt = (p) => {
+    let factor = walks.get(p);
+    if (factor === undefined)
+      walks.set(p, factor = weather ? weather(ctx, p, "walk") : 1);
+    return factor;
+  };
   for (const to of targets) {
     if (to === ask.from || to === ask.at || !own(ctx.world.places, to))
       continue;
@@ -17879,27 +17906,33 @@ function vehicleTrips(ctx, ask, targets) {
     const key = modes.map((m) => `${m}:${factors.get(m)}`).join(",");
     let search = searches.get(key);
     if (!search) {
-      const costing2 = { speed: (m) => ask.speed ?? tuning.speeds[m], terrain: level >= 4, factor: (m) => factors.get(m) ?? 1 };
-      search = { costing: costing2, tree: grow(modes.map((mode) => ({ mode, graph: edges(ctx.world, mode, closed) })), [ask.at], costing2) };
+      search = passMemo([ctx.state, ctx.state.entities, ctx.world], `space.drive\x00${ask.at}\x00${ask.speed ?? ""}\x00${key}`, () => {
+        const costing2 = { speed: (m) => ask.speed ?? tuning.speeds[m], terrain: level >= 4, factor: (m) => factors.get(m) ?? 1 };
+        return { costing: costing2, tree: grow(modes.map((mode) => ({ mode, graph: edges(ctx.world, mode, closed) })), [ask.at], costing2), arrivals: new Map };
+      });
       searches.set(key, search);
     }
-    const { tree, costing } = search;
+    const { tree, costing, arrivals } = search;
     const walkClosed = closes ? closes(ctx, to).includes("walk") : false;
-    const back = walkClosed ? null : grow([{ mode: "walk", graph: reverseEdges(ctx.world, closed) }], [to, `${to}${EXIT}`], { speed: (m) => tuning.speeds[m], terrain: level >= 4, factor: () => 1 });
+    const back = walkClosed ? null : passMemo([ctx.state, ctx.state.entities, ctx.world], `space.walkback\x00${to}`, () => grow([{ mode: "walk", graph: reverseEdges(ctx.world, closed) }], [to, `${to}${EXIT}`], { speed: (m) => tuning.speeds[m], terrain: level >= 4, factor: () => 1 }));
     const arrive = (p) => {
-      const nodes = [p, `${p}${EXIT}`].filter((n) => tree.prev.has(n)).sort((a, b) => (tree.dist.get(a) ?? Infinity) - (tree.dist.get(b) ?? Infinity));
-      const node = nodes[0];
-      return node === undefined ? null : { node, minutes: tree.dist.get(node) ?? Infinity };
+      const known = arrivals.get(p);
+      if (known !== undefined)
+        return known;
+      const node = [p, `${p}${EXIT}`].filter((n) => tree.prev.has(n)).sort((a, b) => (tree.dist.get(a) ?? Infinity) - (tree.dist.get(b) ?? Infinity))[0];
+      const there = node === undefined ? null : { node, minutes: tree.dist.get(node) ?? Infinity };
+      arrivals.set(p, there);
+      return there;
     };
     let best = null;
     const around = new Set([...aroundOf(ctx.world, ask.at), ...aroundOf(ctx.world, to)]);
-    for (const p of [to, ...Object.keys(ctx.world.places).sort()]) {
-      if (p === ask.at || p !== to && (!ask.canPark(p) || around.has(p)))
+    for (const p of [to, ...places]) {
+      if (p === ask.at || p !== to && (around.has(p) || !parksAt(p)))
         continue;
       const there = arrive(p);
       if (!there)
         continue;
-      const walkWeather = weather ? Math.max(weather(ctx, p, "walk"), weather(ctx, to, "walk")) : 1;
+      const walkWeather = weather ? Math.max(walkAt(p), walkAt(to)) : 1;
       const rest = p === to ? 0 : (back?.dist.get(p) ?? Infinity) * walkWeather;
       const minutes = there.minutes + rest;
       if (Number.isFinite(minutes) && (best === null || minutes < best.minutes))
@@ -26891,7 +26924,7 @@ var BUSINESS_FIELDS2 = {
 };
 var valuing = new Set;
 function businessIds2(api, ctx) {
-  return Object.keys(ctx.state.entities).filter((id) => api.partyKind(ctx, id) === "business").sort();
+  return passMemo([ctx.state, ctx.state.entities, ctx.world, api], "economy.businesses", () => Object.keys(ctx.state.entities).filter((id) => api.partyKind(ctx, id) === "business").sort());
 }
 function valuationOf(api, ctx, business) {
   const f = own(ctx.state.entities, business)?.fields ?? {};
@@ -30081,6 +30114,9 @@ function householdView(ctx, viewer, household, flows, viewOf) {
   };
 }
 function buildFinanceView(hooks, ctx, party, player) {
+  return passMemo([ctx.state, ctx.world, hooks], `economy.finance\x00${player ? "p" : "g"}\x00${party}`, () => financeView(hooks, ctx, party, player));
+}
+function financeView(hooks, ctx, party, player) {
   const pov = player ? ctx.world.pov : null;
   const viewer = { pov, hidden: pov === null ? NO_HIDDEN : hiddenNames2(ctx, pov) };
   const runsFlows = featureFor(ctx, party, "flows");
@@ -35262,7 +35298,7 @@ function tripsFor(ctx, vehicle, from, targets) {
   return plan2(ctx, { from, at: at2, modes: modesOf(ctx, vehicle), ...speed !== undefined ? { speed } : {}, canPark: (p) => canSeePlace(ctx.registry, ctx.world, ctx.state, pov, p) }, targets);
 }
 function tripFor(ctx, vehicle, from, to) {
-  return tripsFor(ctx, vehicle, from, [to]).get(to) ?? null;
+  return passMemo([ctx.state, ctx.state.entities, ctx.world], `vehicles.trip\x00${vehicle}\x00${from}\x00${to}`, () => tripsFor(ctx, vehicle, from, [to]).get(to) ?? null);
 }
 function legOf(trip) {
   return { minutes: trip.drive.minutes, distanceKm: trip.drive.distanceKm, terrain: trip.drive.legs.find((l) => l.terrain)?.terrain ?? null, mode: trip.drive.mode };
@@ -35640,31 +35676,43 @@ function parseClimate(raw) {
   });
   return { label: strOf(raw.label, "Climate"), states, seasons, persist: numOf(raw.persist, DEFAULT_PERSIST) };
 }
+var parsedClimates = new WeakMap;
 function climateOf(ctx, region) {
   const id = strOf(own(ctx.state.entities, region)?.fields.climate, "temperate");
   const custom = ctx.world.packs.weather?.config.climates;
   const authored = Array.isArray(custom) ? custom.map((c) => objOf(c)).find((c) => strOf(c.id, strOf(c.region)) === id) : undefined;
-  return authored ? parseClimate(authored) : own(CLIMATES, id) ?? CLIMATES.temperate;
+  if (!authored)
+    return own(CLIMATES, id) ?? CLIMATES.temperate;
+  let climate = parsedClimates.get(authored);
+  if (!climate) {
+    climate = parseClimate(authored);
+    parsedClimates.set(authored, climate);
+  }
+  return climate;
 }
 function climateSeason(climate, month) {
   return climate.seasons.find((s) => s.months.includes(month)) ?? climate.seasons[0] ?? null;
 }
 function regionOf2(ctx, place2) {
-  let cur = place2 ?? undefined;
-  for (let guard = 0;cur && guard < 32; guard++) {
-    const r = own(ctx.world.places, cur)?.fields.region;
-    if (typeof r === "string" && own(ctx.state.entities, r))
-      return r;
-    cur = own(ctx.world.places, cur)?.parent;
-  }
-  return Object.keys(ctx.state.entities).sort().find((id) => kindIs(ctx.registry, ctx.world, own(ctx.state.entities, id)?.kind ?? "", "region")) ?? null;
+  return passMemo([ctx.state, ctx.state.entities, ctx.world], `weather.region\x00${place2 ?? "\x01"}`, () => {
+    let cur = place2 ?? undefined;
+    for (let guard = 0;cur && guard < 32; guard++) {
+      const r = own(ctx.world.places, cur)?.fields.region;
+      if (typeof r === "string" && own(ctx.state.entities, r))
+        return r;
+      cur = own(ctx.world.places, cur)?.parent;
+    }
+    return passMemo([ctx.state, ctx.state.entities, ctx.world], "weather.region", () => Object.keys(ctx.state.entities).sort().find((id) => kindIs(ctx.registry, ctx.world, own(ctx.state.entities, id)?.kind ?? "", "region")) ?? null);
+  });
 }
 function stateAt(ctx, place2) {
-  const region = regionOf2(ctx, place2);
-  if (!region)
-    return null;
-  const id = strOf(own(ctx.state.entities, region)?.fields.weather);
-  return climateOf(ctx, region).states.find((s) => s.id === id) ?? null;
+  return passMemo([ctx.state, ctx.state.entities, ctx.world], `weather.state\x00${place2 ?? "\x01"}`, () => {
+    const region = regionOf2(ctx, place2);
+    if (!region)
+      return null;
+    const id = strOf(own(ctx.state.entities, region)?.fields.weather);
+    return climateOf(ctx, region).states.find((s) => s.id === id) ?? null;
+  });
 }
 function buildWeatherView(ctx) {
   const level = ctx.levelOf(ctx.world.pov, "weather");
@@ -43877,7 +43925,10 @@ function buildOrgsGm(ctx) {
     const page = buildOrgView(ctx, id, null);
     if (!page)
       return [];
+    const based = new Set([...rowsAt(ctx, id).map((r) => r.who), ...ownersIn(own(ctx.state.entities, id)?.fields ?? {}).map((o) => o.party), ...delegationsOf(ctx, id).map((d) => d.who)]);
     const may = people.flatMap((who) => {
+      if (!based.has(who))
+        return [];
       const powers = powersAt(ctx, id, who).map(({ power, grant: grant2 }) => ({ power, basis: grant2.basis, chain: chainOf(ctx, id, who, power, grant2, 0) }));
       return powers.length > 0 ? [{ who: { id: who, name: nameOf6(ctx, who) }, powers }] : [];
     });

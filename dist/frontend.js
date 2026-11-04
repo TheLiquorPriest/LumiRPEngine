@@ -16368,10 +16368,11 @@ var FAMILIES = {
   skip: ["people", "places", "time", "minds"],
   world: ["people", "places", "items", "money", "orgs", "quests", "time"]
 };
+var CURATOR_TOOL_TURNS = 6;
 function defaultRoleSettings() {
   const out = {};
   for (const id of ROLE_IDS)
-    out[id] = { connectionId: null, model: null, effort: "inherit", families: [...FAMILIES[id]], tier: "story", promptOnly: false, onFail: id === "intent" ? "stop" : "prompt_only", budget: {} };
+    out[id] = { connectionId: null, model: null, effort: "inherit", families: [...FAMILIES[id]], tier: "story", promptOnly: false, onFail: id === "intent" ? "stop" : "prompt_only", budget: id === "curator" ? { toolTurns: CURATOR_TOOL_TURNS } : {} };
   return out;
 }
 
@@ -30967,6 +30968,8 @@ var YIELD_TEXT = {
   read: (kind) => `main.lost.read.${kind}`,
   readEmpty: "main.lost.read.empty",
   readUntracked: "main.lost.read.untracked",
+  readHeld: "main.lost.read.held",
+  curatorCut: "main.lost.curator.cut",
   sceneLore: "main.lost.scene.lore",
   prose: (kind) => `main.lost.prose.${kind}`,
   proseAdvice: "main.lost.prose.advice"
@@ -31020,6 +31023,8 @@ var AGENT_YIELD_PROMPTS = [
   ...Object.entries(READ).map(([kind, t3]) => def(YIELD_TEXT.read(kind), t3.label, t3.note, t3.text, t3.vars)),
   def(YIELD_TEXT.readEmpty, "Read: an empty answer", "A read whose answer proposed no change at all.", "its answer proposed no change", []),
   def(YIELD_TEXT.readUntracked, "Read: a count of a thing the world doesn't have", "A count of a thing (how many of it there are) that the world has no entity for, or none the player character knows of: it is only a Not tracked note to the player, since a count makes no thing. Every other change to a thing finds the thing the words mean, or makes it where the story acts on it.", "{{count}} count a thing the world doesn't have ({{things}}): each changes nothing but a Not tracked note, since a count makes no thing", [count, { name: "things", text: "each thing as the read named it; one named by an id the player character doesn't know, as something they don't know", required: true }]),
+  def(YIELD_TEXT.readHeld, "Read: held for the Curator", "Changes of the Curator's types (a thing's, a purchase, a walk-on, a place made in play) that a read gave on an agent chat with the Curator on: held aside, each lands through the reconciler only where the Curator's own work doesn't cover it, when its agent failed, never ran or stopped at a round limit.", "{{count}} held for the Curator ({{types}}): each lands only where the Curator's own work doesn't cover it", [count, { name: "types", text: "the types it gave, each once", required: true }]),
+  def(YIELD_TEXT.curatorCut, "Curator: stopped at a round limit", "A Curator run whose agent a limit on its rounds of tool calls (Tool rounds per agent, or per turn) stopped before it answered: what it staged and noted stands and lands with the turn, and the read's held changes land for what it didn't stage.", "its agent stopped at a round limit before it answered: what it staged and noted stands, and the read's held changes land for what it didn't stage", []),
   def(YIELD_TEXT.sceneLore, "Scene: lore it doesn't have", "Lore ids a scene run chose that the world has no entry for.", "{{count}} lore ids not taken (the world has no such entry: {{ids}})", [count, { name: "ids", text: "the ids it gave", required: true }]),
   ...Object.entries(PROSE).map(([kind, t3]) => def(YIELD_TEXT.prose(kind), t3.label, t3.note, t3.text, [count, lines])),
   def(YIELD_TEXT.proseAdvice, "Director: what a flag means", "Follows the director's flagged lines: the engine's check reads each line against the state by its words alone, so a flag is advice, never by itself a reason to revise.", "the engine thinks these lines may contradict the state; not by itself a reason to revise", [])
@@ -31726,13 +31731,15 @@ var READ_PROMPTS = [
 ];
 var CURATOR_RULES = [
   "The reply is canon: make the world agree with it in the fewest changes.",
-  "Find before you make (items_find, places_find): never make a second of the same thing.",
+  "Work from what you are given: the Place, Gear and People sections are the scene's things and people as they stand. Name a thing, a person or a place they list as they name it, which your tools read; look up only what they don't show.",
+  "Find before you make: never make a second of the same thing. item_make and place_make look first themselves: one the world has is refused with its id, which you then use.",
+  "Make your changes as soon as you know them, several calls in one answer, and any lookups you need all together before them: each answer that calls tools is one of the few rounds you have.",
   "A handover keeps the owner unless the reply says given, sold, traded or kept: give it the basis the reply says (hold when it says none).",
   "A thing too big to carry (furniture, an appliance) is placed, never held.",
   "Say why in every change, in a few words.",
   "A hidden thing the reply reveals is found, never made again; one it doesn't reveal stays as it is.",
   "Make a place only when the reply puts someone or something there and nothing fits.",
-  "When unsure, change nothing."
+  "When unsure, change nothing. Once the reply's things are right, stop and answer."
 ];
 var CURATOR_TASK = [
   "{{instructions}}",
@@ -31740,7 +31747,7 @@ var CURATOR_TASK = [
   "World: {{world}}. The player character is {{pov}} (id {{pov_id}}).",
   "What this turn did already, as the engine recorded it (never do it again):",
   "{{events}}",
-  "Make each change with your tools, one change a call: the engine checks it, stages it with the turn, or refuses it with why. Look a thing or a place up first (items_find, places_find) and use the id it gives; check a change you are unsure of with dry set first. Someone who walks on (person_add), a purchase (purchase) and a place someone is put in (place_make with entity) are noted, and land with the reply's other changes.",
+  "Make each change with your tools, one change a call: the engine checks it, stages it with the turn, or refuses it with why. The engine's sections below show the scene as it stands: name what they list as they name it, and look a thing or a place up (items_find, places_find) only when they don't show it, every lookup you need in one answer. Then make every change in one answer, several calls at once, checking one with dry set only when you are unsure. Someone who walks on (person_add), a purchase (purchase) and a place someone is put in (place_make with entity) are noted, and land with the reply's other changes. Your rounds of calls are few: make the changes the reply needs most first.",
   "{{message}}",
   "Narration:",
   "{{reply}}"
