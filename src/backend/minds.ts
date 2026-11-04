@@ -48,7 +48,7 @@ import { faded, readCharacter, readSlice, salienceNow } from "../packs/minds/cor
 import { sectionsOf } from "./book";
 import type { HostMessage, HostPort } from "./host";
 import { seedKnowledge } from "./knowledge-seed";
-import { checkKnowledge, knowledgeBatches, knowledgeContext, type KnowledgeSpent, type KnowledgeTurn } from "./knowledge-step";
+import { checkKnowledge, knowledgeBatches, knowledgeContext, knowledgeSpent, type KnowledgeTurn } from "./knowledge-step";
 import { askMind, type MindAsk } from "./mind-ask";
 import { pinReader, readPins } from "./lore-pins";
 import { consolidateContext, memoryContext, mindContext, pinnedLines, povLabel, type GivenLore, type MindContextReport, type MindScope } from "./minds-context";
@@ -724,8 +724,9 @@ async function knowledgeCalls(deps: MindsDeps, settings: UserSettings, config: S
   const refused = (kind: KnowledgeRefusal, n = 1): void => {
     out.refused[kind] = (out.refused[kind] ?? 0) + n;
   };
-  // The turn's limits hold across its calls: new facts, learnings and witnessed facts are counted for the turn, not each call.
-  const spent: KnowledgeSpent = { facts: new Set(), learnings: 0, witnessed: new Set() };
+  // The turn's limits hold across its calls: new facts, learnings and witnessed facts are counted for
+  // the turn, not each call, and a fact an earlier call made is the one a later call that says it names.
+  const spent = knowledgeSpent();
   for (const call of await Promise.all(asked)) {
     const checked = call.raw === null ? null : checkKnowledge({ ...turn, state: w.state }, call.batch, call.raw, spent);
     if (!checked && !signal.aborted) out.failed++;

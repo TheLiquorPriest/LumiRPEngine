@@ -1401,6 +1401,10 @@ export class LedgerCore {
       if (parts.transcript === undefined || !Number.isInteger(session.transcriptChars) || session.transcriptChars < 0) return "the transcript's length isn't a count of its characters";
       parts.transcriptChars = session.transcriptChars;
     }
+    if (session.transcriptAt !== undefined) {
+      if (parts.transcript === undefined || !Number.isSafeInteger(session.transcriptAt) || session.transcriptAt < 0) return "the transcript's time isn't a moment in milliseconds";
+      parts.transcriptAt = session.transcriptAt;
+    }
     const chain = this.chain(observed);
     const index = chain.findLastIndex((m) => !m.isUser);
     const head = chain[index];

@@ -4,7 +4,8 @@
 // What references a blob, per user: every swipe's record in every one of their chats (each chat read,
 // whether or not its metadata shows it as LRE's), read from the
 // host's message metadata (LRE has journals only for the chats it has opened, and never sees a
-// Branch being made), each with its session's parts, the segments a compaction's summary or an
+// Branch being made), each with its session's parts (its turn's transcript only while the user's
+// retention keeps it: `transcript-files.ts`), the segments a compaction's summary or an
 // archived span reads (once earlier messages are deleted, only they name a kept segment) and the
 // workspace files its events and post entries write; every chat's agent metadata (its learned
 // index, and its GM assistant thread's messages and proposals); the user's global workspace's index;
@@ -21,7 +22,7 @@
 // (after each ledger operation, and when settings load) and one is due: garbage accrues only with
 // activity, so no timer is needed.
 
-import type { ChatId, UserId } from "../../shared/ids";
+import type { ChatId, MessageId, UserId } from "../../shared/ids";
 import { hashParts } from "../../shared/hash";
 import { isRecord, type JsonObject } from "../../shared/json";
 import { LEDGER_NAMESPACE, type Journal } from "../../shared/ledger";
@@ -34,6 +35,7 @@ import { journalPath } from "../ledger-io";
 import { readStoredJson } from "../stored-json";
 import type { BlobStore } from "./blobs";
 import { baseRefsOf, recordSessionOf, sessionRefsOf } from "./sessions";
+import { repliesFromEnd, type TranscriptKeep, transcriptKept } from "./tools/transcript-files";
 
 /** The sweep's state in the user's storage (a fixed path, AGENT-LOOP-PLAN §16). */
 export const SWEEP_PATH = "agents/sweep.json";
@@ -106,9 +108,12 @@ function eventRefs(events: unknown, into: Found): void {
   if (Array.isArray(events)) for (const hash of workspaceRefs(events)) into.blobs.add(hash);
 }
 
-/** What a stored record names, read leniently (records come from any metadata writer): its session's parts, and the files its events and post entries write. */
-function recordRefs(rec: unknown, into: Found): void {
-  for (const hash of sessionRefsOf(rec)) into.blobs.add(hash);
+/** Whether the user's retention keeps a record's transcript, written at `at` (unknown on a record kept before it was noted), on the reply the record is on. */
+type KeepsTranscript = (at: number | undefined) => boolean;
+
+/** What a stored record names, read leniently (records come from any metadata writer): its session's parts (its transcript while `transcript` keeps it), and the files its events and post entries write. */
+function recordRefs(rec: unknown, into: Found, transcript: KeepsTranscript): void {
+  for (const hash of sessionRefsOf(rec, transcript)) into.blobs.add(hash);
   const { summary, archived } = recordSessionOf(rec);
   for (const base of [summary, archived]) if (base !== undefined) into.bases.add(base);
   if (!isRecord(rec)) return;
@@ -119,10 +124,11 @@ function recordRefs(rec: unknown, into: Found): void {
 /**
  * What the ledger in a message's metadata names: inline, or its chunks joined and checked as
  * `decodeLedger` reads them, with every swipe's record taken leniently (one its checks would skip
- * still names what it names). False when it can't be read (a chunk missing, the chunks not matching
- * their hash, or text that isn't JSON), so what it names is unknown.
+ * still names what it names), its transcript while `transcript` keeps it. False when it can't be
+ * read (a chunk missing, the chunks not matching their hash, or text that isn't JSON), so what it
+ * names is unknown.
  */
-function ledgerRefs(bag: JsonObject, into: Found): boolean {
+function ledgerRefs(bag: JsonObject, into: Found, transcript: KeepsTranscript): boolean {
   let raw: unknown = bag[LEDGER_NAMESPACE];
   if (isRecord(raw) && typeof raw.chunks === "number" && typeof raw.hash === "string") {
     if (!Number.isInteger(raw.chunks) || raw.chunks < 1) return false;
@@ -141,22 +147,23 @@ function ledgerRefs(bag: JsonObject, into: Found): boolean {
     }
   }
   const swipes = isRecord(raw) ? raw.swipes : undefined;
-  if (isRecord(swipes)) for (const rec of Object.values(swipes)) recordRefs(rec, into);
+  if (isRecord(swipes)) for (const rec of Object.values(swipes)) recordRefs(rec, into, transcript);
   return true;
 }
 
 /**
  * What a journal names that the metadata may not: each message's records (one not yet flushed, or
- * one its message lost to another writer, which the journal writes back), the planned events of its
- * pending turns with a Re-narrate's copies, and the post entries of its held writes. Lenient, as a
- * stored journal is read as it is found.
+ * one its message lost to another writer, which the journal writes back), each with its transcript
+ * while `transcript` keeps one on that message, the planned events of its pending turns with a
+ * Re-narrate's copies, and the post entries of its held writes. Lenient, as a stored journal is read
+ * as it is found.
  */
-function journalRefs(journal: unknown, into: Found): void {
+function journalRefs(journal: unknown, into: Found, transcript: (messageId: MessageId) => KeepsTranscript): void {
   if (!isRecord(journal)) return;
   if (isRecord(journal.messages)) {
-    for (const m of Object.values(journal.messages)) {
+    for (const [id, m] of Object.entries(journal.messages)) {
       const swipes = isRecord(m) && isRecord(m.ledger) ? m.ledger.swipes : undefined;
-      if (isRecord(swipes)) for (const rec of Object.values(swipes)) recordRefs(rec, into);
+      if (isRecord(swipes)) for (const rec of Object.values(swipes)) recordRefs(rec, into, transcript(id));
     }
   }
   if (isRecord(journal.pending)) {
@@ -300,8 +307,9 @@ export class Sweep {
         state.unreferenced = {};
         return { ran: true, stored: 0, referenced: 0, found: 0, removed: 0 };
       }
-      const { unreferencedDays } = await this.deps.retention(userId);
-      const read = await this.references(userId, stored);
+      const retention = await this.deps.retention(userId);
+      const { unreferencedDays } = retention;
+      const read = await this.references(userId, stored, { retention, now: began });
       const held = this.deps.blobs.held(userId);
       const marks = state.unreferenced;
       for (const hash of Object.keys(marks)) if (!stored.has(hash)) delete marks[hash];
@@ -354,11 +362,20 @@ export class Sweep {
    * what (`unknown`); what was found before that still counts. A base's segments are read only for a
    * base still stored. Every chat of the user's is read, not only those whose metadata holds LRE's
    * key: one whose key is gone, or that the list doesn't show as LRE's, can still hold records,
-   * journals or diagnostics that name blobs, so a chat that can't be told apart fails closed.
+   * journals or diagnostics that name blobs, so a chat that can't be told apart fails closed. A turn's
+   * transcript counts only while `keep` keeps it, by its reply's place from its chat's end among the
+   * chat's messages (one only a journal holds, on a message the chat doesn't list, is kept) and by
+   * when it was written.
    */
-  private async references(userId: UserId, stored: ReadonlySet<string>): Promise<{ refs: Set<string>; unknown: string | null }> {
+  private async references(userId: UserId, stored: ReadonlySet<string>, keep: TranscriptKeep): Promise<{ refs: Set<string>; unknown: string | null }> {
     const { host, blobs } = this.deps;
     const found: Found = { blobs: new Set(), bases: new Set() };
+    // Each chat's replies by their place from its end, read only while a turn limit is set.
+    const places = new Map<ChatId, Map<MessageId, number>>();
+    const keeps =
+      (chatId: ChatId, messageId: MessageId): KeepsTranscript =>
+      (at) =>
+        transcriptKept(keep, places.get(chatId)?.get(messageId) ?? null, at);
     let reading = "the global workspace";
     try {
       for (const hash of await this.deps.global(userId)) found.blobs.add(hash);
@@ -367,19 +384,21 @@ export class Sweep {
       for (const chat of chats) {
         for (const hash of agentRefs(chat.metadata)) found.blobs.add(hash);
         reading = `chat ${chat.id}'s messages`;
-        for (const m of await this.deps.messages(chat.id, userId)) if (!ledgerRefs(m.metadata, found)) return { refs: found.blobs, unknown: `chat ${chat.id}: the engine data on message ${m.id} can't be read` };
+        const messages = await this.deps.messages(chat.id, userId);
+        if (keep.retention.turnTranscripts !== "none") places.set(chat.id, repliesFromEnd(messages));
+        for (const m of messages) if (!ledgerRefs(m.metadata, found, keeps(chat.id, m.id))) return { refs: found.blobs, unknown: `chat ${chat.id}: the engine data on message ${m.id} can't be read` };
       }
       const open = new Set<ChatId>();
       for (const journal of this.deps.journals(userId)) {
         open.add(journal.chatId);
-        journalRefs(journal, found);
+        journalRefs(journal, found, (id) => keeps(journal.chatId, id));
       }
       for (const chat of chats) {
         if (open.has(chat.id)) continue;
         reading = `chat ${chat.id}'s journal`;
         const text = await host.storage.read(journalPath(chat.id), userId);
         // One that doesn't parse names nothing: the chat puts a fresh one in its place when it opens.
-        if (text !== null) journalRefs(parsed(text), found);
+        if (text !== null) journalRefs(parsed(text), found, (id) => keeps(chat.id, id));
       }
       for (const chat of chats) {
         reading = `chat ${chat.id}'s diagnostics`;

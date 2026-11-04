@@ -8,13 +8,15 @@
 // every role runs prompt-only but the scene's, whose agent writes a note before it answers.
 
 import { describe, expect, test } from "bun:test";
+import { transcriptFiles } from "../../src/backend/agents/tools/transcript-files";
 import { outsideReader } from "../../src/backend/agents/tools/read-view";
-import { listWorkspace, readWorkspaceFile, WORKSPACE_TOOLS } from "../../src/backend/agents/tools/workspace";
+import { chatHead, listWorkspace, readWorkspaceFile, WORKSPACE_TOOLS } from "../../src/backend/agents/tools/workspace";
 import type { QuietRequest, QuietToolCall } from "../../src/backend/host";
 import { ROLE_IDS } from "../../src/shared/agent-roles";
 import type { JsonObject } from "../../src/shared/json";
 import { followLive, type LiveChange, type LiveEntry, type LiveView } from "../../src/shared/live";
 import type { SessionView, WorkspaceFileView } from "../../src/shared/protocol";
+import { DAY_MS } from "../../src/shared/stores";
 import type { QuietScript } from "../support/fake-host";
 import { Rig } from "../support/rig";
 
@@ -338,5 +340,41 @@ describe("the turns' transcripts", () => {
     const next = asked.length;
     await played(rig, chatId, "I walk to the pier.", "The boards creak.");
     expect(sentOf(asked[next] as QuietRequest)).not.toContain("# Agent turn");
+  });
+
+  test("the user's retention keeps the latest turns' transcripts, applied after each turn: one past it is listed no more and reads as no file, and each records when it was written, which the age counts from", async () => {
+    const rig = new Rig({ shipped: true });
+    const chatId = await liveChat(rig);
+    models(rig);
+    const listed = async (): Promise<string[]> => (rig.body(await rig.send({ type: "lre.workspace", chatId, op: "list" })).files as WorkspaceFileView[]).flatMap((f) => (f.path.startsWith("transcripts/") ? [f.path] : []));
+    const before = Date.now();
+    for (const [text, reply] of [["I look out over the harbor.", "Gulls wheel over the water."], ["I walk to the pier.", "The boards creak."], ["I wait for the ferry.", "It's late."]] as const) await played(rig, chatId, text, reply);
+    const after = Date.now();
+    // Every one by default.
+    expect(await listed()).toEqual(["transcripts/reply-0002.md", "transcripts/reply-0003.md", "transcripts/reply-0004.md"]);
+    const oldest = rig.body(await rig.send({ type: "lre.workspace", chatId, op: "read", path: "transcripts/reply-0002.md" })).text;
+    expect(oldest).toContain("I look out over the harbor.");
+    // The latest two turns: the first's goes from the list, and nothing reads it.
+    rig.body(await rig.send({ type: "lre.settings.set", patch: { retention: { turnTranscripts: 2 } } }));
+    expect(await listed()).toEqual(["transcripts/reply-0003.md", "transcripts/reply-0004.md"]);
+    expect(await readWorkspaceFile(rig.rt, { userId: rig.host.userId, chatId }, "transcripts/reply-0002.md")).toBeNull();
+    const base = { userId: rig.host.userId, chatId, knowledge: "gm" as const };
+    const env = { ...base, reader: outsideReader(rig.rt, base), writer: null, agent: { role: "scene", id: "agent_scene" }, signal: new AbortController().signal };
+    const read = WORKSPACE_TOOLS.find((t) => t.name === "workspace_read");
+    if (!read) throw new Error("no workspace_read");
+    expect((await read.run({ path: "transcripts/reply-0002.md" }, env)).error).toBe(true);
+    // The next turn moves it on.
+    await played(rig, chatId, "I board.", "The ferry pulls away.");
+    expect(await listed()).toEqual(["transcripts/reply-0004.md", "transcripts/reply-0005.md"]);
+    // Each notes when it was written, within its turn: the age counts from then.
+    const head = await chatHead(rig.rt, chatId, rig.host.userId);
+    if (!head) throw new Error("no head");
+    const dated = (now: number): (number | null)[] => transcriptFiles(head, { retention: { turnTranscripts: "none", turnTranscriptDays: 1 }, now }).map((f) => f.provenance.turn);
+    expect(dated(before + DAY_MS)).toEqual([2, 3, 4, 5]);
+    expect(dated(after + DAY_MS + 1).filter((turn) => turn !== null && turn <= 4)).toEqual([]);
+    // No limit again: every one is listed, the first's record having named its transcript all along.
+    rig.body(await rig.send({ type: "lre.settings.set", patch: { retention: { turnTranscripts: "none" } } }));
+    expect(await listed()).toEqual(["transcripts/reply-0002.md", "transcripts/reply-0003.md", "transcripts/reply-0004.md", "transcripts/reply-0005.md"]);
+    expect(rig.rt.ledger.errors).toEqual([]);
   });
 });

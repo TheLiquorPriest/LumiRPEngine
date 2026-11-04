@@ -80,7 +80,7 @@ const PAGE: Record<Page, { title: string; subtitle: string; icon: IconName }> = 
   diagnostics: { title: "Diagnostics", subtitle: "What the engine did each turn, and what failed", icon: "list" },
   mcp: { title: "MCP server", subtitle: "Your agent's lumirpengine, and how it follows updates", icon: "branch" },
   prompts: { title: "Prompts", subtitle: "Every text sent to a model, yours to edit", icon: "edit" },
-  retention: { title: "Retention", subtitle: "How long the agents' stored texts are kept", icon: "box" },
+  retention: { title: "Retention", subtitle: "Which turns keep their transcripts, and how long the agents' stored texts are kept", icon: "box" },
 };
 
 /** The home list's groups, in order. */

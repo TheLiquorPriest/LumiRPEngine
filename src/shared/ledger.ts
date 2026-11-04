@@ -387,6 +387,8 @@ export interface RecSession {
   transcript?: string;
   /** The transcript's length in characters, so a listing needs no read of it. */
   transcriptChars?: number;
+  /** When the transcript was last written (epoch ms), which Settings → Agents → Retention's age counts from; none on a record kept before it was noted. */
+  transcriptAt?: number;
 }
 
 /** The parts of a record's session that are blobs, by hash: what the sweep keeps for the record. */

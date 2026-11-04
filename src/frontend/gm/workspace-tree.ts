@@ -20,7 +20,7 @@ export const WORKSPACE_AREAS: readonly WorkspaceArea[] = ["notes", "learned", "t
 export const AREA_WORDS: Readonly<Record<WorkspaceArea, { title: string; note: string }>> = {
   notes: { title: "Notes", note: "What the agents and you keep for this chat. They follow the story: a swipe back past a reply takes what it wrote." },
   learned: { title: "Learned", note: "Kept apart from the story: a swipe, a Re-run or an Undo never changes them, and a change lands at once." },
-  transcripts: { title: "Transcripts", note: "Everything each turn's agents did, as Live showed it. Read-only; every agent reads them." },
+  transcripts: { title: "Transcripts", note: "Everything each turn's agents did, as Live showed it, for the turns Settings → Agents → Retention keeps (every one, by default). Read-only; every agent reads them." },
   pins: { title: "Pins file", note: "Which files each role is shown first, and how much of them." },
   global: { title: "Global (~/)", note: "Your own workspace, which every chat of yours shares: kept apart from the story, and a change lands at once. Its AGENTS.md and roles/ come before this chat's." },
 };

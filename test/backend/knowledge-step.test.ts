@@ -12,13 +12,13 @@
 
 import { describe, expect, test } from "bun:test";
 import { liveLore } from "../../src/backend/book-lore";
-import { checkKnowledge, knowledgeBatches, knowledgeContext, type KnowledgeChecked, type KnowledgeSpent, type KnowledgeTurn } from "../../src/backend/knowledge-step";
+import { checkKnowledge, knowledgeBatches, knowledgeContext, knowledgeSpent, type KnowledgeChecked, type KnowledgeTurn } from "../../src/backend/knowledge-step";
 import { toChain } from "../../src/backend/ledger-io";
 import { personNamed, postKnowledge, postMinds, postOpening } from "../../src/backend/minds";
 import { buildSections } from "../../src/backend/sections-build";
 import { isRecord, type JsonObject, type JsonValue } from "../../src/shared/json";
 import { LEDGER_NAMESPACE, type LedgerEvent } from "../../src/shared/ledger";
-import { claimFactId, DEFAULT_MINDS_MEMORY, factId, KNOWLEDGE_ANSWER_SHAPE, KNOWLEDGE_DEFAULTS, KNOWLEDGE_TEXTS, MEMORY_ANSWER_V2, MIND_ANSWER_FORMATS, MIND_PROMPT_DEFAULTS, MINDS_EVENTS, witnessRef, type Holding, type KnowledgeFact, type KnowledgeSettings, type KnownView, type LearnEventData, type MindsGmView, type MindsSlice } from "../../src/shared/minds";
+import { claimFactId, claimKey, DEFAULT_MINDS_MEMORY, factId, KNOWLEDGE_ANSWER_SHAPE, KNOWLEDGE_DEFAULTS, KNOWLEDGE_TEXTS, MEMORY_ANSWER_V2, MIND_ANSWER_FORMATS, MIND_PROMPT_DEFAULTS, MINDS_EVENTS, witnessRef, type Holding, type KnowledgeFact, type KnowledgeSettings, type KnownView, type LearnEventData, type MindsGmView, type MindsSlice } from "../../src/shared/minds";
 import { SECRET_MARK_WORDING, secretMarkText } from "../../src/shared/secret-marks";
 import type { NarratorView } from "../../src/shared/settings";
 import type { WorldDoc } from "../../src/shared/world";
@@ -926,7 +926,7 @@ describe("the review's fixes (Increment 0)", () => {
 
     // L1: a new fact two calls both make counts once against the chat's limit.
     const one = { ...turn, settings: { ...KNOWLEDGE_DEFAULTS, factsPerChat: 1 } };
-    const spent: KnowledgeSpent = { facts: new Set(), learnings: 0, witnessed: new Set() };
+    const spent = knowledgeSpent();
     expect(checkKnowledge(one, [MARCUS], sawSedan, spent).refused).toEqual([]);
     const again = checkKnowledge(one, [DANNY], saying({ ...sawSedan, facts: [...(sawSedan.facts as JsonObject[]), { ref: "r", claim: RUMOUR }] }), spent);
     expect(again.refused).toEqual([expect.stringContaining(RUMOUR)]);
@@ -1264,7 +1264,7 @@ describe("knowledge rides on the story (KN-SPEC)", () => {
     expect(calls).toEqual([[POV], [MARCUS], [PRIYA], [DANNY]]);
     const said = ["the lift needs a new seal", "the parts order is late again", "the tow truck is low on diesel", "the bay door sticks in the cold", "the coffee maker gave out", "the inspection moved to Thursday"].map((what, i) => ({ ref: `f${i}`, claim: `Marcus said ${what}`, matters: "Danny would act on it" }));
     const six = { facts: said, learned: said.map((f) => ({ fact: f.ref, how: "witnessed" })) };
-    const spent: KnowledgeSpent = { facts: new Set(), learnings: 0, witnessed: new Set() };
+    const spent = knowledgeSpent();
     // Danny's call, the last, also has Marcus telling him his secret.
     const outs = calls.map((batch) => checkKnowledge(own, batch, batch[0] === DANNY ? { ...six, learned: [...six.learned, { who: ["Danny Okafor"], fact: DEBT, how: "told", by: "Marcus Delgado" }] } : six, spent));
     expect(outs.flatMap((o) => o.refused)).toEqual([]);
@@ -1441,5 +1441,91 @@ describe("knowledge rides on the story (KN-SPEC)", () => {
     const fresh = new Rig({ host: rig.host, shipped: true, minds: true });
     expect(readSlice((await stateOf(fresh, chatId)).state).knowledge).toEqual(folded);
     expect(rig.rt.ledger.errors).toEqual([]);
+  });
+});
+
+describe("one fact per real fact", () => {
+  const LEAVING = "Danny is leaving the shop at the end of the month.";
+  const LATCH = "The bathroom window latch hasn't seated in eleven years";
+  /** Each person's name, as a per-person call's context heads their part. */
+  const NAMES: Readonly<Record<string, string>> = { [POV]: "Jordan Ellis", [MARCUS]: "Marcus Delgado", [DANNY]: "Danny Okafor" };
+  /** The facts the chat holds that were made in play. */
+  const claimsMade = (state: Readonly<WorldState>): KnowledgeFact[] => Object.values(factsOf(readSlice(state))).filter((f) => f.kind === "claim");
+
+  test("what a claim says is its words, case, spacing and punctuation aside", () => {
+    const alike = [LEAVING, "danny is leaving the shop, at the end of the month", "Danny is  LEAVING the shop — at the end of the month!", "“Danny is leaving the shop at the end of the month”"];
+    expect([...new Set(alike.map(claimKey))]).toEqual(["danny is leaving the shop at the end of the month"]);
+    expect(claimKey("Danny’s leaving")).toBe(claimKey("Danny's leaving"));
+    expect(claimKey("Danny is leaving the shop")).not.toBe(claimKey(LEAVING));
+    expect(claimKey("…!")).toBe("");
+  });
+
+  test("per-person calls that each make the same fact, worded their own way, make it once: everyone who learned it holds that one fact, and it counts once against the turn's limit", async () => {
+    const rig = new Rig({ shipped: true, minds: true });
+    const worded: Readonly<Record<string, string>> = { [POV]: LEAVING, [MARCUS]: "danny is leaving the shop, at the end of the month", [DANNY]: "Danny is LEAVING the shop — at the end of the month!" };
+    const seen = models(rig, (context): JsonObject => {
+      const who = Object.keys(NAMES).find((id) => context.includes(`### ${NAMES[id]} (id: ${id}`));
+      return context.includes("LEAVING-MARK") && who ? { facts: [{ ref: "l", claim: worded[who] ?? "", about: ["Danny Okafor"] }], learned: [{ fact: "l", how: "witnessed" }] } : {};
+    });
+    const chatId = await shopChat(rig);
+    // One call per person, and room for one new fact a turn: were each wording a fact of its own, the second and third would be refused.
+    rig.body(await rig.send({ type: "lre.settings.set", patch: { minds: { knowledge: { batch: "character", factsPerTurn: 1 } } } }));
+    await rig.turn(chatId, "Morning, Danny.", "Danny says he's leaving the shop at the end of the month. LEAVING-MARK");
+    expect(seen.knowledge.filter((c) => c.includes("LEAVING-MARK")).length).toBe(3);
+    const { state } = await stateOf(rig, chatId);
+    const made = claimsMade(state);
+    // The first call's wording, the player character's own call coming first.
+    expect(made.map((f) => f.claim)).toEqual([LEAVING]);
+    expect(knowersOf(readSlice(state), made[0]?.id ?? "").sort()).toEqual([DANNY, MARCUS, POV].sort());
+    expect(rig.rt.ledger.errors).toEqual([]);
+  });
+
+  test("a later turn that says again a fact the chat holds makes no new one, needing no reason and spending no limit: whoever learns it joins those who hold it, and the fact stays as recorded", async () => {
+    const rig = new Rig({ shipped: true, minds: true });
+    models(rig, (context): JsonObject => {
+      if (context.includes("LEAVING-1")) return { facts: [{ ref: "l", claim: LEAVING, about: ["Danny Okafor"] }], learned: [{ fact: "l", how: "witnessed", missed: ["you"] }] };
+      // Said again, worded its own way, as a new fact with no reason given.
+      if (context.includes("LEAVING-2")) return { facts: [{ ref: "n", claim: "danny is leaving the shop -- at the end of the month!", matters: "" }], learned: [{ fact: "n", how: "told", who: ["you"], by: "Danny Okafor" }] };
+      return {};
+    });
+    const chatId = await shopChat(rig);
+    await rig.turn(chatId, "I check the parts order.", "Behind the counter, Danny tells Marcus he's leaving at the end of the month. LEAVING-1");
+    const [fact, ...more] = claimsMade((await stateOf(rig, chatId)).state);
+    if (!fact) throw new Error("no fact made");
+    expect(more).toEqual([]);
+    expect(knowersOf(readSlice((await stateOf(rig, chatId)).state), fact.id).sort()).toEqual([DANNY, MARCUS].sort());
+    // The chat at its limit of facts made in play: a new one now would be refused.
+    rig.body(await rig.send({ type: "lre.settings.set", patch: { minds: { knowledge: { factsPerChat: 1 } } } }));
+    await atShop(rig, chatId);
+    await rig.turn(chatId, "What's wrong, Danny?", "Danny tells you he's leaving the shop at the end of the month. LEAVING-2");
+    const { state } = await stateOf(rig, chatId);
+    expect(claimsMade(state)).toEqual([fact]);
+    expect(knowersOf(readSlice(state), fact.id).sort()).toEqual([DANNY, MARCUS, POV].sort());
+    expect(holdingsOf(readSlice(state), POV)[fact.id]).toMatchObject({ how: "told", by: DANNY, belief: "true", confidence: 1 });
+    expect(rig.rt.ledger.errors).toEqual([]);
+  });
+
+  test("of two facts alike that an earlier build made, a later learner joins the one more people hold, and nothing new is recorded", async () => {
+    const rig = new Rig({ shipped: true, minds: true });
+    models(rig, () => ({}));
+    const chatId = await shopChat(rig);
+    await rig.turn(chatId, "I open the shutters.", "Marcus counts the till.");
+    const { state, world } = await stateOf(rig, chatId);
+    const fact = (claim: string, msg: string): KnowledgeFact => ({ id: claimFactId(claim, msg), kind: "claim", claim, about: [], truth: "true", source: { msg, at: state.clock }, matters: "Someone will have to fix it" });
+    const learn = (who: string[], f: KnowledgeFact): LedgerEvent => ({ type: MINDS_EVENTS.learn, data: { who, fact: f.id, how: "witnessed", by: null, evidence: [], belief: "true", confidence: 1, msg: null, at: state.clock } });
+    const once = fact(LATCH, "m-old-1");
+    const twice = fact(`${LATCH}!`, "m-old-2");
+    const w = new Working(rig.rt.registry, world, state);
+    w.applyAll([{ type: MINDS_EVENTS.fact, data: { fact: once as unknown as JsonObject } }, { type: MINDS_EVENTS.fact, data: { fact: twice as unknown as JsonObject } }, learn([DANNY], once), learn([MARCUS, DANNY], twice)]);
+    expect(new Set([once.id, twice.id]).size).toBe(2);
+    // Marcus, who holds only the one more people hold, tells Priya: as a new fact, said again.
+    const turn = shopTurn(rig, world, w.state);
+    const out = checkKnowledge(turn, knowledgeBatches(turn)[0] ?? [], { facts: [{ ref: "h", claim: LATCH.toLowerCase() }], learned: [{ fact: "h", how: "told", who: ["Priya Nair"], by: "Marcus Delgado" }] });
+    expect(out.refused).toEqual([]);
+    expect(out.events.filter((e) => e.type === MINDS_EVENTS.fact)).toEqual([]);
+    expect(learnings(out.events)).toEqual([expect.objectContaining({ who: [PRIYA], fact: twice.id, how: "told", by: MARCUS })]);
+    w.applyAll(out.events);
+    expect(knowersOf(readSlice(w.state), twice.id).sort()).toEqual([DANNY, MARCUS, PRIYA].sort());
+    expect(knowersOf(readSlice(w.state), once.id)).toEqual([DANNY]);
   });
 });

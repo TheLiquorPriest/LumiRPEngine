@@ -1222,6 +1222,16 @@ export function claimFactId(claim: string, msg: MessageId | null): FactId {
   return factId({ kind: "claim", hash: hashParts("minds.claim", words, msg ?? "").slice(0, 10) });
 }
 
+/**
+ * What a claim says, as the knowledge step tells one fact from another (DESIGN §24.11): its words,
+ * case, spacing and punctuation aside, so "Danny is leaving." and "danny is leaving!" are one fact
+ * however many of a turn's calls, or later turns, make it. Not an id: a fact keeps the id it was
+ * made with (`claimFactId`), so what a chat recorded folds as it did. Empty for a claim of no words.
+ */
+export function claimKey(claim: string): string {
+  return claim.normalize("NFKC").toLowerCase().replace(/[\p{P}\s]+/gu, " ").trim();
+}
+
 /** A witness entry as a holding's evidence names it: the entry whole, hashed, so it reads back from the log that keeps it. */
 export function witnessRef(entry: Pick<WitnessEntry, "at" | "what" | "how" | "by" | "place">): string {
   return `witness:${hashParts("minds.witness", String(entry.at), entry.how, entry.by ?? "", entry.place ?? "", entry.what).slice(0, 10)}`;

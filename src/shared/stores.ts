@@ -123,9 +123,10 @@ export const PINS_PATH = ".pins.json";
 
 /**
  * The turns' transcripts' folder (DESIGN §4.6): a read-only area GM → Workspace lists, one file for
- * each reply on the chat's chain whose turn record keeps a transcript (`RecSession.transcript`), so
- * the files follow the chat's path as its workspace does. Every agent reads them; nothing writes,
- * moves, deletes or pins a file under it, and none is a pin or part of the main session.
+ * each reply on the chat's chain whose turn record keeps a transcript the user's retention keeps
+ * (`RetentionSettings.turnTranscripts`, `turnTranscriptDays`), so the files follow the chat's path as
+ * its workspace does. Every agent reads them; nothing writes, moves, deletes or pins a file under it,
+ * and none is a pin or part of the main session.
  */
 export const TRANSCRIPTS_DIR = "transcripts/";
 
@@ -138,7 +139,7 @@ export function transcriptPath(turn: number): string {
   return `${TRANSCRIPTS_DIR}reply-${String(turn).padStart(4, "0")}.md`;
 }
 
-/** How long the agent stores keep what nothing needs (Settings → Agents → Retention). */
+/** How long the agent stores keep what nothing needs, and which of the turns' transcripts each chat keeps (Settings → Agents → Retention). */
 export interface RetentionSettings {
   /** Days Diagnostics keeps an agent call's text after the call; "none" keeps it as long as its record. */
   transcriptDays: Limit;
@@ -149,9 +150,17 @@ export interface RetentionSettings {
   unreferencedDays: number;
   /** Hours between sweeps of unreferenced blobs; "none" never sweeps. No sweep runs while a turn does. */
   sweepHours: Limit;
+  /**
+   * The turns' transcripts (GM → Live's, under `transcripts/`) a chat keeps: its latest this many
+   * replies' ("none", the default: every one). One past it is listed no more and nothing references
+   * it, so a sweep removes it once nothing else needs it.
+   */
+  turnTranscripts: Limit;
+  /** Days a turn's transcript is kept after it was written; "none", the default, keeps it however old. */
+  turnTranscriptDays: Limit;
 }
 
-export const RETENTION_DEFAULTS: Readonly<RetentionSettings> = Object.freeze({ transcriptDays: 30, unreferencedDays: 7, sweepHours: 24 });
+export const RETENTION_DEFAULTS: Readonly<RetentionSettings> = Object.freeze({ transcriptDays: 30, unreferencedDays: 7, sweepHours: 24, turnTranscripts: "none", turnTranscriptDays: "none" });
 
 /** `UserSettings.retention` as stored: each part a whole number from its floor, with no ceiling, else `base`'s. */
 export function retentionOf(raw: unknown, base: Readonly<RetentionSettings> = RETENTION_DEFAULTS): RetentionSettings {
@@ -161,6 +170,8 @@ export function retentionOf(raw: unknown, base: Readonly<RetentionSettings> = RE
     transcriptDays: limitIn(r.transcriptDays, 0, Number.MAX_SAFE_INTEGER, base.transcriptDays),
     unreferencedDays: typeof days === "number" && Number.isInteger(days) && days >= 0 ? days : base.unreferencedDays,
     sweepHours: limitIn(r.sweepHours, 1, Number.MAX_SAFE_INTEGER, base.sweepHours),
+    turnTranscripts: limitIn(r.turnTranscripts, 1, Number.MAX_SAFE_INTEGER, base.turnTranscripts),
+    turnTranscriptDays: limitIn(r.turnTranscriptDays, 1, Number.MAX_SAFE_INTEGER, base.turnTranscriptDays),
   };
 }
 

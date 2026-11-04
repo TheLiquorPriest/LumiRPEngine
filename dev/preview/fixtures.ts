@@ -1385,7 +1385,7 @@ export function settingsFixture(): UserSettings {
     gates: { intent: false, outline: false },
     agents: defaultAgentSettings(),
     prompts: { texts: {}, maxChars: 20_000 },
-    retention: { transcriptDays: 30, unreferencedDays: 7, sweepHours: 24 },
+    retention: { transcriptDays: 30, unreferencedDays: 7, sweepHours: 24, turnTranscripts: "none", turnTranscriptDays: "none" },
     diagnostics: { recordsPerChat: 400 },
     narrator: { ...NARRATOR_DEFAULTS },
     statePrices: true,

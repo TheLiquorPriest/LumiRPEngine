@@ -255,7 +255,7 @@ export function LiveFeed(props: LiveFeedProps) {
   if (view === null)
     return (
       <Empty icon="pulse" title="No agent turn yet">
-        Live shows an agent turn as its agents work it: every agent's messages, reasoning, tool calls and results, and the writes they stage. Nothing has run in this chat since the engine started. Each turn's transcript stays in Workspace, under transcripts/.
+        Live shows an agent turn as its agents work it: every agent's messages, reasoning, tool calls and results, and the writes they stage. Nothing has run in this chat since the engine started. Each turn's transcript stays in Workspace, under transcripts/, for as long as Settings → Agents → Retention keeps it (every one, by default).
       </Empty>
     );
   const items = liveItems(view);

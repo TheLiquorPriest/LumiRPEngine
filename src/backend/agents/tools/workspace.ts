@@ -6,10 +6,11 @@
 // `learned/`, the learned area, kept with its pin in the chat's metadata (`chat-agent-meta.ts`), so a
 // swipe never changes it and a Branch copies it; a path under `~/`, the user's global workspace,
 // which every chat of theirs shares (`global-workspace.ts`); or a turn's transcript under
-// `transcripts/`, read-only. Every agent and the GM read every file: there is no file a role can't
-// read, whatever it was told to keep in mind. Who wrote a file is the record its write landed in: an
-// agent's write is a `fix` entry naming the agent (`PostEntry.agent`), a kept file names the role
-// that wrote it last. Everything here reads the head without the ledger's queue, as the GM view does.
+// `transcripts/`, read-only, while the user's retention keeps it (`transcript-files.ts`). Every agent
+// and the GM read every file: there is no file a role can't read, whatever it was told to keep in
+// mind. Who wrote a file is the record its write landed in: an agent's write is a `fix` entry naming
+// the agent (`PostEntry.agent`), a kept file names the role that wrote it last. Everything here reads
+// the head without the ledger's queue, as the GM view does.
 //
 // The tools: list, read and grep read; write, edit, move, delete and pin propose the change
 // (`propose`), which lands as one GM edit with its Undo once it is applied (a kept file's at once).
@@ -34,7 +35,7 @@ import { BOOLEAN, boolArg, missing, propose } from "./propose";
 import type { ToolReadView } from "./read-view";
 import type { ToolDefinition, ToolEnv } from "./registry";
 import { needText, objectSchema, text, textArg } from "./schema";
-import { transcriptFiles } from "./transcript-files";
+import { type TranscriptKeep, transcriptFiles } from "./transcript-files";
 
 // ---------------------------------------------------------------- the files
 
@@ -123,8 +124,8 @@ export async function keptFiles(rt: Pick<Runtime, "chatAgents" | "globalFiles">,
   return { ...learned, ...global };
 }
 
-/** Every file of a workspace, the head's, the kept ones, then the turns' transcripts (each with its size), by path; a file `staged` names was staged by the turn under way, so no reply holds it yet. */
-function filesOf(head: ChatHead, kept: Readonly<Record<string, KeptFile>>, staged: WorkspaceAt["staged"] = new Map()): Map<string, Omit<WorkspaceFile, "size"> & { size?: number }> {
+/** Every file of a workspace, the head's, the kept ones, then the turns' transcripts `keep` keeps (each with its size), by path; a file `staged` names was staged by the turn under way, so no reply holds it yet. */
+function filesOf(head: ChatHead, kept: Readonly<Record<string, KeptFile>>, keep: TranscriptKeep, staged: WorkspaceAt["staged"] = new Map()): Map<string, Omit<WorkspaceFile, "size"> & { size?: number }> {
   const out = new Map<string, Omit<WorkspaceFile, "size"> & { size?: number }>();
   const sources = fileSources(head);
   const pins = workspacePins(head.state);
@@ -136,15 +137,16 @@ function filesOf(head: ChatHead, kept: Readonly<Record<string, KeptFile>>, stage
   for (const [path, file] of Object.entries(kept)) {
     out.set(path, { path, hash: file.hash, pinned: file.pinned === true, learned: isLearnedPath(path), provenance: { ...(file.role !== undefined ? { role: file.role } : {}), turn: null } });
   }
-  for (const file of transcriptFiles(head)) out.set(file.path, file);
+  for (const file of transcriptFiles(head, keep)) out.set(file.path, file);
   return out;
 }
 
-/** Every file of the chat's workspace, as `at` holds it (a turn under way), else as the chat's head and kept files stand; none for a chat that plays no world. */
+/** Every file of the chat's workspace, as `at` holds it (a turn under way), else as the chat's head and kept files stand, the turns' transcripts as the user's retention keeps them now; none for a chat that plays no world. */
 async function allFiles(rt: Runtime, env: Pick<ToolEnv, "userId" | "chatId">, at?: WorkspaceAt): Promise<Map<string, Omit<WorkspaceFile, "size"> & { size?: number }>> {
-  if (at) return filesOf(at.head, at.kept, at.staged);
+  const keep: TranscriptKeep = { retention: (await rt.settings.get(env.userId)).retention, now: Date.now() };
+  if (at) return filesOf(at.head, at.kept, keep, at.staged);
   const head = await chatHead(rt, env.chatId, env.userId);
-  return head ? filesOf(head, await keptFiles(rt, env.chatId, env.userId)) : new Map();
+  return head ? filesOf(head, await keptFiles(rt, env.chatId, env.userId), keep) : new Map();
 }
 
 /** The workspace's files, by path, as `at` holds them (a turn under way) or the chat's stand, each with its size (`BlobStore.size`, which reads a body once); none for a chat that plays no world. */
@@ -153,11 +155,11 @@ export async function listWorkspace(rt: Runtime, env: Pick<ToolEnv, "userId" | "
   return Promise.all(files.map(async (f): Promise<WorkspaceFile> => ({ ...f, size: f.size ?? (await rt.blobs.size(env.userId, f.hash)) ?? 0 })));
 }
 
-/** A file's text; null when there is no such file, its body is gone, or the chat plays no world. Only the file's own index is read, never who wrote what. */
+/** A file's text; null when there is no such file (a transcript the user's retention no longer keeps among them), its body is gone, or the chat plays no world. Only the file's own index is read, never who wrote what. */
 export async function readWorkspaceFile(rt: Runtime, env: Pick<ToolEnv, "userId" | "chatId">, path: string): Promise<string | null> {
   const head = await chatHead(rt, env.chatId, env.userId);
   if (!head) return null;
-  const hash = isKeptPath(path) ? own(await keptFiles(rt, env.chatId, env.userId), path)?.hash : isTranscriptPath(path) ? transcriptFiles(head).find((f) => f.path === path)?.hash : own(workspaceOf(head.state), path);
+  const hash = isKeptPath(path) ? own(await keptFiles(rt, env.chatId, env.userId), path)?.hash : isTranscriptPath(path) ? transcriptFiles(head, { retention: (await rt.settings.get(env.userId)).retention, now: Date.now() }).find((f) => f.path === path)?.hash : own(workspaceOf(head.state), path);
   return hash === undefined ? null : rt.blobs.get(env.userId, hash);
 }
 

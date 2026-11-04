@@ -750,14 +750,14 @@ export class Orchestrator {
    * The run's transcript for its reply's record (`RecSession.transcript`, which GM → Workspace lists
    * under transcripts/): after the one the record keeps already when an earlier run of the same reply
    * kept one (a Continue's read, a Retry read's, a Re-read edit's), held for `holder` until the record
-   * carries it.
+   * carries it, with when it was written, which Settings → Agents → Retention's age counts from.
    */
-  private async transcript(s: AgentRun, at: Pick<TurnContext, "core" | "observed" | "messageId">, holder: string): Promise<Pick<RecSession, "transcript" | "transcriptChars">> {
+  private async transcript(s: AgentRun, at: Pick<TurnContext, "core" | "observed" | "messageId">, holder: string): Promise<Pick<RecSession, "transcript" | "transcriptChars" | "transcriptAt">> {
     const reply = at.core.chain(at.observed).find((m) => m.id === at.messageId);
     const kept = reply ? recordSessionOf(activeRecord(reply, at.core.journal.tombstones)).transcript : undefined;
     const before = kept ? await this.rt.blobs.get(s.userId, kept) : null;
     const text = before ? `${before}\n${s.live.transcript()}` : s.live.transcript();
-    return { transcript: await this.rt.blobs.put(s.userId, text, holder), transcriptChars: text.length };
+    return { transcript: await this.rt.blobs.put(s.userId, text, holder), transcriptChars: text.length, transcriptAt: Date.now() };
   }
 
   /** A Retry read's transcript joins its reply's record, whose session is its turn's. */

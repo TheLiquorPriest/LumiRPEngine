@@ -77,6 +77,17 @@ async function close(t: Stores, chat: ChatId, text: string): Promise<{ messageId
   return { ...at, segment };
 }
 
+/** The latest reply's turn closes with a transcript, `text`, written at `at` (none: a record kept before its time was noted); its hash. */
+async function transcribed(t: Stores, chat: ChatId, text: string, at?: number): Promise<string> {
+  const head = t.h.host.head(chat);
+  if (!head) throw new Error("no reply");
+  const holder = `transcript-${head.id}-${head.swipeId}`;
+  const transcript = await t.blobs.put(t.user, text, holder);
+  expect(await t.sessions.record(chat, t.user, holder, { messageId: head.id, swipeId: head.swipeId }, { transcript, transcriptChars: text.length, ...(at !== undefined ? { transcriptAt: at } : {}) })).toBeNull();
+  await t.h.host.settle();
+  return transcript;
+}
+
 /** The GM writes a workspace file: a `fix` entry on the head, as GM → Workspace writes land. */
 async function gmFile(t: Stores, chat: ChatId, path: string, text: string): Promise<string> {
   const holder = `gm-${path}`;
@@ -413,5 +424,58 @@ describe("the blob sweep", () => {
     await t.sweep.settle();
     expect(chatLists).toBe(3);
     expect(await t.blobs.get(t.user, junk)).toBeNull();
+  });
+
+  test("a turn's transcript past a chat's latest turns (Settings → Agents → Retention) is no longer referenced and goes a retention later; each chat counts its own, so a Branch keeps the one its chain ends on", async () => {
+    const t = new Stores({ unreferencedDays: 0 });
+    const chat = await t.h.newChat();
+    const transcripts: string[] = [];
+    for (const [i, text] of ["look around", "earn:5", "earn:7"].entries()) {
+      await t.h.send(chat, text);
+      transcripts.push(await transcribed(t, chat, `Everything turn ${i + 1}'s agents did.`, DAY0 + i * DAY_MS));
+    }
+    const [first, second, third] = transcripts;
+    // A Branch ends on the second turn's reply.
+    const replies = t.h.host.chat(chat).messages.filter((m) => !m.isUser);
+    const branch = t.h.host.branch(chat, replies[2]?.id ?? "");
+    await t.h.service.open(branch, t.user);
+    await t.h.host.settle();
+    // Every turn keeps its transcript by default, however many and however old.
+    t.at(400);
+    expect(await t.sweep.run(t.user)).toMatchObject({ ran: true, stored: 3, referenced: 3, found: 0 });
+    // One turn a chat: the parent keeps its third, the Branch its second; the first goes.
+    t.retention.turnTranscripts = 1;
+    expect(await t.sweep.run(t.user)).toMatchObject({ ran: true, stored: 3, referenced: 2, found: 1, removed: 0 });
+    expect(await t.sweep.run(t.user)).toMatchObject({ ran: true, stored: 3, referenced: 2, removed: 1 });
+    expect(await t.blobs.get(t.user, first ?? "")).toBeNull();
+    expect(await t.blobs.get(t.user, second ?? "")).toBe("Everything turn 2's agents did.");
+    expect(await t.blobs.get(t.user, third ?? "")).toBe("Everything turn 3's agents did.");
+    // A record only the chat's journal holds counts the same: the chat let go, its replies' engine data lost to another writer.
+    expect(t.h.service.trim(() => false)).toContain(chat);
+    for (const m of t.h.host.chat(chat).messages) {
+      const { [LEDGER_NAMESPACE]: _lost, ...rest } = m.bag;
+      m.bag = rest;
+    }
+    expect(await t.sweep.run(t.user)).toMatchObject({ ran: true, stored: 2, referenced: 2, found: 0, removed: 0 });
+    await t.diag.settle();
+  });
+
+  test("a turn's transcript written longer ago than its age (Settings → Agents → Retention) goes a retention later; one whose record never noted when it was written stays", async () => {
+    const t = new Stores({ unreferencedDays: 0, turnTranscriptDays: 2 });
+    const chat = await t.h.newChat();
+    await t.h.send(chat, "look around");
+    const undated = await transcribed(t, chat, "An earlier build's transcript.");
+    await t.h.send(chat, "earn:5");
+    const old = await transcribed(t, chat, "A transcript four days old.", DAY0);
+    await t.h.send(chat, "earn:7");
+    const recent = await transcribed(t, chat, "A transcript a day old.", DAY0 + 3 * DAY_MS);
+    t.at(4);
+    expect(await t.sweep.run(t.user)).toMatchObject({ ran: true, stored: 3, referenced: 2, found: 1 });
+    expect(await t.sweep.run(t.user)).toMatchObject({ ran: true, stored: 3, referenced: 2, removed: 1 });
+    expect([await t.blobs.get(t.user, undated), await t.blobs.get(t.user, old), await t.blobs.get(t.user, recent)]).toEqual(["An earlier build's transcript.", null, "A transcript a day old."]);
+    // Exactly its age is still within it.
+    t.at(5);
+    expect(await t.sweep.run(t.user)).toMatchObject({ ran: true, stored: 2, referenced: 2, found: 0 });
+    await t.diag.settle();
   });
 });

@@ -72,7 +72,7 @@ export interface Rebase {
   archived: string;
 }
 
-/** A stored record's session as its readers take it: each blob part a blob's hash, and the transcript's length beside it, anything else left out (records come from any metadata writer). */
+/** A stored record's session as its readers take it: each blob part a blob's hash, and the transcript's length and time beside it, anything else left out (records come from any metadata writer). */
 export function recordSessionOf(rec: unknown): RecSession {
   const raw = isRecord(rec) ? rec.session : undefined;
   if (!isRecord(raw)) return {};
@@ -81,15 +81,24 @@ export function recordSessionOf(rec: unknown): RecSession {
     const hash = raw[part];
     if (isBlobHash(hash)) out[part] = hash;
   }
-  const chars = raw.transcriptChars;
-  if (out.transcript !== undefined && typeof chars === "number" && Number.isInteger(chars) && chars >= 0) out.transcriptChars = chars;
+  if (out.transcript === undefined) return out;
+  const { transcriptChars: chars, transcriptAt: at } = raw;
+  if (typeof chars === "number" && Number.isInteger(chars) && chars >= 0) out.transcriptChars = chars;
+  if (typeof at === "number" && Number.isSafeInteger(at) && at >= 0) out.transcriptAt = at;
   return out;
 }
 
-/** The blobs a stored record's session names: what the sweep keeps for it. */
-export function sessionRefsOf(rec: unknown): string[] {
+/**
+ * The blobs a stored record's session names that the sweep keeps for it: every part, but its
+ * transcript only while `transcript` keeps one written then (`transcriptAt`, unknown on a record kept
+ * before it was noted): Settings → Agents → Retention's turn transcripts.
+ */
+export function sessionRefsOf(rec: unknown, transcript: (at: number | undefined) => boolean): string[] {
   const session = recordSessionOf(rec);
-  return REC_SESSION_PARTS.flatMap((part) => session[part] ?? []);
+  return REC_SESSION_PARTS.flatMap((part) => {
+    const hash = session[part];
+    return hash === undefined || (part === "transcript" && !transcript(session.transcriptAt)) ? [] : [hash];
+  });
 }
 
 /**
