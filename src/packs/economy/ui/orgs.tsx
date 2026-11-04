@@ -33,6 +33,7 @@ import { actionPage, Controls, detailPage, type Elsewhere, type HubNav } from ".
 import { observeMoney, playElsewhere, usePlayerControls } from "./panel";
 import { amountOf } from "./requests";
 import { routeFrom } from "./routes";
+import { rate } from "./taxes";
 import { JobListRow } from "./work";
 
 /** The POV's own money and controls beside an organization's page in Play, its detail observed as the Money tab does. */
@@ -103,8 +104,9 @@ export function payAsOf(org: OrgView, palette: PaletteView | null): PayAs | null
 
 /**
  * Pay as…'s page, without hooks (`to` and `amount` kept by the tab): whom, from the palette's Pay,
- * and how much; held, with the limit's words, for a payment over the reader's limit for it. Go pays
- * as the palette's Pay with Paying as does: the organization's money pays, played as the next turn.
+ * and how much. Go pays as the palette's Pay with Paying as does: the organization's money pays,
+ * played as the next turn. A payment over the reader's limit for it asks for approval instead (ORG-SPEC
+ * Phase 5: Pay with `ask`), put to whoever holds the power above, and is paid once they approve.
  */
 export function PayAsPage(props: { org: OrgView; payAs: PayAs; chatId: string; to: string; amount: string; onTo(id: string): void; onAmount(text: string): void; controls: PlayerControls; nav: HubNav }) {
   const { org, payAs, controls } = props;
@@ -112,7 +114,8 @@ export function PayAsPage(props: { org: OrgView; payAs: PayAs; chatId: string; t
   const payees = payAs.entry.options.filter((o) => o.disabled === undefined && o.next === undefined && typeof o.params.to === "string");
   const option = payees.find((o) => o.params.to === props.to);
   const cents = amountOf(props.amount, controls.currency);
-  const problem = !option ? "Pick whom to pay." : (amountProblem(props.amount, controls.currency, "the amount") ?? (payAs.limits && cents !== null ? overLimit(payAs.limits, cents, null, org.name, controls.currency) : null));
+  const problem = !option ? "Pick whom to pay." : amountProblem(props.amount, controls.currency, "the amount");
+  const over = payAs.limits && cents !== null ? overLimit(payAs.limits, cents, null, org.name, controls.currency) : null;
   const limit = payAs.limits?.payment;
   return (
     <ActionPage
@@ -121,16 +124,17 @@ export function PayAsPage(props: { org: OrgView; payAs: PayAs; chatId: string; t
       name="pay-as"
       title={`Pay as ${org.name}`}
       subtitle={limit !== undefined ? `From its money, up to ${fmt(limit)} a payment` : "From its money"}
-      go={cents !== null ? `Pay ${fmt(cents)} as ${org.name}` : `Pay as ${org.name}`}
+      go={cents === null ? `Pay as ${org.name}` : over !== null ? `Ask for approval to pay ${fmt(cents)}` : `Pay ${fmt(cents)} as ${org.name}`}
       problem={problem}
       submit={() => {
         if (!option || cents === null) return Promise.resolve(false);
         const request = paletteRequest(payAs.entry, [option], props.chatId, cents, undefined, [], org.id);
-        return controls.act({ action: request.action, params: request.params });
+        return controls.act({ action: request.action, params: over !== null ? { ...request.params, ask: true } : request.params });
       }}
     >
       <SelectField label="Pay" value={option ? props.to : ""} empty="Choose someone" options={payees.map((o) => ({ value: String(o.params.to), label: o.label }))} onChange={props.onTo} />
       <AmountField label="Amount" value={props.amount} currency={controls.currency} onInput={props.onAmount} invalid={props.amount.trim() !== "" && cents === null} />
+      {over !== null ? <span class="lre-field-help" data-lre-pay-as-over>{`${over}: it goes to whoever holds the power above you for approval, and is paid once they approve.`}</span> : null}
     </ActionPage>
   );
 }
@@ -173,18 +177,23 @@ export function GmOrgMoneyTab(props: OrgGmTabProps) {
 
 /**
  * A company's Payroll, at the foot of its People: how many are on it and what it has cost this
- * year, and each job, which opens its page (Raise, Let go) where `nav` is given, the reader's own
- * view of it first, since that's what their controls go by.
+ * year, its unemployment taxes this year with each one's rate and wage base (ORG-SPEC §3.11,
+ * Phase 5), and each job, which opens its page (Raise, Let go) where `nav` is given, the reader's
+ * own view of it first, since that's what their controls go by.
  */
 export function OrgPayroll(props: { org: OrgView; section: PayrollSection; reader: Reader | null; nav: HubNav | null; currency: WorldCurrency }) {
   const { org, section, reader, nav } = props;
   const theirs = theirBusiness(org, reader);
   const jobs = theirs?.employees ?? section.employees;
+  const u = section.unemployment;
+  const money = (cents: number): string => formatMoney(cents, props.currency);
   return (
     <div class="lre-stack" data-lre-org-payroll={org.id}>
       <List>
         <ListRow icon="users" title="On the payroll" value={String(section.headcount)} />
-        <ListRow icon="coins" title="Payroll this year" value={formatMoney(section.payroll, props.currency)} />
+        <ListRow icon="coins" title="Payroll this year" value={money(section.payroll)} />
+        {u ? <ListRow icon="receipt" title="FUTA this year" subtitle={u.rates?.futa ? `Federal unemployment tax: ${rate(u.rates.futa.pct)} on the first ${money(u.rates.futa.base)} of each worker's pay` : "Federal unemployment tax: it owes none"} value={money(u.futa)} /> : null}
+        {u ? <ListRow icon="receipt" title="SUTA this year" subtitle={u.rates?.suta ? `State unemployment tax: ${rate(u.rates.suta.pct)} on the first ${money(u.rates.suta.base)} of each worker's pay` : "State unemployment tax: it owes none"} value={money(u.suta)} /> : null}
       </List>
       {jobs.length === 0 ? (
         <Empty icon="users">No one on the payroll.</Empty>

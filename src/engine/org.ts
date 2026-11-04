@@ -10,9 +10,9 @@
 import { ownersIn, ROLE_RIGHTS, worthShares } from "../shared/finance";
 import type { EntityId, PlaceId } from "../shared/ids";
 import type { JsonValue } from "../shared/json";
-import { ACTS_FOR, isAudience, limitsIn, ORG_POWERS, overLimit, positionsIn, powerCovers, powersIn, POWER_WORDS, type Audience, type Delegation, type OrgGrant, type OrgLimits, type OrgMember, type OrgPower, type OrgType, type Position } from "../shared/org";
+import { ACTS_FOR, DISSOLVED_FIELD, isAudience, limitsIn, ORG_POWERS, overLimit, positionsIn, powerCovers, powersIn, POWER_WORDS, WINDING_FIELD, type Audience, type Delegation, type OrgGrant, type OrgLimits, type OrgMember, type OrgPower, type OrgType, type Position } from "../shared/org";
 import { PARTY_KIND, PARTY_RELATION, partyTierOf } from "../shared/party";
-import { calendarOf, dateAt, dayIndexOfText, holidaysOn, parseHHMM, placeOffset } from "./calendar";
+import { calendarOf, dateAt, dayIndexOfText, holidaysOn, monthName, parseHHMM, placeOffset } from "./calendar";
 import { acts } from "./life";
 import { labelOf, numOf, objOf, optionalQuery, own, sliceOf } from "./pack-kit";
 import { passMemo } from "./read-pass";
@@ -326,8 +326,8 @@ export function actsFor(ctx: OrgContext, who: EntityId, power: OrgPower): Entity
     .filter((org) => org !== who && !isGone(ctx.state, org) && orgTypeOf(ctx, org) !== null && orgPower(ctx, who, org, power) !== null);
 }
 
-/** Whether someone may use a power now, or why not, in words. */
-export type MayAct = { ok: true; grant: OrgGrant } | { ok: false; reason: string };
+/** Whether someone may use a power now, or why not, in words; `limit` marks a refusal for a limit of the position or delegation the power rests on (each payment, the month, the accounts), which a request for approval may lift. */
+export type MayAct = { ok: true; grant: OrgGrant } | { ok: false; reason: string; limit?: true };
 
 /** What an act asks of a power: the amount it pays, the account it pays from, the person it is done to. */
 export interface ActAsk {
@@ -358,6 +358,8 @@ const SCOPED: readonly OrgPower[] = ["members.admit", "members.remove", "members
  */
 export function mayAct(ctx: ReadContext, who: EntityId, org: EntityId, power: OrgPower, ask: ActAsk = {}): MayAct {
   const name = labelOf(ctx, org);
+  const ended = endedRefusal(ctx, org, power);
+  if (ended !== null) return { ok: false, reason: ended };
   const grant = orgPower(ctx, who, org, power);
   if (!grant) return { ok: false, reason: `${name}: you may not ${POWER_WORDS[power]}` };
   let limits: OrgLimits | undefined;
@@ -370,9 +372,9 @@ export function mayAct(ctx: ReadContext, who: EntityId, org: EntityId, power: Or
   const amount = ask.amount;
   if (limits && amount !== undefined) {
     const over = overLimit(limits, amount, limits.month !== undefined ? spentThisMonth(ctx, who, org) : null, name, ctx.world.currency);
-    if (over !== null) return { ok: false, reason: over };
+    if (over !== null) return { ok: false, reason: over, limit: true };
   }
-  if (limits?.accounts && ask.account !== undefined && !limits.accounts.includes(ask.account)) return { ok: false, reason: `${labelOf(ctx, ask.account)} isn't one of the accounts you may use for ${name}` };
+  if (limits?.accounts && ask.account !== undefined && !limits.accounts.includes(ask.account)) return { ok: false, reason: `${labelOf(ctx, ask.account)} isn't one of the accounts you may use for ${name}`, limit: true };
   if (scoped && ask.target !== undefined && SCOPED.includes(power)) {
     const below = positionsBelow(positionsOf(ctx, org), scoped.id);
     if (!heldPositions(ctx, ask.target, org).some((h) => below.includes(h.position.id))) return { ok: false, reason: `${labelOf(ctx, ask.target)} isn't below ${scoped.title} at ${name}` };
@@ -383,6 +385,39 @@ export function mayAct(ctx: ReadContext, who: EntityId, org: EntityId, power: Or
     if (interests.includes(ask.target)) return { ok: false, reason: `${name}'s money pays for ${name}, not for ${labelOf(ctx, ask.target)}` };
   }
   return { ok: true, grant };
+}
+
+// ---------------------------------------------------------------- winding up (§3.13, Phase 5)
+
+/** A day (`YYYY-MM-DD`) in the world's calendar, in words: "3 Nov 2026"; anything else as it is. */
+export function dayWords(world: ReadContext["world"], text: string): string {
+  const m = /^(-?\d{1,6})-(\d{2})-(\d{2})$/.exec(text.trim());
+  if (!m) return text;
+  const cal = calendarOf(world);
+  const [year, month, day] = [Number(m[1]), Number(m[2]), Number(m[3])];
+  return month >= 1 && month <= cal.system.months && day >= 1 && day <= cal.system.monthLength(year, month) ? `${day} ${monthName(cal, month)} ${year}` : text;
+}
+
+/** The day a company was dissolved (`YYYY-MM-DD`), wound up or folded into another; null while it stands. */
+export function dissolvedOn(state: Pick<ReadContext["state"], "entities">, org: EntityId): string | null {
+  const v = own(state.entities, org)?.fields[DISSOLVED_FIELD];
+  return typeof v === "string" && v !== "" ? v : null;
+}
+
+/** The day a company began winding up (`YYYY-MM-DD`); null while it trades, or once it is dissolved. */
+export function windingUpSince(state: Pick<ReadContext["state"], "entities">, org: EntityId): string | null {
+  const v = own(state.entities, org)?.fields[WINDING_FIELD];
+  return typeof v === "string" && v !== "" && dissolvedOn(state, org) === null ? v : null;
+}
+
+/** What a company winding up no longer does: take people on, bill, borrow. */
+const WINDING_STOPS: readonly OrgPower[] = ["staff.hire", "money.invoice", "money.borrow"];
+
+/** Why no one may use `power` for `org` any more: it was dissolved, or it is winding up and the power is trading; null otherwise. */
+function endedRefusal(ctx: ReadContext, org: EntityId, power: OrgPower): string | null {
+  const dissolved = dissolvedOn(ctx.state, org);
+  if (dissolved !== null) return `${labelOf(ctx, org)} was dissolved on ${dayWords(ctx.world, dissolved)}`;
+  return windingUpSince(ctx.state, org) !== null && WINDING_STOPS.includes(power) ? `${labelOf(ctx, org)} is winding up` : null;
 }
 
 // ---------------------------------------------------------------- places
@@ -397,11 +432,11 @@ export function placesOf(ctx: Pick<ReadContext, "state" | "world">, business: En
   return here ? [here] : [];
 }
 
-/** Every business still in the world, by id. Kept for the read pass: whose a place is asks it of every place. */
+/** Every business still in the world and not dissolved, by id. Kept for the read pass: whose a place is asks it of every place. */
 export function businessIds(ctx: OrgContext): EntityId[] {
   return passMemo([ctx.state, ctx.state.entities, ctx.world], "orgs.businesses", () =>
     Object.keys(ctx.state.entities)
-      .filter((id) => kindIs(ctx.registry, ctx.world, own(ctx.state.entities, id)?.kind ?? "", COMPANY_KIND) && !isGone(ctx.state, id))
+      .filter((id) => kindIs(ctx.registry, ctx.world, own(ctx.state.entities, id)?.kind ?? "", COMPANY_KIND) && !isGone(ctx.state, id) && dissolvedOn(ctx.state, id) === null)
       .sort(),
   );
 }

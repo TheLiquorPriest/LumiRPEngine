@@ -162,11 +162,11 @@ describe("the organization model on Port Alder", () => {
       foreman(world, { title: "Shop foreman", powers: ["staff.hire", "staff.pay", "money.view", "money.spend"], limits: { payment: 50000 } });
       entity(world, JORDAN).relations.push({ type: "acts_for", to: SHOP, fields: { powers: ["money.spend"], payment: 20000, by: MARCUS }, until: 7 * 1440 });
     });
-    expect(mayAct(w.ctx, DANNY, SHOP, "money.spend", { amount: 60000 })).toEqual({ ok: false, reason: "Over your limit of $500.00 a payment for Alder Automotive" });
+    expect(mayAct(w.ctx, DANNY, SHOP, "money.spend", { amount: 60000 })).toEqual({ ok: false, reason: "Over your limit of $500.00 a payment for Alder Automotive", limit: true });
     expect(mayAct(w.ctx, DANNY, SHOP, "money.spend", { amount: 40000 })).toEqual({ ok: true, grant: { basis: "position", id: "shop_foreman" } });
     expect(mayAct(w.ctx, DANNY, SHOP, "money.spend", { amount: 10000, target: DANNY })).toEqual({ ok: false, reason: "Alder Automotive's money pays for Alder Automotive, not for Danny Okafor" });
     expect(mayAct(w.ctx, JORDAN, SHOP, "money.spend", { amount: 15000 })).toEqual({ ok: true, grant: { basis: "delegate", id: MARCUS } });
-    expect(mayAct(w.ctx, JORDAN, SHOP, "money.spend", { amount: 25000 })).toEqual({ ok: false, reason: "Over your limit of $200.00 a payment for Alder Automotive" });
+    expect(mayAct(w.ctx, JORDAN, SHOP, "money.spend", { amount: 25000 })).toEqual({ ok: false, reason: "Over your limit of $200.00 a payment for Alder Automotive", limit: true });
     expect(mayAct(w.ctx, JORDAN, SHOP, "delegate")).toEqual({ ok: false, reason: "Alder Automotive: you may not delegate its powers" });
     // Marcus pays himself from what is his: the fiduciary rule guards money one only manages.
     expect(mayAct(w.ctx, MARCUS, SHOP, "money.spend", { amount: 10000, target: MARCUS }).ok).toBe(true);

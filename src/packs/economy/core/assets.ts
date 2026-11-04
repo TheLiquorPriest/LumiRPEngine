@@ -16,16 +16,17 @@
 import type { EntityId } from "../../../shared/ids";
 import { isRecord, safeKey, type JsonObject, type JsonValue } from "../../../shared/json";
 import type { LedgerEvent, PackEvent } from "../../../shared/ledger";
-import { ASSET_CLASSES, type AssetClass, type AssetDef, type PerformanceView } from "../../../shared/finance";
+import { ASSET_CLASSES, listingIn, type AssetClass, type AssetDef, type PerformanceView } from "../../../shared/finance";
 import { formatMoney } from "../../../shared/world";
 import { calendarOf, clockAt, clockOfLocal, dateAt, type CalDate } from "../../../engine/calendar";
-import { mutableSlice, numOf, objOf, own, sliceOf, strOf } from "../../../engine/pack-kit";
+import { mutableSlice, numOf, objOf, optionalQuery, own, sliceOf, strOf } from "../../../engine/pack-kit";
+import { passMemo } from "../../../engine/read-pass";
 import type { EventTypeDef, ReadContext, Rejection, SlotInfo } from "../../../engine/registry";
 import type { Rng } from "../../../engine/rng";
 import type { WorldState } from "../../../engine/state";
 import { equityShock, indexHistory, monthNumber, monthOfText, monthText } from "./history";
 import type { FinanceApi, FinanceRegistry } from "./module";
-import { blackScholes, bondPrice, correlated, gbmStep, intrinsic, MARKET_CLOSE, normal, TRADING_DAYS, YEAR_MINUTES } from "./pricing";
+import { blackScholes, bondPrice, correlated, gbmStep, intrinsic, listedStep, MARKET_CLOSE, normal, TRADING_DAYS, YEAR_MINUTES } from "./pricing";
 
 /** What an asset read needs: the world (its config and tables) and the state (marks, minted contracts). */
 export type AssetBooks = Pick<ReadContext, "world" | "state" | "tables">;
@@ -208,16 +209,84 @@ export function configAssets(world: ReadContext["world"]): JsonObject {
   return objOf(objOf(world.packs.economy?.config).assets);
 }
 
-/** The definition behind an asset id: authored, minted in play, or an older chat's table symbol. */
+/** The definition behind an asset id: authored, minted in play, a listed company's stock, or an older chat's table symbol. */
 export function assetDefOf(ctx: AssetBooks, id: string): AssetDef | null {
   if (!safeKey(id)) return null;
   const authored = readAssetDef(own(configAssets(ctx.world), id));
   if (authored) return authored;
   const minted = readAssetDef(own(objOf(holdingsSlice(ctx.state).minted), id));
   if (minted) return minted;
+  const listed = listedDef(ctx, id);
+  if (listed) return listed;
   // A symbol an older brokerage account held (the stock index), priced as the fund it stood for.
   if (isRecord(own(investingRows(ctx), id))) return { label: id.replace(/_/g, " "), class: "fund", model: id, price: 10000 };
   return null;
+}
+
+// ---------------------------------------------------------------- listed companies' stock (§27.10 Listing)
+
+/** Whether a kind is a business: `business`, or a kind the world's author made from it (§27.10 Listing: a listed garage trades as any company does). */
+function businessKind(world: ReadContext["world"], kind: string): boolean {
+  let id: string | undefined = kind;
+  for (let guard = 0; id !== undefined && guard < 32; guard++) {
+    if (id === "business") return true;
+    id = own(world.kinds, id)?.extends;
+  }
+  return false;
+}
+
+/** Every listed company's stock, by asset id: the company (a business, or a kind made from it) whose `listing` names it. */
+export function listedAssets(books: Pick<ReadContext, "world" | "state">): ReadonlyMap<string, EntityId> {
+  const { state, world } = books;
+  return passMemo([state, state.entities, world], "economy.listed", () => {
+    const out = new Map<string, EntityId>();
+    for (const id of Object.keys(state.entities).sort()) {
+      const e = own(state.entities, id);
+      const listing = e && businessKind(world, e.kind) ? listingIn(e.fields) : null;
+      if (listing && !out.has(listing.asset)) out.set(listing.asset, id);
+    }
+    return out;
+  });
+}
+
+/** The company whose stock an asset is, while it is listed; null for any other asset. */
+export function listedCompany(books: Pick<ReadContext, "world" | "state">, asset: string): EntityId | null {
+  return listedAssets(books).get(asset) ?? null;
+}
+
+/** How fast a listed price returns to its books, a year (`listingReversion`, 2 by default): a gap halves in about ln 2 / κ years. */
+export const LISTING_REVERSION = 2;
+
+/** The economy config's reversion for listed prices, never below nothing. */
+export function listingReversion(ctx: Pick<ReadContext, "world">): number {
+  return Math.max(0, numOf(objOf(ctx.world.packs.economy?.config).listingReversion, LISTING_REVERSION));
+}
+
+/**
+ * A listed company's stock as an asset: a security named as the company, at its ticker, priced from
+ * its offer price until the market marks it, paying nothing of its own (its holders share the
+ * company's payouts), with the economy config's volatility and correlation for listed stock where
+ * it sets them (else the security class's).
+ */
+function listedDef(ctx: AssetBooks, id: string): AssetDef | null {
+  const business = listedCompany(ctx, id);
+  const e = business ? own(ctx.state.entities, business) : undefined;
+  const listing = e ? listingIn(e.fields) : null;
+  if (!business || !e || !listing) return null;
+  const config = objOf(ctx.world.packs.economy?.config);
+  const vol = num(config.listingVolatility);
+  const rho = num(config.listingCorrelation);
+  return {
+    label: e.name || business,
+    class: "security",
+    symbol: listing.symbol,
+    entity: business,
+    price: listing.price > 0 ? listing.price : 100,
+    pays_per_year: 0,
+    yield_pct: 0,
+    ...(vol !== undefined && vol >= 0 ? { annual_volatility_pct: vol } : {}),
+    ...(rho !== undefined ? { correlation: Math.min(1, Math.max(0, rho)) } : {}),
+  };
 }
 
 /** An asset with its price model settled; null when nothing defines the id. */
@@ -338,10 +407,11 @@ export function quoteOf(ctx: AssetBooks, id: string, at: number = ctx.state.cloc
   return a ? priceOf(ctx, a, at) : null;
 }
 
-/** Every asset a market step moves: the authored ones and any table symbol a holding names, by id. */
+/** Every asset a market step moves: the authored ones, any table symbol a holding names and every listed company's stock, by id. */
 export function marketAssets(ctx: AssetBooks): string[] {
   const ids = new Set(Object.keys(configAssets(ctx.world)));
   for (const e of Object.values(ctx.state.entities)) if (e.kind === "holding" && typeof e.fields.asset === "string") ids.add(e.fields.asset);
+  for (const id of listedAssets(ctx).keys()) ids.add(id);
   return [...ids].filter((id) => assetDefOf(ctx, id) !== null).sort();
 }
 
@@ -452,7 +522,10 @@ export function marketStep(ctx: ReadContext, api: Pick<FinanceApi, "businessDay"
     const price = priceOf(ctx, a);
     if (!(price > 0)) continue;
     const z = correlated(factor(a.market), normal(rng(`asset:${id}`)), a.rho);
-    const next = mark(gbmStep(price, a.drift, a.vol, dt, z));
+    // A listed company's stock moves around its books a unit (§27.10 Listing); everything else walks.
+    const company = listedCompany(ctx, id);
+    const fair = company !== null && company === a.entity ? (optionalQuery(ctx, "economy.fair_unit")?.(ctx, company) ?? null) : null;
+    const next = mark(fair !== null ? listedStep(price, fair, listingReversion(ctx), a.vol, dt, z) : gbmStep(price, a.drift, a.vol, dt, z));
     out.push({ type: "economy.quote", data: { asset: id, price: next } });
     close(a, next);
   }
@@ -468,12 +541,14 @@ export function optionId(underlying: string, right: "call" | "put", strike: numb
 
 /**
  * A contract on `underlying` as an asset: its definition, minted on first purchase. Null when the
- * underlying isn't a priced asset, the strike isn't positive or the expiry isn't a date after now.
+ * underlying isn't a priced asset, the strike isn't positive or the expiry isn't a date after now; and
+ * for a listed company's stock (§27.10 Listing), whose units the market sells only from its float, so
+ * no contract delivers them.
  */
 export function optionDef(ctx: AssetBooks, underlying: string, right: "call" | "put", strike: number, expiry: string): AssetDef | null {
   const under = assetOf(ctx, underlying);
   const at = closeOf(ctx.world, expiry);
-  if (!under || under.option || under.class === "property" || under.class === "business_stake" || !(strike > 0) || at === null || at <= ctx.state.clock) return null;
+  if (!under || under.option || under.class === "property" || under.class === "business_stake" || listedCompany(ctx, underlying) !== null || !(strike > 0) || at === null || at <= ctx.state.clock) return null;
   const money = formatMoney(Math.round(strike), ctx.world.currency);
   return { label: `${under.symbol ?? under.label} ${expiry} ${money} ${right}`, class: "option", underlying, strike: Math.round(strike), expiry, right, multiplier: 100, settlement: "physical" };
 }

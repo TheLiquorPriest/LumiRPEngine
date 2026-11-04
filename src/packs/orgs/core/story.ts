@@ -66,7 +66,7 @@ export function quotesReply(said: string, reply: string): boolean {
  * name the words are (`placeKey`: case, spacing, punctuation and a leading article aside), else the
  * one whose name has the words as one of its own (a first name), when exactly one does.
  */
-function entityNamed(ctx: ReadContext, said: string, fits: (id: EntityId) => boolean): EntityId | null {
+export function entityNamed(ctx: ReadContext, said: string, fits: (id: EntityId) => boolean): EntityId | null {
   const t = said.trim();
   if (t === "") return null;
   for (const id of [t, t.toLowerCase()]) if (own(ctx.state.entities, id) && !isGone(ctx.state, id) && fits(id)) return id;
@@ -83,7 +83,7 @@ function entityNamed(ctx: ReadContext, said: string, fits: (id: EntityId) => boo
 }
 
 /** A person the player character may know, by id or name. */
-function personNamed(ctx: ReadContext, said: string): EntityId | null {
+export function personNamed(ctx: ReadContext, said: string): EntityId | null {
   return entityNamed(ctx, said, (id) => kindIs(ctx.registry, ctx.world, own(ctx.state.entities, id)?.kind ?? "", "person") && povMayKnow(ctx.registry, ctx.world, ctx.state, id));
 }
 

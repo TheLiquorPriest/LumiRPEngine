@@ -12,7 +12,7 @@
 //
 // Here too: the effort a call goes with (§8, "Thinking in agent tool loops"); a prompt's order and
 // its cache breakpoints (§8, within §16's 4 for Anthropic, the connection's own included); the usage
-// request; and the accounts each connection keeps per user: its throttles, and the acceptance runs'
+// request; whether a call streams (Settings → Agents → Streaming); and the accounts each connection keeps per user: its throttles, and the acceptance runs'
 // guard and ceilings (§12), which every call reserves against before it is sent. The runs and the
 // connections they guard are kept in `agent-acceptance.json`, which no build from before the agents
 // writes, so its settings writes never drop the guard (`SettingsStore` reads the list from here).
@@ -843,6 +843,8 @@ export class ProviderSession {
           // With thinking in tool loops, the model's thinking comes back summarized, so its text reaches the agent once the host carries it.
           ...(settings.thinkingInToolLoops ? { thinkingDisplay: "summarized" as const } : {}),
           usage: true,
+          // Streamed, the provider's connection carries a long answer as it is written, never idle until it is whole (Settings → Agents → Streaming).
+          ...(settings.stream ? { stream: true as const } : {}),
         },
         userId,
         signal,

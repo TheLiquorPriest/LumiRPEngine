@@ -314,7 +314,7 @@ export function resolveEffect(reg: Registry, w: Working, spec: EffectSpec, scope
   if (core) return core;
   const def = reg.effects.get(spec.type);
   if (!def) return reject("unknown_effect", `unknown effect ${spec.type}`);
-  return def.resolve(args, { ...w.ctx, rng: scope.rng, params: scope.params ?? {} });
+  return def.resolve(args, { ...w.ctx, rng: scope.rng, params: scope.params ?? {}, effect: { type: spec.type, args } });
 }
 
 /** Effect lists carried in arguments (a check's outcomes), read defensively: they are authored JSON. */

@@ -624,7 +624,31 @@
       "head_of_household": 25000000,
       "note": "Gain excluded on selling a main home owned and lived in for two of the last five years (IRC section 121)."
     },
+    "charitable_contributions": {
+      "agi_limit_pct": 60,
+      "non_itemizer_cents": {
+        "single": 100000,
+        "married_filing_jointly": 200000,
+        "head_of_household": 100000
+      },
+      "non_itemizer_from_year": 2026,
+      "note": "Cash gifts to public charities and churches (IRC section 170): an itemizer deducts them up to 60% of AGI; from 2026 (OBBBA) someone taking the standard deduction also deducts up to $1,000 ($2,000 married filing jointly). Gifts to social clubs and other non-charitable exempt organizations are not deductible."
+    },
+    "consolidated_return_ownership_pct": 80,
+    "consolidated_return_note": "An affiliated group may file one consolidated federal income tax return: a parent corporation and each corporation of which it and the others in the group hold at least 80% of the voting power and of the value of the stock (IRC section 1504(a)(2)). Their profits and losses offset; each state taxes its own.",
     "irs_standard_mileage_cents_per_mile_2025": 70,
     "effective_withholding_note": "occupations.json withholding_rate_pct was computed from these parameters."
+  },
+  "taxes_unemployment": {
+    "tax_year": 2025,
+    "futa": {
+      "wage_base_cents": 700000,
+      "gross_pct": 6.0,
+      "max_credit_pct": 5.4,
+      "deposit_threshold_cents": 50000,
+      "note": "Federal unemployment tax (FUTA, IRC section 3301): 6.0% of the first $7,000 of each employee's wages a year from each employer, less a credit of up to 5.4% for state unemployment tax paid (so 0.6% net), the credit cut by a credit-reduction state's reduction (regions.json). A liability over $500 is deposited by the last day of the month after its quarter, less carries to the next; the annual return (Form 940) settles the rest by 31 January."
+    },
+    "suta_note": "State unemployment tax (SUTA): each state's taxable wage base and new-employer rate are in regions.json (suta_wage_base_cents, suta_new_employer_pct); paid quarterly by the last day of the month after the quarter.",
+    "exempt_note": "Organizations described in IRC section 501(c)(3) (charities and churches) owe no FUTA (section 3306(c)(8)); churches owe no SUTA either (section 3309(b)(1)); see exempt.json."
   }
 }

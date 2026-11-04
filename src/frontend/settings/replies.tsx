@@ -28,6 +28,8 @@ const EXTRACTION_LABEL: Record<ExtractionType, string> = {
   membership: "Who belongs to organizations (joining, leaving, positions, titles)",
   employment: "Jobs (hired, let go, quitting, raises, leave)",
   agenda: "How organizations' plans go (under way, done, blocked)",
+  vote: "Votes on organizations' motions (for, against, abstaining)",
+  approval: "Answers to requests for approval (approved, denied, withdrawn)",
   item_move: "Where things are (picked up, put down, put away, fetched)",
   item_hand: "Handing things over (holding, lending, giving back)",
   item_own: "Whose things are (gifts, sales, trades)",

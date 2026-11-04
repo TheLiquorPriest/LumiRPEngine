@@ -16,7 +16,7 @@ import { labelOf, numOf, own, strOf } from "../../../engine/pack-kit";
 import type { EventTypeDef, ReadContext, Rejection, SlotInfo } from "../../../engine/registry";
 import type { FinanceApi, FinanceRegistry } from "./module";
 import { assetOf, instantIn, priceOf, reject, type Asset } from "./assets";
-import { accountOfHolding, applyLots, canTrade, findHolding, holdingIds, holdingOwners, lotsChange, lotsOf, marketOf, proceedsAccount, qtyOf, unit, unitsText } from "./holdings";
+import { accountOfHolding, applyLots, canTrade, findHolding, holdingIds, holdingOwners, listedFloat, lotsChange, lotsOf, marketOf, proceedsAccount, qtyOf, unit, unitsText } from "./holdings";
 import { holdingIncome, payout } from "./income";
 import { intrinsic, MARKET_CLOSE, QTY_EPSILON, roundQty, takeFifo } from "./pricing";
 import { actAs, asParam, mayAs } from "./acting";
@@ -116,6 +116,10 @@ export function exercise(api: FinanceApi, ctx: ReadContext, x: Exercise): Ledger
   let lines: PostingLine[];
   let target = into;
   if (a.option.right === "call") {
+    // A listed company's units sell only from its float (§27.10 Listing): a call brings no more than the market has left, and never the company its own.
+    const listed = listedFloat(ctx, under.id);
+    if (listed && x.party === listed.business) return reject("own_stock", `${labelOf(ctx, x.party)} takes its own units back by buying back shares or going off the market`);
+    if (listed && units > listed.left + QTY_EPSILON) return reject("declined", listed.left > 0 ? `Only ${unitsText(listed.left)} units of ${under.symbol ?? under.label} are for sale on the market` : `No units of ${under.symbol ?? under.label} are for sale on the market`);
     const from = x.from ?? account ?? api.depositAccount(ctx, x.party);
     if (!from) return reject("no_account", `${labelOf(ctx, x.party)} has no account to pay the strike from`);
     // Cash in the contract's own account pays within it; any other account is paid from (the foundation's `mayUse`).

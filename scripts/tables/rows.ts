@@ -59,6 +59,7 @@ const FINANCE_TITLES: Record<string, string> = {
   investing: "Investing (index return model, GBM recipe, bonds, cash)",
   payroll_deductions_other_than_tax: "Payroll deductions other than tax",
   taxes_federal: "Federal tax",
+  taxes_unemployment: "Unemployment taxes",
 };
 
 const SCHOOL_TITLES: Record<string, string> = { k12: "K-12", college: "College" };
@@ -204,6 +205,9 @@ export const ROW_SPECS: Record<string, RowSpec> = {
       const shared = {
         sales_tax_combined_avg_pct: f.take("sales_tax_combined_avg_pct"),
         property_tax_effective_pct: f.take("property_tax_effective_pct"),
+        suta_wage_base_cents: f.take("suta_wage_base_cents"),
+        suta_new_employer_pct: f.take("suta_new_employer_pct"),
+        futa_credit_reduction_pct: f.take("futa_credit_reduction_pct"),
         cost_of_living_multiplier: f.take("cost_of_living_multiplier"),
         median_rent_1br_cents_per_month: f.take("median_rent_1br_cents_per_month"),
         median_rent_2br_cents_per_month: f.take("median_rent_2br_cents_per_month"),
@@ -236,6 +240,20 @@ export const ROW_SPECS: Record<string, RowSpec> = {
       const title = FINANCE_TITLES[node.key];
       if (!title) f.fail("source", `finance section "${node.key}" has no title`, "title");
       return { title, values: f.rest() };
+    },
+  },
+
+  "economy.exempt": {
+    row(f) {
+      return {
+        name: f.take("name"),
+        code: f.take("code"),
+        income_tax_exempt: f.take("income_tax_exempt"),
+        donations_deductible: f.take("donations_deductible"),
+        futa: f.take("futa"),
+        suta: f.take("suta"),
+        description: f.take("description"),
+      };
     },
   },
 

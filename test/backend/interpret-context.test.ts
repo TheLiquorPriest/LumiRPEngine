@@ -205,7 +205,7 @@ describe("interpret's catalog and scene", () => {
     const jordan = catalogFor("pov");
     for (const id of ["pay", "buy", "move_money"]) {
       expect(jordan.params(id).length).toBeGreaterThan(0);
-      expect(jordan.params(id).filter((p) => p.startsWith("as"))).toEqual([]);
+      expect(jordan.params(id).filter((p) => p.startsWith("as?"))).toEqual([]);
     }
     expect(jordan.named).not.toContain("alder_automotive_co");
     // Marcus owns Alder Automotive: Pay and Buy offer it as who pays, Transfer as whose accounts he manages, and the scene names it.

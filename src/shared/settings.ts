@@ -254,11 +254,13 @@ export interface TimeSettings {
  * (a room, a spot or a venue made in play, §6.2). `membership` and `employment` are the story's
  * changes to organizations (ORG-SPEC §7.3): someone joins, leaves, is appointed or takes a title;
  * someone is hired, let go, quits, gets a raise or goes on leave. `agenda` is an organization's plan
- * item the reply says is under way, done, blocked or refused (ORG-SPEC §3.14). `learn` and `reveal`
- * are the knowledge step's (DESIGN §24.11): what the player character learns, and a secret the story
- * reveals to them; the reply's read never proposes them.
+ * item the reply says is under way, done, blocked or refused (ORG-SPEC §3.14). `vote` and `approval`
+ * are its decisions as the story tells them (ORG-SPEC Phase 5): someone's vote on an open motion, and
+ * an answer to a request for approval. `learn` and `reveal` are the knowledge step's (DESIGN §24.11):
+ * what the player character learns, and a secret the story reveals to them; the reply's read never
+ * proposes them.
  */
-export const EXTRACTION_TYPES = ["time_advance", "location", "place_make", "condition", "knows", "purchase", "transfer", "regard", "quantity", "spawn", "life", "routine", "membership", "employment", "agenda", ...ITEM_CHANGES, "learn", "reveal"] as const;
+export const EXTRACTION_TYPES = ["time_advance", "location", "place_make", "condition", "knows", "purchase", "transfer", "regard", "quantity", "spawn", "life", "routine", "membership", "employment", "agenda", "vote", "approval", ...ITEM_CHANGES, "learn", "reveal"] as const;
 export type ExtractionType = (typeof EXTRACTION_TYPES)[number];
 
 /**
@@ -283,10 +285,12 @@ export const EXTRACTION_DEFAULTS: Readonly<Partial<Record<ExtractionType, BoundM
   life: "confirm",
   knows: "confirm",
   purchase: "confirm",
-  // Organizations (ORG-SPEC §7.3, §9): who belongs, holds a position or works where asks first; how a plan goes lands with its Undo.
+  // Organizations (ORG-SPEC §7.3, §9): who belongs, holds a position or works where asks first; how a plan goes lands with its Undo; a vote or an answer to a request, which carries out what it decides, asks first.
   membership: "confirm",
   employment: "confirm",
   agenda: "auto",
+  vote: "confirm",
+  approval: "confirm",
   // Things (ITEMS-SPEC §5.4): where a thing is and who holds it land with their Undo; whose it is, and a loss, ask.
   item_move: "auto",
   item_hand: "auto",
@@ -576,9 +580,11 @@ export interface UserSettings {
    * steps lifted to reasoning off where they were left to the helper model's; one from before
    * the sections told their facts whole (2 or 3) has a section budget still at Standard's or Full's
    * old default lifted to its new one; one from before the turn's tokens went unbounded (up to 4)
-   * has a turn budget still at its old 100,000 prompt or 10,000 answer tokens set to No limit; and
+   * has a turn budget still at its old 100,000 prompt or 10,000 answer tokens set to No limit;
    * one from before organizations had tools (up to 5) has every role that reads money given the
-   * `orgs` family too. A file older than several revisions has each of their lifts.
+   * `orgs` family too; and one from before the final review's time rose (up to 6) has it still at
+   * its old 2 minutes lifted to the new default. A file older than several revisions has each of
+   * their lifts.
    */
   defaults: typeof SETTINGS_DEFAULTS_REV;
   /** The helper model, apart from the presets: picking one never changes it. */
@@ -663,7 +669,7 @@ export function tidySettingsOf(raw: unknown, base: Readonly<TidySettings> = TIDY
 }
 
 /** The shipped defaults' revision (`UserSettings.defaults`). */
-export const SETTINGS_DEFAULTS_REV = 6;
+export const SETTINGS_DEFAULTS_REV = 7;
 
 /** Build's jobs (DESIGN §13.1): the user's own, which no preset sets. */
 export interface JobSettings {

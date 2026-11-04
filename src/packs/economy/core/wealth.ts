@@ -12,11 +12,12 @@ import { calendarOf, dateAt } from "../../../engine/calendar";
 import { labelOf, optionalQuery, own, strOf } from "../../../engine/pack-kit";
 import type { ReadContext, Rejection } from "../../../engine/registry";
 import type { FinanceApi, FinanceRegistry } from "./module";
-import { assetOf, configAssets, dateText, priceOf, readAssetDef, registerMarkets, reject } from "./assets";
+import { assetOf, configAssets, dateText, listedAssets, priceOf, readAssetDef, registerMarkets, reject } from "./assets";
 import { indexView } from "./history";
 import { registerGains, taxEstimate } from "./gains";
 import { holdingsWorth, holdingView, lotsOf, qtyOf, registerHoldings, setRoute, visibleHoldings } from "./holdings";
 import { registerIncome } from "./income";
+import { hiddenFrom } from "./model";
 import { registerOptions } from "./options";
 import { monthlyRent, propertyIds, propertyValue, propertyView, propertyWorth, registerProperty, routeRent, securedLoans, visibleProperties } from "./property";
 import { gainsIn, incomeIn } from "./records";
@@ -53,12 +54,16 @@ function investmentsView(api: FinanceApi, ctx: ReadContext, party: EntityId, det
   const gains = gainsIn(ctx.state, party, year);
   const income = incomeIn(ctx.state, party, year);
   const held = new Set(holdings.map((h) => h.asset.id));
-  const market = Object.keys(configAssets(ctx.world))
+  // The world's assets, and every listed company's stock the party can see (§27.10 Listing): a company hidden from them names nothing, not even its ticker.
+  const listed = listedAssets(ctx);
+  const market = [...new Set([...Object.keys(configAssets(ctx.world)), ...listed.keys()])]
     .sort()
     .flatMap((id) => {
-      const def = readAssetDef(own(configAssets(ctx.world), id));
+      const def = listed.has(id) && !own(configAssets(ctx.world), id) ? true : readAssetDef(own(configAssets(ctx.world), id));
       const a = def ? assetOf(ctx, id) : null;
-      if (!a || held.has(id) || a.class === "property" || a.class === "business_stake") return [];
+      if (!a || held.has(id) || listed.get(id) === party || a.class === "property" || a.class === "business_stake") return [];
+      const company = listed.get(id);
+      if (company !== undefined && !own(configAssets(ctx.world), id) && hiddenFrom(ctx, party, company)) return [];
       if (a.option && (!api.feature(ctx, party, "options") || ctx.state.clock >= a.option.expiry)) return [];
       return [{ asset: id, label: a.label, class: a.class, symbol: a.symbol, price: priceOf(ctx, a) }];
     });

@@ -44,6 +44,21 @@ export function gbmShock(r: number, driftPct: number, volPct: number, dt: number
 }
 
 /**
+ * A listed company's price over one step (DESIGN §27.2, listed stock): an Ornstein-Uhlenbeck step in
+ * log space around its books a unit (`fair`, at least a minor unit), so the books set its level and
+ * the market moves it. The gap `ln(price / fair)` shrinks by `e^(−κ·dt)` for the reversion `κ` a
+ * year and takes the shock `z` at the swing the process has over `dt` (yearly volatility in percent),
+ * so a step of any length is exact; with no reversion it walks around the books as a random walk.
+ */
+export function listedStep(price: number, fair: number, reversion: number, volPct: number, dt: number, z: number): number {
+  const anchor = Math.max(fair, 1);
+  const gap = Math.log(Math.max(price, 1e-4) / anchor);
+  const k = Math.max(0, reversion);
+  const swing = (Math.max(0, volPct) / 100) * (k > 1e-9 ? Math.sqrt((1 - Math.exp(-2 * k * dt)) / (2 * k)) : Math.sqrt(dt));
+  return anchor * Math.exp(gap * Math.exp(-k * dt) + swing * z);
+}
+
+/**
  * The standard normal distribution function, to double precision (Hart's 1968 approximation as
  * W. J. West gives it), so an option's price is the same in every fold and on every platform.
  */

@@ -29,20 +29,22 @@ const EXTRACT_MARK = "propose concrete state changes";
 const COMPACTION_MARK = "You keep a main agent's session short";
 /** How a summary leads the main agent's history, as shipped. */
 const SUMMARY_LEAD = "Your session before this point, summarized:";
+/** What the final review's message says, as shipped. */
+const REVIEW_MARK = "review the prompt it gets";
 
 /** Every role prompt-only: each runs as its classic step's own call, which the tests script. */
 const PROMPT_ONLY = Object.fromEntries(ROLE_IDS.map((id) => [id, { promptOnly: true }]));
 
 const call = (name: string, args: JsonObject, callId: string): QuietToolCall => ({ name, args, callId });
 
-/** A main agent's call: it is offered run_role; no role's call is. */
-const isMain = (req: QuietRequest): boolean => (req.tools ?? []).some((t) => t.name === "run_role");
-
 /** What the tools gave back to the call that sends their results. */
 const resultsOf = (req: QuietRequest): string[] => (req.messages.at(-1)?.parts ?? []).flatMap((p) => (p.type === "tool_result" ? [p.content] : []));
 
 /** The stage message a main agent's call answers: its latest one. */
 const stageOf = (req: QuietRequest): string => req.messages.findLast((m) => m.role === "user" && m.content.includes("Stage "))?.content ?? "";
+
+/** A main agent's stage: it is offered run_role, no role's call is. Its final review is offered every tool its stages are, and is left here to answer nothing. */
+const isMain = (req: QuietRequest): boolean => (req.tools ?? []).some((t) => t.name === "run_role") && !stageOf(req).includes(REVIEW_MARK);
 
 /** The stage's number, from its message. */
 const stageNumber = (req: QuietRequest): number => Number(/Stage (\d) of 8/.exec(stageOf(req).slice(stageOf(req).lastIndexOf("Stage ")))?.[1] ?? 0);

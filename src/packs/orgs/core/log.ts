@@ -6,7 +6,7 @@
 // effects, one unit with them (the `orgs.acted` service the economy calls).
 
 import type { EntityId } from "../../../shared/ids";
-import type { JsonObject } from "../../../shared/json";
+import { isRecord, type JsonObject, type JsonValue } from "../../../shared/json";
 import type { LedgerEvent, PackEvent } from "../../../shared/ledger";
 import { isOrgPower, type OrgAct, type OrgLogLine, type OrgPower } from "../../../shared/org";
 import { formatMoney } from "../../../shared/world";
@@ -31,6 +31,23 @@ const MONTH = /^\d{4}-\d{2}$/;
 export function orgLog(ctx: Pick<ReadContext, "state">, org: EntityId, text: string, opts: { by?: EntityId; names?: readonly EntityId[]; power?: OrgPower } = {}): LedgerEvent {
   const names = [...new Set(opts.names ?? [])].map((id) => ({ id, name: own(ctx.state.entities, id)?.name ?? id }));
   return { type: ORGS_LOG, data: { org, text, at: ctx.state.clock, ...(opts.by ? { by: opts.by } : {}), ...(names.length > 0 ? { names } : {}), ...(opts.power ? { power: opts.power } : {}), visibility: "secret" } };
+}
+
+/**
+ * The entities an act's arguments name (whom it pays or issues to, what it moves), for a History line
+ * quoting its words (a motion's, a request's): passed as the line's `names`, so a reader who can't see
+ * one of them reads "someone" there.
+ */
+export function actNames(ctx: Pick<ReadContext, "state">, act: { args: Readonly<Record<string, JsonValue>> }): EntityId[] {
+  const out: EntityId[] = [];
+  const walk = (v: JsonValue | undefined): void => {
+    if (typeof v === "string") {
+      if (v !== "" && own(ctx.state.entities, v) && !out.includes(v)) out.push(v);
+    } else if (Array.isArray(v)) for (const x of v) walk(x);
+    else if (isRecord(v)) for (const x of Object.values(v)) walk(x);
+  };
+  for (const v of Object.values(act.args)) walk(v);
+  return out;
 }
 
 /** What an act for an organization records (§3.6, §3.8): a payment out of its money counts toward its payer's month (`orgs.spent`), and every act writes its History line. */

@@ -5,6 +5,8 @@
 import { afterEach, describe, expect, test, vi } from "bun:test";
 import { defaultSettings, SettingsStore } from "../../src/backend/settings-store";
 import { phaseBudget } from "../../src/backend/turn-steps";
+import type { JsonObject } from "../../src/shared/json";
+import { SETTINGS_DEFAULTS_REV } from "../../src/shared/settings";
 import { defaultTimeouts, firedTimeout, HOST_LIMITS, hostBound, migrateTimeouts, timeoutSignal, timerMs, TIMER_MAX_MS, TimeoutFired } from "../../src/shared/timeouts";
 import { FakeHost } from "../support/fake-host";
 import { Rig } from "../support/rig";
@@ -50,6 +52,22 @@ describe("timeouts", () => {
     expect(JSON.stringify(migrated.modelUse)).not.toContain('"ms"');
     // A file that has timeouts already is left alone.
     expect(migrateTimeouts({ ...raw, timeouts: { engineRunMs: 5000 } })).toEqual({ ...raw, timeouts: { engineRunMs: 5000 } });
+  });
+
+  test("the final review's time is 5 min; one saved at its old 2 min, read against defaults before revision 7, is lifted once, and one the user chose stays", async () => {
+    expect(defaultTimeouts().finalReviewMs).toBe(300_000);
+    const read = async (file: JsonObject) => {
+      const host = new FakeHost();
+      host.files.set(`${host.userId}/settings.json`, JSON.stringify({ v: 1, ...file }));
+      return (await new SettingsStore(host).get(host.userId)).timeouts.finalReviewMs;
+    };
+    // A main agent on a large model, reviewing from a long session, thought past 2 min before its first edit.
+    expect(await read({ defaults: 6, timeouts: { finalReviewMs: 120_000 } })).toBe(300_000);
+    expect(await read({ timeouts: { finalReviewMs: 120_000 } })).toBe(300_000);
+    expect(await read({ defaults: 6, timeouts: { finalReviewMs: 600_000 } })).toBe(600_000);
+    expect(await read({ defaults: 6, timeouts: { finalReviewMs: "none" } })).toBe("none");
+    // Once: read against the defaults since revision 7, 2 min is the user's own.
+    for (const defaults of [7, SETTINGS_DEFAULTS_REV]) expect([defaults, await read({ defaults, timeouts: { finalReviewMs: 120_000 } })]).toEqual([defaults, 120_000]);
   });
 
   test("a phase that ran out is recorded in the chat's diagnostics with its setting and how to raise it", async () => {

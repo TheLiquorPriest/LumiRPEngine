@@ -305,6 +305,50 @@ export function ownersJson(owners: readonly Owner[]): JsonObject[] {
   return owners.map((o) => ({ party: o.party, role: o.role, ...(o.share !== undefined ? { share: o.share } : {}), ...(o.units !== undefined ? { units: o.units } : {}), ...(o.class !== undefined ? { class: o.class } : {}) }));
 }
 
+// ---------------------------------------------------------------- listing (ORG-SPEC §10 lane Z: a company's stock on the market)
+
+/**
+ * A listed company's `listing` field: the asset its units trade as, its ticker, the units the public
+ * holds (`float`; units bought in the world are among them, held as holdings of the asset), when it
+ * listed (a clock reading), its offer price a unit (minor units, the asset's price before any mark)
+ * and the class its public units are of (absent: its first). Its owners list keeps the registered
+ * holders, so every unit is a row's or the public's.
+ */
+export interface Listing {
+  asset: string;
+  symbol: string;
+  float: number;
+  since: number;
+  price: number;
+  class?: string;
+}
+
+/** A company's listing, when its `listing` field holds one; null for a company not on a market. */
+export function listingIn(fields: Readonly<JsonObject>): Listing | null {
+  const l = fields.listing;
+  if (typeof l !== "object" || l === null || Array.isArray(l)) return null;
+  const { asset, float } = l;
+  if (typeof asset !== "string" || asset === "" || typeof float !== "number" || !Number.isSafeInteger(float) || float < 0) return null;
+  return {
+    asset,
+    symbol: typeof l.symbol === "string" && l.symbol !== "" ? l.symbol : asset,
+    float,
+    since: typeof l.since === "number" && Number.isFinite(l.since) ? l.since : 0,
+    price: typeof l.price === "number" && Number.isFinite(l.price) && l.price > 0 ? l.price : 0,
+    ...(typeof l.class === "string" && l.class !== "" ? { class: l.class } : {}),
+  };
+}
+
+/** A listing as the `listing` field writes it. */
+export function listingJson(l: Listing): JsonObject {
+  return { asset: l.asset, symbol: l.symbol, float: l.float, since: l.since, price: l.price, ...(l.class !== undefined ? { class: l.class } : {}) };
+}
+
+/** All of a company's units: its owners' rows' and, where it is listed, the public's. */
+export function allUnits(fields: Readonly<JsonObject>): number {
+  return unitsOf(ownersIn(fields)) + (listingIn(fields)?.float ?? 0);
+}
+
 /**
  * Whether `who` holds an entity: names it as its owner, or on its owners list with any role, as
  * its card holder, or (a holding or a card on an account) holds the account it belongs to. The
@@ -883,6 +927,7 @@ export const FINANCE_FEATURES = [
   "tax_brackets",
   "sales_tax",
   "business_tax",
+  "unemployment_tax",
   "capital_gains",
   "investments",
   "options",
@@ -918,6 +963,7 @@ export const FEATURE_DEFS: Readonly<Record<FinanceFeature, FeatureDef>> = Object
   tax_brackets: { label: "Tax brackets", floor: 3, on: 4 },
   sales_tax: { label: "Sales tax", floor: 3, on: 4 },
   business_tax: { label: "Business taxes", floor: 3, on: 4 },
+  unemployment_tax: { label: "Unemployment taxes on payroll (FUTA and SUTA)", floor: 3, on: 4 },
   capital_gains: { label: "Capital gains", floor: 3, on: 4 },
   investments: { label: "Investments", floor: 3, on: 4 },
   options: { label: "Options", floor: 3, on: 4 },
@@ -1383,6 +1429,8 @@ export interface OwnerLine {
   class?: string;
   votes?: number;
   value?: number;
+  /** Held on the market: units of a listed company bought there (a holding of its stock), or the public's own (party null). */
+  public?: boolean;
 }
 
 export interface AccountView {
@@ -1600,11 +1648,79 @@ export interface OwnershipActs {
   decide: string | null;
   /** Changing its structure (`org.govern`, with more than its threshold of the votes). */
   restructure: string | null;
+  /** Short of the votes for share decisions alone, they may put one to a vote (ORG-SPEC Phase 5: the action's `vote`); for a change of structure, `voteRestructure`. */
+  vote?: boolean;
+  voteRestructure?: boolean;
   /** Acting for it on the stakes it holds in others: selling them, putting more in (`shares.manage`). */
   holdings: string | null;
   /** Start a subsidiary (`org.govern`), with the accounts of the company's own its capital may come from. */
   found: string | null;
   sources: { id: EntityId; name: string; balance: string }[];
+}
+
+/** A line of what winding a company up settles or writes off: its words and amount. */
+export interface WindLine {
+  label: string;
+  cents: number;
+}
+
+/** Something a company holds besides cash, as winding it up would leave it: its value where it shows, and where it goes ("sold", "to its owners by share", "to Jordan Ellis"). */
+export interface WindAsset {
+  id: EntityId;
+  label: string;
+  value: number | null;
+  goes: string;
+}
+
+/** A holder's payout when a company is wound up: their share and the cash it comes to, named as the reader may see them. */
+export interface WindPayout {
+  party: EntityId | null;
+  name: string;
+  share: number;
+  cents: number;
+}
+
+/**
+ * A company's winding up (ORG-SPEC §3.13) as its Ownership shows it: since when it is winding up, or
+ * when it was dissolved and what it was folded into; and what finishing would do now: its cash, the
+ * debts it would pay (wages still due, invoices, loans and cards, taxes), what it is owed and would
+ * write off, what it holds and where each goes, the staff and standing payments that would end, each
+ * holder's payout, and what it is short of paying its debts. `why` is null where the reader may wind
+ * it up (always for the GM), else why not.
+ */
+export interface WindingView {
+  since: string | null;
+  dissolved: string | null;
+  mergedInto: { id: EntityId | null; name: string } | null;
+  why: string | null;
+  cash: number;
+  debts: WindLine[];
+  owed: WindLine[];
+  assets: WindAsset[];
+  staff: { id: EntityId | null; name: string }[];
+  payments: { id: EntityId; label: string }[];
+  payouts: WindPayout[];
+  short: number;
+  /** Short only of the votes (`why` says so), the reader may put winding it up to a vote (ORG-SPEC Phase 5: the action's `vote`). */
+  vote?: boolean;
+}
+
+/** A company this one may be merged with (§3.13): its units (as merging counts them) and value a unit, for the default ratio. */
+export interface MergeOption {
+  id: EntityId;
+  name: string;
+  units: number;
+  perUnit: number;
+}
+
+/** Merging (§3.13): this company's units and value a unit as merging counts them, and the companies the reader may fold it into or take into it; `why` null where they may merge it (always for the GM). */
+export interface MergeView {
+  why: string | null;
+  units: number;
+  perUnit: number;
+  with: MergeOption[];
+  /** Short only of this company's votes, the reader may put the merger to its vote (the action's `vote`). */
+  vote?: boolean;
 }
 
 /**
@@ -1621,9 +1737,14 @@ export interface OwnershipView {
   classes: ShareClass[] | null;
   /** Its units in all; null while it doesn't count them. */
   units: number | null;
+  /** Its market, while it is listed; null otherwise. */
+  listing: ListingView | null;
+  /** What the reader may do about its market; null for the GM's view. */
+  market: MarketActs | null;
   /** An ownership decision needs more than this percent of the votes. */
   decidePct: number;
-  valuation: { value: number; set: boolean; book: number; profit: number; multiple: number; perUnit: number | null } | null;
+  /** Its value and its parts; a listed company's is its market capitalization (`market`: its price a unit and all its units), its books then the price's anchor. */
+  valuation: { value: number; set: boolean; book: number; profit: number; multiple: number; perUnit: number | null; market?: { price: number; units: number } } | null;
   parents: StructureLink[];
   children: StructureLink[];
   consolidated: ConsolidatedView | null;
@@ -1634,36 +1755,130 @@ export interface OwnershipView {
   votes: number;
   /** Null for the GM's view, whose changes are GM edits. */
   acts: OwnershipActs | null;
+  /** Winding up: null while it trades and the reader may not wind it up. */
+  winding: WindingView | null;
+  /** Merging: null where the reader may merge it with nothing. */
+  merge: MergeView | null;
 }
 
-/** One year of an organization's taxes (§3.11): sales tax it collected and remitted, what it withheld from pay and its own share of payroll tax, the income tax it paid, and property tax. */
+/**
+ * A listed company's market (§27.10 Listing): the asset and ticker its units trade as, when it
+ * listed, its price a unit now, the units the public holds and, of them, those held in the world and
+ * those the market still sells, its market capitalization (the price times all its units), its books
+ * a unit (the price's anchor; null where values don't show) and how its price has done.
+ */
+export interface ListingView {
+  asset: string;
+  symbol: string;
+  since: string;
+  price: number;
+  float: number;
+  held: number;
+  available: number;
+  marketCap: number;
+  fair: number | null;
+  performance: PerformanceView | null;
+}
+
+/** What the reader may do about a company's market (§27.10 Listing), each null where they may, else why not in words. */
+export interface MarketActs {
+  /** List it, or while it is listed offer more units: `shares.manage`, more than its threshold of the votes, a C corporation. */
+  list: string | null;
+  /** Take it off the market, buying back every public unit. */
+  delist: string | null;
+  /** Sell the reader's own registered units on the market (a stake sale with no buyer). */
+  offer: string | null;
+  /** The reader's own registered units they may sell there: all but the cap table's last. */
+  units: number;
+  /** Short only of the votes to list it (or offer more), or to take it off the market, the reader may put it to a vote (the action's `vote`). */
+  voteList?: boolean;
+  voteDelist?: boolean;
+}
+
+/**
+ * One year of an organization's taxes (§3.11): sales tax it collected and remitted, what it withheld
+ * from pay and its own share of payroll tax, its unemployment taxes on that payroll (FUTA with any
+ * credit reduction, and SUTA: accrued, and paid), the income tax it paid, property tax, and the gifts
+ * it received.
+ */
 export interface TaxYearView {
   year: number;
   salesCollected: number;
   salesRemitted: number;
   withheld: number;
   employerShare: number;
+  futa: number;
+  futaPaid: number;
+  suta: number;
+  sutaPaid: number;
   income: number;
   property: number;
+  donations: number;
+}
+
+/**
+ * An employer's unemployment taxes as they stand (ORG-SPEC §3.11, Phase 5): FUTA's net rate (the
+ * gross rate less the credit for state tax, which a credit-reduction state's reduction cuts), its
+ * parts and wage base; SUTA's rate and wage base. Each null where it owes none (an exempt status, or
+ * no rate in the world's tables or settings).
+ */
+export interface UnemploymentView {
+  futa: { pct: number; grossPct: number; creditPct: number; reductionPct: number; base: number } | null;
+  suta: { pct: number; base: number } | null;
+}
+
+/** An organization's tax-exempt status (§3.11, Phase 5): the `economy.exempt` row its `tax_exempt` names, and what it means for its taxes and its donors. */
+export interface ExemptView {
+  status: string;
+  name: string;
+  code: string;
+  deductible: boolean;
+  futa: boolean;
+  suta: boolean;
+}
+
+/**
+ * A corporation's consolidated return (§3.11, Phase 5): whether it elected one, the corporations its
+ * return includes (or would, once elected): those it and they hold 80 % or more of, by votes and by
+ * worth, each with the group's share of both; and, once elected, this year's combined taxable profit
+ * so far (losses offset) and the tax on it, where values show.
+ */
+export interface ConsolidationView {
+  elected: boolean;
+  members: { name: string; votes: number; share: number }[];
+  profit: number | null;
+  tax: number | null;
 }
 
 /**
  * An organization's Taxes in Orgs (§3.11, §4.4, the economy's `taxes` section): this year and last;
  * the sales tax it holds until it remits it; how its income is taxed (a corporation pays its own,
  * a pass-through's is taxed to the people at the top, each with their share of its profit, through
- * the companies between); this year's income tax so far; what is due next; and a change of
- * structure waiting for the next estimated-tax period.
+ * the companies between, and an exempt organization pays none); this year's income tax so far; what
+ * is due next; a change of structure waiting for the next estimated-tax period; its unemployment
+ * taxes' rates; its exempt status; its consolidated return, or the parent whose return files its
+ * tax; and what the reader may do (null for the GM's view).
  */
 export interface TaxesView {
-  income: "corporate" | "owners" | null;
+  income: "corporate" | "owners" | "exempt" | null;
   years: TaxYearView[];
   salesHeld: number;
   incomeSoFar: number | null;
   taxedTo: { name: string; share: number }[];
   /** The organizations at the top that pay no income tax on their share (a household, a trust, a group). */
   untaxed: { name: string; share: number }[];
+  /** The exempt organizations at the top: no one pays income tax on their shares, by their exemption. */
+  exemptHolders: { name: string; share: number }[];
   due: { label: string; cents: number | null; at: string }[];
   pending: { structure: string; from: string } | null;
+  unemployment: UnemploymentView | null;
+  exempt: ExemptView | null;
+  /** The statuses the world's exempt table holds, in its order, for GM → Orgs to pick from; null for a reader, and for a household or the party, which hold none. */
+  statuses: { id: string; name: string; code: string }[] | null;
+  consolidation: ConsolidationView | null;
+  filedBy: string | null;
+  /** Electing or ending a consolidated return (`org.govern`): null where the reader may, else why not; null as a whole for the GM's view. */
+  acts: { consolidate: string | null } | null;
 }
 
 /**
@@ -1871,4 +2086,8 @@ export const FINANCE_ACTIONS = {
   sharesIssue: "shares_issue",
   sharesBuyBack: "shares_buy_back",
   sharesClasses: "shares_classes",
+  donate: "donate",
+  consolidate: "tax_consolidate",
+  sharesList: "shares_list",
+  sharesDelist: "shares_delist",
 } as const;

@@ -8,12 +8,14 @@
 
 import type { EntityId } from "../../../shared/ids";
 import { isRecord, type JsonObject, type JsonValue } from "../../../shared/json";
+import { listingIn, ownersIn, unitsOf } from "../../../shared/finance";
 import { ACTS_FOR, AS_THE_WORLD, DUES_EVERY, ORGS_ENTRY, POWER_WORDS, type OrgPower } from "../../../shared/org";
+import { DECISION_EFFECTS } from "../../../shared/org-motions";
 import type { OrgOp } from "../../../shared/org-ops";
 import { PARTY_OUT } from "../../../shared/party";
 import { formatMoney, type EffectSpec } from "../../../shared/world";
 import { calendarOf, clockAt, dayIndexOfText } from "../../../engine/calendar";
-import { isStaff, orgPower, orgTypeOf, positionsOf } from "../../../engine/org";
+import { dayWords, dissolvedOn, isStaff, orgPower, orgTypeOf, positionsOf } from "../../../engine/org";
 import { labelOf, own, strOf } from "../../../engine/pack-kit";
 import type { ReadContext, Rejection } from "../../../engine/registry";
 import { isGone } from "../../../engine/scope";
@@ -95,7 +97,9 @@ function endOfDay(ctx: ReadContext, date: string): number | Rejection {
 
 /** An organization an op names, or why not. */
 function orgProblem(ctx: ReadContext, org: EntityId): Rejection | null {
-  return orgTypeOf(ctx, org) === null || isGone(ctx.state, org) ? refuse("missing_entity", `no organization ${labelOf(ctx, org)}`) : null;
+  if (orgTypeOf(ctx, org) === null || isGone(ctx.state, org)) return refuse("missing_entity", `no organization ${labelOf(ctx, org)}`);
+  const dissolved = dissolvedOn(ctx.state, org);
+  return dissolved === null ? null : refuse("dissolved", `${labelOf(ctx, org)} was dissolved on ${dayWords(ctx.world, dissolved)}`);
 }
 
 /** The cadence an organization's dues run on now, and the day they fall on when its `dues` field (a one-record list) sets one; null when it sets none. */
@@ -232,6 +236,27 @@ export function compileOrgOp(ctx: ReadContext, op: OrgOp): EffectSpec[] | Reject
       // Sold, or given for nothing: the price is the whole stake's.
       return [{ type: "economy.stake_sell", args: { business: op.org, party: op.from, buyer: op.to, ...(op.units !== undefined ? { units: Math.round(op.units) } : {}), ...(op.pct !== undefined ? { share: op.pct } : {}), price: Math.round(op.price ?? 0) } }];
     }
+    case "list": {
+      const missing = orgProblem(ctx, op.org) ?? needs(ctx, "economy.list", "list a company on a market");
+      if (missing) return missing;
+      return [{ type: "economy.list", args: { business: op.org, units: Math.round(op.units), ...(op.price !== undefined ? { price: Math.round(op.price) } : {}), ...(op.symbol !== undefined ? { symbol: op.symbol } : {}) } }];
+    }
+    case "delist": {
+      const missing = orgProblem(ctx, op.org) ?? needs(ctx, "economy.delist", "take a company off a market");
+      if (missing) return missing;
+      return [{ type: "economy.delist", args: { business: op.org, ...(op.price !== undefined ? { price: Math.round(op.price) } : {}) } }];
+    }
+    case "trade": {
+      const bad = orgProblem(ctx, op.org);
+      if (bad) return bad;
+      const fields = own(ctx.state.entities, op.org)?.fields ?? {};
+      const listing = listingIn(fields);
+      if (!listing) return refuse("not_listed", `${name(op.org)} isn't on a market`);
+      // Units held on the cap table, and none on the market, sell into its float as a stake with no buyer.
+      const onMarket = Object.values(ctx.state.entities).some((e) => e.kind === "holding" && e.fields.asset === listing.asset && ownersIn(own(ctx.state.entities, strOf(e.fields.account))?.fields ?? e.fields).some((o) => o.party === op.who));
+      if (op.side === "sell" && !onMarket && unitsOf(ownersIn(fields), op.who) > 0) return [{ type: "economy.stake_sell", args: { business: op.org, party: op.who, units: Math.round(op.units), price: 0 } }];
+      return [{ type: "economy.trade", args: { side: op.side, party: op.who, asset: listing.asset, qty: Math.round(op.units), ...(op.account !== undefined ? { account: op.account } : {}) } }];
+    }
     case "entry":
       return [{ type: ORGS_ENTRY, args: { place: op.place, entry: op.entry ?? AS_THE_WORLD, ...(op.keys !== undefined ? { keys: op.keys } : {}) } }];
     case "dues": {
@@ -252,10 +277,56 @@ export function compileOrgOp(ctx: ReadContext, op: OrgOp): EffectSpec[] | Reject
       if (missing) return missing;
       return [{ type: "orgs.restructure", args: { org: op.org, structure: op.structure } }];
     }
+    case "wind_up": {
+      const missing = orgProblem(ctx, op.org) ?? needs(ctx, "orgs.wind_up", "wind up a company");
+      if (missing) return missing;
+      return [{ type: "orgs.wind_up", args: { org: op.org, ...(op.stage !== undefined ? { stage: op.stage } : {}), ...(op.property !== undefined ? { property: op.property } : {}), ...(op.to !== undefined ? { to: op.to } : {}), ...(op.why !== undefined ? { why: plainWords(op.why) } : {}) } }];
+    }
+    case "merge": {
+      const missing = orgProblem(ctx, op.org) ?? orgProblem(ctx, op.into) ?? needs(ctx, "orgs.merge", "merge companies");
+      if (missing) return missing;
+      return [{ type: "orgs.merge", args: { org: op.org, into: op.into, ...(op.ratio !== undefined ? { ratio: op.ratio } : {}), ...(op.cash !== undefined ? { cash: Math.round(op.cash) } : {}), ...(op.from !== undefined ? { from: op.from } : {}), ...(op.keep === true ? { keep: true } : {}), ...(op.why !== undefined ? { why: plainWords(op.why) } : {}) } }];
+    }
     case "rename": {
       const bad = orgProblem(ctx, op.org);
       if (bad) return bad;
       return [{ type: "orgs.rename", args: { org: op.org, name: plainWords(op.name) } }];
+    }
+    case "tax_status": {
+      const missing = orgProblem(ctx, op.org) ?? needs(ctx, "economy.tax_status", "change a tax-exempt status");
+      if (missing) return missing;
+      const row = op.status === null ? undefined : ctx.tables.get("economy.exempt")?.rows[op.status];
+      const words = op.status === null ? "No longer exempt from income tax" : `Exempt from income tax as ${strOf(row?.name, op.status)}`;
+      return [{ type: "economy.tax_status", args: { org: op.org, status: op.status ?? "" } }, historyLine(op.org, words)];
+    }
+    case "consolidate": {
+      const missing = orgProblem(ctx, op.org) ?? needs(ctx, "economy.consolidate", "file a consolidated return");
+      if (missing) return missing;
+      return [{ type: "economy.consolidate", args: { org: op.org, elect: op.elect } }, historyLine(op.org, op.elect ? "Elected to file one consolidated return" : "Stopped filing a consolidated return")];
+    }
+    // Decisions (ORG-SPEC Phase 5), each the orgs pack's own effect, which writes its History line: a decision put to a vote for someone, the GM's vote, a motion closed or withdrawn, a request answered, the rules.
+    case "propose":
+      return [{ type: DECISION_EFFECTS.propose, args: { change: op.change as unknown as JsonObject, by: op.by, ...(op.party !== undefined ? { party: op.party } : {}) } }];
+    case "vote": {
+      const bad = orgProblem(ctx, op.org);
+      if (bad) return bad;
+      return [{ type: DECISION_EFFECTS.vote, args: { org: op.org, motion: op.motion, who: op.who, vote: op.vote } }];
+    }
+    case "end_motion": {
+      const bad = orgProblem(ctx, op.org);
+      if (bad) return bad;
+      return [{ type: DECISION_EFFECTS.end, args: { org: op.org, motion: op.motion, how: op.how } }];
+    }
+    case "answer": {
+      const bad = orgProblem(ctx, op.org);
+      if (bad) return bad;
+      return [{ type: DECISION_EFFECTS.answer, args: { org: op.org, request: op.request, answer: op.answer, ...(op.by !== undefined ? { by: op.by } : {}), ...(op.why !== undefined ? { why: plainWords(op.why) } : {}) } }];
+    }
+    case "decisions": {
+      const bad = orgProblem(ctx, op.org);
+      if (bad) return bad;
+      const { do: _do, org, ...rules } = op;
+      return [{ type: DECISION_EFFECTS.rules, args: { org, ...rules } }];
     }
   }
 }

@@ -12,27 +12,39 @@
 import type { EntityId } from "../../../shared/ids";
 import type { JsonValue } from "../../../shared/json";
 import type { LedgerEvent } from "../../../shared/ledger";
-import { classesIn, COMMON_CLASS, countedIn, countsUnits, FINANCE_ACTIONS, FINANCE_EVENTS, ownersIn, ownersJson, PARTY_KINDS, ROLE_RIGHTS, rowClass, unitsOf, votePcts, withUnitShares, worthShares, type ConsolidatedView, type DistributionRoute, type Owner, type OwnerLine, type OwnershipActs, type OwnershipView, type ShareClass, type StructureLink } from "../../../shared/finance";
+import { classesIn, COMMON_CLASS, countedIn, countsUnits, FINANCE_ACTIONS, FINANCE_EVENTS, listingIn, ownersIn, ownersJson, PARTY_KINDS, ROLE_RIGHTS, rowClass, unitsOf, votePcts, withUnitShares, worthShares, type ConsolidatedView, type DistributionRoute, type Owner, type OwnerLine, type OwnershipActs, type OwnershipView, type ShareClass, type StructureLink } from "../../../shared/finance";
 import { positionIdOf, type OrgPower } from "../../../shared/org";
 import { calendarOf, clockAt, dateAt, dayIndexOf } from "../../../engine/calendar";
 import { businessIds, mayAct, orgTypeOf } from "../../../engine/org";
-import { labelOf, numOf, objOf, optionalService, own, strOf } from "../../../engine/pack-kit";
+import { labelOf, numOf, objOf, optionalQuery, optionalService, own, strOf } from "../../../engine/pack-kit";
 import { passMemo } from "../../../engine/read-pass";
-import type { ReadContext, Rejection } from "../../../engine/registry";
+import type { EffectContext, ReadContext, Rejection } from "../../../engine/registry";
+import { VOTE_PARAM } from "../../../shared/org-motions";
 import { asParam, mayAs, moneyWords } from "./acting";
 import { reject } from "./assets";
 import { businessBooks, operatingAccount } from "./books";
 import { isBusiness, mayDraw } from "./business";
 import { acquisition, disposal } from "./gains";
-import { unit } from "./holdings";
+import { stockHolders, unit } from "./holdings";
 import { hiddenFrom } from "./model";
 import type { FinanceApi, FinanceRegistry } from "./module";
-import { businessValue, stakeRoute, valuationOf } from "./stakes";
+import { businessValue, marketValueOf, stakeRoute, valuationOf } from "./stakes";
+import { deciderFor, mergeView, windingView } from "./winding";
 
 declare module "../../../engine/registry" {
   interface QueryMap {
     /** Why `party` may not make an ownership decision on `business` (more than its threshold of the votes on their own), in words, `doing` heading it ("Changing the structure of"); null when they may. */
     "economy.decide": (ctx: ReadContext, business: EntityId, party: EntityId, doing: string) => string | null;
+    /** Each holder's votes in a company as its decisions count them, in percent of all (`decisionVotes`): its motions' voters. */
+    "economy.votes": (ctx: ReadContext, business: EntityId) => Record<EntityId, number>;
+  }
+  interface ServiceMap {
+    /**
+     * A decision short of the decider's votes put to a vote instead (ORG-SPEC Phase 5, the orgs
+     * pack's): the motion's events, when the action asks for one (`vote`); a refusal when it can't
+     * be; null when the action didn't ask, so the decision is refused as before.
+     */
+    "orgs.put_to_vote": (ctx: ReadContext, ask: { org: EntityId; by: EntityId; party: EntityId; text: string; why: string }) => LedgerEvent[] | Rejection | null;
   }
 }
 
@@ -55,16 +67,53 @@ export function decidePct(state: ReadContext["state"], business: EntityId): numb
   return Math.min(100, Math.max(0, numOf(own(state.entities, business)?.fields.decide_pct, 50)));
 }
 
-/** Each holder's votes in a company, in percent of all (§3.10). */
+/**
+ * Each holder's votes in a company, in percent of all (§3.10). A listed company's public units vote
+ * too, at their class's votes (§27.10 Listing): a holder of its stock in the world casts its own on
+ * top of any units on the cap table, and the rest of the float counts for the public, which no one
+ * casts.
+ */
 export function votesIn(state: ReadContext["state"], business: EntityId): Record<EntityId, number> {
   const e = own(state.entities, business);
-  return e ? votePcts(ownersIn(e.fields), classesIn(e.fields)) : {};
+  if (!e) return {};
+  const owners = ownersIn(e.fields);
+  const classes = classesIn(e.fields);
+  const listing = listingIn(e.fields);
+  if (!listing || !countsUnits(owners)) return votePcts(owners, classes);
+  const each = listedVotes(classes, listing.class);
+  const votes: Record<EntityId, number> = {};
+  let total = listing.float * each;
+  for (const o of owners) {
+    const v = ROLE_RIGHTS[o.role].worth ? (o.units ?? 0) * rowClass(o, classes).votes : 0;
+    votes[o.party] = (votes[o.party] ?? 0) + v;
+    total += v;
+  }
+  for (const [party, units] of Object.entries(stockHolders(state, listing.asset))) votes[party] = (votes[party] ?? 0) + units * each;
+  const out: Record<EntityId, number> = {};
+  for (const [party, v] of Object.entries(votes)) out[party] = total > 0 ? (v * 100) / total : 0;
+  return out;
+}
+
+/** The votes a listed company's public unit carries: its listed class's, else its first class's. */
+export function listedVotes(classes: readonly ShareClass[], cls: string | undefined): number {
+  return (classes.find((c) => c.id === cls) ?? classes[0] ?? COMMON_CLASS).votes;
+}
+
+/**
+ * Each holder's votes in a company as its decisions count them (§3.10, ORG-SPEC Phase 5): by its
+ * shares (`votesIn`), or, where it counts by members (`vote_by`), one each to the holders of its worth.
+ */
+export function decisionVotes(ctx: Pick<ReadContext, "state">, business: EntityId): Record<EntityId, number> {
+  const e = own(ctx.state.entities, business);
+  if (!e || e.fields.vote_by !== "members") return votesIn(ctx.state, business);
+  const holders = [...new Set(ownersIn(e.fields).filter((o) => ROLE_RIGHTS[o.role].worth).map((o) => o.party))];
+  return Object.fromEntries(holders.map((h) => [h, 100 / holders.length]));
 }
 
 /** Why `party` may not make an ownership decision on `business`, `doing` heading the words; null when their votes are enough. */
 export function decisionRefusal(ctx: ReadContext, business: EntityId, party: EntityId, doing: string): string | null {
   const need = decidePct(ctx.state, business);
-  const have = votesIn(ctx.state, business)[party] ?? 0;
+  const have = decisionVotes(ctx, business)[party] ?? 0;
   if (have > need + 1e-9) return null;
   return `${doing} ${labelOf(ctx, business)} needs ${need === 50 ? "more than half the votes" : `more than ${need}% of the votes`}; ${labelOf(ctx, party)} holds ${Math.round(have * 100) / 100}%`;
 }
@@ -73,10 +122,14 @@ export function decisionRefusal(ctx: ReadContext, business: EntityId, party: Ent
  * Whether `by`, deciding as `party` (themselves, or an organization holder they act for), may make an
  * ownership decision on `business` with `power`: they hold it at `party` when they act for it, `party`
  * holds it at `business`, and `party` holds more than the decision threshold of its votes (§3.10).
- * With no `by` (the GM, who decides for its holders until motions come), anything goes.
+ * Short of the votes, an action that asks (`vote`) puts it to a vote instead (`orgs.put_to_vote`: the
+ * motion's events, which the effect returns), `what` its words. A motion of the company's that passed
+ * carries it out with its holders' votes, and with no `by` (the GM's) anything goes.
  */
-function decision(ctx: ReadContext, by: EntityId, party: EntityId, business: EntityId, power: OrgPower, doing: string): Rejection | null {
+export function decision(ctx: ReadContext, by: EntityId, party: EntityId, business: EntityId, power: OrgPower, doing: string, what?: string): LedgerEvent[] | Rejection | null {
   if (by === "") return null;
+  const carried = (ctx as Partial<EffectContext>).carried;
+  if (carried?.motion !== undefined && carried.org === business) return null;
   if (party !== by) {
     const may = mayAct(ctx, by, party, power);
     if (!may.ok) return reject("not_allowed", may.reason);
@@ -84,11 +137,12 @@ function decision(ctx: ReadContext, by: EntityId, party: EntityId, business: Ent
   const holds = mayAct(ctx, party, business, power);
   if (!holds.ok) return reject("not_allowed", holds.reason);
   const why = decisionRefusal(ctx, business, party, doing);
-  return why === null ? null : reject("votes", why);
+  if (why === null) return null;
+  return optionalService(ctx, "orgs.put_to_vote")?.(ctx, { org: business, by, party, text: what ?? `${doing} ${labelOf(ctx, business)}`, why }) ?? reject("votes", why);
 }
 
 /** The History lines of a decision: the company's, and the organization holder's it was made for. */
-function decided(ctx: ReadContext, business: EntityId, by: EntityId, party: EntityId, text: string, names: readonly EntityId[]): LedgerEvent[] {
+export function decided(ctx: ReadContext, business: EntityId, by: EntityId, party: EntityId, text: string, names: readonly EntityId[]): LedgerEvent[] {
   const acted = optionalService(ctx, "orgs.acted");
   if (!acted) return [];
   const named = [...new Set(names.filter((id) => id !== "" && own(ctx.state.entities, id)))];
@@ -97,22 +151,24 @@ function decided(ctx: ReadContext, business: EntityId, by: EntityId, party: Enti
 }
 
 /** A payment's postings stamped with who made it for the organization it was made as (§3.6), as `actAs` stamps them. */
-function stamped(events: readonly LedgerEvent[], by: EntityId, as: EntityId): LedgerEvent[] {
+export function stamped(events: readonly LedgerEvent[], by: EntityId, as: EntityId): LedgerEvent[] {
   return by === "" || by === as ? [...events] : events.map((e): LedgerEvent => (e.type === FINANCE_EVENTS.txn && "data" in e ? { ...e, data: { ...e.data, by, as } } : e));
 }
 
 /** A company's owners counted in units: as they are when it counts them, else in the units it counts them in first. */
-function counted(api: FinanceApi, ctx: ReadContext, business: EntityId): Owner[] {
+export function counted(api: FinanceApi, ctx: ReadContext, business: EntityId): Owner[] {
   const owners = api.ownersOf(ctx.state, business);
   return countsUnits(owners) ? owners : countedIn(owners, unitsToCount(ctx));
 }
 
-/** A price a unit, given or (absent) its value a unit; a total for `units`, the whole value's share where it is worked out. */
+/** A price a unit, given or (absent) its value a unit; a total for `units`, the whole value's share where it is worked out. A listed company's value a unit is its market price. */
 function priced(api: FinanceApi, ctx: ReadContext, business: EntityId, owners: readonly Owner[], units: number, given: JsonValue | undefined): { each: number; cents: number } | Rejection {
   if (typeof given === "number" && Number.isFinite(given)) {
     const each = Math.round(given);
     return each >= 0 && Number.isSafeInteger(each * units) ? { each, cents: each * units } : reject("bad_amount", "a price is a whole amount");
   }
+  const market = marketValueOf(ctx, business);
+  if (market) return { each: Math.round(market.price), cents: Math.round(market.price * units) };
   const total = unitsOf(owners);
   if (total <= 0) return reject("bad_amount", `${labelOf(ctx, business)} has no units to value one by: say the price a unit`);
   const value = businessValue(api, ctx, business);
@@ -143,7 +199,7 @@ function issueShares(api: FinanceApi, ctx: ReadContext, a: Args): LedgerEvent[] 
   if (to === "" || to === business || api.partyKind(ctx, to) === null) return reject("missing_entity", `no one ${labelOf(ctx, to)} to issue shares to`);
   const units = wholeUnits(a.units);
   if (isRejection(units)) return units;
-  const denied = decision(ctx, by, party, business, "shares.manage", "Issuing shares in");
+  const denied = decision(ctx, by, party, business, "shares.manage", "Issuing shares in", `Issue ${units} units of ${name} to ${labelOf(ctx, to)}${typeof a.price === "number" ? ` at ${moneyWords(ctx, a.price)} a unit` : " at their value a unit"}`);
   if (denied) return denied;
   const fields = own(ctx.state.entities, business)?.fields ?? {};
   const classes = classesIn(fields);
@@ -191,7 +247,7 @@ function buyBack(api: FinanceApi, ctx: ReadContext, a: Args): LedgerEvent[] | Re
   const holder = strOf(a.from);
   const units = wholeUnits(a.units);
   if (isRejection(units)) return units;
-  const denied = decision(ctx, by, party, business, "shares.manage", "Buying back shares in");
+  const denied = decision(ctx, by, party, business, "shares.manage", "Buying back shares in", `Buy back ${units} units of ${name} from ${labelOf(ctx, holder)}${typeof a.price === "number" ? ` at ${moneyWords(ctx, a.price)} a unit` : " at their value a unit"}`);
   if (denied) return denied;
   const owners = counted(api, ctx, business);
   const held = unitsOf(owners, holder);
@@ -238,7 +294,7 @@ function setClasses(api: FinanceApi, ctx: ReadContext, a: Args): LedgerEvent[] |
   if (!isBusiness(ctx, business)) return reject("not_business", `${name} isn't a company`);
   const by = strOf(a.by);
   const party = strOf(a.party) || by;
-  const denied = decision(ctx, by, party, business, "shares.manage", "Changing the share classes of");
+  const denied = decision(ctx, by, party, business, "shares.manage", "Changing the share classes of", `${a.remove === true ? "Remove" : "Set"} the share class ${strOf(a.label).trim() || strOf(a.class)} of ${name}${a.remove !== true && typeof a.votes === "number" ? ` (${a.votes} votes a unit)` : ""}${strOf(a.holder) !== "" ? `, with ${labelOf(ctx, strOf(a.holder))}'s units in it` : ""}`);
   if (denied) return denied;
   const fields = own(ctx.state.entities, business)?.fields ?? {};
   const before = classesIn(fields);
@@ -378,8 +434,10 @@ export function ownershipView(api: FinanceApi, ctx: ReadContext, business: Entit
   const owners = api.ownersOf(ctx.state, business);
   const classes = classesIn(fields);
   const counting = countsUnits(owners);
-  const total = unitsOf(owners);
-  const totalVotes = owners.reduce((a, o) => a + (ROLE_RIGHTS[o.role].worth ? (o.units ?? 0) * rowClass(o, classes).votes : 0), 0);
+  // A listed company's units are its owners' and the public's (§27.10 Listing), and the public's vote at their class's votes.
+  const listing = listingIn(fields);
+  const total = unitsOf(owners) + (listing?.float ?? 0);
+  const totalVotes = owners.reduce((a, o) => a + (ROLE_RIGHTS[o.role].worth ? (o.units ?? 0) * rowClass(o, classes).votes : 0), 0) + (listing ? listing.float * listedVotes(classes, listing.class) : 0);
   const shares = worthShares(owners);
   const valuation = values ? valuationOf(api, ctx, business) : null;
   const lines: OwnerLine[] = owners.map((o) => {
@@ -395,24 +453,40 @@ export function ownershipView(api: FinanceApi, ctx: ReadContext, business: Entit
       ...(valuation && worth ? { value: Math.round((valuation.value * share) / 100) } : {}),
     };
   });
-  const parents: StructureLink[] = [...new Set(owners.map((o) => o.party))].flatMap((p) => (orgTypeOf(ctx, p) !== null && !hiddenFrom(ctx, viewer, p) && (shares[p] ?? 0) > 0 ? [{ id: p, name: labelOf(ctx, p), share: shares[p] ?? 0, votes: votesIn(ctx.state, business)[p] ?? 0, controlled: (votesIn(ctx.state, business)[p] ?? 0) > decidePct(ctx.state, business) + 1e-9, value: null, cash: null, profit: null, children: [] }] : []));
+  const parents: StructureLink[] = [...new Set(owners.map((o) => o.party))].flatMap((p) => (orgTypeOf(ctx, p) !== null && !hiddenFrom(ctx, viewer, p) && (shares[p] ?? 0) > 0 ? [{ id: p, name: labelOf(ctx, p), share: api.shareOf(ctx.state, business, p), votes: votesIn(ctx.state, business)[p] ?? 0, controlled: (votesIn(ctx.state, business)[p] ?? 0) > decidePct(ctx.state, business) + 1e-9, value: null, cash: null, profit: null, children: [] }] : []));
   const routed = viewer !== null && api.shareOf(ctx.state, business, viewer) > 0 ? stakeRoute(ctx, viewer, business) : undefined;
   const route: DistributionRoute | null = routed === undefined ? null : routed === null ? { to: null, reinvest: false } : "reinvest" in routed ? { to: null, reinvest: true } : { to: routed.account, reinvest: false };
+  // Its market (§27.10 Listing): the listing, its holders on the market after the cap table's rows, and what the reader may do about it.
+  const market = optionalQuery(ctx, "economy.market_view")?.(ctx, business, viewer) ?? null;
   const acts: OwnershipActs | null =
     viewer === null
       ? null
       : {
           decide: refusalOf(ctx, viewer, business, "shares.manage", level) ?? decisionRefusal(ctx, business, viewer, "Deciding about the shares of"),
           restructure: refusalOf(ctx, viewer, business, "org.govern", level) ?? decisionRefusal(ctx, business, viewer, "Changing the structure of"),
+          // Short of the votes alone, they may put it to a vote (ORG-SPEC Phase 5).
+          vote: refusalOf(ctx, viewer, business, "shares.manage", level) === null && decisionRefusal(ctx, business, viewer, "Deciding about the shares of") !== null,
+          voteRestructure: refusalOf(ctx, viewer, business, "org.govern", level) === null && decisionRefusal(ctx, business, viewer, "Changing the structure of") !== null,
           holdings: refusalOf(ctx, viewer, business, "shares.manage", level),
           found: refusalOf(ctx, viewer, business, "org.govern", level),
           sources: capitalSources(api, ctx, business),
         };
+  // Winding up and merging (§3.13): the reader's own decision, or one through an organization holding it that they govern; short only of the votes, they may put it to a vote (ORG-SPEC Phase 5).
+  const decides = (doing: string): { why: string | null; vote: boolean } => {
+    if (viewer === null) return { why: null, vote: false };
+    if (level < 3) return { why: `${labelOf(ctx, business)} is wound up or merged from Money 3`, vote: false };
+    const d = deciderFor(ctx, viewer, business, "org.govern", doing);
+    return "reason" in d ? { why: d.reason, vote: d.code === "votes" } : { why: null, vote: false };
+  };
+  const winding = decides("Winding up");
+  const merging = decides("Merging");
   return {
     structure: strOf(fields.structure, "llc"),
-    owners: lines,
+    owners: [...lines, ...(market?.holders ?? [])],
     classes: Array.isArray(fields.share_classes) && fields.share_classes.length > 0 ? classes : null,
     units: counting ? total : null,
+    listing: market?.listing ?? null,
+    market: market?.acts ?? null,
     decidePct: decidePct(ctx.state, business),
     valuation: valuation ? { ...valuation, perUnit: counting && total > 0 ? valuation.value / total : null } : null,
     parents,
@@ -421,8 +495,10 @@ export function ownershipView(api: FinanceApi, ctx: ReadContext, business: Entit
     role: viewer === null ? null : (owners.find((o) => o.party === viewer)?.role ?? null),
     mayDraw: viewer !== null && mayDraw(api, ctx.state, viewer, business),
     route,
-    votes: viewer === null ? 0 : (votesIn(ctx.state, business)[viewer] ?? 0),
+    votes: viewer === null ? 0 : (decisionVotes(ctx, business)[viewer] ?? 0),
     acts,
+    winding: windingView(api, ctx, business, viewer, winding.why, winding.vote),
+    merge: level >= 3 ? mergeView(api, ctx, business, viewer, merging.why, merging.vote) : null,
   };
 }
 
@@ -432,6 +508,7 @@ export function ownershipView(api: FinanceApi, ctx: ReadContext, business: Entit
 export function registerShares(r: FinanceRegistry): void {
   const { api, core } = r;
   core.query("economy.decide", (ctx, business, party, doing) => decisionRefusal(ctx, business, party, doing));
+  core.query("economy.votes", (ctx, business) => decisionVotes(ctx, business));
   core.effect({ type: "economy.shares_issue", args: ["business", "to", "units", "price?", "class?", "from?", "party?", "by?"], gm: true, resolve: (a, ctx) => issueShares(api, ctx, a) });
   core.effect({ type: "economy.shares_buy_back", args: ["business", "from", "units", "price?", "to?", "party?", "by?"], gm: true, resolve: (a, ctx) => buyBack(api, ctx, a) });
   core.effect({ type: "economy.shares_classes", args: ["business", "class?", "label?", "votes?", "holder?", "remove?", "party?", "by?"], gm: true, resolve: (a, ctx) => setClasses(api, ctx, a) });
@@ -441,7 +518,7 @@ export function registerShares(r: FinanceRegistry): void {
     label: "Issue shares",
     description: "Issue new units of a company you control to a buyer, who pays for them into its account.",
     pack: "economy",
-    params: { business: { type: "ref", ref: "business", label: "Company" }, to: { type: "ref", of: { kind: [...PARTY_KINDS] }, label: "To" }, units: { type: "number", label: "Units" }, price: { type: "money", optional: true, label: "Price a unit (else its value a unit)" }, class: { type: "text", optional: true, label: "Class (its id)" }, from: { type: "ref", ref: "account", optional: true, label: "Paid from (the buyer's account)" }, as },
+    params: { business: { type: "ref", ref: "business", label: "Company" }, to: { type: "ref", of: { kind: [...PARTY_KINDS] }, label: "To" }, units: { type: "number", label: "Units" }, price: { type: "money", optional: true, label: "Price a unit (else its value a unit)" }, class: { type: "text", optional: true, label: "Class (its id)" }, from: { type: "ref", ref: "account", optional: true, label: "Paid from (the buyer's account)" }, as, vote: VOTE_PARAM },
     requires: ["level.money >= 3", "params.units > 0", "may(self, business, 'shares.manage')", mayAs("shares.manage")],
     outcomes: { default: [{ type: "economy.shares_issue", args: { business: "business", to: "to", units: "=params.units", price: "=params.price", class: "=params.class", from: "=params.from", party: "self", by: "actor" } }] },
     duration: "30",
@@ -453,7 +530,7 @@ export function registerShares(r: FinanceRegistry): void {
     label: "Buy back shares",
     description: "Have a company you control buy back some of a holder's units, paying them from its account.",
     pack: "economy",
-    params: { business: { type: "ref", ref: "business", label: "Company" }, from: { type: "ref", of: { kind: [...PARTY_KINDS] }, label: "From (the holder)" }, units: { type: "number", label: "Units" }, price: { type: "money", optional: true, label: "Price a unit (else its value a unit)" }, as },
+    params: { business: { type: "ref", ref: "business", label: "Company" }, from: { type: "ref", of: { kind: [...PARTY_KINDS] }, label: "From (the holder)" }, units: { type: "number", label: "Units" }, price: { type: "money", optional: true, label: "Price a unit (else its value a unit)" }, as, vote: VOTE_PARAM },
     requires: ["level.money >= 3", "params.units > 0", "may(self, business, 'shares.manage')", mayAs("shares.manage")],
     outcomes: { default: [{ type: "economy.shares_buy_back", args: { business: "business", from: "from", units: "=params.units", price: "=params.price", party: "self", by: "actor" } }] },
     duration: "30",
@@ -466,7 +543,7 @@ export function registerShares(r: FinanceRegistry): void {
     description: "Add, change or remove a company's share class (the votes a unit carries), and move a holder's units into it.",
     pack: "economy",
     mechanical: true,
-    params: { business: { type: "ref", ref: "business", label: "Company" }, label: { type: "text", label: "Class" }, class: { type: "text", optional: true, label: "Its id (else from its name)" }, votes: { type: "number", optional: true, label: "Votes a unit" }, holder: { type: "ref", of: { kind: [...PARTY_KINDS] }, optional: true, label: "Move this holder's units into it" }, remove: { type: "bool", optional: true, label: "Remove it" }, as },
+    params: { business: { type: "ref", ref: "business", label: "Company" }, label: { type: "text", label: "Class" }, class: { type: "text", optional: true, label: "Its id (else from its name)" }, votes: { type: "number", optional: true, label: "Votes a unit" }, holder: { type: "ref", of: { kind: [...PARTY_KINDS] }, optional: true, label: "Move this holder's units into it" }, remove: { type: "bool", optional: true, label: "Remove it" }, as, vote: VOTE_PARAM },
     requires: ["level.money >= 3", "may(self, business, 'shares.manage')", mayAs("shares.manage")],
     outcomes: { default: [{ type: "economy.shares_classes", args: { business: "business", label: "=params.label", class: "=params.class", votes: "=params.votes", holder: "=params.holder", remove: "=params.remove", party: "self", by: "actor" } }] },
     duration: "2",

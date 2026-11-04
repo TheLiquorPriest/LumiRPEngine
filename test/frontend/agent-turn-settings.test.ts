@@ -1,4 +1,4 @@
-// Settings → Agents for agent turns (INC2-SPEC C12, lane T4): the Agents page's Pipeline (the Curator's switch among it), Review card, System instructions,
+// Settings → Agents for agent turns (INC2-SPEC C12, lane T4): the Agents page's Streaming, Pipeline (the Curator's switch among it), Review card, System instructions,
 // Budgets (GM edits per turn, and what the engine keeps in memory), Compaction, Recording and the classic comparison ratio under Acceptance
 // runs; Settings → Agents → Roles, each role's settings with its Default (the Curator's ops per turn on its card); and Settings → Agents → Main
 // agent. Each group reads the shipped defaults and sends its change as a merge patch; each Default
@@ -7,7 +7,7 @@
 // rendered trees (no DOM), as the Assistant page's tests do.
 
 import { describe, expect, test } from "bun:test";
-import { AcceptanceSection, AgentTurnSettings, amountText, BudgetGroup, BudgetsSection, LimitRow, OwnLimitRow, SystemInstructionsSection } from "../../src/frontend/settings/agents";
+import { AcceptanceSection, AgentTurnSettings, amountText, BudgetGroup, BudgetsSection, LimitRow, OwnLimitRow, StreamingSection, SystemInstructionsSection } from "../../src/frontend/settings/agents";
 import { MainAgentBody, mainPatch, mainSummary } from "../../src/frontend/settings/main-agent";
 import { FAMILIES, RoleCard, RolesBody, roleResetPatch, rolesSummary } from "../../src/frontend/settings/roles";
 import { ContextBody, ContextCard, contextSummary, pinsOf } from "../../src/frontend/settings/context";
@@ -459,6 +459,28 @@ describe("Settings → Agents → System instructions", () => {
     expect(sent).toEqual({ agents: { systemTokens: null } });
     rig.body(await rig.send({ type: "lre.settings.set", patch: take() }));
     expect((await rig.rt.settings.get(rig.host.userId)).agents.systemTokens).toBe(8000);
+  });
+});
+
+describe("Settings → Agents → Streaming", () => {
+  test("reads on, sends off, shows its Default only while off, and the store keeps each", async () => {
+    const page = (agents: AgentSettings) => StreamingSection({ agents, patch, busy: false });
+    const toggle = labelled(page(DEFAULTS), HostSwitch, "Stream every agent call's answer");
+    expect(toggle.checked).toBe(true);
+    expect(labels(page(DEFAULTS))).toEqual([]);
+    press(toggle, false);
+    const off = take();
+    expect(off).toEqual({ agents: { stream: false } });
+    const rig = new Rig();
+    rig.body(await rig.send({ type: "lre.settings.set", patch: off }));
+    const agents = (await rig.rt.settings.get(rig.host.userId)).agents;
+    expect(agents.stream).toBe(false);
+    expect(labelled(page(agents), HostSwitch, "Stream every agent call's answer").checked).toBe(false);
+    click(labelled(page(agents), Button, "Reset streaming agent calls to its default, on"));
+    const reset = take();
+    expect(reset).toEqual({ agents: { stream: null } });
+    rig.body(await rig.send({ type: "lre.settings.set", patch: reset }));
+    expect((await rig.rt.settings.get(rig.host.userId)).agents.stream).toBe(true);
   });
 });
 

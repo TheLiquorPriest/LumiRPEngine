@@ -88,6 +88,7 @@ function shopPage(over: Partial<OrgView["you"]> = {}, positions: OrgView["positi
     badge: "Company · LLC",
     level: 3,
     exists: true,
+    ended: null,
     you: { belongs: true, title: "Mechanic", position: null, since: null, reportsTo: [], powers: [], delegations: [], ...over },
     runBy: [],
     people: [],
@@ -155,9 +156,14 @@ describe("Pay as…'s page", () => {
     expect([page.title, page.subtitle, page.go, page.problem]).toEqual(["Pay as Alder Automotive", "From its money, up to $200.00 a payment", "Pay $150.00 as Alder Automotive", null]);
   });
 
-  test("over the limit, it's held in the limit's words", () => {
-    expect(one(payAsPage(payAs, "dale_whitcomb", "250"), ActionPage).problem).toBe("Over your limit of $200.00 a payment for Alder Automotive");
-    expect(one(payAsPage({ entry: pay, limits: null }, "dale_whitcomb", "250"), ActionPage).problem).toBeNull();
+  test("over the limit, it asks for approval instead, in the limit's words", async () => {
+    const over = one(payAsPage(payAs, "dale_whitcomb", "250"), ActionPage);
+    expect([over.go, over.problem]).toEqual(["Ask for approval to pay $250.00", null]);
+    expect(elements(payAsPage(payAs, "dale_whitcomb", "250")).some((e) => e.type === "span" && String(e.props.children).startsWith("Over your limit of $200.00 a payment for Alder Automotive: it goes to whoever holds the power above you"))).toBe(true);
+    const sent: ActionBody[] = [];
+    expect(await (one(payAsPage(payAs, "dale_whitcomb", "250", sent), ActionPage).submit as () => Promise<boolean>)()).toBe(true);
+    expect(sent).toEqual([{ action: "pay", params: { to: "dale_whitcomb", amount: 25000, as: SHOP, ask: true } }]);
+    expect(one(payAsPage({ entry: pay, limits: null }, "dale_whitcomb", "250"), ActionPage).go).toBe("Pay $250.00 as Alder Automotive");
   });
 
   test("Go sends Pay with the organization as Paying as", async () => {
@@ -196,8 +202,8 @@ describe("Live 2: Jordan, by Marcus's delegation, pays a supplier from Orgs → 
     expect(elements(OrgMoney({ ...frame, segment: "summary", view: money, reader: null, nav, currency: chat.currency, onPayAs: noop })).some((e) => e.type === Button && e.props.children === "Pay as…")).toBe(true);
     const sent: ActionBody[] = [];
     const draw = (to: string, amount: string) => one(PayAsPage({ org: page, payAs, chatId: chat.chatId, to, amount, onTo: noop, onAmount: noop, controls: recording(state.palette, sent), nav }), ActionPage);
-    // $250 is held in the limit's words, and refused in them when played anyway.
-    expect(draw("dale_whitcomb", "250").problem).toBe("Over your limit of $200.00 a payment for Alder Automotive");
+    // $250 is over the limit: the page asks for approval in its words, and Pay without asking is refused in them.
+    expect(draw("dale_whitcomb", "250").go).toBe("Ask for approval to pay $250.00");
     expect(await chat.play({ action: "pay", params: { to: "dale_whitcomb", amount: chat.cents("250"), as: SHOP } })).toContain("Over your limit of $200.00 a payment for Alder Automotive");
     // $150 to Dale, the marina's owner, who sells parts.
     const go = draw("dale_whitcomb", "150");

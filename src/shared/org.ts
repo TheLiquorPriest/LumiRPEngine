@@ -256,6 +256,23 @@ export interface OrgMember {
 /** Dues as an organization sets them: so much from each member, every period, on a day of it. */
 export const DUES_EVERY = ["week", "month", "year"] as const;
 
+/**
+ * A company winding up, dissolved, or folded into another (ORG-SPEC §3.13, Phase 5), as its business
+ * fields: the day it began winding up and the day it was dissolved (`YYYY-MM-DD`), and the company a
+ * merger folded it into.
+ */
+export const WINDING_FIELD = "winding_up";
+export const DISSOLVED_FIELD = "dissolved";
+export const MERGED_INTO_FIELD = "merged_into";
+
+/** Winding up (§3.13): all at once; begin (stop trading); finish (settle, pay out and dissolve); resume (trade again). */
+export const WIND_STAGES = ["all", "begin", "finish", "resume"] as const;
+export type WindStage = (typeof WIND_STAGES)[number];
+
+/** What a company winding up does with the real estate and stakes it holds: hands them to its owners by share, or sells them to the market at their value. */
+export const WIND_PROPERTY = ["distribute", "sell"] as const;
+export type WindProperty = (typeof WIND_PROPERTY)[number];
+
 /** The fields every organization has (§3.17): on the base `group` kind, and on `trust`, which is no group. */
 export const ORG_FIELDS: Readonly<Record<string, FieldDef>> = {
   positions: { type: "list", label: "Positions ({id, title, powers, seats?, reports_to?, scope?, limits?, successor?, default?, no_dues?})" },
@@ -263,6 +280,15 @@ export const ORG_FIELDS: Readonly<Record<string, FieldDef>> = {
   payroll: { type: "list", label: "Pay schedule ({every, anchor, weekday, days})", domain: "money", level: 3 },
   payroll_account: { type: "ref", label: "Payroll account", ref: "account", domain: "money", level: 3 },
   dues: { type: "list", label: "Dues ({cents, every, day?})", domain: "money", level: 3 },
+  tax_exempt: { type: "text", label: "Tax-exempt status (a row of the exempt table: charity, church, club)", table: "economy.exempt", domain: "money", level: 3 },
+  suta_pct: { type: "number", label: "Its state unemployment tax rate (%), when it isn't its state's new-employer rate", min: 0, max: 100, domain: "money", level: 3 },
+  // Its decisions (ORG-SPEC Phase 5, `shared/org-motions.ts`): how votes are counted, the quorum and pass mark of a motion, how long it stays open, the standing votes, and how long a request for approval waits.
+  vote_by: { type: "enum", label: "Votes are counted by (shares, or one each for members; a company counts shares unless set)", values: ["shares", "members"] },
+  quorum_pct: { type: "number", label: "A motion needs at least % of the votes to take part (50 unless set)", min: 0, max: 100 },
+  pass_pct: { type: "number", label: "A motion passes with more than % of the votes cast for or against (50 unless set)", min: 0, max: 99.9 },
+  motion_days: { type: "number", label: "A motion stays open for days (7 unless set)", min: 1, max: 365 },
+  vote_rules: { type: "list", label: "Standing votes ({who, vote: for, against, abstain or with, with?})" },
+  approval_days: { type: "number", label: "A request for approval waits for days (7 unless set)", min: 1, max: 365, domain: "money", level: 2 },
 };
 
 /**
@@ -293,6 +319,8 @@ export const ORG_ACTIONS = {
   delegate: "org_delegate",
   revoke: "org_revoke",
   rename: "org_rename",
+  windUp: "org_wind_up",
+  merge: "org_merge",
   found: "org_found",
   restructure: "org_restructure",
 } as const;

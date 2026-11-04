@@ -18,7 +18,7 @@ import type { StepPurpose } from "../shared/world";
 import { currentSignals } from "../shared/steps";
 import type { Limit } from "../shared/minds";
 import { defaultMindsSettings, isMindPurpose, migrateMindReads, MINDS_PRESETS, mindsSettingsOf } from "../shared/minds";
-import { defaultTimeouts, migrateTimeouts, timeoutsOf } from "../shared/timeouts";
+import { defaultTimeouts, migrateTimeouts, TIMEOUTS, timeoutsOf } from "../shared/timeouts";
 import { JOB_SETTINGS_DEFAULTS, jobSettingsOf, LORE_INDEX_DEFAULTS, loreBooksSettingOf, loreIndexSettingsOf, stepConfigOf } from "../shared/settings";
 import { type AcceptanceConnection, agentSettingsOf, defaultAgentSettings } from "../shared/agent-settings";
 import { MARK_TEXT_IDS, PROMPT_SETTINGS_DEFAULTS, promptSettingsOf, promptsWritten, SWIPE_TEXTS } from "../shared/prompts";
@@ -165,6 +165,8 @@ const LIFTED = {
   ]),
   /** The turn's tokens before revision 5 (`agents.turn`), each lifted to No limit. */
   turn: { tokensIn: 100_000, tokensOut: 10_000 },
+  /** The final review's time before revision 7 (`timeouts.finalReviewMs`), lifted to its new default. */
+  finalReviewMs: 120_000,
 };
 
 /**
@@ -174,11 +176,13 @@ const LIFTED = {
  * off where it left their effort to a helper model at its default effort (Inherit): an effort the
  * user chose, the step's or the helper model's, stays; one from revision 2 or 3 has a section budget
  * still at Standard's or Full's old default lifted to its new one, since the sections now tell their
- * facts whole (a file from before revision 2 already lifts to the new ones); and one from before
+ * facts whole (a file from before revision 2 already lifts to the new ones); one from before
  * revision 5 has a turn budget still at its old default (`LIFTED.turn`) set to No limit, since every
- * agent's own limits now bound a turn; and one from before revision 6 gives every role that reads
- * money the organizations' tools too (`orgs`, ORG-SPEC §7.1), as a new user's roles have them. Only
- * plain values are touched; anything malformed is left to `conform`.
+ * agent's own limits now bound a turn; one from before revision 6 gives every role that reads money
+ * the organizations' tools too (`orgs`, ORG-SPEC §7.1), as a new user's roles have them; and one
+ * from before revision 7 has the final review's time still at its old 2 minutes lifted to its new
+ * default, which a main agent's review of a long session on a large model needs. Only plain values
+ * are touched; anything malformed is left to `conform`.
  */
 function lifted(raw: Readonly<Record<string, unknown>>): JsonObject {
   const out = JSON.parse(JSON.stringify(raw)) as JsonObject;
@@ -224,6 +228,8 @@ function lifted(raw: Readonly<Record<string, unknown>>): JsonObject {
       if (isRecord(role) && Array.isArray(role.families) && role.families.includes("money") && !role.families.includes("orgs")) role.families.push("orgs");
     }
   }
+  const timeouts = isRecord(out.timeouts) ? out.timeouts : null;
+  if (rev < 7 && timeouts?.finalReviewMs === LIFTED.finalReviewMs) timeouts.finalReviewMs = TIMEOUTS.finalReviewMs.defaultMs;
   out.defaults = SETTINGS_DEFAULTS_REV;
   return out;
 }

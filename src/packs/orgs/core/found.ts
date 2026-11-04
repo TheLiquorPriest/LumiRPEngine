@@ -12,8 +12,9 @@
 import type { EntityId } from "../../../shared/ids";
 import type { JsonObject, JsonValue } from "../../../shared/json";
 import type { LedgerEvent } from "../../../shared/ledger";
-import { CLASS_TRAITS, classesIn, FINANCE_EVENTS, ROLE_RIGHTS, STRUCTURE_WORDS, type AccountClass } from "../../../shared/finance";
+import { CLASS_TRAITS, classesIn, FINANCE_EVENTS, listingIn, ROLE_RIGHTS, STRUCTURE_WORDS, type AccountClass } from "../../../shared/finance";
 import { ORG_ACTIONS, ORG_POWERS, type Position } from "../../../shared/org";
+import { VOTE_PARAM } from "../../../shared/org-motions";
 import type { OrgStartView } from "../../../shared/org-view";
 import { PARTY_KIND } from "../../../shared/party";
 import { formatMoney } from "../../../shared/world";
@@ -26,6 +27,7 @@ import { isGone, kindDef, kindIs } from "../../../engine/scope";
 import { COMPANY_KIND, GROUP_KIND, MEMBER_OF } from "../../../engine/selector";
 import { Working } from "../../../engine/working";
 import { orgLog } from "./log";
+import { putToVote } from "./motions";
 import { dateWords } from "./view";
 
 /** The Money level a company needs (payroll, books and property, §4.7). */
@@ -227,15 +229,20 @@ function foundEvents(ctx: EffectContext, args: Record<string, JsonValue>): Ledge
 /**
  * `orgs.restructure` (§3.13): a company's new structure, by whoever governs it (`org.govern`) with more
  * than half its votes, deciding as themselves or as an organization holder they govern (`party`); its
- * History line says when its taxes follow. With no `by` (the GM), no power or votes asked.
+ * History line says when its taxes follow. Short of the votes, an action that asks (`vote`) puts it
+ * to a vote instead (ORG-SPEC Phase 5, `putToVote`), which carries it out once it passes. With no
+ * `by` (the GM), no power or votes asked.
  */
 function restructureEvents(ctx: EffectContext, a: Record<string, JsonValue>): LedgerEvent[] | Rejection {
   const org = strOf(a.org);
   if (orgTypeOf(ctx, org) !== "company") return refuse("not_company", `${labelOf(ctx, org)} isn't a company`);
   const structure = strOf(a.structure);
+  // A listed company stays a C corporation while the public holds its units (DESIGN §27.10 Listing).
+  if (structure !== "c_corp" && listingIn(own(ctx.state.entities, org)?.fields ?? {})) return refuse("listed", `${labelOf(ctx, org)} is on a market: take it off the market before it stops being a C corporation`);
   const by = strOf(a.by);
   const party = strOf(a.party) || by;
-  if (by !== "") {
+  const voted = ctx.carried?.motion !== undefined && ctx.carried.org === org;
+  if (by !== "" && !voted) {
     if (party !== by) {
       const may = mayAct(ctx, by, party, "org.govern");
       if (!may.ok) return refuse("not_allowed", may.reason);
@@ -243,7 +250,7 @@ function restructureEvents(ctx: EffectContext, a: Record<string, JsonValue>): Le
     const may = mayAct(ctx, party, org, "org.govern");
     if (!may.ok) return refuse("not_allowed", may.reason);
     const votes = optionalQuery(ctx, "economy.decide")?.(ctx, org, party, "Changing the structure of") ?? null;
-    if (votes !== null) return refuse("votes", votes);
+    if (votes !== null) return putToVote(ctx, { org, by, party, text: `Make ${labelOf(ctx, org)} ${STRUCTURE_WORDS[structure] ?? structure}`, why: votes }) ?? refuse("votes", votes);
   }
   const change = optionalService(ctx, "economy.restructure");
   if (!change) return refuse("no_money", "a company's structure needs the economy");
@@ -289,6 +296,7 @@ export function registerFound(r: CoreRegistry): void {
       org: { type: "ref", ref: COMPANY_KIND, label: "Company" },
       structure: { type: "text", label: `Structure (${STRUCTURES.join(", ")})` },
       as: { type: "ref", optional: true, of: { kind: ["business", "household", "group", "trust"] }, acting: "org.govern", label: "Deciding as: an organization you govern that holds the company's shares; left out, it's your own votes" },
+      vote: VOTE_PARAM,
     },
     requires: ["level.money >= 3", "may(self, org, 'org.govern')", "params.as == null or may(actor, params.as, 'org.govern')"],
     outcomes: { default: [{ type: "orgs.restructure", args: { org: "org", structure: "=params.structure", party: "self", by: "actor" } }] },

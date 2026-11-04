@@ -19,17 +19,21 @@ import { strOf } from "../../../engine/pack-kit";
 import type { PackDef, ReadContext } from "../../../engine/registry";
 import { registerAccess } from "./access";
 import { registerOrgActions } from "./actions";
+import { registerApprovals } from "./approvals";
+import { registerDecisions } from "./decisions";
 import { registerFound } from "./found";
 import { buildOrgsGm } from "./gm";
 import { ORG_LINTS } from "./lint";
 import { ORG_EVENTS, orgLog, orgsActed } from "./log";
 import { registerFeed } from "./feed";
+import { registerMotions } from "./motions";
 import { registerParty } from "./party";
 import { registerPlan } from "./agenda";
 import { registerFollow } from "./follow";
 import { ORGS_CONFIG_EVENT, SEATS_PROCESS, SUCCESSION_EFFECT } from "./seats";
 import { registerStory } from "./story";
 import { buildOrgList, buildOrgPages } from "./view";
+import { registerWind } from "./wind";
 
 declare module "../../../engine/registry" {
   interface QueryMap {
@@ -88,6 +92,12 @@ export const orgsPack: PackDef = {
     registerFeed(r);
     registerPlan(r);
     registerFollow(r);
+    // Winding up and merging companies (Phase 5, lane Z).
+    registerWind(r);
+    // Motions and requests for approval (ORG-SPEC Phase 5): decisions put to a vote, acts over a limit put to whoever holds the power above.
+    registerMotions(r);
+    registerApprovals(r);
+    registerDecisions(r);
   },
 };
 

@@ -3,7 +3,7 @@
 // event payloads carry no userId; handlers receive it as the second argument) and maps the port's
 // calls onto `lumiverse-spindle-types` 0.6.49 plus the local augmentation.
 
-import type { GenerationReasoningOverrideDTO, LlmMessageDTO, LlmMessagePartDTO, PromptBlockDTO, PromptBlockSnapshotDTO, WorldBookEntryCreateDTO, WorldBookEntryDTO, WorldInfoInterceptorCtxDTO } from "lumiverse-spindle-types";
+import type { GenerationReasoningOverrideDTO, GenerationRequestDTO, LlmMessageDTO, LlmMessagePartDTO, PromptBlockDTO, PromptBlockSnapshotDTO, StreamChunkDTO, WorldBookEntryCreateDTO, WorldBookEntryDTO, WorldInfoInterceptorCtxDTO } from "lumiverse-spindle-types";
 import type { HostSpindleAPI, RegexScriptInput } from "../spindle-augment";
 import { MCP_PERMISSION } from "../shared/agents";
 import type { HostPresetBlockInput } from "./host";
@@ -316,6 +316,34 @@ function thinkingBlock(raw: unknown): QuietThinkingBlock | null {
   return { type, ...(thinking !== undefined ? { thinking } : {}), ...(signature !== undefined ? { signature } : {}), ...(data !== undefined ? { data } : {}) };
 }
 
+/**
+ * A streamed call's answer (`generate.quietStream`): its pieces as they come, then its end, `done`,
+ * which holds the whole answer as `generate.quiet` returns it (the text, the reasoning, the tool
+ * calls, why it ended and the usage), so it is read as that is. The call's signal ends the wait at
+ * once, rejecting as Lumiverse's own cancel does (`AbortError`), whether or not Lumiverse has
+ * answered the cancel the stream sends it; the stream is let go of either way, which after a cancel
+ * tells Lumiverse again.
+ */
+async function streamedAnswer(stream: AsyncGenerator<StreamChunkDTO, void, void>, signal: AbortSignal): Promise<unknown> {
+  type Step = IteratorResult<StreamChunkDTO, void>;
+  let wait: PromiseWithResolvers<Step> | null = null;
+  const abort = (): void => wait?.reject(new DOMException("Generation aborted", "AbortError"));
+  signal.addEventListener("abort", abort, { once: true });
+  try {
+    for (;;) {
+      wait = Promise.withResolvers<Step>();
+      if (signal.aborted) abort();
+      else stream.next().then(wait.resolve, wait.reject);
+      const step = await wait.promise;
+      if (step.done) throw new Error("The model's stream ended without its answer");
+      if (step.value.type === "done") return step.value;
+    }
+  } finally {
+    signal.removeEventListener("abort", abort);
+    void stream.return(undefined).catch(() => undefined);
+  }
+}
+
 /** Anthropic's most explicit cache breakpoints in one request, the connection's own included (AGENT-LOOP-PLAN §16.1): a fifth fails the request. */
 const ANTHROPIC_CACHE_BREAKPOINTS = 4;
 
@@ -542,7 +570,7 @@ export function createSpindleHost(): HostPort {
         // Only then does an OpenAI-compatible stream (every call with tools) report usage; every provider drops the key itself.
         if (request.usage) parameters._include_usage = true;
         const reasoning = reasoningOverride(request.effort, request.thinkingDisplay);
-        const raw = await spindle.generate.quiet({
+        const input: GenerationRequestDTO = {
           type: "quiet",
           messages: request.messages.map(messageDTO),
           parameters,
@@ -551,7 +579,9 @@ export function createSpindleHost(): HostPort {
           ...(reasoning ? { reasoning } : {}),
           userId,
           signal,
-        });
+        };
+        // Streamed, the answer comes as the model writes it and ends whole, as `generate.quiet` returns it.
+        const raw = request.stream ? await streamedAnswer(spindle.generate.quietStream(input), signal) : await spindle.generate.quiet(input);
         // `tool_calls` (`ToolCallDTO[]`): a call without a name is dropped; arguments that aren't an object read as none.
         const calls = isRecord(raw) && Array.isArray(raw.tool_calls) ? raw.tool_calls : [];
         const toolCalls: QuietToolCall[] = calls.flatMap((c, i) => {

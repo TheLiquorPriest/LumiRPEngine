@@ -9,12 +9,12 @@ import { opaqueId } from "../../../shared/hash";
 import { STRUCTURE_LABELS } from "../../../shared/finance";
 import type { EntityId } from "../../../shared/ids";
 import { isRecord, type JsonValue } from "../../../shared/json";
-import { DUES_EVERY, ORG_POWER_FAMILIES, ORG_POWERS, POWER_WORDS, type Delegation, type MemberHow, type OrgGrant, type OrgMember, type OrgPower, type OrgType, type Position } from "../../../shared/org";
-import type { OrgDelegationView, OrgDuesView, OrgHistoryLineView, OrgListView, OrgPersonView, OrgPositionView, OrgPowerView, OrgRef, OrgRowView, OrgView, PartyMemberView } from "../../../shared/org-view";
+import { DUES_EVERY, MERGED_INTO_FIELD, ORG_POWER_FAMILIES, ORG_POWERS, POWER_WORDS, type Delegation, type MemberHow, type OrgGrant, type OrgMember, type OrgPower, type OrgType, type Position } from "../../../shared/org";
+import type { OrgDelegationView, OrgDuesView, OrgEndedView, OrgHistoryLineView, OrgListView, OrgPersonView, OrgPositionView, OrgPowerView, OrgRef, OrgRowView, OrgView, PartyMemberView } from "../../../shared/org-view";
 import { isPartyTier, PARTY_KIND, PARTY_SECTION } from "../../../shared/party";
 import { formatMoney } from "../../../shared/world";
-import { calendarOf, clockAt, dateAt, dayIndexOf, formatClock, monthName } from "../../../engine/calendar";
-import { defaultPowers, delegationsOf, heldPositions, HOW_WORDS, LEADER, membersOfOrg, orgPower, orgPowers, orgTitle, orgTypeOf, partyRoster, positionsOf, type HeldPosition } from "../../../engine/org";
+import { calendarOf, clockAt, dateAt, dayIndexOf, formatClock } from "../../../engine/calendar";
+import { dayWords, defaultPowers, delegationsOf, dissolvedOn, heldPositions, HOW_WORDS, LEADER, membersOfOrg, orgPower, orgPowers, orgTitle, orgTypeOf, partyRoster, positionsOf, windingUpSince, type HeldPosition } from "../../../engine/org";
 import { acts } from "../../../engine/life";
 import { optionalQuery, own } from "../../../engine/pack-kit";
 import { povMayKnow } from "../../../engine/player-events";
@@ -32,11 +32,7 @@ const HOW_ORDER: readonly MemberHow[] = ["owner", "leader", "member", "staff", "
 
 /** A date as a link writes it (`YYYY-MM-DD`) in the world's calendar's words ("12 Jan 2026"), as the calendar's view writes today's; anything else as written. */
 export function dateWords(ctx: ReadContext, text: string): string {
-  const m = /^(-?\d{1,6})-(\d{2})-(\d{2})$/.exec(text.trim());
-  if (!m) return text;
-  const cal = calendarOf(ctx.world);
-  const [year, month, day] = [Number(m[1]), Number(m[2]), Number(m[3])];
-  return month >= 1 && month <= cal.system.months && day >= 1 && day <= cal.system.monthLength(year, month) ? `${day} ${monthName(cal, month)} ${year}` : text;
+  return dayWords(ctx.world, text);
 }
 
 /** The party the player character leads: its entity when it has one, else the id it will take. */
@@ -287,12 +283,16 @@ export function buildOrgView(ctx: ReadContext, id: EntityId, viewer: EntityId | 
     if (built !== null) sections[def.id] = built;
   }
   const authored = subject.exists ? positionsOf(ctx, subject.id) : [];
+  const ended = endedOf(page);
+  // A company's History stays with those it names once it is wound up, though no one belongs to it any more.
+  const named = ended?.dissolved != null && viewer !== null && orgHistory(ctx.state, subject.id).some((l) => l.by === viewer || (l.names ?? []).some((n) => n.id === viewer));
   return {
     id: subject.id,
     ...header(ctx, subject),
     type: subject.type,
     level: levelOf(ctx, subject),
     exists: subject.exists,
+    ended,
     you: {
       belongs: mine.length > 0,
       title: mine.length > 0 && viewer !== null ? page.titleOf(viewer, mine) : null,
@@ -311,15 +311,30 @@ export function buildOrgView(ctx: ReadContext, id: EntityId, viewer: EntityId | 
     // Its dues are read by those in it, a holder of a power there and the GM.
     dues: viewer === null || mine.length > 0 || powers.length > 0 ? duesOf(ctx, subject) : null,
     // Its History is read by those in it, or holding a power there, and the GM.
-    history: viewer === null || mine.length > 0 || powers.length > 0 ? historyOf(page) : [],
+    history: viewer === null || mine.length > 0 || powers.length > 0 || named ? historyOf(page) : [],
     candidates: candidatesOf(ctx, subject, viewer, powers),
     sections,
   };
 }
 
+/** A company's end (§3.13): since when it winds up, or when it was dissolved and what a merger folded it into; null while it stands. */
+function endedOf(page: Page): OrgEndedView | null {
+  const { ctx, subject } = page;
+  if (!subject.exists || subject.type !== "company") return null;
+  const dissolved = dissolvedOn(ctx.state, subject.id);
+  const winding = windingUpSince(ctx.state, subject.id);
+  if (dissolved === null && winding === null) return null;
+  const into = own(ctx.state.entities, subject.id)?.fields[MERGED_INTO_FIELD];
+  return { winding: winding === null ? null : dayWords(ctx.world, winding), dissolved: dissolved === null ? null : dayWords(ctx.world, dissolved), mergedInto: typeof into === "string" && into !== "" ? page.ref(into) : null };
+}
+
 /** The one figure a row shows that the reader may see (§4.2): a company's profit this month, a household's shared costs and their share, a group's members, a trust's worth. */
 function figureOf(ctx: ReadContext, org: EntityId, type: OrgType, viewer: EntityId): string | null {
   const money = (cents: number): string => formatMoney(cents, ctx.world.currency);
+  const dissolved = dissolvedOn(ctx.state, org);
+  if (dissolved !== null) return `Dissolved ${dayWords(ctx.world, dissolved)}`;
+  const winding = windingUpSince(ctx.state, org);
+  if (winding !== null) return `Winding up since ${dayWords(ctx.world, winding)}`;
   const sees = orgPower(ctx, viewer, org, "money.view") !== null;
   if (type === "group") {
     const n = membersOf(ctx.registry, ctx.world, ctx.state, org).length;

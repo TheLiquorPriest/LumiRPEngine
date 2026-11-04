@@ -4,8 +4,9 @@
 // have may cost before a capped Make it real asks first; each is typed as the world's currency
 // writes it and stored in whole minor units, and left empty, the engine derives it from the tables.
 // The region prices living and taxes for whoever names none; living costs are a week's spending
-// per wealth band; taxes are the spending categories sales tax never falls on and the corporate rate (§26);
-// shares, the units a company starts counting its owners' stakes in (§27.10).
+// per wealth band; taxes are the spending categories sales tax never falls on, the corporate rate,
+// and the unemployment taxes' rates and wage bases, each empty for the tables' (§26); shares, the
+// units a company starts counting its owners' stakes in (§27.10).
 // The Custom toggles (DESIGN §25) switch a money feature on or off, under any preset, at the levels
 // its floor allows, on a page of their own; products are the world's own account products and
 // assets are what holdings hold (§27), each a row that opens as a sheet. Styles:
@@ -26,6 +27,8 @@ import { ChoiceInput, DateInput, type FormCtx, lintAt, LintBadge, MinorMoneyInpu
 import { humanize } from "../../../frontend/format";
 import type { PackConfigProps } from "../../../frontend/registry";
 import { derivedClaimCap, derivedUnpricedCap, WEALTH_BANDS } from "../core/model";
+import { LISTING_REVERSION } from "../core/assets";
+import { LISTING_OFFER_CAP } from "../core/listing";
 import { SHARE_UNITS } from "../core/shares";
 import { CORPORATE_PCT } from "../core/taxes";
 
@@ -69,8 +72,11 @@ export function withLivingCost(config: Readonly<JsonObject>, band: string, cents
   return Object.keys(costs).length > 0 ? { ...rest, livingCosts: costs } : { ...rest };
 }
 
+/** The economy config's tax settings (`taxes`): the categories sales tax spares, the corporate rate, and the unemployment taxes' rates and wage bases (ORG-SPEC §3.11, Phase 5). */
+export type TaxSetting = "exempt" | "corporatePct" | "futaPct" | "futaWageBase" | "futaCreditPct" | "sutaPct" | "sutaWageBase";
+
 /** The config with one of its tax settings set, or removed (undefined); with none left, `taxes` goes too. */
-export function withTax(config: Readonly<JsonObject>, key: "exempt" | "corporatePct", value: JsonValue | undefined): JsonObject {
+export function withTax(config: Readonly<JsonObject>, key: TaxSetting, value: JsonValue | undefined): JsonObject {
   const taxes: JsonObject = isRecord(config.taxes) ? { ...config.taxes } : {};
   if (value === undefined) delete taxes[key];
   else taxes[key] = value;
@@ -235,9 +241,15 @@ const TAX_CHOICES: readonly SegOption<TaxState>[] = [
 
 const EXEMPT_NOTE = "A category exempt here is never taxed, wherever it's sold; a place can exempt more of its own.";
 
-/** What a C corporation pays and what sales tax spares: the corporate rate, then a row naming the exempt categories, which opens them all on a page of their own. */
+/**
+ * What a C corporation pays, what employers pay on their staff's wages, and what sales tax spares:
+ * the corporate rate; FUTA's rate, wage base and credit and SUTA's rate and wage base, each empty
+ * for the tables' (ORG-SPEC §3.11, Phase 5: FUTA's in the finance table, SUTA's per state in the
+ * regions table); then a row naming the exempt categories, which opens them all on a page of their own.
+ */
 function Taxes(props: PackConfigProps) {
   const [open, setOpen] = useState(false);
+  const currency = props.world.currency;
   const taxes = isRecord(props.config.taxes) ? props.config.taxes : {};
   const exempt = Array.isArray(taxes.exempt) ? taxes.exempt.filter((c): c is string => typeof c === "string") : [];
   const choices = exemptChoices(props.world, exempt);
@@ -247,6 +259,14 @@ function Taxes(props: PackConfigProps) {
     const next = on ? [...exempt.filter((c) => c !== category), category] : exempt.filter((c) => c !== category);
     props.onChange(withTax(props.config, "exempt", next.length > 0 ? next : undefined));
   };
+  // What the unemployment settings fall back on: the finance table's FUTA row, and the world's region's SUTA columns (the national row's without one).
+  const unemployment = props.world.tables["economy.finance"]?.rows.taxes_unemployment?.values;
+  const futa = isRecord(unemployment) && isRecord(unemployment.futa) ? unemployment.futa : {};
+  const regions = props.world.tables["economy.regions"]?.rows ?? {};
+  const region = regions[typeof props.config.region === "string" && hasOwn(regions, props.config.region) ? props.config.region : "us"];
+  const where = typeof region?.name === "string" && region.name !== "" ? region.name : "the national row";
+  const fromTable = (value: JsonValue | undefined, words: (n: number) => string): string => (typeof value === "number" ? `Empty, it's the finance table's ${words(value)}.` : "Empty, it's the finance table's, which this world's doesn't have yet: take its Data update.");
+  const setNumber = (key: TaxSetting) => (v: JsonValue | undefined) => props.onChange(withTax(props.config, key, typeof v === "number" ? v : undefined));
   return (
     <FormGroup title="Taxes">
       <NumberInput
@@ -258,7 +278,62 @@ function Taxes(props: PackConfigProps) {
         placeholder={String(CORPORATE_PCT)}
         hint={`What a C corporation pays on its profit, with its state's rate. Empty, it's the federal rate, ${CORPORATE_PCT}%.`}
         issues={lintAt(props.lint, `${CONFIG}.taxes.corporatePct`)}
-        onChange={(v) => props.onChange(withTax(props.config, "corporatePct", typeof v === "number" ? v : undefined))}
+        onChange={setNumber("corporatePct")}
+      />
+      <NumberInput
+        label="FUTA rate before the credit (%)"
+        value={taxes.futaPct}
+        min={0}
+        max={100}
+        optional
+        placeholder={typeof futa.gross_pct === "number" ? String(futa.gross_pct) : "The tables'"}
+        hint={`The federal unemployment tax on each worker's pay up to its wage base, before the credit for state tax. ${fromTable(futa.gross_pct, (n) => `${n}%`)}`}
+        issues={lintAt(props.lint, `${CONFIG}.taxes.futaPct`)}
+        onChange={setNumber("futaPct")}
+      />
+      <MinorMoneyInput
+        label="FUTA wage base"
+        value={taxes.futaWageBase}
+        currency={currency}
+        min={1}
+        optional
+        placeholder={typeof futa.wage_base_cents === "number" ? formatMoneyInput(futa.wage_base_cents, currency) : "The tables'"}
+        hint={`The pay a year, per worker and employer, FUTA is paid on. ${fromTable(futa.wage_base_cents, (n) => formatMoney(n, currency))}`}
+        issues={lintAt(props.lint, `${CONFIG}.taxes.futaWageBase`)}
+        onChange={setNumber("futaWageBase")}
+      />
+      <NumberInput
+        label="FUTA credit for state tax (%)"
+        value={taxes.futaCreditPct}
+        min={0}
+        max={100}
+        optional
+        placeholder={typeof futa.max_credit_pct === "number" ? String(futa.max_credit_pct) : "The tables'"}
+        hint={`What an employer that pays state unemployment tax takes off FUTA's rate; a credit-reduction state's reduction cuts it. ${fromTable(futa.max_credit_pct, (n) => `${n}%`)}`}
+        issues={lintAt(props.lint, `${CONFIG}.taxes.futaCreditPct`)}
+        onChange={setNumber("futaCreditPct")}
+      />
+      <NumberInput
+        label="SUTA rate (%)"
+        value={taxes.sutaPct}
+        min={0}
+        max={100}
+        optional
+        placeholder="Each state's"
+        hint={`The state unemployment tax rate of an employer that sets none of its own. Empty, it's each employer's state's new-employer rate${typeof region?.suta_new_employer_pct === "number" ? ` (${where}: ${region.suta_new_employer_pct}%)` : ""}.`}
+        issues={lintAt(props.lint, `${CONFIG}.taxes.sutaPct`)}
+        onChange={setNumber("sutaPct")}
+      />
+      <MinorMoneyInput
+        label="SUTA wage base"
+        value={taxes.sutaWageBase}
+        currency={currency}
+        min={1}
+        optional
+        placeholder="Each state's"
+        hint={`The pay a year, per worker and employer, SUTA is paid on. Empty, it's each employer's state's${typeof region?.suta_wage_base_cents === "number" ? ` (${where}: ${formatMoney(region.suta_wage_base_cents, currency)})` : ""}.`}
+        issues={lintAt(props.lint, `${CONFIG}.taxes.sutaWageBase`)}
+        onChange={setNumber("sutaWageBase")}
       />
       <div class="lre-form-items">
         <ItemRow title="Exempt from sales tax" subtitle={named.length > 0 ? named.join(", ") : "None: every category is taxed"} badge={<LintBadge issues={lint} />} onOpen={() => setOpen(true)} openLabel="Edit the categories exempt from sales tax" />
@@ -289,7 +364,7 @@ function Taxes(props: PackConfigProps) {
   );
 }
 
-/** The units a company that doesn't count its shares in units counts its owners in, the first time it issues, buys back or classes them (ORG-SPEC §3.10). */
+/** The units a company that doesn't count its shares in units counts its owners in, the first time it issues, buys back or classes them (ORG-SPEC §3.10); the most the public pays for a listing's new units, and how a listed company's price moves (§27.10 Listing). */
 function Shares(props: PackConfigProps) {
   return (
     <FormGroup title="Shares">
@@ -303,6 +378,54 @@ function Shares(props: PackConfigProps) {
         hint={`A company whose owners hold shares in percent counts them in this many units the first time it issues shares, buys some back or sets its classes, each owner's units their share of them. Empty, it's ${SHARE_UNITS.toLocaleString("en-US")}.`}
         issues={lintAt(props.lint, `${CONFIG}.shareUnits`)}
         onChange={(v) => props.onChange(withKey(props.config, "shareUnits", typeof v === "number" ? Math.round(v) : undefined))}
+      />
+      <NumberInput
+        label="Listing: the most the public pays, times its worth a unit"
+        value={props.config.listingOfferCap}
+        min={1}
+        max={100}
+        step={0.1}
+        optional
+        placeholder={String(LISTING_OFFER_CAP)}
+        hint={`The most the public pays a unit for a company's new units on the market, as a multiple of its books a unit (once it's listed, of its market price). Empty, it's ${LISTING_OFFER_CAP}: no more than they're worth.`}
+        issues={lintAt(props.lint, `${CONFIG}.listingOfferCap`)}
+        onChange={(v) => props.onChange(withKey(props.config, "listingOfferCap", typeof v === "number" ? v : undefined))}
+      />
+      <NumberInput
+        label="Listed prices: return to the books, a year"
+        value={props.config.listingReversion}
+        min={0}
+        max={50}
+        step={0.1}
+        optional
+        placeholder={String(LISTING_REVERSION)}
+        hint={`How fast a listed company's price returns toward its books a unit: a gap halves in about 0.69 ÷ this many years. 0 lets it wander. Empty, it's ${LISTING_REVERSION}.`}
+        issues={lintAt(props.lint, `${CONFIG}.listingReversion`)}
+        onChange={(v) => props.onChange(withKey(props.config, "listingReversion", typeof v === "number" ? v : undefined))}
+      />
+      <NumberInput
+        label="Listed prices: swings, % a year"
+        value={props.config.listingVolatility}
+        min={0}
+        max={200}
+        step={1}
+        optional
+        placeholder="As a single stock"
+        hint="How much a listed company's price swings around its books. Empty, it swings as the finance tables' single stock does."
+        issues={lintAt(props.lint, `${CONFIG}.listingVolatility`)}
+        onChange={(v) => props.onChange(withKey(props.config, "listingVolatility", typeof v === "number" ? v : undefined))}
+      />
+      <NumberInput
+        label="Listed prices: moving with the market, 0 to 1"
+        value={props.config.listingCorrelation}
+        min={0}
+        max={1}
+        step={0.05}
+        optional
+        placeholder="As a single stock"
+        hint="How closely a listed company's daily moves follow the stock market's (the index history where the world keeps it); 1 moves it by the market alone, the same in every chat. Empty, it's the finance tables' single stock's."
+        issues={lintAt(props.lint, `${CONFIG}.listingCorrelation`)}
+        onChange={(v) => props.onChange(withKey(props.config, "listingCorrelation", typeof v === "number" ? v : undefined))}
       />
     </FormGroup>
   );

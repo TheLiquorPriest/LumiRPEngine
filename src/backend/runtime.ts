@@ -69,6 +69,7 @@ import { answerParams, answerWords, expectedAnswers, openPuzzle, ownAnswer, says
 import { resolveUsualMoves, usualRoutineForExtract } from "../packs/castlife/core/usual";
 import { dayPlan, type DayPlan } from "../packs/castlife/core/index";
 import { agendaAsks, agendaLabel, planExtractLines, type PlanReadItems } from "../packs/orgs/core/agenda";
+import { decisionExtractLines, decisionLabel } from "../packs/orgs/core/decisions";
 import { PLAN_TAB } from "../shared/org-feed";
 import { orgKnown, quotesReply, statesChange } from "../packs/orgs/core/story";
 import { positionsOf } from "../engine/org";
@@ -192,7 +193,7 @@ const ALREADY_SO: ReadonlySet<string> = new Set(["already_known", "already"]);
  * routine's refusals are unseen, so it is none either. An organization reads as someone (any entity
  * the POV may know), and an employer as a fact, so the place someone works at names it too (ORG-SPEC
  * §7.3); a plan's organization is the agenda channel's own to find (the party in words, or the plan
- * holding the item).
+ * holding the item), as a motion's or a request's is the vote and approval channels' (by its id).
  */
 type RefRole = "person" | "place" | "thing" | "fact";
 const REF_ROLES: Readonly<Record<string, Readonly<Record<string, RefRole>>>> = {
@@ -219,6 +220,8 @@ const REF_ROLES: Readonly<Record<string, Readonly<Record<string, RefRole>>>> = {
   membership: { who: "person", org: "person", by: "person" },
   employment: { who: "person", org: "fact", by: "person" },
   agenda: { who: "person" },
+  vote: { who: "person", org: "person" },
+  approval: { who: "person", org: "person" },
 };
 
 /**
@@ -228,7 +231,7 @@ const REF_ROLES: Readonly<Record<string, Readonly<Record<string, RefRole>>>> = {
  * fact quotes and calls things (its said, a title, a position, a pay basis, a task offered).
  */
 const THING_WORDS = ["item", "into", "at", "from"] as const;
-const FREE_TEXT: Readonly<Record<string, readonly string[]>> = { give: ["item"], purchase: ["item", "name"], take: THING_WORDS, drop: THING_WORDS, put: THING_WORDS, has: THING_WORDS, owner: THING_WORDS, use_up: THING_WORDS, wear: THING_WORDS, lose: THING_WORDS, item_condition: THING_WORDS, place_make: ["place", "aliases", "description"], membership: ["said", "title", "position"], employment: ["said", "title", "position", "basis"], agenda: ["offer", "said"] };
+const FREE_TEXT: Readonly<Record<string, readonly string[]>> = { give: ["item"], purchase: ["item", "name"], take: THING_WORDS, drop: THING_WORDS, put: THING_WORDS, has: THING_WORDS, owner: THING_WORDS, use_up: THING_WORDS, wear: THING_WORDS, lose: THING_WORDS, item_condition: THING_WORDS, place_make: ["place", "aliases", "description"], membership: ["said", "title", "position"], employment: ["said", "title", "position", "basis"], agenda: ["offer", "said"], vote: ["said", "motion", "vote"], approval: ["said", "request", "answer"] };
 
 /**
  * How a change names, in each role, what the POV doesn't know: alike whether it is hidden or nowhere
@@ -1786,7 +1789,8 @@ export class Runtime implements TurnHooks {
    * as its timelapse, `skipped`, L27), the world's or the user's own words for the step (`run`'s,
    * filled with `vars`), the usual routines, the player's message (`said`), the places it is offered
    * by name (those the reply and the message name, and the nearest first, DESIGN §9.4), the kinds a
-   * newcomer may be and, while agenda is read, the plans' open items by id (`planExtractLines`); the
+   * newcomer may be and, while agenda is read, the plans' open items by id (`planExtractLines`), and
+   * while votes or answers are, the open motions and requests for approval (`decisionExtractLines`); the
    * things the state shows it are the user's `shown` (ITEMS-SPEC §5.2). The
    * prepared read's, and Test's for the read role's texts. On an agent chat with the Curator on
    * (`split`), the read's change types leave out the Curator's (`CURATOR_FACTS`: the thing facts, a
@@ -1806,8 +1810,8 @@ export class Runtime implements TurnHooks {
     // The engine's clock as the Scene tells it: when the player's message came, and now, after the minutes the turn's own actions took.
     const applied = clockMinutes(at.pre);
     const ctx = this.registry.context(world, state);
-    // The plans' open items, each by its id, while the reply's agenda is read (ORG-SPEC §3.14, assess-party §6.2), so a status names an item that is there.
-    const plan = channels.includes("agenda") ? planExtractLines(ctx) : [];
+    // The plans' open items while the reply's agenda is read, and the open motions and requests for approval while its votes and answers are (ORG-SPEC §3.14, Phase 5), each by its id, so a fact names one that is there.
+    const plan = [...(channels.includes("agenda") ? planExtractLines(ctx) : []), ...decisionExtractLines(ctx, { votes: channels.includes("vote"), answers: channels.includes("approval") })];
     return { world: povWorld(this.registry, world, state), prefix: prefixSummary(this.registry, world, state, window), appliedMinutes: applied, clock: { start: sceneClock(ctx, state.clock - applied), now: sceneClock(ctx) }, channels, ...(held.length > 0 ? { held } : {}), instructions: input.run.template ? renderTemplate(input.run.template.template, input.vars) : null, usual: input.usual, said: input.said, places, personKinds, plan };
   }
 
@@ -4288,6 +4292,8 @@ export const TYPE_LABELS: Record<ExtractionType, string> = {
   membership: "Who belongs where",
   employment: "Jobs",
   agenda: "Plans",
+  vote: "Votes on motions",
+  approval: "Answers to requests for approval",
   item_move: "Things moved, picked up or put down",
   item_hand: "Things handed over, lent or given back",
   item_own: "Things changing owner",
@@ -5122,6 +5128,10 @@ export function describeProposal(p: JsonObject, view?: PovView): string {
     // The reply's agenda (assess-party §6.2): an item on a plan moved along, or someone volunteering a task ("Add to the plan?").
     case "agenda":
       return view ? agendaLabel(view, p) : agendaAsks(p) ? `Add to the plan? ${raw("who")}: ${raw("offer")}` : `Plan: ${raw("id")} ${raw("status")}`;
+    // The reply's decisions (ORG-SPEC Phase 5): a vote on an open motion, an answer to a request for approval.
+    case "vote":
+    case "approval":
+      return view ? decisionLabel(view, p) : p.type === "vote" ? `${raw("who")} votes ${raw("vote")}: ${raw("motion")}` : `${raw("who")}: ${raw("answer")} ${raw("request")}`;
     case "time_advance":
       return `Skip ahead ${s("minutes")} min`;
     default:

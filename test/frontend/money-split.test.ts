@@ -128,7 +128,7 @@ const pov = view({
 const shopMoney = view({ party: "shop", name: "The Shop", partyKind: "business", level: 4, detail: true, features: TOP, band: null, accounts: [account({ id: "acct_shop", class: "checking", cents: 500000, owners: [{ party: "shop", name: "The Shop", role: "owner", share: 100 }] })], flows: [flow({ id: "suppliers:shop", label: "Suppliers", source: "business", editable: false, payer: "shop", spec: null })], businesses: [{ ...shop, role: null, mayDraw: false }], ownKeys: [] });
 
 function orgPage(over: Partial<OrgView> & Pick<OrgView, "id" | "name" | "type">): OrgView {
-  return { kind: "Business", structure: null, badge: "Company", level: 4, exists: true, you: { belongs: true, title: "Owner", position: null, since: null, reportsTo: [], powers: [], delegations: [] }, runBy: [], people: [], hidden: { count: 0, ids: [] }, positions: [], delegations: [], defaultPosition: null, dues: null, history: [], candidates: [], sections: {}, ...over };
+  return { kind: "Business", structure: null, badge: "Company", level: 4, exists: true, ended: null, you: { belongs: true, title: "Owner", position: null, since: null, reportsTo: [], powers: [], delegations: [] }, runBy: [], people: [], hidden: { count: 0, ids: [] }, positions: [], delegations: [], defaultPosition: null, dues: null, history: [], candidates: [], sections: {}, ...over };
 }
 
 const shopPage = orgPage({

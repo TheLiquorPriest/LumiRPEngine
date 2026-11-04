@@ -27,9 +27,13 @@
 // agent failing (its send ends short of a commit) stops the turn: before the reply, with the
 // engine-failed card and its Retry (`Diagnostics.fatal`); after it, the read stops as a cancelled one
 // does, which leaves Retry read. There is no fallback to classic. The final review is a send of its
-// own, which never fails the turn: what its failure does is its own setting. On the fixed pipeline
-// the main agent works that review alone (`MainStart.alone`), with no session. The turn's segment of
-// the session, with any compaction or rollback it made, is written at its close (`Orchestrator.closed`).
+// own, which never fails the turn: what its failure does is its own setting. Every send of the turn,
+// its review's too, is offered the same tools, each refused out of its own send (a role's in the
+// review, the review's in a stage), so each call starts as the one before it did and reads the
+// prefix the provider cached: the tools lead what its cache keys on. On the fixed pipeline the main
+// agent works that review alone (`MainStart.alone`), with no session and the review's tools only.
+// The turn's segment of the session, with any compaction or rollback it made, is written at its
+// close (`Orchestrator.closed`).
 
 import { ROLE_IDS, type RoleId } from "../../shared/agent-roles";
 import { AGENT_ROLES, finalReviewBudget, MAIN_AGENT_ROLE, mainBudget, roleBudget } from "../../shared/agent-settings";
@@ -70,7 +74,7 @@ import type { ChatHead } from "./tools/workspace";
 import { recordAgentCalls } from "./transcripts";
 import { systemInstructions, withInstructions } from "./system-files";
 import type { LiveRun } from "./live";
-import { reviewMessage, reviewTools } from "./final-review";
+import { commitReview, reviewCommitTool, reviewMessage, reviewTools, type ReviewWork } from "./final-review";
 import { knowledgeAnswer, recordYield, type RunWrites, runYield } from "./yields";
 import type { ChoicesTask, ChooseTask, DirectorProse, ExtractTask, MemoryTask, ProseTask, RoleResult, RoleRun, SceneOut } from "./turn-ctx";
 import { digestOf, MAIN_PINS, MAIN_PINS_TEXTS, pinnedFiles, tidy, turnTask } from "./turn-task";
@@ -372,13 +376,15 @@ export class MainTurn {
 
   /**
    * The final review (DESIGN §4.6): one send of the main agent once the turn's other stages before
-   * the reply are done, with the narrator's prompt part by part (`draft`) and its review tools beside
-   * its read tools. In a turn it decides, it opens stage 6 from its session and the turn's stages so
-   * far, and joins the turn's messages as a stage does; alone (the fixed pipeline), it is the turn's
-   * one send, from the turn task, and keeps nothing. Its own budget bounds it, and so does `signal`
-   * (its time, the turn's Cancel). It ends at commit, or at an answer that calls nothing more; a send
-   * that stops short of both fails it, with why, and nothing of the draft stands. It never fails the
-   * main agent's turn: what a failure does is the review's own setting.
+   * the reply are done, with the narrator's prompt part by part (`draft`). In a turn it decides, it
+   * opens stage 6 from its session and the turn's stages so far, with the tools every stage has (the
+   * review's work there, the stages' refuse), so its first call reads what the last stage's cached;
+   * it joins the turn's messages as a stage does. Alone (the fixed pipeline), it is the turn's one
+   * send, from the turn task, with the review's tools beside its read tools, and keeps nothing. Its
+   * own budget bounds it, and so does `signal` (its time, the turn's Cancel). It ends at commit, or at
+   * an answer that calls nothing more; a send that stops short of both fails it, with why, and
+   * nothing of the draft stands. It never fails the main agent's turn: what a failure does is the
+   * review's own setting.
    */
   async review(draft: ReviewDraft, signal: AbortSignal): Promise<{ ok: true } | { ok: false; reason: string }> {
     while (this.playing) await this.playing;
@@ -393,11 +399,12 @@ export class MainTurn {
       const history = this.history();
       // The session's last message is the engine's: it leads this one.
       const lead = history.at(-1)?.role === "user" ? history.pop()?.text : undefined;
-      const done = { committed: false };
-      const spec = { ...this.spec([...reviewTools(this.texts, draft, done), ...this.readTools()], history, alone ? REVIEW_TEXT.system : MAIN_TEXT.system), budget: finalReviewBudget(this.host.settings.agents) };
+      const work: ReviewWork = { draft, done: { committed: false } };
+      const tools = alone ? [...reviewTools(this.texts, work), reviewCommitTool(this.texts, work), ...this.readTools()] : this.tools(work);
+      const spec = { ...this.spec(tools, history, alone ? REVIEW_TEXT.system : MAIN_TEXT.system), budget: finalReviewBudget(this.host.settings.agents) };
       const agent = startAgent(spec, { host: this.host.rt.host, userId: this.host.userId, settings: this.host.settings.agents, texts: this.texts, accounts: this.host.rt.agentAccounts, turn: this.host.turn, trace: { phase: "sections", stage: alone ? "The final review" : "Stage 6: the final review" } });
       const reply = await this.send(agent, lead ? `${lead}\n\n${sent}` : sent, stop, "sections");
-      if (!done.committed && reply.status !== "answered") return { ok: false, reason: firedTimeout(signal)?.message ?? reply.reason ?? reply.status };
+      if (!work.done.committed && reply.status !== "answered") return { ok: false, reason: firedTimeout(signal)?.message ?? reply.reason ?? reply.status };
       if (!alone) this.keep(first ? `${this.keptTask}\n\n${message}` : message, sent, agent);
       return { ok: true };
     } catch (error) {
@@ -657,32 +664,51 @@ export class MainTurn {
 
   // ---------------------------------------------------------------- the tools
 
-  private tools(round: Round): AgentTool[] {
+  /**
+   * The main agent's tools, the same in every send of its turn, its stages' and (while the final
+   * review is on) its review's, so each call starts as the one before it did and reads the prefix the
+   * provider cached: the tools lead what the cache keys on. What a tool works on is the send's
+   * (`work`), a stage's requests or the review's draft: a stage's own tool refuses in the review and
+   * the review's in a stage (`reviewTools`), and commit commits either.
+   */
+  private tools(work: Round | ReviewWork): AgentTool[] {
     const { settings } = this.host;
     const describe = (name: string, arg: string): string => this.text(MAIN_TEXT.toolArg(name, arg));
+    const reviewing = settings.agents.finalReview.on;
+    // A stage's own tool in the review is refused: the review only edits the narrator's prompt.
+    const inStage =
+      (name: string, run: (round: Round, args: JsonObject) => Promise<ToolOutcome>) =>
+      (args: JsonObject): Promise<ToolOutcome> =>
+        "draft" in work ? Promise.resolve(this.refuse(MAIN_TEXT.refusedReview, { tool: name })) : run(work, args);
     const own: AgentTool[] = [
       {
         name: MAIN_TOOLS.runRole,
         description: this.text(MAIN_TEXT.tool(MAIN_TOOLS.runRole)),
         parameters: { type: "object", properties: { role: { type: "string", enum: [...ROLE_IDS], description: describe(MAIN_TOOLS.runRole, "role") }, task: { type: "string", description: describe(MAIN_TOOLS.runRole, "task") }, prompt_only: { type: "boolean", description: describe(MAIN_TOOLS.runRole, "prompt_only") } }, required: ["role", "task"] },
-        run: (args) => this.runRole(round, args),
+        run: inStage(MAIN_TOOLS.runRole, (round, args) => this.runRole(round, args)),
       },
       {
         name: MAIN_TOOLS.revise,
         description: this.text(MAIN_TEXT.tool(MAIN_TOOLS.revise)),
         parameters: { type: "object", properties: { agentId: { type: "string", description: describe(MAIN_TOOLS.revise, "agentId") }, message: { type: "string", description: describe(MAIN_TOOLS.revise, "message") } }, required: ["agentId", "message"] },
-        run: (args) => this.revise(round, args),
+        run: inStage(MAIN_TOOLS.revise, (round, args) => this.revise(round, args)),
       },
-      { name: MAIN_TOOLS.commit, description: this.text(MAIN_TEXT.tool(MAIN_TOOLS.commit)), parameters: { type: "object", properties: {} }, run: () => this.commit(round) },
-      ...(settings.agents.compaction.summarizeTool ? [{ name: MAIN_TOOLS.summarize, description: this.text(MAIN_TEXT.tool(MAIN_TOOLS.summarize)), parameters: { type: "object", properties: {} }, run: () => this.summarize(round) } satisfies AgentTool] : []),
+      {
+        name: MAIN_TOOLS.commit,
+        // One description for a stage's commit and the review's, the same in every send.
+        description: [this.text(MAIN_TEXT.tool(MAIN_TOOLS.commit)), ...(reviewing ? [this.text(REVIEW_TEXT.commit)] : [])].join(" "),
+        parameters: { type: "object", properties: {} },
+        run: () => ("draft" in work ? Promise.resolve(commitReview(this.texts, work)) : this.commit(work)),
+      },
+      ...(settings.agents.compaction.summarizeTool ? [{ name: MAIN_TOOLS.summarize, description: this.text(MAIN_TEXT.tool(MAIN_TOOLS.summarize)), parameters: { type: "object", properties: {} }, run: inStage(MAIN_TOOLS.summarize, (round) => this.summarize(round)) } satisfies AgentTool] : []),
       {
         name: MAIN_TOOLS.condense,
         description: this.text(MAIN_TEXT.tool(MAIN_TOOLS.condense)),
         parameters: { type: "object", properties: { source: { type: "string", description: describe(MAIN_TOOLS.condense, "source") }, role: { type: "string", enum: [...ROLE_IDS], description: describe(MAIN_TOOLS.condense, "role") }, note: { type: "string", description: describe(MAIN_TOOLS.condense, "note") }, focus: { type: "string", description: describe(MAIN_TOOLS.condense, "focus") } }, required: ["source", "role"] },
-        run: (args) => this.condense(round, args),
+        run: inStage(MAIN_TOOLS.condense, (round, args) => this.condense(round, args)),
       },
     ];
-    return [...own, ...this.readTools()];
+    return [...own, ...(reviewing ? reviewTools(this.texts, "draft" in work ? work : null) : []), ...this.readTools()];
   }
 
   /** The main agent's read tools, the GM's view with every secret marked: it changes nothing itself. None while the chat's world isn't loaded. */

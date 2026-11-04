@@ -164,7 +164,7 @@ describe("every organization", () => {
       ["Jordan Ellis", "Mechanic"],
     ]);
     expect(shop.hidden.count).toBe(0);
-    expect(Object.keys(shop.sections).sort()).toEqual(["money", "orgs.alerts", "orgs.coming", "orgs.plan", "ownership", "payroll", "premises", "taxes"]);
+    expect(Object.keys(shop.sections).sort()).toEqual(["money", "orgs.alerts", "orgs.coming", "orgs.decisions", "orgs.plan", "ownership", "payroll", "premises", "taxes"]);
     // The GM is no reader: no place of theirs on any page.
     expect(gm.orgs.every((o) => !o.page.you.belongs && o.page.you.powers.length === 0)).toBe(true);
   });

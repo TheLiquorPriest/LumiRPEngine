@@ -20,7 +20,7 @@ import { isGone, kindIs, placeOfEntity, placeWithin } from "../../../engine/scop
 import type { WorldState } from "../../../engine/state";
 import { addToBooks, addToPayables, businessBooks, firstBookedMonth, monthBook, monthOf, monthsBetween, operatingAccount, payablesOf } from "./books";
 import { allJobs, jobBlocks, payrollProblem, staffViews, type Job } from "./employment";
-import { businessAt, businessIds, orgTypeOf, placesOf, tradingDays } from "../../../engine/org";
+import { businessAt, businessIds, orgTypeOf, placesOf, tradingDays, windingUpSince } from "../../../engine/org";
 import type { FinanceApi, FinanceRegistry, FlowPosting } from "./module";
 import { hiddenFrom, managesParty, shownLabel, unpricedCap } from "./model";
 import { actAs, moneyWords } from "./acting";
@@ -149,6 +149,8 @@ function saleTerms(ctx: ReadContext, api: FinanceApi, sale: { payer: EntityId; p
  * business's own level). Its commission staff who worked that day share the commission.
  */
 function walkInFlow(ctx: ReadContext, api: FinanceApi, business: EntityId): Flow | null {
+  // A company winding up takes no more walk-in custom (ORG-SPEC §3.13).
+  if (windingUpSince(ctx.state, business) !== null) return null;
   const daily = numOf(own(ctx.state.entities, business)?.fields.daily_sales);
   const deposit = operatingAccount(api, ctx, business);
   if (daily <= 0 || !deposit) return null;
@@ -190,7 +192,7 @@ function settleFlows(ctx: ReadContext, api: FinanceApi, business: EntityId): Flo
   return out;
 }
 
-function settlePosting(ctx: ReadContext, api: FinanceApi, business: EntityId, what: "suppliers" | "sales_tax"): FlowPosting | null {
+export function settlePosting(ctx: ReadContext, api: FinanceApi, business: EntityId, what: "suppliers" | "sales_tax"): FlowPosting | null {
   const deposit = operatingAccount(api, ctx, business);
   const cents = payablesOf(ctx.state, business)[what];
   if (!deposit || cents <= 0) return null;
@@ -268,7 +270,7 @@ export const INVOICE_PAID: EventTypeDef<PackEvent> = {
 };
 
 /** The events that mark an invoice paid in full with a payment of `cents`, and book it. */
-function invoiceSettled(inv: InvoiceRec, cents: number): LedgerEvent[] {
+export function invoiceSettled(inv: InvoiceRec, cents: number): LedgerEvent[] {
   return [
     { type: "set", entity: inv.id, field: "paid", value: inv.paid + cents },
     { type: "set", entity: inv.id, field: "state", value: "paid" },
@@ -461,7 +463,9 @@ function undistributed(api: FinanceApi, ctx: ReadContext, business: EntityId, fr
  * A distribution from a business's operating account to its owners by their share of its worth,
  * paying `months` of its profit. Each owner's part goes where the holdings module routes their
  * stake (an account of theirs, else their deposit account); a part they reinvest stays in the
- * business and only its stake records it. Null when there is nothing to pay or no account to pay from.
+ * business and only its stake records it. A listed company's public holds the float's part (§27.10
+ * Listing): its holders in the world are paid it by their units, the market the rest. Null when
+ * there is nothing to pay or no account to pay from.
  */
 function distribution(ctx: ReadContext, api: FinanceApi, business: EntityId, months: JsonObject): { lines: PostingLine[]; extra: LedgerEvent[]; paid: number } | null {
   const total = Object.values(months).reduce((a: number, c) => a + numOf(c), 0);
@@ -470,6 +474,8 @@ function distribution(ctx: ReadContext, api: FinanceApi, business: EntityId, mon
   const owners = api.ownersOf(ctx.state, business).map((o) => ({ party: o.party, share: api.shareOf(ctx.state, business, o.party) })).filter((o) => o.share > 0);
   const shareSum = owners.reduce((a, o) => a + o.share, 0);
   if (owners.length === 0 || shareSum <= 0) return null;
+  const pub = optionalService(ctx, "economy.public_payout")?.(ctx, business, total) ?? null;
+  const owed = total - (pub?.cents ?? 0);
   const route = optionalQuery(ctx, "economy.stake_route");
   const stakePaid = optionalService(ctx, "economy.stake_paid");
   const lines: PostingLine[] = [];
@@ -477,7 +483,7 @@ function distribution(ctx: ReadContext, api: FinanceApi, business: EntityId, mon
   let given = 0;
   let paid = 0;
   for (const [i, o] of owners.entries()) {
-    const cents = i === owners.length - 1 ? total - given : Math.round((total * o.share) / shareSum);
+    const cents = i === owners.length - 1 ? owed - given : Math.round((owed * o.share) / shareSum);
     given += cents;
     if (cents <= 0) continue;
     const r = route?.(ctx, o.party, business) ?? null;
@@ -490,6 +496,15 @@ function distribution(ctx: ReadContext, api: FinanceApi, business: EntityId, mon
       paid += cents;
     }
     extra.push(...(stakePaid?.(ctx, o.party, business, cents, reinvest) ?? []));
+  }
+  if (pub) {
+    for (const l of pub.lines) {
+      const line = lines.find((x) => x.account === l.account);
+      if (line) line.amount += l.amount;
+      else lines.push({ account: l.account, amount: l.amount });
+    }
+    paid += pub.cents;
+    extra.push(...pub.extra);
   }
   if (paid > 0) lines.unshift({ account: from, amount: -paid });
   extra.push({ type: "economy.payout", data: { business, what: "distribution", cents: total, months } });
@@ -543,7 +558,8 @@ function distributionFlow(ctx: ReadContext, api: FinanceApi, business: EntityId)
   const f = own(ctx.state.entities, business)?.fields;
   const pct = numOf(f?.distribution_pct);
   const from = operatingAccount(api, ctx, business);
-  if (!f || pct <= 0 || !from) return null;
+  // A company winding up pays out no profit: what is left goes to its owners when it is wound up (ORG-SPEC §3.13).
+  if (!f || pct <= 0 || !from || windingUpSince(ctx.state, business) !== null) return null;
   const every = strOf(f.distribution_every, "quarter");
   const schedule: FlowSchedule = every === "month" ? { every: "month", days: [10], roll: "after" } : every === "year" ? { every: "year", months: [1], days: [10], roll: "after" } : { every: "year", months: [1, 4, 7, 10], days: [10], roll: "after" };
   return { id: `distribute:${business}`, label: "Profit distribution", kind: "distribution", from, to: "Owners", amount: { provider: "distribution", args: { business } }, schedule, shortfall: "skip", category: "distribution", link: business, status: "active", source: "business" };

@@ -12,7 +12,9 @@
 // - per connection (`AgentAccounts`): throttles, and the acceptance runs' guard and ceilings.
 //
 // The loop detector stops an agent the moment it would make the same call with the same arguments
-// a setting's number of times in a row. A tool result past a setting's length reaches the model
+// a setting's number of times in a row, each on what it acts on as the one before found it: a tool
+// whose arguments name something by where it stands now (`AgentTool.state`, the final review's
+// edits) makes a new call once that changed. A tool result past a setting's length reaches the model
 // clipped, the whole kept in the agent's scratch for the built-in `scratch_read`. Cancel goes
 // through the signals the host's calls take: the handle's own, a send's, and each deadline's.
 
@@ -57,6 +59,13 @@ export interface AgentTool {
   description: string;
   /** Its arguments' JSON Schema, hand-written (§3.1). */
   parameters: JsonObject;
+  /**
+   * What its calls act on, as a number that changes whenever that does, for a tool whose arguments
+   * name something by where it stands now (the final review's edits name a line by its number as its
+   * part reads now): once it changed, the same arguments name something else, so the loop detector
+   * takes a call the same as the one before it for a repeat only while this is the same too.
+   */
+  state?(): number;
   run(args: JsonObject, ctx: ToolCtx): Promise<ToolOutcome>;
 }
 
@@ -206,6 +215,13 @@ export function startAgent(spec: AgentSpec, deps: AgentDeps): AgentHandle {
 
 const STATUS: Readonly<Partial<Record<AgentStopCode, AgentStatus>>> = { cancelled: "cancelled", failed: "failed", loop: "stopped" };
 
+/** The loop detector's run, this send: the last call, its tool's state as the call found it (`AgentTool.state`; null for a tool without one), and how many times in a row it was made. */
+interface LoopRun {
+  call: AgentCall | null;
+  state: number | null;
+  times: number;
+}
+
 /** A cut at `at` or one before, so it never splits a character: a UTF-16 unit from 0xD800 to 0xDBFF opens a surrogate pair. */
 function cutAt(text: string, at: number): number {
   const unit = text.charCodeAt(at - 1);
@@ -301,8 +317,7 @@ class Agent implements AgentHandle {
   private async loop(used: AgentUsage, signal: AbortSignal | undefined): Promise<AgentReply> {
     const { budget } = this.spec;
     const turn = this.deps.turn;
-    // The loop detector's run: the last call and how many times in a row it was made, this send.
-    const repeat: { call: AgentCall | null; times: number } = { call: null, times: 0 };
+    const repeat: LoopRun = { call: null, state: null, times: 0 };
     let said = "";
     for (;;) {
       const late = this.timeUp();
@@ -391,12 +406,15 @@ class Agent implements AgentHandle {
   }
 
   /** Why a round of calls isn't run: the loop detector, or the agent's or the turn's rounds spent. */
-  private roundStop(calls: readonly AgentCall[], repeat: { call: AgentCall | null; times: number }): AgentStop | null {
+  private roundStop(calls: readonly AgentCall[], repeat: LoopRun): AgentStop | null {
     const { settings, turn } = this.deps;
     for (const call of calls) {
-      const same = repeat.call !== null && repeat.call.name === call.name && jsonEqual(repeat.call.args, call.args);
+      // A tool whose state changed since the call before is asked something new, whatever its arguments.
+      const state = this.tools.get(call.name)?.state?.() ?? null;
+      const same = repeat.call !== null && repeat.call.name === call.name && jsonEqual(repeat.call.args, call.args) && repeat.state === state;
       repeat.times = same ? repeat.times + 1 : 1;
       repeat.call = call;
+      repeat.state = state;
       if (repeat.times >= settings.loopRepeats) return new AgentStop("loop", { id: STOP_TEXT.loop, vars: { tool: call.name, times: counted(repeat.times, "time", "times") } });
     }
     if (this.total.toolTurns >= limitOf(this.spec.budget.toolTurns)) return new AgentStop("tool_turns", { id: STOP_TEXT.toolTurns, vars: { rounds: counted(limitOf(this.spec.budget.toolTurns), "round", "rounds") } });

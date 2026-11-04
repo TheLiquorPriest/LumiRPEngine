@@ -1,15 +1,23 @@
 // The final review (DESIGN §4.6): before every reply of an agent chat, once the engine has made the
 // turn's sections and before the guard writes them, the main agent reviews the narrator's prompt and
-// may revise it a line at a time. Its edits reach the reply's prompt (what Lumiverse's Prompt
-// Breakdown shows), land on the turn's record outside every hash, and are told again by a
-// Re-narrate and by a kept turn's retry; it works on the fixed pipeline (the main agent alone) and
-// with a main agent deciding (its stage 6); a review that fails sends the prompt unrevised with a
-// Diagnostics record, or stops the turn under Stop; turned off, nothing runs. The models are
-// scripted on Port Alder, every role prompt-only.
+// may revise it a line, or a block of lines, at a time. Its edits reach the reply's prompt (what
+// Lumiverse's Prompt Breakdown shows), land on the turn's record outside every hash, and are told
+// again by a Re-narrate and by a kept turn's retry; it works on the fixed pipeline (the main agent
+// alone) and with a main agent deciding (its stage 6); a review that fails sends the prompt
+// unrevised with a Diagnostics record, or stops the turn under Stop; turned off, nothing runs. And
+// the ways a long chat's reviews failed: a block taken out a line at a time, the same line number
+// each call, which the loop detector stopped; a review out of its time, each still sending the
+// reply; a first call that read nothing of the session's cache, being offered other tools than the
+// stages before it; and edits each answered with their whole section. The models are scripted on
+// Port Alder, every role prompt-only.
 
 import { describe, expect, test } from "bun:test";
+import { commitReview, reviewTools } from "../../src/backend/agents/final-review";
+import type { ToolCtx } from "../../src/backend/agents/runtime";
 import type { QuietRequest, QuietToolCall } from "../../src/backend/host";
+import { cacheBreakpoints } from "../../src/backend/spindle-host";
 import { ROLE_IDS } from "../../src/shared/agent-roles";
+import { defaultAgentSettings } from "../../src/shared/agent-settings";
 import { applyFinalEdits, partOf, partText, ReviewDraft } from "../../src/shared/final-review";
 import type { JsonObject } from "../../src/shared/json";
 import type { Rec } from "../../src/shared/ledger";
@@ -18,33 +26,56 @@ import { Rig } from "../support/rig";
 
 const INTERPRET_MARK = "You map a player's typed input";
 const EXTRACT_MARK = "propose concrete state changes";
+/** What the review's message says, as shipped, in either pipeline. */
+const REVIEW_MARK = "review the prompt it gets";
 const PROMPT_ONLY = Object.fromEntries(ROLE_IDS.map((id) => [id, { promptOnly: true }]));
 /** The line the scripted review adds to the Scene. */
 const LINE = "- REVIEWED: a gull lands on the railing beside you.";
 
 const call = (name: string, args: JsonObject, callId: string): QuietToolCall => ({ name, args, callId });
-const isReview = (req: QuietRequest): boolean => (req.tools ?? []).some((t) => t.name === "review_replace");
-const isMain = (req: QuietRequest): boolean => (req.tools ?? []).some((t) => t.name === "run_role");
 const sentOf = (req: QuietRequest): string => req.messages.map((m) => m.content).join("\n\n");
+/** What the tools gave back to the call that sends their results. */
+const resultsOf = (req: QuietRequest): string[] => (req.messages.at(-1)?.parts ?? []).flatMap((p) => (p.type === "tool_result" ? [p.content] : []));
+/** The message a main agent's call works on: its latest that isn't its tools' results, a stage's or the review's. */
+const workedOf = (req: QuietRequest): string => req.messages.findLast((m) => m.role === "user" && !(m.parts ?? []).some((p) => p.type === "tool_result"))?.content ?? "";
+/** The review's call, in either pipeline: with a main agent deciding, it is offered every tool its stages are. */
+const isReview = (req: QuietRequest): boolean => workedOf(req).includes(REVIEW_MARK);
+/** A main agent's stage: it is offered run_role. */
+const isMain = (req: QuietRequest): boolean => !isReview(req) && (req.tools ?? []).some((t) => t.name === "run_role");
+
+/** Part `id`'s lines as the latest part shown in `req` numbers them, from 1. */
+function shownLines(req: QuietRequest, id: string): string[] {
+  const sent = sentOf(req);
+  const lines: string[] = [];
+  for (const row of sent.slice(sent.lastIndexOf(`Part ${id}: `)).split("\n").slice(1)) {
+    const numbered = /^(\d+): (.*)$/.exec(row);
+    if (!numbered || Number(numbered[1]) !== lines.length + 1) break;
+    lines.push(numbered[2] ?? "");
+  }
+  return lines;
+}
 
 /** Adds LINE to the Scene and commits, in one answer. */
 const appendLine = (): QuietScript => ({ content: "", toolCalls: [call("review_append", { part: "scene", text: LINE }, "edit"), call("commit", {}, "done")] });
 
 /**
- * The scripted models: the review answers `review`; a main agent's stage runs every role it asks
- * for and commits; the roles' classic calls read no action and propose nothing. Each review call, in order.
+ * The scripted models: the review answers `review`; a main agent's stage answers `stage` where it
+ * answers the call (its `n`th), else runs every role its stage asks for and commits; the roles'
+ * classic calls read no action and propose nothing. Each review call, in order.
  */
-function models(rig: Rig, review: (req: QuietRequest) => QuietScript = appendLine): QuietRequest[] {
+function models(rig: Rig, review: (req: QuietRequest) => QuietScript | Promise<QuietScript> = appendLine, stage?: (req: QuietRequest, n: number) => QuietScript | undefined): QuietRequest[] {
   const reviews: QuietRequest[] = [];
-  let stage = 0;
+  let stages = 0;
   rig.host.quietReply = (req) => {
     if (isReview(req)) {
       reviews.push(req);
       return review(req);
     }
     if (isMain(req)) {
-      const n = stage++;
-      const message = req.messages.findLast((m) => m.role === "user")?.content ?? "";
+      const n = stages++;
+      const own = stage?.(req, n);
+      if (own !== undefined) return own;
+      const message = workedOf(req);
       const roles = [...new Set([...message.slice(message.lastIndexOf("Stage ")).matchAll(/^- (\w+):/gm)].map((m) => m[1] ?? ""))];
       return { content: "", toolCalls: [...roles.map((role) => call("run_role", { role, task: `task for ${role}` }, `c${n}_${role}`)), call("commit", {}, `c${n}_commit`)] };
     }
@@ -97,14 +128,14 @@ async function renarrate(rig: Rig, chatId: string) {
 const reviewRecords = async (rig: Rig, chatId: string) => (await rig.rt.diag.records(chatId, rig.host.userId)).filter((r) => r.step === "final review");
 
 describe("the review's draft", () => {
-  test("edits a line by its number, adds at the end, takes a line out, and tells its edits again where the lines still stand", () => {
+  test("edits a line by its number, adds at the end, takes a line out, each saying where it now stands, and tells its edits again where the lines still stand", () => {
     const scene = partOf("scene", "Scene", "[Scene]\nWhere you are.\n- At the harbor.\n- It rains.");
     expect(scene).toEqual({ id: "scene", label: "Scene", header: "[Scene]", lines: ["Where you are.", "- At the harbor.", "- It rains."] });
     const draft = new ReviewDraft([scene], 2000);
-    expect(draft.replace("scene", 3, "- It drizzles {{char}}.")).toMatchObject({ lines: ["Where you are.", "- At the harbor.", "- It drizzles ｛｛char｝｝."] });
-    expect(draft.append("scene", "- A gull.\n- Another gull.")).toMatchObject({ lines: ["Where you are.", "- At the harbor.", "- It drizzles ｛｛char｝｝.", "- A gull.", "- Another gull."] });
-    expect(draft.drop("scene", 1)).toMatchObject({ lines: ["- At the harbor.", "- It drizzles ｛｛char｝｝.", "- A gull.", "- Another gull."] });
-    expect(draft.replace("scene", 9, "x")).toMatchObject({ refused: "line" });
+    expect(draft.replace("scene", 3, "- It drizzles {{char}}.")).toMatchObject({ part: { lines: ["Where you are.", "- At the harbor.", "- It drizzles ｛｛char｝｝."] }, at: 2, count: 1 });
+    expect(draft.append("scene", "- A gull.\n- Another gull.")).toMatchObject({ part: { lines: ["Where you are.", "- At the harbor.", "- It drizzles ｛｛char｝｝.", "- A gull.", "- Another gull."] }, at: 3, count: 2 });
+    expect(draft.drop("scene", 1)).toMatchObject({ part: { lines: ["- At the harbor.", "- It drizzles ｛｛char｝｝.", "- A gull.", "- Another gull."] }, at: 0, count: 0 });
+    expect(draft.replace("scene", 9, "x")).toMatchObject({ refused: "line", line: 9 });
     expect(draft.append("people", "x")).toEqual({ refused: "part" });
     expect(draft.append("scene", "  \n ")).toEqual({ refused: "text" });
     // Told again on the same prompt, every edit finds its line; on one whose line is gone, that edit changes nothing.
@@ -113,6 +144,64 @@ describe("the review's draft", () => {
     expect(partText(again.parts[0] ?? scene)).toBe(partText(draft.parts[0] ?? scene));
     const moved = applyFinalEdits([partOf("scene", "Scene", "[Scene]\nWhere you are.\n- At the harbor.")], draft.edits);
     expect(moved.missed.map((e) => e.op)).toEqual(["replace"]);
+  });
+
+  test("a block, from one line through another in either order, is rewritten or taken out in one edit, recorded line by line so it is told again as any edit is", () => {
+    const scene = partOf("scene", "Scene", "[Scene]\nWhere you are.\n- [LOC] The boatyard: the harbor's own.\n\n### Boats\n- A dinghy.\n- It rains.");
+    const draft = new ReviewDraft([scene], 2000);
+    // A lore entry the Scene tells whole, lines 2 to 5, becomes two lines: the rest of the block goes from after them.
+    expect(draft.replace("scene", 2, "- The boatyard is the harbor's.\n- None of it is yours.", 5)).toMatchObject({ part: { lines: ["Where you are.", "- The boatyard is the harbor's.", "- None of it is yours.", "- It rains."] }, at: 1, count: 2 });
+    expect(draft.drop("scene", 3, 2)).toMatchObject({ part: { lines: ["Where you are.", "- It rains."] }, at: 1, count: 0 });
+    // A block past the part's end is refused, naming the number it doesn't have, and changes nothing.
+    expect(draft.drop("scene", 1, 3)).toMatchObject({ refused: "line", line: 3 });
+    expect(draft.replace("scene", 0, "x", 1)).toMatchObject({ refused: "line", line: 0 });
+    expect(draft.edits).toEqual([
+      { op: "replace", part: "scene", at: 1, line: "- [LOC] The boatyard: the harbor's own.", text: "- The boatyard is the harbor's.\n- None of it is yours." },
+      { op: "drop", part: "scene", at: 3, line: "" },
+      { op: "drop", part: "scene", at: 3, line: "### Boats" },
+      { op: "drop", part: "scene", at: 3, line: "- A dinghy." },
+      { op: "drop", part: "scene", at: 1, line: "- The boatyard is the harbor's." },
+      { op: "drop", part: "scene", at: 1, line: "- None of it is yours." },
+    ]);
+    const again = applyFinalEdits([scene], draft.edits);
+    expect([again.missed, partText(again.parts[0] ?? scene)]).toEqual([[], partText(draft.parts[0] ?? scene)]);
+  });
+});
+
+describe("the review's tools", () => {
+  const ctx: ToolCtx = { signal: new AbortController().signal, agentId: "agent_test", role: "main", callId: "call" };
+  /** Port Alder's Scene as long as a long chat's: twelve lines. */
+  const twelve = (): ReviewDraft => new ReviewDraft([partOf("scene", "Scene", ["[Scene]", ...Array.from({ length: 12 }, (_, i) => `- Line ${i + 1}.`)].join("\n"))], 2000);
+
+  test("regression: an edit answers with the lines it made and two either side, each numbered as the part reads after it, never the whole part; review_read shows it whole", async () => {
+    const work = { draft: twelve(), done: { committed: false } };
+    const tools = new Map(reviewTools({}, work).map((t) => [t.name, t]));
+    const answer = async (name: string, args: JsonObject): Promise<string> => (await tools.get(name)?.run(args, ctx))?.text ?? "";
+    // Line 6 becomes two: lines 4 to 9 of the 13 it now has.
+    expect(await answer("review_replace", { part: "scene", line: 6, text: "- New six.\n- New seven." })).toBe(["Done. Part scene now has 13 lines; around your edit it reads:", "4: - Line 4.", "5: - Line 5.", "6: - New six.", "7: - New seven.", "8: - Line 7.", "9: - Line 8."].join("\n"));
+    // A block out at the start: the two lines after the cut, numbered afresh.
+    expect(await answer("review_drop", { part: "scene", line: 1, to: 3 })).toBe(["Done. Part scene now has 10 lines; around the cut it reads:", "1: - Line 4.", "2: - Line 5."].join("\n"));
+    // A line out in the middle: two either side of the cut.
+    expect(await answer("review_drop", { part: "scene", line: 5 })).toBe(["Done. Part scene now has 9 lines; around the cut it reads:", "3: - New six.", "4: - New seven.", "5: - Line 8.", "6: - Line 9."].join("\n"));
+    // Lines added at the end: they and the two before them.
+    expect(await answer("review_append", { part: "scene", text: "- Last." })).toBe(["Done. Part scene now has 10 lines; around your edit it reads:", "8: - Line 11.", "9: - Line 12.", "10: - Last."].join("\n"));
+    // The whole part only on demand.
+    const read = await answer("review_read", { part: "scene" });
+    expect(read).toBe(["Part scene: [Scene]", ...["- Line 4.", "- Line 5.", "- New six.", "- New seven.", "- Line 8.", "- Line 9.", "- Line 10.", "- Line 11.", "- Line 12.", "- Last."].map((line, i) => `${i + 1}: ${line}`)].join("\n"));
+    expect(await tools.get("review_read")?.run({ part: "people" }, ctx)).toEqual({ text: "No part of the narrator's prompt has the id people. Its parts are scene.", error: true });
+    // Taken out to its last line, a part says it has none.
+    expect(await answer("review_drop", { part: "scene", line: 1, to: 10 })).toBe("Done. Part scene now has 0 lines; around the cut it reads:\n(no lines)");
+    // Committed, every call is refused: the narrator has the prompt.
+    expect(commitReview({}, work)).toMatchObject({ end: true });
+    expect(await tools.get("review_read")?.run({ part: "scene" }, ctx)).toMatchObject({ error: true, text: expect.stringContaining("is committed") });
+  });
+
+  test("out of the review (a main agent's other stages, which are offered them too), each review tool is refused and changes nothing", async () => {
+    const tools = reviewTools({}, null);
+    expect(tools.map((t) => t.name)).toEqual(["review_replace", "review_append", "review_drop", "review_read"]);
+    // The same tools, word for word, as the review's own: only what they work on differs.
+    expect(tools.map(({ name, description, parameters }) => ({ name, description, parameters }))).toEqual(reviewTools({}, { draft: twelve(), done: { committed: false } }).map(({ name, description, parameters }) => ({ name, description, parameters })));
+    for (const tool of tools) expect(await tool.run({ part: "scene", line: 1, text: LINE }, ctx)).toEqual({ text: `${tool.name} edits the narrator's prompt, and works only in the final review that opens stage 6, once the engine has made the prompt. In this stage, run the roles you want, then call commit.`, error: true });
   });
 });
 
@@ -129,6 +218,9 @@ describe("the final review", () => {
     expect(sent).toContain("The player's message:\nI look out over the harbor.");
     expect(sent).toContain("Part scene: [Scene]");
     expect(sent).toContain("Part narrator_rules: [Narrator rules]");
+    // Alone, it is offered the review's tools beside its read tools, none of a stage's.
+    const names = (reviews[0]?.tools ?? []).map((t) => t.name);
+    expect([names.slice(0, 5), names.includes("run_role")]).toEqual([["review_replace", "review_append", "review_drop", "review_read", "commit"], false]);
     expect(scene).toContain(LINE);
     expect(rec.finalEdits).toEqual([{ op: "append", part: "scene", text: LINE }]);
     const live = rig.rt.live.view(chatId, rig.host.userId);
@@ -156,6 +248,51 @@ describe("the final review", () => {
     expect(scene).toContain("Where you are, as the main agent put it.");
     expect(scene).not.toContain(original);
     expect(rec.finalEdits).toEqual([{ op: "replace", part: "scene", at: 0, line: original, text: "Where you are, as the main agent put it." }]);
+    expect(rig.rt.ledger.errors).toEqual([]);
+  });
+
+  test("regression: with a main agent deciding, every call of its turn is offered the same tools and system prompt, so the review's first call opens with the prompt its last stage's call cached", async () => {
+    const rig = new Rig({ shipped: true });
+    // An Anthropic connection that caches: its cache keys on the tools, then the system prompt, then the messages up to a breakpoint.
+    rig.host.connectionProfiles.push({ id: "conn_cached", name: "Cached", models: ["claude-opus"], provider: "anthropic", cache: cacheBreakpoints("anthropic", { prompt_caching: true }) });
+    const chatId = await agentsChat(rig, { agents: { pipeline: { mode: "main" }, main: { connectionId: "conn_cached" } } });
+    const reviews = models(rig);
+    const { rec } = await played(rig, chatId, "I look out over the harbor.", "Gulls wheel over the water.");
+    expect([reviews.length, rec.finalEdits]).toEqual([1, [{ op: "append", part: "scene", text: LINE }]]);
+    // Every call of the main agent's turn, the review's among its stages': each is offered run_role.
+    const calls = rig.host.quietCalls.filter((req) => (req.tools ?? []).some((t) => t.name === "run_role"));
+    const at = calls.indexOf(reviews[0] as QuietRequest);
+    expect([at > 0, calls.slice(at + 1).some(isMain)]).toEqual([true, true]);
+    // What the cache keys on, beside the messages: the tools, the system prompt, and the model and its thinking, which go with the effort and the call's tokens.
+    expect(new Set(calls.map((req) => JSON.stringify({ tools: req.tools, system: req.messages[0], connectionId: req.connectionId, model: req.model, effort: req.effort, maxTokens: req.maxTokens }))).size).toBe(1);
+    expect((calls[0]?.tools ?? []).map((t) => t.name)).toEqual(expect.arrayContaining(["run_role", "revise", "commit", "condense", "review_replace", "review_append", "review_drop", "review_read"]));
+    // The stage before it sent one call, a breakpoint after its message; the review's first call opens with that call's prompt word for word.
+    const review = reviews[0] as QuietRequest;
+    const last = calls[at - 1] as QuietRequest;
+    expect(last.messages.at(-1)?.parts?.at(-1)?.cache).toBe(true);
+    const turns = (req: QuietRequest): string[][] => req.messages.map((m) => [m.role, m.content]);
+    expect(turns(review).slice(0, last.messages.length)).toEqual(turns(last));
+    expect(review.messages.length).toBeGreaterThan(last.messages.length);
+    expect(rig.rt.ledger.errors).toEqual([]);
+  });
+
+  test("with a main agent deciding, a review tool called in a stage and a stage's tool called in the review are refused, and change nothing", async () => {
+    const rig = new Rig({ shipped: true });
+    const chatId = await agentsChat(rig, { agents: { pipeline: { mode: "main" } } });
+    // Its first stage edits the narrator's prompt before the engine has made it; its review runs a role, then adds LINE and commits.
+    const reviews = models(
+      rig,
+      (req) => (resultsOf(req).length === 0 ? { content: "", toolCalls: [call("run_role", { role: "scene", task: "Look again." }, "late")] } : appendLine()),
+      (_req, n) => (n === 0 ? { content: "", toolCalls: [call("review_append", { part: "scene", text: LINE }, "early")] } : undefined),
+    );
+    const { scene, rec } = await played(rig, chatId, "I look out over the harbor.", "Gulls wheel over the water.");
+    const answered = (req: QuietRequest | undefined) => (req?.messages.at(-1)?.parts ?? []).flatMap((p) => (p.type === "tool_result" ? [{ text: p.content, error: p.isError === true }] : []));
+    expect(answered(rig.host.quietCalls.find((req) => isMain(req) && resultsOf(req).length > 0))).toEqual([{ text: "review_append edits the narrator's prompt, and works only in the final review that opens stage 6, once the engine has made the prompt. In this stage, run the roles you want, then call commit.", error: true }]);
+    expect(reviews).toHaveLength(2);
+    expect(answered(reviews[1])).toEqual([{ text: "run_role works in the turn's other stages, not in its final review. Here, edit the narrator's prompt with review_replace, review_append and review_drop, read a part whole with review_read, then call commit.", error: true }]);
+    // No role ran between the review's calls, and the prompt has the review's line once.
+    expect(rig.host.quietCalls.indexOf(reviews[1] as QuietRequest)).toBe(rig.host.quietCalls.indexOf(reviews[0] as QuietRequest) + 1);
+    expect([scene.split(LINE).length - 1, rec.finalEdits]).toEqual([1, [{ op: "append", part: "scene", text: LINE }]]);
     expect(rig.rt.ledger.errors).toEqual([]);
   });
 
@@ -269,5 +406,85 @@ describe("the final review", () => {
     expect(rec.finalEdits).toBeUndefined();
     expect(await reviewRecords(rig, chatId)).toEqual([]);
     expect(rig.rt.live.view(chatId, rig.host.userId)?.entries.some((e) => e.kind === "review")).toBe(false);
+  });
+
+  test("regression: a review that takes a block out one call at a time, each the same line number, past the loop detector's count, commits every edit", async () => {
+    for (const mode of ["fixed", "main"] as const) {
+      const rig = new Rig({ shipped: true });
+      const chatId = await agentsChat(rig, { agents: { pipeline: { mode } } });
+      const loop = defaultAgentSettings().loopRepeats;
+      // As a long chat's main agent did: the Scene's line 1 taken out, one call a round, a call more than the loop detector counts, then commit.
+      let original: string[] = [];
+      let calls = 0;
+      const reviews = models(rig, (req) => {
+        calls += 1;
+        if (calls === 1) original = shownLines(req, "scene");
+        return { content: "", toolCalls: [calls <= loop + 1 ? call("review_drop", { part: "scene", line: 1 }, `drop_${calls}`) : call("commit", {}, "done")] };
+      });
+      const { scene, rec } = await played(rig, chatId, "I look out over the harbor.", "Gulls wheel over the water.");
+      expect([mode, reviews.length, original.length > loop + 1]).toEqual([mode, loop + 2, true]);
+      const dropped = original.slice(0, loop + 1);
+      expect(scene.split("\n")).toEqual(["[Scene]", ...original.slice(loop + 1)]);
+      expect(rec.finalEdits).toEqual(dropped.map((line) => ({ op: "drop", part: "scene", at: 0, line })));
+      expect((await reviewRecords(rig, chatId)).filter((r) => r.status === "failed")).toEqual([]);
+      expect(rig.rt.live.view(chatId, rig.host.userId)?.entries.find((e) => e.kind === "review")).toMatchObject({ outcome: "revised", edits: dropped.map((line) => ({ part: "scene", op: "drop", line })) });
+      expect(rig.rt.ledger.errors).toEqual([]);
+    }
+  });
+
+  test("a block goes in one call: review_replace and review_drop take to, its last line, and the record keeps each line's edit", async () => {
+    const rig = new Rig({ shipped: true });
+    const chatId = await agentsChat(rig);
+    let original: string[] = [];
+    const reviews = models(rig, (req) => {
+      original = shownLines(req, "scene");
+      // Lines 2 and 3 become LINE; then lines 3 and 4 as they read after it (the first's 4 and 5) go, given last first.
+      return { content: "", toolCalls: [call("review_replace", { part: "scene", line: 2, to: 3, text: LINE }, "edit"), call("review_drop", { part: "scene", line: 4, to: 3 }, "drop"), call("commit", {}, "done")] };
+    });
+    const { scene, rec } = await played(rig, chatId, "I look out over the harbor.", "Gulls wheel over the water.");
+    expect(reviews).toHaveLength(1);
+    for (const name of ["review_replace", "review_drop"]) expect(reviews[0]?.tools?.find((t) => t.name === name)?.parameters).toMatchObject({ properties: { to: { type: "integer", minimum: 1 } } });
+    expect(original.length).toBeGreaterThan(5);
+    expect(scene.split("\n")).toEqual(["[Scene]", original[0], LINE, ...original.slice(5)]);
+    expect(rec.finalEdits).toEqual([
+      { op: "replace", part: "scene", at: 1, line: original[1], text: LINE },
+      { op: "drop", part: "scene", at: 2, line: original[2] },
+      { op: "drop", part: "scene", at: 2, line: original[3] },
+      { op: "drop", part: "scene", at: 2, line: original[4] },
+    ]);
+  });
+
+  test("a review stuck on an edit its draft refuses still trips the loop detector: the reply goes out unrevised, and Diagnostics and GM → Live say why", async () => {
+    const rig = new Rig({ shipped: true });
+    const chatId = await agentsChat(rig);
+    const loop = defaultAgentSettings().loopRepeats;
+    const reviews = models(rig, () => ({ content: "", toolCalls: [call("review_drop", { part: "scene", line: 999 }, "drop")] }));
+    const { scene, rec } = await played(rig, chatId, "I look out over the harbor.", "Gulls wheel over the water.");
+    // Each refusal changes nothing, so the same call again is a repeat: the last isn't run.
+    expect(reviews).toHaveLength(loop);
+    expect(scene).toContain("[Scene]");
+    expect(rec.finalEdits).toBeUndefined();
+    expect(rec.status).toBe("ok");
+    const why = `the agent called review_drop with the same arguments ${loop} times in a row (Loop detector)`;
+    const failed = (await reviewRecords(rig, chatId)).find((r) => r.status === "failed");
+    expect([failed?.reason, failed?.fatal]).toEqual([`${why}; the narrator gets the prompt as the engine made it`, undefined]);
+    expect(rig.rt.live.view(chatId, rig.host.userId)?.entries.find((e) => e.kind === "review")).toMatchObject({ outcome: "unrevised", reason: why });
+  });
+
+  test("regression: a review that runs out of its time sends the reply with the prompt unrevised, naming the setting and how to raise it", async () => {
+    const rig = new Rig({ shipped: true });
+    const chatId = await agentsChat(rig, { timeouts: { finalReviewMs: 1_000 } });
+    // The model is still thinking when the time runs out, as a large model's first answer on a long session was.
+    const reviews = models(rig, () => new Promise<QuietScript>(() => undefined));
+    const { scene, rec } = await played(rig, chatId, "I look out over the harbor.", "Gulls wheel over the water.");
+    expect(reviews).toHaveLength(1);
+    expect(scene).toContain("[Scene]");
+    expect(scene).not.toContain("REVIEWED");
+    expect(rec.finalEdits).toBeUndefined();
+    expect(rec.status).toBe("ok");
+    const why = "Final review ran out after 1 s (Settings → Timeouts → Final review)";
+    const failed = (await reviewRecords(rig, chatId)).find((r) => r.status === "failed");
+    expect([failed?.reason, failed?.fix, failed?.fatal]).toEqual([`${why}; the narrator gets the prompt as the engine made it`, "Raise Final review in Settings → Timeouts, or set it to No limit.", undefined]);
+    expect(rig.rt.live.view(chatId, rig.host.userId)?.entries.find((e) => e.kind === "review")).toMatchObject({ outcome: "unrevised", reason: why });
   });
 });

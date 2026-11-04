@@ -4,7 +4,7 @@
 // words its page shows (`BUDGET_DEFS`, `TURN_DEFS`, `LOOP_DEFS`, `GM_OPS_DEF`, `CURATOR_OPS_DEF`, `KEPT_DEFS`, `COMPACTION_DEFS`, `MAIN_DEFS`, `OUTPUT_CHARS_DEF`, `SYSTEM_TOKENS_DEF`), and so is
 // everything the GM assistant runs with (`assistant`: Settings → Agents → Assistant), everything
 // an agent turn runs with (`pipeline`, `roles`, `main`, `context`, `finalReview`, `gmOpsPerTurn`, `curatorOps`, `kept`, `compaction`, `recording`,
-// `review` and `vsClassic`), and how much every agent's system files may take (`systemTokens`); the
+// `review` and `vsClassic`), whether its calls stream (`stream`), and how much every agent's system files may take (`systemTokens`); the
 // values that stay fixed are §16's: the effort levels, "set by the model" as the host's
 // `{source: "custom", effort: "auto"}`, and Anthropic's 4 cache breakpoints per request, which the
 // host adapter keeps (`backend/spindle-host.ts`).
@@ -215,6 +215,14 @@ export interface AgentSettings {
    * keep the role's effort.
    */
   thinkingInToolLoops: boolean;
+  /**
+   * Streaming (Settings → Agents → Streaming): every agent call takes its answer as Lumiverse
+   * streams it (`generate.quietStream`), so the provider's connection carries a long answer as it
+   * is written, never idle until it is whole, which a gateway or proxy between may cut; the answer
+   * reads the same, and each time limit still counts the whole call. Off, each call waits for its
+   * answer whole (`generate.quiet`).
+   */
+  stream: boolean;
   /** Each agent's budget, unless its role sets its own (Settings → Agents → Roles, Increment 2). */
   budget: AgentBudget;
   /** Every agent of a turn together. */
@@ -271,6 +279,7 @@ export const DEFAULT_ACCEPTANCE: Readonly<Omit<AcceptanceConnection, "id">> = Ob
 export function defaultAgentSettings(): AgentSettings {
   return {
     thinkingInToolLoops: false,
+    stream: true,
     budget: { callTokensIn: "none", callTokensOut: HELPER_MAX_TOKENS, callMs: "none", callTools: "none", tokensIn: "none", tokensOut: "none", toolTurns: 10, wallMs: "none", revisions: 2, concurrency: 4 },
     // No turn-wide limit: a fixed pipeline on a long chat sends well past any number that fits a short one, and each agent's own limits stand.
     turn: { tokensIn: "none", tokensOut: "none", toolTurns: "none", wallMs: "none" },
@@ -581,6 +590,7 @@ export function agentSettingsOf(raw: unknown, d: Readonly<AgentSettings> = defau
   const kept = isRecord(a.kept) ? a.kept : {};
   return {
     thinkingInToolLoops: typeof a.thinkingInToolLoops === "boolean" ? a.thinkingInToolLoops : d.thinkingInToolLoops,
+    stream: typeof a.stream === "boolean" ? a.stream : d.stream,
     budget: budgetOf(a.budget, d.budget),
     turn: turnOf(a.turn, d.turn),
     loopRepeats: whole(a.loopRepeats, LOOP_DEFS.loopRepeats.min) ?? d.loopRepeats,

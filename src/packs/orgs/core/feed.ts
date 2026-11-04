@@ -27,6 +27,7 @@ import type { CoreRegistry, ReadContext } from "../../../engine/registry";
 import { builtInSectionsOf } from "../../../shared/sections";
 import { canSeeEntity } from "../../../engine/visibility";
 import { planMindLines } from "./agenda";
+import { decisionAlerts, decisionMindLines } from "./decisions";
 import { orgsSetting } from "./seats";
 import { partyIdOf, powersAt, rowsAt } from "./view";
 
@@ -189,6 +190,8 @@ export function orgAlerts(ctx: ReadContext, org: EntityId, viewer: EntityId | nu
       out.push({ id: "negative_equity", kind: "negative_equity", tone: "neg", text: `Negative equity two months running: it owes ${money(ctx, -worth)} more than it owns.`, short: "negative equity", tab: "money", needsYou: viewer !== null && (holds(ctx, org, viewer, "money.manage") || holds(ctx, org, viewer, "org.govern")) });
     }
   }
+  // A motion open for the reader's vote, a request waiting on their approval (ORG-SPEC Phase 5).
+  out.push(...decisionAlerts(ctx, org, viewer));
   return out.length > 0 ? out : null;
 }
 
@@ -375,7 +378,7 @@ export function orgMindLines(ctx: ReadContext, who: EntityId): string[] {
     const row = partyRoster(ctx, ctx.world.pov).find((r) => r.who === who && r.how !== "leader");
     if (row) lines.push(`You travel with ${own(ctx.state.entities, ctx.world.pov)?.name ?? ctx.world.pov} (the player character) in their party, as ${row.how === "core" ? "a core member" : row.how === "companion" ? "a companion" : row.how === "hired" ? "a hired hand" : "an ally"}.`);
   }
-  return [...planMindLines(ctx, who), ...lines.map((l) => `- ${l}`)];
+  return [...planMindLines(ctx, who), ...decisionMindLines(ctx, who), ...lines.map((l) => `- ${l}`)];
 }
 
 /** The alerts and Coming up sections, and the People section's titles and their switch. */

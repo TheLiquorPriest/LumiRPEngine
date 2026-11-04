@@ -21,6 +21,7 @@ const EXPECTED: Record<string, string> = {
   "economy.occupations": "us/occupations.json",
   "economy.regions": "us/regions.json",
   "economy.finance": "us/finance.json",
+  "economy.exempt": "us/exempt.json",
   "economy.index_history": "us/index-history.json",
   "vehicles.classes": "us/vehicles.json",
   "vehicles.factors": "us/vehicles.json",
@@ -109,7 +110,8 @@ describe("table inventory", () => {
     expect(Object.keys(table("economy.regions").rows)).toHaveLength(array(regions.entries).length + 1);
     expect(Object.keys(table("calendar.shifts").rows)).toHaveLength(array(read(BASE_SOURCES, "us/calendar.json", ["work_shift_patterns"])).length);
     expect(Object.keys(table("gear.items").rows)).toHaveLength(array(read(BASE_SOURCES, "us/gear.json", ["items"])).length);
-    expect(Object.keys(table("economy.finance").rows)).toHaveLength(7);
+    expect(Object.keys(table("economy.finance").rows)).toHaveLength(8);
+    expect(Object.keys(table("economy.exempt").rows)).toEqual(array(read(BASE_SOURCES, "us/exempt.json", ["entries"])).map((e) => (isRecord(e) && typeof e.id === "string" ? e.id : "")));
   });
 });
 

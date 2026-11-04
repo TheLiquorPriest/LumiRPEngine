@@ -41,6 +41,8 @@ import {
   type JobFields,
   type JobView,
   type JournalLine,
+  type ListingView,
+  type MarketActs,
   type OwnerLine,
   type OwnershipView,
   type PayTier,
@@ -49,6 +51,10 @@ import {
   type StatementView,
   type StructureLink,
   type TaxesView,
+  type UnemploymentView,
+  type MergeView,
+  type WindingView,
+  type WindLine,
 } from "../../../shared/finance";
 import { bool, list, num, obj, oneOf, optNum, str, strings, type Obj } from "../../../frontend/decode";
 
@@ -98,7 +104,20 @@ function ownerLine(o: Obj): OwnerLine | null {
   const units = optNum(o.units);
   const votes = optNum(o.votes);
   const value = optNum(o.value);
-  return { party, name: str(o.name, party ?? "someone"), role: oneOf(o.role, OWNER_ROLES, "owner"), share: num(o.share), ...(units !== undefined ? { units } : {}), ...(typeof o.class === "string" ? { class: o.class } : {}), ...(votes !== undefined ? { votes } : {}), ...(value !== undefined ? { value } : {}) };
+  return { party, name: str(o.name, party ?? "someone"), role: oneOf(o.role, OWNER_ROLES, "owner"), share: num(o.share), ...(units !== undefined ? { units } : {}), ...(typeof o.class === "string" ? { class: o.class } : {}), ...(votes !== undefined ? { votes } : {}), ...(value !== undefined ? { value } : {}), ...(o.public === true ? { public: true } : {}) };
+}
+
+/** A listed company's market, as its Ownership sends it; null for one not on a market. */
+function listingView(value: unknown): ListingView | null {
+  const l = obj(value);
+  if (!l || typeof l.asset !== "string") return null;
+  return { asset: l.asset, symbol: str(l.symbol, l.asset), since: str(l.since), price: num(l.price), float: num(l.float), held: num(l.held), available: num(l.available), marketCap: num(l.marketCap), fair: nullableNum(l.fair), performance: performance(l.performance) };
+}
+
+/** What the reader may do about a company's market; null for the GM's view. */
+function marketActs(value: unknown): MarketActs | null {
+  const m = obj(value);
+  return m ? { list: nullableStr(m.list), delist: nullableStr(m.delist), offer: nullableStr(m.offer), units: num(m.units), ...(m.voteList === true ? { voteList: true } : {}), ...(m.voteDelist === true ? { voteDelist: true } : {}) } : null;
 }
 
 function structureLink(o: Obj): StructureLink | null {
@@ -505,16 +524,57 @@ export function decodeFinanceView(value: unknown): FinanceView | null {
   };
 }
 
-/** A company's Payroll in Orgs (the economy's `payroll` section of its page): how many are on its payroll, what payroll has cost it this year, and each job. */
+/** An employer's unemployment taxes as its Taxes and Payroll show their rates (`UnemploymentView`); null when it isn't one. */
+export function decodeUnemployment(value: unknown): UnemploymentView | null {
+  const o = obj(value);
+  if (!o) return null;
+  const f = obj(o.futa);
+  const s = obj(o.suta);
+  return { futa: f ? { pct: num(f.pct), grossPct: num(f.grossPct), creditPct: num(f.creditPct), reductionPct: num(f.reductionPct), base: num(f.base) } : null, suta: s ? { pct: num(s.pct), base: num(s.base) } : null };
+}
+
+/** A company's Payroll in Orgs (the economy's `payroll` section of its page): how many are on its payroll, what payroll has cost it this year, each job, and its unemployment taxes this year with their rates (ORG-SPEC §3.11, Phase 5). */
 export interface PayrollSection {
   headcount: number;
   payroll: number;
   employees: JobView[];
+  unemployment: { futa: number; suta: number; rates: UnemploymentView | null } | null;
 }
 
 export function decodePayroll(value: unknown): PayrollSection | null {
   const o = obj(value);
-  return o ? { headcount: num(o.headcount), payroll: num(o.payroll), employees: list(o.employees, job) } : null;
+  if (!o) return null;
+  const u = obj(o.unemployment);
+  return { headcount: num(o.headcount), payroll: num(o.payroll), employees: list(o.employees, job), unemployment: u ? { futa: num(u.futa), suta: num(u.suta), rates: decodeUnemployment(u.rates) } : null };
+}
+
+/** A company's winding up as its Ownership shows it (`WindingView`); null while it trades and the reader may not wind it up. */
+function decodeWinding(value: unknown): WindingView | null {
+  const o = obj(value);
+  if (!o) return null;
+  const into = obj(o.mergedInto);
+  const line = (l: Obj): WindLine => ({ label: str(l.label), cents: num(l.cents) });
+  return {
+    since: nullableStr(o.since),
+    dissolved: nullableStr(o.dissolved),
+    mergedInto: into ? { id: nullableStr(into.id), name: str(into.name, "another company") } : null,
+    why: nullableStr(o.why),
+    cash: num(o.cash),
+    debts: list(o.debts, line),
+    owed: list(o.owed, line),
+    assets: list(o.assets, (x) => (typeof x.id === "string" ? { id: x.id, label: str(x.label, x.id), value: nullableNum(x.value), goes: str(x.goes) } : null)),
+    staff: list(o.staff, (s) => ({ id: nullableStr(s.id), name: str(s.name, "someone") })),
+    payments: list(o.payments, (p) => (typeof p.id === "string" ? { id: p.id, label: str(p.label, p.id) } : null)),
+    payouts: list(o.payouts, (p) => ({ party: nullableStr(p.party), name: str(p.name, "someone"), share: num(p.share), cents: num(p.cents) })),
+    short: num(o.short),
+    ...(o.vote === true ? { vote: true } : {}),
+  };
+}
+
+/** The companies the reader may merge a company with (`MergeView`). */
+function decodeMerge(value: unknown): MergeView | null {
+  const o = obj(value);
+  return o ? { why: nullableStr(o.why), units: num(o.units), perUnit: num(o.perUnit), with: list(o.with, (m) => (typeof m.id === "string" ? { id: m.id, name: str(m.name, m.id), units: num(m.units), perUnit: num(m.perUnit) } : null)), ...(o.vote === true ? { vote: true } : {}) } : null;
 }
 
 /** A company's Ownership in Orgs (the economy's `ownership` section, `OwnershipView`). */
@@ -529,8 +589,10 @@ export function decodeOwnership(value: unknown): OwnershipView | null {
     owners: list(o.owners, ownerLine),
     classes: Array.isArray(o.classes) ? list(o.classes, (k) => (typeof k.id === "string" ? { id: k.id, label: str(k.label, k.id), votes: num(k.votes) } : null)) : null,
     units: nullableNum(o.units),
+    listing: listingView(o.listing),
+    market: marketActs(o.market),
     decidePct: optNum(o.decidePct) ?? 50,
-    valuation: v ? { value: num(v.value), set: v.set === true, book: num(v.book), profit: num(v.profit), multiple: num(v.multiple), perUnit: nullableNum(v.perUnit) } : null,
+    valuation: v ? { value: num(v.value), set: v.set === true, book: num(v.book), profit: num(v.profit), multiple: num(v.multiple), perUnit: nullableNum(v.perUnit), ...(obj(v.market) ? { market: { price: num(obj(v.market)?.price), units: num(obj(v.market)?.units) } } : {}) } : null,
     parents: list(o.parents, structureLink),
     children: list(o.children, structureLink),
     consolidated: c ? { cash: num(c.cash), profit: num(c.profit), netWorth: num(c.netWorth), companies: num(c.companies) } : null,
@@ -538,7 +600,9 @@ export function decodeOwnership(value: unknown): OwnershipView | null {
     mayDraw: o.mayDraw === true,
     route: distributionRoute(o.route),
     votes: num(o.votes),
-    acts: a ? { decide: nullableStr(a.decide), restructure: nullableStr(a.restructure), holdings: nullableStr(a.holdings), found: nullableStr(a.found), sources: list(a.sources, (s) => (typeof s.id === "string" ? { id: s.id, name: str(s.name, s.id), balance: str(s.balance) } : null)) } : null,
+    acts: a ? { decide: nullableStr(a.decide), restructure: nullableStr(a.restructure), vote: a.vote === true, voteRestructure: a.voteRestructure === true, holdings: nullableStr(a.holdings), found: nullableStr(a.found), sources: list(a.sources, (s) => (typeof s.id === "string" ? { id: s.id, name: str(s.name, s.id), balance: str(s.balance) } : null)) } : null,
+    winding: decodeWinding(o.winding),
+    merge: decodeMerge(o.merge),
   };
 }
 
@@ -548,14 +612,24 @@ export function decodeTaxes(value: unknown): TaxesView | null {
   if (!o) return null;
   const share = (x: Obj): { name: string; share: number } => ({ name: str(x.name, "someone"), share: num(x.share) });
   const p = obj(o.pending);
+  const e = obj(o.exempt);
+  const c = obj(o.consolidation);
+  const a = obj(o.acts);
   return {
-    income: o.income === "corporate" || o.income === "owners" ? o.income : null,
-    years: list(o.years, (y) => ({ year: num(y.year), salesCollected: num(y.salesCollected), salesRemitted: num(y.salesRemitted), withheld: num(y.withheld), employerShare: num(y.employerShare), income: num(y.income), property: num(y.property) })),
+    income: o.income === "corporate" || o.income === "owners" || o.income === "exempt" ? o.income : null,
+    years: list(o.years, (y) => ({ year: num(y.year), salesCollected: num(y.salesCollected), salesRemitted: num(y.salesRemitted), withheld: num(y.withheld), employerShare: num(y.employerShare), futa: num(y.futa), futaPaid: num(y.futaPaid), suta: num(y.suta), sutaPaid: num(y.sutaPaid), income: num(y.income), property: num(y.property), donations: num(y.donations) })),
     salesHeld: num(o.salesHeld),
     incomeSoFar: nullableNum(o.incomeSoFar),
     taxedTo: list(o.taxedTo, share),
     untaxed: list(o.untaxed, share),
+    exemptHolders: list(o.exemptHolders, share),
     due: list(o.due, (d) => ({ label: str(d.label), cents: nullableNum(d.cents), at: str(d.at) })),
     pending: p ? { structure: str(p.structure), from: str(p.from) } : null,
+    unemployment: decodeUnemployment(o.unemployment),
+    exempt: e ? { status: str(e.status), name: str(e.name, str(e.status)), code: str(e.code), deductible: bool(e.deductible), futa: bool(e.futa), suta: bool(e.suta) } : null,
+    statuses: Array.isArray(o.statuses) ? list(o.statuses, (s) => (typeof s.id === "string" ? { id: s.id, name: str(s.name, s.id), code: str(s.code) } : null)) : null,
+    consolidation: c ? { elected: bool(c.elected), members: list(c.members, (m) => ({ name: str(m.name, "a company"), votes: num(m.votes), share: num(m.share) })), profit: nullableNum(c.profit), tax: nullableNum(c.tax) } : null,
+    filedBy: typeof o.filedBy === "string" ? o.filedBy : null,
+    acts: a ? { consolidate: typeof a.consolidate === "string" ? a.consolidate : null } : null,
   };
 }

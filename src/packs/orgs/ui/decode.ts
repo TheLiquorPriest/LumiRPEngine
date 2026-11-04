@@ -4,10 +4,11 @@
 
 import { isOwnerRole } from "../../../shared/finance";
 import { isRecord, type JsonValue } from "../../../shared/json";
-import { DUES_EVERY, limitsIn, MEMBER_HOWS, ORG_BASES, ORG_TYPES, POSITION_SCOPES, powersIn, type MemberHow } from "../../../shared/org";
+import { DUES_EVERY, isOrgPower, limitsIn, MEMBER_HOWS, ORG_BASES, ORG_TYPES, POSITION_SCOPES, powersIn, type MemberHow } from "../../../shared/org";
 import type { OrgDelegationView, OrgDuesView, OrgHistoryLineView, OrgListView, OrgPersonView, OrgPositionView, OrgPowerView, OrgRef, OrgRowView, OrgStartView, OrgView, PartyMemberView } from "../../../shared/org-view";
 import { ALERT_KINDS, ALERT_TABS, COMING_KINDS, PLAN_STATUSES, type OrgAlertView, type OrgComingView, type OrgPlanView, type PlanClosedView, type PlanGoalView, type PlanOrderView } from "../../../shared/org-feed";
 import { isPartyTier } from "../../../shared/party";
+import { MOTION_STATUSES, STANDING_VOTES, VOTE_BASES, VOTE_HOWS, VOTES, type DecisionsView, type MotionView, type RequestView, type Tally } from "../../../shared/org-motions";
 import { list, num, oneOf, optNum, str, strings, type Obj } from "../../../frontend/decode";
 
 function ref(v: unknown): OrgRef | null {
@@ -97,6 +98,7 @@ export function decodeOrgView(value: unknown): OrgView | null {
     badge: str(value.badge),
     level: num(value.level),
     exists: value.exists !== false,
+    ended: isRecord(value.ended) ? { winding: text(value.ended.winding), dissolved: text(value.ended.dissolved), mergedInto: isRecord(value.ended.mergedInto) ? ref(value.ended.mergedInto) : null } : null,
     you: {
       belongs: you.belongs === true,
       title: text(you.title),
@@ -224,5 +226,85 @@ export function decodePlan(value: unknown): OrgPlanView | null {
     recent: list(value.recent, (c): PlanClosedView | null => (typeof c.id === "string" && typeof c.text === "string" ? { id: c.id, kind: c.kind === "goal" ? "goal" : "order", text: c.text, status: oneOf(c.status, PLAN_STATUSES, "done"), when: text(c.when) } : null)),
     mayGive: value.mayGive === true,
     people: list(value.people, ref),
+  };
+}
+
+// ---------------------------------------------------------------- Decisions (ORG-SPEC Phase 5)
+
+function tally(v: unknown): Tally {
+  const o = isRecord(v) ? v : {};
+  return { for: num(o.for), against: num(o.against), abstain: num(o.abstain), cast: num(o.cast), remaining: num(o.remaining), quorumMet: o.quorumMet === true };
+}
+
+function motion(m: Obj): MotionView | null {
+  if (typeof m.id !== "string" || typeof m.text !== "string") return null;
+  return {
+    id: m.id,
+    text: m.text,
+    by: ref(m.by),
+    at: num(m.at),
+    closes: num(m.closes),
+    closesText: str(m.closesText),
+    status: oneOf(m.status, MOTION_STATUSES, "open"),
+    why: text(m.why),
+    basis: oneOf(m.basis, VOTE_BASES, "shares"),
+    quorum: num(m.quorum),
+    pass: num(m.pass),
+    tally: tally(m.tally),
+    voters: list(m.voters, (v) => {
+      const who = ref(v.who);
+      return who ? { who, weight: num(v.weight), vote: v.vote === null || v.vote === undefined ? null : oneOf(v.vote, VOTES, "abstain"), how: v.how === null || v.how === undefined ? null : oneOf(v.how, VOTE_HOWS, "own") } : null;
+    }),
+    public: num(m.public),
+    cast: list(m.cast, (c) => (typeof c.voter === "string" ? { voter: c.voter, name: str(c.name, c.voter), ...(typeof c.as === "string" ? { as: c.as } : {}), vote: c.vote === null || c.vote === undefined ? null : oneOf(c.vote, VOTES, "abstain") } : null)),
+    mayWithdraw: m.mayWithdraw === true,
+  };
+}
+
+function request(r: Obj): RequestView | null {
+  const by = ref(r.by);
+  if (typeof r.id !== "string" || typeof r.text !== "string" || !by || !isOrgPower(r.power)) return null;
+  const answered = isRecord(r.answered) ? r.answered : null;
+  return {
+    id: r.id,
+    text: r.text,
+    why: str(r.why),
+    by,
+    power: r.power,
+    cents: optNum(r.cents) ?? null,
+    at: num(r.at),
+    until: num(r.until),
+    untilText: str(r.untilText),
+    state: oneOf(r.state, ["asked", "approved", "denied", "withdrawn", "lapsed"] as const, "asked"),
+    approvers: list(r.approvers, (a) => ref(a)),
+    answered: answered ? { by: ref(answered.by), at: num(answered.at), why: text(answered.why) } : null,
+    mayAnswer: r.mayAnswer === true,
+    mayWithdraw: r.mayWithdraw === true,
+  };
+}
+
+/** An organization's Decisions section (`orgs.decisions`); null when it isn't one. */
+export function decodeDecisions(value: unknown): DecisionsView | null {
+  if (!isRecord(value) || !isRecord(value.rules) || !Array.isArray(value.open)) return null;
+  const rules = value.rules;
+  const standing = isRecord(value.standing) ? value.standing : null;
+  return {
+    rules: {
+      basis: oneOf(rules.basis, VOTE_BASES, "shares"),
+      quorum: num(rules.quorum),
+      pass: num(rules.pass),
+      days: num(rules.days),
+      approvalDays: num(rules.approvalDays),
+      standing: list(rules.standing, (s) => {
+        const who = ref(s.who);
+        return who ? { who, vote: oneOf(s.vote, STANDING_VOTES, "abstain"), with: ref(s.with) } : null;
+      }),
+    },
+    open: list(value.open, motion),
+    closed: list(value.closed, motion),
+    waiting: list(value.waiting, request),
+    answered: list(value.answered, request),
+    rulesWhy: text(value.rulesWhy),
+    ...(value.standing === null ? { standing: null } : standing && typeof standing.who === "string" ? { standing: { who: standing.who, vote: oneOf(standing.vote, STANDING_VOTES, "abstain"), ...(typeof standing.with === "string" ? { with: standing.with } : {}) } } : {}),
   };
 }

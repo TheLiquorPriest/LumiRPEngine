@@ -206,6 +206,10 @@ const EVERY_TYPE: LedgerEvent[] = [
   { type: "economy.invoice_paid", data: { invoice: "inv", business: "shop", customer: "you", cents: 1000 } },
   { type: "economy.payout", data: { business: "shop", cents: 5000, kind: "draw", party: "dev" } },
   { type: "economy.estimated_tax", data: { party: "dev", periods: ["2026-1"], cents: 500 } },
+  // Unemployment taxes and gifts are the economy slice's records (ORG-SPEC §3.11, Phase 5), never an entity's definition.
+  { type: "economy.unemployment_accrued", data: { employer: "shop", worker: "dev", year: 2026, quarter: 1, futa_wages: 12000, suta_wages: 12000, futa: 72, reduction: 0, suta: 324 } },
+  { type: "economy.unemployment_paid", data: { employer: "shop", kind: "suta", periods: [{ year: 2026, quarter: 1, cents: 324 }], business: true } },
+  { type: "economy.donation", data: { donor: "you", org: "shop", cents: 500, year: 2026, deductible: false } },
   { type: "economy.price", data: { symbol: "idx", price: 101 } },
   { type: "economy.quote", data: { asset: "idx", price: 10100 } },
   { type: "economy.closes", data: { asset: "idx", closes: [["2026-10", 10100]] } },
@@ -239,6 +243,12 @@ const EVERY_TYPE: LedgerEvent[] = [
   { type: "orgs.order", data: { org: "shop", order: { id: "o_1", goal: "g_1", to: ["dev"], text: "Fix the sign", status: "open", source: "play", at: 0, by: "you" }, visibility: "secret" } },
   { type: "orgs.status", data: { org: "shop", id: "o_1", status: "under_way", note: "", source: "play", at: 0, visibility: "secret" } },
   { type: "orgs.lived", data: { org: "shop", id: "o_1", at: 60, visibility: "secret" } },
+  // Motions and requests for approval are the orgs slice's records (ORG-SPEC Phase 5), never an entity's definition: the act one carries out writes its own events.
+  { type: "orgs.motion", data: { org: "shop", motion: { id: "m_1", text: "Issue 10 units of the shop to Dev", what: { type: "economy.shares_issue", args: { business: "shop", to: "dev", units: 10, by: "you" } }, by: "you", at: 0, closes: 10080, basis: "shares", quorum: 50, pass: 50, electorate: { you: 60, dev: 40 }, public: 0, votes: { you: { vote: "for", how: "own", at: 0 } }, status: "open" }, visibility: "secret" } },
+  { type: "orgs.vote", data: { org: "shop", id: "m_1", who: "dev", vote: "against", how: "own", at: 0, visibility: "secret" } },
+  { type: "orgs.motion_end", data: { org: "shop", id: "m_1", status: "failed", why: "voted down", result: { for: 60, against: 40 }, at: 0, visibility: "secret" } },
+  { type: "orgs.ask", data: { org: "shop", request: { id: "r_1", by: "dev", power: "money.spend", cents: 60000, text: "Pay Dev $600.00", why: "over the $500.00 a payment limit", what: { type: "economy.transfer", args: { from: "acct", to: "dev", cents: 60000, by: "dev" } }, approvers: ["you"], at: 0, until: 10080, status: "asked" }, visibility: "secret" } },
+  { type: "orgs.answer", data: { org: "shop", id: "r_1", status: "denied", by: "you", at: 0, visibility: "secret" } },
   { type: "combat.start", data: { encounter: "e1", place: "taproom", order: [{ id: "you", side: "party", init: 15, left: { action: 1 } }, { id: "rat", side: "foes", init: 5, left: { action: 1 } }] } },
   { type: "combat.spend", data: { encounter: "e1", who: "you", cost: { action: 1 } } },
   { type: "combat.act", data: { encounter: "e1", actor: "you", action: "strike", label: "Strike", target: "rat", outcome: "hit" } },

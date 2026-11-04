@@ -10,9 +10,9 @@
 
 import type { ComponentChildren } from "preact";
 import { useId, useState } from "preact/hooks";
-import { orgRouteOf, useApp, type App, type SheetRoute } from "../../../frontend/app";
+import { orgRoute, orgRouteOf, useApp, type App, type SheetRoute } from "../../../frontend/app";
 import { OverflowMenu, type MenuItem } from "../../../frontend/build/chrome";
-import { Button, Empty, Field, IdText, PageHeader, Section, Tabs, tabPanel, useBusy } from "../../../frontend/components";
+import { Banner, Button, Empty, Field, IdText, PageHeader, Section, Tabs, tabPanel, useBusy } from "../../../frontend/components";
 import { gmOpen } from "../../../frontend/gm/gate";
 import type { OrgShellTab, OrgTabDef, Send, SheetProps } from "../../../frontend/registry";
 import type { ChatId } from "../../../shared/ids";
@@ -137,6 +137,13 @@ export function OrgPage(props: OrgPageProps) {
     <div class="lre-stack" data-lre-sheet-org={org.id} data-lre-org-type={org.type}>
       <PageHeader title={org.name} subtitle={[org.badge, org.you.title].filter((part) => part).join(" · ") || undefined} onBack={props.onBack} actions={props.menu && props.menu.length > 0 ? <OverflowMenu label={`${org.name}: more`} items={props.menu} /> : undefined} />
       {org.exists ? <IdText id={org.id} /> : null}
+      {org.ended ? (
+        <div data-lre-org-ended={org.id}>
+          <Banner tone={org.ended.dissolved !== null ? "neg" : "warn"} icon={org.ended.dissolved !== null ? "close" : "hourglass"} title={org.ended.dissolved !== null ? `Dissolved on ${org.ended.dissolved}` : `Winding up since ${org.ended.winding ?? ""}`} {...(org.ended.mergedInto ? { actions: <Button size="sm" onClick={() => props.open(orgRoute(org.ended?.mergedInto?.id ?? ""))}>Open {org.ended.mergedInto.name}</Button> } : {})}>
+            {org.ended.dissolved !== null ? (org.ended.mergedInto ? `Merged into ${org.ended.mergedInto.name}.` : "Wound up: its debts paid and the rest paid out to its owners.") : "It trades no more while it winds up."}
+          </Banner>
+        </div>
+      ) : null}
       {props.above}
       <Tabs label={`${org.name}: tabs`} panelId={props.panelId} value={current} tabs={tabs.map(({ id, label }) => ({ id, label }))} onChange={props.onTab} />
       <div {...tabPanel(props.panelId, current)} class="lre-stack" data-lre-org-tab={current}>

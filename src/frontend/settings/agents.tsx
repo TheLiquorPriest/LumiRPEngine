@@ -1,5 +1,5 @@
 // Settings → Agents (AGENT-LOOP-PLAN §12, §15; INC1-SPEC R1; INC2-SPEC C12): what the agent runtime
-// runs under. Thinking in agent tool loops; how an agent turn runs (the pipeline, where its memory
+// runs under. Thinking in agent tool loops; streaming, whether every agent call takes its answer as a stream; how an agent turn runs (the pipeline, where its memory
 // goes, and whether the Curator keeps the world's things and places) and where its changes that ask first wait (the review card); the budgets, each with
 // what it limits, what happens when it's reached, its default and a No limit switch where one may be
 // lifted, the GM's edits per turn among them; the main session's compaction and the summarize tool;
@@ -178,6 +178,11 @@ const REVIEW_HELP: Record<ReviewPlacement, string> = {
   chips: "The turn goes on and the card waits under the reply; the narrator isn't told of a change until you apply it.",
   gate: "The turn waits after its plan, as at the outline gate, until you answer the card; then it goes on without asking any agent again.",
 };
+
+const STREAM_HELP = {
+  on: "Every agent call takes its answer as Lumiverse streams it, as the model writes it, rather than all at once at the end, which a gateway or proxy between the model and Lumiverse may cut off on a long call.",
+  off: "Every agent call waits for Lumiverse to return its answer whole.",
+} as const;
 
 /** The −/+ step of the classic comparison ratio: a convenience, not a limit; typing takes any amount above 0. */
 const RATIO_STEP = 0.5;
@@ -605,6 +610,26 @@ export function BudgetsSection(props: { agents: AgentSettings; patch(patch: Json
   );
 }
 
+/** Settings → Agents → Streaming, without hooks: whether every agent call takes its answer as a stream, with its Default. */
+export function StreamingSection(props: { agents: AgentSettings; patch(patch: JsonObject): void; busy: boolean }) {
+  const { agents, busy } = props;
+  return (
+    <Section title="Streaming" flush>
+      <div class="lre-set-rows">
+        <div class="lre-set-ext lre-set-timeout" data-lre-agent-setting="stream">
+          <div class="lre-set-ext-head">
+            <span class="lre-set-ext-title">Stream agent calls</span>
+            {agents.stream === DEFAULTS.stream ? null : defaultButton(`Reset streaming agent calls to its default, ${DEFAULTS.stream ? "on" : "off"}`, busy, () => props.patch({ agents: { stream: null } }))}
+          </div>
+          <HostSwitch label="Stream every agent call's answer" checked={agents.stream} disabled={busy} onChange={(stream) => props.patch({ agents: { stream } })} />
+          <span class="lre-field-help">{agents.stream ? STREAM_HELP.on : STREAM_HELP.off}</span>
+          <span class="lre-small lre-muted">The answer reads the same either way, Cancel stops a call mid-stream, and every time limit still counts the whole call. Default {DEFAULTS.stream ? "on" : "off"}.</span>
+        </div>
+      </div>
+    </Section>
+  );
+}
+
 /** Settings → Agents → System instructions: how much of every agent's prompt its system files may take, and what they are. Hook-free. */
 export function SystemInstructionsSection(props: { agents: AgentSettings; patch(patch: JsonObject): void; busy: boolean }) {
   return (
@@ -626,13 +651,14 @@ export function AgentsSection(props: { agents: AgentSettings; patch(patch: JsonO
   const connections = useConnections();
   return (
     <div class="lre-stack" data-lre-settings-page="agents">
-      <p class="lre-set-lead">What the agent runtime runs under: how an agent turn runs, every agent's system instructions, its budgets, compaction, recording, throttles, caching and acceptance runs. No classic step reads any of these.</p>
+      <p class="lre-set-lead">What the agent runtime runs under: whether its calls stream, how an agent turn runs, every agent's system instructions, its budgets, compaction, recording, throttles, caching and acceptance runs. No classic step reads any of these.</p>
       <Section title="Thinking in agent tool loops">
         <HostSwitch label="Thinking in agent tool loops" checked={agents.thinkingInToolLoops} disabled={busy} onChange={(on) => props.patch({ agents: { thinkingInToolLoops: on } })} />
         <span class="lre-small lre-muted">
           Off until Lumiverse passes a reasoning model's thinking back after a tool call. While off, every agent call that offers tools goes with reasoning off, whatever the role's effort; calls without tools keep it. Default {DEFAULTS.thinkingInToolLoops ? "on" : "off"}.
         </span>
       </Section>
+      <StreamingSection agents={agents} patch={props.patch} busy={busy} />
       <AgentTurnSettings agents={agents} patch={props.patch} busy={busy} />
       <SystemInstructionsSection agents={agents} patch={props.patch} busy={busy} />
       <BudgetsSection agents={agents} patch={props.patch} busy={busy} />

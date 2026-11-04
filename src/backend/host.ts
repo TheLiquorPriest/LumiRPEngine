@@ -285,6 +285,8 @@ export interface QuietRequest {
   params?: SamplingParams;
   /** Asks the provider for its token usage (the host's `_include_usage`): only then does an OpenAI-compatible stream, which every call with tools is, report it. */
   usage?: true;
+  /** Takes the answer as Lumiverse streams it (`generate.quietStream`) instead of whole at the end (`generate.quiet`): the result reads the same, but the provider's connection carries it as it is written. */
+  stream?: true;
 }
 
 /** A tool a quiet call offers (the host's `ToolSchemaDTO`): its parameters as a JSON Schema. */

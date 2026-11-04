@@ -16,10 +16,13 @@ import {
   CLASS_TRAITS,
   LEGACY_TYPE_CLASS,
   ROLE_RIGHTS,
+  countsUnits,
   isAccountClass,
   isOwnerRole,
+  listingIn,
   ownersIn,
   payeeKey,
+  unitsOf,
   worthShares,
   type AccountClass,
   type AccountStatus,
@@ -466,9 +469,16 @@ export function householdOf(ctx: Pick<ReadContext, "registry" | "world" | "state
   return own(ctx.state.entities, party)?.relations.find((r) => r.type === MEMBER_OF && isHousehold(r.to))?.to ?? null;
 }
 
-/** A party's share of an entity's worth, in percent. */
+/** A party's share of an entity's worth, in percent; a listed company's row holds its units over all of them, the public holding the rest (§27.10 Listing). */
 export function shareOf(state: Readonly<WorldState>, id: EntityId, party: EntityId): number {
-  return own(worthShares(ownersOf(state, id)), party) ?? 0;
+  const e = own(state.entities, id);
+  const owners = e ? ownersIn(e.fields) : [];
+  const listed = e ? listingIn(e.fields) : null;
+  if (listed && countsUnits(owners)) {
+    const total = unitsOf(owners) + listed.float;
+    return total > 0 ? (unitsOf(owners, party) * 100) / total : 0;
+  }
+  return own(worthShares(owners), party) ?? 0;
 }
 
 /** The party whose money opening posts an account's opening balance: the first on its owners list. */

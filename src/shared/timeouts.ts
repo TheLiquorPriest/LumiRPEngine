@@ -137,7 +137,8 @@ export const TIMEOUTS: Readonly<Record<TimeoutKey, TimeoutDef>> = {
     group: "turn",
     limits: "The main agent's final review of the narrator's prompt, after the engine run makes the turn's sections and before the reply is generated (Settings → Agents → Main agent → Final review).",
     fires: "The review stops and its edits are dropped: the narrator gets the sections as the engine made them, with a Diagnostics record, or the turn stops with a Retry, as the review's failure setting says.",
-    defaultMs: 2 * MIN,
+    // A main agent reviewing from a long session on a large model thinks for minutes before its first edit.
+    defaultMs: 5 * MIN,
     minMs: 1_000,
     none: "the review takes as long as it needs (its budget still bounds it)",
   },

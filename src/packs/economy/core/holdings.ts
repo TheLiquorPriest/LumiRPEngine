@@ -10,14 +10,14 @@
 import type { EntityId } from "../../../shared/ids";
 import { isRecord, safeKey, type JsonObject, type JsonValue } from "../../../shared/json";
 import type { LedgerEvent, PackEvent, PostingLine } from "../../../shared/ledger";
-import { ownersIn, ROLE_RIGHTS, worthShares, type DistributionRoute, type HoldingView, type Owner } from "../../../shared/finance";
+import { listingIn, ownersIn, ROLE_RIGHTS, unitsOf, worthShares, type DistributionRoute, type HoldingView, type Owner } from "../../../shared/finance";
 import { hashParts } from "../../../shared/hash";
 import { formatMoney } from "../../../shared/world";
 import { labelOf, numOf, objOf, own, strOf } from "../../../engine/pack-kit";
 import type { EffectContext, EventTypeDef, ReadContext, Rejection } from "../../../engine/registry";
 import type { WorldState } from "../../../engine/state";
 import type { FinanceApi, FinanceRegistry } from "./module";
-import { assetDefOf, assetFromDef, assetOf, clockOfDate, dateText, optionDef, optionId, performanceOf, priceOf, reject, type Asset, type AssetBooks } from "./assets";
+import { assetDefOf, assetFromDef, assetOf, clockOfDate, dateText, listedCompany, optionDef, optionId, performanceOf, priceOf, reject, type Asset, type AssetBooks } from "./assets";
 import { byShare, recordGain } from "./records";
 import { intrinsic, QTY_EPSILON, roundQty, takeFifo, YEAR_MINUTES, type OpenLot, type TakenLot } from "./pricing";
 import { actAs, asParam, mayAs, moneyWords } from "./acting";
@@ -96,6 +96,37 @@ export function qtyOf(lots: readonly OpenLot[]): number {
 export function holdingValue(books: AssetBooks, holding: EntityId): number {
   const a = assetOf(books, strOf(own(books.state.entities, holding)?.fields.asset));
   return a ? Math.round(qtyOf(lotsOf(books, holding)) * priceOf(books, a)) : 0;
+}
+
+/**
+ * A listed company's stock (§27.10 Listing): the company, its float, the units of it the world holds
+ * and what its market still sells (the float less those). Null for any other asset.
+ */
+export function listedFloat(books: AssetBooks, asset: string): { business: EntityId; float: number; held: number; left: number } | null {
+  const business = listedCompany(books, asset);
+  const listing = business ? listingIn(own(books.state.entities, business)?.fields ?? {}) : null;
+  if (!business || !listing) return null;
+  const held = roundQty(holdingIds(books.state).reduce((a, id) => a + (own(books.state.entities, id)?.fields.asset === asset ? qtyOf(lotsOf(books, id)) : 0), 0));
+  return { business, float: listing.float, held, left: Math.max(0, roundQty(listing.float - held)) };
+}
+
+/**
+ * Who in the world holds a listed company's stock (§27.10 Listing), and how many units each: every
+ * holding of the asset, its units shared by its owners' (or its account's owners') worth shares.
+ * Read from the state alone (a holding's lots by their units), so votes can count them.
+ */
+export function stockHolders(state: Readonly<WorldState>, asset: string): Record<EntityId, number> {
+  const out: Record<EntityId, number> = {};
+  for (const id of holdingIds(state)) {
+    const f = own(state.entities, id)?.fields;
+    if (!f || f.asset !== asset || !Array.isArray(f.lots)) continue;
+    const qty = roundQty(f.lots.reduce((a: number, l) => a + (isRecord(l) && typeof l.qty === "number" && Number.isFinite(l.qty) && l.qty > QTY_EPSILON ? l.qty : 0), 0));
+    if (qty <= QTY_EPSILON) continue;
+    const account = accountOfHolding(state, id);
+    const shares = worthShares(ownersIn(own(state.entities, account ?? id)?.fields ?? {}));
+    for (const [party, pct] of Object.entries(shares)) if (pct > 0) out[party] = roundQty((out[party] ?? 0) + (qty * pct) / 100);
+  }
+  return out;
 }
 
 /** The holding of `asset` in `account`, or held directly with `party` among its owners. */
@@ -316,6 +347,8 @@ export function trade(api: FinanceApi, ctx: EffectContext | ReadContext, t: Trad
   let asset: Asset | null = assetOf(ctx, assetId);
   if (t.option && !holding) {
     if (!api.feature(ctx, party, "options")) return reject("level", "options aren't followed at this money level");
+    // A listed company's units sell only from its float (§27.10 Listing): no contract delivers them.
+    if (listedCompany(ctx, assetId) !== null) return reject("bad_option", `no options are written on ${asset?.label ?? labelOf(ctx, assetId)}'s stock: its units sell only from its float`);
     const def = optionDef(ctx, assetId, t.option.right, t.option.strike, t.option.expiry);
     if (!def) return reject("bad_option", `there's no ${t.option.right} on ${labelOf(ctx, assetId)} at that strike and expiry`);
     assetId = optionId(assetId, t.option.right, t.option.strike, t.option.expiry);
@@ -325,6 +358,9 @@ export function trade(api: FinanceApi, ctx: EffectContext | ReadContext, t: Trad
   if (!asset) return reject("missing_asset", `no asset ${assetId || "named"}`);
   if (asset.option && !api.feature(ctx, party, "options")) return reject("level", "options aren't followed at this money level");
   if (asset.class === "property" || asset.class === "business_stake") return reject("not_traded", `${asset.label} changes hands as a property or a stake, not a trade`);
+  // A listed company's stock trades in whole units, within what its market has left, and never to the company itself (§27.10 Listing).
+  const listed = listedFloat(ctx, assetId);
+  if (listed && party === listed.business) return reject("own_stock", `${labelOf(ctx, party)} takes its own units back by buying back shares or going off the market`);
   const account = holding ? accountOfHolding(ctx.state, holding) : t.account && own(ctx.state.entities, t.account) ? t.account : null;
   if (t.account && !account) return reject("missing_account", `no account ${labelOf(ctx, t.account)}`);
   if (account && !holding) {
@@ -337,14 +373,15 @@ export function trade(api: FinanceApi, ctx: EffectContext | ReadContext, t: Trad
   if (asset.bond && ctx.state.clock >= asset.bond.maturity) return reject("matured", `${asset.label} has matured`);
   const price = priceOf(ctx, asset);
   if (!(price > 0)) return reject("no_price", `${asset.label} has no price to trade at`);
-  const whole = asset.option !== null;
+  const whole = asset.option !== null || listed !== null;
   const held = holding ? qtyOf(lotsOf(ctx, holding)) : 0;
   const money = (c: number): string => formatMoney(c, ctx.world.currency);
 
   if (t.side === "buy") {
     const raw = typeof t.qty === "number" && t.qty > 0 ? t.qty : typeof t.amount === "number" && t.amount > 0 ? t.amount / price : 0;
     const qty = whole ? Math.floor(raw + 1e-9) : roundQty(raw);
-    if (!(qty > QTY_EPSILON)) return reject("bad_amount", whole ? `${money(Math.round(t.amount ?? 0))} buys no whole contract at ${money(Math.round(price))}` : "say how much to buy");
+    if (!(qty > QTY_EPSILON)) return reject("bad_amount", whole ? `${money(Math.round(t.amount ?? 0))} buys no whole ${listed ? "unit" : "contract"} at ${money(Math.round(price))}` : "say how much to buy");
+    if (listed && qty > listed.left + QTY_EPSILON) return reject("declined", listed.left > 0 ? `Only ${unitsText(listed.left)} units of ${asset.symbol ?? asset.label} are for sale on the market` : `No units of ${asset.symbol ?? asset.label} are for sale on the market`);
     const cents = Math.round(qty * price);
     if (cents <= 0) return reject("bad_amount", "say how much to buy");
     const source = t.from ?? account ?? api.depositAccount(ctx, party);
@@ -369,7 +406,10 @@ export function trade(api: FinanceApi, ctx: EffectContext | ReadContext, t: Trad
     return unit([...events, ...posted, lots]);
   }
 
-  if (!holding || held <= QTY_EPSILON) return reject("nothing_held", `${labelOf(ctx, party)} holds no ${asset.label}`);
+  if (!holding || held <= QTY_EPSILON) {
+    if (listed && unitsOf(api.ownersOf(ctx.state, listed.business), party) > 0) return reject("nothing_held", `${labelOf(ctx, party)} holds ${labelOf(ctx, listed.business)}'s units on its cap table, not on the market: sell them as a stake`);
+    return reject("nothing_held", `${labelOf(ctx, party)} holds no ${asset.label}`);
+  }
   const wanted = typeof t.qty === "number" && t.qty > 0 ? t.qty : typeof t.amount === "number" && t.amount > 0 ? t.amount / price : held;
   const qty = whole ? Math.min(held, Math.floor(wanted + 1e-9)) : Math.min(held, roundQty(wanted));
   if (!(qty > QTY_EPSILON)) return reject("bad_amount", "say how much to sell");

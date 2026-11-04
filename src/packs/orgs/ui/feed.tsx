@@ -13,12 +13,13 @@ import { GLANCE_ROWS, GlanceCard } from "../../../frontend/play/glance";
 import type { PanelProps } from "../../../frontend/registry";
 import { isRecord } from "../../../shared/json";
 import { ALERTS_SECTION, isPlanStatusLive, PLAN_SECTION, PLAN_TAB, type AlertTab, type ComingKind, type OrgAlertView, type OrgComingView } from "../../../shared/org-feed";
+import { DECISIONS_TAB } from "../../../shared/org-motions";
 import { ORGS_LIST_PANEL, ORGS_ORG_PANEL, type OrgView } from "../../../shared/org-view";
 import { decodeAlerts, decodeOrgList, decodeOrgPage, decodePlan } from "./decode";
 import { andList, count } from "./words";
 
-/** The tab an alert's Open goes to: the shell's own, the economy's Money, or the Plan. */
-export const ALERT_TAB_IDS: Readonly<Record<AlertTab, string>> = { overview: "overview", people: "people", rules: "rules", money: "economy.money", plan: PLAN_TAB };
+/** The tab an alert's Open goes to: the shell's own, the economy's Money, the Plan, or Decisions. */
+export const ALERT_TAB_IDS: Readonly<Record<AlertTab, string>> = { overview: "overview", people: "people", rules: "rules", money: "economy.money", plan: PLAN_TAB, decisions: DECISIONS_TAB };
 
 /**
  * The alerts under the Overview's headline: each in its tone, "Needs you" when it asks something of

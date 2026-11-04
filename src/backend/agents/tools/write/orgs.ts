@@ -2,13 +2,13 @@
 // org op's vocabulary (`OrgOp`, `shared/org-ops.ts`), sent as the GM edit `{op: "org", change}` the
 // orgs pack compiles to the packs' own effects, its History line with them (`packs/orgs/core/ops.ts`).
 // GM tier. Each id the op names may be written as a name, resolved among what the view may name
-// (`ORG_OP_SLOTS`: a person, an organization, any entity, a place); the op is then read for its
-// shape, checked by the writer's dry run, and proposed outside a turn or staged in one (`propose`);
-// with `dry` set it is only checked.
+// (`ORG_OP_SLOTS`: a person, an organization, any entity, a place; a proposal's decision's too); the
+// op is then read for its shape, checked by the writer's dry run, and proposed outside a turn or
+// staged in one (`propose`); with `dry` set it is only checked.
 
 import { own } from "../../../../engine/pack-kit";
 import { WRITE_NOTE } from "../../../../shared/agent-tools-write";
-import { hasOwn, type JsonObject, type JsonValue } from "../../../../shared/json";
+import { hasOwn, isRecord, type JsonObject, type JsonValue } from "../../../../shared/json";
 import { ORG_OP_SLOTS, parseOrgOp, type OrgOpDo } from "../../../../shared/org-ops";
 import type { ToolOutcome } from "../../runtime";
 import { BOOLEAN, boolArg, gmEdit, missing, needId, propose, refusedAnswer } from "../propose";
@@ -32,7 +32,7 @@ function slotResolve(field: string, slot: string): (view: ToolReadView, said: st
   return slot === "person" ? resolvePerson : slot === "place" ? resolvePlace : resolveEntity;
 }
 
-/** The change with every id its op names resolved from the name the model wrote, or the note why not (not found, several). */
+/** The change with every id its op names resolved from the name the model wrote (a proposal's decision's as well), or the note why not (not found, several). */
 function resolved(view: ToolReadView, change: JsonObject): JsonObject | ToolOutcome {
   const slots = typeof change.do === "string" && hasOwn(ORG_OP_SLOTS, change.do) ? ORG_OP_SLOTS[change.do as OrgOpDo] : null;
   if (!slots) return view.refuse(WRITE_NOTE.badOp);
@@ -55,6 +55,11 @@ function resolved(view: ToolReadView, change: JsonObject): JsonObject | ToolOutc
     const id = needId(view, TOOL, { [field]: v }, field, slotResolve(field, slot));
     if (typeof id !== "string") return id;
     out[field] = id;
+  }
+  if (change.do === "propose" && isRecord(change.change)) {
+    const inner = resolved(view, change.change);
+    if (isNote(inner)) return inner;
+    out.change = inner;
   }
   return out;
 }

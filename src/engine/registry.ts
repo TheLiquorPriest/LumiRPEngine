@@ -112,6 +112,16 @@ export interface EffectContext extends ReadContext {
   rng: Rng;
   /** Evaluated action parameters. */
   params: Record<string, Value>;
+  /**
+   * The effect being resolved, with its arguments as evaluated (`resolveEffect` sets it): what a
+   * decision put to a vote, or an act put up for approval, holds to carry out later (ORG-SPEC Phase 5).
+   */
+  effect?: { type: string; args: Record<string, JsonValue> };
+  /**
+   * Set only when the orgs pack carries out a held act: the motion of `org` that passed, or its
+   * request that `by` approved. The decision's votes, or the act's limit, are answered by it.
+   */
+  carried?: { org: EntityId; motion?: string; approval?: string; by?: EntityId; cents?: number };
 }
 
 /** Turns a validated effect proposal into concrete events. */

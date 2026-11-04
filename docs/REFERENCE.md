@@ -372,14 +372,17 @@ Extends `group`.
 |---|---|---|---|---|---|---|---|
 | `close_at` | Closes at (HH:MM) | text |  |  |  |  | live from money 3 |
 | `collects_sales_tax` | Collects sales tax | bool |  |  |  |  | live from money 4 |
+| `consolidated_return` | Files one consolidated federal return with the corporations it holds 80% or more of (an election) | bool |  |  |  |  | live from money 3 |
 | `daily_sales` | Walk-in takings a trading day | money | ≥ 0 |  |  |  | live from money 3 |
 | `decide_pct` | Ownership decisions need more than % of the votes | number | 0 … 100 | `50` |  |  | live from money 4 |
+| `dissolved` | Dissolved on (YYYY-MM-DD) | text |  |  |  |  | live from money 3 |
 | `distribution_every` | Paid out every | enum: month, quarter, year |  |  |  |  | live from money 4 |
 | `distribution_pct` | Profit paid out % | number | 0 … 100 |  |  |  | live from money 4 |
 | `industry` | Industry | text |  |  |  |  | live from money 3 |
 | `invoice_days` | Invoice terms (days) | number | ≥ 0 |  |  |  | live from money 3 |
 | `late_fee_pct` | Late fee % | number | ≥ 0 |  |  |  | live from money 4 |
 | `margin_pct` | Margin % | number | 0 … 100 |  |  |  | live from money 4 |
+| `merged_into` | Merged into | ref → business |  |  |  |  | live from money 3 |
 | `open_at` | Opens at (HH:MM) | text |  |  |  |  | live from money 3 |
 | `operating_account` | Operating account | ref → account |  |  |  |  | live from money 3 |
 | `owners` | Owners ({party, role, share?, units?, class?}) | list |  |  |  |  | live from money 1 |
@@ -392,6 +395,7 @@ Extends `group`.
 | `trading_days` | Trading days (0 is Sunday) | list of number |  |  |  |  | live from money 3 |
 | `valuation_multiple` | Valued at this many years of profit, over its books | number | ≥ 0 | `3` |  |  | live from money 4 |
 | `value` | Value (set: overrides the books) | money | ≥ 0 |  |  |  | live from money 3 |
+| `winding_up` | Winding up since (YYYY-MM-DD) | text |  |  |  |  | live from money 3 |
 
 #### `card`: Payment card
 
@@ -545,12 +549,20 @@ Extends `thing`.
 
 | Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |
 |---|---|---|---|---|---|---|---|
+| `approval_days` | A request for approval waits for days (7 unless set) | number | 1 … 365 |  |  |  | live from money 2 |
 | `dues` | Dues ({cents, every, day?}) | list |  |  |  |  | live from money 3 |
+| `motion_days` | A motion stays open for days (7 unless set) | number | 1 … 365 |  |  |  |  |
 | `owners` | Owners ({party, role, share?, units?, class?}) | list |  |  |  |  | live from money 1 |
+| `pass_pct` | A motion passes with more than % of the votes cast for or against (50 unless set) | number | 0 … 99.9 |  |  |  |  |
 | `payroll` | Pay schedule ({every, anchor, weekday, days}) | list |  |  |  |  | live from money 3 |
 | `payroll_account` | Payroll account | ref → account |  |  |  |  | live from money 3 |
 | `places` | Its places | list of ref |  |  |  |  |  |
 | `positions` | Positions ({id, title, powers, seats?, reports_to?, scope?, limits?, successor?, default?, no_dues?}) | list |  |  |  |  |  |
+| `quorum_pct` | A motion needs at least % of the votes to take part (50 unless set) | number | 0 … 100 |  |  |  |  |
+| `suta_pct` | Its state unemployment tax rate (%), when it isn't its state's new-employer rate | number | 0 … 100 |  |  |  | live from money 3 |
+| `tax_exempt` | Tax-exempt status (a row of the exempt table: charity, church, club) | text (row of economy.exempt) |  |  |  |  | live from money 3 |
+| `vote_by` | Votes are counted by (shares, or one each for members; a company counts shares unless set) | enum: shares, members |  |  |  |  |  |
+| `vote_rules` | Standing votes ({who, vote: for, against, abstain or with, with?}) | list |  |  |  |  |  |
 
 ### Effects
 
@@ -561,8 +573,11 @@ Extends `thing`.
 | `economy.card_replace` | `card`, `who?`, `by?` |
 | `economy.card_state` | `card`, `state`, `who?`, `by?` |
 | `economy.close_account` | `account` |
+| `economy.consolidate` | `org`, `elect?`, `by?` |
+| `economy.delist` | `business`, `price?`, `party?`, `by?` |
 | `economy.deposit` | `account`, `cents`, `who?`, `by?` |
 | `economy.distribute` | `business`, `cents?`, `by?` |
+| `economy.donate` | `to`, `cents`, `from?`, `method?`, `by?` |
 | `economy.dues` | `org`, `cents`, `every?`, `day?`, `by?` |
 | `economy.exercise` | `holding`, `qty?`, `from?`, `to?`, `party?`, `by?` |
 | `economy.flow_create` | `label?`, `kind?`, `from?`, `to?`, `amount?`, `every?`, `interval?`, `weekday?`, `day?`, `month?`, `at?`, `once?`, `start?`, `end?`, `count?`, `shortfall?`, `retry_days?`, `retries?`, `fallback?`, `roll?`, `category?`, `who?`, `by?` |
@@ -581,6 +596,7 @@ Extends `thing`.
 | `economy.job_title` | `job`, `title?`, `by?` |
 | `economy.lease_end` | `lease`, `on?`, `party?`, `by?` |
 | `economy.lease_start` | `property`, `tenant`, `rent`, `months?`, `day?`, `unit?`, `from?`, `party?`, `by?` |
+| `economy.list` | `business`, `units`, `price?`, `symbol?`, `class?`, `party?`, `by?` |
 | `economy.lose` | `item`, `thief?` |
 | `economy.move` | `from`, `to`, `cents`, `memo?`, `by?`, `party?` |
 | `economy.owner_draw` | `business`, `cents`, `owner?`, `by?` |
@@ -601,6 +617,7 @@ Extends `thing`.
 | `economy.shares_classes` | `business`, `class?`, `label?`, `votes?`, `holder?`, `remove?`, `party?`, `by?` |
 | `economy.shares_issue` | `business`, `to`, `units`, `price?`, `class?`, `from?`, `party?`, `by?` |
 | `economy.stake_sell` | `business`, `share?`, `units?`, `price?`, `buyer?`, `to?`, `party?`, `by?` |
+| `economy.tax_status` | `org`, `status?`, `by?` |
 | `economy.trade` | `side?`, `party?`, `holding?`, `asset?`, `account?`, `qty?`, `amount?`, `from?`, `to?`, `right?`, `strike?`, `expiry?`, `by?` |
 | `economy.transfer` | `to`, `cents`, `from?`, `memo?`, `method?`, `story?`, `by?` |
 | `economy.withdraw` | `account`, `cents`, `who?`, `by?` |
@@ -631,13 +648,14 @@ Extends `thing`.
 | Action | Label | Description | Parameters | Check | Outcomes | Minutes | Lexicon |
 |---|---|---|---|---|---|---|---|
 | `apply_credit` | Apply for credit | Apply for a credit card, a credit line or a loan. | `product: text`, `amount?: money`, `term?: number`, `as?: ref` |  | `default` | `15` | apply for a credit card, apply for a loan, take out a loan |
-| `buy` | Buy | Buy something: food, drinks, goods or a service, here or delivered. | `item: text`, `qty?: number`, `price?: money`, `method?: text`, `cashback?: money`, `as?: ref` |  | `default` | `5` | buy, purchase, order, pick up a |
+| `buy` | Buy | Buy something: food, drinks, goods or a service, here or delivered. | `item: text`, `qty?: number`, `price?: money`, `method?: text`, `cashback?: money`, `as?: ref`, `ask?: bool` |  | `default` | `5` | buy, purchase, order, pick up a |
 | `card_freeze` | Freeze card | Freeze a card so it can't be used. | `card: ref → card`, `as?: ref` |  | `default` | `2` | freeze my card, lock my card |
 | `card_replace` | Replace card | Order a replacement card. | `card: ref → card`, `as?: ref` |  | `default` | `2` | replace my card, order a new card |
 | `card_report_lost` | Report card lost | Report a card lost or stolen. | `card: ref → card`, `as?: ref` |  | `default` | `2` | report my card lost, my card was stolen, cancel my card |
 | `card_unfreeze` | Unfreeze card | Unfreeze a frozen card. | `card: ref → card`, `as?: ref` |  | `default` | `2` | unfreeze my card, unlock my card |
 | `deposit_cash` | Deposit cash | Put cash into a bank account. | `account: ref → account`, `amount: money`, `as?: ref` |  | `default` | `3` | deposit, pay in cash, bank the cash |
 | `distribute_profit` | Distribute profit | Pay a business's profit out to its owners. | `business: ref → business`, `amount?: money` |  | `default` | `10` | distribute profit, pay dividends, pay out the owners |
+| `donate` | Donate | Give money to an organization: a charity, a church, a club. A person's gift to a charity or a church is deductible from their income tax. | `to: ref`, `amount: money`, `method?: text`, `as?: ref` |  | `default` | `5` | donate, make a donation, give to charity, tithe, put money in the collection plate, sponsor |
 | `exercise_option` | Exercise an option | Exercise an option contract you hold. | `holding: ref → holding`, `qty?: number`, `from?: ref → account`, `to?: ref → account`, `as?: ref` |  | `default` | `2` | exercise the option, exercise my calls, exercise my puts |
 | `flow_create` | Set up a standing payment | Set up a standing payment: a bill, a regular transfer, an allowance. | `label?: text`, `kind?: text`, `from?: ref → account`, `to?: text`, `amount?: money`, `every?: text`, `interval?: number`, `weekday?: number`, `day?: number`, `month?: number`, `at?: text`, `once?: text`, `start?: text`, `end?: text`, `count?: number`, `shortfall?: text`, `retry_days?: number`, `retries?: number`, `fallback?: text`, `roll?: text`, `category?: text`, `as?: ref` |  | `default` | `2` | set up a standing order, schedule a payment, set up a recurring transfer |
 | `flow_delete` | Cancel a standing payment | Cancel a standing payment. | `flow: ref → flow`, `as?: ref` |  | `default` | `2` | cancel the standing order, stop the recurring payment |
@@ -657,12 +675,12 @@ Extends `thing`.
 | `job_title` | Change title | Change the title a job goes by: your own, or that of someone who works for you or an organization you appoint for. | `job: ref → job`, `title?: text` |  | `default` | `5` | change the job title, retitle |
 | `lease_end` | End a lease | End a tenant's lease. | `lease: ref → flow`, `on?: text`, `as?: ref` |  | `default` | `10` | end the lease, give notice, move out |
 | `lease_start` | Let a unit | Let a unit of a property you own to a tenant, for rent each month. | `property: ref → property`, `tenant: ref → person`, `rent: money`, `months?: number`, `day?: number`, `unit?: text`, `as?: ref` |  | `default` | `20` | rent out, sign a lease, let the apartment |
-| `move_money` | Transfer between accounts | Move money between your own accounts: checking, savings, cash. | `from: ref → account`, `to: ref → account`, `amount: money`, `as?: ref` |  | `default` | `2` | transfer, move money, put into savings |
+| `move_money` | Transfer between accounts | Move money between your own accounts: checking, savings, cash. | `from: ref → account`, `to: ref → account`, `amount: money`, `as?: ref`, `ask?: bool` |  | `default` | `2` | transfer, move money, put into savings |
 | `org_dues` | Set dues | Set what each member pays into an organization's money, and how often; nothing ends them. | `org: ref`, `amount: money`, `every?: text`, `day?: number` |  | `default` | `2` | set dues, membership fee, everyone chips in |
 | `org_pay_schedule` | Change pay schedule | Set how often an organization you set staff pay for pays its staff, moving every job there to it. | `org: ref`, `every: text`, `weekday?: number`, `anchor?: text` |  | `default` | `2` | pay schedule, change payday, pay every other week |
-| `org_share_out` | Share out | Pay an amount from an organization's money to its members equally (the party's: its core members and companions). | `org: ref`, `amount: money`, `from?: ref → account` |  | `default` | `5` | share out, split the money, divide the purse, hand out |
+| `org_share_out` | Share out | Pay an amount from an organization's money to its members equally (the party's: its core members and companions). | `org: ref`, `amount: money`, `from?: ref → account`, `ask?: bool` |  | `default` | `5` | share out, split the money, divide the purse, hand out |
 | `owner_draw` | Take an owner's draw | Take money out of a business you own, for yourself. | `business: ref → business`, `amount: money` |  | `default` | `5` | take a draw, pay myself, take money out of the business |
-| `pay` | Pay | Give someone money: settle up, pay them back, tip them. | `to: ref, outside: economy.external:world`, `amount: money`, `method?: text`, `as?: ref` |  | `default` | `1` | pay, give money, send money, venmo |
+| `pay` | Pay | Give someone money: settle up, pay them back, tip them. | `to: ref, outside: economy.external:world`, `amount: money`, `method?: text`, `as?: ref`, `ask?: bool` |  | `default` | `1` | pay, give money, send money, venmo |
 | `pay_card` | Pay card or loan | Pay off some or all of a card or loan balance. | `card: ref → account`, `from?: ref → account`, `amount?: money`, `as?: ref` |  | `default` | `2` | pay off the card, pay the card, pay my credit card, make a loan payment |
 | `property_buy` | Buy a property | Buy a property, outright or with a mortgage. | `property: ref → property`, `price?: money`, `from?: ref → account`, `down?: money`, `term_months?: number`, `as?: ref` |  | `default` | `60` | buy the house, buy the property, make an offer on |
 | `property_list` | List a property for sale | Put a property you own up for sale at an asking price, or take it off the market. | `property: ref → property`, `price?: money`, `as?: ref` |  | `default` | `5` | put the house on the market, list the property, take it off the market |
@@ -670,16 +688,19 @@ Extends `thing`.
 | `route_distributions` | Route dividends, rent or profits | Choose where dividends, rent or profits are paid: reinvested, or into an account. | `holding?: ref → holding`, `property?: ref → property`, `business?: ref → business`, `to?: text`, `as?: ref` |  | `default` | `1` | reinvest dividends, send dividends to, send the rent to |
 | `set_autopay` | Set autopay | Set how a card or loan pays itself each month. | `account: ref → account`, `mode: text`, `from?: ref → account`, `amount?: money`, `as?: ref` |  | `default` | `2` | set up autopay, turn on autopay, turn off autopay |
 | `set_pay_prefs` | Set how I pay | Set the order in which you prefer to pay: cash, debit, credit. | `tiers: text` |  | `default` | `2` | i'd rather pay with |
-| `shares_buy_back` | Buy back shares | Have a company you control buy back some of a holder's units, paying them from its account. | `business: ref → business`, `from: ref`, `units: number`, `price?: money`, `as?: ref` |  | `default` | `30` | buy back shares, buy them out, buy back their stake |
-| `shares_classes` | Change share classes | Add, change or remove a company's share class (the votes a unit carries), and move a holder's units into it. | `business: ref → business`, `label: text`, `class?: text`, `votes?: number`, `holder?: ref`, `remove?: bool`, `as?: ref` |  | `default` | `2` | add a share class, non-voting shares, change the votes |
-| `shares_issue` | Issue shares | Issue new units of a company you control to a buyer, who pays for them into its account. | `business: ref → business`, `to: ref`, `units: number`, `price?: money`, `class?: text`, `from?: ref → account`, `as?: ref` |  | `default` | `30` | issue shares, sell new shares in the company, bring in a partner, let them buy in |
+| `shares_buy_back` | Buy back shares | Have a company you control buy back some of a holder's units, paying them from its account. | `business: ref → business`, `from: ref`, `units: number`, `price?: money`, `as?: ref`, `vote?: bool` |  | `default` | `30` | buy back shares, buy them out, buy back their stake |
+| `shares_classes` | Change share classes | Add, change or remove a company's share class (the votes a unit carries), and move a holder's units into it. | `business: ref → business`, `label: text`, `class?: text`, `votes?: number`, `holder?: ref`, `remove?: bool`, `as?: ref`, `vote?: bool` |  | `default` | `2` | add a share class, non-voting shares, change the votes |
+| `shares_delist` | Take it off the market | Take a listed company you control off the market, buying back every unit the public holds at its market price or more from its account. | `business: ref → business`, `price?: money`, `as?: ref`, `vote?: bool` |  | `default` | `60` | take the company private, delist the company, go private, buy out the public |
+| `shares_issue` | Issue shares | Issue new units of a company you control to a buyer, who pays for them into its account. | `business: ref → business`, `to: ref`, `units: number`, `price?: money`, `class?: text`, `from?: ref → account`, `as?: ref`, `vote?: bool` |  | `default` | `30` | issue shares, sell new shares in the company, bring in a partner, let them buy in |
+| `shares_list` | List on the market | List a C corporation you control on the market, selling new units to the public, or offer more units once it is listed; the market pays for them into its account. | `business: ref → business`, `units: number`, `price?: money`, `symbol?: text`, `as?: ref`, `vote?: bool` |  | `default` | `60` | list the company on the market, take the company public, go public, float the company, sell shares to the public |
 | `stake_sell` | Sell a share of a business | Sell part of your share of a business, in percent or, where it counts them, in units; to someone in the world, or a whole business to a buyer outside it. | `business: ref → business`, `share?: number`, `units?: number`, `price: money`, `buyer?: ref`, `to?: ref → account`, `as?: ref` |  | `default` | `60` | sell my share of the business, sell the shop, sell my shares |
+| `tax_consolidate` | File a consolidated return | Elect, or stop, for a C corporation you govern, to file one federal income tax return with the corporations it holds 80% or more of (by votes and by worth): their profits and losses offset, and it pays the group's tax. | `org: ref → business`, `elect?: text` |  | `default` | `15` | file a consolidated return, file one return for the group, consolidate our taxes, stop filing a consolidated return |
 | `trade` | Buy or sell investments | Buy or sell investments: stocks, funds, bonds, crypto. | `side?: text`, `holding?: ref → holding`, `asset?: text`, `account?: ref → account`, `qty?: number`, `amount?: money`, `from?: ref → account`, `to?: ref → account`, `right?: text`, `strike?: money`, `expiry?: text`, `as?: ref` |  | `default` | `2` | invest, buy stocks, buy shares, sell stocks, sell shares, cash out, buy an option |
 | `withdraw_cash` | Withdraw cash | Take cash out of a bank account. | `account: ref → account`, `amount: money`, `as?: ref` |  | `default` | `3` | withdraw, take out cash, hit the atm, get cash |
 
 ### Events
 
-Its own: `economy.accrue`, `economy.acquire`, `economy.anchor`, `economy.card_paid`, `economy.closes`, `economy.commission`, `economy.credit`, `economy.decline`, `economy.delinquency`, `economy.dispose`, `economy.estimated_tax`, `economy.exercise`, `economy.flow_renamed`, `economy.flow_run`, `economy.hold`, `economy.income`, `economy.invoice_paid`, `economy.lots`, `economy.mint`, `economy.modifier`, `economy.note`, `economy.open`, `economy.payout`, `economy.payslip`, `economy.price`, `economy.quote`, `economy.remit`, `economy.sale`, `economy.score`, `economy.settle`, `economy.spend`, `economy.stake_route`, `economy.statement`, `economy.status`, `economy.timesheet`, `economy.txn`.
+Its own: `economy.accrue`, `economy.acquire`, `economy.anchor`, `economy.card_paid`, `economy.closes`, `economy.commission`, `economy.credit`, `economy.decline`, `economy.delinquency`, `economy.dispose`, `economy.donation`, `economy.estimated_tax`, `economy.exercise`, `economy.flow_renamed`, `economy.flow_run`, `economy.hold`, `economy.income`, `economy.invoice_paid`, `economy.lots`, `economy.mint`, `economy.modifier`, `economy.note`, `economy.open`, `economy.payout`, `economy.payslip`, `economy.price`, `economy.quote`, `economy.remit`, `economy.sale`, `economy.score`, `economy.settle`, `economy.spend`, `economy.stake_route`, `economy.statement`, `economy.status`, `economy.timesheet`, `economy.txn`, `economy.unemployment_accrued`, `economy.unemployment_paid`.
 
 Checks it adds to: `post`.
 
@@ -715,14 +736,15 @@ Detail on demand: `money` (version 2).
 |---|---|---|---|---|
 | `economy.catalog` | Price catalog | `lre-table/economy.catalog/v1` | name (text), aliases (list, optional), category (ref), unit (text), size (enum, optional), holds (enum, optional), price_cents (band), notes (text, optional) | 358 |
 | `economy.categories` | Price categories | `lre-table/economy.categories/v1` | name (text), basis (text), notes (text, optional), price_unit_note (text, optional), item_count (int), price_cents (band) | 20 |
-| `economy.finance` | Finance parameters | `lre-table/economy.finance/v1` | title (text), values (json) | 7 |
+| `economy.exempt` | Tax-exempt organizations | `lre-table/economy.exempt/v1` | name (text), code (text), income_tax_exempt (bool), donations_deductible (bool), futa (bool), suta (bool), description (text) | 3 |
+| `economy.finance` | Finance parameters | `lre-table/economy.finance/v1` | title (text), values (json) | 8 |
 | `economy.index_history` | Stock index history (total return, month-end closes) | `lre-table/economy.index_history/v1` | date (text), level (number) | 282 |
 | `economy.occupations` | Occupations and pay | `lre-table/economy.occupations/v1` | title (text), category (enum), median_cents_per_h (int), median_cents_per_year (int), typical_earnings_cents_per_year (int), schedule_pattern (ref), typical_hours_per_week (number), weeks_per_year (number), weekend_work (enum), shifts (list), pay_frequency (enum), benefits (enum), benefits_note (text), withholding_rate_pct (number), description (text), wage_basis (text), tipped (bool, optional), tipped_cash_wage_cents_per_h (int, optional), self_employed (bool, optional), fica_exempt (bool, optional), estimated_tax_set_aside_pct (number, optional), withholding_note (text, optional) | 56 |
-| `economy.regions` | Regions (US states, DC and the national baseline) | `lre-table/economy.regions/v1` | name (text), abbr (text), scope (enum), census_region (enum, optional), census_division (enum, optional), time_zones (list, optional), observes_dst (bool, optional), state_income_tax_effective_pct (number, optional), local_income_tax_pct_typical (number, optional), sales_tax_combined_avg_pct (number), property_tax_effective_pct (number, optional), cost_of_living_multiplier (number), median_rent_1br_cents_per_month (int), median_rent_2br_cents_per_month (int), residential_electricity_cents_per_kwh (number), minimum_wage_cents_per_h (int), tipped_minimum_wage_cents_per_h (int, optional), notes (text, optional) | 52 |
+| `economy.regions` | Regions (US states, DC and the national baseline) | `lre-table/economy.regions/v1` | name (text), abbr (text), scope (enum), census_region (enum, optional), census_division (enum, optional), time_zones (list, optional), observes_dst (bool, optional), state_income_tax_effective_pct (number, optional), local_income_tax_pct_typical (number, optional), sales_tax_combined_avg_pct (number), property_tax_effective_pct (number, optional), suta_wage_base_cents (int), suta_new_employer_pct (number), futa_credit_reduction_pct (number, optional), cost_of_living_multiplier (number), median_rent_1br_cents_per_month (int), median_rent_2br_cents_per_month (int), residential_electricity_cents_per_kwh (number), minimum_wage_cents_per_h (int), tipped_minimum_wage_cents_per_h (int, optional), notes (text, optional) | 52 |
 
 ### Lint codes
 
-`economy.accounts`, `economy.assets`, `economy.business`, `economy.claim_cap`, `economy.holdings`, `economy.property`, `economy.unpriced_cap`.
+`economy.accounts`, `economy.assets`, `economy.business`, `economy.claim_cap`, `economy.holdings`, `economy.listing`, `economy.property`, `economy.unpriced_cap`.
 
 ## Gear & containers pack (`gear`)
 
@@ -945,11 +967,15 @@ Version 1 · realism domain none · requires `economy`, `relationships`, `space`
 | Effect | Arguments |
 |---|---|
 | `orgs.admit` | `org`, `who`, `title?`, `position?`, `by?`, `why?` |
+| `orgs.answer` | `org`, `request`, `answer`, `why?`, `approver?`, `said?`, `by?` |
 | `orgs.appoint` | `org`, `who`, `position?`, `by?`, `why?` |
+| `orgs.decisions` | `org`, `vote_by?`, `quorum?`, `pass?`, `days?`, `approval_days?`, `by?` |
 | `orgs.delegate` | `org`, `to`, `powers`, `payment?`, `month?`, `until?`, `by?` |
 | `orgs.entry` | `place`, `entry?`, `keys?`, `org?`, `by?` |
 | `orgs.found` | `type`, `name`, `kind?`, `cents?`, `from?`, `structure?`, `units?`, `classes?`, `founder?`, `by?` |
 | `orgs.leave` | `org`, `who`, `why?` |
+| `orgs.merge` | `org`, `into`, `ratio?`, `cash?`, `from?`, `keep?`, `why?`, `by?` |
+| `orgs.motion_end` | `org`, `motion`, `how?`, `by?` |
 | `orgs.note` | `org`, `text`, `by?`, `names?` |
 | `orgs.party_hire` | `worker`, `title?`, `occupation?`, `basis?`, `rate?`, `hours_per_week?`, `pay_every?`, `by?` |
 | `orgs.party_name` | `name`, `by?` |
@@ -959,12 +985,16 @@ Version 1 · realism domain none · requires `economy`, `relationships`, `space`
 | `orgs.plan_order` | `org`, `id?`, `to?`, `lead?`, `text?`, `where?`, `when?`, `goal?`, `status?`, `said?`, `source?`, `by?` |
 | `orgs.plan_status` | `org`, `id`, `status`, `note?`, `said?`, `source?`, `by?` |
 | `orgs.position` | `org`, `title?`, `id?`, `powers?`, `seats?`, `reports_to?`, `no_report?`, `scope?`, `payment?`, `month?`, `successor?`, `default?`, `remove?`, `by?` |
+| `orgs.propose` | `change`, `by`, `party?` |
 | `orgs.remove` | `org`, `who`, `by?`, `why?` |
 | `orgs.rename` | `org`, `name`, `by?` |
 | `orgs.restructure` | `org`, `structure`, `party?`, `by?` |
 | `orgs.revoke` | `org`, `to`, `by?` |
 | `orgs.succession` | `on?` |
 | `orgs.title` | `org`, `who`, `title?`, `by?`, `why?` |
+| `orgs.vote` | `org`, `motion`, `vote`, `who?`, `said?`, `by?` |
+| `orgs.vote_rule` | `org`, `who?`, `vote?`, `with?`, `by?` |
+| `orgs.wind_up` | `org`, `stage?`, `property?`, `to?`, `why?`, `by?` |
 
 ### Actions
 
@@ -972,19 +1002,27 @@ Version 1 · realism domain none · requires `economy`, `relationships`, `space`
 |---|---|---|---|---|---|---|---|
 | `org_admit` | Admit a member | Admit someone to an organization, with a title or into a position. | `org: ref`, `who: ref`, `title?: text`, `position?: text` |  | `default` | `10` | admit, take in as a member, welcome into |
 | `org_appoint` | Appoint | Appoint someone to a position in an organization, or take them out of theirs. | `org: ref`, `who: ref`, `position?: text` |  | `default` | `10` | appoint, make them foreman, promote |
+| `org_approve` | Approve | Approve a request made for an organization over the limit of someone below you there (you granted their delegation, hold a position above theirs, or govern or own it), within your own limits: it is done now, as theirs. | `org: ref`, `request: text` |  | `default` | `5` | approve it, sign off on it, okay the spend |
+| `org_decisions` | How decisions are made | Set how an organization's motions count their votes (shares or members), their quorum and pass mark in percent, how many days a motion stays open and a request for approval waits. | `org: ref`, `vote_by?: text`, `quorum?: number`, `pass?: number`, `days?: number`, `approval_days?: number` |  | `default` | `2` | set the quorum, change the voting rules |
 | `org_delegate` | Delegate | Let someone act for an organization with some of your powers there, within limits, until a date. | `org: ref`, `to: ref`, `powers: text`, `payment?: money`, `month?: money`, `until?: date` |  | `default` | `10` | let them act for, delegate, give them authority |
+| `org_deny` | Deny | Deny a request for approval made for an organization (your own request: withdraw it). | `org: ref`, `request: text`, `why?: text` |  | `default` | `5` | deny the request, turn it down, withdraw my request |
 | `org_entry` | Change entry | Change who may enter one of an organization's places, and its keys. | `org: ref → thing`, `place: ref → place`, `entry: text`, `keys?: text` |  | `default` | `0` |  |
 | `org_found` | Start an organization | Found a company (from Money 3: you its only owner, with capital from an account of yours, counted in units when you say how many; or, for an organization you govern, its subsidiary from its money) or a group of one of the world's kinds, which you lead. | `type: text`, `name: text`, `kind?: text`, `amount?: money`, `from?: ref → account`, `structure?: text`, `units?: number`, `as?: ref` |  | `default` | `30` | start a company, found a business, set up a company, start a group, found a club, form a crew, start a subsidiary |
 | `org_goal` | Set a goal | Add a goal to an organization's plan, or change one. | `org: text`, `id?: text`, `text?: text`, `window?: text`, `where?: text` |  | `default` | `2` | set a goal, add to the plan |
 | `org_leave` | Leave | Leave an organization you're a member of. | `org: ref` |  | `default` | `5` | leave the group, quit the club, resign from |
+| `org_merge` | Merge companies | Fold one company into another (from Money 3): its holders get the other's units at a ratio (by their values unless you say) and any cash it pays, and its accounts, property, staff and positions move over; or, kept, the other takes all of it as its subsidiary. You decide for both, with more than half the votes of each (yours, or an organization's you govern). | `org: ref → business`, `into: ref → business`, `ratio?: number`, `cash?: money`, `from?: ref → account`, `keep?: bool`, `vote?: bool` |  | `default` | `60` | merge the companies, fold it into, take over the company, buy out the company, acquire the business |
+| `org_motion_end` | Withdraw a motion | Withdraw a motion you put to a vote, while it is open. | `org: ref`, `motion: text` |  | `default` | `2` | withdraw the motion |
 | `org_order` | Give an order | Give people in an organization a task on its plan, or change one: whom it is for, who leads, where and when. | `org: text`, `id?: text`, `to?: text`, `lead?: text`, `text?: text`, `where?: text`, `when?: text`, `goal?: text` |  | `default` | `2` | give an order, put them on it |
 | `org_plan_status` | Move a plan along | Mark a goal or an order on an organization's plan under way, done, blocked, refused or dropped, or open it again. | `org: text`, `id: text`, `status: text`, `note?: text` |  | `default` | `2` | mark it done, drop the plan |
 | `org_position` | Set a position | Add, change or remove a position in an organization: its title, powers, seats, whom it reports to, its scope and limits. | `org: ref`, `title: text`, `id?: text`, `powers?: text`, `seats?: number`, `reports_to?: text`, `no_report?: bool`, `scope?: text`, `payment?: money`, `month?: money`, `successor?: text`, `default?: bool`, `remove?: bool` |  | `default` | `2` | add a position, change the position |
 | `org_remove` | Remove a member | Remove someone from an organization. | `org: ref`, `who: ref` |  | `default` | `10` | throw out, expel, remove from the group |
 | `org_rename` | Rename | Give an organization a new name. | `org: ref`, `name: text` |  | `default` | `2` | rename, call it |
-| `org_restructure` | Change structure | Change a company's legal structure (a sole proprietorship, a partnership, an LLC, an S or a C corporation): draws and payouts change at once, its taxes from the next estimated-tax period. | `org: ref → business`, `structure: text`, `as?: ref` |  | `default` | `30` | incorporate, become an LLC, change the company's structure, turn it into a corporation |
+| `org_restructure` | Change structure | Change a company's legal structure (a sole proprietorship, a partnership, an LLC, an S or a C corporation): draws and payouts change at once, its taxes from the next estimated-tax period. | `org: ref → business`, `structure: text`, `as?: ref`, `vote?: bool` |  | `default` | `30` | incorporate, become an LLC, change the company's structure, turn it into a corporation |
 | `org_revoke` | Revoke | End someone's delegation to act for an organization. | `org: ref`, `to: ref` |  | `default` | `5` | revoke, take back their authority |
 | `org_title` | Change title | Give someone in an organization a title of their own, or take it away. | `org: ref`, `who: ref`, `title?: text` |  | `default` | `5` | call them, give them the title |
+| `org_vote` | Vote | Vote on a motion open at an organization: for, against, or abstain; as an organization holder whose shares you manage, with `as`. | `org: ref`, `motion: text`, `vote: text`, `as?: ref` |  | `default` | `5` | vote for the motion, vote against, raise a hand for, abstain |
+| `org_vote_rule` | Standing vote | Set how you vote on an organization's motions when you don't vote yourself: for, against, abstain, with another voter, or none. | `org: ref`, `vote: text`, `with?: ref` |  | `default` | `2` | vote with, always vote for |
+| `org_wind_up` | Wind up a company | Close a company down (from Money 3), all at once or in stages: begin (it stops trading: its staff go, its standing payments end), sell what you choose as the company, then finish (its debts paid, its holdings sold, its real estate and stakes handed to its owners by share or sold, the rest of its cash paid out to them by share, its accounts closed, it dissolved); or resume trading. Stage: all, begin, finish, resume. | `org: ref → business`, `stage?: text`, `property?: text`, `to?: ref`, `vote?: bool` |  | `default` | `60` | wind up the company, close the business down, dissolve the company, shut the business for good, liquidate the company |
 | `party_hire` | Hire a hand | Hire someone for your party, paid from its purse; they join it as a hired hand. | `worker: ref → person`, `title?: text`, `basis?: text`, `rate?: money`, `hours_per_week?: number`, `pay_every?: text` |  | `default` | `15` | hire a hand, take on a hand, hire them for the party |
 | `party_name` | Name the party | Give your party a name. | `name: text` |  | `default` | `1` | call our party, name our group |
 | `party_purse` | Start a purse | Open an account your party owns, with a deposit from an account of your own. | `amount: money`, `from?: ref → account` |  | `default` | `1` | start a party purse, pool our money, a kitty for the party |
@@ -992,15 +1030,17 @@ Version 1 · realism domain none · requires `economy`, `relationships`, `space`
 
 ### Events
 
-Its own: `orgs.config`, `orgs.entry`, `orgs.goal`, `orgs.lived`, `orgs.log`, `orgs.order`, `orgs.spent`, `orgs.status`, `orgs.trespass`.
+Its own: `orgs.answer`, `orgs.ask`, `orgs.config`, `orgs.entry`, `orgs.goal`, `orgs.lived`, `orgs.log`, `orgs.motion`, `orgs.motion_end`, `orgs.order`, `orgs.spent`, `orgs.status`, `orgs.trespass`, `orgs.vote`.
 
 ### Proposals
 
 | Proposal | Bound by |
 |---|---|
 | `agenda` | `routine` |
+| `approval` | `routine` |
 | `employment` | `routine` |
 | `membership` | `routine` |
+| `vote` | `routine` |
 
 ### Panels and slots
 
@@ -1010,12 +1050,13 @@ Panels: `orgs.list`, `orgs.org`. Slots it writes: `people`, `quest`.
 
 | Process | Domain | From level | Steps |
 |---|---|---|---|
+| `orgs.motions` | `relationships` | 0 | the world |
 | `orgs.orders` | `relationships` | 0 | the world |
 | `orgs.seats` | `relationships` | 0 | the world |
 
 ### Lint codes
 
-`orgs.delegations`, `orgs.entry`, `orgs.kinds`, `orgs.owners`, `orgs.positions`.
+`orgs.delegations`, `orgs.entry`, `orgs.kinds`, `orgs.owners`, `orgs.positions`, `orgs.taxes`.
 
 ## Relationships pack (`relationships`)
 
@@ -1146,11 +1187,19 @@ Extends `thing`.
 
 | Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |
 |---|---|---|---|---|---|---|---|
+| `approval_days` | A request for approval waits for days (7 unless set) | number | 1 … 365 |  |  |  | live from money 2 |
 | `dues` | Dues ({cents, every, day?}) | list |  |  |  |  | live from money 3 |
+| `motion_days` | A motion stays open for days (7 unless set) | number | 1 … 365 |  |  |  |  |
+| `pass_pct` | A motion passes with more than % of the votes cast for or against (50 unless set) | number | 0 … 99.9 |  |  |  |  |
 | `payroll` | Pay schedule ({every, anchor, weekday, days}) | list |  |  |  |  | live from money 3 |
 | `payroll_account` | Payroll account | ref → account |  |  |  |  | live from money 3 |
 | `places` | Its places | list of ref |  |  |  |  |  |
 | `positions` | Positions ({id, title, powers, seats?, reports_to?, scope?, limits?, successor?, default?, no_dues?}) | list |  |  |  |  |  |
+| `quorum_pct` | A motion needs at least % of the votes to take part (50 unless set) | number | 0 … 100 |  |  |  |  |
+| `suta_pct` | Its state unemployment tax rate (%), when it isn't its state's new-employer rate | number | 0 … 100 |  |  |  | live from money 3 |
+| `tax_exempt` | Tax-exempt status (a row of the exempt table: charity, church, club) | text (row of economy.exempt) |  |  |  |  | live from money 3 |
+| `vote_by` | Votes are counted by (shares, or one each for members; a company counts shares unless set) | enum: shares, members |  |  |  |  |  |
+| `vote_rules` | Standing votes ({who, vote: for, against, abstain or with, with?}) | list |  |  |  |  |  |
 
 #### `party`: Party
 

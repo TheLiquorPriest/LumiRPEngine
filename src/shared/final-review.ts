@@ -98,13 +98,27 @@ export function applyFinalEdits(parts: readonly PromptPart[], edits: readonly Fi
   return { parts: out, applied, missed };
 }
 
-/** Why the review's draft refused an edit: no such part, no such line, or no text. */
-export type DraftRefusal = { refused: "part" } | { refused: "line"; part: PromptPart } | { refused: "text" };
+/** Why the review's draft refused an edit: no such part, no such line (`line`, the number given that its part doesn't have), or no text. */
+export type DraftRefusal = { refused: "part" } | { refused: "line"; part: PromptPart; line: number } | { refused: "text" };
+
+/**
+ * An edit the draft made: its part as it reads now, and where the edit stands in it, from line `at`
+ * (from 0) for `count` lines, the lines its text made; a take-out's count is none, where the lines
+ * it took out stood before what is line `at` now.
+ */
+export interface DraftChange {
+  part: PromptPart;
+  at: number;
+  count: number;
+}
 
 /**
  * The prompt as the review edits it: its parts, and each edit made, in order. A line is named by its
- * number as its part reads now (from 1). Text is taken as the narrator will read it: line breaks
- * kept, blank lines at either end left out, neutralized, and cut to `maxChars` with "…".
+ * number as its part reads now (from 1), a block of lines by its first and last (in either order).
+ * Text is taken as the narrator will read it: line breaks kept, blank lines at either end left out,
+ * neutralized, and cut to `maxChars` with "…". A block's edit is recorded line by line, as edits of
+ * one line each, so the record and its telling again (`applyFinalEdits`) know no blocks. Each edit
+ * says where it stands (`DraftChange`), so its answer can show it with the lines around it.
  */
 export class ReviewDraft {
   private readonly current: PromptPart[];
@@ -129,37 +143,48 @@ export class ReviewDraft {
     return this.current.find((p) => p.id === id);
   }
 
-  replace(id: string, n: number, text: string): PromptPart | DraftRefusal {
-    const found = this.line(id, n);
+  /** Line `n`, or the block from it to line `to`, rewritten with `text`, whose lines take its place together. */
+  replace(id: string, n: number, text: string, to = n): DraftChange | DraftRefusal {
+    const found = this.block(id, n, to);
     if ("refused" in found) return found;
     const clean = this.clean(text);
     if (clean === null) return { refused: "text" };
-    const line = found.part.lines[n - 1] ?? "";
-    // Its own words again change nothing.
-    if (clean !== line) this.edit({ op: "replace", part: id, at: n - 1, line, text: clean }, found.part);
-    return found.part;
+    const { part, at, count } = found;
+    const line = part.lines[at] ?? "";
+    // Its own words again change nothing; the rest of a block goes, from after what took its place.
+    const made = clean === line ? 1 : clean.split("\n").length;
+    if (clean !== line) this.edit({ op: "replace", part: id, at, line, text: clean }, part);
+    for (let i = 1; i < count; i++) this.edit({ op: "drop", part: id, at: at + made, line: part.lines[at + made] ?? "" }, part);
+    return { part, at, count: made };
   }
 
-  append(id: string, text: string): PromptPart | DraftRefusal {
+  append(id: string, text: string): DraftChange | DraftRefusal {
     const part = this.part(id);
     if (!part) return { refused: "part" };
     const clean = this.clean(text);
     if (clean === null) return { refused: "text" };
+    const at = part.lines.length;
     this.edit({ op: "append", part: id, text: clean }, part);
-    return part;
+    return { part, at, count: part.lines.length - at };
   }
 
-  drop(id: string, n: number): PromptPart | DraftRefusal {
-    const found = this.line(id, n);
+  /** Line `n`, or the block from it to line `to`, taken out. */
+  drop(id: string, n: number, to = n): DraftChange | DraftRefusal {
+    const found = this.block(id, n, to);
     if ("refused" in found) return found;
-    this.edit({ op: "drop", part: id, at: n - 1, line: found.part.lines[n - 1] ?? "" }, found.part);
-    return found.part;
+    const { part, at, count } = found;
+    for (let i = 0; i < count; i++) this.edit({ op: "drop", part: id, at, line: part.lines[at] ?? "" }, part);
+    return { part, at, count: 0 };
   }
 
-  private line(id: string, n: number): { part: PromptPart } | DraftRefusal {
+  /** The lines from `n` through `to`, whichever comes first, of part `id` as it reads now: where they start (from 0) and how many; refused naming the first number given that the part doesn't have. */
+  private block(id: string, n: number, to: number): { part: PromptPart; at: number; count: number } | DraftRefusal {
     const part = this.part(id);
     if (!part) return { refused: "part" };
-    return Number.isSafeInteger(n) && n >= 1 && n <= part.lines.length ? { part } : { refused: "line", part };
+    const missing = [n, to].find((x) => !(Number.isSafeInteger(x) && x >= 1 && x <= part.lines.length));
+    if (missing !== undefined) return { refused: "line", part, line: missing };
+    const first = Math.min(n, to);
+    return { part, at: first - 1, count: Math.max(n, to) - first + 1 };
   }
 
   private edit(edit: FinalEdit, part: PromptPart): void {
@@ -177,8 +202,15 @@ export class ReviewDraft {
 
 // ---------------------------------------------------------------- what the review is sent
 
-/** The review's tools, by name; it hands its prompt back with the main agent's `commit`. */
-export const REVIEW_TOOLS = { replace: "review_replace", append: "review_append", drop: "review_drop", commit: "commit" } as const;
+/**
+ * The review's tools, by name; it hands its prompt back with the main agent's `commit`. A turn the
+ * main agent decides offers them in every stage, where they refuse, so every call of the turn is
+ * offered the same tools and reads the prefix the last one cached (DESIGN §4.6).
+ */
+export const REVIEW_TOOLS = { replace: "review_replace", append: "review_append", drop: "review_drop", read: "review_read", commit: "commit" } as const;
+
+/** How many lines an edit's answer shows either side of what it changed (`REVIEW_TEXT.edited`, `dropped`): review_read shows a part whole. */
+export const AROUND_EDIT = 2;
 
 /** The review's text ids, so code names them once. */
 export const REVIEW_TEXT = {
@@ -193,9 +225,11 @@ export const REVIEW_TEXT = {
   toolArg: (name: string, arg: string): string => `main.tool.${name}.${arg}`,
   commit: "main.review.commit",
   edited: "main.review.edited",
+  dropped: "main.review.dropped",
   refusedPart: "main.review.refused.part",
   refusedLine: "main.review.refused.line",
   refusedText: "main.review.refused.text",
+  refusedStage: "main.review.refused.stage",
   committed: "main.review.committed",
   committedNone: "main.review.committed.none",
 } as const;
@@ -224,7 +258,7 @@ export const FINAL_REVIEW_PROMPTS: readonly PromptDef[] = [
     group: GROUP,
     label: "The review",
     note: "What the main agent is sent for the final review: what the review is for and how it works, then the prompt the narrator gets, part by part, each line numbered.",
-    text: "{{stage}}\nBefore the narrator writes its reply, review the prompt it gets: the engine's sections below, the Outline and its brief among them, and the narrator rules, as the narrator will read them. Check each line against the world as it stands and this turn: a fact that is wrong, one the reply needs that is missing, lines that contradict each other, guidance that would lead the narrator astray, a secret told as known where it should stay marked. The player's own words and rules come first: never undo what they asked for.\n\nChange only what needs it, a line at a time: review_replace rewrites a line, review_append adds lines at the end of a part, review_drop takes a line out. Each names a line by its number as its part reads now, and answers with the part as it reads after it. A fact's line starts with \"- \". Then call commit, which hands the narrator the prompt as you leave it; with nothing to fix, call commit at once.\n\n{{parts}}",
+    text: "{{stage}}\nBefore the narrator writes its reply, review the prompt it gets: the engine's sections below, the Outline and its brief among them, and the narrator rules, as the narrator will read them. Check each line against the world as it stands and this turn: a fact that is wrong, one the reply needs that is missing, lines that contradict each other, guidance that would lead the narrator astray, a secret told as known where it should stay marked. The player's own words and rules come first: never undo what they asked for.\n\nChange only what needs it: review_replace rewrites a line, review_append adds lines at the end of a part, review_drop takes a line out, and with to, review_replace and review_drop take the whole block from line through to in one call. Each names a line by its number as its part reads now, and answers with the lines around its edit, numbered as its part reads after it; review_read shows a part whole. A fact's line starts with \"- \". Then call commit, which hands the narrator the prompt as you leave it; with nothing to fix, call commit at once.\n\n{{parts}}",
     vars: [v("stage", "where the review stands in the turn, in the words below"), v("parts", "each part of the prompt, as below", true)],
   },
   { id: REVIEW_TEXT.stageMain, page, group: GROUP, label: "Where it stands: a main agent's turn", note: "Leads the review's message in a turn the main agent decides: the review is the start of the reply's stage.", text: "Stage 6 of 8: the narrator's reply.", vars: [] },
@@ -234,27 +268,33 @@ export const FINAL_REVIEW_PROMPTS: readonly PromptDef[] = [
     page,
     group: GROUP,
     label: "A part of the prompt",
-    note: "One part of the narrator's prompt in the review's message and in its tools' answers: its id, which the tools take, its header as the narrator reads it, and its lines.",
+    note: "One part of the narrator's prompt in the review's message and in review_read's answer: its id, which the tools take, its header as the narrator reads it, and its lines.",
     text: "Part {{part}}: {{header}}\n{{lines}}",
     vars: [v("part", "the part's id, as the tools take it", true), v("header", "its header as the narrator reads it, such as [Outcome], or its name when it has none"), v("lines", "its lines, each numbered as below", true)],
   },
   { id: REVIEW_TEXT.line, page, group: GROUP, label: "A numbered line", note: "One line of a part, with the number the review's tools name it by.", text: "{{n}}: {{text}}", vars: [v("n", "the line's number in its part, from 1", true), v("text", "the line as the narrator reads it", true)] },
   { id: REVIEW_TEXT.empty, page, group: GROUP, label: "A part with no lines", note: "Stands in for the lines of a part that has none left.", text: "(no lines)", vars: [] },
-  { id: REVIEW_TEXT.tool(REVIEW_TOOLS.replace), page, group: GROUP, label: "review_replace: what it does", note: "The description of the review_replace tool.", text: "Rewrite one line of a part of the narrator's prompt: the line by its number as its part reads now, with your text in its place. Several lines in your text take its place together.", vars: [] },
+  { id: REVIEW_TEXT.tool(REVIEW_TOOLS.replace), page, group: GROUP, label: "review_replace: what it does", note: "The description of the review_replace tool.", text: "In the final review: rewrite a line of a part of the narrator's prompt, by its number as its part reads now, with your text in its place; with to, the whole block from line through to. Several lines in your text take its place together.", vars: [] },
   { id: REVIEW_TEXT.toolArg(REVIEW_TOOLS.replace, "part"), page, group: GROUP, label: "review_replace: part", note: "The description of review_replace's part argument.", text: "The part's id, as the review lists it.", vars: [] },
-  { id: REVIEW_TEXT.toolArg(REVIEW_TOOLS.replace, "line"), page, group: GROUP, label: "review_replace: line", note: "The description of review_replace's line argument.", text: "The line's number, as its part reads now.", vars: [] },
+  { id: REVIEW_TEXT.toolArg(REVIEW_TOOLS.replace, "line"), page, group: GROUP, label: "review_replace: line", note: "The description of review_replace's line argument.", text: "The line's number, as its part reads now; with to, the block's first.", vars: [] },
+  { id: REVIEW_TEXT.toolArg(REVIEW_TOOLS.replace, "to"), page, group: GROUP, label: "review_replace: to", note: "The description of review_replace's to argument: a block's last line.", text: "The block's last line, by its number as its part reads now, to rewrite every line from line through it as one; leave it out for line alone.", vars: [] },
   { id: REVIEW_TEXT.toolArg(REVIEW_TOOLS.replace, "text"), page, group: GROUP, label: "review_replace: text", note: "The description of review_replace's text argument.", text: "The line as the narrator should read it, whole.", vars: [] },
-  { id: REVIEW_TEXT.tool(REVIEW_TOOLS.append), page, group: GROUP, label: "review_append: what it does", note: "The description of the review_append tool.", text: "Add lines at the end of a part of the narrator's prompt: what the reply needs that the part doesn't say.", vars: [] },
+  { id: REVIEW_TEXT.tool(REVIEW_TOOLS.append), page, group: GROUP, label: "review_append: what it does", note: "The description of the review_append tool.", text: "In the final review: add lines at the end of a part of the narrator's prompt, what the reply needs that the part doesn't say.", vars: [] },
   { id: REVIEW_TEXT.toolArg(REVIEW_TOOLS.append, "part"), page, group: GROUP, label: "review_append: part", note: "The description of review_append's part argument.", text: "The part's id, as the review lists it.", vars: [] },
   { id: REVIEW_TEXT.toolArg(REVIEW_TOOLS.append, "text"), page, group: GROUP, label: "review_append: text", note: "The description of review_append's text argument.", text: "The line to add, as the narrator should read it; one per line break for several.", vars: [] },
-  { id: REVIEW_TEXT.tool(REVIEW_TOOLS.drop), page, group: GROUP, label: "review_drop: what it does", note: "The description of the review_drop tool.", text: "Take one line out of a part of the narrator's prompt, by its number as its part reads now.", vars: [] },
+  { id: REVIEW_TEXT.tool(REVIEW_TOOLS.drop), page, group: GROUP, label: "review_drop: what it does", note: "The description of the review_drop tool.", text: "In the final review: take a line out of a part of the narrator's prompt, by its number as its part reads now; with to, the whole block from line through to.", vars: [] },
   { id: REVIEW_TEXT.toolArg(REVIEW_TOOLS.drop, "part"), page, group: GROUP, label: "review_drop: part", note: "The description of review_drop's part argument.", text: "The part's id, as the review lists it.", vars: [] },
-  { id: REVIEW_TEXT.toolArg(REVIEW_TOOLS.drop, "line"), page, group: GROUP, label: "review_drop: line", note: "The description of review_drop's line argument.", text: "The line's number, as its part reads now.", vars: [] },
-  { id: REVIEW_TEXT.commit, page, group: GROUP, label: "commit, in the review: what it does", note: "The description of the commit tool in the final review.", text: "Hand the narrator the prompt as your edits leave it, and end the review.", vars: [] },
-  { id: REVIEW_TEXT.edited, page, group: GROUP, label: "An edit made", note: "review_replace's, review_append's and review_drop's answer: the part as it reads after the edit.", text: "Done. It now reads:\n{{part}}", vars: [v("part", "the part, as the review shows parts", true)] },
+  { id: REVIEW_TEXT.toolArg(REVIEW_TOOLS.drop, "line"), page, group: GROUP, label: "review_drop: line", note: "The description of review_drop's line argument.", text: "The line's number, as its part reads now; with to, the block's first.", vars: [] },
+  { id: REVIEW_TEXT.toolArg(REVIEW_TOOLS.drop, "to"), page, group: GROUP, label: "review_drop: to", note: "The description of review_drop's to argument: a block's last line.", text: "The block's last line, by its number as its part reads now, to take out every line from line through it; leave it out for line alone.", vars: [] },
+  { id: REVIEW_TEXT.tool(REVIEW_TOOLS.read), page, group: GROUP, label: "review_read: what it does", note: "The description of the review_read tool: an edit's answer shows only the lines around it.", text: "In the final review: read a part of the narrator's prompt whole, each line numbered as its part reads now. An edit answers with the lines around it alone.", vars: [] },
+  { id: REVIEW_TEXT.toolArg(REVIEW_TOOLS.read, "part"), page, group: GROUP, label: "review_read: part", note: "The description of review_read's part argument.", text: "The part's id, as the review lists it.", vars: [] },
+  { id: REVIEW_TEXT.commit, page, group: GROUP, label: "commit, in the review: what it does", note: "The description of the commit tool in the final review: the whole of it when the main agent works the review alone; after commit's own (Tools) in a turn a main agent decides, whose every stage offers the same tools.", text: "In the final review: hand the narrator the prompt as your edits leave it, and end the review.", vars: [] },
+  { id: REVIEW_TEXT.edited, page, group: GROUP, label: "An edit made", note: `review_replace's and review_append's answer: the lines the edit made, with up to ${AROUND_EDIT} either side, each numbered as its part reads after it. review_read shows a part whole.`, text: "Done. Part {{part}} now has {{count}} {{lines}}; around your edit it reads:\n{{excerpt}}", vars: [PART_VAR, v("count", "how many lines the part has now"), v("lines", '"line" for 1, else "lines"'), v("excerpt", "the lines around the edit, each numbered as the review numbers lines", true)] },
+  { id: REVIEW_TEXT.dropped, page, group: GROUP, label: "Lines taken out", note: `review_drop's answer: up to ${AROUND_EDIT} lines either side of where the lines it took out stood, each numbered as its part reads after it. review_read shows a part whole.`, text: "Done. Part {{part}} now has {{count}} {{lines}}; around the cut it reads:\n{{excerpt}}", vars: [PART_VAR, v("count", "how many lines the part has now"), v("lines", '"line" for 1, else "lines"'), v("excerpt", "the lines either side of where the lines stood, each numbered as the review numbers lines", true)] },
   { id: REVIEW_TEXT.refusedPart, page, group: GROUP, label: "No such part", note: "An edit's answer when no part of the prompt has the id it gave.", text: "No part of the narrator's prompt has the id {{part}}. Its parts are {{parts}}.", vars: [PART_VAR, v("parts", "every part's id")] },
-  { id: REVIEW_TEXT.refusedLine, page, group: GROUP, label: "No such line", note: "review_replace's and review_drop's answer for a line number its part doesn't have.", text: "Part {{part}} has no line {{line}}: it has {{count}} {{lines}}.", vars: [PART_VAR, v("line", "the number given"), v("count", "how many lines it has"), v("lines", '"line" for 1, else "lines"')] },
+  { id: REVIEW_TEXT.refusedLine, page, group: GROUP, label: "No such line", note: "review_replace's and review_drop's answer for a line number, or a block's last (to), that its part doesn't have.", text: "Part {{part}} has no line {{line}}: it has {{count}} {{lines}}.", vars: [PART_VAR, v("line", "the number given"), v("count", "how many lines it has"), v("lines", '"line" for 1, else "lines"')] },
   { id: REVIEW_TEXT.refusedText, page, group: GROUP, label: "No text", note: "review_replace's and review_append's answer when the text given is empty.", text: "Give the line's text: an empty one says nothing. review_drop takes a line out.", vars: [] },
+  { id: REVIEW_TEXT.refusedStage, page, group: GROUP, label: "Not in this stage", note: "A review tool's answer in any other stage of a turn a main agent decides: every stage offers the same tools, so that each call reads the prefix the provider cached, and the review's tools work only in the review.", text: "{{tool}} edits the narrator's prompt, and works only in the final review that opens stage 6, once the engine has made the prompt. In this stage, run the roles you want, then call commit.", vars: [v("tool", "the tool called")] },
   { id: REVIEW_TEXT.committed, page, group: GROUP, label: "Committed", note: "commit's answer in the final review, once it edited the prompt.", text: "Committed. The narrator gets the prompt with your {{count}} {{edits}}.", vars: [v("count", "how many edits the review made", true), v("edits", '"edit" for 1, else "edits"')] },
   { id: REVIEW_TEXT.committedNone, page, group: GROUP, label: "Committed, unchanged", note: "commit's answer in the final review when it edited nothing.", text: "Committed. The narrator gets the prompt as the engine made it.", vars: [] },
 ];

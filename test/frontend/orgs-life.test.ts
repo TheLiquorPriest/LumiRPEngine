@@ -275,7 +275,7 @@ describe("the Plan tab (assess-party §6.2, for any organization)", () => {
     const { w } = partyPlan();
     expect(orgTabs(page(w, PARTY), DEFS).map((t) => t.label)).toEqual(["Overview", "People", "Plan", "Rules"]);
     const marcus = starter("modern_slice_of_life", "Port Alder", "marcus_delgado");
-    expect(orgTabs(page(marcus, SHOP), DEFS).map((t) => t.label)).toEqual(["Overview", "People", "Plan", "Money", "Property", "Ownership", "Taxes", "Rules"]);
+    expect(orgTabs(page(marcus, SHOP), DEFS).map((t) => t.label)).toEqual(["Overview", "People", "Plan", "Money", "Property", "Ownership", "Taxes", "Decisions", "Rules"]);
     // A page draws the tab's component over its section; a shape it isn't reads as none.
     const drawn = pageRig(page(w, PARTY), PLAN_TAB).tree;
     expect(marked(drawn, "data-lre-org-tab").props["data-lre-org-tab"]).toBe(PLAN_TAB);

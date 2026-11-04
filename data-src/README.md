@@ -28,13 +28,16 @@ Raw, neutral JSON for the **Modern US** default data pack (design decision D26, 
 | `prices.json` | 358 items in 20 categories | price bands; sizes on physical goods |
 | `vehicles.json` | 19 | 12 road, 4 marine, 3 off-road classes |
 | `gear.json` | 90 items, 34 containers, 5 kits (+ 20 equip slots) | carried and household gear |
-| `finance.json` | 7 sections | macro, credit card, deposit accounts, loans, investing, payroll deductions, federal tax |
+| `finance.json` | 8 sections | macro, credit card, deposit accounts, loans, investing, payroll deductions, federal tax, unemployment taxes |
+| `exempt.json` | 3 | tax-exempt organization statuses (charity, church, social club) |
 | `index-history.json` | 282 months | the stock index's total return at each month's last close, May 2003 to October 2026 (exact) |
 | `calendar.json` | 11 federal holidays, 30 observances, 24 shift patterns | rules, not dates |
 
 ### `regions.json`
 
 `entries[]` fields: `id`, `abbr`, `name`; `census_region` (Northeast | Midwest | South | West), `census_division`; `time_zones` (IANA ids, primary first), `observes_dst`; `state_income_tax_effective_pct` (flat effective state rate on gross wages for a single filer at about $60,000, rounded 0.1; 0.0 where there is no wage tax); `local_income_tax_pct_typical` (extra local/county income tax, 0.0 if rare); `sales_tax_combined_avg_pct` (state plus average local, Tax Foundation 2025); `cost_of_living_multiplier` (US = 1.00; BEA regional price parities, smoothed); `median_rent_1br_cents_per_month`, `median_rent_2br_cents_per_month`; `residential_electricity_cents_per_kwh` (EIA, decimal cents); `minimum_wage_cents_per_hour` (effective 2025 floor, higher of state and the $7.25 federal rate); optional `notes` (zone splits, excluded taxes). `us_reference` holds the national values (rent $1,350/$1,650, 17 cents/kWh, 7.0% sales tax).
+
+Unemployment tax columns: `suta_wage_base_cents` (the state's 2025 taxable wage base, a year per employee per employer), `suta_new_employer_pct` (its 2025 new-employer rate, employer share, general industry) and, in a credit-reduction state only, `futa_credit_reduction_pct` (California 1.2 for 2025). `us_reference` carries `suta_wage_base_cents` 700000 and `suta_new_employer_pct` 2.7 (the federal floor and the commonest new-employer rate) for a world in no state.
 
 Basis: state brackets for 2025 (state revenue departments, Tax Foundation); rent is a blend of Zumper, Apartment List and HUD FY2025 Fair Market Rent patterns, **2BR is derived from 1BR** by a regional ratio (1.22 / 1.27 / 1.27 / 1.24 for Northeast / Midwest / South / West, DC uses South) and rounded to $10. The engine adds `state_income_tax_effective_pct` (and optionally the local rate) to the federal-plus-FICA rate from `occupations.json`.
 
@@ -69,7 +72,15 @@ Basis: typical product weights from spec sheets; prices consistent with `prices.
 
 Sections: `macro` (Fed funds, prime, CPI, Treasury yields), `credit_card` (APR range, minimum-payment formula with issuer variants and a default, late/returned-payment/cash-advance/foreign fees, grace period, annual fee, credit-score bands), `deposit_accounts` (savings APY regular vs high-yield, money market, CD, checking fees including overdraft and ATM), `loans` (auto new/used by credit tier, mortgage 30/15-year with down payment, PMI, closing costs, tax and insurance, personal loan, federal student loans, payday, BNPL), `investing` (broad-index annual return **11.0% arithmetic / 9.8% geometric, 16.0% volatility** with monthly/daily equivalents and a GBM recipe for seeded price paths; bonds, cash, home appreciation; retirement-account limits), `payroll_deductions_other_than_tax` (health premium ranges for single/family, deductible and out-of-pocket maximums, dental/vision, **401(k) default 3% and typical employee deferral 7.7% with employer match**, FSA/HSA, union dues, garnishment limits), `taxes_federal` (2025 brackets for single and married-filing-jointly in cents, standard deduction, FICA parameters, child tax credit, EITC, capital-gains bands, IRS mileage rate).
 
+`taxes_federal` also carries `charitable_contributions` (`agi_limit_pct` 60; `non_itemizer_cents` by filing status, $1,000 or $2,000 married filing jointly, from `non_itemizer_from_year` 2026 under OBBBA) and `consolidated_return_ownership_pct` 80 (the share of a corporation's votes and of its value an affiliated group holds to file one consolidated return with it, IRC section 1504(a)(2)). `taxes_unemployment` holds FUTA: `futa.wage_base_cents` 700000, `gross_pct` 6.0, `max_credit_pct` 5.4 (for state tax paid), `deposit_threshold_cents` 50000 (a liability under $500 carries to the next quarter; Form 940 settles the year by 31 January); SUTA's rates and bases are per state in `regions.json`.
+
 Basis: Fed G.19/H.15, FDIC, Freddie Mac PMMS, Bankrate/Edmunds, CFPB, KFF 2025, Vanguard HAS 2025, IRS 2025/2026 announcements (2026 401(k) $24,500 and IRA $7,500 values are as announced in late 2025). Rates float; the table is a snapshot.
+
+### `exempt.json`
+
+`entries[]` fields: `id` (the value an organization's `tax_exempt` names), `name`, `code` (the Internal Revenue Code section), `income_tax_exempt`, `donations_deductible` (a person's cash gifts are deductible), `futa` and `suta` (whether it owes each unemployment tax on its staff's wages), `description`. Rows: `charity` (501(c)(3): deductible, no FUTA, SUTA), `church` (501(c)(3): deductible, neither unemployment tax), `club` (501(c)(7): not deductible, both).
+
+Basis: IRS Publications 557, 526 and 15; IRC sections 3306(c)(8) and 3309(b)(1), as recalled.
 
 ### `index-history.json`
 

@@ -1,0 +1,52 @@
+{
+  "schema": "lre-data-src/us/exempt/v1",
+  "table": "exempt",
+  "approximate": true,
+  "country": "US",
+  "currency": "USD",
+  "money_unit": "integer cents",
+  "reflects_period": "2025-2026 (point-in-time rules)",
+  "basis": "The common kinds of tax-exempt organization and how the Internal Revenue Code treats each, as recalled from IRS Publications 557 (Tax-Exempt Status for Your Organization), 526 (Charitable Contributions) and 15 (Employer's Tax Guide), and the FUTA and state unemployment exclusions (IRC sections 3306(c)(8) and 3309(b)(1)); not queried live. Treat as plausible defaults, not legal advice.",
+  "fields": {
+    "id": "Lower-snake stable key: the value an organization's tax_exempt field names.",
+    "name": "The status in words.",
+    "code": "The Internal Revenue Code section that exempts it.",
+    "income_tax_exempt": "Whether it pays no federal income tax on its income (true for every row here).",
+    "donations_deductible": "Whether a person's cash gifts to it are deductible (IRC section 170).",
+    "futa": "Whether it owes federal unemployment tax (FUTA) on its staff's wages.",
+    "suta": "Whether it owes state unemployment tax (SUTA) on its staff's wages.",
+    "description": "What kind of organization holds the status."
+  },
+  "entries": [
+    {
+      "id": "charity",
+      "name": "Charity or nonprofit",
+      "code": "501(c)(3)",
+      "income_tax_exempt": true,
+      "donations_deductible": true,
+      "futa": false,
+      "suta": true,
+      "description": "A public charity or other nonprofit organized for charitable, educational, scientific or literary purposes: a food bank, a shelter, a school, a museum. Gifts to it are deductible; it owes no FUTA but pays state unemployment tax."
+    },
+    {
+      "id": "church",
+      "name": "Church or religious organization",
+      "code": "501(c)(3)",
+      "income_tax_exempt": true,
+      "donations_deductible": true,
+      "futa": false,
+      "suta": false,
+      "description": "A church, synagogue, mosque, temple or other religious organization, exempt without applying. Gifts to it are deductible; it owes neither FUTA nor state unemployment tax."
+    },
+    {
+      "id": "club",
+      "name": "Social club",
+      "code": "501(c)(7)",
+      "income_tax_exempt": true,
+      "donations_deductible": false,
+      "futa": true,
+      "suta": true,
+      "description": "A club organized for pleasure and recreation, supported by its members' dues: a country club, a hobby or sports club, a fraternal lodge's social arm. Exempt on its members' money, but gifts to it are not deductible, and it pays unemployment taxes like any employer."
+    }
+  ]
+}

@@ -1,16 +1,18 @@
 // Build's money editors (DESIGN §13, §25, §26, §27.10): the Custom toggles, the region, living
-// costs, taxes and share units as the economy config stores them, household shares that add up,
-// schedule lists as typed, structured values kept free of empty parts, and every money field and
-// place field reaching its editor through the registry.
+// costs, taxes (the unemployment taxes' rates and wage bases among them) and share units as the
+// economy config stores them, household shares that add up, schedule lists as typed, structured
+// values kept free of empty parts, and every money field and place field reaching its editor
+// through the registry.
 
 import { describe, expect, test } from "bun:test";
 import { fieldEditorFor } from "../../src/frontend/build/schema-form";
 import { buildCatalog } from "../../src/frontend/ui-registry";
 import economy from "../../src/packs/economy/ui/index";
-import { exemptChoices, regionChoices, toggleOf, withLivingCost, withRegion, withTax, withToggle } from "../../src/packs/economy/ui/config";
+import { exemptChoices, regionChoices, toggleOf, withLivingCost, withRegion, withTax, withToggle, type TaxSetting } from "../../src/packs/economy/ui/config";
 import { ALL_PACKS, STARTER_WORLDS } from "../../src/packs/index";
 import { compact, equalShares, householdMembers, monthDays, numbersOf, recordsOf } from "../../src/packs/economy/ui/field-editors";
 import { corporateTax, taxExempt } from "../../src/packs/economy/core/taxes";
+import { unemploymentRates } from "../../src/packs/economy/core/unemployment";
 import { featureFor } from "../../src/packs/economy/core/pay";
 import { applyEffects } from "../../src/engine/effects";
 import { createRegistry } from "../../src/engine/registry-impl";
@@ -91,6 +93,22 @@ describe("the economy's taxes and shares", () => {
     const tax = (world: WorldDoc): number => corporateTax(new Working(reg, world, startState(world)).ctx, "alder_automotive_co", 100000);
     expect(tax(edited) - tax(starter)).toBe(4000);
     expect(withTax(withTax({ unpricedCap: 500, taxes: { exempt: ["medical"], corporatePct: 25 } }, "exempt", undefined), "corporatePct", undefined)).toEqual({ unpricedCap: 500 });
+  });
+
+  test("the unemployment taxes' rates and wage bases are stored where the engine reads them, and emptied the tables' are back", () => {
+    const reg = createRegistry(ALL_PACKS);
+    const rates = (world: WorldDoc) => unemploymentRates(new Working(reg, world, startState(world)).ctx, "alder_automotive_co");
+    // Port Alder's tables: FUTA 6% less the 5.4% credit on $7,000; Michigan's SUTA 2.7% on $9,500.
+    const starter = portAlder((c) => c);
+    expect(rates(starter)).toEqual({ futa: { grossPct: 6, creditPct: 5.4, reductionPct: 0, base: 700_000 }, suta: { pct: 2.7, base: 950_000 } });
+    const settings = { futaPct: 6.2, futaWageBase: 800_000, futaCreditPct: 5, sutaPct: 3.1, sutaWageBase: 1_000_000 } as const;
+    const edited = portAlder((c) => Object.entries(settings).reduce((config, [key, value]) => withTax(config, key as TaxSetting, value), c));
+    expect(edited.packs.economy?.config.taxes).toEqual({ ...(starter.packs.economy?.config.taxes as JsonObject), ...settings });
+    expect(rates(edited)).toEqual({ futa: { grossPct: 6.2, creditPct: 5, reductionPct: 0, base: 800_000 }, suta: { pct: 3.1, base: 1_000_000 } });
+    // Each emptied goes, and with none left (the exempt categories emptied too), `taxes` goes.
+    const cleared = portAlder(() => [...Object.keys(settings), "exempt"].reduce((config, key) => withTax(config, key as TaxSetting, undefined), edited.packs.economy?.config ?? {}));
+    expect(cleared.packs.economy?.config.taxes).toBeUndefined();
+    expect(rates(cleared)).toEqual(rates(starter));
   });
 
   test("the units a company starts counting its shares in are stored where the engine reads them", () => {

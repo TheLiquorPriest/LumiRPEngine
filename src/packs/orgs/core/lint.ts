@@ -4,7 +4,10 @@
 // to no one, seats for every holder, a position taken off a link or a job, a delegation cut to what
 // its granter holds, shares set from units, a company group made a business, and a Head position
 // for the member titled head. A pass-through company's profit owned by an organization that pays
-// no income tax is told too, with no fix: who should be taxed on it is the author's to say. Pure.
+// no income tax is told too, with no fix: who should be taxed on it is the author's to say; an
+// exempt holder isn't, its exemption saying why. Exempt statuses (§3.11, Phase 5): one the world's
+// exempt table doesn't hold, or one on a household or the party, is told with a fix that takes it
+// off, and an exempt company whose owners hold its worth is told. Pure.
 
 import { ownersIn, worthShares } from "../../../shared/finance";
 import type { EntityId } from "../../../shared/ids";
@@ -43,6 +46,9 @@ export const ORG_LINT = {
   companyGroup: "orgs.company_group",
   headTitle: "orgs.head_title",
   profitUntaxed: "orgs.profit_untaxed",
+  exemptUnknown: "orgs.exempt_unknown",
+  exemptType: "orgs.exempt_type",
+  exemptOwners: "orgs.exempt_owners",
 } as const;
 
 /** The world as a chat starts on it. */
@@ -149,23 +155,60 @@ function unitIssues(world: WorldDoc): LintIssue[] {
   return out;
 }
 
+/** The exempt status an entity's `tax_exempt` names in the world's exempt table (ORG-SPEC §3.11, Phase 5), its row; undefined for none or an unknown one. */
+function exemptRow(world: WorldDoc, id: EntityId): Record<string, JsonValue> | undefined {
+  const status = own(world.entities, id)?.fields.tax_exempt;
+  return typeof status === "string" && status.trim() !== "" ? own(world.tables["economy.exempt"]?.rows ?? {}, status.trim()) : undefined;
+}
+
 /**
  * A pass-through company (any structure but a C corporation's) whose owners include an organization
  * that is neither a person nor a company (a household, a group, a trust, the party): its profit, and
  * what companies under it pass up, reaches that holder, and no one pays income tax on that share
- * (§3.11). A company holder passes it on up, or as a C corporation pays it, so it is told where it holds.
+ * (§3.11). A company holder passes it on up, or as a C corporation pays it, so it is told where it
+ * holds; an exempt holder, or an exempt company, keeps it untaxed by its exemption (Phase 5).
  */
 function untaxedIssues(world: WorldDoc, ctx: ReadContext): LintIssue[] {
   const out: LintIssue[] = [];
   for (const id of Object.keys(world.entities).sort()) {
     const e = own(world.entities, id);
-    if (!e || orgTypeOf(ctx, id) !== "company" || e.fields.structure === "c_corp") continue;
-    const untaxed = Object.entries(worthShares(ownersIn(e.fields))).filter(([holder, share]) => share > 0 && holder !== id && orgTypeOf(ctx, holder) !== null && orgTypeOf(ctx, holder) !== "company");
+    if (!e || orgTypeOf(ctx, id) !== "company" || e.fields.structure === "c_corp" || exemptRow(world, id)) continue;
+    const untaxed = Object.entries(worthShares(ownersIn(e.fields))).filter(([holder, share]) => share > 0 && holder !== id && orgTypeOf(ctx, holder) !== null && orgTypeOf(ctx, holder) !== "company" && !exemptRow(world, holder));
     if (untaxed.length === 0) continue;
     const names = untaxed.map(([holder, share]) => `${nameOf(world, holder)} (${Math.round(share * 100) / 100}%)`);
     const who = names.length === 1 ? names[0] : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
     const one = names.length === 1;
     out.push({ severity: "warning", code: ORG_LINT.profitUntaxed, path: `entities.${id}.fields.owners`, message: `${e.name} passes its profit through to its owners, and ${who} ${one ? "pays" : "pay"} no income tax on ${one ? "its share" : "their shares"}, so no one does: only people and C corporations pay it.` });
+  }
+  return out;
+}
+
+/**
+ * Exempt statuses (§3.11, Phase 5): one the world's exempt table doesn't hold (Fix: take it off), on a
+ * household or the party, which can't be exempt (Fix: take it off), and on a company whose owners
+ * hold shares of its worth, as an exempt organization pays no one its profit.
+ */
+function exemptIssues(world: WorldDoc, ctx: ReadContext): LintIssue[] {
+  const out: LintIssue[] = [];
+  const known = Object.keys(world.tables["economy.exempt"]?.rows ?? {});
+  for (const id of Object.keys(world.entities).sort()) {
+    const e = own(world.entities, id);
+    const status = e?.fields.tax_exempt;
+    if (!e || typeof status !== "string" || status.trim() === "") continue;
+    const path = `entities.${id}.fields.tax_exempt`;
+    const drop = dropFix("Take the status off", ["entities", id, "fields", "tax_exempt"]);
+    const row = exemptRow(world, id);
+    if (!row) {
+      out.push({ severity: "error", code: ORG_LINT.exemptUnknown, path, message: `${e.name}'s tax-exempt status "${status}" isn't one of the world's (${known.length > 0 ? known.join(", ") : "its tables hold none: take the Data update"}).`, fix: drop });
+      continue;
+    }
+    const type = orgTypeOf(ctx, id);
+    if (type === "household" || type === "party") {
+      out.push({ severity: "warning", code: ORG_LINT.exemptType, path, message: `${e.name} is a ${type}, which can't be exempt from income tax: only a company, a group or a trust can.`, fix: drop });
+      continue;
+    }
+    const owners = type === "company" ? Object.entries(worthShares(ownersIn(e.fields))).filter(([holder, share]) => share > 0 && holder !== id) : [];
+    if (owners.length > 0) out.push({ severity: "warning", code: ORG_LINT.exemptOwners, path: `entities.${id}.fields.owners`, message: `${e.name} is exempt as ${typeof row.name === "string" ? row.name : status}, but ${owners.map(([holder]) => nameOf(world, holder)).join(", ")} ${owners.length === 1 ? "holds a share" : "hold shares"} of its worth: an exempt organization pays no one its profit, and no one is taxed on it.` });
   }
   return out;
 }
@@ -205,4 +248,5 @@ export const ORG_LINTS: readonly LintRule[] = [
   { code: "orgs.delegations", check: (world, registry) => (registry ? delegationIssues(world, startOf(world, registry)) : []) },
   { code: "orgs.owners", check: (world, registry) => [...unitIssues(world), ...(registry ? untaxedIssues(world, startOf(world, registry)) : [])] },
   { code: "orgs.kinds", check: (world, registry) => (registry ? kindIssues(world, startOf(world, registry)) : []) },
+  { code: "orgs.taxes", check: (world, registry) => (registry ? exemptIssues(world, startOf(world, registry)) : []) },
 ];

@@ -1,9 +1,9 @@
 // The agent runtime and its provider adapter (INC1-SPEC R1), on a scripted model in the fake host:
 // tool round trips, calls written as text, the loop detector, every budget and ceiling refusing, the
-// acceptance guard, cancel mid-call, effort and thinking with tools, caching, usage, and the settings.
+// acceptance guard, cancel mid-call, streaming, effort and thinking with tools, caching, usage, and the settings.
 
 import { describe, expect, test } from "bun:test";
-import type { QuietMessage, QuietRequest, QuietToolCall } from "../../src/backend/host";
+import type { QuietMessage, QuietRequest, QuietResult, QuietToolCall } from "../../src/backend/host";
 import { ACCEPTANCE_PATH, type AccountsClock, AgentAccounts, effortChoice, ownBreakpoints, recoverToolCalls } from "../../src/backend/agents/provider";
 import { type AgentSpec, type AgentTool, AgentTurn, SCRATCH_READ, startAgent } from "../../src/backend/agents/runtime";
 import { parseUsage } from "../../src/backend/agents/usage";
@@ -318,6 +318,21 @@ describe("the loop detector", () => {
     const r = rig(answers);
     expect(await r.start(spec({ tools: [lookup] })).send("Go.")).toMatchObject({ status: "answered" });
     expect(lookup.runs.map((a) => a.q)).toEqual([..."aabba"]);
+  });
+
+  test("a call on a state its tool says changed since the one before is a new call: the same arguments go on while each changes something, and stop once they change nothing", async () => {
+    // A take-out by position, as the final review's: line 1 again is the next line, until none is left.
+    let lines = 4;
+    const drop: AgentTool & { runs: JsonObject[] } = { ...tool("drop", () => (lines > 0 ? `Done: ${--lines} left.` : "No such line.")), state: () => lines };
+    const r = rig(() => ({ content: "", toolCalls: [call("drop", { line: 1 })] }));
+    expect(await r.start(spec({ tools: [drop] })).send("Take out every line.")).toMatchObject({ status: "stopped", code: "loop" });
+    // Four that each took a line out, then the refusals on what no longer changes: the third in a row isn't run.
+    expect([drop.runs.length, lines]).toEqual([6, 0]);
+    // Without a state of its own, the same calls stop at the setting's count, as any tool's do.
+    lines = 4;
+    const plain = tool("drop", () => `Done: ${--lines} left.`);
+    expect(await rig(() => ({ content: "", toolCalls: [call("drop", { line: 1 })] })).start(spec({ tools: [plain] })).send("Take out every line.")).toMatchObject({ status: "stopped", code: "loop" });
+    expect(plain.runs.length).toBe(defaultAgentSettings().loopRepeats - 1);
   });
 });
 
@@ -780,6 +795,209 @@ describe("cancel", () => {
   });
 });
 
+describe("streaming", () => {
+  /** An agent's call as the port gets it: a tool, an effort of its own, and its usage asked for. */
+  const request: QuietRequest = { messages: [{ role: "user", content: "Where is Danny?" }], maxTokens: 100, json: false, connectionId: "c", model: null, tools: [{ name: "lookup", description: "Looks things up.", parameters: { type: "object" } }], effort: "high", usage: true };
+
+  type Sent = { method: "quiet" | "quietStream"; input: Record<string, unknown> };
+
+  /** Lumiverse's generation in the fake `spindle` global, with `connections` as a call with JSON mode off never reads it. */
+  const install = (generate: Record<string, unknown>): void => void Object.assign(globalThis, { spindle: { generate, connections: { list: async () => [] } } });
+  const uninstall = (): void => void Object.assign(globalThis, { spindle: undefined });
+
+  /**
+   * Lumiverse's generation as an extension's worker has it, answering every call with `answer`:
+   * `generate.quiet` returns it whole; `generate.quietStream` sends its reasoning and its text a few
+   * characters at a time, then its end, filled as Lumiverse fills it (the pieces joined, why it
+   * ended, the tool calls and the usage).
+   */
+  function lumiverse(answer: Record<string, unknown>): Sent[] {
+    const sent: Sent[] = [];
+    const pieces = (text: unknown): string[] => (typeof text === "string" ? (text.match(/[\s\S]{1,3}/g) ?? []) : []);
+    install({
+      quiet: async (input: Record<string, unknown>) => (sent.push({ method: "quiet", input }), answer),
+      quietStream: (input: Record<string, unknown>) => {
+        sent.push({ method: "quietStream", input });
+        return (async function* () {
+          let reasoning = "";
+          let content = "";
+          for (const token of pieces(answer.reasoning)) {
+            reasoning += token;
+            yield { type: "reasoning", token };
+          }
+          for (const token of pieces(answer.content)) {
+            content += token;
+            yield { type: "token", token };
+          }
+          yield { type: "done", content, reasoning: reasoning || undefined, finish_reason: answer.finish_reason, tool_calls: answer.tool_calls, usage: answer.usage };
+        })();
+      },
+    });
+    return sent;
+  }
+
+  test("a streamed call reads as the same call answered whole, sent as the same request: its text, tool calls, reasoning, why it ended and its usage", async () => {
+    const usage = { prompt_tokens: 120, completion_tokens: 30, total_tokens: 150, provider_raw: { input_tokens: 20, cache_read_input_tokens: 100, cache_creation_input_tokens: 0, output_tokens: 30 } };
+    const answers = [
+      { content: "Let me look.", reasoning: "He was at the shop at noon.", finish_reason: "tool_calls", tool_calls: [{ name: "lookup", args: { q: "Danny" }, call_id: "toolu_1", thought_signature: "sig-1" }, { name: "lookup", args: { q: "shop" }, call_id: "toolu_2" }], usage },
+      { content: "Danny is at the shop.", finish_reason: "stop", usage: { prompt_tokens: 160, completion_tokens: 8, total_tokens: 168 } },
+      { content: "", finish_reason: "length" },
+    ];
+    try {
+      const read: QuietResult[] = [];
+      for (const answer of answers) {
+        const sent = lumiverse(answer);
+        const host = createSpindleHost();
+        const signal = new AbortController().signal;
+        const whole = await host.models.quiet(request, "u", signal);
+        const streamed = await host.models.quiet({ ...request, stream: true }, "u", signal);
+        expect(streamed).toEqual(whole);
+        expect(sent.map((s) => s.method)).toEqual(["quiet", "quietStream"]);
+        expect(sent[1]?.input).toEqual(sent[0]?.input ?? {});
+        read.push(streamed);
+      }
+      expect(read[0]).toEqual({ content: "Let me look.", finishReason: "tool_calls", tokens: 150, tokensIn: 120, tokensOut: 30, toolCalls: [{ name: "lookup", args: { q: "Danny" }, callId: "toolu_1", thoughtSignature: "sig-1" }, { name: "lookup", args: { q: "shop" }, callId: "toolu_2" }], reasoning: "He was at the shop at noon.", usage });
+      expect(read[1]).toMatchObject({ content: "Danny is at the shop.", finishReason: "stop", tokensIn: 160, tokensOut: 8 });
+      expect(read[2]).toEqual({ content: "", finishReason: "length", tokens: 0 });
+    } finally {
+      uninstall();
+    }
+  });
+
+  test("on by default, every agent call goes to Lumiverse as a stream; off, each is answered whole; the agent reads the same either way", async () => {
+    expect(defaultAgentSettings().stream).toBe(true);
+    const answer = { content: "Danny is at the shop.", finish_reason: "stop", usage: { prompt_tokens: 160, completion_tokens: 8, total_tokens: 168, provider_raw: { prompt_tokens: 160, completion_tokens: 8, prompt_tokens_details: { cached_tokens: 128 }, completion_tokens_details: { reasoning_tokens: 0 } } } };
+    const run = async (settings: AgentSettings) => {
+      const sent = lumiverse(answer);
+      const r = rig([], settings);
+      r.host.models = createSpindleHost().models;
+      const reply = await r.start().send("Where is Danny?");
+      return { methods: sent.map((s) => s.method), reply: { ...reply, usage: { ...reply.usage, ms: 0 } } };
+    };
+    try {
+      const on = await run(settingsWith());
+      const off = await run(settingsWith((s) => (s.stream = false)));
+      expect(on.methods).toEqual(["quietStream"]);
+      expect(off.methods).toEqual(["quiet"]);
+      expect(on.reply).toMatchObject({ status: "answered", text: "Danny is at the shop.", usage: { calls: 1, in: 160, cachedIn: 128, out: 8, estimated: false } });
+      expect(on.reply).toEqual(off.reply);
+    } finally {
+      uninstall();
+    }
+  });
+
+  test("a cancel mid-stream ends the call at once, as Lumiverse's AbortError, before Lumiverse answers it; the stream hears it, and is let go once Lumiverse answers", async () => {
+    const streaming = Promise.withResolvers<void>();
+    const answered = Promise.withResolvers<never>();
+    const released = Promise.withResolvers<void>();
+    let heard: AbortSignal | undefined;
+    let closed = false;
+    install({
+      quietStream: (input: { signal?: AbortSignal }) => {
+        heard = input.signal;
+        return (async function* () {
+          try {
+            yield { type: "token", token: "Danny is" };
+            streaming.resolve();
+            // Nothing more comes until Lumiverse answers the cancel.
+            await answered.promise;
+          } finally {
+            closed = true;
+            released.resolve();
+          }
+        })();
+      },
+    });
+    try {
+      const controller = new AbortController();
+      const call = createSpindleHost().models.quiet({ ...request, stream: true }, "u", controller.signal);
+      await streaming.promise;
+      controller.abort();
+      const error = await call.then(
+        () => null,
+        (e: unknown) => e,
+      );
+      expect(error instanceof DOMException && error.name).toBe("AbortError");
+      expect(heard?.aborted).toBe(true);
+      expect(closed).toBe(false);
+      answered.reject(new DOMException("Generation aborted", "AbortError"));
+      await released.promise;
+      expect(closed).toBe(true);
+      // A call cancelled before it starts asks for nothing.
+      let asked = false;
+      install({ quietStream: () => (async function* () { asked = true; yield { type: "token", token: "x" }; })() });
+      await expect(createSpindleHost().models.quiet({ ...request, stream: true }, "u", AbortSignal.abort())).rejects.toThrow("Generation aborted");
+      expect(asked).toBe(false);
+    } finally {
+      uninstall();
+    }
+  });
+
+  test("a stream that fails fails the call with Lumiverse's error, and one that ends without its answer fails it too", async () => {
+    const streams = [
+      async function* () {
+        yield { type: "token", token: "Dan" };
+        throw new Error("429: rate limited");
+      },
+      async function* () {
+        yield { type: "token", token: "Dan" };
+      },
+    ];
+    let next = 0;
+    install({ quietStream: () => streams[next++]?.() });
+    try {
+      const host = createSpindleHost();
+      const signal = new AbortController().signal;
+      await expect(host.models.quiet({ ...request, stream: true }, "u", signal)).rejects.toThrow("429: rate limited");
+      await expect(host.models.quiet({ ...request, stream: true }, "u", signal)).rejects.toThrow("The model's stream ended without its answer");
+    } finally {
+      uninstall();
+    }
+  });
+
+  test("an agent cancelled mid-stream stops at once, and a call's time limit counts the whole call, however long it streams", async () => {
+    const streams: { signal: AbortSignal; released: PromiseWithResolvers<void> }[] = [];
+    const flowing = Promise.withResolvers<void>();
+    // Lumiverse's stream as it answers a cancel: pieces keep coming until the call's signal fires, then it ends in an AbortError.
+    install({
+      quietStream: (input: { signal: AbortSignal }) => {
+        const stream = { signal: input.signal, released: Promise.withResolvers<void>() };
+        streams.push(stream);
+        return (async function* () {
+          try {
+            for (let sent = 1; ; sent++) {
+              if (input.signal.aborted) throw new DOMException("Generation aborted", "AbortError");
+              yield { type: "token", token: "and then " };
+              if (sent === 3) flowing.resolve();
+              // A real pause between pieces: the time limit under test is the runtime's own timer, which only fires between them.
+              await Bun.sleep(1);
+            }
+          } finally {
+            stream.released.resolve();
+          }
+        })();
+      },
+    });
+    try {
+      const r = rig([]);
+      r.host.models = createSpindleHost().models;
+      const agent = r.start();
+      const pending = agent.send("Go.");
+      await flowing.promise;
+      agent.cancel();
+      expect(await pending).toMatchObject({ status: "cancelled", code: "cancelled" });
+      const timed = rig([]);
+      timed.host.models = createSpindleHost().models;
+      expect(await timed.start(spec({ budget: { ...spec().budget, callMs: 20 } })).send("Go.")).toMatchObject({ status: "refused", code: "call_time" });
+      // Each stream heard its call's end, and was let go of.
+      await Promise.all(streams.map((s) => s.released.promise));
+      expect(streams.map((s) => s.signal.aborted)).toEqual([true, true]);
+    } finally {
+      uninstall();
+    }
+  });
+});
+
 describe("effort", () => {
   test("each effort maps to the host's reasoning choice: set by the model as auto, inherit as none; asked to, an effort of the call's own shows the model's thinking summarized", () => {
     expect((["off", "low", "medium", "high", "model", "inherit"] as const).map(effortChoice)).toEqual(["off", "low", "medium", "high", "auto", "inherit"]);
@@ -932,11 +1150,12 @@ describe("usage", () => {
 describe("the settings", () => {
   test("a new user's agent settings are §15's defaults, each one the reader keeps or falls back from", () => {
     const d = defaultAgentSettings();
-    expect(d).toMatchObject({ thinkingInToolLoops: false, turn: { tokensIn: "none", tokensOut: "none", toolTurns: "none", wallMs: "none" }, budget: { toolTurns: 10, revisions: 2, tokensIn: "none", tokensOut: "none", wallMs: "none" }, loopRepeats: 3, clipChars: 4000, throttles: [], caching: { on: true } });
+    expect(d).toMatchObject({ thinkingInToolLoops: false, stream: true, turn: { tokensIn: "none", tokensOut: "none", toolTurns: "none", wallMs: "none" }, budget: { toolTurns: 10, revisions: 2, tokensIn: "none", tokensOut: "none", wallMs: "none" }, loopRepeats: 3, clipChars: 4000, throttles: [], caching: { on: true } });
     expect(d.acceptance).toEqual({ connections: [], estimateFactor: 2 });
     expect(agentSettingsOf(undefined)).toEqual(d);
-    const read = agentSettingsOf({ loopRepeats: 1, clipChars: 0, budget: { revisions: -1, toolTurns: "none", concurrency: 0 }, turn: { tokensIn: "none" }, acceptance: { estimateFactor: 0, connections: [{ id: "__proto__" }, { id: "c1", only: false, tokensIn: 5, tokensOut: "none" }] }, throttles: [{ id: "c1", requestsPerMinute: 0, tokensPerMinute: 9000 }] });
-    expect(read).toMatchObject({ loopRepeats: 3, clipChars: 4000, budget: { revisions: 2, toolTurns: "none", concurrency: 4 }, turn: { tokensIn: "none" }, acceptance: { estimateFactor: 2, connections: [{ id: "c1", only: false, tokensIn: 5, tokensOut: "none" }] }, throttles: [{ id: "c1", requestsPerMinute: "none", tokensPerMinute: 9000 }] });
+    const read = agentSettingsOf({ stream: "no", loopRepeats: 1, clipChars: 0, budget: { revisions: -1, toolTurns: "none", concurrency: 0 }, turn: { tokensIn: "none" }, acceptance: { estimateFactor: 0, connections: [{ id: "__proto__" }, { id: "c1", only: false, tokensIn: 5, tokensOut: "none" }] }, throttles: [{ id: "c1", requestsPerMinute: 0, tokensPerMinute: 9000 }] });
+    expect(read).toMatchObject({ stream: true, loopRepeats: 3, clipChars: 4000, budget: { revisions: 2, toolTurns: "none", concurrency: 4 }, turn: { tokensIn: "none" }, acceptance: { estimateFactor: 2, connections: [{ id: "c1", only: false, tokensIn: 5, tokensOut: "none" }] }, throttles: [{ id: "c1", requestsPerMinute: "none", tokensPerMinute: 9000 }] });
+    expect(agentSettingsOf({ stream: false }).stream).toBe(false);
   });
 
   /** A settings file as stored, `{v: 1}` and `file`. */
@@ -998,6 +1217,8 @@ describe("the settings", () => {
     expect((await set({ throttles: [] })).throttles).toEqual([]);
     expect((await set({ turn: { tokensOut: 20_000 } })).turn.tokensOut).toBe(20_000);
     expect((await set({ turn: { tokensOut: null } })).turn.tokensOut).toBe("none");
+    expect((await set({ stream: false })).stream).toBe(false);
+    expect((await set({ stream: null })).stream).toBe(true);
     // A new user's file holds none of it until they change one, and reads as the defaults.
     const fresh = new Rig();
     expect(settingsOf(fresh.body(await fresh.send({ type: "lre.settings.get" }))).agents).toEqual(defaultAgentSettings());

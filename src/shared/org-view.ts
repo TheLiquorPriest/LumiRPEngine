@@ -8,6 +8,7 @@ import type { EntityId, PlaceId } from "./ids";
 import type { JsonValue } from "./json";
 import type { Audience, DUES_EVERY, MemberHow, OrgBasis, OrgLimits, OrgPower, OrgType, PositionScope } from "./org";
 import type { OwnerRole } from "./finance";
+import { DECISIONS_SECTION } from "./org-motions";
 import type { PartyTier } from "./party";
 
 /** The panels' ids. */
@@ -115,6 +116,13 @@ export interface OrgDuesView {
   day: number | null;
 }
 
+/** A company's end (ORG-SPEC §3.13): winding up since, or dissolved on, a day in words, and the company a merger folded it into. */
+export interface OrgEndedView {
+  winding: string | null;
+  dissolved: string | null;
+  mergedInto: OrgRef | null;
+}
+
 /** One organization's page (`orgs.org`). */
 export interface OrgView {
   id: EntityId;
@@ -130,6 +138,8 @@ export interface OrgView {
   level: number;
   /** False for the party before it has an entity of its own. */
   exists: boolean;
+  /** Winding up or dissolved; null while it stands. */
+  ended: OrgEndedView | null;
   you: OrgYouView;
   /** Who runs it: the holders of its governing power by ownership or position. */
   runBy: OrgRef[];
@@ -248,13 +258,13 @@ export interface GmPlaceEntry extends PremiseView {
 }
 
 /** The parts of an organization's page an agent or an outside client reads on its own (ORG-SPEC §7.1, §7.5). */
-export const ORG_PARTS = ["overview", "people", "money", "property", "ownership", "taxes", "rules", "log"] as const;
+export const ORG_PARTS = ["overview", "people", "money", "property", "ownership", "taxes", "rules", "decisions", "log"] as const;
 export type OrgPart = (typeof ORG_PARTS)[number];
 
 /**
  * One part of a page (`orgs_read`, `lre_orgs`): what it is and your place there, its people (with
- * those not shown counted and Payroll), its sections (Money, Premises, Ownership, Taxes; null where
- * the reader may see none), its positions and delegations, or its History. Pure.
+ * those not shown counted and Payroll), its sections (Money, Premises, Ownership, Taxes, Decisions;
+ * null where the reader may see none), its positions and delegations, or its History. Pure.
  */
 export function orgPart(page: OrgView, part: OrgPart): Record<string, unknown> {
   const s = page.sections;
@@ -273,6 +283,8 @@ export function orgPart(page: OrgView, part: OrgPart): Record<string, unknown> {
       return { taxes: s.taxes ?? null };
     case "rules":
       return { positions: page.positions, delegations: page.delegations, defaultPosition: page.defaultPosition };
+    case "decisions":
+      return { decisions: s[DECISIONS_SECTION] ?? null };
     case "log":
       return { history: page.history };
   }

@@ -529,7 +529,7 @@ function repoint(api: FinanceApi, ctx: ReadContext, lease: EntityId, side: { to:
  * Leases follow their property to its new owners: each that paid the old ones now pays the new ones'
  * deposit accounts, split by their shares (sold to nobody in the world, they end today).
  */
-function moveLeases(api: FinanceApi, ctx: ReadContext, property: EntityId, owners: readonly EntityId[], next: readonly Owner[]): LedgerEvent[] {
+export function moveLeases(api: FinanceApi, ctx: ReadContext, property: EntityId, owners: readonly EntityId[], next: readonly Owner[]): LedgerEvent[] {
   const out: LedgerEvent[] = [];
   const side = ownersSide(api, ctx, next);
   for (const l of authoredLeases(ctx, property)) {

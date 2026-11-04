@@ -444,6 +444,86 @@
         "minimum_wage_cents_per_h": "9b611a59",
         "tipped_minimum_wage_cents_per_h": "9b5fb4b8",
         "notes": "818bffbf"
+      },
+      "changed": {
+        "al": "69b3c9dc",
+        "ak": "a32d4219",
+        "az": "78246ecd",
+        "ar": "b21a1bc7",
+        "ca": "8a98ff2a",
+        "co": "cf108580",
+        "ct": "186c5a33",
+        "de": "b874fe8c",
+        "dc": "a15c7c53",
+        "fl": "1f7c1b40",
+        "ga": "bd7869c0",
+        "hi": "eeabe1c1",
+        "id": "f864143a",
+        "il": "811b2c0f",
+        "in": "e36770a6",
+        "ia": "3c7a1fa9",
+        "ks": "5777406c",
+        "ky": "08c5d58d",
+        "la": "d0dbac36",
+        "me": "64289d3d",
+        "md": "8ddf0598",
+        "ma": "969e1d87",
+        "mi": "fd16b7c3",
+        "mn": "9fbd2787",
+        "ms": "dea7b16d",
+        "mo": "425af806",
+        "mt": "d9730734",
+        "ne": "0c8dc6e2",
+        "nv": "0c9892a3",
+        "nh": "f060e4f6",
+        "nj": "855b6921",
+        "nm": "f880d62b",
+        "ny": "ec8574a5",
+        "nc": "9508437e",
+        "nd": "f931aeae",
+        "oh": "d76f957d",
+        "ok": "0446c269",
+        "or": "556c0a81",
+        "pa": "7d7d65c6",
+        "ri": "71d7c9b2",
+        "sc": "52fe9dc7",
+        "sd": "ba8ddf60",
+        "tn": "bde9b65a",
+        "tx": "7321d51f",
+        "ut": "326d0b46",
+        "vt": "dbffdff5",
+        "va": "cad01e8b",
+        "wa": "7379ff52",
+        "wv": "de22525b",
+        "wi": "faef0a41",
+        "wy": "91214b90",
+        "us": "d25c0d65"
+      }
+    },
+    {
+      "revision": "0a14f13dda6e977fe0243eaaca5d1790",
+      "columns": {
+        "name": "36de7a58",
+        "abbr": "36de7a58",
+        "scope": "aa3b7497",
+        "census_region": "24ecfdfd",
+        "census_division": "5a358b37",
+        "time_zones": "74f530e5",
+        "observes_dst": "dab038d2",
+        "state_income_tax_effective_pct": "6bba08a1",
+        "local_income_tax_pct_typical": "46744b6f",
+        "sales_tax_combined_avg_pct": "7a54b95f",
+        "property_tax_effective_pct": "b0fd2da6",
+        "suta_wage_base_cents": "c2abe304",
+        "suta_new_employer_pct": "242a4d2e",
+        "futa_credit_reduction_pct": "d27d77a4",
+        "cost_of_living_multiplier": "2475a39b",
+        "median_rent_1br_cents_per_month": "79aae263",
+        "median_rent_2br_cents_per_month": "79aae263",
+        "residential_electricity_cents_per_kwh": "92c79b20",
+        "minimum_wage_cents_per_h": "9b611a59",
+        "tipped_minimum_wage_cents_per_h": "9b5fb4b8",
+        "notes": "818bffbf"
       }
     }
   ],
@@ -464,6 +544,43 @@
       "columns": {
         "title": "36de7a58",
         "values": "ef317d91"
+      },
+      "changed": {
+        "taxes_federal": "47fbd12a"
+      },
+      "added": [
+        "taxes_unemployment"
+      ]
+    },
+    {
+      "revision": "8165541e79de6a1437ec1237d021fcd2",
+      "columns": {
+        "title": "36de7a58",
+        "values": "ef317d91"
+      },
+      "changed": {
+        "taxes_federal": "4045c1b4"
+      }
+    },
+    {
+      "revision": "cf2f58746b64d1e0adaa4b8409dc6c63",
+      "columns": {
+        "title": "36de7a58",
+        "values": "ef317d91"
+      }
+    }
+  ],
+  "economy.exempt": [
+    {
+      "revision": "6a6ce568ab95c880347cc8cd6bd5dbe3",
+      "columns": {
+        "name": "36de7a58",
+        "code": "72ad2c74",
+        "income_tax_exempt": "ad5d42db",
+        "donations_deductible": "f0f4d4e6",
+        "futa": "6edc70b4",
+        "suta": "d7f46101",
+        "description": "36de7a58"
       }
     }
   ],

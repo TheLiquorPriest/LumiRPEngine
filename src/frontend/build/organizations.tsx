@@ -8,6 +8,8 @@
 // - Money: its accounts as the Money records list them, its pay schedule and account, dues, payouts
 //   and invoice terms;
 // - Ownership: share classes and the votes a decision needs;
+// - Decisions: how its motions count votes, their quorum, pass mark and days, standing votes, and
+//   how long a request for approval waits (ORG-SPEC Phase 5);
 // - Property and entry: its properties, and its places with who may enter them;
 // - All fields.
 // The organization's own fields save with Save to draft, as a patch of only what changed; a
@@ -247,6 +249,7 @@ const SECTION_FIELDS = {
   people: ["owners"],
   money: ["operating_account", "payroll", "payroll_account", "dues", "distribution_pct", "distribution_every", "invoice_days", "late_fee_pct", "collects_sales_tax", "margin_pct"],
   ownership: ["share_classes", "decide_pct"],
+  decisions: ["vote_by", "quorum_pct", "pass_pct", "motion_days", "vote_rules", "approval_days"],
 } as const;
 
 /** A link to `org` of `type` on someone's entity, with where it is among their relations. */
@@ -485,6 +488,7 @@ export function OrgEditor(props: EditorProps) {
         </div>
       </Section>
       {type === "company" ? <Section title="Ownership">{inputs(SECTION_FIELDS.ownership)}</Section> : null}
+      <Section title="Decisions">{inputs(SECTION_FIELDS.decisions)}</Section>
       <Section title="Property and entry" flush>
         <List>
           {properties.map((p) => (

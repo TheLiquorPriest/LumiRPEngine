@@ -5,7 +5,10 @@
 // runs through `actAs`, which holds the actor to the power's limits, scope and the fiduciary rule
 // (`mayAct`), names them on every posting the act makes, and records what the act paid and its
 // History line (`orgs.acted`) in the act's own unit, so a rebased view keeps or drops them whole.
-// Acting for oneself runs exactly as before.
+// Acting for oneself runs exactly as before. An act over a limit of the position or delegation the
+// power rests on, by an action that asks (`ask`), is put up the actor's chain of command instead
+// (`orgs.ask_approval`, ORG-SPEC Phase 5); approved, it runs again with that approval lifting the
+// limit (`EffectContext.carried`), the approver named on its History line.
 
 import type { EntityId } from "../../../shared/ids";
 import type { LedgerEvent } from "../../../shared/ledger";
@@ -13,12 +16,24 @@ import { FINANCE_EVENTS } from "../../../shared/finance";
 import type { OrgPower } from "../../../shared/org";
 import type { ParamDef } from "../../../shared/world";
 import { formatMoney } from "../../../shared/world";
-import { actsFor, mayAct, orgTypeOf } from "../../../engine/org";
-import { optionalService, own } from "../../../engine/pack-kit";
-import type { ReadContext, Rejection } from "../../../engine/registry";
+import { actsFor, mayAct, orgTypeOf, type MayAct } from "../../../engine/org";
+import { labelOf, optionalService, own } from "../../../engine/pack-kit";
+import type { EffectContext, ReadContext, Rejection } from "../../../engine/registry";
 import { reject } from "./journal";
 import { holdersOf, traitsOf } from "./model";
 import { namedSource } from "./pay";
+
+declare module "../../../engine/registry" {
+  interface ServiceMap {
+    /**
+     * An act over a limit put up for approval (ORG-SPEC Phase 5, the orgs pack's): the request's
+     * events, naming the nearest of those above the actor who may approve it; a refusal, in words,
+     * when no one above them may approve it or it can't be held. `text` is what the act does, `why`
+     * the limit it is over.
+     */
+    "orgs.ask_approval": (ctx: ReadContext, ask: { org: EntityId; by: EntityId; power: OrgPower; cents?: number; account?: EntityId; target?: EntityId; text: string; why: string }) => LedgerEvent[] | Rejection;
+  }
+}
 
 /** What an `as` may name: an organization of any type (a company, a household, a group of any kind, the party, a trust). */
 const ORG_KINDS = ["business", "household", "group", "trust"];
@@ -80,6 +95,34 @@ export function partyOf(ctx: ReadContext, id: EntityId): EntityId {
   return own(ctx.state.entities, id)?.kind === "account" ? (holdersOf(ctx.state, id).find((h) => own(ctx.state.entities, h)) ?? id) : id;
 }
 
+/** The request for approval of `party`'s being carried out now (`EffectContext.carried`), or null. */
+function approvalFor(ctx: ReadContext, party: EntityId): NonNullable<EffectContext["carried"]> | null {
+  const carried = (ctx as Partial<EffectContext>).carried;
+  return carried?.approval !== undefined && carried.org === party ? carried : null;
+}
+
+/** What a History line adds for an act carried out under an approval: who approved it. */
+export function approvedWords(ctx: ReadContext, party: EntityId): string {
+  const approval = approvalFor(ctx, party);
+  if (!approval) return "";
+  return approval.by !== undefined && approval.by !== "" ? ` (approved by ${labelOf(ctx, approval.by)})` : " (approved)";
+}
+
+/**
+ * Whether `by` may do an act for `party` with `power` now, as `mayAct` asks it (§3.8): null when
+ * they may, or when a request for approval being carried out lifts the limit it is over (an amount
+ * no more than was asked); otherwise, over a limit with the action asking (`ask`), the request's
+ * events (`orgs.ask_approval`), which the effect returns in place of its own; else the refusal.
+ */
+export function heldTo(ctx: ReadContext, act: { by: EntityId; party: EntityId; power: OrgPower; text: string; cents?: number; account?: EntityId; target?: EntityId }, may: MayAct, code = "not_allowed"): LedgerEvent[] | Rejection | null {
+  if (may.ok) return null;
+  const approval = may.limit === true ? approvalFor(ctx, act.party) : null;
+  if (approval) return approval.cents !== undefined && act.cents !== undefined && act.cents > approval.cents ? reject(code, `It comes to ${moneyWords(ctx, act.cents)} now, more than the ${moneyWords(ctx, approval.cents)} approved`) : null;
+  const asked = may.limit === true && (ctx as Partial<EffectContext>).params?.ask === true ? optionalService(ctx, "orgs.ask_approval") : null;
+  if (asked) return asked(ctx, { org: act.party, by: act.by, power: act.power, ...(act.cents !== undefined ? { cents: act.cents } : {}), ...(act.account !== undefined ? { account: act.account } : {}), ...(act.target !== undefined ? { target: act.target } : {}), text: act.text, why: may.reason });
+  return reject(code, may.reason);
+}
+
 /**
  * Runs an act that may be done for an organization (§3.6, §3.8): `run` makes its events as `party`
  * makes them. When someone else (`by`) acts for an organization, they must hold `power` there within
@@ -87,27 +130,30 @@ export function partyOf(ctx: ReadContext, id: EntityId): EntityId {
  * (`money.spend`) must keep within the limits of the position or delegation it rests on, each
  * payment and the month counted from what it drew and the accounts checked against the one it drew
  * on; each posting it makes names its actor (`by` on its journal lines); and what it paid and its
- * History line are recorded with it (`orgs.acted`). Anything else runs as it always has.
+ * History line are recorded with it (`orgs.acted`). Over a limit, an action that asks puts it up
+ * for approval instead, and an approved one runs past it (`heldTo`). Anything else runs as it always has.
  */
 export function actAs(ctx: ReadContext, act: Act, run: () => LedgerEvent[] | Rejection): LedgerEvent[] | Rejection {
   const { by, party, power } = act;
   if (by === "" || by === party || !own(ctx.state.entities, by) || orgTypeOf(ctx, party) === null) return run();
   const target = act.target !== undefined && act.target !== "" && own(ctx.state.entities, act.target) ? partyOf(ctx, act.target) : undefined;
   const ask = { ...(target !== undefined ? { target } : {}), ...(act.account !== undefined ? { account: act.account } : {}) };
-  const may = mayAct(ctx, by, party, power, ask);
-  if (!may.ok) return reject("not_allowed", may.reason);
+  const held = (may: MayAct, paid: number | undefined, account: EntityId | undefined) => heldTo(ctx, { by, party, power, text: act.line(paid), ...(paid !== undefined ? { cents: paid } : {}), ...(account !== undefined ? { account } : {}), ...(target !== undefined ? { target } : {}) }, may);
+  const first = held(mayAct(ctx, by, party, power, ask), act.amount, act.account);
+  if (first) return first;
   const events = run();
   if (!Array.isArray(events)) return events;
   const spends = power === "money.spend";
   const drawn = spends ? drawnBy(ctx, events, party) : undefined;
   const paid = spends ? (act.amount ?? drawn?.cents) : undefined;
   if (spends && (paid !== undefined || drawn !== undefined)) {
-    const within = mayAct(ctx, by, party, power, { ...ask, ...(paid !== undefined ? { amount: paid } : {}), ...(act.account === undefined && drawn !== undefined ? { account: drawn.account } : {}) });
-    if (!within.ok) return reject("not_allowed", within.reason);
+    const account = act.account ?? drawn?.account;
+    const within = held(mayAct(ctx, by, party, power, { ...ask, ...(paid !== undefined ? { amount: paid } : {}), ...(act.account === undefined && drawn !== undefined ? { account: drawn.account } : {}) }), paid, account);
+    if (within) return within;
   }
   const stamped = events.map((e): LedgerEvent => (e.type === FINANCE_EVENTS.txn && "data" in e ? { ...e, data: { ...e.data, by, as: party } } : e));
   const names = [...new Set((act.names ?? []).filter((id): id is EntityId => id !== undefined && id !== "" && own(ctx.state.entities, id) !== undefined))];
-  const recorded = optionalService(ctx, "orgs.acted")?.(ctx, { org: party, by, power, ...(paid !== undefined ? { cents: paid } : {}), text: act.line(paid), ...(names.length > 0 ? { names } : {}) }) ?? [];
+  const recorded = optionalService(ctx, "orgs.acted")?.(ctx, { org: party, by, power, ...(paid !== undefined ? { cents: paid } : {}), text: `${act.line(paid)}${approvedWords(ctx, party)}`, ...(names.length > 0 ? { names } : {}) }) ?? [];
   return [...stamped, ...recorded];
 }
 

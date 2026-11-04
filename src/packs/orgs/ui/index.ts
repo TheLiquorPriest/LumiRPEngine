@@ -9,6 +9,7 @@
 import type { UiPackDef } from "../../../frontend/registry";
 import { ORGS_LIST_PANEL } from "../../../shared/org-view";
 import { PARTY_SECTION } from "../../../shared/party";
+import { DECISIONS_TAB_DEF } from "./decisions";
 import { GM_ORGS_SECTION, GmOrgsSection } from "./gm";
 import { OrgsGlance } from "./feed";
 import { OrgsPanel } from "./home";
@@ -27,6 +28,7 @@ const orgs: UiPackDef = {
     r.gm({ id: GM_ORGS_SECTION, label: "Orgs", icon: "briefcase", order: 28, component: GmOrgsSection });
     r.orgTab(PROPERTY_TAB);
     r.orgTab(PLAN_TAB_DEF);
+    r.orgTab(DECISIONS_TAB_DEF);
     r.glance({ id: "orgs.alerts", order: 76, panel: ORGS_LIST_PANEL, component: OrgsGlance });
     r.orgTab({ id: "orgs.party_tiers", label: "What each tier means", order: 95, section: PARTY_SECTION, within: "rules", component: PartyTiers });
   },

@@ -88,7 +88,7 @@ describe("Data updates in a world with a running chat", () => {
     expect(["TV", "fridge", "couch"].map((text) => matchCatalog(ctx(before), text, null))).toEqual(["cable_tv", null, null]);
 
     const listed = await updatesOf(rig, worldId);
-    expect(Object.fromEntries(listed.map((u) => [u.table, u.status]))).toEqual({ "economy.catalog": "update", "economy.categories": "update", "economy.index_history": "missing", "gear.items": "edited", "gear.containers": "update" });
+    expect(Object.fromEntries(listed.map((u) => [u.table, u.status]))).toEqual({ "economy.catalog": "update", "economy.categories": "update", "economy.exempt": "missing", "economy.finance": "update", "economy.regions": "update", "economy.index_history": "missing", "gear.items": "edited", "gear.containers": "update" });
 
     const draft = rig.body(await rig.send({ type: "lre.editor", op: "get", worldId, base: null }));
     const take = listed.filter((u) => u.status !== "edited").map((u) => u.table);
@@ -136,7 +136,7 @@ describe("Data updates in a world with a running chat", () => {
     const rig = new Rig({ shipped: true, templates: { old_brindlemere: oldBrindlemere } });
     const worldId = await rig.newWorld("Brindlemere", "old_brindlemere");
     const listed = await updatesOf(rig, worldId);
-    expect(Object.fromEntries(listed.map((u) => [u.table, [u.status, u.starter?.name ?? null]]))).toEqual({ "economy.catalog": ["update", "Fantasy town"], "economy.index_history": ["missing", null], "gear.items": ["update", "Fantasy town"], "gear.containers": ["update", null] });
+    expect(Object.fromEntries(listed.map((u) => [u.table, [u.status, u.starter?.name ?? null]]))).toEqual({ "economy.catalog": ["update", "Fantasy town"], "economy.exempt": ["missing", null], "economy.finance": ["update", null], "economy.regions": ["update", null], "economy.index_history": ["missing", null], "gear.items": ["update", "Fantasy town"], "gear.containers": ["update", null] });
     const draft = rig.body(await rig.send({ type: "lre.editor", op: "get", worldId, base: null }));
     const doc = rig.body(await rig.send({ type: "lre.editor", op: "shipped", worldId, base: draft.base, version: draft.version, tables: listed.map((u) => u.table) })).draft as WorldDoc;
     for (const id of ["economy.catalog", "gear.items"]) {

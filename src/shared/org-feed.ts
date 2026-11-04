@@ -21,11 +21,11 @@ export const PLAN_EFFECTS = { goal: "orgs.plan_goal", order: "orgs.plan_order", 
 export const PLAN_TEXT_MAX = 300;
 
 /** The page's tabs an alert's Open may go to; `money` is the economy's Money tab. */
-export const ALERT_TABS = ["overview", "people", "rules", "money", "plan"] as const;
+export const ALERT_TABS = ["overview", "people", "rules", "money", "plan", "decisions"] as const;
 export type AlertTab = (typeof ALERT_TABS)[number];
 
 /** What an alert is about (§3.14). */
-export const ALERT_KINDS = ["vacancy", "payroll_short", "delegation_ending", "dues_arrears", "negative_equity"] as const;
+export const ALERT_KINDS = ["vacancy", "payroll_short", "delegation_ending", "dues_arrears", "negative_equity", "motion_open", "approval_waiting"] as const;
 export type AlertKind = (typeof ALERT_KINDS)[number];
 
 /** One alert, as the reader may see it. */

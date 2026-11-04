@@ -17,6 +17,8 @@ import { labelOf, numOf, optionalService, own, strOf } from "../../../engine/pac
 import type { EffectContext, ReadContext, Rejection } from "../../../engine/registry";
 import { isGone, kindIs } from "../../../engine/scope";
 import { GROUP_KIND, type MembershipContext } from "../../../engine/selector";
+import { ASK_PARAM } from "../../../shared/org-motions";
+import { approvedWords, heldTo } from "./acting";
 import { orgRecord } from "./model";
 import type { FinanceApi, FinanceRegistry } from "./module";
 
@@ -130,8 +132,11 @@ function shareOut(api: FinanceApi, args: Record<string, JsonValue>, ctx: EffectC
   const from = strOf(args.from) || (api.depositAccount(ctx, org) ?? "");
   if (from === "" || !api.accountsOf(ctx, org, "spend").includes(from)) return { code: "bad_account", reason: from === "" ? `${labelOf(ctx, org)} holds no money to share out` : `${labelOf(ctx, from)} isn't ${labelOf(ctx, org)}'s to spend` };
   const by = strOf(args.by);
-  const no = refusal(ctx, by, org, "money.payout", { amount: cents, account: from });
-  if (no) return no;
+  // Over its limit, put up for approval when the action asks; under an approval, past it (ORG-SPEC Phase 5).
+  if (by !== "" && by !== org) {
+    const held = heldTo(ctx, { by, party: org, power: "money.payout", text: `Shared out ${api.money(ctx, cents)}`, cents, account: from }, mayAct(ctx, by, org, "money.payout", { amount: cents, account: from }), "not_owner");
+    if (held) return held;
+  }
   if (api.available(ctx, from) < cents) return { code: "declined", reason: `${labelOf(ctx, from)} doesn't have ${api.money(ctx, cents)}` };
   const each = Math.floor(cents / to.length);
   const out: LedgerEvent[] = [];
@@ -142,7 +147,7 @@ function shareOut(api: FinanceApi, args: Record<string, JsonValue>, ctx: EffectC
     if (!Array.isArray(paid)) return paid;
     out.push(...paid);
   }
-  return [...out, ...acted(ctx, org, by, { power: "money.payout", text: `Shared out ${api.money(ctx, cents)}`, cents, names: to })];
+  return [...out, ...acted(ctx, org, by, { power: "money.payout", text: `Shared out ${api.money(ctx, cents)}${approvedWords(ctx, org)}`, cents, names: to })];
 }
 
 /** Treasuries: dues flows, and setting dues and sharing out, for households, groups and the party. */
@@ -153,5 +158,5 @@ export function registerTreasury(r: FinanceRegistry): void {
   core.effect({ type: "economy.share_out", args: ["org", "cents", "from?", "by?"], resolve: (args, ctx) => shareOut(api, args, ctx) });
   const org: ParamDef = { type: "ref", of: { kind: [GROUP_KIND] }, label: "Organization" };
   core.action({ id: "org_dues", label: "Set dues", description: "Set what each member pays into an organization's money, and how often; nothing ends them.", pack: "economy", params: { org, amount: { type: "money", label: "Each member pays" }, every: { type: "text", optional: true, label: "week, month or year" }, day: { type: "number", optional: true, label: "On the day (a weekday, 0 = Sunday; a day of the month, -1 the last)" } }, requires: ["may(self, org, 'org.govern')", "amount >= 0", "level.money >= 3"], outcomes: { default: [{ type: "economy.dues", args: { org: "org", cents: "=amount", every: "=params.every", day: "=params.day", by: "self" } }] }, duration: "2", observable: "does the paperwork", mechanical: true, lexicon: ["set dues", "membership fee", "everyone chips in"] });
-  core.action({ id: "org_share_out", label: "Share out", description: "Pay an amount from an organization's money to its members equally (the party's: its core members and companions).", pack: "economy", params: { org, amount: { type: "money" }, from: { type: "ref", ref: "account", optional: true, label: "From its account" } }, requires: ["may(self, org, 'money.payout')", "amount > 0", "level.money >= 2"], outcomes: { default: [{ type: "economy.share_out", args: { org: "org", cents: "=amount", from: "=params.from", by: "self" } }] }, duration: "5", observable: "shares out money", lexicon: ["share out", "split the money", "divide the purse", "hand out"] });
+  core.action({ id: "org_share_out", label: "Share out", description: "Pay an amount from an organization's money to its members equally (the party's: its core members and companions).", pack: "economy", params: { org, amount: { type: "money" }, from: { type: "ref", ref: "account", optional: true, label: "From its account" }, ask: ASK_PARAM }, requires: ["may(self, org, 'money.payout')", "amount > 0", "level.money >= 2"], outcomes: { default: [{ type: "economy.share_out", args: { org: "org", cents: "=amount", from: "=params.from", by: "self" } }] }, duration: "5", observable: "shares out money", lexicon: ["share out", "split the money", "divide the purse", "hand out"] });
 }

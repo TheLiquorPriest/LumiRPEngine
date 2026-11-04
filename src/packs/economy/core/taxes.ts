@@ -14,18 +14,22 @@
 import type { JsonObject, JsonValue } from "../../../shared/json";
 import type { EntityId, PlaceId } from "../../../shared/ids";
 import type { LedgerEvent, PackEvent } from "../../../shared/ledger";
-import { FILING_STATUSES, type FilingStatus, type Flow, type FlowSchedule, type TaxesView, type TaxYearView } from "../../../shared/finance";
+import { FILING_STATUSES, FINANCE_ACTIONS, STRUCTURE_WORDS, type ConsolidationView, type FilingStatus, type Flow, type FlowSchedule, type TaxesView, type TaxYearView } from "../../../shared/finance";
 import type { FieldDef } from "../../../shared/world";
 import { calendarOf, clockAt, dateAt, dayIndexOf, dayIndexOfText, MINUTES_PER_DAY, monthName } from "../../../engine/calendar";
-import { jobsAt, orgTypeOf } from "../../../engine/org";
-import { labelOf, numOf, objOf, own, rowOf, sliceOf, sliceRecord, strOf } from "../../../engine/pack-kit";
-import type { EventTypeDef, ReadContext, Rejection } from "../../../engine/registry";
+import { dissolvedOn, jobsAt, mayAct, orgTypeOf } from "../../../engine/org";
+import { labelOf, numOf, objOf, optionalService, own, rowOf, sliceOf, sliceRecord, strOf } from "../../../engine/pack-kit";
+import type { EffectContext, EventTypeDef, ReadContext, Rejection } from "../../../engine/registry";
 import { passMemo } from "../../../engine/read-pass";
 import { isGone, kindIs } from "../../../engine/scope";
+import { COMPANY_KIND } from "../../../engine/selector";
 import type { WorldState } from "../../../engine/state";
 import { addToBooks, businessBooks, monthBook, monthOf, operatingAccount, payablesOf, totalsOf } from "./books";
-import { hiddenFrom, holdersOf, regionRow } from "./model";
+import { deductibleDonors, donationsGiven, donationsReceived, exemptStatuses, exemptStatusOf, isExempt } from "./exempt";
+import { hiddenFrom, holdersOf, moneyLevel, regionRow } from "./model";
 import type { FinanceApi, FinanceRegistry, FlowPosting } from "./module";
+import { votesIn } from "./shares";
+import { unemploymentDueAt, unemploymentTotals, unemploymentView } from "./unemployment";
 
 declare module "../../../engine/registry" {
   interface ServiceMap {
@@ -56,6 +60,8 @@ export interface FederalTables {
   /** Wages in a year past which the additional Medicare rate applies. */
   additionalMedicareFrom: number;
   selfEmploymentPct: number;
+  /** Cash gifts to charities and churches (§3.11, Phase 5): deductible up to this percent of AGI by an itemizer; up to `nonItemizer` on top of the standard deduction for anyone else, from the year `nonItemizerFrom`. */
+  charitable: { agiLimitPct: number; nonItemizer: Record<FilingStatus, number>; nonItemizerFrom: number };
 }
 
 /** The Social Security wage base and the additional Medicare threshold for a single filer, when the tables leave them out. */
@@ -67,6 +73,9 @@ const SE_EARNINGS_SHARE = 0.9235;
 
 /** The federal corporate rate on a C corporation's profit, unless the economy config sets its own (`taxes.corporatePct`). */
 export const CORPORATE_PCT = 21;
+
+/** The share of a corporation's votes and of its worth a group must hold to file a consolidated return for it (IRC section 1504(a)(2)), unless the finance table says otherwise. */
+const CONSOLIDATION_PCT = 80;
 
 function bracketsOf(v: JsonValue | undefined): TaxBracket[] {
   if (!Array.isArray(v)) return [];
@@ -85,6 +94,8 @@ export function federalTables(ctx: Tables): FederalTables {
   const v = objOf(ctx.tables.get("economy.finance")?.rows.taxes_federal?.values);
   const fica = objOf(v.fica);
   const sd = objOf(v.standard_deduction_cents);
+  const charity = objOf(v.charitable_contributions);
+  const allowance = objOf(charity.non_itemizer_cents);
   const single = bracketsOf(v.brackets_single);
   const joint = bracketsOf(v.brackets_married_filing_jointly);
   const base = own(fica, `social_security_wage_base_cents_${numOf(v.tax_year)}`);
@@ -97,6 +108,7 @@ export function federalTables(ctx: Tables): FederalTables {
     additionalMedicarePct: numOf(fica.additional_medicare_pct_over_200k_single, 0.9),
     additionalMedicareFrom: ADDITIONAL_MEDICARE_FROM,
     selfEmploymentPct: numOf(fica.self_employment_pct, 15.3),
+    charitable: { agiLimitPct: numOf(charity.agi_limit_pct, 60), nonItemizer: { single: numOf(allowance.single), married_filing_jointly: numOf(allowance.married_filing_jointly), head_of_household: numOf(allowance.head_of_household) }, nonItemizerFrom: numOf(charity.non_itemizer_from_year, Number.POSITIVE_INFINITY) },
   };
 }
 
@@ -243,11 +255,15 @@ function selfEmployedProfit(structure: Structure): boolean {
   return structure !== "s_corp" && structure !== "c_corp";
 }
 
+/** The federal rate on a C corporation's profit, in percent: the economy config's `taxes.corporatePct`, else 21. */
+export function federalCorporatePct(ctx: Pick<ReadContext, "world">): number {
+  return numOf(objOf(objOf(ctx.world.packs.economy?.config).taxes).corporatePct, CORPORATE_PCT);
+}
+
 /** A C corporation's income tax on a period's profit: the federal corporate rate plus the state rate where it operates. */
 export function corporateTax(ctx: Ctx, business: EntityId, profit: number): number {
   if (profit <= 0) return 0;
-  const federal = numOf(objOf(objOf(ctx.world.packs.economy?.config).taxes).corporatePct, CORPORATE_PCT);
-  return Math.round((profit * (federal + numOf(regionRow(ctx, business).state_income_tax_effective_pct))) / 100);
+  return Math.round((profit * (federalCorporatePct(ctx) + numOf(regionRow(ctx, business).state_income_tax_effective_pct))) / 100);
 }
 
 /**
@@ -402,7 +418,8 @@ function passedThrough(ctx: ReadContext, api: FinanceApi, holder: EntityId, span
   const parts: { source: EntityId; cents: number }[] = [];
   for (const p of pathsByHolder(ctx, api).get(holder) ?? []) {
     const chain = [p.source, ...p.via];
-    if (chain.some((b) => taxStructureAt(ctx, b, span.from) === "c_corp") || !counts(p.source)) continue;
+    // A C corporation on the way keeps it as its own profit; an exempt organization keeps it untaxed (§3.11, Phase 5).
+    if (chain.some((b) => taxStructureAt(ctx, b, span.from) === "c_corp" || isExempt(ctx, b)) || !counts(p.source)) continue;
     const cents = Math.round((Math.max(0, businessBooks(api, ctx, p.source, span.from, span.to).profit) * p.share) / 100);
     if (selfEmployedProfit(taxStructureAt(ctx, chain[chain.length - 1] ?? p.source, span.from))) selfEmployed += cents;
     else other += cents;
@@ -414,14 +431,42 @@ function passedThrough(ctx: ReadContext, api: FinanceApi, holder: EntityId, span
 /**
  * A person's ordinary income for a calendar year: wages and contract pay paid in it, and their share
  * of pass-through business profit over its months, up the companies between too; taxable after
- * pre-tax deductions and the standard deduction. The holdings module stacks capital gains on it.
+ * pre-tax deductions and their deduction (`deductionFor`). The holdings module stacks capital gains on it.
  */
 export function ordinaryIncome(api: FinanceApi, ctx: ReadContext, person: EntityId, year: number): { gross: number; taxable: number; filing: FilingStatus } {
   const pay = yearPay(ctx.state, person, year);
   const through = passedThrough(ctx, api, person, monthsSpan(ctx, year, [1, 12]));
   const gross = pay.gross + through.selfEmployed + through.other;
   const filing = filingStatusOf(ctx, person);
-  return { gross, taxable: Math.max(0, gross - pay.pretax - federalTables(ctx).standardDeduction[filing]), filing };
+  return { gross, taxable: Math.max(0, gross - pay.pretax - deductionFor(ctx, person, year, filing, gross - pay.pretax)), filing };
+}
+
+/**
+ * A person's deduction for a year (§3.11, Phase 5): the standard deduction for their filing status,
+ * with the charitable allowance someone who doesn't itemize takes (from its year, up to their
+ * deductible gifts), or, when more, their deductible gifts themselves up to the AGI limit, as the only
+ * itemized deduction this engine keeps.
+ */
+function deductionFor(ctx: ReadContext, person: EntityId, year: number, filing: FilingStatus, agi: number): number {
+  const t = federalTables(ctx);
+  const given = donationsGiven(ctx.state, person, year).deductible;
+  if (given <= 0) return t.standardDeduction[filing];
+  const allowance = year >= t.charitable.nonItemizerFrom ? Math.min(given, t.charitable.nonItemizer[filing]) : 0;
+  const itemized = Math.min(given, (Math.max(0, agi) * t.charitable.agiLimitPct) / 100);
+  return Math.max(t.standardDeduction[filing] + allowance, itemized);
+}
+
+/**
+ * The federal income tax a person's deductible gifts in a year save them (§3.11, Phase 5): the
+ * brackets' tax on their ordinary taxable income with the standard deduction alone, less with their
+ * deduction, as their return would refund what withholding and estimates paid without it.
+ */
+export function charitableSaving(api: FinanceApi, ctx: ReadContext, person: EntityId, year: number): number {
+  const pay = yearPay(ctx.state, person, year);
+  const income = ordinaryIncome(api, ctx, person, year);
+  const t = federalTables(ctx);
+  const without = Math.max(0, income.gross - pay.pretax - t.standardDeduction[income.filing]);
+  return Math.max(0, bracketTax(t.brackets[income.filing], without) - bracketTax(t.brackets[income.filing], income.taxable));
 }
 
 /**
@@ -459,6 +504,106 @@ export function estimatedTax(api: FinanceApi, ctx: ReadContext, person: EntityId
 function corporateProfit(ctx: ReadContext, api: FinanceApi, business: EntityId, span: { from: number; to: number }): number {
   const through = passedThrough(ctx, api, business, span);
   return businessBooks(api, ctx, business, span.from, span.to).profit + through.selfEmployed + through.other;
+}
+
+/** Whether a company may be in a consolidated return at `clock` (§3.11, Phase 5): taxed as a C corporation then, not exempt, and not yet wound up then (its periods before it was dissolved stay its return's). */
+function includable(ctx: ReadContext, id: EntityId, clock: number): boolean {
+  const e = own(ctx.state.entities, id);
+  if (!e || isGone(ctx.state, id) || !kindIs(ctx.registry, ctx.world, e.kind, COMPANY_KIND) || taxStructureAt(ctx, id, clock) !== "c_corp" || isExempt(ctx, id)) return false;
+  const dissolved = dissolvedOn(ctx.state, id);
+  if (dissolved === null) return true;
+  try {
+    const cal = calendarOf(ctx.world);
+    return clock < clockAt(cal, dayIndexOfText(cal, dissolved), 0);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The corporations a consolidated return filed by `parent` would include at `clock` (§3.11, Phase 5;
+ * IRC section 1504): each company that may be in one of which the parent and those already in hold
+ * the finance table's share (80 %) or more of the votes and of the worth, four companies deep; none
+ * when the parent may not file one. Each with the group's share of its votes and of its worth.
+ */
+export function affiliatedGroup(ctx: ReadContext, api: FinanceApi, parent: EntityId, clock: number): { id: EntityId; votes: number; share: number }[] {
+  if (!includable(ctx, parent, clock)) return [];
+  const need = numOf(objOf(ctx.tables.get("economy.finance")?.rows.taxes_federal?.values).consolidated_return_ownership_pct, CONSOLIDATION_PCT);
+  const companies = Object.keys(ctx.state.entities)
+    .sort()
+    .filter((id) => id !== parent && includable(ctx, id, clock));
+  const group = new Set<EntityId>([parent]);
+  const out: { id: EntityId; votes: number; share: number }[] = [];
+  for (let depth = 0; depth < LOOK_THROUGH_DEPTH; depth++) {
+    const joined: { id: EntityId; votes: number; share: number }[] = [];
+    for (const id of companies) {
+      if (group.has(id)) continue;
+      // Its votes as a decision counts them: a listed company's public units vote too (§27.10 Listing).
+      const votes = votesIn(ctx.state, id);
+      let held = 0;
+      let share = 0;
+      for (const m of group) {
+        held += votes[m] ?? 0;
+        share += api.shareOf(ctx.state, id, m);
+      }
+      if (held + 1e-9 >= need && share + 1e-9 >= need) joined.push({ id, votes: held, share });
+    }
+    if (joined.length === 0) break;
+    for (const j of joined) {
+      group.add(j.id);
+      out.push(j);
+    }
+  }
+  return out;
+}
+
+/**
+ * Who files each corporation's income tax at `clock` when a parent's consolidated return includes it
+ * (§3.11, Phase 5): member to parent, for every parent that elected one (`consolidated_return`) and
+ * may file it. A parent another's return includes files through that one: the parents no other's
+ * return includes go first (of parents including each other, the first by id), and a corporation
+ * belongs to the first return that takes it. Kept for a read pass, by clock.
+ */
+function consolidatedFilers(ctx: ReadContext, api: FinanceApi, clock: number): ReadonlyMap<EntityId, EntityId> {
+  const byClock = passMemo([ctx.state, ctx.world, api], "economy.consolidated", () => new Map<number, Map<EntityId, EntityId>>());
+  const known = byClock.get(clock);
+  if (known) return known;
+  const elected = Object.keys(ctx.state.entities)
+    .sort()
+    .filter((id) => own(ctx.state.entities, id)?.fields.consolidated_return === true && includable(ctx, id, clock));
+  const groups = new Map(elected.map((p) => [p, affiliatedGroup(ctx, api, p, clock).map((m) => m.id)]));
+  const inside = new Set(elected.filter((p) => elected.some((q) => q !== p && (groups.get(q) ?? []).includes(p))));
+  const tops = elected.filter((p) => !inside.has(p));
+  const out = new Map<EntityId, EntityId>();
+  const filed = new Set<EntityId>();
+  for (const p of [...(tops.length > 0 ? tops : elected.slice(0, 1)), ...elected]) {
+    if (filed.has(p) || out.has(p)) continue;
+    filed.add(p);
+    for (const m of groups.get(p) ?? []) if (m !== p && !out.has(m) && !filed.has(m)) out.set(m, p);
+  }
+  byClock.set(clock, out);
+  return out;
+}
+
+/** The corporations a parent's consolidated return files for at `clock`, by id; none when it files none, or another's return includes it. */
+function membersOf(ctx: ReadContext, api: FinanceApi, parent: EntityId, clock: number): EntityId[] {
+  return [...consolidatedFilers(ctx, api, clock)].flatMap(([member, filer]) => (filer === parent ? [member] : [])).sort();
+}
+
+/**
+ * A consolidated return's tax for a span (§3.11, Phase 5): the federal rate on the group's combined
+ * taxable profit, one member's loss offsetting another's profit, and each member's state rate on its
+ * own profit, as the states tax each apart.
+ */
+function consolidatedTax(ctx: ReadContext, api: FinanceApi, parent: EntityId, members: readonly EntityId[], span: { from: number; to: number }): { profit: number; tax: number } {
+  let combined = 0;
+  let state = 0;
+  for (const b of [parent, ...members]) {
+    const profit = corporateProfit(ctx, api, b, span);
+    combined += profit;
+    state += (Math.max(0, profit) * numOf(regionRow(ctx, b).state_income_tax_effective_pct)) / 100;
+  }
+  return { profit: combined, tax: Math.round((Math.max(0, combined) * federalCorporatePct(ctx)) / 100 + state) };
 }
 
 /** The first day of the estimated-tax period after the one `clock` falls in (`YYYY-MM-DD`): a change of structure is taxed from then (§3.13). */
@@ -622,7 +767,7 @@ function owesEstimates(api: FinanceApi, ctx: ReadContext, person: EntityId, path
   let until: number | null = null;
   for (const p of paths.get(person) ?? []) {
     const chain = [p.source, ...p.via];
-    if (chain.every((b) => taxStructureAt(ctx, b, now) !== "c_corp")) return true;
+    if (chain.every((b) => taxStructureAt(ctx, b, now) !== "c_corp" && !isExempt(ctx, b))) return true;
     if (!chain.every((b) => passesThrough(ctx.state, b))) continue;
     const stopped = Math.min(...chain.map((b) => (structureOf(ctx.state, b) === "c_corp" ? (structureFrom(ctx, b) ?? Number.POSITIVE_INFINITY) : Number.POSITIVE_INFINITY)));
     if (Number.isFinite(stopped) && (until === null || stopped > until)) until = stopped;
@@ -639,20 +784,60 @@ function owesEstimates(api: FinanceApi, ctx: ReadContext, person: EntityId, path
   return settles && own(objOf(own(objOf(sliceOf(ctx.state, "economy").estimated), person)), last.key) === undefined && estimatedTax(api, ctx, person, last).cents > 0;
 }
 
-/** What an estimated-tax payment on `at` comes to: the period due then, and any of the year before it no payment settled, each with what is left of its tax. */
-function estimatedDue(api: FinanceApi, ctx: ReadContext, party: EntityId, business: boolean, at: number): { key: string; cents: number }[] {
+/**
+ * What an estimated-tax payment on `at` comes to: the period due then, and any of the year before it
+ * no payment settled, each with what is left of its tax and its span. A corporation pays for the
+ * periods it is taxed as one (§3.13), on its own profit and what passes up to it (§3.11); an exempt
+ * one pays none; one a parent's consolidated return includes pays through the parent, unless it pays
+ * `alone` (as it goes, §3.13: its own tax on its own profit); and a parent filing one pays the group's
+ * tax less what its members paid toward each period, naming them (Phase 5).
+ */
+function estimatedDue(api: FinanceApi, ctx: ReadContext, party: EntityId, business: boolean, at: number, alone = false): { key: string; cents: number; members: EntityId[]; span: { from: number; to: number } }[] {
   const d = dateAt(calendarOf(ctx.world), at);
-  const paid = objOf(own(objOf(sliceOf(ctx.state, "economy").estimated), party));
-  const periods: { key: string; cents: number }[] = [];
+  const all = objOf(sliceOf(ctx.state, "economy").estimated);
+  const paid = objOf(own(all, party));
+  const periods: { key: string; cents: number; members: EntityId[]; span: { from: number; to: number } }[] = [];
   for (const [i, p] of periodsBack(d.year, d.month).entries()) {
     if (i > 0 && own(paid, p.key) !== undefined) continue;
     const span = monthsSpan(ctx, p.year, p.months);
-    // A corporation pays for the periods it is taxed as one (§3.13), on its own profit and what passes up to it (§3.11).
-    const tax = business ? (taxStructureAt(ctx, party, span.from) === "c_corp" ? corporateTax(ctx, party, corporateProfit(ctx, api, party, span)) : 0) : estimatedTax(api, ctx, party, p).cents;
-    const due = tax - numOf(own(paid, p.key));
-    if (due > 0) periods.push({ key: p.key, cents: due });
+    if (!business) {
+      const due = estimatedTax(api, ctx, party, p).cents - numOf(own(paid, p.key));
+      if (due > 0) periods.push({ key: p.key, cents: due, members: [], span });
+      continue;
+    }
+    if (taxStructureAt(ctx, party, span.from) !== "c_corp" || isExempt(ctx, party)) continue;
+    const filed = consolidatedFilers(ctx, api, span.from).has(party);
+    if (filed && !alone) continue;
+    const members = filed ? [] : membersOf(ctx, api, party, span.from);
+    const tax = members.length > 0 ? consolidatedTax(ctx, api, party, members, span).tax : corporateTax(ctx, party, corporateProfit(ctx, api, party, span));
+    const due = tax - [party, ...members].reduce((a, m) => a + numOf(own(objOf(own(all, m)), p.key)), 0);
+    if (due > 0) periods.push({ key: p.key, cents: due, members, span });
   }
   return periods;
+}
+
+/**
+ * The income tax a C corporation still owes as it is wound up or merged away (§3.13): every
+ * estimated-tax period through today no payment settled, the one under way so far among them, as
+ * its next payment would pay it, with the records that payment writes. A corporation a parent's
+ * return files pays its own tax on its own profit, since no return files it once it is gone; a parent
+ * filing one pays the group's, and each member's periods are credited with the member's own tax on
+ * its profit in them (unbooked: the parent paid it), so a member filing alone afterwards pays only
+ * the rest. Null where it owes none or business taxes aren't followed for it.
+ */
+export function taxStillOwed(api: FinanceApi, ctx: ReadContext, business: EntityId): { cents: number; extra: LedgerEvent[] } | null {
+  if (!own(ctx.state.entities, business) || !api.feature(ctx, business, "business_tax")) return null;
+  const cal = calendarOf(ctx.world);
+  const d = dateAt(cal, ctx.state.clock);
+  // The due date of the period today falls in: its payment settles that period and every one before it left unpaid.
+  const due = ESTIMATE_DUE.find((x) => x.months.includes(d.month));
+  if (!due) return null;
+  const periods = estimatedDue(api, ctx, business, true, clockAt(cal, dayIndexOf(cal, due.lastYear ? d.year + 1 : d.year, due.month, 1), 0), true);
+  const cents = periods.reduce((a, p) => a + p.cents, 0);
+  if (cents <= 0) return null;
+  const members = [...new Set(periods.flatMap((p) => p.members))].sort();
+  const credited: LedgerEvent[] = members.map((m) => ({ type: "economy.estimated_tax", data: { party: m, periods: periods.filter((p) => p.members.includes(m)).map((p) => ({ key: p.key, cents: corporateTax(ctx, m, corporateProfit(ctx, api, m, p.span)) })) } }));
+  return { cents, extra: [{ type: "economy.estimated_tax", data: { party: business, periods: periods.map((p) => ({ key: p.key, cents: p.cents })), business: true } }, ...credited] };
 }
 
 /** A date in words, as Taxes gives what falls due ("15 Apr 2027"). */
@@ -671,19 +856,24 @@ export function payrollTaxesIn(state: Readonly<WorldState>, employer: EntityId, 
 /**
  * An organization's Taxes (§3.11, §4.4) as `viewer` (the player character; null for the GM) may read
  * it: this year and last, from its books, its payroll's records and its accounts' journal (sales tax
- * collected and remitted; withholding and its own share of payroll tax; income tax paid; property
- * tax); the sales tax it holds; how its income is taxed, a pass-through's to the people at the top
- * with their shares (anyone the viewer can't see as "someone", and the organizations that pay none);
- * a corporation's income tax so far; what falls due next; and a change of structure waiting.
+ * collected and remitted; withholding and its own share of payroll tax; its unemployment taxes,
+ * accrued and paid; income tax paid; property tax; gifts received); the sales tax it holds; how its
+ * income is taxed, a pass-through's to the people at the top with their shares (anyone the viewer
+ * can't see as "someone", the organizations that pay none, and the exempt ones), an exempt
+ * organization's not at all; a corporation's income tax so far, its consolidated return or the parent
+ * whose return files it; its unemployment taxes' rates and its exempt status (for the GM, with the
+ * statuses the world's table offers, unless it's a household or the party, which hold none); what
+ * falls due next; a change of structure waiting; and what the viewer may do.
  */
 export function taxesView(api: FinanceApi, ctx: ReadContext, org: EntityId, viewer: EntityId | null): TaxesView {
   const cal = calendarOf(ctx.world);
   const now = ctx.state.clock;
   const year = dateAt(cal, now).year;
   const company = kindIs(ctx.registry, ctx.world, own(ctx.state.entities, org)?.kind ?? "", "business");
+  const exempt = exemptStatusOf(ctx, org);
   const accounts = api.accountsOf(ctx, org, "worth");
   const years: TaxYearView[] = [year, year - 1].map((y) => {
-    const out: TaxYearView = { year: y, salesCollected: 0, salesRemitted: 0, withheld: 0, employerShare: 0, income: 0, property: 0 };
+    const out: TaxYearView = { year: y, salesCollected: 0, salesRemitted: 0, withheld: 0, employerShare: 0, futa: 0, futaPaid: 0, suta: 0, sutaPaid: 0, income: 0, property: 0, donations: 0 };
     for (let m = 1; m <= 12; m++) {
       const month = `${String(y).padStart(4, "0")}-${String(m).padStart(2, "0")}`;
       if (company) {
@@ -695,51 +885,98 @@ export function taxesView(api: FinanceApi, ctx: ReadContext, org: EntityId, view
       for (const a of accounts) out.property += totalsOf(ctx.state, a, month).property_tax?.out ?? 0;
     }
     const payroll = payrollTaxesIn(ctx.state, org, y);
-    return { ...out, withheld: payroll.withheld, employerShare: payroll.employer };
+    return { ...out, withheld: payroll.withheld, employerShare: payroll.employer, ...unemploymentTotals(ctx.state, org, y), donations: donationsReceived(ctx.state, org, y) };
   });
-  const corporate = company && taxStructureAt(ctx, org, now) === "c_corp";
+  const corporate = company && exempt === null && taxStructureAt(ctx, org, now) === "c_corp";
   const yearSpan = { from: clockAt(cal, dayIndexOf(cal, year, 1, 1), 0), to: now + 1 };
+  const named = (id: EntityId, unseen: string): string => (hiddenFrom(ctx, viewer, id) ? unseen : labelOf(ctx, id));
   const taxedTo: TaxesView["taxedTo"] = [];
   const untaxed: TaxesView["untaxed"] = [];
-  if (company && !corporate) {
+  const exemptHolders: TaxesView["exemptHolders"] = [];
+  if (company && !corporate && exempt === null) {
     for (const [holder, paths] of pathsByHolder(ctx, api)) {
-      const share = paths.filter((p) => p.source === org && p.via.every((b) => taxStructureAt(ctx, b, now) !== "c_corp")).reduce((a, p) => a + p.share, 0);
+      const share = paths.filter((p) => p.source === org && p.via.every((b) => taxStructureAt(ctx, b, now) !== "c_corp" && !isExempt(ctx, b))).reduce((a, p) => a + p.share, 0);
       if (share <= 0) continue;
       const kind = own(ctx.state.entities, holder)?.kind ?? "";
-      const name = hiddenFrom(ctx, viewer, holder) ? "someone" : labelOf(ctx, holder);
+      const name = named(holder, "someone");
       if (kindIs(ctx.registry, ctx.world, kind, "person")) taxedTo.push({ name, share });
+      else if (isExempt(ctx, holder)) exemptHolders.push({ name, share });
       else if (!kindIs(ctx.registry, ctx.world, kind, "business")) untaxed.push({ name, share });
     }
     taxedTo.sort((a, b) => b.share - a.share || a.name.localeCompare(b.name));
   }
+  // Its consolidated return, or the parent whose return files its tax (Phase 5).
+  const values = api.feature(ctx, org, "business_tax");
+  const filer = corporate ? consolidatedFilers(ctx, api, now).get(org) : undefined;
+  const members = corporate && filer === undefined ? membersOf(ctx, api, org, now) : [];
+  const elected = own(ctx.state.entities, org)?.fields.consolidated_return === true;
+  const group = corporate && filer === undefined ? affiliatedGroup(ctx, api, org, now) : [];
+  const listed = elected ? group.filter((g) => members.includes(g.id)) : group;
+  const together = members.length > 0 && values ? consolidatedTax(ctx, api, org, members, yearSpan) : null;
+  const pct = (n: number): number => Math.round(n * 100) / 100;
+  const consolidation: ConsolidationView | null = corporate && filer === undefined && (elected || listed.length > 0) ? { elected, members: listed.map((g) => ({ name: named(g.id, "a company"), votes: pct(g.votes), share: pct(g.share) })), profit: together?.profit ?? null, tax: together?.tax ?? null } : null;
   const due: TaxesView["due"] = [];
   for (const flow of api.flows(ctx)) {
-    const mine = flow.id === `salestax:${org}` || flow.id === `esttax:${org}` || (flow.id.startsWith("property_tax:") && flow.link !== undefined && api.shareOf(ctx.state, flow.link, org) > 0);
+    const mine = [`salestax:${org}`, `esttax:${org}`, `futa:${org}`, `suta:${org}`].includes(flow.id) || (flow.id.startsWith("property_tax:") && flow.link !== undefined && api.shareOf(ctx.state, flow.link, org) > 0);
     if (!mine || flow.status !== "active") continue;
     const at = api.occurrences(ctx, flow.schedule, now, now + 400 * MINUTES_PER_DAY, flow.start)[0];
     if (at === undefined) continue;
-    const cents = flow.id === `salestax:${org}` ? Math.max(0, payablesOf(ctx.state, org).sales_tax) : flow.id === `esttax:${org}` ? estimatedDue(api, ctx, org, true, at).reduce((a, p) => a + p.cents, 0) : null;
+    const cents = flow.id === `salestax:${org}` ? Math.max(0, payablesOf(ctx.state, org).sales_tax) : flow.id === `esttax:${org}` ? estimatedDue(api, ctx, org, true, at).reduce((a, p) => a + p.cents, 0) : flow.id === `futa:${org}` ? unemploymentDueAt(ctx, org, "futa", at) : flow.id === `suta:${org}` ? unemploymentDueAt(ctx, org, "suta", at) : null;
+    // A member's own corporate tax is its parent's return's to pay.
+    if (flow.id === `esttax:${org}` && filer !== undefined && cents === 0) continue;
     due.push({ label: flow.label, cents, at: dayWords(ctx, at) });
   }
   const f = own(ctx.state.entities, org)?.fields;
   const before = strOf(f?.structure_before);
   const from = strOf(f?.structure_from);
+  const may = viewer === null ? null : mayAct(ctx, viewer, org, "org.govern");
+  // The statuses the GM may give it: none for a household or the party, which hold none.
+  const type = viewer === null ? orgTypeOf(ctx, org) : null;
+  const statusable = type !== null && type !== "household" && type !== "party";
+  const consolidate = !corporate || !values ? "Only a C corporation paying business taxes files a consolidated return" : filer !== undefined ? `${named(filer, "Its parent")}'s consolidated return files its income tax` : may !== null && !may.ok ? may.reason : null;
   return {
-    income: company ? (corporate ? "corporate" : "owners") : null,
+    income: exempt ? "exempt" : company ? (corporate ? "corporate" : "owners") : null,
     years,
     salesHeld: company ? Math.max(0, payablesOf(ctx.state, org).sales_tax) : 0,
-    incomeSoFar: corporate && api.feature(ctx, org, "business_tax") ? corporateTax(ctx, org, corporateProfit(ctx, api, org, yearSpan)) : null,
+    incomeSoFar: corporate && values && filer === undefined ? (together?.tax ?? corporateTax(ctx, org, corporateProfit(ctx, api, org, yearSpan))) : null,
     taxedTo,
     untaxed,
+    exemptHolders,
     due,
     pending: company && before !== "" && from !== "" && taxStructureAt(ctx, org, now) !== structureOf(ctx.state, org) ? { structure: structureOf(ctx.state, org), from: dayWords(ctx, clockAt(cal, dayIndexOfText(cal, from.slice(0, 10)), 0)) } : null,
+    unemployment: unemploymentView(api, ctx, org),
+    exempt,
+    statuses: statusable ? exemptStatuses(ctx) : null,
+    consolidation,
+    filedBy: filer !== undefined ? named(filer, "its parent") : null,
+    acts: viewer === null ? null : { consolidate },
   };
 }
 
-/** What the taxes module adds to a business: what a change of structure leaves waiting for the next estimated-tax period (§3.13). */
+/** Electing (or ending) a consolidated return (§3.11, Phase 5, `economy.consolidate`), by whoever governs the parent (`org.govern`); with no `by` (the GM), no power asked. Its History line names the corporations it includes. */
+function consolidateEvents(api: FinanceApi, ctx: EffectContext, a: Record<string, JsonValue>): LedgerEvent[] | Rejection {
+  const org = strOf(a.org);
+  const by = strOf(a.by);
+  const said = typeof a.elect === "string" ? a.elect.trim().toLowerCase() : a.elect;
+  const elect = !(said === false || said === "no" || said === "off" || said === "false" || said === "stop");
+  if (!own(ctx.state.entities, org) || isGone(ctx.state, org) || !kindIs(ctx.registry, ctx.world, own(ctx.state.entities, org)?.kind ?? "", COMPANY_KIND)) return { code: "not_company", reason: `${labelOf(ctx, org)} isn't a company` };
+  if (by !== "" && by !== org) {
+    const may = mayAct(ctx, by, org, "org.govern");
+    if (!may.ok) return { code: "not_allowed", reason: may.reason };
+  }
+  if (elect && (structureOf(ctx.state, org) !== "c_corp" || isExempt(ctx, org))) return { code: "not_corporation", reason: `Only a C corporation that pays income tax files a consolidated return; ${labelOf(ctx, org)} is ${isExempt(ctx, org) ? "exempt" : (STRUCTURE_WORDS[structureOf(ctx.state, org)] ?? structureOf(ctx.state, org))}` };
+  if ((own(ctx.state.entities, org)?.fields.consolidated_return === true) === elect) return { code: "no_change", reason: `${labelOf(ctx, org)} ${elect ? "already files" : "doesn't file"} a consolidated return` };
+  const members = affiliatedGroup(ctx, api, org, ctx.state.clock).map((m) => m.id);
+  const text = elect ? `Elected to file one consolidated return${members.length > 0 ? ` with ${members.map((m) => labelOf(ctx, m)).join(", ")}` : ""}` : "Stopped filing a consolidated return";
+  const line = by !== "" && by !== org ? (optionalService(ctx, "orgs.acted")?.(ctx, { org, by, power: "org.govern", text, names: members }) ?? []) : [];
+  return [{ type: "set", entity: org, field: "consolidated_return", value: elect }, ...line];
+}
+
+/** What the taxes module adds to a business: what a change of structure leaves waiting for the next estimated-tax period (§3.13), and its consolidated return election (§3.11, Phase 5). */
 const TAX_FIELDS: Record<string, FieldDef> = {
   structure_before: { type: "text", label: "Taxed as, until the change of structure (sole_proprietorship, partnership, llc, s_corp or c_corp)", domain: "money", level: 4 },
   structure_from: { type: "text", label: "Its structure is taxed from (YYYY-MM-DD)", domain: "money", level: 4 },
+  consolidated_return: { type: "bool", label: "Files one consolidated federal return with the corporations it holds 80% or more of (an election)", domain: "money", level: 3 },
 };
 
 /** Estimated tax: a flow per person with contract pay or pass-through profit and per C corporation, its provider, and the tax queries the holdings module shares; changes of structure; an organization's Taxes. */
@@ -758,8 +995,8 @@ export function registerTaxes(r: FinanceRegistry): void {
         if (!e || isGone(ctx.state, id)) continue;
         // The payee is named as a flow names someone outside (`tax:federal`), not as their outside account.
         if (kindIs(ctx.registry, ctx.world, e.kind, "person") && owesEstimates(api, ctx, id, paths, work)) out.push(estimateFlow(`esttax:${id}`, "Estimated tax", id, "tax:federal", id, false));
-        // A corporation, and one that was until its change of structure is taxed (§3.13).
-        else if (kindIs(ctx.registry, ctx.world, e.kind, "business") && (structureOf(ctx.state, id) === "c_corp" || strOf(e.fields.structure_before) === "c_corp")) out.push(estimateFlow(`esttax:${id}`, "Corporate income tax", operatingAccount(api, ctx, id) ?? id, "tax:federal", id, true));
+        // A corporation, and one that was until its change of structure is taxed (§3.13); never an exempt one, nor one wound up, which pays what it owes as it winds up.
+        else if (kindIs(ctx.registry, ctx.world, e.kind, "business") && dissolvedOn(ctx.state, id) === null && !isExempt(ctx, id) && (structureOf(ctx.state, id) === "c_corp" || strOf(e.fields.structure_before) === "c_corp")) out.push(estimateFlow(`esttax:${id}`, "Corporate income tax", operatingAccount(api, ctx, id) ?? id, "tax:federal", id, true));
       }
       return out;
     },
@@ -776,21 +1013,62 @@ export function registerTaxes(r: FinanceRegistry): void {
     // its own naming; its posting names the federal tax account itself, as withholding does.
     const payer = business ? operatingAccount(api, ctx, party) : null;
     const lines = payer ? [{ account: payer, amount: -cents }, { account: api.outside("tax:federal"), amount: cents }] : undefined;
-    return { cents, ...(lines ? { lines } : {}), memo: business ? "Corporate income tax" : "Estimated tax", kind: "payment", category: business ? "business_tax" : "tax", extra: [{ type: "economy.estimated_tax", data: { party, periods, ...(business ? { business: true } : {}) } }] };
+    // A parent's consolidated return files its members' periods too: each marked paid at nothing, so their own payments leave them alone (Phase 5).
+    const members = [...new Set(periods.flatMap((p) => p.members))].sort();
+    const filed: LedgerEvent[] = members.map((m) => ({ type: "economy.estimated_tax", data: { party: m, periods: periods.filter((p) => p.members.includes(m)).map((p) => ({ key: p.key, cents: 0 })), business: true } }));
+    const memo = business ? (members.length > 0 ? "Corporate income tax, consolidated return" : "Corporate income tax") : "Estimated tax";
+    return { cents, ...(lines ? { lines } : {}), memo, kind: "payment", category: business ? "business_tax" : "tax", extra: [{ type: "economy.estimated_tax", data: { party, periods: periods.map((p) => ({ key: p.key, cents: p.cents })), ...(business ? { business: true } : {}) } }, ...filed] };
   });
   core.query("economy.ordinary_income", (ctx, person, year) => ordinaryIncome(api, ctx, person, year));
   core.query("economy.income_tax", (ctx, filing, taxable) => bracketTax(federalTables(ctx).brackets[filing], taxable));
   core.service("economy.restructure", (ctx, business, structure) => restructureEvents(api, ctx, business, structure));
-  // Taxes on an organization's page (§4.4, §4.7), behind `money.view`: a company's from Money 3; a household that employs, at Money 4.
+  // What a person's deductible gifts saved them, refunded each April at the top level (Phase 5).
+  r.flows({
+    id: "donation_refund",
+    flows: (ctx) =>
+      deductibleDonors(ctx.state).flatMap((p): Flow[] =>
+        own(ctx.state.entities, p) && !isGone(ctx.state, p) && api.feature(ctx, p, "tax_brackets")
+          ? [{ id: `donation_refund:${p}`, label: "Tax saved by donations", kind: "tax", from: "tax:federal", to: p, amount: { provider: "donation_refund", args: { person: p } }, schedule: { every: "year", months: [4], days: [15], roll: "after" }, shortfall: "skip", category: "taxes", link: p, status: "active", source: "donations" }]
+          : [],
+      ),
+  });
+  r.amount("donation_refund", (ctx, flow, at): FlowPosting | null => {
+    const person = strOf(("provider" in flow.amount ? objOf(flow.amount.args) : {}).person, flow.link ?? "");
+    if (!own(ctx.state.entities, person) || !api.feature(ctx, person, "tax_brackets")) return null;
+    const year = dateAt(calendarOf(ctx.world), at).year - 1;
+    const saved = charitableSaving(api, ctx, person, year);
+    const deposit = api.depositAccount(ctx, person);
+    if (saved <= 0 || !deposit) return null;
+    return { cents: saved, lines: [{ account: api.outside("tax:federal"), amount: -saved }, { account: deposit, amount: saved }], memo: `Tax saved by ${year} donations`, kind: "refund", category: "taxes" };
+  });
+  // A consolidated return (Phase 5): elected or ended by whoever governs the parent, as a turn; a GM effect too.
+  core.effect({ type: "economy.consolidate", args: ["org", "elect?", "by?"], gm: true, resolve: (a, ctx) => consolidateEvents(api, ctx, a) });
+  core.action({
+    id: FINANCE_ACTIONS.consolidate,
+    label: "File a consolidated return",
+    description: "Elect, or stop, for a C corporation you govern, to file one federal income tax return with the corporations it holds 80% or more of (by votes and by worth): their profits and losses offset, and it pays the group's tax.",
+    pack: "economy",
+    params: { org: { type: "ref", ref: COMPANY_KIND, label: "The parent company" }, elect: { type: "text", optional: true, label: "yes to file one (the default), no to stop" } },
+    requires: ["level.money >= 3", "may(self, org, 'org.govern')"],
+    outcomes: { default: [{ type: "economy.consolidate", args: { org: "org", elect: "=params.elect", by: "actor" } }] },
+    duration: "15",
+    lexicon: ["file a consolidated return", "file one return for the group", "consolidate our taxes", "stop filing a consolidated return"],
+    observable: "signs a tax election",
+  });
+  // Taxes on an organization's page (§4.4, §4.7), behind `money.view`: a company's from Money 3; an exempt organization's from Money 3; any other employer's at Money 4; and for the GM, any organization that may hold an exempt status, from Money 3, so GM → Orgs can give it one.
   core.orgSection({
     id: "taxes",
     label: "Taxes",
     power: "money.view",
     build: (ctx, org, viewer) => {
-      const level = ctx.levelOf(org, "money");
+      // A group's Money level is its members' highest, as its payroll's is (ORG-SPEC §3.1).
+      const level = moneyLevel(ctx, org);
       const company = kindIs(ctx.registry, ctx.world, own(ctx.state.entities, org)?.kind ?? "", "business");
-      const employs = orgTypeOf(ctx, org) === "household" && level >= 4 && (jobsAt(ctx, org).length > 0 || Object.keys(objOf(own(objOf(sliceOf(ctx.state, "economy").payroll_taxes), org))).length > 0);
-      return (company && level >= 3) || employs ? (taxesView(api, ctx, org, viewer) as unknown as JsonValue) : null;
+      const kept = (slice: string): boolean => Object.keys(objOf(own(objOf(sliceOf(ctx.state, "economy")[slice]), org))).length > 0;
+      const employs = !company && level >= 4 && (jobsAt(ctx, org).length > 0 || kept("payroll_taxes") || kept("unemployment"));
+      const type = viewer === null ? orgTypeOf(ctx, org) : null;
+      const statusable = level >= 3 && (type === "group" || type === "trust");
+      return (company && level >= 3) || (level >= 3 && exemptStatusOf(ctx, org) !== null) || employs || statusable ? (taxesView(api, ctx, org, viewer) as unknown as JsonValue) : null;
     },
   });
 }

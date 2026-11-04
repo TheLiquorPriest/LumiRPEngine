@@ -39,6 +39,7 @@ import { addToBooks, businessBooks, monthOf, monthsBetween, operatingAccount, to
 import { hiddenFrom, moneyLevel, orgRecord, outsideHidden, outsideName, shownLabel } from "./model";
 import type { FinanceApi, FinanceRegistry, FlowPosting } from "./module";
 import { addPay, addPayrollTaxes, payTaxes, taxTotal, yearPay, type PayTaxes } from "./taxes";
+import { unemploymentAccrual, unemploymentTotals, unemploymentView } from "./unemployment";
 
 export const JOB_KIND = "job";
 
@@ -520,6 +521,8 @@ export interface Paycheck {
   employerFica: number;
   /** The pay Social Security and Medicare counted (0 when none was withheld). */
   ficaWages: number;
+  /** The pay unemployment taxes count (ORG-SPEC §3.11, Phase 5): gross less pre-tax deductions other than retirement; 0 for contract work and a student at their own school. */
+  futaWages: number;
   /** Pay taken before income tax (pre-tax deductions). */
   pretax: number;
   lines: PostingLine[];
@@ -536,7 +539,7 @@ function ownsAccount(api: FinanceApi, state: Readonly<WorldState>, party: Entity
 
 /** A paycheck that pays nothing but moves the job's record on: a pay period on leave, or with no work in it. */
 function emptyCheck(job: Job, from: number, to: number, work: Work): Paycheck {
-  return { job: job.id, worker: job.worker, from, to, work, gross: 0, parts: { pay: 0, tips: 0, commission: 0 }, taxes: { federal: 0, socialSecurity: 0, medicare: 0, state: 0, local: 0 }, deductions: [], net: 0, routed: [], match: 0, employerFica: 0, ficaWages: 0, pretax: 0, lines: [] };
+  return { job: job.id, worker: job.worker, from, to, work, gross: 0, parts: { pay: 0, tips: 0, commission: 0 }, taxes: { federal: 0, socialSecurity: 0, medicare: 0, state: 0, local: 0 }, deductions: [], net: 0, routed: [], match: 0, employerFica: 0, ficaWages: 0, futaWages: 0, pretax: 0, lines: [] };
 }
 
 /**
@@ -641,7 +644,8 @@ export function paycheckFor(ctx: ReadContext, api: FinanceApi, job: Job, at: num
   add(api.outside("tax:state"), taxes.state);
   add(api.outside("tax:local"), taxes.local);
   const ficaWages = fica > 0 ? Math.max(0, gross - pretax.fica) : 0;
-  return { job: job.id, worker: job.worker, from: since, to: through, work, gross, parts: { pay, tips, commission }, taxes, deductions, net, routed, match, employerFica, ficaWages, pretax: pretax.income, lines: lines.filter((l) => l.amount !== 0) };
+  const futaWages = job.contractor || job.ficaExempt ? 0 : Math.max(0, gross - pretax.fica);
+  return { job: job.id, worker: job.worker, from: since, to: through, work, gross, parts: { pay, tips, commission }, taxes, deductions, net, routed, match, employerFica, ficaWages, futaWages, pretax: pretax.income, lines: lines.filter((l) => l.amount !== 0) };
 }
 
 // ---------------------------------------------------------------- events
@@ -1159,6 +1163,39 @@ function payrollThisYear(ctx: ReadContext, api: FinanceApi, employer: EntityId):
   return api.accountsOf(ctx, employer, "spend").reduce((sum, account) => sum + months.reduce((a, m) => a + (totalsOf(ctx.state, account, m).payroll?.out ?? 0), 0), 0);
 }
 
+/**
+ * What a job's worker was paid earlier this year (before the paycheck at `at`) by its employer, for
+ * the employer's unemployment taxes to count from where their year doesn't count the worker yet: the
+ * worker's year of pay (its FICA wages, else its pay less contract pay) when every job that paid them
+ * this year is at this employer; else nothing, each employer's bases being its own.
+ */
+function paidHereThisYear(ctx: ReadContext, job: Job, at: number): number {
+  const cal = calendarOf(ctx.world);
+  const year = dateAt(cal, at).year;
+  const start = clockAt(cal, dayIndexOf(cal, year, 1, 1), 0);
+  const payroll = objOf(sliceOf(ctx.state, "economy").payroll);
+  if (allJobs(ctx).some((j) => j.worker === job.worker && j.party !== job.party && numOf(objOf(objOf(own(payroll, j.id)).last).at, -1) >= start)) return 0;
+  const pay = yearPay(ctx.state, job.worker, year);
+  return pay.fica > 0 ? pay.fica : Math.max(0, pay.gross - Object.values(pay.contract).reduce((a, c) => a + c, 0));
+}
+
+/** A job's paycheck on a payday as its payroll flow posts it (the `payroll` amount provider): what it earned since the last one, from its payer, with its payslip and the worker's note. */
+export function payrollPosting(ctx: ReadContext, api: FinanceApi, flow: Flow, at: number): FlowPosting | Rejection | null {
+  const id = "provider" in flow.amount ? strOf(objOf(flow.amount.args).job, flow.link ?? "") : (flow.link ?? "");
+  const job = readJob(ctx, id);
+  if (!job) return null;
+  const check = paycheckFor(ctx, api, job, at, payerOf(ctx, api, job));
+  if (!check) return null;
+  // Nothing earned (a period on leave, out of season, no shifts): the record moves on, nothing posts.
+  if (check.gross === 0) return { cents: 0, lines: [], extra: [payslipEvent(ctx, job, check, at)] };
+  const withheld = taxTotal(check.taxes) + check.deductions.reduce((a, d) => a + d.cents, 0);
+  const memo = withheld > 0 ? `Payroll: ${api.money(ctx, check.gross)} gross, ${api.money(ctx, withheld)} withheld` : "Payroll";
+  const note = api.note(ctx, job.worker, "bill", `Payday: ${api.money(ctx, check.net)} net${withheld > 0 ? ` (${api.money(ctx, check.gross)} gross)` : ""}.`);
+  // The employer's unemployment taxes on this pay (ORG-SPEC §3.11, Phase 5), accrued with it and paid each quarter.
+  const accrued = unemploymentAccrual(api, ctx, job.party, job.worker, check.futaWages, at, () => paidHereThisYear(ctx, job, at));
+  return { cents: check.gross, lines: check.lines, memo, kind: "income", category: "payroll", extra: [payslipEvent(ctx, job, check, at), ...(accrued ? [accrued] : []), ...note] };
+}
+
 // ---------------------------------------------------------------- registration
 
 /** Jobs: payroll flows and their paychecks, the timesheet, hiring, letting go, pay, hours, leave and positions, the pay schedule, the staff of every employer, and each worker's jobs on their dashboard. */
@@ -1166,19 +1203,7 @@ export function registerEmployment(r: FinanceRegistry): void {
   const { api, core } = r;
   for (const def of [PAYSLIP, TIMESHEET, COMMISSION]) core.event(def);
   r.flows({ id: "job", flows: (ctx) => allJobs(ctx).flatMap((job) => payrollFlow(ctx, api, job) ?? []) });
-  r.amount("payroll", (ctx, flow, at): FlowPosting | Rejection | null => {
-    const id = "provider" in flow.amount ? strOf(objOf(flow.amount.args).job, flow.link ?? "") : (flow.link ?? "");
-    const job = readJob(ctx, id);
-    if (!job) return null;
-    const check = paycheckFor(ctx, api, job, at, payerOf(ctx, api, job));
-    if (!check) return null;
-    // Nothing earned (a period on leave, out of season, no shifts): the record moves on, nothing posts.
-    if (check.gross === 0) return { cents: 0, lines: [], extra: [payslipEvent(ctx, job, check, at)] };
-    const withheld = taxTotal(check.taxes) + check.deductions.reduce((a, d) => a + d.cents, 0);
-    const memo = withheld > 0 ? `Payroll: ${api.money(ctx, check.gross)} gross, ${api.money(ctx, withheld)} withheld` : "Payroll";
-    const note = api.note(ctx, job.worker, "bill", `Payday: ${api.money(ctx, check.net)} net${withheld > 0 ? ` (${api.money(ctx, check.gross)} gross)` : ""}.`);
-    return { cents: check.gross, lines: check.lines, memo, kind: "income", category: "payroll", extra: [payslipEvent(ctx, job, check, at), ...note] };
-  });
+  r.amount("payroll", (ctx, flow, at) => payrollPosting(ctx, api, flow, at));
   core.process({ id: "economy.timesheet", domain: "money", minLevel: 3, step: (slot, ctx) => timesheet(slot, ctx) });
   // Whoever works for an organization is on its people's list (ORG-SPEC §3.2): every group kind's and a trust's.
   core.membership(GROUP_KIND, staffRows);
@@ -1216,7 +1241,11 @@ export function registerEmployment(r: FinanceRegistry): void {
       const fields = own(ctx.state.entities, org)?.fields ?? {};
       const company = kindIs(ctx.registry, ctx.world, own(ctx.state.entities, org)?.kind ?? "", COMPANY_KIND);
       if (!company && employees.length === 0 && payScheduleOf(ctx, org) === null && strOf(fields.payroll_account) === "") return null;
-      return { headcount: employees.length, payroll: payrollThisYear(ctx, api, org), employees } as unknown as JsonValue;
+      // Its unemployment taxes this year (ORG-SPEC §3.11, Phase 5): FUTA (with any credit reduction) and SUTA accrued, and the rates and wage bases they run at.
+      const rates = unemploymentView(api, ctx, org);
+      const totals = unemploymentTotals(ctx.state, org, dateAt(calendarOf(ctx.world), ctx.state.clock).year);
+      const unemployment = rates || totals.futa > 0 || totals.suta > 0 ? { futa: totals.futa, suta: totals.suta, rates } : null;
+      return { headcount: employees.length, payroll: payrollThisYear(ctx, api, org), employees, unemployment } as unknown as JsonValue;
     },
   });
   r.view((ctx, party, _view, viewer) => (api.partyKind(ctx, party) === "person" ? { jobs: allJobs(ctx).filter((j) => j.worker === party).map((j) => jobView(ctx, api, j, viewer)) } : {}));

@@ -10,14 +10,14 @@
 import type { EntityId } from "../../../shared/ids";
 import type { JsonValue } from "../../../shared/json";
 import type { LedgerEvent, PackEvent } from "../../../shared/ledger";
-import { countsUnits, FINANCE_ACTIONS, moveUnits, ownersJson, PARTY_KINDS, unitsOf, withUnitShares, worthShares, type Owner } from "../../../shared/finance";
+import { allUnits, countsUnits, FINANCE_ACTIONS, listingIn, moveUnits, ownersJson, PARTY_KINDS, unitsOf, withUnitShares, worthShares, type Owner } from "../../../shared/finance";
 import type { FieldDef } from "../../../shared/world";
 import { formatMoney } from "../../../shared/world";
-import { labelOf, numOf, objOf, optionalQuery, own, strOf } from "../../../engine/pack-kit";
+import { labelOf, numOf, objOf, optionalQuery, optionalService, own, strOf } from "../../../engine/pack-kit";
 import { passMemo } from "../../../engine/read-pass";
 import type { EffectContext, EventTypeDef, ReadContext, Rejection } from "../../../engine/registry";
 import type { FinanceApi, FinanceRegistry } from "./module";
-import { holdingsRecord, holdingsSlice, reject } from "./assets";
+import { holdingsRecord, holdingsSlice, quoteOf, reject } from "./assets";
 import { acquisition, disposal } from "./gains";
 import { unit } from "./holdings";
 import { incomeFor } from "./income";
@@ -45,7 +45,7 @@ export function businessIds(api: FinanceApi, ctx: ReadContext): EntityId[] {
   );
 }
 
-/** How a business's value is worked out (DESIGN §27.10): its set value, else its book value and its last year's profit times its multiple; never below nothing. */
+/** How a business's value is worked out (DESIGN §27.10): its set value, else its book value and its last year's profit times its multiple; never below nothing. A listed company's is the market's. */
 export interface Valuation {
   value: number;
   /** Its author or the GM set it (`value`). */
@@ -53,10 +53,28 @@ export interface Valuation {
   book: number;
   profit: number;
   multiple: number;
+  /** A listed company's (§27.10 Listing): its value is its price a unit times all its units, and `book`, `profit` and `multiple` are its books', the price's anchor. */
+  market?: { price: number; units: number };
 }
 
-/** A business's valuation, its parts as they add up. */
+/** A listed company's market: its price a unit now and all its units (its owners' and the public's); null for a company not on a market. */
+export function marketValueOf(ctx: ReadContext, business: EntityId): { price: number; units: number } | null {
+  const f = own(ctx.state.entities, business)?.fields;
+  const listing = f ? listingIn(f) : null;
+  if (!f || !listing) return null;
+  const price = quoteOf(ctx, listing.asset);
+  return price !== null && price > 0 ? { price, units: allUnits(f) } : null;
+}
+
+/** A business's valuation, its parts as they add up: a listed company's at its market price, with its books beside it. */
 export function valuationOf(api: FinanceApi, ctx: ReadContext, business: EntityId): Valuation {
+  const books = bookValuationOf(api, ctx, business);
+  const market = marketValueOf(ctx, business);
+  return market ? { ...books, value: Math.max(0, Math.round(market.price * market.units)), set: false, market } : books;
+}
+
+/** A business's valuation by its books: its set value, else its book value and its last year's profit times its multiple; never below nothing. A listed company's price follows it. */
+export function bookValuationOf(api: FinanceApi, ctx: ReadContext, business: EntityId): Valuation {
   const f = own(ctx.state.entities, business)?.fields ?? {};
   const multiple = Math.max(0, numOf(f.valuation_multiple, VALUATION_MULTIPLE));
   if (typeof f.value === "number" && Number.isFinite(f.value)) return { value: Math.max(0, Math.round(f.value)), set: true, book: 0, profit: 0, multiple };
@@ -72,9 +90,10 @@ export function valuationOf(api: FinanceApi, ctx: ReadContext, business: EntityI
   }
 }
 
-/** What a business is worth: its set value, else its books and a multiple of its last year's profit; never below nothing. */
+/** What a business is worth: a listed company's price a unit times all its units; any other's set value, else its books and a multiple of its last year's profit; never below nothing. */
 export function businessValue(api: FinanceApi, ctx: ReadContext, business: EntityId): number {
-  return valuationOf(api, ctx, business).value;
+  const market = marketValueOf(ctx, business);
+  return market ? Math.max(0, Math.round(market.price * market.units)) : bookValuationOf(api, ctx, business).value;
 }
 
 /** A party's share of every business they own, a line each. */
@@ -152,6 +171,11 @@ export interface StakeSale {
  */
 export function sellStake(api: FinanceApi, ctx: EffectContext | ReadContext, x: StakeSale): LedgerEvent[] | Rejection {
   if (api.partyKind(ctx, x.business) !== "business") return reject("not_business", `${labelOf(ctx, x.business)} isn't a business`);
+  // A listed company's units sell on its market when no buyer is named (§27.10 Listing).
+  if (x.buyer === undefined && listingIn(own(ctx.state.entities, x.business)?.fields ?? {})) {
+    const market = optionalService(ctx, "economy.market_sale");
+    if (market) return market(ctx, { party: x.party, business: x.business, ...(x.units !== undefined ? { units: x.units } : {}), ...(x.share !== undefined ? { share: x.share } : {}), ...(x.to !== undefined ? { to: x.to } : {}) });
+  }
   const owners = api.ownersOf(ctx.state, x.business);
   const shares = worthShares(owners);
   const held = shares[x.party] ?? 0;
