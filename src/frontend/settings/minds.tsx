@@ -230,7 +230,7 @@ const TEXT_GROUP_NOTE: Record<TextGroup, string> = {
   mind: "The heading and lead over the facts a mind holds.",
   holding: "Each line a mind, the narrator and the knowledge step read for a fact someone holds, and the words for how they came by it.",
   narrator: "How Who knows what names a person's facts, what everyone here holds alike, and what someone doesn't know.",
-  step: "The headings of what the knowledge step is given.",
+  step: "The headings of what the knowledge step is given, and what it is told of the facts it lists: each is one fact however it is worded, to be learned by its id rather than made again.",
 };
 
 /** Each knowledge text: its group and what it is. */
@@ -255,6 +255,8 @@ const TEXT_FIELD: Record<KnowledgeTextId, { group: TextGroup; label: string }> =
   stepPresent: { group: "step", label: "Who could perceive it" },
   stepPeople: { group: "step", label: "What each already knows" },
   stepFacts: { group: "step", label: "Facts in play" },
+  stepMade: { group: "step", label: "Facts this turn already made" },
+  stepReuse: { group: "step", label: "Reusing a listed fact" },
   stepPerson: { group: "step", label: "A person" },
   stepYou: { group: "step", label: "The player character" },
   stepSaid: { group: "step", label: "What the player character said or did" },
@@ -338,7 +340,7 @@ function KnowledgeSection(props: { knowledge: KnowledgeSettings; busy: boolean; 
         <div class="lre-minds-group">
           <span class="lre-minds-group-title">The knowledge step</span>
           <Seg<KnowledgeBatch> label="The knowledge step" value={k.batch} options={KNOWLEDGE_BATCHES.map((b) => ({ value: b, label: BATCH_LABEL[b] }))} disabled={busy} onChange={(batch) => set({ batch })} />
-          <Note>One call per scene works out everyone who could perceive the turn at once. One call per character asks about each of them alone: closer reading, a call each.</Note>
+          <Note>One call per scene works out everyone who could perceive the turn at once. One call per character asks about each of them alone, one after another, each shown the facts the ones before it made: closer reading, a call each.</Note>
         </div>
         <div class="lre-minds-group">
           <span class="lre-minds-group-title">Limits</span>

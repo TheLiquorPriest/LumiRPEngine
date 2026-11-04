@@ -477,9 +477,10 @@ export function knowledgeLimitRange(limit: KnowledgeLimit): readonly [number, nu
  * Every text knowledge sends a model besides the knowledge step's own prompt (which is
  * `minds.prompts.knowledge`, as each minds step's), by id, with its shipped wording: what a mind is
  * told of its own holdings, the words a holding reads in (for a mind, the narrator's Who knows what
- * and the knowledge step alike), and the knowledge step's context headings. The user's own wording
- * (`KnowledgeSettings.prompts`) wins; one left out, or emptied, reads as shipped (`knowledgeText`).
- * `{{…}}` are the placeholders each fills.
+ * and the knowledge step alike), and the knowledge step's context: its headings, and that a fact it
+ * lists is one fact however it is worded (`stepReuse`). The user's own wording wins
+ * (`KnowledgeSettings.prompts`); one left out, or emptied, reads as shipped (`knowledgeText`). `{{…}}`
+ * are the placeholders each fills.
  */
 export const KNOWLEDGE_TEXTS = Object.freeze({
   mindTitle: "What you know",
@@ -502,6 +503,8 @@ export const KNOWLEDGE_TEXTS = Object.freeze({
   stepPresent: "Who could perceive it",
   stepPeople: "What each of them already knows, and has witnessed lately",
   stepFacts: "Facts in play (reuse these by id)",
+  stepMade: "Facts this turn already made (reuse these by id)",
+  stepReuse: "A fact listed above is one fact however it is worded: when what someone learns here is one of them, in its words or in others, have them learn that fact by its id, and never make it again as a new fact. Make a new fact only of what none of them says.",
   stepPerson: "{{name}} (id: {{id}})",
   stepYou: '{{name}} (id: {{id}}; the player character, "you")',
   stepSaid: "{{name}} said or did: {{text}}",
@@ -1225,8 +1228,10 @@ export function claimFactId(claim: string, msg: MessageId | null): FactId {
 /**
  * What a claim says, as the knowledge step tells one fact from another (DESIGN §24.11): its words,
  * case, spacing and punctuation aside, so "Danny is leaving." and "danny is leaving!" are one fact
- * however many of a turn's calls, or later turns, make it. Not an id: a fact keeps the id it was
- * made with (`claimFactId`), so what a chat recorded folds as it did. Empty for a claim of no words.
+ * however many of a turn's calls, or later turns, make it. A backstop: a fact said again in other
+ * words is the step's own to name, each call being shown the facts in play and those the turn made,
+ * by id, and told to (`stepReuse`). Not an id: a fact keeps the id it was made with (`claimFactId`),
+ * so what a chat recorded folds as it did. Empty for a claim of no words.
  */
 export function claimKey(claim: string): string {
   return claim.normalize("NFKC").toLowerCase().replace(/[\p{P}\s]+/gu, " ").trim();

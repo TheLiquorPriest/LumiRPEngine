@@ -1480,6 +1480,111 @@ describe("one fact per real fact", () => {
     expect(rig.rt.ledger.errors).toEqual([]);
   });
 
+  test("per-person calls go one after another, each shown the facts the calls before it made, by id and claim, and told to learn one by its id rather than make it again: calls that would each word it their own way name the first one's instead, which everyone who learned it then holds, and no other fact is made", async () => {
+    const rig = new Rig({ shipped: true, minds: true });
+    // How each call would word it: alike to no backstop (`claimKey`).
+    const worded: Readonly<Record<string, string>> = { [POV]: LEAVING, [MARCUS]: "Danny's quitting the garage at month's end", [DANNY]: "Danny is done at the shop once the month is out" };
+    expect(new Set(Object.values(worded).map(claimKey)).size).toBe(3);
+    // A model that, shown a fact the turn made that says what it would, learns that one by its id, and otherwise makes its own.
+    const seen = models(rig, (context): JsonObject => {
+      const who = Object.keys(NAMES).find((id) => context.includes(`### ${NAMES[id]} (id: ${id}`));
+      if (!context.includes("PARAPHRASE-MARK") || !who) return {};
+      const shown = /^- \[([^\]]+)\] Danny is leaving the shop/m.exec(context)?.[1];
+      return shown ? { learned: [{ fact: shown, how: "witnessed" }] } : { facts: [{ ref: "l", claim: worded[who] ?? "", about: ["Danny Okafor"] }], learned: [{ fact: "l", how: "witnessed" }] };
+    });
+    const chatId = await shopChat(rig);
+    rig.body(await rig.send({ type: "lre.settings.set", patch: { minds: { knowledge: { batch: "character" } } } }));
+    await rig.turn(chatId, "Morning, Danny.", "Danny says he's leaving the shop at the end of the month. PARAPHRASE-MARK");
+    const calls = seen.knowledge.filter((c) => c.includes("PARAPHRASE-MARK"));
+    expect(calls.length).toBe(3);
+    const { state } = await stateOf(rig, chatId);
+    const slice = readSlice(state);
+    // One fact, in the first call's words (the player character's own call comes first), and everyone who learned it holds it.
+    expect(claimsMade(state).map((f) => f.claim)).toEqual([LEAVING]);
+    const leaving = claimsMade(state)[0]?.id ?? "";
+    expect(knowersOf(slice, leaving).sort()).toEqual([DANNY, MARCUS, POV].sort());
+    for (const who of [MARCUS, DANNY]) expect(holdingsOf(slice, who)[leaving]).toMatchObject({ how: "witnessed", by: null, belief: "true", confidence: 1 });
+    // What each call was shown: the first, no fact of the turn's; each after it, the first's, by id and claim, once, and what a fact listed is.
+    expect(calls.map((context) => context.split(`## ${KNOWLEDGE_TEXTS.stepMade}\n`)[1]?.split("\n\n")[0] ?? "")).toEqual(["", `- [${leaving}] ${LEAVING}`, `- [${leaving}] ${LEAVING}`]);
+    for (const context of calls.slice(1)) {
+      expect(context).toContain(`- [${leaving}] ${LEAVING}\n\n${KNOWLEDGE_TEXTS.stepReuse}\n\n`);
+      expect(context.split(`[${leaving}]`).length).toBe(2);
+    }
+    // A replay reads what was recorded: a fresh runtime folds the same, asking no model.
+    const asked = seen.knowledge.length;
+    const fresh = new Rig({ host: rig.host, shipped: true, minds: true });
+    expect(readSlice((await stateOf(fresh, chatId)).state).knowledge).toEqual(slice.knowledge);
+    expect(seen.knowledge.length).toBe(asked);
+    expect(rig.rt.ledger.errors).toEqual([]);
+  });
+
+  test("a call's context lists the facts in play, then those the turn's calls before it made, by id and claim, then that a fact listed is one fact however it is worded; one that learns such a fact by its id joins those who hold it, and no fact is made", async () => {
+    const rig = new Rig({ shipped: true, minds: true });
+    models(rig, () => ({}));
+    const chatId = await shopChat(rig, { minds: { holdings: MARCUS_KEEPS } });
+    await rig.turn(chatId, "I open the shutters.", "Marcus counts the till.");
+    const { state, world } = await stateOf(rig, chatId);
+    const reuse = `\n\n${KNOWLEDGE_TEXTS.stepReuse}\n\n`;
+    // The scene's one call: the facts in play (Marcus's secret), and what a fact listed is.
+    const scene = shopTurn(rig, world, state);
+    const whole = knowledgeContext(scene, knowledgeBatches(scene)[0] ?? []);
+    expect(whole).toContain(`## ${KNOWLEDGE_TEXTS.stepFacts}\n- [${DEBT}] `);
+    expect(whole).toContain(reuse);
+    expect(whole).not.toContain(KNOWLEDGE_TEXTS.stepMade);
+    // With no fact listed (the player character alone, holding nothing), there is nothing to say of one.
+    const alone = { ...scene, presence: { ...scene.presence, said: { ...scene.presence.said, who: [] } } };
+    expect(knowledgeContext(alone, [POV])).not.toContain(KNOWLEDGE_TEXTS.stepReuse);
+    // One call per person: the player character's makes an open question, which Marcus's, next, is shown.
+    const turn = shopTurn(rig, world, state, { ...KNOWLEDGE_DEFAULTS, batch: "character" });
+    const spent = knowledgeSpent();
+    expect(knowledgeContext(turn, [POV], spent)).not.toContain(KNOWLEDGE_TEXTS.stepMade);
+    const first = checkKnowledge(turn, [POV], saying({ facts: [{ ref: "l", claim: LEAVING, about: ["Danny Okafor"], truth: "open" }], learned: [{ fact: "l", how: "witnessed" }] }), spent);
+    expect([first.refused, first.proposals.length]).toEqual([[], 1]);
+    const leaving = claimFactId(LEAVING, turn.messageId);
+    expect(knowledgeContext(turn, [MARCUS], spent)).toContain(`## ${KNOWLEDGE_TEXTS.stepFacts}\n- [${DEBT}] `);
+    expect(knowledgeContext(turn, [MARCUS], spent)).toContain(`\n\n## ${KNOWLEDGE_TEXTS.stepMade}\n- [${leaving}] ${LEAVING} ${KNOWLEDGE_TEXTS.stepOpen}${reuse}`);
+    // His call learns it by its id, as the context shows it: he holds that fact, carried whole for him, and none is made.
+    const named = checkKnowledge(turn, [MARCUS], { learned: [{ fact: `[${leaving}]`, how: "witnessed" }] }, spent);
+    expect(named.refused).toEqual([]);
+    expect(learnings(named.events)).toEqual([expect.objectContaining({ who: [MARCUS], fact: leaving, how: "witnessed", belief: "uncertain" })]);
+    expect(named.events.filter((e) => e.type === MINDS_EVENTS.fact)).toEqual([{ type: MINDS_EVENTS.fact, data: { fact: expect.objectContaining({ id: leaving, claim: LEAVING }) } }]);
+    expect([...spent.facts.values()].map((f) => f.id)).toEqual([leaving]);
+  });
+
+  test("the user's own wording of the turn's facts heading and of what a fact listed is reaches each call, and Reset brings back the shipped", async () => {
+    const rig = new Rig({ shipped: true, minds: true });
+    const ROOM = "Danny lost his room at the boarding house";
+    // Each turn's first call makes its fact; the calls after it, shown it, learn nothing of their own.
+    const seen = models(rig, (context): JsonObject => {
+      const claim = context.includes("WORDING-1") ? LEAVING : context.includes("WORDING-2") ? ROOM : null;
+      return claim && !context.includes(`] ${claim}`) ? { facts: [{ ref: "f", claim, about: ["Danny Okafor"] }], learned: [{ fact: "f", how: "witnessed" }] } : {};
+    });
+    const chatId = await shopChat(rig);
+    const own = { stepMade: "MADE-OWN, by id", stepReuse: "REUSE-OWN: one fact, whatever its words." };
+    rig.body(await rig.send({ type: "lre.settings.set", patch: { minds: { knowledge: { batch: "character", prompts: own } } } }));
+    await rig.turn(chatId, "Morning, Danny.", "Danny says he's leaving the shop at the end of the month. WORDING-1");
+    // Each call after the turn's first, shown the fact it made.
+    const ownWording = seen.knowledge.filter((c) => c.includes("WORDING-1")).slice(1);
+    expect(ownWording.length).toBe(2);
+    for (const context of ownWording) {
+      expect(context).toContain(`## ${own.stepMade}\n- [`);
+      expect(context).toContain(`\n\n${own.stepReuse}\n\n`);
+      expect(context).not.toContain(KNOWLEDGE_TEXTS.stepReuse);
+    }
+    // Reset, as Settings → Minds → Knowledge → Texts sends it.
+    rig.body(await rig.send({ type: "lre.settings.set", patch: { minds: { knowledge: { prompts: { stepMade: null, stepReuse: null } } } } }));
+    await atShop(rig, chatId);
+    await rig.turn(chatId, "Where are you staying?", "Danny says he lost his room at the boarding house. WORDING-2");
+    const shipped = seen.knowledge.filter((c) => c.includes("WORDING-2")).slice(1);
+    expect(shipped.length).toBe(2);
+    for (const context of shipped) {
+      expect(context).toContain(`## ${KNOWLEDGE_TEXTS.stepMade}\n- [`);
+      expect(context).toContain(`\n\n${KNOWLEDGE_TEXTS.stepReuse}\n\n`);
+      expect(context).not.toContain(own.stepReuse);
+    }
+    expect(rig.rt.ledger.errors).toEqual([]);
+  });
+
   test("a later turn that says again a fact the chat holds makes no new one, needing no reason and spending no limit: whoever learns it joins those who hold it, and the fact stays as recorded", async () => {
     const rig = new Rig({ shipped: true, minds: true });
     models(rig, (context): JsonObject => {

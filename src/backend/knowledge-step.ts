@@ -3,20 +3,24 @@
 // few facts that would change what someone does, says, hides or believes (a secret, a revelation, a
 // lie, what they would act on…), each saying why it matters and to whom, as its default wording says.
 // One call per scene by default, or one per character (Settings → Minds → Knowledge), for everyone
-// who could perceive the turn: the player character and whoever was there with them.
+// who could perceive the turn: the player character and whoever was there with them, each call asked
+// once the one before it is checked.
 //
 //   knowledgeContext  what the call reads: what happened (the player's message, the reply, the turn's
 //                     events and what the read found in it), who could perceive it and from when,
-//                     the facts in play by id, and each person's holdings, witness log (by ref) and
-//                     traits, within the user's tokens (`stepTokens`).
+//                     the facts in play and those the turn's calls before it made, by id, each one
+//                     fact however it is worded, to be learned by its id rather than made again
+//                     (`stepReuse`), and each person's holdings, witness log (by ref) and traits,
+//                     within the user's tokens (`stepTokens`).
 //   checkKnowledge    its answer, checked as the engine checks every proposal: a new fact says why it
 //                     matters and to whom, and one that says again (case, spacing and punctuation
-//                     aside: `claimKey`) a fact the chat holds or another of the turn's calls made is
-//                     that fact, its learners joining those who hold it; a witnessing reaches
-//                     everyone there throughout but whom the answer says missed it, and no one there
-//                     for only part of the turn; a teller holds what they tell; an inference rests only
-//                     on facts its person holds and lines of their own witness log; a confidence runs
-//                     from 0 to 1. An inference under the threshold is kept, as a suspicion. Within the
+//                     aside: `claimKey`, a backstop to the step's own naming of a fact it was shown)
+//                     a fact the chat holds or another of the turn's calls made is that fact, its
+//                     learners joining those who hold it; a witnessing reaches everyone there
+//                     throughout but whom the answer says missed it, and no one there for only part
+//                     of the turn; a teller holds what they tell; an inference rests only on facts
+//                     its person holds and lines of their own witness log; a confidence runs from 0
+//                     to 1. An inference under the threshold is kept, as a suspicion. Within the
 //                     user's limits (`factsPerTurn`, `learningsPerTurn`, `factsPerChat`, `holdersPerFact`,
 //                     `claimChars`). It returns the learnings of everyone but the player character as
 //                     events, each whole with the facts it names that the turn didn't start with, and
@@ -94,12 +98,14 @@ function label(turn: Pick<KnowledgeTurn, "state" | "world" | "settings">, id: En
 
 /**
  * The knowledge step's user message for one call (`batch`, the people it is about): what happened,
- * who could perceive it and from when, the facts in play, and each person's holdings, witness log and
- * traits. Within `stepTokens`: what happened and who perceived it come first, then every person's
- * lines one round at a time (their best holding, their latest witness line, their next…), so the
- * limit cuts each person's least, and the reply's beginning goes first when even that is over it.
+ * who could perceive it and from when, the facts in play and those the turn's calls before this one
+ * made (`spent`), with that a fact listed is one fact however it is worded (`stepReuse`), and each
+ * person's holdings, witness log and traits. Within `stepTokens`: what happened and who perceived it
+ * come first, then every person's lines one round at a time (their best holding, their latest
+ * witness line, their next…), so the limit cuts each person's least, and the reply's beginning goes
+ * first when even that is over it.
  */
-export function knowledgeContext(turn: KnowledgeTurn, batch: readonly EntityId[]): string {
+export function knowledgeContext(turn: KnowledgeTurn, batch: readonly EntityId[], spent: Pick<KnowledgeSpent, "facts"> = knowledgeSpent()): string {
   const { world, state, settings, presence } = turn;
   const text = (id: KnowledgeTextId): string => knowledgeText(settings, id);
   const cal = calendarOf(world);
@@ -132,10 +138,13 @@ export function knowledgeContext(turn: KnowledgeTurn, batch: readonly EntityId[]
   const inPlay = new Set<FactId>();
   for (const id of people) for (const h of rankedHoldings(slice, id, play)) inPlay.add(h.id);
   for (const [id, f] of Object.entries(facts)) if (f.source?.msg && play.recent.has(f.source.msg)) inPlay.add(id);
-  const factLines = [...inPlay].sort().map((id) => {
-    const f = own(facts, id);
-    return `- [${id}] ${claim(f, id)}${f?.truth === "open" ? ` ${text("stepOpen")}` : f?.truth === "false" ? ` ${text("stepFalse")}` : ""}`;
-  });
+  // A fact as every list of them gives it: its id as an answer names it, in brackets (`idOf` in
+  // `checkKnowledge`), its claim, and its truth unless it is true.
+  const factLine = (id: FactId, f: KnowledgeFact | undefined): string => `- [${id}] ${claim(f, id)}${f?.truth === "open" ? ` ${text("stepOpen")}` : f?.truth === "false" ? ` ${text("stepFalse")}` : ""}`;
+  const factLines = [...inPlay].sort().map((id) => factLine(id, own(facts, id)));
+  // And what the turn's calls before this one made, in the order they made them: this call names
+  // one by its id where it would say it again, in whatever words (`stepReuse`).
+  const madeLines = [...spent.facts.values()].filter((f) => !inPlay.has(f.id)).map((f) => factLine(f.id, f));
   // Each person's lines, best first: who they are, then holdings and witness lines in turn.
   const persons = batch.map((id) => {
     const holdings = rankedHoldings(slice, id, play).map((h) => `- [${h.id}] ${holdingLine(claim(h.fact, h.id), h.holding, words)}`);
@@ -152,6 +161,8 @@ export function knowledgeContext(turn: KnowledgeTurn, batch: readonly EntityId[]
       happened(reply),
       present,
       block(text("stepFacts"), factLines),
+      block(text("stepMade"), madeLines),
+      factLines.length + madeLines.length > 0 ? text("stepReuse") : "",
       block(text("stepPinned"), turn.pinned),
       block(
         text("stepPeople"),
@@ -202,9 +213,10 @@ const list = (v: JsonValue | undefined): JsonValue[] => (Array.isArray(v) ? v : 
 
 /**
  * What a turn's knowledge step has spent of its limits, across its calls: the new facts it made, by
- * what each says (`claimKey`), so a later call that makes one again names that fact and spends
- * nothing (`factsPerTurn`, `factsPerChat`); its learnings (`learningsPerTurn`), and the facts whose
- * witnessing it has charged, each once in the turn, however many calls give it.
+ * what each says (`claimKey`), which each later call reads (`knowledgeContext`) and may name by id,
+ * and which one that makes a fact again in the same words names, spending nothing (`factsPerTurn`,
+ * `factsPerChat`); its learnings (`learningsPerTurn`), and the facts whose witnessing it has
+ * charged, each once in the turn, however many calls give it.
  */
 export interface KnowledgeSpent {
   facts: Map<string, KnowledgeFact>;
@@ -239,7 +251,8 @@ export function checkKnowledge(turn: KnowledgeTurn, batch: readonly EntityId[], 
     out.refusedAs[kind] = (out.refusedAs[kind] ?? 0) + 1;
   };
   // The holdings and witness logs as this answer leaves them, and every fact it may name: the
-  // chat's, and those the turn's calls before this one made.
+  // chat's, and those the turn's calls before this one made, which its context listed by id, so a
+  // learning that names one of those is its learner joining those who hold it.
   const facts = new Map<FactId, KnowledgeFact>(Object.entries(k.facts));
   for (const f of spent.facts.values()) if (!facts.has(f.id)) facts.set(f.id, f);
   const holding = new Map<EntityId, Map<FactId, Holding>>();
@@ -265,8 +278,10 @@ export function checkKnowledge(turn: KnowledgeTurn, batch: readonly EntityId[], 
   const claims = Object.values(begun).filter((f) => f.kind === "claim").length;
   // One fact per real fact: what a fact says (`claimKey`) names it, so one said again, by another of
   // the turn's calls or a later turn, is the fact there is, and whoever learns it now joins those who
-  // hold it. The turn's own first, then the chat's: of two alike that an earlier build made, the one
-  // more people hold, then the first by id. Nothing recorded changes: only what the step makes now.
+  // hold it. A backstop: the step is shown the facts in play and the turn's own by id, and told to
+  // name one it would say again (`stepReuse`); this catches only one said in the same words. The
+  // turn's own first, then the chat's: of two alike that an earlier build made, the one more people
+  // hold, then the first by id. Nothing recorded changes: only what the step makes now.
   const heldCount = new Map<FactId, number>();
   for (const held of Object.values(k.holdings)) for (const id of Object.keys(held)) heldCount.set(id, (heldCount.get(id) ?? 0) + 1);
   const count = (id: FactId): number => heldCount.get(id) ?? 0;

@@ -688,21 +688,32 @@ interface KnowledgeAsk {
 }
 
 /**
- * The knowledge step's calls on `turn` (DESIGN §24.11), one per batch, side by side, each on the same
- * state; then each answer checked in turn (`checkKnowledge`), on what the ones before it left. A
- * learning that doesn't fit the state is dropped, and the log says why each was.
+ * The knowledge step's calls on `turn` (DESIGN §24.11), one per batch, one after another: each is
+ * asked once the one before it is checked (`checkKnowledge`), on what the ones before it left, and
+ * reads, beside the facts in play, the facts they made (`knowledgeContext`), so it names one of them
+ * by its id rather than making it again in its own words. A learning that doesn't fit the state is
+ * dropped, and the log says why each was.
  */
 async function knowledgeCalls(deps: MindsDeps, settings: UserSettings, config: StepConfig, turn: KnowledgeTurn, batches: readonly (readonly EntityId[])[], ask: KnowledgeAsk): Promise<KnowledgeRan> {
   const { reg, world, state } = turn;
   const { userId, signal, guidance } = ask;
   const scene = settings.minds.knowledge.batch === "scene";
-  const asked = batches.map(async (batch) => {
+  const w = new Working(reg, world, state);
+  const out: KnowledgeRan = { events: [], proposals: [], traces: [], connection: helperCallOf(config, settings.helper).connectionId ?? null, refused: {}, failed: 0 };
+  const refused = (kind: KnowledgeRefusal, n = 1): void => {
+    out.refused[kind] = (out.refused[kind] ?? 0) + n;
+  };
+  // The turn's limits hold across its calls: new facts, learnings and witnessed facts are counted for
+  // the turn, not each call. Each call reads the facts the ones before it made, by id, and one that
+  // names such a fact, or says it again in the same words, has its learners join those who hold it.
+  const spent = knowledgeSpent();
+  for (const batch of batches) {
     const who = scene ? "" : (own(state.entities, batch[0] ?? "")?.name ?? batch[0] ?? "");
     const vars = { ...varsFor(world, state, world.pov), character: who };
     const prompt = mindPrompt("knowledge", world, settings.minds, vars);
     const usage = { tokens: 0 };
     const t0 = performance.now();
-    const context = signal.aborted ? "" : knowledgeContext(turn, batch);
+    const context = signal.aborted ? "" : knowledgeContext(turn, batch, spent);
     const raw = signal.aborted
       ? null
       : await askMind(deps.ask, {
@@ -717,18 +728,8 @@ async function knowledgeCalls(deps: MindsDeps, settings: UserSettings, config: S
           check: isRecord,
           classic: () => deps.steps.helperJson("knowledge", prompt.text, context, config, userId, signal, { guidance, usage }),
         });
-    return { batch, raw, who, ms: Math.round(performance.now() - t0), tokens: usage.tokens, prompt: prompt.source };
-  });
-  const w = new Working(reg, world, state);
-  const out: KnowledgeRan = { events: [], proposals: [], traces: [], connection: helperCallOf(config, settings.helper).connectionId ?? null, refused: {}, failed: 0 };
-  const refused = (kind: KnowledgeRefusal, n = 1): void => {
-    out.refused[kind] = (out.refused[kind] ?? 0) + n;
-  };
-  // The turn's limits hold across its calls: new facts, learnings and witnessed facts are counted for
-  // the turn, not each call, and a fact an earlier call made is the one a later call that says it names.
-  const spent = knowledgeSpent();
-  for (const call of await Promise.all(asked)) {
-    const checked = call.raw === null ? null : checkKnowledge({ ...turn, state: w.state }, call.batch, call.raw, spent);
+    const ms = Math.round(performance.now() - t0);
+    const checked = raw === null ? null : checkKnowledge({ ...turn, state: w.state }, batch, raw, spent);
     if (!checked && !signal.aborted) out.failed++;
     for (const why of checked?.refused ?? []) deps.host.log("info", `[LumiRPEngine] knowledge ${turn.messageId.slice(0, 8)}: refused ${why}`, userId);
     for (const [kind, n] of Object.entries(checked?.refusedAs ?? {})) refused(kind as KnowledgeRefusal, n);
@@ -741,8 +742,7 @@ async function knowledgeCalls(deps: MindsDeps, settings: UserSettings, config: S
     }
     out.proposals.push(...(checked?.proposals ?? []));
     // A scene's call thinks for no one; one person's is listed only when the player may know of them.
-    const id = call.batch[0] ?? "";
-    if (scene || traced(reg, world, state, id)) out.traces.push({ purpose: "knowledge", phase: ask.phase, who: call.who, level: null, outcome: checked ? "recorded" : "failed", ms: call.ms, tokens: call.tokens, prompt: call.prompt });
+    if (scene || traced(reg, world, state, batch[0] ?? "")) out.traces.push({ purpose: "knowledge", phase: ask.phase, who, level: null, outcome: checked ? "recorded" : "failed", ms, tokens: usage.tokens, prompt: prompt.source });
   }
   return out;
 }
