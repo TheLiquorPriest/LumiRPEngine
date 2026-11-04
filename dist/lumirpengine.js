@@ -223,6 +223,7 @@ var KNOWLEDGE_TEXTS = Object.freeze({
   stepFacts: "Facts in play (reuse these by id)",
   stepMade: "Facts this turn already made (reuse these by id)",
   stepReuse: "A fact listed above is one fact however it is worded: when what someone learns here is one of them, in its words or in others, have them learn that fact by its id, and never make it again as a new fact. Make a new fact only of what none of them says.",
+  stepBudget: "What this turn can still record: {{facts}} new facts (this chat has room for {{chat}} more) and {{learnings}} learnings. A new fact counts only once someone learns it, so make one only for someone to learn.",
   stepPerson: "{{name}} (id: {{id}})",
   stepYou: '{{name}} (id: {{id}}; the player character, "you")',
   stepSaid: "{{name}} said or did: {{text}}",
@@ -994,7 +995,7 @@ var DEFAULT_PLACE_CAPS = Object.freeze({ turn: 2, chat: 64 });
 // src/cli/version.ts
 var CLI_NAME = "lumirpengine";
 var CLI_VERSION = package_default.version;
-var BUILD = "4629ecb0";
+var BUILD = "6229cc37";
 function runtimeCannotFollow(bun) {
   if (bun === undefined)
     return null;
