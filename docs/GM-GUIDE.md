@@ -29,10 +29,11 @@ People, places, tracks and single fields of a kind each take one. A value the en
 
 Open **Play → GM view** and tap **Show the GM view** past its spoiler gate. Its data is fetched only while it is open and never travels with what Play shows, so a player glancing at the screen with it closed sees nothing. Looking never changes the chat.
 
-- **Entities:** every person, thing, vehicle, group and account, including the ones spawned in this chat and the ones removed, with badges for **You**, **Removed**, **Spawned**, **Agent** and anything that isn't public. Each opens a form: its fields as its kind defines them, its designed sheet, where it is, its relations, its simulation detail (tier, whether it lives off-screen, and each domain's level), and its classification and tags.
-- **Places:** every place with its visibility.
+- **Entities:** every person, thing, vehicle, group and account, including the ones spawned in this chat and the ones removed, with badges for **You**, **Removed**, **Spawned**, **Agent** and anything that isn't public. A person opens their character sheet and a thing its thing page (see [GM → Things](#gm--things)); anything else opens a form: its fields as its kind defines them, its designed sheet, where it is, its relations, its simulation detail (tier, whether it lives off-screen, and each domain's level), and its classification and tags.
+- **Places:** every place with its visibility. With the Organizations pack, a place opens whose it is (12 Birch Lane is Marcus Delgado's), who may enter it and now, its hours, its keys and who carries one, and the latest entries without leave; **Change entry** sets who may enter (Owner only, Members only, Staff only, Customers, Anyone, or as the world has it) and its keys (item ids or item types, between commas) for this chat, one edit with its **Undo**. An organization's own places also show under **GM → Orgs → Property**.
 - **Tracks:** every quest, secret, puzzle and agenda, with all its stages and every truth.
-- **Money:** each person's money at their own Money level: their band, accounts, bills and latest transactions.
+- **Orgs:** every organization, the party first, with its members all named, its powers, delegations, History and fields (see [GM → Orgs](#gm--orgs)).
+- **Money:** each person's money at their own Money level: their band, accounts, bills and latest transactions. An organization's money is on its page under **Orgs**.
 - **Edits:** the corrections in force on this version of the story, each on the latest reply with its **Undo**, and every change that didn't apply after a reply, with the exact reason.
 
 ## GM edits
@@ -50,6 +51,34 @@ Anything the GM view shows, you can change: a field (set it, or add to a number)
 - **The world's definitions stay in Build.** Kinds and the world's places are edited in Build and reach the chat through an Upgrade (below).
 
 Each save is one edit: a notice in the GM view says what it did, in a sentence that names who, what the setting means and the value in words ("Marcus Delgado now sleeps at Alder Automotive (Lakeshore County › Port Alder)", "3 minds are now pinned at Near fidelity"), with **Undo**, and a **GM edit** chip on the latest reply has the same **Undo**. The chip says only what the player's character could know: the change when they see it, else whom it was about if they know them ("About Sam Reyes"), never where someone went or what was set, and otherwise that it happened behind the scenes. A save made while a reply is streaming waits for the reply and lands right after it.
+
+## GM → Things
+
+**GM → Things** is where the chat's belongings are kept straight. The engine keeps four facts about a thing apart: **where it is** (one place or one holder), **who has it** (whoever carries it), **whose it is** (its owner, or, when it has none, whoever's it plausibly is: a business trading where it lies, the household living there; shown as "the household's (presumed)") and **who may use it** (its owner, those they hand it to or lend it to, and the world's household, housemates, partners, staff and customers rules). Most mistakes in a story's belongings are one of those taken for another, so keep them apart when you fix one.
+
+- **Here** shows what is where the player character is: **In the room** (furniture, built-in things and vehicles, with what they hold), **Lying here**, and **On the people here**, each with whose it is and why its holder has it. Start here when the narrator gets the room wrong.
+- **By place** and **By owner** are the same trees as Build's, for the chat as it stands.
+- **A thing's page** makes each change one GM edit with its **Undo**, its notice saying in a sentence what it did. **Hand to…** asks **Holding**, **Gift** or **Loan**, or offers **Return it to** its owner: pick **Holding** for a thing someone only has for now, so its owner stays its owner; **Make it theirs…** is for a real change of owner. **Kept at…** sets where it goes back to, and **Put it away** sends it there now. **History** shows each change in this chat, by the story, you, a fix or an agent, and why.
+- **Moves keep the size rules.** **Move to…** and **Put in…** never put a fridge in someone's hands (it lands where they stand) or a thing into something smaller; a built-in thing moves only because you, the GM, say so.
+
+**Tidy up** is the audit: things too big to carry on someone, things in two places at once, owners a handover changed in an older chat, likely duplicates and things made in play with no size, each said in a sentence. **Fix** is one edit with its **Undo**; **Leave it** puts a finding aside for this chat only (it changes nothing in the story); **Ask the Curator** hands the finding to the GM assistant, whose proposal you then Apply or not. An older chat had the one fix with a single answer, a thing too big to carry, made on its first turn as **Things tidied** with its own Undo; the rest waits here. Whether that fix is made follows the world's **Tidy impossible holds automatically** (Build → Packs → gear → Tidy up), unless **GM → This chat → Things** gives the chat its own setting: switch on **This chat has its own setting**, then **Tidy impossible holds automatically in this chat**. Like the chat's knowledge choices, it is kept with the chat, not its story, and applies from the next turn.
+
+**Keep in the world** copies the things and places the chat made in play into the world's draft, under their own ids, so the world you commit has them and an Upgrade keeps the chat's copies. Do it in Build's spirit: keep what belongs to the world (the back booth everyone now sits in), not what belongs to one story.
+
+**The Curator.** On a chat played by agents, the Curator keeps things and places true to each reply, with the same item and place changes these controls make. Its changes are staged with the turn and land after the read's, and a change of owner asks first, as the reply's own do. When it gets one wrong, fix it here; your edit wins over the reply it follows, as every GM edit does.
+
+## GM → Orgs
+
+**GM → Orgs** is where who belongs where, and who may do what, are kept straight. Each organization's page there is the one the player sees, with every member named and the GM's controls, each save one edit with its **Undo**. Your edits are the world's, not anyone's act: they ask for no power, so you can make a position nobody there could, and the History line names no one.
+
+- **Ask before you change.** **Who may…** answers a person and a power with the chain it rests on: an owner's role, a position and how it is held, a delegation and its granter's own basis, or a member's default. When the player is refused ("Over your limit of $500.00 a payment for Alder Automotive", "Danny Okafor isn't below Shop foreman at Alder Automotive"), read the chain first: most refusals are the rules working.
+- **A title is words; a position is power.** A member's title ("Butler", "Reeve of Brindlemere") is what the story calls them; a position, on **Rules**, carries powers, seats, limits and whom it reports to. Give a title when the story only names someone, and a position when they should be able to act. A title of their own shows over their position's.
+- **Delegate for a while, appoint for good.** A delegation lets one person act with some of its granter's powers, within limits, and ends by itself on its date when it has one; a position stays until someone is taken out of it. Lady Honoria hiring and paying the Thornes' staff for Sir Alaric is a delegation; their Master is a position.
+- **Employers are anyone.** A job's employer may be a business, a household, a group, a trust, the party or a person: the Thornes employ their butler, and the party pays a hired hand from its purse. Payroll pays from the employer's payroll account, else a company's operating account, else its deposit account.
+- **Entry never vetoes.** A place's entry greys the player's **Go** and is told to the narrator, but a move the reply tells still happens, recorded as an entry without leave on the place's **Property** card. To keep someone out, change who may enter, give someone else a key, or have the story lock the door.
+- **The party is tiers.** Its core and companions come along on every move (a companion stays for their own shift, appointment or plan); hired hands and allies come only when taken. Set someone's tier on their character sheet, or for many at once in **World**'s bulk change.
+
+**History** shows the organization's own record (who was admitted, appointed or paid for it, and by whom), then this chat's edits in force that name it: look there when the story and the page disagree.
 
 ## Fixes and Undo
 
@@ -89,7 +118,7 @@ By default the narrator knows what everyone in the scene knows, with each fact t
 
 ## Upgrading a chat
 
-A chat stays on the world revision it started on. When you commit a newer revision of the world in Build, **Settings → Pins and upgrade** offers **Upgrade to the latest revision**, and shows what it brings into this chat, entity by entity, before anything changes. (Importing a world makes a new world, so it never upgrades an existing chat.) The world's other definitions, such as places, rules and actions, come with the revision without a pick.
+A chat stays on the world revision it started on. When you commit a newer revision of the world in Build, **GM → This chat → Pins and upgrade** offers **Upgrade to the latest revision**, and shows what it brings into this chat, entity by entity, before anything changes. (Importing a world makes a new world, so it never upgrades an existing chat.) The world's other definitions, such as places, rules and actions, come with the revision without a pick. A newer LumiRPEngine's data tables come the same way: Pins and upgrade marks the chat's tables that have newer shipped versions, and **Open Data updates** takes you to **Build → World**, where **Apply** and a commit make the revision the Upgrade brings in.
 
 - **New** people and things are listed, and so are ones the revision no longer has: they stay in the chat unless you pick **Remove**.
 - **Each change** to the rest (a field, a name, a tier, classes, a relation, an account's opening balance) shows the chat's value, the revision's value and a pick. **Unchanged in play** (nothing in the chat touched it) starts on **Take**. **Changed in play** (a turn, a fix or a GM edit touched it, even if it later changed back) starts on **Keep**, so an Upgrade never overwrites what happened in the story unless you say so.

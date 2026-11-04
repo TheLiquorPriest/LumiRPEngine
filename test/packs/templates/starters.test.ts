@@ -42,10 +42,11 @@ describe("the starter-template converter", () => {
   });
 
   test("every output validates: zero lint errors or warnings", () => {
-    for (const b of fresh) expect(b.issues).toEqual([]);
+    // Notes (an authored thing whose size nothing gives, ITEMS-SPEC §10.1) are information, never a problem.
+    for (const b of fresh) expect(b.issues.filter((i) => i.severity !== "info")).toEqual([]);
     for (const [id, world] of Object.entries(worlds)) {
       expect(isWorldDoc(world)).toBe(true);
-      expect(lintWorld(world, registry)).toEqual([]);
+      expect(lintWorld(world, registry).filter((i) => i.severity !== "info")).toEqual([]);
       expect(world.id).toBe("w");
       expect(world.name).toBe(id);
     }

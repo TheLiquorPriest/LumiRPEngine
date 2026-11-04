@@ -1,20 +1,24 @@
 // The person sheet: someone from the cast, as the POV knows them: who they are,
 // whether they're here (what they're doing) or where and when the POV last saw them, today's plan
 // with "Why this plan?" and their usual day with where each block comes from, how they regard the
-// POV per axis, the agendas the POV knows about, their next commitment, their groups, the classes
-// players may see, and a life state other than alive.
+// POV per axis, the agendas the POV knows about, their next commitment, their positions and titles
+// in the organizations the POV can see (each opening that organization's page), the classes players
+// may see, and a life state other than alive.
 // Opening it is a player-facing observation of that person (DESIGN §9.2), sent once on mount;
 // nothing here is GM data: the cast view is already POV-filtered, and the usual day is the player's
 // projection of their routine (`lre.routine`, view "player"), asked only where Cast shows a day.
 
 import { useEffect, useState } from "preact/hooks";
-import { useApp } from "../../../frontend/app";
+import { orgRoute, useApp } from "../../../frontend/app";
 import { Avatar, Badge, Button, Disclosure, Empty, IdText, List, ListRow, PageHeader, Section } from "../../../frontend/components";
+import { list, str } from "../../../frontend/decode";
 import { FixEditor } from "../../../frontend/fix-editor";
 import { Icon } from "../../../frontend/icons";
 import type { SheetProps } from "../../../frontend/registry";
 import { whereFixTarget } from "../../../frontend/requests";
 import type { ChatId, EntityId } from "../../../shared/ids";
+import { isRecord } from "../../../shared/json";
+import { ORGS_ORG_PANEL } from "../../../shared/org-view";
 import type { PlayerBlock, RoutinePlayerView } from "../../../shared/routines";
 import { decodeCastView, SLOT_KINDS, whereabouts, type CastPerson, type CastView, type SlotKind } from "./panel";
 
@@ -166,6 +170,35 @@ function classLabel(view: CastView, facetId: string, valueId: string): string {
   return parts.join(" › ") || valueId;
 }
 
+/** Someone's place in an organization the POV can see: its page's name and badge, and their title and position there. */
+export interface PersonOrg {
+  id: string;
+  name: string;
+  badge: string;
+  title: string;
+  /** The position they hold, when its title isn't the title they go by. */
+  position: string | null;
+}
+
+/**
+ * The organizations someone is in, as the Orgs pages (`orgs.org`, ORG-SPEC §4.1) show them to the
+ * POV: every page that lists them among its people, by name. A page only lists people the POV may
+ * see, so their titles follow the same masking.
+ */
+export function personOrgs(pages: unknown, who: EntityId): PersonOrg[] {
+  if (!isRecord(pages)) return [];
+  return Object.values(pages)
+    .flatMap((page): PersonOrg[] => {
+      if (!isRecord(page) || typeof page.id !== "string") return [];
+      const them = list(page.people, (p) => (p.id === who ? p : null))[0];
+      if (!them) return [];
+      const title = str(them.title);
+      const position = isRecord(them.position) ? str(them.position.title) : "";
+      return [{ id: page.id, name: str(page.name, page.id), badge: str(page.badge), title, position: position !== "" && position.toLowerCase() !== title.toLowerCase() ? position : null }];
+    })
+    .sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
+}
+
 export function PersonSheet(props: SheetProps) {
   const app = useApp();
   const [fixingWhere, setFixingWhere] = useState(false);
@@ -192,7 +225,7 @@ export function PersonSheet(props: SheetProps) {
     );
   }
   const pending = props.state.pending.some((mark) => mark.entity === person.id);
-  const groups = person.groups.map((g) => ({ ...g, def: view.groups.find((d) => d.id === g.id) }));
+  const orgs = personOrgs(props.state.panels[ORGS_ORG_PANEL], person.id);
   const classes = Object.entries(person.classes).flatMap(([facet, values]) => values.map((value) => ({ facet, value })));
   const facetLabel = (id: string): string => view.facets.find((f) => f.id === id)?.label ?? id;
   const where = whereabouts(person);
@@ -261,11 +294,11 @@ export function PersonSheet(props: SheetProps) {
           </List>
         </Section>
       ) : null}
-      {groups.length > 0 ? (
-        <Section title="Groups" flush>
+      {orgs.length > 0 ? (
+        <Section title="Organizations" flush>
           <List>
-            {groups.map((g) => (
-              <ListRow key={g.id} id={g.id} icon="users" title={g.def?.name ?? g.id} subtitle={g.def?.kind || undefined} value={g.role} valueTone="muted" />
+            {orgs.map((o) => (
+              <ListRow key={o.id} id={o.id} icon="briefcase" title={o.name} subtitle={o.badge || undefined} value={[o.title, o.position].filter((part) => part).join(" · ") || undefined} valueTone="muted" chevron onClick={() => props.open(orgRoute(o.id))} />
             ))}
           </List>
         </Section>

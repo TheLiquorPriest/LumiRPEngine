@@ -90,6 +90,7 @@ const REQUESTS: Readonly<Record<MainRequestKind, { role: RoleId; stage: MainRole
   skip: { role: "skip", stage: "prepare" },
   prose: { role: "director", stage: "beats" },
   extract: { role: "read", stage: "read" },
+  curate: { role: "curator", stage: "read" },
   effects: { role: "world", stage: "read" },
   knowledge: { role: "knowledge", stage: "read" },
   offscreen: { role: "director", stage: "read" },
@@ -573,7 +574,7 @@ export class MainTurn {
       return this.text(MAIN_TEXT.engineBeats, { lines: lines === "" ? none : lines });
     }
     if (stage === "read") {
-      const task = requests.find((r) => r.kind === "extract" || r.kind === "choices")?.task as ExtractTask | undefined;
+      const task = requests.find((r) => r.kind === "extract" || r.kind === "curate" || r.kind === "choices")?.task as ExtractTask | undefined;
       if (!task) return "";
       this.replyShown = true;
       return this.text(MAIN_TEXT.engineReply, { reply: task.reply });
@@ -614,7 +615,8 @@ export class MainTurn {
         const prose = (out as DirectorProse).prose;
         return { brief: prose.brief, outline: prose.outline };
       }
-      case "extract": {
+      case "extract":
+      case "curate": {
         const read = out as ExtractRead;
         return { proposals: read.proposals, where: read.where };
       }

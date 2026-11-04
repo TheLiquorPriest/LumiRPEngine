@@ -2,14 +2,17 @@
 // states actually happened, and where it leaves the player character, read as classic's extract step
 // reads them: the same world lists, change types, rules and state before, in the role's texts, with
 // the engine's clock as the Scene tells it (when the player's message came, and now, after the
-// minutes the turn's own actions took), which it measures narrated time against. Its answer is
-// classic's `ExtractRead`, by classic's own parser (enabled channels only, narrated time beyond what
-// the turn applied, money in minor units, duplicates gone), with the things its changes name that the
-// world has no entity for (`untracked`), which its run reports; the engine then checks each proposal
-// against the world and the player's settings, as it does classic's.
+// minutes the turn's own actions took), which it measures narrated time against; the organization
+// facts and their rules while one of their types is read, and the plans' open items while agenda
+// is (ORG-SPEC §7.3). Its answer is classic's `ExtractRead`, by classic's own parser (enabled
+// channels only, narrated time beyond what the turn applied, money in minor units, duplicates gone),
+// with the things its changes name that the world has no entity for (`untracked`), which its run
+// reports; the engine then checks each proposal against the world and the player's settings, as it
+// does classic's.
 
 import { isRecord } from "../../../shared/json";
-import { roleTaskTextId } from "../../../shared/role-prompts";
+import { EXTRACT_ITEM_TEXT, EXTRACT_ORG_TEXT, ORG_FACT_TYPES, roleTaskTextId } from "../../../shared/role-prompts";
+import { SIZES } from "../../../shared/things";
 import { lifeStatesOf } from "../../../shared/world";
 import { spanText } from "../../../engine/action-words";
 import { own } from "../../../engine/pack-kit";
@@ -29,6 +32,7 @@ export async function extractRun(rt: Runtime, task: ExtractTask, ctx: TurnAgentC
   const routines = moves && i.usual.length > 0;
   const lists = worldLists(i.world, i.places);
   const said = i.said.trim();
+  const orgFacts = i.channels.length === 0 || ORG_FACT_TYPES.some((t) => i.channels.includes(t));
   return runRoleAgent(
     rt,
     ctx,
@@ -50,15 +54,23 @@ export async function extractRun(rt: Runtime, task: ExtractTask, ctx: TurnAgentC
           life: lifeStatesOf(i.world)
             .map(([id]) => id)
             .join("|"),
+          sizes: SIZES.join("|"),
+          // The thing facts (ITEMS-SPEC §5.2), the registry text classic's extract step reads too.
+          items: renderPrompt(EXTRACT_ITEM_TEXT.facts, ownTexts, {}),
+          // The organization facts (ORG-SPEC §7.3), the registry text classic's extract step reads too.
+          orgs: orgFacts ? ` · ${renderPrompt(EXTRACT_ORG_TEXT.facts, ownTexts, {})}` : "",
         }),
         enabled: i.channels.length > 0 ? text("enabled", { types: i.channels.join(", ") }) : "",
         currency: i.world.currency.code,
         symbol: i.world.currency.symbol,
+        item_rules: renderPrompt(EXTRACT_ITEM_TEXT.rules, ownTexts, {}),
+        org_rules: orgFacts ? renderPrompt(EXTRACT_ORG_TEXT.rules, ownTexts, {}) : "",
         where: moves ? text("where") : "",
         usual_rule: routines ? text("usual_rule") : "",
         state: JSON.stringify(i.prefix),
         clock: text("clock", { start: i.clock.start, now: i.clock.now, took: i.appliedMinutes > 0 ? spanText(i.appliedMinutes) : "no time" }),
         usual: routines ? text("usual", { lines: i.usual.join("\n") }) : "",
+        plan: i.plan.length > 0 ? renderPrompt(EXTRACT_ORG_TEXT.plan, ownTexts, { lines: i.plan.join("\n") }) : "",
         message: said !== "" ? text("message", { text: said }) : "",
         reply: task.reply,
       },

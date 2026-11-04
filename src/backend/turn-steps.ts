@@ -20,6 +20,7 @@ import type { ChainMessage } from "../engine/ledger/chain";
 import { recentMessages } from "./interpret-context";
 import type { StepSignal } from "../shared/steps";
 import { limitOf, MINDS_SLOT } from "../shared/minds";
+import { PRICES_SOURCE } from "../shared/finance";
 import { DECISION_PROMPTS, PROSE_PROMPTS } from "../shared/steps";
 import type { Timeout } from "../shared/timeouts";
 import { within } from "../shared/timeouts";
@@ -103,7 +104,8 @@ export function factLines(registry: Registry, world: WorldDoc, state: Readonly<W
     const seen = new Set(out);
     const each: string[][] = [];
     for (const r of registry.renderers) {
-      if (r.hint || r.slot === "outcome" || r.slot === "montage" || r.slot === "outline" || r.slot === "stance" || r.slot === MINDS_SLOT) continue;
+      // The price list is the narrator's alone (DESIGN §9.5): the engine prices what is bought, so a helper never needs it.
+      if (r.hint || r.slot === "outcome" || r.slot === "montage" || r.slot === "outline" || r.slot === "stance" || r.slot === MINDS_SLOT || r.source === PRICES_SOURCE) continue;
       const mine: string[] = [];
       try {
         for (const line of r.render(ctx)) {
@@ -152,7 +154,7 @@ export function slotVars(registry: Registry, world: WorldDoc, state: Readonly<Wo
     const ctx = registry.context(world, state);
     const lines = new Map<string, string[]>();
     for (const r of registry.renderers) {
-      if (r.hint || !VAR_SLOT_SET.has(r.slot)) continue;
+      if (r.hint || !VAR_SLOT_SET.has(r.slot) || r.source === PRICES_SOURCE) continue;
       try {
         const own = lines.get(r.slot) ?? [];
         for (const line of r.render(ctx)) if (!own.includes(line)) own.push(line);

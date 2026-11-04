@@ -4,7 +4,7 @@
 
 import { describe, expect, test } from "bun:test";
 import { matchCatalog, placeTrade } from "../../src/packs/economy/core/index";
-import { priceOf } from "../../src/packs/economy/core/model";
+import { dayPriceOf } from "../../src/packs/economy/core/model";
 import { formatMoney } from "../../src/shared/world";
 import { alderChat, answerOf, HOME, KNOWLEDGE, POV, toolEnv } from "../support/tools";
 
@@ -86,7 +86,8 @@ describe("money_prices", () => {
     const { rig, chatId } = await alderChat();
     const view = await toolEnv(rig, chatId, "gm").reader.view();
     const money = (cents: number): Amount => ({ cents, amount: formatMoney(cents, view.world.currency) });
-    const latte = view.read(() => priceOf(view.ctx, { catalog: "latte_16oz", place: "bluebird_coffee" }));
+    // Its price there today, as a purchase there is charged (DESIGN §9.5).
+    const latte = view.read(() => dayPriceOf(view.ctx, { catalog: "latte_16oz", place: "bluebird_coffee" }));
     if (!latte) throw new Error("the catalog prices no latte");
     const said = view.read(() => matchCatalog(view.ctx, "latte", "bluebird_coffee"));
     expect(said).not.toBeNull();
@@ -111,7 +112,7 @@ describe("money_prices", () => {
     for (const knowledge of KNOWLEDGE) {
       const s = await answerOf<Sells>(rig, chatId, knowledge, "money_prices", { place: "Bluebird Coffee" });
       expect(s.sells.map((o) => o.catalog)).toEqual(sold);
-      for (const o of s.sells) expect(o.cents).toBe(view.read(() => priceOf(view.ctx, { catalog: o.catalog, place: "bluebird_coffee" }))?.unitCents ?? NaN);
+      for (const o of s.sells) expect(o.cents).toBe(view.read(() => dayPriceOf(view.ctx, { catalog: o.catalog, place: "bluebird_coffee" }))?.unitCents ?? NaN);
     }
     // Where he is, by default: home sells nothing, and a latte has its price there all the same.
     const home = await answerOf<Priced>(rig, chatId, "everyone", "money_prices", { item: "latte_16oz" });

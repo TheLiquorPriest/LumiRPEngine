@@ -10,6 +10,7 @@ import { isRecord } from "../../../shared/json";
 import { loreIsSecret, lorePhrases } from "../../../shared/lore";
 import type { LintIssue } from "../../../shared/protocol";
 import type { WorldDoc } from "../../../shared/world";
+import { trackOwner } from "../../../shared/world";
 import { cuesOf, readCue } from "../../../engine/cues";
 import { optionalQuery, own } from "../../../engine/pack-kit";
 import type { ReadContext } from "../../../engine/registry";
@@ -149,7 +150,8 @@ export function cueIssues(world: WorldDoc): LintIssue[] {
   }
   for (const t of Object.values(world.tracks)) {
     // Only a person's tracks reach Stance; a puzzle a thing owns keeps its cue to the Quest section.
-    const owner = t.owner === undefined ? undefined : own(world.entities, t.owner);
+    const ownerId = trackOwner(t);
+    const owner = ownerId === undefined ? undefined : own(world.entities, ownerId);
     if (!owner || !personKind(world, owner.kind)) continue;
     for (const [stage, s] of Object.entries(t.stages)) {
       if (typeof s.cue !== "string") continue;

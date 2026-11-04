@@ -710,7 +710,9 @@ function ownedBy(state: Readonly<WorldState>, id: EntityId, pov: EntityId): bool
 /**
  * The Montage of an interval, filtered to what the POV knows (DESIGN §7): key events are the
  * visible `note`/`stop` signals and notes; aggregates come from the events themselves, so money
- * lines equal the ledger totals for the interval.
+ * lines equal the ledger totals for the interval. Who worked on which of the party's orders, by the
+ * blocks the day planner laid in it (the orgs pack's `orgs.worked`, assess-party §6.2), is its first
+ * group, Orders.
  */
 export function buildMontage(reg: Registry, world: WorldDoc, before: Readonly<WorldState>, after: Readonly<WorldState>, events: readonly LedgerEvent[], granularity: Montage["granularity"]): Montage {
   const pov = world.pov;
@@ -774,9 +776,11 @@ export function buildMontage(reg: Registry, world: WorldDoc, before: Readonly<Wo
       if (from !== to) bands.push({ entity: id, field, label: `${possessive(e.name)} ${fieldNoun(def.label, field).noun}`, from, to });
     }
   }
+  const ctx = reg.context(world, after);
+  const worked = optionalQuery(ctx, "orgs.worked")?.(ctx, before.clock, after.clock) ?? [];
   return {
     granularity,
-    groups: [...groups].map(([label, lines]) => ({ label, lines })),
+    groups: [...(worked.length > 0 ? [{ label: "Orders", lines: worked }] : []), ...[...groups].map(([label, lines]) => ({ label, lines }))],
     money: [...money].sort(([a], [b]) => a.localeCompare(b)).map(([account, m]) => ({ account, label: own(after.entities, account)?.name ?? account, in: m.in, out: m.out })),
     changes: [...changes.values()]
       .filter((c) => c.delta !== 0)

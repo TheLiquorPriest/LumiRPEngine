@@ -15,7 +15,8 @@ function person(id: string, name: string, tier: EntityDef["tier"], fields: Entit
 /** The Modern US slice-of-life starter (DESIGN §13 templates): Simulation realism, Riverton, Ohio. */
 export function modernUsWorld(id: string, name: string): WorldDoc {
   const tables = defaultTables();
-  const pins: WorldDoc["pins"] = { generators: {}, tables: {} };
+  // Gear generator 1: no everyday carry made, so the fixture's people have only what it gives them.
+  const pins: WorldDoc["pins"] = { generators: { gear: 1 }, tables: {} };
   for (const [tid, t] of Object.entries(tables)) pins.tables[tid] = t.revision;
   const sim = REALISM_PRESETS.simulation;
   const entities: Record<string, EntityDef> = {};

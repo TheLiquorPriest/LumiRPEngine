@@ -41,16 +41,19 @@ export interface ContextSettings {
   roles: Record<RoleId, RoleContext>;
 }
 
-/** §5's perspective for each role: the intent the player character's, a mind and memory their own character's, the rest everyone's. */
-const PERSPECTIVE: Readonly<Record<RoleId, RolePerspective>> = { intent: "pov", scene: "everyone", minds: "own", knowledge: "everyone", director: "everyone", read: "everyone", memory: "own", skip: "everyone", world: "everyone" };
+/** §5's perspective for each role: the intent the player character's, a mind and memory their own character's, the Curator the GM's (every secret marked, ITEMS-SPEC §7.2), the rest everyone's. */
+const PERSPECTIVE: Readonly<Record<RoleId, RolePerspective>> = { intent: "pov", scene: "everyone", minds: "own", knowledge: "everyone", director: "everyone", read: "everyone", curator: "gm", memory: "own", skip: "everyone", world: "everyone" };
 
-/** What each role starts with by default: the director, which briefs and outlines the reply, the Minds and the Scene (with the scene role's lore and notes); every other role its task alone. */
-const START: Readonly<Partial<Record<RoleId, readonly string[]>>> = { director: [MINDS_SLOT, "scene"] };
+/** What each role starts with by default: the director, which briefs and outlines the reply, the Minds and the Scene (with the scene role's lore and notes); the Curator the Place, Gear and People sections; every other role its task alone. */
+const START: Readonly<Partial<Record<RoleId, readonly string[]>>> = { director: [MINDS_SLOT, "scene"], curator: ["place", "gear", "people"] };
+
+/** What a role is never given by default: the Curator keeps to the world's fabric, never the minds (ITEMS-SPEC §7.2). */
+const NEVER: Readonly<Partial<Record<RoleId, readonly string[]>>> = { curator: [MINDS_SLOT] };
 
 /** A new user's context config. */
 export function defaultContextSettings(): ContextSettings {
   const roles = {} as Record<RoleId, RoleContext>;
-  for (const id of ROLE_IDS) roles[id] = { perspective: PERSPECTIVE[id], start: CONTEXT_SOURCES.filter((s) => START[id]?.includes(s) === true), never: [], pins: [] };
+  for (const id of ROLE_IDS) roles[id] = { perspective: PERSPECTIVE[id], start: CONTEXT_SOURCES.filter((s) => START[id]?.includes(s) === true), never: CONTEXT_SOURCES.filter((s) => NEVER[id]?.includes(s) === true), pins: [] };
   return { roles };
 }
 

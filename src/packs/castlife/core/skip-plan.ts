@@ -2,8 +2,9 @@
 // whose time skip the model plans, and how its answer is checked before it is recorded as
 // `castlife.skip_plan`. The call is a helper's, and no helper may be handed what the POV may not know
 // (DESIGN §24.3), so every line here is what the player could know: places the POV can see, the
-// POV-filtered usual routine with no private block, and story commitments screened like any other
-// player text. Routines are context for it, never rules.
+// POV-filtered usual routine with no private block, story commitments screened like any other
+// player text, and a party member's orders on the player character's plan, in the player's own words
+// (assess-party §6.2). Routines are context for it, never rules.
 
 import type { EntityId, PlaceId } from "../../../shared/ids";
 import { isRecord, type JsonValue } from "../../../shared/json";
@@ -11,7 +12,7 @@ import { neutralizeMacros } from "../../../shared/macros";
 import { activityPhrase } from "../../../shared/activity";
 import { BASIC_BLOCKS, type SkipBlock } from "../../../shared/routines";
 import { calendarOf, clockOfStamp, formatStamp } from "../../../engine/calendar";
-import { own } from "../../../engine/pack-kit";
+import { optionalQuery, own } from "../../../engine/pack-kit";
 import { povMayKnow } from "../../../engine/player-events";
 import type { ReadContext } from "../../../engine/registry";
 import { chatSchedulesIn } from "../../../engine/schedules";
@@ -38,7 +39,7 @@ export interface SkipPlanPerson {
   place: { id: PlaceId; name: string } | null;
   activity: string | null;
   usual: string[];
-  /** Their appointments, trips and story plans in the span, as the POV may know them. */
+  /** Their appointments, trips and story plans in the span, and their orders on the player character's party plan, as the POV may know them. */
   story: string[];
 }
 
@@ -76,10 +77,17 @@ export function skipPlanBrief(ctx: ReadContext, people: readonly EntityId[], fro
     const e = own(state.entities, id);
     const here = placeOfEntity(state, id);
     const activity = e && canSeeField(reg, world, state, pov, id, "activity") && typeof e.fields.activity === "string" ? e.fields.activity : null;
-    const story = commitments(ctx, id, from, to)
-      .filter((c) => STORY_KINDS[c.kind] === true)
-      .map((c) => `${formatStamp(cal, c.start)} to ${formatStamp(cal, c.end)}: ${c.label}${c.place && seen.has(c.place) ? ` at ${named(c.place)}` : ""}`)
-      .filter(safe);
+    // Each order still on the plan in place of the blocks the planner laid for it: who gave it, its words, where and by when, how it stands.
+    const orders = (optionalQuery(ctx, "orgs.order_plans")?.(ctx, id) ?? []).filter((o) => o.status === "open" || o.status === "under_way" || o.status === "blocked");
+    const story = [
+      ...commitments(ctx, id, from, to)
+        .filter((c) => STORY_KINDS[c.kind] === true && !(c.plan !== undefined && c.plan.startsWith("order:")))
+        .map((c) => `${formatStamp(cal, c.start)} to ${formatStamp(cal, c.end)}: ${c.label}${c.place && seen.has(c.place) ? ` at ${named(c.place)}` : ""}`),
+      ...orders.map((o) => {
+        const giver = o.by === null ? "the plan" : o.by === pov ? `${own(state.entities, pov)?.name ?? "the player character"} (the player character)` : povMayKnow(reg, world, state, o.by) ? (own(state.entities, o.by)?.name ?? "someone") : "someone";
+        return `Order from ${giver}: ${o.text}${o.place && seen.has(o.place) ? `, at ${named(o.place)}` : ""}${o.when !== null ? `, by ${formatStamp(cal, o.when)}` : ""}; ${o.status === "under_way" ? "under way" : o.status}`;
+      }),
+    ].filter(safe);
     return {
       id,
       name: e && povMayKnow(reg, world, state, id) ? e.name : "someone the player character hasn't met",

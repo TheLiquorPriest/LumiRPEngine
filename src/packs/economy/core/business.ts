@@ -13,14 +13,17 @@ import { INVOICE_STATES, type AlertLine, type BusinessView, type Flow, type Flow
 import { hashParts } from "../../../shared/hash";
 import { calendarOf, clockAt, clockOfLocal, dateAt, dayIndexOf, formatClock, MINUTES_PER_DAY } from "../../../engine/calendar";
 import { labelOf, numOf, objOf, optionalQuery, optionalService, own, sliceOf, sliceRecord, strOf } from "../../../engine/pack-kit";
+import { passMemo } from "../../../engine/read-pass";
 import type { EffectContext, EventTypeDef, ReadContext, Rejection, SlotInfo } from "../../../engine/registry";
 import type { Rng } from "../../../engine/rng";
 import { isGone, kindIs, placeOfEntity, placeWithin } from "../../../engine/scope";
 import type { WorldState } from "../../../engine/state";
 import { addToBooks, addToPayables, businessBooks, firstBookedMonth, monthBook, monthOf, monthsBetween, operatingAccount, payablesOf } from "./books";
-import { allJobs, businessAt, businessIds, jobBlocks, jobView, payrollProblem, placesOf, type Job } from "./employment";
+import { allJobs, jobBlocks, payrollProblem, staffViews, type Job } from "./employment";
+import { businessAt, businessIds, orgTypeOf, placesOf, tradingDays } from "../../../engine/org";
 import type { FinanceApi, FinanceRegistry, FlowPosting } from "./module";
-import { hiddenFrom, managesParty, opaqueId, shownLabel, unpricedCap } from "./model";
+import { hiddenFrom, managesParty, shownLabel, unpricedCap } from "./model";
+import { actAs, moneyWords } from "./acting";
 import { corporateTax, salesTaxAccount, salesTaxOn, salesTaxPct, structureOf, taxExempt, taxRegionOf } from "./taxes";
 
 /** The foundation's invoice kind (`kinds.ts`): one invoice a business issued. */
@@ -68,13 +71,6 @@ export function isBusiness(ctx: Pick<ReadContext, "registry" | "world" | "state"
 /** The share of a sale a business keeps, percent; the rest is the cost of the goods. All of it when no margin is set. */
 function marginOf(state: Readonly<WorldState>, business: EntityId): number {
   return Math.min(100, Math.max(0, numOf(own(state.entities, business)?.fields.margin_pct, 100)));
-}
-
-/** The days of the week a business trades: its own list, else Monday to Friday. */
-function tradingDays(state: Readonly<WorldState>, business: EntityId): number[] {
-  const v = own(state.entities, business)?.fields.trading_days;
-  const days = Array.isArray(v) ? v.filter((d): d is number => typeof d === "number" && Number.isInteger(d) && d >= 0 && d <= 6) : [];
-  return days.length > 0 ? days : [1, 2, 3, 4, 5];
 }
 
 // ---------------------------------------------------------------- sales
@@ -345,30 +341,32 @@ function issueInvoice(ctx: EffectContext, api: FinanceApi, args: Record<string, 
   const business = strOf(args.business);
   if (!isBusiness(ctx, business)) return reject("missing_entity", `no business ${labelOf(ctx, business)}`);
   const by = strOf(args.by);
-  if (by !== "" && !managesParty(ctx.state, business, by)) return reject("not_owner", `${labelOf(ctx, by)} doesn't run ${labelOf(ctx, business)}`);
   const customer = strOf(args.customer) || strOf(args.customer_name).trim();
-  if (customer === "" || customer === business) return reject("bad_party", "an invoice needs someone to bill");
-  // A business the manager runs for others can't be billed by one that is theirs, nor by one whose till they hold a card on: its money would pay them (DESIGN §25.1).
-  if (by !== "" && customer !== by && managesParty(ctx.state, customer, by) && api.paysFor(ctx, by, business, customer, operatingAccount(api, ctx, business) ?? undefined)) return reject("not_owner", `${shownLabel(ctx, ctx.world.pov, by)} runs ${shownLabel(ctx, ctx.world.pov, customer)} for others, so can't bill it for ${shownLabel(ctx, ctx.world.pov, business)}`);
   const cents = typeof args.cents === "number" ? Math.round(args.cents) : NaN;
-  if (!(cents > 0)) return reject("bad_amount", "an invoice needs an amount");
-  // A customer outside the world pays what it is billed from money nobody in the world had, so what a
-  // business bills such customers in a month is bounded by the world's cap on prices nothing lists.
-  if (!own(ctx.state.entities, customer)) {
-    const cap = unpricedCap(ctx.world);
-    const month = monthOf(ctx.world, ctx.state.clock);
-    const billed = allInvoices(ctx)
-      .filter((i) => i.business === business && i.party === null && i.state !== "void" && monthOf(ctx.world, i.issued) === month)
-      .reduce((a, i) => a + i.cents, 0);
-    if (billed + cents > cap) return reject("over_cap", `${labelOf(ctx, business)} can bill customers outside the world at most ${api.money(ctx, cap)} a month, and has billed ${api.money(ctx, billed)}`);
-  }
-  const days = typeof args.days === "number" && args.days >= 0 ? Math.round(args.days) : Math.round(numOf(own(ctx.state.entities, business)?.fields.invoice_days, INVOICE_DAYS));
-  const cal = calendarOf(ctx.world);
-  const due = dateText(ctx, dateAt(cal, ctx.state.clock).dayIndex + days);
-  const memo = strOf(args.memo).trim() || `${labelOf(ctx, business)} invoice`;
-  const id = `invoice:${hashParts(ctx.rng.seed, "invoice", business, customer, String(ctx.state.clock), String(cents)).slice(0, 10)}`;
-  const entity: EntityDef = { id, kind: INVOICE_KIND, name: memo, tier: "background", fields: { business, customer, cents, memo, issued: ctx.state.clock, due, state: "open", paid: 0, late_fee: 0, fees: 0 }, relations: [] };
-  return [{ type: "spawn", entity }];
+  // Sent by someone who may bill for the business (`money.invoice`, ORG-SPEC §3.6), and told in its History.
+  return actAs(ctx, { by, party: business, power: "money.invoice", line: () => `Sent ${labelOf(ctx, customer)} an invoice for ${moneyWords(ctx, cents)}`, names: [customer] }, () => {
+    if (customer === "" || customer === business) return reject("bad_party", "an invoice needs someone to bill");
+    // A business the manager runs for others can't be billed by one that is theirs, nor by one whose till they hold a card on: its money would pay them (DESIGN §25.1).
+    if (by !== "" && customer !== by && managesParty(ctx.state, customer, by) && api.paysFor(ctx, by, business, customer, operatingAccount(api, ctx, business) ?? undefined)) return reject("not_owner", `${shownLabel(ctx, ctx.world.pov, by)} runs ${shownLabel(ctx, ctx.world.pov, customer)} for others, so can't bill it for ${shownLabel(ctx, ctx.world.pov, business)}`);
+    if (!(cents > 0)) return reject("bad_amount", "an invoice needs an amount");
+    // A customer outside the world pays what it is billed from money nobody in the world had, so what a
+    // business bills such customers in a month is bounded by the world's cap on prices nothing lists.
+    if (!own(ctx.state.entities, customer)) {
+      const cap = unpricedCap(ctx.world);
+      const month = monthOf(ctx.world, ctx.state.clock);
+      const billed = allInvoices(ctx)
+        .filter((i) => i.business === business && i.party === null && i.state !== "void" && monthOf(ctx.world, i.issued) === month)
+        .reduce((a, i) => a + i.cents, 0);
+      if (billed + cents > cap) return reject("over_cap", `${labelOf(ctx, business)} can bill customers outside the world at most ${api.money(ctx, cap)} a month, and has billed ${api.money(ctx, billed)}`);
+    }
+    const days = typeof args.days === "number" && args.days >= 0 ? Math.round(args.days) : Math.round(numOf(own(ctx.state.entities, business)?.fields.invoice_days, INVOICE_DAYS));
+    const cal = calendarOf(ctx.world);
+    const due = dateText(ctx, dateAt(cal, ctx.state.clock).dayIndex + days);
+    const memo = strOf(args.memo).trim() || `${labelOf(ctx, business)} invoice`;
+    const id = `invoice:${hashParts(ctx.rng.seed, "invoice", business, customer, String(ctx.state.clock), String(cents)).slice(0, 10)}`;
+    const entity: EntityDef = { id, kind: INVOICE_KIND, name: memo, tier: "background", fields: { business, customer, cents, memo, issued: ctx.state.clock, due, state: "open", paid: 0, late_fee: 0, fees: 0 }, relations: [] };
+    return [{ type: "spawn", entity }];
+  });
 }
 
 function payInvoice(ctx: EffectContext, api: FinanceApi, args: Record<string, JsonValue>): LedgerEvent[] | Rejection {
@@ -377,21 +375,25 @@ function payInvoice(ctx: EffectContext, api: FinanceApi, args: Record<string, Js
   if (inv.left <= 0) return reject("settled", `${inv.memo} is ${inv.state === "void" ? "void" : "paid"}`);
   const by = strOf(args.by);
   const payer = inv.party ?? inv.customer;
-  if (by !== "" && by !== inv.party && !(inv.party && isBusiness(ctx, inv.party) && managesParty(ctx.state, inv.party, by))) return reject("not_customer", `${labelOf(ctx, by)} isn't billed for ${inv.memo}`);
+  // Paid by its customer, or for an organization billed by someone who may spend for it (`money.spend`, ORG-SPEC §3.6); the fiduciary rule is `paysFor`'s, in its words.
+  if (by !== "" && by !== inv.party && !(inv.party && orgTypeOf(ctx, inv.party) !== null)) return reject("not_customer", `${labelOf(ctx, by)} isn't billed for ${inv.memo}`);
   const deposit = operatingAccount(api, ctx, inv.business);
-  if (by !== "" && inv.party && by !== inv.party && api.paysFor(ctx, by, inv.business, inv.party, deposit ?? undefined)) return reject("not_owner", `${shownLabel(ctx, ctx.world.pov, inv.party)} pays for itself, not for ${shownLabel(ctx, ctx.world.pov, by)}`);
-  const paid = inv.party ? api.pay(ctx, { from: inv.party, to: inv.business, cents: inv.left, memo: `Invoice: ${inv.memo}`, kind: "payment", category: "invoice", method: "account", ...(deposit ? { deposit } : {}) }) : api.post(ctx, [{ account: api.outside(`customer:${payer}`), amount: -inv.left }, { account: deposit ?? api.outside(inv.business), amount: inv.left }], { memo: `Invoice: ${inv.memo}`, kind: "payment", category: "invoice", payer });
-  if (!Array.isArray(paid)) return paid;
-  return unit(paid, invoiceSettled(inv, inv.left));
+  return actAs(ctx, { by, party: inv.party ?? payer, power: "money.spend", amount: inv.left, line: () => `Paid ${labelOf(ctx, inv.business)}'s invoice for ${moneyWords(ctx, inv.left)}`, names: [inv.business] }, () => {
+    if (by !== "" && inv.party && by !== inv.party && api.paysFor(ctx, by, inv.business, inv.party, deposit ?? undefined)) return reject("not_owner", `${shownLabel(ctx, ctx.world.pov, inv.party)} pays for itself, not for ${shownLabel(ctx, ctx.world.pov, by)}`);
+    const paid = inv.party ? api.pay(ctx, { from: inv.party, to: inv.business, cents: inv.left, memo: `Invoice: ${inv.memo}`, kind: "payment", category: "invoice", method: "account", ...(deposit ? { deposit } : {}) }) : api.post(ctx, [{ account: api.outside(`customer:${payer}`), amount: -inv.left }, { account: deposit ?? api.outside(inv.business), amount: inv.left }], { memo: `Invoice: ${inv.memo}`, kind: "payment", category: "invoice", payer });
+    if (!Array.isArray(paid)) return paid;
+    return unit(paid, invoiceSettled(inv, inv.left));
+  });
 }
 
 function voidInvoice(ctx: EffectContext, api: FinanceApi, args: Record<string, JsonValue>): LedgerEvent[] | Rejection {
   const inv = readInvoice(ctx, strOf(args.invoice));
   if (!inv) return reject("missing_entity", `no invoice ${labelOf(ctx, strOf(args.invoice))}`);
-  const by = strOf(args.by);
-  if (by !== "" && !managesParty(ctx.state, inv.business, by)) return reject("not_owner", `${labelOf(ctx, by)} doesn't run ${labelOf(ctx, inv.business)}`);
-  if (inv.state === "paid" || inv.state === "void") return reject("settled", `${inv.memo} is already ${inv.state}`);
-  return [{ type: "set", entity: inv.id, field: "state", value: "void" }];
+  // Voided by someone who may bill for the business that sent it (`money.invoice`).
+  return actAs(ctx, { by: strOf(args.by), party: inv.business, power: "money.invoice", line: () => `Voided the invoice to ${labelOf(ctx, inv.customer)} for ${moneyWords(ctx, inv.cents)}`, names: [inv.customer] }, () => {
+    if (inv.state === "paid" || inv.state === "void") return reject("settled", `${inv.memo} is already ${inv.state}`);
+    return [{ type: "set", entity: inv.id, field: "state", value: "void" }];
+  });
 }
 
 // ---------------------------------------------------------------- owners: draws and distributions
@@ -420,7 +422,7 @@ export const PAYOUT: EventTypeDef<PackEvent> = {
 };
 
 /** Whether an owner may draw on a business: an owner or joint owner; a corporation pays its owners by salary or dividends instead. */
-function mayDraw(api: FinanceApi, state: Readonly<WorldState>, who: EntityId, business: EntityId): boolean {
+export function mayDraw(api: FinanceApi, state: Readonly<WorldState>, who: EntityId, business: EntityId): boolean {
   return structureOf(state, business) !== "c_corp" && api.ownersOf(state, business).some((o) => o.party === who && (o.role === "owner" || o.role === "joint"));
 }
 
@@ -497,19 +499,22 @@ function distribution(ctx: ReadContext, api: FinanceApi, business: EntityId, mon
 function distribute(ctx: EffectContext, api: FinanceApi, args: Record<string, JsonValue>): LedgerEvent[] | Rejection {
   const business = strOf(args.business);
   if (!isBusiness(ctx, business)) return reject("missing_entity", `no business ${labelOf(ctx, business)}`);
-  const by = strOf(args.by);
-  if (by !== "" && !managesParty(ctx.state, business, by)) return reject("not_owner", `${labelOf(ctx, by)} doesn't run ${labelOf(ctx, business)}`);
-  const since = numOf(own(objOf(sliceOf(ctx.state, "economy").distributed), business), monthStart(ctx, ctx.state.clock));
-  const pct = numOf(own(ctx.state.entities, business)?.fields.distribution_pct, 100);
-  // A stated amount pays out of this month; otherwise the profit of every month since the last payout that no payout has paid.
-  const months: JsonObject = typeof args.cents === "number" && args.cents > 0 ? { [monthOf(ctx.world, ctx.state.clock)]: Math.round(args.cents) } : undistributed(api, ctx, business, since, ctx.state.clock + 1, pct);
-  if (Object.keys(months).length === 0) return reject("bad_amount", `${labelOf(ctx, business)} has no profit to distribute`);
-  const d = distribution(ctx, api, business, months);
-  if (!d) return reject("no_owners", `${labelOf(ctx, business)} has no owners with a share, or no account to pay from`);
-  if (d.lines.length === 0) return d.extra;
-  const posted = api.post(ctx, d.lines, { memo: "Profit distribution", kind: "income", category: "distribution" });
-  if (!Array.isArray(posted)) return posted;
-  return unit(posted, d.extra);
+  // Paid out by someone who may pay out its profit (`money.payout`, ORG-SPEC §3.6), and told in its History.
+  let total = 0;
+  return actAs(ctx, { by: strOf(args.by), party: business, power: "money.payout", line: () => `Paid ${moneyWords(ctx, total)} of profit out to its owners` }, () => {
+    const since = numOf(own(objOf(sliceOf(ctx.state, "economy").distributed), business), monthStart(ctx, ctx.state.clock));
+    const pct = numOf(own(ctx.state.entities, business)?.fields.distribution_pct, 100);
+    // A stated amount pays out of this month; otherwise the profit of every month since the last payout that no payout has paid.
+    const months: JsonObject = typeof args.cents === "number" && args.cents > 0 ? { [monthOf(ctx.world, ctx.state.clock)]: Math.round(args.cents) } : undistributed(api, ctx, business, since, ctx.state.clock + 1, pct);
+    if (Object.keys(months).length === 0) return reject("bad_amount", `${labelOf(ctx, business)} has no profit to distribute`);
+    const d = distribution(ctx, api, business, months);
+    if (!d) return reject("no_owners", `${labelOf(ctx, business)} has no owners with a share, or no account to pay from`);
+    total = d.paid;
+    if (d.lines.length === 0) return d.extra;
+    const posted = api.post(ctx, d.lines, { memo: "Profit distribution", kind: "income", category: "distribution" });
+    if (!Array.isArray(posted)) return posted;
+    return unit(posted, d.extra);
+  });
 }
 
 function monthStart(ctx: Pick<ReadContext, "world">, clock: number): number {
@@ -553,7 +558,8 @@ function shownName(ctx: ReadContext, viewer: EntityId | null, id: string, fallba
 }
 
 function ownerLines(ctx: ReadContext, api: FinanceApi, viewer: EntityId | null, business: EntityId): OwnerLine[] {
-  return api.ownersOf(ctx.state, business).map((o) => ({ party: hiddenFrom(ctx, viewer, o.party) ? null : o.party, name: shownName(ctx, viewer, o.party, "an owner"), role: o.role, share: api.shareOf(ctx.state, business, o.party) }));
+  // A company counting units (ORG-SPEC §3.10) gives each row its units, so selling its shares can count them.
+  return api.ownersOf(ctx.state, business).map((o) => ({ party: hiddenFrom(ctx, viewer, o.party) ? null : o.party, name: shownName(ctx, viewer, o.party, "an owner"), role: o.role, share: api.shareOf(ctx.state, business, o.party), ...(o.units !== undefined ? { units: o.units } : {}) }));
 }
 
 /**
@@ -600,14 +606,7 @@ export function businessView(ctx: ReadContext, api: FinanceApi, business: Entity
     .filter((i) => i.business === business || i.party === business)
     .sort((a, b) => b.issued - a.issued)
     .map((i) => ({ id: i.id, business: hiddenFrom(ctx, viewer, i.business) ? "" : i.business, customer: i.party !== null && hiddenFrom(ctx, viewer, i.party) ? "" : i.customer, cents: i.cents, memo: i.memo, issued: i.issued, due: i.due, state: i.state, paid: i.paid, late_fee: i.late_fee, ...(i.state === "late" ? { days_late: dateAt(cal, now).dayIndex - dateAt(cal, i.due).dayIndex } : {}), flow: `invoice:${i.id}`, customerName: i.party ? shownName(ctx, viewer, i.party, "a customer") : i.customer, issuedAt: formatClock(cal, i.issued), dueAt: formatClock(cal, i.due) }));
-  const employees = allJobs(ctx)
-    .filter((j) => j.business === business && j.status !== "ended")
-    .map((j) => {
-      const v = jobView(ctx, api, j, viewer);
-      if (!hiddenFrom(ctx, viewer, j.worker)) return v;
-      // Where their pay goes, and to whom, would name them too, and so can the job's id (`job_danny_mechanic`): its payroll's link sends the same stand-in.
-      return { ...v, id: opaqueId(v.id), worker: "an employee", workerId: "", splits: [], spec: { ...v.spec, worker: "", splits: [], deductions: [] } };
-    });
+  const employees = staffViews(ctx, api, business, viewer);
   const owed = payablesOf(ctx.state, business);
   const taxes: BusinessView["taxes"] = [];
   if (owed.sales_tax !== 0) taxes.push({ label: "Sales tax collected, to pay", cents: owed.sales_tax, due: nextDue(ctx, api, `salestax:${business}`) });
@@ -713,11 +712,12 @@ export function registerBusiness(r: FinanceRegistry): void {
   core.effect({ type: "economy.owner_draw", args: ["business", "cents", "owner?", "by?"], resolve: (args, ctx) => ownerDraw(ctx, api, args) });
   core.effect({ type: "economy.distribute", args: ["business", "cents?", "by?"], resolve: (args, ctx) => distribute(ctx, api, args) });
   core.formula("may_draw", (ctx, who, business) => mayDraw(api, ctx.state, String(who ?? ""), String(business ?? "")));
-  core.action({ id: "invoice_issue", label: "Send an invoice", description: "Bill a customer from a business you run.", pack: "economy", params: { business: { type: "ref", ref: "business" }, customer: { type: "ref", optional: true, label: "Bill (someone here)" }, customer_name: { type: "text", optional: true, label: "Or bill (a name)" }, amount: { type: "money" }, memo: { type: "text", optional: true, label: "For" }, days: { type: "number", optional: true, label: "Days to pay" } }, requires: ["manages(self, business)", "amount > 0", "level.money >= 3"], outcomes: { default: [{ type: "economy.invoice_issue", args: { business: "business", customer: "=params.customer", customer_name: "=params.customer_name", cents: "=amount", memo: "=params.memo", days: "=params.days", by: "self" } }] }, duration: "10", lexicon: ["send an invoice", "invoice", "bill them"], observable: "does paperwork" });
-  core.action({ id: "invoice_pay", label: "Pay an invoice", description: "Pay an invoice billed to you or to a business you run.", pack: "economy", params: { invoice: { type: "ref", ref: INVOICE_KIND } }, requires: ["invoice.customer == self or manages(self, invoice.customer)", "invoice.state == 'open' or invoice.state == 'late'", "level.money >= 3"], outcomes: { default: [{ type: "economy.invoice_pay", args: { invoice: "invoice", by: "self" } }] }, duration: "5", lexicon: ["pay the invoice", "settle the bill"], observable: "checks their phone" });
-  core.action({ id: "invoice_void", label: "Void an invoice", description: "Cancel an invoice that a business you run sent.", pack: "economy", params: { invoice: { type: "ref", ref: INVOICE_KIND } }, requires: ["manages(self, invoice.business)", "invoice.state == 'open' or invoice.state == 'late'", "level.money >= 3"], outcomes: { default: [{ type: "economy.invoice_void", args: { invoice: "invoice", by: "self" } }] }, duration: "5", lexicon: ["void the invoice", "cancel the invoice", "write it off"], observable: "does paperwork" });
+  // Who may do each for a business (ORG-SPEC §3.4, §3.6): whoever holds the power there; with no positions authored, its managing owners, as before.
+  core.action({ id: "invoice_issue", label: "Send an invoice", description: "Bill a customer from a business you run.", pack: "economy", params: { business: { type: "ref", ref: "business" }, customer: { type: "ref", optional: true, label: "Bill (someone here)" }, customer_name: { type: "text", optional: true, label: "Or bill (a name)" }, amount: { type: "money" }, memo: { type: "text", optional: true, label: "For" }, days: { type: "number", optional: true, label: "Days to pay" } }, requires: ["may(self, business, 'money.invoice')", "amount > 0", "level.money >= 3"], outcomes: { default: [{ type: "economy.invoice_issue", args: { business: "business", customer: "=params.customer", customer_name: "=params.customer_name", cents: "=amount", memo: "=params.memo", days: "=params.days", by: "self" } }] }, duration: "10", lexicon: ["send an invoice", "invoice", "bill them"], observable: "does paperwork" });
+  core.action({ id: "invoice_pay", label: "Pay an invoice", description: "Pay an invoice billed to you or to a business you run.", pack: "economy", params: { invoice: { type: "ref", ref: INVOICE_KIND } }, requires: ["invoice.customer == self or may(self, invoice.customer, 'money.spend')", "invoice.state == 'open' or invoice.state == 'late'", "level.money >= 3"], outcomes: { default: [{ type: "economy.invoice_pay", args: { invoice: "invoice", by: "self" } }] }, duration: "5", lexicon: ["pay the invoice", "settle the bill"], observable: "checks their phone" });
+  core.action({ id: "invoice_void", label: "Void an invoice", description: "Cancel an invoice that a business you run sent.", pack: "economy", params: { invoice: { type: "ref", ref: INVOICE_KIND } }, requires: ["may(self, invoice.business, 'money.invoice')", "invoice.state == 'open' or invoice.state == 'late'", "level.money >= 3"], outcomes: { default: [{ type: "economy.invoice_void", args: { invoice: "invoice", by: "self" } }] }, duration: "5", lexicon: ["void the invoice", "cancel the invoice", "write it off"], observable: "does paperwork" });
   core.action({ id: "owner_draw", label: "Take an owner's draw", description: "Take money out of a business you own, for yourself.", pack: "economy", params: { business: { type: "ref", ref: "business" }, amount: { type: "money" } }, requires: ["may_draw(self, business)", "amount > 0", "level.money >= 3"], outcomes: { default: [{ type: "economy.owner_draw", args: { business: "business", cents: "=amount", owner: "self", by: "self" } }] }, duration: "5", lexicon: ["take a draw", "pay myself", "take money out of the business"], observable: "checks their phone" });
-  core.action({ id: "distribute_profit", label: "Distribute profit", description: "Pay a business's profit out to its owners.", pack: "economy", params: { business: { type: "ref", ref: "business" }, amount: { type: "money", optional: true, label: "Amount (else its share of the profit)" } }, requires: ["manages(self, business)", "level.money >= 3"], outcomes: { default: [{ type: "economy.distribute", args: { business: "business", cents: "=params.amount", by: "self" } }] }, duration: "10", lexicon: ["distribute profit", "pay dividends", "pay out the owners"], observable: "does paperwork" });
+  core.action({ id: "distribute_profit", label: "Distribute profit", description: "Pay a business's profit out to its owners.", pack: "economy", params: { business: { type: "ref", ref: "business" }, amount: { type: "money", optional: true, label: "Amount (else its share of the profit)" } }, requires: ["may(self, business, 'money.payout')", "level.money >= 3"], outcomes: { default: [{ type: "economy.distribute", args: { business: "business", cents: "=params.amount", by: "self" } }] }, duration: "10", lexicon: ["distribute profit", "pay dividends", "pay out the owners"], observable: "does paperwork" });
 
   core.query("economy.business_books", (ctx, business, from, to) => {
     const b = businessBooks(api, ctx, business, from, to);
@@ -729,6 +729,18 @@ export function registerBusiness(r: FinanceRegistry): void {
     const mine = businessesOf(ctx, api, party);
     const alerts = invoiceAlerts(ctx, api, party, viewer);
     return { ...(mine.length > 0 ? { businesses: mine.map((b) => businessView(ctx, api, b, party, viewer)) } : {}), ...(alerts.length > 0 ? { alerts } : {}) };
+  });
+
+  // An organization's page (ORG-SPEC §4.4): its money, as any party's (§3.8), behind `money.view`, as the organization's Money level allows (§4.7). A company's Ownership is the shares module's, Taxes the taxes module's, Payroll (every employer's) employment's.
+  core.orgSection({
+    id: "money",
+    label: "Money",
+    power: "money.view",
+    build: (ctx, org, viewer) => {
+      const view = ctx.query("economy.finance")(ctx, org, viewer !== null);
+      const holds = view.accounts.length > 0 || view.household !== null || view.businesses.length > 0;
+      return view.level >= 2 && holds ? (view as unknown as JsonValue) : null;
+    },
   });
   r.summary((ctx, who) => {
     const out: string[] = [];

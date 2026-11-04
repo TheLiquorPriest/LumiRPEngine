@@ -7,13 +7,14 @@
 
 import { describe, expect, test } from "bun:test";
 import type { FinanceView, HoldingView } from "../../src/shared/finance";
-import { accountControls, autopaySources, businessAccounts, businessControls, endableLeases, findAccount, flowControls, holdingControls, hubTabs, invoiceControls, jobControls, knownPeople, moveSources, propertyControls, ROUTE_ELSEWHERE, routePick, transferTargets, viewAccounts } from "../../src/packs/economy/ui/layout";
+import { isRecord } from "../../src/shared/json";
+import type { OrgView } from "../../src/shared/org-view";
+import { accountControls, autopaySources, businessAccounts, businessControls, endableLeases, findAccount, flowControls, holdingControls, hubTabs, invoiceControls, jobControls, moveSources, propertyControls, ROUTE_ELSEWHERE, routePick, transferTargets, viewAccounts } from "../../src/packs/economy/ui/layout";
 import {
   autopayAction,
   distributeAction,
   drawAction,
   exerciseAction,
-  hireAction,
   invoiceAction,
   invoiceIssueAction,
   jobEndAction,
@@ -34,6 +35,7 @@ import {
   type ActionBody,
   type TradeForm,
 } from "../../src/packs/economy/ui/requests";
+import { hireAction, newcomers, peopleControls } from "../../src/packs/orgs/ui/edit";
 import { accepted, account, MoneyChat, refusal } from "../support/money-chat";
 
 const CHECKING = "acct_pov_checking";
@@ -101,25 +103,30 @@ describe("Play → Money → Jobs and Businesses: each control plays as the play
     expect(jobControls(after, job, null)).toEqual([]);
   });
 
-  test("A partner hires someone the POV knows, gives them a raise and lets them go; the payroll shows each step", async () => {
+  test("A partner hires someone the POV knows from the shop's People, gives them a raise and lets them go; the payroll shows each step", async () => {
     const chat = await MoneyChat.start();
     // The POV works at the shop but holds no role on it, so it isn't theirs to run.
     expect((await chat.hub()).businesses).toEqual([]);
     await partner(chat);
     const view = await chat.hub();
     const shop = find(view.businesses, SHOP);
-    expect(businessControls(view, shop)).toEqual(["hire", "invoice", "draw", "distribute", "stake"]);
+    expect(businessControls(view, shop)).toEqual(["invoice", "draw", "distribute", "stake"]);
     // On the payroll the POV's own job is theirs to quit and, as a partner, to change.
     expect(jobControls(view, find(shop.employees, JOB), shop)).toEqual(["quit", "raise", "let_go"]);
-    const hire = knownPeople((await chat.state()).palette).find((p) => p.id !== MARCUS && !shop.employees.some((j) => j.workerId === p.id));
+    // Hiring is the shop's People's Hire someone in Orgs.
+    const pages = (await chat.state()).panels["orgs.org"];
+    const page = isRecord(pages) ? (pages[SHOP] as unknown as OrgView | undefined) : undefined;
+    if (!page) throw new Error("the POV sees no page for the shop");
+    expect(peopleControls(page).hire).toBe(true);
+    const hire = newcomers(page, "hire").find((p) => p.id !== MARCUS && !shop.employees.some((j) => j.workerId === p.id));
     if (!hire) throw new Error("the POV knows no one to hire");
-    const body = hireAction({ business: SHOP, worker: hire.id, title: "Apprentice", basis: "hourly", rate: "18", hoursPerWeek: 20, payEvery: "weekly" }, chat.currency);
+    const body = hireAction(page, { worker: hire.id, title: "Apprentice", position: "", basis: "hourly", rate: "18", hours: "20", every: "weekly" }, chat.currency);
     if (!body) throw new Error("the hire form isn't complete");
     expect(await chat.play(body)).toContain("done");
     const hired = await chat.hub();
     const job = find(hired.businesses, SHOP).employees.find((j) => j.workerId === hire.id);
-    if (!job) throw new Error(`${hire.label} isn't on the payroll`);
-    expect(job).toMatchObject({ title: "Apprentice", worker: hire.label, pay: "$18.00 an hour", payEvery: "weekly", status: "active" });
+    if (!job) throw new Error(`${hire.name} isn't on the payroll`);
+    expect(job).toMatchObject({ title: "Apprentice", worker: hire.name, pay: "$18.00 an hour", payEvery: "weekly", status: "active" });
     expect(job.nextPay).not.toBeNull();
     expect(jobControls(hired, job, find(hired.businesses, SHOP))).toEqual(["raise", "let_go"]);
     expect(await chat.play(raiseAction(job.id, chat.cents("20")))).toContain("done");
@@ -479,7 +486,7 @@ describe("Levels: the work and asset controls follow the features running for th
     expect(view.features).toContain("property");
     expect(view.features).not.toContain("investments");
     expect(holdingControls(view, find(holdings(view), LKFR))).toEqual([]);
-    expect(businessControls(view, find(view.businesses, SHOP))).toEqual(["hire", "invoice", "draw", "distribute"]);
+    expect(businessControls(view, find(view.businesses, SHOP))).toEqual(["invoice", "draw", "distribute"]);
     expect(propertyControls(view, find(view.properties, HOUSE))).toEqual(["buy"]);
     expect(await chat.play(trade(chat, { holding: LKFR, qty: 1, from: CHECKING }))).not.toContain("done");
     expect(find(holdings(await chat.hub()), LKFR).qty).toBe(12);

@@ -1,20 +1,21 @@
-// The money hub's navigation: the pages it opens over its overview, the navigator
-// that opens them, and the pieces every page is built from. One set of section, detail and action
-// pages serves Play, where each page rides the sheet stack as a `money` sheet (an account's page as
-// an `account` one), and GM mode, where the pages stack over the Money tab under Whose money.
+// Money's navigation (ORG-SPEC §5): the pages a party's money opens over its segments, the
+// navigator that opens them, and the pieces every page is built from. One set of pages serves Play
+// → Me → Money, an organization's Money tab in Orgs and GM mode: in Play each page rides the sheet
+// stack as a `money` sheet naming whose money it is (the POV's account page as an `account` one),
+// and in GM mode the pages stack over the segments.
 
 import type { ComponentChildren } from "preact";
+import type { PanelId, EntityId } from "../../../shared/ids";
 import { Empty, PageHeader, Stat } from "../../../frontend/components";
 import { GmPage } from "../../../frontend/gm/ui";
 import type { IconName } from "../../../frontend/icons";
 import type { SectionProps } from "./hub";
-import type { HubSection } from "./layout";
 
-/** Where a page sits: a section of the hub, one thing in it, or an action's form. */
+/** Where a page sits: a segment's own page (every alert, the credit report), one thing in it, or an action's form. */
 export type HubPageType = "section" | "detail" | "action";
 
 /**
- * A page of the hub over its overview, named by a path: a section (`["accounts"]`), one thing
+ * A page over a party's money, named by a path: a segment's own page (`["alerts"]`), one thing
  * (`["account", id]`), or an action's form on one (`["account", id, "pay"]`, `["flows", "new"]`).
  * The path's first segment, its head, names the module that draws the page (`HubPages`).
  */
@@ -23,27 +24,35 @@ export interface HubPage {
   path: readonly string[];
 }
 
-export function sectionPage(section: Exclude<HubSection, "overview">): HubPage {
-  return { type: "section", path: [section] };
+export function sectionPage(...path: string[]): HubPage {
+  return { type: "section", path };
 }
 
 export function detailPage(thing: string, id: string): HubPage {
   return { type: "detail", path: [thing, id] };
 }
 
-/** An action's form: what it acts on (a thing and its id, or a section), then the action, then anything it acts on within (a hold, an invoice). */
+/** An action's form: what it acts on (a thing and its id, or a segment's list), then the action, then anything it acts on within (a hold, an invoice). */
 export function actionPage(...path: string[]): HubPage {
   return { type: "action", path };
 }
 
-/** How the hub's pages move, passed to every section, detail and action page. */
+/**
+ * Somewhere outside money that a money page links to: an organization's page in Orgs, on one of
+ * its tabs (null: the list of them, where one is picked), or a panel of Play (the Garage).
+ */
+export type Elsewhere = { org: EntityId | null; tab?: string } | { panel: PanelId };
+
+/** How a party's money pages move, passed to every segment, detail and action page. */
 export interface HubNav {
-  /** The page showing; null on the overview. */
+  /** The page showing; null on the segments. */
   page: HubPage | null;
   /** Opens a page over the one showing. */
   open(page: HubPage): void;
-  /** Back one level, from this page to the one it was opened from (the overview under the first); nothing once this page isn't showing. */
+  /** Back one level, from this page to the one it was opened from (the segments under the first); nothing once this page isn't showing. */
   back(): void;
+  /** Leaves money for an organization's page or a panel: Play → Orgs, or in GM mode GM → Orgs. */
+  elsewhere(to: Elsewhere): void;
   /** Where the pages show: Play's sheet stack, or GM mode's pages. */
   frame: "play" | "gm";
   /** What Back returns to, by name ("Accounts"), for its label; null when there's no name to give. */
@@ -61,7 +70,7 @@ export interface HubPages {
   render(page: HubPage, props: SectionProps): ComponentChildren;
 }
 
-/** A hub page's frame: its header (Back, the title and subtitle, its actions), then its content. */
+/** A page's frame: its header (Back, the title and subtitle, its actions), then its content. */
 export function MoneyPage(props: { nav: HubNav; name: string; title: ComponentChildren; subtitle?: ComponentChildren; actions?: ComponentChildren; children?: ComponentChildren }) {
   const { nav } = props;
   if (nav.frame === "gm") {

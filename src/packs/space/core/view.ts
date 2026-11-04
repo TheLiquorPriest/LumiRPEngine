@@ -16,6 +16,7 @@ import { mapSettingsOf } from "../../../shared/maps";
 import type { GridDef, MapDisplay, WorldDoc } from "../../../shared/world";
 import type { ReadContext } from "../../../engine/registry";
 import { optionalQuery, own } from "../../../engine/pack-kit";
+import { entryFor, entryRefusal } from "../../../engine/entry";
 import { isGone, kindIs, placeOfEntity } from "../../../engine/scope";
 import { cellsSeen, placeVisit } from "../../../engine/seen";
 import { canSeeEntity, canSeePlace } from "../../../engine/visibility";
@@ -159,10 +160,12 @@ export function buildMapView(ctx: ReadContext, chosen: MapDisplay | null = null)
   if (here && level >= 1) {
     for (const id of targets) {
       if (id === here) continue;
-      // Story first, a Go leads anywhere (`goMinutes`); only the travel simulation leaves one with no walk disabled.
+      // Story first, a Go leads anywhere (`goMinutes`); only the travel simulation leaves one with no
+      // walk disabled, and a place that gives the POV no leave to enter is greyed with why (ORG-SPEC §3.9).
       const minutes = goMinutes(ctx, here, id);
       const name = own(world.places, id)?.name ?? id;
-      travel.push({ to: id, label: `Walk to ${name}`, mode: "walk", minutes: minutes ?? 0, action: "go", params: { to: id }, ...(minutes !== null ? {} : { disabled: "no walking route" }) });
+      const shut = entryFor(ctx, world.pov, id) === null ? entryRefusal(ctx, world.pov, id) : "";
+      travel.push({ to: id, label: `Walk to ${name}`, mode: "walk", minutes: minutes ?? 0, action: "go", params: { to: id }, ...(minutes === null ? { disabled: "no walking route" } : shut !== "" ? { disabled: shut } : {}) });
     }
     const vehicles = optionalQuery(ctx, "vehicles.travel_options");
     if (vehicles) for (const o of vehicles(ctx, here)) if (targets.has(o.to)) travel.push(o);

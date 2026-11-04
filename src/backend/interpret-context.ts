@@ -9,12 +9,15 @@ import { bandsWithin, type InferredChecks, type SheetSkill } from "../shared/inf
 import { TRY_ACTION } from "../engine/inferred";
 import type { RecentHistory } from "../shared/settings";
 import { limitOf } from "../shared/minds";
+import { partyTierIn, TIER_MARKS } from "../shared/party";
 import { tableChoices } from "../shared/tables";
 import type { ActionDef, ParamDef, WorldDoc } from "../shared/world";
 import { calendarOf, dateAt, formatStamp, placeOffset, weekdayName } from "../engine/calendar";
 import type { ChainMessage } from "../engine/ledger/chain";
 import { povLife } from "../engine/life";
 import { optionalQuery, own } from "../engine/pack-kit";
+import { actsFor } from "../engine/org";
+import { partyAt } from "../engine/relocate";
 import type { ReadContext } from "../engine/registry";
 import type { Registry } from "../engine/registry-impl";
 import { companionCandidates, paramCandidates, placeCandidates } from "../engine/resolve";
@@ -89,20 +92,27 @@ function kindWords(reg: Registry, world: WorldDoc, def: ParamDef): string {
 }
 
 /**
- * A param in words, or null when it is required and nothing can fill it: a required ref lists the
- * ids that may fill it (each named once, in the scene: `named` gathers them), as the palette offers
- * them; one that pays an outside account (`ParamDef.outside`) takes anyone or anything besides, in
- * the input's own words, so it is never left with nothing to fill it; an optional one, which the
- * palette never lists, takes an id of its kind named elsewhere; a place ref points at the places,
- * listed apart; a text param naming a table row lists the rows' ids, inside the param's own
- * parentheses, so the next param can't read as a row; Attempt's stat lists the stats, and Buy's item
- * what is sold here, as the palette offers them.
+ * A param in words, "" when it is left out, or null when it is required and nothing can fill it: a
+ * required ref lists the ids that may fill it (each named once, in the scene: `named` gathers them),
+ * as the palette offers them; one that pays an outside account (`ParamDef.outside`) takes anyone or
+ * anything besides, in the input's own words, so it is never left with nothing to fill it; an `as`
+ * (`ParamDef.acting`, ORG-SPEC §3.6) lists the organizations the POV may act for with its power, and
+ * is left out when there are none; an optional one, which the palette never lists, takes an id of
+ * its kind named elsewhere; a place ref points at the places, listed apart; a text param naming a
+ * table row lists the rows' ids, inside the param's own parentheses, so the next param can't read as
+ * a row; Attempt's stat lists the stats, and Buy's item what is sold here, as the palette offers them.
  */
 function paramWords(ctx: ReadContext, action: ActionDef, name: string, def: ParamDef, mayKnow: (id: EntityId) => boolean, places: number, named: Set<EntityId>): string | null {
   const { registry: reg, world, state } = ctx;
   const head = `${name}${def.optional ? "?" : ""}`;
   const label = def.label ? `: ${def.label}` : "";
   if (def.type === "ref") {
+    if (def.acting !== undefined) {
+      const orgs = actsFor(ctx, world.pov, def.acting).filter(mayKnow);
+      if (orgs.length === 0) return "";
+      for (const id of orgs) named.add(id);
+      return `${head} (an organization you act for: ${orgs.join(" | ")}${def.label ? `; ${def.label}` : ""})`;
+    }
     if (def.ref === "place") return places > 0 ? `${head} (a place id from Places)` : def.optional ? `${head} (no place you know of)` : null;
     if (def.optional) return `${head} (${kindWords(reg, world, def)}: an id named above${label})`;
     const ids = paramCandidates(reg, world, state, action, name).filter(mayKnow);
@@ -118,12 +128,13 @@ function paramWords(ctx: ReadContext, action: ActionDef, name: string, def: Para
     return `${head} (${kindWords(reg, world, def)}: ${ids.join(" | ")}${open ? `, or ${open}` : ""})`;
   }
   // A list of refs (Go's `with`) takes ids of the scene's people the input brings along: "with Danny"
-  // names one, "we" all of them; nobody when the player goes alone, as when no one is here.
+  // names one, "we" your party here (the scene's line) and anyone else it names; nobody when the
+  // player goes alone, as when no one is here.
   if (def.type === "list" && def.ref !== undefined) {
     const ids = companionCandidates(reg, world, state, action, name).filter(mayKnow);
     if (ids.length === 0) return `${head} (no one here${label})`;
     for (const id of ids) named.add(id);
-    return `${head} (${kindWords(reg, world, def)} here, a list of ids: ${ids.join(" | ")}; "we" is all of them${label})`;
+    return `${head} (${kindWords(reg, world, def)} here, a list of ids: ${ids.join(" | ")}; "we" is your party here plus anyone else the input names${label})`;
   }
   if (def.table !== undefined) return `${head} (one of: ${tableChoices(own(world.tables, def.table)).map((c) => c.key).join(" | ")})`;
   if (action.id === "attempt" && name === "stat" && def.type === "text") {
@@ -160,12 +171,15 @@ export function interpretCatalog(reg: Registry, world: WorldDoc, state: Readonly
     if (!fightOffers(world, state, action) || gatesOf(action).some((req) => !truthy(evalExpr(req, env, false))) || storyLocked(env, action)) continue;
     const params: string[] = [];
     const ids = new Set<EntityId>();
+    let handled = 0;
     for (const [name, def] of Object.entries(action.params)) {
       const words = paramWords(ctx, action, name, def, mayKnow, places, ids);
       if (words === null) break;
-      params.push(words);
+      handled += 1;
+      // A param left out (an `as` with no organization to act for) is handled, and not listed.
+      if (words !== "") params.push(words);
     }
-    if (params.length < Object.keys(action.params).length) continue;
+    if (handled < Object.keys(action.params).length) continue;
     for (const id of ids) named.add(id);
     const label = action.pack === "story" && action.id === "answer" && puzzles.length > 0 ? `${action.label} (open: ${puzzles.join("; ")})` : action.label;
     entries.push({ action, entry: { id: action.id, label, ...(action.description ? { description: action.description } : {}), params, needs: needsOf(action, (param) => `\`${param}\``), ...(action.lexicon ? { lexicon: action.lexicon } : {}) } });
@@ -214,7 +228,7 @@ export function tryEntry(policy: InferredChecks, skills: readonly SheetSkill[]):
       "attempt (text: what is attempted, in the input's words)",
       `skill (one of: ${named.join(" | ")})`,
       `difficulty (one of: ${bandsWithin(policy).map((b) => b.id).join(" | ")}: how hard it looks in context)`,
-      ...(policy.who !== "pov" ? ['with? (a list of ids of people here who join in: "we sneak past" names each companion)'] : []),
+      ...(policy.who !== "pov" ? ['with? (a list of ids of people here who join in: "we sneak past" names your party here and anyone else the input names)'] : []),
       'against? (a list of {"who": an id of someone here, "skill": the skill they resist with}: the people it opposes or targets)',
       ...(policy.when === "tries" ? ["tried (true when the input itself says the player character tries or attempts it)"] : []),
     ],
@@ -245,12 +259,13 @@ function lastSeenWords(reg: Registry, world: WorldDoc, state: Readonly<WorldStat
 
 /**
  * The scene as the POV knows it (DESIGN §5.2): the day and time and where it is (a place it can't
- * see is somewhere it can't name), who is there with it, the people the typed input (`said`) names
- * who aren't, with where the POV last saw them, what it carries, its vehicles, the invitations
- * waiting on its answer, and everyone and everything else the catalog lists (`named`), each by name
- * and id, and what its last message left unplayed (`left`: the words of the Send chip on the reply
- * before it); then the places a place param may name, and the messages before the typed one
- * (`recentMessages`). Only what the POV may know is named.
+ * see is somewhere it can't name), who is there with it, each of its party marked with their tier,
+ * and whom "we" means (its party there that comes along with it, assess-party §6.1), the people the
+ * typed input (`said`) names who aren't, with where the POV last saw them, what it carries, its
+ * vehicles, the invitations waiting on its answer, and everyone and everything else the catalog
+ * lists (`named`), each by name and id, and what its last message left unplayed (`left`: the words
+ * of the Send chip on the reply before it); then the places a place param may name, and the
+ * messages before the typed one (`recentMessages`). Only what the POV may know is named.
  */
 export function interpretScene(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, opts: { mayKnow: (id: EntityId) => boolean; named: readonly EntityId[]; earlier: readonly ChainMessage[]; recent: Readonly<RecentHistory>; hideJson: boolean; said?: string; left?: string }): InterpretScene {
   const ctx = reg.context(world, state);
@@ -277,13 +292,19 @@ export function interpretScene(reg: Registry, world: WorldDoc, state: Readonly<W
     const life = povLife(world, state, id);
     return life ? `, ${life.reads}` : "";
   };
+  const tierWords = (id: EntityId): string => {
+    const tier = partyTierIn(own(state.entities, id)?.relations, world.pov);
+    return tier ? `, ${TIER_MARKS[tier]}` : "";
+  };
+  const party = partyAt(ctx, here).filter(seen);
   const lines = [
     `Now: ${localNow(world, state)}${where}.`,
-    `Here with you: ${people.length > 0 ? people.map((id) => `${nameOf(id)} (${id}${lifeWords(id)})`).join("; ") : "no one"}.`,
+    `Here with you: ${people.length > 0 ? people.map((id) => `${nameOf(id)} (${id}${tierWords(id)}${lifeWords(id)})`).join("; ") : "no one"}.`,
     ...(away.length > 0 ? [`Named in the input but not here: ${away.map((id) => `${nameOf(id)} (${id}${lifeWords(id)})${lastSeenWords(reg, world, state, id)}`).join("; ")}.`] : []),
     `You carry: ${carried.length > 0 ? carried.map((id) => `${nameOf(id)} (${id})`).join("; ") : "nothing"}.`,
     ...(vehicles.length > 0 ? [`Your vehicles: ${vehicles.map((id) => `${nameOf(id)} (${id}${atWords(reg, world, state, id)})`).join("; ")}.`] : []),
     ...(others.length > 0 ? [`Others you can name: ${others.map((id) => `${nameOf(id)} (${id})`).join("; ")}.`] : []),
+    ...(people.length > 0 || party.length > 0 ? [`Your party here, whom "we" means: ${party.length > 0 ? party.map((id) => `${nameOf(id)} (${id})`).join("; ") : `no one, so "we" is only whom the input names`}.`] : []),
     ...(waiting.length > 0 ? [`Waiting on your answer: ${waiting.join(" ")}`] : []),
     ...(opts.left ? [`Left from your last message, not played yet: ${opts.left}`] : []),
   ];

@@ -46,7 +46,7 @@ describe("gear: kits as template plus overrides (L36)", () => {
     expect(Object.values(w.state.entities).filter((e) => e.fields.from_kit === "toolbox")).toHaveLength(1);
     expect(kitStatus(w.ctx, "toolbox")?.present).toBe(44);
     const view = buildGearView(w.ctx);
-    expect(view.stored.find((i) => i.id === "toolbox")?.kit).toMatchObject({ present: 44, total: 45, complete: false });
+    expect(view.elsewhere.find((i) => i.id === "toolbox")?.kit).toMatchObject({ present: 44, total: 45, complete: false });
   });
 });
 
@@ -68,20 +68,24 @@ describe("gear: containment, slots and use grants", () => {
     expect(w.state.entities.toolbox?.relations).toContainEqual({ type: "in", to: "wallet" });
   });
 
-  test("Owned lists a container's contents under it, not again at the top; slots read as words", () => {
+  test("On you lists a container's contents under it, not again at the top; slots read as words", () => {
     const w = setup();
     w.state.realism.levels.gear = 3;
     w.state.entities.card = { kind: "item", name: "Library card", tier: "background", fields: { owner: "you", volume_l: 0.01 }, relations: [{ type: "in", to: "wallet" }], levels: {}, agent: false };
     w.state.entities.wallet!.fields.slot = "pocket_or_bag";
     const view = buildGearView(w.ctx);
-    expect(view.owned.some((i) => i.id === "card")).toBe(false);
-    const wallet = view.owned.find((i) => i.id === "wallet");
+    expect(view.on.some((i) => i.id === "card")).toBe(false);
+    const wallet = view.on.find((i) => i.id === "wallet");
     expect(wallet?.children?.some((i) => i.id === "card")).toBe(true);
     expect(wallet?.slot).toBe("pocket or bag");
-    // Lent, it is with the borrower: Owned shows the loan, not the owner's slot.
+    // Lent and with the borrower: Lent out shows the loan and where it is, not the owner's slot.
+    const lentWallet = w.state.entities.wallet!;
+    lentWallet.relations = [...lentWallet.relations.filter((r) => r.type !== "in"), { type: "in", to: "rosa" }];
     w.state.entities.rosa!.relations.push({ type: "uses", to: "wallet", until: w.state.clock + 1440 });
-    const lent = buildGearView(w.ctx).owned.find((i) => i.id === "wallet");
-    expect([lent?.slot, lent?.lent?.to]).toEqual([undefined, "Rosa Delgado"]);
+    const after = buildGearView(w.ctx);
+    const lent = after.lent.find((i) => i.id === "wallet");
+    expect([lent?.slot, lent?.lent?.to, lent?.where]).toEqual([undefined, "Rosa Delgado", "With Rosa Delgado"]);
+    expect(after.on.some((i) => i.id === "wallet")).toBe(false);
   });
 
   test("worn slots hold one item each (Gear 3)", () => {
@@ -92,7 +96,7 @@ describe("gear: containment, slots and use grants", () => {
     expect(resolveAction(reg, w, { action: "wear", params: { item: "coat" } }, createRng("w")).rejected).toEqual([]);
     const second = resolveAction(reg, w, { action: "wear", params: { item: "parka" } }, createRng("w2"));
     expect(second.rejected[0]?.rejection.code).toBe("slot_taken");
-    expect(buildGearView(w.ctx).worn.map((i) => i.id)).toEqual(["coat"]);
+    expect(buildGearView(w.ctx).on.filter((i) => i.as === "worn").map((i) => i.id)).toEqual(["coat"]);
   });
 
   test("a use grant expires to overdue (with a signal) and the owner's retrieval brings it back", () => {
@@ -211,7 +215,7 @@ describe("gear: containment, slots and use grants", () => {
       wd.realism.levels.gear = 1;
     });
     const view = buildGearView(w.ctx);
-    expect(view.carried.map((i) => i.name)).toEqual(["Phone"]);
+    expect(view.on.map((i) => i.name)).toEqual(["Phone"]);
     w.state.realism.levels.gear = 0;
     const r = applyEffects(reg, w, [{ type: "gear.transfer", args: { item: "phone", to: "maya" } }], { bindings: {}, rng: createRng("z") });
     expect(r.applied).toEqual([]);
@@ -223,7 +227,7 @@ describe("gear: containment, slots and use grants", () => {
     });
     const r = applyEffects(reg, w, [{ type: "gear.receive", args: { name: "Brass key", to: "you", from: "maya" } }], { bindings: {}, rng: createRng("r") });
     expect(r.rejected).toEqual([]);
-    expect(buildGearView(w.ctx).carried.map((i) => i.name)).toContain("Brass key");
+    expect(buildGearView(w.ctx).on.map((i) => i.name)).toContain("Brass key");
   });
 
   test("a narrated hand-over by name gives the thing the giver holds, never a second one", () => {

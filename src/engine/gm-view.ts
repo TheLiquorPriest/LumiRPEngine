@@ -13,7 +13,7 @@ import { DOMAINS, type KindId } from "../shared/ids";
 import type { GmEntity, GmField, GmView } from "../shared/state-view";
 import { tiersInOrder } from "../shared/tiers";
 import type { FieldDef, FieldType, WorldDoc } from "../shared/world";
-import { BUILTIN_RELATIONS, ENGINE_FIELDS, lifeStateOf, lifeStatesOf } from "../shared/world";
+import { BUILTIN_RELATIONS, ENGINE_FIELDS, GM_OWNER, GM_OWNER_NAME, lifeStateOf, lifeStatesOf } from "../shared/world";
 import { fieldBounds } from "./effects";
 import { optionalQuery, own } from "./pack-kit";
 import type { ReadContext } from "./registry";
@@ -117,6 +117,8 @@ export function buildGmWorld(reg: Registry, world: WorldDoc, state: Readonly<Wor
   const kinds = new Map<string, { label: string; extends: string | null }>();
   for (const k of reg.kinds.values()) kinds.set(k.id, { label: k.label, extends: k.extends ?? null });
   for (const k of Object.values(world.kinds)) kinds.set(k.id, { label: k.label, extends: kindParent(reg, world, k.id) ?? null });
+  // Who may enter each place and whose it is (the orgs pack's GM → Places control).
+  const entry = optionalQuery(ctx, "orgs.place_entry");
   return {
     entities: Object.keys(state.entities)
       .sort()
@@ -126,18 +128,20 @@ export function buildGmWorld(reg: Registry, world: WorldDoc, state: Readonly<Wor
     lifeStates: lifeStatesOf(world).map(([id, def]) => ({ id, label: def.label, acts: def.acts })),
     domains: DOMAINS.map((id) => ({ id, label: reg.packs.find((p) => p.domain === id)?.label ?? id })),
     classifications: world.classifications,
-    places: Object.values(world.places).map((p) => ({ id: p.id, name: p.name, visibility: p.visibility ?? "public", parent: p.parent ?? null, pins: own(lorePinsOf(world).places, p.id)?.length ?? 0 })),
+    places: Object.values(world.places).map((p) => ({ id: p.id, name: p.name, visibility: p.visibility ?? "public", parent: p.parent ?? null, pins: own(lorePinsOf(world).places, p.id)?.length ?? 0, ...(entry ? { entry: entry(ctx, p.id) } : {}) })),
     tracks: Object.values(world.tracks).map((t) => ({
       id: t.id,
       label: t.label,
       kind: t.kind,
       visibility: t.visibility,
-      owner: t.owner ? (own(state.entities, t.owner)?.name ?? t.owner) : null,
+      owner: t.owner === GM_OWNER ? GM_OWNER_NAME : t.owner ? (own(state.entities, t.owner)?.name ?? t.owner) : null,
       stage: own(state.tracks, t.id)?.stage ?? t.start,
       stages: Object.entries(t.stages).map(([id, s]) => ({ id, label: s.label, ...(s.truth ? { truth: s.truth } : {}) })),
     })),
     relationTypes: [...relationTypes.values()].sort((a, b) => a.label.localeCompare(b.label)),
     money: optionalQuery(ctx, "economy.people_money")?.(ctx) ?? [],
+    // Every organization as the GM sees it, with who holds each power there (the orgs pack's GM → Orgs).
+    orgs: optionalQuery(ctx, "orgs.gm")?.(ctx) ?? [],
     // The fight under way, as only the GM sees it (the combat pack); its view model is plain JSON.
     encounter: (optionalQuery(ctx, "combat.gm")?.(ctx) ?? null) as unknown as JsonValue | null,
     routineRoles: optionalQuery(ctx, "castlife.chat_roles")?.(ctx) ?? [],

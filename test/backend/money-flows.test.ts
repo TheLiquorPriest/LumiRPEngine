@@ -73,16 +73,16 @@ describe("a catalog row prices an item only when it names it", () => {
     expect(matchCatalog(ctx, "lantern oil", null)).toBeNull();
     expect(name(matchCatalog(ctx, "coffee", null))).toMatch(/^drip coffee/i);
     expect(name(matchCatalog(ctx, "whole milk", null))).toBe("Milk, whole");
-    expect(name(matchCatalog(ctx, "desk lamp", null))).not.toBe("Desk");
+    expect(name(matchCatalog(ctx, "desk lamp", null))).toBe("Lamp, table or desk");
   });
 
-  test("a desk lamp typed at $25 costs $25 and its sales tax, and an automatic purchase's chip shows what it charged", async () => {
+  test("a desk fan typed at $25 costs $25 and its sales tax, and an automatic purchase's chip shows what it charged", async () => {
     const { rig, chatId } = await chat();
     rig.body(await rig.send({ type: "lre.settings.set", patch: { extraction: { purchase: { mode: "auto" } } } }));
-    script(rig, [{ item: "milk" }], () => JSON.stringify({ action: "buy", params: { item: "desk lamp", price: 25 }, confidence: 0.9 }));
-    await rig.turn(chatId, "I buy a desk lamp for $25.", "The clerk rings it up, and you grab some milk too.");
+    script(rig, [{ item: "milk" }], () => JSON.stringify({ action: "buy", params: { item: "desk fan", price: 25 }, confidence: 0.9 }));
+    await rig.turn(chatId, "I buy a desk fan for $25.", "The clerk rings it up, and you grab some milk too.");
     // At the top Money level the price is charged with Port Alder's sales tax, Michigan's 6%.
-    expect((await bought(rig, chatId)).find((b) => b.memo === "Bought desk lamp")?.cents).toBe(2650);
+    expect((await bought(rig, chatId)).find((b) => b.memo === "Bought desk fan")?.cents).toBe(2650);
     const undo = (await rig.rt.view(chatId, rig.host.userId)).chips.filter((c) => c.kind === "undo").map((c) => c.label);
     expect(undo).toEqual([expect.stringMatching(/^Bought milk: \$\d+\.\d{2} \(priced as Milk, whole\)/)]);
   });

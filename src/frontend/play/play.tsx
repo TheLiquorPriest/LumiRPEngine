@@ -1,4 +1,4 @@
-// Play: the running chat. A bottom bar holds the destinations (Now, Me, People,
+// Play: the running chat. A bottom bar holds the destinations (Now, Me, People, Orgs,
 // Places, Story); each shows the visible panels whose home it is, with sub-tabs when there are
 // several. Now is a hub (scene.tsx) rather than tabs: it holds the status banners, what needs you, the
 // fight while one is on and the packs' glances. Details open as sheets stacked over the destination;
@@ -26,6 +26,7 @@ const DESTS: readonly { id: Dest; label: string; icon: IconName }[] = [
   { id: "now", label: "Now", icon: "compass" },
   { id: "me", label: "Me", icon: "user" },
   { id: "people", label: "People", icon: "users" },
+  { id: "orgs", label: "Orgs", icon: "briefcase" },
   { id: "places", label: "Places", icon: "map" },
   { id: "story", label: "Story", icon: "book" },
 ];
@@ -49,7 +50,7 @@ export function destinations(catalog: UiCatalog, view: StateView): Destination[]
   });
 }
 
-const SHEET_TITLE: Record<SheetKind, string> = { person: "Person", place: "Place", item: "Item", account: "Account", quest: "Quest", money: "Money" };
+const SHEET_TITLE: Record<SheetKind, string> = { person: "Person", place: "Place", item: "Item", account: "Account", quest: "Quest", money: "Money", org: "Organization", org_edit: "Organization" };
 
 export function Play() {
   const app = useApp();

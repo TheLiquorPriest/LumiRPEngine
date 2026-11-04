@@ -108,7 +108,7 @@ export function monthsBetween(world: Books["world"], from: number, to: number): 
 }
 
 /** The journal's money in and out of an account in a month, by category (the foundation's monthly totals). */
-function totalsOf(state: Readonly<WorldState>, account: EntityId, month: string): Record<string, { in: number; out: number }> {
+export function totalsOf(state: Readonly<WorldState>, account: EntityId, month: string): Record<string, { in: number; out: number }> {
   const raw = objOf(own(objOf(own(objOf(sliceOf(state, "economy").totals), account)), month));
   const out: Record<string, { in: number; out: number }> = {};
   for (const [category, v] of Object.entries(raw)) out[category] = { in: numOf(objOf(v).in), out: numOf(objOf(v).out) };

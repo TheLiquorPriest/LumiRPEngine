@@ -29,6 +29,7 @@ const CONTRACTS: Readonly<Record<string, Schema>> = {
   [roleContractId("director", "prose")]: { type: "object", properties: { brief: { type: "string" }, beats: STRINGS } },
   [roleContractId("director", "choices")]: { type: "object", required: ["choices"], properties: { choices: STRINGS } },
   [roleContractId("read", "extract")]: { type: "object", required: ["proposals"], properties: { proposals: PROPOSALS, where: { anyOf: [{ type: "string" }, { type: "null" }] } } },
+  [roleContractId("curator", "curate")]: { type: "object", required: ["proposals"], properties: { proposals: PROPOSALS } },
   [roleContractId("memory", "memory")]: { type: "object", required: ["notes"], properties: { notes: OBJECTS, commitments: OBJECTS, resolved: { type: "array" }, plans: OBJECTS, told: OBJECTS, summary: { type: "string" } } },
   [roleContractId("memory", "consolidate")]: { type: "object", required: ["summary"], properties: { summary: { type: "string", minLength: 1 } } },
   [roleContractId("skip", "beats")]: { type: "object", required: ["beats"], properties: { beats: OBJECTS } },

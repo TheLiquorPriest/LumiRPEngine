@@ -3,9 +3,12 @@
 // A table is typed rows plus a revision. Packs ship default tables generated from the raw
 // sources in `data-src/` by `scripts/tables/build.ts`. A world revision copies every table it
 // uses into the document and pins its revision, so a running chat never sees a table change
-// except through Upgrade (a `migrate` marker).
+// except through Upgrade (a `migrate` marker). The build also records every revision a table has
+// shipped as (`ShippedRevision`), so Build can offer a world the newer ones (Data updates).
 
+import { hashJson } from "./hash";
 import type { JsonValue } from "./json";
+import { isRecord } from "./json";
 import type { PackId, TableId } from "./ids";
 
 /** Units used by numeric columns. Money is always integer cents. */
@@ -84,6 +87,84 @@ export interface DataTable {
   columns: Record<string, ColumnDef>;
   /** Rows keyed by stable row id. */
   rows: Record<string, TableRow>;
+}
+
+/**
+ * One revision a pack's default table has shipped as, oldest first in `TableDef.shipped` (ARCHITECTURE
+ * §6): the table build records each one, so a world's copy can be told apart as one it never changed
+ * and one it did (`engine/table-updates.ts`). `columns` holds each column's print (`tablePrint`).
+ * Every revision but the last also says how the next one differs from it: `changed`, the rows the
+ * next revision changes or drops, each with its print at this revision, and `added`, the rows the
+ * next one adds. The last revision's rows are the table as it ships.
+ */
+export interface ShippedRevision {
+  revision: string;
+  columns: Record<string, string>;
+  changed?: Record<string, string>;
+  added?: string[];
+}
+
+/**
+ * A starter world's own version of a pack's table (`src/packs/starters/tables.ts`): one its template
+ * swaps in for the pack's Modern US one (Brindlemere's and Harrowmere's prices, categories, items and
+ * vehicle classes), with every revision it has shipped as, oldest first, the last being `table`
+ * itself (the template build's record), so a world made from the starter is offered the newer
+ * versions of its copies as a world made on the packs' own tables is (Data updates).
+ */
+export interface StarterTable {
+  /** The starter's template id (`fantasy_town`), and its name as Build's template picker shows it. */
+  starter: { id: string; name: string };
+  table: DataTable;
+  shipped: readonly ShippedRevision[];
+}
+
+/** A short fingerprint of a row or a column contract: the first 8 hex digits of its `hashJson`. */
+export function tablePrint(value: unknown): string {
+  return hashJson(value).slice(0, 8);
+}
+
+/** A table's revision worked out from its content, `hashJson({schema, columns, rows})`, whatever its own `revision` says. */
+export function tableRevision(table: Pick<DataTable, "schema" | "columns" | "rows">): string {
+  return hashJson({ schema: table.schema, columns: table.columns, rows: table.rows });
+}
+
+/** Whether a value read from a document has a table's shape: a schema, and columns and rows as objects. */
+export function isDataTable(value: unknown): value is DataTable {
+  return isRecord(value) && typeof value.schema === "string" && isRecord(value.columns) && isRecord(value.rows);
+}
+
+/** Each row's print, by row id. */
+export function rowPrints(rows: Readonly<Record<string, TableRow>>): Map<string, string> {
+  return new Map(Object.entries(rows).map(([id, row]) => [id, tablePrint(row)]));
+}
+
+/** Each column's print, by column id. */
+export function columnPrints(columns: Readonly<Record<string, ColumnDef>>): Map<string, string> {
+  return new Map(Object.entries(columns).map(([id, column]) => [id, tablePrint(column)]));
+}
+
+/** How the rows `next` has differ from the rows `prev` has, as `prev`'s history entry records it: the rows `next` changes or drops, with their prints in `prev`, and the rows `next` adds. */
+export function shippedDelta(prev: ReadonlyMap<string, string>, next: ReadonlyMap<string, string>): Pick<ShippedRevision, "changed" | "added"> {
+  const changed: Record<string, string> = {};
+  for (const [id, print] of prev) if (next.get(id) !== print) changed[id] = print;
+  const added = [...next.keys()].filter((id) => !prev.has(id));
+  return { ...(Object.keys(changed).length > 0 ? { changed } : {}), ...(added.length > 0 ? { added } : {}) };
+}
+
+/** Every shipped revision's row prints, oldest first: the last revision's are `current` (the table as it ships), and each earlier one's comes back through its delta. */
+export function shippedRowPrints(history: readonly ShippedRevision[], current: ReadonlyMap<string, string>): Map<string, string>[] {
+  const out: Map<string, string>[] = [];
+  let rows = new Map(current);
+  for (let i = history.length - 1; i >= 0; i--) {
+    const entry = history[i];
+    if (entry && i < history.length - 1) {
+      const added = new Set(entry.added ?? []);
+      rows = new Map([...rows].filter(([id]) => !added.has(id)));
+      for (const [id, print] of Object.entries(entry.changed ?? {})) rows.set(id, print);
+    }
+    out[i] = rows;
+  }
+  return out;
 }
 
 /** Build-time mapping from one raw source to one pinned table (scripts/tables). */

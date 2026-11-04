@@ -6,22 +6,26 @@
 // its underlying (Black-Scholes). The asset's own drift, volatility and yield override the class.
 //
 // Prices move once a trading day, at the market's close, by a seeded geometric Brownian step that
-// shares a daily shock with the rest of its market (equities fall together on a bad day). The
-// marks are `economy.quote` events, so a fold never draws; options and bonds are priced from
-// those marks and the clock, never stored.
+// shares a daily shock with the rest of its market (equities fall together on a bad day). Where the
+// world keeps the stock index's history (history.ts), the equity market's shock is the index's own
+// move that day and the stock index recipe takes the history's drift and volatility, so equities
+// follow the market as it was. The marks are `economy.quote` events, so a fold never draws; options
+// and bonds are priced from those marks and the clock, never stored. A month's last close is kept
+// for every asset that moves (`economy.closes`), for the performance a holding's page shows.
 
 import type { EntityId } from "../../../shared/ids";
 import { isRecord, safeKey, type JsonObject, type JsonValue } from "../../../shared/json";
 import type { LedgerEvent, PackEvent } from "../../../shared/ledger";
-import { ASSET_CLASSES, type AssetClass, type AssetDef } from "../../../shared/finance";
+import { ASSET_CLASSES, type AssetClass, type AssetDef, type PerformanceView } from "../../../shared/finance";
 import { formatMoney } from "../../../shared/world";
 import { calendarOf, clockAt, clockOfLocal, dateAt, type CalDate } from "../../../engine/calendar";
 import { mutableSlice, numOf, objOf, own, sliceOf, strOf } from "../../../engine/pack-kit";
 import type { EventTypeDef, ReadContext, Rejection, SlotInfo } from "../../../engine/registry";
 import type { Rng } from "../../../engine/rng";
 import type { WorldState } from "../../../engine/state";
+import { equityShock, indexHistory, monthNumber, monthOfText, monthText } from "./history";
 import type { FinanceApi, FinanceRegistry } from "./module";
-import { blackScholes, bondPrice, correlated, gbmStep, intrinsic, normal, YEAR_MINUTES } from "./pricing";
+import { blackScholes, bondPrice, correlated, gbmStep, intrinsic, MARKET_CLOSE, normal, TRADING_DAYS, YEAR_MINUTES } from "./pricing";
 
 /** What an asset read needs: the world (its config and tables) and the state (marks, minted contracts). */
 export type AssetBooks = Pick<ReadContext, "world" | "state" | "tables">;
@@ -66,9 +70,6 @@ export function dateText(world: ReadContext["world"], clock: number): string {
   const d = dateAt(calendarOf(world), clock);
   return `${String(d.year).padStart(4, "0")}-${String(d.month).padStart(2, "0")}-${String(d.day).padStart(2, "0")}`;
 }
-
-/** The market's close, local time: the day's marks are taken then, and contracts expire and bonds mature at it. */
-export const MARKET_CLOSE = 16 * 60;
 
 /** When something due on a date falls: a bare date at the market's close, a date with a time at that time. */
 export function closeOf(world: ReadContext["world"], v: string | undefined): number | null {
@@ -237,8 +238,10 @@ export function assetFromDef(ctx: AssetBooks, id: string, def: AssetDef): Asset 
   // The table's returns are total returns: what an asset pays out comes off its price's drift, so a
   // dividend is never counted twice (and options see the same yield).
   const yieldPct = def.yield_pct ?? num(classRow.dividend_yield_pct) ?? (cashLike ? num(row.annual_return_pct) : (num(row.dividend_yield_pct) ?? num(row.yield_to_maturity_pct))) ?? fallback.yieldPct ?? 0;
-  const total = def.annual_return_pct ?? num(classRow.annual_return_pct) ?? num(row.annual_return_arithmetic_pct) ?? num(row.annual_return_pct) ?? num(row.typical) ?? fallback.drift ?? 0;
-  const vol = def.annual_volatility_pct ?? num(classRow.annual_volatility_pct) ?? (cashLike ? 0 : (num(row.annual_volatility_pct) ?? num(row.volatility_pct))) ?? fallback.vol ?? 0;
+  // The stock index's own drift and volatility are its history's where the world keeps it (DESIGN §27.2).
+  const history = recipe === "broad_us_equity_index" ? indexHistory(ctx) : null;
+  const total = def.annual_return_pct ?? num(classRow.annual_return_pct) ?? history?.driftPct ?? num(row.annual_return_arithmetic_pct) ?? num(row.annual_return_pct) ?? num(row.typical) ?? fallback.drift ?? 0;
+  const vol = def.annual_volatility_pct ?? num(classRow.annual_volatility_pct) ?? (cashLike ? 0 : (history?.volPct ?? num(row.annual_volatility_pct) ?? num(row.volatility_pct))) ?? fallback.vol ?? 0;
   const maturity = closeOf(ctx.world, def.maturity);
   const bond: BondTerms | null =
     def.class === "bond" && typeof def.face === "number" && def.face > 0 && maturity !== null
@@ -362,45 +365,96 @@ export function instantIn(ctx: Pick<ReadContext, "world">, slot: SlotInfo, minut
 const YIELD_REVERSION = 0.3;
 const YIELD_SWING = 0.8;
 
+/** Month-end closes kept for each asset: the twelve months a holding's performance looks back over, and the close they start from. */
+export const CLOSES_KEPT = 13;
+
+/** Whether the market marks an asset each trading day: anything priced but an option (priced from its underlying), property, a business stake and a fixed price. */
+export function marked(a: Asset): boolean {
+  return !a.option && a.class !== "property" && a.class !== "business_stake" && (a.bond !== null || a.vol > 0 || a.drift !== 0);
+}
+
+/** An asset's kept month-end closes, oldest first: `[YYYY-MM, price]`. */
+export function closesOf(state: Readonly<WorldState>, asset: string): [string, number][] {
+  const kept = own(objOf(holdingsSlice(state).closes), asset);
+  return Array.isArray(kept) ? kept.flatMap((c): [string, number][] => (Array.isArray(c) && typeof c[0] === "string" && typeof c[1] === "number" ? [[c[0], c[1]]] : [])) : [];
+}
+
+/**
+ * How an asset's price has done (DESIGN §27.11): its closes kept before this month, oldest first, and
+ * its price now, and its change in percent this month (since last month's close), this year (since
+ * last year's last close) and over the twelve months to last month's close, each null where the
+ * close it starts from wasn't kept. Null for an asset the market doesn't mark.
+ */
+export function performanceOf(ctx: AssetBooks, a: Asset): PerformanceView | null {
+  if (!marked(a)) return null;
+  const cal = calendarOf(ctx.world);
+  const months = cal.system.months;
+  const today = dateAt(cal, ctx.state.clock);
+  const n = monthNumber(today.year, today.month, months);
+  const kept = closesOf(ctx.state, a.id).filter(([m]) => (monthOfText(m, months) ?? n) < n);
+  const price = priceOf(ctx, a);
+  const closing = (m: number): number | undefined => kept.find(([at]) => at === monthText(m, months))?.[1];
+  const change = (from: number | undefined, to: number | undefined): number | null => (from !== undefined && to !== undefined && from > 0 ? (to / from - 1) * 100 : null);
+  return {
+    points: [...kept.map(([at, p]) => ({ at, price: p })), { at: dateText(ctx.world, ctx.state.clock), price }],
+    month: change(closing(n - 1), price),
+    year: change(closing(monthNumber(today.year, 1, months) - 1), price),
+    twelve: change(closing(n - 13), closing(n - 1)),
+  };
+}
+
 /**
  * One trading day's marks (the market's close): each market draws one shock, each asset its own,
  * mixed by the asset's correlation; a priced asset takes a geometric Brownian step, a bond's yield
- * a mean-reverting one. Crypto trades every day, the rest on business days. Fixed-price assets and
- * options (priced from their underlying) are left alone.
+ * a mean-reverting one. Where the world keeps the stock index's history, the equity market's shock
+ * is the index's move that day instead of a draw. Crypto trades every day, the rest on business
+ * days. Fixed-price assets and options (priced from their underlying) are left alone. On a month's
+ * last trading day each asset marked also keeps its close (`economy.closes`).
  */
 export function marketStep(ctx: ReadContext, api: Pick<FinanceApi, "businessDay">, slot: SlotInfo, rng: (label: string) => Rng): LedgerEvent[] {
   const at = instantIn(ctx, slot, MARKET_CLOSE);
   if (!at) return [];
   const business = api.businessDay(ctx, at.day, "after") === at.day;
+  const cal = calendarOf(ctx.world);
+  const months = cal.system.months;
+  const month = monthText(monthNumber(at.date.year, at.date.month, months), months);
+  const lastDay = at.day + cal.system.monthLength(at.date.year, at.date.month) - at.date.day;
+  // The month's last trading day: its last day for what trades every day, its last business day for the rest.
+  const closesMonth = (daily: boolean): boolean => (daily ? at.day === lastDay : business && api.businessDay(ctx, at.day + 1, "after") > lastDay);
   const factors = new Map<string, number>();
   const factor = (market: string): number => {
     let z = factors.get(market);
     if (z === undefined) {
-      z = normal(rng(`market:${market}`));
+      z = (market === "equity" ? equityShock(ctx, at.day) : null) ?? normal(rng(`market:${market}`));
       factors.set(market, z);
     }
     return z;
   };
   const out: LedgerEvent[] = [];
+  const close = (a: Asset, price: number): void => {
+    if (closesMonth(a.daily)) out.push({ type: "economy.closes", data: { asset: a.id, closes: [...closesOf(ctx.state, a.id).filter(([m]) => m !== month).slice(1 - CLOSES_KEPT), [month, price]] } });
+  };
   for (const id of marketAssets(ctx)) {
     const a = assetOf(ctx, id);
-    if (!a || a.option || a.class === "property" || a.class === "business_stake") continue;
+    if (!a || !marked(a)) continue;
     if (!a.daily && !business) continue;
-    const dt = a.daily ? 1 / 365 : 1 / 252;
+    const dt = a.daily ? 1 / 365 : 1 / TRADING_DAYS;
     if (a.bond) {
       if (at.at >= a.bond.maturity) continue;
       const z = correlated(factor(a.market), normal(rng(`asset:${id}`)), a.rho);
       const y = bondYield(ctx, a);
       // A good day for bonds (a positive shock) is a fall in yields.
-      const next = Math.max(0, y + YIELD_REVERSION * (a.bond.baseYield - y) * dt - YIELD_SWING * Math.sqrt(dt) * z);
-      out.push({ type: "economy.quote", data: { asset: id, yield: mark(next) } });
+      const next = mark(Math.max(0, y + YIELD_REVERSION * (a.bond.baseYield - y) * dt - YIELD_SWING * Math.sqrt(dt) * z));
+      out.push({ type: "economy.quote", data: { asset: id, yield: next } });
+      close(a, mark(bondPrice({ face: a.bond.face, couponPct: a.bond.couponPct, yieldPct: next, years: (a.bond.maturity - at.at) / YEAR_MINUTES, frequency: a.pays || 2 })));
       continue;
     }
-    if (a.vol <= 0 && a.drift === 0) continue;
     const price = priceOf(ctx, a);
     if (!(price > 0)) continue;
     const z = correlated(factor(a.market), normal(rng(`asset:${id}`)), a.rho);
-    out.push({ type: "economy.quote", data: { asset: id, price: mark(gbmStep(price, a.drift, a.vol, dt, z)) } });
+    const next = mark(gbmStep(price, a.drift, a.vol, dt, z));
+    out.push({ type: "economy.quote", data: { asset: id, price: next } });
+    close(a, next);
   }
   return out;
 }
@@ -465,6 +519,28 @@ const EVENTS: EventTypeDef<PackEvent>[] = [
     },
     // A mark is an assignment: in one timelapse record only an asset's last one matters.
     coarsen: { key: (e) => `${str(e, "asset")}:${typeof e.data.price === "number" ? "p" : "y"}`, merge: (_a, b) => b },
+  },
+  {
+    // An asset's month-end closes, kept as the market closes a month: the last `CLOSES_KEPT`, oldest first, `[YYYY-MM, price]`.
+    type: "economy.closes",
+    validate: (e) => {
+      const closes = e.data.closes;
+      if (!safeKey(str(e, "asset"))) return reject("bad_event", "closes name their asset");
+      if (!Array.isArray(closes) || closes.length === 0 || closes.length > CLOSES_KEPT) return reject("bad_event", `closes are one to ${CLOSES_KEPT} months`);
+      const each = closes.every((c) => Array.isArray(c) && c.length === 2 && typeof c[0] === "string" && /^-?\d{4,}-\d{2}$/.test(c[0]) && typeof c[1] === "number" && Number.isFinite(c[1]) && c[1] > 0);
+      return each ? null : reject("bad_event", "a close is a month (YYYY-MM) and a price above zero");
+    },
+    apply: (e, state) => {
+      holdingsRecord(state, "closes")[str(e, "asset")] = e.data.closes ?? [];
+    },
+    describe: (e, ctx, viewer) => {
+      if (viewer) return "";
+      const label = assetDefOf(ctx, str(e, "asset"))?.label || str(e, "asset");
+      const last = Array.isArray(e.data.closes) ? e.data.closes.at(-1) : undefined;
+      return Array.isArray(last) && typeof last[1] === "number" ? `${label} closed ${String(last[0])} at ${formatMoney(Math.round(last[1]), ctx.world.currency)}` : `${label}'s month-end closes`;
+    },
+    // The closes are an assignment of the whole list: in one timelapse record only an asset's last one matters.
+    coarsen: { key: (e) => str(e, "asset"), merge: (_a, b) => b },
   },
   {
     // An option contract bought in play, which no world config lists: its definition from then on.

@@ -1,17 +1,22 @@
 // GM → Places and Story, and This chat's Edits log: every place with how visible
-// it is, nested as the world nests them; every track with its stage picker and the truths its
+// it is, nested as the world nests them, each opening who may enter it, whose it is, and its keys,
+// which the GM sets for this chat (the orgs pack's `orgs.entry`; a person's own house has no
+// organization's Property to set it in); every track with its stage picker and the truths its
 // stages hold; and the corrections in force on this chat's path. Places and tracks are the world's
 // definitions, edited in Build; here a track's stage is set for this chat. Everyone's money is the
 // economy pack's GM tab.
 
-import { useId } from "preact/hooks";
+import { useId, useState } from "preact/hooks";
+import type { GmPlaceEntry } from "../../shared/org-view";
 import type { GmView } from "../../shared/state-view";
-import { Badge, Banner, Button, Empty, Field, List, ListRow, Section } from "../components";
+import { listWords } from "../../shared/words";
+import { Badge, Banner, Button, Card, Empty, Field, List, ListRow, Section } from "../components";
 import { humanize } from "../format";
 import { Icon } from "../icons";
+import { entryDraft, EntryForm, entryOps, PremiseRows, type EntryDraft } from "../place-entry";
 import type { Editor } from "./editor";
 import { nameOf } from "./editor";
-import { ActionRow, ActionRows, BuildLink, GmCard } from "./ui";
+import { ActionRow, ActionRows, BuildLink, GmCard, GmPage, usePages } from "./ui";
 
 type Place = GmView["places"][number];
 type Track = GmView["tracks"][number];
@@ -36,7 +41,8 @@ export function placesInOrder(places: readonly Place[]): { place: Place; depth: 
   return out;
 }
 
-export function PlacesSection(props: { gm: GmView }) {
+/** Every place, nested; one the GM may set entry for (with the orgs pack) opens its page, its entry in words when one is set. */
+export function PlacesList(props: { gm: GmView; onOpen(place: string): void }) {
   const { gm } = props;
   if (gm.places.length === 0) return <Empty icon="pin" title="No places" action={<BuildLink />} />;
   return (
@@ -44,24 +50,84 @@ export function PlacesSection(props: { gm: GmView }) {
       <Section title={`${gm.places.length} ${gm.places.length === 1 ? "place" : "places"}`} flush>
         <div data-lre-gm-list="places">
           <List>
-            {placesInOrder(gm.places).map(({ place, depth }) => (
-              <ListRow
-                key={place.id}
-                id={place.id}
-                leading={
-                  <span class="lre-gm-indent" style={{ paddingLeft: `${depth * 16}px` }}>
-                    <Icon name="pin" size={16} />
-                  </span>
-                }
-                title={place.name}
-                subtitle={place.parent ? `In ${nameOf(gm, place.parent)}` : undefined}
-                badge={<Badge tone={place.visibility === "public" ? "neutral" : "gm"}>{humanize(place.visibility)}</Badge>}
-              />
-            ))}
+            {placesInOrder(gm.places).map(({ place, depth }) => {
+              const entry = place.entry;
+              const sub = [place.parent ? `In ${nameOf(gm, place.parent)}` : null, entry && (entry.entry !== null || entry.inPlay) ? entry.words : null].filter((part) => part !== null).join(" · ");
+              return (
+                <ListRow
+                  key={place.id}
+                  id={place.id}
+                  leading={
+                    <span class="lre-gm-indent" style={{ paddingLeft: `${depth * 16}px` }}>
+                      <Icon name="pin" size={16} />
+                    </span>
+                  }
+                  title={place.name}
+                  subtitle={sub || undefined}
+                  badge={<Badge tone={place.visibility === "public" ? "neutral" : "gm"}>{humanize(place.visibility)}</Badge>}
+                  chevron={entry !== undefined}
+                  onClick={entry ? () => props.onOpen(place.id) : undefined}
+                />
+              );
+            })}
           </List>
         </div>
       </Section>
       <BuildLink />
+    </div>
+  );
+}
+
+/** One place's page: whose it is, who may enter it now and why, its keys and who carries them, entries without leave, and Change entry with its keys, for this chat. */
+export function PlaceEntryPage(props: { name: string; entry: GmPlaceEntry; draft: EntryDraft; busy: boolean; onDraft(draft: EntryDraft): void; onSave(): void; onBack(): void }) {
+  const { entry } = props;
+  return (
+    <GmPage name="place-entry" title={props.name} subtitle={entry.owners.length > 0 ? `${listWords(entry.owners)}'s` : "No one's"} backLabel="Places" onBack={props.onBack}>
+      <div class="lre-stack">
+        <Card title="Who may enter" aside={entry.inPlay ? <Badge tone="gm">Set in this chat</Badge> : undefined}>
+          <PremiseRows place={entry} />
+        </Card>
+        <Section title="Change entry">
+          <EntryForm place={entry} draft={props.draft} keys busy={props.busy} onDraft={props.onDraft} onSave={props.onSave} onCancel={props.onBack} />
+        </Section>
+      </div>
+    </GmPage>
+  );
+}
+
+export function PlacesSection(props: { editor: Editor }) {
+  const { editor } = props;
+  const pages = usePages<string>();
+  const [draft, setDraft] = useState<EntryDraft | null>(null);
+  const open = pages.page === null ? undefined : editor.gm.places.find((p) => p.id === pages.page);
+  const entry = open?.entry;
+  // The form starts from the place as it stands, and again once a change applies.
+  const current = entry && draft?.place === entry.id ? draft : entry ? entryDraft(entry) : null;
+  return (
+    <div ref={pages.host.ref} class="lre-gm-pages" onKeyDown={pages.host.onKeyDown}>
+      <div class="lre-stack lre-gm-list" hidden={pages.page !== null}>
+        <PlacesList
+          gm={editor.gm}
+          onOpen={(id) => {
+            setDraft(null);
+            pages.open(id);
+          }}
+        />
+      </div>
+      {open && entry && current ? (
+        <PlaceEntryPage
+          name={open.name}
+          entry={entry}
+          draft={current}
+          busy={editor.busy}
+          onDraft={setDraft}
+          onSave={() => {
+            const ops = entryOps(entry, current);
+            if (ops.length > 0) void editor.edit(ops).then((ok) => ok && setDraft(null));
+          }}
+          onBack={pages.back}
+        />
+      ) : null}
     </div>
   );
 }

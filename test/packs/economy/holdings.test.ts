@@ -19,6 +19,7 @@ import { runTimelapse } from "../../../src/engine/time";
 import { Working } from "../../../src/engine/working";
 import { ALL_PACKS } from "../../../src/packs/index";
 import { assetOf, priceOf, quoteOf } from "../../../src/packs/economy/core/assets";
+import { indexHistory } from "../../../src/packs/economy/core/history";
 import { lotsOf, qtyOf } from "../../../src/packs/economy/core/holdings";
 import { managedLeases } from "../../../src/packs/economy/core/property";
 import { gainsIn, incomeIn } from "../../../src/packs/economy/core/records";
@@ -145,9 +146,11 @@ describe("holdings: prices move on each asset's own model", () => {
     const w = setup();
     const index = assetOf(w.ctx, "index");
     const stock = assetOf(w.ctx, "stock");
-    // From the finance table: the index fund follows the stock index (11 % total return less its 1.3 % yield).
-    expect(index?.drift).toBeCloseTo(11 - 1.3, 10);
-    expect(index?.vol).toBe(16);
+    // The index fund follows the stock index, whose drift and swings are its history's (DESIGN §27.2), less its 1.3 % yield.
+    const history = indexHistory(w.ctx);
+    expect(history).not.toBeNull();
+    expect(index?.drift).toBeCloseTo((history?.driftPct ?? NaN) - 1.3, 10);
+    expect(index?.vol).toBe(history?.volPct ?? NaN);
     // A single stock swings more than the index, by its class row.
     expect(stock?.vol).toBe(28);
     expect(assetOf(w.ctx, "steady")?.drift).toBe(10);

@@ -27,8 +27,10 @@ import { identifiers } from "../engine/expr";
 import type { ChainMessage, FoldOutput } from "../engine/ledger/chain";
 import type { LedgerCore } from "../engine/ledger/journal";
 import { activeRecord, isLive, turnPath } from "../engine/ledger/path";
+import { actsFor } from "../engine/org";
 import { optionalQuery, own } from "../engine/pack-kit";
 import { knownSubjects, playerDrop, playerLines, povMayKnow, UNSEEN_DROP } from "../engine/player-events";
+import { playedWorld } from "../engine/places-in-play";
 import type { ReadContext } from "../engine/registry";
 import { readPass } from "../engine/read-pass";
 import { claimsOf, presetOf } from "../engine/realism";
@@ -42,6 +44,7 @@ import { definitionsLag } from "../engine/upgrade";
 import { canSeeEntity, canSeePlace, findLeaks, playerTrack, povPlace, storyLocked, unrevealedSecrets, unrevealedTruths } from "../engine/visibility";
 import { knownPlaceRefs } from "../engine/character";
 import { combatEntries, paletteEncounter } from "../packs/combat/core/index";
+import { thingsConfigOf } from "../shared/things";
 import type { ChatKnowledgePrefs } from "./chat-knowledge-prefs";
 import type { StoredChip } from "./chips";
 import type { ReplyFailure } from "./ledger-io";
@@ -152,10 +155,10 @@ function scene(world: WorldDoc, state: WorldState, headElapsed: number, registry
   return { placeId: povPlace(registry, world, state)?.id ?? null, sceneType: knownSceneTypes(registry, world, state).has(type) ? type : DEFAULT_SCENE_TYPE, present, elapsed: headElapsed };
 }
 
-/** Why a palette option is off, for the player: an unmet requirement isn't spelled as its expression. */
-function unavailable(failed: { code: string; reason: string } | null | undefined): string {
+/** Why a palette option is off, for the player: an unmet requirement isn't spelled as its expression, only in its own words when it has some (`why`). */
+function unavailable(failed: { code: string; reason: string; words?: string } | null | undefined): string {
   if (!failed) return "Not available";
-  return failed.code === "requirement" ? "Not possible here and now" : failed.reason;
+  return failed.code === "requirement" ? (failed.words ?? "Not possible here and now") : failed.reason;
 }
 
 
@@ -167,6 +170,9 @@ export function palette(world: WorldDoc, state: WorldState, registry: Registry):
   const ctx = registry.context(world, state);
   const env = scopeEnv({ reg: registry, ctx, bindings: { self: world.pov, actor: world.pov } });
   const retry = policyOf(world, state).retry;
+  // Paying as (ORG-SPEC §3.6): the organizations the POV may spend for, worked out once, for Pay and Buy.
+  let spendsFor: { id: EntityId; name: string }[] | undefined;
+  const payingFor = (): { id: EntityId; name: string }[] => (spendsFor ??= actsFor(ctx, world.pov, "money.spend").map((id) => ({ id, name: state.entities[id]?.name ?? id })));
   for (const action of actions.values()) {
     // Combat actions are the combat pack's Combat tab (below), and only where the world's ruleset has combat.
     if (action.id === TIMELAPSE_ACTION || action.combat) continue;
@@ -265,6 +271,9 @@ export function palette(world: WorldDoc, state: WorldState, registry: Registry):
     // Who comes along (Go's With): the scene's people the POV can see, ticked in the sheet.
     const peopleParam = Object.entries(action.params).find(([, p]) => p.type === "list" && p.ref !== undefined)?.[0];
     const company = peopleParam ? companionCandidates(registry, world, state, action, peopleParam).map((id) => ({ id, name: nameOf(id) })) : [];
+    // Paying as (Pay's and Buy's `as`): You, or an organization the POV may spend for, when there is one.
+    const actingParam = Object.entries(action.params).find(([, p]) => p.type === "ref" && p.acting === "money.spend")?.[0];
+    const acting = actingParam ? payingFor() : [];
     // Offers carry their price; a free amount would double it.
     entries.push({
       action: action.id,
@@ -274,6 +283,7 @@ export function palette(world: WorldDoc, state: WorldState, registry: Registry):
       ...(amountParam && offers.length === 0 ? { amount: { param: amountParam, min: 0, max: null } } : {}),
       ...(numberParam ? { number: { param: numberParam, label: paramLabel(action, numberParam, world, registry), min: 1, max: null, default: 1 } } : {}),
       ...(peopleParam && company.length > 0 ? { people: { param: peopleParam, label: paramLabel(action, peopleParam, world, registry), options: company } } : {}),
+      ...(actingParam && acting.length > 0 ? { acting: { param: actingParam, label: "Paying as", options: acting } } : {}),
     });
   }
   entries.push(...combatEntries(ctx));
@@ -322,6 +332,7 @@ function controls(world: WorldDoc, state: WorldState, sceneType: string, registr
       tracking: { chat: knowledge.chat.knowledge ?? null, user: knowledge.tracking },
       narrator: { chat: knowledge.chat.narrator ?? null, world: narratorViewOf(world.narrator), user: knowledge.narrator },
     },
+    things: { tidy: { chat: knowledge.chat.tidy ?? null, world: thingsConfigOf(world).tidy.auto } },
   };
 }
 
@@ -390,12 +401,13 @@ function refKey(ref: EventRef): string {
  * agent wrote keeps its `agent` (role, key, label, knowledge), which the workspace's provenance reads.
  * `agents` lists the agents' writes that stand on the record, in order, each with what it applied:
  * one worked out to nothing where it landed (already so) too, and none undone or dropped, so the
- * agents' writer finds a role's latest write for its retry check.
+ * agents' writer finds a role's latest write for its retry check. `pre` counts the leading `events`
+ * the turn planned before its reply (its actions and processes); the rest are the reply's read.
  */
-export function appliedEvents(rec: Rec, fold: FoldOutput, index: number): { events: LedgerEvent[]; post: LedgerEvent[]; fixes: { seq: number; events: LedgerEvent[]; by?: { action: string; label: string }; gm?: true; agent?: NonNullable<PostEntry["agent"]> }[]; agents: { seq: number; events: LedgerEvent[]; agent: NonNullable<PostEntry["agent"]> }[] } {
+export function appliedEvents(rec: Rec, fold: FoldOutput, index: number): { events: LedgerEvent[]; pre: number; post: LedgerEvent[]; fixes: { seq: number; events: LedgerEvent[]; by?: { action: string; label: string }; gm?: true; agent?: NonNullable<PostEntry["agent"]> }[]; agents: { seq: number; events: LedgerEvent[]; agent: NonNullable<PostEntry["agent"]> }[] } {
   const result = fold.messages[index];
   // A bare record folds as a plain message, and its live entries apply all the same.
-  if (!result || (result.fold !== "on_path" && result.fold !== "view" && result.fold !== "plain")) return { events: [], post: [], fixes: [], agents: [] };
+  if (!result || (result.fold !== "on_path" && result.fold !== "view" && result.fold !== "plain")) return { events: [], pre: 0, post: [], fixes: [], agents: [] };
   const skipped = new Set(rec.undone.map(refKey));
   for (const n of fold.notes) if (n.kind === "dropped" && n.messageId === result.id && n.ref && "in" in n.ref) skipped.add(refKey(n.ref));
   const resolved = new Map(fold.resolved.filter((r) => r.messageId === result.id).map((r) => [r.seq, r.events]));
@@ -404,8 +416,10 @@ export function appliedEvents(rec: Rec, fold: FoldOutput, index: number): { even
     .filter((p) => isLive(p.at, result.parentPath, recPath))
     .sort((a, b) => a.seq - b.seq)
     .map((p) => ({ seq: p.seq, kind: p.kind, events: resolved.get(p.seq) ?? p.events.filter((_, i) => !skipped.has(refKey({ in: "post", seq: p.seq, index: i }))), ...(p.by ? { by: p.by } : {}), ...(p.gm ? { gm: p.gm } : {}), ...(p.agent ? { agent: p.agent } : {}), standing: !Array.from({ length: Math.max(1, p.events.length) }, (_, i) => refKey({ in: "post", seq: p.seq, index: i })).every((k) => skipped.has(k)) }));
+  const events = rec.events.filter((_, i) => !skipped.has(refKey({ in: "events", index: i })));
   return {
-    events: rec.events.filter((_, i) => !skipped.has(refKey({ in: "events", index: i }))),
+    events,
+    pre: rec.events.slice(0, rec.pre).filter((_, i) => !skipped.has(refKey({ in: "events", index: i }))).length,
     post: live.filter((p) => p.kind !== "fix").flatMap((p) => p.events),
     fixes: live.filter((p) => p.kind === "fix" && p.events.length > 0).map((p) => ({ seq: p.seq, events: p.events, ...(p.by ? { by: p.by } : {}), ...(p.gm ? { gm: p.gm } : {}), ...(p.agent ? { agent: p.agent } : {}) })),
     agents: live.flatMap((p) => (p.kind === "fix" && p.agent && p.standing ? [{ seq: p.seq, events: p.events, agent: p.agent }] : [])),
@@ -444,7 +458,7 @@ function turnNotes(chain: readonly ChainMessage[], fold: FoldOutput, core: Ledge
 export function journalNotes(core: LedgerCore, observed: readonly ChainMessage[], index: number, registry: Registry): JournalNote[] {
   const prefix = observed.slice(0, Math.max(0, index));
   const fold = core.fold(prefix);
-  const world = core.worldAt(fold.state.revision);
+  const world = core.playedAt(fold.state);
   if (!world) return [];
   return turnNotes(core.chain(prefix), fold, core, registry, world, fold.state, Number.POSITIVE_INFINITY);
 }
@@ -460,7 +474,7 @@ const RECENT_TURNS = 5;
 export function recentLines(core: LedgerCore, observed: readonly ChainMessage[], index: number, registry: Registry): string[] {
   const prefix = observed.slice(0, Math.max(0, index));
   const fold = core.fold(prefix);
-  const world = core.worldAt(fold.state.revision);
+  const world = core.playedAt(fold.state);
   if (!world) return [];
   return turnNotes(core.chain(prefix), fold, core, registry, world, fold.state)
     .slice(-RECENT_TURNS)
@@ -746,7 +760,9 @@ export function buildView(input: ViewInput): StateView {
   let fold: FoldOutput | null = null;
   const folded = (): FoldOutput => (fold ??= core.fold(observed));
   const head = stateHit ? null : folded().state;
-  const world = stateHit?.world ?? (head ? (input.world(head.revision) ?? input.world(input.run.revision)) : undefined);
+  const doc = head ? (input.world(head.revision) ?? input.world(input.run.revision)) : undefined;
+  // The world as the head state plays it (ITEMS-SPEC §6.2): with the places it made.
+  const world = stateHit?.world ?? (head && doc ? playedWorld(doc, head) : undefined);
   if (!world) return notWorldView(input.chatId);
   // The palette and the controls are judged against what the next turn acts on: before the first
   // record, that includes the starting markers (the world's defaults, the user's settings filling

@@ -10,6 +10,8 @@
 
 import type { JsonObject, JsonValue } from "./json";
 import type { NarratorView } from "./settings";
+import type { PartyTier } from "./party";
+import type { OrgPower } from "./org";
 import { hasOwn, isRecord } from "./json";
 import type {
   ActionId,
@@ -301,6 +303,10 @@ export interface Selector {
   class?: Record<FacetId, FacetValueId[]>;
   /** Members of any of these groups, directly or through a group that is itself a member. */
   memberOf?: EntityId[];
+  /** People in the player character's party in one of these tiers (ORG-SPEC §3.12). */
+  party?: PartyTier[];
+  /** People who hold one of these positions: in a `memberOf` organization when one is named, else in any (ORG-SPEC §3.3). */
+  position?: string[];
   tag?: string[];
 }
 
@@ -486,6 +492,17 @@ export interface ParamDef {
    * needs (a payment with no amount) pays no one, so it plays as roleplay as ever.
    */
   outside?: string;
+  /**
+   * A ref param that also takes things a short walk away (ITEMS-SPEC §4.5 reach, Fetch): within the
+   * same site and the world's fetch minutes on foot, besides what is here or held.
+   */
+  nearby?: true;
+  /**
+   * A ref param naming the organization the actor acts for (`as`, ORG-SPEC §3.6), with the power
+   * the action needs there: the palette offers You and each organization where the actor holds it
+   * (Paying as), and interpret lists them. Left out, the actor acts for themselves.
+   */
+  acting?: OrgPower;
 }
 
 /**
@@ -612,9 +629,10 @@ export interface CombatActionDef {
  * The player's will decides what a typed action is, so one whose plain requirement doesn't hold still
  * plays, as plain roleplay; only a hard lock that doesn't hold vetoes it, and the narrator tells the
  * attempt failing ("the safe stays shut"). Every other reader (the palette, the catalog's needs, an
- * NPC's choice) holds both alike.
+ * NPC's choice) holds both alike. `why` is a formula giving the words the palette shows when it
+ * doesn't hold ("Private: Marcus Delgado's"), in place of "Not possible here and now".
  */
-export type Requirement = Expr | { expr: Expr; hard?: boolean };
+export type Requirement = Expr | { expr: Expr; hard?: boolean; why?: Expr };
 
 /** A requirement's formula. */
 export function requirementExpr(req: Requirement): Expr {
@@ -624,6 +642,11 @@ export function requirementExpr(req: Requirement): Expr {
 /** Whether a requirement is its author's hard lock. */
 export function isHardLock(req: Requirement): boolean {
   return typeof req !== "string" && req.hard === true;
+}
+
+/** The formula giving a requirement's words when it doesn't hold, if it has one. */
+export function requirementWhy(req: Requirement): Expr | null {
+  return typeof req !== "string" && typeof req.why === "string" && req.why !== "" ? req.why : null;
 }
 
 export interface ActionDef {
@@ -785,7 +808,8 @@ export interface TrackDef {
   id: TrackId;
   kind: TrackKind;
   label: string;
-  owner?: EntityId;
+  /** Whose track it is: an entity, or `GM_OWNER` for one that is the GM's (the world's), nobody's in the fiction. */
+  owner?: EntityId | typeof GM_OWNER;
   start: StageId;
   stages: Record<StageId, StageDef>;
   visibility: Visibility;
@@ -793,6 +817,21 @@ export interface TrackDef {
   knownBy?: Selector;
   /** Marked for the adjudication policy's `marked` timing: checks roll while the track is in progress (DESIGN §11). */
   adjudicate?: boolean;
+}
+
+/**
+ * The owner of a track that is the GM's (DESIGN §7): the world's own story, nobody's in the fiction.
+ * It seeds no one's knowledge, knowing someone never makes it known, the GM's views name it "GM",
+ * and its cue is what anyone may notice of the world, never a person's behaviour.
+ */
+export const GM_OWNER = "gm";
+
+/** What the GM's views call a track's `GM_OWNER`. */
+export const GM_OWNER_NAME = "GM";
+
+/** The entity a track belongs to: none for a track nobody owns or the GM's (`GM_OWNER`). */
+export function trackOwner(t: Pick<TrackDef, "owner">): EntityId | undefined {
+  return t.owner === GM_OWNER ? undefined : t.owner;
 }
 
 // ---------------------------------------------------------------- packs, realism, time, context
@@ -1320,6 +1359,10 @@ export interface WorldDoc {
   spawnTier?: TierId;
   /** Characters replies may introduce in a chat, in total (DESIGN §9.4); absent, `DEFAULT_SPAWN_CAP`. */
   spawnCap?: number;
+  /** Places a chat may make in play, in total (ITEMS-SPEC §6.2); absent, `DEFAULT_PLACE_CAPS.chat`. */
+  placeCap?: number;
+  /** Places one reply may make (ITEMS-SPEC §6.2); absent, `DEFAULT_PLACE_CAPS.turn`. */
+  placesPerTurn?: number;
   /** The world's own life states besides alive, dying and dead (DESIGN §8); absent, only those three. */
   lifeStates?: Record<LifeStateId, LifeStateDef>;
   /** Where the POV starts. */
@@ -1356,6 +1399,17 @@ export const MAX_SPAWN_CAP = 500;
 export function spawnCapOf(world: Pick<WorldDoc, "spawnCap">): number {
   const cap: unknown = world.spawnCap;
   return typeof cap === "number" && Number.isFinite(cap) ? Math.max(0, Math.min(MAX_SPAWN_CAP, Math.trunc(cap))) : DEFAULT_SPAWN_CAP;
+}
+
+/** Places made in play in a world that sets neither cap (ITEMS-SPEC §11): per reply, and per chat in total. */
+export const DEFAULT_PLACE_CAPS: Readonly<{ turn: number; chat: number }> = Object.freeze({ turn: 2, chat: 64 });
+/** The most either place cap allows: each place made is one more every fold carries and the place menus may list. */
+export const MAX_PLACE_CAP = 500;
+
+/** The place caps a world plays by: each its own, as a whole number from 0 to `MAX_PLACE_CAP` (lint reports one outside), else the default. */
+export function placeCapsOf(world: Pick<WorldDoc, "placeCap" | "placesPerTurn">): { turn: number; chat: number } {
+  const read = (v: unknown, fallback: number): number => (typeof v === "number" && Number.isFinite(v) ? Math.max(0, Math.min(MAX_PLACE_CAP, Math.trunc(v))) : fallback);
+  return { turn: read(world.placesPerTurn, DEFAULT_PLACE_CAPS.turn), chat: read(world.placeCap, DEFAULT_PLACE_CAPS.chat) };
 }
 
 /** A life state's id: `alive`, `dying`, `dead`, or one the world defines (DESIGN §8). */

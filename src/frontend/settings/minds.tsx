@@ -39,6 +39,7 @@ const READ_LABEL: Record<MindSource, string> = {
   activated: "Lore the turn activates",
   reply: "The latest reply",
   message: "Your message",
+  things: "Their things",
   history: "Recent chat",
   summary: "Their summary",
   memory: "Their notes and what they saw",
@@ -46,6 +47,7 @@ const READ_LABEL: Record<MindSource, string> = {
   recall: "Turns they were there for",
   routine: "Their usual routine",
   plans: "Their plans",
+  orgs: "Their organizations",
   life: "Their life: money, the day and commitments",
   knowledge: "What they know: their own holdings",
 };
@@ -55,6 +57,7 @@ const READ_NOTE: Record<MindSource, string> = {
   activated: "The world's lore entries the turn names, by a key, an alias, a title or a lookup-table term, as World Info activates them, read as the character: by your message and the latest reply when they were there for them, else by where they are.",
   reply: "How the latest reply ended, for those who were there for it; cut to a number, they read its end. The memory step reads the reply within this limit too.",
   message: "What you say and do, for those with you. The memory step reads it within this limit too.",
+  things: "What they have on them, what they hold for someone else, theirs that someone else has (since when, or till when it's lent) and theirs that's missing. Something taken from them without their say is only missing to them: who has it isn't theirs to know.",
   history: "The latest messages before the turn as you see them in the chat (hidden JSON blocks left out), oldest first, up to both limits, whichever comes first. It includes turns they weren't there for: the chat as the player sees it, not what they know. The memory step, consolidation and the time-skip step read it too while it's on.",
   summary: "The summary their memory keeps and folds their old notes into.",
   memory: "Their memory notes, most salient first, and what they saw happen. Never what someone's memory says they were told: that came from another mind.",
@@ -62,6 +65,7 @@ const READ_NOTE: Record<MindSource, string> = {
   recall: "Earlier turns they were there for: the latest, and those that best match the moment. Its limit is the memory setting's, which the world sets and you can override.",
   routine: "What they usually do, from their routine and schedules as the world and the story set them, while their routine isn't off: theirs to weigh, never what they must do. A private block only when it's their own, and never social life the planner made up.",
   plans: "What they mean to do later, soonest first, with when, where and who else is in it: the plans the story's turns stated for them and the ones you set in GM mode. A plan shared by several people is each one's. Never the day the planner lays.",
+  orgs: "Each organization they belong to or act for: their title and position, whom they report to and who reports to them, what they may do there and within what limits, and the delegations they hold; first, the orders asked of them on a plan, with the team, who leads and how they stand.",
   life: "Their money, the rest of today as the planner lays it (with what it fills free time with: meals, friends, outings) and their commitments. None of it is the story as it stands.",
   knowledge: "While the chat tracks knowledge, the facts they hold and how they came by them (saw it, were told, worked it out), in place of the secrets in who they are. Its limit is Knowledge's What they know tokens.",
 };
@@ -69,7 +73,7 @@ const READ_NOTE: Record<MindSource, string> = {
 /** Where each source is listed: the story as it stands, what they know, the chat as the player sees it, what they usually do, or their own memory and life. */
 type ReadGroup = "story" | "known" | "chat" | "usual" | "own";
 const READ_GROUPS: readonly ReadGroup[] = ["story", "known", "chat", "usual", "own"];
-const READ_GROUP: Readonly<Record<MindSource, ReadGroup>> = { pinned: "story", activated: "story", reply: "story", message: "story", knowledge: "known", history: "chat", summary: "own", memory: "own", thoughts: "own", recall: "own", routine: "usual", plans: "usual", life: "own" };
+const READ_GROUP: Readonly<Record<MindSource, ReadGroup>> = { pinned: "story", activated: "story", reply: "story", message: "story", things: "story", knowledge: "known", history: "chat", summary: "own", memory: "own", thoughts: "own", recall: "own", routine: "usual", plans: "usual", orgs: "usual", life: "own" };
 
 const GROUP_TITLE: Record<ReadGroup, string> = { story: "The story as it stands", known: "What they know", chat: "The chat as you see it", usual: "What they usually do and mean to do", own: "Their own memory and life" };
 

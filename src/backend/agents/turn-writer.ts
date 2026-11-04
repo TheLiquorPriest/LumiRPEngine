@@ -39,8 +39,9 @@ import { isRecord } from "../../shared/json";
 import type { LedgerEvent } from "../../shared/ledger";
 import type { LiveDropWhy } from "../../shared/live";
 import { effectiveMemory } from "../../shared/minds";
-import type { AgentChangeType, ExtractionLearning, UserSettings } from "../../shared/settings";
+import type { ChangeType, ExtractionLearning, UserSettings } from "../../shared/settings";
 import type { WorldState } from "../../engine/state";
+import { placeCapsOf } from "../../shared/world";
 import { Working } from "../../engine/working";
 import { loreBookIds } from "../book-lore";
 import { latestTexts } from "../gm";
@@ -63,11 +64,17 @@ export interface StagedOp {
   agentId: string;
   key: string;
   op: AgentOp;
-  changeType: AgentChangeType;
+  changeType: ChangeType;
   /** Its change type's mode when it was staged; the commit asks again. */
   mode: "auto" | "confirm";
   /** What it needs of its role's tier. */
   tier: "story" | "gm";
+  /**
+   * Staged with the GM's say: its role was at the GM tier, or the game master let it through at the
+   * turn's review gate. A change to a thing or a place staged without it is the story's own
+   * (`WriterEnv.gm`), and is checked so again when the turn commits.
+   */
+  gm: boolean;
   /** The connection its role runs on, which its change type's learned mode is keyed by. */
   connectionId: string | null;
   /** The change in plain words, as the role's knowledge has it. */
@@ -177,9 +184,30 @@ export function commitOrder(ops: readonly StagedOp[]): StagedOp[] {
   return [...ops].sort((a, b) => rank(a.role) - rank(b.role) || a.seq - b.seq);
 }
 
-/** What an operation needs of its role's tier: the GM's edits the GM tier, a workspace change (any file, the pins manifest among them) the story's. */
-export function opTier(op: AgentOp): "story" | "gm" {
-  return op.kind.startsWith("ws_") ? "story" : "gm";
+/**
+ * A change to a thing or a place made in play (ITEMS-SPEC §7.3), and what it needs: the story's say
+ * for every one but taking a thing or a place out of the world, which is the GM's; null for any
+ * other operation.
+ */
+export function fabricOf(op: AgentOp): "story" | "gm" | null {
+  if (op.kind !== "gm_edit" || !isRecord(op.op) || (op.op.op !== "item" && op.op.op !== "place")) return null;
+  return op.op.change.do === "remove" ? "gm" : "story";
+}
+
+/**
+ * What an operation needs of its role's tier: a workspace change (any file, the pins manifest among
+ * them) the story's, and so the Curator's change to a thing or a place (ITEMS-SPEC §7.2), but for
+ * taking one out of the world; every other change, any other role's change to a thing or a place
+ * among them, the GM's.
+ */
+export function opTier(op: AgentOp, role: RoleId): "story" | "gm" {
+  if (op.kind.startsWith("ws_")) return "story";
+  return role === "curator" && fabricOf(op) === "story" ? "story" : "gm";
+}
+
+/** Whether an operation makes a thing (`item`) or a place (`place`). */
+function makes(op: AgentOp, what: "item" | "place"): boolean {
+  return op.kind === "gm_edit" && isRecord(op.op) && op.op.op === what && op.op.change.do === "make";
 }
 
 // ---------------------------------------------------------------- reading
@@ -214,23 +242,26 @@ export function stagedWorkspace(rt: Runtime, draft: TurnDraft, head: ChatHead, k
     }
     for (const e of o.events) if ("data" in e && isRecord(e.data) && typeof e.data.path === "string") staged.set(e.data.path, by);
   }
-  return { head: { ...head, state: w.state }, kept: area, staged };
+  // The world played for the staged state (`Working.world`), so a place made in play is in it too.
+  return { head: { ...head, state: w.state, world: w.world }, kept: area, staged };
 }
 
 /**
  * A turn's reader (C10): the turn's base as `view` reads it (`gm` with `marks` for every role and
  * the main agent, whatever perspective it works from: nothing left out, every secret marked; plain
  * `gm` for the turn's own commit), built afresh on each read from the turn's own core and chain,
- * never through the ledger's queue; its workspace, with `staged`, as the turn holds it
- * (`stagedWorkspace`), else the chat's as it stands.
+ * never through the ledger's queue, with what its agent staged before in its phase on top (`own`),
+ * as its writes are checked, so it finds what it made earlier in the turn; its
+ * workspace, with `staged`, as the turn holds it (`stagedWorkspace`), else the chat's as it stands.
  */
-export function turnReader(rt: Runtime, base: TurnBase, env: { userId: UserId; chatId: ChatId; knowledge: ToolView; marks?: boolean; staged?: (head: ChatHead) => WorkspaceAt }): ToolReader {
+export function turnReader(rt: Runtime, base: TurnBase, env: { userId: UserId; chatId: ChatId; knowledge: ToolView; marks?: boolean; staged?: (head: ChatHead) => WorkspaceAt; own?: () => readonly StagedOp[] }): ToolReader {
   return {
     registry: rt.registry,
     async view() {
       const knowledge = env.knowledge;
-      const head = base();
-      if (!head) throw new Error("this chat's world isn't loaded");
+      const at = base();
+      if (!at) throw new Error("this chat's world isn't loaded");
+      const head = withOwn(rt, at, env.own?.() ?? []);
       const settings = await rt.settings.get(env.userId);
       const files = { userId: env.userId, chatId: env.chatId, knowledge };
       return readView({
@@ -249,11 +280,20 @@ export function turnReader(rt: Runtime, base: TurnBase, env: { userId: UserId; c
           const { read } = await loreBookIds(rt.host, world, env.chatId, env.userId, (await rt.settings.get(env.userId)).loreBooks);
           return (await Promise.all(read.map((book) => rt.host.books.entries(book, env.userId)))).flat();
         },
-        workspace: () => listWorkspace(rt, files, env.staged?.(head)),
+        // The workspace's own staged files are on the base, as `stagedWorkspace` lays them.
+        workspace: () => listWorkspace(rt, files, env.staged?.(at)),
         routing: viewRouting(rt, env.userId, settings.loreIndex),
       });
     },
   };
+}
+
+/** A head with one agent's own staged events on top, each on what the ones before it left, and the world they play (a place it made is in it); the head itself when it staged nothing. */
+function withOwn(rt: Runtime, head: ChatHead, own: readonly StagedOp[]): ChatHead {
+  if (own.length === 0) return head;
+  const w = new Working(rt.registry, head.world, head.state);
+  for (const o of own) w.applyAll(o.events);
+  return { ...head, state: w.state, world: w.world };
 }
 
 // ---------------------------------------------------------------- writing
@@ -278,15 +318,6 @@ export interface TurnWriterEnv {
   signal: AbortSignal;
 }
 
-/** The state an agent's next operation is checked on: the base, with what it staged before in this phase on top. */
-function ownState(rt: Runtime, draft: TurnDraft, env: TurnWriterEnv, head: ChatHead): Readonly<WorldState> {
-  const own = draft.own(env.agentId, env.phase);
-  if (own.length === 0) return head.state;
-  const w = new Working(rt.registry, head.world, head.state);
-  for (const o of own) w.applyAll(o.events);
-  return w.state;
-}
-
 /**
  * C10's writer: `dryRun` checks an operation as it would be staged; `apply` stages those that pass
  * into the turn's draft, one by one, each on what the ones before it left, and `stage` one, as a write
@@ -304,13 +335,28 @@ export function turnWriter(rt: Runtime, draft: TurnDraft, env: TurnWriterEnv): T
     const learning = await rt.settings.learningOf(env.userId);
     return { ctx: contextOf(rt, { knowledge: "everyone" }, head, settings, learning, env.kept(), await rt.activeConnectionId(env.userId)), settings, learning };
   };
-  /** One operation checked for this agent on `state`: its role's tier (the GM tier takes every change, the story's all but the GM's edits), the turn's GM edits cap, then the outside writer's checks, on the kept files with what it staged there before in this phase. */
+  /**
+   * One operation checked for this agent on `state`: its role's tier (the GM tier takes every change,
+   * the story's all but the GM's edits), the turn's GM edits cap; for a change to a thing or a place,
+   * the Curator's ops per turn, and the things and the places one turn may make; then the outside
+   * writer's checks, on the kept files with what it staged there before in this phase, as the story's
+   * own change unless its role is at the GM tier.
+   */
   const check = (c: { ctx: WriterCtx; settings: UserSettings }, state: Readonly<WorldState>, op: AgentOp) => {
-    const needs = opTier(op);
+    const needs = opTier(op, env.role);
     const key = keyOf(op);
     if (!(env.tier === "gm" || (env.tier === "story" && needs === "story"))) return refusalOf("not_granted", c.ctx.view.text(WRITE_NOTE.notGranted, { tier: env.tier, needs }), key);
     if (needs === "gm" && draft.gmStaged() >= env.gmOps) return refusalOf("gm_cap", c.ctx.view.text(WRITE_NOTE.gmCap, { count: String(draft.gmStaged()) }), key);
-    const writer: WriterEnv = { userId: env.userId, chatId: env.chatId, knowledge: "everyone", reader: env.reader, agent: { role: env.role, id: env.agentId }, signal: env.signal, connectionId: env.connectionId };
+    if (fabricOf(op) !== null) {
+      const staged = draft.pending();
+      const curated = staged.filter((o) => o.role === "curator" && fabricOf(o.op) !== null).length;
+      if (env.role === "curator" && curated >= c.settings.agents.curatorOps) return refusalOf("curator_cap", c.ctx.view.text(WRITE_NOTE.curatorCap, { count: String(curated) }), key);
+      const things = staged.filter((o) => makes(o.op, "item")).length;
+      if (makes(op, "item") && things >= c.settings.thingReads.madeMax) return refusalOf("made_cap", c.ctx.view.text(WRITE_NOTE.madeCap, { count: String(things) }), key);
+      const places = staged.filter((o) => makes(o.op, "place")).length;
+      if (makes(op, "place") && places >= placeCapsOf(c.ctx.head.world).turn) return refusalOf("place_cap", c.ctx.view.text(WRITE_NOTE.placeCap, { count: String(places) }), key);
+    }
+    const writer: WriterEnv = { userId: env.userId, chatId: env.chatId, knowledge: "everyone", reader: env.reader, agent: { role: env.role, id: env.agentId }, signal: env.signal, connectionId: env.connectionId, gm: env.tier === "gm" };
     const kept = draft.own(env.agentId, env.phase).reduce((files, o) => (o.kept ? withKept(files, o.kept) : files), c.ctx.kept);
     return checkOp(rt, c.ctx, writer, state, kept, op);
   };
@@ -326,7 +372,8 @@ export function turnWriter(rt: Runtime, draft: TurnDraft, env: TurnWriterEnv): T
     const key = keyOf(op);
     const again = key === undefined ? undefined : draft.own(env.agentId, env.phase).find((o) => o.key === key);
     if (again) return { key: again.key, changeType: again.changeType, mode: again.mode, lines: again.lines };
-    const state = ownState(rt, draft, env, c.ctx.head);
+    // Checked on the base with what this agent staged before in this phase on top.
+    const state = withOwn(rt, c.ctx.head, draft.own(env.agentId, env.phase)).state;
     const checked = check(c, state, op);
     if (isOpRefusal(checked)) {
       draft.refuse(env, checked);
@@ -337,14 +384,14 @@ export function turnWriter(rt: Runtime, draft: TurnDraft, env: TurnWriterEnv): T
     const after = new Working(rt.registry, c.ctx.head.world, state);
     after.applyAll(checked.events);
     const lines = opLines(rt, c.ctx, "everyone", checked.type, after.state, checked.shown);
-    draft.stage({ phase: env.phase, role: env.role, agentId: env.agentId, key: checked.p.key, op, changeType: checked.type, mode: checked.mode, tier: opTier(op), connectionId: env.connectionId, lines, events: checked.events, ...(checked.p.kept ? { kept: checked.p.kept.changes } : {}) });
+    draft.stage({ phase: env.phase, role: env.role, agentId: env.agentId, key: checked.p.key, op, changeType: checked.type, mode: checked.mode, tier: opTier(op, env.role), gm: env.tier === "gm", connectionId: env.connectionId, lines, events: checked.events, ...(checked.p.kept ? { kept: checked.p.kept.changes } : {}) });
     return { key: checked.p.key, changeType: checked.type, mode: checked.mode, lines };
   };
   return {
     async dryRun(op) {
       const c = await context();
       if (isOpRefusal(c)) return c;
-      const state = ownState(rt, draft, env, c.ctx.head);
+      const state = withOwn(rt, c.ctx.head, draft.own(env.agentId, env.phase)).state;
       const checked = check(c, state, op);
       if (isOpRefusal(checked)) return checked;
       const after = new Working(rt.registry, c.ctx.head.world, state);
@@ -416,7 +463,7 @@ export interface CommitCtx {
 export function commitStaged(rt: Runtime, commit: CommitCtx, ops: readonly StagedOp[], w: Working): CommitOutcome {
   const out: CommitOutcome = { committed: [], confirm: [], refused: [], kept: {} };
   for (const op of ops) {
-    const env: WriterEnv = { userId: commit.userId, chatId: commit.chatId, knowledge: "everyone", reader: commit.reader, agent: { role: op.role, id: op.agentId }, signal: commit.signal, connectionId: op.connectionId };
+    const env: WriterEnv = { userId: commit.userId, chatId: commit.chatId, knowledge: "everyone", reader: commit.reader, agent: { role: op.role, id: op.agentId }, signal: commit.signal, connectionId: op.connectionId, gm: op.gm };
     const ctx = commit.ctx();
     const checked = checkOp(rt, ctx, env, w.state, withKept(ctx.kept, out.kept), op.op);
     if (isOpRefusal(checked)) {

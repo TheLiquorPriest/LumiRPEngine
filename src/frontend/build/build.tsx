@@ -13,8 +13,8 @@ import type { JsonObject, JsonValue } from "../../shared/json";
 import { hasOwn, isRecord } from "../../shared/json";
 import { mapSettingsOf } from "../../shared/maps";
 import type { JobKind, LintIssue, WorldCollection, WorldPart } from "../../shared/protocol";
-import { playedKinds, spawnCapOf, type WorldDoc, type WorldIndex } from "../../shared/world";
-import type { BuildRoute } from "../app";
+import { placeCapsOf, playedKinds, spawnCapOf, type KindDef, type WorldDoc, type WorldIndex } from "../../shared/world";
+import type { BuildRoute, EntityGroup } from "../app";
 import { LORE_AUDIENCE, lorePinsJson, lorePinsOf } from "../../shared/lore";
 import { KEEP_NOTE, LorePinsSection, PINS_NOTE } from "./lore-pins";
 import { useApp, useUi, useView } from "../app";
@@ -28,11 +28,12 @@ import { tierGroups } from "../batch";
 import { PickBox, SelectBar, useSelection } from "../multi-select";
 import { DraftBatchSheet } from "./batch-sheet";
 import { CheckView, issuePart, IssueRow } from "./check";
-import { COLLECTION_INFO, deleteItem, go, holdNew, ItemHeader, itemLabel, NewItem, newItemName, OverflowMenu, PART_INFO } from "./chrome";
+import { COLLECTION_INFO, type CollectionInfo, deleteItem, go, holdNew, ItemHeader, itemLabel, NewItem, newItemName, OverflowMenu, PART_INFO } from "./chrome";
 import { CharacterPage } from "./character";
 import { entityFormSpecs, isCharacter, opensCharacterPage } from "./character-model";
-import { ContentsSection, RevealItem } from "./contents";
+import { RevealItem } from "./contents";
 import { commitDraft, discardDraft, draftSend, loadDraft } from "./draft";
+import { DataUpdatesSection, useTableUpdates } from "./data-updates";
 import { ChangedElsewhere, useHeld } from "./held";
 import { JOB_INFO, jobStore, JobStatusBadge, JobView, keptJobs } from "./jobs";
 import { LookupTableEditor } from "./lookup-editor";
@@ -50,15 +51,22 @@ import { TiersEditor } from "./tiers-editor";
 import { isVarsKey, VarsPanel } from "../settings/prompt-editor";
 import { DEFAULT_SECTIONS, sectionTemplateProblem } from "../../shared/sections";
 import { BuiltInSectionEditor, builtInSection, SectionTemplateField, sectionRows } from "./section-template";
+import { PlaceThingsSection, ThingPage, ThingsPage } from "./things";
+import { OrganizationsPage, OrgEditor, opensOrgPage } from "./organizations";
+import { entityGroup, entityGroups, GROUP_INFO, opensThingPage } from "./things-model";
 
-/** The world's content in the story's own groups. */
-const GROUPS: readonly { title: string; collections: readonly WorldCollection[] }[] = [
-  { title: "People & things", collections: ["entities", "kinds", "classifications", "relations"] },
-  { title: "Places", collections: ["places", "maps", "routes", "grids"] },
-  { title: "Daily life", collections: ["routines", "schedules"] },
-  { title: "Rules", collections: ["actions", "checks", "rules"] },
-  { title: "Story", collections: ["tracks", "lore"] },
-  { title: "Engine", collections: ["tables", "sections", "steps", "packs"] },
+/** A row of the world home: one of its lists of entities (ITEMS-SPEC §10.1), or a collection. */
+type HomeRow = { group: EntityGroup } | { collection: WorldCollection };
+
+/** The world's content in the story's own groups; every entity once in one list, and all of them under Advanced. */
+const GROUPS: readonly { title: string; rows: readonly HomeRow[] }[] = [
+  { title: "People & things", rows: [{ group: "people" }, { group: "orgs" }, { group: "things" }, { group: "money" }, { collection: "kinds" }, { collection: "classifications" }, { collection: "relations" }] },
+  { title: "Places", rows: [{ collection: "places" }, { collection: "maps" }, { collection: "routes" }, { collection: "grids" }] },
+  { title: "Daily life", rows: [{ collection: "routines" }, { collection: "schedules" }] },
+  { title: "Rules", rows: [{ collection: "actions" }, { collection: "checks" }, { collection: "rules" }] },
+  { title: "Story", rows: [{ collection: "tracks" }, { collection: "lore" }] },
+  { title: "Engine", rows: [{ collection: "tables" }, { collection: "sections" }, { collection: "steps" }, { collection: "packs" }] },
+  { title: "Advanced", rows: [{ collection: "entities" }] },
 ];
 
 // Every world part, in the order Build lists them: `PART_INFO` names each one (a Record over WorldPart),
@@ -110,6 +118,12 @@ function BuildPage(props: { route: BuildRoute }) {
       return (
         <WithDraft worldId={route.worldId}>
           {route.collection === "lore" ? <LoreList worldId={route.worldId} /> : route.collection === "routines" ? <RoutineList worldId={route.worldId} /> : <CollectionView key={route.collection} collection={route.collection} />}
+        </WithDraft>
+      );
+    case "entities":
+      return (
+        <WithDraft worldId={route.worldId}>
+          {route.group === "things" ? <ThingsPage /> : route.group === "orgs" ? <OrganizationsPage /> : <CollectionView key={`group:${route.group}`} collection="entities" group={route.group} />}
         </WithDraft>
       );
     case "item":
@@ -180,14 +194,18 @@ function WithDraft(props: { worldId: WorldId; children: ComponentChildren }) {
   }
   const errors = draft.lint.filter((issue) => issue.severity === "error").length;
   const warnings = draft.lint.filter((issue) => issue.severity === "warning").length;
+  // An entity's page goes back to its list (People, Things…); one in no list, to All entities.
+  const listed = route.view === "item" && route.collection === "entities" && route.id !== null && hasOwn(draft.doc.entities, route.id) ? entityGroup({ ...draft.doc, kinds: playedKinds(draft.packKinds, draft.doc.kinds) }, draft.doc.entities[route.id]?.kind ?? "") : null;
   const up: { route: BuildRoute; label: string } =
     route.view === "world"
       ? { route: { view: "worlds" }, label: "Worlds" }
-      : route.view === "item"
-        ? { route: { view: "collection", worldId: props.worldId, collection: route.collection }, label: COLLECTION_INFO[route.collection].label }
-        : route.view === "secrecy"
-          ? { route: { view: "collection", worldId: props.worldId, collection: "lore" }, label: COLLECTION_INFO.lore.label }
-          : { route: { view: "world", worldId: props.worldId }, label: draft.doc.name };
+      : listed !== null
+        ? { route: { view: "entities", worldId: props.worldId, group: listed }, label: GROUP_INFO[listed].label }
+        : route.view === "item"
+          ? { route: { view: "collection", worldId: props.worldId, collection: route.collection }, label: route.collection === "entities" ? "All entities" : COLLECTION_INFO[route.collection].label }
+          : route.view === "secrecy"
+            ? { route: { view: "collection", worldId: props.worldId, collection: "lore" }, label: COLLECTION_INFO.lore.label }
+            : { route: { view: "world", worldId: props.worldId }, label: draft.doc.name };
   const blocked = errors > 0 ? `${errors} error${errors === 1 ? "" : "s"} block the commit` : undefined;
   return (
     <div class="lre-build" data-lre-section="build">
@@ -455,6 +473,8 @@ function WorldHome() {
   const view = useView();
   const jobs = useSelect(jobStore, (all) => all);
   const [busy, run] = useBusy();
+  // The World row says when this build ships newer data tables than the draft has (Build → World → Data updates).
+  const updates = useTableUpdates();
   const worldId = draft?.worldId;
   // The tools say how their last runs went: the backend keeps each world's jobs.
   useEffect(() => {
@@ -480,32 +500,19 @@ function WorldHome() {
               icon={PART_INFO[part].icon}
               title={PART_INFO[part].label}
               subtitle={PART_INFO[part].hint}
-              badge={<IssueBadge issues={draft.lint.filter((issue) => issuePart(issue.path) === part)} />}
+              badge={
+                <>
+                  <IssueBadge issues={draft.lint.filter((issue) => issuePart(issue.path) === part)} />
+                  {part === "meta" && updates !== null && updates.length > 0 ? <Badge tone="accent">Data updates</Badge> : null}
+                </>
+              }
               chevron
               onClick={() => go(app, { view: "part", worldId: draft.worldId, part })}
             />
           ))}
         </List>
       </Section>
-      {GROUPS.map((group) => (
-        <Section key={group.title} title={group.title} flush>
-          <List>
-            {group.collections.map((collection) => (
-              <ListRow
-                key={collection}
-                icon={COLLECTION_INFO[collection].icon}
-                title={COLLECTION_INFO[collection].label}
-                subtitle={COLLECTION_INFO[collection].hint}
-                value={collection === "sections" ? sectionRows(doc).length : Object.keys(doc[collection] ?? {}).length}
-                valueTone="muted"
-                badge={<IssueBadge issues={collection === "sections" ? [...lintAt(draft.lint, collection), ...lintAt(draft.lint, "sectionTemplates")] : lintAt(draft.lint, collection)} />}
-                chevron
-                onClick={() => go(app, { view: "collection", worldId: draft.worldId, collection })}
-              />
-            ))}
-          </List>
-        </Section>
-      ))}
+      <WorldContent doc={doc} packKinds={draft.packKinds} lint={draft.lint} worldId={draft.worldId} onGo={(route) => go(app, route)} />
       <Section title="Tools" flush>
         <List>
           <ListRow icon="checklist" title="Problems" subtitle={counts.length === 0 ? "No issues in the draft" : counts.join(", ")} chevron onClick={() => go(app, { view: "check", worldId: draft.worldId })} />
@@ -533,7 +540,49 @@ function WorldHome() {
   );
 }
 
-function CollectionView(props: { collection: WorldCollection }) {
+/**
+ * The world home's content: each group's rows, an entity list (People, Organizations, Things,
+ * Money: ITEMS-SPEC §10.1) or a collection, each with how many it holds and the draft's issues in
+ * it; every entity again under Advanced, as All entities. `packKinds` sort entities into the lists.
+ */
+export function WorldContent(props: { doc: WorldDoc; packKinds: Readonly<Record<string, KindDef>>; lint: readonly LintIssue[]; worldId: WorldId; onGo(route: BuildRoute): void }) {
+  const { doc, lint } = props;
+  const lists = entityGroups({ ...doc, kinds: playedKinds(props.packKinds, doc.kinds) });
+  return (
+    <>
+      {GROUPS.map((group) => (
+        <Section key={group.title} title={group.title} flush>
+          <List>
+            {group.rows.map((row) => {
+              if ("group" in row) {
+                const ids = new Set(lists[row.group]);
+                const info = GROUP_INFO[row.group];
+                return <ListRow key={row.group} icon={info.icon} title={info.label} subtitle={info.hint} value={ids.size} valueTone="muted" badge={<IssueBadge issues={lint.filter((issue) => issue.path.startsWith("entities.") && ids.has(issue.path.split(".")[1] ?? ""))} />} chevron onClick={() => props.onGo({ view: "entities", worldId: props.worldId, group: row.group })} />;
+              }
+              const collection = row.collection;
+              return (
+                <ListRow
+                  key={collection}
+                  icon={COLLECTION_INFO[collection].icon}
+                  title={collection === "entities" ? "All entities" : COLLECTION_INFO[collection].label}
+                  subtitle={collection === "entities" ? "Every entity of every kind, in one list" : COLLECTION_INFO[collection].hint}
+                  value={collection === "sections" ? sectionRows(doc).length : Object.keys(doc[collection] ?? {}).length}
+                  valueTone="muted"
+                  badge={<IssueBadge issues={collection === "sections" ? [...lintAt(lint, collection), ...lintAt(lint, "sectionTemplates")] : lintAt(lint, collection)} />}
+                  chevron
+                  onClick={() => props.onGo({ view: "collection", worldId: props.worldId, collection })}
+                />
+              );
+            })}
+          </List>
+        </Section>
+      ))}
+    </>
+  );
+}
+
+/** A collection's items by name, or one of the world home's entity lists (`group`: People, Organizations, Money); + New, search and bulk changes. */
+function CollectionView(props: { collection: WorldCollection; group?: Exclude<EntityGroup, "things"> }) {
   const app = useApp();
   const draft = useSelect(app.drafts, (d) => d);
   const [query, setQuery] = useState("");
@@ -544,13 +593,14 @@ function CollectionView(props: { collection: WorldCollection }) {
   if (!draft) return null;
   const bulk = props.collection === "entities" || props.collection === "places" ? props.collection : null;
   const doc = draft.doc;
-  const info = COLLECTION_INFO[props.collection];
-  const items = props.collection === "sections" ? sectionRows(doc) : Object.entries(doc[props.collection] as Record<string, unknown>).map(([id, value]) => ({ id, value, label: itemLabel(props.collection, id, value, doc.places), path: `${props.collection}.${id}`, note: undefined as string | undefined }));
+  const kinds = playedKinds(draft.packKinds, doc.kinds);
+  const listed = props.group ? new Set(entityGroups({ ...doc, kinds })[props.group]) : null;
+  const info: CollectionInfo = props.group ? GROUP_INFO[props.group] : props.collection === "entities" ? { ...COLLECTION_INFO.entities, label: "All entities" } : COLLECTION_INFO[props.collection];
+  const items = (props.collection === "sections" ? sectionRows(doc) : Object.entries(doc[props.collection] as Record<string, unknown>).map(([id, value]) => ({ id, value, label: itemLabel(props.collection, id, value, doc.places), path: `${props.collection}.${id}`, note: undefined as string | undefined }))).filter((item) => listed === null || listed.has(item.id));
   const q = query.trim().toLowerCase();
   const shown = items.filter((item) => !q || item.id.toLowerCase().includes(q) || item.label.toLowerCase().includes(q));
   // Those picked still in the draft (a change elsewhere can remove one), in the list's order.
   const chosen = items.filter((item) => selection.ids.includes(item.id)).map((item) => item.id);
-  const kinds = playedKinds(draft.packKinds, doc.kinds);
   // Data tables come from packs: a world edits its copy of one and never starts one.
   const canAdd = props.collection !== "tables";
   const detail = (value: unknown): string | undefined => {
@@ -567,7 +617,7 @@ function CollectionView(props: { collection: WorldCollection }) {
     </Button>
   );
   return (
-    <div class="lre-build-page" data-lre-collection={props.collection}>
+    <div class="lre-build-page" data-lre-collection={props.collection} data-lre-group={props.group}>
       <PageHeader
         title={info.label}
         subtitle={info.hint}
@@ -721,9 +771,9 @@ export function SchemaEditor(props: EditorProps & { children?: ComponentChildren
       {props.collection === "sections" ? <SectionTemplateField value={typeof value.template === "string" ? value.template : ""} defaultText={hasOwn(DEFAULT_SECTIONS, id) ? (DEFAULT_SECTIONS[id]?.template ?? null) : null} issues={lintAt(draft?.lint ?? [], `${path}.template`)} disabled={busy} onChange={(template) => setValue({ ...value, template })} /> : null}
       {/* A thing's page leaves out what only a person has (life, cues, their Lumiverse card, their own day). */}
       <SchemaFields specs={props.collection === "entities" ? entityFormSpecs(formDoc, value) : COLLECTION_SPECS[props.collection]} value={value} ctx={{ doc: formDoc, lint: draft?.lint ?? [], path, identifiers, functions: draft?.functions ?? [], fieldEditors: app.catalog.fields }} onChange={setValue} />
-      {/* A thing can be hidden until searched for (DESIGN §7); an entity or a place lists what the world puts in it or there. */}
+      {/* A thing can be hidden until searched for (DESIGN §7); a place lists the things there (ITEMS-SPEC §10.1). */}
       {props.collection === "entities" ? <RevealItem kinds={formDoc.kinds} value={value} onChange={setValue} /> : null}
-      {!isNew && (props.collection === "entities" || props.collection === "places") ? <ContentsSection world={props.world} collection={props.collection} id={id} /> : null}
+      {!isNew && props.collection === "places" ? <PlaceThingsSection world={props.world} id={id} /> : null}
       {props.collection === "places"
         ? app.catalog.placeFields.map((def) => {
             // A pack's place field is edited inside the place's `fields`, which the JSON above shows too.
@@ -772,12 +822,15 @@ function ItemView(props: { collection: WorldCollection; id: string | null }) {
   const send = useMemo(() => draftSend(app), [app]);
   if (!draft) return null;
   const registered = app.catalog.editors.get(props.collection);
-  // A person opens the Character page, never the generic editor (DESIGN §13 characters); a new entity is made in the generic one first.
-  const character = opensCharacterPage({ ...draft.doc, kinds: playedKinds(draft.packKinds, draft.doc.kinds) }, props.collection, props.id);
+  // A person opens the Character page and a thing its own page, never the generic editor (DESIGN §13 characters, ITEMS-SPEC §10.1); a new entity is made in the generic one first.
+  const played = { ...draft.doc, kinds: playedKinds(draft.packKinds, draft.doc.kinds) };
+  const character = opensCharacterPage(played, props.collection, props.id);
+  const thing = opensThingPage(played, props.collection, props.id);
+  const org = opensOrgPage(played, props.collection, props.id);
   // A built-in section the world has without listing it opens its guidance, saved as the world's wording of it.
   const builtIn = props.collection === "sections" && props.id !== null && !hasOwn(draft.doc.sections, props.id) ? builtInSection(draft.doc, props.id) : null;
   if (builtIn) return <BuiltInSectionEditor key={builtIn.id} world={draft.doc} collection={props.collection} id={props.id} send={send} section={builtIn} />;
-  const Editor = registered ? registered.component : character ? CharacterPage : props.collection === "tables" ? TableEditor : props.collection === "lore" ? LoreEditor : props.collection === "routines" ? RoutineEditor : SchemaEditor;
+  const Editor = registered ? registered.component : character ? CharacterPage : thing ? ThingPage : org ? OrgEditor : props.collection === "tables" ? TableEditor : props.collection === "lore" ? LoreEditor : props.collection === "routines" ? RoutineEditor : SchemaEditor;
   return <Editor world={draft.doc} collection={props.collection} id={props.id} send={send} />;
 }
 
@@ -790,8 +843,8 @@ function partValue(doc: WorldDoc, part: Exclude<WorldPart, "tiers" | "loreIndex"
     case "time":
       return doc.time as unknown as JsonObject;
     case "meta":
-      // Map settings and the spawn cap show as the world plays them: a world without them, with the defaults.
-      return { name: doc.name, pov: doc.pov, narrator: doc.narrator ? { ...doc.narrator } : null, start: { ...doc.start }, seedMode: doc.seedMode, lenientPricing: doc.lenientPricing, spawnCap: spawnCapOf(doc), lifeStates: structuredClone(doc.lifeStates ?? {}) as unknown as JsonObject, currency: { ...doc.currency }, mapSettings: structuredClone(mapSettingsOf(doc)) as unknown as JsonObject };
+      // Map settings and the spawn and place caps show as the world plays them: a world without them, with the defaults.
+      return { name: doc.name, pov: doc.pov, narrator: doc.narrator ? { ...doc.narrator } : null, start: { ...doc.start }, seedMode: doc.seedMode, lenientPricing: doc.lenientPricing, spawnCap: spawnCapOf(doc), placeCap: placeCapsOf(doc).chat, placesPerTurn: placeCapsOf(doc).turn, lifeStates: structuredClone(doc.lifeStates ?? {}) as unknown as JsonObject, currency: { ...doc.currency }, mapSettings: structuredClone(mapSettingsOf(doc)) as unknown as JsonObject };
   }
 }
 
@@ -839,6 +892,7 @@ function SchemaPartView(props: { part: Exclude<WorldPart, "tiers" | "loreIndex" 
   return (
     <div class="lre-build-page" data-lre-editor={`part:${props.part}`}>
       <PageHeader title={PART_INFO[props.part].label} subtitle={PART_INFO[props.part].hint} />
+      {props.part === "meta" ? <DataUpdatesSection /> : null}
       <SchemaFields specs={PART_SPECS[props.part]} value={value} ctx={{ doc: draft.doc, lint: draft.lint, path: props.part, identifiers, functions: draft.functions }} onChange={setValue} />
       <SaveBar>
         <Button

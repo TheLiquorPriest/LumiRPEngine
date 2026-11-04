@@ -172,6 +172,15 @@ export function hashParts(...parts: HashPart[]): string {
   return s;
 }
 
+/**
+ * The id a player's view sends in place of one that names someone they can't see (a job's
+ * `job_danny_mechanic`, its payroll's `pay:job_danny_mechanic`, a hidden member of an organization):
+ * a digest of it, the same on every view, so the view's own references to it still meet.
+ */
+export function opaqueId(id: string): string {
+  return `hidden:${hashParts(id).slice(0, 12)}`;
+}
+
 /** 32 bits of the same digest as an unsigned integer (the first 8 hex digits of hashParts). */
 export function hash32(...parts: HashPart[]): number {
   return hashWords(...parts)[0];

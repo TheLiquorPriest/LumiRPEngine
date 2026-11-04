@@ -1,7 +1,7 @@
 // Starts the backend on the real host: every pack, the simulation pipeline, the spindle adapter,
 // the runtime, the protocol dispatcher, the background lane's message route and the memory budget.
 
-import { ALL_PACKS, STARTER_INFO, STARTER_WORLDS } from "../packs/index";
+import { ALL_PACKS, STARTER_INFO, STARTER_TABLES, STARTER_WORLDS } from "../packs/index";
 import { planTurn, postTurn } from "../engine/turn";
 import { Dispatcher } from "./dispatch";
 import { JobRunner } from "./jobs";
@@ -16,7 +16,7 @@ export function startBackend(): Runtime {
   const caught = (what: string) => (error: unknown) => host.log("error", `[LumiRPEngine] ${what}: ${error instanceof Error ? (error.stack ?? `${error.name}: ${error.message}`) : String(error)}`);
   process.on("unhandledRejection", caught("unhandled rejection"));
   process.on("uncaughtException", caught("uncaught exception"));
-  const runtime = new Runtime({ host, packs: ALL_PACKS, pipeline: { plan: planTurn, post: postTurn }, templates: STARTER_WORLDS, templateInfo: STARTER_INFO });
+  const runtime = new Runtime({ host, packs: ALL_PACKS, pipeline: { plan: planTurn, post: postTurn }, templates: STARTER_WORLDS, templateInfo: STARTER_INFO, starterTables: STARTER_TABLES });
   const jobs = new JobRunner(host, runtime.worlds, runtime.steps, runtime.settings, runtime.registry);
   runtime.start();
   new Dispatcher(runtime, jobs).start();

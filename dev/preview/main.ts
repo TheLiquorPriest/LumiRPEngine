@@ -4,9 +4,9 @@
 //   &draft=elsewhere[&draftDelay=<seconds>, default 10]: that long after Build first loads a draft, another window
 //     renames the world and changes Rosie's mood (`lre.draft.changed`); a form holding edits over either shows
 //     Build's "changed elsewhere" notice. `__lre.backend.changeDraftElsewhere()` changes it again at any time.
-//   &money=<party>: Play's money is that Port Alder party's and GM → Money everyone's there, as the engine keeps
-//     them nine days into a chat (`marcus_delgado`: a business, a house and credit; `helen_kowalczyk`: a
-//     household; `pov`: a job and investments).
+//   &money=<party>: Play's money and Orgs are that Port Alder party's and GM → Money everyone's there, as the
+//     engine keeps them nine days into a chat (`marcus_delgado`: a business, a house and credit;
+//     `helen_kowalczyk`: a household; `pov`: a job and investments).
 //   ?pickers: the character pickers alone in the drawer (place, bed, a list of text) over a 320-place world,
 //     in place of the app (dev/preview/pickers.tsx).
 

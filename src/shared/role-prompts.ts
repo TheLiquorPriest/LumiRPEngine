@@ -62,6 +62,7 @@ export const ROLE_TASKS: Readonly<Record<RoleId, readonly string[]>> = {
   knowledge: ["knowledge"],
   director: ["decisions", "prose", "choices"],
   read: ["extract"],
+  curator: ["curate"],
   memory: ["memory", "consolidate"],
   skip: ["beats", "plan"],
   world: ["effects"],
@@ -174,6 +175,15 @@ const INTERPRET_VARS: readonly PromptVar[] = [
   { name: "try", text: "the Try something rule below, while the catalog has it; else empty" },
 ];
 
+/**
+ * The plan the player's own message gives the people they lead (ORG-SPEC §3.14, assess-party §6.2):
+ * interpret's `agenda` part, its rule and its shape, which classic's interpret step and the intent
+ * role's texts both give; the plan's own read (`orgs.plan_read`) holds each to the message's words.
+ */
+export const INTERPRET_AGENDA_RULE =
+  'If the input itself gives the player character\'s own plan or orders for people they lead (their party, or an organization they run), add them to "agenda": each goal in "goals" as {"text", "said", "window"?, "where"?, "org"?}, each order in "orders" as {"to": [names], "lead"?, "text", "said", "where"?, "when"?, "org"?}; "said" quotes the input\'s own words for it, "window" is "today" or YYYY-MM-DD, "when" is YYYY-MM-DD HH:MM, "org" the organization\'s name when it isn\'t the party. Leave out wishes, questions, and anything to be done within this turn. It is never an action.';
+export const INTERPRET_AGENDA_SHAPE = '"agenda"?: {"goals"?: [{"text": string, "said": string, "window"?: string, "where"?: string, "org"?: string}], "orders"?: [{"to": string[], "lead"?: string, "text": string, "said": string, "where"?: string, "when"?: string, "org"?: string}]}';
+
 const INTERPRET_TASK = [
   "{{instructions}}",
   "Map the player's typed input in this roleplay to the engine actions it takes, in order.",
@@ -204,6 +214,7 @@ const INTERPRET_TASK = [
   '- Read every other action the input takes too, not only the one it is for: those the engine plays as well (buying, paying, eating a meal, taking or handing over a thing) go in "more" after it, in the order they happen (at most {{more}}), each {"action": a catalog id, "params": {...}, "text": that action written as the player would type it}: "I walk to the market and buy bread" → "action" for the walk, and "more": [{"action": <the buy\'s id>, "params": {"item": "bread"}, "text": "I buy bread"}]. An action after them that no catalog action fits goes in "next", written as the player would type it.',
   '- If the input lets time pass after its last action, in character ("…and sleep until the next morning", "…then wait two hours", "…then skip ahead to Friday at 6 PM") or out of character after the input gets the player character out of bed or up from a rest, add "then": {"span": its words for how long or until when, with "minutes", "until" (a day part, "shift" or "commitment") or "at" ("YYYY-MM-DD HH:MM" for a stated day and time)}; time passing is never in "more" or "next", nor is anything else that isn\'t an action.',
   '- If the input itself plainly states, as settled fact, a lasting change to someone\'s week (the player character\'s own, "I start nights at the marina Monday", or one the input says someone told of, "Marcus says he\'s started swimming on Tuesdays"), add it to "routine": [{"entity": their id, "change": "start" for a new job, shift or habit, "stop" for one given up, "move" for a new home, "label": what it is in the input\'s words, "days": the days the input states (weekday names, "weekdays", "weekends" or "daily"; leave it out when the input states none, never guess), "start"?/"end"?: "HH:MM" as stated (or "start": morning|afternoon|evening|night), "activity"?: work|school|exercise|leisure|socialize|errand, "place"?: any place the input names for it, as a place id, or in the input\'s own words when nothing lists it ("the community pool"); left out only when the input names none (for "move", the new home), "with"?: people\'s ids, "replaces"?: true only when the input says it takes the place of what they did then, "said": the input\'s own words that state it, copied exactly}]. Never for a question ("do you still swim on Tuesdays?"), a one-off, a plan, a wish, a hypothetical, someone\'s thoughts, or a habit only mentioned in passing ("I walk past the pool where I swim on Tuesdays"). It is never an action, and changes nothing about "action", "more", "then" or "next".',
+  `- ${INTERPRET_AGENDA_RULE}`,
   "{{try}}",
   "- When the input takes for granted that {{pov}} is somewhere other than the scene's place (beside someone who isn't here, at a fixture of another place), read the move there first, as \"I go there\" is read: to where that person was last seen, or the place with that fixture.",
   "- When it takes for granted that what the scene lists as left from the last message happened, read those actions first, in order.",
@@ -219,7 +230,7 @@ const TRY_RULE =
   '- An attempt whose outcome is uncertain that no other catalog action covers is "{{action}}" (Try something), even asked as a question ("I watch him as he answers: is he lying?" is the player character\'s reading of him against his deceit). Never read an attempt a catalog action covers as "{{action}}", nor both: that action alone. "attempt" is what is attempted, in the input\'s words; "skill" and "difficulty" come from its lists; "with" lists the companions the input has join in ("we sneak past"); "against" lists the people here it opposes or targets, each with the skill they resist with.';
 
 const INTERPRET_ANSWER =
-  'Output JSON only, exactly this shape: {"action": string|null, "params": {...}, "text"?: string, "thing"?: string, "confidence": number, "reason"?: string, "more"?: [{"action": string, "params": {...}, "text": string, "thing"?: string}], "then"?: {"span": string, "minutes"?: number, "until"?: string, "at"?: string}, "next"?: string, "routine"?: [{"entity": string, "change": string, "label": string, "days"?: string|string[], "start"?: string, "end"?: string, "activity"?: string, "place"?: string, "with"?: string[], "replaces"?: boolean, "said": string}]}. "action" is the action the input is for (or the move it needs first); "more" holds its other actions, in the order they happen.';
+  `Output JSON only, exactly this shape: {"action": string|null, "params": {...}, "text"?: string, "thing"?: string, "confidence": number, "reason"?: string, "more"?: [{"action": string, "params": {...}, "text": string, "thing"?: string}], "then"?: {"span": string, "minutes"?: number, "until"?: string, "at"?: string}, "next"?: string, "routine"?: [{"entity": string, "change": string, "label": string, "days"?: string|string[], "start"?: string, "end"?: string, "activity"?: string, "place"?: string, "with"?: string[], "replaces"?: boolean, "said": string}], ${INTERPRET_AGENDA_SHAPE}}. "action" is the action the input is for (or the move it needs first); "more" holds its other actions, in the order they happen.`;
 
 const ACTION_VAR: readonly PromptVar[] = [{ name: "action", text: "the action's id in the catalog", required: true }];
 
@@ -250,7 +261,7 @@ const INTENT_PROMPTS: readonly PromptDef[] = [
   taskText("intent", "interpret", "Reading the message", "task", { label: "What to do", note: "The interpret step's work: the player's typed input read into the engine actions it takes, from the catalog the player character may play now: the one it is for first (after a move it needs), then the others in order.", text: INTERPRET_TASK, vars: INTERPRET_VARS }),
   taskText("intent", "interpret", "Reading the message", "timelapse", { label: "The time-skip rule", note: "Joins the rules while the catalog has the time skip.", text: TIMELAPSE_RULE, vars: ACTION_VAR }),
   taskText("intent", "interpret", "Reading the message", "try", { label: "The Try something rule", note: "Joins the rules while the chat infers checks and the catalog has Try something.", text: TRY_RULE, vars: ACTION_VAR }),
-  taskText("intent", "interpret", "Reading the message", "answer", { label: "Its answer", note: "Describes the answer the engine reads (a fixed output contract): the action the input is for and its params, its other actions after it, time passing after them, and the routine changes the input states.", text: INTERPRET_ANSWER, vars: [] }),
+  taskText("intent", "interpret", "Reading the message", "answer", { label: "Its answer", note: "Describes the answer the engine reads (a fixed output contract): the action the input is for and its params, its other actions after it, time passing after them, the routine changes the input states, and the plan it gives.", text: INTERPRET_ANSWER, vars: [] }),
   taskText("intent", "judge", "Judging an approach", "question", { label: "The question", note: "What the judge is asked. The world's or your own words for the judge step stand in for it.", text: DECISION_PROMPTS.judge, vars: [], world: "after-user" }),
   taskText("intent", "judge", "Judging an approach", "task", { label: "What to do", note: "The judge step's work: the approach the player described rated for the check their action rolls, and, when the story decides, each outcome's odds.", text: "{{question}} Rate the approach from 0 (no particular approach, or one that works against them) to {{max}} (a clever, prepared approach that fits the situation), and give a one-line reason in plain words.\n{{outcomes}}\n\nAction: {{action}}\nThe player wrote: {{text}}\nScene: {{scene}}", vars: JUDGE_VARS }),
   taskText("intent", "judge", "Judging an approach", "outcomes", { label: "When the story decides", note: "Joins the task when the story decides how the attempt turns out: the outcomes to give odds to, with the dice's.", text: "Then decide how it turns out: give each outcome a probability. The dice's exact odds are guidance: lean on them, and move them toward success for a strong approach and away from it for a weak one.\nOutcomes with the dice's exact odds: {{odds}}", vars: [{ name: "odds", text: "each outcome with the dice's exact odds of it", required: true }] }),
@@ -357,21 +368,54 @@ const DIRECTOR_PROMPTS: readonly PromptDef[] = [
 
 // ---------------------------------------------------------------- read
 
+/**
+ * The read's thing facts and their rules (ITEMS-SPEC §5.2, §7.4): one pair of registry texts, which
+ * classic's extract step and the read role's agent both read, so the two speak one vocabulary (§8).
+ */
+export const EXTRACT_ITEM_TEXT = { facts: "extract.items.facts", rules: "extract.items.rules" } as const;
+
+const EXTRACT_ITEM_FACTS =
+  "give{item,from,to,basis?,until?,why?,amount?} (basis: hold, loan, return, gift, sale or trade, as the handover rule says; until: when a loan ends, in the prose's words; amount: for cash or money handed over, the amount) · take{entity,item,from?,why?} (from: the holder or person it came from) · drop{entity,item,why?} · put{entity?,item,into?,at?,why?} (into: the holder it goes in; at: a place) · has{entity,item,why?} (the reply shows them holding, wearing or using it now) · owner{item,owner,why} (a stated change of whose it is: owner a person, household, business or group, or none) · use_up{entity,item,qty?,why?} (qty: how many, 1 when not said) · wear{entity,item,off?,why?} · lose{entity,item,by?,why?} (by: who stole it) · item_condition{entity?,item,delta,why?} (delta: as far as the prose says it changed, on the condition's 0..100 scale: damage negative, mending positive). Each names who (entity, the player character when left out) and the thing by its id where the state lists it, else in the reply's words; why: why it changed, in a few words";
+
+const EXTRACT_ITEM_RULES = [
+  "- give only for an explicit handover between two characters; a seller handing over what was bought is part of the purchase; picking something up is a take, not a give.",
+  "- take, drop, put, has, use_up, wear and lose only for a thing the prose says changed hands, place or state this reply: picked up or found (take, from: the holder or person it came from), put down (drop), put into a holder or at a place (put), shown holding, wearing or using it now (has), eaten, drunk or used up (use_up), put on or taken off (wear, off: true), lost or stolen (lose, by: the thief); item_condition only when it says a thing was damaged, worn out or mended; owner only when it states a change of whose a thing is.",
+  '- A handover keeps the owner unless the prose says given for keeps, sold or traded: give\'s basis is hold when nothing is said, loan for a stated borrow or end (until), return when it goes back to its owner, gift for "keep it" or a present (and for food or drink to have now), sale or trade for money or another thing.',
+  "- Name a thing the state lists by its id, and anything else in the reply's words: the engine finds the thing the words mean, and makes one only when the story acts on a thing the world doesn't have yet. Never propose a second of a thing the state has.",
+  "- A thing too big to carry (furniture, an appliance) is put somewhere, never held; a purchase of one says at where it ends up.",
+  "- Say why in every change to a thing, in a few words.",
+].join("\n");
+
+/**
+ * The read's organization facts, their rules and the open items of the plans (ORG-SPEC §7.3,
+ * assess-party §6.2): registry texts that classic's extract step and the read role's agent both
+ * read, as they read the thing facts.
+ */
+export const EXTRACT_ORG_TEXT = { facts: "extract.orgs.facts", rules: "extract.orgs.rules", plan: "extract.orgs.plan" } as const;
+/** The reply's types the organization texts tell of: they join a read while one of them is read. */
+export const ORG_FACT_TYPES = ["membership", "employment", "agenda"] as const;
+
+const EXTRACT_ORG_FACTS =
+  "membership{who,org,change,position?,title?,by?,said} (change: join, leave, appoint or title; position: for appoint, or a join into one, one of the organization's positions, by its id or title; title: for title, or a join with one, the words they go by now; by: who made the change, when the reply says, never the one it happens to) · employment{who,change,org?,job?,title?,position?,rate?,pct?,hours?,basis?,by?,said} (change: hired, let_go, quit, raise, leave (goes on leave) or back (comes back from leave); org: the employer, by id or name: an organization, a person or the place they work at; job: the job's id, when the state lists it; title: a hire's job title; position: one of the employer's positions; rate: the new pay, as written; pct: a raise as a percentage instead; hours: hours a week; basis: hourly, salary, per_shift, commission, tips or stipend; by: who hired them, let them go or changed their pay, when the reply says) · agenda{id,status,said,org?} (an open item of the plans listed below the state that the reply moves along: its id; status: under_way, done, blocked or refused) · agenda{who,offer,said,org?,where?,when?} (someone other than the player character offers, in the reply, to do something for them: who, by id or name; offer: the task, in a few words; org: the organization it is for, when it isn't the party; where: the place it is done at, when said; when: YYYY-MM-DD HH:MM, when said). Each quotes the reply in said: its own words that state the change";
+
+const EXTRACT_ORG_RULES = [
+  '- membership and employment only for a change the reply states as done: someone joins or leaves, is appointed, takes a title, is hired, is let go, quits, gets a raise, or goes on or comes back from leave; never one someone plans, offers, wishes, threatens or is thinking about ("thinking about quitting" is no quit), and never a question.',
+  "- said is the reply's own words, copied exactly: a fact whose said isn't in the reply is left out.",
+  "- An appointment names one of the organization's positions; when the reply names none it has, leave the appointment out.",
+  "- agenda with an id only for an item the open plan items list, as the reply moves it along; an offer only when someone other than the player character volunteers in the reply's words, never for the player character's own plans or orders.",
+].join("\n");
+
 const EXTRACT_TYPES =
-  'time_advance{minutes} · location{entity,place} (place: its id from Places, or its name as Places lists it) · purchase{item,category,payer?,qty?,price?,method?} (payer: the person who pays, an entity id, never an account or a card; method: how the prose says they paid, in its words, e.g. "cash", "debit card", "credit card" or "savings"; leave it out when not said) · transfer{from,to,amount,method?} (from and to: people, entity ids, or a person\'s own cash, checking, savings or card account, never things; method: "cash" when bills or coins change hands in person, as in "hands me $20" or "slips her a twenty"; leave it out for a bank transfer, an app payment or a card) · give{item,from,to,amount?} (item: the thing\'s id; for a thing the world doesn\'t have yet that someone other than the player character hands over, the reply\'s words for it, which makes it, in the recipient\'s hands; amount: for cash or money handed over, the amount) · quantity{entity,item,delta} · condition{who,condition,minutes?,clear?} (a named condition such as tired or injured; clear:true when it ends) · regard{from,to,axis,delta} (axis {{axes}}; delta: as far as the prose moves it, inside the axis\'s range: worse negative, better positive) · knows{who,fact} (fact: the id of a person, thing or place the player character newly learns of, or the name of a place they first hear of; never a sentence) · spawn{kind,name,place?,role?} (a new character the reply introduces by name{{kinds}}; never a thing) · life{entity,state} (state: {{life}}) · routine{entity,change,label,days,start?,end?,minutes?,activity?,place?,with?,replaces?} (change: start for a new job, shift or habit, stop for one given up, move for a new home, its place the home; days: weekday names, weekdays, weekends or daily; start and end: HH:MM, or start morning|afternoon|evening|night; activity: work|school|exercise|leisure|socialize|errand; place: any place the prose names for it, as a place id, or in the prose\'s own words when nothing lists it ("the community pool"), left out only when the prose names none; with: people\'s ids; replaces: true only when the prose says it takes the place of what they did then) · take{entity,item} · drop{entity,item} · use_up{entity,item,qty?} (qty: how many, 1 when not said) · wear{entity,item,off?} · lose{entity,item,by?} (by: who stole it) · item_condition{entity?,item,delta} (delta: as far as the prose says it changed, on the condition\'s 0..100 scale: damage negative, mending positive)';
+  'time_advance{minutes} · location{entity,place,parent?} (place: its id from Places, or its name as Places lists it; for a place Places doesn\'t list that the reply puts them in (a room, a booth, a new bar), only when nothing listed fits: its name in the reply\'s words, with parent: the id from Places of the place it is in or part of) · purchase{item,category,payer?,qty?,price?,method?,seller?,size?,at?} (payer: the person who pays, an entity id, never an account or a card; method: how the prose says they paid, in its words, naming the card or account when it names one, as in "her Amex", "the joint account" or "the card ending in 4417", else e.g. "cash", "debit card", "credit card" or "savings"; leave it out when not said; seller: the person or business selling it, an entity id, when the prose names one: what a seller hands over of their own changes hands, never a second; size: {{sizes}}, when the prose makes it plain; at: where it ends up when the prose says, a place\'s id from Places, or home) · transfer{from,to,amount,method?} (from and to: people, entity ids, or a person\'s own cash, checking, savings or card account, never things; method: "cash" when bills or coins change hands in person, as in "hands me $20" or "slips her a twenty"; leave it out for a bank transfer, an app payment or a card) · quantity{entity,item,delta} · condition{who,condition,minutes?,clear?} (a named condition such as tired or injured; clear:true when it ends) · regard{from,to,axis,delta} (axis {{axes}}; delta: as far as the prose moves it, inside the axis\'s range: worse negative, better positive) · knows{who,fact} (fact: the id of a person, thing or place the player character newly learns of, or the name of a place they first hear of; never a sentence) · spawn{kind,name,place?,role?} (a new character the reply introduces by name{{kinds}}; never a thing) · life{entity,state} (state: {{life}}) · routine{entity,change,label,days,start?,end?,minutes?,activity?,place?,with?,replaces?} (change: start for a new job, shift or habit, stop for one given up, move for a new home, its place the home; days: weekday names, weekdays, weekends or daily; start and end: HH:MM, or start morning|afternoon|evening|night; activity: work|school|exercise|leisure|socialize|errand; place: any place the prose names for it, as a place id, or in the prose\'s own words when nothing lists it ("the community pool"), left out only when the prose names none; with: people\'s ids; replaces: true only when the prose says it takes the place of what they did then) · {{items}}{{orgs}}';
 
 const EXTRACT_STRICT = [
   'time_advance only for time the reply narrates as passing, measured against the engine\'s clock below: an explicit jump or stated duration ("an hour later", "the next morning", "for twenty minutes"), or a time of day it says it now is ("by noon"). Its minutes are all the time from the player\'s message to the reply\'s end: a time of day counts from when the message came; a span the reply gives the turn\'s own actions is that span, whatever the engine had them take; time it narrates after them comes on top of what they took. Never estimate how long described activity took, and never count a time only mentioned (a plan, an appointment, an opening hour).',
   "knows only when the player character newly learns of a public person, thing or place from what is said or shown in this reply: fact is its id, or a place's name as the prose gives it; never a sentence or what they learned about it, never one already known, never what others learn.",
   "regard only when the prose states a clear change in how one character feels about another.",
-  "give only for an explicit handover between two characters; a seller handing over what was bought is part of the purchase; picking something up is not a give.",
   "A purchase already covers its payment: do not add a transfer for it.",
   "One purchase per item: two things bought are two purchases, each with its own item and price; never one item that names both.",
   "life only when the prose states that someone died, is dying, collapsed or came round, or that the player character is told so; never a threat, a fear or a guess.",
   "routine only when the prose states a lasting change to someone's week: a new job or shift, a new habit, one they gave up, or a move to a new home, with the days and times the prose gives; never a one-off, a plan, a wish, someone's thoughts, or a habit only mentioned.",
-  "take, drop, use_up, wear and lose only for a thing the prose says changed hands or state this reply: picked up or found (take), put down (drop), eaten, drunk or used up (use_up), put on or taken off (wear, off: true), lost or stolen (lose, by: the thief); item_condition only when it says a thing was damaged, worn out or mended.",
-  "A thing the reply makes matter that the world doesn't have yet (a key found, a notebook handed over, a lantern, a vehicle) is made only by a give from someone other than the player character, the thing in the reply's words, or by a purchase: use one where the reply tells it. Any other change to it is only noted as not tracked.",
-  "Never duplicate a change. When unsure, leave it out.",
 ];
 
 const EXTRACT_TASK = [
@@ -382,12 +426,16 @@ const EXTRACT_TASK = [
   "Rules: no considered, refused or hypothetical changes; use world ids where they exist; one proposal per change. Money amounts are plain amounts in {{currency}} as written (8 for {{symbol}}8).",
   "Strict rules:",
   ...EXTRACT_STRICT.map((rule) => `- ${rule}`),
+  "{{item_rules}}",
+  "{{org_rules}}",
+  "- Never duplicate a change. When unsure, leave it out.",
   "{{where}}",
   "{{usual_rule}}",
   "",
   "State before: {{state}}",
   "{{clock}}",
   "{{usual}}",
+  "{{plan}}",
   "{{message}}",
   "Narration:",
   "{{reply}}",
@@ -416,16 +464,26 @@ const READ_PROMPTS: readonly PromptDef[] = [
       { name: "enabled", text: "the enabled types text below, when only some are; else empty" },
       { name: "currency", text: "the world's money, as its code" },
       { name: "symbol", text: "the world's money sign" },
+      { name: "item_rules", text: "the rules for changes to things (Thing rules, below), one to a line" },
+      { name: "org_rules", text: "the rules for changes to organizations (Organization rules, below), one to a line, while one of their types is read; else empty" },
       { name: "where", text: "the where text below, while moves are read; else empty" },
       { name: "usual_rule", text: "the usual routines rule below, when it is given them; else empty" },
       { name: "state", text: "the state before the reply", required: true },
       { name: "clock", text: "the engine's clock text below" },
       { name: "usual", text: "the usual routines list below, when it is given them; else empty" },
+      { name: "plan", text: "the open plan items text below, while agenda is read and the plans have any; else empty" },
       { name: "message", text: "the player's message text below, when there is one; else empty" },
       { name: "reply", text: "the narrator's reply", required: true },
     ],
   }),
-  taskText("read", "extract", "Reading the reply", "types", { label: "Proposal types", note: "Each change the read may propose, with its fields. The axes, kinds and life states are the world's.", text: EXTRACT_TYPES, vars: [{ name: "axes", text: "the world's regard axes, each with its range" }, { name: "kinds", text: "the kinds a newcomer may be, after \"; kind: \"; empty when there are none" }, { name: "life", text: "the world's life states" }] }),
+  taskText("read", "extract", "Reading the reply", "types", { label: "Proposal types", note: "Each change the read may propose, with its fields. The axes, kinds, life states and sizes are the world's; the changes to things are the Thing facts text below, and those to organizations the Organization facts text.", text: EXTRACT_TYPES, vars: [{ name: "axes", text: "the world's regard axes, each with its range" }, { name: "kinds", text: "the kinds a newcomer may be, after \"; kind: \"; empty when there are none" }, { name: "life", text: "the world's life states" }, { name: "sizes", text: "the sizes a thing may be, smallest first" }, { name: "items", text: "the changes to things (Thing facts, below)" }, { name: "orgs", text: "the changes to organizations (Organization facts, below), after \" · \", while one of their types is read; else empty" }] }),
+  // The thing facts and their rules (ITEMS-SPEC §5.2, §7.4): classic's extract step reads the same two texts.
+  { id: EXTRACT_ITEM_TEXT.facts, page: rolePageId("read"), group: "Reading the reply", contract: roleContractId("read", "extract"), label: "Thing facts", note: "Each change to a thing the read may propose, with its fields: handed over, taken, put down, put somewhere, had now, owned, used up, worn, lost or damaged. The engine finds the thing each names, or makes it when the story acts on one the world doesn't have yet. Classic's extract step reads this text too.", text: EXTRACT_ITEM_FACTS, vars: [] },
+  { id: EXTRACT_ITEM_TEXT.rules, page: rolePageId("read"), group: "Reading the reply", contract: roleContractId("read", "extract"), label: "Thing rules", note: "When the read proposes a change to a thing, and how it names the thing and says why, among the strict rules: one to a line. Classic's extract step reads this text too.", text: EXTRACT_ITEM_RULES, vars: [] },
+  // The organization facts, their rules and the plans' open items (ORG-SPEC §7.3, assess-party §6.2): classic's extract step reads the same texts.
+  { id: EXTRACT_ORG_TEXT.facts, page: rolePageId("read"), group: "Reading the reply", contract: roleContractId("read", "extract"), label: "Organization facts", note: "Each change to an organization the read may propose, with its fields: someone joins, leaves, is appointed or takes a title (membership); is hired, let go, quits, gets a raise or goes on leave (employment); an item on a plan moves along, or someone offers to do something (agenda). Classic's extract step reads this text too.", text: EXTRACT_ORG_FACTS, vars: [] },
+  { id: EXTRACT_ORG_TEXT.rules, page: rolePageId("read"), group: "Reading the reply", contract: roleContractId("read", "extract"), label: "Organization rules", note: "When the read proposes a change to an organization, and how it quotes the reply, among the strict rules: one to a line. Classic's extract step reads this text too.", text: EXTRACT_ORG_RULES, vars: [] },
+  { id: EXTRACT_ORG_TEXT.plan, page: rolePageId("read"), group: "Reading the reply", contract: roleContractId("read", "extract"), label: "Open plan items", note: "Gives the open goals and orders of the plans the player character is on, each by its id, below the state, so an agenda fact names one that is there. Classic's extract step reads this text too.", text: "Open plan items (an agenda fact names one by the id in brackets):\n{{lines}}", vars: [{ name: "lines", text: "each open goal and order, one to a line", required: true }] },
   taskText("read", "extract", "Reading the reply", "enabled", { label: "Enabled types", note: "Joins the task when only some types are read (Settings → Changes from the reply).", text: "Only these types are enabled: {{types}}.", vars: [{ name: "types", text: "the enabled types", required: true }] }),
   taskText("read", "extract", "Reading the reply", "where", { label: "Where it leaves the player character", note: "Joins the task while moves are read: a reply can take a move as given without telling it.", text: 'Beside "proposals", give "where": the place where the reply leaves the player character at its end, whether it tells how they got there or takes it as given, as its id from Places (or its name as Places lists it); null when it doesn\'t say.', vars: [] }),
   taskText("read", "extract", "Reading the reply", "usual_rule", { label: "Usual routines", note: "Joins the task when it is given the usual routines of the people with the player character.", text: 'Usual routines are given below the state, only to tell where a move the reply describes is going: someone who heads out to their usual spot ("his usual lunch place", "off to her regular bar") moves to that place; give its id from their usual routine, or place "usual" when the reply doesn\'t say which. A usual routine is never a move by itself: no location for someone the reply doesn\'t describe leaving or arriving.', vars: [] }),
@@ -442,6 +500,59 @@ const READ_PROMPTS: readonly PromptDef[] = [
     ],
   }),
   taskText("read", "extract", "Reading the reply", "answer", { label: "Its answer", note: "Describes the answer the engine reads (a fixed output contract): the proposals.", text: 'Output JSON only: {"proposals":[{"type":...}, ...]}.', vars: [] }),
+];
+
+// ---------------------------------------------------------------- curator
+
+/** The Curator's rules (ITEMS-SPEC §7.4), one to a line: its instructions' substance. */
+const CURATOR_RULES = [
+  "The reply is canon: make the world agree with it in the fewest changes.",
+  "Find before you make (items_find, places_find): never make a second of the same thing.",
+  "A handover keeps the owner unless the reply says given, sold, traded or kept: give it the basis the reply says (hold when it says none).",
+  "A thing too big to carry (furniture, an appliance) is placed, never held.",
+  "Say why in every change, in a few words.",
+  "A hidden thing the reply reveals is found, never made again; one it doesn't reveal stays as it is.",
+  "Make a place only when the reply puts someone or something there and nothing fits.",
+  "When unsure, change nothing.",
+];
+
+const CURATOR_TASK = [
+  "{{instructions}}",
+  "Keep the world's fabric true to the narrator's reply below: its things (where each is, who has it, whose it is, who may use it, where it is kept), the places it makes in play, the people who walk on and the goods of what is bought. The reply's other changes (time passing, people moving, feelings, money paid) are the read's: leave them.",
+  "World: {{world}}. The player character is {{pov}} (id {{pov_id}}).",
+  "What this turn did already, as the engine recorded it (never do it again):",
+  "{{events}}",
+  "Make each change with your tools, one change a call: the engine checks it, stages it with the turn, or refuses it with why. Look a thing or a place up first (items_find, places_find) and use the id it gives; check a change you are unsure of with dry set first. Someone who walks on (person_add), a purchase (purchase) and a place someone is put in (place_make with entity) are noted, and land with the reply's other changes.",
+  "{{message}}",
+  "Narration:",
+  "{{reply}}",
+].join("\n");
+
+const CURATOR_PROMPTS: readonly PromptDef[] = [
+  ...roleTexts(
+    "curator",
+    "You are the curator agent of LumiRPEngine, the engine that keeps the roleplay world {{world}}; {{pov}} is the player character. After each reply you keep the world's fabric true to it: the things in it and who has them, the places it makes, the people who walk on and the goods of a purchase, each change made with your tools, which the engine checks and stages with the turn. Your tools show you {{knowledge}}.",
+    howToWork("curator", CURATOR_RULES),
+  ),
+  taskText("curator", "curate", "Curating the reply", "task", {
+    label: "What to do",
+    note: "The Curator's work after the reply: the changes to things and places the reply establishes, made with its tools, with what the turn already did, so nothing is done twice.",
+    text: CURATOR_TASK,
+    vars: [
+      ...WORLD_VARS,
+      { name: "pov_id", text: "the player character's id" },
+      { name: "instructions", text: "the world's or your own words for the extract step (Settings → Steps and connections), which lead it; empty when there are none" },
+      { name: "events", text: "what this turn's actions and the engine did already, one change to a line, as the Journal says it", required: true },
+      { name: "message", text: "the player's message text of the read's task, when there is one; else empty" },
+      { name: "reply", text: "the narrator's reply", required: true },
+    ],
+  }),
+  taskText("curator", "curate", "Curating the reply", "answer", {
+    label: "Its answer",
+    note: "Describes the answer the engine reads (a fixed output contract): once its tools made its changes, none; a change its tools can't make, as a thing fact the engine settles as it settles the read's.",
+    text: 'Once your changes are made, output JSON only: {"proposals": []}. A change your tools can\'t make goes in "proposals" as one of these thing facts, which the engine settles as it settles the read\'s: {{facts}}',
+    vars: [{ name: "facts", text: "the thing facts, as the read's Thing facts text gives them" }],
+  }),
 ];
 
 // ---------------------------------------------------------------- world
@@ -465,10 +576,11 @@ export const ROLE_PROMPT_PAGES: readonly PromptPage[] = [
   page("knowledge", "The knowledge role (after the reply, and before the plan when a decision turns on it): who learned, inferred, doubted or forgot what."),
   page("director", "The director role: the odds of each person's choices before the plan and off-screen after the reply, the brief and outline before the reply, and suggested next moves after it."),
   page("read", "The read role (after the reply): the changes the reply states."),
+  page("curator", "The Curator (after the read, on agent chats): the reply's things, places made in play, walk-on people and the goods of a purchase, each change made with its tools."),
   page("memory", "The memory role (after the reply, or before the next turn): each character's memory of the turn, and their older notes folded into their summary."),
   page("skip", "The time-skip role (on a skip): the moments worth stopping for, and how the people the engine lives a day for spend it."),
   page("world", "The world-steps role: a world's own steps, as their author wrote them."),
 ];
 
 /** Every role's texts, the shared page's first. */
-export const ROLE_PROMPTS: readonly PromptDef[] = [...SHARED_PROMPTS, ...INTENT_PROMPTS, ...SCENE_PROMPTS, ...MINDS_PROMPTS, ...KNOWLEDGE_PROMPTS, ...DIRECTOR_PROMPTS, ...READ_PROMPTS, ...MEMORY_PROMPTS, ...SKIP_PROMPTS, ...WORLD_PROMPTS];
+export const ROLE_PROMPTS: readonly PromptDef[] = [...SHARED_PROMPTS, ...INTENT_PROMPTS, ...SCENE_PROMPTS, ...MINDS_PROMPTS, ...KNOWLEDGE_PROMPTS, ...DIRECTOR_PROMPTS, ...READ_PROMPTS, ...CURATOR_PROMPTS, ...MEMORY_PROMPTS, ...SKIP_PROMPTS, ...WORLD_PROMPTS];

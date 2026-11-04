@@ -1,7 +1,8 @@
 // The action sheet (DESIGN §11, §12): actions with targets and exact odds, Buy, Pay,
 // Transfer, Drive, Lend and Combat, and the Timelapse sheet (duration chips, until targets, interrupt
 // overrides), plus Pause/Resume clock. Each option shows its price, its time and one odds bar with
-// the chances in words; why it can't be taken now shows inline. Everything comes from
+// the chances in words; why it can't be taken now shows inline. Pay and Buy offer Paying as where the
+// player character may spend for an organization (ORG-SPEC §3.6). Everything comes from
 // `StateView.palette`; a choice sends one `lre.action`.
 
 import type { ComponentChildren } from "preact";
@@ -270,6 +271,20 @@ function NextStep(props: { after: PaletteOption; step: NextStepView; chosen: Pal
   );
 }
 
+/** Paying as (ORG-SPEC §3.6, Pay and Buy): You, or each organization the POV may spend for; `value` is the organization's id, "" for You. */
+export function PayingAs(props: { acting: NonNullable<PaletteEntry["acting"]>; value: string; onChange(id: string): void }) {
+  const options = [{ value: "", label: "You" }, ...props.acting.options.map((o) => ({ value: o.id, label: o.name }))];
+  return (
+    <div class="lre-chat-next" data-lre-palette-acting={props.acting.param}>
+      <div class="lre-chat-next-head">
+        <Icon name="briefcase" size={16} />
+        <span>{props.acting.label}</span>
+      </div>
+      <Seg label={props.acting.label} value={options.some((o) => o.value === props.value) ? props.value : ""} options={options} onChange={props.onChange} />
+    </div>
+  );
+}
+
 function ActionList(props: { view: StateView; head: ComponentChildren; entries: PaletteEntry[]; edit?: { gate: PaletteEdit; entry: PaletteEntry }; panel: TabPanelProps; onSent(): void }) {
   const app = useApp();
   // Amounts are typed in the world's currency, with its own decimals (5 is 5 bits, or $5.00).
@@ -292,6 +307,11 @@ function ActionList(props: { view: StateView; head: ComponentChildren; entries: 
     const along = readValue(props.edit?.entry.people?.param);
     return Array.isArray(along) ? along.filter((id): id is string => typeof id === "string") : [];
   });
+  // Paying as (Pay and Buy): the organization the player pays for, "" for themselves; back to You when the action changes.
+  const [payingAs, setPayingAs] = useState(() => {
+    const as = readValue(props.edit?.entry.acting?.param);
+    return typeof as === "string" ? as : "";
+  });
   const [busy, run] = useBusy();
   const amountCents = parseMoneyInput(amount, currency);
   const range = selected?.entry.amount;
@@ -309,13 +329,14 @@ function ActionList(props: { view: StateView; head: ComponentChildren; entries: 
     if (!same) {
       setCount(null);
       setPeople([]);
+      setPayingAs("");
     }
     setSelected(again ? (depth === 0 ? null : { entry, picks }) : { entry, picks: [...picks, option] });
   };
   const go = () => {
     if (!selected || pending || !amountOk || !countOk) return;
     run(async () => {
-      const request = paletteRequest(selected.entry, selected.picks, props.view.chatId, range ? amountCents ?? undefined : undefined, countValue ?? undefined, people);
+      const request = paletteRequest(selected.entry, selected.picks, props.view.chatId, range ? amountCents ?? undefined : undefined, countValue ?? undefined, people, payingAs === "" ? undefined : payingAs);
       // From an intent gate's Edit, the action as picked plays through the chip, in place of the read (DESIGN §5.1).
       const edit = props.edit?.gate;
       const sent = edit ? await sendChipChoice(app, edit.chip, "edit", edit.chatId, { params: request.params }) : (await app.request(request)) !== null;
@@ -323,7 +344,9 @@ function ActionList(props: { view: StateView; head: ComponentChildren; entries: 
     });
   };
   const chain = selected ? selected.picks.map((p) => p.label).filter((part) => part !== selected.entry.label) : [];
-  const what = !selected ? "Choose an action" : pending ? `Choose ${pending.label.toLowerCase()}` : chain.length > 0 ? `${selected.entry.label}: ${chain.join(" → ")}` : selected.entry.label;
+  const payer = selected?.entry.acting?.options.find((o) => o.id === payingAs)?.name;
+  const named = !selected ? "" : chain.length > 0 ? `${selected.entry.label}: ${chain.join(" → ")}` : selected.entry.label;
+  const what = !selected ? "Choose an action" : pending ? `Choose ${pending.label.toLowerCase()}` : payer ? `${named}, as ${payer}` : named;
   const label = props.edit && selected && !pending ? `Play ${what}` : what;
   const span = range ? `${formatMoney(range.min, currency)}${range.max !== null ? `–${formatMoney(range.max, currency)}` : " or more"}` : "";
   return (
@@ -355,6 +378,7 @@ function ActionList(props: { view: StateView; head: ComponentChildren; entries: 
                 ))}
               </div>
             ) : null}
+            {selected?.entry.action === entry.action && entry.acting ? <PayingAs acting={entry.acting} value={payingAs} onChange={setPayingAs} /> : null}
           </section>
         ))}
       </div>

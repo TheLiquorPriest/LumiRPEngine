@@ -17,8 +17,9 @@ import sheetsPack from "./sheets/core/index";
 import storyPack from "./story/core/index";
 import combatPack from "./combat/core/index";
 import mindsPack from "./minds/core/index";
+import orgsPack from "./orgs/core/index";
 
-export const ALL_PACKS: readonly PackDef[] = [enginePack, calendarPack, spacePack, economyPack, gearPack, vehiclesPack, weatherPack, relationshipsPack, castlifePack, sheetsPack, storyPack, combatPack, mindsPack];
+export const ALL_PACKS: readonly PackDef[] = [enginePack, calendarPack, spacePack, economyPack, gearPack, vehiclesPack, weatherPack, relationshipsPack, castlifePack, sheetsPack, storyPack, combatPack, mindsPack, orgsPack];
 
 /** Every pack's default tables, keyed by id (world creation copies and pins them). */
 export function defaultTables(packs: readonly PackDef[] = ALL_PACKS): Record<string, DataTable> {
@@ -45,6 +46,8 @@ export function defaultTables(packs: readonly PackDef[] = ALL_PACKS): Record<str
       proposal: () => undefined,
       lint: () => undefined,
       view: () => undefined,
+      membership: () => undefined,
+      orgSection: () => undefined,
     });
   }
   return out;
@@ -54,3 +57,5 @@ export function defaultTables(packs: readonly PackDef[] = ALL_PACKS): Record<str
 export { STARTER_WORLDS } from "./starters/index";
 /** What each starter world is: its template id, name and a short summary (`lre.world templates`). */
 export { STARTER_INFO } from "./starters/info";
+/** The starter worlds' own tables (a template's prices, items, vehicle classes), each with every revision it has shipped as (Data updates). */
+export { STARTER_TABLES } from "./starters/tables";

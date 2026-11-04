@@ -1,9 +1,10 @@
-// Settings → Narrator holds the narrator's knowledge only (DESIGN §6.11): whose knowledge it gets and
-// what of a secret, each sent as the user's default. How a secret is marked is a text of the prompt
-// registry, so the page has no editor for it and points to Settings → Agents → Prompts instead.
+// Settings → Narrator holds the narrator's knowledge (DESIGN §6.11): whose knowledge it gets and what
+// of a secret, each sent as the user's default, and whether it is given the engine's prices (§9.5).
+// How a secret is marked is a text of the prompt registry, so the page has no editor for it and
+// points to Settings → Agents → Prompts instead.
 
 import { describe, expect, test } from "bun:test";
-import { Seg } from "../../src/frontend/components";
+import { HostSwitch, Seg } from "../../src/frontend/components";
 import { NarratorPage, NarratorViewControl } from "../../src/frontend/settings/narrator";
 import { PromptEditor } from "../../src/frontend/settings/prompt-editor";
 import type { JsonObject } from "../../src/shared/json";
@@ -13,7 +14,7 @@ import { labelled, press, propsOf } from "../support/tree";
 describe("Settings → Narrator", () => {
   test("holds the view choices only, and points to the Prompts page for how a secret is marked", () => {
     const patches: JsonObject[] = [];
-    const tree = NarratorPage({ narrator: { ...NARRATOR_DEFAULTS }, patch: (p) => void patches.push(p), busy: false });
+    const tree = NarratorPage({ narrator: { ...NARRATOR_DEFAULTS }, statePrices: true, patch: (p) => void patches.push(p), busy: false });
     // No text editor of its own: the mark's wording is the registry's.
     expect(propsOf(tree, PromptEditor)).toEqual([]);
     const controls = propsOf(tree, NarratorViewControl);
@@ -25,5 +26,14 @@ describe("Settings → Narrator", () => {
     expect(patches).toEqual([{ narrator: { knowledge: "pov", secrets: "marked" } }, { narrator: { knowledge: "scene", secrets: "omit" } }]);
     const pointer = propsOf(tree, "p").find((p) => "data-lre-mark-wording" in p);
     expect(String(pointer?.children)).toContain("Settings → Agents → Prompts → Final output, under Secret marks");
+  });
+
+  test("Prices switches whether the narrator is given the engine's prices and told to state them", () => {
+    const patches: JsonObject[] = [];
+    const tree = NarratorPage({ narrator: { ...NARRATOR_DEFAULTS }, statePrices: true, patch: (p) => void patches.push(p), busy: false });
+    const [prices] = propsOf(tree, HostSwitch).filter((p) => p.label === "The narrator states prices");
+    expect(prices?.checked).toBe(true);
+    (prices?.onChange as (checked: boolean) => void)(false);
+    expect(patches).toEqual([{ statePrices: false }]);
   });
 });

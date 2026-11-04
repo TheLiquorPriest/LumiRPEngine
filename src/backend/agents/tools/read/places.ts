@@ -15,6 +15,7 @@
 // rule (`whereabouts`).
 
 import { placeChain } from "../../../../engine/lore-pins";
+import { findPlaces } from "../../../../engine/places-in-play";
 import { own } from "../../../../engine/pack-kit";
 import { kindIs, placeOfEntity, placeWithin } from "../../../../engine/scope";
 import { waysOut } from "../../../../packs/space/core/feed";
@@ -232,6 +233,27 @@ export const PLACES_TOOLS: readonly ToolDefinition[] = [
         }
         const answer: RouteAnswer = { from: placeShown(view, from.id), to: placeShown(view, to.id), routes, ...(none.length > 0 ? { none } : {}) };
         return view.answer(answer);
+      });
+    },
+  },
+  {
+    // A place by its words (ITEMS-SPEC §7.3), places made in play among them: found as the space pack finds one (`findPlaces`), nearest first.
+    name: "places_find",
+    family: "places",
+    tier: "read",
+    parameters: () => objectSchema({ words: text(), near: text(), parent: text() }, ["words"]),
+    run: async (args, env) => {
+      const view = await env.reader.view();
+      const words = needText(view, "places_find", args, "words");
+      if (typeof words !== "string") return words;
+      const near = textArg(args, "near") === null ? null : resolvePlace(view, textArg(args, "near") ?? "");
+      if (near && "refused" in near) return near.refused;
+      const parent = textArg(args, "parent") === null ? null : resolvePlace(view, textArg(args, "parent") ?? "");
+      if (parent && "refused" in parent) return parent.refused;
+      return view.read(() => {
+        const at = near?.id ?? placeOfEntity(view.state, view.pov) ?? undefined;
+        const hits = findPlaces(view.ctx, words, { ...(parent ? { parent: parent.id } : {}), ...(at !== undefined ? { near: at } : {}) }).filter((h) => view.seesPlace(h.id));
+        return view.answer({ places: hits.map((h) => ({ ...placeShown(view, h.id), parent: h.parent === null ? undefined : placeShown(view, h.parent), made: h.made || undefined, matched: h.matched })) });
       });
     },
   },

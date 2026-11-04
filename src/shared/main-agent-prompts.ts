@@ -18,7 +18,7 @@ export const MAIN_ROLE_STAGES = ["memory_before", "intent", "prepare", "beats", 
 export type MainRoleStage = (typeof MAIN_ROLE_STAGES)[number];
 
 /** What the engine may ask of a role in a main-agent turn: each model call of a turn (`TurnCalls`), and the scene. */
-export const MAIN_REQUEST_KINDS = ["interpret", "judge", "puzzle", "decisions", "minds", "skipPlan", "skip", "scene", "prose", "extract", "effects", "knowledge", "offscreen", "choices", "memory"] as const;
+export const MAIN_REQUEST_KINDS = ["interpret", "judge", "puzzle", "decisions", "minds", "skipPlan", "skip", "scene", "prose", "extract", "curate", "effects", "knowledge", "offscreen", "choices", "memory"] as const;
 export type MainRequestKind = (typeof MAIN_REQUEST_KINDS)[number];
 
 /** The main agent's tools, by name. */
@@ -109,6 +109,7 @@ const REQUEST_TEXTS: Readonly<Record<MainRequestKind, { label: string; text: str
   scene: { label: "The scene", text: "pick the lore and notes the narrator needs for this scene" },
   prose: { label: "The director: the beats", text: "write the brief and the outline's beats for the planned turn" },
   extract: { label: "The read", text: "read the reply into the changes it makes" },
+  curate: { label: "The Curator", text: "keep the reply's things, places, walk-ons and purchases' goods true to it, with its tools" },
   effects: { label: "A world step", text: "run the world's own step on the reply" },
   knowledge: { label: "The knowledge", text: "work out what each person present or told learned from the reply" },
   offscreen: { label: "The director: decisions elsewhere", text: "give the odds of each choice open to people elsewhere" },

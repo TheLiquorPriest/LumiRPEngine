@@ -13,6 +13,8 @@ import type { Node } from "../../src/engine/expr";
 import { createRegistry } from "../../src/engine/registry-impl";
 import { ALL_PACKS } from "../../src/packs/index";
 import { ASSET_CLASSES } from "../../src/shared/finance";
+import { AUDIENCES, ORG_POWERS } from "../../src/shared/org";
+import { GM_OWNER } from "../../src/shared/world";
 
 type Rec = Record<string, unknown>;
 
@@ -127,7 +129,7 @@ function validate(t: Rec, file: string): { findings: Findings; counts: Record<st
   };
   const collections: [string, string][] = [
     ["places", "place"], ["routes", "route"], ["grids", "grid"], ["characters", "character"], ["items", "item"], ["containers", "container"], ["kits", "kit"],
-    ["vehicles", "vehicle"], ["accounts", "account"], ["tracks", "track"], ["rules", "rule"], ["actions", "action"], ["clues", "clue"], ["lore", "lore"], ["flags", "flag"], ["prices", "price"], ["flows", "flow"], ["cards", "card"], ["households", "household"], ["records", "record"], ["gearItems", "gearItem"],
+    ["vehicles", "vehicle"], ["accounts", "account"], ["tracks", "track"], ["rules", "rule"], ["actions", "action"], ["clues", "clue"], ["lore", "lore"], ["flags", "flag"], ["prices", "price"], ["flows", "flow"], ["cards", "card"], ["households", "household"], ["records", "record"], ["organizations", "organization"], ["gearItems", "gearItem"],
   ];
   for (const [key, kind] of collections) for (const [i, item] of recs(t[key]).entries()) claim(kind, item.id, `${key}[${i}]`);
   for (const group of Object.keys(rec(t.groups))) claim("group", group, `groups.${group}`);
@@ -451,11 +453,11 @@ function validate(t: Rec, file: string): { findings: Findings; counts: Record<st
     const amount = num(flow.amountCents) ?? 0;
     // From an account (its holders pay), or a party without accounts, who pays out of their means; an outside payer named in words pays in.
     if (!accountsById.has(text(flow.from)) && has(flow.from)) {
-      if (!has(flow.from, "character", "household", "record")) err(`${where}: "from" is a ${kindOf(flow.from)}; a flow is paid from an account or a party`);
+      if (!has(flow.from, "character", "household", "organization", "record")) err(`${where}: "from" is a ${kindOf(flow.from)}; a flow is paid from an account or a party`);
       else if (recs(t.accounts).some((a) => ownersOfAccount(a.id).includes(text(flow.from)))) err(`${where}: the payer holds accounts, so "from" must name the one it pays from`);
     }
     // To an account, a party (it lands in their deposit account), or an outside counterparty named in words.
-    if (has(flow.to) && !has(flow.to, "account", "character", "household", "record")) err(`${where}: "to" is a ${kindOf(flow.to)}; a flow pays an account, a party or an outside counterparty`);
+    if (has(flow.to) && !has(flow.to, "account", "character", "household", "organization", "record")) err(`${where}: "to" is a ${kindOf(flow.to)}; a flow pays an account, a party or an outside counterparty`);
     if (flow.to === flow.from) err(`${where}: a flow can't pay itself`);
     if (!Number.isInteger(amount) || amount <= 0) err(`${where}: amountCents must be a positive integer of base units`);
     if (flow.once === undefined) {
@@ -467,7 +469,7 @@ function validate(t: Rec, file: string): { findings: Findings; counts: Record<st
       if (every === "month" && list(flow.days).length === 0) err(`${where}: a monthly flow names its days`);
     }
     if (flow.link !== undefined) need(`${where}.link`, flow.link, "vehicle", "record", "account");
-    for (const [i, share] of recs(flow.shares).entries()) need(`${where}.shares[${i}]`, share.party, "character", "household", "record");
+    for (const [i, share] of recs(flow.shares).entries()) need(`${where}.shares[${i}]`, share.party, "character", "household", "organization", "record");
   }
   for (const k of recs(t.cards)) {
     const where = `card ${text(k.id)}`;
@@ -477,6 +479,7 @@ function validate(t: Rec, file: string): { findings: Findings; counts: Record<st
     if (!["debit", "credit", "charge"].includes(text(k.network))) err(`${where}: network is debit, credit or charge`);
   }
   for (const h of recs(t.households)) for (const [i, m] of recs(h.members).entries()) need(`household ${text(h.id)}.members[${i}]`, m.id, "character");
+  for (const o of recs(t.organizations)) for (const [i, m] of recs(o.members).entries()) need(`organization ${text(o.id)}.members[${i}]`, m.id, "character", "household", "organization", "record");
   const assets = rec(rec(t.economy).assets);
   // An asset of a class the holdings module doesn't know is worth nothing and never shows.
   for (const [id, asset] of Object.entries(assets)) if (!(ASSET_CLASSES as readonly string[]).includes(text(rec(asset).class))) err(`economy.assets.${id}: class "${text(rec(asset).class)}" isn't one of ${ASSET_CLASSES.join(", ")}`);
@@ -490,7 +493,103 @@ function validate(t: Rec, file: string): { findings: Findings; counts: Record<st
     }
     if (r.kind === "property") need(`${where}.fields.place`, fields.place, "place");
   }
+
+  // ---------------------------------------------------------------- organizations (ORG-SPEC §3)
+  // A group's kind is one of the world's group kinds, other than those with collections of their own.
+  const groupKind = (kind: string): boolean => {
+    if (["household", "business", "trust", "party"].includes(kind)) return false;
+    let id: string | undefined = kind;
+    for (let guard = 0; id && guard < 32; guard++) {
+      if (id === "group") return true;
+      id = engine.kinds.get(id)?.extends;
+    }
+    return false;
+  };
+  for (const o of recs(t.organizations)) {
+    if (!groupKind(text(o.kind))) err(`organization ${text(o.id)}: kind "${text(o.kind)}" isn't a group kind (faction, family, company or another extending group)`);
+    for (const [i, p] of list(o.places).entries()) need(`organization ${text(o.id)}.places[${i}]`, p, "place");
+  }
+  // Positions: on a household, an organization, or a business or trust record.
+  const positionsBy = new Map<string, Rec[]>();
+  for (const [key, label] of [["households", "household"], ["organizations", "organization"], ["records", "record"]] as const) {
+    for (const o of recs(t[key])) {
+      const where = `${label} ${text(o.id)}`;
+      const positions = recs(o.positions);
+      if (o.positions !== undefined && key === "records" && !["business", "trust"].includes(text(o.kind))) err(`${where}: only a business or a trust record defines positions`);
+      if (rec(o.fields).positions !== undefined) err(`${where}: write positions as the record's \`positions\`, not in its fields`);
+      positionsBy.set(text(o.id), positions);
+      const ids = new Set<string>();
+      for (const p of positions) {
+        const at = `${where}.positions.${text(p.id)}`;
+        if (!/^[a-z][a-z0-9_]*$/.test(text(p.id))) err(`${at}: id must be lower snake_case`);
+        if (ids.has(text(p.id))) err(`${at}: defined twice`);
+        ids.add(text(p.id));
+        if (!text(p.title)) err(`${at}: a position needs its title`);
+        for (const power of list(p.powers)) if (!(ORG_POWERS as readonly string[]).includes(text(power))) err(`${at}: "${text(power)}" isn't a power (${ORG_POWERS.join(", ")})`);
+        if (p.seats !== undefined && !(Number.isInteger(p.seats) && (num(p.seats) ?? -1) >= 0)) err(`${at}: seats is a whole number, 0 for any number`);
+        if (p.scope !== undefined && !["org", "below"].includes(text(p.scope))) err(`${at}: scope is "org" or "below"`);
+        const successor = text(p.successor);
+        if (p.successor !== undefined && successor !== "next" && successor !== "vacant") need(`${at}.successor`, successor, "character");
+        const limits = rec(p.limits);
+        for (const key2 of ["paymentCents", "monthCents"]) if (limits[key2] !== undefined && !(Number.isInteger(limits[key2]) && (num(limits[key2]) ?? -1) >= 0)) err(`${at}.limits.${key2}: a whole number of base units`);
+        for (const [i, a] of list(limits.accounts).entries()) need(`${at}.limits.accounts[${i}]`, a, "account");
+      }
+      for (const p of positions) {
+        if (p.reportsTo !== undefined && !ids.has(text(p.reportsTo))) err(`${where}.positions.${text(p.id)}: reports to "${text(p.reportsTo)}", which ${text(o.id)} doesn't define`);
+        // Following reportsTo never comes back round.
+        const seen = new Set<string>([text(p.id)]);
+        for (let cur = p.reportsTo === undefined ? "" : text(p.reportsTo); cur !== ""; cur = text(positions.find((q) => text(q.id) === cur)?.reportsTo)) {
+          if (seen.has(cur)) {
+            err(`${where}.positions.${text(p.id)}: reports, up the line, to itself`);
+            break;
+          }
+          seen.add(cur);
+        }
+      }
+    }
+  }
+  const definesPosition = (org: unknown, position: unknown): boolean => (positionsBy.get(text(org)) ?? []).some((p) => p.id === position);
+  const holders = new Map<string, number>();
+  const hold = (org: string, position: string): void => void holders.set(`${org}.${position}`, (holders.get(`${org}.${position}`) ?? 0) + 1);
+  for (const [key, label] of [["households", "household"], ["organizations", "organization"]] as const) {
+    for (const o of recs(t[key])) {
+      for (const [i, m] of recs(o.members).entries()) {
+        if (m.position === undefined) continue;
+        if (!definesPosition(o.id, m.position)) err(`${label} ${text(o.id)}.members[${i}]: holds "${text(m.position)}", which ${text(o.id)} doesn't define`);
+        else hold(text(o.id), text(m.position));
+      }
+    }
+  }
+  for (const c of characters) {
+    const job = rec(c.job);
+    if (job.position === undefined) continue;
+    if (job.rateCents === undefined) err(`character ${text(c.id)}: a job's position needs a paid job (rateCents)`);
+    if (!definesPosition(job.employer, job.position)) err(`character ${text(c.id)}: the job's position "${text(job.position)}" isn't one its employer "${text(job.employer)}" defines`);
+    else hold(text(job.employer), text(job.position));
+  }
+  for (const [org, positions] of positionsBy) {
+    for (const p of positions) {
+      const seats = num(p.seats) ?? 1;
+      const count = holders.get(`${org}.${text(p.id)}`) ?? 0;
+      if (seats > 0 && count > seats) err(`${org}.positions.${text(p.id)}: ${count} holders for ${seats} seat${seats === 1 ? "" : "s"}`);
+    }
+  }
+  // Delegations: to an organization, of real powers, granted by someone who belongs to it or owns it.
+  const orgIds = new Set<string>([...recs(t.households).map((h) => text(h.id)), ...recs(t.organizations).map((o) => text(o.id)), ...recs(t.records).filter((r) => ["business", "trust"].includes(text(r.kind))).map((r) => text(r.id))]);
+  for (const [i, d] of recs(t.delegations).entries()) {
+    const where = `delegations[${i}]`;
+    need(`${where}.who`, d.who, "character", "household", "organization", "record");
+    if (!orgIds.has(text(d.org))) err(`${where}: "${text(d.org)}" isn't a household, an organization, or a business or trust record`);
+    need(`${where}.by`, d.by, "character");
+    if (d.who === d.by) err(`${where}: someone can't delegate to themselves`);
+    if (list(d.powers).length === 0) err(`${where}: a delegation names its powers`);
+    for (const power of list(d.powers)) if (!(ORG_POWERS as readonly string[]).includes(text(power))) err(`${where}: "${text(power)}" isn't a power`);
+    for (const key of ["paymentCents", "monthCents"]) if (d[key] !== undefined && !(Number.isInteger(d[key]) && (num(d[key]) ?? -1) >= 0)) err(`${where}.${key}: a whole number of base units`);
+    for (const [j, a] of list(d.accounts).entries()) need(`${where}.accounts[${j}]`, a, "account");
+    if (d.until !== undefined && !parseDate(d.until)) err(`${where}.until: not a valid date-time`);
+  }
   for (const p of recs(t.places)) for (const key of ["atm", "branch"]) if (p[key] !== undefined && text(rec(p[key]).bank) === "") err(`place ${text(p.id)}: its ${key} names no bank`);
+  for (const p of recs(t.places)) if (p.entry !== undefined && !(AUDIENCES as readonly string[]).includes(text(p.entry))) err(`place ${text(p.id)}: entry "${text(p.entry)}" isn't one of ${AUDIENCES.join(", ")}`);
 
   // ---------------------------------------------------------------- gear
   const gearItems = data.rows("gear.items") ?? {};
@@ -505,7 +604,7 @@ function validate(t: Rec, file: string): { findings: Findings; counts: Record<st
     for (const item of recs(t[collection])) {
       const where = `${kind} ${text(item.id)}`;
       need(`${where}.in`, item.in, ...holderKinds);
-      if (item.owner !== undefined) need(`${where}.owner`, item.owner, "character", "place");
+      if (item.owner !== undefined) need(`${where}.owner`, item.owner, "character", "place", "household", "organization", "record");
       if (text(item.description).length < 20 && !item.hidden) err(`${where}: description is too short`);
       if (item.worn === true) {
         if (!SLOTS.includes(text(item.slot))) err(`${where}: bad slot "${text(item.slot)}"`);
@@ -547,7 +646,7 @@ function validate(t: Rec, file: string): { findings: Findings; counts: Record<st
   }
   for (const v of recs(t.vehicles)) {
     const where = `vehicle ${text(v.id)}`;
-    need(`${where}.owner`, v.owner, "character", "place");
+    need(`${where}.owner`, v.owner, "character", "place", "household", "organization", "record");
     need(`${where}.location`, v.location, "place");
     if (v.class !== undefined) {
       const row = rec(classes[text(v.class)]);
@@ -569,7 +668,7 @@ function validate(t: Rec, file: string): { findings: Findings; counts: Record<st
     const where = `account ${text(a.id)}`;
     const owners = recs(a.owners);
     if (owners.length === 0) err(`${where}: an account needs its owners`);
-    for (const [i, o] of owners.entries()) need(`${where}.owners[${i}]`, o.party, "character", "place", "household", "record");
+    for (const [i, o] of owners.entries()) need(`${where}.owners[${i}]`, o.party, "character", "place", "household", "organization", "record");
     if (a.container !== undefined) need(`${where}.container`, a.container, "container");
     for (const field of ["opening", "limitCents", "paymentCents", "autopayCents", "overdraftLimitCents"]) {
       if (a[field] !== undefined && !Number.isInteger(a[field])) err(`${where}: ${field} must be an integer`);
@@ -620,14 +719,15 @@ function validate(t: Rec, file: string): { findings: Findings; counts: Record<st
     if (!TRACK_KINDS.includes(text(track.kind))) err(`${where}: bad kind`);
     if (!VISIBILITY.includes(text(track.visibility))) err(`${where}: bad visibility`);
     if (!(text(track.start) in stages)) err(`${where}: start stage is missing`);
-    if (track.owner !== undefined) {
+    // The GM's own track (`"gm"`) is nobody's in the story, so there is no one to check it against.
+    if (track.owner !== undefined && track.owner !== GM_OWNER) {
       // An agenda belongs to a character; a puzzle's owner is the thing it is about, which the player must come to know (a `knows` link) before the puzzle shows in Quests.
       if (track.kind === "puzzle") {
         need(`${where}.owner`, track.owner, "character", "item", "container", "vehicle");
         if (track.visibility === "known_by" && !knownToPov.has(text(track.owner))) err(`${where}: the player is never linked as knowing "${text(track.owner)}" (a stage or rule effect {type: "link", rel: "knows", from: "pov"}), so the puzzle never shows in Quests`);
       } else need(`${where}.owner`, track.owner, "character");
     }
-    if (track.kind === "puzzle" && track.visibility === "known_by" && track.owner === undefined) err(`${where}: a known_by puzzle needs an owner the player comes to know, or it never shows in Quests`);
+    if (track.kind === "puzzle" && track.visibility === "known_by" && (track.owner === undefined || track.owner === GM_OWNER)) err(`${where}: a known_by puzzle needs an owner the player comes to know, or it never shows in Quests`);
     const targets = new Map<string, string[]>();
     let terminal = 0;
     let truths = 0;

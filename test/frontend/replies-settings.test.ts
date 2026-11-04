@@ -1,18 +1,19 @@
 // Settings → Changes from the reply (D4 learning, DESIGN §11; AGENT-LOOP-PLAN §6): each type's row shows
 // its mode, where that mode comes from, and Unpin once pinned. The GM assistant's change types read as
 // its role learned them on its connection, through the real settings store, apart from the reply's
-// types, which keep their own per-connection learning.
+// types, which keep their own per-connection learning. What the read tells and keeps of things
+// (ITEMS-SPEC §11) is set there too, each a whole number in its bounds.
 
 import { describe, expect, test } from "bun:test";
 import type { VNode } from "preact";
 import { recordOutcome } from "../../src/backend/settings-store";
-import { Button, Seg } from "../../src/frontend/components";
+import { Button, NumberStepper, Seg } from "../../src/frontend/components";
 import { ExtractionPage, modeSource } from "../../src/frontend/settings/replies";
 import type { JsonObject } from "../../src/shared/json";
 import type { ExtractionModeView, SettingsResult } from "../../src/shared/protocol";
-import { EXTRACTION_LEARNING } from "../../src/shared/settings";
+import { EXTRACTION_LEARNING, THING_READ_BOUNDS, THING_READ_DEFAULTS } from "../../src/shared/settings";
 import { Rig } from "../support/rig";
-import { propsOf, type Props } from "../support/tree";
+import { labelled, press, propsOf, type Props } from "../support/tree";
 
 const DEEPSEEK = { id: "deepseek", name: "Deepseek" };
 
@@ -72,5 +73,30 @@ describe("Settings → Changes from the reply: the GM assistant's changes", () =
     if (typeof unpin?.onClick !== "function") throw new Error("no Unpin");
     unpin.onClick();
     expect(after.patches).toEqual([{ extraction: { money_adjust: null } }]);
+  });
+});
+
+describe("Settings → Changes from the reply: things in the reply", () => {
+  const LABELS = { shown: "Things the read is shown", whyMax: "A change's why, at most (characters)", madeMax: "Things made from a reply, at most" } as const;
+
+  test("each shows its setting within its bounds; what it sends is kept, and a value out of bounds reads as the default", async () => {
+    const rig = new Rig();
+    const first = await page(rig);
+    for (const [key, label] of Object.entries(LABELS) as [keyof typeof LABELS, string][]) {
+      const stepper = labelled(first.tree, NumberStepper, label);
+      expect([stepper.value, stepper.min, stepper.max]).toEqual([THING_READ_DEFAULTS[key], ...THING_READ_BOUNDS[key]]);
+    }
+    press(labelled(first.tree, NumberStepper, LABELS.madeMax), 2);
+    press(labelled(first.tree, NumberStepper, LABELS.shown), 60);
+    press(labelled(first.tree, NumberStepper, LABELS.whyMax), 200);
+    expect(first.patches).toEqual([{ thingReads: { madeMax: 2 } }, { thingReads: { shown: 60 } }, { thingReads: { whyMax: 200 } }]);
+    for (const patch of first.patches) rig.body(await rig.send({ type: "lre.settings.set", patch }));
+    const values = async (): Promise<unknown[]> => {
+      const { tree } = await page(rig);
+      return [LABELS.shown, LABELS.whyMax, LABELS.madeMax].map((label) => labelled(tree, NumberStepper, label).value);
+    };
+    expect(await values()).toEqual([60, 200, 2]);
+    rig.body(await rig.send({ type: "lre.settings.set", patch: { thingReads: { madeMax: 501, whyMax: 12.5 } } }));
+    expect(await values()).toEqual([60, THING_READ_DEFAULTS.whyMax, THING_READ_DEFAULTS.madeMax]);
   });
 });

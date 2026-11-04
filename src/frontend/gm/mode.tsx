@@ -1,7 +1,7 @@
-// GM mode, inside the drawer's GM frame: a bottom bar in GM gold (World, Places,
+// GM mode, inside the drawer's GM frame: a bottom bar in GM gold (World, Places, Things,
 // Story, each pack's tab in its order, the core pack's Assistant and Workspace last, This chat) over
-// the GM panels. The truth (World, Places, Story, the packs' tabs, the Fight and the Edits log) is
-// the `core.gm` panel, behind the gate in UI state; This chat's rules and the Inspector
+// the GM panels. The truth (World, Places, Things, Story, the packs' tabs, the Fight and the Edits
+// log) is the `core.gm` panel, behind the gate in UI state; This chat's rules and the Inspector
 // (`core.context` and any other GM panel) aren't behind it. Leaving GM mode, or moving to another
 // chat, closes the gate again. The bar's height is published (`--lre-gm-nav-h`) so what a list pins
 // at the bottom (its selection bar, an edit's notice) sits above the bar, never under it.
@@ -19,6 +19,7 @@ import { gmAt, hideTruth } from "./gate";
 const ENGINE: readonly { id: GmSection; label: string; icon: IconName }[] = [
   { id: "world", label: "World", icon: "globe" },
   { id: "places", label: "Places", icon: "pin" },
+  { id: "things", label: "Things", icon: "bag" },
   { id: "story", label: "Story", icon: "flag" },
 ];
 

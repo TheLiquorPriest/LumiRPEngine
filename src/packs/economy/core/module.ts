@@ -12,7 +12,7 @@
 
 import type { EntityId } from "../../../shared/ids";
 import type { LedgerEvent, PostingLine } from "../../../shared/ledger";
-import type { AccountClass, AlertLine, ClassTraits, CreditApplication, FilingStatus, FinanceFeature, FinanceView, Flow, FlowSchedule, FlowSplit, MoneySummary, Owner, PartyKind, ResolvedProduct, TxnKind, UpcomingLine } from "../../../shared/finance";
+import type { AccountClass, AlertLine, ClassTraits, CreditApplication, FilingStatus, FinanceFeature, FinanceView, Flow, FlowSchedule, FlowSplit, MoneySummary, Owner, PartyKind, ResolvedProduct, TxnKind, UpcomingLine, WorthLine } from "../../../shared/finance";
 import type { FieldDef } from "../../../shared/world";
 import type { CoreRegistry, ReadContext, Rejection } from "../../../engine/registry";
 import type { WorldState } from "../../../engine/state";
@@ -55,7 +55,7 @@ export interface FlowSource {
 }
 
 /** What a module adds to a party's net worth beyond its accounts' balances: holdings at market, property and business shares, the debts against them. */
-export type WorthSource = (ctx: ReadContext, party: EntityId) => { assets: number; liabilities: number; lines: { label: string; cents: number }[] };
+export type WorthSource = (ctx: ReadContext, party: EntityId) => { assets: number; liabilities: number; lines: WorthLine[] };
 
 /** A purchase about to post. */
 export interface Sale {

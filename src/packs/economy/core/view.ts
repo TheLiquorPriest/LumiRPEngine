@@ -6,9 +6,9 @@
 // surface a party the POV can't see is "someone".
 
 import type { EntityId } from "../../../shared/ids";
-import { AUTOPAY_MODES, CLASS_TRAITS, FINANCE_FEATURES, featureOn, ownersIn, payeeKey, worthShares, type AccountView, type AutopayMode, type CycleState, type AlertLine, type CardView, type FinanceView, type Flow, type FlowView, type HouseholdView, type JournalEntry, type JournalLine, type OverviewView, type PartyKind, type StatementView, type UpcomingLine } from "../../../shared/finance";
+import { AUTOPAY_MODES, CLASS_TRAITS, FINANCE_FEATURES, featureOn, ownersIn, payeeKey, worthShares, type AccountView, type AutopayMode, type CycleState, type AlertLine, type CardView, type FinanceView, type Flow, type FlowView, type HouseholdView, type InterestView, type JournalEntry, type JournalLine, type OverviewView, type PartyKind, type StatementView, type UpcomingLine } from "../../../shared/finance";
 import { formatMoney } from "../../../shared/world";
-import { calendarOf, formatClock, monthName, weekdayName } from "../../../engine/calendar";
+import { calendarOf, dateAt, formatClock, monthName, weekdayName } from "../../../engine/calendar";
 import { EXTERNAL_ACCOUNT_PREFIX } from "../../../engine/events";
 import { numOf, objOf, own, sliceOf, strOf } from "../../../engine/pack-kit";
 import type { ReadContext } from "../../../engine/registry";
@@ -17,11 +17,12 @@ import { membersOf, MEMBER_OF } from "../../../engine/selector";
 import { canSeePlace, personWords, wordPattern } from "../../../engine/visibility";
 import type { FinanceHooks } from "./module";
 import { autopaySourceProblem, interestsOf, mayPayFrom, paysFor } from "./actions";
-import { statementState } from "./cycle";
+import { interestOutlook, statementState } from "./cycle";
 import { creditReport } from "./credit";
 import { allFlows, fallsBackOn, occurrences, occurrenceAmount } from "./flows";
-import { cycleOf, flowRunOf, isOpened, journalOf, NOTES_CAP } from "./journal";
-import { accountsOf, availableOf, balance, canSpend, classOf, holdersOf, holdsOn, householdOf, managesAccount, managesParty, opaqueId, openerOf, outsideHidden, outsideName, ownersOf, productOf, rightsOf, seenBy, shareOf, statusOf, traitsOf, wealthBand } from "./model";
+import { cycleOf, flowRunOf, interestInYear, isOpened, journalOf, lastInterestOf, NOTES_CAP } from "./journal";
+import { accountsOf, availableOf, balance, canSpend, classOf, holdersOf, holdsOn, householdOf, managesAccount, managesParty, moneyLevel, openerOf, outsideHidden, outsideName, ownersOf, productOf, rightsOf, seenBy, shareOf, statusOf, traitsOf, wealthBand } from "./model";
+import { opaqueId } from "../../../shared/hash";
 import { cardsOn, cardRoom, featureFor, isParty, overdraftRoom, tiersOf, toggles } from "./pay";
 import { netWorthParts } from "./worth";
 import { createRng } from "../../../engine/rng";
@@ -183,7 +184,7 @@ function stringsIn(value: unknown, out: Set<string>): void {
 
 function partyKindOf(ctx: ReadContext, id: EntityId): PartyKind {
   const kind = own(ctx.state.entities, id)?.kind ?? "";
-  for (const k of ["business", "trust", "household"] as const) if (kindIs(ctx.registry, ctx.world, kind, k)) return k;
+  for (const k of ["business", "trust", "household", "group"] as const) if (kindIs(ctx.registry, ctx.world, kind, k)) return k;
   return "person";
 }
 
@@ -206,7 +207,9 @@ function journalLine(ctx: ReadContext, viewer: Viewer, party: EntityId, j: Journ
   const worth = Object.entries(worthShares(ownersOf(ctx.state, j.account))).filter(([, share]) => share > 0);
   const whose = worth.length === 1 ? (worth[0]?.[0] ?? j.account) : j.account;
   const counterparty = j.counterparty && j.counterparty !== party && j.counterparty !== whose ? counterpartyName(ctx, viewer, j.counterparty) : null;
-  return { id: j.id, at: when(ctx, j.at), memo: says(viewer, j.memo), cents: j.cents, account: nameFor(ctx, viewer, j.account), accountId: j.account, kind: j.kind ?? null, category: j.category ?? null, counterparty, card: j.card ? nameFor(ctx, viewer, j.card) : null, status: j.status };
+  // Made by someone acting for the organization whose account it is (ORG-SPEC §3.6).
+  const by = j.by && j.by !== whose ? `${j.cents < 0 ? "Paid" : "Made"} by ${nameFor(ctx, viewer, j.by)} for ${nameFor(ctx, viewer, whose)}` : undefined;
+  return { id: j.id, at: when(ctx, j.at), memo: says(viewer, j.memo), cents: j.cents, account: nameFor(ctx, viewer, j.account), accountId: j.account, kind: j.kind ?? null, category: j.category ?? null, counterparty, card: j.card ? nameFor(ctx, viewer, j.card) : null, ...(by !== undefined ? { by } : {}), status: j.status };
 }
 
 function cardView(ctx: ReadContext, viewer: Viewer, card: EntityId): CardView {
@@ -284,6 +287,22 @@ function pastStatements(ctx: ReadContext, account: EntityId): StatementView[] {
     .map((c) => ({ at: day(ctx, numOf(c.at)), closing: numOf(c.closing), interest: numOf(c.interest), fees: numOf(c.fees), minimum: numOf(c.minimum), due: day(ctx, numOf(c.due)), paid: numOf(c.paid), apr: numOf(c.apr), stage: (strOf(c.stage, "current") as StatementView["stage"]) ?? "current", state: numOf(c.paid) >= numOf(c.closing) ? "paid" : numOf(c.paid) >= numOf(c.minimum) ? "minimum" : "late" }));
 }
 
+/** An account's interest as its page shows it: what the cycle will do (`interestOutlook`), with what it came to this year and the last it posted, each as earned or charged. */
+function interestView(ctx: ReadContext, account: EntityId): InterestView | null {
+  const outlook = interestOutlook(ctx, account, ctx.state.clock);
+  if (!outlook) return null;
+  const earns = outlook.way === "earns";
+  const last = lastInterestOf(ctx.state, account);
+  return {
+    way: outlook.way,
+    ratePct: outlook.ratePct,
+    basis: outlook.basis,
+    thisYear: interestInYear(ctx.state, account, dateAt(calendarOf(ctx.world), ctx.state.clock).year, earns ? "in" : "out"),
+    last: last ? { cents: earns ? last.cents : -last.cents, at: day(ctx, last.at) } : null,
+    next: outlook.next ? { cents: outlook.next.cents, at: day(ctx, outlook.next.at) } : null,
+  };
+}
+
 function accountView(ctx: ReadContext, viewer: Viewer, party: EntityId, account: EntityId, level: number, detail: boolean): AccountView {
   const e = own(ctx.state.entities, account);
   const cls = classOf(ctx, account) ?? "checking";
@@ -321,8 +340,7 @@ function accountView(ctx: ReadContext, viewer: Viewer, party: EntityId, account:
     autopayFrom: [],
     fallbacks: [],
     limit: level >= 3 && t.liability ? (p?.limit ?? null) : null,
-    aprPct: level >= 4 && t.liability ? (p?.apr_pct ?? null) : null,
-    apyPct: level >= 4 && t.earns ? (p?.apy_pct ?? null) : null,
+    interest: interestView(ctx, account),
     terms: level >= 3 ? terms(ctx, account, detail) : [],
     autopay: level >= 3 && (t.revolving || t.installment) ? { mode: (AUTOPAY_MODES as readonly string[]).includes(autopayMode) ? (autopayMode as AutopayMode) : "none", from: autopayFrom ? idFor(ctx, viewer, autopayFrom) : null, fromName: autopayFrom ? nameFor(ctx, viewer, autopayFrom) : null, cents: autopayMode === "fixed" ? numOf(e?.fields.autopay_cents) : null } : null,
     due: statements ? due : null,
@@ -514,9 +532,8 @@ export function buildFinanceView(hooks: FinanceHooks, ctx: ReadContext, party: E
   };
   const e = own(ctx.state.entities, party);
   const kind = partyKindOf(ctx, party);
-  // A household is its members' shared money: it is followed as closely as its most closely followed member, though it holds no account of its own.
-  const members = kind === "household" ? membersOf(ctx.registry, ctx.world, ctx.state, party) : [];
-  const level = Math.max(ctx.levelOf(party, "money"), ...members.map((m) => ctx.levelOf(m, "money")));
+  // An organization's money is followed as closely as its most closely followed member's, though a household may hold no account of its own (ORG-SPEC §3.1).
+  const level = moneyLevel(ctx, party);
   const tog = toggles(ctx.world);
   const detail = level >= 4;
   const features = FINANCE_FEATURES.filter((f) => featureFor(ctx, party, f));

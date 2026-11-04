@@ -179,10 +179,11 @@
     },
     "story": {"version": 1, "config": {"flags": {"shop_open": true, "ferry_running": true}}},
     "combat": {"version": 1, "config": {}},
-    "minds": {"version": 1, "config": {}}
+    "minds": {"version": 1, "config": {}},
+    "orgs": {"version": 1, "config": {}}
   },
   "pins": {
-    "generators": {"money": 2, "gear": 1, "vehicles": 1},
+    "generators": {"money": 2, "gear": 2, "vehicles": 1},
     "tables": {
       "calendar.dst": "2a5e1e3d531f68983caa2e2f2d02411b",
       "calendar.holidays": "35b4d12795742dc4d5b4b37e388ce776",
@@ -190,13 +191,14 @@
       "calendar.school": "8f8b2a866c57b80725af82648a9d868c",
       "calendar.shifts": "113c38bc463f6b9ab542629d3905c178",
       "calendar.work": "790bee504417a877b2adc3b5d3c4368a",
-      "economy.catalog": "a74cae4f11e729032d84c5e52a1af81b",
-      "economy.categories": "14a229f6821b5bb6d6e0673a096f7cff",
+      "economy.catalog": "4d663016e223ef86d6db1a92afa6b20b",
+      "economy.categories": "3537edd70ead270059aa1f8c96555595",
       "economy.finance": "5ebb654a8d4458877b86f5100af5c4b6",
+      "economy.index_history": "65038a8238d1241b4aa53ea1bdbbf2c2",
       "economy.occupations": "fe82950d08d32866585e8d92ca6c866a",
       "economy.regions": "20738e97de7eef913a5f8b980afdcef0",
-      "gear.containers": "4e7fd9162139319099076a44b908e7ef",
-      "gear.items": "4f8d8bc56595d23d6a2563d72afb0a25",
+      "gear.containers": "29334aeff91f1b6b9e99db08972661f1",
+      "gear.items": "d4980aa57f9745734d948f954a32bcc7",
       "gear.kits": "3656a59a513f99da1adb635a53e9e208",
       "gear.slots": "3b7a1c09512b25782bd3e5533a74e7ea",
       "vehicles.classes": "d66d371fa1fb8f4c87410b2b0b60a307",
@@ -1840,7 +1842,8 @@
         "pay_weekday": 5,
         "splits": [{"to": "acct_pov_savings", "pct": 10}],
         "shift_pattern": "trades_day_7_330",
-        "start": "2026-01-12"
+        "start": "2026-01-12",
+        "position": "mechanic"
       },
       "relations": []
     },
@@ -1863,7 +1866,8 @@
         "pay_weekday": 5,
         "deductions": [{"label": "Dental", "cents": 1800, "pretax": true, "kind": "health"}],
         "shift_pattern": "trades_day_7_330",
-        "start": "2024-03-04"
+        "start": "2024-03-04",
+        "position": "mechanic"
       },
       "relations": []
     },
@@ -1971,7 +1975,8 @@
         "sales_spread_pct": 35,
         "trading_days": [1, 2, 3, 4, 5, 6],
         "invoice_days": 30,
-        "late_fee_pct": 1.5
+        "late_fee_pct": 1.5,
+        "positions": [{"id": "mechanic", "title": "Mechanic", "powers": [], "seats": 0}]
       },
       "relations": []
     },
@@ -3772,7 +3777,8 @@
           "truth": "Alder Automotive is about $112,000 behind on its lease and its lift-equipment loan after a slow winter. Marcus has been covering payroll from a personal line of credit and has an offer from a regional chain that would keep the staff but cut everyone's pay and end the shop's name. He wants the township contract to prove the shop can pay its own way."
         }
       },
-      "visibility": "secret"
+      "visibility": "secret",
+      "owner": "gm"
     },
     "p_township_truck": {
       "id": "p_township_truck",
@@ -4586,7 +4592,7 @@
       "id": "economy.catalog",
       "pack": "economy",
       "schema": "lre-table/economy.catalog/v1",
-      "revision": "a74cae4f11e729032d84c5e52a1af81b",
+      "revision": "4d663016e223ef86d6db1a92afa6b20b",
       "label": "Price catalog",
       "source": {
         "dataPack": "modern-us",
@@ -4598,8 +4604,26 @@
       },
       "columns": {
         "name": {"type": "text"},
+        "aliases": {
+          "type": "list",
+          "of": "text",
+          "doc": "Other names one goes by (\"TV\", \"fridge\"): a purchase and a thing's type match them as they match its name.",
+          "optional": true
+        },
         "category": {"type": "ref", "ref": "economy.categories"},
         "unit": {"type": "text", "doc": "The quantity the price applies to (1 gallon, per night, per month, …)."},
+        "size": {
+          "type": "enum",
+          "values": ["pocket", "hand", "armful", "heavy", "furniture", "builtin"],
+          "doc": "Physical goods only: how one is carried. Absent on services and fares, and on rows its category's size covers.",
+          "optional": true
+        },
+        "holds": {
+          "type": "enum",
+          "values": ["pocket", "hand", "armful", "heavy", "furniture", "builtin"],
+          "doc": "Furnishings that hold things only (a refrigerator, a dresser): the largest size one takes; never larger than its own size.",
+          "optional": true
+        },
         "price_cents": {"type": "band", "unit": "cents", "doc": "National-average band before regional scaling; the economy pack applies cost_of_living_multiplier."},
         "notes": {"type": "text", "optional": true}
       },
@@ -4608,6 +4632,7 @@
           "name": "Milk, whole",
           "category": "groceries_staples",
           "unit": "1 gallon",
+          "size": "hand",
           "price_cents": {"min": 300, "typical": 410, "max": 780},
           "notes": "max reflects organic"
         },
@@ -4615,6 +4640,7 @@
           "name": "Eggs, grade A large",
           "category": "groceries_staples",
           "unit": "1 dozen",
+          "size": "hand",
           "price_cents": {"min": 250, "typical": 400, "max": 800},
           "notes": "2025 prices swung strongly (avian flu); typical shown is a mid-2025 to early-2026 blend"
         },
@@ -4622,113 +4648,277 @@
           "name": "Bread, white sandwich loaf",
           "category": "groceries_staples",
           "unit": "1 loaf (about 20 oz)",
+          "size": "hand",
           "price_cents": {"min": 150, "typical": 250, "max": 500}
         },
-        "butter": {"name": "Butter, salted", "category": "groceries_staples", "unit": "1 lb", "price_cents": {"min": 380, "typical": 480, "max": 700}},
-        "cheddar": {"name": "Cheddar cheese", "category": "groceries_staples", "unit": "1 lb", "price_cents": {"min": 450, "typical": 600, "max": 1100}},
+        "butter": {
+          "name": "Butter, salted",
+          "category": "groceries_staples",
+          "unit": "1 lb",
+          "size": "hand",
+          "price_cents": {"min": 380, "typical": 480, "max": 700}
+        },
+        "cheddar": {
+          "name": "Cheddar cheese",
+          "category": "groceries_staples",
+          "unit": "1 lb",
+          "size": "hand",
+          "price_cents": {"min": 450, "typical": 600, "max": 1100}
+        },
         "yogurt": {
           "name": "Yogurt, plain or flavored",
           "category": "groceries_staples",
           "unit": "32 oz tub",
+          "size": "hand",
           "price_cents": {"min": 250, "typical": 400, "max": 700}
         },
-        "chicken_breast": {"name": "Chicken breast, boneless", "category": "groceries_staples", "unit": "1 lb", "price_cents": {"min": 250, "typical": 400, "max": 700}},
-        "chicken_whole": {"name": "Chicken, whole fryer", "category": "groceries_staples", "unit": "1 lb", "price_cents": {"min": 120, "typical": 200, "max": 350}},
+        "chicken_breast": {
+          "name": "Chicken breast, boneless",
+          "category": "groceries_staples",
+          "unit": "1 lb",
+          "size": "hand",
+          "price_cents": {"min": 250, "typical": 400, "max": 700}
+        },
+        "chicken_whole": {
+          "name": "Chicken, whole fryer",
+          "category": "groceries_staples",
+          "unit": "1 lb",
+          "size": "hand",
+          "price_cents": {"min": 120, "typical": 200, "max": 350}
+        },
         "ground_beef": {
           "name": "Ground beef, 80-93% lean",
           "category": "groceries_staples",
           "unit": "1 lb",
+          "size": "hand",
           "price_cents": {"min": 450, "typical": 620, "max": 1000}
         },
-        "steak_sirloin": {"name": "Beef steak, sirloin", "category": "groceries_staples", "unit": "1 lb", "price_cents": {"min": 800, "typical": 1200, "max": 2200}},
-        "bacon": {"name": "Bacon, sliced", "category": "groceries_staples", "unit": "1 lb", "price_cents": {"min": 500, "typical": 650, "max": 1000}},
-        "pork_chops": {"name": "Pork chops, bone-in", "category": "groceries_staples", "unit": "1 lb", "price_cents": {"min": 300, "typical": 450, "max": 800}},
-        "salmon_fillet": {"name": "Salmon fillet", "category": "groceries_staples", "unit": "1 lb", "price_cents": {"min": 800, "typical": 1200, "max": 2000}},
-        "deli_turkey": {"name": "Deli turkey, sliced", "category": "groceries_staples", "unit": "1 lb", "price_cents": {"min": 700, "typical": 1000, "max": 1600}},
-        "rice_white": {"name": "Rice, long-grain white", "category": "groceries_staples", "unit": "1 lb", "price_cents": {"min": 80, "typical": 130, "max": 300}},
-        "pasta_dry": {"name": "Pasta, dry", "category": "groceries_staples", "unit": "1 lb", "price_cents": {"min": 100, "typical": 150, "max": 300}},
-        "dry_beans": {"name": "Dried beans", "category": "groceries_staples", "unit": "1 lb", "price_cents": {"min": 100, "typical": 200, "max": 350}},
-        "flour_ap": {"name": "Flour, all-purpose", "category": "groceries_staples", "unit": "5 lb bag", "price_cents": {"min": 250, "typical": 400, "max": 700}},
-        "sugar_white": {"name": "Sugar, granulated", "category": "groceries_staples", "unit": "4 lb bag", "price_cents": {"min": 300, "typical": 400, "max": 600}},
+        "steak_sirloin": {
+          "name": "Beef steak, sirloin",
+          "category": "groceries_staples",
+          "unit": "1 lb",
+          "size": "hand",
+          "price_cents": {"min": 800, "typical": 1200, "max": 2200}
+        },
+        "bacon": {
+          "name": "Bacon, sliced",
+          "category": "groceries_staples",
+          "unit": "1 lb",
+          "size": "hand",
+          "price_cents": {"min": 500, "typical": 650, "max": 1000}
+        },
+        "pork_chops": {
+          "name": "Pork chops, bone-in",
+          "category": "groceries_staples",
+          "unit": "1 lb",
+          "size": "hand",
+          "price_cents": {"min": 300, "typical": 450, "max": 800}
+        },
+        "salmon_fillet": {
+          "name": "Salmon fillet",
+          "category": "groceries_staples",
+          "unit": "1 lb",
+          "size": "hand",
+          "price_cents": {"min": 800, "typical": 1200, "max": 2000}
+        },
+        "deli_turkey": {
+          "name": "Deli turkey, sliced",
+          "category": "groceries_staples",
+          "unit": "1 lb",
+          "size": "hand",
+          "price_cents": {"min": 700, "typical": 1000, "max": 1600}
+        },
+        "rice_white": {
+          "name": "Rice, long-grain white",
+          "category": "groceries_staples",
+          "unit": "1 lb",
+          "size": "hand",
+          "price_cents": {"min": 80, "typical": 130, "max": 300}
+        },
+        "pasta_dry": {
+          "name": "Pasta, dry",
+          "category": "groceries_staples",
+          "unit": "1 lb",
+          "size": "hand",
+          "price_cents": {"min": 100, "typical": 150, "max": 300}
+        },
+        "dry_beans": {
+          "name": "Dried beans",
+          "category": "groceries_staples",
+          "unit": "1 lb",
+          "size": "hand",
+          "price_cents": {"min": 100, "typical": 200, "max": 350}
+        },
+        "flour_ap": {
+          "name": "Flour, all-purpose",
+          "category": "groceries_staples",
+          "unit": "5 lb bag",
+          "size": "hand",
+          "price_cents": {"min": 250, "typical": 400, "max": 700}
+        },
+        "sugar_white": {
+          "name": "Sugar, granulated",
+          "category": "groceries_staples",
+          "unit": "4 lb bag",
+          "size": "hand",
+          "price_cents": {"min": 300, "typical": 400, "max": 600}
+        },
         "cooking_oil": {
           "name": "Vegetable or canola oil",
           "category": "groceries_staples",
           "unit": "48 oz bottle",
+          "size": "hand",
           "price_cents": {"min": 400, "typical": 700, "max": 1200}
         },
-        "potatoes": {"name": "Potatoes, russet", "category": "groceries_staples", "unit": "1 lb", "price_cents": {"min": 70, "typical": 110, "max": 200}},
-        "onions": {"name": "Onions, yellow", "category": "groceries_staples", "unit": "1 lb", "price_cents": {"min": 80, "typical": 130, "max": 200}},
-        "tomatoes": {"name": "Tomatoes, slicing", "category": "groceries_staples", "unit": "1 lb", "price_cents": {"min": 120, "typical": 200, "max": 350}},
-        "carrots": {"name": "Carrots", "category": "groceries_staples", "unit": "1 lb", "price_cents": {"min": 70, "typical": 110, "max": 200}},
+        "potatoes": {
+          "name": "Potatoes, russet",
+          "category": "groceries_staples",
+          "unit": "1 lb",
+          "size": "hand",
+          "price_cents": {"min": 70, "typical": 110, "max": 200}
+        },
+        "onions": {
+          "name": "Onions, yellow",
+          "category": "groceries_staples",
+          "unit": "1 lb",
+          "size": "hand",
+          "price_cents": {"min": 80, "typical": 130, "max": 200}
+        },
+        "tomatoes": {
+          "name": "Tomatoes, slicing",
+          "category": "groceries_staples",
+          "unit": "1 lb",
+          "size": "hand",
+          "price_cents": {"min": 120, "typical": 200, "max": 350}
+        },
+        "carrots": {"name": "Carrots", "category": "groceries_staples", "unit": "1 lb", "size": "hand", "price_cents": {"min": 70, "typical": 110, "max": 200}},
         "lettuce": {
           "name": "Lettuce, romaine or iceberg",
           "category": "groceries_staples",
           "unit": "1 head",
+          "size": "hand",
           "price_cents": {"min": 150, "typical": 250, "max": 400}
         },
-        "bananas": {"name": "Bananas", "category": "groceries_staples", "unit": "1 lb", "price_cents": {"min": 50, "typical": 65, "max": 90}},
-        "apples": {"name": "Apples", "category": "groceries_staples", "unit": "1 lb", "price_cents": {"min": 120, "typical": 190, "max": 300}},
-        "oranges": {"name": "Oranges", "category": "groceries_staples", "unit": "1 lb", "price_cents": {"min": 100, "typical": 150, "max": 250}},
+        "bananas": {"name": "Bananas", "category": "groceries_staples", "unit": "1 lb", "size": "hand", "price_cents": {"min": 50, "typical": 65, "max": 90}},
+        "apples": {"name": "Apples", "category": "groceries_staples", "unit": "1 lb", "size": "hand", "price_cents": {"min": 120, "typical": 190, "max": 300}},
+        "oranges": {"name": "Oranges", "category": "groceries_staples", "unit": "1 lb", "size": "hand", "price_cents": {"min": 100, "typical": 150, "max": 250}},
         "coffee_ground": {
           "name": "Coffee, ground",
           "category": "groceries_staples",
           "unit": "12 oz can or bag",
+          "size": "hand",
           "price_cents": {"min": 600, "typical": 950, "max": 1500}
         },
-        "cereal": {"name": "Breakfast cereal", "category": "groceries_staples", "unit": "12 oz box", "price_cents": {"min": 300, "typical": 450, "max": 650}},
-        "peanut_butter": {"name": "Peanut butter", "category": "groceries_staples", "unit": "16 oz jar", "price_cents": {"min": 250, "typical": 350, "max": 600}},
-        "canned_soup": {"name": "Soup, canned", "category": "groceries_staples", "unit": "1 can", "price_cents": {"min": 100, "typical": 180, "max": 300}},
+        "cereal": {
+          "name": "Breakfast cereal",
+          "category": "groceries_staples",
+          "unit": "12 oz box",
+          "size": "hand",
+          "price_cents": {"min": 300, "typical": 450, "max": 650}
+        },
+        "peanut_butter": {
+          "name": "Peanut butter",
+          "category": "groceries_staples",
+          "unit": "16 oz jar",
+          "size": "hand",
+          "price_cents": {"min": 250, "typical": 350, "max": 600}
+        },
+        "canned_soup": {
+          "name": "Soup, canned",
+          "category": "groceries_staples",
+          "unit": "1 can",
+          "size": "hand",
+          "price_cents": {"min": 100, "typical": 180, "max": 300}
+        },
         "canned_vegetables": {
           "name": "Vegetables, canned",
           "category": "groceries_staples",
           "unit": "1 can (15 oz)",
+          "size": "hand",
           "price_cents": {"min": 80, "typical": 130, "max": 220}
         },
-        "frozen_pizza": {"name": "Pizza, frozen", "category": "groceries_staples", "unit": "1 pie", "price_cents": {"min": 400, "typical": 600, "max": 1000}},
-        "soda_12pack": {"name": "Soda, cans", "category": "groceries_staples", "unit": "12-pack", "price_cents": {"min": 500, "typical": 700, "max": 900}},
-        "bottled_water_24": {"name": "Bottled water", "category": "groceries_staples", "unit": "24-pack", "price_cents": {"min": 300, "typical": 500, "max": 800}},
-        "orange_juice": {"name": "Orange juice", "category": "groceries_staples", "unit": "52 oz carton", "price_cents": {"min": 300, "typical": 450, "max": 700}},
+        "frozen_pizza": {
+          "name": "Pizza, frozen",
+          "category": "groceries_staples",
+          "unit": "1 pie",
+          "size": "hand",
+          "price_cents": {"min": 400, "typical": 600, "max": 1000}
+        },
+        "soda_12pack": {
+          "name": "Soda, cans",
+          "category": "groceries_staples",
+          "unit": "12-pack",
+          "size": "hand",
+          "price_cents": {"min": 500, "typical": 700, "max": 900}
+        },
+        "bottled_water_24": {
+          "name": "Bottled water",
+          "category": "groceries_staples",
+          "unit": "24-pack",
+          "size": "armful",
+          "price_cents": {"min": 300, "typical": 500, "max": 800}
+        },
+        "orange_juice": {
+          "name": "Orange juice",
+          "category": "groceries_staples",
+          "unit": "52 oz carton",
+          "size": "hand",
+          "price_cents": {"min": 300, "typical": 450, "max": 700}
+        },
         "snack_chips": {
           "name": "Potato chips",
           "category": "groceries_staples",
           "unit": "1 family-size bag",
+          "size": "hand",
           "price_cents": {"min": 300, "typical": 500, "max": 700}
         },
-        "ice_cream": {"name": "Ice cream", "category": "groceries_staples", "unit": "1.5 qt tub", "price_cents": {"min": 300, "typical": 550, "max": 900}},
+        "ice_cream": {
+          "name": "Ice cream",
+          "category": "groceries_staples",
+          "unit": "1.5 qt tub",
+          "size": "hand",
+          "price_cents": {"min": 300, "typical": 550, "max": 900}
+        },
         "basket_person_thrifty": {
           "name": "Weekly grocery basket, one adult, thrifty plan",
           "category": "groceries_baskets",
           "unit": "person per week",
+          "size": "armful",
           "price_cents": {"min": 6000, "typical": 7200, "max": 8500}
         },
         "basket_person_moderate": {
           "name": "Weekly grocery basket, one adult, moderate plan",
           "category": "groceries_baskets",
           "unit": "person per week",
+          "size": "armful",
           "price_cents": {"min": 8500, "typical": 10000, "max": 12000}
         },
         "basket_person_liberal": {
           "name": "Weekly grocery basket, one adult, liberal plan",
           "category": "groceries_baskets",
           "unit": "person per week",
+          "size": "armful",
           "price_cents": {"min": 11000, "typical": 13500, "max": 17000}
         },
         "basket_family4_thrifty": {
           "name": "Weekly grocery basket, family of four, thrifty plan",
           "category": "groceries_baskets",
           "unit": "household per week",
+          "size": "armful",
           "price_cents": {"min": 21000, "typical": 23500, "max": 27000}
         },
         "basket_family4_moderate": {
           "name": "Weekly grocery basket, family of four, moderate plan",
           "category": "groceries_baskets",
           "unit": "household per week",
+          "size": "armful",
           "price_cents": {"min": 28000, "typical": 31500, "max": 37000}
         },
         "basket_family4_liberal": {
           "name": "Weekly grocery basket, family of four, liberal plan",
           "category": "groceries_baskets",
           "unit": "household per week",
+          "size": "armful",
           "price_cents": {"min": 36000, "typical": 41000, "max": 50000}
         },
         "fast_food_burger": {"name": "Fast-food burger, sandwich only", "category": "meals_out", "unit": "each", "price_cents": {"min": 400, "typical": 650, "max": 1000}},
@@ -4796,53 +4986,139 @@
           "price_cents": {"min": 500, "typical": 700, "max": 900}
         },
         "pastry": {"name": "Pastry or muffin", "category": "coffee", "unit": "each", "price_cents": {"min": 250, "typical": 400, "max": 650}},
-        "beer_domestic_6": {"name": "Beer, domestic lager", "category": "alcohol", "unit": "6-pack", "price_cents": {"min": 700, "typical": 950, "max": 1300}},
-        "beer_domestic_12": {"name": "Beer, domestic lager", "category": "alcohol", "unit": "12-pack", "price_cents": {"min": 1200, "typical": 1600, "max": 2100}},
-        "beer_craft_6": {"name": "Beer, craft or import", "category": "alcohol", "unit": "6-pack", "price_cents": {"min": 1000, "typical": 1300, "max": 1800}},
+        "beer_domestic_6": {
+          "name": "Beer, domestic lager",
+          "category": "alcohol",
+          "unit": "6-pack",
+          "size": "hand",
+          "price_cents": {"min": 700, "typical": 950, "max": 1300}
+        },
+        "beer_domestic_12": {
+          "name": "Beer, domestic lager",
+          "category": "alcohol",
+          "unit": "12-pack",
+          "size": "hand",
+          "price_cents": {"min": 1200, "typical": 1600, "max": 2100}
+        },
+        "beer_craft_6": {
+          "name": "Beer, craft or import",
+          "category": "alcohol",
+          "unit": "6-pack",
+          "size": "hand",
+          "price_cents": {"min": 1000, "typical": 1300, "max": 1800}
+        },
         "beer_bar_pint": {"name": "Beer at a bar", "category": "alcohol", "unit": "pint", "price_cents": {"min": 500, "typical": 750, "max": 1100}},
-        "wine_bottle_retail": {"name": "Wine, table bottle (retail)", "category": "alcohol", "unit": "750 ml", "price_cents": {"min": 800, "typical": 1400, "max": 3000}},
+        "wine_bottle_retail": {
+          "name": "Wine, table bottle (retail)",
+          "category": "alcohol",
+          "unit": "750 ml",
+          "size": "hand",
+          "price_cents": {"min": 800, "typical": 1400, "max": 3000}
+        },
         "wine_glass_bar": {"name": "Wine by the glass at a bar", "category": "alcohol", "unit": "glass", "price_cents": {"min": 900, "typical": 1300, "max": 1900}},
         "liquor_vodka_whiskey": {
           "name": "Vodka or whiskey, mid-shelf (retail)",
           "category": "alcohol",
           "unit": "750 ml",
+          "size": "hand",
           "price_cents": {"min": 1500, "typical": 2400, "max": 5000}
         },
-        "liquor_premium": {"name": "Liquor, premium (retail)", "category": "alcohol", "unit": "750 ml", "price_cents": {"min": 4000, "typical": 6500, "max": 15000}},
+        "liquor_premium": {
+          "name": "Liquor, premium (retail)",
+          "category": "alcohol",
+          "unit": "750 ml",
+          "size": "hand",
+          "price_cents": {"min": 4000, "typical": 6500, "max": 15000}
+        },
         "cocktail_bar": {"name": "Cocktail at a bar", "category": "alcohol", "unit": "drink", "price_cents": {"min": 1000, "typical": 1400, "max": 2000}},
         "shot_bar": {"name": "Shot at a bar", "category": "alcohol", "unit": "shot", "price_cents": {"min": 600, "typical": 800, "max": 1200}},
-        "hard_seltzer_12": {"name": "Hard seltzer", "category": "alcohol", "unit": "12-pack", "price_cents": {"min": 1500, "typical": 1900, "max": 2400}},
-        "t_shirt": {"name": "T-shirt, basic cotton", "category": "clothing", "unit": "each", "price_cents": {"min": 600, "typical": 1500, "max": 3500}},
-        "dress_shirt": {"name": "Dress shirt", "category": "clothing", "unit": "each", "price_cents": {"min": 2500, "typical": 4500, "max": 9000}},
-        "blouse": {"name": "Blouse or casual top", "category": "clothing", "unit": "each", "price_cents": {"min": 1500, "typical": 3000, "max": 7000}},
-        "sweater": {"name": "Sweater", "category": "clothing", "unit": "each", "price_cents": {"min": 2500, "typical": 4500, "max": 10000}},
-        "hoodie": {"name": "Hoodie or sweatshirt", "category": "clothing", "unit": "each", "price_cents": {"min": 2000, "typical": 4000, "max": 8000}},
-        "jeans": {"name": "Jeans", "category": "clothing", "unit": "pair", "price_cents": {"min": 3000, "typical": 5500, "max": 12000}},
-        "trousers_chinos": {"name": "Trousers or chinos", "category": "clothing", "unit": "pair", "price_cents": {"min": 2500, "typical": 4500, "max": 9000}},
-        "shorts": {"name": "Shorts", "category": "clothing", "unit": "pair", "price_cents": {"min": 1500, "typical": 3000, "max": 6000}},
-        "skirt_or_dress_casual": {"name": "Dress or skirt, casual", "category": "clothing", "unit": "each", "price_cents": {"min": 2500, "typical": 5000, "max": 12000}},
-        "suit": {"name": "Suit, off the rack", "category": "clothing", "unit": "each", "price_cents": {"min": 12000, "typical": 30000, "max": 80000}},
-        "underwear_3pack": {"name": "Underwear", "category": "clothing", "unit": "3-pack", "price_cents": {"min": 1000, "typical": 1800, "max": 3500}},
-        "socks_6pack": {"name": "Socks", "category": "clothing", "unit": "6-pack", "price_cents": {"min": 800, "typical": 1400, "max": 2500}},
-        "sneakers": {"name": "Sneakers", "category": "clothing", "unit": "pair", "price_cents": {"min": 3500, "typical": 7500, "max": 16000}},
-        "work_boots": {"name": "Work boots", "category": "clothing", "unit": "pair", "price_cents": {"min": 7000, "typical": 14000, "max": 25000}},
-        "dress_shoes": {"name": "Dress shoes", "category": "clothing", "unit": "pair", "price_cents": {"min": 5000, "typical": 9000, "max": 20000}},
-        "sandals": {"name": "Sandals or flip-flops", "category": "clothing", "unit": "pair", "price_cents": {"min": 1000, "typical": 2500, "max": 6000}},
-        "belt": {"name": "Belt", "category": "clothing", "unit": "each", "price_cents": {"min": 1500, "typical": 3000, "max": 8000}},
-        "hat_cap": {"name": "Baseball cap or sun hat", "category": "clothing", "unit": "each", "price_cents": {"min": 1000, "typical": 2200, "max": 4500}},
-        "beanie_winter_hat": {"name": "Knit winter hat", "category": "clothing", "unit": "each", "price_cents": {"min": 800, "typical": 1800, "max": 4000}},
-        "scarf": {"name": "Scarf", "category": "clothing", "unit": "each", "price_cents": {"min": 1200, "typical": 2500, "max": 6000}},
-        "gloves_winter": {"name": "Winter gloves", "category": "clothing", "unit": "pair", "price_cents": {"min": 1500, "typical": 3000, "max": 8000}},
-        "light_jacket": {"name": "Light jacket or windbreaker", "category": "clothing", "unit": "each", "price_cents": {"min": 3000, "typical": 6000, "max": 15000}},
-        "rain_jacket": {"name": "Rain jacket", "category": "clothing", "unit": "each", "price_cents": {"min": 3000, "typical": 7000, "max": 20000}},
+        "hard_seltzer_12": {"name": "Hard seltzer", "category": "alcohol", "unit": "12-pack", "size": "hand", "price_cents": {"min": 1500, "typical": 1900, "max": 2400}},
+        "t_shirt": {
+          "name": "T-shirt, basic cotton",
+          "category": "clothing",
+          "unit": "each",
+          "size": "hand",
+          "price_cents": {"min": 600, "typical": 1500, "max": 3500}
+        },
+        "dress_shirt": {"name": "Dress shirt", "category": "clothing", "unit": "each", "size": "hand", "price_cents": {"min": 2500, "typical": 4500, "max": 9000}},
+        "blouse": {
+          "name": "Blouse or casual top",
+          "category": "clothing",
+          "unit": "each",
+          "size": "hand",
+          "price_cents": {"min": 1500, "typical": 3000, "max": 7000}
+        },
+        "sweater": {"name": "Sweater", "category": "clothing", "unit": "each", "size": "hand", "price_cents": {"min": 2500, "typical": 4500, "max": 10000}},
+        "hoodie": {
+          "name": "Hoodie or sweatshirt",
+          "category": "clothing",
+          "unit": "each",
+          "size": "hand",
+          "price_cents": {"min": 2000, "typical": 4000, "max": 8000}
+        },
+        "jeans": {"name": "Jeans", "category": "clothing", "unit": "pair", "size": "hand", "price_cents": {"min": 3000, "typical": 5500, "max": 12000}},
+        "trousers_chinos": {
+          "name": "Trousers or chinos",
+          "category": "clothing",
+          "unit": "pair",
+          "size": "hand",
+          "price_cents": {"min": 2500, "typical": 4500, "max": 9000}
+        },
+        "shorts": {"name": "Shorts", "category": "clothing", "unit": "pair", "size": "hand", "price_cents": {"min": 1500, "typical": 3000, "max": 6000}},
+        "skirt_or_dress_casual": {
+          "name": "Dress or skirt, casual",
+          "category": "clothing",
+          "unit": "each",
+          "size": "hand",
+          "price_cents": {"min": 2500, "typical": 5000, "max": 12000}
+        },
+        "suit": {
+          "name": "Suit, off the rack",
+          "category": "clothing",
+          "unit": "each",
+          "size": "hand",
+          "price_cents": {"min": 12000, "typical": 30000, "max": 80000}
+        },
+        "underwear_3pack": {"name": "Underwear", "category": "clothing", "unit": "3-pack", "size": "hand", "price_cents": {"min": 1000, "typical": 1800, "max": 3500}},
+        "socks_6pack": {"name": "Socks", "category": "clothing", "unit": "6-pack", "size": "hand", "price_cents": {"min": 800, "typical": 1400, "max": 2500}},
+        "sneakers": {"name": "Sneakers", "category": "clothing", "unit": "pair", "size": "hand", "price_cents": {"min": 3500, "typical": 7500, "max": 16000}},
+        "work_boots": {"name": "Work boots", "category": "clothing", "unit": "pair", "size": "hand", "price_cents": {"min": 7000, "typical": 14000, "max": 25000}},
+        "dress_shoes": {"name": "Dress shoes", "category": "clothing", "unit": "pair", "size": "hand", "price_cents": {"min": 5000, "typical": 9000, "max": 20000}},
+        "sandals": {
+          "name": "Sandals or flip-flops",
+          "category": "clothing",
+          "unit": "pair",
+          "size": "hand",
+          "price_cents": {"min": 1000, "typical": 2500, "max": 6000}
+        },
+        "belt": {"name": "Belt", "category": "clothing", "unit": "each", "size": "hand", "price_cents": {"min": 1500, "typical": 3000, "max": 8000}},
+        "hat_cap": {
+          "name": "Baseball cap or sun hat",
+          "category": "clothing",
+          "unit": "each",
+          "size": "hand",
+          "price_cents": {"min": 1000, "typical": 2200, "max": 4500}
+        },
+        "beanie_winter_hat": {"name": "Knit winter hat", "category": "clothing", "unit": "each", "size": "hand", "price_cents": {"min": 800, "typical": 1800, "max": 4000}},
+        "scarf": {"name": "Scarf", "category": "clothing", "unit": "each", "size": "hand", "price_cents": {"min": 1200, "typical": 2500, "max": 6000}},
+        "gloves_winter": {"name": "Winter gloves", "category": "clothing", "unit": "pair", "size": "hand", "price_cents": {"min": 1500, "typical": 3000, "max": 8000}},
+        "light_jacket": {
+          "name": "Light jacket or windbreaker",
+          "category": "clothing",
+          "unit": "each",
+          "size": "hand",
+          "price_cents": {"min": 3000, "typical": 6000, "max": 15000}
+        },
+        "rain_jacket": {"name": "Rain jacket", "category": "clothing", "unit": "each", "size": "hand", "price_cents": {"min": 3000, "typical": 7000, "max": 20000}},
         "winter_coat": {
           "name": "Insulated winter coat or parka",
           "category": "clothing",
           "unit": "each",
+          "size": "hand",
           "price_cents": {"min": 6000, "typical": 15000, "max": 50000}
         },
-        "pajamas": {"name": "Pajamas", "category": "clothing", "unit": "set", "price_cents": {"min": 1500, "typical": 3000, "max": 7000}},
-        "swimsuit": {"name": "Swimsuit", "category": "clothing", "unit": "each", "price_cents": {"min": 2000, "typical": 4500, "max": 10000}},
+        "pajamas": {"name": "Pajamas", "category": "clothing", "unit": "set", "size": "hand", "price_cents": {"min": 1500, "typical": 3000, "max": 7000}},
+        "swimsuit": {"name": "Swimsuit", "category": "clothing", "unit": "each", "size": "hand", "price_cents": {"min": 2000, "typical": 4500, "max": 10000}},
         "dry_cleaning_shirt": {
           "name": "Dry cleaning, one shirt",
           "category": "clothing",
@@ -4850,111 +5126,671 @@
           "price_cents": {"min": 300, "typical": 450, "max": 700},
           "notes": "service, not a garment"
         },
-        "smartphone_budget": {"name": "Smartphone, budget", "category": "electronics", "unit": "each", "price_cents": {"min": 12000, "typical": 25000, "max": 40000}},
-        "smartphone_midrange": {"name": "Smartphone, mid-range", "category": "electronics", "unit": "each", "price_cents": {"min": 35000, "typical": 50000, "max": 70000}},
-        "smartphone_flagship": {"name": "Smartphone, flagship", "category": "electronics", "unit": "each", "price_cents": {"min": 70000, "typical": 110000, "max": 160000}},
-        "laptop_budget": {"name": "Laptop, budget", "category": "electronics", "unit": "each", "price_cents": {"min": 30000, "typical": 50000, "max": 70000}},
-        "laptop_mainstream": {"name": "Laptop, mainstream", "category": "electronics", "unit": "each", "price_cents": {"min": 70000, "typical": 110000, "max": 160000}},
+        "smartphone_budget": {
+          "name": "Smartphone, budget",
+          "category": "electronics",
+          "unit": "each",
+          "size": "pocket",
+          "price_cents": {"min": 12000, "typical": 25000, "max": 40000}
+        },
+        "smartphone_midrange": {
+          "name": "Smartphone, mid-range",
+          "category": "electronics",
+          "unit": "each",
+          "size": "pocket",
+          "price_cents": {"min": 35000, "typical": 50000, "max": 70000}
+        },
+        "smartphone_flagship": {
+          "name": "Smartphone, flagship",
+          "category": "electronics",
+          "unit": "each",
+          "size": "pocket",
+          "price_cents": {"min": 70000, "typical": 110000, "max": 160000}
+        },
+        "laptop_budget": {
+          "name": "Laptop, budget",
+          "category": "electronics",
+          "unit": "each",
+          "size": "hand",
+          "price_cents": {"min": 30000, "typical": 50000, "max": 70000}
+        },
+        "laptop_mainstream": {
+          "name": "Laptop, mainstream",
+          "category": "electronics",
+          "unit": "each",
+          "size": "hand",
+          "price_cents": {"min": 70000, "typical": 110000, "max": 160000}
+        },
         "laptop_premium": {
           "name": "Laptop, premium or gaming",
           "category": "electronics",
           "unit": "each",
+          "size": "hand",
           "price_cents": {"min": 150000, "typical": 220000, "max": 400000}
         },
-        "tablet": {"name": "Tablet", "category": "electronics", "unit": "each", "price_cents": {"min": 12000, "typical": 35000, "max": 130000}},
-        "tv_55_4k": {"name": "Television, 55 in 4K", "category": "electronics", "unit": "each", "price_cents": {"min": 22000, "typical": 40000, "max": 120000}},
-        "tv_65_4k": {"name": "Television, 65 in 4K", "category": "electronics", "unit": "each", "price_cents": {"min": 35000, "typical": 60000, "max": 200000}},
-        "monitor_24": {"name": "Computer monitor, 24 in", "category": "electronics", "unit": "each", "price_cents": {"min": 8000, "typical": 14000, "max": 30000}},
-        "game_console": {"name": "Game console", "category": "electronics", "unit": "each", "price_cents": {"min": 30000, "typical": 50000, "max": 70000}},
-        "smartwatch": {"name": "Smartwatch", "category": "electronics", "unit": "each", "price_cents": {"min": 10000, "typical": 30000, "max": 80000}},
-        "earbuds_wireless": {"name": "Wireless earbuds", "category": "electronics", "unit": "pair", "price_cents": {"min": 1500, "typical": 7500, "max": 25000}},
-        "headphones_wired": {"name": "Headphones, wired", "category": "electronics", "unit": "pair", "price_cents": {"min": 1000, "typical": 2500, "max": 8000}},
-        "bluetooth_speaker": {"name": "Bluetooth speaker", "category": "electronics", "unit": "each", "price_cents": {"min": 2500, "typical": 7000, "max": 30000}},
-        "wifi_router": {"name": "Wi-Fi router", "category": "electronics", "unit": "each", "price_cents": {"min": 4000, "typical": 10000, "max": 30000}},
-        "charger_cable": {"name": "Charging cable", "category": "electronics", "unit": "each", "price_cents": {"min": 800, "typical": 1500, "max": 3500}},
-        "wall_charger": {"name": "USB wall charger", "category": "electronics", "unit": "each", "price_cents": {"min": 1000, "typical": 2000, "max": 5000}},
-        "power_bank": {"name": "Power bank", "category": "electronics", "unit": "each", "price_cents": {"min": 1500, "typical": 3000, "max": 8000}},
-        "phone_case": {"name": "Phone case", "category": "electronics", "unit": "each", "price_cents": {"min": 800, "typical": 2000, "max": 5000}},
-        "screen_protector": {"name": "Screen protector", "category": "electronics", "unit": "each", "price_cents": {"min": 800, "typical": 1500, "max": 4000}},
-        "usb_flash_drive": {"name": "USB flash drive", "category": "electronics", "unit": "each", "price_cents": {"min": 800, "typical": 1500, "max": 4000}},
-        "external_ssd": {"name": "External SSD, 1 TB", "category": "electronics", "unit": "each", "price_cents": {"min": 7000, "typical": 12000, "max": 25000}},
-        "keyboard": {"name": "Keyboard", "category": "electronics", "unit": "each", "price_cents": {"min": 2000, "typical": 5000, "max": 20000}},
-        "mouse": {"name": "Mouse", "category": "electronics", "unit": "each", "price_cents": {"min": 1000, "typical": 2500, "max": 10000}},
-        "printer_inkjet": {"name": "Inkjet printer", "category": "electronics", "unit": "each", "price_cents": {"min": 6000, "typical": 11000, "max": 25000}},
-        "batteries_aa_12": {"name": "AA batteries", "category": "electronics", "unit": "12-pack", "price_cents": {"min": 800, "typical": 1400, "max": 2500}},
-        "hammer_claw": {"name": "Claw hammer", "category": "tools_hardware", "unit": "each", "price_cents": {"min": 1200, "typical": 2500, "max": 4500}},
-        "screwdriver_set": {"name": "Screwdriver set", "category": "tools_hardware", "unit": "set", "price_cents": {"min": 1000, "typical": 2500, "max": 6000}},
-        "wrench_set": {"name": "Combination wrench set", "category": "tools_hardware", "unit": "set", "price_cents": {"min": 2500, "typical": 6000, "max": 20000}},
+        "tablet": {"name": "Tablet", "category": "electronics", "unit": "each", "size": "hand", "price_cents": {"min": 12000, "typical": 35000, "max": 130000}},
+        "monitor_24": {
+          "name": "Computer monitor, 24 in",
+          "category": "electronics",
+          "unit": "each",
+          "size": "armful",
+          "price_cents": {"min": 8000, "typical": 14000, "max": 30000}
+        },
+        "game_console": {
+          "name": "Game console",
+          "category": "electronics",
+          "unit": "each",
+          "size": "hand",
+          "price_cents": {"min": 30000, "typical": 50000, "max": 70000}
+        },
+        "smartwatch": {
+          "name": "Smartwatch",
+          "category": "electronics",
+          "unit": "each",
+          "size": "pocket",
+          "price_cents": {"min": 10000, "typical": 30000, "max": 80000}
+        },
+        "earbuds_wireless": {
+          "name": "Wireless earbuds",
+          "category": "electronics",
+          "unit": "pair",
+          "size": "pocket",
+          "price_cents": {"min": 1500, "typical": 7500, "max": 25000}
+        },
+        "headphones_wired": {
+          "name": "Headphones, wired",
+          "category": "electronics",
+          "unit": "pair",
+          "size": "pocket",
+          "price_cents": {"min": 1000, "typical": 2500, "max": 8000}
+        },
+        "bluetooth_speaker": {
+          "name": "Bluetooth speaker",
+          "category": "electronics",
+          "unit": "each",
+          "size": "hand",
+          "price_cents": {"min": 2500, "typical": 7000, "max": 30000}
+        },
+        "wifi_router": {
+          "name": "Wi-Fi router",
+          "category": "electronics",
+          "unit": "each",
+          "size": "hand",
+          "price_cents": {"min": 4000, "typical": 10000, "max": 30000}
+        },
+        "charger_cable": {
+          "name": "Charging cable",
+          "category": "electronics",
+          "unit": "each",
+          "size": "pocket",
+          "price_cents": {"min": 800, "typical": 1500, "max": 3500}
+        },
+        "wall_charger": {
+          "name": "USB wall charger",
+          "category": "electronics",
+          "unit": "each",
+          "size": "pocket",
+          "price_cents": {"min": 1000, "typical": 2000, "max": 5000}
+        },
+        "power_bank": {
+          "name": "Power bank",
+          "category": "electronics",
+          "unit": "each",
+          "size": "pocket",
+          "price_cents": {"min": 1500, "typical": 3000, "max": 8000}
+        },
+        "phone_case": {"name": "Phone case", "category": "electronics", "unit": "each", "size": "pocket", "price_cents": {"min": 800, "typical": 2000, "max": 5000}},
+        "screen_protector": {
+          "name": "Screen protector",
+          "category": "electronics",
+          "unit": "each",
+          "size": "pocket",
+          "price_cents": {"min": 800, "typical": 1500, "max": 4000}
+        },
+        "usb_flash_drive": {
+          "name": "USB flash drive",
+          "category": "electronics",
+          "unit": "each",
+          "size": "pocket",
+          "price_cents": {"min": 800, "typical": 1500, "max": 4000}
+        },
+        "external_ssd": {
+          "name": "External SSD, 1 TB",
+          "category": "electronics",
+          "unit": "each",
+          "size": "pocket",
+          "price_cents": {"min": 7000, "typical": 12000, "max": 25000}
+        },
+        "keyboard": {"name": "Keyboard", "category": "electronics", "unit": "each", "size": "hand", "price_cents": {"min": 2000, "typical": 5000, "max": 20000}},
+        "mouse": {"name": "Mouse", "category": "electronics", "unit": "each", "size": "hand", "price_cents": {"min": 1000, "typical": 2500, "max": 10000}},
+        "printer_inkjet": {
+          "name": "Inkjet printer",
+          "category": "electronics",
+          "unit": "each",
+          "size": "armful",
+          "price_cents": {"min": 6000, "typical": 11000, "max": 25000}
+        },
+        "batteries_aa_12": {
+          "name": "AA batteries",
+          "category": "electronics",
+          "unit": "12-pack",
+          "size": "pocket",
+          "price_cents": {"min": 800, "typical": 1400, "max": 2500}
+        },
+        "hammer_claw": {
+          "name": "Claw hammer",
+          "category": "tools_hardware",
+          "unit": "each",
+          "size": "hand",
+          "price_cents": {"min": 1200, "typical": 2500, "max": 4500}
+        },
+        "screwdriver_set": {
+          "name": "Screwdriver set",
+          "category": "tools_hardware",
+          "unit": "set",
+          "size": "hand",
+          "price_cents": {"min": 1000, "typical": 2500, "max": 6000}
+        },
+        "wrench_set": {
+          "name": "Combination wrench set",
+          "category": "tools_hardware",
+          "unit": "set",
+          "size": "hand",
+          "price_cents": {"min": 2500, "typical": 6000, "max": 20000}
+        },
         "socket_set_mechanic": {
           "name": "Mechanic socket and ratchet set, 45-100 pieces",
           "category": "tools_hardware",
           "unit": "set",
+          "size": "armful",
           "price_cents": {"min": 3000, "typical": 7500, "max": 25000}
         },
-        "adjustable_wrench": {"name": "Adjustable wrench", "category": "tools_hardware", "unit": "each", "price_cents": {"min": 1200, "typical": 2200, "max": 5000}},
-        "pliers_set": {"name": "Pliers set", "category": "tools_hardware", "unit": "set", "price_cents": {"min": 1500, "typical": 3500, "max": 9000}},
-        "tape_measure_25": {"name": "Tape measure, 25 ft", "category": "tools_hardware", "unit": "each", "price_cents": {"min": 600, "typical": 1500, "max": 3500}},
-        "utility_knife": {"name": "Utility knife", "category": "tools_hardware", "unit": "each", "price_cents": {"min": 500, "typical": 1200, "max": 3000}},
-        "hand_saw": {"name": "Hand saw", "category": "tools_hardware", "unit": "each", "price_cents": {"min": 1200, "typical": 2500, "max": 5000}},
-        "level_2ft": {"name": "Level, 2 ft", "category": "tools_hardware", "unit": "each", "price_cents": {"min": 800, "typical": 1800, "max": 4500}},
-        "cordless_drill_kit": {"name": "Cordless drill kit", "category": "tools_hardware", "unit": "kit", "price_cents": {"min": 5000, "typical": 9900, "max": 25000}},
+        "adjustable_wrench": {
+          "name": "Adjustable wrench",
+          "category": "tools_hardware",
+          "unit": "each",
+          "size": "hand",
+          "price_cents": {"min": 1200, "typical": 2200, "max": 5000}
+        },
+        "pliers_set": {
+          "name": "Pliers set",
+          "category": "tools_hardware",
+          "unit": "set",
+          "size": "hand",
+          "price_cents": {"min": 1500, "typical": 3500, "max": 9000}
+        },
+        "tape_measure_25": {
+          "name": "Tape measure, 25 ft",
+          "category": "tools_hardware",
+          "unit": "each",
+          "size": "pocket",
+          "price_cents": {"min": 600, "typical": 1500, "max": 3500}
+        },
+        "utility_knife": {
+          "name": "Utility knife",
+          "category": "tools_hardware",
+          "unit": "each",
+          "size": "pocket",
+          "price_cents": {"min": 500, "typical": 1200, "max": 3000}
+        },
+        "hand_saw": {"name": "Hand saw", "category": "tools_hardware", "unit": "each", "size": "hand", "price_cents": {"min": 1200, "typical": 2500, "max": 5000}},
+        "level_2ft": {
+          "name": "Level, 2 ft",
+          "category": "tools_hardware",
+          "unit": "each",
+          "size": "hand",
+          "price_cents": {"min": 800, "typical": 1800, "max": 4500}
+        },
+        "cordless_drill_kit": {
+          "name": "Cordless drill kit",
+          "category": "tools_hardware",
+          "unit": "kit",
+          "size": "hand",
+          "price_cents": {"min": 5000, "typical": 9900, "max": 25000}
+        },
         "circular_saw": {
           "name": "Circular saw, corded or cordless",
           "category": "tools_hardware",
           "unit": "each",
+          "size": "hand",
           "price_cents": {"min": 5000, "typical": 12000, "max": 30000}
         },
-        "work_gloves": {"name": "Work gloves", "category": "tools_hardware", "unit": "pair", "price_cents": {"min": 800, "typical": 1600, "max": 4000}},
-        "safety_glasses": {"name": "Safety glasses", "category": "tools_hardware", "unit": "pair", "price_cents": {"min": 500, "typical": 1200, "max": 3000}},
-        "ladder_6ft": {"name": "Step ladder, 6 ft", "category": "tools_hardware", "unit": "each", "price_cents": {"min": 5000, "typical": 9000, "max": 20000}},
-        "extension_cord_25": {"name": "Extension cord, 25 ft", "category": "tools_hardware", "unit": "each", "price_cents": {"min": 1200, "typical": 2000, "max": 4000}},
-        "duct_tape": {"name": "Duct tape", "category": "tools_hardware", "unit": "roll", "price_cents": {"min": 500, "typical": 900, "max": 1500}},
-        "nails_1lb": {"name": "Nails, common", "category": "tools_hardware", "unit": "1 lb box", "price_cents": {"min": 500, "typical": 900, "max": 1500}},
-        "screws_assorted": {"name": "Screws, assorted box", "category": "tools_hardware", "unit": "box", "price_cents": {"min": 600, "typical": 1100, "max": 2200}},
-        "paint_gallon": {"name": "Interior paint", "category": "tools_hardware", "unit": "gallon", "price_cents": {"min": 2000, "typical": 3500, "max": 7000}},
-        "toolbox_20in": {"name": "Toolbox, 20 in", "category": "tools_hardware", "unit": "each", "price_cents": {"min": 1500, "typical": 3000, "max": 8000}},
-        "shovel": {"name": "Shovel", "category": "tools_hardware", "unit": "each", "price_cents": {"min": 1500, "typical": 3000, "max": 6000}},
-        "garden_hose_50": {"name": "Garden hose, 50 ft", "category": "tools_hardware", "unit": "each", "price_cents": {"min": 1500, "typical": 3000, "max": 6000}},
+        "work_gloves": {
+          "name": "Work gloves",
+          "category": "tools_hardware",
+          "unit": "pair",
+          "size": "hand",
+          "price_cents": {"min": 800, "typical": 1600, "max": 4000}
+        },
+        "safety_glasses": {
+          "name": "Safety glasses",
+          "category": "tools_hardware",
+          "unit": "pair",
+          "size": "pocket",
+          "price_cents": {"min": 500, "typical": 1200, "max": 3000}
+        },
+        "ladder_6ft": {
+          "name": "Step ladder, 6 ft",
+          "category": "tools_hardware",
+          "unit": "each",
+          "size": "heavy",
+          "price_cents": {"min": 5000, "typical": 9000, "max": 20000}
+        },
+        "extension_cord_25": {
+          "name": "Extension cord, 25 ft",
+          "category": "tools_hardware",
+          "unit": "each",
+          "size": "hand",
+          "price_cents": {"min": 1200, "typical": 2000, "max": 4000}
+        },
+        "duct_tape": {"name": "Duct tape", "category": "tools_hardware", "unit": "roll", "size": "hand", "price_cents": {"min": 500, "typical": 900, "max": 1500}},
+        "nails_1lb": {
+          "name": "Nails, common",
+          "category": "tools_hardware",
+          "unit": "1 lb box",
+          "size": "hand",
+          "price_cents": {"min": 500, "typical": 900, "max": 1500}
+        },
+        "screws_assorted": {
+          "name": "Screws, assorted box",
+          "category": "tools_hardware",
+          "unit": "box",
+          "size": "hand",
+          "price_cents": {"min": 600, "typical": 1100, "max": 2200}
+        },
+        "paint_gallon": {
+          "name": "Interior paint",
+          "category": "tools_hardware",
+          "unit": "gallon",
+          "size": "hand",
+          "price_cents": {"min": 2000, "typical": 3500, "max": 7000}
+        },
+        "toolbox_20in": {
+          "name": "Toolbox, 20 in",
+          "category": "tools_hardware",
+          "unit": "each",
+          "size": "armful",
+          "price_cents": {"min": 1500, "typical": 3000, "max": 8000}
+        },
+        "shovel": {"name": "Shovel", "category": "tools_hardware", "unit": "each", "size": "hand", "price_cents": {"min": 1500, "typical": 3000, "max": 6000}},
+        "garden_hose_50": {
+          "name": "Garden hose, 50 ft",
+          "category": "tools_hardware",
+          "unit": "each",
+          "size": "armful",
+          "price_cents": {"min": 1500, "typical": 3000, "max": 6000}
+        },
         "wd40_11oz": {
           "name": "WD-40 or similar lubricant",
           "category": "tools_hardware",
           "unit": "11 oz can",
+          "size": "hand",
           "price_cents": {"min": 600, "typical": 900, "max": 1400}
         },
-        "toilet_paper_12": {"name": "Toilet paper", "category": "household_goods", "unit": "12 rolls", "price_cents": {"min": 1000, "typical": 1800, "max": 3000}},
-        "paper_towels_6": {"name": "Paper towels", "category": "household_goods", "unit": "6 rolls", "price_cents": {"min": 800, "typical": 1300, "max": 2200}},
-        "dish_soap": {"name": "Dish soap", "category": "household_goods", "unit": "~20 oz", "price_cents": {"min": 200, "typical": 400, "max": 700}},
-        "laundry_detergent": {"name": "Laundry detergent", "category": "household_goods", "unit": "64 oz", "price_cents": {"min": 700, "typical": 1400, "max": 2400}},
-        "trash_bags_40": {"name": "Trash bags", "category": "household_goods", "unit": "40 count", "price_cents": {"min": 600, "typical": 1000, "max": 1800}},
-        "sponges_6": {"name": "Sponges", "category": "household_goods", "unit": "6 pack", "price_cents": {"min": 300, "typical": 500, "max": 900}},
-        "cleaning_spray": {"name": "All-purpose cleaner", "category": "household_goods", "unit": "~28 oz", "price_cents": {"min": 250, "typical": 400, "max": 700}},
-        "light_bulbs_led_4": {"name": "LED light bulbs", "category": "household_goods", "unit": "4 pack", "price_cents": {"min": 600, "typical": 1000, "max": 2000}},
-        "bedding_sheet_set": {"name": "Bed sheet set, queen", "category": "household_goods", "unit": "set", "price_cents": {"min": 2000, "typical": 4500, "max": 12000}},
-        "bath_towel": {"name": "Bath towel", "category": "household_goods", "unit": "each", "price_cents": {"min": 800, "typical": 1500, "max": 3500}},
-        "pillow": {"name": "Pillow", "category": "household_goods", "unit": "each", "price_cents": {"min": 1000, "typical": 2500, "max": 6000}},
-        "blanket": {"name": "Blanket or throw", "category": "household_goods", "unit": "each", "price_cents": {"min": 1500, "typical": 3500, "max": 9000}},
-        "mattress_queen": {"name": "Mattress, queen", "category": "household_goods", "unit": "each", "price_cents": {"min": 25000, "typical": 70000, "max": 200000}},
-        "vacuum_cleaner": {"name": "Vacuum cleaner", "category": "household_goods", "unit": "each", "price_cents": {"min": 8000, "typical": 20000, "max": 60000}},
-        "microwave": {"name": "Microwave oven", "category": "household_goods", "unit": "each", "price_cents": {"min": 7000, "typical": 12000, "max": 25000}},
-        "coffee_maker": {"name": "Coffee maker", "category": "household_goods", "unit": "each", "price_cents": {"min": 2500, "typical": 6000, "max": 20000}},
-        "cookware_set": {"name": "Cookware set", "category": "household_goods", "unit": "set", "price_cents": {"min": 4000, "typical": 12000, "max": 40000}},
-        "dish_set_16": {"name": "Dish set", "category": "household_goods", "unit": "16 piece", "price_cents": {"min": 3000, "typical": 6000, "max": 15000}},
-        "office_desk": {"name": "Desk", "category": "household_goods", "unit": "each", "price_cents": {"min": 8000, "typical": 18000, "max": 50000}},
-        "office_chair": {"name": "Office chair", "category": "household_goods", "unit": "each", "price_cents": {"min": 5000, "typical": 15000, "max": 40000}},
-        "sofa": {"name": "Sofa, 3-seat", "category": "household_goods", "unit": "each", "price_cents": {"min": 30000, "typical": 80000, "max": 200000}},
-        "air_freshener_candle": {"name": "Candle or air freshener", "category": "household_goods", "unit": "each", "price_cents": {"min": 500, "typical": 1200, "max": 3000}},
-        "pet_food_dog_30lb": {"name": "Dog food", "category": "household_goods", "unit": "30 lb bag", "price_cents": {"min": 2500, "typical": 4500, "max": 8000}},
-        "cat_litter_20lb": {"name": "Cat litter", "category": "household_goods", "unit": "20 lb", "price_cents": {"min": 1200, "typical": 2000, "max": 3200}},
-        "shampoo": {"name": "Shampoo", "category": "personal_care", "unit": "~12 oz", "price_cents": {"min": 300, "typical": 600, "max": 1500}},
-        "toothpaste": {"name": "Toothpaste", "category": "personal_care", "unit": "each", "price_cents": {"min": 200, "typical": 400, "max": 700}},
-        "toothbrush": {"name": "Toothbrush", "category": "personal_care", "unit": "each", "price_cents": {"min": 200, "typical": 400, "max": 1000}},
-        "deodorant": {"name": "Deodorant", "category": "personal_care", "unit": "each", "price_cents": {"min": 300, "typical": 600, "max": 1000}},
-        "body_wash_soap": {"name": "Body wash or bar soap", "category": "personal_care", "unit": "each", "price_cents": {"min": 300, "typical": 600, "max": 1000}},
-        "razor_cartridges": {"name": "Razor cartridges", "category": "personal_care", "unit": "4-8 pack", "price_cents": {"min": 1000, "typical": 2000, "max": 3500}},
-        "sunscreen": {"name": "Sunscreen", "category": "personal_care", "unit": "~8 oz", "price_cents": {"min": 700, "typical": 1200, "max": 2200}},
-        "makeup_basic": {"name": "Makeup item (basic)", "category": "personal_care", "unit": "each", "price_cents": {"min": 800, "typical": 1500, "max": 4000}},
-        "feminine_products": {"name": "Feminine hygiene products", "category": "personal_care", "unit": "box", "price_cents": {"min": 400, "typical": 800, "max": 1500}},
-        "diapers": {"name": "Diapers", "category": "personal_care", "unit": "~100 count", "price_cents": {"min": 2000, "typical": 3000, "max": 4500}},
+        "toilet_paper_12": {
+          "name": "Toilet paper",
+          "category": "household_goods",
+          "unit": "12 rolls",
+          "size": "armful",
+          "price_cents": {"min": 1000, "typical": 1800, "max": 3000}
+        },
+        "paper_towels_6": {
+          "name": "Paper towels",
+          "category": "household_goods",
+          "unit": "6 rolls",
+          "size": "armful",
+          "price_cents": {"min": 800, "typical": 1300, "max": 2200}
+        },
+        "dish_soap": {
+          "name": "Dish soap",
+          "category": "household_goods",
+          "unit": "~20 oz",
+          "size": "hand",
+          "price_cents": {"min": 200, "typical": 400, "max": 700}
+        },
+        "laundry_detergent": {
+          "name": "Laundry detergent",
+          "category": "household_goods",
+          "unit": "64 oz",
+          "size": "hand",
+          "price_cents": {"min": 700, "typical": 1400, "max": 2400}
+        },
+        "trash_bags_40": {
+          "name": "Trash bags",
+          "category": "household_goods",
+          "unit": "40 count",
+          "size": "hand",
+          "price_cents": {"min": 600, "typical": 1000, "max": 1800}
+        },
+        "sponges_6": {"name": "Sponges", "category": "household_goods", "unit": "6 pack", "size": "hand", "price_cents": {"min": 300, "typical": 500, "max": 900}},
+        "cleaning_spray": {
+          "name": "All-purpose cleaner",
+          "category": "household_goods",
+          "unit": "~28 oz",
+          "size": "hand",
+          "price_cents": {"min": 250, "typical": 400, "max": 700}
+        },
+        "light_bulbs_led_4": {
+          "name": "LED light bulbs",
+          "category": "household_goods",
+          "unit": "4 pack",
+          "size": "hand",
+          "price_cents": {"min": 600, "typical": 1000, "max": 2000}
+        },
+        "bedding_sheet_set": {
+          "name": "Bed sheet set, queen",
+          "category": "household_goods",
+          "unit": "set",
+          "size": "hand",
+          "price_cents": {"min": 2000, "typical": 4500, "max": 12000}
+        },
+        "bath_towel": {
+          "name": "Bath towel",
+          "category": "household_goods",
+          "unit": "each",
+          "size": "hand",
+          "price_cents": {"min": 800, "typical": 1500, "max": 3500}
+        },
+        "pillow": {"name": "Pillow", "category": "household_goods", "unit": "each", "size": "hand", "price_cents": {"min": 1000, "typical": 2500, "max": 6000}},
+        "blanket": {
+          "name": "Blanket or throw",
+          "category": "household_goods",
+          "unit": "each",
+          "size": "hand",
+          "price_cents": {"min": 1500, "typical": 3500, "max": 9000}
+        },
+        "vacuum_cleaner": {
+          "name": "Vacuum cleaner",
+          "category": "household_goods",
+          "unit": "each",
+          "size": "armful",
+          "price_cents": {"min": 8000, "typical": 20000, "max": 60000}
+        },
+        "microwave": {
+          "name": "Microwave oven",
+          "category": "household_goods",
+          "unit": "each",
+          "size": "armful",
+          "price_cents": {"min": 7000, "typical": 12000, "max": 25000}
+        },
+        "coffee_maker": {
+          "name": "Coffee maker",
+          "category": "household_goods",
+          "unit": "each",
+          "size": "armful",
+          "price_cents": {"min": 2500, "typical": 6000, "max": 20000}
+        },
+        "cookware_set": {
+          "name": "Cookware set",
+          "category": "household_goods",
+          "unit": "set",
+          "size": "armful",
+          "price_cents": {"min": 4000, "typical": 12000, "max": 40000}
+        },
+        "dish_set_16": {
+          "name": "Dish set",
+          "category": "household_goods",
+          "unit": "16 piece",
+          "size": "armful",
+          "price_cents": {"min": 3000, "typical": 6000, "max": 15000}
+        },
+        "air_freshener_candle": {
+          "name": "Candle or air freshener",
+          "category": "household_goods",
+          "unit": "each",
+          "size": "hand",
+          "price_cents": {"min": 500, "typical": 1200, "max": 3000}
+        },
+        "pet_food_dog_30lb": {
+          "name": "Dog food",
+          "category": "household_goods",
+          "unit": "30 lb bag",
+          "size": "armful",
+          "price_cents": {"min": 2500, "typical": 4500, "max": 8000}
+        },
+        "cat_litter_20lb": {
+          "name": "Cat litter",
+          "category": "household_goods",
+          "unit": "20 lb",
+          "size": "armful",
+          "price_cents": {"min": 1200, "typical": 2000, "max": 3200}
+        },
+        "refrigerator": {
+          "name": "Refrigerator, full-size",
+          "aliases": ["fridge"],
+          "category": "home_furnishings",
+          "unit": "each",
+          "size": "furniture",
+          "holds": "armful",
+          "price_cents": {"min": 60000, "typical": 140000, "max": 300000},
+          "notes": "Top-freezer at the low end, French-door at the high end."
+        },
+        "mini_fridge": {
+          "name": "Mini fridge, compact",
+          "category": "home_furnishings",
+          "unit": "each",
+          "size": "heavy",
+          "holds": "hand",
+          "price_cents": {"min": 12000, "typical": 20000, "max": 35000}
+        },
+        "washer": {
+          "name": "Washing machine",
+          "aliases": ["washer"],
+          "category": "home_furnishings",
+          "unit": "each",
+          "size": "furniture",
+          "holds": "armful",
+          "price_cents": {"min": 50000, "typical": 80000, "max": 130000}
+        },
+        "dryer": {
+          "name": "Clothes dryer",
+          "category": "home_furnishings",
+          "unit": "each",
+          "size": "furniture",
+          "holds": "armful",
+          "price_cents": {"min": 50000, "typical": 75000, "max": 120000}
+        },
+        "range_stove": {
+          "name": "Range (stove and oven)",
+          "aliases": ["stove", "oven"],
+          "category": "home_furnishings",
+          "unit": "each",
+          "size": "furniture",
+          "price_cents": {"min": 55000, "typical": 90000, "max": 180000}
+        },
+        "sofa": {
+          "name": "Sofa, 3-seat",
+          "aliases": ["couch"],
+          "category": "home_furnishings",
+          "unit": "each",
+          "size": "furniture",
+          "price_cents": {"min": 30000, "typical": 80000, "max": 200000}
+        },
+        "armchair": {
+          "name": "Armchair",
+          "category": "home_furnishings",
+          "unit": "each",
+          "size": "heavy",
+          "price_cents": {"min": 15000, "typical": 40000, "max": 90000}
+        },
+        "mattress_queen": {
+          "name": "Mattress, queen",
+          "category": "home_furnishings",
+          "unit": "each",
+          "size": "furniture",
+          "price_cents": {"min": 25000, "typical": 70000, "max": 200000}
+        },
+        "bed_frame_queen": {
+          "name": "Bed frame, queen",
+          "aliases": ["bed"],
+          "category": "home_furnishings",
+          "unit": "each",
+          "size": "furniture",
+          "price_cents": {"min": 10000, "typical": 30000, "max": 80000}
+        },
+        "dresser": {
+          "name": "Dresser",
+          "category": "home_furnishings",
+          "unit": "each",
+          "size": "furniture",
+          "holds": "armful",
+          "price_cents": {"min": 15000, "typical": 40000, "max": 90000}
+        },
+        "nightstand": {
+          "name": "Nightstand",
+          "category": "home_furnishings",
+          "unit": "each",
+          "size": "heavy",
+          "holds": "hand",
+          "price_cents": {"min": 5000, "typical": 12000, "max": 30000}
+        },
+        "wardrobe": {
+          "name": "Wardrobe",
+          "category": "home_furnishings",
+          "unit": "each",
+          "size": "furniture",
+          "holds": "armful",
+          "price_cents": {"min": 15000, "typical": 35000, "max": 80000}
+        },
+        "bookshelf": {
+          "name": "Bookshelf, 5-shelf",
+          "aliases": ["bookcase"],
+          "category": "home_furnishings",
+          "unit": "each",
+          "size": "heavy",
+          "holds": "hand",
+          "price_cents": {"min": 6000, "typical": 15000, "max": 40000}
+        },
+        "dining_table": {
+          "name": "Dining table",
+          "aliases": ["kitchen table"],
+          "category": "home_furnishings",
+          "unit": "each",
+          "size": "furniture",
+          "holds": "armful",
+          "price_cents": {"min": 20000, "typical": 50000, "max": 120000}
+        },
+        "dining_chair": {
+          "name": "Dining chair",
+          "category": "home_furnishings",
+          "unit": "each",
+          "size": "armful",
+          "price_cents": {"min": 4000, "typical": 10000, "max": 25000}
+        },
+        "coffee_table": {
+          "name": "Coffee table",
+          "category": "home_furnishings",
+          "unit": "each",
+          "size": "heavy",
+          "holds": "hand",
+          "price_cents": {"min": 8000, "typical": 20000, "max": 50000}
+        },
+        "office_desk": {
+          "name": "Desk",
+          "category": "home_furnishings",
+          "unit": "each",
+          "size": "furniture",
+          "holds": "armful",
+          "price_cents": {"min": 8000, "typical": 18000, "max": 50000}
+        },
+        "office_chair": {
+          "name": "Office chair",
+          "category": "home_furnishings",
+          "unit": "each",
+          "size": "heavy",
+          "price_cents": {"min": 5000, "typical": 15000, "max": 40000}
+        },
+        "tv_55_4k": {
+          "name": "Television, 55 in 4K",
+          "aliases": ["TV", "flat-screen TV"],
+          "category": "home_furnishings",
+          "unit": "each",
+          "size": "heavy",
+          "price_cents": {"min": 22000, "typical": 40000, "max": 120000}
+        },
+        "tv_65_4k": {
+          "name": "Television, 65 in 4K",
+          "aliases": ["TV", "big-screen TV"],
+          "category": "home_furnishings",
+          "unit": "each",
+          "size": "heavy",
+          "price_cents": {"min": 35000, "typical": 60000, "max": 200000}
+        },
+        "tv_stand": {
+          "name": "TV stand",
+          "category": "home_furnishings",
+          "unit": "each",
+          "size": "heavy",
+          "holds": "hand",
+          "price_cents": {"min": 8000, "typical": 18000, "max": 45000}
+        },
+        "floor_lamp": {
+          "name": "Floor lamp",
+          "category": "home_furnishings",
+          "unit": "each",
+          "size": "armful",
+          "price_cents": {"min": 3000, "typical": 8000, "max": 20000}
+        },
+        "table_lamp": {
+          "name": "Lamp, table or desk",
+          "category": "home_furnishings",
+          "unit": "each",
+          "size": "hand",
+          "price_cents": {"min": 2000, "typical": 4500, "max": 12000}
+        },
+        "area_rug": {
+          "name": "Area rug, 8 x 10 ft",
+          "category": "home_furnishings",
+          "unit": "each",
+          "size": "armful",
+          "price_cents": {"min": 5000, "typical": 15000, "max": 50000}
+        },
+        "shampoo": {"name": "Shampoo", "category": "personal_care", "unit": "~12 oz", "size": "hand", "price_cents": {"min": 300, "typical": 600, "max": 1500}},
+        "toothpaste": {"name": "Toothpaste", "category": "personal_care", "unit": "each", "size": "pocket", "price_cents": {"min": 200, "typical": 400, "max": 700}},
+        "toothbrush": {
+          "name": "Toothbrush",
+          "category": "personal_care",
+          "unit": "each",
+          "size": "pocket",
+          "price_cents": {"min": 200, "typical": 400, "max": 1000}
+        },
+        "deodorant": {"name": "Deodorant", "category": "personal_care", "unit": "each", "size": "pocket", "price_cents": {"min": 300, "typical": 600, "max": 1000}},
+        "body_wash_soap": {
+          "name": "Body wash or bar soap",
+          "category": "personal_care",
+          "unit": "each",
+          "size": "hand",
+          "price_cents": {"min": 300, "typical": 600, "max": 1000}
+        },
+        "razor_cartridges": {
+          "name": "Razor cartridges",
+          "category": "personal_care",
+          "unit": "4-8 pack",
+          "size": "pocket",
+          "price_cents": {"min": 1000, "typical": 2000, "max": 3500}
+        },
+        "sunscreen": {"name": "Sunscreen", "category": "personal_care", "unit": "~8 oz", "size": "hand", "price_cents": {"min": 700, "typical": 1200, "max": 2200}},
+        "makeup_basic": {
+          "name": "Makeup item (basic)",
+          "category": "personal_care",
+          "unit": "each",
+          "size": "pocket",
+          "price_cents": {"min": 800, "typical": 1500, "max": 4000}
+        },
+        "feminine_products": {
+          "name": "Feminine hygiene products",
+          "category": "personal_care",
+          "unit": "box",
+          "size": "hand",
+          "price_cents": {"min": 400, "typical": 800, "max": 1500}
+        },
+        "diapers": {
+          "name": "Diapers",
+          "category": "personal_care",
+          "unit": "~100 count",
+          "size": "armful",
+          "price_cents": {"min": 2000, "typical": 3000, "max": 4500}
+        },
         "haircut": {
           "name": "Haircut, men or basic",
           "category": "personal_care",
@@ -5050,18 +5886,31 @@
         "dental_filling": {"name": "Dental filling", "category": "medical", "unit": "tooth", "price_cents": {"min": 15000, "typical": 25000, "max": 45000}},
         "dental_crown": {"name": "Dental crown", "category": "medical", "unit": "tooth", "price_cents": {"min": 80000, "typical": 120000, "max": 200000}},
         "eye_exam": {"name": "Eye exam", "category": "medical", "unit": "visit", "price_cents": {"min": 8000, "typical": 15000, "max": 25000}},
-        "eyeglasses": {"name": "Eyeglasses with lenses", "category": "medical", "unit": "pair", "price_cents": {"min": 10000, "typical": 25000, "max": 60000}},
+        "eyeglasses": {
+          "name": "Eyeglasses with lenses",
+          "category": "medical",
+          "unit": "pair",
+          "size": "pocket",
+          "price_cents": {"min": 10000, "typical": 25000, "max": 60000}
+        },
         "flu_shot": {
           "name": "Flu shot (often free with insurance)",
           "category": "medical",
           "unit": "shot",
           "price_cents": {"min": 0, "typical": 3500, "max": 6500}
         },
-        "otc_pain_reliever": {"name": "Over-the-counter pain reliever", "category": "medical", "unit": "bottle", "price_cents": {"min": 500, "typical": 900, "max": 1800}},
+        "otc_pain_reliever": {
+          "name": "Over-the-counter pain reliever",
+          "category": "medical",
+          "unit": "bottle",
+          "size": "pocket",
+          "price_cents": {"min": 500, "typical": 900, "max": 1800}
+        },
         "otc_cold_medicine": {
           "name": "Over-the-counter cold or allergy medicine",
           "category": "medical",
           "unit": "box",
+          "size": "pocket",
           "price_cents": {"min": 600, "typical": 1100, "max": 2000}
         },
         "movie_ticket": {
@@ -5075,6 +5924,7 @@
           "name": "Movie theater popcorn, medium",
           "category": "entertainment",
           "unit": "each",
+          "size": "hand",
           "price_cents": {"min": 700, "typical": 900, "max": 1300}
         },
         "concert_ticket": {
@@ -5096,8 +5946,20 @@
           "price_cents": {"min": 3000, "typical": 6500, "max": 20000}
         },
         "live_theater": {"name": "Live theater ticket", "category": "entertainment", "unit": "ticket", "price_cents": {"min": 2500, "typical": 6500, "max": 30000}},
-        "video_game_new": {"name": "Video game, new release", "category": "entertainment", "unit": "each", "price_cents": {"min": 2000, "typical": 6000, "max": 8000}},
-        "book_paperback": {"name": "Book, paperback", "category": "entertainment", "unit": "each", "price_cents": {"min": 800, "typical": 1700, "max": 2800}},
+        "video_game_new": {
+          "name": "Video game, new release",
+          "category": "entertainment",
+          "unit": "each",
+          "size": "hand",
+          "price_cents": {"min": 2000, "typical": 6000, "max": 8000}
+        },
+        "book_paperback": {
+          "name": "Book, paperback",
+          "category": "entertainment",
+          "unit": "each",
+          "size": "hand",
+          "price_cents": {"min": 800, "typical": 1700, "max": 2800}
+        },
         "streaming_rental": {"name": "Streaming movie rental", "category": "entertainment", "unit": "each", "price_cents": {"min": 399, "typical": 599, "max": 699}},
         "bar_cover": {"name": "Bar or club cover charge", "category": "entertainment", "unit": "person", "price_cents": {"min": 500, "typical": 1500, "max": 4000}},
         "arcade_session": {"name": "Arcade session", "category": "entertainment", "unit": "visit", "price_cents": {"min": 500, "typical": 1500, "max": 3000}},
@@ -5190,6 +6052,7 @@
           "name": "Propane cylinder, 20 lb exchange or refill",
           "category": "fuel",
           "unit": "cylinder",
+          "size": "armful",
           "price_cents": {"min": 2200, "typical": 2800, "max": 3500}
         },
         "oil_change_conventional": {
@@ -5416,10 +6279,16 @@
         "meal_kit": {"name": "Meal-kit subscription", "category": "subscriptions", "unit": "week", "price_cents": {"min": 6000, "typical": 9000, "max": 15000}},
         "vpn": {"name": "VPN", "category": "subscriptions", "unit": "month", "price_cents": {"min": 300, "typical": 1000, "max": 1300}},
         "magazine": {"name": "Magazine subscription", "category": "subscriptions", "unit": "year", "price_cents": {"min": 1500, "typical": 3500, "max": 6000}},
-        "greeting_card": {"name": "Greeting card", "category": "gifts", "unit": "each", "price_cents": {"min": 300, "typical": 500, "max": 1000}},
-        "flowers_bouquet": {"name": "Flower bouquet", "category": "gifts", "unit": "each", "price_cents": {"min": 2500, "typical": 5500, "max": 12000}},
-        "chocolate_box": {"name": "Box of chocolates", "category": "gifts", "unit": "each", "price_cents": {"min": 1000, "typical": 2500, "max": 6000}},
-        "gift_card": {"name": "Gift card, typical", "category": "gifts", "unit": "each", "price_cents": {"min": 2500, "typical": 5000, "max": 10000}},
+        "greeting_card": {"name": "Greeting card", "category": "gifts", "unit": "each", "size": "pocket", "price_cents": {"min": 300, "typical": 500, "max": 1000}},
+        "flowers_bouquet": {"name": "Flower bouquet", "category": "gifts", "unit": "each", "size": "hand", "price_cents": {"min": 2500, "typical": 5500, "max": 12000}},
+        "chocolate_box": {"name": "Box of chocolates", "category": "gifts", "unit": "each", "size": "hand", "price_cents": {"min": 1000, "typical": 2500, "max": 6000}},
+        "gift_card": {
+          "name": "Gift card, typical",
+          "category": "gifts",
+          "unit": "each",
+          "size": "pocket",
+          "price_cents": {"min": 2500, "typical": 5000, "max": 10000}
+        },
         "gift_coworker": {
           "name": "Gift for a coworker or acquaintance",
           "category": "gifts",
@@ -5434,19 +6303,43 @@
         },
         "gift_partner": {"name": "Gift for a partner or spouse", "category": "gifts", "unit": "each", "price_cents": {"min": 5000, "typical": 15000, "max": 50000}},
         "gift_child": {"name": "Gift for a child (toy or game)", "category": "gifts", "unit": "each", "price_cents": {"min": 1500, "typical": 3000, "max": 8000}},
-        "jewelry_basic": {"name": "Jewelry, basic gift piece", "category": "gifts", "unit": "each", "price_cents": {"min": 5000, "typical": 15000, "max": 100000}},
-        "wine_gift": {"name": "Bottle of wine as a gift", "category": "gifts", "unit": "each", "price_cents": {"min": 1500, "typical": 3000, "max": 8000}},
+        "jewelry_basic": {
+          "name": "Jewelry, basic gift piece",
+          "category": "gifts",
+          "unit": "each",
+          "size": "pocket",
+          "price_cents": {"min": 5000, "typical": 15000, "max": 100000}
+        },
+        "wine_gift": {
+          "name": "Bottle of wine as a gift",
+          "category": "gifts",
+          "unit": "each",
+          "size": "hand",
+          "price_cents": {"min": 1500, "typical": 3000, "max": 8000}
+        },
         "wedding_gift": {"name": "Wedding gift (cash or registry)", "category": "gifts", "unit": "each", "price_cents": {"min": 5000, "typical": 10000, "max": 25000}},
         "baby_shower_gift": {"name": "Baby shower gift", "category": "gifts", "unit": "each", "price_cents": {"min": 3000, "typical": 5000, "max": 10000}},
-        "wrapping_paper": {"name": "Wrapping paper or gift bag", "category": "gifts", "unit": "each", "price_cents": {"min": 300, "typical": 600, "max": 1200}},
-        "holiday_decorations": {"name": "Seasonal decorations, small set", "category": "gifts", "unit": "set", "price_cents": {"min": 1500, "typical": 3500, "max": 9000}}
+        "wrapping_paper": {
+          "name": "Wrapping paper or gift bag",
+          "category": "gifts",
+          "unit": "each",
+          "size": "hand",
+          "price_cents": {"min": 300, "typical": 600, "max": 1200}
+        },
+        "holiday_decorations": {
+          "name": "Seasonal decorations, small set",
+          "category": "gifts",
+          "unit": "set",
+          "size": "hand",
+          "price_cents": {"min": 1500, "typical": 3500, "max": 9000}
+        }
       }
     },
     "economy.categories": {
       "id": "economy.categories",
       "pack": "economy",
       "schema": "lre-table/economy.categories/v1",
-      "revision": "14a229f6821b5bb6d6e0673a096f7cff",
+      "revision": "3537edd70ead270059aa1f8c96555595",
       "label": "Price categories",
       "source": {
         "dataPack": "modern-us",
@@ -5511,8 +6404,8 @@
         "electronics": {
           "name": "Electronics",
           "basis": "Retail list and street prices (2025), rounded; min = budget or older generation, max = high-end consumer.",
-          "item_count": 27,
-          "price_cents": {"min": 800, "typical": 11000, "max": 400000}
+          "item_count": 25,
+          "price_cents": {"min": 800, "typical": 10000, "max": 400000}
         },
         "tools_hardware": {
           "name": "Tools and hardware",
@@ -5523,8 +6416,15 @@
         "household_goods": {
           "name": "Household goods",
           "basis": "Mass-merchant retail prices (2025), rounded.",
+          "item_count": 20,
+          "price_cents": {"min": 200, "typical": 1900, "max": 60000}
+        },
+        "home_furnishings": {
+          "name": "Home furnishings and appliances",
+          "basis": "Big-box and online retail list prices for mainstream models (home-improvement, furniture and electronics chains), rounded.",
+          "notes": "Prices exclude delivery, haul-away and installation. Furniture-size pieces come by delivery or a move.",
           "item_count": 24,
-          "price_cents": {"min": 200, "typical": 3000, "max": 200000}
+          "price_cents": {"min": 2000, "typical": 32500, "max": 300000}
         },
         "personal_care": {
           "name": "Personal care",
@@ -8035,11 +8935,323 @@
         }
       }
     },
+    "economy.index_history": {
+      "id": "economy.index_history",
+      "pack": "economy",
+      "schema": "lre-table/economy.index_history/v1",
+      "revision": "65038a8238d1241b4aa53ea1bdbbf2c2",
+      "label": "Stock index history (total return, month-end closes)",
+      "source": {
+        "dataPack": "modern-us",
+        "file": "us/index-history.json",
+        "sourceSchema": "lre-data-src/us/index-history/v1",
+        "reflectsPeriod": "2003-05 to 2026-10 (month-end closes)",
+        "approximate": false,
+        "basis": {
+          "series": "The total return of a broad US stock index: the Thrift Savings Plan's C Fund, which tracks the S&P 500 Index and reinvests what it earns, net of its small costs.",
+          "source": "Thrift Savings Plan (Federal Retirement Thrift Investment Board), share price history, C Fund",
+          "page": "https://www.tsp.gov/share-price-history/",
+          "url": "https://www.tsp.gov/data/fund-price-history.csv?startdate=2003-06-02&enddate=2026-10-31&Lfunds=0&InvFunds=1&download=1",
+          "retrieved": "2026-11-02",
+          "sha256": "1e8e6671b10dbc046c51e2918cabcc7f4536d211a1f316a04ec7ef657da17423",
+          "license": "Public domain: published by a U.S. federal agency (17 U.S.C. §105); the figures are facts.",
+          "method": "Each month's close on its last trading day, as published (four decimals); 2003-05 is the fund's $10.0000 base of 31 May 2003, when daily share prices began. Converted by scripts/tables/index-history.ts."
+        }
+      },
+      "columns": {
+        "date": {"type": "text", "doc": "The trading day of the month's last close, YYYY-MM-DD."},
+        "level": {"type": "number", "doc": "The close: a total-return level of the stock index, read only as a ratio to another month's."}
+      },
+      "rows": {
+        "2003-05": {"date": "2003-05-31", "level": 10},
+        "2003-06": {"date": "2003-06-30", "level": 10.12},
+        "2003-07": {"date": "2003-07-31", "level": 10.3},
+        "2003-08": {"date": "2003-08-29", "level": 10.5},
+        "2003-09": {"date": "2003-09-30", "level": 10.38},
+        "2003-10": {"date": "2003-10-31", "level": 10.97},
+        "2003-11": {"date": "2003-11-28", "level": 11.07},
+        "2003-12": {"date": "2003-12-31", "level": 11.65},
+        "2004-01": {"date": "2004-01-30", "level": 11.86},
+        "2004-02": {"date": "2004-02-27", "level": 12.02},
+        "2004-03": {"date": "2004-03-31", "level": 11.84},
+        "2004-04": {"date": "2004-04-30", "level": 11.66},
+        "2004-05": {"date": "2004-05-28", "level": 11.82},
+        "2004-06": {"date": "2004-06-30", "level": 12.04},
+        "2004-07": {"date": "2004-07-30", "level": 11.65},
+        "2004-08": {"date": "2004-08-31", "level": 11.69},
+        "2004-09": {"date": "2004-09-30", "level": 11.82},
+        "2004-10": {"date": "2004-10-29", "level": 12},
+        "2004-11": {"date": "2004-11-30", "level": 12.49},
+        "2004-12": {"date": "2004-12-31", "level": 12.91},
+        "2005-01": {"date": "2005-01-31", "level": 12.6},
+        "2005-02": {"date": "2005-02-28", "level": 12.86},
+        "2005-03": {"date": "2005-03-31", "level": 12.64},
+        "2005-04": {"date": "2005-04-29", "level": 12.4},
+        "2005-05": {"date": "2005-05-31", "level": 12.79},
+        "2005-06": {"date": "2005-06-30", "level": 12.81},
+        "2005-07": {"date": "2005-07-29", "level": 13.28},
+        "2005-08": {"date": "2005-08-31", "level": 13.16},
+        "2005-09": {"date": "2005-09-30", "level": 13.27},
+        "2005-10": {"date": "2005-10-31", "level": 13.05},
+        "2005-11": {"date": "2005-11-30", "level": 13.54},
+        "2005-12": {"date": "2005-12-30", "level": 13.55},
+        "2006-01": {"date": "2006-01-31", "level": 13.91},
+        "2006-02": {"date": "2006-02-28", "level": 13.94},
+        "2006-03": {"date": "2006-03-31", "level": 14.12},
+        "2006-04": {"date": "2006-04-28", "level": 14.31},
+        "2006-05": {"date": "2006-05-31", "level": 13.9},
+        "2006-06": {"date": "2006-06-30", "level": 13.91},
+        "2006-07": {"date": "2006-07-31", "level": 14},
+        "2006-08": {"date": "2006-08-31", "level": 14.33},
+        "2006-09": {"date": "2006-09-29", "level": 14.7},
+        "2006-10": {"date": "2006-10-31", "level": 15.18},
+        "2006-11": {"date": "2006-11-30", "level": 15.47},
+        "2006-12": {"date": "2006-12-29", "level": 15.69},
+        "2007-01": {"date": "2007-01-31", "level": 15.93},
+        "2007-02": {"date": "2007-02-28", "level": 15.62},
+        "2007-03": {"date": "2007-03-30", "level": 15.79},
+        "2007-04": {"date": "2007-04-30", "level": 16.49},
+        "2007-05": {"date": "2007-05-31", "level": 17.07},
+        "2007-06": {"date": "2007-06-29", "level": 16.78},
+        "2007-07": {"date": "2007-07-31", "level": 16.26},
+        "2007-08": {"date": "2007-08-31", "level": 16.51},
+        "2007-09": {"date": "2007-09-28", "level": 17.13},
+        "2007-10": {"date": "2007-10-31", "level": 17.4},
+        "2007-11": {"date": "2007-11-30", "level": 16.67},
+        "2007-12": {"date": "2007-12-31", "level": 16.56},
+        "2008-01": {"date": "2008-01-31", "level": 15.57},
+        "2008-02": {"date": "2008-02-29", "level": 15.06},
+        "2008-03": {"date": "2008-03-31", "level": 14.99},
+        "2008-04": {"date": "2008-04-30", "level": 15.73},
+        "2008-05": {"date": "2008-05-30", "level": 15.93},
+        "2008-06": {"date": "2008-06-30", "level": 14.59},
+        "2008-07": {"date": "2008-07-31", "level": 14.4734},
+        "2008-08": {"date": "2008-08-29", "level": 14.6844},
+        "2008-09": {"date": "2008-09-30", "level": 13.3723},
+        "2008-10": {"date": "2008-10-31", "level": 11.1223},
+        "2008-11": {"date": "2008-11-28", "level": 10.3237},
+        "2008-12": {"date": "2008-12-31", "level": 10.4343},
+        "2009-01": {"date": "2009-01-30", "level": 9.5571},
+        "2009-02": {"date": "2009-02-27", "level": 8.5403},
+        "2009-03": {"date": "2009-03-31", "level": 9.2925},
+        "2009-04": {"date": "2009-04-30", "level": 10.1829},
+        "2009-05": {"date": "2009-05-29", "level": 10.7529},
+        "2009-06": {"date": "2009-06-30", "level": 10.7785},
+        "2009-07": {"date": "2009-07-31", "level": 11.5953},
+        "2009-08": {"date": "2009-08-31", "level": 12.015},
+        "2009-09": {"date": "2009-09-30", "level": 12.4641},
+        "2009-10": {"date": "2009-10-30", "level": 12.2325},
+        "2009-11": {"date": "2009-11-30", "level": 12.9659},
+        "2009-12": {"date": "2009-12-31", "level": 13.2177},
+        "2010-01": {"date": "2010-01-29", "level": 12.7423},
+        "2010-02": {"date": "2010-02-26", "level": 13.1384},
+        "2010-03": {"date": "2010-03-31", "level": 13.9317},
+        "2010-04": {"date": "2010-04-30", "level": 14.1512},
+        "2010-05": {"date": "2010-05-28", "level": 13.0207},
+        "2010-06": {"date": "2010-06-30", "level": 12.339},
+        "2010-07": {"date": "2010-07-30", "level": 13.2035},
+        "2010-08": {"date": "2010-08-31", "level": 12.6074},
+        "2010-09": {"date": "2010-09-30", "level": 13.7324},
+        "2010-10": {"date": "2010-10-29", "level": 14.2545},
+        "2010-11": {"date": "2010-11-30", "level": 14.256},
+        "2010-12": {"date": "2010-12-31", "level": 15.2084},
+        "2011-01": {"date": "2011-01-31", "level": 15.5685},
+        "2011-02": {"date": "2011-02-28", "level": 16.1012},
+        "2011-03": {"date": "2011-03-31", "level": 16.1072},
+        "2011-04": {"date": "2011-04-29", "level": 16.5841},
+        "2011-05": {"date": "2011-05-31", "level": 16.396},
+        "2011-06": {"date": "2011-06-30", "level": 16.1223},
+        "2011-07": {"date": "2011-07-29", "level": 15.794},
+        "2011-08": {"date": "2011-08-31", "level": 14.9352},
+        "2011-09": {"date": "2011-09-30", "level": 13.8852},
+        "2011-10": {"date": "2011-10-31", "level": 15.4028},
+        "2011-11": {"date": "2011-11-30", "level": 15.3702},
+        "2011-12": {"date": "2011-12-30", "level": 15.5299},
+        "2012-01": {"date": "2012-01-31", "level": 16.2289},
+        "2012-02": {"date": "2012-02-29", "level": 16.9327},
+        "2012-03": {"date": "2012-03-30", "level": 17.4921},
+        "2012-04": {"date": "2012-04-30", "level": 17.3844},
+        "2012-05": {"date": "2012-05-31", "level": 16.3428},
+        "2012-06": {"date": "2012-06-29", "level": 17.0178},
+        "2012-07": {"date": "2012-07-31", "level": 17.2561},
+        "2012-08": {"date": "2012-08-31", "level": 17.6437},
+        "2012-09": {"date": "2012-09-28", "level": 18.0979},
+        "2012-10": {"date": "2012-10-31", "level": 17.762},
+        "2012-11": {"date": "2012-11-30", "level": 17.8633},
+        "2012-12": {"date": "2012-12-31", "level": 18.026},
+        "2013-01": {"date": "2013-01-31", "level": 18.9604},
+        "2013-02": {"date": "2013-02-28", "level": 19.2179},
+        "2013-03": {"date": "2013-03-28", "level": 19.9383},
+        "2013-04": {"date": "2013-04-30", "level": 20.3223},
+        "2013-05": {"date": "2013-05-31", "level": 20.7981},
+        "2013-06": {"date": "2013-06-28", "level": 20.5193},
+        "2013-07": {"date": "2013-07-31", "level": 21.5656},
+        "2013-08": {"date": "2013-08-30", "level": 20.9421},
+        "2013-09": {"date": "2013-09-30", "level": 21.6001},
+        "2013-10": {"date": "2013-10-31", "level": 22.5946},
+        "2013-11": {"date": "2013-11-29", "level": 23.2839},
+        "2013-12": {"date": "2013-12-31", "level": 23.8752},
+        "2014-01": {"date": "2014-01-31", "level": 23.0515},
+        "2014-02": {"date": "2014-02-28", "level": 24.1075},
+        "2014-03": {"date": "2014-03-31", "level": 24.3115},
+        "2014-04": {"date": "2014-04-30", "level": 24.4935},
+        "2014-05": {"date": "2014-05-30", "level": 25.0698},
+        "2014-06": {"date": "2014-06-30", "level": 25.5887},
+        "2014-07": {"date": "2014-07-31", "level": 25.2379},
+        "2014-08": {"date": "2014-08-29", "level": 26.2491},
+        "2014-09": {"date": "2014-09-30", "level": 25.8829},
+        "2014-10": {"date": "2014-10-31", "level": 26.5168},
+        "2014-11": {"date": "2014-11-28", "level": 27.2321},
+        "2014-12": {"date": "2014-12-31", "level": 27.1655},
+        "2015-01": {"date": "2015-01-30", "level": 26.352},
+        "2015-02": {"date": "2015-02-27", "level": 27.8673},
+        "2015-03": {"date": "2015-03-31", "level": 27.4284},
+        "2015-04": {"date": "2015-04-30", "level": 27.6928},
+        "2015-05": {"date": "2015-05-29", "level": 28.0503},
+        "2015-06": {"date": "2015-06-30", "level": 27.509},
+        "2015-07": {"date": "2015-07-31", "level": 28.0874},
+        "2015-08": {"date": "2015-08-31", "level": 26.3935},
+        "2015-09": {"date": "2015-09-30", "level": 25.7422},
+        "2015-10": {"date": "2015-10-30", "level": 27.9162},
+        "2015-11": {"date": "2015-11-30", "level": 28.0019},
+        "2015-12": {"date": "2015-12-31", "level": 27.5622},
+        "2016-01": {"date": "2016-01-29", "level": 26.1963},
+        "2016-02": {"date": "2016-02-29", "level": 26.1642},
+        "2016-03": {"date": "2016-03-31", "level": 27.9408},
+        "2016-04": {"date": "2016-04-29", "level": 28.0492},
+        "2016-05": {"date": "2016-05-31", "level": 28.5534},
+        "2016-06": {"date": "2016-06-30", "level": 28.6282},
+        "2016-07": {"date": "2016-07-29", "level": 29.6841},
+        "2016-08": {"date": "2016-08-31", "level": 29.7263},
+        "2016-09": {"date": "2016-09-30", "level": 29.7319},
+        "2016-10": {"date": "2016-10-31", "level": 29.19},
+        "2016-11": {"date": "2016-11-30", "level": 30.2732},
+        "2016-12": {"date": "2016-12-30", "level": 30.8727},
+        "2017-01": {"date": "2017-01-31", "level": 31.4589},
+        "2017-02": {"date": "2017-02-28", "level": 32.7087},
+        "2017-03": {"date": "2017-03-31", "level": 32.7472},
+        "2017-04": {"date": "2017-04-28", "level": 33.0838},
+        "2017-05": {"date": "2017-05-31", "level": 33.5487},
+        "2017-06": {"date": "2017-06-30", "level": 33.7574},
+        "2017-07": {"date": "2017-07-31", "level": 34.4508},
+        "2017-08": {"date": "2017-08-31", "level": 34.5553},
+        "2017-09": {"date": "2017-09-29", "level": 35.2685},
+        "2017-10": {"date": "2017-10-31", "level": 36.0912},
+        "2017-11": {"date": "2017-11-30", "level": 37.1975},
+        "2017-12": {"date": "2017-12-29", "level": 37.6103},
+        "2018-01": {"date": "2018-01-31", "level": 39.7632},
+        "2018-02": {"date": "2018-02-28", "level": 38.2946},
+        "2018-03": {"date": "2018-03-29", "level": 37.3192},
+        "2018-04": {"date": "2018-04-30", "level": 37.4614},
+        "2018-05": {"date": "2018-05-31", "level": 38.3628},
+        "2018-06": {"date": "2018-06-29", "level": 38.5985},
+        "2018-07": {"date": "2018-07-31", "level": 40.0345},
+        "2018-08": {"date": "2018-08-31", "level": 41.3388},
+        "2018-09": {"date": "2018-09-28", "level": 41.5741},
+        "2018-10": {"date": "2018-10-31", "level": 38.7315},
+        "2018-11": {"date": "2018-11-30", "level": 39.5201},
+        "2018-12": {"date": "2018-12-31", "level": 35.9523},
+        "2019-01": {"date": "2019-01-31", "level": 38.8329},
+        "2019-02": {"date": "2019-02-28", "level": 40.0779},
+        "2019-03": {"date": "2019-03-29", "level": 40.8589},
+        "2019-04": {"date": "2019-04-30", "level": 42.513},
+        "2019-05": {"date": "2019-05-31", "level": 39.8099},
+        "2019-06": {"date": "2019-06-28", "level": 42.6144},
+        "2019-07": {"date": "2019-07-31", "level": 43.2268},
+        "2019-08": {"date": "2019-08-30", "level": 42.5403},
+        "2019-09": {"date": "2019-09-30", "level": 43.3358},
+        "2019-10": {"date": "2019-10-31", "level": 44.2721},
+        "2019-11": {"date": "2019-11-29", "level": 45.8775},
+        "2019-12": {"date": "2019-12-31", "level": 47.2602},
+        "2020-01": {"date": "2020-01-31", "level": 47.2395},
+        "2020-02": {"date": "2020-02-28", "level": 43.3479},
+        "2020-03": {"date": "2020-03-31", "level": 37.9739},
+        "2020-04": {"date": "2020-04-30", "level": 42.8395},
+        "2020-05": {"date": "2020-05-29", "level": 44.8807},
+        "2020-06": {"date": "2020-06-30", "level": 45.7718},
+        "2020-07": {"date": "2020-07-31", "level": 48.3531},
+        "2020-08": {"date": "2020-08-31", "level": 51.828},
+        "2020-09": {"date": "2020-09-30", "level": 49.8576},
+        "2020-10": {"date": "2020-10-30", "level": 48.5296},
+        "2020-11": {"date": "2020-11-30", "level": 53.8426},
+        "2020-12": {"date": "2020-12-31", "level": 55.9119},
+        "2021-01": {"date": "2021-01-29", "level": 55.3453},
+        "2021-02": {"date": "2021-02-26", "level": 56.8721},
+        "2021-03": {"date": "2021-03-31", "level": 59.3616},
+        "2021-04": {"date": "2021-04-30", "level": 62.5284},
+        "2021-05": {"date": "2021-05-28", "level": 62.9628},
+        "2021-06": {"date": "2021-06-30", "level": 64.4324},
+        "2021-07": {"date": "2021-07-30", "level": 65.9622},
+        "2021-08": {"date": "2021-08-31", "level": 67.964},
+        "2021-09": {"date": "2021-09-30", "level": 64.8034},
+        "2021-10": {"date": "2021-10-29", "level": 69.3406},
+        "2021-11": {"date": "2021-11-30", "level": 68.8604},
+        "2021-12": {"date": "2021-12-31", "level": 71.947},
+        "2022-01": {"date": "2022-01-31", "level": 68.2231},
+        "2022-02": {"date": "2022-02-28", "level": 66.182},
+        "2022-03": {"date": "2022-03-31", "level": 68.6416},
+        "2022-04": {"date": "2022-04-29", "level": 62.6578},
+        "2022-05": {"date": "2022-05-26", "level": 61.6252},
+        "2022-06": {"date": "2022-06-30", "level": 57.5893},
+        "2022-07": {"date": "2022-07-29", "level": 62.8983},
+        "2022-08": {"date": "2022-08-31", "level": 60.3305},
+        "2022-09": {"date": "2022-09-30", "level": 54.7748},
+        "2022-10": {"date": "2022-10-31", "level": 59.2098},
+        "2022-11": {"date": "2022-11-30", "level": 62.5151},
+        "2022-12": {"date": "2022-12-30", "level": 58.9043},
+        "2023-01": {"date": "2023-01-31", "level": 62.603},
+        "2023-02": {"date": "2023-02-28", "level": 61.0749},
+        "2023-03": {"date": "2023-03-31", "level": 63.3162},
+        "2023-04": {"date": "2023-04-28", "level": 64.3024},
+        "2023-05": {"date": "2023-05-31", "level": 64.579},
+        "2023-06": {"date": "2023-06-30", "level": 68.8445},
+        "2023-07": {"date": "2023-07-31", "level": 71.0523},
+        "2023-08": {"date": "2023-08-31", "level": 69.9266},
+        "2023-09": {"date": "2023-09-29", "level": 66.59},
+        "2023-10": {"date": "2023-10-31", "level": 65.1891},
+        "2023-11": {"date": "2023-11-30", "level": 71.1354},
+        "2023-12": {"date": "2023-12-29", "level": 74.3644},
+        "2024-01": {"date": "2024-01-31", "level": 75.6119},
+        "2024-02": {"date": "2024-02-29", "level": 79.6467},
+        "2024-03": {"date": "2024-03-28", "level": 82.2085},
+        "2024-04": {"date": "2024-04-30", "level": 78.8506},
+        "2024-05": {"date": "2024-05-31", "level": 82.7584},
+        "2024-06": {"date": "2024-06-28", "level": 85.7249},
+        "2024-07": {"date": "2024-07-31", "level": 86.7626},
+        "2024-08": {"date": "2024-08-30", "level": 88.8635},
+        "2024-09": {"date": "2024-09-30", "level": 90.7562},
+        "2024-10": {"date": "2024-10-31", "level": 89.9277},
+        "2024-11": {"date": "2024-11-29", "level": 95.205},
+        "2024-12": {"date": "2024-12-31", "level": 92.9284},
+        "2025-01": {"date": "2025-01-31", "level": 95.5121},
+        "2025-02": {"date": "2025-02-28", "level": 94.2662},
+        "2025-03": {"date": "2025-03-31", "level": 88.9501},
+        "2025-04": {"date": "2025-04-30", "level": 88.3449},
+        "2025-05": {"date": "2025-05-30", "level": 93.9035},
+        "2025-06": {"date": "2025-06-30", "level": 98.6743},
+        "2025-07": {"date": "2025-07-31", "level": 100.8872},
+        "2025-08": {"date": "2025-08-29", "level": 102.9308},
+        "2025-09": {"date": "2025-09-30", "level": 106.6829},
+        "2025-10": {"date": "2025-10-31", "level": 109.1819},
+        "2025-11": {"date": "2025-11-28", "level": 109.449},
+        "2025-12": {"date": "2025-12-31", "level": 109.5126},
+        "2026-01": {"date": "2026-01-30", "level": 111.1},
+        "2026-02": {"date": "2026-02-27", "level": 110.2562},
+        "2026-03": {"date": "2026-03-31", "level": 104.7643},
+        "2026-04": {"date": "2026-04-30", "level": 115.7553},
+        "2026-05": {"date": "2026-05-29", "level": 121.847},
+        "2026-06": {"date": "2026-06-30", "level": 120.6862},
+        "2026-07": {"date": "2026-07-31", "level": 120.6031},
+        "2026-08": {"date": "2026-08-31", "level": 123.8857},
+        "2026-09": {"date": "2026-09-30", "level": 123.4567},
+        "2026-10": {"date": "2026-10-30", "level": 122.3804}
+      }
+    },
     "gear.items": {
       "id": "gear.items",
       "pack": "gear",
       "schema": "lre-table/gear.items/v1",
-      "revision": "4f8d8bc56595d23d6a2563d72afb0a25",
+      "revision": "d4980aa57f9745734d948f954a32bcc7",
       "label": "Gear items",
       "source": {
         "dataPack": "modern-us",
@@ -8055,6 +9267,12 @@
         "equip_slot": {"type": "ref", "ref": "gear.slots"},
         "weight_g": {"type": "int", "unit": "g", "doc": "Empty or dry weight."},
         "volume_l": {"type": "number", "unit": "l"},
+        "size": {
+          "type": "enum",
+          "values": ["pocket", "hand", "armful", "heavy", "furniture", "builtin"],
+          "doc": "How it is carried; inference reads it before the volume.",
+          "optional": true
+        },
         "price_cents": {"type": "band", "unit": "cents"},
         "notes": {"type": "text", "optional": true}
       },
@@ -8065,6 +9283,7 @@
           "equip_slot": "pocket",
           "weight_g": 70,
           "volume_l": 0.06,
+          "size": "pocket",
           "price_cents": {"min": 1500, "typical": 4000, "max": 15000},
           "notes": "Empty weight; cards and cash add about 40-60 g."
         },
@@ -8074,6 +9293,7 @@
           "equip_slot": "pocket",
           "weight_g": 40,
           "volume_l": 0.04,
+          "size": "pocket",
           "price_cents": {"min": 1000, "typical": 3000, "max": 9000}
         },
         "id_card": {
@@ -8082,6 +9302,7 @@
           "equip_slot": "pocket",
           "weight_g": 5,
           "volume_l": 0.004,
+          "size": "pocket",
           "price_cents": {"min": 1000, "typical": 3500, "max": 5500},
           "notes": "Replacement fee, typical state."
         },
@@ -8091,6 +9312,7 @@
           "equip_slot": "pocket",
           "weight_g": 5,
           "volume_l": 0.004,
+          "size": "pocket",
           "price_cents": {"min": 0, "typical": 0, "max": 0},
           "notes": "No purchase price; issued free."
         },
@@ -8100,6 +9322,7 @@
           "equip_slot": "pocket",
           "weight_g": 40,
           "volume_l": 0.03,
+          "size": "pocket",
           "price_cents": {"min": 16500, "typical": 16500, "max": 16500},
           "notes": "$130 application + $35 acceptance fee."
         },
@@ -8109,6 +9332,7 @@
           "equip_slot": "pocket",
           "weight_g": 90,
           "volume_l": 0.08,
+          "size": "pocket",
           "price_cents": {"min": 500, "typical": 2000, "max": 8000},
           "notes": "Price is replacement cost; a car fob alone runs $100-$500."
         },
@@ -8118,6 +9342,7 @@
           "equip_slot": "pocket",
           "weight_g": 190,
           "volume_l": 0.1,
+          "size": "pocket",
           "price_cents": {"min": 12000, "typical": 50000, "max": 160000},
           "notes": "Weight/size typical of a 6.1-6.7 in phone; price spans budget to flagship (see prices.json)."
         },
@@ -8127,6 +9352,7 @@
           "equip_slot": "pocket_or_bag",
           "weight_g": 55,
           "volume_l": 0.04,
+          "size": "pocket",
           "price_cents": {"min": 1500, "typical": 7500, "max": 25000}
         },
         "power_bank": {
@@ -8135,6 +9361,7 @@
           "equip_slot": "pocket_or_bag",
           "weight_g": 200,
           "volume_l": 0.15,
+          "size": "pocket",
           "price_cents": {"min": 1500, "typical": 3000, "max": 8000}
         },
         "charging_cable": {
@@ -8143,6 +9370,7 @@
           "equip_slot": "pocket_or_bag",
           "weight_g": 40,
           "volume_l": 0.03,
+          "size": "pocket",
           "price_cents": {"min": 800, "typical": 1500, "max": 3500}
         },
         "flashlight_pocket_led": {
@@ -8151,6 +9379,7 @@
           "equip_slot": "pocket",
           "weight_g": 120,
           "volume_l": 0.08,
+          "size": "pocket",
           "price_cents": {"min": 800, "typical": 2500, "max": 8000},
           "notes": "Weight includes batteries."
         },
@@ -8160,6 +9389,7 @@
           "equip_slot": "pocket_or_bag",
           "weight_g": 250,
           "volume_l": 0.15,
+          "size": "pocket",
           "price_cents": {"min": 2500, "typical": 6000, "max": 15000}
         },
         "headlamp": {
@@ -8168,6 +9398,7 @@
           "equip_slot": "head",
           "weight_g": 90,
           "volume_l": 0.1,
+          "size": "pocket",
           "price_cents": {"min": 1500, "typical": 3000, "max": 8000}
         },
         "multitool": {
@@ -8176,6 +9407,7 @@
           "equip_slot": "pocket_or_bag",
           "weight_g": 240,
           "volume_l": 0.14,
+          "size": "pocket",
           "price_cents": {"min": 3500, "typical": 9000, "max": 15000}
         },
         "pocketknife": {
@@ -8184,6 +9416,7 @@
           "equip_slot": "pocket",
           "weight_g": 90,
           "volume_l": 0.06,
+          "size": "pocket",
           "price_cents": {"min": 1500, "typical": 4000, "max": 12000},
           "notes": "Legal blade lengths vary by state and venue."
         },
@@ -8193,6 +9426,7 @@
           "equip_slot": "pocket",
           "weight_g": 20,
           "volume_l": 0.02,
+          "size": "pocket",
           "price_cents": {"min": 100, "typical": 300, "max": 3000}
         },
         "water_bottle_1l_steel": {
@@ -8201,6 +9435,7 @@
           "equip_slot": "hand_held",
           "weight_g": 400,
           "volume_l": 1.3,
+          "size": "hand",
           "price_cents": {"min": 1500, "typical": 3000, "max": 6000},
           "notes": "Empty weight; adds about 1.0 kg of water when full."
         },
@@ -8210,6 +9445,7 @@
           "equip_slot": "hand_held",
           "weight_g": 15,
           "volume_l": 0.55,
+          "size": "hand",
           "price_cents": {"min": 50, "typical": 150, "max": 400},
           "notes": "Empty weight; adds 0.5 kg of water when full."
         },
@@ -8219,6 +9455,7 @@
           "equip_slot": "pocket_or_bag",
           "weight_g": 150,
           "volume_l": 0.3,
+          "size": "pocket",
           "price_cents": {"min": 500, "typical": 1200, "max": 2500}
         },
         "sunglasses": {
@@ -8227,6 +9464,7 @@
           "equip_slot": "face",
           "weight_g": 35,
           "volume_l": 0.04,
+          "size": "pocket",
           "price_cents": {"min": 800, "typical": 2500, "max": 15000}
         },
         "eyeglasses": {
@@ -8235,6 +9473,7 @@
           "equip_slot": "face",
           "weight_g": 30,
           "volume_l": 0.03,
+          "size": "pocket",
           "price_cents": {"min": 10000, "typical": 25000, "max": 60000}
         },
         "watch_analog_quartz": {
@@ -8243,6 +9482,7 @@
           "equip_slot": "wrist",
           "weight_g": 60,
           "volume_l": 0.03,
+          "size": "pocket",
           "price_cents": {"min": 2000, "typical": 8000, "max": 50000}
         },
         "smartwatch": {
@@ -8251,6 +9491,7 @@
           "equip_slot": "wrist",
           "weight_g": 50,
           "volume_l": 0.03,
+          "size": "pocket",
           "price_cents": {"min": 10000, "typical": 30000, "max": 80000}
         },
         "pen": {
@@ -8259,6 +9500,7 @@
           "equip_slot": "pocket",
           "weight_g": 15,
           "volume_l": 0.02,
+          "size": "pocket",
           "price_cents": {"min": 100, "typical": 300, "max": 2500}
         },
         "notebook_pocket": {
@@ -8267,6 +9509,7 @@
           "equip_slot": "pocket",
           "weight_g": 80,
           "volume_l": 0.1,
+          "size": "pocket",
           "price_cents": {"min": 200, "typical": 600, "max": 1500}
         },
         "umbrella_compact": {
@@ -8275,6 +9518,7 @@
           "equip_slot": "hand_held",
           "weight_g": 300,
           "volume_l": 0.4,
+          "size": "hand",
           "price_cents": {"min": 800, "typical": 2000, "max": 5000}
         },
         "hand_sanitizer_small": {
@@ -8283,6 +9527,7 @@
           "equip_slot": "pocket_or_bag",
           "weight_g": 70,
           "volume_l": 0.06,
+          "size": "pocket",
           "price_cents": {"min": 100, "typical": 300, "max": 600}
         },
         "tissues_pack": {
@@ -8291,6 +9536,7 @@
           "equip_slot": "pocket",
           "weight_g": 20,
           "volume_l": 0.04,
+          "size": "pocket",
           "price_cents": {"min": 50, "typical": 100, "max": 200}
         },
         "snack_bar": {
@@ -8299,6 +9545,7 @@
           "equip_slot": "pocket_or_bag",
           "weight_g": 50,
           "volume_l": 0.05,
+          "size": "pocket",
           "price_cents": {"min": 100, "typical": 200, "max": 400}
         },
         "scissors_household": {
@@ -8307,6 +9554,7 @@
           "equip_slot": "none",
           "weight_g": 80,
           "volume_l": 0.12,
+          "size": "hand",
           "price_cents": {"min": 500, "typical": 1000, "max": 2500}
         },
         "hammer_claw": {
@@ -8315,6 +9563,7 @@
           "equip_slot": "hand_held",
           "weight_g": 560,
           "volume_l": 0.8,
+          "size": "hand",
           "price_cents": {"min": 1200, "typical": 2500, "max": 4500}
         },
         "tape_measure_25ft": {
@@ -8323,6 +9572,7 @@
           "equip_slot": "pocket_or_bag",
           "weight_g": 250,
           "volume_l": 0.18,
+          "size": "pocket",
           "price_cents": {"min": 600, "typical": 1500, "max": 3500}
         },
         "screwdriver_phillips": {
@@ -8331,6 +9581,7 @@
           "equip_slot": "pocket_or_bag",
           "weight_g": 120,
           "volume_l": 0.12,
+          "size": "hand",
           "price_cents": {"min": 300, "typical": 800, "max": 1800}
         },
         "adjustable_wrench_8in": {
@@ -8339,6 +9590,7 @@
           "equip_slot": "pocket_or_bag",
           "weight_g": 250,
           "volume_l": 0.2,
+          "size": "hand",
           "price_cents": {"min": 1200, "typical": 2200, "max": 5000}
         },
         "duct_tape_roll": {
@@ -8347,6 +9599,7 @@
           "equip_slot": "none",
           "weight_g": 400,
           "volume_l": 0.5,
+          "size": "hand",
           "price_cents": {"min": 500, "typical": 900, "max": 1500}
         },
         "extension_cord_25ft": {
@@ -8355,6 +9608,7 @@
           "equip_slot": "none",
           "weight_g": 500,
           "volume_l": 1.5,
+          "size": "hand",
           "price_cents": {"min": 1200, "typical": 2000, "max": 4000}
         },
         "chefs_knife": {
@@ -8363,6 +9617,7 @@
           "equip_slot": "none",
           "weight_g": 250,
           "volume_l": 0.4,
+          "size": "hand",
           "price_cents": {"min": 1500, "typical": 4000, "max": 15000}
         },
         "skillet_12in": {
@@ -8371,6 +9626,7 @@
           "equip_slot": "none",
           "weight_g": 1500,
           "volume_l": 3,
+          "size": "hand",
           "price_cents": {"min": 1500, "typical": 4000, "max": 15000}
         },
         "mug_ceramic": {
@@ -8379,6 +9635,7 @@
           "equip_slot": "none",
           "weight_g": 350,
           "volume_l": 0.35,
+          "size": "hand",
           "price_cents": {"min": 300, "typical": 800, "max": 2000}
         },
         "dinner_plate": {
@@ -8387,6 +9644,7 @@
           "equip_slot": "none",
           "weight_g": 450,
           "volume_l": 0.5,
+          "size": "hand",
           "price_cents": {"min": 300, "typical": 700, "max": 2000}
         },
         "batteries_aa_4": {
@@ -8395,6 +9653,7 @@
           "equip_slot": "pocket_or_bag",
           "weight_g": 100,
           "volume_l": 0.05,
+          "size": "pocket",
           "price_cents": {"min": 300, "typical": 600, "max": 1200}
         },
         "light_bulb_led": {
@@ -8403,6 +9662,7 @@
           "equip_slot": "none",
           "weight_g": 40,
           "volume_l": 0.08,
+          "size": "pocket",
           "price_cents": {"min": 150, "typical": 300, "max": 800}
         },
         "broom": {
@@ -8411,6 +9671,7 @@
           "equip_slot": "none",
           "weight_g": 600,
           "volume_l": 3,
+          "size": "hand",
           "price_cents": {"min": 800, "typical": 1500, "max": 3000}
         },
         "bucket_5gal": {
@@ -8419,6 +9680,7 @@
           "equip_slot": "none",
           "weight_g": 600,
           "volume_l": 19,
+          "size": "armful",
           "price_cents": {"min": 300, "typical": 700, "max": 1500},
           "notes": "Capacity 19 L when used as a container."
         },
@@ -8428,6 +9690,7 @@
           "equip_slot": "pocket_or_bag",
           "weight_g": 150,
           "volume_l": 0.2,
+          "size": "hand",
           "price_cents": {"min": 700, "typical": 1200, "max": 2500}
         },
         "work_gloves_pair": {
@@ -8436,6 +9699,7 @@
           "equip_slot": "hands",
           "weight_g": 200,
           "volume_l": 0.5,
+          "size": "hand",
           "price_cents": {"min": 800, "typical": 1600, "max": 4000}
         },
         "safety_glasses": {
@@ -8444,6 +9708,7 @@
           "equip_slot": "face",
           "weight_g": 40,
           "volume_l": 0.05,
+          "size": "pocket",
           "price_cents": {"min": 500, "typical": 1200, "max": 3000}
         },
         "spinning_rod_reel_combo": {
@@ -8452,6 +9717,7 @@
           "equip_slot": "hand_held",
           "weight_g": 450,
           "volume_l": 2.5,
+          "size": "hand",
           "price_cents": {"min": 2500, "typical": 5000, "max": 15000}
         },
         "landing_net_small": {
@@ -8460,6 +9726,7 @@
           "equip_slot": "hand_held",
           "weight_g": 450,
           "volume_l": 3,
+          "size": "hand",
           "price_cents": {"min": 1500, "typical": 3000, "max": 7000}
         },
         "baseball_cap": {
@@ -8468,6 +9735,7 @@
           "equip_slot": "head",
           "weight_g": 90,
           "volume_l": 0.25,
+          "size": "hand",
           "price_cents": {"min": 1000, "typical": 2200, "max": 4500}
         },
         "beanie": {
@@ -8476,6 +9744,7 @@
           "equip_slot": "head",
           "weight_g": 80,
           "volume_l": 0.2,
+          "size": "hand",
           "price_cents": {"min": 800, "typical": 1800, "max": 4000}
         },
         "sun_hat": {
@@ -8484,6 +9753,7 @@
           "equip_slot": "head",
           "weight_g": 120,
           "volume_l": 0.6,
+          "size": "hand",
           "price_cents": {"min": 1000, "typical": 2500, "max": 6000}
         },
         "hard_hat": {
@@ -8492,6 +9762,7 @@
           "equip_slot": "head",
           "weight_g": 400,
           "volume_l": 1.2,
+          "size": "hand",
           "price_cents": {"min": 1500, "typical": 3000, "max": 6000}
         },
         "bike_helmet": {
@@ -8500,6 +9771,7 @@
           "equip_slot": "head",
           "weight_g": 300,
           "volume_l": 1.5,
+          "size": "hand",
           "price_cents": {"min": 2000, "typical": 5000, "max": 20000}
         },
         "face_mask_n95": {
@@ -8508,6 +9780,7 @@
           "equip_slot": "face",
           "weight_g": 10,
           "volume_l": 0.02,
+          "size": "pocket",
           "price_cents": {"min": 100, "typical": 250, "max": 600}
         },
         "scarf": {
@@ -8516,6 +9789,7 @@
           "equip_slot": "neck",
           "weight_g": 150,
           "volume_l": 0.6,
+          "size": "hand",
           "price_cents": {"min": 1200, "typical": 2500, "max": 6000}
         },
         "bandana": {
@@ -8524,6 +9798,7 @@
           "equip_slot": "neck",
           "weight_g": 30,
           "volume_l": 0.05,
+          "size": "pocket",
           "price_cents": {"min": 300, "typical": 700, "max": 1500}
         },
         "t_shirt": {
@@ -8532,6 +9807,7 @@
           "equip_slot": "torso_base",
           "weight_g": 150,
           "volume_l": 0.4,
+          "size": "hand",
           "price_cents": {"min": 600, "typical": 1500, "max": 3500}
         },
         "tank_top": {
@@ -8540,6 +9816,7 @@
           "equip_slot": "torso_base",
           "weight_g": 100,
           "volume_l": 0.3,
+          "size": "hand",
           "price_cents": {"min": 500, "typical": 1200, "max": 3000}
         },
         "dress_shirt": {
@@ -8548,6 +9825,7 @@
           "equip_slot": "torso_base",
           "weight_g": 250,
           "volume_l": 0.6,
+          "size": "hand",
           "price_cents": {"min": 2500, "typical": 4500, "max": 9000}
         },
         "blouse": {
@@ -8556,6 +9834,7 @@
           "equip_slot": "torso_base",
           "weight_g": 150,
           "volume_l": 0.5,
+          "size": "hand",
           "price_cents": {"min": 1500, "typical": 3000, "max": 7000}
         },
         "hoodie": {
@@ -8564,6 +9843,7 @@
           "equip_slot": "torso_mid",
           "weight_g": 600,
           "volume_l": 1.8,
+          "size": "hand",
           "price_cents": {"min": 2000, "typical": 4000, "max": 8000}
         },
         "wool_sweater": {
@@ -8572,6 +9852,7 @@
           "equip_slot": "torso_mid",
           "weight_g": 500,
           "volume_l": 1.5,
+          "size": "hand",
           "price_cents": {"min": 2500, "typical": 4500, "max": 10000}
         },
         "fleece_jacket": {
@@ -8580,6 +9861,7 @@
           "equip_slot": "torso_mid",
           "weight_g": 400,
           "volume_l": 1.4,
+          "size": "hand",
           "price_cents": {"min": 2000, "typical": 4500, "max": 10000}
         },
         "light_jacket": {
@@ -8588,6 +9870,7 @@
           "equip_slot": "torso_outer",
           "weight_g": 450,
           "volume_l": 2,
+          "size": "hand",
           "price_cents": {"min": 3000, "typical": 6000, "max": 15000}
         },
         "rain_jacket": {
@@ -8596,6 +9879,7 @@
           "equip_slot": "torso_outer",
           "weight_g": 450,
           "volume_l": 1.5,
+          "size": "hand",
           "price_cents": {"min": 3000, "typical": 7000, "max": 20000}
         },
         "denim_jacket": {
@@ -8604,6 +9888,7 @@
           "equip_slot": "torso_outer",
           "weight_g": 800,
           "volume_l": 3,
+          "size": "hand",
           "price_cents": {"min": 3500, "typical": 6500, "max": 15000}
         },
         "winter_coat": {
@@ -8612,6 +9897,7 @@
           "equip_slot": "torso_outer",
           "weight_g": 1500,
           "volume_l": 6,
+          "size": "hand",
           "price_cents": {"min": 6000, "typical": 15000, "max": 50000}
         },
         "suit_jacket_blazer": {
@@ -8620,6 +9906,7 @@
           "equip_slot": "torso_outer",
           "weight_g": 800,
           "volume_l": 3,
+          "size": "hand",
           "price_cents": {"min": 4000, "typical": 10000, "max": 30000}
         },
         "hi_vis_vest": {
@@ -8628,6 +9915,7 @@
           "equip_slot": "torso_outer",
           "weight_g": 150,
           "volume_l": 0.5,
+          "size": "hand",
           "price_cents": {"min": 800, "typical": 1500, "max": 3000}
         },
         "dress_casual": {
@@ -8636,6 +9924,7 @@
           "equip_slot": "full_body",
           "weight_g": 400,
           "volume_l": 1.2,
+          "size": "hand",
           "price_cents": {"min": 2500, "typical": 5000, "max": 12000}
         },
         "pajamas_set": {
@@ -8644,6 +9933,7 @@
           "equip_slot": "full_body",
           "weight_g": 350,
           "volume_l": 1,
+          "size": "hand",
           "price_cents": {"min": 1500, "typical": 3000, "max": 7000}
         },
         "swimsuit": {
@@ -8652,6 +9942,7 @@
           "equip_slot": "full_body",
           "weight_g": 150,
           "volume_l": 0.3,
+          "size": "hand",
           "price_cents": {"min": 2000, "typical": 4500, "max": 10000}
         },
         "coveralls": {
@@ -8660,6 +9951,7 @@
           "equip_slot": "full_body",
           "weight_g": 1000,
           "volume_l": 3,
+          "size": "hand",
           "price_cents": {"min": 3000, "typical": 6500, "max": 12000}
         },
         "gloves_winter": {
@@ -8668,6 +9960,7 @@
           "equip_slot": "hands",
           "weight_g": 180,
           "volume_l": 0.6,
+          "size": "hand",
           "price_cents": {"min": 1500, "typical": 3000, "max": 8000}
         },
         "gloves_leather": {
@@ -8676,6 +9969,7 @@
           "equip_slot": "hands",
           "weight_g": 120,
           "volume_l": 0.4,
+          "size": "hand",
           "price_cents": {"min": 2500, "typical": 5000, "max": 12000}
         },
         "belt_leather": {
@@ -8684,6 +9978,7 @@
           "equip_slot": "waist",
           "weight_g": 150,
           "volume_l": 0.2,
+          "size": "hand",
           "price_cents": {"min": 1500, "typical": 3000, "max": 8000}
         },
         "jeans": {
@@ -8692,6 +9987,7 @@
           "equip_slot": "legs",
           "weight_g": 700,
           "volume_l": 1.6,
+          "size": "hand",
           "price_cents": {"min": 3000, "typical": 5500, "max": 12000}
         },
         "slacks_chinos": {
@@ -8700,6 +9996,7 @@
           "equip_slot": "legs",
           "weight_g": 500,
           "volume_l": 1.4,
+          "size": "hand",
           "price_cents": {"min": 2500, "typical": 4500, "max": 9000}
         },
         "shorts": {
@@ -8708,6 +10005,7 @@
           "equip_slot": "legs",
           "weight_g": 280,
           "volume_l": 0.8,
+          "size": "hand",
           "price_cents": {"min": 1500, "typical": 3000, "max": 6000}
         },
         "cargo_pants": {
@@ -8716,6 +10014,7 @@
           "equip_slot": "legs",
           "weight_g": 650,
           "volume_l": 1.7,
+          "size": "hand",
           "price_cents": {"min": 3000, "typical": 5500, "max": 10000}
         },
         "skirt": {
@@ -8724,6 +10023,7 @@
           "equip_slot": "legs",
           "weight_g": 300,
           "volume_l": 0.9,
+          "size": "hand",
           "price_cents": {"min": 2000, "typical": 3500, "max": 8000}
         },
         "underwear_briefs": {
@@ -8732,6 +10032,7 @@
           "equip_slot": "underwear",
           "weight_g": 60,
           "volume_l": 0.12,
+          "size": "pocket",
           "price_cents": {"min": 350, "typical": 600, "max": 1200}
         },
         "socks_pair": {
@@ -8740,6 +10041,7 @@
           "equip_slot": "socks",
           "weight_g": 60,
           "volume_l": 0.15,
+          "size": "pocket",
           "price_cents": {"min": 130, "typical": 230, "max": 420}
         },
         "socks_wool_pair": {
@@ -8748,6 +10050,7 @@
           "equip_slot": "socks",
           "weight_g": 110,
           "volume_l": 0.25,
+          "size": "pocket",
           "price_cents": {"min": 1000, "typical": 1800, "max": 3000}
         },
         "sneakers": {
@@ -8756,6 +10059,7 @@
           "equip_slot": "feet",
           "weight_g": 900,
           "volume_l": 4,
+          "size": "hand",
           "price_cents": {"min": 3500, "typical": 7500, "max": 16000}
         },
         "work_boots": {
@@ -8764,6 +10068,7 @@
           "equip_slot": "feet",
           "weight_g": 1600,
           "volume_l": 6,
+          "size": "hand",
           "price_cents": {"min": 7000, "typical": 14000, "max": 25000}
         },
         "dress_shoes": {
@@ -8772,6 +10077,7 @@
           "equip_slot": "feet",
           "weight_g": 1000,
           "volume_l": 3.5,
+          "size": "hand",
           "price_cents": {"min": 5000, "typical": 9000, "max": 20000}
         },
         "sandals": {
@@ -8780,6 +10086,7 @@
           "equip_slot": "feet",
           "weight_g": 450,
           "volume_l": 2.5,
+          "size": "hand",
           "price_cents": {"min": 1000, "typical": 2500, "max": 6000}
         },
         "rubber_boots": {
@@ -8788,6 +10095,7 @@
           "equip_slot": "feet",
           "weight_g": 1500,
           "volume_l": 6,
+          "size": "hand",
           "price_cents": {"min": 2500, "typical": 5000, "max": 12000}
         }
       }
@@ -8796,7 +10104,7 @@
       "id": "gear.containers",
       "pack": "gear",
       "schema": "lre-table/gear.containers/v1",
-      "revision": "4e7fd9162139319099076a44b908e7ef",
+      "revision": "29334aeff91f1b6b9e99db08972661f1",
       "label": "Containers",
       "source": {
         "dataPack": "modern-us",
@@ -8812,6 +10120,18 @@
         "max_load_kg": {"type": "number", "unit": "kg"},
         "empty_weight_g": {"type": "int", "unit": "g"},
         "location": {"type": "enum", "values": ["carried", "furniture", "vehicle_fixed", "worn"]},
+        "size": {
+          "type": "enum",
+          "values": ["pocket", "hand", "armful", "heavy", "furniture", "builtin"],
+          "doc": "The container's own size; absent on vehicle_fixed rows, which are part of their vehicle.",
+          "optional": true
+        },
+        "holds": {
+          "type": "enum",
+          "values": ["pocket", "hand", "armful", "heavy", "furniture", "builtin"],
+          "doc": "The largest size it takes; never larger than its own size.",
+          "optional": true
+        },
         "equip_slot": {"type": "ref", "ref": "gear.slots"},
         "price_cents": {"type": "band", "unit": "cents"},
         "notes": {"type": "text", "optional": true}
@@ -8823,6 +10143,8 @@
           "max_load_kg": 0.25,
           "empty_weight_g": 70,
           "location": "carried",
+          "size": "pocket",
+          "holds": "pocket",
           "equip_slot": "pocket",
           "price_cents": {"min": 1500, "typical": 4000, "max": 15000},
           "notes": "About 8-12 cards plus folded bills."
@@ -8833,6 +10155,8 @@
           "max_load_kg": 1,
           "empty_weight_g": 0,
           "location": "worn",
+          "size": "pocket",
+          "holds": "pocket",
           "equip_slot": "pocket",
           "price_cents": {"min": 0, "typical": 0, "max": 0},
           "notes": "Fixed to the garment; two to four per outfit."
@@ -8843,6 +10167,8 @@
           "max_load_kg": 1.5,
           "empty_weight_g": 0,
           "location": "worn",
+          "size": "pocket",
+          "holds": "pocket",
           "equip_slot": "pocket",
           "price_cents": {"min": 0, "typical": 0, "max": 0},
           "notes": "Fixed to the garment."
@@ -8853,6 +10179,8 @@
           "max_load_kg": 3,
           "empty_weight_g": 500,
           "location": "carried",
+          "size": "hand",
+          "holds": "hand",
           "equip_slot": "shoulder",
           "price_cents": {"min": 2000, "typical": 6000, "max": 40000}
         },
@@ -8862,6 +10190,8 @@
           "max_load_kg": 2,
           "empty_weight_g": 250,
           "location": "carried",
+          "size": "hand",
+          "holds": "hand",
           "equip_slot": "shoulder",
           "price_cents": {"min": 1500, "typical": 4000, "max": 15000}
         },
@@ -8871,6 +10201,8 @@
           "max_load_kg": 2,
           "empty_weight_g": 150,
           "location": "worn",
+          "size": "hand",
+          "holds": "hand",
           "equip_slot": "waist",
           "price_cents": {"min": 800, "typical": 2000, "max": 6000}
         },
@@ -8880,6 +10212,8 @@
           "max_load_kg": 8,
           "empty_weight_g": 600,
           "location": "carried",
+          "size": "hand",
+          "holds": "hand",
           "equip_slot": "back",
           "price_cents": {"min": 2000, "typical": 5000, "max": 15000}
         },
@@ -8889,6 +10223,8 @@
           "max_load_kg": 10,
           "empty_weight_g": 800,
           "location": "carried",
+          "size": "armful",
+          "holds": "hand",
           "equip_slot": "back",
           "price_cents": {"min": 2500, "typical": 5500, "max": 15000}
         },
@@ -8898,6 +10234,8 @@
           "max_load_kg": 18,
           "empty_weight_g": 1900,
           "location": "carried",
+          "size": "armful",
+          "holds": "armful",
           "equip_slot": "back",
           "price_cents": {"min": 8000, "typical": 18000, "max": 40000}
         },
@@ -8907,6 +10245,8 @@
           "max_load_kg": 6,
           "empty_weight_g": 1000,
           "location": "carried",
+          "size": "hand",
+          "holds": "hand",
           "equip_slot": "shoulder",
           "price_cents": {"min": 2500, "typical": 6000, "max": 25000}
         },
@@ -8916,6 +10256,8 @@
           "max_load_kg": 20,
           "empty_weight_g": 900,
           "location": "carried",
+          "size": "armful",
+          "holds": "armful",
           "equip_slot": "hand_held",
           "price_cents": {"min": 2000, "typical": 4500, "max": 12000}
         },
@@ -8925,6 +10267,8 @@
           "max_load_kg": 10,
           "empty_weight_g": 2800,
           "location": "carried",
+          "size": "armful",
+          "holds": "armful",
           "equip_slot": "hand_held",
           "price_cents": {"min": 4000, "typical": 9000, "max": 30000},
           "notes": "Airline carry-on limit commonly 7-10 kg and 22x14x9 in."
@@ -8935,6 +10279,8 @@
           "max_load_kg": 23,
           "empty_weight_g": 4000,
           "location": "carried",
+          "size": "armful",
+          "holds": "armful",
           "equip_slot": "hand_held",
           "price_cents": {"min": 6000, "typical": 12000, "max": 40000},
           "notes": "Airline checked bag limit commonly 23 kg (50 lb)."
@@ -8945,6 +10291,8 @@
           "max_load_kg": 8,
           "empty_weight_g": 100,
           "location": "carried",
+          "size": "hand",
+          "holds": "hand",
           "equip_slot": "hand_held",
           "price_cents": {"min": 100, "typical": 300, "max": 1000}
         },
@@ -8954,6 +10302,8 @@
           "max_load_kg": 15,
           "empty_weight_g": 2000,
           "location": "carried",
+          "size": "armful",
+          "holds": "hand",
           "equip_slot": "hand_held",
           "price_cents": {"min": 1500, "typical": 3000, "max": 8000},
           "notes": "Holds the 45-piece mechanic kit with room for sundries."
@@ -8964,6 +10314,8 @@
           "max_load_kg": 60,
           "empty_weight_g": 25000,
           "location": "furniture",
+          "size": "furniture",
+          "holds": "armful",
           "equip_slot": "none",
           "price_cents": {"min": 15000, "typical": 30000, "max": 80000}
         },
@@ -8973,6 +10325,8 @@
           "max_load_kg": 8,
           "empty_weight_g": 1000,
           "location": "carried",
+          "size": "hand",
+          "holds": "hand",
           "equip_slot": "hand_held",
           "price_cents": {"min": 1500, "typical": 3000, "max": 8000}
         },
@@ -8982,6 +10336,8 @@
           "max_load_kg": 40,
           "empty_weight_g": 7000,
           "location": "carried",
+          "size": "armful",
+          "holds": "hand",
           "equip_slot": "hand_held",
           "price_cents": {"min": 3000, "typical": 8000, "max": 35000},
           "notes": "Insulated; ice takes about a third of capacity."
@@ -8992,6 +10348,7 @@
           "max_load_kg": 5,
           "empty_weight_g": 0,
           "location": "vehicle_fixed",
+          "holds": "hand",
           "equip_slot": "none",
           "price_cents": {"min": 0, "typical": 0, "max": 0},
           "notes": "About 0.5 cu ft."
@@ -9002,6 +10359,7 @@
           "max_load_kg": 3,
           "empty_weight_g": 0,
           "location": "vehicle_fixed",
+          "holds": "hand",
           "equip_slot": "none",
           "price_cents": {"min": 0, "typical": 0, "max": 0}
         },
@@ -9011,6 +10369,7 @@
           "max_load_kg": 100,
           "empty_weight_g": 0,
           "location": "vehicle_fixed",
+          "holds": "heavy",
           "equip_slot": "none",
           "price_cents": {"min": 0, "typical": 0, "max": 0},
           "notes": "Matches vehicles.json compact_car cargo_l."
@@ -9021,6 +10380,7 @@
           "max_load_kg": 110,
           "empty_weight_g": 0,
           "location": "vehicle_fixed",
+          "holds": "heavy",
           "equip_slot": "none",
           "price_cents": {"min": 0, "typical": 0, "max": 0}
         },
@@ -9030,6 +10390,7 @@
           "max_load_kg": 200,
           "empty_weight_g": 0,
           "location": "vehicle_fixed",
+          "holds": "heavy",
           "equip_slot": "none",
           "price_cents": {"min": 0, "typical": 0, "max": 0}
         },
@@ -9039,6 +10400,7 @@
           "max_load_kg": 300,
           "empty_weight_g": 0,
           "location": "vehicle_fixed",
+          "holds": "furniture",
           "equip_slot": "none",
           "price_cents": {"min": 0, "typical": 0, "max": 0}
         },
@@ -9048,6 +10410,7 @@
           "max_load_kg": 600,
           "empty_weight_g": 0,
           "location": "vehicle_fixed",
+          "holds": "furniture",
           "equip_slot": "none",
           "price_cents": {"min": 0, "typical": 0, "max": 0}
         },
@@ -9057,6 +10420,7 @@
           "max_load_kg": 900,
           "empty_weight_g": 0,
           "location": "vehicle_fixed",
+          "holds": "furniture",
           "equip_slot": "none",
           "price_cents": {"min": 0, "typical": 0, "max": 0},
           "notes": "Open bed; secure cargo against weather and theft."
@@ -9067,6 +10431,7 @@
           "max_load_kg": 50,
           "empty_weight_g": 0,
           "location": "vehicle_fixed",
+          "holds": "armful",
           "equip_slot": "none",
           "price_cents": {"min": 0, "typical": 0, "max": 0},
           "notes": "Combined dry lockers."
@@ -9077,6 +10442,7 @@
           "max_load_kg": 70,
           "empty_weight_g": 0,
           "location": "vehicle_fixed",
+          "holds": "armful",
           "equip_slot": "none",
           "price_cents": {"min": 0, "typical": 0, "max": 0}
         },
@@ -9086,6 +10452,7 @@
           "max_load_kg": 200,
           "empty_weight_g": 0,
           "location": "vehicle_fixed",
+          "holds": "heavy",
           "equip_slot": "none",
           "price_cents": {"min": 0, "typical": 0, "max": 0}
         },
@@ -9095,6 +10462,7 @@
           "max_load_kg": 15,
           "empty_weight_g": 0,
           "location": "vehicle_fixed",
+          "holds": "armful",
           "equip_slot": "none",
           "price_cents": {"min": 0, "typical": 0, "max": 0}
         },
@@ -9104,6 +10472,7 @@
           "max_load_kg": 10,
           "empty_weight_g": 3000,
           "location": "vehicle_fixed",
+          "holds": "hand",
           "equip_slot": "none",
           "price_cents": {"min": 10000, "typical": 25000, "max": 70000}
         },
@@ -9113,6 +10482,7 @@
           "max_load_kg": 5,
           "empty_weight_g": 0,
           "location": "vehicle_fixed",
+          "holds": "hand",
           "equip_slot": "none",
           "price_cents": {"min": 0, "typical": 0, "max": 0}
         },
@@ -9122,6 +10492,7 @@
           "max_load_kg": 120,
           "empty_weight_g": 0,
           "location": "vehicle_fixed",
+          "holds": "armful",
           "equip_slot": "none",
           "price_cents": {"min": 0, "typical": 0, "max": 0},
           "notes": "About 40 kg front plus 80 kg rear."
@@ -9132,6 +10503,7 @@
           "max_load_kg": 450,
           "empty_weight_g": 0,
           "location": "vehicle_fixed",
+          "holds": "heavy",
           "equip_slot": "none",
           "price_cents": {"min": 0, "typical": 0, "max": 0}
         }

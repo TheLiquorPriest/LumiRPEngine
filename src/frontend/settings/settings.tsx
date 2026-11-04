@@ -326,7 +326,7 @@ export function Settings() {
     ) : page === "minds" ? (
       <MindsSection minds={settings.minds} patch={patch} busy={busy} />
     ) : page === "narrator" ? (
-      <NarratorPage narrator={settings.narrator} patch={patch} busy={busy} />
+      <NarratorPage narrator={settings.narrator} statePrices={settings.statePrices} patch={patch} busy={busy} />
     ) : page === "timeouts" ? (
       <TimeoutsSection timeouts={settings.timeouts} patch={patch} busy={busy} />
     ) : page === "agents" ? (

@@ -214,7 +214,7 @@ function tiesOf(scope: RoutineScope, who: EntityId): Map<EntityId, string[]> {
 
 /** The groups the job reads that `who` belongs to, directly or through a member group. */
 function groupsOf(scope: RoutineScope, who: EntityId): EntityId[] {
-  return [...scope.groups].filter((g) => g !== who && isMemberOf(scope.state, who, g)).sort();
+  return [...scope.groups].filter((g) => g !== who && isMemberOf({ registry: scope.reg, world: scope.world, state: scope.state }, who, g)).sort();
 }
 
 /** A group's members the job reads. */
@@ -582,7 +582,8 @@ function hhmm(v: JsonValue | undefined): string {
 /** Whether `company` has a ground with `owner`: a tie either way, a group both belong to (or, for a group, membership), or a cited source that names or links them. */
 function grounded(scope: RoutineScope, owner: EntityId, company: EntityId, sources: readonly CheckedSource[]): boolean {
   if (tiesOf(scope, owner).has(company)) return true;
-  if (scope.groups.has(owner) ? isMemberOf(scope.state, company, owner) : groupsOf(scope, owner).some((g) => isMemberOf(scope.state, company, g))) return true;
+  const ctx = { registry: scope.reg, world: scope.world, state: scope.state };
+  if (scope.groups.has(owner) ? isMemberOf(ctx, company, owner) : groupsOf(scope, owner).some((g) => isMemberOf(ctx, company, g))) return true;
   const name = nameOf(scope, company);
   return sources.some((s) => s.refs.includes(company) || namesAny(s.text, [name]));
 }
@@ -714,7 +715,7 @@ function readCompany(scope: RoutineScope, owner: EntityId, raw: JsonValue | unde
   const group = str(raw.group);
   if (group !== "") {
     if (!scope.groups.has(group)) c.problems.push(`its company "${group}" isn't a group in the world`);
-    else if (group !== owner && !isMemberOf(scope.state, owner, group)) c.problems.push(`${nameOf(scope, owner)} doesn't belong to ${nameOf(scope, group)} (${group}), its company`);
+    else if (group !== owner && !isMemberOf({ registry: scope.reg, world: scope.world, state: scope.state }, owner, group)) c.problems.push(`${nameOf(scope, owner)} doesn't belong to ${nameOf(scope, group)} (${group}), its company`);
     return { who: { memberOf: [group] }, ...invite };
   }
   c.problems.push('its company names no one: {"ids": [...]} or {"group": "<id>"}');

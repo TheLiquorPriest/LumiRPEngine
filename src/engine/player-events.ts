@@ -63,9 +63,10 @@ function bookkeeping(type: string): boolean {
     "economy.payslip": true,
     "economy.commission": true,
     "economy.estimated_tax": true,
-    // The holdings module's books (DESIGN §27.11): marks, contracts listed, lots, income and gains
-    // records, and routes. What anyone hears of a trade, a payout or a sale is its posting.
+    // The holdings module's books (DESIGN §27.11): marks, month-end closes, contracts listed, lots,
+    // income and gains records, and routes. What anyone hears of a trade, a payout or a sale is its posting.
     "economy.quote": true,
+    "economy.closes": true,
     "economy.mint": true,
     "economy.lots": true,
     "economy.income": true,

@@ -9,7 +9,7 @@ import type { PaletteView } from "../../src/shared/state-view";
 import type { WorldDoc } from "../../src/shared/world";
 import type { Working } from "../../src/engine/working";
 import { decodeFinanceView } from "../../src/packs/economy/ui/decode";
-import { autopaySources, findAccount, flowControls, flowTargets, hireable, jobControls, payeeProblem } from "../../src/packs/economy/ui/layout";
+import { autopaySources, findAccount, flowControls, flowTargets, jobControls, payeeProblem } from "../../src/packs/economy/ui/layout";
 import { account, act, entity, lapse, setup } from "../packs/economy/work-world";
 
 /** The player's money as the hub draws it, through the JSON the panel receives. */
@@ -166,7 +166,7 @@ describe("money a manager only manages reaches none of their own interests, in t
     expect(refuses(w, "economy.invoice_pay", { invoice: "inv_courier", by: "you" })).toBe(false);
   });
 
-  test("a custodian of the café isn't offered his household to hire, nor Raise on his own job there; an owner is offered both", () => {
+  test("a custodian of the café may not hire his household, nor is offered Raise on his own job there; an owner may both", () => {
     const hire = (worker: string): JsonObject => ({ business: "daybreak", worker, title: "Barista", basis: "hourly", rate: 1_800, pay_every: "weekly", by: "you" });
     const people = PALETTE.entries[0]?.options.map((o) => ({ value: String(o.params.to), label: o.label })) ?? [];
     for (const role of ["custodian", "owner"] as const) {
@@ -179,10 +179,10 @@ describe("money a manager only manages reaches none of their own interests, in t
       const cafe = v.businesses.find((b) => b.id === "daybreak");
       const job = cafe?.employees.find((j) => j.id === "job_you_cafe");
       if (!cafe || !job) throw new Error("no café or job in the view");
-      const offered = hireable(cafe, people).map((p) => p.value);
+      // Hiring is People's Hire someone now (orgs-edit.test); the backend still refuses the custodian his household.
+      const hires = people.filter((p) => !refuses(w, "economy.hire", hire(p.value))).map((p) => p.value);
       const raise = jobControls(v, job, cafe).includes("raise");
-      expect([role, offered, raise]).toEqual(role === "owner" ? [role, ["maya", "rosa", "jordan"], true] : [role, ["maya", "jordan"], false]);
-      expect(people.map((p) => !refuses(w, "economy.hire", hire(p.value)))).toEqual(people.map((p) => offered.includes(p.value)));
+      expect([role, hires, raise]).toEqual(role === "owner" ? [role, ["maya", "rosa", "jordan"], true] : [role, ["maya", "jordan"], false]);
       expect(!refuses(w, "economy.job_raise", { job: "job_you_cafe", rate: 4_000, by: "you" })).toBe(raise);
     }
   });
@@ -235,7 +235,7 @@ describe("managed money is judged where it lands, however its payee is named, in
     payees(w, v, ["trust_acct"], { rosa_kept: false, rosa: false, checking: true, you: true, home: true }, (payee) => ["economy.flow_update", { who: "you", flow: "trust_help", to: payee }]);
   });
 
-  test("the café's custodian isn't offered Rosa to hire, nor Raise on her job there, as her pay would land in the account he's custodian of; its owner outright is offered both", () => {
+  test("the café's custodian may not hire Rosa, nor is offered Raise on her job there, as her pay would land in the account he's custodian of; its owner outright may both", () => {
     const people = PALETTE.entries[0]?.options.map((o) => ({ value: String(o.params.to), label: o.label })) ?? [];
     const hire = (worker: string): JsonObject => ({ business: "daybreak", worker, title: "Barista", basis: "hourly", rate: 1_800, pay_every: "weekly", by: "you" });
     for (const role of ["custodian", "owner"] as const) {
@@ -252,9 +252,8 @@ describe("managed money is judged where it lands, however its payee is named, in
         return { v, shop };
       };
       const hiring = world(false);
-      const offered = hireable(page(hiring).shop, people).map((p) => p.value);
-      expect([role, offered]).toEqual([role, role === "owner" ? ["maya", "rosa", "jordan"] : ["maya", "jordan"]]);
-      expect(people.map((p) => !refuses(hiring, "economy.hire", hire(p.value)))).toEqual(people.map((p) => offered.includes(p.value)));
+      const hires = people.filter((p) => !refuses(hiring, "economy.hire", hire(p.value))).map((p) => p.value);
+      expect([role, hires]).toEqual([role, role === "owner" ? ["maya", "rosa", "jordan"] : ["maya", "jordan"]]);
       const paying = world(true);
       const { v, shop } = page(paying);
       const job = shop.employees.find((j) => j.id === "job_rosa_cafe");

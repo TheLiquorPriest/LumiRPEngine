@@ -325,28 +325,6 @@ export function payPrefsOps(person: EntityId, tiers: readonly PayTier[]): EditOp
 
 // ---------------------------------------------------------------- work and business
 
-export interface HireForm {
-  business: EntityId;
-  worker: EntityId;
-  title: string;
-  basis: string;
-  rate: string;
-  hoursPerWeek: number | null;
-  payEvery: string;
-}
-
-export function hireAction(form: HireForm, currency: WorldCurrency): ActionBody | null {
-  const rate = form.rate.trim() === "" ? null : amountOf(form.rate, currency);
-  if (form.business === "" || form.worker === "" || (form.rate.trim() !== "" && rate === null)) return null;
-  const params: JsonObject = { business: form.business, worker: form.worker };
-  if (form.title.trim() !== "") params.title = form.title.trim();
-  if (form.basis !== "") params.basis = form.basis;
-  if (rate !== null) params.rate = rate;
-  if (form.hoursPerWeek !== null) params.hours_per_week = form.hoursPerWeek;
-  if (form.payEvery !== "") params.pay_every = form.payEvery;
-  return { action: FINANCE_ACTIONS.hire, params };
-}
-
 export function jobEndAction(job: EntityId): ActionBody {
   return { action: FINANCE_ACTIONS.fire, params: { job } };
 }
@@ -459,6 +437,11 @@ export function leaseEndAction(lease: string, on?: string): ActionBody {
 
 export function stakeSellAction(business: EntityId, share: number, price: number, buyer?: EntityId): ActionBody {
   return { action: FINANCE_ACTIONS.stakeSell, params: { business, share, price, ...(buyer ? { buyer } : {}) } };
+}
+
+/** Selling units of a company that counts them (ORG-SPEC §3.10). */
+export function stakeSellUnitsAction(business: EntityId, units: number, price: number, buyer?: EntityId): ActionBody {
+  return { action: FINANCE_ACTIONS.stakeSell, params: { business, units, price, ...(buyer ? { buyer } : {}) } };
 }
 
 /** The GM's price for an asset (`economy.set_price`, a GM effect): a price per unit in minor units. */

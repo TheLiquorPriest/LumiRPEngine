@@ -17,7 +17,7 @@ import { clockMinutes } from "../../src/backend/view";
 import { calendarOf, formatClock, formatTimeOfDay, parseHHMM } from "../../src/engine/calendar";
 import { together } from "../../src/engine/presence";
 import { placeOfEntity } from "../../src/engine/scope";
-import { holderOf } from "../../src/packs/gear/core/model";
+import { holderOf } from "../../src/engine/things";
 import { ROLE_LABEL } from "../../src/shared/agent-roles";
 import { YIELD_TEXT } from "../../src/shared/agent-yield";
 import { MAIN_AGENT_PAGE } from "../../src/shared/main-agent-prompts";
@@ -358,13 +358,18 @@ describe("the time a turn's texts tell", () => {
 });
 
 describe("the shipped texts", () => {
-  test("the intent reads a message for the action it is for, with one example, and its answer says so; the read is told how a thing the world doesn't have yet is made", () => {
+  test("the intent reads a message for the action it is for, with one example, and its answer says so; the read is told how a thing is found or made, in the thing texts classic reads too", () => {
     const text = (id: string): string => PROMPTS.find((d) => d.id === id)?.text ?? "";
     const task = text("role.intent.interpret.task");
     expect(task).toContain("Read the input for what it is for: the one action that drives this turn");
     expect(task).toContain('"I get up from the couch, stretch, and sit down next to Danny to ask how his shift went" is the talk with Danny');
     expect(text("role.intent.interpret.answer")).toContain('"action" is the action the input is for');
-    expect(text("role.read.extract.task")).toContain("is made only by a give from someone other than the player character");
-    expect(text("role.read.extract.types")).toContain("for a thing the world doesn't have yet that someone other than the player character hands over, the reply's words for it, which makes it");
+    // ITEMS-SPEC §5.2, §7.4: the thing facts and their rules are registry texts of their own, which the read's types and task place.
+    expect(text("extract.items.rules")).toContain("the engine finds the thing the words mean, and makes one only when the story acts on a thing the world doesn't have yet");
+    expect(text("extract.items.facts")).toContain("give{item,from,to,basis?,until?,why?,amount?}");
+    expect(text("role.read.extract.types")).toContain("purchase{item,category,payer?,qty?,price?,method?,seller?,size?,at?}");
+    expect(text("role.read.extract.types")).toContain("{{items}}");
+    expect(text("role.read.extract.task")).toContain("{{item_rules}}");
+    expect(text("role.read.extract.task")).not.toContain("is only noted as not tracked");
   });
 });

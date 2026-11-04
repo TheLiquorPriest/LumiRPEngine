@@ -17,9 +17,10 @@ import { labelOf, numOf, objOf, own, strOf } from "../../../engine/pack-kit";
 import type { EffectContext, EventTypeDef, ReadContext, Rejection } from "../../../engine/registry";
 import type { WorldState } from "../../../engine/state";
 import type { FinanceApi, FinanceRegistry } from "./module";
-import { assetDefOf, assetFromDef, assetOf, clockOfDate, dateText, optionDef, optionId, priceOf, reject, type Asset, type AssetBooks } from "./assets";
+import { assetDefOf, assetFromDef, assetOf, clockOfDate, dateText, optionDef, optionId, performanceOf, priceOf, reject, type Asset, type AssetBooks } from "./assets";
 import { byShare, recordGain } from "./records";
 import { intrinsic, QTY_EPSILON, roundQty, takeFifo, YEAR_MINUTES, type OpenLot, type TakenLot } from "./pricing";
+import { actAs, asParam, mayAs, moneyWords } from "./acting";
 
 /** What an older chat's market priced a unit at before its first step: 100 major units. */
 const LEGACY_UNIT_PRICE = 10000;
@@ -427,6 +428,7 @@ export function holdingView(api: FinanceApi, ctx: ReadContext, holding: EntityId
     lots: detail ? lots.map((l) => ({ qty: l.qty, cost: l.cost, at: dateText(ctx.world, l.at), gain: Math.round(l.qty * price) - l.cost, term: ctx.state.clock - l.at >= YEAR_MINUTES ? "long" : "short" })) : [],
     option: a.option && under ? { right: a.option.right, underlying: under.label, strike: a.option.strike, expiry: dateText(ctx.world, a.option.expiry), inTheMoney: intrinsic(a.option.right, priceOf(ctx, under), a.option.strike) > 0 } : null,
     route: a.pays > 0 || a.bond ? shownRoute(api, ctx, viewer, route.to, route.reinvest) : null,
+    performance: performanceOf(ctx, a),
   };
 }
 
@@ -481,10 +483,15 @@ export function tradeArgs(a: Record<string, JsonValue>, ctx: ReadContext): Trade
 /** Holdings (DESIGN §27.3–27.5): the lots event and trading. */
 export function registerHoldings(r: FinanceRegistry): void {
   r.core.event(lotsEvent(r.api));
+  // Traded `as` an organization (ORG-SPEC §3.6) by someone who manages its money (`money.manage`).
   r.core.effect({
     type: "economy.trade",
-    args: ["side?", "party?", "holding?", "asset?", "account?", "qty?", "amount?", "from?", "to?", "right?", "strike?", "expiry?"],
-    resolve: (a, ctx) => trade(r.api, ctx, tradeArgs(a, ctx)),
+    args: ["side?", "party?", "holding?", "asset?", "account?", "qty?", "amount?", "from?", "to?", "right?", "strike?", "expiry?", "by?"],
+    resolve: (a, ctx) => {
+      const t = tradeArgs(a, ctx);
+      const what = t.holding !== undefined ? labelOf(ctx, t.holding) : (t.asset ?? "investments");
+      return actAs(ctx, { by: strOf(a.by), party: t.party, power: "money.manage", line: () => `${t.side === "sell" ? "Sold" : "Bought"} ${what}${t.amount !== undefined ? ` for ${moneyWords(ctx, t.amount)}` : ""}` }, () => trade(r.api, ctx, t));
+    },
   });
   r.core.action({
     id: "trade",
@@ -505,9 +512,10 @@ export function registerHoldings(r: FinanceRegistry): void {
       right: { type: "text", label: "Call or put", optional: true },
       strike: { type: "money", label: "Strike", optional: true },
       expiry: { type: "text", label: "Expiry (YYYY-MM-DD)", optional: true },
+      as: asParam("money.manage", "Trading as: an organization whose money you manage, only when the input trades for it (\"the trust's portfolio\"); left out, it's yours"),
     },
-    requires: ["money_feature('investments', self)"],
-    outcomes: { default: [{ type: "economy.trade", args: { party: "self", side: "=params.side", holding: "=params.holding", asset: "=params.asset", account: "=params.account", qty: "=params.qty", amount: "=params.amount", from: "=params.from", to: "=params.to", right: "=params.right", strike: "=params.strike", expiry: "=params.expiry" } }] },
+    requires: ["money_feature('investments', self)", mayAs("money.manage")],
+    outcomes: { default: [{ type: "economy.trade", args: { party: "self", side: "=params.side", holding: "=params.holding", asset: "=params.asset", account: "=params.account", qty: "=params.qty", amount: "=params.amount", from: "=params.from", to: "=params.to", right: "=params.right", strike: "=params.strike", expiry: "=params.expiry", by: "actor" } }] },
     duration: "2",
     lexicon: ["invest", "buy stocks", "buy shares", "sell stocks", "sell shares", "cash out", "buy an option"],
     observable: "checks their phone",

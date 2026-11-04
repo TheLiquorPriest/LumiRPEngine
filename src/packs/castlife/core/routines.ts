@@ -143,12 +143,14 @@ export function routineRole(ctx: ReadContext, who: EntityId): RoutineRole {
 
 /**
  * How someone spends a time skip (DESIGN §8, `SkipLife`): the chat's choice for them (`routine_follow`),
- * else their level's in the world's settings, read as their level is now. Null for the POV and while
- * their routine isn't informative: an enforced routine is always lived, and an off one never.
+ * else, for a party member with an order they're on (assess-party §6.2), the model's plan, which is
+ * told of it; else their level's in the world's settings, read as their level is now. Null for the
+ * POV and while their routine isn't informative: an enforced routine is always lived, and an off one never.
  */
 export function skipLifeOf(ctx: ReadContext, who: EntityId): SkipLife | null {
   if (who === ctx.world.pov || routineRole(ctx, who) !== "informative") return null;
-  return chatFollow(ctx.state, who)?.skips ?? routineSettingsOf(ctx.world).skips[optionalQuery(ctx, "minds.tier")?.(ctx, who) ?? "background"];
+  const onOrders = (optionalQuery(ctx, "orgs.order_plans")?.(ctx, who) ?? []).some((o) => o.status === "open" || o.status === "under_way");
+  return chatFollow(ctx.state, who)?.skips ?? (onOrders ? "model" : routineSettingsOf(ctx.world).skips[optionalQuery(ctx, "minds.tier")?.(ctx, who) ?? "background"]);
 }
 
 /** The latest skip plan the chat recorded (`castlife.skip_plan`, kept whole as the castlife slice's `skipPlan`), null before any. */
@@ -429,8 +431,9 @@ export function routineLived(ctx: ReadContext, who: EntityId, skip: boolean): bo
  * is lived only in a skip they spend on it; otherwise their minds, story plans and the narration
  * decide what they do). A skip's is the exception to the scene: in a time skip (`skip`), the routine
  * of someone who spends it on their routine may take them out of the scene the story holds with the
- * POV, and back. An enforced routine gives way to the GM's intent for anyone but a Background
- * character (for anyone, story first); a skip's always does. Otherwise it yields to what the story
+ * POV, and back. An enforced routine gives way to the GM's intent, and to a timed order of the party's
+ * under way before its time (`orgs.on_order` at `at`, else now; assess-party §6.2), for anyone but a
+ * Background character (for anyone, story first); a skip's always does. Otherwise it yields to what the story
  * set: when `who` isn't where the routine last had them (`expected`), something else put them there.
  * Between its own edges it never moves them then; at an edge it does under routine first, never under
  * story first, and under balanced only where the story's day ends (`release`: going to bed, or a
@@ -441,7 +444,7 @@ export function routineLived(ctx: ReadContext, who: EntityId, skip: boolean): bo
  * own (`scene` false: a timelapse the POV's routine runs in) there's no scene to keep them in, so a
  * housemate still goes to work and a trip still leaves.
  */
-export function routineYields(ctx: ReadContext, who: EntityId, field: "place" | "activity", expected: JsonValue | null, opts: { edge: boolean; release?: boolean; scene?: boolean; skip?: boolean }): boolean {
+export function routineYields(ctx: ReadContext, who: EntityId, field: "place" | "activity", expected: JsonValue | null, opts: { edge: boolean; release?: boolean; scene?: boolean; skip?: boolean; at?: number }): boolean {
   const pov = who === ctx.world.pov;
   const enforced = routineRole(ctx, who) === "enforced";
   if ((pov || enforced || opts.skip !== true) && opts.scene !== false && withPov(ctx, who)) return true;
@@ -449,7 +452,8 @@ export function routineYields(ctx: ReadContext, who: EntityId, field: "place" | 
   if (!pov) {
     if (!routineLived(ctx, who, opts.skip === true)) return true;
     const tier = optionalQuery(ctx, "minds.tier")?.(ctx, who) ?? "background";
-    if ((!enforced || tier !== "background" || awareness === "story_first") && optionalQuery(ctx, "minds.intent")?.(ctx, who) === true) return true;
+    const steered = optionalQuery(ctx, "minds.intent")?.(ctx, who) === true || optionalQuery(ctx, "orgs.on_order")?.(ctx, who, opts.at ?? ctx.state.clock) === true;
+    if ((!enforced || tier !== "background" || awareness === "story_first") && steered) return true;
   }
   const current = own(ctx.state.entities, who)?.fields[field];
   const diverged = expected === null || expected === undefined ? !opts.edge : current !== undefined && current !== expected;

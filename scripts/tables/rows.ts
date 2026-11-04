@@ -7,6 +7,7 @@ import { isRecord } from "../../src/shared/json";
 import type { JsonObject, JsonValue } from "../../src/shared/json";
 import type { TableRow } from "../../src/shared/tables";
 import type { Report } from "./issues";
+import { SIZES } from "./mappings";
 import type { Fields, SourceNode } from "./source";
 
 /** A row before validation; `undefined` marks an absent optional column. */
@@ -139,7 +140,16 @@ export const ROW_SPECS: Record<string, RowSpec> = {
       const parent = node.parents[0]?.value;
       const category = isRecord(parent) ? parent.id : undefined;
       if (typeof category !== "string") f.fail("source", "item has no enclosing category id", "category");
-      return { name: f.take("name"), category, unit: f.take("unit"), price_cents: f.take("price_cents"), notes: f.take("notes") };
+      return { name: f.take("name"), aliases: f.take("aliases"), category, unit: f.take("unit"), size: f.take("size"), holds: f.take("holds"), price_cents: f.take("price_cents"), notes: f.take("notes") };
+    },
+    // A furnishing that holds things (a refrigerator, a dresser) takes nothing larger than itself, and never a Built-in thing (ITEMS-SPEC §11).
+    check(rows, report) {
+      for (const [id, row] of Object.entries(rows)) {
+        if (row.holds === undefined) continue;
+        if (row.holds === "builtin") report("type", "nothing takes Built-in things", { row: id, column: "holds" });
+        if (typeof row.size !== "string") report("type", "a row that holds things has a size of its own", { row: id, column: "holds" });
+        else if (typeof row.holds === "string" && SIZES.indexOf(row.holds) > SIZES.indexOf(row.size)) report("type", `holds ${row.holds}, larger than its own size ${row.size}`, { row: id, column: "holds" });
+      }
     },
   },
 
@@ -229,6 +239,32 @@ export const ROW_SPECS: Record<string, RowSpec> = {
     },
   },
 
+  "economy.index_history": {
+    row(f) {
+      return { date: f.take("date"), level: f.take("level") };
+    },
+    // One close a month with none missing, oldest first; each on a day of its own month, above zero.
+    check(rows, report) {
+      let before: string | null = null;
+      for (const [id, row] of Object.entries(rows)) {
+        const where = { row: id };
+        const m = /^(\d{4})-(0[1-9]|1[0-2])$/.exec(id);
+        if (!m) {
+          report("type", `month "${id}" is not YYYY-MM`, where);
+          continue;
+        }
+        if (before !== null) {
+          const [y, mo] = before.split("-").map(Number) as [number, number];
+          const next = mo === 12 ? `${String(y + 1).padStart(4, "0")}-01` : `${String(y).padStart(4, "0")}-${String(mo + 1).padStart(2, "0")}`;
+          if (id !== next) report("column", `month ${id} follows ${before}: a month is missing or out of order`, where);
+        }
+        before = id;
+        if (typeof row.date !== "string" || !row.date.startsWith(`${id}-`) || !/^\d{4}-\d{2}-\d{2}$/.test(row.date)) report("type", `date ${JSON.stringify(row.date)} is not a day of ${id}`, { row: id, column: "date" });
+        if (!(typeof row.level === "number" && row.level > 0)) report("type", `level ${JSON.stringify(row.level)} is not above zero`, { row: id, column: "level" });
+      }
+    },
+  },
+
   "vehicles.classes": {
     row(f) {
       const consumption = f.sub("consumption");
@@ -312,6 +348,7 @@ export const ROW_SPECS: Record<string, RowSpec> = {
         equip_slot: f.take("equip_slot"),
         weight_g: f.take("weight_g"),
         volume_l: f.take("volume_l"),
+        size: f.take("size"),
         price_cents: f.take("price_cents"),
         notes: f.take("notes"),
       };
@@ -326,10 +363,23 @@ export const ROW_SPECS: Record<string, RowSpec> = {
         max_load_kg: f.take("max_load_kg"),
         empty_weight_g: f.take("empty_weight_g"),
         location: f.take("location"),
+        size: f.take("size"),
+        holds: f.take("holds"),
         equip_slot: f.take("equip_slot"),
         price_cents: f.take("price_cents"),
         notes: f.take("notes"),
       };
+    },
+    // ITEMS-SPEC §11 categorical rules: nothing goes into something smaller, and a Built-in thing
+    // goes into nothing; a vehicle_fixed row is part of its vehicle, so it has no size of its own.
+    check(rows, report) {
+      for (const [id, row] of Object.entries(rows)) {
+        if (row.location === "vehicle_fixed" && row.size !== undefined) report("type", "a vehicle_fixed container is part of its vehicle and takes no size", { row: id, column: "size" });
+        if (row.holds === "builtin") report("type", "no container takes Built-in things", { row: id, column: "holds" });
+        if (typeof row.size === "string" && typeof row.holds === "string" && SIZES.indexOf(row.holds) > SIZES.indexOf(row.size)) {
+          report("type", `holds ${row.holds}, larger than its own size ${row.size}`, { row: id, column: "holds" });
+        }
+      }
     },
   },
 

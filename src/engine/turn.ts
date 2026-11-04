@@ -25,7 +25,7 @@ import { outline } from "./beats";
 import { ENGINE_EVENTS, signalOf } from "./engine-pack";
 import { materializeAll } from "./materialize";
 import type { Registry } from "./registry-impl";
-import { findAction, missedPlainRequirement, playsAsRoleplay, resolveAction, unmetNeeds, type Resolution } from "./resolve";
+import { findAction, missedPlainRequirement, playsAsRoleplay, resolveAction, unmetNeeds, type Brought, type Resolution } from "./resolve";
 import { IDLE_OPTION } from "./plan-day";
 import { resolveTry, TRY_ACTION } from "./inferred";
 import { createRng } from "./rng";
@@ -178,11 +178,13 @@ export function skipPastFight(w: Working, runSeed: string): string[] {
  * only what that cash lacks, as the action plays, of what the action pays (`params`, the pick
  * `amountParam` names, which the intent gate's Edit may have changed), so what they carry is never
  * made again. The entity the action takes, or the cash account money went into, how many events made
- * it and the cash added. Null when nothing needs making (the claimer already holds the thing, made by
- * an earlier action of the turn, or carries the money by then), when the action pays more than the
- * player agreed to have added for (`cents`), or when it can't be made; the action then plays without it.
+ * it and the cash added; for the player character's own thing brought from elsewhere (`existing`,
+ * ITEMS-SPEC §4.5), where it was and the walk its fetch took (`brought`). Null when nothing needs
+ * making (the claimer already holds the thing, made by an earlier action of the turn, or carries the
+ * money by then), when the action pays more than the player agreed to have added for (`cents`), or
+ * when it can't be made; the action then plays without it.
  */
-function claimThing(w: Working, claim: Claim, salt: string, params: JsonObject): { entity: EntityId; events: number; cents?: number } | null {
+function claimThing(w: Working, claim: Claim, salt: string, params: JsonObject): { entity: EntityId; events: number; cents?: number; brought?: Brought } | null {
   let lacking: number | undefined;
   if (claim.cents !== undefined) {
     const pays = claim.amountParam === undefined ? claim.cents : params[claim.amountParam];
@@ -192,6 +194,8 @@ function claimThing(w: Working, claim: Claim, salt: string, params: JsonObject):
   }
   const made = lacking !== undefined ? optionalService(w.ctx, "economy.claim_cash")?.(w.ctx, w.world.pov, lacking) : optionalService(w.ctx, "gear.claim")?.(w.ctx, { ...claim, by: w.world.pov, salt });
   if (!made || !("entity" in made)) return null;
+  // Where their own thing was before it came to them, read before it moves.
+  const from = claim.existing !== undefined && own(w.state.entities, claim.existing) ? placeOfEntity(w.state, claim.existing) : undefined;
   const before = w.mark();
   for (const e of made.events) {
     if (w.apply(e)) {
@@ -199,7 +203,8 @@ function claimThing(w: Working, claim: Claim, salt: string, params: JsonObject):
       return null;
     }
   }
-  return { entity: made.entity, events: made.events.length, ...(lacking !== undefined ? { cents: lacking } : {}) };
+  const brought: Brought | undefined = from !== undefined && made.entity === claim.existing ? { place: from, ...(claim.fetch !== undefined ? { minutes: claim.fetch } : {}) } : undefined;
+  return { entity: made.entity, events: made.events.length, ...(lacking !== undefined ? { cents: lacking } : {}), ...(brought ? { brought } : {}) };
 }
 
 export function planTurn(input: TurnPlanInput): EngineTurnPlan {
@@ -253,7 +258,7 @@ export function planTurn(input: TurnPlanInput): EngineTurnPlan {
       let resolution: Resolution | null = null;
       // The place and scene as the action's own effects leave them; any other change interrupts the queue.
       let scene = sceneKey(w.world, w.state);
-      let made: { entity: EntityId; name: string; events: number; cents?: number } | null = null;
+      let made: { entity: EntityId; name: string; events: number; cents?: number; brought?: Brought } | null = null;
       let ruled = mark;
       const before: BeforeAction = { picks: "", from: placeOfEntity(w.state, w.world.pov), fields: { ...own(w.state.entities, w.world.pov)?.fields } };
       if (step) {
@@ -267,7 +272,7 @@ export function planTurn(input: TurnPlanInput): EngineTurnPlan {
         // before the action, which takes it; money goes into their cash, which the action pays over
         // (DESIGN §9.4 player claims).
         const claimed = step.claim && unmet === null ? claimThing(w, step.claim, hashParts(seed, "claim"), step.params) : null;
-        if (claimed && step.claim) made = { entity: claimed.entity, name: claimed.cents !== undefined ? formatMoney(claimed.cents, w.world.currency) : step.claim.name, events: claimed.events, ...(claimed.cents !== undefined ? { cents: claimed.cents } : {}) };
+        if (claimed && step.claim) made = { entity: claimed.entity, name: claimed.cents !== undefined ? formatMoney(claimed.cents, w.world.currency) : step.claim.name, events: claimed.events, ...(claimed.cents !== undefined ? { cents: claimed.cents } : {}), ...(claimed.brought ? { brought: claimed.brought } : {}) };
         const params = claimed && step.claim && step.claim.cents === undefined ? { ...step.params, [step.claim.param]: claimed.entity } : step.params;
         // Its picks in words as the POV knows them now, before the action gives away or uses up what it
         // names; the turn's own message counts as said, since the narrator reads it anyway (DESIGN §7).
@@ -286,6 +291,9 @@ export function planTurn(input: TurnPlanInput): EngineTurnPlan {
           w.restore(acting);
           resolution = { ...resolution, ok: false, failed: { code: unpaid.rejection.code, reason: unpaid.rejection.reason }, check: null, outcome: null, events: [], rejected: [], duration: 0, activity: null, adjudged: null, roleplay: true };
         }
+        // Their own thing fetched from close by (ITEMS-SPEC §4.5): the walk is the action's time too.
+        const walk = claimed?.brought?.minutes;
+        if (walk !== undefined && walk > 0 && resolution.ok) resolution = { ...resolution, duration: resolution.duration + walk };
         scene = sceneKey(w.world, w.state);
         // The rules see the claimed thing's making too, so a world rule can react to its mark.
         const done = w.events.slice(mark, mark + (made?.events ?? 0) + resolution.events.length);
@@ -303,7 +311,7 @@ export function planTurn(input: TurnPlanInput): EngineTurnPlan {
           const group = w.events[end]?.group;
           if (group === undefined || !groups.has(group)) break;
         }
-        resolution = { ...resolution, events: w.events.slice(mark, end), ...(made && made.events > 0 ? { claimed: { entity: made.entity, name: made.name, events: w.events.slice(mark, ruled), ...(made.cents !== undefined ? { cents: made.cents } : {}) } } : {}) };
+        resolution = { ...resolution, events: w.events.slice(mark, end), ...(made && made.events > 0 ? { claimed: { entity: made.entity, name: made.name, events: w.events.slice(mark, ruled), ...(made.cents !== undefined ? { cents: made.cents } : {}), ...(made.brought ? { brought: made.brought } : {}) } } : {}) };
         resolutions.push(resolution);
         played.push(before);
       }

@@ -136,6 +136,7 @@ const REQUEST_TYPES: Record<keyof ResultBodies, true> = {
   "lre.minds": true,
   "lre.routine": true,
   "lre.character": true,
+  "lre.things": true,
   "lre.agents": true,
   "lre.acceptance": true,
   "lre.cancel": true,

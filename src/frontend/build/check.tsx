@@ -1,24 +1,25 @@
-// Problems (DESIGN §13): the backend's full lint of the world, filtered by
-// severity, each issue saying where it is by name and opening the item or the world part it points
-// at. `IssueRow` is Build's one problem row: Problems, a playtest's findings and an import's review
-// all use it.
+// Problems (DESIGN §13): the draft's full lint, filtered by severity, each issue saying where it is
+// by name and opening the item or the world part it points at, with Fix where one press mends it
+// (ITEMS-SPEC §10.1: a thing too big to carry, put where its holder stands). `IssueRow` is Build's
+// one problem row: Problems, a playtest's findings and an import's review all use it.
 
-import { useEffect, useState } from "preact/hooks";
+import { useMemo, useState } from "preact/hooks";
 import type { WorldId } from "../../shared/ids";
 import { hasOwn } from "../../shared/json";
-import type { LintIssue, WorldCollection, WorldPart } from "../../shared/protocol";
+import type { LintFix, LintIssue, WorldCollection, WorldPart } from "../../shared/protocol";
 import type { WorldDoc } from "../../shared/world";
 import { useApp, type BuildRoute } from "../app";
 import { Badge, Banner, Button, Empty, IdText, PageHeader, Section, Seg, useBusy } from "../components";
 import { Icon } from "../icons";
 import { useSelect } from "../store";
 import { COLLECTION_INFO, go, itemLabel, PART_INFO } from "./chrome";
+import { draftSend, loadDraft } from "./draft";
 
 const COLLECTIONS: readonly WorldCollection[] = ["kinds", "relations", "entities", "places", "maps", "routes", "grids", "rules", "actions", "checks", "routines", "schedules", "tracks", "tables", "sections", "steps", "packs", "lore", "classifications"];
 /** World parts whose issues open the part: `ruleset.progression.level.thresholds` → the Ruleset part; `loreIndex.terms.ferry` → the lookup table; a step's pins (`lorePins.steps.mind`) → Pinned lore. */
 const PARTS: readonly WorldPart[] = ["calendar", "realism", "tiers", "time", "ruleset", "loreIndex", "lorePins", "routineSettings", "needs"];
 /** The world's own top-level fields, which the World part edits. */
-const META_FIELDS: readonly string[] = ["name", "pov", "start", "seedMode", "lenientPricing", "spawnCap", "lifeStates", "currency", "mapSettings"];
+const META_FIELDS: readonly string[] = ["name", "pov", "start", "seedMode", "lenientPricing", "spawnCap", "placeCap", "placesPerTurn", "lifeStates", "currency", "mapSettings"];
 
 /** The editor an issue path opens: `entities.npc_dev.fields.cash` → entities / npc_dev; a pin's (`lorePins.characters.<id>`, `lorePins.places.<id>`) → the character's or place's page, where its pins are; a built-in section's wording (`sectionTemplates.<id>`) → that section's page. */
 export function issueTarget(path: string): { collection: WorldCollection; id: string } | null {
@@ -63,10 +64,41 @@ export function SeverityBadge(props: { severity: Severity }) {
 }
 
 /**
- * One problem: its severity, its message, where it is by name (its path and code under Show ids),
- * and Open when Build has a page for it in `worldId`'s world (none for a world not yet installed).
+ * One problem as a row: its severity, its message, where it is by name (its path and code under
+ * Show ids), Fix when it has one and the page offers it, and Open when it has a page.
  */
-export function IssueRow(props: { issue: LintIssue; worldId?: WorldId; doc?: WorldDoc }) {
+export function IssueLine(props: { issue: LintIssue; where: string; busy?: boolean; onOpen?(): void; onFix?(fix: LintFix): void }) {
+  const { issue } = props;
+  const fix = issue.fix;
+  const onFix = props.onFix;
+  const onOpen = props.onOpen;
+  return (
+    <div class="lre-lint" role="listitem" data-lre-issue={issue.code}>
+      <span class="lre-lint-text">
+        <SeverityBadge severity={issue.severity} />
+        <span class="lre-lint-message">{issue.message}</span>
+        <span class="lre-lint-where">{props.where}</span>
+        <IdText id={`${issue.path} · ${issue.code}`} />
+      </span>
+      {fix && onFix ? (
+        <Button size="sm" variant="primary" label={fix.label} title={fix.label} busy={props.busy} onClick={() => onFix(fix)}>
+          Fix
+        </Button>
+      ) : null}
+      {onOpen ? (
+        <Button size="sm" label={`Open ${props.where}`} onClick={onOpen}>
+          Open
+        </Button>
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * One problem: its row, opening the item or the world part it points at in `worldId`'s world (none
+ * for a world not yet installed), and its fix when `onFix` applies one.
+ */
+export function IssueRow(props: { issue: LintIssue; worldId?: WorldId; doc?: WorldDoc; busy?: boolean; onFix?(fix: LintFix): void }) {
   const app = useApp();
   const { issue, worldId, doc } = props;
   const target = issueTarget(issue.path);
@@ -77,36 +109,25 @@ export function IssueRow(props: { issue: LintIssue; worldId?: WorldId; doc?: Wor
     where = `${COLLECTION_INFO[target.collection].label} › ${itemLabel(target.collection, target.id, hasOwn(items, target.id) ? items[target.id] : undefined, doc?.places)}`;
   } else if (part) where = PART_INFO[part].label;
   const route = worldId === undefined ? null : issueRoute(worldId, issue.path);
-  const open = route ? () => go(app, route) : null;
-  return (
-    <div class="lre-lint" role="listitem" data-lre-issue={issue.code}>
-      <span class="lre-lint-text">
-        <SeverityBadge severity={issue.severity} />
-        <span class="lre-lint-message">{issue.message}</span>
-        <span class="lre-lint-where">{where}</span>
-        <IdText id={`${issue.path} · ${issue.code}`} />
-      </span>
-      {open ? (
-        <Button size="sm" label={`Open ${where}`} onClick={open}>
-          Open
-        </Button>
-      ) : null}
-    </div>
-  );
+  return <IssueLine issue={issue} where={where} busy={props.busy} onOpen={route ? () => go(app, route) : undefined} onFix={props.onFix} />;
 }
 
+/** Problems: the draft's whole lint as the engine will play it, by severity, each issue with Open and, where one press mends it, Fix. */
 export function CheckView(props: { worldId: WorldId }) {
   const app = useApp();
-  const doc = useSelect(app.drafts, (d) => (d?.worldId === props.worldId ? d.doc : undefined));
-  const [issues, setIssues] = useState<LintIssue[] | null>(null);
+  const draft = useSelect(app.drafts, (d) => (d?.worldId === props.worldId ? d : undefined));
+  const send = useMemo(() => draftSend(app), [app]);
   const [severity, setSeverity] = useState<Severity | "all">("all");
   const [busy, run] = useBusy();
   const check = () =>
     run(async () => {
-      const result = await app.request({ type: "lre.world", op: "lint", worldId: props.worldId });
-      setIssues(result?.lint ?? []);
+      await loadDraft(app, props.worldId);
     });
-  useEffect(check, [props.worldId]);
+  const fix = (next: LintFix) =>
+    run(async () => {
+      await send({ type: "lre.editor", worldId: props.worldId, base: null, op: "patch", ops: next.ops });
+    });
+  const issues = draft?.lint ?? null;
   const count = (s: Severity) => issues?.filter((i) => i.severity === s).length ?? 0;
   const shown = (issues ?? []).filter((i) => severity === "all" || i.severity === severity);
   return (
@@ -145,7 +166,7 @@ export function CheckView(props: { worldId: WorldId }) {
             <Section flush>
               <div class="lre-build-issues" role="list">
                 {shown.map((issue, i) => (
-                  <IssueRow key={`${issue.path}:${issue.code}:${i}`} issue={issue} worldId={props.worldId} doc={doc} />
+                  <IssueRow key={`${issue.path}:${issue.code}:${i}`} issue={issue} worldId={props.worldId} doc={draft?.doc} busy={busy} onFix={fix} />
                 ))}
               </div>
             </Section>

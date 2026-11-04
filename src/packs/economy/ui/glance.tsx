@@ -21,7 +21,7 @@ export function MoneyGlance(props: PanelProps) {
   const lines = glanceLines(view, props.state.hud?.clock.minutes ?? null).slice(0, GLANCE_ROWS);
   if (lines.length === 0) return null;
   const currency = props.state.currency ?? DEFAULT_CURRENCY;
-  const open = (page: HubPage) => app.ui.update((ui) => pushSheet(ui, routeOf(page)));
+  const open = (page: HubPage) => app.ui.update((ui) => pushSheet(ui, routeOf(page, view.party, true)));
   return (
     <GlanceCard title="Money" panel="economy.money">
       {lines.map((line, i) => {

@@ -25,12 +25,15 @@ import { knowsChannel, spawnChannel } from "./narration-channels";
 import { kindIs, placeOfEntity } from "./scope";
 import { restoreObservations } from "./seen";
 import { classOf, classProblems, inClass, isMemberOf, tagsOf } from "./selector";
+import { isStaff, orgPower } from "./org";
+import { isOrgPower } from "../shared/org";
 import type { EntityState, WorldState } from "./state";
 import { own } from "./pack-kit";
 import { minutesBetween } from "./world-state";
 import { feedEvent } from "./feed";
 import { wsDeleteEvent, wsPinEvent, wsReadersEvent, wsWriteEvent } from "./workspace";
 import { outLinesEvent, outSceneEvent } from "./outputs";
+import { THING_NAME_MAX } from "../shared/things";
 
 const LEVELS: readonly Level[] = [0, 1, 2, 3, 4];
 
@@ -64,6 +67,8 @@ export const ENGINE_EVENTS = {
   life: "engine.life",
   /** People told an entity's life state as it is. */
   told: "engine.told",
+  /** An entity's name changed in play (an item op's label, ITEMS-SPEC §3.5), `was` the name before. */
+  rename: "engine.rename",
   /**
    * The clock set back by a ✎ fix of the time (DESIGN §9.2, §12), `minutes` before where it stood.
    * How far it had run stays recorded (`reached`), so nothing up to there runs again (L48).
@@ -447,6 +452,23 @@ const events: EventTypeDef<PackEvent>[] = [
     },
   },
   {
+    // A thing given a new name in play (ITEMS-SPEC: an item op's label): what every reader and line calls it from then on.
+    type: ENGINE_EVENTS.rename,
+    validate: (e, ctx) => {
+      const name = str(e, "name");
+      if (!own(ctx.state.entities, str(e, "entity"))) return { code: "missing_entity", reason: `no entity ${str(e, "entity")}` };
+      return name.trim() !== "" && name.length <= THING_NAME_MAX ? null : { code: "bad_name", reason: `a name is 1–${THING_NAME_MAX} characters` };
+    },
+    apply: (e, state) => {
+      const ent = own(state.entities, str(e, "entity"));
+      if (ent) ent.name = str(e, "name");
+    },
+    // Play's name, so an Upgrade that renames it too keeps the chat's.
+    touches: (e) => [{ entity: str(e, "entity"), aspect: "name" }],
+    describe: (e, ctx) => `${str(e, "was") || str(e, "entity")} is now called ${str(e, "name")}`,
+    coarsen: { key: (e) => str(e, "entity"), merge: (earlier, later) => ({ ...later, data: { ...later.data, was: earlier.data.was ?? null } }) },
+  },
+  {
     type: ENGINE_EVENTS.observed,
     validate: (e) => (Object.values(e.data).every(isRecord) ? null : { code: "bad_event", reason: "observed needs places and people" }),
     apply: (e, state) => restoreObservations(state, e.data),
@@ -571,8 +593,18 @@ export const enginePack: PackDef = {
     });
     r.formula("member_of", (ctx, entity, group) => {
       const hit = entityArg(ctx, entity);
-      return hit !== null && isMemberOf(ctx.state, hit[0], String(group ?? ""));
+      return hit !== null && isMemberOf(ctx, hit[0], String(group ?? ""));
     });
+    // Organizations (ORG-SPEC §3.4, §3.6): whether someone holds a power in one, works for one, and who acts (an organization `as` names, else themselves).
+    r.formula("may", (ctx, who, org, power) => {
+      const hit = entityArg(ctx, who);
+      return hit !== null && isOrgPower(power) && orgPower(ctx, hit[0], String(org ?? ""), power) !== null;
+    });
+    r.formula("staff_of", (ctx, who, org) => {
+      const hit = entityArg(ctx, who);
+      return hit !== null && isStaff(ctx, hit[0], String(org ?? "")) !== null;
+    });
+    r.formula("acting", (ctx, self, as) => (typeof as === "string" && as !== "" && own(ctx.state.entities, as) ? as : (entityArg(ctx, self)?.[0] ?? "")));
     r.formula("tier_of", (ctx, entity) => entityArg(ctx, entity)?.[1].tier ?? "");
     r.formula("band_of", (ctx, entity) => {
       const hit = entityArg(ctx, entity);

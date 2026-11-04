@@ -13,15 +13,16 @@ import type { RoutineGmView } from "../../shared/routines";
 import type { GmEntity, GmField } from "../../shared/state-view";
 import { APPROACH_LABEL, FIDELITY_LABEL } from "../../packs/minds/ui/ops";
 import { useApp } from "../app";
-import { Badge, Banner, Button, Disclosure, Empty, HostSwitch, IdText, Section } from "../components";
+import { Badge, Banner, Button, Disclosure, Empty, IdText, Section } from "../components";
 import { BedPicker } from "../character/bed-picker";
 import { PlacePicker, PlaceSheet } from "../character/place-picker";
 import { bringOp, characterRequest, partyOf } from "../requests";
-import { bedOp, homeOp, moveOp, partySwitchOp, routineStanding, type RoutineStanding } from "./character-ops";
+import { bedOp, homeOp, moveOp, routineStanding, type RoutineStanding } from "./character-ops";
+import { TIER_LABELS } from "../../shared/party";
 import { formatMoney } from "../../shared/world";
 import type { Editor } from "./editor";
 import { nameOf } from "./editor";
-import { Classification, FieldRow, Life, Relations, Simulation } from "./entity";
+import { Classification, FieldRow, Life, PartyField, Relations, Simulation } from "./entity";
 import { gmOpen } from "./gate";
 import { ActionRow, ActionRows, GmPage } from "./ui";
 
@@ -132,7 +133,7 @@ export function CharacterSheet(props: { entity: GmEntity; editor: Editor; chatId
           {mind ? <Badge tone={mind.fidelity.level === "live" ? "accent" : "neutral"}>{FIDELITY_LABEL[mind.fidelity.level]}</Badge> : null}
           <Badge>{editor.gm.tiers.find((t) => t.id === entity.tier)?.label ?? entity.tier}</Badge>
           {entity.gone ? <Badge tone="neg">Removed</Badge> : entity.life.state !== "alive" ? <Badge tone="neg">{entity.life.label}</Badge> : null}
-          {party?.travels ? <Badge tone="pos">Travels with {party.pov.name}</Badge> : null}
+          {party?.tier ? <Badge tone="pos">{`${TIER_LABELS[party.tier]} in ${party.pov.name}'s party`}</Badge> : null}
           {entity.agent ? <Badge>Lives their own day</Badge> : null}
           {entity.visibility !== "public" ? <Badge tone="gm">{entity.visibility === "secret" ? "Secret" : entity.visibility === "known_by" ? "Known by some" : "Discoverable"}</Badge> : null}
         </div>
@@ -179,17 +180,7 @@ export function CharacterSheet(props: { entity: GmEntity; editor: Editor; chatId
               </Button>
             ) : null}
           </div>
-          {party ? (
-            <HostSwitch
-              checked={party.travels}
-              label={`Travels with ${party.pov.name}: goes wherever ${party.pov.name} goes`}
-              disabled={editor.busy}
-              onChange={(on) => {
-                const op = partySwitchOp(entity, editor.gm, on);
-                if (op) edit([op]);
-              }}
-            />
-          ) : null}
+          <PartyField entity={entity} editor={editor} />
           {moving ? (
             <PlaceSheet
               title={`Move ${entity.name}`}

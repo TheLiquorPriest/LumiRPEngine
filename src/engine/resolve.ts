@@ -6,12 +6,13 @@
 // player's judged approach adds, and who settles it; the palette shows the same verdict.
 
 import type { JsonObject, JsonValue } from "../shared/json";
-import type { ActionId, EntityId } from "../shared/ids";
+import type { ActionId, EntityId, PlaceId } from "../shared/ids";
 import type { LedgerEvent } from "../shared/ledger";
 import { heldBy } from "../shared/finance";
-import { isHardLock, requirementExpr, spanRecords, type ActionDef, type CheckDef, type EffectSpec, type Expr, type ParamDef, type WorldDoc } from "../shared/world";
+import { isHardLock, requirementExpr, requirementWhy, spanRecords, type ActionDef, type CheckDef, type EffectSpec, type Expr, type ParamDef, type Requirement, type WorldDoc } from "../shared/world";
 import { tableRowKey } from "../shared/tables";
 import { plainRolling } from "../shared/adjudication";
+import { reachOf } from "./access";
 import { approachShift, closeCall, fightRound, judgedOutcome, oddsSignature, outcomeChoices, passOutcome, policyFor, ratingOf, tryKey, verdictOf, type Adjudged, type Judgement, type Verdict } from "./adjudication";
 import { checkCounts, checkOdds, checkOf, oddsOf, readyCheck, rollCheck, rollVars, type CheckRoll } from "./checks";
 import { ENGINE_EVENTS } from "./engine-pack";
@@ -55,6 +56,12 @@ export interface CheckResult extends CheckRoll {
   odds: Record<string, number>;
 }
 
+/** The player character's own thing a claim brought from elsewhere (ITEMS-SPEC §4.5): where it was (null: nowhere, lost), and the minutes on foot when it was fetched from close by. */
+export interface Brought {
+  place: PlaceId | null;
+  minutes?: number;
+}
+
 export interface Resolution {
   action: ActionId;
   actor: EntityId;
@@ -79,9 +86,10 @@ export interface Resolution {
    * The thing the player said they had, made real for this action as one of a turn's (DESIGN §9.4
    * player claims; set by the plan): its entity and name, and what its Undo takes back: its making,
    * the action's own events and the rules they fired. Money's `cents`: the cash it added, which its
-   * entity (the carried cash account) holds.
+   * entity (the carried cash account) holds. `brought`: the player character's own thing came from
+   * elsewhere rather than being made (ITEMS-SPEC §4.5).
    */
-  claimed?: { entity: EntityId; name: string; events: LedgerEvent[]; cents?: number };
+  claimed?: { entity: EntityId; name: string; events: LedgerEvent[]; cents?: number; brought?: Brought };
   /** An inferred check's people and wording (DESIGN §11), when the action was Try something: the plan's, never recorded. */
   inferred?: InferredResult;
   /** The action as the narrator is told it (`toldAction`): set by the turn's plan once the turn has played, never recorded. */
@@ -176,6 +184,10 @@ function prepare(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, re
     if (v === undefined) return { code: "bad_param", reason: `${name} must be a scalar` };
     params[name] = v;
   }
+  // Acting for an organization (`ParamDef.acting`, ORG-SPEC §3.6): the organization the param names
+  // is who acts, so `self` is it in requirements and outcomes, while `actor` stays whoever does it.
+  const acting = Object.entries(action.params).find(([name, def]) => def.acting !== undefined && def.type === "ref" && bindings[name] !== undefined);
+  if (acting) bindings.self = bindings[acting[0]] ?? actor;
   // Ref params resolve through their bindings (`target.cash`); only scalars are top-level names. An
   // absent optional param reads 0 by its bare name and null as `params.<name>`, so an outcome can
   // tell "not given" from a given 0.
@@ -187,22 +199,30 @@ function prepare(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, re
   return { action, actor, bindings, vars, params };
 }
 
-/** Why an action can't run: a rejection, or a requirement that didn't hold, as its formula (`hard`: its author's hard lock). */
-export type Failure = { code: string; reason: string; requirement?: Expr; hard?: true };
+/** Why an action can't run: a rejection, or a requirement that didn't hold, as its formula (`hard`: its author's hard lock; `words`: its own words for the player, from its `why`). */
+export type Failure = { code: string; reason: string; requirement?: Expr; hard?: true; words?: string };
+
+/** A requirement that didn't hold, with its own words when its `why` gives some. */
+function unmet(req: Requirement, env: ExprEnv, hard: boolean): Failure {
+  const expr = requirementExpr(req);
+  const why = requirementWhy(req);
+  const said = why === null ? null : evalExpr(why, env, "");
+  const words = typeof said === "string" && said.trim() !== "" ? { words: said.trim() } : {};
+  return { code: "requirement", reason: `requires ${expr}`, requirement: expr, ...(hard ? { hard: true as const } : {}), ...words };
+}
 
 /**
  * The requirement that keeps the action from running (DESIGN §11): a hard lock that doesn't hold
  * before any plain one, since it alone vetoes a typed action; null when every one holds.
  */
 function firstUnmet(action: ActionDef, env: ExprEnv): Failure | null {
-  let plain: Expr | null = null;
+  let plain: Requirement | null = null;
   for (const req of action.requires) {
-    const expr = requirementExpr(req);
-    if (truthy(evalExpr(expr, env, false))) continue;
-    if (isHardLock(req)) return { code: "requirement", reason: `requires ${expr}`, requirement: expr, hard: true };
-    plain ??= expr;
+    if (truthy(evalExpr(requirementExpr(req), env, false))) continue;
+    if (isHardLock(req)) return unmet(req, env, true);
+    plain ??= req;
   }
-  return plain === null ? null : { code: "requirement", reason: `requires ${plain}`, requirement: plain };
+  return plain === null ? null : unmet(plain, env, false);
 }
 
 /**
@@ -440,7 +460,8 @@ export function resolveOn(reg: Registry, world: WorldDoc, state: Readonly<WorldS
 /**
  * What can fill a ref parameter. A `place` ref offers the places the actor may see (`placeCandidates`);
  * any other ref offers entities of the right kind that the param's selector (`of`) matches and the
- * actor may see, at the actor's place or held by the actor.
+ * actor may see, at the actor's place or held by the actor, and for a `nearby` param also what is a
+ * short walk away (`reachOf`: the same site, within the world's fetch minutes on foot).
  */
 export function paramCandidates(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, action: ActionDef, param: string, actor: EntityId = world.pov): EntityId[] {
   const def = own(action.params, param);
@@ -448,7 +469,7 @@ export function paramCandidates(reg: Registry, world: WorldDoc, state: Readonly<
   const here = placeOfEntity(state, actor);
   if (def.ref === "place") return placeCandidates(reg, world, state, actor);
   const filters = candidateFilters(action, param);
-  const ctx = filters.length > 0 ? reg.context(world, state) : null;
+  const ctx = filters.length > 0 || def.nearby === true ? reg.context(world, state) : null;
   const out: EntityId[] = [];
   for (const id of Object.keys(state.entities).sort()) {
     if (id === actor) continue;
@@ -456,9 +477,9 @@ export function paramCandidates(reg: Registry, world: WorldDoc, state: Readonly<
     if (!e || isGone(state, id)) continue;
     if (def.ref && !kindIs(reg, world, e.kind, def.ref)) continue;
     if (def.of && !selectorMatches(reg, world, state, def.of, id)) continue;
-    if (placeOfEntity(state, id) !== here && !e.relations.some((r) => r.to === actor) && !heldBy(state.entities, id, actor)) continue;
+    if (placeOfEntity(state, id) !== here && !e.relations.some((r) => r.to === actor) && !heldBy(state.entities, id, actor) && !(ctx && def.nearby === true && reachOf(ctx, actor, id).reach === "nearby")) continue;
     if (!canSeeEntity(reg, world, state, actor, id)) continue;
-    if (ctx && !filters.every((f) => truthy(evalExpr(f, scopeEnv({ reg, ctx, bindings: { self: actor, [param]: id } }), false)))) continue;
+    if (ctx && filters.length > 0 && !filters.every((f) => truthy(evalExpr(f, scopeEnv({ reg, ctx, bindings: { self: actor, [param]: id } }), false)))) continue;
     out.push(id);
   }
   return out;

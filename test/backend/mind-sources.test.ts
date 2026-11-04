@@ -12,9 +12,10 @@ import type { JsonObject } from "../../src/shared/json";
 import type { ModelUseSettings } from "../../src/shared/settings";
 import type { MindMoment, MindSource, MindsReads, MindsSettings } from "../../src/shared/minds";
 import { DEFAULT_MIND_READS, effectiveMemory, MIND_SOURCES } from "../../src/shared/minds";
+import { calendarOf, formatClock } from "../../src/engine/calendar";
 import { pinsFor, worldPinText } from "../../src/engine/lore-pins";
 import { placeOfEntity } from "../../src/engine/scope";
-import { ASK, DANNY, fakeModels, lastFor, stateOf, storyChat, alderChat } from "../support/mind-chat";
+import { ASK, DANNY, fakeModels, lastFor, PRIYA, stateOf, storyChat, alderChat } from "../support/mind-chat";
 import { Rig } from "../support/rig";
 
 /** What shows each source is in Danny's context on the story's second turn (what he knows: the secret the chat seeded him with). */
@@ -23,6 +24,7 @@ const MARKS: Record<MindSource, string> = {
   activated: "ACTIVE-MARK",
   reply: "The story so far ended: SECOND-REPLY-MARK",
   message: `says or does: ${ASK}`,
+  things: "THINGS-MARK",
   history: "## Recent chat",
   summary: "SUMMARY-MARK",
   memory: "NOTE-MARK",
@@ -30,6 +32,7 @@ const MARKS: Record<MindSource, string> = {
   recall: "## Turns you were there for",
   routine: "ROUTINE-MARK",
   plans: "PLAN-MARK",
+  orgs: "## Your organizations",
   life: "COMMIT-MARK",
   knowledge: "## What you know\n",
 };
@@ -38,9 +41,9 @@ describe("each source of what a mind reads, on or off, within its own limit", ()
   test("a source is in a mind's context only while it's on, and within its limit", async () => {
     const rig = new Rig({ shipped: true, minds: true });
     const { chatId } = await storyChat(rig);
-    // Their day took Danny back to work after the reply; he's with the player character again to hear the turn.
+    // Their day took Danny back to work after the reply; he's with the player character again to hear the turn, his lighter on him.
     const here = placeOfEntity((await stateOf(rig, chatId)).state, "pov");
-    rig.body(await rig.send({ type: "lre.edit", chatId, ops: [{ op: "move", entity: DANNY, to: here }] }));
+    rig.body(await rig.send({ type: "lre.edit", chatId, ops: [{ op: "move", entity: DANNY, to: here }, { op: "item", change: { do: "make", name: "THINGS-MARK lighter", at: { in: DANNY }, owner: DANNY, why: "his lighter" } }] }));
     const { state, world } = await stateOf(rig, chatId);
     const messages = await rig.host.chats.messages(chatId, rig.host.userId);
     const settings = await rig.rt.settings.get(rig.host.userId);
@@ -196,5 +199,43 @@ describe("each source of what a mind reads, on or off, within its own limit", ()
     const s = rig.body(await rig.send({ type: "lre.settings.set", patch })).settings as { modelUse: ModelUseSettings };
     expect(s.modelUse.steps.memory?.recent).toBeUndefined();
     expect(s.modelUse.steps.interpret?.recent).toEqual(recent);
+  });
+});
+
+describe("Their things (ITEMS-SPEC §5.5 Minds, §12 Phase 4)", () => {
+  test("Danny's mind reads what is on him, what he holds for Marcus, his truck keys Jordan has since he handed them over, his guitar lent to Priya, and what of his is missing; off, none of it", async () => {
+    const rig = new Rig({ shipped: true, minds: true });
+    const chatId = await alderChat(rig, async () => undefined);
+    const head = await stateOf(rig, chatId);
+    const { world } = head;
+    const state = structuredClone(head.state);
+    const at = state.clock - 90;
+    const item = (id: string, name: string, fields: JsonObject, holder?: string): void => {
+      state.entities[id] = { kind: "item", name, tier: "background", fields, relations: holder !== undefined ? [{ type: "in", to: holder }] : [], levels: {}, agent: false };
+    };
+    item("a_truck_keys", "Truck keys", { owner: DANNY, got: { how: "holding", at, from: DANNY, why: "to move the truck" } }, "pov");
+    item("b_guitar", "Guitar", { owner: DANNY, got: { how: "loan", at, from: DANNY } }, PRIYA);
+    item("c_thermos", "Thermos", { owner: DANNY, lost: true });
+    item("d_wallet", "Wallet", { owner: DANNY, got: { how: "took", at, from: DANNY } }, "marcus_delgado");
+    item("e_wrench", "Torque wrench", { owner: "marcus_delgado", got: { how: "holding", at, from: "marcus_delgado" } }, DANNY);
+    item("f_lighter", "Lighter", { owner: DANNY }, DANNY);
+    const until = state.clock + 2 * 24 * 60;
+    state.entities[PRIYA]?.relations.push({ type: "uses", to: "b_guitar", until, fields: { basis: "loan" } });
+    const settings = await rig.rt.settings.get(rig.host.userId);
+    const moment: MindMoment = { kind: "turn", at: state.clock, reason: "", user: "", reply: "" };
+    const context = (reads: MindsReads): string => mindContext({ reg: rig.rt.registry, world, state, who: DANNY, memory: effectiveMemory(world, settings.minds), messages: [], hideJson: true, moment, reads });
+    const lines = (/## Your things\n((?:- .*\n?)+)/.exec(context(DEFAULT_MIND_READS))?.[1] ?? "").trim().split("\n");
+    const cal = calendarOf(world);
+    expect(lines[0]).toStartWith("- On you: ");
+    expect(lines[0]).toContain("Lighter");
+    expect(lines.slice(1)).toEqual([
+      `- Holding for Marcus Delgado: Torque wrench (since ${formatClock(cal, at)})`,
+      `- Jordan Ellis has your truck keys (since ${formatClock(cal, at)})`,
+      `- Priya Nair has your guitar (lent, until ${formatClock(cal, until)})`,
+      "- Missing: your thermos (lost), your wallet (taken; you don't know who has it)",
+    ]);
+    // Within its limit, lines whole; off, no block.
+    expect(context({ ...DEFAULT_MIND_READS, things: { on: true, tokens: sectionTokens(lines[0] ?? "") } })).not.toContain("Holding for");
+    expect(context({ ...DEFAULT_MIND_READS, things: { on: false, tokens: 300 } })).not.toContain("## Your things");
   });
 });

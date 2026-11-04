@@ -3,7 +3,7 @@
 // property and business shares, the debts against them). The wealth band follows it.
 
 import type { EntityId } from "../../../shared/ids";
-import { CLASS_TRAITS, type AccountClass } from "../../../shared/finance";
+import { CLASS_TRAITS, type AccountClass, type WorthLine } from "../../../shared/finance";
 import { numOf, own, strOf } from "../../../engine/pack-kit";
 import type { ReadContext } from "../../../engine/registry";
 import type { FinanceHooks } from "./module";
@@ -14,7 +14,7 @@ export interface WorthParts {
   net: number;
   assets: number;
   liabilities: number;
-  lines: { label: string; cents: number }[];
+  lines: WorthLine[];
 }
 
 const GROUPS: { label: string; test: (cls: AccountClass) => boolean }[] = [
@@ -42,7 +42,7 @@ export function netWorthParts(hooks: FinanceHooks, ctx: ReadContext, party: Enti
     const group = GROUPS.find((g) => g.test(cls))?.label ?? "Other";
     byGroup.set(group, (byGroup.get(group) ?? 0) + cents);
   }
-  const lines = GROUPS.map((g) => ({ label: g.label, cents: byGroup.get(g.label) ?? 0 })).filter((l) => l.cents !== 0);
+  const lines: WorthLine[] = GROUPS.map((g) => ({ label: g.label, cents: byGroup.get(g.label) ?? 0 })).filter((l) => l.cents !== 0);
   for (const source of hooks.worth) {
     const w = source(ctx, party);
     assets += Math.max(0, w.assets);

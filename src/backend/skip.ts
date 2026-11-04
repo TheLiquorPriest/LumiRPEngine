@@ -12,6 +12,7 @@ import type { Fidelity, MindCallTrace, MindMoment, MindsSettings } from "../shar
 import { limitOf, MIND_TEXT_CAPS, MINDS_EVENTS, SKIP_FILL_HEAD } from "../shared/minds";
 import type { ModelUseSettings } from "../shared/settings";
 import type { WorldDoc } from "../shared/world";
+import { trackOwner } from "../shared/world";
 import { calendarOf, formatClock, formatStamp } from "../engine/calendar";
 import { ENGINE_EVENTS } from "../engine/engine-pack";
 import { acts } from "../engine/life";
@@ -110,7 +111,8 @@ export function scanBeats(reg: Registry, world: WorldDoc, state: Readonly<WorldS
     if (e.type === "clock") clock += e.minutes;
     else if (e.type === "stage") {
       const track = own(world.tracks, e.track);
-      add(clock, `a story moment: ${track?.label ?? e.track}`, RANK.story, track?.owner && person(track.owner) ? [track.owner] : []);
+      const owner = track ? trackOwner(track) : undefined;
+      add(clock, `a story moment: ${track?.label ?? e.track}`, RANK.story, owner && person(owner) ? [owner] : []);
     } else if (e.type === "castlife.invitation" && "data" in e && typeof e.data.agent === "string") add(clock, `${nameOf(e.data.agent)}'s invitation`, RANK.invitation, [e.data.agent]);
     else if (e.type === ENGINE_EVENTS.fired && "data" in e) {
       const rule = rules.find((r) => r.id === e.data.rule);

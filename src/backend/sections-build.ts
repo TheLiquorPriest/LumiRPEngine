@@ -4,6 +4,7 @@
 
 import type { SlotId } from "../shared/ids";
 import { KNOWLEDGE_DEFAULTS, KNOWLEDGE_SLOT, MINDS_SLOT, type KnowledgeSettings } from "../shared/minds";
+import { PRICES_SOURCE } from "../shared/finance";
 import { holdsSecretMark, secretMarkText, type SecretMarkWording } from "../shared/secret-marks";
 import type { NarratorView } from "../shared/settings";
 import type { ContextGeneration } from "../shared/state-view";
@@ -41,6 +42,8 @@ export interface SectionsInput {
    * (`minds.knowing`), and its own token cap (`narratorTokens`); absent, the defaults.
    */
   knowledge?: KnowledgeSettings;
+  /** Whether the Money section carries the prices of what is sold where the player character is (Settings → Narrator → Prices, DESIGN §9.5). */
+  prices: boolean;
   /** The player's words this turn, which order the minds ladder; empty for none yet. */
   said: string;
   /**
@@ -212,7 +215,7 @@ export function buildSections(input: SectionsInput): SectionsBuilt {
       // The facts a secret left a line of out: their other lines beyond the player character's go with it.
       const lost = new Set<string>();
       for (const r of renderersOf(registry.renderers, section, feed)) {
-        if (minds) continue;
+        if (minds || (!input.prices && sourceOf(r) === PRICES_SOURCE)) continue;
         try {
           if (r.hint) {
             hints.push(...r.render(ctx));

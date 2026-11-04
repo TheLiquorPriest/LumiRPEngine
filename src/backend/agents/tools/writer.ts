@@ -44,6 +44,7 @@
 // may see for the review card (`player`). The engine's refusals are the GM's reasons, marked the
 // same way for `everyone`. The writer's own answers are the tool layer's notes, editable texts.
 
+import { ROLE_IDS, type RoleId } from "../../../shared/agent-roles";
 import { TOOL_NOTE, type ToolView } from "../../../shared/agent-tools";
 import { WRITE_NOTE } from "../../../shared/agent-tools-write";
 import { hashJson } from "../../../shared/hash";
@@ -53,16 +54,22 @@ import type { FixOp, LedgerEvent, PostEntry } from "../../../shared/ledger";
 import { isWitnessRef, type MindEditOp } from "../../../shared/minds";
 import { EDIT_OPS_MAX, type EditOp, WRITE_REFUSED } from "../../../shared/protocol";
 import { isOff, type RoutineEditOp } from "../../../shared/routines";
-import { AGENT_CHANGE_LABEL, type AgentChangeType, type ExtractionLearning, type UserSettings } from "../../../shared/settings";
+import { AGENT_CHANGE_LABEL, AGENT_CHANGE_TYPES, type AgentChangeType, type ChangeType, type ExtractionLearning, type UserSettings } from "../../../shared/settings";
+import { type ItemChange, type ItemOp, sizeRank } from "../../../shared/things";
+import { ORG_OP_CHANGE, orgOpIds } from "../../../shared/org-ops";
 import { blobHash, isFilePath, isGlobalPath, isKeptPath, isLearnedPath, isTranscriptPath, type KeptFile } from "../../../shared/stores";
 import { nounFor } from "../../../shared/words";
 import { type FieldDef, spawnCapOf } from "../../../shared/world";
 import { parseEditOps, resolveEdit } from "../../../engine/edits";
+import { handChange } from "../../../engine/reconcile-things";
 import { activeRecord } from "../../../engine/ledger/path";
 import { own } from "../../../engine/pack-kit";
 import { authorLines, playerLines } from "../../../engine/player-events";
 import type { Rejection } from "../../../engine/registry";
 import { fieldDef, kindIs } from "../../../engine/scope";
+import { typeRowOf } from "../../../engine/thing-index";
+import { sizeOf } from "../../../engine/things";
+import { claimCap } from "../../../packs/economy/core/model";
 import type { WorldState } from "../../../engine/state";
 import { canSeeEntity, canSeePlace, findLeaks, unrevealedSecrets } from "../../../engine/visibility";
 import { Working } from "../../../engine/working";
@@ -109,18 +116,23 @@ export function isKeptOp(op: AgentOp): boolean {
 /** What a dry run found: the operation's key, its change type and mode, and what it would change in plain words, as the agent's knowledge has it. */
 export interface OpPreview {
   key: string;
-  changeType: AgentChangeType;
+  changeType: ChangeType;
   /** The user's mode for its change type (Settings → Changes from the reply): Auto may apply it at once; Confirm waits for the game master's Apply. Never is a refusal. */
   mode: "auto" | "confirm";
   lines: string[];
 }
 
-/** An operation that can't be made: a code, why in plain words for the agent's knowledge, and its key when it could be read. */
+/**
+ * An operation that can't be made: a code, why in plain words for the agent's knowledge, and its key
+ * when it could be read; a make that found what it would make names the thing or place there already
+ * (`exists`, ITEMS-SPEC §6.1–6.2), so the agent uses that one.
+ */
 export interface OpRefusal {
   refused: true;
   code: string;
   reason: string;
   key?: string;
+  exists?: string;
 }
 
 /** What an apply did: the keys of the operations it wrote and of those it refused, each in order, the Undo chip of the GM edit it wrote, and whether that waits for a turn under way. */
@@ -146,8 +158,14 @@ export interface ToolWriter {
   stage?(op: AgentOp): Promise<OpPreview | OpRefusal>;
 }
 
-/** Who writes, and as whom: the tool env without its writer, and the connection the agent runs on (null or absent: no learned mode applies). */
-export type WriterEnv = Omit<ToolEnv, "writer"> & { connectionId?: string | null };
+/**
+ * Who writes, and as whom: the tool env without its writer, the connection the agent runs on (null
+ * or absent: no learned mode applies), and whether it writes with the GM's say (`gm`, absent: it
+ * does): a role below the GM tier makes a thing's or a place's change as the story's own, so it
+ * merges no thing the world document defines, removes none, and moves a Built-in thing only once the
+ * game master applies it.
+ */
+export type WriterEnv = Omit<ToolEnv, "writer"> & { connectionId?: string | null; gm?: boolean };
 
 /** The role of the GM's own writes through the writer (GM → Workspace): no agent's, so no mode or cap applies. */
 export const GM_ROLE = "gm";
@@ -311,7 +329,11 @@ function prepare(rt: Runtime, ctx: Ctx, env: WriterEnv, state: Readonly<WorldSta
   switch (op.kind) {
     case "gm_edit": {
       const edit = oneEdit(op.op);
-      return edit ? { key, op, ops: [edit] } : bad(key);
+      if (!edit) return bad(key);
+      // A thing's change keeps its reason only as long as Settings → Changes from the reply lets one be, wherever it lands or is worked out again.
+      const max = ctx.settings.thingReads.whyMax;
+      if (edit.op === "item" && "why" in edit.change && edit.change.why.length > max) return { key, op, ops: [{ ...edit, change: { ...edit.change, why: edit.change.why.slice(0, max) } }] };
+      return { key, op, ops: [edit] };
     }
     case "mind_edit": {
       const edit = oneEdit(op.edit);
@@ -397,6 +419,14 @@ function namedIds(op: FixOp): Named {
     case "spawn":
       if (op.place !== undefined) n.places.push(op.place);
       break;
+    case "org": {
+      // Everyone and everything an organization's change names (ORG-SPEC §7.2): its people, entities (the organization, a job, an account) and places.
+      const ids = orgOpIds(op.change);
+      n.people.push(...ids.people);
+      n.entities.push(...ids.entities);
+      n.places.push(...ids.places);
+      break;
+    }
   }
   return n;
 }
@@ -488,13 +518,38 @@ function moneyField(rt: Runtime, head: ChatHead, state: Readonly<WorldState>, en
   return fieldDef(rt.registry, head.world, own(state.entities, entity)?.kind ?? "", field)?.type === "money";
 }
 
+/** The change type of each item op (ITEMS-SPEC §5.4) but a handover, whose basis decides (`handChange`). */
+const ITEM_OP_CHANGE: Readonly<Record<Exclude<ItemOp["do"], "hand">, ItemChange | AgentChangeType>> = {
+  make: "item_make",
+  move: "item_move",
+  own: "item_own",
+  grant: "item_grant",
+  revoke: "item_grant",
+  permit: "item_grant",
+  unpermit: "item_grant",
+  home: "item_home",
+  use: "item_use",
+  wear: "item_wear",
+  condition: "item_condition",
+  lose: "item_lose",
+  label: "item_label",
+  merge: "item_merge",
+  remove: "item_remove",
+};
+
+/** An item op's change type: a handover that keeps the owner, changes it or is a theft as its basis says; every other op its own. */
+export function itemChangeOf(op: ItemOp): ChangeType {
+  return op.do === "hand" ? handChange(op.basis) : ITEM_OP_CHANGE[op.do];
+}
+
 /**
  * An operation's change type (AGENT-LOOP-PLAN §6): GM spawns, removals (of people; of anything else,
  * a destroy), money adjustments (an adjust, or a set, add or ✎ fix of a money field) and stages each
- * have their own, a workspace change is a note, and every other GM edit, mind, routine and ✎ fix is
- * `gm_edit`.
+ * have their own, a workspace change is a note, a thing's or a place's change is the type its op
+ * lands under (ITEMS-SPEC §5.4, the one list the reply's read and the Curator share), and every other
+ * GM edit, mind, routine and ✎ fix is `gm_edit`.
  */
-export function changeTypeOf(rt: Runtime, head: ChatHead, state: Readonly<WorldState>, op: AgentOp): AgentChangeType {
+export function changeTypeOf(rt: Runtime, head: ChatHead, state: Readonly<WorldState>, op: AgentOp): ChangeType {
   switch (op.kind) {
     case "ws_write":
     case "ws_delete":
@@ -522,6 +577,14 @@ export function changeTypeOf(rt: Runtime, head: ChatHead, state: Readonly<WorldS
           return moneyField(rt, head, state, edit.entity, edit.field) ? "money_adjust" : "gm_edit";
         case "stage":
           return "stage";
+        case "item":
+          return itemChangeOf(edit.change);
+        case "place":
+          // A place made in play is its own type (a room or spot at once, a venue asking first); naming or removing one is a GM edit.
+          return edit.change.do === "make" ? "place_make" : "gm_edit";
+        case "org":
+          // An organization's change is its people, its powers, its shares and structure, or its rules (ORG-SPEC §7.3).
+          return ORG_OP_CHANGE[edit.change.do];
         default:
           return "gm_edit";
       }
@@ -529,20 +592,57 @@ export function changeTypeOf(rt: Runtime, head: ChatHead, state: Readonly<WorldS
   }
 }
 
-/** The mode of an operation's change type for this agent, or why it can't be made at all: Never, or the spawn cap, a per-chat total of the people it brought in. The GM's own writes take neither. */
-function gate(rt: Runtime, ctx: Ctx, env: WriterEnv, state: Readonly<WorldState>, p: Prepared): { type: AgentChangeType; mode: "auto" | "confirm" } | OpRefusal {
+/** A change type in plain words: an agent type's label, else its id as Settings → Changes from the reply lists it. */
+function changeLabel(type: ChangeType): string {
+  const agent = AGENT_CHANGE_TYPES.find((t) => t === type);
+  return agent ? AGENT_CHANGE_LABEL[agent] : type;
+}
+
+/**
+ * The mode of an operation's change type for this agent, and whether the user pinned it, or why it
+ * can't be made at all: Never, or the spawn cap, a per-chat total of the people it brought in. The
+ * GM's own writes take neither.
+ */
+function gate(rt: Runtime, ctx: Ctx, env: WriterEnv, state: Readonly<WorldState>, p: Prepared): { type: ChangeType; mode: "auto" | "confirm"; pinned: boolean } | OpRefusal {
   const { world } = ctx.head;
   const type = changeTypeOf(rt, ctx.head, state, p.op);
-  if (env.agent.role === GM_ROLE) return { type, mode: "auto" };
-  const { mode } = effectiveMode(ctx.settings, ctx.learning, env.connectionId ?? ctx.active, type, env.agent.role);
-  if (mode === "never") return refusal("mode_never", ctx.view.text(WRITE_NOTE.never, { type: AGENT_CHANGE_LABEL[type] }), p.key);
+  if (env.agent.role === GM_ROLE) return { type, mode: "auto", pinned: true };
+  const { mode, source } = effectiveMode(ctx.settings, ctx.learning, env.connectionId ?? ctx.active, type, env.agent.role);
+  if (mode === "never") return refusal("mode_never", ctx.view.text(WRITE_NOTE.never, { type: changeLabel(type) }), p.key);
   const spawn = p.ops[0];
   if (type === "gm_spawn" && spawn?.op === "spawn" && kindIs(rt.registry, world, spawn.kind, "person")) {
     let introduced = 0;
     for (const [id, e] of Object.entries(state.entities)) if (own(world.entities, id) === undefined && kindIs(rt.registry, world, e.kind, "person")) introduced++;
     if (introduced >= spawnCapOf(world)) return refusal("spawn_cap", ctx.view.text(WRITE_NOTE.spawnCap, { count: String(introduced), people: nounFor(introduced, "person", "people") }), p.key);
   }
-  return { type, mode };
+  return { type, mode, pinned: source === "pinned" };
+}
+
+/** One of a thing's type: its row's price where the catalogs give one (a band's typical), in minor units; null when nothing prices it. */
+function priceOf(ctx: Working["ctx"], id: string): number | null {
+  const price = typeRowOf(ctx, own(ctx.state.entities, id)?.fields ?? {})?.row.price_cents;
+  if (typeof price === "number") return price;
+  const typical = isRecord(price) ? price.typical : undefined;
+  return typeof typical === "number" ? typical : null;
+}
+
+/**
+ * Whether a thing's or a place's change asks first whatever its mode but a pin (ITEMS-SPEC §5.4, as
+ * the reply's read asks): a new thing bigger than Armful (a vehicle among them) or costing more than
+ * the world's claim cap, and a new venue.
+ */
+function asksFirst(rt: Runtime, ctx: Ctx, state: Readonly<WorldState>, p: Prepared, events: readonly LedgerEvent[]): boolean {
+  const edit = p.ops[0];
+  if (edit?.op === "place") return edit.change.do === "make" && edit.change.as === "venue";
+  if (edit?.op !== "item" || edit.change.do !== "make") return false;
+  const made = events.find((e) => e.type === "spawn");
+  if (made?.type !== "spawn") return false;
+  const after = new Working(rt.registry, ctx.head.world, state);
+  after.applyAll(events);
+  const size = sizeOf(after.ctx, made.entity.id).size;
+  if (size === "vehicle" || (size !== "unknown" && size !== "part" && sizeRank(size) > sizeRank("armful"))) return true;
+  const cents = priceOf(after.ctx, made.entity.id);
+  return cents !== null && cents > claimCap(ctx.head.world);
 }
 
 // ---------------------------------------------------------------- wording for the agent's knowledge
@@ -555,10 +655,11 @@ function marker(rt: Runtime, ctx: Ctx, state: Readonly<WorldState>): (text: stri
   return (text) => (findLeaks(text, secrets).length > 0 ? ctx.view.mark(text, { known: [], kept }) : text);
 }
 
-/** A refusal from the engine, worded for the agent's view: the GM's reason, or everyone's with its secrets marked. */
+/** A refusal from the engine, worded for the agent's view: the GM's reason, or everyone's with its secrets marked; with the thing or place a make found there already. */
 function refused(rt: Runtime, ctx: Ctx, view: ToolView, rejection: Rejection, key: string): OpRefusal {
   const reason = rejection.gm ?? rejection.reason;
-  return refusal(rejection.code, view === "gm" ? reason : marker(rt, ctx, ctx.head.state)(reason), key);
+  const out = refusal(rejection.code, view === "gm" ? reason : marker(rt, ctx, ctx.head.state)(reason), key);
+  return "exists" in rejection && typeof rejection.exists === "string" ? { ...out, exists: rejection.exists } : out;
 }
 
 /**
@@ -567,7 +668,7 @@ function refused(rt: Runtime, ctx: Ctx, view: ToolView, rejection: Rejection, ke
  * the GM alone: for anyone else it is one line naming no file, as the Journal shows it none. The
  * review card (`player`, a player surface) reads it as the player character may.
  */
-export function opLines(rt: Runtime, ctx: Ctx, reader: ToolView | "player", type: AgentChangeType, after: Readonly<WorldState>, events: readonly LedgerEvent[]): string[] {
+export function opLines(rt: Runtime, ctx: Ctx, reader: ToolView | "player", type: ChangeType, after: Readonly<WorldState>, events: readonly LedgerEvent[]): string[] {
   const reg = rt.registry;
   const world = ctx.head.world;
   if (type === "workspace") return reader === "gm" ? authorLines(reg, world, after, events, events.length) : [ctx.view.text(WRITE_NOTE.workspaceLine)];
@@ -600,13 +701,20 @@ export function contextOf(rt: Runtime, env: Pick<WriterEnv, "knowledge">, head: 
 /** A checked operation: what it writes in the head (none for a kept file's change), its type and mode, and the events that word it. */
 export interface CheckedOp {
   p: Prepared;
-  type: AgentChangeType;
+  type: ChangeType;
   mode: "auto" | "confirm";
   events: LedgerEvent[];
   shown: LedgerEvent[];
 }
 
-/** Prepares, holds to the view, gates and validates one operation against `state` and the kept files (`kept`): what it writes and its mode, or why not. */
+/**
+ * Prepares, holds to the view, gates and validates one operation against `state` and the kept files
+ * (`kept`): what it writes and its mode, or why not. A turn role's thing or place change is made by
+ * it (`made.by`), and one below the GM tier (`env.gm` false) is the story's own: it merges no thing
+ * the world document defines and removes none, and a Built-in thing it moves waits for the game
+ * master's Apply, whatever the mode. A new thing that is big or costly, or a new venue, asks first
+ * unless its type is pinned (ITEMS-SPEC §5.3–5.4).
+ */
 export function checkOp(rt: Runtime, ctx: Ctx, env: WriterEnv, state: Readonly<WorldState>, kept: Readonly<Record<string, KeptFile>>, op: AgentOp): CheckedOp | OpRefusal {
   const p = prepare(rt, ctx, env, state, kept, op);
   if (isRefusal(p)) return p;
@@ -617,10 +725,16 @@ export function checkOp(rt: Runtime, ctx: Ctx, env: WriterEnv, state: Readonly<W
   // A kept file's change is its store's, not the engine's: it writes no event.
   if (p.kept) return { p, type: g.type, mode: g.mode, events: [], shown: p.kept.shown };
   // A GM edit's rules; a ✎ fix's operations keep the player's (`fix_set`).
-  const out = resolveEdit(rt.registry, ctx.head.world, state, p.ops, { gm: true, runSeed: ctx.head.run.runSeed });
+  const gm = env.gm ?? true;
+  const by = ROLE_IDS.find((r: RoleId) => r === env.agent.role);
+  const opts = { gm, runSeed: ctx.head.run.runSeed, ...(by !== undefined ? { by } : {}) };
+  let out = resolveEdit(rt.registry, ctx.head.world, state, p.ops, opts);
+  const builtin = !gm && "rejection" in out && out.rejection.code === "builtin";
+  if (builtin) out = resolveEdit(rt.registry, ctx.head.world, state, p.ops, { ...opts, confirmed: true });
   if ("rejection" in out) return refused(rt, ctx, env.knowledge, out.rejection, p.key);
   if (out.events.length === 0) return refusal("no_change", ctx.view.text(WRITE_NOTE.noChange), p.key);
-  return { p, type: g.type, mode: g.mode, events: out.events, shown: out.events };
+  const mode = builtin || (!g.pinned && asksFirst(rt, ctx, state, p, out.events)) ? "confirm" : g.mode;
+  return { p, type: g.type, mode, events: out.events, shown: out.events };
 }
 
 async function dryRun(rt: Runtime, env: WriterEnv, op: AgentOp): Promise<OpPreview | OpRefusal> {

@@ -16,6 +16,9 @@ import type { RoutineEditOp } from "../shared/routines";
 import type { EditOp, GenerateAs, ResultBodies } from "../shared/protocol";
 import type { Chip } from "../shared/state-view";
 import { chipStarts } from "../shared/state-view";
+import type { ThingRow } from "../shared/thing-view";
+import { sizeLabel, whoseWords } from "../shared/thing-view";
+import { ORG_PARTS, orgPart, ORGS_LIST_PANEL, ORGS_ORG_PANEL, type OrgListView, type OrgView } from "../shared/org-view";
 import type { AdjudicationDef } from "../shared/world";
 import { TIME_CONTROLS } from "../engine/events";
 // The one limit on a GM edit's operations: the schemas take no more than the engine accepts.
@@ -144,6 +147,71 @@ async function minds(args: Args, ctx: ToolContext): Promise<ToolResult> {
   const chatId = chatIdOf(args);
   const [gm, status] = await Promise.all([ask(ctx, chatId, "lre.gm", { chatId }), ask(ctx, chatId, "lre.minds", { chatId, op: "status" })]);
   return readOut({ ...gm.minds, run: status.run }, `the character minds of chat ${chatId} (secrets included), with the latest Run minds now`, args);
+}
+
+/** A thing as lre_items_find answers it: its id and name, its type, its size, where it is (outermost first), whose it is and who has it, and whether it is hidden or secret. */
+function foundThing(row: ThingRow): JsonValue {
+  return {
+    id: row.id,
+    name: row.name,
+    ...(row.type !== null ? { type: row.type } : {}),
+    size: sizeLabel(row.size),
+    where: row.where.map((s) => ({ id: s.id, name: s.name })),
+    whose: whoseWords(row.whose),
+    owners: row.whose.owners.map((o) => o.id),
+    ...(row.with !== null ? { with: row.with } : {}),
+    ...(row.hidden ? { hidden: true } : {}),
+    ...(row.secret ? { secret: true } : {}),
+  };
+}
+
+async function itemsFind(args: Args, ctx: ToolContext): Promise<ToolResult> {
+  gate(args, "lre_items_find", "reads the chat's things as the GM does, hidden and secret ones included");
+  const chatId = chatIdOf(args);
+  const words = neededText(args, "words", 'the words that name the thing, as the story says them ("Danny\'s truck keys", "the wallet")');
+  const [{ found = [] }, { list }] = await Promise.all([ask(ctx, chatId, "lre.things", { scope: "gm", chatId, op: "find", words }), ask(ctx, chatId, "lre.things", { scope: "gm", chatId, op: "list" })]);
+  const rows = new Map((list?.rows ?? []).map((r) => [r.id, r]));
+  const things = found.map((id): JsonValue => {
+    const row = rows.get(id);
+    return row ? foundThing(row) : { id };
+  });
+  return { text: json({ chatId, words, things, ...(things.length === 0 ? { note: "Nothing in the chat goes by those words: try fewer of them, or read lre_gm's /entities." } : {}) }) };
+}
+
+/** The organization words name among `pages`: its id, else its name in any case; the party is also "party". */
+function orgFound(pages: readonly OrgView[], said: string): OrgView | null {
+  const t = said.trim().toLowerCase();
+  return pages.find((p) => p.id === said.trim()) ?? pages.find((p) => p.id.toLowerCase() === t || p.name.trim().toLowerCase() === t || (p.type === "party" && (t === "party" || t === "your party" || t === "the party"))) ?? null;
+}
+
+/**
+ * A chat's organizations (ORG-SPEC §7.5): the player character's Orgs home, or one organization's
+ * page or a part of it, as their Orgs tab reads it (members they can't see counted, money behind its
+ * power); with spoilers, GM → Orgs: every organization, every member named, with who holds each power.
+ */
+async function orgsRead(args: Args, ctx: ToolContext): Promise<ToolResult> {
+  const chatId = chatIdOf(args);
+  const said = textArg(args, "org");
+  const asked = textArg(args, "part");
+  const part = asked === undefined ? undefined : ORG_PARTS.find((p) => p === asked.trim().toLowerCase());
+  if (asked !== undefined && part === undefined) throw new ToolError(`part is one of ${ORG_PARTS.join(", ")}, not ${JSON.stringify(asked)}.`);
+  if (part !== undefined && said === undefined) throw new ToolError("Give org with part: the organization whose part to read (lre_orgs without org lists them).");
+  const shown = (page: OrgView, more: JsonObject = {}): ToolResult => ({ text: json({ chatId, org: { id: page.id, name: page.name, type: page.type, badge: page.badge }, ...(part !== undefined ? { part, ...(JSON.parse(JSON.stringify(orgPart(page, part))) as JsonObject) } : { page: JSON.parse(JSON.stringify(page)) as JsonValue, ...more }) }) });
+  if (boolArg(args, "spoilers")) {
+    const { orgs } = await ask(ctx, chatId, "lre.gm", { chatId });
+    if (said === undefined) return { text: json({ chatId, organizations: orgs.map((o): JsonValue => ({ id: o.page.id, name: o.page.name, type: o.page.type, badge: o.page.badge, runBy: o.page.runBy.map((r) => r.name), people: o.page.people.length })), about: "Read one with lre_orgs {chatId, org, part?, spoilers: true}; change one with lre_gm_edit's org op." }) };
+    const found = orgFound(orgs.map((o) => o.page), said);
+    const one = orgs.find((o) => o.page === found);
+    if (!one) throw new ToolError(`No organization ${JSON.stringify(said)} in chat ${chatId}: lre_orgs with spoilers and no org lists them.`);
+    return shown(one.page, { may: JSON.parse(JSON.stringify(one.may)) as JsonValue });
+  }
+  const { view } = await stateOf(ctx, chatId);
+  const home = (view.panels[ORGS_LIST_PANEL] ?? null) as OrgListView | null;
+  const pages = Object.values((view.panels[ORGS_ORG_PANEL] ?? {}) as unknown as Record<string, OrgView>);
+  if (said === undefined) return { text: json({ chatId, ...(home ? (JSON.parse(JSON.stringify(home)) as JsonObject) : { note: "This chat's world has no organizations." }) }) };
+  const page = orgFound(pages, said);
+  if (!page) throw new ToolError(`The player character knows no organization ${JSON.stringify(said)} in chat ${chatId}: lre_orgs without org lists those they belong to and know of.`);
+  return shown(page);
 }
 
 // ---------------------------------------------------------------- writes
@@ -429,6 +497,24 @@ export const PLAY_TOOLS: readonly ToolModule[] = [
     cli: { command: "minds", section: SECTION, usage: "minds <chatId> --spoilers [--pointer <p>] [--offset <n>]", summary: "A chat's character minds and their latest run", positionals: ["chatId"], needs: 1, options: { "--spoilers": { arg: "spoilers", as: "flag" }, "--pointer": { arg: "pointer", as: "text" }, "--offset": { arg: "offset", as: "int" } } },
   },
   {
+    name: "lre_items_find",
+    description:
+      "The things in a chat that words name, best first, as GM → Things finds them (ITEMS-SPEC §7.5): the name resolver's matches (as the player character would mean the words), then any thing whose name, alias or type has a word starting with each word given. Each with its id (what lre_gm_edit's item ops name), name, type, size, where it is (outermost first), whose it is and who has it, hidden and secret ones marked. Reads the chat as the GM does, secrets included: needs spoilers: true.",
+    inputSchema: object({ chatId: CHAT_ID, spoilers: SPOILERS, words: { type: "string", description: 'The words that name it, as the story says them: "Danny\'s truck keys", "the wallet".' } }, ["chatId", "spoilers", "words"]),
+    write: false,
+    run: itemsFind,
+    cli: { command: "items-find", section: SECTION, usage: "items-find <chatId> <words> --spoilers", summary: "The things words name in a chat, best first", positionals: ["chatId", "words"], needs: 2, options: { "--spoilers": { arg: "spoilers", as: "flag" } } },
+  },
+  {
+    name: "lre_orgs",
+    description:
+      "A chat's organizations (ORG-SPEC §7.5): with no org, the player character's Orgs home (the party, where they belong, the organizations they know of); with org (its id or name; \"party\" for the party), its page as their Orgs tab reads it (their place there, who runs it, its people with titles, positions and jobs, positions and delegations, its money, premises, ownership and taxes where they may see them, its History), or one part of it: overview, people, money, property, ownership, taxes, rules or log. Members the player character can't see are only counted. With spoilers: true, GM → Orgs instead: every organization, every member named, and who holds each power there and why. Ids from here are what lre_gm_edit's org op names.",
+    inputSchema: object({ chatId: CHAT_ID, org: { type: "string", description: 'The organization: its id or its name ("Alder Automotive"), or "party"; leave it out for the list.' }, part: { type: "string", enum: [...ORG_PARTS], description: "Only this part of its page; needs org." }, spoilers: { type: "boolean", description: "true: read GM → Orgs, everyone named and every power's holders, which the player isn't meant to know. Pass it only when the user asked to see behind the curtain." } }, ["chatId"]),
+    write: false,
+    run: orgsRead,
+    cli: { command: "orgs", section: SECTION, usage: "orgs <chatId> [--org <id|name>] [--part <part>] [--spoilers]", summary: "A chat's organizations, or one's page", positionals: ["chatId"], needs: 1, options: { "--org": { arg: "org", as: "text" }, "--part": { arg: "part", as: "text" }, "--spoilers": { arg: "spoilers", as: "flag" } } },
+  },
+  {
     name: "lre_fix",
     description:
       'A ✎ fix, as the player corrects the HUD: set one field on the chat\'s latest message, or the clock. fix names a HUD fix (place, weather, cash, scene: lre_chat_state shows each at /hud/fixes with its entity, field, type, value now and options); or give entity and field for any other field the player can fix; value is what it should hold, in the field\'s type (money in minor units: 2500 is 25.00). time sets the clock instead: "YYYY-MM-DD HH:MM" in the world\'s calendar where the POV is (later runs the time between; earlier sets it back). A locked field is refused. It leaves an Undo chip (lre_chips).',
@@ -448,7 +534,7 @@ export const PLAY_TOOLS: readonly ToolModule[] = [
   {
     name: "lre_gm_edit",
     description:
-      'GM edits on the chat\'s latest message (GM view → Edit): the operations in order, all or none, as one edit with an Undo chip; locked fields are writable. Each names its op: set {entity, field, value}; add {entity, field, delta}; link {rel, from, to, fields?, until?}; unlink {rel, from, to}; move {entity, to: place}; put {entity, into: entity or null}; adjust {account, cents} (money in or out against a correction); stage {track, to}; entity {entity, tier?, agent?, levels?}; classify {entity, class, tags}; life {entity, to?, tell?}; spawn {kind, name, id?, tier?, place?, agent?}; despawn {entity}; restore {entity}; mind_pin, mind_refresh, mind_memory, mind_intent, mind_knowledge (as lre_mind_edit); effect {effect, args}; feed {section, to: {enabled?, maxTokens?, maxLines?, include?, scope?: "player", "scene" or "gm"} or null} sets a section\'s settings in this chat over the world\'s (null returns them). Ids come from lre_gm. Needs spoilers: true.',
+      'GM edits on the chat\'s latest message (GM view → Edit): the operations in order, all or none, as one edit with an Undo chip; locked fields are writable. Each names its op: set {entity, field, value}; add {entity, field, delta}; link {rel, from, to, fields?, until?}; unlink {rel, from, to}; move {entity, to: place}; put {entity, into: entity or null}; adjust {account, cents} (money in or out against a correction); stage {track, to}; entity {entity, tier?, agent?, levels?}; classify {entity, class, tags}; life {entity, to?, tell?}; spawn {kind, name, id?, tier?, place?, agent?}; despawn {entity}; restore {entity}; mind_pin, mind_refresh, mind_memory, mind_intent, mind_knowledge (as lre_mind_edit); effect {effect, args}; feed {section, to: {enabled?, maxTokens?, maxLines?, include?, scope?: "player", "scene" or "gm"} or null} sets a section\'s settings in this chat over the world\'s (null returns them); item {change} is one change to a thing, its change.do one of make {name, at: {place} or {in}, why, type?, size?, owner?, home?, qty?, aliases?, hidden?} (refused as exists when one it may be is there already: use that one), move {item, to: {place} or {in}, why} (a thing too big to carry lands where its person stands), hand {item, to, basis: hold, loan, return, gift, sale, trade or theft, until?, why} (only a gift, sale or trade changes the owner), own {item, owner or null, why}, grant or revoke {item, who, basis?: hold, loan or assign, until?, by?}, permit or unpermit {from, to, scope?: all or home, until?, by?}, home {item, home: {place}, {in}, "owner" or null}, use {item, qty?}, wear {item, who, off?}, condition {item, delta}, lose {item, by?}, label {item, name?, aliases?, description?, size?}, merge {keep, drop}, remove {item, why}, each until the clock in minutes (lre_gm reads it at /minds/now); place {change} is one change to a place made in play, its change.do one of make {name, parent, as: room, spot or venue, why, aliases?, description?, entry?} (refused as exists when one of that name is under the parent), label {place, name?, aliases?, description?}, remove {place} (a made place nobody and nothing is in); org {change} is one change to an organization as the GM makes it (no one\'s powers asked, its History line kept), its change.do one of found {type: company or group, name, founder, kind?, structure?, capital?, from?, units?}, admit {org, who, title?, position?, why}, remove {org, who, why}, appoint {org, who, position or null, why}, title {org, who, title or null}, position {org, position: {title, id?, powers?, seats?, reports_to?, scope?, limits?: {payment?, month?}, successor?, default?}}, unposition {org, position}, delegate {org, to, powers, payment?, month?, accounts?, until?: YYYY-MM-DD, by}, revoke {org, to}, hire {org, who, position?, title?, basis?, rate?, hours?}, fire {job, why}, pay {job, rate or pct}, issue {org, to, units, price (a unit), class?, from?}, buy_back {org, from, units, price}, transfer {org, from, to, units or pct, price?}, entry {place, entry: owner, members, staff, customers, public or null, keys?}, dues {org, cents or null, every?}, tier {who, tier: core, companion, hired, ally or null}, restructure {org, structure}, rename {org, name}, money in minor units (lre_orgs reads organizations). Ids come from lre_gm. Needs spoilers: true.',
     inputSchema: object({ chatId: CHAT_ID, spoilers: SPOILERS, ops: { type: "array", minItems: 1, maxItems: EDIT_OPS_MAX, items: OPS_ITEM, description: 'The operations, applied in order: [{"op": "set", "entity": "pov", "field": "mood", "value": "calm"}].' } }, ["chatId", "spoilers", "ops"]),
     write: { destructive: true, idempotent: false },
     run: (args, ctx) => gmEdit(args, ctx, "lre_gm_edit"),

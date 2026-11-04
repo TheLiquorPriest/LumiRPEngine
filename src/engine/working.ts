@@ -23,7 +23,6 @@ export interface WorkingMark {
 
 export class Working {
   readonly reg: Registry;
-  readonly world: WorldDoc;
   readonly state: WorldState;
   readonly ctx: ReadContext;
   /** Events applied, in order. */
@@ -34,9 +33,13 @@ export class Working {
   /** Starts from a copy of `state`; the caller's object is never mutated. */
   constructor(reg: Registry, world: WorldDoc, state: Readonly<WorldState>) {
     this.reg = reg;
-    this.world = world;
     this.state = structuredClone(state) as WorldState;
     this.ctx = reg.context(world, this.state);
+  }
+
+  /** The world as the working state plays it (ITEMS-SPEC §6.2): a place made by an event applied here is in it. */
+  get world(): WorldDoc {
+    return this.ctx.world;
   }
 
   /** Validates and applies one event; returns the rejection when it was dropped. */

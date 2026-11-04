@@ -12,11 +12,13 @@ import type { EditOp } from "../../../shared/protocol";
 import { isRecord, type JsonObject, type JsonValue } from "../../../shared/json";
 import { own } from "../../../engine/pack-kit";
 import { fieldDef } from "../../../engine/scope";
+import { extractAnswer } from "../../steps";
 import type { ToolOutcome } from "../runtime";
 import type { ToolReadView } from "./read-view";
+import type { ToolEnv } from "./registry";
 import type { Resolved } from "./resolve";
 import { jsonTextOf, needText } from "./schema";
-import type { AgentOp, ToolWriter } from "./writer";
+import type { AgentOp, OpRefusal, ToolWriter } from "./writer";
 
 // The write tools' argument schemas that aren't the world's (`tools/schema.ts` has those): shared, as
 // `toolsFor` copies a schema before it describes it.
@@ -49,15 +51,43 @@ export function fieldValueArg(view: ToolReadView, args: JsonObject, key: string,
   return jsonArg(args, key, type === "text" || type === "enum");
 }
 
+/** A write the writer refused, as a write tool answers it: its code and reason, and the thing or place a make found there already (`exists`). */
+export function refusedAnswer(out: OpRefusal): ToolOutcome {
+  return { text: JSON.stringify({ refused: { code: out.code, reason: out.reason, ...(out.exists !== undefined ? { exists: out.exists } : {}) } }), error: true };
+}
+
 /** What `op` comes to, as a write tool answers it: staged into the turn by a turn's writer, else its dry run; an agent with no writer reads only. */
 export async function propose(view: ToolReadView, writer: ToolWriter | null, op: AgentOp): Promise<ToolOutcome> {
   if (!writer) return view.refuse(WRITE_NOTE.noWriter);
   const out = writer.stage ? await writer.stage(op) : await writer.dryRun(op);
-  if ("refused" in out) return { text: JSON.stringify({ refused: { code: out.code, reason: out.reason } }), error: true };
+  if ("refused" in out) return refusedAnswer(out);
   const change = { key: out.key, changeType: out.changeType, mode: out.mode, lines: out.lines };
   // A staged change says where it stands: landing with the turn, or waiting on the review card.
   if (writer.stage) return view.answer({ staged: { ...change, lands: view.text(out.mode === "confirm" ? WRITE_NOTE.stagedReview : WRITE_NOTE.staged) } });
   return view.answer({ proposed: change });
+}
+
+/**
+ * A fact a Curator's tool notes for the reply's read (`ToolEnv.notes`): read as classic's parser reads
+ * the read's own (money in minor units), checked by its channel against the head, then noted once,
+ * to land with the read's changes under its type's mode; or why it can't be.
+ */
+export function noteFact(view: ToolReadView, env: Pick<ToolEnv, "notes">, fact: JsonObject): ToolOutcome {
+  if (!env.notes) return view.refuse(WRITE_NOTE.noWriter);
+  const type = String(fact.type);
+  const read = extractAnswer({ proposals: [fact] }, { world: view.world, appliedMinutes: 0, channels: [type], moves: false }).proposals[0];
+  const channel = view.registry.proposals.get(type);
+  if (!read || !channel) return view.refuse(WRITE_NOTE.badOp);
+  const bad = channel.validate(read, view.ctx);
+  if (bad) return { text: JSON.stringify({ refused: { code: bad.code, reason: bad.gm ?? bad.reason } }), error: true };
+  env.notes.add(read);
+  return view.answer({ noted: { changeType: type, lands: view.text(WRITE_NOTE.noted, { type }) } });
+}
+
+/** A list-of-words argument, each trimmed and the blank ones left out; null when absent or not a list of words. */
+export function wordsArg(args: JsonObject, key: string): string[] | null {
+  const v = args[key];
+  return Array.isArray(v) && v.every((s) => typeof s === "string") ? v.map((s) => s.trim()).filter((s) => s !== "") : null;
 }
 
 /** A GM edit as a tool builds it from its arguments: the writer reads it for its shape again (`parseEditOps`), so a malformed one is refused there. */

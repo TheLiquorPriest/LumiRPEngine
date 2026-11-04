@@ -14,6 +14,10 @@ import { DEFAULT_HELPER, helperCallOf } from "../shared/settings";
 import type { StepPurpose, WorldCurrency, WorldDoc } from "../shared/world";
 import { lifeStatesOf } from "../shared/world";
 import { firedTimeout } from "../shared/timeouts";
+import { isItemChange, isThingFact, SIZES } from "../shared/things";
+import { EXTRACT_ITEM_TEXT, EXTRACT_ORG_TEXT, INTERPRET_AGENDA_RULE, INTERPRET_AGENDA_SHAPE, ORG_FACT_TYPES } from "../shared/role-prompts";
+import type { PlanReadItems } from "../packs/orgs/core/agenda";
+import { renderPrompt } from "./prompts";
 import type { Answers, Questions } from "../engine/decide";
 import type { PlaceChoice } from "../engine/place-names";
 import { ACTION_QUEUE_LIMIT, type InterpretOutput, type QueuedAction } from "../engine/steps";
@@ -540,8 +544,11 @@ export type SaidRoutine = JsonObject & { said: string };
 /** How many routine changes one message may state. */
 const SAID_ROUTINES_MAX = 3;
 
-/** `interpret`'s read: the intent, the reason it gave when it read no action, what it says each action's thing is, and the routine changes the input states. */
-export type InterpretRead = Omit<InterpretOutput, "queue"> & { reason?: string; thing?: ThingSort; queue?: ReadAction[]; routine?: SaidRoutine[] };
+/** How many goals, and how many orders, one message may give. */
+const SAID_PLAN_MAX = 8;
+
+/** `interpret`'s read: the intent, the reason it gave when it read no action, what it says each action's thing is, the routine changes the input states, and the plan it gives (ORG-SPEC §3.14, assess-party §6.2). */
+export type InterpretRead = Omit<InterpretOutput, "queue"> & { reason?: string; thing?: ThingSort; queue?: ReadAction[]; routine?: SaidRoutine[]; agenda?: PlanReadItems };
 
 /** What `interpret` is told of the world besides the catalog: its name and money, the player character, and the scene as the POV knows it (`interpretScene`). */
 export interface InterpretContext {
@@ -604,6 +611,8 @@ export async function interpret(
     // A routine the player's own message states is asked about, never played (DESIGN §9.4): it is no
     // action, so it never takes an action's place, and anything short of a plain statement is none.
     `If the input itself plainly states, as settled fact, a lasting change to someone's week (the player character's own, "I start nights at the marina Monday", or one the input says someone told of, "Marcus says he's started swimming on Tuesdays"), add it to "routine": [{"entity": their id, "change": "start" for a new job, shift or habit, "stop" for one given up, "move" for a new home, "label": what it is in the input's words, "days": the days the input states (weekday names, "weekdays", "weekends" or "daily"; leave it out when the input states none, never guess), "start"?/"end"?: "HH:MM" as stated (or "start": morning|afternoon|evening|night), "activity"?: work|school|exercise|leisure|socialize|errand, "place"?: any place the input names for it, as a place id, or in the input's own words when nothing lists it ("the community pool"); left out only when the input names none (for "move", the new home), "with"?: people's ids, "replaces"?: true only when the input says it takes the place of what they did then, "said": the input's own words that state it, copied exactly}]. Never for a question ("do you still swim on Tuesdays?"), a one-off, a plan, a wish, a hypothetical, someone's thoughts, or a habit only mentioned in passing ("I walk past the pool where I swim on Tuesdays"). It is never an action, and changes nothing about "action", "more", "then" or "next".`,
+    // The plan the player's own message gives the people they lead (assess-party §6.2): never played, and never an action.
+    INTERPRET_AGENDA_RULE,
   ];
   // An uncertain attempt is Try something while the chat infers checks (DESIGN §11): never beside, or
   // instead of, a catalog action that covers it, and a reaction the input asks for counts.
@@ -628,7 +637,7 @@ export async function interpret(
     `Action catalog:\n${actions.map(catalogLine).join("\n")}`,
     `Rules:\n${rules.map((r) => `- ${r}`).join("\n")}`,
     presumed.map((r) => `- ${r}`).join("\n"),
-    `Output JSON only, exactly this shape: {"action": string|null, "params": {...}, "text"?: string, "thing"?: string, "confidence": number, "reason"?: string, "more"?: [{"action": string, "params": {...}, "text": string, "thing"?: string}], "then"?: {"span": string, "minutes"?: number, "until"?: string, "at"?: string}, "next"?: string, "routine"?: [{"entity": string, "change": string, "label": string, "days"?: string|string[], "start"?: string, "end"?: string, "activity"?: string, "place"?: string, "with"?: string[], "replaces"?: boolean, "said": string}]}.`,
+    `Output JSON only, exactly this shape: {"action": string|null, "params": {...}, "text"?: string, "thing"?: string, "confidence": number, "reason"?: string, "more"?: [{"action": string, "params": {...}, "text": string, "thing"?: string}], "then"?: {"span": string, "minutes"?: number, "until"?: string, "at"?: string}, "next"?: string, "routine"?: [{"entity": string, "change": string, "label": string, "days"?: string|string[], "start"?: string, "end"?: string, "activity"?: string, "place"?: string, "with"?: string[], "replaces"?: boolean, "said": string}], ${INTERPRET_AGENDA_SHAPE}}.`,
   ]
     .filter((part) => part !== "")
     .join("\n");
@@ -639,7 +648,8 @@ export async function interpret(
  * `interpret`'s answer as its read (its output contract, §16): the first action, which only the
  * catalog's actions may be, with its params and the player's words for it; the further ones it reads
  * as catalog actions, up to the queue's bound, and the rest in words; time passing after them; the
- * routine changes the input states; or no action, with its reason. Null for an answer that isn't
+ * routine changes the input states and the plan it gives (goals and orders, each with its words);
+ * or no action, with its reason. Null for an answer that isn't
  * one: the call failed, or said nothing in its contract's shape.
  */
 export function interpretAnswer(raw: JsonValue | null, actions: readonly CatalogEntry[]): InterpretRead | null {
@@ -682,19 +692,37 @@ export function interpretAnswer(raw: JsonValue | null, actions: readonly Catalog
     const copy = JSON.parse(JSON.stringify(r)) as JsonObject;
     return [{ ...copy, said: r.said.replace(/\s+/g, " ").trim() }];
   }).slice(0, SAID_ROUTINES_MAX);
-  return { action, params: action ? params : {}, probabilities: action ? { [action]: confidence, none: 1 - confidence } : { none: 1 }, ...(lead !== "" ? { text: lead } : {}), ...(thing ? { thing } : {}), ...(then ? { then } : {}), ...(queue.length > 0 ? { queue } : {}), ...(next.length > 0 ? { next } : {}), ...(reason !== "" ? { reason } : {}), ...(routine.length > 0 ? { routine } : {}) };
+  // The plan the input gives (assess-party §6.2), read whatever its action: each goal and order with
+  // the words it is in, which the plan's own read holds to the player's message (`orgs.plan_read`).
+  const plan = isRecord(raw.agenda) ? raw.agenda : {};
+  const text = (v: JsonValue | undefined): string => (typeof v === "string" ? v.replace(/\s+/g, " ").trim() : "");
+  const some = (r: JsonObject, keys: readonly string[]): Record<string, string> => Object.fromEntries(keys.flatMap((k) => (text(r[k]) !== "" ? [[k, text(r[k])]] : [])));
+  const goals = (Array.isArray(plan.goals) ? plan.goals : []).flatMap((g) => (isRecord(g) && text(g.text) !== "" && text(g.said) !== "" ? [{ text: text(g.text), said: text(g.said), ...some(g, ["window", "where", "org"]) }] : [])).slice(0, SAID_PLAN_MAX);
+  const orders = (Array.isArray(plan.orders) ? plan.orders : []).flatMap((o) => {
+    const to = isRecord(o) && Array.isArray(o.to) ? o.to.map((n) => text(n)).filter((n) => n !== "") : [];
+    return isRecord(o) && to.length > 0 && text(o.text) !== "" && text(o.said) !== "" ? [{ to, text: text(o.text), said: text(o.said), ...some(o, ["lead", "where", "when", "org"]) }] : [];
+  }).slice(0, SAID_PLAN_MAX);
+  const agenda: PlanReadItems = { ...(goals.length > 0 ? { goals } : {}), ...(orders.length > 0 ? { orders } : {}) };
+  return { action, params: action ? params : {}, probabilities: action ? { [action]: confidence, none: 1 - confidence } : { none: 1 }, ...(lead !== "" ? { text: lead } : {}), ...(thing ? { thing } : {}), ...(then ? { then } : {}), ...(queue.length > 0 ? { queue } : {}), ...(next.length > 0 ? { next } : {}), ...(reason !== "" ? { reason } : {}), ...(routine.length > 0 ? { routine } : {}), ...(goals.length + orders.length > 0 ? { agenda } : {}) };
 }
 
-/** A way of paying said as a payment: a preposition or "use" before it ("pay with my credit card", "on my debit card", "in cash", "from savings"), and not a thing named after it ("a credit card holder"). */
-const SAID_METHOD = /\b(?:with|on|using|use|used|by|from|in)\s+(?:(?:my|the|his|her|their|our|a)\s+)?(credit card|debit card|card|cash|savings)\b(?![ -](?:holder|register|machine|drawer|box|reader|terminal|slot|case|sleeve|wallet))/gi;
+/**
+ * A way of paying said as a payment: a preposition or "use" before it ("pay with my credit card", "on
+ * my debit card", "in cash", "from savings"), and not a thing named after it ("a credit card holder").
+ * A card or account named by more than its way ("on my Chase Sapphire card", "with my Amex", "from the
+ * joint account", "with the card ending in 4417") keeps the words that name it, for the engine to find
+ * among the payer's own (DESIGN §9.5).
+ */
+const SAID_METHOD = /\b(?:with|on|using|use|used|by|from|in)\s+(?:(?:my|the|his|her|their|our|a)\s+)?((?:(?:(?!(?:my|the|his|her|their|our|a|an)\s)[\w'’-]+\s+){0,3}?(?:credit card|debit card|card|cash|savings|visa|mastercard|amex|american express|discover)|(?:(?!(?:my|the|his|her|their|our|a|an)\s)[\w'’-]+\s+){1,3}?account)(?:\s+ending(?:\s+in)?\s+\d{4})?)\b(?![ -](?:holder|register|machine|drawer|box|reader|terminal|slot|case|sleeve|wallet))/gi;
 /** A mention ruled out just before it ("not with cash", "instead of …", "rather than …"). */
 const NEGATED = /(?:\bnot|\bno|\bnever|n't|\binstead of|\brather than|\bthan)(?:\s+(?:pay|paying|paid))?\s*$/i;
 
 /**
  * The way of paying the player's own words name, as said, for an action's `method` the model left
- * empty: "credit card", "debit card", "card", "cash" or "savings", said as a payment (`SAID_METHOD`). A
- * negated mention is skipped and the last one counts ("not with cash, with my debit card" is the
- * debit card). Null when the text names none.
+ * empty: "credit card", "debit card", "card", "cash" or "savings", or the words that name one card or
+ * account ("chase sapphire card", "amex", "joint account", "card ending in 4417"), said as a payment
+ * (`SAID_METHOD`). A negated mention is skipped and the last one counts ("not with cash, with my debit
+ * card" is the debit card). Null when the text names none.
  */
 export function saidPayMethod(text: string): string | null {
   const said = [...text.matchAll(SAID_METHOD)].filter((m) => !NEGATED.test(text.slice(0, m.index))).at(-1)?.[1]?.toLowerCase();
@@ -703,21 +731,40 @@ export function saidPayMethod(text: string): string | null {
 
 // ---------------------------------------------------------------- extract
 
+/** The strict rules but those for changes to things, which the Thing rules registry text holds (ITEMS-SPEC §7.4); the last one closes the list. */
 export const EXTRACT_STRICT_RULES = [
   'time_advance only for an explicit jump or stated duration ("an hour later", "the next morning", "for twenty minutes"), as all the time the reply says passes from the player\'s message to its end, never less for what the turn already took; never estimate how long described activity took.',
   "knows only when the player character newly learns of a public person, thing or place from what is said or shown in this reply: fact is its id, or a place's name as the prose gives it; never a sentence or what they learned about it, never one already known, never what others learn.",
   "regard only when the prose states a clear change in how one character feels about another.",
-  "give only for an explicit handover between two characters; a seller handing over what was bought is part of the purchase; picking something up is not a give.",
   "A purchase already covers its payment: do not add a transfer for it.",
   "One purchase per item: two things bought are two purchases, each with its own item and price; never one item that names both.",
   "life only when the prose states that someone died, is dying, collapsed or came round, or that the player character is told so; never a threat, a fear or a guess.",
   "routine only when the prose states a lasting change to someone's week: a new job or shift, a new habit, one they gave up, or a move to a new home, with the days and times the prose gives; never a one-off, a plan, a wish, someone's thoughts, or a habit only mentioned.",
-  "take, drop, use_up, wear and lose only for a thing the prose says changed hands or state this reply: picked up or found (take), put down (drop), eaten, drunk or used up (use_up), put on or taken off (wear, off: true), lost or stolen (lose, by: the thief); item_condition only when it says a thing was damaged, worn out or mended.",
   "Never duplicate a change. When unsure, leave it out.",
 ];
 
-/** The reply's item changes (DESIGN §9.4), each by who (`entity`, the player character when left out) and the thing, its id where the state lists it, else its name. */
-const EXTRACT_ITEM_TYPES = "take{entity,item} · drop{entity,item} · use_up{entity,item,qty?} (qty: how many, 1 when not said) · wear{entity,item,off?} · lose{entity,item,by?} (by: who stole it) · item_condition{entity?,item,delta} (delta: as far as the prose says it changed, on the condition's 0..100 scale: damage negative, mending positive)";
+/** The read's thing facts and their rules (ITEMS-SPEC §5.2, §7.4), as the registry's texts render them: the user's own, else the shipped ones. */
+export interface ExtractThingTexts {
+  facts: string;
+  rules: string;
+}
+
+/** The shipped thing texts, for a call that is given none. */
+export function shippedThingTexts(): ExtractThingTexts {
+  return { facts: renderPrompt(EXTRACT_ITEM_TEXT.facts, {}, {}), rules: renderPrompt(EXTRACT_ITEM_TEXT.rules, {}, {}) };
+}
+
+/** The read's organization facts, their rules and the plans' open items (ORG-SPEC §7.3), as the registry's texts render them: the plans' text empty when they have none open. */
+export interface ExtractOrgTexts {
+  facts: string;
+  rules: string;
+  plan: string;
+}
+
+/** The shipped organization texts, with no open plan items, for a call that is given none. */
+export function shippedOrgTexts(): ExtractOrgTexts {
+  return { facts: renderPrompt(EXTRACT_ORG_TEXT.facts, {}, {}), rules: renderPrompt(EXTRACT_ORG_TEXT.rules, {}, {}), plan: "" };
+}
 
 /**
  * What `extract` reads from a reply: the changes it proposes, and the place it leaves the player
@@ -733,6 +780,9 @@ export interface ExtractRead {
   dropped?: { why: Counts<ReadDrop>; types: string[] };
   untracked?: string[];
 }
+
+/** A place the reply puts someone or something in that Places lacks (ITEMS-SPEC §6.2), for a read that has no `location` to say it with. */
+const EXTRACT_PLACE_MAKE = "place_make{place,parent,as?,entity?} (a place Places doesn't list that the reply puts someone or something in, only when nothing listed fits: place: its name in the reply's words; parent: the id from Places of the place it is in or part of; as: room (inside a building or a home), spot (a part of a place, like a booth) or venue (a new place in town); entity: who the reply puts there)";
 
 /** Where the reply leaves the player character, asked beside the changes: a reply can take a move as given without telling it, and no change holds that (DESIGN §9.4). */
 const EXTRACT_WHERE = `Beside "proposals", give "where": the place where the reply leaves the player character at its end, whether it tells how they got there or takes it as given, as its id from Places (or its name as Places lists it); null when it doesn't say.`;
@@ -759,24 +809,34 @@ export async function extract(
   said = "",
   places: readonly PlaceChoice[] = [],
   personKinds: readonly string[] = [],
+  things: ExtractThingTexts = shippedThingTexts(),
+  orgs: ExtractOrgTexts = shippedOrgTexts(),
 ): Promise<ExtractRead> {
   // The world's regard axes with their ranges (the relationships pack's own, or its world's set).
   const regardAxes = axesOf({ world })
     .map((a) => `${a.id} (${a.min}..${a.max})`)
     .join("|");
+  // A place the reply puts someone in that Places lacks (ITEMS-SPEC §5.2, §6.2): `location` names it with
+  // the place it is in; a read without `location` (the Curator's prompt-only call) has `place_make` for it.
+  const placeMake = channels.includes("place_make") && !channels.includes("location") ? ` · ${EXTRACT_PLACE_MAKE}` : "";
   const types =
-    `time_advance{minutes} · location{entity,place} (place: its id from Places, or its name as Places lists it) · purchase{item,category,payer?,qty?,price?,method?} (payer: the person who pays, an entity id, never an account or a card; method: how the prose says they paid, in its words, e.g. "cash", "debit card", "credit card" or "savings"; leave it out when not said) · transfer{from,to,amount,method?} (from and to: people, entity ids, or a person's own cash, checking, savings or card account, never things; method: "cash" when bills or coins change hands in person, as in "hands me $20" or "slips her a twenty"; leave it out for a bank transfer, an app payment or a card) · give{item,from,to,amount?} (amount: for cash or money handed over, the amount) · quantity{entity,item,delta} · condition{who,condition,minutes?,clear?} (a named condition such as tired or injured; clear:true when it ends) · regard{from,to,axis,delta} (axis ${regardAxes}; delta: as far as the prose moves it, inside the axis's range: worse negative, better positive) · knows{who,fact} (fact: the id of a person, thing or place the player character newly learns of, or the name of a place they first hear of; never a sentence) · spawn{kind,name,place?,role?} (a new character the reply introduces by name${personKinds.length > 0 ? `; kind: ${personKinds.join("|")}` : ""}; never a thing) · life{entity,state} (state: ${lifeStatesOf(world)
+    `time_advance{minutes} · location{entity,place,parent?} (place: its id from Places, or its name as Places lists it; for a place Places doesn't list that the reply puts them in (a room, a booth, a new bar), only when nothing listed fits: its name in the reply's words, with parent: the id from Places of the place it is in or part of)${placeMake} · purchase{item,category,payer?,qty?,price?,method?,seller?,size?,at?} (payer: the person who pays, an entity id, never an account or a card; method: how the prose says they paid, in its words, naming the card or account when it names one, as in "her Amex", "the joint account" or "the card ending in 4417", else e.g. "cash", "debit card", "credit card" or "savings"; leave it out when not said; seller: the person or business selling it, an entity id, when the prose names one: what a seller hands over of their own changes hands, never a second; size: ${SIZES.join("|")}, when the prose makes it plain; at: where it ends up when the prose says, a place's id from Places, or home) · transfer{from,to,amount,method?} (from and to: people, entity ids, or a person's own cash, checking, savings or card account, never things; method: "cash" when bills or coins change hands in person, as in "hands me $20" or "slips her a twenty"; leave it out for a bank transfer, an app payment or a card) · quantity{entity,item,delta} · condition{who,condition,minutes?,clear?} (a named condition such as tired or injured; clear:true when it ends) · regard{from,to,axis,delta} (axis ${regardAxes}; delta: as far as the prose moves it, inside the axis's range: worse negative, better positive) · knows{who,fact} (fact: the id of a person, thing or place the player character newly learns of, or the name of a place they first hear of; never a sentence) · spawn{kind,name,place?,role?} (a new character the reply introduces by name${personKinds.length > 0 ? `; kind: ${personKinds.join("|")}` : ""}; never a thing) · life{entity,state} (state: ${lifeStatesOf(world)
       .map(([id]) => id)
       .join("|")}) · routine{entity,change,label,days,start?,end?,minutes?,activity?,place?,with?,replaces?} (change: start for a new job, shift or habit, stop for one given up, move for a new home, its place the home; days: weekday names, weekdays, weekends or daily; start and end: HH:MM, or start morning|afternoon|evening|night; activity: work|school|exercise|leisure|socialize|errand; place: any place the prose names for it, as a place id, or in the prose's own words when nothing lists it ("the community pool"), left out only when the prose names none; with: people's ids; replaces: true only when the prose says it takes the place of what they did then)`;
   const allowed = channels.length > 0 ? `Only these types are enabled: ${channels.join(", ")}.` : "";
-  const system = `${instructions ? `${instructions}\n` : ""}You read a narrator's roleplay reply and propose concrete state changes that the prose states actually happened.\n${worldBrief(world, places)}\nProposal types: ${types} · ${EXTRACT_ITEM_TYPES}. ${allowed}\nRules: no considered, refused or hypothetical changes; use world ids where they exist; one proposal per change. Money amounts are plain amounts in ${world.currency.code} as written (8 for ${world.currency.symbol}8).\nStrict rules:\n- ${EXTRACT_STRICT_RULES.join("\n- ")}\nOutput JSON only: {"proposals":[{"type":...}, ...]}.`;
+  // The organization facts and their rules join while one of their types is read (ORG-SPEC §7.3).
+  const orgFacts = channels.length === 0 || ORG_FACT_TYPES.some((t) => channels.includes(t));
+  // The strict rules close with the Thing rules (ITEMS-SPEC §7.4), then the Organization rules, before the last: never a duplicate.
+  const strict = [...EXTRACT_STRICT_RULES.slice(0, -1).map((r) => `- ${r}`), ...[things.rules, orgFacts ? orgs.rules : ""].map((r) => r.trim()).filter((r) => r !== ""), ...EXTRACT_STRICT_RULES.slice(-1).map((r) => `- ${r}`)].join("\n");
+  const system = `${instructions ? `${instructions}\n` : ""}You read a narrator's roleplay reply and propose concrete state changes that the prose states actually happened.\n${worldBrief(world, places)}\nProposal types: ${types} · ${things.facts}${orgFacts && orgs.facts.trim() !== "" ? ` · ${orgs.facts.trim()}` : ""}. ${allowed}\nRules: no considered, refused or hypothetical changes; use world ids where they exist; one proposal per change. Money amounts are plain amounts in ${world.currency.code} as written (8 for ${world.currency.symbol}8).\nStrict rules:\n${strict}\nOutput JSON only: {"proposals":[{"type":...}, ...]}.`;
   const moves = channels.length === 0 || channels.includes("location");
   const routines = moves && usual.length > 0;
   const asked = `${moves ? `${system}\n${EXTRACT_WHERE}` : system}${routines ? `\n${EXTRACT_USUAL}` : ""}`;
   // The player's message is what the reply answers ("I put on my coat" → "she shrugs it on"): context
   // for what the reply means, never a change of its own, since only what the reply states happened.
   const message = said.trim() !== "" ? `The player's message this reply answers (context only; propose only what the narration states happened):\n${said.trim()}\n` : "";
-  const raw = await steps.helperJson("extract", asked, `State before: ${JSON.stringify(prefix)}\n${routines ? `Usual routines (where a described move goes; never a move by itself):\n${usual.join("\n")}\n` : ""}${message}Narration:\n${narration}`, config, userId, signal, { lore, guidance, recent });
+  const plan = orgs.plan.trim() !== "" ? `${orgs.plan.trim()}\n` : "";
+  const raw = await steps.helperJson("extract", asked, `State before: ${JSON.stringify(prefix)}\n${routines ? `Usual routines (where a described move goes; never a move by itself):\n${usual.join("\n")}\n` : ""}${plan}${message}Narration:\n${narration}`, config, userId, signal, { lore, guidance, recent });
   return extractAnswer(raw, { world, appliedMinutes, channels, moves });
 }
 
@@ -826,7 +886,8 @@ export function extractAnswer(raw: JsonValue | null, o: { world: Pick<WorldDoc, 
 
 /**
  * A model states money as written ("$8" is 8); the channels read minor units (cents). Converts a
- * proposal's money once: a purchase's `price`, a transfer's `amount`, and cash handed over
+ * proposal's money once: a purchase's `price`, a transfer's `amount`, an employment fact's pay
+ * (`rate`), and cash handed over
  * (`give` of "$20", "a twenty", "cash" with an `amount`), which becomes a cash transfer
  * (`method: "cash"`: bills changing hands go wallet to wallet) of the amount it states (in
  * `amount`, else in the item's own words). A model's own transfer keeps its method. A purchase's
@@ -840,7 +901,13 @@ export function inMinorUnits(p: JsonObject, currency: WorldCurrency): JsonObject
   const q: JsonObject = cash ? { type: "transfer", ...(typeof p.from === "string" ? { from: p.from } : {}), ...(typeof p.to === "string" ? { to: p.to } : {}), ...(amount !== undefined ? { amount } : {}), method: "cash" } : p;
   delete q.playerPrice;
   delete q.owned;
-  const money = q.type === "purchase" ? "price" : q.type === "transfer" ? "amount" : null;
+  // The reconciler's own marks (ITEMS-SPEC §5.3): a confirmed change, the fact a change to a thing was
+  // settled from (a `knows`'s own `fact` is what it teaches, so it stays), a thing brought along.
+  delete q.confirmed;
+  if (isThingFact(q.type) || isItemChange(q.type)) delete q.fact;
+  delete q.brought;
+  // An employment fact's pay (ORG-SPEC §7.3) is as written too.
+  const money = q.type === "purchase" ? "price" : q.type === "transfer" ? "amount" : q.type === "employment" ? "rate" : null;
   const v = money ? q[money] : undefined;
   if (money && typeof v === "number" && Number.isFinite(v)) q[money] = Math.round(v * 10 ** currency.decimals);
   return q;

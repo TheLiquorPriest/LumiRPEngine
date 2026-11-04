@@ -11,7 +11,7 @@ import { RUNTIME_PROMPT_PAGE, RUNTIME_PROMPTS } from "./agent-prompts";
 import { FINAL_REVIEW_PROMPTS } from "./final-review";
 import { MAIN_AGENT_PAGE, MAIN_AGENT_PROMPTS } from "./main-agent-prompts";
 import { ROLE_PROMPT_PAGES, ROLE_PROMPTS } from "./role-prompts";
-import { TOOL_FAMILY_LABEL, TOOL_NOTES, TOOL_TEXTS, toolArgTextId, toolTextId } from "./agent-tools";
+import { TOOL_FAMILY_LABEL, TOOL_NOTES, TOOL_TEXTS, type ToolTier, toolArgTextId, toolTextId } from "./agent-tools";
 import type { SlotId } from "./ids";
 import { isRecord } from "./json";
 import { DEFAULT_SECTIONS } from "./sections";
@@ -107,6 +107,17 @@ export const NARRATOR_RULE_IDS = ["narrator.source", "narrator.authority", "narr
 /** What leads the preset's rules, sent only when the preset has some. */
 export const PRESET_RULES_LEAD_ID = "narrator.preset_lead";
 
+/**
+ * The narrator rules' part on prices (DESIGN §9.5), sent after the others while Settings → Narrator →
+ * Prices is on: the engine prices every purchase, so the narrator states the price it gives (a
+ * purchase this turn's Outcome charged, or what the Money section lists as sold here), never another.
+ */
+export const PRICES_RULE_ID = "narrator.prices";
+
+/** The prices rule as shipped. */
+export const PRICES_RULE =
+  "Prices: whenever a purchase or a price comes up, state the price the engine gives for it: what the Outcome says a purchase this turn cost, or the price the Money section lists for something sold where the player character is. Use that exact amount; never leave it out, round it or give another. For something nothing lists, give a price that fits the place.";
+
 /** A built-in section's guidance: its template, which leads its lines and says where they go. */
 export function sectionPromptId(slot: SlotId): string {
   return `section.${slot}`;
@@ -170,6 +181,9 @@ const ELAPSED_PROMPTS: readonly PromptDef[] = [
 const TOOLS_GROUP = "Tools";
 const TOOL_ANSWERS_GROUP = "Tool answers";
 
+/** How the Prompts page words a tool's tier. */
+const TOOL_TIER_NOTE: Readonly<Record<ToolTier, string>> = { read: "reads only", story: "story tier: the story's own change, checked and staged", gm: "GM tier: a change, previewed and held" };
+
 /**
  * Each tool's description and its arguments', made from the tools' own texts (`TOOL_TEXTS`) as the
  * sections' guidance is made from the sections, so the GM agent page lists exactly the tools there
@@ -177,7 +191,7 @@ const TOOL_ANSWERS_GROUP = "Tool answers";
  */
 export const TOOL_PROMPTS: readonly PromptDef[] = [
   ...TOOL_TEXTS.flatMap((t): PromptDef[] => [
-    { id: toolTextId(t.name), page: GM_AGENT_PAGE.id, group: TOOLS_GROUP, label: `${t.name}: what it does`, note: `${t.note} ${TOOL_FAMILY_LABEL[t.family]}; ${t.tier === "read" ? "reads only" : "GM tier: a change, previewed and held"}.`, text: t.text, vars: [] },
+    { id: toolTextId(t.name), page: GM_AGENT_PAGE.id, group: TOOLS_GROUP, label: `${t.name}: what it does`, note: `${t.note} ${TOOL_FAMILY_LABEL[t.family]}; ${TOOL_TIER_NOTE[t.tier]}.`, text: t.text, vars: [] },
     ...t.args.map((a): PromptDef => ({ id: toolArgTextId(t.name, a.path), page: GM_AGENT_PAGE.id, group: TOOLS_GROUP, label: `${t.name}: ${a.path}`, note: `The description of ${t.name}'s ${a.path} argument.`, text: a.text, vars: [] })),
   ]),
   ...TOOL_NOTES.map((n): PromptDef => ({ ...n, page: GM_AGENT_PAGE.id, group: TOOL_ANSWERS_GROUP })),
@@ -219,6 +233,7 @@ export const FINAL_OUTPUT_PROMPTS: readonly PromptDef[] = [
   { id: "narrator.source", page: FINAL_OUTPUT_PAGE.id, group: NARRATOR_GROUP, label: "Where the rules come from", note: "Opens the narrator rules: that LumiRPEngine sends them, and how its sections are marked.", text: NARRATOR_SOURCE, vars: [] },
   { id: "narrator.authority", page: FINAL_OUTPUT_PAGE.id, group: NARRATOR_GROUP, label: "Order of authority", note: "The narrator's top rule: whose word comes first. Every rule after it works under it.", text: NARRATOR_AUTHORITY, vars: [] },
   { id: "narrator.marked_facts", page: FINAL_OUTPUT_PAGE.id, group: NARRATOR_GROUP, label: "Marked facts", note: "What a fact marked as unknown to the player character means, and how each character keeps to what they know.", text: MARKED_FACTS_RULE, vars: [] },
+  { id: PRICES_RULE_ID, page: FINAL_OUTPUT_PAGE.id, group: NARRATOR_GROUP, label: "Prices", note: "Tells the narrator to state the prices the engine gives when a purchase or a price comes up; sent while Settings → Narrator → Prices is on.", text: PRICES_RULE, vars: [] },
   { id: PRESET_RULES_LEAD_ID, page: FINAL_OUTPUT_PAGE.id, group: NARRATOR_GROUP, label: "Before your preset's rules", note: "Leads the rules of your preset's RPEngine · narrator block, when it has them.", text: PRESET_RULES_LEAD, vars: [] },
   ...MARK_PROMPTS,
   ...SECTION_PROMPTS,

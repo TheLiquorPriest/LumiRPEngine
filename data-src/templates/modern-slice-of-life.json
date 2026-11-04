@@ -978,7 +978,8 @@
           }
         ],
         "shiftPattern": "trades_day_7_330",
-        "start": "2026-01-12"
+        "start": "2026-01-12",
+        "position": "mechanic"
       },
       "schedule": [
         {
@@ -1202,7 +1203,8 @@
           }
         ],
         "shiftPattern": "trades_day_7_330",
-        "start": "2024-03-04"
+        "start": "2024-03-04",
+        "position": "mechanic"
       },
       "schedule": [
         {
@@ -3348,7 +3350,15 @@
         ],
         "invoice_days": 30,
         "late_fee_pct": 1.5
-      }
+      },
+      "positions": [
+        {
+          "id": "mechanic",
+          "title": "Mechanic",
+          "powers": [],
+          "seats": 0
+        }
+      ]
     },
     {
       "id": "inv_road_commission",
@@ -3840,6 +3850,7 @@
     },
     {
       "id": "s_shop_trouble",
+      "owner": "gm",
       "kind": "secret",
       "label": "What Marcus isn't saying",
       "visibility": "secret",

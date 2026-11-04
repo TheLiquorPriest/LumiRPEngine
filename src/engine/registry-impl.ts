@@ -1,6 +1,6 @@
 // Builds the frozen engine registry from pack definitions (DESIGN §3 Modules; ARCHITECTURE §5).
 
-import type { DomainId, EntityId, Level, TableId } from "../shared/ids";
+import type { DomainId, EntityId, KindId, Level, TableId } from "../shared/ids";
 import { DOMAINS } from "../shared/ids";
 import { tierBand } from "../shared/tiers";
 import type { ActionDef, KindDef, RelationTypeDef, RuleDef, ScheduleDef, WorldDoc } from "../shared/world";
@@ -13,6 +13,8 @@ import type {
   EventTypeDef,
   LintRule,
   MaterializerDef,
+  MembershipProvider,
+  OrgSectionDef,
   PackDef,
   PanelViewDef,
   ProcessDef,
@@ -25,6 +27,7 @@ import type {
 } from "./registry";
 import { knowing } from "./life";
 import { observing } from "./seen";
+import { baseWorld, madePlacesOf, playedWorld } from "./places-in-play";
 import { touching } from "./touched";
 import type { WorldState } from "./state";
 import { clampLevel } from "./time-limits";
@@ -46,6 +49,10 @@ export interface Registry extends EventTypes {
   readonly proposals: ReadonlyMap<string, ProposalChannelDef>;
   readonly lints: readonly LintRule[];
   readonly views: readonly PanelViewDef[];
+  /** Membership providers by the kind they were registered for (ORG-SPEC §3.2), each kind's in registration order. */
+  readonly memberships: ReadonlyMap<KindId, readonly MembershipProvider[]>;
+  /** Packs' sections of an organization's page, in registration order. */
+  readonly orgSections: readonly OrgSectionDef[];
   /**
    * A read context over a world document and a state. `queries` stand in for registered ones in this
    * context only: what a caller knows of one read that the state doesn't hold (the minds the Minds
@@ -118,6 +125,8 @@ export function createRegistry(packs: readonly PackDef[]): Registry {
   const proposals = new Map<string, ProposalChannelDef>();
   const lints: LintRule[] = [];
   const views: PanelViewDef[] = [];
+  const memberships = new Map<KindId, MembershipProvider[]>();
+  const orgSections: OrgSectionDef[] = [];
 
   const once = <T>(map: Map<string, T>, key: string, value: T, what: string): void => {
     if (map.has(key)) throw new RegistryError(`${what} ${key} is registered twice`);
@@ -140,11 +149,30 @@ export function createRegistry(packs: readonly PackDef[]): Registry {
     proposals,
     lints,
     views,
+    memberships,
+    orgSections,
     get: (type) => events.get(type),
     context(world, state, overrides) {
+      // The world as the state plays it (ITEMS-SPEC §6.2): the places play made overlaid on the
+      // world's, read again whenever they change, since a Working applies events to this very state
+      // and a place made by one is there for the next.
+      let base = baseWorld(world);
+      let made: object | null = null;
+      let played = base;
       return {
         registry,
-        world,
+        get world(): WorldDoc {
+          const now = madePlacesOf(state);
+          if (now !== made) {
+            made = now;
+            played = playedWorld(base, state);
+          }
+          return played;
+        },
+        set world(next: WorldDoc) {
+          base = baseWorld(next);
+          made = null;
+        },
         state,
         tables: { get: (id) => world.tables[id] },
         levelOf: (entity, domain) => rulesetFloor(world, domain, effectiveLevel(world, state, entity, domain)),
@@ -200,6 +228,15 @@ export function createRegistry(packs: readonly PackDef[]): Registry {
       proposal: (d) => once(proposals, d.type, d, "proposal channel"),
       lint: (d) => lints.push(d),
       view: (d) => views.push(d),
+      membership: (kind, provider) => {
+        const list = memberships.get(kind);
+        if (list) list.push(provider);
+        else memberships.set(kind, [provider]);
+      },
+      orgSection: (d) => {
+        if (orgSections.some((s) => s.id === d.id)) throw new RegistryError(`organization section ${d.id} is registered twice`);
+        orgSections.push(d);
+      },
     };
     pack.register(r);
   }

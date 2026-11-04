@@ -1,15 +1,18 @@
-// The statement cycle (DESIGN §25.6): one engine for every credit product. A revolving account
+// The statement cycle (DESIGN §25.4): one engine for every credit product. A revolving account
 // (a credit card, a charge card, a line of credit) closes a statement each month: interest only on
 // a balance carried past the last statement (the opening balance is a first statement, not a
-// carried one), fees, a minimum payment and a due date. An installment loan or mortgage bills its
-// payment each month and counts its term down until it is paid off. A missed due date brings the
-// late fee, then delinquency stages (the penalty rate from 60 days, a freeze at 90, collections
-// from 120, a charge-off after), each reported to the holders' credit histories. Deposit accounts
-// earn their APY, and a checking account below its waiver pays its monthly fee.
+// carried one), fees, a minimum payment and a due date. Where statements don't run, its statement
+// day still ends an interest period: interest on what's left of the balance the last one ended
+// with. An installment loan or mortgage bills its payment each month and counts its term down
+// until it is paid off. A missed due date brings the late fee, then delinquency stages (the penalty
+// rate from 60 days, a freeze at 90, collections from 120, a charge-off after), each reported to
+// the holders' credit histories. Deposit accounts earn their APY, and a checking account below its
+// waiver pays its monthly fee. Each account's interest, what it comes to next and how it's worked
+// out, is read here for its view too (`interestOutlook`), so the view says what the cycle does.
 
 import type { EntityId } from "../../../shared/ids";
 import type { LedgerEvent, PostingLine } from "../../../shared/ledger";
-import { FINANCE_EVENTS, featureOn, type CycleState, type DelinquencyStage } from "../../../shared/finance";
+import { FINANCE_EVENTS, featureOn, type CycleState, type DelinquencyStage, type ResolvedProduct } from "../../../shared/finance";
 import { formatMoney } from "../../../shared/world";
 import { calendarOf, clockAt, dateAt, type Calendar } from "../../../engine/calendar";
 import { labelOf, numOf, own, strOf } from "../../../engine/pack-kit";
@@ -96,6 +99,8 @@ export function cycleTasks(ctx: ReadContext, from: number, to: number): CycleTas
     if (!p) continue;
     if (t.revolving && feature(ctx, id, "statements")) {
       for (const at of monthlyAt(cal, from, to, p.statement_day, STATEMENT_MINUTE)) tasks.push({ at, rank: 1, key: `statement:${id}`, run: (run) => closeRevolving(run, id, at) });
+    } else if (t.revolving && feature(ctx, id, "interest") && (p.apr_pct > 0 || p.cash_advance_apr_pct > 0)) {
+      for (const at of monthlyAt(cal, from, to, p.statement_day, STATEMENT_MINUTE)) tasks.push({ at, rank: 1, key: `period:${id}`, run: (run) => closePeriod(run, id, at) });
     }
     if (t.installment) {
       const dom = typeof e.fields.due_day === "number" ? e.fields.due_day : p.statement_day;
@@ -146,36 +151,85 @@ function annualFeeDue(ctx: ReadContext, account: EntityId, at: number): boolean 
   return dateAt(calendarOf(ctx.world), at).month === (month ? Number(month) : 1);
 }
 
+/** What a revolving account's interest period reads: whether it is in grace, what was carried into it, at what rate, and whether it runs on the average daily balance from `since`. */
+interface Period {
+  grace: boolean;
+  carried: number;
+  apr: number;
+  daily: boolean;
+  since: number;
+}
+
+/** A period that ends at a statement: grace on a first statement and after one paid in full, the penalty rate while it applies. */
+function statementPeriod(ctx: ReadContext, account: EntityId, p: ResolvedProduct): Period {
+  const prev = cycleOf(ctx.state, account);
+  return {
+    grace: !prev || prev.closing <= 0 || prev.paid >= prev.closing,
+    carried: Math.max(0, (prev?.closing ?? 0) - (prev?.paid ?? 0)),
+    apr: prev?.penalty && p.penalty_apr_pct > 0 ? p.penalty_apr_pct : p.apr_pct,
+    daily: feature(ctx, account, "average_daily") && p.interest === "average_daily" && prev !== null,
+    since: accrualOf(ctx.state, account)?.from ?? prev?.at ?? 0,
+  };
+}
+
+/** A period where statements don't run: from the last statement day, owing what it owed then (none recorded: a first period, in grace), less what was paid since. */
+function openPeriod(ctx: ReadContext, account: EntityId, p: ResolvedProduct): Period {
+  const acc = accrualOf(ctx.state, account);
+  const owed = acc?.owed;
+  const paid = acc?.paid ?? 0;
+  return {
+    grace: owed === undefined || owed <= 0 || paid >= owed,
+    carried: owed === undefined ? 0 : Math.max(0, owed - paid),
+    apr: p.apr_pct,
+    daily: feature(ctx, account, "average_daily") && p.interest === "average_daily" && owed !== undefined,
+    since: acc?.from ?? 0,
+  };
+}
+
+/**
+ * What a revolving account's period ending at `at` charges, read from the state as it stands:
+ * interest on what was carried into it (none in grace), on the average daily balance where that
+ * runs; and a cash advance's own rate from the day it was drawn, grace or not (less the purchase
+ * rate the average daily balance already charged on it). Null without a product.
+ */
+export function revolvingCharges(ctx: ReadContext, account: EntityId, at: number): { interest: number; advance: number; apr: number; grace: boolean } | null {
+  const p = productOf(ctx, account);
+  if (!p) return null;
+  const period = feature(ctx, account, "statements") ? statementPeriod(ctx, account, p) : openPeriod(ctx, account, p);
+  const runs = feature(ctx, account, "interest");
+  let interest = 0;
+  if (!period.grace && runs && period.apr > 0) {
+    if (period.daily) {
+      const owedOnAverage = Math.max(0, -averageBalance(ctx.state, account, at));
+      const days = Math.max(1, (at - period.since) / 1440);
+      interest = Math.round((owedOnAverage * period.apr * days) / 100 / 365);
+    } else interest = Math.round((period.carried * period.apr) / 100 / 12);
+  }
+  const acc = accrualOf(ctx.state, account);
+  const held = acc ? acc.advanced * (at - acc.from) - acc.advancedAt : 0;
+  const advanceApr = p.cash_advance_apr_pct - (!period.grace && period.daily && period.apr > 0 ? period.apr : 0);
+  const advance = runs && advanceApr > 0 && held > 0 ? Math.round((held * advanceApr) / 100 / (365 * 1440)) : 0;
+  return { interest, advance, apr: period.apr, grace: period.grace };
+}
+
+/** Posts a period's interest and its cash advance interest; returns the interest it counts (the advance's only where it posted). */
+function postCharges(run: Run, account: EntityId, institution: string, charges: { interest: number; advance: number }, at: number): number {
+  const name = labelOf(run.ctx, account);
+  if (charges.interest > 0) run.emit(asUnit(posting(bankLines(account, institution, charges.interest), { memo: `${name} interest`, kind: "interest", category: "interest", at })));
+  const advance = charges.advance > 0 && run.emit(asUnit(posting(bankLines(account, institution, charges.advance), { memo: `${name} cash advance interest`, kind: "interest", category: "interest", at }))).length > 0 ? charges.advance : 0;
+  return charges.interest + advance;
+}
+
 /** A revolving account's statement closes. */
 function closeRevolving(run: Run, account: EntityId, at: number): void {
   const ctx = run.ctx;
   const p = productOf(ctx, account);
-  if (!p) return;
+  const charges = revolvingCharges(ctx, account, at);
+  if (!p || !charges) return;
   const prev = cycleOf(ctx.state, account);
   const name = labelOf(ctx, account);
-  // Grace (and so no interest) holds on a first statement and after one paid in full.
-  const grace = !prev || prev.closing <= 0 || prev.paid >= prev.closing;
-  const apr = prev?.penalty && p.penalty_apr_pct > 0 ? p.penalty_apr_pct : p.apr_pct;
-  let interest = 0;
-  const daily = feature(ctx, account, "average_daily") && p.interest === "average_daily" && prev !== null;
-  if (!grace && feature(ctx, account, "interest") && apr > 0) {
-    if (daily && prev) {
-      const owedOnAverage = Math.max(0, -averageBalance(ctx.state, account, at));
-      const days = Math.max(1, (at - (accrualOf(ctx.state, account)?.from ?? prev.at)) / 1440);
-      interest = Math.round((owedOnAverage * apr * days) / 100 / 365);
-    } else {
-      const carried = Math.max(0, (prev?.closing ?? 0) - (prev?.paid ?? 0));
-      interest = Math.round((carried * apr) / 100 / 12);
-    }
-  }
-  if (interest > 0) run.emit(asUnit(posting(bankLines(account, p.institution, interest), { memo: `${name} interest`, kind: "interest", category: "interest", at })));
-  // A cash advance has no grace: it runs the cash-advance rate from the day it was drawn (less the
-  // purchase rate the average daily balance already charged on it).
-  const acc = accrualOf(ctx.state, account);
-  const held = acc ? acc.advanced * (at - acc.from) - acc.advancedAt : 0;
-  const advanceApr = p.cash_advance_apr_pct - (!grace && daily && apr > 0 ? apr : 0);
-  const advanceInterest = feature(ctx, account, "interest") && advanceApr > 0 && held > 0 ? Math.round((held * advanceApr) / 100 / (365 * 1440)) : 0;
-  if (advanceInterest > 0 && run.emit(asUnit(posting(bankLines(account, p.institution, advanceInterest), { memo: `${name} cash advance interest`, kind: "interest", category: "interest", at }))).length > 0) interest += advanceInterest;
+  const { grace, apr } = charges;
+  const interest = postCharges(run, account, p.institution, charges, at);
   let fees = 0;
   if (feature(ctx, account, "fees") && p.fees.annual > 0 && annualFeeDue(ctx, account, at)) {
     if (run.emit(asUnit(posting(bankLines(account, p.institution, p.fees.annual), { memo: `${name} annual fee`, kind: "fee", category: "annual_fee", at }))).length > 0) fees += p.fees.annual;
@@ -198,6 +252,15 @@ function closeRevolving(run: Run, account: EntityId, at: number): void {
   if (owed > 0) tell(run, account, "bill", `${name} statement: ${money(ctx, owed)}${interest > 0 ? ` incl. ${money(ctx, interest)} interest` : ""}; minimum ${money(ctx, minimum)} due ${dateLabel(ctx, due)}.`, at);
 }
 
+/** A revolving account's statement day where statements don't run: the period's interest, and what it owes now kept for the next period. */
+function closePeriod(run: Run, account: EntityId, at: number): void {
+  const p = productOf(run.ctx, account);
+  const charges = revolvingCharges(run.ctx, account, at);
+  if (!p || !charges) return;
+  postCharges(run, account, p.institution, charges, at);
+  run.emit([{ type: FINANCE_EVENTS.accrue, data: { account, at, owed: Math.max(0, -balance(run.ctx.state, account)) } }]);
+}
+
 function dateLabel(ctx: ReadContext, at: number): string {
   const cal = calendarOf(ctx.world);
   const d = dateAt(cal, at);
@@ -215,6 +278,11 @@ export function amortized(owed: number, rate: number, months: number): number {
   return rate > 0 ? (owed * rate) / (1 - Math.pow(1 + rate, -months)) : owed / months;
 }
 
+/** A loan's yearly rate now: its penalty rate while that applies, else its APR. */
+function loanApr(ctx: ReadContext, account: EntityId, p: ResolvedProduct): number {
+  return cycleOf(ctx.state, account)?.penalty && p.penalty_apr_pct > 0 ? p.penalty_apr_pct : p.apr_pct;
+}
+
 /** An installment loan's month: interest on what it owes, its payment due today, its term one month shorter. */
 function billInstallment(run: Run, account: EntityId, at: number): void {
   const ctx = run.ctx;
@@ -229,7 +297,7 @@ function billInstallment(run: Run, account: EntityId, at: number): void {
   }
   const authoredMonths = numOf(e.fields.months_left, numOf(e.fields.remaining_months, p.term_months ?? 0));
   const months = Math.max(1, Math.round(prev?.months_left !== undefined ? prev.months_left : authoredMonths > 0 ? authoredMonths : 1));
-  const apr = prev?.penalty && p.penalty_apr_pct > 0 ? p.penalty_apr_pct : p.apr_pct;
+  const apr = loanApr(ctx, account, p);
   const rate = feature(ctx, account, "interest") ? apr / 100 / 12 : 0;
   const interest = Math.round(owed * rate);
   const name = labelOf(ctx, account);
@@ -294,19 +362,26 @@ function dueCheck(run: Run, account: EntityId, at: number): void {
   tell(run, account, "decline", `${name} payment of ${money(ctx, short)} ${what}${fee > 0 ? `; a ${money(ctx, fee)} late fee was charged` : ""}${penalty && !cycle.penalty ? `; the penalty rate of ${p.penalty_apr_pct}% applies` : ""}.`, at);
 }
 
+/** What a deposit account's interest comes to at `at`, read from the state as it stands: its APY on the average daily balance where that runs, else a month's on the balance. */
+function depositInterest(ctx: ReadContext, account: EntityId, at: number): number {
+  const p = productOf(ctx, account);
+  if (!p || !feature(ctx, account, "interest") || !(p.apy_pct > 0)) return 0;
+  const a = accrualOf(ctx.state, account);
+  const average = feature(ctx, account, "average_daily") && p.interest === "average_daily" ? averageBalance(ctx.state, account, at) : balance(ctx.state, account);
+  if (!(average > 0)) return 0;
+  const days = a && feature(ctx, account, "average_daily") ? Math.max(1, (at - a.from) / 1440) : 365 / 12;
+  return Math.round((average * p.apy_pct * days) / 100 / 365);
+}
+
 /** A deposit account's month: interest at its APY (on the average daily balance where that runs), and a checking account's fee below its waiver. */
 function monthEnd(run: Run, account: EntityId, at: number): void {
   const ctx = run.ctx;
   const p = productOf(ctx, account);
   if (!p) return;
   const name = labelOf(ctx, account);
-  const a = accrualOf(ctx.state, account);
   const average = feature(ctx, account, "average_daily") && p.interest === "average_daily" ? averageBalance(ctx.state, account, at) : balance(ctx.state, account);
-  if (feature(ctx, account, "interest") && p.apy_pct > 0 && average > 0) {
-    const days = a && feature(ctx, account, "average_daily") ? Math.max(1, (at - a.from) / 1440) : 365 / 12;
-    const interest = Math.round((average * p.apy_pct * days) / 100 / 365);
-    if (interest > 0) run.emit(asUnit(posting([{ account: bankSide(p.institution), amount: -interest }, { account, amount: interest }], { memo: `${name} interest`, kind: "interest", category: "interest", at })));
-  }
+  const interest = depositInterest(ctx, account, at);
+  if (interest > 0) run.emit(asUnit(posting([{ account: bankSide(p.institution), amount: -interest }, { account, amount: interest }], { memo: `${name} interest`, kind: "interest", category: "interest", at })));
   if (feature(ctx, account, "fees") && p.fees.maintenance > 0 && Math.min(balance(ctx.state, account), average) < p.fees.maintenance_waive) {
     run.emit(asUnit(posting(bankLines(account, p.institution, p.fees.maintenance), { memo: `${name} monthly fee`, kind: "fee", category: "maintenance", at })));
   }
@@ -318,4 +393,61 @@ export function statementState(cycle: CycleState, now: number): "paid" | "minimu
   if (cycle.paid >= cycle.closing) return "paid";
   if (cycle.paid >= cycle.minimum) return "minimum";
   return now > cycle.due || cycle.stage !== "current" ? "late" : "open";
+}
+
+/** "1st", "2nd", "3rd", "4th", "11th", "22nd". */
+function ordinal(n: number): string {
+  const tens = n % 100;
+  const suffix = tens >= 11 && tens <= 13 ? "th" : n % 10 === 1 ? "st" : n % 10 === 2 ? "nd" : n % 10 === 3 ? "rd" : "th";
+  return `${n}${suffix}`;
+}
+
+/** An account's interest as the cycle runs it: earned or charged, the rate now, how it's worked out in words, and its next posting with what it comes to if nothing changes before then. */
+export interface InterestOutlook {
+  way: "earns" | "charges";
+  ratePct: number;
+  basis: string;
+  next: { at: number; cents: number } | null;
+}
+
+/**
+ * An account's interest where it runs for the account (the `interest` feature, from Money 3) and
+ * the account has a rate: a deposit account's APY, posted on the 1st; a revolving account's APR,
+ * charged on its statement day (at a statement where statements run); a loan's, billed with its
+ * payment. Its next posting is worked out as the cycle will, from the state now, so it is what
+ * posts if nothing changes before then; an account that no longer runs (closed, charged off, paid
+ * off, matured) has none. Null where no interest runs.
+ */
+export function interestOutlook(ctx: ReadContext, account: EntityId, now: number): InterestOutlook | null {
+  const t = traitsOf(ctx, account);
+  const p = productOf(ctx, account);
+  const e = own(ctx.state.entities, account);
+  if (!t || !p || !e || !feature(ctx, account, "interest")) return null;
+  const cal = calendarOf(ctx.world);
+  const horizon = now + 62 * 1440;
+  const status = statusOf(ctx.state, account);
+  const runs = status !== "closed" && status !== "charged_off" && status !== "paid_off" && status !== "matured";
+  const daily = feature(ctx, account, "average_daily") && p.interest === "average_daily";
+  const at = (dom: number, minute: number): number | null => (runs ? (monthlyAt(cal, now, horizon, dom, minute)[0] ?? null) : null);
+  if (t.earns && p.apy_pct > 0) {
+    const next = at(1, INTEREST_MINUTE);
+    return { way: "earns", ratePct: p.apy_pct, basis: `${daily ? "On the average daily balance" : "On the balance"}, paid on the 1st of each month`, next: next === null ? null : { at: next, cents: depositInterest(ctx, account, next) } };
+  }
+  if (t.revolving && (p.apr_pct > 0 || p.cash_advance_apr_pct > 0)) {
+    const next = at(p.statement_day, STATEMENT_MINUTE);
+    const charges = revolvingCharges(ctx, account, next ?? now);
+    const statements = feature(ctx, account, "statements");
+    const how = statements ? `${daily ? "On the average daily balance" : "On what's left of a statement's balance"} when a statement isn't paid in full, charged as the next statement closes on the ${ordinal(p.statement_day)}` : `${daily ? "On the average daily balance" : "On what's left of the balance owed"} when the last ${ordinal(p.statement_day)} of the month's balance isn't paid in full, charged on the ${ordinal(p.statement_day)}`;
+    const advance = p.cash_advance_apr_pct > 0 ? `; cash advances ${p.cash_advance_apr_pct}% from the day they're drawn` : "";
+    return { way: "charges", ratePct: charges?.apr ?? p.apr_pct, basis: `${how}${advance}`, next: next === null || !charges ? null : { at: next, cents: charges.interest + charges.advance } };
+  }
+  if (t.installment && p.apr_pct > 0) {
+    const dom = typeof e.fields.due_day === "number" ? e.fields.due_day : p.statement_day;
+    const next = at(dom, LOAN_BILL_MINUTE);
+    const owed = Math.max(0, -balance(ctx.state, account));
+    const apr = loanApr(ctx, account, p);
+    // Interest runs here (checked above), so the bill charges the monthly rate on what's owed, worked out as the bill does.
+    return { way: "charges", ratePct: apr, basis: `On what's owed, billed with each payment on the ${ordinal(dom)}`, next: next === null || owed <= 0 ? null : { at: next, cents: Math.round(owed * (apr / 100 / 12)) } };
+  }
+  return null;
 }

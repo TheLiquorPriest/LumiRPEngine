@@ -26,6 +26,7 @@ import type { StepPurpose, StepTemplateDef, WorldDoc } from "../../../shared/wor
 import type { ChainMessage } from "../../../engine/ledger/chain";
 import { ownMessage } from "../../../engine/ledger/path";
 import { outputsOf } from "../../../engine/outputs";
+import { authorLines } from "../../../engine/player-events";
 import { unrevealedSecrets } from "../../../engine/visibility";
 import { usualRoutineForExtract } from "../../../packs/castlife/core/usual";
 import { knowledgeOn } from "../../chat-knowledge-prefs";
@@ -45,6 +46,7 @@ import { turnReader } from "../turn-writer";
 import { roleSections } from "../context";
 import { namesOf, type RoleAnswer, runRoleAgent } from "./agent";
 import { roleContract } from "./contracts";
+import { curateRun } from "./curator";
 import { choicesRun, proseRun } from "./director";
 import { interpretRun } from "./intent";
 import { mindRun } from "./minds-ask";
@@ -73,6 +75,7 @@ const TEST_PURPOSE: Readonly<Record<string, StepPurpose | null>> = {
   [roleContractId("director", "prose")]: "brief",
   [roleContractId("director", "choices")]: "choices",
   [roleContractId("read", "extract")]: "extract",
+  [roleContractId("curator", "curate")]: "extract",
   [roleContractId("memory", "memory")]: "memory",
   [roleContractId("memory", "consolidate")]: "consolidate",
   [roleContractId("skip", "beats")]: "skip",
@@ -233,8 +236,19 @@ const GROUNDED: Readonly<Record<string, Build>> = {
     if (!run) return { run: null, left: ["the reply's read: the extract step is off"] };
     if (!reply) return { run: null, left: [] };
     const { vars, usual } = replyFacts(rt, m, reply.text);
-    const input = rt.extractInput(m.at, { run, text: reply.text, said: m.user, vars, usual, skipped: false });
+    // As the turn reads on an agent chat: with the Curator on, the read leaves the Curator's facts to it (ITEMS-SPEC §6.4).
+    const input = rt.extractInput(m.at, { run, text: reply.text, said: m.user, vars, usual, skipped: false, shown: m.settings.thingReads.shown, ...(m.settings.agents.pipeline.curator ? { split: "read" as const } : {}) });
     return { run: (ctx) => extractRun(rt, { reply: reply.text, world: m.world, state: m.at.state, input, classic: noClassic }, ctx), left: [] };
+  },
+  [roleContractId("curator", "curate")]: async (rt, m) => {
+    const run = stepRuns(m, "extract").find((r) => r.template === null || r.template.output !== "effects");
+    const reply = m.reply;
+    if (!run) return { run: null, left: ["the Curator's read of the reply: the extract step it stands in for is off"] };
+    if (!reply) return { run: null, left: [] };
+    const { vars, usual } = replyFacts(rt, m, reply.text);
+    const input = rt.extractInput(m.at, { run, text: reply.text, said: m.user, vars, usual, skipped: false, shown: m.settings.thingReads.shown, split: "curator" });
+    const events = authorLines(rt.registry, m.at.world, m.at.state, m.at.pre, m.at.pre.length);
+    return { run: (ctx) => curateRun(rt, { reply: reply.text, world: m.world, state: m.at.state, input, events, classic: noClassic }, ctx), left: [] };
   },
   [roleContractId("memory", "memory")]: memoryTask("memory"),
   [roleContractId("memory", "consolidate")]: memoryTask("consolidate"),

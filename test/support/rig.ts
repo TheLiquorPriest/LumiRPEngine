@@ -14,7 +14,7 @@ import { toChain } from "../../src/backend/ledger-io";
 import { Runtime } from "../../src/backend/runtime";
 import { applyDelta } from "../../src/frontend/delta";
 import { FakeHost } from "./fake-host";
-import { ALL_PACKS, STARTER_INFO, STARTER_WORLDS } from "../../src/packs/index";
+import { ALL_PACKS, STARTER_INFO, STARTER_TABLES, STARTER_WORLDS } from "../../src/packs/index";
 import { POV, testPack, testWorld, tieStubPack } from "./test-pack";
 
 export interface RigOptions {
@@ -55,7 +55,7 @@ export class Rig {
     if (!options.minds && !this.host.files.has(settingsFile)) this.host.files.set(settingsFile, JSON.stringify({ v: 1, minds: { enabled: false } }));
     const port = options.port ? options.port(this.host) : this.host;
     this.rt = options.shipped
-      ? new Runtime({ host: port, packs: ALL_PACKS, pipeline: { plan: planTurn, post: postTurn }, templates: { ...STARTER_WORLDS, ...options.templates }, templateInfo: STARTER_INFO, ...(options.build ? { build: options.build } : {}) })
+      ? new Runtime({ host: port, packs: ALL_PACKS, pipeline: { plan: planTurn, post: postTurn }, templates: { ...STARTER_WORLDS, ...options.templates }, templateInfo: STARTER_INFO, starterTables: STARTER_TABLES, ...(options.build ? { build: options.build } : {}) })
       : new Runtime({ host: port, packs: [enginePack, testPack, tieStubPack], pipeline: { plan: planTurn, post: postTurn }, templates: { test: () => testWorld() }, ...(options.build ? { build: options.build } : {}) });
     this.jobs = new JobRunner(port, this.rt.worlds, this.rt.steps, this.rt.settings, this.rt.registry);
     this.dispatch = new Dispatcher(this.rt, this.jobs);

@@ -32,6 +32,7 @@ import { REC_SESSION_PARTS, ROOT_PATH } from "../../shared/ledger";
 import { isBlobHash } from "../../shared/stores";
 import type { WorldDoc } from "../../shared/world";
 import { applyEvent, applyMarker, applyValidUnits, validateEvent, validMarkerBody } from "../events";
+import { playedWorld } from "../places-in-play";
 import type { ReadContext } from "../registry";
 import type { WorldState } from "../state";
 import type { ChainMessage, FoldInput, FoldOutput, SnapshotStore } from "./chain";
@@ -146,6 +147,16 @@ export class LedgerCore {
   /** A world revision as this chat's env resolves it (its pinned revisions). */
   worldAt(revision: RevisionId): WorldDoc | undefined {
     return this.env.worlds(revision);
+  }
+
+  /**
+   * The world as `state` plays it (ITEMS-SPEC §6.2): its revision (or `revision`), with the places the
+   * state made overlaid (`playedWorld`). What a reader of a state reads its world as; `worldAt` is a
+   * revision as authored.
+   */
+  playedAt(state: Readonly<WorldState>, revision: RevisionId = state.revision): WorldDoc | undefined {
+    const world = this.env.worlds(revision);
+    return world && playedWorld(world, state);
   }
 
   /**
@@ -727,7 +738,7 @@ export class LedgerCore {
       users.unshift(activeText(m));
       userMessages[m.id] = contentId(activeText(m));
     }
-    const world = this.env.worlds(state.revision);
+    const world = this.playedAt(state);
     if (!world) return null;
     let startMarkers: Marker[] = [];
     let seq = this.journal.seq;
@@ -1045,12 +1056,14 @@ export class LedgerCore {
     const planned = this.plannedTurn();
     if (planned) return this.renderPlanned(observed, planned, keepStart);
     const out = head ?? this.fold(observed);
-    const world = this.env.worlds(out.state.revision);
-    if (!world) return null;
-    if (head && this.journal.started) return { state: head.state, world };
+    if (head && this.journal.started) {
+      const world = this.playedAt(head.state);
+      return world ? { state: head.state, world } : null;
+    }
     const state = structuredClone(out.state);
     if (!this.journal.started) for (const body of this.env.startMarkers()) applyMarker(state, body, this.env);
-    return { state, world };
+    const world = this.playedAt(state);
+    return world ? { state, world } : null;
   }
 
   /**
@@ -1128,7 +1141,7 @@ export class LedgerCore {
     const rec = m?.ledger?.swipes[String(m.swipeId)];
     if (!p || p.kind !== "continue" || !m || !rec || this.continueSuffix(p, m, rec, content) === null) return null;
     const head = this.fold(observed.slice(0, index + 1));
-    const world = this.env.worlds(head.state.revision);
+    const world = this.playedAt(head.state);
     return world ? { state: head.state, world, read: contSeed(rec.seed, this.journal.seq + 1) } : null;
   }
 
@@ -1162,7 +1175,7 @@ export class LedgerCore {
     // must not lean on what was undone; property seed rc-0d464a0-8843, L7).
     const planned = rec.events.slice(0, rec.pre).filter((_, i) => !rec.undone.some((u) => u.in === "events" && u.index === i));
     applyValidUnits(this.env.types, planned, state, (s) => this.env.types.context(world, s));
-    return { state, world, parent, ...(before ? { start: before } : {}) };
+    return { state, world: playedWorld(world, state), parent, ...(before ? { start: before } : {}) };
   }
 
   /** Reads `text` against `state`, keeping each unit (an event, or a group) that validates in sequence. */

@@ -32,6 +32,7 @@ import { rulesetFloor } from "../engine/registry-impl";
 import { applyTimeAdvance, clockFix, parseOverrides, parseTarget, resolveTarget } from "../engine/time";
 import { timelapseIntent } from "../engine/turn";
 import { definitionsLag, planUpgrade } from "../engine/upgrade";
+import { tableUpdates } from "../engine/table-updates";
 import { actionOdds, resolveAction } from "../engine/resolve";
 import { createRng } from "../engine/rng";
 import { hashParts } from "../shared/hash";
@@ -58,8 +59,10 @@ import { recordOutcome, undoModeChange, type ModeChange } from "./settings-store
 import { applyProposals } from "./turn-model";
 import { upgradePreview } from "./upgrade-preview";
 import { fixChip, recentLines, TIMELAPSE_ACTION } from "./view";
-import { buildGmView } from "./gm";
+import { buildGmView, gmThings, gmThingsHead, keepInWorld, madeInPlay } from "./gm";
+import type { KeepResult } from "../shared/thing-gm";
 import { buildCharacter } from "../engine/character";
+import { buildContext, findThingIds, personThings, thingPage, thingPicks, thingsList, thingTypes } from "../engine/thing-view";
 import type { CharacterResult } from "../shared/character";
 import { type DraftNotice, newChatRun, WorldError } from "./worlds";
 import { SecrecyError, SecrecyMoves } from "./secrecy-migration";
@@ -208,6 +211,52 @@ export class Dispatcher {
     const render = core.renderState(toChain(await this.rt.host.chats.messages(chatId, userId)));
     if (!render) throw new RequestError("unavailable", "the chat's world revision is not loaded");
     return render;
+  }
+
+  /**
+   * GM → Things (ITEMS-SPEC §10.2): the chat's head behind the GM gate, as `lre.gm` is. Leave it
+   * keeps a finding left beside the chat (`ChatPrefs`), never in its ledger, and answers the run
+   * after it; Keep in the world copies what the chat made in play into its world's draft, each under
+   * its own id, and answers what was kept and what is made in play after it.
+   */
+  private async gmThings(r: Extract<FrontendToBackend, { type: "lre.things" }> & { scope: "gm" }, userId: UserId, noted: DraftNoted): Promise<ResultBodies["lre.things"]> {
+    if (typeof r.chatId !== "string") throw new RequestError("bad_request", "name the chat");
+    await this.requireWorldChat(r.chatId, userId);
+    const core = await this.rt.ledger.core(r.chatId, userId);
+    if (!core) throw new RequestError("not_world_chat", "this chat is not attached to a world");
+    const head = gmThingsHead(core, toChain(await this.rt.host.chats.messages(r.chatId, userId)), this.rt.registry);
+    if (!head) throw new RequestError("unavailable", "the chat's world revision is not loaded");
+    if (r.op === "made" || r.op === "keep") {
+      const run = await this.rt.runOf(r.chatId, userId);
+      if (!run) throw new RequestError("not_world_chat", "this chat is not attached to a world");
+      if (r.op === "made") return { made: madeInPlay(head.ctx, await this.rt.worlds.working(run.worldId, userId)) };
+      const ids = (v: unknown): v is string[] => Array.isArray(v) && v.every((id) => typeof id === "string" && id !== "");
+      if (!ids(r.things) || !ids(r.places) || r.things.length + r.places.length === 0) throw new RequestError("bad_request", "say which things and places to keep");
+      const { things, places } = r;
+      let kept: KeepResult | null = null;
+      await this.rt.worlds.editFrom(
+        run.worldId,
+        userId,
+        (draft) => {
+          const keep = keepInWorld(head.ctx, draft, things, places);
+          kept = keep.result;
+          return { lre: PROTOCOL_VERSION, type: "lre.editor", reqId: "", worldId: run.worldId, base: null, op: "patch", ops: keep.ops };
+        },
+        noted,
+      );
+      return { ...(kept !== null ? { kept } : {}), made: madeInPlay(head.ctx, await this.rt.worlds.working(run.worldId, userId)) };
+    }
+    if (r.op === "leave") {
+      if (typeof r.key !== "string" || r.key === "" || typeof r.left !== "boolean") throw new RequestError("bad_request", "name the finding, and whether it is left");
+      await this.rt.chatPrefs.leaveTidy(r.chatId, userId, r.key, r.left);
+    }
+    const read = r.op === "leave" ? { op: "tidy" as const } : r;
+    if ((read.op === "thing" || read.op === "person") && typeof read.entity !== "string") throw new RequestError("bad_request", "name a thing or a person");
+    if (read.op === "find" && typeof read.words !== "string") throw new RequestError("bad_request", "say what to find");
+    if (!["list", "thing", "person", "find", "types", "tidy"].includes(read.op)) throw new RequestError("bad_request", "the op is list, thing, person, find, types, tidy, leave, made or keep");
+    const body = gmThings(this.rt.registry, head, read, { limit: (await this.rt.settings.get(userId)).tidy.findings, left: await this.rt.chatPrefs.tidyLeft(r.chatId, userId) });
+    if (!body) throw new RequestError("not_found", read.op === "person" ? "no such person" : "no such thing");
+    return body;
   }
 
   /** The chat run's seed, which samples on-demand detail; `head` opened the run's core and bridge. */
@@ -543,6 +592,32 @@ export class Dispatcher {
         reply("lre.character", found);
         return;
       }
+      case "lre.things": {
+        if (r.scope === "gm") {
+          reply("lre.things", await this.gmThings(r, userId, noted));
+          return;
+        }
+        // Build's Things (ITEMS-SPEC §10.1): the world's draft as a chat would start from it, an author's view.
+        if (r.scope !== "build" || typeof r.worldId !== "string") throw new RequestError("bad_request", "name the world");
+        const ctx = buildContext(this.rt.registry, await this.rt.worlds.working(r.worldId, userId));
+        if (!ctx) throw new RequestError("unavailable", "the draft can't start a chat yet: its start or calendar doesn't read");
+        if (r.op === "list") return reply("lre.things", { list: thingsList(ctx) });
+        if (r.op === "find") {
+          if (typeof r.words !== "string") throw new RequestError("bad_request", "say what to find");
+          return reply("lre.things", { found: findThingIds(ctx, r.words) });
+        }
+        if (r.op === "types") return reply("lre.things", { types: thingTypes(ctx) });
+        if (r.op !== "thing" && r.op !== "person") throw new RequestError("bad_request", "the op is list, thing, person, find or types");
+        if (typeof r.entity !== "string") throw new RequestError("bad_request", "name a thing or a person");
+        if (r.op === "thing") {
+          const thing = thingPage(ctx, r.entity);
+          if (!thing) throw new RequestError("not_found", "no such thing");
+          return reply("lre.things", { thing, pick: thingPicks(ctx) });
+        }
+        const person = personThings(ctx, r.entity);
+        if (!person) throw new RequestError("not_found", "no such person");
+        return reply("lre.things", { person, pick: thingPicks(ctx) });
+      }
       case "lre.state.get": {
         // An outside client's read of what a page is pushed (DESIGN §23). Only a read: no `ledger.page`,
         // no `askAgain` and no `ledger.open`, so it never takes a prepared reply's claim or closes a window.
@@ -650,7 +725,7 @@ export class Dispatcher {
         return;
       }
       case "lre.chat.knowledge": {
-        // This chat's own knowledge choices (DESIGN §6.11): kept in its metadata, never its ledger,
+        // This chat's own choices (DESIGN §6.11; ITEMS-SPEC §9): kept in its metadata, never its ledger,
         // so no recorded turn changes and a Branch keeps them; they apply from the next turn.
         await this.requireWorldChat(r.chatId, userId);
         if (r.knowledge !== undefined && r.knowledge !== null && typeof r.knowledge !== "boolean") throw new RequestError("bad_request", "knowledge tracking is on (true), off (false) or as Settings has it (null)");
@@ -658,18 +733,19 @@ export class Dispatcher {
         if (narrator === null && r.narrator !== null) throw new RequestError("bad_request", 'the narrator\'s knowledge is {"knowledge": "scene" or "pov", "secrets": "marked" or "omit"}, or null to follow the world\'s default, else Settings');
         const engine = r.engine;
         if (engine !== undefined && engine !== null && engine !== "classic" && engine !== "agents") throw new RequestError("bad_request", "the engine is classic or agents, or null to play classic");
+        if (r.tidy !== undefined && r.tidy !== null && typeof r.tidy !== "boolean") throw new RequestError("bad_request", "tidying impossible holds automatically is on (true), off (false) or as the world has it (null)");
         // A turn finishes on the engine it started on: while one waits at a gate, what it kept for its
         // resume (changes a review card approved among them) would be lost, so the switch waits for it.
         if (engine !== undefined && (engine ?? "classic") !== (await this.rt.chatKnowledge.engine(r.chatId, userId))) {
           const waiting = await this.rt.gateWaiting(r.chatId, userId);
           if (waiting !== null) throw new RequestError("conflict", `This chat's turn is waiting on ${waiting}. Answer or cancel it before you switch the engine: a turn finishes on the engine it started on.`);
         }
-        const change = { ...(r.knowledge !== undefined ? { knowledge: r.knowledge } : {}), ...(narrator !== undefined ? { narrator } : {}), ...(engine !== undefined ? { engine } : {}) };
+        const change = { ...(r.knowledge !== undefined ? { knowledge: r.knowledge } : {}), ...(narrator !== undefined ? { narrator } : {}), ...(engine !== undefined ? { engine } : {}), ...(r.tidy !== undefined ? { tidy: r.tidy } : {}) };
         const changes = Object.keys(change).length > 0;
         const prefs = changes ? await this.rt.chatKnowledge.set(r.chatId, userId, change) : await this.rt.chatKnowledge.get(r.chatId, userId);
         // A turn under way finishes on the engine and choices it started with (`TurnFrame`): the change applies from the chat's next turn.
         if (changes) this.rt.push.changed(r.chatId, userId);
-        reply("lre.chat.knowledge", { knowledge: prefs.knowledge ?? null, narrator: prefs.narrator ?? null, ...(prefs.engine === "agents" ? { engine: "agents" as const } : {}) });
+        reply("lre.chat.knowledge", { knowledge: prefs.knowledge ?? null, narrator: prefs.narrator ?? null, ...(prefs.engine === "agents" ? { engine: "agents" as const } : {}), ...(prefs.tidy !== undefined ? { tidy: prefs.tidy } : {}) });
         return;
       }
       case "lre.job": {
@@ -966,6 +1042,11 @@ export class Dispatcher {
         }
         return { chats };
       }
+      case "updates": {
+        // Data updates (DESIGN §9.2): what this build ships newer than the draft's tables, or one revision's (a chat's): the packs' own, and a starter world's own.
+        const world = r.revision !== undefined ? (await store.get(r.worldId, userId, r.revision)).world : await store.working(r.worldId, userId);
+        return { updates: tableUpdates(world, this.rt.registry.tables, this.rt.starterTables) };
+      }
     }
   }
 
@@ -1223,7 +1304,10 @@ export class Dispatcher {
       case "confirm": {
         // Set price and Pick item price a purchase nothing priced, and Pay another way pays the first
         // other way that covers it (DESIGN §9.5): each applies it as Apply would, so each accepts it.
-        if (choice !== "confirm" && choice !== "amount" && choice !== "price" && choice !== "item" && choice !== "other") {
+        // A Which one? pick (ITEMS-SPEC §5.3) applies the change for the thing picked, as Apply does.
+        const picked = /^pick:(\d+)$/.exec(choice);
+        const picks = Array.isArray(chip.payload.picks) ? chip.payload.picks : [];
+        if (choice !== "confirm" && choice !== "amount" && choice !== "price" && choice !== "item" && choice !== "other" && !picked) {
           await settle("rejected");
           this.rt.push.changed(chatId, userId);
           return { applied: false, pending: false };
@@ -1233,7 +1317,8 @@ export class Dispatcher {
           await settle("accepted");
           return result;
         }
-        const proposal = isRecord(chip.payload.proposal) ? (JSON.parse(JSON.stringify(chip.payload.proposal)) as JsonObject) : null;
+        const chosen = picked ? picks[Number(picked[1])] : chip.payload.proposal;
+        const proposal = isRecord(chosen) ? (JSON.parse(JSON.stringify(chosen)) as JsonObject) : null;
         if (!proposal) throw new RequestError("bad_request", "the chip has no proposal");
         // Edit amount: the purchase is charged what the player set, as set.
         if (choice === "amount") {
@@ -1289,7 +1374,10 @@ export class Dispatcher {
           await settle("accepted");
           return result;
         }
-        const refs = Dispatcher.refsTo(rec, events);
+        // A plan's Edit opens the organization's Plan tab in Play (an `org` input), with nothing to send.
+        if (choice === "edit") throw new RequestError("bad_request", "Edit opens the plan in Orgs; it sends nothing");
+        // What the player's message added to a plan is its turn's plan's (assess-party §6.2), ahead of the reply's read.
+        const refs = chip.payload.plan === true ? Runtime.refsOf(rec, events, 0) : Dispatcher.refsTo(rec, events);
         if (choice === "amount") {
           // Edit amount on a purchase that applied by itself: the difference to what it charged in all
           // moves between the same two accounts, as a correction beside it; one this version of the
@@ -1433,8 +1521,9 @@ export class Dispatcher {
         const lines = edited === undefined ? shown : edited.split("\n").map((l) => neutralizeMacros(l).trim()).filter((l) => l !== "");
         return { applied: this.rt.passOutline(chatId, text, [...lines, ...held]), pending: false };
       }
-      case "claimed": {
-        // Undo of a thing the player said they had: it goes, with what its action did (DESIGN §9.4).
+      case "claimed":
+      case "tidied": {
+        // Undo of a thing the player said they had: it goes, with what its action did (DESIGN §9.4); of an older chat's Things tidied fix: what it put down is back where it was (ITEMS-SPEC §9).
         const core = await this.rt.ledger.core(chatId, userId);
         const m = core?.chain(observed).find((x) => x.id === chip.messageId);
         const rec = m?.ledger?.swipes[String(m.swipeId)];
@@ -1517,7 +1606,7 @@ function chipValue(chip: StoredChip, choice: string, payload: JsonObject | undef
   const input = chip.actions.find((a) => a.id === choice)?.input;
   if (!input || !payload) return null;
   if (input.type === "money") return typeof payload.cents === "number" && Number.isSafeInteger(payload.cents) && payload.cents > 0 ? payload.cents : null;
-  if (input.type === "text" || input.type === "action") return null;
+  if (input.type === "text" || input.type === "action" || input.type === "org") return null;
   return typeof payload.value === "string" && input.options.some((o) => o.value === payload.value) ? payload.value : null;
 }
 

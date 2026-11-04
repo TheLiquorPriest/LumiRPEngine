@@ -1,0 +1,86 @@
+{
+ "recordedAt": "58b2ac44",
+ "recipe": "Port Alder (modern_slice_of_life) on the code of 58b2ac44, its catalog given a Refrigerator row (household goods), Jordan materialized; the events of moving Jordan to Alder Market and of the narrated purchase economy.buy {item: refrigerator, payer: pov, story: true}, which that build put in the payer",
+ "revision": "622774c4cc66e895a881bd81cf17755f",
+ "events": [
+  {
+   "type": "set",
+   "entity": "pov",
+   "field": "place",
+   "value": "alder_market"
+  },
+  {
+   "type": "post",
+   "lines": [
+    {
+     "account": "acct_pov_checking",
+     "amount": -121841
+    },
+    {
+     "account": "economy.external:market",
+     "amount": 114944
+    },
+    {
+     "account": "economy.external:tax:sales:mi",
+     "amount": 6897
+    }
+   ],
+   "memo": "Bought Refrigerator",
+   "overdraw": true,
+   "group": "fx:ddb5e73bca"
+  },
+  {
+   "type": "economy.txn",
+   "data": {
+    "memo": "Bought Refrigerator",
+    "lines": [
+     {
+      "account": "acct_pov_checking",
+      "amount": -121841
+     }
+    ],
+    "kind": "purchase",
+    "category": "household_goods",
+    "counterparty": "economy.external:market",
+    "payer": "pov",
+    "card": "card_pov_debit",
+    "status": "pending",
+    "settles": 1815,
+    "story": true
+   },
+   "group": "fx:ddb5e73bca"
+  },
+  {
+   "type": "economy.spend",
+   "data": {
+    "card": "card_pov_debit",
+    "day": 0,
+    "purchase": 121841,
+    "atm": 0
+   },
+   "group": "fx:ddb5e73bca"
+  },
+  {
+   "type": "spawn",
+   "entity": {
+    "id": "item:81d6cb7cf8df",
+    "kind": "item",
+    "name": "Refrigerator",
+    "tier": "background",
+    "fields": {
+     "notable": true,
+     "owner": "pov",
+     "catalog": "refrigerator",
+     "category": "household_goods"
+    },
+    "relations": [
+     {
+      "type": "in",
+      "to": "pov"
+     }
+    ]
+   },
+   "group": "fx:ddb5e73bca"
+  }
+ ]
+}

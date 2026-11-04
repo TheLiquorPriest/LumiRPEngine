@@ -1,59 +1,46 @@
-// Money → Jobs and Businesses (DESIGN §26): the party's jobs with their pay, schedule and last
-// paycheck; the businesses it owns or runs with their accounts, books, sales, invoices, payroll and
-// taxes. Each job and business opens its own page, and each control there its own page with Back
-// and one button. The player quits a job, and for a business they manage hires, gives raises, lets
-// people go, issues, pays and voids invoices, draws money, pays out profit, sells a stake and says
-// where their profit goes, each an in-world action, and runs the business's own accounts from their
-// pages; the GM ends and edits jobs, adds one, sets an invoice's state, edits every business's
-// declared fields and routes an owner's profit.
+// Money's work and businesses (DESIGN §26; ORG-SPEC §5.2): the party's jobs, each with its pay,
+// schedule, next payday, payslip, deductions and where the pay goes, from In & out's Income; a
+// business's own books, months and sales (its Money's Books in Orgs) and the invoices it issued;
+// and the controls on a business, which its pages in Orgs open: issuing an invoice (Money), paying
+// out profit, an owner's draw and where an owner's share goes (Ownership's Payouts), and selling a
+// stake (Ownership); hiring is People's Hire someone, the orgs pack's. Each control opens a page of
+// its own with Back and one button, an in-world action as the player's own role on the business
+// allows it. The player quits a job, and for a business they manage gives raises and lets people
+// go from its payroll's jobs; the GM ends and edits jobs, adds one, sets an invoice's state and
+// routes a person's share of a business's profit from their stake.
 
 import { useState } from "preact/hooks";
-import { INVOICE_STATES, PAY_BASES, PAY_EVERY, ROLE_RIGHTS, type BusinessView, type FinanceView, type InvoiceState, type JobView } from "../../../shared/finance";
+import { INVOICE_STATES, PAY_BASES, PAY_EVERY, ROLE_RIGHTS, type BusinessView, type InvoiceState, type JobView } from "../../../shared/finance";
 import { formatMoney, type WorldCurrency } from "../../../shared/world";
 import { Badge, Button, Empty, IdText, List, ListRow, Section } from "../../../frontend/components";
 import { humanize } from "../../../frontend/format";
-import type { IconName } from "../../../frontend/icons";
-import { AccountRow } from "./accounts";
 import { RoutePage, RouteRow } from "./assets";
 import { ActionPage, AmountField, AmountPage, amountProblem, ChoiceField, NumberField, SelectField, TextField, unchangedProblem, type Choice } from "./forms";
-import type { PlayerControls, SectionProps } from "./hub";
-import { businessAccounts, businessControls, gmParties, hireable, invoiceControls, jobControls, knownPeople, possessive, workBlocks, type BusinessControl, type InvoiceControl } from "./layout";
+import type { PlayerControls, SectionProps, SegmentProps } from "./hub";
+import { businessControls, findJob, gmParties, invoiceControls, jobControls, knownPeople, ownBusiness, possessive, workBlocks, type BusinessControl, type InvoiceControl } from "./layout";
 import { FieldsPage, OwnerRows, TxnRows } from "./lines";
-import { actionPage, Controls, detailPage, Hero, MoneyPage, Note, type HubPages } from "./nav";
-import { amountOf, distributeAction, drawAction, hireAction, invoiceAction, invoiceIssueAction, jobEndAction, jobSpawnOps, newIdFor, raiseAction, stakeSellAction, type HireForm } from "./requests";
+import { actionPage, Controls, Hero, MoneyPage, Note, type HubPage, type HubPages } from "./nav";
+import { amountOf, distributeAction, drawAction, invoiceAction, invoiceIssueAction, jobEndAction, jobSpawnOps, newIdFor, raiseAction, stakeSellAction, stakeSellUnitsAction } from "./requests";
 
 type Invoice = BusinessView["invoices"][number];
 
 /** A choice that stands for someone outside the world, whose name is typed instead. */
 const OUTSIDE = "__outside";
 
-/** The people a player's control may name (a hire, a customer, a buyer): those the POV knows. */
+/** The people a player's control may name (a customer, a buyer): those the POV knows. */
 function people(controls: PlayerControls): Choice[] {
   return knownPeople(controls.palette).map((p) => ({ value: p.id, label: p.label }));
 }
 
 /** A job by its title, or how it pays when it has none. */
-function jobTitle(j: JobView): string {
+export function jobTitle(j: JobView): string {
   return j.title || humanize(j.basis);
 }
 
 // ---------------------------------------------------------------- jobs
 
-/**
- * A job by id: one of the party's own, or one on the payroll of a business it owns or runs, with
- * that business (whose manager gives raises and lets people go, as its payroll offered).
- */
-function findJob(view: FinanceView, id: string): { job: JobView; employer: BusinessView | null } | null {
-  for (const b of view.businesses) {
-    const job = b.employees.find((j) => j.id === id);
-    if (job) return { job, employer: b };
-  }
-  const job = view.jobs.find((j) => j.id === id);
-  return job ? { job, employer: null } : null;
-}
-
-/** A job as a row: its title, the employer (or, on a payroll, the worker) and the next payday, its pay; it opens the job's page. */
-function JobListRow(props: { job: JobView; payroll: boolean; onOpen(): void }) {
+/** A job as a row: its title, the employer (or, on a payroll, the worker) and the next payday, its pay; `onOpen` opens the job's page. */
+export function JobListRow(props: { job: JobView; payroll: boolean; onOpen?(): void }) {
   const j = props.job;
   return (
     <ListRow
@@ -62,40 +49,43 @@ function JobListRow(props: { job: JobView; payroll: boolean; onOpen(): void }) {
       id={j.id}
       value={j.pay}
       badge={j.status === "active" ? undefined : <Badge>{humanize(j.status)}</Badge>}
-      chevron
+      chevron={props.onOpen !== undefined}
       onClick={props.onOpen}
     />
   );
 }
 
-function JobsSection(props: SectionProps) {
-  const { view, controls, nav } = props;
+/** A paycheck as its payslip lists it: what it came to before and after, with the taxes and deductions between where the books show them. */
+function Payslip(props: { job: JobView; withholding: boolean; currency: WorldCurrency }) {
+  const { job: j } = props;
+  const fmt = (cents: number): string => formatMoney(cents, props.currency);
+  const last = j.lastPay;
   return (
-    <MoneyPage nav={nav} name="jobs" title="Jobs">
-      {controls.mode === "gm" ? (
-        <Button variant="primary" icon="plus" block onClick={() => nav.open(actionPage("jobs", "new"))}>
-          Add a job
-        </Button>
-      ) : null}
-      {view.jobs.length === 0 ? (
-        <Empty icon="briefcase">No jobs.</Empty>
-      ) : (
-        <Section flush>
-          <List>
-            {view.jobs.map((j) => (
-              <JobListRow key={j.id} job={j} payroll={false} onOpen={() => nav.open(detailPage("job", j.id))} />
-            ))}
-          </List>
-        </Section>
-      )}
-    </MoneyPage>
+    <Section title="Payslip" flush>
+      <div data-lre-job-payslip={j.id}>
+        <List>
+          {last === null ? (
+            <ListRow icon="receipt" title="No payslip yet" subtitle={j.nextPay ? `The first comes on payday, ${j.nextPay}` : undefined} />
+          ) : props.withholding ? (
+            <>
+              <ListRow icon="receipt" title={`Paid ${last.at}`} subtitle="Before taxes" value={fmt(last.gross)} />
+              <ListRow title="Taxes" value={fmt(-last.taxes)} valueTone="neg" />
+              <ListRow title="Deductions" value={fmt(-last.deductions)} valueTone="neg" />
+              <ListRow title="Net pay" value={fmt(last.net)} valueTone="pos" />
+            </>
+          ) : (
+            <ListRow icon="receipt" title={`Paid ${last.at}`} subtitle="Net pay" value={fmt(last.net)} valueTone="pos" />
+          )}
+        </List>
+      </div>
+    </Section>
   );
 }
 
 /**
- * One job: its pay, schedule, next payday, hours and last paycheck (taxes and deductions where the
- * books show them), where the pay goes, and the controls its mode allows: the worker quits; whoever
- * runs the employer gives a raise or lets them go; the GM ends it and edits its fields.
+ * One job: its pay, schedule, next payday and hours, its payslip (taxes and deductions where the
+ * books show them), where the pay goes, and the controls its mode allows: the worker quits;
+ * whoever runs the employer gives a raise or lets them go; the GM ends it and edits its fields.
  */
 function JobPage(props: SectionProps & { job: JobView; employer: BusinessView | null }) {
   const { view, controls, nav, job: j } = props;
@@ -137,16 +127,16 @@ function JobPage(props: SectionProps & { job: JobView; employer: BusinessView | 
           ) : null}
         </Controls>
       ) : null}
-      {j.nextPay || j.grossPerPeriod !== null || j.hours || j.lastPay ? (
+      {j.nextPay || j.grossPerPeriod !== null || j.hours ? (
         <Section flush>
           <List>
             {j.nextPay ? <ListRow icon="calendar" title="Next payday" value={j.nextPay} /> : null}
             {j.grossPerPeriod !== null ? <ListRow icon="coins" title="Each payday, before taxes" value={fmt(j.grossPerPeriod)} /> : null}
             {j.hours ? <ListRow icon="clock" title="Hours this period" subtitle={`${j.hours.scheduled} scheduled`} value={String(j.hours.attended)} /> : null}
-            {j.lastPay ? <ListRow icon="receipt" title={`Last paid ${j.lastPay.at}`} subtitle={blocks.withholding ? `${fmt(j.lastPay.gross)} gross · ${fmt(-j.lastPay.taxes)} taxes · ${fmt(-j.lastPay.deductions)} deductions` : undefined} value={fmt(j.lastPay.net)} valueTone="pos" /> : null}
           </List>
         </Section>
       ) : null}
+      <Payslip job={j} withholding={blocks.withholding} currency={controls.currency} />
       {blocks.deductions && j.deductions.length > 0 ? (
         <Section title="Deductions" flush>
           <List>
@@ -173,6 +163,7 @@ function JobPage(props: SectionProps & { job: JobView; employer: BusinessView | 
 function JobEndPage(props: SectionProps & { job: JobView; control: "quit" | "let_go" | "end" }) {
   const { controls, nav, job: j, control } = props;
   const words = control === "quit" ? "Quit" : control === "let_go" ? "Let go" : "End the job";
+  if (controls.mode === "read") return null;
   const submit = (): Promise<boolean> => (controls.mode === "player" ? controls.act(jobEndAction(j.id)) : controls.edit([{ op: "set", entity: j.id, field: "status", value: "ended" }]));
   return (
     <ActionPage nav={nav} controls={controls} name={`job-${control}`} title={words} subtitle={control === "quit" ? jobTitle(j) : `${j.worker} · ${jobTitle(j)}`} go={words} danger submit={submit}>
@@ -234,136 +225,18 @@ function jobPage(control: string | undefined, props: SectionProps, job: JobView,
   }
 }
 
-// ---------------------------------------------------------------- businesses
+// ---------------------------------------------------------------- a business's books and invoices
 
-const BUSINESS_ICON: IconName = "bag";
-
-function BusinessesSection(props: SectionProps) {
-  const { view, controls, nav } = props;
-  return (
-    <MoneyPage nav={nav} name="businesses" title="Businesses">
-      {view.businesses.length === 0 ? (
-        <Empty icon={BUSINESS_ICON}>No businesses.</Empty>
-      ) : (
-        <Section flush>
-          <List>
-            {view.businesses.map((b) => (
-              <ListRow
-                key={b.id}
-                title={b.name}
-                subtitle={[b.role ? humanize(b.role) : null, `${b.books.period} profit`].filter((s) => s !== null).join(" · ")}
-                id={b.id}
-                value={formatMoney(b.books.profit, controls.currency)}
-                valueTone={b.books.profit < 0 ? "neg" : "pos"}
-                badge={b.invoices.some((i) => i.state === "late") ? <Badge tone="warn">Late invoice</Badge> : undefined}
-                chevron
-                onClick={() => nav.open(detailPage("business", b.id))}
-              />
-            ))}
-          </List>
-        </Section>
-      )}
-    </MoneyPage>
-  );
-}
-
-/** An invoice as a row: who it bills and for what, when it was issued and falls due, how late it is, its amount and state; `onOpen` when there's something to do with it. */
-function InvoiceRow(props: { invoice: Invoice; currency: WorldCurrency; onOpen?(): void }) {
-  const i = props.invoice;
-  const fmt = (cents: number): string => formatMoney(cents, props.currency);
-  return (
-    <ListRow
-      title={`${i.customerName}: ${i.memo || "invoice"}`}
-      subtitle={[`issued ${i.issuedAt}`, `due ${i.dueAt}`, i.days_late ? `${i.days_late} days late` : null, i.late_fee ? `late fee ${fmt(i.late_fee)}` : null].filter((s) => s !== null).join(" · ")}
-      id={i.id}
-      value={fmt(i.cents)}
-      badge={<Badge tone={i.state === "late" ? "neg" : i.state === "paid" ? "pos" : "neutral"}>{humanize(i.state)}</Badge>}
-      chevron={props.onOpen !== undefined}
-      onClick={props.onOpen}
-    />
-  );
-}
-
-const BUSINESS_CONTROL: Readonly<Record<BusinessControl, { label: string; icon: IconName }>> = {
-  hire: { label: "Hire", icon: "user-plus" },
-  invoice: { label: "Issue an invoice", icon: "receipt" },
-  draw: { label: "Owner's draw", icon: "wallet" },
-  distribute: { label: "Pay out profit", icon: "coins" },
-  stake: { label: "Sell a stake", icon: "users" },
-};
-
-const INVOICE_CONTROL: Readonly<Record<InvoiceControl, { title: string; go: string }>> = { void: { title: "Void the invoice", go: "Void" }, pay: { title: "Pay the invoice", go: "Pay" } };
-
-/** One business: where it trades, its accounts, its owners, its books, invoices, payroll and taxes, where the viewer's profit goes, and the controls its role allows. */
-function BusinessPage(props: SectionProps & { business: BusinessView }) {
-  const { view, controls, nav, business: b } = props;
+/** A business's own money's Books (ORG-SPEC §5.1, in Orgs): the year's books by category in the full books, month by month and its sales where they show. */
+export function BooksSegment(props: SegmentProps) {
+  const { view, controls } = props;
+  const b = ownBusiness(view);
+  if (!b) return null;
   const fmt = (cents: number): string => formatMoney(cents, controls.currency);
   const blocks = workBlocks(view);
-  const can = controls.mode === "player" ? businessControls(view, b) : [];
-  // Each account the view holds opens its page; one it doesn't (the party doesn't run the business, or
-  // their level shows only some accounts) is counted for the player and named for the GM, never shown by its id.
-  const accounts = businessAccounts(view, b);
-  const others = accounts.others.length;
-  // The player's own control on an invoice is its page; with both (a business billing its own manager) a page offers each; the GM sets its state.
-  const invoicePage = (i: Invoice) => {
-    if (controls.mode === "gm") return actionPage("business", b.id, "state", i.id);
-    const mine = invoiceControls(view, b, i);
-    if (mine.length === 0) return null;
-    return actionPage("business", b.id, mine.length === 1 ? (mine[0] ?? "invoice") : "invoice", i.id);
-  };
   return (
-    <MoneyPage nav={nav} name="business" title={b.name} subtitle={b.role ? humanize(b.role) : undefined}>
-      <IdText id={b.id} />
+    <>
       <Hero label={`Profit · ${b.books.period}`} value={fmt(b.books.profit)} tone={b.books.profit < 0 ? "neg" : "pos"} />
-      {can.length > 0 ? (
-        <Controls name={b.id}>
-          {can.map((c) => (
-            <Button key={c} icon={BUSINESS_CONTROL[c].icon} onClick={() => nav.open(actionPage("business", b.id, c))}>
-              {BUSINESS_CONTROL[c].label}
-            </Button>
-          ))}
-        </Controls>
-      ) : null}
-      {controls.mode === "gm" ? (
-        <Controls name={b.id}>
-          <Button icon="list" onClick={() => nav.open(actionPage("business", b.id, "fields"))}>
-            Business fields
-          </Button>
-        </Controls>
-      ) : null}
-      {b.places.length > 0 ? (
-        <Section flush>
-          <List>
-            <ListRow icon="pin" title="Trades at" value={b.places.map((p) => p.name).join(", ")} />
-          </List>
-        </Section>
-      ) : null}
-      {b.accounts.length > 0 ? (
-        <Section title="Accounts" flush>
-          <div data-lre-business-accounts={b.id}>
-            <List>
-              {accounts.shown.map((a) => (
-                <AccountRow key={a.id} account={a} currency={controls.currency} onOpen={() => nav.open(detailPage("account", a.id))} />
-              ))}
-              {others > 0 ? (
-                <ListRow
-                  icon="bank"
-                  title={controls.mode === "gm" ? accounts.others.map((id) => controls.gm.entities.find((e) => e.id === id)?.name ?? "another account").join(", ") : `${others} ${accounts.shown.length > 0 ? "more " : ""}${others === 1 ? "account" : "accounts"}`}
-                  subtitle={`${possessive(b.name, false)} own`}
-                />
-              ) : null}
-            </List>
-          </div>
-        </Section>
-      ) : null}
-      {b.owners.length > 0 ? (
-        <Section title="Owners" flush>
-          <List>
-            <OwnerRows owners={b.owners} />
-          </List>
-        </Section>
-      ) : null}
-      {b.role !== null && ROLE_RIGHTS[b.role].worth ? <RouteRow view={view} controls={controls} nav={nav} route={b.route} reinvest label={controls.mode === "player" ? "Your share of its profit goes to" : `${possessive(view.name, view.partyKind === "household")} share of its profit goes to`} page={actionPage("business", b.id, "route")} /> : null}
       <Section title={`Books · ${b.books.period}`} flush>
         <List>
           <ListRow title="Revenue" value={fmt(b.books.revenue)} valueTone="pos" />
@@ -392,7 +265,52 @@ function BusinessPage(props: SectionProps & { business: BusinessView }) {
           <TxnRows lines={b.sales} max={10} currency={controls.currency} />
         </Section>
       ) : null}
-      <Section title="Invoices" flush>
+    </>
+  );
+}
+
+/** An invoice as a row: who it bills and for what, when it was issued and falls due, how late it is, its amount and state; `onOpen` when there's something to do with it. */
+function InvoiceRow(props: { invoice: Invoice; currency: WorldCurrency; onOpen?(): void }) {
+  const i = props.invoice;
+  const fmt = (cents: number): string => formatMoney(cents, props.currency);
+  return (
+    <ListRow
+      title={`${i.customerName}: ${i.memo || "invoice"}`}
+      subtitle={[`issued ${i.issuedAt}`, `due ${i.dueAt}`, i.days_late ? `${i.days_late} days late` : null, i.late_fee ? `late fee ${fmt(i.late_fee)}` : null].filter((s) => s !== null).join(" · ")}
+      id={i.id}
+      value={fmt(i.cents)}
+      badge={<Badge tone={i.state === "late" ? "neg" : i.state === "paid" ? "pos" : "neutral"}>{humanize(i.state)}</Badge>}
+      chevron={props.onOpen !== undefined}
+      onClick={props.onOpen}
+    />
+  );
+}
+
+/**
+ * The invoices a business issued, on its own money's In & out, with Issue an invoice where the
+ * reader runs it. Each opens what may be done with it: the reader's own Void or Pay (as their own
+ * role on the business allows, or as its customer), or the GM's state.
+ */
+export function IssuedInvoices(props: SectionProps & { business: BusinessView }) {
+  const { controls, nav, reader, business: b } = props;
+  // The reader's own view of the business: their role on it decides their controls.
+  const theirs = reader?.view.businesses.find((x) => x.id === b.id) ?? null;
+  const issue = reader && theirs ? businessControls(reader.view, theirs).includes("invoice") : false;
+  const invoicePage = (i: Invoice): HubPage | null => {
+    if (controls.mode === "gm") return actionPage("business", b.id, "state", i.id);
+    const own = theirs?.invoices.find((x) => x.id === i.id);
+    const mine = reader && theirs && own ? invoiceControls(reader.view, theirs, own) : [];
+    if (mine.length === 0) return null;
+    return actionPage("business", b.id, mine.length === 1 ? (mine[0] ?? "invoice") : "invoice", i.id);
+  };
+  return (
+    <div class="lre-stack" data-lre-money-invoices={b.id}>
+      {issue ? (
+        <Button variant="primary" icon="receipt" block onClick={() => nav.open(actionPage("business", b.id, "invoice"))}>
+          Issue an invoice
+        </Button>
+      ) : null}
+      <Section title="Invoices it issued" flush>
         {b.invoices.length === 0 ? (
           <Empty icon="receipt">No invoices.</Empty>
         ) : (
@@ -404,48 +322,15 @@ function BusinessPage(props: SectionProps & { business: BusinessView }) {
           </List>
         )}
       </Section>
-      <Section title="Payroll" flush>
-        {b.employees.length === 0 ? (
-          <Empty icon="users">No one on the payroll.</Empty>
-        ) : (
-          <List>
-            {b.employees.map((j) => (
-              <JobListRow key={j.id} job={j} payroll onOpen={() => nav.open(detailPage("job", j.id))} />
-            ))}
-          </List>
-        )}
-      </Section>
-      {blocks.taxes && b.taxes.length > 0 ? (
-        <Section title="Taxes" flush>
-          <List>
-            {b.taxes.map((t) => (
-              <ListRow key={t.label} title={t.label} subtitle={t.due ? `due ${t.due}` : undefined} value={fmt(t.cents)} />
-            ))}
-          </List>
-        </Section>
-      ) : null}
-    </MoneyPage>
+    </div>
   );
 }
 
-function HirePage(props: SectionProps & { business: BusinessView }) {
-  const { controls, nav, business: b } = props;
-  const [form, setForm] = useState<HireForm>({ business: b.id, worker: "", title: "", basis: "hourly", rate: "", hoursPerWeek: null, payEvery: "biweekly" });
-  if (controls.mode !== "player") return null;
-  const body = hireAction(form, controls.currency);
-  const candidates = hireable(b, people(controls));
-  const problem = candidates.length === 0 ? "No one you can name is free to hire." : form.worker === "" ? "Choose whom to hire." : amountProblem(form.rate, controls.currency, "a rate", false);
-  return (
-    <ActionPage nav={nav} controls={controls} name="business-hire" title="Hire" subtitle={b.name} go="Hire" problem={problem} submit={() => (body === null ? Promise.resolve(false) : controls.act(body))}>
-      <SelectField label="Who" value={form.worker} empty="Choose someone" options={candidates} onChange={(worker) => setForm({ ...form, worker })} />
-      <TextField label="Title" value={form.title} onInput={(title) => setForm({ ...form, title })} />
-      <SelectField label="Paid by" value={form.basis} options={PAY_BASES.map((p) => ({ value: p, label: humanize(p) }))} onChange={(basis) => setForm({ ...form, basis })} />
-      <AmountField label="Rate (a year, an hour or a shift)" value={form.rate} currency={controls.currency} onInput={(rate) => setForm({ ...form, rate })} invalid={form.rate.trim() !== "" && amountOf(form.rate, controls.currency) === null} />
-      <NumberField label="Hours a week" value={form.hoursPerWeek} min={0} onChange={(hoursPerWeek) => setForm({ ...form, hoursPerWeek })} />
-      <SelectField label="Paid" value={form.payEvery} options={PAY_EVERY.map((p) => ({ value: p, label: humanize(p) }))} onChange={(payEvery) => setForm({ ...form, payEvery })} />
-    </ActionPage>
-  );
-}
+// ---------------------------------------------------------------- a business's controls
+
+const BUSINESS_CONTROL: Readonly<Record<BusinessControl, string>> = { invoice: "Issue an invoice", draw: "Owner's draw", distribute: "Pay out profit", stake: "Sell a stake" };
+
+const INVOICE_CONTROL: Readonly<Record<InvoiceControl, { title: string; go: string }>> = { void: { title: "Void the invoice", go: "Void" }, pay: { title: "Pay the invoice", go: "Pay" } };
 
 function IssueInvoicePage(props: SectionProps & { business: BusinessView }) {
   const { controls, nav, business: b } = props;
@@ -458,7 +343,7 @@ function IssueInvoicePage(props: SectionProps & { business: BusinessView }) {
   const cents = amountOf(amount, controls.currency);
   const who = customer === OUTSIDE ? (outside.trim() !== "" ? { name: outside } : null) : customer !== "" ? { id: customer } : null;
   return (
-    <ActionPage nav={nav} controls={controls} name="business-invoice" title="Issue an invoice" subtitle={b.name} go="Issue the invoice" problem={customer === "" ? "Choose a customer." : who === null ? "Type the customer's name." : amountProblem(amount, controls.currency, "the amount")} submit={() => (who === null || cents === null ? Promise.resolve(false) : controls.act(invoiceIssueAction(b.id, who, cents, memo, days)))}>
+    <ActionPage nav={nav} controls={controls} name="business-invoice" title={BUSINESS_CONTROL.invoice} subtitle={b.name} go="Issue the invoice" problem={customer === "" ? "Choose a customer." : who === null ? "Type the customer's name." : amountProblem(amount, controls.currency, "the amount")} submit={() => (who === null || cents === null ? Promise.resolve(false) : controls.act(invoiceIssueAction(b.id, who, cents, memo, days)))}>
       <SelectField label="To" value={customer} empty="Choose a customer" options={[...people(controls), { value: OUTSIDE, label: "Someone else (type the name)" }]} onChange={setCustomer} />
       {customer === OUTSIDE ? <TextField label="Customer's name" value={outside} onInput={setOutside} /> : null}
       <AmountField label="Amount" value={amount} currency={controls.currency} onInput={setAmount} invalid={amount.trim() !== "" && cents === null} />
@@ -468,17 +353,21 @@ function IssueInvoicePage(props: SectionProps & { business: BusinessView }) {
   );
 }
 
-function StakePage(props: SectionProps & { business: BusinessView }) {
-  const { controls, nav, business: b } = props;
+/** Selling the player's shares: in units where the company counts them (ORG-SPEC §3.10), else a percent of it. */
+function StakeSalePage(props: SectionProps & { business: BusinessView }) {
+  const { view, controls, nav, business: b } = props;
   const [share, setShare] = useState<number | null>(null);
   const [price, setPrice] = useState("");
   const [buyer, setBuyer] = useState("");
   if (controls.mode !== "player") return null;
+  const units = b.owners.some((o) => o.units !== undefined);
+  const held = b.owners.filter((o) => o.party === view.party).reduce((a, o) => a + (o.units ?? 0), 0);
   const cents = amountOf(price, controls.currency);
-  const problem = share === null ? "Type the share to sell." : share <= 0 ? "Sell a share above 0%." : amountProblem(price, controls.currency, "the price");
+  const problem = share === null ? (units ? "Type the units to sell." : "Type the share to sell.") : share <= 0 ? (units ? "Sell at least a unit." : "Sell a share above 0%.") : units && (!Number.isInteger(share) || share > held) ? `You hold ${held} units.` : amountProblem(price, controls.currency, "the price");
+  const body = share === null || cents === null ? null : units ? stakeSellUnitsAction(b.id, share, cents, buyer || undefined) : stakeSellAction(b.id, share, cents, buyer || undefined);
   return (
-    <ActionPage nav={nav} controls={controls} name="business-stake" title="Sell a stake" subtitle={b.name} go="Sell the stake" problem={problem} submit={() => (share === null || cents === null || problem !== null ? Promise.resolve(false) : controls.act(stakeSellAction(b.id, share, cents, buyer || undefined)))}>
-      <NumberField label="Share to sell (%)" value={share} min={0} max={100} onChange={setShare} />
+    <ActionPage nav={nav} controls={controls} name="business-stake" title={BUSINESS_CONTROL.stake} subtitle={b.name} go="Sell the shares" problem={problem} submit={() => (body === null || problem !== null ? Promise.resolve(false) : controls.act(body))}>
+      {units ? <NumberField label={`Units to sell (you hold ${held})`} value={share} min={1} max={held} onChange={setShare} /> : <NumberField label="Share to sell (%)" value={share} min={0} max={100} onChange={setShare} />}
       <AmountField label="Price" value={price} currency={controls.currency} onInput={setPrice} invalid={price.trim() !== "" && cents === null} />
       <SelectField label="Buyer" value={buyer} empty="Whoever buys" options={people(controls)} onChange={setBuyer} />
     </ActionPage>
@@ -540,14 +429,17 @@ function InvoiceStatePage(props: SectionProps & { business: BusinessView; invoic
   );
 }
 
-/** A business's pages: the business, each control's page and an invoice's, each only where the mode and the view allow it. */
+/** Where the party's share of a business's profit goes, in its words: "Your share of its profit goes to", or the GM's "Marcus Delgado's share…". */
+export function shareRouteLabel(props: SectionProps): string {
+  return props.controls.mode === "player" ? "Your share of its profit goes to" : `${possessive(props.view.name, props.view.partyKind === "household")} share of its profit goes to`;
+}
+
+/** A business's control pages and an invoice's, each only where the mode and the view allow it; the business itself has its pages in Orgs. */
 function businessPage(control: string | undefined, inner: string | undefined, props: SectionProps, b: BusinessView) {
   const { view, controls, nav } = props;
-  const invoice = inner === undefined ? undefined : b.invoices.find((i) => i.id === inner);
-  if (control === undefined) return <BusinessPage {...props} business={b} />;
-  if (control === "fields") return <FieldsPage nav={nav} controls={controls} name="business-fields" title="Business fields" subtitle={b.name} entity={b.id} />;
-  if (control === "route") return b.role !== null && ROLE_RIGHTS[b.role].worth ? <RoutePage view={view} controls={controls} nav={nav} target={{ business: b.id }} route={b.route} reinvest label={controls.mode === "player" ? "Your share of its profit goes to" : `${possessive(view.name, view.partyKind === "household")} share of its profit goes to`} subtitle={b.name} /> : null;
+  if (control === "route") return b.role !== null && ROLE_RIGHTS[b.role].worth ? <RoutePage view={view} controls={controls} nav={nav} target={{ business: b.id }} route={b.route} reinvest label={shareRouteLabel(props)} subtitle={b.name} /> : null;
   if (inner !== undefined) {
+    const invoice = b.invoices.find((i) => i.id === inner);
     if (!invoice) return null;
     if (control === "state") return <InvoiceStatePage {...props} business={b} invoice={invoice} />;
     const can = controls.mode === "player" ? invoiceControls(view, b, invoice) : [];
@@ -556,34 +448,63 @@ function businessPage(control: string | undefined, inner: string | undefined, pr
   }
   const can = controls.mode === "player" ? businessControls(view, b) : [];
   switch (control) {
-    case "hire":
-      return can.includes(control) ? <HirePage {...props} business={b} /> : null;
     case "invoice":
       return can.includes(control) ? <IssueInvoicePage {...props} business={b} /> : null;
     case "stake":
-      return can.includes(control) ? <StakePage {...props} business={b} /> : null;
+      return can.includes(control) ? <StakeSalePage {...props} business={b} /> : null;
     case "draw":
-      return can.includes(control) && controls.mode === "player" ? <AmountPage nav={nav} controls={controls} name="business-draw" title="Owner's draw" subtitle={b.name} label="Amount" go="Draw it" submit={(cents) => (cents === null ? Promise.resolve(false) : controls.act(drawAction(b.id, cents)))} /> : null;
+      return can.includes(control) && controls.mode === "player" ? <AmountPage nav={nav} controls={controls} name="business-draw" title={BUSINESS_CONTROL.draw} subtitle={b.name} label="Amount" go="Draw it" submit={(cents) => (cents === null ? Promise.resolve(false) : controls.act(drawAction(b.id, cents)))} /> : null;
     case "distribute":
-      return can.includes(control) && controls.mode === "player" ? <AmountPage nav={nav} controls={controls} name="business-distribute" title="Pay out profit" subtitle={b.name} label="Amount" go="Pay it out by share" optional="Its share of the profit since the last" submit={(cents) => controls.act(distributeAction(b.id, cents))} /> : null;
+      return can.includes(control) && controls.mode === "player" ? <AmountPage nav={nav} controls={controls} name="business-distribute" title={BUSINESS_CONTROL.distribute} subtitle={b.name} label="Amount" go="Pay it out by share" optional="Its share of the profit since the last" submit={(cents) => controls.act(distributeAction(b.id, cents))} /> : null;
     default:
       return null;
   }
 }
 
-/** Jobs' and businesses' pages: each section, a job, a business, and each control's page. What the view no longer holds, or the mode may not do, draws nothing (gone). */
+/**
+ * A person's stake in a business, as the GM sees it from their money (Assets): their role and
+ * share, where their share of its profit goes, and its owners; the business itself opens in GM →
+ * Orgs. The player's stakes open the business's Ownership in Orgs instead.
+ */
+function StakePage(props: SectionProps & { business: BusinessView }) {
+  const { view, controls, nav, business: b } = props;
+  const share = b.owners.find((o) => o.party === view.party)?.share ?? null;
+  return (
+    <MoneyPage nav={nav} name="stake" title={b.name} subtitle={b.role ? humanize(b.role) : undefined}>
+      <IdText id={b.id} />
+      <Hero label={`${possessive(view.name, view.partyKind === "household")} share`} value={share !== null ? `${Math.round(share * 10) / 10}%` : "—"} sub={`Profit · ${b.books.period}: ${formatMoney(b.books.profit, controls.currency)}`} />
+      <Controls name={b.id}>
+        <Button icon="briefcase" iconAfter="chevron-right" onClick={() => nav.elsewhere({ org: b.id, tab: "economy.ownership" })}>
+          Open in GM → Orgs
+        </Button>
+      </Controls>
+      {b.role !== null && ROLE_RIGHTS[b.role].worth ? <RouteRow view={view} controls={controls} nav={nav} route={b.route} reinvest label={shareRouteLabel(props)} page={actionPage("business", b.id, "route")} /> : null}
+      {b.owners.length > 0 ? (
+        <Section title="Owners" flush>
+          <List>
+            <OwnerRows owners={b.owners} />
+          </List>
+        </Section>
+      ) : null}
+    </MoneyPage>
+  );
+}
+
+/** Jobs' pages (a job and its controls, the GM's new job), a business's control pages, and the GM's stake pages. What the view no longer holds, or the mode may not do, draws nothing (gone). */
 export const workPages: HubPages = {
-  heads: ["jobs", "job", "businesses", "business"],
+  heads: ["jobs", "job", "business", "stake"],
   render(page, props) {
+    const { view, controls } = props;
     const [head, id, control, inner] = page.path;
-    if (head === "jobs") return id === undefined ? <JobsSection {...props} /> : id === "new" && props.controls.mode === "gm" ? <NewJobPage {...props} /> : null;
-    if (head === "businesses") return id === undefined ? <BusinessesSection {...props} /> : null;
+    if (head === "jobs") return id === "new" && controls.mode === "gm" ? <NewJobPage {...props} /> : null;
     if (id === undefined) return null;
     if (head === "job") {
-      const found = findJob(props.view, id);
+      const found = findJob(view, id);
       return found ? jobPage(control, props, found.job, found.employer) : null;
     }
-    const business = head === "business" ? props.view.businesses.find((b) => b.id === id) : undefined;
-    return business ? businessPage(control, inner, props, business) : null;
+    const business = view.businesses.find((b) => b.id === id);
+    if (!business) return null;
+    if (head === "stake") return controls.mode === "gm" && page.type === "detail" ? <StakePage {...props} business={business} /> : null;
+    return page.type === "action" ? businessPage(control, inner, props, business) : null;
   },
 };

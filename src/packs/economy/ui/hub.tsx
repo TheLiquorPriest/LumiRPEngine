@@ -1,47 +1,77 @@
-// The money hub (DESIGN §12, §25): one party's money. It opens on the overview (net
-// worth as a large figure, cash on hand, alerts, what's coming up, recent lines, and at the levels
-// that show them what it's made of and its cash flow), then a row for each of the party's other
-// sections with a line from the view, which opens that section's page. The player's Play → Me →
-// Money shows the POV's, with in-world actions as controls; the GM's Money tab shows anyone's,
-// with edits. Both draw the same `FinanceView`, which the core built at the party's Money level: a
-// band at level 1, the simple books below the top level, and everything at the top level; a feature
-// the world switches on shows its own detail wherever it runs, and one it switches off shows nowhere.
+// A party's money (DESIGN §12, §25; ORG-SPEC §5): its segments, Summary · Accounts · In & out ·
+// Books · Assets · Credit, each where the party has something there, under a row of them. Play →
+// Me → Money shows the POV's own, with in-world actions as controls; an organization's Money tab
+// in Orgs shows the organization's own, read only until people act as it (§3.6), though what it
+// shares with the POV (an account they hold, a business they run) opens the POV's own page with
+// their controls; GM → Money shows a person's, and GM → Orgs an organization's, with edits. All
+// draw the same `FinanceView`, which the core built at the party's Money level: a band at level 1,
+// the simple books below the top level, and everything at the top level; a feature the world
+// switches on shows its own detail wherever it runs, and one it switches off shows nowhere.
 
 import type { ComponentChildren } from "preact";
 import type { FinanceView, UpcomingLine } from "../../../shared/finance";
 import type { EditOp } from "../../../shared/protocol";
 import type { GmView, PaletteView } from "../../../shared/state-view";
-import { counted } from "../../../shared/words";
 import { formatMoney, type WorldCurrency } from "../../../shared/world";
-import { Badge, Banner, Button, Empty, List, ListRow, Section, Stat } from "../../../frontend/components";
+import { Badge, Banner, Button, Empty, List, ListRow, Section, Stat, Tabs, tabPanel } from "../../../frontend/components";
 import { humanize } from "../../../frontend/format";
-import type { IconName } from "../../../frontend/icons";
-import { hubTabs, overviewBlocks, SECTION_LABELS, type HubSection } from "./layout";
-import { TxnRows } from "./lines";
-import { detailPage, Hero, sectionPage, type HubNav, type HubPage } from "./nav";
+import { AccountsSegment } from "./accounts";
+import { AssetsSegment } from "./assets";
+import { CreditSegment } from "./credit";
+import { InOutSegment } from "./inout";
+import { comingUp, findFlow, moneySegments, overviewBlocks, ownBusiness, SUMMARY_ALERTS, type ActivityFilter, type MoneySegment } from "./layout";
+import { detailPage, Hero, MoneyPage, sectionPage, type HubNav, type HubPage, type HubPages } from "./nav";
 import type { ActionBody } from "./requests";
+import { BooksSegment } from "./work";
 
 /**
- * How the hub's controls reach the backend. The player's are in-world actions (`lre.action`,
+ * How a party's money pages reach the backend. The player's are in-world actions (`lre.action`,
  * played as a turn like any other); the GM's are edits (`lre.edit`, each one correction with its
- * own Undo). A section offers only the controls of its mode.
+ * own Undo); an organization's own money in Play has none of its own yet (`read`). A page offers
+ * only the controls of its mode.
  */
 export type HubControls =
   | { mode: "player"; busy: boolean; currency: WorldCurrency; act(body: ActionBody): Promise<boolean>; palette: PaletteView | null }
-  | { mode: "gm"; busy: boolean; currency: WorldCurrency; edit(ops: EditOp[]): Promise<boolean>; gm: GmView };
+  | { mode: "gm"; busy: boolean; currency: WorldCurrency; edit(ops: EditOp[]): Promise<boolean>; gm: GmView }
+  | { mode: "read"; busy: false; currency: WorldCurrency };
 
-/** What every page of the hub gets: the party's view, the controls of its mode, and the navigator. */
+/** The GM's controls, when the money is the GM's to edit. */
+export type GmControls = Extract<HubControls, { mode: "gm" }>;
+export type PlayerControls = Extract<HubControls, { mode: "player" }>;
+
+/**
+ * The POV's own money and controls, beside an organization's own money in Play: what the two share
+ * opens the POV's own page, and the POV's own controls on the organization (issuing its invoices,
+ * say) show on its pages.
+ */
+export interface Reader {
+  view: FinanceView;
+  controls: PlayerControls;
+}
+
+/** What every page of a party's money gets: the party's view, the controls of its mode, the navigator, and on an organization's money in Play the POV's own (`reader`). */
 export interface SectionProps {
   view: FinanceView;
   controls: HubControls;
   nav: HubNav;
+  reader?: Reader | null;
 }
 
-/** The GM's controls, when the hub is the GM's. */
-export type GmControls = Extract<HubControls, { mode: "gm" }>;
-export type PlayerControls = Extract<HubControls, { mode: "player" }>;
+/** What the segments get besides: the one chosen, Activity's filter, the world's clock and whether the Garage shows, each kept by the frame that draws them. */
+export interface HubFrame {
+  segment: MoneySegment;
+  onSegment(segment: MoneySegment): void;
+  filter: ActivityFilter;
+  onFilter(filter: ActivityFilter): void;
+  /** The HUD clock's minutes, which Coming up looks a week ahead of; null without one. */
+  now: number | null;
+  /** Whether Play's Garage shows, which Assets' vehicles open. */
+  garage: boolean;
+  /** The id the segments' panel goes by, for its row of tabs. */
+  panelId: string;
+}
 
-const SECTION_ICON: Readonly<Record<Exclude<HubSection, "overview">, IconName>> = { accounts: "bank", flows: "refresh", jobs: "briefcase", businesses: "bag", investments: "layers", properties: "home", credit: "pulse", household: "users" };
+export type SegmentProps = SectionProps & HubFrame;
 
 /**
  * The page a money line names (an alert, something coming up): its flow's when the view holds the
@@ -49,7 +79,7 @@ const SECTION_ICON: Readonly<Record<Exclude<HubSection, "overview">, IconName>> 
  * account's; null when it names neither, and the line opens nothing.
  */
 export function lineTarget(view: FinanceView, flow: string | null | undefined, account: string | null | undefined): { page: HubPage; name: string } | null {
-  const f = flow ? [...view.flows, ...view.properties.flatMap((p) => p.costs), ...(view.household?.flows ?? [])].find((x) => x.id === flow) : undefined;
+  const f = flow ? findFlow(view, flow) : null;
   if (f) return { page: detailPage("flow", f.id), name: f.label };
   const a = account ? view.accounts.find((x) => x.id === account) : undefined;
   return a ? { page: detailPage("account", a.id), name: a.name } : null;
@@ -62,64 +92,39 @@ export function lineTarget(view: FinanceView, flow: string | null | undefined, a
  * for it at a reading size; a 0 the view holds no flow for shows as it is.
  */
 export function upcomingValue(view: FinanceView, u: UpcomingLine, currency: WorldCurrency): { value: ComponentChildren; tone?: "pos" | "neg" | "muted" } {
-  const f = u.cents === 0 && u.flow ? [...view.flows, ...view.properties.flatMap((p) => p.costs), ...(view.household?.flows ?? [])].find((x) => x.id === u.flow) : undefined;
+  const f = u.cents === 0 && u.flow ? findFlow(view, u.flow) : null;
   if (f && f.cents !== null) return { value: formatMoney(f.cents, currency), tone: "muted" };
   if (f) return { value: <span class="lre-money-row-words">{f.amount}</span> };
   return { value: `${u.cents > 0 ? "+" : ""}${formatMoney(u.cents, currency)}`, tone: u.cents < 0 ? "neg" : "pos" };
 }
 
-/** A section's row line, from the view: what's in it at a glance. */
-function summaryOf(view: FinanceView, section: Exclude<HubSection, "overview">, fmt: (cents: number) => string): string {
-  const parts = (...list: (string | null)[]): string => list.filter((p) => p !== null).join(" · ");
-  switch (section) {
-    case "accounts": {
-      const due = view.accounts.filter((a) => a.due !== null).length;
-      return parts(counted(view.accounts.length, "account", "accounts"), view.cards.length > 0 ? counted(view.cards.length, "card", "cards") : null, due > 0 ? `${due} due` : null);
-    }
-    case "flows": {
-      if (view.flows.length === 0) return "None set up yet";
-      const active = view.flows.filter((f) => f.status === "active").length;
-      const paused = view.flows.filter((f) => f.status === "paused").length;
-      const next = view.overview?.upcoming.find((u) => u.flow !== null);
-      return parts(`${active} active`, paused > 0 ? `${paused} paused` : null, next ? `next ${next.label}, ${next.at}` : null);
-    }
-    case "jobs": {
-      const [job] = view.jobs;
-      if (view.jobs.length === 0) return "None yet";
-      if (view.jobs.length !== 1 || !job) return counted(view.jobs.length, "job", "jobs");
-      return parts(`${job.title || humanize(job.basis)} at ${job.employer}`, job.nextPay ? `payday ${job.nextPay}` : null);
-    }
-    case "businesses": {
-      const [b] = view.businesses;
-      if (view.businesses.length !== 1 || !b) return counted(view.businesses.length, "business", "businesses");
-      return parts(b.name, `${fmt(b.books.profit)} profit, ${b.books.period}`);
-    }
-    case "investments": {
-      const inv = view.investments;
-      if (!inv) return "";
-      return parts(`Worth ${fmt(inv.value)}`, `${inv.unrealised > 0 ? "+" : ""}${fmt(inv.unrealised)} not yet taken`);
-    }
-    case "properties": {
-      if (view.properties.length === 0) return "None yet";
-      const owned = view.properties.filter((p) => p.share > 0);
-      const forSale = view.properties.filter((p) => p.share <= 0 && p.forSale !== null && p.forSale !== undefined).length;
-      const [home] = owned;
-      return parts(owned.length === 1 && home ? `${home.name}, ${fmt(home.equity)} equity` : owned.length > 0 ? `${owned.length} owned` : null, forSale > 0 ? `${forSale} for sale` : null);
-    }
-    case "credit": {
-      const c = view.credit;
-      if (!c) return "";
-      return parts(c.score !== null ? `Score ${c.score}${c.band ? `, ${c.band}` : ""}` : "No score yet", c.offers.length > 0 ? counted(c.offers.length, "offer", "offers") : null);
-    }
-    case "household": {
-      const h = view.household;
-      if (!h) return "None yet";
-      return parts(h.name, counted(h.members.length, "person", "people"), `${fmt(h.monthly.total)} a month shared`);
-    }
-  }
+/** An alert as a banner, with Open where it names a page. */
+function AlertBanner(props: { view: FinanceView; nav: HubNav; alert: NonNullable<FinanceView["overview"]>["alerts"][number] }) {
+  const { alert: a, nav } = props;
+  const target = lineTarget(props.view, a.flow, a.account);
+  return (
+    <Banner
+      tone={a.tone}
+      actions={
+        target ? (
+          <Button variant="ghost" size="sm" iconAfter="chevron-right" label={`Open ${target.name}`} onClick={() => nav.open(target.page)}>
+            Open
+          </Button>
+        ) : undefined
+      }
+    >
+      {a.text}
+    </Banner>
+  );
 }
 
-function Overview(props: SectionProps) {
+/**
+ * Summary: net worth as a large figure (a band at Money 1; a household's own money, its shared
+ * costs a month), cash on hand, assets and what's owed; the first alerts and All alerts; what's due
+ * within the week; where a business trades; money in and out over the last 30 days, by category in
+ * the full books, with the next 30 days; and for the GM, the notes and the person's organizations.
+ */
+function SummarySegment(props: SegmentProps) {
   const { view, controls, nav } = props;
   const fmt = (cents: number): string => formatMoney(cents, controls.currency);
   const o = view.overview;
@@ -129,6 +134,8 @@ function Overview(props: SectionProps) {
   const netWorth = o && o.netWorth !== null ? o.netWorth : null;
   const assets = blocks.assets && o && o.assets !== null ? o.assets : null;
   const owed = blocks.assets && o && o.liabilities !== null && o.liabilities !== 0 ? o.liabilities : null;
+  // A household's own money with no account of its own leads with what its members share.
+  const shared = view.household !== null && view.household.id === view.party && netWorth === null ? view.household : null;
   // Cash on hand leads only where there's neither a net worth nor a band to lead with.
   const cashLeads = netWorth === null && !view.band && cash !== null;
   const stats =
@@ -139,6 +146,11 @@ function Overview(props: SectionProps) {
         {owed !== null ? <Stat label="Owed" value={fmt(-Math.abs(owed))} tone="neg" /> : null}
       </div>
     ) : null;
+  const alerts = o?.alerts ?? [];
+  const soon = comingUp(view, props.now);
+  const places = ownBusiness(view)?.places ?? [];
+  // Their organizations: the businesses they hold a role on and their household, each in GM → Orgs.
+  const theirs = controls.mode === "gm" && view.partyKind === "person" ? [...view.businesses.map((b) => ({ id: b.id, name: b.name, role: b.role ? humanize(b.role) : null })), ...(view.household ? [{ id: view.household.id, name: view.household.name, role: "Household" }] : [])] : [];
   return (
     <>
       {!view.opened ? (
@@ -149,6 +161,10 @@ function Overview(props: SectionProps) {
       <div class="lre-money-top" data-lre-money-overview>
         {netWorth !== null ? (
           <Hero label="Net worth" value={fmt(netWorth)} tone={netWorth < 0 ? "neg" : undefined} sub={view.band ? `Wealth: ${view.band}` : undefined} badges={level}>
+            {stats}
+          </Hero>
+        ) : shared ? (
+          <Hero label="Shared costs a month" value={fmt(shared.monthly.total)} sub={view.band ? `Wealth: ${view.band}` : undefined} badges={level}>
             {stats}
           </Hero>
         ) : view.band ? (
@@ -163,28 +179,20 @@ function Overview(props: SectionProps) {
           <span class="lre-money-hero-badges">{level}</span>
         )}
       </div>
-      {o?.alerts.map((a, i) => {
-        const target = lineTarget(view, a.flow, a.account);
-        return (
-          <Banner
-            key={`${a.text}:${i}`}
-            tone={a.tone}
-            actions={
-              target ? (
-                <Button variant="ghost" size="sm" iconAfter="chevron-right" label={`Open ${target.name}`} onClick={() => nav.open(target.page)}>
-                  Open
-                </Button>
-              ) : undefined
-            }
-          >
-            {a.text}
-          </Banner>
-        );
-      })}
-      {o && o.upcoming.length > 0 ? (
+      {alerts.slice(0, SUMMARY_ALERTS).map((a, i) => (
+        <AlertBanner key={`${a.text}:${i}`} view={view} nav={nav} alert={a} />
+      ))}
+      {alerts.length > SUMMARY_ALERTS ? (
+        <Section flush>
+          <List>
+            <ListRow icon="alert" title="All alerts" value={String(alerts.length)} chevron onClick={() => nav.open(sectionPage("alerts"))} />
+          </List>
+        </Section>
+      ) : null}
+      {soon.length > 0 ? (
         <Section title="Coming up" flush>
           <List>
-            {o.upcoming.slice(0, blocks.upcoming).map((u, i) => {
+            {soon.map((u, i) => {
               const target = lineTarget(view, u.flow, u.account);
               const amount = upcomingValue(view, u, controls.currency);
               return <ListRow key={`${u.clock}:${i}`} icon="calendar" title={u.label} subtitle={u.at} value={amount.value} valueTone={amount.tone} chevron={target !== null} onClick={target ? () => nav.open(target.page) : undefined} />;
@@ -192,17 +200,10 @@ function Overview(props: SectionProps) {
           </List>
         </Section>
       ) : null}
-      {view.level >= 2 ? (
-        <Section title="Recent" flush>
-          <TxnRows lines={view.recent} max={blocks.recent} currency={controls.currency} account />
-        </Section>
-      ) : null}
-      {blocks.breakdown && o && o.breakdown.length > 0 ? (
-        <Section title="What it's made of" flush>
+      {places.length > 0 ? (
+        <Section flush>
           <List>
-            {o.breakdown.map((b) => (
-              <ListRow key={b.label} title={b.label} value={fmt(b.cents)} valueTone={b.cents < 0 ? "neg" : undefined} />
-            ))}
+            <ListRow icon="pin" title="Trades at" value={places.map((p) => p.name).join(", ")} />
           </List>
         </Section>
       ) : null}
@@ -225,42 +226,70 @@ function Overview(props: SectionProps) {
           </List>
         </Section>
       ) : null}
-    </>
-  );
-}
-
-/** One party's money hub: the overview, then a row for each other section the party has, which opens its page. */
-export function MoneyHub(props: SectionProps & { label: string }) {
-  const { view, controls, nav } = props;
-  const tabs = hubTabs(view, controls.mode);
-  if (tabs.length === 0) return <Empty icon="coins">Money is off for {view.name}.</Empty>;
-  const fmt = (cents: number): string => formatMoney(cents, controls.currency);
-  const rows = tabs.flatMap((t) => (t.id === "overview" ? [] : [{ id: t.id, dot: t.dot }]));
-  return (
-    <div class="lre-money-hub" data-lre-money-hub={view.party}>
-      <Overview view={view} controls={controls} nav={nav} />
-      {rows.length > 0 ? (
-        <Section title={props.label} flush>
-          <div data-lre-money-sections>
+      {theirs.length > 0 ? (
+        <Section title="Their organizations" flush>
+          <div data-lre-money-orgs>
             <List>
-              {rows.map((t) => {
-                const summary = summaryOf(view, t.id, fmt);
-                return (
-                  <ListRow
-                    key={t.id}
-                    icon={SECTION_ICON[t.id]}
-                    title={SECTION_LABELS[t.id]}
-                    subtitle={summary === "" ? undefined : summary}
-                    badge={t.dot ? <Badge tone="warn">Needs you</Badge> : undefined}
-                    chevron
-                    onClick={() => nav.open(sectionPage(t.id))}
-                  />
-                );
-              })}
+              {theirs.map((org) => (
+                <ListRow key={org.id} icon="briefcase" title={org.name} subtitle={org.role ?? undefined} id={org.id} chevron onClick={() => nav.elsewhere({ org: org.id })} />
+              ))}
             </List>
           </div>
         </Section>
       ) : null}
+    </>
+  );
+}
+
+/** Every alert, each with Open where it names a page. */
+function AlertsPage(props: SectionProps) {
+  const { view, nav } = props;
+  const alerts = view.overview?.alerts ?? [];
+  return (
+    <MoneyPage nav={nav} name="alerts" title="Alerts" subtitle={view.name}>
+      {alerts.length === 0 ? <Empty icon="check">Nothing needs looking at.</Empty> : alerts.map((a, i) => <AlertBanner key={`${a.text}:${i}`} view={view} nav={nav} alert={a} />)}
+    </MoneyPage>
+  );
+}
+
+/** Summary's own page: every alert. */
+export const summaryPages: HubPages = {
+  heads: ["alerts"],
+  render(page, props) {
+    return page.type === "section" && page.path.length === 1 ? <AlertsPage {...props} /> : null;
+  },
+};
+
+const SEGMENT: Readonly<Record<MoneySegment, (props: SegmentProps) => ComponentChildren>> = {
+  summary: SummarySegment,
+  accounts: AccountsSegment,
+  in_out: InOutSegment,
+  books: BooksSegment,
+  assets: AssetsSegment,
+  credit: CreditSegment,
+};
+
+/**
+ * One party's money: a row of its segments (none when there's only one), then the segment chosen,
+ * Summary when the one chosen isn't there. Without hooks: the frame that draws it keeps the
+ * segment, Activity's filter and the panel's id.
+ */
+export function MoneyHub(props: SegmentProps) {
+  const { view, controls } = props;
+  const segments = moneySegments(view, controls.mode);
+  if (segments.length === 0) return <Empty icon="coins">Money is off for {view.name}.</Empty>;
+  const current = segments.find((s) => s.id === props.segment)?.id ?? "summary";
+  const Body = SEGMENT[current];
+  return (
+    <div class="lre-money-hub" data-lre-money-hub={view.party}>
+      {segments.length > 1 ? (
+        <div class="lre-money-segments" data-lre-money-segments>
+          <Tabs<MoneySegment> label={controls.mode === "player" ? "Your money" : `${view.name}: money`} panelId={props.panelId} value={current} tabs={segments} onChange={props.onSegment} />
+        </div>
+      ) : null}
+      <div {...(segments.length > 1 ? tabPanel(props.panelId, current) : {})} class="lre-money-segment" data-lre-money-segment={current}>
+        <Body {...props} />
+      </div>
     </div>
   );
 }

@@ -48,6 +48,8 @@ describe("a tap with no words waits for the player's next message", () => {
     expect(sent?.swipes[sent.swipeId]).toBe("I slide Danny twenty for the gas, no fuss.");
     expect(sent?.bag[LEDGER_NAMESPACE]).toMatchObject({ action: "pay", params: PAY.params, described: true });
     expect(outcome).toContain("Pay");
+    // The staged amount is the player's pick, in cents: $20, never read again as written ($2,000).
+    expect(outcome).toContain("Pay (Danny Okafor, $20.00)");
     expect((await chat.state()).staged ?? null).toBeNull();
 
     // A Re-run of that message plays the same action.

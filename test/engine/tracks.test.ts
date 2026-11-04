@@ -1,8 +1,13 @@
 import { describe, expect, test } from "bun:test";
+import type { HostPort } from "../../src/backend/host";
+import { seedKnowledge } from "../../src/backend/knowledge-seed";
+import { lintWorld } from "../../src/engine/authoring";
+import { buildGmWorld } from "../../src/engine/gm-view";
 import { agendaFor, answerPuzzle, moveTrack, normalizeAnswer, stepTracks } from "../../src/engine/tracks";
-import { findLeaks, hintsEarned, playerTrack, unrevealedTruths } from "../../src/engine/visibility";
+import { findLeaks, hintsEarned, playerTrack, trackKnown, unrevealedTruths } from "../../src/engine/visibility";
 import { Working } from "../../src/engine/working";
-import type { TrackDef } from "../../src/shared/world";
+import { STARTER_WORLDS } from "../../src/packs/index";
+import { GM_OWNER, type TrackDef, type WorldDoc } from "../../src/shared/world";
 import { baseWorld, POV, registryOf, startState } from "../packs/support";
 
 const quest: TrackDef = {
@@ -186,5 +191,34 @@ describe("tracks", () => {
     const wd = world();
     wd.tracks.plan = { id: "plan", kind: "agenda", label: "Open a bakery", owner: "dev", start: "save", visibility: "known_by", stages: { save: { label: "Save money", priority: 3, next: [] } } };
     expect(agendaFor(wd, startState(wd), "dev")).toEqual([{ track: "plan", label: "Open a bakery", stage: "save", stageLabel: "Save money", priority: 3 }]);
+  });
+
+  test("a track that is the GM's (owner gm): lint takes it, it seeds no one, knowing anyone never shows it, its cue is the world's, and the GM's views say GM", async () => {
+    const reg = registryOf();
+    const host = { books: { entries: async () => [] }, log: () => undefined } as unknown as Pick<HostPort, "books" | "log">;
+    const play = async (owner: TrackDef["owner"]) => {
+      const wd = world();
+      wd.tracks.butler = { ...secret, owner, start: "clue" };
+      wd.tracks.plan = { ...secret, id: "plan", label: "The plan", visibility: "known_by", owner, start: "clue" };
+      const w = new Working(reg, wd, startState(wd));
+      // The POV knows Dev, so a track Dev owns is known to them.
+      expect(w.apply({ type: "link", rel: "knows", from: POV, to: "dev" })).toBeNull();
+      const seeded = await seedKnowledge(host, { reg, world: wd, state: w.state, settings: { claimChars: 400 }, userId: "u" });
+      return {
+        lint: lintWorld(wd, reg).filter((i) => i.path.startsWith("tracks.butler.owner")).map((i) => i.code),
+        seeded: JSON.stringify(seeded).includes("butler"),
+        known: trackKnown(reg, wd, w.state, POV, wd.tracks.plan!),
+        cue: playerTrack(reg, wd, w.state, POV, "butler")?.cue ?? null,
+        owner: buildGmWorld(reg, wd, w.state).tracks.find((t) => t.id === "butler")?.owner ?? null,
+      };
+    };
+    // A person's: they hold the truths, knowing them makes the plan known, and the cue is their behaviour (Stance's alone).
+    expect(await play("dev")).toEqual({ lint: [], seeded: true, known: true, cue: null, owner: "Dev" });
+    // The GM's: nobody holds it or knows of it, and its cue is what anyone may notice.
+    expect(await play(GM_OWNER)).toEqual({ lint: [], seeded: false, known: false, cue: "Ink stains on a cuff.", owner: "GM" });
+    expect((await play("nobody")).lint).toEqual(["refs"]);
+    // Port Alder's debt is the GM's.
+    const alder = (STARTER_WORLDS["modern_slice_of_life"] as (id: string, name: string) => WorldDoc)("w", "Port Alder");
+    expect(alder.tracks.s_shop_trouble?.owner).toBe(GM_OWNER);
   });
 });

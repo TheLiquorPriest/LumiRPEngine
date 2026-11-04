@@ -8,7 +8,7 @@ import type { JsonObject, JsonValue } from "../shared/json";
 import { hasOwn, isRecord } from "../shared/json";
 import type { EntityId, PlaceId } from "../shared/ids";
 import { fixedReason } from "../shared/items-build";
-import { PARTY_RELATION } from "../shared/party";
+import { PARTY_RELATION, partyTierIn } from "../shared/party";
 import { activitySpanEnd, ALIVE, ENGINE_FIELDS, lifeStateOf, type FieldDef, type Recurrence, type RelationInstance, type RelationTypeDef, type ScheduleDef, type ScheduleSlot, type WorldDoc } from "../shared/world";
 import { calendarOf, formatStamp, formatTimeOfDay, placeOffset, weekdayName } from "./calendar";
 import { lifeOf } from "./life";
@@ -328,7 +328,7 @@ function bedChoices(bodies: Readonly<Record<EntityId, Body>>, refs: ReadonlyMap<
   return { places, items };
 }
 
-/** What the GM sees of them now: their activity until when, whether they travel with the POV, and what the story holds. */
+/** What the GM sees of them now: their activity until when, their tier in the POV's party, and what the story holds. */
 function nowOf(world: WorldDoc, state: Readonly<WorldState>, id: EntityId): CharacterNow {
   const e = own(state.entities, id);
   const cal = calendarOf(world);
@@ -340,7 +340,7 @@ function nowOf(world: WorldDoc, state: Readonly<WorldState>, id: EntityId): Char
     activity,
     activityLabel: words(activity),
     until: when(activitySpanEnd(e?.fields)),
-    party: e?.relations.some((r) => r.type === PARTY_RELATION && r.to === world.pov) ?? false,
+    partyTier: partyTierIn(e?.relations, world.pov),
     holds: Object.keys(holds)
       .sort()
       .flatMap((field) => {

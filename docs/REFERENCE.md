@@ -4,7 +4,7 @@
 
 What the engine and its packs register, as the registry has it: kinds and their fields, effects and the arguments they read, formula functions, actions, events, proposal channels, panels, slots, data tables and lint codes. Arguments and parameters marked `?` may be left out. The formula language is in [EXPRESSIONS.md](EXPRESSIONS.md), worked examples are in [RECIPES.md](RECIPES.md), and the [user guide](USER-GUIDE.md#authoring) shows the editors.
 
-Engine `0.1.0` · world format `lre-world-v1` · packs `engine` 1, `calendar` 1, `space` 1, `economy` 1, `gear` 1, `vehicles` 1, `weather` 1, `relationships` 1, `castlife` 1, `sheets` 1, `story` 1, `combat` 1, `minds` 1.
+Engine `0.1.0` · world format `lre-world-v1` · packs `engine` 1, `calendar` 1, `space` 1, `economy` 1, `gear` 1, `vehicles` 1, `weather` 1, `relationships` 1, `castlife` 1, `sheets` 1, `story` 1, `combat` 1, `minds` 1, `orgs` 1.
 
 ## Contents
 
@@ -15,6 +15,7 @@ Engine `0.1.0` · world format `lre-world-v1` · packs `engine` 1, `calendar` 1,
 - [Economy pack](#economy-pack-economy)
 - [Gear & containers pack](#gear--containers-pack-gear)
 - [Minds pack](#minds-pack-minds)
+- [Organizations pack](#organizations-pack-orgs)
 - [Relationships pack](#relationships-pack-relationships)
 - [Character sheets pack](#character-sheets-pack-sheets)
 - [Space & travel pack](#space--travel-pack-space)
@@ -77,19 +78,22 @@ The engine's own:
 
 Taxonomy and life states:
 
+- `acting(self, as)`
 - `band_of(entity)`
 - `has_tag(entity, tag)`
 - `in_class(entity, facet, value)`
 - `kind_is(entity, kind)`
 - `life_of(entity)`
+- `may(who, org, power)`
 - `member_of(entity, group)`
+- `staff_of(who, org)`
 - `tier_of(entity)`
 
 ### Events
 
 Core: `add`, `clock`, `link`, `materialize`, `post`, `set`, `spawn`, `stage`, `timelapse`, `unlink`.
 
-Engine bookkeeping: `engine.adjudged`, `engine.attempt`, `engine.beat`, `engine.caught`, `engine.check`, `engine.choice`, `engine.class`, `engine.cursor`, `engine.entity`, `engine.feed`, `engine.fired`, `engine.hint`, `engine.life`, `engine.note`, `engine.observed`, `engine.out.lines`, `engine.out.scene`, `engine.pause`, `engine.revealed`, `engine.rewind`, `engine.signal`, `engine.told`, `engine.ws.delete`, `engine.ws.pin`, `engine.ws.readers`, `engine.ws.write`.
+Engine bookkeeping: `engine.adjudged`, `engine.attempt`, `engine.beat`, `engine.caught`, `engine.check`, `engine.choice`, `engine.class`, `engine.cursor`, `engine.entity`, `engine.feed`, `engine.fired`, `engine.hint`, `engine.life`, `engine.note`, `engine.observed`, `engine.out.lines`, `engine.out.scene`, `engine.pause`, `engine.rename`, `engine.revealed`, `engine.rewind`, `engine.signal`, `engine.told`, `engine.ws.delete`, `engine.ws.pin`, `engine.ws.readers`, `engine.ws.write`.
 
 ### Relation types
 
@@ -352,7 +356,7 @@ Version 1 · realism domain `money` · requires `space`.
 | `overdraft` | Overdraft policy | enum: decline, fee, linked |  |  |  |  | live from money 2 |
 | `overdraft_limit` | Overdraft limit | money | ≥ 0 |  |  |  | live from money 2 |
 | `overdraft_link` | Overdraft from | ref → account |  |  |  |  | live from money 2 |
-| `owners` | Owners ({party, role, share?}) | list |  |  |  |  | live from money 1 |
+| `owners` | Owners ({party, role, share?, units?, class?}) | list |  |  |  |  | live from money 1 |
 | `payment` | Monthly payment (loans) | money | ≥ 0 |  |  |  | live from money 3 |
 | `product` | Product (a world product, or a class: cash, checking, business_checking, savings, money_market, cd, trust, escrow, credit_card, charge_card, line_of_credit, loan, mortgage, brokerage, retirement) | text |  |  |  |  | live from money 2 |
 | `secured_by` | Secured by | ref |  |  |  |  | live from money 3 |
@@ -362,23 +366,29 @@ Version 1 · realism domain `money` · requires `space`.
 
 #### `business`: Business
 
-Extends `thing`.
+Extends `group`.
 
 | Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |
 |---|---|---|---|---|---|---|---|
+| `close_at` | Closes at (HH:MM) | text |  |  |  |  | live from money 3 |
 | `collects_sales_tax` | Collects sales tax | bool |  |  |  |  | live from money 4 |
 | `daily_sales` | Walk-in takings a trading day | money | ≥ 0 |  |  |  | live from money 3 |
+| `decide_pct` | Ownership decisions need more than % of the votes | number | 0 … 100 | `50` |  |  | live from money 4 |
 | `distribution_every` | Paid out every | enum: month, quarter, year |  |  |  |  | live from money 4 |
 | `distribution_pct` | Profit paid out % | number | 0 … 100 |  |  |  | live from money 4 |
 | `industry` | Industry | text |  |  |  |  | live from money 3 |
 | `invoice_days` | Invoice terms (days) | number | ≥ 0 |  |  |  | live from money 3 |
 | `late_fee_pct` | Late fee % | number | ≥ 0 |  |  |  | live from money 4 |
 | `margin_pct` | Margin % | number | 0 … 100 |  |  |  | live from money 4 |
+| `open_at` | Opens at (HH:MM) | text |  |  |  |  | live from money 3 |
 | `operating_account` | Operating account | ref → account |  |  |  |  | live from money 3 |
-| `owners` | Owners ({party, role, share?}) | list |  |  |  |  | live from money 1 |
+| `owners` | Owners ({party, role, share?, units?, class?}) | list |  |  |  |  | live from money 1 |
 | `places` | Places it trades at | list of ref |  |  |  |  | live from money 3 |
 | `sales_spread_pct` | Takings vary by up to ± % | number | 0 … 100 | `30` |  |  | live from money 3 |
+| `share_classes` | Share classes ({id, label, votes}) | list |  |  |  |  | live from money 4 |
 | `structure` | Structure | enum: sole_proprietorship, partnership, llc, s_corp, c_corp |  |  |  |  | live from money 4 |
+| `structure_before` | Taxed as, until the change of structure (sole_proprietorship, partnership, llc, s_corp or c_corp) | text |  |  |  |  | live from money 4 |
+| `structure_from` | Its structure is taxed from (YYYY-MM-DD) | text |  |  |  |  | live from money 4 |
 | `trading_days` | Trading days (0 is Sunday) | list of number |  |  |  |  | live from money 3 |
 | `valuation_multiple` | Valued at this many years of profit, over its books | number | ≥ 0 | `3` |  |  | live from money 4 |
 | `value` | Value (set: overrides the books) | money | ≥ 0 |  |  |  | live from money 3 |
@@ -443,7 +453,7 @@ Extends `thing`.
 | `account` | Account | ref → account |  |  |  |  | live from money 4 |
 | `asset` | Asset | text |  |  |  |  | live from money 4 |
 | `lots` | Lots ({qty, cost, at}) | list |  |  |  |  | live from money 4 |
-| `owners` | Owners ({party, role, share?}) | list |  |  |  |  | live from money 1 |
+| `owners` | Owners ({party, role, share?, units?, class?}) | list |  |  |  |  | live from money 1 |
 | `route` | Distributions go to (an account, or reinvest) | text |  |  |  |  | live from money 4 |
 
 #### `invoice`: Invoice
@@ -471,7 +481,7 @@ Extends `thing`.
 | `commission_pct` | Commission % | number | ≥ 0 |  |  |  | live from money 3 |
 | `contractor` | Contractor (nothing withheld) | bool |  |  |  |  | live from money 4 |
 | `deductions` | Deductions ({label, pretax, cents?, pct?, kind?, match_pct?, to?}) | list |  |  |  |  | live from money 4 |
-| `employer` | Employer (a business, or an outside employer) | text |  |  |  |  | live from money 3 |
+| `employer` | Employer (anyone in the world, a place, or an outside employer) | text |  |  |  |  | live from money 3 |
 | `end` | Ends | date |  |  |  |  | live from money 3 |
 | `hours` | Hours counted | enum: scheduled, attended, contract |  |  |  |  | live from money 3 |
 | `hours_per_week` | Hours a week | number | ≥ 0 |  |  |  | live from money 3 |
@@ -486,6 +496,7 @@ Extends `thing`.
 | `pay_unit` | Custom pay: every | enum: day, week, month, year |  |  |  |  | live from money 3 |
 | `pay_weekday` | Payday weekday (0 = Sunday) | number | 0 … 6 |  |  |  | live from money 3 |
 | `pay_weekdays` | Custom pay: weekdays | list of number |  |  |  |  | live from money 3 |
+| `position` | Position (one its employer defines) | text |  |  |  |  | live from money 3 |
 | `rate` | Rate (a year, an hour or a shift) | money | ≥ 0 |  |  |  | live from money 3 |
 | `season_from` | Season from (MM-DD) | text |  |  |  |  | live from money 3 |
 | `season_to` | Season to (MM-DD) | text |  |  |  |  | live from money 3 |
@@ -514,7 +525,7 @@ Extends `thing`.
 | `managed` | Let to outside tenants | bool |  | `false` |  |  | live from money 3 |
 | `market_rent` | Market rent, a unit a month | money | ≥ 0 |  |  |  | live from money 3 |
 | `mortgage` | Mortgage | ref → account |  |  |  |  | live from money 3 |
-| `owners` | Owners ({party, role, share?}) | list |  |  |  |  | live from money 1 |
+| `owners` | Owners ({party, role, share?, units?, class?}) | list |  |  |  |  | live from money 1 |
 | `place` | Place | ref |  |  |  |  | live from money 3 |
 | `purchase_price` | Purchase price | money | ≥ 0 |  |  |  | live from money 4 |
 | `purchased` | Purchased | date |  |  |  |  | live from money 4 |
@@ -534,49 +545,65 @@ Extends `thing`.
 
 | Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |
 |---|---|---|---|---|---|---|---|
-| `owners` | Owners ({party, role, share?}) | list |  |  |  |  | live from money 1 |
+| `dues` | Dues ({cents, every, day?}) | list |  |  |  |  | live from money 3 |
+| `owners` | Owners ({party, role, share?, units?, class?}) | list |  |  |  |  | live from money 1 |
+| `payroll` | Pay schedule ({every, anchor, weekday, days}) | list |  |  |  |  | live from money 3 |
+| `payroll_account` | Payroll account | ref → account |  |  |  |  | live from money 3 |
+| `places` | Its places | list of ref |  |  |  |  |  |
+| `positions` | Positions ({id, title, powers, seats?, reports_to?, scope?, limits?, successor?, default?, no_dues?}) | list |  |  |  |  |  |
 
 ### Effects
 
 | Effect | Arguments |
 |---|---|
-| `economy.apply_credit` | `product`, `cents?`, `term?`, `secured_by?`, `who?` |
-| `economy.buy` | `item?`, `category?`, `qty?`, `price?`, `exact?`, `stated?`, `name?`, `payer?`, `method?`, `from?`, `payee?`, `keep?`, `cashback?`, `story?` |
-| `economy.card_replace` | `card`, `who?` |
-| `economy.card_state` | `card`, `state`, `who?` |
+| `economy.apply_credit` | `product`, `cents?`, `term?`, `secured_by?`, `who?`, `by?` |
+| `economy.buy` | `item?`, `category?`, `qty?`, `price?`, `exact?`, `stated?`, `name?`, `payer?`, `method?`, `from?`, `payee?`, `keep?`, `cashback?`, `story?`, `seller?`, `size?`, `at?`, `by?` |
+| `economy.card_replace` | `card`, `who?`, `by?` |
+| `economy.card_state` | `card`, `state`, `who?`, `by?` |
 | `economy.close_account` | `account` |
-| `economy.deposit` | `account`, `cents`, `who?` |
+| `economy.deposit` | `account`, `cents`, `who?`, `by?` |
 | `economy.distribute` | `business`, `cents?`, `by?` |
-| `economy.exercise` | `holding`, `qty?`, `from?`, `to?`, `party?` |
-| `economy.flow_create` | `label?`, `kind?`, `from?`, `to?`, `amount?`, `every?`, `interval?`, `weekday?`, `day?`, `month?`, `at?`, `once?`, `start?`, `end?`, `count?`, `shortfall?`, `retry_days?`, `retries?`, `fallback?`, `roll?`, `category?`, `who?` |
+| `economy.dues` | `org`, `cents`, `every?`, `day?`, `by?` |
+| `economy.exercise` | `holding`, `qty?`, `from?`, `to?`, `party?`, `by?` |
+| `economy.flow_create` | `label?`, `kind?`, `from?`, `to?`, `amount?`, `every?`, `interval?`, `weekday?`, `day?`, `month?`, `at?`, `once?`, `start?`, `end?`, `count?`, `shortfall?`, `retry_days?`, `retries?`, `fallback?`, `roll?`, `category?`, `who?`, `by?` |
 | `economy.flow_edit` | `flow`, `name?`, `clear?` |
-| `economy.flow_status` | `flow`, `status`, `who?` |
-| `economy.flow_update` | `flow`, `label?`, `kind?`, `from?`, `to?`, `amount?`, `every?`, `interval?`, `weekday?`, `day?`, `month?`, `at?`, `once?`, `start?`, `end?`, `count?`, `shortfall?`, `retry_days?`, `retries?`, `fallback?`, `roll?`, `category?`, `who?`, `clear?` |
-| `economy.hire` | `business`, `worker`, `title?`, `occupation?`, `basis?`, `rate?`, `hours?`, `hours_per_week?`, `pay_every?`, `start?`, `by?` |
+| `economy.flow_status` | `flow`, `status`, `who?`, `by?` |
+| `economy.flow_update` | `flow`, `label?`, `kind?`, `from?`, `to?`, `amount?`, `every?`, `interval?`, `weekday?`, `day?`, `month?`, `at?`, `once?`, `start?`, `end?`, `count?`, `shortfall?`, `retry_days?`, `retries?`, `fallback?`, `roll?`, `category?`, `who?`, `by?`, `clear?` |
+| `economy.hire` | `business`, `worker`, `title?`, `occupation?`, `basis?`, `rate?`, `hours?`, `hours_per_week?`, `pay_every?`, `start?`, `position?`, `by?` |
 | `economy.invoice_issue` | `business`, `customer?`, `customer_name?`, `cents`, `memo?`, `days?`, `by?` |
 | `economy.invoice_pay` | `invoice`, `by?` |
 | `economy.invoice_void` | `invoice`, `by?` |
 | `economy.job_end` | `job`, `end?`, `by?` |
+| `economy.job_hours` | `job`, `hours_per_week`, `by?` |
+| `economy.job_leave` | `job`, `leave`, `by?` |
+| `economy.job_position` | `job`, `position?`, `by?` |
 | `economy.job_raise` | `job`, `rate?`, `pct?`, `by?` |
-| `economy.lease_end` | `lease`, `on?`, `party?` |
-| `economy.lease_start` | `property`, `tenant`, `rent`, `months?`, `day?`, `unit?`, `from?`, `party?` |
+| `economy.job_title` | `job`, `title?`, `by?` |
+| `economy.lease_end` | `lease`, `on?`, `party?`, `by?` |
+| `economy.lease_start` | `property`, `tenant`, `rent`, `months?`, `day?`, `unit?`, `from?`, `party?`, `by?` |
 | `economy.lose` | `item`, `thief?` |
-| `economy.move` | `from`, `to`, `cents`, `memo?` |
+| `economy.move` | `from`, `to`, `cents`, `memo?`, `by?`, `party?` |
 | `economy.owner_draw` | `business`, `cents`, `owner?`, `by?` |
-| `economy.pay_card` | `card`, `from?`, `cents?`, `who?` |
+| `economy.pay_card` | `card`, `from?`, `cents?`, `who?`, `by?` |
+| `economy.pay_schedule` | `org`, `every`, `weekday?`, `anchor?`, `days?`, `by?` |
 | `economy.price_modifier` | `percent`, `scope?`, `place?`, `minutes?`, `id?`, `clear?` |
-| `economy.property_buy` | `property`, `price?`, `from?`, `down?`, `term_months?`, `party?` |
-| `economy.property_sell` | `property`, `price`, `buyer?`, `to?`, `party?` |
+| `economy.property_buy` | `property`, `price?`, `from?`, `down?`, `term_months?`, `party?`, `by?` |
+| `economy.property_list` | `property`, `price?`, `party?`, `by?` |
+| `economy.property_sell` | `property`, `price`, `buyer?`, `to?`, `party?`, `by?` |
 | `economy.release_hold` | `account`, `hold` |
-| `economy.route` | `holding?`, `property?`, `business?`, `to?`, `party?` |
-| `economy.set_autopay` | `account`, `mode`, `from?`, `cents?`, `who?` |
+| `economy.route` | `holding?`, `property?`, `business?`, `to?`, `party?`, `by?` |
+| `economy.set_autopay` | `account`, `mode`, `from?`, `cents?`, `who?`, `by?` |
 | `economy.set_pay_prefs` | `tiers`, `who?` |
 | `economy.set_price` | `asset`, `price` |
 | `economy.set_status` | `account`, `status` |
-| `economy.stake_sell` | `business`, `share`, `price`, `buyer?`, `to?`, `party?` |
-| `economy.trade` | `side?`, `party?`, `holding?`, `asset?`, `account?`, `qty?`, `amount?`, `from?`, `to?`, `right?`, `strike?`, `expiry?` |
-| `economy.transfer` | `to`, `cents`, `from?`, `memo?`, `method?`, `story?` |
-| `economy.withdraw` | `account`, `cents`, `who?` |
+| `economy.share_out` | `org`, `cents`, `from?`, `by?` |
+| `economy.shares_buy_back` | `business`, `from`, `units`, `price?`, `to?`, `party?`, `by?` |
+| `economy.shares_classes` | `business`, `class?`, `label?`, `votes?`, `holder?`, `remove?`, `party?`, `by?` |
+| `economy.shares_issue` | `business`, `to`, `units`, `price?`, `class?`, `from?`, `party?`, `by?` |
+| `economy.stake_sell` | `business`, `share?`, `units?`, `price?`, `buyer?`, `to?`, `party?`, `by?` |
+| `economy.trade` | `side?`, `party?`, `holding?`, `asset?`, `account?`, `qty?`, `amount?`, `from?`, `to?`, `right?`, `strike?`, `expiry?`, `by?` |
+| `economy.transfer` | `to`, `cents`, `from?`, `memo?`, `method?`, `story?`, `by?` |
+| `economy.withdraw` | `account`, `cents`, `who?`, `by?` |
 
 ### Formula functions
 
@@ -585,7 +612,7 @@ Extends `thing`.
 - `business_value(id)`
 - `can_afford(who, cents)`
 - `credit_score(who)`
-- `employs(business, who)`
+- `employs(employer, who)`
 - `holding_units(id)`
 - `holding_value(id)`
 - `holds(who, thing)`
@@ -603,44 +630,56 @@ Extends `thing`.
 
 | Action | Label | Description | Parameters | Check | Outcomes | Minutes | Lexicon |
 |---|---|---|---|---|---|---|---|
-| `apply_credit` | Apply for credit | Apply for a credit card, a credit line or a loan. | `product: text`, `amount?: money`, `term?: number` |  | `default` | `15` | apply for a credit card, apply for a loan, take out a loan |
-| `buy` | Buy | Buy something: food, drinks, goods or a service, here or delivered. | `item: text`, `qty?: number`, `price?: money`, `method?: text`, `cashback?: money` |  | `default` | `5` | buy, purchase, order, pick up a |
-| `card_freeze` | Freeze card | Freeze a card so it can't be used. | `card: ref → card` |  | `default` | `2` | freeze my card, lock my card |
-| `card_replace` | Replace card | Order a replacement card. | `card: ref → card` |  | `default` | `2` | replace my card, order a new card |
-| `card_report_lost` | Report card lost | Report a card lost or stolen. | `card: ref → card` |  | `default` | `2` | report my card lost, my card was stolen, cancel my card |
-| `card_unfreeze` | Unfreeze card | Unfreeze a frozen card. | `card: ref → card` |  | `default` | `2` | unfreeze my card, unlock my card |
-| `deposit_cash` | Deposit cash | Put cash into a bank account. | `account: ref → account`, `amount: money` |  | `default` | `3` | deposit, pay in cash, bank the cash |
+| `apply_credit` | Apply for credit | Apply for a credit card, a credit line or a loan. | `product: text`, `amount?: money`, `term?: number`, `as?: ref` |  | `default` | `15` | apply for a credit card, apply for a loan, take out a loan |
+| `buy` | Buy | Buy something: food, drinks, goods or a service, here or delivered. | `item: text`, `qty?: number`, `price?: money`, `method?: text`, `cashback?: money`, `as?: ref` |  | `default` | `5` | buy, purchase, order, pick up a |
+| `card_freeze` | Freeze card | Freeze a card so it can't be used. | `card: ref → card`, `as?: ref` |  | `default` | `2` | freeze my card, lock my card |
+| `card_replace` | Replace card | Order a replacement card. | `card: ref → card`, `as?: ref` |  | `default` | `2` | replace my card, order a new card |
+| `card_report_lost` | Report card lost | Report a card lost or stolen. | `card: ref → card`, `as?: ref` |  | `default` | `2` | report my card lost, my card was stolen, cancel my card |
+| `card_unfreeze` | Unfreeze card | Unfreeze a frozen card. | `card: ref → card`, `as?: ref` |  | `default` | `2` | unfreeze my card, unlock my card |
+| `deposit_cash` | Deposit cash | Put cash into a bank account. | `account: ref → account`, `amount: money`, `as?: ref` |  | `default` | `3` | deposit, pay in cash, bank the cash |
 | `distribute_profit` | Distribute profit | Pay a business's profit out to its owners. | `business: ref → business`, `amount?: money` |  | `default` | `10` | distribute profit, pay dividends, pay out the owners |
-| `exercise_option` | Exercise an option | Exercise an option contract you hold. | `holding: ref → holding`, `qty?: number`, `from?: ref → account`, `to?: ref → account` |  | `default` | `2` | exercise the option, exercise my calls, exercise my puts |
-| `flow_create` | Set up a standing payment | Set up a standing payment: a bill, a regular transfer, an allowance. | `label?: text`, `kind?: text`, `from?: ref → account`, `to?: text`, `amount?: money`, `every?: text`, `interval?: number`, `weekday?: number`, `day?: number`, `month?: number`, `at?: text`, `once?: text`, `start?: text`, `end?: text`, `count?: number`, `shortfall?: text`, `retry_days?: number`, `retries?: number`, `fallback?: text`, `roll?: text`, `category?: text` |  | `default` | `2` | set up a standing order, schedule a payment, set up a recurring transfer |
-| `flow_delete` | Cancel a standing payment | Cancel a standing payment. | `flow: ref → flow` |  | `default` | `2` | cancel the standing order, stop the recurring payment |
-| `flow_pause` | Pause a standing payment | Pause a standing payment. | `flow: ref → flow` |  | `default` | `2` | pause the standing order |
-| `flow_resume` | Resume a standing payment | Resume a paused standing payment. | `flow: ref → flow` |  | `default` | `2` | resume the standing order |
-| `flow_update` | Change a standing payment | Change a standing payment: its amount, its schedule or its accounts. | `flow: ref → flow`, `label?: text`, `kind?: text`, `from?: ref → account`, `to?: text`, `amount?: money`, `every?: text`, `interval?: number`, `weekday?: number`, `day?: number`, `month?: number`, `at?: text`, `once?: text`, `start?: text`, `end?: text`, `count?: number`, `shortfall?: text`, `retry_days?: number`, `retries?: number`, `fallback?: text`, `roll?: text`, `category?: text`, `clear?: text` |  | `default` | `2` | change the standing order, change the recurring payment |
+| `exercise_option` | Exercise an option | Exercise an option contract you hold. | `holding: ref → holding`, `qty?: number`, `from?: ref → account`, `to?: ref → account`, `as?: ref` |  | `default` | `2` | exercise the option, exercise my calls, exercise my puts |
+| `flow_create` | Set up a standing payment | Set up a standing payment: a bill, a regular transfer, an allowance. | `label?: text`, `kind?: text`, `from?: ref → account`, `to?: text`, `amount?: money`, `every?: text`, `interval?: number`, `weekday?: number`, `day?: number`, `month?: number`, `at?: text`, `once?: text`, `start?: text`, `end?: text`, `count?: number`, `shortfall?: text`, `retry_days?: number`, `retries?: number`, `fallback?: text`, `roll?: text`, `category?: text`, `as?: ref` |  | `default` | `2` | set up a standing order, schedule a payment, set up a recurring transfer |
+| `flow_delete` | Cancel a standing payment | Cancel a standing payment. | `flow: ref → flow`, `as?: ref` |  | `default` | `2` | cancel the standing order, stop the recurring payment |
+| `flow_pause` | Pause a standing payment | Pause a standing payment. | `flow: ref → flow`, `as?: ref` |  | `default` | `2` | pause the standing order |
+| `flow_resume` | Resume a standing payment | Resume a paused standing payment. | `flow: ref → flow`, `as?: ref` |  | `default` | `2` | resume the standing order |
+| `flow_update` | Change a standing payment | Change a standing payment: its amount, its schedule or its accounts. | `flow: ref → flow`, `label?: text`, `kind?: text`, `from?: ref → account`, `to?: text`, `amount?: money`, `every?: text`, `interval?: number`, `weekday?: number`, `day?: number`, `month?: number`, `at?: text`, `once?: text`, `start?: text`, `end?: text`, `count?: number`, `shortfall?: text`, `retry_days?: number`, `retries?: number`, `fallback?: text`, `roll?: text`, `category?: text`, `clear?: text`, `as?: ref` |  | `default` | `2` | change the standing order, change the recurring payment |
 | `invoice_issue` | Send an invoice | Bill a customer from a business you run. | `business: ref → business`, `customer?: ref`, `customer_name?: text`, `amount: money`, `memo?: text`, `days?: number` |  | `default` | `10` | send an invoice, invoice, bill them |
 | `invoice_pay` | Pay an invoice | Pay an invoice billed to you or to a business you run. | `invoice: ref → invoice` |  | `default` | `5` | pay the invoice, settle the bill |
 | `invoice_void` | Void an invoice | Cancel an invoice that a business you run sent. | `invoice: ref → invoice` |  | `default` | `5` | void the invoice, cancel the invoice, write it off |
-| `job_end` | End a job | End a job: quit your own, or let someone go from a business you run. | `job: ref → job` |  | `default` | `10` | fire, let go, quit, resign, hand in my notice |
-| `job_hire` | Hire | Hire someone into a business you run, with a title and pay. | `business: ref → business`, `worker: ref → person`, `title?: text`, `basis?: text`, `rate?: money`, `hours_per_week?: number`, `pay_every?: text` |  | `default` | `15` | hire, take on, give a job to |
-| `job_raise` | Give a raise | Change the pay of someone who works for a business you run. | `job: ref → job`, `rate: money` |  | `default` | `5` | give a raise, raise the pay, pay more |
-| `lease_end` | End a lease | End a tenant's lease. | `lease: ref → flow`, `on?: text` |  | `default` | `10` | end the lease, give notice, move out |
-| `lease_start` | Let a unit | Let a unit of a property you own to a tenant, for rent each month. | `property: ref → property`, `tenant: ref → person`, `rent: money`, `months?: number`, `day?: number`, `unit?: text` |  | `default` | `20` | rent out, sign a lease, let the apartment |
-| `move_money` | Transfer between accounts | Move money between your own accounts: checking, savings, cash. | `from: ref → account`, `to: ref → account`, `amount: money` |  | `default` | `2` | transfer, move money, put into savings |
+| `job_end` | End a job | End a job: quit your own, or let someone go who works for you or an organization you let staff go for. | `job: ref → job` |  | `default` | `10` | fire, let go, quit, resign, hand in my notice |
+| `job_hire` | Hire | Hire someone, for yourself or for an organization you hire for (a business, a household, the party), with a title, pay and a position. | `business: ref`, `worker: ref → person`, `title?: text`, `basis?: text`, `rate?: money`, `hours_per_week?: number`, `pay_every?: text`, `position?: text` |  | `default` | `15` | hire, take on, give a job to |
+| `job_hours` | Change hours | Change the hours a week someone works for you or an organization you set staff hours for. | `job: ref → job`, `hours_per_week: number` |  | `default` | `5` | change their hours, cut their hours, more hours, full time, part time |
+| `job_leave` | Put on leave | Put someone who works for you or an organization you set staff leave for on leave: they keep the job and are paid nothing while it lasts. | `job: ref → job` |  | `default` | `5` | put on leave, give time off, send on leave |
+| `job_position` | Appoint to a position | Promote or move someone who works for you or an organization you appoint for into one of its positions, or take them out of theirs. | `job: ref → job`, `position?: text` |  | `default` | `5` | promote, appoint, make them, move them to |
+| `job_raise` | Give a raise | Change the pay of someone who works for you or an organization you set staff pay for. | `job: ref → job`, `rate: money` |  | `default` | `5` | give a raise, raise the pay, pay more |
+| `job_return` | Back from leave | Bring someone on leave back to work, paid again from their next payday. | `job: ref → job` |  | `default` | `5` | back from leave, back to work, end their leave |
+| `job_title` | Change title | Change the title a job goes by: your own, or that of someone who works for you or an organization you appoint for. | `job: ref → job`, `title?: text` |  | `default` | `5` | change the job title, retitle |
+| `lease_end` | End a lease | End a tenant's lease. | `lease: ref → flow`, `on?: text`, `as?: ref` |  | `default` | `10` | end the lease, give notice, move out |
+| `lease_start` | Let a unit | Let a unit of a property you own to a tenant, for rent each month. | `property: ref → property`, `tenant: ref → person`, `rent: money`, `months?: number`, `day?: number`, `unit?: text`, `as?: ref` |  | `default` | `20` | rent out, sign a lease, let the apartment |
+| `move_money` | Transfer between accounts | Move money between your own accounts: checking, savings, cash. | `from: ref → account`, `to: ref → account`, `amount: money`, `as?: ref` |  | `default` | `2` | transfer, move money, put into savings |
+| `org_dues` | Set dues | Set what each member pays into an organization's money, and how often; nothing ends them. | `org: ref`, `amount: money`, `every?: text`, `day?: number` |  | `default` | `2` | set dues, membership fee, everyone chips in |
+| `org_pay_schedule` | Change pay schedule | Set how often an organization you set staff pay for pays its staff, moving every job there to it. | `org: ref`, `every: text`, `weekday?: number`, `anchor?: text` |  | `default` | `2` | pay schedule, change payday, pay every other week |
+| `org_share_out` | Share out | Pay an amount from an organization's money to its members equally (the party's: its core members and companions). | `org: ref`, `amount: money`, `from?: ref → account` |  | `default` | `5` | share out, split the money, divide the purse, hand out |
 | `owner_draw` | Take an owner's draw | Take money out of a business you own, for yourself. | `business: ref → business`, `amount: money` |  | `default` | `5` | take a draw, pay myself, take money out of the business |
-| `pay` | Pay | Give someone money: settle up, pay them back, tip them. | `to: ref, outside: economy.external:world`, `amount: money`, `method?: text` |  | `default` | `1` | pay, give money, send money, venmo |
-| `pay_card` | Pay card or loan | Pay off some or all of a card or loan balance. | `card: ref → account`, `from?: ref → account`, `amount?: money` |  | `default` | `2` | pay off the card, pay the card, pay my credit card, make a loan payment |
-| `property_buy` | Buy a property | Buy a property, outright or with a mortgage. | `property: ref → property`, `price?: money`, `from?: ref → account`, `down?: money`, `term_months?: number` |  | `default` | `60` | buy the house, buy the property, make an offer on |
-| `property_sell` | Sell a property | Sell a property you own. | `property: ref → property`, `price: money`, `buyer?: ref → person`, `to?: ref → account` |  | `default` | `60` | sell the house, sell the property |
-| `route_distributions` | Route dividends, rent or profits | Choose where dividends, rent or profits are paid: reinvested, or into an account. | `holding?: ref → holding`, `property?: ref → property`, `business?: ref → business`, `to?: text` |  | `default` | `1` | reinvest dividends, send dividends to, send the rent to |
-| `set_autopay` | Set autopay | Set how a card or loan pays itself each month. | `account: ref → account`, `mode: text`, `from?: ref → account`, `amount?: money` |  | `default` | `2` | set up autopay, turn on autopay, turn off autopay |
+| `pay` | Pay | Give someone money: settle up, pay them back, tip them. | `to: ref, outside: economy.external:world`, `amount: money`, `method?: text`, `as?: ref` |  | `default` | `1` | pay, give money, send money, venmo |
+| `pay_card` | Pay card or loan | Pay off some or all of a card or loan balance. | `card: ref → account`, `from?: ref → account`, `amount?: money`, `as?: ref` |  | `default` | `2` | pay off the card, pay the card, pay my credit card, make a loan payment |
+| `property_buy` | Buy a property | Buy a property, outright or with a mortgage. | `property: ref → property`, `price?: money`, `from?: ref → account`, `down?: money`, `term_months?: number`, `as?: ref` |  | `default` | `60` | buy the house, buy the property, make an offer on |
+| `property_list` | List a property for sale | Put a property you own up for sale at an asking price, or take it off the market. | `property: ref → property`, `price?: money`, `as?: ref` |  | `default` | `5` | put the house on the market, list the property, take it off the market |
+| `property_sell` | Sell a property | Sell a property you own. | `property: ref → property`, `price: money`, `buyer?: ref → person`, `to?: ref → account`, `as?: ref` |  | `default` | `60` | sell the house, sell the property |
+| `route_distributions` | Route dividends, rent or profits | Choose where dividends, rent or profits are paid: reinvested, or into an account. | `holding?: ref → holding`, `property?: ref → property`, `business?: ref → business`, `to?: text`, `as?: ref` |  | `default` | `1` | reinvest dividends, send dividends to, send the rent to |
+| `set_autopay` | Set autopay | Set how a card or loan pays itself each month. | `account: ref → account`, `mode: text`, `from?: ref → account`, `amount?: money`, `as?: ref` |  | `default` | `2` | set up autopay, turn on autopay, turn off autopay |
 | `set_pay_prefs` | Set how I pay | Set the order in which you prefer to pay: cash, debit, credit. | `tiers: text` |  | `default` | `2` | i'd rather pay with |
-| `stake_sell` | Sell a share of a business | Sell part of your share of a business. | `business: ref → business`, `share: number`, `price: money`, `buyer?: ref → person`, `to?: ref → account` |  | `default` | `60` | sell my share of the business, sell the shop |
-| `trade` | Buy or sell investments | Buy or sell investments: stocks, funds, bonds, crypto. | `side?: text`, `holding?: ref → holding`, `asset?: text`, `account?: ref → account`, `qty?: number`, `amount?: money`, `from?: ref → account`, `to?: ref → account`, `right?: text`, `strike?: money`, `expiry?: text` |  | `default` | `2` | invest, buy stocks, buy shares, sell stocks, sell shares, cash out, buy an option |
-| `withdraw_cash` | Withdraw cash | Take cash out of a bank account. | `account: ref → account`, `amount: money` |  | `default` | `3` | withdraw, take out cash, hit the atm, get cash |
+| `shares_buy_back` | Buy back shares | Have a company you control buy back some of a holder's units, paying them from its account. | `business: ref → business`, `from: ref`, `units: number`, `price?: money`, `as?: ref` |  | `default` | `30` | buy back shares, buy them out, buy back their stake |
+| `shares_classes` | Change share classes | Add, change or remove a company's share class (the votes a unit carries), and move a holder's units into it. | `business: ref → business`, `label: text`, `class?: text`, `votes?: number`, `holder?: ref`, `remove?: bool`, `as?: ref` |  | `default` | `2` | add a share class, non-voting shares, change the votes |
+| `shares_issue` | Issue shares | Issue new units of a company you control to a buyer, who pays for them into its account. | `business: ref → business`, `to: ref`, `units: number`, `price?: money`, `class?: text`, `from?: ref → account`, `as?: ref` |  | `default` | `30` | issue shares, sell new shares in the company, bring in a partner, let them buy in |
+| `stake_sell` | Sell a share of a business | Sell part of your share of a business, in percent or, where it counts them, in units; to someone in the world, or a whole business to a buyer outside it. | `business: ref → business`, `share?: number`, `units?: number`, `price: money`, `buyer?: ref`, `to?: ref → account`, `as?: ref` |  | `default` | `60` | sell my share of the business, sell the shop, sell my shares |
+| `trade` | Buy or sell investments | Buy or sell investments: stocks, funds, bonds, crypto. | `side?: text`, `holding?: ref → holding`, `asset?: text`, `account?: ref → account`, `qty?: number`, `amount?: money`, `from?: ref → account`, `to?: ref → account`, `right?: text`, `strike?: money`, `expiry?: text`, `as?: ref` |  | `default` | `2` | invest, buy stocks, buy shares, sell stocks, sell shares, cash out, buy an option |
+| `withdraw_cash` | Withdraw cash | Take cash out of a bank account. | `account: ref → account`, `amount: money`, `as?: ref` |  | `default` | `3` | withdraw, take out cash, hit the atm, get cash |
 
 ### Events
 
-Its own: `economy.accrue`, `economy.acquire`, `economy.anchor`, `economy.card_paid`, `economy.commission`, `economy.credit`, `economy.decline`, `economy.delinquency`, `economy.dispose`, `economy.estimated_tax`, `economy.exercise`, `economy.flow_renamed`, `economy.flow_run`, `economy.hold`, `economy.income`, `economy.invoice_paid`, `economy.lots`, `economy.mint`, `economy.modifier`, `economy.note`, `economy.open`, `economy.payout`, `economy.payslip`, `economy.price`, `economy.quote`, `economy.remit`, `economy.sale`, `economy.score`, `economy.settle`, `economy.spend`, `economy.stake_route`, `economy.statement`, `economy.status`, `economy.timesheet`, `economy.txn`.
+Its own: `economy.accrue`, `economy.acquire`, `economy.anchor`, `economy.card_paid`, `economy.closes`, `economy.commission`, `economy.credit`, `economy.decline`, `economy.delinquency`, `economy.dispose`, `economy.estimated_tax`, `economy.exercise`, `economy.flow_renamed`, `economy.flow_run`, `economy.hold`, `economy.income`, `economy.invoice_paid`, `economy.lots`, `economy.mint`, `economy.modifier`, `economy.note`, `economy.open`, `economy.payout`, `economy.payslip`, `economy.price`, `economy.quote`, `economy.remit`, `economy.sale`, `economy.score`, `economy.settle`, `economy.spend`, `economy.stake_route`, `economy.statement`, `economy.status`, `economy.timesheet`, `economy.txn`.
 
 Checks it adds to: `post`.
 
@@ -674,9 +713,10 @@ Detail on demand: `money` (version 2).
 
 | Table | Label | Schema | Columns | Default rows |
 |---|---|---|---|---|
-| `economy.catalog` | Price catalog | `lre-table/economy.catalog/v1` | name (text), category (ref), unit (text), price_cents (band), notes (text, optional) | 340 |
-| `economy.categories` | Price categories | `lre-table/economy.categories/v1` | name (text), basis (text), notes (text, optional), price_unit_note (text, optional), item_count (int), price_cents (band) | 19 |
+| `economy.catalog` | Price catalog | `lre-table/economy.catalog/v1` | name (text), aliases (list, optional), category (ref), unit (text), size (enum, optional), holds (enum, optional), price_cents (band), notes (text, optional) | 358 |
+| `economy.categories` | Price categories | `lre-table/economy.categories/v1` | name (text), basis (text), notes (text, optional), price_unit_note (text, optional), item_count (int), price_cents (band) | 20 |
 | `economy.finance` | Finance parameters | `lre-table/economy.finance/v1` | title (text), values (json) | 7 |
+| `economy.index_history` | Stock index history (total return, month-end closes) | `lre-table/economy.index_history/v1` | date (text), level (number) | 282 |
 | `economy.occupations` | Occupations and pay | `lre-table/economy.occupations/v1` | title (text), category (enum), median_cents_per_h (int), median_cents_per_year (int), typical_earnings_cents_per_year (int), schedule_pattern (ref), typical_hours_per_week (number), weeks_per_year (number), weekend_work (enum), shifts (list), pay_frequency (enum), benefits (enum), benefits_note (text), withholding_rate_pct (number), description (text), wage_basis (text), tipped (bool, optional), tipped_cash_wage_cents_per_h (int, optional), self_employed (bool, optional), fica_exempt (bool, optional), estimated_tax_set_aside_pct (number, optional), withholding_note (text, optional) | 56 |
 | `economy.regions` | Regions (US states, DC and the national baseline) | `lre-table/economy.regions/v1` | name (text), abbr (text), scope (enum), census_region (enum, optional), census_division (enum, optional), time_zones (list, optional), observes_dst (bool, optional), state_income_tax_effective_pct (number, optional), local_income_tax_pct_typical (number, optional), sales_tax_combined_avg_pct (number), property_tax_effective_pct (number, optional), cost_of_living_multiplier (number), median_rent_1br_cents_per_month (int), median_rent_2br_cents_per_month (int), residential_electricity_cents_per_kwh (number), minimum_wage_cents_per_h (int), tipped_minimum_wage_cents_per_h (int, optional), notes (text, optional) | 52 |
 
@@ -706,16 +746,28 @@ Extends `thing`.
 
 | Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |
 |---|---|---|---|---|---|---|---|
+| `access` | Who may use it | enum: owner, members, staff, customers, public |  |  |  |  |  |
+| `aliases` | Also called | list of text |  |  |  |  |  |
 | `catalog` | Catalog item | text (row of economy.catalog) |  |  |  |  |  |
 | `category` | Category | text |  |  |  |  |  |
 | `condition` | Condition | number | 0 … 100 | `100` |  |  | live from gear 3; bound auto; bands: broken, worn, good, like new |
 | `consumable` | Consumable | bool |  |  |  |  | live from gear 4 |
+| `description` | Description | text |  |  |  |  |  |
 | `fixed` | Fixed in place (can't be picked up) | bool |  |  |  |  | locked |
 | `from_kit` | From kit | ref |  |  |  |  | locked |
+| `got` | How its holder came to have it | list |  |  |  |  | locked |
+| `holds` | Takes things up to | enum: pocket, hand, armful, heavy, furniture, builtin |  |  |  |  |  |
+| `home` | Kept at (a place, a holder, or owner) | text |  |  |  |  |  |
+| `made` | Made in play (by whom, where) | list |  |  |  |  | locked |
+| `maybe_same_as` | Maybe the same as | ref |  |  |  |  | locked |
+| `merged_into` | Merged into | ref |  |  |  |  | locked |
 | `notable` | Notable | bool |  |  |  |  | live from gear 1 |
 | `overdue` | Overdue | bool |  |  |  |  | locked |
+| `part` | Built into what holds it | bool |  |  |  |  |  |
 | `piece` | Kit piece | text |  |  |  |  | locked |
 | `qty` | Quantity | number | ≥ 0 | `1` |  |  | live from gear 2 |
+| `size` | Size | enum: pocket, hand, armful, heavy, furniture, builtin |  |  |  |  |  |
+| `sleep` | Can be slept in or on | bool |  |  |  |  |  |
 | `slot` | Equip slot | text |  |  |  |  | live from gear 3 |
 | `uses` | Uses left | number | ≥ 0 |  |  |  | live from gear 4 |
 | `volume_l` | Volume (l) | number | ≥ 0 |  |  |  | live from gear 2 |
@@ -736,7 +788,8 @@ Extends `container`.
 | Relation | Label | From | To | Cardinality | Symmetric | Inverse | Fields |
 |---|---|---|---|---|---|---|---|
 | `equipped` | Equipped by | `item` | `*` | many_one |  |  | `slot` |
-| `uses` | Uses (granted until) | `*` | `*` | many_many |  |  | none |
+| `permits` | Lets use their things | `*` | `*` | many_many |  |  | `by`, `scope` |
+| `uses` | Uses (granted until) | `*` | `*` | many_many |  |  | `basis`, `by` |
 | `worn_by` | Worn by | `item` | `*` | many_one |  |  | `slot` |
 
 ### Effects
@@ -744,14 +797,19 @@ Extends `container`.
 | Effect | Arguments |
 |---|---|
 | `gear.drop` | `item`, `place?` |
-| `gear.give` | `item`, `from`, `to`, `told?` |
+| `gear.fetch` | `item`, `to` |
+| `gear.give` | `item`, `from`, `to`, `told?`, `basis?` |
+| `gear.hand` | `item`, `to`, `basis`, `until?`, `by?` |
 | `gear.lend` | `item`, `to`, `until?`, `said?` |
 | `gear.lose` | `item`, `thief?` |
+| `gear.put_away` | `item`, `by?` |
 | `gear.receive` | `name`, `to`, `from?` |
 | `gear.remove` | `item` |
 | `gear.retrieve` | `item` |
 | `gear.search` | `who`, `target?` |
+| `gear.take` | `item`, `to` |
 | `gear.take_piece` | `kit`, `piece`, `to` |
+| `gear.thing_change` | `change` |
 | `gear.transfer` | `item`, `to` |
 | `gear.use` | `item`, `user?` |
 | `gear.wear` | `item`, `wearer`, `slot?` |
@@ -760,20 +818,32 @@ Extends `container`.
 
 - `carried_kg(holder)`
 - `carries(holder, item)`
+- `fetch_minutes(who, thing)`
+- `fits_on(_who, thing)`
 - `has_item(holder, what)`
 - `kit_complete(kit)`
 - `kit_present(kit)`
 - `lent_out(thing)`
+- `may_assign(who, thing)`
+- `may_use(who, thing)`
 - `movable(thing)`
+- `possessor(thing)`
+- `reach_of(who, thing)`
+- `rest_near(who, thing)`
+- `returns_to(who, thing)`
 
 ### Actions
 
 | Action | Label | Description | Parameters | Check | Outcomes | Minutes | Lexicon |
 |---|---|---|---|---|---|---|---|
 | `drop` | Drop | Put down something you carry, here. | `item: ref → item, claim: held` |  | `default` | `1` | drop, put down, leave |
-| `give` | Give | Hand something you carry to someone here, for keeps. | `item: ref → item, claim: held`, `to: ref → person` |  | `default` | `1` | give, hand, pass |
-| `lend` | Lend | Lend something of yours to someone, for some days or until a time. | `item: ref → item`, `to: ref → person`, `days?: number`, `until?: text` |  | `default` | `2` | lend, loan, let borrow |
+| `fetch` | Fetch | Go and get something of yours, or something you may use, from close by. | `item: ref → item` |  | `default` | `1 + fetch_minutes(self, item)` | fetch, go get, go and get |
+| `give` | Give | Give something you carry to someone here, for keeps. | `item: ref → item, claim: held`, `to: ref → person` |  | `default` | `1` | give, give away, let keep |
+| `give_back` | Give back | Give something back to whose it is, here. | `item: ref → item` |  | `default` | `1` | give back, return, hand back |
+| `hand_over` | Hand over | Hand something you carry to someone here to hold; it stays whose it is. | `item: ref → item, claim: held`, `to: ref → person` |  | `default` | `1` | hand, hand over, pass, toss |
+| `lend` | Lend | Lend something to someone, for some days or until a time. | `item: ref → item`, `to: ref → person`, `days?: number`, `until?: text` |  | `default` | `2` | lend, loan, let borrow |
 | `lose` | Lose something | Something you own or carry is lost or gone, whereabouts unknown. | `item: ref → item` |  | `default` | `1` | lost my, lose, can't find my, is gone, is missing |
+| `put_away` | Put away | Put something back where it's kept. | `item: ref → item` |  | `default` | `2` | put away, put back, tidy away |
 | `reclaim` | Take back | Take back something of yours that you lent out. | `item: ref → item` |  | `default` | `5` | take back, get back, reclaim |
 | `remove` | Take off | Take off something you wear or have equipped. | `item: ref → item` |  | `default` | `2` | take off, remove, unequip |
 | `search` | Search | Search where you are, or look through a container, for what isn't in plain sight. | `target?: ref → item` |  | `default` | `5` | search, look around, examine, look through, look inside, open, rummage |
@@ -788,8 +858,18 @@ Extends `container`.
 |---|---|
 | `drop` | `ref` |
 | `give` | `ref` |
+| `has` | `ref` |
 | `item_condition` | `number` |
+| `item_hand` | `ref` |
+| `item_lose` | `ref` |
+| `item_make` | `ref` |
+| `item_move` | `ref` |
+| `item_own` | `ref` |
+| `item_use` | `number` |
+| `item_wear` | `ref` |
 | `lose` | `ref` |
+| `owner` | `ref` |
+| `put` | `ref` |
 | `quantity` | `number` |
 | `take` | `ref` |
 | `use_up` | `number` |
@@ -804,21 +884,22 @@ Panels: `gear.gear`. Slots it writes: `gear`, `people`.
 | Process | Domain | From level | Steps |
 |---|---|---|---|
 | `gear.grants` | `gear` | 1 | the world |
+| `gear.put_away` | `gear` | 1 | the world |
 
-Detail on demand: `gear` (version 1).
+Detail on demand: `gear` (version 2).
 
 ### Data tables
 
 | Table | Label | Schema | Columns | Default rows |
 |---|---|---|---|---|
-| `gear.containers` | Containers | `lre-table/gear.containers/v1` | name (text), capacity_l (number), max_load_kg (number), empty_weight_g (int), location (enum), equip_slot (ref), price_cents (band), notes (text, optional) | 34 |
-| `gear.items` | Gear items | `lre-table/gear.items/v1` | name (text), category (enum), equip_slot (ref), weight_g (int), volume_l (number), price_cents (band), notes (text, optional) | 90 |
+| `gear.containers` | Containers | `lre-table/gear.containers/v1` | name (text), capacity_l (number), max_load_kg (number), empty_weight_g (int), location (enum), size (enum, optional), holds (enum, optional), equip_slot (ref), price_cents (band), notes (text, optional) | 34 |
+| `gear.items` | Gear items | `lre-table/gear.items/v1` | name (text), category (enum), equip_slot (ref), weight_g (int), volume_l (number), size (enum, optional), price_cents (band), notes (text, optional) | 90 |
 | `gear.kits` | Kits | `lre-table/gear.kits/v1` | name (text), recommended_container (ref), description (text), piece_count (int), pieces_total_weight_g (number), packed_volume_l (number), price_cents (band), pieces (list), notes (text, optional) | 5 |
 | `gear.slots` | Equip slots | `lre-table/gear.slots/v1` | description (text) | 20 |
 
 ### Lint codes
 
-`gear.contents`, `gear.holders`, `gear.kits`.
+`gear.carry`, `gear.contents`, `gear.holders`, `gear.kits`, `gear.things`.
 
 ## Minds pack (`minds`)
 
@@ -849,6 +930,93 @@ Panels: `minds.known`. Slots it writes: `knowledge`, `minds`.
 
 `minds.config`, `minds.holdings`, `minds.steps`.
 
+## Organizations pack (`orgs`)
+
+Version 1 · realism domain none · requires `economy`, `relationships`, `space`.
+
+### Relation types
+
+| Relation | Label | From | To | Cardinality | Symmetric | Inverse | Fields |
+|---|---|---|---|---|---|---|---|
+| `acts_for` | Acts for | `*` | `*` | many_many |  |  | `accounts`, `by`, `month`, `payment`, `powers` |
+
+### Effects
+
+| Effect | Arguments |
+|---|---|
+| `orgs.admit` | `org`, `who`, `title?`, `position?`, `by?`, `why?` |
+| `orgs.appoint` | `org`, `who`, `position?`, `by?`, `why?` |
+| `orgs.delegate` | `org`, `to`, `powers`, `payment?`, `month?`, `until?`, `by?` |
+| `orgs.entry` | `place`, `entry?`, `keys?`, `org?`, `by?` |
+| `orgs.found` | `type`, `name`, `kind?`, `cents?`, `from?`, `structure?`, `units?`, `classes?`, `founder?`, `by?` |
+| `orgs.leave` | `org`, `who`, `why?` |
+| `orgs.note` | `org`, `text`, `by?`, `names?` |
+| `orgs.party_hire` | `worker`, `title?`, `occupation?`, `basis?`, `rate?`, `hours_per_week?`, `pay_every?`, `by?` |
+| `orgs.party_name` | `name`, `by?` |
+| `orgs.party_purse` | `cents`, `from?`, `by?` |
+| `orgs.party_tier` | `who`, `tier`, `by?` |
+| `orgs.plan_goal` | `org`, `id?`, `text?`, `window?`, `where?`, `status?`, `source?`, `by?` |
+| `orgs.plan_order` | `org`, `id?`, `to?`, `lead?`, `text?`, `where?`, `when?`, `goal?`, `status?`, `said?`, `source?`, `by?` |
+| `orgs.plan_status` | `org`, `id`, `status`, `note?`, `said?`, `source?`, `by?` |
+| `orgs.position` | `org`, `title?`, `id?`, `powers?`, `seats?`, `reports_to?`, `no_report?`, `scope?`, `payment?`, `month?`, `successor?`, `default?`, `remove?`, `by?` |
+| `orgs.remove` | `org`, `who`, `by?`, `why?` |
+| `orgs.rename` | `org`, `name`, `by?` |
+| `orgs.restructure` | `org`, `structure`, `party?`, `by?` |
+| `orgs.revoke` | `org`, `to`, `by?` |
+| `orgs.succession` | `on?` |
+| `orgs.title` | `org`, `who`, `title?`, `by?`, `why?` |
+
+### Actions
+
+| Action | Label | Description | Parameters | Check | Outcomes | Minutes | Lexicon |
+|---|---|---|---|---|---|---|---|
+| `org_admit` | Admit a member | Admit someone to an organization, with a title or into a position. | `org: ref`, `who: ref`, `title?: text`, `position?: text` |  | `default` | `10` | admit, take in as a member, welcome into |
+| `org_appoint` | Appoint | Appoint someone to a position in an organization, or take them out of theirs. | `org: ref`, `who: ref`, `position?: text` |  | `default` | `10` | appoint, make them foreman, promote |
+| `org_delegate` | Delegate | Let someone act for an organization with some of your powers there, within limits, until a date. | `org: ref`, `to: ref`, `powers: text`, `payment?: money`, `month?: money`, `until?: date` |  | `default` | `10` | let them act for, delegate, give them authority |
+| `org_entry` | Change entry | Change who may enter one of an organization's places, and its keys. | `org: ref → thing`, `place: ref → place`, `entry: text`, `keys?: text` |  | `default` | `0` |  |
+| `org_found` | Start an organization | Found a company (from Money 3: you its only owner, with capital from an account of yours, counted in units when you say how many; or, for an organization you govern, its subsidiary from its money) or a group of one of the world's kinds, which you lead. | `type: text`, `name: text`, `kind?: text`, `amount?: money`, `from?: ref → account`, `structure?: text`, `units?: number`, `as?: ref` |  | `default` | `30` | start a company, found a business, set up a company, start a group, found a club, form a crew, start a subsidiary |
+| `org_goal` | Set a goal | Add a goal to an organization's plan, or change one. | `org: text`, `id?: text`, `text?: text`, `window?: text`, `where?: text` |  | `default` | `2` | set a goal, add to the plan |
+| `org_leave` | Leave | Leave an organization you're a member of. | `org: ref` |  | `default` | `5` | leave the group, quit the club, resign from |
+| `org_order` | Give an order | Give people in an organization a task on its plan, or change one: whom it is for, who leads, where and when. | `org: text`, `id?: text`, `to?: text`, `lead?: text`, `text?: text`, `where?: text`, `when?: text`, `goal?: text` |  | `default` | `2` | give an order, put them on it |
+| `org_plan_status` | Move a plan along | Mark a goal or an order on an organization's plan under way, done, blocked, refused or dropped, or open it again. | `org: text`, `id: text`, `status: text`, `note?: text` |  | `default` | `2` | mark it done, drop the plan |
+| `org_position` | Set a position | Add, change or remove a position in an organization: its title, powers, seats, whom it reports to, its scope and limits. | `org: ref`, `title: text`, `id?: text`, `powers?: text`, `seats?: number`, `reports_to?: text`, `no_report?: bool`, `scope?: text`, `payment?: money`, `month?: money`, `successor?: text`, `default?: bool`, `remove?: bool` |  | `default` | `2` | add a position, change the position |
+| `org_remove` | Remove a member | Remove someone from an organization. | `org: ref`, `who: ref` |  | `default` | `10` | throw out, expel, remove from the group |
+| `org_rename` | Rename | Give an organization a new name. | `org: ref`, `name: text` |  | `default` | `2` | rename, call it |
+| `org_restructure` | Change structure | Change a company's legal structure (a sole proprietorship, a partnership, an LLC, an S or a C corporation): draws and payouts change at once, its taxes from the next estimated-tax period. | `org: ref → business`, `structure: text`, `as?: ref` |  | `default` | `30` | incorporate, become an LLC, change the company's structure, turn it into a corporation |
+| `org_revoke` | Revoke | End someone's delegation to act for an organization. | `org: ref`, `to: ref` |  | `default` | `5` | revoke, take back their authority |
+| `org_title` | Change title | Give someone in an organization a title of their own, or take it away. | `org: ref`, `who: ref`, `title?: text` |  | `default` | `5` | call them, give them the title |
+| `party_hire` | Hire a hand | Hire someone for your party, paid from its purse; they join it as a hired hand. | `worker: ref → person`, `title?: text`, `basis?: text`, `rate?: money`, `hours_per_week?: number`, `pay_every?: text` |  | `default` | `15` | hire a hand, take on a hand, hire them for the party |
+| `party_name` | Name the party | Give your party a name. | `name: text` |  | `default` | `1` | call our party, name our group |
+| `party_purse` | Start a purse | Open an account your party owns, with a deposit from an account of your own. | `amount: money`, `from?: ref → account` |  | `default` | `1` | start a party purse, pool our money, a kitty for the party |
+| `party_tier` | Party tier | Add someone you know to your party in a tier (core, companion, hired, ally), change their tier, or take them out of the party (out). | `who: ref → person`, `tier: text` |  | `default` | `1` | join my party, travel with me from now on, leave the party |
+
+### Events
+
+Its own: `orgs.config`, `orgs.entry`, `orgs.goal`, `orgs.lived`, `orgs.log`, `orgs.order`, `orgs.spent`, `orgs.status`, `orgs.trespass`.
+
+### Proposals
+
+| Proposal | Bound by |
+|---|---|
+| `agenda` | `routine` |
+| `employment` | `routine` |
+| `membership` | `routine` |
+
+### Panels and slots
+
+Panels: `orgs.list`, `orgs.org`. Slots it writes: `people`, `quest`.
+
+### Simulation
+
+| Process | Domain | From level | Steps |
+|---|---|---|---|
+| `orgs.orders` | `relationships` | 0 | the world |
+| `orgs.seats` | `relationships` | 0 | the world |
+
+### Lint codes
+
+`orgs.delegations`, `orgs.entry`, `orgs.kinds`, `orgs.owners`, `orgs.positions`.
+
 ## Relationships pack (`relationships`)
 
 Version 1 · realism domain `relationships` · requires `space`.
@@ -873,12 +1041,6 @@ Extends `group`.
 
 No fields of its own.
 
-#### `group`: Group
-
-Extends `thing`.
-
-No fields of its own.
-
 #### `household`: Household
 
 Extends `group`.
@@ -891,7 +1053,7 @@ No fields of its own.
 |---|---|---|---|---|---|---|---|
 | `child_of` | Child of | `person` | `person` | many_many |  | `parent_of` | none |
 | `knows` | Knows | `*` | `*` | many_many |  |  | none |
-| `member_of` | Member of | `*` | `group` | many_many |  |  | `rank`, `role`, `since` |
+| `member_of` | Member of | `*` | `group` | many_many |  |  | `position`, `rank`, `role`, `since` |
 | `parent_of` | Parent of | `person` | `person` | many_many |  | `child_of` | none |
 | `partner_of` | Partner of | `person` | `person` | many_many | yes |  | `since` |
 | `regard` | Regard | `*` | `*` | many_many |  |  | `respect`, `trust`, `warmth` |
@@ -978,6 +1140,26 @@ Version 1 · realism domain `space` · requires `calendar`.
 
 ### Kinds
 
+#### `group`: Group
+
+Extends `thing`.
+
+| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |
+|---|---|---|---|---|---|---|---|
+| `dues` | Dues ({cents, every, day?}) | list |  |  |  |  | live from money 3 |
+| `payroll` | Pay schedule ({every, anchor, weekday, days}) | list |  |  |  |  | live from money 3 |
+| `payroll_account` | Payroll account | ref → account |  |  |  |  | live from money 3 |
+| `places` | Its places | list of ref |  |  |  |  |  |
+| `positions` | Positions ({id, title, powers, seats?, reports_to?, scope?, limits?, successor?, default?, no_dues?}) | list |  |  |  |  |  |
+
+#### `party`: Party
+
+Extends `group`.
+
+| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |
+|---|---|---|---|---|---|---|---|
+| `leader` | Leader | ref → person |  |  |  |  |  |
+
 #### `person`: Person
 
 Extends `thing`.
@@ -1022,12 +1204,14 @@ Extends `thing`.
 | Relation | Label | From | To | Cardinality | Symmetric | Inverse | Fields |
 |---|---|---|---|---|---|---|---|
 | `in` | In | `*` | `*` | many_one |  |  | none |
-| `travels_with` | Travels with | `person` | `person` | many_one |  |  | none |
+| `travels_with` | Travels with | `person` | `person` | many_one |  |  | `since`, `tier` |
 
 ### Effects
 
 | Effect | Arguments |
 |---|---|
+| `space.entered` | `entity`, `to` |
+| `space.make_place` | `change` |
 | `space.set_route` | `route`, `open?` |
 | `space.step` | `x`, `y`, `entity?` |
 
@@ -1035,9 +1219,11 @@ Extends `thing`.
 
 - `can_go(from, to)`
 - `distance_km(from, to, mode)`
+- `entry_why(who, place)`
 - `go_minutes(from, to)`
 - `grid_minutes(place, x, y)`
 - `grid_reachable(place, x, y)`
+- `may_enter(who, place)`
 - `on_grid(thing)`
 - `reach(a, b)`
 - `route_exists(from, to, mode)`
@@ -1054,13 +1240,14 @@ Extends `thing`.
 
 ### Events
 
-Its own: `space.pos`, `space.route`.
+Its own: `space.place`, `space.pos`, `space.route`.
 
 ### Proposals
 
 | Proposal | Bound by |
 |---|---|
 | `location` | `ref` |
+| `place_make` | `ref` |
 
 ### Panels and slots
 

@@ -12,22 +12,22 @@
 import type { JsonObject } from "../../../shared/json";
 import { fixedReason, type FixedReason } from "../../../shared/items-build";
 import type { EntityId, KindId } from "../../../shared/ids";
+import { sizeRank, thingsConfigOf } from "../../../shared/things";
 import type { WorldDoc } from "../../../shared/world";
 import type { ReadContext } from "../../../engine/registry";
 import type { Registry } from "../../../engine/registry-impl";
 import { numOf, objOf, strOf, own, rowOf } from "../../../engine/pack-kit";
 import { kindIs } from "../../../engine/scope";
+import { readPass } from "../../../engine/read-pass";
 import type { WorldState } from "../../../engine/state";
+import { nameMeets, namesThing } from "../../../engine/thing-resolve";
+import { contentsOf, holderOf, sizeOf } from "../../../engine/things";
 
-export function holderOf(state: Readonly<WorldState>, id: EntityId): EntityId | null {
-  return own(state.entities, id)?.relations.find((r) => r.type === "in")?.to ?? null;
-}
-
-/** Things directly `in` a holder, by id. */
-export function contentsOf(state: Readonly<WorldState>, holder: EntityId): EntityId[] {
-  return Object.keys(state.entities)
-    .filter((id) => own(state.entities, id)?.relations.some((r) => r.type === "in" && r.to === holder))
-    .sort();
+/** Whether a person may carry a thing (ITEMS-SPEC §3.2): its size is the person ceiling's or smaller, or unknown; never a vehicle, a part or a fixture. */
+export function fitsOn(ctx: ReadContext, thing: EntityId): boolean {
+  const size = sizeOf(ctx, thing).size;
+  if (size === "unknown") return true;
+  return size !== "vehicle" && size !== "part" && sizeRank(size) <= sizeRank(thingsConfigOf(ctx.world).sizes.ceiling);
 }
 
 /** Whether `inner` is (transitively) inside `outer`. */
@@ -272,19 +272,23 @@ export function overdueFor(state: Readonly<WorldState>, owner: EntityId): Grant[
 
 // ---------------------------------------------------------------- has_item
 
-/** Whether `holder` carries (transitively) a thing matching `what`: a kind (with inheritance), a catalog id, a category or a name. */
+/**
+ * Whether `holder` carries (transitively) a thing matching `what`: a kind (with inheritance), a
+ * catalog id, a category, or words that name it by any of its names (`namesThing`, the things
+ * model's one name rule: "key" names keys, never a turkey sandwich), or a piece present in a kit
+ * they carry (`nameMeets`). One read pass, so the thing index the names are read from is built once
+ * for everything they carry.
+ */
 export function hasItem(ctx: ReadContext, holder: EntityId, what: string): boolean {
-  const lower = what.toLowerCase();
-  for (const id of carriedBy(ctx.state, holder)) {
-    const e = own(ctx.state.entities, id);
-    if (!e) continue;
-    if (kindIs(ctx.registry, ctx.world, e.kind, what)) return true;
-    const f: JsonObject = e.fields;
-    if (f.catalog === what || f.category === what || e.name.toLowerCase().includes(lower)) return true;
-    if (typeof f.kit === "string" || Array.isArray(f.pieces)) {
-      const status = kitStatus(ctx, id);
-      if (status?.pieces.some((p) => p.present > 0 && p.name.toLowerCase().includes(lower))) return true;
-    }
-  }
-  return false;
+  return readPass(() =>
+    carriedBy(ctx.state, holder).some((id) => {
+      const e = own(ctx.state.entities, id);
+      if (!e) return false;
+      if (kindIs(ctx.registry, ctx.world, e.kind, what)) return true;
+      const f: JsonObject = e.fields;
+      if (f.catalog === what || f.category === what || namesThing(ctx, id, what)) return true;
+      if (typeof f.kit !== "string" && !Array.isArray(f.pieces)) return false;
+      return kitStatus(ctx, id)?.pieces.some((p) => p.present > 0 && nameMeets(what, p.name)) ?? false;
+    }),
+  );
 }

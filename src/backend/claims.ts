@@ -13,18 +13,21 @@ import type { JsonObject } from "../shared/json";
 import { hasOwn } from "../shared/json";
 import type { ActionDef, WorldDoc } from "../shared/world";
 import { formatMoney } from "../shared/world";
+import { reachOf } from "../engine/access";
 import { optionalQuery, optionalService, own } from "../engine/pack-kit";
+import type { ReadContext } from "../engine/registry";
 import type { Registry } from "../engine/registry-impl";
 import { findAction } from "../engine/resolve";
 import { isGone, kindIs, placeOfEntity } from "../engine/scope";
 import type { WorldState } from "../engine/state";
 import type { Claim, Needs } from "../engine/steps";
+import { findThings } from "../engine/thing-resolve";
 import { canSeePlace } from "../engine/visibility";
 import { matchCatalog } from "../packs/economy/core/index";
 import { catalogName, itemName } from "../packs/economy/core/items";
 import { claimCap, FOOD_AND_DRINK, priceOf } from "../packs/economy/core/model";
 import { cashGift } from "../packs/gear/core/index";
-import { isInside } from "../packs/gear/core/model";
+import { fitsOn, isInside } from "../packs/gear/core/model";
 import type { ThingSort } from "./steps";
 import { namesOf, paidOutside, takes, unfitRef, type UnfitRef } from "./turn-steps";
 
@@ -95,7 +98,7 @@ function knownBy(registry: Registry, world: WorldDoc, state: Readonly<WorldState
   const here = placeOfEntity(state, world.pov);
   const rank = (id: EntityId): number => (isInside(state, id, world.pov) ? 0 : placeOfEntity(state, id) === here ? 1 : 2);
   const things = Object.keys(state.entities)
-    // The player character's own thing elsewhere isn't taken as is (the action would fail for want of it): it is a claim's (`mineByName`).
+    // The player character's own thing elsewhere isn't taken as is (the action would fail for want of it): it is a claim's, by its reach (`existingClaim`).
     .filter((id) => id !== world.pov && !isGone(state, id) && mayKnow(id) && !mineElsewhere(world, state, id, mayKnow) && names(own(state.entities, id)?.name ?? ""))
     .sort((a, b) => rank(a) - rank(b) || a.localeCompare(b));
   if (things[0] !== undefined) return things[0];
@@ -154,17 +157,14 @@ export function claimFor(input: ClaimInput): ClaimVerdict | null {
   const verb = (action.lexicon?.[0] ?? action.label).toLowerCase();
   if (money) return moneyClaim(input, at, kind, cash?.amount ?? null, verb);
   const ctx = registry.context(world, state);
-  if (input.policy.mode === "hold" || !optionalService(ctx, "gear.claim") || ctx.levelOf(world.pov, "gear") === 0) return { kind: "hold" };
-  const title = `${name.charAt(0).toUpperCase()}${name.slice(1)}`;
+  if (!optionalService(ctx, "gear.claim") || ctx.levelOf(world.pov, "gear") === 0) return { kind: "hold" };
   // A tracking gap, not a new thing: the player character's own thing the world has somewhere else
-  // ("I put on my clothes" while the world keeps them at home). Made real, it is that very thing
-  // brought to hand (`existing`), never a second one; the policy still decides, as for any claim.
-  const existing = named ?? mineByName(registry, world, state, name, mayKnow);
-  if (existing) {
-    const claim: Claim = { param: unfit.param, name, at, kind, consumable: false, existing };
-    const detail = input.policy.mode === "ask" ? "This chat asks before it changes where your things are." : input.thing !== undefined && hasOwn(RESTRICTED, input.thing) ? "Keys, weapons and documents always ask first." : null;
-    return detail === null ? { kind: "real", claim } : { kind: "ask", claim, question: `${title} isn't with you as far as the world knows. Have it with you and ${verb} it?`, detail };
-  }
+  // ("I put on my clothes" while the world keeps them at home), found by the one resolver and had as
+  // its reach says (ITEMS-SPEC §4.5, §5.1): that very thing, never a second one.
+  const existing = named ?? mineFound(ctx, name, mayKnow);
+  if (existing) return existingClaim(input, ctx, { param: unfit.param, name, at, kind, consumable: false, existing });
+  if (input.policy.mode === "hold") return { kind: "hold" };
+  const title = `${name.charAt(0).toUpperCase()}${name.slice(1)}`;
   const here = placeOfEntity(state, world.pov);
   const row = matchCatalog(ctx, name, here);
   const category = row ? String(ctx.tables.get("economy.catalog")?.rows[row]?.category ?? "") : "";
@@ -259,18 +259,39 @@ function mineElsewhere(world: WorldDoc, state: Readonly<WorldState>, id: string,
   return e !== undefined && id !== world.pov && !isGone(state, id) && mayKnow(id) && e.fields.owner === world.pov && !isInside(state, id, world.pov) && placeOfEntity(state, id) !== placeOfEntity(state, world.pov);
 }
 
-/** The player character's own thing elsewhere that `name` names (the same main noun, with every word of it), the first by id; none when none does. */
-function mineByName(registry: Registry, world: WorldDoc, state: Readonly<WorldState>, name: string, mayKnow: (id: EntityId) => boolean): EntityId | null {
-  const said = itemName(name);
-  if (!said) return null;
-  const fits = Object.keys(state.entities)
-    .filter((id) => mineElsewhere(world, state, id, mayKnow) && kindIs(registry, world, own(state.entities, id)?.kind ?? "", "item"))
-    .filter((id) => {
-      const n = itemName(own(state.entities, id)?.name ?? "");
-      return n !== null && n.head === said.head && [...said.words].every((w) => n.words.has(w));
-    })
-    .sort();
-  return fits[0] ?? null;
+/**
+ * The player character's own thing elsewhere that `name` names, by the one resolver (ITEMS-SPEC §5.1:
+ * the head noun matching, every word before the head alone, then the nearest, then by id), one the POV
+ * may know (`mineElsewhere`); none when nothing of theirs is.
+ */
+function mineFound(ctx: ReadContext, name: string, mayKnow: (id: EntityId) => boolean): EntityId | null {
+  const pov = ctx.world.pov;
+  const found = findThings(ctx, name, { actor: pov, viewer: pov, scope: "own", owner: pov }).find((c) => !c.secret && kindIs(ctx.registry, ctx.world, own(ctx.state.entities, c.id)?.kind ?? "", "item") && mineElsewhere(ctx.world, ctx.state, c.id, mayKnow));
+  return found?.id ?? null;
+}
+
+/**
+ * A claim of the player character's own thing elsewhere (`existing`), as its reach says (ITEMS-SPEC
+ * §4.5). A short walk away it is fetched, the walk the action's time (`fetch`), in every mode. Further,
+ * the chat's policy decides, as for any claim: Make it real brings it along (keys, weapons and
+ * documents ask first), Ask first asks ("Your phone is at 114 Harbor Street. Have it with you
+ * anyway?"), and under Hold me to the world the action plays as plain roleplay. A thing too big to
+ * carry never comes along: it stays where it is, and so does the action, as plain roleplay.
+ */
+function existingClaim(input: ClaimInput, ctx: ReadContext, claim: Claim & { existing: EntityId }): ClaimVerdict {
+  const { world } = input;
+  const thing = claim.existing;
+  if (!fitsOn(ctx, thing)) return { kind: "hold" };
+  const reach = reachOf(ctx, world.pov, thing);
+  if (reach.reach === "nearby") return { kind: "real", claim: { ...claim, ...(reach.minutes !== undefined ? { fetch: reach.minutes } : {}) } };
+  if (input.policy.mode === "hold") return { kind: "hold" };
+  const detail = input.policy.mode === "ask" ? "This chat asks before it changes where your things are." : input.thing !== undefined && hasOwn(RESTRICTED, input.thing) ? "Keys, weapons and documents always ask first." : null;
+  if (detail === null) return { kind: "real", claim };
+  // Named as a sentence names it ("Your phone"): a name in sentence case reads lowercase after "Your".
+  const name = /^\p{Lu}\p{Ll}*(?:\s+\p{Ll}+)*$/u.test(claim.name) ? `${claim.name.charAt(0).toLowerCase()}${claim.name.slice(1)}` : claim.name;
+  const yours = /^your\s/i.test(name) ? `${name.charAt(0).toUpperCase()}${name.slice(1)}` : `Your ${name}`;
+  const where = reach.place !== null && canSeePlace(ctx.registry, world, ctx.state, world.pov, reach.place) ? `is at ${own(world.places, reach.place)?.name ?? reach.place}` : "isn't with you as far as the world knows";
+  return { kind: "ask", claim, question: `${yours} ${where}. Have it with you anyway?`, detail };
 }
 
 /**

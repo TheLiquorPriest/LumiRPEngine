@@ -15,10 +15,11 @@ import { formatMoney } from "../../../shared/world";
 import { labelOf, numOf, own, strOf } from "../../../engine/pack-kit";
 import type { EventTypeDef, ReadContext, Rejection, SlotInfo } from "../../../engine/registry";
 import type { FinanceApi, FinanceRegistry } from "./module";
-import { assetOf, instantIn, MARKET_CLOSE, priceOf, reject, type Asset } from "./assets";
+import { assetOf, instantIn, priceOf, reject, type Asset } from "./assets";
 import { accountOfHolding, applyLots, canTrade, findHolding, holdingIds, holdingOwners, lotsChange, lotsOf, marketOf, proceedsAccount, qtyOf, unit, unitsText } from "./holdings";
 import { holdingIncome, payout } from "./income";
-import { intrinsic, QTY_EPSILON, roundQty, takeFifo } from "./pricing";
+import { intrinsic, MARKET_CLOSE, QTY_EPSILON, roundQty, takeFifo } from "./pricing";
+import { actAs, asParam, mayAs } from "./acting";
 
 function isRejection(v: LedgerEvent[] | Rejection): v is Rejection {
   return !Array.isArray(v);
@@ -203,10 +204,15 @@ function settlements(api: FinanceApi, ctx: ReadContext, slot: SlotInfo): LedgerE
 /** Options and maturities (DESIGN §27.7): exercise, expiry and redemption. */
 export function registerOptions(r: FinanceRegistry): void {
   r.core.event(exerciseEvent(r.api));
+  // Exercised `as` an organization (ORG-SPEC §3.6) by someone who manages its money (`money.manage`).
   r.core.effect({
     type: "economy.exercise",
-    args: ["holding", "qty?", "from?", "to?", "party?"],
-    resolve: (a, ctx) => exercise(r.api, ctx, { party: strOf(a.party) || ctx.world.pov, holding: strOf(a.holding), ...(typeof a.qty === "number" ? { qty: a.qty } : {}), ...(strOf(a.from) !== "" ? { from: strOf(a.from) } : {}), ...(strOf(a.to) !== "" ? { to: strOf(a.to) } : {}) }),
+    args: ["holding", "qty?", "from?", "to?", "party?", "by?"],
+    resolve: (a, ctx) => {
+      const party = strOf(a.party) || ctx.world.pov;
+      const holding = strOf(a.holding);
+      return actAs(ctx, { by: strOf(a.by), party, power: "money.manage", line: () => `Exercised ${labelOf(ctx, holding)}` }, () => exercise(r.api, ctx, { party, holding, ...(typeof a.qty === "number" ? { qty: a.qty } : {}), ...(strOf(a.from) !== "" ? { from: strOf(a.from) } : {}), ...(strOf(a.to) !== "" ? { to: strOf(a.to) } : {}) }));
+    },
   });
   r.core.action({
     id: "exercise_option",
@@ -214,9 +220,9 @@ export function registerOptions(r: FinanceRegistry): void {
     description: "Exercise an option contract you hold.",
     pack: "economy",
     mechanical: true,
-    params: { holding: { type: "ref", ref: "holding" }, qty: { type: "number", label: "Contracts", optional: true }, from: { type: "ref", ref: "account", label: "Pay the strike from", optional: true }, to: { type: "ref", ref: "account", label: "Strike to", optional: true } },
-    requires: ["money_feature('options', self)"],
-    outcomes: { default: [{ type: "economy.exercise", args: { party: "self", holding: "holding", qty: "=params.qty", from: "=params.from", to: "=params.to" } }] },
+    params: { holding: { type: "ref", ref: "holding" }, qty: { type: "number", label: "Contracts", optional: true }, from: { type: "ref", ref: "account", label: "Pay the strike from", optional: true }, to: { type: "ref", ref: "account", label: "Strike to", optional: true }, as: asParam("money.manage", "As: an organization whose money you manage, only when the input exercises its option; left out, it's yours") },
+    requires: ["money_feature('options', self)", mayAs("money.manage")],
+    outcomes: { default: [{ type: "economy.exercise", args: { party: "self", holding: "holding", qty: "=params.qty", from: "=params.from", to: "=params.to", by: "actor" } }] },
     duration: "2",
     lexicon: ["exercise the option", "exercise my calls", "exercise my puts"],
     observable: "checks their phone",

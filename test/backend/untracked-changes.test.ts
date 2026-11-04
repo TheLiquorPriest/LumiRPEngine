@@ -13,6 +13,8 @@ import { chipRole } from "../../src/frontend/chip-roles";
 import type { JsonObject } from "../../src/shared/json";
 import { toChain } from "../../src/backend/ledger-io";
 import { Rig } from "../support/rig";
+import type { WorldState } from "../../src/engine/state";
+import { knows } from "../../src/engine/visibility";
 
 const INTERPRET_MARK = "You map a player's typed input";
 const EXTRACT_MARK = "You read a narrator's roleplay reply";
@@ -206,7 +208,7 @@ describe("a change the engine has no place for", () => {
     expect(hidden).toEqual(without);
   });
 
-  test("a thing handed over or bought reads as the reply put it, the same whether the world hides a thing by that id or name or has none, and the hidden one stays where it is", async () => {
+  test("a thing handed over or bought reads as the reply put it, the same whether the world hides a thing by that id or name or has none; the hidden one in the giver's hands is found, never made twice", async () => {
     // A reply each: Danny hands over the oilskin, or you buy one, by the secret thing's id or by its
     // name (a purchase takes in a handover of the same thing in its reply).
     const replies: [JsonObject, string][] = [
@@ -226,15 +228,26 @@ describe("a change the engine has no place for", () => {
       }
       return shown;
     };
-    const without = await play(await portAlder());
+    const alder = await portAlder();
+    const without = await play(alder);
     const world = await alderWithSecretThing();
     const hidden = await play(world);
     expect(without.map((chips) => chips.length)).toEqual([1, 1, 1, 1]);
     expect(hidden).toEqual(without);
-    // Each applied as words for a new thing: the hidden one never changed hands.
-    const { rig, chatId } = world;
-    const core = await rig.rt.ledger.core(chatId, rig.host.userId);
-    const state = core?.fold(toChain(await rig.host.chats.messages(chatId, rig.host.userId))).state;
-    expect(state?.entities[OILSKIN]?.relations).toContainEqual({ type: "in", to: DANNY });
+    const folded = async ({ rig, chatId }: { rig: Rig; chatId: string }): Promise<WorldState> => {
+      const core = await rig.rt.ledger.core(chatId, rig.host.userId);
+      const state = core?.fold(toChain(await rig.host.chats.messages(chatId, rig.host.userId))).state;
+      if (!state) throw new Error("no state");
+      return state;
+    };
+    // Danny hands over what he has by those words (ITEMS-SPEC §5.1, §5.3): the hidden oilskin in his
+    // hands is found, with you now, still his, and yours to know. Nothing was made in its place, so the
+    // world that hides it holds as many oilskins as the one that has none, the hidden one among them.
+    const after = await folded(world);
+    expect(after.entities[OILSKIN]?.relations).toContainEqual({ type: "in", to: "pov" });
+    expect(after.entities[OILSKIN]?.fields.owner).toBe(DANNY);
+    expect(knows(after, "pov", OILSKIN)).toBe(true);
+    const oilskins = (s: WorldState): number => Object.values(s.entities).filter((e) => /oilskin/i.test(e.name)).length;
+    expect(oilskins(after)).toBe(oilskins(await folded(alder)));
   });
 });

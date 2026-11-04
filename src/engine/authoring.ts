@@ -160,6 +160,7 @@ export function shapeIssues(doc: unknown): LintIssue[] {
   if (typeof doc.lenientPricing !== "boolean") err("lenientPricing", "lenientPricing must be true or false");
   if (doc.spawnTier !== undefined && typeof doc.spawnTier !== "string") err("spawnTier", "spawnTier must be a tier id");
   if (doc.spawnCap !== undefined && typeof doc.spawnCap !== "number") err("spawnCap", "spawnCap must be a number");
+  for (const key of ["placeCap", "placesPerTurn"] as const) if (doc[key] !== undefined && typeof doc[key] !== "number") err(key, `${key} must be a number`);
   // The world's own life states, when it has any: an object of objects, as a collection is.
   if (doc.lifeStates !== undefined) collection("lifeStates");
   return issues;

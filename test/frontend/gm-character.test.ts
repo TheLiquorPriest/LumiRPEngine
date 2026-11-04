@@ -1,12 +1,13 @@
 // GM's Character sheet (the Character model, DESIGN §7): a person opens it in place of the generic
-// entity sheet, its controls send one edit each, and a link between a character's GM pages opens
-// the page asked for once.
+// entity sheet, its controls send one edit each (the party's tier select among them, assess-party
+// §6.1), and a link between a character's GM pages opens the page asked for once.
 
 import { describe, expect, test } from "bun:test";
 import { initialUi } from "../../src/frontend/app";
-import { bedOp, gmPageFor, homeOp, moveOp, partySwitchOp, relationRows, routineStanding } from "../../src/frontend/gm/character-ops";
+import { bedOp, gmPageFor, homeOp, moveOp, relationRows, routineStanding } from "../../src/frontend/gm/character-ops";
 import { focusTaken, gmOpen, revealTruth } from "../../src/frontend/gm/gate";
 import type { PlaceRef, ThingRef } from "../../src/shared/character";
+import { partyOf } from "../../src/frontend/requests";
 import { PARTY_RELATION } from "../../src/shared/party";
 import type { GmEntity } from "../../src/shared/state-view";
 
@@ -33,14 +34,22 @@ describe("the GM character sheet", () => {
     expect(homeOp(person("rosie"), place("flat"))).toEqual({ op: "set", entity: "rosie", field: "home", value: "flat" });
   });
 
-  test("the party switch sends the link on and the unlink off, and nothing when it's already so", () => {
+  test("the party's tier select links with the tier, keeping since when, unlinks for Not in the party, and sends nothing when it's already so", () => {
     const pov = person("sam", { pov: true });
     const rosie = person("rosie");
     const gm = { entities: [pov, rosie] };
-    expect(partySwitchOp(rosie, gm, true)).toEqual({ op: "link", rel: PARTY_RELATION, from: "rosie", to: "sam" });
-    expect(partySwitchOp(rosie, gm, false)).toBeNull();
-    const along = person("rosie", { relations: [{ type: PARTY_RELATION, to: "sam", toName: "Sam" }] });
-    expect(partySwitchOp(along, { entities: [pov, along] }, false)).toEqual({ op: "unlink", rel: PARTY_RELATION, from: "rosie", to: "sam" });
+    expect(partyOf(pov, gm)).toBeNull();
+    expect(partyOf(rosie, gm)?.tier).toBeNull();
+    expect(partyOf(rosie, gm)?.op("companion")).toEqual({ op: "link", rel: PARTY_RELATION, from: "rosie", to: "sam", fields: { tier: "companion" } });
+    expect(partyOf(rosie, gm)?.op(null)).toBeNull();
+    const along = person("rosie", { relations: [{ type: PARTY_RELATION, to: "sam", toName: "Sam", fields: { tier: "companion", since: "2026-09-14" } }] });
+    const party = partyOf(along, { entities: [pov, along] });
+    expect([party?.tier, party?.op("companion")]).toEqual(["companion", null]);
+    expect(party?.op("hired")).toEqual({ op: "link", rel: PARTY_RELATION, from: "rosie", to: "sam", fields: { tier: "hired", since: "2026-09-14" } });
+    expect(party?.op(null)).toEqual({ op: "unlink", rel: PARTY_RELATION, from: "rosie", to: "sam" });
+    // A link written before tiers reads core.
+    const before = person("rosie", { relations: [{ type: PARTY_RELATION, to: "sam", toName: "Sam" }] });
+    expect(partyOf(before, { entities: [pov, before] })?.tier).toBe("core");
   });
 
   test("a link to a character's mind opens Minds on them once, the gate left as it is", () => {

@@ -71,7 +71,7 @@ describe("the Character model", () => {
     expect(refs.get("riverton")).toMatchObject({ path: [], parent: null });
   });
 
-  test("the GM's read says where they are now and what they're doing, the party included", () => {
+  test("the GM's read says where they are now and what they're doing, their party tier included", () => {
     const world = migrateWorld(modernUsWorld("w", "R"));
     const state = startState(world, reg);
     const maya = state.entities.maya;
@@ -79,10 +79,14 @@ describe("the Character model", () => {
     maya.fields.place = "office";
     maya.fields.activity = "work_shift";
     maya.fields.activity_until = state.clock + 120;
-    maya.relations.push({ type: "travels_with", to: "you" });
+    maya.relations.push({ type: "travels_with", to: "you", fields: { tier: "companion" } });
     const built = buildCharacter(reg, world, "maya", state);
     expect(built?.character.place?.id).toBe("office");
-    expect(built?.character.now).toMatchObject({ activity: "work_shift", activityLabel: "Work shift", party: true });
+    expect(built?.character.now).toMatchObject({ activity: "work_shift", activityLabel: "Work shift", partyTier: "companion" });
+    // A link written before tiers reads core; nobody else is in the party.
+    maya.relations = maya.relations.map((r) => (r.type === "travels_with" ? { type: r.type, to: r.to } : r));
+    expect(buildCharacter(reg, world, "maya", state)?.character.now?.partyTier).toBe("core");
+    expect(buildCharacter(reg, world, "rosa", state)?.character.now?.partyTier).toBeNull();
     expect(built?.character.now?.until).toBeTruthy();
     // Build's read has no now.
     expect(buildCharacter(reg, world, "maya")?.character.now).toBeUndefined();

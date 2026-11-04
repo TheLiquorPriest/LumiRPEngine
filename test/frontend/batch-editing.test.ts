@@ -7,10 +7,10 @@ import { describe, expect, test } from "bun:test";
 import { bulkOps, chunks, draftPatch, fidelityGroups, mixCounts, sendInChunks, tierGroups } from "../../src/frontend/batch";
 import { draftTargets } from "../../src/frontend/build/batch-sheet";
 import { Button } from "../../src/frontend/components";
-import { BLANK_CHOICES, batchChanges, bulkTargets, ChangeCard, routineStanding } from "../../src/frontend/gm/batch";
+import { BLANK_CHOICES, batchChanges, bulkDone, bulkTargets, ChangeCard, routineStanding } from "../../src/frontend/gm/batch";
 import { editNotice, noticeStands, sendEdits } from "../../src/frontend/gm/editor";
 import { GroupPicks, SelectBar, type Selection } from "../../src/frontend/multi-select";
-import { editRequest } from "../../src/frontend/requests";
+import { editRequest, partyOf } from "../../src/frontend/requests";
 import { FIDELITY_LABEL } from "../../src/packs/minds/ui/ops";
 import { lorePinsOf } from "../../src/shared/lore";
 import { MIND_TEXT_CAPS } from "../../src/shared/minds";
@@ -71,7 +71,7 @@ describe("GM batch edits", () => {
     const chipsBefore = await undoChips(rig, chatId);
     const sent: EditOp[][] = [];
     const change = { kind: "tier", tier: "background" } as const;
-    const ops = bulkOps(bulkTargets({ gm }, people, change.kind), change);
+    const ops = bulkOps(bulkTargets({ gm }, people, change.kind), change, gm);
     if (!ops) throw new Error("no ops");
     expect(await sendInChunks(ops, editor(rig, chatId, sent))).toEqual({ applied: 1, of: 1 });
     expect(sent.map((s) => s.length)).toEqual([3]);
@@ -91,7 +91,7 @@ describe("GM batch edits", () => {
     expect(ids.length).toBe(70);
     const chipsBefore = await undoChips(rig, chatId);
     const sent: EditOp[][] = [];
-    const ops = bulkOps(ids, { kind: "tier", tier: "supporting" });
+    const ops = bulkOps(ids, { kind: "tier", tier: "supporting" }, gm);
     if (!ops) throw new Error("no ops");
     expect(chunks(ops).map((c) => c.length)).toEqual([EDIT_OPS_MAX, 70 - EDIT_OPS_MAX]);
     expect(await sendInChunks(ops, editor(rig, chatId, sent))).toEqual({ applied: 2, of: 2 });
@@ -106,7 +106,7 @@ describe("GM batch edits", () => {
     const before = await gmView(rig, chatId);
     const ids = before.entities.filter((e) => !e.gone).map((e) => e.id).slice(0, 70);
     expect(ids.length).toBe(70);
-    const ops = bulkOps(ids, { kind: "tier", tier: "supporting" });
+    const ops = bulkOps(ids, { kind: "tier", tier: "supporting" }, before);
     if (!ops) throw new Error("no ops");
     const sent = await sendEdits((send) => sendInChunks(ops, send), request(rig, chatId));
     expect([sent.applied, sent.of, sent.count]).toEqual([2, 2, 70]);
@@ -152,7 +152,7 @@ describe("GM batch edits", () => {
   });
 
   test("every control starts on Choose…: Apply stays off until a value is picked, and for a value no one picked fits", () => {
-    expect(Object.values(batchChanges(BLANK_CHOICES))).toEqual([null, null, null, null, null, null]);
+    expect(Object.values(batchChanges(BLANK_CHOICES))).toEqual([null, null, null, null, null, null, null]);
     const choices = { ...BLANK_CHOICES, tier: "background", domain: "money" as const, level: "tier" as const, pin: "score" as const, approach: "mind" as const, to: "home" };
     const changes = batchChanges(choices);
     expect([changes.tier, changes.level, changes.pin, changes.intent, changes.move]).toEqual([
@@ -210,12 +210,12 @@ describe("GM batch edits", () => {
     expect(before.routineRoles).toEqual([]);
     expect(mix(before)).toEqual({ shown: [{ label: "world", count: 3 }], rest: 0 });
 
-    expect(await send(bulkOps([one, two], { kind: "role", role: "enforced" }) ?? [])).not.toBeNull();
+    expect(await send(bulkOps([one, two], { kind: "role", role: "enforced" }, before) ?? [])).not.toBeNull();
     const set = await gmView(rig, chatId);
     expect(set.routineRoles).toEqual([one, two].sort().map((entity) => ({ entity, role: "enforced" })));
     expect(mix(set)).toEqual({ shown: [{ label: "enforced", count: 2 }, { label: "world", count: 1 }], rest: 0 });
 
-    expect(await send(bulkOps([one], { kind: "role", role: null }) ?? [])).not.toBeNull();
+    expect(await send(bulkOps([one], { kind: "role", role: null }, set) ?? [])).not.toBeNull();
     const back = await gmView(rig, chatId);
     expect(back.routineRoles).toEqual([{ entity: two, role: "enforced" }]);
     expect(mix(back)).toEqual({ shown: [{ label: "world", count: 2 }, { label: "enforced", count: 1 }], rest: 0 });
@@ -252,12 +252,42 @@ describe("GM batch edits", () => {
     if (!to || people.length < 2) throw new Error("nowhere to move them");
     const sent: EditOp[][] = [];
     const change = { kind: "move", to } as const;
-    const ops = bulkOps(bulkTargets({ gm }, people, change.kind), change);
+    const ops = bulkOps(bulkTargets({ gm }, people, change.kind), change, gm);
     if (!ops) throw new Error("no ops");
     expect(await sendInChunks(ops, editor(rig, chatId, sent))).toEqual({ applied: 1, of: 1 });
     expect(sent).toEqual([people.map((entity) => ({ op: "move", entity, to }))]);
     const after = await gmView(rig, chatId);
     expect(people.map((id) => after.entities.find((e) => e.id === id)?.place)).toEqual([to, to]);
+  });
+
+  test("a bulk party tier puts the people picked in the player character's party, never the player character; set where it changes something, and Not in the party takes out only those in it", async () => {
+    const { rig, chatId } = await chat();
+    const gm = await gmView(rig, chatId);
+    const you = gm.entities.find((e) => e.pov)?.id ?? "";
+    const people = gm.minds.characters.slice(0, 2).map((c) => c.entity);
+    const [one] = people;
+    if (!one || people.length < 2) throw new Error("the starter has too few characters");
+    expect(bulkTargets({ gm }, [you, ...people], "party").sort()).toEqual([...people].sort());
+    const send = request(rig, chatId);
+    const tiers = async (): Promise<(string | null)[]> => {
+      const view = await gmView(rig, chatId);
+      return people.map((id) => {
+        const e = view.entities.find((x) => x.id === id);
+        return e ? (partyOf(e, view)?.tier ?? null) : null;
+      });
+    };
+    expect(await send(bulkOps([one], { kind: "party", tier: "companion" }, gm) ?? [])).not.toBeNull();
+    expect(await tiers()).toEqual(["companion", null]);
+    const hired = bulkOps(people, { kind: "party", tier: "hired" }, await gmView(rig, chatId)) ?? [];
+    expect(hired.map((op) => op.op)).toEqual(["link", "link"]);
+    expect(await send(hired)).not.toBeNull();
+    expect(await tiers()).toEqual(["hired", "hired"]);
+    expect(bulkOps(people, { kind: "party", tier: "hired" }, await gmView(rig, chatId))).toEqual([]);
+    expect(await send(bulkOps([one], { kind: "party", tier: null }, await gmView(rig, chatId)) ?? [])).not.toBeNull();
+    expect(await tiers()).toEqual([null, "hired"]);
+    expect(bulkOps([one], { kind: "party", tier: null }, await gmView(rig, chatId))).toEqual([]);
+    expect([bulkDone(gm, { kind: "party", tier: "hired" }, 2), bulkDone(gm, { kind: "party", tier: "ally" }, 1), bulkDone(gm, { kind: "party", tier: null }, 1)]).toEqual(["2 are now in the party as hired hands", "1 is now in the party as an ally", "1 is no longer in the party"]);
+    expect(rig.rt.ledger.errors).toEqual([]);
   });
 });
 

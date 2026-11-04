@@ -7,11 +7,11 @@ import type { JsonObject, JsonValue } from "../shared/json";
 import type { ChatId, DomainId, EntityId, InterruptClass, InterruptPolicy, Level, TierId, WorldId } from "../shared/ids";
 import type { EntityUpgradePick, KeepLine, ResolveScope, TimeControl, TimelapseTarget, TimeScope, UpgradePicks } from "../shared/ledger";
 import { parseMoneyInput } from "../shared/money";
-import type { EditOp, GenerateAs, UpgradePreview } from "../shared/protocol";
+import type { EditOp, GenerateAs, GmThingsRead, ThingsRead, UpgradePreview } from "../shared/protocol";
 import type { Chip, FieldFixTarget, GmEntity, GmView, HudView, PaletteEntry, PaletteOption, StateView, TimelapseView } from "../shared/state-view";
 import { chipStarts } from "../shared/state-view";
 import type { AdjudicationDef, FacetId, FacetValueId, WorldCurrency } from "../shared/world";
-import { PARTY_RELATION } from "../shared/party";
+import { PARTY_RELATION, partyTierOf, type PartyTier } from "../shared/party";
 import type { RequestBody } from "./registry";
 
 /** The request body of one protocol type. */
@@ -71,14 +71,16 @@ export function convertRequest(line: KeepLine, chatId: ChatId): Req<"lre.keep"> 
   return { type: "lre.keep", chatId, choice: "convert", messageId: line.messageId, parentPath: line.parentPath, refs: [line.ref] };
 }
 
-/** A chain of palette picks (an option, then its second-step choices); params merge in order, then a free amount (cents) and the entry's required number. */
-export function paletteRequest(entry: PaletteEntry, picks: readonly PaletteOption[], chatId: ChatId, amountCents?: number, count?: number, people: readonly EntityId[] = []): Req<"lre.action"> {
+/** A chain of palette picks (an option, then its second-step choices); params merge in order, then a free amount (cents), the entry's required number, who comes along and whom the player pays as. */
+export function paletteRequest(entry: PaletteEntry, picks: readonly PaletteOption[], chatId: ChatId, amountCents?: number, count?: number, people: readonly EntityId[] = [], as?: EntityId): Req<"lre.action"> {
   const params: JsonObject = Object.assign({}, ...picks.map((pick) => pick.params));
   if (entry.amount && amountCents !== undefined) params[entry.amount.param] = Math.round(amountCents);
   if (entry.number && count !== undefined) params[entry.number.param] = count;
   // Only the people the picker offered come along: a tick left from another place never does.
   const along = entry.people ? people.filter((id) => entry.people?.options.some((o) => o.id === id)) : [];
   if (entry.people && along.length > 0) params[entry.people.param] = along;
+  // Paying as (ORG-SPEC §3.6): only an organization the entry offers; You, or one it no longer offers, sends none.
+  if (entry.acting && as !== undefined && entry.acting.options.some((o) => o.id === as)) params[entry.acting.param] = as;
   return { type: "lre.action", chatId, action: entry.action, params, source: "palette" };
 }
 
@@ -103,6 +105,16 @@ export function travelRequest(action: string, params: JsonObject, chatId: ChatId
 /** A character's model (DESIGN §7): from a world's draft in Build, or from a chat's head in GM, behind the GM gate. */
 export function characterRequest(entity: EntityId, from: { worldId: WorldId } | { chatId: ChatId }): Req<"lre.character"> {
   return "worldId" in from ? { type: "lre.character", op: "get", entity, scope: "build", worldId: from.worldId } : { type: "lre.character", op: "get", entity, scope: "gm", chatId: from.chatId };
+}
+
+/** Build's Things read of `worldId`'s draft (ITEMS-SPEC §10.1): the list, a thing's page, a person's things, a search, or the catalog's types. */
+export function thingsRequest(worldId: WorldId, read: ThingsRead): Req<"lre.things"> {
+  return { type: "lre.things", scope: "build", worldId, ...read };
+}
+
+/** GM → Things' read of the chat's head (ITEMS-SPEC §10.2), behind the GM gate: Build's reads, and Tidy up, Leave it, what was made in play and Keep in the world. */
+export function gmThingsRequest(chatId: ChatId, read: GmThingsRead): Req<"lre.things"> {
+  return { type: "lre.things", scope: "gm", chatId, ...read };
 }
 
 /** The staged action sent again (DESIGN §11): as tapped, which clears it, or with `now`, which plays it at once. */
@@ -200,12 +212,26 @@ export function bringOp(entity: GmEntity, gm: Pick<GmView, "entities">): EditOp 
   return pov && pov.id !== entity.id && pov.place && pov.place !== entity.place ? { op: "move", entity: entity.id, to: pov.place } : null;
 }
 
-/** The player character's party (DESIGN §9.3): whether someone travels with it, and the GM's edit that changes that. */
-export function partyOf(entity: GmEntity, gm: Pick<GmView, "entities">): { pov: GmEntity; travels: boolean; op: EditOp } | null {
+/**
+ * The player character's party (DESIGN §9.3; ORG-SPEC §3.12): someone's tier in it (null: not in it),
+ * and the GM's edit that puts them in a tier or takes them out (`null`), none when it is so already. A
+ * tier change keeps since when they joined; a GM's correction doesn't say since when for someone new.
+ */
+export function partyOf(entity: Pick<GmEntity, "id" | "relations">, gm: Pick<GmView, "entities">): { pov: GmEntity; tier: PartyTier | null; op(tier: PartyTier | null): EditOp | null } | null {
   const pov = gm.entities.find((e) => e.pov);
   if (!pov || pov.id === entity.id) return null;
-  const travels = entity.relations.some((r) => r.type === PARTY_RELATION && r.to === pov.id);
-  return { pov, travels, op: travels ? { op: "unlink", rel: PARTY_RELATION, from: entity.id, to: pov.id } : { op: "link", rel: PARTY_RELATION, from: entity.id, to: pov.id } };
+  const link = entity.relations.find((r) => r.type === PARTY_RELATION && r.to === pov.id);
+  const now = link ? partyTierOf(link.fields) : null;
+  const since = link?.fields?.since;
+  return {
+    pov,
+    tier: now,
+    op: (tier) => {
+      if (tier === now) return null;
+      if (tier === null) return { op: "unlink", rel: PARTY_RELATION, from: entity.id, to: pov.id };
+      return { op: "link", rel: PARTY_RELATION, from: entity.id, to: pov.id, fields: { tier, ...(typeof since === "string" && since !== "" ? { since } : {}) } };
+    },
+  };
 }
 
 /** The places a picker offers for a search: each word of it in the name, in the list's order. */

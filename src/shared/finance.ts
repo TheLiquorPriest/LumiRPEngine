@@ -100,8 +100,11 @@ export const LEGACY_TYPE_CLASS: Readonly<Record<string, AccountClass>> = Object.
 
 // ---------------------------------------------------------------- parties and ownership
 
-/** Who can hold money: a person, or one of the three party kinds. Each owns accounts and assets. */
-export const PARTY_KINDS = ["person", "business", "trust", "household"] as const;
+/**
+ * Who can hold money: a person, or an organization (ORG-SPEC §3.1): a business, a trust, a household
+ * and every other group kind (a faction, a family, a club, the party). Each owns accounts and assets.
+ */
+export const PARTY_KINDS = ["person", "business", "trust", "household", "group"] as const;
 export type PartyKind = (typeof PARTY_KINDS)[number];
 
 export const OWNER_ROLES = ["owner", "joint", "custodian", "beneficiary", "trustee", "authorized_user"] as const;
@@ -110,12 +113,15 @@ export type OwnerRole = (typeof OWNER_ROLES)[number];
 /**
  * One holder of an account or an asset (an `owners` list on accounts, businesses, holdings and
  * properties). `share` is a percentage of its worth among the owners whose role carries worth;
- * when none gives one, those owners share equally.
+ * when none gives one, those owners share equally. A company's row may count its stake in `units`
+ * of a share `class` (ORG-SPEC §3.10), each change writing `share` beside them.
  */
 export interface Owner {
   party: EntityId;
   role: OwnerRole;
   share?: number;
+  units?: number;
+  class?: string;
 }
 
 /** What a role lets its holder do. */
@@ -170,11 +176,133 @@ export function ownersIn(fields: Readonly<JsonObject>): Owner[] {
       const party = raw.party;
       if (typeof party !== "string" || party === "") continue;
       const share = raw.share;
-      out.push({ party, role: isOwnerRole(raw.role) ? raw.role : "owner", ...(typeof share === "number" && Number.isFinite(share) ? { share } : {}) });
+      const units = raw.units;
+      const cls = raw.class;
+      out.push({ party, role: isOwnerRole(raw.role) ? raw.role : "owner", ...(typeof share === "number" && Number.isFinite(share) ? { share } : {}), ...(typeof units === "number" && Number.isInteger(units) && units >= 0 ? { units } : {}), ...(typeof cls === "string" && cls !== "" ? { class: cls } : {}) });
     }
     return out;
   }
   return typeof fields.owner === "string" && fields.owner !== "" ? [{ party: fields.owner, role: "owner" }] : [];
+}
+
+// ---------------------------------------------------------------- share units, classes and votes (ORG-SPEC §3.10)
+
+function worthRow(o: Owner): boolean {
+  return ROLE_RIGHTS[o.role].worth;
+}
+
+/** Whether a company counts its shares in units: any owner whose role carries worth holds a count of them. */
+export function countsUnits(owners: readonly Owner[]): boolean {
+  return owners.some((o) => worthRow(o) && o.units !== undefined);
+}
+
+/** The units the worth-bearing rows hold: all of them, or `party`'s. */
+export function unitsOf(owners: readonly Owner[], party?: EntityId): number {
+  return owners.filter((o) => worthRow(o) && (party === undefined || o.party === party)).reduce((a, o) => a + (o.units ?? 0), 0);
+}
+
+/**
+ * The owners with every worth-bearing row's `share` written from its units over all of them, the
+ * one truth units and share keep together; a row left with no units holds nothing and goes. Rows
+ * whose role carries no worth (a trustee, an authorized user) stay as they are.
+ */
+export function withUnitShares(owners: readonly Owner[]): Owner[] {
+  const total = unitsOf(owners);
+  return owners.flatMap((o): Owner[] => {
+    if (!worthRow(o)) return [o];
+    const units = Math.max(0, Math.round(o.units ?? 0));
+    if (units === 0 || total <= 0) return [];
+    // A share as an owners row keeps it: four places.
+    return [{ ...o, units, share: Math.round(((units * 100) / total) * 10000) / 10000 }];
+  });
+}
+
+/**
+ * The owners of a company that doesn't count units yet, counted in `total` of them by their shares of
+ * its worth (the largest remainders taking what rounding leaves, then by party), each row's share
+ * written from its units.
+ */
+export function countedIn(owners: readonly Owner[], total: number): Owner[] {
+  const shares = worthShares(owners);
+  const rows = owners.map((o, i) => ({ o, i, exact: worthRow(o) ? ((shares[o.party] ?? 0) * total) / 100 / owners.filter((p) => p.party === o.party && worthRow(p)).length : 0 }));
+  const units = rows.map((r) => Math.floor(r.exact));
+  let left = total - units.reduce((a, u) => a + u, 0);
+  for (const r of [...rows].filter((r) => r.exact > 0).sort((a, b) => b.exact - Math.floor(b.exact) - (a.exact - Math.floor(a.exact)) || a.o.party.localeCompare(b.o.party) || a.i - b.i)) {
+    if (left <= 0) break;
+    units[r.i] = (units[r.i] ?? 0) + 1;
+    left--;
+  }
+  return withUnitShares(owners.map((o, i) => (worthRow(o) ? { ...o, units: units[i] ?? 0 } : o)));
+}
+
+/**
+ * `units` of `from`'s moved to `to` (taken from `from`'s rows in order, each keeping its class), the
+ * shares rewritten; `to` gains a row of each class it didn't hold, in `role`.
+ */
+export function moveUnits(owners: readonly Owner[], from: EntityId, to: EntityId, units: number, role: OwnerRole = "owner"): Owner[] {
+  const next = owners.map((o) => ({ ...o }));
+  let left = units;
+  const moved: { cls: string | undefined; units: number }[] = [];
+  for (const o of next) {
+    if (left <= 0 || o.party !== from || !worthRow(o)) continue;
+    const take = Math.min(left, o.units ?? 0);
+    o.units = (o.units ?? 0) - take;
+    left -= take;
+    if (take > 0) moved.push({ cls: o.class, units: take });
+  }
+  for (const m of moved) {
+    const row = next.find((o) => o.party === to && worthRow(o) && o.class === m.cls);
+    if (row) row.units = (row.units ?? 0) + m.units;
+    else next.push({ party: to, role, units: m.units, ...(m.cls !== undefined ? { class: m.cls } : {}) });
+  }
+  return withUnitShares(next);
+}
+
+/** A company's share classes (its `share_classes`), each once by id; one class, Common with a vote a unit, when it defines none. */
+export function classesIn(fields: Readonly<JsonObject>): ShareClass[] {
+  const out: ShareClass[] = [];
+  const raw = fields.share_classes;
+  for (const c of Array.isArray(raw) ? raw : []) {
+    if (typeof c !== "object" || c === null || Array.isArray(c)) continue;
+    const id = typeof c.id === "string" ? c.id.trim() : "";
+    if (id === "" || out.some((x) => x.id === id)) continue;
+    const votes = typeof c.votes === "number" && Number.isFinite(c.votes) && c.votes >= 0 ? c.votes : 1;
+    out.push({ id, label: typeof c.label === "string" && c.label.trim() !== "" ? c.label.trim() : id.replace(/_/g, " "), votes });
+  }
+  return out.length > 0 ? out : [COMMON_CLASS];
+}
+
+/** The class a row's units are of: the one it names, else the company's first. */
+export function rowClass(o: Owner, classes: readonly ShareClass[]): ShareClass {
+  return classes.find((c) => c.id === o.class) ?? classes[0] ?? COMMON_CLASS;
+}
+
+/**
+ * Each holder's votes in percent of all (§3.10): a company counting units gives each unit its class's
+ * votes; any other, each owner's share of its worth. Nobody holds any while no votes are cast.
+ */
+export function votePcts(owners: readonly Owner[], classes: readonly ShareClass[]): Record<EntityId, number> {
+  const out: Record<EntityId, number> = {};
+  if (!countsUnits(owners)) {
+    const shares = worthShares(owners);
+    for (const [party, pct] of Object.entries(shares)) out[party] = pct;
+    return out;
+  }
+  const votes: Record<EntityId, number> = {};
+  let total = 0;
+  for (const o of owners) {
+    if (!worthRow(o)) continue;
+    const v = (o.units ?? 0) * rowClass(o, classes).votes;
+    votes[o.party] = (votes[o.party] ?? 0) + v;
+    total += v;
+  }
+  for (const o of owners) out[o.party] = total > 0 ? ((votes[o.party] ?? 0) * 100) / total : 0;
+  return out;
+}
+
+/** An owners list as an entity's `owners` field writes it. */
+export function ownersJson(owners: readonly Owner[]): JsonObject[] {
+  return owners.map((o) => ({ party: o.party, role: o.role, ...(o.share !== undefined ? { share: o.share } : {}), ...(o.units !== undefined ? { units: o.units } : {}), ...(o.class !== undefined ? { class: o.class } : {}) }));
 }
 
 /**
@@ -552,6 +680,8 @@ export interface JournalEntry {
   counterparty?: string;
   card?: EntityId;
   flow?: string;
+  /** Who made it for the organization that holds the account, when someone acted for it (ORG-SPEC §3.6): "Paid by Jordan Ellis for Alder Automotive". */
+  by?: EntityId;
   status: TxnStatus;
   /** When a pending entry posts. */
   settles?: number;
@@ -775,7 +905,7 @@ export const FEATURE_DEFS: Readonly<Record<FinanceFeature, FeatureDef>> = Object
   households: { label: "Household shares", floor: 2, on: 3 },
   living_costs: { label: "Living costs", floor: 2, on: 3 },
   statements: { label: "Statements and minimum payments", floor: 3, on: 4 },
-  interest: { label: "Interest", floor: 3, on: 4 },
+  interest: { label: "Interest", floor: 3, on: 3 },
   fees: { label: "Fees", floor: 3, on: 4 },
   delinquency: { label: "Late payments, penalty rates and collections", floor: 3, on: 4 },
   credit: { label: "Credit reports and scores", floor: 3, on: 4 },
@@ -1006,6 +1136,13 @@ export interface LeaseView {
   state: "let" | "vacant" | "ended";
 }
 
+/**
+ * The Money section's source for the prices of what is sold where the player character is (DESIGN
+ * §9.5): the narrator's alone, sent while Settings → Narrator → Prices is on; the helpers price
+ * nothing, so it never takes their room.
+ */
+export const PRICES_SOURCE = "prices";
+
 // ---------------------------------------------------------------- the events
 
 /**
@@ -1051,10 +1188,15 @@ export interface StatusData {
   status: AccountStatus;
 }
 
-/** `economy.accrue`: an interest period ends for an account; its average daily balance starts again from `at`. */
+/**
+ * `economy.accrue`: an interest period ends for an account; its average daily balance starts again
+ * from `at`. A card without statements records what it owed then (`owed`), so its next period
+ * charges interest on what's left of it.
+ */
 export interface AccrueData {
   account: EntityId;
   at: number;
+  owed?: number;
 }
 
 /** `economy.txn`: a posting's journal lines (one per account in the world it touches) and what it was. */
@@ -1191,6 +1333,8 @@ export interface JournalLine {
   category: string | null;
   counterparty: string | null;
   card: string | null;
+  /** Who made it for the organization that holds the account, in words ("Paid by Jordan Ellis for Alder Automotive", ORG-SPEC §3.6); absent when its holder made it. */
+  by?: string;
   status: TxnStatus;
 }
 
@@ -1234,6 +1378,11 @@ export interface OwnerLine {
   name: string;
   role: OwnerRole;
   share: number;
+  /** A company that counts its shares in units (ORG-SPEC §3.10): the row's units, its class's label, its votes in percent and what its units are worth, where values show. */
+  units?: number;
+  class?: string;
+  votes?: number;
+  value?: number;
 }
 
 export interface AccountView {
@@ -1260,8 +1409,8 @@ export interface AccountView {
   /** The accounts in the view that may back a standing payment from this one when it can't cover it: its payer's own (§25.5). */
   fallbacks: EntityId[];
   limit: number | null;
-  aprPct: number | null;
-  apyPct: number | null;
+  /** Where interest runs for the account and it has a rate: what it earns or charges; else null. */
+  interest: InterestView | null;
   /** Plain lines: APR, APY, fees, grace, due day, minimum rule, overdraft, limits, hold days, term. */
   terms: { label: string; value: string }[];
   /** Null where autopay isn't offered (not credit, or below the level that runs it). */
@@ -1274,6 +1423,22 @@ export interface AccountView {
   transactions: JournalLine[];
   securedBy: { id: EntityId; name: string } | null;
   loan: { payment: number; monthsLeft: number; payoff: number } | null;
+}
+
+/** An account's interest (DESIGN §25.4): what it earns or charges, at what rate, how it's worked out, and what it has come to. */
+export interface InterestView {
+  /** A deposit account earns on what's in it; a credit account or a loan charges on what's owed. */
+  way: "earns" | "charges";
+  /** The yearly rate it runs at now: its APY, its APR, or its penalty APR while that applies. */
+  ratePct: number;
+  /** How it's worked out, and when it posts, in words. */
+  basis: string;
+  /** What it earned or charged this calendar year, minor units. */
+  thisYear: number;
+  /** The latest it earned or charged, and when; null before any. */
+  last: { cents: number; at: string } | null;
+  /** When it next posts, and about what that comes to if nothing changes before then (0 in a grace period). */
+  next: { cents: number; at: string } | null;
 }
 
 export interface FlowView {
@@ -1304,12 +1469,19 @@ export interface FlowView {
   spec: Flow | null;
 }
 
+/** One part of a party's net worth: an account group, a holding, a property, a stake or a vehicle (`vehicle`: Assets' vehicles row totals these). */
+export interface WorthLine {
+  label: string;
+  cents: number;
+  vehicle?: true;
+}
+
 export interface OverviewView {
   netWorth: number | null;
   assets: number | null;
   liabilities: number | null;
-  /** Cash, deposits, investments, property, business, debts. */
-  breakdown: { label: string; cents: number }[];
+  /** Cash, deposits, investments, property, business, vehicles, debts. */
+  breakdown: WorthLine[];
   /** Money in and out over the last 30 days, by category; and what's due in the next 30. */
   cashFlow: { period: string; in: number; out: number; byCategory: { category: string; cents: number }[]; nextIn: number; nextOut: number } | null;
   upcoming: UpcomingLine[];
@@ -1379,6 +1551,153 @@ export interface BusinessView {
   route: DistributionRoute | null;
 }
 
+/** A company's structures (DESIGN §26.3) as people say them. */
+export const STRUCTURE_LABELS: Readonly<Record<string, string>> = Object.freeze({ sole_proprietorship: "Sole proprietorship", partnership: "Partnership", llc: "LLC", s_corp: "S corporation", c_corp: "C corporation" });
+
+/** A company's structures as a sentence names one ("became an LLC", "taxed as a C corporation"). */
+export const STRUCTURE_WORDS: Readonly<Record<string, string>> = Object.freeze({ sole_proprietorship: "a sole proprietorship", partnership: "a partnership", llc: "an LLC", s_corp: "an S corporation", c_corp: "a C corporation" });
+
+/** A company's share class (ORG-SPEC §3.10): classes differ only in the votes a unit carries. */
+export interface ShareClass {
+  id: string;
+  label: string;
+  votes: number;
+}
+
+/** One class a company defines when it defines none of its own: Common, one vote a unit. */
+export const COMMON_CLASS: ShareClass = Object.freeze({ id: "common", label: "Common", votes: 1 });
+
+/**
+ * A company in another's Structure (§3.10): a parent among its owners, or a subsidiary it holds a
+ * share of, with that share of its worth and of its votes, whether the holder controls it (more than
+ * its decision threshold of the votes), and its value, cash and profit this year where the reader
+ * may see them (null otherwise); a subsidiary's own subsidiaries under it.
+ */
+export interface StructureLink {
+  id: EntityId;
+  name: string;
+  share: number;
+  votes: number;
+  controlled: boolean;
+  value: number | null;
+  cash: number | null;
+  profit: number | null;
+  children: StructureLink[];
+}
+
+/** A parent's figures with the companies it controls added (§3.10), worked out when read: their cash and this year's profit in full, its net worth with its stakes in them at their books. */
+export interface ConsolidatedView {
+  cash: number;
+  profit: number;
+  netWorth: number;
+  /** How many companies it controls, through others too. */
+  companies: number;
+}
+
+/** What the reader may do on a company's Ownership (§4.4), each null where they may, else why not in words. */
+export interface OwnershipActs {
+  /** Share decisions: issuing, buying back, classes (`shares.manage`, with more than its threshold of the votes). */
+  decide: string | null;
+  /** Changing its structure (`org.govern`, with more than its threshold of the votes). */
+  restructure: string | null;
+  /** Acting for it on the stakes it holds in others: selling them, putting more in (`shares.manage`). */
+  holdings: string | null;
+  /** Start a subsidiary (`org.govern`), with the accounts of the company's own its capital may come from. */
+  found: string | null;
+  sources: { id: EntityId; name: string; balance: string }[];
+}
+
+/**
+ * A company's Ownership in Orgs (§4.4, the economy's `ownership` section): its structure, its cap
+ * table (each owner with their role and share, and in a company counting units their class, units,
+ * votes and, at Money 4, value), its classes, its valuation and value per unit (Money 4), its
+ * parents and subsidiaries with the figures consolidated, the reader's own role, draw and route,
+ * their votes, and what they may do.
+ */
+export interface OwnershipView {
+  structure: string;
+  owners: OwnerLine[];
+  /** Its classes; null while it defines none (one class, a vote a unit). */
+  classes: ShareClass[] | null;
+  /** Its units in all; null while it doesn't count them. */
+  units: number | null;
+  /** An ownership decision needs more than this percent of the votes. */
+  decidePct: number;
+  valuation: { value: number; set: boolean; book: number; profit: number; multiple: number; perUnit: number | null } | null;
+  parents: StructureLink[];
+  children: StructureLink[];
+  consolidated: ConsolidatedView | null;
+  role: OwnerRole | null;
+  mayDraw: boolean;
+  route: DistributionRoute | null;
+  /** The reader's own votes, percent. */
+  votes: number;
+  /** Null for the GM's view, whose changes are GM edits. */
+  acts: OwnershipActs | null;
+}
+
+/** One year of an organization's taxes (§3.11): sales tax it collected and remitted, what it withheld from pay and its own share of payroll tax, the income tax it paid, and property tax. */
+export interface TaxYearView {
+  year: number;
+  salesCollected: number;
+  salesRemitted: number;
+  withheld: number;
+  employerShare: number;
+  income: number;
+  property: number;
+}
+
+/**
+ * An organization's Taxes in Orgs (§3.11, §4.4, the economy's `taxes` section): this year and last;
+ * the sales tax it holds until it remits it; how its income is taxed (a corporation pays its own,
+ * a pass-through's is taxed to the people at the top, each with their share of its profit, through
+ * the companies between); this year's income tax so far; what is due next; and a change of
+ * structure waiting for the next estimated-tax period.
+ */
+export interface TaxesView {
+  income: "corporate" | "owners" | null;
+  years: TaxYearView[];
+  salesHeld: number;
+  incomeSoFar: number | null;
+  taxedTo: { name: string; share: number }[];
+  /** The organizations at the top that pay no income tax on their share (a household, a trust, a group). */
+  untaxed: { name: string; share: number }[];
+  due: { label: string; cents: number | null; at: string }[];
+  pending: { structure: string; from: string } | null;
+}
+
+/**
+ * How an asset's price has done (DESIGN §27.11): its month-end closes the market kept before this
+ * month (the last thirteen, oldest first, `at` the month) and its price now (`at` today's date), and,
+ * in percent, its change this month (since last month's close), this year (since last December's)
+ * and over the twelve months to last month's close. A change whose starting close wasn't kept (a
+ * chat younger than it) is null.
+ */
+export interface PerformanceView {
+  points: { at: string; price: number }[];
+  month: number | null;
+  year: number | null;
+  twelve: number | null;
+}
+
+/**
+ * The stock market (DESIGN §27.2, §27.11), where a world keeps the stock index's history: the index's
+ * level at the last thirteen month-ends (`at` the month) and now (`at` today's date), each read only
+ * against another, and its change in percent this month, this year and over the twelve months to last
+ * month's end. `history` says whether this month moves as the history did; outside its months (`from`
+ * to `to`) the market walks at random with the history's swings. `source` cites the history.
+ */
+export interface IndexView {
+  history: boolean;
+  from: string;
+  to: string;
+  source: string;
+  points: { at: string; level: number }[];
+  month: number;
+  year: number;
+  twelve: number;
+}
+
 export interface HoldingView {
   id: EntityId;
   account: EntityId | null;
@@ -1392,6 +1711,8 @@ export interface HoldingView {
   option: { right: "call" | "put"; underlying: string; strike: number; expiry: string; inTheMoney: boolean } | null;
   /** Where its payouts go; null when it pays none. */
   route: DistributionRoute | null;
+  /** How its price has done; null for an asset no market moves (an option, property, a stake, a fixed price). */
+  performance: PerformanceView | null;
 }
 
 export interface InvestmentsView {
@@ -1409,6 +1730,8 @@ export interface InvestmentsView {
   market?: { asset: string; label: string; class: AssetClass; symbol: string | null; price: number }[];
   /** Accounts that can hold a new position. */
   accounts?: EntityId[];
+  /** The stock market, where the world keeps its history; null where it doesn't. */
+  index?: IndexView | null;
 }
 
 export interface PropertyView {
@@ -1545,4 +1868,7 @@ export const FINANCE_ACTIONS = {
   leaseStart: "lease_start",
   leaseEnd: "lease_end",
   stakeSell: "stake_sell",
+  sharesIssue: "shares_issue",
+  sharesBuyBack: "shares_buy_back",
+  sharesClasses: "shares_classes",
 } as const;

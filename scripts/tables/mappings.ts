@@ -27,6 +27,10 @@ const opt = (def: ColumnDef): ColumnDef => ({ ...def, optional: true });
 
 const WEEKDAYS = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"];
 
+/** The size ladder (ITEMS-SPEC §3.2), smallest first: how a thing is carried, and the largest a holder takes. */
+export const SIZES = ["pocket", "hand", "armful", "heavy", "furniture", "builtin"];
+const size = (doc: string): ColumnDef => opt(oneOf(SIZES, doc));
+
 /** Display labels of the pinned tables. */
 export const LABELS: Record<string, string> = {
   "economy.catalog": "Price catalog",
@@ -34,6 +38,7 @@ export const LABELS: Record<string, string> = {
   "economy.occupations": "Occupations and pay",
   "economy.regions": "Regions (US states, DC and the national baseline)",
   "economy.finance": "Finance parameters",
+  "economy.index_history": "Stock index history (total return, month-end closes)",
   "vehicles.classes": "Vehicle classes",
   "vehicles.factors": "Consumption factor guides",
   "gear.items": "Gear items",
@@ -57,8 +62,11 @@ export const MAPPINGS: readonly TableMapping[] = [
     from: "categories[].items[]",
     columns: {
       name: text(),
+      aliases: opt(listOf("text", { doc: "Other names one goes by (\"TV\", \"fridge\"): a purchase and a thing's type match them as they match its name." })),
       category: ref("economy.categories"),
       unit: text("The quantity the price applies to (1 gallon, per night, per month, …)."),
+      size: size("Physical goods only: how one is carried. Absent on services and fares, and on rows its category's size covers."),
+      holds: opt(oneOf(SIZES, "Furnishings that hold things only (a refrigerator, a dresser): the largest size one takes; never larger than its own size.")),
       price_cents: band("cents", "National-average band before regional scaling; the economy pack applies cost_of_living_multiplier."),
       notes: opt(text()),
     },
@@ -150,6 +158,17 @@ export const MAPPINGS: readonly TableMapping[] = [
     },
   },
   {
+    table: "economy.index_history",
+    pack: "economy",
+    schema: "lre-table/economy.index_history/v1",
+    file: "us/index-history.json",
+    from: "months[]",
+    columns: {
+      date: text("The trading day of the month's last close, YYYY-MM-DD."),
+      level: num(undefined, "The close: a total-return level of the stock index, read only as a ratio to another month's."),
+    },
+  },
+  {
     table: "vehicles.classes",
     pack: "vehicles",
     schema: "lre-table/vehicles.classes/v1",
@@ -206,6 +225,7 @@ export const MAPPINGS: readonly TableMapping[] = [
       equip_slot: ref("gear.slots"),
       weight_g: int("g", "Empty or dry weight."),
       volume_l: num("l"),
+      size: size("How it is carried; inference reads it before the volume."),
       price_cents: band("cents"),
       notes: opt(text()),
     },
@@ -222,6 +242,8 @@ export const MAPPINGS: readonly TableMapping[] = [
       max_load_kg: num("kg"),
       empty_weight_g: int("g"),
       location: oneOf(["carried", "furniture", "vehicle_fixed", "worn"]),
+      size: size("The container's own size; absent on vehicle_fixed rows, which are part of their vehicle."),
+      holds: opt(oneOf(SIZES, "The largest size it takes; never larger than its own size.")),
       equip_slot: ref("gear.slots"),
       price_cents: band("cents"),
       notes: opt(text()),

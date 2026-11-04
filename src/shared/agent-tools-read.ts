@@ -80,6 +80,18 @@ export const READ_TOOL_TEXTS: readonly ToolText[] = [
       { path: "mode", text: "Only this way of travelling; leave it out for each." },
     ],
   },
+  {
+    name: "places_find",
+    family: "places",
+    tier: "read",
+    note: "Finds the places words name, places made in play among them.",
+    text: "The places words name, the places made in play among them, nearest first: each with its id, name and the place it is in, whether it was made in play, and how it matched (its id, its name, an alias, or its head noun alone). Find a place before you make one.",
+    args: [
+      { path: "words", text: 'The words for the place, as the story says them ("the back booth", "the kitchen").' },
+      { path: "near", text: "Rank from this place: its id or name; leave it out for where the player character is." },
+      { path: "parent", text: "Only places directly inside this one: its id or name." },
+    ],
+  },
   // ---------------------------------------------------------------- items
   {
     name: "items_inventory",
@@ -105,6 +117,58 @@ export const READ_TOOL_TEXTS: readonly ToolText[] = [
     text: "A thing's condition and state as the world keeps them: how worn it is, whether it works, and for a vehicle its fuel and mileage.",
     args: [{ path: "thing", text: thing }],
   },
+  {
+    name: "items_find",
+    family: "items",
+    tier: "read",
+    note: "Finds the things words name, nearest first.",
+    text: 'The things words name, as the engine\'s one name resolver finds them: owners and places in the words narrow it ("Marcus\'s key", "the keys on the counter"), and the head noun must match. Each candidate comes with its id, where it is, whose it is (stated or presumed), its size, who has it, how near it is (on them, handed over, loose here, in a holder here, a fixture here, the same site, their own elsewhere, known elsewhere) and what matched; found says whether one fits best, several do, or none. Find a thing before you make one.',
+    args: [
+      { path: "words", text: 'The words for the thing, as the story says them ("his truck keys", "the fridge").' },
+      { path: "near", text: 'Whose words they are, so "my" is theirs and nearness counts from them: a person\'s id or name; leave it out for the player character.' },
+      { path: "owner", text: "Only things this person, household, business or group owns: an id or name." },
+      { path: "need", text: "holder: only things that hold other things." },
+    ],
+  },
+  {
+    name: "items_at",
+    family: "items",
+    tier: "read",
+    note: "Lists what lies at a place or is in a holder, nested.",
+    text: "What lies loose at a place, or is in a holder (a person, a bag, a car, a fridge), each thing with its contents nested: its id, size, whose it is and whether it is hidden until searched, every secret marked.",
+    args: [
+      { path: "place", text: "The place: its id or name." },
+      { path: "holder", text: "Or the holder: a person's or thing's id or name." },
+      { path: "depth", text: "How deep to nest contents, 1 to 4; 2 when left out." },
+    ],
+  },
+  {
+    name: "items_of",
+    family: "items",
+    tier: "read",
+    note: "Lists a person's things, by where they stand.",
+    text: "A person's things: on them; others' they hold (for whom and why); theirs elsewhere, with where; theirs someone else has; what they borrowed, on what basis and until when; and theirs that are missing.",
+    args: [{ path: "person", text: person }],
+  },
+  {
+    name: "items_read",
+    family: "items",
+    tier: "read",
+    note: "Reads one thing whole: what it is, where, whose, who may use it.",
+    text: "One thing whole: its type, size (and where the size comes from) and traits; where it is, outermost first; where it is kept when not in use; whose it is, stated or presumed; who may use it, on which ground, and its grants; how its holder got it and who made it; its other names and description; a thing made beside a hidden one it may be; and what it holds.",
+    args: [{ path: "item", text: thing }],
+  },
+  {
+    name: "items_access",
+    family: "items",
+    tier: "read",
+    note: "Says whether someone may use or dispose of a thing, and why.",
+    text: "Whether a person may use a thing, and whether they may dispose of it (use it up, give it away, sell it), each with its ground: owner, a household's or group's member, a position, a grant (hold, loan or assign), a permission, household, housemate, partner, family, staff, customer or public; none when they may not.",
+    args: [
+      { path: "who", text: person },
+      { path: "item", text: thing },
+    ],
+  },
   // ---------------------------------------------------------------- money
   {
     name: "money_balances",
@@ -123,6 +187,38 @@ export const READ_TOOL_TEXTS: readonly ToolText[] = [
     args: [
       { path: "item", text: "What to price, in words, or its catalog id; leave it out to list what the place sells." },
       { path: "place", text: "Where: a place's id or name; leave it out for where the player character is." },
+    ],
+  },
+  // ---------------------------------------------------------------- organizations
+  {
+    name: "orgs_list",
+    family: "orgs",
+    tier: "read",
+    note: "Lists the organizations someone belongs to, with their title, position and powers there.",
+    text: "The organizations someone belongs to (companies, households, groups, trusts and the party): each one's id, name and type, the title they go by there, the position they hold, the powers they hold with what each rests on, and since when. Leave who out for the player character; under the GM's view, leaving it out lists every organization with who runs it.",
+    args: [{ path: "who", text: "Whose: a person's id or name; leave it out for the player character's." }],
+  },
+  {
+    name: "orgs_read",
+    family: "orgs",
+    tier: "read",
+    note: "Reads an organization's page, or one part of it.",
+    text: "One organization's page, whole: its type and level, the player character's place there, who runs it, every one of its people (with their titles, positions, jobs and shares), its positions and delegations, its money, property, ownership and taxes, its dues and its history, every secret marked. Give part for one part only.",
+    args: [
+      { path: "org", text: "The organization: its id, or its name; the party is \"your party\"." },
+      { path: "part", text: "Only this part: overview, people, money, property, ownership, taxes, rules (positions, delegations and dues) or log (its history); leave it out for the whole page." },
+    ],
+  },
+  {
+    name: "orgs_who_may",
+    family: "orgs",
+    tier: "read",
+    note: "Says who may use a power in an organization, or whether someone may, and why.",
+    text: "Who may use a power in an organization, and on what basis: an owner's role, a position, a delegation or a member's default, with the chain of bases it rests on in words and any limits, every secret marked. With who, whether that person may use it now and on what basis, or why not.",
+    args: [
+      { path: "org", text: "The organization: its id, or its name; the party is \"your party\"." },
+      { path: "power", text: "The power: members.admit, members.remove, members.appoint, staff.hire, staff.fire, staff.pay, money.view, money.spend, money.manage, money.invoice, money.payout, money.borrow, assets.use, assets.assign, assets.dispose, property.manage, property.trade, shares.manage, org.govern, orders.give or delegate." },
+      { path: "who", text: "Only this person: their id or name; leave it out for everyone who holds the power." },
     ],
   },
   // ---------------------------------------------------------------- quests and secrets

@@ -8,7 +8,7 @@ import type { GearItem, GearView } from "../core/view";
 import { GLANCE_ROWS, GlanceCard } from "../../../frontend/play/glance";
 import { decodeGearView, lentText, SECTIONS } from "./panel";
 
-/** Every item lent out and overdue, each once (an owned thing can also show where it is). */
+/** Every item lent out and overdue, each once (a thing can show in more than one section's tree). */
 export function overdueLoans(view: GearView): GearItem[] {
   const seen = new Map<string, GearItem>();
   const walk = (items: readonly GearItem[]) => {

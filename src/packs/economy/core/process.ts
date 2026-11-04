@@ -21,7 +21,7 @@ import { cycleTasks, type CycleTask } from "./cycle";
 import { hasCreditFile, monthlyScore, scoreInstants } from "./credit";
 import { allFlows, flowLevel, occurrences, planPayments, runOccurrence } from "./flows";
 import { flowRunOf, isOpened } from "./journal";
-import { accountsOf, bandByLabel, external, openerOf } from "./model";
+import { accountsOf, bandByLabel, external, moneyLevel, openerOf } from "./model";
 import { featureFor, isParty, toggles } from "./pay";
 import { Run } from "./run";
 
@@ -54,16 +54,17 @@ export function openingBalances(entity: EntityId, ctx: ReadContext, claimed?: Se
 }
 
 /**
- * Opens the authored accounts of everyone the money processes act for (Money 3+): in the first slot
- * that steps them at that level, their opening balances post as the same `materialize` event a
- * view would record, so their flows draw on the money the author gave them.
+ * Opens the authored accounts of everyone the money processes act for (Money 3+, an organization's
+ * its most closely followed member's): in the first slot that steps them at that level, their
+ * opening balances post as the same `materialize` event a view would record, so their flows draw on
+ * the money the author gave them.
  */
 export function openAccounts(ctx: ReadContext): LedgerEvent[] {
   const out: LedgerEvent[] = [];
   // Every party here opens from the same state, so an account two of them hold goes with the first only.
   const claimed = new Set<EntityId>();
   for (const who of parties(ctx)) {
-    if (ctx.levelOf(who, "money") < 3 || isMaterialized(ctx.state, who, "money")) continue;
+    if (moneyLevel(ctx, who) < 3 || isMaterialized(ctx.state, who, "money")) continue;
     const opening = openingEvent(ctx, who, claimed);
     if (opening) out.push(opening);
   }
@@ -167,7 +168,7 @@ function logUniform(rng: Rng, lo: number, hi: number): number {
 export function materializeMoney(entity: EntityId, ctx: ReadContext, rng: Rng, version: number): LedgerEvent[] {
   const s = ctx.state;
   const e = own(s.entities, entity);
-  const level = e ? ctx.levelOf(entity, "money") : 0;
+  const level = e ? moneyLevel(ctx, entity) : 0;
   if (!e || level < 1) return [];
   if (accountsOf(ctx, entity).length > 0) return openingBalances(entity, ctx);
   if (level < 2 || !kindIs(ctx.registry, ctx.world, e.kind, "person")) return [];

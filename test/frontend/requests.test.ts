@@ -217,14 +217,15 @@ describe("GM edits", () => {
     expect(adjustOp("dev_checking", "a lot", DEFAULT_CURRENCY, false)).toBeNull();
   });
 
-  test("Bring to moves someone to the player character's place, the party toggle joins or leaves, and the place search narrows by words", () => {
+  test("Bring to moves someone to the player character's place, the party's tier puts them in it or takes them out, and the place search narrows by words", () => {
     const you: GmEntity = { ...rosie, id: "you", name: "You", pov: true, place: "garage" };
     expect(bringOp(rosie, { entities: [rosie, you] })).toEqual({ op: "move", entity: "npc_rosie", to: "garage" });
     expect(bringOp(you, { entities: [rosie, you] })).toBeNull();
     expect(bringOp({ ...rosie, place: "garage" }, { entities: [rosie, you] })).toBeNull();
-    expect(partyOf(rosie, { entities: [rosie, you] })?.op).toEqual({ op: "link", rel: "travels_with", from: "npc_rosie", to: "you" });
+    expect(partyOf(rosie, { entities: [rosie, you] })?.op("core")).toEqual({ op: "link", rel: "travels_with", from: "npc_rosie", to: "you", fields: { tier: "core" } });
     const member = { ...rosie, relations: [{ type: "travels_with", to: "you", toName: "You" }] };
-    expect(partyOf(member, { entities: [member, you] })).toMatchObject({ travels: true, op: { op: "unlink", rel: "travels_with", from: "npc_rosie", to: "you" } });
+    const party = partyOf(member, { entities: [member, you] });
+    expect([party?.tier, party?.op(null)]).toEqual(["core", { op: "unlink", rel: "travels_with", from: "npc_rosie", to: "you" }]);
     const places = [{ name: "Daybreak Café" }, { name: "Building garage" }, { name: "Garage bay" }];
     expect(placesMatching(places, "garage")).toEqual([{ name: "Building garage" }, { name: "Garage bay" }]);
     expect(placesMatching(places, " bay  garage")).toEqual([{ name: "Garage bay" }]);

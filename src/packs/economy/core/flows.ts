@@ -21,7 +21,7 @@ import { isGone, kindIs, scopeEnv } from "../../../engine/scope";
 import type { FinanceHooks, FlowPosting } from "./module";
 import type { MindPlan } from "../../../shared/minds";
 import { cycleOf, flowRunOf, reject } from "./journal";
-import { availableOf, balance, canSpend, classOf, holdersOf, ledgerHolders, outsideAccount, priceOf, productOf, statusOf, traitsOf } from "./model";
+import { availableOf, balance, canSpend, classOf, holdersOf, ledgerHolders, moneyLevel, outsideAccount, priceOf, productOf, statusOf, traitsOf } from "./model";
 import { accountLevel, asUnit, charge, chooseSource, depositAccount, isParty, isRejection, mostPayable, overdraftEvents, overdraftRoom, payeeSide, posting, signal, toggles, type PayMethod } from "./pay";
 import { Run } from "./run";
 
@@ -296,8 +296,8 @@ function foundationFlows(ctx: ReadContext): Flow[] {
   const holders = ledgerHolders(ctx);
   for (const id of Object.keys(s.entities).sort()) {
     const e = own(s.entities, id);
-    if (!e || id === pov || isGone(s, id) || !holders.has(id) || !isParty(ctx, id) || e.kind === "household") continue;
-    // Living costs are a person's everyday spending; businesses and trusts have none.
+    if (!e || id === pov || isGone(s, id) || !holders.has(id) || !isParty(ctx, id)) continue;
+    // Living costs are a person's everyday spending; no organization has them (ORG-SPEC §3.1): a business, a trust, a household, any other group, the party.
     if (!featureOn(ctx.levelOf(id, "money"), "living_costs", toggles(ctx.world)) || !kindIs(ctx.registry, ctx.world, e.kind, "person")) continue;
     out.push({ id: `living:${id}`, label: "Living costs", kind: "living", from: id, to: "market", amount: { provider: "economy.living" }, schedule: { every: "week", weekdays: [1] }, shortfall: "partial", category: "living", status: "active", method: "auto", source: "living" });
   }
@@ -381,9 +381,9 @@ function sideOf(ctx: ReadContext, id: string): Side {
   return { outside: id };
 }
 
-/** A flow's Money level: its payer's when the payer is in the world, else its payee's. */
+/** A flow's Money level: its payer's when the payer is in the world, else its payee's (an organization's is its most closely followed member's, `moneyLevel`). */
 export function flowLevel(ctx: ReadContext, flow: Flow): number {
-  const level = (side: Side): number | null => ("account" in side ? accountLevel(ctx, side.account) : "party" in side ? ctx.levelOf(side.party, "money") : null);
+  const level = (side: Side): number | null => ("account" in side ? accountLevel(ctx, side.account) : "party" in side ? moneyLevel(ctx, side.party) : null);
   return level(sideOf(ctx, flow.from)) ?? level(sideOf(ctx, flow.to)) ?? 0;
 }
 

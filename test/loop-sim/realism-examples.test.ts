@@ -116,7 +116,9 @@ describe("realism examples: money", () => {
     expect(moneyView(w.ctx).cash).toEqual({ cents: 8400 });
     effects(w, [{ type: "gear.drop", args: { item: "wallet", place: "apartment" } }, { type: "economy.lose", args: { item: "wallet" } }]);
     expect(moneyView(w.ctx).cash).toEqual({ cents: 0 });
-    expect(buildGearView(w.ctx).carried.some((i) => i.id === "wallet")).toBe(false);
+    const gear = buildGearView(w.ctx);
+    expect(gear.on.some((i) => i.id === "wallet")).toBe(false);
+    expect(gear.elsewhere.find((i) => i.id === "wallet")?.where).toBe("At Your apartment");
     expect(trialBalance(w.state)).toBe(0);
     const t = setup();
     effects(t, [{ type: "economy.lose", args: { item: "wallet", thief: "rosa" } }]);
@@ -221,16 +223,16 @@ describe("realism examples: vehicles", () => {
 });
 
 describe("realism examples: gear", () => {
-  test("owned vs worn vs lent", () => {
+  test("on you vs worn vs lent", () => {
     const w = setup((wd) => {
       wd.realism.levels.gear = 3;
       wd.entities.hoodie = { id: "hoodie", kind: "item", name: "Hoodie", tier: "background", fields: { owner: "you", catalog: "hoodie", slot: "torso_mid", weight_g: 600 }, relations: [{ type: "in", to: "you" }] };
     });
     effects(w, [{ type: "gear.wear", args: { item: "hoodie", wearer: "you" } }, { type: "gear.lend", args: { item: "toolbox", to: "rosa", until: w.state.clock + 1440 } }]);
     const v = buildGearView(w.ctx);
-    expect(v.worn.map((i) => i.id)).toEqual(["hoodie"]);
-    expect(v.owned.map((i) => i.id)).toEqual(expect.arrayContaining(["hoodie", "phone", "toolbox", "wallet"]));
-    expect(v.owned.find((i) => i.id === "toolbox")?.lent).toMatchObject({ to: "Rosa Delgado", overdue: false });
+    expect(v.on.filter((i) => i.as === "worn").map((i) => i.id)).toEqual(["hoodie"]);
+    expect(v.on.map((i) => i.id)).toEqual(expect.arrayContaining(["hoodie", "phone", "wallet"]));
+    expect(v.lent.find((i) => i.id === "toolbox")?.lent).toMatchObject({ to: "Rosa Delgado", overdue: false });
   });
 
   test("the toolbox shows 44/45 after a wrench is taken, and the wrench is its own item", () => {
@@ -239,13 +241,13 @@ describe("realism examples: gear", () => {
     });
     expect(resolveAction(reg, w, { action: "take_piece", params: { kit: "toolbox", piece: "wrench" } }, createRng("t")).ok).toBe(true);
     const v = buildGearView(w.ctx);
-    expect(v.stored.find((i) => i.id === "toolbox")?.kit).toMatchObject({ present: 44, total: 45, complete: false });
-    expect(v.carried.some((i) => /wrench/i.test(i.name))).toBe(true);
+    expect(v.elsewhere.find((i) => i.id === "toolbox")?.kit).toMatchObject({ present: 44, total: 45, complete: false });
+    expect(v.on.some((i) => /wrench/i.test(i.name))).toBe(true);
   });
 
   test("containers and weight: loads show in the panel and an oversized item doesn't fit", () => {
     const w = setup();
-    const wallet = buildGearView(w.ctx).carried.find((i) => i.id === "wallet");
+    const wallet = buildGearView(w.ctx).on.find((i) => i.id === "wallet");
     expect(wallet?.load).toMatchObject({ capacity: 0.08, unit: "l" });
     expect(effects(w, [{ type: "gear.transfer", args: { item: "toolbox", to: "wallet" } }]).rejected.length).toBe(1);
     expect(Number(w.ctx.query("has_item")(w.ctx, "you", "phone"))).toBe(1);

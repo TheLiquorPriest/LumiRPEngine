@@ -43,6 +43,7 @@ export async function roleSections(rt: Runtime, input: { userId: UserId; chatId:
     wording: markWording(texts),
     texts,
     knowledge: settings.minds.knowledge,
+    prices: settings.statePrices,
     said: input.said,
     planned: { outcome: [], montage: [], scene: lore, ...(notes.length > 0 ? { notes } : {}) },
     outline: [],

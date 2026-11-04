@@ -1,0 +1,316 @@
+// GM → Things (ITEMS-SPEC §10.2, §7.5, §6.2, lane G) on Port Alder, its pages walked as rendered
+// trees (no DOM), as Build's Things tests do, from what the engine reads of a chat starting: Here
+// (in the room, lying here, on the people here with why each has what they have), Tidy up's cards
+// (Fix and the choices, Leave it and Bring it back, Ask the Curator, Show N left, findings per run),
+// Keep in the world's list, and the GM thing page, each control's one GM edit with the sentence its
+// notice says; and GM → This chat → Things, the chat's own Tidy up switch over the world's.
+
+import { describe, expect, test } from "bun:test";
+import type { VNode } from "preact";
+import { migrateWorld } from "../../src/engine/authoring";
+import { buildGmWorld } from "../../src/engine/gm-view";
+import { createRegistry } from "../../src/engine/registry-impl";
+import { gmThingExtras, gmThingsList } from "../../src/engine/thing-gm";
+import { tidyFindings, tidyRun } from "../../src/engine/thing-tidy";
+import { buildContext, thingPage, thingPicks, thingsList } from "../../src/engine/thing-view";
+import { AddPicker, RefPicker } from "../../src/frontend/build/form-kit";
+import { HoldsSection, ThingRowView } from "../../src/frontend/build/things";
+import { Button, Disclosure, HostSwitch, ListRow, NumberStepper, Section } from "../../src/frontend/components";
+import { thingsSummary, tidyRequest, TidySwitch } from "../../src/frontend/gm/chat-things";
+import type { Editor } from "../../src/frontend/gm/editor";
+import { FieldRow, Relations } from "../../src/frontend/gm/entity";
+import { GmThingBody, HereView, KeepList, TidyCard, TidyList, hereSections, isThingKind, keepKey, type GmThingBodyProps, type ThingSheet } from "../../src/frontend/gm/things";
+import { ActionRow, GmCard } from "../../src/frontend/gm/ui";
+import type { EditOp } from "../../src/shared/protocol";
+import type { GmView } from "../../src/shared/state-view";
+import type { MadeInPlay, TidyFinding } from "../../src/shared/thing-gm";
+import { DEFAULT_CURRENCY, type WorldDoc } from "../../src/shared/world";
+import { ALL_PACKS } from "../../src/packs/index";
+import { expand, labelled, press, type Props } from "../support/tree";
+
+const reg = createRegistry(ALL_PACKS);
+const portAlder = migrateWorld(await Bun.file(new URL("../../src/packs/starters/modern_slice_of_life.json", import.meta.url)).json());
+
+function ctxOf(world: WorldDoc = portAlder) {
+  const ctx = buildContext(reg, world);
+  if (!ctx) throw new Error("the world can't start a chat");
+  return ctx;
+}
+
+/** Port Alder with Jordan's phone lying at home while it is still on him, as an older build could leave it. */
+function splitPhone(): WorldDoc {
+  const world = structuredClone(portAlder);
+  const phone = world.entities.pov_phone;
+  if (!phone) throw new Error("no phone");
+  phone.fields.place = "harbor_street_114";
+  return world;
+}
+
+/** Every element anywhere in a rendered tree, under its children and every other prop that holds elements (a row's actions, a card's badges). */
+function elements(node: unknown): VNode<Props>[] {
+  if (Array.isArray(node)) return node.flatMap(elements);
+  if (!node || typeof node !== "object" || !("props" in node) || !("type" in node)) return [];
+  const v = node as VNode<Props>;
+  return [v, ...Object.values(v.props).flatMap(elements)];
+}
+
+/** The props of every element of `type` anywhere in a rendered tree. */
+function find(node: unknown, type: unknown): Props[] {
+  return elements(node)
+    .filter((v) => v.type === type)
+    .map((v) => v.props);
+}
+
+/** The words a rendered tree shows under its children, in order. */
+function textOf(node: unknown): string {
+  if (node === null || node === undefined || typeof node === "boolean") return "";
+  if (typeof node === "string" || typeof node === "number") return String(node);
+  if (Array.isArray(node)) return node.map(textOf).join("");
+  if (typeof node === "object" && "props" in node) return textOf((node as VNode<Props>).props.children);
+  return "";
+}
+
+/** Presses the one button showing `text`. */
+function click(tree: unknown, text: string): void {
+  const found = find(tree, Button).filter((p) => textOf(p.children) === text);
+  if (found.length !== 1) throw new Error(`${found.length} buttons say ${text}`);
+  (found[0]?.onClick as () => void)();
+}
+
+/** The GM view of a chat starting on `world`, and an editor that keeps what it is asked to send. */
+function editorOf(world: WorldDoc = portAlder): { gm: GmView; editor: Editor; sent: { ops: EditOp[]; done?: string }[] } {
+  const ctx = ctxOf(world);
+  const gm: GmView = { ...buildGmWorld(reg, world, ctx.state), edits: [], refused: [], minds: {} as GmView["minds"] };
+  const sent: { ops: EditOp[]; done?: string }[] = [];
+  const editor: Editor = {
+    gm,
+    currency: DEFAULT_CURRENCY,
+    busy: false,
+    edit: (ops, done) => {
+      sent.push({ ops, ...(done !== undefined ? { done } : {}) });
+      return Promise.resolve(true);
+    },
+  };
+  return { gm, editor, sent };
+}
+
+describe("Here", () => {
+  const ctx = ctxOf();
+  const list = thingsList(ctx);
+  const here = gmThingsList(ctx);
+
+  test("where the player character is: the room's furniture and vehicles, what lies there, and the people there", () => {
+    expect(here.here).toBe("harbor_street_114");
+    const sections = hereSections(list.rows, "harbor_street_114");
+    const home = sections[0];
+    // Headed from where Jordan is inward, not from the county.
+    expect(home?.path.map((s) => s.id)).toEqual(["harbor_street_114"]);
+    expect(home?.room.map((n) => ("thing" in n ? n.thing.id : n.holder.id))).toContain("pov_truck");
+    expect(home?.lying.some((n) => "thing" in n && n.thing.id === "pov_truck")).toBe(false);
+    expect(home?.people.map((p) => p.holder.id)).toContain("pov");
+    // Nothing of another place: the toolbox lies at Alder Automotive.
+    expect(sections.flatMap((s) => [...s.room, ...s.lying]).some((n) => "thing" in n && n.thing.id === "pov_toolbox")).toBe(false);
+  });
+
+  test("each person there with Open, each thing on them with why they have it", () => {
+    let person = "";
+    const tree = HereView({ sections: hereSections(list.rows, "harbor_street_114"), why: here.why, open: new Set(), onToggle: () => undefined, onOpen: () => undefined, onPerson: (id) => (person = id) });
+    const text = textOf(tree);
+    expect(text).toContain("In the room");
+    expect(text).toContain("On the people here");
+    expect(text).toContain("On Jordan Ellis");
+    (find(tree, Button).find((p) => p.label === "Open Jordan Ellis's sheet")?.onClick as () => void)();
+    expect(person).toBe("pov");
+    // The rows of what is on Jordan, one level down: each with why he has it.
+    const jordan = elements(tree).find((v) => Array.isArray(v.props.nodes) && v.props.why !== undefined && (v.props.nodes as { thing?: { id: string } }[]).some((n) => n.thing?.id === "pov_keys"));
+    if (!jordan) throw new Error("no rows on Jordan");
+    const keys = find(expand(jordan), ThingRowView).find((p) => (p.row as { id: string }).id === "pov_keys");
+    expect(keys?.sub).toBe("Theirs");
+  });
+});
+
+describe("Tidy up's cards", () => {
+  const ctx = ctxOf(splitPhone());
+  const findings = tidyFindings(ctx, []);
+  const phone = findings.find((f) => f.key === "two_places:pov_phone");
+  if (!phone) throw new Error("no finding");
+  const names = new Map([["pov_phone", "Phone"]]);
+
+  test("a card: its sentence, Fix and the other fix, Open, Leave it and Ask the Curator", () => {
+    const calls: unknown[][] = [];
+    const card = TidyCard({ finding: phone, names, busy: false, onFix: (fix) => calls.push(["fix", fix.label]), onLeave: (left) => calls.push(["leave", left]), onAsk: () => calls.push(["ask"]), onOpen: (id) => calls.push(["open", id]) });
+    expect(find(card, GmCard)[0]?.title).toBe("In two places at once");
+    expect(textOf(card)).toContain("Phone lies at 114 Harbor Street and is on Jordan Ellis at once; play reads it at 114 Harbor Street.");
+    for (const text of ["Keep it at 114 Harbor Street", "Keep it on Jordan Ellis", "Phone", "Leave it", "Ask the Curator"]) click(card, text);
+    expect(calls).toEqual([["fix", "Keep it at 114 Harbor Street"], ["fix", "Keep it on Jordan Ellis"], ["open", "pov_phone"], ["leave", true], ["ask"]]);
+  });
+
+  test("a run: its count, findings per run, and Show N left, each left card with Bring it back and no Fix", () => {
+    const calls: unknown[][] = [];
+    const props = { names, busy: false, onFix: (fix: { label: string }) => calls.push(["fix", fix.label]), onLeave: (f: TidyFinding, left: boolean) => calls.push(["leave", f.key, left]), onAsk: (f: TidyFinding) => calls.push(["ask", f.key]), onShowLeft: (show: boolean) => calls.push(["show", show]), onLimit: (n: number) => calls.push(["limit", n]), onOpen: (id: string) => calls.push(["open", id]) };
+    const all = TidyList({ ...props, run: tidyRun(findings, new Set(), 50), showLeft: false });
+    expect(find(all, Section)[0]?.title).toBe(findings.length === 1 ? "1 finding" : `${findings.length} findings`);
+    const stepper = find(all, NumberStepper)[0];
+    expect(stepper).toMatchObject({ label: "Findings per run", value: 50, min: 1, max: 500 });
+    (stepper?.onChange as (n: number) => void)(10);
+    expect(calls).toEqual([["limit", 10]]);
+
+    const run = tidyRun(findings, new Set([phone.key]), 50);
+    const folded = TidyList({ ...props, run, showLeft: false });
+    expect(find(folded, TidyCard).some((p) => (p.finding as TidyFinding).key === phone.key)).toBe(false);
+    click(folded, "Show 1 left");
+    const shown = TidyList({ ...props, run, showLeft: true });
+    const left = find(shown, TidyCard).find((p) => (p.finding as TidyFinding).key === phone.key);
+    expect(left?.left).toBe(true);
+    const card = TidyCard(left as Parameters<typeof TidyCard>[0]);
+    expect(find(card, Button).find((p) => textOf(p.children) === "Keep it at 114 Harbor Street")?.disabled).toBe(true);
+    click(card, "Bring it back");
+    expect(calls.slice(1)).toEqual([["show", true], ["leave", phone.key, false]]);
+  });
+});
+
+describe("Keep in the world's list", () => {
+  const path = [
+    { id: "port_alder", name: "Port Alder", is: "place" as const },
+    { id: "harbor_street_114", name: "114 Harbor Street", is: "place" as const },
+  ];
+  const made: MadeInPlay = {
+    places: [{ id: "place_garage_1", name: "Garage", path, as: "room", inDraft: false }],
+    things: [
+      { id: "thing_workbench_1", name: "Workbench", where: [...path, { id: "place_garage_1", name: "Garage", is: "place" }], inDraft: false },
+      { id: "thing_lamp_1", name: "Lamp", where: path, inDraft: true },
+    ],
+  };
+
+  test("places and things to pick, one the draft has already held back, and Keep with how many", () => {
+    const picks: unknown[][] = [];
+    let kept = 0;
+    const tree = KeepList({ made, picked: new Set([keepKey("place", "place_garage_1")]), kept: null, names: new Map(), busy: false, onPick: (key, on) => picks.push([key, on]), onKeep: () => kept++ });
+    const rows = find(tree, ListRow);
+    expect(rows.map((p) => [p.title, p.subtitle, p.disabled])).toEqual([
+      ["Garage", "A room in Port Alder › 114 Harbor Street", false],
+      ["Workbench", "At Garage", false],
+      ["Lamp", "At 114 Harbor Street · in the world's draft already", true],
+    ]);
+    for (const row of rows.slice(0, 2)) (row.onClick as () => void)();
+    expect(picks).toEqual([
+      ["place:place_garage_1", false],
+      ["thing:thing_workbench_1", true],
+    ]);
+    click(tree, "Keep 1 in the world");
+    expect(kept).toBe(1);
+  });
+
+  test("what Keep did: kept, skipped with why, and what a kept thing lost on the way", () => {
+    const tree = KeepList({ made, picked: new Set(), kept: { things: ["thing_workbench_1"], places: ["place_garage_1"], skipped: [{ id: "place_shelf_1", reason: "Corner shelf: it is in Garage, which was made in play too: keep it as well" }], notes: ["Workbench: its owner Sam isn't in the world, so it is kept as nobody's."] }, names: new Map([["thing_workbench_1", "Workbench"], ["place_garage_1", "Garage"]]), busy: false, onPick: () => undefined, onKeep: () => undefined });
+    const text = textOf(tree);
+    expect(text).toContain("Garage, Workbench");
+    expect(text).toContain("Corner shelf: it is in Garage, which was made in play too: keep it as well");
+    expect(text).toContain("Workbench: its owner Sam isn't in the world, so it is kept as nobody's.");
+    expect(find(tree, Button).find((p) => textOf(p.children) === "Keep in the world")?.disabled).toBe(true);
+  });
+});
+
+describe("the GM thing page", () => {
+  const ctx = ctxOf();
+  const page = thingPage(ctx, "pov_toolbox");
+  if (!page) throw new Error("no toolbox");
+  const pick = thingPicks(ctx);
+  const extras = gmThingExtras(reg, ctx, [], "pov_toolbox", [], 12);
+
+  function render(over: Partial<GmThingBodyProps> = {}) {
+    const { gm, editor, sent } = editorOf();
+    const sheets: ThingSheet[] = [];
+    const props: GmThingBodyProps = { page: page!, gm: { ...extras, putAway: { place: "harbor_street_114" }, history: [{ turn: 2, source: "gm", lines: ["Mechanic's toolbox is now at 114 Harbor Street"] }] }, pick, entity: gm.entities.find((e) => e.id === "pov_toolbox"), editor, onSheet: (s) => sheets.push(s), onOpen: () => undefined, ...over };
+    return { tree: GmThingBody(props), sent, sheets, gm };
+  }
+
+  test("its sections, in order, with no simulation, life or tier", () => {
+    const { tree } = render();
+    expect(find(tree, Section).map((p) => p.title)).toEqual(["Where it is", "Whose", "Who may use it", "What it is", "Secrecy", "History", "Remove"]);
+    expect(find(tree, HoldsSection).length).toBe(1);
+    expect(textOf(find(tree, Disclosure)[0]?.summary)).toBe("Advanced: every field, its relations and its id");
+    expect(find(tree, FieldRow).length).toBeGreaterThan(0);
+    expect(find(tree, Relations).length).toBe(1);
+    const titles = find(tree, ActionRow).map((p) => textOf(p.title));
+    expect(titles.slice(0, 2)).toEqual(["Is", "Kept at"]);
+    expect(titles).toContain("Mechanic's toolbox is now at 114 Harbor Street");
+    expect(find(tree, ActionRow).find((p) => textOf(p.title) === "Mechanic's toolbox is now at 114 Harbor Street")?.subtitle).toBe("Turn 2 · the GM");
+    expect(find(tree, ActionRow).find((p) => p.title === "Kept at")?.subtitle).toBe("Where the world starts it");
+  });
+
+  test("Move to…, Put in…, Hand to…, Kept at… and + Add inside open their sheets", () => {
+    const { tree, sheets } = render();
+    for (const text of ["Move to…", "Put in…", "Hand to…", "Kept at…"]) click(tree, text);
+    (find(tree, HoldsSection)[0]?.onAdd as () => void)();
+    expect(sheets).toEqual(["move", "put", "hand", "kept", "inside"]);
+  });
+
+  test("each control is one GM edit, its notice the sentence of what it did", () => {
+    const { tree, sent } = render();
+    click(tree, "Put it away");
+    (find(tree, RefPicker).find((p) => p.label === "Make it theirs…")?.onChange as (v: string) => void)("danny_okafor");
+    (find(tree, RefPicker).find((p) => p.label === "Make it theirs…")?.onChange as (v: string) => void)("");
+    (find(tree, AddPicker)[0]?.onAdd as (v: string) => void)("danny_okafor");
+    click(tree, "Remove from the world");
+    expect(sent).toEqual([
+      { ops: [{ op: "item", change: { do: "move", item: "pov_toolbox", to: { place: "harbor_street_114" }, why: "Put away" } }], done: "Mechanic's toolbox is put away, at 114 Harbor Street." },
+      { ops: [{ op: "item", change: { do: "own", item: "pov_toolbox", owner: "danny_okafor", why: "The GM made it so" } }], done: "Mechanic's toolbox is Danny Okafor's now." },
+      { ops: [{ op: "item", change: { do: "own", item: "pov_toolbox", owner: null, why: "The GM made it so" } }], done: "Mechanic's toolbox is nobody's now." },
+      { ops: [{ op: "item", change: { do: "grant", item: "pov_toolbox", who: "danny_okafor", basis: "assign" } }], done: "Danny Okafor may use Mechanic's toolbox now." },
+      { ops: [{ op: "item", change: { do: "remove", item: "pov_toolbox", why: "The GM removed it" } }], done: "Mechanic's toolbox is out of the world." },
+    ]);
+  });
+
+  test("a grant with Stop; Reveal for a hidden thing the player character hasn't found; Tidy up's finding on it first", () => {
+    const row = { ...page.row, hidden: true };
+    const finding: TidyFinding = { key: "size_unknown:pov_toolbox", kind: "size_unknown", things: ["pov_toolbox"], text: "Mechanic's toolbox was made in play.", fix: null, choices: [{ label: "Heavy", ops: [{ op: "item", change: { do: "label", item: "pov_toolbox", size: "heavy" } }], done: "Mechanic's toolbox is Heavy now." }], secret: false };
+    const { tree, sent } = render({ page: { ...page, row, grants: [{ who: { id: "danny_okafor", name: "Danny Okafor", is: "person" }, basis: "loan", until: "Friday 6 November 2026, 18:00" }] }, gm: { ...extras, found: false, findings: [finding] } });
+    expect(find(tree, AddPicker)[0]?.options).not.toContainEqual(expect.objectContaining({ value: "danny_okafor" }));
+    (find(tree, Button).find((p) => p.label === "Stop Danny Okafor using it")?.onClick as () => void)();
+    click(tree, "Reveal to Jordan Ellis");
+    const card = find(tree, TidyCard)[0];
+    (card?.onFix as (fix: TidyFinding["choices"][number]) => void)(finding.choices[0]!);
+    expect(sent).toEqual([
+      { ops: [{ op: "item", change: { do: "revoke", item: "pov_toolbox", who: "danny_okafor" } }], done: "Danny Okafor may no longer use Mechanic's toolbox." },
+      { ops: [{ op: "link", rel: "knows", from: "pov", to: "pov_toolbox" }], done: "Jordan Ellis knows of Mechanic's toolbox now." },
+      { ops: [{ op: "item", change: { do: "label", item: "pov_toolbox", size: "heavy" } }], done: "Mechanic's toolbox is Heavy now." },
+    ]);
+    // Found, or public, there is nothing to reveal.
+    expect(find(render().tree, Button).some((p) => textOf(p.children).startsWith("Reveal"))).toBe(false);
+  });
+
+  test("a thing is an item or a kind built on one, as the GM view's kinds say", () => {
+    const { gm } = editorOf();
+    expect(isThingKind(gm.kinds, "container")).toBe(true);
+    expect(isThingKind(gm.kinds, "vehicle")).toBe(true);
+    expect(isThingKind(gm.kinds, "character")).toBe(false);
+    expect(isThingKind(gm.kinds, "account")).toBe(false);
+  });
+});
+
+describe("GM → This chat → Things", () => {
+  test("following the world's setting, it says so; its own setting starts from the world's and sends lre.chat.knowledge with tidy, null to follow again", () => {
+    const sent: (boolean | null)[] = [];
+    const following = TidySwitch({ tidy: { chat: null, world: true }, busy: false, onChange: (tidy) => sent.push(tidy) });
+    expect(find(following, HostSwitch).map((p) => [p.label, p.checked])).toEqual([["This chat has its own setting", false]]);
+    expect(textOf(following)).toContain("It follows the world's setting (Build → Packs → gear → Tidy up), now On.");
+    expect(thingsSummary({ chat: null, world: true })).toBe("Tidy impossible holds automatically on · the world's setting");
+    press(labelled(following, HostSwitch, "This chat has its own setting"), true);
+    const own = TidySwitch({ tidy: { chat: true, world: true }, busy: false, onChange: (tidy) => sent.push(tidy) });
+    expect(find(own, HostSwitch).map((p) => [p.label, p.checked])).toEqual([
+      ["This chat has its own setting", true],
+      ["Tidy impossible holds automatically in this chat", true],
+    ]);
+    press(labelled(own, HostSwitch, "Tidy impossible holds automatically in this chat"), false);
+    press(labelled(own, HostSwitch, "This chat has its own setting"), false);
+    expect(sent).toEqual([true, false, null]);
+    expect(thingsSummary({ chat: false, world: true })).toBe("Tidy impossible holds automatically off · this chat's own");
+    expect(tidyRequest("chat_1", false)).toEqual({ type: "lre.chat.knowledge", chatId: "chat_1", tidy: false });
+    expect(tidyRequest("chat_1", null)).toEqual({ type: "lre.chat.knowledge", chatId: "chat_1", tidy: null });
+    // A world that has it off: the chat's own setting starts off too.
+    const off: (boolean | null)[] = [];
+    press(labelled(TidySwitch({ tidy: { chat: null, world: false }, busy: false, onChange: (tidy) => off.push(tidy) }), HostSwitch, "This chat has its own setting"), true);
+    expect(off).toEqual([false]);
+  });
+});

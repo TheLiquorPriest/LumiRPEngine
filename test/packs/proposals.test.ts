@@ -27,11 +27,13 @@ function setup(): Working {
   return w;
 }
 
+/** A proposal through its channel as the read applies it (`applyProposals`): whole, its type in it, which the thing facts' channels read the fact from. */
 function propose(w: Working, type: string, p: JsonObject): ReturnType<typeof applyEffects> | string {
+  const proposal = { type, ...p };
   const ch = reg.proposals.get(type);
-  const bad = ch?.validate(p, w.ctx);
+  const bad = ch?.validate(proposal, w.ctx);
   if (bad) return bad.code;
-  return applyEffects(reg, w, ch?.toEffects(p, w.ctx) ?? [], { bindings: {}, rng: createRng("p") });
+  return applyEffects(reg, w, ch?.toEffects(proposal, w.ctx) ?? [], { bindings: {}, rng: createRng("p") });
 }
 
 describe("narration proposals", () => {
@@ -70,11 +72,16 @@ describe("narration proposals", () => {
     expect(unpricedCap({ ...world, tables: {} })).toBe(500 * 10 ** world.currency.decimals);
   });
 
-  test("an NPC can hand the POV an item the world didn't track; the POV can't give what it doesn't have", () => {
+  test("an NPC can hand the POV an item the world didn't track: made as the giver's and held for them, or the POV's when it's a gift (ITEMS-SPEC §4.6); the POV can't give what it doesn't have", () => {
     const w = setup();
+    const made = (name: string) => Object.values(w.state.entities).find((e) => e.name.toLowerCase() === name);
     const r = propose(w, "give", { item: "thermos", from: "maya", to: "you" });
     expect(typeof r === "string" ? r : r.rejected).toEqual([]);
-    expect(Object.values(w.state.entities).some((e) => e.name === "thermos" && e.fields.owner === "you")).toBe(true);
+    // No giving words: it stays Maya's, and the POV holds it for her.
+    expect([made("thermos")?.fields.owner, made("thermos")?.relations.some((l) => l.type === "in" && l.to === "you")]).toEqual(["maya", true]);
+    const gift = propose(w, "give", { item: "scarf", from: "maya", to: "you", basis: "gift" });
+    expect(typeof gift === "string" ? gift : gift.rejected).toEqual([]);
+    expect([made("scarf")?.fields.owner, made("scarf")?.relations.some((l) => l.type === "in" && l.to === "you")]).toEqual(["you", true]);
     expect(propose(w, "give", { item: "sandwich", from: "you", to: "maya" })).toBe("missing_entity");
   });
 
@@ -128,7 +135,7 @@ describe("narration proposals", () => {
     expect(moneyView(w.ctx).accounts.find((a) => a.id === "cash")?.cents).toBe(0);
     expect(moneyView(w.ctx).recent.find((t) => t.memo === "Lost with Wallet")?.cents).toBe(-cashBefore);
     expect(w.state.entities.wallet?.relations.some((r) => r.type === "in")).toBe(false);
-    expect(buildGearView(w.ctx).owned.some((i) => i.name === "Wallet (lost)")).toBe(true);
+    expect(buildGearView(w.ctx).elsewhere.find((i) => i.id === "wallet")?.where).toBe("Lost");
     // Already lost: the palette no longer offers it (the effect would refuse it too).
     expect(resolveAction(reg, w, { action: "lose", params: { item: "wallet" } }, createRng("l2")).failed?.requirement).toBe("item.lost != true");
   });

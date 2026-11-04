@@ -15,7 +15,7 @@ import { neutralizeMacros } from "../shared/macros";
 import type { SectionTemplate, SlotPosition, WorldDoc, WorldIndex } from "../shared/world";
 import { builtInSectionsOf } from "../shared/sections";
 import type { PromptTexts } from "../shared/prompts";
-import { NARRATOR_RULE_IDS, PRESET_RULES_LEAD_ID, sectionPromptId } from "../shared/prompts";
+import { NARRATOR_RULE_IDS, PRESET_RULES_LEAD_ID, PRICES_RULE_ID, sectionPromptId } from "../shared/prompts";
 import { secretMarkForms } from "../shared/secret-marks";
 import { ChatMetaQueue } from "./chat-meta-queue";
 import type { HostBookEntry, HostEntryPlacement, HostPort } from "./host";
@@ -28,19 +28,20 @@ import { markWording, renderPrompt, resolvePrompt } from "./prompts";
  * since the player's directives come first, then what marked facts mean (which keeps each character
  * consistent with what they know) and what a secret's mark means (each form a mark takes in the
  * turn's wording of it, `secretMarkForms`, and its word for everyone fill the sentence's
- * placeholders), then the preset's own rules, as the player's. Each part is the turn's text for it
+ * placeholders), then, while Settings → Narrator → Prices is on (`prices`), to state the prices the
+ * engine gives (DESIGN §9.5), then the preset's own rules, as the player's. Each part is the turn's text for it
  * (`texts`, DESIGN §6.12: the user's own or a Re-narrate's turn's, else the shipped one), the mark
  * wording among them, so the rules explain the marks the turn's sections carry; each is neutralized
  * as any text the engine puts into a prompt is, and a part the user left empty is left out. Only the
  * preset's rules and the user's own texts differ between turns, never by world, so the rules tell
  * nothing of whether a world keeps secrets.
  */
-export function narratorRules(preset: string | null, texts: PromptTexts): string {
+export function narratorRules(preset: string | null, texts: PromptTexts, prices: boolean): string {
   // A text is filled from its own placeholders only, so every part may be given the marks'.
   const wording = markWording(texts);
   const vars = { forms: secretMarkForms(wording).join(" or "), everyone: neutralizeMacros(wording.everyone) };
   const part = (id: string): string => neutralizeMacros(renderPrompt(id, texts, vars));
-  return ["[Narrator rules]", ...NARRATOR_RULE_IDS.map(part), ...(preset ? [part(PRESET_RULES_LEAD_ID), preset] : [])].filter((s) => s !== "").join("\n");
+  return ["[Narrator rules]", ...NARRATOR_RULE_IDS.map(part), ...(prices ? [part(PRICES_RULE_ID)] : []), ...(preset ? [part(PRESET_RULES_LEAD_ID), preset] : [])].filter((s) => s !== "").join("\n");
 }
 
 /**

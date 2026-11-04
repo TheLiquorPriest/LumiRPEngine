@@ -784,7 +784,7 @@ function TableList(props: EditorProps) {
               <ListRow
                 key={key}
                 title={t.label}
-                subtitle={`${humanize(t.pack)} · ${count} ${count === 1 ? "row" : "rows"} · ${t.source?.approximate ? "approximate" : "authored"}`}
+                subtitle={`${humanize(t.pack)} · ${count} ${count === 1 ? "row" : "rows"} · ${t.source ? (t.source.approximate ? "approximate" : "exact") : "authored"}`}
                 id={key}
                 chevron
                 onClick={() => go(app, { view: "item", worldId: props.world.id, collection: "tables", id: key })}
@@ -864,7 +864,7 @@ function TablePage(props: { world: WorldDoc; send: Send; id: string; table: Data
         <div>
           <Row k="Schema" v={<code class="lre-form-table-code">{table.schema}</code>} />
           <Row k="Revision" v={<code class="lre-form-table-code">{table.revision.slice(0, 12)}</code>} sub={changed ? "A new revision is computed when you save" : undefined} />
-          {table.source ? <Row k="Source" v={table.source.dataPack} sub={`${table.source.file} · ${table.source.reflectsPeriod}${table.source.approximate ? " · approximate" : ""}`} /> : null}
+          {table.source ? <Row k="Source" v={table.source.dataPack} sub={`${table.source.file} · ${table.source.reflectsPeriod} · ${table.source.approximate ? "approximate" : "exact"}`} /> : null}
         </div>
       </Disclosure>
       <Section title="Rows" aside={<Badge>{rows.length}</Badge>} flush>

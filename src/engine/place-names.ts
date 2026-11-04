@@ -7,7 +7,8 @@
 
 import type { PlaceId } from "../shared/ids";
 import { hasOwn } from "../shared/json";
-import type { WorldDoc } from "../shared/world";
+import { nameKey, type NameKey } from "../shared/things";
+import type { PlaceDef, WorldDoc } from "../shared/world";
 import { placeChain } from "./lore-pins";
 import { own } from "./pack-kit";
 import type { Registry } from "./registry-impl";
@@ -36,6 +37,22 @@ function words(text: string): string {
 /** A place's name as names are compared (`words`), a leading article left out: "the Rooftop Terrace" is "rooftop terrace". */
 export function placeKey(name: string): string {
   return words(name).replace(/^(?:the|a|an) /, "");
+}
+
+/** A place's other names (`fields.aliases`): a place made in play keeps the story's, and an author may give any place some. */
+export function placeAliases(def: PlaceDef): string[] {
+  const aliases = def.fields.aliases;
+  return Array.isArray(aliases) ? aliases.filter((a): a is string => typeof a === "string" && a.trim() !== "") : [];
+}
+
+/**
+ * Whether words name a place by its head noun, as a thing's name is matched (ITEMS-SPEC §5.1): a
+ * noun they end in is one the name ends in, and every word they say is one of the name's ("the
+ * booth" names "the back booth"; "the back room" doesn't).
+ */
+export function headSays(said: NameKey, name: string): boolean {
+  const key = nameKey(name);
+  return key !== null && said.heads.some((h) => key.heads.includes(h)) && said.words.every((w) => key.words.includes(w));
 }
 
 /** How many steps up and down the place tree lead from `a` to `b`; two places with no common ancestor are as far apart as their chains are long. */
@@ -84,8 +101,9 @@ export function placeMenu(reg: Registry, world: WorldDoc, state: Readonly<WorldS
 
 /**
  * The place `said` stands for: a place id as it is (in any case), else the place the POV can see by
- * that name (`placeKey`), the nearest to the POV's place when several share it. Null when none does,
- * or when the nearest two are as near as each other.
+ * that name or an alias (`placeKey`), else by its head noun (`headSays`: "the booth" for "the back
+ * booth"), the nearest to the POV's place when several answer. Null when none does, or when the
+ * nearest two are as near as each other.
  */
 export function placeSaid(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, said: string): PlaceId | null {
   const t = said.trim();
@@ -94,7 +112,16 @@ export function placeSaid(reg: Registry, world: WorldDoc, state: Readonly<WorldS
   if (hasOwn(world.places, t.toLowerCase())) return t.toLowerCase();
   const key = placeKey(t);
   if (key === "") return null;
-  const matches = namedPlaces(reg, world, state).filter((id) => placeKey(own(world.places, id)?.name ?? "") === key);
+  const seen = namedPlaces(reg, world, state);
+  const named = seen.filter((id) => {
+    const def = own(world.places, id);
+    return def !== undefined && (placeKey(def.name) === key || placeAliases(def).some((a) => placeKey(a) === key));
+  });
+  const head = named.length > 0 ? null : nameKey(t);
+  const matches = head === null ? named : seen.filter((id) => {
+    const def = own(world.places, id);
+    return def !== undefined && [def.name, ...placeAliases(def)].some((n) => headSays(head, n));
+  });
   if (matches.length <= 1) return matches[0] ?? null;
   const here = placeOfEntity(state, world.pov);
   if (here === null) return null;

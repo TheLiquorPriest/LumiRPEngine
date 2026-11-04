@@ -106,7 +106,8 @@ export async function planSkip(deps: SkipPlanDeps, input: SkipPlanInput): Promis
   if (last && last.from <= from && from < last.to && to <= last.to) return null;
   const ctx = deps.registry.context(input.world, input.state);
   // Only people the engine lives a day for (an LOD1 agent from Cast life 3, §24.8): anyone else would
-  // never take up a planned block, so planning them would only show plans nothing lives.
+  // never take up a planned block, so planning them would only show plans nothing lives. A party
+  // member on an order has the model plan their skip unless this chat set theirs (`skipLifeOf`).
   const people = Object.keys(input.state.entities)
     .sort()
     .filter((id) => kindIs(deps.registry, input.world, input.state.entities[id]?.kind ?? "", "person") && !isGone(input.state, id) && livesPlans(ctx, id) && skipLifeOf(ctx, id) === "model");

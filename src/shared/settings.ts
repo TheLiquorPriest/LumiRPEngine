@@ -15,6 +15,7 @@ import type { AgentSettings } from "./agent-settings";
 import type { PromptSettings, SwipeTexts } from "./prompts";
 import type { DiagnosticsSettings } from "./diagnostics";
 import type { RetentionSettings } from "./stores";
+import { ITEM_CHANGES } from "./things";
 
 /**
  * How hard a model reasons on a call (Lumiverse's per-request reasoning override): `inherit` leaves
@@ -247,21 +248,32 @@ export interface TimeSettings {
 }
 
 /**
- * Extraction proposal types with a per-type mode (DESIGN §9.4, §11). `learn` and `reveal` are the
- * knowledge step's (DESIGN §24.11): what the player character learns, and a secret the story reveals
- * to them; the reply's read never proposes them.
+ * The change types with a per-type mode the reply's read lands under (DESIGN §9.4, §11; ITEMS-SPEC
+ * §5.4). A thing fact the read gives (`THING_FACTS`) is settled into one of the item change types
+ * (`ITEM_CHANGES`) before its mode is read, and a move to a place the world lacks into `place_make`
+ * (a room, a spot or a venue made in play, §6.2). `membership` and `employment` are the story's
+ * changes to organizations (ORG-SPEC §7.3): someone joins, leaves, is appointed or takes a title;
+ * someone is hired, let go, quits, gets a raise or goes on leave. `agenda` is an organization's plan
+ * item the reply says is under way, done, blocked or refused (ORG-SPEC §3.14). `learn` and `reveal`
+ * are the knowledge step's (DESIGN §24.11): what the player character learns, and a secret the story
+ * reveals to them; the reply's read never proposes them.
  */
-export const EXTRACTION_TYPES = ["time_advance", "location", "condition", "knows", "give", "purchase", "transfer", "regard", "quantity", "spawn", "life", "routine", "take", "drop", "use_up", "wear", "lose", "item_condition", "learn", "reveal"] as const;
+export const EXTRACTION_TYPES = ["time_advance", "location", "place_make", "condition", "knows", "purchase", "transfer", "regard", "quantity", "spawn", "life", "routine", "membership", "employment", "agenda", ...ITEM_CHANGES, "learn", "reveal"] as const;
 export type ExtractionType = (typeof EXTRACTION_TYPES)[number];
 
 /**
- * D4: per-type cold-start modes. These are only the start: per-connection learning
- * (ExtractionLearning) promotes a type to `auto` at ≥ 0.90 acceptance over at least 30
- * confirm/undo outcomes. `quantity` keeps its field bounds' mode.
+ * D4: per-type cold-start modes, ITEMS-SPEC §5.4 amending it for things: moves, holds, use, wear
+ * and condition apply; a change of owner and a loss ask. A thing made applies at or under the
+ * world's claim cap and Armful or smaller, and asks otherwise (`item_make`'s default reads the make).
+ * These are only the start: per-connection learning (ExtractionLearning) promotes a type to `auto`
+ * at ≥ 0.90 acceptance over at least 30 confirm/undo outcomes. `quantity` keeps its field bounds'
+ * mode.
  */
 export const EXTRACTION_DEFAULTS: Readonly<Partial<Record<ExtractionType, BoundMode>>> = Object.freeze({
   time_advance: "auto",
   location: "auto",
+  // A place made in play (ITEMS-SPEC §5.4): a room or a spot applies, with its Undo; a venue (a new place in town) asks first.
+  place_make: "auto",
   condition: "auto",
   // A routine is a default that never moves anyone the story has: a wrong one costs little, and its chip undoes it.
   routine: "auto",
@@ -270,33 +282,66 @@ export const EXTRACTION_DEFAULTS: Readonly<Partial<Record<ExtractionType, BoundM
   spawn: "confirm",
   life: "confirm",
   knows: "confirm",
-  give: "confirm",
   purchase: "confirm",
-  // The item channels have no measured precision yet: they ask, as `give` did before learning.
-  take: "confirm",
-  drop: "confirm",
-  use_up: "confirm",
-  wear: "confirm",
-  lose: "confirm",
-  item_condition: "confirm",
+  // Organizations (ORG-SPEC §7.3, §9): who belongs, holds a position or works where asks first; how a plan goes lands with its Undo.
+  membership: "confirm",
+  employment: "confirm",
+  agenda: "auto",
+  // Things (ITEMS-SPEC §5.4): where a thing is and who holds it land with their Undo; whose it is, and a loss, ask.
+  item_move: "auto",
+  item_hand: "auto",
+  item_own: "confirm",
+  item_make: "auto",
+  item_use: "auto",
+  item_wear: "auto",
+  item_condition: "auto",
+  item_lose: "confirm",
   // Knowledge (DESIGN §24.11): what the player character learns applies, with its Undo; a secret's reveal asks first.
   learn: "auto",
   reveal: "confirm",
 });
 
 /**
- * What an agent (the GM assistant) may change on its own, per type (AGENT-LOOP-PLAN §6, §15).
- * They take a mode as the extraction types do and share their pins (`UserSettings.extraction`),
- * but they are not extraction types: no reply proposes them, so the extract step never lists them.
+ * What the reply's read tells and keeps of things (Settings → Changes from the reply, ITEMS-SPEC
+ * §11): how many things its prefix shows (those the reply or the player's message names first,
+ * then the scene's, then the player character's own), the longest reason a change keeps, and how
+ * many things one reply may bring into the world (its read's thing facts that find nothing make
+ * one each, §5.3 step 3; past the cap, a Not tracked receipt).
  */
-export const AGENT_CHANGE_TYPES = ["gm_spawn", "despawn", "destroy", "money_adjust", "stage", "gm_edit", "workspace"] as const;
+export interface ThingReadSettings {
+  shown: number;
+  whyMax: number;
+  madeMax: number;
+}
+
+export const THING_READ_DEFAULTS: Readonly<ThingReadSettings> = Object.freeze({ shown: 40, whyMax: 120, madeMax: 6 });
+/** What each may be set to: at least one thing, at most what a prompt can carry; a reason of 20 to 500 characters; none to 500 things made (each a whole entity every fold carries). */
+export const THING_READ_BOUNDS = Object.freeze({ shown: [1, 200] as const, whyMax: [20, 500] as const, madeMax: [0, 500] as const });
+
+/** `UserSettings.thingReads` as the engine reads it: each a whole number in its bounds, else `base`'s. */
+export function thingReadsOf(raw: unknown, base: Readonly<ThingReadSettings> = THING_READ_DEFAULTS): ThingReadSettings {
+  const v = isRecord(raw) ? raw : {};
+  const whole = (x: unknown, [min, max]: readonly [number, number], fallback: number): number => (typeof x === "number" && Number.isInteger(x) && x >= min && x <= max ? x : fallback);
+  return { shown: whole(v.shown, THING_READ_BOUNDS.shown, base.shown), whyMax: whole(v.whyMax, THING_READ_BOUNDS.whyMax, base.whyMax), madeMax: whole(v.madeMax, THING_READ_BOUNDS.madeMax, base.madeMax) };
+}
+
+/**
+ * What an agent (the GM assistant, the Curator) may change on its own, per type (AGENT-LOOP-PLAN §6,
+ * §15; ITEMS-SPEC §5.4; ORG-SPEC §7.3). They take a mode as the extraction types do and share their
+ * pins (`UserSettings.extraction`), but they are not extraction types: no reply proposes them, so the
+ * extract step never lists them. A thing's resting place, who may use it, its names and size, two
+ * things merged into one and a thing taken out of the world are only the Curator's and the GM's; an
+ * organization's changes (`{op: "org"}`) are its people, its powers, its shares and structure, and
+ * its rules.
+ */
+export const AGENT_CHANGE_TYPES = ["gm_spawn", "despawn", "destroy", "money_adjust", "stage", "gm_edit", "workspace", "item_home", "item_grant", "item_label", "item_merge", "item_remove", "org_people", "org_powers", "org_shares", "org_rules"] as const;
 export type AgentChangeType = (typeof AGENT_CHANGE_TYPES)[number];
 
 /** Every type with a mode: what a reply may change, then what an agent may. */
 export type ChangeType = ExtractionType | AgentChangeType;
 export const CHANGE_TYPES: readonly ChangeType[] = [...EXTRACTION_TYPES, ...AGENT_CHANGE_TYPES];
 
-/** AGENT-LOOP-PLAN §6: despawn, destroy, money adjustment, stage and GM spawn confirm; other GM edits and workspace notes apply. */
+/** AGENT-LOOP-PLAN §6: despawn, destroy, money adjustment, stage and GM spawn confirm; other GM edits and workspace notes apply. ITEMS-SPEC §5.4: a thing's rest, grants and labels apply; a merge and a removal ask. ORG-SPEC §9: an organization's people, powers and shares ask; its rules apply. */
 export const AGENT_CHANGE_DEFAULTS: Readonly<Record<AgentChangeType, BoundMode>> = Object.freeze({
   gm_spawn: "confirm",
   despawn: "confirm",
@@ -305,6 +350,15 @@ export const AGENT_CHANGE_DEFAULTS: Readonly<Record<AgentChangeType, BoundMode>>
   stage: "confirm",
   gm_edit: "auto",
   workspace: "auto",
+  item_home: "auto",
+  item_grant: "auto",
+  item_label: "auto",
+  item_merge: "confirm",
+  item_remove: "confirm",
+  org_people: "confirm",
+  org_powers: "confirm",
+  org_shares: "confirm",
+  org_rules: "auto",
 });
 
 /** Each agent change type in plain words, for Settings and for the writer's refusals. */
@@ -316,6 +370,15 @@ export const AGENT_CHANGE_LABEL: Readonly<Record<AgentChangeType, string>> = Obj
   stage: "Quest and secret stages",
   gm_edit: "Other GM edits (fields, tiers, minds, routines, sections, the clock)",
   workspace: "Workspace notes",
+  item_home: "Where things are kept",
+  item_grant: "Who may use things",
+  item_label: "Things' names, descriptions and sizes",
+  item_merge: "Two things merged into one",
+  item_remove: "Things removed from the world",
+  org_people: "Organizations' people (members, positions held, titles, staff, pay, the party's tiers)",
+  org_powers: "Organizations' positions and delegations",
+  org_shares: "Organizations' shares and structure (founding, issuing, buying back, transfers, restructuring)",
+  org_rules: "Organizations' rules (entry, dues, names)",
 });
 
 /**
@@ -510,10 +573,12 @@ export interface UserSettings {
    * Which shipped defaults the file was last read against: a file from before the defaults rose
    * for reasoning models (absent) has every value still at an old default lifted to the new one;
    * one from before memory, consolidation and the time skip's steps stopped reasoning (2) has those
-   * steps lifted to reasoning off where they were left to the helper model's; and one from before
+   * steps lifted to reasoning off where they were left to the helper model's; one from before
    * the sections told their facts whole (2 or 3) has a section budget still at Standard's or Full's
-   * old default lifted to its new one; and one from before the turn's tokens went unbounded (up to 4)
-   * has a turn budget still at its old 100,000 prompt or 10,000 answer tokens set to No limit.
+   * old default lifted to its new one; one from before the turn's tokens went unbounded (up to 4)
+   * has a turn budget still at its old 100,000 prompt or 10,000 answer tokens set to No limit; and
+   * one from before organizations had tools (up to 5) has every role that reads money given the
+   * `orgs` family too. A file older than several revisions has each of their lifts.
    */
   defaults: typeof SETTINGS_DEFAULTS_REV;
   /** The helper model, apart from the presets: picking one never changes it. */
@@ -534,6 +599,8 @@ export interface UserSettings {
    */
   inferred: InferredChecks | null;
   extraction: ExtractionBounds;
+  /** What the reply's read tells and keeps of things (Settings → Changes from the reply, ITEMS-SPEC §11). */
+  thingReads: ThingReadSettings;
   swipeDefault: "rerun" | "renarrate";
   /** What a Re-narrate is sent (Settings → Swipes, DESIGN §6.12): the texts its turn was made with (its prompt set), or the user's current ones. */
   swipeTexts: SwipeTexts;
@@ -569,10 +636,34 @@ export interface UserSettings {
    * (the registry's Secret marks texts, §6.12).
    */
   narrator: NarratorView;
+  /**
+   * Whether the narrator is given the prices the engine charges, what is sold where the player
+   * character is in the Money section, and told to state the engine's price whenever a purchase or a
+   * price comes up (Settings → Narrator → Prices, DESIGN §9.5). Off, neither is sent.
+   */
+  statePrices: boolean;
+  /** Tidy up (GM → Things → Tidy up, ITEMS-SPEC §7.5, §11): how many findings one run shows. */
+  tidy: TidySettings;
+}
+
+/** Tidy up's settings: how many findings a run shows at most (past that, fixing some shows the next). */
+export interface TidySettings {
+  findings: number;
+}
+
+export const TIDY_DEFAULTS: Readonly<TidySettings> = Object.freeze({ findings: 50 });
+/** At least one finding a run; at most what a phone's list stays quick with. */
+export const TIDY_BOUNDS = Object.freeze({ findings: [1, 500] as const });
+
+/** `UserSettings.tidy` as the engine reads it: a whole number in its bounds, else `base`'s. */
+export function tidySettingsOf(raw: unknown, base: Readonly<TidySettings> = TIDY_DEFAULTS): TidySettings {
+  const v = isRecord(raw) ? raw.findings : undefined;
+  const [min, max] = TIDY_BOUNDS.findings;
+  return { findings: typeof v === "number" && Number.isInteger(v) && v >= min && v <= max ? v : base.findings };
 }
 
 /** The shipped defaults' revision (`UserSettings.defaults`). */
-export const SETTINGS_DEFAULTS_REV = 5;
+export const SETTINGS_DEFAULTS_REV = 6;
 
 /** Build's jobs (DESIGN §13.1): the user's own, which no preset sets. */
 export interface JobSettings {

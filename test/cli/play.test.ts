@@ -4,8 +4,10 @@
 // read-only client neither lists nor runs the writes.
 
 import { describe, expect, test } from "bun:test";
+import { chatHead } from "../../src/backend/agents/tools/workspace";
 import type { QuietResult } from "../../src/backend/host";
 import { toolsFor } from "../../src/cli/tools";
+import { madePlaces } from "../../src/engine/places-in-play";
 import { isRecord } from "../../src/shared/json";
 import type { CliRig } from "../support/cli-rig";
 import { cliRig } from "../support/cli-rig";
@@ -97,6 +99,60 @@ describe("the chat tools", () => {
     expect(await call("lre_gm_edit", { chatId, spoilers: true, ops: move })).toMatchObject({ applied: 1, pending: false });
     expect(await read("lre_chat_state", { pointer: "/hud/place/id" })).toBe("bluebird_coffee");
     expect(await read("lre_gm", { spoilers: true, pointer: "/edits" })).toHaveLength(1);
+  });
+
+  test("lre_gm_edit takes a thing's and a place's typed ops (ITEMS-SPEC §7.5): a thing moved, a place made, and the same place made again refused as there already", async () => {
+    const { rig, chatId, call, raw } = await portAlder();
+    const take = [{ op: "item", change: { do: "move", item: "pov_flashlight", to: { in: "pov" }, why: "Jordan takes the flashlight from the glovebox" } }];
+    expect(await call("lre_gm_edit", { chatId, spoilers: true, ops: take })).toMatchObject({ applied: 1, pending: false });
+    const booth = [{ op: "place", change: { do: "make", name: "Back booth", parent: "rusty_anchor", as: "spot", why: "the back booth at the Rusty Anchor" } }];
+    expect(await call("lre_gm_edit", { chatId, spoilers: true, ops: booth })).toMatchObject({ applied: 1, pending: false });
+    const again = await raw("lre_gm_edit", { chatId, spoilers: true, ops: booth });
+    expect({ isError: again.isError, says: again.text.includes("Back booth is there already") }).toEqual({ isError: true, says: true });
+    const head = await chatHead(rig.rt, chatId, rig.host.userId);
+    if (!head) throw new Error("the chat has no head");
+    expect(head.state.entities.pov_flashlight?.relations).toContainEqual({ type: "in", to: "pov" });
+    expect(madePlaces(head.state).map((p) => [p.name, p.parent, p.made.as, p.made.by])).toEqual([["Back booth", "rusty_anchor", "spot", "gm"]]);
+  });
+
+  test("lre_gm_edit takes the org op (ORG-SPEC §7.5): a Shop foreman position and Danny appointed to it read back on lre_orgs' GM page, and its Undo puts him back", async () => {
+    const { chatId, call } = await portAlder();
+    const ops = [
+      { op: "org", change: { do: "position", org: "alder_automotive_co", position: { id: "shop_foreman", title: "Shop foreman", powers: ["staff.hire"] } } },
+      { op: "org", change: { do: "appoint", org: "alder_automotive_co", who: "danny_okafor", position: "shop_foreman", why: "Marcus wants someone running the floor" } },
+    ];
+    expect(await call("lre_gm_edit", { chatId, spoilers: true, ops })).toMatchObject({ applied: 2, pending: false });
+    const dannyThere = async (): Promise<unknown> => {
+      const people = (await call("lre_orgs", { chatId, org: "Alder Automotive", part: "people", spoilers: true })).people;
+      return Array.isArray(people) ? people.filter(isRecord).find((p) => p.id === "danny_okafor")?.position : undefined;
+    };
+    expect(await dannyThere()).toEqual({ id: "shop_foreman", title: "Shop foreman" });
+    const listed = (await call("lre_chips", { chatId })).chips;
+    const undo = Array.isArray(listed) ? listed.filter(isRecord).find((c) => c.kind === "fix") : undefined;
+    expect(await call("lre_chip", { chatId, chip: undo?.id, choice: "undo" })).toMatchObject({ applied: true, pending: false });
+    expect(await dannyThere()).toEqual({ id: "mechanic", title: "Mechanic" });
+  });
+
+  test("lre_items_find needs spoilers, and answers the things words name, best first, each with where it is and whose", async () => {
+    const { rig, chatId, call, raw } = await portAlder();
+    const ids = (answer: Record<string, unknown>): unknown => (Array.isArray(answer.things) ? answer.things.map((t: unknown) => (isRecord(t) ? t.id : null)) : null);
+    const sent = rig.host.sent.length;
+    const refused = await raw("lre_items_find", { chatId, words: "the keys" });
+    expect({ isError: refused.isError, says: refused.text.includes("spoilers: true") }).toEqual({ isError: true, says: true });
+    expect(rig.host.sent.length).toBe(sent);
+    // "The keys" are Jordan's first, as he would mean them, then the others' keys.
+    const keys = await call("lre_items_find", { chatId, spoilers: true, words: "the keys" });
+    expect(ids(keys)).toEqual(["pov_keys", "pontoon_keys", "shop_office_key"]);
+    const home = [
+      { id: "lakeshore_county", name: "Lakeshore County" },
+      { id: "port_alder", name: "Port Alder" },
+      { id: "harbor_street_114", name: "114 Harbor Street" },
+      { id: "pov", name: "Jordan Ellis" },
+    ];
+    expect(Array.isArray(keys.things) ? keys.things[0] : null).toEqual({ id: "pov_keys", name: "Keys", type: "Key set (house, car fob, keyring)", size: "Pocket", where: home, whose: "Jordan Ellis's", owners: ["pov"], with: "pov" });
+    // An owner's name narrows them; words nothing goes by find nothing, and say so.
+    expect(ids(await call("lre_items_find", { chatId, spoilers: true, words: "Marcus's key" }))).toEqual(["shop_office_key"]);
+    expect(await call("lre_items_find", { chatId, spoilers: true, words: "a purple elephant" })).toMatchObject({ things: [], note: "Nothing in the chat goes by those words: try fewer of them, or read lre_gm's /entities." });
   });
 
   test("lre_marker previews without writing, then sets a time control, the player-claims policy and inferred checks", async () => {

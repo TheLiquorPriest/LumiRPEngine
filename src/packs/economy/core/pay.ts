@@ -8,7 +8,7 @@
 import type { JsonObject } from "../../../shared/json";
 import type { EntityId } from "../../../shared/ids";
 import { apartOf, type LedgerEvent, type PostEvent, type PostingLine } from "../../../shared/ledger";
-import { FINANCE_EVENTS, featureOn, type ClassTraits, type FinanceFeature, type PayTier, type TxnKind } from "../../../shared/finance";
+import { FINANCE_EVENTS, featureOn, PARTY_KINDS, type ClassTraits, type FinanceFeature, type PayTier, type TxnKind } from "../../../shared/finance";
 import { formatMoney } from "../../../shared/world";
 import { hashParts } from "../../../shared/hash";
 import { calendarOf, dateAt } from "../../../engine/calendar";
@@ -36,6 +36,7 @@ import {
   hasLedger,
   holdersOf,
   isLost,
+  moneyLevel,
   notional,
   openerOf,
   ownersOf,
@@ -118,24 +119,26 @@ export function toggles(world: ReadContext["world"]): JsonObject {
   return objOf(objOf(world.packs.economy?.config).features);
 }
 
+/** Whether a feature runs for a party at its Money level (`moneyLevel`: an organization's is its most closely followed member's) and the world's toggles. */
 export function featureFor(ctx: ReadContext, party: EntityId, feature: FinanceFeature): boolean {
-  return featureOn(ctx.levelOf(party, "money"), feature, toggles(ctx.world));
+  return featureOn(moneyLevel(ctx, party), feature, toggles(ctx.world));
 }
 
-/** An account's Money level: the highest among the parties who can spend from it (else who hold it), 0 with none in the world. */
+/** An account's Money level: the highest among the parties who can spend from it (else who hold it), each at its own (`moneyLevel`), 0 with none in the world. */
 export function accountLevel(ctx: ReadContext, account: EntityId): number {
   const owners = ownersOf(ctx.state, account).filter((o) => own(ctx.state.entities, o.party));
   const spenders = owners.filter((o) => rightsOf(ctx.state, account, o.party)?.spend);
-  return Math.max(0, ...(spenders.length > 0 ? spenders : owners).map((o) => ctx.levelOf(o.party, "money")));
+  return Math.max(0, ...(spenders.length > 0 ? spenders : owners).map((o) => moneyLevel(ctx, o.party)));
 }
 
 export function accountFeature(ctx: ReadContext, account: EntityId, feature: FinanceFeature): boolean {
   return featureOn(accountLevel(ctx, account), feature, toggles(ctx.world));
 }
 
+/** Whether `id` holds money: a person or an organization of any kind (`PARTY_KINDS`). */
 export function isParty(ctx: ReadContext, id: EntityId): boolean {
   const kind = own(ctx.state.entities, id)?.kind ?? "";
-  return kind !== "" && ["person", "business", "trust", "household"].some((k) => kindIs(ctx.registry, ctx.world, kind, k));
+  return kind !== "" && PARTY_KINDS.some((k) => kindIs(ctx.registry, ctx.world, kind, k));
 }
 
 // ---------------------------------------------------------------- cards
@@ -216,20 +219,73 @@ function sourcesFor(ctx: ReadContext, payer: EntityId, use: string, till: boolea
       return cardSources(ctx, payer, where((_t, c) => c === "charge_card"), "charge", till, problems);
     case "savings":
       return where((_t, c) => c === "savings" || c === "money_market" || c === "trust").map((account) => ({ account, via: "savings" }));
-    default: {
-      const e = own(ctx.state.entities, use);
-      if (e?.kind === "card") {
-        const problem = cardProblem(ctx, use, payer);
-        if (problem) {
-          problems.push(problem);
-          return [];
-        }
-        const account = strOf(e.fields.account);
-        return mine.includes(account) ? [{ account, card: use, via: e.fields.network === "debit" ? "debit" : e.fields.network === "charge" ? "charge" : "credit" }] : [];
-      }
-      return mine.includes(use) ? [{ account: use, via: classOf(ctx, use) === "cash" ? "cash" : "account" }] : [];
+    default:
+      return idSources(ctx, payer, use, problems);
+  }
+}
+
+/**
+ * What one card or account of the payer's pays as, by its id (a way named by id, or a source): a
+ * card on an account they spend from as its network, an account as itself. Never read as a way in
+ * words, whatever the id (an account whose id is `card`).
+ */
+function idSources(ctx: ReadContext, payer: EntityId, id: EntityId, problems: string[]): Source[] {
+  const mine = spendable(ctx, payer);
+  const e = own(ctx.state.entities, id);
+  if (e?.kind === "card") {
+    const problem = cardProblem(ctx, id, payer);
+    if (problem) {
+      problems.push(problem);
+      return [];
+    }
+    const account = strOf(e.fields.account);
+    return mine.includes(account) ? [{ account, card: id, via: e.fields.network === "debit" ? "debit" : e.fields.network === "charge" ? "charge" : "credit" }] : [];
+  }
+  return mine.includes(id) ? [{ account: id, via: classOf(ctx, id) === "cash" ? "cash" : "account" }] : [];
+}
+
+/** Words that say a way of paying, not which card or account: they pick none out of several by themselves (`namedSource`). */
+const WAY_WORDS: Readonly<Record<string, true>> = { card: true, cards: true, credit: true, debit: true, charge: true, checking: true, check: true, chequing: true, savings: true, saving: true, account: true, accounts: true, cash: true, wallet: true, coins: true, money: true, bank: true };
+/** Words around a way of paying that name nothing: articles, possessives, the payment's own verbs, how a card's digits are read out. */
+const FILLER_WORDS: Readonly<Record<string, true>> = { a: true, an: true, the: true, my: true, your: true, his: true, her: true, their: true, our: true, its: true, own: true, one: true, with: true, on: true, using: true, use: true, used: true, by: true, from: true, in: true, of: true, and: true, paid: true, pay: true, paying: true, s: true, ending: true, ends: true, last: true, digits: true, number: true };
+
+function wordsOf(text: string): string[] {
+  return text.toLowerCase().replace(/['’]s\b/g, "").match(/[a-z0-9]+/g) ?? [];
+}
+
+/**
+ * The payer's own card or account that words of payment name (DESIGN §9.5, §25.8): "my Visa", "her
+ * American Express", "the card ending in 1111", "the Harbor Savings account". Each way the payer
+ * may pay with reads by its words: a card by its name, its last four digits, its card in gear and its
+ * account's; an account without a card of theirs by its name, its product and its bank. A word picks
+ * one out only where some of those ways carry it and others don't; of those it fits alike, the one
+ * the way's own words fit best ("card" beside a bank's name) is it. Words that only say a way
+ * ("credit card", "cash"), or fit several alike, name none: they go by the way (`payMethodOf`) and
+ * the payer's order. Null when nothing of the payer's is picked out.
+ */
+export function namedSource(ctx: ReadContext, payer: EntityId, text: string): EntityId | null {
+  const said = wordsOf(text).filter((w) => own(FILLER_WORDS, w) !== true);
+  const names = said.filter((w) => own(WAY_WORDS, w) !== true);
+  if (names.length === 0) return null;
+  const ways: { id: EntityId; words: Set<string> }[] = [];
+  for (const account of spendable(ctx, payer)) {
+    const p = productOf(ctx, account);
+    const accountWords = [labelOf(ctx, account), p?.label ?? "", p?.institution ?? ""];
+    const cards = cardsOn(ctx.state, account).filter((card) => strOf(own(ctx.state.entities, card)?.fields.holder) === payer);
+    if (cards.length === 0) ways.push({ id: account, words: new Set(accountWords.flatMap(wordsOf)) });
+    for (const card of cards) {
+      const f = own(ctx.state.entities, card)?.fields ?? {};
+      const item = strOf(f.item);
+      ways.push({ id: card, words: new Set([...accountWords, labelOf(ctx, card), "card", strOf(f.network), strOf(f.last4), item !== "" && own(ctx.state.entities, item) ? labelOf(ctx, item) : ""].flatMap(wordsOf)) });
     }
   }
+  const everywhere = (w: string): boolean => ways.length > 1 && ways.every((way) => way.words.has(w));
+  const fits = ways
+    .map((way) => ({ id: way.id, named: names.filter((w) => way.words.has(w) && !everywhere(w)).length, said: said.filter((w) => way.words.has(w)).length }))
+    .filter((f) => f.named > 0)
+    .sort((a, b) => b.named - a.named || b.said - a.said);
+  const [best, next] = fits;
+  return best && !(next && next.named === best.named && next.said === best.said) ? best.id : null;
 }
 
 /** The overdraft a transactional account allows on top of what it has: its policy's room, where overdrafts run. */
@@ -399,7 +455,7 @@ export function chooseSource(ctx: ReadContext, payer: EntityId, cents: number, o
   const story = opts.story === true && level >= 2;
   const problems: string[] = [];
   const money = (c: number): string => formatMoney(c, ctx.world.currency);
-  const named = opts.source ? sourcesFor(ctx, payer, opts.source, opts.till, problems).filter((s) => s.account !== opts.except) : [];
+  const named = opts.source ? idSources(ctx, payer, opts.source, problems).filter((s) => s.account !== opts.except) : [];
   const first = named[0];
   if (first && (level < 2 || covers(ctx, first, cents, opts.overdraft) || (story && runsDebt(ctx, first.account)))) return first;
   if (opts.source && !opts.story) {
@@ -1086,7 +1142,7 @@ export function otherWay(ctx: ReadContext, events: readonly LedgerEvent[]): { fr
   const paid = storyPayment(ctx, events);
   if (!paid) return reject("not_a_payment", "there's no payment to pay another way");
   const touched = new Set(paid.post.lines.map((l) => l.account));
-  const ways = [...(paid.named ? sourcesFor(ctx, paid.payer, paid.named, true, []) : []), ...(["savings", "card", "checking", "cash"] as const).flatMap((method) => sourcesToTry(ctx, paid.payer, paid.total, { method, till: true }, []))];
+  const ways = [...(paid.named ? idSources(ctx, paid.payer, paid.named, []) : []), ...(["savings", "card", "checking", "cash"] as const).flatMap((method) => sourcesToTry(ctx, paid.payer, paid.total, { method, till: true }, []))];
   const way = ways.find((s) => !touched.has(s.account) && covers(ctx, s, paid.total, false));
   if (!way) return reject("declined", "No other way to pay covers it.");
   const memo = `${paid.post.memo}: paid from ${labelOf(ctx, way.account)} instead`;

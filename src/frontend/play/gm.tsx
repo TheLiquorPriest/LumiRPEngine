@@ -1,13 +1,13 @@
 // The GM view (`core.gm`, DESIGN §7): the truth for the GM section in view, secrets
-// and removed entities included, with the editor. GM mode renders it for World, Places and Story,
-// for each pack's tab (`UiRegistry.gm`: everyone's money is the economy pack's, the characters'
-// minds the minds pack's, the GM assistant and the workspace the core pack's), and for This chat's
-// Edits. Behind the gate in UI state (`ui.gm.revealed`): its data is asked for (`lre.gm`) only while
-// the gate is open and dropped when it closes, so it never travels with the player's state and
-// nothing of it is drawn behind the gate. Every change is one `lre.edit`: checked against what it
-// touches, all or none, one fix with its own Undo chip. Once one applies, a notice over the tab bar
-// says what it did, with that Undo; a GM → Workspace write, one GM edit through its own request,
-// says it the same way (`changed`).
+// and removed entities included, with the editor. GM mode renders it for World, Places, Things
+// (ITEMS-SPEC §10.2) and Story, for each pack's tab (`UiRegistry.gm`: everyone's money is the
+// economy pack's, the characters' minds the minds pack's, the GM assistant and the workspace the
+// core pack's), and for This chat's Edits. Behind the gate in UI state (`ui.gm.revealed`): its data
+// is asked for (`lre.gm`) only while the gate is open and dropped when it closes, so it never travels
+// with the player's state and nothing of it is drawn behind the gate. Every change is one
+// `lre.edit`: checked against what it touches, all or none, one fix with its own Undo chip. Once one
+// applies, a notice over the tab bar says what it did, with that Undo; a GM → Workspace write, one
+// GM edit through its own request, says it the same way (`changed`).
 
 import { useEffect, useRef, useState } from "preact/hooks";
 import type { EditOp } from "../../shared/protocol";
@@ -21,6 +21,7 @@ import type { BulkEditor, EditNotice } from "../gm/editor";
 import { editNotice, noticeStands, sendEdits } from "../gm/editor";
 import { hideTruth, revealTruth } from "../gm/gate";
 import { EditsLog, PlacesSection, StorySection } from "../gm/sections";
+import { ThingsSection } from "../gm/things";
 import { EditNoticeBar } from "../gm/ui";
 import { WorldSection } from "../gm/world";
 import type { PanelProps } from "../registry";
@@ -121,7 +122,9 @@ export function GmPanel(props: PanelProps) {
       {!editor ? (
         <Empty>Loading the truth…</Empty>
       ) : section === "places" ? (
-        <PlacesSection gm={editor.gm} />
+        <PlacesSection editor={editor} />
+      ) : section === "things" ? (
+        <ThingsSection editor={editor} chatId={props.chatId} />
       ) : section === "story" ? (
         <StorySection editor={editor} />
       ) : section === "chat" ? (

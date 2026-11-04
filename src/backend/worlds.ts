@@ -20,7 +20,7 @@ import { hasOwn, isRecord, safeKey } from "../shared/json";
 import { applyPatch, isPrototypeKey, jsonEqual, measure, parsePointer, PatchError, readOp } from "../shared/json-patch";
 import type { EditorRequest, JsonPatchOp, LintIssue, ResultBodies, WorldCollection, WorldPart } from "../shared/protocol";
 import type { RevisionNote, RulesetDef, WorldDoc, WorldIndex } from "../shared/world";
-import { DEFAULT_SPAWN_CAP, EXPORT_FORMAT, WORLD_FORMAT } from "../shared/world";
+import { DEFAULT_PLACE_CAPS, DEFAULT_SPAWN_CAP, EXPORT_FORMAT, WORLD_FORMAT } from "../shared/world";
 import { WORLD_MINDS_KEYS, type WorldMindsConfig } from "../shared/minds";
 import { narratorViewOf } from "../shared/settings";
 import { loreBooksOf, lorePinsOf, loreSourceOf } from "../shared/lore";
@@ -30,6 +30,8 @@ import { sectionTemplatesProblem } from "../shared/sections";
 import { currencyOf, isWorldDoc, lintWorld, macrosIn, migrateWorld, newBlankWorld, shapeIssues, stamped } from "../engine/authoring";
 import { compileMaps, mapSettingsOf } from "../shared/maps";
 import type { Registry } from "../engine/registry-impl";
+import { shippedVersion } from "../engine/table-updates";
+import type { StarterTable } from "../shared/tables";
 import type { HostPort } from "./host";
 import { readStoredJson } from "./stored-json";
 import { applyProfile, profileChoices, profileOf } from "../shared/profiles/index";
@@ -166,6 +168,8 @@ export class WorldStore {
   constructor(
     private readonly host: HostPort,
     private readonly registry: Registry,
+    /** The starter worlds' own tables, whose newer versions Data updates offers a world made from one. */
+    private readonly starters: readonly StarterTable[] = [],
   ) {}
 
   private async readJson(path: string, userId: UserId): Promise<unknown> {
@@ -448,6 +452,22 @@ export class WorldStore {
         what = `revision ${request.revision}`;
         doc = structuredClone((await this.get(worldId, userId, request.revision)).world);
         base = draft.head;
+      } else if (request.op === "shipped") {
+        // Data updates (DESIGN §9.2): the version this build ships of each named table, in place of the draft's copy or beside the rest, pinned as any table write is: the starter's own where the copy came from it (`shippedVersion`), else the packs'.
+        const ids: unknown = request.tables;
+        if (!Array.isArray(ids) || ids.length === 0) throw new WorldError("bad_request", "shipped names the data tables to take");
+        const taken = ids.map((id) => {
+          const table = typeof id === "string" ? shippedVersion(doc, this.registry.tables, this.starters, id) : null;
+          if (!table) throw new WorldError("bad_request", `${String(id)} is no data table this build ships`);
+          return table;
+        });
+        const collection = collectionOf(doc, "tables");
+        // Taking what the draft holds already writes nothing, as a patch that changes nothing doesn't.
+        if (taken.every((table) => jsonEqual(collection[table.id], table))) return { draft: draft.doc, lint: lintWorld(draft.doc, this.registry), base: draft.base, stored: draft.stored, version: draft.version };
+        what = taken.length === 1 ? `the shipped table ${taken[0]?.id ?? ""}` : "the shipped tables";
+        const tables = { ...doc.tables };
+        for (const table of taken) collection[table.id] = structuredClone(table) as unknown as JsonValue;
+        repinTables(tables, doc);
       } else if (request.op === "put" || request.op === "remove") {
         if (!hasOwn(WORLD_COLLECTIONS, request.collection)) throw new WorldError("bad_request", `unknown collection ${request.collection}`);
         if (!safeKey(request.id)) throw new WorldError("bad_request", "not a valid id");
@@ -746,6 +766,15 @@ function setPart(doc: WorldDoc, part: WorldPart, value: JsonValue): void {
     if (typeof value.spawnCap === "number") {
       if (value.spawnCap === DEFAULT_SPAWN_CAP) delete doc.spawnCap;
       else doc.spawnCap = value.spawnCap;
+    }
+    // The place caps as the editor sends them (ITEMS-SPEC §6.2, lint checks their range); a default is no cap set.
+    if (typeof value.placeCap === "number") {
+      if (value.placeCap === DEFAULT_PLACE_CAPS.chat) delete doc.placeCap;
+      else doc.placeCap = value.placeCap;
+    }
+    if (typeof value.placesPerTurn === "number") {
+      if (value.placesPerTurn === DEFAULT_PLACE_CAPS.turn) delete doc.placesPerTurn;
+      else doc.placesPerTurn = value.placesPerTurn;
     }
     // The world's own life states, as the editor sends them (lint checks each); none is no record, so a world saved untouched stays as it was.
     if (value.lifeStates !== undefined) {

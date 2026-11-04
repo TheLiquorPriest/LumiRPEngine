@@ -16,8 +16,15 @@ export type Owner = string | Selector | undefined;
 
 export type OwnerLevel = "entity" | "group" | "kind" | "selector" | "none";
 
-/** The kind every group extends (the relationships pack's `group`). */
+/** The kind every group extends (the space pack's `group`). */
 const GROUP_KIND = "group";
+/** A business is a group, but a schedule it owns is its own, not its members' (ORG-SPEC §3.2): it is picked as an entity. */
+const COMPANY_KIND = "business";
+
+/** Whether a schedule this entity owns applies to its members: a group's, but not a business's. */
+function ownsAsGroup(doc: WorldDoc, kind: string): boolean {
+  return kindIs(doc, kind, GROUP_KIND) && !kindIs(doc, kind, COMPANY_KIND);
+}
 
 const LEVELS: readonly OwnerLevel[] = ["entity", "group", "kind", "selector", "none"];
 
@@ -29,7 +36,7 @@ export function ownerLevel(doc: WorldDoc, owner: unknown): OwnerLevel {
   if (isRecord(owner)) return "selector";
   if (typeof owner !== "string" || owner === "") return "none";
   const entity = hasOwn(doc.entities, owner) ? doc.entities[owner] : undefined;
-  if (entity) return kindIs(doc, entity.kind, GROUP_KIND) ? "group" : "entity";
+  if (entity) return ownsAsGroup(doc, entity.kind) ? "group" : "entity";
   return "kind";
 }
 
@@ -41,7 +48,7 @@ export function ownerOptions(doc: WorldDoc, level: OwnerLevel): RefOption[] {
     case "entity":
     case "group":
       return Object.values(doc.entities)
-        .filter((e) => kindIs(doc, e.kind, GROUP_KIND) === (level === "group"))
+        .filter((e) => ownsAsGroup(doc, e.kind) === (level === "group"))
         .map((e) => ({ value: e.id, label: e.name || e.id, sublabel: kindLabel(e.kind) }))
         .sort(byName);
     case "kind":

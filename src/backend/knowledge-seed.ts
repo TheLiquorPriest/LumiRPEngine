@@ -23,6 +23,7 @@ import { factId, keptFromOf, MINDS_EVENTS, parseFactId, wiFactIdOfLiveLore, worl
 import { bookTextHash, loreIsSecret, loreSourceOf } from "../shared/lore";
 import { parseSecretMarks, resolveMarkNames, wholeEntrySecret } from "../shared/secret-marks";
 import type { LoreEntryDef, WorldDoc } from "../shared/world";
+import { trackOwner } from "../shared/world";
 import { visibilityOf } from "../engine/visibility";
 import { own } from "../engine/pack-kit";
 import type { Registry } from "../engine/registry-impl";
@@ -125,7 +126,8 @@ function authoredFact(input: SeedInput, id: FactId): KnowledgeFact | null {
   if (ref?.kind === "track") {
     const track = own(world.tracks, ref.track);
     const truth = track ? own(track.stages, ref.stage)?.truth : undefined;
-    return track && truth ? { id, kind: "track", claim: claim(truth), about: track.owner ? [track.owner] : [], truth: "true" } : null;
+    const owner = track ? trackOwner(track) : undefined;
+    return track && truth ? { id, kind: "track", claim: claim(truth), about: owner ? [owner] : [], truth: "true" } : null;
   }
   if (ref?.kind === "field") {
     const e = own(state.entities, ref.entity);
@@ -161,14 +163,15 @@ export async function seedKnowledge(host: Pick<HostPort, "books" | "log">, input
     const fact = authoredFact(input, id);
     if (fact) for (const who of entry.holders ?? []) add(fact, who, authored("everyone"));
   }
-  // Tracks: an owner holds each stage's truth, kept from everyone while the track is secret.
+  // Tracks: an owner holds each stage's truth, kept from everyone while the track is secret; the GM's (`GM_OWNER`) seeds no one.
   for (const [track, t] of Object.entries(world.tracks)) {
-    if (t.owner === undefined) continue;
+    const owner = trackOwner(t);
+    if (owner === undefined) continue;
     for (const stage of Object.keys(t.stages)) {
       const id = factId({ kind: "track", track, stage });
       if (own(k.facts, id)) continue;
       const fact = authoredFact(input, id);
-      if (fact) add(fact, t.owner, authored(visibilityOf(t.visibility) === "secret" ? "everyone" : null));
+      if (fact) add(fact, owner, authored(visibilityOf(t.visibility) === "secret" ? "everyone" : null));
     }
   }
   // Authored holdings, as the author gave them.

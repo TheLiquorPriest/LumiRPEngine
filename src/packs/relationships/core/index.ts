@@ -26,7 +26,7 @@ import type { BandDef, KindDef, RelationTypeDef } from "../../../shared/world";
 import { numOf, objOf, strOf, own } from "../../../engine/pack-kit";
 import type { EventTypeDef, PackDef, ReadContext, Rejection } from "../../../engine/registry";
 import { bandOf } from "../../../engine/scope";
-import { GROUP_KIND, MEMBER_OF, membersOf } from "../../../engine/selector";
+import { GROUP_KIND, linkRows, MEMBER_OF, membersOf } from "../../../engine/selector";
 import type { WorldState } from "../../../engine/state";
 import { CONVERSATION, STATED_MINUTES } from "../../../shared/needs";
 import { listWords, possessive } from "../../../shared/words";
@@ -254,9 +254,7 @@ const regardEvent: EventTypeDef<PackEvent> = {
   },
 };
 
-/** The kind every group extends; authors add their own with `extends: "group"`. */
-export const GROUP: KindDef = { id: GROUP_KIND, label: "Group", extends: "thing", pack: "relationships", fields: {} };
-/** The pack's own groups. `faction` keeps its id, so worlds written before groups keep working. */
+/** The pack's own groups (the base `group` kind is the space pack's). `faction` keeps its id, so worlds written before groups keep working. */
 export const GROUP_KINDS: readonly KindDef[] = [
   { id: "faction", label: "Faction", extends: GROUP_KIND, pack: "relationships", fields: {} },
   { id: "family", label: "Family", extends: GROUP_KIND, pack: "relationships", fields: {} },
@@ -325,10 +323,12 @@ export const relationshipsPack: PackDef = {
   domain: "relationships",
   requires: ["space"],
   register(r) {
-    r.kind(GROUP);
     for (const kind of GROUP_KINDS) r.kind(kind);
     r.relation({ id: "regard", label: "Regard", from: "*", to: "*", cardinality: "many_many", symmetric: false, fields: Object.fromEntries(DEFAULT_AXES.map((a) => [a.id, { type: "number", min: a.min, max: a.max, domain: "relationships", level: 1 }])), pack: "relationships" });
-    r.relation({ id: MEMBER_OF, label: "Member of", from: "*", to: GROUP_KIND, cardinality: "many_many", symmetric: false, fields: { role: { type: "text", label: "Role" }, rank: { type: "number", label: "Rank" }, since: { type: "date", label: "Since" } }, pack: "relationships" });
+    // `role` is the member's own title (ORG-SPEC §3.3); `position` one its group defines.
+    r.relation({ id: MEMBER_OF, label: "Member of", from: "*", to: GROUP_KIND, cardinality: "many_many", symmetric: false, fields: { role: { type: "text", label: "Title" }, position: { type: "text", label: "Position" }, rank: { type: "number", label: "Rank" }, since: { type: "date", label: "Since" } }, pack: "relationships" });
+    // Every group's members by `member_of`, nested through member groups (ORG-SPEC §3.2).
+    r.membership(GROUP_KIND, linkRows);
     r.relation({ id: "knows", label: "Knows", from: "*", to: "*", cardinality: "many_many", symmetric: false, fields: {}, pack: "relationships" });
     for (const kin of KINSHIP) r.relation(kin);
     r.event(regardEvent);

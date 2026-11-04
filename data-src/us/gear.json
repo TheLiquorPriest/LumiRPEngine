@@ -13,10 +13,13 @@
     "items[].volume_l": "Liters occupied (bounding volume of the item; for liquid containers the outer volume).",
     "items[].price_cents": "Integer cents {min, typical, max}.",
     "items[].equip_slot": "equip_slots id.",
+    "items[].size": "How it is carried, on the size ladder: pocket | hand | armful | heavy | furniture | builtin.",
     "containers[].capacity_l": "Usable internal volume in liters.",
     "containers[].max_load_kg": "Practical maximum load in kilograms.",
     "containers[].empty_weight_g": "Grams (0 for garments pockets and fixed vehicle storage).",
     "containers[].location": "carried | worn | furniture | vehicle_fixed.",
+    "containers[].size": "The container's own size on the ladder; absent on vehicle_fixed rows, which are part of their vehicle.",
+    "containers[].holds": "The largest size it takes: pocket | hand | armful | heavy | furniture.",
     "kits[].pieces[].weight_g_each": "Grams per single piece; total weight is qty x weight_g_each.",
     "kits[].piece_count": "Sum of piece qty (the mechanic kit is exactly 45).",
     "kits[].recommended_container_id": "Container in this file that normally holds the kit."
@@ -111,6 +114,7 @@
       "equip_slot": "pocket",
       "weight_g": 70,
       "volume_l": 0.06,
+      "size": "pocket",
       "price_cents": {
         "min": 1500,
         "typical": 4000,
@@ -125,6 +129,7 @@
       "equip_slot": "pocket",
       "weight_g": 40,
       "volume_l": 0.04,
+      "size": "pocket",
       "price_cents": {
         "min": 1000,
         "typical": 3000,
@@ -138,6 +143,7 @@
       "equip_slot": "pocket",
       "weight_g": 5,
       "volume_l": 0.004,
+      "size": "pocket",
       "price_cents": {
         "min": 1000,
         "typical": 3500,
@@ -152,6 +158,7 @@
       "equip_slot": "pocket",
       "weight_g": 5,
       "volume_l": 0.004,
+      "size": "pocket",
       "price_cents": {
         "min": 0,
         "typical": 0,
@@ -166,6 +173,7 @@
       "equip_slot": "pocket",
       "weight_g": 40,
       "volume_l": 0.03,
+      "size": "pocket",
       "price_cents": {
         "min": 16500,
         "typical": 16500,
@@ -180,6 +188,7 @@
       "equip_slot": "pocket",
       "weight_g": 90,
       "volume_l": 0.08,
+      "size": "pocket",
       "price_cents": {
         "min": 500,
         "typical": 2000,
@@ -194,6 +203,7 @@
       "equip_slot": "pocket",
       "weight_g": 190,
       "volume_l": 0.1,
+      "size": "pocket",
       "price_cents": {
         "min": 12000,
         "typical": 50000,
@@ -208,6 +218,7 @@
       "equip_slot": "pocket_or_bag",
       "weight_g": 55,
       "volume_l": 0.04,
+      "size": "pocket",
       "price_cents": {
         "min": 1500,
         "typical": 7500,
@@ -221,6 +232,7 @@
       "equip_slot": "pocket_or_bag",
       "weight_g": 200,
       "volume_l": 0.15,
+      "size": "pocket",
       "price_cents": {
         "min": 1500,
         "typical": 3000,
@@ -234,6 +246,7 @@
       "equip_slot": "pocket_or_bag",
       "weight_g": 40,
       "volume_l": 0.03,
+      "size": "pocket",
       "price_cents": {
         "min": 800,
         "typical": 1500,
@@ -247,6 +260,7 @@
       "equip_slot": "pocket",
       "weight_g": 120,
       "volume_l": 0.08,
+      "size": "pocket",
       "price_cents": {
         "min": 800,
         "typical": 2500,
@@ -261,6 +275,7 @@
       "equip_slot": "pocket_or_bag",
       "weight_g": 250,
       "volume_l": 0.15,
+      "size": "pocket",
       "price_cents": {
         "min": 2500,
         "typical": 6000,
@@ -274,6 +289,7 @@
       "equip_slot": "head",
       "weight_g": 90,
       "volume_l": 0.1,
+      "size": "pocket",
       "price_cents": {
         "min": 1500,
         "typical": 3000,
@@ -287,6 +303,7 @@
       "equip_slot": "pocket_or_bag",
       "weight_g": 240,
       "volume_l": 0.14,
+      "size": "pocket",
       "price_cents": {
         "min": 3500,
         "typical": 9000,
@@ -300,6 +317,7 @@
       "equip_slot": "pocket",
       "weight_g": 90,
       "volume_l": 0.06,
+      "size": "pocket",
       "price_cents": {
         "min": 1500,
         "typical": 4000,
@@ -314,6 +332,7 @@
       "equip_slot": "pocket",
       "weight_g": 20,
       "volume_l": 0.02,
+      "size": "pocket",
       "price_cents": {
         "min": 100,
         "typical": 300,
@@ -327,6 +346,7 @@
       "equip_slot": "hand_held",
       "weight_g": 400,
       "volume_l": 1.3,
+      "size": "hand",
       "price_cents": {
         "min": 1500,
         "typical": 3000,
@@ -341,6 +361,7 @@
       "equip_slot": "hand_held",
       "weight_g": 15,
       "volume_l": 0.55,
+      "size": "hand",
       "price_cents": {
         "min": 50,
         "typical": 150,
@@ -355,6 +376,7 @@
       "equip_slot": "pocket_or_bag",
       "weight_g": 150,
       "volume_l": 0.3,
+      "size": "pocket",
       "price_cents": {
         "min": 500,
         "typical": 1200,
@@ -368,6 +390,7 @@
       "equip_slot": "face",
       "weight_g": 35,
       "volume_l": 0.04,
+      "size": "pocket",
       "price_cents": {
         "min": 800,
         "typical": 2500,
@@ -381,6 +404,7 @@
       "equip_slot": "face",
       "weight_g": 30,
       "volume_l": 0.03,
+      "size": "pocket",
       "price_cents": {
         "min": 10000,
         "typical": 25000,
@@ -394,6 +418,7 @@
       "equip_slot": "wrist",
       "weight_g": 60,
       "volume_l": 0.03,
+      "size": "pocket",
       "price_cents": {
         "min": 2000,
         "typical": 8000,
@@ -407,6 +432,7 @@
       "equip_slot": "wrist",
       "weight_g": 50,
       "volume_l": 0.03,
+      "size": "pocket",
       "price_cents": {
         "min": 10000,
         "typical": 30000,
@@ -420,6 +446,7 @@
       "equip_slot": "pocket",
       "weight_g": 15,
       "volume_l": 0.02,
+      "size": "pocket",
       "price_cents": {
         "min": 100,
         "typical": 300,
@@ -433,6 +460,7 @@
       "equip_slot": "pocket",
       "weight_g": 80,
       "volume_l": 0.1,
+      "size": "pocket",
       "price_cents": {
         "min": 200,
         "typical": 600,
@@ -446,6 +474,7 @@
       "equip_slot": "hand_held",
       "weight_g": 300,
       "volume_l": 0.4,
+      "size": "hand",
       "price_cents": {
         "min": 800,
         "typical": 2000,
@@ -459,6 +488,7 @@
       "equip_slot": "pocket_or_bag",
       "weight_g": 70,
       "volume_l": 0.06,
+      "size": "pocket",
       "price_cents": {
         "min": 100,
         "typical": 300,
@@ -472,6 +502,7 @@
       "equip_slot": "pocket",
       "weight_g": 20,
       "volume_l": 0.04,
+      "size": "pocket",
       "price_cents": {
         "min": 50,
         "typical": 100,
@@ -485,6 +516,7 @@
       "equip_slot": "pocket_or_bag",
       "weight_g": 50,
       "volume_l": 0.05,
+      "size": "pocket",
       "price_cents": {
         "min": 100,
         "typical": 200,
@@ -498,6 +530,7 @@
       "equip_slot": "none",
       "weight_g": 80,
       "volume_l": 0.12,
+      "size": "hand",
       "price_cents": {
         "min": 500,
         "typical": 1000,
@@ -511,6 +544,7 @@
       "equip_slot": "hand_held",
       "weight_g": 560,
       "volume_l": 0.8,
+      "size": "hand",
       "price_cents": {
         "min": 1200,
         "typical": 2500,
@@ -524,6 +558,7 @@
       "equip_slot": "pocket_or_bag",
       "weight_g": 250,
       "volume_l": 0.18,
+      "size": "pocket",
       "price_cents": {
         "min": 600,
         "typical": 1500,
@@ -537,6 +572,7 @@
       "equip_slot": "pocket_or_bag",
       "weight_g": 120,
       "volume_l": 0.12,
+      "size": "hand",
       "price_cents": {
         "min": 300,
         "typical": 800,
@@ -550,6 +586,7 @@
       "equip_slot": "pocket_or_bag",
       "weight_g": 250,
       "volume_l": 0.2,
+      "size": "hand",
       "price_cents": {
         "min": 1200,
         "typical": 2200,
@@ -563,6 +600,7 @@
       "equip_slot": "none",
       "weight_g": 400,
       "volume_l": 0.5,
+      "size": "hand",
       "price_cents": {
         "min": 500,
         "typical": 900,
@@ -576,6 +614,7 @@
       "equip_slot": "none",
       "weight_g": 500,
       "volume_l": 1.5,
+      "size": "hand",
       "price_cents": {
         "min": 1200,
         "typical": 2000,
@@ -589,6 +628,7 @@
       "equip_slot": "none",
       "weight_g": 250,
       "volume_l": 0.4,
+      "size": "hand",
       "price_cents": {
         "min": 1500,
         "typical": 4000,
@@ -602,6 +642,7 @@
       "equip_slot": "none",
       "weight_g": 1500,
       "volume_l": 3.0,
+      "size": "hand",
       "price_cents": {
         "min": 1500,
         "typical": 4000,
@@ -615,6 +656,7 @@
       "equip_slot": "none",
       "weight_g": 350,
       "volume_l": 0.35,
+      "size": "hand",
       "price_cents": {
         "min": 300,
         "typical": 800,
@@ -628,6 +670,7 @@
       "equip_slot": "none",
       "weight_g": 450,
       "volume_l": 0.5,
+      "size": "hand",
       "price_cents": {
         "min": 300,
         "typical": 700,
@@ -641,6 +684,7 @@
       "equip_slot": "pocket_or_bag",
       "weight_g": 100,
       "volume_l": 0.05,
+      "size": "pocket",
       "price_cents": {
         "min": 300,
         "typical": 600,
@@ -654,6 +698,7 @@
       "equip_slot": "none",
       "weight_g": 40,
       "volume_l": 0.08,
+      "size": "pocket",
       "price_cents": {
         "min": 150,
         "typical": 300,
@@ -667,6 +712,7 @@
       "equip_slot": "none",
       "weight_g": 600,
       "volume_l": 3.0,
+      "size": "hand",
       "price_cents": {
         "min": 800,
         "typical": 1500,
@@ -680,6 +726,7 @@
       "equip_slot": "none",
       "weight_g": 600,
       "volume_l": 19.0,
+      "size": "armful",
       "price_cents": {
         "min": 300,
         "typical": 700,
@@ -694,6 +741,7 @@
       "equip_slot": "pocket_or_bag",
       "weight_g": 150,
       "volume_l": 0.2,
+      "size": "hand",
       "price_cents": {
         "min": 700,
         "typical": 1200,
@@ -707,6 +755,7 @@
       "equip_slot": "hands",
       "weight_g": 200,
       "volume_l": 0.5,
+      "size": "hand",
       "price_cents": {
         "min": 800,
         "typical": 1600,
@@ -720,6 +769,7 @@
       "equip_slot": "face",
       "weight_g": 40,
       "volume_l": 0.05,
+      "size": "pocket",
       "price_cents": {
         "min": 500,
         "typical": 1200,
@@ -733,6 +783,7 @@
       "equip_slot": "hand_held",
       "weight_g": 450,
       "volume_l": 2.5,
+      "size": "hand",
       "price_cents": {
         "min": 2500,
         "typical": 5000,
@@ -746,6 +797,7 @@
       "equip_slot": "hand_held",
       "weight_g": 450,
       "volume_l": 3.0,
+      "size": "hand",
       "price_cents": {
         "min": 1500,
         "typical": 3000,
@@ -759,6 +811,7 @@
       "equip_slot": "head",
       "weight_g": 90,
       "volume_l": 0.25,
+      "size": "hand",
       "price_cents": {
         "min": 1000,
         "typical": 2200,
@@ -772,6 +825,7 @@
       "equip_slot": "head",
       "weight_g": 80,
       "volume_l": 0.2,
+      "size": "hand",
       "price_cents": {
         "min": 800,
         "typical": 1800,
@@ -785,6 +839,7 @@
       "equip_slot": "head",
       "weight_g": 120,
       "volume_l": 0.6,
+      "size": "hand",
       "price_cents": {
         "min": 1000,
         "typical": 2500,
@@ -798,6 +853,7 @@
       "equip_slot": "head",
       "weight_g": 400,
       "volume_l": 1.2,
+      "size": "hand",
       "price_cents": {
         "min": 1500,
         "typical": 3000,
@@ -811,6 +867,7 @@
       "equip_slot": "head",
       "weight_g": 300,
       "volume_l": 1.5,
+      "size": "hand",
       "price_cents": {
         "min": 2000,
         "typical": 5000,
@@ -824,6 +881,7 @@
       "equip_slot": "face",
       "weight_g": 10,
       "volume_l": 0.02,
+      "size": "pocket",
       "price_cents": {
         "min": 100,
         "typical": 250,
@@ -837,6 +895,7 @@
       "equip_slot": "neck",
       "weight_g": 150,
       "volume_l": 0.6,
+      "size": "hand",
       "price_cents": {
         "min": 1200,
         "typical": 2500,
@@ -850,6 +909,7 @@
       "equip_slot": "neck",
       "weight_g": 30,
       "volume_l": 0.05,
+      "size": "pocket",
       "price_cents": {
         "min": 300,
         "typical": 700,
@@ -863,6 +923,7 @@
       "equip_slot": "torso_base",
       "weight_g": 150,
       "volume_l": 0.4,
+      "size": "hand",
       "price_cents": {
         "min": 600,
         "typical": 1500,
@@ -876,6 +937,7 @@
       "equip_slot": "torso_base",
       "weight_g": 100,
       "volume_l": 0.3,
+      "size": "hand",
       "price_cents": {
         "min": 500,
         "typical": 1200,
@@ -889,6 +951,7 @@
       "equip_slot": "torso_base",
       "weight_g": 250,
       "volume_l": 0.6,
+      "size": "hand",
       "price_cents": {
         "min": 2500,
         "typical": 4500,
@@ -902,6 +965,7 @@
       "equip_slot": "torso_base",
       "weight_g": 150,
       "volume_l": 0.5,
+      "size": "hand",
       "price_cents": {
         "min": 1500,
         "typical": 3000,
@@ -915,6 +979,7 @@
       "equip_slot": "torso_mid",
       "weight_g": 600,
       "volume_l": 1.8,
+      "size": "hand",
       "price_cents": {
         "min": 2000,
         "typical": 4000,
@@ -928,6 +993,7 @@
       "equip_slot": "torso_mid",
       "weight_g": 500,
       "volume_l": 1.5,
+      "size": "hand",
       "price_cents": {
         "min": 2500,
         "typical": 4500,
@@ -941,6 +1007,7 @@
       "equip_slot": "torso_mid",
       "weight_g": 400,
       "volume_l": 1.4,
+      "size": "hand",
       "price_cents": {
         "min": 2000,
         "typical": 4500,
@@ -954,6 +1021,7 @@
       "equip_slot": "torso_outer",
       "weight_g": 450,
       "volume_l": 2.0,
+      "size": "hand",
       "price_cents": {
         "min": 3000,
         "typical": 6000,
@@ -967,6 +1035,7 @@
       "equip_slot": "torso_outer",
       "weight_g": 450,
       "volume_l": 1.5,
+      "size": "hand",
       "price_cents": {
         "min": 3000,
         "typical": 7000,
@@ -980,6 +1049,7 @@
       "equip_slot": "torso_outer",
       "weight_g": 800,
       "volume_l": 3.0,
+      "size": "hand",
       "price_cents": {
         "min": 3500,
         "typical": 6500,
@@ -993,6 +1063,7 @@
       "equip_slot": "torso_outer",
       "weight_g": 1500,
       "volume_l": 6.0,
+      "size": "hand",
       "price_cents": {
         "min": 6000,
         "typical": 15000,
@@ -1006,6 +1077,7 @@
       "equip_slot": "torso_outer",
       "weight_g": 800,
       "volume_l": 3.0,
+      "size": "hand",
       "price_cents": {
         "min": 4000,
         "typical": 10000,
@@ -1019,6 +1091,7 @@
       "equip_slot": "torso_outer",
       "weight_g": 150,
       "volume_l": 0.5,
+      "size": "hand",
       "price_cents": {
         "min": 800,
         "typical": 1500,
@@ -1032,6 +1105,7 @@
       "equip_slot": "full_body",
       "weight_g": 400,
       "volume_l": 1.2,
+      "size": "hand",
       "price_cents": {
         "min": 2500,
         "typical": 5000,
@@ -1045,6 +1119,7 @@
       "equip_slot": "full_body",
       "weight_g": 350,
       "volume_l": 1.0,
+      "size": "hand",
       "price_cents": {
         "min": 1500,
         "typical": 3000,
@@ -1058,6 +1133,7 @@
       "equip_slot": "full_body",
       "weight_g": 150,
       "volume_l": 0.3,
+      "size": "hand",
       "price_cents": {
         "min": 2000,
         "typical": 4500,
@@ -1071,6 +1147,7 @@
       "equip_slot": "full_body",
       "weight_g": 1000,
       "volume_l": 3.0,
+      "size": "hand",
       "price_cents": {
         "min": 3000,
         "typical": 6500,
@@ -1084,6 +1161,7 @@
       "equip_slot": "hands",
       "weight_g": 180,
       "volume_l": 0.6,
+      "size": "hand",
       "price_cents": {
         "min": 1500,
         "typical": 3000,
@@ -1097,6 +1175,7 @@
       "equip_slot": "hands",
       "weight_g": 120,
       "volume_l": 0.4,
+      "size": "hand",
       "price_cents": {
         "min": 2500,
         "typical": 5000,
@@ -1110,6 +1189,7 @@
       "equip_slot": "waist",
       "weight_g": 150,
       "volume_l": 0.2,
+      "size": "hand",
       "price_cents": {
         "min": 1500,
         "typical": 3000,
@@ -1123,6 +1203,7 @@
       "equip_slot": "legs",
       "weight_g": 700,
       "volume_l": 1.6,
+      "size": "hand",
       "price_cents": {
         "min": 3000,
         "typical": 5500,
@@ -1136,6 +1217,7 @@
       "equip_slot": "legs",
       "weight_g": 500,
       "volume_l": 1.4,
+      "size": "hand",
       "price_cents": {
         "min": 2500,
         "typical": 4500,
@@ -1149,6 +1231,7 @@
       "equip_slot": "legs",
       "weight_g": 280,
       "volume_l": 0.8,
+      "size": "hand",
       "price_cents": {
         "min": 1500,
         "typical": 3000,
@@ -1162,6 +1245,7 @@
       "equip_slot": "legs",
       "weight_g": 650,
       "volume_l": 1.7,
+      "size": "hand",
       "price_cents": {
         "min": 3000,
         "typical": 5500,
@@ -1175,6 +1259,7 @@
       "equip_slot": "legs",
       "weight_g": 300,
       "volume_l": 0.9,
+      "size": "hand",
       "price_cents": {
         "min": 2000,
         "typical": 3500,
@@ -1188,6 +1273,7 @@
       "equip_slot": "underwear",
       "weight_g": 60,
       "volume_l": 0.12,
+      "size": "pocket",
       "price_cents": {
         "min": 350,
         "typical": 600,
@@ -1201,6 +1287,7 @@
       "equip_slot": "socks",
       "weight_g": 60,
       "volume_l": 0.15,
+      "size": "pocket",
       "price_cents": {
         "min": 130,
         "typical": 230,
@@ -1214,6 +1301,7 @@
       "equip_slot": "socks",
       "weight_g": 110,
       "volume_l": 0.25,
+      "size": "pocket",
       "price_cents": {
         "min": 1000,
         "typical": 1800,
@@ -1227,6 +1315,7 @@
       "equip_slot": "feet",
       "weight_g": 900,
       "volume_l": 4.0,
+      "size": "hand",
       "price_cents": {
         "min": 3500,
         "typical": 7500,
@@ -1240,6 +1329,7 @@
       "equip_slot": "feet",
       "weight_g": 1600,
       "volume_l": 6.0,
+      "size": "hand",
       "price_cents": {
         "min": 7000,
         "typical": 14000,
@@ -1253,6 +1343,7 @@
       "equip_slot": "feet",
       "weight_g": 1000,
       "volume_l": 3.5,
+      "size": "hand",
       "price_cents": {
         "min": 5000,
         "typical": 9000,
@@ -1266,6 +1357,7 @@
       "equip_slot": "feet",
       "weight_g": 450,
       "volume_l": 2.5,
+      "size": "hand",
       "price_cents": {
         "min": 1000,
         "typical": 2500,
@@ -1279,6 +1371,7 @@
       "equip_slot": "feet",
       "weight_g": 1500,
       "volume_l": 6.0,
+      "size": "hand",
       "price_cents": {
         "min": 2500,
         "typical": 5000,
@@ -1294,6 +1387,8 @@
       "max_load_kg": 0.25,
       "empty_weight_g": 70,
       "location": "carried",
+      "size": "pocket",
+      "holds": "pocket",
       "equip_slot": "pocket",
       "price_cents": {
         "min": 1500,
@@ -1309,6 +1404,8 @@
       "max_load_kg": 1.0,
       "empty_weight_g": 0,
       "location": "worn",
+      "size": "pocket",
+      "holds": "pocket",
       "equip_slot": "pocket",
       "price_cents": {
         "min": 0,
@@ -1324,6 +1421,8 @@
       "max_load_kg": 1.5,
       "empty_weight_g": 0,
       "location": "worn",
+      "size": "pocket",
+      "holds": "pocket",
       "equip_slot": "pocket",
       "price_cents": {
         "min": 0,
@@ -1339,6 +1438,8 @@
       "max_load_kg": 3,
       "empty_weight_g": 500,
       "location": "carried",
+      "size": "hand",
+      "holds": "hand",
       "equip_slot": "shoulder",
       "price_cents": {
         "min": 2000,
@@ -1353,6 +1454,8 @@
       "max_load_kg": 2,
       "empty_weight_g": 250,
       "location": "carried",
+      "size": "hand",
+      "holds": "hand",
       "equip_slot": "shoulder",
       "price_cents": {
         "min": 1500,
@@ -1367,6 +1470,8 @@
       "max_load_kg": 2,
       "empty_weight_g": 150,
       "location": "worn",
+      "size": "hand",
+      "holds": "hand",
       "equip_slot": "waist",
       "price_cents": {
         "min": 800,
@@ -1381,6 +1486,8 @@
       "max_load_kg": 8,
       "empty_weight_g": 600,
       "location": "carried",
+      "size": "hand",
+      "holds": "hand",
       "equip_slot": "back",
       "price_cents": {
         "min": 2000,
@@ -1395,6 +1502,8 @@
       "max_load_kg": 10,
       "empty_weight_g": 800,
       "location": "carried",
+      "size": "armful",
+      "holds": "hand",
       "equip_slot": "back",
       "price_cents": {
         "min": 2500,
@@ -1409,6 +1518,8 @@
       "max_load_kg": 18,
       "empty_weight_g": 1900,
       "location": "carried",
+      "size": "armful",
+      "holds": "armful",
       "equip_slot": "back",
       "price_cents": {
         "min": 8000,
@@ -1423,6 +1534,8 @@
       "max_load_kg": 6,
       "empty_weight_g": 1000,
       "location": "carried",
+      "size": "hand",
+      "holds": "hand",
       "equip_slot": "shoulder",
       "price_cents": {
         "min": 2500,
@@ -1437,6 +1550,8 @@
       "max_load_kg": 20,
       "empty_weight_g": 900,
       "location": "carried",
+      "size": "armful",
+      "holds": "armful",
       "equip_slot": "hand_held",
       "price_cents": {
         "min": 2000,
@@ -1451,6 +1566,8 @@
       "max_load_kg": 10,
       "empty_weight_g": 2800,
       "location": "carried",
+      "size": "armful",
+      "holds": "armful",
       "equip_slot": "hand_held",
       "price_cents": {
         "min": 4000,
@@ -1466,6 +1583,8 @@
       "max_load_kg": 23,
       "empty_weight_g": 4000,
       "location": "carried",
+      "size": "armful",
+      "holds": "armful",
       "equip_slot": "hand_held",
       "price_cents": {
         "min": 6000,
@@ -1481,6 +1600,8 @@
       "max_load_kg": 8,
       "empty_weight_g": 100,
       "location": "carried",
+      "size": "hand",
+      "holds": "hand",
       "equip_slot": "hand_held",
       "price_cents": {
         "min": 100,
@@ -1495,6 +1616,8 @@
       "max_load_kg": 15,
       "empty_weight_g": 2000,
       "location": "carried",
+      "size": "armful",
+      "holds": "hand",
       "equip_slot": "hand_held",
       "price_cents": {
         "min": 1500,
@@ -1510,6 +1633,8 @@
       "max_load_kg": 60,
       "empty_weight_g": 25000,
       "location": "furniture",
+      "size": "furniture",
+      "holds": "armful",
       "equip_slot": "none",
       "price_cents": {
         "min": 15000,
@@ -1524,6 +1649,8 @@
       "max_load_kg": 8,
       "empty_weight_g": 1000,
       "location": "carried",
+      "size": "hand",
+      "holds": "hand",
       "equip_slot": "hand_held",
       "price_cents": {
         "min": 1500,
@@ -1538,6 +1665,8 @@
       "max_load_kg": 40,
       "empty_weight_g": 7000,
       "location": "carried",
+      "size": "armful",
+      "holds": "hand",
       "equip_slot": "hand_held",
       "price_cents": {
         "min": 3000,
@@ -1553,6 +1682,7 @@
       "max_load_kg": 5,
       "empty_weight_g": 0,
       "location": "vehicle_fixed",
+      "holds": "hand",
       "equip_slot": "none",
       "price_cents": {
         "min": 0,
@@ -1568,6 +1698,7 @@
       "max_load_kg": 3,
       "empty_weight_g": 0,
       "location": "vehicle_fixed",
+      "holds": "hand",
       "equip_slot": "none",
       "price_cents": {
         "min": 0,
@@ -1582,6 +1713,7 @@
       "max_load_kg": 100,
       "empty_weight_g": 0,
       "location": "vehicle_fixed",
+      "holds": "heavy",
       "equip_slot": "none",
       "price_cents": {
         "min": 0,
@@ -1597,6 +1729,7 @@
       "max_load_kg": 110,
       "empty_weight_g": 0,
       "location": "vehicle_fixed",
+      "holds": "heavy",
       "equip_slot": "none",
       "price_cents": {
         "min": 0,
@@ -1611,6 +1744,7 @@
       "max_load_kg": 200,
       "empty_weight_g": 0,
       "location": "vehicle_fixed",
+      "holds": "heavy",
       "equip_slot": "none",
       "price_cents": {
         "min": 0,
@@ -1625,6 +1759,7 @@
       "max_load_kg": 300,
       "empty_weight_g": 0,
       "location": "vehicle_fixed",
+      "holds": "furniture",
       "equip_slot": "none",
       "price_cents": {
         "min": 0,
@@ -1639,6 +1774,7 @@
       "max_load_kg": 600,
       "empty_weight_g": 0,
       "location": "vehicle_fixed",
+      "holds": "furniture",
       "equip_slot": "none",
       "price_cents": {
         "min": 0,
@@ -1653,6 +1789,7 @@
       "max_load_kg": 900,
       "empty_weight_g": 0,
       "location": "vehicle_fixed",
+      "holds": "furniture",
       "equip_slot": "none",
       "price_cents": {
         "min": 0,
@@ -1668,6 +1805,7 @@
       "max_load_kg": 50,
       "empty_weight_g": 0,
       "location": "vehicle_fixed",
+      "holds": "armful",
       "equip_slot": "none",
       "price_cents": {
         "min": 0,
@@ -1683,6 +1821,7 @@
       "max_load_kg": 70,
       "empty_weight_g": 0,
       "location": "vehicle_fixed",
+      "holds": "armful",
       "equip_slot": "none",
       "price_cents": {
         "min": 0,
@@ -1697,6 +1836,7 @@
       "max_load_kg": 200,
       "empty_weight_g": 0,
       "location": "vehicle_fixed",
+      "holds": "heavy",
       "equip_slot": "none",
       "price_cents": {
         "min": 0,
@@ -1711,6 +1851,7 @@
       "max_load_kg": 15,
       "empty_weight_g": 0,
       "location": "vehicle_fixed",
+      "holds": "armful",
       "equip_slot": "none",
       "price_cents": {
         "min": 0,
@@ -1725,6 +1866,7 @@
       "max_load_kg": 10,
       "empty_weight_g": 3000,
       "location": "vehicle_fixed",
+      "holds": "hand",
       "equip_slot": "none",
       "price_cents": {
         "min": 10000,
@@ -1739,6 +1881,7 @@
       "max_load_kg": 5,
       "empty_weight_g": 0,
       "location": "vehicle_fixed",
+      "holds": "hand",
       "equip_slot": "none",
       "price_cents": {
         "min": 0,
@@ -1753,6 +1896,7 @@
       "max_load_kg": 120,
       "empty_weight_g": 0,
       "location": "vehicle_fixed",
+      "holds": "armful",
       "equip_slot": "none",
       "price_cents": {
         "min": 0,
@@ -1768,6 +1912,7 @@
       "max_load_kg": 450,
       "empty_weight_g": 0,
       "location": "vehicle_fixed",
+      "holds": "heavy",
       "equip_slot": "none",
       "price_cents": {
         "min": 0,

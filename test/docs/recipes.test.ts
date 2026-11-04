@@ -109,7 +109,8 @@ describe("recipes", () => {
     expect(table?.revision).toBe(hashJson({ schema: table?.schema, columns: table?.columns, rows: table?.rows }));
     const state = play(world, ["I buy a brass lantern", "I buy beef jerky", "I buy a brass lantern"]);
     expect(state.accounts.purse).toBe(2000 - 1250 - 350);
-    const held = Object.values(state.entities).filter((e) => e.relations.some((r) => r.type === "in" && r.to === "you"));
+    // Everyday carry (wallet, keys, phone) is theirs from the start; only what was bought counts here.
+    const held = Object.values(state.entities).filter((e) => e.relations.some((r) => r.type === "in" && r.to === "you") && e.fields.notable === true);
     expect(held.map((e) => e.name).sort()).toEqual(["Beef jerky", "Brass lantern"]);
     const rope = 2000 - (play(world, ["I buy hemp rope"]).accounts.purse ?? 0);
     expect(rope >= 736 && rope <= 864).toBe(true);

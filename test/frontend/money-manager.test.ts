@@ -88,7 +88,7 @@ describe("a manager's pickers", () => {
       const shop = view.businesses.find((b) => b.id === BUSINESS);
       if (!shop) throw new Error("Marcus doesn't run the shop");
       // He runs it either way.
-      expect(businessControls(view, shop)).toEqual(expect.arrayContaining(["hire", "invoice", "distribute"]));
+      expect(businessControls(view, shop)).toEqual(expect.arrayContaining(["invoice", "distribute"]));
       return businessControls(view, shop).includes("draw");
     };
     expect(await draws("llc")).toBe(true);

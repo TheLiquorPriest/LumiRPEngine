@@ -9,7 +9,7 @@ A world is one JSON document in the `lre-world-v1` format, with a published JSON
 - **Collections** are objects keyed by id: `kinds`, `relations`, `entities`, `places`, `routes`, `grids`, `maps`, `rules`, `actions`, `checks`, `schedules`, `tracks`, `tables`, `sections`, `steps`, `packs`, `lore`, `classifications`, `tiers`, and `lifeStates` and `routines` when the world has them.
 - **Parts** are single values: `calendar`, `realism`, `time`, `start` (`{place, at}`), `pov` (the entity the player plays), `currency`, `loreIndex`, `pins`, and the optional `ruleset`, `mapSettings`, `spawnTier`, `spawnCap`, `routineSettings`, `sectionTemplates` and `narrator` (the narrator's knowledge in the world's chats, whole: `{"knowledge": "scene" or "pov", "secrets": "marked" or "omit"}`; left out, each user's Settings → Narrator decides, and a chat's own choice beats either).
 - **Checks:** `ruleset.adjudication` decides how checks are decided, and `ruleset.inferred` how a typed attempt no action with its own check covers is read as a check of the world's sheet (`mode`, `when`, `who`, `skills`, `difficulty`, `detail`, `others`, `guidance`, `most`; it must name its `mode`). A world without one leaves inferred checks to each chat's realism preset. The skills it rolls are the world's own: the rows of a skill action's table (Use a skill, Make a save) or the Sheets pack's stats, so give an attempt that matters to the story its own action with its own check, which keeps it.
-- **Kinds** are types with fields and single inheritance (`extends`). The packs define the common ones: `thing` (with `owner` and `place`), `person`, `item`, `container`, `kit`, `vehicle`, `region`, the money kinds (`account`, `card`, `flow`, `job`, `holding`, `property`, `business`, `trust`, `invoice`), and `group` with its `faction`, `family`, `household` and `company`. A world kind with a pack kind's id replaces it whole, so extend a pack kind rather than redefine it.
+- **Kinds** are types with fields and single inheritance (`extends`). The packs define the common ones: `thing` (with `owner` and `place`), `person`, `item`, `container`, `kit`, `vehicle`, `region`, the money kinds (`account`, `card`, `flow`, `job`, `holding`, `property`, `business`, `trust`, `invoice`), and `group`, which `faction`, `family`, `household`, `company`, `party` and `business` extend, each of them an organization (see Organizations). A world kind with a pack kind's id replaces it whole, so extend a pack kind rather than redefine it.
 - **Entities** are the people and things: `{id, kind, name, tier, fields, relations}`, plus `life`, `lifeKnownBy`, `agent`, `cues`, `class`, `tags`, `visibility` and `knownBy` as needed. Fields hold values; relations are `{type, to, fields?}` links to other entities.
 - **Actions** need a one-line `description`: typed messages are read against each action's label and description.
 - **Formulas** are strings in a small, safe expression language (`lre_docs` with `doc: "expressions"`): `at(pov, 'archive')`, `stage.hale_debt == 'revealed'`, `hour >= 18`. Dice are notation strings (`1d20`).
@@ -148,8 +148,45 @@ A block that asks someone along makes an invitation only when the world's settin
 
 ## Things and who owns them
 
-- Where a thing is: `fields.place` for something lying in a place, a relation `{"type": "in", "to": "rhea"}` for something carried or inside a container.
-- **Whose a thing is lives in `fields.owner`**, the owner's id. That puts it on their gear, a vehicle in their garage and at their levels, and lets them drive it. The `owns` relation only changes how the Journal words a change: an item with an `owns` link and no `fields.owner` belongs to no one. Set `fields.owner` on everything someone owns. Money is owned differently: see Money.
+A thing (an `item`, or a kind built on one: a `container`, a `kit`, a `vehicle`) has four facts the engine keeps apart and never guesses one from another (DESIGN §28):
+
+- **Where it is**: exactly one of `fields.place` (lying at a place) or an `in` relation (`{"type": "in", "to": "rhea"}`: carried by a person, or inside a container or a vehicle). Never both: lint (`gear.two_places`) flags it, and play reads the place.
+- **Who has it** follows from `in`: the nearest person up the chain.
+- **Whose it is** lives in `fields.owner`: the id of a person, a household, a business or a group. That puts it on their gear, a vehicle in their garage and at their levels, and lets them use it. The `owns` relation only changes how the Journal words a change: an item with an `owns` link and no `fields.owner` belongs to no one. Left unset, an owner is presumed when it is needed, and never written: on a person, theirs; in a holder, the holder's owner's; at a place, the business trading there, else whoever lives there, else nobody's. So leave a home's furniture unowned and it reads as the household's; set `fields.owner` on what someone owns outright. Money is owned differently: see Money.
+- **Who may use it** follows from the owner, the `uses` grants on it (a relation from the user to the thing, `fields.basis` `hold`, `loan` or `assign`, `until` for a loan's end), the `permits` relations of its owner (`{"type": "permits", "to": "<who>", "fields": {"scope": "all" or "home"}}`, from the owner) and the world's implied rules (household, housemates, partners, staff, customers), unless the thing's own `access` says otherwise (`owner`, `members`, `staff`, `customers` or `public`, each admitting those before it).
+
+The rest of a thing:
+
+- **`size`**, one of `pocket`, `hand`, `armful`, `heavy`, `furniture` and `builtin`. Leave it out when its `catalog` row has one (a refrigerator row is Furniture), when it is `fixed` (Built-in) or `part` (built into what holds it, a glovebox), or when its `volume_l` or its category says; lint notes (`gear.size_unknown`) a thing nothing sizes. A person carries up to the world's ceiling (Armful by default), so a thing above it on a person is a warning with a one-press fix (`gear.too_big`), and so is one both lying at a place and in a holder; nothing goes into a holder smaller than it (a holder's `holds`: the largest size it takes).
+- **`home`**, where it is kept and goes back to: a place id, a holder id, or `"owner"` (on its owner). Left out, an authored thing rests where you put it.
+- **`aliases`** (other names the story may use: "mug", "the fridge"), **`description`**, **`sleep`** (can be slept in or on) and **`part`**.
+- **Never write** `got`, `made`, `maybe_same_as` or `merged_into`: they are the engine's record of how a thing was had and made in play.
+
+A mug Marcus keeps at the shop, and a fridge in the Kowalczyks' kitchen that nobody owns outright (it reads as the household's, its size and what it holds from its catalog row):
+
+```json
+[{ "op": "add", "path": "/entities/marcus_mug", "value": { "id": "marcus_mug", "kind": "item", "name": "Chipped mug", "tier": "background",
+  "fields": { "place": "alder_automotive", "owner": "marcus_delgado", "size": "hand", "home": "alder_automotive", "aliases": ["mug", "coffee mug"], "description": "A chipped mug, always half full of cold coffee." },
+  "relations": [] } },
+ { "op": "add", "path": "/entities/harbor_fridge", "value": { "id": "harbor_fridge", "kind": "container", "name": "Refrigerator", "tier": "background",
+  "fields": { "place": "harbor_street_114", "catalog": "refrigerator", "aliases": ["fridge"] },
+  "relations": [] } }]
+```
+
+Danny lets Jordan use his things at home, without lending any one of them:
+
+```json
+[{ "op": "add", "path": "/entities/danny_okafor/relations/-", "value": { "type": "permits", "to": "pov", "fields": { "scope": "home" } } }]
+```
+
+**The world's things config** is the gear pack's (`packs.gear.config`, Build → Packs → gear): `sizes` (`ceiling`, `byCategory`, `byVolume`), `access` (the implied rules, each `true` or `false`), `carry` (everyday carry: `[{"who": selector, "types": [catalog ids]}]`, by default people carry a wallet, keys and a phone; `[]` carries nothing), `fetchMinutes`, `putAway` (`on`, `hours`, `minLevel`), `tidy` (`auto`) and `notWithYou`. Each part left out reads as its default, so set only what the world changes:
+
+```json
+[{ "op": "add", "path": "/packs/gear/config/access", "value": { "family": true } },
+ { "op": "add", "path": "/packs/gear/config/fetchMinutes", "value": 5 }]
+```
+
+**In a chat**, move, hand over or make a thing with item ops rather than field edits: `lre_gm_edit` takes `{"op": "item", "change": {"do": "move", "item": "marcus_mug", "to": {"in": "pov"}, "why": "…"}}` and the other ops ([MCP.md](MCP.md)), and `lre_items_find` finds a thing by the story's words. The older `put`, `move`, `link in` and `set place` on a thing go through the same move, with its size rules.
 
 ## Money
 
@@ -157,14 +194,14 @@ Money is entities, a few fields and the economy pack's config. Amounts are whole
 
 | From | What runs | Its feature ids |
 |---|---|---|
-| Money 3 | flows (so bills, pay and a business's takings), cards, payment preferences, household shares, living costs, property, withholding at a flat rate | `flows`, `cards`, `payment_prefs`, `households`, `living_costs`, `property`, `withholding` |
-| Money 4 | statements and minimum payments, interest (on the average daily balance where an account asks for it), fees, late payments and collections, credit scores, cash only at a machine or a branch, holds, daily card limits, overdraft policies, withholding through the tax brackets, sales tax, business taxes, investments, options, capital gains | `statements`, `interest`, `average_daily`, `fees`, `delinquency`, `credit`, `atm`, `holds`, `daily_limits`, `overdraft`, `tax_brackets`, `sales_tax`, `business_tax`, `investments`, `options`, `capital_gains` |
+| Money 3 | flows (so bills, pay and a business's takings), cards, payment preferences, household shares, living costs, property, withholding at a flat rate, interest (deposits earn, loans and cards charge, a card on its statement day where statements don't run) | `flows`, `cards`, `payment_prefs`, `households`, `living_costs`, `property`, `withholding`, `interest` |
+| Money 4 | statements and minimum payments, interest on the average daily balance where an account asks for it, fees, late payments and collections, credit scores, cash only at a machine or a branch, holds, daily card limits, overdraft policies, withholding through the tax brackets, sales tax, business taxes, investments, options, capital gains | `statements`, `average_daily`, `fees`, `delinquency`, `credit`, `atm`, `holds`, `daily_limits`, `overdraft`, `tax_brackets`, `sales_tax`, `business_tax`, `investments`, `options`, `capital_gains` |
 
 A world switches a feature on or off for itself in `packs.economy.config.features` by its id (`{"sales_tax": true}`), down to its floor: Money 2 for `flows`, `cards`, `payment_prefs`, `households`, `living_costs`, `atm`, `daily_limits` and `overdraft`, Money 3 for the rest. Lint warns about an id it doesn't know.
 
 ### Who owns money
 
-A **party** is a person, or an entity of kind `business`, `trust` or `household`. An account, a business, a holding or a property names its holders in `owners`, each with a role: `[{"party": "pov", "role": "owner"}]`.
+A **party** is a person, or an entity of kind `business`, `trust`, `household` or any other group (a `faction`, a `family`, the `party`). An account, a business, a holding or a property names its holders in `owners`, each with a role: `[{"party": "pov", "role": "owner"}]`.
 
 | Role | Spends from it | Counts toward their net worth | Manages it |
 |---|---|---|---|
@@ -212,6 +249,7 @@ A **business** is an entity of kind `business`, a party with `owners` (and their
 - **Where it sells:** a purchase at one of its `places` (else where it stands) pays it. `daily_sales` is what walk-in customers from outside the world spend there on each of its `trading_days` (0 is Sunday; Monday to Friday when left out), give or take `sales_spread_pct` (30 when left out), paid at closing and never on a day-off holiday.
 - **Its money** is in the accounts it owns. `operating_account`, one of them, is where takings land and payroll comes from (else its best deposit account). It keeps `margin_pct` of a sale (all of it when left out) and owes the rest to its suppliers, paid on the 10th; the sales tax it collects is paid on the 20th. Its rent, bills and loan payments are flows from its accounts.
 - **Its owners** take draws in play, except from a `c_corp`. `distribution_pct` pays that share of each period's profit out to the owners by share, every `distribution_every` (`month`, `quarter` (the default) or `year`), on the 10th after the period closes.
+- **Its shares** may be counted in units: give every owner row with a share of the worth `units` (a whole number), and set each `share` to its units over all of them, which lint holds you to (`orgs.units_share`). A row's `class` names one of the business's `share_classes` (`[{"id", "label", "votes"}]`, the votes a unit carries; one class, Common with a vote a unit, when left out). Ownership decisions in play need more than `decide_pct` (50 when left out) of the votes. An owner may be another business: the one it owns is its subsidiary. Profit owned by a household, a group or a trust, directly or through companies that pass it on, is taxed to no one, which lint warns of (`orgs.profit_untaxed`).
 - **Its books**, month by month, are kept by the engine from all of that: there is nothing to write.
 
 A business's own Money level is its tier's cap, as a person's is: it decides whether the business collects sales tax and pays business taxes (Money 4) and whether its invoices go late (Money 3). Its payroll, takings and other flows go through its accounts, and an account runs at the highest level of those who may spend from it (the business and its authorized users), whatever the account's own tier. So give a business the `principal` tier, as the modern starter does, for all of it to run.
@@ -236,13 +274,13 @@ An **invoice** is an entity of kind `invoice`: the `business` that issued it, th
 
 A **job** is an entity of kind `job`, one worker's employment:
 
-- **Who and where:** `worker`; `employer`, a business entity (paying from its operating account), a place (the business trading there, else an outside employer) or an outside employer named in words, an id-shaped one that names no one and no place drawing a lint warning; `workplace`, the place the work is (else the business's `places`); `title`; and `occupation`, a row of the occupations table (else the worker's own `occupation`).
+- **Who and where:** `worker`; `employer`, any party in the world (a business, paying from its operating account; a household, a group, a trust, the party or a person, paying from its `payroll_account` or else its deposit account), a place (the business trading there, else an outside employer) or an outside employer named in words, an id-shaped one that names no one and no place drawing a lint warning; `workplace`, the place the work is (else the business's `places`); `title`; `position`, one of the employer's positions (see Organizations); and `occupation`, a row of the occupations table (else the worker's own `occupation`).
 - **Pay:** `basis`, which is `salary` (a year), `hourly`, `per_shift`, `commission`, `tips` or `stipend` (a period), and `rate`, both from the occupation's row when left out; `commission_pct` of the sales credited to the worker; `tips_per_hour` on top of hourly pay.
 - **When it pays:** `pay_every`, the occupation's when left out: `weekly` or `biweekly` on the weekday of `pay_anchor` (the first payday), else of `pay_weekday` (Friday); `semimonthly` on `pay_days` (the 15th and the last); `monthly` on one day (the last); `per_job`, each evening at 21:00 for that day's work; or `custom`, a flow's schedule with `pay_` before each part (`pay_unit`, `pay_interval`, `pay_weekdays`, `pay_days`, `pay_months`, `pay_except`). A payday on a weekend or a day-off holiday moves to the business day before it (`pay_roll`: `before`, `after` or `none`).
 - **What it pays for:** the days from `start` to `end`, and inside the season (`season_from` to `season_to`, `MM-DD`, which may wrap the new year). Hourly and per-shift pay count what `hours` names: the worker's scheduled commitments at the workplace (`scheduled`, laid out by `shift_pattern`, a row of the `calendar.shifts` table), the shifts the POV turns up for (`attended`), or `hours_per_week` and `shifts_per_week` over `weeks_per_year` (`contract`). Left out, it is `attended` for the POV and `scheduled` for anyone else while they have a routine at the job, and `contract` without one. `status` is `active`, `leave` (paid nothing) or `ended`.
-- **The paycheck:** `deductions` come off the gross first, each `{label, cents or pct, pretax, kind, to, match_pct}`. A `pretax` one comes off income-tax wages (a `retirement` one still counts as wages for Social Security and Medicare; any other doesn't). `to` is an account of the worker's, else an outside payee by name, and a business employer adds `match_pct` of the gross, up to the deduction, to that account. Withholding follows (Taxes, below), and none for a `contractor` (the occupation's `self_employed` when left out). `splits` route the net among the worker's own accounts, each `{to, cents}` or `{to, pct}`: fixed amounts first, then percentages of the rest, and what's left to their deposit account.
+- **The paycheck:** `deductions` come off the gross first, each `{label, cents or pct, pretax, kind, to, match_pct}`. A `pretax` one comes off income-tax wages (a `retirement` one still counts as wages for Social Security and Medicare; any other doesn't). `to` is an account of the worker's, else an outside payee by name, and an employer in the world adds `match_pct` of the gross, up to the deduction, to that account. Withholding follows (Taxes, below), and none for a `contractor` (the occupation's `self_employed` when left out). `splits` route the net among the worker's own accounts, each `{to, cents}` or `{to, pct}`: fixed amounts first, then percentages of the rest, and what's left to their deposit account.
 
-Each job pays through a flow from its employer to the worker. A paycheck covers the work since the last one paid, so a payday the employer can't cover is paid with the next. In play, a business's owner hires, ends jobs and raises pay; a GM edit of the job's fields does the same.
+Each job pays through a flow from its employer to the worker. A paycheck covers the work since the last one paid, so a payday the employer can't cover is paid with the next. In play, whoever holds the employer's staff powers (its owner, a position, a delegation; see Organizations) hires, ends jobs and raises pay; a GM edit of the job's fields does the same.
 
 A second job beside the POV's work at the garage: one shift a week on the marina's fall haul-out crew, paid on Fridays with half of each check into savings, and nothing outside the season:
 
@@ -263,7 +301,7 @@ And a 401(k) at the garage: 5 % of the POV's pay before income tax into a retire
 
 - **On pay**, withholding runs from Money 3 at a flat rate: the occupation's withholding rate (federal tax, Social Security and Medicare together) and the worker's state rate, plus their region's local rate when they have `local_tax: true`. At Money 4 it goes through the federal brackets and standard deduction for their `filing_status` (`single` when left out, `married_filing_jointly` or `head_of_household`), with Social Security and Medicare, then the state and local rates.
 - **Regions** are rows of the regions table (`mi`, `il`…), with their state, local and sales tax rates. The economy config's `region` is the world's own (the modern starter's is `mi`); without one, what it would cover runs at the national row's rates. A party's income tax follows its own `region` field, else the config's.
-- **Income nobody withholds from** is paid as estimated tax on 15 April, June and September and 15 January: a contractor's pay, and an owner's share of the profit of any business but a `c_corp` where that business pays business taxes. A `c_corp` pays corporate tax on its own profit, at the config's `taxes.corporatePct` (21 when left out) plus the state rate.
+- **Income nobody withholds from** is paid as estimated tax on 15 April, June and September and 15 January: a contractor's pay, and an owner's share of the profit of any business but a `c_corp` where that business pays business taxes, through any companies between that aren't `c_corp`s too, up to four owners up. A `c_corp` pays corporate tax on its own profit and on what such companies pass up to it, at the config's `taxes.corporatePct` (21 when left out) plus the state rate.
 - **Sales tax** runs only at the top level, Money 4 (or from 3 where the world switches `sales_tax` on), and at the buyer's level: below it a price is as listed, and a business below it neither collects nor remits. The rate at a place is its `sales_tax_pct` (or an enclosing place's), else that of its tax region: a `tax_region` on it or an enclosing place, else the config's `region`. Nothing is charged on a category in the config's `taxes.exempt` (the modern starter's holds `groceries_staples`, `groceries_baskets` and `medical`) or in a place's `tax_exempt`, nor on what a business with `collects_sales_tax: false` sells.
 
 The modern starter's economy is in Michigan, so a purchase in Chicago is taxed at Michigan's rate. To tax it for Illinois at Chicago's own combined rate, and the POV's pay at Michigan's typical local rate:
@@ -346,6 +384,8 @@ The marina's grounds, owned by the marina business, with a mortgage it pays from
 
 **A stake** is an owner's share of a business: of its `value` when one is set, else of its book value (its own net worth from its accounts, holdings, property and stakes, plus what its customers owe it less what it owes) plus its last twelve months' profit times its `valuation_multiple` (3 when left out). Each owner's share of a profit distribution lands where they route it in play (`route_distributions`; `reinvest` keeps it in the business, adding to the stake), and `stake_sell` sells part of a stake.
 
+**In units**, a business's stake has a value a unit: its value over all its units, the price shares issued or bought back in play take when none is given. In play its owners issue units (`shares_issue`), buy them back (`shares_buy_back`) and set its classes (`shares_classes`), `stake_sell` sells by the unit, and a business starts a subsidiary as itself (`org_found` with `as`), its capital from the business's own accounts.
+
 **Net worth** is a party's share of the accounts it holds with a role that counts worth, plus its share of every holding at market, of every property's value and of every stake. A mortgage is one of its accounts, so a property's debt counts once. A party with accounts has the wealth band of its net worth; one without keeps its `wealth` field.
 
 The marina, with a waiting list for its slips, is worth four years' profit over its books:
@@ -353,6 +393,62 @@ The marina, with a waiting list for its slips, is worth four years' profit over 
 ```json
 [{ "op": "add", "path": "/entities/alder_harbor_marina_co/fields/valuation_multiple", "value": 4 }]
 ```
+
+And its stake counted in 1,000 units, so its Ownership shows the value a unit and Dale sells by the unit:
+
+```json
+[{ "op": "replace", "path": "/entities/alder_harbor_marina_co/fields/owners", "value": [{ "party": "dale_whitcomb", "role": "owner", "share": 100, "units": 1000 }] }]
+```
+
+## Organizations
+
+Households, groups, companies (`business`), trusts and the player character's party are all organizations: an organization's members, titles, positions, powers and delegations work at every Money level, and its money at its own. Everything here is optional: a world with no positions gives everyone today's rights (an owner who manages a company or a trust holds every power; a household's or a group's members see its money and use its things; a household member titled `head` heads it). Every kind is in the reference (`lre_docs`), and `lre_lint` names each mistake in `orgs.*`.
+
+- **Members** join by `member_of` (`{"type": "member_of", "to": "<org>", "fields": {"role", "position", "rank", "since"}}`): `role` is the title they go by ("Butler", "Anchor"), `position` one of the organization's positions, `rank` a number (higher is more senior) and `since` a date. A company's owners (`owners`) and its staff (every job whose `employer` it is) belong to it without a link, and so do a trust's; a member group's members count through it.
+- **Positions** are the organization's `positions` field, a list of `{id, title, powers, seats?, reports_to?, scope?, limits?, successor?, default?, no_dues?}`. `powers` are ids of the 21 powers (`members.admit`, `members.remove`, `members.appoint`; `staff.hire`, `staff.fire`, `staff.pay`; `money.view`, `money.spend`, `money.manage`, `money.invoice`, `money.payout`, `money.borrow`; `assets.use`, `assets.assign`, `assets.dispose`; `property.manage`, `property.trade`; `shares.manage`; `org.govern`, `orders.give`, `delegate`). `seats` is how many may hold it (1 when left out, 0 for any number); `reports_to` another position's id; `scope` `org` (the default) or `below`, so its staff and member powers reach only the positions under it; `limits` `{payment?, month?, accounts?}` in minor units; `successor` `next`, `vacant` (the default) or a person's id; `default: true` for the one new members join in; `no_dues: true` for one that pays no dues. A member link's or a job's `position` holds it.
+- **Delegation** is an `acts_for` link from the delegate to the organization: `fields` `{powers, payment?, month?, accounts?, by}`, `by` the granter, who must hold every power it gives (lint warns otherwise), and the link's own `until` (game minutes) when it ends.
+- **Money and pay:** `payroll` (`[{every, anchor?, weekday?, days?}]`, the schedule its new hires join), `payroll_account` (the account its payroll pays from), `dues` (`[{cents, every, day?}]`: so much from each member every `week`, `month` or `year`, flowing only while the organization owns a deposit account) and `places` (the places that are its, beyond a business's trading places and a household's homes).
+- **Entry** is a place's own: `fields.entry` (`owner`, `members`, `staff`, `customers` or `public`, each admitting those before it) and `fields.keys` (item ids or catalog types that let whoever carries one in). Left unset, a business's place admits customers while it trades (`open_at` and `close_at` on the business, nine to five by default) and its staff after hours, and any other place anyone; a room takes its house's.
+- **The party** is the `travels_with` links to the POV, each with `fields.tier` (`core`, `companion`, `hired` or `ally`; core when left out) and `since`. Its entity (`party_<pov>`, kind `party`, with `leader`) is made in play when the party is named or starts a purse; author one only to give it a name or things from the start.
+
+Marcus makes Danny his shop foreman, who may hire and pay staff and spend up to $500 a payment of the shop's money, with the mechanics reporting to him; and lets Jordan spend up to $200 a payment for the shop:
+
+```json
+[
+  { "op": "add", "path": "/entities/alder_automotive_co/fields/positions/-", "value": { "id": "shop_foreman", "title": "Shop foreman", "powers": ["staff.hire", "staff.pay", "money.view", "money.spend"], "seats": 1, "limits": { "payment": 50000 } } },
+  { "op": "add", "path": "/entities/alder_automotive_co/fields/positions/0/reports_to", "value": "shop_foreman" },
+  { "op": "replace", "path": "/entities/job_danny_mechanic/fields/position", "value": "shop_foreman" },
+  { "op": "add", "path": "/entities/pov/relations/-", "value": { "type": "acts_for", "to": "alder_automotive_co", "fields": { "powers": ["money.spend"], "payment": 20000, "by": "marcus_delgado" } } }
+]
+```
+
+A bowling league Danny captains, which Jordan has joined as its anchor, with monthly dues (they flow once the league owns an account):
+
+```json
+[
+  { "op": "add", "path": "/entities/lakeshore_bowling_league", "value": { "id": "lakeshore_bowling_league", "kind": "group", "name": "Lakeshore Bowling League", "tier": "background",
+    "fields": { "positions": [
+      { "id": "captain", "title": "Captain", "powers": ["members.admit", "members.remove", "members.appoint", "money.spend", "org.govern"], "seats": 1 },
+      { "id": "bowler", "title": "Bowler", "powers": [], "seats": 0, "reports_to": "captain", "default": true } ],
+      "dues": [{ "cents": 1500, "every": "month", "day": 1 }] },
+    "relations": [] } },
+  { "op": "add", "path": "/entities/danny_okafor/relations/-", "value": { "type": "member_of", "to": "lakeshore_bowling_league", "fields": { "position": "captain", "since": "2024-09-01" } } },
+  { "op": "add", "path": "/entities/pov/relations/-", "value": { "type": "member_of", "to": "lakeshore_bowling_league", "fields": { "role": "Anchor", "position": "bowler", "rank": 2, "since": "2026-09-01" } } }
+]
+```
+
+Marcus's house lets in only him, and whoever carries his spare key, which Danny has; and Danny travels with Jordan as a companion:
+
+```json
+[
+  { "op": "add", "path": "/places/birch_lane_12/fields/entry", "value": "owner" },
+  { "op": "add", "path": "/places/birch_lane_12/fields/keys", "value": ["marcus_spare_key"] },
+  { "op": "add", "path": "/entities/marcus_spare_key", "value": { "id": "marcus_spare_key", "kind": "item", "name": "Spare house key", "tier": "background", "fields": { "owner": "marcus_delgado", "size": "pocket", "aliases": ["spare key"] }, "relations": [{ "type": "in", "to": "danny_okafor" }] } },
+  { "op": "add", "path": "/entities/danny_okafor/relations/-", "value": { "type": "travels_with", "to": "pov", "fields": { "tier": "companion", "since": "2026-09-14" } } }
+]
+```
+
+**Mistakes lint catches** (`orgs.*`, most with a one-press fix in Build): a power that isn't one (`power_unknown`), a `reports_to` or a member's position the organization doesn't define (`position_unknown`), a report that comes back to itself (`reports_cycle`), more holders than seats (`seats`), a job's position its employer lacks (`job_position`), a delegation giving more than its granter holds (`delegate_escalation`), owners' `units` that don't match their shares (`units_share`), a business that isn't a `c_corp` held in part by a household, a group, a trust or the party, whose share of its profit no one is taxed on (`profit_untaxed`, no fix), a `company` group with owners or staff, which should be a `business` (`company_group`), and a place's `entry` or `keys` of the wrong shape (`entry_unknown`, `keys_shape`). A household member titled `head` with no `head` position is a note (`head_title`): add the position when the Head should be named.
 
 ## Places, routes and maps
 
@@ -501,6 +597,8 @@ A session goes like this:
  { "op": "stage", "track": "q_pontoon_weekend", "to": "diagnose" }]
 ```
 
+- A thing changes by `item` ops (`{"op": "item", "change": {"do": "hand", "item": "…", "to": "pov", "basis": "hold", "why": "…"}}`), which keep where it is, who has it and whose it is apart, with the size rules (a thing too big to carry lands where its person stands); find its id first with `lre_items_find {chatId, spoilers, words}` ("Danny's truck keys"). A handover keeps the owner unless its basis is `gift`, `sale` or `trade`. A place made in play is a `place` op (`{"op": "place", "change": {"do": "make", "name": "The back booth", "parent": "rusty_anchor", "as": "spot", "why": "…"}}`), refused as `exists` when one of that name is there already.
+- An organization changes by `org` ops (`{"op": "org", "change": {"do": "appoint", "org": "alder_automotive_co", "who": "danny_okafor", "position": "shop_foreman", "why": "…"}}`), each one change as the GM makes it, with its History line and no one's powers asked: founding, members and titles, positions and delegations, hiring, firing and pay, shares, entry, dues, party tiers, structure and name ([MCP.md](MCP.md) lists them, money in minor units); one this world can't make is refused as `not_available`. Read a chat's organizations first with `lre_orgs {chatId, org?, part?}`, the player's Orgs tab, or with `spoilers: true` GM → Orgs, whose ids the ops name and which says who holds each power and why. See [Organizations](#organizations) for positions, powers and delegation.
 - A `stage` op moves a track as the story would: on to a stage that follows, it plays that stage's entry (rewards, effects, its reveal); back, it only sets the stage. It is made from where the track stands now, so if the reply it waits for, or a swipe or re-read of that reply, moves the track first, it is dropped whole, rewards included, never paid twice, and the chat says it didn't apply.
 - `lre_marker` changes how the chat plays from its latest message on: `resolve` (a domain's realism level, for everyone, a band or one entity), `time` (a control: `tick`, `scale`, `pause`, `interrupt`, `speed_through`, `montage`, `unit_cap`), `claims` (what a typed action's thing the world doesn't have becomes), `adjudicate` (the whole checks policy: read `/controls/adjudication`, change what you need, send it back) and `infer` (when typed attempts roll skill checks, the same way from `/controls/inferred`). `preview: true` says what it would change and writes nothing; read it first, since a lower level freezes what the higher one tracked.
 - `lre_view_open` opens a panel as the player does, which settles detail the chat hadn't decided yet (a balance first looked at); opening `core.context` checks the active preset.

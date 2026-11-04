@@ -138,7 +138,7 @@ describe("the Gear section", () => {
     const out = lines((w) => {
       for (let i = 1; i <= 14; i++) w.entities[`card${i}`] = thing(`card${i}`, `Punch card ${i}`, { owner: "you", description: `A punch card from shop ${i}.` }, { relations: [{ type: "in", to: "wallet" }] });
     }, "gear").map((l) => l.text);
-    for (let i = 1; i <= 14; i++) expect(out).toContain(`Carrying: Punch card ${i} (in Wallet): A punch card from shop ${i}.`);
+    for (let i = 1; i <= 14; i++) expect(out).toContain(`On you: Punch card ${i} (in Wallet): A punch card from shop ${i}.`);
   });
 });
 

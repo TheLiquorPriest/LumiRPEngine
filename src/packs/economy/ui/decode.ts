@@ -1,6 +1,8 @@
 // The money dashboards' view (`FinanceView`, shared/finance.ts) as it arrives: JSON from the
-// player's state push (`economy.money`) or the GM view (`GmView.money`). Read defensively, so a
-// view an older or newer backend built still draws what it can; null when it isn't one at all.
+// player's state push (`economy.money`), the GM view (`GmView.money`) or an organization's page
+// in Orgs (`orgs.org`'s money section), and the economy's other sections of that page (payroll,
+// ownership, taxes). Read defensively, so a view an older or newer backend built still draws what
+// it can; null when it isn't one at all.
 
 import { isRecord } from "../../../shared/json";
 import type { JsonObject } from "../../../shared/json";
@@ -24,6 +26,8 @@ import {
   PAY_EVERY,
   TXN_KINDS,
   type AccountView,
+  type DistributionRoute,
+  type OwnerRole,
   type CardView,
   type CreditReport,
   type FinanceView,
@@ -32,13 +36,19 @@ import {
   type FlowSchedule,
   type FlowView,
   type HoldingView,
+  type IndexView,
+  type InterestView,
   type JobFields,
   type JobView,
   type JournalLine,
   type OwnerLine,
+  type OwnershipView,
   type PayTier,
+  type PerformanceView,
   type PropertyView,
   type StatementView,
+  type StructureLink,
+  type TaxesView,
 } from "../../../shared/finance";
 import { bool, list, num, obj, oneOf, optNum, str, strings, type Obj } from "../../../frontend/decode";
 
@@ -76,6 +86,7 @@ function journalLine(o: Obj): JournalLine | null {
     category: nullableStr(o.category),
     counterparty: nullableStr(o.counterparty),
     card: nullableStr(o.card),
+    ...(typeof o.by === "string" && o.by !== "" ? { by: o.by } : {}),
     status: o.status === "pending" ? "pending" : "posted",
   };
 }
@@ -83,7 +94,15 @@ function journalLine(o: Obj): JournalLine | null {
 function ownerLine(o: Obj): OwnerLine | null {
   // An owner the player can't see comes with a null id and the name "someone".
   const party = typeof o.party === "string" ? o.party : o.party === null ? null : undefined;
-  return party !== undefined ? { party, name: str(o.name, party ?? "someone"), role: oneOf(o.role, OWNER_ROLES, "owner"), share: num(o.share) } : null;
+  if (party === undefined) return null;
+  const units = optNum(o.units);
+  const votes = optNum(o.votes);
+  const value = optNum(o.value);
+  return { party, name: str(o.name, party ?? "someone"), role: oneOf(o.role, OWNER_ROLES, "owner"), share: num(o.share), ...(units !== undefined ? { units } : {}), ...(typeof o.class === "string" ? { class: o.class } : {}), ...(votes !== undefined ? { votes } : {}), ...(value !== undefined ? { value } : {}) };
+}
+
+function structureLink(o: Obj): StructureLink | null {
+  return typeof o.id === "string" ? { id: o.id, name: str(o.name, o.id), share: num(o.share), votes: num(o.votes), controlled: o.controlled === true, value: nullableNum(o.value), cash: nullableNum(o.cash), profit: nullableNum(o.profit), children: list(o.children, structureLink) } : null;
 }
 
 function card(o: Obj): CardView | null {
@@ -102,6 +121,15 @@ function card(o: Obj): CardView | null {
     dailyAtmLimit: nullableNum(o.dailyAtmLimit),
     spentToday: num(o.spentToday),
   };
+}
+
+/** An account's interest block: null where none runs, or when it isn't one. */
+function interest(value: unknown): InterestView | null {
+  const o = obj(value);
+  if (!o || (o.way !== "earns" && o.way !== "charges")) return null;
+  const last = obj(o.last);
+  const next = obj(o.next);
+  return { way: o.way, ratePct: num(o.ratePct), basis: str(o.basis), thisYear: num(o.thisYear), last: last ? { cents: num(last.cents), at: str(last.at) } : null, next: next ? { cents: num(next.cents), at: str(next.at) } : null };
 }
 
 function statement(o: Obj): StatementView | null {
@@ -142,8 +170,7 @@ function account(o: Obj): AccountView | null {
     autopayFrom: strings(o.autopayFrom),
     fallbacks: strings(o.fallbacks),
     limit: nullableNum(o.limit),
-    aprPct: nullableNum(o.aprPct),
-    apyPct: nullableNum(o.apyPct),
+    interest: interest(o.interest),
     terms: list(o.terms, (t) => ({ label: str(t.label), value: str(t.value) })),
     autopay: autopay ? { mode: oneOf(autopay.mode, AUTOPAY_MODES, "none"), from: nullableStr(autopay.from), fromName: nullableStr(autopay.fromName), cents: nullableNum(autopay.cents) } : null,
     due: due ? { label: str(due.label), cents: num(due.cents), at: str(due.at) } : null,
@@ -290,7 +317,21 @@ function holding(o: Obj): HoldingView | null {
     lots: list(o.lots, (l) => ({ qty: num(l.qty), cost: num(l.cost), at: str(l.at), gain: num(l.gain), term: l.term === "long" ? "long" : "short" })),
     option: option ? { right: option.right === "put" ? "put" : "call", underlying: str(option.underlying), strike: num(option.strike), expiry: str(option.expiry), inTheMoney: bool(option.inTheMoney) } : null,
     route: distributionRoute(o.route),
+    performance: performance(o.performance),
   };
+}
+
+/** How a holding's price has done, as a view sends it; null when it sends none. */
+function performance(value: unknown): PerformanceView | null {
+  const p = obj(value);
+  return p ? { points: list(p.points, (x) => (typeof x.at === "string" ? { at: x.at, price: num(x.price) } : null)), month: nullableNum(p.month), year: nullableNum(p.year), twelve: nullableNum(p.twelve) } : null;
+}
+
+/** The stock market, as a view sends it; null where the world keeps no history. */
+function indexView(value: unknown): IndexView | null {
+  const v = obj(value);
+  if (!v) return null;
+  return { history: bool(v.history), from: str(v.from), to: str(v.to), source: str(v.source), points: list(v.points, (x) => (typeof x.at === "string" ? { at: x.at, level: num(x.level) } : null)), month: num(v.month), year: num(v.year), twelve: num(v.twelve) };
 }
 
 /** Where payouts go, as a view sends it; null when it says none. */
@@ -375,7 +416,7 @@ export function decodeFinanceView(value: unknown): FinanceView | null {
           netWorth: nullableNum(overview.netWorth),
           assets: nullableNum(overview.assets),
           liabilities: nullableNum(overview.liabilities),
-          breakdown: list(overview.breakdown, (b) => ({ label: str(b.label), cents: num(b.cents) })),
+          breakdown: list(overview.breakdown, (b) => ({ label: str(b.label), cents: num(b.cents), ...(b.vehicle === true ? { vehicle: true as const } : {}) })),
           cashFlow: flow ? { period: str(flow.period), in: num(flow.in), out: num(flow.out), byCategory: list(flow.byCategory, (c) => ({ category: str(c.category), cents: num(c.cents) })), nextIn: num(flow.nextIn), nextOut: num(flow.nextOut) } : null,
           upcoming: list(overview.upcoming, (u) => ({ at: str(u.at), clock: num(u.clock), label: str(u.label), cents: num(u.cents), flow: nullableStr(u.flow), account: nullableStr(u.account) })),
           alerts: list(overview.alerts, (a) => ({ tone: oneOf(a.tone, ["info", "warn", "neg"] as const, "info"), text: str(a.text), ...(typeof a.account === "string" ? { account: a.account } : {}), ...(typeof a.flow === "string" ? { flow: a.flow } : {}) })),
@@ -440,6 +481,7 @@ export function decodeFinanceView(value: unknown): FinanceView | null {
           holdings: list(investments.holdings, holding),
           market: list(investments.market, (m) => (typeof m.asset === "string" ? { asset: m.asset, label: str(m.label, m.asset), class: oneOf(m.class, ASSET_CLASSES, "other"), symbol: nullableStr(m.symbol), price: num(m.price) } : null)),
           accounts: strings(investments.accounts),
+          index: indexView(investments.index),
         }
       : null,
     properties: list(value.properties, property),
@@ -460,5 +502,60 @@ export function decodeFinanceView(value: unknown): FinanceView | null {
     payPrefs: list(value.payPrefs, payTier),
     paysFor: list(value.paysFor, (p) => (typeof p.from === "string" ? { from: p.from, to: strings(p.to) } : null)),
     ownKeys: strings(value.ownKeys),
+  };
+}
+
+/** A company's Payroll in Orgs (the economy's `payroll` section of its page): how many are on its payroll, what payroll has cost it this year, and each job. */
+export interface PayrollSection {
+  headcount: number;
+  payroll: number;
+  employees: JobView[];
+}
+
+export function decodePayroll(value: unknown): PayrollSection | null {
+  const o = obj(value);
+  return o ? { headcount: num(o.headcount), payroll: num(o.payroll), employees: list(o.employees, job) } : null;
+}
+
+/** A company's Ownership in Orgs (the economy's `ownership` section, `OwnershipView`). */
+export function decodeOwnership(value: unknown): OwnershipView | null {
+  const o = obj(value);
+  if (!o) return null;
+  const v = obj(o.valuation);
+  const c = obj(o.consolidated);
+  const a = obj(o.acts);
+  return {
+    structure: str(o.structure, "llc"),
+    owners: list(o.owners, ownerLine),
+    classes: Array.isArray(o.classes) ? list(o.classes, (k) => (typeof k.id === "string" ? { id: k.id, label: str(k.label, k.id), votes: num(k.votes) } : null)) : null,
+    units: nullableNum(o.units),
+    decidePct: optNum(o.decidePct) ?? 50,
+    valuation: v ? { value: num(v.value), set: v.set === true, book: num(v.book), profit: num(v.profit), multiple: num(v.multiple), perUnit: nullableNum(v.perUnit) } : null,
+    parents: list(o.parents, structureLink),
+    children: list(o.children, structureLink),
+    consolidated: c ? { cash: num(c.cash), profit: num(c.profit), netWorth: num(c.netWorth), companies: num(c.companies) } : null,
+    role: nullableOf(o.role, OWNER_ROLES),
+    mayDraw: o.mayDraw === true,
+    route: distributionRoute(o.route),
+    votes: num(o.votes),
+    acts: a ? { decide: nullableStr(a.decide), restructure: nullableStr(a.restructure), holdings: nullableStr(a.holdings), found: nullableStr(a.found), sources: list(a.sources, (s) => (typeof s.id === "string" ? { id: s.id, name: str(s.name, s.id), balance: str(s.balance) } : null)) } : null,
+  };
+}
+
+/** An organization's Taxes in Orgs (the economy's `taxes` section, `TaxesView`). */
+export function decodeTaxes(value: unknown): TaxesView | null {
+  const o = obj(value);
+  if (!o) return null;
+  const share = (x: Obj): { name: string; share: number } => ({ name: str(x.name, "someone"), share: num(x.share) });
+  const p = obj(o.pending);
+  return {
+    income: o.income === "corporate" || o.income === "owners" ? o.income : null,
+    years: list(o.years, (y) => ({ year: num(y.year), salesCollected: num(y.salesCollected), salesRemitted: num(y.salesRemitted), withheld: num(y.withheld), employerShare: num(y.employerShare), income: num(y.income), property: num(y.property) })),
+    salesHeld: num(o.salesHeld),
+    incomeSoFar: nullableNum(o.incomeSoFar),
+    taxedTo: list(o.taxedTo, share),
+    untaxed: list(o.untaxed, share),
+    due: list(o.due, (d) => ({ label: str(d.label), cents: nullableNum(d.cents), at: str(d.at) })),
+    pending: p ? { structure: str(p.structure), from: str(p.from) } : null,
   };
 }

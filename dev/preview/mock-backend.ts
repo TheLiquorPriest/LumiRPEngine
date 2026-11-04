@@ -332,6 +332,11 @@ export class MockBackend {
         lines.push(`The ${op.section} section's settings changed`);
         continue;
       }
+      // The things model's item and place ops, and an organization's, need the engine, which the preview doesn't run: noted, changing nothing.
+      if (op.op === "item" || op.op === "place" || op.op === "org") {
+        lines.push(`${op.op === "item" ? "A thing" : op.op === "place" ? "A place" : "An organization"}: ${op.change.do}`);
+        continue;
+      }
       const id = op.op === "link" || op.op === "unlink" ? op.from : op.op === "adjust" ? op.account : op.entity;
       const entity = find(id);
       if (!entity) return `${id} isn't in the world.`;
@@ -445,6 +450,7 @@ export class MockBackend {
         const money = this.options.money && this.options.scenario !== "not_world" ? portAlderMoney(this.options.money) : null;
         if (money) {
           this.view.panels["economy.money"] = money.play;
+          Object.assign(this.view.panels, money.orgs);
           // The GM's money pages read entities, kinds and places too (a business's fields, Add a job's employers, a payee): all Port Alder's, with its money.
           this.gm = { ...this.gm, ...money.gm };
         }
@@ -542,21 +548,24 @@ export class MockBackend {
         // The narrator's knowledge as This chat → Knowledge shows it: the chat's own, else the world's, else the user's.
         const knowledge = this.view?.controls?.knowledge.narrator;
         const narrator = { chat: knowledge?.chat ?? null, view: knowledge?.chat ?? knowledge?.world ?? knowledge?.user ?? settings.narrator };
-        const built = buildSections({ registry: REGISTRY, world, state, secrets: unrevealedSecrets(REGISTRY, world, state), narrator, wording: markWording(settings.prompts.texts), budget: settings.modelUse.tokens.sections, mindsBudget: settings.minds.tokens, texts: settings.prompts.texts, said: "", planned: { outcome: [], montage: [] }, outline: [], elapsed: null, hasEntry: () => true, cost: sectionTokens, seen: () => {}, warn: () => {} });
+        const built = buildSections({ registry: REGISTRY, world, state, secrets: unrevealedSecrets(REGISTRY, world, state), narrator, wording: markWording(settings.prompts.texts), budget: settings.modelUse.tokens.sections, mindsBudget: settings.minds.tokens, texts: settings.prompts.texts, prices: settings.statePrices, said: "", planned: { outcome: [], montage: [] }, outline: [], elapsed: null, hasEntry: () => true, cost: sectionTokens, seen: () => {}, warn: () => {} });
         return this.result(reqId, "lre.sections", { sections: built.sections.map((s) => ({ slot: s.slot, label: s.label, status: s.status, scope: s.scope, content: s.content, tokens: s.tokens, cut: s.cut, marked: s.marked, hints: s.hints })), budget: { sections: settings.modelUse.tokens.sections, used: built.used, minds: settings.minds.tokens } });
       }
       case "lre.chat.knowledge": {
         // The chat's own choices, as the backend keeps them in its metadata: a part given sets it, null follows again.
-        const knowledge = this.view?.controls?.knowledge;
-        if (!knowledge) return this.error(reqId, "not_world_chat", "not a world chat");
+        const controls = this.view?.controls;
+        if (!controls) return this.error(reqId, "not_world_chat", "not a world chat");
+        const { knowledge } = controls;
         const tracking = message.knowledge !== undefined ? message.knowledge : knowledge.tracking.chat;
         const narrator = message.narrator !== undefined ? message.narrator : knowledge.narrator.chat;
-        this.result(reqId, "lre.chat.knowledge", { knowledge: tracking, narrator });
+        const tidy = message.tidy !== undefined ? message.tidy : controls.things.tidy.chat;
+        this.result(reqId, "lre.chat.knowledge", { knowledge: tracking, narrator, ...(tidy !== null ? { tidy } : {}) });
         this.mutate((view) => {
-          const k = view.controls?.knowledge;
-          if (!k) return;
-          k.tracking.chat = tracking;
-          k.narrator.chat = narrator ? { ...narrator } : null;
+          const c = view.controls;
+          if (!c) return;
+          c.knowledge.tracking.chat = tracking;
+          c.knowledge.narrator.chat = narrator ? { ...narrator } : null;
+          c.things.tidy.chat = tidy;
         }, 40);
         return;
       }

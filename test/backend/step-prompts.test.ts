@@ -55,7 +55,7 @@ describe("the vars a prompted step reads", () => {
     const between = (name: string, text: string): string => new RegExp(`${name}=\\[([^\\]]*)\\]`).exec(text)?.[1] ?? "";
     expect(between("gear", shown)).toContain("Pocketknife");
     expect(between("money", shown)).toContain("$85.00");
-    expect(between("positions", shown)).toContain("Danny Okafor is here.");
+    expect(between("positions", shown)).toContain("Danny Okafor (mechanic at Alder Automotive, where you work) is here.");
     // While the pocketknife is someone's secret, no line naming it reaches the step.
     const kept = await briefPrompt("Pocketknife");
     expect(kept).not.toContain("Pocketknife");

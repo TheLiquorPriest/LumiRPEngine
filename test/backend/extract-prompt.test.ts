@@ -6,7 +6,7 @@
 
 import { describe, expect, test } from "bun:test";
 import { toChain } from "../../src/backend/ledger-io";
-import { CallMeter, extract, Steps } from "../../src/backend/steps";
+import { CallMeter, extract, shippedThingTexts, Steps, type ExtractThingTexts } from "../../src/backend/steps";
 import { FakeHost } from "../support/fake-host";
 import { Rig } from "../support/rig";
 import { POV, testWorld } from "../support/test-pack";
@@ -36,8 +36,9 @@ describe("extract: purchase payer and method", () => {
     expect(purchase).toContain("method?");
     expect(purchase).toMatch(/payer: the person who pays/);
     expect(purchase).toMatch(/never an account or a card/);
-    // The model passes the prose's words; the economy pack reads them.
-    for (const words of ["cash", "debit card", "credit card", "savings"]) expect(purchase).toContain(words);
+    // The model passes the prose's words, naming the card or account it names; the economy pack reads them.
+    expect(purchase).toMatch(/naming the card or account when it names one/);
+    for (const words of ["her Amex", "the card ending in 4417", "cash", "debit card", "credit card", "savings"]) expect(purchase).toContain(words);
   });
 
   test("a narrated purchase paid by debit card charges checking, not wallet cash", async () => {
@@ -86,6 +87,29 @@ describe("extract: purchase payer and method", () => {
       { type: "transfer", from: "dev", to: POV, amount: 1200 },
       { type: "transfer", from: "dev", to: POV, amount: 500, method: "cash" },
     ]);
+  });
+
+  test("the thing facts and rules are the registry's texts (ITEMS-SPEC §7.4): the shipped ones, else the user's own, and a reset brings the shipped ones back", async () => {
+    const host = new FakeHost();
+    const world = testWorld();
+    const asked: string[] = [];
+    host.quietReply = (req) => {
+      asked.push(req.messages[0]?.content ?? "");
+      return "{}";
+    };
+    const run = (things?: ExtractThingTexts) => extract(new Steps(host, new CallMeter()), "Sam hands Dev the lamp.", world, {}, 0, [], null, host.userId, new AbortController().signal, undefined, null, "", [], [], "", [], [], things);
+    await run();
+    const shipped = shippedThingTexts();
+    expect(asked[0]).toContain(shipped.facts);
+    expect(asked[0]).toContain(shipped.rules);
+    expect(asked[0]).toContain("purchase{item,category,payer?,qty?,price?,method?,seller?,size?,at?}");
+    expect(asked[0]).toContain("give{item,from,to,basis?,until?,why?,amount?}");
+    // The strict rules end, as ever, on never duplicating a change.
+    expect(asked[0]?.split("\nOutput JSON only")[0]?.trimEnd().endsWith("- Never duplicate a change. When unsure, leave it out.")).toBe(true);
+    await run({ facts: "give{item,from,to} (mine)", rules: "- My own thing rule." });
+    expect(asked[1]).toContain("give{item,from,to} (mine)");
+    expect(asked[1]).toContain("- My own thing rule.");
+    expect(asked[1]).not.toContain(shipped.rules);
   });
 });
 

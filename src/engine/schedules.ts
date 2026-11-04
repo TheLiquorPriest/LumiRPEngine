@@ -27,7 +27,7 @@ import { acts } from "./life";
 import { optionalQuery, own } from "./pack-kit";
 import { fieldDef, isGone, kindIs, placeOfEntity } from "./scope";
 import { relocate } from "./relocate";
-import { GROUP_KIND, membersOf, selectEntities } from "./selector";
+import { COMPANY_KIND, GROUP_KIND, membersOf, selectEntities } from "./selector";
 import type { WorldState } from "./state";
 import { initialState, minutesBetween } from "./world-state";
 
@@ -104,6 +104,11 @@ function handedOver(world: WorldDoc, instant: ScheduleInstant): boolean {
   });
 }
 
+/** Whether a schedule an entity of this kind owns applies to its members: a group's, but not a business's, whose schedules are its own (ORG-SPEC §3.2). */
+function ownsAsGroup(reg: Registry, world: WorldDoc, kind: string): boolean {
+  return kindIs(reg, world, kind, GROUP_KIND) && !kindIs(reg, world, kind, COMPANY_KIND);
+}
+
 /**
  * A schedule's owner precedence, most specific first: 0 an entity, 1 a group, 2 a kind, 3 a
  * selector; null for a world process. An id naming both an entity and a kind is the entity.
@@ -113,7 +118,7 @@ export function ownerRank(reg: Registry, world: WorldDoc, state: Readonly<WorldS
   if (isRecord(owner)) return 3;
   if (typeof owner !== "string" || owner === "") return null;
   const e = own(state.entities, owner);
-  if (e) return kindIs(reg, world, e.kind, GROUP_KIND) ? 1 : 0;
+  if (e) return ownsAsGroup(reg, world, e.kind) ? 1 : 0;
   return 2;
 }
 
@@ -132,7 +137,7 @@ export function scheduleOwners(reg: Registry, world: WorldDoc, state: Readonly<W
   const e = own(state.entities, owner);
   if (e) {
     if (isGone(state, owner)) return [];
-    return acting(kindIs(reg, world, e.kind, GROUP_KIND) ? membersOf(reg, world, state, owner) : [owner]);
+    return acting(ownsAsGroup(reg, world, e.kind) ? membersOf(reg, world, state, owner) : [owner]);
   }
   return Object.keys(state.entities)
     .sort()

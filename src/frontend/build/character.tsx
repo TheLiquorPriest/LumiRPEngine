@@ -2,7 +2,8 @@
 // entity of some kind. It reads the Character model (`lre.character`, build scope) for plain labels,
 // place paths and bed choices, edits the draft's entity in place, and saves a draft patch of only what
 // changed, so an edit made elsewhere to anything else stands. Places and beds are chosen with the
-// shared pickers; every field the sections don't lay out is under All fields.
+// shared pickers; the things they have are Build's Things (`things.tsx`), each changed on its own;
+// every field the sections don't lay out is under All fields.
 
 import { useEffect, useMemo, useState } from "preact/hooks";
 import type { CharacterBed, CharacterDTO, CharacterField, CharacterResult, CharacterSection, PlaceRef, ThingRef } from "../../shared/character";
@@ -20,13 +21,13 @@ import { characterRequest } from "../requests";
 import { useSelect } from "../store";
 import { employerPicker, entityPatch, GROUP_LABEL, relationGroups, type EmployerKind, type RelationGroup } from "./character-model";
 import { deleteItem, go, ItemHeader } from "./chrome";
-import { authoredContents } from "../../shared/items-build";
 import { CheckField, FormGroup, ItemRow, RefPicker, type RefOption } from "./form-kit";
 import { useHeld } from "./held";
 import { LorePinsSection } from "./lore-pins";
 import { COLLECTION_SPECS } from "./schema";
 import { DefInput, kindFields, lintAt, SchemaFields, worldIdentifiers, type FormCtx } from "./schema-form";
 import { kindIs } from "./selector-editor";
+import { PersonThingsSection } from "./things";
 
 /** The entity form's own keys each section lays out with the generic fields; All fields holds the rest. */
 const WHO_KEYS: ReadonlySet<string> = new Set(["name", "kind", "tier", "class", "tags", "life", "lifeKnownBy"]);
@@ -114,7 +115,7 @@ export function CharacterPage(props: EditorProps) {
         {(character?.sections.find((s) => s.id === "stats")?.fields.length ?? 0) === 0 ? <span class="lre-small lre-muted">Their kind has no sheet numbers or conditions.</span> : null}
         <SectionFields section="stats" model={character} value={value} ctx={ctx} onField={setField} />
       </Section>
-      <ThingsTheyHave world={props.world} id={id} />
+      <PersonThingsSection world={props.world} id={id} send={props.send} />
       <Section title="Secrets">
         <SchemaFields specs={COLLECTION_SPECS.entities.filter((s) => SECRET_KEYS.has(s.key))} value={value} ctx={ctx} onChange={setValue} />
       </Section>
@@ -296,24 +297,3 @@ function People(props: { world: WorldDoc; id: string; value: JsonObject; onChang
   );
 }
 
-/** What the world puts on them, and the vehicles and property they own, each opening its page. */
-function ThingsTheyHave(props: { world: WorldDoc; id: string }) {
-  const app = useApp();
-  const owns = (e: WorldDoc["entities"][string]): boolean => e.fields.owner === props.id || (Array.isArray(e.fields.owners) && e.fields.owners.includes(props.id));
-  const owned = Object.values(props.world.entities).filter((e) => (kindIs(props.world, e.kind, "vehicle") || kindIs(props.world, e.kind, "property")) && owns(e));
-  const carried = authoredContents(props.world, props.id, "entities");
-  const open = (id: string): void => go(app, { view: "item", worldId: props.world.id, collection: "entities", id });
-  return (
-    <div data-lre-contents={props.id}>
-      <Section title="Things they have">
-        {carried.length === 0 && owned.length === 0 ? <span class="lre-small lre-muted">Nothing the world puts on them, and no vehicle or property of theirs.</span> : null}
-        {carried.map((row) => (
-          <ItemRow key={row.id} title={row.name} subtitle="On them" badge={row.hidden ? <Badge tone="gm">Hidden until searched</Badge> : undefined} openLabel={`Open ${row.name}`} onOpen={() => open(row.id)} />
-        ))}
-        {owned.map((e) => (
-          <ItemRow key={e.id} title={e.name} subtitle={`Theirs · ${humanize(e.kind)}`} openLabel={`Open ${e.name}`} onOpen={() => open(e.id)} />
-        ))}
-      </Section>
-    </div>
-  );
-}

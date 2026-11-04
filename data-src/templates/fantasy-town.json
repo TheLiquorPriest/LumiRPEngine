@@ -19,6 +19,7 @@
   },
   "dataPack": null,
   "region": null,
+  "carry": [],
   "currency": {
     "id": "bit",
     "label": "Brindlemere coin",
@@ -393,7 +394,8 @@
       "tags": [
         "inn"
       ],
-      "description": "A leaning, low-beamed inn with a copper kettle hung crooked over the door. Warm, noisy and always smelling of onions and woodsmoke; there are six beds upstairs and a stable yard behind."
+      "description": "A leaning, low-beamed inn with a copper kettle hung crooked over the door. Warm, noisy and always smelling of onions and woodsmoke; there are six beds upstairs and a stable yard behind.",
+      "entry": "public"
     },
     {
       "id": "reeves_hall",
@@ -2176,7 +2178,7 @@
       "id": "reeves_strongbox",
       "name": "Reeve's strongbox",
       "description": "An iron-bound oak chest under the long table, with two locks.",
-      "owner": "hollis_garrow",
+      "owner": "reeves_office",
       "in": "reeves_hall",
       "capacityL": 40,
       "maxLoadKg": 60,
@@ -2446,7 +2448,7 @@
       "product": "cash",
       "owners": [
         {
-          "party": "hollis_garrow"
+          "party": "reeves_office"
         }
       ],
       "container": "reeves_strongbox",
@@ -2463,7 +2465,7 @@
       "product": "cash",
       "owners": [
         {
-          "party": "odo_kettleby"
+          "party": "kettle_inn"
         }
       ],
       "opening": 151,
@@ -2543,7 +2545,7 @@
       "id": "bill_kettle_market_dues",
       "label": "Market dues to the reeve",
       "from": "acct_kettle_till",
-      "to": "hollis_garrow",
+      "to": "acct_hollis_strongbox",
       "amountCents": 20,
       "every": "month",
       "days": [
@@ -2554,7 +2556,7 @@
       "id": "bill_marta_hearth_tax",
       "label": "Hearth tax",
       "from": "acct_marta_purse",
-      "to": "hollis_garrow",
+      "to": "acct_hollis_strongbox",
       "amountCents": 6,
       "every": "month",
       "days": [
@@ -2565,7 +2567,7 @@
       "id": "bill_joss_hearth_tax",
       "label": "Hearth tax",
       "from": "acct_joss_purse",
-      "to": "hollis_garrow",
+      "to": "acct_hollis_strongbox",
       "amountCents": 6,
       "every": "month",
       "days": [
@@ -2576,7 +2578,7 @@
       "id": "bill_wren_hearth_tax",
       "label": "Hearth tax",
       "from": "acct_wren_purse",
-      "to": "hollis_garrow",
+      "to": "acct_hollis_strongbox",
       "amountCents": 4,
       "every": "month",
       "days": [
@@ -3750,6 +3752,129 @@
         "hint": "The reeve's smile is exactly as warm as before and does not reach his eyes."
       },
       "whenExpr": "stage('s_quiet_bell') != 'cue'"
+    }
+  ],
+  "records": [
+    {
+      "id": "kettle_inn",
+      "kind": "business",
+      "name": "The Crooked Kettle",
+      "tier": "supporting",
+      "fields": {
+        "places": [
+          "crooked_kettle"
+        ],
+        "owners": [
+          {
+            "party": "odo_kettleby",
+            "role": "owner",
+            "share": 100
+          }
+        ],
+        "structure": "sole_proprietorship",
+        "operating_account": "acct_kettle_till",
+        "industry": "inn",
+        "trading_days": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6
+        ],
+        "open_at": "00:00",
+        "close_at": "24:00"
+      }
+    }
+  ],
+  "organizations": [
+    {
+      "id": "ferry_crew",
+      "kind": "company",
+      "name": "The Wend Ferry",
+      "tier": "supporting",
+      "places": [
+        "ferry_landing"
+      ],
+      "positions": [
+        {
+          "id": "ferrywoman",
+          "title": "Ferrywoman",
+          "powers": [
+            "members.admit",
+            "members.remove",
+            "members.appoint",
+            "assets.use",
+            "assets.assign",
+            "orders.give",
+            "delegate"
+          ],
+          "successor": "next"
+        },
+        {
+          "id": "ferry_hand",
+          "title": "Ferry hand",
+          "powers": [
+            "assets.use"
+          ],
+          "seats": 0,
+          "reportsTo": "ferrywoman"
+        }
+      ],
+      "members": [
+        {
+          "id": "tamsin_reed",
+          "position": "ferrywoman"
+        },
+        {
+          "id": "pip_marlow",
+          "position": "ferry_hand"
+        }
+      ]
+    },
+    {
+      "id": "reeves_office",
+      "kind": "faction",
+      "name": "The Reeve's Office",
+      "tier": "supporting",
+      "places": [
+        "reeves_hall"
+      ],
+      "positions": [
+        {
+          "id": "reeve",
+          "title": "Reeve of Brindlemere",
+          "powers": [
+            "members.admit",
+            "members.remove",
+            "members.appoint",
+            "staff.hire",
+            "staff.fire",
+            "staff.pay",
+            "money.view",
+            "money.spend",
+            "money.manage",
+            "money.invoice",
+            "money.payout",
+            "money.borrow",
+            "assets.use",
+            "assets.assign",
+            "assets.dispose",
+            "property.manage",
+            "property.trade",
+            "org.govern",
+            "orders.give",
+            "delegate"
+          ]
+        }
+      ],
+      "members": [
+        {
+          "id": "hollis_garrow",
+          "position": "reeve"
+        }
+      ]
     }
   ],
   "groups": {

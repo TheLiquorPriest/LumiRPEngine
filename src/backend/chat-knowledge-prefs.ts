@@ -1,17 +1,20 @@
 // What a chat chose for knowledge (DESIGN §6.11, §24): whether it tracks who knows what, and what
-// the narrator knows (`NarratorView`); and which engine plays its turns (INC2-SPEC C12: classic, or
-// agents). Knowledge and the narrator fall back in one order: this chat's own choice, then its
-// world's default, then the user's Settings; the engine is classic unless the chat chose agents. A
-// chat's own choice lives in the host's chat metadata under LRE's key (`lumi_rp_engine.prefs`,
-// beside the chat's `ChatRun`), never in its ledger: it is how the chat is played, not a fact of its
-// story, so a swipe, a Re-run or an Undo never changes it, recorded turns replay as they were, and a
-// Lumiverse Branch, which copies the chat's metadata, keeps it. A choice is written in the chat's
-// turn among LRE's writes of its metadata (`ChatMetaQueue`).
+// the narrator knows (`NarratorView`); which engine plays its turns (INC2-SPEC C12: classic, or
+// agents); and whether its impossible holds are tidied automatically (ITEMS-SPEC §9, §11: GM → This
+// chat → Things). Knowledge and the narrator fall back in one order: this chat's own choice, then its
+// world's default, then the user's Settings; the tidy switch is this chat's own, else its world's;
+// the engine is classic unless the chat chose agents. A chat's own choice lives in the host's chat
+// metadata under LRE's key (`lumi_rp_engine.prefs`, beside the chat's `ChatRun`), never in its
+// ledger: it is how the chat is played, not a fact of its story, so a swipe, a Re-run or an Undo
+// never changes it, recorded turns replay as they were, and a Lumiverse Branch, which copies the
+// chat's metadata, keeps it. A choice is written in the chat's turn among LRE's writes of its
+// metadata (`ChatMetaQueue`).
 
 import type { ChatId, UserId } from "../shared/ids";
 import { isRecord, type JsonObject } from "../shared/json";
 import { LEDGER_NAMESPACE } from "../shared/ledger";
 import { narratorViewOf, type NarratorView, type UserSettings } from "../shared/settings";
+import { thingsConfigOf } from "../shared/things";
 import type { WorldDoc } from "../shared/world";
 import { ChatMetaQueue } from "./chat-meta-queue";
 import type { HostPort } from "./host";
@@ -29,6 +32,8 @@ export interface ChatKnowledgePrefs {
   narrator?: NarratorView;
   /** The engine that plays this chat's turns; absent, classic. */
   engine?: ChatEngine;
+  /** Tidy impossible holds automatically in this chat (the one-time Things tidied fix); absent, the world's (Build → Packs → gear → Tidy up). */
+  tidy?: boolean;
 }
 
 /** A change to a chat's own choices: a value sets one, null returns it to what it follows, and a part left out stays as it is. */
@@ -36,6 +41,7 @@ export interface ChatKnowledgeChange {
   knowledge?: boolean | null;
   narrator?: NarratorView | null;
   engine?: ChatEngine | null;
+  tidy?: boolean | null;
 }
 
 /** Where a chat's own choices sit inside LRE's key of its metadata. */
@@ -50,7 +56,7 @@ export function chatKnowledgePrefsOf(meta: JsonObject): ChatKnowledgePrefs {
   const raw = isRecord(own) ? own[PREFS_KEY] : undefined;
   if (!isRecord(raw)) return {};
   const narrator = narratorViewOf(raw.narrator);
-  return { ...(typeof raw.knowledge === "boolean" ? { knowledge: raw.knowledge } : {}), ...(narrator ? { narrator } : {}), ...(raw.engine === "agents" ? { engine: "agents" as const } : {}) };
+  return { ...(typeof raw.knowledge === "boolean" ? { knowledge: raw.knowledge } : {}), ...(narrator ? { narrator } : {}), ...(raw.engine === "agents" ? { engine: "agents" as const } : {}), ...(typeof raw.tidy === "boolean" ? { tidy: raw.tidy } : {}) };
 }
 
 /** What the narrator knows: this chat's choice, else its world's default (when it is a whole one), else the user's. */
@@ -66,6 +72,11 @@ export function narratorView(chat: ChatKnowledgePrefs | null, world: Pick<WorldD
  */
 export function knowledgeOn(chat: ChatKnowledgePrefs | null, world: Pick<WorldDoc, "narrator"> | null, settings: Pick<UserSettings, "minds">): boolean {
   return chat?.knowledge ?? settings.minds.knowledge.enabled;
+}
+
+/** Whether an older chat's impossible holds are tidied automatically (ITEMS-SPEC §9): the chat's own switch (GM → This chat → Things), else its world's (`tidy.auto`). */
+export function tidyOn(chat: ChatKnowledgePrefs | null, world: Pick<WorldDoc, "packs">): boolean {
+  return chat?.tidy ?? thingsConfigOf(world).tidy.auto;
 }
 
 /** Each chat's own choices, read once from its metadata and kept per (user, chat), so one user's read never answers another's. */
@@ -128,12 +139,15 @@ export class ChatKnowledge {
       // Classic is what a chat with no choice plays, so choosing it stores nothing.
       if (change.engine === null || change.engine === "classic") delete next.engine;
       else if (change.engine !== undefined) next.engine = change.engine;
+      if (change.tidy === null) delete next.tidy;
+      else if (change.tidy !== undefined) next.tidy = change.tidy;
       const stored: JsonObject = { ...own };
       delete stored[PREFS_KEY];
       const prefs: JsonObject = {};
       if (next.knowledge !== undefined) prefs.knowledge = next.knowledge;
       if (next.narrator) prefs.narrator = { knowledge: next.narrator.knowledge, secrets: next.narrator.secrets };
       if (next.engine) prefs.engine = next.engine;
+      if (next.tidy !== undefined) prefs.tidy = next.tidy;
       // A chat that follows in every part stores no `prefs` at all.
       if (Object.keys(prefs).length > 0) stored[PREFS_KEY] = prefs;
       await this.host.chats.mergeChatMetadata(chatId, { [LEDGER_NAMESPACE]: stored }, userId);

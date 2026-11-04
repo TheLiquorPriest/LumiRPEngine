@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { PanelHome } from "../../src/frontend/app";
-import { initialUi, playAt, popSheet, pushSheet, showPanel, switchChat } from "../../src/frontend/app";
+import { initialUi, openAt, orgRoute, orgRouteOf, playAt, popSheet, pushSheet, showPanel, switchChat } from "../../src/frontend/app";
 import type { Overlays } from "../../src/frontend/app";
 import { ProtocolClient } from "../../src/frontend/protocol-client";
 import { createStore } from "../../src/frontend/store";
@@ -13,7 +13,7 @@ import type { Chip, StateView } from "../../src/shared/state-view";
 const Empty = () => null;
 const panel = (id: string, order: number, home: PanelHome): PanelDef => ({ id, label: id, order, home, component: Empty });
 const catalog: UiCatalog = {
-  panels: [panel("combat.encounter", 5, "now"), panel("core.scene", 10, "now"), panel("sheets.you", 20, "me"), panel("economy.money", 30, "me"), panel("castlife.cast", 60, "people"), panel("core.journal", 90, "story"), panel("core.gm", 100, "gm")],
+  panels: [panel("combat.encounter", 5, "now"), panel("core.scene", 10, "now"), panel("sheets.you", 20, "me"), panel("economy.money", 30, "me"), panel("castlife.cast", 60, "people"), panel("orgs.list", 10, "orgs"), panel("space.map", 10, "places"), panel("core.journal", 90, "story"), panel("core.gm", 100, "gm")],
   editors: new Map(),
   configs: new Map(),
   chips: new Map(),
@@ -23,6 +23,7 @@ const catalog: UiCatalog = {
   placeFields: [],
   sheets: new Map(),
   glances: [],
+  orgTabs: [],
   packs: [],
 };
 const state = (panels: Record<string, unknown>, pending: { panel: string; entity: string | null }[] = []) => ({ panels, pending }) as unknown as StateView;
@@ -45,6 +46,18 @@ describe("Play destinations", () => {
       ["now", false],
       ["people", true],
       ["story", false],
+    ]);
+  });
+
+  test("Orgs, the sixth destination, sits between People and Places with the briefcase (ORG-SPEC §4.1)", () => {
+    const shown = destinations(catalog, state({ "economy.money": { level: 1 }, "castlife.cast": {}, "orgs.list": { party: { id: "party_pov" } }, "space.map": {} }));
+    expect(shown.map((d) => [d.id, d.label, d.icon])).toEqual([
+      ["now", "Now", "compass"],
+      ["me", "Me", "user"],
+      ["people", "People", "users"],
+      ["orgs", "Orgs", "briefcase"],
+      ["places", "Places", "map"],
+      ["story", "Story", "book"],
     ]);
   });
 });
@@ -79,6 +92,29 @@ describe("UI navigation", () => {
     expect(popSheet(opened).play.stack).toEqual([{ kind: "person", id: "rosie" }]);
     const none = initialUi(false);
     expect(popSheet(none)).toBe(none);
+  });
+
+  test("a link into another destination opens its page there, alone, so Back returns to that destination's home", () => {
+    const fromCast = pushSheet(playAt(initialUi(false), "people", "castlife.cast"), { kind: "person", id: "danny_okafor" });
+    const opened = openAt(fromCast, "orgs", orgRoute("alder_automotive_co"));
+    expect(opened.play).toEqual({ dest: "orgs", tab: { people: "castlife.cast" }, stack: [{ kind: "org", id: "alder_automotive_co" }] });
+    expect(popSheet(opened).play).toEqual({ dest: "orgs", tab: { people: "castlife.cast" }, stack: [] });
+  });
+
+  test("an organization's route names its page and the tab it opens on, whatever its id holds", () => {
+    expect(orgRoute("alder_automotive_co")).toEqual({ kind: "org", id: "alder_automotive_co" });
+    expect(orgRouteOf(orgRoute("alder_automotive_co").id)).toEqual({ org: "alder_automotive_co", tab: null });
+    // Money → Assets opens a stake's Ownership (ORG-SPEC §5.1).
+    expect(orgRoute("alder_automotive_co", "economy.ownership")).toEqual({ kind: "org", id: "alder_automotive_co#economy.ownership" });
+    expect(orgRouteOf("alder_automotive_co#economy.ownership")).toEqual({ org: "alder_automotive_co", tab: "economy.ownership" });
+    // An author's id may hold anything: a `#` or a `%` in it is never a tab.
+    for (const org of ["club#2", "100%_club", "a/b c"]) {
+      expect(orgRouteOf(orgRoute(org).id)).toEqual({ org, tab: null });
+      expect(orgRouteOf(orgRoute(org, "people").id)).toEqual({ org, tab: "people" });
+    }
+    // A hand-written id that doesn't decode reads as written; an empty tab names none.
+    expect(orgRouteOf("100%_club")).toEqual({ org: "100%_club", tab: null });
+    expect(orgRouteOf("party_pov#")).toEqual({ org: "party_pov", tab: null });
   });
 
   test("a panel opens where it lives: its destination and tab, or GM mode; an unknown panel changes nothing", () => {

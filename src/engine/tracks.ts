@@ -15,7 +15,7 @@ import { hashParts } from "../shared/hash";
 import type { EntityId, StageId, TrackId } from "../shared/ids";
 import type { LedgerEvent } from "../shared/ledger";
 import type { StageDef, TrackDef, WorldDoc } from "../shared/world";
-import { objectiveWhen } from "../shared/world";
+import { objectiveWhen, trackOwner } from "../shared/world";
 import { applyEffects } from "./effects";
 import { ENGINE_EVENTS, readEngineSlice } from "./engine-pack";
 import type { ExprEnv } from "./expr";
@@ -45,18 +45,24 @@ export function currentStage(world: WorldDoc, state: Readonly<WorldState>, track
   return own(state.tracks, track)?.stage ?? def.start;
 }
 
+/** A track's owner as `self` and `owner`, when an entity owns it (never the GM's, `GM_OWNER`). */
+function ownerBindings(track: TrackDef): Record<string, EntityId> {
+  const owner = trackOwner(track);
+  return owner ? { self: owner, owner } : {};
+}
+
 /** What a track's predicates read (`next`, `fail`, a target's `gate`): its owner as `self` and `owner`, and `track.*` (its id, stage, minutes there, attempts and objectives met). */
 export function trackEnv(reg: Registry, w: Pick<Working, "state" | "ctx">, track: TrackDef, trackId: TrackId): ExprEnv {
   const stage = own(w.state.tracks, trackId)?.stage ?? track.start;
   const def = own(track.stages, stage);
-  const env0 = scopeEnv({ reg, ctx: w.ctx, bindings: track.owner ? { self: track.owner, owner: track.owner } : {} });
+  const env0 = scopeEnv({ reg, ctx: w.ctx, bindings: ownerBindings(track) });
   const objectives = def?.objectives ?? [];
   const done = objectives.filter((o) => truthy(evalExpr(objectiveWhen(o), env0, false))).length;
   const slice = readEngineSlice(w.state);
   return scopeEnv({
     reg,
     ctx: w.ctx,
-    bindings: track.owner ? { self: track.owner, owner: track.owner } : {},
+    bindings: ownerBindings(track),
     vars: {
       track: {
         id: trackId,
@@ -84,7 +90,7 @@ function enter(reg: Registry, w: Working, trackId: TrackId, track: TrackDef, fro
   const leaving = own(track.stages, from);
   const key = hashParts(seed, "track", trackId, from, to, w.state.clock);
   const rng = createRng(key);
-  const bindings: Record<string, EntityId> = track.owner ? { self: track.owner, owner: track.owner } : {};
+  const bindings = ownerBindings(track);
   if (via !== "fail" && leaving?.rewards && leaving.rewards.length > 0) applyEffects(reg, w, leaving.rewards, { bindings, rng: rng.fork("rewards") });
   if (w.apply({ type: "stage", track: trackId, to, from })) return null;
   const entering = own(track.stages, to);

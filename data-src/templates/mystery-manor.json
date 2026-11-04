@@ -19,6 +19,7 @@
   },
   "dataPack": null,
   "region": null,
+  "carry": ["wallet"],
   "currency": {
     "id": "pence",
     "label": "Pounds, shillings and pence",
@@ -1833,6 +1834,20 @@
         "discreet"
       ],
       "home": "entrance_hall",
+      "job": {
+        "id": "job_gideon_pell",
+        "name": "Butler at Harrowmere Hall",
+        "title": "Butler",
+        "employer": "household_thorne",
+        "workplace": "harrowmere_hall",
+        "occupation": null,
+        "basis": "salary",
+        "rateCents": 18000,
+        "payEvery": "weekly",
+        "payWeekday": 5,
+        "start": "1904-10-03",
+        "position": "butler"
+      },
       "agenda": "a_gideon_pell",
       "sheet": {
         "observation": 8,
@@ -2035,6 +2050,20 @@
         "loyal"
       ],
       "home": "kitchen",
+      "job": {
+        "id": "job_mrs_marsh",
+        "name": "Cook and housekeeper at Harrowmere Hall",
+        "title": "Cook and housekeeper",
+        "employer": "household_thorne",
+        "workplace": "harrowmere_hall",
+        "occupation": null,
+        "basis": "salary",
+        "rateCents": 13200,
+        "payEvery": "weekly",
+        "payWeekday": 5,
+        "start": "1914-09-07",
+        "position": "housekeeper"
+      },
       "sheet": {
         "observation": 7,
         "manner": 6,
@@ -2160,6 +2189,20 @@
         "quick"
       ],
       "home": "kitchen",
+      "job": {
+        "id": "job_nell_sparrow",
+        "name": "Housemaid at Harrowmere Hall",
+        "title": "Housemaid",
+        "employer": "household_thorne",
+        "workplace": "harrowmere_hall",
+        "occupation": null,
+        "basis": "salary",
+        "rateCents": 8640,
+        "payEvery": "weekly",
+        "payWeekday": 5,
+        "start": "1932-10-03",
+        "position": "housemaid"
+      },
       "sheet": {
         "observation": 7,
         "manner": 5,
@@ -2968,6 +3011,30 @@
       "paymentCents": 3285,
       "monthsLeft": 24,
       "autopay": "none"
+    },
+    {
+      "id": "acct_thorne_household",
+      "name": "The Thornes' household account",
+      "product": "checking",
+      "owners": [
+        {
+          "party": "household_thorne"
+        }
+      ],
+      "institution": "Fenland & District Bank",
+      "opening": 15360
+    },
+    {
+      "id": "acct_thorne_trust",
+      "name": "The Thorne Trust's account",
+      "product": "checking",
+      "owners": [
+        {
+          "party": "thorne_trust"
+        }
+      ],
+      "institution": "Fenland & District Bank",
+      "opening": 297600
     }
   ],
   "flows": [
@@ -4422,6 +4489,140 @@
         "hint": "Rupert's smile stays exactly where it is while his eyes go somewhere else."
       },
       "whenExpr": "story.asked_whereabouts and at('rupert_thorne', here)"
+    }
+  ],
+  "households": [
+    {
+      "id": "household_thorne",
+      "name": "The Thornes",
+      "positions": [
+        {
+          "id": "head",
+          "title": "Master",
+          "powers": [
+            "members.admit",
+            "members.remove",
+            "members.appoint",
+            "staff.hire",
+            "staff.fire",
+            "staff.pay",
+            "money.view",
+            "money.spend",
+            "money.manage",
+            "money.invoice",
+            "money.payout",
+            "money.borrow",
+            "assets.use",
+            "assets.assign",
+            "assets.dispose",
+            "property.manage",
+            "property.trade",
+            "shares.manage",
+            "org.govern",
+            "orders.give",
+            "delegate"
+          ],
+          "successor": "rupert_thorne"
+        },
+        {
+          "id": "butler",
+          "title": "Butler",
+          "powers": [
+            "assets.use",
+            "assets.assign",
+            "orders.give"
+          ],
+          "reportsTo": "head",
+          "scope": "below"
+        },
+        {
+          "id": "housekeeper",
+          "title": "Housekeeper",
+          "powers": [
+            "assets.use",
+            "assets.dispose",
+            "orders.give"
+          ],
+          "reportsTo": "head",
+          "scope": "below"
+        },
+        {
+          "id": "housemaid",
+          "title": "Housemaid",
+          "powers": [
+            "assets.use"
+          ],
+          "seats": 0,
+          "reportsTo": "housekeeper"
+        }
+      ],
+      "members": [
+        {
+          "id": "sir_alaric",
+          "role": "Master of Harrowmere",
+          "position": "head"
+        },
+        {
+          "id": "lady_honoria",
+          "role": "Lady of the house"
+        },
+        {
+          "id": "rupert_thorne",
+          "role": "Heir"
+        }
+      ]
+    }
+  ],
+  "records": [
+    {
+      "id": "thorne_trust",
+      "kind": "trust",
+      "name": "The Thorne Trust",
+      "tier": "supporting",
+      "fields": {
+        "owners": [
+          {
+            "party": "sir_alaric",
+            "role": "trustee"
+          },
+          {
+            "party": "julian_ashcombe",
+            "role": "trustee"
+          },
+          {
+            "party": "lady_honoria",
+            "role": "beneficiary",
+            "share": 50
+          },
+          {
+            "party": "rupert_thorne",
+            "role": "beneficiary",
+            "share": 50
+          }
+        ]
+      }
+    }
+  ],
+  "delegations": [
+    {
+      "who": "lady_honoria",
+      "org": "household_thorne",
+      "powers": [
+        "money.spend",
+        "staff.hire",
+        "staff.fire",
+        "staff.pay"
+      ],
+      "by": "sir_alaric"
+    },
+    {
+      "who": "julian_ashcombe",
+      "org": "household_thorne",
+      "powers": [
+        "property.manage",
+        "money.view"
+      ],
+      "by": "sir_alaric"
     }
   ],
   "groups": {

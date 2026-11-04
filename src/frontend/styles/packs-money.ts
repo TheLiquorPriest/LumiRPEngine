@@ -1,5 +1,6 @@
-// The money hub (economy pack): Play → Me → Money and GM → Money, their section and detail pages,
-// the action forms and Now's money glance. Built on the tokens only.
+// Money (economy pack): Play → Me → Money's segments, an organization's Money, Ownership, Taxes
+// and Payroll in Orgs, GM → Money, their detail and action pages, and Now's money glance. Built on
+// the tokens only.
 
 export const PACKS_MONEY_CSS = `
 /* Money in Build (economy/ui/config.tsx, field-editors.tsx): living costs in a grid, the feature and sales tax switches pages, a place's cash machine and branch */
@@ -16,12 +17,14 @@ export const PACKS_MONEY_CSS = `
 .lre .lre-money-build-absent-text{flex:1 1 10rem;min-width:0;color:var(--lre-muted);overflow-wrap:anywhere}
 .lre .lre-money-build-place{gap:var(--lre-s3)}
 .lre .lre-money-build-place-actions{display:flex;flex-wrap:wrap;gap:var(--lre-s2)}
-/* The money hub's sections: flows, jobs, businesses, investments, properties, credit and household (economy/ui/flows.tsx, work.tsx, assets.tsx, credit.tsx): a lead amount in words (worked out each time) at a reading size */
+/* Money's segments and pages: flows, jobs, investments, properties and credit (economy/ui/flows.tsx, work.tsx, assets.tsx, credit.tsx): a lead amount in words (worked out each time) at a reading size */
 .lre .lre-money-hero .lre-money-hero-words{font-size:var(--lre-fs-lg);line-height:1.3;letter-spacing:0}
 /* An amount in words in a row's value (what's coming up that's worked out each time) reads as a note beside the figures */
 .lre .lre-money-row-words{font-size:var(--lre-fs-sm);font-weight:400;line-height:1.3;color:var(--lre-muted)}
-/* The money hub (economy/ui/hub.tsx, panel.tsx, gm.tsx, sheet.tsx), its page frame and shared pieces (nav.tsx, forms.tsx, lines.tsx), accounts and cards (accounts.tsx), payment tiers (pay-prefs.tsx) and Now's glance */
-.lre .lre-money-root,.lre .lre-money-hub,.lre .lre-money-page,.lre .lre-money-page-body,.lre .lre-money-level,.lre .lre-money-form{display:flex;flex-direction:column;gap:var(--lre-s3);min-width:0}
+/* Money (economy/ui/hub.tsx, panel.tsx, gm.tsx, sheet.tsx, orgs.tsx): its segments under their row, its page frame and shared pieces (nav.tsx, forms.tsx, lines.tsx), accounts and cards (accounts.tsx), payment tiers (pay-prefs.tsx) and Now's glance */
+.lre .lre-money-root,.lre .lre-money-hub,.lre .lre-money-segment,.lre .lre-money-page,.lre .lre-money-page-body,.lre .lre-money-level,.lre .lre-money-form{display:flex;flex-direction:column;gap:var(--lre-s3);min-width:0}
+/* Activity's filters, side by side where they fit, over its lines */
+.lre .lre-money-filters{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,10rem),1fr));gap:var(--lre-s2) var(--lre-s3);min-width:0;padding:var(--lre-s3);border-bottom:1px solid var(--lre-hairline)}
 .lre .lre-money-hero{display:flex;flex-direction:column;gap:var(--lre-s3);min-width:0;padding:var(--lre-s3);border:1px solid var(--lre-hairline);border-radius:var(--lre-r-xl);background:var(--lre-card)}
 /* A figure stays whole (it breaks only where it can't fit the card at all), so the badges beside it wrap under it instead */
 .lre .lre-money-hero-main{display:flex;flex-wrap:wrap;align-items:flex-start;justify-content:space-between;gap:var(--lre-s3);min-width:0}
@@ -65,4 +68,13 @@ export const PACKS_MONEY_CSS = `
 .lre .lre-money-tier-title{flex:1;min-width:0;font-weight:600}
 .lre .lre-money-tier-range{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,9rem),1fr));gap:var(--lre-s3);min-width:0}
 .lre .lre-money-whose{display:flex;flex-direction:column;gap:var(--lre-s2);min-width:0}
+/* How prices have done (economy/ui/assets.tsx): the market's and a holding's line over their month-end closes, above their changes */
+.lre .lre-money-spark-wrap{padding:var(--lre-s3) var(--lre-s3) var(--lre-s2)}
+.lre .lre-money-spark{display:block;width:100%;height:56px;overflow:visible}
+.lre .lre-money-spark>polyline{fill:none;stroke:var(--lre-accent);stroke-width:2;stroke-linejoin:round;stroke-linecap:round;vector-effect:non-scaling-stroke}
+.lre .lre-money-spark[data-tone=pos]>polyline{stroke:var(--lre-pos)}
+.lre .lre-money-spark[data-tone=neg]>polyline{stroke:var(--lre-neg)}
+.lre .lre-money-spark-wrap+.lre-rowlist,.lre .lre-money-spark-wrap+.lre-money-spark-note,.lre .lre-rowlist+.lre-money-spark-note{border-top:1px solid var(--lre-hairline)}
+.lre .lre-money-spark-note{padding:var(--lre-s2) var(--lre-s3);color:var(--lre-muted)}
+.lre .lre-money-spark-note>.lre-money-note{font-size:var(--lre-fs-sm)}
 `;

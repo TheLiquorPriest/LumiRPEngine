@@ -18,7 +18,7 @@ import { currentStage, isTerminal, trackEnv } from "../../../../engine/tracks";
 import { hintsEarned, hintsOpened, type PlayerTrack } from "../../../../engine/visibility";
 import { TOOL_NOTE } from "../../../../shared/agent-tools";
 import type { StageId, TrackId } from "../../../../shared/ids";
-import { type Expr, objectiveLabel, objectiveWhen, type StageDef, TRACK_KINDS, type TrackDef, type TrackKind } from "../../../../shared/world";
+import { type Expr, GM_OWNER, GM_OWNER_NAME, objectiveLabel, objectiveWhen, type StageDef, TRACK_KINDS, type TrackDef, type TrackKind, trackOwner } from "../../../../shared/world";
 import type { ToolDefinition } from "../registry";
 import type { Secrecy, ToolReadView, ViewRef } from "../read-view";
 import { resolveTrack } from "../resolve";
@@ -130,8 +130,15 @@ function standing(view: ToolReadView, id: TrackId, t: TrackDef): Standing | null
 function objectivesOf(view: ToolReadView, t: TrackDef, def: StageDef | undefined): { label: string; when: Expr; done: boolean }[] {
   const objectives = def?.objectives ?? [];
   if (objectives.length === 0) return [];
-  const env = scopeEnv({ reg: view.registry, ctx: view.ctx, bindings: t.owner ? { self: t.owner } : {} });
+  const owner = trackOwner(t);
+  const env = scopeEnv({ reg: view.registry, ctx: view.ctx, bindings: owner ? { self: owner } : {} });
   return objectives.map((o) => ({ label: objectiveLabel(o), when: objectiveWhen(o), done: truthy(evalExpr(objectiveWhen(o), env, false)) }));
+}
+
+/** A track's owner as the GM's views name it: an entity, "GM" for the GM's own (`GM_OWNER`), none for no one's. */
+function ownerRef(view: ToolReadView, t: TrackDef): ViewRef | null | undefined {
+  if (t.owner === GM_OWNER) return { id: GM_OWNER, name: GM_OWNER_NAME };
+  return t.owner === undefined ? undefined : view.entity(t.owner);
 }
 
 /** Every track by id, of `kind` when given. */
@@ -142,7 +149,7 @@ function trackRows(view: ToolReadView, kind: TrackKind | null): TrackRow[] {
     const at = t && (kind === null || t.kind === kind) ? standing(view, id, t) : null;
     if (!t || !at) continue;
     const row: TrackRow = { id, label: at.ref.name, kind: t.kind, stage: at.words(at.def?.label ?? at.stage), status: at.status };
-    rows.push(view.knowledge === "gm" ? { ...row, stageId: at.stage, visibility: at.ref.visibility, owner: t.owner === undefined ? undefined : view.entity(t.owner) } : row);
+    rows.push(view.knowledge === "gm" ? { ...row, stageId: at.stage, visibility: at.ref.visibility, owner: ownerRef(view, t) } : row);
   }
   return rows;
 }
@@ -176,7 +183,7 @@ function stageAnswer(view: ToolReadView, id: TrackId): StageAnswer | null {
     ...answer,
     stageId: at.stage,
     visibility: at.ref.visibility,
-    owner: t.owner === undefined ? undefined : view.entity(t.owner),
+    owner: ownerRef(view, t),
     stages: stages.map(([sid, s]) => ({ id: sid, label: at.words(s.label), truth: s.truth === undefined || at.revealed.includes(sid) ? s.truth : view.mark(s.truth, kept), revealed: s.truth === undefined ? undefined : at.revealed.includes(sid), current: sid === at.stage || undefined })),
   };
 }

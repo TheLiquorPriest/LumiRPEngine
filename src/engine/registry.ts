@@ -12,10 +12,11 @@
 // All functions here are pure: same inputs, same outputs; randomness only from the Rng passed in.
 
 import type { JsonObject, JsonValue } from "../shared/json";
-import type { DomainId, EntityId, FieldId, Level, PackId, PanelId, RelationTypeId, SlotId, TableId } from "../shared/ids";
+import type { DomainId, EntityId, FieldId, KindId, Level, PackId, PanelId, RelationTypeId, SlotId, TableId } from "../shared/ids";
 import type { LedgerEvent } from "../shared/ledger";
+import type { OrgMember, OrgPower } from "../shared/org";
 import type { LintIssue } from "../shared/protocol";
-import type { ColumnDef, DataTable } from "../shared/tables";
+import type { ColumnDef, DataTable, ShippedRevision } from "../shared/tables";
 import type { ActionDef, EffectSpec, FeedScope, FieldType, KindDef, MapDisplay, RelationTypeDef, RuleDef, ScheduleDef, WorldDoc } from "../shared/world";
 import type { Value } from "./expr";
 import type { Registry } from "./registry-impl";
@@ -260,12 +261,14 @@ export interface ProcessDef {
   ended?(ctx: ReadContext, agent: EntityId, activity: { type: string; until: number }): LedgerEvent[];
 }
 
-/** A pack's default table and its column contract (ARCHITECTURE §6). */
+/** A pack's default table and its column contract (ARCHITECTURE §6), with every revision it has shipped as. */
 export interface TableDef {
   id: TableId;
   schema: string;
   columns: Record<string, ColumnDef>;
   defaults: DataTable | null;
+  /** The revisions `defaults` has shipped as, oldest first, the last being `defaults` itself (the table build's record); none for a table without defaults. */
+  shipped?: readonly ShippedRevision[];
 }
 
 /**
@@ -306,6 +309,27 @@ export interface PanelViewDef {
   build(ctx: ReadContext, prefs: ViewPrefs): JsonValue;
 }
 
+/**
+ * The ways a kind's organizations have members beyond what an ancestor's provider gives (ORG-SPEC
+ * §3.2): a business's owners and staff, a party's travellers. An organization's members are the rows
+ * of every provider up its kind's chain; the `group` provider's are its `member_of` links, which the
+ * engine also walks upward itself. Only rows of a member group nest: its members count through it.
+ */
+export type MembershipProvider = (ctx: Pick<ReadContext, "registry" | "world" | "state">, org: EntityId) => OrgMember[];
+
+/**
+ * A pack's section of an organization's page (`orgs.org`, ORG-SPEC §4.4): its money, payroll,
+ * ownership or taxes. It shows to a reader who holds `power` there (anyone who may see the
+ * organization, without one); `build` returns null when the organization has none of it.
+ */
+export interface OrgSectionDef {
+  id: string;
+  label: string;
+  power?: OrgPower;
+  /** `viewer` is the player character, or null for the GM, who sees every name. */
+  build(ctx: ReadContext, org: EntityId, viewer: EntityId | null): JsonValue | null;
+}
+
 export interface CoreRegistry {
   kind(def: KindDef): void;
   relation(def: RelationTypeDef): void;
@@ -331,6 +355,9 @@ export interface CoreRegistry {
   proposal(def: ProposalChannelDef): void;
   lint(rule: LintRule): void;
   view(def: PanelViewDef): void;
+  /** Adds `provider`'s members to every organization of `kind` and the kinds extending it; several packs may add to one kind (a group's member links, its staff). */
+  membership(kind: KindId, provider: MembershipProvider): void;
+  orgSection(def: OrgSectionDef): void;
 }
 
 export interface PackDef {

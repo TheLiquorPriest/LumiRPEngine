@@ -3,21 +3,25 @@
 // secrets, whole), the intent the GM set for them, where they are and whom they see there, and the
 // occasion. Then each source the user has minds read (Settings → Minds → What a mind reads), each
 // within its own limit: the story as it stands (the lore pinned to them and to where they are, the
-// lore the turn activates, how the latest reply ended and what the player says), their usual routine
-// (on by default: habits to weigh, never orders), their plans (on by default: what the turns stated
-// and the GM set), what they know (on by default while the chat tracks knowledge, §24.11: their own
-// holdings, which then stand for the secrets an author gave them, a cue's aside), and, when switched
-// on, their own summary, notes and what they saw, last thoughts, recall of the turns they were there
-// for, and their life (money, the day and commitments). Nothing limits the whole: a part's own limit
-// is the only one, so no room left by the others cuts what the user allowed. Never the GM view
+// lore the turn activates, how the latest reply ended and what the player says, and their things:
+// on them, held for others, theirs someone else has, theirs missing, ITEMS-SPEC §5.5), their usual
+// routine (on by default: habits to weigh, never orders), their plans (on by default: what the
+// turns stated and the GM set), what they know (on by default while the chat tracks knowledge,
+// §24.11: their own holdings, which then stand for the secrets an author gave them, a cue's aside),
+// and, when switched on, their own summary, notes and what they saw, last thoughts, recall of the
+// turns they were there for, and their life (money, the day and commitments). Nothing limits the
+// whole: a part's own limit is the only one, so no room left by the others cuts what the user
+// allowed. Never the GM view
 // (but for the intent the GM set for them), another mind, what another character's memory says they
 // were told, or a turn they weren't present for.
 
+import { ownersIn } from "../shared/finance";
 import type { EntityId, MessageId, PlaceId } from "../shared/ids";
 import type { KnowledgeSettings, Limit, MindMoment, MindsCharacter, MindsMemoryConfig, MindsReads } from "../shared/minds";
 import { factId, knowledgeText, knowledgeThreshold, limitOf, planWords } from "../shared/minds";
 import { applyMarks } from "../shared/secret-marks";
 import { loreIsSecret } from "../shared/lore";
+import { gotOf, grantBasisOf } from "../shared/things";
 import type { LoreEntryDef, StepPurpose, WorldDoc } from "../shared/world";
 import { activitySpanEnd, ENGINE_FIELDS, formatMoney } from "../shared/world";
 import { calendarOf, dateAt, dayPartAt, formatClock, formatHHMM, holidaysOn } from "../engine/calendar";
@@ -30,7 +34,10 @@ import type { Registry } from "../engine/registry-impl";
 import { together } from "../engine/presence";
 import { fieldDef, isGone, kindIs, placeOfEntity } from "../engine/scope";
 import type { WorldState } from "../engine/state";
+import { thingIndex } from "../engine/thing-index";
+import { contentsOf, isThing, possessorOf } from "../engine/things";
 import { agendaFor } from "../engine/tracks";
+import { ownsThrough } from "../engine/org";
 import { canSeeEntity, knows, loreFactId, loreGateReader } from "../engine/visibility";
 import { dayPlan } from "../packs/castlife/core/index";
 import { usualRoutine } from "../packs/castlife/core/usual";
@@ -39,6 +46,8 @@ import { intentLines, intentOf } from "../packs/minds/core/intent";
 import { holdingLine, latestTurns, rankedHoldings } from "../packs/minds/core/knowledge";
 import { worldSecrets } from "../packs/minds/core/knowledge-section";
 import { faded, openCommitments, openPlans, readCharacter, readKnowledge, readSlice, salienceNow } from "../packs/minds/core/state";
+import { planMemoryLines } from "../packs/orgs/core/agenda";
+import { orgMindLines } from "../packs/orgs/core/feed";
 import { CHARS_PER_TOKEN, sectionTokens } from "./book";
 import type { HostMessage } from "./host";
 import { recentMessages } from "./interpret-context";
@@ -350,6 +359,68 @@ function lifeLines(scope: MindScope, c: MindsCharacter): string[] {
   return out;
 }
 
+/** How deep the things on someone are followed, holder in holder. */
+const THINGS_DEPTH = 8;
+
+/**
+ * Their things, when they read them (ITEMS-SPEC §5.5 Minds, on by default): what they have on them
+ * (their own, or nobody's, and their household's or group's), what they hold for someone else and
+ * since when, theirs that someone else has (since when, or till when it is lent) and theirs that is
+ * missing. Only what they may know of: a thing hidden on them that they don't know is there isn't
+ * theirs to tell, and one of theirs taken without a right to it is missing to them, never told as
+ * with whoever took it. The player character by the name the mind knows them by.
+ */
+function thingsLines(scope: MindScope): string[] {
+  const { reg, world, state, who } = scope;
+  const ctx = reg.context(world, state);
+  const cal = calendarOf(world);
+  const nameFor = (id: EntityId): string => (id === world.pov ? povLabel(scope) : nameOf(scope, id));
+  // A name as a phrase after "your": its first letter lowered unless the name is an initialism ("TV").
+  const phrase = (name: string): string => (/^\p{Lu}\p{Ll}/u.test(name) ? `${name.charAt(0).toLowerCase()}${name.slice(1)}` : name);
+  const since = (id: EntityId): string => {
+    const at = gotOf(own(state.entities, id)?.fields.got)?.at;
+    return at !== undefined ? `since ${formatClock(cal, at)}` : "";
+  };
+  const ownersOf = (id: EntityId): EntityId[] => [...new Set(ownersIn(own(state.entities, id)?.fields ?? {}).map((o) => o.party))];
+  const on: string[] = [];
+  const holding: string[] = [];
+  const walk = (holder: EntityId, depth: number): void => {
+    if (depth > THINGS_DEPTH) return;
+    for (const id of contentsOf(state, holder)) {
+      const e = own(state.entities, id);
+      if (!e || isGone(state, id) || !isThing(ctx, id)) continue;
+      const owners = ownersOf(id);
+      const theirs = owners.length === 0 || owners.some((o) => ownsThrough(ctx, who, o));
+      if (!owners.includes(who) && !canSeeEntity(reg, world, state, who, id)) continue;
+      if (theirs) on.push(holder === who ? e.name : `${e.name} (in ${own(state.entities, holder)?.name ?? holder})`);
+      else {
+        const why = [since(id), gotOf(e.fields.got)?.why ?? ""].filter((s) => s !== "").join("; ");
+        holding.push(`- Holding for ${owners.map(nameFor).join(" and ")}: ${e.name}${why !== "" ? ` (${why})` : ""}`);
+      }
+      walk(id, depth + 1);
+    }
+  };
+  walk(who, 0);
+  const elsewhere: string[] = [];
+  const missing: string[] = [];
+  for (const id of thingIndex(ctx).owned.get(who) ?? []) {
+    const e = own(state.entities, id);
+    if (!e || isGone(state, id)) continue;
+    const name = phrase(e.name);
+    const has = possessorOf(ctx, id);
+    if (e.fields.lost === true) missing.push(`your ${name} (lost)`);
+    else if (has === null || has === who) continue;
+    else if (gotOf(e.fields.got)?.how === "took") missing.push(`your ${name} (taken; you don't know who has it)`);
+    else {
+      const loan = own(state.entities, has)?.relations.find((r) => r.type === "uses" && r.to === id && grantBasisOf(r.fields, r.until) === "loan");
+      const when = loan?.until !== undefined ? `lent, until ${formatClock(cal, loan.until)}` : since(id);
+      const holder = nameFor(has);
+      elsewhere.push(`- ${holder.charAt(0).toUpperCase()}${holder.slice(1)} has your ${name}${when !== "" ? ` (${when})` : ""}`);
+    }
+  }
+  return [...(on.length > 0 ? [`- On you: ${on.join(", ")}`] : []), ...holding, ...elsewhere, ...(missing.length > 0 ? [`- Missing: ${missing.join(", ")}`] : [])];
+}
+
 /**
  * Their plans, when they read them (DESIGN §24.5, on by default): their open plans in force, soonest
  * first, each with its time, place and who else is in it: what the turns stated they will do and
@@ -539,8 +610,11 @@ export function mindContext(scope: MindScope, report?: MindContextReport): strin
     `You are ${e?.name ?? who}. ${occasion(scope, place)}`,
     block("Who you are", identityLines(scope)),
     block("What you mean to do", intentLines(intentOf(state, who))),
+    // Your organizations (ORG-SPEC §3.15): the orders asked of them first, then their place in each.
+    reads.orgs.on ? block("Your organizations", linesWithin(orgMindLines(scope.reg.context(world, state), who), reads.orgs.tokens)) : "",
     knowledgeBlock(scope, place),
     block("Where you are", sceneLines(scope, place)),
+    reads.things.on ? block("Your things", linesWithin(thingsLines(scope), reads.things.tokens)) : "",
     reads.summary.on && c.summary !== "" ? block("Your story so far", [clip(c.summary, charsOf(reads.summary.tokens))]) : "",
     block("Your usual routine (habits you may weigh, never orders: what is happening now comes first)", routine),
     block("Your plans", plans),
@@ -588,6 +662,8 @@ export function memoryContext(scope: MindScope, turn: { user: string; reply: str
     c.summary !== "" ? block("Your story so far", [c.summary]) : "",
     block("Your open commitments (by id)", commitments),
     block("Your plans", plans),
+    // The orders asked of them on an organization's plan are recorded once there (assess-party §6.2): the memory step never copies one.
+    block("Orders you've been given (already recorded: never restate one as a plan or a commitment)", planMemoryLines(scope.reg.context(world, state), who)),
     block("What you remember", memoryLines(scope, c)),
     block("Pinned lore", pinnedLines(scope, "memory")),
     recentBlock(scope, recentChat(scope)),

@@ -1,9 +1,9 @@
 // Settings → Agents (AGENT-LOOP-PLAN §15; INC1-SPEC R1, R6a; INC2-SPEC C12): what the agent runtime
 // runs under, kept in `UserSettings.agents`, apart from the classic steps' settings, so no classic
 // turn reads any of it. Every limit the runtime keeps is a setting here, with its default and the
-// words its page shows (`BUDGET_DEFS`, `TURN_DEFS`, `LOOP_DEFS`, `GM_OPS_DEF`, `KEPT_DEFS`, `COMPACTION_DEFS`, `MAIN_DEFS`, `OUTPUT_CHARS_DEF`, `SYSTEM_TOKENS_DEF`), and so is
+// words its page shows (`BUDGET_DEFS`, `TURN_DEFS`, `LOOP_DEFS`, `GM_OPS_DEF`, `CURATOR_OPS_DEF`, `KEPT_DEFS`, `COMPACTION_DEFS`, `MAIN_DEFS`, `OUTPUT_CHARS_DEF`, `SYSTEM_TOKENS_DEF`), and so is
 // everything the GM assistant runs with (`assistant`: Settings → Agents → Assistant), everything
-// an agent turn runs with (`pipeline`, `roles`, `main`, `context`, `finalReview`, `gmOpsPerTurn`, `kept`, `compaction`, `recording`,
+// an agent turn runs with (`pipeline`, `roles`, `main`, `context`, `finalReview`, `gmOpsPerTurn`, `curatorOps`, `kept`, `compaction`, `recording`,
 // `review` and `vsClassic`), and how much every agent's system files may take (`systemTokens`); the
 // values that stay fixed are §16's: the effort levels, "set by the model" as the host's
 // `{source: "custom", effort: "auto"}`, and Anthropic's 4 cache breakpoints per request, which the
@@ -125,6 +125,11 @@ export const REVIEW_PLACEMENTS: readonly ReviewPlacement[] = ["chips", "gate"];
 export interface PipelineSettings {
   mode: PipelineMode;
   memory: MemoryPlacement;
+  /**
+   * The Curator on agent chats (ITEMS-SPEC §7.1, I9): it keeps things, places, walk-on people and
+   * purchases true to the reply, and the read proposes none of those; off, the read does, as classic's.
+   */
+  curator: boolean;
 }
 
 /** The main session's compaction (Settings → Agents → Compaction): once it passes `atTokens`, all but the last `keepTurns` turns are summarized; `summarizeTool` gives the main agent its summarize tool. */
@@ -242,6 +247,8 @@ export interface AgentSettings {
   finalReview: FinalReviewSettings;
   /** The GM's edits a turn's agents may stage in all, per turn (Settings → Agents → Budgets). */
   gmOpsPerTurn: number;
+  /** The changes to things and places the Curator may stage in a turn (Settings → Agents → Roles, Curator ops per turn). */
+  curatorOps: number;
   /** What the engine keeps in memory for agent turns (Settings → Agents → Budgets). */
   kept: KeptSettings;
   compaction: CompactionSettings;
@@ -274,7 +281,7 @@ export function defaultAgentSettings(): AgentSettings {
     acceptance: { connections: [], estimateFactor: 2 },
     // The assistant reads everything, outside the story, and its changes wait for your Apply.
     assistant: { connectionId: null, model: null, effort: "inherit", apply: "ask", historyTokens: 20_000, budget: {} },
-    pipeline: { mode: "fixed", memory: "after_reply" },
+    pipeline: { mode: "fixed", memory: "after_reply", curator: true },
     roles: defaultRoleSettings(),
     // The main agent reads the workspace, everything secrets marked as every turn agent does; its digest and pins, 2,000 tokens each (§15).
     main: { connectionId: null, model: null, effort: "inherit", families: ["workspace"], budget: {}, digestTokens: 2000, pinsTokens: 2000 },
@@ -282,6 +289,7 @@ export function defaultAgentSettings(): AgentSettings {
     // The final review is on, and a review that fails sends the sections unrevised; its budget is the main agent's.
     finalReview: { on: true, onFail: "send", budget: {} },
     gmOpsPerTurn: 10,
+    curatorOps: 24,
     kept: { runs: 64, gates: 256, watchers: 256, live: 16, texts: 4_000_000, folds: KEPT_FOLDS_DEFAULT },
     compaction: { atTokens: 32_000, keepTurns: 3, summarizeTool: true },
     recording: { outputChars: 2000 },
@@ -379,6 +387,9 @@ export const HISTORY_TOKENS_DEF: AgentLimitDef = { label: "History tokens", limi
 
 /** Settings → Agents → Budgets: the GM's edits an agent turn may stage. */
 export const GM_OPS_DEF: AgentLimitDef = { label: "GM edits per turn", limits: "How many of the GM's edits (a spawn, a removal, any field, a stage, the clock) a turn's agents may stage together.", fires: "The edits past it are refused, and the agent that asked is told so.", unit: "count", min: 0, none: null };
+
+/** Settings → Agents → Roles: the Curator's changes to things and places in a turn. */
+export const CURATOR_OPS_DEF: AgentLimitDef = { label: "Curator ops per turn", limits: "How many changes to things and places (each thing made, moved, handed over, kept somewhere, named; each place made) the Curator may stage in one turn.", fires: "The changes past it are refused, and the Curator is told so.", unit: "count", min: 0, none: null };
 
 /** Settings → Agents → Budgets: what the engine keeps in memory, at least one of each turn's kind, so a turn can run, wait at its gate and be heard, and one message worked out; the texts it keeps once read may be none. */
 export const KEPT_DEFS: Readonly<Record<keyof KeptSettings, AgentLimitDef>> = {
@@ -581,12 +592,13 @@ export function agentSettingsOf(raw: unknown, d: Readonly<AgentSettings> = defau
       estimateFactor: typeof factor === "number" && Number.isFinite(factor) && factor >= ESTIMATE_FACTOR_MIN ? factor : d.acceptance.estimateFactor,
     },
     assistant: assistantOf(a.assistant, d.assistant),
-    pipeline: { mode: oneOf(pipeline.mode, PIPELINE_MODES, d.pipeline.mode), memory: oneOf(pipeline.memory, MEMORY_PLACEMENTS, d.pipeline.memory) },
+    pipeline: { mode: oneOf(pipeline.mode, PIPELINE_MODES, d.pipeline.mode), memory: oneOf(pipeline.memory, MEMORY_PLACEMENTS, d.pipeline.memory), curator: typeof pipeline.curator === "boolean" ? pipeline.curator : d.pipeline.curator },
     roles: rolesOf(a.roles, d.roles),
     main: mainOf(a.main, d.main),
     context: contextSettingsOf(a.context, d.context),
     finalReview: finalReviewOf(a.finalReview, d.finalReview),
     gmOpsPerTurn: whole(a.gmOpsPerTurn, GM_OPS_DEF.min) ?? d.gmOpsPerTurn,
+    curatorOps: whole(a.curatorOps, CURATOR_OPS_DEF.min) ?? d.curatorOps,
     kept: { runs: whole(kept.runs, KEPT_DEFS.runs.min) ?? d.kept.runs, gates: whole(kept.gates, KEPT_DEFS.gates.min) ?? d.kept.gates, watchers: whole(kept.watchers, KEPT_DEFS.watchers.min) ?? d.kept.watchers, live: whole(kept.live, KEPT_DEFS.live.min) ?? d.kept.live, texts: whole(kept.texts, KEPT_DEFS.texts.min) ?? d.kept.texts, folds: whole(kept.folds, KEPT_DEFS.folds.min) ?? d.kept.folds },
     compaction: { atTokens: whole(compaction.atTokens, COMPACTION_DEFS.atTokens.min) ?? d.compaction.atTokens, keepTurns: whole(compaction.keepTurns, COMPACTION_DEFS.keepTurns.min) ?? d.compaction.keepTurns, summarizeTool: typeof compaction.summarizeTool === "boolean" ? compaction.summarizeTool : d.compaction.summarizeTool },
     recording: { outputChars: whole(recording.outputChars, OUTPUT_CHARS_DEF.min) ?? d.recording.outputChars },

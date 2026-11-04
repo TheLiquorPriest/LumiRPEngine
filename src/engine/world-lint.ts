@@ -13,7 +13,7 @@ import { narratorViewOf } from "../shared/settings";
 import { DOMAINS } from "../shared/ids";
 import { isBand, tierOf } from "../shared/tiers";
 import type { EffectSpec, FieldDef, KindDef, WorldDoc } from "../shared/world";
-import { ALIVE, BUILTIN_LIFE_STATES, isLifeState, MAX_SPAWN_CAP, objectiveWhen } from "../shared/world";
+import { ALIVE, BUILTIN_LIFE_STATES, GM_OWNER, isLifeState, MAX_PLACE_CAP, MAX_SPAWN_CAP, objectiveWhen } from "../shared/world";
 import { callsIn, compile } from "./expr";
 import { frozenPredicates } from "./realism";
 import { rulesetFloor, type Registry } from "./registry-impl";
@@ -221,6 +221,11 @@ export function lintStructure(world: WorldDoc, reg: Registry): LintIssue[] {
   if (world.spawnTier !== undefined && !tierOf(world, world.spawnTier)) err("spawnTier", "unknown_tier", `New people would join tier "${world.spawnTier}", which isn't one of the world's tiers.`);
   const cap: unknown = world.spawnCap;
   if (cap !== undefined && !(typeof cap === "number" && Number.isInteger(cap) && cap >= 0 && cap <= MAX_SPAWN_CAP)) err("spawnCap", "spawn_cap", `The number of people replies may introduce must be a whole number from 0 to ${MAX_SPAWN_CAP}.`);
+  // Places made in play (ITEMS-SPEC §6.2, §11): per chat and per reply.
+  for (const [key, what] of [["placeCap", "a chat"], ["placesPerTurn", "one reply"]] as const) {
+    const v: unknown = world[key];
+    if (v !== undefined && !(typeof v === "number" && Number.isInteger(v) && v >= 0 && v <= MAX_PLACE_CAP)) err(key, "place_cap", `The number of places ${what} may make in play must be a whole number from 0 to ${MAX_PLACE_CAP}.`);
+  }
   // The narrator's knowledge in the world's chats (DESIGN §6.11): a whole view, or none at all.
   const narrator: unknown = world.narrator;
   if (narrator !== undefined && narratorViewOf(narrator) === null) err("narrator", "narrator", 'The narrator\'s knowledge needs both parts: knowledge "scene" or "pov", and secrets "marked" or "omit". As it is, the world\'s chats follow each player\'s Settings.');
@@ -265,7 +270,7 @@ export function lintStructure(world: WorldDoc, reg: Registry): LintIssue[] {
 
   // Tracks: owners, stage targets, unreachable stages, predicates that don't parse.
   for (const [id, t] of Object.entries(world.tracks)) {
-    if (t.owner && !own(world.entities, t.owner)) err(`tracks.${id}.owner`, "refs", `Track ${id} belongs to an unknown "${t.owner}".`);
+    if (t.owner && t.owner !== GM_OWNER && !own(world.entities, t.owner)) err(`tracks.${id}.owner`, "refs", `Track ${id} belongs to an unknown "${t.owner}".`);
     if (!own(t.stages, t.start)) err(`tracks.${id}.start`, "refs", `Track ${id} starts at an unknown stage "${t.start}".`);
     const reached = new Set<string>();
     const queue = [t.start];

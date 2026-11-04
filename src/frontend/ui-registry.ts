@@ -1,14 +1,14 @@
 // The UiRegistry implementation (ARCHITECTURE §5). Each pack's ui registers its panels, Build
-// editors, config fields, chip renderers, detail sheets, Now glances, GM view tabs and editors for
-// its kinds' structured fields; a duplicate registration is a pack conflict and throws, so two packs
-// can never silently shadow each other.
+// editors, config fields, chip renderers, detail sheets, Now glances, GM view tabs, editors for
+// its kinds' structured fields and tabs of an organization's page; a duplicate registration is a
+// pack conflict and throws, so two packs can never silently shadow each other.
 
 import type { ComponentType } from "preact";
 import type { PackId } from "../shared/ids";
 import type { WorldCollection } from "../shared/protocol";
 import type { ChipKind } from "../shared/state-view";
 import type { SheetKind } from "./app";
-import type { ChipProps, EditorDef, FieldEditorDef, GlanceDef, GmSectionDef, PackConfigProps, PanelDef, PlaceFieldDef, PreviewProps, SheetProps, UiPackDef, UiRegistry } from "./registry";
+import type { ChipProps, EditorDef, FieldEditorDef, GlanceDef, GmSectionDef, OrgTabDef, PackConfigProps, PanelDef, PlaceFieldDef, PreviewProps, SheetProps, UiPackDef, UiRegistry } from "./registry";
 
 export interface UiCatalog {
   /** Panels in `order`, ties by id. */
@@ -29,6 +29,8 @@ export interface UiCatalog {
   sheets: ReadonlyMap<SheetKind, ComponentType<SheetProps>>;
   /** Now's glances in `order`, ties by id. */
   glances: readonly GlanceDef[];
+  /** The packs' tabs and parts of an organization's page in `order`, ties by id. */
+  orgTabs: readonly OrgTabDef[];
   packs: readonly string[];
 }
 
@@ -43,6 +45,7 @@ export function buildCatalog(packs: readonly UiPackDef[]): UiCatalog {
   const placeFields = new Map<string, PlaceFieldDef>();
   const sheets = new Map<SheetKind, ComponentType<SheetProps>>();
   const glances = new Map<string, GlanceDef>();
+  const orgTabs = new Map<string, OrgTabDef>();
   const ids = new Set<string>();
   for (const pack of packs) {
     if (ids.has(pack.id)) throw new Error(`UI pack ${pack.id} is registered twice`);
@@ -89,6 +92,10 @@ export function buildCatalog(packs: readonly UiPackDef[]): UiCatalog {
         if (glances.has(def.id)) throw new Error(`Glance ${def.id} (pack ${pack.id}) is already registered`);
         glances.set(def.id, def);
       },
+      orgTab(def) {
+        if (orgTabs.has(def.id)) throw new Error(`An organization tab ${def.id} (pack ${pack.id}) is already registered`);
+        orgTabs.set(def.id, def);
+      },
     };
     pack.register(registry);
   }
@@ -103,6 +110,7 @@ export function buildCatalog(packs: readonly UiPackDef[]): UiCatalog {
     placeFields: [...placeFields.values()],
     sheets,
     glances: [...glances.values()].sort((a, b) => a.order - b.order || a.id.localeCompare(b.id)),
+    orgTabs: [...orgTabs.values()].sort((a, b) => a.order - b.order || a.id.localeCompare(b.id)),
     packs: [...ids],
   };
 }

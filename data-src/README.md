@@ -1,10 +1,10 @@
 # data-src — raw default data tables
 
-Raw, neutral JSON for the **Modern US** default data pack (design decision D26, `docs/DESIGN.md`). These are source tables, not the engine's schema: `scripts/tables/build.ts` (`bun run tables`) maps them into the pinned pack tables under `src/packs/<pack>/core/tables/modern-us/` (ARCHITECTURE §6), validating types, units, bands and references on the way; every source field must be consumed by a mapping or the build fails. Nothing here is imported by the extension build.
+Raw, neutral JSON for the **Modern US** default data pack (design decision D26, `docs/DESIGN.md`). These are source tables, not the engine's schema: `scripts/tables/build.ts` (`bun run tables`) maps them into the pinned pack tables under `src/packs/<pack>/core/tables/modern-us/` (ARCHITECTURE §6), validating types, units, bands and references on the way; every source field must be consumed by a mapping or the build fails. Nothing here is imported by the extension build. A build that changes a table also records its new revision, and what changed against the committed one, in that pack's `shipped.json`, so worlds made on the earlier table are offered the new one (Build → World → Data updates): commit the tables and `shipped.json` together.
 
 - **Region of the pack:** `us/` (United States).
-- **Year the figures reflect:** about **2025–2026** (point-in-time, mid-2025 to early-2026 values).
-- **Provenance:** compiled from well-known public statistics as the author knows them (BLS, EIA, Federal Reserve, IRS, FDIC, KFF, Tax Foundation, BEA, USDA, AAA and others), then rounded. Nothing was scraped or fetched live. Every file is marked `"approximate": true` and carries a `basis` string; treat the numbers as plausible defaults, not as authoritative statistics.
+- **Year the figures reflect:** about **2025–2026** (point-in-time, mid-2025 to early-2026 values); the stock index's history runs from May 2003 to October 2026.
+- **Provenance:** compiled from well-known public statistics as the author knows them (BLS, EIA, Federal Reserve, IRS, FDIC, KFF, Tax Foundation, BEA, USDA, AAA and others), then rounded. Nothing was scraped or fetched live, and every file is marked `"approximate": true` and carries a `basis` string; treat the numbers as plausible defaults, not as authoritative statistics. The one exception is `index-history.json`, the stock index's month-end closes: copied exactly from a file its publisher serves, it is `"approximate": false`, and its `basis` names where the file was fetched, when, and its SHA-256, so it can be checked against its source.
 
 ## Conventions (all files)
 
@@ -25,10 +25,11 @@ Raw, neutral JSON for the **Modern US** default data pack (design decision D26, 
 |---|---|---|
 | `regions.json` | 51 | 50 states + DC |
 | `occupations.json` | 56 | occupations in 12 categories |
-| `prices.json` | 340 items in 19 categories | price bands |
+| `prices.json` | 358 items in 20 categories | price bands; sizes on physical goods |
 | `vehicles.json` | 19 | 12 road, 4 marine, 3 off-road classes |
 | `gear.json` | 90 items, 34 containers, 5 kits (+ 20 equip slots) | carried and household gear |
 | `finance.json` | 7 sections | macro, credit card, deposit accounts, loans, investing, payroll deductions, federal tax |
+| `index-history.json` | 282 months | the stock index's total return at each month's last close, May 2003 to October 2026 (exact) |
 | `calendar.json` | 11 federal holidays, 30 observances, 24 shift patterns | rules, not dates |
 
 ### `regions.json`
@@ -45,7 +46,7 @@ Basis: BLS OEWS May 2024 national medians as recalled (rounded); gig, intern and
 
 ### `prices.json`
 
-`categories[]` → `items[]` with `id`, `name`, `unit` (per gallon, night, month, person, and so on) and `price_cents { min, typical, max }`, optional `notes`. Categories: groceries (per-item staples), groceries (weekly baskets, USDA food-plan style), meals out, coffee, alcohol, clothing, electronics, tools and hardware, household goods, personal care, medical, entertainment, transport (public and for-hire, including bus fare, rideshare base/mile/minute, taxi, flights per segment, trains), fuel and charging (regular, midgrade, premium, diesel, E85, marine gasoline and diesel, EV home/L2/DC fast per kWh), vehicle services (oil change, tires, brakes, inspection, car wash, tow), lodging, utilities (monthly), subscriptions, gifts. Prices exclude sales tax and tip unless the name says otherwise. Scale with `regions.cost_of_living_multiplier` (rents move more than goods).
+`categories[]` → `items[]` with `id`, `name`, `unit` (per gallon, night, month, person, and so on) and `price_cents { min, typical, max }`, optional `notes`, and on physical goods an optional `size` (pocket | hand | armful | heavy | furniture | builtin, the ITEMS-SPEC size ladder: how one is carried; services, fares and cups have none). Categories: groceries (per-item staples), groceries (weekly baskets, USDA food-plan style), meals out, coffee, alcohol, clothing, electronics, tools and hardware, household goods, home furnishings and appliances (refrigerator, washer, dryer, range, sofa, armchair, mattress, bed frame, dresser, wardrobe, tables and chairs, desk, TVs, lamps, rug; prices exclude delivery and installation), personal care, medical, entertainment, transport (public and for-hire, including bus fare, rideshare base/mile/minute, taxi, flights per segment, trains), fuel and charging (regular, midgrade, premium, diesel, E85, marine gasoline and diesel, EV home/L2/DC fast per kWh), vehicle services (oil change, tires, brakes, inspection, car wash, tow), lodging, utilities (monthly), subscriptions, gifts. Prices exclude sales tax and tip unless the name says otherwise. Scale with `regions.cost_of_living_multiplier` (rents move more than goods).
 
 Basis: BLS CPI average prices, USDA, EIA, AAA, STR, DOT, KFF, Healthcare Bluebook / FAIR Health and published retail list prices, rounded. The medical "billed / uninsured" rows are chargemaster-style amounts; insured patients pay copays and deductibles (see `finance.json`).
 
@@ -58,8 +59,8 @@ Basis: representative models' MSRP and used-market bands (Edmunds, KBB), EPA fue
 ### `gear.json`
 
 - `equip_slots[]`: slot ids (`head`, `face`, `neck`, `torso_base`, `torso_mid`, `torso_outer`, `full_body`, `hands`, `wrist`, `waist`, `legs`, `underwear`, `socks`, `feet`, `back`, `shoulder`, `hand_held`, `pocket`, `pocket_or_bag`, `none`).
-- `items[]` (90): `id`, `name`, `category` (carried, household, tool, clothing, recreation), `equip_slot`, `weight_g` (empty/dry), `volume_l`, `price_cents` band, `notes`.
-- `containers[]` (34): `capacity_l`, `max_load_kg`, `empty_weight_g`, `location` (carried | worn | furniture | vehicle_fixed), `equip_slot`, price. Includes wallet, purse, daypack/hiking pack, duffel, suitcases, toolbox, glovebox, vehicle trunks/beds and boat lockers.
+- `items[]` (90): `id`, `name`, `category` (carried, household, tool, clothing, recreation), `equip_slot`, `weight_g` (empty/dry), `volume_l`, `size` (the size ladder), `price_cents` band, `notes`.
+- `containers[]` (34): `capacity_l`, `max_load_kg`, `empty_weight_g`, `location` (carried | worn | furniture | vehicle_fixed), `size` (its own; absent on vehicle_fixed rows, which are part of their vehicle), `holds` (the largest size it takes, never above its own size and never builtin), `equip_slot`, price. Includes wallet, purse, daypack/hiking pack, duffel, suitcases, toolbox, glovebox, vehicle trunks/beds and boat lockers.
 - `kits[]` (5): `piece_count`, `pieces_total_weight_g`, `packed_volume_l`, price band, `recommended_container_id` and `pieces[] { name, qty, weight_g_each }`. **`mechanic_toolbox_45` has exactly 45 pieces** (invariant: sum of qty = 45; the box is separate). Also first-aid, camping, fishing tackle (rod/reel is a separate item) and basic sewing kits.
 
 Basis: typical product weights from spec sheets; prices consistent with `prices.json`.
@@ -69,6 +70,20 @@ Basis: typical product weights from spec sheets; prices consistent with `prices.
 Sections: `macro` (Fed funds, prime, CPI, Treasury yields), `credit_card` (APR range, minimum-payment formula with issuer variants and a default, late/returned-payment/cash-advance/foreign fees, grace period, annual fee, credit-score bands), `deposit_accounts` (savings APY regular vs high-yield, money market, CD, checking fees including overdraft and ATM), `loans` (auto new/used by credit tier, mortgage 30/15-year with down payment, PMI, closing costs, tax and insurance, personal loan, federal student loans, payday, BNPL), `investing` (broad-index annual return **11.0% arithmetic / 9.8% geometric, 16.0% volatility** with monthly/daily equivalents and a GBM recipe for seeded price paths; bonds, cash, home appreciation; retirement-account limits), `payroll_deductions_other_than_tax` (health premium ranges for single/family, deductible and out-of-pocket maximums, dental/vision, **401(k) default 3% and typical employee deferral 7.7% with employer match**, FSA/HSA, union dues, garnishment limits), `taxes_federal` (2025 brackets for single and married-filing-jointly in cents, standard deduction, FICA parameters, child tax credit, EITC, capital-gains bands, IRS mileage rate).
 
 Basis: Fed G.19/H.15, FDIC, Freddie Mac PMMS, Bankrate/Edmunds, CFPB, KFF 2025, Vanguard HAS 2025, IRS 2025/2026 announcements (2026 401(k) $24,500 and IRA $7,500 values are as announced in late 2025). Rates float; the table is a snapshot.
+
+### `index-history.json`
+
+`months[]` fields: `id` (the month, `YYYY-MM`), `date` (the trading day of its last close, `YYYY-MM-DD`) and `level` (the close). The series is the **Thrift Savings Plan's C Fund**, which tracks the S&P 500 Index and reinvests what it earns, so its share price is the index's total return, net of the fund's small costs; a level is read only as a ratio to another month's. The first month is the fund's $10.0000 base of 31 May 2003, when daily share prices began; the last is October 2026. The economy pack's market follows it (DESIGN §27.2): a world that keeps the table moves its equities as the market moved, and outside these months walks with the swings they had. Its monthly log returns give the stock index's drift and volatility (§27.1): mean 0.0089 and spread 0.0418 a month, about 11.7 % and 14.5 % a year.
+
+Basis: exact, not recalled. `scripts/tables/index-history.ts` converts the TSP's share price history download (the URL in the script and in `basis.url`, a query whose dates are fixed so the same bytes come back; fetched 2026-11-02 with a browser's user agent) into this file, taking each month's last close as published (four decimals). It refuses any file whose SHA-256 isn't the pinned one, so the conversion can be repeated from the source at any time:
+
+```sh
+curl -A 'Mozilla/5.0' -o fund-price-history.csv '<basis.url>'
+bun scripts/tables/index-history.ts fund-price-history.csv
+bun run tables
+```
+
+TSP data is published by a U.S. federal agency (the Federal Retirement Thrift Investment Board), so it is in the public domain (17 U.S.C. §105). The build accepts `approximate: false` only with `basis.url`, `basis.retrieved` and `basis.sha256`, and checks the table's rows: consecutive months, each close's date in its month, each level above nothing.
 
 ### `calendar.json`
 

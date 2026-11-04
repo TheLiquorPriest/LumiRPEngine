@@ -1,7 +1,7 @@
-// Money → Flows (DESIGN §25): every standing transfer, bill, income and one-off that moves the
+// Money's flows (DESIGN §25): every standing transfer, bill, income and one-off that moves the
 // party's money, with its schedule, what it does when the money isn't there and how it has run.
-// The section lists them by status, each opens its own page, and every control there opens a page
-// of its own with one button that returns to the flow when it's done. The player creates,
+// In & out lists them (ORG-SPEC §5.1); each opens its own page, and every control there opens a
+// page of its own with one button that returns to the flow when it's done. The player creates,
 // edits, pauses, resumes and deletes the ones they may (in-world actions), pays an invoice billed
 // to them and gives notice on a lease they rent under; a flow a job, a lease or a loan derives is
 // changed at its source. The GM edits any stored flow's fields, name and status. An edit fills its
@@ -11,12 +11,12 @@
 import { useState } from "preact/hooks";
 import { CLASS_TRAITS, FLOW_KINDS, FLOW_SHORTFALLS, FLOW_STATUSES, PARTY_KINDS, type FinanceView, type Flow, type FlowStatus, type FlowView } from "../../../shared/finance";
 import { formatMoney } from "../../../shared/world";
-import { Badge, Button, Disclosure, Empty, IdText, List, ListRow, Section } from "../../../frontend/components";
+import { Badge, Button, Disclosure, IdText, List, ListRow, Section } from "../../../frontend/components";
 import { humanize } from "../../../frontend/format";
 import type { IconName } from "../../../frontend/icons";
 import { ActionPage, AmountField, ChoiceField, MONTH_CHOICES, NumberField, SelectField, TextField, unchangedProblem, WEEKDAY_CHOICES, type Choice } from "./forms";
-import type { HubControls, SectionProps } from "./hub";
-import { fallbackSources, findAccount, flowControls, flowSources, flowTargets, gmParties, payeeProblem, viewAccounts, type FlowControl } from "./layout";
+import type { GmControls, HubControls, PlayerControls, SectionProps } from "./hub";
+import { fallbackSources, findAccount, findFlow, flowControls, flowSources, flowTargets, gmParties, payeeProblem, viewAccounts, type FlowControl } from "./layout";
 import { FieldsPage } from "./lines";
 import { actionPage, Controls, detailPage, Hero, MoneyPage, Note, type HubNav, type HubPages } from "./nav";
 import { amountOf, blankFlowForm, flowCreateAction, flowEditOps, flowFormOf, flowFormProblem, flowSpawnOps, flowStatusAction, flowStatusOps, flowUpdateAction, invoiceAction, leaseEndAction, newIdFor, type FlowEvery, type FlowForm } from "./requests";
@@ -42,14 +42,9 @@ const SHORTFALL_LABEL: Readonly<Record<(typeof FLOW_SHORTFALLS)[number], string>
   defer: "Carry it to the next time",
 };
 
-/** Every flow the view carries: the party's own, a property's running costs and a household's shared costs. */
-function findFlow(view: FinanceView, id: string): FlowView | null {
-  return view.flows.find((f) => f.id === id) ?? view.properties.flatMap((p) => p.costs).find((f) => f.id === id) ?? view.household?.flows.find((f) => f.id === id) ?? null;
-}
-
 /** Whether the controls' mode may set up a new flow: the GM always, the player where flows run and an account can pay one. */
 function canCreate(view: FinanceView, controls: HubControls): boolean {
-  return controls.mode === "gm" || (view.features.includes("flows") && flowSources(view).length > 0);
+  return controls.mode === "gm" || (controls.mode === "player" && view.features.includes("flows") && flowSources(view).length > 0);
 }
 
 /**
@@ -57,7 +52,7 @@ function canCreate(view: FinanceView, controls: HubControls): boolean {
  * people they may pay, where what pays (`payers`, its From and the account it falls back on)
  * allows; for the GM, the party's accounts (a business's they run included) and anyone in the world.
  */
-function endpoints(view: FinanceView, controls: HubControls, payers: readonly string[]): { from: Choice[]; to: Choice[] } {
+function endpoints(view: FinanceView, controls: PlayerControls | GmControls, payers: readonly string[]): { from: Choice[]; to: Choice[] } {
   if (controls.mode === "player") return { from: flowSources(view).map((s) => ({ value: s.id, label: s.label })), to: flowTargets(view, controls.palette, payers).map((t) => ({ value: t.id, label: t.label })) };
   const accounts = viewAccounts(view).filter((a) => !CLASS_TRAITS[a.class].cash).map((a) => ({ value: a.id, label: a.name }));
   const parties = gmParties(controls.gm, PARTY_KINDS).map((p) => ({ value: p.id, label: `${p.name} (${p.kind})` }));
@@ -85,8 +80,8 @@ function withSpec(f: FlowView): f is FlowView & { spec: Flow } {
   return f.spec !== null;
 }
 
-/** A flow as a row: its name, from where to where and when, its amount and any trouble; it opens the flow's page. */
-export function FlowListRow(props: { flow: FlowView; nav: HubNav }) {
+/** A flow as a row: its name, from where to where and when, its amount and any trouble; it opens the flow's page, or `onOpen`'s. */
+export function FlowListRow(props: { flow: FlowView; nav: HubNav; onOpen?(): void }) {
   const f = props.flow;
   return (
     <ListRow
@@ -96,24 +91,32 @@ export function FlowListRow(props: { flow: FlowView; nav: HubNav }) {
       value={f.amount}
       badge={f.status !== "active" ? <Badge>{humanize(f.status)}</Badge> : f.missed > 0 ? <Badge tone="warn">Missed</Badge> : undefined}
       chevron
-      onClick={() => props.nav.open(detailPage("flow", f.id))}
+      onClick={props.onOpen ?? (() => props.nav.open(detailPage("flow", f.id)))}
     />
   );
 }
 
-function FlowsSection(props: SectionProps) {
+/** Standing payments by status, Active first, under one heading each, with New where the mode may set one up. */
+export function StandingPayments(props: SectionProps & { flows: readonly FlowView[] }) {
   const { view, controls, nav } = props;
-  const groups = FLOW_STATUSES.map((status) => ({ status, flows: view.flows.filter((f) => f.status === status) })).filter((g) => g.flows.length > 0);
+  const groups = FLOW_STATUSES.map((status) => ({ status, flows: props.flows.filter((f) => f.status === status) })).filter((g) => g.flows.length > 0);
+  if (groups.length === 0 && !canCreate(view, controls)) return null;
   return (
-    <MoneyPage nav={nav} name="flows" title="Flows">
+    <div class="lre-stack" data-lre-money-standing>
       {canCreate(view, controls) ? (
         <Button variant="primary" icon="plus" block onClick={() => nav.open(actionPage("flows", "new"))}>
           New standing payment or one-off
         </Button>
       ) : null}
-      {groups.length === 0 ? <Empty icon="refresh">No standing payments, income or one-offs.</Empty> : null}
+      {groups.length === 0 ? (
+        <Section title="Standing payments" flush>
+          <List>
+            <ListRow icon="refresh" title="None set up yet" />
+          </List>
+        </Section>
+      ) : null}
       {groups.map((g) => (
-        <Section key={g.status} title={humanize(g.status)} flush>
+        <Section key={g.status} title={`Standing payments · ${humanize(g.status)}`} flush>
           <List>
             {g.flows.map((f) => (
               <FlowListRow key={f.id} flow={f} nav={nav} />
@@ -121,7 +124,7 @@ function FlowsSection(props: SectionProps) {
           </List>
         </Section>
       ))}
-    </MoneyPage>
+    </div>
   );
 }
 
@@ -135,11 +138,16 @@ const CONTROL: Readonly<Record<FlowControl, { label: string; icon: IconName }>> 
   pay_now: { label: "Pay now", icon: "check" },
 };
 
+/** The player's controls on a flow its view allows, each its own page; an edit only where the flow's stored form came with it. */
+export function playerFlowControls(view: FinanceView, f: FlowView): FlowControl[] {
+  return flowControls(view, f).filter((c) => c !== "edit" || withSpec(f));
+}
+
 /** One flow: what it moves, when, how it has run, and the controls its mode allows. */
 function FlowPage(props: SectionProps & { flow: FlowView }) {
   const { view, controls, nav, flow: f } = props;
   const runs = view.detail && f.done + f.missed > 0 ? `${f.done} paid, ${f.missed} missed${f.deferred > 0 ? `, ${formatMoney(f.deferred, controls.currency)} carried` : ""}` : null;
-  const can = controls.mode === "player" ? flowControls(view, f).filter((c) => c !== "edit" || withSpec(f)) : [];
+  const can = controls.mode === "player" ? playerFlowControls(view, f) : [];
   // A flow whose stored form the viewer can't see still leads as a figure when its words are one.
   const figure = f.spec ? "fixed" in f.spec.amount : f.cents !== null && f.amount === formatMoney(f.cents, controls.currency);
   return (
@@ -159,26 +167,28 @@ function FlowPage(props: SectionProps & { flow: FlowView }) {
         ) : (
           <Note>{f.source === "entity" ? "Only whoever pays it can change it." : `Set by its ${humanize(f.source).toLowerCase()}; change it there.`}</Note>
         )
-      ) : f.source === "entity" ? (
-        <Controls name={f.id}>
-          {withSpec(f) ? (
-            <Button icon="edit" onClick={() => nav.open(actionPage("flow", f.id, "edit"))}>
-              Edit
+      ) : controls.mode === "gm" ? (
+        f.source === "entity" ? (
+          <Controls name={f.id}>
+            {withSpec(f) ? (
+              <Button icon="edit" onClick={() => nav.open(actionPage("flow", f.id, "edit"))}>
+                Edit
+              </Button>
+            ) : null}
+            <Button icon="sliders" onClick={() => nav.open(actionPage("flow", f.id, "status"))}>
+              Status
             </Button>
-          ) : null}
-          <Button icon="sliders" onClick={() => nav.open(actionPage("flow", f.id, "status"))}>
-            Status
-          </Button>
-          <Button icon="list" onClick={() => nav.open(actionPage("flow", f.id, "fields"))}>
-            Flow fields
-          </Button>
-          <Button variant="danger" icon="trash" onClick={() => nav.open(actionPage("flow", f.id, "delete"))}>
-            Delete
-          </Button>
-        </Controls>
-      ) : (
-        <Note>Derived from its {humanize(f.source).toLowerCase()}: edit that.</Note>
-      )}
+            <Button icon="list" onClick={() => nav.open(actionPage("flow", f.id, "fields"))}>
+              Flow fields
+            </Button>
+            <Button variant="danger" icon="trash" onClick={() => nav.open(actionPage("flow", f.id, "delete"))}>
+              Delete
+            </Button>
+          </Controls>
+        ) : (
+          <Note>Derived from its {humanize(f.source).toLowerCase()}: edit that.</Note>
+        )
+      ) : null}
       <Section flush>
         <List>
           <ListRow icon="wallet" title="From" value={f.from} />
@@ -200,7 +210,7 @@ function FlowPage(props: SectionProps & { flow: FlowView }) {
  * for its holder. A To or a fallback that another choice rules out stays shown, and the problem
  * under the form says why.
  */
-function FlowFormPage(props: SectionProps & { flow?: FlowView & { spec: Flow }; from?: string }) {
+function FlowFormPage(props: { view: FinanceView; controls: PlayerControls | GmControls; nav: HubNav; flow?: FlowView & { spec: Flow }; from?: string }) {
   const { view, controls, nav, flow } = props;
   const every = flowSideChoices(endpoints(view, controls, []), flow);
   const start = props.from !== undefined && every.from.some((f) => f.value === props.from) ? props.from : (every.from[0]?.value ?? "");
@@ -304,7 +314,8 @@ function FlowControlPage(props: SectionProps & { flow: FlowView; control: Exclud
   let page: { text: string; go: string; danger: boolean; submit(): Promise<boolean> } | null = null;
   if (controls.mode === "gm") {
     if (control === "delete") page = { text: `Delete ${f.label}? It won't run again.`, go: "Delete", danger: true, submit: () => controls.edit([{ op: "despawn", entity: f.id }]) };
-  } else if (control === "pause") page = { text: "It won't run until you resume it.", go: "Pause", danger: false, submit: () => controls.act(flowStatusAction(f.id, "pause")) };
+  } else if (controls.mode !== "player") page = null;
+  else if (control === "pause") page = { text: "It won't run until you resume it.", go: "Pause", danger: false, submit: () => controls.act(flowStatusAction(f.id, "pause")) };
   else if (control === "resume") page = { text: "It runs again on its schedule.", go: "Resume", danger: false, submit: () => controls.act(flowStatusAction(f.id, "resume")) };
   else if (control === "end_lease") page = { text: `Give notice on ${f.label}? It ends today.`, go: "End it", danger: true, submit: () => controls.act(leaseEndAction(f.id)) };
   else if (control === "delete") page = { text: `Delete ${f.label}? It won't run again.`, go: "Delete", danger: true, submit: () => controls.act(flowStatusAction(f.id, "delete")) };
@@ -333,13 +344,13 @@ function FlowStatusPage(props: SectionProps & { flow: FlowView }) {
   );
 }
 
-/** Flows' pages: the section, a new flow, each flow, and each control's page. A control the view no longer allows draws nothing (gone). */
+/** Flows' pages: a new flow, each flow, and each control's page. A control the view no longer allows draws nothing (gone). */
 export const flowPages: HubPages = {
   heads: ["flows", "flow"],
   render(page, props) {
-    const { view, controls } = props;
+    const { view, controls, nav } = props;
     const [head, id, control] = page.path;
-    if (head === "flows") return id === undefined ? <FlowsSection {...props} /> : id === "new" && canCreate(view, controls) ? <FlowFormPage {...props} from={control} /> : null;
+    if (head === "flows") return id === "new" && controls.mode !== "read" && canCreate(view, controls) ? <FlowFormPage view={view} controls={controls} nav={nav} from={control} /> : null;
     const flow = id === undefined ? null : findFlow(view, id);
     if (head !== "flow" || flow === null) return null;
     // The GM changes only a flow stored as its own entity; a derived one changes at its source.
@@ -348,11 +359,11 @@ export const flowPages: HubPages = {
       case undefined:
         return <FlowPage {...props} flow={flow} />;
       case "fields":
-        return gm ? <FieldsPage nav={props.nav} controls={controls} name="flow-fields" title="Flow fields" subtitle={flow.label} entity={flow.id} /> : null;
+        return gm ? <FieldsPage nav={nav} controls={controls} name="flow-fields" title="Flow fields" subtitle={flow.label} entity={flow.id} /> : null;
       case "status":
         return gm ? <FlowStatusPage {...props} flow={flow} /> : null;
       case "edit":
-        return withSpec(flow) && (gm || (controls.mode === "player" && flowControls(view, flow).includes("edit"))) ? <FlowFormPage {...props} flow={flow} /> : null;
+        return withSpec(flow) && controls.mode !== "read" && (gm || (controls.mode === "player" && flowControls(view, flow).includes("edit"))) ? <FlowFormPage view={view} controls={controls} nav={nav} flow={flow} /> : null;
       case "delete":
         return gm || (controls.mode === "player" && flowControls(view, flow).includes("delete")) ? <FlowControlPage {...props} flow={flow} control="delete" /> : null;
       case "pause":

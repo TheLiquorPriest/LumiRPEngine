@@ -28,6 +28,7 @@ import type {
   WorldId,
 } from "./ids";
 import type { FinanceView } from "./finance";
+import type { GmPlaceEntry, OrgGmView } from "./org-view";
 import type { JournalNote, KeepLine, TimelapseTarget } from "./ledger";
 import type { RoutineRole } from "./routines";
 import type { AdjudicationDef, FacetDef, FacetId, FacetValueId, FieldType, SectionFeed, StepPurpose, WorldCurrency } from "./world";
@@ -157,8 +158,10 @@ export type ChipKind =
   | "reply_failed"
   /** A typed action uses a thing the world doesn't have and the turn waits, nothing generated, on Add or Not an action; either resumes it (DESIGN §9.4 player claims). */
   | "claim"
-  /** A thing the player said they had, made real for their action ("Added: a coffee"), with Undo (DESIGN §9.4 player claims). */
+  /** A thing the player said they had, made real for their action ("Added: a coffee"), or their own thing brought along or fetched from elsewhere ("Brought along: phone", ITEMS-SPEC §4.5), with Undo (DESIGN §9.4 player claims). */
   | "claimed"
+  /** An older chat's one-time fix at its first turn (ITEMS-SPEC §9): what someone had on them that is too big to carry, put down, with Undo. */
+  | "tidied"
   /** A typed attempt the chat reads as a check only suggests it ("Roll Persuasion?"): the turn waits, nothing generated, on Roll or No roll; either resumes it (DESIGN §11 inferred checks). */
   | "check"
   /** A routine change the player's own message states ("Would you like to add this to your routine?"): Yes records it, No drops it; the turn doesn't wait on it (DESIGN §9.4). */
@@ -181,8 +184,10 @@ export type ChipKind =
  * world's currency (`{cents}`, minor units; `value` is the amount it starts at), one of `options`
  * (`{value}`), text the player edits (`{text}`; `value` is the text it starts with), or an action
  * picked again in the Actions palette, opened at `action` with `params` already picked (`{params}`).
+ * Or no value at all: `org` opens an organization's page in Orgs, at its `tab` when named (the
+ * Plan's Edit, ORG-SPEC §4.4), and sends nothing.
  */
-export type ChipInput = { type: "money"; label: string; value?: number } | { type: "choice"; label: string; options: { value: string; label: string }[] } | { type: "text"; label: string; value: string } | { type: "action"; label: string; action: string; params: JsonObject };
+export type ChipInput = { type: "money"; label: string; value?: number } | { type: "choice"; label: string; options: { value: string; label: string }[] } | { type: "text"; label: string; value: string } | { type: "action"; label: string; action: string; params: JsonObject } | { type: "org"; label: string; org: string; tab?: string };
 
 export interface ChipAction {
   id: string;
@@ -283,6 +288,12 @@ export interface PaletteEntry {
    * may tick; their ids are merged into params under `param` as a list. Absent with no one here.
    */
   people?: { param: string; label: string; options: { id: EntityId; name: string }[] };
+  /**
+   * Paying as (ORG-SPEC §3.6, Pay and Buy): the organizations the POV may spend for, any of which the
+   * player may pick to pay instead of themselves (You, the sheet's first choice, sends none); its id
+   * is merged into params under `param`. Absent when the POV may spend for none.
+   */
+  acting?: { param: string; label: string; options: { id: EntityId; name: string }[] };
 }
 
 /**
@@ -365,6 +376,14 @@ export interface ControlsView {
   knowledge: {
     tracking: { chat: boolean | null; user: boolean };
     narrator: { chat: NarratorView | null; world: NarratorView | null; user: NarratorView };
+  };
+  /**
+   * This chat's things choices (GM → This chat → Things, ITEMS-SPEC §9, §11): whether its impossible
+   * holds are tidied automatically, the one-time Things tidied fix, as the chat sets it (null where it
+   * follows) beside the world's (`tidy.auto`, Build → Packs → gear → Tidy up). The chat's wins.
+   */
+  things: {
+    tidy: { chat: boolean | null; world: boolean };
   };
 }
 
@@ -486,12 +505,14 @@ export interface GmView {
   domains: { id: DomainId; label: string }[];
   /** The world's classification facets, hidden ones too: what the classification editor offers. */
   classifications: Record<FacetId, FacetDef>;
-  /** `pins`: how many lore entries are pinned to the place (DESIGN §24.5). */
-  places: { id: PlaceId; name: string; visibility: string; parent: PlaceId | null; pins: number }[];
+  /** `pins`: how many lore entries are pinned to the place (DESIGN §24.5); `entry`: who may enter it, and whose it is (the orgs pack's `orgs.place_entry`, ORG-SPEC §3.9), absent without the pack. */
+  places: { id: PlaceId; name: string; visibility: string; parent: PlaceId | null; pins: number; entry?: GmPlaceEntry }[];
   tracks: { id: string; label: string; kind: string; visibility: string; owner: string | null; stage: string; stages: { id: string; label: string; truth?: string }[] }[];
   relationTypes: { id: string; label: string; from: string; to: string; fields: { id: string; label: string; type: FieldType; min?: number; max?: number; values?: string[] }[] }[];
   /** Every party's money, the POV first, each at their own Money level (the economy pack's `economy.people_money`); empty without it. */
   money: FinanceView[];
+  /** Every organization as the GM sees it (GM → Orgs, the orgs pack's `orgs.gm`): the party first, then each in id order, with who holds each power there and why; empty without the pack. */
+  orgs: OrgGmView[];
   /** The fight under way as the GM sees it, everyone named and HP exact (the combat pack's `combat.gm`); null without one. Its shape is the Encounter card's. */
   encounter: JsonValue | null;
   /** Everyone this chat set a routine role for (`routine_follow`, DESIGN §8), with it, by entity id; one following their level's role, as the world sets it, isn't listed. Empty without the castlife pack. */

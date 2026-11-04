@@ -37,7 +37,7 @@ describe("lre.character", () => {
     rig.body(await rig.send({ type: "lre.edit", chatId, ops: [{ op: "move", entity: MARCUS, to: "alder_automotive" }] }));
     const got = rig.body(await rig.send({ type: "lre.character", op: "get", entity: MARCUS, scope: "gm", chatId })) as unknown as CharacterResult;
     expect(got.character.place?.id).toBe("alder_automotive");
-    expect(got.character.now?.party).toBe(false);
+    expect(got.character.now?.partyTier).toBeNull();
     const bare = rig.host.createChat("No world here.");
     expect((await rig.send({ type: "lre.character", op: "get", entity: MARCUS, scope: "gm", chatId: bare })).type).toBe("lre.error");
   });

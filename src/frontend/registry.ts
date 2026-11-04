@@ -9,6 +9,7 @@ import type { IconName } from "./icons";
 import type { JsonObject, JsonValue } from "../shared/json";
 import type { ChatId, EntityId, FieldId, KindId, PackId, PanelId } from "../shared/ids";
 import type { EditOp, FrontendToBackend, ResultMessage, ErrorMessage, LintIssue, WorldCollection } from "../shared/protocol";
+import type { OrgView } from "../shared/org-view";
 import type { ChipKind, Chip, GmView, StateView } from "../shared/state-view";
 import type { FieldDef, WorldCurrency, WorldDoc } from "../shared/world";
 
@@ -180,6 +181,46 @@ export interface GmSectionDef {
   component: ComponentType<GmSectionProps>;
 }
 
+/** The tabs the orgs pack's own page draws (ORG-SPEC §4.3): a pack's part may join one of them. */
+export type OrgShellTab = "overview" | "people" | "rules";
+
+/** What a pack's tab or part of an organization's page gets: the page as the reader may see it, and its own section of it. */
+export interface OrgTabProps {
+  chatId: ChatId;
+  org: OrgView;
+  /** `org.sections[def.section]`: what the pack's `r.orgSection` built for this reader. */
+  section: JsonValue;
+  state: StateView;
+  send: Send;
+  /** Opens a sheet over the organization's page. */
+  open(route: SheetRoute): void;
+}
+
+/** What a pack's tab or part gets in GM → Orgs (ORG-SPEC §6.1): the page as the GM sees it, and the GM view's own props, to change it by edits. */
+export interface OrgGmTabProps extends OrgTabProps {
+  gm: GmSectionProps;
+}
+
+/**
+ * A pack's tab on an organization's page (ORG-SPEC §4.3, `r.orgTab`), the UI half of the pack's
+ * `r.orgSection`: it shows only while the page holds that section, which the backend builds only for
+ * a reader who holds its power, at the organization's Money level.
+ */
+export interface OrgTabDef {
+  /** Unique across packs, with a dot (`economy.money`). */
+  id: `${string}.${string}`;
+  label: string;
+  /** Its place among the page's tabs, the shell's being Overview 10, People 20 and Rules 90; ties by id. */
+  order: number;
+  /** The section it draws (`OrgView.sections`). */
+  section: string;
+  /** A part at the foot of one of the shell's tabs rather than a tab of its own (People's Payroll): the page draws it in a Section headed by `label`. */
+  within?: OrgShellTab;
+  component: ComponentType<OrgTabProps>;
+  /** Drawn instead of `component` in GM → Orgs, with the GM's controls; absent, GM → Orgs draws `component`. */
+  gm?: ComponentType<OrgGmTabProps>;
+}
+
 export interface UiRegistry {
   panel(def: PanelDef): void;
   editor(def: EditorDef): void;
@@ -199,6 +240,8 @@ export interface UiRegistry {
   sheet(kind: SheetKind, component: ComponentType<SheetProps>): void;
   /** A compact card for Play → Now. */
   glance(def: GlanceDef): void;
+  /** A tab, or a part of one of the shell's tabs, on an organization's page in Orgs; ids are unique across packs. */
+  orgTab(def: OrgTabDef): void;
 }
 
 export interface UiPackDef {

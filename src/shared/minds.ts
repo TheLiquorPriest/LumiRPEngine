@@ -170,7 +170,8 @@ const whole = (v: unknown, range: readonly [number, number], fallback: number): 
 const wholeOrNone = (v: unknown, range: readonly [number, number], fallback: Limit): Limit => (v === "none" ? "none" : typeof v === "number" && Number.isFinite(v) && v >= range[0] && v <= range[1] ? Math.round(v) : fallback);
 const obj = (v: unknown): Record<string, unknown> => (isRecord(v) ? v : {});
 
-function selectorOrNull(v: unknown): Selector | null {
+/** A selector as a world's config writes it: its readable parts, or null when nothing in it is readable. */
+export function selectorOrNull(v: unknown): Selector | null {
   if (!isRecord(v)) return null;
   const out: Selector = {};
   const list = (x: unknown): string[] | undefined => (Array.isArray(x) && x.every((s) => typeof s === "string") ? (x as string[]).slice(0, 200) : undefined);
@@ -353,18 +354,22 @@ export type MindsMemoryOverrides = { [K in keyof MindsMemoryConfig]?: Partial<Mi
 /**
  * The sources a mind's context is read from (DESIGN §24.5, Settings → Minds → What a mind reads), in
  * the order Settings lists them: the story as it stands (the lore pinned to them and to where they
- * are, the lore the turn activates, the latest reply and the player's message), the recent chat as
- * the player sees it (turns they weren't there for included), then their own summary, notes and what
- * they saw, last thoughts, recall of the turns they were there for, their usual routine (their
+ * are, the lore the turn activates, the latest reply, the player's message, and their things: what
+ * they have on them, what they hold for others, theirs someone else has and theirs that is missing,
+ * ITEMS-SPEC §5.5), the recent chat as the player sees it (turns they weren't there for included),
+ * then their own summary, notes and what they saw, last thoughts, recall of the turns they were
+ * there for, their usual routine (their
  * routine blocks and schedules while their routine is informative or enforced, a private block only
  * when it is their own, never social life the planner made up: `RoutineRole`), their plans (the
- * plans in force the story and the GM gave them, never the day the planner lays), their life
- * (money, the day and commitments), and what they know (their own holdings, DESIGN §24.11, while
- * knowledge is tracked). Who they are, where they are and what they mean to do are in every
- * context, outside these.
+ * plans in force the story and the GM gave them, never the day the planner lays), their
+ * organizations (ORG-SPEC §3.15: their title and position in each, whom they report to and who
+ * reports to them, what they may do and the delegations they hold, after the orders asked of them),
+ * their life (money, the day and commitments), and what they know (their own holdings, DESIGN
+ * §24.11, while knowledge is tracked). Who they are, where they are and what they mean to do are in
+ * every context, outside these.
  */
-export type MindSource = "pinned" | "activated" | "reply" | "message" | "history" | "summary" | "memory" | "thoughts" | "recall" | "routine" | "plans" | "life" | "knowledge";
-export const MIND_SOURCES: readonly MindSource[] = ["pinned", "activated", "reply", "message", "history", "summary", "memory", "thoughts", "recall", "routine", "plans", "life", "knowledge"];
+export type MindSource = "pinned" | "activated" | "reply" | "message" | "things" | "history" | "summary" | "memory" | "thoughts" | "recall" | "routine" | "plans" | "orgs" | "life" | "knowledge";
+export const MIND_SOURCES: readonly MindSource[] = ["pinned", "activated", "reply", "message", "things", "history", "summary", "memory", "thoughts", "recall", "routine", "plans", "orgs", "life", "knowledge"];
 
 /** One source as the user sets it: whether a mind reads it, and the most it may take, in tokens ("none": no limit). */
 export interface MindRead {
@@ -384,10 +389,11 @@ export type MindHistoryRead = MindRead & { messages: Limit };
 export type MindsReads = Record<Exclude<MindSource, "recall" | "history" | "knowledge">, MindRead> & { recall: Pick<MindRead, "on">; history: MindHistoryRead; knowledge: Pick<MindRead, "on"> };
 
 /**
- * What a mind reads unless the user says otherwise: the story as it stands, their usual routine as
- * context, their own plans, and nothing else of its own memory or life. Each of those can carry what
- * no story set up: the day the Cast life planner lays (meals, friends, outings), commitments the
- * memory step took from narration that depicted another mind, and older replies and thoughts that
+ * What a mind reads unless the user says otherwise: the story as it stands, their things among it,
+ * their usual routine as context, their own plans, and nothing else of its own memory or life. Each
+ * of those can carry what no story set up: the day the Cast life planner lays (meals, friends,
+ * outings), commitments the memory step took from narration that depicted another mind, and older
+ * replies and thoughts that
  * acted on them (DESIGN §24.5). Their usual routine is the world's and the story's, never the
  * planner's guesses; their plans are what the turns stated and the GM set, which they mean to keep.
  */
@@ -396,6 +402,8 @@ export const DEFAULT_MIND_READS: Readonly<MindsReads> = Object.freeze({
   activated: { on: true, tokens: 1600 },
   reply: { on: true, tokens: "none" },
   message: { on: true, tokens: "none" },
+  // On: their belongings as the world has them, which the story set up.
+  things: { on: true, tokens: 300 },
   // Off: it tells of turns they weren't there for. Once on, what a helper reads before a typed message.
   history: { on: false, messages: 8, tokens: 3000 },
   summary: { on: false, tokens: "none" },
@@ -404,6 +412,8 @@ export const DEFAULT_MIND_READS: Readonly<MindsReads> = Object.freeze({
   recall: { on: false },
   routine: { on: true, tokens: 400 },
   plans: { on: true, tokens: 400 },
+  // On (ORG-SPEC §9): their places in the organizations they belong to, and the orders asked of them.
+  orgs: { on: true, tokens: 200 },
   life: { on: false, tokens: "none" },
   // On: while the chat tracks knowledge, their own holdings in place of the secrets in who they are.
   knowledge: { on: true },
@@ -610,6 +620,8 @@ function readsOf(raw: unknown, base: Readonly<MindsReads>): MindsReads {
     activated: readOf(r.activated, base.activated),
     reply: readOf(r.reply, base.reply),
     message: readOf(r.message, base.message),
+    // A file saved before minds read their things takes the default: on.
+    things: readOf(r.things, base.things),
     history: { ...readOf(r.history, base.history), messages: limitIn(obj(r.history).messages, 1, Number.MAX_SAFE_INTEGER, base.history.messages) },
     summary: readOf(r.summary, base.summary),
     memory: readOf(r.memory, base.memory),
@@ -618,6 +630,8 @@ function readsOf(raw: unknown, base: Readonly<MindsReads>): MindsReads {
     routine: readOf(r.routine, base.routine),
     // A file saved before minds read their plans on their own takes the default: on.
     plans: readOf(r.plans, base.plans),
+    // A file saved before minds read their organizations takes the default: on.
+    orgs: readOf(r.orgs, base.orgs),
     life: readOf(r.life, base.life),
     knowledge: { on: typeof obj(r.knowledge).on === "boolean" ? (obj(r.knowledge).on as boolean) : base.knowledge.on },
   };

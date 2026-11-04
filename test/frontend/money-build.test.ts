@@ -1,7 +1,7 @@
-// Build's money editors (DESIGN §13, §25, §26): the Custom toggles, the region, living costs and
-// taxes as the economy config stores them, household shares that add up, schedule lists as typed,
-// structured values kept free of empty parts, and every money field and place field reaching its
-// editor through the registry.
+// Build's money editors (DESIGN §13, §25, §26, §27.10): the Custom toggles, the region, living
+// costs, taxes and share units as the economy config stores them, household shares that add up,
+// schedule lists as typed, structured values kept free of empty parts, and every money field and
+// place field reaching its editor through the registry.
 
 import { describe, expect, test } from "bun:test";
 import { fieldEditorFor } from "../../src/frontend/build/schema-form";
@@ -12,7 +12,9 @@ import { ALL_PACKS, STARTER_WORLDS } from "../../src/packs/index";
 import { compact, equalShares, householdMembers, monthDays, numbersOf, recordsOf } from "../../src/packs/economy/ui/field-editors";
 import { corporateTax, taxExempt } from "../../src/packs/economy/core/taxes";
 import { featureFor } from "../../src/packs/economy/core/pay";
+import { applyEffects } from "../../src/engine/effects";
 import { createRegistry } from "../../src/engine/registry-impl";
+import { createRng } from "../../src/engine/rng";
 import { Working } from "../../src/engine/working";
 import type { JsonObject } from "../../src/shared/json";
 import type { WorldDoc } from "../../src/shared/world";
@@ -65,7 +67,7 @@ describe("the region and living costs", () => {
   });
 });
 
-describe("the economy's taxes", () => {
+describe("the economy's taxes and shares", () => {
   /** Port Alder with its economy config as Build's form leaves it. */
   const portAlder = (config: (was: JsonObject) => JsonObject): WorldDoc => {
     const world = (STARTER_WORLDS.modern_slice_of_life as (id: string, name: string) => WorldDoc)("pa", "Port Alder");
@@ -89,6 +91,18 @@ describe("the economy's taxes", () => {
     const tax = (world: WorldDoc): number => corporateTax(new Working(reg, world, startState(world)).ctx, "alder_automotive_co", 100000);
     expect(tax(edited) - tax(starter)).toBe(4000);
     expect(withTax(withTax({ unpricedCap: 500, taxes: { exempt: ["medical"], corporatePct: 25 } }, "exempt", undefined), "corporatePct", undefined)).toEqual({ unpricedCap: 500 });
+  });
+
+  test("the units a company starts counting its shares in are stored where the engine reads them", () => {
+    const world = portAlder((c) => ({ ...c, shareUnits: 100 }));
+    const reg = createRegistry(ALL_PACKS);
+    const w = new Working(reg, world, startState(world));
+    // Alder Automotive, Marcus's in percent, issues Danny 25 units: Marcus's 100 % is counted in the world's 100 units first.
+    expect(applyEffects(reg, w, [{ type: "economy.shares_issue", args: { business: "alder_automotive_co", to: "danny_okafor", units: 25, price: 0 } }], { bindings: {}, rng: createRng("issue") }).rejected).toEqual([]);
+    expect(w.state.entities.alder_automotive_co?.fields.owners).toEqual([
+      { party: "marcus_delgado", role: "owner", share: 80, units: 100 },
+      { party: "danny_okafor", role: "owner", share: 20, units: 25 },
+    ]);
   });
 });
 

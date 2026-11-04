@@ -17,7 +17,7 @@ import { formatMoneyInput, parseMoneyInput } from "../shared/money";
 import type { GenerateAs, ReviewCardView } from "../shared/protocol";
 import type { Chip, ChipAction, ChipInput, ChipKind } from "../shared/state-view";
 import { DEFAULT_CURRENCY, type WorldCurrency } from "../shared/world";
-import { type App, useApp, useView } from "./app";
+import { type App, openAt, orgRoute, useApp, useView } from "./app";
 import { chipRole, chipTone } from "./chip-roles";
 import { Badge, Button, Field, useBusy } from "./components";
 import { openDiagnostics } from "./diagnostics";
@@ -55,6 +55,7 @@ const CHIP_ICON: Record<ChipKind, IconName> = {
   claim: "help",
   check: "dice",
   claimed: "sparkle",
+  tidied: "box",
   routine_ask: "calendar",
   routine_added: "calendar",
   fix: "edit",
@@ -254,7 +255,8 @@ interface ChipControls {
 /**
  * A chip's actions as the player presses them: one that asks for a value opens its form first, one
  * that picks an action again opens the Actions palette at it (the intent gate's Edit), or the
- * Timelapse sheet for a time skip, and any other sends at once.
+ * Timelapse sheet for a time skip, one that names an organization opens its page in Orgs (the
+ * plan's Edit), and any other sends at once.
  */
 function useChipControls(chip: Chip, chatId: ChatId): ChipControls {
   const app = useApp();
@@ -265,6 +267,7 @@ function useChipControls(chip: Chip, chatId: ChatId): ChipControls {
   const press = (action: ChipAction): void => {
     const input = action.input;
     if (input?.type === "action") void app.overlays.openPalette(input.action === view?.palette?.timelapse?.action ? "timelapse" : "actions", { chatId, chip, action: input.action, params: input.params });
+    else if (input?.type === "org") app.ui.update((ui) => openAt(ui, "orgs", orgRoute(input.org, input.tab)));
     else if (input) setAsking(asking === action.id ? null : action.id);
     else choose(action.id);
   };
@@ -272,7 +275,7 @@ function useChipControls(chip: Chip, chatId: ChatId): ChipControls {
     busy,
     asking,
     press,
-    form: open?.input && open.input.type !== "action" ? <ChipInputForm key={open.id} action={open} input={open.input} currency={view?.currency ?? DEFAULT_CURRENCY} busy={busy} onSend={(payload) => choose(open.id, payload)} onCancel={() => setAsking(null)} /> : null,
+    form: open?.input && open.input.type !== "action" && open.input.type !== "org" ? <ChipInputForm key={open.id} action={open} input={open.input} currency={view?.currency ?? DEFAULT_CURRENCY} busy={busy} onSend={(payload) => choose(open.id, payload)} onCancel={() => setAsking(null)} /> : null,
   };
 }
 
@@ -282,7 +285,7 @@ function ActionButton(props: { action: ChipAction; controls: ChipControls; pill?
   const icon = ACTION_ICON[action.id];
   const style = action.style === "primary" ? " primary" : action.style === "danger" ? " danger" : "";
   return (
-    <button type="button" class={props.pill ? `lre-chat-pill${style}` : `lre-btn small${style}`} disabled={controls.busy} aria-expanded={action.input && action.input.type !== "action" ? controls.asking === action.id : undefined} onClick={() => controls.press(action)}>
+    <button type="button" class={props.pill ? `lre-chat-pill${style}` : `lre-btn small${style}`} disabled={controls.busy} aria-expanded={action.input && action.input.type !== "action" && action.input.type !== "org" ? controls.asking === action.id : undefined} onClick={() => controls.press(action)}>
       {icon ? <Icon name={icon} size={16} /> : null}
       {action.label}
     </button>
@@ -290,7 +293,7 @@ function ActionButton(props: { action: ChipAction; controls: ChipControls; pill?
 }
 
 /** The small form an action with an input opens: an amount in the world's currency, one of its options, or text to edit; Apply sends it as the chip's payload. */
-function ChipInputForm(props: { action: ChipAction; input: Exclude<ChipInput, { type: "action" }>; currency: WorldCurrency; busy: boolean; onSend(payload: JsonObject): void; onCancel(): void }) {
+function ChipInputForm(props: { action: ChipAction; input: Exclude<ChipInput, { type: "action" } | { type: "org" }>; currency: WorldCurrency; busy: boolean; onSend(payload: JsonObject): void; onCancel(): void }) {
   const { input } = props;
   const [text, setText] = useState(() => (input.type === "money" && input.value !== undefined ? formatMoneyInput(input.value, props.currency) : input.type === "text" ? input.value : ""));
   const [picked, setPicked] = useState(() => (input.type === "choice" ? (input.options[0]?.value ?? "") : ""));

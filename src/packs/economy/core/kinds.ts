@@ -5,10 +5,11 @@
 // edits and lint read it; the modules add their own through `FinanceRegistry.fields`.
 
 import type { FieldDef, KindDef } from "../../../shared/world";
+import { ORG_FIELDS } from "../../../shared/org";
 import { ACCOUNT_CLASSES, ACCOUNT_STATUSES, AUTOPAY_MODES, CARD_NETWORKS, CARD_STATES, FLOW_KINDS, FLOW_SHORTFALLS, FLOW_STATUSES, INVOICE_STATES, OVERDRAFT_POLICIES, PAY_BASES, PAY_EVERY } from "../../../shared/finance";
 import type { FinanceKind } from "./module";
 
-const OWNERS: FieldDef = { type: "list", label: "Owners ({party, role, share?})", domain: "money", level: 1 };
+const OWNERS: FieldDef = { type: "list", label: "Owners ({party, role, share?, units?, class?})", domain: "money", level: 1 };
 
 const ACCOUNT_FIELDS: Record<string, FieldDef> = {
   owners: OWNERS,
@@ -97,11 +98,16 @@ const BUSINESS_FIELDS: Record<string, FieldDef> = {
   late_fee_pct: { type: "number", label: "Late fee %", min: 0, domain: "money", level: 4 },
   distribution_pct: { type: "number", label: "Profit paid out %", min: 0, max: 100, domain: "money", level: 4 },
   distribution_every: { type: "enum", label: "Paid out every", values: ["month", "quarter", "year"], domain: "money", level: 4 },
+  // Organizations (ORG-SPEC §3.10, §3.9): share classes and the votes an ownership decision needs, and the hours it trades.
+  share_classes: { type: "list", label: "Share classes ({id, label, votes})", domain: "money", level: 4 },
+  decide_pct: { type: "number", label: "Ownership decisions need more than % of the votes", min: 0, max: 100, default: 50, domain: "money", level: 4 },
+  open_at: { type: "text", label: "Opens at (HH:MM)", domain: "money", level: 3 },
+  close_at: { type: "text", label: "Closes at (HH:MM)", domain: "money", level: 3 },
 };
 
 const JOB_FIELDS: Record<string, FieldDef> = {
   worker: { type: "ref", label: "Worker", ref: "person", domain: "money", level: 3 },
-  employer: { type: "text", label: "Employer (a business, or an outside employer)", domain: "money", level: 3 },
+  employer: { type: "text", label: "Employer (anyone in the world, a place, or an outside employer)", domain: "money", level: 3 },
   workplace: { type: "ref", label: "Workplace", domain: "money", level: 3 },
   title: { type: "text", label: "Title", domain: "money", level: 3 },
   occupation: { type: "text", label: "Occupation", domain: "money", level: 3, table: "economy.occupations" },
@@ -131,6 +137,7 @@ const JOB_FIELDS: Record<string, FieldDef> = {
   deductions: { type: "list", label: "Deductions ({label, pretax, cents?, pct?, kind?, match_pct?, to?})", domain: "money", level: 4 },
   splits: { type: "list", label: "Pay goes to ({to, cents?, pct?})", domain: "money", level: 3 },
   status: { type: "enum", label: "Status", values: ["active", "leave", "ended"], default: "active", domain: "money", level: 3 },
+  position: { type: "text", label: "Position (one its employer defines)", domain: "money", level: 3 },
   shift_pattern: { type: "text", label: "Shift pattern", domain: "money", level: 3, table: "calendar.shifts" },
 };
 
@@ -174,8 +181,10 @@ const BASE: Record<FinanceKind, Omit<KindDef, "fields"> & { fields: Record<strin
   account: { id: "account", label: "Account", pack: "economy", fields: ACCOUNT_FIELDS },
   card: { id: "card", label: "Payment card", pack: "economy", fields: CARD_FIELDS },
   flow: { id: "flow", label: "Money flow", pack: "economy", fields: FLOW_FIELDS },
-  trust: { id: "trust", label: "Trust", extends: "thing", pack: "economy", fields: { owners: OWNERS } },
-  business: { id: "business", label: "Business", extends: "thing", pack: "economy", fields: BUSINESS_FIELDS },
+  // A trust is an organization but no group (ORG-SPEC §3.1): it has every organization's fields of its own.
+  trust: { id: "trust", label: "Trust", extends: "thing", pack: "economy", fields: { owners: OWNERS, ...ORG_FIELDS } },
+  // A business is a group (ORG-SPEC §3.1): a company, whose owners and staff are its members.
+  business: { id: "business", label: "Business", extends: "group", pack: "economy", fields: BUSINESS_FIELDS },
   job: { id: "job", label: "Job", pack: "economy", fields: JOB_FIELDS },
   holding: { id: "holding", label: "Holding", pack: "economy", fields: HOLDING_FIELDS },
   property: { id: "property", label: "Property", extends: "thing", pack: "economy", fields: PROPERTY_FIELDS },

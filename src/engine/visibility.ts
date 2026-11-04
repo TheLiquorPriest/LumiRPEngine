@@ -11,10 +11,11 @@ import type { JsonValue } from "../shared/json";
 import { hasOwn, isRecord } from "../shared/json";
 import type { EntityId, PlaceId, StageId, TrackId, Visibility } from "../shared/ids";
 import { heldBy } from "../shared/finance";
+import { isPartyTier } from "../shared/party";
 import { hashParts } from "../shared/hash";
 import type { LedgerEvent } from "../shared/ledger";
 import type { ActionDef, Expr, LoreEntryDef, PlaceDef, Selector, StageDef, TrackDef, TrackKind, WorldDoc } from "../shared/world";
-import { isHardLock, objectiveLabel, objectiveWhen, requirementExpr } from "../shared/world";
+import { isHardLock, objectiveLabel, objectiveWhen, requirementExpr, trackOwner } from "../shared/world";
 import { loreIsSecret, loreParts, lorePhrases, loreSourceOf } from "../shared/lore";
 import type { FactId } from "../shared/minds";
 import { factId, heldSecrets, liveLoreIdOfWiFact, wiFactIdOfLiveLore } from "../shared/minds";
@@ -40,7 +41,7 @@ export function visibilityOf(v: unknown): Visibility {
   return v === "known_by" ? "known_by" : "secret";
 }
 
-const SELECTOR_LISTS = ["ids", "kind", "tier", "memberOf", "tag"] as const;
+const SELECTOR_LISTS = ["ids", "kind", "tier", "memberOf", "position", "tag"] as const;
 
 function isStrings(v: unknown): v is string[] {
   return Array.isArray(v) && v.every((x) => typeof x === "string");
@@ -64,6 +65,12 @@ export function knownBySelector(v: unknown): Selector | null {
       }
       out.class = accepted;
       constraints += Object.keys(accepted).length;
+      continue;
+    }
+    if (key === "party") {
+      if (!Array.isArray(value) || !value.every(isPartyTier)) return null;
+      out.party = value;
+      constraints++;
       continue;
     }
     const list = SELECTOR_LISTS.find((k) => k === key);
@@ -175,9 +182,10 @@ export function povPlace(reg: Registry, world: WorldDoc, state: Readonly<WorldSt
   return canSeePlace(reg, world, state, world.pov, here) ? { id: here, name: own(world.places, here)?.name ?? here } : { id: null, name: HIDDEN_PLACE_NAME };
 }
 
-/** A `known_by` track is known to its owner, to whoever knows the owner, and to whoever matches its `knownBy`. */
+/** A `known_by` track is known to its owner, to whoever knows the owner, and to whoever matches its `knownBy`; the GM's (`GM_OWNER`) only by `knownBy`. */
 export function trackKnown(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, pov: EntityId, t: TrackDef): boolean {
-  return t.owner === pov || (t.owner !== undefined && knows(state, pov, t.owner)) || granted(reg, world, state, pov, t.knownBy);
+  const owner = trackOwner(t);
+  return owner === pov || (owner !== undefined && knows(state, pov, owner)) || granted(reg, world, state, pov, t.knownBy);
 }
 
 /**
@@ -222,8 +230,9 @@ export function trackKeepsSecret(reg: Registry, world: WorldDoc, state: Readonly
  */
 export function ownersCue(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, pov: EntityId, id: TrackId): boolean {
   const t = own(world.tracks, id);
-  if (t?.owner === undefined || t.owner === pov) return false;
-  const owner = own(state.entities, t.owner);
+  const ownerId = t ? trackOwner(t) : undefined;
+  if (ownerId === undefined || ownerId === pov) return false;
+  const owner = own(state.entities, ownerId);
   return owner !== undefined && kindIs(reg, world, owner.kind, "person") && trackKeepsSecret(reg, world, state, pov, id);
 }
 
@@ -368,7 +377,8 @@ export function playerTrack(reg: Registry, world: WorldDoc, state: Readonly<Worl
   const dormant = stageId === t.start && (stage.objectives ?? []).length === 0 && stage.answer === undefined;
   const cue = !stage.cue || ownersCue(reg, world, state, pov, id) ? null : stage.cue;
   if (cue === null && truths.length === 0 && (secret || dormant)) return null;
-  const env = scopeEnv({ reg, ctx: reg.context(world, state), bindings: t.owner ? { self: t.owner } : {} });
+  const owner = trackOwner(t);
+  const env = scopeEnv({ reg, ctx: reg.context(world, state), bindings: owner ? { self: owner } : {} });
   const objectives = secret ? [] : (stage.objectives ?? []).map((o) => ({ label: objectiveLabel(o), done: truthy(evalExpr(objectiveWhen(o), env, false)) }));
   const hints = hintsEarned(world, state, id);
   const failed = Object.values(t.stages).some((s) => s.fail?.to === stageId);
@@ -519,7 +529,8 @@ export function unrevealedSecretFacts(reg: Registry, world: WorldDoc, state: Rea
   const out: UnrevealedSecret[] = [];
   for (const [id, t] of Object.entries(world.tracks)) {
     const revealed = revealedStages(state, world.pov, id);
-    for (const [stage, s] of Object.entries(t.stages)) if (s.truth && !revealed.includes(stage)) out.push(secret(factId({ kind: "track", track: id, stage }), s.truth, t.owner ? [t.owner] : []));
+    const owner = trackOwner(t);
+    for (const [stage, s] of Object.entries(t.stages)) if (s.truth && !revealed.includes(stage)) out.push(secret(factId({ kind: "track", track: id, stage }), s.truth, owner ? [owner] : []));
   }
   for (const l of unrevealedLore(reg, world, state)) if (typeof l.content === "string" && l.content.trim() !== "") out.push(secret(loreFactId(l), l.content, [...l.links]));
   return out;

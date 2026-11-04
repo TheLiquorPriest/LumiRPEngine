@@ -37,7 +37,7 @@ import { parseJsonReply } from "../../steps";
 import type { AgentTool } from "../runtime";
 import type { Summarize } from "../tools/condense";
 import { loreIndexText } from "../tools/lore";
-import { toolsFor } from "../tools/registry";
+import { type ReadNotes, toolsFor } from "../tools/registry";
 import { recordAgentCalls } from "../transcripts";
 import { type RoleResult, startRoleAgent, type TurnAgentCtx } from "../turn-ctx";
 import { pinnedFiles, type PinsTexts } from "../turn-task";
@@ -51,6 +51,8 @@ const ROLE_GUIDANCE: Readonly<Record<RoleId, readonly GuidanceTarget[]>> = {
   knowledge: ["knowledge"],
   director: ["brief", "outline", "choices", "npc.choose"],
   read: ["extract"],
+  // Prompt-only, the Curator is classic's item read (ITEMS-SPEC I9): the extract step's guidance leads it too.
+  curator: ["extract"],
   memory: ["memory", "consolidate"],
   skip: ["skip"],
   world: [],
@@ -58,6 +60,9 @@ const ROLE_GUIDANCE: Readonly<Record<RoleId, readonly GuidanceTarget[]>> = {
 
 /** The tool families whose writes are the story's own (`opTier`): the workspace, and lore saved to it. A role at the story tier is given those writes and no GM edit. */
 const STORY_FAMILIES: readonly ToolFamily[] = ["workspace", "lore"];
+
+/** The role whose story-tier tools change the world's fabric (ITEMS-SPEC §6.4, one writer per domain per phase): things and places, walk-ons and a purchase's goods are its own after the reply; another role makes such a change only with the GM's tier. */
+const FABRIC_ROLE: RoleId = "curator";
 
 /** One task of a role, as its agent is asked to work it. */
 export interface RoleAsk<O> {
@@ -79,6 +84,8 @@ export interface RoleAsk<O> {
   answer?: { part: string; vars?: Readonly<Record<string, string>> };
   /** The world its tools' schemas are filled from; null for a task that gets none (a puzzle's answer, which only its call is told). */
   tools: WorldDoc | null;
+  /** Where its tools note what lands with the reply's read (`ToolEnv.notes`): the Curator's; absent for every other task. */
+  notes?: ReadNotes;
   /** Classic's own check of the answer: its classic type, or null when it isn't one. */
   check(raw: JsonValue): O | null;
 }
@@ -86,15 +93,20 @@ export interface RoleAsk<O> {
 /** How a role's task ended (C9), with the answer as the model wrote it, which Test checks against the contract. */
 export type RoleAnswer<O> = RoleResult<O> & { text: string };
 
-/** The tools a role is given (§6): its families, at its tier, every one reading the GM's view with every secret marked; `summarize` lets its `condense` tool condense a source with its own model. */
-function roleTools(ctx: TurnAgentCtx, world: WorldDoc, texts: PromptTexts, summarize: Summarize): AgentTool[] {
+/**
+ * The tools a role is given (§6): its families, at its tier, every one reading the GM's view with
+ * every secret marked; `summarize` lets its `condense` tool condense a source with its own model.
+ * Writes to the world's fabric (the story tier's) go to the Curator, and to any role at the GM tier.
+ */
+function roleTools(ctx: TurnAgentCtx, world: WorldDoc, texts: PromptTexts, summarize: Summarize, notes: ReadNotes | undefined): AgentTool[] {
   const tier: RoleTier = ctx.settings.tier;
-  const env = { userId: ctx.userId, chatId: ctx.chatId, knowledge: "gm" as const, marks: true, reader: ctx.reader, writer: tier === "read" ? null : ctx.writer, agent: { role: ctx.role, id: ctx.agentId }, signal: ctx.signal, loads: ctx.loads, summarize };
+  const env = { userId: ctx.userId, chatId: ctx.chatId, knowledge: "gm" as const, marks: true, reader: ctx.reader, writer: tier === "read" ? null : ctx.writer, agent: { role: ctx.role, id: ctx.agentId }, signal: ctx.signal, loads: ctx.loads, summarize, ...(notes ? { notes } : {}) };
   const families = ctx.settings.families;
   const reads = toolsFor({ world, tiers: ["read"], families, texts, env });
   if (tier === "read") return reads;
+  const story = tier === "gm" || ctx.role === FABRIC_ROLE ? toolsFor({ world, tiers: ["story"], families, texts, env }) : [];
   const writes = toolsFor({ world, tiers: ["gm"], families: tier === "gm" ? families : families.filter((f) => STORY_FAMILIES.includes(f)), texts, env });
-  return [...reads, ...writes];
+  return [...reads, ...story, ...writes];
 }
 
 /** The preset's guidance for the role's steps, each block under its name, after its instructions; empty when the preset has none. */
@@ -162,7 +174,7 @@ export async function runRoleAgent<O>(rt: Runtime, ctx: TurnAgentCtx, ask: RoleA
       await recordAgentCalls(rt.diag, { at: { chatId: ctx.chatId, userId: ctx.userId, turn: ctx.generationId }, phase: ask.phase, role, connection: at.settings.connectionId ?? "active", model: at.settings.model, transcript: condenser.transcript() }).catch(() => undefined);
     }
   };
-  const tools = ask.tools ? roleTools(ctx, ask.tools, own, summarize) : [];
+  const tools = ask.tools ? roleTools(ctx, ask.tools, own, summarize, ask.notes) : [];
   const handle = startRoleAgent(rt, at, { system: withInstructions(system, instructions), prefix, tools }, { phase: ask.phase, task: ask.sub });
   rt.diag.agentWorking(ctx.chatId, ctx.userId, handle.id, ROLE_LABEL[role]);
   let reply;

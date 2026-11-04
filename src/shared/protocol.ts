@@ -13,8 +13,12 @@ import type { InferredChecks, SheetSkill } from "./inferred";
 import type { BookFieldsEdit, BookLoreFields, LoreIndexAddition } from "./lore";
 import type { Limit, MindEditOp, MindsRunView } from "./minds";
 import type { RoutineEditOp, RoutineRead, RoutineReadResult } from "./routines";
+import type { ItemOp, PlaceOp } from "./things";
+import type { OrgOp } from "./org-ops";
 import type { CharacterResult } from "./character";
-import type { ActionId, BoundMode, ChatId, ChipId, DomainId, EntityId, FieldId, KindId, Level, MessageId, PanelId, PlaceId, RelationTypeId, RevisionId, SlotId, StageId, TierId, TrackId, WorldId } from "./ids";
+import type { PersonThings, ThingPage, ThingPicks, ThingsList, ThingType } from "./thing-view";
+import type { GmThingExtras, GmThingsList, KeepResult, MadeInPlay, TidyRun } from "./thing-gm";
+import type { ActionId, BoundMode, ChatId, ChipId, DomainId, EntityId, FieldId, KindId, Level, MessageId, PackId, PanelId, PlaceId, RelationTypeId, RevisionId, SlotId, StageId, TableId, TierId, TrackId, WorldId } from "./ids";
 import type { EntityUpgradePick, EventRef, PathHash, ResolveScope, TimeControl, TimeScope, UpgradeAspect, UpgradePicks } from "./ledger";
 import type { BuiltLoreIndex, ChangeType, NarratorView, UserSettings } from "./settings";
 import type { Activity, DiagRecord } from "./diagnostics";
@@ -165,6 +169,15 @@ export type FixRequest = Request<"lre.fix"> & { chatId: ChatId } & ({ entity: En
  *    what no entity field holds, such as an asset's price.
  *  - `feed` sets a section's settings in this chat over the world's (DESIGN §6.11), whole; `to: null`
  *    returns it to the world's.
+ *  - `item` is one change to a thing in the things model's vocabulary (`ItemOp`, ITEMS-SPEC §3.5):
+ *    made, moved through the one location writer, handed over, owned, lent, kept at, labelled,
+ *    merged or removed. `put`, `move`, `link in`, `unlink in` and `set place` on a thing are such a
+ *    move too.
+ *  - `place` is one change to a place made in play (`PlaceOp`), the space pack's.
+ *  - `org` is one change to an organization (`OrgOp`, ORG-SPEC §7.2): founding one, its members,
+ *    positions, titles, delegations, staff and pay, shares, entry, dues, the party's tiers, its
+ *    structure and name; the orgs pack compiles it to the packs' effects, the GM's (no power asked),
+ *    with its History line, in one unit.
  */
 export type EditOp =
   | { op: "set"; entity: EntityId; field: FieldId; value: JsonValue }
@@ -185,7 +198,10 @@ export type EditOp =
   | MindEditOp
   | RoutineEditOp
   | { op: "effect"; effect: string; args: JsonObject }
-  | { op: "feed"; section: SlotId; to: SectionFeed | null };
+  | { op: "feed"; section: SlotId; to: SectionFeed | null }
+  | { op: "item"; change: ItemOp }
+  | { op: "place"; change: PlaceOp }
+  | { op: "org"; change: OrgOp };
 
 /** A GM edit on the head (DESIGN §7): the operations in order, all or none, as one `post` entry of kind `fix`; locked fields are writable. */
 export interface EditRequest extends Request<"lre.edit"> {
@@ -245,6 +261,28 @@ export type RoutineRequest = Request<"lre.routine"> & { chatId: ChatId } & Routi
  * chat's head, behind the GM gate as `lre.gm` is, and adds what they're doing now.
  */
 export type CharacterRequest = Request<"lre.character"> & { op: "get"; entity: EntityId } & ({ scope: "build"; worldId: WorldId } | { scope: "gm"; chatId: ChatId });
+
+/**
+ * Things (ITEMS-SPEC §10.1, §10.2): Build's (`scope: "build"`), read from the world's draft as a chat
+ * would start from it, and GM → Things' (`scope: "gm"`), read from the chat's head behind the GM gate
+ * as `lre.gm` is. `list`, every thing with its size, where it is and whose, by owner too, and the
+ * pickers' choices (in GM, also where the player character is and why each thing someone has is
+ * theirs to have); `thing`, one thing's page (where it is kept, who may use it, what it holds) and
+ * the pickers' choices (in GM, also where it rests, why it is had, its history and its findings);
+ * `person`, the things a person has and owns in the Character page's groups, and the choices;
+ * `find`, the things words name, best first (the name resolver, then names starting with them);
+ * `types`, the catalog's types with the size each gives. GM only: `tidy`, Tidy up's findings (at
+ * most the user's findings per run, those left out); `leave`, a finding left (or shown again,
+ * `left: false`) for this chat; `made`, the things and places the chat made in play, each saying
+ * whether the world's draft has it; `keep`, copies of those into the world's draft.
+ */
+export type ThingsRequest = Request<"lre.things"> & (({ scope: "build"; worldId: WorldId } & ThingsRead) | ({ scope: "gm"; chatId: ChatId } & GmThingsRead));
+
+/** The reads of `lre.things` both scopes answer. */
+export type ThingsRead = { op: "list" } | { op: "thing"; entity: EntityId } | { op: "person"; entity: EntityId } | { op: "find"; words: string } | { op: "types" };
+
+/** What `lre.things` answers in GM scope: the reads, and Tidy up, Leave it, what was made in play and Keep in the world. */
+export type GmThingsRead = ThingsRead | { op: "tidy" } | { op: "leave"; key: string; left: boolean } | { op: "made" } | { op: "keep"; things: EntityId[]; places: PlaceId[] };
 
 /**
  * A chat's state view, as a page's snapshot holds it, answered to an outside client (DESIGN §23),
@@ -370,6 +408,8 @@ export interface ChatKnowledgeRequest extends Request<"lre.chat.knowledge"> {
   narrator?: NarratorView | null;
   /** Which engine plays the chat's turns (GM → This chat, INC2-SPEC C12): its classic steps, or the agent loop; null returns it to classic. A change drops a turn the engine prepared for it. */
   engine?: "classic" | "agents" | null;
+  /** Whether this chat's impossible holds are tidied automatically, its one-time Things tidied fix (GM → This chat → Things, ITEMS-SPEC §9, §11); null returns it to the world's (`tidy.auto`). */
+  tidy?: boolean | null;
 }
 
 /**
@@ -512,7 +552,9 @@ export type JsonPatchOp =
  * `profile` applies a ruleset profile to the draft in one write (`shared/profiles`), each
  * conflicting item kept or taken by its path in `choices` (kept when unnamed). `patch` applies
  * RFC 6902 operations to the whole draft, all of them or none. `restore` makes the draft a copy of
- * one of the world's revisions, which a commit then makes head again (DESIGN §23).
+ * one of the world's revisions, which a commit then makes head again (DESIGN §23). `shipped` puts
+ * the version this build ships of each named data table into the draft, in place of the draft's copy
+ * or beside the rest (Data updates, `lre.world updates`), pinned at its revision as any table write is.
  *
  * `version` names a state of the world's working copy, and is never reused within a world: each
  * write counts one, and so does a discard or commit (which drops the draft). With no draft stored it
@@ -529,6 +571,7 @@ export type EditorRequest = Request<"lre.editor"> & { worldId: WorldId; base: Re
     | { op: "profile"; profile: string; choices: Record<string, "mine" | "profile"> }
     | { op: "patch"; ops: JsonPatchOp[] }
     | { op: "restore"; revision: RevisionId }
+    | { op: "shipped"; tables: TableId[] }
   );
 
 /**
@@ -536,7 +579,9 @@ export type EditorRequest = Request<"lre.editor"> & { worldId: WorldId; base: Re
  * place of its own, read on `entity` (the POV by default) as a new chat would start; nothing is saved.
  * `commit`'s `note` goes into the world's history, and its `version`, when sent, is checked as an
  * editor write's is (DESIGN §23). `templates` lists the starter worlds `create` takes; `chats` lists
- * the user's chats that play a world (one world's with `worldId`, one chat with `chatId`).
+ * the user's chats that play a world (one world's with `worldId`, one chat with `chatId`). `updates`
+ * lists the data tables this build ships newer than the world's copies (`TableUpdate`): the draft's,
+ * or one revision's (a chat's, for Pins and upgrade).
  */
 export type WorldRequest = Request<"lre.world"> &
   (
@@ -553,7 +598,44 @@ export type WorldRequest = Request<"lre.world"> &
     | { op: "sheet"; worldId: WorldId; ruleset: JsonValue; entity?: EntityId }
     | { op: "templates" }
     | { op: "chats"; worldId?: WorldId; chatId?: ChatId }
+    | { op: "updates"; worldId: WorldId; revision?: RevisionId }
   );
+
+/** Some of a table's rows: how many, and the first few by name (a row's `label` or `name`, else its id in words). */
+export interface TableNames {
+  count: number;
+  names: string[];
+}
+
+/** How one version of a table's rows differs from another's: the rows it adds, holds otherwise and drops. */
+export interface TableRowChanges {
+  added: TableNames;
+  changed: TableNames;
+  dropped: TableNames;
+}
+
+/**
+ * A data table this build ships newer than a world's copy (`lre.world updates`, DESIGN §9.2).
+ * `update`: the copy is an earlier shipped version the world never changed, so the shipped one
+ * replaces it with nothing lost; `missing`: the world has none, as the table shipped after it was
+ * made; `edited`: the world changed its copy of an earlier shipped version, so nothing replaces it
+ * unasked. `shipped` is what the shipped version changes since the version the copy came from (for
+ * a missing table, every row it brings), with the columns it adds, changes and drops by id;
+ * `yours`, for an edited copy, what the world changed since that version, which taking the shipped
+ * one would lose. `starter` names the starter world whose own version of the table it is (a
+ * template's prices or items: a world made from Fantasy town keeps Brindlemere's); without it, the
+ * packs' own version.
+ */
+export interface TableUpdate {
+  table: TableId;
+  label: string;
+  pack: PackId;
+  status: "update" | "missing" | "edited";
+  /** The starter world whose own version ships newer (its template id and name); absent for the packs' own. */
+  starter?: { id: string; name: string };
+  shipped: TableRowChanges & { columns: { added: string[]; changed: string[]; dropped: string[] } };
+  yours?: TableRowChanges;
+}
 
 /** A starter world `lre.world create` can start from. */
 export interface TemplateInfo {
@@ -1097,6 +1179,7 @@ export type FrontendToBackend =
   | MindsRequest
   | RoutineRequest
   | CharacterRequest
+  | ThingsRequest
   | AgentsRequest
   | AcceptanceRequest
   | CancelTurnRequest
@@ -1115,6 +1198,14 @@ export interface LintIssue {
   path: string;
   code: string;
   message: string;
+  /** A fix Problems offers in one press: what it does, and the draft patch that does it. */
+  fix?: LintFix;
+}
+
+/** One press's fix to the draft (`lre.editor patch`): its label ("Put it at 114 Harbor Street") and its operations. */
+export interface LintFix {
+  label: string;
+  ops: JsonPatchOp[];
 }
 
 /** Each extraction or agent change type's effective mode and where it comes from (DESIGN §11, D4 learning; AGENT-LOOP-PLAN §6). */
@@ -1172,15 +1263,15 @@ export interface ResultBodies {
    * function a formula may call outside an effect's arguments (the math built-ins, the engine's and
    * the packs' formulas), for the expression editor. `sheet` answers the `sheet` preview: the
    * sections, or null when the ruleset designs no sheet; `skills` beside it, the skills the draft's
-   * sheet has as a chat starts (what an inferred check may roll, DESIGN §11). `templates` and `chats` answer their ops.
+   * sheet has as a chat starts (what an inferred check may roll, DESIGN §11). `templates`, `chats` and `updates` answer their ops.
    * `get` carries the world's `history` (oldest first; `list` leaves it out). `upgrade` says
    * `pending` when the chat is mid-turn: its Upgrade lands when the turn ends.
    */
-  "lre.world": { worlds?: WorldIndex[]; world?: WorldDoc; revision?: RevisionId; lint?: LintIssue[]; file?: JsonValue; packKinds?: Record<string, KindDef>; packRelations?: Record<string, RelationTypeDef>; functions?: string[]; sheet?: SheetSectionView[] | null; skills?: SheetSkill[]; templates?: TemplateInfo[]; chats?: WorldChatInfo[]; history?: RevisionNote[]; pending?: boolean };
+  "lre.world": { worlds?: WorldIndex[]; world?: WorldDoc; revision?: RevisionId; lint?: LintIssue[]; file?: JsonValue; packKinds?: Record<string, KindDef>; packRelations?: Record<string, RelationTypeDef>; functions?: string[]; sheet?: SheetSectionView[] | null; skills?: SheetSkill[]; templates?: TemplateInfo[]; chats?: WorldChatInfo[]; history?: RevisionNote[]; pending?: boolean; updates?: TableUpdate[] };
   "lre.ui": { done: true };
   "lre.map": { display?: MapDisplay; walk?: { minutes: number; disabled?: string } };
-  /** The chat's own knowledge choices after the request, null where it follows; `engine` when the chat plays the agent loop (absent: classic, which a chat with no choice plays). */
-  "lre.chat.knowledge": { knowledge: boolean | null; narrator: NarratorView | null; engine?: "agents" };
+  /** The chat's own knowledge choices after the request, null where it follows; `engine` when the chat plays the agent loop (absent: classic, which a chat with no choice plays); `tidy`, its own Tidy up switch (absent: the world's). */
+  "lre.chat.knowledge": { knowledge: boolean | null; narrator: NarratorView | null; engine?: "agents"; tidy?: boolean };
   /** `start`, `cancel` and `dismiss` name the job; `list` returns the world's kept jobs. */
   "lre.job": { jobId?: string; jobs?: JobSummary[] };
   /**
@@ -1199,6 +1290,12 @@ export interface ResultBodies {
   "lre.cancel": { cancelled: boolean };
   "lre.routine": RoutineReadResult;
   "lre.character": CharacterResult;
+  /**
+   * `list`: the list (GM: and `here`, what the list adds); `thing`: the page and the choices (GM: and `gm`, what the page adds); `person`: the groups and the
+   * choices; `find`: the ids found, best first; `types`: the catalog's types; `tidy`: the run; `leave`: the run after it; `made`: what the chat made in play;
+   * `keep`: what was kept, then what is made in play after it.
+   */
+  "lre.things": { list?: ThingsList; here?: GmThingsList; thing?: ThingPage; gm?: GmThingExtras; person?: PersonThings; pick?: ThingPicks; found?: EntityId[]; types?: ThingType[]; tidy?: TidyRun; made?: MadeInPlay; kept?: KeepResult };
   /** `kit`: this build, where its kit is, and whether the asking session checked in since the extension started; every other op answers the `view`. */
   "lre.agents": { view?: AgentsView; build?: string; kit?: KitReport | null; known?: boolean };
   /** The open acceptance run and the last one closed, after the op. */

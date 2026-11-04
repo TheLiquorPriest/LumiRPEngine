@@ -2,10 +2,15 @@
 // state: the world as it stands on the head (an in-flight turn's plan included, as GM edits are
 // checked against it), every ✎ fix and GM edit in force on the chat's path worded in full, those on
 // the latest reply with the chip that undoes them, and the held writes that didn't apply, with their
-// reasons.
+// reasons. GM → Things (ITEMS-SPEC §10.2) reads the same head and the events on the chat's path
+// (`pathEvents`): Build's things reads on the chat, a thing's page with its rest, its why and its
+// history, and Tidy up's findings.
 
+import type { GmThingsRead, JsonPatchOp, ResultBodies } from "../shared/protocol";
 import type { GmView } from "../shared/state-view";
 import { effectiveMemory, knowledgeThreshold, type MindsSettings } from "../shared/minds";
+import type { HistorySource, KeepResult, MadeInPlay } from "../shared/thing-gm";
+import type { WorldDoc } from "../shared/world";
 import { buildGmWorld } from "../engine/gm-view";
 import { buildMindsGm } from "../packs/minds/core/gm";
 import type { ChainMessage } from "../engine/ledger/chain";
@@ -13,11 +18,18 @@ import type { LedgerCore } from "../engine/ledger/journal";
 import { activeRecord, ownMessage } from "../engine/ledger/path";
 import { authorLines } from "../engine/player-events";
 import { readPass } from "../engine/read-pass";
+import type { ReadContext } from "../engine/registry";
 import type { Registry } from "../engine/registry-impl";
+import { gmThingExtras, gmThingsList, keepPlaces, keepThings, madePlaceViews, madeThings, type PathEvent } from "../engine/thing-gm";
+import { TIDIED_GROUP, tidyFindings, tidyRun } from "../engine/thing-tidy";
+import { findThingIds, personThings, thingPage, thingPicks, thingsList, thingTypes } from "../engine/thing-view";
 import { appliedEvents, clockFixLine, fixChip } from "./view";
 
 /** How many edits the GM view lists, newest first. */
 const GM_EDITS = 40;
+
+/** How many entries a thing's History strip shows, newest first. */
+const HISTORY = 12;
 
 export function buildGmView(core: LedgerCore, observed: readonly ChainMessage[], registry: Registry, minds: MindsSettings): GmView | null {
   const render = core.renderState(observed);
@@ -56,4 +68,93 @@ export function buildGmView(core: LedgerCore, observed: readonly ChainMessage[],
 export function latestTexts(observed: readonly ChainMessage[]): { user: string; reply: string } {
   const text = (m: ChainMessage | undefined): string => (m ? (m.swipes[m.swipeId] ?? "") : "");
   return { user: text(ownMessage(observed)), reply: text(observed.findLast((m) => !m.isUser)) };
+}
+
+/**
+ * The events on the chat's path as they applied, in order (`appliedEvents`, undone and dropped ones
+ * left out), each with its turn (the player's messages before it), what made it and its unit: a
+ * record's planned events are its turn's, the rest and its answered chips the reply's read (the
+ * story's), a materialization the turn's; each fix is its own unit, the GM's, an agent's, a player's
+ * action's or a ✎ fix.
+ */
+export function pathEvents(core: LedgerCore, observed: readonly ChainMessage[]): PathEvent[] {
+  const fold = core.fold(observed);
+  const out: PathEvent[] = [];
+  let turn = 0;
+  core.chain(observed).forEach((m, i) => {
+    if (m.isUser) {
+      turn++;
+      return;
+    }
+    const rec = activeRecord(m, core.journal.tombstones);
+    if (!rec) return;
+    const applied = appliedEvents(rec, fold, i);
+    applied.events.forEach((event, at) => out.push({ turn, origin: at < applied.pre ? "turn" : "story", unit: `${m.id}:${at < applied.pre ? "turn" : "read"}`, event }));
+    for (const event of applied.post) out.push({ turn, origin: event.type === "materialize" ? "turn" : "story", unit: `${m.id}:post`, event });
+    for (const fix of applied.fixes) {
+      const origin: HistorySource = fix.gm ? "gm" : fix.agent ? "agent" : fix.by ? "turn" : "fix";
+      for (const event of fix.events) out.push({ turn, origin, unit: `${m.id}:fix:${fix.seq}`, event });
+    }
+  });
+  return out;
+}
+
+/** Whether a record on the chain holds the one-time Things tidied fix (`TIDIED_GROUP`), undone or not: its chain is tidied no more. */
+export function tidiedOn(core: LedgerCore, chain: readonly ChainMessage[]): boolean {
+  return core.chain(chain).some((m) => !m.isUser && (activeRecord(m, core.journal.tombstones)?.events.some((e) => e.group === TIDIED_GROUP) ?? false));
+}
+
+/** The chat's head as GM → Things reads it: its read context (the world as played, places made in play overlaid), and the events on its path. */
+export function gmThingsHead(core: LedgerCore, observed: readonly ChainMessage[], registry: Registry): { ctx: ReadContext; path: PathEvent[] } | null {
+  const render = core.renderState(observed);
+  return render ? { ctx: registry.context(render.world, render.state), path: pathEvents(core, observed) } : null;
+}
+
+/**
+ * GM → Things' reads (ITEMS-SPEC §10.2) of the chat's head: Build's list with where the player
+ * character is and why each thing someone has is theirs; a thing's page with what the GM's adds
+ * (its rest, why it is had, its history, its findings); a person's things; a search; the types; and
+ * Tidy up's run (at most `tidy.limit` findings, those left out). Null for a thing or person the
+ * head doesn't have.
+ */
+export function gmThings(registry: Registry, head: { ctx: ReadContext; path: readonly PathEvent[] }, read: Exclude<GmThingsRead, { op: "leave" | "made" | "keep" }>, tidy: { limit: number; left: ReadonlySet<string> }): ResultBodies["lre.things"] | null {
+  const { ctx, path } = head;
+  return readPass(() => {
+    switch (read.op) {
+      case "list":
+        return { list: thingsList(ctx), here: gmThingsList(ctx) };
+      case "find":
+        return { found: findThingIds(ctx, read.words) };
+      case "types":
+        return { types: thingTypes(ctx) };
+      case "tidy":
+        return { tidy: tidyRun(tidyFindings(ctx, path), tidy.left, tidy.limit) };
+      case "person": {
+        const person = personThings(ctx, read.entity);
+        return person ? { person, pick: thingPicks(ctx) } : null;
+      }
+      case "thing": {
+        const thing = thingPage(ctx, read.entity);
+        return thing ? { thing, pick: thingPicks(ctx), gm: gmThingExtras(registry, ctx, path, read.entity, tidyFindings(ctx, path), HISTORY) } : null;
+      }
+    }
+  });
+}
+
+/** What the chat made in play that the world doesn't have (ITEMS-SPEC §6.2): its things and places, each saying whether `draft` has it already. */
+export function madeInPlay(ctx: ReadContext, draft: Pick<WorldDoc, "entities" | "places">): MadeInPlay {
+  return { things: madeThings(ctx, draft), places: madePlaceViews(ctx, draft) };
+}
+
+/**
+ * Keep in the world (ITEMS-SPEC §6.2): the draft patch that copies the things and places named
+ * into `draft` (the world's stored draft, never a world as a chat plays it), each under its own id,
+ * so an Upgrade then follows its keep and take picks for them; the places first, so a thing kept
+ * with the place it lies at lies there; with what was kept, what was skipped and why, and what a
+ * kept thing lost on the way.
+ */
+export function keepInWorld(ctx: ReadContext, draft: Pick<WorldDoc, "entities" | "places">, things: readonly string[], places: readonly string[]): { ops: JsonPatchOp[]; result: KeepResult } {
+  const placed = keepPlaces(ctx, places, draft);
+  const kept = keepThings(ctx, things, draft, new Set(placed.result.places));
+  return { ops: [...placed.ops, ...kept.ops], result: { things: kept.result.things, places: placed.result.places, skipped: [...placed.result.skipped, ...kept.result.skipped], notes: kept.result.notes } };
 }

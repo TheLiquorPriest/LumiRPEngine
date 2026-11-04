@@ -41,6 +41,7 @@ import type { AgentInstant, EventTypeDef, FeedLine, PackDef, ReadContext, Reject
 import type { PlayerBlock, RoutineAwareness, RoutineEditOp, RoutineMode, RoutineRole, RoutineSociability, SkipBlock, SkipLife } from "../../../shared/routines";
 import { BASIC_BLOCKS, blockShapeProblems, isOff, ROUTINE_AWARENESS, ROUTINE_EVENTS, ROUTINE_MODES, ROUTINE_ROLES, routineSettingsOf, SKIP_LIVES } from "../../../shared/routines";
 import { listWords } from "../../../shared/words";
+import { partyTierIn, TIER_MARKS } from "../../../shared/party";
 import type { NeedId, NeedTuning } from "../../../shared/needs";
 import { CONVERSATION, isNeedId, NEED_DEFAULTS, NEED_IDS, NEED_WORDS, needsOn, needsSettingsOf, needsSettingsProblems, STATED_MINUTES } from "../../../shared/needs";
 import { createRng, type Rng } from "../../../engine/rng";
@@ -522,7 +523,7 @@ function liveBlock(ctx: ReadContext, who: EntityId, plan: DayPlan, block: DayPla
   const wasPlace = places.find((p) => p === e?.fields.place) ?? places[0] ?? [...earlier].reverse().find((b) => b.place !== null)?.place ?? home;
   const wasDoing = doings.find((d) => d === e?.fields.activity) ?? doings[0] ?? null;
   const target = block.place ?? (edge && earlier.at(-1)?.place ? home : null);
-  const opts = { edge, release: block.activity === "sleep", scene, skip };
+  const opts = { edge, release: block.activity === "sleep", scene, skip, at };
   const place = target !== null && !routineYields(ctx, who, "place", wasPlace, opts) ? target : null;
   const doing = routineYields(ctx, who, "activity", wasDoing, opts) ? null : activity;
   // A routine never stops a skip for the cast the story is about, nor for anyone it moves only in a
@@ -833,14 +834,15 @@ function skipBlocksOf(ctx: ReadContext, who: EntityId, slot: SlotInfo): readonly
 
 /**
  * Someone takes up a block of their skip life (DESIGN §8: the model's, or a basic need filling time it
- * left open), as an enforced routine's block is taken up: not while a story plan, a trip or an
- * appointment of theirs holds the moment, nor against the GM's intent. Being their skip life's, it may
- * take them out of the scene the story holds with the POV, which sees them go (a note the Montage
- * tells), and back: their arrival where the POV is only notes.
+ * left open), as an enforced routine's block is taken up: not while a story plan (or an order of the
+ * party's), a trip or an appointment of theirs holds the moment, nor against the GM's intent or a timed
+ * order under way (`orgs.on_order`). Being their skip life's, it may take them out of the scene the
+ * story holds with the POV, which sees them go (a note the Montage tells), and back: their arrival
+ * where the POV is only notes.
  */
 function liveSkipBlock(ctx: ReadContext, who: EntityId, block: SkipLived, at: number): LedgerEvent[] {
   if (commitments(ctx, who, at, at + 1).some((c) => c.kind === "plan" || c.kind === "trip" || c.kind === "appointment")) return [];
-  if (optionalQuery(ctx, "minds.intent")?.(ctx, who) === true) return [];
+  if (optionalQuery(ctx, "minds.intent")?.(ctx, who) === true || optionalQuery(ctx, "orgs.on_order")?.(ctx, who, at) === true) return [];
   return takeUp(ctx, who, block.place, block.activity, at, undefined, true, true);
 }
 
@@ -853,7 +855,8 @@ function liveSkipBlock(ctx: ReadContext, who: EntityId, block: SkipLived, at: nu
  * while the story holds the POV (`SlotInfo.povRoutine` false), which in a skip only a story plan's
  * block is held to. Someone whose routine isn't lived takes up only their plans: after one they take
  * up the skip's planned block holding then, if any, else stay where it left them, at rest, until the
- * story moves them.
+ * story moves them. After a plan's block, someone on a timed order of the party's still under way
+ * stays at it (`orgs.on_order`, assess-party §6.2): what follows is routine, which gives way to it.
  */
 function atPlanMoment(ctx: ReadContext, who: EntityId, moment: AgentInstant, slot: SlotInfo): LedgerEvent[] {
   if (moment.key === ACTIVITY_END) return povLivedNeeds(ctx, slot, moment.at);
@@ -878,6 +881,7 @@ function atPlanMoment(ctx: ReadContext, who: EntityId, moment: AgentInstant, slo
   }
   const block = plan.blocks.find((b) => b.start <= moment.at && moment.at < b.end);
   if (!block) return [];
+  if (moment.key.startsWith("end:") && !block.option.startsWith("plan:") && optionalQuery(ctx, "orgs.on_order")?.(ctx, who, moment.at) === true) return [];
   const skipLife = slot.timelapse === true && who !== ctx.world.pov && routineRole(ctx, who) !== "enforced" && !block.option.startsWith("plan:");
   if (scene && withPov(ctx, who) && !skipLife) return [];
   if (who !== ctx.world.pov && !block.option.startsWith("plan:") && !routineLived(ctx, who, slot.timelapse === true)) {
@@ -1488,7 +1492,7 @@ export function buildCastView(ctx: ReadContext): CastView {
     .filter((id) => isGroup(ctx.registry, ctx.world, ctx.state, id) && shown(id));
   const membershipsOf = (who: EntityId): { id: EntityId; role?: string; rank?: number; since?: string }[] =>
     groupIds
-      .filter((g) => isMemberOf(ctx.state, who, g))
+      .filter((g) => isMemberOf(ctx, who, g))
       .map((g) => {
         const direct = objOf(own(ctx.state.entities, who)?.relations.find((r) => r.type === MEMBER_OF && r.to === g)?.fields);
         return { id: g, ...(typeof direct.role === "string" && direct.role !== "" ? { role: direct.role } : {}), ...(typeof direct.rank === "number" ? { rank: direct.rank } : {}), ...(typeof direct.since === "string" ? { since: direct.since } : {}) };
@@ -1691,9 +1695,10 @@ export function stanceCues(ctx: ReadContext): string[] {
 
 /**
  * The People section (DESIGN §6.6, §6.11): the POV by name with its pressing needs, then each person
- * with it that it can see, what they are doing as it may see it and how they regard it. In `scene`
- * scope, also someone here the POV can't see whom another person here knows, marked with who; in
- * `gm`, someone here no one the POV can see knows of, marked as the GM's.
+ * with it that it can see, marked with their tier when they are in its party (assess-party §6.1,
+ * "Danny Okafor (party companion) is here."), what they are doing as it may see it and how they
+ * regard it. In `scene` scope, also someone here the POV can't see whom another person here knows,
+ * marked with who; in `gm`, someone here no one the POV can see knows of, marked as the GM's.
  */
 export function peopleLines(ctx: ReadContext, scope: FeedScope): FeedLine[] {
   const pov = ctx.world.pov;
@@ -1731,7 +1736,11 @@ export function peopleLines(ctx: ReadContext, scope: FeedScope): FeedLine[] {
     const act = canSeeField(ctx.registry, ctx.world, ctx.state, pov, id, "activity") ? e.fields.activity : undefined;
     // "Danny Okafor is here, at work."; with nothing they're seen doing, only that they are here.
     const doing = typeof act === "string" ? activityPhrase(shownActivity(ctx, id, act)) : null;
-    lines.push({ text: life ? `${e.name} ${life.reads}.` : `${e.name} is here${doing ? `, ${doing}` : ""}.`, known: "pov" });
+    // Their party tier, then their titles where an organization ties them to the POV (ORG-SPEC §3.15): "Marcus Delgado (owner of Alder Automotive, where you work)".
+    const tier = partyTierIn(e.relations, pov);
+    const marks = [...(tier ? [TIER_MARKS[tier]] : []), ...(optionalQuery(ctx, "orgs.titles")?.(ctx, id) ?? [])];
+    const name = marks.length > 0 ? `${e.name} (${marks.join("; ")})` : e.name;
+    lines.push({ text: life ? `${name} ${life.reads}.` : `${name} is here${doing ? `, ${doing}` : ""}.`, known: "pov" });
     // How they regard the POV follows them; a body the POV knows of holds no regard to voice.
     const regard = life && !life.acts ? null : (voice?.(ctx, id) ?? null);
     if (regard) lines.push({ text: regard, known: "pov" });

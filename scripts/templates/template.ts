@@ -58,6 +58,8 @@ export interface TplJob {
   start?: string;
   /** Tipped work (DESIGN §26): the tips an hour on top of `rateCents`, which is then the cash wage. */
   tipsPerHourCents?: number;
+  /** The position the job holds there: one its employer defines (ORG-SPEC §3.3). */
+  position?: string;
 }
 
 export interface TplCharacter {
@@ -99,6 +101,8 @@ export interface TplPlace {
   atm?: { bank: string; fee?: number; limit?: number; deposits?: boolean };
   /** A branch of a bank, where its customers bank at the counter. */
   branch?: { bank: string };
+  /** Who may come in (ORG-SPEC §3.9): owner, members, staff, customers or public; unset, a business's place admits customers while it trades and staff outside its hours, and anywhere else is open. */
+  entry?: string;
 }
 
 export interface TplRoute {
@@ -271,19 +275,73 @@ export interface TplFlow {
   rateCentsPerKwh?: number;
 }
 
+/**
+ * A position an organization defines (ORG-SPEC §3.3): its title, the powers it carries, how many
+ * may hold it (0 any number, 1 by default), whom it reports to, whether its staff and member powers
+ * reach only the positions below it, its spending limits, and who fills it when it falls vacant.
+ */
+export interface TplPosition {
+  id: string;
+  title: string;
+  powers: string[];
+  seats?: number;
+  reportsTo?: string;
+  scope?: "org" | "below";
+  limits?: { paymentCents?: number; monthCents?: number; accounts?: string[] };
+  /** "next", a character's id, or "vacant" (the default). */
+  successor?: string;
+  default?: true;
+  noDues?: true;
+}
+
+/** Someone belonging to a household or an organization by `member_of`: their own title (`role`), the position they hold, their rank in it and since when. */
+export interface TplMember {
+  id: string;
+  role?: string;
+  position?: string;
+  rank?: number;
+  /** The date they joined (`YYYY-MM-DD`). */
+  since?: string;
+}
+
 export interface TplHousehold {
   id: string;
   name: string;
-  members: { id: string; role?: string }[];
+  members: TplMember[];
+  positions?: TplPosition[];
 }
 
-/** A record the money modules keep as an entity (a business, an invoice, a property, a holding), written as the entity's fields. */
+/** A group of one of the world's group kinds (a faction, a family, a company group, …) with its members, positions and places. */
+export interface TplOrganization {
+  id: string;
+  kind: string;
+  name: string;
+  tier?: string;
+  places?: string[];
+  members: TplMember[];
+  positions?: TplPosition[];
+}
+
+/** A delegation (`acts_for`, ORG-SPEC §3.5): who acts for which organization, with what powers and limits, granted by whom, until when (a local date-time). */
+export interface TplDelegation {
+  who: string;
+  org: string;
+  powers: string[];
+  paymentCents?: number;
+  monthCents?: number;
+  accounts?: string[];
+  by: string;
+  until?: string;
+}
+
+/** A record the money modules keep as an entity (a business, an invoice, a property, a holding, a trust), written as the entity's fields; a business or a trust may define positions. */
 export interface TplRecord {
   id: string;
   kind: string;
   name: string;
   tier?: string;
   fields: JsonObject;
+  positions?: TplPosition[];
 }
 
 export interface TplStage {
@@ -412,8 +470,14 @@ export interface Template {
   flows?: TplFlow[];
   households?: TplHousehold[];
   records?: TplRecord[];
+  /** Groups of the world's group kinds other than households (ORG-SPEC §3.1). */
+  organizations?: TplOrganization[];
+  /** Who acts for an organization, and with what powers (ORG-SPEC §3.5). */
+  delegations?: TplDelegation[];
   /** The economy pack's config: products, Custom money toggles, assets, and module keys (taxes). */
   economy?: JsonObject;
+  /** Everyday carry (ITEMS-SPEC §4.4): the catalog types every person carries from the start; absent, the Modern US default (a wallet, keys and a phone). */
+  carry?: string[];
   prices?: { id: string; name: string; unit: string; category: string; band: { min: number; typical: number; max: number } }[];
   /** Price bands for every `economy.categories` row, in the world's own base units, for a world with no data pack (replaces the Modern US bands in cents). */
   categories?: Record<string, { name: string; basis: string; band: { min: number; typical: number; max: number } }>;

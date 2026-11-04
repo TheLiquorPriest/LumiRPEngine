@@ -1,6 +1,8 @@
 // What a purchase names (DESIGN §9.5): an item's words as purchases compare them. Pure string work,
 // shared by catalog pricing (`matchCatalog`) and the read that tells a narrated purchase from the
-// turn's own Buy (`boughtAlong` in the backend).
+// turn's own Buy (`boughtAlong` in the backend). A word's comparison form is the things model's (`stem`).
+
+import { stem } from "../../../shared/things";
 
 /** Words that don't name the thing bought: articles and possessives, and the containers and measures it comes in ("a box of matches" is matches, "a round of beers" is beer). */
 const FILLER: Readonly<Record<string, true>> = {
@@ -11,24 +13,6 @@ const FILLER: Readonly<Record<string, true>> = {
 
 /** Words that start a trailing phrase about where, how, when or who a thing is for ("sandwich for lunch", "beer at a bar", "pizza by the slice"). */
 const TRAILING: Readonly<Record<string, true>> = { for: true, to: true, from: true, at: true, with: true, in: true, on: true, by: true, per: true, as: true };
-
-/**
- * A word's comparison form: lowercase singular, simply ("coffees" coffee, "lunches" lunch,
- * "glasses" glass, "potatoes" potato), with -y and -ie endings made one ("battery" and "batteries",
- * "cookie" and "cookies" compare equal). A hyphenated word keeps its hyphens and stems its last part.
- */
-export function stem(word: string): string {
-  const parts = word.split("-");
-  const w = parts.pop() ?? "";
-  let s = w;
-  if (w.length > 3 && !/(?:ss|us|is)$/.test(w)) {
-    if (w.length > 4 && w.endsWith("ies")) s = `${w.slice(0, -3)}i`;
-    else if (/(?:s|x|z|ch|sh)es$/.test(w) || (w.length > 5 && w.endsWith("oes"))) s = w.slice(0, -2);
-    else if (w.endsWith("s")) s = w.slice(0, -1);
-    if (s.length > 3 && /(?:ie|y)$/.test(s)) s = s.replace(/(?:ie|y)$/, "i");
-  }
-  return [...parts, s].join("-");
-}
 
 /** Lowercase words of a phrase; a hyphenated word ("fast-food", "flip-flops") is one word. */
 function tokens(text: string): string[] {

@@ -135,9 +135,9 @@ describe("the main agent's turn", () => {
     const stages = asked.map(stageNumber);
     expect(stages).toEqual([...stages].sort((a, b) => a - b));
     expect(new Set(stages)).toEqual(new Set([1, 3, 5, 7, 8]));
-    // The refused calls ran nothing: one read of the message, one of the reply.
+    // The refused calls ran nothing: one read of the message, and one of the reply by each of its halves, the read's and the Curator's.
     expect(rig.host.quietCalls.filter((c) => (c.messages[0]?.content ?? "").includes(INTERPRET_MARK))).toHaveLength(1);
-    expect(rig.host.quietCalls.filter((c) => (c.messages[0]?.content ?? "").includes(EXTRACT_MARK))).toHaveLength(1);
+    expect(rig.host.quietCalls.filter((c) => (c.messages[0]?.content ?? "").includes(EXTRACT_MARK))).toHaveLength(2);
     // The turn task opened its first stage: a fresh session's digest of the chat so far, then the player's message.
     expect(sentOf(asked[0] as QuietRequest)).toContain("You take this chat up now");
     expect(sentOf(asked[0] as QuietRequest)).toContain("I look out over the harbor.");
@@ -464,6 +464,7 @@ describe("what a run gave the engine", () => {
   function quietRole(role: string, req: QuietRequest): QuietScript {
     const all = sentOf(req);
     if (role === "scene") return JSON.stringify({ lore: [], notes: [] });
+    if (role === "curator") return JSON.stringify({ proposals: [] });
     if (role === "knowledge") return JSON.stringify({ facts: [], learned: [], inferred: [], doubted: [] });
     if (role === "minds") return JSON.stringify({ monologue: "Nothing yet.", depiction: "looks up", intent: "Wait.", reactions: [], mood: "calm" });
     if (role === "memory") return JSON.stringify({ notes: [], commitments: [], resolved: [], plans: [] });
@@ -687,13 +688,28 @@ describe("what a run gave the engine", () => {
     expect(rig.rt.ledger.errors).toEqual([]);
   });
 
-  test("a read's change to a thing the world doesn't have says so, naming it and how a thing is made", async () => {
+  test("with the Curator off, a read's take of a thing the world doesn't have makes it in the taker's hands (ITEMS-SPEC §5.3), and its run says nothing of a thing it lacks", async () => {
+    const rig = new Rig({ shipped: true, minds: true });
+    const chatId = await rolesChat(rig, { agents: { pipeline: { curator: false } } });
+    // A harmonica: nothing in Port Alder shares its head noun, so nothing the words may mean is there.
+    const asked = agentModels(rig, { read: () => JSON.stringify({ proposals: [{ type: "take", entity: "pov", item: "harmonica" }], where: null }) });
+    await played(rig, chatId, "I pick up the harmonica from the counter.", "You pocket the harmonica.");
+    const [ran = ""] = ranOf(asked, "read");
+    expect(ran).toContain('"type":"take"');
+    expect(ran).not.toContain("What the engine didn't take");
+    const { state } = await stateOf(rig, chatId);
+    const made = Object.values(state.entities).filter((e) => e.name.toLowerCase() === "harmonica");
+    expect(made.map((e) => e.relations.filter((r) => r.type === "in").map((r) => r.to))).toEqual([["pov"]]);
+    expect(rig.rt.ledger.errors).toEqual([]);
+  });
+
+  test("with the Curator on, a thing fact is the Curator's: the read's isn't read, and the Curator runs beside it (ITEMS-SPEC §6.4)", async () => {
     const rig = new Rig({ shipped: true, minds: true });
     const chatId = await rolesChat(rig);
-    const asked = agentModels(rig, { read: () => JSON.stringify({ proposals: [{ type: "take", entity: "pov", item: "brass key" }], where: null }) });
-    await played(rig, chatId, "I pick up the brass key from the counter.", "You pocket the brass key.");
-    const [ran = ""] = ranOf(asked, "read");
-    expect(ran).toContain("What the engine didn't take: 1 name a thing the world doesn't have (brass key): each changes nothing but a Not tracked note; only a give by someone other than the player character, the thing in the reply's words, or a purchase makes one.");
+    const asked = agentModels(rig, { read: () => JSON.stringify({ proposals: [{ type: "take", entity: "pov", item: "pov_keys" }], where: null }) });
+    await played(rig, chatId, "I pick up my keys.", "You pocket your keys.");
+    expect(ranOf(asked, "read")[0]).toContain("What the engine didn't take: 1 not read (take: not a change type the read takes now).");
+    expect(ranOf(asked, "curator").length).toBeGreaterThan(0);
     expect(rig.rt.ledger.errors).toEqual([]);
   });
 

@@ -47,6 +47,8 @@ export function classicRoles(rt?: Runtime): TurnRoles {
       offscreen: prompted,
     },
     read: { extract: prompted },
+    // Prompt-only, the Curator is classic's item read (ITEMS-SPEC I9): classic's extract on its channels alone.
+    curator: { curate: prompted },
     world: { effects: prompted },
     memory: prompted,
     skip: { plan: prompted, beats: prompted },

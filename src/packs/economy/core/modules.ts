@@ -2,10 +2,14 @@
 // one import and one entry here; nothing else of the foundation names it.
 
 import type { FinanceModule } from "./module";
+import { registerShares } from "./shares";
+import { registerTreasury } from "./treasury";
 import { registerWork } from "./work";
 import { registerAssets } from "./wealth";
 
 export const FINANCE_MODULES: readonly { id: string; register: FinanceModule }[] = [
   { id: "work", register: registerWork },
   { id: "assets", register: registerAssets },
+  { id: "treasury", register: registerTreasury },
+  { id: "shares", register: registerShares },
 ];

@@ -140,7 +140,7 @@ function appointmentsWith(state: Readonly<WorldState>, who: EntityId, other: Ent
   }).length;
 }
 
-/** The pending interactions between a character and the POV: an invitation, an appointment together, an open plan or commitment with them. */
+/** The pending interactions between a character and the POV: an invitation, an appointment together, an open plan or commitment with them, and each order asked of them on a plan the POV is on (the orgs pack's `orgs.open_orders`). */
 function pendingWith(ctx: ReadContext, id: EntityId): number {
   const { world, state } = ctx;
   const pov = world.pov;
@@ -152,6 +152,7 @@ function pendingWith(ctx: ReadContext, id: EntityId): number {
   const c = readCharacter(state, id);
   n += openPlans(c).filter((p) => p.with.includes(pov) && p.when.to >= now).length;
   n += openCommitments(c).filter((x) => x.with.includes(pov)).length;
+  n += optionalQuery(ctx, "orgs.open_orders")?.(ctx, id) ?? 0;
   return n;
 }
 
@@ -161,9 +162,9 @@ const SOON_MINUTES = 1440;
 /**
  * Whether someone off the POV's scene is in something that could surface soon (DESIGN §24.1): a plan
  * or appointment with the POV within the coming day, an invitation to it still open, an agenda of
- * their own under way, the GM's intent for them, a place or activity the story holds them to, or a
- * mind that interrupted the skip the clock stopped on. Idling, living their routine or being named
- * is none of these.
+ * their own under way, an order on a plan the POV is on (assess-party §6.2), the GM's intent for them,
+ * a place or activity the story holds them to, or a mind that interrupted the skip the clock stopped
+ * on. Idling, living their routine or being named is none of these.
  */
 export function involved(ctx: ReadContext, id: EntityId): boolean {
   const { world, state } = ctx;
@@ -176,6 +177,7 @@ export function involved(ctx: ReadContext, id: EntityId): boolean {
   if (ctx.registry.formulas.get("invited")?.(ctx, id) === true) return true;
   if (liveTracks(world, state).some((t) => own(world.tracks, t)?.kind === "agenda" && own(world.tracks, t)?.owner === id)) return true;
   if (c.intent !== undefined) return true;
+  if ((optionalQuery(ctx, "orgs.open_orders")?.(ctx, id) ?? 0) > 0) return true;
   if (Object.values(objOf(own(state.entities, id)?.fields.holds)).some((until) => typeof until === "number" && until > now)) return true;
   return c.mind !== null && c.mind.interrupt !== null && c.mind.at === now;
 }

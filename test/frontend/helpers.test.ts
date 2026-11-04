@@ -187,7 +187,7 @@ describe("time settings patches", () => {
 describe("Play panels", () => {
   const Empty = () => null;
   const panel = (id: string, order: number): PanelDef => ({ id, label: id, order, home: "now", component: Empty });
-  const catalog: UiCatalog = { panels: [panel("core.scene", 10), panel("economy.money", 30), panel("core.journal", 90), panel("gear.gear", 50)], editors: new Map(), configs: new Map(), chips: new Map(), previews: new Map(), gmSections: [], fields: [], placeFields: [], sheets: new Map(), glances: [], packs: [] };
+  const catalog: UiCatalog = { panels: [panel("core.scene", 10), panel("economy.money", 30), panel("core.journal", 90), panel("gear.gear", 50)], editors: new Map(), configs: new Map(), chips: new Map(), previews: new Map(), gmSections: [], fields: [], placeFields: [], sheets: new Map(), glances: [], orgTabs: [], packs: [] };
 
   test("core panels always show; a pack panel shows once its view is in the state", () => {
     const view = { panels: { "economy.money": { level: 1 } } } as unknown as StateView;

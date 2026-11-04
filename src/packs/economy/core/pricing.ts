@@ -7,6 +7,12 @@ import type { Rng } from "../../../engine/rng";
 /** Minutes in a year, for option and bond time (365 days, as the market's year counts). */
 export const YEAR_MINUTES = 365 * 1440;
 
+/** The market's close, local time: the day's marks are taken then, and contracts expire and bonds mature at it. */
+export const MARKET_CLOSE = 16 * 60;
+
+/** Trading days in the market's year: a business-day asset steps a 252nd of a year each one (an asset that trades every day, crypto, a 365th). */
+export const TRADING_DAYS = 252;
+
 /** A standard normal draw (Box-Muller): two uniforms in, one normal out, so each stream is one draw per step. */
 export function normal(rng: Rng): number {
   const u1 = Math.max(Number.MIN_VALUE, rng.next());
@@ -28,6 +34,13 @@ export function gbmStep(price: number, driftPct: number, volPct: number, dt: num
   const mu = driftPct / 100;
   const sigma = volPct / 100;
   return price * Math.exp((mu - (sigma * sigma) / 2) * dt + sigma * Math.sqrt(dt) * z);
+}
+
+/** The shock that makes `gbmStep` move a price by the log return `r`, at the same drift, volatility and `dt`: its inverse. */
+export function gbmShock(r: number, driftPct: number, volPct: number, dt: number): number {
+  const mu = driftPct / 100;
+  const sigma = volPct / 100;
+  return (r - (mu - (sigma * sigma) / 2) * dt) / (sigma * Math.sqrt(dt));
 }
 
 /**

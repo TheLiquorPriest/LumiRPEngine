@@ -6,7 +6,7 @@
 // accounts are positive when they hold money; credit accounts are negative when money is owed.
 // Every posting balances, so the trial balance is always 0.
 
-import type { JsonObject } from "../../../shared/json";
+import { isRecord, type JsonObject } from "../../../shared/json";
 import type { EntityId } from "../../../shared/ids";
 import { hashParts } from "../../../shared/hash";
 import type { Band } from "../../../shared/tables";
@@ -38,10 +38,12 @@ import { EXTERNAL_ACCOUNT_PREFIX } from "../../../engine/events";
 import { bandOfJson, labelOf, numOf, objOf, sliceOf, strOf, own, rowOf } from "../../../engine/pack-kit";
 import type { ReadContext } from "../../../engine/registry";
 import { passMemo } from "../../../engine/read-pass";
-import type { Rng } from "../../../engine/rng";
+import { createRng, type Rng } from "../../../engine/rng";
+import { calendarOf, dateAt } from "../../../engine/calendar";
 import type { WorldState } from "../../../engine/state";
 import { kindIs, placeOfEntity } from "../../../engine/scope";
-import { MEMBER_OF } from "../../../engine/selector";
+import { COMPANY_KIND, GROUP_KIND, MEMBER_OF, membersOf } from "../../../engine/selector";
+import { mayAct } from "../../../engine/org";
 import { canSeeEntity, canSeePlace } from "../../../engine/visibility";
 
 /** The outside account corrections post against (a ✎ cash fix, a GM money edit): money they add or remove comes from or goes to it, so the books still balance. Shown as "Correction". */
@@ -182,15 +184,6 @@ export function hiddenFrom(books: ViewBooks, viewer: EntityId | null, id: string
 /** A name as `viewer` may read it, in a view or in why something was refused: "someone" for anyone or anything they can't see. */
 export function shownLabel(books: ViewBooks, viewer: EntityId | null, id: string): string {
   return seenBy(books, viewer, id) ? labelOf(books, id) : "someone";
-}
-
-/**
- * The id a player's view sends in place of one that names someone they can't see (a job's
- * `job_danny_mechanic`, its payroll's `pay:job_danny_mechanic`): a digest of it, the same on every
- * view, so the view's own references to it still meet.
- */
-export function opaqueId(id: string): string {
-  return `hidden:${hashParts(id).slice(0, 12)}`;
 }
 
 export function bankSide(institution: string): string {
@@ -421,15 +414,39 @@ export function managesParty(state: Readonly<WorldState>, party: EntityId, who: 
 }
 
 /**
- * Whether `who` manages an account (DESIGN §25.1): by a managing role on it, or by managing a
- * business or a trust that holds one, so a business's owners manage its accounts by their role on
- * the business. Managing is setting up and changing what the account pays (its standing payments,
- * its autopay) and its cards; it isn't spending, which only a role on the account gives, and an
- * employee, holding no role on the business, manages none of it.
+ * Whether `who` manages an account (DESIGN §25.1, ORG-SPEC §3.8): by a managing role on it, by
+ * managing a business or a trust that holds one, so a business's owners manage its accounts by their
+ * role on the business, or by holding `money.manage` for an organization that holds one by a
+ * managing role (a position, a delegation in force within its accounts, a household's Head).
+ * Managing is setting up and changing what the account pays (its standing payments, its autopay) and
+ * its cards; it isn't spending, which only a role on the account gives, and an employee, holding no
+ * role on the business, manages none of it.
  */
-export function managesAccount(books: Books, account: EntityId, who: EntityId): boolean {
-  if (!classOf(books, account)) return false;
-  return ownersOf(books.state, account).some((o) => ROLE_RIGHTS[o.role].manage && (o.party === who || managesParty(books.state, o.party, who)));
+export function managesAccount(ctx: ReadContext, account: EntityId, who: EntityId): boolean {
+  if (!classOf(ctx, account)) return false;
+  return ownersOf(ctx.state, account).some((o) => ROLE_RIGHTS[o.role].manage && (o.party === who || managesParty(ctx.state, o.party, who) || mayAct(ctx, who, o.party, "money.manage", { account }).ok));
+}
+
+/**
+ * A party's Money level (ORG-SPEC §3.1): a person's, a business's or a trust's own; a household's,
+ * any other group's or the party's the highest of its own and its members', so an organization's
+ * money is followed as closely as its most closely followed member's.
+ */
+export function moneyLevel(ctx: Pick<ReadContext, "registry" | "world" | "state" | "levelOf">, party: EntityId): number {
+  const level = ctx.levelOf(party, "money");
+  const kind = own(ctx.state.entities, party)?.kind ?? "";
+  if (kind === "" || !kindIs(ctx.registry, ctx.world, kind, GROUP_KIND) || kindIs(ctx.registry, ctx.world, kind, COMPANY_KIND)) return level;
+  return passMemo([ctx.state, ctx.state.entities, ctx.world], `economy.level:${party}`, () => Math.max(level, ...membersOf(ctx.registry, ctx.world, ctx.state, party).map((m) => ctx.levelOf(m, "money"))));
+}
+
+/**
+ * One of an organization's setting fields that holds a record (`payroll`, `dues`): the record itself,
+ * or the first record of a list, as Build and the GM's edits store a list field; null for none.
+ */
+export function orgRecord(state: Readonly<WorldState>, org: EntityId, field: string): JsonObject | null {
+  const v = own(state.entities, org)?.fields[field];
+  const record = Array.isArray(v) ? v.find(isRecord) : v;
+  return isRecord(record) ? record : null;
 }
 
 /**
@@ -699,6 +716,17 @@ export function priceOf(ctx: Pick<ReadContext, "tables" | "world" | "state">, re
     clamped = unit !== n;
   }
   return { cents: Math.round(unit * qty), unitCents: unit, band, source: item ? "catalog" : "category", clamped, name: strOf(item?.name ?? cat?.name, ref.catalog ?? categoryId), category: categoryId };
+}
+
+/**
+ * A catalog row's price where it is sold, today (DESIGN §9.5): the catalog's seeded variance drawn
+ * once a day for the row and the place, so what lists the price (the Buy options, the narrator's
+ * Money section, the agents' reads) names what buying it there that day costs.
+ */
+export function dayPriceOf(ctx: Pick<ReadContext, "tables" | "world" | "state">, ref: PriceRef & { catalog: string }): Price | null {
+  const place = ref.place !== undefined ? ref.place : placeOfEntity(ctx.state, ctx.world.pov);
+  const day = dateAt(calendarOf(ctx.world), ctx.state.clock).dayIndex;
+  return priceOf(ctx, { ...ref, place }, createRng(hashParts("price", ref.catalog, place ?? "", String(day))));
 }
 
 /**

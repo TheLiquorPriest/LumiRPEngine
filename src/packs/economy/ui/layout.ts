@@ -1,10 +1,11 @@
-// The money hub's layout, worked out from a party's view (DESIGN §25 realism gating): which
-// sections show, how accounts group, which controls each thing offers the player (from the
-// owner's role and the features running) and the choices the forms offer. Pure, so what the
-// dashboards show at each level is tested directly; the core already left out what the level
-// doesn't simulate, and nothing here shows detail the view marks as below the top level.
+// A party's money laid out, worked out from its view (DESIGN §25 realism gating, ORG-SPEC §5): the
+// parts its money has and the segments they make, how accounts group, what each segment lists,
+// which controls each thing offers the player (from the owner's role and the features running) and
+// the choices the forms offer. Pure, so what each level shows is tested directly; the core already
+// left out what the level doesn't simulate, and nothing here shows detail the view marks as below
+// the top level.
 
-import { CLASS_TRAITS, payeeKey, ROLE_RIGHTS, type AccountView, type AlertLine, type BusinessView, type CardView, type DistributionRoute, type FinanceFeature, type FinanceView, type FlowView, type HoldingView, type HouseholdView, type Invoice, type JobView, type OwnerRole, type PartyKind, type PropertyView, type RoleRights, type UpcomingLine } from "../../../shared/finance";
+import { CLASS_TRAITS, payeeKey, ROLE_RIGHTS, type AccountView, type AlertLine, type BusinessView, type CardView, type DistributionRoute, type FinanceFeature, type FinanceView, type FlowView, type HoldingView, type HouseholdView, type Invoice, type JobView, type JournalLine, type OwnerRole, type PartyKind, type PropertyView, type RoleRights, type UpcomingLine } from "../../../shared/finance";
 import type { EntityId } from "../../../shared/ids";
 import type { GmView, PaletteView } from "../../../shared/state-view";
 import { cardChanges, type CardChange } from "./requests";
@@ -41,13 +42,14 @@ export interface HubTab {
 }
 
 /**
- * The hub's sections for a party, in order. Money 1 is a band and nothing else; from 2 a section
- * shows when the party has something there (accounts; flows, or the feature that runs them from
- * its accounts; a job, a household, …), so a household that holds no account of its own still
- * shows its members, and a player with no job or business sees no empty tab for one. The GM also
- * gets the sections that hold its create controls while they're empty, wherever what it adds would
- * show: a person's Jobs, anyone's Properties, and a person's Household where households run for
- * them (a household switched off shows nothing, so a member's would read as none).
+ * The parts a party's money has, in order, which its segments group (`moneySegments`). Money 1 is
+ * a band and nothing else; from 2 a part shows when the party has something there (accounts;
+ * flows, or the feature that runs them from its accounts; a job, a household, …), so a household
+ * that holds no account of its own still shows its members, and a player with no job or business
+ * has no empty part for one. The GM also gets the parts that hold its create controls while
+ * they're empty, wherever what it adds would show: a person's Jobs, anyone's Properties, and a
+ * person's Household where households run for them (a household switched off shows nothing, so a
+ * member's would read as none).
  */
 export function hubTabs(view: FinanceView, mode: "player" | "gm"): HubTab[] {
   if (view.level <= 0) return [];
@@ -66,6 +68,126 @@ export function hubTabs(view: FinanceView, mode: "player" | "gm"): HubTab[] {
   if (view.credit !== null) tabs.push({ id: "credit", label: SECTION_LABELS.credit, dot: view.credit.marks.length > 0 });
   if (view.household !== null || (creates && person && view.features.includes("households"))) tabs.push({ id: "household", label: SECTION_LABELS.household, dot: false });
   return tabs;
+}
+
+/**
+ * Who is looking at a party's money: the player at their own (each control an in-world action),
+ * the GM (each an edit), or the player at an organization's in Orgs, drawn without controls of its
+ * own, since no one acts as an organization yet (ORG-SPEC §3.6, Phase 2).
+ */
+export type HubMode = "player" | "gm" | "read";
+
+/** The segments of a party's money (ORG-SPEC §5.1): Me → Money's row, an organization's Money tab and GM → Money. */
+export type MoneySegment = "summary" | "accounts" | "in_out" | "books" | "assets" | "credit";
+
+export const SEGMENT_LABELS: Readonly<Record<MoneySegment, string>> = { summary: "Summary", accounts: "Accounts", in_out: "In & out", books: "Books", assets: "Assets", credit: "Credit" };
+
+export interface SegmentTab {
+  id: MoneySegment;
+  label: string;
+  /** Something in it needs attention, as its parts say. */
+  dot: boolean;
+}
+
+/**
+ * The segments a party's money shows, in order, each where a part of it has something
+ * (`hubTabs`): Summary from Money 1; Accounts with the accounts; In & out with a job, a flow (or
+ * the flows that run from its accounts) or a household, and a business's own invoices; Books on a
+ * business's own money; Assets with investments, property or a stake in a business; Credit with
+ * a credit report. With one segment there's no row to show.
+ */
+export function moneySegments(view: FinanceView, mode: HubMode): SegmentTab[] {
+  const parts = hubTabs(view, mode === "gm" ? "gm" : "player");
+  if (parts.length === 0) return [];
+  const part = (id: HubSection): HubTab | undefined => parts.find((p) => p.id === id);
+  const tab = (id: MoneySegment, dot: boolean): SegmentTab => ({ id, label: SEGMENT_LABELS[id], dot });
+  const own = ownBusiness(view);
+  const out: SegmentTab[] = [tab("summary", part("overview")?.dot ?? false)];
+  if (part("accounts")) out.push(tab("accounts", part("accounts")?.dot ?? false));
+  if (part("flows") || part("jobs") || part("household") || own) out.push(tab("in_out", (part("flows")?.dot ?? false) || (own?.invoices.some((i) => i.state === "late") ?? false)));
+  if (own) out.push(tab("books", false));
+  if (part("investments") || part("properties") || stakesOf(view).length > 0) out.push(tab("assets", part("properties")?.dot ?? false));
+  if (part("credit")) out.push(tab("credit", part("credit")?.dot ?? false));
+  return out;
+}
+
+/** A business's own money (Orgs, GM → Orgs) is of the business itself: its books, invoices and payroll; null on anyone else's. */
+export function ownBusiness(view: FinanceView): BusinessView | null {
+  return view.partyKind === "business" ? (view.businesses.find((b) => b.id === view.party) ?? null) : null;
+}
+
+/** The businesses the party holds a share of the worth of (as an owner, a joint owner, a beneficiary): its stakes, under Assets; one it only runs is in Orgs alone. */
+export function stakesOf(view: FinanceView): BusinessView[] {
+  return view.businesses.filter((b) => b.id !== view.party && b.role !== null && ROLE_RIGHTS[b.role].worth);
+}
+
+// ---------------------------------------------------------------- what each segment lists
+
+/** How far ahead Summary's Coming up looks: seven days of the world's clock, in minutes. */
+export const COMING_UP_MINUTES = 7 * 24 * 60;
+
+/** How many alerts Summary shows before All alerts. */
+export const SUMMARY_ALERTS = 3;
+
+/** Summary's Coming up: what's due within seven days of `now` (the HUD clock's minutes), by each line's clock; without a clock, the first few as the level shows them. */
+export function comingUp(view: FinanceView, now: number | null): UpcomingLine[] {
+  const upcoming = view.overview?.upcoming ?? [];
+  return (now === null ? upcoming : upcoming.filter((u) => u.clock <= now + COMING_UP_MINUTES)).slice(0, overviewBlocks(view).upcoming);
+}
+
+/** The ways Accounts' Move money offers, each the account control (`accountControls`) it opens. */
+export type MoveControl = "transfer" | "pay" | "withdraw" | "deposit";
+
+export const MOVE_CONTROLS: readonly MoveControl[] = ["transfer", "pay", "withdraw", "deposit"];
+
+/** The party's accounts Move money can start `control` from: each that offers it, in the view's order. */
+export function moveFrom(view: FinanceView, control: MoveControl): AccountView[] {
+  return view.accounts.filter((a) => accountControls(view, a).includes(control));
+}
+
+/** Activity's filter: one account's lines, one category's, or (empty) all. */
+export interface ActivityFilter {
+  account: string;
+  category: string;
+}
+
+export const ALL_ACTIVITY: ActivityFilter = { account: "", category: "" };
+
+/**
+ * Activity (ORG-SPEC §5.1): every line across the party's accounts the view carries, newest first,
+ * of the account and the category the filter names; where holds run, the lines still pending and
+ * the holds on each account too (a hold has no category, so a category's lines leave them out).
+ */
+export function activityOf(view: FinanceView, filter: ActivityFilter): { lines: JournalLine[]; pending: JournalLine[]; holds: { account: AccountView; hold: AccountView["holds"][number] }[] } {
+  const accounts = view.accounts.filter((a) => filter.account === "" || a.id === filter.account);
+  const kept = (l: JournalLine): boolean => (filter.account === "" || l.accountId === filter.account) && (filter.category === "" || l.category === filter.category);
+  const holds = shows(view, "holds");
+  return {
+    lines: view.recent.filter(kept),
+    pending: holds ? accounts.flatMap((a) => a.pending).filter(kept) : [],
+    holds: holds && filter.category === "" ? accounts.flatMap((a) => a.holds.map((hold) => ({ account: a, hold }))) : [],
+  };
+}
+
+/** What Activity's filter offers: each of the party's accounts, and each category its lines carry, by name. */
+export function activityChoices(view: FinanceView): { accounts: { value: string; label: string }[]; categories: { value: string; label: string }[] } {
+  const categories = [...new Set([...view.recent, ...view.accounts.flatMap((a) => a.pending)].flatMap((l) => (l.category ? [l.category] : [])))].sort();
+  return { accounts: view.accounts.map((a) => ({ value: a.id, label: a.name })), categories: categories.map((c) => ({ value: c, label: c })) };
+}
+
+/**
+ * The flows In & out lists as standing payments: all but those it lists elsewhere, pay from a job
+ * (Income), an invoice (Invoices to pay) and a credit account's autopay (Autopay); and a business's
+ * own trade (its sales, its suppliers, its sales tax), which shows only on the business's own money.
+ */
+export function standingPayments(view: FinanceView): FlowView[] {
+  const business = view.partyKind === "business";
+  return view.flows.filter((f) => f.source !== "job" && f.source !== "invoice" && f.source !== "autopay" && (business || f.source !== "business"));
+}
+
+/** The invoices billed to the party, as their flows: one it may pay now opens its Pay now. */
+export function invoicesToPay(view: FinanceView): FlowView[] {
+  return view.flows.filter((f) => f.source === "invoice" && f.payer === view.party);
 }
 
 export type AccountGroup = "cash" | "banking" | "credit" | "loans" | "investing";
@@ -103,10 +225,35 @@ export function findAccount(view: FinanceView, id: string | undefined): AccountV
   return viewAccounts(view).find((a) => a.id === id) ?? null;
 }
 
+/** Any card the view shows: the party's own, one on an account of theirs in someone else's hands, or one on a business's account they manage. */
+export function findCard(view: FinanceView, id: string | undefined): CardView | null {
+  return view.cards.find((c) => c.id === id) ?? viewAccounts(view).flatMap((a) => a.cards).find((c) => c.id === id) ?? null;
+}
+
+/** Every flow the view carries: the party's own, a property's running costs and a household's shared costs. */
+export function findFlow(view: FinanceView, id: string): FlowView | null {
+  return view.flows.find((f) => f.id === id) ?? view.properties.flatMap((p) => p.costs).find((f) => f.id === id) ?? view.household?.flows.find((f) => f.id === id) ?? null;
+}
+
 /**
- * A business's accounts as its page lists them, in the business's order: each one the view holds
- * (by the party's own role on it, or managed for the business), and the ids of the rest, which the
- * party neither holds nor manages, so its view doesn't show them.
+ * A job by id: one on the payroll of a business the view holds (the party's own business, or one
+ * it owns or runs), with that business, whose manager gives raises and lets people go; else one
+ * of the party's own.
+ */
+export function findJob(view: FinanceView, id: string): { job: JobView; employer: BusinessView | null } | null {
+  for (const b of view.businesses) {
+    const job = b.employees.find((j) => j.id === id);
+    if (job) return { job, employer: b };
+  }
+  const job = view.jobs.find((j) => j.id === id);
+  return job ? { job, employer: null } : null;
+}
+
+/**
+ * A business's accounts as someone's own view holds them, in the business's order: each one the
+ * view holds (by the party's own role on it, or managed for the business), and the ids of the rest,
+ * which the party neither holds nor manages, so its view doesn't show them. The business's Money
+ * tab in Orgs lists the first as the reader's own, and the rest from the business's own money.
  */
 export function businessAccounts(view: FinanceView, business: BusinessView): { shown: AccountView[]; others: EntityId[] } {
   const all = viewAccounts(view);
@@ -225,18 +372,18 @@ export function jobControls(view: FinanceView, job: JobView, employer: BusinessV
   return out;
 }
 
-export type BusinessControl = "hire" | "invoice" | "draw" | "distribute" | "stake";
+export type BusinessControl = "invoice" | "draw" | "distribute" | "stake";
 
 /**
- * The player's controls on a business from Money 3: running it (hiring, invoicing, paying out
- * profit) for whoever manages it, and a draw for whoever may take one (an owner or a joint owner,
- * never from a corporation, as the view says); selling a stake, where investments run, for whoever
- * holds a share of its worth.
+ * The player's controls on a business from Money 3: running it (invoicing, paying out profit) for
+ * whoever manages it, and a draw for whoever may take one (an owner or a joint owner, never from a
+ * corporation, as the view says); selling a stake, where investments run, for whoever holds a
+ * share of its worth. Hiring is the organization's People's Hire someone (the orgs pack's).
  */
 export function businessControls(view: FinanceView, business: BusinessView): BusinessControl[] {
   if (view.level < 3) return [];
   const r = rights(business.role);
-  const out: BusinessControl[] = r.manage ? ["hire", "invoice"] : [];
+  const out: BusinessControl[] = r.manage ? ["invoice"] : [];
   if (business.mayDraw) out.push("draw");
   if (r.manage) out.push("distribute");
   if (r.worth && view.features.includes("investments")) out.push("stake");
@@ -363,22 +510,13 @@ export function fallbackSources(view: FinanceView, from: string, to: string): Ac
 }
 
 /**
- * The people the player may name (a payee, a tenant, a buyer, a hire): the palette's Pay targets the
+ * The people the player may name (a payee, a tenant, a buyer): the palette's Pay targets the
  * POV knows that are people (`person`). Pay takes a business, a household or a trust too (DESIGN §9.4
  * typed money), which none of these pickers' actions take, so they're left out.
  */
 export function knownPeople(palette: PaletteView | null): { id: string; label: string }[] {
   const pay = palette?.entries.find((e) => e.action === "pay");
   return (pay?.options ?? []).flatMap((o) => (o.person === true && typeof o.params.to === "string" ? [{ id: o.params.to, label: o.label }] : []));
-}
-
-/**
- * Whom a business's manager may hire, of the people the player may name: no one already on its
- * payroll, whom the economy won't hire twice, nor, running it for others without a share of its
- * worth, themselves or their household (`selfDealing`).
- */
-export function hireable<T extends { value: string }>(business: BusinessView, people: readonly T[]): T[] {
-  return people.filter((p) => !business.selfDealing.includes(p.value) && !business.employees.some((j) => j.workerId === p.value && j.status !== "ended"));
 }
 
 /** True when `kind` is `ancestor` or extends it, up the GM view's kinds as the engine's `kindIs` walks them (a loop ends the walk). */
@@ -391,8 +529,8 @@ export function gmKindIs(kinds: GmView["kinds"], kind: string, ancestor: string)
   return false;
 }
 
-/** The party kinds in the order the economy tries them (`partyKindOf`): a business, a trust or a household before a person, which any of them might extend. */
-const PARTY_KIND_ORDER: readonly PartyKind[] = ["business", "trust", "household", "person"];
+/** The party kinds in the order the economy tries them (`partyKindOf`): a business, a trust, a household or another group before a person, which any of them might extend. */
+const PARTY_KIND_ORDER: readonly PartyKind[] = ["business", "trust", "household", "group", "person"];
 
 /** The world's parties of `kinds` for a GM's picker, each with the kind the economy gives it (a kind that extends a person's is a person); whoever is gone is left out. */
 export function gmParties(gm: Pick<GmView, "entities" | "kinds">, kinds: readonly PartyKind[]): { id: EntityId; name: string; kind: PartyKind }[] {

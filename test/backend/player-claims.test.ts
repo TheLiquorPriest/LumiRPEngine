@@ -109,6 +109,28 @@ describe("tracking gaps", () => {
       expect({ mode, ...seen[0] }).toEqual({ mode, ...seen[1] });
     }
   });
+
+  test("'I check my phone' with the phone at home is that phone, by its reach (ITEMS-SPEC §4.5): Make it real brings it along with a Brought along chip whose Undo puts it back; Ask first says where it is", async () => {
+    /** Jordan at the shop, the phone at home. */
+    const atShop = async (rig: Rig, chatId: string): Promise<void> => {
+      rig.body(await rig.send({ type: "lre.edit", chatId, ops: [{ op: "move", entity: "pov", to: "alder_automotive" }, { op: "move", entity: "pov_phone", to: HERE }] }));
+    };
+    const real = await chat({ mode: "real", capped: false });
+    await atShop(real.rig, real.chatId);
+    reading(real.rig, { action: "use", params: { item: "phone" }, thing: "other" });
+    await real.rig.turn(real.chatId, "I check my phone.", "You scroll through your messages.");
+    expect((await state(real.rig, real.chatId)).entities.pov_phone?.relations).toContainEqual({ type: "in", to: "pov" });
+    expect(await claimed(real.rig, real.chatId)).toEqual([]);
+    const brought = (await chips(real.rig, real.chatId)).find((c) => c.kind === "claimed");
+    expect(brought).toMatchObject({ label: "Brought along: phone", detail: "It was at 114 Harbor Street, so it's with you now. Undo puts it back, with what you did with it.", actions: [{ id: "undo", label: "Undo" }] });
+    expect(real.rig.body(await real.rig.send({ type: "lre.chip", chatId: real.chatId, chip: brought?.id, choice: "undo" })).applied).toBe(true);
+    expect((await state(real.rig, real.chatId)).entities.pov_phone?.fields.place).toBe(HERE);
+    const ask = await chat({ mode: "ask", capped: false });
+    await atShop(ask.rig, ask.chatId);
+    reading(ask.rig, { action: "use", params: { item: "phone" }, thing: "other" });
+    expect((await send(ask.rig, ask.chatId, "I check my phone.")).halted).toBe("cancelled");
+    expect((await chips(ask.rig, ask.chatId)).find((c) => c.kind === "claim")).toMatchObject({ label: "Your phone is at 114 Harbor Street. Have it with you anyway?", detail: "This chat asks before it changes where your things are." });
+  });
 });
 
 describe("Make it real", () => {

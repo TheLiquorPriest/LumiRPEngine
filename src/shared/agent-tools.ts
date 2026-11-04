@@ -11,17 +11,22 @@ import { READ_TOOL_TEXTS } from "./agent-tools-read";
 import { WRITE_TOOL_NOTES, WRITE_TOOL_TEXTS } from "./agent-tools-write";
 import type { PromptVar } from "./prompts";
 
-/** What a tool may do: read, or change the world as the GM's edits do (`gm`, always held and previewed). */
-export type ToolTier = "read" | "gm";
+/**
+ * What a tool may do: read; make the story's own changes to the world's fabric (`story`: a thing, a
+ * place made in play, a walk-on, a purchase's goods, ITEMS-SPEC §7.3), which a role at the story tier
+ * may stage; or change the world as the GM's edits do (`gm`, always held and previewed).
+ */
+export type ToolTier = "read" | "story" | "gm";
 
-/** The families of AGENT-LOOP-PLAN §6's table; a role is given tools by family. */
-export type ToolFamily = "people" | "places" | "items" | "money" | "quests" | "knowledge" | "time" | "checks" | "minds" | "lore" | "workspace";
+/** The families of AGENT-LOOP-PLAN §6's table, and organizations (ORG-SPEC §7.1); a role is given tools by family. */
+export type ToolFamily = "people" | "places" | "items" | "money" | "orgs" | "quests" | "knowledge" | "time" | "checks" | "minds" | "lore" | "workspace";
 
 export const TOOL_FAMILY_LABEL: Readonly<Record<ToolFamily, string>> = {
   people: "People",
   places: "Places and travel",
   items: "Items",
   money: "Money",
+  orgs: "Organizations",
   quests: "Quests and secrets",
   knowledge: "Knowledge",
   time: "Time",
@@ -102,6 +107,7 @@ export const TOOL_NOTE = {
   noPerson: "tool.note.no_person",
   noPlace: "tool.note.no_place",
   noThing: "tool.note.no_thing",
+  noOrg: "tool.note.no_org",
   noTrack: "tool.note.no_track",
   noFact: "tool.note.no_fact",
   ambiguous: "tool.note.ambiguous",
@@ -117,6 +123,7 @@ const LAYER_NOTES: readonly ToolNote[] = [
   { id: TOOL_NOTE.noPerson, label: "No such person", note: "A tool's answer when a person's name or id names no one the agent's knowledge can see: a hidden person reads exactly as one who doesn't exist.", text: "No such person here: {{name}}.", vars: [asked] },
   { id: TOOL_NOTE.noPlace, label: "No such place", note: "A tool's answer when a place's name or id names no place the agent's knowledge can see.", text: "No such place here: {{name}}.", vars: [asked] },
   { id: TOOL_NOTE.noThing, label: "No such thing", note: "A tool's answer when a thing's name or id names nothing the agent's knowledge can see.", text: "No such thing here: {{name}}.", vars: [asked] },
+  { id: TOOL_NOTE.noOrg, label: "No such organization", note: "A tool's answer when an organization's name or id names none the world has: a company, a household, a group, a trust or the party.", text: "No such organization here: {{name}}.", vars: [asked] },
   { id: TOOL_NOTE.noTrack, label: "No such quest or secret", note: "A tool's answer when a quest, secret, puzzle or agenda's id or label names none the agent's knowledge can see.", text: "No such quest, secret, puzzle or agenda here: {{name}}.", vars: [asked] },
   { id: TOOL_NOTE.noFact, label: "No such fact", note: "A tool's answer when a fact's id names no fact the chat records.", text: "No such fact here: {{name}}.", vars: [asked] },
   {

@@ -1,33 +1,16 @@
-// Build's item helpers (DESIGN §13): an entity's or a place's Contents (what the world puts in it or
-// leaves lying there, each opening its own page), "Reveal this item" (hidden until searched for,
-// §7), and an objective picker for a quest's item checks (`carries`, `has_item`, `at`).
+// Build's item helpers (DESIGN §13): "Reveal this item" (hidden until searched for, §7), and an
+// objective picker for a quest's item checks (`carries`, `has_item`, `at`). What a place, a person
+// or a holder has is Build's Things (`things.tsx`).
 
 import { useMemo, useState } from "preact/hooks";
 import type { JsonObject } from "../../shared/json";
-import { authoredContents, isItemKind, itemObjective, itemObjectiveLabel, revealScaffold, type ItemCheck } from "../../shared/items-build";
+import { isItemKind, itemObjective, itemObjectiveLabel, revealScaffold, type ItemCheck } from "../../shared/items-build";
 import { playedKinds, type KindDef, type WorldDoc } from "../../shared/world";
 import { useApp } from "../app";
 import { useSelect } from "../store";
-import { Badge, Button, Section, Seg } from "../components";
-import { go } from "./chrome";
-import { CheckField, FormGroup, ItemRow, RefPicker, type RefOption } from "./form-kit";
+import { Button, Seg } from "../components";
+import { CheckField, FormGroup, RefPicker, type RefOption } from "./form-kit";
 import { TextInput } from "./schema-form";
-
-/** What the world puts in this container or on this person, or leaves lying at this place. */
-export function ContentsSection(props: { world: WorldDoc; collection: "entities" | "places"; id: string }) {
-  const app = useApp();
-  const rows = authoredContents(props.world, props.id, props.collection);
-  return (
-    <div data-lre-contents={props.id}>
-      <Section title={props.collection === "places" ? "Things here" : "Contents"}>
-        {rows.length === 0 ? <span class="lre-small lre-muted">{props.collection === "places" ? "Nothing lies here loose." : "Nothing is in it."}</span> : null}
-        {rows.map((row) => (
-          <ItemRow key={row.id} title={row.name} badge={row.hidden ? <Badge tone="gm">Hidden until searched</Badge> : undefined} openLabel={`Open ${row.name}`} onOpen={() => go(app, { view: "item", worldId: props.world.id, collection: "entities", id: row.id })} />
-        ))}
-      </Section>
-    </div>
-  );
-}
 
 /**
  * "Hidden until searched" for the thing being edited: one switch whose label is its state. On, it is

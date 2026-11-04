@@ -42,7 +42,7 @@ import { ACTIVE_CONNECTION, type LandedWrites, type Runtime } from "../runtime";
 import { recordOutcome } from "../settings-store";
 import { fixChip } from "../view";
 import { activeRecord } from "../../engine/ledger/path";
-import { AGENT_CHANGE_TYPES } from "../../shared/settings";
+import { CHANGE_TYPES } from "../../shared/settings";
 import { nounFor } from "../../shared/words";
 import { askRollback, sessionView } from "./compaction";
 import { type AgentHandle, type AgentHistoryMessage, type AgentReply, type AgentTool, type AgentTranscript, startAgent } from "./runtime";
@@ -63,8 +63,8 @@ const ROLE_LABEL = AGENT_ROLES.find((r) => r.id === ASSISTANT_ROLE)?.label ?? AS
 /** What the running row and the activity line show while it answers, and nothing else. */
 const RUN_LABEL = STEP_LABEL.assistant ?? ROLE_LABEL;
 
-/** The tool tiers it works with (INC1-SPEC R6a): every read, and the GM's edits as proposals. */
-const TIERS: readonly ToolTier[] = ["read", "gm"];
+/** The tool tiers it works with (INC1-SPEC R6a; ITEMS-SPEC §7.5): every read, and the changes to things and places and the GM's edits as proposals. */
+const TIERS: readonly ToolTier[] = ["read", "story", "gm"];
 
 /** The label GM → Workspace's own writes carry on their entry (GM-only). */
 const WORKSPACE_LABEL = "GM → Workspace";
@@ -565,7 +565,7 @@ export class Assistant {
       const learning = await this.rt.settings.learningOf(userId);
       const now = Date.now();
       for (const o of outcomes) {
-        const type = AGENT_CHANGE_TYPES.find((t) => t === o.changeType);
+        const type = CHANGE_TYPES.find((t) => t === o.changeType);
         if (type) recordOutcome(settings, learning, connection, type, o.outcome, now, ASSISTANT_ROLE);
       }
       await this.rt.settings.saveLearning(userId);

@@ -264,6 +264,8 @@ export interface ExtractInput {
   places: readonly PlaceChoice[];
   /** The kinds a newcomer may be. */
   personKinds: readonly string[];
+  /** The open goals and orders of the plans the player character is on, each by its id (`planExtractLines`), while `agenda` is a channel; else none. */
+  plan: readonly string[];
 }
 
 /** read: the reply's proposals in extract's contract, and where it leaves the player character. */
@@ -272,6 +274,22 @@ export interface ExtractTask extends RoleTask<ExtractRead> {
   world: WorldDoc;
   state: WorldState;
   input: ExtractInput;
+}
+
+/**
+ * curator: the reply's things, the places it makes, its walk-ons and a purchase's goods (ITEMS-SPEC
+ * §7), after the read on an agent chat. Its agent makes each change with its tools, staged in the
+ * turn, and answers what is noted for the read's own path (a walk-on, a purchase, a place someone is
+ * put in, a thing fact its tools couldn't make); prompt-only, it is classic's read of those facts
+ * alone (`input`, with the Curator's channels), which the reconciler settles as classic's.
+ */
+export interface CurateTask extends RoleTask<ExtractRead> {
+  reply: string;
+  world: WorldDoc;
+  state: WorldState;
+  input: ExtractInput;
+  /** What the turn did already, as the GM's Journal words it, one change a line: never done again. */
+  events: readonly string[];
 }
 
 /** world: a world `effects` step's proposals for the reply, its author's text the task's instructions. */
@@ -305,6 +323,7 @@ export interface TurnRoles {
   knowledge: RoleRun<KnowledgeTask, RunMindsResult>;
   director: { decisions: RoleRun<ChooseTask, TieOdds | null>; prose: RoleRun<ProseTask, DirectorProse>; choices: RoleRun<ChoicesTask, string[]>; offscreen: RoleRun<ChooseTask, TieOdds | null> };
   read: { extract: RoleRun<ExtractTask, ExtractRead> };
+  curator: { curate: RoleRun<CurateTask, ExtractRead> };
   world: { effects: RoleRun<EffectsTask, JsonObject[]> };
   memory: RoleRun<MemoryTask, RunMindsResult>;
   skip: { plan: RoleRun<SkipPlanTask, LedgerEvent | null>; beats: RoleRun<SkipTask, SkipRun | null> };

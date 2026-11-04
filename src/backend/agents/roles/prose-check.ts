@@ -28,7 +28,8 @@ import type { Registry } from "../../../engine/registry-impl";
 import { isGone, kindIs, placeOfEntity, placeWithin } from "../../../engine/scope";
 import type { WorldState } from "../../../engine/state";
 import { canSeeEntity, plainLetters } from "../../../engine/visibility";
-import { holderOf, isInside } from "../../../packs/gear/core/model";
+import { holderOf } from "../../../engine/things";
+import { isInside } from "../../../packs/gear/core/model";
 
 /** A line the check flagged, and how it contradicts the state. */
 export interface ProseClash {

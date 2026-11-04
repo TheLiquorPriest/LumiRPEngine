@@ -8,11 +8,11 @@
 import type { AgentBudget, AgentEffort } from "./agent-settings";
 import type { ToolFamily } from "./agent-tools";
 
-/** The roles of §5, by id. */
-export type RoleId = "intent" | "scene" | "minds" | "knowledge" | "director" | "read" | "memory" | "skip" | "world";
+/** The roles of §5, by id, with the Curator (ITEMS-SPEC §7): after the read, it keeps the world's fabric (things, places, walk-on people, a purchase's goods) true to the reply. */
+export type RoleId = "intent" | "scene" | "minds" | "knowledge" | "director" | "read" | "curator" | "memory" | "skip" | "world";
 
-/** Every role, in §5's order: a turn commits what its roles staged in this order, then by staging order (INC2-SPEC C10). */
-export const ROLE_IDS: readonly RoleId[] = ["intent", "scene", "minds", "knowledge", "director", "read", "memory", "skip", "world"];
+/** Every role, in §5's order: a turn commits what its roles staged in this order, then by staging order (INC2-SPEC C10). The Curator commits after the read and before the memory. */
+export const ROLE_IDS: readonly RoleId[] = ["intent", "scene", "minds", "knowledge", "director", "read", "curator", "memory", "skip", "world"];
 
 /** Where in the turn a role's work runs: before the plan, between the plan and the reply, after the reply, or inside a time skip. */
 export type RolePhase = "pre" | "plan" | "post" | "skip";
@@ -60,22 +60,25 @@ export const ROLE_LABEL: Readonly<Record<RoleId, string>> = {
   knowledge: "Knowledge",
   director: "Director",
   read: "Read",
+  curator: "Curator",
   memory: "Memory",
   skip: "Skip beats",
   world: "World steps",
 };
 
-/** §6's tool families for each role: what its work reads. */
+/** §6's tool families for each role: what its work reads. Organizations come wherever money does (ORG-SPEC §7.1). */
 const FAMILIES: Readonly<Record<RoleId, readonly ToolFamily[]>> = {
-  intent: ["people", "places", "items", "money", "checks", "time"],
+  intent: ["people", "places", "items", "money", "orgs", "checks", "time"],
   scene: ["people", "places", "lore", "workspace"],
   minds: ["people", "minds", "knowledge", "lore"],
   knowledge: ["people", "knowledge"],
   director: ["people", "places", "quests", "minds", "knowledge", "time"],
-  read: ["people", "places", "items", "money", "time", "quests", "knowledge"],
+  read: ["people", "places", "items", "money", "orgs", "time", "quests", "knowledge"],
+  // Things and places it reads and writes; people, money and organizations it reads (ITEMS-SPEC §7.2).
+  curator: ["items", "places", "people", "money", "orgs"],
   memory: ["people", "minds"],
   skip: ["people", "places", "time", "minds"],
-  world: ["people", "places", "items", "money", "quests", "time"],
+  world: ["people", "places", "items", "money", "orgs", "quests", "time"],
 };
 
 /**

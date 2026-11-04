@@ -1,0 +1,94 @@
+{
+  "calendar.holidays": [
+    {
+      "revision": "35b4d12795742dc4d5b4b37e388ce776",
+      "columns": {
+        "name": "36de7a58",
+        "rule_type": "97c9ea6d",
+        "month": "86d753f6",
+        "day": "4b4e97b3",
+        "weekday": "8e33a774",
+        "n": "c892cb15",
+        "federal_paid_day_off": "61195a2f",
+        "private_sector_paid_day_off": "792c400f",
+        "observed_if_weekend": "818bffbf"
+      }
+    }
+  ],
+  "calendar.observances": [
+    {
+      "revision": "cb84b61b74848557cec90057cab93397",
+      "columns": {
+        "name": "36de7a58",
+        "rule_type": "49c5d63c",
+        "month": "6989a7c1",
+        "day": "4b4e97b3",
+        "weekday": "8e33a774",
+        "n": "c892cb15",
+        "base": "7a2aea11",
+        "offset_days": "2eea5054",
+        "algorithm": "25708a0b",
+        "window": "1ee3242c",
+        "start": "9ccbb0ea",
+        "end": "9ccbb0ea",
+        "rule_text": "f173aa30",
+        "rule_note": "818bffbf"
+      }
+    }
+  ],
+  "calendar.dst": [
+    {
+      "revision": "2a5e1e3d531f68983caa2e2f2d02411b",
+      "columns": {
+        "start": "66fac2e6",
+        "end": "2e953375",
+        "duration_weeks_approx": "a0732eea",
+        "exceptions": "d9f1b454",
+        "standard_offsets_h": "3455953b",
+        "note": "36de7a58",
+        "daylight_hours": "01cb4add"
+      }
+    }
+  ],
+  "calendar.school": [
+    {
+      "revision": "8f8b2a866c57b80725af82648a9d868c",
+      "columns": {
+        "title": "36de7a58",
+        "values": "5bcc2d97"
+      }
+    }
+  ],
+  "calendar.work": [
+    {
+      "revision": "790bee504417a877b2adc3b5d3c4368a",
+      "columns": {
+        "full_time_hours_per_week": "ef3b6e4a",
+        "standard_work_year_h": "b555f0b7",
+        "overtime": "36de7a58",
+        "vacation_days_after_1_year": "395238f4",
+        "vacation_days_after_5_years": "395238f4",
+        "vacation_days_after_10_years": "395238f4",
+        "sick_days_per_year": "395238f4",
+        "paid_time_off_note": "36de7a58",
+        "paid_holidays_per_year": "d48bf98f",
+        "meal_break": "36de7a58"
+      }
+    }
+  ],
+  "calendar.shifts": [
+    {
+      "revision": "113c38bc463f6b9ab542629d3905c178",
+      "columns": {
+        "name": "36de7a58",
+        "description": "36de7a58",
+        "days_per_week": "ef3b6e4a",
+        "typical_start": "9f21394e",
+        "typical_shift_h": "0618322d",
+        "typical_hours_per_week": "b6b9986f",
+        "weekend_work": "86996547",
+        "notes": "36de7a58"
+      }
+    }
+  ]
+}

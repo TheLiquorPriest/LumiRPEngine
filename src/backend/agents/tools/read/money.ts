@@ -16,7 +16,7 @@
 import { optionalQuery, own, rowOf, strOf } from "../../../../engine/pack-kit";
 import { placeOfEntity } from "../../../../engine/scope";
 import { matchCatalog, placeTrade } from "../../../../packs/economy/core/index";
-import { priceOf } from "../../../../packs/economy/core/model";
+import { dayPriceOf, priceOf } from "../../../../packs/economy/core/model";
 import { isParty } from "../../../../packs/economy/core/pay";
 import { TOOL_NOTE } from "../../../../shared/agent-tools";
 import { type AccountView, CLASS_TRAITS, type FinanceView, type PartyKind } from "../../../../shared/finance";
@@ -189,7 +189,7 @@ function sells(view: ToolReadView, place: PlaceId | null): Offered[] {
     for (const id of ids) {
       const row = own(rows, id);
       if (!row || listed.has(id) || (strOf(row.category) !== category && !trade.sells.includes(id))) continue;
-      const price = priceOf(view.ctx, { catalog: id, place });
+      const price = dayPriceOf(view.ctx, { catalog: id, place });
       if (!price) continue;
       listed.add(id);
       out.push({ catalog: id, name: price.name, category: price.category, unit: strOf(row.unit) || undefined, ...amount(view, price.unitCents) });
@@ -207,7 +207,7 @@ function priced(view: ToolReadView, item: string, place: PlaceId | null): ItemPr
   const byId = rowOf(ctx, "economy.catalog", item) !== undefined;
   const category = !byId && rowOf(ctx, "economy.categories", item) !== undefined ? item : null;
   const catalog = byId ? item : category === null ? matchCatalog(ctx, item, place) : null;
-  const price = catalog !== null ? priceOf(ctx, { catalog, place }) : category !== null ? priceOf(ctx, { category, place }) : null;
+  const price = catalog !== null ? dayPriceOf(ctx, { catalog, place }) : category !== null ? priceOf(ctx, { category, place }) : null;
   if (!price) return null;
   // Sold there as Buy options are (`placeTrade`): a category it sells, or the item it sells by id.
   const trade = placeTrade(ctx, place);

@@ -1,22 +1,23 @@
 // Settings → Replies: what the engine may change from a reply's text, per type
-// (Auto, Confirm or Never, with where the mode comes from and Unpin, D4 learning), what the GM
-// assistant may change on its own, per type (AGENT-LOOP-PLAN §6), what a swipe does by default,
-// and which texts a Re-narrate is sent (DESIGN §6.12).
+// (Auto, Confirm or Never, with where the mode comes from and Unpin, D4 learning), what the reply's
+// read tells and keeps of things (ITEMS-SPEC §11), what the GM assistant may change on its own, per
+// type (AGENT-LOOP-PLAN §6), what a swipe does by default, and which texts a Re-narrate is sent
+// (DESIGN §6.12).
 
 import type { JsonObject } from "../../shared/json";
 import type { SwipeTexts } from "../../shared/prompts";
 import type { BoundMode } from "../../shared/ids";
 import type { ExtractionModeView, SettingsResult } from "../../shared/protocol";
-import { AGENT_CHANGE_LABEL, AGENT_CHANGE_TYPES, EXTRACTION_TYPES } from "../../shared/settings";
-import type { ChangeType, ExtractionType } from "../../shared/settings";
-import { Button, Section, Seg } from "../components";
+import { AGENT_CHANGE_LABEL, AGENT_CHANGE_TYPES, EXTRACTION_TYPES, THING_READ_BOUNDS, THING_READ_DEFAULTS } from "../../shared/settings";
+import type { ChangeType, ExtractionType, ThingReadSettings } from "../../shared/settings";
+import { Button, NumberStepper, Section, Seg } from "../components";
 
 const EXTRACTION_LABEL: Record<ExtractionType, string> = {
   time_advance: "Time passing",
   location: "Moving somewhere",
+  place_make: "New places the story brings in (a room, a booth, a new bar)",
   condition: "Conditions (hurt, tired…)",
   knows: "Learning a fact",
-  give: "Giving things",
   purchase: "Purchases",
   transfer: "Money transfers",
   regard: "Feelings toward others",
@@ -24,12 +25,17 @@ const EXTRACTION_LABEL: Record<ExtractionType, string> = {
   spawn: "New people",
   life: "Life and death (dying, dead, collapsed…)",
   routine: "Routines (a new job, a habit, a move…)",
-  take: "Picking things up or finding them",
-  drop: "Putting things down",
-  use_up: "Using things up",
-  wear: "Putting on or taking off",
-  lose: "Losing things, or having them stolen",
+  membership: "Who belongs to organizations (joining, leaving, positions, titles)",
+  employment: "Jobs (hired, let go, quitting, raises, leave)",
+  agenda: "How organizations' plans go (under way, done, blocked)",
+  item_move: "Where things are (picked up, put down, put away, fetched)",
+  item_hand: "Handing things over (holding, lending, giving back)",
+  item_own: "Whose things are (gifts, sales, trades)",
+  item_make: "New things the story brings in",
+  item_use: "Using things up",
+  item_wear: "Putting on or taking off",
   item_condition: "Wear and damage to things",
+  item_lose: "Losing things, or having them stolen",
   learn: "What you learn (who knows what)",
   reveal: "Secrets the story reveals to you",
 };
@@ -38,6 +44,13 @@ const MODE_OPTIONS: { value: BoundMode; label: string }[] = [
   { value: "auto", label: "Auto" },
   { value: "confirm", label: "Confirm" },
   { value: "never", label: "Never" },
+];
+
+/** What the reply's read tells and keeps of things, each a whole number in its bounds (`THING_READ_BOUNDS`). */
+const THING_READ_ROWS: readonly { key: keyof ThingReadSettings; title: string; label: string; help: string }[] = [
+  { key: "shown", title: "Things the read is shown", label: "Things the read is shown", help: "How many things reading a reply is told of, each with whose it is, its size and where it rests: those the reply or your message names first, then the scene's, then your character's own." },
+  { key: "whyMax", title: "A change's why, at most", label: "A change's why, at most (characters)", help: "The longest reason a change to a thing keeps, as the reply gave it; a longer one is cut." },
+  { key: "madeMax", title: "Things made from a reply", label: "Things made from a reply, at most", help: "How many things one reply may bring into the world when it acts on something the world doesn't have yet (picked up, put away, handed over…). One more gets a Not tracked note instead; 0 makes none." },
 ];
 
 /** Where an effective mode comes from, in words (D4 learning precedence). */
@@ -87,6 +100,21 @@ export function ExtractionPage(props: { data: SettingsResult; patch(patch: JsonO
             if (!view) return null;
             return <ModeRow key={type} type={type} label={EXTRACTION_LABEL[type]} view={view} patch={props.patch} busy={props.busy} />;
           })}
+        </div>
+      </Section>
+      <Section title="Things in the reply">
+        <div class="lre-set-rows">
+          {THING_READ_ROWS.map((row) => (
+            <div key={row.key} class="lre-set-ext" data-lre-thing-read={row.key}>
+              <div class="lre-set-ext-head">
+                <span class="lre-set-ext-title">{row.title}</span>
+              </div>
+              <NumberStepper label={row.label} value={props.data.settings.thingReads[row.key]} min={THING_READ_BOUNDS[row.key][0]} max={THING_READ_BOUNDS[row.key][1]} integer disabled={props.busy} onChange={(value) => props.patch({ thingReads: { [row.key]: value } })} />
+              <span class="lre-small lre-muted">
+                {row.help} Default {THING_READ_DEFAULTS[row.key]}.
+              </span>
+            </div>
+          ))}
         </div>
       </Section>
       <Section title="The GM assistant's changes">

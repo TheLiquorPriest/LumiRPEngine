@@ -11,7 +11,8 @@ import type { JsonObject, JsonValue } from "../shared/json";
 import { hasOwn, isRecord, safeKey } from "../shared/json";
 import type { ExtractionModeView, SettingsResult } from "../shared/protocol";
 import type { AgentChangeType, ChangeType, ExtractionBounds, ExtractionLearning, ExtractionType, ExtractionTypeStats, GateSettings, HelperDefault, LookupLimits, LorePolicy, ModelUseSettings, PhaseBudget, RealismSettings, RecentHistory, SamplingParams, StepConfig, StepLore, StepRoute, TimeSettings, UserSettings } from "../shared/settings";
-import { AGENT_CHANGE_DEFAULTS, AGENT_CHANGE_TYPES, ASK_BEYOND_DEFAULT, CHANGE_TYPES, DEFAULT_HELPER, EXTRACTION_DEFAULTS, EXTRACTION_LEARNING, EXTRACTION_TYPES, LORE_POLICIES, LORE_TRANSPORTS, NARRATOR_DEFAULTS, narratorSettingsOf, REASONING_CHOICES, SAMPLING_PARAMS, SETTINGS_DEFAULTS_REV, SPEED_ACTIVITIES, SPEED_DEFAULT, SPEED_THRESHOLD_MINUTES, TIMELAPSE_REACH_MINUTES, UNREASONED_ROUTE, UNREASONED_STEPS } from "../shared/settings";
+import { AGENT_CHANGE_DEFAULTS, AGENT_CHANGE_TYPES, ASK_BEYOND_DEFAULT, CHANGE_TYPES, DEFAULT_HELPER, EXTRACTION_DEFAULTS, EXTRACTION_LEARNING, EXTRACTION_TYPES, LORE_POLICIES, LORE_TRANSPORTS, NARRATOR_DEFAULTS, narratorSettingsOf, REASONING_CHOICES, SAMPLING_PARAMS, SETTINGS_DEFAULTS_REV, SPEED_ACTIVITIES, SPEED_DEFAULT, SPEED_THRESHOLD_MINUTES, THING_READ_DEFAULTS, thingReadsOf, TIDY_DEFAULTS, tidySettingsOf, TIMELAPSE_REACH_MINUTES, UNREASONED_ROUTE, UNREASONED_STEPS } from "../shared/settings";
+import { FACT_CHANGE } from "../shared/things";
 import type { BoundMode } from "../shared/ids";
 import type { StepPurpose } from "../shared/world";
 import { currentSignals } from "../shared/steps";
@@ -175,8 +176,9 @@ const LIFTED = {
  * still at Standard's or Full's old default lifted to its new one, since the sections now tell their
  * facts whole (a file from before revision 2 already lifts to the new ones); and one from before
  * revision 5 has a turn budget still at its old default (`LIFTED.turn`) set to No limit, since every
- * agent's own limits now bound a turn. Only plain values are touched; anything malformed is left to
- * `conform`.
+ * agent's own limits now bound a turn; and one from before revision 6 gives every role that reads
+ * money the organizations' tools too (`orgs`, ORG-SPEC §7.1), as a new user's roles have them. Only
+ * plain values are touched; anything malformed is left to `conform`.
  */
 function lifted(raw: Readonly<Record<string, unknown>>): JsonObject {
   const out = JSON.parse(JSON.stringify(raw)) as JsonObject;
@@ -216,6 +218,12 @@ function lifted(raw: Readonly<Record<string, unknown>>): JsonObject {
     if (turn.tokensIn === LIFTED.turn.tokensIn) turn.tokensIn = "none";
     if (turn.tokensOut === LIFTED.turn.tokensOut) turn.tokensOut = "none";
   }
+  const roles = isRecord(out.agents) && isRecord(out.agents.roles) ? out.agents.roles : null;
+  if (rev < 6 && roles) {
+    for (const role of Object.values(roles)) {
+      if (isRecord(role) && Array.isArray(role.families) && role.families.includes("money") && !role.families.includes("orgs")) role.families.push("orgs");
+    }
+  }
   out.defaults = SETTINGS_DEFAULTS_REV;
   return out;
 }
@@ -245,6 +253,7 @@ export function defaultSettings(): UserSettings {
     // New chats play inferred checks by their realism preset and Sheets level until the user picks a policy.
     inferred: null,
     extraction: {},
+    thingReads: { ...THING_READ_DEFAULTS },
     swipeDefault: "rerun",
     // A Re-narrate keeps the texts its turn was made with until the user picks their current ones.
     swipeTexts: "turn",
@@ -265,6 +274,10 @@ export function defaultSettings(): UserSettings {
     diagnostics: { ...DIAGNOSTICS_DEFAULTS },
     // The narrator knows what everyone in the scene knows, secrets marked, in every chat that sets nothing of its own.
     narrator: { ...NARRATOR_DEFAULTS },
+    // The narrator is given the prices the engine charges and told to state them.
+    statePrices: true,
+    // Tidy up shows 50 findings a run.
+    tidy: { ...TIDY_DEFAULTS },
   };
 }
 
@@ -475,6 +488,30 @@ function recentHistoryOf(v: unknown): RecentHistory | undefined {
   return messages !== undefined && tokens !== undefined ? { on: typeof v.on === "boolean" ? v.on : true, messages, tokens } : undefined;
 }
 
+/** The old type names each item change type takes its pin and learning from (ITEMS-SPEC §5.4: take and drop moves, give handovers, use_up uses, wear wearing, lose losses). */
+function oldNamesOf(type: string): string[] {
+  return Object.entries(FACT_CHANGE).flatMap(([old, now]) => (now === type ? [old] : []));
+}
+
+/**
+ * The pins as kept by type name, the old thing-fact types' carried over to the change types they
+ * became (ITEMS-SPEC §5.4, §9 Settings), once: a change type pinned already keeps its own, and two
+ * old pins that differ (take and drop) ask, Confirm. The old names are no change types, so the next
+ * save keeps only the new ones.
+ */
+function conformedPins(raw: Readonly<Record<string, unknown>>): Record<string, unknown> {
+  const out: Record<string, unknown> = { ...raw };
+  for (const type of new Set(Object.values(FACT_CHANGE))) {
+    if (type === undefined || hasOwn(raw, type)) continue;
+    const pins = oldNamesOf(type).flatMap((old) => (hasOwn(raw, old) && isRecord(raw[old]) ? [raw[old] as Record<string, unknown>] : []));
+    const modes = [...new Set(pins.map((b) => b.mode).filter((m): m is BoundMode => m === "auto" || m === "confirm" || m === "never"))];
+    if (modes.length === 0) continue;
+    const maxDelta = pins.map((b) => b.maxDelta).find((m) => typeof m === "number");
+    out[type] = { mode: modes.length === 1 ? modes[0] : "confirm", ...(maxDelta !== undefined ? { maxDelta } : {}) };
+  }
+  return out;
+}
+
 /**
  * Settings checked field by field against their schema: a value of the wrong type or out of range
  * falls back to the default, and open maps keep only safe keys (a settings file or a patch is
@@ -539,7 +576,7 @@ function conform(v: JsonObject, d: UserSettings): UserSettings {
     unitCap: { agentDays: int(unitCap.agentDays, 1, 1_000_000) ?? d.time.unitCap.agentDays, events: int(unitCap.events, 1, 10_000_000) ?? d.time.unitCap.events },
     askBeyondMinutes: askBeyondOf(t.askBeyondMinutes) ?? d.time.askBeyondMinutes,
   };
-  const rawBounds = isRecord(v.extraction) ? v.extraction : {};
+  const rawBounds = conformedPins(isRecord(v.extraction) ? v.extraction : {});
   const extraction: ExtractionBounds = {};
   for (const type of CHANGE_TYPES) {
     const b = hasOwn(rawBounds, type) ? rawBounds[type] : undefined;
@@ -562,6 +599,7 @@ function conform(v: JsonObject, d: UserSettings): UserSettings {
     // A policy that names no mode (or none at all) leaves new chats to their realism preset.
     inferred: readInferred(v.inferred),
     extraction,
+    thingReads: thingReadsOf(v.thingReads, d.thingReads),
     swipeDefault: oneOf(v.swipeDefault, ["rerun", "renarrate"] as const) ?? d.swipeDefault,
     swipeTexts: oneOf(v.swipeTexts, SWIPE_TEXTS) ?? d.swipeTexts,
     hideJsonBlocks: typeof v.hideJsonBlocks === "boolean" ? v.hideJsonBlocks : d.hideJsonBlocks,
@@ -576,6 +614,8 @@ function conform(v: JsonObject, d: UserSettings): UserSettings {
     retention: retentionOf(v.retention, d.retention),
     diagnostics: diagnosticsSettingsOf(v.diagnostics, d.diagnostics),
     narrator: narratorSettingsOf(v.narrator, d.narrator),
+    statePrices: typeof v.statePrices === "boolean" ? v.statePrices : d.statePrices,
+    tidy: tidySettingsOf(v.tidy, d.tidy),
   };
 }
 
@@ -678,12 +718,25 @@ function learningFrom(raw: Readonly<Record<string, unknown>>): ExtractionLearnin
       ...(count(s.holdUntil) ? { holdUntil: s.holdUntil } : {}),
     };
   };
+  /**
+   * One type's stats as kept, an item change type's carried over once from the old thing-fact
+   * types it became (ITEMS-SPEC §5.4, §9 Settings) while it has none of its own: their counts
+   * summed, their windows joined (the latest kept), a learned mode only when they agree.
+   */
+  const statsOf = (byType: Readonly<Record<string, unknown>>, type: string): ExtractionTypeStats | undefined => {
+    const stored = statsFrom(hasOwn(byType, type) ? byType[type] : undefined);
+    if (stored) return stored;
+    const old = oldNamesOf(type).flatMap((name) => statsFrom(hasOwn(byType, name) ? byType[name] : undefined) ?? []);
+    if (old.length === 0) return undefined;
+    const learned = old.every((s) => s.learned === old[0]?.learned) ? old[0]?.learned : undefined;
+    return { accepted: old.reduce((n, s) => n + s.accepted, 0), rejected: old.reduce((n, s) => n + s.rejected, 0), recent: old.map((s) => s.recent).join("").slice(-EXTRACTION_LEARNING.window), ...(learned ? { learned } : {}) };
+  };
   const connections: ExtractionLearning["connections"] = {};
   for (const [connectionId, byType] of Object.entries(isRecord(raw.connections) ? raw.connections : {})) {
     if (!safeKey(connectionId) || !isRecord(byType)) continue;
     const kept: Partial<Record<ExtractionType, ExtractionTypeStats>> = {};
     for (const type of EXTRACTION_TYPES) {
-      const stats = statsFrom(hasOwn(byType, type) ? byType[type] : undefined);
+      const stats = statsOf(byType, type);
       if (stats) kept[type] = stats;
     }
     connections[connectionId] = kept;
@@ -697,7 +750,7 @@ function learningFrom(raw: Readonly<Record<string, unknown>>): ExtractionLearnin
       if (!safeKey(connectionId) || !isRecord(byType)) continue;
       const kept: Partial<Record<ChangeType, ExtractionTypeStats>> = {};
       for (const type of CHANGE_TYPES) {
-        const stats = statsFrom(hasOwn(byType, type) ? byType[type] : undefined);
+        const stats = statsOf(byType, type);
         if (stats) kept[type] = stats;
       }
       keptConnections[connectionId] = kept;

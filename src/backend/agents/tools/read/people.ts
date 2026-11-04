@@ -23,6 +23,7 @@ import { TOOL_NOTE } from "../../../../shared/agent-tools";
 import type { CharacterDTO, CharacterField, CharacterRelation } from "../../../../shared/character";
 import type { EntityId, PlaceId } from "../../../../shared/ids";
 import { hasOwn, type JsonValue } from "../../../../shared/json";
+import type { PartyTier } from "../../../../shared/party";
 import { ALIVE, lifeStateOf, type LoreEntryDef } from "../../../../shared/world";
 import type { Secrecy, ToolReadView, ViewLore, ViewRef } from "../read-view";
 import type { ToolDefinition } from "../registry";
@@ -161,8 +162,8 @@ interface SheetAnswer extends Whereabouts {
   relations: SheetRelation[];
   /** Under `gm`: whether the engine runs their mind and day. */
   agent?: boolean;
-  /** Under `gm`: until when they keep doing what they do, whether they travel with the player character, and what the story holds. */
-  now?: { until?: string; party: boolean; holds: { label: string; until: string | null }[] };
+  /** Under `gm`: until when they keep doing what they do, their tier in the player character's party (null: not in it), and what the story holds. */
+  now?: { until?: string; partyTier: PartyTier | null; holds: { label: string; until: string | null }[] };
   /** Under `gm`: the schedules that apply to them, in words. */
   schedules?: { label: string; summary: string }[];
   lore: ViewLore[];
@@ -229,7 +230,7 @@ function sheetOf(view: ToolReadView, person: ViewRef, sheet: CharacterDTO, lore:
     view.knowledge === "gm"
       ? {
           agent: sheet.agent,
-          ...(now ? { now: { ...(now.until !== null ? { until: now.until } : {}), party: now.party, holds: now.holds } } : {}),
+          ...(now ? { now: { ...(now.until !== null ? { until: now.until } : {}), partyTier: now.partyTier, holds: now.holds } } : {}),
           schedules: sheet.schedules.map((s) => ({ label: s.label, summary: s.summary })),
         }
       : {};

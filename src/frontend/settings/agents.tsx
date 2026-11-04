@@ -1,6 +1,6 @@
 // Settings → Agents (AGENT-LOOP-PLAN §12, §15; INC1-SPEC R1; INC2-SPEC C12): what the agent runtime
-// runs under. Thinking in agent tool loops; how an agent turn runs (the pipeline, and where its
-// memory goes) and where its changes that ask first wait (the review card); the budgets, each with
+// runs under. Thinking in agent tool loops; how an agent turn runs (the pipeline, where its memory
+// goes, and whether the Curator keeps the world's things and places) and where its changes that ask first wait (the review card); the budgets, each with
 // what it limits, what happens when it's reached, its default and a No limit switch where one may be
 // lifted, the GM's edits per turn among them; the main session's compaction and the summarize tool;
 // what an agent turn records for the narrator; throttles per connection; caching for every role and
@@ -169,6 +169,11 @@ const MEMORY_HELP: Record<MemoryPlacement, string> = {
   before_next: "They run first in the next turn, before its plan, so reading the reply ends sooner; what they remember belongs to that turn.",
 };
 
+const CURATOR_HELP = {
+  on: "After the reply, beside the read, the Curator makes the world agree with it: the things in it and who has them, the places it makes, the people who walk on and a purchase's goods, each change with its tools. The read leaves those to it.",
+  off: "The read reads the reply's things, places, walk-ons and purchases itself, as classic's read does.",
+} as const;
+
 const REVIEW_HELP: Record<ReviewPlacement, string> = {
   chips: "The turn goes on and the card waits under the reply; the narrator isn't told of a change until you apply it.",
   gate: "The turn waits after its plan, as at the outline gate, until you answer the card; then it goes on without asking any agent again.",
@@ -178,9 +183,9 @@ const REVIEW_HELP: Record<ReviewPlacement, string> = {
 const RATIO_STEP = 0.5;
 
 /**
- * How an agent turn runs, without hooks (INC2-SPEC C12): the pipeline and memory placement, where its
- * changes that ask first wait, the main session's compaction and the summarize tool, and what it
- * records for the narrator. Each shows its default and has a Default.
+ * How an agent turn runs, without hooks (INC2-SPEC C12): the pipeline, memory placement and the
+ * Curator (ITEMS-SPEC §7.1), where its changes that ask first wait, the main session's compaction and
+ * the summarize tool, and what it records for the narrator. Each shows its default and has a Default.
  */
 export function AgentTurnSettings(props: { agents: AgentSettings; patch(patch: JsonObject): void; busy: boolean }) {
   const { agents, busy } = props;
@@ -211,6 +216,15 @@ export function AgentTurnSettings(props: { agents: AgentSettings; patch(patch: J
               <span class="lre-field-help">{MEMORY_HELP[agents.pipeline.memory]}</span>
             </div>
             <span class="lre-small lre-muted">Default {MEMORY_PLACEMENT_LABELS[DEFAULTS.pipeline.memory]}.</span>
+          </div>
+          <div class="lre-set-ext lre-set-timeout" data-lre-agent-setting="pipeline-curator">
+            <div class="lre-set-ext-head">
+              <span class="lre-set-ext-title">The Curator</span>
+              {agents.pipeline.curator === DEFAULTS.pipeline.curator ? null : defaultButton(`Reset the Curator to its default, ${DEFAULTS.pipeline.curator ? "on" : "off"}`, busy, () => set({ pipeline: { curator: null } }))}
+            </div>
+            <HostSwitch label="The Curator keeps the world's things and places" checked={agents.pipeline.curator} disabled={busy} onChange={(curator) => set({ pipeline: { curator } })} />
+            <span class="lre-field-help">{agents.pipeline.curator ? CURATOR_HELP.on : CURATOR_HELP.off}</span>
+            <span class="lre-small lre-muted">Its tools, tier and budget are Settings → Agents → Roles'. Default {DEFAULTS.pipeline.curator ? "on" : "off"}.</span>
           </div>
         </div>
       </Section>

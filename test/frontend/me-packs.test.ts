@@ -29,22 +29,25 @@ describe("garageAlerts", () => {
 describe("gear", () => {
   const view = decodeGearView({
     level: 3,
-    owned: [
+    on: [{ id: "backpack", name: "Backpack", load: { used: 4, capacity: 10 }, whose: "yours", children: [{ id: "wallet", name: "Wallet", whose: "yours", children: [{ id: "cash", name: "Cash", qty: 46, whose: "yours" }] }] }],
+    holding: [{ id: "parcel", name: "Parcel", whose: "Dev's", why: "Dev handed it to you to hold", where: "In Backpack" }],
+    elsewhere: [{ id: "drill", name: "Cordless drill", whose: "yours", where: "With Dev", lent: { to: "Dev", until: "Mon 18:00", overdue: true } }],
+    lent: [
       { id: "drill", name: "Cordless drill", lent: { to: "Dev", until: "Mon 18:00", overdue: true } },
-      { id: "backpack", name: "Backpack", children: [{ id: "wallet", name: "Wallet" }] },
+      { id: "tent", name: "Tent", lent: { to: "Mara", overdue: false, hold: true } },
     ],
-    worn: [],
-    carried: [{ id: "backpack", name: "Backpack", load: { used: 4, capacity: 10 }, children: [{ id: "wallet", name: "Wallet", children: [{ id: "cash", name: "Cash", qty: 46 }] }] }],
-    stored: [{ id: "tent", name: "Tent", lent: { to: "Mara", overdue: false } }],
+    borrowed: [{ id: "ladder", name: "Ladder", borrowed: { from: "Mara", overdue: false, assigned: true } }],
   });
   if (!view) throw new Error("no view");
 
-  test("an item is where the POV keeps it, inside its containers, and owned when it's among the owned", () => {
+  test("an item is in the first section that holds it, inside its containers", () => {
     const cash = findItem(view, "cash");
-    expect(cash && [cash.section, cash.path.map((p) => p.id), cash.owned]).toEqual(["carried", ["backpack", "wallet"], false]);
-    const wallet = findItem(view, "wallet");
-    expect(wallet && [wallet.section, wallet.owned]).toEqual(["carried", true]);
-    expect(findItem(view, "drill")?.section).toBe("owned");
+    expect(cash && [cash.section, cash.path.map((p) => p.id), cash.item.whose]).toEqual(["on", ["backpack", "wallet"], "yours"]);
+    const parcel = findItem(view, "parcel");
+    expect(parcel && [parcel.section, parcel.item.whose, parcel.item.where]).toEqual(["holding", "Dev's", "In Backpack"]);
+    expect(findItem(view, "drill")?.section).toBe("elsewhere");
+    expect(findItem(view, "tent")?.item.lent).toEqual({ to: "Mara", until: undefined, overdue: false, hold: true });
+    expect(findItem(view, "ladder")?.item.borrowed).toEqual({ from: "Mara", until: undefined, overdue: false, assigned: true });
     expect(findItem(view, "nope")).toBeNull();
   });
 

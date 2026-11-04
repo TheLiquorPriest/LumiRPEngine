@@ -1,0 +1,378 @@
+{
+ "port-alder": {
+  "world": "port-alder.world.json.gz",
+  "revision": "3de8737c2b85fed26307255fa593e53f",
+  "events": [
+   {
+    "type": "materialize",
+    "entity": "pov",
+    "domain": "money",
+    "generatorVersion": 2,
+    "tablesRevision": "880701125f1ff12dfc0664b2d21cb505",
+    "events": [
+     {
+      "type": "post",
+      "lines": [
+       {
+        "account": "acct_pov_cash",
+        "amount": 8500
+       },
+       {
+        "account": "acct_pov_checking",
+        "amount": 184217
+       },
+       {
+        "account": "acct_pov_savings",
+        "amount": 326000
+       },
+       {
+        "account": "acct_pov_card",
+        "amount": -63840
+       },
+       {
+        "account": "acct_pov_auto_loan",
+        "amount": -1740000
+       },
+       {
+        "account": "economy.external:pov",
+        "amount": 1285123
+       }
+      ],
+      "memo": "Opening balances"
+     },
+     {
+      "type": "economy.txn",
+      "data": {
+       "memo": "Opening balance",
+       "kind": "opening",
+       "category": "opening",
+       "lines": [
+        {
+         "account": "acct_pov_cash",
+         "amount": 8500
+        },
+        {
+         "account": "acct_pov_checking",
+         "amount": 184217
+        },
+        {
+         "account": "acct_pov_savings",
+         "amount": 326000
+        },
+        {
+         "account": "acct_pov_card",
+         "amount": -63840
+        },
+        {
+         "account": "acct_pov_auto_loan",
+         "amount": -1740000
+        }
+       ]
+      }
+     },
+     {
+      "type": "economy.open",
+      "data": {
+       "accounts": [
+        "acct_pov_cash",
+        "acct_pov_checking",
+        "acct_pov_savings",
+        "acct_pov_card",
+        "acct_pov_auto_loan",
+        "acct_pov_brokerage"
+       ]
+      }
+     }
+    ]
+   },
+   {
+    "type": "unlink",
+    "rel": "in",
+    "from": "pov_pocketknife",
+    "to": "pov",
+    "group": "fx:50065a3b76"
+   },
+   {
+    "type": "unlink",
+    "rel": "worn_by",
+    "from": "pov_pocketknife",
+    "to": "pov",
+    "group": "fx:50065a3b76"
+   },
+   {
+    "type": "link",
+    "rel": "in",
+    "from": "pov_pocketknife",
+    "to": "danny_okafor",
+    "group": "fx:50065a3b76"
+   },
+   {
+    "type": "set",
+    "entity": "pov_pocketknife",
+    "field": "owner",
+    "value": "danny_okafor",
+    "group": "fx:50065a3b76"
+   },
+   {
+    "type": "spawn",
+    "entity": {
+     "id": "item:331847000b35",
+     "kind": "item",
+     "name": "Thermos",
+     "tier": "background",
+     "fields": {
+      "notable": true,
+      "owner": "pov"
+     },
+     "relations": [
+      {
+       "type": "in",
+       "to": "pov"
+      }
+     ]
+    }
+   },
+   {
+    "type": "unlink",
+    "rel": "in",
+    "from": "pov_watch",
+    "to": "pov",
+    "group": "fx:6ce7ebcc87"
+   },
+   {
+    "type": "unlink",
+    "rel": "worn_by",
+    "from": "pov_watch",
+    "to": "pov",
+    "group": "fx:6ce7ebcc87"
+   },
+   {
+    "type": "link",
+    "rel": "in",
+    "from": "pov_watch",
+    "to": "danny_okafor",
+    "group": "fx:6ce7ebcc87"
+   },
+   {
+    "type": "link",
+    "rel": "uses",
+    "from": "danny_okafor",
+    "to": "pov_watch",
+    "until": 3255,
+    "group": "fx:6ce7ebcc87"
+   },
+   {
+    "type": "unlink",
+    "rel": "uses",
+    "from": "danny_okafor",
+    "to": "pov_watch",
+    "group": "fx:70be10df1f"
+   },
+   {
+    "type": "unlink",
+    "rel": "in",
+    "from": "pov_watch",
+    "to": "danny_okafor",
+    "group": "fx:70be10df1f"
+   },
+   {
+    "type": "link",
+    "rel": "in",
+    "from": "pov_watch",
+    "to": "pov",
+    "group": "fx:70be10df1f"
+   },
+   {
+    "type": "set",
+    "entity": "pov_watch",
+    "field": "overdue",
+    "value": false,
+    "group": "fx:70be10df1f"
+   },
+   {
+    "type": "set",
+    "entity": "pov",
+    "field": "place",
+    "value": "alder_market"
+   },
+   {
+    "type": "post",
+    "lines": [
+     {
+      "account": "acct_pov_cash",
+      "amount": -367
+     },
+     {
+      "account": "economy.external:market",
+      "amount": 367
+     }
+    ],
+    "memo": "Bought Milk, whole",
+    "group": "fx:593473e716"
+   },
+   {
+    "type": "economy.txn",
+    "data": {
+     "memo": "Bought Milk, whole",
+     "lines": [
+      {
+       "account": "acct_pov_cash",
+       "amount": -367
+      }
+     ],
+     "kind": "purchase",
+     "category": "groceries_staples",
+     "counterparty": "economy.external:market",
+     "payer": "pov"
+    },
+    "group": "fx:593473e716"
+   },
+   {
+    "type": "spawn",
+    "entity": {
+     "id": "item:a128d0e46a17",
+     "kind": "item",
+     "name": "Milk, whole",
+     "tier": "background",
+     "fields": {
+      "notable": true,
+      "owner": "pov",
+      "catalog": "milk_whole",
+      "category": "groceries_staples"
+     },
+     "relations": [
+      {
+       "type": "in",
+       "to": "pov"
+      }
+     ]
+    },
+    "group": "fx:593473e716"
+   },
+   {
+    "type": "spawn",
+    "entity": {
+     "id": "item:claim_8199765b1318",
+     "kind": "item",
+     "name": "Grocery list",
+     "tier": "background",
+     "fields": {
+      "claimed": true,
+      "notable": true,
+      "owner": "pov"
+     },
+     "relations": [
+      {
+       "type": "in",
+       "to": "pov"
+      }
+     ]
+    }
+   }
+  ],
+  "ops": [
+   {
+    "op": "materialize",
+    "from": 0,
+    "to": 1,
+    "hash": "f0377f69a3c5cbf6b651626885e13cea"
+   },
+   {
+    "op": "give",
+    "from": 1,
+    "to": 5,
+    "hash": "79fdc5eb74b634e7a27e63123397ebaa"
+   },
+   {
+    "op": "receive",
+    "from": 5,
+    "to": 6,
+    "hash": "17632a06c5af67672f08717bcaf38f65"
+   },
+   {
+    "op": "lend",
+    "from": 6,
+    "to": 10,
+    "hash": "1fc9a5343025f44e9c8ecb7b18c02154"
+   },
+   {
+    "op": "retrieve",
+    "from": 10,
+    "to": 14,
+    "hash": "b2aa0916e98898bae5fd9314e0a544b6"
+   },
+   {
+    "op": "go to the market",
+    "from": 14,
+    "to": 15,
+    "hash": "683708b25ea759a0b0e144d574eaf8a2"
+   },
+   {
+    "op": "buy",
+    "from": 15,
+    "to": 18,
+    "hash": "41ff1306e118cc084f2e7fe4e11cf495"
+   },
+   {
+    "op": "claim",
+    "from": 18,
+    "to": 19,
+    "hash": "965b57e5932e78a0882f23312cd6f794"
+   }
+  ],
+  "hash": "965b57e5932e78a0882f23312cd6f794"
+ },
+ "mystery-manor": {
+  "world": "mystery-manor.world.json.gz",
+  "revision": "2a0c9698d80ba06a1ab8b15ebdaf9c22",
+  "events": [
+   {
+    "type": "set",
+    "entity": "pov",
+    "field": "place",
+    "value": "study"
+   },
+   {
+    "type": "link",
+    "rel": "knows",
+    "from": "pov",
+    "to": "brass_key"
+   },
+   {
+    "type": "unlink",
+    "rel": "in",
+    "from": "brass_key",
+    "to": "study_desk",
+    "group": "fx:0353e78987"
+   },
+   {
+    "type": "link",
+    "rel": "in",
+    "from": "brass_key",
+    "to": "pov",
+    "group": "fx:0353e78987"
+   }
+  ],
+  "ops": [
+   {
+    "op": "go to the study",
+    "from": 0,
+    "to": 1,
+    "hash": "bc4a8e0278722968c8eb117d5dd35ddb"
+   },
+   {
+    "op": "search",
+    "from": 1,
+    "to": 2,
+    "hash": "af1a67f78f0998e7058b7091ceeceef6"
+   },
+   {
+    "op": "take",
+    "from": 2,
+    "to": 4,
+    "hash": "898fbe4630345f226e82698f243f0f8a"
+   }
+  ],
+  "hash": "898fbe4630345f226e82698f243f0f8a"
+ }
+}

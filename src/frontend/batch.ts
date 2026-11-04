@@ -9,10 +9,13 @@ import { pointerOf } from "../shared/json-patch";
 import { lorePinKey, lorePinsJson, lorePinsOf } from "../shared/lore";
 import type { Fidelity, MindApproach } from "../shared/minds";
 import { FIDELITIES, MIND_TEXT_CAPS } from "../shared/minds";
+import type { PartyTier } from "../shared/party";
 import type { EditOp, JsonPatchOp } from "../shared/protocol";
 import { EDIT_OPS_MAX } from "../shared/protocol";
 import type { RoutineRole } from "../shared/routines";
+import type { GmView } from "../shared/state-view";
 import type { LorePin, WorldDoc } from "../shared/world";
+import { partyOf } from "./requests";
 
 /** A group a list selects at once ("by level"): exactly these rows. */
 export interface SelectGroup {
@@ -86,15 +89,27 @@ export type BulkChange =
   | { kind: "pin"; level: Fidelity | null }
   /** What they mean to do now and how (`mind_intent`); blank text and no approach clear it. */
   | { kind: "intent"; text: string; approach: MindApproach | null }
-  | { kind: "move"; to: PlaceId };
+  | { kind: "move"; to: PlaceId }
+  /** Their tier in the player character's party (ORG-SPEC §3.12), or null to take them out of it. */
+  | { kind: "party"; tier: PartyTier | null };
 
 /** Whether a kind of change is a character's (their mind or routine): it applies only to the characters among those selected. */
 export function forCharacters(kind: BulkChange["kind"]): boolean {
   return kind === "role" || kind === "pin" || kind === "intent";
 }
 
-/** The ops that make a change for each entity, in order; null when the change can't be made (an intent over its cap). */
-export function bulkOps(ids: readonly EntityId[], change: BulkChange): EditOp[] | null {
+/** An intent's text as it is sent, its spaces tidied; null over its cap. */
+export function intentText(text: string): string | null {
+  const tidy = text.trim().replace(/\s+/g, " ");
+  return tidy.length > MIND_TEXT_CAPS.gmIntent ? null : tidy;
+}
+
+/**
+ * The ops that make a change for each entity, in order; null when the change can't be made (an
+ * intent over its cap). A party tier is set only where it changes something, keeping since when
+ * each joined, and only those in the party are taken out of it.
+ */
+export function bulkOps(ids: readonly EntityId[], change: BulkChange, gm: Pick<GmView, "entities">): EditOp[] | null {
   switch (change.kind) {
     case "tier":
       return ids.map((entity) => ({ op: "entity", entity, tier: change.tier }));
@@ -105,12 +120,17 @@ export function bulkOps(ids: readonly EntityId[], change: BulkChange): EditOp[] 
     case "pin":
       return ids.map((entity) => ({ op: "mind_pin", entity, level: change.level }));
     case "intent": {
-      const text = change.text.trim().replace(/\s+/g, " ");
-      if (text.length > MIND_TEXT_CAPS.gmIntent) return null;
-      return ids.map((entity) => ({ op: "mind_intent", entity, text, approach: change.approach }));
+      const text = intentText(change.text);
+      return text === null ? null : ids.map((entity) => ({ op: "mind_intent", entity, text, approach: change.approach }));
     }
     case "move":
       return ids.map((entity) => ({ op: "move", entity, to: change.to }));
+    case "party":
+      return ids.flatMap((id) => {
+        const entity = gm.entities.find((e) => e.id === id);
+        const op = entity ? partyOf(entity, gm)?.op(change.tier) : null;
+        return op ? [op] : [];
+      });
   }
 }
 

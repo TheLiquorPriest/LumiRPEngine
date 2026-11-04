@@ -1,9 +1,10 @@
 // A person's commitments (DESIGN §8, §24.8): what the day planner treats as fixed blocks. Routine
-// (activity schedules: shifts, school timetables), dated appointments and trips, and the plans their
-// memory or the GM recorded (`minds.plans`), each laid into its window. Everything here is a pure
-// function of the plans and the authored commitments, never of the clock or of where anyone stands,
-// so a plan lands at the same time however often, and from whatever segment of a timelapse, its day
-// is planned again.
+// (activity schedules: shifts, school timetables), dated appointments and trips, the plans their
+// memory or the GM recorded (`minds.plans`), and the orders a party member has on the player
+// character's party plan (`orgs.order_plans`, assess-party §6.2), each laid into its window.
+// Everything here is a pure function of the plans, the orders and the authored commitments, never of
+// the clock or of where anyone stands, so a plan lands at the same time however often, and from
+// whatever segment of a timelapse, its day is planned again.
 
 import type { EntityId, PlaceId } from "../../../shared/ids";
 import type { Fidelity, MindPlan, PlanKind } from "../../../shared/minds";
@@ -43,6 +44,8 @@ interface Played {
   hours: readonly [number, number];
   activity: string;
   label: string;
+  /** Why the block is there, as the day plan says; a plan of their own's when none. */
+  reason?: string;
 }
 
 /**
@@ -68,6 +71,13 @@ export function isPlayed(p: MindPlan): boolean {
 
 /** The furthest a plan's window is searched for room: a plan for "sometime this month" lands in its first fortnight or not at all. */
 const SEARCH_DAYS = 14;
+
+/**
+ * How an order plays (assess-party §6.2): an hour's work in the day's waking hours, under the
+ * player's own words, which are safe to show; a standing order under way holds those hours of each
+ * day it runs.
+ */
+const ORDER_PLAYED = { minutes: 60, hours: [6, 22] as const, activity: "work", reason: "an order" };
 
 /** `blocks` with every span a cutter covers taken out: a block overlapping one keeps only its parts outside it. */
 export function cutAround(blocks: Commitment[], cutters: readonly Commitment[]): Commitment[] {
@@ -169,26 +179,52 @@ interface Layable {
   from: number;
   /** When it was settled, from which it lays nothing; for an open plan, never. */
   until: number;
+  /** A standing order under way: laid as each day's waking hours in its window (`holdDays`), never placed in it. */
+  hold?: true;
+  /** It never takes its time from routine, whatever its priority: a standing order with no window gives way to its member's fixed shifts. */
+  givesWay?: true;
+}
+
+/**
+ * A party member's orders as the planner lays them (assess-party §6.2): from Cast life 3, whatever
+ * their agent flag or minds level, never the player character's; each under its own plan id
+ * (`order:<org>:<id>`) with no one in it, so it asks no one along, at their tier's priority. A closed
+ * one lays only before it closed, as a settled plan does.
+ */
+function orderLayables(ctx: ReadContext, who: EntityId): Layable[] {
+  if (who === ctx.world.pov || ctx.levelOf(who, "castlife") < 3) return [];
+  return (optionalQuery(ctx, "orgs.order_plans")?.(ctx, who) ?? []).flatMap((o): Layable[] => {
+    if (!o.window) return [];
+    const { from } = o.window;
+    // Held until it is done or dropped: its days are laid only as far as a span asks (`holdDays`).
+    const to = o.window.to ?? Number.MAX_SAFE_INTEGER;
+    const until = o.closed ?? Infinity;
+    if (to <= from || until <= from) return [];
+    const p: MindPlan = { id: o.plan, what: o.text, kind: "work", when: { from, to }, where: o.place, with: [], priority: o.priority, status: o.closed === null ? "open" : "done", made: o.made, source: "gm", closed: o.closed, reason: null };
+    return [{ p, played: { ...ORDER_PLAYED, label: `On an order: ${o.text}` }, from, until, ...(o.hold ? { hold: true as const } : {}), ...(o.hold && o.window.to === null ? { givesWay: true as const } : {}) }];
+  });
 }
 
 /**
  * The plans that shape a person's days (DESIGN §24.8): the open ones, and the settled ones for the
  * times before they were settled, so settling a plan never changes the day it had, nor what another
- * plan was cut to. None for a Background character, who follows routine only, nor for anyone whose
- * plans the planner doesn't live.
+ * plan was cut to. None of their own for a Background character, who follows routine only, nor for
+ * anyone whose plans the planner doesn't live; a party member's orders lay all the same.
  */
 function layable(ctx: ReadContext, who: EntityId, tier: Fidelity): Layable[] {
+  const orders = orderLayables(ctx, who);
   // A Background character follows routine only, unless the story comes first for them (DESIGN §8).
-  if ((tier === "background" && followOf(ctx, who).awareness !== "story_first") || !livesPlans(ctx, who)) return [];
-  return (optionalQuery(ctx, "minds.plans")?.(ctx, who) ?? []).flatMap((p) => {
+  if ((tier === "background" && followOf(ctx, who).awareness !== "story_first") || !livesPlans(ctx, who)) return orders;
+  const own = (optionalQuery(ctx, "minds.plans")?.(ctx, who) ?? []).flatMap((p) => {
     const played = PLAYED[p.kind];
     const from = Math.max(p.when.from, p.made + 1);
     const until = p.status === "open" ? Infinity : (p.closed ?? from);
     return played && p.when.to > from && until > from ? [{ p, played, from, until }] : [];
   });
+  return [...own, ...orders];
 }
 
-/** The open plans that shape a person's days (DESIGN §24.8), as `layable` finds them. */
+/** The open plans that shape a person's days (DESIGN §24.8), as `layable` finds them: their own and their orders. */
 export function plansOf(ctx: ReadContext, who: EntityId, tier: Fidelity = planTier(ctx, who)): MindPlan[] {
   return layable(ctx, who, tier).flatMap((l) => (l.p.status === "open" ? [l.p] : []));
 }
@@ -210,6 +246,7 @@ function searchEnd(l: Layable): number {
  * plan that must happen; `strong` strong plans only; `ordinary` an ordinary one at a set time for anyone.
  */
 function cutsRoutine(ctx: ReadContext, l: Layable, tier: Fidelity): boolean {
+  if (l.givesWay === true) return false;
   switch (routineSettingsOf(ctx.world).planBend) {
     case "must":
       return l.p.priority >= 5;
@@ -230,7 +267,7 @@ function precedence(a: MindPlan, b: MindPlan): number {
 /** What a plan's block is: its kind's activity (company makes a visit social), at its own place, else at home for rest. */
 function planBlock(ctx: ReadContext, who: EntityId, { p, played }: Layable, start: number, end: number): Commitment {
   const place = p.where !== null && own(ctx.world.places, p.where) ? p.where : p.kind === "rest" ? homeOf(ctx, who) : null;
-  return { start, end, label: played.label, activity: p.kind === "visit" && p.with.length > 0 ? "socialize" : played.activity, place, reason: "their own plan", kind: "plan", plan: p.id, option: `plan:${p.id}` };
+  return { start, end, label: played.label, activity: p.kind === "visit" && p.with.length > 0 ? "socialize" : played.activity, place, reason: played.reason ?? "their own plan", kind: "plan", plan: p.id, option: `plan:${p.id}` };
 }
 
 /**
@@ -285,15 +322,39 @@ function bearing(plans: readonly Layable[], start: number, end: number): Layable
 }
 
 /**
- * A person's commitments overlapping [start, end): routine, appointments, trips and their own plans
- * (DESIGN §8, §24.8). A plan that takes its time from routine cuts the routine it overlaps; one that
- * must happen (priority 5) cuts appointments too; otherwise appointments and routine cut the plan.
- * Plans cut each other by precedence, a wide one placed around the stronger ones, and a trip
- * preempts everything it overlaps. A settled plan keeps only what it laid before it was settled.
+ * A standing order's days within [lo, hi) (assess-party §6.2: it holds its member to its place and
+ * activity while it is under way): each day's waking hours in its window, as a block of its own whose
+ * window is its time, so each day is laid alike whatever span is asked about.
+ */
+function holdDays(ctx: ReadContext, l: Layable, lo: number, hi: number): Layable[] {
+  const cal = calendarOf(ctx.world);
+  const { hold: _, ...day } = l;
+  const last = Math.min(hi, l.p.when.to, l.until);
+  const out: Layable[] = [];
+  for (let d = dateAt(cal, Math.max(lo, l.from)).dayIndex; clockAt(cal, d, 0) < last; d++) {
+    const from = Math.max(l.from, clockAt(cal, d, l.played.hours[0] * 60));
+    const to = Math.min(l.p.when.to, clockAt(cal, d, l.played.hours[1] * 60));
+    if (to > from) out.push({ ...day, p: { ...l.p, when: { from, to } }, played: { ...l.played, minutes: to - from }, from });
+  }
+  return out;
+}
+
+/**
+ * A person's commitments overlapping [start, end): routine, appointments, trips, their own plans and
+ * their orders (DESIGN §8, §24.8). A plan that takes its time from routine cuts the routine it
+ * overlaps; one that must happen (priority 5) cuts appointments too; otherwise appointments and
+ * routine cut the plan. Plans cut each other by precedence, a wide one placed around the stronger
+ * ones, and a trip preempts everything it overlaps. A settled plan keeps only what it laid before it
+ * was settled. A standing order under way lays each day of its window that a bearing plan or the span
+ * reaches.
  */
 export function commitments(ctx: ReadContext, who: EntityId, start: number, end: number): Commitment[] {
   const tier = planTier(ctx, who);
-  const plans = bearing(layable(ctx, who, tier), start, end).sort((x, y) => precedence(x.p, y.p));
+  const all = layable(ctx, who, tier);
+  const found = bearing(all.filter((l) => l.hold !== true), start, end);
+  const lo = Math.min(start, ...found.map((l) => l.from));
+  const hi = Math.max(end, ...found.map(searchEnd));
+  const plans = [...found, ...all.flatMap((l) => (l.hold === true ? holdDays(ctx, l, lo, hi) : []))].sort((x, y) => precedence(x.p, y.p));
   // Plans are laid against the authored commitments of their whole windows, whatever span is asked about.
   const from = Math.min(start, ...plans.map((l) => l.from));
   const to = Math.max(end, ...plans.map(searchEnd));

@@ -12,9 +12,16 @@ describe("settings through the tools", () => {
     const read = await raw("lre_settings", { section: "realism", pointer: "/levels" });
     expect(read.text.startsWith("your LumiRPEngine settings at /settings/realism/levels")).toBe(true);
     expect(JSON.parse(read.text.slice(read.text.indexOf("\n\n") + 2))).toEqual((await rig.rt.settings.get(userId)).realism.levels);
-    // The whole holds the settings and each change type's effective mode.
-    const whole = await raw("lre_settings");
-    expect(Object.keys(JSON.parse(whole.text.slice(whole.text.indexOf("\n\n") + 2)) as object)).toEqual(["settings", "extractionModes"]);
+    // The whole holds the settings and each change type's effective mode: outlined once it is too big for one answer, its JSON read in pages from offset 0.
+    expect((await raw("lre_settings")).text).toMatch(/^your LumiRPEngine settings(, | is )an object of 2 keys/);
+    let whole = "";
+    for (let offset: number | null = 0; offset !== null; ) {
+      const page = /^[^\n]*:\n\n([\s\S]*?)\n\n\((?:Continues: read on with offset (\d+)|That is the end)\.\)/.exec((await raw("lre_settings", { offset })).text);
+      if (page === null) throw new Error(`not a page at offset ${offset}`);
+      whole += page[1] ?? "";
+      offset = page[2] === undefined ? null : Number(page[2]);
+    }
+    expect(Object.keys(JSON.parse(whole) as object)).toEqual(["settings", "extractionModes"]);
 
     const set = await call("lre_settings_set", { patch: { realism: { levels: { money: 4 } }, adjudication: { riskyAt: 0.4 }, timeouts: { requestMs: -5 } } });
     const stored = await rig.rt.settings.get(userId);

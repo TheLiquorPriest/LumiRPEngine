@@ -5,6 +5,7 @@
 
 import type { JsonValue } from "./json";
 import type { EntityId, KindId, PlaceId, PlaceVisibility, TierId } from "./ids";
+import type { PartyTier } from "./party";
 import type { FieldType } from "./world";
 
 /** How public a place or an entity is: a place's visibility, which an entity's is a subset of. */
@@ -77,12 +78,12 @@ export interface CharacterSection {
   fields: CharacterField[];
 }
 
-/** What the GM sees of a character now: what they're doing until when, the party, and what the story holds. */
+/** What the GM sees of a character now: what they're doing until when, their tier in the player character's party (null: not in it), and what the story holds. */
 export interface CharacterNow {
   activity: string;
   activityLabel: string;
   until: string | null;
-  party: boolean;
+  partyTier: PartyTier | null;
   holds: { label: string; until: string | null }[];
 }
 

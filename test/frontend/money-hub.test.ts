@@ -17,7 +17,7 @@ import { ALL_PACKS, STARTER_WORLDS } from "../../src/packs/index";
 import { startState } from "../packs/support";
 import { ListRow } from "../../src/frontend/components";
 import { decodeFinanceView } from "../../src/packs/economy/ui/decode";
-import { accountBlocks, accountControls, autopaySources, businessAccounts, businessControls, cardControls, creditBlocks, endableLeases, fallbackSources, findAccount, flowControls, flowSources, flowTargets, gmAutopaySources, gmKindIs, gmParties, hireable, holdingControls, householdRows, hubTabs, invoiceControls, investmentBlocks, mortgageTermChoices, overviewBlocks, payeeProblem, propertyControls, transferTargets, workBlocks } from "../../src/packs/economy/ui/layout";
+import { accountBlocks, accountControls, autopaySources, businessAccounts, businessControls, cardControls, creditBlocks, endableLeases, fallbackSources, findAccount, flowControls, flowSources, flowTargets, gmAutopaySources, gmKindIs, gmParties, holdingControls, householdRows, hubTabs, invoiceControls, investmentBlocks, mortgageTermChoices, overviewBlocks, payeeProblem, propertyControls, transferTargets, workBlocks } from "../../src/packs/economy/ui/layout";
 import { OwnerRows } from "../../src/packs/economy/ui/lines";
 import { amountProblem, numberProblem, unchangedProblem } from "../../src/packs/economy/ui/forms";
 import { gmFixture } from "../../dev/preview/fixtures";
@@ -37,7 +37,6 @@ import {
   flowSpawnOps,
   flowUpdateAction,
   flowCreateAction,
-  hireAction,
   invoiceIssueAction,
   newIdFor,
   payCardAction,
@@ -54,7 +53,7 @@ const USD = DEFAULT_CURRENCY;
 /** An account in the party's view; whether they manage it and spend from it follows their own role unless a test says (a business's account its owner runs). */
 function account(over: Partial<AccountView> & Pick<AccountView, "id" | "class">): AccountView {
   const role = over.role === undefined ? "owner" : over.role;
-  return { name: over.id, classLabel: "", product: { id: over.class, label: "" }, institution: null, status: "open", cents: 0, available: null, owners: [{ party: "pov", name: "You", role: "owner", share: 100 }], role: "owner", manages: role !== null && ROLE_RIGHTS[role].manage, spends: role !== null && ROLE_RIGHTS[role].spend, autopayFrom: [], fallbacks: [], limit: null, aprPct: null, apyPct: null, terms: [], autopay: null, due: null, statements: [], cards: [], pending: [], holds: [], transactions: [], securedBy: null, loan: null, ...over };
+  return { name: over.id, classLabel: "", product: { id: over.class, label: "" }, institution: null, status: "open", cents: 0, available: null, owners: [{ party: "pov", name: "You", role: "owner", share: 100 }], role: "owner", manages: role !== null && ROLE_RIGHTS[role].manage, spends: role !== null && ROLE_RIGHTS[role].spend, autopayFrom: [], fallbacks: [], limit: null, interest: null, terms: [], autopay: null, due: null, statements: [], cards: [], pending: [], holds: [], transactions: [], securedBy: null, loan: null, ...over };
 }
 
 function card(over: Partial<CardView> & Pick<CardView, "id" | "account">): CardView {
@@ -68,7 +67,7 @@ function view(over: Partial<FinanceView> = {}): FinanceView {
 const cash = account({ id: "wallet", class: "cash", cents: 4600 });
 const checking = account({ id: "chk", class: "checking", cents: 124018, available: 124018 });
 const savings = account({ id: "sav", class: "savings", cents: 350000 });
-const visa = account({ id: "visa", class: "credit_card", cents: -41255, limit: 120000, available: 78745, autopay: { mode: "minimum", from: "chk", fromName: "Checking", cents: null }, statements: [{ at: "Oct 1", closing: 41255, interest: 0, fees: 0, minimum: 3500, due: "Oct 28", paid: 0, apr: 22, stage: "current", state: "open" }], terms: [{ label: "APR", value: "22%" }], holds: [{ id: "h1", cents: 3211, until: "Oct 20", kind: "authorization", memo: "Shell" }] });
+const visa = account({ id: "visa", class: "credit_card", cents: -41255, limit: 120000, available: 78745, interest: { way: "charges", ratePct: 22, basis: "On what's left of a statement's balance when a statement isn't paid in full, charged as the next statement closes on the 3rd", thisYear: 697, last: { cents: 697, at: "Thu 3 Dec" }, next: { cents: 0, at: "Sun 3 Jan" } }, autopay: { mode: "minimum", from: "chk", fromName: "Checking", cents: null }, statements: [{ at: "Oct 1", closing: 41255, interest: 0, fees: 0, minimum: 3500, due: "Oct 28", paid: 0, apr: 22, stage: "current", state: "open" }], terms: [{ label: "APR", value: "22%" }], holds: [{ id: "h1", cents: 3211, until: "Oct 20", kind: "authorization", memo: "Shell" }] });
 
 /** Every money feature that runs at the top level unless a toggle turns it off. */
 const TOP = FINANCE_FEATURES.filter((f) => featureOn(4, f));
@@ -103,6 +102,19 @@ describe("the view as it arrives", () => {
     expect(decodeFinanceView(null)).toBeNull();
   });
 
+  test("the market and how a holding's price has done decode field for field", () => {
+    const performance = { points: [{ at: "2008-09", price: 9944.6515 }, { at: "2008-10", price: 8321.4786 }, { at: "2008-11-14", price: 7599.5593 }], month: -8.674, year: null, twelve: null };
+    const index = { history: true, from: "2003-05", to: "2026-10", source: "Thrift Savings Plan, C Fund", points: [{ at: "2008-10", level: 11.1223 }, { at: "2008-11-14", level: 10.1543 }], month: -8.703, year: -38.68, twelve: -36.07 };
+    const held: HoldingView = { id: "h_idx", account: null, asset: { id: "idx", label: "Total Market Index Fund", class: "fund", symbol: "TMKT" }, qty: 10, price: 7599.5593, value: 75996, cost: 100000, gain: -24004, lots: [], option: null, route: null, performance };
+    const v = view({ level: 4, features: ["investments"], investments: { value: 75996, cost: 100000, unrealised: -24004, realised: 0, taxDue: null, holdings: [held], market: [], accounts: [], index } });
+    expect(decodeFinanceView(JSON.parse(JSON.stringify(v)))).toEqual(v);
+    // A view from before either reads as none of them.
+    const older = JSON.parse(JSON.stringify(v)) as { investments: { holdings: Record<string, unknown>[]; index?: unknown } };
+    delete older.investments.index;
+    delete older.investments.holdings[0]?.performance;
+    expect(decodeFinanceView(older)?.investments).toMatchObject({ index: null, holdings: [{ performance: null }] });
+  });
+
   test("values a newer backend might send read as the nearest known ones; entries without an id are dropped", () => {
     const raw = JSON.parse(JSON.stringify(view({ accounts: [visa] }))) as Record<string, unknown>;
     raw.accounts = [{ ...visa, class: "space_bank", status: "orbiting" }, { name: "no id" }];
@@ -110,6 +122,13 @@ describe("the view as it arrives", () => {
     const decoded = decodeFinanceView(raw);
     expect(decoded?.accounts.map((a) => [a.id, a.class, a.status])).toEqual([["visa", "checking", "open"]]);
     expect(decoded?.features).toEqual(["flows"]);
+  });
+
+  test("an account's interest arrives whole, and a block that isn't one is none", () => {
+    const raw = JSON.parse(JSON.stringify(view({ accounts: [visa] }))) as { accounts: Record<string, unknown>[] };
+    expect(decodeFinanceView(raw)?.accounts[0]?.interest).toEqual(visa.interest);
+    raw.accounts = [{ ...raw.accounts[0], interest: { way: "sideways", ratePct: 5 } }];
+    expect(decodeFinanceView(raw)?.accounts[0]?.interest).toBeNull();
   });
 
   test("household members the player can't see arrive without ids and still keep their own parts and rows", () => {
@@ -354,33 +373,18 @@ describe("what a party's roles allow", () => {
     expect(businessControls(view({ level: 4, features: ["investments"] }), shop("beneficiary"))).toEqual(["stake"]);
     expect(businessControls(view({ level: 3 }), shop("beneficiary"))).toEqual([]);
     // A trustee runs the business but takes no draw: only an owner or a joint owner does, and never from a corporation.
-    expect(businessControls(view({ level: 3 }), shop("trustee"))).toEqual(["hire", "invoice", "distribute"]);
-    expect(businessControls(view({ level: 3 }), shop("custodian"))).toEqual(["hire", "invoice", "distribute"]);
-    expect(businessControls(view({ level: 3 }), shop("owner"))).toEqual(["hire", "invoice", "draw", "distribute"]);
-    expect(businessControls(view({ level: 3 }), { ...shop("owner"), mayDraw: false })).toEqual(["hire", "invoice", "distribute"]);
+    // Hiring is the organization's People's (orgs-edit.test).
+    expect(businessControls(view({ level: 3 }), shop("trustee"))).toEqual(["invoice", "distribute"]);
+    expect(businessControls(view({ level: 3 }), shop("custodian"))).toEqual(["invoice", "distribute"]);
+    expect(businessControls(view({ level: 3 }), shop("owner"))).toEqual(["invoice", "draw", "distribute"]);
+    expect(businessControls(view({ level: 3 }), { ...shop("owner"), mayDraw: false })).toEqual(["invoice", "distribute"]);
     const invoice = { id: "inv1", business: "shop", customer: "pov", cents: 5000, memo: "", issued: 0, due: 0, state: "paid" as const, customerName: "You", issuedAt: "", dueAt: "" };
     expect(invoiceControls(view({ level: 3 }), shop("owner"), invoice)).toEqual([]);
     expect(invoiceControls(view({ level: 3 }), shop("owner"), { ...invoice, state: "late" })).toEqual(["void", "pay"]);
   });
 
-  test("Hire offers the people the player knows but no one the business already employs", () => {
-    const marcus = portAlderMoney(3, {}, "marcus_delgado");
-    const alder = marcus.businesses.find((b) => b.id === "alder_automotive_co");
-    if (!alder) throw new Error("Marcus doesn't run the shop");
-    // Danny and Jordan (the POV) work at the shop; Priya doesn't.
-    expect(alder.employees.filter((j) => j.status !== "ended").map((j) => j.workerId).sort()).toEqual(["danny_okafor", "pov"]);
-    const known = [
-      { value: "danny_okafor", label: "Danny Okafor" },
-      { value: "pov", label: "Jordan Ellis" },
-      { value: "priya_nair", label: "Priya Nair" },
-    ];
-    expect(hireable(alder, known).map((p) => p.value)).toEqual(["priya_nair"]);
-    // Someone whose job there has ended may be hired again.
-    expect(hireable({ ...alder, employees: alder.employees.map((j) => ({ ...j, status: "ended" as const })) }, known)).toEqual(known);
-  });
-
   test("a holding trades only in an account the party may spend from; an option exercises only where options run", () => {
-    const holding = (over: Partial<HoldingView>): HoldingView => ({ id: "h", account: "brk", asset: { id: "acme", label: "Acme", class: "security", symbol: "ACME" }, qty: 1, price: 100, value: 100, cost: 100, gain: 0, lots: [], option: null, route: null, ...over });
+    const holding = (over: Partial<HoldingView>): HoldingView => ({ id: "h", account: "brk", asset: { id: "acme", label: "Acme", class: "security", symbol: "ACME" }, qty: 1, price: 100, value: 100, cost: 100, gain: 0, lots: [], option: null, route: null, performance: null, ...over });
     const mine = account({ id: "brk", class: "brokerage" });
     const kids = account({ id: "brk", class: "brokerage", role: "beneficiary" });
     const call = { right: "call" as const, underlying: "Acme", strike: 90, expiry: "2026-12-18", inTheMoney: true };
@@ -522,8 +526,6 @@ describe("the requests the controls send", () => {
   });
 
   test("work, credit, routing and payment preferences send the params their actions take", () => {
-    expect(hireAction({ business: "alder", worker: "dev", title: " Mechanic ", basis: "hourly", rate: "23.50", hoursPerWeek: 40, payEvery: "biweekly" }, USD)).toEqual({ action: "job_hire", params: { business: "alder", worker: "dev", title: "Mechanic", basis: "hourly", rate: 2350, hours_per_week: 40, pay_every: "biweekly" } });
-    expect(hireAction({ business: "alder", worker: "dev", title: "", basis: "", rate: "lots", hoursPerWeek: null, payEvery: "" }, USD)).toBeNull();
     expect(invoiceIssueAction("alder", { id: "mara" }, 42000, "Brake job", null)).toEqual({ action: "invoice_issue", params: { business: "alder", customer: "mara", amount: 42000, memo: "Brake job" } });
     expect(invoiceIssueAction("alder", { name: " Harbor Mutual " }, 9900, "", 30)).toEqual({ action: "invoice_issue", params: { business: "alder", customer_name: "Harbor Mutual", amount: 9900, days: 30 } });
     expect(routeAction({ property: "duplex" }, "chk")).toEqual({ action: "route_distributions", params: { property: "duplex", to: "chk" } });

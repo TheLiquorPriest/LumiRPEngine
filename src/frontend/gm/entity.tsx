@@ -1,10 +1,11 @@
-// GM → World → one entity (DESIGN §7, §8): its fields as its kind types them (references picked by
-// name, bounds, locks, worked-out values read-only), its designed sheet, where it is and what holds
-// it, its relations, how deeply it is simulated, its life state and who knows it, its classes (hidden
-// facets too) and tags, and Remove or Restore. Each Save is one edit with its own Undo. Classes and
-// tags are set for this chat; kinds and places are the world's definitions, edited in Build.
+// GM → World → one entity (DESIGN §7, §8) that is neither a person (their character sheet) nor a
+// thing (GM → Things' thing page, ITEMS-SPEC §10.2): its fields as its kind types them (references
+// picked by name, bounds, locks, worked-out values read-only), its designed sheet, where it is and
+// what holds it, its relations, how deeply it is simulated, its life state and who knows it, its
+// classes (hidden facets too) and tags, and Remove or Restore. Each Save is one edit with its own
+// Undo. Classes and tags are set for this chat; kinds and places are the world's definitions,
+// edited in Build. Its Fields and Relations serve the thing page's Advanced too.
 
-import type { ComponentChildren } from "preact";
 import { useId, useRef, useState } from "preact/hooks";
 import type { JsonValue } from "../../shared/json";
 import { formatMoneyInput, parseMoneyInput } from "../../shared/money";
@@ -19,15 +20,59 @@ import { formatMinutes, humanize } from "../format";
 import { Icon } from "../icons";
 import { MoneyInput } from "../money-input";
 import { adjustOp, bringOp, classifyOp, entityStateOp, lifeEditOp, partyOf, placesMatching, relationFields } from "../requests";
-import { PARTY_RELATION } from "../../shared/party";
+import { isPartyTier, PARTY_RELATION, PARTY_TIERS, TIER_LABELS, type PartyTier } from "../../shared/party";
 import { LEVEL_LABEL } from "../../shared/ids";
 import type { Editor } from "./editor";
-import { holdersFor, nameOf } from "./editor";
+import { nameOf } from "./editor";
 import { ActionRow, ActionRows, GmPage } from "./ui";
 import { relationRows } from "./character-ops";
-import { BedPicker } from "./bed-picker";
 
 const LEVELS = [0, 1, 2, 3, 4] as const;
+
+/** What each party tier means (assess-party §6.1), as the GM reads it of the player character's party. */
+const TIER_HELP: Readonly<Record<PartyTier, (leader: string) => string>> = {
+  core: (leader) => `Goes wherever ${leader} goes.`,
+  companion: (leader) => `Goes wherever ${leader} goes, unless their own shift, appointment or plan is due.`,
+  hired: (leader) => `Works for the party for pay; comes along only when ${leader} takes them.`,
+  ally: (leader) => `On ${leader}'s side, but goes their own way; comes along only when ${leader} takes them.`,
+};
+
+/**
+ * The player character's party (ORG-SPEC §3.12; assess-party §6.1): a person's tier in it, or Not in
+ * the party, each change one edit with its Undo. Nothing for the player character, for anything but
+ * a person, or in a world without the party.
+ */
+export function PartyField(props: { entity: GmEntity; editor: Editor }) {
+  const { entity, editor } = props;
+  const id = useId();
+  const party = entity.person && editor.gm.relationTypes.some((t) => t.id === PARTY_RELATION) ? partyOf(entity, editor.gm) : null;
+  if (!party) return null;
+  const leader = party.pov.name;
+  return (
+    <div data-lre-gm-party={party.tier ?? "none"}>
+      <Field label={`In ${leader}'s party`} for={id} help={party.tier ? TIER_HELP[party.tier](leader) : `Not in ${leader}'s party: they go their own way.`}>
+        <select
+          id={id}
+          class="lre-input"
+          value={party.tier ?? ""}
+          disabled={editor.busy}
+          onChange={(event) => {
+            const value = event.currentTarget.value;
+            const op = party.op(isPartyTier(value) ? value : null);
+            if (op) void editor.edit([op]);
+          }}
+        >
+          <option value="">Not in the party</option>
+          {PARTY_TIERS.map((t) => (
+            <option key={t} value={t}>
+              {TIER_LABELS[t]}
+            </option>
+          ))}
+        </select>
+      </Field>
+    </div>
+  );
+}
 
 /** What an entity is at a glance: the player's own, removed, not alive, not public, claimed by the player, living its own day, new in this chat. */
 export function EntityBadges(props: { entity: GmEntity; full?: boolean }) {
@@ -223,21 +268,19 @@ function SheetRow(props: { row: SheetRowView }) {
 }
 
 /**
- * Where it is: a place, inside something, or taken out; and an account's money in or out. The current
- * place comes first with a one-tap Bring to the player character's place and a searchable place
- * picker (each a move through the one move path, with its own Undo), and whether a person travels
- * with the player character. `children` take their place beside the location picker (a bed).
+ * Where it is: a place, inside something (Take out), a person's tier in the player character's
+ * party, and an account's money in or out. The current place comes first with a one-tap Bring to
+ * the player character's place and a searchable place picker (each a move through the one move
+ * path, with its own Undo).
  */
-function Placement(props: { entity: GmEntity; editor: Editor; children?: ComponentChildren }) {
+function Placement(props: { entity: GmEntity; editor: Editor }) {
   const { entity, editor } = props;
   const [amount, setAmount] = useState("");
   const [search, setSearch] = useState("");
   const move = useId();
-  const put = useId();
   const add = adjustOp(entity.id, amount, editor.currency, false);
   const take = adjustOp(entity.id, amount, editor.currency, true);
   const bring = bringOp(entity, editor.gm);
-  const party = entity.person && editor.gm.relationTypes.some((t) => t.id === PARTY_RELATION) ? partyOf(entity, editor.gm) : null;
   const found = placesMatching(editor.gm.places, search);
   return (
     <Section title="Where it is">
@@ -253,17 +296,6 @@ function Placement(props: { entity: GmEntity; editor: Editor; children?: Compone
             ) : undefined
           }
         />
-        {party ? (
-          <ActionRow
-            title={`Travels with ${party.pov.name}`}
-            value={party.travels ? "Yes" : "No"}
-            actions={
-              <Button size="sm" disabled={editor.busy} onClick={() => void editor.edit([party.op])}>
-                {party.travels ? "Leave the party" : "Join the party"}
-              </Button>
-            }
-          />
-        ) : null}
         {entity.holder ? (
           <ActionRow
             title="Inside"
@@ -277,6 +309,7 @@ function Placement(props: { entity: GmEntity; editor: Editor; children?: Compone
         ) : null}
         {entity.balance !== undefined ? <ActionRow title="Balance" value={formatMoney(entity.balance, editor.currency)} tone={entity.balance < 0 ? "neg" : undefined} /> : null}
       </ActionRows>
+      <PartyField entity={entity} editor={editor} />
       <Field label="Move to a place" for={move} help="Type to narrow the places, then pick one.">
         <input class="lre-input" type="search" placeholder="Search places" aria-label="Search places" value={search} onInput={(event) => setSearch(event.currentTarget.value)} />
         <select id={move} class="lre-input" value="" disabled={editor.busy} onChange={(event) => event.currentTarget.value !== "" && void editor.edit([{ op: "move", entity: entity.id, to: event.currentTarget.value }])}>
@@ -288,19 +321,6 @@ function Placement(props: { entity: GmEntity; editor: Editor; children?: Compone
           ))}
         </select>
       </Field>
-      {props.children}
-      {entity.goes === "nowhere" ? null : (
-        <Field label="Put inside" for={put} help={entity.goes === "vehicle" ? "Only a vehicle can hold this." : undefined}>
-          <select id={put} class="lre-input" value="" disabled={editor.busy} onChange={(event) => event.currentTarget.value !== "" && void editor.edit([{ op: "put", entity: entity.id, into: event.currentTarget.value }])}>
-            <option value="">Choose what holds it…</option>
-            {holdersFor(editor.gm, entity).map((h) => (
-              <option key={h.id} value={h.id}>
-                {h.label}
-              </option>
-            ))}
-          </select>
-        </Field>
-      )}
       {entity.balance !== undefined ? (
         <Field label="Correct the balance" help="Money in or out against a correction; its Undo takes it back.">
           <MoneyInput currency={editor.currency} label="Amount" placeholder="Amount" value={amount} invalid={add === null && amount !== ""} onInput={setAmount} />
@@ -599,9 +619,7 @@ export function EntityPage(props: { entity: GmEntity; editor: Editor; onBack(): 
             </ActionRows>
           </Section>
         ))}
-        <Placement entity={entity} editor={editor}>
-          <BedPicker entity={entity} editor={editor} />
-        </Placement>
+        <Placement entity={entity} editor={editor} />
         <Relations entity={entity} editor={editor} />
         <Simulation key={`${entity.tier}:${entity.agent}:${JSON.stringify(entity.levels)}`} entity={entity} editor={editor} />
         <Life key={JSON.stringify(entity.life)} entity={entity} editor={editor} />

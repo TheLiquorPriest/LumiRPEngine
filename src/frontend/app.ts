@@ -22,12 +22,13 @@ import type { UiCatalog } from "./ui-registry";
 export type Mode = "play" | "gm" | "build" | "settings";
 
 /** Play's bottom-bar destinations. */
-export type Dest = "now" | "me" | "people" | "places" | "story";
+export type Dest = "now" | "me" | "people" | "orgs" | "places" | "story";
 
 /** Where a panel lives: a Play destination, or GM mode. */
 export type PanelHome = Dest | "gm";
 
-export type SheetKind = "person" | "place" | "item" | "account" | "quest" | "money";
+/** `org_edit`: an organization's editors in Play (ORG-SPEC §4.4): a member's sheet, Hire someone, Admit a member, a position, a delegation, its dues. */
+export type SheetKind = "person" | "place" | "item" | "account" | "quest" | "money" | "org" | "org_edit";
 
 /** A detail sheet opened over a Play destination. */
 export interface SheetRoute {
@@ -44,7 +45,7 @@ export interface PlayState {
 }
 
 /** GM mode's sections: the engine's own, and each pack's tab by its registered id, which holds a dot (`economy.money`). */
-export type GmSection = "world" | "places" | "story" | "chat" | `${string}.${string}`;
+export type GmSection = "world" | "places" | "things" | "story" | "chat" | `${string}.${string}`;
 
 export interface GmState {
   /** The truth shows only once the gate is opened; leaving GM mode closes it again. */
@@ -56,10 +57,15 @@ export interface GmState {
 
 export type SettingsPage = "home" | "helper" | "model" | "steps" | "minds" | "narrator" | "timeouts" | "agents" | "roles" | "context" | "main" | "assistant" | "prompts" | "retention" | "realism" | "checks" | "time" | "extraction" | "swipes" | "preset" | "lore" | "display" | "caveats" | "diagnostics" | "mcp";
 
+/** The world home's lists of entities (ITEMS-SPEC §10.1): characters, organizations, things and money records. */
+export type EntityGroup = "people" | "orgs" | "things" | "money";
+
 export type BuildRoute =
   | { view: "worlds" }
   | { view: "world"; worldId: WorldId }
   | { view: "collection"; worldId: WorldId; collection: WorldCollection }
+  /** One of the world home's lists of entities; Things is its own page (by place, by owner). */
+  | { view: "entities"; worldId: WorldId; group: EntityGroup }
   /** `at`: the lint path the page opens at (Problems' Open), for an editor with sheets of its own; a routine opens the block it names. */
   | { view: "item"; worldId: WorldId; collection: WorldCollection; id: string | null; at?: string }
   | { view: "part"; worldId: WorldId; part: WorldPart }
@@ -103,6 +109,33 @@ export function showPanel(ui: UiState, catalog: UiCatalog, panel: PanelId): UiSt
 /** A sheet opened over the current Play destination. */
 export function pushSheet(ui: UiState, route: SheetRoute): UiState {
   return { ...ui, mode: "play", play: { ...ui.play, stack: [...ui.play.stack, route] } };
+}
+
+/** Play at a destination with one sheet open over it: a link from one destination into another's page (Cast's groups open their organization in Orgs). */
+export function openAt(ui: UiState, dest: Dest, route: SheetRoute): UiState {
+  return pushSheet(playAt(ui, dest), route);
+}
+
+/**
+ * The `org` sheet's route (ORG-SPEC §4.3): an organization's page, opened on one of its tabs when
+ * `tab` names one (`overview`, `people`, `rules`, or a pack's `r.orgTab` id, as Money → Assets opens
+ * a stake's Ownership). Its id is the organization's, URI-encoded so it holds no `#`, then `#` and the
+ * tab; a plain id (`alder_automotive_co`) reads as itself.
+ */
+export function orgRoute(org: string, tab?: string): SheetRoute {
+  return { kind: "org", id: tab === undefined ? encodeURIComponent(org) : `${encodeURIComponent(org)}#${tab}` };
+}
+
+/** The organization an `org` sheet's id names (`orgRoute`), and the tab it opens on (null: none named); a head that doesn't decode reads as written. */
+export function orgRouteOf(id: string): { org: string; tab: string | null } {
+  const at = id.indexOf("#");
+  const head = at < 0 ? id : id.slice(0, at);
+  const tab = at < 0 ? null : id.slice(at + 1) || null;
+  try {
+    return { org: decodeURIComponent(head), tab };
+  } catch {
+    return { org: head, tab };
+  }
 }
 
 /** Back one level: the sheet under the top one, or the destination itself. */

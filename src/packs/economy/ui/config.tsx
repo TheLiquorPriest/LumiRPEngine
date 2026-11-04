@@ -4,7 +4,8 @@
 // have may cost before a capped Make it real asks first; each is typed as the world's currency
 // writes it and stored in whole minor units, and left empty, the engine derives it from the tables.
 // The region prices living and taxes for whoever names none; living costs are a week's spending
-// per wealth band; taxes are the spending categories sales tax never falls on and the corporate rate (§26).
+// per wealth band; taxes are the spending categories sales tax never falls on and the corporate rate (§26);
+// shares, the units a company starts counting its owners' stakes in (§27.10).
 // The Custom toggles (DESIGN §25) switch a money feature on or off, under any preset, at the levels
 // its floor allows, on a page of their own; products are the world's own account products and
 // assets are what holdings hold (§27), each a row that opens as a sheet. Styles:
@@ -25,6 +26,7 @@ import { ChoiceInput, DateInput, type FormCtx, lintAt, LintBadge, MinorMoneyInpu
 import { humanize } from "../../../frontend/format";
 import type { PackConfigProps } from "../../../frontend/registry";
 import { derivedClaimCap, derivedUnpricedCap, WEALTH_BANDS } from "../core/model";
+import { SHARE_UNITS } from "../core/shares";
 import { CORPORATE_PCT } from "../core/taxes";
 
 /** A Custom toggle's state: as the level decides, or forced on or off. */
@@ -287,6 +289,25 @@ function Taxes(props: PackConfigProps) {
   );
 }
 
+/** The units a company that doesn't count its shares in units counts its owners in, the first time it issues, buys back or classes them (ORG-SPEC §3.10). */
+function Shares(props: PackConfigProps) {
+  return (
+    <FormGroup title="Shares">
+      <NumberInput
+        label="Units a company starts counting in"
+        value={props.config.shareUnits}
+        min={1}
+        step={1}
+        optional
+        placeholder={String(SHARE_UNITS)}
+        hint={`A company whose owners hold shares in percent counts them in this many units the first time it issues shares, buys some back or sets its classes, each owner's units their share of them. Empty, it's ${SHARE_UNITS.toLocaleString("en-US")}.`}
+        issues={lintAt(props.lint, `${CONFIG}.shareUnits`)}
+        onChange={(v) => props.onChange(withKey(props.config, "shareUnits", typeof v === "number" ? Math.round(v) : undefined))}
+      />
+    </FormGroup>
+  );
+}
+
 const TOGGLE_CHOICES: readonly SegOption<ToggleState>[] = [
   { value: "level", label: "By level" },
   { value: "on", label: "On" },
@@ -504,6 +525,7 @@ export function EconomyConfig(props: PackConfigProps) {
       <Prices {...props} />
       <LivingCosts {...props} />
       <Taxes {...props} />
+      <Shares {...props} />
       <FeatureToggles {...props} />
       <Definitions
         config={props.config}

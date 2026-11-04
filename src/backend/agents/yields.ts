@@ -100,13 +100,16 @@ function lostOf(say: (id: string, vars?: Readonly<Record<string, string>>) => st
       if (lost.length === 0 && k.events.length === 0 && k.proposals.length === 0) lost.push(say(YIELD_TEXT.knowledgeEmpty));
       return lost;
     }
-    case "extract": {
+    case "extract":
+    case "curate": {
       const read = out as ExtractRead;
       const dropped = read.dropped;
       const lost = READ_DROPS.flatMap((why) => {
         const n = dropped?.why[why] ?? 0;
         return n > 0 ? [say(YIELD_TEXT.read(why), { count: String(n), types: dropped?.types.join(", ") ?? "" })] : [];
       });
+      // The Curator's work is what it staged: an answer with no facts is its usual one.
+      if (kind === "curate") return lost;
       const untracked = read.untracked ?? [];
       if (untracked.length > 0) lost.push(say(YIELD_TEXT.readUntracked, { count: String(untracked.length), things: [...new Set(untracked)].join(", ") }));
       if (lost.length === 0 && read.proposals.length === 0) lost.push(say(YIELD_TEXT.readEmpty));

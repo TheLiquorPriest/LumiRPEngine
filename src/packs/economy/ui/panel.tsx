@@ -1,16 +1,19 @@
-// Play → Me → Money (DESIGN §12, §25): the POV's money hub. The view (`FinanceView`)
-// is already at the POV's Money level; the hub lays it out, and each page it opens rides the sheet
-// stack. Each control is an in-world action sent like a palette pick, so it plays as the next turn
-// and the narrator hears of it.
+// Play → Me → Money (DESIGN §12, §25; ORG-SPEC §5.1): the POV's own money, as its segments under
+// Me's tabs. The view (`FinanceView`) is already at the POV's Money level; the segments lay it out,
+// and each page they open rides the sheet stack. Each control is an in-world action sent like a
+// palette pick, so it plays as the next turn and the narrator hears of it.
 
+import { useId, useState } from "preact/hooks";
 import type { ChatId } from "../../../shared/ids";
 import type { StateView } from "../../../shared/state-view";
 import { DEFAULT_CURRENCY } from "../../../shared/world";
-import { pushSheet, useApp } from "../../../frontend/app";
+import { openAt, orgRoute, playAt, pushSheet, showPanel, useApp, type App } from "../../../frontend/app";
 import { Empty, JsonView, useBusy } from "../../../frontend/components";
 import type { PanelProps } from "../../../frontend/registry";
 import { decodeFinanceView } from "./decode";
 import { MoneyHub, type PlayerControls } from "./hub";
+import { ALL_ACTIVITY, type ActivityFilter, type MoneySegment } from "./layout";
+import type { Elsewhere, HubNav } from "./nav";
 import { actionRequest } from "./requests";
 import { routeOf } from "./routes";
 
@@ -38,16 +41,36 @@ export function usePlayerControls(chatId: ChatId, state: StateView): PlayerContr
   };
 }
 
+/**
+ * Opens the POV's money, whose detail is the POV's to materialize (DESIGN §9.2; an account has
+ * none of its own), as picking the Money tab does: for a money page that opens elsewhere (over Now
+ * from the glance, over Orgs from an organization's page) and an organization's tabs that read it.
+ */
+export function observeMoney(app: App, chatId: ChatId): void {
+  void app.request({ type: "lre.view.open", chatId, panel: "economy.money", entity: null }).then((result) => {
+    if (result?.pending) app.toast("Details appear when the reply finishes.", "info");
+  });
+}
+
+/** In Play, where money's links outside money lead: an organization's page in Orgs, on the tab named (none: the Orgs home), or a panel on its tab. */
+export function playElsewhere(app: App, to: Elsewhere): void {
+  app.ui.update((ui) => ("panel" in to ? showPanel(ui, app.catalog, to.panel) : to.org === null ? playAt(ui, "orgs") : openAt(ui, "orgs", orgRoute(to.org, to.tab))));
+}
+
 export function MoneyPanel(props: PanelProps) {
   const app = useApp();
   const controls = usePlayerControls(props.chatId, props.state);
+  const [segment, setSegment] = useState<MoneySegment>("summary");
+  const [filter, setFilter] = useState<ActivityFilter>(ALL_ACTIVITY);
+  const panelId = useId();
   if (props.view === null || props.view === undefined) return <Empty icon="coins">Money is off in this world.</Empty>;
   const view = decodeFinanceView(props.view);
   if (!view) return <JsonView value={props.view} />;
-  // The overview is the bottom level: its pages open as sheets over it, and Back from it goes nowhere.
+  // The segments are the bottom level: their pages open as sheets over them, and Back from them goes nowhere.
+  const nav: HubNav = { page: null, open: (page) => app.ui.update((ui) => pushSheet(ui, routeOf(page, view.party, true))), back: () => undefined, elsewhere: (to) => playElsewhere(app, to), frame: "play", backLabel: null };
   return (
     <div class="lre-money-root" data-lre-panel="economy.money">
-      <MoneyHub view={view} label="Your money" controls={controls} nav={{ page: null, open: (page) => app.ui.update((ui) => pushSheet(ui, routeOf(page))), back: () => undefined, frame: "play", backLabel: null }} />
+      <MoneyHub view={view} controls={controls} nav={nav} segment={segment} onSegment={setSegment} filter={filter} onFilter={setFilter} now={props.state.hud?.clock.minutes ?? null} garage={(props.state.panels["vehicles.garage"] ?? null) !== null} panelId={panelId} />
     </div>
   );
 }

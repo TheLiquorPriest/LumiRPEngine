@@ -17,6 +17,7 @@ import type { JsonObject, JsonValue } from "../../../shared/json";
 import type { LedgerEvent, PostingLine } from "../../../shared/ledger";
 import { ownersIn, worthShares, type Flow, type FlowShare, type FlowSplit, type FlowView, type LeaseView, type Owner, type OwnerLine, type PropertyView } from "../../../shared/finance";
 import { hash32 } from "../../../shared/hash";
+import type { OrgPower } from "../../../shared/org";
 import type { FieldDef } from "../../../shared/world";
 import { formatMoney } from "../../../shared/world";
 import { calendarOf, clockAt, dateAt, dayIndexOf } from "../../../engine/calendar";
@@ -34,6 +35,7 @@ import { isOpened } from "./journal";
 import { openerOf } from "./model";
 import { byShare } from "./records";
 import { correlated, gbmStep, normal } from "./pricing";
+import { actAs, asParam, mayAs } from "./acting";
 
 export const PROPERTY_COST_PROVIDER = "property_cost";
 const COSTS = ["tax", "insurance", "upkeep"] as const;
@@ -694,6 +696,16 @@ export function endLease(api: FinanceApi, ctx: ReadContext, party: EntityId, lea
   return strOf(f.fields.end) === date ? [] : [{ type: "set", entity: lease, field: "end", value: date }];
 }
 
+/** Listing a property for sale (`property_list`) by one of its owners: an asking price, so someone in the world may buy it, or none, taking it off the market. */
+export function listProperty(api: FinanceApi, ctx: ReadContext, party: EntityId, property: EntityId, price: number | undefined): LedgerEvent[] | Rejection {
+  const e = own(ctx.state.entities, property);
+  if (!e || e.kind !== "property") return reject("missing_property", `no property ${labelOf(ctx, property)}`);
+  if (!api.feature(ctx, party, "property")) return reject("level", "property isn't followed at this money level");
+  if (api.shareOf(ctx.state, property, party) <= 0) return reject("not_yours", `${e.name} isn't ${labelOf(ctx, party)}'s to sell`);
+  const asking = price !== undefined && price > 0 ? Math.round(price) : null;
+  return (num(e.fields.asking_price) ?? null) === asking ? [] : [{ type: "set", entity: property, field: "asking_price", value: asking }];
+}
+
 // ---------------------------------------------------------------- views and worth
 
 /** A name as `viewer` may read it: anyone the POV can't see reads as `fallback` (DESIGN §7); the GM's views of others name everyone. */
@@ -812,48 +824,74 @@ export function registerProperty(r: FinanceRegistry): void {
   const n = (a: Record<string, JsonValue>, k: string): number | undefined => (typeof a[k] === "number" && Number.isFinite(a[k]) ? (a[k] as number) : undefined);
   const s = (a: Record<string, JsonValue>, k: string): string | undefined => (typeof a[k] === "string" && a[k] !== "" ? (a[k] as string) : undefined);
   const party = (a: Record<string, JsonValue>, ctx: ReadContext): EntityId => s(a, "party") ?? ctx.world.pov;
+  const money = (ctx: ReadContext, cents: number | undefined): string => (cents !== undefined && Number.isFinite(cents) ? formatMoney(Math.round(cents), ctx.world.currency) : "");
+  // Each done `as` an organization (ORG-SPEC §3.6) by someone acting for it (`by`), with the power it needs there: buying and selling by `property.trade`; letting, ending a lease and listing by `property.manage`.
+  const acted = (a: Record<string, JsonValue>, ctx: ReadContext, power: OrgPower, line: () => string, names: readonly (EntityId | undefined)[], run: () => LedgerEvent[] | Rejection): LedgerEvent[] | Rejection => actAs(ctx, { by: strOf(a.by), party: party(a, ctx), power, line, names }, run);
   r.core.effect({
     type: "economy.property_buy",
-    args: ["property", "price?", "from?", "down?", "term_months?", "party?"],
+    args: ["property", "price?", "from?", "down?", "term_months?", "party?", "by?"],
     resolve: (a, ctx) => {
       const price = n(a, "price");
       const from = s(a, "from");
       const down = n(a, "down");
       const term = n(a, "term_months");
-      return buyProperty(r.api, ctx, { party: party(a, ctx), property: strOf(a.property), ...(price !== undefined ? { price } : {}), ...(from ? { from } : {}), ...(down !== undefined ? { down } : {}), ...(term !== undefined ? { term_months: term } : {}) });
+      const property = strOf(a.property);
+      return acted(a, ctx, "property.trade", () => `Bought ${labelOf(ctx, property)}${price !== undefined ? ` for ${money(ctx, price)}` : ""}`, [], () =>
+        buyProperty(r.api, ctx, { party: party(a, ctx), property, ...(price !== undefined ? { price } : {}), ...(from ? { from } : {}), ...(down !== undefined ? { down } : {}), ...(term !== undefined ? { term_months: term } : {}) }),
+      );
     },
   });
   r.core.effect({
     type: "economy.property_sell",
-    args: ["property", "price", "buyer?", "to?", "party?"],
+    args: ["property", "price", "buyer?", "to?", "party?", "by?"],
     resolve: (a, ctx) => {
       const buyer = s(a, "buyer");
       const to = s(a, "to");
-      return sellProperty(r.api, ctx, { party: party(a, ctx), property: strOf(a.property), price: n(a, "price") ?? NaN, ...(buyer ? { buyer } : {}), ...(to ? { to } : {}) });
+      const property = strOf(a.property);
+      const price = n(a, "price") ?? NaN;
+      return acted(a, ctx, "property.trade", () => `Sold ${labelOf(ctx, property)}${buyer ? ` to ${labelOf(ctx, buyer)}` : ""} for ${money(ctx, price)}`, [buyer], () =>
+        sellProperty(r.api, ctx, { party: party(a, ctx), property, price, ...(buyer ? { buyer } : {}), ...(to ? { to } : {}) }),
+      );
     },
   });
   r.core.effect({
     type: "economy.lease_start",
-    args: ["property", "tenant", "rent", "months?", "day?", "unit?", "from?", "party?"],
+    args: ["property", "tenant", "rent", "months?", "day?", "unit?", "from?", "party?", "by?"],
     resolve: (a, ctx) => {
       const months = n(a, "months");
       const day = n(a, "day");
       const unitName = s(a, "unit");
       const from = s(a, "from");
-      return startLease(r.api, ctx, { party: party(a, ctx), property: strOf(a.property), tenant: strOf(a.tenant), rent: n(a, "rent") ?? NaN, ...(months !== undefined ? { months } : {}), ...(day !== undefined ? { day } : {}), ...(unitName ? { unit: unitName } : {}), ...(from ? { from } : {}) });
+      const property = strOf(a.property);
+      const tenant = strOf(a.tenant);
+      const rent = n(a, "rent") ?? NaN;
+      return acted(a, ctx, "property.manage", () => `Let ${unitName ? `${unitName}, ` : ""}${labelOf(ctx, property)} to ${labelOf(ctx, tenant)} for ${money(ctx, rent)} a month`, [tenant], () =>
+        startLease(r.api, ctx, { party: party(a, ctx), property, tenant, rent, ...(months !== undefined ? { months } : {}), ...(day !== undefined ? { day } : {}), ...(unitName ? { unit: unitName } : {}), ...(from ? { from } : {}) }),
+      );
     },
   });
-  r.core.effect({ type: "economy.lease_end", args: ["lease", "on?", "party?"], resolve: (a, ctx) => endLease(r.api, ctx, party(a, ctx), strOf(a.lease), s(a, "on")) });
+  r.core.effect({ type: "economy.lease_end", args: ["lease", "on?", "party?", "by?"], resolve: (a, ctx) => acted(a, ctx, "property.manage", () => `Ended ${labelOf(ctx, strOf(a.lease))}`, [], () => endLease(r.api, ctx, party(a, ctx), strOf(a.lease), s(a, "on"))) });
+  r.core.effect({
+    type: "economy.property_list",
+    args: ["property", "price?", "party?", "by?"],
+    resolve: (a, ctx) => {
+      const property = strOf(a.property);
+      const price = n(a, "price");
+      return acted(a, ctx, "property.manage", () => (price !== undefined && price > 0 ? `Put ${labelOf(ctx, property)} up for sale at ${money(ctx, price)}` : `Took ${labelOf(ctx, property)} off the market`), [], () => listProperty(r.api, ctx, party(a, ctx), property, price));
+    },
+  });
 
   const requires = ["money_feature('property', self)"];
+  const trading = asParam("property.trade", "As: an organization whose property you buy and sell, only when the input does it for it (\"buy the lot for the company\"); left out, it's yours");
+  const managing = asParam("property.manage", "As: an organization whose property you manage, only when the input does it for it (\"let the trust's flat\"); left out, it's yours");
   r.core.action({
     id: "property_buy",
     label: "Buy a property",
     description: "Buy a property, outright or with a mortgage.",
     pack: "economy",
-    params: { property: { type: "ref", ref: "property" }, price: { type: "money", label: "Offer", optional: true }, from: { type: "ref", ref: "account", label: "Pay from", optional: true }, down: { type: "money", label: "Down payment (the rest on a mortgage)", optional: true }, term_months: { type: "number", label: "Mortgage term, months (one a lender offers)", optional: true } },
-    requires,
-    outcomes: { default: [{ type: "economy.property_buy", args: { party: "self", property: "property", price: "=params.price", from: "=params.from", down: "=params.down", term_months: "=params.term_months" } }] },
+    params: { property: { type: "ref", ref: "property" }, price: { type: "money", label: "Offer", optional: true }, from: { type: "ref", ref: "account", label: "Pay from", optional: true }, down: { type: "money", label: "Down payment (the rest on a mortgage)", optional: true }, term_months: { type: "number", label: "Mortgage term, months (one a lender offers)", optional: true }, as: trading },
+    requires: [...requires, mayAs("property.trade")],
+    outcomes: { default: [{ type: "economy.property_buy", args: { party: "self", property: "property", price: "=params.price", from: "=params.from", down: "=params.down", term_months: "=params.term_months", by: "actor" } }] },
     duration: "60",
     lexicon: ["buy the house", "buy the property", "make an offer on"],
     observable: "signs a stack of papers",
@@ -863,21 +901,34 @@ export function registerProperty(r: FinanceRegistry): void {
     label: "Sell a property",
     description: "Sell a property you own.",
     pack: "economy",
-    params: { property: { type: "ref", ref: "property" }, price: { type: "money", label: "Price" }, buyer: { type: "ref", ref: "person", label: "Buyer", optional: true }, to: { type: "ref", ref: "account", label: "Proceeds to", optional: true } },
-    requires,
-    outcomes: { default: [{ type: "economy.property_sell", args: { party: "self", property: "property", price: "=params.price", buyer: "=params.buyer", to: "=params.to" } }] },
+    params: { property: { type: "ref", ref: "property" }, price: { type: "money", label: "Price" }, buyer: { type: "ref", ref: "person", label: "Buyer", optional: true }, to: { type: "ref", ref: "account", label: "Proceeds to", optional: true }, as: trading },
+    requires: [...requires, mayAs("property.trade")],
+    outcomes: { default: [{ type: "economy.property_sell", args: { party: "self", property: "property", price: "=params.price", buyer: "=params.buyer", to: "=params.to", by: "actor" } }] },
     duration: "60",
     lexicon: ["sell the house", "sell the property"],
     observable: "signs a stack of papers",
+  });
+  r.core.action({
+    id: "property_list",
+    label: "List a property for sale",
+    description: "Put a property you own up for sale at an asking price, or take it off the market.",
+    pack: "economy",
+    mechanical: true,
+    params: { property: { type: "ref", ref: "property" }, price: { type: "money", label: "Asking price (none takes it off the market)", optional: true }, as: managing },
+    requires: [...requires, mayAs("property.manage")],
+    outcomes: { default: [{ type: "economy.property_list", args: { party: "self", property: "property", price: "=params.price", by: "actor" } }] },
+    duration: "5",
+    lexicon: ["put the house on the market", "list the property", "take it off the market"],
+    observable: "makes a call",
   });
   r.core.action({
     id: "lease_start",
     label: "Let a unit",
     description: "Let a unit of a property you own to a tenant, for rent each month.",
     pack: "economy",
-    params: { property: { type: "ref", ref: "property" }, tenant: { type: "ref", ref: "person", label: "Tenant" }, rent: { type: "money", label: "Rent a month" }, months: { type: "number", label: "Term, months", optional: true }, day: { type: "number", label: "Rent day", optional: true }, unit: { type: "text", label: "Unit", optional: true } },
-    requires,
-    outcomes: { default: [{ type: "economy.lease_start", args: { party: "self", property: "property", tenant: "tenant", rent: "=params.rent", months: "=params.months", day: "=params.day", unit: "=params.unit" } }] },
+    params: { property: { type: "ref", ref: "property" }, tenant: { type: "ref", ref: "person", label: "Tenant" }, rent: { type: "money", label: "Rent a month" }, months: { type: "number", label: "Term, months", optional: true }, day: { type: "number", label: "Rent day", optional: true }, unit: { type: "text", label: "Unit", optional: true }, as: managing },
+    requires: [...requires, mayAs("property.manage")],
+    outcomes: { default: [{ type: "economy.lease_start", args: { party: "self", property: "property", tenant: "tenant", rent: "=params.rent", months: "=params.months", day: "=params.day", unit: "=params.unit", by: "actor" } }] },
     duration: "20",
     lexicon: ["rent out", "sign a lease", "let the apartment"],
     observable: "signs a lease",
@@ -887,9 +938,9 @@ export function registerProperty(r: FinanceRegistry): void {
     label: "End a lease",
     description: "End a tenant's lease.",
     pack: "economy",
-    params: { lease: { type: "ref", ref: "flow" }, on: { type: "text", label: "Last day (YYYY-MM-DD)", optional: true } },
-    requires,
-    outcomes: { default: [{ type: "economy.lease_end", args: { party: "self", lease: "lease", on: "=params.on" } }] },
+    params: { lease: { type: "ref", ref: "flow" }, on: { type: "text", label: "Last day (YYYY-MM-DD)", optional: true }, as: managing },
+    requires: [...requires, mayAs("property.manage")],
+    outcomes: { default: [{ type: "economy.lease_end", args: { party: "self", lease: "lease", on: "=params.on", by: "actor" } }] },
     duration: "10",
     lexicon: ["end the lease", "give notice", "move out"],
     observable: "writes a letter",

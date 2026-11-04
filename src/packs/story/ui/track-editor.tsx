@@ -10,6 +10,7 @@ import { isRecord } from "../../../shared/json";
 import { nameOfId } from "../../../shared/maps";
 import type { LintIssue } from "../../../shared/protocol";
 import type { Objective, StageDef, TrackDef, TrackKind, WorldDoc } from "../../../shared/world";
+import { GM_OWNER, GM_OWNER_NAME } from "../../../shared/world";
 import { useApp } from "../../../frontend/app";
 import { deleteItem, go, ItemHeader, newItemName } from "../../../frontend/build/chrome";
 import { ExprEditor } from "../../../frontend/build/expr-editor";
@@ -424,7 +425,7 @@ export function TrackEditor(props: EditorProps) {
           <Field label="Who knows of it">
             <Seg<TrackDef["visibility"]> label="Who knows of it" value={track.visibility} options={VISIBILITY} onChange={(visibility) => setTrack({ ...track, visibility })} />
           </Field>
-          <RefPicker label="Whose it is" value={track.owner ?? ""} options={refOptions(props.world, "entities")} none="No one's" onChange={(owner) => setTrack({ ...track, owner: owner || undefined })} />
+          <RefPicker label="Whose it is" value={track.owner ?? ""} options={[{ value: GM_OWNER, label: GM_OWNER_NAME, sublabel: "the world's own, no one's in the story" }, ...refOptions(props.world, "entities")]} none="No one's" onChange={(owner) => setTrack({ ...track, owner: owner || undefined })} />
           {track.visibility === "known_by" ? <SelectorEditor label="Known by (besides its owner and those who know the owner)" value={track.knownBy} doc={props.world} optional onChange={(knownBy) => setTrack({ ...track, knownBy })} /> : null}
           <CheckField label="Checks roll while it's in progress" help="For a world whose checks roll only where marked." checked={track.adjudicate === true} onChange={(on) => setTrack({ ...track, adjudicate: on ? true : undefined })} />
         </div>

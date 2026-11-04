@@ -4,8 +4,9 @@
 // says how those it reaches stand now. A tier and a domain's level go to the people picked unless the
 // GM widens them to everything picked; their routine's role, a fidelity pin and an intent to the
 // characters among them (never the player character, who has no mind here); a move to anything not
-// removed. Once applied, the GM view says what changed, with one Undo for all of it. GM data, behind
-// the gate.
+// removed; a tier in the player character's party (or out of it) to the people picked but the player
+// character. Once applied, the GM view says what changed, with one Undo for all of it. GM data,
+// behind the gate.
 
 import type { ComponentChildren } from "preact";
 import { useId, useState } from "preact/hooks";
@@ -13,12 +14,15 @@ import type { DomainId, EntityId, Level, PlaceId, TierId } from "../../shared/id
 import { LEVEL_LABEL } from "../../shared/ids";
 import type { Fidelity, MindApproach } from "../../shared/minds";
 import { FIDELITIES, MIND_APPROACHES, MIND_TEXT_CAPS } from "../../shared/minds";
+import type { PartyTier } from "../../shared/party";
+import { isPartyTier, PARTY_OUT, PARTY_RELATION, PARTY_TIERS, TIER_LABELS, TIER_NOUNS } from "../../shared/party";
 import type { RoutineRole } from "../../shared/routines";
 import { ROUTINE_ROLE_LABEL, ROUTINE_ROLES } from "../../shared/routines";
 import type { GmView } from "../../shared/state-view";
 import { APPROACH_LABEL, FIDELITY_LABEL } from "../../packs/minds/ui/ops";
 import type { BulkChange } from "../batch";
-import { bulkOps, forCharacters, mixOf } from "../batch";
+import { bulkOps, forCharacters, intentText, mixOf } from "../batch";
+import { partyOf } from "../requests";
 import { Banner, Button, Field, HostSwitch, Section } from "../components";
 import type { BulkEditor, Editor } from "./editor";
 import { GmPage } from "./ui";
@@ -38,12 +42,14 @@ export interface BatchChoices {
   text: string;
   approach: MindApproach | "mind" | null;
   to: PlaceId | null;
+  /** A tier in the player character's party, or out of it (`PARTY_OUT`). */
+  party: PartyTier | typeof PARTY_OUT | null;
   /** A tier or a level reaches the people picked, unless widened to everything picked. */
   tierAll: boolean;
   levelAll: boolean;
 }
 
-export const BLANK_CHOICES: BatchChoices = { tier: null, domain: null, level: null, role: null, pin: null, text: "", approach: null, to: null, tierAll: false, levelAll: false };
+export const BLANK_CHOICES: BatchChoices = { tier: null, domain: null, level: null, role: null, pin: null, text: "", approach: null, to: null, party: null, tierAll: false, levelAll: false };
 
 type Card = BulkChange["kind"];
 
@@ -55,19 +61,21 @@ export function batchChanges(c: BatchChoices): Record<Card, BulkChange | null> {
     level: c.domain === null || c.level === null ? null : { kind: "level", domain: c.domain, level: c.level === "tier" ? null : c.level },
     role: c.role === null ? null : { kind: "role", role: c.role === "world" ? null : c.role },
     pin: c.pin === null ? null : { kind: "pin", level: c.pin === "score" ? null : c.pin },
-    intent: intent && bulkOps([], intent) !== null ? intent : null,
+    intent: intent && intentText(c.text) !== null ? intent : null,
     move: c.to === null ? null : { kind: "move", to: c.to },
+    party: c.party === null ? null : { kind: "party", tier: c.party === PARTY_OUT ? null : c.party },
   };
 }
 
 /**
  * Who a kind of change reaches among those picked: the characters for a mind or routine change,
- * anyone not removed for a move; for a tier or a level, the people picked, or everything picked
- * when `everything`.
+ * anyone not removed for a move, the people not removed but the player character for a party tier;
+ * for a tier or a level, the people picked, or everything picked when `everything`.
  */
 export function bulkTargets(editor: Pick<Editor, "gm">, ids: readonly EntityId[], kind: Card, everything = false): EntityId[] {
   if (forCharacters(kind)) return ids.filter((id) => editor.gm.minds.characters.some((c) => c.entity === id));
   if (kind === "move") return ids.filter((id) => editor.gm.entities.some((e) => e.id === id && !e.gone));
+  if (kind === "party") return ids.filter((id) => editor.gm.entities.some((e) => e.id === id && e.person && !e.pov && !e.gone));
   return everything ? [...ids] : ids.filter((id) => editor.gm.entities.some((e) => e.id === id && e.person));
 }
 
@@ -101,7 +109,7 @@ function placeWords(gm: Pick<GmView, "places">, id: string): string {
 /**
  * What a change did, for the notice it leaves, in a sentence that says what the setting means and
  * its value: "3 minds are now pinned at Near fidelity", "2 are now at Rusty Anchor (Port Alder ›
- * Harbor Street)".
+ * Harbor Street)", "2 are now in the party as companions".
  */
 export function bulkDone(gm: Pick<GmView, "tiers" | "domains" | "places">, change: BulkChange, count: number): string {
   const are = count === 1 ? "is" : "are";
@@ -121,6 +129,11 @@ export function bulkDone(gm: Pick<GmView, "tiers" | "domains" | "places">, chang
       return change.text.trim() === "" && change.approach === null ? `${count} no longer ${have} your intent` : `${count} now ${have} your intent${change.text.trim() === "" ? "" : `: “${change.text.trim()}”`}`;
     case "move":
       return `${count} ${are} now at ${placeWords(gm, change.to)}`;
+    case "party": {
+      if (change.tier === null) return `${count} ${are} no longer in the party`;
+      const [one, many] = TIER_NOUNS[change.tier];
+      return `${count} ${are} now in the party as ${count === 1 ? `${/^[aeiou]/.test(one) ? "an" : "a"} ${one}` : many}`;
+    }
   }
 }
 
@@ -146,10 +159,10 @@ export function BatchPage(props: { editor: BulkEditor; ids: readonly EntityId[];
   const gm = editor.gm;
   const [choices, setChoices] = useState<BatchChoices>(BLANK_CHOICES);
   const [outcome, setOutcome] = useState<string | null>(null);
-  const field = { tier: useId(), domain: useId(), level: useId(), role: useId(), pin: useId(), text: useId(), approach: useId(), place: useId() };
+  const field = { tier: useId(), domain: useId(), level: useId(), role: useId(), pin: useId(), text: useId(), approach: useId(), place: useId(), party: useId() };
   const choose = (patch: Partial<BatchChoices>) => setChoices((c) => ({ ...c, ...patch }));
   const changes = batchChanges(choices);
-  const everything: Record<Card, boolean> = { tier: choices.tierAll, level: choices.levelAll, role: false, pin: false, intent: false, move: false };
+  const everything: Record<Card, boolean> = { tier: choices.tierAll, level: choices.levelAll, role: false, pin: false, intent: false, move: false, party: false };
   // Who each card reaches as it stands: the "Now" line and Apply's count read them before anything is chosen.
   const reach = (card: Card) => bulkTargets(editor, ids, card, everything[card]);
   const entities = (targets: readonly EntityId[]) => gm.entities.filter((e) => targets.includes(e.id));
@@ -159,6 +172,13 @@ export function BatchPage(props: { editor: BulkEditor; ids: readonly EntityId[];
   const others = ids.length - bulkTargets(editor, ids, "tier").length;
   const chars = characters(reach("pin"));
   const placed = entities(reach("move"));
+  // The party's card shows in a world with the party, and Apply counts only those it changes.
+  const pov = gm.entities.find((e) => e.pov) ?? null;
+  const partied = pov && gm.relationTypes.some((t) => t.id === PARTY_RELATION) ? entities(reach("party")) : [];
+  const partyWords = (e: (typeof partied)[number]): string => {
+    const tier = partyOf(e, gm)?.tier ?? null;
+    return tier === null ? "not in the party" : TIER_LABELS[tier];
+  };
   const tierOf = (id: string) => gm.tiers.find((t) => t.id === id)?.label ?? id;
   const levelOf = (e: (typeof leveled)[number]): string => {
     const level = LEVELS.find((n) => n === e.levels.find((l) => l.domain === choices.domain)?.override);
@@ -169,7 +189,7 @@ export function BatchPage(props: { editor: BulkEditor; ids: readonly EntityId[];
     return standing === "world" ? "as the world has it" : `set to ${ROUTINE_ROLE_LABEL[standing]}`;
   };
   const apply = (card: Card, change: BulkChange) => {
-    const ops = bulkOps(reach(card), change);
+    const ops = bulkOps(reach(card), change, gm);
     if (!ops || ops.length === 0) return;
     void editor.editAll(ops, (count) => bulkDone(gm, change, count)).then(({ applied, of }) => {
       if (applied === of) props.onBack();
@@ -306,6 +326,27 @@ export function BatchPage(props: { editor: BulkEditor; ids: readonly EntityId[];
             </select>
           </Field>
         </ChangeCard>
+        {pov && partied.length > 0 ? (
+          <ChangeCard
+            title={`${pov.name}'s party`}
+            note={`Core members and companions go wherever ${pov.name} goes, a companion unless their own shift, appointment or plan is due; hired hands and allies come only when taken along. It reaches the people picked, never your own character.`}
+            {...card("party")}
+            reach={changes.party ? (bulkOps(partied.map((e) => e.id), changes.party, gm)?.length ?? 0) : partied.length}
+            now={mixOf(partied.map(partyWords))}
+          >
+            <Field label="In the party" for={field.party}>
+              <select id={field.party} class="lre-input" value={choices.party ?? ""} onChange={(event) => choose({ party: event.currentTarget.value === PARTY_OUT ? PARTY_OUT : isPartyTier(event.currentTarget.value) ? event.currentTarget.value : null })}>
+                <option value="">Choose…</option>
+                <option value={PARTY_OUT}>Not in the party</option>
+                {PARTY_TIERS.map((t) => (
+                  <option key={t} value={t}>
+                    {TIER_LABELS[t]}
+                  </option>
+                ))}
+              </select>
+            </Field>
+          </ChangeCard>
+        ) : null}
       </div>
     </GmPage>
   );

@@ -81,7 +81,7 @@ import type { LoreLoads } from "./tools/registry";
 import { contextOf, landKept, withKept } from "./tools/writer";
 import { type ChatHead, keptFiles, type WorkspaceAt } from "./tools/workspace";
 import { recordSessionOf, segmentOf, sessionAt, type SessionMessage } from "./sessions";
-import type { ChoicesTask, ChooseTask, DirectorProse, EffectsTask, ExtractTask, InterpretOutcome, InterpretTask, JudgeTask, KnowledgeTask, MemoryTask, MindsTask, ProseTask, PuzzleTask, RoleResult, RoleRun, SceneOut, SceneTask, SkipPlanTask, SkipTask, TurnAgentCtx, TurnRoles } from "./turn-ctx";
+import type { ChoicesTask, ChooseTask, CurateTask, DirectorProse, EffectsTask, ExtractTask, InterpretOutcome, InterpretTask, JudgeTask, KnowledgeTask, MemoryTask, MindsTask, ProseTask, PuzzleTask, RoleResult, RoleRun, SceneOut, SceneTask, SkipPlanTask, SkipTask, TurnAgentCtx, TurnRoles } from "./turn-ctx";
 import { type CommitCtx, commitOrder, commitStaged, opTier, type StagedOp, type StagePhase, stagedWorkspace, TurnDraft, turnReader, turnWriter } from "./turn-writer";
 import { roleSections } from "./context";
 import { recordCommit, recordYield, runYield } from "./yields";
@@ -103,6 +103,8 @@ export interface TurnCalls {
   skip(task: SkipTask, signal: AbortSignal): Promise<SkipRun | null>;
   prose(task: ProseTask, signal: AbortSignal): Promise<DirectorProse>;
   extract(task: ExtractTask, signal: AbortSignal): Promise<ExtractRead>;
+  /** The Curator after the read, on an agent chat whose pipeline has it on (ITEMS-SPEC §7.1): the reply's things, places, walk-ons and purchases' goods. */
+  curate(task: CurateTask, signal: AbortSignal): Promise<ExtractRead>;
   effects(task: EffectsTask, signal: AbortSignal): Promise<JsonObject[]>;
   /** The knowledge step after the read (an agent chat's own call; a classic chat's is inside `memory`, its whole post phase). */
   knowledge(task: KnowledgeTask, signal: AbortSignal): Promise<RunMindsResult>;
@@ -122,6 +124,7 @@ export const CLASSIC_CALLS: TurnCalls = {
   skip: (task, signal) => task.classic(signal),
   prose: async (task, signal) => ({ prose: await task.classic(signal) }),
   extract: (task, signal) => task.classic(signal),
+  curate: (task, signal) => task.classic(signal),
   effects: (task, signal) => task.classic(signal),
   knowledge: (task, signal) => task.classic(signal),
   offscreen: (task, signal) => task.classic(signal),
@@ -476,7 +479,7 @@ export class Orchestrator {
     const s = this.runs.get(generationId);
     if (!s) return;
     const gated = await this.review.gated(s.chatId, s.userId, text);
-    s.approved = (gated?.approved ?? []).flatMap((item, i): StagedOp[] => (item.op ? [{ seq: -1000 + i, phase: "pre", role: roleOf(item.role), agentId: item.agentId ?? item.role, key: item.key, op: item.op, changeType: item.changeType as StagedOp["changeType"], mode: "auto", tier: opTier(item.op), connectionId: item.connection ?? null, lines: item.lines, events: [], approved: true }] : []));
+    s.approved = (gated?.approved ?? []).flatMap((item, i): StagedOp[] => (item.op ? [{ seq: -1000 + i, phase: "pre", role: roleOf(item.role), agentId: item.agentId ?? item.role, key: item.key, op: item.op, changeType: item.changeType as StagedOp["changeType"], mode: "auto", tier: opTier(item.op, roleOf(item.role)), gm: true, connectionId: item.connection ?? null, lines: item.lines, events: [], approved: true }] : []));
   }
 
   /**
@@ -908,6 +911,7 @@ export class Orchestrator {
       skip: (task, signal) => or("skip", "skip", "skip", r.skip.beats, task, signal, null),
       prose: (task, signal) => or<ProseTask, DirectorProse>("prose", "director", "prose", r.director.prose, task, signal, { prose: { brief: null, outline: [] } satisfies PlanProse }),
       extract: (task, signal) => or("extract", "read", "read", r.read.extract, task, signal, { proposals: [], where: null }),
+      curate: (task, signal) => or("curate", "curator", "read", r.curator.curate, task, signal, { proposals: [], where: null }),
       effects: (task, signal) => or("effects", "world", "read", r.world.effects, task, signal, []),
       knowledge: (task, signal) => or("knowledge", "knowledge", "read", r.knowledge, task, signal, NO_MINDS),
       offscreen: (task, signal) => or("offscreen", "director", "read", r.director.offscreen, task, signal, null),
@@ -1018,8 +1022,10 @@ export class Orchestrator {
     const both = AbortSignal.any([signal, s.stop.signal]);
     const base = (): ChatHead | null => s.head;
     const agentId = `${role}:${s.generationId.slice(0, 8)}:${++s.agents}`;
-    const reader = turnReader(this.rt, base, { userId: s.userId, chatId: s.chatId, knowledge: "gm", marks: true, staged: this.staged(s) });
-    const writer = turnWriter(this.rt, s.draft, { userId: s.userId, chatId: s.chatId, role, agentId, tier: settings.tier, connectionId: settings.connectionId, phase: s.phase, base, kept: () => withKept(s.kept, s.landing), reader, gmOps: s.settings.agents.gmOpsPerTurn, holder: s.holder, signal: both });
+    // It reads what it staged before in its phase, as its writes are checked (`turnReader`).
+    const phase = s.phase;
+    const reader = turnReader(this.rt, base, { userId: s.userId, chatId: s.chatId, knowledge: "gm", marks: true, staged: this.staged(s), own: () => s.draft.own(agentId, phase) });
+    const writer = turnWriter(this.rt, s.draft, { userId: s.userId, chatId: s.chatId, role, agentId, tier: settings.tier, connectionId: settings.connectionId, phase, base, kept: () => withKept(s.kept, s.landing), reader, gmOps: s.settings.agents.gmOpsPerTurn, holder: s.holder, signal: both });
     const sections = (slots: readonly string[]): Promise<string> => roleSections(this.rt, { userId: s.userId, chatId: s.chatId, head: s.head, slots, scene: s.scene, said: s.text });
     return { turn: s.turn, signal: both, userId: s.userId, chatId: s.chatId, generationId: s.generationId, reader, writer, role, agentId, settings, brief, sections, loads: loadsOf(s) };
   }
@@ -1041,8 +1047,10 @@ export class Orchestrator {
       reader: () => turnReader(this.rt, () => s.head, { userId: s.userId, chatId: s.chatId, knowledge: "gm", marks: true, staged: this.staged(s) }),
       writer: (role) => {
         const settings = s.settings.agents.roles[role];
-        const reader = turnReader(this.rt, () => s.head, { userId: s.userId, chatId: s.chatId, knowledge: "gm", marks: true, staged: this.staged(s) });
-        return turnWriter(this.rt, s.draft, { userId: s.userId, chatId: s.chatId, role, agentId: `main>${role}:${s.generationId.slice(0, 8)}:${++s.agents}`, tier: settings.tier, connectionId: settings.connectionId, phase: s.phase, base: () => s.head, kept: () => withKept(s.kept, s.landing), reader, gmOps: s.settings.agents.gmOpsPerTurn, holder: s.holder, signal: s.stop.signal });
+        const agentId = `main>${role}:${s.generationId.slice(0, 8)}:${++s.agents}`;
+        const phase = s.phase;
+        const reader = turnReader(this.rt, () => s.head, { userId: s.userId, chatId: s.chatId, knowledge: "gm", marks: true, staged: this.staged(s), own: () => s.draft.own(agentId, phase) });
+        return turnWriter(this.rt, s.draft, { userId: s.userId, chatId: s.chatId, role, agentId, tier: settings.tier, connectionId: settings.connectionId, phase, base: () => s.head, kept: () => withKept(s.kept, s.landing), reader, gmOps: s.settings.agents.gmOpsPerTurn, holder: s.holder, signal: s.stop.signal });
       },
       loads: loadsOf(s),
       run: async ({ role, run, task, signal, brief, promptOnly }) => {

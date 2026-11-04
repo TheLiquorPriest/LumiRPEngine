@@ -30,6 +30,7 @@ import { initialState } from "../../src/engine/world-state";
 import { materializeAll } from "../../src/engine/materialize";
 import { runTimelapse } from "../../src/engine/time";
 import { Working } from "../../src/engine/working";
+import { readPass } from "../../src/engine/read-pass";
 import { ALL_PACKS, STARTER_WORLDS } from "../../src/packs/index";
 import { buildMapView } from "../../src/packs/space/core/view";
 import { NEED_DEFAULTS, NEED_IDS, NEED_WORDS } from "../../src/shared/needs";
@@ -122,16 +123,15 @@ export function stateFixture(chatId: string): StateView {
       },
       "gear.gear": {
         level: 3,
-        owned: [{ id: "drill", name: "Cordless drill", condition: 80, lent: { to: "Dev", until: "Mon 18:00", overdue: true }, children: [] }],
-        worn: [
-          { id: "apron", name: "Server apron", slot: "Waist", children: [{ id: "pad", name: "Order pad", children: [] }, { id: "pen", name: "Pen", qty: 3, children: [] }] },
-          { id: "jacket", name: "Rain jacket", slot: "Outer", condition: 45, children: [] },
+        on: [
+          { id: "apron", name: "Server apron", slot: "Waist", as: "worn", whose: "yours", kept: "On you", children: [{ id: "pad", name: "Order pad", children: [] }, { id: "pen", name: "Pen", qty: 3, children: [] }] },
+          { id: "jacket", name: "Rain jacket", slot: "Outer", as: "worn", condition: 45, whose: "yours", children: [] },
+          { id: "backpack", name: "Backpack", whose: "yours", load: { used: 4.2, capacity: 10, unit: "kg" }, children: [{ id: "wallet", name: "Wallet", children: [{ id: "cashstack", name: "Cash", qty: 46, children: [] }] }, { id: "phone", name: "Phone", condition: 30, children: [] }, { id: "kit", name: "Mechanic toolbox", kit: { complete: false, present: 43, total: 45, missing: ["10 mm socket", "torque wrench"] }, children: [] }] },
         ],
-        carried: [
-          { id: "backpack", name: "Backpack", load: { used: 4.2, capacity: 10, unit: "kg" }, children: [{ id: "wallet", name: "Wallet", children: [{ id: "cashstack", name: "Cash", qty: 46, children: [] }] }, { id: "phone", name: "Phone", condition: 30, children: [] }, { id: "kit", name: "Mechanic toolbox", kit: { complete: false, present: 43, total: 45, missing: ["10 mm socket", "torque wrench"] }, children: [] }] },
-          { id: "keys", name: "Car keys", children: [] },
-        ],
-        stored: [{ id: "tent", name: "2-person tent", condition: 90, children: [] }],
+        holding: [{ id: "keys", name: "Truck keys", as: "pocket", whose: "Dev's", why: "Dev handed it to you to hold: to move the truck", kept: "On Dev", children: [] }],
+        elsewhere: [{ id: "tent", name: "2-person tent", condition: 90, whose: "yours", kept: "Apartment", where: "At your apartment", children: [] }],
+        lent: [{ id: "drill", name: "Cordless drill", condition: 80, whose: "yours", lent: { to: "Dev", until: "Mon 18:00", overdue: true }, where: "With Dev", children: [] }],
+        borrowed: [],
       },
       // Play → Me → Needs as the engine builds it (`buildNeedsView`): hunger past its point, the rest not.
       "castlife.needs": {
@@ -475,6 +475,8 @@ export function stateFixture(chatId: string): StateView {
       },
       // A world that narrows the narrator, and a chat that keeps its own knowledge switch.
       knowledge: { tracking: { chat: false, user: true }, narrator: { chat: null, world: { knowledge: "pov", secrets: "marked" }, user: { ...NARRATOR_DEFAULTS } } },
+      // The world tidies an older chat's impossible holds; this chat follows it.
+      things: { tidy: { chat: null, world: true } },
     },
     meter: { turn: { calls: 3, tokens: 2140, ms: 6200, lookups: 1 }, average: { calls: 2.4, tokens: 1890, ms: 5100, lookups: 0.4 }, p95: { calls: 5, tokens: 3900, ms: 11800, lookups: 2 } },
     currency: { code: "USD", symbol: "$", minorUnit: "cent", decimals: 2, format: "{sign}{symbol}{amount}" },
@@ -562,7 +564,7 @@ function gmMoney(party: string, name: string, level: number, opened: boolean, ac
     opened,
     cash: null,
     overview: { netWorth: cents, assets: cents, liabilities: 0, breakdown: [], cashFlow: null, upcoming: [], alerts: [] },
-    accounts: [{ id: account, name: accountName, class: "checking", classLabel: "Checking", product: { id: "checking", label: "Checking" }, institution: null, status: "open", cents, available: cents, owners: [], role: "owner", manages: true, spends: true, autopayFrom: [], fallbacks: [], limit: null, aprPct: null, apyPct: null, terms: [], autopay: null, due: null, statements: [], cards: [], pending: [], holds: [], transactions: lines, securedBy: null, loan: null }],
+    accounts: [{ id: account, name: accountName, class: "checking", classLabel: "Checking", product: { id: "checking", label: "Checking" }, institution: null, status: "open", cents, available: cents, owners: [], role: "owner", manages: true, spends: true, autopayFrom: [], fallbacks: [], limit: null, interest: null, terms: [], autopay: null, due: null, statements: [], cards: [], pending: [], holds: [], transactions: lines, securedBy: null, loan: null }],
     cards: [],
     flows: [],
     jobs: [],
@@ -582,7 +584,7 @@ function gmMoney(party: string, name: string, level: number, opened: boolean, ac
 /** Sam's money at Money 3 as Play → Money draws it: cash, checking with its debit card, savings and a Visa, the flows that move it, and how Sam pays. */
 function samMoney(): FinanceView {
   const line = (id: string, at: string, memo: string, cents: number, accountId: string, account: string, category: string): JournalLine => ({ id, at, memo, cents, account, accountId, kind: cents > 0 ? "income" : "purchase", category, counterparty: null, card: null, status: "posted" });
-  const account = (id: string, name: string, cls: AccountView["class"], classLabel: string, cents: number, rest: Partial<AccountView> = {}): AccountView => ({ id, name, class: cls, classLabel, product: { id: cls, label: classLabel }, institution: cls === "cash" ? null : "Maple Credit Union", status: "open", cents, available: cents, owners: [{ party: "pov", name: "Sam Rivera", role: "owner", share: 1 }], role: "owner", manages: true, spends: true, autopayFrom: [], fallbacks: [], limit: null, aprPct: null, apyPct: null, terms: [], autopay: null, due: null, statements: [], cards: [], pending: [], holds: [], transactions: [], securedBy: null, loan: null, ...rest });
+  const account = (id: string, name: string, cls: AccountView["class"], classLabel: string, cents: number, rest: Partial<AccountView> = {}): AccountView => ({ id, name, class: cls, classLabel, product: { id: cls, label: classLabel }, institution: cls === "cash" ? null : "Maple Credit Union", status: "open", cents, available: cents, owners: [{ party: "pov", name: "Sam Rivera", role: "owner", share: 1 }], role: "owner", manages: true, spends: true, autopayFrom: [], fallbacks: [], limit: null, interest: null, terms: [], autopay: null, due: null, statements: [], cards: [], pending: [], holds: [], transactions: [], securedBy: null, loan: null, ...rest });
   const card = (id: string, name: string, network: CardView["network"], accountId: string, last4: string): CardView => ({ id, name, network, state: "active", holder: "Sam Rivera", holderId: "pov", account: accountId, last4, item: null, dailyPurchaseLimit: null, dailyAtmLimit: network === "debit" ? 50000 : null, spentToday: 325 });
   const flow = (spec: Flow, amount: string, cents: number, schedule: string, next: string, from: string, to: string): FlowView => ({ id: spec.id, label: spec.label, kind: spec.kind, from, to, amount, cents, schedule, next, shortfall: spec.shortfall, status: spec.status, category: spec.category ?? null, link: null, payer: spec.from, editable: spec.source === "entity", source: spec.source, done: 3, missed: 0, deferred: 0, spec });
   const recent = [
@@ -597,8 +599,8 @@ function samMoney(): FinanceView {
     account("cash", "Wallet cash", "cash", "Cash", 4600),
     // Sam spends from all of them: each bank account backs the other, and the Visa's autopay draws on either.
     account("chk", "Checking", "checking", "Checking", 124018, { cards: [debit], fallbacks: ["sav"], transactions: recent.filter((r) => r.accountId === "chk") }),
-    account("sav", "Savings", "savings", "Savings", 350000, { fallbacks: ["chk"] }),
-    account("visa", "Visa ··4421", "credit_card", "Credit card", -41255, { available: 78745, limit: 120000, autopay: { mode: "minimum", from: "chk", fromName: "Checking", cents: null }, autopayFrom: ["chk", "sav"], cards: [visaCard], transactions: recent.filter((r) => r.accountId === "visa") }),
+    account("sav", "Savings", "savings", "Savings", 350000, { fallbacks: ["chk"], interest: { way: "earns", ratePct: 4.1, basis: "On the balance, paid on the 1st of each month", thisYear: 10688, last: { cents: 1196, at: "Sat 1 Nov" }, next: { cents: 1196, at: "Mon 1 Dec" } } }),
+    account("visa", "Visa ··4421", "credit_card", "Credit card", -41255, { available: 78745, limit: 120000, interest: { way: "charges", ratePct: 22, basis: "On what's left of a statement's balance when a statement isn't paid in full, charged as the next statement closes on the 3rd; cash advances 27% from the day they're drawn", thisYear: 2214, last: { cents: 697, at: "Mon 3 Nov" }, next: { cents: 756, at: "Wed 3 Dec" } }, autopay: { mode: "minimum", from: "chk", fromName: "Checking", cents: null }, autopayFrom: ["chk", "sav"], cards: [visaCard], transactions: recent.filter((r) => r.accountId === "visa") }),
   ];
   const rent: Flow = { id: "flow_rent", label: "Rent", kind: "rent", from: "chk", to: "Maple Street Properties", amount: { fixed: 85000 }, schedule: { every: "month", days: [1] }, shortfall: "retry", retry_days: 3, retries: 2, category: "housing", status: "active", source: "entity" };
   const phone: Flow = { id: "flow_phone", label: "Phone", kind: "subscription", from: "visa", to: "Northwind Mobile", amount: { fixed: 4500 }, schedule: { every: "month", days: [1] }, shortfall: "skip", category: "utilities", status: "active", source: "entity" };
@@ -663,9 +665,10 @@ function starterMoney(template: string): JsonValue {
  * read Port Alder's entities, kinds and places. 114 Harbor Street is put up for sale, so whoever
  * doesn't own it sees its listing. Marcus Delgado (`marcus_delgado`) has a business, a mortgaged
  * house and a credit score; Helen Kowalczyk (`helen_kowalczyk`) a household and a let house; the
- * POV (`pov`) a job, investments and a credit score. Null for a party the world doesn't have.
+ * POV (`pov`) a job, investments and a credit score. Play → Orgs is that party's too (`orgs`: the
+ * orgs pack's panels as the engine builds them). Null for a party the world doesn't have.
  */
-export function portAlderMoney(party: string): { play: JsonValue; gm: Omit<GmView, "edits" | "refused" | "minds"> } | null {
+export function portAlderMoney(party: string): { play: JsonValue; gm: Omit<GmView, "edits" | "refused" | "minds">; orgs: Record<string, JsonValue> } | null {
   const world = STARTER_WORLDS.modern_slice_of_life?.("preview", "modern_slice_of_life");
   const harbor = world?.entities.prop_harbor_114;
   if (!world || !harbor || !Object.hasOwn(world.entities, party)) return null;
@@ -677,7 +680,8 @@ export function portAlderMoney(party: string): { play: JsonValue; gm: Omit<GmVie
   // Nothing stops the nine days: what would interrupt a player's timelapse only goes in its montage.
   const lapse = runTimelapse(registry, w, { type: "duration", minutes: 9 * 24 * 60 }, { runSeed: "preview", overrides: { invitation: "note", decline: "note", incident: "note", quest: "note", arrival: "note" } });
   if ("code" in lapse) return null;
-  return { play: w.ctx.query("economy.finance")(w.ctx, party, true) as unknown as JsonValue, gm: buildGmWorld(registry, w.world, w.state) };
+  const orgs = readPass(() => Object.fromEntries(registry.views.filter((v) => v.panel.startsWith("orgs.")).map((v) => [v.panel, v.build(w.ctx, { mapDisplay: null })])));
+  return { play: w.ctx.query("economy.finance")(w.ctx, party, true) as unknown as JsonValue, gm: buildGmWorld(registry, w.world, w.state), orgs };
 }
 
 /**
@@ -1074,6 +1078,8 @@ export function gmFixture(): GmView {
       ]),
       gmMoney("npc_mara", "Mara Lopez", 2, false, "mara_checking", "Mara's checking", 1235000, [], []),
     ],
+    // Organizations come with Port Alder's money (`?money=<party>`, `portAlderMoney`), which builds the GM view from the engine.
+    orgs: [],
     encounter: null,
     // The mock serves the roles from its routines' follow settings (`chatRolesFixture`), so edits show.
     routineRoles: [],
@@ -1367,6 +1373,7 @@ export function settingsFixture(): UserSettings {
     overrideWorldAdjudication: false,
     inferred: null,
     extraction: { regard: { mode: "never" } },
+    thingReads: { shown: 40, whyMax: 120, madeMax: 6 },
     swipeDefault: "rerun",
     swipeTexts: "turn",
     hideJsonBlocks: true,
@@ -1381,10 +1388,12 @@ export function settingsFixture(): UserSettings {
     retention: { transcriptDays: 30, unreferencedDays: 7, sweepHours: 24 },
     diagnostics: { recordsPerChat: 400 },
     narrator: { ...NARRATOR_DEFAULTS },
+    statePrices: true,
+    tidy: { findings: 50 },
   };
 }
 
-const DEFAULTS: Record<ExtractionType, ExtractionModeView["mode"]> = { time_advance: "auto", location: "auto", condition: "auto", routine: "auto", knows: "confirm", give: "confirm", purchase: "confirm", transfer: "confirm", regard: "confirm", quantity: "confirm", spawn: "confirm", life: "confirm", take: "confirm", drop: "confirm", use_up: "confirm", wear: "confirm", lose: "confirm", item_condition: "confirm", learn: "auto", reveal: "confirm" };
+const DEFAULTS: Record<ExtractionType, ExtractionModeView["mode"]> = { time_advance: "auto", location: "auto", place_make: "auto", condition: "auto", routine: "auto", knows: "confirm", purchase: "confirm", transfer: "confirm", regard: "confirm", quantity: "confirm", spawn: "confirm", life: "confirm", membership: "confirm", employment: "confirm", agenda: "auto", item_move: "auto", item_hand: "auto", item_own: "confirm", item_make: "auto", item_use: "auto", item_wear: "auto", item_condition: "auto", item_lose: "confirm", learn: "auto", reveal: "confirm" };
 
 /** What the backend would derive: pins first, then learning on the connection, then D4 defaults; the GM assistant's change types pinned or at their defaults. */
 export function extractionView(settings: UserSettings): Record<ChangeType, ExtractionModeView> {
@@ -1394,7 +1403,7 @@ export function extractionView(settings: UserSettings): Record<ChangeType, Extra
     if (pinned) out[type] = { mode: pinned.mode, source: "pinned", connection: null, accepted: 4, rejected: 1 };
     else if (type === "purchase") out[type] = { mode: "auto", source: "learned", connection: { id: "conn-ds", name: "DeepSeek" }, accepted: 28, rejected: 2 };
     else if (type === "quantity" || type === "spawn") out[type] = { mode: "confirm", source: "bound", connection: null, accepted: 0, rejected: 0 };
-    else out[type] = { mode: DEFAULTS[type], source: "default", connection: { id: "conn-ds", name: "DeepSeek" }, accepted: type === "give" ? 11 : 0, rejected: type === "give" ? 2 : 0 };
+    else out[type] = { mode: DEFAULTS[type], source: "default", connection: { id: "conn-ds", name: "DeepSeek" }, accepted: type === "item_hand" ? 11 : 0, rejected: type === "item_hand" ? 2 : 0 };
   }
   for (const type of AGENT_CHANGE_TYPES) {
     const pinned = settings.extraction[type];

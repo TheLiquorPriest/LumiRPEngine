@@ -14,7 +14,7 @@ import type { DataTable, TableRow } from "../../src/shared/tables";
 import { defaultTiers, leadTierOf } from "../../src/shared/tiers";
 import type { ActionDef, EffectSpec, EntityDef, FieldDef, GridDef, KindDef, LoreEntryDef, Objective, PackConfig, PlaceDef, Recurrence, RelationInstance, RuleDef, RuleTrigger, ScheduleDef, StageDef, TrackDef, WorldDoc } from "../../src/shared/world";
 import { ENGINE_VERSION, WORLD_FORMAT } from "../../src/shared/world";
-import type { TplAccount, TplBlock, TplCard, TplCharacter, TplEffect, TplFlow, TplItem, TplJob, TplKit, TplRule, TplStage, TplVehicle, Template } from "./template";
+import type { TplAccount, TplBlock, TplCard, TplCharacter, TplEffect, TplFlow, TplItem, TplJob, TplKit, TplMember, TplPosition, TplRule, TplStage, TplVehicle, Template } from "./template";
 
 /** Template content the engine has no home for yet (see data-src/templates/README.md). */
 export const DEFERRED = [
@@ -321,6 +321,7 @@ function placeDef(c: Ctx, p: Template["places"][number]): PlaceDef {
   if (p.tags && p.tags.length > 0) fields.tags = p.tags;
   if (p.atm) fields.atm = { bank: p.atm.bank, fee: p.atm.fee ?? 0, ...(p.atm.limit !== undefined ? { limit: p.atm.limit } : {}), deposits: p.atm.deposits === true };
   if (p.branch) fields.branch = { bank: p.branch.bank };
+  if (p.entry) fields.entry = p.entry;
   const region = c.climateRegions.get(p.id) ?? appliesRegion(c, p.id);
   if (region) fields.region = region;
   const out: PlaceDef = { id: p.id, name: p.name, fields };
@@ -512,7 +513,37 @@ function jobEntity(ch: TplCharacter, job: TplJob): EntityDef | null {
   put(fields, "shift_pattern", job.shiftPattern);
   put(fields, "start", job.start);
   put(fields, "tips_per_hour", job.tipsPerHourCents);
+  put(fields, "position", job.position);
   return { id: job.id ?? `job_${ch.id}`, kind: "job", name: job.name ?? job.title ?? `${ch.name}'s work`, tier: "background", fields, relations: [] };
+}
+
+/** A position as an organization's `positions` field holds it (ORG-SPEC §3.3). */
+function positionField(p: TplPosition): JsonObject {
+  const out: JsonObject = { id: p.id, title: p.title, powers: [...p.powers] };
+  put(out, "seats", p.seats);
+  put(out, "reports_to", p.reportsTo);
+  put(out, "scope", p.scope);
+  if (p.limits) {
+    const limits: JsonObject = {};
+    put(limits, "payment", p.limits.paymentCents);
+    put(limits, "month", p.limits.monthCents);
+    if (p.limits.accounts) limits.accounts = [...p.limits.accounts];
+    out.limits = limits;
+  }
+  put(out, "successor", p.successor);
+  put(out, "default", p.default);
+  put(out, "no_dues", p.noDues);
+  return out;
+}
+
+/** A member's `member_of` fields: their title, position, rank and since; `role` falls back to `fallbackRole` when given. */
+function memberFields(m: TplMember, fallbackRole?: string): Fields {
+  const fields: Fields = {};
+  put(fields, "role", m.role ?? fallbackRole);
+  put(fields, "position", m.position);
+  put(fields, "rank", m.rank);
+  put(fields, "since", m.since);
+  return fields;
 }
 
 // ---------------------------------------------------------------- schedules
@@ -692,10 +723,26 @@ export function convertTemplate(tpl: Template, env: ConvertEnv): WorldDoc {
   }
   // A household is a party its members belong to (DESIGN §25.11).
   for (const h of tpl.households ?? []) {
-    add({ id: h.id, kind: "household", name: h.name, tier: "background", fields: {}, relations: [] });
-    for (const m of h.members) entities[m.id]?.relations.push({ type: "member_of", to: h.id, fields: { role: m.role ?? "member" } });
+    add({ id: h.id, kind: "household", name: h.name, tier: "background", fields: h.positions ? { positions: h.positions.map(positionField) } : {}, relations: [] });
+    for (const m of h.members) entities[m.id]?.relations.push({ type: "member_of", to: h.id, fields: memberFields(m, "member") });
   }
-  for (const r of tpl.records ?? []) add({ id: r.id, kind: r.kind, name: r.name, tier: r.tier ?? "background", fields: r.fields, relations: [] });
+  for (const r of tpl.records ?? []) add({ id: r.id, kind: r.kind, name: r.name, tier: r.tier ?? "background", fields: r.positions ? { ...r.fields, positions: r.positions.map(positionField) } : r.fields, relations: [] });
+  // Groups of the world's other group kinds (ORG-SPEC §3.1), each member linked by `member_of`.
+  for (const o of tpl.organizations ?? []) {
+    const fields: Fields = {};
+    if (o.places) fields.places = [...o.places];
+    if (o.positions) fields.positions = o.positions.map(positionField);
+    add({ id: o.id, kind: o.kind, name: o.name, tier: o.tier ?? "background", fields, relations: [] });
+    for (const m of o.members) (entities[m.id] ?? fail(`organizations.${o.id}`, `member "${m.id}" is no entity`)).relations.push({ type: "member_of", to: o.id, fields: memberFields(m) });
+  }
+  // Delegations (ORG-SPEC §3.5): an `acts_for` link from the delegate to the organization.
+  for (const [i, d] of (tpl.delegations ?? []).entries()) {
+    const fields: Fields = { powers: [...d.powers], by: d.by };
+    put(fields, "payment", d.paymentCents);
+    put(fields, "month", d.monthCents);
+    if (d.accounts) fields.accounts = [...d.accounts];
+    (entities[d.who] ?? fail(`delegations[${i}]`, `"${d.who}" is no entity`)).relations.push({ type: "acts_for", to: d.org, fields, ...(d.until !== undefined ? { until: clockOfLocal(c.cal, d.until) } : {}) });
+  }
   for (const cl of tpl.weather.climates) add({ id: `region_${cl.region}`, kind: "region", name: cl.label, tier: "background", fields: { climate: cl.region, weather: "clear" }, relations: [] });
   for (const v of tpl.vehicles) {
     const grant = v.assignedTo;
@@ -729,6 +776,8 @@ export function convertTemplate(tpl: Template, env: ConvertEnv): WorldDoc {
   config("space", { closedRoutes: tpl.routes.filter((r) => r.secret === true).map((r) => r.id) });
   // People carry the template's region for income tax; sales tax at a place reads it from the economy config.
   if (tpl.economy || tpl.region) config("economy", { ...(tpl.region ? { region: tpl.region } : {}), ...(tpl.economy ?? {}) });
+  // Everyday carry (ITEMS-SPEC §4.4): a template of another era names its own, or none; without one, the Modern US default applies.
+  if (tpl.carry) config("gear", { carry: tpl.carry.length > 0 ? [{ who: { kind: ["person"] }, types: tpl.carry }] : [] });
 
   // Climate regions: the root place of each climate (and its appliesTo places) points at the region entity.
   const generators: Record<string, number> = {};

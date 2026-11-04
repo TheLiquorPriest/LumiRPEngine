@@ -1,5 +1,7 @@
 // The economy's events and the state they fold into (DESIGN §25.4, §25.6): the transaction
-// journal per account (with monthly totals by category and the average-daily-balance accrual),
+// journal per account (with monthly totals by category, its latest interest and the
+// average-daily-balance accrual, which on a card without statements keeps what it owed when its
+// interest period began and what was paid toward it since),
 // private notes, statement cycles and delinquency, flow runs, holds and settlement, opened
 // accounts and statuses, credit history and scores, card spending, price modifiers and level-1
 // anchors. The events of chats recorded before the rebuild (`anchor`, `txn`, `note`, `modifier`,
@@ -96,12 +98,26 @@ export function isOpened(state: Readonly<WorldState>, account: EntityId, opener:
 
 /**
  * The average daily balance accrual of an account: since when, the last change, and balance ×
- * minutes so far; with a credit account's purchases (for rewards) and cash advances (for their own
- * interest) since its statement.
+ * minutes so far; with a credit account's purchases (for rewards), cash advances (for their own
+ * interest) and payments since its statement, and, on a card without statements, what it owed when
+ * the period began (`owed`, absent on a first period).
  */
-export function accrualOf(state: Readonly<WorldState>, account: EntityId): { from: number; at: number; sum: number; spent: number; advanced: number; advancedAt: number } | null {
+export function accrualOf(state: Readonly<WorldState>, account: EntityId): { from: number; at: number; sum: number; spent: number; advanced: number; advancedAt: number; paid: number; owed?: number } | null {
   const raw = objOf(own(objOf(sliceOf(state, "economy").adb), account));
-  return typeof raw.from === "number" ? { from: raw.from, at: numOf(raw.at, raw.from), sum: numOf(raw.sum), spent: numOf(raw.spent), advanced: numOf(raw.advanced), advancedAt: numOf(raw.advanced_at) } : null;
+  return typeof raw.from === "number" ? { from: raw.from, at: numOf(raw.at, raw.from), sum: numOf(raw.sum), spent: numOf(raw.spent), advanced: numOf(raw.advanced), advancedAt: numOf(raw.advanced_at), paid: numOf(raw.paid), ...(typeof raw.owed === "number" ? { owed: raw.owed } : {}) } : null;
+}
+
+/** The latest interest an account earned or charged (`economy.txn` lines of kind `interest`, those at one instant summed): its amount from the holder's side, and when. */
+export function lastInterestOf(state: Readonly<WorldState>, account: EntityId): { cents: number; at: number } | null {
+  const raw = objOf(own(objOf(sliceOf(state, "economy").interest), account));
+  return typeof raw.at === "number" ? { cents: numOf(raw.cents), at: raw.at } : null;
+}
+
+/** What an account's interest came to in a calendar year, from the monthly totals: earned (money in) or charged (money out). */
+export function interestInYear(state: Readonly<WorldState>, account: EntityId, year: number, way: "in" | "out"): number {
+  const months = objOf(own(objOf(sliceOf(state, "economy").totals), account));
+  const prefix = `${String(year).padStart(4, "0")}-`;
+  return Object.entries(months).reduce((sum, [key, month]) => (key.startsWith(prefix) ? sum + numOf(objOf(objOf(month).interest)[way]) : sum), 0);
 }
 
 /** The average balance over `[from, now]`, from the accrual (the current balance when nothing accrued). */
@@ -133,12 +149,14 @@ function partyOfSide(state: Readonly<WorldState>, side: string): string {
   return bare !== "" && own(state.entities, bare) ? bare : side;
 }
 
-/** Files one journal line, naming `other` as its other side, its month's total, and the average-daily-balance accrual. */
+/** Files one journal line, naming `other` as its other side, its month's total, an interest line as the account's latest interest, and the average-daily-balance accrual. */
 function fileLine(state: WorldState, ctx: ReadContext, account: EntityId, amount: number, at: number, data: JsonObject, other: string, seq: number): void {
   const journal = sliceRecord(state, "economy", "journal");
   const status = data.status === "pending" ? "pending" : "posted";
   const entry: JsonObject = { id: `j${seq}`, at, account, cents: amount, memo: strOf(data.memo), status };
   for (const k of ["kind", "category", "card", "flow"] as const) if (typeof data[k] === "string" && data[k] !== "") entry[k] = data[k];
+  // Who made it for the organization it was made as (`by`, `as`: ORG-SPEC §3.6), on that organization's own lines; a recorded posting names neither.
+  if (typeof data.by === "string" && data.by !== "" && typeof data.as === "string" && holdersOf(state, account).includes(data.as)) entry.by = data.by;
   if (other !== "") entry.counterparty = other;
   if (status === "pending" && typeof data.settles === "number") entry.settles = data.settles;
   journal[account] = pushCapped(journal[account], entry, JOURNAL_CAP);
@@ -153,6 +171,12 @@ function fileLine(state: WorldState, ctx: ReadContext, account: EntityId, amount
   months[key] = month;
   for (const old of Object.keys(months).sort().slice(0, -MONTHS_KEPT)) delete months[old];
   totals[account] = months;
+
+  if (data.kind === "interest") {
+    const latest = sliceRecord(state, "economy", "interest");
+    const before = objOf(latest[account]);
+    latest[account] = { cents: (numOf(before.at, NaN) === at ? numOf(before.cents) : 0) + amount, at };
+  }
 }
 
 function accrue(state: WorldState, account: EntityId, amount: number, at: number, use: "purchase" | "advance" | null): void {
@@ -171,7 +195,9 @@ function accrue(state: WorldState, account: EntityId, amount: number, at: number
   }
   const last = numOf(cur.at, cur.from);
   const dt = Math.max(0, at - last);
-  adb[account] = { from: cur.from, at: Math.max(last, at), sum: numOf(cur.sum) + before * dt, spent: numOf(cur.spent) + spent, ...advances };
+  // A card without statements keeps, through its period, what it owed when the period began and what was paid toward it since.
+  const period: JsonObject = { ...(typeof cur.paid === "number" ? { paid: cur.paid } : {}), ...(typeof cur.owed === "number" ? { owed: cur.owed } : {}) };
+  adb[account] = { from: cur.from, at: Math.max(last, at), sum: numOf(cur.sum) + before * dt, spent: numOf(cur.spent) + spent, ...advances, ...period };
 }
 
 function isCreditAccount(ctx: ReadContext, account: EntityId): boolean {
@@ -282,7 +308,7 @@ export const EVENTS: EventTypeDef<PackEvent>[] = [
     describe: (e, ctx) => `The statement closed at ${formatMoney(numOf(e.data.closing), ctx.world.currency)}, with at least ${formatMoney(numOf(e.data.minimum), ctx.world.currency)} due`,
   },
   {
-    // A payment toward a credit account's statement.
+    // A payment toward a credit account's statement, or, on a card without statements, toward what it owed when its period began.
     type: FINANCE_EVENTS.cardPaid,
     validate: (e, ctx) => (isCreditAccount(ctx, str(e, "account")) ? null : reject("bad_event", "statement payments are for credit accounts")),
     apply: (e, state) => {
@@ -290,6 +316,8 @@ export const EVENTS: EventTypeDef<PackEvent>[] = [
       const account = str(e, "account");
       const cur = objOf(cycles[account]);
       if (Object.keys(cur).length > 0) cycles[account] = { ...cur, paid: numOf(cur.paid) + numOf(e.data.cents) };
+      const period = objOf(own(objOf(sliceOf(state, "economy").adb), account));
+      if (typeof period.owed === "number") sliceRecord(state, "economy", "adb")[account] = { ...period, paid: numOf(period.paid) + numOf(e.data.cents) };
     },
     describe: (e, ctx) => `A card payment of ${formatMoney(numOf(e.data.cents), ctx.world.currency)} was made`,
   },
@@ -440,12 +468,12 @@ export const EVENTS: EventTypeDef<PackEvent>[] = [
     coarsen: { key: (e) => str(e, "account"), merge: (_a, b) => b },
   },
   {
-    // An interest period ends: the account's average daily balance starts again.
+    // An interest period ends: the account's average daily balance starts again, and a card without statements keeps what it owed then.
     type: FINANCE_EVENTS.accrue,
-    validate: (e, ctx) => (own(ctx.state.entities, str(e, "account")) && typeof e.data.at === "number" ? null : reject("bad_event", "an accrual needs an account and a time")),
+    validate: (e, ctx) => (own(ctx.state.entities, str(e, "account")) && typeof e.data.at === "number" && (e.data.owed === undefined || (typeof e.data.owed === "number" && Number.isFinite(e.data.owed))) ? null : reject("bad_event", "an accrual needs an account and a time")),
     apply: (e, state) => {
       const at = numOf(e.data.at);
-      sliceRecord(state, "economy", "adb")[str(e, "account")] = { from: at, at, sum: 0, spent: 0 };
+      sliceRecord(state, "economy", "adb")[str(e, "account")] = { from: at, at, sum: 0, spent: 0, ...(typeof e.data.owed === "number" ? { owed: e.data.owed } : {}) };
     },
     describe: () => "Interest period",
   },

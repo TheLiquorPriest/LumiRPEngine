@@ -57,7 +57,7 @@ describe("UI registry", () => {
     expect(catalog.glances.map((g) => g.id)).toEqual(["vehicles.due", "calendar.next", "economy.due", "story.step"]);
   });
 
-  test("a second registration of the same panel, editor, chip kind, sheet kind, glance or pack throws", () => {
+  test("a second registration of the same panel, editor, chip kind, sheet kind, glance, organization tab or pack throws", () => {
     const panel = (id: string): UiPackDef => ({ id, register: (r) => r.panel({ id: "x.p", label: "P", order: 1, home: "now", component: Empty }) });
     expect(() => buildCatalog([panel("a"), panel("b")])).toThrow("Panel x.p");
     const editor = (id: string): UiPackDef => ({ id, register: (r) => r.editor({ collection: "kinds", label: "K", component: Empty }) });
@@ -74,6 +74,8 @@ describe("UI registry", () => {
     expect(() => buildCatalog([sheet("a"), sheet("b")])).toThrow("A sheet for person (pack b)");
     const glance = (id: string): UiPackDef => ({ id, register: (r) => r.glance({ id: "x.g", order: 1, panel: "x.p", component: Empty }) });
     expect(() => buildCatalog([glance("a"), glance("b")])).toThrow("Glance x.g (pack b)");
+    const orgTab = (id: string): UiPackDef => ({ id, register: (r) => r.orgTab({ id: "x.money", label: "Money", order: 40, section: "money", component: Empty }) });
+    expect(() => buildCatalog([orgTab("a"), orgTab("b")])).toThrow("An organization tab x.money (pack b)");
     expect(() => buildCatalog([{ id: "a", register: () => {} }, { id: "a", register: () => {} }])).toThrow("registered twice");
   });
 
@@ -81,6 +83,26 @@ describe("UI registry", () => {
     const tab = (pack: string, id: `${string}.${string}`, order: number): UiPackDef => ({ id: pack, register: (r) => r.gm({ id, label: id, icon: "layers", order, component: Empty }) });
     const catalog = buildCatalog([tab("minds", "minds.minds", 20), tab("economy", "economy.money", 30), tab("aaa", "aaa.tab", 20)]);
     expect(catalog.gmSections.map((def) => def.id)).toEqual(["aaa.tab", "minds.minds", "economy.money"]);
+  });
+
+  test("the packs' organization tabs and parts come out in order, ties broken by id, whichever pack registered them", () => {
+    const catalog = buildCatalog([
+      {
+        id: "economy",
+        register(r) {
+          r.orgTab({ id: "economy.taxes", label: "Taxes", order: 70, section: "taxes", component: Empty });
+          r.orgTab({ id: "economy.money", label: "Money", order: 40, section: "money", component: Empty });
+        },
+      },
+      { id: "orgs", register: (r) => r.orgTab({ id: "orgs.property", label: "Property", order: 50, section: "property", component: Empty }) },
+      { id: "aaa", register: (r) => r.orgTab({ id: "aaa.payroll", label: "Payroll", order: 40, section: "payroll", within: "people", component: Empty }) },
+    ]);
+    expect(catalog.orgTabs.map((def) => [def.id, def.within ?? null])).toEqual([
+      ["aaa.payroll", "people"],
+      ["economy.money", null],
+      ["orgs.property", null],
+      ["economy.taxes", null],
+    ]);
   });
 
   test("an entity's structured field gets the editor registered on the nearest kind up its chain", () => {

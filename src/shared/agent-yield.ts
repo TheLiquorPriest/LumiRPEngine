@@ -98,9 +98,9 @@ export const AGENT_YIELD_PROMPTS: readonly PromptDef[] = [
   def(YIELD_TEXT.readEmpty, "Read: an empty answer", "A read whose answer proposed no change at all.", "its answer proposed no change", []),
   def(
     YIELD_TEXT.readUntracked,
-    "Read: a thing the world doesn't have",
-    "Changes to a thing (taken, dropped, used up, worn, lost, damaged or counted) that the world has no entity for, or none the player character knows of: each is only a Not tracked note to the player, since no such change makes a thing; a give by someone other than the player character, with the thing in the reply's words, or a purchase, makes one.",
-    "{{count}} name a thing the world doesn't have ({{things}}): each changes nothing but a Not tracked note; only a give by someone other than the player character, the thing in the reply's words, or a purchase makes one",
+    "Read: a count of a thing the world doesn't have",
+    "A count of a thing (how many of it there are) that the world has no entity for, or none the player character knows of: it is only a Not tracked note to the player, since a count makes no thing. Every other change to a thing finds the thing the words mean, or makes it where the story acts on it.",
+    "{{count}} count a thing the world doesn't have ({{things}}): each changes nothing but a Not tracked note, since a count makes no thing",
     [count, { name: "things", text: "each thing as the read named it; one named by an id the player character doesn't know, as something they don't know", required: true }],
   ),
   def(YIELD_TEXT.sceneLore, "Scene: lore it doesn't have", "Lore ids a scene run chose that the world has no entry for.", "{{count}} lore ids not taken (the world has no such entry: {{ids}})", [count, { name: "ids", text: "the ids it gave", required: true }]),

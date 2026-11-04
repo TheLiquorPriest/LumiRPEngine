@@ -16,6 +16,7 @@ import type { WorldState } from "../../src/engine/state";
 import { Working } from "../../src/engine/working";
 import { initialState } from "../../src/engine/world-state";
 import { ALL_PACKS, STARTER_WORLDS } from "../../src/packs/index";
+import { journalOf } from "../../src/packs/economy/core/journal";
 import type { JsonObject } from "../../src/shared/json";
 import { DEFAULT_RECENT, recentOf, stepConfigOf } from "../../src/shared/settings";
 import type { WorldDoc } from "../../src/shared/world";
@@ -190,6 +191,39 @@ describe("interpret's catalog and scene", () => {
     w.applyAll([{ type: "castlife.invitation", data: { agent: "danny_okafor", place: "bluebird_coffee", at: w.state.clock + 60, text: "Danny Okafor invites you to Bluebird Coffee at 07:15.", key: "danny:test" } }]);
     expect(scene()).toContain("Waiting on your answer: Danny Okafor invites you to Bluebird Coffee at 7:15 AM. (host danny_okafor)");
     expect(accept()?.params).toEqual(["host (person: danny_okafor)"]);
+  });
+
+  test("an `as` lists the organizations the POV may act for with the power it needs, each named in the scene, and is left out when there are none (ORG-SPEC §3.6)", () => {
+    const reg = createRegistry(ALL_PACKS);
+    const catalogFor = (pov: string) => {
+      const world = (STARTER_WORLDS.modern_slice_of_life as (id: string, name: string) => WorldDoc)("w", "Port Alder");
+      world.pov = pov;
+      const offered = interpretCatalog(reg, world, initialState(world, "r", reg), [...reg.actions.values()], () => true);
+      return { named: offered.named, params: (id: string): string[] => offered.entries.find((e) => e.action.id === id)?.entry.params ?? [] };
+    };
+    // Jordan may act for no organization: Pay and Buy are offered all the same, with no `as`.
+    const jordan = catalogFor("pov");
+    for (const id of ["pay", "buy", "move_money"]) {
+      expect(jordan.params(id).length).toBeGreaterThan(0);
+      expect(jordan.params(id).filter((p) => p.startsWith("as"))).toEqual([]);
+    }
+    expect(jordan.named).not.toContain("alder_automotive_co");
+    // Marcus owns Alder Automotive: Pay and Buy offer it as who pays, Transfer as whose accounts he manages, and the scene names it.
+    const marcus = catalogFor("marcus_delgado");
+    for (const id of ["pay", "buy"]) expect(marcus.params(id)).toContainEqual(expect.stringMatching(/^as\? \(an organization you act for: (?:[a-z_]+ \| )*alder_automotive_co(?: \| [a-z_]+)*; Paying as: an organization you may spend for, /));
+    expect(marcus.params("move_money")).toContainEqual(expect.stringMatching(/^as\? \(an organization you act for: (?:[a-z_]+ \| )*alder_automotive_co(?: \| [a-z_]+)*; As: /));
+    expect(marcus.named).toContain("alder_automotive_co");
+  });
+
+  test("typed, a payment from the shop's account plays as the shop: the catalog offers it as `as` to Jordan acting for it, the scene names it, and the read's `as` pays from its till with Jordan on the line", async () => {
+    const { rig, chatId } = await alder();
+    rig.body(await rig.send({ type: "lre.edit", chatId, ops: [{ op: "link", rel: "acts_for", from: "pov", to: "alder_automotive_co", fields: { powers: ["money.spend"], payment: 20000, by: "marcus_delgado" } }] }));
+    const prompts = reading(rig, () => ({ action: "pay", params: { to: "danny_okafor", amount: 20, as: "alder_automotive_co" }, confidence: 0.9 }));
+    await rig.turn(chatId, "I pay Danny $20 for the parts from the shop's account.", "You pay Danny from the shop's till.");
+    const pay = block(prompts[0] ?? "", "Action catalog").find((l) => l.startsWith("pay — ")) ?? "";
+    expect(pay).toContain("as? (an organization you act for: alder_automotive_co; Paying as: ");
+    expect(block(prompts[0] ?? "", "Scene").join("\n")).toContain("Alder Automotive (alder_automotive_co)");
+    expect(journalOf(await headState(rig, chatId), "acct_marcus_shop").find((j) => j.cents === -2000)?.by).toBe("pov");
   });
 });
 

@@ -573,7 +573,7 @@ describe("the hub shows what each Money level shows", () => {
     const top = await chat.hub();
     expect(top.level).toBe(4);
     expect(hubTabs(top, "player").map((t) => t.id)).toEqual(expect.arrayContaining(["overview", "accounts", "flows", "credit"]));
-    expect(account(top, CARD).aprPct).toBe(22);
+    expect(account(top, CARD).interest).toMatchObject({ way: "charges", ratePct: 22 });
     expect(accountBlocks(top, account(top, CARD)).terms).toBe(true);
     expect(overviewBlocks(top)).toMatchObject({ cashFlowAhead: true, upcoming: 20 });
     expect(creditBlocks(top)).toEqual({ factors: true, report: true, history: 12 });
@@ -585,7 +585,8 @@ describe("the hub shows what each Money level shows", () => {
     expect(threeTabs).toContain("flows");
     expect(threeTabs).not.toContain("credit");
     expect(three.accounts.map((a) => a.id).sort()).toEqual(top.accounts.map((a) => a.id).sort());
-    expect(account(three, CARD).aprPct).toBeNull();
+    // Interest runs from Money 3, so the card's rate and what it charges still show; its terms are the full books'.
+    expect(account(three, CARD).interest).toMatchObject({ way: "charges", ratePct: 22 });
     expect(accountBlocks(three, account(three, CARD)).terms).toBe(false);
     expect(overviewBlocks(three)).toMatchObject({ cashFlowAhead: false, upcoming: 5 });
     expect(accountControls(three, account(three, CARD))).toEqual(["pay", "autopay"]);

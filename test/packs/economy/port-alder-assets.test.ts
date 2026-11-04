@@ -155,10 +155,11 @@ describe("Port Alder's holdings and property", () => {
     const w = portAlder();
     const view = w.ctx.query("economy.finance")(w.ctx, w.world.pov, true);
     const vehicles = (view.overview?.breakdown ?? []).filter((l) => ["Your pickup", "Your ATV", "Your fishing boat"].includes(l.label));
+    // Each marked a vehicle's, for Assets' Your vehicles row.
     expect(vehicles).toEqual([
-      { label: "Your ATV", cents: 500_000 },
-      { label: "Your fishing boat", cents: 3_200_000 },
-      { label: "Your pickup", cents: 3_000_000 },
+      { label: "Your ATV", cents: 500_000, vehicle: true },
+      { label: "Your fishing boat", cents: 3_200_000, vehicle: true },
+      { label: "Your pickup", cents: 3_000_000, vehicle: true },
     ]);
     expect(view.band).toBe("comfortable");
     // A vehicle's own value is what counts when it has one; and Dale's pontoon is Dale's.

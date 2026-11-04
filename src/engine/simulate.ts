@@ -34,7 +34,7 @@ import { isGone } from "./scope";
 import { lostObservations, unobserved } from "./seen";
 import type { WorldState } from "./state";
 import { dropTouches } from "./touched";
-import { own } from "./pack-kit";
+import { optionalQuery, own } from "./pack-kit";
 import type { WorldDoc } from "../shared/world";
 import { stepTracks, type TrackChange } from "./tracks";
 import { signalVisible } from "./visibility";
@@ -455,17 +455,22 @@ export interface CatchUpResult {
   backlog: number;
 }
 
-/** Off-screen catch-up (DESIGN §8): up to K agents, on-screen first, then round-robin. */
+/**
+ * Off-screen catch-up (DESIGN §8): up to K agents, on-screen first, then those with orders pending
+ * with the POV (the orgs pack's `orgs.open_orders`, assess-party §6.2), then round-robin.
+ */
 export function catchUp(reg: Registry, w: Working, opts: CatchUpOptions): CatchUpResult {
   const cal = calendarOf(w.world);
   const done = completedSlot(w.world, w.state);
   const all = lod1Agents(w.world, w.state).filter((a) => a !== w.world.pov);
   const slice = readEngineSlice(w.state);
   const onScreen = (opts.onScreen ?? []).filter((a) => all.includes(a)).sort();
-  const queue = all.filter((a) => !onScreen.includes(a));
+  const orders = optionalQuery(w.ctx, "orgs.open_orders");
+  const ordered = all.filter((a) => !onScreen.includes(a) && (orders?.(w.ctx, a) ?? 0) > 0);
+  const queue = all.filter((a) => !onScreen.includes(a) && !ordered.includes(a));
   const rr = queue.length > 0 ? slice.rr % queue.length : 0;
   const rotated = [...queue.slice(rr), ...queue.slice(0, rr)];
-  const order = [...onScreen, ...rotated];
+  const order = [...onScreen, ...ordered, ...rotated];
   const slotLen = MINUTES_PER_DAY / cal.partStarts.length;
   let budget = (opts.agentDays ?? Infinity) * MINUTES_PER_DAY;
   const stepped: CatchUpResult["stepped"] = [];
@@ -477,7 +482,7 @@ export function catchUp(reg: Registry, w: Working, opts: CatchUpOptions): CatchU
     // Someone an earlier agent's slot left dead or removed is passed by, cursor and all.
     if (cursor >= done || !stillActs(w, agent)) continue;
     taken++;
-    if (!onScreen.includes(agent)) advancedQueue = rotated.indexOf(agent) + 1;
+    if (rotated.includes(agent)) advancedQueue = rotated.indexOf(agent) + 1;
     let k = cursor;
     // One who stops acting on the way stops there, its cursor at the last slot it lived.
     while (k < done && budget > 0 && stillActs(w, agent)) {

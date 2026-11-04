@@ -1,37 +1,55 @@
-// Build's helpers for authoring things (DESIGN §13): what lies in a container, on someone or at a
-// place; the "Reveal this item" scaffold that hides a thing until it is searched for (§7
-// discoverable things); the item checks a quest's objectives test (`carries`, `has_item`, `at`);
-// and what keeps a thing where it is (§7 containment), which the engine and the pickers both read.
+// Build's helpers for authoring things (DESIGN §13): the "Reveal this item" scaffold that hides a
+// thing until it is searched for (§7 discoverable things); the item checks a quest's objectives test
+// (`carries`, `has_item`, `at`); what keeps a thing where it is (§7 containment), which the engine
+// and the pickers both read; and what a catalog type makes a thing (`typeFields`), for a thing made
+// in play and one added in Build.
 
 import type { JsonObject, JsonValue } from "./json";
 import { hasOwn, isRecord } from "./json";
-import type { DataTable } from "./tables";
-import type { KindDef, WorldDoc } from "./world";
+import type { DataTable, TableRow } from "./tables";
+import { isSize } from "./things";
+import type { KindDef } from "./world";
 
 /** Why a thing stays where it is (DESIGN §7): it is a vehicle, a part built into one, or fixed in place. */
 export type FixedReason = "vehicle" | "part" | "fixed";
 
 /**
  * What keeps a thing where it is, as the world declares it (DESIGN §7): a vehicle (`isVehicle`, from
- * its kind); a part built into a vehicle, whose catalog row in the world's Containers table is
- * `vehicle_fixed` (a truck bed, a glovebox, a boat's lockers); or a thing marked `fixed` (a mill
- * stone, an installed relay). Null for a thing that can be picked up. Never read from its name.
+ * its kind); a part built into what holds it, marked so (`part`, ITEMS-SPEC §3.2) or with a catalog
+ * row in the world's Containers table that is `vehicle_fixed` (a truck bed, a glovebox, a boat's
+ * lockers); or a thing marked `fixed` (a mill stone, an installed relay). Null for a thing that can be
+ * picked up. Never read from its name.
  */
 export function fixedReason(isVehicle: boolean, fields: JsonObject, tables: Readonly<Record<string, DataTable>>): FixedReason | null {
   if (isVehicle) return "vehicle";
   if (fields.fixed === true) return "fixed";
+  if (fields.part === true) return "part";
   const catalog = fields.catalog;
   const rows = hasOwn(tables, "gear.containers") ? tables["gear.containers"]?.rows : undefined;
   const row = rows && typeof catalog === "string" && hasOwn(rows, catalog) ? rows[catalog] : undefined;
   return row?.location === "vehicle_fixed" ? "part" : null;
 }
 
-/** One thing in a container, on someone or lying at a place, as Build's Contents lists it. */
-export interface ContentsRow {
-  id: string;
-  name: string;
-  /** `discoverable`: hidden until the player character searches where it lies or opens what holds it. */
-  hidden: boolean;
+/** The tables a thing's type (`catalog`) names a row of, in the order a type is looked up: the gear tables first. */
+export const TYPE_TABLES = ["gear.items", "gear.containers", "economy.catalog"] as const;
+export type TypeTable = (typeof TYPE_TABLES)[number];
+
+/**
+ * What a thing of a catalog type is (ITEMS-SPEC §3.1): a container for a row of the Containers table,
+ * or a row with a capacity or a size it holds (a refrigerator, a wardrobe), else an item; and the
+ * fields its row fills: the type itself, its category, the slot it is worn in, and its weight,
+ * volume and room (a container's empty weight as its weight).
+ */
+export function typeFields(table: TypeTable, id: string, row: Readonly<TableRow>): { kind: "item" | "container"; fields: JsonObject } {
+  const fields: JsonObject = { catalog: id };
+  if (typeof row.category === "string") fields.category = row.category;
+  if (typeof row.equip_slot === "string" && row.equip_slot !== "none") fields.slot = row.equip_slot;
+  for (const key of ["weight_g", "volume_l", "capacity_l", "max_load_kg"] as const) {
+    const v = row[key];
+    if (typeof v === "number") fields[key] = v;
+  }
+  if (typeof row.empty_weight_g === "number") fields.weight_g = row.empty_weight_g;
+  return { kind: table === "gear.containers" || typeof row.capacity_l === "number" || isSize(row.holds) ? "container" : "item", fields };
 }
 
 /** Whether `kind` is a thing (an item, or a kind that extends one), by the world's kinds and the packs'. */
@@ -42,18 +60,6 @@ export function isItemKind(kinds: Readonly<Record<string, KindDef>>, kind: strin
     cur = hasOwn(kinds, cur) ? kinds[cur]?.extends : undefined;
   }
   return false;
-}
-
-/**
- * What the world document puts in `id` (an entity's `in` relations to it), or, for a place, what
- * lies loose there (its `place` with no holder), by name. Only the document's own: what play adds
- * (bought, found, sampled stock) isn't the author's.
- */
-export function authoredContents(world: Pick<WorldDoc, "entities">, id: string, of: "entities" | "places"): ContentsRow[] {
-  return Object.values(world.entities)
-    .filter((e) => (of === "entities" ? e.relations.some((r) => r.type === "in" && r.to === id) : e.fields.place === id && !e.relations.some((r) => r.type === "in")))
-    .map((e) => ({ id: e.id, name: e.name, hidden: e.visibility === "discoverable" }))
-    .sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
 }
 
 /**

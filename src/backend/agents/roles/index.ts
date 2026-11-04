@@ -8,6 +8,7 @@
 import type { Runtime } from "../../runtime";
 import type { RoleResult, RoleRun, TurnAgentCtx, TurnRoles } from "../turn-ctx";
 import { classicRoles } from "./classic";
+import { curateRun } from "./curator";
 import { choicesRun, decideRun, proseRun } from "./director";
 import { interpretRun, judgeRun, puzzleRun } from "./intent";
 import { knowledgeRun, memoryRun, mindsRun, skipPlanRun, skipRun } from "./minds";
@@ -29,6 +30,7 @@ export function agentRoles(rt: Runtime): TurnRoles {
     knowledge: either(knowledgeRun, classic.knowledge),
     director: { decisions: either(decideRun, classic.director.decisions), prose: either(proseRun, classic.director.prose), choices: either(choicesRun, classic.director.choices), offscreen: either(decideRun, classic.director.offscreen) },
     read: { extract: either(extractRun, classic.read.extract) },
+    curator: { curate: either(curateRun, classic.curator.curate) },
     world: { effects: either(effectsRun, classic.world.effects) },
     memory: either(memoryRun, classic.memory),
     skip: { plan: either(skipPlanRun, classic.skip.plan), beats: either(skipRun, classic.skip.beats) },

@@ -23,22 +23,29 @@ import type { EntityId, PlaceId, TravelMode } from "../../../shared/ids";
 import type { LedgerEvent } from "../../../shared/ledger";
 import type { LintIssue } from "../../../shared/protocol";
 import type { GridDef, GridTrigger, KindDef, WorldDoc } from "../../../shared/world";
+import { placeOp, type PlaceOpOutcome } from "../../../engine/places-in-play";
+import type { PlaceOp } from "../../../shared/things";
 import type { PackDef, ReadContext, Rejection } from "../../../engine/registry";
 import { GRID_SPACE_FLOOR } from "../../../engine/registry-impl";
-import { placeOfEntity, placeWithin } from "../../../engine/scope";
+import { kindIs, placeOfEntity, placeWithin } from "../../../engine/scope";
 import { relocate } from "../../../engine/relocate";
 import { placeSaid } from "../../../engine/place-names";
-import { PARTY_RELATION } from "../../../shared/party";
+import { PARTY_KIND, PARTY_RELATION, PARTY_TIERS } from "../../../shared/party";
+import { ORG_FIELDS } from "../../../shared/org";
+import { GROUP_KIND } from "../../../engine/selector";
+import { partyLeader, partyRoster } from "../../../engine/org";
 import { observeCells } from "../../../engine/seen";
 import { canSeePlace, knownBySelector } from "../../../engine/visibility";
 import type { PackEvent } from "../../../shared/ledger";
-import { labelOf, sliceRecord, strOf, own } from "../../../engine/pack-kit";
+import { labelOf, optionalService, sliceRecord, strOf, own } from "../../../engine/pack-kit";
+import { entersFrom, entryClosed, entryFor, entryRefusal, withoutLeave } from "../../../engine/entry";
 import { arrivalEvents, entered, layEvents, POS_EVENT, povGround, reach, spotData, spotOf, stepEvents } from "./positions";
 import { closedRoutes, goMinutes, nominalRoute, routeAt, vehicleTrips } from "./travel";
 import type { TravelPlan, VehicleTrip, VehicleTripAsk } from "../../../shared/travel";
 import { buildMapView } from "./view";
-import { placeLines, sceneLines } from "./feed";
+import { placeLines, sceneLines, trespassLines } from "./feed";
 import { placeLoreLines } from "../../../engine/place-lore";
+import { makePlaceEffect, placeEventDef, placeMakeChannel } from "./places";
 
 export type TravelService = (ctx: ReadContext, entity: EntityId, to: PlaceId, mode: TravelMode) => { plan: TravelPlan; events: LedgerEvent[] } | Rejection;
 export type RouteQuery = (ctx: ReadContext, from: PlaceId, to: PlaceId, mode: TravelMode) => TravelPlan | null;
@@ -51,6 +58,18 @@ declare module "../../../engine/registry" {
     "space.arrival": (ctx: ReadContext, entity: EntityId, to: PlaceId) => LedgerEvent[];
     /** Where a thing lies once it leaves someone's hands: put down at `place` by `by`, or (null) picked up. */
     "space.lay": (ctx: ReadContext, thing: EntityId, place: PlaceId | null, by: EntityId | null) => LedgerEvent[];
+    /**
+     * One change to a place made in play (ITEMS-SPEC §6.2, a `place` GM edit, the Curator's place
+     * tools): its events, the place it made, or why not; a make that finds the place names it
+     * (`exists`). `by` is the writer making it and `salt` draws a made place's id.
+     */
+    "space.place_op": (ctx: ReadContext, op: PlaceOp, opts: { by: string; salt: string }) => PlaceOpOutcome;
+    /**
+     * What an entry the story tells (a reply's move) records when it is without leave (ORG-SPEC
+     * §3.9): no basis of the mover's own, and nobody there who may enter. The orgs pack's
+     * `orgs.trespass`; none without it.
+     */
+    "space.trespass": (ctx: ReadContext, who: EntityId, place: PlaceId) => LedgerEvent[];
   }
   interface QueryMap {
     /** The fastest route for a mode at the current Space level (terrain and weather from level 4). */
@@ -182,6 +201,16 @@ export const PERSON: KindDef = {
   },
 };
 
+/**
+ * The kind every organization's group extends (ORG-SPEC §3.1): factions, families, households,
+ * companies, businesses, the party and an author's own (`extends: "group"`). It registers here,
+ * beside `thing`, before any pack's kind that extends it; its fields are every organization's.
+ */
+export const GROUP: KindDef = { id: GROUP_KIND, label: "Group", extends: "thing", pack: "space", fields: { ...ORG_FIELDS } };
+
+/** The party's own entity (`party_<leader>`, ORG-SPEC §3.12), made only when the party needs a name, a purse or a thing of its own. */
+export const PARTY: KindDef = { id: PARTY_KIND, label: "Party", extends: GROUP_KIND, pack: "space", fields: { leader: { type: "ref", label: "Leader", ref: "person" } } };
+
 function asMode(v: unknown): TravelMode {
   return typeof v === "string" && (MODES as readonly string[]).includes(v) ? (v as TravelMode) : "walk";
 }
@@ -209,9 +238,13 @@ export const spacePack: PackDef = {
   register(r) {
     r.kind(THING);
     r.kind(PERSON);
+    r.kind(GROUP);
+    r.kind(PARTY);
     r.relation({ id: "in", label: "In", from: "*", to: "*", cardinality: "many_one", symmetric: false, fields: {}, pack: "space" });
-    // The player character's party (DESIGN §9.3): a person who travels with it comes along on every move it makes.
-    r.relation({ id: PARTY_RELATION, label: "Travels with", from: "person", to: "person", cardinality: "many_one", symmetric: false, fields: {}, pack: "space" });
+    // The player character's party (DESIGN §9.3; ORG-SPEC §3.12): a person who travels with it comes along on every move it makes; a link without a tier is core.
+    r.relation({ id: PARTY_RELATION, label: "Travels with", from: "person", to: "person", cardinality: "many_one", symmetric: false, fields: { tier: { type: "enum", label: "Tier", values: [...PARTY_TIERS] }, since: { type: "date", label: "Since" } }, pack: "space" });
+    // The party's members: its leader and whoever travels with the leader (ORG-SPEC §3.2).
+    r.membership(PARTY_KIND, (ctx, party) => partyRoster(ctx, partyLeader(ctx, party)));
 
     r.service("space.travel", travel);
     r.service("space.arrival", arrivalEvents);
@@ -220,6 +253,7 @@ export const spacePack: PackDef = {
     r.query("space.vehicle_trips", vehicleTrips);
     r.query("space.reachable", reachable);
     r.query("space.entered", entered);
+    r.service("space.place_op", placeOp);
 
     // A position on a grid while the grid system is on (`positions.ts`): the cell (null: off any
     // grid) and the one before, written whole, so the POV's sight and zone triggers read whole moves.
@@ -258,6 +292,12 @@ export const spacePack: PackDef = {
       args: ["x", "y", "entity?"],
       resolve: (a, ctx) => (typeof a.x === "number" && typeof a.y === "number" ? stepEvents(ctx, strOf(a.entity) || ctx.world.pov, { x: Math.round(a.x), y: Math.round(a.y) }) : { code: "bad_args", reason: "a step needs x and y" }),
     });
+
+    // Places made in play (ITEMS-SPEC §6.2): each written whole into the pack's slice, and the
+    // `place_make` change that makes one the story puts someone in, the move with it.
+    r.event<PackEvent>(placeEventDef);
+    r.effect(makePlaceEffect);
+    r.proposal(placeMakeChannel);
 
     // Opening and closing routes (a ferry stops running, a secret passage is found).
     r.event<PackEvent>({
@@ -301,6 +341,23 @@ export const spacePack: PackDef = {
       const e = own(ctx.state.entities, String(thing ?? ""));
       return mapSettingsOf(ctx.world).grid.movement && typeof e?.fields.place === "string" && spotOf(ctx.world, ctx.state, String(thing ?? "")) !== null;
     });
+    // Who may enter a place (ORG-SPEC §3.9, `engine/entry.ts`): leave of their own (living there, the
+    // place's owner or their organization, a member, staff, a customer, a key they carry), and the
+    // words for a place that turns them away ("Private: Marcus Delgado's", "Staff only").
+    r.formula("may_enter", (ctx, who, place) => entryFor(ctx, String(who ?? ""), String(place ?? "")) !== null);
+    r.formula("entry_why", (ctx, who, place) => (entryFor(ctx, String(who ?? ""), String(place ?? "")) === null ? entryRefusal(ctx, ctx.world.pov, String(place ?? "")) : ""));
+    // An entry the story tells (a reply's move), once it has landed: without leave (§3.9), it is
+    // recorded as a trespass by the pack that keeps the record, never refused.
+    r.effect({
+      type: "space.entered",
+      args: ["entity", "to"],
+      resolve: (a, ctx) => {
+        const who = strOf(a.entity);
+        const to = strOf(a.to);
+        if (placeOfEntity(ctx.state, who) !== to || !kindIs(ctx.registry, ctx.world, own(ctx.state.entities, who)?.kind ?? "", "person") || !withoutLeave(ctx, who, to)) return [];
+        return optionalService(ctx, "space.trespass")?.(ctx, who, to) ?? [];
+      },
+    });
 
     r.action({
       id: "go",
@@ -310,8 +367,10 @@ export const spacePack: PackDef = {
       // Who comes along: people with the player character it names ("with Danny"), or all of them for "we".
       params: { to: { type: "ref", ref: "place", label: "Place" }, with: { type: "list", ref: "person", optional: true, label: "Who comes along" } },
       // Story first: the walk, else any mode's route, else a nominal move. The world's travel
-      // simulation brings back the walk it once needed (`can_go`).
-      requires: ["to != here", "can_go(here, to)"],
+      // simulation brings back the walk it once needed (`can_go`). A place that gives no leave to
+      // enter is offered greyed, with why (ORG-SPEC §3.9); typed, it plays as roleplay, and the
+      // reply's move records the trespass.
+      requires: ["to != here", "can_go(here, to)", { expr: "may_enter(self, to)", why: "entry_why(self, to)" }],
       outcomes: { default: [{ type: "move", args: { entity: "self", to: "=to", with: "=params.with" } }] },
       duration: "go_minutes(here, to)",
       activity: { type: "travel", until: "clock + (level.space < 2 ? 15 : go_minutes(here, to))" },
@@ -334,6 +393,8 @@ export const spacePack: PackDef = {
     // A section's `include` picks these by their source (DESIGN §6.11).
     r.renderer({ slot: "scene", source: "location", label: "Where your character is, and what's a short walk away", render: (ctx) => sceneLines(ctx, "player").map((l) => l.text), feed: sceneLines });
     r.renderer({ slot: "place", label: "The place: what it's like, what lies here, the way around", render: (ctx) => placeLines(ctx, "player").map((l) => l.text), feed: placeLines });
+    // Whether the player character is somewhere without leave (ORG-SPEC §3.9, §9: on unless Build → Sections → Place leaves it out).
+    r.renderer({ slot: "place", source: "trespass", label: "Whether your character is somewhere without leave", render: (ctx) => trespassLines(ctx, "player").map((l) => l.text), feed: trespassLines });
     // The place's lore, after what the place itself shows, so a section cut to its tokens loses lore first.
     r.renderer({ slot: "place", source: "place_lore", label: "Lore about the place", render: (ctx) => placeLoreLines(ctx, "player").map((l) => l.text), feed: placeLoreLines });
 
@@ -361,12 +422,14 @@ export const spacePack: PackDef = {
       // The one move path, as a told move: a move to another place doesn't carry over what they were
       // doing where they were (the shift their routine or the planner gave them), so their activity
       // goes back to idle unless the proposal says what they do there, which holds even where they
-      // already are (the party brought them first).
+      // already are (the party brought them first). One that enters from outside a place that turns
+      // some away now is checked for leave once it has landed (`space.entered`).
       toEffects: (p, ctx) => {
         const entity = typeof p.entity === "string" ? p.entity : ctx.world.pov;
         const to = placeOf(p, ctx);
         const activity = typeof p.activity === "string" && p.activity.trim() !== "" ? p.activity.trim() : null;
-        return [{ type: "move", args: { entity, to, told: true, ...(activity !== null ? { activity } : {}) } }];
+        const enters = own(ctx.world.places, to) !== undefined && entryClosed(ctx, to) !== null && entersFrom(ctx, placeOfEntity(ctx.state, entity), to);
+        return [{ type: "move", args: { entity, to, told: true, ...(activity !== null ? { activity } : {}) } }, ...(enters ? [{ type: "space.entered", args: { entity, to } }] : [])];
       },
     });
 

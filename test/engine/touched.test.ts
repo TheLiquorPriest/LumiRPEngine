@@ -170,12 +170,16 @@ const EVERY_TYPE: LedgerEvent[] = [
   { type: "engine.check", data: { actor: "you", check: "initiative", outcome: "success" } },
   { type: "engine.entity", data: { entity: "dev", tier: "supporting", agent: false, levels: { money: 2 } } },
   { type: "engine.class", data: { entity: "dev", class: {}, tags: ["regular"], was: {} } },
+  // A name given in play (an item op's label) is play's, so an Upgrade keeps it.
+  { type: "engine.rename", data: { entity: "dev", name: "Devon", was: "Dev" } },
   { type: "engine.life", data: { entity: "dev", to: "dying" } },
   { type: "engine.told", data: { entity: "dev", who: ["you"] } },
   { type: "engine.observed", data: { people: {} } },
   { type: "engine.adjudged", data: { actor: "you", action: "climb", outcome: "success", rolled: true } },
   { type: "space.pos", data: { entity: "you", at: { scope: "inn", x: 4, y: 3 }, from: { scope: "inn", x: 3, y: 2 } } },
   { type: "space.route", data: { route: "lane", open: false } },
+  // A place made in play is the space slice's (ITEMS-SPEC §3.5), never an entity's definition.
+  { type: "space.place", data: { place: "booth", def: { id: "booth", name: "Booth", parent: "taproom", fields: {}, made: { as: "spot", by: "story", at: 0, why: "A quiet corner" } } } },
   { type: "economy.anchor", data: { entity: "dev", band: "comfortable", typical: 3000, base: 2000 } },
   { type: "economy.txn", data: { memo: "Rent", lines: [{ account: "acct", amount: -100 }] } },
   { type: "economy.note", data: { entity: "dev", class: "bill", text: "Rent is due" } },
@@ -204,6 +208,7 @@ const EVERY_TYPE: LedgerEvent[] = [
   { type: "economy.estimated_tax", data: { party: "dev", periods: ["2026-1"], cents: 500 } },
   { type: "economy.price", data: { symbol: "idx", price: 101 } },
   { type: "economy.quote", data: { asset: "idx", price: 10100 } },
+  { type: "economy.closes", data: { asset: "idx", closes: [["2026-10", 10100]] } },
   { type: "economy.mint", data: { asset: "opt:idx:call:10000:2026-11-20", def: { label: "IDX 2026-11-20 $100.00 call", class: "option", underlying: "idx", strike: 10000, expiry: "2026-11-20", right: "call", multiplier: 100, settlement: "physical" } } },
   { type: "economy.lots", data: { holding: "hold", qty: 2, cents: 20200, kind: "buy", label: "Bought IDX" } },
   { type: "economy.income", data: { source: "hold", cents: 500, kind: "dividend" } },
@@ -211,6 +216,9 @@ const EVERY_TYPE: LedgerEvent[] = [
   { type: "economy.acquire", data: { entity: "house", party: "you", cents: 25000000 } },
   { type: "economy.dispose", data: { entity: "house", party: "you", pct: 50, proceeds: 15000000, label: "Sold half the house" } },
   { type: "economy.stake_route", data: { business: "shop", owner: "you", to: "acct" } },
+  // An organization's History and what was spent for it are the orgs slice's (ORG-SPEC §3.17), never an entity's definition.
+  { type: "orgs.log", data: { org: "shop", text: "Paid Dev $1.00", by: "you", at: 0 } },
+  { type: "orgs.spent", data: { org: "shop", who: "you", month: "2026-01", cents: 100 } },
   { type: "relationships.regard", data: { from: "you", to: "dev", deltas: { warmth: 5 } } },
   { type: "castlife.need", data: { entity: "you", need: "hunger", delta: 10 } },
   { type: "castlife.decision", data: { key: "dev:evening", choice: "rest" } },
@@ -222,6 +230,15 @@ const EVERY_TYPE: LedgerEvent[] = [
   // A skip's plan is the Cast life slice's record of the skip, never an entity's definition.
   { type: "castlife.skip_plan", data: { from: 0, to: 60, plans: [], note: "No one to plan." } },
   { type: "story.flag", data: { name: "met_dev", value: true } },
+  // Entry set in play and entries without leave are the orgs pack's slice, keyed by place, never an entity's definition.
+  { type: "orgs.entry", data: { place: "inn", entry: "owner", keys: ["inn_key"], visibility: "secret" } },
+  { type: "orgs.trespass", data: { entity: "you", place: "town", at: 0, visibility: "public" } },
+  // Succession's switch for the chat, and an organization's plan, the day planner's marker on an order included, are the orgs slice's (ORG-SPEC §3.14, assess-party §6.2), never an entity's definition.
+  { type: "orgs.config", data: { key: "succession", value: false, visibility: "secret" } },
+  { type: "orgs.goal", data: { org: "shop", goal: { id: "g_1", text: "Open on Sunday", status: "open", source: "play", at: 0, by: "you" }, visibility: "secret" } },
+  { type: "orgs.order", data: { org: "shop", order: { id: "o_1", goal: "g_1", to: ["dev"], text: "Fix the sign", status: "open", source: "play", at: 0, by: "you" }, visibility: "secret" } },
+  { type: "orgs.status", data: { org: "shop", id: "o_1", status: "under_way", note: "", source: "play", at: 0, visibility: "secret" } },
+  { type: "orgs.lived", data: { org: "shop", id: "o_1", at: 60, visibility: "secret" } },
   { type: "combat.start", data: { encounter: "e1", place: "taproom", order: [{ id: "you", side: "party", init: 15, left: { action: 1 } }, { id: "rat", side: "foes", init: 5, left: { action: 1 } }] } },
   { type: "combat.spend", data: { encounter: "e1", who: "you", cost: { action: 1 } } },
   { type: "combat.act", data: { encounter: "e1", actor: "you", action: "strike", label: "Strike", target: "rat", outcome: "hit" } },

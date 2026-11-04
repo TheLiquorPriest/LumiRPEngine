@@ -1,13 +1,15 @@
-// The people family's GM writes (AGENT-LOOP-PLAN §6; INC1-SPEC R3b): a person's or thing's fields,
-// tier, classes, life, coming and going, and relations, each proposed as the GM editor's operation
-// (`EditOp`, read again for its shape by the writer). A name resolves only among what the agent's
-// knowledge may name, so a hidden one reads as not found.
+// The people family's writes (AGENT-LOOP-PLAN §6; INC1-SPEC R3b): the GM's, a person's or thing's
+// fields, tier, classes, life, coming and going, and relations, each proposed as the GM editor's
+// operation (`EditOp`, read again for its shape by the writer); and the story's own (ITEMS-SPEC
+// §7.3), a walk-on (`person_add`, story tier), which the Curator's call notes for the reply's read,
+// checked by the `spawn` channel (its cap and its find first) and settled with the read's changes. A
+// name resolves only among what the agent's knowledge may name, so a hidden one reads as not found.
 
 import { DOMAINS, LEVEL_LABEL } from "../../../../shared/ids";
 import type { JsonObject } from "../../../../shared/json";
 import { tiersInOrder } from "../../../../shared/tiers";
 import { lifeStatesOf, type WorldDoc } from "../../../../shared/world";
-import { BOOLEAN, boolArg, fieldValueArg, gmEdit, JSON_VALUE, missing, needId, NUMBER, propose, TEXT_LIST } from "../propose";
+import { BOOLEAN, boolArg, fieldValueArg, gmEdit, JSON_VALUE, missing, needId, noteFact, NUMBER, propose, TEXT_LIST } from "../propose";
 import type { ToolReadView } from "../read-view";
 import type { ToolDefinition } from "../registry";
 import { type Resolved, resolveEntity, resolvePerson, resolvePlace } from "../resolve";
@@ -216,6 +218,28 @@ export const PEOPLE_WRITES: readonly ToolDefinition[] = [
       const to = needId(view, "gm_unlink", args, "to", relationEnd);
       if (typeof to !== "string") return to;
       return propose(view, env.writer, gmEdit({ op: "unlink", rel, from, to }));
+    },
+  },
+  {
+    // A walk-on person the reply introduces by name (ITEMS-SPEC §6.3): the spawn channel's, capped and found first as the read's newcomers are.
+    name: "person_add",
+    family: "people",
+    tier: "story",
+    notes: true,
+    parameters: (world) => objectSchema({ name: text(), kind: text(kindEnum(world, "person")), place: text(), role: text() }, ["name"]),
+    async run(args, env) {
+      const view = await env.reader.view();
+      const name = needText(view, "person_add", args, "name");
+      if (typeof name !== "string") return name;
+      const kind = textArg(args, "kind") ?? "person";
+      let place: string | null = null;
+      if (argGiven(args, "place")) {
+        const at = needId(view, "person_add", args, "place", resolvePlace);
+        if (typeof at !== "string") return at;
+        place = at;
+      }
+      const role = textArg(args, "role");
+      return noteFact(view, env, { type: "spawn", kind, name, ...(place !== null ? { place } : {}), ...(role !== null ? { role } : {}) });
     },
   },
 ];

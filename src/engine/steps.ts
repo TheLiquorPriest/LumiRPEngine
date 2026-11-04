@@ -89,6 +89,8 @@ export interface Claim {
   like?: string;
   /** The player character's own thing the world had elsewhere: brought to hand (or here) rather than made (DESIGN §9.4). Absent in older records. */
   existing?: string;
+  /** A short walk away (ITEMS-SPEC §4.5): the minutes on foot fetching `existing` takes, added to the action's time. */
+  fetch?: number;
   /**
    * Money the player said they had, in minor units: the amount they agreed to have added for. As the
    * action plays, only what the claimer's carried cash lacks of what it pays is added (DESIGN §9.4),

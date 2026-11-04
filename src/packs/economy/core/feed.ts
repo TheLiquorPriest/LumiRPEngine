@@ -9,11 +9,11 @@ import type { OwnerRole } from "../../../shared/finance";
 import type { EntityId } from "../../../shared/ids";
 import type { FeedScope } from "../../../shared/world";
 import { accessOf, owns } from "../../../engine/access";
+import { ownsThrough } from "../../../engine/org";
 import { own } from "../../../engine/pack-kit";
 import { together } from "../../../engine/presence";
 import type { FeedLine, ReadContext } from "../../../engine/registry";
 import { isGone, kindIs, placeOfEntity } from "../../../engine/scope";
-import { isMemberOf } from "../../../engine/selector";
 import { canSeeEntity, canSeePlace } from "../../../engine/visibility";
 import { propertyIds } from "./property";
 
@@ -47,7 +47,7 @@ export function propertyLines(ctx: ReadContext, scope: FeedScope): FeedLine[] {
     if (isGone(ctx.state, id)) continue;
     const access = accessOf(ctx.state, id);
     // One he holds a part in but can't see (a group's secret safehouse) is never a player line.
-    if (!owns(ctx.state, pov, id) || !see(pov, id)) {
+    if (!owns(ctx, pov, id) || !see(pov, id)) {
       others.push(id);
       continue;
     }
@@ -55,7 +55,7 @@ export function propertyLines(ctx: ReadContext, scope: FeedScope): FeedLine[] {
     // role, then what he is to it (his own role, or the group he holds through). Holders as he may know them.
     const holder = (o: (typeof access.owners)[number]): string => `${see(pov, o.party) ? name(o.party) : "someone"} (${roleOf(o)})`;
     const direct = access.owners.find((o) => o.party === pov);
-    const through = direct ? undefined : access.owners.find((o) => isMemberOf(ctx.state, pov, o.party));
+    const through = direct ? undefined : access.owners.find((o) => o.party !== pov && ownsThrough(ctx, pov, o.party));
     const rest = access.owners.filter((o) => o !== direct).map(holder);
     let stake: string;
     if (direct && OWNING[direct.role]) stake = `yours (${roleOf(direct)})${rest.length > 0 ? `, with ${rest.join(", ")}` : ""}`;

@@ -11,6 +11,10 @@
 // An agent's GM edit (AGENT-LOOP-PLAN §4, §15) is such a submit too, and may carry more than the
 // GM editor does: workspace changes (a file written, removed, moved with its pin, pinned or not,
 // DESIGN §4.4) and the clock set as its ✎ fix sets it, each as the events those make, in order.
+// A thing's changes are the things model's item ops (ITEMS-SPEC §3.5, `engine/thing-ops`), and so
+// is any move of a thing an older operation asks for (`put`, `move`, `link in`, `unlink in`, `set
+// place`): through the one location writer and its size rules. A place made in play is the space
+// pack's (`space.place_op`), and an organization's change the orgs pack's (`orgs.op`, ORG-SPEC §7.2).
 
 import { hashParts } from "../shared/hash";
 import type { EntityId, FieldId } from "../shared/ids";
@@ -27,6 +31,8 @@ import { ROUTINE_AWARENESS, ROUTINE_MODES, ROUTINE_ROLES, SKIP_LIVES } from "../
 import { isBand, tierOf } from "../shared/tiers";
 import type { EffectSpec, FieldDef, FieldType, WorldDoc } from "../shared/world";
 import { BUILTIN_RELATIONS, formatMoney, readSectionFeed, spanRecords } from "../shared/world";
+import { parseItemOp, parsePlaceOp, type Spot } from "../shared/things";
+import { parseOrgOp } from "../shared/org-ops";
 import { FEED_EVENT } from "./feed";
 import { calendarOf, slotIndexAt } from "./calendar";
 import { parseDice } from "./dice";
@@ -45,6 +51,8 @@ import { clockFix } from "./time";
 import { moveTrack } from "./tracks";
 import { Working } from "./working";
 import { workspaceOf, workspacePins, wsDelete, wsPin, wsWrite } from "./workspace";
+import { applyItemOp, type ItemOpOptions } from "./thing-ops";
+import { isThing } from "./things";
 
 export interface EditOptions {
   /** The GM editor writes locked fields too; a player's ✎ fix can't. */
@@ -53,6 +61,12 @@ export interface EditOptions {
   runSeed: string;
   /** Resolved again after the story moved on (`resolveFix`): an operation whose outcome is already so is passed over, not refused. */
   again?: boolean;
+  /** Who makes a thing's or a place's change (`made.by`): a turn role writing the story's own change (the Curator); absent, the GM, or the player for a ✎ fix. */
+  by?: string;
+  /** Whether a thing's change counts as confirmed (only then does a Built-in thing move); absent, as `gm` says. */
+  confirmed?: boolean;
+  /** The longest reason (`why`) a thing's change keeps (Settings → Changes from the reply); absent, as given. */
+  whyMax?: number;
 }
 
 /**
@@ -144,6 +158,17 @@ function applyAll(w: Working, events: readonly LedgerEvent[]): Rejection | null 
   return null;
 }
 
+/** How an edit's item ops resolve: the GM's, so confirmed, unless the edit says who makes them and whether they are; a player's ✎ never moves a Built-in thing. */
+function itemOptions(opts: EditOptions, rng: Rng): ItemOpOptions {
+  return { by: opts.by ?? (opts.gm ? "gm" : "player"), confirmed: opts.confirmed ?? opts.gm, gm: opts.gm, salt: rng.seed, ...(opts.whyMax !== undefined ? { whyMax: opts.whyMax } : {}) };
+}
+
+/** A thing moved by an edit: the item op `move`, through the one location writer and its size rules. */
+function thingMove(w: Working, thing: EntityId, to: Spot, opts: EditOptions, rng: Rng): Rejection | null {
+  const out = applyItemOp(w, { do: "move", item: thing, to, why: "" }, itemOptions(opts, rng));
+  return "code" in out ? out : null;
+}
+
 /** The checks every field write shares: a field the kind may hold, never derived, locked only for the GM. */
 function writable(reg: Registry, w: Working, entity: EntityId, field: FieldId, opts: EditOptions): { def: FieldDef | undefined; label: string } | Rejection {
   const e = own(w.state.entities, entity);
@@ -175,7 +200,7 @@ function setField(reg: Registry, w: Working, entity: EntityId, field: FieldId, v
   }
   // A place set from the field editor is a move like any other (the one move path): out of whatever
   // holds them and onto where they stand there, rather than the field alone.
-  if (field === "place" && typeof value === "string" && own(w.world.places, value)) return run(reg, w, [{ type: "move", args: { entity, to: value } }], rng);
+  if (field === "place" && typeof value === "string" && own(w.world.places, value)) return isThing(w.ctx, entity) ? thingMove(w, entity, { place: value }, opts, rng) : run(reg, w, [{ type: "move", args: { entity, to: value } }], rng);
   return run(reg, w, [{ type: "set", args: { entity, field, value } }], rng);
 }
 
@@ -189,13 +214,15 @@ function addField(reg: Registry, w: Working, entity: EntityId, field: FieldId, d
 }
 
 /** A relation: its type known (the world's, a pack's or built in), its ends of the kinds it allows, its fields typed. */
-function linkOp(reg: Registry, w: Working, op: Extract<EditOp, { op: "link" }>, rng: Rng): Rejection | null {
+function linkOp(reg: Registry, w: Working, op: Extract<EditOp, { op: "link" }>, opts: EditOptions, rng: Rng): Rejection | null {
   const def = own(w.world.relations, op.rel) ?? reg.relations.get(op.rel);
   if (!def && !BUILTIN_RELATIONS.some((r) => r === op.rel)) return reject("unknown_relation", `no relation type ${op.rel.replace(/_/g, " ")}`);
   const from = own(w.state.entities, op.from);
   const to = own(w.state.entities, op.to);
   if (!from || !to) return reject("missing_entity", `no entity ${labelOf(w, from ? op.to : op.from)}`);
   if (op.from === op.to) return reject("self", `${from.name} can't relate to itself`);
+  // A thing linked `in` something is a thing moved into it.
+  if (op.rel === "in" && isThing(w.ctx, op.from)) return thingMove(w, op.from, { in: op.to }, opts, rng);
   const label = def?.label ?? op.rel.replace(/_/g, " ");
   if (def && def.from !== "*" && !kindIs(reg, w.world, from.kind, def.from)) return reject("bad_kind", `${label} starts from a ${(kindDef(reg, w.world, def.from)?.label ?? def.from).toLowerCase()}`);
   if (def && def.to !== "*" && !kindIs(reg, w.world, to.kind, def.to)) return reject("bad_kind", `${label} points at a ${(kindDef(reg, w.world, def.to)?.label ?? def.to).toLowerCase()}`);
@@ -212,9 +239,15 @@ function linkOp(reg: Registry, w: Working, op: Extract<EditOp, { op: "link" }>, 
 }
 
 /** Into a container (`in`), never inside itself; or out of it (`into: null`) to where the container stands. */
-function putOp(reg: Registry, w: Working, entity: EntityId, into: EntityId | null, rng: Rng): Rejection | null {
+function putOp(reg: Registry, w: Working, entity: EntityId, into: EntityId | null, opts: EditOptions, rng: Rng): Rejection | null {
   const e = own(w.state.entities, entity);
   if (!e) return reject("missing_entity", `no entity ${labelOf(w, entity)}`);
+  if (isThing(w.ctx, entity)) {
+    if (into !== null) return thingMove(w, entity, { in: into }, opts, rng);
+    const place = placeOfEntity(w.state, entity);
+    if (!e.relations.some((r) => r.type === "in") || !place) return reject("not_inside", `${e.name} isn't inside anything`);
+    return thingMove(w, entity, { place }, opts, rng);
+  }
   const holders = e.relations.filter((r) => r.type === "in");
   const specs: EffectSpec[] = holders.filter((r) => r.to !== into).map((r) => ({ type: "unlink", args: { rel: "in", from: entity, to: r.to } }));
   if (into === null) {
@@ -427,13 +460,16 @@ function applyOp(reg: Registry, w: Working, op: FixOp, opts: EditOptions, rng: R
     case "add":
       return addField(reg, w, op.entity, op.field, op.delta, opts, rng);
     case "link":
-      return linkOp(reg, w, op, rng);
-    case "unlink":
-      return run(reg, w, [{ type: "unlink", args: { rel: op.rel, from: op.from, to: op.to } }], rng);
+      return linkOp(reg, w, op, opts, rng);
+    case "unlink": {
+      // A thing taken out of what holds it lies where that stands.
+      const place = op.rel === "in" && isThing(w.ctx, op.from) && own(w.state.entities, op.from)?.relations.some((r) => r.type === "in" && r.to === op.to) ? placeOfEntity(w.state, op.from) : null;
+      return place ? thingMove(w, op.from, { place }, opts, rng) : run(reg, w, [{ type: "unlink", args: { rel: op.rel, from: op.from, to: op.to } }], rng);
+    }
     case "move":
-      return run(reg, w, [{ type: "move", args: { entity: op.entity, to: op.to } }], rng);
+      return isThing(w.ctx, op.entity) ? thingMove(w, op.entity, { place: op.to }, opts, rng) : run(reg, w, [{ type: "move", args: { entity: op.entity, to: op.to } }], rng);
     case "put":
-      return putOp(reg, w, op.entity, op.into, rng);
+      return putOp(reg, w, op.entity, op.into, opts, rng);
     case "adjust":
       return adjustOp(reg, w, op.account, op.cents, rng);
     case "stage":
@@ -476,6 +512,36 @@ function applyOp(reg: Registry, w: Working, op: FixOp, opts: EditOptions, rng: R
     case "feed":
       // A section's settings in this chat (DESIGN §6.11): one event, so its Undo is the fix's.
       return w.apply({ type: FEED_EVENT, data: { section: op.section, to: op.to as JsonObject | null } });
+    case "item": {
+      // Taking a thing out of the world is the GM's Remove, as for anyone.
+      if (op.change.do === "remove") {
+        if (!opts.gm) return reject("gm_only", "removing a thing from the world is the GM's");
+        if (!isThing(w.ctx, op.change.item)) return reject("not_a_thing", `${labelOf(w, op.change.item)} isn't a thing`);
+        return despawnOp(reg, w, op.change.item, rng);
+      }
+      const out = applyItemOp(w, op.change, itemOptions(opts, rng));
+      return "code" in out ? out : null;
+    }
+    case "place": {
+      // A place made in play is the space pack's (ITEMS-SPEC §6.2): it words the change as its events.
+      const change = optionalService(w.ctx, "space.place_op");
+      if (!change) return reject("no_places", "this world can't make places in play");
+      const out = change(w.ctx, op.change, { by: opts.by ?? (opts.gm ? "gm" : "player"), salt: rng.seed });
+      return "code" in out ? out : applyAll(w, out.events);
+    }
+    case "org": {
+      // An organization's change (ORG-SPEC §7.2) is the orgs pack's: it compiles to the packs' own
+      // effects with no actor, the GM's, so no power is asked, and its History line, run as one unit.
+      if (!opts.gm) return reject("gm_only", "an organization's change is the GM's");
+      const compile = optionalService(w.ctx, "orgs.op");
+      if (!compile) return reject("no_orgs", "this world has no organizations");
+      const specs = compile(w.ctx, op.change);
+      if (!Array.isArray(specs)) return specs;
+      const before = w.events.length;
+      const rejection = run(reg, w, specs, rng);
+      if (rejection) return rejection;
+      return w.events.length === before ? reject("no_change", "nothing to change") : null;
+    }
     case "ws_write":
     case "ws_delete":
     case "ws_move":
@@ -676,6 +742,18 @@ function parseEditOp(o: Record<string, unknown>): EditOp | null {
       if (o.to === null) return { op: "feed", section: o.section, to: null };
       const to = readSectionFeed(o.to);
       return to ? { op: "feed", section: o.section, to } : null;
+    }
+    case "item": {
+      const change = parseItemOp(o.change);
+      return change ? { op: "item", change } : null;
+    }
+    case "place": {
+      const change = parsePlaceOp(o.change);
+      return change ? { op: "place", change } : null;
+    }
+    case "org": {
+      const change = parseOrgOp(o.change);
+      return change ? { op: "org", change } : null;
     }
     default:
       return null;

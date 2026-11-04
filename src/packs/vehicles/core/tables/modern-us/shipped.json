@@ -1,0 +1,43 @@
+{
+  "vehicles.classes": [
+    {
+      "revision": "d66d371fa1fb8f4c87410b2b0b60a307",
+      "columns": {
+        "name": "36de7a58",
+        "domain": "4c6bcbd0",
+        "fuel_type": "aee2d214",
+        "factor_guide": "32381c37",
+        "tank_capacity_gal": "ecc0f9e0",
+        "tank_capacity_l": "803569e8",
+        "usable_battery_kwh": "48d743b9",
+        "consumption_unit": "646be84d",
+        "consumption": "c9cea9c8",
+        "range_mi": "44338d81",
+        "range_h": "1c74e55d",
+        "price_new_cents": "12e8789d",
+        "price_used_cents": "1ae9a3a2",
+        "insurance_liability_cents_per_month": "86319561",
+        "insurance_full_cents_per_month": "bfcecee9",
+        "registration_cents_per_year": "c67fd79c",
+        "annual_maintenance_cents_per_year": "1040090f",
+        "maintenance": "b6c4599e",
+        "passengers": "b6b9986f",
+        "cargo_l": "cf86793b",
+        "payload_kg": "160cfd2c",
+        "towing_kg": "8f6e84e5",
+        "charging": "62c0bd0b",
+        "notes": "36de7a58"
+      }
+    }
+  ],
+  "vehicles.factors": [
+    {
+      "revision": "491579e3ac37e00325a6adb017d7a9c7",
+      "columns": {
+        "basis": "36de7a58",
+        "factors": "45cd92a7",
+        "note": "818bffbf"
+      }
+    }
+  ]
+}

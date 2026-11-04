@@ -116,6 +116,8 @@
     "tiers": { "type": "object", "propertyNames": { "minLength": 1 }, "additionalProperties": { "$ref": "#/$defs/tier" } },
     "spawnTier": { "$ref": "#/$defs/id", "description": "The tier a spawned entity gets when it names none." },
     "spawnCap": { "type": "integer", "minimum": 0, "maximum": 500, "description": "Characters replies may introduce in a chat, in total. Absent: 24." },
+    "placeCap": { "type": "integer", "minimum": 0, "maximum": 500, "description": "Places a chat may make in play (a room, a spot, a venue), in total. Absent: 64." },
+    "placesPerTurn": { "type": "integer", "minimum": 0, "maximum": 500, "description": "Places one reply may make in play. Absent: 2." },
     "lifeStates": { "type": "object", "description": "The world's own life states besides alive, dying and dead, by id. Absent: only those three.", "propertyNames": { "minLength": 1 }, "additionalProperties": { "$ref": "#/$defs/lifeState" } },
     "narrator": {
       "type": "object",
@@ -139,6 +141,7 @@
       "properties": {
         "unpricedCap": { "type": "number", "description": "The most a narrated price nothing else prices is charged, in minor units." },
         "claimCap": { "type": "integer", "minimum": 1, "description": "The most a thing the player says they have may cost before a capped Make it real asks first, in minor units; absent, about the price of a meal." },
+        "shareUnits": { "type": "integer", "minimum": 1, "description": "The units a company whose owners hold shares in percent counts them in the first time it issues shares, buys some back or sets its classes; absent, 1,000." },
         "products": { "type": "object", "description": "Account products by id: a class, and the terms that differ from its defaults.", "additionalProperties": { "type": "object", "required": ["class"], "properties": { "class": { "enum": ["cash", "checking", "business_checking", "savings", "money_market", "cd", "trust", "escrow", "credit_card", "charge_card", "line_of_credit", "loan", "mortgage", "brokerage", "retirement"] }, "label": { "type": "string" }, "institution": { "type": "string" } } } },
         "features": { "type": "object", "description": "Custom toggles: a money feature switched on from its floor up, or off.", "additionalProperties": { "type": "boolean" } },
         "assets": { "type": "object", "description": "Assets the holdings module prices, by id.", "additionalProperties": { "type": "object" } }
@@ -274,7 +277,9 @@
         "kind": { "$ref": "#/$defs/ids" },
         "tier": { "$ref": "#/$defs/ids" },
         "class": { "type": "object", "description": "facet → accepted values", "additionalProperties": { "$ref": "#/$defs/ids" } },
-        "memberOf": { "$ref": "#/$defs/ids" },
+        "memberOf": { "$ref": "#/$defs/ids", "description": "members of any of these organizations: by member_of, directly or through a member group, and a company's owners and staff, a trust's owners" },
+        "party": { "type": "array", "uniqueItems": true, "items": { "enum": ["core", "companion", "hired", "ally"] }, "description": "people in the player character's party in one of these tiers (a party link without a tier is core)" },
+        "position": { "$ref": "#/$defs/ids", "description": "people who hold one of these positions: in a memberOf organization when one is named, else in any" },
         "tag": { "$ref": "#/$defs/strings" }
       }
     },
@@ -570,11 +575,11 @@
             "anyOf": [
               { "$ref": "#/$defs/expr" },
               {
-                "title": "a hard lock",
+                "title": "a hard lock, or a requirement with its words",
                 "type": "object",
                 "required": ["expr"],
                 "additionalProperties": false,
-                "properties": { "expr": { "$ref": "#/$defs/expr" }, "hard": { "type": "boolean" } }
+                "properties": { "expr": { "$ref": "#/$defs/expr" }, "hard": { "type": "boolean" }, "why": { "$ref": "#/$defs/expr", "description": "a formula giving the words the palette shows when it doesn't hold" } }
               }
             ]
           }
@@ -874,7 +879,7 @@
         "id": { "$ref": "#/$defs/id" },
         "kind": { "enum": ["quest", "secret", "puzzle", "agenda"] },
         "label": { "type": "string" },
-        "owner": { "$ref": "#/$defs/id" },
+        "owner": { "$ref": "#/$defs/id", "description": "Whose track it is: an entity id, or \"gm\" for the GM's own (the world's), no one's in the story." },
         "start": { "$ref": "#/$defs/id" },
         "stages": { "type": "object", "propertyNames": { "minLength": 1 }, "additionalProperties": { "$ref": "#/$defs/stage" } },
         "visibility": { "$ref": "#/$defs/visibility" },

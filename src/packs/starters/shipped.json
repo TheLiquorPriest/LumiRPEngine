@@ -1,0 +1,220 @@
+{
+  "fantasy_town": {
+    "economy.catalog": [
+      {
+        "revision": "090284118982be8b91fee509f8d4ed75",
+        "columns": {
+          "name": "36de7a58",
+          "category": "eb33dd96",
+          "unit": "d76e2f69",
+          "price_cents": "c3c50850",
+          "notes": "818bffbf"
+        }
+      },
+      {
+        "revision": "071cffdc044b57ee63b2a02201bbd345",
+        "columns": {
+          "name": "36de7a58",
+          "category": "eb33dd96",
+          "unit": "d76e2f69",
+          "size": "61b5e71c",
+          "price_cents": "c3c50850",
+          "notes": "818bffbf"
+        }
+      },
+      {
+        "revision": "babcf79fa523e87be47ce8f06d08c3e2",
+        "columns": {
+          "name": "36de7a58",
+          "aliases": "5ef531bf",
+          "category": "eb33dd96",
+          "unit": "d76e2f69",
+          "size": "61b5e71c",
+          "holds": "33b23ddc",
+          "price_cents": "c3c50850",
+          "notes": "818bffbf"
+        }
+      }
+    ],
+    "economy.categories": [
+      {
+        "revision": "b58c6ce5c3336d8067722e4ada3bdb05",
+        "columns": {
+          "name": "36de7a58",
+          "basis": "0f257421",
+          "notes": "818bffbf",
+          "price_unit_note": "862e8973",
+          "item_count": "b6b9986f",
+          "price_cents": "349e3c5a"
+        }
+      }
+    ],
+    "gear.items": [
+      {
+        "revision": "32f73961cc1d7ce1574dec1f46aaf278",
+        "columns": {
+          "name": "36de7a58",
+          "category": "f365a17a",
+          "equip_slot": "d0861bfc",
+          "weight_g": "65a14944",
+          "volume_l": "cf86793b",
+          "price_cents": "12e8789d",
+          "notes": "818bffbf"
+        }
+      },
+      {
+        "revision": "bbe5564544b975612164c412d2ac3249",
+        "columns": {
+          "name": "36de7a58",
+          "category": "f365a17a",
+          "equip_slot": "d0861bfc",
+          "weight_g": "65a14944",
+          "volume_l": "cf86793b",
+          "size": "8f86d188",
+          "price_cents": "12e8789d",
+          "notes": "818bffbf"
+        }
+      }
+    ],
+    "vehicles.classes": [
+      {
+        "revision": "63a3d347866b62d922bae0ec1bdd1797",
+        "columns": {
+          "name": "36de7a58",
+          "domain": "4c6bcbd0",
+          "fuel_type": "adeba34e",
+          "factor_guide": "32381c37",
+          "tank_capacity_gal": "ecc0f9e0",
+          "tank_capacity_l": "803569e8",
+          "usable_battery_kwh": "48d743b9",
+          "consumption_unit": "646be84d",
+          "consumption": "c9cea9c8",
+          "range_mi": "44338d81",
+          "range_h": "1c74e55d",
+          "price_new_cents": "12e8789d",
+          "price_used_cents": "1ae9a3a2",
+          "insurance_liability_cents_per_month": "86319561",
+          "insurance_full_cents_per_month": "bfcecee9",
+          "registration_cents_per_year": "c67fd79c",
+          "annual_maintenance_cents_per_year": "1040090f",
+          "maintenance": "b6c4599e",
+          "passengers": "b6b9986f",
+          "cargo_l": "cf86793b",
+          "payload_kg": "160cfd2c",
+          "towing_kg": "8f6e84e5",
+          "charging": "62c0bd0b",
+          "notes": "36de7a58"
+        }
+      }
+    ]
+  },
+  "mystery_manor": {
+    "economy.catalog": [
+      {
+        "revision": "3e419fc1ebe145e22a0badcda3ec4a76",
+        "columns": {
+          "name": "36de7a58",
+          "category": "eb33dd96",
+          "unit": "d76e2f69",
+          "price_cents": "c3c50850",
+          "notes": "818bffbf"
+        }
+      },
+      {
+        "revision": "d2770e3e1b58dfd93490cf12fe26dc58",
+        "columns": {
+          "name": "36de7a58",
+          "category": "eb33dd96",
+          "unit": "d76e2f69",
+          "size": "61b5e71c",
+          "price_cents": "c3c50850",
+          "notes": "818bffbf"
+        }
+      },
+      {
+        "revision": "acce89ae165a4fe873899b9cd8b84cac",
+        "columns": {
+          "name": "36de7a58",
+          "aliases": "5ef531bf",
+          "category": "eb33dd96",
+          "unit": "d76e2f69",
+          "size": "61b5e71c",
+          "holds": "33b23ddc",
+          "price_cents": "c3c50850",
+          "notes": "818bffbf"
+        }
+      }
+    ],
+    "economy.categories": [
+      {
+        "revision": "0e5202e0d1140576442d90298cdad64a",
+        "columns": {
+          "name": "36de7a58",
+          "basis": "0f257421",
+          "notes": "818bffbf",
+          "price_unit_note": "862e8973",
+          "item_count": "b6b9986f",
+          "price_cents": "349e3c5a"
+        }
+      }
+    ],
+    "gear.items": [
+      {
+        "revision": "9ac229055bb3e68c136db8119ae02b1c",
+        "columns": {
+          "name": "36de7a58",
+          "category": "f365a17a",
+          "equip_slot": "d0861bfc",
+          "weight_g": "65a14944",
+          "volume_l": "cf86793b",
+          "price_cents": "12e8789d",
+          "notes": "818bffbf"
+        }
+      },
+      {
+        "revision": "a799c31ed29573302a62b08a89edcf94",
+        "columns": {
+          "name": "36de7a58",
+          "category": "f365a17a",
+          "equip_slot": "d0861bfc",
+          "weight_g": "65a14944",
+          "volume_l": "cf86793b",
+          "size": "8f86d188",
+          "price_cents": "12e8789d",
+          "notes": "818bffbf"
+        }
+      }
+    ],
+    "vehicles.classes": [
+      {
+        "revision": "fb9d85ba90b254c358bfa7894216fffb",
+        "columns": {
+          "name": "36de7a58",
+          "domain": "4c6bcbd0",
+          "fuel_type": "adeba34e",
+          "factor_guide": "32381c37",
+          "tank_capacity_gal": "ecc0f9e0",
+          "tank_capacity_l": "803569e8",
+          "usable_battery_kwh": "48d743b9",
+          "consumption_unit": "646be84d",
+          "consumption": "c9cea9c8",
+          "range_mi": "44338d81",
+          "range_h": "1c74e55d",
+          "price_new_cents": "12e8789d",
+          "price_used_cents": "1ae9a3a2",
+          "insurance_liability_cents_per_month": "86319561",
+          "insurance_full_cents_per_month": "bfcecee9",
+          "registration_cents_per_year": "c67fd79c",
+          "annual_maintenance_cents_per_year": "1040090f",
+          "maintenance": "b6c4599e",
+          "passengers": "b6b9986f",
+          "cargo_l": "cf86793b",
+          "payload_kg": "160cfd2c",
+          "towing_kg": "8f6e84e5",
+          "charging": "62c0bd0b",
+          "notes": "36de7a58"
+        }
+      }
+    ]
+  }
+}

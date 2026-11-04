@@ -134,8 +134,8 @@ describe("what the sections say, in words", () => {
     await rig.turn(chatId, "I nod to Danny.", "Danny nods back.");
     const outline = rig.host.assembled.find((e) => e.content.startsWith("[Outline]"))?.content ?? "";
     for (const l of outline.split("\n").filter((x) => x.includes("Danny Okafor"))) expect(l).not.toMatch(bare);
-    // Someone here doing nothing in particular is simply here.
+    // Someone here doing nothing in particular is simply here, with their title where an organization ties them to the player character (ORG-SPEC §3.15).
     await edit(rig, chatId, { op: "set", entity: "danny_okafor", field: "activity", value: "idle" });
-    expect(bullets((await preview(rig, chatId)).sections.find((s) => s.slot === "people")?.content)).toContain("- Danny Okafor is here.");
+    expect(bullets((await preview(rig, chatId)).sections.find((s) => s.slot === "people")?.content)).toContain("- Danny Okafor (mechanic at Alder Automotive, where you work) is here.");
   });
 });

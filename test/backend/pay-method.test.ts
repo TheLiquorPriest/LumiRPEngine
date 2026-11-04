@@ -1,5 +1,6 @@
 // A typed Buy that names how it's paid: when interpret leaves `method` empty, the
-// player's own words fill it; a method interpret set stands.
+// player's own words fill it, a card or account named by more than its way among them; a method
+// interpret set stands.
 
 import { describe, expect, test } from "bun:test";
 import type { JsonObject } from "../../src/shared/json";
@@ -34,6 +35,11 @@ describe("a typed Buy's way of paying", () => {
     expect(probes.map(saidPayMethod)).toEqual([null, "debit card", "debit card", "cash", "credit card", null, "credit card"]);
   });
 
+  test("a card or account named by more than its way keeps the words that name it", () => {
+    const probes = ["I pay with my Amex.", "I put it on my Chase Sapphire card.", "I pay from the joint account.", "I pay with the card ending in 4417.", "I pay from my savings account.", "I pay with the account."];
+    expect(probes.map(saidPayMethod)).toEqual(["amex", "chase sapphire card", "joint account", "card ending in 4417", "savings", null]);
+  });
+
   test("buying a credit card holder doesn't charge the card", async () => {
     const text = "I buy a credit card holder for $12.";
     const none = await buy(null, text);
@@ -56,5 +62,14 @@ describe("a typed Buy's way of paying", () => {
     const got = await buy({ item: "old brass ship's lantern", price: 84, method: "checking" });
     expect(got.card).toBe(none.card);
     expect(none.checking - got.checking).toBe(8904);
+  });
+
+  test("the card the player names by its last four digits pays, though it isn't the way 'card' alone would take", async () => {
+    const none = await buy(null, "I buy the old brass ship's lantern and pay with the card ending in 4417.");
+    const got = await buy({ item: "old brass ship's lantern", price: 84 }, "I buy the old brass ship's lantern and pay with the card ending in 4417.");
+    // The debit card, on checking: $84 and Michigan's 6% sales tax.
+    expect(none.checking - got.checking).toBe(8904);
+    expect(got.card).toBe(none.card);
+    expect(got.errors).toEqual([]);
   });
 });

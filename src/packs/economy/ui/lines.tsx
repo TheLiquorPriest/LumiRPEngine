@@ -27,6 +27,20 @@ export function OwnerRows(props: { owners: readonly OwnerLine[]; icon?: IconName
   );
 }
 
+/** One journal line: its memo; when, its account (`account`), category, other side and card, and who made it for the organization whose account it is ("Paid by Jordan Ellis for Alder Automotive"); its amount. */
+export function TxnRow(props: { line: JournalLine; currency: WorldCurrency; account?: boolean }) {
+  const t = props.line;
+  return (
+    <ListRow
+      title={t.memo}
+      subtitle={[t.at, props.account ? t.account : null, t.category ? humanize(t.category) : null, t.counterparty, t.card, t.by ?? null].filter((s) => s !== null && s !== "").join(" · ")}
+      badge={t.status === "pending" ? <Badge>Pending</Badge> : undefined}
+      value={`${t.cents > 0 ? "+" : ""}${formatMoney(t.cents, props.currency)}`}
+      valueTone={t.cents < 0 ? "neg" : "pos"}
+    />
+  );
+}
+
 /** Journal lines, newest first: at most `max`, with a Show all when there are more. `account` names each line's account. */
 export function TxnRows(props: { lines: readonly JournalLine[]; max: number; currency: WorldCurrency; account?: boolean }) {
   const [all, setAll] = useState(false);
@@ -36,14 +50,7 @@ export function TxnRows(props: { lines: readonly JournalLine[]; max: number; cur
     <div class="lre-money-lines">
       <List>
         {shown.map((t, i) => (
-          <ListRow
-            key={`${t.id}:${i}`}
-            title={t.memo}
-            subtitle={[t.at, props.account ? t.account : null, t.category ? humanize(t.category) : null, t.counterparty, t.card].filter((s) => s !== null && s !== "").join(" · ")}
-            badge={t.status === "pending" ? <Badge>Pending</Badge> : undefined}
-            value={`${t.cents > 0 ? "+" : ""}${formatMoney(t.cents, props.currency)}`}
-            valueTone={t.cents < 0 ? "neg" : "pos"}
-          />
+          <TxnRow key={`${t.id}:${i}`} line={t} currency={props.currency} account={props.account} />
         ))}
       </List>
       {props.lines.length > shown.length ? (

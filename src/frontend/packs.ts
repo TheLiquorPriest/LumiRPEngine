@@ -9,6 +9,7 @@ import castlife from "../packs/castlife/ui";
 import economy from "../packs/economy/ui";
 import gear from "../packs/gear/ui";
 import minds from "../packs/minds/ui";
+import orgs from "../packs/orgs/ui";
 import sheets from "../packs/sheets/ui";
 import space from "../packs/space/ui";
 import story from "../packs/story/ui";
@@ -36,4 +37,4 @@ const core: UiPackDef = {
   },
 };
 
-export const UI_PACKS: readonly UiPackDef[] = [core, sheets, economy, vehicles, gear, castlife, calendar, story, space, combat, minds];
+export const UI_PACKS: readonly UiPackDef[] = [core, sheets, economy, vehicles, gear, castlife, orgs, calendar, story, space, combat, minds];

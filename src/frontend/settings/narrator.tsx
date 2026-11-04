@@ -7,7 +7,7 @@
 import type { JsonObject } from "../../shared/json";
 import type { NarratorKnowledge, NarratorSecrets, NarratorView } from "../../shared/settings";
 import { NARRATOR_KNOWLEDGE, NARRATOR_KNOWLEDGE_LABEL, NARRATOR_SECRETS, NARRATOR_SECRETS_LABEL } from "../../shared/settings";
-import { Section, Seg } from "../components";
+import { HostSwitch, Section, Seg } from "../components";
 
 const KNOWLEDGE_CHOICES = NARRATOR_KNOWLEDGE.map((value) => ({ value, label: NARRATOR_KNOWLEDGE_LABEL[value] }));
 const SECRETS_CHOICES = NARRATOR_SECRETS.map((value) => ({ value, label: NARRATOR_SECRETS_LABEL[value] }));
@@ -50,11 +50,11 @@ export function NarratorViewControl(props: { value: NarratorView; disabled?: boo
   );
 }
 
-export function NarratorPage(props: { narrator: NarratorView; patch(patch: JsonObject): void; busy: boolean }) {
+export function NarratorPage(props: { narrator: NarratorView; statePrices: boolean; patch(patch: JsonObject): void; busy: boolean }) {
   const { narrator, busy } = props;
   return (
     <div class="lre-stack lre-minds-set" data-lre-settings-page="narrator">
-      <p class="lre-set-lead">What the narrator is told each turn: whose knowledge, and what of a secret.</p>
+      <p class="lre-set-lead">What the narrator is told each turn: whose knowledge, what of a secret, and the prices the engine charges.</p>
       <Section>
         <div class="lre-minds-body">
           <NarratorViewControl value={narrator} disabled={busy} onChange={(next) => props.patch({ narrator: { knowledge: next.knowledge, secrets: next.secrets } })} />
@@ -62,6 +62,16 @@ export function NarratorPage(props: { narrator: NarratorView; patch(patch: JsonO
           <p class="lre-minds-note" data-lre-mark-wording>
             How a secret is marked, and what the narrator is told a mark means, are yours to word in Settings → Agents → Prompts → Final output, under Secret marks.
           </p>
+        </div>
+      </Section>
+      <Section title="Prices">
+        <div class="lre-field" data-lre-state-prices>
+          <HostSwitch label="The narrator states prices" checked={props.statePrices} disabled={busy} onChange={(statePrices) => props.patch({ statePrices })} />
+          <span class="lre-field-help">
+            {props.statePrices
+              ? "The Money section lists what is sold where your character is, at the price the engine charges there today, and the narrator is told to state the engine's price whenever a purchase or a price comes up: that price, or what a purchase this turn cost. Its words are yours in Settings → Agents → Prompts → Final output, under Narrator rules."
+              : "The narrator gets no prices and isn't told to state them. Purchases are still priced and charged as ever."}
+          </span>
         </div>
       </Section>
     </div>

@@ -1,96 +1,59 @@
 // Gear & containers pack (DESIGN §9.3): own, hold, wear and store; equip slots; containers with
 // volume and load limits; stacks; kits as template plus overrides; condition, wear, consumables;
-// use grants (lending) with overdue semantics.
+// use grants (lending) with overdue semantics; everyday carry (ITEMS-SPEC §4.4, `carry.ts`); the
+// put-away process, off screen, of NPCs' things left lying away from where they are kept (§4.3,
+// `put-away.ts`).
 //
 // Level contract (domain `gear`):
 //   0  off: transfers are no-ops; nothing renders
-//   1  notable items only render (transfers still apply: the data is uniform)
+//   1  only things in play render: notable ones and what the story brought in (transfers still
+//      apply: the data is uniform); everyday carry is made from here
 //   2  items, containers (volume/load limits), stacks; cash lives in a wallet
 //   3  worn and equipped slots, kits, condition
 //   4  wear per use, consumables
 //
 // Services: gear.transfer, gear.drop, gear.give, gear.spawn, gear.take_piece, gear.lend,
-// gear.retrieve. Queries: has_item, gear.kit_status, gear.overdue.
+// gear.retrieve. Queries: has_item, gear.kit_status, gear.overdue. Formulas besides: who may use a
+// thing and who may lend it out (`may_use`, `may_assign`: the things model's access resolver).
+// The Gear and People sections are `feed.ts`'s; Play → Me → Gear is `view.ts`'s.
 
 import type { JsonObject, JsonValue } from "../../../shared/json";
-import { hasOwn } from "../../../shared/json";
+import { hasOwn, isRecord } from "../../../shared/json";
 import type { EntityId, PlaceId } from "../../../shared/ids";
 import { hashParts } from "../../../shared/hash";
 import type { LedgerEvent } from "../../../shared/ledger";
-import type { DataTable } from "../../../shared/tables";
-import { requirementExpr, type ActionDef, type EffectSpec, type EntityDef, type KindDef, type WorldCurrency, type WorldDoc } from "../../../shared/world";
+import type { DataTable, ShippedRevision } from "../../../shared/tables";
+import { AUDIENCES } from "../../../shared/org";
+import { GRANT_BASES, HANDOVER_BASES, isItemChange, ITEM_CHANGES, PERMIT_SCOPES, SIZES, THING_FACTS, thingsConfigOf, type HandoverBasis, type ItemOp, type Size } from "../../../shared/things";
+import { requirementExpr, type ActionDef, type EntityDef, type KindDef, type WorldCurrency, type WorldDoc } from "../../../shared/world";
+import { accessFor, assignFor, reachOf } from "../../../engine/access";
 import { calendarOf, clockOfPhrase } from "../../../engine/calendar";
 import { ENGINE_EVENTS } from "../../../engine/engine-pack";
-import { bump, labelOf, numOf, optionalService, strOf, own, rowOf } from "../../../engine/pack-kit";
-import type { FeedLine, PackDef, ReadContext, Rejection } from "../../../engine/registry";
+import { orgPower, orgTypeOf } from "../../../engine/org";
+import { bump, labelOf, numOf, optionalQuery, optionalService, strOf, own, rowOf } from "../../../engine/pack-kit";
+import { factOf, reconcileFact, type Reconciled } from "../../../engine/reconcile-things";
+import type { EffectContext, FeedLine, PackDef, ReadContext, Rejection } from "../../../engine/registry";
 import { effectLists } from "../../../engine/ruleset-lint";
 import { GONE_FIELD, isGone, kindIs, placeOfEntity } from "../../../engine/scope";
-import { carriedBy, contentsOf, findPiece, fitProblem, fixedOf, goesIn, grants, hasItem, holderOf, holdProblem, holdsAs, isInside, kindGoesIn, kindHoldsAs, kitStatus, overdueFor, takenOf, weightOf, type Grant, type KitStatus } from "./model";
+import { applyItemOp } from "../../../engine/thing-ops";
+import { carriedBy, findPiece, fitProblem, fitsOn, fixedOf, goesIn, grants, hasItem, holdProblem, holdsAs, isInside, kindGoesIn, kindHoldsAs, kitStatus, overdueFor, takenOf, weightOf, type Grant, type KitStatus } from "./model";
+import { putAwayEvents } from "./put-away";
+import { contentsOf, holderOf, possessorOf, restOf, spotOf, whoseOf } from "../../../engine/things";
 import { sentence, thingName, thingText } from "../../../engine/thing-words";
 import { canSeeEntity, isDiscoverable, knows } from "../../../engine/visibility";
 import { together } from "../../../engine/presence";
+import { Working } from "../../../engine/working";
 import type { FeedScope } from "../../../shared/world";
 import type { EntityState } from "../../../engine/state";
+import { carryDue, carryProblems } from "./carry";
+import { gearLines, presentGearLines } from "./feed";
 import { buildGearView } from "./view";
+import { THING_LINTS } from "./thing-lint";
 import containers from "./tables/modern-us/containers.json";
 import items from "./tables/modern-us/items.json";
 import kits from "./tables/modern-us/kits.json";
 import slots from "./tables/modern-us/slots.json";
-
-/** What a holder wears or has equipped. */
-export function wornBy(ctx: ReadContext, who: EntityId): EntityId[] {
-  return Object.keys(ctx.state.entities)
-    .sort()
-    .filter((id) => own(ctx.state.entities, id)?.relations.some((x) => (x.type === "worn_by" || x.type === "equipped") && x.to === who));
-}
-
-/** Where a worn or equipped thing is on its holder, as a gear line groups it: a pocket isn't something worn. */
-function wornAs(ctx: ReadContext, id: EntityId, who: EntityId): "pockets" | "hand" | "worn" {
-  const r = own(ctx.state.entities, id)?.relations.find((x) => (x.type === "worn_by" || x.type === "equipped") && x.to === who);
-  const slot = typeof r?.fields?.slot === "string" ? r.fields.slot : "";
-  return slot === "pocket" || slot === "pocket_or_bag" ? "pockets" : r?.type === "equipped" || slot === "hand_held" ? "hand" : "worn";
-}
-
-/** The lead of each group of worn or equipped things in a Gear line. */
-const WORN_LEAD: Record<"pockets" | "hand" | "worn", string> = { pockets: "In your pockets", hand: "In your hands", worn: "Wearing" };
-
-/**
- * The Gear section (DESIGN §6, §6.11): what the POV carries (only notable things at Gear 1), from
- * Gear 3 what it wears, and what it has lent and borrowed; only what it can see. Each thing has a
- * line of its own with its details as the POV may see them (`thingText`: a count, a kit's pieces,
- * its kind's fields, its description), and a thing inside another says what it is in. In `gm`
- * scope, something it carries without knowing (a thing planted on it) is added, marked.
- */
-export function gearLines(ctx: ReadContext, scope: FeedScope): FeedLine[] {
-  const pov = ctx.world.pov;
-  const level = ctx.levelOf(pov, "gear");
-  if (level === 0) return [];
-  const see = (id: EntityId): boolean => canSeeEntity(ctx.registry, ctx.world, ctx.state, pov, id);
-  const carried = carriedBy(ctx.state, pov).filter((id) => own(ctx.state.entities, id)?.kind !== "account");
-  // From Gear 3, what is worn, in a pocket or in hand is told where it is, and not again as carried.
-  const worn = level >= 3 ? wornBy(ctx, pov).filter(see) : [];
-  const shown = carried.filter((id) => see(id) && !worn.includes(id) && (level >= 2 || own(ctx.state.entities, id)?.fields.notable === true));
-  // What a carried thing is in, when that is something other than the POV itself.
-  const inside = (id: EntityId): string[] => {
-    const holder = holderOf(ctx.state, id);
-    return holder !== null && holder !== pov && see(holder) ? [`in ${own(ctx.state.entities, holder)?.name ?? holder}`] : [];
-  };
-  const lines: FeedLine[] = [];
-  for (const as of ["worn", "pockets", "hand"] as const) {
-    for (const id of worn.filter((w) => wornAs(ctx, w, pov) === as)) lines.push({ text: sentence(`${WORN_LEAD[as]}: ${thingText(ctx, id)}`), known: "pov" });
-  }
-  for (const id of shown) lines.push({ text: sentence(`${worn.length > 0 ? "Also carrying" : "Carrying"}: ${thingText(ctx, id, inside(id))}`), known: "pov" });
-  for (const g of grants(ctx.state)) {
-    if (!see(g.thing)) continue;
-    if (g.owner === pov) lines.push({ text: `You lent ${own(ctx.state.entities, g.thing)?.name ?? g.thing} to ${see(g.borrower) ? (own(ctx.state.entities, g.borrower)?.name ?? g.borrower) : "someone"}${g.overdue ? " (overdue: it should have come back by now)" : ""}.`, known: "pov" });
-    else if (g.borrower === pov) lines.push({ text: `You borrowed ${own(ctx.state.entities, g.thing)?.name ?? g.thing}${g.overdue ? " (overdue: it should go back)" : ""}.`, known: "pov" });
-  }
-  if (scope === "gm") {
-    const unknown = [...carried, ...wornBy(ctx, pov)].filter((id) => !see(id));
-    if (unknown.length > 0) lines.push({ text: `On you without your knowing: ${unknown.map((id) => thingName(ctx, id, level)).join(", ")}.`, known: "gm" });
-  }
-  return lines;
-}
+import shipped from "./tables/modern-us/shipped.json";
 
 /**
  * The authored effects that move a thing, by the argument naming what they move and the one naming
@@ -182,44 +145,9 @@ function authoredMoves(world: WorldDoc): { things: Map<string, string>; holders:
   return { things, holders };
 }
 
-/**
- * What each person with the POV that it can see visibly wears and carries (DESIGN §6.11): every
- * worn and equipped thing and everything they hold in hand, never what is in a bag or a pocket. Only
- * what the POV can see. In `scene` scope, a thing on them the POV can't see but they can (by the
- * visibility rules, so never a secret one), marked as theirs to know; in `gm`, any other thing on
- * them too.
- */
-export function presentGearLines(ctx: ReadContext, scope: FeedScope): FeedLine[] {
-  const pov = ctx.world.pov;
-  if (ctx.levelOf(pov, "gear") === 0) return [];
-  const see = (who: EntityId, id: EntityId): boolean => canSeeEntity(ctx.registry, ctx.world, ctx.state, who, id);
-  const here = placeOfEntity(ctx.state, pov);
-  const lines: FeedLine[] = [];
-  for (const who of Object.keys(ctx.state.entities).sort()) {
-    const person = own(ctx.state.entities, who);
-    if (!person || who === pov || !kindIs(ctx.registry, ctx.world, person.kind, "person") || isGone(ctx.state, who) || !see(pov, who) || !together(ctx.world, here, placeOfEntity(ctx.state, who))) continue;
-    const level = Math.max(1, ctx.levelOf(who, "gear"));
-    const worn = wornBy(ctx, who);
-    const held = contentsOf(ctx.state, who).filter((id) => {
-      const e = own(ctx.state.entities, id);
-      return !!e && e.kind !== "account" && e.fields.slot !== "pocket" && !worn.includes(id);
-    });
-    const say = (ids: readonly EntityId[]): string => ids.map((id) => thingName(ctx, id, level)).join(", ");
-    const wornSeen = worn.filter((id) => see(pov, id));
-    const heldSeen = held.filter((id) => see(pov, id));
-    const parts = [...(wornSeen.length > 0 ? [`wears ${say(wornSeen)}`] : []), ...(heldSeen.length > 0 ? [`carries ${say(heldSeen)}`] : [])];
-    if (parts.length > 0) lines.push({ text: `${person.name} ${parts.join("; ")}.`, known: "pov" });
-    if (scope === "player") continue;
-    const hidden = [...worn, ...held].filter((id) => !see(pov, id));
-    const theirs = hidden.filter((id) => see(who, id));
-    const gms = hidden.filter((id) => !see(who, id));
-    if (theirs.length > 0) lines.push({ text: `${person.name} has ${say(theirs)}.`, known: "scene", who: person.name });
-    if (scope === "gm" && gms.length > 0) lines.push({ text: `${person.name} has ${say(gms)}.`, known: "gm" });
-  }
-  return lines;
-}
-
 const TABLES: DataTable[] = [items, containers, kits, slots] as unknown as DataTable[];
+/** Every revision each table has shipped as (the table build's record). */
+const SHIPPED = shipped as unknown as Readonly<Record<string, readonly ShippedRevision[]>>;
 
 export interface GearSpawn {
   name: string;
@@ -235,6 +163,12 @@ export interface GearSpawn {
   salt?: string;
   /** A bought or received thing joins a matching stack its holder has (DESIGN §9.4 stacking) rather than making another. */
   stack?: boolean;
+  /** Its size, when the story says it (a purchase's, ITEMS-SPEC §5.2). */
+  size?: Size;
+  /** Fields it is made with as given: a purchase's `got` and `made` (ITEMS-SPEC §3.3). */
+  fields?: JsonObject;
+  /** False for what nobody brought into play (everyday carry, ITEMS-SPEC §4.4): it shows at Gear 1 only once the story touches it. */
+  notable?: boolean;
 }
 
 /** A thing the player says they have, made real for their action (DESIGN §9.4 player claims). */
@@ -301,6 +235,25 @@ export const ITEM: KindDef = {
     from_kit: { type: "ref", label: "From kit", locked: true },
     // Something built in or too big to lift (a mill stone, an installed relay): nobody picks it up or puts it anywhere (DESIGN §7).
     fixed: { type: "bool", label: "Fixed in place (can't be picked up)", locked: true },
+    // The things model (ITEMS-SPEC §3.2, §3.5), each unset by default and read as inferred when unset
+    // (`engine/things`): its size and the largest a holder of it takes, where it is kept (a place, a
+    // holder, or "owner": on whoever owns it), its other names, who may use it beyond its owner, and
+    // its traits.
+    size: { type: "enum", label: "Size", values: [...SIZES] },
+    holds: { type: "enum", label: "Takes things up to", values: [...SIZES] },
+    home: { type: "text", label: "Kept at (a place, a holder, or owner)" },
+    aliases: { type: "list", of: "text", label: "Also called" },
+    description: { type: "text", label: "Description" },
+    access: { type: "enum", label: "Who may use it", values: [...AUDIENCES] },
+    sleep: { type: "bool", label: "Can be slept in or on" },
+    part: { type: "bool", label: "Built into what holds it" },
+    // What the engine records as play goes (ITEMS-SPEC §3.3, §6.1): how whoever has it came to
+    // (`got {how, from?, at, why?}`), who made it in play and where (`made {by, at}`), a hidden thing it
+    // may be the same as, and the thing a merge kept in its place.
+    got: { type: "list", label: "How its holder came to have it", locked: true },
+    made: { type: "list", label: "Made in play (by whom, where)", locked: true },
+    maybe_same_as: { type: "ref", label: "Maybe the same as", locked: true },
+    merged_into: { type: "ref", label: "Merged into", locked: true },
   },
 };
 
@@ -474,8 +427,8 @@ const spawn = (ctx: ReadContext, spec: GearSpawn): Events => {
     return [typeof stored === "number" ? { type: "add", entity: stack, field: "qty", delta: spec.qty ?? 1 } : { type: "set", entity: stack, field: "qty", value: 1 + (spec.qty ?? 1) }];
   }
   const row = spec.catalog ? (rowOf(ctx, "gear.items", spec.catalog) ?? rowOf(ctx, "gear.containers", spec.catalog)) : undefined;
-  // What comes into play (found, bought, handed over) is notable, so Gear 1 shows it as it shows authored notable things.
-  const fields: JsonObject = { notable: true };
+  // What comes into play (found, bought, handed over) is notable, so Gear 1 shows it as it shows authored notable things; everyday carry isn't.
+  const fields: JsonObject = spec.notable === false ? {} : { notable: true };
   if (spec.owner) fields.owner = spec.owner;
   if (spec.catalog) fields.catalog = spec.catalog;
   if (spec.category ?? row?.category) fields.category = spec.category ?? strOf(row?.category);
@@ -488,10 +441,14 @@ const spawn = (ctx: ReadContext, spec: GearSpawn): Events => {
     if (typeof row.max_load_kg === "number") fields.max_load_kg = row.max_load_kg;
     if (typeof row.equip_slot === "string" && row.equip_slot !== "none") fields.slot = row.equip_slot;
   }
+  if (spec.size) fields.size = spec.size;
+  if (spec.fields) Object.assign(fields, spec.fields);
   const id = spawnId(ctx, spec);
   const relations = spec.holder && own(ctx.state.entities, spec.holder) ? [{ type: "in", to: spec.holder }] : [];
   if (relations.length === 0 && spec.place) fields.place = spec.place;
-  const kind = spec.kind ?? (row && typeof row.capacity_l === "number" ? "container" : "item");
+  // What holds things is a container: a row with room, or a furnishing that holds (a refrigerator bought, ITEMS-SPEC §3.2).
+  const holds = spec.catalog ? rowOf(ctx, "economy.catalog", spec.catalog)?.holds : undefined;
+  const kind = spec.kind ?? ((row && typeof row.capacity_l === "number") || (typeof holds === "string" && (SIZES as readonly string[]).includes(holds)) ? "container" : "item");
   const entity: EntityDef = { id, kind, name: spec.name, tier: "background", fields, relations };
   return [{ type: "spawn", entity }];
 };
@@ -524,36 +481,56 @@ function search(ctx: ReadContext, who: EntityId, target: EntityId | null): Event
 }
 
 /**
- * The thing a narrated hand-over names (DESIGN §9.4 `give`): an id as given, else the one thing
- * the giver holds by that name, any case and without a leading article, so "the brass key" is the
- * key they carry rather than a new one. A name that fits none or several stays as it was.
+ * The events an item op makes (ITEMS-SPEC §3.5, §8) as an action's or an authored effect's: the one
+ * validator's, on what the state holds now, by `by`, never confirmed, so a Built-in thing never moves
+ * by an action. Nothing at Gear 0, where moves are no-ops.
  */
-function heldItem(ctx: ReadContext, item: string, from: EntityId): string {
-  if (own(ctx.state.entities, item) || from === "") return item;
-  const name = item.trim().replace(/^(?:a|an|the|my|his|her|their|your|our)\s+/i, "").toLowerCase();
-  // Only what the player character can see: a hidden thing by that name is none, so it neither hides a visible one nor tells of itself.
-  const fits = carriedBy(ctx.state, from).filter((id) => !isGone(ctx.state, id) && canSeeEntity(ctx.registry, ctx.world, ctx.state, ctx.world.pov, id) && own(ctx.state.entities, id)?.name.trim().toLowerCase() === name);
-  return fits.length === 1 && fits[0] !== undefined ? fits[0] : item;
+function itemOpEvents(ctx: ReadContext, op: Exclude<ItemOp, { do: "remove" }>, by: EntityId, salt: string): Events {
+  const thing = "item" in op ? op.item : null;
+  const to = op.do === "hand" ? op.to : op.do === "move" && "in" in op.to ? op.to.in : undefined;
+  if (thing !== null && own(ctx.state.entities, thing) && gearLevel(ctx, thing, to) === 0) return [];
+  const w = new Working(ctx.registry, ctx.world, ctx.state);
+  const out = applyItemOp(w, op, { by, confirmed: false, gm: false, salt, viewer: ctx.world.pov });
+  return "code" in out ? out : [...w.events];
 }
 
-/** The one thing lying loose where `who` is by that name (any case, no leading article), as `heldItem` reads a held one; the name itself when none or several fit. */
-function lyingNamed(ctx: ReadContext, item: string, who: EntityId): string {
-  const place = placeOfEntity(ctx.state, who);
-  const name = item.trim().replace(/^(?:a|an|the|my|his|her|their|your|our)\s+/i, "").toLowerCase();
-  // Only what the player character can see: a hidden or undiscovered thing by that name reads as none, so nothing tells of it.
-  const fits = Object.keys(ctx.state.entities).filter((id) => !isGone(ctx.state, id) && !heldByPerson(ctx, id) && placeOfEntity(ctx.state, id) === place && canSeeEntity(ctx.registry, ctx.world, ctx.state, ctx.world.pov, id) && own(ctx.state.entities, id)?.name.trim().toLowerCase() === name);
-  return fits.length === 1 && fits[0] !== undefined ? fits[0] : item;
-}
-
-/** Whether someone has the thing on them, at any depth (a pocket, a bag): picking it up would be taking it from them. */
-function heldByPerson(ctx: ReadContext, id: EntityId): boolean {
-  let cur = holderOf(ctx.state, id);
-  for (let guard = 0; cur && guard < 32; guard++) {
-    const e = own(ctx.state.entities, cur);
-    if (e && kindIs(ctx.registry, ctx.world, e.kind, "person")) return true;
-    cur = holderOf(ctx.state, cur);
+/**
+ * Whom a thing goes back to from `who` (ITEMS-SPEC §4.6 return, the Give back action): an owner who
+ * is someone else here, else one of an owning household's or group's own here; null for none.
+ */
+function returnsTo(ctx: ReadContext, who: EntityId, thing: EntityId): EntityId | null {
+  const here = placeOfEntity(ctx.state, who);
+  if (here === null) return null;
+  const people = (id: EntityId): boolean => id !== who && kindIs(ctx.registry, ctx.world, own(ctx.state.entities, id)?.kind ?? "", "person") && !isGone(ctx.state, id) && placeOfEntity(ctx.state, id) === here;
+  const owners = whoseOf(ctx, thing);
+  if (owners.presumed !== undefined) return null;
+  const person = owners.owners.find(people);
+  if (person !== undefined) return person;
+  for (const org of owners.owners) {
+    if (orgTypeOf(ctx, org) === null) continue;
+    const member = Object.keys(ctx.state.entities).sort().find((id) => people(id) && orgPower(ctx, id, org, "assets.use", thing) !== null);
+    if (member !== undefined) return member;
   }
-  return false;
+  return null;
+}
+
+/** Whether a thing's rest (`restOf`) is where `who` is or within their fetch reach, and it isn't there already: what Put away takes it back to. */
+function restNear(ctx: ReadContext, who: EntityId, thing: EntityId): boolean {
+  const rest = restOf(ctx, thing).rest;
+  if (rest === null) return false;
+  const here = placeOfEntity(ctx.state, who);
+  if (rest === "owner") {
+    const owner = whoseOf(ctx, thing).owners[0];
+    return owner !== undefined && owner !== possessorOf(ctx, thing) && kindIs(ctx.registry, ctx.world, own(ctx.state.entities, owner)?.kind ?? "", "person") && placeOfEntity(ctx.state, owner) === here;
+  }
+  const at = spotOf(ctx.state, thing);
+  if (at !== null && JSON.stringify(at) === JSON.stringify(rest)) return false;
+  const place = "place" in rest ? rest.place : placeOfEntity(ctx.state, rest.in);
+  if (place === null || here === null) return false;
+  if (place === here) return true;
+  if (!together(ctx.world, here, place)) return false;
+  const minutes = optionalQuery(ctx, "space.route")?.(ctx, here, place, "walk")?.minutes;
+  return minutes !== undefined && minutes <= thingsConfigOf(ctx.world).fetchMinutes;
 }
 
 /** A claimed thing's id: from the turn's seed, the action's place and the name, never the name alone, and never one the state has. */
@@ -688,13 +665,19 @@ export const gearPack: PackDef = {
   domain: "gear",
   requires: ["space"],
   register(r) {
-    for (const t of TABLES) r.table({ id: t.id, schema: t.schema, columns: t.columns, defaults: t });
+    for (const t of TABLES) r.table({ id: t.id, schema: t.schema, columns: t.columns, defaults: t, shipped: SHIPPED[t.id] ?? [] });
     r.kind(ITEM);
     r.kind(CONTAINER);
     r.kind(KIT);
     r.relation({ id: "worn_by", label: "Worn by", from: "item", to: "*", cardinality: "many_one", symmetric: false, fields: { slot: { type: "text" } }, pack: "gear" });
     r.relation({ id: "equipped", label: "Equipped by", from: "item", to: "*", cardinality: "many_one", symmetric: false, fields: { slot: { type: "text" } }, pack: "gear" });
-    r.relation({ id: "uses", label: "Uses (granted until)", from: "*", to: "*", cardinality: "many_many", symmetric: false, fields: {}, pack: "gear" });
+    // A use grant (ITEMS-SPEC §3.5): from the one who may use it to the thing, with what it rests on (a
+    // hold, a loan or an assignment; a link from before reads as a loan when it ends, else an
+    // assignment) and who gave it.
+    r.relation({ id: "uses", label: "Uses (granted until)", from: "*", to: "*", cardinality: "many_many", symmetric: false, fields: { basis: { type: "enum", label: "Basis", values: [...GRANT_BASES] }, by: { type: "ref", label: "Given by" } }, pack: "gear" });
+    // A standing permission (ITEMS-SPEC §3.4): from an owner (a person or an organization) to someone,
+    // to use all their things or those at their home, optionally until a time, and who gave it.
+    r.relation({ id: "permits", label: "Lets use their things", from: "*", to: "*", cardinality: "many_many", symmetric: false, fields: { scope: { type: "enum", label: "Which things", values: [...PERMIT_SCOPES] }, by: { type: "ref", label: "Given by" } }, pack: "gear" });
 
     r.service("gear.transfer", transfer);
     r.service("gear.drop", drop);
@@ -718,8 +701,21 @@ export const gearPack: PackDef = {
     r.formula("kit_present", (ctx, kit) => kitStatus(ctx, String(kit ?? ""))?.present ?? 0);
     r.formula("kit_complete", (ctx, kit) => kitStatus(ctx, String(kit ?? ""))?.complete ?? false);
     r.formula("lent_out", (ctx, thing) => grants(ctx.state).some((g) => g.thing === thing));
+    // Who may use a thing, and who may lend it out or let someone use it (ITEMS-SPEC §3.4, `accessFor`, `assignFor`).
+    r.formula("may_use", (ctx, who, thing) => accessFor(ctx, String(who ?? ""), String(thing ?? "")).use !== null);
+    r.formula("may_assign", (ctx, who, thing) => assignFor(ctx, String(who ?? ""), String(thing ?? "")) !== null);
+    // Who has a thing on them, if anyone (ITEMS-SPEC §3.3): Take never lifts it out of someone's pocket.
+    r.formula("possessor", (ctx, thing) => possessorOf(ctx, String(thing ?? "")));
+    // Whether a person may carry it (§3.2): the person ceiling's size or smaller, or unknown.
+    r.formula("fits_on", (ctx, _who, thing) => fitsOn(ctx, String(thing ?? "")));
+    // How far a thing is from someone (§4.5): "on", "here", "nearby" (a fetch away) or "away"; and a fetch's minutes on foot.
+    r.formula("reach_of", (ctx, who, thing) => reachOf(ctx, String(who ?? ""), String(thing ?? "")).reach);
+    r.formula("fetch_minutes", (ctx, who, thing) => reachOf(ctx, String(who ?? ""), String(thing ?? "")).minutes ?? 0);
+    // Whom a thing goes back to from someone here (§4.6 return), or null; whether its rest is close enough to put it away.
+    r.formula("returns_to", (ctx, who, thing) => returnsTo(ctx, String(who ?? ""), String(thing ?? "")));
+    r.formula("rest_near", (ctx, who, thing) => restNear(ctx, String(who ?? ""), String(thing ?? "")));
 
-    const wrap = (type: string, args: readonly string[], f: (args: Record<string, JsonValue>, ctx: ReadContext) => Events): void => r.effect({ type, args, resolve: (a, ctx) => f(a, ctx) });
+    const wrap = (type: string, args: readonly string[], f: (args: Record<string, JsonValue>, ctx: EffectContext) => Events): void => r.effect({ type, args, resolve: (a, ctx) => f(a, ctx) });
     wrap("gear.transfer", ["item", "to"], (a, ctx) => {
       const item = strOf(a.item);
       const to = strOf(a.to);
@@ -727,8 +723,28 @@ export const gearPack: PackDef = {
       return Array.isArray(moved) && own(ctx.state.entities, item)?.fields.owner === to ? [...moved, ...endLoans(ctx, item)] : moved;
     });
     wrap("gear.drop", ["item", "place?"], (a, ctx) => drop(ctx, strOf(a.item), strOf(a.place) || (placeOfEntity(ctx.state, strOf(a.item)) ?? "")));
-    // A reply's handover (`told`) lands as the story told it, room or not.
-    wrap("gear.give", ["item", "from", "to", "told?"], (a, ctx) => give(ctx, strOf(a.item), strOf(a.from), strOf(a.to), a.told === true));
+    // A reply's handover (`told`) lands as the story told it, room or not. A stated basis (ITEMS-SPEC
+    // §4.6) hands it over as an item op does; without one it is for keeps, as authored rewards mean it.
+    wrap("gear.give", ["item", "from", "to", "told?", "basis?"], (a, ctx) => {
+      const basis = HANDOVER_BASES.find((b) => b === a.basis);
+      return basis ? itemOpEvents(ctx, { do: "hand", item: strOf(a.item), to: strOf(a.to), basis, why: "" }, strOf(a.from) || ctx.world.pov, ctx.rng.seed) : give(ctx, strOf(a.item), strOf(a.from), strOf(a.to), a.told === true);
+    });
+    // A handover on its basis (ITEMS-SPEC §4.6): Hand over holds it, Give back returns it; a loan's end is a clock.
+    wrap("gear.hand", ["item", "to", "basis", "until?", "by?"], (a, ctx) => {
+      const basis: HandoverBasis = HANDOVER_BASES.find((b) => b === a.basis) ?? "hold";
+      return itemOpEvents(ctx, { do: "hand", item: strOf(a.item), to: strOf(a.to), basis, ...(typeof a.until === "number" && a.until > ctx.state.clock ? { until: a.until } : {}), why: "" }, strOf(a.by) || ctx.world.pov, ctx.rng.seed);
+    });
+    // Picked up or fetched into someone's hands (ITEMS-SPEC §8): another's thing taken without a right to it is a theft, its owner kept (`got.how`).
+    for (const type of ["gear.take", "gear.fetch"]) wrap(type, ["item", "to"], (a, ctx) => itemOpEvents(ctx, { do: "move", item: strOf(a.item), to: { in: strOf(a.to) }, why: "" }, strOf(a.to), ctx.rng.seed));
+    // Back to its rest (ITEMS-SPEC §4.3): where it is kept, or on its owner.
+    wrap("gear.put_away", ["item", "by?"], (a, ctx) => {
+      const item = strOf(a.item);
+      const rest = restOf(ctx, item).rest;
+      const owner = whoseOf(ctx, item).owners[0];
+      if (rest === null || (rest === "owner" && owner === undefined)) return reject("no_rest", `${labelOf(ctx, item)} has nowhere it's kept`);
+      const op: Exclude<ItemOp, { do: "remove" }> = rest === "owner" ? { do: "hand", item, to: owner ?? "", basis: "return", why: "" } : { do: "move", item, to: rest, why: "" };
+      return itemOpEvents(ctx, op, strOf(a.by) || ctx.world.pov, ctx.rng.seed);
+    });
     // An NPC hands over something the world hadn't tracked yet: it comes into being, held by the recipient.
     wrap("gear.receive", ["name", "to", "from?"], (a, ctx) => spawn(ctx, { name: strOf(a.name), owner: strOf(a.to), holder: strOf(a.to), salt: `give:${strOf(a.from)}:${ctx.state.clock}`, stack: true }));
     wrap("gear.search", ["who", "target?"], (a, ctx) => search(ctx, strOf(a.who) || ctx.world.pov, strOf(a.target) || null));
@@ -779,8 +795,10 @@ export const gearPack: PackDef = {
 
     // Things in cells (DESIGN §11): with the grid system on, taking or using one lying in a cell
     // needs you on or next to it (`reach`); off, `reach` is being at the same place.
-    // Never a vehicle, a part built into one or a fixed thing (`movable`, DESIGN §7): only what can be lifted is offered or taken.
-    r.action({ id: "take", label: "Take", description: "Pick up something that is here.", pack: "gear", params: { item: { type: "ref", ref: "item", claim: "here" } }, requires: ["place(item) == here", "not carries(self, item)", "reach(self, item)", "movable(item)"], outcomes: { default: [{ type: "gear.transfer", args: { item: "item", to: "self" } }] }, duration: "1", lexicon: ["take", "pick up", "grab"], observable: "picks something up" });
+    // Never a vehicle, a part built into one or a fixed thing (`movable`, DESIGN §7), never more than a
+    // person carries, and never out of someone else's hands (ITEMS-SPEC §8): only what lies here and can
+    // be lifted is offered or taken. Another's thing taken without a right to it is a theft, its owner kept.
+    r.action({ id: "take", label: "Take", description: "Pick up something that is here.", pack: "gear", params: { item: { type: "ref", ref: "item", claim: "here" } }, requires: ["place(item) == here", "not carries(self, item)", "possessor(item) == null", "reach(self, item)", "movable(item)", "fits_on(self, item)"], outcomes: { default: [{ type: "gear.take", args: { item: "item", to: "self" } }] }, duration: "1", lexicon: ["take", "pick up", "grab"], observable: "picks something up" });
     // Losing something: it leaves its holder and the world (whereabouts unknown); cash inside goes with it.
     r.effect({
       type: "gear.lose",
@@ -809,14 +827,20 @@ export const gearPack: PackDef = {
     // searched or opened. A world that wants a roll for it authors its own `search` action with a check
     // whose passing outcomes run `gear.search`; it replaces this one by id.
     r.action({ id: "search", label: "Search", description: "Search where you are, or look through a container, for what isn't in plain sight.", pack: "gear", params: { target: { type: "ref", ref: "item", optional: true, label: "What to look through (none: around here)" } }, requires: [], outcomes: { default: [{ type: "gear.search", args: { who: "self", target: "=params.target" } }] }, duration: "5", lexicon: ["search", "look around", "examine", "look through", "look inside", "open", "rummage"], observable: "searches the place" });
-    r.action({ id: "give", label: "Give", description: "Hand something you carry to someone here, for keeps.", pack: "gear", params: { item: { type: "ref", ref: "item", claim: "held" }, to: { type: "ref", ref: "person" } }, requires: ["carries(self, item)", "at(to, here)"], outcomes: { default: [{ type: "gear.give", args: { item: "item", from: "self", to: "to" } }] }, duration: "1", lexicon: ["give", "hand", "pass"], observable: "hands something over" });
+    // Give is for keeps (ITEMS-SPEC §8); Hand over keeps the owner, and Give back returns a thing to whose it is.
+    r.action({ id: "give", label: "Give", description: "Give something you carry to someone here, for keeps.", pack: "gear", params: { item: { type: "ref", ref: "item", claim: "held" }, to: { type: "ref", ref: "person" } }, requires: ["carries(self, item)", "at(to, here)"], outcomes: { default: [{ type: "gear.give", args: { item: "item", from: "self", to: "to" } }] }, duration: "1", lexicon: ["give", "give away", "let keep"], observable: "hands something over" });
+    r.action({ id: "hand_over", label: "Hand over", description: "Hand something you carry to someone here to hold; it stays whose it is.", pack: "gear", params: { item: { type: "ref", ref: "item", claim: "held" }, to: { type: "ref", ref: "person" } }, requires: ["carries(self, item)", "at(to, here)"], outcomes: { default: [{ type: "gear.hand", args: { item: "item", to: "to", basis: "hold", by: "self" } }] }, duration: "1", lexicon: ["hand", "hand over", "pass", "toss"], observable: "hands something over" });
+    r.action({ id: "give_back", label: "Give back", description: "Give something back to whose it is, here.", pack: "gear", params: { item: { type: "ref", ref: "item" } }, requires: ["carries(self, item)", "returns_to(self, item) != null"], outcomes: { default: [{ type: "gear.hand", args: { item: "item", to: "=returns_to(self, item)", basis: "return", by: "self" } }] }, duration: "1", lexicon: ["give back", "return", "hand back"], observable: "gives something back" });
+    // A thing of yours, or one you may use, a short walk away (ITEMS-SPEC §4.5): the walk is the action's time.
+    r.action({ id: "fetch", label: "Fetch", description: "Go and get something of yours, or something you may use, from close by.", pack: "gear", params: { item: { type: "ref", ref: "item", nearby: true } }, requires: ["reach_of(self, item) == 'nearby'", "may_use(self, item)", "movable(item)", "fits_on(self, item)"], outcomes: { default: [{ type: "gear.fetch", args: { item: "item", to: "self" } }] }, duration: "1 + fetch_minutes(self, item)", lexicon: ["fetch", "go get", "go and get"], observable: "goes to get something" });
+    r.action({ id: "put_away", label: "Put away", description: "Put something back where it's kept.", pack: "gear", params: { item: { type: "ref", ref: "item" } }, requires: ["carries(self, item) or (place(item) == here and reach(self, item))", "movable(item)", "rest_near(self, item)"], outcomes: { default: [{ type: "gear.put_away", args: { item: "item", by: "self" } }] }, duration: "2", lexicon: ["put away", "put back", "tidy away"], observable: "puts something away" });
     // Days or a said end, at least one: interpret fills whichever the player said ("until 7 tonight");
     // the palette always sends days.
-    r.action({ id: "lend", label: "Lend", description: "Lend something of yours to someone, for some days or until a time.", pack: "gear", params: { item: { type: "ref", ref: "item" }, to: { type: "ref", ref: "person" }, days: { type: "number", optional: true }, until: { type: "text", optional: true, label: "Until (a time: 7 pm, tonight, tomorrow)" } }, requires: ["item.owner == self", "days > 0 or params.until != null", "at(to, here) or at(item, here)"], outcomes: { default: [{ type: "gear.lend", args: { item: "item", to: "to", until: "=days > 0 ? clock + days(days) : 0", said: "=params.until" } }] }, duration: "2", lexicon: ["lend", "loan", "let borrow"], observable: "lends something" });
+    r.action({ id: "lend", label: "Lend", description: "Lend something to someone, for some days or until a time.", pack: "gear", params: { item: { type: "ref", ref: "item" }, to: { type: "ref", ref: "person" }, days: { type: "number", optional: true }, until: { type: "text", optional: true, label: "Until (a time: 7 pm, tonight, tomorrow)" } }, requires: ["may_assign(self, item)", "days > 0 or params.until != null", "at(to, here) or at(item, here)"], outcomes: { default: [{ type: "gear.lend", args: { item: "item", to: "to", until: "=days > 0 ? clock + days(days) : 0", said: "=params.until" } }] }, duration: "2", lexicon: ["lend", "loan", "let borrow"], observable: "lends something" });
     r.action({ id: "reclaim", label: "Take back", description: "Take back something of yours that you lent out.", pack: "gear", params: { item: { type: "ref", ref: "item" } }, requires: ["item.owner == self", "lent_out(item)"], outcomes: { default: [{ type: "gear.retrieve", args: { item: "item" } }] }, duration: "5", lexicon: ["take back", "get back", "reclaim"], observable: "takes something back" });
-    r.action({ id: "wear", label: "Wear or equip", description: "Put on or equip clothing, armor or gear.", pack: "gear", params: { item: { type: "ref", ref: "item", claim: "held" } }, requires: ["carries(self, item) or (place(item) == here and reach(self, item))", "level.gear >= 3", "movable(item)"], outcomes: { default: [{ type: "gear.wear", args: { item: "item", wearer: "self" } }] }, duration: "2", lexicon: ["wear", "put on", "equip"], observable: "puts something on" });
+    r.action({ id: "wear", label: "Wear or equip", description: "Put on or equip clothing, armor or gear.", pack: "gear", params: { item: { type: "ref", ref: "item", claim: "held" } }, requires: ["carries(self, item) or (place(item) == here and reach(self, item))", "level.gear >= 3", "movable(item)", "may_use(self, item)"], outcomes: { default: [{ type: "gear.wear", args: { item: "item", wearer: "self" } }] }, duration: "2", lexicon: ["wear", "put on", "equip"], observable: "puts something on" });
     r.action({ id: "remove", label: "Take off", description: "Take off something you wear or have equipped.", pack: "gear", params: { item: { type: "ref", ref: "item" } }, requires: ["carries(self, item)"], outcomes: { default: [{ type: "gear.remove", args: { item: "item" } }] }, duration: "2", lexicon: ["take off", "remove", "unequip"], observable: "takes something off" });
-    r.action({ id: "use", label: "Use", description: "Use an item you carry or can reach.", pack: "gear", params: { item: { type: "ref", ref: "item", claim: "held" } }, requires: ["carries(self, item) or (on_grid(item) and reach(self, item))"], outcomes: { default: [{ type: "gear.use", args: { item: "item", user: "self" } }] }, duration: "5", lexicon: ["use", "apply"], observable: "uses something" });
+    r.action({ id: "use", label: "Use", description: "Use an item you carry or can reach.", pack: "gear", params: { item: { type: "ref", ref: "item", claim: "held" } }, requires: ["carries(self, item) or (on_grid(item) and reach(self, item))", "may_use(self, item)"], outcomes: { default: [{ type: "gear.use", args: { item: "item", user: "self" } }] }, duration: "5", lexicon: ["use", "apply"], observable: "uses something" });
     r.action({ id: "take_piece", label: "Take from a kit", description: "Take one piece, such as a tool or a part, out of a kit.", pack: "gear", params: { kit: { type: "ref", ref: "kit" }, piece: { type: "text" } }, requires: ["(place(kit) == here and reach(self, kit)) or carries(self, kit)", "level.gear >= 3"], outcomes: { default: [{ type: "gear.take_piece", args: { kit: "kit", piece: "=piece", to: "self" } }] }, duration: "1", lexicon: ["take the", "grab a", "get a"], observable: "takes a tool" });
 
     r.process({
@@ -835,23 +859,39 @@ export const gearPack: PackDef = {
         return out;
       },
     });
+    // Off screen, an NPC's or their household's thing left lying away from where it is kept goes
+    // back there (ITEMS-SPEC §4.3, `put-away.ts`); from the world's `putAway.minLevel`, which it reads.
+    r.process({ id: "gear.put_away", domain: "gear", minLevel: 1, step: (slot, ctx) => putAwayEvents(ctx, slot.end) });
 
+    // Detail on demand (DESIGN §9.2). Generator 2 (ITEMS-SPEC §4.4): a person observed at Gear 1 or
+    // above is made the everyday carry the world's rules give them and they have no thing of yet
+    // (`carryDue`), theirs, on them and not notable. Generator 1, for worlds that pin it: a person at
+    // Gear 2 or above with no wallet is made one, so cash has a place to live. Either way, a stocked
+    // container (`stock`) at Gear 2 or above is sampled once from the world's items of its kind.
     r.materializer({
       domain: "gear",
-      version: 1,
-      materialize(entity, ctx, rng) {
+      version: 2,
+      versions: [1, 2],
+      materialize(entity, ctx, rng, version) {
         const e = own(ctx.state.entities, entity);
-        if (!e || ctx.levelOf(entity, "gear") < 2) return [];
+        if (!e) return [];
+        const level = ctx.levelOf(entity, "gear");
         const out: LedgerEvent[] = [];
         if (kindIs(ctx.registry, ctx.world, e.kind, "person")) {
-          // Everyone carries a wallet at Gear 2+, so cash has a place to live.
-          const hasWallet = carriedBy(ctx.state, entity).some((id) => own(ctx.state.entities, id)?.fields.catalog === "wallet" || /wallet|purse/i.test(own(ctx.state.entities, id)?.name ?? ""));
-          if (!hasWallet) {
+          if (version >= 2) {
+            for (const due of level >= 1 ? carryDue(ctx, entity) : []) {
+              const made = spawn(ctx, { name: due.name, owner: entity, holder: entity, catalog: due.type, ...(due.category !== undefined ? { category: due.category } : {}), salt: `carry:${due.type}`, notable: false });
+              if (Array.isArray(made)) out.push(...made);
+            }
+            return out;
+          }
+          if (level >= 2 && !carriedBy(ctx.state, entity).some((id) => own(ctx.state.entities, id)?.fields.catalog === "wallet" || /wallet|purse/i.test(own(ctx.state.entities, id)?.name ?? ""))) {
             const w = spawn(ctx, { name: "Wallet", owner: entity, holder: entity, catalog: "wallet", kind: "container", salt: "materialize" });
             if (Array.isArray(w)) out.push(...w);
           }
           return out;
         }
+        if (level < 2) return [];
         const stock = e.fields.stock;
         // `stock` is the author asking for more of its kind: it adds to whatever the world put inside.
         if (typeof stock === "string" && e.fields.sampled !== true) {
@@ -868,6 +908,8 @@ export const gearPack: PackDef = {
         return out;
       },
     });
+    // A type the world's everyday carry names that none of its catalogs has (ITEMS-SPEC §4.4).
+    r.lint({ code: "gear.carry", check: carryProblems });
 
     r.renderer({ slot: "gear", label: "What your character carries and wears", render: (ctx) => gearLines(ctx, "player").map((l) => l.text), feed: gearLines });
     // What the people with the POV visibly wear and carry (DESIGN §6.11), beside them in People.
@@ -875,165 +917,52 @@ export const gearPack: PackDef = {
 
     r.view({ panel: "gear.gear", build: (ctx) => buildGearView(ctx) as unknown as JsonValue });
 
-    // A reply's give hands over a thing the giver holds that the player character can see, by id or
-    // by name (`heldItem`). Anything else is words for a thing the world doesn't track yet, as the
-    // reply put it, which only an NPC can hand over; a hidden thing's id or name reads exactly as
-    // such words, so nothing tells of it, and the hidden thing never changes hands (DESIGN §9.4).
-    const givenOf = (p: JsonObject, ctx: ReadContext): EntityId | null => {
-      const id = heldItem(ctx, strOf(p.item), strOf(p.from));
-      return own(ctx.state.entities, id) && canSeeEntity(ctx.registry, ctx.world, ctx.state, ctx.world.pov, id) ? id : null;
+    // The reply's thing facts (ITEMS-SPEC §5.2, §5.3): a channel per change type a fact lands under
+    // (`ITEM_CHANGES`, its mode), and one per fact's own name, readable as an input for anything
+    // recorded that is worked out again (a kept chip): each settled by the reconciler against where
+    // things are now, under the rules in force, so one thing is acted on, one the world lacks is made
+    // when the story acts on it, and what can't happen is refused like any change. A change type
+    // holds only while its fact still lands as it: one that would now land otherwise is refused.
+    // Money handed over is a transfer, never a thing called "$20" or "cash".
+    const settled = (p: JsonObject, ctx: ReadContext, salt: string): { out: Reconciled; w: Working } => {
+      const w = new Working(ctx.registry, ctx.world, ctx.state);
+      return { out: reconcileFact(w, p, { viewer: ctx.world.pov, salt, confirmed: p.confirmed === true }), w };
     };
-    r.proposal({
-      type: "give",
-      boundField: "ref",
-      validate(p, ctx) {
-        if (!own(ctx.state.entities, strOf(p.to))) return reject("missing_entity", `no recipient ${labelOf(ctx, strOf(p.to))}`);
-        const given = givenOf(p, ctx);
-        if (given === null) {
-          const item = strOf(p.item);
-          // Money handed over is a transfer, never a new item called "$20" or "cash".
-          if (cashGift(item, ctx.world.currency)) return reject("is_money", "a cash give is a transfer");
-          // Only an NPC can hand over something untracked; the POV can't give what it doesn't have.
-          const from = strOf(p.from);
-          return item !== "" && from !== "" && from !== ctx.world.pov && own(ctx.state.entities, from) ? null : reject("missing_entity", `no item ${item}`);
+    const refusal = (p: JsonObject, out: Reconciled): Rejection | null => {
+      if (out.kind === "which") return reject("ambiguous", "more than one thing fits");
+      if (out.kind === "refused") return out.rejection;
+      return isItemChange(p.type) && out.change !== p.type ? reject("changed", "it would no longer happen as told") : null;
+    };
+    const cash = (p: JsonObject, ctx: ReadContext): Rejection | null => (factOf(p) === "give" && cashGift(strOf(p.item), ctx.world.currency) ? reject("is_money", "a cash give is a transfer") : null);
+    for (const type of new Set<string>([...ITEM_CHANGES, ...THING_FACTS])) {
+      r.proposal({
+        type,
+        boundField: type === "item_condition" || type === "item_use" || type === "use_up" ? "number" : "ref",
+        validate: (p, ctx) => cash(p, ctx) ?? refusal(p, settled(p, ctx, "check").out),
+        toEffects: (p) => [{ type: "gear.thing_change", args: { change: JSON.stringify(p) } }],
+        // A thing's condition, inside its range; its bound in Build applies (`boundTarget`).
+        boundTarget: (p, ctx) => {
+          if (factOf(p) !== "item_condition") return null;
+          const { out } = settled(p, ctx, "check");
+          const id = out.kind === "change" ? out.items[0] : undefined;
+          return id !== undefined ? { entity: id, field: "condition" } : null;
+        },
+      });
+    }
+    // The proposal rides whole as one string, so no word of the story's reads as a formula or a binding.
+    r.effect({
+      type: "gear.thing_change",
+      args: ["change"],
+      resolve(a, ctx) {
+        let p: JsonValue;
+        try {
+          p = JSON.parse(strOf(a.change)) as JsonValue;
+        } catch {
+          return reject("bad_proposal", "the change isn't one");
         }
-        if (own(ctx.state.entities, given)?.kind === "account") return reject("is_money", "a cash give is a transfer");
-        return null;
-      },
-      toEffects: (p, ctx) => {
-        const given = givenOf(p, ctx);
-        return given !== null ? [{ type: "gear.give", args: { item: given, from: strOf(p.from), to: strOf(p.to), told: true } }] : [{ type: "gear.receive", args: { name: strOf(p.item), from: strOf(p.from), to: strOf(p.to) } }];
-      },
-    });
-    // The reply's item changes (DESIGN §9.4): each names someone and a thing the world has, by id or by
-    // a name the one it can mean holds or has here (`heldItem`), and is checked against where the
-    // thing is now; what can't happen is refused like any change, never made up.
-    const itemFor = (p: JsonObject, ctx: ReadContext, who: EntityId, near: boolean): { id: EntityId; e: EntityState } | Rejection => {
-      if (!own(ctx.state.entities, who)) return reject("missing_entity", `no one ${labelOf(ctx, who)}`);
-      const named = heldItem(ctx, strOf(p.item), who);
-      const id = near && !own(ctx.state.entities, named) ? lyingNamed(ctx, strOf(p.item), who) : named;
-      const e = own(ctx.state.entities, id);
-      // A thing the player character can't see reads as one nothing has: its refusal can't tell it exists.
-      if (!e || isGone(ctx.state, id) || !kindIs(ctx.registry, ctx.world, e.kind, "item") || !canSeeEntity(ctx.registry, ctx.world, ctx.state, ctx.world.pov, id)) return reject("missing_entity", `no item ${labelOf(ctx, strOf(p.item))}`);
-      if (e.kind === "account") return reject("is_money", "money changes hands as a transfer");
-      return { id, e };
-    };
-    r.proposal({
-      type: "take",
-      boundField: "ref",
-      validate(p, ctx) {
-        const who = strOf(p.entity) || ctx.world.pov;
-        const found = itemFor(p, ctx, who, true);
-        if ("code" in found) return found;
-        if (isInside(ctx.state, found.id, who)) return reject("already_held", `${labelOf(ctx, who)} already has ${found.e.name}`);
-        // Picked up where they are, and not out of someone else's hands: that is a give or a theft.
-        if (placeOfEntity(ctx.state, found.id) !== placeOfEntity(ctx.state, who) || heldByPerson(ctx, found.id)) return reject("not_here", `${found.e.name} isn't lying where ${labelOf(ctx, who)} is`);
-        const cannot = holdProblem(ctx, found.id, who);
-        if (cannot) return reject("fixed", cannot);
-        return null;
-      },
-      toEffects: (p, ctx) => {
-        const who = strOf(p.entity) || ctx.world.pov;
-        const found = itemFor(p, ctx, who, true);
-        return "code" in found ? [] : [{ type: "gear.transfer", args: { item: found.id, to: who } }];
-      },
-    });
-    r.proposal({
-      type: "drop",
-      boundField: "ref",
-      validate(p, ctx) {
-        const who = strOf(p.entity) || ctx.world.pov;
-        const found = itemFor(p, ctx, who, false);
-        if ("code" in found) return found;
-        if (!isInside(ctx.state, found.id, who)) return reject("not_held", `${labelOf(ctx, who)} doesn't have ${found.e.name}`);
-        return placeOfEntity(ctx.state, who) ? null : reject("no_place", `${labelOf(ctx, who)} is nowhere`);
-      },
-      toEffects: (p, ctx) => {
-        const who = strOf(p.entity) || ctx.world.pov;
-        const found = itemFor(p, ctx, who, false);
-        return "code" in found ? [] : [{ type: "gear.drop", args: { item: found.id, place: placeOfEntity(ctx.state, who) ?? "" } }];
-      },
-    });
-    r.proposal({
-      type: "use_up",
-      boundField: "number",
-      validate(p, ctx) {
-        const who = strOf(p.entity) || ctx.world.pov;
-        const found = itemFor(p, ctx, who, false);
-        if ("code" in found) return found;
-        if (!isInside(ctx.state, found.id, who)) return reject("not_held", `${labelOf(ctx, who)} doesn't have ${found.e.name}`);
-        // As many as the story says, from one up; more than there is uses up all of it.
-        const n = p.qty === undefined ? 1 : p.qty;
-        if (typeof n !== "number" || !Number.isInteger(n) || n < 1) return reject("bad_amount", "using up is a whole number of at least 1");
-        return null;
-      },
-      toEffects: (p, ctx) => {
-        const who = strOf(p.entity) || ctx.world.pov;
-        const found = itemFor(p, ctx, who, false);
-        if ("code" in found) return [];
-        const left = numOf(found.e.fields.qty, 1) - numOf(p.qty, 1);
-        // The last of it leaves the world as a used-up claim does (`gone`), holder and owner kept.
-        // `add` counts down from whatever the parent holds when the entry folds (`change`), never a stale total.
-        const step: EffectSpec = left > 0 ? { type: "add", args: { entity: found.id, field: "qty", delta: -numOf(p.qty, 1) } } : { type: "set", args: { entity: found.id, field: GONE_FIELD, value: true } };
-        return [step];
-      },
-    });
-    r.proposal({
-      type: "wear",
-      boundField: "ref",
-      validate(p, ctx) {
-        const who = strOf(p.entity) || ctx.world.pov;
-        const found = itemFor(p, ctx, who, true);
-        if ("code" in found) return found;
-        const worn = found.e.relations.some((x) => (x.type === "worn_by" || x.type === "equipped") && x.to === who);
-        if (p.off === true) return worn ? null : reject("not_worn", `${labelOf(ctx, who)} isn't wearing ${found.e.name}`);
-        if (worn) return reject("already_worn", `${labelOf(ctx, who)} already wears ${found.e.name}`);
-        return isInside(ctx.state, found.id, who) || placeOfEntity(ctx.state, found.id) === placeOfEntity(ctx.state, who) ? null : reject("not_held", `${labelOf(ctx, who)} doesn't have ${found.e.name}`);
-      },
-      toEffects: (p, ctx) => {
-        const who = strOf(p.entity) || ctx.world.pov;
-        const found = itemFor(p, ctx, who, true);
-        if ("code" in found) return [];
-        return p.off === true ? [{ type: "gear.remove", args: { item: found.id } }] : [{ type: "gear.wear", args: { item: found.id, wearer: who } }];
-      },
-    });
-    r.proposal({
-      type: "lose",
-      boundField: "ref",
-      validate(p, ctx) {
-        const who = strOf(p.entity) || ctx.world.pov;
-        const found = itemFor(p, ctx, who, false);
-        if ("code" in found) return found;
-        if (!isInside(ctx.state, found.id, who) && found.e.fields.owner !== who) return reject("not_held", `${labelOf(ctx, who)} doesn't have ${found.e.name}`);
-        const by = strOf(p.by);
-        return by === "" || own(ctx.state.entities, by) ? null : reject("missing_entity", `no thief ${labelOf(ctx, by)}`);
-      },
-      // Stolen (`by`): it goes into the thief's hands, still the owner's; else lost, whereabouts unknown.
-      toEffects: (p, ctx) => {
-        const who = strOf(p.entity) || ctx.world.pov;
-        const found = itemFor(p, ctx, who, false);
-        if ("code" in found) return [];
-        return strOf(p.by) !== "" ? [{ type: "gear.transfer", args: { item: found.id, to: strOf(p.by) } }] : [{ type: "gear.lose", args: { item: found.id } }];
-      },
-    });
-    r.proposal({
-      type: "item_condition",
-      boundField: "number",
-      validate(p, ctx) {
-        const holder = strOf(p.entity) || ctx.world.pov;
-        const found = itemFor(p, ctx, holder, true);
-        if ("code" in found) return found;
-        if (typeof p.delta !== "number" || !Number.isInteger(p.delta) || p.delta === 0) return reject("bad_amount", "an item's condition moves by a whole, non-zero number");
-        return null;
-      },
-      // As far as the story says, inside the condition's range; its bound in Build applies (`boundTarget`).
-      toEffects: (p, ctx) => {
-        const found = itemFor(p, ctx, strOf(p.entity) || ctx.world.pov, true);
-        return "code" in found ? [] : [{ type: "add", args: { entity: found.id, field: "condition", delta: numOf(p.delta, 0) } }];
-      },
-      boundTarget: (p, ctx) => {
-        const found = itemFor(p, ctx, strOf(p.entity) || ctx.world.pov, true);
-        return "code" in found ? null : { entity: found.id, field: "condition" };
+        if (!isRecord(p)) return reject("bad_proposal", "the change isn't one");
+        const { out, w } = settled(p, ctx, ctx.rng.seed);
+        return refusal(p, out) ?? [...w.events];
       },
     });
     r.proposal({
@@ -1053,6 +982,9 @@ export const gearPack: PackDef = {
       toEffects: (p) => [{ type: "add", args: { entity: strOf(p.item), field: "qty", delta: numOf(p.delta) } }],
       boundTarget: (p, ctx) => (own(ctx.state.entities, strOf(p.item)) ? { entity: strOf(p.item), field: "qty" } : null),
     });
+
+    // Things the world puts where the size rules never let play put one, and sizes nothing gives (ITEMS-SPEC §10.1 Problems).
+    for (const rule of THING_LINTS) r.lint(rule);
 
     r.lint({
       code: "gear.kits",

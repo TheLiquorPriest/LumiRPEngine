@@ -3,23 +3,23 @@
 // connection and model it runs on (none: its classic step's), its effort,
 // its tool families and what it may write (its tier), whether it runs prompt-only (its classic
 // step's one call), what the fixed pipeline does when it fails, and its own limits over every
-// agent's budget; and its caching, which the providers read from `agents.caching.roles[<role>]`, as
+// agent's budget (the Curator's ops per turn besides, `agents.curatorOps`); and its caching, which the providers read from `agents.caching.roles[<role>]`, as
 // Settings → Agents → Caching keeps it for the assistant and the main agent. Each role shows its
-// shipped defaults; its Default sends null for the role and for its own caching, so the store reads
-// §15's defaults back (`defaultRoleSettings`). What renders and what is pressed (`RolesBody`,
+// shipped defaults; its Default sends null for the role and for its own caching (and the Curator's
+// ops), so the store reads §15's defaults back (`defaultRoleSettings`). What renders and what is pressed (`RolesBody`,
 // `RoleCard`, `rolePatch`, `roleResetPatch`) is hook-free, so tests press it without a DOM.
 // Styles: styles/settings.ts.
 
 import type { RoleId, RoleOnFail, RoleSettings, RoleTier } from "../../shared/agent-roles";
 import { ROLE_IDS, ROLE_LABEL, ROLE_ON_FAIL, ROLE_TIERS } from "../../shared/agent-roles";
 import type { AgentBudget, AgentEffort, AgentSettings } from "../../shared/agent-settings";
-import { AGENT_EFFORTS, BUDGET_DEFS, defaultAgentSettings, roleCaching } from "../../shared/agent-settings";
+import { AGENT_EFFORTS, BUDGET_DEFS, CURATOR_OPS_DEF, defaultAgentSettings, roleCaching } from "../../shared/agent-settings";
 import type { ToolFamily } from "../../shared/agent-tools";
 import { TOOL_FAMILY_LABEL } from "../../shared/agent-tools";
 import { hasOwn, type JsonObject } from "../../shared/json";
 import { jsonEqual } from "../../shared/json-patch";
 import { Badge, Button, HostModelPicker, HostSwitch, Section, Seg } from "../components";
-import { defaultButton, freshNonce, OwnLimitRow } from "./agents";
+import { defaultButton, freshNonce, LimitRow, OwnLimitRow } from "./agents";
 import { EFFORT_LABEL } from "./assistant";
 import { type Connection, ConnectionSelect, useConnections } from "./steps";
 
@@ -60,15 +60,15 @@ export function rolePatch(id: RoleId, fields: JsonObject): JsonObject {
   return { agents: { roles: { [id]: fields } } };
 }
 
-/** A role's Default: its settings and its own caching go, so the store reads §15's defaults back. */
+/** A role's Default: its settings and its own caching go, and the Curator's ops per turn, so the store reads §15's defaults back. */
 export function roleResetPatch(id: RoleId): JsonObject {
-  return { agents: { roles: { [id]: null }, caching: { roles: { [id]: null } } } };
+  return { agents: { roles: { [id]: null }, caching: { roles: { [id]: null } }, ...(id === "curator" ? { curatorOps: null } : {}) } };
 }
 
-/** Whether a role runs on its shipped defaults: its settings as `defaultRoleSettings` has them (its tool families in any order), and no caching of its own. */
+/** Whether a role runs on its shipped defaults: its settings as `defaultRoleSettings` has them (its tool families in any order), no caching of its own, and the Curator its shipped ops per turn. */
 export function roleAtDefaults(agents: AgentSettings, id: RoleId): boolean {
   const sorted = (r: RoleSettings) => ({ ...r, families: [...r.families].sort() });
-  return jsonEqual(sorted(agents.roles[id]), sorted(DEFAULTS.roles[id])) && !hasOwn(agents.caching.roles, id);
+  return jsonEqual(sorted(agents.roles[id]), sorted(DEFAULTS.roles[id])) && !hasOwn(agents.caching.roles, id) && (id !== "curator" || agents.curatorOps === DEFAULTS.curatorOps);
 }
 
 /** Settings home's line for this page: how many roles have settings of their own. */
@@ -173,6 +173,7 @@ export function RoleCard(props: { id: RoleId; agents: AgentSettings; connections
         </div>
         <span class="lre-small lre-muted">{hasOwn(agents.caching.roles, id) ? "Its own caching." : "Every role's caching (Settings → Agents → Caching)."} Default: every role's.</span>
       </div>
+      {id === "curator" ? <LimitRow id="curatorOps" def={CURATOR_OPS_DEF} value={agents.curatorOps} standard={DEFAULTS.curatorOps} busy={busy} set={(curatorOps) => props.patch({ agents: { curatorOps } })} /> : null}
       <p class="lre-set-timeout-lead">
         <strong>Its budget.</strong> Each limit is every agent's (Settings → Agents → Budgets) until you change it here; Every agent's goes back to that one.
       </p>

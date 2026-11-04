@@ -3,7 +3,7 @@
 // and then runs the post steps. Model calls happen before, in the ledger's async hooks; this
 // bridge only consumes their results, so the core stays synchronous and deterministic.
 
-import type { ActionId } from "../shared/ids";
+import type { ActionId, EntityId } from "../shared/ids";
 import { hashParts } from "../shared/hash";
 import type { JsonObject } from "../shared/json";
 import { hasOwn } from "../shared/json";
@@ -11,6 +11,7 @@ import type { GenerationKind, LedgerEvent, PathHash, TimelapseTarget } from "../
 import { applyEffects } from "../engine/effects";
 import { materializeAll } from "../engine/materialize";
 import type { TurnModel } from "../engine/ledger/journal";
+import { optionalService } from "../engine/pack-kit";
 import type { ReadContext, Rejection } from "../engine/registry";
 import type { Registry } from "../engine/registry-impl";
 import { createRng } from "../engine/rng";
@@ -19,6 +20,7 @@ import type { InterpretOutput, PostTurnInput, QueuedAction, TurnPlanInput } from
 import { applyTimeAdvance, type SkipRecord } from "../engine/time";
 import type { EngineTurnPlan } from "../engine/turn";
 import { Working } from "../engine/working";
+import type { PlanReadItems } from "../packs/orgs/core/agenda";
 
 /** Proposals prepared for one reply text: the ones that apply automatically, and whether post steps follow. */
 export interface PreparedRead {
@@ -60,6 +62,13 @@ export interface ProposalOutcome {
   /** Why a change refused unseen (`Rejection.unseen`) was dropped: for the log only, never a chip or a note. */
   dropped?: string;
 }
+
+/**
+ * What a turn's plan added to the plan from the player's own message (assess-party §6.2,
+ * `orgs.plan_read`): the events it applied, the organization whose plan took them and how many goals
+ * and orders; or why it added none, in words.
+ */
+export type PlannedRead = { events: LedgerEvent[]; org: EntityId; goals: number; orders: number } | { refused: Rejection };
 
 /** The proposal fields that name the people a change reads (a payer's accounts, a recipient's pockets). */
 const NAMED = ["from", "to", "payer", "who", "entity"] as const;
@@ -236,10 +245,14 @@ export class TurnBridge implements TurnModel {
   private readonly held = new Map<string, HeldRead>();
   /** Routine changes a typed message states, keyed like `intents`: asked about once, when it is read (`takeRoutineAsks`). */
   private readonly routineAsks = new Map<string, RoutineAsk[]>();
+  /** The plan a typed message gives (interpret's `agenda`, assess-party §6.2), keyed like `intents`: its turn's plan adds it ahead of what the turn plays (`orgs.plan_read`). */
+  private readonly planReads = new Map<string, PlanReadItems>();
+  /** What each plan added of its message's plan, keyed by seed: the turn's receipt (`plannedFor`). */
+  private readonly planned = new Map<string, PlannedRead>();
   /** Typed messages whose read the player let play from the intent gate (Settings → Steps and connections, DESIGN §5.2), keyed like `intents`. */
   private readonly intentsPassed = new Set<string>();
   /** Each text's own turn's last plan, kept with the path it was made at: what the turn plays once its outline is let through. */
-  private readonly ownPlans = new Map<string, { parentPath: PathHash; events: LedgerEvent[]; result: EngineTurnPlan }>();
+  private readonly ownPlans = new Map<string, { parentPath: PathHash; events: LedgerEvent[]; result: EngineTurnPlan; planned?: PlannedRead }>();
   /** The outline the player let through the outline gate for a text's turn, as edited: what its reply is told, with the plan it was shown for (`ownPlans`). */
   private readonly outlines = new Map<string, string[]>();
   /**
@@ -255,6 +268,8 @@ export class TurnBridge implements TurnModel {
    * commits (`committed`), so a run of the turn after a wait asks for it no more.
    */
   private readonly memories = new Map<string, LedgerEvent[]>();
+  /** An older chat's one-time Things tidied fix (ITEMS-SPEC §9, `tidyOnce`), keyed like `intents`: applied right after the memory, ahead of everything else the plan applies. */
+  private readonly tidied = new Map<string, LedgerEvent[]>();
   /** An agent turn's commit of what its roles staged before the plan, keyed like `intents`: applied after the plan's events (INC2-SPEC C10), once. */
   private readonly commits = new Map<string, TurnCommit>();
   /**
@@ -293,7 +308,7 @@ export class TurnBridge implements TurnModel {
    * next time it plays rather than coming back to the card the player cancelled.
    */
   forget(userText: string): void {
-    for (const kept of [this.intents, this.unfit, this.nexts, this.decisions, this.minds, this.offers, this.skips, this.skipPlans, this.held, this.routineAsks, this.ownPlans, this.outlines, this.memories, this.commits]) kept.delete(userText);
+    for (const kept of [this.intents, this.unfit, this.nexts, this.decisions, this.minds, this.offers, this.skips, this.skipPlans, this.held, this.routineAsks, this.planReads, this.ownPlans, this.outlines, this.memories, this.tidied, this.commits]) kept.delete(userText);
     if (this.replay === userText) this.replay = null;
     this.interpreted.delete(userText);
     this.intentsPassed.delete(userText);
@@ -414,6 +429,29 @@ export class TurnBridge implements TurnModel {
     return asks;
   }
 
+  /** The plan this text gives, from its read (null clears it). */
+  setPlanRead(userText: string, items: PlanReadItems | null): void {
+    if (items === null) this.planReads.delete(userText);
+    else this.planReads.set(userText, items);
+    trim(this.planReads);
+  }
+
+  /** What the plan made with `seed` added of its message's plan, if this process made it. */
+  plannedFor(seed: string): PlannedRead | undefined {
+    return this.planned.get(seed);
+  }
+
+  /** The plan `userText` gives, added on `w` (`orgs.plan_read`): what it applied, or why it added none; null when the text gives none or no pack keeps plans. */
+  private planRead(w: Working, userText: string): PlannedRead | null {
+    const items = this.planReads.get(userText);
+    const read = items ? optionalService(w.ctx, "orgs.plan_read") : null;
+    if (!items || !read) return null;
+    const out = read(w.ctx, items, userText);
+    if ("code" in out) return { refused: out };
+    const events = w.applyAll(out.events);
+    return events.length > 0 ? { events, org: out.org, goals: out.goals, orders: out.orders } : { refused: { code: "no_change", reason: "the plan has it already" } };
+  }
+
   /** Whether this text's intent came from `interpret` (not a palette or chip action). */
   wasInterpreted(userText: string): boolean {
     return this.interpreted.has(userText);
@@ -470,10 +508,17 @@ export class TurnBridge implements TurnModel {
     trim(this.commits);
   }
 
-  /** What the plan applies before the pipeline, in order: a turn's memory of the reply before it, the decisions, the minds, then the skip plan, so the timelapse that follows lives it. */
+  /** The one-time Things tidied fix the turn whose last user text is `userText` records first after its memory (empty clears it). */
+  setTidied(userText: string, events: readonly LedgerEvent[]): void {
+    if (events.length === 0) this.tidied.delete(userText);
+    else this.tidied.set(userText, [...events]);
+    trim(this.tidied);
+  }
+
+  /** What the plan applies before the pipeline, in order: a turn's memory of the reply before it, the one-time Things tidied fix, the decisions, the minds, then the skip plan, so the timelapse that follows lives it. */
   prePlan(userText: string): LedgerEvent[] {
     const plan = this.skipPlans.get(userText);
-    return [...(this.memories.get(userText) ?? []), ...(this.decisions.get(userText) ?? []), ...(this.minds.get(userText) ?? []), ...(plan ? [plan] : [])];
+    return [...(this.memories.get(userText) ?? []), ...(this.tidied.get(userText) ?? []), ...(this.decisions.get(userText) ?? []), ...(this.minds.get(userText) ?? []), ...(plan ? [plan] : [])];
   }
 
   /** The skip plan this text's timelapse turn records (null: none), and whether one was made for it. */
@@ -563,6 +608,10 @@ export class TurnBridge implements TurnModel {
     if (shown && shown.parentPath === input.parentPath) {
       this.plans.set(input.seed, shown.result);
       trim(this.plans);
+      if (shown.planned) {
+        this.planned.set(input.seed, shown.planned);
+        trim(this.planned);
+      }
       const events = structuredClone(shown.events);
       // What the review gate let through lands after the plan it held, re-validated against it (INC2-SPEC C13).
       return [...events, ...this.committed(commit, input, events)];
@@ -570,6 +619,13 @@ export class TurnBridge implements TurnModel {
     // Decisions and minds first: the plan then follows the choices they record (DESIGN §5.2 npc.choose, §24).
     const w = new Working(this.registry, input.ctx.world, input.state);
     w.applyAll(own ? this.prePlan(last) : []);
+    // The plan the message gives lands ahead of what the turn plays (assess-party §6.2): its actions
+    // and its reply are told it, and a Re-read of the reply keeps it.
+    const added = own ? this.planRead(w, last) : null;
+    if (added) {
+      this.planned.set(input.seed, added);
+      trim(this.planned);
+    }
     const result = this.pipeline.plan({
       registry: this.registry,
       world: input.ctx.world,
@@ -589,7 +645,7 @@ export class TurnBridge implements TurnModel {
     const events = committed.length > 0 ? [...planned, ...committed] : planned;
     // Kept by reference (a reuse clones it), so a turn that never meets the outline gate pays nothing for it.
     if (own) {
-      this.ownPlans.set(last, { parentPath: input.parentPath, events, result });
+      this.ownPlans.set(last, { parentPath: input.parentPath, events, result, ...(added ? { planned: added } : {}) });
       trim(this.ownPlans);
     }
     return events;

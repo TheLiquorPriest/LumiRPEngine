@@ -14,7 +14,7 @@
 import type { JsonObject, JsonValue } from "../../../shared/json";
 import type { EntityId, PlaceId, TravelMode } from "../../../shared/ids";
 import type { LedgerEvent } from "../../../shared/ledger";
-import type { DataTable, TableRow } from "../../../shared/tables";
+import type { DataTable, ShippedRevision, TableRow } from "../../../shared/tables";
 import type { KindDef } from "../../../shared/world";
 import { ENGINE_EVENTS } from "../../../engine/engine-pack";
 import { bump, labelOf, numOf, objOf, optionalQuery, optionalService, own, rowOf, strOf } from "../../../engine/pack-kit";
@@ -22,7 +22,7 @@ import type { PackDef, ReadContext, Rejection } from "../../../engine/registry";
 import type { Rng } from "../../../engine/rng";
 import { fieldDef, isGone, kindIs, placeOfEntity } from "../../../engine/scope";
 import { partyAt, relocate } from "../../../engine/relocate";
-import { isMemberOf } from "../../../engine/selector";
+import { ownsThrough } from "../../../engine/org";
 import { calendarOf, formatClock } from "../../../engine/calendar";
 import { sentence, thingDescription, thingDetails, thingName } from "../../../engine/thing-words";
 import { canSeeEntity, canSeeField, canSeePlace, knows } from "../../../engine/visibility";
@@ -34,10 +34,13 @@ import type { FeedScope } from "../../../shared/world";
 import { buildGarageView } from "./view";
 import classes from "./tables/modern-us/classes.json";
 import factors from "./tables/modern-us/factors.json";
+import shipped from "./tables/modern-us/shipped.json";
 import type { TravelPart, VehicleTrip } from "../../../shared/travel";
 import { travelTuningOf } from "../../../shared/maps";
 
 const TABLES: DataTable[] = [classes, factors] as unknown as DataTable[];
+/** Every revision each table has shipped as (the table build's record). */
+const SHIPPED = shipped as unknown as Readonly<Record<string, readonly ShippedRevision[]>>;
 const KM_TO_MI = 0.621371;
 
 export interface Leg {
@@ -161,7 +164,7 @@ export function vehicleLines(ctx: ReadContext, scope: FeedScope): FeedLine[] {
   // his own thing, or a thing in it he knows of. Another's bag in a car lent to him stays shut, as
   // People and Place never tell what is inside another's things.
   const named = (id: EntityId, depth: number, mine: boolean): string => {
-    const open = mine || owns(ctx.state, pov, id);
+    const open = mine || owns(ctx, pov, id);
     const inner = depth >= 8 ? [] : contents(id).filter((x) => open || knows(ctx.state, pov, x)).map((x) => named(x, depth + 1, mine));
     return `${thingName(ctx, id)}${inner.length > 0 ? ` (holding ${inner.join(", ")})` : ""}`;
   };
@@ -174,7 +177,7 @@ export function vehicleLines(ctx: ReadContext, scope: FeedScope): FeedLine[] {
     const owner = accessOf(ctx.state, v).owners[0]?.party ?? null;
     const grant = grants.get(v);
     const place = placeOfEntity(ctx.state, v);
-    const whose = owner === pov ? "yours" : level >= 2 && owner !== null && isMemberOf(ctx.state, pov, owner) ? `${ownerName(owner)}'s` : level >= 3 && grant ? `${owner ? `${ownerName(owner)}'s, ` : ""}${grant.until !== undefined ? `lent to you until ${formatClock(cal, grant.until)}` : "assigned to you"}` : null;
+    const whose = owner === pov ? "yours" : level >= 2 && owner !== null && ownsThrough(ctx, pov, owner) ? `${ownerName(owner)}'s` : level >= 3 && grant ? `${owner ? `${ownerName(owner)}'s, ` : ""}${grant.until !== undefined ? `lent to you until ${formatClock(cal, grant.until)}` : "assigned to you"}` : null;
     if (whose === null) {
       // Someone else's: told when it is at his site.
       if (site !== null && siteOf(ctx.world, place) === site) others.push({ v, owner, place });
@@ -204,7 +207,7 @@ export function vehicleLines(ctx: ReadContext, scope: FeedScope): FeedLine[] {
     // Who and what is in it only for one at his site: one away from here he can't see into.
     const inside = elsewhere ? [] : contents(v);
     const aboard = inside.filter((id) => kindIs(ctx.registry, ctx.world, own(ctx.state.entities, id)?.kind ?? "", "person")).map((id) => (id === pov ? "you" : (own(ctx.state.entities, id)?.name ?? id)));
-    const cargo = inside.filter((id) => !kindIs(ctx.registry, ctx.world, own(ctx.state.entities, id)?.kind ?? "", "person")).map((id) => named(id, 0, owns(ctx.state, pov, v)));
+    const cargo = inside.filter((id) => !kindIs(ctx.registry, ctx.world, own(ctx.state.entities, id)?.kind ?? "", "person")).map((id) => named(id, 0, owns(ctx, pov, v)));
     const description = thingDescription(ctx, v);
     const text = [
       `${e.name}: ${[head.join(", "), ...parts].join("; ")}.`,
@@ -425,7 +428,7 @@ export const vehiclesPack: PackDef = {
   domain: "vehicles",
   requires: ["space", "gear", "economy"],
   register(r) {
-    for (const t of TABLES) r.table({ id: t.id, schema: t.schema, columns: t.columns, defaults: t });
+    for (const t of TABLES) r.table({ id: t.id, schema: t.schema, columns: t.columns, defaults: t, shipped: SHIPPED[t.id] ?? [] });
     r.kind(VEHICLE);
     r.service("vehicle.consume", consume);
     r.query("fuel_ok", fuelOk);
@@ -569,7 +572,8 @@ export const vehiclesPack: PackDef = {
       pack: "vehicles",
       params: { vehicle: { type: "ref", ref: "vehicle" }, to: { type: "ref", ref: "place", label: "Destination" } },
       // A vehicle parked elsewhere is fetched on foot, within the world's travel tuning: the trip from here says whether it can go.
-      requires: ["vehicle.owner == self or has_rel(self, 'uses', vehicle)", "vehicle.status != 'broken'", "place(vehicle) != to", "drive_minutes(vehicle, to, here) > 0", "fuel_ok(vehicle, to, here)"],
+      // Who may drive it is the access resolver's (ITEMS-SPEC §3.4 `may_use`), as the Vehicles section tells it usable.
+      requires: ["may_use(self, vehicle)", "vehicle.status != 'broken'", "place(vehicle) != to", "drive_minutes(vehicle, to, here) > 0", "fuel_ok(vehicle, to, here)"],
       outcomes: { default: [{ type: "vehicles.drive", args: { vehicle: "vehicle", to: "=to", driver: "self" } }] },
       duration: "drive_minutes(vehicle, to, here)",
       activity: { type: "travel", until: "clock + drive_minutes(vehicle, to, here)" },

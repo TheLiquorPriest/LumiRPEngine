@@ -73,6 +73,8 @@ function record(pack: PackDef): PackRecord {
     proposal: (def) => void out.proposals.push(def),
     lint: (rule) => void out.lints.push(rule.code),
     view: (def) => void out.panels.push(def.panel),
+    membership: () => undefined,
+    orgSection: () => undefined,
   };
   pack.register(recorder);
   return out;

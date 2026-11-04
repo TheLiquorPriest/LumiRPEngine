@@ -1,6 +1,8 @@
 // The turn's actions as the narrator is told them (DESIGN §6.2 Outcome, the Outline's beats), on Port
 // Alder: each names what it was about, where it started, the time it took and what it changed, in the
 // player's words, so the reply can't have the player character still about to do what the engine played.
+// Take never takes what someone has on them (ITEMS-SPEC §13, Entities 7: a typed take from someone's
+// hands is no Take, and the story wins): the letter Jordan takes lies loose in the shop.
 
 import { describe, expect, test } from "bun:test";
 import type { QuietRequest } from "../../src/backend/host";
@@ -12,18 +14,21 @@ import { Rig } from "../support/rig";
 const POV = "pov";
 
 const INTERPRET_MARK = "You map a player's typed input";
-const TYPED = "I take the letter from Marcus, fold it into my jacket, and tell him I'll walk over to Bluebird Coffee and get us both a coffee.";
+const TYPED = "I take the letter off the counter, fold it into my jacket, and tell Marcus I'll walk over to Bluebird Coffee and get us both a coffee.";
+/** The same, the letter taken from Marcus's hands. */
+const FROM_HIM = "I take the letter from Marcus, fold it into my jacket, and tell him I'll walk over to Bluebird Coffee and get us both a coffee.";
 /** The message read as Take, Go to and Buy, in that order. */
 const READ: JsonObject = { action: "take", params: { item: "unsigned_letter" }, confidence: 0.9, more: [{ action: "go", params: { to: "bluebird_coffee" }, text: "I walk over to Bluebird Coffee" }, { action: "buy", params: { item: "coffee", qty: 2 }, text: "get us both a coffee" }] };
 /** Port Alder's puzzle of the township pickup, "The truck that won't start". */
 const TRUCK = "p_township_truck";
 
 /**
- * A Port Alder chat with the player character and `holder` at Alder Automotive, `holder` carrying
- * the unsigned letter; Vex Morrow is someone the POV can't see (unless `world.vex` is false), and
- * `world.puts` adds more. With `truckOpen` the truck puzzle is one the player knows of.
+ * A Port Alder chat with the player character and Marcus at Alder Automotive, where `owner`'s
+ * unsigned letter lies loose (carried by `owner` with `world.held`); Vex Morrow is someone the POV
+ * can't see (unless `world.vex` is false), and `world.puts` adds more. With `truckOpen` the truck
+ * puzzle is one the player knows of.
  */
-async function atTheShop(holder: "marcus_delgado" | "vex_morrow", truckOpen = false, world: { vex?: boolean; puts?: [string, JsonObject][] } = {}): Promise<{ rig: Rig; chatId: string }> {
+async function atTheShop(owner: "marcus_delgado" | "vex_morrow", truckOpen = false, world: { vex?: boolean; held?: boolean; puts?: [string, JsonObject][] } = {}): Promise<{ rig: Rig; chatId: string }> {
   const rig = new Rig({ shipped: true });
   const worldId = await rig.newWorld("Port Alder", "modern_slice_of_life");
   const put = async (collection: string, id: string, value: JsonObject): Promise<void> => {
@@ -36,7 +41,7 @@ async function atTheShop(holder: "marcus_delgado" | "vex_morrow", truckOpen = fa
     await put("entities", id, { ...e, fields: { ...e.fields, place: "alder_automotive" } });
   }
   if (world.vex ?? true) await put("entities", "vex_morrow", { id: "vex_morrow", kind: "character", name: "Vex Morrow", tier: "background", visibility: "secret", fields: { place: "alder_automotive" }, relations: [] });
-  await put("entities", "unsigned_letter", { id: "unsigned_letter", kind: "item", name: "Unsigned letter", tier: "background", fields: { owner: holder }, relations: [{ type: "in", to: holder }] });
+  await put("entities", "unsigned_letter", { id: "unsigned_letter", kind: "item", name: "Unsigned letter", tier: "background", fields: world.held ? { owner } : { owner, place: "alder_automotive" }, relations: world.held ? [{ type: "in", to: owner }] : [] });
   if (truckOpen) await put("tracks", TRUCK, { ...draft.tracks[TRUCK], visibility: "public" });
   for (const [collection, value] of world.puts ?? []) await put(collection, String(value.id), value);
   rig.body(await rig.send({ type: "lre.world", op: "commit", worldId, base: null }));
@@ -50,12 +55,12 @@ const lines = (section: string): string[] => section.split("\n").filter((l) => l
 const IDS = ["unsigned_letter", "marcus_delgado", "bluebird_coffee", "alder_automotive", "vex_morrow"];
 
 describe("the turn's actions in words (Outcome and Outline)", () => {
-  test("a take, a walk and a buy each name the item and its giver, the places, the time and the amount, in order, with no id", async () => {
+  test("a take, a walk and a buy each name the item, the places, the time and the amount, in order, with no id", async () => {
     const { rig, chatId } = await atTheShop("marcus_delgado");
     await rig.turn(chatId, TYPED, "You fold the letter away.");
     for (const section of ["Outcome", "Outline"]) {
       const told = lines(rig.host.section(section));
-      const take = told.findIndex((l) => l.includes("Unsigned letter") && l.includes("Marcus Delgado"));
+      const take = told.findIndex((l) => l.startsWith("Take (Unsigned letter)") && l.includes("carried by you"));
       const walk = told.findIndex((l) => l.includes("Alder Automotive") && l.includes("Bluebird Coffee") && /\d+ min/.test(l));
       const buy = told.findIndex((l) => /coffee/i.test(l) && /\$\d+\.\d\d/.test(l));
       expect(take).toBeGreaterThanOrEqual(0);
@@ -66,7 +71,7 @@ describe("the turn's actions in words (Outcome and Outline)", () => {
     expect(rig.rt.ledger.errors).toEqual([]);
   });
 
-  test("an action about someone the player character can't see never names them", async () => {
+  test("an action about something of someone the player character can't see never names them", async () => {
     const { rig, chatId } = await atTheShop("vex_morrow");
     await rig.turn(chatId, TYPED, "You fold the letter away.");
     for (const section of ["Outcome", "Outline"]) {
@@ -74,6 +79,19 @@ describe("the turn's actions in words (Outcome and Outline)", () => {
       expect(told).toContain("Unsigned letter");
       expect(told).not.toContain("Vex");
       expect(told).not.toContain("Morrow");
+    }
+    expect(rig.rt.ledger.errors).toEqual([]);
+  });
+
+  test("a take of what someone has on them isn't played as Take: the story tells it, and the Outcome and Outline hold only the walk and the buy", async () => {
+    const { rig, chatId } = await atTheShop("marcus_delgado", false, { held: true });
+    await rig.turn(chatId, FROM_HIM, "Marcus hands you the letter.");
+    for (const section of ["Outcome", "Outline"]) {
+      const told = lines(rig.host.section(section));
+      expect(told.some((l) => l.includes("Unsigned letter") || l.startsWith("Take"))).toBe(false);
+      const walk = told.findIndex((l) => l.includes("Alder Automotive") && l.includes("Bluebird Coffee"));
+      expect(walk).toBeGreaterThanOrEqual(0);
+      expect(told.findIndex((l) => /coffee/i.test(l) && /\$\d+\.\d\d/.test(l))).toBeGreaterThan(walk);
     }
     expect(rig.rt.ledger.errors).toEqual([]);
   });

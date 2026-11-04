@@ -13,6 +13,7 @@ import { labelOf, optionalQuery, own, strOf } from "../../../engine/pack-kit";
 import type { ReadContext, Rejection } from "../../../engine/registry";
 import type { FinanceApi, FinanceRegistry } from "./module";
 import { assetOf, configAssets, dateText, priceOf, readAssetDef, registerMarkets, reject } from "./assets";
+import { indexView } from "./history";
 import { registerGains, taxEstimate } from "./gains";
 import { holdingsWorth, holdingView, lotsOf, qtyOf, registerHoldings, setRoute, visibleHoldings } from "./holdings";
 import { registerIncome } from "./income";
@@ -20,6 +21,7 @@ import { registerOptions } from "./options";
 import { monthlyRent, propertyIds, propertyValue, propertyView, propertyWorth, registerProperty, routeRent, securedLoans, visibleProperties } from "./property";
 import { gainsIn, incomeIn } from "./records";
 import { businessIds, businessValue, registerStakes, setStakeRoute, stakeWorth } from "./stakes";
+import { actAs, asParam } from "./acting";
 
 /** Where a property's rent lands (`economy.route` with a property): an account of the owner's, or back to the owners' accounts. */
 function setRentRoute(api: FinanceApi, ctx: ReadContext, party: EntityId, property: EntityId, to: string): LedgerEvent[] | Rejection {
@@ -73,6 +75,7 @@ function investmentsView(api: FinanceApi, ctx: ReadContext, party: EntityId, det
     holdings,
     market,
     accounts: api.accountsOf(ctx, party, "spend").filter((a) => api.traitsOf(ctx, a)?.investment === true),
+    index: indexView(ctx),
   };
 }
 
@@ -126,17 +129,23 @@ export function registerAssets(r: FinanceRegistry): void {
   registerProperty(r);
   registerStakes(r);
 
+  // Routed `as` an organization (ORG-SPEC §3.6): its rent by someone who manages its property (`property.manage`), its dividends and profits by someone who manages its money (`money.manage`).
   r.core.effect({
     type: "economy.route",
-    args: ["holding?", "property?", "business?", "to?", "party?"],
+    args: ["holding?", "property?", "business?", "to?", "party?", "by?"],
     gm: true,
     resolve: (a, ctx) => {
       const party = strOf(a.party) || ctx.world.pov;
       const to = strOf(a.to);
-      if (strOf(a.holding) !== "") return setRoute(r.api, ctx, party, strOf(a.holding), to);
-      if (strOf(a.property) !== "") return setRentRoute(r.api, ctx, party, strOf(a.property), to);
-      if (strOf(a.business) !== "") return setStakeRoute(r.api, ctx, party, strOf(a.business), to);
-      return reject("bad_route", "say which holding, property or business");
+      const from = strOf(a.holding) || strOf(a.property) || strOf(a.business);
+      const where = to === "" ? "back to its owners" : to === "reinvest" ? "to be reinvested" : `to ${labelOf(ctx, to)}`;
+      const what = strOf(a.property) !== "" ? "rent" : strOf(a.business) !== "" ? "profits" : "dividends";
+      return actAs(ctx, { by: strOf(a.by), party, power: strOf(a.property) !== "" ? "property.manage" : "money.manage", line: () => `Sent ${labelOf(ctx, from)}'s ${what} ${where}` }, () => {
+        if (strOf(a.holding) !== "") return setRoute(r.api, ctx, party, strOf(a.holding), to);
+        if (strOf(a.property) !== "") return setRentRoute(r.api, ctx, party, strOf(a.property), to);
+        if (strOf(a.business) !== "") return setStakeRoute(r.api, ctx, party, strOf(a.business), to);
+        return reject("bad_route", "say which holding, property or business");
+      });
     },
   });
   r.core.action({
@@ -150,9 +159,10 @@ export function registerAssets(r: FinanceRegistry): void {
       property: { type: "ref", ref: "property", optional: true },
       business: { type: "ref", ref: "business", optional: true },
       to: { type: "text", label: "To (an account, or reinvest)", optional: true },
+      as: asParam("money.manage", "As: an organization whose money or property you manage, only when the input routes what it is paid; left out, it's yours"),
     },
-    requires: ["level.money >= 3"],
-    outcomes: { default: [{ type: "economy.route", args: { party: "self", holding: "=params.holding", property: "=params.property", business: "=params.business", to: "=params.to" } }] },
+    requires: ["level.money >= 3", "params.as == null or may(actor, params.as, params.property == null ? 'money.manage' : 'property.manage')"],
+    outcomes: { default: [{ type: "economy.route", args: { party: "self", holding: "=params.holding", property: "=params.property", business: "=params.business", to: "=params.to", by: "actor" } }] },
     duration: "1",
     lexicon: ["reinvest dividends", "send dividends to", "send the rent to"],
     observable: "checks their phone",
@@ -162,10 +172,10 @@ export function registerAssets(r: FinanceRegistry): void {
     const h = holdingsWorth(r.api, ctx, party);
     const p = propertyWorth(r.api, ctx, party);
     const s = stakeWorth(r.api, ctx, party);
-    // Vehicles are worth what they'd sell for (the vehicles pack's values), so a car loan isn't counted against nothing.
+    // Vehicles are worth what they'd sell for (the vehicles pack's values), so a car loan isn't counted against nothing; each line is marked, for Assets' vehicles row.
     const v = (optionalQuery(ctx, "vehicles.values")?.(ctx) ?? []).flatMap((x) => {
       const cents = Math.round((x.cents * r.api.shareOf(ctx.state, x.vehicle, party)) / 100);
-      return cents > 0 ? [{ label: labelOf(ctx, x.vehicle), cents }] : [];
+      return cents > 0 ? [{ label: labelOf(ctx, x.vehicle), cents, vehicle: true as const }] : [];
     });
     return { assets: h.assets + p.assets + s.assets + v.reduce((a, l) => a + l.cents, 0), liabilities: 0, lines: [...h.lines, ...p.lines, ...s.lines, ...v] };
   });

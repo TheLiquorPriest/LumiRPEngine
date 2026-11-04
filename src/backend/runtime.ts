@@ -14,8 +14,8 @@ import type { ExtractionType, NarratorView, StepConfig, UserSettings } from "../
 import { EXTRACTION_TYPES, helperCallOf, recentOf, stepConfigOf, stepLoreOf } from "../shared/settings";
 import type { ChipAction, ChipInput, ContextGeneration, ContextView, LoreStepTrace, StateView } from "../shared/state-view";
 import type { ActionDef, AdjudicationDef, LoreEntryDef, ParamDef, SectionTemplate, StepPurpose, WorldDoc } from "../shared/world";
-import { formatMoney, offersAction } from "../shared/world";
-import { counted, fieldNoun } from "../shared/words";
+import { formatMoney, offersAction, trackOwner } from "../shared/world";
+import { counted, fieldNoun, possessive } from "../shared/words";
 import { applyFinalEdits, FINAL_REVIEW_STEP, finalEditsOf, partOf, partText, type PromptPart, RULES_PART } from "../shared/final-review";
 import { LORE_AUDIENCE } from "../shared/lore";
 import { isMindPurpose, KNOWLEDGE_CHANGES, MINDS_EVENTS, MINDS_SLOT, type MindCallTrace, type MindEventData } from "../shared/minds";
@@ -26,8 +26,12 @@ import { planSkip } from "./skip-plan";
 import { mindLines } from "../packs/minds/core/section";
 import { namedInText, singlesOut } from "../packs/minds/core/fidelity";
 import { matchCatalog, transferCents, type PaidFrom } from "../packs/economy/core/index";
-import { itemName, stem } from "../packs/economy/core/items";
-import { holderOf } from "../packs/gear/core/model";
+import { itemName } from "../packs/economy/core/items";
+import { CURATOR_FACTS, isItemChange, isThingFact, nameTokens, sizeRank, stem, THING_FACTS } from "../shared/things";
+import { holderOf, holdersOf, isThing, restOf, sizeOf, whoseOf } from "../engine/things";
+import { thingIndex } from "../engine/thing-index";
+import { factChange, reconcileFact } from "../engine/reconcile-things";
+import { claimCap } from "../packs/economy/core/model";
 import { needsJudge, outcomeChoices, policyFor, policyOf, type Verdict } from "../engine/adjudication";
 import type { EngineTurnPlan, QueueStop } from "../engine/turn";
 import { timelapseIntent } from "../engine/turn";
@@ -49,6 +53,7 @@ import { readPass } from "../engine/read-pass";
 import { claimsOf } from "../engine/realism";
 import { kindIs, placeOfEntity, placeWithin } from "../engine/scope";
 import { placeKey, placeMenu, placeSaid } from "../engine/place-names";
+import { settlePlaceFacts } from "./place-facts";
 import { heardPlace } from "../engine/narration-channels";
 import type { EntityState, WorldState } from "../engine/state";
 import { actionOdds, companionCandidates, findAction, outsideOf, paramCandidates, playsAsRoleplay, type Resolution } from "../engine/resolve";
@@ -57,14 +62,22 @@ import type { InterpretOutput, QueuedAction } from "../engine/steps";
 import { checkAnswer } from "../engine/tracks";
 import { loreReadable, namesHiddenOrSecretLore, secretLoreNames } from "../engine/lore";
 import { pinsFor, type PinnedText } from "../engine/lore-pins";
-import { hiddenNameCheck, namesHidden, povMayKnow } from "../engine/player-events";
+import { authorLines, hiddenNameCheck, namesHidden, povMayKnow } from "../engine/player-events";
 import { canSeeEntity, canSeePlace, findLeaks, loreGateReader, playerTrack, povPlace, shownTrackId, unrevealedSecrets, unseenPlaceNames } from "../engine/visibility";
 import { feedOf, renderersOf } from "../engine/feed";
 import { answerParams, answerWords, expectedAnswers, openPuzzle, ownAnswer, saysAmount } from "../packs/story/core/index";
 import { resolveUsualMoves, usualRoutineForExtract } from "../packs/castlife/core/usual";
 import { dayPlan, type DayPlan } from "../packs/castlife/core/index";
+import { agendaAsks, agendaLabel, planExtractLines, type PlanReadItems } from "../packs/orgs/core/agenda";
+import { PLAN_TAB } from "../shared/org-feed";
+import { orgKnown, quotesReply, statesChange } from "../packs/orgs/core/story";
+import { positionsOf } from "../engine/org";
 import { Working } from "../engine/working";
+import { TIDIED_GROUP, tidyOnce } from "../engine/thing-tidy";
+import { pathEvents, tidiedOn } from "./gm";
+import { fixLines, unseenFixLine } from "./view";
 import type { GenerateAs, PresetCard, ResultBodies, TemplateInfo } from "../shared/protocol";
+import type { StarterTable } from "../shared/tables";
 import { Agents, type BuildInfo, thisBuild } from "./agents";
 import { AgentAccounts } from "./agents/provider";
 import { EngineBook, narratorRules, sectionsOf, sectionTokens } from "./book";
@@ -79,7 +92,7 @@ import { ChatMetaQueue } from "./chat-meta-queue";
 import { BlobStore } from "./agents/blobs";
 import { Sessions } from "./agents/sessions";
 import { Sweep } from "./agents/sweep";
-import { ChatKnowledge, chatKnowledgePrefsOf, knowledgeOn, narratorView } from "./chat-knowledge-prefs";
+import { ChatKnowledge, chatKnowledgePrefsOf, knowledgeOn, narratorView, tidyOn } from "./chat-knowledge-prefs";
 import { ChipStore, type StoredChip } from "./chips";
 import type { DryRun, HostPort } from "./host";
 import { EngineFailure, LedgerService, OPEN_CHATS_CAP, toChain, type Delivered, type PreOutcome, type RunOutcome, type TurnContext, type TurnGone, type TurnHooks } from "./ledger-io";
@@ -101,13 +114,15 @@ import { playerReason, unplayedWords } from "./requirement-words";
 import { buildSections } from "./sections-build";
 import { routineAsks } from "./routine-ask";
 import { CallMeter, dedupeProposals, extract, interpret, NotNeeded, saidPayMethod, Steps, type InterpretContext, type InterpretRead, type ReadAction, type ThingSort } from "./steps";
+import { renderPrompt } from "./prompts";
+import { EXTRACT_ITEM_TEXT, EXTRACT_ORG_TEXT, ORG_FACT_TYPES } from "../shared/role-prompts";
 import { PlanNotes, type PlanLines } from "./plan-notes";
 import { StagedActions } from "./staged";
 import { InspectorLog, type InspectorRecord } from "./inspector-log";
 import { JsonHiding, readableReply } from "./json-hiding";
 import { GUIDANCE_PREFIX, GUIDANCE_TARGETS, NARRATOR_OUTLET, outletOf, PresetBinding, type Guidance, type PresetConfig } from "./preset-binding";
 import { presetCaveats, type PresetCaveat } from "./preset-lint";
-import { applyProposals, applyRead, type EnginePipeline, type PlanProse, type PreparedRead, type ProposalOutcome, type ReadChip, type ReadStep, TurnBridge, type UnfitAction } from "./turn-model";
+import { applyProposals, applyRead, type EnginePipeline, type PlannedRead, type PlanProse, type PreparedRead, type ProposalOutcome, type ReadChip, type ReadStep, TurnBridge, type UnfitAction } from "./turn-model";
 import { agentsActHere, factLines, handedCash, judge, keepLine, noFacts, npcAsked, npcOdds, oddsDecisions, paidOutside, payeeOf, phaseBudget, planFacts, presentNames, promptedEffects, promptedText, puzzleAnswer, renderTemplate, runsOf, safeVars, sceneClock, slotVars, type EarlierMessage, type StepBudget, tiesOf, turnTimeLine, unfitRef, type PlanStart, type ProseMark, type SignalFacts, type StepRun, type Tie, type UnfitRef } from "./turn-steps";
 import { buildView, clockMinutes, notWorldView, palette, recentLines, replyFailedChip, TIMELAPSE_ACTION, ViewMemo } from "./view";
 import { actionWords, compactSpan, editedText, spanText } from "../engine/action-words";
@@ -132,6 +147,8 @@ export interface RuntimeOptions {
   templates?: Record<string, (id: string, name: string) => WorldDoc>;
   /** What each template is (`lre.world templates`); a template without an entry here isn't listed. */
   templateInfo?: readonly TemplateInfo[];
+  /** The starter worlds' own tables, each with every revision it has shipped as (Data updates, `STARTER_TABLES`). */
+  starterTables?: readonly StarterTable[];
   /** This build and where its agent kit is (DESIGN §23): from what the build defined, unless a test names one. */
   build?: BuildInfo;
 }
@@ -169,8 +186,12 @@ const ALREADY_SO: ReadonlySet<string> = new Set(["already_known", "already"]);
 
 /**
  * What each reference of a read's change names (DESIGN §11): someone, a place, a thing, or a `knows`
- * fact, which may be any of them. A thing changing hands or bought is words (`FREE_TEXT`), and a
- * routine's refusals are unseen, so neither is one.
+ * fact, which may be any of them. A thing a thing fact names is words the reconciler reads (ITEMS-SPEC
+ * §5.1: secrets are marks, never a filter), and a thing bought is words, so neither is one; a
+ * routine's refusals are unseen, so it is none either. An organization reads as someone (any entity
+ * the POV may know), and an employer as a fact, so the place someone works at names it too (ORG-SPEC
+ * §7.3); a plan's organization is the agenda channel's own to find (the party in words, or the plan
+ * holding the item).
  */
 type RefRole = "person" | "place" | "thing" | "fact";
 const REF_ROLES: Readonly<Record<string, Readonly<Record<string, RefRole>>>> = {
@@ -179,24 +200,34 @@ const REF_ROLES: Readonly<Record<string, Readonly<Record<string, RefRole>>>> = {
   regard: { from: "person", to: "person" },
   give: { from: "person", to: "person" },
   transfer: { from: "person", to: "person" },
-  purchase: { payer: "person" },
+  purchase: { payer: "person", seller: "person" },
   condition: { who: "person", entity: "person" },
   quantity: { entity: "person", item: "thing" },
   life: { entity: "person" },
-  take: { entity: "person", item: "thing" },
-  drop: { entity: "person", item: "thing" },
-  use_up: { entity: "person", item: "thing" },
-  wear: { entity: "person", item: "thing" },
-  lose: { entity: "person", item: "thing", by: "person" },
-  item_condition: { entity: "person", item: "thing" },
+  take: { entity: "person" },
+  drop: { entity: "person" },
+  put: { entity: "person" },
+  has: { entity: "person" },
+  owner: { owner: "person" },
+  use_up: { entity: "person" },
+  wear: { entity: "person" },
+  lose: { entity: "person", by: "person" },
+  item_condition: { entity: "person" },
   spawn: { place: "place" },
+  place_make: { entity: "person", parent: "place" },
+  membership: { who: "person", org: "person", by: "person" },
+  employment: { who: "person", org: "fact", by: "person" },
+  agenda: { who: "person" },
 };
 
 /**
  * Fields a change words as the reply put them, never a reference: a thing handed over or bought may be
- * one the world doesn't track yet, so one the POV doesn't know of, hidden or not, is such words too.
+ * one the world doesn't track yet, so one the POV doesn't know of, hidden or not, is such words too;
+ * and so is every thing and holder a thing fact names (ITEMS-SPEC §5.1), and what an organization
+ * fact quotes and calls things (its said, a title, a position, a pay basis, a task offered).
  */
-const FREE_TEXT: Readonly<Record<string, readonly string[]>> = { give: ["item"], purchase: ["item", "name"] };
+const THING_WORDS = ["item", "into", "at", "from"] as const;
+const FREE_TEXT: Readonly<Record<string, readonly string[]>> = { give: ["item"], purchase: ["item", "name"], take: THING_WORDS, drop: THING_WORDS, put: THING_WORDS, has: THING_WORDS, owner: THING_WORDS, use_up: THING_WORDS, wear: THING_WORDS, lose: THING_WORDS, item_condition: THING_WORDS, place_make: ["place", "aliases", "description"], membership: ["said", "title", "position"], employment: ["said", "title", "position", "basis"], agenda: ["offer", "said"] };
 
 /**
  * How a change names, in each role, what the POV doesn't know: alike whether it is hidden or nowhere
@@ -242,34 +273,69 @@ function povWorld(reg: Registry, world: WorldDoc, state: Readonly<WorldState>): 
   };
 }
 
+/** How many people and money records the read is shown beside its things (`thingReads.shown` counts the things). */
+const PREFIX_PEOPLE = 30;
+
 /**
- * The entities an extraction reads against, only those the POV may know: 30 of them, the scene's
- * people and things first and money accounts last, so a wallet's cards never crowd out who is in
- * the room.
+ * The entities an extraction reads against, only those the POV may know (ITEMS-SPEC §5.2). Up to 30
+ * people and money records, the scene's first and money accounts last, so a wallet's cards never
+ * crowd out who is in the room; and up to `shown` things (Settings → Changes from the reply → Things
+ * the read is shown): first each thing a name or alias of which the reply or the player's message
+ * says (`said`, by its head noun), then those in the player character's scene, then their own
+ * elsewhere, then the rest, each group in the state's order.
  */
-function prefixEntities(reg: Registry, world: WorldDoc, state: WorldState): { id: EntityId; e: EntityState }[] {
+function prefixEntities(reg: Registry, world: WorldDoc, state: WorldState, opts: { said: readonly string[]; shown: number }): { id: EntityId; e: EntityState }[] {
+  const ctx = reg.context(world, state);
   const here = placeOfEntity(state, world.pov);
-  const rank = (id: EntityId, kind: string): number => (kind === "account" ? 2 : here !== null && placeOfEntity(state, id) === here ? 0 : 1);
-  return Object.entries(state.entities)
+  const index = thingIndex(ctx);
+  const things = new Set(index.things);
+  const words = new Set(opts.said.flatMap((t) => nameTokens(t)).map(stem));
+  const said = (id: EntityId): boolean => (index.names.get(id) ?? []).some((n) => n.by !== "type" && n.heads.some((h) => words.has(h)));
+  const scene = (id: EntityId): boolean => here !== null && placeOfEntity(state, id) === here;
+  const thingRank = (id: EntityId): number => {
+    if (said(id)) return 0;
+    if (scene(id) || holdersOf(state, id).includes(world.pov)) return 1;
+    const whose = whoseOf(ctx, id);
+    return whose.presumed === undefined && whose.owners.includes(world.pov) ? 2 : 3;
+  };
+  const known = Object.entries(state.entities)
     .filter(([id]) => povMayKnow(reg, world, state, id))
-    .map(([id, e], i) => ({ id, e, i, rank: rank(id, e.kind) }))
-    .sort((a, b) => a.rank - b.rank || a.i - b.i)
-    .slice(0, 30);
+    .map(([id, e], i) => ({ id, e, i, thing: things.has(id) }));
+  const ranked = known.map((x) => ({ ...x, rank: x.thing ? thingRank(x.id) : x.e.kind === "account" ? 2 : scene(x.id) ? 0 : 1 })).sort((a, b) => a.rank - b.rank || a.i - b.i);
+  const people = ranked.filter((x) => !x.thing).slice(0, PREFIX_PEOPLE);
+  const shown = ranked.filter((x) => x.thing).slice(0, Math.max(0, opts.shown));
+  return [...people, ...shown].map(({ id, e }) => ({ id, e }));
 }
 
 /**
- * The prefix an extraction reads against (`prefixEntities`). A thing names who holds it (one the POV
- * may know), so a narrated hand-over reads from the right giver; anyone's place is named only when
- * the POV can see it, so extract never learns of a place the POV hasn't heard of. Places are offered
- * beside it, by name (`placeMenu`).
+ * The prefix an extraction reads against (`prefixEntities`). A thing names who holds it, whose it is
+ * (stated, or `presumed` from where it is, ITEMS-SPEC §4.2), its size and where it rests (§4.3), each
+ * party and place as the POV may know it, so a narrated hand-over reads from the right giver and keeps
+ * its owner; anyone's place is named only when the POV can see it, so extract never learns of a place
+ * the POV hasn't heard of. Places are offered beside it, by name (`placeMenu`).
  */
-export function prefixSummary(reg: Registry, world: WorldDoc, state: WorldState): JsonValue {
+export function prefixSummary(reg: Registry, world: WorldDoc, state: WorldState, opts: { said: readonly string[]; shown: number }): JsonValue {
+  const ctx = reg.context(world, state);
   const pov = state.entities[world.pov];
+  const sees = (place: string): boolean => canSeePlace(reg, world, state, world.pov, place);
+  const knows = (id: EntityId): boolean => povMayKnow(reg, world, state, id);
   const people: JsonObject = {};
-  for (const { id, e } of prefixEntities(reg, world, state)) {
+  for (const { id, e } of prefixEntities(reg, world, state, opts)) {
     const holder = holderOf(state, id);
-    const place = typeof e.fields.place === "string" && canSeePlace(reg, world, state, world.pov, e.fields.place) ? e.fields.place : null;
-    people[id] = { name: e.name, kind: e.kind, place, ...(holder !== null && povMayKnow(reg, world, state, holder) ? { holder } : {}) };
+    const place = typeof e.fields.place === "string" && sees(e.fields.place) ? e.fields.place : null;
+    const entry: JsonObject = { name: e.name, kind: e.kind, place, ...(holder !== null && knows(holder) ? { holder } : {}) };
+    if (isThing(ctx, id)) {
+      const whose = whoseOf(ctx, id);
+      const owners = whose.owners.filter(knows);
+      if (owners.length > 0) Object.assign(entry, { owner: owners.length === 1 ? (owners[0] ?? null) : owners }, whose.presumed !== undefined ? { presumed: true } : {});
+      const size = sizeOf(ctx, id).size;
+      if (size !== "unknown") entry.size = size;
+      const rest = restOf(ctx, id).rest;
+      if (rest === "owner") entry.rest = "owner";
+      else if (rest && "place" in rest && sees(rest.place)) entry.rest = { place: rest.place };
+      else if (rest && "in" in rest && knows(rest.in)) entry.rest = { in: rest.in };
+    }
+    people[id] = entry;
   }
   return { clock: state.clock, pov: world.pov, povName: pov?.name ?? world.pov, cents: state.accounts[world.pov] ?? null, entities: people };
 }
@@ -290,10 +356,12 @@ function inRecordOrder(record: readonly LedgerEvent[], events: readonly LedgerEv
 /**
  * Whether every entity and place a proposal names is one the POV may know; a read leaves out one
  * that isn't. A value is matched as the channels read it, trimmed (and lowercased when only that
- * names something), so `" vera "` is Vera. Two exceptions: the place a `knows` proposal teaches the
- * POV (`heardPlace`), since hearing of a `known_by` or `discoverable` place is how it comes to know
- * it, and words for a thing handed over or bought (`FREE_TEXT`), which name nothing of the world's
- * the POV doesn't know of, so a hidden thing's id there reads as one no world has.
+ * names something), so `" vera "` is Vera. An organization is known as the Orgs home shows it
+ * (`orgKnown`, ORG-SPEC §3.16): one the POV belongs to or can see, wherever it stands. Two
+ * exceptions: the place a `knows` proposal teaches the POV (`heardPlace`), since hearing of a
+ * `known_by` or `discoverable` place is how it comes to know it, and words for a thing handed over
+ * or bought (`FREE_TEXT`), which name nothing of the world's the POV doesn't know of, so a hidden
+ * thing's id there reads as one no world has.
  */
 export function proposalKnown(p: JsonObject, reg: Registry, world: WorldDoc, state: Readonly<WorldState>): boolean {
   const named = (s: string): string => {
@@ -303,7 +371,7 @@ export function proposalKnown(p: JsonObject, reg: Registry, world: WorldDoc, sta
   const ok = (v: JsonValue | undefined, depth: number): boolean => {
     if (typeof v === "string") {
       const id = named(v);
-      return hasOwn(state.entities, id) ? povMayKnow(reg, world, state, id) : hasOwn(world.places, id) ? canSeePlace(reg, world, state, world.pov, id) : true;
+      return hasOwn(state.entities, id) ? povMayKnow(reg, world, state, id) || orgKnown({ registry: reg, world, state }, id) : hasOwn(world.places, id) ? canSeePlace(reg, world, state, world.pov, id) : true;
     }
     if (depth > 3) return true;
     if (Array.isArray(v)) return v.every((x) => ok(x, depth + 1));
@@ -319,9 +387,10 @@ type PovView = Pick<ReadContext, "registry" | "world" | "state">;
 
 /**
  * Who or what a change's reference names, as the POV may know it (DESIGN §11): itself, an entity it
- * may be told of (by id in any case, else by name as `placeKey` compares names), and for a place or a
- * fact, a place it can see (`placeSaid`). Null when it names no one and nothing the POV knows,
- * whether that is hidden or nowhere in the world: the two read alike.
+ * may be told of (by id in any case, else by name as `placeKey` compares names), an organization
+ * it knows of (`orgKnown`), and for a place or a fact, a place it can see (`placeSaid`). Null when
+ * it names no one and nothing the POV knows, whether that is hidden or nowhere in the world: the
+ * two read alike.
  */
 function knownRef(view: PovView, role: RefRole, said: string): { id: string; name: string } | null {
   const { registry: reg, world, state } = view;
@@ -333,7 +402,8 @@ function knownRef(view: PovView, role: RefRole, said: string): { id: string; nam
   }
   const key = placeKey(t);
   const byId = hasOwn(state.entities, t) ? t : hasOwn(state.entities, t.toLowerCase()) ? t.toLowerCase() : null;
-  const id = byId !== null ? (povMayKnow(reg, world, state, byId) ? byId : null) : (Object.keys(state.entities).find((e) => key !== "" && placeKey(own(state.entities, e)?.name ?? "") === key && povMayKnow(reg, world, state, e)) ?? null);
+  const knows = (e: EntityId): boolean => povMayKnow(reg, world, state, e) || orgKnown(view, e);
+  const id = byId !== null ? (knows(byId) ? byId : null) : (Object.keys(state.entities).find((e) => key !== "" && placeKey(own(state.entities, e)?.name ?? "") === key && knows(e)) ?? null);
   return id === null ? null : { id, name: id === world.pov ? "you" : (own(state.entities, id)?.name ?? id) };
 }
 
@@ -804,6 +874,8 @@ export class Runtime implements TurnHooks {
   readonly agentAccounts: AgentAccounts;
   readonly templates: Record<string, (id: string, name: string) => WorldDoc>;
   readonly templateInfo: readonly TemplateInfo[];
+  /** The starter worlds' own tables with their shipped revisions (Data updates). */
+  readonly starterTables: readonly StarterTable[];
   private readonly pipeline: EnginePipeline;
   /** Runs by `user \0 chat`. */
   private readonly runs = new Map<string, ChatRun | null>();
@@ -885,7 +957,8 @@ export class Runtime implements TurnHooks {
     this.pipeline = options.pipeline;
     this.templates = options.templates ?? {};
     this.templateInfo = options.templateInfo ?? [];
-    this.worlds = new WorldStore(this.host, this.registry);
+    this.starterTables = options.starterTables ?? [];
+    this.worlds = new WorldStore(this.host, this.registry, this.starterTables);
     // The guard asks Lumiverse to wait as long as the users' guard timeouts say. The connections
     // acceptance runs guard are kept beside the runs, where an earlier build's settings write can't
     // drop them. A turn under way runs on the settings it started with (`TurnFrame`), so a change
@@ -1206,6 +1279,16 @@ export class Runtime implements TurnHooks {
       w.applyAll(remembered);
       render.state = w.state;
     }
+    // Once, an older chat's first turn puts down what someone has on them that is too big to carry
+    // (ITEMS-SPEC §9, Tidy up's first kind), first after the memory, so all the turn reads is tidied;
+    // its chip after the turn has Undo. A chain that holds the fix, undone or not, records it no
+    // more, and the chat's own switch (GM → This chat → Things), else the world's `tidy.auto`, turns it off.
+    if (tidyOn(await this.chatKnowledge.get(input.chatId, input.userId), render.world) && !tidiedOn(input.core, before)) {
+      const w = new Working(this.registry, render.world, render.state);
+      const tidied = tidyOnce(w, pathEvents(input.core, before));
+      bridge.setTidied(text, tidied);
+      if (tidied.length > 0) render.state = w.state;
+    } else bridge.setTidied(text, []);
     // Whether the chat tracks knowledge (DESIGN §24.11): its own switch, else the user's; the turn records a change, and minds read what they hold.
     const knowing = knowledgeOn(await this.chatKnowledge.get(input.chatId, input.userId), render.world, settings);
     const mindsKey = [input.runKey, render.state.revision, text, hashParts("lre.kept-minds", JSON.stringify({ minds: settings.minds, knowing, step: mindsStepConfig(settings.modelUse, "mind"), guidance: preset.guidance.mind ?? "" }))].join("\u0000");
@@ -1701,18 +1784,28 @@ export class Runtime implements TurnHooks {
    * time against it), the change types it may propose (no time passing after a turn whose time passed
    * as its timelapse, `skipped`, L27), the world's or the user's own words for the step (`run`'s,
    * filled with `vars`), the usual routines, the player's message (`said`), the places it is offered
-   * by name (those the reply and the message name, and the nearest first, DESIGN §9.4) and the kinds
-   * a newcomer may be. The prepared read's, and Test's for the read role's texts.
+   * by name (those the reply and the message name, and the nearest first, DESIGN §9.4), the kinds a
+   * newcomer may be and, while agenda is read, the plans' open items by id (`planExtractLines`); the
+   * things the state shows it are the user's `shown` (ITEMS-SPEC §5.2). The
+   * prepared read's, and Test's for the read role's texts. On an agent chat with the Curator on
+   * (`split`), the read's change types leave out the Curator's (`CURATOR_FACTS`: the thing facts, a
+   * purchase, a walk-on, a place made in play), and the Curator's prompt-only read (`"curator"`) is
+   * told those alone (ITEMS-SPEC §6.4, one writer per domain).
    */
-  extractInput(at: Pick<ReadInput, "world" | "state" | "pre">, input: { run: StepRun; text: string; said: string; vars: Readonly<Record<string, string>>; usual: readonly string[]; skipped: boolean }): ExtractInput {
+  extractInput(at: Pick<ReadInput, "world" | "state" | "pre">, input: { run: StepRun; text: string; said: string; vars: Readonly<Record<string, string>>; usual: readonly string[]; skipped: boolean; shown: number; split?: "read" | "curator" }): ExtractInput {
     const { world, state } = at;
-    const places = placeMenu(this.registry, world, state, [input.text, input.said], prefixEntities(this.registry, world, state).flatMap(({ e }) => (typeof e.fields.place === "string" ? [e.fields.place] : [])));
+    const window = { said: [input.text, input.said], shown: input.shown };
+    const places = placeMenu(this.registry, world, state, [input.text, input.said], prefixEntities(this.registry, world, state, window).flatMap(({ e }) => (typeof e.fields.place === "string" ? [e.fields.place] : [])));
     const personKinds = [...new Set([...Object.keys(world.kinds), ...this.registry.kinds.keys()])].filter((k) => kindIs(this.registry, world, k, "person"));
-    const channels = EXTRACTION_TYPES.filter((t) => !(KNOWLEDGE_CHANGES as readonly string[]).includes(t) && (t === "time_advance" ? !input.skipped : this.registry.proposals.has(t)));
+    // The read gives facts: the change types' own (but the item change types, which the thing facts are settled into, ITEMS-SPEC §5.2–5.4), and the thing facts.
+    const every: string[] = [...EXTRACTION_TYPES.filter((t) => !(KNOWLEDGE_CHANGES as readonly string[]).includes(t) && !isItemChange(t) && (t === "time_advance" ? !input.skipped : this.registry.proposals.has(t))), ...THING_FACTS];
+    const channels = input.split === undefined ? every : every.filter((t) => CURATOR_FACTS.includes(t) === (input.split === "curator"));
     // The engine's clock as the Scene tells it: when the player's message came, and now, after the minutes the turn's own actions took.
     const applied = clockMinutes(at.pre);
     const ctx = this.registry.context(world, state);
-    return { world: povWorld(this.registry, world, state), prefix: prefixSummary(this.registry, world, state), appliedMinutes: applied, clock: { start: sceneClock(ctx, state.clock - applied), now: sceneClock(ctx) }, channels, instructions: input.run.template ? renderTemplate(input.run.template.template, input.vars) : null, usual: input.usual, said: input.said, places, personKinds };
+    // The plans' open items, each by its id, while the reply's agenda is read (ORG-SPEC §3.14, assess-party §6.2), so a status names an item that is there.
+    const plan = channels.includes("agenda") ? planExtractLines(ctx) : [];
+    return { world: povWorld(this.registry, world, state), prefix: prefixSummary(this.registry, world, state, window), appliedMinutes: applied, clock: { start: sceneClock(ctx, state.clock - applied), now: sceneClock(ctx) }, channels, instructions: input.run.template ? renderTemplate(input.run.template.template, input.vars) : null, usual: input.usual, said: input.said, places, personKinds, plan };
   }
 
   /**
@@ -1774,12 +1867,11 @@ export class Runtime implements TurnHooks {
   }
 
   /**
-   * The things a read's changes name (`REF_ROLES`' things: taken, dropped, used up, worn, lost,
-   * damaged or counted) that the world has no entity for, as the player character may know it
-   * (`knownRef`), each as the read named it, or, named by an id they don't know, as one they don't
-   * know (DESIGN §11): each lands only as a Not tracked note, since no such change makes a thing (a
-   * give by someone else, in the reply's words, or a purchase does). The read role's run reports them
-   * (`ExtractRead.untracked`).
+   * The things a read's changes name by reference (`REF_ROLES`' things: a count's) that the world
+   * has no entity for, as the player character may know it (`knownRef`), each as the read named it,
+   * or, named by an id they don't know, as one they don't know (DESIGN §11): each lands only as a Not
+   * tracked note, since a count makes no thing (a thing fact finds or makes its own, ITEMS-SPEC
+   * §5.3). The read role's run reports them (`ExtractRead.untracked`).
    */
   untrackedThings(world: WorldDoc, state: WorldState, proposals: readonly JsonObject[]): string[] {
     const view: PovView = { registry: this.registry, world, state };
@@ -1886,6 +1978,11 @@ export class Runtime implements TurnHooks {
     const asks = routineAsks(this.registry, render.world, render.state, result.routine ?? [], text, secrets, (p) => proposalKnown(p, this.registry, render.world, render.state));
     if ((result.routine ?? []).length > asks.length) this.host.log("info", `[LumiRPEngine] interpret: ${(result.routine ?? []).length - asks.length} routine change(s) the message doesn't state as its own or that don't hold; not asked`, userId);
     bridge.setRoutineAsks(text, asks);
+    // The plan the message itself gives (assess-party §6.2) is added by its turn's plan, whatever the
+    // turn plays, with a receipt on the reply (`planReceipt`).
+    const plan = planSaid(this.registry, render.world, render.state, result.agenda, text, secrets);
+    if (plan.dropped > 0) this.host.log("info", `[LumiRPEngine] interpret: ${plan.dropped} plan item(s) carrying an unrevealed secret or a hidden name; not added`, userId);
+    bridge.setPlanRead(text, plan.items);
     if (findLeaks({ params: result.params, ...(result.then ? { then: result.then } : {}) }, secrets).length > 0) {
       this.host.log("info", `[LumiRPEngine] interpret: ${result.action ?? "no action"} carried an unrevealed secret; played as roleplay`, userId);
       bridge.setOffer(text, null);
@@ -1969,7 +2066,9 @@ export class Runtime implements TurnHooks {
       return;
     }
     const chosen = result.action ? all.find((a) => a.id === result.action) : undefined;
-    const params = chosen ? playable(chosen, result.params, render.world, [text]) : result.params;
+    // A staged action's params are the player's picks, money already in minor units with the way of
+    // paying it was given; only the read's own are as the model wrote them ("$20" is 2000).
+    const params = chosen ? (staged ? result.params : playable(chosen, result.params, render.world, [text])) : result.params;
     // An action whose params name nothing in the world that fits, as the POV knows it ("I chat with
     // Rena" where Rena is no one in it), is dropped on its own, the first as much as a queued one, and
     // plays as plain roleplay: its reply's receipt says why (DESIGN §9.4). The rest of the message
@@ -2089,7 +2188,8 @@ export class Runtime implements TurnHooks {
     const stage = render.world.tracks[track]?.stages[render.state.tracks[track]?.stage ?? render.world.tracks[track]?.start ?? ""];
     const run = runsOf(settings.modelUse, render.world, "puzzle.answer", facts, { guidance: at.guidance })[0];
     if (!run || !stage?.answer || !budget.take()) return;
-    const owner = render.world.tracks[track]?.owner;
+    const def = render.world.tracks[track];
+    const owner = def ? trackOwner(def) : undefined;
     const expect = stage.answer.expect;
     const p = await calls.puzzle({ answer, question: stage.label, world: render.world, state: render.state, accepted: expect, template: run.template?.template ?? null, classic: (signal) => puzzleAnswer(this.steps, run, stage.label, expect, answer, at.userId, signal, this.stepLore(run, at, { text: `${stage.label}\n${answer}`, links: owner ? [owner] : [] })) }, budget.signal);
     // Retried by the id the quest log shows it by, which the answer takes (a secret's stand-in), never its own.
@@ -2401,11 +2501,26 @@ export class Runtime implements TurnHooks {
     const extractRun = runsOf(modelUse, context.world, "extract", facts, { guidance }).find((r) => r.template === null || r.template.output !== "effects");
     // L27: a timelapse or speed-through turn's time passed as its timelapse, so its reply proposes no skip.
     const skipped = facts.timelapse || !!plan?.timelapse;
-    // What extract reads, as classic's call and the read role are told it.
-    const extractInput = extractRun ? this.extractInput(context, { run: extractRun, text, said: pre?.text ?? "", vars, usual, skipped }) : null;
-    const extractTask = extractRun && extractInput && budget.take()
-      ? calls.extract({ reply: text, world: live, state: context.state, input: extractInput, classic: (signal) => extract(this.steps, text, extractInput.world, extractInput.prefix, extractInput.appliedMinutes, extractInput.channels, extractRun.config, userId, signal, extractInput.instructions ?? undefined, lore(extractRun), extractRun.guidance, extractInput.usual, extractRun.recent, extractInput.said, extractInput.places, extractInput.personKinds) }, budget.signal)
-      : Promise.resolve({ proposals: [], where: null });
+    // What extract reads, as classic's call and the read role are told it. On an agent chat with the
+    // Curator on (ITEMS-SPEC §6.4), the read proposes no thing, place, walk-on or purchase: the Curator,
+    // beside it, owns those, and commits after it in role order.
+    const curated = this.orchestrator.isAgent(key) && settings.agents.pipeline.curator;
+    const asked = { text, said: pre?.text ?? "", vars, usual, skipped, shown: settings.thingReads.shown };
+    const extractInput = extractRun ? this.extractInput(context, { run: extractRun, ...asked, ...(curated ? { split: "read" as const } : {}) }) : null;
+    const itemTexts = { facts: renderPrompt(EXTRACT_ITEM_TEXT.facts, settings.prompts.texts, {}), rules: renderPrompt(EXTRACT_ITEM_TEXT.rules, settings.prompts.texts, {}) };
+    // The organization facts and their rules (ORG-SPEC §7.3); the plans' open items are each input's own.
+    const orgTexts = { facts: renderPrompt(EXTRACT_ORG_TEXT.facts, settings.prompts.texts, {}), rules: renderPrompt(EXTRACT_ORG_TEXT.rules, settings.prompts.texts, {}) };
+    // Classic's own read of `input`'s change types: the read's prompt-only call, and the Curator's (classic's item read, I9).
+    const classicRead = (run: StepRun, input: ExtractInput) => (signal: AbortSignal) => extract(this.steps, text, input.world, input.prefix, input.appliedMinutes, input.channels, run.config, userId, signal, input.instructions ?? undefined, lore(run), run.guidance, input.usual, run.recent, input.said, input.places, input.personKinds, itemTexts, { ...orgTexts, plan: input.plan.length > 0 ? renderPrompt(EXTRACT_ORG_TEXT.plan, settings.prompts.texts, { lines: input.plan.join("\n") }) : "" });
+    // The read's call takes its one from the phase's budget. On an agent chat with the Curator on, the
+    // Curator reads the reply's other half beside it under that same call, never one more of the
+    // phase's: its own budget is its role's and its ops per turn (ITEMS-SPEC §7.2), so a Lean budget
+    // still reads the reply's things, and the steps after the read keep their calls as on classic.
+    const readCall = extractRun && extractInput && budget.take() ? { run: extractRun, input: extractInput } : null;
+    const extractTask = readCall ? calls.extract({ reply: text, world: live, state: context.state, input: readCall.input, classic: classicRead(readCall.run, readCall.input) }, budget.signal) : Promise.resolve({ proposals: [], where: null });
+    const curatorInput = curated && readCall ? this.extractInput(context, { run: readCall.run, ...asked, split: "curator" }) : null;
+    // It is told what the turn did already, in the GM's words, so it does nothing twice.
+    const curateTask = readCall && curatorInput ? calls.curate({ reply: text, world: live, state: context.state, input: curatorInput, events: authorLines(this.registry, context.world, context.state, context.pre, context.pre.length), classic: classicRead(readCall.run, curatorInput) }, budget.signal) : Promise.resolve({ proposals: [], where: null });
     const effectsTasks = (["extract", "choices"] as const).flatMap((purpose) => runsOf(modelUse, context.world, purpose, facts, { output: "effects", guidance })).map((r) => (budget.take() ? calls.effects({ template: r.template?.template ?? "", world: live, vars, currency: context.world.currency, classic: (signal) => promptedEffects(this.steps, r, vars, context.world.currency, userId, signal, lore(r, true)) }, budget.signal) : Promise.resolve([])));
     const npcRun = runsOf(modelUse, context.world, "npc.choose", facts, { guidance })[0];
     const offscreen = npcAsked(ties.offscreen);
@@ -2442,7 +2557,7 @@ export class Runtime implements TurnHooks {
       return { events: [...opening.events, ...m.events], traces: [...m.traces, ...k.traces], ...(k.knowledge ? { knowledge: k.knowledge } : {}) };
     };
     const mindsTask = !post ? Promise.resolve(none) : this.diag.step({ chatId, userId, turn: key }, "memory", "minds", () => (this.orchestrator.isAgent(key) ? split() : calls.memory({ input: remember, opening: null, classic: (signal) => postMinds(this.minds, { ...remember, signal }) }, budget.signal)), undefined, MINDS_POST_CALLS);
-    const [extracted, effects, decisions, choices, minded] = await Promise.all([extractTask, Promise.all(effectsTasks), npcTask, Promise.all(choiceTasks), mindsTask]);
+    const [extracted, curatedRead, effects, decisions, choices, minded] = await Promise.all([extractTask, curateTask, Promise.all(effectsTasks), npcTask, Promise.all(choiceTasks), mindsTask]);
     this.timeLimits({ chatId, userId, turn: key }, "read", budget);
     this.addMindTraces(chatId, key, minded.traces);
     // The reply's lore traces join its generation's inspector record (the pre phase's are there already).
@@ -2468,13 +2583,16 @@ export class Runtime implements TurnHooks {
     // A move to someone's usual place ("usual") goes where their routine has them now, as the POV may
     // know it; one that resolves to none is left out (DESIGN §9.4).
     // The knowledge step's own change types (DESIGN §24.11) come only from it, never from a read.
-    const narrated = [...resolveUsualMoves(ctx, extracted.proposals), ...effects.flat()].filter((p) => !(KNOWLEDGE_CHANGES as readonly string[]).includes(String(p.type)));
+    const narrated = [...resolveUsualMoves(ctx, extracted.proposals), ...curatedRead.proposals, ...effects.flat()].filter((p) => !(KNOWLEDGE_CHANGES as readonly string[]).includes(String(p.type)));
     // Where the reply leaves the POV when no move says so is a guess (a flashback, a phone call, a look
     // across the street read as being there): whatever the location mode it waits for Apply, and its
     // chip is no outcome for the type's learning (DESIGN §9.4). `never` still ignores it.
     const guessed = new Set(replyPlace(this.registry, extracted.where, narrated, context));
+    // The reply's place facts (ITEMS-SPEC §6.2): a move to a place the world lacks makes the place,
+    // settled before anything else reads the changes, so a later one naming it finds it.
+    const placed = settlePlaceFacts(this.registry, context.world, context.state, [...narrated, ...guessed]);
     const deduped = dedupeProposals(
-      [...narrated, ...guessed].flatMap((p) => splitAlongBuy(p, context.pre, ctx, typedItems)),
+      placed.proposals.flatMap((p) => splitAlongBuy(p, context.pre, ctx, typedItems)),
       context.world.pov,
     ).filter((p) => {
       if (lentAlong(p, context.pre, context.state) || movedAlong(p, context.pre, context.state)) return false;
@@ -2491,15 +2609,25 @@ export class Runtime implements TurnHooks {
     // counts those naming what the POV hasn't seen. Any other change naming that is left out.
     const unnamed: JsonObject[] = [];
     const named: JsonObject[] = [];
-    for (const p of unleaked) (namesUnknown(ctx, p) ? unnamed : named).push(p);
-    const unseen = unnamed.filter((p) => !proposalKnown(p, this.registry, context.world, context.state)).length;
+    // Read with the places the reply makes, so a change naming one names a place the POV knows.
+    const placing = placed.working.ctx;
+    for (const p of unleaked) (namesUnknown(placing, p) ? unnamed : named).push(p);
+    const unseen = unnamed.filter((p) => !proposalKnown(p, this.registry, placing.world, placing.state)).length;
     if (unseen > 0) this.host.log("info", `[LumiRPEngine] read ${messageId.slice(0, 8)}: dropped ${unseen} proposal(s) naming what the player hasn't seen, each a receipt that doesn't name it`, userId);
-    const known = named.filter((p) => proposalKnown(p, this.registry, context.world, context.state));
+    const known = named.filter((p) => proposalKnown(p, this.registry, placing.world, placing.state));
     if (known.length < named.length) this.host.log("info", `[LumiRPEngine] read ${messageId.slice(0, 8)}: dropped ${named.length - known.length} proposal(s) naming what the player hasn't seen`, userId);
     // A change to someone's routine is the story's only for someone the reply speaks of: the player
     // character, or a person it names (DESIGN §9.4). It carries the reply's message as its turn, which
-    // the model can't set, so the change records where it came from.
+    // the model can't set, so the change records where it came from. An organization fact is the
+    // story's only in the reply's own words (ORG-SPEC §7.3): one whose `said` isn't the reply's, or
+    // that hedges a membership or a job ("thinking about quitting"), is none.
     const proposals = known.flatMap((p): JsonObject[] => {
+      if ((ORG_FACT_TYPES as readonly string[]).includes(String(p.type))) {
+        const said = typeof p.said === "string" ? p.said : "";
+        if (quotesReply(said, text) && (p.type === "agenda" || statesChange(said))) return [p];
+        this.host.log("info", `[LumiRPEngine] read ${messageId.slice(0, 8)}: dropped a ${String(p.type)} change the reply doesn't state in its own words`, userId);
+        return [];
+      }
       if (p.type !== "routine") return [p];
       const who = typeof p.entity === "string" ? p.entity : "";
       if (who === context.world.pov || namedInText(context.state.entities[who]?.name ?? "", text)) return [{ ...p, turn: messageId }];
@@ -2512,12 +2640,58 @@ export class Runtime implements TurnHooks {
     // helper model's. A chip-triggered read (Re-read, Retry read) or a Continue without a pre phase
     // was read on the user's default connection, the one Settings shows.
     const connection = helperCallOf(extractRun?.config, (await this.settings.get(userId)).helper).connectionId ?? pre?.connectionId ?? (await this.activeConnectionId(userId));
+    // The reply's thing facts (ITEMS-SPEC §5.3), in reply order, each settled against the state the
+    // ones before it left: a change of the type it lands under (§5.4), Which one? when several things
+    // fit, or why it can't be kept. A change asks first, whatever its mode but Never, when it moves a
+    // Built-in thing; a new thing asks under its cold start when it costs more than the world's claim
+    // cap or is bigger than Armful. The reply makes at most the user's Things made from a reply
+    // (Settings → Changes from the reply); a fact that would make one more is a Not tracked receipt.
+    // They settle against the places the reply makes (a thing put down in a booth it made), and a
+    // venue it makes asks first under its mode, as a costly thing does (ITEMS-SPEC §5.4).
+    const settling = new Working(this.registry, context.world, placed.working.state);
+    const settled: JsonObject[] = [];
+    const asks = new Map<JsonObject, "builtin" | "make">();
+    const whichOnes: { proposal: JsonObject; picks: { id: EntityId; proposal: JsonObject }[] }[] = [];
+    const thingDeclines: { proposal: JsonObject; reason: string; code: string }[] = [];
+    let made = 0;
+    proposals.forEach((p, i) => {
+      if (!isThingFact(p.type)) {
+        if (placed.venues.has(p)) asks.set(p, "make");
+        settled.push(p);
+        return;
+      }
+      const fact = p.type;
+      const why = typeof p.why === "string" ? p.why.trim().slice(0, settings.thingReads.whyMax) : undefined;
+      const told: JsonObject = { ...p, ...(why !== undefined ? { why } : {}) };
+      const opts = { viewer: context.world.pov, salt: `${context.read}:fact:${i}`, makes: settings.thingReads.madeMax - made };
+      const out = reconcileFact(settling, told, opts);
+      if (out.kind === "refused") {
+        if (!ALREADY_SO.has(out.rejection.code)) thingDeclines.push({ proposal: told, reason: out.rejection.reason, code: out.rejection.code });
+        return;
+      }
+      if (out.kind === "which") {
+        const picks = out.candidates.flatMap((id) => {
+          const q: JsonObject = { ...told, [out.field]: id };
+          const r = reconcileFact(new Working(this.registry, context.world, settling.state), q, opts);
+          return r.kind === "change" ? [{ id, proposal: { ...q, type: r.change, fact, ...(r.basis ? { basis: r.basis } : {}) } }] : [];
+        });
+        if (picks.length > 0) whichOnes.push({ proposal: told, picks });
+        return;
+      }
+      // A handover carries its basis as settled (§4.6), so its chip says it and an Apply hands it over so.
+      const change: JsonObject = { ...told, type: out.change, fact, ...(out.basis ? { basis: out.basis } : {}), ...(out.brought ? { brought: out.brought.place ?? "" } : {}) };
+      const costly = out.made.some((m) => (m.cents !== null && m.cents > claimCap(context.world)) || m.size === "vehicle" || (m.size !== "unknown" && m.size !== "part" && sizeRank(m.size) > sizeRank("armful")));
+      if (out.builtin) asks.set(change, "builtin");
+      else if (out.change === "item_make" && costly) asks.set(change, "make");
+      settled.push(change);
+      made += out.made.length;
+    });
     const auto: JsonObject[] = [];
     const confirm: JsonObject[] = [];
-    for (const p of proposals) {
+    for (const p of settled) {
       const type = EXTRACTION_TYPES.find((t) => t === p.type);
       if (!type) continue;
-      const { mode: typeMode } = effectiveMode(settings, learning, connection, type);
+      const { mode: typeMode, source } = effectiveMode(settings, learning, connection, type);
       // What the change lands on: the entity and field its channel names (a thing's count or
       // condition, whose bound in Build applies), else the person it names and the field it gives.
       const target = this.registry.proposals.get(type)?.boundTarget?.(p, ctx) ?? null;
@@ -2532,11 +2706,15 @@ export class Runtime implements TurnHooks {
         this.host.log("info", `[LumiRPEngine] read ${messageId.slice(0, 8)}: dropped ${describeProposal(p)} (a timelapse turn's time passed as its timelapse)`, userId);
         continue;
       }
+      const ask = asks.get(p);
+      // A Built-in thing moves only by a confirmed change; a costly or large new thing asks unless its
+      // type is pinned; someone volunteering a task asks "Add to the plan?" whatever the mode (assess-party §6.2).
+      const asking = ask === "builtin" || (ask === "make" && source !== "pinned") || (type === "agenda" && agendaAsks(p));
       const fitted = bounded.delta !== undefined ? { ...p, delta: bounded.delta } : p;
       if (unsure.has(p)) unsure.add(fitted);
       if (guessed.has(p)) guessed.add(fitted);
-      if (bounded.mode === "auto" && !unsure.has(p) && !guessed.has(p)) auto.push(fitted);
-      else confirm.push(fitted);
+      if (bounded.mode === "auto" && !asking && !unsure.has(p) && !guessed.has(p)) auto.push(fitted);
+      else confirm.push(isItemChange(type) ? { ...fitted, confirmed: true } : fitted);
     }
     // The knowledge step's changes (DESIGN §24.11, C4), on the connection it ran on: the player
     // character's learnings and reveals by their own modes, as the read's chips; everyone else's with
@@ -2577,8 +2755,15 @@ export class Runtime implements TurnHooks {
     applyRead(this.registry, w, reading, context.read, bridge.runSeed, (o) => outcomes.push({ ...o, paid: optionalQuery(w.ctx, "economy.paid_from")?.(w.ctx, o.events, context.world.pov) ?? null }));
     const stored: StoredChip[] = [];
     // One naming what the POV doesn't know is refused for that alone, under any mode but its type's
-    // `never`, and never by bounds, which would tell of whom it names.
-    const declines: { proposal: JsonObject; reason: string; code: string }[] = unnamed.filter((p) => EXTRACTION_TYPES.some((t) => t === p.type && effectiveMode(settings, learning, connection, t).mode !== "never")).map((proposal) => ({ proposal, reason: UNKNOWN_REASON, code: "unknown_ref" }));
+    // `never` (a thing fact's, the change type it would land under), and never by bounds, which would
+    // tell of whom it names.
+    const unknownTo = unnamed.filter((p) => {
+      const type = factChange(p) ?? EXTRACTION_TYPES.find((t) => t === p.type);
+      return type !== undefined && effectiveMode(settings, learning, connection, type).mode !== "never";
+    });
+    // A place fact the reply can't keep (past its places per reply, no parent the POV can see) is a receipt under any mode but `place_make`'s never.
+    const placeDeclines = effectiveMode(settings, learning, connection, "place_make").mode === "never" ? [] : placed.declines;
+    const declines: { proposal: JsonObject; reason: string; code: string }[] = [...unknownTo.map((proposal) => ({ proposal, reason: UNKNOWN_REASON, code: "unknown_ref" })), ...thingDeclines, ...placeDeclines];
     outcomes.forEach((o, i) => {
       if (o.rejection) {
         this.host.log("info", `[LumiRPEngine] read ${input.messageId.slice(0, 8)}: ${describeProposal(o.proposal)} didn't apply (${o.rejection.code}: ${o.rejection.reason})`, input.userId);
@@ -2699,10 +2884,26 @@ export class Runtime implements TurnHooks {
         messageId: input.messageId,
         swipeId,
         label: also ? `Also bought ${describeItem(proposal)}?${quote?.text ?? ""}${money.label}` : `${describeProposal(proposal, ctx)}${quote?.text ?? ""}${money.label}`,
-        detail: [money.detail, also ? "The reply may be telling your purchase again. Apply it only if this was bought too." : guess ? `The reply has you there, but the engine still has you ${here?.id ? `at ${here.name}` : "elsewhere"}. Apply the move?` : proposal.type === "reveal" ? "The story revealed a secret to you. Apply opens it in What you know and on your other screens; No keeps it from you." : "The narration says this happened. Apply it?"].filter((s) => s !== "").join(" "),
+        detail: [money.detail, also ? "The reply may be telling your purchase again. Apply it only if this was bought too." : guess ? `The reply has you there, but the engine still has you ${here?.id ? `at ${here.name}` : "elsewhere"}. Apply the move?` : proposal.type === "reveal" ? "The story revealed a secret to you. Apply opens it in What you know and on your other screens; No keeps it from you." : proposal.type === "agenda" && agendaAsks(proposal) ? "Offered in the story. Add it to the plan?" : "The narration says this happened. Apply it?"].filter((s) => s !== "").join(" "),
         actions: [{ id: "confirm", label: "Apply", style: "primary" }, ...(money.over ? [PAY_ANOTHER_WAY] : []), ...(quote?.limited ? [{ id: "amount", label: "Edit amount", input: { type: "money" as const, label: "Amount", value: quote.cents } }] : []), { id: "reject", label: "No" }],
         expires: "next_send",
         payload: { ...(guess ? {} : { type: String(proposal.type), connection: via.get(proposal) ?? connection }), proposal, seed },
+      });
+    });
+    // Which one? (ITEMS-SPEC §5.3 step 1): several things fit what the reply says; each is offered as
+    // the player may know it, then No. A pick applies as Apply does and counts toward no learning.
+    whichOnes.forEach((q, i) => {
+      const names = q.picks.map((pk) => own(context.state.entities, pk.id)?.name ?? "something");
+      stored.push({
+        id: `confirm:${input.messageId}:${input.generationId}:w${i}`,
+        kind: "confirm",
+        messageId: input.messageId,
+        swipeId,
+        label: `Which one? ${describeProposal(q.proposal, ctx)}`,
+        detail: "More than one thing fits what the reply says. Which did it mean?",
+        actions: [...q.picks.map((pk, n) => ({ id: `pick:${n}`, label: `${names[n]}${names.filter((x) => x === names[n]).length > 1 ? ` (${n + 1})` : ""}${whoseWords(ctx, pk.id)}`, ...(n === 0 ? { style: "primary" as const } : {}) })), { id: "reject", label: "No" }],
+        expires: "next_send",
+        payload: { proposal: q.picks[0]?.proposal ?? q.proposal, picks: q.picks.map((pk) => ({ ...pk.proposal, confirmed: true })), seed: `${context.seed}:check` },
       });
     });
     declines.forEach((d, i) => {
@@ -2763,7 +2964,8 @@ export class Runtime implements TurnHooks {
     this.host.log("info", `[LumiRPEngine] turn ${input.messageId.slice(0, 8)}:${input.swipeId} ${input.kind}: plan ${plan ? "yes" : "no"}, ${checked.length > 0 ? checked.join("; ") : "action -"}${plan?.stopped ? `; queue stopped (${plan.stopped.cause}) with ${plan.stopped.left} left` : ""}`, input.userId);
     if (played.length > 0) {
       // The actions live in the revision the chat folds at (after any Upgrade), not the run's first.
-      const world = input.core.worldAt(input.core.fold(input.observed).state.revision) ?? input.core.worldAt(rec?.defHash ?? "");
+      const head = input.core.fold(input.observed).state;
+      const world = input.core.playedAt(head) ?? input.core.playedAt(head, rec?.defHash ?? "");
       const labelOf = (res: Resolution): string => res.inferred?.label ?? (world?.actions[res.action] ?? this.registry.actions.get(res.action))?.label ?? res.action;
       for (const [i, res] of played.entries()) {
         const label = labelOf(res);
@@ -2777,14 +2979,37 @@ export class Runtime implements TurnHooks {
         if (playsAsRoleplay(res) && res.failed) stored.push({ id: `roleplay:${at}${n}`, kind: "untracked", ...base, label: `${label}: played as roleplay`, detail: `${unplayedWords(res.failed)}. It played as plain roleplay.`, actions: [], expires: "next_send", payload: {} });
         else if (!res.ok && res.failed) stored.push({ id: `decline:${at}${n}`, kind: "decline", ...base, label: `${label}: couldn't`, detail: playerReason(res.failed), actions: [], expires: "next_send", payload: {} });
         else if (res.rejected.length > 0) stored.push({ id: `decline:${at}${n}`, kind: "decline", ...base, label: `${label}: declined`, detail: res.rejected.map((r) => r.rejection.reason).join("; "), actions: [], expires: "next_send", payload: {} });
-        // A thing the player said they had, made real for this action (DESIGN §9.4), or money put in their cash: Undo takes it back, with what the action did.
-        if (res.claimed && input.kind !== "renarrate" && input.kind !== "continue") stored.push({ id: `claimed:${at}${n}`, kind: "claimed", ...base, label: res.claimed.cents !== undefined ? `Added: ${res.claimed.name} in cash` : `Added: ${/^[aeiou]/i.test(res.claimed.name) ? "an" : "a"} ${res.claimed.name}`, detail: "You said you had it, so the world has it now. Undo takes it back, with what you did with it.", actions: [{ id: "undo", label: "Undo", style: "danger" }], expires: "next_send", payload: { events: JSON.parse(JSON.stringify(res.claimed.events)) as JsonValue } });
+        // A thing the player said they had, made real for this action (DESIGN §9.4), money put in their
+        // cash, or their own thing brought along or fetched (ITEMS-SPEC §4.5): Undo takes it back, with
+        // what the action did. Where it was is named only as the POV may know it.
+        if (res.claimed && input.kind !== "renarrate" && input.kind !== "continue") {
+          const was = res.claimed.brought?.place ?? null;
+          const where = was !== null && world && hasOwn(world.places, was) && canSeePlace(this.registry, world, head, world.pov, was) ? (own(world.places, was)?.name ?? null) : null;
+          stored.push({ id: `claimed:${at}${n}`, kind: "claimed", ...base, ...claimedWords(res.claimed, where), actions: [{ id: "undo", label: "Undo", style: "danger" }], expires: "next_send", payload: { events: JSON.parse(JSON.stringify(res.claimed.events)) as JsonValue } });
+        }
       }
       // Typed text `interpret` read as actions (DESIGN §9.4, §11): one tap undoes what they did.
       const done = played.filter((res) => res.ok && res.events.length > 0);
       if (done.length > 0 && input.kind !== "renarrate" && input.kind !== "continue" && bridge.wasInterpreted(userText)) {
         stored.push({ id: `not_action:${at}`, kind: "not_action", ...base, label: "Not an action?", detail: `Read as ${done.map((res) => `"${labelOf(res)}"`).join(", then ")}. Undo it if you only meant to say it.`, actions: [{ id: "undo", label: "Not an action", style: "danger" }], expires: "next_send", payload: { text: userText, events: JSON.parse(JSON.stringify(inRecordOrder(plan?.events ?? [], done.flatMap((res) => res.events)))) as JsonValue } });
       }
+    }
+    // An older chat's one-time Things tidied fix, recorded first in this turn's plan (ITEMS-SPEC §9): its Undo puts back what it put down.
+    const tidied = rec && input.kind !== "renarrate" && input.kind !== "continue" ? rec.events.slice(0, rec.pre).filter((e) => e.group === TIDIED_GROUP) : [];
+    if (tidied.length > 0) {
+      const head = input.core.fold(input.observed).state;
+      const world = input.core.playedAt(head) ?? input.core.playedAt(head, rec?.defHash ?? "");
+      const lines = world ? fixLines(this.registry, world, head, tidied) : [];
+      const what = lines.length > 0 ? lines.join(" · ") : world ? unseenFixLine(this.registry, world, head, tidied) : "Behind the scenes";
+      stored.push({ id: `tidied:${at}`, kind: "tidied", ...base, label: "Things tidied", detail: `Too big to carry, so put down: ${what}. Undo puts them back as they were.`, actions: [{ id: "undo", label: "Undo", style: "danger" }], expires: "next_send", payload: { events: JSON.parse(JSON.stringify(tidied)) as JsonValue } });
+    }
+    // The plan the player's message gave (assess-party §6.2), as the turn's plan added it: its receipt
+    // (`planReceipt`). A Re-narrate tells the same plan again, so its swipe gets the same receipt.
+    const planned = rec && rec.seed !== "" && input.kind !== "continue" ? bridge.plannedFor(rec.seed) : undefined;
+    if (planned) {
+      const head = input.core.fold(input.observed).state;
+      const world = input.core.playedAt(head) ?? input.core.playedAt(head, rec?.defHash ?? "");
+      stored.push(this.planReceipt(`plan:${at}`, base, planned, world ? { world, state: head } : null, userText));
     }
     // `interpret` couldn't read the typed text (DESIGN §9.4): its call failed, or a Decision route's choice
     // had no call left for its params. The turn ran as plain roleplay. Retry runs it again, as the swipe
@@ -2828,6 +3053,37 @@ export class Runtime implements TurnHooks {
     bridge.turnCommitted(userText);
     // An agent turn closes: which role wrote what, its review card, its session.
     await this.orchestrator.closed(input);
+  }
+
+  /**
+   * The receipt for what a turn's plan added of the player's message's plan (assess-party §6.2):
+   * "Added to the plan: 1 goal, 2 orders", with Edit, which opens the organization's Plan tab, and
+   * Undo, which takes it back and counts toward no learning (its payload has no type); or why none
+   * of it was added, named only as the POV may know it (`typed`: the player's message, whose own
+   * words stay).
+   */
+  private planReceipt(id: string, base: { messageId: MessageId; swipeId: number }, planned: PlannedRead, view: { world: WorldDoc; state: WorldState } | null, typed: string): StoredChip {
+    if ("refused" in planned) {
+      const reason = planned.refused.reason.replace(/[.\s]+$/, "");
+      const secrets = view ? unrevealedSecrets(this.registry, view.world, view.state).filter((s) => !typed.toLowerCase().includes(s.toLowerCase())) : [];
+      const hidden = !view || findLeaks(reason, secrets).length > 0 || namesHiddenOrSecretLore(this.registry, view.world, view.state, reason, typed);
+      return { id, kind: "decline", ...base, label: `Not added to the plan: ${hidden ? "it names someone or something you don't know" : reason}`, actions: [], expires: "next_send", payload: {} };
+    }
+    const what = [planned.goals > 0 ? counted(planned.goals, "goal", "goals") : "", planned.orders > 0 ? counted(planned.orders, "order", "orders") : ""].filter((s) => s !== "").join(", ");
+    const name = view ? own(view.state.entities, planned.org)?.name : undefined;
+    return {
+      id,
+      kind: "undo",
+      ...base,
+      label: `Added to the plan: ${what}`,
+      detail: `On ${name ? possessive(name) : "your party's"} plan, as your message gives it. Edit opens the plan; Undo takes this back.`,
+      actions: [
+        { id: "edit", label: "Edit", input: { type: "org", label: "The plan", org: planned.org, tab: PLAN_TAB } },
+        { id: "undo", label: "Undo", style: "danger" },
+      ],
+      expires: "next_send",
+      payload: { events: JSON.parse(JSON.stringify(planned.events)) as JsonValue, plan: true },
+    };
   }
 
   /**
@@ -2936,7 +3192,7 @@ export class Runtime implements TurnHooks {
     const at = `${input.messageId}:${input.swipeId}`;
     const base = { messageId: input.messageId, swipeId: input.swipeId };
     const headState = input.core.fold(input.observed).state;
-    const chipWorld = input.core.worldAt(headState.revision) ?? input.core.worldAt(rec?.defHash ?? "");
+    const chipWorld = input.core.playedAt(headState) ?? input.core.playedAt(headState, rec?.defHash ?? "");
     // Time the message asked for that the turn didn't run (DESIGN §9.2): a typed timelapse longer than
     // a turn runs, offered and never run unasked, or time it lets pass after its actions, never offered
     // while some of them are left to play.
@@ -3299,6 +3555,7 @@ export class Runtime implements TurnHooks {
       // The next turn's texts: the user's own, as a turn that isn't a Re-narrate is sent.
       texts: settings.prompts.texts,
       knowledge: settings.minds.knowledge,
+      prices: settings.statePrices,
       said: "",
       planned: { outcome: [], montage: [] },
       outline: [],
@@ -3396,6 +3653,7 @@ export class Runtime implements TurnHooks {
       wording,
       texts,
       knowledge: settings.minds.knowledge,
+      prices: settings.statePrices,
       said: this.prePhase.get(input.generationId)?.text ?? "",
       planned,
       outline,
@@ -3429,7 +3687,7 @@ export class Runtime implements TurnHooks {
     // wording, one text in every world whether or not the turn carries marked facts (§6.8, §6.11),
     // then the preset's own rules, as the player's.
     const rulesAt = entries.narratorOutlet !== null && preset.outlets.has(NARRATOR_OUTLET) ? entries.narratorOutlet : entries.narrator;
-    if (rulesAt) fills.push({ id: rulesAt, content: narratorRules(preset.guidance.narrator ?? null, texts), part: RULES_PART, label: "Narrator rules" });
+    if (rulesAt) fills.push({ id: rulesAt, content: narratorRules(preset.guidance.narrator ?? null, texts, settings.statePrices), part: RULES_PART, label: "Narrator rules" });
     this.countLater(input.userId, uncounted);
     // Activation is confirmed from the entries the player's record shows (a section's row) and the
     // preset's own narrator rules: an entry filled only for marked facts, or rules filled only with the
@@ -4005,9 +4263,9 @@ export class Runtime implements TurnHooks {
 export const TYPE_LABELS: Record<ExtractionType, string> = {
   time_advance: "Time skips",
   location: "Moves",
+  place_make: "New places",
   condition: "Condition changes",
   knows: "New facts",
-  give: "Handovers",
   purchase: "Purchases",
   transfer: "Payments",
   regard: "Feelings",
@@ -4015,12 +4273,17 @@ export const TYPE_LABELS: Record<ExtractionType, string> = {
   spawn: "New characters",
   life: "Life and death",
   routine: "Routine changes",
-  take: "Things picked up",
-  drop: "Things put down",
-  use_up: "Things used up",
-  wear: "Things put on or off",
-  lose: "Things lost or stolen",
+  membership: "Who belongs where",
+  employment: "Jobs",
+  agenda: "Plans",
+  item_move: "Things moved, picked up or put down",
+  item_hand: "Things handed over, lent or given back",
+  item_own: "Things changing owner",
+  item_make: "New things",
+  item_use: "Things used up",
+  item_wear: "Things put on or off",
   item_condition: "Wear and damage",
+  item_lose: "Things lost or stolen",
   learn: "Things you learn",
   reveal: "Secrets the story reveals to you",
 };
@@ -4155,6 +4418,23 @@ function quotedWords(reg: Registry, world: WorldDoc, state: Readonly<WorldState>
   const said = piece.replace(/\s+/g, " ").trim();
   if (hasOwn(NO_VALUE, said.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim())) return null;
   return findLeaks(said, secrets).length > 0 || namesHiddenOrSecretLore(reg, world, state, said, heard) ? null : said;
+}
+
+/**
+ * The plan a typed message gives as `interpret` read it (assess-party §6.2), each goal and order as
+ * its turn's plan adds it: less one carrying an unrevealed secret (`secrets`) or naming anything
+ * hidden that the player's message (`text`) doesn't, since its words show on the Plan tab and its
+ * receipt. Null when nothing is left; `dropped` counts what was left out.
+ */
+function planSaid(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, agenda: PlanReadItems | undefined, text: string, secrets: readonly string[]): { items: PlanReadItems | null; dropped: number } {
+  const fits = (item: Readonly<Record<string, string | readonly string[] | undefined>>): boolean => {
+    const words = Object.values(item).flatMap((v) => (v === undefined ? [] : typeof v === "string" ? [v] : [...v]));
+    return findLeaks(words, secrets).length === 0 && !namesHiddenOrSecretLore(reg, world, state, words.join(" · "), text);
+  };
+  const goals = (agenda?.goals ?? []).filter(fits);
+  const orders = (agenda?.orders ?? []).filter(fits);
+  const dropped = (agenda?.goals?.length ?? 0) + (agenda?.orders?.length ?? 0) - goals.length - orders.length;
+  return { items: goals.length + orders.length > 0 ? { ...(goals.length > 0 ? { goals } : {}), ...(orders.length > 0 ? { orders } : {}) } : null, dropped };
 }
 
 /**
@@ -4464,6 +4744,21 @@ function checkLine(label: string, res: Resolution): string {
 }
 
 /**
+ * What a claimed chip says (DESIGN §9.4): money put in the player character's cash, a thing they said
+ * they had made real, or their own thing brought along from away or fetched from close by (ITEMS-SPEC
+ * §4.5), with where it was (`where`, as the POV may know it; null names none).
+ */
+function claimedWords(claimed: NonNullable<Resolution["claimed"]>, where: string | null): { label: string; detail: string } {
+  const brought = claimed.brought;
+  if (brought) {
+    const walk = brought.minutes !== undefined ? `, ${brought.minutes} min away on foot` : "";
+    return { label: `${brought.minutes !== undefined ? "Fetched" : "Brought along"}: ${claimed.name}`, detail: `${where !== null ? `It was at ${where}${walk}` : "It was elsewhere"}, so it's with you now. Undo puts it back, with what you did with it.` };
+  }
+  const label = claimed.cents !== undefined ? `Added: ${claimed.name} in cash` : `Added: ${/^[aeiou]/i.test(claimed.name) ? "an" : "a"} ${claimed.name}`;
+  return { label, detail: "You said you had it, so the world has it now. Undo takes it back, with what you did with it." };
+}
+
+/**
  * The roll chip (DESIGN §12): what was rolled with its odds, or, when the adjudication policy rolled
  * nothing, why; with the judged approach and a hybrid close call. Under narrative authority a roll
  * means nothing judged the approach, so the dice decided. Null without a check.
@@ -4622,6 +4917,13 @@ function refName(view: PovView, role: RefRole, said: string): string {
   return knownRef(view, role, said)?.name ?? (ID_SHAPED.test(said) ? UNKNOWN_PHRASE[role] : said);
 }
 
+/** Whose a Which one? candidate is, as the POV may know it (" (Marcus Delgado's)", " (yours)"); empty when nobody it knows owns it. */
+function whoseWords(view: PovView & ReadContext, id: EntityId): string {
+  const owner = whoseOf(view, id).owners.find((o) => o === view.world.pov || povMayKnow(view.registry, view.world, view.state, o));
+  if (owner === undefined) return "";
+  return owner === view.world.pov ? " (yours)" : ` (${own(view.state.entities, owner)?.name ?? owner}'s)`;
+}
+
 /**
  * A one-line label for a proposal chip, in a sentence. With `view`, ids read as names (and money in
  * the world's currency), but only what the POV knows. A reference (`REF_ROLES`) names someone or
@@ -4633,6 +4935,14 @@ function refName(view: PovView, role: RefRole, said: string): string {
  * what it names (DESIGN §11).
  */
 export function describeProposal(p: JsonObject, view?: PovView): string {
+  // A thing fact settled into its change type (ITEMS-SPEC §5.3) reads as the fact.
+  if (isItemChange(p.type) && isThingFact(p.fact)) {
+    // The fact's own words, read without the settling (`item_condition` is a fact and a change type alike).
+    const { fact, ...rest } = p;
+    const told = describeProposal({ ...rest, type: fact }, view);
+    // A handover that keeps the owner says so, a thing the giver had or one made in their hands alike.
+    return p.fact === "give" && (p.basis === undefined || p.basis === "hold") && (p.type === "item_hand" || p.type === "item_make") ? `${told}, to hold` : told;
+  }
   const world = view?.world;
   const state = view?.state;
   const raw = (k: string): string => (typeof p[k] === "string" || typeof p[k] === "number" ? String(p[k]) : "?");
@@ -4681,6 +4991,11 @@ export function describeProposal(p: JsonObject, view?: PovView): string {
       return named("from") ? `${subject("from")} gave ${s("item")} to ${s("to")}` : `${subject("to")} got ${s("item")}`;
     case "location":
       return `${actor("entity")} went to ${s("place")}`;
+    case "place_make": {
+      // A place the story made (ITEMS-SPEC §6.2): its name as the reply gave it, and the place it is in, as the POV may know it.
+      const where = `${raw("place")}, in ${s("parent")}`;
+      return named("entity") ? `${actor("entity")} went to ${where} (a new place)` : `A new place: ${where}`;
+    }
     case "condition": {
       // Sheets: {who, condition, clear?}; a bare field change (entity, field, delta) otherwise.
       if (typeof p.condition !== "string") {
@@ -4703,6 +5018,19 @@ export function describeProposal(p: JsonObject, view?: PovView): string {
       return `${who} ${who === "You" ? "learn" : "learns"}: ${s("fact")}`;
     }
     // The reply's item changes (DESIGN §9.4), each by who and what, as the POV may know them.
+    case "put":
+      return `${actor("entity")} put ${s("item")}${named("into") ? ` in ${s("into")}` : named("at") ? ` at ${s("at")}` : " down"}`;
+    case "has": {
+      const who = actor("entity");
+      // The player character's own thing brought from away (ITEMS-SPEC §4.5): a Brought along receipt, with where it was as they may know it.
+      if (who === "You" && typeof p.brought === "string") {
+        const was = p.brought !== "" && view && hasOwn(view.world.places, p.brought) && canSeePlace(view.registry, view.world, view.state, view.world.pov, p.brought) ? (own(view.world.places, p.brought)?.name ?? null) : null;
+        return `Brought along: ${s("item")}${was !== null ? ` (it was at ${was})` : ""}`;
+      }
+      return `${who} ${who === "You" ? "have" : "has"} ${s("item")} now`;
+    }
+    case "owner":
+      return named("owner") ? `${s("item")} is ${s("owner") === "you" ? "yours" : `${s("owner")}'s`} now` : `${s("item")} is nobody's now`;
     case "take":
       return `${actor("entity")} picked up ${s("item")}`;
     case "drop":
@@ -4744,6 +5072,44 @@ export function describeProposal(p: JsonObject, view?: PovView): string {
       const too = others.length > 0 ? ` · ${others.join(", ")} ${others.length === 1 ? "knows" : "know"} too` : "";
       return p.type === "reveal" ? `A secret the story revealed to you${how}` : `Learned: ${typeof p.claim === "string" ? p.claim : "something"}${how}${too}`;
     }
+    // The reply's organization facts (ORG-SPEC §7.3): someone joins or leaves, holds a position or a
+    // title, or their job changes, as the POV may know them; a position by the title it has there.
+    case "membership":
+    case "employment": {
+      const who = subject("who");
+      const was = who === "You" ? "were" : "was";
+      const org = named("org") ? s("org") : "";
+      const at = org !== "" ? ` at ${org}` : "";
+      const words = (k: string): string => (typeof p[k] === "string" ? (p[k] as string).trim() : "");
+      const known = view && named("org") ? knownRef(view, "person", String(p.org)) : null;
+      const said = words("position");
+      const position = (known && view ? positionsOf(view, known.id).find((x) => x.id === said || x.title.toLowerCase() === said.toLowerCase())?.title : undefined) ?? said.replace(/_/g, " ");
+      const as = words("title") || position;
+      if (p.type === "membership") {
+        if (p.change === "join") return `${who} joined ${org || "an organization"}${as !== "" ? ` as ${as}` : ""}`;
+        if (p.change === "leave") return `${who} left ${org || "an organization"}`;
+        if (p.change === "appoint") return `${who} ${be(who)} now ${position || "appointed"}${at}`;
+        return `${who} now ${who === "You" ? "go" : "goes"} by ${words("title") || "a title"}${at}`;
+      }
+      const rate = typeof p.rate === "number" && Number.isFinite(p.rate) ? (world ? formatMoney(p.rate, world.currency) : String(p.rate)) : "";
+      switch (p.change) {
+        case "hired":
+          return `${who} ${was} hired${as !== "" ? ` as ${as}` : ""}${at}`;
+        case "let_go":
+          return `${who} ${was} let go${org !== "" ? ` from ${org}` : ""}`;
+        case "quit":
+          return `${who} quit ${org || (who === "You" ? "your job" : "their job")}`;
+        case "raise":
+          return `${whose("who")} pay${at} changed${rate !== "" ? ` to ${rate}` : typeof p.pct === "number" ? ` by ${p.pct}%` : ""}`;
+        case "leave":
+          return `${who} ${be(who)} on leave${org !== "" ? ` from ${org}` : ""}`;
+        default:
+          return `${who} ${be(who)} back from leave${at}`;
+      }
+    }
+    // The reply's agenda (assess-party §6.2): an item on a plan moved along, or someone volunteering a task ("Add to the plan?").
+    case "agenda":
+      return view ? agendaLabel(view, p) : agendaAsks(p) ? `Add to the plan? ${raw("who")}: ${raw("offer")}` : `Plan: ${raw("id")} ${raw("status")}`;
     case "time_advance":
       return `Skip ahead ${s("minutes")} min`;
     default:

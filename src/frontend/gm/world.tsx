@@ -1,8 +1,9 @@
 // GM → World: every entity, secrets and the removed included, with search, a kind
-// filter and badges; each opens its editor as a page. While a fight is on, a Fight card leads,
-// opening the fight as the GM sees it (everyone named, HP exact). The things the player claimed
-// into being (DESIGN §9.4) get a section of their own, with who holds each, so a GM can find one
-// and remove it from its page. Spawn adds someone or something to this chat.
+// filter and badges; each opens as a page: a person's character sheet, a thing's GM thing page
+// (ITEMS-SPEC §10.2, as GM → Things opens it), anything else its editor. While a fight is on, a
+// Fight card leads, opening the fight as the GM sees it (everyone named, HP exact). The things the
+// player claimed into being (DESIGN §9.4) get a section of their own, with who holds each, so a GM
+// can find one and remove it from its page. Spawn adds someone or something to this chat.
 
 import { useEffect, useId, useState } from "preact/hooks";
 import type { EncounterView } from "../../packs/combat/ui/panel";
@@ -16,6 +17,7 @@ import { BatchPage } from "./batch";
 import type { BulkEditor, Editor } from "./editor";
 import { claimedThings, findEntities } from "./editor";
 import { EntityBadges, EntityPage } from "./entity";
+import { GmThingPage, isThingKind } from "./things";
 import { BuildLink, GmPage, useGmFocus, usePages } from "./ui";
 import { CharacterSheet } from "./character";
 
@@ -195,7 +197,15 @@ export function WorldSection(props: { editor: BulkEditor; chatId: string }) {
           <EncounterCard view={fight} />
         </GmPage>
       ) : null}
-      {entity ? entity.person ? <CharacterSheet entity={entity} editor={editor} chatId={props.chatId} onBack={pages.back} onOpen={(id) => pages.open({ entity: id })} /> : <EntityPage entity={entity} editor={editor} onBack={pages.back} /> : null}
+      {entity ? (
+        entity.person ? (
+          <CharacterSheet entity={entity} editor={editor} chatId={props.chatId} onBack={pages.back} onOpen={(id) => pages.open({ entity: id })} />
+        ) : isThingKind(editor.gm.kinds, entity.kind) && !entity.gone ? (
+          <GmThingPage key={entity.id} chatId={props.chatId} id={entity.id} editor={editor} backLabel="World" onBack={pages.back} onOpen={(id) => pages.open({ entity: id })} />
+        ) : (
+          <EntityPage entity={entity} editor={editor} onBack={pages.back} />
+        )
+      ) : null}
       {page === "batch" && chosen.length > 0 ? <BatchPage editor={editor} ids={chosen} onBack={pages.back} /> : null}
     </div>
   );

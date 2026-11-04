@@ -1,15 +1,20 @@
 // The reply's item channels (DESIGN §9.4): picking up, putting down, using up, wearing, losing or
 // having stolen, and an item's condition. Each applies what the prose states, as much as it tells,
 // against where the thing is now; it refuses what can't happen and keeps a field inside its range.
+// On the starter worlds (ITEMS-SPEC §12 Phase 2): a thing handed over that the world lacks is made
+// as the story has it (R7), and a hidden thing the words name is found, never made twice (R8).
 
 import { describe, expect, test } from "bun:test";
 import type { JsonObject } from "../../../src/shared/json";
+import type { EntityDef } from "../../../src/shared/world";
+import { accessFor } from "../../../src/engine/access";
 import { applyEffects } from "../../../src/engine/effects";
 import { createRegistry } from "../../../src/engine/registry-impl";
 import { createRng } from "../../../src/engine/rng";
 import { isGone } from "../../../src/engine/scope";
+import { knows } from "../../../src/engine/visibility";
 import { Working } from "../../../src/engine/working";
-import { ALL_PACKS } from "../../../src/packs/index";
+import { ALL_PACKS, STARTER_WORLDS } from "../../../src/packs/index";
 import { modernUsWorld } from "../riverton";
 import { startState } from "../support";
 
@@ -34,6 +39,22 @@ function play(w: Working, p: JsonObject): string | null {
 }
 
 const holder = (w: Working, id: string): string | undefined => w.state.entities[id]?.relations.find((r) => r.type === "in")?.to;
+
+/** A starter world, with the things a test adds, and its people where `at` puts them (each moved as the story moves people). */
+function starter(id: string, things: readonly EntityDef[], at: Readonly<Record<string, string>>): Working {
+  const make = STARTER_WORLDS[id];
+  if (!make) throw new Error(`no starter ${id}`);
+  const world = make("w", id);
+  for (const e of things) world.entities[e.id] = structuredClone(e);
+  const w = new Working(reg, world, startState(world, reg));
+  for (const [entity, to] of Object.entries(at)) moveTo(w, entity, to);
+  return w;
+}
+
+function moveTo(w: Working, entity: string, to: string): void {
+  const r = applyEffects(reg, w, [{ type: "move", args: { entity, to } }], { bindings: {}, rng: createRng("move") });
+  if (r.rejected.length > 0) throw new Error(`move refused: ${JSON.stringify(r.rejected)}`);
+}
 
 describe("the reply's item channels", () => {
   test("take, drop and use_up apply what the prose states, and refuse what can't happen", () => {
@@ -85,5 +106,38 @@ describe("the reply's item channels", () => {
     expect(w.state.entities.scarf?.fields.condition).toBe(75);
     expect(play(w, { type: "quantity", entity: "you", item: "candle", delta: -1 })).toBeNull();
     expect(w.state.entities.candle?.fields.qty).toBe(0);
+  });
+});
+
+describe("the reply's thing facts on the starter worlds", () => {
+  test("R7: a torque wrench Marcus hands Jordan at the shop is made the shop's, held by Jordan, who may use it as its staff there and not at home", () => {
+    const w = starter("modern_slice_of_life", [], { pov: "alder_automotive", marcus_delgado: "alder_automotive" });
+    const before = new Set(Object.keys(w.state.entities));
+    expect(play(w, { type: "give", item: "a torque wrench", from: "marcus_delgado", to: "pov", why: "Marcus hands Jordan a torque wrench" })).toBeNull();
+    const made = Object.keys(w.state.entities).filter((id) => !before.has(id));
+    expect(made.map((id) => w.state.entities[id]?.name)).toEqual(["Torque wrench"]);
+    const wrench = made[0] ?? "";
+    expect(w.state.entities[wrench]?.fields).toMatchObject({ owner: "alder_automotive_co", got: { how: "holding", from: "marcus_delgado" } });
+    expect(holder(w, wrench)).toBe("pov");
+    // Staff may use the shop's things at the shop: holding it, Jordan needs no grant of his own.
+    expect(accessFor(w.ctx, "pov", wrench)).toEqual({ use: { basis: "staff", via: "alder_automotive_co", by: "job_pov_mechanic" }, dispose: null });
+    expect(w.state.entities.pov?.relations.some((r) => r.type === "uses" && r.to === wrench)).toBe(false);
+    // Taken home, it is no more his to use than any of the shop's tools.
+    moveTo(w, "pov", "harbor_street_114");
+    expect(holder(w, wrench)).toBe("pov");
+    expect(accessFor(w.ctx, "pov", wrench).use).toBeNull();
+  });
+
+  test("R8: an old brass key found in the study desk is the discoverable key there, the finder's to know, and no second key", () => {
+    // As the replay golden's Mystery Manor has it: a writing desk in Sir Alaric's study, a discoverable brass key in it.
+    const desk: EntityDef = { id: "study_desk", kind: "container", name: "Writing desk", tier: "background", fields: { place: "study", fixed: true }, relations: [] };
+    const key: EntityDef = { id: "brass_key", kind: "item", name: "Old brass key", tier: "background", visibility: "discoverable", fields: { category: "carried" }, relations: [{ type: "in", to: "study_desk" }] };
+    const w = starter("mystery_manor", [desk, key], { pov: "study" });
+    expect(knows(w.state, "pov", "brass_key")).toBe(false);
+    const before = Object.keys(w.state.entities).sort();
+    expect(play(w, { type: "take", entity: "pov", item: "an old brass key", from: "the study desk", why: "you find an old brass key in the study desk" })).toBeNull();
+    expect(holder(w, "brass_key")).toBe("pov");
+    expect(knows(w.state, "pov", "brass_key")).toBe(true);
+    expect(Object.keys(w.state.entities).sort()).toEqual(before);
   });
 });

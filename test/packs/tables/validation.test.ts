@@ -13,6 +13,7 @@ const VEHICLES = "us/vehicles.json";
 const GEAR = "us/gear.json";
 const CALENDAR = "us/calendar.json";
 const FINANCE = "us/finance.json";
+const HISTORY = "us/index-history.json";
 
 const MILK: Step[] = ["categories", { id: "groceries_staples" }, "items", { id: "milk_whole" }];
 const TOOLBOX: Step[] = ["kits", { id: "mechanic_toolbox_45" }];
@@ -242,6 +243,36 @@ describe("sums", () => {
   });
 });
 
+describe("sizes (ITEMS-SPEC §3.2, §11)", () => {
+  test("a size that is not on the ladder", () => {
+    const sources = cloneSources();
+    mutate(sources, GEAR, ["items", { id: "wallet_bifold" }, "size"], "huge");
+    mutate(sources, PRICES, [...MILK, "size"], "small");
+    expect(brief(issuesOf(sources))).toEqual([
+      { rule: "type", table: "economy.catalog", row: "milk_whole", column: "size" },
+      { rule: "type", table: "gear.items", row: "wallet_bifold", column: "size" },
+    ]);
+  });
+
+  test("a container that holds something larger than itself", () => {
+    const sources = cloneSources();
+    mutate(sources, GEAR, ["containers", { id: "toolbox_20in" }, "holds"], "heavy");
+    expect(brief(issuesOf(sources))).toEqual([{ rule: "type", table: "gear.containers", row: "toolbox_20in", column: "holds" }]);
+  });
+
+  test("a container that takes Built-in things", () => {
+    const sources = cloneSources();
+    mutate(sources, GEAR, ["containers", { id: "truck_bed_fullsize" }, "holds"], "builtin");
+    expect(brief(issuesOf(sources))).toEqual([{ rule: "type", table: "gear.containers", row: "truck_bed_fullsize", column: "holds" }]);
+  });
+
+  test("a vehicle_fixed container given a size of its own", () => {
+    const sources = cloneSources();
+    mutate(sources, GEAR, ["containers", { id: "glovebox" }, "size"], "hand");
+    expect(brief(issuesOf(sources))).toEqual([{ rule: "type", table: "gear.containers", row: "glovebox", column: "size" }]);
+  });
+});
+
 describe("source integrity", () => {
   test("a source field no column consumes fails instead of being dropped", () => {
     const sources = cloneSources();
@@ -255,6 +286,25 @@ describe("source integrity", () => {
     const issues = issuesOf(sources);
     expect(issues.length).toBeGreaterThan(0);
     expect(issues.every((issue) => issue.rule === "source" && issue.message.includes("approximate"))).toBe(true);
+  });
+
+  test("an exact source that doesn't pin where and when it was fetched", () => {
+    const sources = cloneSources();
+    mutate(sources, HISTORY, ["basis", "sha256"], undefined);
+    const issues = issuesOf(sources);
+    expect(issues.length).toBeGreaterThan(0);
+    expect(issues.every((issue) => issue.rule === "source" && issue.message.includes("sha256"))).toBe(true);
+  });
+
+  test("a month missing from the stock index's history, or a close outside its month", () => {
+    const sources = cloneSources();
+    const months = read(sources, HISTORY, ["months"]);
+    if (!Array.isArray(months)) throw new Error("months missing");
+    mutate(sources, HISTORY, ["months"], months.filter((m) => !(isRecord(m) && m.id === "2008-10")));
+    expect(brief(issuesOf(sources))).toEqual([{ rule: "column", table: "economy.index_history", row: "2008-11", column: null }]);
+    const shifted = cloneSources();
+    mutate(shifted, HISTORY, ["months", { id: "2008-10" }, "date"], "2008-11-03");
+    expect(brief(issuesOf(shifted))).toEqual([{ rule: "type", table: "economy.index_history", row: "2008-10", column: "date" }]);
   });
 
   test("a missing source file", () => {

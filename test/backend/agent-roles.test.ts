@@ -48,6 +48,7 @@ function scripted(rig: Rig, agents: Record<string, string> = {}, classic: { extr
     seen.push({ role, head, task, classic: kind });
     if (role !== null && agents[role] !== undefined) return agents[role];
     if (role === "scene") return JSON.stringify({ lore: [], notes: [] });
+    if (role === "curator") return JSON.stringify({ proposals: [] });
     if (all.includes(INTERPRET_MARK)) return JSON.stringify({ action: null, params: {}, confidence: 0.9 });
     if (all.includes(EXTRACT_MARK)) return JSON.stringify({ proposals: classic.extract ?? [] });
     return "{}";

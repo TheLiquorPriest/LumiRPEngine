@@ -46,6 +46,18 @@ export interface ToolEnv {
   loads?: LoreLoads;
   /** Condenses a source with the agent's own model (`condense`); absent for an agent that can't make the call. */
   summarize?: Summarize;
+  /** Where the Curator's tools note what lands with the reply's read (ITEMS-SPEC §7.3); absent outside the Curator's turn. */
+  notes?: ReadNotes;
+}
+
+/**
+ * Where the Curator's tools note a fact that lands with the reply's read, checked and settled as the
+ * read's are, under its change type's mode: a walk-on person (the `spawn` channel), a purchase (the
+ * economy's `purchase` channel) and a place someone is put in (`place_make`).
+ */
+export interface ReadNotes {
+  /** Notes one fact as classic's parser reads it; false when the same fact is noted already. */
+  add(fact: JsonObject): boolean;
 }
 
 /** Where a turn's agents load lore into the reply it is writing (`lore_load`, DESIGN §4.6): the turn's scene lore, which reaches the narrator in the Scene section. */
@@ -62,6 +74,8 @@ export interface ToolDefinition {
   turn?: true;
   /** Given only to an agent that can condense a source (`ToolEnv.summarize`). */
   summarizes?: true;
+  /** Given only to an agent that notes facts for the reply's read (`ToolEnv.notes`): the Curator working a turn. */
+  notes?: true;
   /** Its description is the registry text `tool.<name>` (R5, GM agent page, group "Tools"): editable, with a reset. */
   parameters(world: WorldDoc): JsonObject; // hand-written JSON Schema, with the world's enums filled in
   run(args: JsonObject, env: ToolEnv): Promise<ToolOutcome>;
@@ -104,7 +118,7 @@ function described(def: ToolDefinition, schema: JsonObject, texts: PromptTexts):
 export function toolsFor(input: { world: WorldDoc; tiers: readonly ToolTier[]; families?: readonly ToolFamily[]; texts: PromptTexts; env: ToolEnv }): AgentTool[] {
   const { env, texts } = input;
   const world = schemaWorld(input.world, env.reader.registry);
-  return TOOL_DEFINITIONS.filter((def) => input.tiers.includes(def.tier) && (input.families === undefined || input.families.includes(def.family)) && (def.turn !== true || env.loads !== undefined) && (def.summarizes !== true || env.summarize !== undefined)).map(
+  return TOOL_DEFINITIONS.filter((def) => input.tiers.includes(def.tier) && (input.families === undefined || input.families.includes(def.family)) && (def.turn !== true || env.loads !== undefined) && (def.summarizes !== true || env.summarize !== undefined) && (def.notes !== true || env.notes !== undefined)).map(
     (def): AgentTool => ({
       name: def.name,
       description: renderPrompt(toolTextId(def.name), texts, {}),

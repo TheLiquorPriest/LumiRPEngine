@@ -4,7 +4,7 @@
 import { describe, expect, test } from "bun:test";
 import { createRegistry } from "../../src/engine/registry-impl";
 import { lintStructure } from "../../src/engine/world-lint";
-import { authoredContents, itemObjective, revealScaffold } from "../../src/shared/items-build";
+import { itemObjective, revealScaffold } from "../../src/shared/items-build";
 import type { JsonObject } from "../../src/shared/json";
 import type { EntityDef } from "../../src/shared/world";
 import { ALL_PACKS } from "../../src/packs/index";
@@ -21,7 +21,6 @@ describe("Build's item helpers", () => {
     world.entities.ring = made.entity as unknown as EntityDef;
     expect(made.entity.visibility).toBe("discoverable");
     expect(lintStructure(world, reg).filter((i) => i.path.startsWith("entities.ring"))).toEqual([]);
-    expect(authoredContents(world, "apartment", "places")).toContainEqual({ id: "ring", name: "Silver ring", hidden: true });
     expect("problem" in revealScaffold({ ...ring, fields: {} } as JsonObject)).toBe(true);
   });
 

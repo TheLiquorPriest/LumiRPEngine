@@ -258,10 +258,11 @@ describe("with fixed seeds, a reply that repeats the player's typed price for a 
   afterEach(() => restore?.());
 
   // `near`: the catalog's price is within 25% of the typed one, so either match drops the retelling.
+  // The catalog's price is the row's that day where it's sold (DESIGN §9.5): milk's is $4.00, a quarter off the typed $5.
   const cases: { typed: string; price: number; qty?: number; narrated: string; charged: string; near?: boolean }[] = [
     { typed: "sandwich", price: 9, narrated: "sandwich", charged: "Bought Deli sandwich" },
     { typed: "coffee", price: 3, narrated: "coffee", charged: "Bought Drip coffee, 12 oz, cafe", near: true },
-    { typed: "milk", price: 5, narrated: "milk", charged: "Bought Milk, whole" },
+    { typed: "milk", price: 5, narrated: "milk", charged: "Bought Milk, whole", near: true },
     { typed: "coffee", price: 6, qty: 2, narrated: "coffees", charged: "Bought Drip coffee, 12 oz, cafe ×2", near: true },
   ];
   for (const c of cases) {

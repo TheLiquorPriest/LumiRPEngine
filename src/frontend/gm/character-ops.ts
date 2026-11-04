@@ -7,7 +7,6 @@ import { PARTY_RELATION } from "../../shared/party";
 import type { RoutineRole } from "../../shared/routines";
 import type { GmEntity, GmRelation, GmView } from "../../shared/state-view";
 import { bedValue } from "../character/bed-picker";
-import { partyOf } from "../requests";
 
 /** A person opens their character sheet; anything else, the entity sheet. */
 export function gmPageFor(entity: Pick<GmEntity, "person">): "character" | "entity" {
@@ -27,12 +26,6 @@ export function homeOp(entity: Pick<GmEntity, "id">, place: PlaceRef | null): Ed
 /** Sleeps: their `bed` set to the place or thing picked, or cleared to sleep at home. */
 export function bedOp(entity: Pick<GmEntity, "id">, bed: CharacterBed): EditOp {
   return { op: "set", entity: entity.id, field: "bed", value: bedValue(bed) };
-}
-
-/** "Travels with <player character>" switched on or off: the party link or unlink, or none when it's already so. */
-export function partySwitchOp(entity: GmEntity, gm: Pick<GmView, "entities">, on: boolean): EditOp | null {
-  const party = partyOf(entity, gm);
-  return party && party.travels !== on ? party.op : null;
 }
 
 /**
@@ -57,7 +50,7 @@ export function routineStanding(role: RoutineRole, held: boolean, blockPlace: st
   return "elsewhere";
 }
 
-/** Relations a character's sheet shows elsewhere: what holds them (Inside) and the party (its switch). */
+/** Relations a character's sheet shows elsewhere: what holds them (Inside) and the party (its tier). */
 const SHOWN_ON_SHEET: Record<string, true> = { in: true, [PARTY_RELATION]: true };
 
 /**

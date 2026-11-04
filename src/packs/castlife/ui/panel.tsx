@@ -1,16 +1,17 @@
 // Play → People (DESIGN §12): everyone the POV knows and anyone here, people here
 // first. Each row shows who they are, what they're doing or where and when the POV last saw them,
 // and how they regard the POV; tapping one opens their person sheet (person.tsx) with today's
-// plan, regard per axis, agendas, groups and classes. The list can be grouped by a classification
+// plan, regard per axis, agendas, organizations and classes. The list can be grouped by a classification
 // facet players can see, by group membership or by tier, and filtered by those facets' values
 // (nested values included) and by groups: within one kind of chip any will do, across kinds all
-// must hold, as in a selector; both sit in a disclosure. The POV's own groups, with its role in
-// each, close the panel. Hidden facets and tags never reach this view.
+// must hold, as in a selector; both sit in a disclosure. The POV's own groups, with its title in
+// each, close the panel, each opening its page in Orgs. Hidden facets and tags never reach this view.
 
 import { useState } from "preact/hooks";
 import { withinValue } from "../../../shared/classes";
 import { isRecord } from "../../../shared/json";
-import { pushSheet, useApp } from "../../../frontend/app";
+import { ORGS_ORG_PANEL } from "../../../shared/org-view";
+import { openAt, orgRoute, pushSheet, useApp } from "../../../frontend/app";
 import { Avatar, Badge, Button, Disclosure, Empty, Field, JsonView, List, ListRow, Section } from "../../../frontend/components";
 import { list, oneOf, optNum, optStr, str, strings } from "../../../frontend/decode";
 import { Icon } from "../../../frontend/icons";
@@ -270,15 +271,37 @@ export function CastPanel(props: PanelProps) {
           </Section>
         </div>
       ))}
-      {view.mine.length > 0 ? (
-        <Section title="Your groups" flush>
-          <List>
-            {view.mine.map((g) => (
-              <ListRow key={g.id} id={g.id} icon="users" title={g.name} subtitle={[g.kind, g.since ? `since ${g.since}` : ""].filter((part) => part).join(" · ") || undefined} value={g.role ?? "member"} />
-            ))}
-          </List>
-        </Section>
-      ) : null}
+      {view.mine.length > 0 ? <YourGroups groups={view.mine} pages={props.state.panels[ORGS_ORG_PANEL]} onOpen={(id) => app.ui.update((ui) => openAt(ui, "orgs", orgRoute(id)))} /> : null}
     </div>
+  );
+}
+
+/**
+ * The POV's own groups, closing Cast: each with the title it goes by there. One with a page in Orgs
+ * (`orgs.org`, ORG-SPEC §4.1) opens it there, its title read from that page.
+ */
+export function YourGroups(props: { groups: readonly CastGroup[]; pages: unknown; onOpen(id: string): void }) {
+  const pages = isRecord(props.pages) ? props.pages : {};
+  return (
+    <Section title="Your groups" flush>
+      <List>
+        {props.groups.map((g) => {
+          const page = pages[g.id];
+          const titled = isRecord(page) && isRecord(page.you) && typeof page.you.title === "string" && page.you.title !== "" ? page.you.title : null;
+          return (
+            <ListRow
+              key={g.id}
+              id={g.id}
+              icon="users"
+              title={g.name}
+              subtitle={[g.kind, g.since ? `since ${g.since}` : ""].filter((part) => part).join(" · ") || undefined}
+              value={titled ?? g.role ?? "member"}
+              chevron={page !== undefined}
+              onClick={page === undefined ? undefined : () => props.onOpen(g.id)}
+            />
+          );
+        })}
+      </List>
+    </Section>
   );
 }

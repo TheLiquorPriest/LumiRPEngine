@@ -11,7 +11,7 @@
 //   4  holidays, terms and exceptions
 
 import type { JsonValue } from "../../../shared/json";
-import type { DataTable } from "../../../shared/tables";
+import type { DataTable, ShippedRevision } from "../../../shared/tables";
 import { agentOf } from "../../../shared/tiers";
 import type { DateRule, HolidayDef } from "../../../shared/world";
 import { calendarOf, clockOfLocal, dateAt, dayIndexOf, dayPartAt, formatClock, holidaysOn, MINUTES_PER_DAY, nextTimeOfDay, parseHHMM, sceneOffset, shortestSlot, weekdayName } from "../../../engine/calendar";
@@ -26,8 +26,11 @@ import observances from "./tables/modern-us/observances.json";
 import school from "./tables/modern-us/school.json";
 import shifts from "./tables/modern-us/shifts.json";
 import work from "./tables/modern-us/work.json";
+import shipped from "./tables/modern-us/shipped.json";
 
 const TABLES: DataTable[] = [dst, holidays, observances, school, shifts, work] as unknown as DataTable[];
+/** Every revision each table has shipped as (the table build's record). */
+const SHIPPED = shipped as unknown as Readonly<Record<string, readonly ShippedRevision[]>>;
 
 const WEEKDAYS = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
 
@@ -76,7 +79,7 @@ export const calendarPack: PackDef = {
   domain: "calendar",
   requires: [],
   register(r) {
-    for (const t of TABLES) r.table({ id: t.id, schema: t.schema, columns: t.columns, defaults: t });
+    for (const t of TABLES) r.table({ id: t.id, schema: t.schema, columns: t.columns, defaults: t, shipped: SHIPPED[t.id] ?? [] });
 
     r.formula("is_weekend", (ctx) => {
       const wd = dateAt(calendarOf(ctx.world), ctx.state.clock).weekday;
