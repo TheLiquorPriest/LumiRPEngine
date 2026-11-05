@@ -13,12 +13,13 @@
 // all of it, and a later turn only what is new: a book entry whose text changed (`textHash`) has its
 // marks read again, each fact recorded anew and whoever its marks now name who doesn't hold it
 // learning it. Cue grants stay where they were (decision 11 waits): a cue's character still reads its
-// truth in who they are. Every claim is cut to the user's length (`claimChars`), never in the fold.
+// truth in who they are. Every claim keeps its entry's text whole, whitespace collapsed: the
+// knowledge step's length (`claimChars`) is for the claims it writes, never the world's own.
 
 import type { EntityId, UserId } from "../shared/ids";
 import type { JsonObject } from "../shared/json";
 import type { LedgerEvent } from "../shared/ledger";
-import type { AuthoredHolding, FactId, KeptFrom, KnowledgeFact, KnowledgeSettings, LearnEventData } from "../shared/minds";
+import type { AuthoredHolding, FactId, KeptFrom, KnowledgeFact, LearnEventData } from "../shared/minds";
 import { factId, keptFromOf, MINDS_EVENTS, parseFactId, wiFactIdOfLiveLore, worldMindsOf } from "../shared/minds";
 import { bookTextHash, loreIsSecret, loreSourceOf } from "../shared/lore";
 import { parseSecretMarks, resolveMarkNames, wholeEntrySecret } from "../shared/secret-marks";
@@ -29,9 +30,13 @@ import { own } from "../engine/pack-kit";
 import type { Registry } from "../engine/registry-impl";
 import { fieldDef, kindIs } from "../engine/scope";
 import type { WorldState } from "../engine/state";
-import { capText } from "../packs/minds/core/edit";
 import { readKnowledge } from "../packs/minds/core/state";
 import type { HostPort } from "./host";
+
+/** An entry's text as a seeded claim keeps it: whole, whitespace collapsed. */
+function entryText(text: string): string {
+  return text.replace(/\s+/g, " ").trim();
+}
 
 /** One fact to seed and who holds it from the start, each with their own belief, confidence and discretion. */
 interface Seed {
@@ -45,7 +50,6 @@ export interface SeedInput {
   world: WorldDoc;
   /** The state the turn's knowledge starts from. */
   state: Readonly<WorldState>;
-  settings: Pick<KnowledgeSettings, "claimChars">;
   userId: UserId;
 }
 
@@ -91,11 +95,11 @@ function secretBookEntries(world: WorldDoc): Map<string, { book: string; entry: 
  * opens it to, kept from everyone. Each is about what the entry links.
  */
 function markSeeds(input: SeedInput, at: { book: string; entry: string; lore: LoreEntryDef[] }, content: string): Seed[] {
-  const { world, state, settings } = input;
+  const { world, state } = input;
   const textHash = bookTextHash(content);
   const about = [...new Set(at.lore.flatMap((l) => l.links))];
   const seed = (id: FactId, text: string, knownTo: readonly string[], keptFrom: KeptFrom | null): Seed => ({
-    fact: { id, kind: "wi", claim: capText(text, settings.claimChars), about, truth: "true", textHash },
+    fact: { id, kind: "wi", claim: entryText(text), about, truth: "true", textHash },
     holders: new Map(knownTo.filter((who) => person(input, who)).map((who) => [who, authored(keptFromOf(keptFrom, who))])),
   });
   const whole = wholeEntrySecret(content);
@@ -115,26 +119,25 @@ function markSeeds(input: SeedInput, at: { book: string; entry: string; lore: Lo
 
 /** The text an authored fact's claim reads from: a lore entry's, a stage's truth, or someone's field as their sheet says it; null when the world has none. */
 function authoredFact(input: SeedInput, id: FactId): KnowledgeFact | null {
-  const { reg, world, state, settings } = input;
+  const { reg, world, state } = input;
   const ref = parseFactId(id);
-  const claim = (text: string): string => capText(text, settings.claimChars);
   if (ref?.kind === "lore") {
     const lore = own(world.lore, ref.lore);
     const text = lore ? (lore.content.trim() !== "" ? lore.content : lore.title) : "";
-    return lore && text.trim() !== "" ? { id, kind: "lore", claim: claim(text), about: [...lore.links], truth: "true" } : null;
+    return lore && text.trim() !== "" ? { id, kind: "lore", claim: entryText(text), about: [...lore.links], truth: "true" } : null;
   }
   if (ref?.kind === "track") {
     const track = own(world.tracks, ref.track);
     const truth = track ? own(track.stages, ref.stage)?.truth : undefined;
     const owner = track ? trackOwner(track) : undefined;
-    return track && truth ? { id, kind: "track", claim: claim(truth), about: owner ? [owner] : [], truth: "true" } : null;
+    return track && truth ? { id, kind: "track", claim: entryText(truth), about: owner ? [owner] : [], truth: "true" } : null;
   }
   if (ref?.kind === "field") {
     const e = own(state.entities, ref.entity);
     const value = e ? own(e.fields, ref.field) : undefined;
     if (!e || value === undefined || value === null || typeof value === "object") return null;
     const label = fieldDef(reg, world, e.kind, ref.field)?.label ?? ref.field.replace(/_/g, " ");
-    return { id, kind: "field", claim: claim(`${e.name}'s ${label}: ${String(value)}`), about: [ref.entity], truth: "true" };
+    return { id, kind: "field", claim: entryText(`${e.name}'s ${label}: ${String(value)}`), about: [ref.entity], truth: "true" };
   }
   return null;
 }

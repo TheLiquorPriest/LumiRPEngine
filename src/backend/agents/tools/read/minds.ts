@@ -18,6 +18,7 @@ import { mindLines } from "../../../../packs/minds/core/section";
 import { TOOL_NOTE } from "../../../../shared/agent-tools";
 import type { EntityId, PlaceId } from "../../../../shared/ids";
 import type { CommitmentKind, CommitmentStatus, FidelityScore, MindIntent, MindPlan, MindRecord, MindsGmCharacter, PlanKind, PlanStatus, WitnessEntry } from "../../../../shared/minds";
+import { MIND_LENGTH_DEFAULTS } from "../../../../shared/minds";
 import { formatMoney } from "../../../../shared/world";
 import type { ToolReadView, ViewRef } from "../read-view";
 import type { ToolDefinition } from "../registry";
@@ -169,8 +170,8 @@ export const MINDS_TOOLS: readonly ToolDefinition[] = [
         const who = view.entity(person.id);
         if (!who) return view.refuse(TOOL_NOTE.noPerson, { name: said });
         if (view.knowledge === "everyone") return view.answer({ who, mind: narratorLine(view, person.id) } satisfies NarratorMind);
-        // As the GM view builds its minds; the player character, whom the player decides for, has none.
-        const c = buildMindsGm(view.ctx, view.minds.latest, view.minds.enabled, view.minds.memory, view.threshold).characters.find((x) => x.entity === person.id);
+        // As the GM view builds its minds; the player character, whom the player decides for, has none. Only the characters are read, so the lengths the GM's forms use are the defaults.
+        const c = buildMindsGm(view.ctx, view.minds.latest, view.minds.enabled, view.minds.memory, view.threshold, MIND_LENGTH_DEFAULTS).characters.find((x) => x.entity === person.id);
         return view.answer(c ? gmMind(view, who, c) : ({ who, mind: null } satisfies NarratorMind));
       });
     },

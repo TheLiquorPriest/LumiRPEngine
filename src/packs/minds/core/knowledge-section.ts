@@ -32,7 +32,7 @@ import type { FeedLine, ReadContext } from "../../../engine/registry";
 import { together } from "../../../engine/presence";
 import { isGone, kindIs, placeOfEntity } from "../../../engine/scope";
 import { canSeeEntity, loreGateReader } from "../../../engine/visibility";
-import { byPlay, holdingLine, holdingsOf, keptFromIt, latestTurns, rankedHoldings, type HoldingWords, type InPlay } from "./knowledge";
+import { byPlay, factText, holdingLine, holdingsOf, keptFromIt, latestTurns, rankedHoldings, type HoldingWords, type InPlay } from "./knowledge";
 import { readSlice } from "./state";
 
 /** Everyone in the player character's scene, whether it can see them or not and whether they act or not, in id order. */
@@ -87,7 +87,7 @@ export function knowledgeLines(ctx: ReadContext, scope: FeedScope): FeedLine[] {
   const place = placeOfEntity(state, pov);
   const secret = worldSecrets(ctx);
   const play: InPlay = { here: [pov, ...people, ...(place ? [place] : [])], recent: latestTurns(slice, settings.inPlayTurns), secret };
-  const claim = (fact: KnowledgeFact | undefined, id: FactId): string => applyMarks(fact?.claim ?? id, { world, state }, "omit");
+  const claim = (fact: KnowledgeFact | undefined, id: FactId): string => applyMarks(factText(world, fact, id), { world, state }, "omit");
   // Each one's most relevant holdings: the player character's, then each person here's but in the player character's own scope.
   const others = scope === "player" ? [] : people;
   // Everyone physically there, seen or not and acting or not: "Everyone here" speaks for all of them.

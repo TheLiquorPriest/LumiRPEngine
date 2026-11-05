@@ -8,7 +8,7 @@ import type { DomainId, EntityId, Level, PlaceId, TierId } from "../shared/ids";
 import { pointerOf } from "../shared/json-patch";
 import { lorePinKey, lorePinsJson, lorePinsOf } from "../shared/lore";
 import type { Fidelity, MindApproach } from "../shared/minds";
-import { FIDELITIES, MIND_TEXT_CAPS } from "../shared/minds";
+import { FIDELITIES } from "../shared/minds";
 import type { PartyTier } from "../shared/party";
 import type { EditOp, JsonPatchOp } from "../shared/protocol";
 import { EDIT_OPS_MAX } from "../shared/protocol";
@@ -98,10 +98,10 @@ export function forCharacters(kind: BulkChange["kind"]): boolean {
   return kind === "role" || kind === "pin" || kind === "intent";
 }
 
-/** An intent's text as it is sent, its spaces tidied; null over its cap. */
-export function intentText(text: string): string | null {
+/** An intent's text as it is sent, its spaces tidied; null when it is longer than `max`, the user's length for an intent (Settings → Minds → Lengths). */
+export function intentText(text: string, max: number): string | null {
   const tidy = text.trim().replace(/\s+/g, " ");
-  return tidy.length > MIND_TEXT_CAPS.gmIntent ? null : tidy;
+  return tidy.length > max ? null : tidy;
 }
 
 /**
@@ -109,7 +109,7 @@ export function intentText(text: string): string | null {
  * intent over its cap). A party tier is set only where it changes something, keeping since when
  * each joined, and only those in the party are taken out of it.
  */
-export function bulkOps(ids: readonly EntityId[], change: BulkChange, gm: Pick<GmView, "entities">): EditOp[] | null {
+export function bulkOps(ids: readonly EntityId[], change: BulkChange, gm: Pick<GmView, "entities" | "minds">): EditOp[] | null {
   switch (change.kind) {
     case "tier":
       return ids.map((entity) => ({ op: "entity", entity, tier: change.tier }));
@@ -120,7 +120,7 @@ export function bulkOps(ids: readonly EntityId[], change: BulkChange, gm: Pick<G
     case "pin":
       return ids.map((entity) => ({ op: "mind_pin", entity, level: change.level }));
     case "intent": {
-      const text = intentText(change.text);
+      const text = intentText(change.text, gm.minds.lengths.gmIntent);
       return text === null ? null : ids.map((entity) => ({ op: "mind_intent", entity, text, approach: change.approach }));
     }
     case "move":

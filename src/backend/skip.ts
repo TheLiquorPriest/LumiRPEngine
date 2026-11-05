@@ -9,7 +9,7 @@ import type { ChatId, EntityId, UserId } from "../shared/ids";
 import { isRecord } from "../shared/json";
 import type { LedgerEvent } from "../shared/ledger";
 import type { Fidelity, MindCallTrace, MindMoment, MindsSettings } from "../shared/minds";
-import { limitOf, MIND_TEXT_CAPS, MINDS_EVENTS, SKIP_FILL_HEAD } from "../shared/minds";
+import { cutsNote, limitOf, MINDS_EVENTS, SKIP_FILL_HEAD, type MindCuts } from "../shared/minds";
 import type { ModelUseSettings } from "../shared/settings";
 import type { WorldDoc } from "../shared/world";
 import { trackOwner } from "../shared/world";
@@ -29,6 +29,7 @@ import { skipPastFight, timelapseOptions, turnStart } from "../engine/turn";
 import { Working } from "../engine/working";
 import type { HostPort } from "./host";
 import { readPins } from "./lore-pins";
+import { capCounted } from "../packs/minds/core/edit";
 import { askMind, type MindAsk } from "./mind-ask";
 import { chatBefore, localTime, mindPrompt, mindsStepConfig, ownMindPrompt, type RunMindsInput, type RunMindsResult } from "./minds";
 import { pinnedLines, recentChat } from "./minds-context";
@@ -209,14 +210,17 @@ async function proposedBeats(deps: SkipDeps, input: SkipInput, state: Readonly<W
     classic: () => deps.steps.helperJson("skip", prompt.text, user, config, input.userId, input.signal, { lore: null, guidance: input.guidance?.skip ?? "", usage }),
   });
   const proposals = isRecord(raw) && Array.isArray(raw.beats) ? raw.beats : null;
-  traces.push({ purpose: "skip", phase: "skip", who: "", level: null, outcome: proposals ? "recorded" : "failed", ms: Math.round(performance.now() - t0), tokens: usage.tokens, prompt: prompt.source });
-  if (!proposals) return [];
   const out: Beat[] = [];
-  for (const b of proposals.slice(0, 5)) {
+  // Each reason is cut to the length the step was told (Settings → Minds → Lengths), and the trace and the host log say so.
+  const cuts: MindCuts = {};
+  for (const b of (proposals ?? []).slice(0, 5)) {
     if (!isRecord(b) || typeof b.at !== "string" || typeof b.reason !== "string") continue;
     const at = localTime(input.world, scanned.from, b.at);
-    if (at !== null && at > scanned.after && at <= scanned.to) out.push({ at, reason: b.reason.replace(/\s+/g, " ").trim().slice(0, MIND_TEXT_CAPS.reason), source: "model", who: [], rank: RANK.model });
+    if (at !== null && at > scanned.after && at <= scanned.to) out.push({ at, reason: capCounted(b.reason, input.settings.minds.lengths.reason, cuts, "reason"), source: "model", who: [], rank: RANK.model });
   }
+  const cut = cutsNote(cuts, input.settings.minds);
+  if (cut !== null) deps.host.log("info", `[LumiRPEngine] time-skip beats: ${cut}`, input.userId);
+  traces.push({ purpose: "skip", phase: "skip", who: "", level: null, outcome: proposals ? "recorded" : "failed", ms: Math.round(performance.now() - t0), tokens: usage.tokens, prompt: prompt.source, ...(cut !== null ? { notes: [cut] } : {}) });
   return out;
 }
 

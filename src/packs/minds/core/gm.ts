@@ -4,14 +4,14 @@
 // Built on request, never pushed with the player's state.
 
 import type { EntityId } from "../../../shared/ids";
-import type { FidelityScore, FidelityTexts, MindsCharacter, MindsGmCharacter, MindsGmEvidence, MindsGmHolding, MindsGmView, MindsMemoryConfig, MindsSecrecy, WitnessEntry } from "../../../shared/minds";
+import type { FidelityScore, FidelityTexts, MindLengths, MindsCharacter, MindsGmCharacter, MindsGmEvidence, MindsGmHolding, MindsGmView, MindsMemoryConfig, MindsSecrecy, WitnessEntry } from "../../../shared/minds";
 import { isWitnessRef, parseFactId, witnessRef, worldMindsOf } from "../../../shared/minds";
 import { calendarOf, formatClock } from "../../../engine/calendar";
 import { own } from "../../../engine/pack-kit";
 import type { ReadContext } from "../../../engine/registry";
 import { isGone, kindIs } from "../../../engine/scope";
 import { fidelityOf } from "./fidelity";
-import { factsOf, holdingsOf, isSuspicion, knowersOf } from "./knowledge";
+import { factsOf, factText, holdingsOf, isSuspicion, knowersOf } from "./knowledge";
 import { faded, readCharacter, readSlice, salienceNow } from "./state";
 
 const LEVEL_ORDER = { live: 0, near: 1, far: 2, background: 3 } as const;
@@ -40,7 +40,7 @@ export function holdingsView(ctx: ReadContext, who: EntityId, witness: readonly 
       return w ? { ref, kind: "witness", text: `${w.what} (${w.how === "told" ? `told${w.by ? ` by ${name(w.by)}` : ""}` : "saw it"}, ${formatClock(cal, w.at)})` } : { ref, kind: "gone", text: "A witness entry their log no longer keeps" };
     }
     const f = own(facts, ref);
-    return f ? { ref, kind: "fact", text: f.claim } : { ref, kind: "gone", text: ref };
+    return f ? { ref, kind: "fact", text: factText(world, f, ref) } : { ref, kind: "gone", text: ref };
   };
   return Object.entries(holdingsOf(slice, who))
     .map(([fact, h]): MindsGmHolding => {
@@ -48,7 +48,7 @@ export function holdingsView(ctx: ReadContext, who: EntityId, witness: readonly 
       return {
         ...h,
         fact,
-        claim: f?.claim ?? fact,
+        claim: factText(world, f, fact),
         ...(f?.matters !== undefined ? { matters: f.matters } : {}),
         kind: f?.kind ?? parseFactId(fact)?.kind ?? "claim",
         truth: f?.truth ?? "open",
@@ -91,7 +91,7 @@ function characterView(ctx: ReadContext, id: EntityId, c: MindsCharacter, fideli
  * with the user's overrides); `threshold` is the user's confidence under which a holding is a
  * suspicion (Settings → Minds → Knowledge).
  */
-export function buildMindsGm(ctx: ReadContext, texts: FidelityTexts, enabled: boolean, memory: MindsMemoryConfig, threshold: number): MindsGmView {
+export function buildMindsGm(ctx: ReadContext, texts: FidelityTexts, enabled: boolean, memory: MindsMemoryConfig, threshold: number, lengths: Readonly<MindLengths>): MindsGmView {
   const { registry: reg, world, state } = ctx;
   const config = worldMindsOf(world);
   const scores = new Map(fidelityOf(ctx, texts, config).map((s) => [s.entity, s]));
@@ -103,9 +103,9 @@ export function buildMindsGm(ctx: ReadContext, texts: FidelityTexts, enabled: bo
   const secrecy: MindsSecrecy = config.secrecy;
   const slice = readSlice(state);
   const facts = Object.values(factsOf(slice))
-    .map((f) => ({ ...f, holders: knowersOf(slice, f.id) }))
+    .map((f) => ({ ...f, claim: factText(world, f, f.id), holders: knowersOf(slice, f.id) }))
     .sort((a, b) => a.claim.localeCompare(b.claim) || (a.id < b.id ? -1 : 1));
   const pov = own(state.entities, world.pov);
   const knowledge = { facts, pov: pov ? { entity: world.pov, name: pov.name, holdings: holdingsView(ctx, world.pov, readCharacter(state, world.pov).witness, threshold) } : null, threshold };
-  return { enabled, secrecy, now: state.clock, nowText: formatClock(calendarOf(world), state.clock), characters, knowledge };
+  return { enabled, secrecy, now: state.clock, nowText: formatClock(calendarOf(world), state.clock), characters, knowledge, lengths: { ...lengths } };
 }

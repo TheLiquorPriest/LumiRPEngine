@@ -661,7 +661,7 @@ export const WRITE_TOOL_TEXTS: readonly ToolText[] = [
       { path: "part", text: "mind_memory: note, commitment or plan." },
       { path: "id", text: "mind_memory: the note's, commitment's or plan's id; leave it out to add one." },
       { path: "value", text: "mind_memory: its fields, or the ones to change, written as a JSON object; leave it out to delete it." },
-      { path: "text", text: "mind_intent: what they mean to do now, in your words (at most 600 characters); an empty text clears it." },
+      { path: "text", text: "mind_intent: what they mean to do now, in your words (at most the length Settings → Minds → Lengths gives your intent, 1,200 characters unless the user changed it; a longer one is refused); an empty text clears it." },
       { path: "approach", text: "mind_intent: reactive (they answer the scene), proactive (they pursue their own aims), or none (their mind decides)." },
       { path: "fact", text: "mind_knowledge: the fact's id, as the knowledge tools give it." },
       { path: "holding", text: 'mind_knowledge: the holding, whole, written as a JSON object: {"how": "authored", "witnessed", "told", "inferred" or "guessed", "by": who told them or null, "evidence": [fact ids], "since": {"msg", "at"}, "belief": "true", "false" or "uncertain", "confidence": 0 to 1, "keptFrom": [ids] or "everyone"}; leave it out to take it away.' },

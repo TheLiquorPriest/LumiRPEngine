@@ -13,7 +13,7 @@ import { GroupPicks, SelectBar, type Selection } from "../../src/frontend/multi-
 import { editRequest, partyOf } from "../../src/frontend/requests";
 import { FIDELITY_LABEL } from "../../src/packs/minds/ui/ops";
 import { lorePinsOf } from "../../src/shared/lore";
-import { MIND_TEXT_CAPS } from "../../src/shared/minds";
+import { MIND_LENGTH_DEFAULTS } from "../../src/shared/minds";
 import type { EditOp, JsonPatchOp, ResultBodies } from "../../src/shared/protocol";
 import { EDIT_OPS_MAX } from "../../src/shared/protocol";
 import type { GmView } from "../../src/shared/state-view";
@@ -152,9 +152,9 @@ describe("GM batch edits", () => {
   });
 
   test("every control starts on Choose…: Apply stays off until a value is picked, and for a value no one picked fits", () => {
-    expect(Object.values(batchChanges(BLANK_CHOICES))).toEqual([null, null, null, null, null, null, null]);
+    expect(Object.values(batchChanges(BLANK_CHOICES, MIND_LENGTH_DEFAULTS.gmIntent))).toEqual([null, null, null, null, null, null, null]);
     const choices = { ...BLANK_CHOICES, tier: "background", domain: "money" as const, level: "tier" as const, pin: "score" as const, approach: "mind" as const, to: "home" };
-    const changes = batchChanges(choices);
+    const changes = batchChanges(choices, MIND_LENGTH_DEFAULTS.gmIntent);
     expect([changes.tier, changes.level, changes.pin, changes.intent, changes.move]).toEqual([
       { kind: "tier", tier: "background" },
       { kind: "level", domain: "money", level: null },
@@ -163,7 +163,9 @@ describe("GM batch edits", () => {
       { kind: "intent", text: "", approach: null },
       { kind: "move", to: "home" },
     ]);
-    expect(batchChanges({ ...BLANK_CHOICES, text: "x".repeat(MIND_TEXT_CAPS.gmIntent + 1) }).intent).toBeNull();
+    // An intent longer than the user's length for one (Settings → Minds → Lengths) can't be applied; within a raised one it can.
+    expect(batchChanges({ ...BLANK_CHOICES, text: "x".repeat(MIND_LENGTH_DEFAULTS.gmIntent + 1) }, MIND_LENGTH_DEFAULTS.gmIntent).intent).toBeNull();
+    expect(batchChanges({ ...BLANK_CHOICES, text: "x".repeat(MIND_LENGTH_DEFAULTS.gmIntent + 1) }, MIND_LENGTH_DEFAULTS.gmIntent * 2).intent).not.toBeNull();
     const applied: unknown[] = [];
     const apply = (change: unknown) => applied.push(change);
     const card = (change: (typeof changes)["tier"], reach: number) => propsOf(ChangeCard({ title: "Tier", note: "", change, reach, now: null, busy: false, onApply: apply, children: null }), Button)[0] ?? {};

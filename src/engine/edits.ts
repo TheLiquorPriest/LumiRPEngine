@@ -23,7 +23,7 @@ import { DOMAINS } from "../shared/ids";
 import type { JsonObject, JsonValue } from "../shared/json";
 import { isRecord, safeKey } from "../shared/json";
 import type { FixDirective, FixOp, LedgerEvent, PostEntry, WorkspaceOp } from "../shared/ledger";
-import type { Holding } from "../shared/minds";
+import type { Holding, MindLengths } from "../shared/minds";
 import type { EditOp } from "../shared/protocol";
 import { EDIT_OPS_MAX } from "../shared/protocol";
 import { isBlobHash, isWorkspacePath } from "../shared/stores";
@@ -71,6 +71,8 @@ export interface EditOptions {
   confirmed?: boolean;
   /** The longest reason (`why`) a thing's change keeps (Settings → Changes from the reply); absent, as given. */
   whyMax?: number;
+  /** How long the GM's words in a minds edit may be (Settings → Minds → Lengths): a longer one is refused; absent, as an edit resolved again has them, kept as given. */
+  mindLengths?: Readonly<MindLengths>;
 }
 
 /**
@@ -585,7 +587,7 @@ function applyOp(reg: Registry, w: Working, op: FixOp, opts: EditOptions, rng: R
       // A character's mind, and what anyone knows, is the minds pack's (DESIGN §24.9, §24.11): it words the control as its events.
       const edit = optionalService(w.ctx, "minds.edit");
       if (!edit) return reject("no_minds", "this world has no character minds");
-      const out = edit(w.ctx, op);
+      const out = edit(w.ctx, op, opts.mindLengths);
       return Array.isArray(out) ? applyAll(w, out) : out;
     }
     case "routine_follow":

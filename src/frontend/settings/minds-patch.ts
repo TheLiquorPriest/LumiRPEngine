@@ -6,7 +6,7 @@
 // prompt, the shipped text, or the world's memory setting, again.
 
 import type { JsonObject } from "../../shared/json";
-import type { Fidelity, KnowledgeLimit, KnowledgeSettings, KnowledgeTextId, Limit, MindHistoryRead, MindPurpose, MindSource, MindsMemoryConfig, MindsSettings } from "../../shared/minds";
+import type { Fidelity, KnowledgeLimit, KnowledgeSettings, KnowledgeTextId, Limit, MindHistoryRead, MindLengthKey, MindPurpose, MindSource, MindsMemoryConfig, MindsSettings } from "../../shared/minds";
 import { FIDELITIES, KNOWLEDGE_TEXTS, MIND_PROMPT_DEFAULTS, MIND_PROMPT_MAX, MINDS_RANGES } from "../../shared/minds";
 
 /** The fields a Model use preset sets; changing one makes the preset Custom. */
@@ -59,6 +59,11 @@ export function knowledgePatch(change: KnowledgeSettingsChange): JsonObject {
 /** One knowledge limit set, as `knowledgePatch` would. */
 export function knowledgeLimitPatch(limit: KnowledgeLimit, value: number): JsonObject {
   return { minds: { knowledge: { [limit]: value } } };
+}
+
+/** One length set (Settings → Minds → Lengths): the user's own, so the preset stays. */
+export function mindsLengthPatch(key: MindLengthKey, value: number): JsonObject {
+  return { minds: { lengths: { [key]: value } } };
 }
 
 /** The `{{name}}` placeholders a knowledge text's shipped wording fills, which the user's own must keep. */

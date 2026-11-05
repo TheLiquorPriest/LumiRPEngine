@@ -12,7 +12,7 @@ import type { RoleId } from "../../../shared/agent-roles";
 import { ROLE_LABEL } from "../../../shared/agent-roles";
 import type { DiagPhase } from "../../../shared/diagnostics";
 import type { JsonValue } from "../../../shared/json";
-import { knowledgeText } from "../../../shared/minds";
+import { answerLengths, knowledgeText, type MindPurpose } from "../../../shared/minds";
 import { ROLES_TEXT, roleTaskTextId } from "../../../shared/role-prompts";
 import { renderPrompt } from "../../prompts";
 import type { MindAsk, MindCall, MindCallKind } from "../../mind-ask";
@@ -44,7 +44,9 @@ export async function mindRun(rt: Runtime, ctx: TurnAgentCtx, call: MindCall, ph
   const taskId = roleTaskTextId(kind.role, kind.sub, "task");
   // Its tools' schemas are the world's as the head it reads holds it; none while that world isn't loaded.
   const world = (await ctx.reader.view().catch(() => null))?.world ?? null;
-  const answer = call.knowing ? { part: "answer_knowing" } : call.kind === "knowledge" ? { part: "answer", vars: { lists: knowledgeText(settings.minds.knowledge, "stepAnswer") } } : undefined;
+  // The lengths the engine keeps follow the answer's text, whoever worded it, so the model writes to them (Settings → Minds → Lengths); a skip's plan has none.
+  const tail = call.kind === "skip_plan" ? undefined : answerLengths(call.kind satisfies MindPurpose, settings.minds, call.knowing === true);
+  const answer = { part: call.knowing ? "answer_knowing" : "answer", ...(call.kind === "knowledge" ? { vars: { lists: knowledgeText(settings.minds.knowledge, "stepAnswer") } } : {}), ...(tail !== undefined ? { tail } : {}) };
   const framing = ctx.brief && call.who !== null && (call.kind === "mind" || call.kind === "knowledge") ? renderPrompt(ROLES_TEXT.call[call.kind], ctx.texts ?? settings.prompts.texts, { character: call.vars.character || call.who }) : "";
   return runRoleAgent(rt, framing === "" ? ctx : { ...ctx, brief: `${framing}\n\n${ctx.brief}` }, {
     sub: kind.sub,
@@ -53,7 +55,7 @@ export async function mindRun(rt: Runtime, ctx: TurnAgentCtx, call: MindCall, ph
     vars: call.vars,
     ...(call.template !== null ? { own: { [taskId]: call.template } } : {}),
     data: call.context,
-    ...(answer ? { answer } : {}),
+    answer,
     tools: world,
     check: (raw) => (call.check(raw) ? raw : null),
   });

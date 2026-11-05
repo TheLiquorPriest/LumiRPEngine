@@ -43,8 +43,8 @@ import type { EntityId, MessageId } from "../shared/ids";
 import type { JsonObject, JsonValue } from "../shared/json";
 import { isRecord } from "../shared/json";
 import type { LedgerEvent } from "../shared/ledger";
-import type { FactId, FactTruth, Holding, HoldingBelief, KeptFrom, KnowledgeFact, KnowledgeProposal, KnowledgeSettings, KnowledgeTextId, LearnEventData, MindsMemoryConfig, PresenceEventData } from "../shared/minds";
-import { claimFactId, claimKey, FACT_TRUTHS, fillText, HOLDING_BELIEFS, isConfidence, isWitnessRef, knowledgeText, knowledgeThreshold, MIND_TEXT_CAPS, MINDS_EVENTS, parseFactId, witnessRef } from "../shared/minds";
+import type { FactId, FactTruth, Holding, HoldingBelief, KeptFrom, KnowledgeFact, KnowledgeProposal, KnowledgeSettings, KnowledgeTextId, LearnEventData, MindCuts, MindsMemoryConfig, PresenceEventData } from "../shared/minds";
+import { claimFactId, claimKey, FACT_TRUTHS, fillText, HOLDING_BELIEFS, isConfidence, isWitnessRef, knowledgeText, knowledgeThreshold, MINDS_EVENTS, parseFactId, witnessRef } from "../shared/minds";
 import { applyMarks } from "../shared/secret-marks";
 import type { WorldDoc } from "../shared/world";
 import { calendarOf, formatClock } from "../engine/calendar";
@@ -54,9 +54,9 @@ import { placeOfEntity } from "../engine/scope";
 import type { WorldState } from "../engine/state";
 import { unrevealedSecretFacts } from "../engine/visibility";
 import { hiddenNameCheck } from "../engine/player-events";
-import { capText } from "../packs/minds/core/edit";
+import { capCounted } from "../packs/minds/core/edit";
 import { learnedWitness } from "../packs/minds/core/events";
-import { factsOf, holdingLine, latestTurns, rankedHoldings, type HoldingWords } from "../packs/minds/core/knowledge";
+import { factsOf, factText, holdingLine, latestTurns, rankedHoldings, type HoldingWords } from "../packs/minds/core/knowledge";
 import { worldSecrets } from "../packs/minds/core/knowledge-section";
 import { readCharacter, readKnowledge, readSlice } from "../packs/minds/core/state";
 import { sectionTokens } from "./book";
@@ -125,7 +125,7 @@ export function knowledgeContext(turn: KnowledgeTurn, batch: readonly EntityId[]
   const pov = world.pov;
   const slice = readSlice(state);
   const reader = { world, state };
-  const claim = (fact: KnowledgeFact | undefined, id: FactId): string => applyMarks(fact?.claim ?? id, reader, "marked");
+  const claim = (fact: KnowledgeFact | undefined, id: FactId): string => applyMarks(factText(world, fact, id), reader, "marked");
   const words: HoldingWords = { texts: settings, threshold: knowledgeThreshold(slice), nameOf: (id) => own(state.entities, id)?.name ?? id };
   const people = perceivers(turn);
   const here = placeOfEntity(state, pov);
@@ -224,6 +224,8 @@ export interface KnowledgeChecked {
   proposals: KnowledgeProposal[];
   refused: string[];
   refusedAs: Counts<KnowledgeRefusal>;
+  /** What its new facts lost to the longest claim it was told (`claimChars`): the claims and the reasons they matter cut. */
+  cuts: MindCuts;
 }
 
 const str = (v: JsonValue | undefined): string => (typeof v === "string" ? v.trim() : "");
@@ -256,7 +258,7 @@ export function knowledgeSpent(): KnowledgeSpent {
  * the ones before it left, so a fact someone learns may be told on, or reasoned from, further down.
  */
 export function checkKnowledge(turn: KnowledgeTurn, batch: readonly EntityId[], raw: JsonValue, spent: KnowledgeSpent = knowledgeSpent()): KnowledgeChecked {
-  const out: KnowledgeChecked = { events: [], proposals: [], refused: [], refusedAs: {} };
+  const out: KnowledgeChecked = { events: [], proposals: [], refused: [], refusedAs: {}, cuts: {} };
   if (!isRecord(raw)) return out;
   const { world, state, settings } = turn;
   const pov = world.pov;
@@ -319,7 +321,7 @@ export function checkKnowledge(turn: KnowledgeTurn, batch: readonly EntityId[], 
   const pending = new Map<FactId, string>();
   for (const f of list(raw.facts)) {
     if (!isRecord(f)) continue;
-    const claim = capText(str(f.claim), settings.claimChars);
+    const claim = capCounted(str(f.claim), settings.claimChars, out.cuts, "claim");
     if (claim === "") continue;
     const made = claimFactId(claim, turn.messageId);
     // A claim of no words is told apart by its id alone.
@@ -327,7 +329,7 @@ export function checkKnowledge(turn: KnowledgeTurn, batch: readonly EntityId[], 
     const id = said.get(key) ?? made;
     if (!facts.has(id)) {
       // A new fact says why it matters and to whom; one that doesn't is no fact worth keeping.
-      const matters = capText(str(f.matters), settings.claimChars);
+      const matters = capCounted(str(f.matters), settings.claimChars, out.cuts, "matters");
       if (matters === "") {
         refuse("matters", `a new fact that doesn't say why it matters, or to whom: "${claim}"`);
         continue;
@@ -418,7 +420,7 @@ export function checkKnowledge(turn: KnowledgeTurn, batch: readonly EntityId[], 
     }
     if (!learners.includes(pov)) return;
     const fact = facts.get(data.fact);
-    out.proposals.push({ type: secret(data.fact, fact) ? "reveal" : "learn", facts: needs, learn: { ...data, who: [pov] }, claim: fact?.claim ?? data.fact, with: npcs });
+    out.proposals.push({ type: secret(data.fact, fact) ? "reveal" : "learn", facts: needs, learn: { ...data, who: [pov] }, claim: factText(world, fact, data.fact), with: npcs });
   };
   /**
    * What the player character comes to hold of a fact they learn: one of the world's secrets, as itself
@@ -439,7 +441,8 @@ export function checkKnowledge(turn: KnowledgeTurn, batch: readonly EntityId[], 
     if (!one) return { fact: id };
     if (more.length > 0) return { refused: `what the player character would learn carries more than one secret's words: "${claim}"` };
     if (!one.parts.every(carries)) return { refused: `what the player character would learn carries only part of a secret: "${claim}"` };
-    if (!facts.has(one.fact)) facts.set(one.fact, { id: one.fact, kind: parseFactId(one.fact)?.kind ?? "lore", claim: capText(one.text, settings.claimChars), about: one.about, truth: "true" });
+    // The secret itself, its text whole: the world's own words, never a claim to cut.
+    if (!facts.has(one.fact)) facts.set(one.fact, { id: one.fact, kind: parseFactId(one.fact)?.kind ?? "lore", claim: one.text.replace(/\s+/g, " ").trim(), about: one.about, truth: "true" });
     return { fact: one.fact };
   };
   // What a learning would leave someone holding, past the limit of holders a fact has.
@@ -559,7 +562,8 @@ export function checkKnowledge(turn: KnowledgeTurn, batch: readonly EntityId[], 
       const id = who(str(n));
       return id !== null && !learning.has(id) ? [id] : [];
     }))];
-    const line = { what: capText(claim, MIND_TEXT_CAPS.told), place: scene };
+    // What they saw or were told is the fact as it reads, whole: its claim was cut to its length once, if at all.
+    const line = { what: factText(world, facts.get(fact), fact), place: scene };
     // One learning for each fact and whom it is kept from: whom the answer names, else, for a holding it
     // replaces, whom that one was kept from.
     const groups = new Map<string, { fact: FactId; keptFrom: KeptFrom | undefined; who: EntityId[] }>();

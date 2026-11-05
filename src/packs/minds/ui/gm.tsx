@@ -11,7 +11,7 @@ import type { ComponentChildren } from "preact";
 import { useEffect, useId, useRef, useState } from "preact/hooks";
 import type { EntityId, PlaceId } from "../../../shared/ids";
 import type { CommitmentKind, CommitmentStatus, FactId, Fidelity, HoldingBelief, HoldingHow, MindApproach, MindIntent, MindsGmCharacter, MindsGmHolding, MindsGmView, PlanKind, PlanStatus, RefreshReason } from "../../../shared/minds";
-import { COMMITMENT_KINDS, COMMITMENT_STATUSES, FIDELITIES, HOLDING_BELIEFS, HOLDING_HOWS, MIND_APPROACHES, MIND_TEXT_CAPS, PLAN_KINDS, PLAN_PRIORITY, planInForce, witnessRef } from "../../../shared/minds";
+import { COMMITMENT_KINDS, COMMITMENT_STATUSES, FIDELITIES, HOLDING_BELIEFS, HOLDING_HOWS, MIND_APPROACHES, PLAN_KINDS, PLAN_PRIORITY, planInForce, witnessRef } from "../../../shared/minds";
 import type { EditOp } from "../../../shared/protocol";
 import { formatMoneyInput, parseMoneyInput } from "../../../shared/money";
 import { formatMoney, type WorldCurrency } from "../../../shared/world";
@@ -754,8 +754,10 @@ function IntentPage(props: { ctx: Ctx; c: MindsGmCharacter; onBack(): void }) {
   const [draft, setDraft] = useState<MindIntent>(current);
   const textId = useId();
   const group = useId();
-  const op = intentOp(c.entity, draft);
-  const clear = intentOp(c.entity, NO_INTENT);
+  // Your words may be as long as Settings → Minds → Lengths lets your intent be, or as long as they already are.
+  const max = Math.max(ctx.view.lengths.gmIntent, current.text.length);
+  const op = intentOp(c.entity, draft, max);
+  const clear = intentOp(c.entity, NO_INTENT, max);
   // Saving only what changes; spaces alone are no change.
   const changed = draft.text.trim().replace(/\s+/g, " ") !== current.text || draft.approach !== current.approach;
   const choices: readonly (MindApproach | null)[] = [null, ...MIND_APPROACHES];
@@ -771,8 +773,8 @@ function IntentPage(props: { ctx: Ctx; c: MindsGmCharacter; onBack(): void }) {
       >
         <Section>
           <p class="lre-gm-note">What {c.name} means to do now, in your words. Only their own mind reads it, first after who they are, and works from it, so the story follows; no other mind, the narrator or Play ever sees it. It stays until you change or clear it.</p>
-          <Field label="What they mean to do" for={textId} help={used(draft.text, MIND_TEXT_CAPS.gmIntent)}>
-            <textarea id={textId} class="lre-input lre-gm-prose" rows={4} maxLength={MIND_TEXT_CAPS.gmIntent} value={draft.text} onInput={(event) => setDraft({ ...draft, text: event.currentTarget.value })} />
+          <Field label="What they mean to do" for={textId} help={used(draft.text, max)}>
+            <textarea id={textId} class="lre-input lre-gm-prose" rows={4} maxLength={max} value={draft.text} onInput={(event) => setDraft({ ...draft, text: event.currentTarget.value })} />
           </Field>
           <Field label="How they go about it">
             <fieldset class="lre-gm-minds-choices">
@@ -792,7 +794,7 @@ function IntentPage(props: { ctx: Ctx; c: MindsGmCharacter; onBack(): void }) {
             </fieldset>
           </Field>
         </Section>
-        <Submit ctx={ctx} ready={op !== null && changed} icon="check" invalid={op === null ? `At most ${MIND_TEXT_CAPS.gmIntent} characters.` : undefined}>
+        <Submit ctx={ctx} ready={op !== null && changed} icon="check" invalid={op === null ? `At most ${max.toLocaleString("en-US")} characters, as Settings → Minds → Lengths has it.` : undefined}>
           {op !== null && changed && draft.text.trim() === "" && draft.approach === null ? "Clear intent" : "Save"}
         </Submit>
       </form>
@@ -812,7 +814,9 @@ function NotePage(props: { ctx: Ctx; c: MindsGmCharacter; note: Note | null; onB
   const { ctx, c, note } = props;
   const [draft, setDraft] = useState(() => noteDraft(note ?? undefined));
   const textId = useId();
-  const op = noteOp(c.entity, note?.id ?? null, draft);
+  // A note may be as long as Settings → Minds → Lengths lets one be, or as long as this one already is.
+  const max = Math.max(ctx.view.lengths.note, note?.text.length ?? 0);
+  const op = noteOp(c.entity, note?.id ?? null, draft, max);
   return (
     <ChangePage name="mind-note" title={note ? "Edit note" : "Add a note"} c={c} onBack={props.onBack}>
       <form
@@ -824,8 +828,8 @@ function NotePage(props: { ctx: Ctx; c: MindsGmCharacter; note: Note | null; onB
         }}
       >
         <Section>
-          <Field label="Note" for={textId} help={used(draft.text, MIND_TEXT_CAPS.note)}>
-            <textarea id={textId} class="lre-input lre-gm-prose" rows={3} maxLength={MIND_TEXT_CAPS.note} value={draft.text} onInput={(event) => setDraft({ ...draft, text: event.currentTarget.value })} />
+          <Field label="Note" for={textId} help={used(draft.text, max)}>
+            <textarea id={textId} class="lre-input lre-gm-prose" rows={3} maxLength={max} value={draft.text} onInput={(event) => setDraft({ ...draft, text: event.currentTarget.value })} />
           </Field>
           <Field label="Salience" help={note ? `From 1 to 5; it fades with time unless it matters. Now ${note.now.toFixed(1)}${note.faded ? ", faded" : ""}.` : "From 1 to 5; it fades with time unless it matters."}>
             <Seg<string> label="Salience" value={draft.salience} options={["1", "2", "3", "4", "5"].map((s) => ({ value: s, label: s }))} onChange={(salience) => setDraft({ ...draft, salience })} />
@@ -852,7 +856,8 @@ function CommitmentPage(props: { ctx: Ctx; c: MindsGmCharacter; commitment: Comm
     const hours = Number(text);
     setDraft({ ...draft, due: text.trim() === "" ? (commitment?.due ?? null) : Number.isFinite(hours) ? Math.round(now + hours * 60) : Number.NaN });
   };
-  const op = commitmentOp(c.entity, commitment?.id ?? null, draft);
+  const max = Math.max(ctx.view.lengths.commitment, commitment?.text.length ?? 0);
+  const op = commitmentOp(c.entity, commitment?.id ?? null, draft, max);
   const dueText = commitment?.dueText ?? null;
   return (
     <ChangePage name="mind-commitment" title={commitment ? "Edit commitment" : "Add a commitment"} c={c} onBack={props.onBack}>
@@ -874,8 +879,8 @@ function CommitmentPage(props: { ctx: Ctx; c: MindsGmCharacter; commitment: Comm
               ))}
             </select>
           </Field>
-          <Field label="What it is" for={ids.text} help={used(draft.text, MIND_TEXT_CAPS.commitment)}>
-            <textarea id={ids.text} class="lre-input lre-gm-prose" rows={3} maxLength={MIND_TEXT_CAPS.commitment} value={draft.text} onInput={(event) => setDraft({ ...draft, text: event.currentTarget.value })} />
+          <Field label="What it is" for={ids.text} help={used(draft.text, max)}>
+            <textarea id={ids.text} class="lre-input lre-gm-prose" rows={3} maxLength={max} value={draft.text} onInput={(event) => setDraft({ ...draft, text: event.currentTarget.value })} />
           </Field>
           <PeopleField label="With" value={draft.with} people={ctx.people} exclude={c.entity} disabled={ctx.busy} onChange={(next) => setDraft({ ...draft, with: next })} />
           <Field
@@ -928,7 +933,8 @@ function PlanPage(props: { ctx: Ctx; c: MindsGmCharacter; plan: Plan | null; onB
   const money = isMoneyPlan(draft.kind);
   const amountOff = amount.trim() !== "" && draft.cents === null;
   const ids = { what: useId(), kind: useId(), start: useId(), lasts: useId(), where: useId(), status: useId() };
-  const op = planOp(c.entity, plan?.id ?? null, draft);
+  const max = Math.max(ctx.view.lengths.plan, plan?.what.length ?? 0);
+  const op = planOp(c.entity, plan?.id ?? null, draft, max);
   // Text that isn't a number leaves the plan's start or length as it was.
   const startOff = startIn.trim() !== "" && !Number.isFinite(Number(startIn));
   const minutes = Number(lasts);
@@ -944,8 +950,8 @@ function PlanPage(props: { ctx: Ctx; c: MindsGmCharacter; plan: Plan | null; onB
         }}
       >
         <Section>
-          <Field label="What" for={ids.what} help={used(draft.what, MIND_TEXT_CAPS.planWhat)}>
-            <input id={ids.what} class="lre-input" placeholder="What they mean to do" maxLength={MIND_TEXT_CAPS.planWhat} value={draft.what} onInput={(event) => setDraft({ ...draft, what: event.currentTarget.value })} />
+          <Field label="What" for={ids.what} help={used(draft.what, max)}>
+            <input id={ids.what} class="lre-input" placeholder="What they mean to do" maxLength={max} value={draft.what} onInput={(event) => setDraft({ ...draft, what: event.currentTarget.value })} />
           </Field>
           <Field label="Kind" for={ids.kind}>
             <select id={ids.kind} class="lre-input" value={draft.kind} onChange={(event) => setDraft({ ...draft, kind: event.currentTarget.value as PlanKind })}>

@@ -16,7 +16,7 @@ import { own } from "../../../engine/pack-kit";
 import { hiddenNameCheck, povMayKnow } from "../../../engine/player-events";
 import type { ReadContext } from "../../../engine/registry";
 import { findLeaks, unrevealedSecrets } from "../../../engine/visibility";
-import { factsOf, holdingsOf, isSuspicion } from "./knowledge";
+import { factsOf, factText, holdingsOf, isSuspicion } from "./knowledge";
 import { worldSecrets } from "./knowledge-section";
 import { readSlice } from "./state";
 
@@ -44,7 +44,7 @@ export function buildKnownView(ctx: ReadContext): KnownView {
       const f = own(facts, fact);
       return {
         key: hashParts("lre.known", fact),
-        claim: secret(fact, f) && !revealsFact(fact, h, sure) ? UNWORDED : worded(applyMarks(f?.claim ?? "", { world, state }, "omit")),
+        claim: secret(fact, f) && !revealsFact(fact, h, sure) ? UNWORDED : worded(applyMarks(f ? factText(world, f, fact) : "", { world, state }, "omit")),
         how: h.how,
         byName: h.by === null ? null : name(h.by),
         sinceText: formatClock(cal, h.since.at),

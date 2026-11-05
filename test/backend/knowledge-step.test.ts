@@ -974,7 +974,10 @@ describe("the re-review's fixes (Increment 0)", () => {
     const chatId = await shopChat(rig, { minds: { holdings: MARCUS_KEEPS } });
     await rig.turn(chatId, "Morning, Marcus.", "Marcus grunts a hello from under a truck.");
     truth = (await stateOf(rig, chatId)).world.tracks.s_shop_trouble?.stages.truth?.truth ?? "";
-    expect(truth.length).toBeGreaterThan(KNOWLEDGE_DEFAULTS.claimChars);
+    // A claim's length below the truth's, as Settings → Minds → Knowledge may set it, so the claim told word for word is cut.
+    const claimChars = Math.floor(truth.length / 2);
+    rig.body(await rig.send({ type: "lre.settings.set", patch: { minds: { knowledge: { claimChars } } } }));
+    expect(truth.length).toBeGreaterThan(claimChars);
     await atShop(rig, chatId);
     await rig.turn(chatId, "What's really going on with the shop?", `Marcus puts down the wrench. "${truth}" CONFESS-MARK`);
     const reveal = (await chipsOf(rig, chatId)).find((c) => c.kind === "confirm" && c.label.startsWith("A secret the story revealed to you"));

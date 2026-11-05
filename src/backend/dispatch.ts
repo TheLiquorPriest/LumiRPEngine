@@ -593,7 +593,8 @@ export class Dispatcher {
         const ops = parseEditOps(r.ops);
         if (!ops) throw new RequestError("bad_request", "not a list of edits");
         const { state, world } = await this.head(r.chatId, userId);
-        const edit = resolveEdit(this.rt.registry, world, state, ops, { gm: true, runSeed: this.runSeedOf(r.chatId) });
+        // The GM's words in a minds edit are held to the user's lengths (Settings → Minds → Lengths), refused past them, never cut.
+        const edit = resolveEdit(this.rt.registry, world, state, ops, { gm: true, runSeed: this.runSeedOf(r.chatId), mindLengths: (await this.rt.settings.get(userId)).minds.lengths });
         if ("rejection" in edit) throw new RequestError("validation", edit.rejection.gm ?? edit.rejection.reason);
         const result = edit.events.length > 0 ? await this.write(r.chatId, userId, { kind: "post", id: this.nextId(), target: "head", entry: { kind: "fix", gm: true, events: edit.events, edit: { ops } } }) : { pending: false };
         // The chip of the entry this edit wrote, so the GM view's Undo takes back this edit and nothing that landed meanwhile.

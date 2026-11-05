@@ -1,13 +1,16 @@
 // What everyone knows (DESIGN §24.11), read from the minds slice: the facts, one person's holdings,
-// a fact's holders, whether a holding is only a suspicion, and how a holding reads to a model (a
-// mind's What they know, the narrator's Who knows what, the knowledge step's context). A slice
-// without knowledge (a chat from before it, or one that never learned anything) reads empty, and so
-// does one whose chat switched knowledge off (`knowledgeTracked`). Whose holdings a consumer gets is
-// its own view's choice; these readers give whatever they are asked for.
+// a fact's holders, whether a holding is only a suspicion, what a fact says (its world entry whole,
+// for one of the world's own), and how a holding reads to a model (a mind's What they know, the
+// narrator's Who knows what, the knowledge step's context). A slice without knowledge (a chat from
+// before it, or one that never learned anything) reads empty, and so does one whose chat switched
+// knowledge off (`knowledgeTracked`). Whose holdings a consumer gets is its own view's choice; these
+// readers give whatever they are asked for.
 
 import type { EntityId, MessageId } from "../../../shared/ids";
 import type { FactId, Holding, KnowledgeFact, KnowledgeSettings, KnowledgeTextId, MindsSlice } from "../../../shared/minds";
-import { fillText, knowledgeText, knowledgeTracked } from "../../../shared/minds";
+import { fillText, knowledgeText, knowledgeTracked, liveLoreIdOfWiFact, parseFactId } from "../../../shared/minds";
+import { loreSourceOf } from "../../../shared/lore";
+import type { WorldDoc } from "../../../shared/world";
 import { own } from "../../../engine/pack-kit";
 
 type Knowing = Pick<MindsSlice, "knowledge">;
@@ -38,6 +41,36 @@ export function isSuspicion(holding: Pick<Holding, "confidence">, threshold: num
 /** What one person holds while the chat tracks knowledge; none once it switched it off. */
 export function trackedHoldings(slice: Knowing, who: EntityId): Readonly<Record<FactId, Holding>> {
   return knowledgeTracked(slice) ? holdingsOf(slice, who) : {};
+}
+
+/**
+ * What a fact says, whole (DESIGN §24.11): a fact of the world's own that an earlier build recorded
+ * cut to a claim's length (its claim the start of its entry's text, ending in …) reads as its entry
+ * does, wherever the world still holds it: a lore entry's text (its title when it has none), a
+ * stage's truth, and a World Info entry's or mark's text while the entry reads as it did when the
+ * fact was recorded (`textHash`), which only a turn's world holds, its books' lore live. Anything
+ * else reads as recorded: a claim made in play, someone's field as it was, an entry the world no
+ * longer holds, and one changed since, so what the chat recorded stands; a fact the chat records
+ * none of reads as the entry, else by its id. Whitespace is collapsed, as every claim's is.
+ */
+export function factText(world: Pick<WorldDoc, "lore" | "tracks">, fact: KnowledgeFact | undefined, id: FactId): string {
+  const ref = parseFactId(id);
+  let entry = "";
+  if (ref?.kind === "lore") {
+    const lore = own(world.lore, ref.lore);
+    entry = lore ? (lore.content.trim() !== "" ? lore.content : lore.title) : "";
+  } else if (ref?.kind === "track") {
+    const track = own(world.tracks, ref.track);
+    entry = (track ? own(track.stages, ref.stage)?.truth : undefined) ?? "";
+  } else if (ref?.kind === "wi" && fact?.textHash !== undefined) {
+    const live = liveLoreIdOfWiFact(id);
+    const lore = live === null ? undefined : own(world.lore, live);
+    const source = lore ? loreSourceOf(lore.source) : null;
+    entry = lore && source?.kind === "book" && source.hash === fact.textHash ? lore.content : "";
+  }
+  const whole = entry.trim() !== "" ? entry.replace(/\s+/g, " ").trim() : "";
+  if (!fact) return whole !== "" ? whole : id;
+  return whole !== "" && fact.claim.endsWith("…") && whole.length >= fact.claim.length && whole.startsWith(fact.claim.slice(0, -1)) ? whole : fact.claim;
 }
 
 /** Whether a holding is kept from `who` (from everyone, or from them by name). */

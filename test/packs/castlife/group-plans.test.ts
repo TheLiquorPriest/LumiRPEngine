@@ -8,7 +8,7 @@ import { sectionTokens } from "../../../src/backend/book";
 import { mindContext, type MindContextReport } from "../../../src/backend/minds-context";
 import type { JsonObject } from "../../../src/shared/json";
 import type { LedgerEvent } from "../../../src/shared/ledger";
-import { DEFAULT_MIND_READS, DEFAULT_MINDS_MEMORY, MINDS_EVENTS, type MindPlan, type MindsReads } from "../../../src/shared/minds";
+import { DEFAULT_MIND_READS, DEFAULT_MINDS_MEMORY, MIND_LENGTH_DEFAULTS, MINDS_EVENTS, type MindPlan, type MindsReads } from "../../../src/shared/minds";
 import { calendarOf, formatStamp } from "../../../src/engine/calendar";
 import { resolveEdit } from "../../../src/engine/edits";
 import { resolveAction } from "../../../src/engine/resolve";
@@ -32,7 +32,7 @@ function riverton(): Working {
 /** What Maya's memory of the turn takes from it: drinks at the Anchor tonight, 19:00 to 21:00, with `others` (names, as the model writes them). */
 function drinks(w: Working, others: string[]): MindPlan[] {
   const cal = calendarOf(w.world);
-  return plansFrom(reg, w.world, w.state, "maya", [{ what: "Drinks at the Anchor after work", kind: "meet", when: { from: formatStamp(cal, at(w, 0, "19:00")), to: formatStamp(cal, at(w, 0, "21:00")) }, where: "The Anchor", with: others }]);
+  return plansFrom(reg, w.world, w.state, "maya", [{ what: "Drinks at the Anchor after work", kind: "meet", when: { from: formatStamp(cal, at(w, 0, "19:00")), to: formatStamp(cal, at(w, 0, "21:00")) }, where: "The Anchor", with: others }], MIND_LENGTH_DEFAULTS);
 }
 
 /** The `minds.memory` event a memory of the turn records for `who`, with `plans`. */

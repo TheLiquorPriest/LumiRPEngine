@@ -23,7 +23,7 @@ import { wordsOf } from "../../../../engine/lore";
 import { own } from "../../../../engine/pack-kit";
 import { holdingsView } from "../../../../packs/minds/core/gm";
 import { loreFactOf } from "../../../lore-ids";
-import { factsOf, knowersOf } from "../../../../packs/minds/core/knowledge";
+import { factsOf, factText, knowersOf } from "../../../../packs/minds/core/knowledge";
 import { readCharacter, readSlice } from "../../../../packs/minds/core/state";
 import { TOOL_NOTE } from "../../../../shared/agent-tools";
 import type { EntityId } from "../../../../shared/ids";
@@ -211,7 +211,7 @@ export const KNOWLEDGE_TOOLS: readonly ToolDefinition[] = [
       return view.read(() => {
         const k = knowing(view);
         // Every fact the chat records, with everyone who holds it.
-        const facts: (Fact & { holders: Held[] })[] = Object.values(k.facts).map((f) => ({ id: f.id, claim: f.claim, kind: f.kind, truth: f.truth, about: f.about, holders: k.holders(f.id) }));
+        const facts: (Fact & { holders: Held[] })[] = Object.values(k.facts).map((f) => ({ id: f.id, claim: factText(view.ctx.world, f, f.id), kind: f.kind, truth: f.truth, about: f.about, holders: k.holders(f.id) }));
         facts.sort((a, b) => a.claim.localeCompare(b.claim) || (a.id < b.id ? -1 : 1));
         return view.answer({
           facts: matching(view, about, facts, entry).map((f) => ({ ...factPart(view, f, () => factSecrecy(view, f.holders)), holders: f.holders.map(({ who, holding }) => ({ who, ...holdingPart(view, holding) })) })),

@@ -731,7 +731,8 @@ export function checkOp(rt: Runtime, ctx: Ctx, env: WriterEnv, state: Readonly<W
   // A GM edit's rules; a ✎ fix's operations keep the player's (`fix_set`).
   const gm = env.gm ?? true;
   const by = ROLE_IDS.find((r: RoleId) => r === env.agent.role);
-  const opts = { gm, runSeed: ctx.head.run.runSeed, ...(by !== undefined ? { by } : {}) };
+  // A minds edit's words are held to the user's lengths, refused past them, as the GM's own are.
+  const opts = { gm, runSeed: ctx.head.run.runSeed, mindLengths: ctx.settings.minds.lengths, ...(by !== undefined ? { by } : {}) };
   let out = resolveEdit(rt.registry, ctx.head.world, state, p.ops, opts);
   const builtin = !gm && "rejection" in out && out.rejection.code === "builtin";
   if (builtin) out = resolveEdit(rt.registry, ctx.head.world, state, p.ops, { ...opts, confirmed: true });
@@ -839,7 +840,7 @@ async function apply(rt: Runtime, env: WriterEnv, ops: readonly AgentOp[], label
       // The batch is one GM edit, resolved as `resolveFix` will resolve it again: one generator over
       // all of its operations, so a rebased view or a held landing works out the same ids.
       const asked: FixOp[] = edits.flatMap((p) => p.ops);
-      const group = resolveEdit(rt.registry, world, ctx.head.state, asked, { gm: true, runSeed: run.runSeed });
+      const group = resolveEdit(rt.registry, world, ctx.head.state, asked, { gm: true, runSeed: run.runSeed, mindLengths: ctx.settings.minds.lengths });
       if ("rejection" in group) refuseEdits((p) => refused(rt, ctx, env.knowledge, group.rejection, p.key));
       else if (group.events.length === 0) refuseEdits((p) => refusal("no_change", ctx.view.text(WRITE_NOTE.noChange), p.key));
       else {

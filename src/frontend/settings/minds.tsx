@@ -8,13 +8,13 @@
 
 import { useEffect, useId, useState } from "preact/hooks";
 import type { JsonObject } from "../../shared/json";
-import type { KnowledgeBatch, KnowledgeLimit, KnowledgeSettings, KnowledgeTextId, Limit, MindPurpose, MindSource, MindsReads, MindsSettings } from "../../shared/minds";
-import { DEFAULT_MIND_READS, DEFAULT_MINDS_MEMORY, FIDELITIES, KNOWLEDGE_BATCHES, KNOWLEDGE_LIMITS, KNOWLEDGE_RANGES, KNOWLEDGE_TEXT_IDS, KNOWLEDGE_TEXTS, knowledgeLimitRange, MIND_PROMPT_DEFAULTS, MIND_PROMPT_MAX, MIND_PURPOSES, MIND_SOURCES, MINDS_DEFAULTS } from "../../shared/minds";
+import type { KnowledgeBatch, KnowledgeLimit, KnowledgeSettings, KnowledgeTextId, Limit, MindLengthKey, MindLengths, MindPurpose, MindSource, MindsReads, MindsSettings } from "../../shared/minds";
+import { DEFAULT_MIND_READS, DEFAULT_MINDS_MEMORY, FIDELITIES, isListCount, KNOWLEDGE_BATCHES, KNOWLEDGE_LIMITS, KNOWLEDGE_RANGES, KNOWLEDGE_TEXT_IDS, KNOWLEDGE_TEXTS, knowledgeLimitRange, MIND_LENGTH_DEFAULTS, MIND_LIST_COUNTS, MIND_PROMPT_DEFAULTS, MIND_PROMPT_MAX, MIND_PURPOSES, MIND_SOURCES, MIND_TEXT_LENGTHS, mindLengthRange, MINDS_DEFAULTS } from "../../shared/minds";
 import { Badge, Button, Disclosure, HostSwitch, NumberStepper, Section, Seg } from "../components";
 import { Icon } from "../icons";
 import { PromptEditor } from "./prompt-editor";
 import type { KnowledgeSettingsChange, MemoryField } from "./minds-patch";
-import { knowledgeLimitPatch, knowledgePatch, knowledgePlaceholders, knowledgeTextPatch, MEMORY_FIELDS, memoryOverride, memoryOverridePatch, memoryValue, mindsPolicyPatch, mindsPromptPatch, mindsReadPatch, missingPlaceholders, withMemoryLevel } from "./minds-patch";
+import { knowledgeLimitPatch, knowledgePatch, knowledgePlaceholders, knowledgeTextPatch, MEMORY_FIELDS, memoryOverride, memoryOverridePatch, memoryValue, mindsLengthPatch, mindsPolicyPatch, mindsPromptPatch, mindsReadPatch, missingPlaceholders, withMemoryLevel } from "./minds-patch";
 import { STEP_LABEL } from "../../shared/steps";
 import { FIDELITY_LABEL } from "../../packs/minds/ui/ops";
 
@@ -190,7 +190,7 @@ const LIMIT_FIELD: Record<KnowledgeLimit, { label: string; note: string; step: n
   narratorTokens: { label: "Who knows what, for the narrator (tokens)", note: "The narrator's Who knows what: who here knows, suspects or doesn't know the facts in play.", step: 100 },
   perPerson: { label: "Who knows what: facts per person", note: "The narrator gets each person's most relevant facts, up to this many.", step: 1 },
   stepTokens: { label: "The knowledge step's context (tokens)", note: "What happened, who could perceive it, what each of them already knows and has seen lately, and the facts in play.", step: 100 },
-  claimChars: { label: "A fact's claim (characters)", note: "The longest claim the knowledge step records; a longer one is cut.", step: 10 },
+  claimChars: { label: "A fact's claim (characters)", note: "The longest claim, and why it matters, the knowledge step writes; it is told this, and a longer one is cut at a word, ending in …, with a note in the Context panel. A fact from the world's lore, World Info or a stage's truth keeps its entry whole.", step: 10 },
   factsPerChat: { label: "Facts made in play, per chat", note: "Past it, the knowledge step makes no new fact; people still learn the ones there are.", step: 1 },
   holdersPerFact: { label: "People who may hold one fact", note: "Past it, no one else learns that fact from the knowledge step.", step: 1 },
   factsPerTurn: { label: "New facts a turn", note: "The most new facts one turn's knowledge step records, each saying why it matters and to whom; most turns need none.", step: 1 },
@@ -199,7 +199,7 @@ const LIMIT_FIELD: Record<KnowledgeLimit, { label: string; note: string; step: n
 };
 
 /** The limits Knowledge shows open; the rest fold under More limits. */
-const OPEN_LIMITS: readonly KnowledgeLimit[] = ["mindTokens", "narratorTokens", "perPerson", "stepTokens"];
+const OPEN_LIMITS: readonly KnowledgeLimit[] = ["claimChars", "mindTokens", "narratorTokens", "perPerson", "stepTokens"];
 
 /** One knowledge limit: a whole number within its range (`knowledgeLimitRange`). */
 function KnowledgeLimitStepper(props: { limit: KnowledgeLimit; knowledge: KnowledgeSettings; busy: boolean; patch(patch: JsonObject): void }) {
@@ -214,6 +214,60 @@ function KnowledgeLimitRow(props: { limit: KnowledgeLimit; knowledge: KnowledgeS
       <KnowledgeLimitStepper limit={props.limit} knowledge={props.knowledge} busy={props.busy} patch={props.patch} />
       <Note>{LIMIT_FIELD[props.limit].note}</Note>
     </div>
+  );
+}
+
+/** Each length as Settings → Minds → Lengths names it: a text's most characters, or a list's most items. */
+const LENGTH_LABEL: Record<MindLengthKey, string> = {
+  monologue: "A mind's monologue",
+  depiction: "How they come across (depiction)",
+  intent: "What they mean to do next (intent)",
+  reaction: "Each reaction",
+  reactions: "Reactions a mind gives",
+  mood: "Mood",
+  interrupt: "Why they'd interrupt a time skip",
+  note: "Each memory note",
+  notes: "Notes a memory takes from a turn",
+  commitment: "Each commitment",
+  commitments: "Commitments a memory makes",
+  plan: "What each plan is",
+  plans: "Plans a memory makes",
+  told: "Each thing they told someone",
+  tolds: "Things told a memory records",
+  summary: "Their summary",
+  reason: "Why a time-skip moment is worth stopping at",
+  gmIntent: "Your intent for a character (GM → Minds)",
+};
+
+/**
+ * Settings → Minds → Lengths (DESIGN §24.5): how long each text the minds steps write may be and how
+ * many of each list an answer gives. Each is told to its step's model, so it writes to it.
+ */
+function LengthsSection(props: { lengths: MindLengths; busy: boolean; patch(patch: JsonObject): void }) {
+  const row = (key: MindLengthKey) => {
+    const [min, max] = mindLengthRange(key);
+    const label = `${LENGTH_LABEL[key]} (${isListCount(key) ? "at most" : "characters"})`;
+    return (
+      <div key={key} class="lre-minds-override" data-lre-minds-length={key}>
+        <NumberStepper label={label} value={props.lengths[key]} min={min} max={max} step={isListCount(key) ? 1 : 50} integer disabled={props.busy} onChange={(value) => props.patch(mindsLengthPatch(key, value))} />
+        {props.lengths[key] !== MIND_LENGTH_DEFAULTS[key] ? <span class="lre-minds-note">Default {MIND_LENGTH_DEFAULTS[key].toLocaleString("en-US")}</span> : null}
+      </div>
+    );
+  };
+  return (
+    <Section title="Lengths">
+      <div class="lre-minds-body" data-lre-minds-lengths="">
+        <Note>How long each text the minds steps write may be, and how many of each list one answer gives. Each step's model is told these after its answer format, whoever worded it, so it writes to them. A longer text is cut at a word, ending in …, and a longer list loses its last items; the call's Context panel entry and your diagnostics log say what was cut and that this is where to raise it. The lengths hold what you write in GM → Minds too, which is refused past them, never cut. Changing one never changes what a past turn recorded.</Note>
+        <div class="lre-minds-group">
+          <span class="lre-minds-group-title">Each text, at most</span>
+          <div class="lre-minds-overrides">{MIND_TEXT_LENGTHS.map(row)}</div>
+        </div>
+        <div class="lre-minds-group">
+          <span class="lre-minds-group-title">Each list, at most</span>
+          <div class="lre-minds-overrides">{MIND_LIST_COUNTS.map(row)}</div>
+        </div>
+      </div>
+    </Section>
   );
 }
 
@@ -458,6 +512,7 @@ export function MindsSection(props: { minds: MindsSettings; patch(patch: JsonObj
         </>
       ) : null}
       <KnowledgeSection knowledge={minds.knowledge} busy={busy} patch={props.patch} />
+      <LengthsSection lengths={minds.lengths} busy={busy} patch={props.patch} />
       <Section title="Memory">
         <div class="lre-minds-body">
           <Note>Each world sets how its characters remember (Build → World → Minds); what you set here wins in every world.</Note>

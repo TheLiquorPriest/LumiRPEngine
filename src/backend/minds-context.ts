@@ -43,7 +43,7 @@ import { dayPlan } from "../packs/castlife/core/index";
 import { usualRoutine } from "../packs/castlife/core/usual";
 import { routineRole } from "../packs/castlife/core/routines";
 import { intentLines, intentOf } from "../packs/minds/core/intent";
-import { holdingLine, latestTurns, rankedHoldings } from "../packs/minds/core/knowledge";
+import { factText, holdingLine, latestTurns, rankedHoldings } from "../packs/minds/core/knowledge";
 import { worldSecrets } from "../packs/minds/core/knowledge-section";
 import { faded, openCommitments, openPlans, readCharacter, readKnowledge, readSlice, salienceNow } from "../packs/minds/core/state";
 import { planMemoryLines } from "../packs/orgs/core/agenda";
@@ -331,7 +331,7 @@ export function heldKnowledge(scope: Pick<MindScope, "reg" | "world" | "state" |
   const here = place === null ? [] : Object.keys(state.entities).filter((id) => placeOfEntity(state, id) === place);
   const play = { here: [...here, ...(place ? [place] : [])], recent: latestTurns(slice, settings.inPlayTurns), secret: worldSecrets(scope.reg.context(world, state)) };
   const words = { texts: settings, threshold: knowledgeThreshold(slice), nameOf: (id: EntityId) => (id === world.pov ? povLabel(scope) : nameOf(scope, id)) };
-  const lines = rankedHoldings(slice, who, play).map((h) => `- ${holdingLine(applyMarks(h.fact?.claim ?? h.id, { world, state }, `holder:${who}`), h.holding, words)}`);
+  const lines = rankedHoldings(slice, who, play).map((h) => `- ${holdingLine(applyMarks(factText(world, h.fact, h.id), { world, state }, `holder:${who}`), h.holding, words)}`);
   const kept = linesWithin(lines, settings.mindTokens);
   return kept.length > 0 ? block(knowledgeText(settings, "mindTitle"), [knowledgeText(settings, "mindLead"), ...kept]) : "";
 }

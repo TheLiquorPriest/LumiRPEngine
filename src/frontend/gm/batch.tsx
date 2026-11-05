@@ -13,7 +13,7 @@ import { useId, useState } from "preact/hooks";
 import type { DomainId, EntityId, Level, PlaceId, TierId } from "../../shared/ids";
 import { LEVEL_LABEL } from "../../shared/ids";
 import type { Fidelity, MindApproach } from "../../shared/minds";
-import { FIDELITIES, MIND_APPROACHES, MIND_TEXT_CAPS } from "../../shared/minds";
+import { FIDELITIES, MIND_APPROACHES } from "../../shared/minds";
 import type { PartyTier } from "../../shared/party";
 import { isPartyTier, PARTY_OUT, PARTY_RELATION, PARTY_TIERS, TIER_LABELS, TIER_NOUNS } from "../../shared/party";
 import type { RoutineRole } from "../../shared/routines";
@@ -53,15 +53,15 @@ export const BLANK_CHOICES: BatchChoices = { tier: null, domain: null, level: nu
 
 type Card = BulkChange["kind"];
 
-/** Each card's change as chosen so far: null until its every control has a value (an intent over its length cap stays null). */
-export function batchChanges(c: BatchChoices): Record<Card, BulkChange | null> {
+/** Each card's change as chosen so far: null until its every control has a value (an intent longer than `intentMax`, the user's length for one, stays null). */
+export function batchChanges(c: BatchChoices, intentMax: number): Record<Card, BulkChange | null> {
   const intent: BulkChange | null = c.text.trim() === "" && c.approach === null ? null : { kind: "intent", text: c.text, approach: c.approach === "mind" || c.approach === null ? null : c.approach };
   return {
     tier: c.tier === null ? null : { kind: "tier", tier: c.tier },
     level: c.domain === null || c.level === null ? null : { kind: "level", domain: c.domain, level: c.level === "tier" ? null : c.level },
     role: c.role === null ? null : { kind: "role", role: c.role === "world" ? null : c.role },
     pin: c.pin === null ? null : { kind: "pin", level: c.pin === "score" ? null : c.pin },
-    intent: intent && intentText(c.text) !== null ? intent : null,
+    intent: intent && intentText(c.text, intentMax) !== null ? intent : null,
     move: c.to === null ? null : { kind: "move", to: c.to },
     party: c.party === null ? null : { kind: "party", tier: c.party === PARTY_OUT ? null : c.party },
   };
@@ -161,7 +161,7 @@ export function BatchPage(props: { editor: BulkEditor; ids: readonly EntityId[];
   const [outcome, setOutcome] = useState<string | null>(null);
   const field = { tier: useId(), domain: useId(), level: useId(), role: useId(), pin: useId(), text: useId(), approach: useId(), place: useId(), party: useId() };
   const choose = (patch: Partial<BatchChoices>) => setChoices((c) => ({ ...c, ...patch }));
-  const changes = batchChanges(choices);
+  const changes = batchChanges(choices, gm.minds.lengths.gmIntent);
   const everything: Record<Card, boolean> = { tier: choices.tierAll, level: choices.levelAll, role: false, pin: false, intent: false, move: false, party: false };
   // Who each card reaches as it stands: the "Now" line and Apply's count read them before anything is chosen.
   const reach = (card: Card) => bulkTargets(editor, ids, card, everything[card]);
@@ -293,8 +293,8 @@ export function BatchPage(props: { editor: BulkEditor; ids: readonly EntityId[];
           now={chars.length > 0 ? mixOf(chars.map((c) => (c.intent ? "with your intent" : "without your intent"))) : null}
           {...card("intent")}
         >
-          <Field label="What they mean to do" for={field.text} help={`${choices.text.length} / ${MIND_TEXT_CAPS.gmIntent}`}>
-            <textarea id={field.text} class="lre-input lre-gm-prose" rows={3} maxLength={MIND_TEXT_CAPS.gmIntent} value={choices.text} onInput={(event) => choose({ text: event.currentTarget.value })} />
+          <Field label="What they mean to do" for={field.text} help={`${choices.text.length} / ${gm.minds.lengths.gmIntent}`}>
+            <textarea id={field.text} class="lre-input lre-gm-prose" rows={3} maxLength={gm.minds.lengths.gmIntent} value={choices.text} onInput={(event) => choose({ text: event.currentTarget.value })} />
           </Field>
           <Field label="How they go about it" for={field.approach}>
             <select id={field.approach} class="lre-input" value={choices.approach ?? ""} onChange={(event) => choose({ approach: event.currentTarget.value === "mind" ? "mind" : (MIND_APPROACHES.find((a) => a === event.currentTarget.value) ?? null) })}>

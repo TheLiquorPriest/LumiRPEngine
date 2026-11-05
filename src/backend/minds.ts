@@ -22,8 +22,8 @@ import type { ChatId, EntityId, MessageId, UserId } from "../shared/ids";
 import type { JsonObject, JsonValue } from "../shared/json";
 import { isRecord } from "../shared/json";
 import type { LedgerEvent } from "../shared/ledger";
-import type { CommitmentKind, FactId, Fidelity, KnowledgeProposal, KnowledgeSettings, Limit, MemoryEventData, MindCallTrace, MindCommitment, MindEventData, MindMoment, MindNote, MindPlan, MindPurpose, MindsRunEntry, MindsSettings, PinnedTrace, PlanKind, PresenceEventData } from "../shared/minds";
-import { COMMITMENT_KINDS, effectiveMemory, knowledgeAnswerFormat, knowledgeThreshold, knowledgeTracked, MEMORY_ANSWER_V2, MIND_ANSWER_FORMATS, MIND_PROMPT_DEFAULTS, MIND_TEXT_CAPS, MINDS_EVENTS, MINDS_SLOT, parseFactId, PLAN_KINDS, PLAN_PRIORITY, sharedPlanId, sharesPlan, worldMindsOf, worldMindTemplate } from "../shared/minds";
+import type { CommitmentKind, FactId, Fidelity, KnowledgeProposal, KnowledgeSettings, Limit, MemoryEventData, MindCallTrace, MindCommitment, MindCuts, MindEventData, MindLengths, MindMoment, MindNote, MindPlan, MindPurpose, MindsRunEntry, MindsSettings, PinnedTrace, PlanKind, PresenceEventData } from "../shared/minds";
+import { answerLengths, COMMITMENT_KINDS, cutsNote, effectiveMemory, knowledgeAnswerFormat, knowledgeThreshold, knowledgeTracked, MEMORY_ANSWER_V2, MIND_ANSWER_FORMATS, MIND_PROMPT_DEFAULTS, MINDS_EVENTS, MINDS_SLOT, parseFactId, PLAN_KINDS, PLAN_PRIORITY, sharedPlanId, sharesPlan, worldMindsOf, worldMindTemplate } from "../shared/minds";
 import type { ModelUseSettings, StepConfig, UserSettings } from "../shared/settings";
 import { helperCallOf, stepConfigOf } from "../shared/settings";
 import type { StepPurpose, WorldDoc } from "../shared/world";
@@ -42,7 +42,7 @@ import type { WorldState } from "../engine/state";
 import { findLeaks, loreGateReader, unrevealedSecrets } from "../engine/visibility";
 import { acts } from "../engine/life";
 import { Working } from "../engine/working";
-import { capText } from "../packs/minds/core/edit";
+import { capCounted, capText, firstCounted } from "../packs/minds/core/edit";
 import { fidelityOf, type MindPick, pickMinds, quietMind } from "../packs/minds/core/fidelity";
 import { faded, readCharacter, readSlice, salienceNow } from "../packs/minds/core/state";
 import { sectionsOf } from "./book";
@@ -152,13 +152,15 @@ export function ownMindPrompt(purpose: MindPurpose, world: WorldDoc, settings: M
 
 /**
  * A minds step's instructions: its own wording (`ownMindPrompt`), else the built-in; then the answer
- * format, which no prompt replaces. While the chat tracks knowledge (`knowing`), the memory step's
- * is the one without `told` (`MEMORY_ANSWER_V2`, DESIGN §24.11): telling is the knowledge step's.
+ * format, which no prompt replaces, and what each part of the answer may run to (`answerLengths`,
+ * Settings → Minds → Lengths), so the model writes to the lengths the engine keeps. While the chat
+ * tracks knowledge (`knowing`), the memory step's format is the one without `told`
+ * (`MEMORY_ANSWER_V2`, DESIGN §24.11): telling is the knowledge step's.
  */
 export function mindPrompt(purpose: MindPurpose, world: WorldDoc, settings: MindsSettings, vars: Readonly<Record<string, string>>, knowing = false): { text: string; source: MindCallTrace["prompt"] } {
   const own = ownMindPrompt(purpose, world, settings, vars);
   const format = purpose === "memory" && knowing ? MEMORY_ANSWER_V2 : purpose === "knowledge" ? knowledgeAnswerFormat(settings.knowledge) : MIND_ANSWER_FORMATS[purpose];
-  return { text: `${own?.text ?? renderTemplate(MIND_PROMPT_DEFAULTS[purpose], vars)}\n\n${format}`, source: own?.source ?? "default" };
+  return { text: `${own?.text ?? renderTemplate(MIND_PROMPT_DEFAULTS[purpose], vars)}\n\n${format}\n${answerLengths(purpose, settings, knowing)}`, source: own?.source ?? "default" };
 }
 
 /** The placeholders a minds step's prompt is filled with, for `who`: the world, the character, the clock, where they are, and the player character as they know them. */
@@ -208,13 +210,13 @@ function placeNamed(world: WorldDoc, name: string): string | null {
  * Only the memory step gives plans (DESIGN §24.8): it reads the turn as written. One with others in
  * it is theirs too (`sharesPlan`), under the id its people and start give it (`sharedPlanId`), so the
  * same plan in another's memory of the turn is the same plan; the answer giving it twice gives it once.
+ * At most the user's lengths' plans are read, each one's words cut to its length, as `cuts` counts.
  */
-export function plansFrom(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, who: EntityId, raw: JsonValue | undefined): MindPlan[] {
+export function plansFrom(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, who: EntityId, raw: JsonValue | undefined, lengths: Readonly<MindLengths>, cuts?: MindCuts): MindPlan[] {
   const now = state.clock;
   const out: MindPlan[] = [];
-  for (const [i, d] of (Array.isArray(raw) ? raw : []).slice(0, MIND_TEXT_CAPS.plans).entries()) {
-    if (!isRecord(d)) continue;
-    const what = capText(str(d.what), MIND_TEXT_CAPS.planWhat);
+  for (const [i, d] of firstCounted(Array.isArray(raw) ? raw.filter((x): x is JsonObject => isRecord(x)) : [], lengths.plans, cuts, "plans").entries()) {
+    const what = capCounted(str(d.what), lengths.plan, cuts, "plan");
     const when = isRecord(d.when) ? d.when : {};
     const from = localTime(world, now, str(when.from));
     if (what === "" || from === null) continue;
@@ -248,21 +250,23 @@ export function unheldPlans(state: Readonly<WorldState>, who: EntityId, plans: r
 }
 
 /**
- * A mind's answer as its event data, or null when it says nothing usable. Lengths are capped; under
- * `brief` the depiction is screened as Stance's cues are (an unrevealed secret, a name the POV can't
- * see), and one that fails is kept for the GM but `withheld` from the narrator. Any plans it gives are
- * ignored: a mind sees what its character knows, not where the story is going, so plans come only
- * from the memory step (DESIGN §24.8).
+ * A mind's answer as its event data, or null when it says nothing usable. Each text is cut to its
+ * length and each list to its count (`lengths`, Settings → Minds → Lengths, which the mind was told),
+ * as `cuts` counts; under `brief` the depiction is screened as Stance's cues are (an unrevealed
+ * secret, a name the POV can't see), and one that fails is kept for the GM but `withheld` from the
+ * narrator. Any plans it gives are ignored: a mind sees what its character knows, not where the
+ * story is going, so plans come only from the memory step (DESIGN §24.8).
  */
-export function mindData(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, who: EntityId, raw: JsonValue, moment: MindMoment, level: Fidelity, reason: string): MindEventData | null {
+export function mindData(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, who: EntityId, raw: JsonValue, moment: MindMoment, level: Fidelity, reason: string, lengths: Readonly<MindLengths>, cuts?: MindCuts): MindEventData | null {
   if (!isRecord(raw)) return null;
-  const monologue = capText(str(raw.monologue), MIND_TEXT_CAPS.monologue);
-  const intent = capText(str(raw.intent), MIND_TEXT_CAPS.intent);
-  const depiction = capText(str(raw.depiction), MIND_TEXT_CAPS.depiction);
+  const monologue = capCounted(str(raw.monologue), lengths.monologue, cuts, "monologue");
+  const intent = capCounted(str(raw.intent), lengths.intent, cuts, "intent");
+  const depiction = capCounted(str(raw.depiction), lengths.depiction, cuts, "depiction");
   if (monologue === "" && intent === "" && depiction === "") return null;
-  const reactions = (Array.isArray(raw.reactions) ? raw.reactions : []).map((r) => capText(str(r), MIND_TEXT_CAPS.reaction)).filter((r) => r !== "").slice(0, MIND_TEXT_CAPS.reactions);
-  const mood = capText(str(raw.mood), MIND_TEXT_CAPS.mood);
-  const interruptReason = moment.kind === "beat" && isRecord(raw.interrupt) ? capText(str(raw.interrupt.reason), MIND_TEXT_CAPS.interrupt) : "";
+  const said = (Array.isArray(raw.reactions) ? raw.reactions : []).map(str).filter((r) => r.trim() !== "");
+  const reactions = firstCounted(said, lengths.reactions, cuts, "reactions").map((r) => capCounted(r, lengths.reaction, cuts, "reaction"));
+  const mood = capCounted(str(raw.mood), lengths.mood, cuts, "mood");
+  const interruptReason = moment.kind === "beat" && isRecord(raw.interrupt) ? capCounted(str(raw.interrupt.reason), lengths.interrupt, cuts, "interrupt") : "";
   let withheld = false;
   if (worldMindsOf(world).secrecy === "brief" && depiction !== "") {
     const secrets = unrevealedSecrets(reg, world, state);
@@ -274,7 +278,8 @@ export function mindData(reg: Registry, world: WorldDoc, state: Readonly<WorldSt
     place: placeOfEntity(state, who),
     level,
     moment: moment.kind,
-    reason: capText(reason, MIND_TEXT_CAPS.reason),
+    // Why they thought now is the engine's words (a refresh, a beat's reason), never the model's.
+    reason: capText(reason, lengths.reason),
     monologue,
     depiction,
     intent,
@@ -405,11 +410,15 @@ export async function runMinds(deps: MindsDeps, input: RunMindsInput): Promise<R
       signal: input.signal,
       usage,
       failure,
-      check: (answer) => mindData(reg, world, state, who, answer, input.moment, level, reason) !== null,
+      check: (answer) => mindData(reg, world, state, who, answer, input.moment, level, reason, settings.minds.lengths) !== null,
       classic: () => deps.steps.helperJson("mind", prompt.text, context, config, userId, input.signal, { guidance, usage, failure, spared: input.spared === true }),
     });
     const ms = Math.round(performance.now() - t0);
-    const data = raw === null ? null : mindData(reg, world, state, who, raw, input.moment, level, reason);
+    // What the answer lost to the lengths it was told is said where the call's other cuts are, and in the host log.
+    const cuts: MindCuts = {};
+    const data = raw === null ? null : mindData(reg, world, state, who, raw, input.moment, level, reason, settings.minds.lengths, cuts);
+    const cut = data === null ? null : cutsNote(cuts, settings.minds);
+    if (cut !== null) deps.host.log("info", `[LumiRPEngine] mind for ${who}: ${cut}`, userId);
     const given = shownLore(report.pinned);
     const activated = shownLore(report.activated);
     const routineLeft = report.routine?.left ?? 0;
@@ -419,6 +428,7 @@ export async function runMinds(deps: MindsDeps, input: RunMindsInput): Promise<R
       ...fitNote("The lore the turn activated", report.activated, reads.activated.tokens),
       ...(routineLeft > 0 ? [`Their usual routine didn't all fit: ${routineLeft} line${routineLeft === 1 ? "" : "s"} left out, over the ${reads.routine.tokens} tokens a mind reads of it; raise that in Settings → Minds → What a mind reads.`] : []),
       ...(plansLeft > 0 ? [`Their plans didn't all fit: ${plansLeft} left out, over the ${reads.plans.tokens} tokens a mind reads of them; raise that in Settings → Minds → What a mind reads.`] : []),
+      ...(cut !== null ? [cut] : []),
     ];
     const routine = report.routine?.given ?? 0;
     const plans = report.plans?.given ?? 0;
@@ -660,34 +670,37 @@ export function turnPresence(reg: Registry, world: WorldDoc, input: Pick<PostMin
   };
 }
 
-/** The `memory` step's answer as event data; what they told reaches only `listeners`, who were with them for the turn (none while the chat tracks knowledge, whose step is telling's only writer). */
-function memoryData(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, who: EntityId, raw: JsonValue, listeners: readonly EntityId[]): MemoryEventData | null {
+/**
+ * The `memory` step's answer as event data, each text cut to its length and each list to its count
+ * (`lengths`, Settings → Minds → Lengths, which the step was told), as `cuts` counts; what they told
+ * reaches only `listeners`, who were with them for the turn (none while the chat tracks knowledge,
+ * whose step is telling's only writer).
+ */
+function memoryData(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, who: EntityId, raw: JsonValue, listeners: readonly EntityId[], lengths: Readonly<MindLengths>, cuts?: MindCuts): MemoryEventData | null {
   if (!isRecord(raw)) return null;
   const now = state.clock;
-  const notes: MindNote[] = (Array.isArray(raw.notes) ? raw.notes : []).slice(0, MIND_TEXT_CAPS.notes).flatMap((n, i) => {
-    if (!isRecord(n)) return [];
-    const text = capText(str(n.text), MIND_TEXT_CAPS.note);
+  // A list's items that say something (`text`), the first so many of them.
+  const saying = (v: JsonValue | undefined, text: (item: JsonObject) => JsonValue | undefined, max: number, key: keyof MindCuts): JsonObject[] => firstCounted((Array.isArray(v) ? v : []).filter((x): x is JsonObject => isRecord(x) && str(text(x)).trim() !== ""), max, cuts, key);
+  const notes: MindNote[] = saying(raw.notes, (n) => n.text, lengths.notes, "notes").map((n, i) => {
+    const text = capCounted(str(n.text), lengths.note, cuts, "note");
     const salience = typeof n.salience === "number" && Number.isFinite(n.salience) ? Math.min(5, Math.max(1, Math.round(n.salience))) : 3;
-    return text === "" ? [] : [{ id: `n_${hashParts("minds.note", who, String(now), String(i), text).slice(0, 10)}`, text, salience, at: now }];
+    return { id: `n_${hashParts("minds.note", who, String(now), String(i), text).slice(0, 10)}`, text, salience, at: now };
   });
-  const commitments: MindCommitment[] = (Array.isArray(raw.commitments) ? raw.commitments : []).slice(0, MIND_TEXT_CAPS.commitments).flatMap((x, i) => {
-    if (!isRecord(x)) return [];
-    const text = capText(str(x.text), MIND_TEXT_CAPS.commitment);
-    if (text === "") return [];
+  const commitments: MindCommitment[] = saying(raw.commitments, (x) => x.text, lengths.commitments, "commitments").map((x, i) => {
+    const text = capCounted(str(x.text), lengths.commitment, cuts, "commitment");
     const kind: CommitmentKind = (COMMITMENT_KINDS as readonly string[]).includes(str(x.kind)) ? (str(x.kind) as CommitmentKind) : "other";
     const withIds = [...new Set((Array.isArray(x.with) ? x.with : []).map((n) => personNamed(reg, world, state, str(n))).filter((n): n is EntityId => n !== null && n !== who))];
-    return [{ id: `c_${hashParts("minds.commitment", who, String(now), String(i), text).slice(0, 10)}`, kind, with: withIds, text, due: localTime(world, now, str(x.due)), status: "open" as const, made: now, closed: null }];
+    return { id: `c_${hashParts("minds.commitment", who, String(now), String(i), text).slice(0, 10)}`, kind, with: withIds, text, due: localTime(world, now, str(x.due)), status: "open" as const, made: now, closed: null };
   });
   const open = new Set(readCharacter(state, who).commitments.filter((x) => x.status === "open").map((x) => x.id));
   const resolved = (Array.isArray(raw.resolved) ? raw.resolved : []).flatMap((r): MemoryEventData["resolved"] => (isRecord(r) && open.has(str(r.id)) && (r.status === "kept" || r.status === "broken" || r.status === "released") ? [{ id: str(r.id), status: r.status }] : []));
-  const told = (Array.isArray(raw.told) ? raw.told : []).slice(0, MIND_TEXT_CAPS.tolds).flatMap((t) => {
-    if (!isRecord(t)) return [];
-    const what = capText(str(t.what), MIND_TEXT_CAPS.told);
+  // No telling is read while no one may be told (the chat tracks knowledge), so none is counted either.
+  const told = (listeners.length === 0 ? [] : saying(raw.told, (t) => t.what, lengths.tolds, "tolds")).flatMap((t) => {
     const to = [...new Set((Array.isArray(t.to) ? t.to : []).map((n) => personNamed(reg, world, state, str(n))).filter((n): n is EntityId => n !== null && n !== who && listeners.includes(n)))];
-    return what === "" || to.length === 0 ? [] : [{ to, what }];
+    return to.length === 0 ? [] : [{ to, what: capCounted(str(t.what), lengths.told, cuts, "told") }];
   });
-  const summary = capText(str(raw.summary), MIND_TEXT_CAPS.summary);
-  return { entity: who, at: now, notes, commitments, resolved, plans: plansFrom(reg, world, state, who, raw.plans), told, summary: summary === "" ? null : summary };
+  const summary = capCounted(str(raw.summary), lengths.summary, cuts, "summary");
+  return { entity: who, at: now, notes, commitments, resolved, plans: plansFrom(reg, world, state, who, raw.plans, lengths, cuts), told, summary: summary === "" ? null : summary };
 }
 
 /** How many characters' notes one turn folds at most: consolidation is upkeep, never the turn's work. */
@@ -803,8 +816,11 @@ async function knowledgeCalls(deps: MindsDeps, settings: UserSettings, config: S
         } else out.events.push(event);
       }
       out.proposals.push(...(checked?.proposals ?? []));
+      // What the answer's new facts lost to the longest claim it was told, said as a mind's cuts are.
+      const cut = checked ? cutsNote(checked.cuts, settings.minds) : null;
+      if (cut !== null) deps.host.log("info", `[LumiRPEngine] knowledge ${turn.messageId.slice(0, 8)}: ${cut}`, userId);
       // A scene's call thinks for no one; one person's is listed only when the player may know of them.
-      if (scene || traced(reg, world, state, batch[0] ?? "")) out.traces.push({ purpose: "knowledge", phase: ask.phase, who, level: null, outcome: checked ? "recorded" : "failed", ms, tokens: usage.tokens, prompt: prompt.source });
+      if (scene || traced(reg, world, state, batch[0] ?? "")) out.traces.push({ purpose: "knowledge", phase: ask.phase, who, level: null, outcome: checked ? "recorded" : "failed", ms, tokens: usage.tokens, prompt: prompt.source, ...(cut !== null ? { notes: [cut] } : {}) });
     });
     await checks;
   };
@@ -910,7 +926,7 @@ export async function postOpening(deps: MindsDeps, input: Omit<PostMindsInput, "
     if (!w.apply(event)) events.push(event);
   };
   if (minds) for (const data of presence.met ? [presence.said, presence.met] : [presence.said]) record({ type: MINDS_EVENTS.presence, data });
-  if (knowing) for (const event of await seedKnowledge(deps.host, { reg, world, state: w.state, settings: settings.minds.knowledge, userId })) record(event);
+  if (knowing) for (const event of await seedKnowledge(deps.host, { reg, world, state: w.state, userId })) record(event);
   return { events, state: w.state, presence };
 }
 
@@ -975,11 +991,14 @@ async function remember(deps: MindsDeps, input: PostMindsInput, settings: UserSe
               signal: input.signal,
               usage,
               failure: { reason: "" },
-              check: (answer) => memoryData(reg, world, w.state, id, answer, listeners) !== null,
+              check: (answer) => memoryData(reg, world, w.state, id, answer, listeners, settings.minds.lengths) !== null,
               classic: () => deps.steps.helperJson("memory", prompt.text, context, memoryConfig, userId, input.signal, { guidance, usage }),
             });
-        const data = raw === null ? null : memoryData(reg, world, w.state, id, raw, listeners);
-        if (traced(reg, world, state, id)) traces.push({ purpose: "memory", phase: "post", who: own(state.entities, id)?.name ?? id, level: levels.get(id) ?? "near", outcome: data ? "recorded" : "failed", ms: Math.round(performance.now() - t0), tokens: usage.tokens, prompt: prompt.source });
+        const cuts: MindCuts = {};
+        const data = raw === null ? null : memoryData(reg, world, w.state, id, raw, listeners, settings.minds.lengths, cuts);
+        const cut = data === null ? null : cutsNote(cuts, settings.minds);
+        if (cut !== null) deps.host.log("info", `[LumiRPEngine] memory for ${id}: ${cut}`, userId);
+        if (traced(reg, world, state, id)) traces.push({ purpose: "memory", phase: "post", who: own(state.entities, id)?.name ?? id, level: levels.get(id) ?? "near", outcome: data ? "recorded" : "failed", ms: Math.round(performance.now() - t0), tokens: usage.tokens, prompt: prompt.source, ...(cut !== null ? { notes: [cut] } : {}) });
         return data;
       })();
       return [id, task] as const;
@@ -1031,11 +1050,14 @@ async function remember(deps: MindsDeps, input: PostMindsInput, settings: UserSe
           signal,
           usage,
           failure: { reason: "" },
-          check: (answer) => isRecord(answer) && capText(str(answer.summary), MIND_TEXT_CAPS.summary) !== "",
+          check: (answer) => isRecord(answer) && str(answer.summary).trim() !== "",
           classic: () => deps.steps.helperJson("consolidate", prompt.text, asked, consolidateConfig, userId, signal, { guidance, usage }),
         });
-    const summary = isRecord(raw) ? capText(str(raw.summary), MIND_TEXT_CAPS.summary) : "";
-    const trace: MindCallTrace | null = traced(reg, world, state, id) ? { purpose: "consolidate", phase: "post", who: own(state.entities, id)?.name ?? id, level: levels.get(id) ?? "background", outcome: summary === "" ? "failed" : "recorded", ms: Math.round(performance.now() - t0), tokens: usage.tokens, prompt: prompt.source } : null;
+    const cuts: MindCuts = {};
+    const summary = isRecord(raw) ? capCounted(str(raw.summary), settings.minds.lengths.summary, cuts, "summary") : "";
+    const cut = summary === "" ? null : cutsNote(cuts, settings.minds);
+    if (cut !== null) deps.host.log("info", `[LumiRPEngine] consolidation for ${id}: ${cut}`, userId);
+    const trace: MindCallTrace | null = traced(reg, world, state, id) ? { purpose: "consolidate", phase: "post", who: own(state.entities, id)?.name ?? id, level: levels.get(id) ?? "background", outcome: summary === "" ? "failed" : "recorded", ms: Math.round(performance.now() - t0), tokens: usage.tokens, prompt: prompt.source, ...(cut !== null ? { notes: [cut] } : {}) } : null;
     return { event: summary === "" ? null : { type: MINDS_EVENTS.consolidated, data: { entity: id, at: now, notes: fold.map((n) => n.id), summary } }, trace };
   };
   const consolidations = due.map(({ id, fold }) => {

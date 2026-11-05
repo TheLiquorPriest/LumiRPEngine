@@ -71,8 +71,8 @@ export interface RoleAsk<O> {
   own?: Readonly<Record<string, string>>;
   /** What it reads besides its task text, as the classic step reads it (a minds step's context): after the task text. */
   data?: string;
-  /** Its answer's text (default `answer`), and that text's placeholders. */
-  answer?: { part: string; vars?: Readonly<Record<string, string>> };
+  /** Its answer's text (default `answer`), that text's placeholders, and what the engine adds after it whoever worded it (a minds step's lengths, `answerLengths`). */
+  answer?: { part: string; vars?: Readonly<Record<string, string>>; tail?: string };
   /** The world its tools' schemas are filled from; null for a task that gets none (a puzzle's answer, which only its call is told). */
   tools: WorldDoc | null;
   /** Where its tools note what lands with the reply's read (`ToolEnv.notes`): the Curator's; absent for every other task. */
@@ -147,7 +147,7 @@ export async function runRoleAgent<O>(rt: Runtime, ctx: TurnAgentCtx, ask: RoleA
     renderPrompt(roleTaskTextId(role, ask.sub, "task"), own, { ...ask.names, ...ask.vars }, ask.own),
     ask.data ?? "",
     sections === "" ? "" : renderPrompt(ROLES_TEXT.context, own, { ...ask.names, sections }),
-    renderPrompt(roleTaskTextId(role, ask.sub, answer), own, { ...ask.names, ...(ask.answer?.vars ?? {}) }),
+    [renderPrompt(roleTaskTextId(role, ask.sub, answer), own, { ...ask.names, ...(ask.answer?.vars ?? {}) }), ask.answer?.tail ?? ""].filter((t) => t.trim() !== "").join("\n"),
     // The main agent's words for this run (C10's `brief`), whole; none in the fixed pipeline.
     ctx.brief ?? "",
   ]

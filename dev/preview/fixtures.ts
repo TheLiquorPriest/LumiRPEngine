@@ -9,7 +9,7 @@ import { OFFSTAGE_DEFAULTS } from "../../src/shared/offstage";
 import type { AssistantProposalOp, AssistantView, ExtractionModeView, TraceRow, UpgradePreview, WorkspaceFileView } from "../../src/shared/protocol";
 import type { ChangeType, ExtractionType, UserSettings } from "../../src/shared/settings";
 import { AGENT_CHANGE_DEFAULTS, AGENT_CHANGE_TYPES, LORE_INDEX_DEFAULTS, NARRATOR_DEFAULTS, SETTINGS_DEFAULTS_REV } from "../../src/shared/settings";
-import { claimFactId, defaultMindsSettings, KNOWLEDGE_DEFAULTS, witnessRef } from "../../src/shared/minds";
+import { claimFactId, defaultMindsSettings, KNOWLEDGE_DEFAULTS, MIND_LENGTH_DEFAULTS, witnessRef } from "../../src/shared/minds";
 import { defaultTimeouts } from "../../src/shared/timeouts";
 import { hashJson } from "../../src/shared/hash";
 import type { AgentKnowledge } from "../../src/shared/agent-tools";
@@ -1028,6 +1028,7 @@ function gmMinds(): MindsGmView {
       pov: { entity: "pov", name: "Sam Rivera", holdings: [held(sale, { how: "guessed", by: null, evidence: [], since: { msg: null, at: 1890 }, belief: "uncertain", confidence: 0.35 })] },
       threshold,
     },
+    lengths: { ...MIND_LENGTH_DEFAULTS },
   };
 }
 

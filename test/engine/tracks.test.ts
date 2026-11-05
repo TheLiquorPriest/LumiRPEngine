@@ -203,7 +203,7 @@ describe("tracks", () => {
       const w = new Working(reg, wd, startState(wd));
       // The POV knows Dev, so a track Dev owns is known to them.
       expect(w.apply({ type: "link", rel: "knows", from: POV, to: "dev" })).toBeNull();
-      const seeded = await seedKnowledge(host, { reg, world: wd, state: w.state, settings: { claimChars: 400 }, userId: "u" });
+      const seeded = await seedKnowledge(host, { reg, world: wd, state: w.state, userId: "u" });
       return {
         lint: lintWorld(wd, reg).filter((i) => i.path.startsWith("tracks.butler.owner")).map((i) => i.code),
         seeded: JSON.stringify(seeded).includes("butler"),

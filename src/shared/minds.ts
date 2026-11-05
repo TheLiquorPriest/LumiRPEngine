@@ -426,7 +426,7 @@ export const KNOWLEDGE_BATCHES: readonly KnowledgeBatch[] = ["scene", "character
 /**
  * `UserSettings.minds.knowledge` (DESIGN §24.11, Settings → Minds → Knowledge): whether knowledge
  * is tracked, the confidence under which a holding is a suspicion, how the knowledge step asks, the
- * longest claim a fact keeps, the tokens a mind's own holdings, the narrator's Who knows what and
+ * longest claim the step writes, the tokens a mind's own holdings, the narrator's Who knows what and
  * the step's own context may take, and the user's own wording of its texts. Each limit applies when
  * a proposal is checked or a call is made, never in the fold, so changing one never changes a past
  * turn. A chat's own switch (GM → This chat) wins over `enabled`. No Model use preset sets any of it.
@@ -438,7 +438,12 @@ export interface KnowledgeSettings {
   batch: KnowledgeBatch;
   /** How many of the step's calls (one per character, `batch`) go out at once: 1 asks them one after another, each shown what the ones before it made; more ask together, each answer checked as it comes back, a fact said again in the same words (`claimKey`) being the one made first. */
   callsAtOnce: number;
-  /** The longest claim a fact is recorded with, in characters. */
+  /**
+   * The longest claim, and why it matters, the knowledge step writes for a fact, in characters: its
+   * model is told it (`answerLengths`), and a longer one is cut at a word, ending in "…". A fact of
+   * the world's own (seeded from its lore, its World Info, a stage's truth or a field) keeps its
+   * text whole, and one of an entry reads as the entry does now wherever it is read (`factText`).
+   */
   claimChars: number;
   /** What a mind reads of its own holdings, in tokens. */
   mindTokens: number;
@@ -461,7 +466,7 @@ export interface KnowledgeSettings {
   prompts: Record<string, string>;
 }
 
-export const KNOWLEDGE_DEFAULTS: Readonly<KnowledgeSettings> = Object.freeze({ enabled: true, threshold: 0.7, batch: "scene", callsAtOnce: 1, claimChars: 240, mindTokens: 400, narratorTokens: 600, stepTokens: 4000, factsPerChat: 512, holdersPerFact: 64, factsPerTurn: 3, learningsPerTurn: 24, inPlayTurns: 3, perPerson: 3, prompts: {} });
+export const KNOWLEDGE_DEFAULTS: Readonly<KnowledgeSettings> = Object.freeze({ enabled: true, threshold: 0.7, batch: "scene", callsAtOnce: 1, claimChars: 600, mindTokens: 1600, narratorTokens: 1600, stepTokens: 4000, factsPerChat: 512, holdersPerFact: 64, factsPerTurn: 3, learningsPerTurn: 24, inPlayTurns: 3, perPerson: 3, prompts: {} });
 
 /** The ranges knowledge settings are read within: only what keeps each meaningful (a threshold is a confidence, a claim has a character, no count is negative, at most 8 calls at once). */
 export const KNOWLEDGE_RANGES = { threshold: [0, 1], claimChars: [1, Number.MAX_SAFE_INTEGER], tokens: [0, Number.MAX_SAFE_INTEGER], count: [0, Number.MAX_SAFE_INTEGER], atOnce: [1, 8] } as const;
@@ -545,7 +550,87 @@ export function fillText(text: string, values: Readonly<Record<string, string>>)
   return text.replace(/\{\{(\w+)\}\}/g, (whole, key: string) => (hasOwn(values, key) ? (values[key] ?? whole) : whole));
 }
 
-/** `UserSettings.minds` (DESIGN §24.6). A named Model use preset sets everything here but `reads`, `memory`, `prompts` and `knowledge`. */
+/**
+ * How long each text the minds steps write may be, in characters, and how many items each list of
+ * one answer may hold (DESIGN §24.5, Settings → Minds → Lengths): the user's own, so no Model use
+ * preset sets them. A step's model is told those its answer has, after its answer format whoever
+ * worded that (`answerLengths`), so it writes to them; a longer text is cut at a word, ending in
+ * "…", a longer list loses its last items, and the call's trace and the host log say what was cut
+ * (`cutsNote`). The texts' lengths bound what the GM writes in GM → Minds too, where a longer one is
+ * refused, never cut. Each applies when an answer or an edit is checked, never in the fold, so
+ * changing one never changes what a past turn recorded.
+ */
+export interface MindLengths {
+  /** A mind's private reasoning (the mind step). */
+  monologue: number;
+  /** How a mind comes across: behaviour anyone present could see. */
+  depiction: number;
+  /** What a mind means to do next. */
+  intent: number;
+  /** Each of a mind's conditional reactions, and how many one mind gives. */
+  reaction: number;
+  reactions: number;
+  /** A mind's mood. */
+  mood: number;
+  /** Why a mind at a time skip's beat interrupts the skip. */
+  interrupt: number;
+  /** Each memory note, and how many one memory of a turn takes (the memory step). */
+  note: number;
+  notes: number;
+  /** Each commitment, and how many one memory makes. */
+  commitment: number;
+  commitments: number;
+  /** What each plan is, and how many one memory makes. */
+  plan: number;
+  plans: number;
+  /** Each thing a memory says its character told someone, and how many. */
+  told: number;
+  tolds: number;
+  /** A character's summary, as a memory rewrites it and consolidation folds notes into it. */
+  summary: number;
+  /** Why each moment the time-skip step proposes is worth stopping at. */
+  reason: number;
+  /** What the GM means a character to do now, in the GM's own words (GM → Minds). */
+  gmIntent: number;
+}
+
+export type MindLengthKey = keyof MindLengths;
+
+/** The texts `MindLengths` sets, in characters, in the order Settings lists them. */
+export const MIND_TEXT_LENGTHS = ["monologue", "depiction", "intent", "reaction", "mood", "interrupt", "note", "commitment", "plan", "told", "summary", "reason", "gmIntent"] as const satisfies readonly MindLengthKey[];
+
+/** The lists `MindLengths` caps, by how many items one answer may hold. */
+export const MIND_LIST_COUNTS = ["reactions", "notes", "commitments", "plans", "tolds"] as const satisfies readonly MindLengthKey[];
+
+/** Each length unless the user sets it. */
+export const MIND_LENGTH_DEFAULTS: Readonly<MindLengths> = Object.freeze({ monologue: 2000, depiction: 1000, intent: 600, reaction: 300, reactions: 4, mood: 60, interrupt: 400, note: 600, notes: 4, commitment: 400, commitments: 3, plan: 300, plans: 4, told: 400, tolds: 3, summary: 1800, reason: 300, gmIntent: 1200 });
+
+/** What each may be set to: a text from 1 to 100,000 characters, a list from 1 to 64 items (the most notes the state keeps, `MINDS_KEEP`). */
+export const MIND_LENGTH_RANGES = { text: [1, 100_000], count: [1, 64] } as const;
+
+/** Whether a length is how many items a list holds rather than how many characters a text has. */
+export function isListCount(key: MindLengthKey): boolean {
+  return (MIND_LIST_COUNTS as readonly string[]).includes(key);
+}
+
+/** Each length's range (`MIND_LENGTH_RANGES`). */
+export function mindLengthRange(key: MindLengthKey): readonly [number, number] {
+  return isListCount(key) ? MIND_LENGTH_RANGES.count : MIND_LENGTH_RANGES.text;
+}
+
+/** `UserSettings.minds.lengths` as the engine reads it: each a whole number within its range, else `base`'s. */
+export function mindLengthsOf(raw: unknown, base: Readonly<MindLengths> = MIND_LENGTH_DEFAULTS): MindLengths {
+  const r = obj(raw);
+  const out: MindLengths = { ...base };
+  for (const key of [...MIND_TEXT_LENGTHS, ...MIND_LIST_COUNTS]) {
+    const [lo, hi] = mindLengthRange(key);
+    const v = r[key];
+    if (typeof v === "number" && Number.isSafeInteger(v) && v >= lo && v <= hi) out[key] = v;
+  }
+  return out;
+}
+
+/** `UserSettings.minds` (DESIGN §24.6). A named Model use preset sets everything here but `reads`, `memory`, `prompts`, `knowledge` and `lengths`. */
 export interface MindsSettings {
   enabled: boolean;
   /** How many Live minds run a turn, best score first; the rest wait for Near's triggers. */
@@ -568,9 +653,11 @@ export interface MindsSettings {
   skip: { maxBeats: Limit; maxMindsPerBeat: Limit };
   /** Knowledge (DESIGN §24.11): the user's own, so no preset sets it. */
   knowledge: KnowledgeSettings;
+  /** How long each text the minds steps write may be, and how many of each list (DESIGN §24.5): the user's own, so no preset sets it. */
+  lengths: MindLengths;
 }
 
-type PresetMinds = Omit<MindsSettings, "prompts" | "memory" | "reads" | "knowledge">;
+type PresetMinds = Omit<MindsSettings, "prompts" | "memory" | "reads" | "knowledge" | "lengths">;
 
 /** The minds part of each Model use preset (D25): Lean off; Standard 3 Live with notes for Live; Full no limit with notes for Live and Near. */
 export const MINDS_PRESETS: Readonly<Record<"lean" | "standard" | "full", Readonly<PresetMinds>>> = Object.freeze({
@@ -581,7 +668,7 @@ export const MINDS_PRESETS: Readonly<Record<"lean" | "standard" | "full", Readon
 
 /** A new user's minds settings: Standard's, reading what minds read by default. */
 export function defaultMindsSettings(preset: keyof typeof MINDS_PRESETS = "standard"): MindsSettings {
-  return { ...structuredClone(MINDS_PRESETS[preset]) as PresetMinds, reads: structuredClone(DEFAULT_MIND_READS), memory: {}, prompts: {}, knowledge: structuredClone(KNOWLEDGE_DEFAULTS) };
+  return { ...structuredClone(MINDS_PRESETS[preset]) as PresetMinds, reads: structuredClone(DEFAULT_MIND_READS), memory: {}, prompts: {}, knowledge: structuredClone(KNOWLEDGE_DEFAULTS), lengths: { ...MIND_LENGTH_DEFAULTS } };
 }
 
 /** Kept equal to `defaultMindsSettings()`: what Settings shows as the defaults. */
@@ -720,6 +807,7 @@ export function mindsSettingsOf(raw: unknown, base: Readonly<MindsSettings> = MI
     prompts: isRecord(m.prompts) ? prompts : { ...base.prompts },
     skip: { maxBeats: limitIn(skip.maxBeats, 0, 200, base.skip.maxBeats), maxMindsPerBeat: limitIn(skip.maxMindsPerBeat, 0, 64, base.skip.maxMindsPerBeat) },
     knowledge: knowledgeSettingsOf(m.knowledge, base.knowledge),
+    lengths: mindLengthsOf(m.lengths, base.lengths),
   };
 }
 
@@ -944,29 +1032,6 @@ export type MindsSlice = {
 /** The most the state keeps; beyond, the oldest go first (the fold's hard bounds, whatever the settings show). */
 export const MINDS_KEEP = { notes: 64, openCommitments: 48, closedCommitments: 16, openPlans: 24, closedPlans: 16, witness: 48, presence: 400 } as const;
 
-/** The longest each piece of model text is kept, in characters (DESIGN §24.5); a longer one is cut at a word. */
-export const MIND_TEXT_CAPS = {
-  monologue: 1200,
-  depiction: 600,
-  intent: 300,
-  /** The GM's intent for a character, in the GM's own words. */
-  gmIntent: 600,
-  reaction: 200,
-  reactions: 4,
-  plans: 4,
-  planWhat: 160,
-  mood: 40,
-  interrupt: 200,
-  note: 300,
-  notes: 4,
-  commitment: 240,
-  commitments: 3,
-  summary: 900,
-  told: 240,
-  tolds: 3,
-  reason: 160,
-} as const;
-
 /** A plan as a model writes it: names and local times, which the backend resolves to ids and clock minutes. */
 export interface PlanDraft {
   what: string;
@@ -1033,12 +1098,14 @@ export const FACT_TRUTHS: readonly FactTruth[] = ["true", "false", "open"];
 
 /**
  * One thing someone can know, held once in the minds slice (`minds.fact`): its id says where it
- * lives, never copying it; a short claim the narrator can read; the ids it is about (relevance only,
- * never who knows); and its truth. A claim made in play keeps its source, and why it matters and to
- * whom, as the knowledge step said it (`matters`, GM data: GM → Minds shows it; an older claim has
- * none); a book entry's keeps the hash of the text it was read from (`textHash`), so a change to the
- * entry shows. How long a claim may be is a setting (`KnowledgeSettings.claimChars`), applied when one
- * is proposed, never here.
+ * lives; its claim, what the narrator and the minds read; the ids it is about (relevance only, never
+ * who knows); and its truth. A claim made in play keeps its source, and why it matters and to whom,
+ * as the knowledge step said it (`matters`, GM data: GM → Minds shows it; an older claim has none);
+ * a book entry's keeps the hash of the text it was read from (`textHash`), so a change to the entry
+ * shows. A claim the knowledge step writes is as long as the user lets one be
+ * (`KnowledgeSettings.claimChars`), applied when it is proposed, never here; a fact of the world's
+ * own keeps its entry's text whole, and wherever the world still holds that entry it reads as the
+ * entry does now (`factText`), so one recorded cut by an earlier build reads whole too.
  */
 export type KnowledgeFact = {
   id: FactId;
@@ -1469,7 +1536,8 @@ export interface MindsGmCharacter {
  * One holding as GM → Minds shows it (DESIGN §24.11): the fact's claim, kind and truth, why it
  * matters and to whom when the knowledge step said so, who told them by name, since when in words,
  * whether it is a suspicion (under the threshold), whom it is kept from by name, and its evidence,
- * each fact by its claim and each witness entry by its line.
+ * each fact by its claim and each witness entry by its line. A fact of the world's own shows its
+ * entry whole (`factText`).
  */
 export type MindsGmHolding = Holding & {
   fact: FactId;
@@ -1494,7 +1562,7 @@ export interface MindsGmKnowledge {
   threshold: number;
 }
 
-/** `GmView.minds`: the chat's minds as the GM sees them; `enabled` is the user's setting. */
+/** `GmView.minds`: the chat's minds as the GM sees them; `enabled` and `lengths` are the user's settings. */
 export interface MindsGmView {
   enabled: boolean;
   secrecy: MindsSecrecy;
@@ -1504,6 +1572,8 @@ export interface MindsGmView {
   /** Every person but the POV, closest on the ladder first. */
   characters: MindsGmCharacter[];
   knowledge: MindsGmKnowledge;
+  /** How long what the GM writes here may be, as the minds steps' own (Settings → Minds → Lengths). */
+  lengths: MindLengths;
 }
 
 /**
@@ -1559,7 +1629,7 @@ export interface MindCallTrace {
   plans?: number;
   /** How many of the chat's latest messages it was given (Recent chat, DESIGN §24.5); absent: none. */
   history?: number;
-  /** What the player should know of how it went: lore or routine cut or left out over what a mind reads of it, and why. */
+  /** What the player should know of how it went: lore or routine cut or left out over what a mind reads of it, or its answer cut to the lengths it was told (`cutsNote`), and why. */
   notes?: string[];
 }
 
@@ -1655,20 +1725,24 @@ export const MIND_PROMPT_DEFAULTS: Readonly<Record<MindPurpose, string>> = Objec
 export const KNOWLEDGE_ANSWER_SHAPE =
   'Answer with JSON only: {"facts": [{"ref": "n1", "claim": "...", "matters": "why it matters, and to whom", "about": ["a name"], "truth": "true"}], "learned": [{"fact": "a fact id or n1", "how": "witnessed", "missed": ["a name"], "keptFrom": ["a name"]}, {"fact": "a fact id or n2", "how": "told", "who": ["a name"], "by": "a name", "keptFrom": ["a name"]}], "inferred": [{"who": "a name", "fact": "a fact id or n1", "confidence": 0.5, "evidence": ["a fact id or a witness ref"], "belief": "true"}], "doubted": [{"who": "a name", "fact": "a fact id", "confidence": 0.3, "belief": "uncertain"}]}';
 
-/** Each minds step's answer: the JSON the engine reads, appended after the instructions whoever wrote them. */
+/**
+ * Each minds step's answer: the JSON the engine reads, appended after the instructions whoever wrote
+ * them, then what each part may run to (`answerLengths`), which the lengths in Settings say, so no
+ * format words a length or a count of its own.
+ */
 export const MIND_ANSWER_FORMATS: Readonly<Record<MindPurpose, string>> = Object.freeze({
   mind: [
     'Answer with JSON only: {"monologue": "...", "depiction": "...", "intent": "...", "reactions": ["..."], "mood": "...", "interrupt": {"reason": "..."}}',
-    "- monologue: their private reasoning in the first person, at most six sentences.",
+    "- monologue: their private reasoning in the first person.",
     "- depiction: how they come across right now, as behaviour anyone present could see (posture, tone, what they do). Never a secret, an unspoken reason or a thought.",
     "- intent: what they mean to do next, in one sentence.",
-    '- reactions: up to three short conditional reactions ("if pressed about the cellar, changes the subject").',
+    '- reactions: short conditional reactions ("if pressed about the cellar, changes the subject").',
     "- mood: one or two words.",
     "- interrupt: only when the moment is a beat inside a time skip and what they'd do now would interrupt the player character's skipped time (seeking them out, calling them). Leave it out otherwise.",
   ].join("\n"),
   memory: [
     'Answer with JSON only: {"notes": [{"text": "...", "salience": 3}], "commitments": [{"kind": "promise|debt|grudge|favour|plan|other", "with": ["a name"], "text": "...", "due": "YYYY-MM-DD HH:MM"}], "resolved": [{"id": "...", "status": "kept|broken|released"}], "plans": [], "told": [{"to": ["a name"], "what": "..."}], "summary": "..."}',
-    "- notes: at most three things they will remember, in their own perspective; salience 1 (passing) to 5 (unforgettable).",
+    "- notes: the things they will remember, in their own perspective; salience 1 (passing) to 5 (unforgettable).",
     "- commitments: promises, debts, grudges, favours and plans with someone that this turn made; due only when a time was set.",
     "- resolved: their open commitments (listed with ids) that this turn kept, broke or released.",
     '- plans: only what this turn states they will do later: said aloud, agreed with someone, or scheduled in the story as written; never a guess at what they might do. Each {"what": "...", "kind": "errand|meet|visit|work|rest|leisure|pay|lend|other", "when": {"from": "YYYY-MM-DD HH:MM", "to": "YYYY-MM-DD HH:MM"}, "where": "a place", "with": ["a name"], "priority": 3, "amount": 20}, with local times; priority 1 (whenever it fits) to 5 (it must happen); kind pay or lend, with amount, when they mean to hand someone money, and no amount otherwise.',
@@ -1677,7 +1751,7 @@ export const MIND_ANSWER_FORMATS: Readonly<Record<MindPurpose, string>> = Object
     "Use empty lists for anything the turn didn't give.",
   ].join("\n"),
   skip: 'Answer with JSON only: {"beats": [{"at": "YYYY-MM-DD HH:MM", "reason": "..."}]}, at most five, in time order; an empty list when there are none.',
-  consolidate: 'Answer with JSON only: {"summary": "..."}: at most 900 characters of plain prose, in their own perspective.',
+  consolidate: 'Answer with JSON only: {"summary": "..."}: plain prose, in their own perspective.',
   knowledge: `${KNOWLEDGE_ANSWER_SHAPE}\n${KNOWLEDGE_TEXTS.stepAnswer}`,
 });
 
@@ -1696,3 +1770,83 @@ export const MEMORY_ANSWER_V2: string = MIND_ANSWER_FORMATS.memory
   .split("\n")
   .filter((line) => !line.startsWith("- told:"))
   .join("\n");
+
+/** A number as the lengths read it to a model and to the user: grouped, as "2,000". */
+function counted(n: number): string {
+  return n.toLocaleString("en-US");
+}
+
+/**
+ * What a minds step's answer may run to (DESIGN §24.5), as its model is told after the answer
+ * format, whoever worded that, so it writes to it: each text's most characters and each list's most
+ * items, from the user's lengths (Settings → Minds → Lengths) and, for the knowledge step, the
+ * longest claim it may write (`claimChars`). While the chat tracks knowledge (`knowing`) the memory
+ * step records no telling, so its line leaves `told` out. The engine keeps an answer to them,
+ * cutting a longer text at a word and a longer list after its last item kept.
+ */
+export function answerLengths(purpose: MindPurpose, settings: Pick<MindsSettings, "lengths" | "knowledge">, knowing = false): string {
+  const l = settings.lengths;
+  const list = (what: string, count: number, each: number, part = ""): string => `${what}, up to ${counted(count)}, each${part} ${counted(each)}`;
+  const parts =
+    purpose === "mind"
+      ? [`monologue ${counted(l.monologue)}`, `depiction ${counted(l.depiction)}`, `intent ${counted(l.intent)}`, list("reactions", l.reactions, l.reaction), `mood ${counted(l.mood)}`, `an interrupt's reason ${counted(l.interrupt)}`]
+      : purpose === "memory"
+        ? [list("notes", l.notes, l.note), list("commitments", l.commitments, l.commitment), list("plans", l.plans, l.plan, " one's what"), ...(knowing ? [] : [list("told", l.tolds, l.told)]), `summary ${counted(l.summary)}`]
+        : purpose === "consolidate"
+          ? [`summary ${counted(l.summary)}`]
+          : purpose === "skip"
+            ? [`each beat's reason ${counted(l.reason)}`]
+            : [`each claim ${counted(settings.knowledge.claimChars)}, and why it matters ${counted(settings.knowledge.claimChars)}`];
+  return `The engine keeps each part to its length in characters and cuts anything longer, so write within them: ${parts.join("; ")}.`;
+}
+
+/**
+ * What a minds step cut of one answer to the lengths it was told (`answerLengths`): of each text,
+ * how many it cut; of each list, how many items it left out past the most it keeps. A knowledge
+ * answer's claims and why they matter count under `claim` and `matters`.
+ */
+export type MindCuts = Partial<Record<MindLengthKey | "claim" | "matters", number>>;
+
+/** What each cut is called, one and many. */
+const CUT_NOUNS: Readonly<Record<keyof MindCuts, readonly [string, string]>> = {
+  monologue: ["monologue", "monologues"],
+  depiction: ["depiction", "depictions"],
+  intent: ["intent", "intents"],
+  reaction: ["reaction", "reactions"],
+  reactions: ["reaction", "reactions"],
+  mood: ["mood", "moods"],
+  interrupt: ["interrupt's reason", "interrupts' reasons"],
+  note: ["note", "notes"],
+  notes: ["note", "notes"],
+  commitment: ["commitment", "commitments"],
+  commitments: ["commitment", "commitments"],
+  plan: ["plan", "plans"],
+  plans: ["plan", "plans"],
+  told: ["thing told", "things told"],
+  tolds: ["thing told", "things told"],
+  summary: ["summary", "summaries"],
+  reason: ["beat's reason", "beats' reasons"],
+  gmIntent: ["intent", "intents"],
+  claim: ["claim", "claims"],
+  matters: ["reason a fact matters", "reasons facts matter"],
+};
+
+/**
+ * What a call's trace and the host log say an answer lost to the lengths it was told (DESIGN
+ * §24.5): each text cut, to how many characters, and each list's items left out, past how many,
+ * with where to raise them; null when it lost nothing.
+ */
+export function cutsNote(cuts: Readonly<MindCuts>, settings: Pick<MindsSettings, "lengths" | "knowledge">): string | null {
+  const keys = [...MIND_TEXT_LENGTHS, ...MIND_LIST_COUNTS, "claim", "matters"] as const;
+  const parts = keys.flatMap((key) => {
+    const n = cuts[key] ?? 0;
+    if (n <= 0) return [];
+    const noun = CUT_NOUNS[key][n === 1 ? 0 : 1];
+    if (key === "claim" || key === "matters") return [`${n} ${noun} cut to ${counted(settings.knowledge.claimChars)} characters`];
+    return [isListCount(key) ? `${n} ${noun} left out past the ${counted(settings.lengths[key])} kept` : `${n} ${noun} cut to ${counted(settings.lengths[key])} characters`];
+  });
+  if (parts.length === 0) return null;
+  // A knowledge answer's claims are Knowledge's limit to raise; every other cut is a length's.
+  const claims = keys.every((key) => (cuts[key] ?? 0) <= 0 || key === "claim" || key === "matters");
+  return `Its answer ran past the lengths it was told: ${parts.join("; ")}. Raise ${claims ? "A fact's claim in Settings → Minds → Knowledge" : "them in Settings → Minds → Lengths"} to keep more.`;
+}

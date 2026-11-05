@@ -8,6 +8,7 @@ import { editRequest, timelapseRequest } from "../../src/frontend/requests";
 import { toChain } from "../../src/backend/ledger-io";
 import { journalOf } from "../../src/packs/economy/core/journal";
 import type { MindsGmCharacter, MindsGmView } from "../../src/shared/minds";
+import { MIND_LENGTH_DEFAULTS } from "../../src/shared/minds";
 import type { EditOp } from "../../src/shared/protocol";
 import { Rig } from "../support/rig";
 
@@ -132,7 +133,7 @@ describe("GM view → Minds round trip", () => {
     await undoLatest(rig, chatId);
     expect(await intent()).toEqual({ text: AIM, approach: "proactive" });
     // Over its cap the form refuses it.
-    expect(intentOp("danny_okafor", { text: "x".repeat(601), approach: null })).toBeNull();
+    expect(intentOp("danny_okafor", { text: "x".repeat(MIND_LENGTH_DEFAULTS.gmIntent + 1), approach: null })).toBeNull();
 
     // A swipe keeps it, Re-narrate and Re-run alike, as it keeps a pin.
     rig.rt.setSwipeChoice(chatId, "renarrate");

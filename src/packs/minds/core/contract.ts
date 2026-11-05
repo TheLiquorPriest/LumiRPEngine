@@ -3,13 +3,13 @@
 
 import type { EntityId } from "../../../shared/ids";
 import type { LedgerEvent } from "../../../shared/ledger";
-import type { Fidelity, FidelityScore, FidelityTexts, KnowledgeSettings, MindEditOp, MindPlan } from "../../../shared/minds";
+import type { Fidelity, FidelityScore, FidelityTexts, KnowledgeSettings, MindEditOp, MindLengths, MindPlan } from "../../../shared/minds";
 import type { ReadContext, Rejection } from "../../../engine/registry";
 
 declare module "../../../engine/registry" {
   interface ServiceMap {
-    /** A GM minds control (`lre.edit`'s `mind_*` operations) as the events of its `fix` entry, or why it can't apply. */
-    "minds.edit": (ctx: ReadContext, op: MindEditOp) => LedgerEvent[] | Rejection;
+    /** A GM minds control (`lre.edit`'s `mind_*` operations) as the events of its `fix` entry, or why it can't apply; the GM's words are checked against `lengths`, the user's, when given. */
+    "minds.edit": (ctx: ReadContext, op: MindEditOp, lengths?: Readonly<MindLengths>) => LedgerEvent[] | Rejection;
   }
   interface QueryMap {
     /** A character's plans in force as kept (the memory step's and the GM's, never a mind's own: `planInForce`), open and settled, soonest first: the castlife planner lays open ones into their day, and settled ones for the times before they were settled. */

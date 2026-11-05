@@ -17,7 +17,7 @@ import type { BoundMode } from "../shared/ids";
 import type { StepPurpose } from "../shared/world";
 import { currentSignals } from "../shared/steps";
 import type { Limit } from "../shared/minds";
-import { defaultMindsSettings, isMindPurpose, migrateMindReads, MINDS_PRESETS, mindsSettingsOf } from "../shared/minds";
+import { defaultMindsSettings, isMindPurpose, KNOWLEDGE_DEFAULTS, migrateMindReads, MINDS_PRESETS, mindsSettingsOf } from "../shared/minds";
 import { defaultTimeouts, migrateTimeouts, TIMEOUTS, timeoutsOf } from "../shared/timeouts";
 import { JOB_SETTINGS_DEFAULTS, jobSettingsOf, GM_PAGE_DEFAULTS, gmPageSettingsOf, LORE_INDEX_DEFAULTS, loreBooksSettingOf, loreIndexSettingsOf, PERF_DEFAULTS, perfSettingsOf, stepConfigOf, SWIPE_DEFAULTS } from "../shared/settings";
 import { type AcceptanceConnection, agentSettingsOf, defaultAgentSettings } from "../shared/agent-settings";
@@ -170,6 +170,8 @@ const LIFTED = {
   finalReviewMs: 120_000,
   /** What a swipe did by default before revision 8 (`swipeDefault`), lifted to Re-narrate. */
   swipeDefault: "rerun",
+  /** The knowledge limits before revision 9, when claims, and what minds and the narrator read of them, were shorter: each old default with its new one (`KNOWLEDGE_DEFAULTS`). */
+  knowledge: { claimChars: [240, KNOWLEDGE_DEFAULTS.claimChars], mindTokens: [400, KNOWLEDGE_DEFAULTS.mindTokens], narratorTokens: [600, KNOWLEDGE_DEFAULTS.narratorTokens] } as const,
 };
 
 /**
@@ -236,6 +238,9 @@ function lifted(raw: Readonly<Record<string, unknown>>): JsonObject {
   const timeouts = isRecord(out.timeouts) ? out.timeouts : null;
   if (rev < 7 && timeouts?.finalReviewMs === LIFTED.finalReviewMs) timeouts.finalReviewMs = TIMEOUTS.finalReviewMs.defaultMs;
   if (rev < 8 && out.swipeDefault === LIFTED.swipeDefault) out.swipeDefault = "renarrate";
+  // Revision 9: a knowledge limit still at its old default rises with the longer claims and what reads them.
+  const knowledge = isRecord(out.minds) && isRecord(out.minds.knowledge) ? out.minds.knowledge : null;
+  if (rev < 9 && knowledge) for (const [key, [was, now]] of Object.entries(LIFTED.knowledge)) if (knowledge[key] === was) knowledge[key] = now;
   out.defaults = SETTINGS_DEFAULTS_REV;
   return out;
 }
@@ -668,8 +673,8 @@ function expandPresets(settings: UserSettings, patch: JsonObject): UserSettings 
       const template = before[purpose]?.template;
       if (template !== undefined) out.modelUse.steps[purpose] = { ...stepConfigOf(out.modelUse.steps, purpose), template };
     }
-    // A preset is a whole policy for minds too; what a mind reads, the user's own prompts, memory overrides and knowledge stay.
-    out.minds = { ...structuredClone(MINDS_PRESETS[modelUse]), reads: out.minds.reads, memory: out.minds.memory, prompts: out.minds.prompts, knowledge: out.minds.knowledge };
+    // A preset is a whole policy for minds too; what a mind reads, the user's own prompts, memory overrides, knowledge and lengths stay.
+    out.minds = { ...structuredClone(MINDS_PRESETS[modelUse]), reads: out.minds.reads, memory: out.minds.memory, prompts: out.minds.prompts, knowledge: out.minds.knowledge, lengths: out.minds.lengths };
   }
   return out;
 }

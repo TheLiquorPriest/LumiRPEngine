@@ -15,7 +15,7 @@ import { decodeContextView, sectionNote } from "../../src/frontend/play/context"
 import { mindTracesOf } from "../../src/backend/inspector-log";
 import type { JsonObject } from "../../src/shared/json";
 import type { KnownItem, MindCallTrace, MindSource, MindsSettings, WorldMindsConfig } from "../../src/shared/minds";
-import { DEFAULT_WORLD_MINDS, defaultMindsSettings, KNOWLEDGE_DEFAULTS, KNOWLEDGE_TEXTS, MIND_PROMPT_DEFAULTS, MIND_PROMPT_MAX, MIND_SOURCES, MINDS_PRESETS, worldMindsOf, worldMindTemplate } from "../../src/shared/minds";
+import { DEFAULT_WORLD_MINDS, defaultMindsSettings, KNOWLEDGE_DEFAULTS, KNOWLEDGE_TEXTS, MIND_LENGTH_DEFAULTS, MIND_PROMPT_DEFAULTS, MIND_PROMPT_MAX, MIND_SOURCES, MINDS_PRESETS, worldMindsOf, worldMindTemplate } from "../../src/shared/minds";
 import type { WorldDoc } from "../../src/shared/world";
 import { Rig } from "../support/rig";
 import { stepUpdatePatch } from "../../src/frontend/settings/steps";
@@ -261,7 +261,9 @@ describe("GM view → Minds controls", () => {
     expect(noteOp("dev", null, { text: "  Sam  lied\nabout the keys ", salience: "4" })).toEqual({ op: "mind_memory", entity: "dev", part: "note", id: null, value: { text: "Sam lied about the keys", salience: 4 } });
     expect(noteOp("dev", "n1", { text: "", salience: "3" })).toBeNull();
     expect(noteOp("dev", "n1", { text: "x", salience: "6" })).toBeNull();
-    expect(noteOp("dev", "n1", { text: "x".repeat(400), salience: "3" })).toBeNull();
+    // Longer than the note's length (Settings → Minds → Lengths) it is refused; within a raised one it is kept whole.
+    expect(noteOp("dev", "n1", { text: "x".repeat(MIND_LENGTH_DEFAULTS.note + 1), salience: "3" })).toBeNull();
+    expect(noteOp("dev", "n1", { text: "x".repeat(MIND_LENGTH_DEFAULTS.note + 1), salience: "3" }, MIND_LENGTH_DEFAULTS.note * 2)).toMatchObject({ value: { text: "x".repeat(MIND_LENGTH_DEFAULTS.note + 1) } });
   });
 
   test("a commitment needs text and someone else it is with", () => {

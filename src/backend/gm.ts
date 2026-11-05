@@ -72,7 +72,7 @@ const CHAT_PARTS: { [P in Exclude<GmPart, GmWorldPart>]: (head: GmHead) => GmVie
       return { id: write.id, kind: post ? post.kind : write.kind, lines: post && post.events.length > 0 ? authorLines(registry, render.world, render.state, post.events, 12) : [], ...(post?.by ? { by: post.by.label } : {}), waitsOn: waitsOn ?? "reply" };
     }),
   // Fidelity reads the chat's latest message and reply, as the next turn's would; a holding under the threshold the chat recorded reads as a suspicion, as on the player's screens.
-  minds: ({ observed, registry, render, minds }) => buildMindsGm(registry.context(render.world, render.state), latestTexts(observed), minds.enabled, effectiveMemory(render.world, minds), knowledgeThreshold(render.state.packs.minds)),
+  minds: ({ observed, registry, render, minds }) => buildMindsGm(registry.context(render.world, render.state), latestTexts(observed), minds.enabled, effectiveMemory(render.world, minds), knowledgeThreshold(render.state.packs.minds), minds.lengths),
 };
 
 export function buildGmView(core: LedgerCore, observed: readonly ChainMessage[], registry: Registry, minds: MindsSettings, waitsOn: QueuedOn | null): GmView | null {

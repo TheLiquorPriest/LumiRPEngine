@@ -13,7 +13,7 @@ import type { FinanceView } from "../../shared/finance";
 import { GM_IDS_MAX, GM_PARTS, GM_ROSTER, rosterEntity, type GmPart, type GmPartReply, type GmReadPart } from "../../shared/gm-parts";
 import type { EntityId } from "../../shared/ids";
 import { hasOwn } from "../../shared/json";
-import { DEFAULT_WORLD_MINDS, knowledgeThreshold } from "../../shared/minds";
+import { DEFAULT_WORLD_MINDS, knowledgeThreshold, MIND_LENGTH_DEFAULTS } from "../../shared/minds";
 import type { GmDuringTurn } from "../../shared/settings";
 import type { ChatStatus, GmEntity, GmRosterEntry, GmView } from "../../shared/state-view";
 import type { GmSection } from "../app";
@@ -78,7 +78,7 @@ const EMPTY: GmView = {
   edits: [],
   refused: [],
   held: [],
-  minds: { enabled: false, secrecy: DEFAULT_WORLD_MINDS.secrecy, now: 0, nowText: "", characters: [], knowledge: { facts: [], pov: null, threshold: knowledgeThreshold(undefined) } },
+  minds: { enabled: false, secrecy: DEFAULT_WORLD_MINDS.secrecy, now: 0, nowText: "", characters: [], knowledge: { facts: [], pov: null, threshold: knowledgeThreshold(undefined) }, lengths: MIND_LENGTH_DEFAULTS },
 };
 
 // Each roster entry's slim entity, made once, and every such entity, so a page can tell one.

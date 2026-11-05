@@ -6,7 +6,7 @@
 import type { EntityId, PlaceId } from "../../../shared/ids";
 import type { JsonObject } from "../../../shared/json";
 import type { CommitmentKind, CommitmentStatus, FactId, FactTruth, Fidelity, Holding, HoldingBelief, HoldingHow, MindApproach, MindCommitment, MindIntent, MindNote, MindPlan, MindRecord, MindsSecrecy, PlanKind, PlanStatus } from "../../../shared/minds";
-import { MIND_TEXT_CAPS, PLAN_PRIORITY } from "../../../shared/minds";
+import { MIND_LENGTH_DEFAULTS, PLAN_PRIORITY } from "../../../shared/minds";
 import type { EditOp } from "../../../shared/protocol";
 
 export const FIDELITY_LABEL: Record<Fidelity, string> = { live: "Live", near: "Near", far: "Far", background: "Background" };
@@ -50,11 +50,12 @@ export function deleteOp(entity: EntityId, part: "note" | "commitment" | "plan",
 
 /**
  * Sets what they mean to do now and how they go about it, both as the form holds them: blank text
- * and no approach clear the intent. Refused (null) when the text is over its cap.
+ * and no approach clear the intent. Refused (null) when the text is longer than `max`, the user's
+ * length for it (Settings → Minds → Lengths).
  */
-export function intentOp(entity: EntityId, draft: MindIntent): EditOp | null {
+export function intentOp(entity: EntityId, draft: MindIntent, max: number = MIND_LENGTH_DEFAULTS.gmIntent): EditOp | null {
   const text = draft.text.trim().replace(/\s+/g, " ");
-  return text.length > MIND_TEXT_CAPS.gmIntent ? null : { op: "mind_intent", entity, text, approach: draft.approach };
+  return text.length > max ? null : { op: "mind_intent", entity, text, approach: draft.approach };
 }
 
 function textIn(text: string, cap: number): string | null {
@@ -78,9 +79,9 @@ export function noteDraft(note?: Pick<MindNote, "text" | "salience">): NoteDraft
   return { text: note?.text ?? "", salience: String(note?.salience ?? 3) };
 }
 
-/** A note added (`id` null) or replaced: its text, within the note cap, and a salience of 1 to 5. */
-export function noteOp(entity: EntityId, id: string | null, draft: NoteDraft): EditOp | null {
-  const text = textIn(draft.text, MIND_TEXT_CAPS.note);
+/** A note added (`id` null) or replaced: its text, within `max` (the note length), and a salience of 1 to 5. */
+export function noteOp(entity: EntityId, id: string | null, draft: NoteDraft, max: number = MIND_LENGTH_DEFAULTS.note): EditOp | null {
+  const text = textIn(draft.text, max);
   const salience = wholeIn(draft.salience, 1, 5);
   if (text === null || salience === null) return null;
   return { op: "mind_memory", entity, part: "note", id, value: { text, salience } };
@@ -99,9 +100,9 @@ export function commitmentDraft(c?: Pick<MindCommitment, "kind" | "with" | "text
   return { kind: c?.kind ?? "promise", with: [...(c?.with ?? [])], text: c?.text ?? "", due: c?.due ?? null, status: c?.status ?? "open" };
 }
 
-/** A commitment added or replaced: its text within the cap, and someone it is with. */
-export function commitmentOp(entity: EntityId, id: string | null, draft: CommitmentDraft): EditOp | null {
-  const text = textIn(draft.text, MIND_TEXT_CAPS.commitment);
+/** A commitment added or replaced: its text within `max` (the commitment length), and someone it is with. */
+export function commitmentOp(entity: EntityId, id: string | null, draft: CommitmentDraft, max: number = MIND_LENGTH_DEFAULTS.commitment): EditOp | null {
+  const text = textIn(draft.text, max);
   const withIds = [...new Set(draft.with.filter((w) => w !== "" && w !== entity))];
   if (text === null || withIds.length === 0 || (draft.due !== null && !Number.isFinite(draft.due))) return null;
   const value: JsonObject = { kind: draft.kind, with: withIds, text, due: draft.due === null ? null : Math.round(draft.due), status: draft.status };
@@ -144,9 +145,9 @@ export function planLasts(draft: PlanFormDraft, minutes: number): PlanFormDraft 
   return { ...draft, to: draft.from + Math.round(minutes) };
 }
 
-/** A plan added or replaced: what it is within the cap, a start before its end, a priority of 1 to 5, and for a pay or lend plan an amount above zero and someone to hand it to. */
-export function planOp(entity: EntityId, id: string | null, draft: PlanFormDraft): EditOp | null {
-  const what = textIn(draft.what, MIND_TEXT_CAPS.planWhat);
+/** A plan added or replaced: what it is within `max` (the plan length), a start before its end, a priority of 1 to 5, and for a pay or lend plan an amount above zero and someone to hand it to. */
+export function planOp(entity: EntityId, id: string | null, draft: PlanFormDraft, max: number = MIND_LENGTH_DEFAULTS.plan): EditOp | null {
+  const what = textIn(draft.what, max);
   const ok = Number.isInteger(draft.from) && Number.isInteger(draft.to) && draft.from < draft.to && Number.isInteger(draft.priority) && draft.priority >= PLAN_PRIORITY.min && draft.priority <= PLAN_PRIORITY.max;
   const withIds = [...new Set(draft.with.filter((w) => w !== "" && w !== entity))];
   const money = isMoneyPlan(draft.kind);
