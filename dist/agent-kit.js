@@ -475,7 +475,7 @@ var DEFAULT_MIND_READS = Object.freeze({
   life: { on: false, tokens: "none" },
   knowledge: { on: true }
 });
-var KNOWLEDGE_DEFAULTS = Object.freeze({ enabled: true, threshold: 0.7, batch: "scene", callsAtOnce: 1, claimChars: 240, mindTokens: 400, narratorTokens: 600, stepTokens: 4000, factsPerChat: 512, holdersPerFact: 64, factsPerTurn: 3, learningsPerTurn: 24, inPlayTurns: 3, perPerson: 3, prompts: {} });
+var KNOWLEDGE_DEFAULTS = Object.freeze({ enabled: true, threshold: 0.7, batch: "scene", callsAtOnce: 1, claimChars: 600, mindTokens: 1600, narratorTokens: 1600, stepTokens: 4000, factsPerChat: 512, holdersPerFact: 64, factsPerTurn: 3, learningsPerTurn: 24, inPlayTurns: 3, perPerson: 3, prompts: {} });
 var KNOWLEDGE_RANGES = { threshold: [0, 1], claimChars: [1, Number.MAX_SAFE_INTEGER], tokens: [0, Number.MAX_SAFE_INTEGER], count: [0, Number.MAX_SAFE_INTEGER], atOnce: [1, 8] };
 var KNOWLEDGE_TEXTS = Object.freeze({
   mindTitle: "What you know",
@@ -533,13 +533,14 @@ function knowledgeText(settings, id) {
 function fillText(text, values) {
   return text.replace(/\{\{(\w+)\}\}/g, (whole2, key) => hasOwn(values, key) ? values[key] ?? whole2 : whole2);
 }
+var MIND_LENGTH_DEFAULTS = Object.freeze({ monologue: 2000, depiction: 1000, intent: 600, reaction: 300, reactions: 4, mood: 60, interrupt: 400, note: 600, notes: 4, commitment: 400, commitments: 3, plan: 300, plans: 4, told: 400, tolds: 3, summary: 1800, reason: 300, gmIntent: 1200 });
 var MINDS_PRESETS = Object.freeze({
   lean: { enabled: false, liveLimit: 3, nearRefresh: { scene: true, mention: true, turns: 6, minutes: 120 }, farRefreshMinutes: 1440, refreshLimit: 1, memoryLevels: [], tokens: 1200, skip: { maxBeats: 4, maxMindsPerBeat: 2 } },
   standard: { enabled: true, liveLimit: 3, nearRefresh: { scene: true, mention: true, turns: 6, minutes: 120 }, farRefreshMinutes: 1440, refreshLimit: 2, memoryLevels: ["live"], tokens: 2400, skip: { maxBeats: 6, maxMindsPerBeat: 3 } },
   full: { enabled: true, liveLimit: "none", nearRefresh: { scene: true, mention: true, turns: 4, minutes: 60 }, farRefreshMinutes: 720, refreshLimit: "none", memoryLevels: ["live", "near"], tokens: 4000, skip: { maxBeats: "none", maxMindsPerBeat: "none" } }
 });
 function defaultMindsSettings(preset = "standard") {
-  return { ...structuredClone(MINDS_PRESETS[preset]), reads: structuredClone(DEFAULT_MIND_READS), memory: {}, prompts: {}, knowledge: structuredClone(KNOWLEDGE_DEFAULTS) };
+  return { ...structuredClone(MINDS_PRESETS[preset]), reads: structuredClone(DEFAULT_MIND_READS), memory: {}, prompts: {}, knowledge: structuredClone(KNOWLEDGE_DEFAULTS), lengths: { ...MIND_LENGTH_DEFAULTS } };
 }
 var MINDS_DEFAULTS = Object.freeze(defaultMindsSettings());
 var PLAN_KINDS = ["errand", "meet", "visit", "work", "rest", "leisure", "pay", "lend", "other"];
@@ -557,26 +558,6 @@ var COMMITMENT_KINDS = ["promise", "debt", "grudge", "favour", "plan", "other"];
 var COMMITMENT_STATUSES = ["open", "kept", "broken", "released"];
 var MIND_APPROACHES = ["reactive", "proactive"];
 var MINDS_KEEP = { notes: 64, openCommitments: 48, closedCommitments: 16, openPlans: 24, closedPlans: 16, witness: 48, presence: 400 };
-var MIND_TEXT_CAPS = {
-  monologue: 1200,
-  depiction: 600,
-  intent: 300,
-  gmIntent: 600,
-  reaction: 200,
-  reactions: 4,
-  plans: 4,
-  planWhat: 160,
-  mood: 40,
-  interrupt: 200,
-  note: 300,
-  notes: 4,
-  commitment: 240,
-  commitments: 3,
-  summary: 900,
-  told: 240,
-  tolds: 3,
-  reason: 160
-};
 var FACT_KINDS = ["lore", "wi", "track", "field", "claim"];
 var FACT_TRUTHS = ["true", "false", "open"];
 var HOLDING_HOWS = ["authored", "witnessed", "told", "inferred", "guessed"];
@@ -722,17 +703,17 @@ var KNOWLEDGE_ANSWER_SHAPE = 'Answer with JSON only: {"facts": [{"ref": "n1", "c
 var MIND_ANSWER_FORMATS = Object.freeze({
   mind: [
     'Answer with JSON only: {"monologue": "...", "depiction": "...", "intent": "...", "reactions": ["..."], "mood": "...", "interrupt": {"reason": "..."}}',
-    "- monologue: their private reasoning in the first person, at most six sentences.",
+    "- monologue: their private reasoning in the first person.",
     "- depiction: how they come across right now, as behaviour anyone present could see (posture, tone, what they do). Never a secret, an unspoken reason or a thought.",
     "- intent: what they mean to do next, in one sentence.",
-    '- reactions: up to three short conditional reactions ("if pressed about the cellar, changes the subject").',
+    '- reactions: short conditional reactions ("if pressed about the cellar, changes the subject").',
     "- mood: one or two words.",
     "- interrupt: only when the moment is a beat inside a time skip and what they'd do now would interrupt the player character's skipped time (seeking them out, calling them). Leave it out otherwise."
   ].join(`
 `),
   memory: [
     'Answer with JSON only: {"notes": [{"text": "...", "salience": 3}], "commitments": [{"kind": "promise|debt|grudge|favour|plan|other", "with": ["a name"], "text": "...", "due": "YYYY-MM-DD HH:MM"}], "resolved": [{"id": "...", "status": "kept|broken|released"}], "plans": [], "told": [{"to": ["a name"], "what": "..."}], "summary": "..."}',
-    "- notes: at most three things they will remember, in their own perspective; salience 1 (passing) to 5 (unforgettable).",
+    "- notes: the things they will remember, in their own perspective; salience 1 (passing) to 5 (unforgettable).",
     "- commitments: promises, debts, grudges, favours and plans with someone that this turn made; due only when a time was set.",
     "- resolved: their open commitments (listed with ids) that this turn kept, broke or released.",
     '- plans: only what this turn states they will do later: said aloud, agreed with someone, or scheduled in the story as written; never a guess at what they might do. Each {"what": "...", "kind": "errand|meet|visit|work|rest|leisure|pay|lend|other", "when": {"from": "YYYY-MM-DD HH:MM", "to": "YYYY-MM-DD HH:MM"}, "where": "a place", "with": ["a name"], "priority": 3, "amount": 20}, with local times; priority 1 (whenever it fits) to 5 (it must happen); kind pay or lend, with amount, when they mean to hand someone money, and no amount otherwise.',
@@ -742,7 +723,7 @@ var MIND_ANSWER_FORMATS = Object.freeze({
   ].join(`
 `),
   skip: 'Answer with JSON only: {"beats": [{"at": "YYYY-MM-DD HH:MM", "reason": "..."}]}, at most five, in time order; an empty list when there are none.',
-  consolidate: 'Answer with JSON only: {"summary": "..."}: at most 900 characters of plain prose, in their own perspective.',
+  consolidate: 'Answer with JSON only: {"summary": "..."}: plain prose, in their own perspective.',
   knowledge: `${KNOWLEDGE_ANSWER_SHAPE}
 ${KNOWLEDGE_TEXTS.stepAnswer}`
 });
@@ -11495,7 +11476,7 @@ var WRITE_TOOL_TEXTS = [
       { path: "part", text: "mind_memory: note, commitment or plan." },
       { path: "id", text: "mind_memory: the note's, commitment's or plan's id; leave it out to add one." },
       { path: "value", text: "mind_memory: its fields, or the ones to change, written as a JSON object; leave it out to delete it." },
-      { path: "text", text: "mind_intent: what they mean to do now, in your words (at most 600 characters); an empty text clears it." },
+      { path: "text", text: "mind_intent: what they mean to do now, in your words (at most the length Settings → Minds → Lengths gives your intent, 1,200 characters unless the user changed it; a longer one is refused); an empty text clears it." },
       { path: "approach", text: "mind_intent: reactive (they answer the scene), proactive (they pursue their own aims), or none (their mind decides)." },
       { path: "fact", text: "mind_knowledge: the fact's id, as the knowledge tools give it." },
       { path: "holding", text: 'mind_knowledge: the holding, whole, written as a JSON object: {"how": "authored", "witnessed", "told", "inferred" or "guessed", "by": who told them or null, "evidence": [fact ids], "since": {"msg", "at"}, "belief": "true", "false" or "uncertain", "confidence": 0 to 1, "keptFrom": [ids] or "everyone"}; leave it out to take it away.' }
@@ -50358,15 +50339,17 @@ function mindsOn(ctx) {
 function reject22(code, reason) {
   return { code, reason };
 }
-function capText(text4, max) {
-  const t = text4.replace(/\s+/g, " ").trim();
-  if (t.length <= max)
-    return t;
-  const cut = t.slice(0, max + 1);
-  const at2 = cut.lastIndexOf(" ");
-  return `${(at2 > max * 0.6 ? cut.slice(0, at2) : t.slice(0, max)).replace(/[\s,;:.]+$/, "")}…`;
+function tidy(text4) {
+  return text4.replace(/\s+/g, " ").trim();
 }
-var text4 = (v, max) => typeof v === "string" && v.trim() !== "" ? capText(v, max) : null;
+function gmText(v, max, kept3, what) {
+  if (typeof v !== "string" || v.trim() === "")
+    return null;
+  const t = tidy(v);
+  if (max === undefined || t.length <= max || t === kept3)
+    return t;
+  return reject22("too_long", `${what} is at most ${max.toLocaleString("en-US")} characters, as Settings → Minds → Lengths has it, and this is ${t.length.toLocaleString("en-US")}`);
+}
 var minutes = (v) => typeof v === "number" && Number.isFinite(v) ? Math.round(v) : null;
 function peopleIn(ctx, v) {
   if (v === undefined)
@@ -50383,8 +50366,11 @@ function peopleIn(ctx, v) {
   }
   return [...new Set(ids2)];
 }
-function noteFrom(ctx, who, id, v, before) {
-  const body = text4(v.text, MIND_TEXT_CAPS.note) ?? before?.text ?? null;
+function noteFrom(ctx, who, id, v, before, lengths) {
+  const said3 = gmText(v.text, lengths?.note, before?.text, "A note");
+  if (typeof said3 === "object" && said3 !== null)
+    return said3;
+  const body = said3 ?? before?.text ?? null;
   if (body === null)
     return reject22("bad_value", "a note needs its text");
   const salience = v.salience === undefined ? before?.salience ?? 3 : typeof v.salience === "number" && v.salience >= 1 && v.salience <= 5 ? v.salience : null;
@@ -50392,8 +50378,11 @@ function noteFrom(ctx, who, id, v, before) {
     return reject22("bad_value", "a note's salience is 1 to 5");
   return { id: id ?? `n_${hashParts("minds.gm.note", who, String(ctx.state.clock), body).slice(0, 10)}`, text: body, salience, at: before?.at ?? ctx.state.clock };
 }
-function commitmentFrom(ctx, who, id, v, before) {
-  const body = text4(v.text, MIND_TEXT_CAPS.commitment) ?? before?.text ?? null;
+function commitmentFrom(ctx, who, id, v, before, lengths) {
+  const said3 = gmText(v.text, lengths?.commitment, before?.text, "A commitment");
+  if (typeof said3 === "object" && said3 !== null)
+    return said3;
+  const body = said3 ?? before?.text ?? null;
   if (body === null)
     return reject22("bad_value", "a commitment needs its text");
   const kind = v.kind === undefined ? before?.kind ?? "other" : COMMITMENT_KINDS.includes(v.kind) ? v.kind : null;
@@ -50411,8 +50400,11 @@ function commitmentFrom(ctx, who, id, v, before) {
   const closed = status === "open" ? null : before && before.status !== "open" ? before.closed : ctx.state.clock;
   return { id: id ?? `c_${hashParts("minds.gm.commitment", who, String(ctx.state.clock), body).slice(0, 10)}`, kind, with: withList, text: body, due, status, made: before?.made ?? ctx.state.clock, closed };
 }
-function planFrom(ctx, who, id, v, before) {
-  const what = text4(v.what, MIND_TEXT_CAPS.planWhat) ?? before?.what ?? null;
+function planFrom(ctx, who, id, v, before, lengths) {
+  const said3 = gmText(v.what, lengths?.plan, before?.what, "What a plan is");
+  if (typeof said3 === "object" && said3 !== null)
+    return said3;
+  const what = said3 ?? before?.what ?? null;
   if (what === null)
     return reject22("bad_value", "a plan needs what it is");
   const when2 = v.when === undefined ? before?.when ?? null : typeof v.when === "object" && v.when !== null && !Array.isArray(v.when) ? { from: minutes(v.when.from), to: minutes(v.when.to) } : null;
@@ -50480,7 +50472,7 @@ function knowledgeEdit(ctx, op, name) {
     return reject22("no_change", "nothing to change");
   return [{ type: MINDS_EVENTS.learn, data: { who: [op.entity], fact: op.fact, how: next.how, by: next.by, evidence: next.evidence, belief: next.belief, confidence: next.confidence, ...next.keptFrom ? { keptFrom: next.keptFrom } : {}, msg: next.since.msg, at: next.since.at } }];
 }
-function mindEdit(ctx, op) {
+function mindEdit(ctx, op, lengths) {
   const { world, state: state2, registry } = ctx;
   const e = own(state2.entities, op.entity);
   if (!e)
@@ -50497,9 +50489,12 @@ function mindEdit(ctx, op) {
   if (op.op === "mind_intent") {
     if (op.text === undefined && op.approach === undefined)
       return reject22("bad_value", "say what they mean to do, or how they go about it");
-    const text5 = op.text === undefined ? c.intent?.text ?? "" : capText(op.text, MIND_TEXT_CAPS.gmIntent);
+    const said3 = op.text === undefined ? undefined : gmText(op.text, lengths?.gmIntent, c.intent?.text, "Your intent for them");
+    if (typeof said3 === "object" && said3 !== null)
+      return said3;
+    const text4 = said3 === undefined ? c.intent?.text ?? "" : said3 ?? "";
     const approach = op.approach === undefined ? c.intent?.approach ?? null : op.approach;
-    return [{ type: MINDS_EVENTS.intent, data: { entity: op.entity, intent: text5 === "" && approach === null ? null : { text: text5, approach } } }];
+    return [{ type: MINDS_EVENTS.intent, data: { entity: op.entity, intent: text4 === "" && approach === null ? null : { text: text4, approach } } }];
   }
   const value = op.value;
   if (op.part === "note") {
@@ -50508,7 +50503,7 @@ function mindEdit(ctx, op) {
       return reject22("missing_note", `${e.name} has no such note`);
     if (value === null)
       return op.id === null ? reject22("bad_value", "say which note to delete") : [{ type: MINDS_EVENTS.noteEdit, data: { entity: op.entity, note: op.id, value: null } }];
-    const note2 = noteFrom(ctx, op.entity, op.id, value, before2);
+    const note2 = noteFrom(ctx, op.entity, op.id, value, before2, lengths);
     return "code" in note2 ? note2 : [{ type: MINDS_EVENTS.noteEdit, data: { entity: op.entity, note: note2.id, value: note2 } }];
   }
   if (op.part === "commitment") {
@@ -50517,7 +50512,7 @@ function mindEdit(ctx, op) {
       return reject22("missing_commitment", `${e.name} has no such commitment`);
     if (value === null)
       return op.id === null ? reject22("bad_value", "say which commitment to delete") : [{ type: MINDS_EVENTS.commitmentEdit, data: { entity: op.entity, commitment: op.id, value: null } }];
-    const commitment = commitmentFrom(ctx, op.entity, op.id, value, before2);
+    const commitment = commitmentFrom(ctx, op.entity, op.id, value, before2, lengths);
     return "code" in commitment ? commitment : [{ type: MINDS_EVENTS.commitmentEdit, data: { entity: op.entity, commitment: commitment.id, value: commitment } }];
   }
   const before = op.id === null ? undefined : c.plans.find((p) => p.id === op.id);
@@ -50525,7 +50520,7 @@ function mindEdit(ctx, op) {
     return reject22("missing_plan", `${e.name} has no such plan`);
   if (value === null)
     return op.id === null ? reject22("bad_value", "say which plan to delete") : [{ type: MINDS_EVENTS.planEdit, data: { entity: op.entity, plan: op.id, value: null } }];
-  const plan2 = planFrom(ctx, op.entity, op.id, value, before);
+  const plan2 = planFrom(ctx, op.entity, op.id, value, before, lengths);
   return "code" in plan2 ? plan2 : [{ type: MINDS_EVENTS.planEdit, data: { entity: op.entity, plan: plan2.id, value: plan2 } }];
 }
 
@@ -50535,8 +50530,8 @@ function mindCandidates(ctx) {
   return Object.keys(state2.entities).sort().filter((id) => id !== world.pov && kindIs(reg, world, own(state2.entities, id)?.kind ?? "", "person") && !isGone(state2, id) && acts(world, state2, id));
 }
 var NAME_FILLER = { mr: true, mrs: true, ms: true, miss: true, dr: true, sir: true, lady: true, lord: true, dame: true, the: true, of: true, de: true, van: true, von: true, la: true, le: true, old: true, young: true, captain: true, constable: true, father: true, mother: true, sister: true, brother: true, aunt: true, uncle: true };
-function words3(text5) {
-  return text5.toLowerCase().replace(/['’]s\b/g, "").match(/[\p{L}\p{N}]+/gu) ?? [];
+function words3(text4) {
+  return text4.toLowerCase().replace(/['’]s\b/g, "").match(/[\p{L}\p{N}]+/gu) ?? [];
 }
 function singlesOut(word) {
   return word.length >= 3 && !NAME_FILLER[word];
@@ -50748,18 +50743,38 @@ function isSuspicion(holding, threshold2) {
 function trackedHoldings(slice2, who) {
   return knowledgeTracked(slice2) ? holdingsOf(slice2, who) : {};
 }
+function factText(world, fact, id) {
+  const ref = parseFactId(id);
+  let entry = "";
+  if (ref?.kind === "lore") {
+    const lore2 = own(world.lore, ref.lore);
+    entry = lore2 ? lore2.content.trim() !== "" ? lore2.content : lore2.title : "";
+  } else if (ref?.kind === "track") {
+    const track2 = own(world.tracks, ref.track);
+    entry = (track2 ? own(track2.stages, ref.stage)?.truth : undefined) ?? "";
+  } else if (ref?.kind === "wi" && fact?.textHash !== undefined) {
+    const live = liveLoreIdOfWiFact(id);
+    const lore2 = live === null ? undefined : own(world.lore, live);
+    const source = lore2 ? loreSourceOf(lore2.source) : null;
+    entry = lore2 && source?.kind === "book" && source.hash === fact.textHash ? lore2.content : "";
+  }
+  const whole4 = entry.trim() !== "" ? entry.replace(/\s+/g, " ").trim() : "";
+  if (!fact)
+    return whole4 !== "" ? whole4 : id;
+  return whole4 !== "" && fact.claim.endsWith("…") && whole4.length >= fact.claim.length && whole4.startsWith(fact.claim.slice(0, -1)) ? whole4 : fact.claim;
+}
 function keptFromIt(holding, who) {
   return holding.keptFrom === "everyone" || (holding.keptFrom?.includes(who) ?? false);
 }
 function holdingLine(claim2, h, words4) {
-  const text5 = (id) => knowledgeText(words4.texts, id);
-  const how = fillText(text5(h.how), { by: h.by === null ? "" : words4.nameOf(h.by) });
+  const text4 = (id) => knowledgeText(words4.texts, id);
+  const how = fillText(text4(h.how), { by: h.by === null ? "" : words4.nameOf(h.by) });
   const template = h.belief === "false" ? "disbelieved" : h.belief === "uncertain" ? "unsure" : isSuspicion(h, words4.threshold) ? "suspected" : "known";
-  const line2 = fillText(text5(template), { claim: claim2, how, percent: String(Math.round(h.confidence * 100)) });
+  const line2 = fillText(text4(template), { claim: claim2, how, percent: String(Math.round(h.confidence * 100)) });
   if (h.keptFrom === undefined)
     return line2;
-  const whom = h.keptFrom === "everyone" ? text5("everyone") : h.keptFrom.map(words4.nameOf).join(", ");
-  return `${line2}; ${fillText(text5("keeps"), { whom })}`;
+  const whom = h.keptFrom === "everyone" ? text4("everyone") : h.keptFrom.map(words4.nameOf).join(", ");
+  return `${line2}; ${fillText(text4("keeps"), { whom })}`;
 }
 function latestTurns(slice2, turns) {
   const seen = [];
@@ -50841,7 +50856,7 @@ function knowledgeLines(ctx, scope) {
   const place2 = placeOfEntity(state2, pov);
   const secret = worldSecrets(ctx);
   const play = { here: [pov, ...people, ...place2 ? [place2] : []], recent: latestTurns(slice2, settings.inPlayTurns), secret };
-  const claim2 = (fact, id) => applyMarks(fact?.claim ?? id, { world, state: state2 }, "omit");
+  const claim2 = (fact, id) => applyMarks(factText(world, fact, id), { world, state: state2 }, "omit");
   const others = scope === "player" ? [] : people;
   const there = others.length > 0 ? peopleThere(ctx) : [];
   const listed3 = [pov, ...others].flatMap((who) => rankedHoldings(slice2, who, play).slice(0, settings.perPerson).map((h) => ({ who, h })));
@@ -50864,22 +50879,22 @@ function knowledgeLines(ctx, scope) {
       }
     }
     for (const { who, h } of holders) {
-      const text5 = fillText(knowledgeText(settings, "person"), { name: who === pov ? "You" : name(who), line: holdingLine(claim2(h.fact, id), h.holding, words4) });
+      const text4 = fillText(knowledgeText(settings, "person"), { name: who === pov ? "You" : name(who), line: holdingLine(claim2(h.fact, id), h.holding, words4) });
       if (yours !== undefined)
-        out.push(kept3 ? { text: text5, known: "pov", secret: { keptFrom: kept3.keptFrom, known: [...new Set([...kept3.known, who])] }, group: id } : { text: text5, known: "pov", group: id });
+        out.push(kept3 ? { text: text4, known: "pov", secret: { keptFrom: kept3.keptFrom, known: [...new Set([...kept3.known, who])] }, group: id } : { text: text4, known: "pov", group: id });
       else if (keptFromIt(h.holding, pov) || secret(id, h.fact)) {
         const keeps = h.holding.keptFrom;
-        out.push({ text: text5, known: "scene", who: name(who), secret: { keptFrom: keeps === "everyone" ? "everyone" : [...new Set([...keeps ?? [], pov])], known: [who] }, group: id });
+        out.push({ text: text4, known: "scene", who: name(who), secret: { keptFrom: keeps === "everyone" ? "everyone" : [...new Set([...keeps ?? [], pov])], known: [who] }, group: id });
       } else
-        out.push({ text: text5, known: "scene", who: name(who), group: id });
+        out.push({ text: text4, known: "scene", who: name(who), group: id });
     }
     const mine = holders.find((x) => x.who === pov)?.h;
     if (mine && (mine.secret || mine.about || mine.recent))
       for (const who of others) {
         if (own(holdingsOf(slice2, who), id) !== undefined)
           continue;
-        const text5 = fillText(knowledgeText(settings, "notKnown"), { name: name(who), claim: claim2(mine.fact, id) });
-        out.push(kept3 ? { text: text5, known: "pov", secret: kept3, group: id } : { text: text5, known: "pov", group: id });
+        const text4 = fillText(knowledgeText(settings, "notKnown"), { name: name(who), claim: claim2(mine.fact, id) });
+        out.push(kept3 ? { text: text4, known: "pov", secret: kept3, group: id } : { text: text4, known: "pov", group: id });
       }
   }
   return out;
@@ -50897,14 +50912,14 @@ function buildKnownView(ctx) {
   const secrets = unrevealedSecrets(reg, world, state2);
   const hidden = hiddenNameCheck(reg, world, state2, world.pov, { stages: false });
   const name = (id) => povMayKnow(reg, world, state2, id) ? own(state2.entities, id)?.name ?? id : "someone";
-  const worded = (text5) => findLeaks(text5, secrets).length > 0 || hidden(text5) ? UNWORDED : text5;
+  const worded = (text4) => findLeaks(text4, secrets).length > 0 || hidden(text4) ? UNWORDED : text4;
   const secret = worldSecrets(ctx);
   const sure = knowledgeThreshold(slice2);
   const items = Object.entries(holdingsOf(slice2, world.pov)).sort(([a, x], [b, y]) => y.since.at - x.since.at || (a < b ? -1 : 1)).map(([fact, h]) => {
     const f = own(facts, fact);
     return {
       key: hashParts("lre.known", fact),
-      claim: secret(fact, f) && !revealsFact(fact, h, sure) ? UNWORDED : worded(applyMarks(f?.claim ?? "", { world, state: state2 }, "omit")),
+      claim: secret(fact, f) && !revealsFact(fact, h, sure) ? UNWORDED : worded(applyMarks(f ? factText(world, f, fact) : "", { world, state: state2 }, "omit")),
       how: h.how,
       byName: h.by === null ? null : name(h.by),
       sinceText: formatClock(cal, h.since.at),
@@ -51133,8 +51148,8 @@ var MINDS_LINTS = [
 ];
 
 // src/packs/minds/core/section.ts
-function clause(text5) {
-  return text5.replace(/\s+/g, " ").trim().replace(/[.;]+$/, "");
+function clause(text4) {
+  return text4.replace(/\s+/g, " ").trim().replace(/[.;]+$/, "");
 }
 function mindLines(ctx) {
   const { registry: reg, world, state: state2 } = ctx;
@@ -51145,13 +51160,13 @@ function mindLines(ctx) {
   const here = placeOfEntity(state2, pov);
   const secrecy = worldMindsOf(world).secrecy;
   let check2 = null;
-  const safe = (text5) => {
+  const safe = (text4) => {
     if (!check2) {
       const secrets = unrevealedSecrets(reg, world, state2);
       const hidden = hiddenNameCheck(reg, world, state2, pov);
       check2 = (t) => findLeaks(t, secrets).length === 0 && !hidden(t);
     }
-    return check2(text5);
+    return check2(text4);
   };
   const out = [];
   for (const id of Object.keys(slice2.chars).sort()) {
@@ -51260,9 +51275,9 @@ var ORGS_SPENT = "orgs.spent";
 var LOG_KEPT = 40;
 var SPENT_MONTHS_KEPT = 13;
 var MONTH2 = /^\d{4}-\d{2}$/;
-function orgLog(ctx, org, text5, opts = {}) {
+function orgLog(ctx, org, text4, opts = {}) {
   const names = [...new Set(opts.names ?? [])].map((id) => ({ id, name: own(ctx.state.entities, id)?.name ?? id }));
-  return { type: ORGS_LOG, data: { org, text: text5, at: ctx.state.clock, ...opts.by ? { by: opts.by } : {}, ...names.length > 0 ? { names } : {}, ...opts.power ? { power: opts.power } : {}, visibility: "secret" } };
+  return { type: ORGS_LOG, data: { org, text: text4, at: ctx.state.clock, ...opts.by ? { by: opts.by } : {}, ...names.length > 0 ? { names } : {}, ...opts.power ? { power: opts.power } : {}, visibility: "secret" } };
 }
 function actNames(ctx, act2) {
   const out = [];
@@ -51418,8 +51433,8 @@ function entryChange(ctx, a) {
     ...keys === undefined ? [] : [keys === null ? "its keys as the world has them" : keys.length === 0 ? "no keys" : `keys: ${listWords(keys.map((k) => keyWords(ctx, k, pov)))}`]
   ].join("; ");
   const where = canSeePlace(ctx.registry, ctx.world, ctx.state, pov, place2) ? own(ctx.world.places, place2)?.name ?? place2 : actor2 !== null ? "a place" : "A place";
-  const text5 = `${actor2 !== null ? `${labelOf(ctx, actor2)} set ` : ""}${where}: ${said3}`;
-  const logs = (org !== "" ? [org] : holdersOf6(ctx, place2)).map((o) => orgLog(ctx, o, text5, actor2 !== null ? { by: actor2, names: [actor2] } : {}));
+  const text4 = `${actor2 !== null ? `${labelOf(ctx, actor2)} set ` : ""}${where}: ${said3}`;
+  const logs = (org !== "" ? [org] : holdersOf6(ctx, place2)).map((o) => orgLog(ctx, o, text4, actor2 !== null ? { by: actor2, names: [actor2] } : {}));
   return [{ type: ORGS_ENTRY, data }, ...logs];
 }
 function str20(e, key) {
@@ -51744,16 +51759,16 @@ function parseOrgOp(o) {
 function refuse2(code, reason2) {
   return { code, reason: reason2 };
 }
-function plainWords(text5) {
-  return text5.trim().replace(/^=+\s*/, "");
+function plainWords(text4) {
+  return text4.trim().replace(/^=+\s*/, "");
 }
-function historyLine(org, text5, opts = {}) {
+function historyLine(org, text4, opts = {}) {
   const names = [...new Set((opts.names ?? []).filter((id) => id !== ""))];
-  return { type: "orgs.note", args: { org, text: plainWords(text5), ...opts.by !== undefined && opts.by !== "" ? { by: opts.by } : {}, ...names.length > 0 ? { names } : {} } };
+  return { type: "orgs.note", args: { org, text: plainWords(text4), ...opts.by !== undefined && opts.by !== "" ? { by: opts.by } : {}, ...names.length > 0 ? { names } : {} } };
 }
-function withWhy(text5, why2) {
+function withWhy(text4, why2) {
   const reason2 = plainWords(why2 ?? "");
-  return reason2 === "" ? text5 : `${text5}: ${reason2}`;
+  return reason2 === "" ? text4 : `${text4}: ${reason2}`;
 }
 function flagged(ctx, by, org, power, did) {
   if (by === undefined || by === "" || by === org || orgTypeOf(ctx, org) === null || orgPower(ctx, by, org, power) !== null)
@@ -51834,8 +51849,8 @@ function compileOrgOp(ctx, op) {
       if (!job)
         return [{ type: "orgs.appoint", args: { org: op.org, who: op.who, position: op.position ?? "", why: plainWords(op.why) } }];
       const title = op.position === null ? null : positionsOf(ctx, op.org).find((p) => p.id === op.position)?.title ?? op.position;
-      const text5 = title === null ? `${name(op.who)} no longer holds a position` : `Appointed ${name(op.who)} ${title}`;
-      return [{ type: "economy.job_position", args: { job: job.id, position: op.position ?? "" } }, historyLine(op.org, withWhy(text5, op.why), { names: [op.who] })];
+      const text4 = title === null ? `${name(op.who)} no longer holds a position` : `Appointed ${name(op.who)} ${title}`;
+      return [{ type: "economy.job_position", args: { job: job.id, position: op.position ?? "" } }, historyLine(op.org, withWhy(text4, op.why), { names: [op.who] })];
     }
     case "title": {
       const bad2 = orgProblem(ctx, op.org);
@@ -51890,11 +51905,11 @@ function compileOrgOp(ctx, op) {
         return refuse2("bad_date", "a delegation ends after today");
       const fields = { powers: op.powers, ...op.payment !== undefined && op.payment > 0 ? { payment: Math.round(op.payment) } : {}, ...op.month !== undefined && op.month > 0 ? { month: Math.round(op.month) } : {}, ...op.accounts !== undefined ? { accounts: op.accounts } : {}, by: op.by };
       const limits = [...op.payment !== undefined && op.payment > 0 ? [`${money4(ctx, op.payment)} a payment`] : [], ...op.month !== undefined && op.month > 0 ? [`${money4(ctx, op.month)} a month`] : []];
-      const text5 = `${name(op.by)} let ${name(op.to)} ${op.powers.map((p) => POWER_WORDS[p]).join(", ")}${limits.length > 0 ? `, up to ${limits.join(" and ")}` : ""}${op.until !== undefined ? `, until ${op.until.slice(0, 10)}` : ""}`;
+      const text4 = `${name(op.by)} let ${name(op.to)} ${op.powers.map((p) => POWER_WORDS[p]).join(", ")}${limits.length > 0 ? `, up to ${limits.join(" and ")}` : ""}${op.until !== undefined ? `, until ${op.until.slice(0, 10)}` : ""}`;
       const lacking = op.powers.find((p) => orgPower(ctx, op.by, op.org, p) === null);
       return [
         { type: "link", args: { rel: ACTS_FOR, from: op.to, to: op.org, fields, ...until2 !== undefined ? { until: until2 } : {} } },
-        historyLine(op.org, text5, { by: op.by, names: [op.by, op.to] }),
+        historyLine(op.org, text4, { by: op.by, names: [op.by, op.to] }),
         ...flagged(ctx, op.by, op.org, "delegate", `let ${name(op.to)} act for ${name(op.org)}`),
         ...lacking !== undefined && orgPower(ctx, op.by, op.org, "delegate") !== null ? flagged(ctx, op.by, op.org, lacking, `let ${name(op.to)} ${POWER_WORDS[lacking]}`) : []
       ];
@@ -52095,8 +52110,8 @@ function motionIn(raw) {
     return null;
   const what = objOf(raw.what);
   const id = strOf(raw.id);
-  const text5 = strOf(raw.text);
-  if (id === "" || text5 === "" || strOf(what.type) === "")
+  const text4 = strOf(raw.text);
+  if (id === "" || text4 === "" || strOf(what.type) === "")
     return null;
   const votes = {};
   for (const [who, v] of Object.entries(objOf(raw.votes))) {
@@ -52107,7 +52122,7 @@ function motionIn(raw) {
   const num8 = (v, fallback) => typeof v === "number" && Number.isFinite(v) ? v : fallback;
   return {
     id,
-    text: text5,
+    text: text4,
     what: { type: strOf(what.type), args: objOf(what.args) },
     by: strOf(raw.by),
     ...strOf(raw.party) !== "" ? { party: strOf(raw.party) } : {},
@@ -52206,10 +52221,10 @@ function carryOut(ctx, rng, org, id, what) {
   return def.resolve({ ...what.args }, { ...ctx, rng, params: {}, effect: { type: what.type, args: { ...what.args } }, carried: { org, motion: id } });
 }
 function ended(ctx, org, m, status, why2, tally, by) {
-  const text5 = status === "passed" ? `Carried by vote (${why2.replace(/^carried: /, "")}): ${m.text}` : status === "withdrawn" ? `Withdrew the motion: ${m.text}` : `The motion failed (${why2}): ${m.text}`;
+  const text4 = status === "passed" ? `Carried by vote (${why2.replace(/^carried: /, "")}): ${m.text}` : status === "withdrawn" ? `Withdrew the motion: ${m.text}` : `The motion failed (${why2}): ${m.text}`;
   return [
     { type: ORGS_MOTION_END, data: { org, id: m.id, status, why: why2, result: tally, at: ctx.state.clock, ...by !== undefined && by !== "" ? { by } : {}, visibility: povIn(ctx, m) ? "public" : "secret" } },
-    orgLog(ctx, org, text5, { ...by !== undefined && by !== "" ? { by } : {}, names: [m.by, ...Object.keys(m.electorate), ...actNames(ctx, m.what)].filter((id) => id !== "") })
+    orgLog(ctx, org, text4, { ...by !== undefined && by !== "" ? { by } : {}, names: [m.by, ...Object.keys(m.electorate), ...actNames(ctx, m.what)].filter((id) => id !== "") })
   ];
 }
 function settle4(ctx, rng, org, m, final) {
@@ -52690,9 +52705,9 @@ function openAndFund(ctx, w, f, o) {
   const stamp = f.founder === f.by || f.by === "" ? {} : { by: f.by, as: f.founder };
   return applyAll2(w, paid.map((e) => e.type === FINANCE_EVENTS.txn && ("data" in e) ? { ...e, data: { ...e.data, category: o.category, ...stamp } } : e)) ?? account;
 }
-function foundedLines(w, f, id, text5, theirs) {
+function foundedLines(w, f, id, text4, theirs) {
   const by = f.by !== "" ? { by: f.by } : {};
-  return f.founder === f.by ? [orgLog(w.ctx, id, text5, { by: f.by, names: [f.by] })] : [orgLog(w.ctx, id, text5, { ...by, names: [f.founder] }), orgLog(w.ctx, f.founder, theirs, by)];
+  return f.founder === f.by ? [orgLog(w.ctx, id, text4, { by: f.by, names: [f.by] })] : [orgLog(w.ctx, id, text4, { ...by, names: [f.founder] }), orgLog(w.ctx, f.founder, theirs, by)];
 }
 function spending(ctx, f, source, beneficiary) {
   if (f.by === "" || f.founder === f.by || f.cents <= 0)
@@ -52906,8 +52921,8 @@ function restructureEvents2(ctx, a) {
   if (!Array.isArray(events3) || events3.length === 0)
     return events3;
   const from = events3.flatMap((e) => e.type === "set" && e.field === "structure_from" && typeof e.value === "string" ? [e.value] : [])[0] ?? "";
-  const text5 = `Became ${STRUCTURE_WORDS[structure] ?? structure}${from !== "" ? `, taxed as one from ${dateWords(ctx, from)}` : ""}`;
-  return [...events3, orgLog(ctx, org, text5, by !== "" ? { by } : {}), ...party !== by && party !== org ? [orgLog(ctx, party, `${labelOf(ctx, org)}: ${text5}`, { by, names: [org] })] : []];
+  const text4 = `Became ${STRUCTURE_WORDS[structure] ?? structure}${from !== "" ? `, taxed as one from ${dateWords(ctx, from)}` : ""}`;
+  return [...events3, orgLog(ctx, org, text4, by !== "" ? { by } : {}), ...party !== by && party !== org ? [orgLog(ctx, party, `${labelOf(ctx, org)}: ${text4}`, { by, names: [org] })] : []];
 }
 function registerFound(r) {
   r.effect({ type: "orgs.found", args: ["type", "name", "kind?", "cents?", "from?", "structure?", "units?", "classes?", "trustee?", "beneficiary?", "revocable?", "purpose?", "until?", "founder?", "by?"], gm: true, resolve: (a, ctx) => foundEvents(ctx, a) });
@@ -52960,8 +52975,8 @@ function registerFound(r) {
 // src/packs/orgs/core/view.ts
 var TYPE_ORDER = ["household", "company", "group", "trust", "party"];
 var HOW_ORDER = ["owner", "leader", "member", "staff", "core", "companion", "hired", "ally"];
-function dateWords(ctx, text5) {
-  return dayWords(ctx.world, text5);
+function dateWords(ctx, text4) {
+  return dayWords(ctx.world, text4);
 }
 function partyIdOf(ctx) {
   const pov = ctx.world.pov;
@@ -53162,10 +53177,10 @@ function trustOf(page) {
   if (!subject.exists || subject.type !== "trust")
     return null;
   const f = own(ctx.state.entities, subject.id)?.fields ?? {};
-  const text5 = (v) => typeof v === "string" && v.trim() !== "" ? v.trim() : null;
-  const settlor = text5(f.settlor);
-  const until2 = text5(f.until);
-  return { settlor: settlor === null ? null : page.ref(settlor), revocable: f.revocable === true, purpose: text5(f.purpose), until: until2 === null ? null : dateWords(ctx, until2), decide: trusteesDecideIn(f) };
+  const text4 = (v) => typeof v === "string" && v.trim() !== "" ? v.trim() : null;
+  const settlor = text4(f.settlor);
+  const until2 = text4(f.until);
+  return { settlor: settlor === null ? null : page.ref(settlor), revocable: f.revocable === true, purpose: text4(f.purpose), until: until2 === null ? null : dateWords(ctx, until2), decide: trusteesDecideIn(f) };
 }
 function historyOf(page) {
   const { ctx, subject, viewer } = page;
@@ -53176,7 +53191,7 @@ function historyOf(page) {
   const cal = calendarOf(ctx.world);
   return orgHistory(ctx.state, subject.id).filter((line2) => seesMoney || line2.power === undefined || !money5.includes(line2.power)).map((line2) => ({
     at: formatClock(cal, line2.at),
-    text: (line2.names ?? []).reduce((text5, n) => page.seen(n.id) ? text5 : text5.split(n.name).join("someone"), line2.text),
+    text: (line2.names ?? []).reduce((text4, n) => page.seen(n.id) ? text4 : text4.split(n.name).join("someone"), line2.text),
     by: line2.by === undefined ? null : page.ref(line2.by)
   }));
 }
@@ -53446,9 +53461,9 @@ function heldLimits(ctx, by, org, power) {
   return { limits: undefined, below: undefined };
 }
 var SCOPED2 = ["members.admit", "members.remove", "members.appoint", "staff.hire", "staff.fire", "staff.pay"];
-function withWhy2(text5, a) {
+function withWhy2(text4, a) {
   const why2 = strOf(a.why).trim();
-  return why2 === "" ? text5 : `${text5}: ${why2}`;
+  return why2 === "" ? text4 : `${text4}: ${why2}`;
 }
 function actedBy(by, power) {
   return by === "" ? {} : { by, ...power !== null ? { power } : {} };
@@ -53540,8 +53555,8 @@ function appointMember(ctx, a) {
   if (isRejection11(linked))
     return linked;
   const left = positionsOf(ctx, org).find((p) => p.id === was)?.title ?? was;
-  const text5 = position ? `Appointed ${labelOf(ctx, who)} ${position.title}` : `${labelOf(ctx, who)} no longer holds ${left}`;
-  return [...linked, orgLog(ctx, org, withWhy2(text5, a), { ...actedBy(by, "members.appoint"), names: [who] })];
+  const text4 = position ? `Appointed ${labelOf(ctx, who)} ${position.title}` : `${labelOf(ctx, who)} no longer holds ${left}`;
+  return [...linked, orgLog(ctx, org, withWhy2(text4, a), { ...actedBy(by, "members.appoint"), names: [who] })];
 }
 function titleMember(ctx, a) {
   const org = orgOf(ctx, a);
@@ -53590,7 +53605,7 @@ function setPosition2(ctx, a) {
   if (isRejection11(powers))
     return powers;
   const num8 = (k) => typeof a[k] === "number" && Number.isFinite(a[k]) ? Math.round(a[k]) : undefined;
-  const text5 = (k) => typeof a[k] === "string" && a[k] !== "" ? a[k] : undefined;
+  const text4 = (k) => typeof a[k] === "string" && a[k] !== "" ? a[k] : undefined;
   const limits = { ...before?.limits ?? {}, ...num8("payment") !== undefined ? { payment: num8("payment") } : {}, ...num8("month") !== undefined ? { month: num8("month") } : {} };
   if (limits.payment === 0)
     delete limits.payment;
@@ -53607,10 +53622,10 @@ function setPosition2(ctx, a) {
     title: strOf(a.title).trim() || before?.title || id.replace(/_/g, " "),
     powers,
     ...num8("seats") !== undefined ? { seats: num8("seats") } : {},
-    ...text5("reports_to") !== undefined ? { reports_to: text5("reports_to") } : {},
-    ...text5("scope") !== undefined ? { scope: text5("scope") } : {},
+    ...text4("reports_to") !== undefined ? { reports_to: text4("reports_to") } : {},
+    ...text4("scope") !== undefined ? { scope: text4("scope") } : {},
     ...Object.keys(limits).length > 0 ? { limits } : {},
-    ...text5("successor") !== undefined ? { successor: text5("successor") } : {},
+    ...text4("successor") !== undefined ? { successor: text4("successor") } : {},
     ...typeof a.default === "boolean" ? { default: a.default } : {}
   });
   if (!next)
@@ -53630,12 +53645,12 @@ function setPosition2(ctx, a) {
 function endOfDay2(ctx, v) {
   if (typeof v === "number" && Number.isFinite(v))
     return Math.round(v);
-  const text5 = strOf(v).trim();
-  if (text5 === "")
+  const text4 = strOf(v).trim();
+  if (text4 === "")
     return;
   try {
     const cal = calendarOf(ctx.world);
-    return clockAt(cal, dayIndexOfText(cal, text5.slice(0, 10)) + 1, 0) - 1;
+    return clockAt(cal, dayIndexOfText(cal, text4.slice(0, 10)) + 1, 0) - 1;
   } catch {
     return refuse5("bad_date", "until is a date (YYYY-MM-DD)");
   }
@@ -54158,12 +54173,12 @@ function noteIn(v) {
 }
 function common(o) {
   const id = strOf(o.id);
-  const text5 = strOf(o.text).trim();
+  const text4 = strOf(o.text).trim();
   const source = strOf(o.source);
-  if (id === "" || text5 === "" || text5.length > PLAN_LIMITS.text || !isPlanStatus(o.status) || !PLAN_SOURCES.includes(source) || typeof o.at !== "number")
+  if (id === "" || text4 === "" || text4.length > PLAN_LIMITS.text || !isPlanStatus(o.status) || !PLAN_SOURCES.includes(source) || typeof o.at !== "number")
     return null;
   const last = noteIn(o.last);
-  return { id, text: text5, status: o.status, source, at: o.at, ...strOf(o.by) !== "" ? { by: strOf(o.by) } : {}, ...last ? { last } : {} };
+  return { id, text: text4, status: o.status, source, at: o.at, ...strOf(o.by) !== "" ? { by: strOf(o.by) } : {}, ...last ? { last } : {} };
 }
 function goalIn(o) {
   const base = common(o);
@@ -54304,23 +54319,23 @@ function idsOf2(v) {
 function whenOf(ctx, v) {
   if (typeof v === "number" && Number.isFinite(v))
     return v;
-  const text5 = strOf(v).trim();
-  if (text5 === "")
+  const text4 = strOf(v).trim();
+  if (text4 === "")
     return null;
   try {
-    return clockOfLocal(calendarOf(ctx.world), text5.replace(" ", "T"));
+    return clockOfLocal(calendarOf(ctx.world), text4.replace(" ", "T"));
   } catch {
-    return { code: "bad_args", reason: `"${text5}" isn't a date and time (YYYY-MM-DD HH:MM)` };
+    return { code: "bad_args", reason: `"${text4}" isn't a date and time (YYYY-MM-DD HH:MM)` };
   }
 }
 function windowOf(v) {
-  const text5 = strOf(v).trim();
-  if (text5 === "")
+  const text4 = strOf(v).trim();
+  if (text4 === "")
     return null;
-  return text5 === "today" || /^\d{4}-\d{2}-\d{2}$/.test(text5) ? text5 : { code: "bad_args", reason: `a goal's window is "today" or a date (YYYY-MM-DD), not "${text5}"` };
+  return text4 === "today" || /^\d{4}-\d{2}-\d{2}$/.test(text4) ? text4 : { code: "bad_args", reason: `a goal's window is "today" or a date (YYYY-MM-DD), not "${text4}"` };
 }
-function words4(text5) {
-  const t = text5.trim();
+function words4(text4) {
+  const t = text4.trim();
   if (t === "")
     return { code: "bad_args", reason: "what it is, in words" };
   return t.length > PLAN_LIMITS.text ? { code: "bad_args", reason: `at most ${PLAN_LIMITS.text} characters` } : t;
@@ -54328,8 +54343,8 @@ function words4(text5) {
 function isRejection12(v) {
   return typeof v === "object" && v !== null && "code" in v && "reason" in v;
 }
-function newId2(ctx, prefix, org, text5, n) {
-  return `${prefix}_${hashParts(org, text5, String(ctx.state.clock), String(n)).slice(0, 8)}`;
+function newId2(ctx, prefix, org, text4, n) {
+  return `${prefix}_${hashParts(org, text4, String(ctx.state.clock), String(n)).slice(0, 8)}`;
 }
 function keeps(a, key) {
   return a[key] === undefined || a[key] === null;
@@ -54345,15 +54360,15 @@ function goalEvents(ctx, a) {
   const was = id === "" ? undefined : plan2.goals.find((g) => g.id === id);
   if (id !== "" && !was)
     return { code: "not_found", reason: `nothing on the plan is ${id}` };
-  const text5 = keeps(a, "text") && was ? was.text : words4(strOf(a.text));
-  if (isRejection12(text5))
-    return text5;
+  const text4 = keeps(a, "text") && was ? was.text : words4(strOf(a.text));
+  if (isRejection12(text4))
+    return text4;
   const window = keeps(a, "window") && was ? was.window ?? null : windowOf(a.window);
   if (isRejection12(window))
     return window;
   const where = keeps(a, "where") && was ? was.where ?? "" : strOf(a.where).trim();
   const status = isPlanStatus(a.status) ? a.status : was?.status ?? "open";
-  const goal = { id: was?.id ?? newId2(ctx, "g", org, text5, plan2.goals.length), text: text5, ...window !== null ? { window } : {}, ...where !== "" ? { where } : {}, status, ...was?.by ?? by ? { by: was?.by ?? by } : {}, source: was?.source ?? sourceOf3(a), at: was?.at ?? ctx.state.clock, ...was?.last ? { last: was.last } : {} };
+  const goal = { id: was?.id ?? newId2(ctx, "g", org, text4, plan2.goals.length), text: text4, ...window !== null ? { window } : {}, ...where !== "" ? { where } : {}, status, ...was?.by ?? by ? { by: was?.by ?? by } : {}, source: was?.source ?? sourceOf3(a), at: was?.at ?? ctx.state.clock, ...was?.last ? { last: was.last } : {} };
   return [{ type: ORGS_GOAL, data: { org, goal, visibility: "secret" } }];
 }
 function orderEvents(ctx, a) {
@@ -54367,9 +54382,9 @@ function orderEvents(ctx, a) {
   const was = id === "" ? undefined : plan2.orders.find((o) => o.id === id);
   if (id !== "" && !was)
     return { code: "not_found", reason: `nothing on the plan is ${id}` };
-  const text5 = keeps(a, "text") && was ? was.text : words4(strOf(a.text));
-  if (isRejection12(text5))
-    return text5;
+  const text4 = keeps(a, "text") && was ? was.text : words4(strOf(a.text));
+  if (isRejection12(text4))
+    return text4;
   const to = keeps(a, "to") && was ? was.to : idsOf2(a.to);
   if (to.length === 0)
     return { code: "bad_args", reason: "whom the order is for" };
@@ -54389,11 +54404,11 @@ function orderEvents(ctx, a) {
   const status = isPlanStatus(a.status) ? a.status : was?.status ?? "open";
   const relaid = !was || (was.when ?? null) !== when3 || (was.where ?? "") !== where || [...was.to].sort().join(",") !== [...to].sort().join(",") || when3 === null && status === "under_way" && was.status !== "under_way";
   const order = {
-    id: was?.id ?? newId2(ctx, "o", org, `${to.join(",")}:${text5}`, plan2.orders.length),
+    id: was?.id ?? newId2(ctx, "o", org, `${to.join(",")}:${text4}`, plan2.orders.length),
     ...goal !== "" ? { goal } : {},
     to,
     ...lead !== "" ? { lead } : {},
-    text: text5,
+    text: text4,
     ...where !== "" ? { where } : {},
     ...when3 !== null ? { when: when3 } : {},
     status,
@@ -54652,18 +54667,18 @@ function offerOf(ctx, p) {
     return { code: "not_found", reason: named === "" ? "who offers it" : `no one you know is ${named}` };
   if (isGone(ctx.state, who) || !acts(ctx.world, ctx.state, who))
     return { code: "not_acting", reason: `${labelOf(ctx, who)} can't take it on` };
-  const text5 = words4(strOf(p.offer));
-  if (isRejection12(text5))
-    return text5;
+  const text4 = words4(strOf(p.offer));
+  if (isRejection12(text4))
+    return text4;
   const said3 = strOf(p.said).trim().slice(0, PLAN_LIMITS.text);
   if (said3 === "")
     return { code: "bad_proposal", reason: "it quotes the story's words" };
   const when3 = whenOf(ctx, p.when);
   if (isRejection12(when3))
     return when3;
-  if (planOf3(ctx.state, org).orders.some((o) => isPlanStatusLive(o.status) && o.to.includes(who) && o.text.toLowerCase() === text5.toLowerCase()))
+  if (planOf3(ctx.state, org).orders.some((o) => isPlanStatusLive(o.status) && o.to.includes(who) && o.text.toLowerCase() === text4.toLowerCase()))
     return { code: "already", reason: "it's on the plan already" };
-  return { org, who, text: text5, where: strOf(p.where).trim(), when: when3, said: said3 };
+  return { org, who, text: text4, where: strOf(p.where).trim(), when: when3, said: said3 };
 }
 var AGENDA_CHANNEL = {
   type: "agenda",
@@ -54923,7 +54938,7 @@ function employment(ctx, p) {
   const why2 = quoted2(p);
   const name = (id) => labelOf(ctx, id);
   const flag2 = (org2, power, did) => by === undefined || org2 === null || by === who ? [] : flagged(ctx, by, org2, power, did);
-  const line2 = (org2, text5) => org2 === null ? [] : [historyLine(org2, withWhy(text5, why2), { names: [who] })];
+  const line2 = (org2, text4) => org2 === null ? [] : [historyLine(org2, withWhy(text4, why2), { names: [who] })];
   if (change2 === "hired") {
     const org2 = employerNamed(ctx, strOf(p.org));
     if (org2 === null)
@@ -54942,8 +54957,8 @@ function employment(ctx, p) {
     const basis = strOf(p.basis);
     const hire2 = { type: "economy.hire", args: { business: org2, worker: who, ...title !== "" ? { title } : {}, ...position !== null ? { position } : {}, ...basis !== "" ? { basis } : {}, ...rate !== undefined ? { rate } : {}, ...hours !== undefined ? { hours_per_week: hours } : {} } };
     const as = title !== "" ? title : position !== null ? positionsOf(ctx, org2).find((x) => x.id === position)?.title ?? "" : "";
-    const text5 = `Hired ${name(who)}${as !== "" ? ` as ${as}` : ""}`;
-    return { effects: [hire2, ...line2(orgTypeOf(ctx, org2) !== null ? org2 : null, text5), ...flag2(org2, "staff.hire", `hired ${name(who)}`)] };
+    const text4 = `Hired ${name(who)}${as !== "" ? ` as ${as}` : ""}`;
+    return { effects: [hire2, ...line2(orgTypeOf(ctx, org2) !== null ? org2 : null, text4), ...flag2(org2, "staff.hire", `hired ${name(who)}`)] };
   }
   const job = jobNamed(ctx, who, p);
   if (typeof job !== "string")
@@ -55567,8 +55582,8 @@ function builtInSectionsOf(world) {
     return section && !own2.includes(slot) ? [section] : [];
   });
 }
-function sectionTemplateProblem(text5) {
-  return text5.includes(LINES_MARKER) ? null : `it must hold ${LINES_MARKER}, where the section's lines go`;
+function sectionTemplateProblem(text4) {
+  return text4.includes(LINES_MARKER) ? null : `it must hold ${LINES_MARKER}, where the section's lines go`;
 }
 
 // src/packs/orgs/core/seats.ts
@@ -55648,8 +55663,8 @@ function succeed(ctx, org) {
       if (seatedBy === null)
         continue;
       taken.add(who);
-      const text5 = was ? `${name(who)} succeeds ${name(was.who)} as ${p.title}` : `${name(who)} takes the seat of ${p.title}`;
-      const unit3 = [...seatedBy, orgLog(ctx, org, text5, { names: was ? [who, was.who] : [who] })];
+      const text4 = was ? `${name(who)} succeeds ${name(was.who)} as ${p.title}` : `${name(who)} takes the seat of ${p.title}`;
+      const unit3 = [...seatedBy, orgLog(ctx, org, text4, { names: was ? [who, was.who] : [who] })];
       if (belongsTo(ctx, ctx.world.pov, org)) {
         const told = canSeeEntity(ctx.registry, ctx.world, ctx.state, ctx.world.pov, who) ? name(who) : "Someone";
         unit3.push({ type: ENGINE_EVENTS.signal, data: { class: "incident", text: `${told} now holds ${p.title} for ${orgName}.`, entity: org } });
@@ -55830,11 +55845,11 @@ function orgAlerts(ctx, org, viewer) {
   out.push(...decisionAlerts(ctx, org, viewer));
   return out.length > 0 ? out : null;
 }
-function dayClock(ctx, text5) {
-  if (text5 === null || !/^\d{4}-\d{2}-\d{2}$/.test(text5))
+function dayClock(ctx, text4) {
+  if (text4 === null || !/^\d{4}-\d{2}-\d{2}$/.test(text4))
     return null;
   const cal = calendarOf(ctx.world);
-  return clockAt(cal, dayIndexOfText(cal, text5), 0);
+  return clockAt(cal, dayIndexOfText(cal, text4), 0);
 }
 function orgComing(ctx, org, viewer) {
   const type = orgTypeOf(ctx, org);
@@ -55905,8 +55920,8 @@ function titlesOn(ctx) {
   return feed.include === undefined || feed.include.includes(TITLES_SOURCE);
 }
 var TITLES_SOURCE = "titles";
-function lowerFirst(text5) {
-  return /^\p{Lu}\p{Ll}/u.test(text5) ? `${text5.charAt(0).toLowerCase()}${text5.slice(1)}` : text5;
+function lowerFirst(text4) {
+  return /^\p{Lu}\p{Ll}/u.test(text4) ? `${text4.charAt(0).toLowerCase()}${text4.slice(1)}` : text4;
 }
 var TITLES_KEPT = 2;
 var BARE_TITLES = new Set([...Object.values(HOW_WORDS), ...Object.values(OWNER_ROLE_LABELS).map((l) => l.one)].map((word) => word.toLowerCase()));
@@ -55992,8 +56007,8 @@ function tierEvents(ctx, by, who, tier) {
   const linked = linkEvents(ctx.registry, ctx.world, ctx.state, { rel: PARTY_RELATION, from: who, to: pov, fields: { tier, since: sinceOf(ctx, who) } });
   if (!Array.isArray(linked))
     return linked;
-  const text5 = now === null ? `${labelOf(ctx, by)} added ${e.name} to the party as ${aTier(tier)}.` : `${labelOf(ctx, by)} made ${e.name} ${aTier(tier)} of the party.`;
-  return [...linked, orgLog(ctx, party, text5, { by, names: [by, who] })];
+  const text4 = now === null ? `${labelOf(ctx, by)} added ${e.name} to the party as ${aTier(tier)}.` : `${labelOf(ctx, by)} made ${e.name} ${aTier(tier)} of the party.`;
+  return [...linked, orgLog(ctx, party, text4, { by, names: [by, who] })];
 }
 function sinceOf(ctx, who) {
   const since = own(ctx.state.entities, who)?.relations.find((r) => r.type === PARTY_RELATION && r.to === ctx.world.pov)?.fields?.since;
@@ -88762,15 +88777,15 @@ var BODY_LIMIT = 20000;
 function count(n, one, many = `${one}s`) {
   return `${n.toLocaleString("en-US")} ${n === 1 ? one : many}`;
 }
-function cutAt(text5, end) {
-  const code = text5.charCodeAt(end - 1);
-  return end > 0 && end < text5.length && code >= 55296 && code <= 56319 ? end - 1 : end;
+function cutAt(text4, end) {
+  const code = text4.charCodeAt(end - 1);
+  return end > 0 && end < text4.length && code >= 55296 && code <= 56319 ? end - 1 : end;
 }
-function clip(text5, max) {
-  if (text5.length <= max)
-    return text5;
-  const end = cutAt(text5, max);
-  return `${text5.slice(0, end)}…[${count(text5.length - end, "more character")}]`;
+function clip(text4, max) {
+  if (text4.length <= max)
+    return text4;
+  const end = cutAt(text4, max);
+  return `${text4.slice(0, end)}…[${count(text4.length - end, "more character")}]`;
 }
 function jsonText(value, compact = false) {
   return (compact ? JSON.stringify(value) : JSON.stringify(value, null, 1)) ?? "null";
@@ -88895,37 +88910,37 @@ function readAt(root, options) {
   }
   if (options.from !== undefined || options.limit !== undefined)
     return entriesOf(value, where, indexed, options.from ?? 0, options.limit);
-  const text5 = jsonText(value, options.compact);
+  const text4 = jsonText(value, options.compact);
   if (options.offset !== undefined) {
     let offset = Math.floor(options.offset);
-    if (!(offset >= 0) || offset >= text5.length)
-      return { ok: false, text: `offset ${options.offset} is outside ${where}: its JSON text has ${count(text5.length, "character")} (offsets 0–${text5.length - 1}).` };
-    if (offset > 0 && cutAt(text5, offset) < offset)
+    if (!(offset >= 0) || offset >= text4.length)
+      return { ok: false, text: `offset ${options.offset} is outside ${where}: its JSON text has ${count(text4.length, "character")} (offsets 0–${text4.length - 1}).` };
+    if (offset > 0 && cutAt(text4, offset) < offset)
       offset -= 1;
-    const end = cutAt(text5, Math.min(text5.length, offset + BODY_LIMIT));
-    const next = end < text5.length ? `
+    const end = cutAt(text4, Math.min(text4.length, offset + BODY_LIMIT));
+    const next = end < text4.length ? `
 
 (Continues: read on with offset ${end}.)` : `
 
 (That is the end.)`;
-    return { ok: true, text: `${where}, characters ${offset}–${end} of ${text5.length}:
+    return { ok: true, text: `${where}, characters ${offset}–${end} of ${text4.length}:
 
-${text5.slice(offset, end)}${next}` };
+${text4.slice(offset, end)}${next}` };
   }
-  if (text5.length <= BODY_LIMIT)
+  if (text4.length <= BODY_LIMIT)
     return { ok: true, text: `${where}, ${kindOf(value)}:
 
-${text5}` };
+${text4}` };
   if (!isRecord(value) && !Array.isArray(value)) {
-    const end = cutAt(text5, BODY_LIMIT);
-    return { ok: true, text: `${where}, ${kindOf(value)}, characters 0–${end} of ${text5.length}:
+    const end = cutAt(text4, BODY_LIMIT);
+    return { ok: true, text: `${where}, ${kindOf(value)}, characters 0–${end} of ${text4.length}:
 
-${text5.slice(0, end)}
+${text4.slice(0, end)}
 
 (Continues: read on with offset ${end}.)` };
   }
   const deeper = Array.isArray(value) ? `${indexed}/0` : `${indexed}/<key>`;
-  return { ok: true, text: `${where} is ${kindOf(value)}, ${count(text5.length, "character")} as JSON: too big for one answer, so here is its outline. Read a part with pointer "${deeper}", page through its entries with from, or through its JSON with offset 0.
+  return { ok: true, text: `${where} is ${kindOf(value)}, ${count(text4.length, "character")} as JSON: too big for one answer, so here is its outline. Read a part with pointer "${deeper}", page through its entries with from, or through its JSON with offset 0.
 
 ${outline(value, indexed)}` };
 }
@@ -88938,12 +88953,12 @@ function entriesOf(value, where, pointer, from, limit) {
     return { ok: false, text: `from ${from} is outside ${where}: it has ${count(entries2.length, "entry", "entries")} (from 0–${Math.max(0, entries2.length - 1)}).` };
   const end = Math.min(entries2.length, limit === undefined ? entries2.length : start + Math.max(1, Math.floor(limit)));
   const page = Array.isArray(value) ? value.slice(start, end) : Object.fromEntries(entries2.slice(start, end));
-  const text5 = jsonText(page);
+  const text4 = jsonText(page);
   const next = (at2) => at2 < entries2.length ? `(Continues: read on with from ${at2}.)` : "(That is the end.)";
-  if (text5.length <= BODY_LIMIT)
+  if (text4.length <= BODY_LIMIT)
     return { ok: true, text: `${where}, entries ${start}–${Math.max(start, end - 1)} of ${entries2.length}${Array.isArray(value) ? " (by index)" : ""}:
 
-${text5}
+${text4}
 
 ${next(end)}` };
   return { ok: true, text: `${where}, entries from ${start} of ${entries2.length}, too big for one answer as JSON, so here is their outline:
@@ -89640,7 +89655,7 @@ var LEADS2 = { from: ["from"], to: ["to", "into"] };
 var NUMBER = String.raw`\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?`;
 var SCALES = { k: 1000, thousand: 1000, m: 1e6, million: 1e6 };
 var escaped = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-function currencyAmounts(currency, text5) {
+function currencyAmounts(currency, text4) {
   const scale = String.raw`(?:\s?(k|thousand|m|million)\b)?`;
   const symbol = currency.symbol.trim();
   const minorUnit = currency.minorUnit.trim().toLowerCase();
@@ -89649,7 +89664,7 @@ function currencyAmounts(currency, text5) {
   const patterns = [...symbol !== "" ? [new RegExp(`${escaped(symbol)}\\s?(${NUMBER})${scale}`, "gi")] : [], ...units.length > 0 ? [new RegExp(`\\b(${NUMBER})${scale}\\s*(${units.join("|")})\\b`, "gi")] : []];
   const found = [];
   for (const pattern of patterns) {
-    for (const m of text5.matchAll(pattern)) {
+    for (const m of text4.matchAll(pattern)) {
       const start = m.index;
       const end = start + m[0].length;
       if (found.some((f) => start < f.end && end > f.start))
@@ -89769,11 +89784,11 @@ var IDIOMS = [
   ["give", "up"],
   ["give", "it", "a", "try"]
 ];
-function tokenize2(text5) {
+function tokenize2(text4) {
   const out = [];
   let clause2 = 0;
   let sentence2 = 0;
-  for (const m of text5.toLowerCase().replace(/[‘’]/g, "'").matchAll(new RegExp(`${NUMBER}|[a-z0-9]+(?:'[a-z]+)*|[.!?;:,]`, "g"))) {
+  for (const m of text4.toLowerCase().replace(/[‘’]/g, "'").matchAll(new RegExp(`${NUMBER}|[a-z0-9]+(?:'[a-z]+)*|[.!?;:,]`, "g"))) {
     const word = m[0];
     if (/^[.!?;]$/.test(word)) {
       sentence2++;
@@ -89852,15 +89867,15 @@ function phraseAt(tokens3, phrase, acts3) {
   }
   return null;
 }
-function typedIntent(reg, world, state2, text5) {
-  const said3 = tokenize2(text5);
+function typedIntent(reg, world, state2, text4) {
+  const said3 = tokenize2(text4);
   const tokens3 = said3.map((t) => t.word);
   const actions = new Map;
   for (const [id, a] of reg.actions)
     actions.set(id, a);
   for (const [id, a] of Object.entries(world.actions))
     actions.set(id, a);
-  const named = new Set(words5(text5));
+  const named = new Set(words5(text4));
   const pov = world.pov;
   const people = new Set;
   for (const [id, e] of Object.entries(state2.entities))
@@ -89872,8 +89887,8 @@ function typedIntent(reg, world, state2, text5) {
   const fits3 = optionalQuery(ctx, "combat.offers");
   const holders = optionalQuery(ctx, "economy.holders");
   const candidates = [];
-  const amounts2 = currencyAmounts(world.currency, text5);
-  const numbers4 = [...text5.matchAll(new RegExp(NUMBER, "g"))].filter((m) => !amounts2.some((a) => m.index >= a.start && m.index < a.end)).map((m) => Number(m[0].replace(/,/g, "")));
+  const amounts2 = currencyAmounts(world.currency, text4);
+  const numbers4 = [...text4.matchAll(new RegExp(NUMBER, "g"))].filter((m) => !amounts2.some((a) => m.index >= a.start && m.index < a.end)).map((m) => Number(m[0].replace(/,/g, "")));
   const after = (leads) => {
     const at2 = tokens3.findIndex((w) => leads.includes(w));
     if (at2 < 0)
@@ -89913,7 +89928,7 @@ function typedIntent(reg, world, state2, text5) {
         params[name] = rest;
         textFilled = true;
       } else if (def.type === "duration") {
-        const span = typedSpan(calendarOf(world), state2.clock, text5);
+        const span = typedSpan(calendarOf(world), state2.clock, text4);
         if (span?.type === "duration")
           params[name] = span.minutes;
       } else if (def.type === "money" && amounts2[nextAmount] !== undefined) {
@@ -90005,8 +90020,8 @@ function account(e) {
   }
   return { ...e, fields: f };
 }
-function slug4(text5) {
-  return text5.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "").slice(0, 40) || "bill";
+function slug4(text4) {
+  return text4.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "").slice(0, 40) || "bill";
 }
 function freeId2(doc, taken, base) {
   let id = base;
@@ -90339,17 +90354,17 @@ function lintWorld(world, registry) {
       err(`sections.${id}.template`, "section_macro", `"${s.label}" may use only {{lines}}; any other macro, control character or <user>/<char>/<bot> would act beside engine values`);
   }
   const builtIn = new Set(builtInSectionsOf(world).map((s) => s.id));
-  for (const [id, text5] of Object.entries(world.sectionTemplates ?? {})) {
+  for (const [id, text4] of Object.entries(world.sectionTemplates ?? {})) {
     const path2 = `sectionTemplates.${id}`;
     const label2 = DEFAULT_SECTIONS[id]?.label ?? id;
-    if (typeof text5 !== "string") {
+    if (typeof text4 !== "string") {
       err(path2, "section_template", `the wording of "${label2}" must be text`);
       continue;
     }
-    const problem = hasOwn(DEFAULT_SECTIONS, id) ? sectionTemplateProblem(text5) : `there is no built-in section "${id}"`;
+    const problem = hasOwn(DEFAULT_SECTIONS, id) ? sectionTemplateProblem(text4) : `there is no built-in section "${id}"`;
     if (problem !== null)
       err(path2, "section_template", `"${label2}": ${problem}`);
-    if (macroHazards(text5, ["{{lines}}"]).length > 0)
+    if (macroHazards(text4, ["{{lines}}"]).length > 0)
       err(path2, "section_macro", `"${label2}" may use only {{lines}}; any other macro, control character or <user>/<char>/<bot> would act beside engine values`);
     if (hasOwn(DEFAULT_SECTIONS, id) && !builtIn.has(id))
       warn(path2, "section_template_unused", `"${label2}" is the world's own section, so its own template is used and this wording isn't`);
@@ -90390,17 +90405,17 @@ function lintWorld(world, registry) {
 }
 function macrosIn(world) {
   const out = [];
-  const scan2 = (path2, text5) => {
-    for (const macro of macroHazards(text5, ["{{lines}}"]))
+  const scan2 = (path2, text4) => {
+    for (const macro of macroHazards(text4, ["{{lines}}"]))
       out.push({ path: path2, macro });
   };
   for (const [id, l] of Object.entries(world.lore))
     scan2(`lore.${id}.content`, l.content);
   for (const [id, s] of Object.entries(world.sections))
     scan2(`sections.${id}.template`, s.template);
-  for (const [id, text5] of Object.entries(world.sectionTemplates ?? {}))
-    if (typeof text5 === "string")
-      scan2(`sectionTemplates.${id}`, text5);
+  for (const [id, text4] of Object.entries(world.sectionTemplates ?? {}))
+    if (typeof text4 === "string")
+      scan2(`sectionTemplates.${id}`, text4);
   for (const [id, t] of Object.entries(world.steps))
     scan2(`steps.${id}.template`, t.template);
   return out;
@@ -90448,20 +90463,20 @@ function checkWorldDay(registry, pipeline, world, state2, runSeed, day2, intent2
   let events3 = [];
   let applied2 = [];
   let processMs;
-  const note2 = (kind, text5) => {
-    findings[kind].push(text5);
-    notes.push(text5);
+  const note2 = (kind, text4) => {
+    findings[kind].push(text4);
+    notes.push(text4);
   };
   try {
     const plan2 = timedProcesses(options.clock, () => pipeline.plan({ registry, world, state: next, runSeed, seed: `${runSeed}:check:${day2}`, kind: "normal", userTexts: [`(Timelapse: ${label2})`], intent: intent2 }));
     processMs = processMsOf(plan2);
     const planned2 = applyAll3(registry, world, next, plan2.events);
-    for (const text5 of planned2.dropped)
-      note2("dropped", text5);
+    for (const text4 of planned2.dropped)
+      note2("dropped", text4);
     const post = pipeline.post({ registry, world, state: next, runSeed, seed: `${runSeed}:check:${day2}:post`, appliedMinutes: plan2.elapsedMinutes, extracted: [] });
     const posted = applyAll3(registry, world, next, post);
-    for (const text5 of posted.dropped)
-      note2("dropped", text5);
+    for (const text4 of posted.dropped)
+      note2("dropped", text4);
     events3 = [...plan2.events, ...post];
     applied2 = [...planned2.applied, ...posted.applied];
     notes.unshift(`+${plan2.elapsedMinutes} min, ${events3.length} events`);
@@ -90722,7 +90737,7 @@ function pickReader(registry, world, state2, typed, heard) {
     }
     return nameOf9(value);
   };
-  const text5 = (def, value) => {
+  const text4 = (def, value) => {
     const label2 = labelOf2(def.table, value);
     if (label2 !== null)
       return findLeaks(label2, secrets).length === 0 ? { words: label2, label: true } : null;
@@ -90742,7 +90757,7 @@ function pickReader(registry, world, state2, typed, heard) {
     const key = value.startsWith(EXTERNAL_ACCOUNT_PREFIX) ? value.slice(EXTERNAL_ACCOUNT_PREFIX.length).replace(/[_:]+/g, " ").trim() : "";
     return typed === "" || key === "" ? null : `${key.charAt(0).toUpperCase()}${key.slice(1)}`;
   };
-  return { nameOf: nameOf9, asTyped, text: text5, payee };
+  return { nameOf: nameOf9, asTyped, text: text4, payee };
 }
 function actionWords(registry, world, state2, action, params, typed = "", heard = typed, said3 = {}) {
   const read = pickReader(registry, world, state2, typed, heard);
@@ -90781,13 +90796,13 @@ function actionWords(registry, world, state2, action, params, typed = "", heard 
     parts.push(`× ${count2}`);
   return parts.join(", ");
 }
-function plural2(text5) {
-  const of = text5.search(/\s+of\s+/i);
-  const head = of >= 0 ? text5.slice(0, of) : text5;
-  const rest = of >= 0 ? text5.slice(of) : "";
+function plural2(text4) {
+  const of = text4.search(/\s+of\s+/i);
+  const head = of >= 0 ? text4.slice(0, of) : text4;
+  const rest = of >= 0 ? text4.slice(of) : "";
   const m = /([A-Za-z]+)$/.exec(head);
   if (!m)
-    return text5;
+    return text4;
   const word = m[1] ?? "";
   const many = /[^s]s$/i.test(word) ? word : /(?:s|x|z|ch|sh)$/i.test(word) ? `${word}es` : /[^aeiou]y$/i.test(word) ? `${word.slice(0, -1)}ies` : `${word}s`;
   return `${head.slice(0, head.length - word.length)}${many}${rest}`;
@@ -93102,7 +93117,7 @@ Four layers, each tunable (the world's defaults, then the user's overrides):
   - **The memory step** reads who they are, their summary, every open commitment by its id and every plan, what they remember (as above, nothing told), the lore pinned to the memory step (below), and the turn as written: the player's message and the reply within the message's and the reply's limits (their switches are a mind's; the memory step always reads the turn). Nothing is cut for room, and it reads no other lore. Only the characters who heard the turn remember it (§24.4).
 - **Never in it:** the GM view (but for the intent the GM set for this character), another character's mind or intent (their memory's reading of a turn included), or a turn they weren't present for.
 - **The answer:** JSON \`{monologue, depiction, intent, reactions[], mood?, interrupt?{reason}}\`.
-  - Lengths are capped.
+  - **Lengths** (\`UserSettings.minds.lengths\`, \`MindLengths\`, Settings → Minds → Lengths, the user's own, so no Model use preset sets them): each text a minds step writes has its most characters (a mind's monologue 2,000, depiction 1,000, intent 600, each reaction 300, mood 60, an interrupt's reason 400; each memory note 600, commitment 400, plan's what 300, thing told 400; the summary 1,800; a time-skip beat's reason 300) and each list its most items (4 reactions, 4 notes, 3 commitments, 4 plans, 3 things told); the GM's intent for a character has its own, 1,200. Each step's model is told the lengths its answer has after the answer format, whoever worded that (\`answerLengths\`: classic's prompt, and an agent turn's role answer text as its tail), and no format words a length or a count of its own, so the model writes to them. A longer text is cut at a word, ending in "…" (\`capCounted\`), and a longer list loses its last items (\`firstCounted\`); the call's trace says what was cut and where to raise it (\`cutsNote\`, the Context panel), and so does the host log. They hold what the GM writes in GM → Minds too (\`mindEdit\`, \`EditOptions.mindLengths\`): a longer text is refused, never cut, one left as it stands is kept whatever its length, and an edit resolved again keeps what it set. Each applies when an answer or an edit is checked, never in the fold: a past turn's events stay as recorded.
   - **No plans.** A mind sees what its character knows and how the latest reply ended, not where the story is going, and asked for plans it filled the gap with an ordinary day the story never set up: errands, meetings, trips and payments that then moved people, money and time skips. So a mind proposes none, and any plans its answer gives anyway are ignored. Plans come from the memory step, which reads the turn as written, and from the GM. A mind's plans an older chat recorded stay in the state as thoughts that drive nothing (§24.8).
   - The memory step's plans resolve to place and people ids and game minutes, and one with no time, or wholly past, is dropped. A time is read strictly: a local \`YYYY-MM-DD HH:MM\`, a day (its midnight) or an \`HH:MM\` (the next such time), on a day the calendar has and from 00:00 to 23:59 (\`clockOfStamp\`); anything else is no time.
   - \`interrupt\` counts only at a time-skip beat.
@@ -93204,7 +93219,7 @@ The Cast life planner (§8) lays each character's own plans into their days and 
   - pin a level, or unpin (\`mind_pin\`);
   - ask for a fresh mind next turn (\`mind_refresh\`);
   - add, edit or delete a note, commitment or plan (\`mind_memory\`; a value names only the fields that change). A plan with others in it is shared, under its shared id when added; an edit or a delete of a shared plan reaches everyone in it (above).
-  - set their **intent** (\`mind_intent\`, \`{entity, text?, approach?}\`, recorded as \`minds.intent\` with the intent whole): what they mean to do now, in the GM's own words (at most 600 characters), and how they go about it: \`reactive\` (they answer the scene and what is asked of them, and start nothing of their own), \`proactive\` (they pursue their own aims unprompted) or null (their mind decides). Each part is optional and a part left out is kept; \`""\` and null empty one, and with both empty the intent is cleared. Only that character's own mind reads it, first after who they are (§24.5), so what it intends, and through it the story, follows; no other mind, no other step, no narrator's section and no player surface is given it. It stays in the chat until changed or cleared, so a Re-narrate and a Re-run keep it as they keep a pin. Proactivity is a choice of its own because a mind told only to read the moment answers it: without it, the GM could steer what a character wants but not whether they act on it unasked.
+  - set their **intent** (\`mind_intent\`, \`{entity, text?, approach?}\`, recorded as \`minds.intent\` with the intent whole): what they mean to do now, in the GM's own words (at most the GM intent's length, 1,200 characters unless Settings → Minds → Lengths says otherwise; a longer one is refused), and how they go about it: \`reactive\` (they answer the scene and what is asked of them, and start nothing of their own), \`proactive\` (they pursue their own aims unprompted) or null (their mind decides). Each part is optional and a part left out is kept; \`""\` and null empty one, and with both empty the intent is cleared. Only that character's own mind reads it, first after who they are (§24.5), so what it intends, and through it the story, follows; no other mind, no other step, no narrator's section and no player surface is given it. It stays in the chat until changed or cleared, so a Re-narrate and a Re-run keep it as they keep a pin. Proactivity is a choice of its own because a mind told only to read the moment answers it: without it, the GM could steer what a character wants but not whether they act on it unasked.
   - set or take away one **holding** (\`mind_knowledge\`, \`{entity, fact, holding}\`, §24.11): what one person, the player character too, holds of a fact the chat has, whole (\`minds.learn\`), or with \`holding\` null nothing (\`minds.forget\`). A holding that is already so, or one taken away that isn't held, is no change, so the edit resolved again where the story already made it so passes it over.
   - **Run minds now** (\`lre.minds\`, \`{op: "run", who?}\`): one character, those chosen, or (nobody named) everyone Live and Near, asked from the chat so far as the turn would, with the same lore (World Info read live, each entry as secret as its text is, §4.2) and pins, four at a time. The moment is the waiting player message if there is one, else how the latest reply ended (reason \`BETWEEN_TURNS\`), and the reason recorded is \`gm\`. It opens no \`minds.round\`, so the narrator's next Minds section has these minds only if the cadence runs them again. Everyone Live and Near is a button that says how many minds it runs and asks before it starts, since each is a model call spent at once.
   - The run's minds are one \`fix\` entry with its Undo; while a reply is being written the edit is held and lands when it finishes (\`pending\`). Progress, each mind's outcome with why it failed in words (\`helperJson\`'s failure reasons), its time, tokens and pinned lore, go to the requesting session as \`lre.minds.update\`; \`{op: "cancel"}\` stops it and records nothing, and \`{op: "status"}\` reads the latest run. One run per chat at a time; it stops at the user's **Minds run on demand** limit (\`timeouts.mindsRunMs\`, 10 minutes by default, or none).
@@ -93222,7 +93237,8 @@ Each person knows what they know: facts, and who holds each and how, kept in the
 - **Holdings,** per person including the player character (never in \`chars\`, which is for minds): how they came by it (\`authored\`, \`witnessed\`, \`told\`, \`inferred\` or \`guessed\`), who told them (a told one names its teller), the evidence it rests on (facts, and their witness entries by \`witnessRef\`, which outlives the witness log's bound), since when (its message and game time), what they take it to be (\`true\`, \`false\` or \`uncertain\`), how sure (0 to 1), and whom they keep it from. A holding under the threshold (Settings → Minds → Knowledge, 0.7 by default) is a suspicion (\`isSuspicion\`); no holding is not knowing.
 - **Events,** each applied from its own data and the minds slice: \`minds.fact\` (a fact recorded whole; one already held is replaced, its holders kept), \`minds.learn\` (people hold a fact as given, in place of any holding of it), \`minds.forget\`, \`minds.keep\` (whom someone keeps a fact from; none is no one) and \`minds.settle\` (its truth). Each checks that what it names is in the world and the chat: the fact, the learners, a teller and those it's kept from (never a learner), and each fact it rests on. Every limit (a claim's length, how many) is a setting applied by whatever proposes the event, never in the fold, so changing one changes no past turn. Every describer words nothing for a player.
 - **Readers:** \`factsOf\`, \`holdingsOf\`, \`knowersOf\`, \`isSuspicion\`, and \`trackedHoldings\` (none once the chat switched tracking off). Whose holdings a consumer gets is that consumer's view.
-- **Settings** (\`UserSettings.minds.knowledge\`, Settings → Minds → Knowledge, the user's own, so no Model use preset sets them): tracking on (the default) or off; the threshold (0.7); the knowledge step one call per scene (the default) or per character (\`batch\`); the limits (\`KNOWLEDGE_LIMITS\`, each a whole number, none negative and a claim at least one character): a claim's length (\`claimChars\`, 240), the tokens a mind's own holdings (\`mindTokens\`, 400), the narrator's Who knows what (\`narratorTokens\`, 600) and the step's context (\`stepTokens\`, 4,000) may take, the claims a chat holds (\`factsPerChat\`, 512), the holders a fact has (\`holdersPerFact\`, 64), the new facts (\`factsPerTurn\`, 3: most turns need none) and learnings (\`learningsPerTurn\`, 24) a turn records, the turns a learning keeps its fact in play (\`inPlayTurns\`, 3) and the facts per person in Who knows what (\`perPerson\`, 3); and the user's own wording of its texts (\`prompts\`, by id, \`KNOWLEDGE_TEXTS\`; one left out or emptied reads as shipped, \`knowledgeText\`, and an id knowledge doesn't send is dropped): a mind's What you know title and lead, the templates a holding reads in (known, suspected, disbelieved, unsure, whom it's kept from, "everyone", and each way of coming by it), Who knows what's person line, "Everyone here" line and "doesn't know" line, and every text of the knowledge step's context and its answer's instructions (the \`step…\` ids, below). The step's own prompt is \`minds.prompts.knowledge\` (§24.5).
+- **Settings** (\`UserSettings.minds.knowledge\`, Settings → Minds → Knowledge, the user's own, so no Model use preset sets them): tracking on (the default) or off; the threshold (0.7); the knowledge step one call per scene (the default) or per character (\`batch\`); the limits (\`KNOWLEDGE_LIMITS\`, each a whole number, none negative and a claim at least one character): a claim's length (\`claimChars\`, 600: the longest claim, and why it matters, the step writes, told to its model and cut at a word past it, the cut said as a mind's are), the tokens a mind's own holdings (\`mindTokens\`, 1,600), the narrator's Who knows what (\`narratorTokens\`, 1,600) and the step's context (\`stepTokens\`, 4,000) may take, the claims a chat holds (\`factsPerChat\`, 512), the holders a fact has (\`holdersPerFact\`, 64), the new facts (\`factsPerTurn\`, 3: most turns need none) and learnings (\`learningsPerTurn\`, 24) a turn records, the turns a learning keeps its fact in play (\`inPlayTurns\`, 3) and the facts per person in Who knows what (\`perPerson\`, 3); and the user's own wording of its texts (\`prompts\`, by id, \`KNOWLEDGE_TEXTS\`; one left out or emptied reads as shipped, \`knowledgeText\`, and an id knowledge doesn't send is dropped): a mind's What you know title and lead, the templates a holding reads in (known, suspected, disbelieved, unsure, whom it's kept from, "everyone", and each way of coming by it), Who knows what's person line, "Everyone here" line and "doesn't know" line, and every text of the knowledge step's context and its answer's instructions (the \`step…\` ids, below). The step's own prompt is \`minds.prompts.knowledge\` (§24.5). A settings file from before revision 9 with a claim's length, a mind's tokens or the narrator's still at its old default (240, 400, 600) has it lifted to the new one.
+- **A fact of the world's own reads whole** (\`factText\`): one an earlier build recorded cut to a claim's length (its claim the start of its entry's text, ending in "…") reads as its entry does wherever the world still holds it: a lore entry's text, a stage's truth, and a World Info entry's or mark's text while the entry reads as it did when the fact was recorded (\`textHash\`, which only a turn's world, its books' lore live, holds). It does wherever a fact's claim is read (GM → Minds, a mind's What you know, the narrator's Who knows what, the knowledge step's context and witness lines, Play's What you know, the knowledge tools). A claim made in play, a field as it was, an entry the world no longer holds and one changed since read as recorded, so what the chat recorded stands and no event is rewritten.
 - **From the start:** \`world.minds.holdings\` (§24.2; Build → World → Minds → What they know from the start) gives people facts they hold as the chat starts; a World Info entry's secret marks name their own holders. Both are seeded (below).
 - **Tracking it** (\`minds.knowledge\`, \`{on, threshold?}\`): a chat tracks knowledge by its own switch (GM → This chat), else the user's (\`knowledgeOn\`). The pre phase records the switch, minds on or off, only when it changes in a chat that holds knowledge, so the turn's sections and screens read it as set and a chat that never held any folds as it always did; it records the user's threshold the same way, only when it differs from the one the chat last recorded (\`knowledgeThreshold\`, the default until then), and every reader of the chat reads that one: what counts as revealed (\`revealsFact\`, below), What you know's Suspicion badge, GM → Minds, and the wording of Who knows what, a mind's What you know and the knowledge step's context, so none disagrees while a changed setting waits for the chat's next turn. Off (\`MindsKnowledge.off\`, \`knowledgeTracked\`), every reader reads as before knowledge: nothing is seeded and no knowledge step runs, the memory step records telling again, minds read their secrets in who they are, Who knows what has no lines, What you know says the chat doesn't track it, and no holding counts as revealed. What was recorded stays, for when it is switched on again.
 - **Seeding** (\`seedKnowledge\`, \`backend/knowledge-seed.ts\`): after each reply while the chat tracks knowledge, minds on or off, before the knowledge step, the post phase records what the world authors that the chat doesn't hold yet, as \`minds.fact\` and \`minds.learn\` events (\`how: authored\`, no message, at the clock) with the turn, so a replay never reads a book again. Its sources:
@@ -93231,7 +93247,7 @@ Each person knows what they know: facts, and who holds each and how, kept in the
   - \`world.minds.holdings\`, as the author gave them (a field's claim reads "<name>'s <field label>: <value>");
   - World Info secret marks: whom a mark names as knowing it hold it, kept from whom it says, each mark \`wi:<book>:<entry>:<n>\` in the entry's order, or the whole entry (\`wi:<book>:<entry>\`) when its text is one mark; an entry an earlier build made secret, with no mark, is held by its lore's holders but the player character, to whom its gate opens it (so it counts as revealed to them only once a reveal or the GM gives it them), kept from everyone. Each is about what the entry links, with the hash of the entry's text (\`textHash\`).
 
-  A fact the chat already holds is never seeded again, nor its holdings, so what the story and the GM made of it stands (a forgotten holding stays forgotten): the chat's first knowledge turn seeds it all, and a later one only what is new. A book entry is read again only when no fact of it the chat records has the hash of its text as the turn's lore read it (every lore entry read from a book carries the hash of the text read now, a world entry indexed from one too, \`indexedEntry\`, while the world keeps the hash it was indexed with), and seeded again only when the text read isn't one its facts were recorded from (\`textHash\`). Its marks are then recorded anew, and whoever they now name who doesn't hold one learns it. A book that can't be read seeds nothing that turn and is read on the next. Every claim is cut to \`claimChars\`. Cue grants stay as they were: a cue's character still reads its truth in who they are (§24.5).
+  A fact the chat already holds is never seeded again, nor its holdings, so what the story and the GM made of it stands (a forgotten holding stays forgotten): the chat's first knowledge turn seeds it all, and a later one only what is new. A book entry is read again only when no fact of it the chat records has the hash of its text as the turn's lore read it (every lore entry read from a book carries the hash of the text read now, a world entry indexed from one too, \`indexedEntry\`, while the world keeps the hash it was indexed with), and seeded again only when the text read isn't one its facts were recorded from (\`textHash\`). Its marks are then recorded anew, and whoever they now name who doesn't hold one learns it. A book that can't be read seeds nothing that turn and is read on the next. Every claim keeps its entry's text whole, whitespace collapsed: \`claimChars\` is for the claims the knowledge step writes. Cue grants stay as they were: a cue's character still reads its truth in who they are (§24.5).
 - **The knowledge step** (purpose \`knowledge\`, \`backend/knowledge-step.ts\`): after the reply, while the chat tracks knowledge and its step card isn't switched off, minds on or off; it waits for the reply's read, since it reads what the read found, and works on the state seeding left. It rides on the story: the chat itself, which the narrator and minds read, with the witness logs and presence records, is what everyone who was there knows of a scene, and the step never restates it. It records only the few facts, usually none and at most one or two, that would change what someone does, says, hides, or believes about another person: a secret, a revelation or a lie; something a person would act on, hide, trade, or be hurt or helped by; a promise or debt that rests on it; an open question someone is pursuing. Something said or done in plain view is a fact only when it is one of these, so a revelation or a promise made aloud still is; the story holds the rest, and small talk, advice and description never are facts. Each new fact says why it matters and to whom (\`matters\`). Its default wording says so (its prompt, \`MIND_PROMPT_DEFAULTS.knowledge\`, and its answer's instructions, \`stepAnswer\`), both the user's to word with a reset; the per-turn limits stay settings (\`factsPerTurn\`, 3 by default). One call for the scene, or one per person, about everyone who could perceive the turn: the player character, whoever heard the player's message and whoever it met at its end (\`perceivers\`, \`knowledgeBatches\`). The calls go one after another (\`knowledgeCalls\`): each is asked once the one before it is checked, on what that left, and reads the facts the calls before it made, so it names one of them by its id rather than making it again in its own words.
   - **Its context** (\`knowledgeContext\`), within \`stepTokens\`: what happened (the player's message, the reply as displayed, the turn's notable lines as an onlooker's, \`witnessLines\`, and the changes the read found, in words); who could perceive it and from when (there throughout; there from the start but not at its end; or came in or met at its end: the two last witnessing none of it, though they may be told); the facts in play, by id; the facts the turn's calls before it made, by id and claim, in the order they were made (\`stepMade\`: none for a turn's first call, so none for the scene's one); while any fact is listed, under them, that each is one fact however it is worded, so someone who learns one, in its words or in others, learns it by its id and it is never made again (\`stepReuse\`); the lore pinned to the step (\`lorePins.steps.knowledge\`, read once a turn as no one, within the pinned source's limit, §24.5); and for each person the call is about, what they are like (their sheet; none for the player character), what they hold, the most relevant first, and their latest witness lines by ref (\`witnessRef\`). Over the limit the reply loses its beginning first, then each person's holdings and witness lines go in a round at a time, so the limit cuts each person's least. A claim's secret marks are given marked.
   - **Its answer** (\`KnowledgeOutput\`, JSON, the format's third version, \`KNOWLEDGE_ANSWER_SHAPE\`): \`facts\` (each new one with a ref of the answer's own, a short claim, why it matters and to whom, \`matters\`, whom or where it is about, and its truth: \`true\`, \`false\` or \`open\`), \`learned\` (who came to know a fact and how: \`witnessed\`, naming only who was there but missed it, \`missed\`, a whisper out of earshot, someone asleep or looking away, "you" for the player character; or \`told\`, naming whom it was told to, \`who\`, and by whom; and whom they mean to keep it from), \`inferred\` (what someone worked out: a confidence, the evidence and a belief) and \`doubted\` (a held fact someone now doubts: a confidence and a belief). A fact is named by its id (one in play, or one the turn's calls before it made), a witness line by its ref, and a new fact by the answer's own ref, each bare or as the context shows an id, in its square brackets (\`[n1]\` is \`n1\`): a new fact's ref is kept without them, as a learning's, an inference's or a doubt's fact and an inference's evidence are read, so a ref written either way names the same fact everywhere in the answer. A name resolves to someone in the world; "you" is the player character. The earlier versions are still read beside it (§16: a new version, read beside the old): the first's witnessed learnings, which named each witness (\`who\`, without \`missed\`), as they name them, and the second's, which named who missed it, as before; their new facts, which said nothing of why they matter, are refused as any such fact is (below), while a fact the chat already holds needs no reason, by its id or restated. Recorded events are what a replay reads, so no recorded chat parses an answer again.
@@ -95657,15 +95673,16 @@ Three sections are there whether minds are on or off:
   - **Texts**: the words knowledge sends a model besides its own prompt, folded by where they appear: **What a mind reads**, **How a fact someone holds reads**, **The narrator's Who knows what** (including **What everyone here holds alike**) and **The knowledge step's context** (including **Facts this turn already made**, **Reusing a listed fact**, which tells the step that a fact it lists is one fact however it is worded, and **What the turn can still record**, the new facts, learnings and room in the chat it has left). Each starts from the shipped text with a **Shipped** or **Your own** badge, and **Save**, **Revert** and **Reset**. Placeholders such as \`{{claim}}\` must stay: a wording that leaves one out can't be saved. Saving the shipped text unchanged, or an empty one, keeps no copy.
 - **Memory**: **Your overrides**, folded away, with a badge counting the ones you set. Each of the world's memory settings (see [Character minds in a world](#character-minds-in-a-world)) says "The world's applies (built in: …)" until you set your own; then it shows a **Yours** badge and **Use the world's**, which goes back to the world's.
 - **Prompts**: a row for each minds step (Character minds, Character memory, Time-skip beats, Memory consolidation, Who knows what), with a **Built-in** or **Your own** badge. Open it for the text, with **Save**, **Revert** and **Reset to the default**; the built-in text is under **The built-in default**, inside it. **Save** keeps your own; **Reset to the default** drops it. Saving the built-in text unchanged keeps no copy, so you get later improvements to it. Your own prompt wins over a world's own step template for that step, and the world's template over the built-in. **Who knows what** is the knowledge step's own prompt.
+- **Lengths**: how long each text the minds steps write may be, in characters (a mind's monologue, depiction, intent, each reaction, mood and why they'd interrupt a time skip; each memory note, commitment, plan and thing told; their summary; why a time-skip moment is worth stopping at), how many of each list one answer gives (reactions, notes, commitments, plans, things told), and how long your own intent for a character may be in **GM → Minds**. Each step's model is told these lengths after its answer format, whoever worded it, so it writes to them. A longer text is cut at a word and ends in …, and a longer list loses its last items; when that happens the call's entry in the **Context** panel and your diagnostics log say what was cut and that this is where to raise it. What you write in **GM → Minds** is refused past its length, never cut. A length that differs from the default shows the default beside it. Changing one never changes what a past turn recorded.
 
-The **Model use** presets set minds too: **Lean** turns them off; **Standard** runs up to 3 Live minds and 2 refreshes a turn, with memory notes for Live characters; **Full** has no limits, with notes for Live and Near. Picking a preset resets everything above but what a mind reads, knowledge, your prompts and your memory; changing any of the rest makes the preset **Custom**. The Minds section's own budget is 1,200 tokens on Lean, 2,400 on Standard and 4,000 on Full, and a mind recalls up to 4,000 tokens of past turns unless the world or your memory overrides say otherwise (either can say **no limit**). Where each minds step runs (its connection, model, effort and max tokens) is in **Settings → Steps and connections**, as for the other steps; what a mind reads, its lore included, is set here, and the memory, time-skip and consolidation steps read only the lore pinned to them in Build. A minds step you haven't set there shows **On**, on the helper model with 8,192 max tokens, because that is how it runs; only its **Enabled** switch turns it off. **Time-skip beats** is the exception: it shows **Off**, and runs only once you turn it on. Minds' calls aren't counted in the presets' step counts above: a turn makes one call per mind that runs, and after the reply one memory call per character who heard your message, at a level you picked, and now and then a consolidation.
+The **Model use** presets set minds too: **Lean** turns them off; **Standard** runs up to 3 Live minds and 2 refreshes a turn, with memory notes for Live characters; **Full** has no limits, with notes for Live and Near. Picking a preset resets everything above but what a mind reads, knowledge, your prompts, your memory and your lengths; changing any of the rest makes the preset **Custom**. The Minds section's own budget is 1,200 tokens on Lean, 2,400 on Standard and 4,000 on Full, and a mind recalls up to 4,000 tokens of past turns unless the world or your memory overrides say otherwise (either can say **no limit**). Where each minds step runs (its connection, model, effort and max tokens) is in **Settings → Steps and connections**, as for the other steps; what a mind reads, its lore included, is set here, and the memory, time-skip and consolidation steps read only the lore pinned to them in Build. A minds step you haven't set there shows **On**, on the helper model with 8,192 max tokens, because that is how it runs; only its **Enabled** switch turns it off. **Time-skip beats** is the exception: it shows **Off**, and runs only once you turn it on. Minds' calls aren't counted in the presets' step counts above: a turn makes one call per mind that runs, and after the reply one memory call per character who heard your message, at a level you picked, and now and then a consolidation.
 
 ### Minds in GM mode
 
 **GM → Minds** starts with the chat's time (**Now**) and **This world's secrecy**, then **The player character**, whose row opens what your own character knows (they have no mind: you decide for them), then **Search by name** and a level filter (**Every level**, or one level). Below, every character but you, closest on the ladder first: their name, their level, when they last thought (or **No mind yet**), a **Pinned**, **Refresh** or **Intent** badge, and their score. Tap someone for their page, with a back button to **Minds**:
 
 - **Fidelity**: their level and score, and each thing that added to it. Under **Pin and refresh**, **Pin their fidelity** opens a page that keeps them at a level in this chat whatever their score (**By score** unpins); its button stays off until you pick something other than what's in force. The author's pin, if any, has its own row. **Refresh their mind next turn** opens a page that asks for a fresh mind on the next turn, whatever the refresh settings say.
-- **Your intent for them**: what they mean to do now, as you set it. Its page has **What they mean to do**, in your own words (up to 600 characters), and **How they go about it**: **Their mind decides** (the default), **Reactive** (they answer the scene and what they're asked, and start nothing of their own) or **Proactive** (they pursue their own aims without waiting to be asked). Either can be set alone. Their own mind reads it first, right after who they are, and works from it, so the story follows what they then intend; it is never cut to fit, and no other character's mind, the narrator or anything in Play ever sees it. It stays until you change it: emptying both, or **Clear intent**, clears it, and its edit's **Undo** brings it back. Swipes keep it, as they keep a pin.
+- **Your intent for them**: what they mean to do now, as you set it. Its page has **What they mean to do**, in your own words (up to 1,200 characters, or what **Settings → Minds → Lengths** sets), and **How they go about it**: **Their mind decides** (the default), **Reactive** (they answer the scene and what they're asked, and start nothing of their own) or **Proactive** (they pursue their own aims without waiting to be asked). Either can be set alone. Their own mind reads it first, right after who they are, and works from it, so the story follows what they then intend; it is never cut to fit, and no other character's mind, the narrator or anything in Play ever sees it. It stays until you change it: emptying both, or **Clear intent**, clears it, and its edit's **Undo** brings it back. Swipes keep it, as they keep a pin.
 - **Latest mind**: when and why it ran, where they were, their mood, monologue, depiction, intent and reactions, and whether it interrupted a time skip. A **To the narrator** badge marks what the narrator got under the world's secrecy, and a warning says when a depiction was kept from the narrator because it gave something away.
 - **What they know**: each fact they hold, with how they came by it (**From the start**, **Witnessed**, **Told by** someone, **Inferred** or **Guessed**) and since when, why it matters and to whom (**Matters:**, as the knowledge step said it; a fact from the world, or one recorded before the step said so, has none), what they make of it and how sure they are, whom they keep it from, and what it rests on: another fact they hold, or the line of their witness log itself. A **Suspicion** badge marks one held less surely than the threshold in **Settings → Minds → Knowledge** (70% by default), and a fact that is false or an open question says so. Each row opens its page: **How they came by it**, **Who told them** (a told one needs someone), **What they make of it**, **How sure (percent)**, **Whom they keep it from** (**No one**, **Everyone** or **Some people**) and **What it rests on**, then **Save**, and **Delete holding** at the bottom. **Add a holding** gives them a fact the chat already holds that they don't. Your own character's page has the same list. Each change has its edit's **Undo**, and swipes and Re-runs keep it as they keep any edit.
 - **Plans**, **Commitments** and **Memory notes**: each row opens the item's own page to edit it, with **Delete plan** (or **Delete commitment**, **Delete note**) at the bottom, and **Add a plan**, **Add a commitment** and **Add a note** open a page for a new one. A plan has what it is, its kind, when it starts (hours from now) and how long it lasts, where, with whom, a priority from 1 (whenever it fits) to 5 (it must happen) and its status. A plan with others in it is theirs too: adding, editing or deleting it on anyone's page does it for everyone in it (each keeps their own status), someone you take out of it loses it, and someone you add gets it. A plan to **Pay someone** or **Lend money** also has an amount, shown beside its kind, and needs someone it is with: the money goes to the first of them at the plan's time. A plan their mind made in a chat from before shows a **Thought** badge and "a thought from their mind, which drives nothing": it moves no one, pays nothing and stops no skip, and isn't counted among the open plans. A commitment has its kind, its text, who it is with, an optional due time (hours from now) and its status. A note has its text and a salience from 1 to 5, and shows how much it has faded.
@@ -96467,10 +96484,10 @@ function sectionsOf(markdown) {
   let body = [];
   let fenced = false;
   const flush = () => {
-    const text5 = body.join(`
+    const text4 = body.join(`
 `).trim();
-    if (trail.length > 0 && text5 !== "")
-      out.push({ title: trail.filter((t) => t !== "").join(" › "), depth: depth2, body: text5 });
+    if (trail.length > 0 && text4 !== "")
+      out.push({ title: trail.filter((t) => t !== "").join(" › "), depth: depth2, body: text4 });
     body = [];
   };
   for (const line2 of markdown.split(`
@@ -96499,10 +96516,10 @@ function partsOf(section) {
   let size = 0;
   let fenced = false;
   const flush = () => {
-    const text5 = lines.join(`
+    const text4 = lines.join(`
 `).trim();
-    if (text5 !== "")
-      parts.push({ title: `${section.title} (part ${parts.length + 1})`, depth: section.depth, body: text5 });
+    if (text4 !== "")
+      parts.push({ title: `${section.title} (part ${parts.length + 1})`, depth: section.depth, body: text4 });
     lines = [];
     size = 0;
   };
@@ -96534,9 +96551,9 @@ function stem2(word) {
   }
   return word.endsWith("s") && !/(?:ss|us|is)$/.test(word) ? word.slice(0, -1) : word;
 }
-function termsOf(text5) {
+function termsOf(text4) {
   const out = [];
-  for (const [term] of text5.toLowerCase().matchAll(TERM)) {
+  for (const [term] of text4.toLowerCase().matchAll(TERM)) {
     if (term.length < 2 || hasOwn(STOPWORDS, term))
       continue;
     out.push(/[._]/.test(term) ? term : stem2(term));
@@ -96655,9 +96672,9 @@ function guide(topic) {
         break;
       parts.push(s);
     }
-    const text5 = render(parts);
-    if (text5.length <= ANSWER_LIMIT)
-      return text5;
+    const text4 = render(parts);
+    if (text4.length <= ANSWER_LIMIT)
+      return text4;
   }
   return lookup(guideSections, wanted, 4);
 }
@@ -96834,13 +96851,13 @@ function strings4(value, base, out) {
     for (const [key, v] of Object.entries(value))
       strings4(v, `${base}${pointerOf([key])}`, out);
 }
-function snippetOf(text5, words6) {
-  const lower = text5.toLowerCase();
+function snippetOf(text4, words6) {
+  const lower = text4.toLowerCase();
   const found = words6.map((w) => lower.indexOf(w)).filter((i) => i >= 0);
   const at2 = found.length > 0 ? Math.min(...found) : 0;
-  const start = cutAt(text5, Math.max(0, at2 - 60));
-  const end = cutAt(text5, start + 160);
-  return `${start > 0 ? "…" : ""}${text5.slice(start, end).replace(/\s+/g, " ")}${end < text5.length ? "…" : ""}`;
+  const start = cutAt(text4, Math.max(0, at2 - 60));
+  const end = cutAt(text4, start + 160);
+  return `${start > 0 ? "…" : ""}${text4.slice(start, end).replace(/\s+/g, " ")}${end < text4.length ? "…" : ""}`;
 }
 function searchItems(items, words6, scope) {
   if (words6.length === 0)
@@ -97776,8 +97793,8 @@ async function orgsRead(args, ctx) {
     throw new ToolError("account cuts an organization's money to one account: give org with it (and part money, or no part).");
   const answer = (root, what) => {
     const paged = ["pointer", "offset", "from", "limit"].some((a) => args[a] !== undefined);
-    const text5 = json(root);
-    return paged || text5.length > BODY_LIMIT ? readOut(root, what, args) : { text: text5 };
+    const text4 = json(root);
+    return paged || text4.length > BODY_LIMIT ? readOut(root, what, args) : { text: text4 };
   };
   const shown4 = (page2, more = {}) => {
     const plain4 = JSON.parse(JSON.stringify(page2));
@@ -97985,9 +98002,9 @@ function action(args, ctx) {
   const params = args.params ?? {};
   if (!isRecord(params))
     throw new ToolError("params is an object: the picked option's params, as /palette/entries/<i>/options/<j>/params shows them.");
-  const text5 = textArg(args, "text");
+  const text4 = textArg(args, "text");
   return ctx.serialize(`chat:${chatId}`, async () => {
-    const words6 = text5 !== undefined && text5.trim() !== "" ? text5 : undefined;
+    const words6 = text4 !== undefined && text4.trim() !== "" ? text4 : undefined;
     const body = await ask(ctx, chatId, "lre.action", { chatId, action: id, params, source: "palette", ...atOnceByDefault(id) && words6 === undefined ? {} : { now: true }, ...words6 !== undefined ? { text: words6 } : {} });
     return { text: json("messageId" in body ? { chatId, action: id, messageId: body.messageId, reply: REPLY } : ("pending" in body) ? { chatId, action: id, applied: true, pending: body.pending, ...queuedOf(body), ...body.undo ? { undo: body.undo } : {} } : { chatId, action: id, applied: true, pending: false }) };
   });
@@ -98000,7 +98017,7 @@ function timelapse(args, ctx) {
   const overrides = args.overrides ?? {};
   if (!isRecord(overrides))
     throw new ToolError(`overrides is an object of interrupt classes (${INTERRUPT_CLASSES.join(", ")}) to stop, note or ignore.`);
-  const text5 = textArg(args, "text");
+  const text4 = textArg(args, "text");
   return ctx.serialize(`chat:${chatId}`, async () => {
     const offered = (await stateOf2(ctx, chatId)).view.palette?.timelapse ?? null;
     if (offered === null)
@@ -98008,7 +98025,7 @@ function timelapse(args, ctx) {
     if (offered.blocked !== null)
       throw new ToolError(`Chat ${chatId} can't timelapse now: ${offered.blocked}`);
     const params = { target, overrides };
-    const body = await ask(ctx, chatId, "lre.action", { chatId, action: offered.action, params, source: "palette", now: true, ...text5 !== undefined && text5.trim() !== "" ? { text: text5 } : {} });
+    const body = await ask(ctx, chatId, "lre.action", { chatId, action: offered.action, params, source: "palette", now: true, ...text4 !== undefined && text4.trim() !== "" ? { text: text4 } : {} });
     return { text: json({ chatId, action: offered.action, target, messageId: "messageId" in body ? body.messageId : null, reply: REPLY }) };
   });
 }
@@ -98351,7 +98368,7 @@ function advanceTo(sb, target, budgetMs) {
     month.tally.add(sb, step.events, step.findings);
     month.tally.time(step.turn.processMs);
     if (sb.state.clock < end) {
-      const note2 = step.events.map((e) => e.type === ENGINE_EVENTS.note ? text5(dataOf(e).text) : "").find((t) => t.startsWith("Timelapse not run"));
+      const note2 = step.events.map((e) => e.type === ENGINE_EVENTS.note ? text4(dataOf(e).text) : "").find((t) => t.startsWith("Timelapse not run"));
       stopped = `The clock stopped at ${clockLabel(sb, sb.state.clock)}: ${step.findings.failed[0] ?? note2 ?? "the day's timelapse didn't reach its end"}.`;
       break;
     }
@@ -98372,7 +98389,7 @@ function nextMidnight(cal, clock) {
 }
 var dataOf = (e) => ("data" in e) && isRecord(e.data) ? e.data : {};
 var num8 = (v) => typeof v === "number" && Number.isFinite(v) ? v : 0;
-var text5 = (v) => typeof v === "string" ? v : "";
+var text4 = (v) => typeof v === "string" ? v : "";
 var SLOWEST = 5;
 
 class Tally {
@@ -98411,14 +98428,14 @@ class Tally {
       }
       const d = dataOf(e);
       if (e.type === FINANCE_EVENTS.statement)
-        this.bills.push({ account: named(text5(d.account)), id: text5(d.account), owed: money6(num8(d.closing)), interest: money6(num8(d.interest)), minimum: money6(num8(d.minimum)), due: formatClock(cal, num8(d.due)) });
+        this.bills.push({ account: named(text4(d.account)), id: text4(d.account), owed: money6(num8(d.closing)), interest: money6(num8(d.interest)), minimum: money6(num8(d.minimum)), due: formatClock(cal, num8(d.due)) });
       else if (e.type === "economy.payslip")
-        this.pays.push({ worker: named(text5(d.worker)), job: named(text5(d.job)), gross: money6(num8(d.gross)), net: money6(num8(d.net)), through: formatClock(cal, num8(d.through)) });
+        this.pays.push({ worker: named(text4(d.worker)), job: named(text4(d.job)), gross: money6(num8(d.gross)), net: money6(num8(d.net)), through: formatClock(cal, num8(d.through)) });
       else if (e.type === FINANCE_EVENTS.flowRun) {
-        const id = text5(d.flow);
-        const row = this.flows.get(id) ?? { label: text5(d.label) || id, runs: 0, paid: 0, outcomes: {} };
+        const id = text4(d.flow);
+        const row = this.flows.get(id) ?? { label: text4(d.label) || id, runs: 0, paid: 0, outcomes: {} };
         row.runs++;
-        const outcome = text5(d.outcome) || "ran";
+        const outcome = text4(d.outcome) || "ran";
         if (outcome !== "declined")
           row.paid += num8(d.cents);
         row.outcomes[outcome] = (row.outcomes[outcome] ?? 0) + 1;
@@ -98536,7 +98553,7 @@ var package_default = {
 // src/cli/version.ts
 var CLI_NAME = "lumirpengine";
 var CLI_VERSION = package_default.version;
-var BUILD = "e34d9cf4";
+var BUILD = "6f56e6d8";
 function runtimeCannotFollow(bun) {
   if (bun === undefined)
     return null;
@@ -99030,8 +99047,8 @@ function upChain(world, packKinds, kind, visit2) {
   return;
 }
 function words6(id) {
-  const text6 = id.replace(/[._]/g, " ");
-  return text6.charAt(0).toUpperCase() + text6.slice(1);
+  const text5 = id.replace(/[._]/g, " ");
+  return text5.charAt(0).toUpperCase() + text5.slice(1);
 }
 function rulesetIn(doc) {
   const ruleset = isRecord(doc.ruleset) ? doc.ruleset : {};
@@ -99952,9 +99969,9 @@ async function pinsRead2(args, ctx) {
 }
 async function saveTool(args, ctx) {
   const chatId = neededText(args, "chatId", "the chat's id (lre_chats lists them)");
-  const text6 = textArg(args, "text");
+  const text5 = textArg(args, "text");
   const live = ctx.live();
-  const saved = await live.conn.request("lre.lore", text6 === undefined ? { op: "save", chatId } : { op: "save", chatId, text: text6 });
+  const saved = await live.conn.request("lre.lore", text5 === undefined ? { op: "save", chatId } : { op: "save", chatId, text: text5 });
   if (saved.worldId === undefined || saved.id === undefined)
     throw new ToolError("LumiRPEngine saved the entry but didn't say where; lre_draft of the chat's world shows it.");
   const draft = await live.draft(saved.worldId);
@@ -100699,9 +100716,9 @@ ${lines.join(`
 `).join("");
 }
 function jsonFrom(option, given, io) {
-  const text6 = /^\s*([[{"]|-?\d|true\s*$|false\s*$|null\s*$)/.test(given) ? given : io.readFile(given);
+  const text5 = /^\s*([[{"]|-?\d|true\s*$|false\s*$|null\s*$)/.test(given) ? given : io.readFile(given);
   try {
-    return JSON.parse(text6);
+    return JSON.parse(text5);
   } catch (error) {
     throw new UsageError(`${option} isn't JSON: ${error instanceof Error ? error.message : String(error)}`);
   }
@@ -100753,10 +100770,10 @@ function opsFrom(p, io) {
   const given = one(p, "--ops");
   if (given === undefined)
     throw new UsageError("edit needs --ops: a JSON Patch list, inline or in a file.");
-  const text6 = /^\s*[[{]/.test(given) ? given : io.readFile(given);
+  const text5 = /^\s*[[{]/.test(given) ? given : io.readFile(given);
   let ops;
   try {
-    ops = JSON.parse(text6);
+    ops = JSON.parse(text5);
   } catch (error) {
     throw new UsageError(`--ops isn't JSON: ${error instanceof Error ? error.message : String(error)}`);
   }
@@ -100882,13 +100899,13 @@ async function writeOut(command, p, io, session, out) {
     file = await live.exportFile(worldId, revision);
     what = `“${index.name}” (${worldId}), revision ${revision}`;
   }
-  const text6 = `${JSON.stringify(file, null, 2)}
+  const text5 = `${JSON.stringify(file, null, 2)}
 `;
   if (out === null) {
-    io.out(text6);
+    io.out(text5);
     return 0;
   }
-  io.writeFile(out, text6);
+  io.writeFile(out, text5);
   io.out(`Wrote ${what} to ${out} as an export file (Import reads it).`);
   return 0;
 }

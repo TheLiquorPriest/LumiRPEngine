@@ -558,7 +558,7 @@ var DEFAULT_MIND_READS = Object.freeze({
   life: { on: false, tokens: "none" },
   knowledge: { on: true }
 });
-var KNOWLEDGE_DEFAULTS = Object.freeze({ enabled: true, threshold: 0.7, batch: "scene", callsAtOnce: 1, claimChars: 240, mindTokens: 400, narratorTokens: 600, stepTokens: 4000, factsPerChat: 512, holdersPerFact: 64, factsPerTurn: 3, learningsPerTurn: 24, inPlayTurns: 3, perPerson: 3, prompts: {} });
+var KNOWLEDGE_DEFAULTS = Object.freeze({ enabled: true, threshold: 0.7, batch: "scene", callsAtOnce: 1, claimChars: 600, mindTokens: 1600, narratorTokens: 1600, stepTokens: 4000, factsPerChat: 512, holdersPerFact: 64, factsPerTurn: 3, learningsPerTurn: 24, inPlayTurns: 3, perPerson: 3, prompts: {} });
 var KNOWLEDGE_RANGES = { threshold: [0, 1], claimChars: [1, Number.MAX_SAFE_INTEGER], tokens: [0, Number.MAX_SAFE_INTEGER], count: [0, Number.MAX_SAFE_INTEGER], atOnce: [1, 8] };
 var KNOWLEDGE_TEXTS = Object.freeze({
   mindTitle: "What you know",
@@ -616,13 +616,14 @@ function knowledgeText(settings, id) {
 function fillText(text, values) {
   return text.replace(/\{\{(\w+)\}\}/g, (whole2, key) => hasOwn(values, key) ? values[key] ?? whole2 : whole2);
 }
+var MIND_LENGTH_DEFAULTS = Object.freeze({ monologue: 2000, depiction: 1000, intent: 600, reaction: 300, reactions: 4, mood: 60, interrupt: 400, note: 600, notes: 4, commitment: 400, commitments: 3, plan: 300, plans: 4, told: 400, tolds: 3, summary: 1800, reason: 300, gmIntent: 1200 });
 var MINDS_PRESETS = Object.freeze({
   lean: { enabled: false, liveLimit: 3, nearRefresh: { scene: true, mention: true, turns: 6, minutes: 120 }, farRefreshMinutes: 1440, refreshLimit: 1, memoryLevels: [], tokens: 1200, skip: { maxBeats: 4, maxMindsPerBeat: 2 } },
   standard: { enabled: true, liveLimit: 3, nearRefresh: { scene: true, mention: true, turns: 6, minutes: 120 }, farRefreshMinutes: 1440, refreshLimit: 2, memoryLevels: ["live"], tokens: 2400, skip: { maxBeats: 6, maxMindsPerBeat: 3 } },
   full: { enabled: true, liveLimit: "none", nearRefresh: { scene: true, mention: true, turns: 4, minutes: 60 }, farRefreshMinutes: 720, refreshLimit: "none", memoryLevels: ["live", "near"], tokens: 4000, skip: { maxBeats: "none", maxMindsPerBeat: "none" } }
 });
 function defaultMindsSettings(preset = "standard") {
-  return { ...structuredClone(MINDS_PRESETS[preset]), reads: structuredClone(DEFAULT_MIND_READS), memory: {}, prompts: {}, knowledge: structuredClone(KNOWLEDGE_DEFAULTS) };
+  return { ...structuredClone(MINDS_PRESETS[preset]), reads: structuredClone(DEFAULT_MIND_READS), memory: {}, prompts: {}, knowledge: structuredClone(KNOWLEDGE_DEFAULTS), lengths: { ...MIND_LENGTH_DEFAULTS } };
 }
 var MINDS_DEFAULTS = Object.freeze(defaultMindsSettings());
 var PLAN_KINDS = ["errand", "meet", "visit", "work", "rest", "leisure", "pay", "lend", "other"];
@@ -640,26 +641,6 @@ var COMMITMENT_KINDS = ["promise", "debt", "grudge", "favour", "plan", "other"];
 var COMMITMENT_STATUSES = ["open", "kept", "broken", "released"];
 var MIND_APPROACHES = ["reactive", "proactive"];
 var MINDS_KEEP = { notes: 64, openCommitments: 48, closedCommitments: 16, openPlans: 24, closedPlans: 16, witness: 48, presence: 400 };
-var MIND_TEXT_CAPS = {
-  monologue: 1200,
-  depiction: 600,
-  intent: 300,
-  gmIntent: 600,
-  reaction: 200,
-  reactions: 4,
-  plans: 4,
-  planWhat: 160,
-  mood: 40,
-  interrupt: 200,
-  note: 300,
-  notes: 4,
-  commitment: 240,
-  commitments: 3,
-  summary: 900,
-  told: 240,
-  tolds: 3,
-  reason: 160
-};
 var FACT_KINDS = ["lore", "wi", "track", "field", "claim"];
 var FACT_TRUTHS = ["true", "false", "open"];
 var HOLDING_HOWS = ["authored", "witnessed", "told", "inferred", "guessed"];
@@ -805,17 +786,17 @@ var KNOWLEDGE_ANSWER_SHAPE = 'Answer with JSON only: {"facts": [{"ref": "n1", "c
 var MIND_ANSWER_FORMATS = Object.freeze({
   mind: [
     'Answer with JSON only: {"monologue": "...", "depiction": "...", "intent": "...", "reactions": ["..."], "mood": "...", "interrupt": {"reason": "..."}}',
-    "- monologue: their private reasoning in the first person, at most six sentences.",
+    "- monologue: their private reasoning in the first person.",
     "- depiction: how they come across right now, as behaviour anyone present could see (posture, tone, what they do). Never a secret, an unspoken reason or a thought.",
     "- intent: what they mean to do next, in one sentence.",
-    '- reactions: up to three short conditional reactions ("if pressed about the cellar, changes the subject").',
+    '- reactions: short conditional reactions ("if pressed about the cellar, changes the subject").',
     "- mood: one or two words.",
     "- interrupt: only when the moment is a beat inside a time skip and what they'd do now would interrupt the player character's skipped time (seeking them out, calling them). Leave it out otherwise."
   ].join(`
 `),
   memory: [
     'Answer with JSON only: {"notes": [{"text": "...", "salience": 3}], "commitments": [{"kind": "promise|debt|grudge|favour|plan|other", "with": ["a name"], "text": "...", "due": "YYYY-MM-DD HH:MM"}], "resolved": [{"id": "...", "status": "kept|broken|released"}], "plans": [], "told": [{"to": ["a name"], "what": "..."}], "summary": "..."}',
-    "- notes: at most three things they will remember, in their own perspective; salience 1 (passing) to 5 (unforgettable).",
+    "- notes: the things they will remember, in their own perspective; salience 1 (passing) to 5 (unforgettable).",
     "- commitments: promises, debts, grudges, favours and plans with someone that this turn made; due only when a time was set.",
     "- resolved: their open commitments (listed with ids) that this turn kept, broke or released.",
     '- plans: only what this turn states they will do later: said aloud, agreed with someone, or scheduled in the story as written; never a guess at what they might do. Each {"what": "...", "kind": "errand|meet|visit|work|rest|leisure|pay|lend|other", "when": {"from": "YYYY-MM-DD HH:MM", "to": "YYYY-MM-DD HH:MM"}, "where": "a place", "with": ["a name"], "priority": 3, "amount": 20}, with local times; priority 1 (whenever it fits) to 5 (it must happen); kind pay or lend, with amount, when they mean to hand someone money, and no amount otherwise.',
@@ -825,7 +806,7 @@ var MIND_ANSWER_FORMATS = Object.freeze({
   ].join(`
 `),
   skip: 'Answer with JSON only: {"beats": [{"at": "YYYY-MM-DD HH:MM", "reason": "..."}]}, at most five, in time order; an empty list when there are none.',
-  consolidate: 'Answer with JSON only: {"summary": "..."}: at most 900 characters of plain prose, in their own perspective.',
+  consolidate: 'Answer with JSON only: {"summary": "..."}: plain prose, in their own perspective.',
   knowledge: `${KNOWLEDGE_ANSWER_SHAPE}
 ${KNOWLEDGE_TEXTS.stepAnswer}`
 });
@@ -9572,7 +9553,7 @@ var WRITE_TOOL_TEXTS = [
       { path: "part", text: "mind_memory: note, commitment or plan." },
       { path: "id", text: "mind_memory: the note's, commitment's or plan's id; leave it out to add one." },
       { path: "value", text: "mind_memory: its fields, or the ones to change, written as a JSON object; leave it out to delete it." },
-      { path: "text", text: "mind_intent: what they mean to do now, in your words (at most 600 characters); an empty text clears it." },
+      { path: "text", text: "mind_intent: what they mean to do now, in your words (at most the length Settings \u2192 Minds \u2192 Lengths gives your intent, 1,200 characters unless the user changed it; a longer one is refused); an empty text clears it." },
       { path: "approach", text: "mind_intent: reactive (they answer the scene), proactive (they pursue their own aims), or none (their mind decides)." },
       { path: "fact", text: "mind_knowledge: the fact's id, as the knowledge tools give it." },
       { path: "holding", text: 'mind_knowledge: the holding, whole, written as a JSON object: {"how": "authored", "witnessed", "told", "inferred" or "guessed", "by": who told them or null, "evidence": [fact ids], "since": {"msg", "at"}, "belief": "true", "false" or "uncertain", "confidence": 0 to 1, "keptFrom": [ids] or "everyone"}; leave it out to take it away.' }
@@ -49911,15 +49892,17 @@ function mindsOn(ctx) {
 function reject22(code, reason) {
   return { code, reason };
 }
-function capText(text4, max) {
-  const t = text4.replace(/\s+/g, " ").trim();
-  if (t.length <= max)
-    return t;
-  const cut = t.slice(0, max + 1);
-  const at2 = cut.lastIndexOf(" ");
-  return `${(at2 > max * 0.6 ? cut.slice(0, at2) : t.slice(0, max)).replace(/[\s,;:.]+$/, "")}\u2026`;
+function tidy(text4) {
+  return text4.replace(/\s+/g, " ").trim();
 }
-var text4 = (v, max) => typeof v === "string" && v.trim() !== "" ? capText(v, max) : null;
+function gmText(v, max, kept3, what) {
+  if (typeof v !== "string" || v.trim() === "")
+    return null;
+  const t = tidy(v);
+  if (max === undefined || t.length <= max || t === kept3)
+    return t;
+  return reject22("too_long", `${what} is at most ${max.toLocaleString("en-US")} characters, as Settings \u2192 Minds \u2192 Lengths has it, and this is ${t.length.toLocaleString("en-US")}`);
+}
 var minutes = (v) => typeof v === "number" && Number.isFinite(v) ? Math.round(v) : null;
 function peopleIn(ctx, v) {
   if (v === undefined)
@@ -49936,8 +49919,11 @@ function peopleIn(ctx, v) {
   }
   return [...new Set(ids2)];
 }
-function noteFrom(ctx, who, id, v, before) {
-  const body = text4(v.text, MIND_TEXT_CAPS.note) ?? before?.text ?? null;
+function noteFrom(ctx, who, id, v, before, lengths) {
+  const said2 = gmText(v.text, lengths?.note, before?.text, "A note");
+  if (typeof said2 === "object" && said2 !== null)
+    return said2;
+  const body = said2 ?? before?.text ?? null;
   if (body === null)
     return reject22("bad_value", "a note needs its text");
   const salience = v.salience === undefined ? before?.salience ?? 3 : typeof v.salience === "number" && v.salience >= 1 && v.salience <= 5 ? v.salience : null;
@@ -49945,8 +49931,11 @@ function noteFrom(ctx, who, id, v, before) {
     return reject22("bad_value", "a note's salience is 1 to 5");
   return { id: id ?? `n_${hashParts("minds.gm.note", who, String(ctx.state.clock), body).slice(0, 10)}`, text: body, salience, at: before?.at ?? ctx.state.clock };
 }
-function commitmentFrom(ctx, who, id, v, before) {
-  const body = text4(v.text, MIND_TEXT_CAPS.commitment) ?? before?.text ?? null;
+function commitmentFrom(ctx, who, id, v, before, lengths) {
+  const said2 = gmText(v.text, lengths?.commitment, before?.text, "A commitment");
+  if (typeof said2 === "object" && said2 !== null)
+    return said2;
+  const body = said2 ?? before?.text ?? null;
   if (body === null)
     return reject22("bad_value", "a commitment needs its text");
   const kind = v.kind === undefined ? before?.kind ?? "other" : COMMITMENT_KINDS.includes(v.kind) ? v.kind : null;
@@ -49964,8 +49953,11 @@ function commitmentFrom(ctx, who, id, v, before) {
   const closed = status === "open" ? null : before && before.status !== "open" ? before.closed : ctx.state.clock;
   return { id: id ?? `c_${hashParts("minds.gm.commitment", who, String(ctx.state.clock), body).slice(0, 10)}`, kind, with: withList, text: body, due, status, made: before?.made ?? ctx.state.clock, closed };
 }
-function planFrom(ctx, who, id, v, before) {
-  const what = text4(v.what, MIND_TEXT_CAPS.planWhat) ?? before?.what ?? null;
+function planFrom(ctx, who, id, v, before, lengths) {
+  const said2 = gmText(v.what, lengths?.plan, before?.what, "What a plan is");
+  if (typeof said2 === "object" && said2 !== null)
+    return said2;
+  const what = said2 ?? before?.what ?? null;
   if (what === null)
     return reject22("bad_value", "a plan needs what it is");
   const when2 = v.when === undefined ? before?.when ?? null : typeof v.when === "object" && v.when !== null && !Array.isArray(v.when) ? { from: minutes(v.when.from), to: minutes(v.when.to) } : null;
@@ -50033,7 +50025,7 @@ function knowledgeEdit(ctx, op, name) {
     return reject22("no_change", "nothing to change");
   return [{ type: MINDS_EVENTS.learn, data: { who: [op.entity], fact: op.fact, how: next.how, by: next.by, evidence: next.evidence, belief: next.belief, confidence: next.confidence, ...next.keptFrom ? { keptFrom: next.keptFrom } : {}, msg: next.since.msg, at: next.since.at } }];
 }
-function mindEdit(ctx, op) {
+function mindEdit(ctx, op, lengths) {
   const { world, state: state2, registry } = ctx;
   const e = own(state2.entities, op.entity);
   if (!e)
@@ -50050,9 +50042,12 @@ function mindEdit(ctx, op) {
   if (op.op === "mind_intent") {
     if (op.text === undefined && op.approach === undefined)
       return reject22("bad_value", "say what they mean to do, or how they go about it");
-    const text5 = op.text === undefined ? c.intent?.text ?? "" : capText(op.text, MIND_TEXT_CAPS.gmIntent);
+    const said2 = op.text === undefined ? undefined : gmText(op.text, lengths?.gmIntent, c.intent?.text, "Your intent for them");
+    if (typeof said2 === "object" && said2 !== null)
+      return said2;
+    const text4 = said2 === undefined ? c.intent?.text ?? "" : said2 ?? "";
     const approach = op.approach === undefined ? c.intent?.approach ?? null : op.approach;
-    return [{ type: MINDS_EVENTS.intent, data: { entity: op.entity, intent: text5 === "" && approach === null ? null : { text: text5, approach } } }];
+    return [{ type: MINDS_EVENTS.intent, data: { entity: op.entity, intent: text4 === "" && approach === null ? null : { text: text4, approach } } }];
   }
   const value = op.value;
   if (op.part === "note") {
@@ -50061,7 +50056,7 @@ function mindEdit(ctx, op) {
       return reject22("missing_note", `${e.name} has no such note`);
     if (value === null)
       return op.id === null ? reject22("bad_value", "say which note to delete") : [{ type: MINDS_EVENTS.noteEdit, data: { entity: op.entity, note: op.id, value: null } }];
-    const note2 = noteFrom(ctx, op.entity, op.id, value, before2);
+    const note2 = noteFrom(ctx, op.entity, op.id, value, before2, lengths);
     return "code" in note2 ? note2 : [{ type: MINDS_EVENTS.noteEdit, data: { entity: op.entity, note: note2.id, value: note2 } }];
   }
   if (op.part === "commitment") {
@@ -50070,7 +50065,7 @@ function mindEdit(ctx, op) {
       return reject22("missing_commitment", `${e.name} has no such commitment`);
     if (value === null)
       return op.id === null ? reject22("bad_value", "say which commitment to delete") : [{ type: MINDS_EVENTS.commitmentEdit, data: { entity: op.entity, commitment: op.id, value: null } }];
-    const commitment = commitmentFrom(ctx, op.entity, op.id, value, before2);
+    const commitment = commitmentFrom(ctx, op.entity, op.id, value, before2, lengths);
     return "code" in commitment ? commitment : [{ type: MINDS_EVENTS.commitmentEdit, data: { entity: op.entity, commitment: commitment.id, value: commitment } }];
   }
   const before = op.id === null ? undefined : c.plans.find((p) => p.id === op.id);
@@ -50078,7 +50073,7 @@ function mindEdit(ctx, op) {
     return reject22("missing_plan", `${e.name} has no such plan`);
   if (value === null)
     return op.id === null ? reject22("bad_value", "say which plan to delete") : [{ type: MINDS_EVENTS.planEdit, data: { entity: op.entity, plan: op.id, value: null } }];
-  const plan2 = planFrom(ctx, op.entity, op.id, value, before);
+  const plan2 = planFrom(ctx, op.entity, op.id, value, before, lengths);
   return "code" in plan2 ? plan2 : [{ type: MINDS_EVENTS.planEdit, data: { entity: op.entity, plan: plan2.id, value: plan2 } }];
 }
 
@@ -50088,8 +50083,8 @@ function mindCandidates(ctx) {
   return Object.keys(state2.entities).sort().filter((id) => id !== world.pov && kindIs(reg, world, own(state2.entities, id)?.kind ?? "", "person") && !isGone(state2, id) && acts(world, state2, id));
 }
 var NAME_FILLER = { mr: true, mrs: true, ms: true, miss: true, dr: true, sir: true, lady: true, lord: true, dame: true, the: true, of: true, de: true, van: true, von: true, la: true, le: true, old: true, young: true, captain: true, constable: true, father: true, mother: true, sister: true, brother: true, aunt: true, uncle: true };
-function words4(text5) {
-  return text5.toLowerCase().replace(/['\u2019]s\b/g, "").match(/[\p{L}\p{N}]+/gu) ?? [];
+function words4(text4) {
+  return text4.toLowerCase().replace(/['\u2019]s\b/g, "").match(/[\p{L}\p{N}]+/gu) ?? [];
 }
 function singlesOut(word) {
   return word.length >= 3 && !NAME_FILLER[word];
@@ -50301,18 +50296,38 @@ function isSuspicion(holding, threshold2) {
 function trackedHoldings(slice2, who) {
   return knowledgeTracked(slice2) ? holdingsOf(slice2, who) : {};
 }
+function factText(world, fact, id) {
+  const ref = parseFactId(id);
+  let entry = "";
+  if (ref?.kind === "lore") {
+    const lore2 = own(world.lore, ref.lore);
+    entry = lore2 ? lore2.content.trim() !== "" ? lore2.content : lore2.title : "";
+  } else if (ref?.kind === "track") {
+    const track2 = own(world.tracks, ref.track);
+    entry = (track2 ? own(track2.stages, ref.stage)?.truth : undefined) ?? "";
+  } else if (ref?.kind === "wi" && fact?.textHash !== undefined) {
+    const live = liveLoreIdOfWiFact(id);
+    const lore2 = live === null ? undefined : own(world.lore, live);
+    const source = lore2 ? loreSourceOf(lore2.source) : null;
+    entry = lore2 && source?.kind === "book" && source.hash === fact.textHash ? lore2.content : "";
+  }
+  const whole4 = entry.trim() !== "" ? entry.replace(/\s+/g, " ").trim() : "";
+  if (!fact)
+    return whole4 !== "" ? whole4 : id;
+  return whole4 !== "" && fact.claim.endsWith("\u2026") && whole4.length >= fact.claim.length && whole4.startsWith(fact.claim.slice(0, -1)) ? whole4 : fact.claim;
+}
 function keptFromIt(holding, who) {
   return holding.keptFrom === "everyone" || (holding.keptFrom?.includes(who) ?? false);
 }
 function holdingLine(claim2, h, words5) {
-  const text5 = (id) => knowledgeText(words5.texts, id);
-  const how = fillText(text5(h.how), { by: h.by === null ? "" : words5.nameOf(h.by) });
+  const text4 = (id) => knowledgeText(words5.texts, id);
+  const how = fillText(text4(h.how), { by: h.by === null ? "" : words5.nameOf(h.by) });
   const template = h.belief === "false" ? "disbelieved" : h.belief === "uncertain" ? "unsure" : isSuspicion(h, words5.threshold) ? "suspected" : "known";
-  const line2 = fillText(text5(template), { claim: claim2, how, percent: String(Math.round(h.confidence * 100)) });
+  const line2 = fillText(text4(template), { claim: claim2, how, percent: String(Math.round(h.confidence * 100)) });
   if (h.keptFrom === undefined)
     return line2;
-  const whom = h.keptFrom === "everyone" ? text5("everyone") : h.keptFrom.map(words5.nameOf).join(", ");
-  return `${line2}; ${fillText(text5("keeps"), { whom })}`;
+  const whom = h.keptFrom === "everyone" ? text4("everyone") : h.keptFrom.map(words5.nameOf).join(", ");
+  return `${line2}; ${fillText(text4("keeps"), { whom })}`;
 }
 function latestTurns(slice2, turns) {
   const seen = [];
@@ -50394,7 +50409,7 @@ function knowledgeLines(ctx, scope) {
   const place2 = placeOfEntity(state2, pov);
   const secret = worldSecrets(ctx);
   const play = { here: [pov, ...people, ...place2 ? [place2] : []], recent: latestTurns(slice2, settings.inPlayTurns), secret };
-  const claim2 = (fact, id) => applyMarks(fact?.claim ?? id, { world, state: state2 }, "omit");
+  const claim2 = (fact, id) => applyMarks(factText(world, fact, id), { world, state: state2 }, "omit");
   const others = scope === "player" ? [] : people;
   const there = others.length > 0 ? peopleThere(ctx) : [];
   const listed3 = [pov, ...others].flatMap((who) => rankedHoldings(slice2, who, play).slice(0, settings.perPerson).map((h) => ({ who, h })));
@@ -50417,22 +50432,22 @@ function knowledgeLines(ctx, scope) {
       }
     }
     for (const { who, h } of holders) {
-      const text5 = fillText(knowledgeText(settings, "person"), { name: who === pov ? "You" : name(who), line: holdingLine(claim2(h.fact, id), h.holding, words5) });
+      const text4 = fillText(knowledgeText(settings, "person"), { name: who === pov ? "You" : name(who), line: holdingLine(claim2(h.fact, id), h.holding, words5) });
       if (yours !== undefined)
-        out.push(kept3 ? { text: text5, known: "pov", secret: { keptFrom: kept3.keptFrom, known: [...new Set([...kept3.known, who])] }, group: id } : { text: text5, known: "pov", group: id });
+        out.push(kept3 ? { text: text4, known: "pov", secret: { keptFrom: kept3.keptFrom, known: [...new Set([...kept3.known, who])] }, group: id } : { text: text4, known: "pov", group: id });
       else if (keptFromIt(h.holding, pov) || secret(id, h.fact)) {
         const keeps = h.holding.keptFrom;
-        out.push({ text: text5, known: "scene", who: name(who), secret: { keptFrom: keeps === "everyone" ? "everyone" : [...new Set([...keeps ?? [], pov])], known: [who] }, group: id });
+        out.push({ text: text4, known: "scene", who: name(who), secret: { keptFrom: keeps === "everyone" ? "everyone" : [...new Set([...keeps ?? [], pov])], known: [who] }, group: id });
       } else
-        out.push({ text: text5, known: "scene", who: name(who), group: id });
+        out.push({ text: text4, known: "scene", who: name(who), group: id });
     }
     const mine = holders.find((x) => x.who === pov)?.h;
     if (mine && (mine.secret || mine.about || mine.recent))
       for (const who of others) {
         if (own(holdingsOf(slice2, who), id) !== undefined)
           continue;
-        const text5 = fillText(knowledgeText(settings, "notKnown"), { name: name(who), claim: claim2(mine.fact, id) });
-        out.push(kept3 ? { text: text5, known: "pov", secret: kept3, group: id } : { text: text5, known: "pov", group: id });
+        const text4 = fillText(knowledgeText(settings, "notKnown"), { name: name(who), claim: claim2(mine.fact, id) });
+        out.push(kept3 ? { text: text4, known: "pov", secret: kept3, group: id } : { text: text4, known: "pov", group: id });
       }
   }
   return out;
@@ -50450,14 +50465,14 @@ function buildKnownView(ctx) {
   const secrets = unrevealedSecrets(reg, world, state2);
   const hidden = hiddenNameCheck(reg, world, state2, world.pov, { stages: false });
   const name = (id) => povMayKnow(reg, world, state2, id) ? own(state2.entities, id)?.name ?? id : "someone";
-  const worded = (text5) => findLeaks(text5, secrets).length > 0 || hidden(text5) ? UNWORDED : text5;
+  const worded = (text4) => findLeaks(text4, secrets).length > 0 || hidden(text4) ? UNWORDED : text4;
   const secret = worldSecrets(ctx);
   const sure = knowledgeThreshold(slice2);
   const items = Object.entries(holdingsOf(slice2, world.pov)).sort(([a, x], [b, y]) => y.since.at - x.since.at || (a < b ? -1 : 1)).map(([fact, h]) => {
     const f = own(facts, fact);
     return {
       key: hashParts("lre.known", fact),
-      claim: secret(fact, f) && !revealsFact(fact, h, sure) ? UNWORDED : worded(applyMarks(f?.claim ?? "", { world, state: state2 }, "omit")),
+      claim: secret(fact, f) && !revealsFact(fact, h, sure) ? UNWORDED : worded(applyMarks(f ? factText(world, f, fact) : "", { world, state: state2 }, "omit")),
       how: h.how,
       byName: h.by === null ? null : name(h.by),
       sinceText: formatClock(cal, h.since.at),
@@ -50686,8 +50701,8 @@ var MINDS_LINTS = [
 ];
 
 // src/packs/minds/core/section.ts
-function clause(text5) {
-  return text5.replace(/\s+/g, " ").trim().replace(/[.;]+$/, "");
+function clause(text4) {
+  return text4.replace(/\s+/g, " ").trim().replace(/[.;]+$/, "");
 }
 function mindLines(ctx) {
   const { registry: reg, world, state: state2 } = ctx;
@@ -50698,13 +50713,13 @@ function mindLines(ctx) {
   const here = placeOfEntity(state2, pov);
   const secrecy = worldMindsOf(world).secrecy;
   let check2 = null;
-  const safe = (text5) => {
+  const safe = (text4) => {
     if (!check2) {
       const secrets = unrevealedSecrets(reg, world, state2);
       const hidden = hiddenNameCheck(reg, world, state2, pov);
       check2 = (t) => findLeaks(t, secrets).length === 0 && !hidden(t);
     }
-    return check2(text5);
+    return check2(text4);
   };
   const out = [];
   for (const id of Object.keys(slice2.chars).sort()) {
@@ -50787,9 +50802,9 @@ var ORGS_SPENT = "orgs.spent";
 var LOG_KEPT = 40;
 var SPENT_MONTHS_KEPT = 13;
 var MONTH2 = /^\d{4}-\d{2}$/;
-function orgLog(ctx, org, text5, opts = {}) {
+function orgLog(ctx, org, text4, opts = {}) {
   const names = [...new Set(opts.names ?? [])].map((id) => ({ id, name: own(ctx.state.entities, id)?.name ?? id }));
-  return { type: ORGS_LOG, data: { org, text: text5, at: ctx.state.clock, ...opts.by ? { by: opts.by } : {}, ...names.length > 0 ? { names } : {}, ...opts.power ? { power: opts.power } : {}, visibility: "secret" } };
+  return { type: ORGS_LOG, data: { org, text: text4, at: ctx.state.clock, ...opts.by ? { by: opts.by } : {}, ...names.length > 0 ? { names } : {}, ...opts.power ? { power: opts.power } : {}, visibility: "secret" } };
 }
 function actNames(ctx, act2) {
   const out = [];
@@ -50945,8 +50960,8 @@ function entryChange(ctx, a) {
     ...keys === undefined ? [] : [keys === null ? "its keys as the world has them" : keys.length === 0 ? "no keys" : `keys: ${listWords(keys.map((k) => keyWords(ctx, k, pov)))}`]
   ].join("; ");
   const where = canSeePlace(ctx.registry, ctx.world, ctx.state, pov, place2) ? own(ctx.world.places, place2)?.name ?? place2 : actor2 !== null ? "a place" : "A place";
-  const text5 = `${actor2 !== null ? `${labelOf(ctx, actor2)} set ` : ""}${where}: ${said2}`;
-  const logs = (org !== "" ? [org] : holdersOf6(ctx, place2)).map((o) => orgLog(ctx, o, text5, actor2 !== null ? { by: actor2, names: [actor2] } : {}));
+  const text4 = `${actor2 !== null ? `${labelOf(ctx, actor2)} set ` : ""}${where}: ${said2}`;
+  const logs = (org !== "" ? [org] : holdersOf6(ctx, place2)).map((o) => orgLog(ctx, o, text4, actor2 !== null ? { by: actor2, names: [actor2] } : {}));
   return [{ type: ORGS_ENTRY, data }, ...logs];
 }
 function str20(e, key) {
@@ -51271,16 +51286,16 @@ function parseOrgOp(o) {
 function refuse2(code, reason2) {
   return { code, reason: reason2 };
 }
-function plainWords(text5) {
-  return text5.trim().replace(/^=+\s*/, "");
+function plainWords(text4) {
+  return text4.trim().replace(/^=+\s*/, "");
 }
-function historyLine(org, text5, opts = {}) {
+function historyLine(org, text4, opts = {}) {
   const names = [...new Set((opts.names ?? []).filter((id) => id !== ""))];
-  return { type: "orgs.note", args: { org, text: plainWords(text5), ...opts.by !== undefined && opts.by !== "" ? { by: opts.by } : {}, ...names.length > 0 ? { names } : {} } };
+  return { type: "orgs.note", args: { org, text: plainWords(text4), ...opts.by !== undefined && opts.by !== "" ? { by: opts.by } : {}, ...names.length > 0 ? { names } : {} } };
 }
-function withWhy(text5, why2) {
+function withWhy(text4, why2) {
   const reason2 = plainWords(why2 ?? "");
-  return reason2 === "" ? text5 : `${text5}: ${reason2}`;
+  return reason2 === "" ? text4 : `${text4}: ${reason2}`;
 }
 function flagged(ctx, by, org, power, did) {
   if (by === undefined || by === "" || by === org || orgTypeOf(ctx, org) === null || orgPower(ctx, by, org, power) !== null)
@@ -51361,8 +51376,8 @@ function compileOrgOp(ctx, op) {
       if (!job)
         return [{ type: "orgs.appoint", args: { org: op.org, who: op.who, position: op.position ?? "", why: plainWords(op.why) } }];
       const title = op.position === null ? null : positionsOf(ctx, op.org).find((p) => p.id === op.position)?.title ?? op.position;
-      const text5 = title === null ? `${name(op.who)} no longer holds a position` : `Appointed ${name(op.who)} ${title}`;
-      return [{ type: "economy.job_position", args: { job: job.id, position: op.position ?? "" } }, historyLine(op.org, withWhy(text5, op.why), { names: [op.who] })];
+      const text4 = title === null ? `${name(op.who)} no longer holds a position` : `Appointed ${name(op.who)} ${title}`;
+      return [{ type: "economy.job_position", args: { job: job.id, position: op.position ?? "" } }, historyLine(op.org, withWhy(text4, op.why), { names: [op.who] })];
     }
     case "title": {
       const bad2 = orgProblem(ctx, op.org);
@@ -51417,11 +51432,11 @@ function compileOrgOp(ctx, op) {
         return refuse2("bad_date", "a delegation ends after today");
       const fields = { powers: op.powers, ...op.payment !== undefined && op.payment > 0 ? { payment: Math.round(op.payment) } : {}, ...op.month !== undefined && op.month > 0 ? { month: Math.round(op.month) } : {}, ...op.accounts !== undefined ? { accounts: op.accounts } : {}, by: op.by };
       const limits = [...op.payment !== undefined && op.payment > 0 ? [`${money4(ctx, op.payment)} a payment`] : [], ...op.month !== undefined && op.month > 0 ? [`${money4(ctx, op.month)} a month`] : []];
-      const text5 = `${name(op.by)} let ${name(op.to)} ${op.powers.map((p) => POWER_WORDS[p]).join(", ")}${limits.length > 0 ? `, up to ${limits.join(" and ")}` : ""}${op.until !== undefined ? `, until ${op.until.slice(0, 10)}` : ""}`;
+      const text4 = `${name(op.by)} let ${name(op.to)} ${op.powers.map((p) => POWER_WORDS[p]).join(", ")}${limits.length > 0 ? `, up to ${limits.join(" and ")}` : ""}${op.until !== undefined ? `, until ${op.until.slice(0, 10)}` : ""}`;
       const lacking = op.powers.find((p) => orgPower(ctx, op.by, op.org, p) === null);
       return [
         { type: "link", args: { rel: ACTS_FOR, from: op.to, to: op.org, fields, ...until2 !== undefined ? { until: until2 } : {} } },
-        historyLine(op.org, text5, { by: op.by, names: [op.by, op.to] }),
+        historyLine(op.org, text4, { by: op.by, names: [op.by, op.to] }),
         ...flagged(ctx, op.by, op.org, "delegate", `let ${name(op.to)} act for ${name(op.org)}`),
         ...lacking !== undefined && orgPower(ctx, op.by, op.org, "delegate") !== null ? flagged(ctx, op.by, op.org, lacking, `let ${name(op.to)} ${POWER_WORDS[lacking]}`) : []
       ];
@@ -51622,8 +51637,8 @@ function motionIn(raw) {
     return null;
   const what = objOf(raw.what);
   const id = strOf(raw.id);
-  const text5 = strOf(raw.text);
-  if (id === "" || text5 === "" || strOf(what.type) === "")
+  const text4 = strOf(raw.text);
+  if (id === "" || text4 === "" || strOf(what.type) === "")
     return null;
   const votes = {};
   for (const [who, v] of Object.entries(objOf(raw.votes))) {
@@ -51634,7 +51649,7 @@ function motionIn(raw) {
   const num8 = (v, fallback) => typeof v === "number" && Number.isFinite(v) ? v : fallback;
   return {
     id,
-    text: text5,
+    text: text4,
     what: { type: strOf(what.type), args: objOf(what.args) },
     by: strOf(raw.by),
     ...strOf(raw.party) !== "" ? { party: strOf(raw.party) } : {},
@@ -51733,10 +51748,10 @@ function carryOut(ctx, rng, org, id, what) {
   return def.resolve({ ...what.args }, { ...ctx, rng, params: {}, effect: { type: what.type, args: { ...what.args } }, carried: { org, motion: id } });
 }
 function ended(ctx, org, m, status, why2, tally, by) {
-  const text5 = status === "passed" ? `Carried by vote (${why2.replace(/^carried: /, "")}): ${m.text}` : status === "withdrawn" ? `Withdrew the motion: ${m.text}` : `The motion failed (${why2}): ${m.text}`;
+  const text4 = status === "passed" ? `Carried by vote (${why2.replace(/^carried: /, "")}): ${m.text}` : status === "withdrawn" ? `Withdrew the motion: ${m.text}` : `The motion failed (${why2}): ${m.text}`;
   return [
     { type: ORGS_MOTION_END, data: { org, id: m.id, status, why: why2, result: tally, at: ctx.state.clock, ...by !== undefined && by !== "" ? { by } : {}, visibility: povIn(ctx, m) ? "public" : "secret" } },
-    orgLog(ctx, org, text5, { ...by !== undefined && by !== "" ? { by } : {}, names: [m.by, ...Object.keys(m.electorate), ...actNames(ctx, m.what)].filter((id) => id !== "") })
+    orgLog(ctx, org, text4, { ...by !== undefined && by !== "" ? { by } : {}, names: [m.by, ...Object.keys(m.electorate), ...actNames(ctx, m.what)].filter((id) => id !== "") })
   ];
 }
 function settle4(ctx, rng, org, m, final) {
@@ -52217,9 +52232,9 @@ function openAndFund(ctx, w, f, o) {
   const stamp = f.founder === f.by || f.by === "" ? {} : { by: f.by, as: f.founder };
   return applyAll3(w, paid.map((e) => e.type === FINANCE_EVENTS.txn && ("data" in e) ? { ...e, data: { ...e.data, category: o.category, ...stamp } } : e)) ?? account;
 }
-function foundedLines(w, f, id, text5, theirs) {
+function foundedLines(w, f, id, text4, theirs) {
   const by = f.by !== "" ? { by: f.by } : {};
-  return f.founder === f.by ? [orgLog(w.ctx, id, text5, { by: f.by, names: [f.by] })] : [orgLog(w.ctx, id, text5, { ...by, names: [f.founder] }), orgLog(w.ctx, f.founder, theirs, by)];
+  return f.founder === f.by ? [orgLog(w.ctx, id, text4, { by: f.by, names: [f.by] })] : [orgLog(w.ctx, id, text4, { ...by, names: [f.founder] }), orgLog(w.ctx, f.founder, theirs, by)];
 }
 function spending(ctx, f, source, beneficiary) {
   if (f.by === "" || f.founder === f.by || f.cents <= 0)
@@ -52433,8 +52448,8 @@ function restructureEvents2(ctx, a) {
   if (!Array.isArray(events3) || events3.length === 0)
     return events3;
   const from = events3.flatMap((e) => e.type === "set" && e.field === "structure_from" && typeof e.value === "string" ? [e.value] : [])[0] ?? "";
-  const text5 = `Became ${STRUCTURE_WORDS[structure] ?? structure}${from !== "" ? `, taxed as one from ${dateWords(ctx, from)}` : ""}`;
-  return [...events3, orgLog(ctx, org, text5, by !== "" ? { by } : {}), ...party !== by && party !== org ? [orgLog(ctx, party, `${labelOf(ctx, org)}: ${text5}`, { by, names: [org] })] : []];
+  const text4 = `Became ${STRUCTURE_WORDS[structure] ?? structure}${from !== "" ? `, taxed as one from ${dateWords(ctx, from)}` : ""}`;
+  return [...events3, orgLog(ctx, org, text4, by !== "" ? { by } : {}), ...party !== by && party !== org ? [orgLog(ctx, party, `${labelOf(ctx, org)}: ${text4}`, { by, names: [org] })] : []];
 }
 function registerFound(r) {
   r.effect({ type: "orgs.found", args: ["type", "name", "kind?", "cents?", "from?", "structure?", "units?", "classes?", "trustee?", "beneficiary?", "revocable?", "purpose?", "until?", "founder?", "by?"], gm: true, resolve: (a, ctx) => foundEvents(ctx, a) });
@@ -52487,8 +52502,8 @@ function registerFound(r) {
 // src/packs/orgs/core/view.ts
 var TYPE_ORDER = ["household", "company", "group", "trust", "party"];
 var HOW_ORDER = ["owner", "leader", "member", "staff", "core", "companion", "hired", "ally"];
-function dateWords(ctx, text5) {
-  return dayWords(ctx.world, text5);
+function dateWords(ctx, text4) {
+  return dayWords(ctx.world, text4);
 }
 function partyIdOf(ctx) {
   const pov = ctx.world.pov;
@@ -52689,10 +52704,10 @@ function trustOf(page) {
   if (!subject.exists || subject.type !== "trust")
     return null;
   const f = own(ctx.state.entities, subject.id)?.fields ?? {};
-  const text5 = (v) => typeof v === "string" && v.trim() !== "" ? v.trim() : null;
-  const settlor = text5(f.settlor);
-  const until2 = text5(f.until);
-  return { settlor: settlor === null ? null : page.ref(settlor), revocable: f.revocable === true, purpose: text5(f.purpose), until: until2 === null ? null : dateWords(ctx, until2), decide: trusteesDecideIn(f) };
+  const text4 = (v) => typeof v === "string" && v.trim() !== "" ? v.trim() : null;
+  const settlor = text4(f.settlor);
+  const until2 = text4(f.until);
+  return { settlor: settlor === null ? null : page.ref(settlor), revocable: f.revocable === true, purpose: text4(f.purpose), until: until2 === null ? null : dateWords(ctx, until2), decide: trusteesDecideIn(f) };
 }
 function historyOf(page) {
   const { ctx, subject, viewer } = page;
@@ -52703,7 +52718,7 @@ function historyOf(page) {
   const cal = calendarOf(ctx.world);
   return orgHistory(ctx.state, subject.id).filter((line2) => seesMoney || line2.power === undefined || !money5.includes(line2.power)).map((line2) => ({
     at: formatClock(cal, line2.at),
-    text: (line2.names ?? []).reduce((text5, n) => page.seen(n.id) ? text5 : text5.split(n.name).join("someone"), line2.text),
+    text: (line2.names ?? []).reduce((text4, n) => page.seen(n.id) ? text4 : text4.split(n.name).join("someone"), line2.text),
     by: line2.by === undefined ? null : page.ref(line2.by)
   }));
 }
@@ -52973,9 +52988,9 @@ function heldLimits(ctx, by, org, power) {
   return { limits: undefined, below: undefined };
 }
 var SCOPED2 = ["members.admit", "members.remove", "members.appoint", "staff.hire", "staff.fire", "staff.pay"];
-function withWhy2(text5, a) {
+function withWhy2(text4, a) {
   const why2 = strOf(a.why).trim();
-  return why2 === "" ? text5 : `${text5}: ${why2}`;
+  return why2 === "" ? text4 : `${text4}: ${why2}`;
 }
 function actedBy(by, power) {
   return by === "" ? {} : { by, ...power !== null ? { power } : {} };
@@ -53067,8 +53082,8 @@ function appointMember(ctx, a) {
   if (isRejection11(linked))
     return linked;
   const left = positionsOf(ctx, org).find((p) => p.id === was)?.title ?? was;
-  const text5 = position ? `Appointed ${labelOf(ctx, who)} ${position.title}` : `${labelOf(ctx, who)} no longer holds ${left}`;
-  return [...linked, orgLog(ctx, org, withWhy2(text5, a), { ...actedBy(by, "members.appoint"), names: [who] })];
+  const text4 = position ? `Appointed ${labelOf(ctx, who)} ${position.title}` : `${labelOf(ctx, who)} no longer holds ${left}`;
+  return [...linked, orgLog(ctx, org, withWhy2(text4, a), { ...actedBy(by, "members.appoint"), names: [who] })];
 }
 function titleMember(ctx, a) {
   const org = orgOf(ctx, a);
@@ -53117,7 +53132,7 @@ function setPosition2(ctx, a) {
   if (isRejection11(powers))
     return powers;
   const num8 = (k) => typeof a[k] === "number" && Number.isFinite(a[k]) ? Math.round(a[k]) : undefined;
-  const text5 = (k) => typeof a[k] === "string" && a[k] !== "" ? a[k] : undefined;
+  const text4 = (k) => typeof a[k] === "string" && a[k] !== "" ? a[k] : undefined;
   const limits = { ...before?.limits ?? {}, ...num8("payment") !== undefined ? { payment: num8("payment") } : {}, ...num8("month") !== undefined ? { month: num8("month") } : {} };
   if (limits.payment === 0)
     delete limits.payment;
@@ -53134,10 +53149,10 @@ function setPosition2(ctx, a) {
     title: strOf(a.title).trim() || before?.title || id.replace(/_/g, " "),
     powers,
     ...num8("seats") !== undefined ? { seats: num8("seats") } : {},
-    ...text5("reports_to") !== undefined ? { reports_to: text5("reports_to") } : {},
-    ...text5("scope") !== undefined ? { scope: text5("scope") } : {},
+    ...text4("reports_to") !== undefined ? { reports_to: text4("reports_to") } : {},
+    ...text4("scope") !== undefined ? { scope: text4("scope") } : {},
     ...Object.keys(limits).length > 0 ? { limits } : {},
-    ...text5("successor") !== undefined ? { successor: text5("successor") } : {},
+    ...text4("successor") !== undefined ? { successor: text4("successor") } : {},
     ...typeof a.default === "boolean" ? { default: a.default } : {}
   });
   if (!next)
@@ -53157,12 +53172,12 @@ function setPosition2(ctx, a) {
 function endOfDay2(ctx, v) {
   if (typeof v === "number" && Number.isFinite(v))
     return Math.round(v);
-  const text5 = strOf(v).trim();
-  if (text5 === "")
+  const text4 = strOf(v).trim();
+  if (text4 === "")
     return;
   try {
     const cal = calendarOf(ctx.world);
-    return clockAt(cal, dayIndexOfText(cal, text5.slice(0, 10)) + 1, 0) - 1;
+    return clockAt(cal, dayIndexOfText(cal, text4.slice(0, 10)) + 1, 0) - 1;
   } catch {
     return refuse5("bad_date", "until is a date (YYYY-MM-DD)");
   }
@@ -53685,12 +53700,12 @@ function noteIn(v) {
 }
 function common(o) {
   const id = strOf(o.id);
-  const text5 = strOf(o.text).trim();
+  const text4 = strOf(o.text).trim();
   const source = strOf(o.source);
-  if (id === "" || text5 === "" || text5.length > PLAN_LIMITS.text || !isPlanStatus(o.status) || !PLAN_SOURCES.includes(source) || typeof o.at !== "number")
+  if (id === "" || text4 === "" || text4.length > PLAN_LIMITS.text || !isPlanStatus(o.status) || !PLAN_SOURCES.includes(source) || typeof o.at !== "number")
     return null;
   const last = noteIn(o.last);
-  return { id, text: text5, status: o.status, source, at: o.at, ...strOf(o.by) !== "" ? { by: strOf(o.by) } : {}, ...last ? { last } : {} };
+  return { id, text: text4, status: o.status, source, at: o.at, ...strOf(o.by) !== "" ? { by: strOf(o.by) } : {}, ...last ? { last } : {} };
 }
 function goalIn(o) {
   const base = common(o);
@@ -53831,23 +53846,23 @@ function idsOf2(v) {
 function whenOf(ctx, v) {
   if (typeof v === "number" && Number.isFinite(v))
     return v;
-  const text5 = strOf(v).trim();
-  if (text5 === "")
+  const text4 = strOf(v).trim();
+  if (text4 === "")
     return null;
   try {
-    return clockOfLocal(calendarOf(ctx.world), text5.replace(" ", "T"));
+    return clockOfLocal(calendarOf(ctx.world), text4.replace(" ", "T"));
   } catch {
-    return { code: "bad_args", reason: `"${text5}" isn't a date and time (YYYY-MM-DD HH:MM)` };
+    return { code: "bad_args", reason: `"${text4}" isn't a date and time (YYYY-MM-DD HH:MM)` };
   }
 }
 function windowOf(v) {
-  const text5 = strOf(v).trim();
-  if (text5 === "")
+  const text4 = strOf(v).trim();
+  if (text4 === "")
     return null;
-  return text5 === "today" || /^\d{4}-\d{2}-\d{2}$/.test(text5) ? text5 : { code: "bad_args", reason: `a goal's window is "today" or a date (YYYY-MM-DD), not "${text5}"` };
+  return text4 === "today" || /^\d{4}-\d{2}-\d{2}$/.test(text4) ? text4 : { code: "bad_args", reason: `a goal's window is "today" or a date (YYYY-MM-DD), not "${text4}"` };
 }
-function words5(text5) {
-  const t = text5.trim();
+function words5(text4) {
+  const t = text4.trim();
   if (t === "")
     return { code: "bad_args", reason: "what it is, in words" };
   return t.length > PLAN_LIMITS.text ? { code: "bad_args", reason: `at most ${PLAN_LIMITS.text} characters` } : t;
@@ -53855,8 +53870,8 @@ function words5(text5) {
 function isRejection12(v) {
   return typeof v === "object" && v !== null && "code" in v && "reason" in v;
 }
-function newId2(ctx, prefix, org, text5, n) {
-  return `${prefix}_${hashParts(org, text5, String(ctx.state.clock), String(n)).slice(0, 8)}`;
+function newId2(ctx, prefix, org, text4, n) {
+  return `${prefix}_${hashParts(org, text4, String(ctx.state.clock), String(n)).slice(0, 8)}`;
 }
 function keeps(a, key) {
   return a[key] === undefined || a[key] === null;
@@ -53872,15 +53887,15 @@ function goalEvents(ctx, a) {
   const was = id === "" ? undefined : plan2.goals.find((g) => g.id === id);
   if (id !== "" && !was)
     return { code: "not_found", reason: `nothing on the plan is ${id}` };
-  const text5 = keeps(a, "text") && was ? was.text : words5(strOf(a.text));
-  if (isRejection12(text5))
-    return text5;
+  const text4 = keeps(a, "text") && was ? was.text : words5(strOf(a.text));
+  if (isRejection12(text4))
+    return text4;
   const window = keeps(a, "window") && was ? was.window ?? null : windowOf(a.window);
   if (isRejection12(window))
     return window;
   const where = keeps(a, "where") && was ? was.where ?? "" : strOf(a.where).trim();
   const status = isPlanStatus(a.status) ? a.status : was?.status ?? "open";
-  const goal = { id: was?.id ?? newId2(ctx, "g", org, text5, plan2.goals.length), text: text5, ...window !== null ? { window } : {}, ...where !== "" ? { where } : {}, status, ...was?.by ?? by ? { by: was?.by ?? by } : {}, source: was?.source ?? sourceOf3(a), at: was?.at ?? ctx.state.clock, ...was?.last ? { last: was.last } : {} };
+  const goal = { id: was?.id ?? newId2(ctx, "g", org, text4, plan2.goals.length), text: text4, ...window !== null ? { window } : {}, ...where !== "" ? { where } : {}, status, ...was?.by ?? by ? { by: was?.by ?? by } : {}, source: was?.source ?? sourceOf3(a), at: was?.at ?? ctx.state.clock, ...was?.last ? { last: was.last } : {} };
   return [{ type: ORGS_GOAL, data: { org, goal, visibility: "secret" } }];
 }
 function orderEvents(ctx, a) {
@@ -53894,9 +53909,9 @@ function orderEvents(ctx, a) {
   const was = id === "" ? undefined : plan2.orders.find((o) => o.id === id);
   if (id !== "" && !was)
     return { code: "not_found", reason: `nothing on the plan is ${id}` };
-  const text5 = keeps(a, "text") && was ? was.text : words5(strOf(a.text));
-  if (isRejection12(text5))
-    return text5;
+  const text4 = keeps(a, "text") && was ? was.text : words5(strOf(a.text));
+  if (isRejection12(text4))
+    return text4;
   const to = keeps(a, "to") && was ? was.to : idsOf2(a.to);
   if (to.length === 0)
     return { code: "bad_args", reason: "whom the order is for" };
@@ -53916,11 +53931,11 @@ function orderEvents(ctx, a) {
   const status = isPlanStatus(a.status) ? a.status : was?.status ?? "open";
   const relaid = !was || (was.when ?? null) !== when3 || (was.where ?? "") !== where || [...was.to].sort().join(",") !== [...to].sort().join(",") || when3 === null && status === "under_way" && was.status !== "under_way";
   const order = {
-    id: was?.id ?? newId2(ctx, "o", org, `${to.join(",")}:${text5}`, plan2.orders.length),
+    id: was?.id ?? newId2(ctx, "o", org, `${to.join(",")}:${text4}`, plan2.orders.length),
     ...goal !== "" ? { goal } : {},
     to,
     ...lead !== "" ? { lead } : {},
-    text: text5,
+    text: text4,
     ...where !== "" ? { where } : {},
     ...when3 !== null ? { when: when3 } : {},
     status,
@@ -54179,18 +54194,18 @@ function offerOf(ctx, p) {
     return { code: "not_found", reason: named === "" ? "who offers it" : `no one you know is ${named}` };
   if (isGone(ctx.state, who) || !acts(ctx.world, ctx.state, who))
     return { code: "not_acting", reason: `${labelOf(ctx, who)} can't take it on` };
-  const text5 = words5(strOf(p.offer));
-  if (isRejection12(text5))
-    return text5;
+  const text4 = words5(strOf(p.offer));
+  if (isRejection12(text4))
+    return text4;
   const said2 = strOf(p.said).trim().slice(0, PLAN_LIMITS.text);
   if (said2 === "")
     return { code: "bad_proposal", reason: "it quotes the story's words" };
   const when3 = whenOf(ctx, p.when);
   if (isRejection12(when3))
     return when3;
-  if (planOf3(ctx.state, org).orders.some((o) => isPlanStatusLive(o.status) && o.to.includes(who) && o.text.toLowerCase() === text5.toLowerCase()))
+  if (planOf3(ctx.state, org).orders.some((o) => isPlanStatusLive(o.status) && o.to.includes(who) && o.text.toLowerCase() === text4.toLowerCase()))
     return { code: "already", reason: "it's on the plan already" };
-  return { org, who, text: text5, where: strOf(p.where).trim(), when: when3, said: said2 };
+  return { org, who, text: text4, where: strOf(p.where).trim(), when: when3, said: said2 };
 }
 var AGENDA_CHANNEL = {
   type: "agenda",
@@ -54450,7 +54465,7 @@ function employment(ctx, p) {
   const why2 = quoted2(p);
   const name = (id) => labelOf(ctx, id);
   const flag2 = (org2, power, did) => by === undefined || org2 === null || by === who ? [] : flagged(ctx, by, org2, power, did);
-  const line2 = (org2, text5) => org2 === null ? [] : [historyLine(org2, withWhy(text5, why2), { names: [who] })];
+  const line2 = (org2, text4) => org2 === null ? [] : [historyLine(org2, withWhy(text4, why2), { names: [who] })];
   if (change2 === "hired") {
     const org2 = employerNamed(ctx, strOf(p.org));
     if (org2 === null)
@@ -54469,8 +54484,8 @@ function employment(ctx, p) {
     const basis = strOf(p.basis);
     const hire2 = { type: "economy.hire", args: { business: org2, worker: who, ...title !== "" ? { title } : {}, ...position !== null ? { position } : {}, ...basis !== "" ? { basis } : {}, ...rate !== undefined ? { rate } : {}, ...hours !== undefined ? { hours_per_week: hours } : {} } };
     const as = title !== "" ? title : position !== null ? positionsOf(ctx, org2).find((x) => x.id === position)?.title ?? "" : "";
-    const text5 = `Hired ${name(who)}${as !== "" ? ` as ${as}` : ""}`;
-    return { effects: [hire2, ...line2(orgTypeOf(ctx, org2) !== null ? org2 : null, text5), ...flag2(org2, "staff.hire", `hired ${name(who)}`)] };
+    const text4 = `Hired ${name(who)}${as !== "" ? ` as ${as}` : ""}`;
+    return { effects: [hire2, ...line2(orgTypeOf(ctx, org2) !== null ? org2 : null, text4), ...flag2(org2, "staff.hire", `hired ${name(who)}`)] };
   }
   const job = jobNamed(ctx, who, p);
   if (typeof job !== "string")
@@ -55130,8 +55145,8 @@ function succeed(ctx, org) {
       if (seatedBy === null)
         continue;
       taken.add(who);
-      const text5 = was ? `${name(who)} succeeds ${name(was.who)} as ${p.title}` : `${name(who)} takes the seat of ${p.title}`;
-      const unit3 = [...seatedBy, orgLog(ctx, org, text5, { names: was ? [who, was.who] : [who] })];
+      const text4 = was ? `${name(who)} succeeds ${name(was.who)} as ${p.title}` : `${name(who)} takes the seat of ${p.title}`;
+      const unit3 = [...seatedBy, orgLog(ctx, org, text4, { names: was ? [who, was.who] : [who] })];
       if (belongsTo(ctx, ctx.world.pov, org)) {
         const told = canSeeEntity(ctx.registry, ctx.world, ctx.state, ctx.world.pov, who) ? name(who) : "Someone";
         unit3.push({ type: ENGINE_EVENTS.signal, data: { class: "incident", text: `${told} now holds ${p.title} for ${orgName}.`, entity: org } });
@@ -55312,11 +55327,11 @@ function orgAlerts(ctx, org, viewer) {
   out.push(...decisionAlerts(ctx, org, viewer));
   return out.length > 0 ? out : null;
 }
-function dayClock(ctx, text5) {
-  if (text5 === null || !/^\d{4}-\d{2}-\d{2}$/.test(text5))
+function dayClock(ctx, text4) {
+  if (text4 === null || !/^\d{4}-\d{2}-\d{2}$/.test(text4))
     return null;
   const cal = calendarOf(ctx.world);
-  return clockAt(cal, dayIndexOfText(cal, text5), 0);
+  return clockAt(cal, dayIndexOfText(cal, text4), 0);
 }
 function orgComing(ctx, org, viewer) {
   const type = orgTypeOf(ctx, org);
@@ -55387,8 +55402,8 @@ function titlesOn(ctx) {
   return feed.include === undefined || feed.include.includes(TITLES_SOURCE);
 }
 var TITLES_SOURCE = "titles";
-function lowerFirst(text5) {
-  return /^\p{Lu}\p{Ll}/u.test(text5) ? `${text5.charAt(0).toLowerCase()}${text5.slice(1)}` : text5;
+function lowerFirst(text4) {
+  return /^\p{Lu}\p{Ll}/u.test(text4) ? `${text4.charAt(0).toLowerCase()}${text4.slice(1)}` : text4;
 }
 var TITLES_KEPT = 2;
 var BARE_TITLES = new Set([...Object.values(HOW_WORDS), ...Object.values(OWNER_ROLE_LABELS).map((l) => l.one)].map((word) => word.toLowerCase()));
@@ -55474,8 +55489,8 @@ function tierEvents(ctx, by, who, tier) {
   const linked = linkEvents(ctx.registry, ctx.world, ctx.state, { rel: PARTY_RELATION, from: who, to: pov, fields: { tier, since: sinceOf(ctx, who) } });
   if (!Array.isArray(linked))
     return linked;
-  const text5 = now === null ? `${labelOf(ctx, by)} added ${e.name} to the party as ${aTier(tier)}.` : `${labelOf(ctx, by)} made ${e.name} ${aTier(tier)} of the party.`;
-  return [...linked, orgLog(ctx, party, text5, { by, names: [by, who] })];
+  const text4 = now === null ? `${labelOf(ctx, by)} added ${e.name} to the party as ${aTier(tier)}.` : `${labelOf(ctx, by)} made ${e.name} ${aTier(tier)} of the party.`;
+  return [...linked, orgLog(ctx, party, text4, { by, names: [by, who] })];
 }
 function sinceOf(ctx, who) {
   const since = own(ctx.state.entities, who)?.relations.find((r) => r.type === PARTY_RELATION && r.to === ctx.world.pov)?.fields?.since;

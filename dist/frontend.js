@@ -1097,7 +1097,7 @@ var DEFAULT_MIND_READS = Object.freeze({
   knowledge: { on: true }
 });
 var KNOWLEDGE_BATCHES = ["scene", "character"];
-var KNOWLEDGE_DEFAULTS = Object.freeze({ enabled: true, threshold: 0.7, batch: "scene", callsAtOnce: 1, claimChars: 240, mindTokens: 400, narratorTokens: 600, stepTokens: 4000, factsPerChat: 512, holdersPerFact: 64, factsPerTurn: 3, learningsPerTurn: 24, inPlayTurns: 3, perPerson: 3, prompts: {} });
+var KNOWLEDGE_DEFAULTS = Object.freeze({ enabled: true, threshold: 0.7, batch: "scene", callsAtOnce: 1, claimChars: 600, mindTokens: 1600, narratorTokens: 1600, stepTokens: 4000, factsPerChat: 512, holdersPerFact: 64, factsPerTurn: 3, learningsPerTurn: 24, inPlayTurns: 3, perPerson: 3, prompts: {} });
 var KNOWLEDGE_RANGES = { threshold: [0, 1], claimChars: [1, Number.MAX_SAFE_INTEGER], tokens: [0, Number.MAX_SAFE_INTEGER], count: [0, Number.MAX_SAFE_INTEGER], atOnce: [1, 8] };
 var KNOWLEDGE_LIMITS = ["claimChars", "mindTokens", "narratorTokens", "stepTokens", "factsPerChat", "holdersPerFact", "factsPerTurn", "learningsPerTurn", "inPlayTurns", "perPerson"];
 function knowledgeLimitRange(limit) {
@@ -1152,13 +1152,23 @@ var KNOWLEDGE_TEXTS = Object.freeze({
 `)
 });
 var KNOWLEDGE_TEXT_IDS = Object.keys(KNOWLEDGE_TEXTS);
+var MIND_TEXT_LENGTHS = ["monologue", "depiction", "intent", "reaction", "mood", "interrupt", "note", "commitment", "plan", "told", "summary", "reason", "gmIntent"];
+var MIND_LIST_COUNTS = ["reactions", "notes", "commitments", "plans", "tolds"];
+var MIND_LENGTH_DEFAULTS = Object.freeze({ monologue: 2000, depiction: 1000, intent: 600, reaction: 300, reactions: 4, mood: 60, interrupt: 400, note: 600, notes: 4, commitment: 400, commitments: 3, plan: 300, plans: 4, told: 400, tolds: 3, summary: 1800, reason: 300, gmIntent: 1200 });
+var MIND_LENGTH_RANGES = { text: [1, 1e5], count: [1, 64] };
+function isListCount(key) {
+  return MIND_LIST_COUNTS.includes(key);
+}
+function mindLengthRange(key) {
+  return isListCount(key) ? MIND_LENGTH_RANGES.count : MIND_LENGTH_RANGES.text;
+}
 var MINDS_PRESETS = Object.freeze({
   lean: { enabled: false, liveLimit: 3, nearRefresh: { scene: true, mention: true, turns: 6, minutes: 120 }, farRefreshMinutes: 1440, refreshLimit: 1, memoryLevels: [], tokens: 1200, skip: { maxBeats: 4, maxMindsPerBeat: 2 } },
   standard: { enabled: true, liveLimit: 3, nearRefresh: { scene: true, mention: true, turns: 6, minutes: 120 }, farRefreshMinutes: 1440, refreshLimit: 2, memoryLevels: ["live"], tokens: 2400, skip: { maxBeats: 6, maxMindsPerBeat: 3 } },
   full: { enabled: true, liveLimit: "none", nearRefresh: { scene: true, mention: true, turns: 4, minutes: 60 }, farRefreshMinutes: 720, refreshLimit: "none", memoryLevels: ["live", "near"], tokens: 4000, skip: { maxBeats: "none", maxMindsPerBeat: "none" } }
 });
 function defaultMindsSettings(preset = "standard") {
-  return { ...structuredClone(MINDS_PRESETS[preset]), reads: structuredClone(DEFAULT_MIND_READS), memory: {}, prompts: {}, knowledge: structuredClone(KNOWLEDGE_DEFAULTS) };
+  return { ...structuredClone(MINDS_PRESETS[preset]), reads: structuredClone(DEFAULT_MIND_READS), memory: {}, prompts: {}, knowledge: structuredClone(KNOWLEDGE_DEFAULTS), lengths: { ...MIND_LENGTH_DEFAULTS } };
 }
 var MINDS_DEFAULTS = Object.freeze(defaultMindsSettings());
 var MIND_PROMPT_MAX = 20000;
@@ -1170,26 +1180,6 @@ function planInForce(p3) {
 var COMMITMENT_KINDS = ["promise", "debt", "grudge", "favour", "plan", "other"];
 var COMMITMENT_STATUSES = ["open", "kept", "broken", "released"];
 var MIND_APPROACHES = ["reactive", "proactive"];
-var MIND_TEXT_CAPS = {
-  monologue: 1200,
-  depiction: 600,
-  intent: 300,
-  gmIntent: 600,
-  reaction: 200,
-  reactions: 4,
-  plans: 4,
-  planWhat: 160,
-  mood: 40,
-  interrupt: 200,
-  note: 300,
-  notes: 4,
-  commitment: 240,
-  commitments: 3,
-  summary: 900,
-  told: 240,
-  tolds: 3,
-  reason: 160
-};
 var HOLDING_HOWS = ["authored", "witnessed", "told", "inferred", "guessed"];
 var HOLDING_BELIEFS = ["true", "false", "uncertain"];
 function knowledgeThreshold(slice) {
@@ -1275,17 +1265,17 @@ var KNOWLEDGE_ANSWER_SHAPE = 'Answer with JSON only: {"facts": [{"ref": "n1", "c
 var MIND_ANSWER_FORMATS = Object.freeze({
   mind: [
     'Answer with JSON only: {"monologue": "...", "depiction": "...", "intent": "...", "reactions": ["..."], "mood": "...", "interrupt": {"reason": "..."}}',
-    "- monologue: their private reasoning in the first person, at most six sentences.",
+    "- monologue: their private reasoning in the first person.",
     "- depiction: how they come across right now, as behaviour anyone present could see (posture, tone, what they do). Never a secret, an unspoken reason or a thought.",
     "- intent: what they mean to do next, in one sentence.",
-    '- reactions: up to three short conditional reactions ("if pressed about the cellar, changes the subject").',
+    '- reactions: short conditional reactions ("if pressed about the cellar, changes the subject").',
     "- mood: one or two words.",
     "- interrupt: only when the moment is a beat inside a time skip and what they'd do now would interrupt the player character's skipped time (seeking them out, calling them). Leave it out otherwise."
   ].join(`
 `),
   memory: [
     'Answer with JSON only: {"notes": [{"text": "...", "salience": 3}], "commitments": [{"kind": "promise|debt|grudge|favour|plan|other", "with": ["a name"], "text": "...", "due": "YYYY-MM-DD HH:MM"}], "resolved": [{"id": "...", "status": "kept|broken|released"}], "plans": [], "told": [{"to": ["a name"], "what": "..."}], "summary": "..."}',
-    "- notes: at most three things they will remember, in their own perspective; salience 1 (passing) to 5 (unforgettable).",
+    "- notes: the things they will remember, in their own perspective; salience 1 (passing) to 5 (unforgettable).",
     "- commitments: promises, debts, grudges, favours and plans with someone that this turn made; due only when a time was set.",
     "- resolved: their open commitments (listed with ids) that this turn kept, broke or released.",
     '- plans: only what this turn states they will do later: said aloud, agreed with someone, or scheduled in the story as written; never a guess at what they might do. Each {"what": "...", "kind": "errand|meet|visit|work|rest|leisure|pay|lend|other", "when": {"from": "YYYY-MM-DD HH:MM", "to": "YYYY-MM-DD HH:MM"}, "where": "a place", "with": ["a name"], "priority": 3, "amount": 20}, with local times; priority 1 (whenever it fits) to 5 (it must happen); kind pay or lend, with amount, when they mean to hand someone money, and no amount otherwise.',
@@ -1295,7 +1285,7 @@ var MIND_ANSWER_FORMATS = Object.freeze({
   ].join(`
 `),
   skip: 'Answer with JSON only: {"beats": [{"at": "YYYY-MM-DD HH:MM", "reason": "..."}]}, at most five, in time order; an empty list when there are none.',
-  consolidate: 'Answer with JSON only: {"summary": "..."}: at most 900 characters of plain prose, in their own perspective.',
+  consolidate: 'Answer with JSON only: {"summary": "..."}: plain prose, in their own perspective.',
   knowledge: `${KNOWLEDGE_ANSWER_SHAPE}
 ${KNOWLEDGE_TEXTS.stepAnswer}`
 });
@@ -17160,7 +17150,7 @@ var WRITE_TOOL_TEXTS = [
       { path: "part", text: "mind_memory: note, commitment or plan." },
       { path: "id", text: "mind_memory: the note's, commitment's or plan's id; leave it out to add one." },
       { path: "value", text: "mind_memory: its fields, or the ones to change, written as a JSON object; leave it out to delete it." },
-      { path: "text", text: "mind_intent: what they mean to do now, in your words (at most 600 characters); an empty text clears it." },
+      { path: "text", text: "mind_intent: what they mean to do now, in your words (at most the length Settings → Minds → Lengths gives your intent, 1,200 characters unless the user changed it; a longer one is refused); an empty text clears it." },
       { path: "approach", text: "mind_intent: reactive (they answer the scene), proactive (they pursue their own aims), or none (their mind decides)." },
       { path: "fact", text: "mind_knowledge: the fact's id, as the knowledge tools give it." },
       { path: "holding", text: 'mind_knowledge: the holding, whole, written as a JSON object: {"how": "authored", "witnessed", "told", "inferred" or "guessed", "by": who told them or null, "evidence": [fact ids], "since": {"msg", "at"}, "belief": "true", "false" or "uncertain", "confidence": 0 to 1, "keptFrom": [ids] or "everyone"}; leave it out to take it away.' }
@@ -20210,9 +20200,9 @@ function mixOf(labels, max = 3) {
 function forCharacters(kind) {
   return kind === "role" || kind === "pin" || kind === "intent";
 }
-function intentText(text) {
+function intentText(text, max) {
   const tidy2 = text.trim().replace(/\s+/g, " ");
-  return tidy2.length > MIND_TEXT_CAPS.gmIntent ? null : tidy2;
+  return tidy2.length > max ? null : tidy2;
 }
 function bulkOps(ids, change, gm) {
   switch (change.kind) {
@@ -20225,7 +20215,7 @@ function bulkOps(ids, change, gm) {
     case "pin":
       return ids.map((entity2) => ({ op: "mind_pin", entity: entity2, level: change.level }));
     case "intent": {
-      const text = intentText(change.text);
+      const text = intentText(change.text, gm.minds.lengths.gmIntent);
       return text === null ? null : ids.map((entity2) => ({ op: "mind_intent", entity: entity2, text, approach: change.approach }));
     }
     case "move":
@@ -25355,6 +25345,9 @@ function knowledgePatch(change) {
 function knowledgeLimitPatch(limit, value) {
   return { minds: { knowledge: { [limit]: value } } };
 }
+function mindsLengthPatch(key, value) {
+  return { minds: { lengths: { [key]: value } } };
+}
 function knowledgePlaceholders(id) {
   return [...new Set(KNOWLEDGE_TEXTS[id].match(/\{\{\w+\}\}/g) ?? [])];
 }
@@ -25424,9 +25417,9 @@ function refreshOp(entity2) {
 function deleteOp(entity2, part, id) {
   return { op: "mind_memory", entity: entity2, part, id, value: null };
 }
-function intentOp(entity2, draft) {
+function intentOp(entity2, draft, max = MIND_LENGTH_DEFAULTS.gmIntent) {
   const text = draft.text.trim().replace(/\s+/g, " ");
-  return text.length > MIND_TEXT_CAPS.gmIntent ? null : { op: "mind_intent", entity: entity2, text, approach: draft.approach };
+  return text.length > max ? null : { op: "mind_intent", entity: entity2, text, approach: draft.approach };
 }
 function textIn(text, cap) {
   const t3 = text.trim().replace(/\s+/g, " ");
@@ -25441,8 +25434,8 @@ function wholeIn(text, lo, hi) {
 function noteDraft(note) {
   return { text: note?.text ?? "", salience: String(note?.salience ?? 3) };
 }
-function noteOp(entity2, id, draft) {
-  const text = textIn(draft.text, MIND_TEXT_CAPS.note);
+function noteOp(entity2, id, draft, max = MIND_LENGTH_DEFAULTS.note) {
+  const text = textIn(draft.text, max);
   const salience = wholeIn(draft.salience, 1, 5);
   if (text === null || salience === null)
     return null;
@@ -25451,8 +25444,8 @@ function noteOp(entity2, id, draft) {
 function commitmentDraft(c3) {
   return { kind: c3?.kind ?? "promise", with: [...c3?.with ?? []], text: c3?.text ?? "", due: c3?.due ?? null, status: c3?.status ?? "open" };
 }
-function commitmentOp(entity2, id, draft) {
-  const text = textIn(draft.text, MIND_TEXT_CAPS.commitment);
+function commitmentOp(entity2, id, draft, max = MIND_LENGTH_DEFAULTS.commitment) {
+  const text = textIn(draft.text, max);
   const withIds = [...new Set(draft.with.filter((w3) => w3 !== "" && w3 !== entity2))];
   if (text === null || withIds.length === 0 || draft.due !== null && !Number.isFinite(draft.due))
     return null;
@@ -25474,8 +25467,8 @@ function startPlanIn(draft, now, hours) {
 function planLasts(draft, minutes) {
   return { ...draft, to: draft.from + Math.round(minutes) };
 }
-function planOp(entity2, id, draft) {
-  const what = textIn(draft.what, MIND_TEXT_CAPS.planWhat);
+function planOp(entity2, id, draft, max = MIND_LENGTH_DEFAULTS.plan) {
+  const what = textIn(draft.what, max);
   const ok = Number.isInteger(draft.from) && Number.isInteger(draft.to) && draft.from < draft.to && Number.isInteger(draft.priority) && draft.priority >= PLAN_PRIORITY.min && draft.priority <= PLAN_PRIORITY.max;
   const withIds = [...new Set(draft.with.filter((w3) => w3 !== "" && w3 !== entity2))];
   const money = isMoneyPlan(draft.kind);
@@ -45809,14 +45802,14 @@ var LIMIT_FIELD = {
   narratorTokens: { label: "Who knows what, for the narrator (tokens)", note: "The narrator's Who knows what: who here knows, suspects or doesn't know the facts in play.", step: 100 },
   perPerson: { label: "Who knows what: facts per person", note: "The narrator gets each person's most relevant facts, up to this many.", step: 1 },
   stepTokens: { label: "The knowledge step's context (tokens)", note: "What happened, who could perceive it, what each of them already knows and has seen lately, and the facts in play.", step: 100 },
-  claimChars: { label: "A fact's claim (characters)", note: "The longest claim the knowledge step records; a longer one is cut.", step: 10 },
+  claimChars: { label: "A fact's claim (characters)", note: "The longest claim, and why it matters, the knowledge step writes; it is told this, and a longer one is cut at a word, ending in …, with a note in the Context panel. A fact from the world's lore, World Info or a stage's truth keeps its entry whole.", step: 10 },
   factsPerChat: { label: "Facts made in play, per chat", note: "Past it, the knowledge step makes no new fact; people still learn the ones there are.", step: 1 },
   holdersPerFact: { label: "People who may hold one fact", note: "Past it, no one else learns that fact from the knowledge step.", step: 1 },
   factsPerTurn: { label: "New facts a turn", note: "The most new facts one turn's knowledge step records, each saying why it matters and to whom; most turns need none.", step: 1 },
   learningsPerTurn: { label: "Learnings a turn", note: "The most learnings one turn's knowledge step records: each person told something counts one, and each fact seen or heard counts one however many were there.", step: 1 },
   inPlayTurns: { label: "A fact stays in play for (turns)", note: "A fact is in play while someone learned it within this many of the latest turns, or while it's about someone or somewhere here.", step: 1 }
 };
-var OPEN_LIMITS = ["mindTokens", "narratorTokens", "perPerson", "stepTokens"];
+var OPEN_LIMITS = ["claimChars", "mindTokens", "narratorTokens", "perPerson", "stepTokens"];
 function KnowledgeLimitStepper(props) {
   const [min, max] = knowledgeLimitRange(props.limit);
   const field2 = LIMIT_FIELD[props.limit];
@@ -45847,6 +45840,93 @@ function KnowledgeLimitRow(props) {
       }, undefined, false, undefined, this)
     ]
   }, undefined, true, undefined, this);
+}
+var LENGTH_LABEL = {
+  monologue: "A mind's monologue",
+  depiction: "How they come across (depiction)",
+  intent: "What they mean to do next (intent)",
+  reaction: "Each reaction",
+  reactions: "Reactions a mind gives",
+  mood: "Mood",
+  interrupt: "Why they'd interrupt a time skip",
+  note: "Each memory note",
+  notes: "Notes a memory takes from a turn",
+  commitment: "Each commitment",
+  commitments: "Commitments a memory makes",
+  plan: "What each plan is",
+  plans: "Plans a memory makes",
+  told: "Each thing they told someone",
+  tolds: "Things told a memory records",
+  summary: "Their summary",
+  reason: "Why a time-skip moment is worth stopping at",
+  gmIntent: "Your intent for a character (GM → Minds)"
+};
+function LengthsSection(props) {
+  const row = (key) => {
+    const [min, max] = mindLengthRange(key);
+    const label = `${LENGTH_LABEL[key]} (${isListCount(key) ? "at most" : "characters"})`;
+    return /* @__PURE__ */ u3("div", {
+      class: "lre-minds-override",
+      "data-lre-minds-length": key,
+      children: [
+        /* @__PURE__ */ u3(NumberStepper, {
+          label,
+          value: props.lengths[key],
+          min,
+          max,
+          step: isListCount(key) ? 1 : 50,
+          integer: true,
+          disabled: props.busy,
+          onChange: (value) => props.patch(mindsLengthPatch(key, value))
+        }, undefined, false, undefined, this),
+        props.lengths[key] !== MIND_LENGTH_DEFAULTS[key] ? /* @__PURE__ */ u3("span", {
+          class: "lre-minds-note",
+          children: [
+            "Default ",
+            MIND_LENGTH_DEFAULTS[key].toLocaleString("en-US")
+          ]
+        }, undefined, true, undefined, this) : null
+      ]
+    }, key, true, undefined, this);
+  };
+  return /* @__PURE__ */ u3(Section, {
+    title: "Lengths",
+    children: /* @__PURE__ */ u3("div", {
+      class: "lre-minds-body",
+      "data-lre-minds-lengths": "",
+      children: [
+        /* @__PURE__ */ u3(Note2, {
+          children: "How long each text the minds steps write may be, and how many of each list one answer gives. Each step's model is told these after its answer format, whoever worded it, so it writes to them. A longer text is cut at a word, ending in …, and a longer list loses its last items; the call's Context panel entry and your diagnostics log say what was cut and that this is where to raise it. The lengths hold what you write in GM → Minds too, which is refused past them, never cut. Changing one never changes what a past turn recorded."
+        }, undefined, false, undefined, this),
+        /* @__PURE__ */ u3("div", {
+          class: "lre-minds-group",
+          children: [
+            /* @__PURE__ */ u3("span", {
+              class: "lre-minds-group-title",
+              children: "Each text, at most"
+            }, undefined, false, undefined, this),
+            /* @__PURE__ */ u3("div", {
+              class: "lre-minds-overrides",
+              children: MIND_TEXT_LENGTHS.map(row)
+            }, undefined, false, undefined, this)
+          ]
+        }, undefined, true, undefined, this),
+        /* @__PURE__ */ u3("div", {
+          class: "lre-minds-group",
+          children: [
+            /* @__PURE__ */ u3("span", {
+              class: "lre-minds-group-title",
+              children: "Each list, at most"
+            }, undefined, false, undefined, this),
+            /* @__PURE__ */ u3("div", {
+              class: "lre-minds-overrides",
+              children: MIND_LIST_COUNTS.map(row)
+            }, undefined, false, undefined, this)
+          ]
+        }, undefined, true, undefined, this)
+      ]
+    }, undefined, true, undefined, this)
+  }, undefined, false, undefined, this);
 }
 var TEXT_GROUPS = ["mind", "holding", "narrator", "step"];
 var TEXT_GROUP_TITLE = {
@@ -46364,6 +46444,11 @@ function MindsSection(props) {
       }, undefined, true, undefined, this) : null,
       /* @__PURE__ */ u3(KnowledgeSection, {
         knowledge: minds.knowledge,
+        busy,
+        patch: props.patch
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(LengthsSection, {
+        lengths: minds.lengths,
         busy,
         patch: props.patch
       }, undefined, false, undefined, this),
@@ -74048,8 +74133,9 @@ function IntentPage(props) {
   const [draft, setDraft] = d2(current2);
   const textId = P2();
   const group = P2();
-  const op = intentOp(c3.entity, draft);
-  const clear = intentOp(c3.entity, NO_INTENT);
+  const max = Math.max(ctx.view.lengths.gmIntent, current2.text.length);
+  const op = intentOp(c3.entity, draft, max);
+  const clear = intentOp(c3.entity, NO_INTENT, max);
   const changed = draft.text.trim().replace(/\s+/g, " ") !== current2.text || draft.approach !== current2.approach;
   const choices = [null, ...MIND_APPROACHES];
   return /* @__PURE__ */ u3(ChangePage2, {
@@ -74080,12 +74166,12 @@ function IntentPage(props) {
               /* @__PURE__ */ u3(Field, {
                 label: "What they mean to do",
                 for: textId,
-                help: used(draft.text, MIND_TEXT_CAPS.gmIntent),
+                help: used(draft.text, max),
                 children: /* @__PURE__ */ u3("textarea", {
                   id: textId,
                   class: "lre-input lre-gm-prose",
                   rows: 4,
-                  maxLength: MIND_TEXT_CAPS.gmIntent,
+                  maxLength: max,
                   value: draft.text,
                   onInput: (event) => setDraft({ ...draft, text: event.currentTarget.value })
                 }, undefined, false, undefined, this)
@@ -74139,7 +74225,7 @@ function IntentPage(props) {
             ctx,
             ready: op !== null && changed,
             icon: "check",
-            invalid: op === null ? `At most ${MIND_TEXT_CAPS.gmIntent} characters.` : undefined,
+            invalid: op === null ? `At most ${max.toLocaleString("en-US")} characters, as Settings → Minds → Lengths has it.` : undefined,
             children: op !== null && changed && draft.text.trim() === "" && draft.approach === null ? "Clear intent" : "Save"
           }, undefined, false, undefined, this)
         ]
@@ -74167,7 +74253,8 @@ function NotePage(props) {
   const { ctx, c: c3, note } = props;
   const [draft, setDraft] = d2(() => noteDraft(note ?? undefined));
   const textId = P2();
-  const op = noteOp(c3.entity, note?.id ?? null, draft);
+  const max = Math.max(ctx.view.lengths.note, note?.text.length ?? 0);
+  const op = noteOp(c3.entity, note?.id ?? null, draft, max);
   return /* @__PURE__ */ u3(ChangePage2, {
     name: "mind-note",
     title: note ? "Edit note" : "Add a note",
@@ -74188,12 +74275,12 @@ function NotePage(props) {
               /* @__PURE__ */ u3(Field, {
                 label: "Note",
                 for: textId,
-                help: used(draft.text, MIND_TEXT_CAPS.note),
+                help: used(draft.text, max),
                 children: /* @__PURE__ */ u3("textarea", {
                   id: textId,
                   class: "lre-input lre-gm-prose",
                   rows: 3,
-                  maxLength: MIND_TEXT_CAPS.note,
+                  maxLength: max,
                   value: draft.text,
                   onInput: (event) => setDraft({ ...draft, text: event.currentTarget.value })
                 }, undefined, false, undefined, this)
@@ -74239,7 +74326,8 @@ function CommitmentPage(props) {
     const hours = Number(text);
     setDraft({ ...draft, due: text.trim() === "" ? commitment?.due ?? null : Number.isFinite(hours) ? Math.round(now + hours * 60) : Number.NaN });
   };
-  const op = commitmentOp(c3.entity, commitment?.id ?? null, draft);
+  const max = Math.max(ctx.view.lengths.commitment, commitment?.text.length ?? 0);
+  const op = commitmentOp(c3.entity, commitment?.id ?? null, draft, max);
   const dueText = commitment?.dueText ?? null;
   return /* @__PURE__ */ u3(ChangePage2, {
     name: "mind-commitment",
@@ -74275,12 +74363,12 @@ function CommitmentPage(props) {
               /* @__PURE__ */ u3(Field, {
                 label: "What it is",
                 for: ids.text,
-                help: used(draft.text, MIND_TEXT_CAPS.commitment),
+                help: used(draft.text, max),
                 children: /* @__PURE__ */ u3("textarea", {
                   id: ids.text,
                   class: "lre-input lre-gm-prose",
                   rows: 3,
-                  maxLength: MIND_TEXT_CAPS.commitment,
+                  maxLength: max,
                   value: draft.text,
                   onInput: (event) => setDraft({ ...draft, text: event.currentTarget.value })
                 }, undefined, false, undefined, this)
@@ -74364,7 +74452,8 @@ function PlanPage(props) {
   const money2 = isMoneyPlan(draft.kind);
   const amountOff = amount2.trim() !== "" && draft.cents === null;
   const ids = { what: P2(), kind: P2(), start: P2(), lasts: P2(), where: P2(), status: P2() };
-  const op = planOp(c3.entity, plan2?.id ?? null, draft);
+  const max = Math.max(ctx.view.lengths.plan, plan2?.what.length ?? 0);
+  const op = planOp(c3.entity, plan2?.id ?? null, draft, max);
   const startOff = startIn.trim() !== "" && !Number.isFinite(Number(startIn));
   const minutes = Number(lasts);
   const lastsOff = !(Number.isInteger(minutes) && minutes > 0);
@@ -74388,12 +74477,12 @@ function PlanPage(props) {
               /* @__PURE__ */ u3(Field, {
                 label: "What",
                 for: ids.what,
-                help: used(draft.what, MIND_TEXT_CAPS.planWhat),
+                help: used(draft.what, max),
                 children: /* @__PURE__ */ u3("input", {
                   id: ids.what,
                   class: "lre-input",
                   placeholder: "What they mean to do",
-                  maxLength: MIND_TEXT_CAPS.planWhat,
+                  maxLength: max,
                   value: draft.what,
                   onInput: (event) => setDraft({ ...draft, what: event.currentTarget.value })
                 }, undefined, false, undefined, this)
@@ -90270,7 +90359,7 @@ var EMPTY = {
   edits: [],
   refused: [],
   held: [],
-  minds: { enabled: false, secrecy: DEFAULT_WORLD_MINDS.secrecy, now: 0, nowText: "", characters: [], knowledge: { facts: [], pov: null, threshold: knowledgeThreshold(undefined) } }
+  minds: { enabled: false, secrecy: DEFAULT_WORLD_MINDS.secrecy, now: 0, nowText: "", characters: [], knowledge: { facts: [], pov: null, threshold: knowledgeThreshold(undefined) }, lengths: MIND_LENGTH_DEFAULTS }
 };
 var THIN = new WeakSet;
 var THIN_OF = new WeakMap;
@@ -92829,14 +92918,14 @@ function useGmParts(app, chatId, revealed, parts, gmKey, status) {
 // src/frontend/gm/batch.tsx
 var LEVELS6 = [0, 1, 2, 3, 4];
 var BLANK_CHOICES = { tier: null, domain: null, level: null, role: null, pin: null, text: "", approach: null, to: null, party: null, tierAll: false, levelAll: false };
-function batchChanges(c3) {
+function batchChanges(c3, intentMax) {
   const intent = c3.text.trim() === "" && c3.approach === null ? null : { kind: "intent", text: c3.text, approach: c3.approach === "mind" || c3.approach === null ? null : c3.approach };
   return {
     tier: c3.tier === null ? null : { kind: "tier", tier: c3.tier },
     level: c3.domain === null || c3.level === null ? null : { kind: "level", domain: c3.domain, level: c3.level === "tier" ? null : c3.level },
     role: c3.role === null ? null : { kind: "role", role: c3.role === "world" ? null : c3.role },
     pin: c3.pin === null ? null : { kind: "pin", level: c3.pin === "score" ? null : c3.pin },
-    intent: intent && intentText(c3.text) !== null ? intent : null,
+    intent: intent && intentText(c3.text, intentMax) !== null ? intent : null,
     move: c3.to === null ? null : { kind: "move", to: c3.to },
     party: c3.party === null ? null : { kind: "party", tier: c3.party === PARTY_OUT ? null : c3.party }
   };
@@ -92934,7 +93023,7 @@ function BatchPage(props) {
   const [outcome, setOutcome] = d2(null);
   const field2 = { tier: P2(), domain: P2(), level: P2(), role: P2(), pin: P2(), text: P2(), approach: P2(), place: P2(), party: P2() };
   const choose = (patch) => setChoices((c3) => ({ ...c3, ...patch }));
-  const changes = batchChanges(choices);
+  const changes = batchChanges(choices, gm.minds.lengths.gmIntent);
   const everything = { tier: choices.tierAll, level: choices.levelAll, role: false, pin: false, intent: false, move: false, party: false };
   const reach = (card3) => bulkTargets(editor, ids, card3, everything[card3]);
   const entities = (targets) => gm.entities.filter((e3) => targets.includes(e3.id));
@@ -93155,12 +93244,12 @@ function BatchPage(props) {
             /* @__PURE__ */ u3(Field, {
               label: "What they mean to do",
               for: field2.text,
-              help: `${choices.text.length} / ${MIND_TEXT_CAPS.gmIntent}`,
+              help: `${choices.text.length} / ${gm.minds.lengths.gmIntent}`,
               children: /* @__PURE__ */ u3("textarea", {
                 id: field2.text,
                 class: "lre-input lre-gm-prose",
                 rows: 3,
-                maxLength: MIND_TEXT_CAPS.gmIntent,
+                maxLength: gm.minds.lengths.gmIntent,
                 value: choices.text,
                 onInput: (event) => choose({ text: event.currentTarget.value })
               }, undefined, false, undefined, this)
