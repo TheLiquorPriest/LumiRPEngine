@@ -198,8 +198,8 @@ var DEFAULT_MIND_READS = Object.freeze({
   life: { on: false, tokens: "none" },
   knowledge: { on: true }
 });
-var KNOWLEDGE_DEFAULTS = Object.freeze({ enabled: true, threshold: 0.7, batch: "scene", claimChars: 240, mindTokens: 400, narratorTokens: 600, stepTokens: 4000, factsPerChat: 512, holdersPerFact: 64, factsPerTurn: 3, learningsPerTurn: 24, inPlayTurns: 3, perPerson: 3, prompts: {} });
-var KNOWLEDGE_RANGES = { threshold: [0, 1], claimChars: [1, Number.MAX_SAFE_INTEGER], tokens: [0, Number.MAX_SAFE_INTEGER], count: [0, Number.MAX_SAFE_INTEGER] };
+var KNOWLEDGE_DEFAULTS = Object.freeze({ enabled: true, threshold: 0.7, batch: "scene", callsAtOnce: 1, claimChars: 240, mindTokens: 400, narratorTokens: 600, stepTokens: 4000, factsPerChat: 512, holdersPerFact: 64, factsPerTurn: 3, learningsPerTurn: 24, inPlayTurns: 3, perPerson: 3, prompts: {} });
+var KNOWLEDGE_RANGES = { threshold: [0, 1], claimChars: [1, Number.MAX_SAFE_INTEGER], tokens: [0, Number.MAX_SAFE_INTEGER], count: [0, Number.MAX_SAFE_INTEGER], atOnce: [1, 8] };
 var KNOWLEDGE_TEXTS = Object.freeze({
   mindTitle: "What you know",
   mindLead: "The facts you hold and how you came by them. You know only these and what is in front of you: never act on, hint at or guess anything that isn't here.",
@@ -995,7 +995,7 @@ var DEFAULT_PLACE_CAPS = Object.freeze({ turn: 2, chat: 64 });
 // src/cli/version.ts
 var CLI_NAME = "lumirpengine";
 var CLI_VERSION = package_default.version;
-var BUILD = "c94df18b";
+var BUILD = "e34d9cf4";
 function runtimeCannotFollow(bun) {
   if (bun === undefined)
     return null;

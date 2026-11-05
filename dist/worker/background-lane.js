@@ -558,8 +558,8 @@ var DEFAULT_MIND_READS = Object.freeze({
   life: { on: false, tokens: "none" },
   knowledge: { on: true }
 });
-var KNOWLEDGE_DEFAULTS = Object.freeze({ enabled: true, threshold: 0.7, batch: "scene", claimChars: 240, mindTokens: 400, narratorTokens: 600, stepTokens: 4000, factsPerChat: 512, holdersPerFact: 64, factsPerTurn: 3, learningsPerTurn: 24, inPlayTurns: 3, perPerson: 3, prompts: {} });
-var KNOWLEDGE_RANGES = { threshold: [0, 1], claimChars: [1, Number.MAX_SAFE_INTEGER], tokens: [0, Number.MAX_SAFE_INTEGER], count: [0, Number.MAX_SAFE_INTEGER] };
+var KNOWLEDGE_DEFAULTS = Object.freeze({ enabled: true, threshold: 0.7, batch: "scene", callsAtOnce: 1, claimChars: 240, mindTokens: 400, narratorTokens: 600, stepTokens: 4000, factsPerChat: 512, holdersPerFact: 64, factsPerTurn: 3, learningsPerTurn: 24, inPlayTurns: 3, perPerson: 3, prompts: {} });
+var KNOWLEDGE_RANGES = { threshold: [0, 1], claimChars: [1, Number.MAX_SAFE_INTEGER], tokens: [0, Number.MAX_SAFE_INTEGER], count: [0, Number.MAX_SAFE_INTEGER], atOnce: [1, 8] };
 var KNOWLEDGE_TEXTS = Object.freeze({
   mindTitle: "What you know",
   mindLead: "The facts you hold and how you came by them. You know only these and what is in front of you: never act on, hint at or guess anything that isn't here.",
@@ -1531,7 +1531,7 @@ function mapSettingsOf(world) {
   };
 }
 var DEFAULT_TRAVEL = Object.freeze({ speeds: {}, vehicleSpeeds: {}, startMinutes: 1, parkMinutes: 1, fetchMinutes: 30 });
-var TRAVEL_MODES = ["walk", "road", "offroad", "water"];
+var TRAVEL_MODES = ["walk", "road", "offroad", "water", "air"];
 function travelTuningOf(world) {
   const raw = isRecord(world.mapSettings) && isRecord(world.mapSettings.travel) ? world.mapSettings.travel : {};
   const speed = (v) => typeof v === "number" && Number.isFinite(v) && v > 0 ? v : null;
@@ -2249,6 +2249,100 @@ function clampBand(policy, said) {
   return DIFFICULTY_BANDS[index] ?? { id: "moderate", label: "Moderate", dc: 10 };
 }
 
+// src/shared/vehicles.ts
+var VEHICLE_DOMAINS = ["road", "offroad", "marine", "air"];
+function vehicleDomainOf(row) {
+  const d = row?.domain;
+  return d === "offroad" || d === "marine" || d === "air" ? d : "road";
+}
+function vehiclesConfigOf(world) {
+  const raw = Object.prototype.hasOwnProperty.call(world.packs ?? {}, "vehicles") ? world.packs.vehicles?.config : undefined;
+  return { registration: isRecord(raw) && raw.registration === true };
+}
+function shortClassName(name) {
+  const cut = name.replace(/\s*\(.*\)\s*$/, "").trim();
+  return cut === "" ? name.trim() : cut;
+}
+var USED_VEHICLE_AGE_YEARS = 4;
+function vehicleClassChoices(table, opts) {
+  const out = [];
+  for (const domain of VEHICLE_DOMAINS) {
+    if (domain === "air" && !opts.air)
+      continue;
+    for (const [id, row] of Object.entries(table?.rows ?? {})) {
+      if (!row || vehicleDomainOf(row) !== domain)
+        continue;
+      const used = row.price_used_cents;
+      const price = isRecord(used) && typeof used.typical === "number" && Number.isFinite(used.typical) ? Math.round(used.typical) : undefined;
+      out.push({
+        id,
+        name: typeof row.name === "string" && row.name.trim() !== "" ? row.name : id,
+        domain,
+        ...typeof row.make === "string" ? { make: row.make } : {},
+        ...typeof row.model === "string" ? { model: row.model } : {},
+        ...Number.isFinite(opts.year) ? { year: Math.round(opts.year) - USED_VEHICLE_AGE_YEARS } : {},
+        ...price !== undefined ? { priceCents: price } : {}
+      });
+    }
+  }
+  return out;
+}
+function worldHasAir(world) {
+  for (const r of Object.values(world.routes ?? {}))
+    if (r && isRecord(r.modes) && r.modes.air !== undefined)
+      return true;
+  for (const m of Object.values(world.maps ?? {}))
+    if (m?.links?.some((l) => l.mode === "air"))
+      return true;
+  return false;
+}
+function tokens(text) {
+  return text.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim().split(" ").filter((w) => w !== "").map((w) => w.length > 3 && w.endsWith("s") && !w.endsWith("ss") ? w.slice(0, -1) : w);
+}
+function within(words, phrase) {
+  if (phrase.length === 0 || phrase.length > words.length)
+    return false;
+  for (let i = 0;i + phrase.length <= words.length; i++)
+    if (phrase.every((w, j) => words[i + j] === w))
+      return true;
+  return false;
+}
+function ends(words, phrase) {
+  let bare = words.length;
+  while (bare > 0 && /^\d+$/.test(words[bare - 1] ?? ""))
+    bare--;
+  return phrase.length > 0 && [words.length, bare].some((end) => phrase.length <= end && phrase.every((w, j) => words[end - phrase.length + j] === w));
+}
+function matchVehicleClass(words, table, opts = {}) {
+  const said = tokens(words);
+  if (said.length === 0)
+    return null;
+  const fits = opts.ending === true ? ends : within;
+  let best = null;
+  for (const [id, row] of Object.entries(table?.rows ?? {})) {
+    if (!row)
+      continue;
+    const names = [id.replace(/_/g, " "), typeof row.name === "string" ? shortClassName(row.name) : "", ...Array.isArray(row.aliases) ? row.aliases.filter((a) => typeof a === "string") : []];
+    for (const name of names) {
+      const phrase = tokens(name);
+      if (fits(said, phrase) && (best === null || phrase.length > best.size))
+        best = { id, size: phrase.length };
+    }
+  }
+  return best?.id ?? null;
+}
+function saysNew(words) {
+  const said = tokens(words);
+  if (said.some((w) => w === "used" || w === "secondhand" || w === "second" || w === "pre" || w === "old"))
+    return false;
+  return said.includes("new");
+}
+function vehicleNameFrom(words, className) {
+  const cut = words.trim().replace(/^(?:an?|the|my|our|his|her|their|one)\s+/i, "").replace(/^(?:brand[\s-]new|new|used|second[\s-]hand|pre[\s-]owned|old)\s+/i, "").trim();
+  const name = cut === "" || /^[a-z0-9_]+$/.test(cut) && cut.includes("_") ? shortClassName(className) : cut;
+  return name.charAt(0).toUpperCase() + name.slice(1);
+}
+
 // src/shared/party.ts
 var PARTY_RELATION = "travels_with";
 var PARTY_KIND = "party";
@@ -2478,7 +2572,48 @@ function grantBasisOf(fields, until) {
     return basis;
   return until !== undefined ? "loan" : "assign";
 }
+var SET_KINDS = ["outfit", "loadout"];
+var SET_KIND_LABEL = { outfit: "Outfit", loadout: "Loadout" };
+var SET_NAME_MAX = 40;
+var isSetKind = (v) => typeof v === "string" && SET_KINDS.includes(v);
+function setPiecesOf(v) {
+  if (!Array.isArray(v))
+    return null;
+  const out = [];
+  for (const p of v) {
+    if (!isRecord(p) || typeof p.item !== "string" || p.item === "" || !safeKey(p.item) || p.slot !== undefined && (typeof p.slot !== "string" || p.slot === ""))
+      return null;
+    out.push({ item: p.item, ...typeof p.slot === "string" ? { slot: p.slot } : {} });
+  }
+  return out;
+}
+function setsOf(fields) {
+  const raw = fields?.sets;
+  const out = {};
+  if (!isRecord(raw))
+    return out;
+  for (const [id, v] of Object.entries(raw)) {
+    if (!safeKey(id) || !isRecord(v) || typeof v.name !== "string" || v.name.trim() === "" || !isSetKind(v.kind))
+      continue;
+    const pieces = setPiecesOf(v.pieces);
+    if (pieces)
+      out[id] = { name: v.name, kind: v.kind, pieces };
+  }
+  return out;
+}
+function setIdOf(name) {
+  return `set_${name.normalize("NFD").replace(/\p{M}+/gu, "").toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 32) || "set"}`;
+}
+function setIdSaid(sets, said) {
+  if (hasOwn(sets, said))
+    return said;
+  const name = said.trim().toLowerCase();
+  return Object.keys(sets).find((id) => sets[id]?.name.trim().toLowerCase() === name) ?? said;
+}
 var PLACE_KINDS = ["room", "spot", "venue"];
+function isSetOp(op) {
+  return op.do === "set_save" || op.do === "set_apply" || op.do === "set_drop";
+}
 var THING_FACTS = ["give", "take", "drop", "put", "has", "owner", "use_up", "wear", "lose", "item_condition"];
 function isThingFact(v) {
   return typeof v === "string" && THING_FACTS.includes(v);
@@ -2492,6 +2627,10 @@ var strings = (v) => Array.isArray(v) && v.every((s) => typeof s === "string");
 function isRest(v) {
   return v === "owner" || isSpot(v);
 }
+var CONTAINER_RULES = ["refuse", "off"];
+var CONTAINER_DEPTH_MAX = 32;
+var SETS_MAX = 50;
+var ARSENAL_CATEGORIES = ["weapon", "armor", "ammo"];
 var MODERN_US_CATEGORY_SIZES = {
   carried: "pocket",
   clothing: "hand",
@@ -2510,7 +2649,10 @@ var MODERN_US_CATEGORY_SIZES = {
   medical: "hand",
   entertainment: "hand",
   gifts: "hand",
-  home_furnishings: "furniture"
+  home_furnishings: "furniture",
+  weapon: "hand",
+  armor: "hand",
+  ammo: "pocket"
 };
 var MODERN_US_NAME_SIZES = {
   fridge: { size: "furniture", also: ["refrigerator"], holds: "armful" },
@@ -2536,7 +2678,8 @@ var MODERN_US_NAME_SIZES = {
   "hair dryer": { size: "hand", also: ["blow dryer"] },
   "pressure washer": { size: "heavy", also: [] },
   "dog bed": { size: "armful", also: [] },
-  "cat bed": { size: "armful", also: [] }
+  "cat bed": { size: "armful", also: [] },
+  "gun safe": { size: "furniture", also: ["gun cabinet"], holds: "armful", keeps: ["weapon", "ammo", "armor"] }
 };
 var DEFAULT_THINGS_CONFIG = Object.freeze({
   sizes: { ceiling: "armful", byCategory: MODERN_US_CATEGORY_SIZES, byVolume: { pocket: 0.5, hand: 5, armful: 40, heavy: 400 }, byName: MODERN_US_NAME_SIZES },
@@ -2545,7 +2688,9 @@ var DEFAULT_THINGS_CONFIG = Object.freeze({
   fetchMinutes: 3,
   putAway: { on: true, hours: 24, minLevel: 3 },
   tidy: { auto: true },
-  notWithYou: 3
+  notWithYou: 3,
+  containers: { capacity: "refuse", depth: 8 },
+  sets: { max: 12 }
 });
 var obj2 = (v) => isRecord(v) ? v : {};
 var flag = (v, fallback) => typeof v === "boolean" ? v : fallback;
@@ -2609,6 +2754,9 @@ function thingsConfigOf(world) {
   }
   const putAway = obj2(raw.putAway);
   const minLevel = putAway.minLevel;
+  const containers = obj2(raw.containers);
+  const depth = containers.depth;
+  const most = obj2(raw.sets).max;
   return {
     sizes: { ceiling: isSize(sizes.ceiling) ? sizes.ceiling : d.sizes.ceiling, byCategory, byVolume, byName },
     access: { household: flag(access.household, d.access.household), housemates: flag(access.housemates, d.access.housemates), partners: flag(access.partners, d.access.partners), family: flag(access.family, d.access.family), staff: flag(access.staff, d.access.staff), customers: flag(access.customers, d.access.customers) },
@@ -2616,7 +2764,9 @@ function thingsConfigOf(world) {
     fetchMinutes: atLeast(raw.fetchMinutes, 0, d.fetchMinutes),
     putAway: { on: flag(putAway.on, d.putAway.on), hours: atLeast(putAway.hours, Number.MIN_VALUE, d.putAway.hours), minLevel: minLevel === 0 || minLevel === 1 || minLevel === 2 || minLevel === 3 || minLevel === 4 ? minLevel : d.putAway.minLevel },
     tidy: { auto: flag(obj2(raw.tidy).auto, d.tidy.auto) },
-    notWithYou: typeof raw.notWithYou === "number" && Number.isInteger(raw.notWithYou) && raw.notWithYou >= 0 ? raw.notWithYou : d.notWithYou
+    notWithYou: typeof raw.notWithYou === "number" && Number.isInteger(raw.notWithYou) && raw.notWithYou >= 0 ? raw.notWithYou : d.notWithYou,
+    containers: { capacity: CONTAINER_RULES.find((c) => c === containers.capacity) ?? d.containers.capacity, depth: typeof depth === "number" && Number.isInteger(depth) && depth >= 1 && depth <= CONTAINER_DEPTH_MAX ? depth : d.containers.depth },
+    sets: { max: typeof most === "number" && Number.isInteger(most) && most >= 0 && most <= SETS_MAX ? most : d.sets.max }
   };
 }
 function sizeOfVolume(litres, bounds) {
@@ -2791,7 +2941,7 @@ var EXTRACTION_DEFAULTS = Object.freeze({
 });
 var THING_READ_DEFAULTS = Object.freeze({ shown: 40, whyMax: 120, madeMax: 6 });
 var THING_READ_BOUNDS = Object.freeze({ shown: [1, 200], whyMax: [20, 500], madeMax: [0, 500] });
-var AGENT_CHANGE_TYPES = ["gm_spawn", "despawn", "destroy", "money_adjust", "stage", "gm_edit", "workspace", "item_home", "item_grant", "item_label", "item_merge", "item_remove", "org_people", "org_powers", "org_shares", "org_rules"];
+var AGENT_CHANGE_TYPES = ["gm_spawn", "despawn", "destroy", "money_adjust", "stage", "gm_edit", "workspace", "item_home", "item_grant", "item_label", "item_merge", "item_set", "item_remove", "org_people", "org_powers", "org_shares", "org_rules"];
 var CHANGE_TYPES = [...EXTRACTION_TYPES, ...AGENT_CHANGE_TYPES];
 var AGENT_CHANGE_DEFAULTS = Object.freeze({
   gm_spawn: "confirm",
@@ -2805,6 +2955,7 @@ var AGENT_CHANGE_DEFAULTS = Object.freeze({
   item_grant: "auto",
   item_label: "auto",
   item_merge: "confirm",
+  item_set: "auto",
   item_remove: "confirm",
   org_people: "confirm",
   org_powers: "confirm",
@@ -2823,6 +2974,7 @@ var AGENT_CHANGE_LABEL = Object.freeze({
   item_grant: "Who may use things",
   item_label: "Things' names, descriptions and sizes",
   item_merge: "Two things merged into one",
+  item_set: "Saved outfits and loadouts, and changing into them",
   item_remove: "Things removed from the world",
   org_people: "Organizations' people (members, positions held, titles, staff, pay, the party's tiers)",
   org_powers: "Organizations' positions and delegations",
@@ -2846,8 +2998,11 @@ function narratorViewOf(raw) {
   return knowledge && secrets ? { knowledge, secrets } : null;
 }
 var LORE_INDEX_DEFAULTS = Object.freeze({ tagPattern: "^lr\\d{4}$", idPrefix: "lre", idDigits: 4, holdsChars: 100, promptTokens: 1500, own: null, built: null });
+var SWIPE_DEFAULTS = Object.freeze({ swipeDefault: "renarrate", swipeAsk: false, swipeTexts: "turn" });
 var TIDY_DEFAULTS = Object.freeze({ findings: 50 });
 var TIDY_BOUNDS = Object.freeze({ findings: [1, 500] });
+var GM_PAGE_DEFAULTS = Object.freeze({ duringTurn: "hold" });
+var PERF_DEFAULTS = Object.freeze({ reuseViews: true });
 var JOB_SETTINGS_DEFAULTS = Object.freeze({ routineLoreTokens: 8000 });
 
 // src/engine/read-pass.ts
@@ -7194,11 +7349,11 @@ function secretLoreNames(reg, world, state) {
 function namesHiddenOrSecretLore(reg, world, state, text, heard = "") {
   return namesHidden(reg, world, state, text, heard) || namesAny(text, [], secretLoreNames(reg, world, state), heard);
 }
-function loreSnippet(tokens, entry, budget, keep = "start") {
+function loreSnippet(tokens2, entry, budget, keep = "start") {
   const title = (typeof entry.title === "string" ? entry.title : "").replace(/\s+/g, " ").trim();
   const body = publicText(typeof entry.content === "string" ? entry.content : "").replace(/\s+/g, " ").trim();
   const whole3 = title === "" ? body : `${title}: ${body}`;
-  const cost = tokens(whole3);
+  const cost = tokens2(whole3);
   if (cost <= budget)
     return { text: whole3, tokens: cost, cut: false };
   if (keep === "end") {
@@ -7206,22 +7361,22 @@ function loreSnippet(tokens, entry, budget, keep = "start") {
     const lead = title === "" ? "\u2026" : `${title}: \u2026`;
     const kept2 = (n) => `${lead}${words2.slice(words2.length - n).join(" ")}`;
     let lo2 = MIN_WORDS;
-    if (lo2 >= words2.length || tokens(kept2(lo2)) > budget)
+    if (lo2 >= words2.length || tokens2(kept2(lo2)) > budget)
       return null;
     let hi2 = words2.length - 1;
     while (lo2 < hi2) {
       const mid = Math.ceil((lo2 + hi2) / 2);
-      if (tokens(kept2(mid)) <= budget)
+      if (tokens2(kept2(mid)) <= budget)
         lo2 = mid;
       else
         hi2 = mid - 1;
     }
     const text2 = kept2(lo2);
-    return { text: text2, tokens: tokens(text2), cut: true };
+    return { text: text2, tokens: tokens2(text2), cut: true };
   }
   const head = title === "" ? 0 : title.split(" ").length;
   const words = whole3.split(" ");
-  const fits = (n) => tokens(`${words.slice(0, n).join(" ")}\u2026`) <= budget;
+  const fits = (n) => tokens2(`${words.slice(0, n).join(" ")}\u2026`) <= budget;
   let lo = head + MIN_WORDS;
   if (lo >= words.length || !fits(lo))
     return null;
@@ -7234,7 +7389,7 @@ function loreSnippet(tokens, entry, budget, keep = "start") {
       hi = mid - 1;
   }
   const text = `${words.slice(0, lo).join(" ")}\u2026`;
-  return { text, tokens: tokens(text), cut: true };
+  return { text, tokens: tokens2(text), cut: true };
 }
 
 // src/engine/lore-pins.ts
@@ -7504,12 +7659,12 @@ function together(world, a, b) {
     return false;
   if (a === b)
     return true;
-  const within = (inner, outer) => {
+  const within2 = (inner, outer) => {
     const up = placeChain(world, inner).slice(1, LEVELS_APART + 1);
     const at = up.indexOf(outer);
     return at >= 0 && !up.slice(0, at + 1).some((p) => spreadPlaces(world).has(p));
   };
-  return within(a, b) || within(b, a);
+  return within2(a, b) || within2(b, a);
 }
 function siteOf(world, place) {
   if (place === null)
@@ -8306,7 +8461,7 @@ var TIME_LIMITS = Object.freeze({
 function finite(v) {
   return typeof v === "number" && Number.isFinite(v) ? v : null;
 }
-function within(v, lo, hi) {
+function within2(v, lo, hi) {
   return Math.min(hi, Math.max(lo, v));
 }
 function clampUnitCap(cap) {
@@ -8314,27 +8469,27 @@ function clampUnitCap(cap) {
   const days = finite(cap?.agentDays);
   const events = finite(cap?.events);
   return {
-    agentDays: days === null ? max.agentDays : within(days, 1 / 24, max.agentDays),
-    events: events === null ? max.events : Math.round(within(events, 1, max.events))
+    agentDays: days === null ? max.agentDays : within2(days, 1 / 24, max.agentDays),
+    events: events === null ? max.events : Math.round(within2(events, 1, max.events))
   };
 }
 function clampTick(v, fallback = 2) {
   const n = finite(v);
-  return n === null ? fallback : within(n, 0, TIME_LIMITS.tickMinutes);
+  return n === null ? fallback : within2(n, 0, TIME_LIMITS.tickMinutes);
 }
 function clampScale(v) {
   const n = finite(v);
   const [lo, hi] = TIME_LIMITS.scale;
-  return n === null || n === 0 ? 1 : within(n, lo, hi);
+  return n === null || n === 0 ? 1 : within2(n, lo, hi);
 }
 function clampThreshold(v) {
   const n = finite(v);
   const [lo, hi] = TIME_LIMITS.thresholdMinutes;
-  return n === null ? lo : Math.round(within(n, lo, hi));
+  return n === null ? lo : Math.round(within2(n, lo, hi));
 }
 function clampLevel(v) {
   const n = finite(v);
-  return n === null ? 0 : Math.round(within(n, 0, 4));
+  return n === null ? 0 : Math.round(within2(n, 0, 4));
 }
 
 // src/engine/world-state.ts
@@ -8640,6 +8795,17 @@ var READ_TOOL_TEXTS = [
     ]
   },
   {
+    name: "vehicles_classes",
+    family: "items",
+    tier: "read",
+    note: "Lists the world's vehicle classes and their prices.",
+    text: "The world's vehicle classes: each with its id, name, domain (road, offroad, marine or air), the make and model a new one takes, its other names, and its used and new price bands in minor units; air says whether the world authors air routes (aircraft are listed only where it does, and elsewhere a flight is told, never routed). A purchase or a make of a vehicle names one of these ids as its class.",
+    args: [
+      { path: "domain", text: "Only this domain's classes: road, offroad, marine or air." },
+      { path: "search", text: "Only classes whose id, name or other names hold these words." }
+    ]
+  },
+  {
     name: "money_balances",
     family: "money",
     tier: "read",
@@ -8782,14 +8948,28 @@ var path = "The workspace file's path: names joined by /, such as notes/marcus.m
 var under = "Only files under this folder, such as notes/; leave it out for every file.";
 var lore = "The lore entry's id, as lore_index, lore_search or lore_grep gives it: a short id such as lr0101, a World Info entry as bookId/entryId, or a world entry's own id.";
 var proposes = "The answer is the change in plain words, its change type and its mode. Working a turn, the change is staged at once: it lands when the turn commits, or, when its mode is confirm, waits for the game master's Apply on the turn's review card. Otherwise nothing changes until the game master applies it.";
-var story = `One change, checked by the engine against the world: one that doesn't hold is refused with why, and the same change asked again is the one already made. ${proposes} With dry set, it is only checked, and nothing is staged.`;
-var item = `The thing: its id (items_find gives it), its name, or words that name it as items_find reads them ("the fridge", "Danny's keys"); words that fit several things as well are answered with each of their ids.`;
+var dry = "true: check only; nothing is staged.";
+var dryWhole = "true: only check the change and say what it would do; nothing is staged.";
+var item = 'The thing: its id, its name, or words for it ("the fridge").';
 var why = "Why, in a few words, as the reply has it.";
-var dry = "true: only check the change and say what it would do; nothing is staged.";
-var into = 'Into what: a person, by id or name, or a thing that holds things (a bag, a car, a fridge), by id, name or words as items_find reads them ("the fridge"). Give in or at, not both.';
+var into = "Into whom or what: a person, or a thing that holds things (a bag, a car, a fridge). Give in or at, not both.";
 var at = "At a place: its id or name. Give in or at, not both.";
 var until = `When it ends, in the story's words ("until 7 tonight", "for two days", "Friday") or as YYYY-MM-DD HH:MM; leave it out for no end.`;
 var partyArg = "A person, household, business or group: an id or name.";
+var WRITE_TOOL_GUIDES = [
+  {
+    guide: "changes",
+    label: "What a change does",
+    note: "Told once, in the system prompt of an agent given any tool that changes a thing or a place (the Curator's), instead of in each tool's description: how the engine checks, stages and refuses a change, and what dry does.",
+    text: `How each of your tools that changes a thing or a place works: it makes one change, checked by the engine against the world. One that doesn't hold is refused with why, and the same change asked again is the one already made. ${proposes} With dry set, it is only checked, and nothing is staged.`
+  },
+  {
+    guide: "things",
+    label: "How a thing is named",
+    note: "Told once, in the system prompt of an agent given any tool that takes a thing, instead of in each such argument's description.",
+    text: `A thing a tool takes is named by its id (items_find gives it), its name, or words that name it as items_find reads them ("the fridge", "Danny's keys"); words that fit several things as well are answered with each of their ids.`
+  }
+];
 var WRITE_TOOL_TEXTS = [
   {
     name: "gm_set_field",
@@ -8915,6 +9095,7 @@ var WRITE_TOOL_TEXTS = [
     tier: "story",
     note: "Notes someone who walks on in the reply, for the read's newcomers.",
     text: "Note someone the reply introduces by name who isn't in the world yet (a waitress, a delivery driver): they join with the reply's other changes, as the read's newcomers do, found first and within the chat's spawn cap, under the New characters mode. Look for them first (people_find).",
+    notes: true,
     args: [
       { path: "name", text: "Their name, as the reply gives it." },
       { path: "kind", text: "The kind of person they are, among the world's; person when left out." },
@@ -8938,7 +9119,8 @@ var WRITE_TOOL_TEXTS = [
     family: "places",
     tier: "story",
     note: "Makes a place in play: a room, a spot or a venue.",
-    text: `Make a place the reply establishes that the world doesn't have: a room (inside a building or home), a spot (a part of a place: "the back booth") or a venue (a new place in town), under its parent. Find it first (places_find): one with the same name or alias under the same parent is refused with its id (exists). With entity, the place is noted with the reply's other changes, and that person or thing is put there with it. ${story}`,
+    text: `Make a place the reply establishes that the world doesn't have: a room (inside a building or home), a spot (a part of a place: "the back booth") or a venue (a new place in town), under its parent. Find it first (places_find): one with the same name or alias under the same parent is refused with its id (exists). With entity, the place is noted with the reply's other changes, and that person or thing is put there with it.`,
+    guides: ["changes"],
     args: [
       { path: "name", text: 'Its name, as the story calls it ("the back booth").' },
       { path: "parent", text: "The place it is part of or in: its id or name." },
@@ -8956,7 +9138,8 @@ var WRITE_TOOL_TEXTS = [
     family: "places",
     tier: "story",
     note: "Renames a place made in play, or gives it other names or a description.",
-    text: `Rename a place made in play, or give it other names or a description, as the reply calls it. ${story}`,
+    text: "Rename a place made in play, or give it other names or a description, as the reply calls it.",
+    guides: ["changes"],
     args: [
       { path: "place", text: "The place: its id or name." },
       { path: "name", text: "Its new name." },
@@ -8970,11 +9153,14 @@ var WRITE_TOOL_TEXTS = [
     family: "items",
     tier: "story",
     note: "Makes a thing the story acts on that the world doesn't have.",
-    text: `Make a thing the reply acts on (moved, handed over, used, worn, bought) or establishes as mattering (a clue), when the world has none: find it first (items_find). One in its scope is refused with its id (exists). A thing too big to carry made on someone lands where they stand. A new thing that is big or costly asks first. ${story}`,
+    text: "Make a thing the reply acts on (moved, handed over, used, worn, bought) or establishes as mattering (a clue), when the world has none: find it first (items_find). One in its scope is refused with its id (exists). A thing too big to carry made on someone lands where they stand. A new thing that is big or costly asks first.",
+    guides: ["changes", "things"],
     args: [
       { path: "name", text: 'Its name, as the story calls it ("torque wrench").' },
-      { path: "type", text: "Its catalog type's id, when the world's catalogs have one; leave it out otherwise." },
-      { path: "size", text: "pocket, hand, armful, heavy, furniture or builtin, when the reply makes it plain." },
+      { path: "type", text: "Its catalog type's id (a kit's too), when the world's catalogs have one; leave it out otherwise." },
+      { path: "class", text: "A vehicle's class id (vehicles_classes), for a vehicle the reply brings in; the vehicles pack makes it, and it asks first." },
+      { path: "details", text: "With class: the vehicle's make, model, year, colour and plate, as the reply gives them." },
+      { path: "size", text: "Its size, when the reply makes it plain." },
       { path: "in", text: into },
       { path: "at", text: at },
       { path: "owner", text: `Whose it is: ${partyArg} Leave it out when the story doesn't say: the engine presumes it from where it is.` },
@@ -8991,7 +9177,8 @@ var WRITE_TOOL_TEXTS = [
     family: "items",
     tier: "story",
     note: "Moves a thing into a holder or to a place.",
-    text: `Move a thing into a holder (a person, who then has it; a bag; a car) or to a place, out of whatever held it, as the reply says: picked up, put down, put away, fetched. A thing too big to carry put on someone lands where they stand; nothing goes into a holder smaller than it; a Built-in thing moves only once the game master applies it. ${story}`,
+    text: "Move a thing into a holder (a person, who then has it; a bag; a car) or to a place, out of whatever held it, as the reply says: picked up, put down, put away, fetched. A thing too big to carry put on someone lands where they stand; nothing goes into a holder smaller than it; a Built-in thing moves only once the game master applies it.",
+    guides: ["changes", "things"],
     args: [
       { path: "item", text: item },
       { path: "in", text: into },
@@ -9005,7 +9192,8 @@ var WRITE_TOOL_TEXTS = [
     family: "items",
     tier: "story",
     note: "Hands a thing to someone, on a basis: hold, loan, return, gift, sale, trade or theft.",
-    text: `Hand a thing to a person, on the basis the reply says. hold (handed over with no giving words): still its owner's, the receiver may use it while they hold it. loan (borrowed, lent, or a stated end): still its owner's, until when it ends. return (back to its owner or the owner's household): its grants end. gift ("keep it", a present, food or drink to have now), sale or trade: the receiver's. theft: taken without a right, still its owner's. ${story}`,
+    text: `Hand a thing to a person, on the basis the reply says. hold (handed over with no giving words): still its owner's, the receiver may use it while they hold it. loan (borrowed, lent, or a stated end): still its owner's, until when it ends. return (back to its owner or the owner's household): its grants end. gift ("keep it", a present, food or drink to have now), sale or trade: the receiver's. theft: taken without a right, still its owner's.`,
+    guides: ["changes", "things"],
     args: [
       { path: "item", text: item },
       { path: "to", text: "Who gets it: a person's id or name." },
@@ -9020,7 +9208,8 @@ var WRITE_TOOL_TEXTS = [
     family: "items",
     tier: "story",
     note: "Changes whose a thing is, as the story states.",
-    text: `Change whose a thing is, when the reply states it (inherited, signed over, abandoned), without moving it; a handover for keeps is item_hand's gift, sale or trade. Its grants end. ${story}`,
+    text: "Change whose a thing is, when the reply states it (inherited, signed over, abandoned), without moving it; a handover for keeps is item_hand's gift, sale or trade. Its grants end.",
+    guides: ["changes", "things"],
     args: [
       { path: "item", text: item },
       { path: "owner", text: `Its new owner: ${partyArg} Or nobody.` },
@@ -9033,7 +9222,8 @@ var WRITE_TOOL_TEXTS = [
     family: "items",
     tier: "story",
     note: "Lets someone use a thing.",
-    text: `Let a person use a thing that isn't theirs: hold (while they hold it for its owner), loan (until it ends) or assign (theirs to use until it is taken back). A grant from someone it isn't theirs to lend is made, flagged for the game master. ${story}`,
+    text: "Let a person use a thing that isn't theirs: hold (while they hold it for its owner), loan (until it ends) or assign (theirs to use until it is taken back). A grant from someone it isn't theirs to lend is made, flagged for the game master.",
+    guides: ["changes", "things"],
     args: [
       { path: "item", text: item },
       { path: "who", text: "Who may use it: a person's id or name." },
@@ -9048,7 +9238,8 @@ var WRITE_TOOL_TEXTS = [
     family: "items",
     tier: "story",
     note: "Takes back someone's use of a thing.",
-    text: `Take back a person's grant to use a thing. ${story}`,
+    text: "Take back a person's grant to use a thing.",
+    guides: ["changes", "things"],
     args: [
       { path: "item", text: item },
       { path: "who", text: "Whose grant ends: a person's id or name." },
@@ -9060,7 +9251,8 @@ var WRITE_TOOL_TEXTS = [
     family: "items",
     tier: "story",
     note: "Lets someone use another's things, all of them or those at home.",
-    text: `Let a person use another's things as a standing permission ("make yourself at home"): all of them, or those at home. ${story}`,
+    text: `Let a person use another's things as a standing permission ("make yourself at home"): all of them, or those at home.`,
+    guides: ["changes"],
     args: [
       { path: "from", text: `Whose things: ${partyArg}` },
       { path: "to", text: "Who may use them: a person's id or name." },
@@ -9075,7 +9267,8 @@ var WRITE_TOOL_TEXTS = [
     family: "items",
     tier: "story",
     note: "Ends a standing permission to use another's things.",
-    text: `End a standing permission to use another's things. ${story}`,
+    text: "End a standing permission to use another's things.",
+    guides: ["changes"],
     args: [
       { path: "from", text: `Whose things: ${partyArg}` },
       { path: "to", text: "Whose permission ends: a person's id or name." },
@@ -9087,7 +9280,8 @@ var WRITE_TOOL_TEXTS = [
     family: "items",
     tier: "story",
     note: "Sets where a thing is kept when not in use.",
-    text: `Set where a thing is kept when not in use, as the reply establishes it ("the spare key lives under the mat"): in a holder, at a place, or on its owner; or clear it, so the engine works it out. Off screen, things drift back there. ${story}`,
+    text: 'Set where a thing is kept when not in use, as the reply establishes it ("the spare key lives under the mat"): in a holder, at a place, or on its owner; or clear it, so the engine works it out. Off screen, things drift back there.',
+    guides: ["changes", "things"],
     args: [
       { path: "item", text: item },
       { path: "in", text: "In what: a person or a thing that holds things, by id or name. Give one of in, at, owner or clear." },
@@ -9102,7 +9296,8 @@ var WRITE_TOOL_TEXTS = [
     family: "items",
     tier: "story",
     note: "Uses up a thing, or some of a stack.",
-    text: `Use up a thing the reply eats, drinks or spends, or some of a stack; the last of it leaves the world. ${story}`,
+    text: "Use up a thing the reply eats, drinks or spends, or some of a stack; the last of it leaves the world.",
+    guides: ["changes", "things"],
     args: [
       { path: "item", text: item },
       { path: "qty", text: "How many; 1 when left out." },
@@ -9114,11 +9309,13 @@ var WRITE_TOOL_TEXTS = [
     family: "items",
     tier: "story",
     note: "Puts a thing on someone, or takes it off.",
-    text: `Put a wearable thing on a person, or take it off; one not on them comes to them first. ${story}`,
+    text: "Put a wearable thing on a person, or take it off; one not on them comes to them first. A slot readies it (ready: in hand) or holsters, sheathes or slings it; what held that slot comes off and stays carried.",
+    guides: ["changes", "things"],
     args: [
       { path: "item", text: item },
       { path: "who", text: "Who wears it: a person's id or name." },
       { path: "off", text: "true: taken off." },
+      { path: "slot", text: "Where it goes, when not its own slot: ready (in hand), holster, sheath, quiver, back, shoulder." },
       { path: "dry", text: dry }
     ]
   },
@@ -9127,7 +9324,8 @@ var WRITE_TOOL_TEXTS = [
     family: "items",
     tier: "story",
     note: "Wears a thing down or mends it.",
-    text: `Change a thing's condition, when the reply damages, wears out or mends it, within its bounds. ${story}`,
+    text: "Change a thing's condition, when the reply damages, wears out or mends it, within its bounds.",
+    guides: ["changes", "things"],
     args: [
       { path: "item", text: item },
       { path: "delta", text: "How much: negative wears it down, positive mends it." },
@@ -9139,7 +9337,8 @@ var WRITE_TOOL_TEXTS = [
     family: "items",
     tier: "story",
     note: "Loses a thing, or has it stolen.",
-    text: `A thing lost (whereabouts unknown, with any cash in it), or stolen: into the thief's hands, still its owner's. A loss asks first. ${story}`,
+    text: "A thing lost (whereabouts unknown, with any cash in it), or stolen: into the thief's hands, still its owner's. A loss asks first.",
+    guides: ["changes", "things"],
     args: [
       { path: "item", text: item },
       { path: "by", text: "Who stole it: a person's id or name; leave it out for lost." },
@@ -9151,13 +9350,14 @@ var WRITE_TOOL_TEXTS = [
     family: "items",
     tier: "story",
     note: "Renames a thing, or gives it other names, a description or a size.",
-    text: `Rename a thing, or give it other names, a description or its size, as the reply calls it. ${story}`,
+    text: "Rename a thing, or give it other names, a description or its size, as the reply calls it.",
+    guides: ["changes", "things"],
     args: [
       { path: "item", text: item },
       { path: "name", text: "Its new name." },
       { path: "aliases", text: "Its other names, all of them." },
       { path: "description", text: "What it is like, in a sentence." },
-      { path: "size", text: "pocket, hand, armful, heavy, furniture or builtin." },
+      { path: "size", text: "Its new size." },
       { path: "dry", text: dry }
     ]
   },
@@ -9166,10 +9366,39 @@ var WRITE_TOOL_TEXTS = [
     family: "items",
     tier: "story",
     note: "Merges a thing made twice into one.",
-    text: `Merge a thing made twice into one: the dropped one's quantity, grants and contents go to the one kept, and it leaves the world. Only things made in play merge; one the world document defines is the game master's to merge. A merge asks first. ${story}`,
+    text: "Merge a thing made twice into one: the dropped one's quantity, grants and contents go to the one kept, and it leaves the world. Only things made in play merge; one the world document defines is the game master's to merge. A merge asks first.",
+    guides: ["changes", "things"],
     args: [
       { path: "keep", text: "The one kept: an id or name." },
       { path: "drop", text: "The one merged into it: an id or name." },
+      { path: "dry", text: dry }
+    ]
+  },
+  {
+    name: "set_save",
+    family: "items",
+    tier: "story",
+    note: "Keeps what someone wears as a saved outfit or loadout.",
+    text: "Keep, under a name, what a person wears now as an outfit (their clothes), or what they carry ready as a loadout (in hand, holstered, sheathed, in a quiver, on their back, and arms and armor), when the reply has them say or make it so; one of the same name is replaced.",
+    guides: ["changes", "things"],
+    args: [
+      { path: "who", text: "Whose: a person's id or name." },
+      { path: "name", text: 'Its name, as the story calls it ("Work", "Range day").' },
+      { path: "kind", text: "outfit or loadout." },
+      { path: "pieces", text: "The things in it, by id or name; leave it out for what they wear now of its kind." },
+      { path: "dry", text: dry }
+    ]
+  },
+  {
+    name: "set_apply",
+    family: "items",
+    tier: "story",
+    note: "Changes someone into one of their saved outfits or loadouts.",
+    text: "Change a person into one of their saved outfits or loadouts, by its name, when the reply has them change into it: each piece to hand goes on in its slot, what else of its kind they wear comes off, and at home what came off goes back where it is kept. Pieces out of reach are named, not made.",
+    guides: ["changes", "things"],
+    args: [
+      { path: "who", text: "Who changes: a person's id or name." },
+      { path: "set", text: "The saved outfit or loadout: its name (the Gear section lists them) or id." },
       { path: "dry", text: dry }
     ]
   },
@@ -9178,7 +9407,8 @@ var WRITE_TOOL_TEXTS = [
     family: "items",
     tier: "gm",
     note: "Takes a thing out of the world.",
-    text: `Take a thing out of the world, as the GM's Remove does: a GM change, asked first. ${story}`,
+    text: "Take a thing out of the world, as the GM's Remove does: a GM change, asked first.",
+    guides: ["changes", "things"],
     args: [
       { path: "item", text: item },
       { path: "why", text: why },
@@ -9212,7 +9442,8 @@ var WRITE_TOOL_TEXTS = [
     family: "money",
     tier: "story",
     note: "Notes what the reply has bought, for the economy's purchase.",
-    text: "Note a purchase the reply establishes: it lands with the reply's other changes, as the read's purchases do, the money posted and the goods placed as one change, under the Purchases mode. A seller's own thing that the seller holds changes hands; a new one is made only otherwise. A purchase too big to carry lies where it ends up, never on the buyer. A purchase the turn already made (Buy) is never noted again.",
+    text: "Note a purchase the reply establishes: it lands with the reply's other changes, as the read's purchases do, the money posted and the goods placed as one change, under the Purchases mode. A seller's own thing that the seller holds changes hands; a new one is made only otherwise. A purchase too big to carry lies where it ends up, never on the buyer. A purchase the turn already made (Buy) is never noted again. A vehicle is a purchase of category vehicles and its class, standing where the story leaves it (at), never an item; a house is a purchase of its place (property).",
+    notes: true,
     args: [
       { path: "item", text: "What was bought, as the reply names it." },
       { path: "category", text: "Its category in the world's price catalog (groceries, hardware, home_furnishings, \u2026)." },
@@ -9221,8 +9452,13 @@ var WRITE_TOOL_TEXTS = [
       { path: "price", text: "What it cost each, as a plain amount in the world's money (8 for $8), when the reply says." },
       { path: "method", text: `How they paid, in the reply's words ("cash", "her Amex"), when it says.` },
       { path: "seller", text: "Who sold it: a person's or business's id or name, when the reply names one." },
-      { path: "size", text: "pocket, hand, armful, heavy, furniture or builtin, when the reply makes it plain." },
-      { path: "at", text: `Where it ends up, when the reply says: a place's id or name, or "home".` }
+      { path: "size", text: "Its size, when the reply makes it plain." },
+      { path: "at", text: `Where it ends up, when the reply says: a place's id or name, or "home".` },
+      { path: "class", text: "For a vehicle (category vehicles): its class id from vehicles_classes. It is made a vehicle of that class, never an item." },
+      { path: "details", text: "For a vehicle: what the reply says of it, as {make, model, year, colour, plate, odometer_mi, condition, value}." },
+      { path: "finance", text: "Bought on a loan, when the reply says: {down: the down payment as a plain amount, term: months}; the rest is a loan the vehicle or property secures." },
+      { path: "property", text: "For a house, flat or lot: the place's or property's id or name; a place that is no property yet becomes one. Its price goes in price." },
+      { path: "live", text: "For a property: true when the reply says the buyer moves in; their home becomes it." }
     ]
   },
   {
@@ -9237,7 +9473,7 @@ var WRITE_TOOL_TEXTS = [
       { path: "cents", text: "Minor units added to each payment while it lasts (negative takes them off), at most one payment's own; leave it out to give a factor." },
       { path: "days", text: "How many days it lasts, 1 to 31; 7 when left out." },
       { path: "reason", text: "Why, in a few words for its History line." },
-      { path: "dry", text: dry }
+      { path: "dry", text: dryWhole }
     ]
   },
   {
@@ -9246,6 +9482,7 @@ var WRITE_TOOL_TEXTS = [
     tier: "story",
     note: "Notes what the reply says of a revenue stream earning more or less for a while.",
     text: `Note what the reply says of a revenue stream earning more or less for a while ("the fair doubled the stall's takings this week"): a factor on each payment (0.25 to 4) or an amount on each (at most one payment's own), for 1 to 31 days, quoting the reply. It lands with the reply's changes under the revenue mode, which asks first. Only a stream its author opened to the agents takes one.`,
+    notes: true,
     args: [
       { path: "stream", text: "The stream: its id or name." },
       { path: "factor", text: "A factor on each payment while it lasts; leave it out to give cents." },
@@ -9262,7 +9499,7 @@ var WRITE_TOOL_TEXTS = [
     text: `Propose one change to an organization (a company, a household, a group, a trust or the party), as the GM makes it: no one's powers are asked, and the change keeps its History line. The change is an object with its do and fields; people, organizations, jobs, accounts and places by id or name, money in minor units (2500 is 25.00), dates as YYYY-MM-DD. found {type: company or group, name, founder, kind?, structure?, capital?, from?, units?}; admit {org, who, title?, position?, why}; remove {org, who, why}; appoint {org, who, position or null, why}; title {org, who, title or null}; position {org, position: {title, id?, powers?, seats?, reports_to?, scope?: org or below, limits?: {payment?, month?}, successor?: next, vacant or someone, default?}}; unposition {org, position}; delegate {org, to, powers, payment?, month?, accounts?, until?, by}; revoke {org, to}; hire {org, who, position?, title?, basis?, rate?, hours?}; fire {job, why}; pay {job, rate or pct}; issue {org, to, units, price (a unit), class?, from?}; buy_back {org, from, units, price (a unit)}; transfer {org, from, to, units or pct, price? (in all; none is a gift)}; list {org, units, price? (a unit; else its books a unit), symbol?} (a C corporation on the market, new units sold to the public; listed already, more units at its market price); delist {org, price? (a unit; else its market price)} (every public unit bought back); trade {org, who, side: buy or sell, units, account?} (its stock on the market; units held on its cap table sell into its float); entry {place, entry: owner, members, staff, customers, public or null, keys?}; dues {org, cents or null, every?: week, month or year}; tier {who, tier: core, companion, hired, ally or null}; restructure {org, structure}; wind_up {org, stage?: all, begin, finish or resume, property?: distribute or sell, to?, why?} (a company's debts paid, the rest paid out by share, and it dissolved); merge {org, into, ratio? (into's units for each of org's), cash? (in all), from?, keep?: true keeps org as into's subsidiary, why?}; rename {org, name}; tax_status {org, status: charity, church or club (a row of the world's exempt table), or null} (exempt from income tax, and from FUTA and SUTA as the status says; not a household or the party); consolidate {org, elect: true or false} (a C corporation's one federal return with the corporations it holds 80% or more of); project {org, act: start, pause, resume, drop or note, project?, template?, name?, account?, step?, days?, cents?, why?} (a production project, as gm_project makes it). Decisions, motions and requests by the ids orgs_read's decisions part gives: propose {by, change, party?} puts a decision (change: an issue, buy_back, restructure, list, delist, wind_up or merge, as above) to a vote for by, who hasn't the votes to make it alone (party: an organization holder they decide as), their vote for it; vote {org, motion, who, vote: for, against or abstain}, cast for anyone with a vote on it, carries the motion out once it passes; end_motion {org, motion, how: close (on the votes cast now) or withdraw}; answer {org, request, answer: approve, deny or withdraw, by?, why?} (by: one up the requester's chain of command who may approve it, or the requester withdrawing; left out, the GM's), approving runs the act then as the requester's; decisions {org, vote_by?: shares or members, quorum?, pass? (percent), days?, approval_days? (null puts the default back)}. One that doesn't hold is refused with why. ${proposes} With dry set, it is only checked, and nothing is staged.`,
     args: [
       { path: "change", text: 'The change, written as a JSON object: {"do": "appoint", "org": "Alder Automotive", "who": "Danny Okafor", "position": "shop_foreman", "why": "Marcus made him foreman"}.' },
-      { path: "dry", text: dry }
+      { path: "dry", text: dryWhole }
     ]
   },
   {
@@ -9282,7 +9519,7 @@ var WRITE_TOOL_TEXTS = [
       { path: "days", text: "note: whole days it is set back." },
       { path: "cents", text: "note: what it costs on top, in minor units (2500 is 25.00)." },
       { path: "why", text: "Why, in a few words (a note needs it)." },
-      { path: "dry", text: dry }
+      { path: "dry", text: dryWhole }
     ]
   },
   {
@@ -9291,6 +9528,7 @@ var WRITE_TOOL_TEXTS = [
     tier: "story",
     note: "Notes a production project's step set back or costing more, as the reply tells it.",
     text: "Note that the reply sets a production project's step back or makes it cost more (a breakdown, the weather, a part that had to be replaced): it lands with the reply's other changes under the project setbacks mode, with its receipt and Undo. At most 30 days, and what it costs on top at most the world's cap on unlisted prices. Never note a step done, started or dropped: the engine finishes each step on its day, and the player decides the rest.",
+    notes: true,
     args: [
       { path: "project", text: "The project, by id or name (orgs_read's projects part lists them)." },
       { path: "step", text: "The step, by id or name; the one under way when left out." },
@@ -10628,12 +10866,15 @@ function coreEventTypes(lookup) {
         return reject3("missing_entity", `no entity ${e.entity}`);
       if (hasOwn(ctx.state.materialized, `${e.entity}:${e.domain}`))
         return reject3("materialized", `${e.domain} detail for ${nameOf2(ctx, e.entity)} is already recorded`);
+      if (e.events.length <= 1)
+        return e.events[0] ? validateEvent(lookup(), e.events[0], ctx) : null;
       const scratch = structuredClone(ctx.state);
-      for (const inner of e.events) {
+      for (const [i, inner] of e.events.entries()) {
         const failure = validateEvent(lookup(), inner, { ...ctx, state: scratch });
         if (failure)
           return failure;
-        applyEvent(lookup(), inner, scratch, { ...ctx, state: scratch });
+        if (i < e.events.length - 1)
+          applyEvent(lookup(), inner, scratch, { ...ctx, state: scratch });
       }
       return null;
     },
@@ -10705,13 +10946,13 @@ function checkBands(check, dc) {
   const authored = Array.isArray(check.bands) ? check.bands : [];
   return authored.length > 0 ? authored : dc !== null ? DC_BANDS : [];
 }
-function within2(span, v) {
+function within3(span, v) {
   if (!span)
     return true;
   return v !== null && (span.min === undefined || v >= span.min) && (span.max === undefined || v <= span.max);
 }
 function matches(b, x) {
-  return within2(b.natural, x.natural) && within2(b, x.total) && within2(b.margin, x.margin);
+  return within3(b.natural, x.natural) && within3(b, x.total) && within3(b.margin, x.margin);
 }
 function bandOutcome(bands, x) {
   for (const b of bands)
@@ -11725,8 +11966,16 @@ function fixedReason(isVehicle, fields, tables) {
   const row = rows && typeof catalog === "string" && hasOwn(rows, catalog) ? rows[catalog] : undefined;
   return row?.location === "vehicle_fixed" ? "part" : null;
 }
-var TYPE_TABLES = ["gear.items", "gear.containers", "economy.catalog"];
+var TYPE_TABLES = ["gear.items", "gear.containers", "economy.catalog", "gear.kits"];
 function typeFields(table, id, row) {
+  if (table === "gear.kits") {
+    const fields2 = { kit: id };
+    if (typeof row.pieces_total_weight_g === "number")
+      fields2.weight_g = row.pieces_total_weight_g;
+    if (typeof row.packed_volume_l === "number")
+      fields2.volume_l = row.packed_volume_l;
+    return { kind: "kit", fields: fields2 };
+  }
   const fields = { catalog: id };
   if (typeof row.category === "string")
     fields.category = row.category;
@@ -11983,6 +12232,9 @@ function mayFixThing(ctx, pov, item2) {
     return true;
   return presumedAt(ctx, at2).owners.some(ours);
 }
+function householdOf(ctx, who) {
+  return Object.keys(ctx.state.entities).sort().find((id) => orgTypeOf(ctx, id) === "household" && !isGone(ctx.state, id) && isMemberOf(ctx, who, id)) ?? null;
+}
 function readRest(value, ctx) {
   if (value === "owner")
     return "owner";
@@ -11996,8 +12248,16 @@ function everyday(ctx, id, owner) {
     return false;
   return thingsConfigOf(ctx.world).carry.some((rule) => rule.types.includes(type) && selectorMatches(ctx.registry, ctx.world, ctx.state, rule.who, owner));
 }
-var CARRY_SLOTS = { none: true, pocket: true, pocket_or_bag: true, hand_held: true, back: true, shoulder: true };
+var CARRY_SLOTS = { none: true, pocket: true, pocket_or_bag: true, hand_held: true, back: true, shoulder: true, holster: true, sheath: true, quiver: true };
 var SHARED_SLOTS = { pocket: true, pocket_or_bag: true, hand_held: true };
+function setKindOf(ctx, f, slot) {
+  if (slot === "pocket" || slot === "pocket_or_bag" || slot === "none")
+    return null;
+  if (hasOwn(CARRY_SLOTS, slot))
+    return "loadout";
+  const category = typeof f.category === "string" ? f.category : typeRowOf(ctx, f)?.row.category;
+  return typeof category === "string" && ARSENAL_CATEGORIES.includes(category) ? "loadout" : "outfit";
+}
 function slotOf2(ctx, f) {
   const slot = typeof f.slot === "string" && f.slot !== "" ? f.slot : typeRowOf(ctx, f)?.row.equip_slot;
   return typeof slot === "string" && slot !== "" && slot !== "none" ? slot : null;
@@ -12937,10 +13197,27 @@ class Working {
   mark() {
     return { state: structuredClone(this.state), events: this.events.length, dropped: this.dropped.length };
   }
+  checkpoint = null;
+  lightMark() {
+    if (this.checkpoint === null || this.checkpoint.events > this.events.length)
+      this.checkpoint = { state: structuredClone(this.state), events: this.events.length };
+    return { state: null, events: this.events.length, dropped: this.dropped.length, base: this.checkpoint };
+  }
   restore(mark) {
-    Object.assign(this.state, structuredClone(mark.state));
+    if (mark.state !== null)
+      Object.assign(this.state, structuredClone(mark.state));
+    else if (mark.base) {
+      Object.assign(this.state, structuredClone(mark.base.state));
+      for (let i = mark.base.events;i < mark.events; i++) {
+        const e = this.events[i];
+        if (e)
+          applyEvent(this.reg, e, this.state, this.ctx);
+      }
+    }
     this.events.length = mark.events;
     this.dropped.length = mark.dropped;
+    if (this.checkpoint !== null && this.checkpoint.events > this.events.length)
+      this.checkpoint = null;
   }
 }
 
@@ -13149,8 +13426,8 @@ function resolveAction(reg, w, req, rng, opts = {}) {
     const judgement = opts.judgement ?? null;
     const place2 = placeOfEntity(w.state, p.actor);
     let close = null;
-    const story2 = verdict.why === "story" ? judgedOutcome(judgement, outcomeChoices(p.action, Object.keys(odds)), rng.fork("judge")) : null;
-    const rolls = verdict.roll || verdict.why === "story" && story2 === null;
+    const story = verdict.why === "story" ? judgedOutcome(judgement, outcomeChoices(p.action, Object.keys(odds)), rng.fork("judge")) : null;
+    const rolls = verdict.roll || verdict.why === "story" && story === null;
     const why2 = rolls ? null : verdict.why;
     if (rolls) {
       const shift = verdict.roll ? approachShift(policy, judgement) : null;
@@ -13163,7 +13440,7 @@ function resolveAction(reg, w, req, rng, opts = {}) {
       if (policy.authority === "hybrid")
         close = closeCall(rolling, rolled, rolled.outcome, policy.closeBy);
     } else {
-      outcome = story2 ?? verdict.outcome ?? passOutcome(p.action, ready, counts, verdict.pass);
+      outcome = story ?? verdict.outcome ?? passOutcome(p.action, ready, counts, verdict.pass);
       vars = { ...p.vars, roll: { natural: null, total: null, modifier: ready.modifier, dc: ready.dc, margin: null, outcome } };
     }
     if (!plainRolling(policy)) {
@@ -13511,6 +13788,1178 @@ function resolveTry(reg, w, params, rng, opts = {}) {
   }
   const inferred = { label: `${skill.label} check`, skill: skill.id, attempt: namesHiddenOrSecretLore(reg, world, w.state, read.attempt, opts.heard ?? "") ? "" : read.attempt, pov: nameOf3(pov), band, dc, against, companions: rolled, share: share2, pass, detail: policy.detail, others: policy.others, guidance: policy.guidance };
   return { ...res, events: w.events.slice(start), inferred };
+}
+
+// src/engine/rules.ts
+var CASCADE_CAP = 8;
+var FIRING_CAP = 256;
+function allRules(reg, world) {
+  const out = Object.keys(world.rules).sort().map((id) => world.rules[id]).filter((r) => r !== undefined);
+  for (const r of reg.rules)
+    if (!world.rules[r.id])
+      out.push(r);
+  return out;
+}
+function eventSubject(e) {
+  switch (e.type) {
+    case "set":
+    case "add":
+      return e.entity;
+    case "link":
+    case "unlink":
+      return e.from;
+    case "spawn":
+      return e.entity.id;
+    case "materialize":
+      return e.entity;
+    default: {
+      if ("data" in e && isRecord(e.data)) {
+        const d = e.data;
+        for (const key of ["entity", "agent", "actor", "from"])
+          if (typeof d[key] === "string")
+            return d[key];
+      }
+      return null;
+    }
+  }
+}
+function eventVars(e) {
+  const out = { type: e.type };
+  for (const [k, v] of Object.entries(e)) {
+    if (k === "type")
+      continue;
+    const scalar = toValue(v);
+    if (scalar !== undefined)
+      out[k] = scalar;
+    else if (isRecord(v)) {
+      const nested = {};
+      for (const [nk, nv] of Object.entries(v)) {
+        const s = toValue(nv);
+        if (s !== undefined)
+          nested[nk] = s;
+      }
+      out[k] = nested;
+    }
+  }
+  return out;
+}
+function eligible(w, rule) {
+  const fired = own(readEngineSlice(w.state).fired, rule.id);
+  if (!fired)
+    return true;
+  if (rule.once)
+    return false;
+  if (rule.cooldownMinutes !== undefined && w.state.clock - fired.last < rule.cooldownMinutes)
+    return false;
+  return true;
+}
+function fire(reg, w, p, opts) {
+  const bindings = p.self ? { self: p.self } : {};
+  const env = scopeEnv({ reg, ctx: w.ctx, bindings, vars: p.vars });
+  if (!eligible(w, p.rule))
+    return null;
+  if (p.rule.when !== undefined && !truthy2(evalExpr(p.rule.when, env, false)))
+    return null;
+  const count = own(readEngineSlice(w.state).fired, p.rule.id)?.n ?? 0;
+  const start = w.events.length;
+  if (w.apply({ type: ENGINE_EVENTS.fired, data: { rule: p.rule.id } }))
+    return null;
+  const rng = createRng(hashParts(opts.seed, "rule", p.rule.id, w.state.clock, count));
+  const result = applyEffects(reg, w, p.rule.do, { bindings, vars: p.vars, rng });
+  if (p.rule.interrupt)
+    w.apply({ type: ENGINE_EVENTS.signal, data: { class: "rule", text: p.rule.beat?.hint ?? p.rule.id } });
+  if (p.rule.beat)
+    w.apply({ type: ENGINE_EVENTS.beat, data: { hint: p.rule.beat.hint, rule: p.rule.id, weight: p.rule.beat.weight ?? 1 } });
+  return {
+    rule: p.rule.id,
+    depth: p.depth,
+    beat: p.rule.beat ? { hint: p.rule.beat.hint, weight: p.rule.beat.weight ?? 1 } : null,
+    interrupt: p.rule.interrupt === true,
+    events: w.events.slice(start),
+    rejected: result.rejected
+  };
+}
+function matchesEvent(w, rule, e) {
+  const on = rule.on;
+  if ("event" in on)
+    return on.event === e.type;
+  if ("enter" in on)
+    return e.type === "set" && e.field === "place" && typeof e.value === "string" && placeWithin(w.world, e.value, on.enter);
+  if ("zone" in on || "cell" in on)
+    return optionalQuery(w.ctx, "space.entered")?.(w.ctx, on, e) === true;
+  return false;
+}
+function cascade(reg, w, roots, opts) {
+  const cap = opts.cascadeCap ?? CASCADE_CAP;
+  const rules = allRules(reg, w.world);
+  const firings = [];
+  let queue = roots;
+  let capped = false;
+  while (queue.length > 0) {
+    const next = [];
+    for (const p of queue) {
+      if (firings.length >= FIRING_CAP) {
+        capped = true;
+        break;
+      }
+      const f = fire(reg, w, p, opts);
+      if (!f)
+        continue;
+      firings.push(f);
+      if (p.depth + 1 >= cap) {
+        if (f.events.some((e) => rules.some((r) => matchesEvent(w, r, e))))
+          capped = true;
+        continue;
+      }
+      for (const e of f.events) {
+        for (const r of rules)
+          if (matchesEvent(w, r, e))
+            next.push({ rule: r, depth: p.depth + 1, self: eventSubject(e), vars: { event: eventVars(e) } });
+      }
+    }
+    if (capped)
+      break;
+    queue = next;
+  }
+  if (capped)
+    w.apply({ type: ENGINE_EVENTS.note, data: { text: `Rule cascade stopped at its cap of ${cap}.`, visibility: "secret" } });
+  return firings;
+}
+function runRulesOnEvents(reg, w, events2, opts) {
+  const rules = allRules(reg, w.world);
+  const roots = [];
+  for (const e of events2)
+    for (const r of rules)
+      if (matchesEvent(w, r, e))
+        roots.push({ rule: r, depth: 0, self: eventSubject(e), vars: { event: eventVars(e) } });
+  return cascade(reg, w, roots, opts);
+}
+function runRulesOnTick(reg, w, tick, opts) {
+  const roots = [];
+  for (const r of allRules(reg, w.world)) {
+    const on = r.on;
+    if ("tick" in on && on.tick === tick)
+      roots.push({ rule: r, depth: 0, self: null, vars: {} });
+    else if ("at" in on && tick !== "day") {
+      const env = scopeEnv({ reg, ctx: w.ctx });
+      if (truthy2(evalExpr(on.at, env, false)))
+        roots.push({ rule: r, depth: 0, self: null, vars: {} });
+    }
+  }
+  return cascade(reg, w, roots, opts);
+}
+
+// src/engine/schedules.ts
+function allSchedules(reg, world) {
+  const out = Object.keys(world.schedules).sort().map((id) => own(world.schedules, id)).filter((s) => s !== undefined);
+  for (const s of reg.schedules)
+    if (!own(world.schedules, s.id))
+      out.push(s);
+  return out;
+}
+function chatSchedulesIn(ctx) {
+  const mine = optionalQuery(ctx, "castlife.chat_schedules")?.(ctx) ?? [];
+  return mine.length === 0 ? allSchedules(ctx.registry, ctx.world) : [...allSchedules(ctx.registry, ctx.world), ...mine];
+}
+function slotSpan(slot) {
+  const start = parseHHMM(slot.start);
+  let end = parseHHMM(slot.end);
+  if (end <= start)
+    end += MINUTES_PER_DAY;
+  return { start, length: end - start };
+}
+function scheduleInstants(world, schedules, from, to) {
+  const out = [];
+  if (to <= from)
+    return out;
+  const cal = calendarOf(world);
+  const firstDay = dateAt(cal, from).dayIndex - 1;
+  const lastDay = dateAt(cal, to).dayIndex;
+  for (const schedule of schedules) {
+    const spans = schedule.slots.map(slotSpan);
+    for (let day = firstDay;day <= lastDay; day++) {
+      if (!recursOn(cal, schedule.recurrence, day))
+        continue;
+      spans.forEach((span, slot) => {
+        const start = clockAt(cal, day, span.start);
+        const end = start + span.length;
+        const occurrence = day * schedule.slots.length + slot;
+        if (start > from && start <= to)
+          out.push({ at: start, schedule, slot, day, occurrence, edge: "start" });
+        if (end > from && end <= to)
+          out.push({ at: end, schedule, slot, day, occurrence, edge: "end" });
+      });
+    }
+  }
+  const order = new Map(schedules.map((s, i) => [s, i]));
+  return out.sort((a, b) => a.at - b.at || (a.edge === b.edge ? 0 : a.edge === "end" ? -1 : 1) || (order.get(a.schedule) ?? 0) - (order.get(b.schedule) ?? 0) || a.slot - b.slot);
+}
+function handedOver(world, instant) {
+  const cal = calendarOf(world);
+  return instant.schedule.slots.some((s, i) => {
+    if (i === instant.slot)
+      return false;
+    const start = parseHHMM(s.start);
+    return [instant.day, instant.day + 1].some((d) => recursOn(cal, instant.schedule.recurrence, d) && clockAt(cal, d, start) === instant.at);
+  });
+}
+function ownsAsGroup(reg, world, kind) {
+  return kindIs(reg, world, kind, GROUP_KIND) && !kindIs(reg, world, kind, COMPANY_KIND) && !kindIs(reg, world, kind, TRUST_KIND);
+}
+function ownerRank(reg, world, state, schedule) {
+  const owner = schedule.owner;
+  if (isRecord(owner))
+    return 3;
+  if (typeof owner !== "string" || owner === "")
+    return null;
+  const e = own(state.entities, owner);
+  if (e)
+    return ownsAsGroup(reg, world, e.kind) ? 1 : 0;
+  return 2;
+}
+function scheduleOwners(reg, world, state, schedule) {
+  const owner = schedule.owner;
+  const acting = (ids) => ids.filter((id) => acts(world, state, id));
+  if (isRecord(owner))
+    return acting(selectEntities(reg, world, state, owner));
+  if (typeof owner !== "string" || owner === "")
+    return [];
+  const e = own(state.entities, owner);
+  if (e) {
+    if (isGone(state, owner))
+      return [];
+    return acting(ownsAsGroup(reg, world, e.kind) ? membersOf(reg, world, state, owner) : [owner]);
+  }
+  return Object.keys(state.entities).sort().filter((id) => {
+    const x = own(state.entities, id);
+    return !!x && kindIs(reg, world, x.kind, owner) && !isGone(state, id) && acts(world, state, id);
+  });
+}
+function keyOf(v) {
+  if (v === undefined || v === null)
+    return "null";
+  return typeof v === "string" ? v : JSON.stringify(v);
+}
+function draw(items, rng) {
+  const usable = items.filter((w) => Number.isFinite(w.weight) && w.weight > 0);
+  if (usable.length === 0)
+    return;
+  return rng.weighted(usable.map((w) => ({ value: w.value, weight: w.weight })));
+}
+function sampleSlot(slot, previous, rng) {
+  const row = slot.given?.[keyOf(previous)];
+  if (row) {
+    const v = draw(row, rng);
+    if (v !== undefined)
+      return v;
+  }
+  if (slot.weighted) {
+    const v = draw(slot.weighted, rng);
+    if (v !== undefined)
+      return v;
+  }
+  return slot.value;
+}
+function scheduleSeed(runSeed, schedule, entity2, occurrence) {
+  return hashParts(runSeed, `schedule:${schedule}`, entity2, occurrence);
+}
+function scheduleDomain(reg, schedule) {
+  if (!schedule.pack)
+    return null;
+  return reg.packs.find((p) => p.id === schedule.pack)?.domain ?? null;
+}
+function held(state, entity2, target, at2) {
+  const holds2 = own(state.entities, entity2)?.fields.holds;
+  if (!isRecord(holds2))
+    return false;
+  const until2 = own(holds2, target);
+  return typeof until2 === "number" && until2 > at2;
+}
+function restValue(reg, world, state, entity2, target) {
+  const e = own(state.entities, entity2);
+  if (!e)
+    return;
+  if (target === "place") {
+    const home = e.fields.home;
+    return typeof home === "string" ? home : undefined;
+  }
+  return fieldDef(reg, world, e.kind, target)?.default;
+}
+function runningRivals(reg, ctx, schedule, rank, at2) {
+  const out = [];
+  for (const s of chatSchedulesIn(ctx)) {
+    if (s.id === schedule.id || s.target !== schedule.target)
+      continue;
+    const r = ownerRank(reg, ctx.world, ctx.state, s);
+    if (r === null || r === rank)
+      continue;
+    const active = activeSlot(ctx.world, s, at2);
+    if (active)
+      out.push({ schedule: s, rank: r, owners: new Set(scheduleOwners(reg, ctx.world, ctx.state, s)), domain: scheduleDomain(reg, s), slot: active.slot, occurrence: active.occurrence });
+  }
+  return out;
+}
+function runsFor(ctx, rival, entity2) {
+  return rival.owners.has(entity2) && (!rival.domain || ctx.levelOf(entity2, rival.domain) >= 1);
+}
+function overriddenAt(reg, ctx, schedule, entity2, at2) {
+  const rank = ownerRank(reg, ctx.world, ctx.state, schedule);
+  if (rank === null || rank === 0)
+    return false;
+  return runningRivals(reg, ctx, schedule, rank, at2).some((r) => r.rank < rank && runsFor(ctx, r, entity2));
+}
+function valueBefore(reg, ctx, instant, entity2) {
+  const cal = calendarOf(ctx.world);
+  const s = instant.schedule;
+  for (const [i, slot] of s.slots.entries()) {
+    if (i === instant.slot)
+      continue;
+    const span = slotSpan(slot);
+    for (const d of [instant.day - 1, instant.day])
+      if (recursOn(cal, s.recurrence, d) && clockAt(cal, d, span.start) + span.length === instant.at)
+        return slot.value === undefined ? null : slot.value;
+  }
+  return restValue(reg, ctx.world, ctx.state, entity2, s.target) ?? null;
+}
+function firstOfDay(instant) {
+  if (instant.edge !== "start")
+    return false;
+  const starts = instant.schedule.slots.map((slot) => slotSpan(slot).start);
+  return starts[instant.slot] === Math.min(...starts);
+}
+function instantEvents(reg, ctx, instant, runSeed, opts = {}) {
+  const { schedule } = instant;
+  const out = [];
+  const domain = scheduleDomain(reg, schedule);
+  const slot = schedule.slots[instant.slot];
+  if (!slot)
+    return out;
+  const startsHere = instant.edge === "end" && handedOver(ctx.world, instant);
+  const rank = ownerRank(reg, ctx.world, ctx.state, schedule);
+  const rivals = rank === null ? [] : runningRivals(reg, ctx, schedule, rank, instant.at);
+  const yields = optionalQuery(ctx, "castlife.yields");
+  const off = optionalQuery(ctx, "castlife.schedule_off");
+  const routine = schedule.target === "place" || schedule.target === "activity";
+  for (const entity2 of scheduleOwners(reg, ctx.world, ctx.state, schedule)) {
+    if (domain && ctx.levelOf(entity2, domain) < 1)
+      continue;
+    if (held(ctx.state, entity2, schedule.target, instant.at))
+      continue;
+    if (opts.povRoutine === false && entity2 === ctx.world.pov && routine)
+      continue;
+    if (off?.(ctx, entity2, schedule.id, instant.at) === true)
+      continue;
+    if (routine && optionalQuery(ctx, "combat.engaged")?.(ctx, entity2) === true)
+      continue;
+    const mine = rivals.filter((r) => runsFor(ctx, r, entity2));
+    if (rank !== null && mine.some((r) => r.rank < rank))
+      continue;
+    const current = own(own(ctx.state.entities, entity2)?.fields ?? {}, schedule.target);
+    let value;
+    if (instant.edge === "start")
+      value = sampleSlot(slot, current, createRng(scheduleSeed(runSeed, schedule.id, entity2, instant.occurrence)));
+    else {
+      if (startsHere)
+        continue;
+      const under2 = mine.filter((r) => rank !== null && r.rank > rank).sort((a, b) => a.rank - b.rank)[0];
+      value = under2 ? sampleSlot(under2.slot, current, createRng(scheduleSeed(runSeed, under2.schedule.id, entity2, under2.occurrence))) : restValue(reg, ctx.world, ctx.state, entity2, schedule.target);
+    }
+    if (value === undefined || keyOf(value) === keyOf(current))
+      continue;
+    if (schedule.target === "place" && typeof value === "string" && !own(ctx.world.places, value))
+      continue;
+    if (routine && routineStays(ctx, entity2, schedule.target === "place" ? value : null))
+      continue;
+    if (routine && yields) {
+      const lower = mine.filter((r) => rank !== null && r.rank > rank).sort((a, b) => a.rank - b.rank)[0];
+      const expected = instant.edge === "end" ? slot.value ?? null : lower ? lower.slot.value ?? null : valueBefore(reg, ctx, instant, entity2);
+      if (yields(ctx, entity2, schedule.target === "place" ? "place" : "activity", expected, firstOfDay(instant), opts.povRoutine === false, opts.timelapse === true))
+        continue;
+    }
+    if (schedule.target === "place" && typeof value === "string") {
+      const moved = relocate(ctx, entity2, value, { party: true });
+      if (!("code" in moved))
+        out.push(...moved);
+    } else
+      out.push({ type: "set", entity: entity2, field: schedule.target, value });
+  }
+  return out;
+}
+function routineStays(ctx, who, to) {
+  if (who !== ctx.world.pov)
+    return false;
+  const reach = optionalQuery(ctx, "space.reachable");
+  const here = placeOfEntity(ctx.state, who);
+  if (!reach || !here)
+    return false;
+  const home = own(ctx.state.entities, who)?.fields.home;
+  if (typeof home === "string" && own(ctx.world.places, home) && !reach(ctx, here, home))
+    return true;
+  return typeof to === "string" && own(ctx.world.places, to) !== undefined && !reach(ctx, here, to);
+}
+function activeSlot(world, schedule, clock) {
+  const cal = calendarOf(world);
+  const today = dateAt(cal, clock).dayIndex;
+  for (const day of [today, today - 1]) {
+    if (!recursOn(cal, schedule.recurrence, day))
+      continue;
+    for (const [index, slot] of schedule.slots.entries()) {
+      const span = slotSpan(slot);
+      const start = clockAt(cal, day, span.start);
+      if (start <= clock && clock < start + span.length)
+        return { slot, index, start, end: start + span.length, occurrence: day * schedule.slots.length + index };
+    }
+  }
+  return null;
+}
+function nextStartFor(reg, ctx, schedule, entity2, clock, horizonDays = 14) {
+  for (const i of scheduleInstants(ctx.world, [schedule], clock, clock + horizonDays * MINUTES_PER_DAY)) {
+    const slot = schedule.slots[i.slot];
+    if (i.edge === "start" && slot && !overriddenAt(reg, ctx, schedule, entity2, i.at))
+      return { at: i.at, slot };
+  }
+  return null;
+}
+function daySpans(schedule) {
+  return schedule.slots.flatMap((slot) => {
+    const { start, length } = slotSpan(slot);
+    const end = start + length;
+    return end <= MINUTES_PER_DAY ? [[start, end]] : [[start, MINUTES_PER_DAY], [0, end - MINUTES_PER_DAY]];
+  });
+}
+var OVERLAP_DAYS = 372;
+function scheduleOverlaps(reg, world) {
+  const issues = [];
+  let startClock;
+  try {
+    startClock = minutesBetween(world.calendar.epoch, world.start.at);
+  } catch {
+    return issues;
+  }
+  const cal = calendarOf(world);
+  const state = initialState(world, "", reg);
+  const entries2 = allSchedules(reg, world).map((schedule) => ({ schedule, rank: ownerRank(reg, world, state, schedule), owners: new Set(scheduleOwners(reg, world, state, schedule)) }));
+  const fromDay = (s) => {
+    try {
+      return s.recurrence.from ? dayIndexOfText(cal, s.recurrence.from) : -Infinity;
+    } catch {
+      return -Infinity;
+    }
+  };
+  const runs = (s, day) => {
+    const from = clockAt(cal, day, 0);
+    const starts = new Map;
+    const out = [];
+    for (const e of scheduleInstants(world, [s], from - MINUTES_PER_DAY, from + OVERLAP_DAYS * MINUTES_PER_DAY)) {
+      if (e.edge === "start")
+        starts.set(e.occurrence, e.at);
+      else {
+        const at2 = starts.get(e.occurrence);
+        if (at2 !== undefined)
+          out.push([at2, e.at]);
+      }
+    }
+    return out.sort((x, y) => x[0] - y[0]);
+  };
+  const meet = (ra, rb) => {
+    let i = 0;
+    let j = 0;
+    while (i < ra.length && j < rb.length) {
+      const [s1, e1] = ra[i] ?? [0, 0];
+      const [s2, e2] = rb[j] ?? [0, 0];
+      if (s1 < e2 && s2 < e1)
+        return true;
+      if (e1 <= e2)
+        i++;
+      else
+        j++;
+    }
+    return false;
+  };
+  for (let i = 0;i < entries2.length; i++) {
+    for (let j = i + 1;j < entries2.length; j++) {
+      const a = entries2[i];
+      const b = entries2[j];
+      if (!a || !b || a.schedule.target !== b.schedule.target || a.rank === null || a.rank !== b.rank)
+        continue;
+      const shared = [...a.owners].filter((id) => b.owners.has(id));
+      if (shared.length === 0)
+        continue;
+      let spansA;
+      let spansB;
+      try {
+        spansA = daySpans(a.schedule);
+        spansB = daySpans(b.schedule);
+      } catch {
+        continue;
+      }
+      if (!spansA.some(([s1, e1]) => spansB.some(([s2, e2]) => s1 < e2 && s2 < e1)))
+        continue;
+      const day = Math.max(dateAt(cal, startClock).dayIndex, fromDay(a.schedule), fromDay(b.schedule));
+      let clash = false;
+      try {
+        clash = meet(runs(a.schedule, day), runs(b.schedule, day));
+      } catch {
+        continue;
+      }
+      if (!clash)
+        continue;
+      const names = shared.map((id) => own(state.entities, id)?.name ?? id);
+      const who = names.length <= 3 ? names.join(", ") : `${names.slice(0, 3).join(", ")} and ${names.length - 3} more`;
+      issues.push({ severity: "warning", path: `schedules.${b.schedule.id}`, code: "schedule_overlap", message: `${who} ${names.length === 1 ? "is" : "are"} double-booked: ${a.schedule.id} and ${b.schedule.id} both set ${a.schedule.target} at the same time, with the same precedence.` });
+    }
+  }
+  return issues;
+}
+
+// src/engine/tracks.ts
+var TRANSITION_CAP = 8;
+function currentStage(world, state, track2) {
+  const def = own(world.tracks, track2);
+  if (!def)
+    return null;
+  return own(state.tracks, track2)?.stage ?? def.start;
+}
+function ownerBindings(track2) {
+  const owner = trackOwner(track2);
+  return owner ? { self: owner, owner } : {};
+}
+function trackEnv(reg, w, track2, trackId) {
+  const stage = own(w.state.tracks, trackId)?.stage ?? track2.start;
+  const def = own(track2.stages, stage);
+  const env0 = scopeEnv({ reg, ctx: w.ctx, bindings: ownerBindings(track2) });
+  const objectives = def?.objectives ?? [];
+  const done = objectives.filter((o) => truthy2(evalExpr(objectiveWhen(o), env0, false))).length;
+  const slice2 = readEngineSlice(w.state);
+  return scopeEnv({
+    reg,
+    ctx: w.ctx,
+    bindings: ownerBindings(track2),
+    vars: {
+      track: {
+        id: trackId,
+        stage,
+        since: w.state.clock - (own(w.state.tracks, trackId)?.since ?? 0),
+        attempts: own(slice2.attempts, trackId) ?? 0,
+        objectives: objectives.length,
+        done,
+        complete: done === objectives.length
+      }
+    }
+  });
+}
+function enter(reg, w, trackId, track2, from, to, via, seed) {
+  const start = w.events.length;
+  const leaving = own(track2.stages, from);
+  const key = hashParts(seed, "track", trackId, from, to, w.state.clock);
+  const rng = createRng(key);
+  const bindings = ownerBindings(track2);
+  if (via !== "fail" && leaving?.rewards && leaving.rewards.length > 0)
+    applyEffects(reg, w, leaving.rewards, { bindings, rng: rng.fork("rewards") });
+  if (w.apply({ type: "stage", track: trackId, to, from }))
+    return null;
+  const entering = own(track2.stages, to);
+  if (entering?.effects && entering.effects.length > 0)
+    applyEffects(reg, w, entering.effects, { bindings, rng: rng.fork("effects") });
+  if (entering?.rewards && entering.rewards.length > 0 && isTerminal(track2, to))
+    applyEffects(reg, w, entering.rewards, { bindings, rng: rng.fork("end rewards") });
+  if (entering?.truth)
+    w.apply({ type: ENGINE_EVENTS.revealed, data: { track: trackId, stage: to } });
+  if (track2.kind === "quest") {
+    const cue = entering?.cue && !ownersCue(reg, w.world, w.state, w.world.pov, trackId) ? entering.cue : null;
+    const text3 = cue ?? `${track2.label}: ${entering?.label ?? to}`;
+    w.apply({ type: ENGINE_EVENTS.signal, data: { class: "quest", text: text3, visibility: track2.visibility } });
+  }
+  w.unite(start, `stage:${key.slice(0, 10)}`);
+  return { track: trackId, from, to, via, events: w.events.slice(start) };
+}
+function gateOpen(reg, w, track2, trackId, to) {
+  const gate = own(track2.stages, to)?.gate;
+  if (gate === undefined)
+    return true;
+  return truthy2(evalExpr(gate, trackEnv(reg, w, track2, trackId), false));
+}
+function stepTracks(reg, w, seed) {
+  const changes = [];
+  for (const trackId of Object.keys(w.world.tracks).sort()) {
+    const track2 = own(w.world.tracks, trackId);
+    if (!track2)
+      continue;
+    for (let i = 0;i < TRANSITION_CAP; i++) {
+      const stage = own(w.state.tracks, trackId)?.stage ?? track2.start;
+      const def = own(track2.stages, stage);
+      if (!def)
+        break;
+      const env = trackEnv(reg, w, track2, trackId);
+      let change2 = null;
+      const solvedHere = track2.kind === "puzzle" && def.answer !== undefined && own(readEngineSlice(w.state).solved, trackId) === stage;
+      if (def.fail && truthy2(evalExpr(def.fail.when, env, false)))
+        change2 = enter(reg, w, trackId, track2, stage, def.fail.to, "fail", seed);
+      else if (solvedHere && def.next[0] && gateOpen(reg, w, track2, trackId, def.next[0].to))
+        change2 = enter(reg, w, trackId, track2, stage, def.next[0].to, "answer", seed);
+      else {
+        for (const n of def.next) {
+          if (!truthy2(evalExpr(n.when, env, false)))
+            continue;
+          if (!gateOpen(reg, w, track2, trackId, n.to))
+            continue;
+          change2 = enter(reg, w, trackId, track2, stage, n.to, "next", seed);
+          break;
+        }
+      }
+      if (!change2)
+        break;
+      changes.push(change2);
+    }
+  }
+  return changes;
+}
+function normalizeAnswer(text3) {
+  return text3.normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim().replace(/^(the|a|an) /, "");
+}
+function checkAnswer(world, state, trackId, answer, decision) {
+  const none = { correct: false, via: null, needsDecision: false, event: null };
+  const track2 = own(world.tracks, trackId);
+  if (!track2 || track2.kind !== "puzzle")
+    return none;
+  const stage = own(state.tracks, trackId)?.stage ?? track2.start;
+  const def = own(track2.stages, stage);
+  if (!def?.answer)
+    return none;
+  let via = null;
+  if (def.answer.expect.includes(answer))
+    via = "exact";
+  else if (def.answer.normalize && def.answer.expect.some((x) => normalizeAnswer(x) === normalizeAnswer(answer)))
+    via = "normalized";
+  else if (def.answer.decision && decision !== undefined && decision >= def.answer.decision.threshold)
+    via = "decision";
+  if (via === null && def.answer.decision !== undefined && decision === undefined)
+    return { ...none, needsDecision: true };
+  return { correct: via !== null, via, needsDecision: false, event: { type: ENGINE_EVENTS.attempt, data: { track: trackId, stage, correct: via !== null, ...via ? { via } : {} } } };
+}
+function agendaFor(world, state, agent) {
+  const out = [];
+  for (const id of Object.keys(world.tracks).sort()) {
+    const t = own(world.tracks, id);
+    if (!t || t.kind !== "agenda" || t.owner !== agent)
+      continue;
+    const stage = own(state.tracks, id)?.stage ?? t.start;
+    const def = own(t.stages, stage);
+    if (!def)
+      continue;
+    out.push({ track: id, label: t.label, stage, stageLabel: def.label, priority: def.priority ?? 0 });
+  }
+  return out.sort((a, b) => b.priority - a.priority || a.track.localeCompare(b.track));
+}
+function isTerminal(track2, stage) {
+  const def = own(track2.stages, stage);
+  return !def || def.next.length === 0 && !def.fail;
+}
+
+// src/engine/simulate.ts
+function processSeed(runSeed, process, entity2, slotIndex) {
+  return hashParts(runSeed, process, entity2, slotIndex);
+}
+function lod1Agents(world, state) {
+  return Object.keys(state.entities).filter((id) => own(state.entities, id)?.agent === true && !isGone(state, id) && acts(world, state, id)).sort();
+}
+function agentCursor(world, state, agent) {
+  const recorded = own(readEngineSlice(state).agents, agent);
+  if (recorded !== undefined)
+    return recorded;
+  const cal = calendarOf(world);
+  return slotIndexAt(cal, minutesBetween(world.calendar.epoch, world.start.at)) - 1;
+}
+function completedSlot(world, state) {
+  return slotIndexAt(calendarOf(world), state.clock) - 1;
+}
+function ranTo(state) {
+  const reached = readEngineSlice(state).reached;
+  return reached !== null && reached > state.clock ? reached : state.clock;
+}
+var processClock = null;
+function timedProcesses(clock, run) {
+  const outer = processClock;
+  processClock = clock ?? null;
+  try {
+    return run();
+  } finally {
+    processClock = outer;
+  }
+}
+function timeProcess(times, id, fn) {
+  const clock = processClock;
+  if (clock === null)
+    return fn();
+  const t0 = clock();
+  try {
+    return fn();
+  } finally {
+    times[id] = (times[id] ?? 0) + (clock() - t0);
+  }
+}
+function interruptPolicy(state, overrides = {}) {
+  const out = {};
+  for (const c of INTERRUPT_CLASSES)
+    out[c] = overrides[c] ?? own(state.time.interrupts, c) ?? "ignore";
+  return out;
+}
+var ALL_NOTE = Object.fromEntries(INTERRUPT_CLASSES.map((c) => [c, "note"]));
+function rngFactory(runSeed, process, slot) {
+  return (entity2) => createRng(processSeed(runSeed, process, entity2, slot));
+}
+function stepAgent(reg, w, agent, slot, runSeed, povRoutine, timelapse, times, run) {
+  const applied = [];
+  for (const def of reg.processes) {
+    if (def.scope !== "agent")
+      continue;
+    if (w.ctx.levelOf(agent, def.domain) < def.minLevel)
+      continue;
+    applied.push(...w.applyAll(timeProcess(times, def.id, () => def.step({ start: slot.start, end: slot.end, index: slot.index, ...povRoutine ? {} : { povRoutine: false }, ...timelapse ? { timelapse: true } : {}, ...run ? { run } : {} }, w.ctx, rngFactory(runSeed, def.id, slot.index), agent))));
+  }
+  return applied;
+}
+function emitter(reg, w, seed, rules) {
+  return {
+    emit(events2) {
+      const applied = w.applyAll(events2);
+      if (applied.length > 0)
+        rules.push(...runRulesOnEvents(reg, w, applied, { seed }));
+    }
+  };
+}
+function stillActs(w, id) {
+  return !isGone(w.state, id) && acts(w.world, w.state, id);
+}
+function clockTo(w, at2, cause, e) {
+  const minutes = at2 - w.state.clock;
+  if (minutes > 0)
+    e.emit([{ type: "clock", minutes, cause }]);
+}
+function advance(reg, w, to, opts) {
+  const from = w.state.clock;
+  const cause = opts.cause ?? (opts.mode === "timelapse" ? "timelapse" : "tick");
+  const policy = interruptPolicy(w.state, opts.interrupts);
+  const cap = clampUnitCap(opts.unitCap ?? w.state.time.unitCap);
+  const spent = opts.spent ?? { slots: 0, agentDays: 0, events: 0 };
+  const startEvents = w.events.length;
+  const processMs = {};
+  const result = { from, to: from, requested: to, slots: 0, stop: "target", stoppedBy: null, stops: [], notes: [], agentDays: 0, events: 0, rules: [], tracks: [], open: opts.open ?? null, processMs };
+  if (to <= from)
+    return result;
+  const cal = calendarOf(w.world);
+  const since = ranTo(w.state);
+  const schedules = chatSchedulesIn(w.ctx);
+  const instants = scheduleInstants(w.world, schedules, since, to);
+  const slots = slotsEnding(cal, since, to);
+  const e = emitter(reg, w, opts.runSeed, result.rules);
+  const timelapse = opts.mode === "timelapse";
+  const povRoutine = timelapse && opts.povRoutine !== false;
+  const stepping = () => {
+    if (!timelapse)
+      return [];
+    const list = lod1Agents(w.world, w.state).filter((a) => a !== w.world.pov);
+    if (opts.includePov !== false && own(w.state.entities, w.world.pov) && stillActs(w, w.world.pov))
+      list.unshift(w.world.pov);
+    return list;
+  };
+  const settle = (agent, slot) => {
+    if (slot !== agentCursor(w.world, w.state, agent))
+      w.apply({ type: ENGINE_EVENTS.caught, data: { agent, slot } });
+  };
+  let cursors = new Map;
+  let next = 0;
+  const run = { from, to };
+  const infoOf = (slot) => ({ start: slot.start, end: slot.end, index: slot.index, ...povRoutine ? {} : { povRoutine: false }, ...timelapse ? { timelapse: true } : {}, run });
+  const agentInstants = (slot, info, until2) => {
+    const timed = reg.processes.filter((d) => d.scope === "agent" && d.instants);
+    if (timed.length === 0)
+      return [];
+    const after = Math.max(w.state.clock, since);
+    const opening = w.state.clock === since;
+    const who = timelapse ? stepping() : lod1Agents(w.world, w.state).filter((a) => a !== w.world.pov);
+    const out = [];
+    for (const agent of who) {
+      if ((cursors.get(agent) ?? agentCursor(w.world, w.state, agent)) < slot.index - 1)
+        continue;
+      for (const def of timed) {
+        if (w.ctx.levelOf(agent, def.domain) < def.minLevel)
+          continue;
+        for (const instant of def.instants?.(w.ctx, agent, info) ?? []) {
+          const due = instant.opens === true ? opening && instant.at === since : instant.at > after && instant.at > slot.start;
+          if (due && instant.at <= until2 && instant.at < slot.end)
+            out.push({ at: instant.at, agent, def, instant });
+        }
+      }
+    }
+    return out.sort((a, b) => a.at - b.at || a.agent.localeCompare(b.agent) || timed.indexOf(a.def) - timed.indexOf(b.def) || a.instant.key.localeCompare(b.instant.key));
+  };
+  const applyInstants = (until2, slot) => {
+    const info = infoOf(slot);
+    const timed = agentInstants(slot, info, until2);
+    let t = 0;
+    for (;; ) {
+      const edge = instants[next];
+      const edgeAt = edge && edge.at <= until2 ? edge.at : Infinity;
+      const moment = timed[t];
+      if (edgeAt === Infinity && !moment)
+        break;
+      if (edge && edgeAt <= (moment?.at ?? Infinity)) {
+        next++;
+        clockTo(w, edgeAt, cause, e);
+        e.emit(instantEvents(reg, w.ctx, edge, opts.runSeed, { povRoutine, timelapse }));
+      } else if (moment) {
+        t++;
+        clockTo(w, moment.at, cause, e);
+        const at2 = moment.def.atInstant;
+        if (at2 && stillActs(w, moment.agent))
+          e.emit(timeProcess(processMs, moment.def.id, () => at2(w.ctx, moment.agent, moment.instant, info)));
+      }
+    }
+  };
+  const signalsSince = (index) => {
+    const out = [];
+    for (let i = index;i < w.events.length; i++) {
+      const ev = w.events[i];
+      const s = ev && "data" in ev ? signalOf(ev) : null;
+      if (s)
+        out.push(s);
+    }
+    return out;
+  };
+  const stepThrough = (agents, last, slot) => {
+    for (const agent of agents) {
+      let k = cursors.get(agent) ?? agentCursor(w.world, w.state, agent);
+      while (k < last && stillActs(w, agent)) {
+        k++;
+        const applied = stepAgent(reg, w, agent, k === slot.index ? slot : slotOf(cal, k), opts.runSeed, povRoutine, timelapse, processMs, run);
+        if (applied.length > 0)
+          result.rules.push(...runRulesOnEvents(reg, w, applied, { seed: hashParts(opts.runSeed, "agent", agent, k) }));
+      }
+      cursors.set(agent, k);
+    }
+  };
+  const overDays = (slot, agents) => timelapse && result.slots + spent.slots > 0 && spent.agentDays + result.agentDays + agents * (slot.end - slot.start) / MINUTES_PER_DAY > cap.agentDays;
+  for (const slot of slots) {
+    const agents = stepping();
+    for (const [agent, cursor] of [...cursors]) {
+      if (agents.includes(agent))
+        continue;
+      settle(agent, cursor);
+      cursors.delete(agent);
+    }
+    const slotDays = agents.length * (slot.end - slot.start) / MINUTES_PER_DAY;
+    const opened = slot.index === opts.open?.slot ? opts.open : null;
+    if (!opened && overDays(slot, agents.length)) {
+      result.stop = "cap";
+      break;
+    }
+    const mark = opened ? opened.mark : timelapse && result.slots + spent.slots > 0 ? w.lightMark() : null;
+    const held2 = mark && !opened ? new Map(cursors) : null;
+    const before = opened ? opened.since : w.events.length;
+    const rulesBefore = result.rules.length;
+    const tracksBefore = result.tracks.length;
+    stepThrough(agents, slot.index - 1, slot);
+    applyInstants(slot.end, slot);
+    clockTo(w, slot.end, cause, e);
+    const info = infoOf(slot);
+    for (const def of reg.processes) {
+      if (def.scope === "agent" || rulesetFloor(w.world, def.domain, w.state.realism.levels[def.domain] ?? 0) < def.minLevel)
+        continue;
+      e.emit(timeProcess(processMs, def.id, () => def.step(info, w.ctx, rngFactory(opts.runSeed, def.id, slot.index))));
+    }
+    stepThrough(agents, slot.index, slot);
+    const dayEnds = (slot.index + 1) % cal.partStarts.length === 0;
+    const tickSeed = hashParts(opts.runSeed, "tick", slot.index);
+    result.rules.push(...runRulesOnTick(reg, w, "slot", { seed: tickSeed }));
+    if (dayEnds)
+      result.rules.push(...runRulesOnTick(reg, w, "day", { seed: tickSeed }));
+    result.tracks.push(...stepTracks(reg, w, tickSeed));
+    if (mark && spent.events + w.events.length - startEvents > cap.events) {
+      w.restore(mark);
+      cursors = held2 ?? new Map;
+      result.rules.length = rulesBefore;
+      result.tracks.length = tracksBefore;
+      result.stop = "cap";
+      break;
+    }
+    result.slots++;
+    result.agentDays += slotDays;
+    for (const s of signalsSince(before)) {
+      const p = own(policy, s.class);
+      if (p === "stop" && timelapse && s.stops !== false && signalVisible(reg, w.world, w.state, w.world.pov, s))
+        result.stops.push(s);
+      else if (p === "note" || p === "stop")
+        result.notes.push(s);
+    }
+    if (timelapse && result.stops.length > 0) {
+      result.stop = "interrupt";
+      result.stoppedBy = result.stops[0]?.class ?? null;
+      break;
+    }
+    if (opts.stopWhen?.(w)) {
+      result.stop = "predicate";
+      break;
+    }
+  }
+  result.open = null;
+  if (result.stop === "target") {
+    const tail = slotOf(cal, slotIndexAt(cal, to));
+    let open = tail.start < to && result.slots === 0 && opts.open?.slot === tail.index ? opts.open : null;
+    if (tail.start < to && !open) {
+      const stepped = timelapse && opts.segmentTo !== undefined && tail.end <= opts.segmentTo && tail.end > since && result.slots + spent.slots > 0;
+      if (stepped && (overDays(tail, stepping().length) || spent.events + w.events.length - startEvents >= cap.events))
+        result.stop = "cap";
+      else {
+        let mark = null;
+        if (stepped) {
+          for (const [agent, slot] of cursors)
+            settle(agent, slot);
+          cursors = new Map;
+          mark = w.lightMark();
+        }
+        open = { slot: tail.index, since: w.events.length, mark };
+      }
+    }
+    if (result.stop === "target") {
+      stepThrough(stepping(), tail.index - 1, tail);
+      applyInstants(to, tail);
+      clockTo(w, to, cause, e);
+      result.open = open;
+    }
+  }
+  if (!timelapse && w.state.clock > from && own(w.state.entities, w.world.pov) && stillActs(w, w.world.pov)) {
+    const span = { from, to: w.state.clock };
+    for (const def of reg.processes) {
+      if (def.scope === "agent" && def.lived && w.ctx.levelOf(w.world.pov, def.domain) >= def.minLevel)
+        e.emit(def.lived(w.ctx, w.world.pov, span));
+    }
+  }
+  for (const [agent, slot] of cursors)
+    settle(agent, slot);
+  result.to = w.state.clock;
+  result.events = Math.max(0, w.events.length - startEvents);
+  return result;
+}
+function catchUp(reg, w, opts) {
+  const cal = calendarOf(w.world);
+  const done = completedSlot(w.world, w.state);
+  const all2 = lod1Agents(w.world, w.state).filter((a) => a !== w.world.pov);
+  const slice2 = readEngineSlice(w.state);
+  const onScreen = (opts.onScreen ?? []).filter((a) => all2.includes(a)).sort();
+  const orders = optionalQuery(w.ctx, "orgs.open_orders");
+  const ordered = all2.filter((a) => !onScreen.includes(a) && (orders?.(w.ctx, a) ?? 0) > 0);
+  const queue = all2.filter((a) => !onScreen.includes(a) && !ordered.includes(a));
+  const rr = queue.length > 0 ? slice2.rr % queue.length : 0;
+  const rotated = [...queue.slice(rr), ...queue.slice(0, rr)];
+  const order = [...onScreen, ...ordered, ...rotated];
+  const slotLen = MINUTES_PER_DAY / cal.partStarts.length;
+  let budget = (opts.agentDays ?? Infinity) * MINUTES_PER_DAY;
+  const stepped = [];
+  let taken = 0;
+  let advancedQueue = 0;
+  for (const agent of order) {
+    if (taken >= opts.agents || budget <= 0)
+      break;
+    const cursor = agentCursor(w.world, w.state, agent);
+    if (cursor >= done || !stillActs(w, agent))
+      continue;
+    taken++;
+    if (rotated.includes(agent))
+      advancedQueue = rotated.indexOf(agent) + 1;
+    let k = cursor;
+    while (k < done && budget > 0 && stillActs(w, agent)) {
+      k++;
+      const applied = stepAgent(reg, w, agent, slotOf(cal, k), opts.runSeed, false, false, {});
+      if (applied.length > 0)
+        runRulesOnEvents(reg, w, applied, { seed: hashParts(opts.runSeed, "agent", agent, k) });
+      budget -= slotLen;
+    }
+    w.apply({ type: ENGINE_EVENTS.caught, data: { agent, slot: k } });
+    stepped.push({ agent, from: cursor + 1, to: k });
+  }
+  if (queue.length > 0 && advancedQueue > 0)
+    w.apply({ type: ENGINE_EVENTS.cursor, data: { rr: (rr + advancedQueue) % queue.length } });
+  let backlog = 0;
+  for (const agent of lod1Agents(w.world, w.state))
+    if (agent !== w.world.pov)
+      backlog += Math.max(0, done - agentCursor(w.world, w.state, agent));
+  return { stepped, backlog };
+}
+var FIELD_TRANSPARENT = new Set(["clock", "post", "timelapse", ENGINE_EVENTS.signal, ENGINE_EVENTS.note, ENGINE_EVENTS.beat, ENGINE_EVENTS.cursor, ENGINE_EVENTS.choice, ENGINE_EVENTS.caught, ENGINE_EVENTS.fired]);
+var CLOCK_TRANSPARENT = new Set(["set", "add", "post", ENGINE_EVENTS.signal, ENGINE_EVENTS.note, ENGINE_EVENTS.beat, ENGINE_EVENTS.cursor, ENGINE_EVENTS.choice, ENGINE_EVENTS.caught]);
+var COLLAPSED_SIGNALS = new Set(["arrival", "needs", "weather", "overdue", "invitation"]);
+function coarsenRuns(events2, held2) {
+  const out = [];
+  let keys = new Map;
+  let lastClock = null;
+  for (const ev of events2) {
+    if (held2(ev)) {
+      keys = new Map;
+      if (!CLOCK_TRANSPARENT.has(ev.type))
+        lastClock = null;
+      out.push(ev);
+      continue;
+    }
+    if (ev.type === "set" || ev.type === "add") {
+      const key = `${ev.entity}\x00${ev.field}`;
+      const slot = keys.get(key) ?? {};
+      if (ev.type === "set") {
+        if (slot.set !== undefined)
+          out[slot.set] = null;
+        if (slot.add !== undefined)
+          out[slot.add] = null;
+        out.push({ ...ev });
+        keys.set(key, { set: out.length - 1 });
+      } else if (slot.add !== undefined) {
+        const prev = out[slot.add];
+        if (prev && prev.type === "add")
+          out[slot.add] = { ...prev, delta: prev.delta + ev.delta };
+      } else {
+        out.push({ ...ev });
+        keys.set(key, { ...slot, add: out.length - 1 });
+      }
+      continue;
+    }
+    if (ev.type === "clock") {
+      const prev = lastClock !== null ? out[lastClock] : null;
+      if (prev && prev.type === "clock" && prev.cause === ev.cause) {
+        out[lastClock] = { ...prev, minutes: prev.minutes + ev.minutes };
+        continue;
+      }
+      out.push({ ...ev });
+      lastClock = out.length - 1;
+      continue;
+    }
+    if (!FIELD_TRANSPARENT.has(ev.type))
+      keys = new Map;
+    if (!CLOCK_TRANSPARENT.has(ev.type))
+      lastClock = null;
+    out.push(ev);
+  }
+  return out.filter((e) => e !== null && !(e.type === "add" && e.delta === 0) && !(e.type === "clock" && e.minutes === 0));
+}
+function groupKey(reg, e) {
+  if (e.type === "set" || e.type === "add")
+    return `f\x00${e.entity}\x00${e.field}`;
+  if (e.type === "post")
+    return `p\x00${e.lines.map((l) => `${l.account}${l.amount < 0 ? "-" : "+"}`).join(",")}`;
+  if (e.type === ENGINE_EVENTS.caught && "data" in e)
+    return `c\x00${String(e.data.agent)}`;
+  if (e.type === ENGINE_EVENTS.cursor)
+    return "r";
+  const s = "data" in e ? signalOf(e) : null;
+  if (s)
+    return COLLAPSED_SIGNALS.has(s.class) ? `s\x00${s.class}\x00${s.entity ?? ""}` : null;
+  const hook = reg.get(e.type)?.coarsen;
+  const key = hook ? hook.key(e) : null;
+  return key === null ? null : `h\x00${e.type}\x00${key}`;
+}
+function collapseField(start, group) {
+  const first = group[0];
+  if (!first || first.type !== "set" && first.type !== "add")
+    return group;
+  const before = own(start.entities, first.entity);
+  let value = own(before?.fields ?? {}, first.field);
+  let lastSet = null;
+  let delta = 0;
+  for (const e of group) {
+    if (e.type === "set") {
+      value = e.value;
+      lastSet = e;
+      delta = 0;
+    } else if (e.type === "add") {
+      value = (typeof value === "number" ? value : 0) + e.delta;
+      delta += e.delta;
+    }
+  }
+  if (lastSet)
+    return delta === 0 ? [lastSet] : [{ ...lastSet, value: value ?? null }];
+  const base = own(before?.fields ?? {}, first.field);
+  if (first.type === "add" && before && (typeof base === "number" ? base : 0) + delta === value)
+    return delta === 0 ? [] : [{ ...first, delta }];
+  return group;
+}
+function creditOnly(e) {
+  return e.type === "post" && e.lines.every((l) => l.account.startsWith(EXTERNAL_ACCOUNT_PREFIX) || l.amount >= 0);
+}
+function collapse(reg, start, events2, held2) {
+  const keys = events2.map((e) => held2(e) ? null : groupKey(reg, e));
+  const first = new Map;
+  const last = new Map;
+  const members = new Map;
+  keys.forEach((k, i) => {
+    if (k === null)
+      return;
+    if (!first.has(k))
+      first.set(k, i);
+    last.set(k, i);
+    const list = members.get(k) ?? [];
+    const ev = events2[i];
+    if (ev)
+      list.push(ev);
+    members.set(k, list);
+  });
+  const out = [];
+  events2.forEach((e, i) => {
+    const k = keys[i];
+    if (k === null || k === undefined) {
+      out.push(e);
+      return;
+    }
+    const list = members.get(k) ?? [];
+    const early = k.startsWith("p\x00") && creditOnly(e);
+    if ((early ? first.get(k) : last.get(k)) !== i)
+      return;
+    const tail = list[list.length - 1] ?? e;
+    if (k.startsWith("f\x00"))
+      out.push(...collapseField(start, list));
+    else if (k.startsWith("p\x00") && tail.type === "post") {
+      const lines = tail.lines.map((l, j) => ({ account: l.account, amount: list.reduce((a, p) => a + (p.type === "post" ? p.lines[j]?.amount ?? 0 : 0), 0) }));
+      const memo = list.length === 1 ? tail.memo : `${(tail.memo ?? "").split(":")[0]?.trim() ?? ""} (${list.length} postings)`;
+      if (lines.some((l) => l.amount !== 0))
+        out.push({ ...tail, lines, ...memo !== undefined ? { memo } : {} });
+    } else if (k.startsWith("h\x00")) {
+      const hook = reg.get(e.type)?.coarsen;
+      out.push(hook ? list.reduce((a, b) => hook.merge(a, b)) : e);
+    } else
+      out.push(e);
+  });
+  const merged = [];
+  for (const e of out) {
+    const prev = merged[merged.length - 1];
+    if (e.type === "clock" && prev?.type === "clock" && prev.cause === e.cause)
+      merged[merged.length - 1] = { ...prev, minutes: prev.minutes + e.minutes };
+    else
+      merged.push(e);
+  }
+  return merged.filter((e) => !(e.type === "add" && e.delta === 0) && !(e.type === "clock" && e.minutes === 0));
+}
+function foldOf(reg, world, start, events2) {
+  const w = new Working(reg, world, start);
+  const applied = w.applyAll(events2);
+  return applied.length === events2.length ? w.state : null;
+}
+function coarsen(reg, world, start, events2) {
+  const full = foldOf(reg, world, start, events2);
+  if (full === null)
+    return [...events2];
+  const worldOnly = (s) => {
+    const copy = unobserved(s);
+    dropTouches(copy);
+    return hashJson(copy);
+  };
+  const expected = worldOnly(full);
+  const entries2 = new Set(events2.flatMap((e) => e.type === "stage" && e.group !== undefined ? [e.group] : []));
+  const held2 = (e) => e.group !== undefined && entries2.has(e.group);
+  for (const candidate of [collapse(reg, start, events2, held2), coarsenRuns(events2, held2)]) {
+    const coarse = foldOf(reg, world, start, candidate);
+    if (coarse === null || worldOnly(coarse) !== expected)
+      continue;
+    const lost = lostObservations(full, coarse);
+    return lost ? [...candidate, { type: ENGINE_EVENTS.observed, data: lost }] : candidate;
+  }
+  return [...events2];
 }
 
 // src/engine/lore-lint.ts
@@ -14192,369 +15641,6 @@ function lintRuleset(world, reg) {
   return issues;
 }
 
-// src/engine/schedules.ts
-function allSchedules(reg, world) {
-  const out = Object.keys(world.schedules).sort().map((id) => own(world.schedules, id)).filter((s) => s !== undefined);
-  for (const s of reg.schedules)
-    if (!own(world.schedules, s.id))
-      out.push(s);
-  return out;
-}
-function chatSchedulesIn(ctx) {
-  const mine = optionalQuery(ctx, "castlife.chat_schedules")?.(ctx) ?? [];
-  return mine.length === 0 ? allSchedules(ctx.registry, ctx.world) : [...allSchedules(ctx.registry, ctx.world), ...mine];
-}
-function slotSpan(slot) {
-  const start = parseHHMM(slot.start);
-  let end = parseHHMM(slot.end);
-  if (end <= start)
-    end += MINUTES_PER_DAY;
-  return { start, length: end - start };
-}
-function scheduleInstants(world, schedules, from, to) {
-  const out = [];
-  if (to <= from)
-    return out;
-  const cal = calendarOf(world);
-  const firstDay = dateAt(cal, from).dayIndex - 1;
-  const lastDay = dateAt(cal, to).dayIndex;
-  for (const schedule of schedules) {
-    const spans = schedule.slots.map(slotSpan);
-    for (let day = firstDay;day <= lastDay; day++) {
-      if (!recursOn(cal, schedule.recurrence, day))
-        continue;
-      spans.forEach((span, slot) => {
-        const start = clockAt(cal, day, span.start);
-        const end = start + span.length;
-        const occurrence = day * schedule.slots.length + slot;
-        if (start > from && start <= to)
-          out.push({ at: start, schedule, slot, day, occurrence, edge: "start" });
-        if (end > from && end <= to)
-          out.push({ at: end, schedule, slot, day, occurrence, edge: "end" });
-      });
-    }
-  }
-  const order = new Map(schedules.map((s, i) => [s, i]));
-  return out.sort((a, b) => a.at - b.at || (a.edge === b.edge ? 0 : a.edge === "end" ? -1 : 1) || (order.get(a.schedule) ?? 0) - (order.get(b.schedule) ?? 0) || a.slot - b.slot);
-}
-function handedOver(world, instant) {
-  const cal = calendarOf(world);
-  return instant.schedule.slots.some((s, i) => {
-    if (i === instant.slot)
-      return false;
-    const start = parseHHMM(s.start);
-    return [instant.day, instant.day + 1].some((d) => recursOn(cal, instant.schedule.recurrence, d) && clockAt(cal, d, start) === instant.at);
-  });
-}
-function ownsAsGroup(reg, world, kind) {
-  return kindIs(reg, world, kind, GROUP_KIND) && !kindIs(reg, world, kind, COMPANY_KIND) && !kindIs(reg, world, kind, TRUST_KIND);
-}
-function ownerRank(reg, world, state, schedule) {
-  const owner = schedule.owner;
-  if (isRecord(owner))
-    return 3;
-  if (typeof owner !== "string" || owner === "")
-    return null;
-  const e = own(state.entities, owner);
-  if (e)
-    return ownsAsGroup(reg, world, e.kind) ? 1 : 0;
-  return 2;
-}
-function scheduleOwners(reg, world, state, schedule) {
-  const owner = schedule.owner;
-  const acting = (ids) => ids.filter((id) => acts(world, state, id));
-  if (isRecord(owner))
-    return acting(selectEntities(reg, world, state, owner));
-  if (typeof owner !== "string" || owner === "")
-    return [];
-  const e = own(state.entities, owner);
-  if (e) {
-    if (isGone(state, owner))
-      return [];
-    return acting(ownsAsGroup(reg, world, e.kind) ? membersOf(reg, world, state, owner) : [owner]);
-  }
-  return Object.keys(state.entities).sort().filter((id) => {
-    const x = own(state.entities, id);
-    return !!x && kindIs(reg, world, x.kind, owner) && !isGone(state, id) && acts(world, state, id);
-  });
-}
-function keyOf(v) {
-  if (v === undefined || v === null)
-    return "null";
-  return typeof v === "string" ? v : JSON.stringify(v);
-}
-function draw(items, rng) {
-  const usable = items.filter((w) => Number.isFinite(w.weight) && w.weight > 0);
-  if (usable.length === 0)
-    return;
-  return rng.weighted(usable.map((w) => ({ value: w.value, weight: w.weight })));
-}
-function sampleSlot(slot, previous, rng) {
-  const row = slot.given?.[keyOf(previous)];
-  if (row) {
-    const v = draw(row, rng);
-    if (v !== undefined)
-      return v;
-  }
-  if (slot.weighted) {
-    const v = draw(slot.weighted, rng);
-    if (v !== undefined)
-      return v;
-  }
-  return slot.value;
-}
-function scheduleSeed(runSeed, schedule, entity2, occurrence) {
-  return hashParts(runSeed, `schedule:${schedule}`, entity2, occurrence);
-}
-function scheduleDomain(reg, schedule) {
-  if (!schedule.pack)
-    return null;
-  return reg.packs.find((p) => p.id === schedule.pack)?.domain ?? null;
-}
-function held(state, entity2, target, at2) {
-  const holds2 = own(state.entities, entity2)?.fields.holds;
-  if (!isRecord(holds2))
-    return false;
-  const until2 = own(holds2, target);
-  return typeof until2 === "number" && until2 > at2;
-}
-function restValue(reg, world, state, entity2, target) {
-  const e = own(state.entities, entity2);
-  if (!e)
-    return;
-  if (target === "place") {
-    const home = e.fields.home;
-    return typeof home === "string" ? home : undefined;
-  }
-  return fieldDef(reg, world, e.kind, target)?.default;
-}
-function runningRivals(reg, ctx, schedule, rank, at2) {
-  const out = [];
-  for (const s of chatSchedulesIn(ctx)) {
-    if (s.id === schedule.id || s.target !== schedule.target)
-      continue;
-    const r = ownerRank(reg, ctx.world, ctx.state, s);
-    if (r === null || r === rank)
-      continue;
-    const active = activeSlot(ctx.world, s, at2);
-    if (active)
-      out.push({ schedule: s, rank: r, owners: new Set(scheduleOwners(reg, ctx.world, ctx.state, s)), domain: scheduleDomain(reg, s), slot: active.slot, occurrence: active.occurrence });
-  }
-  return out;
-}
-function runsFor(ctx, rival, entity2) {
-  return rival.owners.has(entity2) && (!rival.domain || ctx.levelOf(entity2, rival.domain) >= 1);
-}
-function overriddenAt(reg, ctx, schedule, entity2, at2) {
-  const rank = ownerRank(reg, ctx.world, ctx.state, schedule);
-  if (rank === null || rank === 0)
-    return false;
-  return runningRivals(reg, ctx, schedule, rank, at2).some((r) => r.rank < rank && runsFor(ctx, r, entity2));
-}
-function valueBefore(reg, ctx, instant, entity2) {
-  const cal = calendarOf(ctx.world);
-  const s = instant.schedule;
-  for (const [i, slot] of s.slots.entries()) {
-    if (i === instant.slot)
-      continue;
-    const span = slotSpan(slot);
-    for (const d of [instant.day - 1, instant.day])
-      if (recursOn(cal, s.recurrence, d) && clockAt(cal, d, span.start) + span.length === instant.at)
-        return slot.value === undefined ? null : slot.value;
-  }
-  return restValue(reg, ctx.world, ctx.state, entity2, s.target) ?? null;
-}
-function firstOfDay(instant) {
-  if (instant.edge !== "start")
-    return false;
-  const starts = instant.schedule.slots.map((slot) => slotSpan(slot).start);
-  return starts[instant.slot] === Math.min(...starts);
-}
-function instantEvents(reg, ctx, instant, runSeed, opts = {}) {
-  const { schedule } = instant;
-  const out = [];
-  const domain = scheduleDomain(reg, schedule);
-  const slot = schedule.slots[instant.slot];
-  if (!slot)
-    return out;
-  const startsHere = instant.edge === "end" && handedOver(ctx.world, instant);
-  const rank = ownerRank(reg, ctx.world, ctx.state, schedule);
-  const rivals = rank === null ? [] : runningRivals(reg, ctx, schedule, rank, instant.at);
-  const yields = optionalQuery(ctx, "castlife.yields");
-  const off = optionalQuery(ctx, "castlife.schedule_off");
-  const routine = schedule.target === "place" || schedule.target === "activity";
-  for (const entity2 of scheduleOwners(reg, ctx.world, ctx.state, schedule)) {
-    if (domain && ctx.levelOf(entity2, domain) < 1)
-      continue;
-    if (held(ctx.state, entity2, schedule.target, instant.at))
-      continue;
-    if (opts.povRoutine === false && entity2 === ctx.world.pov && routine)
-      continue;
-    if (off?.(ctx, entity2, schedule.id, instant.at) === true)
-      continue;
-    if (routine && optionalQuery(ctx, "combat.engaged")?.(ctx, entity2) === true)
-      continue;
-    const mine = rivals.filter((r) => runsFor(ctx, r, entity2));
-    if (rank !== null && mine.some((r) => r.rank < rank))
-      continue;
-    const current = own(own(ctx.state.entities, entity2)?.fields ?? {}, schedule.target);
-    let value;
-    if (instant.edge === "start")
-      value = sampleSlot(slot, current, createRng(scheduleSeed(runSeed, schedule.id, entity2, instant.occurrence)));
-    else {
-      if (startsHere)
-        continue;
-      const under2 = mine.filter((r) => rank !== null && r.rank > rank).sort((a, b) => a.rank - b.rank)[0];
-      value = under2 ? sampleSlot(under2.slot, current, createRng(scheduleSeed(runSeed, under2.schedule.id, entity2, under2.occurrence))) : restValue(reg, ctx.world, ctx.state, entity2, schedule.target);
-    }
-    if (value === undefined || keyOf(value) === keyOf(current))
-      continue;
-    if (schedule.target === "place" && typeof value === "string" && !own(ctx.world.places, value))
-      continue;
-    if (routine && routineStays(ctx, entity2, schedule.target === "place" ? value : null))
-      continue;
-    if (routine && yields) {
-      const lower = mine.filter((r) => rank !== null && r.rank > rank).sort((a, b) => a.rank - b.rank)[0];
-      const expected = instant.edge === "end" ? slot.value ?? null : lower ? lower.slot.value ?? null : valueBefore(reg, ctx, instant, entity2);
-      if (yields(ctx, entity2, schedule.target === "place" ? "place" : "activity", expected, firstOfDay(instant), opts.povRoutine === false, opts.timelapse === true))
-        continue;
-    }
-    if (schedule.target === "place" && typeof value === "string") {
-      const moved = relocate(ctx, entity2, value, { party: true });
-      if (!("code" in moved))
-        out.push(...moved);
-    } else
-      out.push({ type: "set", entity: entity2, field: schedule.target, value });
-  }
-  return out;
-}
-function routineStays(ctx, who, to) {
-  if (who !== ctx.world.pov)
-    return false;
-  const reach = optionalQuery(ctx, "space.reachable");
-  const here = placeOfEntity(ctx.state, who);
-  if (!reach || !here)
-    return false;
-  const home = own(ctx.state.entities, who)?.fields.home;
-  if (typeof home === "string" && own(ctx.world.places, home) && !reach(ctx, here, home))
-    return true;
-  return typeof to === "string" && own(ctx.world.places, to) !== undefined && !reach(ctx, here, to);
-}
-function activeSlot(world, schedule, clock) {
-  const cal = calendarOf(world);
-  const today = dateAt(cal, clock).dayIndex;
-  for (const day of [today, today - 1]) {
-    if (!recursOn(cal, schedule.recurrence, day))
-      continue;
-    for (const [index, slot] of schedule.slots.entries()) {
-      const span = slotSpan(slot);
-      const start = clockAt(cal, day, span.start);
-      if (start <= clock && clock < start + span.length)
-        return { slot, index, start, end: start + span.length, occurrence: day * schedule.slots.length + index };
-    }
-  }
-  return null;
-}
-function nextStartFor(reg, ctx, schedule, entity2, clock, horizonDays = 14) {
-  for (const i of scheduleInstants(ctx.world, [schedule], clock, clock + horizonDays * MINUTES_PER_DAY)) {
-    const slot = schedule.slots[i.slot];
-    if (i.edge === "start" && slot && !overriddenAt(reg, ctx, schedule, entity2, i.at))
-      return { at: i.at, slot };
-  }
-  return null;
-}
-function daySpans(schedule) {
-  return schedule.slots.flatMap((slot) => {
-    const { start, length } = slotSpan(slot);
-    const end = start + length;
-    return end <= MINUTES_PER_DAY ? [[start, end]] : [[start, MINUTES_PER_DAY], [0, end - MINUTES_PER_DAY]];
-  });
-}
-var OVERLAP_DAYS = 372;
-function scheduleOverlaps(reg, world) {
-  const issues = [];
-  let startClock;
-  try {
-    startClock = minutesBetween(world.calendar.epoch, world.start.at);
-  } catch {
-    return issues;
-  }
-  const cal = calendarOf(world);
-  const state = initialState(world, "", reg);
-  const entries2 = allSchedules(reg, world).map((schedule) => ({ schedule, rank: ownerRank(reg, world, state, schedule), owners: new Set(scheduleOwners(reg, world, state, schedule)) }));
-  const fromDay = (s) => {
-    try {
-      return s.recurrence.from ? dayIndexOfText(cal, s.recurrence.from) : -Infinity;
-    } catch {
-      return -Infinity;
-    }
-  };
-  const runs = (s, day) => {
-    const from = clockAt(cal, day, 0);
-    const starts = new Map;
-    const out = [];
-    for (const e of scheduleInstants(world, [s], from - MINUTES_PER_DAY, from + OVERLAP_DAYS * MINUTES_PER_DAY)) {
-      if (e.edge === "start")
-        starts.set(e.occurrence, e.at);
-      else {
-        const at2 = starts.get(e.occurrence);
-        if (at2 !== undefined)
-          out.push([at2, e.at]);
-      }
-    }
-    return out.sort((x, y) => x[0] - y[0]);
-  };
-  const meet = (ra, rb) => {
-    let i = 0;
-    let j = 0;
-    while (i < ra.length && j < rb.length) {
-      const [s1, e1] = ra[i] ?? [0, 0];
-      const [s2, e2] = rb[j] ?? [0, 0];
-      if (s1 < e2 && s2 < e1)
-        return true;
-      if (e1 <= e2)
-        i++;
-      else
-        j++;
-    }
-    return false;
-  };
-  for (let i = 0;i < entries2.length; i++) {
-    for (let j = i + 1;j < entries2.length; j++) {
-      const a = entries2[i];
-      const b = entries2[j];
-      if (!a || !b || a.schedule.target !== b.schedule.target || a.rank === null || a.rank !== b.rank)
-        continue;
-      const shared = [...a.owners].filter((id) => b.owners.has(id));
-      if (shared.length === 0)
-        continue;
-      let spansA;
-      let spansB;
-      try {
-        spansA = daySpans(a.schedule);
-        spansB = daySpans(b.schedule);
-      } catch {
-        continue;
-      }
-      if (!spansA.some(([s1, e1]) => spansB.some(([s2, e2]) => s1 < e2 && s2 < e1)))
-        continue;
-      const day = Math.max(dateAt(cal, startClock).dayIndex, fromDay(a.schedule), fromDay(b.schedule));
-      let clash = false;
-      try {
-        clash = meet(runs(a.schedule, day), runs(b.schedule, day));
-      } catch {
-        continue;
-      }
-      if (!clash)
-        continue;
-      const names = shared.map((id) => own(state.entities, id)?.name ?? id);
-      const who = names.length <= 3 ? names.join(", ") : `${names.slice(0, 3).join(", ")} and ${names.length - 3} more`;
-      issues.push({ severity: "warning", path: `schedules.${b.schedule.id}`, code: "schedule_overlap", message: `${who} ${names.length === 1 ? "is" : "are"} double-booked: ${a.schedule.id} and ${b.schedule.id} both set ${a.schedule.target} at the same time, with the same precedence.` });
-    }
-  }
-  return issues;
-}
-
 // src/engine/world-lint.ts
 var TRACK_REF_ARGS = {
   carries: ["entity", "entity"],
@@ -14919,792 +16005,6 @@ function lintStructure(world, reg) {
   return issues;
 }
 
-// src/engine/rules.ts
-var CASCADE_CAP = 8;
-var FIRING_CAP = 256;
-function allRules(reg, world) {
-  const out = Object.keys(world.rules).sort().map((id) => world.rules[id]).filter((r) => r !== undefined);
-  for (const r of reg.rules)
-    if (!world.rules[r.id])
-      out.push(r);
-  return out;
-}
-function eventSubject(e) {
-  switch (e.type) {
-    case "set":
-    case "add":
-      return e.entity;
-    case "link":
-    case "unlink":
-      return e.from;
-    case "spawn":
-      return e.entity.id;
-    case "materialize":
-      return e.entity;
-    default: {
-      if ("data" in e && isRecord(e.data)) {
-        const d = e.data;
-        for (const key of ["entity", "agent", "actor", "from"])
-          if (typeof d[key] === "string")
-            return d[key];
-      }
-      return null;
-    }
-  }
-}
-function eventVars(e) {
-  const out = { type: e.type };
-  for (const [k, v] of Object.entries(e)) {
-    if (k === "type")
-      continue;
-    const scalar = toValue(v);
-    if (scalar !== undefined)
-      out[k] = scalar;
-    else if (isRecord(v)) {
-      const nested = {};
-      for (const [nk, nv] of Object.entries(v)) {
-        const s = toValue(nv);
-        if (s !== undefined)
-          nested[nk] = s;
-      }
-      out[k] = nested;
-    }
-  }
-  return out;
-}
-function eligible(w, rule) {
-  const fired = own(readEngineSlice(w.state).fired, rule.id);
-  if (!fired)
-    return true;
-  if (rule.once)
-    return false;
-  if (rule.cooldownMinutes !== undefined && w.state.clock - fired.last < rule.cooldownMinutes)
-    return false;
-  return true;
-}
-function fire(reg, w, p, opts) {
-  const bindings = p.self ? { self: p.self } : {};
-  const env = scopeEnv({ reg, ctx: w.ctx, bindings, vars: p.vars });
-  if (!eligible(w, p.rule))
-    return null;
-  if (p.rule.when !== undefined && !truthy2(evalExpr(p.rule.when, env, false)))
-    return null;
-  const count = own(readEngineSlice(w.state).fired, p.rule.id)?.n ?? 0;
-  const start = w.events.length;
-  if (w.apply({ type: ENGINE_EVENTS.fired, data: { rule: p.rule.id } }))
-    return null;
-  const rng = createRng(hashParts(opts.seed, "rule", p.rule.id, w.state.clock, count));
-  const result = applyEffects(reg, w, p.rule.do, { bindings, vars: p.vars, rng });
-  if (p.rule.interrupt)
-    w.apply({ type: ENGINE_EVENTS.signal, data: { class: "rule", text: p.rule.beat?.hint ?? p.rule.id } });
-  if (p.rule.beat)
-    w.apply({ type: ENGINE_EVENTS.beat, data: { hint: p.rule.beat.hint, rule: p.rule.id, weight: p.rule.beat.weight ?? 1 } });
-  return {
-    rule: p.rule.id,
-    depth: p.depth,
-    beat: p.rule.beat ? { hint: p.rule.beat.hint, weight: p.rule.beat.weight ?? 1 } : null,
-    interrupt: p.rule.interrupt === true,
-    events: w.events.slice(start),
-    rejected: result.rejected
-  };
-}
-function matchesEvent(w, rule, e) {
-  const on = rule.on;
-  if ("event" in on)
-    return on.event === e.type;
-  if ("enter" in on)
-    return e.type === "set" && e.field === "place" && typeof e.value === "string" && placeWithin(w.world, e.value, on.enter);
-  if ("zone" in on || "cell" in on)
-    return optionalQuery(w.ctx, "space.entered")?.(w.ctx, on, e) === true;
-  return false;
-}
-function cascade(reg, w, roots, opts) {
-  const cap = opts.cascadeCap ?? CASCADE_CAP;
-  const rules = allRules(reg, w.world);
-  const firings = [];
-  let queue = roots;
-  let capped = false;
-  while (queue.length > 0) {
-    const next = [];
-    for (const p of queue) {
-      if (firings.length >= FIRING_CAP) {
-        capped = true;
-        break;
-      }
-      const f = fire(reg, w, p, opts);
-      if (!f)
-        continue;
-      firings.push(f);
-      if (p.depth + 1 >= cap) {
-        if (f.events.some((e) => rules.some((r) => matchesEvent(w, r, e))))
-          capped = true;
-        continue;
-      }
-      for (const e of f.events) {
-        for (const r of rules)
-          if (matchesEvent(w, r, e))
-            next.push({ rule: r, depth: p.depth + 1, self: eventSubject(e), vars: { event: eventVars(e) } });
-      }
-    }
-    if (capped)
-      break;
-    queue = next;
-  }
-  if (capped)
-    w.apply({ type: ENGINE_EVENTS.note, data: { text: `Rule cascade stopped at its cap of ${cap}.`, visibility: "secret" } });
-  return firings;
-}
-function runRulesOnEvents(reg, w, events2, opts) {
-  const rules = allRules(reg, w.world);
-  const roots = [];
-  for (const e of events2)
-    for (const r of rules)
-      if (matchesEvent(w, r, e))
-        roots.push({ rule: r, depth: 0, self: eventSubject(e), vars: { event: eventVars(e) } });
-  return cascade(reg, w, roots, opts);
-}
-function runRulesOnTick(reg, w, tick, opts) {
-  const roots = [];
-  for (const r of allRules(reg, w.world)) {
-    const on = r.on;
-    if ("tick" in on && on.tick === tick)
-      roots.push({ rule: r, depth: 0, self: null, vars: {} });
-    else if ("at" in on && tick !== "day") {
-      const env = scopeEnv({ reg, ctx: w.ctx });
-      if (truthy2(evalExpr(on.at, env, false)))
-        roots.push({ rule: r, depth: 0, self: null, vars: {} });
-    }
-  }
-  return cascade(reg, w, roots, opts);
-}
-
-// src/engine/tracks.ts
-var TRANSITION_CAP = 8;
-function currentStage(world, state, track2) {
-  const def = own(world.tracks, track2);
-  if (!def)
-    return null;
-  return own(state.tracks, track2)?.stage ?? def.start;
-}
-function ownerBindings(track2) {
-  const owner = trackOwner(track2);
-  return owner ? { self: owner, owner } : {};
-}
-function trackEnv(reg, w, track2, trackId) {
-  const stage = own(w.state.tracks, trackId)?.stage ?? track2.start;
-  const def = own(track2.stages, stage);
-  const env0 = scopeEnv({ reg, ctx: w.ctx, bindings: ownerBindings(track2) });
-  const objectives = def?.objectives ?? [];
-  const done = objectives.filter((o) => truthy2(evalExpr(objectiveWhen(o), env0, false))).length;
-  const slice2 = readEngineSlice(w.state);
-  return scopeEnv({
-    reg,
-    ctx: w.ctx,
-    bindings: ownerBindings(track2),
-    vars: {
-      track: {
-        id: trackId,
-        stage,
-        since: w.state.clock - (own(w.state.tracks, trackId)?.since ?? 0),
-        attempts: own(slice2.attempts, trackId) ?? 0,
-        objectives: objectives.length,
-        done,
-        complete: done === objectives.length
-      }
-    }
-  });
-}
-function enter(reg, w, trackId, track2, from, to, via, seed) {
-  const start = w.events.length;
-  const leaving = own(track2.stages, from);
-  const key = hashParts(seed, "track", trackId, from, to, w.state.clock);
-  const rng = createRng(key);
-  const bindings = ownerBindings(track2);
-  if (via !== "fail" && leaving?.rewards && leaving.rewards.length > 0)
-    applyEffects(reg, w, leaving.rewards, { bindings, rng: rng.fork("rewards") });
-  if (w.apply({ type: "stage", track: trackId, to, from }))
-    return null;
-  const entering = own(track2.stages, to);
-  if (entering?.effects && entering.effects.length > 0)
-    applyEffects(reg, w, entering.effects, { bindings, rng: rng.fork("effects") });
-  if (entering?.rewards && entering.rewards.length > 0 && isTerminal(track2, to))
-    applyEffects(reg, w, entering.rewards, { bindings, rng: rng.fork("end rewards") });
-  if (entering?.truth)
-    w.apply({ type: ENGINE_EVENTS.revealed, data: { track: trackId, stage: to } });
-  if (track2.kind === "quest") {
-    const cue = entering?.cue && !ownersCue(reg, w.world, w.state, w.world.pov, trackId) ? entering.cue : null;
-    const text3 = cue ?? `${track2.label}: ${entering?.label ?? to}`;
-    w.apply({ type: ENGINE_EVENTS.signal, data: { class: "quest", text: text3, visibility: track2.visibility } });
-  }
-  w.unite(start, `stage:${key.slice(0, 10)}`);
-  return { track: trackId, from, to, via, events: w.events.slice(start) };
-}
-function gateOpen(reg, w, track2, trackId, to) {
-  const gate = own(track2.stages, to)?.gate;
-  if (gate === undefined)
-    return true;
-  return truthy2(evalExpr(gate, trackEnv(reg, w, track2, trackId), false));
-}
-function stepTracks(reg, w, seed) {
-  const changes = [];
-  for (const trackId of Object.keys(w.world.tracks).sort()) {
-    const track2 = own(w.world.tracks, trackId);
-    if (!track2)
-      continue;
-    for (let i = 0;i < TRANSITION_CAP; i++) {
-      const stage = own(w.state.tracks, trackId)?.stage ?? track2.start;
-      const def = own(track2.stages, stage);
-      if (!def)
-        break;
-      const env = trackEnv(reg, w, track2, trackId);
-      let change2 = null;
-      const solvedHere = track2.kind === "puzzle" && def.answer !== undefined && own(readEngineSlice(w.state).solved, trackId) === stage;
-      if (def.fail && truthy2(evalExpr(def.fail.when, env, false)))
-        change2 = enter(reg, w, trackId, track2, stage, def.fail.to, "fail", seed);
-      else if (solvedHere && def.next[0] && gateOpen(reg, w, track2, trackId, def.next[0].to))
-        change2 = enter(reg, w, trackId, track2, stage, def.next[0].to, "answer", seed);
-      else {
-        for (const n of def.next) {
-          if (!truthy2(evalExpr(n.when, env, false)))
-            continue;
-          if (!gateOpen(reg, w, track2, trackId, n.to))
-            continue;
-          change2 = enter(reg, w, trackId, track2, stage, n.to, "next", seed);
-          break;
-        }
-      }
-      if (!change2)
-        break;
-      changes.push(change2);
-    }
-  }
-  return changes;
-}
-function normalizeAnswer(text3) {
-  return text3.normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim().replace(/^(the|a|an) /, "");
-}
-function checkAnswer(world, state, trackId, answer, decision) {
-  const none = { correct: false, via: null, needsDecision: false, event: null };
-  const track2 = own(world.tracks, trackId);
-  if (!track2 || track2.kind !== "puzzle")
-    return none;
-  const stage = own(state.tracks, trackId)?.stage ?? track2.start;
-  const def = own(track2.stages, stage);
-  if (!def?.answer)
-    return none;
-  let via = null;
-  if (def.answer.expect.includes(answer))
-    via = "exact";
-  else if (def.answer.normalize && def.answer.expect.some((x) => normalizeAnswer(x) === normalizeAnswer(answer)))
-    via = "normalized";
-  else if (def.answer.decision && decision !== undefined && decision >= def.answer.decision.threshold)
-    via = "decision";
-  if (via === null && def.answer.decision !== undefined && decision === undefined)
-    return { ...none, needsDecision: true };
-  return { correct: via !== null, via, needsDecision: false, event: { type: ENGINE_EVENTS.attempt, data: { track: trackId, stage, correct: via !== null, ...via ? { via } : {} } } };
-}
-function agendaFor(world, state, agent) {
-  const out = [];
-  for (const id of Object.keys(world.tracks).sort()) {
-    const t = own(world.tracks, id);
-    if (!t || t.kind !== "agenda" || t.owner !== agent)
-      continue;
-    const stage = own(state.tracks, id)?.stage ?? t.start;
-    const def = own(t.stages, stage);
-    if (!def)
-      continue;
-    out.push({ track: id, label: t.label, stage, stageLabel: def.label, priority: def.priority ?? 0 });
-  }
-  return out.sort((a, b) => b.priority - a.priority || a.track.localeCompare(b.track));
-}
-function isTerminal(track2, stage) {
-  const def = own(track2.stages, stage);
-  return !def || def.next.length === 0 && !def.fail;
-}
-
-// src/engine/simulate.ts
-function processSeed(runSeed, process, entity2, slotIndex) {
-  return hashParts(runSeed, process, entity2, slotIndex);
-}
-function lod1Agents(world, state) {
-  return Object.keys(state.entities).filter((id) => own(state.entities, id)?.agent === true && !isGone(state, id) && acts(world, state, id)).sort();
-}
-function agentCursor(world, state, agent) {
-  const recorded = own(readEngineSlice(state).agents, agent);
-  if (recorded !== undefined)
-    return recorded;
-  const cal = calendarOf(world);
-  return slotIndexAt(cal, minutesBetween(world.calendar.epoch, world.start.at)) - 1;
-}
-function completedSlot(world, state) {
-  return slotIndexAt(calendarOf(world), state.clock) - 1;
-}
-function ranTo(state) {
-  const reached = readEngineSlice(state).reached;
-  return reached !== null && reached > state.clock ? reached : state.clock;
-}
-function interruptPolicy(state, overrides = {}) {
-  const out = {};
-  for (const c of INTERRUPT_CLASSES)
-    out[c] = overrides[c] ?? own(state.time.interrupts, c) ?? "ignore";
-  return out;
-}
-var ALL_NOTE = Object.fromEntries(INTERRUPT_CLASSES.map((c) => [c, "note"]));
-function rngFactory(runSeed, process, slot) {
-  return (entity2) => createRng(processSeed(runSeed, process, entity2, slot));
-}
-function stepAgent(reg, w, agent, slot, runSeed, povRoutine, timelapse, run) {
-  const applied = [];
-  for (const def of reg.processes) {
-    if (def.scope !== "agent")
-      continue;
-    if (w.ctx.levelOf(agent, def.domain) < def.minLevel)
-      continue;
-    applied.push(...w.applyAll(def.step({ start: slot.start, end: slot.end, index: slot.index, ...povRoutine ? {} : { povRoutine: false }, ...timelapse ? { timelapse: true } : {}, ...run ? { run } : {} }, w.ctx, rngFactory(runSeed, def.id, slot.index), agent)));
-  }
-  return applied;
-}
-function emitter(reg, w, seed, rules) {
-  return {
-    emit(events2) {
-      const applied = w.applyAll(events2);
-      if (applied.length > 0)
-        rules.push(...runRulesOnEvents(reg, w, applied, { seed }));
-    }
-  };
-}
-function stillActs(w, id) {
-  return !isGone(w.state, id) && acts(w.world, w.state, id);
-}
-function clockTo(w, at2, cause, e) {
-  const minutes = at2 - w.state.clock;
-  if (minutes > 0)
-    e.emit([{ type: "clock", minutes, cause }]);
-}
-function advance(reg, w, to, opts) {
-  const from = w.state.clock;
-  const cause = opts.cause ?? (opts.mode === "timelapse" ? "timelapse" : "tick");
-  const policy = interruptPolicy(w.state, opts.interrupts);
-  const cap = clampUnitCap(opts.unitCap ?? w.state.time.unitCap);
-  const spent = opts.spent ?? { slots: 0, agentDays: 0, events: 0 };
-  const startEvents = w.events.length;
-  const result = { from, to: from, requested: to, slots: 0, stop: "target", stoppedBy: null, stops: [], notes: [], agentDays: 0, events: 0, rules: [], tracks: [], open: opts.open ?? null };
-  if (to <= from)
-    return result;
-  const cal = calendarOf(w.world);
-  const since = ranTo(w.state);
-  const schedules = chatSchedulesIn(w.ctx);
-  const instants = scheduleInstants(w.world, schedules, since, to);
-  const slots = slotsEnding(cal, since, to);
-  const e = emitter(reg, w, opts.runSeed, result.rules);
-  const timelapse = opts.mode === "timelapse";
-  const povRoutine = timelapse && opts.povRoutine !== false;
-  const stepping = () => {
-    if (!timelapse)
-      return [];
-    const list = lod1Agents(w.world, w.state).filter((a) => a !== w.world.pov);
-    if (opts.includePov !== false && own(w.state.entities, w.world.pov) && stillActs(w, w.world.pov))
-      list.unshift(w.world.pov);
-    return list;
-  };
-  const settle = (agent, slot) => {
-    if (slot !== agentCursor(w.world, w.state, agent))
-      w.apply({ type: ENGINE_EVENTS.caught, data: { agent, slot } });
-  };
-  let cursors = new Map;
-  let next = 0;
-  const run = { from, to };
-  const infoOf = (slot) => ({ start: slot.start, end: slot.end, index: slot.index, ...povRoutine ? {} : { povRoutine: false }, ...timelapse ? { timelapse: true } : {}, run });
-  const agentInstants = (slot, info, until2) => {
-    const timed = reg.processes.filter((d) => d.scope === "agent" && d.instants);
-    if (timed.length === 0)
-      return [];
-    const after = Math.max(w.state.clock, since);
-    const opening = w.state.clock === since;
-    const who = timelapse ? stepping() : lod1Agents(w.world, w.state).filter((a) => a !== w.world.pov);
-    const out = [];
-    for (const agent of who) {
-      if ((cursors.get(agent) ?? agentCursor(w.world, w.state, agent)) < slot.index - 1)
-        continue;
-      for (const def of timed) {
-        if (w.ctx.levelOf(agent, def.domain) < def.minLevel)
-          continue;
-        for (const instant of def.instants?.(w.ctx, agent, info) ?? []) {
-          const due = instant.opens === true ? opening && instant.at === since : instant.at > after && instant.at > slot.start;
-          if (due && instant.at <= until2 && instant.at < slot.end)
-            out.push({ at: instant.at, agent, def, instant });
-        }
-      }
-    }
-    return out.sort((a, b) => a.at - b.at || a.agent.localeCompare(b.agent) || timed.indexOf(a.def) - timed.indexOf(b.def) || a.instant.key.localeCompare(b.instant.key));
-  };
-  const applyInstants = (until2, slot) => {
-    const info = infoOf(slot);
-    const timed = agentInstants(slot, info, until2);
-    let t = 0;
-    for (;; ) {
-      const edge = instants[next];
-      const edgeAt = edge && edge.at <= until2 ? edge.at : Infinity;
-      const moment = timed[t];
-      if (edgeAt === Infinity && !moment)
-        break;
-      if (edge && edgeAt <= (moment?.at ?? Infinity)) {
-        next++;
-        clockTo(w, edgeAt, cause, e);
-        e.emit(instantEvents(reg, w.ctx, edge, opts.runSeed, { povRoutine, timelapse }));
-      } else if (moment) {
-        t++;
-        clockTo(w, moment.at, cause, e);
-        if (stillActs(w, moment.agent))
-          e.emit(moment.def.atInstant?.(w.ctx, moment.agent, moment.instant, info) ?? []);
-      }
-    }
-  };
-  const signalsSince = (index) => {
-    const out = [];
-    for (let i = index;i < w.events.length; i++) {
-      const ev = w.events[i];
-      const s = ev && "data" in ev ? signalOf(ev) : null;
-      if (s)
-        out.push(s);
-    }
-    return out;
-  };
-  const stepThrough = (agents, last, slot) => {
-    for (const agent of agents) {
-      let k = cursors.get(agent) ?? agentCursor(w.world, w.state, agent);
-      while (k < last && stillActs(w, agent)) {
-        k++;
-        const applied = stepAgent(reg, w, agent, k === slot.index ? slot : slotOf(cal, k), opts.runSeed, povRoutine, timelapse, run);
-        if (applied.length > 0)
-          result.rules.push(...runRulesOnEvents(reg, w, applied, { seed: hashParts(opts.runSeed, "agent", agent, k) }));
-      }
-      cursors.set(agent, k);
-    }
-  };
-  const overDays = (slot, agents) => timelapse && result.slots + spent.slots > 0 && spent.agentDays + result.agentDays + agents * (slot.end - slot.start) / MINUTES_PER_DAY > cap.agentDays;
-  for (const slot of slots) {
-    const agents = stepping();
-    for (const [agent, cursor] of [...cursors]) {
-      if (agents.includes(agent))
-        continue;
-      settle(agent, cursor);
-      cursors.delete(agent);
-    }
-    const slotDays = agents.length * (slot.end - slot.start) / MINUTES_PER_DAY;
-    const opened = slot.index === opts.open?.slot ? opts.open : null;
-    if (!opened && overDays(slot, agents.length)) {
-      result.stop = "cap";
-      break;
-    }
-    const mark = opened ? opened.mark : timelapse && result.slots + spent.slots > 0 ? w.mark() : null;
-    const held2 = mark && !opened ? new Map(cursors) : null;
-    const before = opened ? opened.since : w.events.length;
-    const rulesBefore = result.rules.length;
-    const tracksBefore = result.tracks.length;
-    stepThrough(agents, slot.index - 1, slot);
-    applyInstants(slot.end, slot);
-    clockTo(w, slot.end, cause, e);
-    const info = infoOf(slot);
-    for (const def of reg.processes) {
-      if (def.scope === "agent" || rulesetFloor(w.world, def.domain, w.state.realism.levels[def.domain] ?? 0) < def.minLevel)
-        continue;
-      e.emit(def.step(info, w.ctx, rngFactory(opts.runSeed, def.id, slot.index)));
-    }
-    stepThrough(agents, slot.index, slot);
-    const dayEnds = (slot.index + 1) % cal.partStarts.length === 0;
-    const tickSeed = hashParts(opts.runSeed, "tick", slot.index);
-    result.rules.push(...runRulesOnTick(reg, w, "slot", { seed: tickSeed }));
-    if (dayEnds)
-      result.rules.push(...runRulesOnTick(reg, w, "day", { seed: tickSeed }));
-    result.tracks.push(...stepTracks(reg, w, tickSeed));
-    if (mark && spent.events + w.events.length - startEvents > cap.events) {
-      w.restore(mark);
-      cursors = held2 ?? new Map;
-      result.rules.length = rulesBefore;
-      result.tracks.length = tracksBefore;
-      result.stop = "cap";
-      break;
-    }
-    result.slots++;
-    result.agentDays += slotDays;
-    for (const s of signalsSince(before)) {
-      const p = own(policy, s.class);
-      if (p === "stop" && timelapse && s.stops !== false && signalVisible(reg, w.world, w.state, w.world.pov, s))
-        result.stops.push(s);
-      else if (p === "note" || p === "stop")
-        result.notes.push(s);
-    }
-    if (timelapse && result.stops.length > 0) {
-      result.stop = "interrupt";
-      result.stoppedBy = result.stops[0]?.class ?? null;
-      break;
-    }
-    if (opts.stopWhen?.(w)) {
-      result.stop = "predicate";
-      break;
-    }
-  }
-  result.open = null;
-  if (result.stop === "target") {
-    const tail = slotOf(cal, slotIndexAt(cal, to));
-    let open = tail.start < to && result.slots === 0 && opts.open?.slot === tail.index ? opts.open : null;
-    if (tail.start < to && !open) {
-      const stepped = timelapse && opts.segmentTo !== undefined && tail.end <= opts.segmentTo && tail.end > since && result.slots + spent.slots > 0;
-      if (stepped && (overDays(tail, stepping().length) || spent.events + w.events.length - startEvents >= cap.events))
-        result.stop = "cap";
-      else {
-        let mark = null;
-        if (stepped) {
-          for (const [agent, slot] of cursors)
-            settle(agent, slot);
-          cursors = new Map;
-          mark = w.mark();
-        }
-        open = { slot: tail.index, since: w.events.length, mark };
-      }
-    }
-    if (result.stop === "target") {
-      stepThrough(stepping(), tail.index - 1, tail);
-      applyInstants(to, tail);
-      clockTo(w, to, cause, e);
-      result.open = open;
-    }
-  }
-  if (!timelapse && w.state.clock > from && own(w.state.entities, w.world.pov) && stillActs(w, w.world.pov)) {
-    const span = { from, to: w.state.clock };
-    for (const def of reg.processes) {
-      if (def.scope === "agent" && def.lived && w.ctx.levelOf(w.world.pov, def.domain) >= def.minLevel)
-        e.emit(def.lived(w.ctx, w.world.pov, span));
-    }
-  }
-  for (const [agent, slot] of cursors)
-    settle(agent, slot);
-  result.to = w.state.clock;
-  result.events = Math.max(0, w.events.length - startEvents);
-  return result;
-}
-function catchUp(reg, w, opts) {
-  const cal = calendarOf(w.world);
-  const done = completedSlot(w.world, w.state);
-  const all2 = lod1Agents(w.world, w.state).filter((a) => a !== w.world.pov);
-  const slice2 = readEngineSlice(w.state);
-  const onScreen = (opts.onScreen ?? []).filter((a) => all2.includes(a)).sort();
-  const orders = optionalQuery(w.ctx, "orgs.open_orders");
-  const ordered = all2.filter((a) => !onScreen.includes(a) && (orders?.(w.ctx, a) ?? 0) > 0);
-  const queue = all2.filter((a) => !onScreen.includes(a) && !ordered.includes(a));
-  const rr = queue.length > 0 ? slice2.rr % queue.length : 0;
-  const rotated = [...queue.slice(rr), ...queue.slice(0, rr)];
-  const order = [...onScreen, ...ordered, ...rotated];
-  const slotLen = MINUTES_PER_DAY / cal.partStarts.length;
-  let budget = (opts.agentDays ?? Infinity) * MINUTES_PER_DAY;
-  const stepped = [];
-  let taken = 0;
-  let advancedQueue = 0;
-  for (const agent of order) {
-    if (taken >= opts.agents || budget <= 0)
-      break;
-    const cursor = agentCursor(w.world, w.state, agent);
-    if (cursor >= done || !stillActs(w, agent))
-      continue;
-    taken++;
-    if (rotated.includes(agent))
-      advancedQueue = rotated.indexOf(agent) + 1;
-    let k = cursor;
-    while (k < done && budget > 0 && stillActs(w, agent)) {
-      k++;
-      const applied = stepAgent(reg, w, agent, slotOf(cal, k), opts.runSeed, false, false);
-      if (applied.length > 0)
-        runRulesOnEvents(reg, w, applied, { seed: hashParts(opts.runSeed, "agent", agent, k) });
-      budget -= slotLen;
-    }
-    w.apply({ type: ENGINE_EVENTS.caught, data: { agent, slot: k } });
-    stepped.push({ agent, from: cursor + 1, to: k });
-  }
-  if (queue.length > 0 && advancedQueue > 0)
-    w.apply({ type: ENGINE_EVENTS.cursor, data: { rr: (rr + advancedQueue) % queue.length } });
-  let backlog = 0;
-  for (const agent of lod1Agents(w.world, w.state))
-    if (agent !== w.world.pov)
-      backlog += Math.max(0, done - agentCursor(w.world, w.state, agent));
-  return { stepped, backlog };
-}
-var FIELD_TRANSPARENT = new Set(["clock", "post", "timelapse", ENGINE_EVENTS.signal, ENGINE_EVENTS.note, ENGINE_EVENTS.beat, ENGINE_EVENTS.cursor, ENGINE_EVENTS.choice, ENGINE_EVENTS.caught, ENGINE_EVENTS.fired]);
-var CLOCK_TRANSPARENT = new Set(["set", "add", "post", ENGINE_EVENTS.signal, ENGINE_EVENTS.note, ENGINE_EVENTS.beat, ENGINE_EVENTS.cursor, ENGINE_EVENTS.choice, ENGINE_EVENTS.caught]);
-var COLLAPSED_SIGNALS = new Set(["arrival", "needs", "weather", "overdue", "invitation"]);
-function coarsenRuns(events2, held2) {
-  const out = [];
-  let keys = new Map;
-  let lastClock = null;
-  for (const ev of events2) {
-    if (held2(ev)) {
-      keys = new Map;
-      if (!CLOCK_TRANSPARENT.has(ev.type))
-        lastClock = null;
-      out.push(ev);
-      continue;
-    }
-    if (ev.type === "set" || ev.type === "add") {
-      const key = `${ev.entity}\x00${ev.field}`;
-      const slot = keys.get(key) ?? {};
-      if (ev.type === "set") {
-        if (slot.set !== undefined)
-          out[slot.set] = null;
-        if (slot.add !== undefined)
-          out[slot.add] = null;
-        out.push({ ...ev });
-        keys.set(key, { set: out.length - 1 });
-      } else if (slot.add !== undefined) {
-        const prev = out[slot.add];
-        if (prev && prev.type === "add")
-          out[slot.add] = { ...prev, delta: prev.delta + ev.delta };
-      } else {
-        out.push({ ...ev });
-        keys.set(key, { ...slot, add: out.length - 1 });
-      }
-      continue;
-    }
-    if (ev.type === "clock") {
-      const prev = lastClock !== null ? out[lastClock] : null;
-      if (prev && prev.type === "clock" && prev.cause === ev.cause) {
-        out[lastClock] = { ...prev, minutes: prev.minutes + ev.minutes };
-        continue;
-      }
-      out.push({ ...ev });
-      lastClock = out.length - 1;
-      continue;
-    }
-    if (!FIELD_TRANSPARENT.has(ev.type))
-      keys = new Map;
-    if (!CLOCK_TRANSPARENT.has(ev.type))
-      lastClock = null;
-    out.push(ev);
-  }
-  return out.filter((e) => e !== null && !(e.type === "add" && e.delta === 0) && !(e.type === "clock" && e.minutes === 0));
-}
-function groupKey(reg, e) {
-  if (e.type === "set" || e.type === "add")
-    return `f\x00${e.entity}\x00${e.field}`;
-  if (e.type === "post")
-    return `p\x00${e.lines.map((l) => `${l.account}${l.amount < 0 ? "-" : "+"}`).join(",")}`;
-  if (e.type === ENGINE_EVENTS.caught && "data" in e)
-    return `c\x00${String(e.data.agent)}`;
-  if (e.type === ENGINE_EVENTS.cursor)
-    return "r";
-  const s = "data" in e ? signalOf(e) : null;
-  if (s)
-    return COLLAPSED_SIGNALS.has(s.class) ? `s\x00${s.class}\x00${s.entity ?? ""}` : null;
-  const hook = reg.get(e.type)?.coarsen;
-  const key = hook ? hook.key(e) : null;
-  return key === null ? null : `h\x00${e.type}\x00${key}`;
-}
-function collapseField(start, group) {
-  const first = group[0];
-  if (!first || first.type !== "set" && first.type !== "add")
-    return group;
-  const before = own(start.entities, first.entity);
-  let value = own(before?.fields ?? {}, first.field);
-  let lastSet = null;
-  let delta = 0;
-  for (const e of group) {
-    if (e.type === "set") {
-      value = e.value;
-      lastSet = e;
-      delta = 0;
-    } else if (e.type === "add") {
-      value = (typeof value === "number" ? value : 0) + e.delta;
-      delta += e.delta;
-    }
-  }
-  if (lastSet)
-    return delta === 0 ? [lastSet] : [{ ...lastSet, value: value ?? null }];
-  const base = own(before?.fields ?? {}, first.field);
-  if (first.type === "add" && before && (typeof base === "number" ? base : 0) + delta === value)
-    return delta === 0 ? [] : [{ ...first, delta }];
-  return group;
-}
-function creditOnly(e) {
-  return e.type === "post" && e.lines.every((l) => l.account.startsWith(EXTERNAL_ACCOUNT_PREFIX) || l.amount >= 0);
-}
-function collapse(reg, start, events2, held2) {
-  const keys = events2.map((e) => held2(e) ? null : groupKey(reg, e));
-  const first = new Map;
-  const last = new Map;
-  const members = new Map;
-  keys.forEach((k, i) => {
-    if (k === null)
-      return;
-    if (!first.has(k))
-      first.set(k, i);
-    last.set(k, i);
-    const list = members.get(k) ?? [];
-    const ev = events2[i];
-    if (ev)
-      list.push(ev);
-    members.set(k, list);
-  });
-  const out = [];
-  events2.forEach((e, i) => {
-    const k = keys[i];
-    if (k === null || k === undefined) {
-      out.push(e);
-      return;
-    }
-    const list = members.get(k) ?? [];
-    const early = k.startsWith("p\x00") && creditOnly(e);
-    if ((early ? first.get(k) : last.get(k)) !== i)
-      return;
-    const tail = list[list.length - 1] ?? e;
-    if (k.startsWith("f\x00"))
-      out.push(...collapseField(start, list));
-    else if (k.startsWith("p\x00") && tail.type === "post") {
-      const lines = tail.lines.map((l, j) => ({ account: l.account, amount: list.reduce((a, p) => a + (p.type === "post" ? p.lines[j]?.amount ?? 0 : 0), 0) }));
-      const memo = list.length === 1 ? tail.memo : `${(tail.memo ?? "").split(":")[0]?.trim() ?? ""} (${list.length} postings)`;
-      if (lines.some((l) => l.amount !== 0))
-        out.push({ ...tail, lines, ...memo !== undefined ? { memo } : {} });
-    } else if (k.startsWith("h\x00")) {
-      const hook = reg.get(e.type)?.coarsen;
-      out.push(hook ? list.reduce((a, b) => hook.merge(a, b)) : e);
-    } else
-      out.push(e);
-  });
-  const merged = [];
-  for (const e of out) {
-    const prev = merged[merged.length - 1];
-    if (e.type === "clock" && prev?.type === "clock" && prev.cause === e.cause)
-      merged[merged.length - 1] = { ...prev, minutes: prev.minutes + e.minutes };
-    else
-      merged.push(e);
-  }
-  return merged.filter((e) => !(e.type === "add" && e.delta === 0) && !(e.type === "clock" && e.minutes === 0));
-}
-function foldOf(reg, world, start, events2) {
-  const w = new Working(reg, world, start);
-  const applied = w.applyAll(events2);
-  return applied.length === events2.length ? w.state : null;
-}
-function coarsen(reg, world, start, events2) {
-  const full = foldOf(reg, world, start, events2);
-  if (full === null)
-    return [...events2];
-  const worldOnly = (s) => {
-    const copy = unobserved(s);
-    dropTouches(copy);
-    return hashJson(copy);
-  };
-  const expected = worldOnly(full);
-  const entries2 = new Set(events2.flatMap((e) => e.type === "stage" && e.group !== undefined ? [e.group] : []));
-  const held2 = (e) => e.group !== undefined && entries2.has(e.group);
-  for (const candidate of [collapse(reg, start, events2, held2), coarsenRuns(events2, held2)]) {
-    const coarse = foldOf(reg, world, start, candidate);
-    if (coarse === null || worldOnly(coarse) !== expected)
-      continue;
-    const lost = lostObservations(full, coarse);
-    return lost ? [...candidate, { type: ENGINE_EVENTS.observed, data: lost }] : candidate;
-  }
-  return [...events2];
-}
-
 // src/engine/time.ts
 var DEFAULT_SCENE_TYPE = "conversation";
 function sceneType(world, state) {
@@ -16026,7 +16326,7 @@ class TimelapseRun {
     this.from = w.state.clock;
     this.to = resolved.to;
     this.cap = clampUnitCap(opts.unitCap ?? w.state.time.unitCap);
-    this.result = { from: this.from, to: this.from, requested: resolved.to, slots: 0, stop: "target", stoppedBy: null, stops: [], notes: [], agentDays: 0, events: 0, rules: [], tracks: [], open: null };
+    this.result = { from: this.from, to: this.from, requested: resolved.to, slots: 0, stop: "target", stoppedBy: null, stops: [], notes: [], agentDays: 0, events: 0, rules: [], tracks: [], open: null, processMs: {} };
   }
   static start(reg, w, target, opts) {
     if (clockPaused(w.world, w.state))
@@ -16062,6 +16362,9 @@ class TimelapseRun {
     acc.stops.push(...r.stops);
     acc.notes.push(...r.notes);
     acc.rules.push(...r.rules);
+    for (const [id, ms] of Object.entries(r.processMs ?? {}))
+      if (acc.processMs)
+        acc.processMs[id] = (acc.processMs[id] ?? 0) + ms;
     acc.tracks.push(...r.tracks);
     acc.open = r.open;
     if (r.stop === "target")
@@ -16397,13 +16700,13 @@ function playerSubject(lead, names) {
   }
   return !lead.some((w) => AUX.has(w));
 }
-function playerActs(tokens, start, names) {
-  const at2 = tokens[start];
+function playerActs(tokens2, start, names) {
+  const at2 = tokens2[start];
   if (!at2)
     return false;
-  const before = tokens.slice(0, start);
+  const before = tokens2.slice(0, start);
   const lead = before.filter((t) => t.clause === at2.clause).map((t) => t.word);
-  if (IDIOMS.some((idiom) => idiom.some((w, offset) => w === at2.word && idiom.every((x, k) => tokens[start - offset + k]?.word === x))))
+  if (IDIOMS.some((idiom) => idiom.some((w, offset) => w === at2.word && idiom.every((x, k) => tokens2[start - offset + k]?.word === x))))
     return false;
   if (lead.some((w) => NEGATION.has(w) || w.endsWith("n't")))
     return false;
@@ -16413,19 +16716,19 @@ function playerActs(tokens, start, names) {
     return false;
   return playerSubject(lead, names);
 }
-function phraseAt(tokens, phrase, acts2) {
-  for (let start = 0;start < tokens.length; start++) {
-    if (tokens[start] !== phrase[0])
+function phraseAt(tokens2, phrase, acts2) {
+  for (let start = 0;start < tokens2.length; start++) {
+    if (tokens2[start] !== phrase[0])
       continue;
     let at2 = start + 1;
     let skipped = 0;
     let k = 1;
     for (;k < phrase.length; k++) {
-      while (at2 < tokens.length && tokens[at2] !== phrase[k] && FILLER.has(tokens[at2] ?? "")) {
+      while (at2 < tokens2.length && tokens2[at2] !== phrase[k] && FILLER.has(tokens2[at2] ?? "")) {
         at2++;
         skipped++;
       }
-      if (tokens[at2] !== phrase[k])
+      if (tokens2[at2] !== phrase[k])
         break;
       at2++;
     }
@@ -16436,7 +16739,7 @@ function phraseAt(tokens, phrase, acts2) {
 }
 function typedIntent(reg, world, state, text3) {
   const said = tokenize2(text3);
-  const tokens = said.map((t) => t.word);
+  const tokens2 = said.map((t) => t.word);
   const actions = new Map;
   for (const [id, a] of reg.actions)
     actions.set(id, a);
@@ -16457,11 +16760,11 @@ function typedIntent(reg, world, state, text3) {
   const amounts = currencyAmounts(world.currency, text3);
   const numbers = [...text3.matchAll(new RegExp(NUMBER, "g"))].filter((m) => !amounts.some((a) => m.index >= a.start && m.index < a.end)).map((m) => Number(m[0].replace(/,/g, "")));
   const after = (leads) => {
-    const at2 = tokens.findIndex((w) => leads.includes(w));
+    const at2 = tokens2.findIndex((w) => leads.includes(w));
     if (at2 < 0)
       return null;
-    const end = tokens.findIndex((w, i) => i > at2 && Object.values(LEADS).some((l) => l.includes(w)));
-    return new Set(words3(tokens.slice(at2 + 1, end < 0 ? undefined : end).join(" ")));
+    const end = tokens2.findIndex((w, i) => i > at2 && Object.values(LEADS).some((l) => l.includes(w)));
+    return new Set(words3(tokens2.slice(at2 + 1, end < 0 ? undefined : end).join(" ")));
   };
   const fill = (action, rest) => {
     const params = {};
@@ -16519,16 +16822,16 @@ function typedIntent(reg, world, state, text3) {
       const phrase = raw.trim().toLowerCase();
       if (phrase.length <= 2)
         continue;
-      const at2 = phraseAt(tokens, tokenize2(phrase).map((t) => t.word), acts2);
+      const at2 = phraseAt(tokens2, tokenize2(phrase).map((t) => t.word), acts2);
       if (!at2)
         continue;
-      candidates.push({ action, params: fill(action, words3(tokens.slice(at2.end).join(" ")).join(" ")), skipped: at2.skipped, length: phrase.length });
+      candidates.push({ action, params: fill(action, words3(tokens2.slice(at2.end).join(" ")).join(" ")), skipped: at2.skipped, length: phrase.length });
     }
   }
   const pay = actions.get(FINANCE_ACTIONS.pay);
-  const verb = tokens.findIndex((w, i) => hasOwn(MONEY_VERBS, w) && acts2(i));
+  const verb = tokens2.findIndex((w, i) => hasOwn(MONEY_VERBS, w) && acts2(i));
   if (pay && amounts.length > 0 && verb >= 0 && offered(pay))
-    candidates.push({ action: pay, params: fill(pay, words3(tokens.slice(verb + 1).join(" ")).join(" ")), skipped: 0, length: tokens[verb]?.length ?? 0 });
+    candidates.push({ action: pay, params: fill(pay, words3(tokens2.slice(verb + 1).join(" ")).join(" ")), skipped: 0, length: tokens2[verb]?.length ?? 0 });
   let best = null;
   for (const c of candidates) {
     const filled = Object.entries(c.action.params).every(([name, def]) => def.optional === true || c.params[name] !== undefined);
@@ -16552,9 +16855,9 @@ function softLocks(id, action) {
     const expr = requirementExpr(req);
     const key = CARRIES.exec(expr)?.[1];
     const keyed = key !== undefined && !hasOwn(action.params, key);
-    const story2 = readsStory(expr);
-    const hides = story2 && identifiers(expr).every((name) => !hasOwn(action.params, name));
-    if (isHardLock(req) || /^\s*not\b/.test(expr) || hides || !(story2 || keyed))
+    const story = readsStory(expr);
+    const hides = story && identifiers(expr).every((name) => !hasOwn(action.params, name));
+    if (isHardLock(req) || /^\s*not\b/.test(expr) || hides || !(story || keyed))
       return [];
     return [{ severity: "info", path: `actions.${id}.requires.${i}`, code: "soft_lock", message: `"${action.label}" reads like a lock, but this requirement isn't marked hard: a typed attempt that misses it plays as plain roleplay, and the reply can tell it working. Mark it a hard lock if the attempt should fail instead.` }];
   });
@@ -16669,6 +16972,10 @@ function applyAll(registry, world, state, events2) {
   }
   return { applied, dropped };
 }
+function processMsOf(plan2) {
+  const ms = plan2.timelapse?.result.processMs;
+  return ms && Object.keys(ms).length > 0 ? { ...ms } : undefined;
+}
 function playtestStart(registry, world, revision) {
   return initialState(world, revision, registry);
 }
@@ -16692,12 +16999,14 @@ function checkWorldDay(registry, pipeline, world, state, runSeed, day, intent, o
   const findings = { dropped: [], failed: [], leaks: [] };
   let events2 = [];
   let applied = [];
+  let processMs;
   const note = (kind, text3) => {
     findings[kind].push(text3);
     notes.push(text3);
   };
   try {
-    const plan2 = pipeline.plan({ registry, world, state: next, runSeed, seed: `${runSeed}:check:${day}`, kind: "normal", userTexts: [`(Timelapse: ${label})`], intent });
+    const plan2 = timedProcesses(options.clock, () => pipeline.plan({ registry, world, state: next, runSeed, seed: `${runSeed}:check:${day}`, kind: "normal", userTexts: [`(Timelapse: ${label})`], intent }));
+    processMs = processMsOf(plan2);
     const planned = applyAll(registry, world, next, plan2.events);
     for (const text3 of planned.dropped)
       note("dropped", text3);
@@ -16727,7 +17036,7 @@ function checkWorldDay(registry, pipeline, world, state, runSeed, day, intent, o
   }
   const lines = authorLines(registry, world, next, events2, 40);
   return { turn: { user: label, reply: lines.length > 0 ? lines.join(`
-`) : "(nothing happened)", notes }, state: next, events: applied, findings };
+`) : "(nothing happened)", notes, ...processMs ? { processMs } : {} }, state: next, events: applied, findings };
 }
 
 // src/engine/action-words.ts
@@ -18051,7 +18360,8 @@ function scopeView(world, scope, filter, opts) {
     const p = own(world.places, id);
     const pos = at2.get(id) ?? { x: 0, y: 0 };
     const known = filter.known(id);
-    return { id: filter.shown(id), name: shownName(world, filter, id), x: pos.x, y: pos.y, ...known && p?.sceneType ? { kind: p.sceneType } : {}, known, visited: filter.visited(id) };
+    const marked = known ? filter.mark?.(id) : undefined;
+    return { id: filter.shown(id), name: shownName(world, filter, id), x: pos.x, y: pos.y, ...known && p?.sceneType ? { kind: p.sceneType } : {}, known, visited: filter.visited(id), ...marked?.mark ? { mark: marked.mark } : {}, ...marked?.mark && marked.property ? { property: marked.property } : {} };
   });
   const drawn = new Set(kids);
   const routes = new Map;
@@ -18415,8 +18725,8 @@ function findRoute(world, from, to, mode, opts = {}) {
     return null;
   const costing = { speed: () => opts.speed, terrain: opts.terrain === true, factor: () => opts.factor ?? 1 };
   const tree = grow([{ mode, graph: edges(world, mode, opts.closed ?? new Set) }], [from], costing, (node) => node === to || node === `${to}${EXIT}`);
-  const ends = [to, `${to}${EXIT}`].filter((n) => tree.prev.has(n)).sort((a, b) => (tree.dist.get(a) ?? Infinity) - (tree.dist.get(b) ?? Infinity));
-  const end = ends[0] ?? null;
+  const ends2 = [to, `${to}${EXIT}`].filter((n) => tree.prev.has(n)).sort((a, b) => (tree.dist.get(a) ?? Infinity) - (tree.dist.get(b) ?? Infinity));
+  const end = ends2[0] ?? null;
   if (end === null)
     return null;
   const legs = legsTo(tree, costing, from, end);
@@ -18703,12 +19013,14 @@ function buildMapView(ctx, chosen = null) {
     if (!known(id))
       standIns.set(id, standIn(world, standIns.size + 1));
   const closed = closedRoutes(ctx);
+  const marks = new Map((optionalQuery(ctx, "economy.place_marks")?.(ctx, world.pov) ?? []).map((m) => [m.place, m]));
   const filter = {
     known,
     drawn: (id) => inside.has(id) || known(id),
     visited: (id) => placeVisit(state, id) !== null,
     shown: (id) => standIns.get(id) ?? id,
-    routeOpen: (id) => !closed.has(id)
+    routeOpen: (id) => !closed.has(id),
+    mark: (id) => marks.get(id)
   };
   const children = placeChildren(world);
   const opens = (id) => hasGrid(world, id) || (children.get(id) ?? []).some(filter.drawn);
@@ -19040,6 +19352,12 @@ function placeLines(ctx, scope) {
       lines.push({ text: sentence(`In the room: ${thingText(ctx, id, whose(id))}`), known: "pov" });
     for (const id of seen.filter((t) => !fixture(t)))
       lines.push({ text: sentence(`Lying here: ${thingText(ctx, id, whose(id))}`), known: "pov" });
+    const parked = (thingIndex(ctx).loose.get(here) ?? []).filter((id) => {
+      const e = own(ctx.state.entities, id);
+      return !!e && !isGone(ctx.state, id) && kindIs(ctx.registry, ctx.world, e.kind, "vehicle") && seeThing(pov, id);
+    });
+    if (parked.length > 0)
+      lines.push({ text: `Parked here: ${parked.map((id) => thingName(ctx, id, undefined, whose(id))).join(", ")}.`, known: "pov" });
     const ownersOf = (id) => [...whoseOf(ctx, id).owners].sort().join(" ");
     const holders = seen.filter((id) => holdsOf2(ctx, id) !== null && accessFor(ctx, pov, id).use !== null);
     const hiddenInside = [];
@@ -19249,11 +19567,10 @@ var placeMakeChannel = {
 };
 
 // src/packs/space/core/index.ts
-var MODES = ["walk", "road", "offroad", "water"];
 function reachable(ctx, from, to) {
   if (from === to || ctx.levelOf(ctx.world.pov, "space") < 2)
     return true;
-  return MODES.some((m) => routeAt(ctx, from, to, m) !== null);
+  return TRAVEL_MODES.some((m) => routeAt(ctx, from, to, m) !== null);
 }
 function gridWalk(ctx, place2, x, y) {
   const stand = standingGrid(ctx.world, place2);
@@ -19291,13 +19608,13 @@ function gridLint(world) {
           err(path2, "A speed is km/h, above 0.");
       };
       for (const [key, v] of Object.entries(isRecord(travel.speeds) ? travel.speeds : {})) {
-        if (!MODES.includes(key))
-          err(`mapSettings.travel.speeds.${key}`, `"${key}" isn't a way of travel: walk, road, offroad or water.`);
+        if (!TRAVEL_MODES.includes(key))
+          err(`mapSettings.travel.speeds.${key}`, `"${key}" isn't a way of travel: walk, road, offroad, water or air.`);
         else
           speed(`mapSettings.travel.speeds.${key}`, v);
       }
       if (travel.speeds !== undefined && !isRecord(travel.speeds))
-        err("mapSettings.travel.speeds", "Speeds are km/h by way of travel: walk, road, offroad, water.");
+        err("mapSettings.travel.speeds", "Speeds are km/h by way of travel: walk, road, offroad, water, air.");
       if (travel.vehicleSpeeds !== undefined && !isRecord(travel.vehicleSpeeds))
         err("mapSettings.travel.vehicleSpeeds", "Vehicle speeds are km/h by vehicle class.");
       for (const [cls, v] of Object.entries(isRecord(travel.vehicleSpeeds) ? travel.vehicleSpeeds : {}))
@@ -19384,7 +19701,7 @@ var PERSON = {
 var GROUP = { id: GROUP_KIND, label: "Group", extends: "thing", pack: "space", fields: { ...ORG_FIELDS } };
 var PARTY = { id: PARTY_KIND, label: "Party", extends: GROUP_KIND, pack: "space", fields: { leader: { type: "ref", label: "Leader", ref: "person" } } };
 function asMode(v) {
-  return typeof v === "string" && MODES.includes(v) ? v : "walk";
+  return typeof v === "string" && TRAVEL_MODES.includes(v) ? v : "walk";
 }
 var travel = (ctx, entity2, to, mode) => {
   const e = own(ctx.state.entities, entity2);
@@ -19606,8 +19923,8 @@ var core_default2 = spacePack;
 
 // src/shared/json-patch.ts
 var PROTOTYPE_KEYS = Object.fromEntries(["__proto__", "constructor", "prototype"].map((key) => [key, true]));
-function pointerOf(tokens) {
-  return tokens.map((t) => `/${t.replace(/~/g, "~0").replace(/\//g, "~1")}`).join("");
+function pointerOf(tokens2) {
+  return tokens2.map((t) => `/${t.replace(/~/g, "~0").replace(/\//g, "~1")}`).join("");
 }
 
 // src/shared/money.ts
@@ -19696,7 +20013,7 @@ function parse(ctx, words4, opts, nested) {
       text3 = possessive2[2] ?? "";
     }
   }
-  let within3 = null;
+  let within4 = null;
   const cuts = [...text3.matchAll(WHERE)].map((m) => ({ at: m.index ?? 0, end: (m.index ?? 0) + m[0].length })).reverse();
   for (const cut of cuts) {
     const phrase = text3.slice(cut.end);
@@ -19707,12 +20024,12 @@ function parse(ctx, words4, opts, nested) {
     const holders = nested ? [] : bestOf(findThings(ctx, phrase, { ...opts, need: "holder", owner: undefined }, true)).map((c) => c.id);
     if (places.length === 0 && holders.length === 0)
       continue;
-    within3 = { places, holders };
+    within4 = { places, holders };
     text3 = text3.slice(0, cut.at);
     break;
   }
   const key = nameKey(text3);
-  return key ? { key, owners, within: within3 } : null;
+  return key ? { key, owners, within: within4 } : null;
 }
 function bestOf(candidates) {
   const first = candidates[0];
@@ -19800,7 +20117,30 @@ function locate(ctx, thing2, to) {
   out.push(...optionalService(ctx, "space.lay")?.(ctx, thing2, null, null) ?? []);
   return out;
 }
-function landing(ctx, name, size, to, opts, moving) {
+function nestDepth(ctx, thing2, guard = 0) {
+  if (guard >= 32)
+    return 0;
+  let deepest = 0;
+  for (const inner of contentsOf(ctx.state, thing2))
+    deepest = Math.max(deepest, 1 + nestDepth(ctx, inner, guard + 1));
+  return deepest;
+}
+function roomProblem(ctx, name, holder, opts, adding) {
+  if (opts.room !== true || kindIs(ctx.registry, ctx.world, own(ctx.state.entities, holder)?.kind ?? "", "person"))
+    return null;
+  const doer = own(ctx.state.entities, opts.by) ? opts.by : ctx.world.pov;
+  if (ctx.levelOf(doer, "gear") < 2)
+    return null;
+  const rule = thingsConfigOf(ctx.world).containers;
+  const depth2 = 1 + holdersOf2(ctx.state, holder).length + (typeof adding === "string" ? nestDepth(ctx, adding) : 0);
+  if (depth2 > rule.depth)
+    return reject7("too_deep", `${name} can't go in ${labelOf(ctx, holder)}: things are packed at most ${rule.depth} deep`);
+  if (rule.capacity === "off")
+    return null;
+  const problem = optionalQuery(ctx, "gear.room_problem")?.(ctx, holder, adding) ?? null;
+  return problem === null ? null : reject7("no_room", `${name} ${problem}`);
+}
+function landing(ctx, name, size, to, opts, moving, adding) {
   if (moving && size === "part")
     return reject7("part", `${name} is built into what holds it`);
   if (moving && size === "builtin" && !opts.confirmed)
@@ -19816,7 +20156,7 @@ function landing(ctx, name, size, to, opts, moving) {
   if (size === "vehicle" && !kindIs(ctx.registry, ctx.world, holder.kind, "vehicle"))
     return reject7("cant_hold", `${name} is a vehicle: it goes only on another vehicle`);
   if (size === "unknown" || size === "part" || size === "vehicle" || sizeRank(size) <= sizeRank(holds2))
-    return { spot: to };
+    return roomProblem(ctx, name, to.in, opts, adding) ?? { spot: to };
   if (kindIs(ctx.registry, ctx.world, holder.kind, "person")) {
     const place2 = placeOfEntity(ctx.state, to.in);
     if (!place2)
@@ -19848,7 +20188,7 @@ function moveThing(w, thing2, to, opts, why2, how) {
     return reject7("no_change", `${e.name} is there already`);
   if ("in" in to && (to.in === thing2 || holdersOf2(ctx.state, to.in).includes(thing2)))
     return reject7("cycle", `${e.name} can't go inside ${labelOf(ctx, to.in)}`);
-  const where = landing(ctx, e.name, sizeOf(ctx, thing2).size, to, opts, true);
+  const where = landing(ctx, e.name, sizeOf(ctx, thing2).size, to, opts, true, thing2);
   if ("code" in where)
     return where;
   const before = possessorOf(ctx, thing2);
@@ -19883,6 +20223,15 @@ function endGrants(ctx, thing2) {
         out.push({ type: "unlink", rel: "uses", from: id, to: thing2 });
   if (own(ctx.state.entities, thing2)?.fields.overdue === true)
     out.push({ type: "set", entity: thing2, field: "overdue", value: false });
+  return out;
+}
+function ownerEvents(ctx, thing2, owner) {
+  const e = own(ctx.state.entities, thing2);
+  if (!Array.isArray(e?.fields.owners))
+    return [{ type: "set", entity: thing2, field: "owner", value: owner }];
+  const out = [{ type: "set", entity: thing2, field: "owners", value: owner === null ? [] : [{ party: owner, role: "owner" }] }];
+  if (typeof e.fields.owner === "string")
+    out.push({ type: "set", entity: thing2, field: "owner", value: owner });
   return out;
 }
 function thingProblem(ctx, id) {
@@ -19942,7 +20291,58 @@ function thingTypeFor(ctx, name, place2) {
     return { type: sold.catalog, cents: sold.cents, food: sold.food };
   return head ? { type: head.id, cents: gearCents(head.id), food: false } : { cents: null, food: false };
 }
+function makeVehicle(w, op, vehicleClass, opts) {
+  const ctx = w.ctx;
+  const spawn = optionalService(ctx, "vehicles.spawn");
+  if (!spawn)
+    return reject7("no_vehicles", "this world plays no vehicles");
+  const name = op.name.trim();
+  if (name.length > THING_NAME_MAX)
+    return reject7("bad_name", `a name is at most ${THING_NAME_MAX} characters`);
+  const problem = (op.owner !== undefined ? partyProblem(ctx, op.owner) : null) ?? (op.home !== undefined && op.home !== "owner" && "place" in op.home ? restProblem(ctx, op.home) : null);
+  if (problem)
+    return problem;
+  let at2;
+  if ("place" in op.at) {
+    if (!own(ctx.world.places, op.at.place))
+      return reject7("missing_place", `no place ${labelOf(ctx, op.at.place)}`);
+    at2 = op.at;
+  } else {
+    const holder = own(ctx.state.entities, op.at.in);
+    if (!holder || isGone(ctx.state, op.at.in))
+      return reject7("missing_entity", `no holder ${labelOf(ctx, op.at.in)}`);
+    const place3 = placeOfEntity(ctx.state, op.at.in);
+    if (kindIs(ctx.registry, ctx.world, holder.kind, "vehicle"))
+      at2 = op.at;
+    else if (place3 !== null)
+      at2 = { place: place3 };
+    else
+      return reject7("missing_place", `${holder.name} is nowhere`);
+  }
+  const place2 = "place" in at2 ? at2.place : placeOfEntity(ctx.state, at2.in);
+  const viewer = opts.viewer ?? ctx.world.pov;
+  const seen = name === "" ? undefined : findThings(ctx, name, { actor: viewer, viewer, scope: "all" }).find((c) => c.full && !c.secret && sizeOf(ctx, c.id).size === "vehicle" && placeOfEntity(ctx.state, c.id) === place2);
+  if (seen)
+    return { ...reject7("exists", `${labelOf(ctx, seen.id)} is already there`), exists: seen.id };
+  const fields = { made: { by: opts.by, at: at2 } };
+  const description = op.description?.trim() ?? "";
+  if (description !== "")
+    fields.description = description;
+  const aliases = (op.aliases ?? []).map((a) => a.trim()).filter((a) => a !== "");
+  if (aliases.length > 0)
+    fields.aliases = aliases;
+  const home = op.home !== undefined && op.home !== "owner" && "place" in op.home ? op.home.place : undefined;
+  const made = spawn(ctx, { class: vehicleClass, ...name !== "" ? { name } : {}, owner: op.owner ?? null, ..."in" in at2 ? { holder: at2.in } : { place: at2.place }, ...home !== undefined ? { home } : {}, ...op.details !== undefined ? { details: op.details } : {}, salt: opts.salt, fields });
+  if ("code" in made)
+    return made;
+  const rejection = applyAll2(w, made.events);
+  if (rejection)
+    return rejection;
+  return sameSpot(at2, op.at) ? { made: made.entity } : { made: made.entity, placed: at2 };
+}
 function make(w, op, opts) {
+  if (op.class !== undefined)
+    return makeVehicle(w, op, op.class, opts);
   const ctx = w.ctx;
   const name = op.name.trim();
   if (name === "" || name.length > THING_NAME_MAX)
@@ -19959,17 +20359,24 @@ function make(w, op, opts) {
   const seen = found.find((c) => !c.secret);
   if (seen)
     return { ...reject7("exists", `${labelOf(ctx, seen.id)} is already there`), exists: seen.id };
-  const type = op.type ?? (op.size === undefined ? thingTypeFor(ctx, name, place2).type : undefined);
+  const type = op.type ?? (op.size === undefined && op.holds === undefined && op.category === undefined ? thingTypeFor(ctx, name, place2).type : undefined);
   const row = type !== undefined ? typeRowOf(ctx, { catalog: type }) : null;
   if (op.type !== undefined && !row)
     return reject7("missing_type", `no type ${op.type} in the catalogs`);
   const typed = row && type !== undefined ? typeFields(row.table, type, row.row) : null;
-  const kind = typed?.kind ?? "item";
+  const kind = typed?.kind ?? (op.holds !== undefined ? "container" : "item");
   const fields = { ...typed?.fields };
   if (op.owner !== undefined)
     fields.owner = op.owner;
   if (op.size !== undefined)
     fields.size = op.size;
+  if (op.holds !== undefined)
+    fields.holds = op.holds;
+  if (op.category !== undefined && typeof fields.category !== "string")
+    fields.category = op.category;
+  const description = op.description?.trim() ?? "";
+  if (description !== "")
+    fields.description = description;
   if (op.home !== undefined)
     fields.home = restValue2(op.home);
   if (op.qty !== undefined && op.qty !== 1)
@@ -19984,7 +20391,9 @@ function make(w, op, opts) {
     fields.maybe_same_as = maybe.id;
   if ("in" in op.at && !own(ctx.state.entities, op.at.in))
     return reject7("missing_entity", `no holder ${labelOf(ctx, op.at.in)}`);
-  const where = landing(ctx, name, sizeOfDef(ctx, kind, fields, name).size, op.at, opts, false);
+  const count = op.qty ?? 1;
+  const adding = { volumeL: (typeof fields.volume_l === "number" ? fields.volume_l : 0) * count, weightG: (typeof fields.weight_g === "number" ? fields.weight_g : 0) * count };
+  const where = landing(ctx, name, sizeOfDef(ctx, kind, fields, name).size, op.at, opts, false, adding);
   if ("code" in where)
     return where;
   const id = madeId2(ctx, name, opts.salt);
@@ -20002,6 +20411,11 @@ function make(w, op, opts) {
     return rejection;
   return sameSpot(where.spot, op.at) ? { made: id } : { made: id, placed: where.spot };
 }
+function handGrant(ctx, op, by) {
+  if (!(op.basis === "loan" && !whoseOf(ctx, op.item).owners.includes(op.to) || op.basis === "hold" && accessFor(ctx, op.to, op.item).use === null))
+    return [];
+  return [{ type: "link", rel: "uses", from: op.to, to: op.item, fields: { basis: op.basis, ...by !== null ? { by } : {} }, ...op.until !== undefined ? { until: Math.round(op.until) } : {} }];
+}
 function hand(w, op, opts) {
   const ctx = w.ctx;
   const to = own(ctx.state.entities, op.to);
@@ -20016,19 +20430,22 @@ function hand(w, op, opts) {
   const owners = ownersIn(e.fields).map((o) => o.party);
   if (op.basis === "return" && !owners.some((o) => o === op.to || orgTypeOf(ctx, o) !== null && orgPower(ctx, op.to, o, "assets.use") !== null))
     return reject7("not_owner", `${e.name} goes back to its owner, not ${to.name}`);
+  const newOwner = op.basis === "gift" || op.basis === "sale" || op.basis === "trade";
+  const owning = newOwner && !(owners.length === 1 && owners[0] === op.to) ? ownerEvents(ctx, op.item, op.to) : [];
+  if (sizeOf(ctx, op.item).size === "vehicle") {
+    if (op.basis === "theft")
+      return reject7("cant_hold", `${e.name} is a vehicle: it is taken by driving it off, not by hand`);
+    const by = own(ctx.state.entities, opts.by) ? opts.by : owners.find((o) => own(ctx.state.entities, o) !== undefined) ?? null;
+    const events3 = newOwner || op.basis === "return" ? [...endGrants(ctx, op.item), ...owning] : handGrant(ctx, op, by);
+    if (events3.length === 0)
+      return reject7("no_change", `${to.name} may use ${e.name} already`);
+    return applyAll2(w, events3) ?? {};
+  }
   const how = { hold: "holding", loan: "loan", return: null, gift: "given", sale: "bought", trade: "bought", theft: "took" };
   const moved = moveThing(w, op.item, { in: op.to }, opts, op.why, how[op.basis]);
   if ("code" in moved)
     return moved;
-  const events2 = [];
-  if (op.basis === "gift" || op.basis === "sale" || op.basis === "trade") {
-    events2.push(...endGrants(ctx, op.item));
-    if (!(owners.length === 1 && owners[0] === op.to))
-      events2.push({ type: "set", entity: op.item, field: "owner", value: op.to });
-  } else if (op.basis === "return")
-    events2.push(...endGrants(ctx, op.item));
-  else if (op.basis === "loan" && !whoseOf(ctx, op.item).owners.includes(op.to) || op.basis === "hold" && accessFor(ctx, op.to, op.item).use === null)
-    events2.push({ type: "link", rel: "uses", from: op.to, to: op.item, fields: { basis: op.basis, ...giver !== null ? { by: giver } : {} }, ...op.until !== undefined ? { until: Math.round(op.until) } : {} });
+  const events2 = newOwner || op.basis === "return" ? [...endGrants(ctx, op.item), ...owning] : handGrant(ctx, op, giver);
   return applyAll2(w, events2) ?? moved;
 }
 function grant(w, op) {
@@ -20069,13 +20486,17 @@ function wear(w, op, opts) {
   if (!e || !who || !kindIs(ctx.registry, ctx.world, who.kind, "person"))
     return reject7("not_a_person", `${labelOf(ctx, op.who)} can't wear anything`);
   const worn = e.relations.filter((r) => (r.type === "worn_by" || r.type === "equipped") && r.to === op.who);
+  const unworn = worn.map((r) => ({ type: "unlink", rel: r.type, from: op.item, to: op.who }));
   if (op.off === true)
-    return worn.length === 0 ? reject7("not_worn", `${who.name} isn't wearing ${e.name}`) : applyAll2(w, worn.map((r) => ({ type: "unlink", rel: r.type, from: op.item, to: op.who }))) ?? {};
-  if (worn.length > 0)
-    return reject7("no_change", `${who.name} already wears ${e.name}`);
-  const slot = typeof e.fields.slot === "string" ? e.fields.slot : typeRowOf(ctx, e.fields)?.row.equip_slot;
-  if (typeof slot !== "string" || slot === "" || slot === "none")
+    return worn.length === 0 ? reject7("not_worn", `${who.name} isn't wearing ${e.name}`) : applyAll2(w, unworn) ?? {};
+  const ownSlot = slotOf2(ctx, e.fields);
+  const slot = op.slot ?? ownSlot;
+  if (slot === null || slot === "none")
     return reject7("no_slot", `${e.name} isn't worn`);
+  if (op.slot !== undefined && op.slot !== ownSlot && op.slot !== "hand_held" && rowOf(ctx, "gear.slots", op.slot) === undefined)
+    return reject7("bad_slot", `there is no ${op.slot.replace(/_/g, " ")} slot`);
+  if (worn.length > 0 && (op.slot === undefined || worn.some((r) => r.fields?.slot === slot)))
+    return reject7("no_change", `${who.name} already wears ${e.name}`);
   if (holdersOf2(ctx.state, op.item)[0] !== op.who) {
     const moved = moveThing(w, op.item, { in: op.who }, opts, "", null);
     if ("code" in moved)
@@ -20085,7 +20506,7 @@ function wear(w, op, opts) {
   }
   const rel = slot === "hand_held" ? "equipped" : "worn_by";
   const taken = hasOwn(SHARED_SLOTS, slot) ? [] : Object.keys(ctx.state.entities).sort().filter((id) => id !== op.item && own(ctx.state.entities, id)?.relations.some((r) => r.type === rel && r.to === op.who && r.fields?.slot === slot));
-  return applyAll2(w, [...taken.map((id) => ({ type: "unlink", rel, from: id, to: op.who })), { type: "link", rel, from: op.item, to: op.who, fields: { slot } }]) ?? {};
+  return applyAll2(w, [...unworn, ...taken.map((id) => ({ type: "unlink", rel, from: id, to: op.who })), { type: "link", rel, from: op.item, to: op.who, fields: { slot } }]) ?? {};
 }
 function merge(w, op, opts) {
   const ctx = w.ctx;
@@ -20176,10 +20597,21 @@ function label(w, op) {
     return reject7("no_change", "nothing to change");
   return applyAll2(w, events2) ?? {};
 }
+function setOp(w, op, opts) {
+  const sets = optionalService(w.ctx, "gear.set_op");
+  if (!sets)
+    return reject7("no_sets", "saved outfits are the gear pack's");
+  const events2 = sets(w.ctx, op, opts);
+  if (!Array.isArray(events2))
+    return events2;
+  return applyAll2(w, events2) ?? {};
+}
 function applyItemOp(w, op, opts) {
   const ctx = w.ctx;
   if (op.do === "make")
     return make(w, op, opts);
+  if (isSetOp(op))
+    return setOp(w, op, opts);
   if ("from" in op)
     return permit(w, op);
   const missing = thingProblem(ctx, op.do === "merge" ? op.drop : op.item);
@@ -20197,12 +20629,10 @@ function applyItemOp(w, op, opts) {
         if (party)
           return party;
       }
-      if (Array.isArray(e?.fields.owners))
-        return reject7("shared", `${labelOf(ctx, op.item)} has owners with shares: change them in its owners`);
       const owners = ownersIn(e?.fields ?? {}).map((o) => o.party);
       if (op.owner === null ? owners.length === 0 : owners.length === 1 && owners[0] === op.owner)
         return reject7("no_change", "it is so already");
-      return applyAll2(w, [{ type: "set", entity: op.item, field: "owner", value: op.owner }, ...endGrants(ctx, op.item)]) ?? {};
+      return applyAll2(w, [...ownerEvents(ctx, op.item, op.owner), ...endGrants(ctx, op.item)]) ?? {};
     }
     case "grant":
     case "revoke":
@@ -20333,11 +20763,18 @@ var OFFSTAGE_ACTIONS = Object.freeze({
   drop: "things",
   put_away: "things",
   take: "things",
-  put_in: "things"
+  put_in: "things",
+  give: "handovers",
+  hand_over: "handovers",
+  give_back: "handovers",
+  lend: "handovers",
+  reclaim: "handovers",
+  set_apply: "handovers"
 });
-var OFFSTAGE_GEAR = Object.freeze(Object.keys(OFFSTAGE_ACTIONS).filter((id) => OFFSTAGE_ACTIONS[id] === "things"));
+var GEAR_GROUPS = { things: true, handovers: true };
+var OFFSTAGE_GEAR = Object.freeze(Object.keys(OFFSTAGE_ACTIONS).filter((id) => GEAR_GROUPS[OFFSTAGE_ACTIONS[id] ?? "accounts"] === true));
 var OFFSTAGE_DEFAULTS = Object.freeze({
-  tell: Object.freeze({ payments: true, credit: true, property: true, business: true, staff: true, members: true, structure: true, accounts: false, investing: false, governance: false, things: false }),
+  tell: Object.freeze({ payments: true, credit: true, property: true, business: true, staff: true, members: true, structure: true, handovers: true, accounts: false, investing: false, governance: false, things: false }),
   paymentsFrom: 0
 });
 var ORIGIN_FIELD = "origin";
@@ -20653,6 +21090,7 @@ var OUTSIDE_NAMES = {
   market: "Shops",
   world: "World",
   insurer: "Insurer",
+  registrar: "Vehicle registration",
   "tax:federal": "Federal tax",
   "tax:state": "State tax",
   "tax:local": "Local tax",
@@ -20941,7 +21379,7 @@ function debtorsOf(state, account) {
   const owing = owners.filter((o) => ROLE_RIGHTS[o.role].worth);
   return [...new Set((owing.length > 0 ? owing : owners).map((o) => o.party))];
 }
-function householdOf(ctx, party) {
+function householdOf2(ctx, party) {
   const isHousehold = (id) => kindIs(ctx.registry, ctx.world, own(ctx.state.entities, id)?.kind ?? "", "household");
   if (isHousehold(party))
     return party;
@@ -21856,12 +22294,12 @@ function distinct(sources) {
 var NO_WAY_TO_PAY = "no_way_to_pay";
 function chooseSource(ctx, payer, cents2, opts) {
   const level = ctx.levelOf(payer, "money");
-  const story2 = opts.story === true && level >= 2;
+  const story = opts.story === true && level >= 2;
   const problems = [];
   const money = (c) => formatMoney(c, ctx.world.currency);
   const named = opts.source ? idSources(ctx, payer, opts.source, problems).filter((s) => s.account !== opts.except) : [];
   const first = named[0];
-  if (first && (level < 2 || covers(ctx, first, cents2, opts.overdraft) || story2 && runsDebt(ctx, first.account)))
+  if (first && (level < 2 || covers(ctx, first, cents2, opts.overdraft) || story && runsDebt(ctx, first.account)))
     return first;
   if (opts.source && !opts.story) {
     if (first)
@@ -21871,9 +22309,9 @@ function chooseSource(ctx, payer, cents2, opts) {
   }
   const method = opts.method ?? "auto";
   const tried = sourcesToTry(ctx, payer, cents2, opts, problems);
-  const said = story2 ? first?.account ?? (method !== "auto" ? tried[0]?.account : undefined) : undefined;
+  const said = story ? first?.account ?? (method !== "auto" ? tried[0]?.account : undefined) : undefined;
   const elsewhere = (s) => said !== undefined && s.account !== said ? { ...s, named: said } : s;
-  if (story2 && method !== "auto") {
+  if (story && method !== "auto") {
     const way = tried.find((s) => covers(ctx, s, cents2, opts.overdraft)) ?? tried.find((s) => runsDebt(ctx, s.account));
     if (way)
       return elsewhere(way);
@@ -21889,7 +22327,7 @@ function chooseSource(ctx, payer, cents2, opts) {
       return fallback;
   }
   const name = own(ctx.state.entities, payer)?.name ?? payer;
-  if (story2) {
+  if (story) {
     const debt = candidates.findLast((s) => runsDebt(ctx, s.account)) ?? spendable(ctx, payer).filter((id) => id !== opts.except && runsDebt(ctx, id)).map(account).at(-1);
     const saved = debt ?? sourcesFor(ctx, payer, "savings", opts.till, []).find((s) => s.account !== opts.except && covers(ctx, s, cents2, false));
     return saved ? elsewhere(saved) : reject8(NO_WAY_TO_PAY, `${name} has nothing that covers ${money(cents2)} or can run a debt, so nothing was paid`);
@@ -22040,7 +22478,7 @@ function overdraftEvents(ctx, account, total, at2) {
 }
 function saleTermsOf(hooks, ctx, payer, cents2, category, sale) {
   for (const hook of hooks.sales) {
-    const terms = hook(ctx, { payer, place: sale.place, category, cents: cents2, item: sale.item });
+    const terms = hook(ctx, { payer, place: sale.place, category, cents: cents2, ...sale.price !== undefined ? { price: sale.price } : {}, item: sale.item });
     if (terms)
       return terms;
   }
@@ -22050,7 +22488,7 @@ function charge(hooks, ctx, payer, rawCents, memo, opts = {}) {
   if (!own(ctx.state.entities, payer))
     return reject8("missing_entity", `no payer ${labelOf(ctx, payer)}`);
   const cents2 = Math.round(rawCents);
-  if (!(cents2 > 0))
+  if (!(cents2 > 0) && !(cents2 === 0 && (opts.sale?.price ?? 0) > 0))
     return [];
   const level = ctx.levelOf(payer, "money");
   if (level === 0)
@@ -22060,6 +22498,8 @@ function charge(hooks, ctx, payer, rawCents, memo, opts = {}) {
   const tax = Math.max(0, Math.round(terms?.tax ?? 0));
   const cashback = Math.max(0, Math.round(opts.cashback ?? 0));
   const total = cents2 + tax + cashback;
+  if (!(total > 0))
+    return [];
   const overdraft = opts.overdraft !== false;
   const out = [];
   const dest = terms?.seller ? payeeSide(ctx, { payee: terms.seller, ...terms.deposit ? { deposit: terms.deposit } : {} }, cents2) : payeeSide(ctx, opts, cents2);
@@ -22195,7 +22635,7 @@ function transferParty(ctx, id, side) {
   }
   return reject8("bad_party", `${labelOf(ctx, id)} isn't someone, or an account someone can ${side === "from" ? "pay from" : "pay into"}`);
 }
-function transfer(hooks, ctx, from, to, cents2, memo, method = "auto", story2 = false) {
+function transfer(hooks, ctx, from, to, cents2, memo, method = "auto", story = false) {
   const payer = transferParty(ctx, from, "from");
   if ("code" in payer)
     return payer;
@@ -22209,10 +22649,10 @@ function transfer(hooks, ctx, from, to, cents2, memo, method = "auto", story2 = 
   if (payee === null || !sameSide) {
     const deposit = payee?.account ?? cash;
     const source2 = payer.account ?? (method === "cash" ? cashAccount(ctx, payer.holder) ?? undefined : undefined);
-    const storyNamed = story2 && ctx.levelOf(payer.holder, "money") >= 2;
+    const storyNamed = story && ctx.levelOf(payer.holder, "money") >= 2;
     const fromCash = storyNamed || method === "cash" && source2 !== undefined && availableOf(ctx, source2) >= Math.round(cents2) ? source2 : payer.account;
     const side = payee !== null ? { payee: payee.holder } : outside !== null ? { counterparty: outside } : {};
-    return charge(hooks, ctx, payer.holder, cents2, memo, { ...side, method: paying, kind: "transfer", ...fromCash ? { source: fromCash } : {}, ...deposit ? { deposit } : {}, overdraft: false, story: story2 });
+    return charge(hooks, ctx, payer.holder, cents2, memo, { ...side, method: paying, kind: "transfer", ...fromCash ? { source: fromCash } : {}, ...deposit ? { deposit } : {}, overdraft: false, story });
   }
   if (!payer.account && !payee.account)
     return reject8("bad_party", `${labelOf(ctx, from)} can't pay themselves`);
@@ -22221,10 +22661,10 @@ function transfer(hooks, ctx, from, to, cents2, memo, method = "auto", story2 = 
     return [];
   const c = Math.round(cents2);
   const takes = payee.account !== undefined && traitsOf(ctx, payee.account)?.liability === true ? Math.min(c, Math.max(0, -balance(ctx.state, payee.account))) : c;
-  let named = story2 && level >= 2 && payer.account !== undefined && !runsDebt(ctx, payer.account) && availableOf(ctx, payer.account) < takes ? payer.account : undefined;
+  let named = story && level >= 2 && payer.account !== undefined && !runsDebt(ctx, payer.account) && availableOf(ctx, payer.account) < takes ? payer.account : undefined;
   let source = named === undefined ? payer.account : undefined;
   if (!source) {
-    const picked = chooseSource(ctx, payer.holder, c, { method: paying, ...payee.account ? { except: payee.account } : {}, till: false, overdraft: false, story: story2 });
+    const picked = chooseSource(ctx, payer.holder, c, { method: paying, ...payee.account ? { except: payee.account } : {}, till: false, overdraft: false, story });
     if ("code" in picked)
       return picked;
     source = picked.account;
@@ -22233,7 +22673,7 @@ function transfer(hooks, ctx, from, to, cents2, memo, method = "auto", story2 = 
   const target = payee.account ?? (cash !== undefined && cash !== source ? cash : depositAccount(ctx, payee.holder, source) ?? undefined);
   if (!target || target === source)
     return reject8("bad_party", `${labelOf(ctx, source)} can't pay itself`);
-  return move(ctx, source, target, c, memo, { cap: true, story: story2, ...named ? { named } : {} });
+  return move(ctx, source, target, c, memo, { cap: true, story, ...named ? { named } : {} });
 }
 function postGuard(ctx, lines, overdraw = false) {
   const s = ctx.state;
@@ -22758,6 +23198,15 @@ function foundationFlows(ctx) {
     if (insured.has(p.vehicle) || payers.has(p.owner) || p.cents <= 0)
       continue;
     out.push({ id: `insurance:${p.vehicle}`, label: p.label, kind: "premium", from: p.owner, to: "insurer", amount: { fixed: p.cents }, schedule: { every: "month", days: [1] }, shortfall: "skip", category: "insurance", link: p.vehicle, status: "active", method: "account", source: "vehicle" });
+  }
+  const registered = new Set(Object.keys(s.entities).flatMap((id) => {
+    const f = flowOfEntity(ctx, id);
+    return f && f.status !== "ended" && f.category === "registration" && f.link && !isGone(s, f.link) ? [f.link] : [];
+  }));
+  for (const p of optionalQuery(ctx, "vehicles.registration")?.(ctx) ?? []) {
+    if (registered.has(p.vehicle) || p.cents <= 0)
+      continue;
+    out.push({ id: `registration:${p.vehicle}`, label: p.label, kind: "tax", from: p.owner, to: "registrar", amount: { fixed: p.cents }, schedule: { every: "year", months: [p.month], days: [1] }, shortfall: "skip", category: "registration", link: p.vehicle, status: "active", method: "account", source: "vehicle" });
   }
   out.push(...planPayments(ctx).map((p) => p.flow));
   return out;
@@ -24038,9 +24487,9 @@ function actAs(ctx, act, run) {
   const paid = spends ? act.amount ?? drawn?.cents : undefined;
   if (spends && (paid !== undefined || drawn !== undefined)) {
     const account = act.account ?? drawn?.account;
-    const within3 = held2(mayAct(ctx, by, party, power, { ...ask, ...paid !== undefined ? { amount: paid } : {}, ...act.account === undefined && drawn !== undefined ? { account: drawn.account } : {} }), paid, account);
-    if (within3)
-      return within3;
+    const within4 = held2(mayAct(ctx, by, party, power, { ...ask, ...paid !== undefined ? { amount: paid } : {}, ...act.account === undefined && drawn !== undefined ? { account: drawn.account } : {} }), paid, account);
+    if (within4)
+      return within4;
   }
   const stamped = events2.map((e) => e.type === FINANCE_EVENTS.txn && ("data" in e) ? { ...e, data: { ...e.data, by, as: party } } : e);
   const names = [...new Set((act.names ?? []).filter((id) => id !== undefined && id !== "" && own(ctx.state.entities, id) !== undefined))];
@@ -26304,7 +26753,7 @@ function limitFor(ctx, cls, score) {
   return tier === "super_prime" ? numOf(limits.good_credit, 1500000) : tier === "prime" ? numOf(limits.typical, 1e6) : numOf(limits.starter, 50000);
 }
 function loanCeiling(ctx, score, securedBy) {
-  const worth = numOf(own(ctx.state.entities, securedBy ?? "")?.fields.value);
+  const worth = numOf(own(ctx.state.entities, securedBy ?? "")?.fields.value) || (securedBy !== undefined ? optionalQuery(ctx, "vehicles.values")?.(ctx).find((v) => v.vehicle === securedBy)?.cents ?? 0 : 0);
   if (worth > 0)
     return worth;
   const amounts = objOf(objOf(objOf(objOf(ctx.tables.get("economy.finance")?.rows.loans?.values).personal).amount_cents));
@@ -26673,7 +27122,7 @@ function worthHolders(ctx, id) {
 }
 var WORTH_DEPTH = 4;
 function interestsOf(ctx, who) {
-  const household = householdOf(ctx, who);
+  const household = householdOf2(ctx, who);
   const kin = household === null ? [who] : [who, household, ...membersOf(ctx.registry, ctx.world, ctx.state, household)];
   const out = new Set(kin);
   const parties = Object.keys(ctx.state.entities).filter((id) => !out.has(id) && isParty(ctx, id));
@@ -26740,7 +27189,7 @@ function paysFor(ctx, who, to, from, opts = {}) {
     return mine(id) || lands !== null && theirs(lands);
   }
   const key = payeeKey(id);
-  const household = householdOf(ctx, who);
+  const household = householdOf2(ctx, who);
   return key !== "" && [who, household].some((p) => p !== null && (key === payeeKey(p) || key === payeeKey(own(ctx.state.entities, p)?.name ?? "")));
 }
 function flowProblem(ctx, who, from, to, fallback) {
@@ -28353,7 +28802,7 @@ function soleHoldings(api, ctx, business) {
 function ownedThings(ctx, business) {
   return Object.keys(ctx.state.entities).filter((id) => {
     const e = own(ctx.state.entities, id);
-    return !!e && e.fields.owner === business && !isGone(ctx.state, id) && !MONEY_KINDS.includes(e.kind);
+    return !!e && ownersIn(e.fields).some((o) => o.party === business) && !isGone(ctx.state, id) && !MONEY_KINDS.includes(e.kind);
   }).sort();
 }
 function heldAssets(api, ctx, business, sell) {
@@ -28765,8 +29214,10 @@ function merge2(api, ctx, business, into2, terms) {
     setOwners(c, countsUnits(owners) ? moveUnits(owners, business, into2, unitsOf(owners, business)) : rowsTo(owners, business, into2));
     carryBasis(c);
   }
-  for (const t of ownedThings(w.ctx, business))
-    events2.push({ type: "set", entity: t, field: "owner", value: into2 });
+  for (const t of ownedThings(w.ctx, business)) {
+    const f = own(w.state.entities, t)?.fields ?? {};
+    events2.push(Array.isArray(f.owners) ? { type: "set", entity: t, field: "owners", value: ownersJson(ownersIn(f).map((o) => o.party === business ? { ...o, party: into2 } : o)) } : { type: "set", entity: t, field: "owner", value: into2 });
+  }
   const staff = [];
   for (const job of allJobs(w.ctx)) {
     if (job.party !== business)
@@ -31365,7 +31816,7 @@ function saleTerms(ctx, api, sale) {
   const business = seller !== null && seller !== sale.payer ? seller : null;
   const collects = business === null || own(ctx.state.entities, business)?.fields.collects_sales_tax !== false;
   const taxed = collects && api.feature(ctx, sale.payer, "sales_tax") && !taxExempt(ctx, sale.place, sale.category);
-  const tax = taxed ? salesTaxOn(sale.cents, salesTaxPct(ctx, sale.place)) : 0;
+  const tax = taxed ? salesTaxOn(sale.price ?? sale.cents, salesTaxPct(ctx, sale.place)) : 0;
   const authority = salesTaxAccount(api, taxRegionOf(ctx, sale.place));
   if (!business)
     return tax > 0 ? { tax, taxAccount: authority } : null;
@@ -32885,6 +33336,73 @@ function buyProperty(api, ctx, x) {
     ...moveLeases(api, ctx, x.property, api.ownersOf(ctx.state, x.property).map((o) => o.party), [{ party: x.party, role: "owner", share: 100 }])
   ]);
 }
+function priceOwned(api, ctx, x) {
+  const e = own(ctx.state.entities, x.property);
+  if (!e || e.kind !== "property")
+    return reject9("missing_property", `no property ${labelOf(ctx, x.property)}`);
+  if (!api.feature(ctx, x.party, "property"))
+    return reject9("level", "property isn't followed at this money level");
+  const price = Math.round(x.price);
+  if (!(price > 0))
+    return reject9("bad_amount", "a price is above nothing");
+  const from = x.from ?? api.depositAccount(ctx, x.party);
+  if (!from)
+    return reject9("no_account", `${labelOf(ctx, x.party)} has no account to pay from`);
+  const unusable = api.mayUse(ctx, x.party, from, "from");
+  if (unusable)
+    return unusable;
+  const lines = [
+    { account: from, amount: -price },
+    { account: api.outside(`seller:${x.property}`), amount: price }
+  ];
+  const posted = api.post(ctx, lines, { memo: `Bought ${e.name} for ${formatMoney(price, ctx.world.currency)}`, kind: "purchase", category: "property" });
+  if (isRejection6(posted))
+    return posted;
+  return unit([
+    ...posted,
+    { type: "set", entity: x.property, field: "purchase_price", value: price },
+    ...propertyValue(ctx.state, x.property) <= 0 ? [{ type: "set", entity: x.property, field: "value", value: price }] : [],
+    acquisition(x.property, x.party, price)
+  ]);
+}
+function propertyAt(state, place2) {
+  return propertyIds(state).find((id) => fieldsOf(state, id).place === place2) ?? null;
+}
+function makeProperty(ctx, x) {
+  const place2 = own(ctx.world.places, x.place);
+  if (!place2)
+    return reject9("missing_place", `no place ${labelOf(ctx, x.place)}`);
+  const had = propertyAt(ctx.state, x.place);
+  if (had)
+    return reject9("already_property", `${place2.name} is a property already`);
+  if (x.owner && !own(ctx.state.entities, x.owner))
+    return reject9("missing_entity", `no owner ${labelOf(ctx, x.owner)}`);
+  let id = `property:${x.place}`;
+  for (let i = 2;own(ctx.state.entities, id); i++)
+    id = `property:${x.place}:${i}`;
+  const value = Math.max(0, Math.round(x.value ?? 0));
+  const fields = { place: x.place, value, ...x.owner ? { owners: [{ party: x.owner, role: "owner", share: 100 }] } : {}, ...x.asking_price !== undefined && x.asking_price > 0 ? { asking_price: Math.round(x.asking_price) } : {} };
+  return { entity: id, events: [{ type: "spawn", entity: { id, kind: "property", name: x.name?.trim() || place2.name, tier: "background", fields, relations: [] } }] };
+}
+function placeMarks(api, ctx, who) {
+  const sees = (p) => own(ctx.world.places, p) !== undefined && canSeePlace(ctx.registry, ctx.world, ctx.state, who, p);
+  const held2 = new Map;
+  for (const id of propertyIds(ctx.state)) {
+    const place2 = strOf(fieldsOf(ctx.state, id).place);
+    if (place2 === "" || held2.get(place2)?.mark === "owned" || !sees(place2))
+      continue;
+    const mark2 = api.shareOf(ctx.state, id, who) > 0 ? "owned" : num5(fieldsOf(ctx.state, id).asking_price) !== undefined && canSeeEntity(ctx.registry, ctx.world, ctx.state, who, id) ? "for_sale" : null;
+    if (mark2 !== null && (mark2 === "owned" || !held2.has(place2)))
+      held2.set(place2, { mark: mark2, property: id });
+  }
+  const marks = new Map(held2);
+  const home = own(ctx.state.entities, who)?.fields.home;
+  if (typeof home === "string" && sees(home)) {
+    const property = held2.get(home)?.property;
+    marks.set(home, { mark: "home", ...property !== undefined ? { property } : {} });
+  }
+  return [...marks].sort(([a], [b]) => a.localeCompare(b)).map(([place2, m]) => ({ place: place2, ...m }));
+}
 function paysOwners(api, ctx, lease, owners) {
   const to = strOf(fieldsOf(ctx.state, lease).to);
   return owners.includes(to) || api.ownersOf(ctx.state, to).some((o) => owners.includes(o.party));
@@ -33174,16 +33692,60 @@ function registerProperty(r) {
   const acted2 = (a, ctx, power, line2, names, run) => actAs(ctx, { by: strOf(a.by), party: party(a, ctx), power, line: line2, names }, run);
   r.core.effect({
     type: "economy.property_buy",
-    args: ["property", "price?", "from?", "down?", "term_months?", "party?", "by?"],
+    args: ["property", "price?", "from?", "down?", "term_months?", "party?", "by?", "live?", "story?", "name?", "owned?"],
     resolve: (a, ctx) => {
       const price = n(a, "price");
       const from = s(a, "from");
       const down = n(a, "down");
       const term = n(a, "term_months");
-      const property = strOf(a.property);
-      return acted2(a, ctx, "property.trade", () => `Bought ${labelOf(ctx, property)}${price !== undefined ? ` for ${money3(ctx, price)}` : ""}`, [], () => buyProperty(r.api, ctx, { party: party(a, ctx), property, ...price !== undefined ? { price } : {}, ...from ? { from } : {}, ...down !== undefined ? { down } : {}, ...term !== undefined ? { term_months: term } : {} }));
+      const buyer = party(a, ctx);
+      let property = strOf(a.property);
+      const made = [];
+      let at2 = ctx;
+      if (own(ctx.state.entities, property)?.kind !== "property" && own(ctx.world.places, property)) {
+        const there = propertyAt(ctx.state, property);
+        if (there)
+          property = there;
+        else {
+          const make2 = makeProperty(ctx, { place: property, ...s(a, "name") ? { name: s(a, "name") } : {}, ...price !== undefined ? { value: price } : {} });
+          if ("code" in make2)
+            return make2;
+          const w = new Working(ctx.registry, ctx.world, ctx.state);
+          w.applyAll(make2.events);
+          made.push(...make2.events);
+          property = make2.entity;
+          at2 = w.ctx;
+        }
+      }
+      const place2 = strOf(fieldsOf(at2.state, property).place);
+      const moveIn = a.live === true && place2 !== "" && own(ctx.world.places, place2) && own(ctx.state.entities, buyer)?.fields.home !== place2 ? [{ type: "set", entity: buyer, field: "home", value: place2 }] : [];
+      return acted2(a, ctx, "property.trade", () => `Bought ${labelOf(at2, property)}${price !== undefined ? ` for ${money3(ctx, price)}` : ""}`, [], () => {
+        const e = own(at2.state.entities, property);
+        if (a.story === true && price === undefined && num5(e?.fields.asking_price) === undefined && propertyValue(at2.state, property) <= 0 && ownersIn(e?.fields ?? {}).length === 0) {
+          return unit([...made, { type: "set", entity: property, field: "owners", value: [{ party: buyer, role: "owner", share: 100 }] }, { type: "set", entity: property, field: "purchased", value: dateText(ctx.world, ctx.state.clock) }, ...moveIn]);
+        }
+        if (a.owned === true && price !== undefined && r.api.shareOf(at2.state, property, buyer) > 0) {
+          const charged = priceOwned(r.api, at2, { party: buyer, property, price, ...from ? { from } : {} });
+          return isRejection6(charged) ? charged : unit([...made, ...charged, ...moveIn]);
+        }
+        const bought = buyProperty(r.api, at2, { party: buyer, property, ...price !== undefined ? { price } : {}, ...from ? { from } : {}, ...down !== undefined ? { down } : {}, ...term !== undefined ? { term_months: term } : {} });
+        return isRejection6(bought) ? bought : unit([...made, ...bought, ...moveIn]);
+      });
     }
   });
+  r.core.effect({
+    type: "economy.property_make",
+    args: ["place", "name?", "value?", "owner?", "asking_price?"],
+    gm: true,
+    resolve: (a, ctx) => {
+      const owner = s(a, "owner");
+      const asking = n(a, "asking_price");
+      const value = n(a, "value");
+      const made = makeProperty(ctx, { place: strOf(a.place), ...s(a, "name") ? { name: s(a, "name") } : {}, ...value !== undefined ? { value } : {}, ...owner ? { owner } : {}, ...asking !== undefined ? { asking_price: asking } : {} });
+      return "code" in made ? made : made.events;
+    }
+  });
+  r.core.query("economy.place_marks", (ctx, who) => placeMarks(r.api, ctx, who));
   r.core.effect({
     type: "economy.property_sell",
     args: ["property", "price", "buyer?", "to?", "party?", "by?"],
@@ -33227,9 +33789,9 @@ function registerProperty(r) {
     label: "Buy a property",
     description: "Buy a property, outright or with a mortgage.",
     pack: "economy",
-    params: { property: { type: "ref", ref: "property" }, price: { type: "money", label: "Offer", optional: true }, from: { type: "ref", ref: "account", label: "Pay from", optional: true }, down: { type: "money", label: "Down payment (the rest on a mortgage)", optional: true }, term_months: { type: "number", label: "Mortgage term, months (one a lender offers)", optional: true }, as: trading2 },
+    params: { property: { type: "ref", ref: "property" }, price: { type: "money", label: "Offer", optional: true }, from: { type: "ref", ref: "account", label: "Pay from", optional: true }, down: { type: "money", label: "Down payment (the rest on a mortgage)", optional: true }, term_months: { type: "number", label: "Mortgage term, months (one a lender offers)", optional: true }, live: { type: "bool", label: "Live there: their home from today, only when the input says they move in", optional: true }, as: trading2 },
     requires: [...requires, mayAs("property.trade")],
-    outcomes: { default: [{ type: "economy.property_buy", args: { party: "self", property: "property", price: "=params.price", from: "=params.from", down: "=params.down", term_months: "=params.term_months", by: "actor" } }] },
+    outcomes: { default: [{ type: "economy.property_buy", args: { party: "self", property: "property", price: "=params.price", from: "=params.from", down: "=params.down", term_months: "=params.term_months", live: "=params.live", by: "actor" } }] },
     duration: "60",
     lexicon: ["buy the house", "buy the property", "make an offer on"],
     observable: "signs a stack of papers"
@@ -34870,8 +35432,8 @@ var PROJECT_EVENT_DEFS = [
       if (made.length > 0)
         out.made = [...run.made ?? [], ...made];
       const p = projectOf({ world: ctx.world, state }, id);
-      const ends = phase === "done" && p !== null && allDone(p.def, out);
-      writeRun(state, id, ends ? writtenOff(state, ctx.world, id, { ...out, status: "done", ended: at2 }, at2) : out);
+      const ends2 = phase === "done" && p !== null && allDone(p.def, out);
+      writeRun(state, id, ends2 ? writtenOff(state, ctx.world, id, { ...out, status: "done", ended: at2 }, at2) : out);
     },
     describe: (e, ctx) => {
       const p = projectOf(ctx, strOf(e.data.project));
@@ -34904,9 +35466,9 @@ var PROJECT_EVENT_DEFS = [
     apply: (e, state) => {
       const id = strOf(e.data.project);
       const { paused: _paused, ...run } = projectRunOf(state, id);
-      const ends = objOf(e.data.ends);
+      const ends2 = objOf(e.data.ends);
       const steps = { ...run.steps };
-      for (const [step, end] of Object.entries(ends)) {
+      for (const [step, end] of Object.entries(ends2)) {
         if (typeof end !== "number")
           continue;
         const { left: _left, ...cur } = steps[step] ?? {};
@@ -35281,14 +35843,14 @@ function resumeEffect(api, args, ctx) {
     return no;
   const cal = calendarOf(ctx.world);
   const at2 = ctx.state.clock;
-  const ends = {};
+  const ends2 = {};
   for (const s of p.def.steps) {
     const r = p.run.steps[s.id];
     if (typeof r?.left === "number")
-      ends[s.id] = addWork(cal, at2, r.left, s.business_days !== undefined);
+      ends2[s.id] = addWork(cal, at2, r.left, s.business_days !== undefined);
   }
   const run = new Run(ctx);
-  if (run.emit([{ type: PROJECT_EVENTS.resume, data: { project: p.def.id, at: at2, ends } }]).length === 0)
+  if (run.emit([{ type: PROJECT_EVENTS.resume, data: { project: p.def.id, at: at2, ends: ends2 } }]).length === 0)
     return { code: "bad_status", reason: `${p.def.name} can't resume` };
   advance2(api, run, [p.def.id], at2, null);
   return [...run.out, ...acted2(ctx, p.def.org, by, `Resumed ${p.def.name}`)];
@@ -35387,26 +35949,26 @@ function dueEnds(cal, p, now) {
   const order = stepOrder(p.def.steps);
   if (!order)
     return null;
-  const ends = new Map;
+  const ends2 = new Map;
   for (const s of order) {
     const r = p.run.steps[s.id];
     const done = doneAt(p, s);
     if (done !== null) {
-      ends.set(s.id, done);
+      ends2.set(s.id, done);
       continue;
     }
     if (r?.wait)
       return null;
     if (typeof r?.start === "number") {
-      ends.set(s.id, Math.max(now, r.end ?? now));
+      ends2.set(s.id, Math.max(now, r.end ?? now));
       continue;
     }
     let start = Math.max(now, p.started);
     for (const a of s.after ?? [])
-      start = Math.max(start, ends.get(a) ?? start);
-    ends.set(s.id, addWork(cal, start, workOf(s, r), s.business_days !== undefined));
+      start = Math.max(start, ends2.get(a) ?? start);
+    ends2.set(s.id, addWork(cal, start, workOf(s, r), s.business_days !== undefined));
   }
-  return ends;
+  return ends2;
 }
 function seenName(ctx, viewer, id) {
   if (!hiddenFrom(ctx, viewer, id))
@@ -35483,8 +36045,8 @@ function projectView(api, ctx, p, viewer) {
   const steps = p.def.steps.map((s) => stepView(api, ctx, p, s, now, viewer));
   const cost = steps.reduce((n, s) => n + s.cost, 0);
   const paid = steps.reduce((n, s) => n + s.paid, 0);
-  const ends = dueEnds(cal, p, now);
-  const due = ends && ends.size > 0 ? Math.max(...ends.values()) : null;
+  const ends2 = dueEnds(cal, p, now);
+  const due = ends2 && ends2.size > 0 ? Math.max(...ends2.values()) : null;
   const can = mayRun(ctx, viewer, p.def.org);
   const account = p.def.account ?? api.depositAccount(ctx, p.def.org);
   return {
@@ -35558,8 +36120,8 @@ function projectNarratorLines(api, ctx) {
       continue;
     const whose = p.def.org === ctx.world.pov ? "Your" : `${labelOf(ctx, p.def.org)}'s`;
     const done = p.def.steps.filter((s) => doneAt(p, s) !== null).length;
-    const ends = dueEnds(cal, p, now);
-    const last = ends && ends.size > 0 ? Math.max(...ends.values()) : null;
+    const ends2 = dueEnds(cal, p, now);
+    const last = ends2 && ends2.size > 0 ? Math.max(...ends2.values()) : null;
     const next = p.def.steps.find((s) => stateOf(p, s) === "ready" || stateOf(p, s) === "pending");
     out.push(`${whose} ${p.def.name}: ${nowWords(api, ctx, p, now) ?? PROJECT_STATUS_WORDS[p.status]}; ${done} of ${p.def.steps.length} steps done${next ? `; next: ${next.name}` : ""}${last !== null ? `; due to be done ${dayText(cal, last)}` : ""}.`);
   }
@@ -36444,7 +37006,7 @@ var FILLER2 = {
   everyone: true
 };
 var TRAILING2 = { for: true, to: true, from: true, at: true, with: true, in: true, on: true, by: true, per: true, as: true };
-function tokens(text3) {
+function tokens2(text3) {
   return text3.toLowerCase().replace(/['\u2019]/g, "").match(/[a-z0-9]+(?:-[a-z0-9]+)*/g) ?? [];
 }
 function wordsOf4(list) {
@@ -36464,20 +37026,20 @@ function wordsOf4(list) {
 function itemName(text3) {
   const lower = text3.toLowerCase();
   const cut = lower.search(/[,(]/);
-  const base = tokens(cut < 0 ? lower : lower.slice(0, cut));
-  const qualifier = cut < 0 ? [] : tokens(lower.slice(cut + 1));
+  const base = tokens2(cut < 0 ? lower : lower.slice(0, cut));
+  const qualifier = cut < 0 ? [] : tokens2(lower.slice(cut + 1));
   const at2 = base.findIndex((w, i) => i > 0 && TRAILING2[w] === true);
   const noun = (at2 < 0 ? base : base.slice(0, at2)).filter((t) => !FILLER2[t]);
   const head = noun.findLast((t) => /[a-z]/.test(t));
   if (head === undefined)
     return null;
   const trailing = at2 < 0 ? null : { word: base[at2] ?? "", words: wordsOf4(base.slice(at2 + 1)) };
-  return { head: stem(head), words: new Set([...wordsOf4(noun), ...wordsOf4(qualifier)]), trailing };
+  return { head: stem(head), noun: noun.join(" "), words: new Set([...wordsOf4(noun), ...wordsOf4(qualifier)]), trailing };
 }
 function catalogName(id, name) {
   const lower = name.toLowerCase();
   const cut = lower.search(/[,(]/);
-  const base = tokens(cut < 0 ? lower : lower.slice(0, cut));
+  const base = tokens2(cut < 0 ? lower : lower.slice(0, cut));
   const at2 = base.findIndex((w, i) => i > 0 && TRAILING2[w] === true);
   const noun = at2 < 0 ? base : base.slice(0, at2);
   const alternatives = [[]];
@@ -36498,7 +37060,7 @@ function catalogName(id, name) {
     if (word.includes("-"))
       heads.add(stem(word.split("-").at(-1) ?? word));
   }
-  const words4 = new Set([...wordsOf4(tokens(lower)), ...wordsOf4(id.split("_"))]);
+  const words4 = new Set([...wordsOf4(tokens2(lower)), ...wordsOf4(id.split("_"))]);
   const qualifiers = new Set(named.flat().filter((w) => !/^\d/.test(w)).map((w) => stem(w)).filter((w) => !heads.has(w)));
   return { heads, main: stem(last.at(-1) ?? ""), qualifiers, words: words4 };
 }
@@ -37137,7 +37699,7 @@ function linkView(ctx, viewer, link) {
   return { id: opaqueId(link), name: at2 === "" ? title : `${title} at ${at2}` };
 }
 function flowSides(ctx, viewer, f, party) {
-  const home = householdOf(ctx, party);
+  const home = householdOf2(ctx, party);
   const ours = (id) => {
     if (id === "" || id === party)
       return id === party;
@@ -37345,7 +37907,7 @@ function financeView(hooks, ctx, party, player) {
   const recent = shownAccounts.flatMap((id) => journalOf(ctx.state, id)).sort((a, b) => b.at - a.at || (a.id < b.id ? 1 : -1)).map((j) => journalLine(ctx, viewer, party, j));
   const notesRaw = own(objOf(sliceOf(ctx.state, "economy").notes), party);
   const notes = player ? [] : (Array.isArray(notesRaw) ? notesRaw : []).slice(-NOTES_CAP).map((n) => objOf(n)).reverse().map((n) => ({ at: when(ctx, numOf(n.at)), text: strOf(n.text) }));
-  const household = kind === "household" ? party : householdOf(ctx, party);
+  const household = kind === "household" ? party : householdOf2(ctx, party);
   const view = {
     ...empty,
     band: band2,
@@ -37409,7 +37971,7 @@ function financeView(hooks, ctx, party, player) {
       carried.add(id);
   const payees = [...carried].filter((id) => own(ctx.state.entities, id)?.kind === "account" || isParty(ctx, id));
   view.paysFor = payers2.map((from) => ({ from, to: payees.filter((to) => paysFor(ctx, party, to, from, { interests })) }));
-  const home = householdOf(ctx, party);
+  const home = householdOf2(ctx, party);
   const keyed = [party, ...home !== null && visible(ctx, viewer, home) ? [home] : []];
   view.ownKeys = [...new Set(keyed.flatMap((id) => [payeeKey(id), payeeKey(own(ctx.state.entities, id)?.name ?? "")]).filter((k) => k !== ""))];
   return view;
@@ -38525,13 +39087,31 @@ function amountOf(v) {
   return typeof v === "number" ? Math.round(v) : NaN;
 }
 var PHYSICAL = new Set(["groceries_staples", "clothing", "electronics", "tools_hardware", "household_goods", "home_furnishings", "personal_care", "gifts", "alcohol", "medical"]);
+var VEHICLE_CATEGORY = "vehicles";
+function vehicleNamed(ctx, item2, category) {
+  if (category !== "" && category !== VEHICLE_CATEGORY && rowOf(ctx, "economy.categories", category))
+    return null;
+  const noun = itemName(item2)?.noun;
+  return noun ? optionalQuery(ctx, "vehicles.named")?.(ctx, noun) ?? null : null;
+}
 function quote(ctx, args, payer, qty) {
   const place2 = placeOfEntity(ctx.state, payer);
   const named = strOf(args.item);
   const given = strOf(args.category);
-  const row = named === "" ? null : rowOf(ctx, "economy.catalog", named) ? named : matchCatalog(ctx, named, place2, given);
-  const category = given !== "" ? given : !row && rowOf(ctx, "economy.categories", named) ? named : "";
+  const cls = strOf(args.class);
+  const catalogRow = named === "" ? null : rowOf(ctx, "economy.catalog", named) ? named : matchCatalog(ctx, named, place2, given);
+  const vehicleFirst = given === VEHICLE_CATEGORY || cls !== "";
   const said2 = typeof args.price === "number" && args.price > 0 ? Math.round(args.price) : undefined;
+  const wordsClass = vehicleFirst || catalogRow !== null ? null : vehicleNamed(ctx, named, given);
+  const vehicle = vehicleFirst || wordsClass !== null ? optionalQuery(ctx, "vehicles.priced")?.(ctx, [named, strOf(args.name)].filter((w) => w !== "").join(" "), place2, cls || (wordsClass ?? undefined)) ?? null : null;
+  if (vehicle) {
+    const unit3 = said2 === undefined ? vehicle.cents : args.exact === true ? said2 : Math.min(vehicle.band.max, Math.max(vehicle.band.min, said2));
+    const clamped = said2 !== undefined && unit3 !== said2;
+    const price = { cents: unit3, unitCents: unit3, band: vehicle.band, source: "catalog", clamped, name: vehicle.name, category: VEHICLE_CATEGORY };
+    return { price, row: null, vehicle, ...clamped && said2 !== undefined ? { narrated: { cents: said2, limited: "band" } } : {} };
+  }
+  const row = catalogRow;
+  const category = given !== "" ? given : !row && rowOf(ctx, "economy.categories", named) ? named : "";
   const rowDef = row ? rowOf(ctx, "economy.catalog", row) : undefined;
   const asIs = (cents2) => ({ cents: cents2, unitCents: Math.round(cents2 / qty), band: { min: cents2, typical: cents2, max: cents2 }, source: row ? "catalog" : "category", clamped: false, name: strOf(rowDef?.name, named || "something"), category: rowDef ? strOf(rowDef.category) : rowOf(ctx, "economy.categories", category) ? category : "misc" });
   if (said2 !== undefined && args.exact === true)
@@ -38547,6 +39127,35 @@ function quote(ctx, args, payer, qty) {
   }
   const banded = category !== "" ? priceOf2(ctx, { category, qty, place: place2 }, ctx.rng) : null;
   return banded ? { price: banded, row: null } : null;
+}
+function vehicleDetails(v) {
+  const o = objOf(v);
+  const out = {};
+  for (const k of ["make", "model", "colour", "plate"])
+    if (typeof o[k] === "string" && o[k].trim() !== "")
+      out[k] = o[k].trim();
+  for (const k of ["year", "odometer_mi", "engine_hours", "condition", "fuel_pct", "value"])
+    if (typeof o[k] === "number" && Number.isFinite(o[k]))
+      out[k] = o[k];
+  return out;
+}
+function payChoices(ctx, payer) {
+  const ways = accountsOf(ctx, payer, "spend").filter((id) => traitsOf(ctx, id)?.pays === true).flatMap((id) => [id, ...cardsOn(ctx.state, id).filter((c) => strOf(own(ctx.state.entities, c)?.fields.holder) === payer)]);
+  return ways.length > 0 ? ways.map((id) => `${labelOf(ctx, id)} (${id})`).join(", ") : "nothing of theirs pays";
+}
+function methodSource(ctx, payer, words4) {
+  const id = words4.trim();
+  const e = own(ctx.state.entities, id);
+  if (e && (e.kind === "account" || e.kind === "card")) {
+    const account = e.kind === "card" ? strOf(e.fields.account) : id;
+    const holder = e.kind === "card" ? strOf(e.fields.holder) : payer;
+    if (holder === payer && canSpend(ctx.state, account, payer))
+      return { source: id };
+    return reject8("bad_method", `${labelOf(ctx, payer)} can't pay from ${labelOf(ctx, id)}; they can pay from ${payChoices(ctx, payer)}`);
+  }
+  if (/^[a-z][a-z0-9]*(?:_[a-z0-9]+)+$/.test(id))
+    return reject8("bad_method", `no account or card ${id}; ${labelOf(ctx, payer)} can pay from ${payChoices(ctx, payer)}`);
+  return null;
 }
 function emptyHooks() {
   return { fields: {}, flows: [], amounts: {}, worth: [], sales: [], views: [], summaries: [] };
@@ -38784,7 +39393,15 @@ function registerRest(r, hooks) {
     const { payer } = purchaser(p, ctx);
     const item2 = strOf(p.item);
     const category = strOf(p.category);
-    const priced2 = typeof p.price === "number" && p.price > 0 || typeof p.playerPrice === "number" && p.playerPrice > 0 || !!rowOf(ctx, "economy.categories", category) || item2 !== "" && (!!rowOf(ctx, "economy.catalog", item2) || !!rowOf(ctx, "economy.categories", item2) || matchCatalog(ctx, item2, placeOfEntity(ctx.state, payer), category) !== null);
+    const set = typeof p.price === "number" && p.price > 0 || typeof p.playerPrice === "number" && p.playerPrice > 0;
+    if (typeof p.property === "string" && p.property !== "") {
+      const id = own(ctx.state.entities, p.property)?.kind === "property" ? p.property : propertyAt(ctx.state, p.property);
+      const f = id ? own(ctx.state.entities, id)?.fields ?? {} : {};
+      return !set && !(numOf(f.asking_price) > 0 || numOf(f.value) > 0) && own(ctx.state.entities, payer) !== undefined && ctx.levelOf(payer, "money") >= 1;
+    }
+    const cls = strOf(p.class) || (category === VEHICLE_CATEGORY || rowOf(ctx, "economy.catalog", item2) ? "" : vehicleNamed(ctx, item2, category) ?? "");
+    const vehicle = item2 !== "" && (category === VEHICLE_CATEGORY || cls !== "") && optionalQuery(ctx, "vehicles.priced")?.(ctx, item2, placeOfEntity(ctx.state, payer), cls || undefined) != null;
+    const priced2 = set || vehicle || !!rowOf(ctx, "economy.categories", category) || item2 !== "" && (!!rowOf(ctx, "economy.catalog", item2) || !!rowOf(ctx, "economy.categories", item2) || matchCatalog(ctx, item2, placeOfEntity(ctx.state, payer), category) !== null);
     return !priced2 && own(ctx.state.entities, payer) !== undefined && ctx.levelOf(payer, "money") >= 1;
   });
   r.query("economy.purchaser", (ctx, p) => purchaser(p, ctx).payer);
@@ -38885,6 +39502,8 @@ function registerRest(r, hooks) {
         return reject8("missing_entity", `no payer ${labelOf(ctx, payer)}`);
       if (!isParty(ctx, payer))
         return reject8("bad_payer", "a payer must be an account holder");
+      if (typeof p.property === "string" && p.property !== "")
+        return own(ctx.state.entities, p.property)?.kind === "property" || own(ctx.world.places, p.property) ? null : reject8("missing_property", `no property or place ${labelOf(ctx, p.property)}`);
       return strOf(p.item) === "" && strOf(p.category) === "" ? reject8("bad_proposal", "a purchase needs an item or a category") : null;
     },
     toEffects: (p, ctx) => {
@@ -38892,7 +39511,15 @@ function registerRest(r, hooks) {
       const set = typeof p.playerPrice === "number" && p.playerPrice > 0 ? p.playerPrice : undefined;
       const price = set ?? (typeof p.price === "number" ? p.price : undefined);
       const seller = strOf(p.seller);
-      return [{ type: "economy.buy", args: { payer, item: strOf(p.item), category: strOf(p.category), name: strOf(p.name), qty: typeof p.qty === "number" ? p.qty : 1, ...price !== undefined ? { price } : {}, ...set !== undefined ? { exact: true } : {}, ...method !== undefined ? { method } : {}, ...from !== undefined ? { from } : {}, ...p.owned === true ? { keep: false } : {}, ...seller !== "" && seller !== payer ? { seller } : {}, ...isSize(p.size) ? { size: p.size } : {}, ...typeof p.at === "string" && p.at.trim() !== "" ? { at: JSON.stringify(p.at.trim()) } : {}, story: true } }];
+      const finance = objOf(p.finance);
+      const down = typeof finance.down === "number" ? finance.down : typeof p.down === "number" ? p.down : undefined;
+      const term = typeof finance.term === "number" ? finance.term : typeof p.term_months === "number" ? p.term_months : undefined;
+      const property = strOf(p.property);
+      if (property !== "") {
+        return [{ type: "economy.property_buy", args: { party: payer, property, ...price !== undefined ? { price } : {}, ...down !== undefined ? { down } : {}, ...term !== undefined ? { term_months: term } : {}, ...from !== undefined ? { from } : {}, ...p.live === true ? { live: true } : {}, ...strOf(p.item) !== "" ? { name: strOf(p.item) } : {}, ...p.owned === true ? { owned: true } : {}, story: true } }];
+      }
+      const financed = down !== undefined || term !== undefined ? { ...down !== undefined ? { down } : {}, ...term !== undefined ? { term_months: term } : {}, finance: true } : {};
+      return [{ type: "economy.buy", args: { payer, item: strOf(p.item), category: strOf(p.category), name: strOf(p.name), qty: typeof p.qty === "number" ? p.qty : 1, ...price !== undefined ? { price } : {}, ...set !== undefined ? { exact: true } : {}, ...method !== undefined ? { method } : {}, ...from !== undefined ? { from } : {}, ...p.owned === true ? { keep: false } : {}, ...seller !== "" && seller !== payer ? { seller } : {}, ...isSize(p.size) ? { size: p.size } : {}, ...typeof p.at === "string" && p.at.trim() !== "" ? { at: JSON.stringify(p.at.trim()) } : {}, ...typeof p.class === "string" && p.class !== "" ? { class: p.class } : {}, ...isRecord(p.details) ? { details: p.details } : {}, ...financed, story: true } }];
     }
   });
   r.proposal({
@@ -39032,7 +39659,7 @@ function actor(ctx, args, key = "who") {
 function registerEffects(r, hooks) {
   r.effect({
     type: "economy.buy",
-    args: ["item?", "category?", "qty?", "price?", "exact?", "stated?", "name?", "payer?", "method?", "from?", "payee?", "keep?", "cashback?", "story?", "seller?", "size?", "at?", "by?"],
+    args: ["item?", "category?", "qty?", "price?", "exact?", "stated?", "name?", "payer?", "method?", "from?", "payee?", "keep?", "cashback?", "story?", "seller?", "size?", "at?", "by?", "class?", "details?", "finance?", "down?", "term_months?"],
     resolve(args, ctx) {
       const by = strOf(args.by);
       const words4 = strOf(args.method);
@@ -39040,23 +39667,37 @@ function registerEffects(r, hooks) {
       const named = asked2 === by ? namedOrgSource(ctx, by, words4) : null;
       const payer = named?.party ?? asked2;
       const buyer = by !== "" && by !== payer && own(ctx.state.entities, by) ? by : payer;
-      const qty = typeof args.qty === "number" && args.qty > 0 ? args.qty : 1;
+      const idKind = own(ctx.state.entities, words4.trim())?.kind;
+      const byId = words4 === "" ? null : idKind === "account" || idKind === "card" || payMethodOf(words4.replace(/_/g, " ")) === "auto" && namedSource(ctx, payer, words4.replace(/_/g, " ")) === null ? methodSource(ctx, payer, words4) : null;
+      if (byId && "code" in byId)
+        return byId;
       const sold = soldThing(ctx, strOf(args.seller), strOf(args.item) || strOf(args.name), payer);
-      const priced2 = quote(ctx, sold && typeof args.price === "number" ? { ...args, exact: true } : args, buyer, qty);
-      const story2 = args.story === true;
-      if (!priced2 && !story2)
+      const priced2 = quote(ctx, sold && typeof args.price === "number" ? { ...args, exact: true } : args, buyer, typeof args.qty === "number" && args.qty > 0 ? args.qty : 1);
+      const vehicle = sold ? undefined : priced2?.vehicle;
+      const qty = vehicle ? 1 : typeof args.qty === "number" && args.qty > 0 ? args.qty : 1;
+      const story = args.story === true;
+      if (!priced2 && !story)
         return reject8("unpriced", `no price for ${labelOf(ctx, strOf(args.item) || strOf(args.category))}`);
       const name = sold ? own(ctx.state.entities, sold)?.name ?? "something" : strOf(args.name) || priced2?.price.name || strOf(args.item) || strOf(args.category) || "something";
       const what = `${name}${qty > 1 ? ` \xD7${qty}` : ""}`;
       const seller = strOf(args.seller);
+      const spawnVehicle = vehicle !== undefined && args.keep !== false && ctx.levelOf(buyer, "vehicles") >= 1 ? optionalService(ctx, "vehicles.spawn") : null;
+      const auto = objOf(objOf(ctx.tables.get("economy.finance")?.rows.loans?.values).auto);
+      const terms2 = objOf(auto.term_months);
+      const financing = spawnVehicle !== null && priced2 !== null && (args.finance === true || typeof args.down === "number" || typeof args.term_months === "number");
+      const term = Math.round(typeof args.term_months === "number" ? args.term_months : numOf(terms2.typical, 60));
+      if (financing && (term < numOf(terms2.min, 12) || term > numOf(terms2.max, 96)))
+        return reject8("bad_term", `car loans run ${numOf(terms2.min, 12)} to ${numOf(terms2.max, 96)} months`);
+      const down = financing && priced2 ? Math.max(0, Math.min(priced2.price.cents, Math.round(typeof args.down === "number" ? args.down : priced2.price.cents * numOf(auto.down_payment_pct_typical, 12) / 100))) : 0;
+      const financed = financing && priced2 ? priced2.price.cents - down : 0;
       return actAs(ctx, { by, party: payer, power: "money.spend", ...seller !== "" ? { target: seller } : {}, line: (paid) => `Bought ${what}${paid !== undefined ? ` for ${moneyWords(ctx, paid)}` : ""}` }, () => {
         const out = [];
-        if (priced2) {
+        if (priced2 && priced2.price.cents > 0) {
           const { price, row } = priced2;
-          const from = strOf(args.from) || named?.source || (namedSource(ctx, payer, words4) ?? "");
+          const from = strOf(args.from) || byId?.source || named?.source || (namedSource(ctx, payer, words4) ?? "");
           const payee = sold ? seller : typeof args.payee === "string" ? args.payee : undefined;
-          const till = sold ? {} : { sale: { place: placeOfEntity(ctx.state, buyer), item: row ?? name } };
-          const paid = charge(hooks, ctx, payer, price.cents, `Bought ${what}`, { method: payMethodOf(words4), category: price.category, kind: "purchase", ...till, ...priced2.narrated ? { narrated: priced2.narrated } : {}, ...payee !== undefined ? { payee } : {}, ...from !== "" ? { source: from } : {}, ...typeof args.cashback === "number" && args.cashback > 0 ? { cashback: args.cashback } : {}, ...story2 ? { story: story2 } : {} });
+          const till = sold ? {} : { sale: { place: placeOfEntity(ctx.state, buyer), item: row ?? name, ...financed > 0 ? { price: price.cents } : {} } };
+          const paid = charge(hooks, ctx, payer, price.cents - financed, financed > 0 ? `Bought ${what}, ${down > 0 ? moneyWords(ctx, down) : "nothing"} down` : `Bought ${what}`, { method: payMethodOf(words4), category: price.category, kind: "purchase", ...till, ...priced2.narrated ? { narrated: priced2.narrated } : {}, ...payee !== undefined ? { payee } : {}, ...from !== "" ? { source: from } : {}, ...typeof args.cashback === "number" && args.cashback > 0 ? { cashback: args.cashback } : {}, ...story ? { story } : {} });
           if (isRejection2(paid))
             return paid;
           out.push(...paid);
@@ -39068,11 +39709,30 @@ function registerEffects(r, hooks) {
             return handed;
           return [...out, ...w.events];
         }
-        const thing2 = priced2 ? PHYSICAL.has(priced2.price.category) || story2 && priced2.price.category === "misc" : story2;
+        if (vehicle) {
+          if (!spawnVehicle || !priced2)
+            return out;
+          const where = boughtSpot(ctx, buyer, { size: "furniture" }, strOf(args.at), name);
+          const place2 = "place" in where ? where.place : placeOfEntity(ctx.state, buyer);
+          const made = spawnVehicle(ctx, { class: vehicle.class, name, owner: payer, place: place2, new: vehicle.new, details: { value: priced2.price.cents, ...vehicleDetails(args.details) }, salt: `buy:${ctx.rng.seed}`, fields: { got: { how: "bought", at: ctx.state.clock }, made: { by: story ? "story" : buyer, ...place2 ? { at: { place: place2 } } : {} } } });
+          if ("code" in made)
+            return made;
+          out.push(...made.events);
+          if (financed > 0) {
+            const w = new Working(ctx.registry, ctx.world, ctx.state);
+            w.applyAll(made.events);
+            const loan = makeApi(hooks).applyCredit(w.ctx, payer, { product: "loan", cents: financed, term_months: term, secured_by: made.entity, into: external(`seller:${made.entity}`), id: `${made.entity}:loan`, name: `Car loan, ${name}` });
+            if (isRejection2(loan))
+              return loan;
+            out.push(...loan);
+          }
+          return out;
+        }
+        const thing2 = priced2 ? PHYSICAL.has(priced2.price.category) || story && priced2.price.category === "misc" : story;
         const spawn = args.keep !== false && thing2 ? optionalService(ctx, "gear.spawn") : null;
         if (spawn && ctx.levelOf(buyer, "gear") >= 1) {
           const where = boughtSpot(ctx, buyer, { ...priced2?.row ? { catalog: priced2.row } : {}, ...priced2 ? { category: priced2.price.category } : {}, ...isSize(args.size) ? { size: args.size } : {} }, strOf(args.at), name);
-          const bought = { got: { how: "bought", at: ctx.state.clock }, made: { by: story2 ? "story" : buyer, at: "in" in where ? { in: where.in } : { place: where.place } } };
+          const bought = { got: { how: "bought", at: ctx.state.clock }, made: { by: story ? "story" : buyer, at: "in" in where ? { in: where.in } : { place: where.place } } };
           const made = spawn(ctx, { name, owner: payer, ..."in" in where ? { holder: where.in } : { holder: null, place: where.place }, ...priced2?.row ? { catalog: priced2.row } : {}, ...priced2 ? { category: priced2.price.category } : {}, qty, salt: `buy:${ctx.rng.seed}`, stack: "in" in where, ...isSize(args.size) ? { size: args.size } : {}, fields: bought });
           if (Array.isArray(made))
             out.push(...made);
@@ -39761,6 +40421,18 @@ function fitProblem(state, item2, container) {
     return "too heavy for it";
   return null;
 }
+function roomProblem2(ctx, holder, adding) {
+  const load = loadOf(ctx.state, holder);
+  const name = own(ctx.state.entities, holder)?.name ?? holder;
+  const volume = typeof adding === "string" ? volumeOf(ctx.state, adding) : adding.volumeL;
+  const grams = typeof adding === "string" ? weightOf(ctx.state, adding) : adding.weightG;
+  const round = (n) => Math.max(0, Math.round(n * 10) / 10);
+  if (load.capacityL !== null && load.usedL + volume > load.capacityL + 0.000000001)
+    return `doesn't fit in ${name}: ${round(load.capacityL - load.usedL)} l of ${round(load.capacityL)} l free`;
+  if (load.maxKg !== null && load.usedKg + grams / 1000 > load.maxKg + 0.000000001)
+    return `is too heavy for ${name}, which takes ${round(load.maxKg)} kg`;
+  return null;
+}
 function fixedOf(ctx, id) {
   const e = own(ctx.state.entities, id);
   return e ? fixedReason(kindIs(ctx.registry, ctx.world, e.kind, "vehicle"), e.fields, ctx.world.tables) : null;
@@ -39893,20 +40565,214 @@ function grants(state) {
 function overdueFor(state, owner2) {
   return grants(state).filter((g) => g.owner === owner2 && g.overdue);
 }
+function thingIs(ctx, id, what) {
+  const e = own(ctx.state.entities, id);
+  if (!e)
+    return false;
+  if (kindIs(ctx.registry, ctx.world, e.kind, what))
+    return true;
+  const f = e.fields;
+  if (f.catalog === what || f.category === what || namesThing(ctx, id, what))
+    return true;
+  if (typeof f.kit !== "string" && !Array.isArray(f.pieces))
+    return false;
+  return kitStatus(ctx, id)?.pieces.some((p) => p.present > 0 && nameMeets(what, p.name)) ?? false;
+}
 function hasItem(ctx, holder, what) {
-  return readPass(() => carriedBy(ctx.state, holder).some((id) => {
+  return readPass(() => carriedBy(ctx.state, holder).some((id) => thingIs(ctx, id, what)));
+}
+function categoryOf(ctx, f) {
+  return typeof f.category === "string" ? f.category : typeRowOf(ctx, f)?.row.category;
+}
+function armsAre(ctx, id, what) {
+  const f = own(ctx.state.entities, id)?.fields;
+  return f !== undefined && (id === what || categoryOf(ctx, f) === what || thingIs(ctx, id, what));
+}
+function readied(ctx, who, what) {
+  return readPass(() => contentsOf(ctx.state, who).some((id) => own(ctx.state.entities, id)?.relations.some((r) => r.type === "equipped" && r.to === who) === true && !isGone(ctx.state, id) && armsAre(ctx, id, what)));
+}
+function ammoTypeOf(ctx, f) {
+  const ammo = typeof f.ammo === "string" && f.ammo !== "" ? f.ammo : typeRowOf(ctx, f)?.row.ammo;
+  return typeof ammo === "string" && ammo !== "" ? ammo : null;
+}
+function ammoOf(ctx, who, what) {
+  return readPass(() => {
+    const weapon = own(ctx.state.entities, what);
+    const takes = ammoTypeOf(ctx, weapon ? weapon.fields : { catalog: what });
+    let rounds = 0;
+    for (const id of carriedBy(ctx.state, who)) {
+      const e = own(ctx.state.entities, id);
+      if (!e || isGone(ctx.state, id))
+        continue;
+      if (takes !== null ? e.fields.catalog === takes : categoryOf(ctx, e.fields) === "ammo" && armsAre(ctx, id, what))
+        rounds += Math.max(0, numOf(e.fields.qty, 1));
+    }
+    return rounds;
+  });
+}
+
+// src/packs/gear/core/sets.ts
+function reject14(code, reason) {
+  return { code, reason };
+}
+function wornSlot(ctx, who, thing2) {
+  const e = own(ctx.state.entities, thing2);
+  const r = e?.relations.find((x) => (x.type === "worn_by" || x.type === "equipped") && x.to === who);
+  if (!e || !r)
+    return null;
+  return typeof r.fields?.slot === "string" && r.fields.slot !== "" ? r.fields.slot : slotOf2(ctx, e.fields);
+}
+function wornPieces(ctx, who, kind) {
+  const out = [];
+  for (const id of contentsOf(ctx.state, who)) {
     const e = own(ctx.state.entities, id);
-    if (!e)
-      return false;
-    if (kindIs(ctx.registry, ctx.world, e.kind, what))
-      return true;
-    const f = e.fields;
-    if (f.catalog === what || f.category === what || namesThing(ctx, id, what))
-      return true;
-    if (typeof f.kit !== "string" && !Array.isArray(f.pieces))
-      return false;
-    return kitStatus(ctx, id)?.pieces.some((p) => p.present > 0 && nameMeets(what, p.name)) ?? false;
-  }));
+    const slot = wornSlot(ctx, who, id);
+    if (!e || slot === null || isGone(ctx.state, id))
+      continue;
+    const of = setKindOf(ctx, e.fields, slot);
+    if (of === null || kind !== undefined && of !== kind)
+      continue;
+    out.push({ item: id, ...slot !== slotOf2(ctx, e.fields) ? { slot } : {} });
+  }
+  return out;
+}
+function pieceProblem(ctx, who, item2) {
+  const e = own(ctx.state.entities, item2);
+  if (!e || isGone(ctx.state, item2) || !isThing(ctx, item2))
+    return "is gone";
+  if (e.fields.lost === true)
+    return "is lost";
+  const has = possessorOf(ctx, item2);
+  if (has !== null && has !== who)
+    return `is with ${labelOf(ctx, has)}`;
+  if (accessFor(ctx, who, item2).use === null)
+    return "isn't yours to use";
+  return reachOf(ctx, who, item2).reach === "away" ? "isn't with you or close by" : null;
+}
+function atHome2(ctx, who) {
+  const home = own(ctx.state.entities, who)?.fields.home;
+  const here = placeOfEntity(ctx.state, who);
+  return typeof home === "string" && own(ctx.world.places, home) !== undefined && here !== null && placeWithin(ctx.world, here, home) && together(ctx.world, here, home);
+}
+function gearSets(ctx, who) {
+  const sets = setsOf(own(ctx.state.entities, who)?.fields);
+  return Object.entries(sets).map(([id, set]) => {
+    const pieces = set.pieces.map((p) => ({ item: p.item, name: own(ctx.state.entities, p.item)?.name ?? p.item, ...p.slot !== undefined ? { slot: p.slot.replace(/_/g, " ") } : {}, ...pieceProblem(ctx, who, p.item) !== null ? { missing: true } : {} }));
+    const reached = set.pieces.filter((p) => pieceProblem(ctx, who, p.item) === null);
+    const worn = reached.length > 0 && reached.every((p) => {
+      const slot = wornSlot(ctx, who, p.item);
+      return slot !== null && slot === (p.slot ?? slotOf2(ctx, own(ctx.state.entities, p.item)?.fields ?? {}));
+    });
+    return { id, name: set.name, kind: set.kind, pieces, ...worn ? { on: true } : {} };
+  }).sort((a, b) => a.kind.localeCompare(b.kind) || a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
+}
+function written(who, sets) {
+  return { type: "set", entity: who, field: "sets", value: sets };
+}
+function saveSet(ctx, op) {
+  const who = own(ctx.state.entities, op.who);
+  const name = op.name.trim();
+  if (name === "" || name.length > SET_NAME_MAX)
+    return reject14("bad_name", `a name is 1\u2013${SET_NAME_MAX} characters`);
+  if (!who)
+    return reject14("missing_entity", `no one ${labelOf(ctx, op.who)}`);
+  const pieces = op.pieces ?? wornPieces(ctx, op.who, op.kind);
+  const word = SET_KIND_LABEL[op.kind].toLowerCase();
+  if (pieces.length === 0)
+    return reject14("nothing_worn", `${who.name} wears nothing to keep as ${word === "outfit" ? "an outfit" : "a loadout"}`);
+  for (const p of pieces)
+    if (!isThing(ctx, p.item) || isGone(ctx.state, p.item))
+      return reject14("missing_entity", `no thing ${labelOf(ctx, p.item)}`);
+  const sets = setsOf(who.fields);
+  const id = setIdOf(name);
+  const max = thingsConfigOf(ctx.world).sets.max;
+  if (!Object.hasOwn(sets, id) && Object.keys(sets).length >= max)
+    return reject14("too_many", max === 0 ? "This world keeps no saved outfits" : `${who.name} keeps at most ${max} saved outfits and loadouts: drop one first`);
+  const set = { name, kind: op.kind, pieces: pieces.map((p) => ({ item: p.item, ...p.slot !== undefined ? { slot: p.slot } : {} })) };
+  if (JSON.stringify(sets[id]) === JSON.stringify(set))
+    return reject14("no_change", `${name} is saved as it is`);
+  return [written(op.who, { ...sets, [id]: set })];
+}
+function dropSet(ctx, op) {
+  const who = own(ctx.state.entities, op.who);
+  const sets = setsOf(who?.fields);
+  if (!who || !Object.hasOwn(sets, op.set))
+    return reject14("no_set", `${labelOf(ctx, op.who)} keeps no such outfit`);
+  const { [op.set]: _dropped, ...rest } = sets;
+  return [written(op.who, rest)];
+}
+function applySet(ctx, op, opts) {
+  const who = own(ctx.state.entities, op.who);
+  if (!who || !kindIs(ctx.registry, ctx.world, who.kind, "person"))
+    return reject14("not_a_person", `${labelOf(ctx, op.who)} can't wear anything`);
+  if (ctx.levelOf(op.who, "gear") < 3)
+    return reject14("level", "outfits are kept from Gear level 3");
+  const set = setsOf(who.fields)[op.set];
+  if (!set)
+    return reject14("no_set", `${who.name} keeps no such outfit`);
+  const w = new Working(ctx.registry, ctx.world, ctx.state);
+  const before = wornPieces(w.ctx, op.who).map((p) => p.item);
+  const missing = [];
+  const wearing = new Set;
+  for (const piece of set.pieces) {
+    const name = labelOf(w.ctx, piece.item);
+    const problem = pieceProblem(w.ctx, op.who, piece.item);
+    if (problem !== null) {
+      missing.push(`${name} (${problem})`);
+      continue;
+    }
+    const mark2 = w.lightMark();
+    const slot = piece.slot ?? slotOf2(w.ctx, own(w.state.entities, piece.item)?.fields ?? {});
+    const out = applyItemOp(w, { do: "wear", item: piece.item, who: op.who, ...slot !== null ? { slot } : {} }, opts);
+    if ("code" in out && out.code !== "no_change") {
+      w.restore(mark2);
+      missing.push(`${name} (${out.reason})`);
+      continue;
+    }
+    wearing.add(piece.item);
+  }
+  if (wearing.size === 0)
+    return reject14("none_to_hand", `None of ${set.name} is to hand: ${missing.join("; ")}`);
+  for (const p of wornPieces(w.ctx, op.who, set.kind)) {
+    if (wearing.has(p.item))
+      continue;
+    const mark2 = w.lightMark();
+    if ("code" in applyItemOp(w, { do: "wear", item: p.item, who: op.who, off: true }, opts))
+      w.restore(mark2);
+  }
+  if (atHome2(w.ctx, op.who)) {
+    const worn = new Set(wornPieces(w.ctx, op.who).map((p) => p.item));
+    for (const id of before) {
+      if (worn.has(id))
+        continue;
+      const rest = restOf(w.ctx, id).rest;
+      if (rest === null || rest === "owner" || "in" in rest && rest.in === op.who)
+        continue;
+      const place2 = "place" in rest ? rest.place : placeOfEntity(w.state, rest.in);
+      const home = own(w.state.entities, op.who)?.fields.home;
+      if (place2 === null || typeof home !== "string" || !placeWithin(w.world, place2, home) || !together(w.world, place2, home))
+        continue;
+      const mark2 = w.lightMark();
+      if ("code" in applyItemOp(w, { do: "move", item: id, to: rest, why: "" }, opts))
+        w.restore(mark2);
+    }
+  }
+  const events2 = [...w.events];
+  if (missing.length > 0)
+    events2.push({ type: ENGINE_EVENTS.note, data: { text: `Not to hand for ${set.name}: ${missing.join("; ")}.`, entity: op.who, visibility: op.who === ctx.world.pov ? "public" : "secret" } });
+  return events2;
+}
+function setOpEvents(ctx, op, opts) {
+  if (!own(ctx.state.entities, op.who) || isGone(ctx.state, op.who))
+    return reject14("missing_entity", `no one ${labelOf(ctx, op.who)}`);
+  switch (op.do) {
+    case "set_save":
+      return saveSet(ctx, op);
+    case "set_drop":
+      return dropSet(ctx, op);
+    case "set_apply":
+      return applySet(ctx, op, opts);
+  }
 }
 
 // src/packs/gear/core/put-away.ts
@@ -39921,7 +40787,7 @@ function putAwayEvents(ctx, end) {
   const left = end - config.hours * 60;
   const granted2 = new Set(grants(ctx.state).map((g) => g.thing));
   const person3 = (id) => kindIs(ctx.registry, ctx.world, own(ctx.state.entities, id)?.kind ?? "", "person");
-  const w = new Working(ctx.registry, ctx.world, ctx.state);
+  let w = null;
   for (const [place2, ids] of [...thingIndex(ctx).loose].sort(([a], [b]) => a.localeCompare(b))) {
     if (place2 === here)
       continue;
@@ -39942,13 +40808,14 @@ function putAwayEvents(ctx, end) {
       const to = rest === "owner" ? npc !== undefined ? { in: npc } : null : rest;
       if (to === null || "place" in to && to.place === place2)
         continue;
-      const mark2 = w.mark();
+      w ??= new Working(ctx.registry, ctx.world, ctx.state);
+      const mark2 = w.lightMark();
       const done = applyItemOp(w, { do: "move", item: id, to, why: WHY }, { by: npc ?? owners[0] ?? pov, confirmed: false, gm: false, salt: `put_away:${id}:${end}`, viewer: pov });
       if ("code" in done)
         w.restore(mark2);
     }
   }
-  return [...w.events];
+  return w ? [...w.events] : [];
 }
 
 // src/packs/gear/core/carry.ts
@@ -40113,6 +40980,12 @@ function gearLines(ctx, scope) {
       const where = possessorOf(ctx, id) === null ? whereWords(ctx, id) : null;
       lines.push({ text: sentence(`Not with you: ${thingText(ctx, id, [where ?? "you don't know where"])}`), known: "pov" });
     }
+    const sets = level >= 3 ? Object.values(setsOf(own(ctx.state.entities, pov)?.fields)) : [];
+    for (const kind of SET_KINDS) {
+      const names = sets.filter((s) => s.kind === kind).map((s) => s.name).sort((a, b) => a.localeCompare(b));
+      if (names.length > 0)
+        lines.push({ text: `${kind === "outfit" ? "Saved outfits" : "Saved loadouts"}: ${listWords(names)}.`, known: "pov" });
+    }
     if (scope === "gm") {
       const unknown = [...new Set([...carriedBy(ctx.state, pov), ...wornBy(ctx, pov)])].filter((id) => own(ctx.state.entities, id)?.kind !== "account" && !see(id));
       if (unknown.length > 0)
@@ -40162,6 +41035,97 @@ function presentGearLines(ctx, scope) {
   });
 }
 
+// src/shared/thing-view.ts
+function partyPossessive(party) {
+  return party.is === "household" && /s$/i.test(party.name) ? `${party.name}'` : possessive(party.name);
+}
+
+// src/engine/thing-view.ts
+var CHIP_NAMES = 2;
+var isPerson4 = (ctx, id) => {
+  const e = own(ctx.state.entities, id);
+  return !!e && kindIs(ctx.registry, ctx.world, e.kind, "person");
+};
+function partyRef(ctx, id) {
+  const e = own(ctx.state.entities, id);
+  if (e)
+    return { id, name: e.name, is: orgTypeOf(ctx, id) ?? (kindIs(ctx.registry, ctx.world, e.kind, "person") ? "person" : "other") };
+  const place2 = own(ctx.world.places, id);
+  return { id, name: place2?.name ?? id, is: place2 ? "place" : "other" };
+}
+function partyOrder(ctx, a, b) {
+  const rank = (p) => p.id === ctx.world.pov ? 0 : p.is === "person" ? 1 : p.is === "place" || p.is === "other" ? 3 : 2;
+  return rank(a) - rank(b) || a.name.localeCompare(b.name) || a.id.localeCompare(b.id);
+}
+function chipNames(names) {
+  return names.length <= CHIP_NAMES ? listWords(names) : `${names.slice(0, CHIP_NAMES).join(", ")} and ${names.length - CHIP_NAMES} more`;
+}
+function orgPlaceAt(ctx, org, at2) {
+  const place2 = at2 === null ? undefined : orgPlaces(ctx, org).find((p) => placeWithin(ctx.world, at2, p));
+  return place2 === undefined ? null : own(ctx.world.places, place2)?.name ?? place2;
+}
+function useChips(ctx, thing2, keep = () => true) {
+  const chips = new Map;
+  const people = Object.keys(ctx.state.entities).filter((id) => isPerson4(ctx, id) && !isGone(ctx.state, id) && keep(id)).sort((a, b) => partyOrder(ctx, partyRef(ctx, a), partyRef(ctx, b)));
+  for (const who of people) {
+    const use = accessFor(ctx, who, thing2).use;
+    if (!use || use.basis === "grant")
+      continue;
+    const key = use.basis === "public" ? "public" : use.basis === "member" || use.basis === "staff" || use.basis === "customer" ? `${use.basis}:${use.via ?? ""}` : use.basis === "owner" || use.basis === "position" || use.basis === "delegate" || use.basis === "control" ? `${use.basis}:${use.via ?? ""}:${who}` : `${use.basis}:${use.via ?? ""}`;
+    const chip = chips.get(key);
+    const name = own(ctx.state.entities, who)?.name ?? who;
+    if (chip)
+      chip.who.push(name);
+    else
+      chips.set(key, { answer: use, who: [name] });
+  }
+  const at2 = placeOfEntity(ctx.state, thing2);
+  const nameOf4 = (id) => id === undefined ? "" : partyRef(ctx, id).name;
+  return [...chips.values()].map(({ answer, who }) => {
+    const presumed = answer.presumed ? " (presumed)" : "";
+    const via = answer.via;
+    switch (answer.basis) {
+      case "public":
+        return { basis: "public", label: "Anyone \xB7 nobody's", who: [] };
+      case "owner":
+        return { basis: "owner", label: via === undefined ? `${chipNames(who)} \xB7 owner${presumed}` : `${chipNames(who)} \xB7 ${partyPossessive(partyRef(ctx, via))} owner`, who };
+      case "member":
+        return { basis: "member", label: `${nameOf4(via)} \xB7 members${presumed}`, who };
+      case "staff": {
+        const place2 = via === undefined ? null : orgPlaceAt(ctx, via, at2);
+        return { basis: "staff", label: `${nameOf4(via)} staff${place2 !== null ? ` \xB7 at ${place2}` : ""}`, who };
+      }
+      case "customer":
+        return { basis: "customer", label: `${nameOf4(via)} customers \xB7 while it trades`, who };
+      case "permit":
+        return { basis: "permit", label: `${chipNames(who)} \xB7 allowed by ${nameOf4(via)}`, who };
+      case "household":
+        return { basis: "household", label: `${chipNames(who)} \xB7 household`, who };
+      case "housemate":
+        return { basis: "housemate", label: `${chipNames(who)} \xB7 housemates`, who };
+      case "partner":
+        return { basis: "partner", label: `${chipNames(who)} \xB7 partner`, who };
+      case "family":
+        return { basis: "family", label: `${chipNames(who)} \xB7 family`, who };
+      case "control":
+        return { basis: "control", label: `${chipNames(who)} \xB7 ${nameOf4(via)} through ${nameOf4(answer.by)}`, who };
+      default:
+        return { basis: answer.basis, label: `${chipNames(who)} \xB7 ${answer.basis} in ${nameOf4(via)}`, who };
+    }
+  });
+}
+
+// src/engine/thing-gm.ts
+function loanChoices(ctx) {
+  const cal = calendarOf(ctx.world);
+  const now = ctx.state.clock;
+  return [
+    { days: 1, words: "For a day" },
+    { days: 3, words: "For three days" },
+    { days: 7, words: "For a week" }
+  ].map(({ days, words: words4 }) => ({ label: `${words4}, until ${formatClock(cal, now + days * 1440)}`, until: now + days * 1440 }));
+}
+
 // src/packs/gear/core/view.ts
 var GOT_WORDS = {
   bought: (from) => from ? `You bought it from ${from}` : "You bought it",
@@ -40182,7 +41146,14 @@ function buildGearView(ctx) {
     const cal = calendarOf(ctx.world);
     const see = (id) => canSeeEntity(ctx.registry, ctx.world, ctx.state, pov, id);
     const nameOf4 = (id) => own(ctx.state.entities, id)?.name ?? id;
-    const listed2 = (id) => own(ctx.state.entities, id)?.kind !== "account" && see(id);
+    const listed2 = (id) => {
+      const e = own(ctx.state.entities, id);
+      if (e === undefined || e.kind === "account" || kindIs(ctx.registry, ctx.world, e.kind, "vehicle"))
+        return false;
+      const holder = holderOf(ctx.state, id);
+      const inVehicle = holder !== null && kindIs(ctx.registry, ctx.world, own(ctx.state.entities, holder)?.kind ?? "", "vehicle");
+      return !(inVehicle && sizeOf(ctx, id).size === "part") && see(id);
+    };
     const shown3 = (id) => listed2(id) && (level >= 2 || inPlay(ctx, id));
     const gear = gearOf(ctx, pov);
     const onYou = (id) => holdersOf2(ctx.state, id).includes(pov);
@@ -40206,6 +41177,16 @@ function buildGearView(ctx) {
         return rest.in === pov ? "On you" : see(rest.in) ? `In ${nameOf4(rest.in)}` : undefined;
       return canSeePlace(ctx.registry, ctx.world, ctx.state, pov, rest.place) ? own(ctx.world.places, rest.place)?.name ?? rest.place : undefined;
     };
+    const granted2 = new Map;
+    for (const who of Object.keys(ctx.state.entities).sort()) {
+      for (const r of own(ctx.state.entities, who)?.relations ?? []) {
+        if (r.type !== "uses")
+          continue;
+        granted2.set(r.to, [...granted2.get(r.to) ?? [], { who, basis: grantBasisOf(r.fields, r.until), until: r.until }]);
+      }
+    }
+    const known = (who) => who === pov || see(who);
+    const household = householdOf(ctx, pov);
     const item2 = (id, depth2, keep) => {
       const e = own(ctx.state.entities, id);
       const out = { id, name: e?.name ?? id };
@@ -40229,8 +41210,23 @@ function buildGearView(ctx) {
         out.holds = holds2;
       if (level >= 3 && slotOf2(ctx, e.fields) !== null)
         out.wearable = true;
-      if (mayFixThing(ctx, pov, id))
+      if (mayFixThing(ctx, pov, id)) {
         out.mine = true;
+        if (level >= 2)
+          out.use = useChips(ctx, id, known);
+        const grants2 = (granted2.get(id) ?? []).filter((g) => known(g.who));
+        if (grants2.length > 0)
+          out.grants = grants2.map((g) => ({ who: g.who, name: nameOf4(g.who), basis: g.basis, ...g.until !== undefined ? { until: formatClock(cal, g.until) } : {}, ...g.until !== undefined && g.until <= ctx.state.clock ? { overdue: true } : {} }));
+      }
+      const stated = whoseOf(ctx, id);
+      const ownerId = stated.presumed === undefined ? stated.owners[0] : undefined;
+      if (ownerId === undefined)
+        out.ownerId = null;
+      else if (known(ownerId) || ownerId === household)
+        out.ownerId = ownerId;
+      const category = typeof e.fields.category === "string" && e.fields.category !== "" ? e.fields.category : typeRowOf(ctx, e.fields)?.row.category;
+      if (typeof category === "string" && category !== "")
+        out.category = category;
       if (level >= 2 && typeof e.fields.capacity_l === "number") {
         const load = loadOf(ctx.state, id);
         out.load = { used: Math.round(load.usedL * 100) / 100, capacity: load.capacityL ?? 0, unit: "l" };
@@ -40262,7 +41258,7 @@ function buildGearView(ctx) {
     const roots = (ids) => ids.filter((id) => !ids.includes(holderOf(ctx.state, id) ?? ""));
     const yoursShown = (id) => gear.on.includes(id) && shown3(id);
     const slots = Object.keys(ctx.tables.get("gear.slots")?.rows ?? {});
-    const wornSlot = (id) => {
+    const wornSlot2 = (id) => {
       const r = own(ctx.state.entities, id)?.relations.find((x) => (x.type === "worn_by" || x.type === "equipped") && x.to === pov);
       const slot = !r ? null : typeof r.fields?.slot === "string" && r.fields.slot !== "" ? r.fields.slot : slotOf2(ctx, own(ctx.state.entities, id)?.fields ?? {}) ?? "worn";
       return slot === "pocket" || slot === "pocket_or_bag" ? null : slot;
@@ -40270,13 +41266,13 @@ function buildGearView(ctx) {
     const mine = contentsOf(ctx.state, pov).filter(shown3);
     const slotRank = (slot) => slots.includes(slot) ? slots.indexOf(slot) : slots.length;
     const outfit = (level < 3 ? [] : mine).flatMap((id) => {
-      const slot = wornSlot(id);
+      const slot = wornSlot2(id);
       return slot !== null ? [{ id, slot }] : [];
     }).sort((a, b) => slotRank(a.slot) - slotRank(b.slot) || a.id.localeCompare(b.id));
     const outfitIds = new Set(outfit.map((o) => o.id));
     const home = own(ctx.state.entities, pov)?.fields.home;
     const homePlace = typeof home === "string" && own(ctx.world.places, home) ? home : null;
-    const atHome2 = (place2) => place2 !== null && homePlace !== null && placeWithin(ctx.world, place2, homePlace) && together(ctx.world, place2, homePlace);
+    const atHome3 = (place2) => place2 !== null && homePlace !== null && placeWithin(ctx.world, place2, homePlace) && together(ctx.world, place2, homePlace);
     const placeName2 = (place2) => own(ctx.world.places, place2)?.name ?? place2;
     const wardrobe = [];
     if (level >= 3 && homePlace !== null) {
@@ -40286,7 +41282,7 @@ function buildGearView(ctx) {
         if (!e || isGone(ctx.state, id) || !listed2(id) || possessorOf(ctx, id) !== null || keptCategoryOf(ctx, e.fields) !== "clothing" || !whoseOf(ctx, id).owners.includes(pov))
           continue;
         const at2 = placeOfEntity(ctx.state, id);
-        if (!atHome2(at2) || at2 === null)
+        if (!atHome3(at2) || at2 === null)
           continue;
         const holder = holderOf(ctx.state, id);
         const by = holder !== null && see(holder) ? holder : null;
@@ -40296,6 +41292,33 @@ function buildGearView(ctx) {
         groups.set(key, group);
       }
       wardrobe.push(...[...groups.values()].sort((a, b) => Number(a.holder === null) - Number(b.holder === null) || (a.holder?.name ?? a.where).localeCompare(b.holder?.name ?? b.where)));
+    }
+    const stored = [];
+    if (homePlace !== null) {
+      const ours = (id) => listed2(id) && !isGone(ctx.state, id) && possessorOf(ctx, id) === null && mayFixThing(ctx, pov, id);
+      const portable = (id) => {
+        const size = sizeOf(ctx, id).size;
+        return size !== "furniture" && size !== "builtin" && size !== "part" && size !== "vehicle";
+      };
+      const loose = [];
+      for (const [at2, ids] of [...thingIndex(ctx).loose].sort(([a], [b]) => a.localeCompare(b))) {
+        if (!atHome3(at2) || !canSeePlace(ctx.registry, ctx.world, ctx.state, pov, at2))
+          continue;
+        const lying = [];
+        for (const id of ids) {
+          if (!listed2(id) || isGone(ctx.state, id))
+            continue;
+          const inner = holdsOf2(ctx, id) !== null ? contentsOf(ctx.state, id).filter(ours) : [];
+          if (inner.length > 0)
+            stored.push({ holder: { id, name: nameOf4(id) }, where: placeName2(at2), items: inner.map((kid) => item2(kid, 0, listed2)) });
+          else if (ours(id) && portable(id))
+            lying.push(id);
+        }
+        if (lying.length > 0)
+          loose.push({ holder: null, where: placeName2(at2), items: lying.map((id) => item2(id, 0, listed2)) });
+      }
+      stored.sort((a, b) => (a.holder?.name ?? "").localeCompare(b.holder?.name ?? "") || a.where.localeCompare(b.where));
+      stored.push(...loose);
     }
     const herePlace = placeOfEntity(ctx.state, pov);
     let here = null;
@@ -40330,7 +41353,15 @@ function buildGearView(ctx) {
       outfit: outfit.map(({ id, slot }) => ({ ...item2(id, 0, shown3), slot: slot.replace(/_/g, " ") })),
       carried: mine.filter((id) => !outfitIds.has(id)).map((id) => item2(id, 0, shown3)),
       wardrobe,
-      here
+      here,
+      stored,
+      sets: level >= 3 ? gearSets(ctx, pov) : [],
+      people: herePlace === null ? [] : Object.keys(ctx.state.entities).filter((id) => id !== pov && kindIs(ctx.registry, ctx.world, own(ctx.state.entities, id)?.kind ?? "", "person") && !isGone(ctx.state, id) && placeOfEntity(ctx.state, id) === herePlace && see(id)).map((id) => ({ id, name: nameOf4(id) })).sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id)),
+      vehicles: optionalQuery(ctx, "vehicles.for")?.(ctx, pov).filter(see).length ?? 0,
+      loans: loanChoices(ctx),
+      household: household !== null ? { id: household, name: nameOf4(household) } : null,
+      home: homePlace !== null ? { id: homePlace, name: placeName2(homePlace) } : null,
+      ceiling: thingsConfigOf(ctx.world).sizes.ceiling
     };
   });
 }
@@ -40399,7 +41430,7 @@ var containers_default = {
   id: "gear.containers",
   pack: "gear",
   schema: "lre-table/gear.containers/v1",
-  revision: "29334aeff91f1b6b9e99db08972661f1",
+  revision: "91ebed05ed7fe51de7bfd7c0c318bd72",
   label: "Containers",
   source: { dataPack: "modern-us", file: "us/gear.json", sourceSchema: "lre-data-src/us/gear/v1", reflectsPeriod: "2025-2026 retail prices; physical values are typical product weights", approximate: true, basis: "Typical product weights and dimensions from manufacturer spec sheets and common retail products, rounded; prices from prices.json bands and typical retail. Not a real inventory standard." },
   columns: {
@@ -40448,7 +41479,10 @@ var containers_default = {
     motorcycle_saddlebags: { name: "Motorcycle saddlebags, pair", capacity_l: 30, max_load_kg: 10, empty_weight_g: 3000, location: "vehicle_fixed", holds: "hand", equip_slot: "none", price_cents: { min: 1e4, typical: 25000, max: 70000 } },
     scooter_underseat: { name: "Scooter under-seat storage", capacity_l: 30, max_load_kg: 5, empty_weight_g: 0, location: "vehicle_fixed", holds: "hand", equip_slot: "none", price_cents: { min: 0, typical: 0, max: 0 } },
     atv_racks: { name: "ATV front and rear racks", capacity_l: 120, max_load_kg: 120, empty_weight_g: 0, location: "vehicle_fixed", holds: "armful", equip_slot: "none", price_cents: { min: 0, typical: 0, max: 0 }, notes: "About 40 kg front plus 80 kg rear." },
-    utv_cargo_bed: { name: "UTV dump bed", capacity_l: 350, max_load_kg: 450, empty_weight_g: 0, location: "vehicle_fixed", holds: "heavy", equip_slot: "none", price_cents: { min: 0, typical: 0, max: 0 } }
+    utv_cargo_bed: { name: "UTV dump bed", capacity_l: 350, max_load_kg: 450, empty_weight_g: 0, location: "vehicle_fixed", holds: "heavy", equip_slot: "none", price_cents: { min: 0, typical: 0, max: 0 } },
+    gun_safe: { name: "Gun safe", capacity_l: 400, max_load_kg: 300, empty_weight_g: 150000, location: "furniture", size: "furniture", holds: "armful", equip_slot: "none", price_cents: { min: 50000, typical: 120000, max: 400000 }, notes: "Long guns upright, handguns and ammunition on the door and shelves; most bolt to the floor." },
+    rifle_case_soft: { name: "Rifle case, soft", capacity_l: 12, max_load_kg: 8, empty_weight_g: 1200, location: "carried", size: "armful", holds: "armful", equip_slot: "shoulder", price_cents: { min: 2500, typical: 6000, max: 20000 } },
+    ammo_can: { name: "Ammo can, .50 caliber", capacity_l: 8, max_load_kg: 15, empty_weight_g: 1800, location: "carried", size: "hand", holds: "hand", equip_slot: "hand_held", price_cents: { min: 1500, typical: 2500, max: 5000 } }
   }
 };
 // src/packs/gear/core/tables/modern-us/items.json
@@ -40456,17 +41490,18 @@ var items_default = {
   id: "gear.items",
   pack: "gear",
   schema: "lre-table/gear.items/v1",
-  revision: "d4980aa57f9745734d948f954a32bcc7",
+  revision: "3b706178b400380a9407c9cd01f27c48",
   label: "Gear items",
   source: { dataPack: "modern-us", file: "us/gear.json", sourceSchema: "lre-data-src/us/gear/v1", reflectsPeriod: "2025-2026 retail prices; physical values are typical product weights", approximate: true, basis: "Typical product weights and dimensions from manufacturer spec sheets and common retail products, rounded; prices from prices.json bands and typical retail. Not a real inventory standard." },
   columns: {
     name: { type: "text" },
-    category: { type: "enum", values: ["carried", "clothing", "household", "recreation", "tool"] },
+    category: { type: "enum", values: ["carried", "clothing", "household", "recreation", "tool", "weapon", "armor", "ammo"] },
     equip_slot: { type: "ref", ref: "gear.slots" },
     weight_g: { type: "int", unit: "g", doc: "Empty or dry weight." },
     volume_l: { type: "number", unit: "l" },
     size: { type: "enum", values: ["pocket", "hand", "armful", "heavy", "furniture", "builtin"], doc: "How it is carried; inference reads it before the volume.", optional: true },
     price_cents: { type: "band", unit: "cents" },
+    ammo: { type: "ref", ref: "gear.items", doc: "The ammunition a weapon takes: an ammo row, which ammo_of counts.", optional: true },
     notes: { type: "text", optional: true }
   },
   rows: {
@@ -40559,7 +41594,33 @@ var items_default = {
     work_boots: { name: "Work boots, one pair", category: "clothing", equip_slot: "feet", weight_g: 1600, volume_l: 6, size: "hand", price_cents: { min: 7000, typical: 14000, max: 25000 } },
     dress_shoes: { name: "Dress shoes, one pair", category: "clothing", equip_slot: "feet", weight_g: 1000, volume_l: 3.5, size: "hand", price_cents: { min: 5000, typical: 9000, max: 20000 } },
     sandals: { name: "Sandals, one pair", category: "clothing", equip_slot: "feet", weight_g: 450, volume_l: 2.5, size: "hand", price_cents: { min: 1000, typical: 2500, max: 6000 } },
-    rubber_boots: { name: "Rubber boots, one pair", category: "clothing", equip_slot: "feet", weight_g: 1500, volume_l: 6, size: "hand", price_cents: { min: 2500, typical: 5000, max: 12000 } }
+    rubber_boots: { name: "Rubber boots, one pair", category: "clothing", equip_slot: "feet", weight_g: 1500, volume_l: 6, size: "hand", price_cents: { min: 2500, typical: 5000, max: 12000 } },
+    pistol_9mm: { name: "Pistol, 9mm semi-automatic", category: "weapon", equip_slot: "holster", weight_g: 700, volume_l: 0.6, size: "hand", price_cents: { min: 30000, typical: 55000, max: 120000 }, ammo: "ammo_9mm", notes: "Unloaded; a loaded 15-round magazine adds about 200 g." },
+    pistol_45: { name: "Pistol, .45 ACP", category: "weapon", equip_slot: "holster", weight_g: 1000, volume_l: 0.7, size: "hand", price_cents: { min: 40000, typical: 70000, max: 150000 }, ammo: "ammo_45_acp", notes: "Unloaded." },
+    revolver_38: { name: "Revolver, .38 Special", category: "weapon", equip_slot: "holster", weight_g: 650, volume_l: 0.6, size: "hand", price_cents: { min: 40000, typical: 65000, max: 130000 }, ammo: "ammo_38_special", notes: "Unloaded; holds 5 or 6 rounds." },
+    rifle_hunting_308: { name: "Hunting rifle, bolt-action .308", category: "weapon", equip_slot: "back", weight_g: 3600, volume_l: 8, size: "armful", price_cents: { min: 40000, typical: 80000, max: 200000 }, ammo: "ammo_308", notes: "Unloaded, without a scope; slung on the back or carried in a case." },
+    rifle_ar15: { name: "Rifle, AR-15 style 5.56mm", category: "weapon", equip_slot: "back", weight_g: 2900, volume_l: 7, size: "armful", price_cents: { min: 60000, typical: 1e5, max: 200000 }, ammo: "ammo_556", notes: "Unloaded." },
+    rifle_22: { name: "Rifle, .22 LR", category: "weapon", equip_slot: "back", weight_g: 2300, volume_l: 6, size: "armful", price_cents: { min: 15000, typical: 30000, max: 70000 }, ammo: "ammo_22lr", notes: "Unloaded." },
+    shotgun_12ga: { name: "Shotgun, pump-action 12 gauge", category: "weapon", equip_slot: "back", weight_g: 3400, volume_l: 8, size: "armful", price_cents: { min: 25000, typical: 45000, max: 1e5 }, ammo: "ammo_12ga", notes: "Unloaded." },
+    hunting_knife: { name: "Hunting knife, fixed blade", category: "weapon", equip_slot: "sheath", weight_g: 250, volume_l: 0.3, size: "hand", price_cents: { min: 2500, typical: 6000, max: 20000 } },
+    machete: { name: "Machete", category: "weapon", equip_slot: "sheath", weight_g: 600, volume_l: 1, size: "hand", price_cents: { min: 1500, typical: 3000, max: 8000 } },
+    baton_expandable: { name: "Expandable baton", category: "weapon", equip_slot: "holster", weight_g: 500, volume_l: 0.3, size: "hand", price_cents: { min: 3000, typical: 6000, max: 15000 } },
+    stun_gun: { name: "Stun gun", category: "weapon", equip_slot: "holster", weight_g: 300, volume_l: 0.3, size: "hand", price_cents: { min: 2500, typical: 5000, max: 12000 } },
+    pepper_spray: { name: "Pepper spray", category: "weapon", equip_slot: "pocket", weight_g: 60, volume_l: 0.05, size: "pocket", price_cents: { min: 800, typical: 1500, max: 3000 } },
+    compound_bow: { name: "Compound bow", category: "weapon", equip_slot: "back", weight_g: 1800, volume_l: 10, size: "armful", price_cents: { min: 30000, typical: 60000, max: 150000 }, ammo: "arrow_carbon" },
+    crossbow: { name: "Crossbow", category: "weapon", equip_slot: "back", weight_g: 3200, volume_l: 15, size: "armful", price_cents: { min: 25000, typical: 50000, max: 120000 }, ammo: "crossbow_bolt" },
+    body_armor_soft: { name: "Body armor vest, soft (IIIA)", category: "armor", equip_slot: "torso_outer", weight_g: 1800, volume_l: 6, size: "hand", price_cents: { min: 30000, typical: 60000, max: 120000 }, notes: "Worn over or under a shirt; stops handgun rounds." },
+    plate_carrier: { name: "Plate carrier with rifle plates (III)", category: "armor", equip_slot: "torso_outer", weight_g: 6500, volume_l: 12, size: "armful", price_cents: { min: 50000, typical: 90000, max: 200000 }, notes: "Two plates; stops rifle rounds." },
+    helmet_ballistic: { name: "Ballistic helmet", category: "armor", equip_slot: "head", weight_g: 1400, volume_l: 6, size: "hand", price_cents: { min: 30000, typical: 60000, max: 150000 } },
+    ammo_9mm: { name: "9mm round", category: "ammo", equip_slot: "pocket_or_bag", weight_g: 12, volume_l: 0.005, size: "pocket", price_cents: { min: 20, typical: 35, max: 80 }, notes: "One round: a box is a stack of 50." },
+    ammo_45_acp: { name: ".45 ACP round", category: "ammo", equip_slot: "pocket_or_bag", weight_g: 21, volume_l: 0.006, size: "pocket", price_cents: { min: 35, typical: 55, max: 120 }, notes: "One round: a box is a stack of 50." },
+    ammo_38_special: { name: ".38 Special round", category: "ammo", equip_slot: "pocket_or_bag", weight_g: 15, volume_l: 0.005, size: "pocket", price_cents: { min: 30, typical: 50, max: 100 }, notes: "One round: a box is a stack of 50." },
+    ammo_556: { name: "5.56mm round", category: "ammo", equip_slot: "pocket_or_bag", weight_g: 12, volume_l: 0.006, size: "pocket", price_cents: { min: 35, typical: 55, max: 120 }, notes: "One round: a box is a stack of 20." },
+    ammo_308: { name: ".308 Winchester round", category: "ammo", equip_slot: "pocket_or_bag", weight_g: 25, volume_l: 0.008, size: "pocket", price_cents: { min: 80, typical: 130, max: 300 }, notes: "One round: a box is a stack of 20." },
+    ammo_22lr: { name: ".22 LR round", category: "ammo", equip_slot: "pocket_or_bag", weight_g: 3, volume_l: 0.001, size: "pocket", price_cents: { min: 5, typical: 10, max: 25 }, notes: "One round: a box is a stack of 50 to 500." },
+    ammo_12ga: { name: "12-gauge shell", category: "ammo", equip_slot: "pocket_or_bag", weight_g: 35, volume_l: 0.015, size: "pocket", price_cents: { min: 40, typical: 70, max: 150 }, notes: "One shell: a box is a stack of 25." },
+    arrow_carbon: { name: "Arrow, carbon", category: "ammo", equip_slot: "quiver", weight_g: 25, volume_l: 0.05, size: "hand", price_cents: { min: 500, typical: 1000, max: 2000 }, notes: "One arrow: a quiver holds about 6 to 12." },
+    crossbow_bolt: { name: "Crossbow bolt", category: "ammo", equip_slot: "quiver", weight_g: 28, volume_l: 0.04, size: "hand", price_cents: { min: 600, typical: 1200, max: 2500 }, notes: "One bolt." }
   }
 };
 // src/packs/gear/core/tables/modern-us/kits.json
@@ -40594,7 +41655,7 @@ var slots_default = {
   id: "gear.slots",
   pack: "gear",
   schema: "lre-table/gear.slots/v1",
-  revision: "3b7a1c09512b25782bd3e5533a74e7ea",
+  revision: "e813e37ac93fe7f769ef6081705b58f8",
   label: "Equip slots",
   source: { dataPack: "modern-us", file: "us/gear.json", sourceSchema: "lre-data-src/us/gear/v1", reflectsPeriod: "2025-2026 retail prices; physical values are typical product weights", approximate: true, basis: "Typical product weights and dimensions from manufacturer spec sheets and common retail products, rounded; prices from prices.json bands and typical retail. Not a real inventory standard." },
   columns: {
@@ -40617,6 +41678,9 @@ var slots_default = {
     feet: { description: "Shoes and boots" },
     back: { description: "Backpacks" },
     shoulder: { description: "Shoulder and crossbody bags" },
+    holster: { description: "A holster on the belt, the shoulder or the thigh: a sidearm, a stun gun, a baton" },
+    sheath: { description: "A sheath on the belt: a knife, a machete" },
+    quiver: { description: "A quiver: arrows, crossbow bolts" },
     hand_held: { description: "Carried in hand: luggage, toolboxes, umbrellas" },
     pocket: { description: "Small items carried in a pocket" },
     pocket_or_bag: { description: "Small items carried in a pocket or a bag" },
@@ -40742,6 +41806,48 @@ var shipped_default3 = {
         size: "8f86d188",
         price_cents: "12e8789d",
         notes: "818bffbf"
+      },
+      added: [
+        "pistol_9mm",
+        "pistol_45",
+        "revolver_38",
+        "rifle_hunting_308",
+        "rifle_ar15",
+        "rifle_22",
+        "shotgun_12ga",
+        "hunting_knife",
+        "machete",
+        "baton_expandable",
+        "stun_gun",
+        "pepper_spray",
+        "compound_bow",
+        "crossbow",
+        "body_armor_soft",
+        "plate_carrier",
+        "helmet_ballistic",
+        "ammo_9mm",
+        "ammo_45_acp",
+        "ammo_38_special",
+        "ammo_556",
+        "ammo_308",
+        "ammo_22lr",
+        "ammo_12ga",
+        "arrow_carbon",
+        "crossbow_bolt"
+      ]
+    },
+    {
+      revision: "3b706178b400380a9407c9cd01f27c48",
+      columns: {
+        name: "36de7a58",
+        category: "f0fd0ef0",
+        equip_slot: "d0861bfc",
+        weight_g: "65a14944",
+        volume_l: "cf86793b",
+        size: "8f86d188",
+        price_cents: "12e8789d",
+        ammo: "f1160518",
+        notes: "818bffbf"
       }
     }
   ],
@@ -40808,6 +41914,26 @@ var shipped_default3 = {
         equip_slot: "d0861bfc",
         price_cents: "12e8789d",
         notes: "818bffbf"
+      },
+      added: [
+        "gun_safe",
+        "rifle_case_soft",
+        "ammo_can"
+      ]
+    },
+    {
+      revision: "91ebed05ed7fe51de7bfd7c0c318bd72",
+      columns: {
+        name: "36de7a58",
+        capacity_l: "cf86793b",
+        max_load_kg: "772792fe",
+        empty_weight_g: "71af05dd",
+        location: "b0e71912",
+        size: "da0f6bc3",
+        holds: "4fe800e8",
+        equip_slot: "d0861bfc",
+        price_cents: "12e8789d",
+        notes: "818bffbf"
       }
     }
   ],
@@ -40830,6 +41956,17 @@ var shipped_default3 = {
   "gear.slots": [
     {
       revision: "3b7a1c09512b25782bd3e5533a74e7ea",
+      columns: {
+        description: "36de7a58"
+      },
+      added: [
+        "holster",
+        "sheath",
+        "quiver"
+      ]
+    },
+    {
+      revision: "e813e37ac93fe7f769ef6081705b58f8",
       columns: {
         description: "36de7a58"
       }
@@ -40967,7 +42104,7 @@ var KIT = {
     piece_count: { type: "number", label: "Piece count", domain: "gear", level: 3 }
   }
 };
-function reject14(code, reason) {
+function reject15(code, reason) {
   return { code, reason };
 }
 var CASH_WORDS = { cash: null, money: null, buck: null, bucks: null, change: null, coin: null, coins: null, banknote: null, banknotes: null, twenties: null, fifties: null, fiver: 5, tenner: 10, twenty: 20, fifty: 50, hundred: 100 };
@@ -41010,24 +42147,24 @@ function detach(ctx, thing2) {
 }
 var transfer2 = (ctx, item2, to, told = false) => {
   if (!own(ctx.state.entities, item2))
-    return reject14("missing_entity", `no item ${labelOf(ctx, item2)}`);
+    return reject15("missing_entity", `no item ${labelOf(ctx, item2)}`);
   if (!own(ctx.state.entities, to))
-    return reject14("missing_entity", `no holder ${labelOf(ctx, to)}`);
+    return reject15("missing_entity", `no holder ${labelOf(ctx, to)}`);
   const level = gearLevel(ctx, item2, to);
   if (level === 0)
     return [];
   if (holderOf(ctx.state, item2) === to)
     return [];
   if (item2 === to || isInside(ctx.state, to, item2))
-    return reject14("cycle", "can't put something inside itself");
+    return reject15("cycle", "can't put something inside itself");
   const cannot = holdProblem(ctx, item2, to);
   if (cannot)
-    return reject14(fixedOf(ctx, item2) === null ? "cant_hold" : "fixed", cannot);
+    return reject15(fixedOf(ctx, item2) === null ? "cant_hold" : "fixed", cannot);
   const target = own(ctx.state.entities, to);
   if (!told && level >= 2 && target && !kindIs(ctx.registry, ctx.world, target.kind, "person")) {
     const problem = fitProblem(ctx.state, item2, to);
     if (problem)
-      return reject14("no_room", `${labelOf(ctx, item2)} ${problem}`);
+      return reject15("no_room", `${labelOf(ctx, item2)} ${problem}`);
   }
   const out = detach(ctx, item2);
   if (typeof own(ctx.state.entities, item2)?.fields.place === "string")
@@ -41038,9 +42175,9 @@ var transfer2 = (ctx, item2, to, told = false) => {
 };
 var drop = (ctx, item2, place2) => {
   if (!own(ctx.state.entities, item2))
-    return reject14("missing_entity", `no item ${labelOf(ctx, item2)}`);
+    return reject15("missing_entity", `no item ${labelOf(ctx, item2)}`);
   if (!own(ctx.world.places, place2))
-    return reject14("missing_place", `no place ${labelOf(ctx, place2)}`);
+    return reject15("missing_place", `no place ${labelOf(ctx, place2)}`);
   if (gearLevel(ctx, item2) === 0)
     return [];
   return [...detach(ctx, item2), { type: "set", entity: item2, field: "place", value: place2 }, ...optionalService(ctx, "space.lay")?.(ctx, item2, place2, holderOf(ctx.state, item2)) ?? []];
@@ -41054,11 +42191,11 @@ function endLoans(ctx, thing2) {
 var give2 = (ctx, item2, from, to, told = false) => {
   const e = own(ctx.state.entities, item2);
   if (!e)
-    return reject14("missing_entity", `no item ${labelOf(ctx, item2)}`);
+    return reject15("missing_entity", `no item ${labelOf(ctx, item2)}`);
   if (e.kind === "account")
-    return reject14("is_money", "cash changes hands as a transfer");
+    return reject15("is_money", "cash changes hands as a transfer");
   if (from !== to && !isInside(ctx.state, item2, from) && e.fields.owner !== from)
-    return reject14("not_held", `${labelOf(ctx, from)} doesn't have ${e.name}`);
+    return reject15("not_held", `${labelOf(ctx, from)} doesn't have ${e.name}`);
   const moved2 = transfer2(ctx, item2, to, told);
   if (!Array.isArray(moved2))
     return moved2;
@@ -41133,15 +42270,15 @@ function usedUp(ctx, item2, done) {
 }
 function search(ctx, who, target) {
   if (!own(ctx.state.entities, who))
-    return reject14("missing_entity", `no searcher ${labelOf(ctx, who)}`);
+    return reject15("missing_entity", `no searcher ${labelOf(ctx, who)}`);
   const place2 = placeOfEntity(ctx.state, who);
   if (target !== null) {
     if (!own(ctx.state.entities, target))
-      return reject14("missing_entity", `no ${labelOf(ctx, target)} to search`);
+      return reject15("missing_entity", `no ${labelOf(ctx, target)} to search`);
     if (placeOfEntity(ctx.state, target) !== place2)
-      return reject14("not_here", `${labelOf(ctx, target)} isn't here`);
+      return reject15("not_here", `${labelOf(ctx, target)} isn't here`);
   } else if (!place2)
-    return reject14("no_place", `${labelOf(ctx, who)} is nowhere`);
+    return reject15("no_place", `${labelOf(ctx, who)} is nowhere`);
   const found = target !== null ? contentsOf(ctx.state, target) : Object.keys(ctx.state.entities).filter((id) => holderOf(ctx.state, id) === null && own(ctx.state.entities, id)?.fields.place === place2).sort();
   return found.filter((id) => id !== who && !isGone(ctx.state, id) && isDiscoverable(ctx.world, ctx.state, id) && !knows(ctx.state, who, id)).map((id) => ({ type: "link", rel: "knows", from: who, to: id }));
 }
@@ -41151,8 +42288,25 @@ function itemOpEvents(ctx, op, by, salt) {
   if (thing2 !== null && own(ctx.state.entities, thing2) && gearLevel(ctx, thing2, to) === 0)
     return [];
   const w = new Working(ctx.registry, ctx.world, ctx.state);
-  const out = applyItemOp(w, op, { by, confirmed: false, gm: false, salt, viewer: ctx.world.pov });
+  const out = applyItemOp(w, op, { by, confirmed: false, gm: false, salt, viewer: ctx.world.pov, room: true });
   return "code" in out ? out : [...w.events];
+}
+function handoverRefusal(ctx, action, params, actor2) {
+  const here = placeOfEntity(ctx.state, actor2);
+  const away = (id) => here === null || placeOfEntity(ctx.state, id) !== here;
+  if (action === "give" || action === "hand_over" || action === "lend") {
+    const to = strOf(params.to);
+    return to !== "" && own(ctx.state.entities, to) && away(to) ? `${labelOf(ctx, to)} isn't here to take it.` : null;
+  }
+  if (action !== "reclaim")
+    return null;
+  const item2 = strOf(params.item);
+  if (!own(ctx.state.entities, item2))
+    return null;
+  const has = possessorOf(ctx, item2);
+  if (has !== null)
+    return has !== actor2 && away(has) ? `${labelOf(ctx, has)} has it, and isn't here.` : null;
+  return away(item2) ? `${labelOf(ctx, item2)} isn't here.` : null;
 }
 function returnsTo(ctx, who, thing2) {
   const here = placeOfEntity(ctx.state, who);
@@ -41205,11 +42359,11 @@ function claimId(ctx, c) {
 }
 var claim = (ctx, c) => {
   if (!own(ctx.state.entities, c.by))
-    return reject14("missing_entity", `no claimer ${labelOf(ctx, c.by)}`);
+    return reject15("missing_entity", `no claimer ${labelOf(ctx, c.by)}`);
   const name = c.name.trim();
   if (c.existing && own(ctx.state.entities, c.existing)) {
     const place3 = placeOfEntity(ctx.state, c.by);
-    const moved2 = c.at === "held" ? transfer2(ctx, c.existing, c.by) : place3 ? drop(ctx, c.existing, place3) : reject14("no_place", `${labelOf(ctx, c.by)} is nowhere`);
+    const moved2 = c.at === "held" ? transfer2(ctx, c.existing, c.by) : place3 ? drop(ctx, c.existing, place3) : reject15("no_place", `${labelOf(ctx, c.by)} is nowhere`);
     return Array.isArray(moved2) ? { entity: c.existing, events: moved2 } : moved2;
   }
   if (c.at === "held") {
@@ -41222,7 +42376,7 @@ var claim = (ctx, c) => {
   }
   const place2 = placeOfEntity(ctx.state, c.by);
   if (c.at === "here" && !place2)
-    return reject14("no_place", `${labelOf(ctx, c.by)} is nowhere`);
+    return reject15("no_place", `${labelOf(ctx, c.by)} is nowhere`);
   const row = c.like ? rowOf(ctx, "gear.items", c.like) ?? rowOf(ctx, "gear.containers", c.like) : undefined;
   const fields = { claimed: true, notable: true };
   if (c.at === "held")
@@ -41251,17 +42405,17 @@ var claim = (ctx, c) => {
 var takePiece = (ctx, kit, piece, to) => {
   const k = own(ctx.state.entities, kit);
   if (!k)
-    return reject14("missing_entity", `no kit ${labelOf(ctx, kit)}`);
+    return reject15("missing_entity", `no kit ${labelOf(ctx, kit)}`);
   const status = kitStatus(ctx, kit);
   const p = findPiece(ctx, kit, piece);
   if (!status || !p)
-    return reject14("no_piece", `${k.name} has no ${piece}`);
+    return reject15("no_piece", `${k.name} has no ${piece}`);
   const back = contentsOf(ctx.state, kit).find((id) => own(ctx.state.entities, id)?.fields.from_kit === kit && own(ctx.state.entities, id)?.fields.piece === p.name);
   if (back)
     return transfer2(ctx, back, to);
   const present2 = status.pieces.find((x) => x.name === p.name)?.present ?? 0;
   if (present2 <= 0)
-    return reject14("no_piece", `no ${p.name} left in ${k.name}`);
+    return reject15("no_piece", `no ${p.name} left in ${k.name}`);
   const taken = takenOf(ctx.state, kit);
   const spawned = spawn(ctx, { name: p.name, owner: typeof k.fields.owner === "string" ? k.fields.owner : null, holder: to, salt: `${kit}:${p.name}:${own(taken, p.name) ?? 0}` });
   if (!Array.isArray(spawned))
@@ -41277,11 +42431,11 @@ var takePiece = (ctx, kit, piece, to) => {
 var lend = (ctx, thing2, to, until2) => {
   const e = own(ctx.state.entities, thing2);
   if (!e)
-    return reject14("missing_entity", `no ${labelOf(ctx, thing2)}`);
+    return reject15("missing_entity", `no ${labelOf(ctx, thing2)}`);
   if (!own(ctx.state.entities, to))
-    return reject14("missing_entity", `no ${labelOf(ctx, to)}`);
+    return reject15("missing_entity", `no ${labelOf(ctx, to)}`);
   if (!Number.isFinite(until2) || until2 <= ctx.state.clock)
-    return reject14("bad_until", "a loan needs a future end");
+    return reject15("bad_until", "a loan needs a future end");
   const out = [];
   if (typeof e.fields.place !== "string" || holderOf(ctx.state, thing2)) {
     const moved2 = transfer2(ctx, thing2, to);
@@ -41297,7 +42451,7 @@ var lend = (ctx, thing2, to, until2) => {
 var retrieve = (ctx, thing2) => {
   const e = own(ctx.state.entities, thing2);
   if (!e)
-    return reject14("missing_entity", `no ${labelOf(ctx, thing2)}`);
+    return reject15("missing_entity", `no ${labelOf(ctx, thing2)}`);
   const out = [];
   for (const g of grants(ctx.state))
     if (g.thing === thing2)
@@ -41317,16 +42471,16 @@ var retrieve = (ctx, thing2) => {
 var wear2 = (ctx, item2, wearer, slot) => {
   const e = own(ctx.state.entities, item2);
   if (!e)
-    return reject14("missing_entity", `no item ${labelOf(ctx, item2)}`);
+    return reject15("missing_entity", `no item ${labelOf(ctx, item2)}`);
   if (ctx.levelOf(wearer, "gear") < 3)
-    return reject14("level", "slots are tracked from Gear level 3");
+    return reject15("level", "slots are tracked from Gear level 3");
   const s = slot ?? strOf(e.fields.slot);
   if (!s || s === "none")
-    return reject14("no_slot", `${e.name} isn't worn`);
+    return reject15("no_slot", `${e.name} isn't worn`);
   const rel = s === "hand_held" ? "equipped" : "worn_by";
   const occupied = Object.keys(ctx.state.entities).find((id) => id !== item2 && own(ctx.state.entities, id)?.relations.some((r) => r.type === rel && r.to === wearer && r.fields?.slot === s));
   if (occupied && s !== "pocket" && s !== "pocket_or_bag")
-    return reject14("slot_taken", `${labelOf(ctx, occupied)} is already in the ${s.replace(/_/g, " ")} slot`);
+    return reject15("slot_taken", `${labelOf(ctx, occupied)} is already in the ${s.replace(/_/g, " ")} slot`);
   const out = [];
   if (holderOf(ctx.state, item2) !== wearer) {
     const moved2 = transfer2(ctx, item2, wearer);
@@ -41361,11 +42515,14 @@ var gearPack = {
     r.service("gear.take_piece", takePiece);
     r.service("gear.lend", lend);
     r.service("gear.retrieve", retrieve);
+    r.service("gear.set_op", setOpEvents);
     r.query("has_item", hasItem);
     r.query("gear.kit_status", kitStatus);
     r.query("gear.overdue", (ctx, owner2) => overdueFor(ctx.state, owner2));
     r.query("gear.hold_problem", holdProblem);
     r.query("gear.containment", (ctx, id) => ({ holds: holdsAs(ctx, id), goes: goesIn(ctx, id) }));
+    r.query("gear.room_problem", roomProblem2);
+    r.query("gear.offstage_refusal", handoverRefusal);
     r.formula("has_item", (ctx, holder, what) => hasItem(ctx, String(holder ?? ""), String(what ?? "")));
     r.formula("carries", (ctx, holder, item2) => isInside(ctx.state, String(item2 ?? ""), String(holder ?? "")));
     r.formula("movable", (ctx, thing2) => fixedOf(ctx, String(thing2 ?? "")) === null);
@@ -41388,6 +42545,8 @@ var gearPack = {
     r.formula("fetch_minutes", (ctx, who, thing2) => reachOf(ctx, String(who ?? ""), String(thing2 ?? "")).minutes ?? 0);
     r.formula("returns_to", (ctx, who, thing2) => returnsTo(ctx, String(who ?? ""), String(thing2 ?? "")));
     r.formula("rest_near", (ctx, who, thing2) => restNear(ctx, String(who ?? ""), String(thing2 ?? "")));
+    r.formula("readied", (ctx, who, what) => readied(ctx, String(who ?? ""), String(what ?? "")));
+    r.formula("ammo_of", (ctx, who, what) => ammoOf(ctx, String(who ?? ""), String(what ?? "")));
     const wrap = (type, args, f) => r.effect({ type, args, resolve: (a, ctx) => f(a, ctx) });
     wrap("gear.transfer", ["item", "to"], (a, ctx) => {
       const item2 = strOf(a.item);
@@ -41411,7 +42570,7 @@ var gearPack = {
       const rest = restOf(ctx, item2).rest;
       const owner2 = whoseOf(ctx, item2).owners[0];
       if (rest === null || rest === "owner" && owner2 === undefined)
-        return reject14("no_rest", `${labelOf(ctx, item2)} has nowhere it's kept`);
+        return reject15("no_rest", `${labelOf(ctx, item2)} has nowhere it's kept`);
       const op = rest === "owner" ? { do: "hand", item: item2, to: owner2 ?? "", basis: "return", why: "" } : { do: "move", item: item2, to: rest, why: "" };
       return itemOpEvents(ctx, op, strOf(a.by) || ctx.world.pov, ctx.rng.seed);
     });
@@ -41424,16 +42583,32 @@ var gearPack = {
       const at2 = said2 !== "" ? clockOfPhrase(calendarOf(ctx.world), ctx.state.clock, said2) : null;
       const until2 = at2 ?? numOf(a.until, NaN);
       if (said2 !== "" && at2 === null && !(until2 > ctx.state.clock))
-        return reject14("bad_until", `"${said2}" names no time; say how many days or until when`);
+        return reject15("bad_until", `"${said2}" names no time; say how many days or until when`);
       return lend(ctx, strOf(a.item), strOf(a.to), until2);
     });
     wrap("gear.retrieve", ["item"], (a, ctx) => retrieve(ctx, strOf(a.item)));
+    wrap("gear.set_save", ["who", "name", "kind"], (a, ctx) => {
+      const kind = SET_KINDS.find((k) => k === a.kind);
+      return kind ? itemOpEvents(ctx, { do: "set_save", who: strOf(a.who) || ctx.world.pov, name: strOf(a.name), kind }, strOf(a.who) || ctx.world.pov, ctx.rng.seed) : reject15("bad_kind", "a saved set is an outfit or a loadout");
+    });
+    const setOf = (a, ctx) => {
+      const who = strOf(a.who) || ctx.world.pov;
+      return { who, set: setIdSaid(setsOf(own(ctx.state.entities, who)?.fields), strOf(a.set)) };
+    };
+    wrap("gear.set_apply", ["who", "set"], (a, ctx) => {
+      const { who, set } = setOf(a, ctx);
+      return itemOpEvents(ctx, { do: "set_apply", who, set }, who, ctx.rng.seed);
+    });
+    wrap("gear.set_drop", ["who", "set"], (a, ctx) => {
+      const { who, set } = setOf(a, ctx);
+      return itemOpEvents(ctx, { do: "set_drop", who, set }, who, ctx.rng.seed);
+    });
     wrap("gear.wear", ["item", "wearer", "slot?"], (a, ctx) => wear2(ctx, strOf(a.item), strOf(a.wearer), typeof a.slot === "string" ? a.slot : undefined));
     wrap("gear.remove", ["item"], (a, ctx) => {
       const item2 = strOf(a.item);
       const e = own(ctx.state.entities, item2);
       if (!e)
-        return reject14("missing_entity", `no item ${labelOf(ctx, item2)}`);
+        return reject15("missing_entity", `no item ${labelOf(ctx, item2)}`);
       return e.relations.filter((x) => x.type === "worn_by" || x.type === "equipped").map((x) => ({ type: "unlink", rel: x.type, from: item2, to: x.to }));
     });
     r.effect({
@@ -41444,14 +42619,14 @@ var gearPack = {
         const user = strOf(args.user) || ctx.world.pov;
         const e = own(ctx.state.entities, item2);
         if (!e)
-          return reject14("missing_entity", `no item ${labelOf(ctx, item2)}`);
+          return reject15("missing_entity", `no item ${labelOf(ctx, item2)}`);
         const level = ctx.levelOf(user, "gear");
         const out = [];
         if (level >= 4) {
           if (e.fields.consumable === true || typeof e.fields.uses === "number") {
             const uses = numOf(e.fields.uses, 1);
             if (uses <= 0)
-              return reject14("used_up", `${e.name} is used up`);
+              return reject15("used_up", `${e.name} is used up`);
             out.push(bump(ctx.state, item2, "uses", -1, uses));
           }
           const wearBy = ctx.rng.int(0, 2);
@@ -41471,9 +42646,9 @@ var gearPack = {
         const item2 = strOf(args.item);
         const e = own(ctx.state.entities, item2);
         if (!e)
-          return reject14("missing_entity", `no ${labelOf(ctx, item2)}`);
+          return reject15("missing_entity", `no ${labelOf(ctx, item2)}`);
         if (e.fields.lost === true)
-          return reject14("already_lost", `${e.name} is already lost`);
+          return reject15("already_lost", `${e.name} is already lost`);
         const out = [];
         const lose2 = optionalService(ctx, "economy.lose");
         if (lose2) {
@@ -41502,6 +42677,9 @@ var gearPack = {
     r.action({ id: "put_in", label: "Put in", description: "Put something you carry, or that is here, into a bag, a box or a piece of furniture here.", pack: "gear", params: { item: { type: "ref", ref: "item" }, into: { type: "ref", ref: "item", label: "Into" } }, requires: ["carries(self, item) or (place(item) == here and reach(self, item))", "carries(self, into) or (place(into) == here and reach(self, into))", "movable(item)", "may_use(self, into)", "fits_in(item, into)"], outcomes: { default: [{ type: "gear.put_in", args: { item: "item", into: "into", by: "self" } }] }, duration: "1", lexicon: ["put in", "put into", "stash in", "pack in", "store in"], observable: "puts something away" });
     r.action({ id: "lend", label: "Lend", description: "Lend something to someone, for some days or until a time.", pack: "gear", params: { item: { type: "ref", ref: "item" }, to: { type: "ref", ref: "person" }, days: { type: "number", optional: true }, until: { type: "text", optional: true, label: "Until (a time: 7 pm, tonight, tomorrow)" } }, requires: ["may_assign(self, item)", "days > 0 or params.until != null", "at(to, here) or at(item, here)"], outcomes: { default: [{ type: "gear.lend", args: { item: "item", to: "to", until: "=days > 0 ? clock + days(days) : 0", said: "=params.until" } }] }, duration: "2", lexicon: ["lend", "loan", "let borrow"], observable: "lends something" });
     r.action({ id: "reclaim", label: "Take back", description: "Take back something of yours that you lent out.", pack: "gear", params: { item: { type: "ref", ref: "item" } }, requires: ["item.owner == self", "lent_out(item)"], outcomes: { default: [{ type: "gear.retrieve", args: { item: "item" } }] }, duration: "5", lexicon: ["take back", "get back", "reclaim"], observable: "takes something back" });
+    r.action({ id: "set_apply", label: "Change into", description: "Change into one of your saved outfits or loadouts.", pack: "gear", params: { set: { type: "text", label: "Outfit or loadout" } }, requires: ["level.gear >= 3"], outcomes: { default: [{ type: "gear.set_apply", args: { who: "self", set: "=params.set" } }] }, duration: "5", lexicon: ["change into", "put on my", "get dressed in", "gear up"], observable: "changes clothes" });
+    r.action({ id: "set_save", label: "Save what I'm wearing", description: "Keep what you wear now as an outfit, or what you carry ready as a loadout.", pack: "gear", params: { name: { type: "text", label: "Name" }, kind: { type: "text", label: "Outfit or loadout" } }, requires: ["level.gear >= 3"], outcomes: { default: [{ type: "gear.set_save", args: { who: "self", name: "=params.name", kind: "=params.kind" } }] }, duration: "0", mechanical: true });
+    r.action({ id: "set_drop", label: "Forget an outfit", description: "Stop keeping one of your saved outfits or loadouts.", pack: "gear", params: { set: { type: "text", label: "Outfit or loadout" } }, requires: [], outcomes: { default: [{ type: "gear.set_drop", args: { who: "self", set: "=params.set" } }] }, duration: "0", mechanical: true });
     r.action({ id: "wear", label: "Wear or equip", description: "Put on or equip clothing, armor or gear.", pack: "gear", params: { item: { type: "ref", ref: "item", claim: "held" } }, requires: ["carries(self, item) or (place(item) == here and reach(self, item))", "level.gear >= 3", "movable(item)", "may_use(self, item)"], outcomes: { default: [{ type: "gear.wear", args: { item: "item", wearer: "self" } }] }, duration: "2", lexicon: ["wear", "put on", "equip"], observable: "puts something on" });
     r.action({ id: "remove", label: "Take off", description: "Take off something you wear or have equipped.", pack: "gear", params: { item: { type: "ref", ref: "item" } }, requires: ["carries(self, item)"], outcomes: { default: [{ type: "gear.remove", args: { item: "item" } }] }, duration: "2", lexicon: ["take off", "remove", "unequip"], observable: "takes something off" });
     r.action({ id: "use", label: "Use", description: "Use an item you carry or can reach.", pack: "gear", params: { item: { type: "ref", ref: "item", claim: "held" } }, requires: ["carries(self, item) or (on_grid(item) and reach(self, item))", "may_use(self, item)"], outcomes: { default: [{ type: "gear.use", args: { item: "item", user: "self" } }] }, duration: "5", lexicon: ["use", "apply"], observable: "uses something" });
@@ -41578,12 +42756,12 @@ var gearPack = {
     };
     const refusal3 = (p, out) => {
       if (out.kind === "which")
-        return reject14("ambiguous", "more than one thing fits");
+        return reject15("ambiguous", "more than one thing fits");
       if (out.kind === "refused")
         return out.rejection;
-      return isItemChange(p.type) && out.change !== p.type ? reject14("changed", "it would no longer happen as told") : null;
+      return isItemChange(p.type) && out.change !== p.type ? reject15("changed", "it would no longer happen as told") : null;
     };
-    const cash = (p, ctx) => factOf3(p) === "give" && cashGift(strOf(p.item), ctx.world.currency) ? reject14("is_money", "a cash give is a transfer") : null;
+    const cash = (p, ctx) => factOf3(p) === "give" && cashGift(strOf(p.item), ctx.world.currency) ? reject15("is_money", "a cash give is a transfer") : null;
     for (const type of new Set([...ITEM_CHANGES, ...THING_FACTS])) {
       r.proposal({
         type,
@@ -41607,10 +42785,10 @@ var gearPack = {
         try {
           p = JSON.parse(strOf(a.change));
         } catch {
-          return reject14("bad_proposal", "the change isn't one");
+          return reject15("bad_proposal", "the change isn't one");
         }
         if (!isRecord(p))
-          return reject14("bad_proposal", "the change isn't one");
+          return reject15("bad_proposal", "the change isn't one");
         const { out, w } = settled2(p, ctx, ctx.rng.seed);
         return refusal3(p, out) ?? [...w.events];
       }
@@ -41622,13 +42800,13 @@ var gearPack = {
         const item2 = strOf(p.item);
         const e = own(ctx.state.entities, item2);
         if (!e || !kindIs(ctx.registry, ctx.world, e.kind, "item"))
-          return reject14("missing_entity", `no item ${labelOf(ctx, item2)}`);
+          return reject15("missing_entity", `no item ${labelOf(ctx, item2)}`);
         const delta = p.delta;
         if (typeof delta !== "number" || !Number.isInteger(delta) || delta === 0)
-          return reject14("bad_proposal", "quantity needs a whole, non-zero delta");
+          return reject15("bad_proposal", "quantity needs a whole, non-zero delta");
         const who = strOf(p.entity);
         if (who !== "" && who !== e.fields.owner && !isInside(ctx.state, item2, who))
-          return reject14("not_holder", `${labelOf(ctx, who)} doesn't have ${e.name}`);
+          return reject15("not_holder", `${labelOf(ctx, who)} doesn't have ${e.name}`);
         return null;
       },
       toEffects: (p) => [{ type: "add", args: { entity: strOf(p.item), field: "qty", delta: numOf(p.delta) } }],
@@ -41678,27 +42856,99 @@ var gearPack = {
 };
 var core_default4 = gearPack;
 
+// src/packs/vehicles/core/access.ts
+var DRIVES = { owner: true, member: true, position: true, delegate: true, control: true, household: true, housemate: true, partner: true, family: true, staff: true, grant: true, permit: true };
+function useTier(use) {
+  return use.basis === "owner" && use.via === undefined ? 1 : use.basis === "grant" || use.basis === "permit" || use.basis === "staff" ? 3 : 2;
+}
+function isVehicle(ctx, id) {
+  const e = own(ctx.state.entities, id);
+  return !!e && kindIs(ctx.registry, ctx.world, e.kind, "vehicle") && !isGone(ctx.state, id);
+}
+function vehiclesFor(ctx, who) {
+  const out = [];
+  for (const id of Object.keys(ctx.state.entities).sort()) {
+    if (!isVehicle(ctx, id))
+      continue;
+    const use = accessFor(ctx, who, id).use;
+    if (!use || DRIVES[use.basis] !== true)
+      continue;
+    const owner2 = whoseOf(ctx, id).owners[0] ?? null;
+    out.push({ id, use, owner: owner2, mine: useTier(use) === 1, canLend: assignFor(ctx, who, id) !== null });
+  }
+  return out;
+}
+
+// src/engine/character.ts
+function knownPlaceRefs(world, known) {
+  const out = [];
+  for (const id of Object.keys(world.places).sort()) {
+    const p = own(world.places, id);
+    if (!p || !known(id))
+      continue;
+    const path2 = [];
+    let cur = p.parent;
+    for (let guard = 0;cur !== undefined && guard < 64; guard++) {
+      const up = own(world.places, cur);
+      if (!up || !known(cur))
+        break;
+      path2.unshift(up.name);
+      cur = up.parent;
+    }
+    const parent = p.parent !== undefined && own(world.places, p.parent) && known(p.parent) ? p.parent : null;
+    out.push({ id, name: p.name, path: path2, parent, visibility: "public" });
+  }
+  return out;
+}
+var RELATION_INTERNAL = new Set(["t"]);
+
 // src/packs/vehicles/core/view.ts
+var PEOPLE_CAP = 200;
+function accessWords(ctx, u, ownerName, household) {
+  const cal = calendarOf(ctx.world);
+  switch (u.use.basis) {
+    case "owner":
+      return u.mine ? "Yours" : `${ownerName}'s`;
+    case "grant":
+      return u.use.grant === "hold" ? `Holding it for ${ownerName}` : u.use.until !== undefined ? `Lent to you until ${formatClock(cal, u.use.until)}` : "Assigned to you";
+    case "staff":
+      return `${ownerName}'s, yours to use at work`;
+    case "permit":
+      return `${ownerName}'s, yours to use`;
+    default:
+      return household ? "Your household's" : `${ownerName}'s`;
+  }
+}
 function buildGarageView(ctx) {
   const pov = ctx.world.pov;
   const level = ctx.levelOf(pov, "vehicles");
   const cal = calendarOf(ctx.world);
+  const seesPlace = (p) => canSeePlace(ctx.registry, ctx.world, ctx.state, pov, p);
+  const seesEntity = (id) => canSeeEntity(ctx.registry, ctx.world, ctx.state, pov, id);
+  const nameOf4 = (id) => seesEntity(id) ? own(ctx.state.entities, id)?.name ?? "someone" : "someone";
   const vehicles = [];
-  for (const id of Object.keys(ctx.state.entities).sort()) {
+  for (const u of vehiclesFor(ctx, pov)) {
+    const id = u.id;
     const e = own(ctx.state.entities, id);
-    if (!e || !kindIs(ctx.registry, ctx.world, e.kind, "vehicle") || isGone(ctx.state, id))
-      continue;
-    const grant2 = Object.keys(ctx.state.entities).sort().map((b) => ({ b, r: own(ctx.state.entities, b)?.relations.find((x) => x.type === "uses" && x.to === id) })).find((x) => x.r);
-    if (e.fields.owner !== pov && grant2?.b !== pov)
+    if (!e || !u.mine && !seesEntity(id))
       continue;
     const place2 = placeOfEntity(ctx.state, id);
     const cls = rowOf(ctx, "vehicles.classes", strOf(e.fields.class));
+    const household = u.owner !== null && orgTypeOf(ctx, u.owner) === "household";
+    const ownerName = u.owner !== null ? nameOf4(u.owner) : "nobody";
     const v = {
       id,
       name: e.name,
       kind: strOf(cls?.domain, "road"),
       status: level <= 1 ? e.fields.status === "broken" ? "broken" : "runs fine" : strOf(e.fields.status, "ok").replace(/_/g, " "),
-      place: place2 ? canSeePlace(ctx.registry, ctx.world, ctx.state, pov, place2) ? own(ctx.world.places, place2)?.name ?? place2 : HIDDEN_PLACE_NAME : null
+      place: place2 ? seesPlace(place2) ? own(ctx.world.places, place2)?.name ?? place2 : HIDDEN_PLACE_NAME : null,
+      ...place2 && seesPlace(place2) ? { placeId: place2 } : {},
+      ...cls ? { classId: strOf(e.fields.class), className: strOf(cls.name, strOf(e.fields.class)) } : {},
+      owner: u.mine ? "self" : household ? "household" : u.owner === null ? "nobody" : "other",
+      ...u.mine || u.owner === null ? {} : { ownerName },
+      access: accessWords(ctx, u, ownerName, household),
+      mine: u.mine,
+      canLend: u.canLend
     };
     if (level >= 2) {
       v.fuelPct = Math.round(numOf(e.fields.fuel_pct, 100));
@@ -41714,13 +42964,23 @@ function buildGarageView(ctx) {
       if (typeof e.fields.condition === "number")
         v.condition = e.fields.condition;
       const home = e.fields.home;
-      if (typeof home === "string")
-        v.home = canSeePlace(ctx.registry, ctx.world, ctx.state, pov, home) ? own(ctx.world.places, home)?.name ?? home : HIDDEN_PLACE_NAME;
-      if (grant2?.r) {
-        const until2 = grant2.r.until;
-        v.assignedTo = { name: own(ctx.state.entities, grant2.b)?.name ?? grant2.b, ...until2 !== undefined ? { until: formatClock(cal, until2) } : {}, overdue: until2 !== undefined && until2 <= ctx.state.clock };
+      if (typeof home === "string") {
+        v.home = seesPlace(home) ? own(ctx.world.places, home)?.name ?? home : HIDDEN_PLACE_NAME;
+        if (seesPlace(home))
+          v.homeId = home;
       }
+      if (u.use.basis === "grant")
+        v.assignedTo = { name: own(ctx.state.entities, pov)?.name ?? pov, ...u.use.until !== undefined ? { until: formatClock(cal, u.use.until) } : {}, overdue: u.use.until !== undefined && u.use.until <= ctx.state.clock };
     }
+    if (u.canLend && useTier({ basis: "grant" }) <= level) {
+      v.grants = accessOf(ctx.state, id).users.filter((g) => g.who !== pov && seesEntity(g.who)).map((g) => {
+        const fields = own(ctx.state.entities, g.who)?.relations.find((r) => r.type === "uses" && r.to === id)?.fields;
+        return { who: g.who, name: nameOf4(g.who), basis: grantBasisOf(fields, g.until), ...g.until !== undefined ? { until: formatClock(cal, g.until) } : {}, ...g.until !== undefined && g.until <= ctx.state.clock ? { overdue: true } : {} };
+      });
+    }
+    const cargo = Object.keys(ctx.state.entities).sort().filter((x) => !isGone(ctx.state, x) && seesEntity(x) && own(ctx.state.entities, x)?.relations.some((r) => r.type === "in" && r.to === id)).map((x) => own(ctx.state.entities, x)?.name ?? x);
+    if (cargo.length > 0)
+      v.cargo = cargo;
     if (level >= 4) {
       const interval = serviceInterval(ctx, id);
       if (interval !== null) {
@@ -41732,26 +42992,41 @@ function buildGarageView(ctx) {
     }
     vehicles.push(v);
   }
-  return { level, vehicles };
+  const here = placeOfEntity(ctx.state, pov);
+  const people = Object.keys(ctx.state.entities).filter((id) => id !== pov && !isGone(ctx.state, id) && kindIs(ctx.registry, ctx.world, own(ctx.state.entities, id)?.kind ?? "", "person") && seesEntity(id)).map((id) => ({ id, name: own(ctx.state.entities, id)?.name ?? id })).sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id)).slice(0, PEOPLE_CAP);
+  const homeOrg = (own(ctx.state.entities, pov)?.relations ?? []).find((r) => r.type === "member_of" && orgTypeOf(ctx, r.to) === "household" && !isGone(ctx.state, r.to))?.to;
+  return {
+    level,
+    vehicles,
+    places: knownPlaceRefs(ctx.world, seesPlace),
+    ...here && seesPlace(here) ? { here } : {},
+    people,
+    household: homeOrg ? { id: homeOrg, name: own(ctx.state.entities, homeOrg)?.name ?? homeOrg } : null,
+    loans: loanChoices(ctx),
+    classes: vehicleClassChoices(ctx.tables.get("vehicles.classes"), { year: dateAt(cal, ctx.state.clock).year, air: worldHasAir(ctx.world) })
+  };
 }
 // src/packs/vehicles/core/tables/modern-us/classes.json
 var classes_default = {
   id: "vehicles.classes",
   pack: "vehicles",
   schema: "lre-table/vehicles.classes/v1",
-  revision: "d66d371fa1fb8f4c87410b2b0b60a307",
+  revision: "bafe3d2f10c8e41d855b710e97384d30",
   label: "Vehicle classes",
   source: { dataPack: "modern-us", file: "us/vehicles.json", sourceSchema: "lre-data-src/us/vehicles/v1", reflectsPeriod: "2025-2026 (model-year 2025 new prices; used = about 3-5 years old)", approximate: true, basis: { prices_and_economy: "Typical new MSRP bands, used-market (Edmunds, Kelley Blue Book, NADA) values and EPA fueleconomy.gov combined ratings for representative models, rounded; marine and off-road from manufacturer spec sheets (Mercury, Yamaha, Sea-Doo, Polaris, Honda) and dealer pricing.", insurance: "Bankrate / Insurify 2025 average premiums: full coverage about $2,300-$2,700 per year for a clean-record adult, state-minimum liability about $600-$800 per year; EVs are 15-25% higher; boats about 1.5% of value per year; rounded to cents per month.", maintenance: "Manufacturer service schedules and AAA / RepairPal cost surveys, rounded.", registration: "State DMV fee ranges; actual cost varies by weight, value, age and county." } },
   columns: {
     name: { type: "text" },
-    domain: { type: "enum", values: ["road", "marine", "offroad"] },
-    fuel_type: { type: "enum", values: ["diesel", "electricity", "gasoline"] },
+    aliases: { type: "list", of: "text", doc: 'Other words a purchase or a story names one of the class by ("pickup", "jet ski"), lowercase; the longest that matches wins (`vehicles.priced`).', optional: true },
+    make: { type: "text", doc: "A representative make for a new one of the class, as the vehicle picker suggests it.", optional: true },
+    model: { type: "text", doc: "A representative model of that make.", optional: true },
+    domain: { type: "enum", values: ["road", "marine", "offroad", "air"], doc: "Where it goes: roads, water, off-road trails, or the air (only over routes the world authors for the air)." },
+    fuel_type: { type: "enum", values: ["avgas", "diesel", "electricity", "gasoline", "none"], doc: "none: pedalled, paddled or rowed, so no tank, fuel or range." },
     factor_guide: { type: "ref", ref: "vehicles.factors", doc: "The consumption factor guide for this class." },
     tank_capacity_gal: { type: "number", unit: "gal", doc: "Usable fuel.", optional: true },
     tank_capacity_l: { type: "number", unit: "l", optional: true },
     usable_battery_kwh: { type: "number", unit: "kwh", optional: true },
-    consumption_unit: { type: "enum", values: ["mpg", "mi_per_kwh", "gal_per_h"], doc: "The unit of the rates in `consumption`: mpg for fuel road vehicles, mi_per_kwh for EVs, gal_per_h for marine and off-road." },
-    consumption: { type: "json", doc: "Rates by regime in consumption_unit. Road: city, highway, combined. Marine: idle_no_wake, cruise_planing, wide_open (+ note). Off-road: idle, normal_trail, hard_use, plus approx_mpg_trail in mpg." },
+    consumption_unit: { type: "enum", values: ["mpg", "mi_per_kwh", "gal_per_h", "none"], doc: "The unit of the rates in `consumption`: mpg for fuel road vehicles, mi_per_kwh for EVs, gal_per_h for marine, off-road and aircraft, none for what burns nothing." },
+    consumption: { type: "json", doc: "Rates by regime in consumption_unit. Road: city, highway, combined. Marine: idle_no_wake, cruise_planing, wide_open (+ note). Off-road: idle, normal_trail, hard_use, plus approx_mpg_trail in mpg. Air: taxi, climb, cruise. None: no rates." },
     range_mi: { type: "int", unit: "mi", doc: "On a full tank or battery at combined consumption.", optional: true },
     range_h: { type: "number", unit: "h", doc: "Engine hours on a full tank at the normal or cruise rate.", optional: true },
     price_new_cents: { type: "band", unit: "cents" },
@@ -41759,6 +43034,7 @@ var classes_default = {
     insurance_liability_cents_per_month: { type: "int", unit: "cents_per_month", doc: "State-minimum liability, clean-record adult." },
     insurance_full_cents_per_month: { type: "int", unit: "cents_per_month", doc: "Liability plus collision and comprehensive." },
     registration_cents_per_year: { type: "band", unit: "cents_per_year", doc: "Varies widely by state." },
+    fuel_cents_per_gal: { type: "band", unit: "cents_per_gal", doc: "A US gallon of its fuel, for a fuel the price catalog has no row for (aviation gasoline).", optional: true },
     annual_maintenance_cents_per_year: { type: "int", unit: "cents_per_year" },
     maintenance: { type: "json", doc: "Service intervals and other upkeep, with the unit in each key (\u2026_miles, \u2026_hours, \u2026_cents_\u2026); not-applicable entries are omitted." },
     passengers: { type: "int" },
@@ -41769,25 +43045,38 @@ var classes_default = {
     notes: { type: "text" }
   },
   rows: {
-    compact_car: { name: "Compact car (Civic / Corolla class)", domain: "road", fuel_type: "gasoline", factor_guide: "road", tank_capacity_gal: 12.4, tank_capacity_l: 46.9, consumption_unit: "mpg", consumption: { city: 30, highway: 40, combined: 33 }, range_mi: 410, price_new_cents: { min: 2200000, typical: 2600000, max: 3100000 }, price_used_cents: { min: 1200000, typical: 1750000, max: 2200000 }, insurance_liability_cents_per_month: 6000, insurance_full_cents_per_month: 20000, registration_cents_per_year: { min: 3000, typical: 12500, max: 50000 }, annual_maintenance_cents_per_year: 90000, maintenance: { oil_change_interval_miles: 7500, oil_type: "synthetic", tire_rotation_interval_miles: 7500, tire_replace_interval_miles: 45000, brake_pads_interval_miles: 50000, major_service_interval_miles: [30000, 60000, 90000] }, passengers: 5, cargo_l: 425, payload_kg: 430, towing_kg: 0, notes: "US new-vehicle average transaction price is near $49,000 in 2025 across all classes; compacts are at the low end." },
-    midsize_sedan: { name: "Midsize sedan (Camry / Accord class)", domain: "road", fuel_type: "gasoline", factor_guide: "road", tank_capacity_gal: 14.5, tank_capacity_l: 54.9, consumption_unit: "mpg", consumption: { city: 28, highway: 38, combined: 31 }, range_mi: 450, price_new_cents: { min: 2700000, typical: 3200000, max: 4000000 }, price_used_cents: { min: 1500000, typical: 2100000, max: 2700000 }, insurance_liability_cents_per_month: 6000, insurance_full_cents_per_month: 21500, registration_cents_per_year: { min: 3000, typical: 13000, max: 55000 }, annual_maintenance_cents_per_year: 1e5, maintenance: { oil_change_interval_miles: 7500, oil_type: "synthetic", tire_rotation_interval_miles: 7500, tire_replace_interval_miles: 45000, brake_pads_interval_miles: 50000, major_service_interval_miles: [30000, 60000, 90000] }, passengers: 5, cargo_l: 450, payload_kg: 450, towing_kg: 700, notes: "Hybrid variants reach 45-52 mpg combined." },
-    pickup_midsize: { name: "Midsize pickup (Tacoma / Colorado class)", domain: "road", fuel_type: "gasoline", factor_guide: "road", tank_capacity_gal: 21.1, tank_capacity_l: 79.9, consumption_unit: "mpg", consumption: { city: 19, highway: 24, combined: 21 }, range_mi: 440, price_new_cents: { min: 3300000, typical: 4200000, max: 5800000 }, price_used_cents: { min: 2200000, typical: 3000000, max: 4000000 }, insurance_liability_cents_per_month: 6200, insurance_full_cents_per_month: 22500, registration_cents_per_year: { min: 3500, typical: 15000, max: 70000 }, annual_maintenance_cents_per_year: 110000, maintenance: { oil_change_interval_miles: 7500, oil_type: "synthetic", tire_rotation_interval_miles: 7500, tire_replace_interval_miles: 40000, brake_pads_interval_miles: 45000, major_service_interval_miles: [30000, 60000, 90000] }, passengers: 5, cargo_l: 1000, payload_kg: 620, towing_kg: 3000, notes: "Cargo is the open bed (about 5 ft). Towing about 6,500 lb." },
-    pickup_fullsize: { name: "Full-size pickup (F-150 / Silverado class)", domain: "road", fuel_type: "gasoline", factor_guide: "road", tank_capacity_gal: 26, tank_capacity_l: 98.4, consumption_unit: "mpg", consumption: { city: 18, highway: 24, combined: 20 }, range_mi: 520, price_new_cents: { min: 4000000, typical: 5800000, max: 8500000 }, price_used_cents: { min: 2800000, typical: 3800000, max: 5200000 }, insurance_liability_cents_per_month: 6500, insurance_full_cents_per_month: 24000, registration_cents_per_year: { min: 4000, typical: 17000, max: 90000 }, annual_maintenance_cents_per_year: 120000, maintenance: { oil_change_interval_miles: 7500, oil_type: "synthetic", tire_rotation_interval_miles: 7500, tire_replace_interval_miles: 40000, brake_pads_interval_miles: 45000, major_service_interval_miles: [30000, 60000, 90000] }, passengers: 5, cargo_l: 1500, payload_kg: 900, towing_kg: 4500, notes: "Cargo is the open bed (5.5-6.5 ft). Towing up to ~10,000 lb with the right package." },
-    pickup_heavy_duty_diesel: { name: "Heavy-duty diesel pickup (2500 / F-250 class)", domain: "road", fuel_type: "diesel", factor_guide: "road", tank_capacity_gal: 34, tank_capacity_l: 128.7, consumption_unit: "mpg", consumption: { city: 14, highway: 19, combined: 16 }, range_mi: 540, price_new_cents: { min: 5500000, typical: 7200000, max: 1e7 }, price_used_cents: { min: 3800000, typical: 5000000, max: 7000000 }, insurance_liability_cents_per_month: 7500, insurance_full_cents_per_month: 27000, registration_cents_per_year: { min: 5000, typical: 22000, max: 120000 }, annual_maintenance_cents_per_year: 180000, maintenance: { oil_change_interval_miles: 1e4, oil_type: "diesel synthetic", tire_rotation_interval_miles: 7500, tire_replace_interval_miles: 45000, brake_pads_interval_miles: 45000, major_service_interval_miles: [30000, 60000, 90000], fuel_filter_interval_miles: 15000 }, passengers: 5, cargo_l: 1700, payload_kg: 1500, towing_kg: 7000, notes: "DEF fluid (diesel exhaust fluid) refills every ~5,000 miles, about $15-25/ 2.5 gal. Towing up to 15,000-20,000 lb." },
-    suv_compact: { name: "Compact SUV (RAV4 / CR-V class)", domain: "road", fuel_type: "gasoline", factor_guide: "road", tank_capacity_gal: 14.5, tank_capacity_l: 54.9, consumption_unit: "mpg", consumption: { city: 27, highway: 35, combined: 30 }, range_mi: 430, price_new_cents: { min: 3000000, typical: 3600000, max: 4600000 }, price_used_cents: { min: 1900000, typical: 2600000, max: 3400000 }, insurance_liability_cents_per_month: 6200, insurance_full_cents_per_month: 22000, registration_cents_per_year: { min: 3000, typical: 14000, max: 60000 }, annual_maintenance_cents_per_year: 105000, maintenance: { oil_change_interval_miles: 7500, oil_type: "synthetic", tire_rotation_interval_miles: 7500, tire_replace_interval_miles: 45000, brake_pads_interval_miles: 50000, major_service_interval_miles: [30000, 60000, 90000] }, passengers: 5, cargo_l: 1100, payload_kg: 450, towing_kg: 700, notes: "Cargo volume is with the rear seats folded: about 1,100 L; behind seats about 540 L. Hybrids reach 38-41 mpg." },
-    suv_midsize_3row: { name: "Midsize three-row SUV (Highlander / Explorer class)", domain: "road", fuel_type: "gasoline", factor_guide: "road", tank_capacity_gal: 18, tank_capacity_l: 68.1, consumption_unit: "mpg", consumption: { city: 20, highway: 27, combined: 23 }, range_mi: 410, price_new_cents: { min: 4000000, typical: 5000000, max: 6800000 }, price_used_cents: { min: 2600000, typical: 3400000, max: 4400000 }, insurance_liability_cents_per_month: 6500, insurance_full_cents_per_month: 24000, registration_cents_per_year: { min: 3500, typical: 16000, max: 75000 }, annual_maintenance_cents_per_year: 125000, maintenance: { oil_change_interval_miles: 7500, oil_type: "synthetic", tire_rotation_interval_miles: 7500, tire_replace_interval_miles: 45000, brake_pads_interval_miles: 45000, major_service_interval_miles: [30000, 60000, 90000] }, passengers: 7, cargo_l: 2300, payload_kg: 600, towing_kg: 2300, notes: "Cargo with second and third rows folded about 2,300 L; behind the third row about 480 L." },
-    minivan: { name: "Minivan (Sienna / Odyssey / Pacifica class)", domain: "road", fuel_type: "gasoline", factor_guide: "road", tank_capacity_gal: 19.5, tank_capacity_l: 73.8, consumption_unit: "mpg", consumption: { city: 19, highway: 28, combined: 22 }, range_mi: 430, price_new_cents: { min: 3800000, typical: 4400000, max: 5600000 }, price_used_cents: { min: 2400000, typical: 3000000, max: 3800000 }, insurance_liability_cents_per_month: 6200, insurance_full_cents_per_month: 22000, registration_cents_per_year: { min: 3500, typical: 15000, max: 65000 }, annual_maintenance_cents_per_year: 115000, maintenance: { oil_change_interval_miles: 7500, oil_type: "synthetic", tire_rotation_interval_miles: 7500, tire_replace_interval_miles: 45000, brake_pads_interval_miles: 45000, major_service_interval_miles: [30000, 60000, 90000] }, passengers: 8, cargo_l: 4000, payload_kg: 650, towing_kg: 1600, notes: "Hybrid minivans (Sienna) return 35-36 mpg combined; cargo with rows folded is about 4,000 L (140 cu ft)." },
-    ev_sedan: { name: "Electric sedan (Model 3 / Ioniq 6 class)", domain: "road", fuel_type: "electricity", factor_guide: "road", usable_battery_kwh: 60, consumption_unit: "mi_per_kwh", consumption: { city: 4.3, highway: 3.4, combined: 3.8 }, range_mi: 270, price_new_cents: { min: 3800000, typical: 4400000, max: 5600000 }, price_used_cents: { min: 1900000, typical: 2600000, max: 3400000 }, insurance_liability_cents_per_month: 7000, insurance_full_cents_per_month: 27000, registration_cents_per_year: { min: 5000, typical: 17500, max: 80000 }, annual_maintenance_cents_per_year: 50000, maintenance: { tire_rotation_interval_miles: 7500, tire_replace_interval_miles: 35000, brake_pads_interval_miles: 1e5, cabin_filter_interval_miles: 20000, battery_coolant_interval_miles: 1e5, major_service_interval_miles: [25000, 50000, 75000] }, passengers: 5, cargo_l: 600, payload_kg: 450, towing_kg: 0, charging: { home_level2_kw: "7-11", dc_fast_peak_kw: "150-250", dc_fast_10_to_80_minutes: "25-35", wall_outlet_120v_miles_per_hour: "3-5" }, notes: "No oil changes. Many states add an EV registration surcharge of about $100-$250 per year, included in the registration band. Tires wear faster (instant torque, weight)." },
-    ev_crossover: { name: "Electric crossover (Model Y / Equinox EV class)", domain: "road", fuel_type: "electricity", factor_guide: "road", usable_battery_kwh: 75, consumption_unit: "mi_per_kwh", consumption: { city: 3.6, highway: 3, combined: 3.3 }, range_mi: 300, price_new_cents: { min: 4000000, typical: 5000000, max: 6500000 }, price_used_cents: { min: 2200000, typical: 3100000, max: 4200000 }, insurance_liability_cents_per_month: 7200, insurance_full_cents_per_month: 28000, registration_cents_per_year: { min: 5000, typical: 18000, max: 85000 }, annual_maintenance_cents_per_year: 55000, maintenance: { tire_rotation_interval_miles: 7500, tire_replace_interval_miles: 35000, brake_pads_interval_miles: 1e5, cabin_filter_interval_miles: 20000, battery_coolant_interval_miles: 1e5, major_service_interval_miles: [25000, 50000, 75000] }, passengers: 5, cargo_l: 1900, payload_kg: 480, towing_kg: 1600, charging: { home_level2_kw: "7-11", dc_fast_peak_kw: "150-250", dc_fast_10_to_80_minutes: "25-40", wall_outlet_120v_miles_per_hour: "3-5" }, notes: "Cargo volume with rear seats folded." },
-    motorcycle_standard: { name: "Motorcycle, standard or cruiser (500-900 cc)", domain: "road", fuel_type: "gasoline", factor_guide: "road", tank_capacity_gal: 4.5, tank_capacity_l: 17, consumption_unit: "mpg", consumption: { city: 45, highway: 52, combined: 48 }, range_mi: 200, price_new_cents: { min: 700000, typical: 1e6, max: 1600000 }, price_used_cents: { min: 350000, typical: 550000, max: 900000 }, insurance_liability_cents_per_month: 3500, insurance_full_cents_per_month: 7500, registration_cents_per_year: { min: 1500, typical: 5000, max: 15000 }, annual_maintenance_cents_per_year: 45000, maintenance: { oil_change_interval_miles: 5000, oil_type: "synthetic", tire_replace_interval_miles: 8000, brake_pads_interval_miles: 15000, chain_lube_interval_miles: 500, valve_check_interval_miles: 16000, major_service_interval_miles: [6000, 12000, 24000] }, passengers: 2, cargo_l: 30, payload_kg: 180, towing_kg: 0, notes: "Cargo is saddlebags or a tail bag; a passenger seat is optional. Front/rear tires are replaced separately (rear wears ~2x faster). Helmet laws vary by state." },
-    scooter_150: { name: "Scooter or moped (50-150 cc)", domain: "road", fuel_type: "gasoline", factor_guide: "road", tank_capacity_gal: 1.5, tank_capacity_l: 5.7, consumption_unit: "mpg", consumption: { city: 80, highway: 65, combined: 75 }, range_mi: 110, price_new_cents: { min: 250000, typical: 400000, max: 650000 }, price_used_cents: { min: 1e5, typical: 200000, max: 350000 }, insurance_liability_cents_per_month: 1800, insurance_full_cents_per_month: 4000, registration_cents_per_year: { min: 500, typical: 3000, max: 1e4 }, annual_maintenance_cents_per_year: 20000, maintenance: { oil_change_interval_miles: 2500, oil_type: "scooter 10W-40", tire_replace_interval_miles: 6000, brake_pads_interval_miles: 8000, belt_replace_interval_miles: 1e4, major_service_interval_miles: [3000, 6000, 12000] }, passengers: 2, cargo_l: 30, payload_kg: 150, towing_kg: 0, notes: "Under-seat storage about 25-35 L. Mopeds under 50 cc often need no registration or license in some states; top speed 30-60 mph." },
-    bass_boat_outboard: { name: "Outboard bass boat (18-20 ft, 150-200 hp)", domain: "marine", fuel_type: "gasoline", factor_guide: "marine", tank_capacity_gal: 40, tank_capacity_l: 151.4, consumption_unit: "gal_per_h", consumption: { idle_no_wake: 0.8, cruise_planing: 9, wide_open: 16 }, range_h: 4, price_new_cents: { min: 4000000, typical: 6500000, max: 1e7 }, price_used_cents: { min: 1800000, typical: 3200000, max: 5500000 }, insurance_liability_cents_per_month: 2500, insurance_full_cents_per_month: 7500, registration_cents_per_year: { min: 1000, typical: 5000, max: 15000 }, annual_maintenance_cents_per_year: 120000, maintenance: { engine_service_interval_hours: 100, engine_service_note: "oil, filters and lower-unit gear oil every 100 hours or annually", water_pump_impeller_interval_hours: 300, winterization_cents_annual: 45000, trailer_bearing_interval_miles: 12000, slip_or_storage_cents_per_month: { min: 0, typical: 15000, max: 60000 } }, passengers: 4, cargo_l: 250, payload_kg: 450, notes: "Boat state registration usually renews every 1-3 years (annualised here); trailer is registered separately (~$30-$100/year). Price includes motor and trailer. Cruise burn is at planing speed with a normal load." },
-    pontoon_boat: { name: "Pontoon boat (22-24 ft, 90-150 hp outboard)", domain: "marine", fuel_type: "gasoline", factor_guide: "marine", tank_capacity_gal: 26, tank_capacity_l: 98.4, consumption_unit: "gal_per_h", consumption: { idle_no_wake: 0.6, cruise_planing: 5.5, wide_open: 11 }, range_h: 4.7, price_new_cents: { min: 3500000, typical: 6000000, max: 1e7 }, price_used_cents: { min: 2000000, typical: 3000000, max: 5000000 }, insurance_liability_cents_per_month: 2000, insurance_full_cents_per_month: 6500, registration_cents_per_year: { min: 1000, typical: 5000, max: 15000 }, annual_maintenance_cents_per_year: 90000, maintenance: { engine_service_interval_hours: 100, water_pump_impeller_interval_hours: 300, winterization_cents_annual: 40000, trailer_bearing_interval_miles: 12000, slip_or_storage_cents_per_month: { min: 0, typical: 20000, max: 80000 } }, passengers: 10, cargo_l: 300, payload_kg: 1000, notes: "Capacity plate typically 8-13 persons / 1,500-2,500 lb total." },
-    jet_ski_pwc: { name: "Personal watercraft / jet ski (1-3 seats)", domain: "marine", fuel_type: "gasoline", factor_guide: "marine", tank_capacity_gal: 15.9, tank_capacity_l: 60.2, consumption_unit: "gal_per_h", consumption: { idle_no_wake: 0.8, cruise_planing: 6, wide_open: 13 }, range_h: 2.6, price_new_cents: { min: 800000, typical: 1300000, max: 2500000 }, price_used_cents: { min: 500000, typical: 850000, max: 1500000 }, insurance_liability_cents_per_month: 1500, insurance_full_cents_per_month: 4500, registration_cents_per_year: { min: 1000, typical: 4500, max: 12000 }, annual_maintenance_cents_per_year: 60000, maintenance: { engine_service_interval_hours: 50, engine_service_note: "oil and filter every 50 hours or annually", winterization_cents_annual: 20000, slip_or_storage_cents_per_month: { min: 0, typical: 1e4, max: 40000 } }, passengers: 3, cargo_l: 60, payload_kg: 250, notes: "Premium-grade fuel recommended by most makers. Price excludes trailer ($800-$2,500)." },
-    sailboat_auxiliary: { name: "Cruising sailboat with auxiliary diesel (30-35 ft)", domain: "marine", fuel_type: "diesel", factor_guide: "marine", tank_capacity_gal: 25, tank_capacity_l: 94.6, consumption_unit: "gal_per_h", consumption: { idle_no_wake: 0.3, cruise_planing: 0.8, wide_open: 1.4, note: "Displacement hull: motors at hull speed (~6 knots) burning 0.6-1.0 gph; sailing uses no fuel." }, range_h: 31, price_new_cents: { min: 15000000, typical: 25000000, max: 40000000 }, price_used_cents: { min: 2500000, typical: 6000000, max: 12000000 }, insurance_liability_cents_per_month: 2500, insurance_full_cents_per_month: 15000, registration_cents_per_year: { min: 1000, typical: 4500, max: 12000 }, annual_maintenance_cents_per_year: 400000, maintenance: { engine_service_interval_hours: 150, engine_service_note: "oil and filters every 100-150 hours; impeller every 200 hours", haul_out_bottom_paint_cents_annual: 250000, rigging_and_sails_cents_annual: 80000, slip_or_storage_cents_per_month: { min: 25000, typical: 80000, max: 250000 } }, passengers: 6, cargo_l: 1500, payload_kg: 900, notes: "Documented vessels (US Coast Guard documentation) pay no state registration. A rule of thumb is that ownership costs 10% of value per year. Sleeps 4-6." },
-    atv_utility: { name: "ATV, utility quad (450-700 cc)", domain: "offroad", fuel_type: "gasoline", factor_guide: "offroad", tank_capacity_gal: 4.5, tank_capacity_l: 17, consumption_unit: "gal_per_h", consumption: { idle: 0.15, normal_trail: 1, hard_use: 1.8, approx_mpg_trail: 18 }, range_h: 4.5, price_new_cents: { min: 700000, typical: 950000, max: 1400000 }, price_used_cents: { min: 300000, typical: 500000, max: 800000 }, insurance_liability_cents_per_month: 1500, insurance_full_cents_per_month: 3500, registration_cents_per_year: { min: 0, typical: 2500, max: 6000 }, annual_maintenance_cents_per_year: 35000, maintenance: { oil_change_interval_hours: 50, oil_change_interval_miles: 1000, tire_replace_interval_miles: 3000, air_filter_interval_hours: 25, chain_or_driveshaft_service_interval_hours: 100 }, passengers: 1, cargo_l: 120, payload_kg: 130, towing_kg: 500, notes: "Cargo: front and rear racks, about 40 kg front and 80 kg rear. Many states require an off-highway vehicle (OHV) sticker/permit rather than road registration; helmet and age rules vary." },
-    utv_side_by_side: { name: "UTV / side-by-side (Ranger / RZR class, 2-4 seats)", domain: "offroad", fuel_type: "gasoline", factor_guide: "offroad", tank_capacity_gal: 10, tank_capacity_l: 37.9, consumption_unit: "gal_per_h", consumption: { idle: 0.2, normal_trail: 1.8, hard_use: 3, approx_mpg_trail: 14 }, range_h: 5.5, price_new_cents: { min: 1400000, typical: 2200000, max: 3500000 }, price_used_cents: { min: 900000, typical: 1400000, max: 2200000 }, insurance_liability_cents_per_month: 2500, insurance_full_cents_per_month: 6000, registration_cents_per_year: { min: 0, typical: 3500, max: 8000 }, annual_maintenance_cents_per_year: 60000, maintenance: { oil_change_interval_hours: 100, oil_change_interval_miles: 1500, tire_replace_interval_miles: 4000, belt_replace_interval_miles: 3000, air_filter_interval_hours: 25 }, passengers: 4, cargo_l: 350, payload_kg: 450, towing_kg: 900, notes: "Utility models carry a dump bed up to ~450 kg; sport models carry people only. Roll cage and belts required." },
-    dirt_bike_250: { name: "Dirt bike, 250 cc four-stroke", domain: "offroad", fuel_type: "gasoline", factor_guide: "offroad", tank_capacity_gal: 1.9, tank_capacity_l: 7.2, consumption_unit: "gal_per_h", consumption: { idle: 0.08, normal_trail: 0.5, hard_use: 0.8, approx_mpg_trail: 40 }, range_h: 3.8, price_new_cents: { min: 550000, typical: 800000, max: 1050000 }, price_used_cents: { min: 200000, typical: 380000, max: 600000 }, insurance_liability_cents_per_month: 1000, insurance_full_cents_per_month: 2500, registration_cents_per_year: { min: 0, typical: 2000, max: 5000 }, annual_maintenance_cents_per_year: 55000, maintenance: { oil_change_interval_hours: 15, oil_change_interval_miles: 300, tire_replace_interval_miles: 800, air_filter_interval_hours: 5, top_end_rebuild_interval_hours: 150, chain_lube_interval_miles: 100 }, passengers: 1, cargo_l: 5, payload_kg: 100, towing_kg: 0, notes: "Competition bikes are not street legal; plated dual-sport bikes use the motorcycle class. Premium fuel with 91+ octane typical." }
+    compact_car: { name: "Compact car (Civic / Corolla class)", aliases: ["compact car", "compact", "hatchback", "economy car", "civic", "corolla"], make: "Honda", model: "Civic", domain: "road", fuel_type: "gasoline", factor_guide: "road", tank_capacity_gal: 12.4, tank_capacity_l: 46.9, consumption_unit: "mpg", consumption: { city: 30, highway: 40, combined: 33 }, range_mi: 410, price_new_cents: { min: 2200000, typical: 2600000, max: 3100000 }, price_used_cents: { min: 1200000, typical: 1750000, max: 2200000 }, insurance_liability_cents_per_month: 6000, insurance_full_cents_per_month: 20000, registration_cents_per_year: { min: 3000, typical: 12500, max: 50000 }, annual_maintenance_cents_per_year: 90000, maintenance: { oil_change_interval_miles: 7500, oil_type: "synthetic", tire_rotation_interval_miles: 7500, tire_replace_interval_miles: 45000, brake_pads_interval_miles: 50000, major_service_interval_miles: [30000, 60000, 90000] }, passengers: 5, cargo_l: 425, payload_kg: 430, towing_kg: 0, notes: "US new-vehicle average transaction price is near $49,000 in 2025 across all classes; compacts are at the low end." },
+    midsize_sedan: { name: "Midsize sedan (Camry / Accord class)", aliases: ["car", "sedan", "saloon", "family car", "camry", "accord"], make: "Toyota", model: "Camry", domain: "road", fuel_type: "gasoline", factor_guide: "road", tank_capacity_gal: 14.5, tank_capacity_l: 54.9, consumption_unit: "mpg", consumption: { city: 28, highway: 38, combined: 31 }, range_mi: 450, price_new_cents: { min: 2700000, typical: 3200000, max: 4000000 }, price_used_cents: { min: 1500000, typical: 2100000, max: 2700000 }, insurance_liability_cents_per_month: 6000, insurance_full_cents_per_month: 21500, registration_cents_per_year: { min: 3000, typical: 13000, max: 55000 }, annual_maintenance_cents_per_year: 1e5, maintenance: { oil_change_interval_miles: 7500, oil_type: "synthetic", tire_rotation_interval_miles: 7500, tire_replace_interval_miles: 45000, brake_pads_interval_miles: 50000, major_service_interval_miles: [30000, 60000, 90000] }, passengers: 5, cargo_l: 450, payload_kg: 450, towing_kg: 700, notes: "Hybrid variants reach 45-52 mpg combined." },
+    pickup_midsize: { name: "Midsize pickup (Tacoma / Colorado class)", aliases: ["midsize pickup", "small pickup", "compact pickup", "tacoma", "colorado", "ford ranger", "frontier"], make: "Toyota", model: "Tacoma", domain: "road", fuel_type: "gasoline", factor_guide: "road", tank_capacity_gal: 21.1, tank_capacity_l: 79.9, consumption_unit: "mpg", consumption: { city: 19, highway: 24, combined: 21 }, range_mi: 440, price_new_cents: { min: 3300000, typical: 4200000, max: 5800000 }, price_used_cents: { min: 2200000, typical: 3000000, max: 4000000 }, insurance_liability_cents_per_month: 6200, insurance_full_cents_per_month: 22500, registration_cents_per_year: { min: 3500, typical: 15000, max: 70000 }, annual_maintenance_cents_per_year: 110000, maintenance: { oil_change_interval_miles: 7500, oil_type: "synthetic", tire_rotation_interval_miles: 7500, tire_replace_interval_miles: 40000, brake_pads_interval_miles: 45000, major_service_interval_miles: [30000, 60000, 90000] }, passengers: 5, cargo_l: 1000, payload_kg: 620, towing_kg: 3000, notes: "Cargo is the open bed (about 5 ft). Towing about 6,500 lb." },
+    pickup_fullsize: { name: "Full-size pickup (F-150 / Silverado class)", aliases: ["pickup", "pickup truck", "truck", "full-size pickup", "f-150", "f150", "silverado", "ram 1500"], make: "Ford", model: "F-150", domain: "road", fuel_type: "gasoline", factor_guide: "road", tank_capacity_gal: 26, tank_capacity_l: 98.4, consumption_unit: "mpg", consumption: { city: 18, highway: 24, combined: 20 }, range_mi: 520, price_new_cents: { min: 4000000, typical: 5800000, max: 8500000 }, price_used_cents: { min: 2800000, typical: 3800000, max: 5200000 }, insurance_liability_cents_per_month: 6500, insurance_full_cents_per_month: 24000, registration_cents_per_year: { min: 4000, typical: 17000, max: 90000 }, annual_maintenance_cents_per_year: 120000, maintenance: { oil_change_interval_miles: 7500, oil_type: "synthetic", tire_rotation_interval_miles: 7500, tire_replace_interval_miles: 40000, brake_pads_interval_miles: 45000, major_service_interval_miles: [30000, 60000, 90000] }, passengers: 5, cargo_l: 1500, payload_kg: 900, towing_kg: 4500, notes: "Cargo is the open bed (5.5-6.5 ft). Towing up to ~10,000 lb with the right package." },
+    pickup_heavy_duty_diesel: { name: "Heavy-duty diesel pickup (2500 / F-250 class)", aliases: ["heavy-duty pickup", "heavy duty truck", "diesel pickup", "diesel truck", "work truck", "flatbed", "flatbed truck", "dually", "f-250", "f-350", "ram 2500"], make: "Ram", model: "2500", domain: "road", fuel_type: "diesel", factor_guide: "road", tank_capacity_gal: 34, tank_capacity_l: 128.7, consumption_unit: "mpg", consumption: { city: 14, highway: 19, combined: 16 }, range_mi: 540, price_new_cents: { min: 5500000, typical: 7200000, max: 1e7 }, price_used_cents: { min: 3800000, typical: 5000000, max: 7000000 }, insurance_liability_cents_per_month: 7500, insurance_full_cents_per_month: 27000, registration_cents_per_year: { min: 5000, typical: 22000, max: 120000 }, annual_maintenance_cents_per_year: 180000, maintenance: { oil_change_interval_miles: 1e4, oil_type: "diesel synthetic", tire_rotation_interval_miles: 7500, tire_replace_interval_miles: 45000, brake_pads_interval_miles: 45000, major_service_interval_miles: [30000, 60000, 90000], fuel_filter_interval_miles: 15000 }, passengers: 5, cargo_l: 1700, payload_kg: 1500, towing_kg: 7000, notes: "DEF fluid (diesel exhaust fluid) refills every ~5,000 miles, about $15-25/ 2.5 gal. Towing up to 15,000-20,000 lb." },
+    suv_compact: { name: "Compact SUV (RAV4 / CR-V class)", aliases: ["suv", "compact suv", "crossover", "rav4", "cr-v"], make: "Toyota", model: "RAV4", domain: "road", fuel_type: "gasoline", factor_guide: "road", tank_capacity_gal: 14.5, tank_capacity_l: 54.9, consumption_unit: "mpg", consumption: { city: 27, highway: 35, combined: 30 }, range_mi: 430, price_new_cents: { min: 3000000, typical: 3600000, max: 4600000 }, price_used_cents: { min: 1900000, typical: 2600000, max: 3400000 }, insurance_liability_cents_per_month: 6200, insurance_full_cents_per_month: 22000, registration_cents_per_year: { min: 3000, typical: 14000, max: 60000 }, annual_maintenance_cents_per_year: 105000, maintenance: { oil_change_interval_miles: 7500, oil_type: "synthetic", tire_rotation_interval_miles: 7500, tire_replace_interval_miles: 45000, brake_pads_interval_miles: 50000, major_service_interval_miles: [30000, 60000, 90000] }, passengers: 5, cargo_l: 1100, payload_kg: 450, towing_kg: 700, notes: "Cargo volume is with the rear seats folded: about 1,100 L; behind seats about 540 L. Hybrids reach 38-41 mpg." },
+    suv_midsize_3row: { name: "Midsize three-row SUV (Highlander / Explorer class)", aliases: ["three-row suv", "3-row suv", "midsize suv", "family suv", "highlander", "explorer"], make: "Ford", model: "Explorer", domain: "road", fuel_type: "gasoline", factor_guide: "road", tank_capacity_gal: 18, tank_capacity_l: 68.1, consumption_unit: "mpg", consumption: { city: 20, highway: 27, combined: 23 }, range_mi: 410, price_new_cents: { min: 4000000, typical: 5000000, max: 6800000 }, price_used_cents: { min: 2600000, typical: 3400000, max: 4400000 }, insurance_liability_cents_per_month: 6500, insurance_full_cents_per_month: 24000, registration_cents_per_year: { min: 3500, typical: 16000, max: 75000 }, annual_maintenance_cents_per_year: 125000, maintenance: { oil_change_interval_miles: 7500, oil_type: "synthetic", tire_rotation_interval_miles: 7500, tire_replace_interval_miles: 45000, brake_pads_interval_miles: 45000, major_service_interval_miles: [30000, 60000, 90000] }, passengers: 7, cargo_l: 2300, payload_kg: 600, towing_kg: 2300, notes: "Cargo with second and third rows folded about 2,300 L; behind the third row about 480 L." },
+    minivan: { name: "Minivan (Sienna / Odyssey / Pacifica class)", aliases: ["minivan", "mini van", "people carrier", "sienna", "odyssey", "pacifica"], make: "Honda", model: "Odyssey", domain: "road", fuel_type: "gasoline", factor_guide: "road", tank_capacity_gal: 19.5, tank_capacity_l: 73.8, consumption_unit: "mpg", consumption: { city: 19, highway: 28, combined: 22 }, range_mi: 430, price_new_cents: { min: 3800000, typical: 4400000, max: 5600000 }, price_used_cents: { min: 2400000, typical: 3000000, max: 3800000 }, insurance_liability_cents_per_month: 6200, insurance_full_cents_per_month: 22000, registration_cents_per_year: { min: 3500, typical: 15000, max: 65000 }, annual_maintenance_cents_per_year: 115000, maintenance: { oil_change_interval_miles: 7500, oil_type: "synthetic", tire_rotation_interval_miles: 7500, tire_replace_interval_miles: 45000, brake_pads_interval_miles: 45000, major_service_interval_miles: [30000, 60000, 90000] }, passengers: 8, cargo_l: 4000, payload_kg: 650, towing_kg: 1600, notes: "Hybrid minivans (Sienna) return 35-36 mpg combined; cargo with rows folded is about 4,000 L (140 cu ft)." },
+    ev_sedan: { name: "Electric sedan (Model 3 / Ioniq 6 class)", aliases: ["electric car", "ev", "electric sedan", "tesla", "model 3", "ioniq"], make: "Tesla", model: "Model 3", domain: "road", fuel_type: "electricity", factor_guide: "road", usable_battery_kwh: 60, consumption_unit: "mi_per_kwh", consumption: { city: 4.3, highway: 3.4, combined: 3.8 }, range_mi: 270, price_new_cents: { min: 3800000, typical: 4400000, max: 5600000 }, price_used_cents: { min: 1900000, typical: 2600000, max: 3400000 }, insurance_liability_cents_per_month: 7000, insurance_full_cents_per_month: 27000, registration_cents_per_year: { min: 5000, typical: 17500, max: 80000 }, annual_maintenance_cents_per_year: 50000, maintenance: { tire_rotation_interval_miles: 7500, tire_replace_interval_miles: 35000, brake_pads_interval_miles: 1e5, cabin_filter_interval_miles: 20000, battery_coolant_interval_miles: 1e5, major_service_interval_miles: [25000, 50000, 75000] }, passengers: 5, cargo_l: 600, payload_kg: 450, towing_kg: 0, charging: { home_level2_kw: "7-11", dc_fast_peak_kw: "150-250", dc_fast_10_to_80_minutes: "25-35", wall_outlet_120v_miles_per_hour: "3-5" }, notes: "No oil changes. Many states add an EV registration surcharge of about $100-$250 per year, included in the registration band. Tires wear faster (instant torque, weight)." },
+    ev_crossover: { name: "Electric crossover (Model Y / Equinox EV class)", aliases: ["electric suv", "electric crossover", "ev suv", "model y", "equinox ev"], make: "Tesla", model: "Model Y", domain: "road", fuel_type: "electricity", factor_guide: "road", usable_battery_kwh: 75, consumption_unit: "mi_per_kwh", consumption: { city: 3.6, highway: 3, combined: 3.3 }, range_mi: 300, price_new_cents: { min: 4000000, typical: 5000000, max: 6500000 }, price_used_cents: { min: 2200000, typical: 3100000, max: 4200000 }, insurance_liability_cents_per_month: 7200, insurance_full_cents_per_month: 28000, registration_cents_per_year: { min: 5000, typical: 18000, max: 85000 }, annual_maintenance_cents_per_year: 55000, maintenance: { tire_rotation_interval_miles: 7500, tire_replace_interval_miles: 35000, brake_pads_interval_miles: 1e5, cabin_filter_interval_miles: 20000, battery_coolant_interval_miles: 1e5, major_service_interval_miles: [25000, 50000, 75000] }, passengers: 5, cargo_l: 1900, payload_kg: 480, towing_kg: 1600, charging: { home_level2_kw: "7-11", dc_fast_peak_kw: "150-250", dc_fast_10_to_80_minutes: "25-40", wall_outlet_120v_miles_per_hour: "3-5" }, notes: "Cargo volume with rear seats folded." },
+    motorcycle_standard: { name: "Motorcycle, standard or cruiser (500-900 cc)", aliases: ["motorcycle", "motorbike", "cruiser", "chopper", "sportbike", "harley"], make: "Honda", model: "Rebel 500", domain: "road", fuel_type: "gasoline", factor_guide: "road", tank_capacity_gal: 4.5, tank_capacity_l: 17, consumption_unit: "mpg", consumption: { city: 45, highway: 52, combined: 48 }, range_mi: 200, price_new_cents: { min: 700000, typical: 1e6, max: 1600000 }, price_used_cents: { min: 350000, typical: 550000, max: 900000 }, insurance_liability_cents_per_month: 3500, insurance_full_cents_per_month: 7500, registration_cents_per_year: { min: 1500, typical: 5000, max: 15000 }, annual_maintenance_cents_per_year: 45000, maintenance: { oil_change_interval_miles: 5000, oil_type: "synthetic", tire_replace_interval_miles: 8000, brake_pads_interval_miles: 15000, chain_lube_interval_miles: 500, valve_check_interval_miles: 16000, major_service_interval_miles: [6000, 12000, 24000] }, passengers: 2, cargo_l: 30, payload_kg: 180, towing_kg: 0, notes: "Cargo is saddlebags or a tail bag; a passenger seat is optional. Front/rear tires are replaced separately (rear wears ~2x faster). Helmet laws vary by state." },
+    scooter_150: { name: "Scooter or moped (50-150 cc)", aliases: ["scooter", "moped", "motor scooter", "vespa"], make: "Vespa", model: "Primavera 150", domain: "road", fuel_type: "gasoline", factor_guide: "road", tank_capacity_gal: 1.5, tank_capacity_l: 5.7, consumption_unit: "mpg", consumption: { city: 80, highway: 65, combined: 75 }, range_mi: 110, price_new_cents: { min: 250000, typical: 400000, max: 650000 }, price_used_cents: { min: 1e5, typical: 200000, max: 350000 }, insurance_liability_cents_per_month: 1800, insurance_full_cents_per_month: 4000, registration_cents_per_year: { min: 500, typical: 3000, max: 1e4 }, annual_maintenance_cents_per_year: 20000, maintenance: { oil_change_interval_miles: 2500, oil_type: "scooter 10W-40", tire_replace_interval_miles: 6000, brake_pads_interval_miles: 8000, belt_replace_interval_miles: 1e4, major_service_interval_miles: [3000, 6000, 12000] }, passengers: 2, cargo_l: 30, payload_kg: 150, towing_kg: 0, notes: "Under-seat storage about 25-35 L. Mopeds under 50 cc often need no registration or license in some states; top speed 30-60 mph." },
+    bass_boat_outboard: { name: "Outboard bass boat (18-20 ft, 150-200 hp)", aliases: ["boat", "motorboat", "bass boat", "fishing boat", "speedboat", "outboard"], make: "Tracker", model: "Pro Team 175", domain: "marine", fuel_type: "gasoline", factor_guide: "marine", tank_capacity_gal: 40, tank_capacity_l: 151.4, consumption_unit: "gal_per_h", consumption: { idle_no_wake: 0.8, cruise_planing: 9, wide_open: 16 }, range_h: 4, price_new_cents: { min: 4000000, typical: 6500000, max: 1e7 }, price_used_cents: { min: 1800000, typical: 3200000, max: 5500000 }, insurance_liability_cents_per_month: 2500, insurance_full_cents_per_month: 7500, registration_cents_per_year: { min: 1000, typical: 5000, max: 15000 }, annual_maintenance_cents_per_year: 120000, maintenance: { engine_service_interval_hours: 100, engine_service_note: "oil, filters and lower-unit gear oil every 100 hours or annually", water_pump_impeller_interval_hours: 300, winterization_cents_annual: 45000, trailer_bearing_interval_miles: 12000, slip_or_storage_cents_per_month: { min: 0, typical: 15000, max: 60000 } }, passengers: 4, cargo_l: 250, payload_kg: 450, notes: "Boat state registration usually renews every 1-3 years (annualised here); trailer is registered separately (~$30-$100/year). Price includes motor and trailer. Cruise burn is at planing speed with a normal load." },
+    pontoon_boat: { name: "Pontoon boat (22-24 ft, 90-150 hp outboard)", aliases: ["pontoon", "pontoon boat", "party boat"], make: "Sun Tracker", model: "Party Barge 22 XP3", domain: "marine", fuel_type: "gasoline", factor_guide: "marine", tank_capacity_gal: 26, tank_capacity_l: 98.4, consumption_unit: "gal_per_h", consumption: { idle_no_wake: 0.6, cruise_planing: 5.5, wide_open: 11 }, range_h: 4.7, price_new_cents: { min: 3500000, typical: 6000000, max: 1e7 }, price_used_cents: { min: 2000000, typical: 3000000, max: 5000000 }, insurance_liability_cents_per_month: 2000, insurance_full_cents_per_month: 6500, registration_cents_per_year: { min: 1000, typical: 5000, max: 15000 }, annual_maintenance_cents_per_year: 90000, maintenance: { engine_service_interval_hours: 100, water_pump_impeller_interval_hours: 300, winterization_cents_annual: 40000, trailer_bearing_interval_miles: 12000, slip_or_storage_cents_per_month: { min: 0, typical: 20000, max: 80000 } }, passengers: 10, cargo_l: 300, payload_kg: 1000, notes: "Capacity plate typically 8-13 persons / 1,500-2,500 lb total." },
+    jet_ski_pwc: { name: "Personal watercraft / jet ski (1-3 seats)", aliases: ["jet ski", "jetski", "personal watercraft", "pwc", "sea-doo"], make: "Sea-Doo", model: "GTI 130", domain: "marine", fuel_type: "gasoline", factor_guide: "marine", tank_capacity_gal: 15.9, tank_capacity_l: 60.2, consumption_unit: "gal_per_h", consumption: { idle_no_wake: 0.8, cruise_planing: 6, wide_open: 13 }, range_h: 2.6, price_new_cents: { min: 800000, typical: 1300000, max: 2500000 }, price_used_cents: { min: 500000, typical: 850000, max: 1500000 }, insurance_liability_cents_per_month: 1500, insurance_full_cents_per_month: 4500, registration_cents_per_year: { min: 1000, typical: 4500, max: 12000 }, annual_maintenance_cents_per_year: 60000, maintenance: { engine_service_interval_hours: 50, engine_service_note: "oil and filter every 50 hours or annually", winterization_cents_annual: 20000, slip_or_storage_cents_per_month: { min: 0, typical: 1e4, max: 40000 } }, passengers: 3, cargo_l: 60, payload_kg: 250, notes: "Premium-grade fuel recommended by most makers. Price excludes trailer ($800-$2,500)." },
+    sailboat_auxiliary: { name: "Cruising sailboat with auxiliary diesel (30-35 ft)", aliases: ["sailboat", "sailing boat", "yacht", "sloop", "sailing yacht"], make: "Catalina", model: "315", domain: "marine", fuel_type: "diesel", factor_guide: "marine", tank_capacity_gal: 25, tank_capacity_l: 94.6, consumption_unit: "gal_per_h", consumption: { idle_no_wake: 0.3, cruise_planing: 0.8, wide_open: 1.4, note: "Displacement hull: motors at hull speed (~6 knots) burning 0.6-1.0 gph; sailing uses no fuel." }, range_h: 31, price_new_cents: { min: 15000000, typical: 25000000, max: 40000000 }, price_used_cents: { min: 2500000, typical: 6000000, max: 12000000 }, insurance_liability_cents_per_month: 2500, insurance_full_cents_per_month: 15000, registration_cents_per_year: { min: 1000, typical: 4500, max: 12000 }, annual_maintenance_cents_per_year: 400000, maintenance: { engine_service_interval_hours: 150, engine_service_note: "oil and filters every 100-150 hours; impeller every 200 hours", haul_out_bottom_paint_cents_annual: 250000, rigging_and_sails_cents_annual: 80000, slip_or_storage_cents_per_month: { min: 25000, typical: 80000, max: 250000 } }, passengers: 6, cargo_l: 1500, payload_kg: 900, notes: "Documented vessels (US Coast Guard documentation) pay no state registration. A rule of thumb is that ownership costs 10% of value per year. Sleeps 4-6." },
+    atv_utility: { name: "ATV, utility quad (450-700 cc)", aliases: ["atv", "quad", "quad bike", "four-wheeler", "four wheeler"], make: "Honda", model: "FourTrax Rancher", domain: "offroad", fuel_type: "gasoline", factor_guide: "offroad", tank_capacity_gal: 4.5, tank_capacity_l: 17, consumption_unit: "gal_per_h", consumption: { idle: 0.15, normal_trail: 1, hard_use: 1.8, approx_mpg_trail: 18 }, range_h: 4.5, price_new_cents: { min: 700000, typical: 950000, max: 1400000 }, price_used_cents: { min: 300000, typical: 500000, max: 800000 }, insurance_liability_cents_per_month: 1500, insurance_full_cents_per_month: 3500, registration_cents_per_year: { min: 0, typical: 2500, max: 6000 }, annual_maintenance_cents_per_year: 35000, maintenance: { oil_change_interval_hours: 50, oil_change_interval_miles: 1000, tire_replace_interval_miles: 3000, air_filter_interval_hours: 25, chain_or_driveshaft_service_interval_hours: 100 }, passengers: 1, cargo_l: 120, payload_kg: 130, towing_kg: 500, notes: "Cargo: front and rear racks, about 40 kg front and 80 kg rear. Many states require an off-highway vehicle (OHV) sticker/permit rather than road registration; helmet and age rules vary." },
+    utv_side_by_side: { name: "UTV / side-by-side (Ranger / RZR class, 2-4 seats)", aliases: ["utv", "side-by-side", "side by side", "polaris ranger", "rzr", "gator"], make: "Polaris", model: "Ranger 1000", domain: "offroad", fuel_type: "gasoline", factor_guide: "offroad", tank_capacity_gal: 10, tank_capacity_l: 37.9, consumption_unit: "gal_per_h", consumption: { idle: 0.2, normal_trail: 1.8, hard_use: 3, approx_mpg_trail: 14 }, range_h: 5.5, price_new_cents: { min: 1400000, typical: 2200000, max: 3500000 }, price_used_cents: { min: 900000, typical: 1400000, max: 2200000 }, insurance_liability_cents_per_month: 2500, insurance_full_cents_per_month: 6000, registration_cents_per_year: { min: 0, typical: 3500, max: 8000 }, annual_maintenance_cents_per_year: 60000, maintenance: { oil_change_interval_hours: 100, oil_change_interval_miles: 1500, tire_replace_interval_miles: 4000, belt_replace_interval_miles: 3000, air_filter_interval_hours: 25 }, passengers: 4, cargo_l: 350, payload_kg: 450, towing_kg: 900, notes: "Utility models carry a dump bed up to ~450 kg; sport models carry people only. Roll cage and belts required." },
+    dirt_bike_250: { name: "Dirt bike, 250 cc four-stroke", aliases: ["dirt bike", "dirtbike", "trail bike", "motocross bike", "enduro"], make: "Honda", model: "CRF250F", domain: "offroad", fuel_type: "gasoline", factor_guide: "offroad", tank_capacity_gal: 1.9, tank_capacity_l: 7.2, consumption_unit: "gal_per_h", consumption: { idle: 0.08, normal_trail: 0.5, hard_use: 0.8, approx_mpg_trail: 40 }, range_h: 3.8, price_new_cents: { min: 550000, typical: 800000, max: 1050000 }, price_used_cents: { min: 200000, typical: 380000, max: 600000 }, insurance_liability_cents_per_month: 1000, insurance_full_cents_per_month: 2500, registration_cents_per_year: { min: 0, typical: 2000, max: 5000 }, annual_maintenance_cents_per_year: 55000, maintenance: { oil_change_interval_hours: 15, oil_change_interval_miles: 300, tire_replace_interval_miles: 800, air_filter_interval_hours: 5, top_end_rebuild_interval_hours: 150, chain_lube_interval_miles: 100 }, passengers: 1, cargo_l: 5, payload_kg: 100, towing_kg: 0, notes: "Competition bikes are not street legal; plated dual-sport bikes use the motorcycle class. Premium fuel with 91+ octane typical." },
+    bicycle: { name: "Bicycle (commuter, hybrid or mountain bike)", aliases: ["bicycle", "bike", "push bike", "pushbike", "cycle", "mountain bike", "road bike", "hybrid bike"], make: "Trek", model: "FX 2", domain: "road", fuel_type: "none", factor_guide: "road", consumption_unit: "none", consumption: {}, price_new_cents: { min: 40000, typical: 80000, max: 200000 }, price_used_cents: { min: 15000, typical: 35000, max: 90000 }, insurance_liability_cents_per_month: 0, insurance_full_cents_per_month: 0, registration_cents_per_year: { min: 0, typical: 0, max: 0 }, annual_maintenance_cents_per_year: 1e4, maintenance: { service_interval_miles: 2000, chain_replace_interval_miles: 2500, tire_replace_interval_miles: 3000 }, passengers: 1, cargo_l: 20, payload_kg: 110, towing_kg: 0, notes: "Pedalled: no fuel, so no range; a shop tune-up stands in for the service. Most US states register none; homeowners or renters insurance usually covers theft." },
+    ebike: { name: "Electric bicycle (Class 1-3 e-bike)", aliases: ["e-bike", "ebike", "electric bike", "electric bicycle"], make: "Rad Power", model: "RadCity", domain: "road", fuel_type: "electricity", factor_guide: "road", usable_battery_kwh: 0.6, consumption_unit: "mi_per_kwh", consumption: { city: 70, highway: 55, combined: 65 }, range_mi: 40, price_new_cents: { min: 120000, typical: 200000, max: 450000 }, price_used_cents: { min: 50000, typical: 110000, max: 250000 }, insurance_liability_cents_per_month: 0, insurance_full_cents_per_month: 1500, registration_cents_per_year: { min: 0, typical: 0, max: 2500 }, annual_maintenance_cents_per_year: 20000, maintenance: { service_interval_miles: 1500, chain_lube_interval_miles: 200, brake_pads_interval_miles: 1500, battery_replace_cents_typical: 60000 }, passengers: 1, cargo_l: 25, payload_kg: 125, towing_kg: 0, charging: { level_1_120v: "3-6 h to full" }, notes: "Pedal-assist to 20 mph (Class 1-2) or 28 mph (Class 3); a few states register or plate Class 3." },
+    cargo_van: { name: "Cargo van (Transit / Sprinter / ProMaster class)", aliases: ["van", "cargo van", "work van", "panel van", "delivery van", "transit", "sprinter", "promaster"], make: "Ford", model: "Transit 250", domain: "road", fuel_type: "gasoline", factor_guide: "road", tank_capacity_gal: 25, tank_capacity_l: 94.6, consumption_unit: "mpg", consumption: { city: 15, highway: 19, combined: 16 }, range_mi: 400, price_new_cents: { min: 4500000, typical: 5200000, max: 7000000 }, price_used_cents: { min: 2500000, typical: 3400000, max: 4500000 }, insurance_liability_cents_per_month: 7000, insurance_full_cents_per_month: 25000, registration_cents_per_year: { min: 4000, typical: 18000, max: 90000 }, annual_maintenance_cents_per_year: 140000, maintenance: { oil_change_interval_miles: 7500, oil_type: "synthetic", tire_rotation_interval_miles: 7500, tire_replace_interval_miles: 40000, brake_pads_interval_miles: 35000 }, passengers: 2, cargo_l: 9000, payload_kg: 1600, towing_kg: 2500, notes: "High-roof, long-wheelbase vans hold about 15 m3; commercial use raises the premium." },
+    box_truck: { name: "Box truck (16-26 ft, Class 6 diesel)", aliases: ["box truck", "moving truck", "delivery truck", "straight truck", "cube truck", "cube van"], make: "Isuzu", model: "FTR", domain: "road", fuel_type: "diesel", factor_guide: "road", tank_capacity_gal: 50, tank_capacity_l: 189.3, consumption_unit: "mpg", consumption: { city: 8, highway: 11, combined: 9 }, range_mi: 450, price_new_cents: { min: 8000000, typical: 11000000, max: 15000000 }, price_used_cents: { min: 3500000, typical: 5500000, max: 8000000 }, insurance_liability_cents_per_month: 15000, insurance_full_cents_per_month: 45000, registration_cents_per_year: { min: 20000, typical: 80000, max: 250000 }, annual_maintenance_cents_per_year: 450000, maintenance: { oil_change_interval_miles: 15000, oil_type: "diesel synthetic", tire_replace_interval_miles: 60000, brake_pads_interval_miles: 50000, dot_inspection: "annual" }, passengers: 3, cargo_l: 40000, payload_kg: 4500, towing_kg: 4500, notes: "Under 26,001 lb GVWR, so no CDL needed; commercial insurance and an annual DOT inspection." },
+    semi_truck: { name: "Semi tractor (Class 8 sleeper, diesel)", aliases: ["semi", "semi truck", "semi-truck", "semi tractor", "tractor-trailer", "tractor trailer", "big rig", "eighteen-wheeler", "18-wheeler", "lorry"], make: "Freightliner", model: "Cascadia", domain: "road", fuel_type: "diesel", factor_guide: "road", tank_capacity_gal: 250, tank_capacity_l: 946.4, consumption_unit: "mpg", consumption: { city: 5, highway: 7, combined: 6.5 }, range_mi: 1600, price_new_cents: { min: 15000000, typical: 18000000, max: 22000000 }, price_used_cents: { min: 6000000, typical: 9000000, max: 13000000 }, insurance_liability_cents_per_month: 60000, insurance_full_cents_per_month: 110000, registration_cents_per_year: { min: 1e5, typical: 200000, max: 400000 }, annual_maintenance_cents_per_year: 1500000, maintenance: { oil_change_interval_miles: 25000, oil_type: "diesel synthetic", tire_replace_interval_miles: 1e5, brake_pads_interval_miles: 75000, dot_inspection: "annual" }, passengers: 2, cargo_l: 1000, payload_kg: 1500, towing_kg: 36000, notes: "Needs a Class A CDL; registration is apportioned (IRP) by the miles run in each state. Payload is the cab's; the trailer is towed." },
+    bus: { name: "Bus (school bus or shuttle, diesel)", aliases: ["bus", "school bus", "shuttle bus", "shuttle", "coach", "minibus"], make: "Blue Bird", model: "Vision", domain: "road", fuel_type: "diesel", factor_guide: "road", tank_capacity_gal: 60, tank_capacity_l: 227.1, consumption_unit: "mpg", consumption: { city: 6, highway: 9, combined: 7 }, range_mi: 420, price_new_cents: { min: 9000000, typical: 12000000, max: 16000000 }, price_used_cents: { min: 1500000, typical: 4000000, max: 8000000 }, insurance_liability_cents_per_month: 20000, insurance_full_cents_per_month: 50000, registration_cents_per_year: { min: 1e4, typical: 30000, max: 1e5 }, annual_maintenance_cents_per_year: 600000, maintenance: { oil_change_interval_miles: 1e4, oil_type: "diesel synthetic", tire_replace_interval_miles: 60000, brake_pads_interval_miles: 40000 }, passengers: 48, cargo_l: 1000, payload_kg: 5000, towing_kg: 0, notes: "Carrying 16 or more people needs a CDL with a passenger endorsement." },
+    rv_motorhome: { name: "Motorhome (Class C or Class A RV)", aliases: ["rv", "motorhome", "motor home", "camper", "camper van", "recreational vehicle"], make: "Thor", model: "Four Winds 28A", domain: "road", fuel_type: "gasoline", factor_guide: "road", tank_capacity_gal: 55, tank_capacity_l: 208.2, consumption_unit: "mpg", consumption: { city: 7, highway: 10, combined: 8 }, range_mi: 440, price_new_cents: { min: 9000000, typical: 15000000, max: 30000000 }, price_used_cents: { min: 5000000, typical: 8500000, max: 15000000 }, insurance_liability_cents_per_month: 5000, insurance_full_cents_per_month: 15000, registration_cents_per_year: { min: 1e4, typical: 40000, max: 150000 }, annual_maintenance_cents_per_year: 250000, maintenance: { oil_change_interval_miles: 5000, oil_type: "synthetic", tire_replace_interval_miles: 40000, roof_reseal_interval_miles: 30000, winterization_cents_annual: 20000 }, passengers: 6, cargo_l: 3000, payload_kg: 1500, towing_kg: 2300, notes: "Sleeps four to eight; propane, fresh-water and holding tanks are its own upkeep." },
+    snowmobile: { name: "Snowmobile (600-850 cc, trail)", aliases: ["snowmobile", "snow machine", "sled", "ski-doo", "skidoo"], make: "Ski-Doo", model: "MXZ 600", domain: "offroad", fuel_type: "gasoline", factor_guide: "offroad", tank_capacity_gal: 10.5, tank_capacity_l: 39.7, consumption_unit: "gal_per_h", consumption: { idle: 0.2, normal_trail: 2, hard_use: 3.5, approx_mpg_trail: 12 }, range_h: 5, price_new_cents: { min: 1100000, typical: 1500000, max: 2000000 }, price_used_cents: { min: 500000, typical: 850000, max: 1300000 }, insurance_liability_cents_per_month: 1000, insurance_full_cents_per_month: 3500, registration_cents_per_year: { min: 2000, typical: 5000, max: 15000 }, annual_maintenance_cents_per_year: 50000, maintenance: { engine_service_interval_hours: 50, track_and_skis_check: "each season", summer_storage_cents_annual: 15000 }, passengers: 2, cargo_l: 30, payload_kg: 180, towing_kg: 0, notes: "Snow only: a trail permit or registration is required in snowbelt states." },
+    tractor_farm: { name: "Farm tractor (utility, 45-100 hp diesel)", aliases: ["tractor", "farm tractor", "utility tractor", "john deere"], make: "John Deere", model: "5075E", domain: "offroad", fuel_type: "diesel", factor_guide: "offroad", tank_capacity_gal: 20, tank_capacity_l: 75.7, consumption_unit: "gal_per_h", consumption: { idle: 0.5, normal_trail: 2.5, hard_use: 4.5, approx_mpg_trail: 3 }, range_h: 8, price_new_cents: { min: 3500000, typical: 5500000, max: 9000000 }, price_used_cents: { min: 1500000, typical: 3000000, max: 5500000 }, insurance_liability_cents_per_month: 1500, insurance_full_cents_per_month: 4500, registration_cents_per_year: { min: 0, typical: 2000, max: 1e4 }, annual_maintenance_cents_per_year: 150000, maintenance: { engine_service_interval_hours: 250, hydraulic_fluid_interval_hours: 1000 }, passengers: 1, cargo_l: 0, payload_kg: 1000, towing_kg: 5000, notes: "Farm use usually needs no registration; on public roads it carries a slow-moving-vehicle sign." },
+    rowboat: { name: "Rowboat or jon boat (10-14 ft, oars)", aliases: ["rowboat", "row boat", "rowing boat", "dinghy", "jon boat", "jonboat", "skiff"], make: "Lowe", model: "L1236", domain: "marine", fuel_type: "none", factor_guide: "marine", consumption_unit: "none", consumption: {}, price_new_cents: { min: 80000, typical: 150000, max: 300000 }, price_used_cents: { min: 30000, typical: 70000, max: 150000 }, insurance_liability_cents_per_month: 0, insurance_full_cents_per_month: 1000, registration_cents_per_year: { min: 0, typical: 1500, max: 5000 }, annual_maintenance_cents_per_year: 5000, maintenance: {}, passengers: 3, cargo_l: 200, payload_kg: 300, towing_kg: 0, notes: "Rowed: no fuel. Most states register a hull only once an outboard is fitted." },
+    kayak: { name: "Kayak or canoe (paddled, 1-2 seats)", aliases: ["kayak", "canoe", "sea kayak", "sit-on-top kayak"], make: "Old Town", model: "Loon 106", domain: "marine", fuel_type: "none", factor_guide: "marine", consumption_unit: "none", consumption: {}, price_new_cents: { min: 40000, typical: 90000, max: 250000 }, price_used_cents: { min: 20000, typical: 50000, max: 120000 }, insurance_liability_cents_per_month: 0, insurance_full_cents_per_month: 0, registration_cents_per_year: { min: 0, typical: 0, max: 3000 }, annual_maintenance_cents_per_year: 2000, maintenance: {}, passengers: 2, cargo_l: 100, payload_kg: 200, towing_kg: 0, notes: "Paddled: no fuel. A few states ask for a launch permit or an invasive-species sticker." },
+    small_plane: { name: "Small plane (four-seat single piston, Cessna 172 class)", aliases: ["plane", "airplane", "aeroplane", "small plane", "light aircraft", "aircraft", "prop plane", "cessna", "piper"], make: "Cessna", model: "172 Skyhawk", domain: "air", fuel_type: "avgas", factor_guide: "air", tank_capacity_gal: 53, tank_capacity_l: 200.6, consumption_unit: "gal_per_h", consumption: { taxi: 1.5, climb: 12, cruise: 9 }, range_h: 5, price_new_cents: { min: 45000000, typical: 50000000, max: 60000000 }, price_used_cents: { min: 9000000, typical: 20000000, max: 40000000 }, insurance_liability_cents_per_month: 15000, insurance_full_cents_per_month: 25000, registration_cents_per_year: { min: 500, typical: 20000, max: 150000 }, fuel_cents_per_gal: { min: 550, typical: 700, max: 1000 }, annual_maintenance_cents_per_year: 800000, maintenance: { engine_service_interval_hours: 100, engine_overhaul_interval_hours: 2000, annual_inspection_cents_typical: 250000 }, passengers: 4, cargo_l: 340, payload_kg: 400, towing_kg: 0, notes: "Flown by a licensed pilot between airfields; FAA registration lasts seven years, and some states add an aircraft fee or tax. Hangar or tie-down rent is extra." },
+    helicopter: { name: "Light helicopter (four-seat piston, Robinson R44 class)", aliases: ["helicopter", "heli", "copter", "robinson"], make: "Robinson", model: "R44 Raven II", domain: "air", fuel_type: "avgas", factor_guide: "air", tank_capacity_gal: 46.5, tank_capacity_l: 176, consumption_unit: "gal_per_h", consumption: { taxi: 4, climb: 17, cruise: 15 }, range_h: 2.8, price_new_cents: { min: 50000000, typical: 60000000, max: 70000000 }, price_used_cents: { min: 20000000, typical: 32000000, max: 45000000 }, insurance_liability_cents_per_month: 25000, insurance_full_cents_per_month: 150000, registration_cents_per_year: { min: 500, typical: 20000, max: 150000 }, fuel_cents_per_gal: { min: 550, typical: 700, max: 1000 }, annual_maintenance_cents_per_year: 2500000, maintenance: { engine_service_interval_hours: 100, overhaul_interval_hours: 2200, annual_inspection_cents_typical: 500000 }, passengers: 4, cargo_l: 200, payload_kg: 380, towing_kg: 0, notes: "Lands at a helipad, an airfield or any cleared spot the route names; the rotor and engine overhaul come due together at about 2,200 hours." }
   }
 };
 // src/packs/vehicles/core/tables/modern-us/factors.json
@@ -41795,7 +43084,7 @@ var factors_default = {
   id: "vehicles.factors",
   pack: "vehicles",
   schema: "lre-table/vehicles.factors/v1",
-  revision: "491579e3ac37e00325a6adb017d7a9c7",
+  revision: "e6c1c3b8e9d3cd0d690a59ad77103940",
   label: "Consumption factor guides",
   source: { dataPack: "modern-us", file: "us/vehicles.json", sourceSchema: "lre-data-src/us/vehicles/v1", reflectsPeriod: "2025-2026 (model-year 2025 new prices; used = about 3-5 years old)", approximate: true, basis: { prices_and_economy: "Typical new MSRP bands, used-market (Edmunds, Kelley Blue Book, NADA) values and EPA fueleconomy.gov combined ratings for representative models, rounded; marine and off-road from manufacturer spec sheets (Mercury, Yamaha, Sea-Doo, Polaris, Honda) and dealer pricing.", insurance: "Bankrate / Insurify 2025 average premiums: full coverage about $2,300-$2,700 per year for a clean-record adult, state-minimum liability about $600-$800 per year; EVs are 15-25% higher; boats about 1.5% of value per year; rounded to cents per month.", maintenance: "Manufacturer service schedules and AAA / RepairPal cost surveys, rounded.", registration: "State DMV fee ranges; actual cost varies by weight, value, age and county." } },
   columns: {
@@ -41806,7 +43095,8 @@ var factors_default = {
   rows: {
     road: { basis: "Multipliers on fuel (or energy) consumed per mile relative to the combined rating; >1 burns more. Rounded rules of thumb from EPA/fueleconomy.gov and AAA tests.", factors: { highway_steady_55_65mph: 0.88, stop_and_go_city: 1.15, hilly_or_mountain: 1.15, highway_75mph: 1.15, highway_80mph_plus: 1.3, cold_below_20F: 1.15, hot_ac_on_95F: 1.1, headwind_strong: 1.1, loaded_to_payload: 1.2, towing_near_rated: 1.6, roof_cargo_or_box: 1.1, off_pavement_dirt_gravel: 1.2, sand_mud_snow: 1.5 }, note: "For EVs the same multipliers apply to kWh per mile (cold weather is harsher: use 1.35; highway 75 mph: 1.30; towing: 2.0)." },
     marine: { basis: "Multipliers on gallons per hour at planing cruise; rules of thumb from engine makers' fuel curves (Mercury, Yamaha, Volvo Penta) and BoatUS guidance.", factors: { idle_or_no_wake_trolling: 0.12, displacement_or_slow_cruise: 0.35, planing_cruise_default: 1, wide_open_throttle: 1.8, rough_chop_head_sea: 1.3, heavy_load_full_crew: 1.15, strong_current_against: 1.25, sailing_under_sail: 0 }, note: "Plan on the 1/3 out, 1/3 back, 1/3 reserve fuel rule. Marine tank capacities are usable gallons." },
-    offroad: { basis: "Multipliers on gallons per hour at normal trail pace; rule-of-thumb values from OEM spec sheets and trail-riding reports.", factors: { idle: 0.15, easy_trail_forest_road: 0.8, normal_trail_default: 1, technical_climb_rock: 1.3, sand_dunes_deep_mud: 1.6, sustained_high_speed_desert_race_pace: 1.5, two_up_or_loaded_cargo: 1.15 } }
+    offroad: { basis: "Multipliers on gallons per hour at normal trail pace; rule-of-thumb values from OEM spec sheets and trail-riding reports.", factors: { idle: 0.15, easy_trail_forest_road: 0.8, normal_trail_default: 1, technical_climb_rock: 1.3, sand_dunes_deep_mud: 1.6, sustained_high_speed_desert_race_pace: 1.5, two_up_or_loaded_cargo: 1.15 } },
+    air: { basis: "Multipliers on gallons per hour at normal cruise; rules of thumb from light-aircraft operating handbooks' fuel tables and flight-school planning guidance.", factors: { taxi_and_runup: 0.3, climb_full_power: 1.35, normal_cruise_default: 1, economy_cruise_leaned: 0.85, headwind_strong: 1.15, max_gross_weight: 1.1, high_density_altitude: 1.1 }, note: "Plan a 30-minute day VFR reserve (45 minutes at night) on top of the trip's fuel." }
   }
 };
 
@@ -41840,12 +43130,92 @@ var shipped_default4 = {
         towing_kg: "8f6e84e5",
         charging: "62c0bd0b",
         notes: "36de7a58"
+      },
+      changed: {
+        compact_car: "bf110eb2",
+        midsize_sedan: "2709afd5",
+        pickup_midsize: "45e2069e",
+        pickup_fullsize: "76eb00cc",
+        pickup_heavy_duty_diesel: "a63ccd94",
+        suv_compact: "813365bc",
+        suv_midsize_3row: "0972b132",
+        minivan: "018c45c2",
+        ev_sedan: "faf24cf5",
+        ev_crossover: "be9c168f",
+        motorcycle_standard: "3708080b",
+        scooter_150: "5bb1fc3f",
+        bass_boat_outboard: "18c4768e",
+        pontoon_boat: "12429de4",
+        jet_ski_pwc: "c3a09500",
+        sailboat_auxiliary: "bf745457",
+        atv_utility: "217517f6",
+        utv_side_by_side: "866a6ce5",
+        dirt_bike_250: "074a7dcf"
+      },
+      added: [
+        "bicycle",
+        "ebike",
+        "cargo_van",
+        "box_truck",
+        "semi_truck",
+        "bus",
+        "rv_motorhome",
+        "snowmobile",
+        "tractor_farm",
+        "rowboat",
+        "kayak",
+        "small_plane",
+        "helicopter"
+      ]
+    },
+    {
+      revision: "bafe3d2f10c8e41d855b710e97384d30",
+      columns: {
+        name: "36de7a58",
+        aliases: "7e30e701",
+        make: "90f6fddd",
+        model: "42b5aaa6",
+        domain: "770c1aa5",
+        fuel_type: "91ecc733",
+        factor_guide: "32381c37",
+        tank_capacity_gal: "ecc0f9e0",
+        tank_capacity_l: "803569e8",
+        usable_battery_kwh: "48d743b9",
+        consumption_unit: "78ac5cfc",
+        consumption: "45b86faa",
+        range_mi: "44338d81",
+        range_h: "1c74e55d",
+        price_new_cents: "12e8789d",
+        price_used_cents: "1ae9a3a2",
+        insurance_liability_cents_per_month: "86319561",
+        insurance_full_cents_per_month: "bfcecee9",
+        registration_cents_per_year: "c67fd79c",
+        fuel_cents_per_gal: "9902935f",
+        annual_maintenance_cents_per_year: "1040090f",
+        maintenance: "b6c4599e",
+        passengers: "b6b9986f",
+        cargo_l: "cf86793b",
+        payload_kg: "160cfd2c",
+        towing_kg: "8f6e84e5",
+        charging: "62c0bd0b",
+        notes: "36de7a58"
       }
     }
   ],
   "vehicles.factors": [
     {
       revision: "491579e3ac37e00325a6adb017d7a9c7",
+      columns: {
+        basis: "36de7a58",
+        factors: "45cd92a7",
+        note: "818bffbf"
+      },
+      added: [
+        "air"
+      ]
+    },
+    {
+      revision: "e6c1c3b8e9d3cd0d690a59ad77103940",
       columns: {
         basis: "36de7a58",
         factors: "45cd92a7",
@@ -41895,7 +43265,7 @@ function vehicleLines(ctx, scope) {
     return [];
   const see = (who, id) => canSeeEntity(ctx.registry, ctx.world, ctx.state, who, id);
   const cal = calendarOf(ctx.world);
-  const grants2 = new Map((own(ctx.state.entities, pov)?.relations ?? []).filter((r) => r.type === "uses").map((r) => [r.to, r]));
+  const uses = new Map(vehiclesFor(ctx, pov).map((u) => [u.id, u]));
   const here = placeOfEntity(ctx.state, pov);
   const site = siteOf(ctx.world, here);
   const ownerName = (owner2) => see(pov, owner2) ? own(ctx.state.entities, owner2)?.name ?? "someone" : "someone";
@@ -41919,16 +43289,17 @@ function vehicleLines(ctx, scope) {
     const e = own(ctx.state.entities, v);
     if (!e || !kindIs(ctx.registry, ctx.world, e.kind, "vehicle") || isGone(ctx.state, v))
       continue;
-    const owner2 = accessOf(ctx.state, v).owners[0]?.party ?? null;
-    const grant2 = grants2.get(v);
+    const stated = accessOf(ctx.state, v).owners[0]?.party ?? null;
+    const u = uses.get(v);
+    const owner2 = u?.owner ?? stated;
     const place2 = placeOfEntity(ctx.state, v);
-    const whose = owner2 === pov ? "yours" : level >= 2 && owner2 !== null && ownsThrough(ctx, pov, owner2) ? `${ownerName(owner2)}'s` : level >= 3 && grant2 ? `${owner2 ? `${ownerName(owner2)}'s, ` : ""}${grant2.until !== undefined ? `lent to you until ${formatClock(cal, grant2.until)}` : "assigned to you"}` : null;
-    if (whose === null) {
+    const whose = !u || useTier(u.use) > level ? null : u.mine ? "yours" : u.use.basis === "grant" ? `${owner2 ? `${ownerName(owner2)}'s, ` : ""}${u.use.until !== undefined ? `lent to you until ${formatClock(cal, u.use.until)}` : "assigned to you"}` : `${owner2 ? ownerName(owner2) : "someone"}'s${u.use.basis === "staff" ? ", yours to use at work" : u.use.basis === "permit" ? ", yours to use" : ""}`;
+    if (whose === null || !u) {
       if (site !== null && siteOf(ctx.world, place2) === site)
-        others.push({ v, owner: owner2, place: place2 });
+        others.push({ v, owner: stated, place: place2 });
       continue;
     }
-    if (owner2 !== pov && !see(pov, v))
+    if (!u.mine && !see(pov, v))
       continue;
     const elsewhere = site !== null && siteOf(ctx.world, place2) !== site;
     const head = [placeText(place2), ...level === 1 ? [] : [whose], ...elsewhere ? ["away from here"] : []];
@@ -41984,12 +43355,12 @@ function vehicleLines(ctx, scope) {
   return lines;
 }
 function domainOf(ctx, vehicle) {
-  const d = strOf(classRow(ctx, vehicle)?.domain, strOf(own(ctx.state.entities, vehicle)?.fields.domain, "road"));
-  return d === "marine" || d === "offroad" ? d : "road";
+  const row = classRow(ctx, vehicle);
+  return row ? vehicleDomainOf(row) : vehicleDomainOf({ domain: strOf(own(ctx.state.entities, vehicle)?.fields.domain, "road") });
 }
 function modesOf(ctx, vehicle) {
   const d = domainOf(ctx, vehicle);
-  return d === "marine" ? ["water"] : d === "offroad" ? ["offroad", "road"] : ["road"];
+  return d === "marine" ? ["water"] : d === "air" ? ["air"] : d === "offroad" ? ["offroad", "road"] : ["road"];
 }
 function factor(ctx, guide, key) {
   return numOf(own(objOf(rowOf(ctx, "vehicles.factors", guide)?.factors), key), 1);
@@ -42015,15 +43386,15 @@ function fuelUse(ctx, vehicle, leg) {
   const e = own(ctx.state.entities, vehicle);
   const miles = leg.distanceKm * KM_TO_MI;
   const hours = leg.minutes / 60;
-  if (!row || !e)
+  if (!row || !e || strOf(row.fuel_type) === "none")
     return { pct: 0, miles, hours };
   const guide = strOf(row.factor_guide, domainOf(ctx, vehicle));
-  const level = ctx.levelOf(e.fields.owner && typeof e.fields.owner === "string" ? e.fields.owner : ctx.world.pov, "vehicles");
+  const level = ownerLevel(ctx, vehicle);
   let mult = level >= 4 ? terrainFactor(ctx, guide, leg.terrain) : 1;
   const payload = numOf(row.payload_kg);
   const cargoKg = Object.values(ctx.state.entities).filter((x) => x.relations.some((r) => r.type === "in" && r.to === vehicle)).reduce((a, x) => a + numOf(x.fields.weight_g) / 1000, 0);
   if (level >= 4 && payload > 0 && cargoKg > payload / 2)
-    mult *= guide === "road" ? factor(ctx, "road", "loaded_to_payload") : guide === "marine" ? factor(ctx, "marine", "heavy_load_full_crew") : factor(ctx, "offroad", "two_up_or_loaded_cargo");
+    mult *= guide === "road" ? factor(ctx, "road", "loaded_to_payload") : guide === "marine" ? factor(ctx, "marine", "heavy_load_full_crew") : guide === "air" ? factor(ctx, "air", "max_gross_weight") : factor(ctx, "offroad", "two_up_or_loaded_cargo");
   const consumption = objOf(row.consumption);
   const unit3 = strOf(row.consumption_unit);
   if (unit3 === "mpg" || unit3 === "mi_per_kwh") {
@@ -42032,13 +43403,13 @@ function fuelUse(ctx, vehicle, leg) {
     const capacity2 = unit3 === "mpg" ? numOf(row.tank_capacity_gal, 15) : numOf(row.usable_battery_kwh, 60);
     return { pct: used / capacity2 * 100, miles, hours };
   }
-  const perHour = guide === "marine" ? numOf(consumption.cruise_planing, 5) : numOf(consumption.normal_trail, 1.5);
+  const perHour = guide === "marine" ? numOf(consumption.cruise_planing, 5) : guide === "air" ? numOf(consumption.cruise, 9) : numOf(consumption.normal_trail, 1.5);
   const capacity = numOf(row.tank_capacity_gal, 10);
   return { pct: perHour * hours * mult / capacity * 100, miles, hours };
 }
 function ownerLevel(ctx, vehicle) {
-  const owner2 = own(ctx.state.entities, vehicle)?.fields.owner;
-  return ctx.levelOf(typeof owner2 === "string" && own(ctx.state.entities, owner2) ? owner2 : ctx.world.pov, "vehicles");
+  const owner2 = ownersIn(own(ctx.state.entities, vehicle)?.fields ?? {})[0]?.party;
+  return ctx.levelOf(owner2 !== undefined && own(ctx.state.entities, owner2) ? owner2 : ctx.world.pov, "vehicles");
 }
 function serviceInterval(ctx, vehicle) {
   const m = objOf(classRow(ctx, vehicle)?.maintenance);
@@ -42119,11 +43490,82 @@ function fuelProduct(ctx, vehicle) {
   const row = classRow(ctx, vehicle);
   const type = strOf(row?.fuel_type, "gasoline");
   if (type === "electricity")
-    return { catalog: "ev_public_l2_kwh", unit: "kWh", capacity: numOf(row?.usable_battery_kwh, 60) };
+    return { catalog: "ev_public_l2_kwh", perUnit: 0, unit: "kWh", capacity: numOf(row?.usable_battery_kwh, 60) };
+  if (type === "avgas")
+    return { catalog: null, perUnit: numOf(objOf(row?.fuel_cents_per_gal).typical, 700), unit: "gal", capacity: numOf(row?.tank_capacity_gal, 50) };
   const marine = domainOf(ctx, vehicle) === "marine";
-  return { catalog: type === "diesel" ? marine ? "marine_diesel" : "diesel" : marine ? "marine_gasoline" : "gasoline_regular", unit: "gal", capacity: numOf(row?.tank_capacity_gal, 15) };
+  return { catalog: type === "diesel" ? marine ? "marine_diesel" : "diesel" : marine ? "marine_gasoline" : "gasoline_regular", perUnit: 0, unit: "gal", capacity: numOf(row?.tank_capacity_gal, 15) };
 }
-function reject15(code, reason) {
+function plateFor(id) {
+  const h = hashParts("plate", id);
+  const letters = [0, 2, 4].map((i) => String.fromCharCode(65 + parseInt(h.slice(i, i + 2), 16) % 26)).join("");
+  return `${parseInt(h.slice(6, 7), 16) % 9 + 1}${letters}${(parseInt(h.slice(8, 12), 16) % 1000).toString().padStart(3, "0")}`;
+}
+function spawnVehicle(ctx, spec) {
+  const row = rowOf(ctx, "vehicles.classes", spec.class);
+  if (!row) {
+    const some = Object.keys(ctx.tables.get("vehicles.classes")?.rows ?? {}).slice(0, 8);
+    return reject16("unknown_class", `no vehicle class ${spec.class}${some.length > 0 ? `; classes include ${some.join(", ")}` : ""}`);
+  }
+  const d = spec.details ?? {};
+  const domain = vehicleDomainOf(row);
+  const used = spec.new !== true;
+  const year = dateAt(calendarOf(ctx.world), ctx.state.clock).year;
+  const make2 = typeof d.make === "string" && d.make.trim() !== "" ? d.make.trim() : strOf(row.make);
+  const model = typeof d.model === "string" && d.model.trim() !== "" ? d.model.trim() : strOf(row.model);
+  const name = spec.name?.trim() || (make2 !== "" && model !== "" ? `${make2} ${model}` : shortClassName(strOf(row.name, spec.class)));
+  const holder = spec.holder && own(ctx.state.entities, spec.holder) ? spec.holder : null;
+  const place2 = holder ? null : spec.place ?? null;
+  let id = `vehicle:${hashParts("vehicle", spec.class, name, spec.owner ?? "", spec.salt ?? "").slice(0, 12)}`;
+  for (let n = 2;own(ctx.state.entities, id); n++)
+    id = `vehicle:${hashParts("vehicle", spec.class, name, spec.owner ?? "", spec.salt ?? "", String(n)).slice(0, 12)}`;
+  const ownerHome = spec.owner ? own(ctx.state.entities, spec.owner)?.fields.home : undefined;
+  const home = spec.home ?? (typeof ownerHome === "string" && own(ctx.world.places, ownerHome) ? ownerHome : place2);
+  const burns = strOf(row.fuel_type) !== "none";
+  const fields = { class: spec.class, status: "ok" };
+  if (spec.owner)
+    fields.owner = spec.owner;
+  if (make2 !== "")
+    fields.make = make2;
+  if (model !== "")
+    fields.model = model;
+  fields.year = typeof d.year === "number" && Number.isFinite(d.year) ? Math.round(d.year) : used ? year - USED_VEHICLE_AGE_YEARS : year;
+  if (typeof d.colour === "string" && d.colour.trim() !== "")
+    fields.colour = d.colour.trim();
+  if (typeof d.plate === "string" && d.plate.trim() !== "")
+    fields.plate = d.plate.trim();
+  else if (domain === "road" && burns)
+    fields.plate = plateFor(id);
+  if (domain === "road")
+    fields.odometer_mi = typeof d.odometer_mi === "number" ? d.odometer_mi : used ? 12000 * USED_VEHICLE_AGE_YEARS : 10;
+  else if (burns)
+    fields.engine_hours = typeof d.engine_hours === "number" ? d.engine_hours : used ? 60 * USED_VEHICLE_AGE_YEARS : 1;
+  fields.condition = typeof d.condition === "number" ? d.condition : used ? 80 : 100;
+  if (burns)
+    fields.fuel_pct = typeof d.fuel_pct === "number" ? d.fuel_pct : used ? 50 : 100;
+  if (typeof d.value === "number" && d.value > 0)
+    fields.value = Math.round(d.value);
+  if (home)
+    fields.home = home;
+  if (place2)
+    fields.place = place2;
+  Object.assign(fields, spec.fields ?? {});
+  return { entity: id, events: [{ type: "spawn", entity: { id, kind: "vehicle", name, tier: "background", fields, relations: holder ? [{ type: "in", to: holder }] : [] } }] };
+}
+function pricedVehicle(ctx, words4, given) {
+  const table = ctx.tables.get("vehicles.classes");
+  const cls = given !== undefined && own(table?.rows ?? {}, given) ? given : matchVehicleClass(words4, table);
+  const row = cls ? own(table?.rows ?? {}, cls) : undefined;
+  if (!cls || !row)
+    return null;
+  const fresh = saysNew(words4);
+  const raw = objOf(fresh ? row.price_new_cents : row.price_used_cents);
+  const band2 = { min: Math.round(numOf(raw.min)), typical: Math.round(numOf(raw.typical)), max: Math.round(numOf(raw.max)) };
+  if (!(band2.typical > 0))
+    return null;
+  return { class: cls, name: vehicleNameFrom(words4, strOf(row.name, cls)), new: fresh, band: band2, cents: band2.typical };
+}
+function reject16(code, reason) {
   return { code, reason };
 }
 function charge2(ctx, payer, cents2, memo, category, recurring = false) {
@@ -42157,13 +43599,12 @@ var vehiclesPack = {
       const targets = Object.keys(ctx.world.places).sort().filter((to) => to !== from);
       const placeName2 = (p) => own(ctx.world.places, p)?.name ?? p;
       const home = own(ctx.state.entities, pov)?.fields.home;
-      for (const v of Object.keys(ctx.state.entities).sort()) {
+      for (const v of vehiclesFor(ctx, pov).map((u) => u.id)) {
         const e = own(ctx.state.entities, v);
-        if (!e || !kindIs(ctx.registry, ctx.world, e.kind, "vehicle") || isGone(ctx.state, v))
+        if (!e)
           continue;
-        const mine = e.fields.owner === pov || own(ctx.state.entities, pov)?.relations.some((x) => x.type === "uses" && x.to === v);
         const at2 = placeOfEntity(ctx.state, v);
-        if (!mine || !at2 || at2 !== from && !canSeePlace(ctx.registry, ctx.world, ctx.state, pov, at2))
+        if (!at2 || at2 !== from && !canSeePlace(ctx.registry, ctx.world, ctx.state, pov, at2))
           continue;
         const named = /^(your|my|the|a|an)\s/i.test(e.name) ? e.name.charAt(0).toLowerCase() + e.name.slice(1) : `the ${e.name}`;
         for (const [to, trip] of tripsFor(ctx, v, from, targets)) {
@@ -42173,18 +43614,19 @@ var vehiclesPack = {
           const leg = legOf(trip);
           const why2 = e.fields.status === "broken" ? "broken down" : !fuelOk(ctx, v, leg) ? "not enough fuel" : undefined;
           const sail = trip.drive.mode === "water";
+          const fly = trip.drive.mode === "air";
           const parts = [];
           if (trip.fetch)
             parts.push({ kind: "fetch", minutes: trip.fetch.minutes, words: `to reach it ${at2 === home ? "at home" : `at ${placeName2(at2)}`}` });
           if (trip.startMinutes > 0)
             parts.push({ kind: "start", minutes: trip.startMinutes, words: "to get going" });
           if (trip.drive.minutes > 0)
-            parts.push({ kind: "drive", minutes: trip.drive.minutes, words: sail ? "sailing" : "driving" });
+            parts.push({ kind: "drive", minutes: trip.drive.minutes, words: fly ? "flying" : sail ? "sailing" : "driving" });
           if (trip.parkMinutes > 0)
-            parts.push({ kind: "park", minutes: trip.parkMinutes, words: sail ? "to tie up" : "to park" });
+            parts.push({ kind: "park", minutes: trip.parkMinutes, words: fly ? "to land and tie down" : sail ? "to tie up" : "to park" });
           if (trip.walk && trip.walk.minutes > 0)
             parts.push({ kind: "walk", minutes: trip.walk.minutes, words: `on foot from ${placeName2(trip.park)}` });
-          out.push({ to, label: `${sail ? "Sail" : "Drive"} ${named} to ${placeName2(to)}`, mode: trip.drive.mode, minutes: trip.minutes, parts, vehicle: e.name, action: "drive", params: { vehicle: v, to }, ...why2 ? { disabled: why2 } : {} });
+          out.push({ to, label: `${fly ? "Fly" : sail ? "Sail" : "Drive"} ${named} to ${placeName2(to)}`, mode: trip.drive.mode, minutes: trip.minutes, parts, vehicle: e.name, action: "drive", params: { vehicle: v, to }, ...why2 ? { disabled: why2 } : {} });
         }
       }
       return out;
@@ -42210,19 +43652,19 @@ var vehiclesPack = {
         const driver = strOf(args.driver) || ctx.world.pov;
         const e = own(ctx.state.entities, v);
         if (!e)
-          return reject15("missing_entity", `no vehicle ${labelOf(ctx, v)}`);
+          return reject16("missing_entity", `no vehicle ${labelOf(ctx, v)}`);
         if (e.fields.status === "broken")
-          return reject15("broken", `${e.name} has broken down`);
+          return reject16("broken", `${e.name} has broken down`);
         const driverAt = placeOfEntity(ctx.state, driver);
         const vehicleAt = placeOfEntity(ctx.state, v);
         if (vehicleAt === to)
-          return reject15("already_there", `${e.name} is at ${labelOf(ctx, to)} already: walk there`);
+          return reject16("already_there", `${e.name} is at ${labelOf(ctx, to)} already: walk there`);
         const trip = (driverAt ? tripFor(ctx, v, driverAt, to) : null) ?? (vehicleAt && vehicleAt !== driverAt ? tripFor(ctx, v, vehicleAt, to) : null);
         if (!trip)
-          return reject15("no_route", `no route for ${e.name} to ${labelOf(ctx, to)}`);
+          return reject16("no_route", `no route for ${e.name} to ${labelOf(ctx, to)}`);
         const leg = legOf(trip);
         if (!fuelOk(ctx, v, leg))
-          return reject15("no_fuel", `${e.name} doesn't have the fuel`);
+          return reject16("no_fuel", `${e.name} doesn't have the fuel`);
         const out = [...consume(ctx, v, leg, ctx.rng), { type: "set", entity: v, field: "place", value: trip.park }];
         const leftShort = trip.park !== to;
         const named = Array.isArray(args.riders) ? args.riders.filter((x) => typeof x === "string") : [];
@@ -42249,16 +43691,16 @@ var vehiclesPack = {
         const payer = strOf(args.payer) || ctx.world.pov;
         const e = own(ctx.state.entities, v);
         if (!e)
-          return reject15("missing_entity", `no vehicle ${labelOf(ctx, v)}`);
+          return reject16("missing_entity", `no vehicle ${labelOf(ctx, v)}`);
         if (ownerLevel(ctx, v) < 2)
           return [];
         const fuel = numOf(e.fields.fuel_pct, 100);
         const wanted = Math.min(100 - fuel, numOf(args.pct, 100 - fuel));
         if (wanted <= 0)
-          return reject15("full", `${e.name} is full`);
+          return reject16("full", `${e.name} is full`);
         const product = fuelProduct(ctx, v);
         const qty = Math.round(wanted / 100 * product.capacity * 100) / 100;
-        const cents2 = priceOf4(ctx, product.catalog, qty);
+        const cents2 = product.catalog !== null ? priceOf4(ctx, product.catalog, qty) : Math.round(product.perUnit * qty);
         const paid = charge2(ctx, payer, cents2, `Fuel for ${e.name} (${qty} ${product.unit})`, "fuel");
         if (!Array.isArray(paid))
           return paid;
@@ -42273,7 +43715,7 @@ var vehiclesPack = {
         const payer = strOf(args.payer) || ctx.world.pov;
         const e = own(ctx.state.entities, v);
         if (!e)
-          return reject15("missing_entity", `no vehicle ${labelOf(ctx, v)}`);
+          return reject16("missing_entity", `no vehicle ${labelOf(ctx, v)}`);
         const repair = args.repair === true;
         const cents2 = repair ? priceOf4(ctx, "tow_hookup", 1) + priceOf4(ctx, "diagnostic_fee", 1) + priceOf4(ctx, "brake_pads_axle", 1) : priceOf4(ctx, "oil_change_synthetic", 1);
         const paid = charge2(ctx, payer, cents2, `${repair ? "Repair" : "Service"}: ${e.name}`, "vehicle_services");
@@ -42291,14 +43733,14 @@ var vehiclesPack = {
     r.action({
       id: "drive",
       label: "Drive",
-      description: "Drive, ride or sail a vehicle you own or may use to another place.",
+      description: "Drive, ride, sail or fly a vehicle you own or may use to another place.",
       pack: "vehicles",
       params: { vehicle: { type: "ref", ref: "vehicle" }, to: { type: "ref", ref: "place", label: "Destination" } },
       requires: ["may_use(self, vehicle)", "vehicle.status != 'broken'", "place(vehicle) != to", "drive_minutes(vehicle, to, here) > 0", "fuel_ok(vehicle, to, here)"],
       outcomes: { default: [{ type: "vehicles.drive", args: { vehicle: "vehicle", to: "=to", driver: "self" } }] },
       duration: "drive_minutes(vehicle, to, here)",
       activity: { type: "travel", until: "clock + drive_minutes(vehicle, to, here)" },
-      lexicon: ["drive to", "drive over to", "take the truck", "take the car", "sail to", "ride to"],
+      lexicon: ["drive to", "drive over to", "take the truck", "take the car", "sail to", "ride to", "fly to", "fly the plane to"],
       observable: "drives off"
     });
     r.action({ id: "refuel", label: "Refuel", description: "Fill up a vehicle's tank, or charge it.", pack: "vehicles", params: { vehicle: { type: "ref", ref: "vehicle" } }, requires: ["place(vehicle) == here", "fuel_pct(vehicle) < 100"], outcomes: { default: [{ type: "vehicles.refuel", args: { vehicle: "vehicle", payer: "self" } }] }, duration: "10", lexicon: ["refuel", "fill up", "gas up", "charge the car"], observable: "fills up the tank" });
@@ -42327,7 +43769,7 @@ var vehiclesPack = {
       const out = [];
       for (const v of Object.keys(ctx.state.entities).sort()) {
         const e = own(ctx.state.entities, v);
-        const owner2 = typeof e?.fields.owner === "string" ? e.fields.owner : null;
+        const owner2 = e ? ownersIn(e.fields)[0]?.party ?? null : null;
         if (!e || !owner2 || !own(ctx.state.entities, owner2) || !kindIs(ctx.registry, ctx.world, e.kind, "vehicle") || ownerLevel(ctx, v) < 4)
           continue;
         const premium = Math.round(numOf(classRow(ctx, v)?.insurance_full_cents_per_month));
@@ -42336,6 +43778,25 @@ var vehiclesPack = {
       }
       return out;
     });
+    r.query("vehicles.registration", (ctx) => {
+      const out = [];
+      if (!vehiclesConfigOf(ctx.world).registration)
+        return out;
+      for (const v of Object.keys(ctx.state.entities).sort()) {
+        const e = own(ctx.state.entities, v);
+        const owner2 = e ? ownersIn(e.fields)[0]?.party ?? null : null;
+        if (!e || !owner2 || !own(ctx.state.entities, owner2) || !kindIs(ctx.registry, ctx.world, e.kind, "vehicle") || isGone(ctx.state, v) || ownerLevel(ctx, v) < 4)
+          continue;
+        const fee = Math.round(numOf(objOf(classRow(ctx, v)?.registration_cents_per_year).typical));
+        if (fee > 0)
+          out.push({ vehicle: v, owner: owner2, cents: fee, label: `Registration: ${e.name}`, month: parseInt(hashParts("registration", v).slice(0, 4), 16) % 12 + 1 });
+      }
+      return out;
+    });
+    r.query("vehicles.for", (ctx, who) => vehiclesFor(ctx, who).map((u) => u.id));
+    r.query("vehicles.priced", (ctx, words4, _place, cls) => pricedVehicle(ctx, words4, cls));
+    r.query("vehicles.named", (ctx, noun) => matchVehicleClass(noun, ctx.tables.get("vehicles.classes"), { ending: true }));
+    r.service("vehicles.spawn", spawnVehicle);
     r.query("vehicles.values", (ctx) => {
       const out = [];
       for (const v of Object.keys(ctx.state.entities).sort()) {
@@ -42542,10 +44003,10 @@ function stepRegions(slot, ctx, rng) {
       continue;
     const cur = strOf(e.fields.weather, "clear");
     const until2 = strOf(e.fields.weather_hold_until);
-    const ends = until2 !== "" && truthy2(evalExpr(until2, scopeEnv({ reg: ctx.registry, ctx, bindings: {} }), false));
-    if (ends)
+    const ends2 = until2 !== "" && truthy2(evalExpr(until2, scopeEnv({ reg: ctx.registry, ctx, bindings: {} }), false));
+    if (ends2)
       out.push({ type: "set", entity: id, field: "weather_hold_until", value: "" }, { type: "set", entity: id, field: "weather_hold", value: 0 });
-    const held2 = !ends && (numOf(e.fields.weather_hold, -Infinity) > slot.start || until2 !== "");
+    const held2 = !ends2 && (numOf(e.fields.weather_hold, -Infinity) > slot.start || until2 !== "");
     const keep = g.next() < climate.persist && (own(season.weights, cur) ?? 0) > 0;
     const options = Object.entries(season.weights).map(([value, weight]) => ({ value, weight }));
     const next = held2 || keep || options.length === 0 ? cur : g.weighted(options);
@@ -42566,7 +44027,7 @@ function stepRegions(slot, ctx, rng) {
   }
   return out;
 }
-function reject16(code, reason) {
+function reject17(code, reason) {
   return { code, reason };
 }
 var weatherPack = {
@@ -42612,10 +44073,10 @@ var weatherPack = {
         const target = strOf(a.region);
         const region = own(ctx.state.entities, target) ? target : regionOf2(ctx, own(ctx.world.places, target) ? target : null);
         if (!region)
-          return reject16("missing_region", `no weather region for ${labelOf(ctx, target)}`);
+          return reject17("missing_region", `no weather region for ${labelOf(ctx, target)}`);
         const st = strOf(a.state);
         if (!climateOf(ctx, region).states.some((s) => s.id === st))
-          return reject16("bad_state", `no weather state ${st.replace(/_/g, " ")}`);
+          return reject17("bad_state", `no weather state ${st.replace(/_/g, " ")}`);
         const out = [{ type: "set", entity: region, field: "weather", value: st }];
         if (typeof a.minutes === "number" && a.minutes > 0)
           out.push({ type: "set", entity: region, field: "weather_hold", value: ctx.state.clock + Math.round(a.minutes) });
@@ -42631,14 +44092,14 @@ var weatherPack = {
         const target = strOf(a.region);
         const region = own(ctx.state.entities, target) ? target : regionOf2(ctx, own(ctx.world.places, target) ? target : null);
         if (!region)
-          return reject16("missing_region", `no weather region for ${labelOf(ctx, target)}`);
+          return reject17("missing_region", `no weather region for ${labelOf(ctx, target)}`);
         const climate = climateOf(ctx, region);
         const season = climateSeason(climate, dateAt(calendarOf(ctx.world), ctx.state.clock).month);
         const calm = climate.states.filter((s) => s.closes.length === 0 && Object.keys(s.travel).length === 0).map((s) => s.id);
         const likeliest = Object.entries(season?.weights ?? {}).filter(([id]) => calm.includes(id)).sort((x, y) => y[1] - x[1] || x[0].localeCompare(y[0]))[0]?.[0];
         const st = strOf(a.state) || likeliest || calm[0] || strOf(own(ctx.state.entities, region)?.fields.weather, "clear");
         if (!climate.states.some((s) => s.id === st))
-          return reject16("bad_state", `no weather state ${st.replace(/_/g, " ")}`);
+          return reject17("bad_state", `no weather state ${st.replace(/_/g, " ")}`);
         return [
           { type: "set", entity: region, field: "weather", value: st },
           { type: "set", entity: region, field: "weather_hold", value: 0 },
@@ -42946,7 +44407,7 @@ function groupRegard(ctx, group, to) {
     return 0;
   return Math.round(members.reduce((a, m) => a + regardValue(ctx, m, to), 0) / members.length * 10) / 10;
 }
-function reject17(code, reason) {
+function reject18(code, reason) {
   return { code, reason };
 }
 function voiceLine(ctx, who) {
@@ -43004,7 +44465,7 @@ var relationshipsPack = {
         const from = strOf(a.from);
         const to = strOf(a.to);
         if (!own(ctx.state.entities, from) || !own(ctx.state.entities, to))
-          return reject17("missing_entity", "regard needs two entities");
+          return reject18("missing_entity", "regard needs two entities");
         const delta = numOf(a.delta);
         const axis = strOf(a.axis);
         return appraise(ctx, from, to, axis ? { [axis]: delta } : Object.fromEntries(axesOf(ctx).map((x) => [x.id, delta])), strOf(a.why, "change"));
@@ -43017,11 +44478,11 @@ var relationshipsPack = {
       boundField: "number",
       validate(p, ctx) {
         if (!own(ctx.state.entities, strOf(p.from)) || !own(ctx.state.entities, strOf(p.to)))
-          return reject17("missing_entity", "regard needs two known people");
+          return reject18("missing_entity", "regard needs two known people");
         if (typeof p.delta !== "number" || p.delta === 0)
-          return reject17("bad_delta", "regard needs a non-zero delta");
+          return reject18("bad_delta", "regard needs a non-zero delta");
         if (typeof p.axis === "string" && !axesOf(ctx).some((a) => a.id === p.axis))
-          return reject17("bad_axis", `no regard axis ${p.axis}`);
+          return reject18("bad_axis", `no regard axis ${p.axis}`);
         return null;
       },
       toEffects: (p) => [{ type: "relationships.adjust", args: { from: strOf(p.from), to: strOf(p.to), ...typeof p.axis === "string" ? { axis: p.axis } : {}, delta: numOf(p.delta), why: strOf(p.why, "narrated") } }]
@@ -44433,7 +45894,7 @@ function stopChange(ctx, who, p) {
   const week = [0, 1, 2, 3, 4, 5, 6].map((i) => from + i);
   const probe = { id: "", label: "", activity: "", kind: "flexible", window: WAKING, minutes: 1, ...Object.keys(stated).length > 0 ? { days: stated } : {} };
   const allowed = new Set(weekOf(ctx, who, probe, from));
-  const within3 = (on) => on.length > 0 && on.every((d) => allowed.has(d));
+  const within4 = (on) => on.length > 0 && on.every((d) => allowed.has(d));
   const blocks = [];
   for (const [id, list] of routineCandidates(ctx, who)) {
     const top = list[0];
@@ -44441,7 +45902,7 @@ function stopChange(ctx, who, p) {
       continue;
     const b = top.entry;
     const named = where !== null && blockPlace(ctx, who, b) === where || words4.length > 0 && sameWords(words4, wordsOf5(b.label));
-    if (!named || !within3(weekOf(ctx, who, b, from)))
+    if (!named || !within4(weekOf(ctx, who, b, from)))
       continue;
     blocks.push({ block: id, value: list.every((a) => a.level === "chat") ? null : { id, off: true } });
   }
@@ -44453,7 +45914,7 @@ function stopChange(ctx, who, p) {
   const mine = where === null ? [] : theirSchedules(ctx, who);
   for (const { id, def } of mine) {
     const gone = def.slots.filter((s) => s.value === where);
-    if (def.target !== "place" || gone.length === 0 || !within3(week.filter((d) => recursOn(cal, def.recurrence, d))))
+    if (def.target !== "place" || gone.length === 0 || !within4(week.filter((d) => recursOn(cal, def.recurrence, d))))
       continue;
     schedules.push({ schedule: id, value: cut(def, (slot) => slot.value === where) });
     const paired = (slot) => gone.some((g) => g.start === slot.start && g.end === slot.end);
@@ -44777,7 +46238,7 @@ function needsIssues(world) {
   const tuning = needsSettingsOf(world);
   return NEED_IDS.flatMap((need2) => tuning[need2].on && tuning[need2].alert < tuning[need2].tell ? [{ severity: "warning", code: "castlife.needs", message: `${NEED_WORDS[need2].name}'s alert (${tuning[need2].alert}) is below the point the narrator is told of it (${tuning[need2].tell}): a skip may stop for it before the story ever mentions it.`, path: `needs.${need2}` }] : []);
 }
-function within3(dayStart, fromH, toH) {
+function within4(dayStart, fromH, toH) {
   return { from: dayStart + fromH * 60, to: dayStart + toH * 60 };
 }
 var AGENDA_OPTION = "agenda:";
@@ -44799,16 +46260,16 @@ function groundedOptions(ctx, who, dayStart) {
   if (Array.isArray(chores)) {
     chores.forEach((raw, i) => {
       const c = objOf(raw);
-      options.push({ id: `chore:${i}`, label: strOf(c.label, "Chores"), activity: "chores", place: strOf(c.place) || home, duration: numOf(c.minutes, 45), window: within3(dayStart, 8, 20), utility: numOf(c.utility, 2), reasons: ["chore"] });
+      options.push({ id: `chore:${i}`, label: strOf(c.label, "Chores"), activity: "chores", place: strOf(c.place) || home, duration: numOf(c.minutes, 45), window: within4(dayStart, 8, 20), utility: numOf(c.utility, 2), reasons: ["chore"] });
     });
   }
   for (const a of agendaFor(ctx.world, ctx.state, who))
-    options.push({ id: `${AGENDA_OPTION}${a.track}`, label: a.stageLabel, activity: AGENDA_ACTIVITY, place: home, duration: 60, window: within3(dayStart, 9, 20), utility: 1 + a.priority, reasons: [`agenda: ${a.label}`] });
+    options.push({ id: `${AGENDA_OPTION}${a.track}`, label: a.stageLabel, activity: AGENDA_ACTIVITY, place: home, duration: 60, window: within4(dayStart, 9, 20), utility: 1 + a.priority, reasons: [`agenda: ${a.label}`] });
   const overdue = optionalQuery(ctx, "gear.overdue");
   if (overdue) {
     for (const g of overdue(ctx, who)) {
       const where = placeOfEntity(ctx.state, g.borrower) ?? placeOfEntity(ctx.state, g.thing);
-      options.push({ id: `retrieve:${g.thing}`, label: `Get ${own(ctx.state.entities, g.thing)?.name ?? g.thing} back from ${own(ctx.state.entities, g.borrower)?.name ?? g.borrower}`, activity: `retrieve:${g.thing}`, place: where, duration: 45, window: within3(dayStart, 8, 20), utility: 7, reasons: ["overdue loan"] });
+      options.push({ id: `retrieve:${g.thing}`, label: `Get ${own(ctx.state.entities, g.thing)?.name ?? g.thing} back from ${own(ctx.state.entities, g.borrower)?.name ?? g.borrower}`, activity: `retrieve:${g.thing}`, place: where, duration: 45, window: within4(dayStart, 8, 20), utility: 7, reasons: ["overdue loan"] });
     }
   }
   return options;
@@ -44831,10 +46292,10 @@ function legacyDayOptions(ctx, who, dayStart) {
   const unwind = [...off ? ["a day off"] : [], ...occasion.season === "summer" || occasion.season === "winter" ? [occasion.season] : [], ...occasion.foul ? ["bad weather"] : []];
   const options = [
     { id: "sleep", label: "Sleep", activity: "sleep", place: home, duration: 480, repeat: true, reasons: ["night"], utility: (t) => hourOf(t) >= 21.5 || hourOf(t) < 6 ? 10 : 0 },
-    { id: "breakfast", label: "Breakfast", activity: "breakfast", place: home, duration: 30, window: off ? within3(dayStart, 7, 11) : within3(dayStart, 6, 10), utility: (t, laid) => 4 + need2("hunger", t, laid) / 20, reasons: off ? ["morning meal", "a slow morning"] : ["morning meal"], because: pressed("hunger", "hungry") },
-    { id: "lunch", label: "Lunch", activity: "lunch", place: company2, duration: 45, window: within3(dayStart, 11, 14), utility: (t, laid) => 4 + need2("hunger", t, laid) / 20, reasons: ["midday meal"], because: pressed("hunger", "hungry") },
-    { id: "dinner", label: "Dinner", activity: "dinner", place: home, duration: 60, window: within3(dayStart, 17, 21), utility: (t, laid) => 4.5 + need2("hunger", t, laid) / 20, reasons: ["evening meal"], because: pressed("hunger", "hungry") },
-    { id: "leisure", label: "Time out", activity: "leisure", place: outdoors, duration: 60, window: within3(dayStart, 9, off ? 22 : 20), utility: (t, laid) => 1.5 + (off ? 1 : 0) + outside + need2("fun", t, laid) / 30, reasons: ["unwind", ...unwind], because: pressed("fun", "bored") }
+    { id: "breakfast", label: "Breakfast", activity: "breakfast", place: home, duration: 30, window: off ? within4(dayStart, 7, 11) : within4(dayStart, 6, 10), utility: (t, laid) => 4 + need2("hunger", t, laid) / 20, reasons: off ? ["morning meal", "a slow morning"] : ["morning meal"], because: pressed("hunger", "hungry") },
+    { id: "lunch", label: "Lunch", activity: "lunch", place: company2, duration: 45, window: within4(dayStart, 11, 14), utility: (t, laid) => 4 + need2("hunger", t, laid) / 20, reasons: ["midday meal"], because: pressed("hunger", "hungry") },
+    { id: "dinner", label: "Dinner", activity: "dinner", place: home, duration: 60, window: within4(dayStart, 17, 21), utility: (t, laid) => 4.5 + need2("hunger", t, laid) / 20, reasons: ["evening meal"], because: pressed("hunger", "hungry") },
+    { id: "leisure", label: "Time out", activity: "leisure", place: outdoors, duration: 60, window: within4(dayStart, 9, off ? 22 : 20), utility: (t, laid) => 1.5 + (off ? 1 : 0) + outside + need2("fun", t, laid) / 30, reasons: ["unwind", ...unwind], because: pressed("fun", "bored") }
   ];
   const social = optionalQuery(ctx, "regard");
   let fondness = 0;
@@ -44843,16 +46304,16 @@ function legacyDayOptions(ctx, who, dayStart) {
       if (other !== who && kindIs(ctx.registry, ctx.world, own(ctx.state.entities, other)?.kind ?? "", "person"))
         fondness = Math.max(fondness, social(ctx, who, other));
   }
-  options.push({ id: "socialize", label: "See friends", activity: "socialize", place: company2, duration: 90, window: off ? within3(dayStart, 12, 23) : within3(dayStart, 17, 22), utility: (t, laid) => 2.5 + (off ? 1 : 0) - (occasion.foul ? 0.5 : 0) + fondness / 50 + need2("social", t, laid) / 25, reasons: ["company", ...fondness >= FOND ? ["a close friend"] : [], ...off ? ["a day off"] : []], because: pressed("social", "lonely") });
+  options.push({ id: "socialize", label: "See friends", activity: "socialize", place: company2, duration: 90, window: off ? within4(dayStart, 12, 23) : within4(dayStart, 17, 22), utility: (t, laid) => 2.5 + (off ? 1 : 0) - (occasion.foul ? 0.5 : 0) + fondness / 50 + need2("social", t, laid) / 25, reasons: ["company", ...fondness >= FOND ? ["a close friend"] : [], ...off ? ["a day off"] : []], because: pressed("social", "lonely") });
   options.push(...groundedOptions(ctx, who, dayStart));
   for (const h of occasion.holidays) {
-    options.push(h.dayOff ? { id: `holiday:${h.id}`, label: h.label, activity: "socialize", place: home, duration: 180, window: within3(dayStart, 12, 20), utility: 5.5, reasons: [h.label] } : { id: `holiday:${h.id}`, label: h.label, activity: "leisure", place: company2, duration: 90, window: within3(dayStart, 17, 22), utility: 3, reasons: [h.label] });
+    options.push(h.dayOff ? { id: `holiday:${h.id}`, label: h.label, activity: "socialize", place: home, duration: 180, window: within4(dayStart, 12, 20), utility: 5.5, reasons: [h.label] } : { id: `holiday:${h.id}`, label: h.label, activity: "leisure", place: company2, duration: 90, window: within4(dayStart, 17, 22), utility: 3, reasons: [h.label] });
   }
   if (occasion.birthday)
-    options.push({ id: "birthday", label: "Birthday", activity: "socialize", place: company2, duration: 150, window: within3(dayStart, 17, 23), utility: 6.5, reasons: ["their birthday"] });
+    options.push({ id: "birthday", label: "Birthday", activity: "socialize", place: company2, duration: 150, window: within4(dayStart, 17, 23), utility: 6.5, reasons: ["their birthday"] });
   for (const friend of occasion.friends.slice(0, 2)) {
     const theirs = homeOf(ctx, friend);
-    options.push({ id: `birthday:${friend}`, label: "A friend's birthday", activity: "socialize", place: theirs !== null && own(ctx.world.places, theirs) ? theirs : company2, duration: 90, window: within3(dayStart, 17, 22), utility: 4 + (social?.(ctx, who, friend) ?? 0) / 50, reasons: ["a friend's birthday"] });
+    options.push({ id: `birthday:${friend}`, label: "A friend's birthday", activity: "socialize", place: theirs !== null && own(ctx.world.places, theirs) ? theirs : company2, duration: 90, window: within4(dayStart, 17, 22), utility: 4 + (social?.(ctx, who, friend) ?? 0) / 50, reasons: ["a friend's birthday"] });
   }
   return options;
 }
@@ -45317,8 +46778,8 @@ function activityEndMoment(ctx, slot) {
     return [];
   const from = passedFrom(slot);
   const until2 = activitySpanEnd(e?.fields);
-  const ends = [...until2 !== null && until2 > from ? [until2] : [], ...slot.run ? [slot.run.to] : []];
-  const at2 = ends.length > 0 ? Math.min(...ends) : null;
+  const ends2 = [...until2 !== null && until2 > from ? [until2] : [], ...slot.run ? [slot.run.to] : []];
+  const at2 = ends2.length > 0 ? Math.min(...ends2) : null;
   return at2 !== null && at2 > from && at2 < slot.end ? [{ at: at2, key: ACTIVITY_END }] : [];
 }
 function stepAgent2(slot, ctx, rngFor, who) {
@@ -46217,7 +47678,7 @@ function buildSheetView(ctx) {
     sections: designed ?? [...stats.length > 0 ? [{ title: "Stats", rows: stats }] : [], ...derived.length > 0 ? [{ title: "Derived", rows: derived }] : []]
   };
 }
-function reject18(code, reason) {
+function reject19(code, reason) {
   return { code, reason };
 }
 var sheetsPack = {
@@ -46244,10 +47705,10 @@ var sheetsPack = {
         const who = strOf(a.who) || ctx.world.pov;
         const e = own(ctx.state.entities, who);
         if (!e)
-          return reject18("missing_entity", `no ${labelOf(ctx, who)}`);
+          return reject19("missing_entity", `no ${labelOf(ctx, who)}`);
         const id = strOf(a.condition).toLowerCase().replace(/\W+/g, "_");
         if (!id)
-          return reject18("bad_condition", "a condition needs a name");
+          return reject19("bad_condition", "a condition needs a name");
         const kept3 = (Array.isArray(e.fields.conditions) ? e.fields.conditions : []).filter((c) => objOf(c).id !== id && !(typeof objOf(c).until === "number" && numOf(objOf(c).until) <= ctx.state.clock));
         if (a.clear === true)
           return [{ type: "set", entity: who, field: "conditions", value: kept3 }];
@@ -46286,9 +47747,9 @@ var sheetsPack = {
       validate(p, ctx) {
         const who = strOf(p.who) || ctx.world.pov;
         if (!own(ctx.state.entities, who) || !kindIs(ctx.registry, ctx.world, own(ctx.state.entities, who)?.kind ?? "", "person"))
-          return reject18("missing_entity", "a condition needs a person");
+          return reject19("missing_entity", "a condition needs a person");
         if (strOf(p.condition) === "")
-          return reject18("bad_condition", "a condition needs a name");
+          return reject19("bad_condition", "a condition needs a name");
         return null;
       },
       toEffects: (p) => [{ type: "sheets.condition", args: { who: strOf(p.who), condition: strOf(p.condition), ...typeof p.minutes === "number" ? { minutes: p.minutes } : {}, ...p.clear === true ? { clear: true } : {} } }]
@@ -46498,7 +47959,7 @@ function unsetFlags(world) {
   }
   return out;
 }
-function reject19(code, reason) {
+function reject20(code, reason) {
   return { code, reason };
 }
 function openPuzzles(ctx) {
@@ -46564,8 +48025,8 @@ function answerTo(ctx, track2, a) {
   const answer = typeof a.answer === "number" && Number.isFinite(a.answer) ? String(a.answer) : strOf(a.answer);
   const check2 = checkAnswer(ctx.world, ctx.state, track2, answer, decision2);
   if (check2.needsDecision)
-    return reject19("needs_decision", "this answer needs a judgement");
-  return check2.event ? [check2.event] : reject19("no_answer", "there is nothing to answer here");
+    return reject20("needs_decision", "this answer needs a judgement");
+  return check2.event ? [check2.event] : reject20("no_answer", "there is nothing to answer here");
 }
 var storyPack = {
   id: "story",
@@ -46588,7 +48049,7 @@ var storyPack = {
       const v = flagValue(ctx, String(name ?? ""));
       return typeof v === "number" || typeof v === "boolean" || typeof v === "string" ? v : v !== null;
     });
-    r.effect({ type: "story.flag", args: ["name", "value?"], resolve: (a) => strOf(a.name) === "" ? reject19("bad_flag", "a flag needs a name") : [{ type: "story.flag", data: { name: strOf(a.name), value: a.value ?? true } }] });
+    r.effect({ type: "story.flag", args: ["name", "value?"], resolve: (a) => strOf(a.name) === "" ? reject20("bad_flag", "a flag needs a name") : [{ type: "story.flag", data: { name: strOf(a.name), value: a.value ?? true } }] });
     r.effect({
       type: "story.answer",
       args: ["track?", "puzzle?", "answer", "decision?"],
@@ -47392,14 +48853,14 @@ function buildEncounterView(ctx, opts = {}) {
 }
 
 // src/packs/combat/core/index.ts
-function reject20(code, reason) {
+function reject21(code, reason) {
   return { code, reason };
 }
 function current(e, ctx) {
   const enc = encounterOf(ctx.state);
   if (!enc)
-    return reject20("no_fight", "no fight is under way");
-  return enc.id === strOf(e.data.encounter) ? enc : reject20("other_fight", "that was another fight");
+    return reject21("no_fight", "no fight is under way");
+  return enc.id === strOf(e.data.encounter) ? enc : reject21("other_fight", "that was another fight");
 }
 function counts(v) {
   if (!isRecord(v))
@@ -47432,33 +48893,33 @@ function namedFoes(ctx, v, here) {
     return null;
   if (isRecord(v)) {
     const selector = knownBySelector(v);
-    return selector ? here.filter((id) => selectorMatches(ctx.registry, ctx.world, ctx.state, selector, id)) : reject20("bad_args", "the foes are ids or a selector");
+    return selector ? here.filter((id) => selectorMatches(ctx.registry, ctx.world, ctx.state, selector, id)) : reject21("bad_args", "the foes are ids or a selector");
   }
   const ids = (Array.isArray(v) ? v : [v]).filter((x) => typeof x === "string" && x !== "");
   const away = ids.find((id) => !here.includes(id));
-  return away !== undefined ? reject20("not_here", `${labelOf(ctx, away)} isn't here to fight`) : ids;
+  return away !== undefined ? reject21("not_here", `${labelOf(ctx, away)} isn't here to fight`) : ids;
 }
 function startFight(a, ctx) {
   const rules = rulesOf(ctx.world);
   if (!rules)
-    return reject20("no_combat", "this world has no combat");
+    return reject21("no_combat", "this world has no combat");
   if (encounterOf(ctx.state))
-    return reject20("in_fight", "a fight is already under way");
+    return reject21("in_fight", "a fight is already under way");
   const pov = ctx.world.pov;
   const place2 = placeOfEntity(ctx.state, pov);
   if (place2 === null)
-    return reject20("nowhere", "there's nowhere to fight");
+    return reject21("nowhere", "there's nowhere to fight");
   if (!canFight(ctx, rules, pov))
-    return reject20("cannot_fight", "you can't fight here");
+    return reject21("cannot_fight", "you can't fight here");
   const here = Object.keys(ctx.state.entities).sort().filter((id) => id !== pov && placeOfEntity(ctx.state, id) === place2 && canFight(ctx, rules, id));
   const named = namedFoes(ctx, a.foes, here);
   if (named !== null && !Array.isArray(named))
     return named;
   const foes = new Set(named ?? here.filter((id) => hostile(ctx, rules.sides?.hostile, id, pov)));
   if (foes.size === 0)
-    return reject20("no_foes", "there's no one to fight here");
+    return reject21("no_foes", "there's no one to fight here");
   if (foes.has(pov))
-    return reject20("bad_args", "you can't fight yourself");
+    return reject21("bad_args", "you can't fight yourself");
   const ally = (self, other) => rules.sides?.ally !== undefined && truthy2(readFor(ctx, rules.sides.ally, { self, other }, false));
   const party = new Set([pov, ...here.filter((id) => !foes.has(id) && ally(id, pov))]);
   const sworn = [...foes];
@@ -47467,7 +48928,7 @@ function startFight(a, ctx) {
       foes.add(id);
   const init = checkOf(ctx.world, rules.initiative);
   if (!init)
-    return reject20("no_initiative", "the initiative check is missing");
+    return reject21("no_initiative", "the initiative check is missing");
   const rolled = [];
   for (const id of [...party, ...[...foes].sort()]) {
     const ready = readyCheck(ctx.registry, ctx, init, { self: id, actor: id });
@@ -47490,19 +48951,19 @@ var events2 = [
     type: "combat.start",
     validate(e, ctx) {
       if (!rulesOf(ctx.world))
-        return reject20("no_combat", "this world has no combat");
+        return reject21("no_combat", "this world has no combat");
       if (encounterOf(ctx.state))
-        return reject20("in_fight", "a fight is already under way");
+        return reject21("in_fight", "a fight is already under way");
       const order = orderOf(e.data.order);
       if (strOf(e.data.encounter) === "" || !order)
-        return reject20("bad_event", "a fight needs an id and an initiative order");
+        return reject21("bad_event", "a fight needs an id and an initiative order");
       if (new Set(order.map((f) => f.id)).size !== order.length)
-        return reject20("bad_event", "someone is in the fight twice");
+        return reject21("bad_event", "someone is in the fight twice");
       const missing = order.find((f) => !own(ctx.state.entities, f.id));
       if (missing)
-        return reject20("missing_entity", `no ${labelOf(ctx, missing.id)}`);
+        return reject21("missing_entity", `no ${labelOf(ctx, missing.id)}`);
       if (order.find((f) => f.id === ctx.world.pov)?.side !== "party" || !order.some((f) => f.side === "foes"))
-        return reject20("bad_event", "a fight is the POV's side against foes");
+        return reject21("bad_event", "a fight is the POV's side against foes");
       return null;
     },
     apply(e, state2, ctx) {
@@ -47522,15 +48983,15 @@ var events2 = [
       const round = e.data.round;
       const turn = e.data.turn;
       if (typeof round !== "number" || typeof turn !== "number" || !Number.isInteger(round) || !Number.isInteger(turn))
-        return reject20("bad_event", "a turn needs a round and a place in the order");
+        return reject21("bad_event", "a turn needs a round and a place in the order");
       if (enc.order[turn]?.id !== strOf(e.data.actor))
-        return reject20("bad_turn", "that isn't who goes there");
+        return reject21("bad_turn", "that isn't who goes there");
       if (round < enc.round || round === enc.round && turn <= enc.turn)
-        return reject20("bad_turn", "turns only move on");
+        return reject21("bad_turn", "turns only move on");
       const reset = objOf(e.data.reset);
       for (const [id, budgets] of Object.entries(reset))
         if (!fighterOf(enc, id) || !counts(budgets))
-          return reject20("bad_event", "a refill names a participant and its budgets");
+          return reject21("bad_event", "a refill names a participant and its budgets");
       return null;
     },
     apply(e, state2, ctx) {
@@ -47564,12 +49025,12 @@ var events2 = [
       const f = fighterOf(enc, who);
       const cost = counts(e.data.cost);
       if (!rules || !f || !cost || Object.values(cost).some((n) => n <= 0))
-        return reject20("bad_event", "a spend needs a participant and what it spends");
+        return reject21("bad_event", "a spend needs a participant and what it spends");
       if (!standing(ctx, enc, f))
-        return reject20("down", `${labelOf(ctx, who)} is out of the fight`);
+        return reject21("down", `${labelOf(ctx, who)} is out of the fight`);
       if (enc.order[enc.turn]?.id !== who && !offTurnCost(rules, cost))
-        return reject20("not_your_turn", `it isn't ${labelOf(ctx, who)}'s turn`);
-      return fits2(cost, f.left) ? null : reject20("spent", `${labelOf(ctx, who)} has nothing like that left`);
+        return reject21("not_your_turn", `it isn't ${labelOf(ctx, who)}'s turn`);
+      return fits2(cost, f.left) ? null : reject21("spent", `${labelOf(ctx, who)} has nothing like that left`);
     },
     apply(e, state2) {
       const enc = encounterOf(state2);
@@ -47585,7 +49046,7 @@ var events2 = [
       const enc = current(e, ctx);
       if ("code" in enc)
         return enc;
-      return fighterOf(enc, strOf(e.data.actor)) ? null : reject20("not_fighting", `${labelOf(ctx, strOf(e.data.actor))} isn't in this fight`);
+      return fighterOf(enc, strOf(e.data.actor)) ? null : reject21("not_fighting", `${labelOf(ctx, strOf(e.data.actor))} isn't in this fight`);
     },
     apply(e, state2, ctx) {
       const enc = encounterOf(state2);
@@ -47607,8 +49068,8 @@ var events2 = [
       const rules = rulesOf(ctx.world);
       const who = strOf(e.data.entity);
       if (!rules || !fighterOf(enc, who) || typeof e.data.down !== "boolean")
-        return reject20("bad_event", "a fall names a participant");
-      return downHolds(ctx, rules, who) === e.data.down ? null : reject20("not_down", e.data.down ? `${labelOf(ctx, who)} isn't down` : `${labelOf(ctx, who)} is still down`);
+        return reject21("bad_event", "a fall names a participant");
+      return downHolds(ctx, rules, who) === e.data.down ? null : reject21("not_down", e.data.down ? `${labelOf(ctx, who)} isn't down` : `${labelOf(ctx, who)} is still down`);
     },
     apply(e, state2) {
       const enc = encounterOf(state2);
@@ -47625,11 +49086,11 @@ var events2 = [
         return enc;
       const rules = rulesOf(ctx.world);
       if (e.data.reason === "over" && (!rules || !endHolds(ctx, rules, enc)))
-        return reject20("not_over", "the fight isn't over");
+        return reject21("not_over", "the fight isn't over");
       if (e.data.reason === "left" && !povLeft(ctx.state, ctx.world, enc))
-        return reject20("not_left", "you are still in the fight");
+        return reject21("not_left", "you are still in the fight");
       if (e.data.reason === "stalemate" && (!rules || !stalledHolds(ctx, rules, enc)))
-        return reject20("not_stalemate", rules && stalemateRounds(rules) === 0 ? "this world's fights never peter out" : "someone has attacked or been hurt since");
+        return reject21("not_stalemate", rules && stalemateRounds(rules) === 0 ? "this world's fights never peter out" : "someone has attacked or been hurt since");
       return null;
     },
     apply: (_e, state2) => writeEncounter(state2, null),
@@ -47637,7 +49098,7 @@ var events2 = [
   },
   {
     type: "combat.decision",
-    validate: (e) => strOf(e.data.key) !== "" && strOf(e.data.choice) !== "" ? null : reject20("bad_event", "a decision needs a key and a choice"),
+    validate: (e) => strOf(e.data.key) !== "" && strOf(e.data.choice) !== "" ? null : reject21("bad_event", "a decision needs a key and a choice"),
     apply: (e, state2) => {
       sliceRecord(state2, PACK4, "decisions")[strOf(e.data.key)] = strOf(e.data.choice);
     },
@@ -47665,7 +49126,7 @@ var combatPack = {
       resolve(a, ctx) {
         const enc = encounterOf(ctx.state);
         if (!enc)
-          return reject20("no_fight", "no fight is under way");
+          return reject21("no_fight", "no fight is under way");
         const winner = a.winner === "party" || a.winner === "foes" ? a.winner : winnerOf(ctx, enc);
         return [{ type: "combat.end", data: { encounter: enc.id, reason: "effect", winner, rounds: enc.round } }];
       }
@@ -47678,11 +49139,11 @@ var combatPack = {
         const enc = encounterOf(ctx.state);
         const who = strOf(a.who) || ctx.world.pov;
         if (!rules || !enc)
-          return reject20("no_fight", "no fight is under way");
+          return reject21("no_fight", "no fight is under way");
         if (enc.order[enc.turn]?.id !== who)
-          return reject20("not_your_turn", who === ctx.world.pov ? "it isn't your turn" : `it isn't ${labelOf(ctx, who)}'s turn`);
+          return reject21("not_your_turn", who === ctx.world.pov ? "it isn't your turn" : `it isn't ${labelOf(ctx, who)}'s turn`);
         const next = nextTurn(ctx, rules, enc);
-        return next ? [next] : reject20("no_one", "no one is left to take a turn");
+        return next ? [next] : reject21("no_one", "no one is left to take a turn");
       }
     });
     r.effect({ type: "combat.spend", args: ["who?", "cost"], resolve: (a, ctx) => spendFor(ctx, strOf(a.who) || ctx.world.pov, { combat: { cost: counts(a.cost) ?? {} } }) });
@@ -48447,7 +49908,7 @@ function mindsOn(ctx) {
 }
 
 // src/packs/minds/core/edit.ts
-function reject21(code, reason) {
+function reject22(code, reason) {
   return { code, reason };
 }
 function capText(text4, max) {
@@ -48464,73 +49925,73 @@ function peopleIn(ctx, v) {
   if (v === undefined)
     return [];
   if (!Array.isArray(v) || !v.every((x) => typeof x === "string"))
-    return reject21("bad_value", "who it's with is a list of people");
+    return reject22("bad_value", "who it's with is a list of people");
   const ids2 = v;
   for (const id of ids2) {
     const e = own(ctx.state.entities, id);
     if (!e)
-      return reject21("missing_entity", `there's no ${labelOf(ctx, id)}`);
+      return reject22("missing_entity", `there's no ${labelOf(ctx, id)}`);
     if (!kindIs(ctx.registry, ctx.world, e.kind, "person"))
-      return reject21("bad_value", `${e.name} isn't a person`);
+      return reject22("bad_value", `${e.name} isn't a person`);
   }
   return [...new Set(ids2)];
 }
 function noteFrom(ctx, who, id, v, before) {
   const body = text4(v.text, MIND_TEXT_CAPS.note) ?? before?.text ?? null;
   if (body === null)
-    return reject21("bad_value", "a note needs its text");
+    return reject22("bad_value", "a note needs its text");
   const salience = v.salience === undefined ? before?.salience ?? 3 : typeof v.salience === "number" && v.salience >= 1 && v.salience <= 5 ? v.salience : null;
   if (salience === null)
-    return reject21("bad_value", "a note's salience is 1 to 5");
+    return reject22("bad_value", "a note's salience is 1 to 5");
   return { id: id ?? `n_${hashParts("minds.gm.note", who, String(ctx.state.clock), body).slice(0, 10)}`, text: body, salience, at: before?.at ?? ctx.state.clock };
 }
 function commitmentFrom(ctx, who, id, v, before) {
   const body = text4(v.text, MIND_TEXT_CAPS.commitment) ?? before?.text ?? null;
   if (body === null)
-    return reject21("bad_value", "a commitment needs its text");
+    return reject22("bad_value", "a commitment needs its text");
   const kind = v.kind === undefined ? before?.kind ?? "other" : COMMITMENT_KINDS.includes(v.kind) ? v.kind : null;
   if (kind === null)
-    return reject21("bad_value", `a commitment is one of ${COMMITMENT_KINDS.join(", ")}`);
+    return reject22("bad_value", `a commitment is one of ${COMMITMENT_KINDS.join(", ")}`);
   const status = v.status === undefined ? before?.status ?? "open" : COMMITMENT_STATUSES.includes(v.status) ? v.status : null;
   if (status === null)
-    return reject21("bad_value", `a commitment's status is one of ${COMMITMENT_STATUSES.join(", ")}`);
+    return reject22("bad_value", `a commitment's status is one of ${COMMITMENT_STATUSES.join(", ")}`);
   const withList = v.with === undefined ? before?.with ?? [] : peopleIn(ctx, v.with);
   if (!Array.isArray(withList))
     return withList;
   const due = v.due === undefined ? before?.due ?? null : v.due === null ? null : minutes(v.due);
   if (v.due !== undefined && v.due !== null && due === null)
-    return reject21("bad_value", "a commitment's due time is game minutes");
+    return reject22("bad_value", "a commitment's due time is game minutes");
   const closed = status === "open" ? null : before && before.status !== "open" ? before.closed : ctx.state.clock;
   return { id: id ?? `c_${hashParts("minds.gm.commitment", who, String(ctx.state.clock), body).slice(0, 10)}`, kind, with: withList, text: body, due, status, made: before?.made ?? ctx.state.clock, closed };
 }
 function planFrom(ctx, who, id, v, before) {
   const what = text4(v.what, MIND_TEXT_CAPS.planWhat) ?? before?.what ?? null;
   if (what === null)
-    return reject21("bad_value", "a plan needs what it is");
+    return reject22("bad_value", "a plan needs what it is");
   const when2 = v.when === undefined ? before?.when ?? null : typeof v.when === "object" && v.when !== null && !Array.isArray(v.when) ? { from: minutes(v.when.from), to: minutes(v.when.to) } : null;
   if (!when2 || when2.from === null || when2.to === null || when2.to < when2.from)
-    return reject21("bad_value", "a plan needs when, from and to in game minutes, to not before from");
+    return reject22("bad_value", "a plan needs when, from and to in game minutes, to not before from");
   const kind = v.kind === undefined ? before?.kind ?? "other" : PLAN_KINDS.includes(v.kind) ? v.kind : null;
   if (kind === null)
-    return reject21("bad_value", `a plan is one of ${PLAN_KINDS.join(", ")}`);
+    return reject22("bad_value", `a plan is one of ${PLAN_KINDS.join(", ")}`);
   const where = v.where === undefined ? before?.where ?? null : v.where === null ? null : typeof v.where === "string" && own(ctx.world.places, v.where) ? v.where : undefined;
   if (where === undefined)
-    return reject21("missing_place", `there's no place ${typeof v.where === "string" ? labelOf(ctx, v.where) : "like that"}`);
+    return reject22("missing_place", `there's no place ${typeof v.where === "string" ? labelOf(ctx, v.where) : "like that"}`);
   const withList = v.with === undefined ? before?.with ?? [] : peopleIn(ctx, v.with);
   if (!Array.isArray(withList))
     return withList;
   const priority = v.priority === undefined ? before?.priority ?? PLAN_PRIORITY.normal : typeof v.priority === "number" && v.priority >= PLAN_PRIORITY.min && v.priority <= PLAN_PRIORITY.max ? Math.round(v.priority) : null;
   if (priority === null)
-    return reject21("bad_value", `a plan's priority is ${PLAN_PRIORITY.min} to ${PLAN_PRIORITY.max}`);
+    return reject22("bad_value", `a plan's priority is ${PLAN_PRIORITY.min} to ${PLAN_PRIORITY.max}`);
   const statuses = ["open", "done", "dropped"];
   const status = v.status === undefined ? before?.status ?? "open" : statuses.includes(v.status) ? v.status : null;
   if (status === null)
-    return reject21("bad_value", "a plan's status is open, done or dropped");
+    return reject22("bad_value", "a plan's status is open, done or dropped");
   const closed = status === "open" ? null : before && before.status !== "open" ? before.closed : ctx.state.clock;
   const money4 = kind === "pay" || kind === "lend";
   const cents2 = v.cents === undefined ? before?.cents : typeof v.cents === "number" && Number.isInteger(v.cents) && v.cents > 0 ? v.cents : null;
   if (money4 && (cents2 === null || cents2 === undefined || withList.length === 0))
-    return reject21("bad_value", "a pay or lend plan needs an amount in minor units and someone to hand it to");
+    return reject22("bad_value", "a pay or lend plan needs an amount in minor units and someone to hand it to");
   const shared = sharesPlan({ kind, with: withList });
   return {
     id: id ?? (shared ? sharedPlanId([who, ...withList], when2.from) : `p_${hashParts("minds.gm.plan", who, String(ctx.state.clock), what).slice(0, 10)}`),
@@ -48553,34 +50014,34 @@ function planFrom(ctx, who, id, v, before) {
 function knowledgeEdit(ctx, op, name) {
   const k = readKnowledge(ctx.state);
   if (!own(k.facts, op.fact))
-    return reject21("missing_fact", "the minds hold no such fact");
+    return reject22("missing_fact", "the minds hold no such fact");
   const before = own(own(k.holdings, op.entity) ?? {}, op.fact);
   if (op.holding === null)
-    return before ? [{ type: MINDS_EVENTS.forget, data: { who: [op.entity], fact: op.fact } }] : reject21("no_change", `${name} doesn't hold that`);
+    return before ? [{ type: MINDS_EVENTS.forget, data: { who: [op.entity], fact: op.fact } }] : reject22("no_change", `${name} doesn't hold that`);
   const h = op.holding;
   if (!isHolding(h))
-    return reject21("bad_value", "a holding is how it's held and by whom (one told names its teller), its evidence, since when, the belief, a confidence from 0 to 1 and whom it's kept from");
+    return reject22("bad_value", "a holding is how it's held and by whom (one told names its teller), its evidence, since when, the belief, a confidence from 0 to 1 and whom it's kept from");
   const named = peopleIn(ctx, [...h.by === null ? [] : [h.by], ...Array.isArray(h.keptFrom) ? h.keptFrom : []]);
   if (!Array.isArray(named))
     return named;
   if (h.by === op.entity)
-    return reject21("bad_value", `${name} can't have told themselves`);
+    return reject22("bad_value", `${name} can't have told themselves`);
   if (h.evidence.some((ref) => ref === op.fact || !isWitnessRef(ref) && !own(k.facts, ref)))
-    return reject21("missing_fact", "a holding rests on facts the minds hold, never on itself");
+    return reject22("missing_fact", "a holding rests on facts the minds hold, never on itself");
   const next = holdingOf(h, op.entity);
   if (before && JSON.stringify(holdingOf(before, op.entity)) === JSON.stringify(next))
-    return reject21("no_change", "nothing to change");
+    return reject22("no_change", "nothing to change");
   return [{ type: MINDS_EVENTS.learn, data: { who: [op.entity], fact: op.fact, how: next.how, by: next.by, evidence: next.evidence, belief: next.belief, confidence: next.confidence, ...next.keptFrom ? { keptFrom: next.keptFrom } : {}, msg: next.since.msg, at: next.since.at } }];
 }
 function mindEdit(ctx, op) {
   const { world, state: state2, registry } = ctx;
   const e = own(state2.entities, op.entity);
   if (!e)
-    return reject21("missing_entity", `there's no ${labelOf(ctx, op.entity)}`);
+    return reject22("missing_entity", `there's no ${labelOf(ctx, op.entity)}`);
   if (op.op === "mind_knowledge")
-    return kindIs(registry, world, e.kind, "person") ? knowledgeEdit(ctx, op, e.name) : reject21("bad_value", `${e.name} isn't a person`);
+    return kindIs(registry, world, e.kind, "person") ? knowledgeEdit(ctx, op, e.name) : reject22("bad_value", `${e.name} isn't a person`);
   if (op.entity === world.pov || !kindIs(registry, world, e.kind, "person"))
-    return reject21("no_mind", `${e.name} doesn't have a mind`);
+    return reject22("no_mind", `${e.name} doesn't have a mind`);
   if (op.op === "mind_pin")
     return [{ type: MINDS_EVENTS.pin, data: { entity: op.entity, level: op.level } }];
   if (op.op === "mind_refresh")
@@ -48588,7 +50049,7 @@ function mindEdit(ctx, op) {
   const c = readCharacter(state2, op.entity);
   if (op.op === "mind_intent") {
     if (op.text === undefined && op.approach === undefined)
-      return reject21("bad_value", "say what they mean to do, or how they go about it");
+      return reject22("bad_value", "say what they mean to do, or how they go about it");
     const text5 = op.text === undefined ? c.intent?.text ?? "" : capText(op.text, MIND_TEXT_CAPS.gmIntent);
     const approach = op.approach === undefined ? c.intent?.approach ?? null : op.approach;
     return [{ type: MINDS_EVENTS.intent, data: { entity: op.entity, intent: text5 === "" && approach === null ? null : { text: text5, approach } } }];
@@ -48597,26 +50058,26 @@ function mindEdit(ctx, op) {
   if (op.part === "note") {
     const before2 = op.id === null ? undefined : c.notes.find((n) => n.id === op.id);
     if (op.id !== null && !before2)
-      return reject21("missing_note", `${e.name} has no such note`);
+      return reject22("missing_note", `${e.name} has no such note`);
     if (value === null)
-      return op.id === null ? reject21("bad_value", "say which note to delete") : [{ type: MINDS_EVENTS.noteEdit, data: { entity: op.entity, note: op.id, value: null } }];
+      return op.id === null ? reject22("bad_value", "say which note to delete") : [{ type: MINDS_EVENTS.noteEdit, data: { entity: op.entity, note: op.id, value: null } }];
     const note2 = noteFrom(ctx, op.entity, op.id, value, before2);
     return "code" in note2 ? note2 : [{ type: MINDS_EVENTS.noteEdit, data: { entity: op.entity, note: note2.id, value: note2 } }];
   }
   if (op.part === "commitment") {
     const before2 = op.id === null ? undefined : c.commitments.find((x) => x.id === op.id);
     if (op.id !== null && !before2)
-      return reject21("missing_commitment", `${e.name} has no such commitment`);
+      return reject22("missing_commitment", `${e.name} has no such commitment`);
     if (value === null)
-      return op.id === null ? reject21("bad_value", "say which commitment to delete") : [{ type: MINDS_EVENTS.commitmentEdit, data: { entity: op.entity, commitment: op.id, value: null } }];
+      return op.id === null ? reject22("bad_value", "say which commitment to delete") : [{ type: MINDS_EVENTS.commitmentEdit, data: { entity: op.entity, commitment: op.id, value: null } }];
     const commitment = commitmentFrom(ctx, op.entity, op.id, value, before2);
     return "code" in commitment ? commitment : [{ type: MINDS_EVENTS.commitmentEdit, data: { entity: op.entity, commitment: commitment.id, value: commitment } }];
   }
   const before = op.id === null ? undefined : c.plans.find((p) => p.id === op.id);
   if (op.id !== null && !before)
-    return reject21("missing_plan", `${e.name} has no such plan`);
+    return reject22("missing_plan", `${e.name} has no such plan`);
   if (value === null)
-    return op.id === null ? reject21("bad_value", "say which plan to delete") : [{ type: MINDS_EVENTS.planEdit, data: { entity: op.entity, plan: op.id, value: null } }];
+    return op.id === null ? reject22("bad_value", "say which plan to delete") : [{ type: MINDS_EVENTS.planEdit, data: { entity: op.entity, plan: op.id, value: null } }];
   const plan2 = planFrom(ctx, op.entity, op.id, value, before);
   return "code" in plan2 ? plan2 : [{ type: MINDS_EVENTS.planEdit, data: { entity: op.entity, plan: plan2.id, value: plan2 } }];
 }
@@ -53328,13 +54789,14 @@ function chainOf2(ctx, org, who, power, grant2, depth2) {
     }
   }
 }
-function buildOrgsGm(ctx) {
+function buildOrgsGm(ctx, only) {
   const people = Object.keys(ctx.state.entities).sort().filter((id) => !isGone(ctx.state, id) && kindIs(ctx.registry, ctx.world, own(ctx.state.entities, id)?.kind ?? "", "person"));
   const party = partyIdOf(ctx);
+  const wanted = only ? new Set(only) : null;
   const ids2 = [
     ...party.exists ? [] : [party.id],
-    ...Object.keys(ctx.state.entities).sort().filter((id) => orgTypeOf(ctx, id) !== null && !isGone(ctx.state, id))
-  ];
+    ...(wanted ? [...wanted].filter((id) => own(ctx.state.entities, id)).sort() : Object.keys(ctx.state.entities).sort()).filter((id) => orgTypeOf(ctx, id) !== null && !isGone(ctx.state, id))
+  ].filter((id) => !wanted || wanted.has(id));
   return ids2.flatMap((id) => {
     const page = buildOrgView(ctx, id, null);
     if (!page)
@@ -53352,11 +54814,11 @@ function buildOrgsGm(ctx) {
 }
 
 // src/packs/orgs/core/lint.ts
-function setFix(label2, tokens2, value) {
-  return { label: label2, ops: [{ op: "add", path: pointerOf(tokens2), value }] };
+function setFix(label2, tokens3, value) {
+  return { label: label2, ops: [{ op: "add", path: pointerOf(tokens3), value }] };
 }
-function dropFix(label2, tokens2) {
-  return { label: label2, ops: [{ op: "remove", path: pointerOf(tokens2) }] };
+function dropFix(label2, tokens3) {
+  return { label: label2, ops: [{ op: "remove", path: pointerOf(tokens3) }] };
 }
 var ORG_LINT = {
   positionUnknown: "orgs.position_unknown",
@@ -54119,7 +55581,7 @@ function hireEvents(ctx, by, args) {
     return linked;
   return [...hired, ...linked, orgLog(ctx, party.id, `${labelOf(ctx, by)} hired ${labelOf(ctx, worker)} as a hand.`, { by, names: [by, worker] })];
 }
-function whereOf(ctx, viewer, who) {
+function whereOf2(ctx, viewer, who) {
   const { registry: reg, world, state: state2 } = ctx;
   const place2 = placeOfEntity(state2, who);
   if (place2 !== null && canSeeField(reg, world, state2, viewer, who, "place") && canSeePlace(reg, world, state2, viewer, place2))
@@ -54154,7 +55616,7 @@ function partySection(ctx, org, viewer) {
   const at2 = placeOfEntity(ctx.state, viewer ?? pov);
   const members = Object.keys(ctx.state.entities).sort().flatMap((id) => {
     const tier = id === pov || isGone(ctx.state, id) ? null : partyTierIn(own(ctx.state.entities, id)?.relations, pov);
-    return tier !== null && seen(id) ? [{ id, tier, where: together(ctx.world, at2, placeOfEntity(ctx.state, id)) ? null : whereOf(ctx, viewer ?? pov, id) }] : [];
+    return tier !== null && seen(id) ? [{ id, tier, where: together(ctx.world, at2, placeOfEntity(ctx.state, id)) ? null : whereOf2(ctx, viewer ?? pov, id) }] : [];
   });
   const inParty2 = new Set(members.map((m) => m.id));
   const candidates = viewer === pov ? Object.keys(ctx.state.entities).filter((id) => {
@@ -54280,18 +55742,18 @@ function orderPlans(ctx, who) {
     return { plan: orderPlanId(org, o.id), org, id: o.id, text: o.text, by: o.by ?? null, to: o.to, place: place2, when: o.when ?? null, status: o.status, priority: ORDER_PRIORITY[tier], made: o.at, window, hold, closed: isPlanStatusLive(o.status) ? null : o.last?.at ?? o.at };
   });
 }
-function within4(o, at2) {
+function within5(o, at2) {
   return o.window !== null && o.window.from <= at2 && (o.window.to === null || at2 < o.window.to);
 }
 function onOrder(ctx, who, at2) {
-  return orderPlans(ctx, who).some((o) => o.status === "under_way" && !o.hold && within4(o, at2));
+  return orderPlans(ctx, who).some((o) => o.status === "under_way" && !o.hold && within5(o, at2));
 }
 function orderHold(ctx, who, to) {
   const live = orderPlans(ctx, who).filter((o) => o.status === "open" || o.status === "under_way");
   if (live.some((o) => o.to.includes(ctx.world.pov)))
     return "come";
   const now = ctx.state.clock;
-  return live.some((o) => o.place !== null && o.place !== to && within4(o, now)) ? "stay" : null;
+  return live.some((o) => o.place !== null && o.place !== to && within5(o, now)) ? "stay" : null;
 }
 function openOrders(ctx, who) {
   const pov = ctx.world.pov;
@@ -54331,7 +55793,7 @@ function stepOrders(slot, ctx) {
   for (const o of planOf3(ctx.state, org).orders) {
     if (!isPlanStatusLive(o.status) || o.lived !== undefined)
       continue;
-    const ends = [];
+    const ends2 = [];
     let open = false;
     for (const who of o.to) {
       const p = orderPlans(ctx, who).find((x) => x.id === o.id);
@@ -54343,10 +55805,10 @@ function stepOrders(slot, ctx) {
       }
       const laid = commitments2(ctx, who, p.window.from, Math.min(p.window.to, ahead)).filter((b) => b.plan === p.plan);
       if (laid.length > 0)
-        ends.push(p.hold ? p.window.to : Math.max(...laid.map((b) => b.end)));
+        ends2.push(p.hold ? p.window.to : Math.max(...laid.map((b) => b.end)));
     }
-    const at2 = Math.max(...ends);
-    if (!open && ends.length > 0 && at2 <= slot.end)
+    const at2 = Math.max(...ends2);
+    if (!open && ends2.length > 0 && at2 <= slot.end)
       out.push({ type: ORGS_LIVED, data: { org, id: o.id, at: at2, visibility: "secret" } });
   }
   return out;
@@ -54421,11 +55883,11 @@ function windUpEvents(ctx, a) {
     if (failed)
       return failed;
   }
-  const ends = stage === "begin" ? [] : [MEMBER_OF, ACTS_FOR].flatMap((rel) => linksTo(w.ctx, rel, org).map((l) => ({ type: "unlink", rel, from: l.from, to: org })));
+  const ends2 = stage === "begin" ? [] : [MEMBER_OF, ACTS_FOR].flatMap((rel) => linksTo(w.ctx, rel, org).map((l) => ({ type: "unlink", rel, from: l.from, to: org })));
   const said2 = stage === "begin" ? result.said : [...result.said, { text: "Dissolved", names: [] }];
   const lines = linesOf(ctx, org, said2.map((s, i) => i === 0 ? { ...s, text: withWhy(s.text, why2) } : s), by);
   const told = holder !== null ? [orgLog(ctx, holder, `${name}: ${stage === "begin" ? "began winding up" : "wound up and dissolved"}`, { ...credit, names: [org], power: "org.govern" })] : [];
-  return [...result.events, ...ends, ...lines, ...told];
+  return [...result.events, ...ends2, ...lines, ...told];
 }
 function mergedPositions(ctx, org, into2) {
   const mine = positionsOf(ctx, into2);
@@ -54604,7 +56066,7 @@ var orgsPack = {
     r.effect({ type: "orgs.note", args: ["org", "text", "by?", "names?"], gm: true, resolve: (a, ctx) => strOf(a.org) !== "" && strOf(a.text) !== "" ? [orgLog(ctx, strOf(a.org), strOf(a.text), { ...strOf(a.by) !== "" ? { by: strOf(a.by) } : {}, names: Array.isArray(a.names) ? a.names.filter((n) => typeof n === "string" && n !== "") : [] })] : { code: "bad_args", reason: "a History line needs an organization and its words" } });
     r.view({ panel: ORGS_LIST_PANEL, build: (ctx) => buildOrgList(ctx) });
     r.view({ panel: ORGS_ORG_PANEL, build: (ctx) => buildOrgPages(ctx) });
-    r.query("orgs.gm", (ctx) => buildOrgsGm(ctx));
+    r.query("orgs.gm", (ctx, only) => buildOrgsGm(ctx, only));
     registerOrgActions(r);
     registerParty(r);
     registerFound(r);
@@ -54734,12 +56196,12 @@ var fantasy_town_default = {
       "economy.occupations": "fe82950d08d32866585e8d92ca6c866a",
       "economy.projects": "46bd6c11c3a35c528464d62990f8e500",
       "economy.regions": "0a14f13dda6e977fe0243eaaca5d1790",
-      "gear.containers": "29334aeff91f1b6b9e99db08972661f1",
-      "gear.items": "bbe5564544b975612164c412d2ac3249",
+      "gear.containers": "91ebed05ed7fe51de7bfd7c0c318bd72",
+      "gear.items": "0b6b84d2f4996103b3d61519f9ebe06d",
       "gear.kits": "3656a59a513f99da1adb635a53e9e208",
-      "gear.slots": "3b7a1c09512b25782bd3e5533a74e7ea",
-      "vehicles.classes": "63a3d347866b62d922bae0ec1bdd1797",
-      "vehicles.factors": "491579e3ac37e00325a6adb017d7a9c7"
+      "gear.slots": "e813e37ac93fe7f769ef6081705b58f8",
+      "vehicles.classes": "50bdd1908468c9457097fcdf1f296c11",
+      "vehicles.factors": "e6c1c3b8e9d3cd0d690a59ad77103940"
     }
   },
   kinds: {
@@ -61554,7 +63016,7 @@ var fantasy_town_default = {
       id: "gear.items",
       pack: "gear",
       schema: "lre-table/gear.items/v1",
-      revision: "bbe5564544b975612164c412d2ac3249",
+      revision: "0b6b84d2f4996103b3d61519f9ebe06d",
       label: "Gear items",
       source: {
         dataPack: "modern-us",
@@ -61566,7 +63028,7 @@ var fantasy_town_default = {
       },
       columns: {
         name: { type: "text" },
-        category: { type: "enum", values: ["carried", "clothing", "household", "recreation", "tool"] },
+        category: { type: "enum", values: ["carried", "clothing", "household", "recreation", "tool", "weapon", "armor", "ammo"] },
         equip_slot: { type: "ref", ref: "gear.slots" },
         weight_g: { type: "int", unit: "g", doc: "Empty or dry weight." },
         volume_l: { type: "number", unit: "l" },
@@ -61577,6 +63039,7 @@ var fantasy_town_default = {
           optional: true
         },
         price_cents: { type: "band", unit: "cents" },
+        ammo: { type: "ref", ref: "gear.items", doc: "The ammunition a weapon takes: an ammo row, which ammo_of counts.", optional: true },
         notes: { type: "text", optional: true }
       },
       rows: {
@@ -61650,7 +63113,7 @@ var fantasy_town_default = {
       id: "gear.containers",
       pack: "gear",
       schema: "lre-table/gear.containers/v1",
-      revision: "29334aeff91f1b6b9e99db08972661f1",
+      revision: "91ebed05ed7fe51de7bfd7c0c318bd72",
       label: "Containers",
       source: {
         dataPack: "modern-us",
@@ -62052,6 +63515,40 @@ var fantasy_town_default = {
           holds: "heavy",
           equip_slot: "none",
           price_cents: { min: 0, typical: 0, max: 0 }
+        },
+        gun_safe: {
+          name: "Gun safe",
+          capacity_l: 400,
+          max_load_kg: 300,
+          empty_weight_g: 150000,
+          location: "furniture",
+          size: "furniture",
+          holds: "armful",
+          equip_slot: "none",
+          price_cents: { min: 50000, typical: 120000, max: 400000 },
+          notes: "Long guns upright, handguns and ammunition on the door and shelves; most bolt to the floor."
+        },
+        rifle_case_soft: {
+          name: "Rifle case, soft",
+          capacity_l: 12,
+          max_load_kg: 8,
+          empty_weight_g: 1200,
+          location: "carried",
+          size: "armful",
+          holds: "armful",
+          equip_slot: "shoulder",
+          price_cents: { min: 2500, typical: 6000, max: 20000 }
+        },
+        ammo_can: {
+          name: "Ammo can, .50 caliber",
+          capacity_l: 8,
+          max_load_kg: 15,
+          empty_weight_g: 1800,
+          location: "carried",
+          size: "hand",
+          holds: "hand",
+          equip_slot: "hand_held",
+          price_cents: { min: 1500, typical: 2500, max: 5000 }
         }
       }
     },
@@ -62239,7 +63736,7 @@ var fantasy_town_default = {
       id: "gear.slots",
       pack: "gear",
       schema: "lre-table/gear.slots/v1",
-      revision: "3b7a1c09512b25782bd3e5533a74e7ea",
+      revision: "e813e37ac93fe7f769ef6081705b58f8",
       label: "Equip slots",
       source: {
         dataPack: "modern-us",
@@ -62267,6 +63764,9 @@ var fantasy_town_default = {
         feet: { description: "Shoes and boots" },
         back: { description: "Backpacks" },
         shoulder: { description: "Shoulder and crossbody bags" },
+        holster: { description: "A holster on the belt, the shoulder or the thigh: a sidearm, a stun gun, a baton" },
+        sheath: { description: "A sheath on the belt: a knife, a machete" },
+        quiver: { description: "A quiver: arrows, crossbow bolts" },
         hand_held: { description: "Carried in hand: luggage, toolboxes, umbrellas" },
         pocket: { description: "Small items carried in a pocket" },
         pocket_or_bag: { description: "Small items carried in a pocket or a bag" },
@@ -62277,7 +63777,7 @@ var fantasy_town_default = {
       id: "vehicles.classes",
       pack: "vehicles",
       schema: "lre-table/vehicles.classes/v1",
-      revision: "63a3d347866b62d922bae0ec1bdd1797",
+      revision: "50bdd1908468c9457097fcdf1f296c11",
       label: "Vehicle classes",
       source: {
         dataPack: "modern-us",
@@ -62294,20 +63794,36 @@ var fantasy_town_default = {
       },
       columns: {
         name: { type: "text" },
-        domain: { type: "enum", values: ["road", "marine", "offroad"] },
-        fuel_type: { type: "enum", values: ["diesel", "electricity", "gasoline", "feed", "none"] },
+        aliases: {
+          type: "list",
+          of: "text",
+          doc: 'Other words a purchase or a story names one of the class by ("pickup", "jet ski"), lowercase; the longest that matches wins (`vehicles.priced`).',
+          optional: true
+        },
+        make: { type: "text", doc: "A representative make for a new one of the class, as the vehicle picker suggests it.", optional: true },
+        model: { type: "text", doc: "A representative model of that make.", optional: true },
+        domain: {
+          type: "enum",
+          values: ["road", "marine", "offroad", "air"],
+          doc: "Where it goes: roads, water, off-road trails, or the air (only over routes the world authors for the air)."
+        },
+        fuel_type: {
+          type: "enum",
+          values: ["avgas", "diesel", "electricity", "gasoline", "none", "feed"],
+          doc: "none: pedalled, paddled or rowed, so no tank, fuel or range."
+        },
         factor_guide: { type: "ref", ref: "vehicles.factors", doc: "The consumption factor guide for this class." },
         tank_capacity_gal: { type: "number", unit: "gal", doc: "Usable fuel.", optional: true },
         tank_capacity_l: { type: "number", unit: "l", optional: true },
         usable_battery_kwh: { type: "number", unit: "kwh", optional: true },
         consumption_unit: {
           type: "enum",
-          values: ["mpg", "mi_per_kwh", "gal_per_h"],
-          doc: "The unit of the rates in `consumption`: mpg for fuel road vehicles, mi_per_kwh for EVs, gal_per_h for marine and off-road."
+          values: ["mpg", "mi_per_kwh", "gal_per_h", "none"],
+          doc: "The unit of the rates in `consumption`: mpg for fuel road vehicles, mi_per_kwh for EVs, gal_per_h for marine, off-road and aircraft, none for what burns nothing."
         },
         consumption: {
           type: "json",
-          doc: "Rates by regime in consumption_unit. Road: city, highway, combined. Marine: idle_no_wake, cruise_planing, wide_open (+ note). Off-road: idle, normal_trail, hard_use, plus approx_mpg_trail in mpg."
+          doc: "Rates by regime in consumption_unit. Road: city, highway, combined. Marine: idle_no_wake, cruise_planing, wide_open (+ note). Off-road: idle, normal_trail, hard_use, plus approx_mpg_trail in mpg. Air: taxi, climb, cruise. None: no rates."
         },
         range_mi: { type: "int", unit: "mi", doc: "On a full tank or battery at combined consumption.", optional: true },
         range_h: { type: "number", unit: "h", doc: "Engine hours on a full tank at the normal or cruise rate.", optional: true },
@@ -62316,6 +63832,12 @@ var fantasy_town_default = {
         insurance_liability_cents_per_month: { type: "int", unit: "cents_per_month", doc: "State-minimum liability, clean-record adult." },
         insurance_full_cents_per_month: { type: "int", unit: "cents_per_month", doc: "Liability plus collision and comprehensive." },
         registration_cents_per_year: { type: "band", unit: "cents_per_year", doc: "Varies widely by state." },
+        fuel_cents_per_gal: {
+          type: "band",
+          unit: "cents_per_gal",
+          doc: "A US gallon of its fuel, for a fuel the price catalog has no row for (aviation gasoline).",
+          optional: true
+        },
         annual_maintenance_cents_per_year: { type: "int", unit: "cents_per_year" },
         maintenance: {
           type: "json",
@@ -62331,6 +63853,9 @@ var fantasy_town_default = {
       rows: {
         compact_car: {
           name: "Compact car (Civic / Corolla class)",
+          aliases: ["compact car", "compact", "hatchback", "economy car", "civic", "corolla"],
+          make: "Honda",
+          model: "Civic",
           domain: "road",
           fuel_type: "gasoline",
           factor_guide: "road",
@@ -62361,6 +63886,9 @@ var fantasy_town_default = {
         },
         midsize_sedan: {
           name: "Midsize sedan (Camry / Accord class)",
+          aliases: ["car", "sedan", "saloon", "family car", "camry", "accord"],
+          make: "Toyota",
+          model: "Camry",
           domain: "road",
           fuel_type: "gasoline",
           factor_guide: "road",
@@ -62391,6 +63919,9 @@ var fantasy_town_default = {
         },
         pickup_midsize: {
           name: "Midsize pickup (Tacoma / Colorado class)",
+          aliases: ["midsize pickup", "small pickup", "compact pickup", "tacoma", "colorado", "ford ranger", "frontier"],
+          make: "Toyota",
+          model: "Tacoma",
           domain: "road",
           fuel_type: "gasoline",
           factor_guide: "road",
@@ -62421,6 +63952,9 @@ var fantasy_town_default = {
         },
         pickup_fullsize: {
           name: "Full-size pickup (F-150 / Silverado class)",
+          aliases: ["pickup", "pickup truck", "truck", "full-size pickup", "f-150", "f150", "silverado", "ram 1500"],
+          make: "Ford",
+          model: "F-150",
           domain: "road",
           fuel_type: "gasoline",
           factor_guide: "road",
@@ -62451,6 +63985,21 @@ var fantasy_town_default = {
         },
         pickup_heavy_duty_diesel: {
           name: "Heavy-duty diesel pickup (2500 / F-250 class)",
+          aliases: [
+            "heavy-duty pickup",
+            "heavy duty truck",
+            "diesel pickup",
+            "diesel truck",
+            "work truck",
+            "flatbed",
+            "flatbed truck",
+            "dually",
+            "f-250",
+            "f-350",
+            "ram 2500"
+          ],
+          make: "Ram",
+          model: "2500",
           domain: "road",
           fuel_type: "diesel",
           factor_guide: "road",
@@ -62482,6 +64031,9 @@ var fantasy_town_default = {
         },
         suv_compact: {
           name: "Compact SUV (RAV4 / CR-V class)",
+          aliases: ["suv", "compact suv", "crossover", "rav4", "cr-v"],
+          make: "Toyota",
+          model: "RAV4",
           domain: "road",
           fuel_type: "gasoline",
           factor_guide: "road",
@@ -62512,6 +64064,9 @@ var fantasy_town_default = {
         },
         suv_midsize_3row: {
           name: "Midsize three-row SUV (Highlander / Explorer class)",
+          aliases: ["three-row suv", "3-row suv", "midsize suv", "family suv", "highlander", "explorer"],
+          make: "Ford",
+          model: "Explorer",
           domain: "road",
           fuel_type: "gasoline",
           factor_guide: "road",
@@ -62542,6 +64097,9 @@ var fantasy_town_default = {
         },
         minivan: {
           name: "Minivan (Sienna / Odyssey / Pacifica class)",
+          aliases: ["minivan", "mini van", "people carrier", "sienna", "odyssey", "pacifica"],
+          make: "Honda",
+          model: "Odyssey",
           domain: "road",
           fuel_type: "gasoline",
           factor_guide: "road",
@@ -62572,6 +64130,9 @@ var fantasy_town_default = {
         },
         ev_sedan: {
           name: "Electric sedan (Model 3 / Ioniq 6 class)",
+          aliases: ["electric car", "ev", "electric sedan", "tesla", "model 3", "ioniq"],
+          make: "Tesla",
+          model: "Model 3",
           domain: "road",
           fuel_type: "electricity",
           factor_guide: "road",
@@ -62602,6 +64163,9 @@ var fantasy_town_default = {
         },
         ev_crossover: {
           name: "Electric crossover (Model Y / Equinox EV class)",
+          aliases: ["electric suv", "electric crossover", "ev suv", "model y", "equinox ev"],
+          make: "Tesla",
+          model: "Model Y",
           domain: "road",
           fuel_type: "electricity",
           factor_guide: "road",
@@ -62632,6 +64196,9 @@ var fantasy_town_default = {
         },
         motorcycle_standard: {
           name: "Motorcycle, standard or cruiser (500-900 cc)",
+          aliases: ["motorcycle", "motorbike", "cruiser", "chopper", "sportbike", "harley"],
+          make: "Honda",
+          model: "Rebel 500",
           domain: "road",
           fuel_type: "gasoline",
           factor_guide: "road",
@@ -62663,6 +64230,9 @@ var fantasy_town_default = {
         },
         scooter_150: {
           name: "Scooter or moped (50-150 cc)",
+          aliases: ["scooter", "moped", "motor scooter", "vespa"],
+          make: "Vespa",
+          model: "Primavera 150",
           domain: "road",
           fuel_type: "gasoline",
           factor_guide: "road",
@@ -62693,6 +64263,9 @@ var fantasy_town_default = {
         },
         bass_boat_outboard: {
           name: "Outboard bass boat (18-20 ft, 150-200 hp)",
+          aliases: ["boat", "motorboat", "bass boat", "fishing boat", "speedboat", "outboard"],
+          make: "Tracker",
+          model: "Pro Team 175",
           domain: "marine",
           fuel_type: "gasoline",
           factor_guide: "marine",
@@ -62722,6 +64295,9 @@ var fantasy_town_default = {
         },
         pontoon_boat: {
           name: "Pontoon boat (22-24 ft, 90-150 hp outboard)",
+          aliases: ["pontoon", "pontoon boat", "party boat"],
+          make: "Sun Tracker",
+          model: "Party Barge 22 XP3",
           domain: "marine",
           fuel_type: "gasoline",
           factor_guide: "marine",
@@ -62750,6 +64326,9 @@ var fantasy_town_default = {
         },
         jet_ski_pwc: {
           name: "Personal watercraft / jet ski (1-3 seats)",
+          aliases: ["jet ski", "jetski", "personal watercraft", "pwc", "sea-doo"],
+          make: "Sea-Doo",
+          model: "GTI 130",
           domain: "marine",
           fuel_type: "gasoline",
           factor_guide: "marine",
@@ -62777,6 +64356,9 @@ var fantasy_town_default = {
         },
         sailboat_auxiliary: {
           name: "Cruising sailboat with auxiliary diesel (30-35 ft)",
+          aliases: ["sailboat", "sailing boat", "yacht", "sloop", "sailing yacht"],
+          make: "Catalina",
+          model: "315",
           domain: "marine",
           fuel_type: "diesel",
           factor_guide: "marine",
@@ -62810,6 +64392,9 @@ var fantasy_town_default = {
         },
         atv_utility: {
           name: "ATV, utility quad (450-700 cc)",
+          aliases: ["atv", "quad", "quad bike", "four-wheeler", "four wheeler"],
+          make: "Honda",
+          model: "FourTrax Rancher",
           domain: "offroad",
           fuel_type: "gasoline",
           factor_guide: "offroad",
@@ -62839,6 +64424,9 @@ var fantasy_town_default = {
         },
         utv_side_by_side: {
           name: "UTV / side-by-side (Ranger / RZR class, 2-4 seats)",
+          aliases: ["utv", "side-by-side", "side by side", "polaris ranger", "rzr", "gator"],
+          make: "Polaris",
+          model: "Ranger 1000",
           domain: "offroad",
           fuel_type: "gasoline",
           factor_guide: "offroad",
@@ -62868,6 +64456,9 @@ var fantasy_town_default = {
         },
         dirt_bike_250: {
           name: "Dirt bike, 250 cc four-stroke",
+          aliases: ["dirt bike", "dirtbike", "trail bike", "motocross bike", "enduro"],
+          make: "Honda",
+          model: "CRF250F",
           domain: "offroad",
           fuel_type: "gasoline",
           factor_guide: "offroad",
@@ -62895,6 +64486,382 @@ var fantasy_town_default = {
           payload_kg: 100,
           towing_kg: 0,
           notes: "Competition bikes are not street legal; plated dual-sport bikes use the motorcycle class. Premium fuel with 91+ octane typical."
+        },
+        bicycle: {
+          name: "Bicycle (commuter, hybrid or mountain bike)",
+          aliases: ["bicycle", "bike", "push bike", "pushbike", "cycle", "mountain bike", "road bike", "hybrid bike"],
+          make: "Trek",
+          model: "FX 2",
+          domain: "road",
+          fuel_type: "none",
+          factor_guide: "road",
+          consumption_unit: "none",
+          consumption: {},
+          price_new_cents: { min: 40000, typical: 80000, max: 200000 },
+          price_used_cents: { min: 15000, typical: 35000, max: 90000 },
+          insurance_liability_cents_per_month: 0,
+          insurance_full_cents_per_month: 0,
+          registration_cents_per_year: { min: 0, typical: 0, max: 0 },
+          annual_maintenance_cents_per_year: 1e4,
+          maintenance: { service_interval_miles: 2000, chain_replace_interval_miles: 2500, tire_replace_interval_miles: 3000 },
+          passengers: 1,
+          cargo_l: 20,
+          payload_kg: 110,
+          towing_kg: 0,
+          notes: "Pedalled: no fuel, so no range; a shop tune-up stands in for the service. Most US states register none; homeowners or renters insurance usually covers theft."
+        },
+        ebike: {
+          name: "Electric bicycle (Class 1-3 e-bike)",
+          aliases: ["e-bike", "ebike", "electric bike", "electric bicycle"],
+          make: "Rad Power",
+          model: "RadCity",
+          domain: "road",
+          fuel_type: "electricity",
+          factor_guide: "road",
+          usable_battery_kwh: 0.6,
+          consumption_unit: "mi_per_kwh",
+          consumption: { city: 70, highway: 55, combined: 65 },
+          range_mi: 40,
+          price_new_cents: { min: 120000, typical: 200000, max: 450000 },
+          price_used_cents: { min: 50000, typical: 110000, max: 250000 },
+          insurance_liability_cents_per_month: 0,
+          insurance_full_cents_per_month: 1500,
+          registration_cents_per_year: { min: 0, typical: 0, max: 2500 },
+          annual_maintenance_cents_per_year: 20000,
+          maintenance: {
+            service_interval_miles: 1500,
+            chain_lube_interval_miles: 200,
+            brake_pads_interval_miles: 1500,
+            battery_replace_cents_typical: 60000
+          },
+          passengers: 1,
+          cargo_l: 25,
+          payload_kg: 125,
+          towing_kg: 0,
+          charging: { level_1_120v: "3-6 h to full" },
+          notes: "Pedal-assist to 20 mph (Class 1-2) or 28 mph (Class 3); a few states register or plate Class 3."
+        },
+        cargo_van: {
+          name: "Cargo van (Transit / Sprinter / ProMaster class)",
+          aliases: ["van", "cargo van", "work van", "panel van", "delivery van", "transit", "sprinter", "promaster"],
+          make: "Ford",
+          model: "Transit 250",
+          domain: "road",
+          fuel_type: "gasoline",
+          factor_guide: "road",
+          tank_capacity_gal: 25,
+          tank_capacity_l: 94.6,
+          consumption_unit: "mpg",
+          consumption: { city: 15, highway: 19, combined: 16 },
+          range_mi: 400,
+          price_new_cents: { min: 4500000, typical: 5200000, max: 7000000 },
+          price_used_cents: { min: 2500000, typical: 3400000, max: 4500000 },
+          insurance_liability_cents_per_month: 7000,
+          insurance_full_cents_per_month: 25000,
+          registration_cents_per_year: { min: 4000, typical: 18000, max: 90000 },
+          annual_maintenance_cents_per_year: 140000,
+          maintenance: {
+            oil_change_interval_miles: 7500,
+            oil_type: "synthetic",
+            tire_rotation_interval_miles: 7500,
+            tire_replace_interval_miles: 40000,
+            brake_pads_interval_miles: 35000
+          },
+          passengers: 2,
+          cargo_l: 9000,
+          payload_kg: 1600,
+          towing_kg: 2500,
+          notes: "High-roof, long-wheelbase vans hold about 15 m3; commercial use raises the premium."
+        },
+        box_truck: {
+          name: "Box truck (16-26 ft, Class 6 diesel)",
+          aliases: ["box truck", "moving truck", "delivery truck", "straight truck", "cube truck", "cube van"],
+          make: "Isuzu",
+          model: "FTR",
+          domain: "road",
+          fuel_type: "diesel",
+          factor_guide: "road",
+          tank_capacity_gal: 50,
+          tank_capacity_l: 189.3,
+          consumption_unit: "mpg",
+          consumption: { city: 8, highway: 11, combined: 9 },
+          range_mi: 450,
+          price_new_cents: { min: 8000000, typical: 11000000, max: 15000000 },
+          price_used_cents: { min: 3500000, typical: 5500000, max: 8000000 },
+          insurance_liability_cents_per_month: 15000,
+          insurance_full_cents_per_month: 45000,
+          registration_cents_per_year: { min: 20000, typical: 80000, max: 250000 },
+          annual_maintenance_cents_per_year: 450000,
+          maintenance: {
+            oil_change_interval_miles: 15000,
+            oil_type: "diesel synthetic",
+            tire_replace_interval_miles: 60000,
+            brake_pads_interval_miles: 50000,
+            dot_inspection: "annual"
+          },
+          passengers: 3,
+          cargo_l: 40000,
+          payload_kg: 4500,
+          towing_kg: 4500,
+          notes: "Under 26,001 lb GVWR, so no CDL needed; commercial insurance and an annual DOT inspection."
+        },
+        semi_truck: {
+          name: "Semi tractor (Class 8 sleeper, diesel)",
+          aliases: [
+            "semi",
+            "semi truck",
+            "semi-truck",
+            "semi tractor",
+            "tractor-trailer",
+            "tractor trailer",
+            "big rig",
+            "eighteen-wheeler",
+            "18-wheeler",
+            "lorry"
+          ],
+          make: "Freightliner",
+          model: "Cascadia",
+          domain: "road",
+          fuel_type: "diesel",
+          factor_guide: "road",
+          tank_capacity_gal: 250,
+          tank_capacity_l: 946.4,
+          consumption_unit: "mpg",
+          consumption: { city: 5, highway: 7, combined: 6.5 },
+          range_mi: 1600,
+          price_new_cents: { min: 15000000, typical: 18000000, max: 22000000 },
+          price_used_cents: { min: 6000000, typical: 9000000, max: 13000000 },
+          insurance_liability_cents_per_month: 60000,
+          insurance_full_cents_per_month: 110000,
+          registration_cents_per_year: { min: 1e5, typical: 200000, max: 400000 },
+          annual_maintenance_cents_per_year: 1500000,
+          maintenance: {
+            oil_change_interval_miles: 25000,
+            oil_type: "diesel synthetic",
+            tire_replace_interval_miles: 1e5,
+            brake_pads_interval_miles: 75000,
+            dot_inspection: "annual"
+          },
+          passengers: 2,
+          cargo_l: 1000,
+          payload_kg: 1500,
+          towing_kg: 36000,
+          notes: "Needs a Class A CDL; registration is apportioned (IRP) by the miles run in each state. Payload is the cab's; the trailer is towed."
+        },
+        bus: {
+          name: "Bus (school bus or shuttle, diesel)",
+          aliases: ["bus", "school bus", "shuttle bus", "shuttle", "coach", "minibus"],
+          make: "Blue Bird",
+          model: "Vision",
+          domain: "road",
+          fuel_type: "diesel",
+          factor_guide: "road",
+          tank_capacity_gal: 60,
+          tank_capacity_l: 227.1,
+          consumption_unit: "mpg",
+          consumption: { city: 6, highway: 9, combined: 7 },
+          range_mi: 420,
+          price_new_cents: { min: 9000000, typical: 12000000, max: 16000000 },
+          price_used_cents: { min: 1500000, typical: 4000000, max: 8000000 },
+          insurance_liability_cents_per_month: 20000,
+          insurance_full_cents_per_month: 50000,
+          registration_cents_per_year: { min: 1e4, typical: 30000, max: 1e5 },
+          annual_maintenance_cents_per_year: 600000,
+          maintenance: {
+            oil_change_interval_miles: 1e4,
+            oil_type: "diesel synthetic",
+            tire_replace_interval_miles: 60000,
+            brake_pads_interval_miles: 40000
+          },
+          passengers: 48,
+          cargo_l: 1000,
+          payload_kg: 5000,
+          towing_kg: 0,
+          notes: "Carrying 16 or more people needs a CDL with a passenger endorsement."
+        },
+        rv_motorhome: {
+          name: "Motorhome (Class C or Class A RV)",
+          aliases: ["rv", "motorhome", "motor home", "camper", "camper van", "recreational vehicle"],
+          make: "Thor",
+          model: "Four Winds 28A",
+          domain: "road",
+          fuel_type: "gasoline",
+          factor_guide: "road",
+          tank_capacity_gal: 55,
+          tank_capacity_l: 208.2,
+          consumption_unit: "mpg",
+          consumption: { city: 7, highway: 10, combined: 8 },
+          range_mi: 440,
+          price_new_cents: { min: 9000000, typical: 15000000, max: 30000000 },
+          price_used_cents: { min: 5000000, typical: 8500000, max: 15000000 },
+          insurance_liability_cents_per_month: 5000,
+          insurance_full_cents_per_month: 15000,
+          registration_cents_per_year: { min: 1e4, typical: 40000, max: 150000 },
+          annual_maintenance_cents_per_year: 250000,
+          maintenance: {
+            oil_change_interval_miles: 5000,
+            oil_type: "synthetic",
+            tire_replace_interval_miles: 40000,
+            roof_reseal_interval_miles: 30000,
+            winterization_cents_annual: 20000
+          },
+          passengers: 6,
+          cargo_l: 3000,
+          payload_kg: 1500,
+          towing_kg: 2300,
+          notes: "Sleeps four to eight; propane, fresh-water and holding tanks are its own upkeep."
+        },
+        snowmobile: {
+          name: "Snowmobile (600-850 cc, trail)",
+          aliases: ["snowmobile", "snow machine", "sled", "ski-doo", "skidoo"],
+          make: "Ski-Doo",
+          model: "MXZ 600",
+          domain: "offroad",
+          fuel_type: "gasoline",
+          factor_guide: "offroad",
+          tank_capacity_gal: 10.5,
+          tank_capacity_l: 39.7,
+          consumption_unit: "gal_per_h",
+          consumption: { idle: 0.2, normal_trail: 2, hard_use: 3.5, approx_mpg_trail: 12 },
+          range_h: 5,
+          price_new_cents: { min: 1100000, typical: 1500000, max: 2000000 },
+          price_used_cents: { min: 500000, typical: 850000, max: 1300000 },
+          insurance_liability_cents_per_month: 1000,
+          insurance_full_cents_per_month: 3500,
+          registration_cents_per_year: { min: 2000, typical: 5000, max: 15000 },
+          annual_maintenance_cents_per_year: 50000,
+          maintenance: { engine_service_interval_hours: 50, track_and_skis_check: "each season", summer_storage_cents_annual: 15000 },
+          passengers: 2,
+          cargo_l: 30,
+          payload_kg: 180,
+          towing_kg: 0,
+          notes: "Snow only: a trail permit or registration is required in snowbelt states."
+        },
+        tractor_farm: {
+          name: "Farm tractor (utility, 45-100 hp diesel)",
+          aliases: ["tractor", "farm tractor", "utility tractor", "john deere"],
+          make: "John Deere",
+          model: "5075E",
+          domain: "offroad",
+          fuel_type: "diesel",
+          factor_guide: "offroad",
+          tank_capacity_gal: 20,
+          tank_capacity_l: 75.7,
+          consumption_unit: "gal_per_h",
+          consumption: { idle: 0.5, normal_trail: 2.5, hard_use: 4.5, approx_mpg_trail: 3 },
+          range_h: 8,
+          price_new_cents: { min: 3500000, typical: 5500000, max: 9000000 },
+          price_used_cents: { min: 1500000, typical: 3000000, max: 5500000 },
+          insurance_liability_cents_per_month: 1500,
+          insurance_full_cents_per_month: 4500,
+          registration_cents_per_year: { min: 0, typical: 2000, max: 1e4 },
+          annual_maintenance_cents_per_year: 150000,
+          maintenance: { engine_service_interval_hours: 250, hydraulic_fluid_interval_hours: 1000 },
+          passengers: 1,
+          cargo_l: 0,
+          payload_kg: 1000,
+          towing_kg: 5000,
+          notes: "Farm use usually needs no registration; on public roads it carries a slow-moving-vehicle sign."
+        },
+        rowboat: {
+          name: "Rowboat or jon boat (10-14 ft, oars)",
+          aliases: ["rowboat", "row boat", "rowing boat", "dinghy", "jon boat", "jonboat", "skiff"],
+          make: "Lowe",
+          model: "L1236",
+          domain: "marine",
+          fuel_type: "none",
+          factor_guide: "marine",
+          consumption_unit: "none",
+          consumption: {},
+          price_new_cents: { min: 80000, typical: 150000, max: 300000 },
+          price_used_cents: { min: 30000, typical: 70000, max: 150000 },
+          insurance_liability_cents_per_month: 0,
+          insurance_full_cents_per_month: 1000,
+          registration_cents_per_year: { min: 0, typical: 1500, max: 5000 },
+          annual_maintenance_cents_per_year: 5000,
+          maintenance: {},
+          passengers: 3,
+          cargo_l: 200,
+          payload_kg: 300,
+          towing_kg: 0,
+          notes: "Rowed: no fuel. Most states register a hull only once an outboard is fitted."
+        },
+        kayak: {
+          name: "Kayak or canoe (paddled, 1-2 seats)",
+          aliases: ["kayak", "canoe", "sea kayak", "sit-on-top kayak"],
+          make: "Old Town",
+          model: "Loon 106",
+          domain: "marine",
+          fuel_type: "none",
+          factor_guide: "marine",
+          consumption_unit: "none",
+          consumption: {},
+          price_new_cents: { min: 40000, typical: 90000, max: 250000 },
+          price_used_cents: { min: 20000, typical: 50000, max: 120000 },
+          insurance_liability_cents_per_month: 0,
+          insurance_full_cents_per_month: 0,
+          registration_cents_per_year: { min: 0, typical: 0, max: 3000 },
+          annual_maintenance_cents_per_year: 2000,
+          maintenance: {},
+          passengers: 2,
+          cargo_l: 100,
+          payload_kg: 200,
+          towing_kg: 0,
+          notes: "Paddled: no fuel. A few states ask for a launch permit or an invasive-species sticker."
+        },
+        small_plane: {
+          name: "Small plane (four-seat single piston, Cessna 172 class)",
+          aliases: ["plane", "airplane", "aeroplane", "small plane", "light aircraft", "aircraft", "prop plane", "cessna", "piper"],
+          make: "Cessna",
+          model: "172 Skyhawk",
+          domain: "air",
+          fuel_type: "avgas",
+          factor_guide: "air",
+          tank_capacity_gal: 53,
+          tank_capacity_l: 200.6,
+          consumption_unit: "gal_per_h",
+          consumption: { taxi: 1.5, climb: 12, cruise: 9 },
+          range_h: 5,
+          price_new_cents: { min: 45000000, typical: 50000000, max: 60000000 },
+          price_used_cents: { min: 9000000, typical: 20000000, max: 40000000 },
+          insurance_liability_cents_per_month: 15000,
+          insurance_full_cents_per_month: 25000,
+          registration_cents_per_year: { min: 500, typical: 20000, max: 150000 },
+          fuel_cents_per_gal: { min: 550, typical: 700, max: 1000 },
+          annual_maintenance_cents_per_year: 800000,
+          maintenance: { engine_service_interval_hours: 100, engine_overhaul_interval_hours: 2000, annual_inspection_cents_typical: 250000 },
+          passengers: 4,
+          cargo_l: 340,
+          payload_kg: 400,
+          towing_kg: 0,
+          notes: "Flown by a licensed pilot between airfields; FAA registration lasts seven years, and some states add an aircraft fee or tax. Hangar or tie-down rent is extra."
+        },
+        helicopter: {
+          name: "Light helicopter (four-seat piston, Robinson R44 class)",
+          aliases: ["helicopter", "heli", "copter", "robinson"],
+          make: "Robinson",
+          model: "R44 Raven II",
+          domain: "air",
+          fuel_type: "avgas",
+          factor_guide: "air",
+          tank_capacity_gal: 46.5,
+          tank_capacity_l: 176,
+          consumption_unit: "gal_per_h",
+          consumption: { taxi: 4, climb: 17, cruise: 15 },
+          range_h: 2.8,
+          price_new_cents: { min: 50000000, typical: 60000000, max: 70000000 },
+          price_used_cents: { min: 20000000, typical: 32000000, max: 45000000 },
+          insurance_liability_cents_per_month: 25000,
+          insurance_full_cents_per_month: 150000,
+          registration_cents_per_year: { min: 500, typical: 20000, max: 150000 },
+          fuel_cents_per_gal: { min: 550, typical: 700, max: 1000 },
+          annual_maintenance_cents_per_year: 2500000,
+          maintenance: { engine_service_interval_hours: 100, overhaul_interval_hours: 2200, annual_inspection_cents_typical: 500000 },
+          passengers: 4,
+          cargo_l: 200,
+          payload_kg: 380,
+          towing_kg: 0,
+          notes: "Lands at a helipad, an airfield or any cleared spot the route names; the rotor and engine overhaul come due together at about 2,200 hours."
         },
         riding_horse: {
           name: "Riding horse",
@@ -62959,7 +64926,7 @@ var fantasy_town_default = {
       id: "vehicles.factors",
       pack: "vehicles",
       schema: "lre-table/vehicles.factors/v1",
-      revision: "491579e3ac37e00325a6adb017d7a9c7",
+      revision: "e6c1c3b8e9d3cd0d690a59ad77103940",
       label: "Consumption factor guides",
       source: {
         dataPack: "modern-us",
@@ -63027,6 +64994,19 @@ var fantasy_town_default = {
             sustained_high_speed_desert_race_pace: 1.5,
             two_up_or_loaded_cargo: 1.15
           }
+        },
+        air: {
+          basis: "Multipliers on gallons per hour at normal cruise; rules of thumb from light-aircraft operating handbooks' fuel tables and flight-school planning guidance.",
+          factors: {
+            taxi_and_runup: 0.3,
+            climb_full_power: 1.35,
+            normal_cruise_default: 1,
+            economy_cruise_leaned: 0.85,
+            headwind_strong: 1.15,
+            max_gross_weight: 1.1,
+            high_density_altitude: 1.1
+          },
+          note: "Plan a 30-minute day VFR reserve (45 minutes at night) on top of the trip's fuel."
         }
       }
     }
@@ -63375,12 +65355,12 @@ var mystery_manor_default = {
       "economy.occupations": "fe82950d08d32866585e8d92ca6c866a",
       "economy.projects": "46bd6c11c3a35c528464d62990f8e500",
       "economy.regions": "0a14f13dda6e977fe0243eaaca5d1790",
-      "gear.containers": "29334aeff91f1b6b9e99db08972661f1",
-      "gear.items": "a799c31ed29573302a62b08a89edcf94",
+      "gear.containers": "91ebed05ed7fe51de7bfd7c0c318bd72",
+      "gear.items": "f4fde123adc424fbc5315f31437de334",
       "gear.kits": "3656a59a513f99da1adb635a53e9e208",
-      "gear.slots": "3b7a1c09512b25782bd3e5533a74e7ea",
-      "vehicles.classes": "fb9d85ba90b254c358bfa7894216fffb",
-      "vehicles.factors": "491579e3ac37e00325a6adb017d7a9c7"
+      "gear.slots": "e813e37ac93fe7f769ef6081705b58f8",
+      "vehicles.classes": "e7f0d0bd1c2d2b4e8146064b6ab92b4c",
+      "vehicles.factors": "e6c1c3b8e9d3cd0d690a59ad77103940"
     }
   },
   kinds: {
@@ -70507,7 +72487,7 @@ var mystery_manor_default = {
       id: "gear.items",
       pack: "gear",
       schema: "lre-table/gear.items/v1",
-      revision: "a799c31ed29573302a62b08a89edcf94",
+      revision: "f4fde123adc424fbc5315f31437de334",
       label: "Gear items",
       source: {
         dataPack: "modern-us",
@@ -70519,7 +72499,7 @@ var mystery_manor_default = {
       },
       columns: {
         name: { type: "text" },
-        category: { type: "enum", values: ["carried", "clothing", "household", "recreation", "tool"] },
+        category: { type: "enum", values: ["carried", "clothing", "household", "recreation", "tool", "weapon", "armor", "ammo"] },
         equip_slot: { type: "ref", ref: "gear.slots" },
         weight_g: { type: "int", unit: "g", doc: "Empty or dry weight." },
         volume_l: { type: "number", unit: "l" },
@@ -70530,6 +72510,7 @@ var mystery_manor_default = {
           optional: true
         },
         price_cents: { type: "band", unit: "cents" },
+        ammo: { type: "ref", ref: "gear.items", doc: "The ammunition a weapon takes: an ammo row, which ammo_of counts.", optional: true },
         notes: { type: "text", optional: true }
       },
       rows: {
@@ -70619,7 +72600,7 @@ var mystery_manor_default = {
       id: "gear.containers",
       pack: "gear",
       schema: "lre-table/gear.containers/v1",
-      revision: "29334aeff91f1b6b9e99db08972661f1",
+      revision: "91ebed05ed7fe51de7bfd7c0c318bd72",
       label: "Containers",
       source: {
         dataPack: "modern-us",
@@ -71021,6 +73002,40 @@ var mystery_manor_default = {
           holds: "heavy",
           equip_slot: "none",
           price_cents: { min: 0, typical: 0, max: 0 }
+        },
+        gun_safe: {
+          name: "Gun safe",
+          capacity_l: 400,
+          max_load_kg: 300,
+          empty_weight_g: 150000,
+          location: "furniture",
+          size: "furniture",
+          holds: "armful",
+          equip_slot: "none",
+          price_cents: { min: 50000, typical: 120000, max: 400000 },
+          notes: "Long guns upright, handguns and ammunition on the door and shelves; most bolt to the floor."
+        },
+        rifle_case_soft: {
+          name: "Rifle case, soft",
+          capacity_l: 12,
+          max_load_kg: 8,
+          empty_weight_g: 1200,
+          location: "carried",
+          size: "armful",
+          holds: "armful",
+          equip_slot: "shoulder",
+          price_cents: { min: 2500, typical: 6000, max: 20000 }
+        },
+        ammo_can: {
+          name: "Ammo can, .50 caliber",
+          capacity_l: 8,
+          max_load_kg: 15,
+          empty_weight_g: 1800,
+          location: "carried",
+          size: "hand",
+          holds: "hand",
+          equip_slot: "hand_held",
+          price_cents: { min: 1500, typical: 2500, max: 5000 }
         }
       }
     },
@@ -71208,7 +73223,7 @@ var mystery_manor_default = {
       id: "gear.slots",
       pack: "gear",
       schema: "lre-table/gear.slots/v1",
-      revision: "3b7a1c09512b25782bd3e5533a74e7ea",
+      revision: "e813e37ac93fe7f769ef6081705b58f8",
       label: "Equip slots",
       source: {
         dataPack: "modern-us",
@@ -71236,6 +73251,9 @@ var mystery_manor_default = {
         feet: { description: "Shoes and boots" },
         back: { description: "Backpacks" },
         shoulder: { description: "Shoulder and crossbody bags" },
+        holster: { description: "A holster on the belt, the shoulder or the thigh: a sidearm, a stun gun, a baton" },
+        sheath: { description: "A sheath on the belt: a knife, a machete" },
+        quiver: { description: "A quiver: arrows, crossbow bolts" },
         hand_held: { description: "Carried in hand: luggage, toolboxes, umbrellas" },
         pocket: { description: "Small items carried in a pocket" },
         pocket_or_bag: { description: "Small items carried in a pocket or a bag" },
@@ -71246,7 +73264,7 @@ var mystery_manor_default = {
       id: "vehicles.classes",
       pack: "vehicles",
       schema: "lre-table/vehicles.classes/v1",
-      revision: "fb9d85ba90b254c358bfa7894216fffb",
+      revision: "e7f0d0bd1c2d2b4e8146064b6ab92b4c",
       label: "Vehicle classes",
       source: {
         dataPack: "modern-us",
@@ -71263,20 +73281,36 @@ var mystery_manor_default = {
       },
       columns: {
         name: { type: "text" },
-        domain: { type: "enum", values: ["road", "marine", "offroad"] },
-        fuel_type: { type: "enum", values: ["diesel", "electricity", "gasoline", "feed", "none"] },
+        aliases: {
+          type: "list",
+          of: "text",
+          doc: 'Other words a purchase or a story names one of the class by ("pickup", "jet ski"), lowercase; the longest that matches wins (`vehicles.priced`).',
+          optional: true
+        },
+        make: { type: "text", doc: "A representative make for a new one of the class, as the vehicle picker suggests it.", optional: true },
+        model: { type: "text", doc: "A representative model of that make.", optional: true },
+        domain: {
+          type: "enum",
+          values: ["road", "marine", "offroad", "air"],
+          doc: "Where it goes: roads, water, off-road trails, or the air (only over routes the world authors for the air)."
+        },
+        fuel_type: {
+          type: "enum",
+          values: ["avgas", "diesel", "electricity", "gasoline", "none", "feed"],
+          doc: "none: pedalled, paddled or rowed, so no tank, fuel or range."
+        },
         factor_guide: { type: "ref", ref: "vehicles.factors", doc: "The consumption factor guide for this class." },
         tank_capacity_gal: { type: "number", unit: "gal", doc: "Usable fuel.", optional: true },
         tank_capacity_l: { type: "number", unit: "l", optional: true },
         usable_battery_kwh: { type: "number", unit: "kwh", optional: true },
         consumption_unit: {
           type: "enum",
-          values: ["mpg", "mi_per_kwh", "gal_per_h"],
-          doc: "The unit of the rates in `consumption`: mpg for fuel road vehicles, mi_per_kwh for EVs, gal_per_h for marine and off-road."
+          values: ["mpg", "mi_per_kwh", "gal_per_h", "none"],
+          doc: "The unit of the rates in `consumption`: mpg for fuel road vehicles, mi_per_kwh for EVs, gal_per_h for marine, off-road and aircraft, none for what burns nothing."
         },
         consumption: {
           type: "json",
-          doc: "Rates by regime in consumption_unit. Road: city, highway, combined. Marine: idle_no_wake, cruise_planing, wide_open (+ note). Off-road: idle, normal_trail, hard_use, plus approx_mpg_trail in mpg."
+          doc: "Rates by regime in consumption_unit. Road: city, highway, combined. Marine: idle_no_wake, cruise_planing, wide_open (+ note). Off-road: idle, normal_trail, hard_use, plus approx_mpg_trail in mpg. Air: taxi, climb, cruise. None: no rates."
         },
         range_mi: { type: "int", unit: "mi", doc: "On a full tank or battery at combined consumption.", optional: true },
         range_h: { type: "number", unit: "h", doc: "Engine hours on a full tank at the normal or cruise rate.", optional: true },
@@ -71285,6 +73319,12 @@ var mystery_manor_default = {
         insurance_liability_cents_per_month: { type: "int", unit: "cents_per_month", doc: "State-minimum liability, clean-record adult." },
         insurance_full_cents_per_month: { type: "int", unit: "cents_per_month", doc: "Liability plus collision and comprehensive." },
         registration_cents_per_year: { type: "band", unit: "cents_per_year", doc: "Varies widely by state." },
+        fuel_cents_per_gal: {
+          type: "band",
+          unit: "cents_per_gal",
+          doc: "A US gallon of its fuel, for a fuel the price catalog has no row for (aviation gasoline).",
+          optional: true
+        },
         annual_maintenance_cents_per_year: { type: "int", unit: "cents_per_year" },
         maintenance: {
           type: "json",
@@ -71300,6 +73340,9 @@ var mystery_manor_default = {
       rows: {
         compact_car: {
           name: "Compact car (Civic / Corolla class)",
+          aliases: ["compact car", "compact", "hatchback", "economy car", "civic", "corolla"],
+          make: "Honda",
+          model: "Civic",
           domain: "road",
           fuel_type: "gasoline",
           factor_guide: "road",
@@ -71330,6 +73373,9 @@ var mystery_manor_default = {
         },
         midsize_sedan: {
           name: "Midsize sedan (Camry / Accord class)",
+          aliases: ["car", "sedan", "saloon", "family car", "camry", "accord"],
+          make: "Toyota",
+          model: "Camry",
           domain: "road",
           fuel_type: "gasoline",
           factor_guide: "road",
@@ -71360,6 +73406,9 @@ var mystery_manor_default = {
         },
         pickup_midsize: {
           name: "Midsize pickup (Tacoma / Colorado class)",
+          aliases: ["midsize pickup", "small pickup", "compact pickup", "tacoma", "colorado", "ford ranger", "frontier"],
+          make: "Toyota",
+          model: "Tacoma",
           domain: "road",
           fuel_type: "gasoline",
           factor_guide: "road",
@@ -71390,6 +73439,9 @@ var mystery_manor_default = {
         },
         pickup_fullsize: {
           name: "Full-size pickup (F-150 / Silverado class)",
+          aliases: ["pickup", "pickup truck", "truck", "full-size pickup", "f-150", "f150", "silverado", "ram 1500"],
+          make: "Ford",
+          model: "F-150",
           domain: "road",
           fuel_type: "gasoline",
           factor_guide: "road",
@@ -71420,6 +73472,21 @@ var mystery_manor_default = {
         },
         pickup_heavy_duty_diesel: {
           name: "Heavy-duty diesel pickup (2500 / F-250 class)",
+          aliases: [
+            "heavy-duty pickup",
+            "heavy duty truck",
+            "diesel pickup",
+            "diesel truck",
+            "work truck",
+            "flatbed",
+            "flatbed truck",
+            "dually",
+            "f-250",
+            "f-350",
+            "ram 2500"
+          ],
+          make: "Ram",
+          model: "2500",
           domain: "road",
           fuel_type: "diesel",
           factor_guide: "road",
@@ -71451,6 +73518,9 @@ var mystery_manor_default = {
         },
         suv_compact: {
           name: "Compact SUV (RAV4 / CR-V class)",
+          aliases: ["suv", "compact suv", "crossover", "rav4", "cr-v"],
+          make: "Toyota",
+          model: "RAV4",
           domain: "road",
           fuel_type: "gasoline",
           factor_guide: "road",
@@ -71481,6 +73551,9 @@ var mystery_manor_default = {
         },
         suv_midsize_3row: {
           name: "Midsize three-row SUV (Highlander / Explorer class)",
+          aliases: ["three-row suv", "3-row suv", "midsize suv", "family suv", "highlander", "explorer"],
+          make: "Ford",
+          model: "Explorer",
           domain: "road",
           fuel_type: "gasoline",
           factor_guide: "road",
@@ -71511,6 +73584,9 @@ var mystery_manor_default = {
         },
         minivan: {
           name: "Minivan (Sienna / Odyssey / Pacifica class)",
+          aliases: ["minivan", "mini van", "people carrier", "sienna", "odyssey", "pacifica"],
+          make: "Honda",
+          model: "Odyssey",
           domain: "road",
           fuel_type: "gasoline",
           factor_guide: "road",
@@ -71541,6 +73617,9 @@ var mystery_manor_default = {
         },
         ev_sedan: {
           name: "Electric sedan (Model 3 / Ioniq 6 class)",
+          aliases: ["electric car", "ev", "electric sedan", "tesla", "model 3", "ioniq"],
+          make: "Tesla",
+          model: "Model 3",
           domain: "road",
           fuel_type: "electricity",
           factor_guide: "road",
@@ -71571,6 +73650,9 @@ var mystery_manor_default = {
         },
         ev_crossover: {
           name: "Electric crossover (Model Y / Equinox EV class)",
+          aliases: ["electric suv", "electric crossover", "ev suv", "model y", "equinox ev"],
+          make: "Tesla",
+          model: "Model Y",
           domain: "road",
           fuel_type: "electricity",
           factor_guide: "road",
@@ -71601,6 +73683,9 @@ var mystery_manor_default = {
         },
         motorcycle_standard: {
           name: "Motorcycle, standard or cruiser (500-900 cc)",
+          aliases: ["motorcycle", "motorbike", "cruiser", "chopper", "sportbike", "harley"],
+          make: "Honda",
+          model: "Rebel 500",
           domain: "road",
           fuel_type: "gasoline",
           factor_guide: "road",
@@ -71632,6 +73717,9 @@ var mystery_manor_default = {
         },
         scooter_150: {
           name: "Scooter or moped (50-150 cc)",
+          aliases: ["scooter", "moped", "motor scooter", "vespa"],
+          make: "Vespa",
+          model: "Primavera 150",
           domain: "road",
           fuel_type: "gasoline",
           factor_guide: "road",
@@ -71662,6 +73750,9 @@ var mystery_manor_default = {
         },
         bass_boat_outboard: {
           name: "Outboard bass boat (18-20 ft, 150-200 hp)",
+          aliases: ["boat", "motorboat", "bass boat", "fishing boat", "speedboat", "outboard"],
+          make: "Tracker",
+          model: "Pro Team 175",
           domain: "marine",
           fuel_type: "gasoline",
           factor_guide: "marine",
@@ -71691,6 +73782,9 @@ var mystery_manor_default = {
         },
         pontoon_boat: {
           name: "Pontoon boat (22-24 ft, 90-150 hp outboard)",
+          aliases: ["pontoon", "pontoon boat", "party boat"],
+          make: "Sun Tracker",
+          model: "Party Barge 22 XP3",
           domain: "marine",
           fuel_type: "gasoline",
           factor_guide: "marine",
@@ -71719,6 +73813,9 @@ var mystery_manor_default = {
         },
         jet_ski_pwc: {
           name: "Personal watercraft / jet ski (1-3 seats)",
+          aliases: ["jet ski", "jetski", "personal watercraft", "pwc", "sea-doo"],
+          make: "Sea-Doo",
+          model: "GTI 130",
           domain: "marine",
           fuel_type: "gasoline",
           factor_guide: "marine",
@@ -71746,6 +73843,9 @@ var mystery_manor_default = {
         },
         sailboat_auxiliary: {
           name: "Cruising sailboat with auxiliary diesel (30-35 ft)",
+          aliases: ["sailboat", "sailing boat", "yacht", "sloop", "sailing yacht"],
+          make: "Catalina",
+          model: "315",
           domain: "marine",
           fuel_type: "diesel",
           factor_guide: "marine",
@@ -71779,6 +73879,9 @@ var mystery_manor_default = {
         },
         atv_utility: {
           name: "ATV, utility quad (450-700 cc)",
+          aliases: ["atv", "quad", "quad bike", "four-wheeler", "four wheeler"],
+          make: "Honda",
+          model: "FourTrax Rancher",
           domain: "offroad",
           fuel_type: "gasoline",
           factor_guide: "offroad",
@@ -71808,6 +73911,9 @@ var mystery_manor_default = {
         },
         utv_side_by_side: {
           name: "UTV / side-by-side (Ranger / RZR class, 2-4 seats)",
+          aliases: ["utv", "side-by-side", "side by side", "polaris ranger", "rzr", "gator"],
+          make: "Polaris",
+          model: "Ranger 1000",
           domain: "offroad",
           fuel_type: "gasoline",
           factor_guide: "offroad",
@@ -71837,6 +73943,9 @@ var mystery_manor_default = {
         },
         dirt_bike_250: {
           name: "Dirt bike, 250 cc four-stroke",
+          aliases: ["dirt bike", "dirtbike", "trail bike", "motocross bike", "enduro"],
+          make: "Honda",
+          model: "CRF250F",
           domain: "offroad",
           fuel_type: "gasoline",
           factor_guide: "offroad",
@@ -71864,6 +73973,382 @@ var mystery_manor_default = {
           payload_kg: 100,
           towing_kg: 0,
           notes: "Competition bikes are not street legal; plated dual-sport bikes use the motorcycle class. Premium fuel with 91+ octane typical."
+        },
+        bicycle: {
+          name: "Bicycle (commuter, hybrid or mountain bike)",
+          aliases: ["bicycle", "bike", "push bike", "pushbike", "cycle", "mountain bike", "road bike", "hybrid bike"],
+          make: "Trek",
+          model: "FX 2",
+          domain: "road",
+          fuel_type: "none",
+          factor_guide: "road",
+          consumption_unit: "none",
+          consumption: {},
+          price_new_cents: { min: 40000, typical: 80000, max: 200000 },
+          price_used_cents: { min: 15000, typical: 35000, max: 90000 },
+          insurance_liability_cents_per_month: 0,
+          insurance_full_cents_per_month: 0,
+          registration_cents_per_year: { min: 0, typical: 0, max: 0 },
+          annual_maintenance_cents_per_year: 1e4,
+          maintenance: { service_interval_miles: 2000, chain_replace_interval_miles: 2500, tire_replace_interval_miles: 3000 },
+          passengers: 1,
+          cargo_l: 20,
+          payload_kg: 110,
+          towing_kg: 0,
+          notes: "Pedalled: no fuel, so no range; a shop tune-up stands in for the service. Most US states register none; homeowners or renters insurance usually covers theft."
+        },
+        ebike: {
+          name: "Electric bicycle (Class 1-3 e-bike)",
+          aliases: ["e-bike", "ebike", "electric bike", "electric bicycle"],
+          make: "Rad Power",
+          model: "RadCity",
+          domain: "road",
+          fuel_type: "electricity",
+          factor_guide: "road",
+          usable_battery_kwh: 0.6,
+          consumption_unit: "mi_per_kwh",
+          consumption: { city: 70, highway: 55, combined: 65 },
+          range_mi: 40,
+          price_new_cents: { min: 120000, typical: 200000, max: 450000 },
+          price_used_cents: { min: 50000, typical: 110000, max: 250000 },
+          insurance_liability_cents_per_month: 0,
+          insurance_full_cents_per_month: 1500,
+          registration_cents_per_year: { min: 0, typical: 0, max: 2500 },
+          annual_maintenance_cents_per_year: 20000,
+          maintenance: {
+            service_interval_miles: 1500,
+            chain_lube_interval_miles: 200,
+            brake_pads_interval_miles: 1500,
+            battery_replace_cents_typical: 60000
+          },
+          passengers: 1,
+          cargo_l: 25,
+          payload_kg: 125,
+          towing_kg: 0,
+          charging: { level_1_120v: "3-6 h to full" },
+          notes: "Pedal-assist to 20 mph (Class 1-2) or 28 mph (Class 3); a few states register or plate Class 3."
+        },
+        cargo_van: {
+          name: "Cargo van (Transit / Sprinter / ProMaster class)",
+          aliases: ["van", "cargo van", "work van", "panel van", "delivery van", "transit", "sprinter", "promaster"],
+          make: "Ford",
+          model: "Transit 250",
+          domain: "road",
+          fuel_type: "gasoline",
+          factor_guide: "road",
+          tank_capacity_gal: 25,
+          tank_capacity_l: 94.6,
+          consumption_unit: "mpg",
+          consumption: { city: 15, highway: 19, combined: 16 },
+          range_mi: 400,
+          price_new_cents: { min: 4500000, typical: 5200000, max: 7000000 },
+          price_used_cents: { min: 2500000, typical: 3400000, max: 4500000 },
+          insurance_liability_cents_per_month: 7000,
+          insurance_full_cents_per_month: 25000,
+          registration_cents_per_year: { min: 4000, typical: 18000, max: 90000 },
+          annual_maintenance_cents_per_year: 140000,
+          maintenance: {
+            oil_change_interval_miles: 7500,
+            oil_type: "synthetic",
+            tire_rotation_interval_miles: 7500,
+            tire_replace_interval_miles: 40000,
+            brake_pads_interval_miles: 35000
+          },
+          passengers: 2,
+          cargo_l: 9000,
+          payload_kg: 1600,
+          towing_kg: 2500,
+          notes: "High-roof, long-wheelbase vans hold about 15 m3; commercial use raises the premium."
+        },
+        box_truck: {
+          name: "Box truck (16-26 ft, Class 6 diesel)",
+          aliases: ["box truck", "moving truck", "delivery truck", "straight truck", "cube truck", "cube van"],
+          make: "Isuzu",
+          model: "FTR",
+          domain: "road",
+          fuel_type: "diesel",
+          factor_guide: "road",
+          tank_capacity_gal: 50,
+          tank_capacity_l: 189.3,
+          consumption_unit: "mpg",
+          consumption: { city: 8, highway: 11, combined: 9 },
+          range_mi: 450,
+          price_new_cents: { min: 8000000, typical: 11000000, max: 15000000 },
+          price_used_cents: { min: 3500000, typical: 5500000, max: 8000000 },
+          insurance_liability_cents_per_month: 15000,
+          insurance_full_cents_per_month: 45000,
+          registration_cents_per_year: { min: 20000, typical: 80000, max: 250000 },
+          annual_maintenance_cents_per_year: 450000,
+          maintenance: {
+            oil_change_interval_miles: 15000,
+            oil_type: "diesel synthetic",
+            tire_replace_interval_miles: 60000,
+            brake_pads_interval_miles: 50000,
+            dot_inspection: "annual"
+          },
+          passengers: 3,
+          cargo_l: 40000,
+          payload_kg: 4500,
+          towing_kg: 4500,
+          notes: "Under 26,001 lb GVWR, so no CDL needed; commercial insurance and an annual DOT inspection."
+        },
+        semi_truck: {
+          name: "Semi tractor (Class 8 sleeper, diesel)",
+          aliases: [
+            "semi",
+            "semi truck",
+            "semi-truck",
+            "semi tractor",
+            "tractor-trailer",
+            "tractor trailer",
+            "big rig",
+            "eighteen-wheeler",
+            "18-wheeler",
+            "lorry"
+          ],
+          make: "Freightliner",
+          model: "Cascadia",
+          domain: "road",
+          fuel_type: "diesel",
+          factor_guide: "road",
+          tank_capacity_gal: 250,
+          tank_capacity_l: 946.4,
+          consumption_unit: "mpg",
+          consumption: { city: 5, highway: 7, combined: 6.5 },
+          range_mi: 1600,
+          price_new_cents: { min: 15000000, typical: 18000000, max: 22000000 },
+          price_used_cents: { min: 6000000, typical: 9000000, max: 13000000 },
+          insurance_liability_cents_per_month: 60000,
+          insurance_full_cents_per_month: 110000,
+          registration_cents_per_year: { min: 1e5, typical: 200000, max: 400000 },
+          annual_maintenance_cents_per_year: 1500000,
+          maintenance: {
+            oil_change_interval_miles: 25000,
+            oil_type: "diesel synthetic",
+            tire_replace_interval_miles: 1e5,
+            brake_pads_interval_miles: 75000,
+            dot_inspection: "annual"
+          },
+          passengers: 2,
+          cargo_l: 1000,
+          payload_kg: 1500,
+          towing_kg: 36000,
+          notes: "Needs a Class A CDL; registration is apportioned (IRP) by the miles run in each state. Payload is the cab's; the trailer is towed."
+        },
+        bus: {
+          name: "Bus (school bus or shuttle, diesel)",
+          aliases: ["bus", "school bus", "shuttle bus", "shuttle", "coach", "minibus"],
+          make: "Blue Bird",
+          model: "Vision",
+          domain: "road",
+          fuel_type: "diesel",
+          factor_guide: "road",
+          tank_capacity_gal: 60,
+          tank_capacity_l: 227.1,
+          consumption_unit: "mpg",
+          consumption: { city: 6, highway: 9, combined: 7 },
+          range_mi: 420,
+          price_new_cents: { min: 9000000, typical: 12000000, max: 16000000 },
+          price_used_cents: { min: 1500000, typical: 4000000, max: 8000000 },
+          insurance_liability_cents_per_month: 20000,
+          insurance_full_cents_per_month: 50000,
+          registration_cents_per_year: { min: 1e4, typical: 30000, max: 1e5 },
+          annual_maintenance_cents_per_year: 600000,
+          maintenance: {
+            oil_change_interval_miles: 1e4,
+            oil_type: "diesel synthetic",
+            tire_replace_interval_miles: 60000,
+            brake_pads_interval_miles: 40000
+          },
+          passengers: 48,
+          cargo_l: 1000,
+          payload_kg: 5000,
+          towing_kg: 0,
+          notes: "Carrying 16 or more people needs a CDL with a passenger endorsement."
+        },
+        rv_motorhome: {
+          name: "Motorhome (Class C or Class A RV)",
+          aliases: ["rv", "motorhome", "motor home", "camper", "camper van", "recreational vehicle"],
+          make: "Thor",
+          model: "Four Winds 28A",
+          domain: "road",
+          fuel_type: "gasoline",
+          factor_guide: "road",
+          tank_capacity_gal: 55,
+          tank_capacity_l: 208.2,
+          consumption_unit: "mpg",
+          consumption: { city: 7, highway: 10, combined: 8 },
+          range_mi: 440,
+          price_new_cents: { min: 9000000, typical: 15000000, max: 30000000 },
+          price_used_cents: { min: 5000000, typical: 8500000, max: 15000000 },
+          insurance_liability_cents_per_month: 5000,
+          insurance_full_cents_per_month: 15000,
+          registration_cents_per_year: { min: 1e4, typical: 40000, max: 150000 },
+          annual_maintenance_cents_per_year: 250000,
+          maintenance: {
+            oil_change_interval_miles: 5000,
+            oil_type: "synthetic",
+            tire_replace_interval_miles: 40000,
+            roof_reseal_interval_miles: 30000,
+            winterization_cents_annual: 20000
+          },
+          passengers: 6,
+          cargo_l: 3000,
+          payload_kg: 1500,
+          towing_kg: 2300,
+          notes: "Sleeps four to eight; propane, fresh-water and holding tanks are its own upkeep."
+        },
+        snowmobile: {
+          name: "Snowmobile (600-850 cc, trail)",
+          aliases: ["snowmobile", "snow machine", "sled", "ski-doo", "skidoo"],
+          make: "Ski-Doo",
+          model: "MXZ 600",
+          domain: "offroad",
+          fuel_type: "gasoline",
+          factor_guide: "offroad",
+          tank_capacity_gal: 10.5,
+          tank_capacity_l: 39.7,
+          consumption_unit: "gal_per_h",
+          consumption: { idle: 0.2, normal_trail: 2, hard_use: 3.5, approx_mpg_trail: 12 },
+          range_h: 5,
+          price_new_cents: { min: 1100000, typical: 1500000, max: 2000000 },
+          price_used_cents: { min: 500000, typical: 850000, max: 1300000 },
+          insurance_liability_cents_per_month: 1000,
+          insurance_full_cents_per_month: 3500,
+          registration_cents_per_year: { min: 2000, typical: 5000, max: 15000 },
+          annual_maintenance_cents_per_year: 50000,
+          maintenance: { engine_service_interval_hours: 50, track_and_skis_check: "each season", summer_storage_cents_annual: 15000 },
+          passengers: 2,
+          cargo_l: 30,
+          payload_kg: 180,
+          towing_kg: 0,
+          notes: "Snow only: a trail permit or registration is required in snowbelt states."
+        },
+        tractor_farm: {
+          name: "Farm tractor (utility, 45-100 hp diesel)",
+          aliases: ["tractor", "farm tractor", "utility tractor", "john deere"],
+          make: "John Deere",
+          model: "5075E",
+          domain: "offroad",
+          fuel_type: "diesel",
+          factor_guide: "offroad",
+          tank_capacity_gal: 20,
+          tank_capacity_l: 75.7,
+          consumption_unit: "gal_per_h",
+          consumption: { idle: 0.5, normal_trail: 2.5, hard_use: 4.5, approx_mpg_trail: 3 },
+          range_h: 8,
+          price_new_cents: { min: 3500000, typical: 5500000, max: 9000000 },
+          price_used_cents: { min: 1500000, typical: 3000000, max: 5500000 },
+          insurance_liability_cents_per_month: 1500,
+          insurance_full_cents_per_month: 4500,
+          registration_cents_per_year: { min: 0, typical: 2000, max: 1e4 },
+          annual_maintenance_cents_per_year: 150000,
+          maintenance: { engine_service_interval_hours: 250, hydraulic_fluid_interval_hours: 1000 },
+          passengers: 1,
+          cargo_l: 0,
+          payload_kg: 1000,
+          towing_kg: 5000,
+          notes: "Farm use usually needs no registration; on public roads it carries a slow-moving-vehicle sign."
+        },
+        rowboat: {
+          name: "Rowboat or jon boat (10-14 ft, oars)",
+          aliases: ["rowboat", "row boat", "rowing boat", "dinghy", "jon boat", "jonboat", "skiff"],
+          make: "Lowe",
+          model: "L1236",
+          domain: "marine",
+          fuel_type: "none",
+          factor_guide: "marine",
+          consumption_unit: "none",
+          consumption: {},
+          price_new_cents: { min: 80000, typical: 150000, max: 300000 },
+          price_used_cents: { min: 30000, typical: 70000, max: 150000 },
+          insurance_liability_cents_per_month: 0,
+          insurance_full_cents_per_month: 1000,
+          registration_cents_per_year: { min: 0, typical: 1500, max: 5000 },
+          annual_maintenance_cents_per_year: 5000,
+          maintenance: {},
+          passengers: 3,
+          cargo_l: 200,
+          payload_kg: 300,
+          towing_kg: 0,
+          notes: "Rowed: no fuel. Most states register a hull only once an outboard is fitted."
+        },
+        kayak: {
+          name: "Kayak or canoe (paddled, 1-2 seats)",
+          aliases: ["kayak", "canoe", "sea kayak", "sit-on-top kayak"],
+          make: "Old Town",
+          model: "Loon 106",
+          domain: "marine",
+          fuel_type: "none",
+          factor_guide: "marine",
+          consumption_unit: "none",
+          consumption: {},
+          price_new_cents: { min: 40000, typical: 90000, max: 250000 },
+          price_used_cents: { min: 20000, typical: 50000, max: 120000 },
+          insurance_liability_cents_per_month: 0,
+          insurance_full_cents_per_month: 0,
+          registration_cents_per_year: { min: 0, typical: 0, max: 3000 },
+          annual_maintenance_cents_per_year: 2000,
+          maintenance: {},
+          passengers: 2,
+          cargo_l: 100,
+          payload_kg: 200,
+          towing_kg: 0,
+          notes: "Paddled: no fuel. A few states ask for a launch permit or an invasive-species sticker."
+        },
+        small_plane: {
+          name: "Small plane (four-seat single piston, Cessna 172 class)",
+          aliases: ["plane", "airplane", "aeroplane", "small plane", "light aircraft", "aircraft", "prop plane", "cessna", "piper"],
+          make: "Cessna",
+          model: "172 Skyhawk",
+          domain: "air",
+          fuel_type: "avgas",
+          factor_guide: "air",
+          tank_capacity_gal: 53,
+          tank_capacity_l: 200.6,
+          consumption_unit: "gal_per_h",
+          consumption: { taxi: 1.5, climb: 12, cruise: 9 },
+          range_h: 5,
+          price_new_cents: { min: 45000000, typical: 50000000, max: 60000000 },
+          price_used_cents: { min: 9000000, typical: 20000000, max: 40000000 },
+          insurance_liability_cents_per_month: 15000,
+          insurance_full_cents_per_month: 25000,
+          registration_cents_per_year: { min: 500, typical: 20000, max: 150000 },
+          fuel_cents_per_gal: { min: 550, typical: 700, max: 1000 },
+          annual_maintenance_cents_per_year: 800000,
+          maintenance: { engine_service_interval_hours: 100, engine_overhaul_interval_hours: 2000, annual_inspection_cents_typical: 250000 },
+          passengers: 4,
+          cargo_l: 340,
+          payload_kg: 400,
+          towing_kg: 0,
+          notes: "Flown by a licensed pilot between airfields; FAA registration lasts seven years, and some states add an aircraft fee or tax. Hangar or tie-down rent is extra."
+        },
+        helicopter: {
+          name: "Light helicopter (four-seat piston, Robinson R44 class)",
+          aliases: ["helicopter", "heli", "copter", "robinson"],
+          make: "Robinson",
+          model: "R44 Raven II",
+          domain: "air",
+          fuel_type: "avgas",
+          factor_guide: "air",
+          tank_capacity_gal: 46.5,
+          tank_capacity_l: 176,
+          consumption_unit: "gal_per_h",
+          consumption: { taxi: 4, climb: 17, cruise: 15 },
+          range_h: 2.8,
+          price_new_cents: { min: 50000000, typical: 60000000, max: 70000000 },
+          price_used_cents: { min: 20000000, typical: 32000000, max: 45000000 },
+          insurance_liability_cents_per_month: 25000,
+          insurance_full_cents_per_month: 150000,
+          registration_cents_per_year: { min: 500, typical: 20000, max: 150000 },
+          fuel_cents_per_gal: { min: 550, typical: 700, max: 1000 },
+          annual_maintenance_cents_per_year: 2500000,
+          maintenance: { engine_service_interval_hours: 100, overhaul_interval_hours: 2200, annual_inspection_cents_typical: 500000 },
+          passengers: 4,
+          cargo_l: 200,
+          payload_kg: 380,
+          towing_kg: 0,
+          notes: "Lands at a helipad, an airfield or any cleared spot the route names; the rotor and engine overhaul come due together at about 2,200 hours."
         },
         four_door_saloon: {
           name: "Four-door saloon",
@@ -71910,7 +74395,7 @@ var mystery_manor_default = {
       id: "vehicles.factors",
       pack: "vehicles",
       schema: "lre-table/vehicles.factors/v1",
-      revision: "491579e3ac37e00325a6adb017d7a9c7",
+      revision: "e6c1c3b8e9d3cd0d690a59ad77103940",
       label: "Consumption factor guides",
       source: {
         dataPack: "modern-us",
@@ -71978,6 +74463,19 @@ var mystery_manor_default = {
             sustained_high_speed_desert_race_pace: 1.5,
             two_up_or_loaded_cargo: 1.15
           }
+        },
+        air: {
+          basis: "Multipliers on gallons per hour at normal cruise; rules of thumb from light-aircraft operating handbooks' fuel tables and flight-school planning guidance.",
+          factors: {
+            taxi_and_runup: 0.3,
+            climb_full_power: 1.35,
+            normal_cruise_default: 1,
+            economy_cruise_leaned: 0.85,
+            headwind_strong: 1.15,
+            max_gross_weight: 1.1,
+            high_density_altitude: 1.1
+          },
+          note: "Plan a 30-minute day VFR reserve (45 minutes at night) on top of the trip's fuel."
         }
       }
     }
@@ -72249,7 +74747,7 @@ var modern_slice_of_life_default = {
       }
     },
     gear: { version: 1, config: {} },
-    vehicles: { version: 1, config: {} },
+    vehicles: { version: 1, config: { registration: true } },
     weather: {
       version: 1,
       config: {
@@ -72392,12 +74890,12 @@ var modern_slice_of_life_default = {
       "economy.occupations": "fe82950d08d32866585e8d92ca6c866a",
       "economy.projects": "46bd6c11c3a35c528464d62990f8e500",
       "economy.regions": "0a14f13dda6e977fe0243eaaca5d1790",
-      "gear.containers": "29334aeff91f1b6b9e99db08972661f1",
-      "gear.items": "d4980aa57f9745734d948f954a32bcc7",
+      "gear.containers": "91ebed05ed7fe51de7bfd7c0c318bd72",
+      "gear.items": "3b706178b400380a9407c9cd01f27c48",
       "gear.kits": "3656a59a513f99da1adb635a53e9e208",
-      "gear.slots": "3b7a1c09512b25782bd3e5533a74e7ea",
-      "vehicles.classes": "d66d371fa1fb8f4c87410b2b0b60a307",
-      "vehicles.factors": "491579e3ac37e00325a6adb017d7a9c7"
+      "gear.slots": "e813e37ac93fe7f769ef6081705b58f8",
+      "vehicles.classes": "bafe3d2f10c8e41d855b710e97384d30",
+      "vehicles.factors": "e6c1c3b8e9d3cd0d690a59ad77103940"
     }
   },
   kinds: {
@@ -82037,7 +84535,7 @@ var modern_slice_of_life_default = {
       id: "gear.items",
       pack: "gear",
       schema: "lre-table/gear.items/v1",
-      revision: "d4980aa57f9745734d948f954a32bcc7",
+      revision: "3b706178b400380a9407c9cd01f27c48",
       label: "Gear items",
       source: {
         dataPack: "modern-us",
@@ -82049,7 +84547,7 @@ var modern_slice_of_life_default = {
       },
       columns: {
         name: { type: "text" },
-        category: { type: "enum", values: ["carried", "clothing", "household", "recreation", "tool"] },
+        category: { type: "enum", values: ["carried", "clothing", "household", "recreation", "tool", "weapon", "armor", "ammo"] },
         equip_slot: { type: "ref", ref: "gear.slots" },
         weight_g: { type: "int", unit: "g", doc: "Empty or dry weight." },
         volume_l: { type: "number", unit: "l" },
@@ -82060,6 +84558,7 @@ var modern_slice_of_life_default = {
           optional: true
         },
         price_cents: { type: "band", unit: "cents" },
+        ammo: { type: "ref", ref: "gear.items", doc: "The ammunition a weapon takes: an ammo row, which ammo_of counts.", optional: true },
         notes: { type: "text", optional: true }
       },
       rows: {
@@ -82883,6 +85382,267 @@ var modern_slice_of_life_default = {
           volume_l: 6,
           size: "hand",
           price_cents: { min: 2500, typical: 5000, max: 12000 }
+        },
+        pistol_9mm: {
+          name: "Pistol, 9mm semi-automatic",
+          category: "weapon",
+          equip_slot: "holster",
+          weight_g: 700,
+          volume_l: 0.6,
+          size: "hand",
+          price_cents: { min: 30000, typical: 55000, max: 120000 },
+          ammo: "ammo_9mm",
+          notes: "Unloaded; a loaded 15-round magazine adds about 200 g."
+        },
+        pistol_45: {
+          name: "Pistol, .45 ACP",
+          category: "weapon",
+          equip_slot: "holster",
+          weight_g: 1000,
+          volume_l: 0.7,
+          size: "hand",
+          price_cents: { min: 40000, typical: 70000, max: 150000 },
+          ammo: "ammo_45_acp",
+          notes: "Unloaded."
+        },
+        revolver_38: {
+          name: "Revolver, .38 Special",
+          category: "weapon",
+          equip_slot: "holster",
+          weight_g: 650,
+          volume_l: 0.6,
+          size: "hand",
+          price_cents: { min: 40000, typical: 65000, max: 130000 },
+          ammo: "ammo_38_special",
+          notes: "Unloaded; holds 5 or 6 rounds."
+        },
+        rifle_hunting_308: {
+          name: "Hunting rifle, bolt-action .308",
+          category: "weapon",
+          equip_slot: "back",
+          weight_g: 3600,
+          volume_l: 8,
+          size: "armful",
+          price_cents: { min: 40000, typical: 80000, max: 200000 },
+          ammo: "ammo_308",
+          notes: "Unloaded, without a scope; slung on the back or carried in a case."
+        },
+        rifle_ar15: {
+          name: "Rifle, AR-15 style 5.56mm",
+          category: "weapon",
+          equip_slot: "back",
+          weight_g: 2900,
+          volume_l: 7,
+          size: "armful",
+          price_cents: { min: 60000, typical: 1e5, max: 200000 },
+          ammo: "ammo_556",
+          notes: "Unloaded."
+        },
+        rifle_22: {
+          name: "Rifle, .22 LR",
+          category: "weapon",
+          equip_slot: "back",
+          weight_g: 2300,
+          volume_l: 6,
+          size: "armful",
+          price_cents: { min: 15000, typical: 30000, max: 70000 },
+          ammo: "ammo_22lr",
+          notes: "Unloaded."
+        },
+        shotgun_12ga: {
+          name: "Shotgun, pump-action 12 gauge",
+          category: "weapon",
+          equip_slot: "back",
+          weight_g: 3400,
+          volume_l: 8,
+          size: "armful",
+          price_cents: { min: 25000, typical: 45000, max: 1e5 },
+          ammo: "ammo_12ga",
+          notes: "Unloaded."
+        },
+        hunting_knife: {
+          name: "Hunting knife, fixed blade",
+          category: "weapon",
+          equip_slot: "sheath",
+          weight_g: 250,
+          volume_l: 0.3,
+          size: "hand",
+          price_cents: { min: 2500, typical: 6000, max: 20000 }
+        },
+        machete: {
+          name: "Machete",
+          category: "weapon",
+          equip_slot: "sheath",
+          weight_g: 600,
+          volume_l: 1,
+          size: "hand",
+          price_cents: { min: 1500, typical: 3000, max: 8000 }
+        },
+        baton_expandable: {
+          name: "Expandable baton",
+          category: "weapon",
+          equip_slot: "holster",
+          weight_g: 500,
+          volume_l: 0.3,
+          size: "hand",
+          price_cents: { min: 3000, typical: 6000, max: 15000 }
+        },
+        stun_gun: {
+          name: "Stun gun",
+          category: "weapon",
+          equip_slot: "holster",
+          weight_g: 300,
+          volume_l: 0.3,
+          size: "hand",
+          price_cents: { min: 2500, typical: 5000, max: 12000 }
+        },
+        pepper_spray: {
+          name: "Pepper spray",
+          category: "weapon",
+          equip_slot: "pocket",
+          weight_g: 60,
+          volume_l: 0.05,
+          size: "pocket",
+          price_cents: { min: 800, typical: 1500, max: 3000 }
+        },
+        compound_bow: {
+          name: "Compound bow",
+          category: "weapon",
+          equip_slot: "back",
+          weight_g: 1800,
+          volume_l: 10,
+          size: "armful",
+          price_cents: { min: 30000, typical: 60000, max: 150000 },
+          ammo: "arrow_carbon"
+        },
+        crossbow: {
+          name: "Crossbow",
+          category: "weapon",
+          equip_slot: "back",
+          weight_g: 3200,
+          volume_l: 15,
+          size: "armful",
+          price_cents: { min: 25000, typical: 50000, max: 120000 },
+          ammo: "crossbow_bolt"
+        },
+        body_armor_soft: {
+          name: "Body armor vest, soft (IIIA)",
+          category: "armor",
+          equip_slot: "torso_outer",
+          weight_g: 1800,
+          volume_l: 6,
+          size: "hand",
+          price_cents: { min: 30000, typical: 60000, max: 120000 },
+          notes: "Worn over or under a shirt; stops handgun rounds."
+        },
+        plate_carrier: {
+          name: "Plate carrier with rifle plates (III)",
+          category: "armor",
+          equip_slot: "torso_outer",
+          weight_g: 6500,
+          volume_l: 12,
+          size: "armful",
+          price_cents: { min: 50000, typical: 90000, max: 200000 },
+          notes: "Two plates; stops rifle rounds."
+        },
+        helmet_ballistic: {
+          name: "Ballistic helmet",
+          category: "armor",
+          equip_slot: "head",
+          weight_g: 1400,
+          volume_l: 6,
+          size: "hand",
+          price_cents: { min: 30000, typical: 60000, max: 150000 }
+        },
+        ammo_9mm: {
+          name: "9mm round",
+          category: "ammo",
+          equip_slot: "pocket_or_bag",
+          weight_g: 12,
+          volume_l: 0.005,
+          size: "pocket",
+          price_cents: { min: 20, typical: 35, max: 80 },
+          notes: "One round: a box is a stack of 50."
+        },
+        ammo_45_acp: {
+          name: ".45 ACP round",
+          category: "ammo",
+          equip_slot: "pocket_or_bag",
+          weight_g: 21,
+          volume_l: 0.006,
+          size: "pocket",
+          price_cents: { min: 35, typical: 55, max: 120 },
+          notes: "One round: a box is a stack of 50."
+        },
+        ammo_38_special: {
+          name: ".38 Special round",
+          category: "ammo",
+          equip_slot: "pocket_or_bag",
+          weight_g: 15,
+          volume_l: 0.005,
+          size: "pocket",
+          price_cents: { min: 30, typical: 50, max: 100 },
+          notes: "One round: a box is a stack of 50."
+        },
+        ammo_556: {
+          name: "5.56mm round",
+          category: "ammo",
+          equip_slot: "pocket_or_bag",
+          weight_g: 12,
+          volume_l: 0.006,
+          size: "pocket",
+          price_cents: { min: 35, typical: 55, max: 120 },
+          notes: "One round: a box is a stack of 20."
+        },
+        ammo_308: {
+          name: ".308 Winchester round",
+          category: "ammo",
+          equip_slot: "pocket_or_bag",
+          weight_g: 25,
+          volume_l: 0.008,
+          size: "pocket",
+          price_cents: { min: 80, typical: 130, max: 300 },
+          notes: "One round: a box is a stack of 20."
+        },
+        ammo_22lr: {
+          name: ".22 LR round",
+          category: "ammo",
+          equip_slot: "pocket_or_bag",
+          weight_g: 3,
+          volume_l: 0.001,
+          size: "pocket",
+          price_cents: { min: 5, typical: 10, max: 25 },
+          notes: "One round: a box is a stack of 50 to 500."
+        },
+        ammo_12ga: {
+          name: "12-gauge shell",
+          category: "ammo",
+          equip_slot: "pocket_or_bag",
+          weight_g: 35,
+          volume_l: 0.015,
+          size: "pocket",
+          price_cents: { min: 40, typical: 70, max: 150 },
+          notes: "One shell: a box is a stack of 25."
+        },
+        arrow_carbon: {
+          name: "Arrow, carbon",
+          category: "ammo",
+          equip_slot: "quiver",
+          weight_g: 25,
+          volume_l: 0.05,
+          size: "hand",
+          price_cents: { min: 500, typical: 1000, max: 2000 },
+          notes: "One arrow: a quiver holds about 6 to 12."
+        },
+        crossbow_bolt: {
+          name: "Crossbow bolt",
+          category: "ammo",
+          equip_slot: "quiver",
+          weight_g: 28,
+          volume_l: 0.04,
+          size: "hand",
+          price_cents: { min: 600, typical: 1200, max: 2500 },
+          notes: "One bolt."
         }
       }
     },
@@ -82890,7 +85650,7 @@ var modern_slice_of_life_default = {
       id: "gear.containers",
       pack: "gear",
       schema: "lre-table/gear.containers/v1",
-      revision: "29334aeff91f1b6b9e99db08972661f1",
+      revision: "91ebed05ed7fe51de7bfd7c0c318bd72",
       label: "Containers",
       source: {
         dataPack: "modern-us",
@@ -83292,6 +86052,40 @@ var modern_slice_of_life_default = {
           holds: "heavy",
           equip_slot: "none",
           price_cents: { min: 0, typical: 0, max: 0 }
+        },
+        gun_safe: {
+          name: "Gun safe",
+          capacity_l: 400,
+          max_load_kg: 300,
+          empty_weight_g: 150000,
+          location: "furniture",
+          size: "furniture",
+          holds: "armful",
+          equip_slot: "none",
+          price_cents: { min: 50000, typical: 120000, max: 400000 },
+          notes: "Long guns upright, handguns and ammunition on the door and shelves; most bolt to the floor."
+        },
+        rifle_case_soft: {
+          name: "Rifle case, soft",
+          capacity_l: 12,
+          max_load_kg: 8,
+          empty_weight_g: 1200,
+          location: "carried",
+          size: "armful",
+          holds: "armful",
+          equip_slot: "shoulder",
+          price_cents: { min: 2500, typical: 6000, max: 20000 }
+        },
+        ammo_can: {
+          name: "Ammo can, .50 caliber",
+          capacity_l: 8,
+          max_load_kg: 15,
+          empty_weight_g: 1800,
+          location: "carried",
+          size: "hand",
+          holds: "hand",
+          equip_slot: "hand_held",
+          price_cents: { min: 1500, typical: 2500, max: 5000 }
         }
       }
     },
@@ -83479,7 +86273,7 @@ var modern_slice_of_life_default = {
       id: "gear.slots",
       pack: "gear",
       schema: "lre-table/gear.slots/v1",
-      revision: "3b7a1c09512b25782bd3e5533a74e7ea",
+      revision: "e813e37ac93fe7f769ef6081705b58f8",
       label: "Equip slots",
       source: {
         dataPack: "modern-us",
@@ -83507,6 +86301,9 @@ var modern_slice_of_life_default = {
         feet: { description: "Shoes and boots" },
         back: { description: "Backpacks" },
         shoulder: { description: "Shoulder and crossbody bags" },
+        holster: { description: "A holster on the belt, the shoulder or the thigh: a sidearm, a stun gun, a baton" },
+        sheath: { description: "A sheath on the belt: a knife, a machete" },
+        quiver: { description: "A quiver: arrows, crossbow bolts" },
         hand_held: { description: "Carried in hand: luggage, toolboxes, umbrellas" },
         pocket: { description: "Small items carried in a pocket" },
         pocket_or_bag: { description: "Small items carried in a pocket or a bag" },
@@ -83517,7 +86314,7 @@ var modern_slice_of_life_default = {
       id: "vehicles.classes",
       pack: "vehicles",
       schema: "lre-table/vehicles.classes/v1",
-      revision: "d66d371fa1fb8f4c87410b2b0b60a307",
+      revision: "bafe3d2f10c8e41d855b710e97384d30",
       label: "Vehicle classes",
       source: {
         dataPack: "modern-us",
@@ -83534,20 +86331,36 @@ var modern_slice_of_life_default = {
       },
       columns: {
         name: { type: "text" },
-        domain: { type: "enum", values: ["road", "marine", "offroad"] },
-        fuel_type: { type: "enum", values: ["diesel", "electricity", "gasoline"] },
+        aliases: {
+          type: "list",
+          of: "text",
+          doc: 'Other words a purchase or a story names one of the class by ("pickup", "jet ski"), lowercase; the longest that matches wins (`vehicles.priced`).',
+          optional: true
+        },
+        make: { type: "text", doc: "A representative make for a new one of the class, as the vehicle picker suggests it.", optional: true },
+        model: { type: "text", doc: "A representative model of that make.", optional: true },
+        domain: {
+          type: "enum",
+          values: ["road", "marine", "offroad", "air"],
+          doc: "Where it goes: roads, water, off-road trails, or the air (only over routes the world authors for the air)."
+        },
+        fuel_type: {
+          type: "enum",
+          values: ["avgas", "diesel", "electricity", "gasoline", "none"],
+          doc: "none: pedalled, paddled or rowed, so no tank, fuel or range."
+        },
         factor_guide: { type: "ref", ref: "vehicles.factors", doc: "The consumption factor guide for this class." },
         tank_capacity_gal: { type: "number", unit: "gal", doc: "Usable fuel.", optional: true },
         tank_capacity_l: { type: "number", unit: "l", optional: true },
         usable_battery_kwh: { type: "number", unit: "kwh", optional: true },
         consumption_unit: {
           type: "enum",
-          values: ["mpg", "mi_per_kwh", "gal_per_h"],
-          doc: "The unit of the rates in `consumption`: mpg for fuel road vehicles, mi_per_kwh for EVs, gal_per_h for marine and off-road."
+          values: ["mpg", "mi_per_kwh", "gal_per_h", "none"],
+          doc: "The unit of the rates in `consumption`: mpg for fuel road vehicles, mi_per_kwh for EVs, gal_per_h for marine, off-road and aircraft, none for what burns nothing."
         },
         consumption: {
           type: "json",
-          doc: "Rates by regime in consumption_unit. Road: city, highway, combined. Marine: idle_no_wake, cruise_planing, wide_open (+ note). Off-road: idle, normal_trail, hard_use, plus approx_mpg_trail in mpg."
+          doc: "Rates by regime in consumption_unit. Road: city, highway, combined. Marine: idle_no_wake, cruise_planing, wide_open (+ note). Off-road: idle, normal_trail, hard_use, plus approx_mpg_trail in mpg. Air: taxi, climb, cruise. None: no rates."
         },
         range_mi: { type: "int", unit: "mi", doc: "On a full tank or battery at combined consumption.", optional: true },
         range_h: { type: "number", unit: "h", doc: "Engine hours on a full tank at the normal or cruise rate.", optional: true },
@@ -83556,6 +86369,12 @@ var modern_slice_of_life_default = {
         insurance_liability_cents_per_month: { type: "int", unit: "cents_per_month", doc: "State-minimum liability, clean-record adult." },
         insurance_full_cents_per_month: { type: "int", unit: "cents_per_month", doc: "Liability plus collision and comprehensive." },
         registration_cents_per_year: { type: "band", unit: "cents_per_year", doc: "Varies widely by state." },
+        fuel_cents_per_gal: {
+          type: "band",
+          unit: "cents_per_gal",
+          doc: "A US gallon of its fuel, for a fuel the price catalog has no row for (aviation gasoline).",
+          optional: true
+        },
         annual_maintenance_cents_per_year: { type: "int", unit: "cents_per_year" },
         maintenance: {
           type: "json",
@@ -83571,6 +86390,9 @@ var modern_slice_of_life_default = {
       rows: {
         compact_car: {
           name: "Compact car (Civic / Corolla class)",
+          aliases: ["compact car", "compact", "hatchback", "economy car", "civic", "corolla"],
+          make: "Honda",
+          model: "Civic",
           domain: "road",
           fuel_type: "gasoline",
           factor_guide: "road",
@@ -83601,6 +86423,9 @@ var modern_slice_of_life_default = {
         },
         midsize_sedan: {
           name: "Midsize sedan (Camry / Accord class)",
+          aliases: ["car", "sedan", "saloon", "family car", "camry", "accord"],
+          make: "Toyota",
+          model: "Camry",
           domain: "road",
           fuel_type: "gasoline",
           factor_guide: "road",
@@ -83631,6 +86456,9 @@ var modern_slice_of_life_default = {
         },
         pickup_midsize: {
           name: "Midsize pickup (Tacoma / Colorado class)",
+          aliases: ["midsize pickup", "small pickup", "compact pickup", "tacoma", "colorado", "ford ranger", "frontier"],
+          make: "Toyota",
+          model: "Tacoma",
           domain: "road",
           fuel_type: "gasoline",
           factor_guide: "road",
@@ -83661,6 +86489,9 @@ var modern_slice_of_life_default = {
         },
         pickup_fullsize: {
           name: "Full-size pickup (F-150 / Silverado class)",
+          aliases: ["pickup", "pickup truck", "truck", "full-size pickup", "f-150", "f150", "silverado", "ram 1500"],
+          make: "Ford",
+          model: "F-150",
           domain: "road",
           fuel_type: "gasoline",
           factor_guide: "road",
@@ -83691,6 +86522,21 @@ var modern_slice_of_life_default = {
         },
         pickup_heavy_duty_diesel: {
           name: "Heavy-duty diesel pickup (2500 / F-250 class)",
+          aliases: [
+            "heavy-duty pickup",
+            "heavy duty truck",
+            "diesel pickup",
+            "diesel truck",
+            "work truck",
+            "flatbed",
+            "flatbed truck",
+            "dually",
+            "f-250",
+            "f-350",
+            "ram 2500"
+          ],
+          make: "Ram",
+          model: "2500",
           domain: "road",
           fuel_type: "diesel",
           factor_guide: "road",
@@ -83722,6 +86568,9 @@ var modern_slice_of_life_default = {
         },
         suv_compact: {
           name: "Compact SUV (RAV4 / CR-V class)",
+          aliases: ["suv", "compact suv", "crossover", "rav4", "cr-v"],
+          make: "Toyota",
+          model: "RAV4",
           domain: "road",
           fuel_type: "gasoline",
           factor_guide: "road",
@@ -83752,6 +86601,9 @@ var modern_slice_of_life_default = {
         },
         suv_midsize_3row: {
           name: "Midsize three-row SUV (Highlander / Explorer class)",
+          aliases: ["three-row suv", "3-row suv", "midsize suv", "family suv", "highlander", "explorer"],
+          make: "Ford",
+          model: "Explorer",
           domain: "road",
           fuel_type: "gasoline",
           factor_guide: "road",
@@ -83782,6 +86634,9 @@ var modern_slice_of_life_default = {
         },
         minivan: {
           name: "Minivan (Sienna / Odyssey / Pacifica class)",
+          aliases: ["minivan", "mini van", "people carrier", "sienna", "odyssey", "pacifica"],
+          make: "Honda",
+          model: "Odyssey",
           domain: "road",
           fuel_type: "gasoline",
           factor_guide: "road",
@@ -83812,6 +86667,9 @@ var modern_slice_of_life_default = {
         },
         ev_sedan: {
           name: "Electric sedan (Model 3 / Ioniq 6 class)",
+          aliases: ["electric car", "ev", "electric sedan", "tesla", "model 3", "ioniq"],
+          make: "Tesla",
+          model: "Model 3",
           domain: "road",
           fuel_type: "electricity",
           factor_guide: "road",
@@ -83842,6 +86700,9 @@ var modern_slice_of_life_default = {
         },
         ev_crossover: {
           name: "Electric crossover (Model Y / Equinox EV class)",
+          aliases: ["electric suv", "electric crossover", "ev suv", "model y", "equinox ev"],
+          make: "Tesla",
+          model: "Model Y",
           domain: "road",
           fuel_type: "electricity",
           factor_guide: "road",
@@ -83872,6 +86733,9 @@ var modern_slice_of_life_default = {
         },
         motorcycle_standard: {
           name: "Motorcycle, standard or cruiser (500-900 cc)",
+          aliases: ["motorcycle", "motorbike", "cruiser", "chopper", "sportbike", "harley"],
+          make: "Honda",
+          model: "Rebel 500",
           domain: "road",
           fuel_type: "gasoline",
           factor_guide: "road",
@@ -83903,6 +86767,9 @@ var modern_slice_of_life_default = {
         },
         scooter_150: {
           name: "Scooter or moped (50-150 cc)",
+          aliases: ["scooter", "moped", "motor scooter", "vespa"],
+          make: "Vespa",
+          model: "Primavera 150",
           domain: "road",
           fuel_type: "gasoline",
           factor_guide: "road",
@@ -83933,6 +86800,9 @@ var modern_slice_of_life_default = {
         },
         bass_boat_outboard: {
           name: "Outboard bass boat (18-20 ft, 150-200 hp)",
+          aliases: ["boat", "motorboat", "bass boat", "fishing boat", "speedboat", "outboard"],
+          make: "Tracker",
+          model: "Pro Team 175",
           domain: "marine",
           fuel_type: "gasoline",
           factor_guide: "marine",
@@ -83962,6 +86832,9 @@ var modern_slice_of_life_default = {
         },
         pontoon_boat: {
           name: "Pontoon boat (22-24 ft, 90-150 hp outboard)",
+          aliases: ["pontoon", "pontoon boat", "party boat"],
+          make: "Sun Tracker",
+          model: "Party Barge 22 XP3",
           domain: "marine",
           fuel_type: "gasoline",
           factor_guide: "marine",
@@ -83990,6 +86863,9 @@ var modern_slice_of_life_default = {
         },
         jet_ski_pwc: {
           name: "Personal watercraft / jet ski (1-3 seats)",
+          aliases: ["jet ski", "jetski", "personal watercraft", "pwc", "sea-doo"],
+          make: "Sea-Doo",
+          model: "GTI 130",
           domain: "marine",
           fuel_type: "gasoline",
           factor_guide: "marine",
@@ -84017,6 +86893,9 @@ var modern_slice_of_life_default = {
         },
         sailboat_auxiliary: {
           name: "Cruising sailboat with auxiliary diesel (30-35 ft)",
+          aliases: ["sailboat", "sailing boat", "yacht", "sloop", "sailing yacht"],
+          make: "Catalina",
+          model: "315",
           domain: "marine",
           fuel_type: "diesel",
           factor_guide: "marine",
@@ -84050,6 +86929,9 @@ var modern_slice_of_life_default = {
         },
         atv_utility: {
           name: "ATV, utility quad (450-700 cc)",
+          aliases: ["atv", "quad", "quad bike", "four-wheeler", "four wheeler"],
+          make: "Honda",
+          model: "FourTrax Rancher",
           domain: "offroad",
           fuel_type: "gasoline",
           factor_guide: "offroad",
@@ -84079,6 +86961,9 @@ var modern_slice_of_life_default = {
         },
         utv_side_by_side: {
           name: "UTV / side-by-side (Ranger / RZR class, 2-4 seats)",
+          aliases: ["utv", "side-by-side", "side by side", "polaris ranger", "rzr", "gator"],
+          make: "Polaris",
+          model: "Ranger 1000",
           domain: "offroad",
           fuel_type: "gasoline",
           factor_guide: "offroad",
@@ -84108,6 +86993,9 @@ var modern_slice_of_life_default = {
         },
         dirt_bike_250: {
           name: "Dirt bike, 250 cc four-stroke",
+          aliases: ["dirt bike", "dirtbike", "trail bike", "motocross bike", "enduro"],
+          make: "Honda",
+          model: "CRF250F",
           domain: "offroad",
           fuel_type: "gasoline",
           factor_guide: "offroad",
@@ -84135,6 +87023,382 @@ var modern_slice_of_life_default = {
           payload_kg: 100,
           towing_kg: 0,
           notes: "Competition bikes are not street legal; plated dual-sport bikes use the motorcycle class. Premium fuel with 91+ octane typical."
+        },
+        bicycle: {
+          name: "Bicycle (commuter, hybrid or mountain bike)",
+          aliases: ["bicycle", "bike", "push bike", "pushbike", "cycle", "mountain bike", "road bike", "hybrid bike"],
+          make: "Trek",
+          model: "FX 2",
+          domain: "road",
+          fuel_type: "none",
+          factor_guide: "road",
+          consumption_unit: "none",
+          consumption: {},
+          price_new_cents: { min: 40000, typical: 80000, max: 200000 },
+          price_used_cents: { min: 15000, typical: 35000, max: 90000 },
+          insurance_liability_cents_per_month: 0,
+          insurance_full_cents_per_month: 0,
+          registration_cents_per_year: { min: 0, typical: 0, max: 0 },
+          annual_maintenance_cents_per_year: 1e4,
+          maintenance: { service_interval_miles: 2000, chain_replace_interval_miles: 2500, tire_replace_interval_miles: 3000 },
+          passengers: 1,
+          cargo_l: 20,
+          payload_kg: 110,
+          towing_kg: 0,
+          notes: "Pedalled: no fuel, so no range; a shop tune-up stands in for the service. Most US states register none; homeowners or renters insurance usually covers theft."
+        },
+        ebike: {
+          name: "Electric bicycle (Class 1-3 e-bike)",
+          aliases: ["e-bike", "ebike", "electric bike", "electric bicycle"],
+          make: "Rad Power",
+          model: "RadCity",
+          domain: "road",
+          fuel_type: "electricity",
+          factor_guide: "road",
+          usable_battery_kwh: 0.6,
+          consumption_unit: "mi_per_kwh",
+          consumption: { city: 70, highway: 55, combined: 65 },
+          range_mi: 40,
+          price_new_cents: { min: 120000, typical: 200000, max: 450000 },
+          price_used_cents: { min: 50000, typical: 110000, max: 250000 },
+          insurance_liability_cents_per_month: 0,
+          insurance_full_cents_per_month: 1500,
+          registration_cents_per_year: { min: 0, typical: 0, max: 2500 },
+          annual_maintenance_cents_per_year: 20000,
+          maintenance: {
+            service_interval_miles: 1500,
+            chain_lube_interval_miles: 200,
+            brake_pads_interval_miles: 1500,
+            battery_replace_cents_typical: 60000
+          },
+          passengers: 1,
+          cargo_l: 25,
+          payload_kg: 125,
+          towing_kg: 0,
+          charging: { level_1_120v: "3-6 h to full" },
+          notes: "Pedal-assist to 20 mph (Class 1-2) or 28 mph (Class 3); a few states register or plate Class 3."
+        },
+        cargo_van: {
+          name: "Cargo van (Transit / Sprinter / ProMaster class)",
+          aliases: ["van", "cargo van", "work van", "panel van", "delivery van", "transit", "sprinter", "promaster"],
+          make: "Ford",
+          model: "Transit 250",
+          domain: "road",
+          fuel_type: "gasoline",
+          factor_guide: "road",
+          tank_capacity_gal: 25,
+          tank_capacity_l: 94.6,
+          consumption_unit: "mpg",
+          consumption: { city: 15, highway: 19, combined: 16 },
+          range_mi: 400,
+          price_new_cents: { min: 4500000, typical: 5200000, max: 7000000 },
+          price_used_cents: { min: 2500000, typical: 3400000, max: 4500000 },
+          insurance_liability_cents_per_month: 7000,
+          insurance_full_cents_per_month: 25000,
+          registration_cents_per_year: { min: 4000, typical: 18000, max: 90000 },
+          annual_maintenance_cents_per_year: 140000,
+          maintenance: {
+            oil_change_interval_miles: 7500,
+            oil_type: "synthetic",
+            tire_rotation_interval_miles: 7500,
+            tire_replace_interval_miles: 40000,
+            brake_pads_interval_miles: 35000
+          },
+          passengers: 2,
+          cargo_l: 9000,
+          payload_kg: 1600,
+          towing_kg: 2500,
+          notes: "High-roof, long-wheelbase vans hold about 15 m3; commercial use raises the premium."
+        },
+        box_truck: {
+          name: "Box truck (16-26 ft, Class 6 diesel)",
+          aliases: ["box truck", "moving truck", "delivery truck", "straight truck", "cube truck", "cube van"],
+          make: "Isuzu",
+          model: "FTR",
+          domain: "road",
+          fuel_type: "diesel",
+          factor_guide: "road",
+          tank_capacity_gal: 50,
+          tank_capacity_l: 189.3,
+          consumption_unit: "mpg",
+          consumption: { city: 8, highway: 11, combined: 9 },
+          range_mi: 450,
+          price_new_cents: { min: 8000000, typical: 11000000, max: 15000000 },
+          price_used_cents: { min: 3500000, typical: 5500000, max: 8000000 },
+          insurance_liability_cents_per_month: 15000,
+          insurance_full_cents_per_month: 45000,
+          registration_cents_per_year: { min: 20000, typical: 80000, max: 250000 },
+          annual_maintenance_cents_per_year: 450000,
+          maintenance: {
+            oil_change_interval_miles: 15000,
+            oil_type: "diesel synthetic",
+            tire_replace_interval_miles: 60000,
+            brake_pads_interval_miles: 50000,
+            dot_inspection: "annual"
+          },
+          passengers: 3,
+          cargo_l: 40000,
+          payload_kg: 4500,
+          towing_kg: 4500,
+          notes: "Under 26,001 lb GVWR, so no CDL needed; commercial insurance and an annual DOT inspection."
+        },
+        semi_truck: {
+          name: "Semi tractor (Class 8 sleeper, diesel)",
+          aliases: [
+            "semi",
+            "semi truck",
+            "semi-truck",
+            "semi tractor",
+            "tractor-trailer",
+            "tractor trailer",
+            "big rig",
+            "eighteen-wheeler",
+            "18-wheeler",
+            "lorry"
+          ],
+          make: "Freightliner",
+          model: "Cascadia",
+          domain: "road",
+          fuel_type: "diesel",
+          factor_guide: "road",
+          tank_capacity_gal: 250,
+          tank_capacity_l: 946.4,
+          consumption_unit: "mpg",
+          consumption: { city: 5, highway: 7, combined: 6.5 },
+          range_mi: 1600,
+          price_new_cents: { min: 15000000, typical: 18000000, max: 22000000 },
+          price_used_cents: { min: 6000000, typical: 9000000, max: 13000000 },
+          insurance_liability_cents_per_month: 60000,
+          insurance_full_cents_per_month: 110000,
+          registration_cents_per_year: { min: 1e5, typical: 200000, max: 400000 },
+          annual_maintenance_cents_per_year: 1500000,
+          maintenance: {
+            oil_change_interval_miles: 25000,
+            oil_type: "diesel synthetic",
+            tire_replace_interval_miles: 1e5,
+            brake_pads_interval_miles: 75000,
+            dot_inspection: "annual"
+          },
+          passengers: 2,
+          cargo_l: 1000,
+          payload_kg: 1500,
+          towing_kg: 36000,
+          notes: "Needs a Class A CDL; registration is apportioned (IRP) by the miles run in each state. Payload is the cab's; the trailer is towed."
+        },
+        bus: {
+          name: "Bus (school bus or shuttle, diesel)",
+          aliases: ["bus", "school bus", "shuttle bus", "shuttle", "coach", "minibus"],
+          make: "Blue Bird",
+          model: "Vision",
+          domain: "road",
+          fuel_type: "diesel",
+          factor_guide: "road",
+          tank_capacity_gal: 60,
+          tank_capacity_l: 227.1,
+          consumption_unit: "mpg",
+          consumption: { city: 6, highway: 9, combined: 7 },
+          range_mi: 420,
+          price_new_cents: { min: 9000000, typical: 12000000, max: 16000000 },
+          price_used_cents: { min: 1500000, typical: 4000000, max: 8000000 },
+          insurance_liability_cents_per_month: 20000,
+          insurance_full_cents_per_month: 50000,
+          registration_cents_per_year: { min: 1e4, typical: 30000, max: 1e5 },
+          annual_maintenance_cents_per_year: 600000,
+          maintenance: {
+            oil_change_interval_miles: 1e4,
+            oil_type: "diesel synthetic",
+            tire_replace_interval_miles: 60000,
+            brake_pads_interval_miles: 40000
+          },
+          passengers: 48,
+          cargo_l: 1000,
+          payload_kg: 5000,
+          towing_kg: 0,
+          notes: "Carrying 16 or more people needs a CDL with a passenger endorsement."
+        },
+        rv_motorhome: {
+          name: "Motorhome (Class C or Class A RV)",
+          aliases: ["rv", "motorhome", "motor home", "camper", "camper van", "recreational vehicle"],
+          make: "Thor",
+          model: "Four Winds 28A",
+          domain: "road",
+          fuel_type: "gasoline",
+          factor_guide: "road",
+          tank_capacity_gal: 55,
+          tank_capacity_l: 208.2,
+          consumption_unit: "mpg",
+          consumption: { city: 7, highway: 10, combined: 8 },
+          range_mi: 440,
+          price_new_cents: { min: 9000000, typical: 15000000, max: 30000000 },
+          price_used_cents: { min: 5000000, typical: 8500000, max: 15000000 },
+          insurance_liability_cents_per_month: 5000,
+          insurance_full_cents_per_month: 15000,
+          registration_cents_per_year: { min: 1e4, typical: 40000, max: 150000 },
+          annual_maintenance_cents_per_year: 250000,
+          maintenance: {
+            oil_change_interval_miles: 5000,
+            oil_type: "synthetic",
+            tire_replace_interval_miles: 40000,
+            roof_reseal_interval_miles: 30000,
+            winterization_cents_annual: 20000
+          },
+          passengers: 6,
+          cargo_l: 3000,
+          payload_kg: 1500,
+          towing_kg: 2300,
+          notes: "Sleeps four to eight; propane, fresh-water and holding tanks are its own upkeep."
+        },
+        snowmobile: {
+          name: "Snowmobile (600-850 cc, trail)",
+          aliases: ["snowmobile", "snow machine", "sled", "ski-doo", "skidoo"],
+          make: "Ski-Doo",
+          model: "MXZ 600",
+          domain: "offroad",
+          fuel_type: "gasoline",
+          factor_guide: "offroad",
+          tank_capacity_gal: 10.5,
+          tank_capacity_l: 39.7,
+          consumption_unit: "gal_per_h",
+          consumption: { idle: 0.2, normal_trail: 2, hard_use: 3.5, approx_mpg_trail: 12 },
+          range_h: 5,
+          price_new_cents: { min: 1100000, typical: 1500000, max: 2000000 },
+          price_used_cents: { min: 500000, typical: 850000, max: 1300000 },
+          insurance_liability_cents_per_month: 1000,
+          insurance_full_cents_per_month: 3500,
+          registration_cents_per_year: { min: 2000, typical: 5000, max: 15000 },
+          annual_maintenance_cents_per_year: 50000,
+          maintenance: { engine_service_interval_hours: 50, track_and_skis_check: "each season", summer_storage_cents_annual: 15000 },
+          passengers: 2,
+          cargo_l: 30,
+          payload_kg: 180,
+          towing_kg: 0,
+          notes: "Snow only: a trail permit or registration is required in snowbelt states."
+        },
+        tractor_farm: {
+          name: "Farm tractor (utility, 45-100 hp diesel)",
+          aliases: ["tractor", "farm tractor", "utility tractor", "john deere"],
+          make: "John Deere",
+          model: "5075E",
+          domain: "offroad",
+          fuel_type: "diesel",
+          factor_guide: "offroad",
+          tank_capacity_gal: 20,
+          tank_capacity_l: 75.7,
+          consumption_unit: "gal_per_h",
+          consumption: { idle: 0.5, normal_trail: 2.5, hard_use: 4.5, approx_mpg_trail: 3 },
+          range_h: 8,
+          price_new_cents: { min: 3500000, typical: 5500000, max: 9000000 },
+          price_used_cents: { min: 1500000, typical: 3000000, max: 5500000 },
+          insurance_liability_cents_per_month: 1500,
+          insurance_full_cents_per_month: 4500,
+          registration_cents_per_year: { min: 0, typical: 2000, max: 1e4 },
+          annual_maintenance_cents_per_year: 150000,
+          maintenance: { engine_service_interval_hours: 250, hydraulic_fluid_interval_hours: 1000 },
+          passengers: 1,
+          cargo_l: 0,
+          payload_kg: 1000,
+          towing_kg: 5000,
+          notes: "Farm use usually needs no registration; on public roads it carries a slow-moving-vehicle sign."
+        },
+        rowboat: {
+          name: "Rowboat or jon boat (10-14 ft, oars)",
+          aliases: ["rowboat", "row boat", "rowing boat", "dinghy", "jon boat", "jonboat", "skiff"],
+          make: "Lowe",
+          model: "L1236",
+          domain: "marine",
+          fuel_type: "none",
+          factor_guide: "marine",
+          consumption_unit: "none",
+          consumption: {},
+          price_new_cents: { min: 80000, typical: 150000, max: 300000 },
+          price_used_cents: { min: 30000, typical: 70000, max: 150000 },
+          insurance_liability_cents_per_month: 0,
+          insurance_full_cents_per_month: 1000,
+          registration_cents_per_year: { min: 0, typical: 1500, max: 5000 },
+          annual_maintenance_cents_per_year: 5000,
+          maintenance: {},
+          passengers: 3,
+          cargo_l: 200,
+          payload_kg: 300,
+          towing_kg: 0,
+          notes: "Rowed: no fuel. Most states register a hull only once an outboard is fitted."
+        },
+        kayak: {
+          name: "Kayak or canoe (paddled, 1-2 seats)",
+          aliases: ["kayak", "canoe", "sea kayak", "sit-on-top kayak"],
+          make: "Old Town",
+          model: "Loon 106",
+          domain: "marine",
+          fuel_type: "none",
+          factor_guide: "marine",
+          consumption_unit: "none",
+          consumption: {},
+          price_new_cents: { min: 40000, typical: 90000, max: 250000 },
+          price_used_cents: { min: 20000, typical: 50000, max: 120000 },
+          insurance_liability_cents_per_month: 0,
+          insurance_full_cents_per_month: 0,
+          registration_cents_per_year: { min: 0, typical: 0, max: 3000 },
+          annual_maintenance_cents_per_year: 2000,
+          maintenance: {},
+          passengers: 2,
+          cargo_l: 100,
+          payload_kg: 200,
+          towing_kg: 0,
+          notes: "Paddled: no fuel. A few states ask for a launch permit or an invasive-species sticker."
+        },
+        small_plane: {
+          name: "Small plane (four-seat single piston, Cessna 172 class)",
+          aliases: ["plane", "airplane", "aeroplane", "small plane", "light aircraft", "aircraft", "prop plane", "cessna", "piper"],
+          make: "Cessna",
+          model: "172 Skyhawk",
+          domain: "air",
+          fuel_type: "avgas",
+          factor_guide: "air",
+          tank_capacity_gal: 53,
+          tank_capacity_l: 200.6,
+          consumption_unit: "gal_per_h",
+          consumption: { taxi: 1.5, climb: 12, cruise: 9 },
+          range_h: 5,
+          price_new_cents: { min: 45000000, typical: 50000000, max: 60000000 },
+          price_used_cents: { min: 9000000, typical: 20000000, max: 40000000 },
+          insurance_liability_cents_per_month: 15000,
+          insurance_full_cents_per_month: 25000,
+          registration_cents_per_year: { min: 500, typical: 20000, max: 150000 },
+          fuel_cents_per_gal: { min: 550, typical: 700, max: 1000 },
+          annual_maintenance_cents_per_year: 800000,
+          maintenance: { engine_service_interval_hours: 100, engine_overhaul_interval_hours: 2000, annual_inspection_cents_typical: 250000 },
+          passengers: 4,
+          cargo_l: 340,
+          payload_kg: 400,
+          towing_kg: 0,
+          notes: "Flown by a licensed pilot between airfields; FAA registration lasts seven years, and some states add an aircraft fee or tax. Hangar or tie-down rent is extra."
+        },
+        helicopter: {
+          name: "Light helicopter (four-seat piston, Robinson R44 class)",
+          aliases: ["helicopter", "heli", "copter", "robinson"],
+          make: "Robinson",
+          model: "R44 Raven II",
+          domain: "air",
+          fuel_type: "avgas",
+          factor_guide: "air",
+          tank_capacity_gal: 46.5,
+          tank_capacity_l: 176,
+          consumption_unit: "gal_per_h",
+          consumption: { taxi: 4, climb: 17, cruise: 15 },
+          range_h: 2.8,
+          price_new_cents: { min: 50000000, typical: 60000000, max: 70000000 },
+          price_used_cents: { min: 20000000, typical: 32000000, max: 45000000 },
+          insurance_liability_cents_per_month: 25000,
+          insurance_full_cents_per_month: 150000,
+          registration_cents_per_year: { min: 500, typical: 20000, max: 150000 },
+          fuel_cents_per_gal: { min: 550, typical: 700, max: 1000 },
+          annual_maintenance_cents_per_year: 2500000,
+          maintenance: { engine_service_interval_hours: 100, overhaul_interval_hours: 2200, annual_inspection_cents_typical: 500000 },
+          passengers: 4,
+          cargo_l: 200,
+          payload_kg: 380,
+          towing_kg: 0,
+          notes: "Lands at a helipad, an airfield or any cleared spot the route names; the rotor and engine overhaul come due together at about 2,200 hours."
         }
       }
     },
@@ -84142,7 +87406,7 @@ var modern_slice_of_life_default = {
       id: "vehicles.factors",
       pack: "vehicles",
       schema: "lre-table/vehicles.factors/v1",
-      revision: "491579e3ac37e00325a6adb017d7a9c7",
+      revision: "e6c1c3b8e9d3cd0d690a59ad77103940",
       label: "Consumption factor guides",
       source: {
         dataPack: "modern-us",
@@ -84210,6 +87474,19 @@ var modern_slice_of_life_default = {
             sustained_high_speed_desert_race_pace: 1.5,
             two_up_or_loaded_cargo: 1.15
           }
+        },
+        air: {
+          basis: "Multipliers on gallons per hour at normal cruise; rules of thumb from light-aircraft operating handbooks' fuel tables and flight-school planning guidance.",
+          factors: {
+            taxi_and_runup: 0.3,
+            climb_full_power: 1.35,
+            normal_cruise_default: 1,
+            economy_cruise_leaned: 0.85,
+            headwind_strong: 1.15,
+            max_gross_weight: 1.1,
+            high_density_altitude: 1.1
+          },
+          note: "Plan a 30-minute day VFR reserve (45 minutes at night) on top of the trip's fuel."
         }
       }
     }
@@ -84569,6 +87846,20 @@ var shipped_default5 = {
           price_cents: "12e8789d",
           notes: "818bffbf"
         }
+      },
+      {
+        revision: "0b6b84d2f4996103b3d61519f9ebe06d",
+        columns: {
+          name: "36de7a58",
+          category: "f0fd0ef0",
+          equip_slot: "d0861bfc",
+          weight_g: "65a14944",
+          volume_l: "cf86793b",
+          size: "8f86d188",
+          price_cents: "12e8789d",
+          ammo: "f1160518",
+          notes: "818bffbf"
+        }
       }
     ],
     "vehicles.classes": [
@@ -84591,6 +87882,75 @@ var shipped_default5 = {
           insurance_liability_cents_per_month: "86319561",
           insurance_full_cents_per_month: "bfcecee9",
           registration_cents_per_year: "c67fd79c",
+          annual_maintenance_cents_per_year: "1040090f",
+          maintenance: "b6c4599e",
+          passengers: "b6b9986f",
+          cargo_l: "cf86793b",
+          payload_kg: "160cfd2c",
+          towing_kg: "8f6e84e5",
+          charging: "62c0bd0b",
+          notes: "36de7a58"
+        },
+        changed: {
+          compact_car: "bf110eb2",
+          midsize_sedan: "2709afd5",
+          pickup_midsize: "45e2069e",
+          pickup_fullsize: "76eb00cc",
+          pickup_heavy_duty_diesel: "a63ccd94",
+          suv_compact: "813365bc",
+          suv_midsize_3row: "0972b132",
+          minivan: "018c45c2",
+          ev_sedan: "faf24cf5",
+          ev_crossover: "be9c168f",
+          motorcycle_standard: "3708080b",
+          scooter_150: "5bb1fc3f",
+          bass_boat_outboard: "18c4768e",
+          pontoon_boat: "12429de4",
+          jet_ski_pwc: "c3a09500",
+          sailboat_auxiliary: "bf745457",
+          atv_utility: "217517f6",
+          utv_side_by_side: "866a6ce5",
+          dirt_bike_250: "074a7dcf"
+        },
+        added: [
+          "bicycle",
+          "ebike",
+          "cargo_van",
+          "box_truck",
+          "semi_truck",
+          "bus",
+          "rv_motorhome",
+          "snowmobile",
+          "tractor_farm",
+          "rowboat",
+          "kayak",
+          "small_plane",
+          "helicopter"
+        ]
+      },
+      {
+        revision: "50bdd1908468c9457097fcdf1f296c11",
+        columns: {
+          name: "36de7a58",
+          aliases: "7e30e701",
+          make: "90f6fddd",
+          model: "42b5aaa6",
+          domain: "770c1aa5",
+          fuel_type: "481cdf60",
+          factor_guide: "32381c37",
+          tank_capacity_gal: "ecc0f9e0",
+          tank_capacity_l: "803569e8",
+          usable_battery_kwh: "48d743b9",
+          consumption_unit: "78ac5cfc",
+          consumption: "45b86faa",
+          range_mi: "44338d81",
+          range_h: "1c74e55d",
+          price_new_cents: "12e8789d",
+          price_used_cents: "1ae9a3a2",
+          insurance_liability_cents_per_month: "86319561",
+          insurance_full_cents_per_month: "bfcecee9",
+          registration_cents_per_year: "c67fd79c",
+          fuel_cents_per_gal: "9902935f",
           annual_maintenance_cents_per_year: "1040090f",
           maintenance: "b6c4599e",
           passengers: "b6b9986f",
@@ -84678,6 +88038,20 @@ var shipped_default5 = {
           price_cents: "12e8789d",
           notes: "818bffbf"
         }
+      },
+      {
+        revision: "f4fde123adc424fbc5315f31437de334",
+        columns: {
+          name: "36de7a58",
+          category: "f0fd0ef0",
+          equip_slot: "d0861bfc",
+          weight_g: "65a14944",
+          volume_l: "cf86793b",
+          size: "8f86d188",
+          price_cents: "12e8789d",
+          ammo: "f1160518",
+          notes: "818bffbf"
+        }
       }
     ],
     "vehicles.classes": [
@@ -84700,6 +88074,75 @@ var shipped_default5 = {
           insurance_liability_cents_per_month: "86319561",
           insurance_full_cents_per_month: "bfcecee9",
           registration_cents_per_year: "c67fd79c",
+          annual_maintenance_cents_per_year: "1040090f",
+          maintenance: "b6c4599e",
+          passengers: "b6b9986f",
+          cargo_l: "cf86793b",
+          payload_kg: "160cfd2c",
+          towing_kg: "8f6e84e5",
+          charging: "62c0bd0b",
+          notes: "36de7a58"
+        },
+        changed: {
+          compact_car: "bf110eb2",
+          midsize_sedan: "2709afd5",
+          pickup_midsize: "45e2069e",
+          pickup_fullsize: "76eb00cc",
+          pickup_heavy_duty_diesel: "a63ccd94",
+          suv_compact: "813365bc",
+          suv_midsize_3row: "0972b132",
+          minivan: "018c45c2",
+          ev_sedan: "faf24cf5",
+          ev_crossover: "be9c168f",
+          motorcycle_standard: "3708080b",
+          scooter_150: "5bb1fc3f",
+          bass_boat_outboard: "18c4768e",
+          pontoon_boat: "12429de4",
+          jet_ski_pwc: "c3a09500",
+          sailboat_auxiliary: "bf745457",
+          atv_utility: "217517f6",
+          utv_side_by_side: "866a6ce5",
+          dirt_bike_250: "074a7dcf"
+        },
+        added: [
+          "bicycle",
+          "ebike",
+          "cargo_van",
+          "box_truck",
+          "semi_truck",
+          "bus",
+          "rv_motorhome",
+          "snowmobile",
+          "tractor_farm",
+          "rowboat",
+          "kayak",
+          "small_plane",
+          "helicopter"
+        ]
+      },
+      {
+        revision: "e7f0d0bd1c2d2b4e8146064b6ab92b4c",
+        columns: {
+          name: "36de7a58",
+          aliases: "7e30e701",
+          make: "90f6fddd",
+          model: "42b5aaa6",
+          domain: "770c1aa5",
+          fuel_type: "481cdf60",
+          factor_guide: "32381c37",
+          tank_capacity_gal: "ecc0f9e0",
+          tank_capacity_l: "803569e8",
+          usable_battery_kwh: "48d743b9",
+          consumption_unit: "78ac5cfc",
+          consumption: "45b86faa",
+          range_mi: "44338d81",
+          range_h: "1c74e55d",
+          price_new_cents: "12e8789d",
+          price_used_cents: "1ae9a3a2",
+          insurance_liability_cents_per_month: "86319561",
+          insurance_full_cents_per_month: "bfcecee9",
+          registration_cents_per_year: "c67fd79c",
+          fuel_cents_per_gal: "9902935f",
           annual_maintenance_cents_per_year: "1040090f",
           maintenance: "b6c4599e",
           passengers: "b6b9986f",
@@ -84752,7 +88195,7 @@ function run(proc) {
       overrides[id] = "note";
     const intent2 = timelapseIntent({ type: "duration", minutes: 24 * 60 }, overrides);
     count = Math.max(1, Math.min(CHECK_MAX_DAYS, typeof p.days === "number" ? Math.floor(p.days) : 3));
-    step = (state3, i) => checkWorldDay(registry, pipeline, world, state3, runSeed, i, intent2);
+    step = (state3, i) => checkWorldDay(registry, pipeline, world, state3, runSeed, i, intent2, { clock: () => performance.now() });
   } else {
     const turns = Array.isArray(p.turns) ? p.turns.filter((t) => typeof t === "string") : [];
     count = turns.length;
