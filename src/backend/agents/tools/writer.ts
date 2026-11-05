@@ -535,6 +535,10 @@ const ITEM_OP_CHANGE: Readonly<Record<Exclude<ItemOp["do"], "hand">, ItemChange 
   label: "item_label",
   merge: "item_merge",
   remove: "item_remove",
+  // A saved outfit or loadout made, dropped or changed into (C5's sets).
+  set_save: "item_set",
+  set_apply: "item_set",
+  set_drop: "item_set",
 };
 
 /** An item op's change type: a handover that keeps the owner, changes it or is a theft as its basis says; every other op its own. */

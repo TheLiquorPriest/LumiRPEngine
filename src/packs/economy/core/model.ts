@@ -83,6 +83,7 @@ const OUTSIDE_NAMES: Readonly<Record<string, string>> = {
   market: "Shops",
   world: "World",
   insurer: "Insurer",
+  registrar: "Vehicle registration",
   "tax:federal": "Federal tax",
   "tax:state": "State tax",
   "tax:local": "Local tax",

@@ -27,12 +27,92 @@
         "towing_kg": "8f6e84e5",
         "charging": "62c0bd0b",
         "notes": "36de7a58"
+      },
+      "changed": {
+        "compact_car": "bf110eb2",
+        "midsize_sedan": "2709afd5",
+        "pickup_midsize": "45e2069e",
+        "pickup_fullsize": "76eb00cc",
+        "pickup_heavy_duty_diesel": "a63ccd94",
+        "suv_compact": "813365bc",
+        "suv_midsize_3row": "0972b132",
+        "minivan": "018c45c2",
+        "ev_sedan": "faf24cf5",
+        "ev_crossover": "be9c168f",
+        "motorcycle_standard": "3708080b",
+        "scooter_150": "5bb1fc3f",
+        "bass_boat_outboard": "18c4768e",
+        "pontoon_boat": "12429de4",
+        "jet_ski_pwc": "c3a09500",
+        "sailboat_auxiliary": "bf745457",
+        "atv_utility": "217517f6",
+        "utv_side_by_side": "866a6ce5",
+        "dirt_bike_250": "074a7dcf"
+      },
+      "added": [
+        "bicycle",
+        "ebike",
+        "cargo_van",
+        "box_truck",
+        "semi_truck",
+        "bus",
+        "rv_motorhome",
+        "snowmobile",
+        "tractor_farm",
+        "rowboat",
+        "kayak",
+        "small_plane",
+        "helicopter"
+      ]
+    },
+    {
+      "revision": "bafe3d2f10c8e41d855b710e97384d30",
+      "columns": {
+        "name": "36de7a58",
+        "aliases": "7e30e701",
+        "make": "90f6fddd",
+        "model": "42b5aaa6",
+        "domain": "770c1aa5",
+        "fuel_type": "91ecc733",
+        "factor_guide": "32381c37",
+        "tank_capacity_gal": "ecc0f9e0",
+        "tank_capacity_l": "803569e8",
+        "usable_battery_kwh": "48d743b9",
+        "consumption_unit": "78ac5cfc",
+        "consumption": "45b86faa",
+        "range_mi": "44338d81",
+        "range_h": "1c74e55d",
+        "price_new_cents": "12e8789d",
+        "price_used_cents": "1ae9a3a2",
+        "insurance_liability_cents_per_month": "86319561",
+        "insurance_full_cents_per_month": "bfcecee9",
+        "registration_cents_per_year": "c67fd79c",
+        "fuel_cents_per_gal": "9902935f",
+        "annual_maintenance_cents_per_year": "1040090f",
+        "maintenance": "b6c4599e",
+        "passengers": "b6b9986f",
+        "cargo_l": "cf86793b",
+        "payload_kg": "160cfd2c",
+        "towing_kg": "8f6e84e5",
+        "charging": "62c0bd0b",
+        "notes": "36de7a58"
       }
     }
   ],
   "vehicles.factors": [
     {
       "revision": "491579e3ac37e00325a6adb017d7a9c7",
+      "columns": {
+        "basis": "36de7a58",
+        "factors": "45cd92a7",
+        "note": "818bffbf"
+      },
+      "added": [
+        "air"
+      ]
+    },
+    {
+      "revision": "e6c1c3b8e9d3cd0d690a59ad77103940",
       "columns": {
         "basis": "36de7a58",
         "factors": "45cd92a7",

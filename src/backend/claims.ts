@@ -5,22 +5,29 @@
 // gives it, or, when the story hasn't established them, to the world's catch-all (DESIGN §9.4 typed
 // money). The chat's policy decides the rest: made real, asked about first (under Make it real too,
 // when its catalog price is over the world's claim cap under a capped policy, or it is money they
-// lack, a key, a weapon or a document), or dropped to play as plain roleplay with its receipt.
+// lack, a key, a weapon or ammunition (by the reading's word, or its gear row's category) or a
+// document), or dropped to play as plain roleplay with its receipt. Play's Add (DESIGN §28.16)
+// reads what it offers here too (`playThingTypes`): the types, the vehicle classes and the cap.
 
 import type { ClaimPlace, ClaimsPolicy } from "../shared/claims";
 import type { ActionId, EntityId } from "../shared/ids";
 import type { JsonObject } from "../shared/json";
 import { hasOwn } from "../shared/json";
+import type { ThingType } from "../shared/thing-view";
+import { vehicleClassChoices, worldHasAir, type VehicleClassChoice } from "../shared/vehicles";
 import type { ActionDef, WorldDoc } from "../shared/world";
 import { formatMoney } from "../shared/world";
 import { reachOf } from "../engine/access";
+import { calendarOf, dateAt } from "../engine/calendar";
 import { optionalQuery, optionalService, own } from "../engine/pack-kit";
+import { claimsOf } from "../engine/realism";
 import type { ReadContext } from "../engine/registry";
 import type { Registry } from "../engine/registry-impl";
 import { findAction } from "../engine/resolve";
 import { isGone, kindIs, placeOfEntity } from "../engine/scope";
 import type { WorldState } from "../engine/state";
 import type { Claim, Needs } from "../engine/steps";
+import { thingTypes } from "../engine/thing-view";
 import { findThings } from "../engine/thing-resolve";
 import { canSeePlace } from "../engine/visibility";
 import { matchCatalog } from "../packs/economy/core/index";
@@ -68,6 +75,9 @@ interface ClaimInput {
 
 /** What the reading may say a claimed thing is that always asks first: a claim can't stand in for what opens or proves things, or arms someone. */
 const RESTRICTED: Readonly<Record<string, true>> = { weapon: true, key: true, document: true };
+
+/** The gear categories that arm someone, which ask first as a weapon does: a weapon, and its ammunition. */
+const ARMS: Readonly<Record<string, true>> = { weapon: true, ammo: true };
 
 const DETERMINER = /^(?:a|an|the|some|my|your|his|her|their|our|this|that)\s+/i;
 
@@ -174,10 +184,13 @@ export function claimFor(input: ClaimInput): ClaimVerdict | null {
   const like = gearRow(world, name);
   const claim: Claim = { param: unfit.param, name, at, kind, ...(row ? { catalog: row } : {}), ...(category !== "" ? { category } : {}), consumable, ...(like ? { like } : {}) };
   const cap = claimCap(world);
+  // A weapon by the reading's word or by the gear row it is like (a pistol, a box of rounds).
+  const likeCategory = like !== undefined ? world.tables["gear.items"]?.rows[like]?.category : undefined;
+  const restricted = (input.thing !== undefined && hasOwn(RESTRICTED, input.thing)) || (typeof likeCategory === "string" && hasOwn(ARMS, likeCategory));
   const detail =
     input.policy.mode === "ask"
       ? "This chat asks before it adds what you say you have."
-      : input.thing !== undefined && hasOwn(RESTRICTED, input.thing)
+      : restricted
         ? "Keys, weapons and documents always ask first."
         : input.policy.capped && price !== null && price > cap
           ? `It costs about ${formatMoney(price, world.currency)}, over this world's ${formatMoney(cap, world.currency)} for what you say you have.`
@@ -305,4 +318,17 @@ export function outOfHand(action: ActionDef, params: JsonObject, world: WorldDoc
     if (def.type === "ref" && def.claim && typeof value === "string" && mineElsewhere(world, state, value, mayKnow)) return { param, def, value };
   }
   return null;
+}
+
+/**
+ * What Play's Add offers (DESIGN §28.16, `lre.things` scope `play`): the catalogs' types and kits,
+ * each with its size and typical price; the vehicle classes the vehicle picker lists (aircraft only
+ * where the world flies), dated from the clock's year; and, under a capped Make it real, the claim
+ * cap over which Add asks first, as a claim does.
+ */
+export function playThingTypes(registry: Registry, world: WorldDoc, state: Readonly<WorldState>): { types: ThingType[]; classes: VehicleClassChoice[]; cap?: number } {
+  const ctx = registry.context(world, state);
+  const policy = claimsOf(world, state);
+  const year = dateAt(calendarOf(world), state.clock).year;
+  return { types: thingTypes(ctx), classes: vehicleClassChoices(ctx.tables.get("vehicles.classes"), { year, air: worldHasAir(world) }), ...(policy.mode === "real" && policy.capped ? { cap: claimCap(world) } : {}) };
 }

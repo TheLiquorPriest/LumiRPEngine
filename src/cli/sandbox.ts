@@ -2,25 +2,26 @@
 // engine with no model. It opens from the chat's export (`lre.chat.export`, behind the GM gate),
 // plays typed turns as Playtest does (money said in words too: "send $500 to Danny"), and moves its
 // clock up to a year at a time as Check world moves a day, each month told in a digest of its
-// money: postings by holder; bills, pays and standing payments; and what was dropped, failed or
-// leaked. An advance given a time budget stops when it runs out, with a cursor that goes on from
-// there. Nothing it does reaches the chat or the host. A process holds at most SANDBOX_MAX, each
-// until it is closed or the process ends.
+// money: postings by holder; bills, pays and standing payments; what was dropped, failed or
+// leaked; and its slowest processes, wall clock. An advance given a time budget stops when it runs
+// out, with a cursor that goes on from there. Nothing it does reaches the chat or the host. A
+// process holds at most SANDBOX_MAX, each until it is closed or the process ends.
 
 import { calendarOf, clockAt, dateAt, formatClock, monthName, type Calendar } from "../engine/calendar";
 import { ENGINE_EVENTS } from "../engine/engine-pack";
 import type { GmWorldPart } from "../engine/gm-view";
 import type { WorldState } from "../engine/state";
 import { FINANCE_EVENTS, ownersIn } from "../shared/finance";
-import { GM_KEYED_PARTS, GM_PARTS, keyedItem, type GmOutline, type GmPart } from "../shared/gm-parts";
+import { GM_KEYED_PARTS, GM_PARTS, keyedItem, type GmOutline, type GmReadPart } from "../shared/gm-parts";
 import { isRecord, type JsonObject } from "../shared/json";
 import type { LedgerEvent } from "../shared/ledger";
 import type { ChatExport } from "../shared/protocol";
+import { formatMs } from "../shared/timeouts";
 import type { WorldDoc } from "../shared/world";
 import { ENGINE_VERSION, formatMoney } from "../shared/world";
 import { ToolError } from "./args";
 import { sandboxGmCount, sandboxGmPart, sandboxGmWorld, sandboxSpan, sandboxTurn } from "./local-engine";
-import { noneNamed, type GmSource } from "./tools-play";
+import { noneNamed, type GmReadPick, type GmSource } from "./tools-play";
 
 /** How many sandboxes one process holds at once: each is a whole world and its state. */
 export const SANDBOX_MAX = 3;
@@ -90,6 +91,12 @@ export interface MonthDigest {
   failed: Seen[];
   /** Read at the month's end, and at the advance's. */
   leaks: Seen[];
+  /**
+   * The month's five slowest simulated processes, by their time over all its days, wall clock
+   * ("Slowest processes: economy.flows 1.2 s · castlife.agents 340 ms"); absent when none ran. Timing
+   * only: it differs from run to run, so no state, event or comparison reads it.
+   */
+  slowest?: string;
 }
 
 /** One typed turn, as its answer tells it. */
@@ -236,6 +243,7 @@ function advanceTo(sb: Sandbox, target: number, budgetMs: number | null): Advanc
     }
     month.to = sb.state.clock;
     month.tally.add(sb, step.events, step.findings);
+    month.tally.time(step.turn.processMs);
     if (sb.state.clock < end) {
       // Why it stopped: the span's failure, else the engine's note that the timelapse couldn't run (a paused clock).
       const note = step.events.map((e) => (e.type === ENGINE_EVENTS.note ? text(dataOf(e).text) : "")).find((t) => t.startsWith("Timelapse not run"));
@@ -263,13 +271,17 @@ const dataOf = (e: LedgerEvent): JsonObject => ("data" in e && isRecord(e.data) 
 const num = (v: unknown): number => (typeof v === "number" && Number.isFinite(v) ? v : 0);
 const text = (v: unknown): string => (typeof v === "string" ? v : "");
 
-/** What a span's events did to money, and what its findings say, added up. */
+/** How many processes a month's digest names as its slowest. */
+const SLOWEST = 5;
+
+/** What a span's events did to money, what its findings say, and how long its processes took, added up. */
 class Tally {
   private readonly holders = new Map<string, { ids: string[]; in: number; out: number; postings: number }>();
   private readonly bills: Bill[] = [];
   private readonly pays: Pay[] = [];
   private readonly flows = new Map<string, { label: string; runs: number; paid: number; outcomes: Record<string, number> }>();
   private readonly found = { dropped: new Map<string, number>(), failed: new Map<string, number>(), leaks: new Map<string, number>() };
+  private readonly processMs = new Map<string, number>();
 
   add(sb: Sandbox, events: readonly LedgerEvent[], findings?: { dropped: string[]; failed: string[]; leaks: string[] }): void {
     const { state, world } = sb;
@@ -312,6 +324,11 @@ class Tally {
     for (const kind of ["dropped", "failed", "leaks"] as const) for (const what of findings[kind]) this.found[kind].set(what, (this.found[kind].get(what) ?? 0) + 1);
   }
 
+  /** A span's time per simulated process (`PlaytestTurn.processMs`), added to each one's. */
+  time(ms: Readonly<Record<string, number>> | undefined): void {
+    for (const [id, spent] of Object.entries(ms ?? {})) this.processMs.set(id, (this.processMs.get(id) ?? 0) + spent);
+  }
+
   /** Each holder's money, the most moved first. */
   money(sb: Sandbox): HolderMoney[] {
     const money = (c: number): string => formatMoney(c, sb.world.currency);
@@ -334,6 +351,7 @@ class Tally {
       dropped: seen(this.found.dropped),
       failed: seen(this.found.failed),
       leaks: seen(this.found.leaks),
+      ...(this.processMs.size > 0 ? { slowest: `Slowest processes: ${[...this.processMs].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).slice(0, SLOWEST).map(([id, ms]) => `${id} ${formatMs(ms)}`).join(" · ")}` } : {}),
     };
   }
 }
@@ -341,7 +359,7 @@ class Tally {
 /** A month's digest with each list cut to `cap` entries, saying how many more each holds. */
 export function cutDigest(m: MonthDigest, cap: number): JsonObject {
   const cut = <T>(key: string, list: readonly T[]): JsonObject => ({ [key]: JSON.parse(JSON.stringify(list.slice(0, cap))) as JsonObject[], ...(list.length > cap ? { [`more${key[0]?.toUpperCase() ?? ""}${key.slice(1)}`]: list.length - cap } : {}) });
-  return { month: m.month, from: m.from, to: m.to, ...cut("postings", m.postings), ...cut("bills", m.bills), ...cut("pays", m.pays), ...cut("flows", m.flows), ...cut("dropped", m.dropped), ...cut("failed", m.failed), ...cut("leaks", m.leaks) };
+  return { month: m.month, from: m.from, to: m.to, ...cut("postings", m.postings), ...cut("bills", m.bills), ...cut("pays", m.pays), ...cut("flows", m.flows), ...cut("dropped", m.dropped), ...cut("failed", m.failed), ...cut("leaks", m.leaks), ...(m.slowest !== undefined ? { slowest: m.slowest } : {}) };
 }
 
 // ---------------------------------------------------------------- the GM view of a sandbox
@@ -349,13 +367,14 @@ export function cutDigest(m: MonthDigest, cap: number): JsonObject {
 /** The parts of the GM view a sandbox has: the world's, as it stands. The chat's own (its edits, refused and held writes, minds) stay the chat's. */
 export const SANDBOX_PARTS: readonly GmWorldPart[] = GM_PARTS.filter((p): p is GmWorldPart => !["edits", "refused", "held", "minds"].includes(p));
 
-/** A sandbox as a GM read reads it (`gmRead`): its world parts, each built alone, keyed by id or name as `lre.gm.part` keys them. */
+/** A sandbox as a GM read reads it (`gmRead`): its world parts, each built alone, keyed by id or name as `lre.gm.part` keys them, some by ids or of a kind as it picks them. */
 export function sandboxGm(sb: Sandbox): GmSource {
-  const part = (asked: GmPart, id?: string): { id: string | null; value: unknown } => {
+  const part = (asked: GmReadPart, pick: GmReadPick = {}): { id: string | null; value: unknown } => {
     const world = SANDBOX_PARTS.find((p) => p === asked);
     if (world === undefined) throw new ToolError(`A sandbox has no ${asked}: its parts are ${SANDBOX_PARTS.join(", ")}. The chat's own (its edits, refused and held writes, and minds) are read with lre_gm.`);
     const keyed = GM_KEYED_PARTS.find((p) => p === world);
-    if (keyed === undefined || id === undefined) return { id: null, value: sandboxGmPart(sb.world, sb.state, world) };
+    const id = pick.id;
+    if (keyed === undefined || id === undefined) return { id: null, value: sandboxGmPart(sb.world, sb.state, world, { ...(pick.ids ? { ids: pick.ids } : {}), ...(pick.kind !== undefined ? { kind: pick.kind } : {}) }) };
     const ambiguous = (ids: string[]): ToolError => new ToolError(`${ids.length} have the name ${JSON.stringify(id)}: ${ids.join(", ")}; name one by its id.`);
     if (keyed === "orgs") {
       const orgs = sandboxGmPart(sb.world, sb.state, "orgs");
@@ -370,12 +389,12 @@ export function sandboxGm(sb: Sandbox): GmSource {
       (e) => e.name,
     );
     if (named && "ambiguous" in named) throw ambiguous(named.ambiguous);
-    return named ? { id: named.item.id, value: sandboxGmPart(sb.world, sb.state, keyed, named.item.id) } : { id, value: [] };
+    return named ? { id: named.item.id, value: sandboxGmPart(sb.world, sb.state, keyed, { ids: [named.item.id] }) } : { id, value: [] };
   };
   return {
     what: `sandbox ${sb.id} (a scratch copy of chat ${sb.chatId}, now ${clockLabel(sb, sb.state.clock)})`,
     parts: SANDBOX_PARTS,
-    part: async (asked, id) => part(asked, id),
+    part: async (asked, pick) => part(asked, pick),
     outline: async (): Promise<GmOutline> => SANDBOX_PARTS.map((p) => ({ part: p, count: sandboxGmCount(sb.world, sb.state, p) })),
     whole: async () => sandboxGmWorld(sb.world, sb.state),
     noneNamed: (keyed, said) => noneNamed(keyed, said, `sandbox ${sb.id}`),

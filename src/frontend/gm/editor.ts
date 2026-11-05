@@ -1,12 +1,15 @@
 // What GM mode's forms share once the truth is shown: the loaded GM view, the world's currency and
 // one way to send an edit (one `lre.edit`: checked against what it touches, all or none, one fix
 // with its own Undo chip), after which the GM view says what it did, with that Undo: the chips the
-// edits themselves wrote, never whatever else landed meanwhile. Names stand in for ids everywhere;
-// the ids show only with Show ids.
+// edits themselves wrote, never whatever else landed meanwhile. The view is the open tab's parts
+// (`parts.ts`): a page asks for the full entries it shows (`need`), and reads what else it reads
+// again when the chat moves on (`reloadKey`). Names stand in for ids everywhere; the ids show only
+// with Show ids.
 
 import type { EditOp, ResultBodies } from "../../shared/protocol";
 import type { GmEntity, GmView } from "../../shared/state-view";
 import type { WorldCurrency } from "../../shared/world";
+import type { GmNeed } from "./parts";
 
 export interface Editor {
   gm: GmView;
@@ -19,7 +22,10 @@ export interface Editor {
   edit(ops: EditOp[], done?: string): Promise<boolean>;
 }
 
-/** The GM view's own editor, which World's bulk change sends through as well. */
+/**
+ * The GM view's own editor, which its tabs' pages get and World's bulk change sends through as well:
+ * its view is the open tab's (`GmParts.view`), entities slim (`thinEntity`) but for those a page needs.
+ */
 export interface BulkEditor extends Editor {
   /**
    * Sends a batch as edits of at most `EDIT_OPS_MAX` operations, in order, stopping at the first one
@@ -27,6 +33,14 @@ export interface BulkEditor extends Editor {
    * for all of it.
    */
   editAll(ops: readonly EditOp[], done: (count: number) => string): Promise<{ applied: number; of: number }>;
+  /** The chat's GM key as the view was last loaded at (`GmSectionProps.reloadKey`): what a page reads besides `gm` (a thing, a character) it reads again on this, not on `gm`. */
+  reloadKey: string;
+  /**
+   * What an open page reads besides its tab's parts: these entities' full entries and these
+   * parties' money, loaded now and with every reload until the release it returns is called (an
+   * effect's cleanup); until one lands, its entity is slim.
+   */
+  need(want: GmNeed): () => void;
 }
 
 type Edit = GmView["edits"][number];

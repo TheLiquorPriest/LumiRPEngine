@@ -31,7 +31,7 @@ import { counted, nounFor } from "../../shared/words";
 import type { HostPort, QuietMessage, QuietTool } from "../host";
 import { renderPrompt } from "../prompts";
 import { type AgentAccounts, type AgentCall, AgentStop, type AgentStopCode, type ModelReply, NATIVE_TURNS, type PreparedCall, ProviderSession, TEXT_TURNS, type ToolResult, ToolsRefused } from "./provider";
-import { type AgentUsage, addCall, type CallUsage, emptyUsage } from "./usage";
+import { type AgentUsage, addCall, type CallUsage, emptyUsage, toolTokens } from "./usage";
 
 // ---------------------------------------------------------------- the contract
 
@@ -104,14 +104,28 @@ export interface AgentReply {
   /** Why it isn't an answer, in a code and plain words. */
   code?: AgentStopCode;
   reason?: string;
+  /** How this send's last model call ended, as its provider said (`stop`, `tool_calls`, …; `cutShort` reads a cut one); absent when no call came back. */
+  finish?: string;
   /** What this send spent. */
   usage: AgentUsage;
+}
+
+/** Whether a call's finish reason says its answer was cut at its token limit, as the host passes each provider's on: OpenAI's `length` (`max_output_tokens` from its Responses API), Anthropic's `max_tokens`, Google's and Vertex's `MAX_TOKENS`. */
+export function cutShort(finish: string | undefined): boolean {
+  const f = finish?.toLowerCase();
+  return f === "length" || f === "max_tokens" || f === "max_output_tokens";
+}
+
+/** The tools a call was offered (natively or as text, `scratch_read` among them): how many, and their definitions' tokens as estimated (`toolTokens`). */
+export interface OfferedTools {
+  tools: number;
+  tokens: number;
 }
 
 /** One step of an agent's work, for Diagnostics (§3.5): a message it was sent, a model's answer, a call its connection refused for its native tools (asked again with them as text), a tool's result, or its stop. */
 export type TranscriptEntry =
   | { kind: "message"; text: string; at: number }
-  | { kind: "answer"; text: string; reasoning?: string; calls: { id: string; name: string; args: JsonObject }[]; written: boolean; tools: "native" | "text" | "none"; usage: CallUsage; model: string; finishReason: string; ms: number; at: number }
+  | { kind: "answer"; text: string; reasoning?: string; calls: { id: string; name: string; args: JsonObject }[]; written: boolean; tools: "native" | "text" | "none"; offered?: OfferedTools; usage: CallUsage; model: string; finishReason: string; ms: number; at: number }
   | { kind: "tools_refused"; reason: string; ms: number; at: number }
   | { kind: "result"; callId: string; name: string; text: string; error: boolean; scratch?: string; ms: number; at: number }
   | { kind: "stop"; status: AgentStatus; code: AgentStopCode; reason: string; at: number };
@@ -235,6 +249,8 @@ class Agent implements AgentHandle {
   private readonly session: ProviderSession;
   private readonly tools = new Map<string, AgentTool>();
   private readonly offered: QuietTool[];
+  /** What its tools weigh in each call's prompt (`toolTokens`): the same on every call, since every call offers the same tools. */
+  private readonly offeredTokens: number;
   /** What the model is sent after its opening: the messages, its answers, the results. */
   private readonly conversation: QuietMessage[] = [];
   private readonly entries: TranscriptEntry[] = [];
@@ -260,6 +276,7 @@ class Agent implements AgentHandle {
     // An agent with tools gets scratch_read, for the results that come back clipped.
     if (this.tools.size > 0) this.tools.set(SCRATCH_READ, this.scratchRead());
     this.offered = [...this.tools.values()].map((t) => ({ name: t.name, description: t.description, parameters: t.parameters }));
+    this.offeredTokens = toolTokens(this.offered);
     deps.turn?.trace?.start({ id: this.id, role: spec.role, connectionId: spec.connectionId, model: spec.model, effort: spec.effort, system: spec.system, prefix: [...spec.prefix], history: spec.history?.length ?? 0, tag: deps.trace ?? {} });
   }
 
@@ -319,12 +336,13 @@ class Agent implements AgentHandle {
     const turn = this.deps.turn;
     const repeat: LoopRun = { call: null, state: null, times: 0 };
     let said = "";
+    let finish: string | undefined;
     for (;;) {
       const late = this.timeUp();
-      if (late) return this.end(used, late, said);
+      if (late) return this.end(used, late, said, finish);
       const prepared = await this.session.prepare(this.conversation, this.offered);
       const over = this.overBudget(prepared);
-      if (over) return this.end(used, over, said);
+      if (over) return this.end(used, over, said, finish);
       const outLeft = Math.min(limitOf(budget.tokensOut) - this.total.out, turn ? limitOf(turn.budget.tokensOut) - turn.used.out : Number.POSITIVE_INFINITY);
       const scope = this.scope(signal, true);
       const sentAt = this.now();
@@ -338,7 +356,7 @@ class Agent implements AgentHandle {
           this.session.refuseNativeTools(error.message);
           continue;
         }
-        return this.end(used, this.why(error, scope.signal), said);
+        return this.end(used, this.why(error, scope.signal), said, finish);
       } finally {
         scope.clear();
       }
@@ -349,18 +367,19 @@ class Agent implements AgentHandle {
       }
       this.watched();
       said = reply.text;
-      this.record({ kind: "answer", text: reply.text, ...(reply.reasoning ? { reasoning: reply.reasoning } : {}), calls: reply.calls.map((c) => ({ id: c.id, name: c.name, args: c.args })), written: reply.written, tools: prepared.names.size === 0 ? "none" : prepared.textTools ? "text" : "native", usage: reply.usage, model: reply.model, finishReason: reply.finishReason, ms: reply.ms, at: this.now() });
+      finish = reply.finishReason;
+      this.record({ kind: "answer", text: reply.text, ...(reply.reasoning ? { reasoning: reply.reasoning } : {}), calls: reply.calls.map((c) => ({ id: c.id, name: c.name, args: c.args })), written: reply.written, tools: prepared.names.size === 0 ? "none" : prepared.textTools ? "text" : "native", ...(prepared.names.size > 0 ? { offered: { tools: prepared.names.size, tokens: this.offeredTokens } } : {}), usage: reply.usage, model: reply.model, finishReason: reply.finishReason, ms: reply.ms, at: this.now() });
       if (reply.calls.length === 0) {
         this.answered = true;
         this.conversation.push({ role: "assistant", content: reply.text });
-        return { status: "answered", text: reply.text, usage: { ...used } };
+        return { status: "answered", text: reply.text, finish, usage: { ...used } };
       }
       // No round runs once the time it would run in is gone.
       const stop = this.roundStop(reply.calls, repeat) ?? this.timeUp();
       if (stop) {
         // The calls aren't run, so the model's turn goes on record as what it said.
         if (reply.text !== "") this.conversation.push({ role: "assistant", content: reply.text });
-        return this.end(used, stop, said);
+        return this.end(used, stop, said, finish);
       }
       this.total.toolTurns += 1;
       used.toolTurns += 1;
@@ -374,12 +393,12 @@ class Agent implements AgentHandle {
       }
       const encoding = reply.written ? TEXT_TURNS : NATIVE_TURNS;
       this.conversation.push(encoding.assistant(reply), encoding.results(results, this.deps.texts));
-      if (tools.signal.aborted) return this.end(used, this.why(tools.signal.reason, tools.signal), said);
+      if (tools.signal.aborted) return this.end(used, this.why(tools.signal.reason, tools.signal), said, finish);
       if (this.ending !== null) {
         const text = this.ending;
         this.ending = null;
         this.answered = true;
-        return { status: "answered", text, usage: { ...used } };
+        return { status: "answered", text, finish, usage: { ...used } };
       }
     }
   }
@@ -453,11 +472,11 @@ class Agent implements AgentHandle {
   }
 
   /** The run stopped: its transcript says why, in the user's words for the stop (`STOP_TEXT`). */
-  private end(used: AgentUsage, stop: AgentStop, said = ""): AgentReply {
+  private end(used: AgentUsage, stop: AgentStop, said = "", finish?: string): AgentReply {
     const status = STATUS[stop.code] ?? "refused";
     const reason = this.text(stop.text.id, stop.text.vars);
     this.record({ kind: "stop", status, code: stop.code, reason, at: this.now() });
-    return { status, text: said, code: stop.code, reason, usage: { ...used } };
+    return { status, text: said, code: stop.code, reason, ...(finish !== undefined ? { finish } : {}), usage: { ...used } };
   }
 
   /** A round's calls, as many at once as the budget lets, results in the calls' order. */

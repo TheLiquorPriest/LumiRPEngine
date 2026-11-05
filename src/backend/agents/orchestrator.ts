@@ -351,7 +351,8 @@ export class Orchestrator {
     const text = said ? (said.swipes[said.swipeId] ?? "") : "";
     const head = run ? { run, core: input.core, observed: input.observed, world: input.world, state: input.state } : null;
     const s = await this.newRun({ chatId: input.chatId, userId: input.userId, key: input.generationId, phase: "post", head, text, parentPath: "", retry: false, kind: "reply", mainable: input.kind !== "continue", cancelRead: (why) => void this.rt.ledger.cancel(input.chatId, input.userId, why) });
-    if (input.kind !== "continue" && s.settings.agents.pipeline.mode === "main") s.main = new MainTurn(this.mainHost(s), { text, core: input.core, observed: before });
+    // A Re-narrate's main agent works only its read and memory: it makes no compaction of its own (`MainStart.renarrate`).
+    if (input.kind !== "continue" && s.settings.agents.pipeline.mode === "main") s.main = new MainTurn(this.mainHost(s), { text, core: input.core, observed: before, renarrate: true });
     return true;
   }
 

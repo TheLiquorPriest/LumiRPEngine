@@ -314,6 +314,15 @@ function foundationFlows(ctx: ReadContext): Flow[] {
     if (insured.has(p.vehicle) || payers.has(p.owner) || p.cents <= 0) continue;
     out.push({ id: `insurance:${p.vehicle}`, label: p.label, kind: "premium", from: p.owner, to: "insurer", amount: { fixed: p.cents }, schedule: { every: "month", days: [1] }, shortfall: "skip", category: "insurance", link: p.vehicle, status: "active", method: "account", source: "vehicle" });
   }
+  // Registration (Vehicles 4, where the world's vehicles config registers them): a vehicle's yearly fee in its renewal month, unless a flow linked to it already pays registration.
+  const registered = new Set(Object.keys(s.entities).flatMap((id) => {
+    const f = flowOfEntity(ctx, id);
+    return f && f.status !== "ended" && f.category === "registration" && f.link && !isGone(s, f.link) ? [f.link] : [];
+  }));
+  for (const p of optionalQuery(ctx, "vehicles.registration")?.(ctx) ?? []) {
+    if (registered.has(p.vehicle) || p.cents <= 0) continue;
+    out.push({ id: `registration:${p.vehicle}`, label: p.label, kind: "tax", from: p.owner, to: "registrar", amount: { fixed: p.cents }, schedule: { every: "year", months: [p.month], days: [1] }, shortfall: "skip", category: "registration", link: p.vehicle, status: "active", method: "account", source: "vehicle" });
+  }
   out.push(...planPayments(ctx).map((p) => p.flow));
   return out;
 }

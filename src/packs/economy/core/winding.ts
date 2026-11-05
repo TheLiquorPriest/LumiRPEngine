@@ -413,12 +413,12 @@ function soleHoldings(api: FinanceApi, ctx: ReadContext, business: EntityId): En
   });
 }
 
-/** The things and vehicles a company owns (an entity's single `owner`, outside the money foundation's own kinds). */
+/** The things and vehicles a company owns (its `owner`, or an `owners` list it is on), outside the money foundation's own kinds. */
 function ownedThings(ctx: ReadContext, business: EntityId): EntityId[] {
   return Object.keys(ctx.state.entities)
     .filter((id) => {
       const e = own(ctx.state.entities, id);
-      return !!e && e.fields.owner === business && !isGone(ctx.state, id) && !(MONEY_KINDS as readonly string[]).includes(e.kind);
+      return !!e && ownersIn(e.fields).some((o) => o.party === business) && !isGone(ctx.state, id) && !(MONEY_KINDS as readonly string[]).includes(e.kind);
     })
     .sort();
 }
@@ -831,8 +831,11 @@ function merge(api: FinanceApi, ctx: ReadContext, business: EntityId, into: Enti
     setOwners(c, countsUnits(owners) ? moveUnits(owners, business, into, unitsOf(owners, business)) : rowsTo(owners, business, into));
     carryBasis(c);
   }
-  // Its things and vehicles.
-  for (const t of ownedThings(w.ctx, business)) events.push({ type: "set", entity: t, field: "owner", value: into });
+  // Its things and vehicles: a sole owner's become the survivor's; on an `owners` list, the survivor takes its place.
+  for (const t of ownedThings(w.ctx, business)) {
+    const f = own(w.state.entities, t)?.fields ?? {};
+    events.push(Array.isArray(f.owners) ? { type: "set", entity: t, field: "owners", value: ownersJson(ownersIn(f).map((o) => (o.party === business ? { ...o, party: into } : o))) } : { type: "set", entity: t, field: "owner", value: into });
+  }
   // Its staff, in the survivor's positions; their jobs, ended ones too (a last paycheck still due), paid by the survivor from now.
   const staff: EntityId[] = [];
   for (const job of allJobs(w.ctx)) {

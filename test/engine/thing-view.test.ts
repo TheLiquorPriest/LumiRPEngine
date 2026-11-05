@@ -2,7 +2,9 @@
 // Jordan's outfit (what he wears, by slot), what he carries and doesn't wear, and his wardrobe (his
 // clothing at home, by what holds it), in the Gear panel's view and in his Character page's things;
 // below Gear 3 everything on him is carried. A thing's row says where Put away takes it, and its
-// slot.
+// slot. Belongings' parts (DESIGN §28.12): his things stored at home by what keeps them, his saved
+// outfits and loadouts, the people here, the vehicles he may use (the Garage's, never a list's),
+// and on each thing of his whose it is, who may use it and whom he lets use it, until when.
 
 import { describe, expect, test } from "bun:test";
 import type { Level } from "../../src/shared/ids";
@@ -67,6 +69,55 @@ describe("the Gear panel's outfit, carried and wardrobe", () => {
     expect(view.outfit).toEqual([]);
     expect(view.wardrobe).toEqual([]);
     expect(view.carried.map((i) => i.id)).toEqual(expect.arrayContaining(["jacket", "boots", "shirt"]));
+  });
+});
+
+describe("Belongings' parts of the Gear panel's view (DESIGN §28.12)", () => {
+  test("home storage: his things at home that nobody has, by what keeps them, loose last; the people here, the vehicles he may use and none listed", () => {
+    const view = buildGearView(dressed().ctx);
+    expect(view.stored.map((s) => ({ holder: s.holder, where: s.where, items: s.items.map((i) => i.id) }))).toEqual([
+      { holder: { id: "wardrobe", name: "Oak wardrobe" }, where: "114 Harbor Street", items: ["sweater"] },
+      { holder: null, where: "114 Harbor Street", items: ["jeans"] },
+    ]);
+    // His pickup is parked at home: the Garage counts it, and no list of these holds it.
+    const listed = [...view.stored.flatMap((s) => s.items), ...(view.here?.room ?? []), ...(view.here?.lying ?? []), ...view.carried, ...view.elsewhere].map((i) => i.id);
+    expect(listed).not.toContain("pov_truck");
+    expect(view.vehicles).toBe(3);
+    expect(view.people.map((p) => p.name)).toEqual(["Danny Okafor", "Helen Kowalczyk", "Jess Kowalczyk", "Maddie Kowalczyk"]);
+    expect([view.household, view.home, view.ceiling]).toEqual([null, { id: HOME, name: "114 Harbor Street" }, "armful"]);
+    expect(view.loans.map((l) => l.label.split(",")[0])).toEqual(["For a day", "For three days", "For a week"]);
+  });
+
+  test("a thing of his says whose it is, its category, who may use it, and whom he lets use it until when, overdue once that is past", () => {
+    const w = dressed();
+    const until = w.state.clock + 60;
+    w.state.entities.danny_okafor?.relations.push({ type: "uses", to: "jacket", fields: { basis: "loan", by: JORDAN }, until });
+    const jacket = buildGearView(w.ctx).outfit.find((i) => i.id === "jacket");
+    expect(jacket).toMatchObject({ ownerId: JORDAN, category: "clothing", mine: true, grants: [{ who: "danny_okafor", name: "Danny Okafor", basis: "loan", until: expect.any(String) }] });
+    expect(jacket?.use).toContainEqual({ basis: "owner", label: "Jordan Ellis · owner", who: ["Jordan Ellis"] });
+    expect(jacket?.grants?.[0]?.overdue).toBeUndefined();
+    w.state.clock = until + 1;
+    expect(buildGearView(w.ctx).outfit.find((i) => i.id === "jacket")?.grants?.[0]?.overdue).toBe(true);
+    // His jeans made nobody's, lying at home: still his to change, and they say whose they are.
+    const jeans = w.state.entities.jeans;
+    if (jeans) jeans.fields = { category: "clothing", slot: "legs", place: HOME };
+    expect(buildGearView(w.ctx).stored.find((s) => s.holder === null)?.items.find((i) => i.id === "jeans")).toMatchObject({ ownerId: null, mine: true });
+  });
+
+  test("his saved outfits and loadouts from Gear 3, by kind and name: what is out of reach marked, and on while all of it to hand is worn; none below Gear 3", () => {
+    /** `dressed` at Gear `gear` with three saved sets of his: Work (what he wears), Cosy (at home, and a scarf gone) and a loadout, Ready (the shirt in hand). */
+    const withSets = (gear?: Level): Working => {
+      const w = dressed(gear);
+      const pov = w.state.entities[JORDAN];
+      if (pov) pov.fields.sets = { set_work: { name: "Work", kind: "outfit", pieces: [{ item: "jacket" }, { item: "boots" }] }, set_cosy: { name: "Cosy", kind: "outfit", pieces: [{ item: "sweater" }, { item: "jeans" }, { item: "scarf" }] }, set_ready: { name: "Ready", kind: "loadout", pieces: [{ item: "shirt", slot: "hand_held" }] } };
+      return w;
+    };
+    expect(buildGearView(withSets().ctx).sets).toEqual([
+      { id: "set_ready", name: "Ready", kind: "loadout", pieces: [{ item: "shirt", name: "Flannel shirt", slot: "hand held" }] },
+      { id: "set_cosy", name: "Cosy", kind: "outfit", pieces: [{ item: "sweater", name: "Wool sweater" }, { item: "jeans", name: "Jeans" }, { item: "scarf", name: "scarf", missing: true }] },
+      { id: "set_work", name: "Work", kind: "outfit", pieces: [{ item: "jacket", name: "Rain jacket" }, { item: "boots", name: "Work boots" }], on: true },
+    ]);
+    expect(buildGearView(withSets(2).ctx).sets).toEqual([]);
   });
 });
 

@@ -20,7 +20,7 @@ import { personNamed, postKnowledge, postMinds, postOpening } from "../../src/ba
 import { buildSections } from "../../src/backend/sections-build";
 import { isRecord, type JsonObject, type JsonValue } from "../../src/shared/json";
 import { LEDGER_NAMESPACE, type LedgerEvent } from "../../src/shared/ledger";
-import { claimFactId, claimKey, DEFAULT_MINDS_MEMORY, factId, fillText, KNOWLEDGE_ANSWER_SHAPE, KNOWLEDGE_DEFAULTS, KNOWLEDGE_TEXTS, MEMORY_ANSWER_V2, MIND_ANSWER_FORMATS, MIND_PROMPT_DEFAULTS, MINDS_EVENTS, witnessRef, type Holding, type KnowledgeFact, type KnowledgeSettings, type KnownView, type LearnEventData, type MindsGmView, type MindsSlice } from "../../src/shared/minds";
+import { claimFactId, claimKey, DEFAULT_MINDS_MEMORY, factId, fillText, KNOWLEDGE_ANSWER_SHAPE, KNOWLEDGE_DEFAULTS, KNOWLEDGE_TEXTS, knowledgeSettingsOf, MEMORY_ANSWER_V2, MIND_ANSWER_FORMATS, MIND_PROMPT_DEFAULTS, MINDS_EVENTS, witnessRef, type Holding, type KnowledgeFact, type KnowledgeSettings, type KnownView, type LearnEventData, type MindsGmView, type MindsSlice } from "../../src/shared/minds";
 import { SECRET_MARK_WORDING, secretMarkText } from "../../src/shared/secret-marks";
 import type { NarratorView } from "../../src/shared/settings";
 import type { WorldDoc } from "../../src/shared/world";
@@ -1742,5 +1742,90 @@ describe("the knowledge step's limits, lore ids, tellings and counts (N3)", () =
     const seen = saying({ facts: [{ ref: "s", claim: SEDAN }], learned: [{ who: ["Marcus Delgado", "Danny Okafor"], fact: "s", how: "witnessed" }] });
     expect(checkKnowledge(each, [MARCUS], seen).refusedAs).toEqual({ own_call: 1 });
     expect(checkKnowledge({ ...scene, asked: [MARCUS] }, [MARCUS], seen).refusedAs).toEqual({ not_this_call: 1 });
+  });
+});
+
+describe("knowledge calls at once (minds.knowledge.callsAtOnce)", () => {
+  const LEAVING = "Danny is leaving the shop at the end of the month.";
+  /** Each person's name, as a per-person call's context heads their part. */
+  const NAMES: Readonly<Record<string, string>> = { [POV]: "Jordan Ellis", [MARCUS]: "Marcus Delgado", [DANNY]: "Danny Okafor" };
+  /** The order the calls are asked in (the player character's, then each person's by id), and the order the held answers come back in at once: the last asked first. */
+  const ASKED: readonly string[] = [POV, DANNY, MARCUS];
+  const QUICKEST: readonly string[] = [...ASKED].reverse();
+
+  /**
+   * One turn at Marcus's shop with a call per person and `atOnce` of them at once (null: the
+   * default). Each answer is the same fact in the same words, learned by the one the call is about,
+   * held until `held` calls wait (the most at once the setting lets go out together), then given back
+   * quickest first, once the host is waiting on the last of them. Says how many calls had started as
+   * each answer came, whose came in what order, and what each call read.
+   */
+  async function played(atOnce: number | null, held: number): Promise<{ rig: Rig; chatId: string; started: number[]; answered: string[]; contexts: string[] }> {
+    const rig = new Rig({ shipped: true, minds: true });
+    models(rig, () => ({}));
+    const base = rig.host.quietReply;
+    let calls = 0;
+    const started: number[] = [];
+    const answered: string[] = [];
+    const contexts: string[] = [];
+    const waiting: { who: string; answer: () => void }[] = [];
+    const answer = JSON.stringify(saying({ facts: [{ ref: "l", claim: LEAVING, about: ["Danny Okafor"] }], learned: [{ fact: "l", how: "witnessed" }] }));
+    rig.host.quietReply = (req) => {
+      const context = req.messages[1]?.content ?? "";
+      const who = Object.keys(NAMES).find((id) => context.includes(`### ${NAMES[id]} (id: ${id}`));
+      if (!(req.messages[0]?.content ?? "").startsWith(KNOWLEDGE) || !context.includes("ATONCE-MARK") || !who) return base?.(req) ?? "{}";
+      calls++;
+      contexts.push(context);
+      const { promise, resolve } = Promise.withResolvers<string>();
+      waiting.push({ who, answer: () => (started.push(calls), answered.push(who), resolve(answer)) });
+      if (waiting.length === held) {
+        const now = waiting.splice(0).sort((a, b) => QUICKEST.indexOf(a.who) - QUICKEST.indexOf(b.who));
+        queueMicrotask(() => {
+          for (const w of now) w.answer();
+        });
+      }
+      return promise;
+    };
+    const chatId = await shopChat(rig);
+    rig.body(await rig.send({ type: "lre.settings.set", patch: { minds: { knowledge: { batch: "character", ...(atOnce === null ? {} : { callsAtOnce: atOnce }) } } } }));
+    await rig.turn(chatId, "Morning, Danny.", "Danny says he's leaving the shop at the end of the month. ATONCE-MARK");
+    expect(rig.rt.ledger.errors).toEqual([]);
+    return { rig, chatId, started, answered, contexts };
+  }
+
+  /** The facts made in play, and who holds each. */
+  const madeFacts = async (rig: Rig, chatId: string) => {
+    const slice = readSlice((await stateOf(rig, chatId)).state);
+    return Object.values(factsOf(slice))
+      .filter((f) => f.kind === "claim")
+      .map((f) => ({ claim: f.claim, holders: knowersOf(slice, f.id).sort() }));
+  };
+
+  test("the setting reads within 1 to 8, 1 by default", () => {
+    expect(KNOWLEDGE_DEFAULTS.callsAtOnce).toBe(1);
+    expect([3, 8, 9, 0, 2.5, "2", null].map((callsAtOnce) => knowledgeSettingsOf({ callsAtOnce }).callsAtOnce)).toEqual([3, 8, 1, 1, 1, 1, 1]);
+  });
+
+  test("with 3 at once, the three per-person calls start before the first answers; each answer is checked as it comes back, and the fact all three make in the same words is one fact, which everyone holds", async () => {
+    const { rig, chatId, started, answered, contexts } = await played(3, 3);
+    // All three were under way before the first answer came, and they came back the last asked first.
+    expect(started).toEqual([3, 3, 3]);
+    expect(answered).toEqual([...QUICKEST]);
+    // None was shown a fact another made: they went out together.
+    for (const context of contexts) expect(context).not.toContain(KNOWLEDGE_TEXTS.stepMade);
+    // Checked in the order they came back, not the order they were asked: Marcus's learning before Danny's.
+    expect(learnings(await recorded(rig, chatId)).filter((l) => l.who.some((who) => who !== POV)).map((l) => l.who)).toEqual([[MARCUS], [DANNY]]);
+    expect(await madeFacts(rig, chatId)).toEqual([{ claim: LEAVING, holders: [DANNY, MARCUS, POV].sort() }]);
+  });
+
+  test("at 1, as by default, each call is asked once the one before it is checked, in the batch's order, each after the first shown the fact it made", async () => {
+    for (const atOnce of [null, 1]) {
+      const { rig, chatId, started, answered, contexts } = await played(atOnce, 1);
+      expect(started).toEqual([1, 2, 3]);
+      expect(answered).toEqual([...ASKED]);
+      expect(contexts.map((context) => context.includes(KNOWLEDGE_TEXTS.stepMade))).toEqual([false, true, true]);
+      expect(learnings(await recorded(rig, chatId)).filter((l) => l.who.some((who) => who !== POV)).map((l) => l.who)).toEqual([[DANNY], [MARCUS]]);
+      expect(await madeFacts(rig, chatId)).toEqual([{ claim: LEAVING, holders: [DANNY, MARCUS, POV].sort() }]);
+    }
   });
 });

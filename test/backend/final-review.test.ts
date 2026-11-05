@@ -455,7 +455,8 @@ describe("the final review", () => {
 
   test("replay: a failed reply's retry takes the revised prompt again with no call, and after a restart the record still tells it", async () => {
     const rig = new Rig({ shipped: true });
-    const chatId = await agentsChat(rig);
+    // A swipe re-runs the turn here (it re-narrates by default).
+    const chatId = await agentsChat(rig, { swipeDefault: "rerun" });
     const reviews = models(rig);
     const first = await played(rig, chatId, "I look out over the harbor.", "Gulls wheel over the water.");
     // A Re-run swipe is reviewed afresh; its reply fails, and the swipe after it takes the kept turn.

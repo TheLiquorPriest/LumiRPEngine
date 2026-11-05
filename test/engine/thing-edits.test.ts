@@ -2,7 +2,10 @@
 // resolved as the things model resolves it, and Remove is the GM's despawn; a `place` edit is the
 // space pack's place op (ITEMS-SPEC §6.2), its made place seen by the next edit; and the older operations that move a
 // thing (`put`, `move`, `link in`, `unlink in`, `set place`) go through the one location writer and
-// its size rules, so none leaves a thing both somewhere and in something.
+// its size rules, so none leaves a thing both somewhere and in something. A make takes a vehicle's
+// class (the vehicles pack makes it, the same vehicle when its make is made again), what a thing is said to be (a holder, a category, a
+// description) or a kit's type, and a person's saved outfits are item edits too (DESIGN §28.8,
+// §28.16).
 
 import { describe, expect, test } from "bun:test";
 import type { FixOp, LedgerEvent } from "../../src/shared/ledger";
@@ -13,6 +16,7 @@ import { createRegistry } from "../../src/engine/registry-impl";
 import { isGone, placeOfEntity } from "../../src/engine/scope";
 import type { WorldState } from "../../src/engine/state";
 import { spotOf } from "../../src/engine/things";
+import { kitStatus } from "../../src/packs/gear/core/model";
 import { resolveThing } from "../../src/engine/thing-resolve";
 import { ALL_PACKS, STARTER_WORLDS } from "../../src/packs/index";
 import { madePlaces, madePlacesOf } from "../../src/engine/places-in-play";
@@ -116,15 +120,82 @@ describe("item and place edits (ITEMS-SPEC §3.5)", () => {
     expect(typeof mine === "string" ? mine : madePlaces(mine.state).map((p) => p.made.by)).toEqual(["player"]);
   });
 
+  test("an item edit makes a vehicle of its class, found first by its name; made on Jordan, it stands where he stands; a class the world hasn't is refused", () => {
+    const { world, state } = portAlder();
+    const loaner = applied(world, state, [{ op: "item", change: { do: "make", name: "Shop loaner", class: "compact_car", details: { make: "Honda", model: "Civic", year: 2015, colour: "Blue" }, at: { place: "alder_automotive" }, owner: "marcus_delgado", why: "Marcus keeps a loaner" } }]);
+    const id = Object.keys(loaner.entities).find((e) => loaner.entities[e]?.name === "Shop loaner") ?? "";
+    expect(loaner.entities[id]).toMatchObject({ kind: "vehicle", fields: { class: "compact_car", owner: "marcus_delgado", make: "Honda", model: "Civic", year: 2015, colour: "Blue", place: "alder_automotive", made: { by: "gm", at: { place: "alder_automotive" } } } });
+    expect(edit(world, loaner, [{ op: "item", change: { do: "make", name: "Shop loaner", class: "compact_car", at: { place: "alder_automotive" }, why: "" } }])).toBe("exists");
+    const sedan = applied(world, state, [{ op: "item", change: { do: "make", name: "Old sedan", class: "midsize_sedan", at: { in: JORDAN }, owner: JORDAN, why: "" } }]);
+    const sedanId = Object.keys(sedan.entities).find((e) => sedan.entities[e]?.name === "Old sedan") ?? "";
+    expect([sedan.entities[sedanId]?.kind, spotOf(sedan, sedanId)]).toEqual(["vehicle", { place: "harbor_street_114" }]);
+    expect(edit(world, state, [{ op: "item", change: { do: "make", name: "Hovercraft", class: "hovercraft", at: { place: "alder_automotive" }, why: "" } }])).toBe("unknown_class");
+  });
+
+  test("a vehicle's make made again later is the same vehicle: checked again after time passed and other things were made (a held change at its commit, a review card's Apply), its id is the same, so a change naming it still finds it", () => {
+    const { world, state } = portAlder();
+    const make: FixOp = { op: "item", change: { do: "make", name: "Shop loaner", class: "compact_car", at: { place: "alder_automotive" }, owner: "marcus_delgado", why: "" } };
+    const loanerOf = (s: WorldState): string => Object.keys(s.entities).find((e) => s.entities[e]?.name === "Shop loaner") ?? "";
+    const id = loanerOf(applied(world, state, [make]));
+    expect(id).not.toBe("");
+    // An hour and a half on, with a crate made first: the same make makes the same vehicle.
+    const later = applied(world, { ...state, clock: state.clock + 90 }, [{ op: "item", change: { do: "make", name: "Tackle crate", holds: "hand", at: { place: "alder_harbor_marina" }, why: "" } }]);
+    const again = applied(world, later, [make]);
+    expect(loanerOf(again)).toBe(id);
+    // The change that names it, made with it, lands on it.
+    expect(applied(world, again, [{ op: "item", change: { do: "home", item: id, home: { place: "harbor_street_114" } } }]).entities[id]?.fields.home).toBe("harbor_street_114");
+  });
+
+  test("a make says what a thing is: said to hold things, a container; given a category, no type from its name; a kit's type, the kit's template with its pieces counted", () => {
+    const { world, state } = portAlder();
+    const out = applied(world, state, [
+      { op: "item", change: { do: "make", name: "Tackle crate", holds: "hand", category: "recreation", description: "A milk crate of lures", at: { place: "alder_harbor_marina" }, why: "" } },
+      { op: "item", change: { do: "make", name: "Refrigerator", category: "household", at: { place: "alder_harbor_marina" }, why: "" } },
+      { op: "item", change: { do: "make", name: "First-aid kit", type: "first_aid_kit", owner: JORDAN, at: { place: "harbor_street_114" }, why: "" } },
+    ]);
+    const named = (name: string) => Object.entries(out.entities).find(([, e]) => e.name === name);
+    expect(named("Tackle crate")?.[1]).toMatchObject({ kind: "container", fields: { holds: "hand", category: "recreation", description: "A milk crate of lures" } });
+    expect(named("Refrigerator")?.[1].fields).toMatchObject({ category: "household" });
+    expect(named("Refrigerator")?.[1].fields.catalog).toBeUndefined();
+    const [kit = "", kitDef] = named("First-aid kit") ?? [];
+    expect(kitDef).toMatchObject({ kind: "kit", fields: { kit: "first_aid_kit", weight_g: 778.5, volume_l: 1.2, owner: JORDAN } });
+    expect(kitStatus(reg.context(world, out), kit)).toMatchObject({ complete: true, present: 84, total: 84 });
+  });
+
+  test("a person's saved outfits are item edits too: the GM keeps a loadout of Jordan's, changes him into it and drops it", () => {
+    const { world, state } = portAlder();
+    const saved = applied(world, state, [{ op: "item", change: { do: "set_save", who: JORDAN, name: "Whittling", kind: "loadout", pieces: [{ item: "pov_pocketknife", slot: "hand_held" }] } }]);
+    expect(saved.entities[JORDAN]?.fields.sets).toEqual({ set_whittling: { name: "Whittling", kind: "loadout", pieces: [{ item: "pov_pocketknife", slot: "hand_held" }] } });
+    const ready = applied(world, saved, [{ op: "item", change: { do: "set_apply", who: JORDAN, set: "set_whittling" } }]);
+    expect(ready.entities.pov_pocketknife?.relations).toEqual([
+      { type: "in", to: JORDAN },
+      { type: "equipped", to: JORDAN, fields: { slot: "hand_held" } },
+    ]);
+    expect(edit(world, ready, [{ op: "item", change: { do: "set_apply", who: JORDAN, set: "set_gala" } }])).toBe("no_set");
+    expect(applied(world, ready, [{ op: "item", change: { do: "set_drop", who: JORDAN, set: "set_whittling" } }]).entities[JORDAN]?.fields.sets).toEqual({});
+  });
+
   test("parseEditOps reads item and place edits for shape, and refuses a malformed one", () => {
     const ops: EditOp[] = [
       { op: "item", change: { do: "move", item: "pov_keys", to: { place: "harbor_street_114" }, why: "" } },
       { op: "place", change: { do: "label", place: "alder_automotive", name: "Alder Auto" } },
+      { op: "item", change: { do: "make", name: "Shop loaner", class: "compact_car", details: { make: "Honda", year: 2015 }, at: { place: "alder_automotive" }, why: "" } },
+      { op: "item", change: { do: "make", name: "Tackle crate", holds: "hand", category: "recreation", description: "Lures", at: { place: "alder_harbor_marina" }, why: "" } },
+      { op: "item", change: { do: "wear", item: "pov_pocketknife", who: JORDAN, slot: "hand_held" } },
+      { op: "item", change: { do: "set_save", who: JORDAN, name: "Whittling", kind: "loadout", pieces: [{ item: "pov_pocketknife", slot: "hand_held" }] } },
+      { op: "item", change: { do: "set_apply", who: JORDAN, set: "set_whittling" } },
+      { op: "item", change: { do: "set_drop", who: JORDAN, set: "set_whittling" } },
     ];
     expect(parseEditOps(JSON.parse(JSON.stringify(ops)))).toEqual(ops);
     expect(parseEditOps([{ op: "item", change: { do: "move", item: "pov_keys", to: { shelf: "top" }, why: "" } }])).toBeNull();
     expect(parseEditOps([{ op: "item", change: { do: "teleport", item: "pov_keys" } }])).toBeNull();
     expect(parseEditOps([{ op: "place", change: { do: "make", name: "Shed", parent: "harbor_street_114", as: "castle", why: "" } }])).toBeNull();
+    // A vehicle's details keep what a vehicle has, each as its kind is: words trimmed, a year a number.
+    expect(parseEditOps([{ op: "item", change: { do: "make", name: "Beater", class: "compact_car", details: { make: " Ford ", year: "old", color: "red" }, at: { place: "harbor_street_114" }, why: "" } }])).toEqual([{ op: "item", change: { do: "make", name: "Beater", class: "compact_car", details: { make: "Ford" }, at: { place: "harbor_street_114" }, why: "" } }]);
+    expect(parseEditOps([{ op: "item", change: { do: "make", name: "Crate", holds: "huge", at: { place: "harbor_street_114" }, why: "" } }])).toBeNull();
+    expect(parseEditOps([{ op: "item", change: { do: "set_save", who: JORDAN, name: "Gala", kind: "costume" } }])).toBeNull();
+    expect(parseEditOps([{ op: "item", change: { do: "set_save", who: JORDAN, name: "Gala", kind: "outfit", pieces: [{ slot: "neck" }] } }])).toBeNull();
+    expect(parseEditOps([{ op: "item", change: { do: "set_apply", who: JORDAN } }])).toBeNull();
   });
 });
 

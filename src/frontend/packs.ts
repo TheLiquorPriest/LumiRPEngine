@@ -30,10 +30,10 @@ const core: UiPackDef = {
     r.panel({ id: "core.journal", label: "Journal", order: 90, home: "story", component: JournalPanel });
     r.panel({ id: "core.gm", label: "GM view", order: 100, home: "gm", component: GmPanel });
     r.panel({ id: "core.context", label: "Context", order: 110, home: "gm", component: ContextPanel });
-    // After Money (30): the agents' tabs, before This chat.
-    r.gm({ id: "core.assistant", label: "Assistant", icon: "message", order: 40, component: AssistantSection });
-    r.gm({ id: "core.live", label: "Live", icon: "pulse", order: 45, component: LiveSection });
-    r.gm({ id: "core.workspace", label: "Workspace", icon: "box", order: 50, component: WorkspaceSection });
+    // After Money (30): the agents' tabs, before This chat. None reads the GM view but its edits (Assistant's thread marks those it made).
+    r.gm({ id: "core.assistant", label: "Assistant", icon: "message", order: 40, component: AssistantSection, parts: [] });
+    r.gm({ id: "core.live", label: "Live", icon: "pulse", order: 45, component: LiveSection, parts: [] });
+    r.gm({ id: "core.workspace", label: "Workspace", icon: "box", order: 50, component: WorkspaceSection, parts: [] });
   },
 };
 

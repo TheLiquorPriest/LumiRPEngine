@@ -8,21 +8,20 @@
 // Its context is its config's (Settings → Agents → Context, `agents.context.roles[<role>]`), a guide
 // and never a screen: every role's tools read everything, secrets marked in the user's wording,
 // whatever perspective it works from. The prompt is laid out so the provider can cache what stays the
-// same: the system prompt (with its perspective's text, then the workspace's system files for it,
-// AGENTS.md and roles/<role>.md, the global workspace's then the chat's) and the stable prefix (its
-// instructions, the preset's guidance for its steps, its pinned files: those its config pins, then
-// `.pins.json`'s for it, then those pinned in GM → Workspace, within its pins budget; and the lore
-// index when it starts with it) come first, then the message: the task's text, what the task reads
-// besides it, the narrator's sections its config starts it with as they stand now, its answer's
-// description, and the main agent's words for it whole. Every call is recorded in Diagnostics, and
-// the live trace shows the role at work, by its label only.
+// same: the system prompt (with its perspective's text, what its tools share (`toolsGuide`), then the
+// workspace's system files for it, AGENTS.md and roles/<role>.md, the global workspace's then the
+// chat's) and the stable prefix (its instructions, the preset's guidance for its steps, its pinned
+// files: those its config pins, then `.pins.json`'s for it, then those pinned in GM → Workspace,
+// within its pins budget; and the lore index when it starts with it) come first, then the message:
+// the task's text, what the task reads besides it, the narrator's sections its config starts it with
+// as they stand now, its answer's description, and the main agent's words for it whole. Every call is
+// recorded in Diagnostics, and the live trace shows the role at work, by its label only.
 
 import { LORE_INDEX_SOURCE } from "../../../shared/agent-context";
 import { FAILED_TEXT } from "../../../shared/agent-failures";
 import { RUNTIME_TEXT } from "../../../shared/agent-prompts";
-import type { RoleId, RoleTier } from "../../../shared/agent-roles";
-import { ROLE_LABEL } from "../../../shared/agent-roles";
-import type { ToolFamily } from "../../../shared/agent-tools";
+import type { RoleId } from "../../../shared/agent-roles";
+import { ROLE_LABEL, roleToolScope } from "../../../shared/agent-roles";
 import type { DiagPhase } from "../../../shared/diagnostics";
 import type { JsonValue } from "../../../shared/json";
 import type { PromptTexts } from "../../../shared/prompts";
@@ -37,7 +36,7 @@ import { parseJsonReply } from "../../steps";
 import type { AgentTool } from "../runtime";
 import type { Summarize } from "../tools/condense";
 import { loreIndexText } from "../tools/lore";
-import { type ReadNotes, toolsFor } from "../tools/registry";
+import { type ReadNotes, toolsFor, toolsGuide } from "../tools/registry";
 import { recordAgentCalls } from "../transcripts";
 import { type RoleResult, startRoleAgent, type TurnAgentCtx } from "../turn-ctx";
 import { pinnedFiles, type PinsTexts } from "../turn-task";
@@ -57,12 +56,6 @@ const ROLE_GUIDANCE: Readonly<Record<RoleId, readonly GuidanceTarget[]>> = {
   skip: ["skip"],
   world: [],
 };
-
-/** The tool families whose writes are the story's own (`opTier`): the workspace, and lore saved to it. A role at the story tier is given those writes and no GM edit. */
-const STORY_FAMILIES: readonly ToolFamily[] = ["workspace", "lore"];
-
-/** The role whose story-tier tools change the world's fabric (ITEMS-SPEC §6.4, one writer per domain per phase): things and places, walk-ons and a purchase's goods are its own after the reply; another role makes such a change only with the GM's tier. */
-const FABRIC_ROLE: RoleId = "curator";
 
 /** One task of a role, as its agent is asked to work it. */
 export interface RoleAsk<O> {
@@ -92,19 +85,15 @@ export interface RoleAsk<O> {
 export type RoleAnswer<O> = RoleResult<O> & { text: string };
 
 /**
- * The tools a role is given (§6): its families, at its tier, every one reading the GM's view with
- * every secret marked; `summarize` lets its `condense` tool condense a source with its own model.
- * Writes to the world's fabric (the story tier's) go to the Curator, and to any role at the GM tier.
+ * The tools a role is given (§6): its families, at its tier (`roleToolScope`), every one reading the
+ * GM's view with every secret marked; `summarize` lets its `condense` tool condense a source with its
+ * own model. Writes to the world's fabric (the story tier's) go to the Curator, and to any role at the
+ * GM tier.
  */
 function roleTools(ctx: TurnAgentCtx, world: WorldDoc, texts: PromptTexts, summarize: Summarize, notes: ReadNotes | undefined): AgentTool[] {
-  const tier: RoleTier = ctx.settings.tier;
-  const env = { userId: ctx.userId, chatId: ctx.chatId, knowledge: "gm" as const, marks: true, reader: ctx.reader, writer: tier === "read" ? null : ctx.writer, agent: { role: ctx.role, id: ctx.agentId }, signal: ctx.signal, loads: ctx.loads, summarize, ...(notes ? { notes } : {}) };
-  const families = ctx.settings.families;
-  const reads = toolsFor({ world, tiers: ["read"], families, texts, env });
-  if (tier === "read") return reads;
-  const story = tier === "gm" || ctx.role === FABRIC_ROLE ? toolsFor({ world, tiers: ["story"], families, texts, env }) : [];
-  const writes = toolsFor({ world, tiers: ["gm"], families: tier === "gm" ? families : families.filter((f) => STORY_FAMILIES.includes(f)), texts, env });
-  return [...reads, ...story, ...writes];
+  const scope = roleToolScope(ctx.role, ctx.settings);
+  const env = { userId: ctx.userId, chatId: ctx.chatId, knowledge: "gm" as const, marks: true, reader: ctx.reader, writer: ctx.settings.tier === "read" ? null : ctx.writer, agent: { role: ctx.role, id: ctx.agentId }, signal: ctx.signal, loads: ctx.loads, summarize, ...(notes ? { notes } : {}) };
+  return (["read", "story", "gm"] as const).flatMap((tier) => (scope[tier].length > 0 ? toolsFor({ world, tiers: [tier], families: scope[tier], texts, env }) : []));
 }
 
 /** The preset's guidance for the role's steps, each block under its name, after its instructions; empty when the preset has none. */
@@ -176,7 +165,9 @@ export async function runRoleAgent<O>(rt: Runtime, ctx: TurnAgentCtx, ask: RoleA
     }
   };
   const tools = ask.tools ? roleTools(ctx, ask.tools, own, summarize, ask.notes) : [];
-  const handle = startRoleAgent(rt, at, { system: withInstructions(system, instructions), prefix, tools }, { phase: ask.phase, task: ask.sub });
+  // What its tools share goes once, after its own system prompt, so every call's tool block is the same and smaller.
+  const guide = toolsGuide(tools, own);
+  const handle = startRoleAgent(rt, at, { system: withInstructions(guide === "" ? system : `${system}\n\n${guide}`, instructions), prefix, tools }, { phase: ask.phase, task: ask.sub });
   rt.diag.agentWorking(ctx.chatId, ctx.userId, handle.id, ROLE_LABEL[role]);
   let reply;
   try {

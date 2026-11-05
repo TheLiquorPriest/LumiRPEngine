@@ -131,14 +131,15 @@ function commissions(ctx: ReadContext, business: EntityId, cents: number, workin
  * The sale hook (DESIGN §26.2, §26.3): a purchase at a place a business trades at pays the business,
  * into its operating account, with the sales tax it collects on top; anywhere else the tax goes
  * straight to the region's tax authority. Sales tax runs at the payer's level; a business below the
- * level it runs at neither collects nor remits it, so its customer's tax goes to the region too.
+ * level it runs at neither collects nor remits it, so its customer's tax goes to the region too. A
+ * financed purchase is taxed on its whole price (`price`), the business booking what it was paid.
  */
-function saleTerms(ctx: ReadContext, api: FinanceApi, sale: { payer: EntityId; place: string | null; category: string; cents: number; item: string }) {
+function saleTerms(ctx: ReadContext, api: FinanceApi, sale: { payer: EntityId; place: string | null; category: string; cents: number; price?: number; item: string }) {
   const seller = businessAt(ctx, sale.place);
   const business = seller !== null && seller !== sale.payer ? seller : null;
   const collects = business === null || own(ctx.state.entities, business)?.fields.collects_sales_tax !== false;
   const taxed = collects && api.feature(ctx, sale.payer, "sales_tax") && !taxExempt(ctx, sale.place, sale.category);
-  const tax = taxed ? salesTaxOn(sale.cents, salesTaxPct(ctx, sale.place)) : 0;
+  const tax = taxed ? salesTaxOn(sale.price ?? sale.cents, salesTaxPct(ctx, sale.place)) : 0;
   const authority = salesTaxAccount(api, taxRegionOf(ctx, sale.place));
   if (!business) return tax > 0 ? { tax, taxAccount: authority } : null;
   const deposit = operatingAccount(api, ctx, business);

@@ -1,16 +1,17 @@
 // Settings → Replies: what the engine may change from a reply's text, per type
 // (Auto, Confirm or Never, with where the mode comes from and Unpin, D4 learning), what the reply's
 // read tells and keeps of things (ITEMS-SPEC §11), what the GM assistant may change on its own, per
-// type (AGENT-LOOP-PLAN §6), what a swipe does by default, and which texts a Re-narrate is sent
-// (DESIGN §6.12).
+// type (AGENT-LOOP-PLAN §6), what a swipe does by default, whether a swipe asks what should change,
+// and which texts a Re-narrate is sent (DESIGN §6.12; Build C item 1).
 
 import type { JsonObject } from "../../shared/json";
 import type { SwipeTexts } from "../../shared/prompts";
 import type { BoundMode } from "../../shared/ids";
 import type { ExtractionModeView, SettingsResult } from "../../shared/protocol";
-import { AGENT_CHANGE_LABEL, AGENT_CHANGE_TYPES, EXTRACTION_TYPES, THING_READ_BOUNDS, THING_READ_DEFAULTS } from "../../shared/settings";
+import { AGENT_CHANGE_LABEL, AGENT_CHANGE_TYPES, EXTRACTION_TYPES, SWIPE_DEFAULTS, THING_READ_BOUNDS, THING_READ_DEFAULTS } from "../../shared/settings";
 import type { ChangeType, ExtractionType, ThingReadSettings } from "../../shared/settings";
-import { Button, NumberStepper, Section, Seg } from "../components";
+import { Button, HostSwitch, NumberStepper, Section, Seg } from "../components";
+import { SettingRow } from "./kit";
 
 const EXTRACTION_LABEL: Record<ExtractionType, string> = {
   time_advance: "Time passing",
@@ -139,52 +140,50 @@ export function ExtractionPage(props: { data: SettingsResult; patch(patch: JsonO
   );
 }
 
+const SWIPE_LABEL: Record<"rerun" | "renarrate", string> = { renarrate: "Re-narrate", rerun: "Re-run the turn with the engine" };
+
 const SWIPE_HELP: Record<"rerun" | "renarrate", string> = {
-  rerun: "A plain swipe plays the turn again with a fresh roll, so a failed check can succeed.",
-  renarrate: "A plain swipe keeps everything the engine decided (the same dice, outcome and events) and only asks for new prose.",
+  renarrate: "A swipe tells the same turn again: the engine's dice, outcome and events stay, and the narrator writes new prose, which the reply's read then reads. Nothing before the reply runs again.",
+  rerun: "A swipe plays the turn again with the engine: a fresh roll, so a failed check can succeed, then a new reply.",
 };
+
+const SWIPE_TEXTS_LABEL: Record<SwipeTexts, string> = { turn: "The texts the turn was made with", current: "My current texts" };
 
 const SWIPE_TEXTS_HELP: Record<SwipeTexts, string> = {
   turn: "A Re-narrate or a Re-run is sent the texts its turn was made with (Settings → Agents → Prompts as they were then), so only the prose or the roll changes.",
   current: "A Re-narrate or a Re-run is sent your texts as they are now, so an edit to the narrator rules or a section's guidance shows in the new prose.",
 };
 
-export function SwipesPage(props: { value: "rerun" | "renarrate"; texts: SwipeTexts; patch(patch: JsonObject): void; busy: boolean }) {
+/** Settings → Swipes: what a swipe does, whether it asks what should change first, and the texts it is sent; each with its Default. Hook-free. */
+export function SwipesPage(props: { value: "rerun" | "renarrate"; ask: boolean; texts: SwipeTexts; patch(patch: JsonObject): void; busy: boolean }) {
+  const d = SWIPE_DEFAULTS;
   return (
     <div class="lre-stack" data-lre-settings-page="swipes">
-      <p class="lre-set-lead">What a plain swipe on a reply does. The Swipe as… chip under a reply still offers Re-run and Re-narrate for a single swipe.</p>
-      <Section title="By default">
-        <div class="lre-stack">
-          <Seg<"rerun" | "renarrate">
-            label="Swipe default"
-            value={props.value}
-            options={[
-              { value: "rerun", label: "Re-run (new roll)" },
-              { value: "renarrate", label: "Re-narrate (same outcome)" },
-            ]}
-            disabled={props.busy}
-            onChange={(swipeDefault) => props.patch({ swipeDefault })}
-          />
-          <p class="lre-small lre-muted" style={{ margin: 0 }}>
-            {SWIPE_HELP[props.value]}
-          </p>
+      <p class="lre-set-lead">What a swipe on a reply does. The Swipe as… chip under the latest reply offers both for a single swipe, each with an optional word on what should change, which only the narrator reads.</p>
+      <Section title="A swipe">
+        <div class="lre-set-rows">
+          <SettingRow id="swipe-default" label="What a swipe does" changed={props.value !== d.swipeDefault} help={SWIPE_HELP[props.value]} reset={{ label: `Reset what a swipe does to its default, ${SWIPE_LABEL[d.swipeDefault]}`, to: SWIPE_LABEL[d.swipeDefault], onClick: () => props.patch({ swipeDefault: null }) }} busy={props.busy}>
+            <Seg<"rerun" | "renarrate">
+              label="What a swipe does"
+              value={props.value}
+              options={[
+                { value: "renarrate", label: "Re-narrate (same outcome)" },
+                { value: "rerun", label: "Re-run (new roll)" },
+              ]}
+              disabled={props.busy}
+              onChange={(swipeDefault) => props.patch({ swipeDefault })}
+            />
+          </SettingRow>
+          <SettingRow id="swipe-ask" label="Ask what should change on each swipe" bare changed={props.ask !== d.swipeAsk} help={props.ask ? "Each swipe first asks what should change, in a word or two, before its reply starts; leave it empty and the swipe goes ahead as it is. Only the narrator reads it, for that telling alone." : "A swipe starts its reply at once. The Swipe as… chip still takes a word on what should change."} reset={{ label: `Reset asking on each swipe to its default, ${d.swipeAsk ? "on" : "off"}`, to: d.swipeAsk ? "on" : "off", onClick: () => props.patch({ swipeAsk: null }) }} busy={props.busy}>
+            <HostSwitch label="Ask what should change on each swipe" checked={props.ask} disabled={props.busy} onChange={(swipeAsk) => props.patch({ swipeAsk })} />
+          </SettingRow>
         </div>
       </Section>
       <Section title="Texts on Re-narrate and Re-run">
-        <div class="lre-stack">
-          <Seg<SwipeTexts>
-            label="Swipe with"
-            value={props.texts}
-            options={[
-              { value: "turn", label: "The texts the turn was made with" },
-              { value: "current", label: "My current texts" },
-            ]}
-            disabled={props.busy}
-            onChange={(swipeTexts) => props.patch({ swipeTexts })}
-          />
-          <p class="lre-small lre-muted" style={{ margin: 0 }}>
-            {SWIPE_TEXTS_HELP[props.texts]}
-          </p>
+        <div class="lre-set-rows">
+          <SettingRow id="swipe-texts" label="Swipe with" changed={props.texts !== d.swipeTexts} help={SWIPE_TEXTS_HELP[props.texts]} reset={{ label: `Reset the texts a swipe is sent to their default, ${SWIPE_TEXTS_LABEL[d.swipeTexts]}`, to: SWIPE_TEXTS_LABEL[d.swipeTexts], onClick: () => props.patch({ swipeTexts: null }) }} busy={props.busy}>
+            <Seg<SwipeTexts> label="Swipe with" value={props.texts} options={(["turn", "current"] as const).map((value) => ({ value, label: SWIPE_TEXTS_LABEL[value] }))} disabled={props.busy} onChange={(swipeTexts) => props.patch({ swipeTexts })} />
+          </SettingRow>
         </div>
       </Section>
     </div>

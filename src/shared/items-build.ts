@@ -30,17 +30,25 @@ export function fixedReason(isVehicle: boolean, fields: JsonObject, tables: Read
   return row?.location === "vehicle_fixed" ? "part" : null;
 }
 
-/** The tables a thing's type (`catalog`) names a row of, in the order a type is looked up: the gear tables first. */
-export const TYPE_TABLES = ["gear.items", "gear.containers", "economy.catalog"] as const;
+/** The tables a thing's type (`catalog`) names a row of, in the order a type is looked up: the gear tables first, the kits last (a kit's id never shadows another row). */
+export const TYPE_TABLES = ["gear.items", "gear.containers", "economy.catalog", "gear.kits"] as const;
 export type TypeTable = (typeof TYPE_TABLES)[number];
 
 /**
- * What a thing of a catalog type is (ITEMS-SPEC §3.1): a container for a row of the Containers table,
- * or a row with a capacity or a size it holds (a refrigerator, a wardrobe), else an item; and the
- * fields its row fills: the type itself, its category, the slot it is worn in, and its weight,
- * volume and room (a container's empty weight as its weight).
+ * What a thing of a catalog type is (ITEMS-SPEC §3.1): a kit for a row of the Kits table (its
+ * template, so its pieces are counted, and its packed weight and volume), a container for a row of
+ * the Containers table, or a row with a capacity or a size it holds (a refrigerator, a wardrobe),
+ * else an item; and the fields its row fills: the type itself, its category, the slot it is worn
+ * in, and its weight, volume and room (a container's empty weight as its weight).
  */
-export function typeFields(table: TypeTable, id: string, row: Readonly<TableRow>): { kind: "item" | "container"; fields: JsonObject } {
+export function typeFields(table: TypeTable, id: string, row: Readonly<TableRow>): { kind: "item" | "container" | "kit"; fields: JsonObject } {
+  // A kit is its template (`kit`), whose pieces the gear pack counts; a catalog id is the other tables' own.
+  if (table === "gear.kits") {
+    const fields: JsonObject = { kit: id };
+    if (typeof row.pieces_total_weight_g === "number") fields.weight_g = row.pieces_total_weight_g;
+    if (typeof row.packed_volume_l === "number") fields.volume_l = row.packed_volume_l;
+    return { kind: "kit", fields };
+  }
   const fields: JsonObject = { catalog: id };
   if (typeof row.category === "string") fields.category = row.category;
   if (typeof row.equip_slot === "string" && row.equip_slot !== "none") fields.slot = row.equip_slot;

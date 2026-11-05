@@ -19,7 +19,7 @@ import { currentSignals } from "../shared/steps";
 import type { Limit } from "../shared/minds";
 import { defaultMindsSettings, isMindPurpose, migrateMindReads, MINDS_PRESETS, mindsSettingsOf } from "../shared/minds";
 import { defaultTimeouts, migrateTimeouts, TIMEOUTS, timeoutsOf } from "../shared/timeouts";
-import { JOB_SETTINGS_DEFAULTS, jobSettingsOf, LORE_INDEX_DEFAULTS, loreBooksSettingOf, loreIndexSettingsOf, stepConfigOf } from "../shared/settings";
+import { JOB_SETTINGS_DEFAULTS, jobSettingsOf, GM_PAGE_DEFAULTS, gmPageSettingsOf, LORE_INDEX_DEFAULTS, loreBooksSettingOf, loreIndexSettingsOf, PERF_DEFAULTS, perfSettingsOf, stepConfigOf, SWIPE_DEFAULTS } from "../shared/settings";
 import { type AcceptanceConnection, agentSettingsOf, defaultAgentSettings } from "../shared/agent-settings";
 import { MARK_TEXT_IDS, PROMPT_SETTINGS_DEFAULTS, promptSettingsOf, promptsWritten, SWIPE_TEXTS } from "../shared/prompts";
 import { DIAGNOSTICS_DEFAULTS, diagnosticsSettingsOf } from "../shared/diagnostics";
@@ -168,6 +168,8 @@ const LIFTED = {
   turn: { tokensIn: 100_000, tokensOut: 10_000 },
   /** The final review's time before revision 7 (`timeouts.finalReviewMs`), lifted to its new default. */
   finalReviewMs: 120_000,
+  /** What a swipe did by default before revision 8 (`swipeDefault`), lifted to Re-narrate. */
+  swipeDefault: "rerun",
 };
 
 /**
@@ -180,10 +182,12 @@ const LIFTED = {
  * facts whole (a file from before revision 2 already lifts to the new ones); one from before
  * revision 5 has a turn budget still at its old default (`LIFTED.turn`) set to No limit, since every
  * agent's own limits now bound a turn; one from before revision 6 gives every role that reads money
- * the organizations' tools too (`orgs`, ORG-SPEC §7.1), as a new user's roles have them; and one
+ * the organizations' tools too (`orgs`, ORG-SPEC §7.1), as a new user's roles have them; one
  * from before revision 7 has the final review's time still at its old 2 minutes lifted to its new
- * default, which a main agent's review of a long session on a large model needs. Only plain values
- * are touched; anything malformed is left to `conform`.
+ * default, which a main agent's review of a long session on a large model needs; and one from
+ * before revision 8 has a swipe default of Re-run lifted to Re-narrate, the new default (a swipe tells
+ * the turn again; the head reply's chip still re-runs it), once: a file saved at revision 8 keeps
+ * either. Only plain values are touched; anything malformed is left to `conform`.
  */
 function lifted(raw: Readonly<Record<string, unknown>>): JsonObject {
   const out = JSON.parse(JSON.stringify(raw)) as JsonObject;
@@ -231,6 +235,7 @@ function lifted(raw: Readonly<Record<string, unknown>>): JsonObject {
   }
   const timeouts = isRecord(out.timeouts) ? out.timeouts : null;
   if (rev < 7 && timeouts?.finalReviewMs === LIFTED.finalReviewMs) timeouts.finalReviewMs = TIMEOUTS.finalReviewMs.defaultMs;
+  if (rev < 8 && out.swipeDefault === LIFTED.swipeDefault) out.swipeDefault = "renarrate";
   out.defaults = SETTINGS_DEFAULTS_REV;
   return out;
 }
@@ -261,9 +266,9 @@ export function defaultSettings(): UserSettings {
     inferred: null,
     extraction: {},
     thingReads: { ...THING_READ_DEFAULTS },
-    swipeDefault: "rerun",
-    // A Re-narrate keeps the texts its turn was made with until the user picks their current ones.
-    swipeTexts: "turn",
+    // A swipe tells the same turn again, asking nothing first (the head reply's chip re-runs it with the
+    // engine), with the texts its turn was made with until the user picks their current ones.
+    ...SWIPE_DEFAULTS,
     hideJsonBlocks: true,
     minds: defaultMindsSettings(),
     timeouts: defaultTimeouts(),
@@ -287,6 +292,10 @@ export function defaultSettings(): UserSettings {
     offstage: { tell: { ...OFFSTAGE_DEFAULTS.tell }, paymentsFrom: OFFSTAGE_DEFAULTS.paymentsFrom },
     // Tidy up shows 50 findings a run.
     tidy: { ...TIDY_DEFAULTS },
+    // The GM page holds its parts while a turn runs; Refresh shows the turn so far.
+    gm: { ...GM_PAGE_DEFAULTS },
+    // A view built for a ledger head is shared by every request at that head.
+    perf: { ...PERF_DEFAULTS },
   };
 }
 
@@ -610,6 +619,7 @@ function conform(v: JsonObject, d: UserSettings): UserSettings {
     extraction,
     thingReads: thingReadsOf(v.thingReads, d.thingReads),
     swipeDefault: oneOf(v.swipeDefault, ["rerun", "renarrate"] as const) ?? d.swipeDefault,
+    swipeAsk: typeof v.swipeAsk === "boolean" ? v.swipeAsk : d.swipeAsk,
     swipeTexts: oneOf(v.swipeTexts, SWIPE_TEXTS) ?? d.swipeTexts,
     hideJsonBlocks: typeof v.hideJsonBlocks === "boolean" ? v.hideJsonBlocks : d.hideJsonBlocks,
     minds: mindsSettingsOf(v.minds, d.minds),
@@ -626,6 +636,8 @@ function conform(v: JsonObject, d: UserSettings): UserSettings {
     statePrices: typeof v.statePrices === "boolean" ? v.statePrices : d.statePrices,
     offstage: offstageSettingsOf(v.offstage, d.offstage),
     tidy: tidySettingsOf(v.tidy, d.tidy),
+    gm: gmPageSettingsOf(v.gm, d.gm),
+    perf: perfSettingsOf(v.perf, d.perf),
   };
 }
 

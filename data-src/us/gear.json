@@ -22,7 +22,8 @@
     "containers[].holds": "The largest size it takes: pocket | hand | armful | heavy | furniture.",
     "kits[].pieces[].weight_g_each": "Grams per single piece; total weight is qty x weight_g_each.",
     "kits[].piece_count": "Sum of piece qty (the mechanic kit is exactly 45).",
-    "kits[].recommended_container_id": "Container in this file that normally holds the kit."
+    "kits[].recommended_container_id": "Container in this file that normally holds the kit.",
+    "items[].ammo": "The ammunition a weapon takes: an items id of category ammo (one round per stack unit)."
   },
   "equip_slots": [
     {
@@ -88,6 +89,18 @@
     {
       "id": "shoulder",
       "description": "Shoulder and crossbody bags"
+    },
+    {
+      "id": "holster",
+      "description": "A holster on the belt, the shoulder or the thigh: a sidearm, a stun gun, a baton"
+    },
+    {
+      "id": "sheath",
+      "description": "A sheath on the belt: a knife, a machete"
+    },
+    {
+      "id": "quiver",
+      "description": "A quiver: arrows, crossbow bolts"
     },
     {
       "id": "hand_held",
@@ -1377,6 +1390,397 @@
         "typical": 5000,
         "max": 12000
       }
+    },
+    {
+      "id": "pistol_9mm",
+      "name": "Pistol, 9mm semi-automatic",
+      "category": "weapon",
+      "equip_slot": "holster",
+      "weight_g": 700,
+      "volume_l": 0.6,
+      "size": "hand",
+      "price_cents": {
+        "min": 30000,
+        "typical": 55000,
+        "max": 120000
+      },
+      "ammo": "ammo_9mm",
+      "notes": "Unloaded; a loaded 15-round magazine adds about 200 g."
+    },
+    {
+      "id": "pistol_45",
+      "name": "Pistol, .45 ACP",
+      "category": "weapon",
+      "equip_slot": "holster",
+      "weight_g": 1000,
+      "volume_l": 0.7,
+      "size": "hand",
+      "price_cents": {
+        "min": 40000,
+        "typical": 70000,
+        "max": 150000
+      },
+      "ammo": "ammo_45_acp",
+      "notes": "Unloaded."
+    },
+    {
+      "id": "revolver_38",
+      "name": "Revolver, .38 Special",
+      "category": "weapon",
+      "equip_slot": "holster",
+      "weight_g": 650,
+      "volume_l": 0.6,
+      "size": "hand",
+      "price_cents": {
+        "min": 40000,
+        "typical": 65000,
+        "max": 130000
+      },
+      "ammo": "ammo_38_special",
+      "notes": "Unloaded; holds 5 or 6 rounds."
+    },
+    {
+      "id": "rifle_hunting_308",
+      "name": "Hunting rifle, bolt-action .308",
+      "category": "weapon",
+      "equip_slot": "back",
+      "weight_g": 3600,
+      "volume_l": 8.0,
+      "size": "armful",
+      "price_cents": {
+        "min": 40000,
+        "typical": 80000,
+        "max": 200000
+      },
+      "ammo": "ammo_308",
+      "notes": "Unloaded, without a scope; slung on the back or carried in a case."
+    },
+    {
+      "id": "rifle_ar15",
+      "name": "Rifle, AR-15 style 5.56mm",
+      "category": "weapon",
+      "equip_slot": "back",
+      "weight_g": 2900,
+      "volume_l": 7.0,
+      "size": "armful",
+      "price_cents": {
+        "min": 60000,
+        "typical": 100000,
+        "max": 200000
+      },
+      "ammo": "ammo_556",
+      "notes": "Unloaded."
+    },
+    {
+      "id": "rifle_22",
+      "name": "Rifle, .22 LR",
+      "category": "weapon",
+      "equip_slot": "back",
+      "weight_g": 2300,
+      "volume_l": 6.0,
+      "size": "armful",
+      "price_cents": {
+        "min": 15000,
+        "typical": 30000,
+        "max": 70000
+      },
+      "ammo": "ammo_22lr",
+      "notes": "Unloaded."
+    },
+    {
+      "id": "shotgun_12ga",
+      "name": "Shotgun, pump-action 12 gauge",
+      "category": "weapon",
+      "equip_slot": "back",
+      "weight_g": 3400,
+      "volume_l": 8.0,
+      "size": "armful",
+      "price_cents": {
+        "min": 25000,
+        "typical": 45000,
+        "max": 100000
+      },
+      "ammo": "ammo_12ga",
+      "notes": "Unloaded."
+    },
+    {
+      "id": "hunting_knife",
+      "name": "Hunting knife, fixed blade",
+      "category": "weapon",
+      "equip_slot": "sheath",
+      "weight_g": 250,
+      "volume_l": 0.3,
+      "size": "hand",
+      "price_cents": {
+        "min": 2500,
+        "typical": 6000,
+        "max": 20000
+      }
+    },
+    {
+      "id": "machete",
+      "name": "Machete",
+      "category": "weapon",
+      "equip_slot": "sheath",
+      "weight_g": 600,
+      "volume_l": 1.0,
+      "size": "hand",
+      "price_cents": {
+        "min": 1500,
+        "typical": 3000,
+        "max": 8000
+      }
+    },
+    {
+      "id": "baton_expandable",
+      "name": "Expandable baton",
+      "category": "weapon",
+      "equip_slot": "holster",
+      "weight_g": 500,
+      "volume_l": 0.3,
+      "size": "hand",
+      "price_cents": {
+        "min": 3000,
+        "typical": 6000,
+        "max": 15000
+      }
+    },
+    {
+      "id": "stun_gun",
+      "name": "Stun gun",
+      "category": "weapon",
+      "equip_slot": "holster",
+      "weight_g": 300,
+      "volume_l": 0.3,
+      "size": "hand",
+      "price_cents": {
+        "min": 2500,
+        "typical": 5000,
+        "max": 12000
+      }
+    },
+    {
+      "id": "pepper_spray",
+      "name": "Pepper spray",
+      "category": "weapon",
+      "equip_slot": "pocket",
+      "weight_g": 60,
+      "volume_l": 0.05,
+      "size": "pocket",
+      "price_cents": {
+        "min": 800,
+        "typical": 1500,
+        "max": 3000
+      }
+    },
+    {
+      "id": "compound_bow",
+      "name": "Compound bow",
+      "category": "weapon",
+      "equip_slot": "back",
+      "weight_g": 1800,
+      "volume_l": 10.0,
+      "size": "armful",
+      "price_cents": {
+        "min": 30000,
+        "typical": 60000,
+        "max": 150000
+      },
+      "ammo": "arrow_carbon"
+    },
+    {
+      "id": "crossbow",
+      "name": "Crossbow",
+      "category": "weapon",
+      "equip_slot": "back",
+      "weight_g": 3200,
+      "volume_l": 15.0,
+      "size": "armful",
+      "price_cents": {
+        "min": 25000,
+        "typical": 50000,
+        "max": 120000
+      },
+      "ammo": "crossbow_bolt"
+    },
+    {
+      "id": "body_armor_soft",
+      "name": "Body armor vest, soft (IIIA)",
+      "category": "armor",
+      "equip_slot": "torso_outer",
+      "weight_g": 1800,
+      "volume_l": 6.0,
+      "size": "hand",
+      "price_cents": {
+        "min": 30000,
+        "typical": 60000,
+        "max": 120000
+      },
+      "notes": "Worn over or under a shirt; stops handgun rounds."
+    },
+    {
+      "id": "plate_carrier",
+      "name": "Plate carrier with rifle plates (III)",
+      "category": "armor",
+      "equip_slot": "torso_outer",
+      "weight_g": 6500,
+      "volume_l": 12.0,
+      "size": "armful",
+      "price_cents": {
+        "min": 50000,
+        "typical": 90000,
+        "max": 200000
+      },
+      "notes": "Two plates; stops rifle rounds."
+    },
+    {
+      "id": "helmet_ballistic",
+      "name": "Ballistic helmet",
+      "category": "armor",
+      "equip_slot": "head",
+      "weight_g": 1400,
+      "volume_l": 6.0,
+      "size": "hand",
+      "price_cents": {
+        "min": 30000,
+        "typical": 60000,
+        "max": 150000
+      }
+    },
+    {
+      "id": "ammo_9mm",
+      "name": "9mm round",
+      "category": "ammo",
+      "equip_slot": "pocket_or_bag",
+      "weight_g": 12,
+      "volume_l": 0.005,
+      "size": "pocket",
+      "price_cents": {
+        "min": 20,
+        "typical": 35,
+        "max": 80
+      },
+      "notes": "One round: a box is a stack of 50."
+    },
+    {
+      "id": "ammo_45_acp",
+      "name": ".45 ACP round",
+      "category": "ammo",
+      "equip_slot": "pocket_or_bag",
+      "weight_g": 21,
+      "volume_l": 0.006,
+      "size": "pocket",
+      "price_cents": {
+        "min": 35,
+        "typical": 55,
+        "max": 120
+      },
+      "notes": "One round: a box is a stack of 50."
+    },
+    {
+      "id": "ammo_38_special",
+      "name": ".38 Special round",
+      "category": "ammo",
+      "equip_slot": "pocket_or_bag",
+      "weight_g": 15,
+      "volume_l": 0.005,
+      "size": "pocket",
+      "price_cents": {
+        "min": 30,
+        "typical": 50,
+        "max": 100
+      },
+      "notes": "One round: a box is a stack of 50."
+    },
+    {
+      "id": "ammo_556",
+      "name": "5.56mm round",
+      "category": "ammo",
+      "equip_slot": "pocket_or_bag",
+      "weight_g": 12,
+      "volume_l": 0.006,
+      "size": "pocket",
+      "price_cents": {
+        "min": 35,
+        "typical": 55,
+        "max": 120
+      },
+      "notes": "One round: a box is a stack of 20."
+    },
+    {
+      "id": "ammo_308",
+      "name": ".308 Winchester round",
+      "category": "ammo",
+      "equip_slot": "pocket_or_bag",
+      "weight_g": 25,
+      "volume_l": 0.008,
+      "size": "pocket",
+      "price_cents": {
+        "min": 80,
+        "typical": 130,
+        "max": 300
+      },
+      "notes": "One round: a box is a stack of 20."
+    },
+    {
+      "id": "ammo_22lr",
+      "name": ".22 LR round",
+      "category": "ammo",
+      "equip_slot": "pocket_or_bag",
+      "weight_g": 3,
+      "volume_l": 0.001,
+      "size": "pocket",
+      "price_cents": {
+        "min": 5,
+        "typical": 10,
+        "max": 25
+      },
+      "notes": "One round: a box is a stack of 50 to 500."
+    },
+    {
+      "id": "ammo_12ga",
+      "name": "12-gauge shell",
+      "category": "ammo",
+      "equip_slot": "pocket_or_bag",
+      "weight_g": 35,
+      "volume_l": 0.015,
+      "size": "pocket",
+      "price_cents": {
+        "min": 40,
+        "typical": 70,
+        "max": 150
+      },
+      "notes": "One shell: a box is a stack of 25."
+    },
+    {
+      "id": "arrow_carbon",
+      "name": "Arrow, carbon",
+      "category": "ammo",
+      "equip_slot": "quiver",
+      "weight_g": 25,
+      "volume_l": 0.05,
+      "size": "hand",
+      "price_cents": {
+        "min": 500,
+        "typical": 1000,
+        "max": 2000
+      },
+      "notes": "One arrow: a quiver holds about 6 to 12."
+    },
+    {
+      "id": "crossbow_bolt",
+      "name": "Crossbow bolt",
+      "category": "ammo",
+      "equip_slot": "quiver",
+      "weight_g": 28,
+      "volume_l": 0.04,
+      "size": "hand",
+      "price_cents": {
+        "min": 600,
+        "typical": 1200,
+        "max": 2500
+      },
+      "notes": "One bolt."
     }
   ],
   "containers": [
@@ -1918,6 +2322,55 @@
         "min": 0,
         "typical": 0,
         "max": 0
+      }
+    },
+    {
+      "id": "gun_safe",
+      "name": "Gun safe",
+      "capacity_l": 400,
+      "max_load_kg": 300,
+      "empty_weight_g": 150000,
+      "location": "furniture",
+      "size": "furniture",
+      "holds": "armful",
+      "equip_slot": "none",
+      "price_cents": {
+        "min": 50000,
+        "typical": 120000,
+        "max": 400000
+      },
+      "notes": "Long guns upright, handguns and ammunition on the door and shelves; most bolt to the floor."
+    },
+    {
+      "id": "rifle_case_soft",
+      "name": "Rifle case, soft",
+      "capacity_l": 12,
+      "max_load_kg": 8,
+      "empty_weight_g": 1200,
+      "location": "carried",
+      "size": "armful",
+      "holds": "armful",
+      "equip_slot": "shoulder",
+      "price_cents": {
+        "min": 2500,
+        "typical": 6000,
+        "max": 20000
+      }
+    },
+    {
+      "id": "ammo_can",
+      "name": "Ammo can, .50 caliber",
+      "capacity_l": 8,
+      "max_load_kg": 15,
+      "empty_weight_g": 1800,
+      "location": "carried",
+      "size": "hand",
+      "holds": "hand",
+      "equip_slot": "hand_held",
+      "price_cents": {
+        "min": 1500,
+        "typical": 2500,
+        "max": 5000
       }
     }
   ],

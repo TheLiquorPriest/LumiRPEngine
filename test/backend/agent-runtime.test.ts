@@ -10,6 +10,8 @@ import { parseUsage } from "../../src/backend/agents/usage";
 import { cacheBreakpoints, createSpindleHost, reasoningOverride, rouletteTargets } from "../../src/backend/spindle-host";
 import { type AgentSettings, agentSettingsOf, DEFAULT_ACCEPTANCE, defaultAgentSettings } from "../../src/shared/agent-settings";
 import type { AcceptanceState } from "../../src/shared/agent-settings";
+import { defaultRoleSettings } from "../../src/shared/agent-roles";
+import type { ToolFamily } from "../../src/shared/agent-tools";
 import type { JsonObject } from "../../src/shared/json";
 import { SETTINGS_DEFAULTS_REV, type UserSettings } from "../../src/shared/settings";
 import { STOP_TEXT } from "../../src/shared/agent-failures";
@@ -1278,6 +1280,34 @@ describe("the settings", () => {
     // Once: a role read against the new defaults without them keeps that as the user's own.
     const now = await readStored({ defaults: SETTINGS_DEFAULTS_REV, agents: { roles } });
     expect(now.agents.roles.intent.families).toEqual(["people", "money", "checks"]);
+  });
+
+  test("a swipe default saved as Re-run before revision 8 is read as Re-narrate, once; Re-narrate, and either saved at revision 8, stay; the Curator's tool list is never lifted", async () => {
+    const curator = { families: [...defaultRoleSettings().curator.families] };
+    const custom: { families: ToolFamily[] } = { families: ["items", "places", "people", "money", "orgs", "lore"] };
+    for (const defaults of [undefined, 5, 7]) {
+      const old = await readStored({ ...(defaults !== undefined ? { defaults } : {}), swipeDefault: "rerun", agents: { roles: { curator } } });
+      expect([defaults, old.defaults, old.swipeDefault, old.agents.roles.curator.families]).toEqual([defaults, SETTINGS_DEFAULTS_REV, "renarrate", curator.families]);
+      const own = await readStored({ ...(defaults !== undefined ? { defaults } : {}), swipeDefault: "renarrate", agents: { roles: { curator: custom } } });
+      expect([defaults, own.swipeDefault, own.agents.roles.curator.families]).toEqual([defaults, "renarrate", custom.families]);
+    }
+    for (const swipeDefault of ["rerun", "renarrate"] as const) expect((await readStored({ defaults: SETTINGS_DEFAULTS_REV, swipeDefault })).swipeDefault).toBe(swipeDefault);
+    // A new user's: a swipe re-narrates, asking nothing first; the GM page holds during a turn and built views are reused.
+    const fresh = await readStored({});
+    expect([fresh.swipeDefault, fresh.swipeAsk, fresh.gm, fresh.perf]).toEqual(["renarrate", false, { duringTurn: "hold" }, { reuseViews: true }]);
+    const set = await readStored({ defaults: SETTINGS_DEFAULTS_REV, swipeAsk: true, gm: { duringTurn: "live" }, perf: { reuseViews: false } });
+    expect([set.swipeAsk, set.gm, set.perf]).toEqual([true, { duringTurn: "live" }, { reuseViews: false }]);
+    const bad = await readStored({ defaults: SETTINGS_DEFAULTS_REV, swipeAsk: "yes", gm: { duringTurn: "sometimes" }, perf: { reuseViews: 1 } });
+    expect([bad.swipeAsk, bad.gm, bad.perf]).toEqual([false, { duringTurn: "hold" }, { reuseViews: true }]);
+    // Once: the lifted file saved back reads as the user's choice from then on.
+    const rig = new Rig({ shipped: true });
+    stored(rig, { defaults: 7, swipeDefault: "rerun" });
+    rig.body(await rig.send({ type: "lre.settings.set", patch: { swipeDefault: "rerun" } }));
+    const saved = JSON.parse(rig.host.files.get(`${rig.host.userId}/settings.json`) ?? "{}") as JsonObject;
+    expect([saved.defaults, saved.swipeDefault]).toEqual([SETTINGS_DEFAULTS_REV, "rerun"]);
+    const again = new Rig({ shipped: true });
+    stored(again, saved);
+    expect((await again.rt.settings.get(again.host.userId)).swipeDefault).toBe("rerun");
   });
 
   test("what the engine keeps in memory is 64 turns, 256 gates, 256 watched chats, 16 chats in the live view, 4,000,000 characters of texts read and 65,536 messages worked out; a count under its least or not whole falls back", () => {

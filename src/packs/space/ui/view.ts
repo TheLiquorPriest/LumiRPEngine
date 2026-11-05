@@ -2,12 +2,13 @@
 // Decoded defensively from JSON; the space core builds it, already filtered to the POV.
 
 import type { JsonObject } from "../../../shared/json";
+import { placeMarkOf } from "../../../shared/maps";
 import { isRecord } from "../../../shared/json";
 import type { TravelMode } from "../../../shared/ids";
 import { list, num, obj, oneOf, optNum, optStr, str, strings } from "../../../frontend/decode";
 import type { MapGridView, MapItemView, MapPlaceView, MapRouteView, MapScopeView, MapView } from "../core/view";
 
-export const TRAVEL_MODES = ["walk", "road", "offroad", "water"] as const satisfies readonly TravelMode[];
+export const TRAVEL_MODES = ["walk", "road", "offroad", "water", "air"] as const satisfies readonly TravelMode[];
 const TRIP_PARTS = ["fetch", "start", "drive", "park", "walk"] as const;
 
 function numbers(value: unknown): number[] {
@@ -16,7 +17,7 @@ function numbers(value: unknown): number[] {
 
 function decodePlace(p: Record<string, unknown>): MapPlaceView | null {
   // A view without `visited` (an older backend) reads every place as visited: none is drawn as only heard of.
-  return typeof p.id === "string" ? { id: p.id, name: str(p.name, p.id), x: num(p.x), y: num(p.y), kind: optStr(p.kind), known: p.known !== false, visited: p.visited !== false } : null;
+  return typeof p.id === "string" ? { id: p.id, name: str(p.name, p.id), x: num(p.x), y: num(p.y), kind: optStr(p.kind), known: p.known !== false, visited: p.visited !== false, ...placeMarkOf(p) } : null;
 }
 
 function decodeItem(i: Record<string, unknown>): MapItemView | null {

@@ -342,11 +342,11 @@ export function thingReadsOf(raw: unknown, base: Readonly<ThingReadSettings> = T
  * §15; ITEMS-SPEC §5.4; ORG-SPEC §7.3). They take a mode as the extraction types do and share their
  * pins (`UserSettings.extraction`), but they are not extraction types: no reply proposes them, so the
  * extract step never lists them. A thing's resting place, who may use it, its names and size, two
- * things merged into one and a thing taken out of the world are only the Curator's and the GM's; an
- * organization's changes (`{op: "org"}`) are its people, its powers, its shares and structure, and
- * its rules.
+ * things merged into one and a thing taken out of the world are only the Curator's and the GM's; so
+ * are a saved outfit or loadout made, dropped or changed into (`item_set`). An organization's changes
+ * (`{op: "org"}`) are its people, its powers, its shares and structure, and its rules.
  */
-export const AGENT_CHANGE_TYPES = ["gm_spawn", "despawn", "destroy", "money_adjust", "stage", "gm_edit", "workspace", "item_home", "item_grant", "item_label", "item_merge", "item_remove", "org_people", "org_powers", "org_shares", "org_rules"] as const;
+export const AGENT_CHANGE_TYPES = ["gm_spawn", "despawn", "destroy", "money_adjust", "stage", "gm_edit", "workspace", "item_home", "item_grant", "item_label", "item_merge", "item_set", "item_remove", "org_people", "org_powers", "org_shares", "org_rules"] as const;
 export type AgentChangeType = (typeof AGENT_CHANGE_TYPES)[number];
 
 /** Every type with a mode: what a reply may change, then what an agent may. */
@@ -366,6 +366,7 @@ export const AGENT_CHANGE_DEFAULTS: Readonly<Record<AgentChangeType, BoundMode>>
   item_grant: "auto",
   item_label: "auto",
   item_merge: "confirm",
+  item_set: "auto",
   item_remove: "confirm",
   org_people: "confirm",
   org_powers: "confirm",
@@ -386,6 +387,7 @@ export const AGENT_CHANGE_LABEL: Readonly<Record<AgentChangeType, string>> = Obj
   item_grant: "Who may use things",
   item_label: "Things' names, descriptions and sizes",
   item_merge: "Two things merged into one",
+  item_set: "Saved outfits and loadouts, and changing into them",
   item_remove: "Things removed from the world",
   org_people: "Organizations' people (members, positions held, titles, staff, pay, the party's tiers)",
   org_powers: "Organizations' positions and delegations",
@@ -590,9 +592,10 @@ export interface UserSettings {
    * old default lifted to its new one; one from before the turn's tokens went unbounded (up to 4)
    * has a turn budget still at its old 100,000 prompt or 10,000 answer tokens set to No limit;
    * one from before organizations had tools (up to 5) has every role that reads money given the
-   * `orgs` family too; and one from before the final review's time rose (up to 6) has it still at
-   * its old 2 minutes lifted to the new default. A file older than several revisions has each of
-   * their lifts.
+   * `orgs` family too; one from before the final review's time rose (up to 6) has it still at
+   * its old 2 minutes lifted to the new default; and one from before a swipe re-narrated by default
+   * (up to 7) has a swipe default of Re-run lifted to Re-narrate. A file older than several
+   * revisions has each of their lifts.
    */
   defaults: typeof SETTINGS_DEFAULTS_REV;
   /** The helper model, apart from the presets: picking one never changes it. */
@@ -615,7 +618,10 @@ export interface UserSettings {
   extraction: ExtractionBounds;
   /** What the reply's read tells and keeps of things (Settings → Changes from the reply, ITEMS-SPEC §11). */
   thingReads: ThingReadSettings;
+  /** What a host swipe does (Settings → Swipes, DESIGN §6.12): tells the same turn again (`renarrate`, the default), or plays the turn again with the engine (`rerun`). */
   swipeDefault: "rerun" | "renarrate";
+  /** Whether a host swipe first asks what should change (Settings → Swipes): off, it starts at once. */
+  swipeAsk: boolean;
   /** What a Re-narrate is sent (Settings → Swipes, DESIGN §6.12): the texts its turn was made with (its prompt set), or the user's current ones. */
   swipeTexts: SwipeTexts;
   /** World chats hide each reply's `<json>…</json>` block on display, after the preset's own display scripts. World Info skips the block either way (DESIGN §6.7). */
@@ -665,7 +671,14 @@ export interface UserSettings {
   offstage: OffstageSettings;
   /** Tidy up (GM → Things → Tidy up, ITEMS-SPEC §7.5, §11): how many findings one run shows. */
   tidy: TidySettings;
+  /** The GM page (Settings → Speed → Pages): what it shows while a turn runs. */
+  gm: GmPageSettings;
+  /** Reusing work (Settings → Speed): whether built views are shared instead of built again. */
+  perf: PerfSettings;
 }
+
+/** What a swipe does as shipped (Settings → Swipes): it tells the same turn again, asking nothing first, with the texts its turn was made with. */
+export const SWIPE_DEFAULTS: Readonly<Pick<UserSettings, "swipeDefault" | "swipeAsk" | "swipeTexts">> = Object.freeze({ swipeDefault: "renarrate", swipeAsk: false, swipeTexts: "turn" });
 
 /** Tidy up's settings: how many findings a run shows at most (past that, fixing some shows the next). */
 export interface TidySettings {
@@ -683,8 +696,45 @@ export function tidySettingsOf(raw: unknown, base: Readonly<TidySettings> = TIDY
   return { findings: typeof v === "number" && Number.isInteger(v) && v >= min && v <= max ? v : base.findings };
 }
 
+/**
+ * What the GM page shows while a turn runs (Settings → Speed → Pages): the chat as it was before the
+ * turn, its parts held until Refresh shows the turn so far (`hold`), or every change as it lands (`live`).
+ */
+export type GmDuringTurn = "hold" | "live";
+export const GM_DURING_TURN: readonly GmDuringTurn[] = ["hold", "live"];
+
+export interface GmPageSettings {
+  duringTurn: GmDuringTurn;
+}
+
+/** A new user's GM page: held while a turn runs, so its parts aren't built again on every change. */
+export const GM_PAGE_DEFAULTS: Readonly<GmPageSettings> = Object.freeze({ duringTurn: "hold" });
+
+/** `UserSettings.gm` as the engine reads it: a choice it takes, else `base`'s. */
+export function gmPageSettingsOf(raw: unknown, base: Readonly<GmPageSettings> = GM_PAGE_DEFAULTS): GmPageSettings {
+  const v = isRecord(raw) ? raw.duringTurn : undefined;
+  return { duringTurn: GM_DURING_TURN.find((x) => x === v) ?? base.duringTurn };
+}
+
+/**
+ * Reusing work (Settings → Speed → Reusing work): with `reuseViews` on, a view built for one ledger
+ * head (the GM page's parts, the fold's state they read) is shared by every request at that head
+ * instead of built and copied again; off, every request builds its own, as before.
+ */
+export interface PerfSettings {
+  reuseViews: boolean;
+}
+
+export const PERF_DEFAULTS: Readonly<PerfSettings> = Object.freeze({ reuseViews: true });
+
+/** `UserSettings.perf` as the engine reads it: a switch that isn't a boolean keeps `base`'s. */
+export function perfSettingsOf(raw: unknown, base: Readonly<PerfSettings> = PERF_DEFAULTS): PerfSettings {
+  const v = isRecord(raw) ? raw.reuseViews : undefined;
+  return { reuseViews: typeof v === "boolean" ? v : base.reuseViews };
+}
+
 /** The shipped defaults' revision (`UserSettings.defaults`). */
-export const SETTINGS_DEFAULTS_REV = 7;
+export const SETTINGS_DEFAULTS_REV = 8;
 
 /** Build's jobs (DESIGN §13.1): the user's own, which no preset sets. */
 export interface JobSettings {

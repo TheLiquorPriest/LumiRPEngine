@@ -38,7 +38,8 @@ export default function run(proc: SpindleBackendProcessContext): void {
     for (const id of Object.keys(world.time.interrupts)) overrides[id] = "note";
     const intent = timelapseIntent({ type: "duration", minutes: 24 * 60 }, overrides);
     count = Math.max(1, Math.min(CHECK_MAX_DAYS, typeof p.days === "number" ? Math.floor(p.days) : 3));
-    step = (state, i) => checkWorldDay(registry, pipeline, world, state, runSeed, i, intent);
+    // The lane's wall clock times each day's processes (the engine reads none of its own).
+    step = (state, i) => checkWorldDay(registry, pipeline, world, state, runSeed, i, intent, { clock: () => performance.now() });
   } else {
     const turns = Array.isArray(p.turns) ? p.turns.filter((t): t is string => typeof t === "string") : [];
     count = turns.length;

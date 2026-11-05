@@ -436,6 +436,8 @@ export interface KnowledgeSettings {
   /** From 0 to 1: a holding whose confidence is under it is a suspicion (`isSuspicion`). */
   threshold: number;
   batch: KnowledgeBatch;
+  /** How many of the step's calls (one per character, `batch`) go out at once: 1 asks them one after another, each shown what the ones before it made; more ask together, each answer checked as it comes back, a fact said again in the same words (`claimKey`) being the one made first. */
+  callsAtOnce: number;
   /** The longest claim a fact is recorded with, in characters. */
   claimChars: number;
   /** What a mind reads of its own holdings, in tokens. */
@@ -459,10 +461,10 @@ export interface KnowledgeSettings {
   prompts: Record<string, string>;
 }
 
-export const KNOWLEDGE_DEFAULTS: Readonly<KnowledgeSettings> = Object.freeze({ enabled: true, threshold: 0.7, batch: "scene", claimChars: 240, mindTokens: 400, narratorTokens: 600, stepTokens: 4000, factsPerChat: 512, holdersPerFact: 64, factsPerTurn: 3, learningsPerTurn: 24, inPlayTurns: 3, perPerson: 3, prompts: {} });
+export const KNOWLEDGE_DEFAULTS: Readonly<KnowledgeSettings> = Object.freeze({ enabled: true, threshold: 0.7, batch: "scene", callsAtOnce: 1, claimChars: 240, mindTokens: 400, narratorTokens: 600, stepTokens: 4000, factsPerChat: 512, holdersPerFact: 64, factsPerTurn: 3, learningsPerTurn: 24, inPlayTurns: 3, perPerson: 3, prompts: {} });
 
-/** The ranges knowledge settings are read within: only what keeps each meaningful (a threshold is a confidence, a claim has a character, no count is negative). */
-export const KNOWLEDGE_RANGES = { threshold: [0, 1], claimChars: [1, Number.MAX_SAFE_INTEGER], tokens: [0, Number.MAX_SAFE_INTEGER], count: [0, Number.MAX_SAFE_INTEGER] } as const;
+/** The ranges knowledge settings are read within: only what keeps each meaningful (a threshold is a confidence, a claim has a character, no count is negative, at most 8 calls at once). */
+export const KNOWLEDGE_RANGES = { threshold: [0, 1], claimChars: [1, Number.MAX_SAFE_INTEGER], tokens: [0, Number.MAX_SAFE_INTEGER], count: [0, Number.MAX_SAFE_INTEGER], atOnce: [1, 8] } as const;
 
 /** The knowledge settings that are whole numbers within a range, as Settings → Minds → Knowledge lists its limits. */
 export const KNOWLEDGE_LIMITS = ["claimChars", "mindTokens", "narratorTokens", "stepTokens", "factsPerChat", "holdersPerFact", "factsPerTurn", "learningsPerTurn", "inPlayTurns", "perPerson"] as const satisfies readonly (keyof KnowledgeSettings)[];
@@ -682,6 +684,7 @@ export function knowledgeSettingsOf(raw: unknown, base: Readonly<KnowledgeSettin
     enabled: typeof k.enabled === "boolean" ? k.enabled : base.enabled,
     threshold: typeof k.threshold === "number" && Number.isFinite(k.threshold) && k.threshold >= lo && k.threshold <= hi ? k.threshold : base.threshold,
     batch: k.batch === "scene" || k.batch === "character" ? k.batch : base.batch,
+    callsAtOnce: whole(k.callsAtOnce, KNOWLEDGE_RANGES.atOnce, base.callsAtOnce),
     ...limits,
     prompts: isRecord(k.prompts) ? prompts : { ...base.prompts },
   };

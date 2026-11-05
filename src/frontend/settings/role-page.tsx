@@ -1,23 +1,24 @@
 // Each agent's page, on one template (Settings → Agents → Roles → a role; Main agent and Assistant
 // lay theirs out the same): Runs on (each task, and the connection and model it actually runs on),
-// What it may do (its tool families as chips, and what it may change), What it reads (the perspective
-// it works from, each source, its pinned files), When it runs and fails, its Budget (only the limits
-// of its own, and a picker that sets one more), Caching and its Prompts. Every setting shows Changed
-// while it differs from its default, and Default only then; Reset at the foot puts the whole page
-// back. A role's settings are `agents.roles[<role>]`, what it reads `agents.context.roles[<role>]`,
-// its caching `agents.caching.roles[<role>]` and the Curator's ops per turn `agents.curatorOps`; a
-// Default sends null, so the store reads the shipped defaults back. Hook-free, so tests press it
-// without a DOM. Styles: styles/settings.ts.
+// What it may do (its tool families as chips, with what its tools weigh in each call's prompt, and
+// what it may change), What it reads (the perspective it works from, each source, its pinned files),
+// When it runs and fails (the Curator's also whether a quiet turn skips it), its Budget (only the
+// limits of its own, and a picker that sets one more), Caching and its Prompts. Every setting shows
+// Changed while it differs from its default, and Default only then; Reset at the foot puts the whole
+// page back. A role's settings are `agents.roles[<role>]`, what it reads `agents.context.roles[<role>]`,
+// its caching `agents.caching.roles[<role>]`, and the Curator's ops per turn `agents.curatorOps` and
+// its quiet-turn gate `agents.pipeline.curatorGate`; a Default sends null, so the store reads the
+// shipped defaults back. Hook-free, so tests press it without a DOM. Styles: styles/settings.ts.
 
 import type { ComponentChildren } from "preact";
 import { CONTEXT_SOURCES, defaultContextSettings, PERSPECTIVE_LABEL, ROLE_PERSPECTIVES, type RolePerspective, SOURCE_USE_LABEL, SOURCE_USES, type SourceUse, sourceLabel, sourceUse, withSourceUse } from "../../shared/agent-context";
-import { ROLE_LABEL, ROLE_ON_FAIL, ROLE_TIERS, type RoleId, type RoleOnFail, type RoleTier } from "../../shared/agent-roles";
-import { PIPELINE_ROLES, ROLE_RUN_LABELS, type RoleRun, roleRunHelp, roleRuns, roleStages, STAGE_WORDS } from "../../shared/agent-pipeline";
+import { ROLE_LABEL, ROLE_ON_FAIL, ROLE_TIERS, type RoleId, type RoleOnFail, type RoleTier, roleToolNames } from "../../shared/agent-roles";
+import { CURATOR_GATE_HELP, CURATOR_GATE_LABELS, CURATOR_GATES, type CuratorGate, PIPELINE_ROLES, ROLE_RUN_LABELS, type RoleRun, roleRunHelp, roleRuns, roleStages, STAGE_WORDS } from "../../shared/agent-pipeline";
 import { AGENT_EFFORTS, BUDGET_DEFS, CURATOR_OPS_DEF, defaultAgentSettings, roleCaching, type AgentBudget, type AgentEffort, type AgentSettings } from "../../shared/agent-settings";
-import { TOOL_FAMILY_LABEL, type ToolFamily } from "../../shared/agent-tools";
+import { TOOL_FAMILY_LABEL, type ToolFamily, toolsWeight } from "../../shared/agent-tools";
 import { hasOwn, type JsonObject } from "../../shared/json";
 import type { PromptSettings } from "../../shared/prompts";
-import { PROMPTS } from "../../shared/prompts";
+import { PROMPTS, promptDef } from "../../shared/prompts";
 import { rolePageId } from "../../shared/role-prompts";
 import { roleRoutes, type RouteSettings, type TaskRoute } from "../../shared/role-routes";
 import type { SettingsRoute } from "../app";
@@ -43,7 +44,7 @@ function cap(owner: string): string {
 export const BUDGET_KEYS = Object.keys(BUDGET_DEFS) as (keyof AgentBudget)[];
 
 /** A page's sections, by id: what Context's rows open a role's page at (`at`). */
-export type AgentSection = "runs" | "may" | "reads" | "when" | "stages" | "review" | "budget" | "caching" | "prompts";
+export type AgentSection = "runs" | "may" | "reads" | "session" | "when" | "stages" | "review" | "budget" | "caching" | "prompts";
 
 /** The settings patch (`lre.settings.set`) for some of a role's settings; a field sent as null is deleted, so the store reads its default. */
 export function rolePatch(id: RoleId, fields: JsonObject): JsonObject {
@@ -55,14 +56,25 @@ export function contextPatch(role: RoleId, fields: JsonObject | null): JsonObjec
   return { agents: { context: { roles: { [role]: fields } } } };
 }
 
-/** A role's page put back: its settings, what it reads and its own caching go, and the Curator's ops per turn, so the store reads the shipped defaults back. */
+/** A role's page put back: its settings, what it reads and its own caching go, and the Curator's ops per turn and quiet-turn gate, so the store reads the shipped defaults back. */
 export function roleResetPatch(id: RoleId): JsonObject {
-  return { agents: { roles: { [id]: null }, context: { roles: { [id]: null } }, caching: { roles: { [id]: null } }, ...(id === "curator" ? { curatorOps: null } : {}) } };
+  return { agents: { roles: { [id]: null }, context: { roles: { [id]: null } }, caching: { roles: { [id]: null } }, ...(id === "curator" ? { curatorOps: null, pipeline: { curatorGate: null } } : {}) } };
 }
 
 /** The pinned paths as typed, one a line: trimmed, blank lines left out, each once. */
 export function pinsOf(text: string): string[] {
   return [...new Set(text.split("\n").map((line) => line.trim()).filter((line) => line !== ""))];
+}
+
+/** What a role's tools weigh: how many it is given working a turn, and about how many tokens they take of each call's prompt, in `prompts`' texts (the user's own, else the shipped). */
+export function roleWeight(id: RoleId, settings: AgentSettings["roles"][RoleId], prompts: PromptSettings): { tools: number; tokens: number } {
+  const names = roleToolNames(id, settings);
+  return { tools: names.length, tokens: toolsWeight(names, (text) => prompts.texts[text] ?? promptDef(text)?.text ?? "") };
+}
+
+/** A weight in words: "42 tools, about 8.4k tokens of each call's prompt". */
+export function weightText(w: { tools: number; tokens: number }): string {
+  return `${w.tools} ${w.tools === 1 ? "tool" : "tools"}, about ${w.tokens < 1000 ? String(w.tokens) : `${Math.round(w.tokens / 100) / 10}k`} tokens of each call's prompt`;
 }
 
 /** A route in words: the connection and model, and where it comes from; Lumiverse's default connection alone says so. */
@@ -166,13 +178,18 @@ export function EffortSetting(props: { owner: string; value: AgentEffort; standa
   );
 }
 
-/** An agent's tool families as chips, as one setting. */
-export function FamiliesSetting(props: { owner: string; value: readonly ToolFamily[]; standard: readonly ToolFamily[]; help: ComponentChildren; busy: boolean; set(families: ToolFamily[] | null): void }) {
+/** An agent's tool families as chips, as one setting, and, given its weight, what its tools take of each call's prompt. */
+export function FamiliesSetting(props: { owner: string; value: readonly ToolFamily[]; standard: readonly ToolFamily[]; help: ComponentChildren; weight?: { tools: number; tokens: number }; busy: boolean; set(families: ToolFamily[] | null): void }) {
   const changed = props.value.length !== props.standard.length || props.value.some((f) => !props.standard.includes(f));
   const to = props.standard.length > 0 ? props.standard.map((f) => TOOL_FAMILY_LABEL[f]).join(", ") : "none";
   return (
     <SettingRow id="families" label="Tools" changed={changed} help={props.help} reset={{ label: `Reset ${props.owner}'s tools to their default, ${to}`, to, onClick: () => props.set(null) }} busy={props.busy}>
       <ToggleChips<ToolFamily> label={`${cap(props.owner)}: tools`} options={FAMILIES.map((value) => ({ value, label: TOOL_FAMILY_LABEL[value] }))} on={props.value} busy={props.busy} toggle={(family, on) => props.set(FAMILIES.filter((f) => (f === family ? on : props.value.includes(f))))} />
+      {props.weight ? (
+        <span class="lre-set-note" data-lre-tool-weight="">
+          {weightText(props.weight)}: the same on every call, so its connection's cache keeps them. What several tools share is told once, in its system prompt.
+        </span>
+      ) : null}
     </SettingRow>
   );
 }
@@ -266,7 +283,7 @@ export function RolePage(props: { id: RoleId; agents: AgentSettings; routes: Rou
       changed: (r.families.length !== d.families.length || r.families.some((f) => !d.families.includes(f)) ? 1 : 0) + (r.tier !== d.tier ? 1 : 0),
       body: (
         <div class="lre-set-rows">
-          <FamiliesSetting owner={label} value={r.families} standard={d.families} help="The families of tools it is given. They read everything, secrets marked, whatever perspective it works from." busy={busy} set={(families) => set({ families })} />
+          <FamiliesSetting owner={label} value={r.families} standard={d.families} help="The families of tools it is given. They read everything, secrets marked, whatever perspective it works from." weight={roleWeight(id, r, props.prompts)} busy={busy} set={(families) => set({ families })} />
           <SettingRow id="tier" label="What it may change" changed={r.tier !== d.tier} help={TIER_HELP[r.tier]} reset={{ label: `Reset what ${label} may change to its default, ${TIER_LABEL[d.tier]}`, to: TIER_LABEL[d.tier], onClick: () => set({ tier: null }) }} busy={busy}>
             <Seg<RoleTier> label={`${label}: what it may change`} value={r.tier} options={ROLE_TIERS.map((value) => ({ value, label: TIER_LABEL[value] }))} disabled={busy} onChange={(tier) => set({ tier })} />
           </SettingRow>
@@ -277,13 +294,14 @@ export function RolePage(props: { id: RoleId; agents: AgentSettings; routes: Rou
     {
       id: "when",
       title: "When it runs and fails",
-      changed: (r.promptOnly !== d.promptOnly ? 1 : 0) + (r.onFail !== d.onFail ? 1 : 0) + (r.run !== d.run ? 1 : 0),
+      changed: (r.promptOnly !== d.promptOnly ? 1 : 0) + (r.onFail !== d.onFail ? 1 : 0) + (r.run !== d.run ? 1 : 0) + (curator && agents.pipeline.curatorGate !== DEFAULTS.pipeline.curatorGate ? 1 : 0),
       body: (
         <div class="lre-set-rows">
           {curator ? (
             <NavRow id="pipeline" icon="branch" title={agents.pipeline.curator ? "Runs after each reply, beside the read" : "Off: the read does its work"} subtitle="Switched in Settings → Agents → Pipeline" changed={0} onOpen={() => props.go({ page: "agents", sub: "pipeline" })} />
           ) : null}
           <RunSetting id={id} agents={agents} busy={busy} set={set} go={props.go} />
+          {curator ? <QuietTurnsSetting agents={agents} busy={busy} patch={props.patch} /> : null}
           <SettingRow id="promptOnly" label="One call, no tools" bare changed={r.promptOnly !== d.promptOnly} help="On, it makes its step's own call, with that step's prompt and answer format: one call, and no tools." reset={{ label: `Reset ${label}'s one call to its default, ${d.promptOnly ? "on" : "off"}`, to: d.promptOnly ? "on" : "off", onClick: () => set({ promptOnly: null }) }} busy={busy}>
             <HostSwitch label={`${label}: one call, no tools`} checked={r.promptOnly} disabled={busy} onChange={(promptOnly) => set({ promptOnly })} />
           </SettingRow>
@@ -344,13 +362,25 @@ export function RunSetting(props: { id: RoleId; agents: AgentSettings; busy: boo
       {roleRunHelp(id, run)}
       {kept}
       {main ? ` With a main agent deciding the turn, it works in ${stages.join(", ")}.` : ""}
-      {runs.length === 1 ? " The engine never skips it." : ""}
+      {runs.length === 1 ? (id === "curator" && agents.pipeline.curatorGate === "on" ? " The engine skips it only on a quiet turn (below)." : " The engine never skips it.") : ""}
     </>
   );
   return (
     <SettingRow id="run" label="When it runs" changed={run !== standard} help={help} reset={{ label: `Reset when ${label} runs to its default, ${ROLE_RUN_LABELS[standard]}`, to: ROLE_RUN_LABELS[standard], onClick: () => props.set({ run: null }) }} busy={busy}>
       {runs.length > 1 ? <Seg<RoleRun> label={`${label}: when it runs`} value={run} options={runs.map((value) => ({ value, label: ROLE_RUN_LABELS[value] }))} disabled={busy} onChange={(next) => props.set({ run: next })} /> : <span class="lre-set-note">{ROLE_RUN_LABELS.smart}</span>}
       {main ? <NavRow id="stages" icon="branch" title="Its stages" subtitle="Settings → Agents → Main agent → Stages" changed={0} onOpen={() => props.go({ page: "main", at: "stages" })} /> : null}
+    </SettingRow>
+  );
+}
+
+/** Whether a quiet turn skips the Curator (`pipeline.curatorGate`): Off, Shadow (it runs, and Diagnostics records what the gate would have decided) or On, with what each does. */
+function QuietTurnsSetting(props: { agents: AgentSettings; busy: boolean; patch(patch: JsonObject): void }) {
+  const gate = props.agents.pipeline.curatorGate;
+  const standard = DEFAULTS.pipeline.curatorGate;
+  const set = (curatorGate: CuratorGate | null) => props.patch({ agents: { pipeline: { curatorGate } } });
+  return (
+    <SettingRow id="curatorGate" label="Skip it on quiet turns" changed={gate !== standard} help={CURATOR_GATE_HELP[gate]} reset={{ label: `Reset skipping the Curator on quiet turns to its default, ${CURATOR_GATE_LABELS[standard]}`, to: CURATOR_GATE_LABELS[standard], onClick: () => set(null) }} busy={props.busy}>
+      <Seg<CuratorGate> label="Curator: skip it on quiet turns" value={gate} options={CURATOR_GATES.map((value) => ({ value, label: CURATOR_GATE_LABELS[value] }))} disabled={props.busy} onChange={set} />
     </SettingRow>
   );
 }

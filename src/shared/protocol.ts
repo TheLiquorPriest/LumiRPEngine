@@ -14,6 +14,7 @@ import type { BookFieldsEdit, BookLoreFields, LoreIndexAddition } from "./lore";
 import type { Limit, MindEditOp, MindsRunView } from "./minds";
 import type { RoutineEditOp, RoutineRead, RoutineReadResult } from "./routines";
 import type { ItemFix, ItemOp, PlaceOp } from "./things";
+import type { VehicleClassChoice } from "./vehicles";
 import type { OrgOp } from "./org-ops";
 import type { CharacterResult } from "./character";
 import type { PersonThings, ThingPage, ThingPicks, ThingsList, ThingType } from "./thing-view";
@@ -25,7 +26,7 @@ import type { Activity, DiagRecord } from "./diagnostics";
 import type { LiveChange, LiveView } from "./live";
 import type { GmView, SheetSectionView, StateView } from "./state-view";
 import type { AdjudicationDef, FacetId, FacetValueId, FeedScope, KindDef, LifeStateId, LorePin, MapDisplay, RelationTypeDef, RevisionNote, SectionFeed, StepPurpose, WorldDoc, WorldIndex } from "./world";
-import type { GM_OUTLINE, GmPart, GmPartAnswer, QueuedOn } from "./gm-parts";
+import type { GM_OUTLINE, GmPartReply, GmReadPart, QueuedOn } from "./gm-parts";
 
 export const PROTOCOL_VERSION = 1;
 
@@ -103,6 +104,8 @@ export interface PageRequest extends Request<"lre.page"> {
 export interface RestartRequest extends Request<"lre.restart"> {
   chatId: ChatId;
   turn: string;
+  /** What the player asked of this telling, from the page's ask (Settings → Swipes): for the narrator alone. */
+  direction?: string;
 }
 
 /**
@@ -148,10 +151,15 @@ export interface ViewOpenRequest extends Request<"lre.view.open"> {
  * (`EditOp`; locked fields are refused), the clock set to `time`, a date and time of day in the
  * world's calendar (`YYYY-MM-DD HH:MM`) at the POV's place, as the HUD reads it (DESIGN §9.2, §12),
  * the next hint the player has earned at a quest log row opened (`hint`, the row's id: DESIGN §10),
- * or a change to one of the player's own things (`thing`: `fix_item`, under the player's rules).
- * `undo` is the chip of the entry just written, null while it waits for a reply in flight.
+ * or a change to one of the player's own things (`thing`: `fix_item`, under the player's rules), or
+ * to several at once (`things`, 1 to `FIX_THINGS_MAX`: all or none, one entry with one Undo named by
+ * its `label`, told as Settings → Narrator → Out-of-play actions says for its group unless `tell`
+ * says). `undo` is the chip of the entry just written, null while it waits for a reply in flight.
  */
-export type FixRequest = Request<"lre.fix"> & { chatId: ChatId } & ({ entity: EntityId; field: FieldId; value: JsonValue } | { time: string } | { hint: string } | { thing: ItemFix });
+export type FixRequest = Request<"lre.fix"> & { chatId: ChatId } & ({ entity: EntityId; field: FieldId; value: JsonValue } | { time: string } | { hint: string } | { thing: ItemFix } | { things: ItemFix[]; label: string; tell?: boolean });
+
+/** The most things one `lre.fix {things}` changes. */
+export const FIX_THINGS_MAX = 64;
 
 /**
  * One typed edit (DESIGN §7 GM edits, §12 ✎ fixes). Each is checked against what it touches (a
@@ -233,14 +241,23 @@ export interface GmRequest extends Request<"lre.gm"> {
 
 /**
  * One part of the GM view (DESIGN §7), built alone (`GmPartView`): a client reading one part (the
- * MCP server's `lre_gm`) needn't have the whole view built and sent. With `id`, of `entities`,
- * `money` or `orgs` only that one, by its id or its name (an ambiguous name is refused, listing the
- * ids). `outline` (`GM_OUTLINE`) reads how many each part holds instead (`GmOutline`).
+ * MCP server's `lre_gm`, the GM page's tabs) needn't have the whole view built and sent. With `id`,
+ * of `entities`, `money` or `orgs` only that one, by its id or its name (an ambiguous name is
+ * refused, listing the ids); with `ids`, of those or of `roster`, only those found, in the order
+ * asked; with `kind`, of `entities`, `roster` or `money`, only those of that kind or one extending
+ * it. `roster` lists every entity slim (`GmRosterEntry`). `outline` (`GM_OUTLINE`) reads how many
+ * each part holds instead (`GmOutline`), with each part's size when `bytes` is asked. `since`, the
+ * key of an answer the client holds: while the head's key is still that, the answer is `same`, with
+ * nothing built.
  */
 export interface GmPartRequest extends Request<"lre.gm.part"> {
   chatId: ChatId;
-  part: GmPart | typeof GM_OUTLINE;
+  part: GmReadPart | typeof GM_OUTLINE;
   id?: string;
+  ids?: string[];
+  kind?: string;
+  since?: string;
+  bytes?: boolean;
 }
 
 /**
@@ -321,9 +338,11 @@ export type CharacterRequest = Request<"lre.character"> & { op: "get"; entity: E
  * `types`, the catalog's types with the size each gives. GM only: `tidy`, Tidy up's findings (at
  * most the user's findings per run, those left out); `leave`, a finding left (or shown again,
  * `left: false`) for this chat; `made`, the things and places the chat made in play, each saying
- * whether the world's draft has it; `keep`, copies of those into the world's draft.
+ * whether the world's draft has it; `keep`, copies of those into the world's draft. Play's
+ * (`scope: "play"`): `types`, what Belongings' Add offers the player of the chat's head (the types,
+ * the vehicle classes, and how many things one Add makes at most).
  */
-export type ThingsRequest = Request<"lre.things"> & (({ scope: "build"; worldId: WorldId } & ThingsRead) | ({ scope: "gm"; chatId: ChatId } & GmThingsRead));
+export type ThingsRequest = Request<"lre.things"> & (({ scope: "build"; worldId: WorldId } & ThingsRead) | ({ scope: "gm"; chatId: ChatId } & GmThingsRead) | { scope: "play"; chatId: ChatId; op: "types" });
 
 /** The reads of `lre.things` both scopes answer. */
 export type ThingsRead = { op: "list" } | { op: "thing"; entity: EntityId } | { op: "person"; entity: EntityId } | { op: "find"; words: string } | { op: "types" };
@@ -520,9 +539,10 @@ export interface JobProposal {
 
 /**
  * A job's result: proposals, with `next`, the input that continues a pass that stopped before the
- * end (Propose routines), or a run's turns and lint.
+ * end (Propose routines), or a run's turns and lint. `processMs`: a Check world day's ms per
+ * simulated process, wall clock, shown beside the day; absent for Playtest.
  */
-export type JobResult = { proposals: JobProposal[]; next?: JsonObject } | { turns: { user: string; reply: string; notes: string[] }[]; lint: LintIssue[] };
+export type JobResult = { proposals: JobProposal[]; next?: JsonObject } | { turns: { user: string; reply: string; notes: string[]; processMs?: Record<string, number> }[]; lint: LintIssue[] };
 
 /** Pushed while a job runs and once when it ends. */
 export interface JobUpdate extends Envelope<"lre.job.update"> {
@@ -1096,6 +1116,8 @@ export interface SessionView {
 export interface SessionSegmentView {
   turn: number | null;
   messages: SessionMessageView[];
+  /** What of it the main agent reads, in tokens, estimated (its receipts where the session keeps them). */
+  tokens?: number;
 }
 
 /**
@@ -1295,7 +1317,7 @@ export interface ResultBodies {
   /** `undo`: the chip that undoes the edit just written (the chat's GM edit chip for it), null while it waits for a reply in flight or when it changed nothing. */
   "lre.edit": { pending: boolean; queued?: QueuedOn; undo: string | null };
   "lre.gm": GmView;
-  "lre.gm.part": GmPartAnswer;
+  "lre.gm.part": GmPartReply;
   "lre.chat.export": ChatExport;
   /** Every section in prompt order, and the section budget: the shared one, what the sent sections spend of it, and the Minds section's own. */
   "lre.sections": { sections: SectionPreview[]; budget: { sections: number; used: number; minds: number } };
@@ -1347,7 +1369,7 @@ export interface ResultBodies {
    * choices; `find`: the ids found, best first; `types`: the catalog's types; `tidy`: the run; `leave`: the run after it; `made`: what the chat made in play;
    * `keep`: what was kept, then what is made in play after it.
    */
-  "lre.things": { list?: ThingsList; here?: GmThingsList; thing?: ThingPage; gm?: GmThingExtras; person?: PersonThings; pick?: ThingPicks; found?: EntityId[]; types?: ThingType[]; tidy?: TidyRun; made?: MadeInPlay; kept?: KeepResult };
+  "lre.things": { list?: ThingsList; here?: GmThingsList; thing?: ThingPage; gm?: GmThingExtras; person?: PersonThings; pick?: ThingPicks; found?: EntityId[]; types?: ThingType[]; tidy?: TidyRun; made?: MadeInPlay; kept?: KeepResult; classes?: VehicleClassChoice[]; cap?: number };
   /** `kit`: this build, where its kit is, and whether the asking session checked in since the extension started; every other op answers the `view`. */
   "lre.agents": { view?: AgentsView; build?: string; kit?: KitReport | null; known?: boolean };
   /** The open acceptance run and the last one closed, after the op. */
@@ -1434,6 +1456,8 @@ export interface GeneratePush extends Envelope<"lre.generate"> {
   chatId: ChatId;
   as: GenerateAs;
   turn: string;
+  /** A swipe no chip's choice asked anything of, while Settings → Swipes → Ask what should change on each swipe is on: the page asks first (restart.ts), and its claim carries the answer. */
+  ask?: true;
 }
 
 /**

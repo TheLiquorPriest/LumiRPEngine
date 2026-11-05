@@ -1,7 +1,8 @@
 // Build → Things (ITEMS-SPEC §10.1, mobile first): the world's things by place (a tree of places,
 // what lies there and what holds what) and by owner (each owner's things on them, at home and
 // elsewhere), with a search through the name resolver; Add a thing in four fields (its name, what it
-// is from either catalog or a size in words, where it is, whose); a thing's page (where it is and is
+// is: its kind, Item to Ammo or a Vehicle, then a type of that kind from the catalogs, a size in words
+// or a vehicle's class; where it is, whose); a thing's page (where it is and is
 // kept, whose, who may use it and why, what it is, what it holds, its secrecy and every field under
 // Advanced, never a tier or a life); a person's things in the Character page's groups, each with
 // Move, Give, Lend and Remove; and a place's furnishings and loose things. Everything is read from
@@ -17,7 +18,9 @@ import type { GrantBasis, Size, SizeClass, Spot } from "../../shared/things";
 import { isSize, SIZE_LABELS, SIZES, THING_NAME_MAX } from "../../shared/things";
 import type { GrantView, OwnerGroup, PartyRef, PersonThings, ThingPage as ThingPageView, ThingPicks, ThingRow, ThingType, WhereChoice } from "../../shared/thing-view";
 import { GRANT_WORDS, presumedLine, SIZE_FROM_WORDS, SIZE_WORDS, sizeLabel, whoseWords } from "../../shared/thing-view";
+import { vehicleClassChoices, worldHasAir, type VehicleClassChoice, type VehiclePick } from "../../shared/vehicles";
 import { playedKinds, type WorldDoc } from "../../shared/world";
+import { VehiclePicker } from "../../packs/vehicles/ui/picker";
 import { useApp } from "../app";
 import { TextListEditor } from "../character/text-list";
 import { wordsOf } from "../character/places";
@@ -29,6 +32,7 @@ import { thingsRequest } from "../requests";
 import { useSelect } from "../store";
 import { cannotHold, stepWords, whereLabel } from "../things/where";
 import { WherePicker, WhereSheet, type WhereExtra, type WherePick } from "../things/where-picker";
+import { KindChips, sizeOfWhat, suggestedName, THING_KINDS, TypeSheet, whatWords, type ThingKind, type WhatItIs } from "../things/what-it-is";
 import { entityFormSpecs, entityPatch } from "./character-model";
 import { go, ItemHeader, OverflowMenu, type MenuItem } from "./chrome";
 import { RevealItem } from "./contents";
@@ -382,87 +386,6 @@ export function ThingsPage() {
 
 // ---------------------------------------------------------------- Add a thing
 
-/** The types whose name or category has every word of the query (each a word's beginning), named by it first; at most this many. */
-const TYPE_LIMIT = 60;
-
-export function searchTypes(types: readonly ThingType[], query: string): ThingType[] {
-  const want = wordsOf(query);
-  if (want.length === 0) return [];
-  const hits: { type: ThingType; own: boolean }[] = [];
-  for (const type of types) {
-    const name = wordsOf(type.name);
-    const category = type.category ? wordsOf(type.category) : [];
-    const inName = (q: string): boolean => name.some((n) => n.startsWith(q));
-    if (!want.every((q) => inName(q) || category.some((n) => n.startsWith(q)))) continue;
-    hits.push({ type, own: want.every(inName) });
-  }
-  hits.sort((a, b) => Number(b.own) - Number(a.own) || a.type.name.localeCompare(b.type.name));
-  return hits.slice(0, TYPE_LIMIT).map((h) => h.type);
-}
-
-/** What Add a thing's "What is it?" holds: a type from the catalogs, a size in words (something else), or nothing yet. */
-type WhatItIs = { type: ThingType } | { size: Size } | null;
-
-/** Each size in words, to pick one for something the catalogs don't have. */
-export function SizeChoices(props: { value: Size | null; onPick(size: Size): void }) {
-  return (
-    <div class="lre-thing-sizes" role="radiogroup" aria-label="How big it is">
-      {SIZES.map((size) => (
-        <button key={size} type="button" role="radio" aria-checked={props.value === size} class="lre-thing-size" data-lre-size-choice={size} onClick={() => props.onPick(size)}>
-          <span class="lre-thing-size-name">{SIZE_LABELS[size]}</span>
-          <span class="lre-thing-size-means">{SIZE_WORDS[size].means}</span>
-          <span class="lre-thing-size-eg">Like {SIZE_WORDS[size].examples}</span>
-        </button>
-      ))}
-    </div>
-  );
-}
-
-/** "What is it?": the catalogs searched by name and category, each type with the size it gives, and Something else for a size in words. */
-function TypeSheet(props: { types: readonly ThingType[] | null; value: WhatItIs; onPick(next: WhatItIs): void; onClose(): void }) {
-  const [query, setQuery] = useState("");
-  const [other, setOther] = useState(props.value !== null && "size" in props.value);
-  const id = useId();
-  const results = useMemo(() => searchTypes(props.types ?? [], query), [props.types, query]);
-  return (
-    <FormSheet title="What is it?" subtitle={props.value === null ? "Pick its type, or say how big it is" : "type" in props.value ? props.value.type.name : `Something else: ${SIZE_LABELS[props.value.size]}`} onClose={props.onClose}>
-      <div class="lre-cp-sheet" data-lre-type-sheet="">
-        <label class="lre-cp-search" for={id}>
-          <Icon name="search" size={16} />
-          <input id={id} class="lre-input" type="search" placeholder="Search the catalogs: “toolbox”, “fridge”, “milk”" aria-label="Search the catalogs" value={query} onInput={(event) => setQuery(event.currentTarget.value)} />
-        </label>
-        <Button variant={other ? "primary" : "secondary"} icon="sliders" onClick={() => setOther(!other)}>
-          Something else
-        </Button>
-        {other ? (
-          <Section title="How big is it?" flush>
-            <SizeChoices value={props.value !== null && "size" in props.value ? props.value.size : null} onPick={(size) => props.onPick({ size })} />
-          </Section>
-        ) : props.types === null ? (
-          <Empty icon="hourglass">Reading the catalogs…</Empty>
-        ) : query.trim() === "" ? (
-          <p class="lre-cp-note">Type what it is. A type gives its size and its details (weight, volume, the slot it is worn in); Something else gives a size in words.</p>
-        ) : results.length === 0 ? (
-          <Empty icon="search">No type matches “{query.trim()}”: try Something else.</Empty>
-        ) : (
-          <Section title={results.length === TYPE_LIMIT ? `${TYPE_LIMIT} types, keep typing to narrow` : results.length === 1 ? "1 type" : `${results.length} types`} flush>
-            <List>
-              {results.map((t) => (
-                <ListRow key={`${t.table}:${t.id}`} title={t.name} subtitle={[t.category, sizeLabel(t.size)].filter((p) => p).join(" · ")} current={props.value !== null && "type" in props.value && props.value.type.id === t.id} onClick={() => props.onPick({ type: t })} />
-              ))}
-            </List>
-          </Section>
-        )}
-      </div>
-    </FormSheet>
-  );
-}
-
-/** The size a "What is it?" gives: its type's, the size in words, or none yet. */
-function sizeOfWhat(what: WhatItIs): SizeClass | null {
-  return what === null ? null : "type" in what ? what.type.size : what.size;
-}
-
 /** The where picker's value for a spot, from its choices. */
 function pickOf(pick: ThingPicks, spot: Spot | null): WherePick | null {
   if (spot === null) return null;
@@ -500,17 +423,24 @@ function partyOptions(parties: readonly PartyRef[]): RefOption[] {
   return parties.map((p) => ({ value: p.id, label: p.name, ...(p.is !== "person" ? { sublabel: p.is === "company" ? "a business" : `a ${p.is}` } : {}) }));
 }
 
+/** The vehicle classes Add a thing offers in a world: its own table's, for a year (the one it starts in, unless said), aircraft only where it has air routes. */
+export function buildClasses(doc: WorldDoc, year: number = Number(doc.start.at.slice(0, 4))): VehicleClassChoice[] {
+  return vehicleClassChoices(doc.tables["vehicles.classes"], { year, air: worldHasAir(doc) });
+}
+
 /**
- * Add a thing (ITEMS-SPEC §10.1): one sheet of four fields: its name; what it is (a type from the
- * catalogs, which gives its size and details, or something else, a size in words); where it is;
- * whose (or nobody's, with what that means where it is). Kept at follows Where unless changed.
- * Create puts it in the draft and opens its page; `preset` starts Where and Whose ("Give them a thing").
+ * Add a thing (ITEMS-SPEC §10.1): one sheet of four fields: its name; what it is (its kind, a chip
+ * each, then a type from the catalogs of that kind, which gives its size and details, or something
+ * else, a size in words; a vehicle's class from the vehicle picker); where it is; whose (or
+ * nobody's, with what that means where it is). Kept at follows Where unless changed. Create puts it
+ * in the draft and opens its page; `preset` starts Where and Whose ("Give them a thing").
  */
 export function AddThing(props: { doc: WorldDoc; pick: ThingPicks; preset?: { where?: Spot; owner?: string | null }; onClose(): void; onCreated?(id: EntityId): void }) {
   const app = useApp();
   const send = useMemo(() => draftSend(app), [app]);
   const [busy, run] = useBusy();
   const [name, setName] = useState("");
+  const [kind, setKind] = useState<ThingKind>("item");
   const [what, setWhat] = useState<WhatItIs>(null);
   const [choosing, setChoosing] = useState(false);
   const [types, setTypes] = useState<ThingType[] | null>(null);
@@ -518,6 +448,7 @@ export function AddThing(props: { doc: WorldDoc; pick: ThingPicks; preset?: { wh
   const [owner, setOwner] = useState<string>(props.preset?.owner ?? "");
   const [kept, setKept] = useState<WherePick>({ extra: "here" });
   const nameId = useId();
+  const classes = useMemo(() => buildClasses(props.doc), [props.doc]);
   useEffect(() => {
     let live = true;
     void app.request(thingsRequest(props.doc.id, { op: "types" })).then((answer) => {
@@ -527,18 +458,39 @@ export function AddThing(props: { doc: WorldDoc; pick: ThingPicks; preset?: { wh
       live = false;
     };
   }, [props.doc.id]);
+  const vehicle = kind === "vehicle";
   const size = sizeOfWhat(what);
   const choice = where && "choice" in where ? where.choice : null;
   const tooBig = choice ? cannotHold(choice, size) : null;
   const trimmed = name.trim();
-  const ready = trimmed !== "" && trimmed.length <= THING_NAME_MAX && what !== null && choice !== null && tooBig === null;
+  const ready = trimmed !== "" && trimmed.length <= THING_NAME_MAX && what !== null && choice !== null && tooBig === null && (!vehicle || choice.is === "place");
   const presumes = owner === "" && choice ? presumedLine(choice.presumes) : null;
+  const pickKind = (next: ThingKind): void => {
+    if (next === kind) return;
+    setKind(next);
+    setWhat(null);
+  };
+  const pickWhat = (next: WhatItIs): void => {
+    setWhat(next);
+    setChoosing(false);
+    const named = suggestedName(next);
+    if (named !== null && trimmed === "") setName(named.slice(0, THING_NAME_MAX));
+  };
   const create = () =>
     run(async () => {
       if (!ready || !choice) return;
       const typed = what !== null && "type" in what ? what.type : null;
       const row = typed ? props.doc.tables[typed.table]?.rows[typed.id] : undefined;
-      const made = newThing(props.doc, { name: trimmed, type: typed && row ? { type: typed, row } : null, size: what !== null && "size" in what ? what.size : null, where: spotOfChoice(choice), owner: owner === "" ? null : owner, kept: keptValue(kept) });
+      const made = newThing(props.doc, {
+        name: trimmed,
+        type: typed && row ? { type: typed, row } : null,
+        size: what !== null && "size" in what ? what.size : null,
+        is: vehicle ? null : kind,
+        vehicle: what !== null && "vehicle" in what ? what.vehicle : null,
+        where: spotOfChoice(choice),
+        owner: owner === "" ? null : owner,
+        kept: keptValue(kept),
+      });
       const sent = await send({ type: "lre.editor", worldId: props.doc.id, base: null, op: "put", collection: "entities", id: made.id, value: made.value });
       if (sent.type !== "lre.result") return;
       props.onClose();
@@ -556,24 +508,25 @@ export function AddThing(props: { doc: WorldDoc; pick: ThingPicks; preset?: { wh
         </Button>
       }
     >
-      <div class="lre-stack" data-lre-add-thing="">
+      <div class="lre-stack" data-lre-add-thing={kind}>
         <div class="lre-field">
           <label class="label" for={nameId}>
             1. Name
           </label>
-          <input id={nameId} class="lre-input" value={name} maxLength={THING_NAME_MAX} placeholder="Torque wrench" onInput={(event) => setName(event.currentTarget.value)} />
+          <input id={nameId} class="lre-input" value={name} maxLength={THING_NAME_MAX} placeholder={vehicle ? "Delivery van" : "Torque wrench"} onInput={(event) => setName(event.currentTarget.value)} />
         </div>
         <div class="lre-field" data-lre-what="">
           <span class="label">2. What is it?</span>
+          <KindChips value={kind} kinds={classes.length > 0 ? THING_KINDS : THING_KINDS.filter((k) => k !== "vehicle")} onPick={pickKind} />
           <div class="lre-cp-value">
-            <span class="lre-cp-path">{what === null ? <span class="lre-muted">Not picked yet</span> : "type" in what ? `${what.type.name} · ${sizeLabel(what.type.size)}` : `Something else · ${SIZE_LABELS[what.size]}`}</span>
-            <Button size="sm" icon="search" onClick={() => setChoosing(true)}>
+            <span class="lre-cp-path">{what === null ? <span class="lre-muted">Not picked yet</span> : whatWords(what)}</span>
+            <Button size="sm" icon={vehicle ? "car" : "search"} onClick={() => setChoosing(true)}>
               {what === null ? "Pick…" : "Change…"}
             </Button>
           </div>
-          <span class="lre-field-help">A type from the catalogs gives its size and details; Something else asks how big it is.</span>
+          <span class="lre-field-help">{vehicle ? "Its class gives its fuel, range and price; its make, model and year are yours to set." : "A type from the catalogs gives its size and details; Something else asks how big it is."}</span>
         </div>
-        <WherePicker title="3. Where is it?" choices={props.pick.where} value={where} size={size} onPick={setWhere} action={where ? "Change…" : "Pick…"} empty="Not picked yet" help={tooBig ?? "A place, someone who has it, or what holds it."} />
+        <WherePicker title="3. Where is it?" choices={vehicle ? props.pick.where.filter((c) => c.is === "place") : props.pick.where} value={where} size={size} onPick={setWhere} action={where ? "Change…" : "Pick…"} empty="Not picked yet" help={tooBig ?? (vehicle ? "A place it stands at." : "A place, someone who has it, or what holds it.")} />
         {tooBig ? <Banner tone="warn">{tooBig}: pick a place, or something that takes it.</Banner> : null}
         <div class="lre-field" data-lre-whose="">
           <RefPicker label="4. Whose?" value={owner} options={partyOptions(props.pick.parties)} none="Nobody" onChange={setOwner} />
@@ -581,18 +534,8 @@ export function AddThing(props: { doc: WorldDoc; pick: ThingPicks; preset?: { wh
         </div>
         <WherePicker title="Kept at" choices={props.pick.where} value={kept} size={size} extras={KEPT_EXTRAS} onPick={(next) => setKept(next ?? { extra: "here" })} help="Where it goes back to when nobody is using it." />
       </div>
-      {choosing ? (
-        <TypeSheet
-          types={types}
-          value={what}
-          onClose={() => setChoosing(false)}
-          onPick={(next) => {
-            setWhat(next);
-            setChoosing(false);
-            if (next !== null && "type" in next && trimmed === "") setName(next.type.name);
-          }}
-        />
-      ) : null}
+      {choosing && vehicle ? <VehiclePicker classes={classes} value={what !== null && "vehicle" in what ? what.vehicle.id : null} title="What vehicle?" onClose={() => setChoosing(false)} onPick={(pick: VehiclePick) => pickWhat({ vehicle: pick })} /> : null}
+      {choosing && !vehicle ? <TypeSheet types={types} kind={kind} value={what} onClose={() => setChoosing(false)} onPick={pickWhat} /> : null}
     </FormSheet>
   );
 }
@@ -835,11 +778,12 @@ export function ThingPage(props: EditorProps) {
       {choosingType ? (
         <TypeSheet
           types={types}
+          kind="item"
           value={null}
           onClose={() => setChoosingType(false)}
           onPick={(next) => {
             setChoosingType(false);
-            if (next === null) return;
+            if (next === null || "vehicle" in next) return;
             setValue("type" in next ? withField(value, "catalog", next.type.id) : withField(withField(value, "catalog", undefined), "size", next.size));
           }}
         />

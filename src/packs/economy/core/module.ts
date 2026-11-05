@@ -63,8 +63,10 @@ export interface Sale {
   payer: EntityId;
   place: string | null;
   category: string;
-  /** The price, before any sales tax. */
+  /** What is paid now, before any sales tax: the price, or a financed purchase's down payment. */
   cents: number;
+  /** A financed purchase's whole price, of which `cents` is the down payment: its sales tax is on all of it. */
+  price?: number;
   item: string;
 }
 

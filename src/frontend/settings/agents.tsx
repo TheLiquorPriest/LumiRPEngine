@@ -28,6 +28,9 @@ import { amountText, ChangedBadge, freshNonce, LimitGroup, LimitRow, NavRow, Set
 import { AGENTS_SUB, AGENTS_SUBS, CURATOR_HELP, MEMORY_HELP, PIPELINE_HELP, REVIEW_HELP, STAGE_LABEL, STREAM_HELP, THINKING_HELP, type AgentsSub } from "./labels";
 import { routeText } from "./role-page";
 import type { Connection } from "./steps";
+import type { UserSettings } from "../../shared/settings";
+import { speedChanged } from "../../shared/speed-presets";
+import { speedSummary } from "./speed";
 
 /** The defaults each row's Default resets to (a reset deletes the stored value, so the reader falls back to these). */
 const DEFAULTS = defaultAgentSettings();
@@ -207,11 +210,18 @@ export function CallSwitches(props: { agents: AgentSettings; busy: boolean; patc
 }
 
 /** Settings → Agents, without hooks: a turn at a glance, every call's switches, and a row per section. */
-export function AgentsHub(props: { agents: AgentSettings; routes: RouteSettings; connections: readonly Connection[]; busy: boolean; patch(patch: JsonObject): void; go(route: SettingsRoute): void }) {
+export function AgentsHub(props: { agents: AgentSettings; routes: RouteSettings; connections: readonly Connection[]; busy: boolean; patch(patch: JsonObject): void; go(route: SettingsRoute): void; speed?: UserSettings }) {
   const { agents } = props;
   return (
     <div class="lre-stack" data-lre-settings-page="agents">
       <p class="lre-set-lead">How a chat's turns run once GM → This chat → Engine plays it on agents, and what every agent runs under.</p>
+      {props.speed ? (
+        <Section title="Speed" flush>
+          <List>
+            <NavRow id="speed" icon="fast-forward" title="Speed" subtitle={`${speedSummary(props.speed)} · where the last turn's time went, and every setting that decides it`} changed={speedChanged(props.speed)} onOpen={() => props.go({ page: "speed" })} />
+          </List>
+        </Section>
+      ) : null}
       <TurnGlance agents={agents} routes={props.routes} connections={props.connections} go={props.go} />
       <CallSwitches agents={agents} busy={props.busy} patch={props.patch} />
       <Section title="Sections" flush>

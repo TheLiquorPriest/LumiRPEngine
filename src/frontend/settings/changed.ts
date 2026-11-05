@@ -34,7 +34,8 @@ function sameSet(a: readonly string[], b: readonly string[]): boolean {
 export function agentsSubChanged(agents: Readonly<AgentSettings>, sub: AgentsSub): number {
   switch (sub) {
     case "pipeline":
-      return fieldsChanged(agents.pipeline, DEFAULTS.pipeline) + fieldsChanged(agents.persist, DEFAULTS.persist);
+      // The Curator's gate is on its role page (When it runs), so it counts there, not here.
+      return fieldsChanged({ ...agents.pipeline, curatorGate: DEFAULTS.pipeline.curatorGate }, DEFAULTS.pipeline) + fieldsChanged(agents.persist, DEFAULTS.persist);
     case "review":
       return fieldsChanged(agents.review, DEFAULTS.review);
     case "system":
@@ -42,7 +43,7 @@ export function agentsSubChanged(agents: Readonly<AgentSettings>, sub: AgentsSub
     case "budgets":
       return fieldsChanged(agents.budget, DEFAULTS.budget) + fieldsChanged(agents.turn, DEFAULTS.turn) + fieldsChanged(agents.kept, DEFAULTS.kept) + [agents.loopRepeats !== DEFAULTS.loopRepeats, agents.clipChars !== DEFAULTS.clipChars, agents.gmOpsPerTurn !== DEFAULTS.gmOpsPerTurn].filter(Boolean).length;
     case "compaction":
-      return fieldsChanged(agents.compaction, DEFAULTS.compaction);
+      return [agents.compaction.atTokens !== DEFAULTS.compaction.atTokens, agents.compaction.keepTurns !== DEFAULTS.compaction.keepTurns, agents.compaction.summarizeTool !== DEFAULTS.compaction.summarizeTool].filter(Boolean).length;
     case "recording":
       return fieldsChanged(agents.recording, DEFAULTS.recording);
     case "throttles":
@@ -70,7 +71,7 @@ export function contextChanged(agents: Readonly<AgentSettings>, id: RoleId): num
 export function roleChanged(agents: Readonly<AgentSettings>, id: RoleId): number {
   const r = agents.roles[id];
   const d = DEFAULTS.roles[id];
-  const settings = [r.connectionId !== d.connectionId || r.model !== d.model, r.effort !== d.effort, !sameSet(r.families, d.families), r.tier !== d.tier, r.promptOnly !== d.promptOnly, r.onFail !== d.onFail, r.run !== d.run, hasOwn(agents.caching.roles, id), id === "curator" && agents.curatorOps !== DEFAULTS.curatorOps];
+  const settings = [r.connectionId !== d.connectionId || r.model !== d.model, r.effort !== d.effort, !sameSet(r.families, d.families), r.tier !== d.tier, r.promptOnly !== d.promptOnly, r.onFail !== d.onFail, r.run !== d.run, hasOwn(agents.caching.roles, id), id === "curator" && agents.curatorOps !== DEFAULTS.curatorOps, id === "curator" && agents.pipeline.curatorGate !== DEFAULTS.pipeline.curatorGate];
   return settings.filter(Boolean).length + ownChanged(r.budget, d.budget) + contextChanged(agents, id);
 }
 
@@ -79,14 +80,23 @@ export function rolesChanged(agents: Readonly<AgentSettings>): number {
   return ROLE_IDS.filter((id) => roleChanged(agents, id) > 0).length;
 }
 
-/** The main agent's page: where it runs, its effort and tools, its turn task, its own limits, its caching, and its final review (its time among them). */
+/** The main agent's page: where it runs, its effort and tools, its turn task, its own limits, its caching, its session, and its final review (its time among them). */
 export function mainChanged(agents: Readonly<AgentSettings>, timeouts: Readonly<Pick<TimeoutSettings, "finalReviewMs">>): number {
   const m = agents.main;
   const d = DEFAULTS.main;
   const r = agents.finalReview;
   const dr = DEFAULTS.finalReview;
   const settings = [m.connectionId !== d.connectionId || m.model !== d.model, m.effort !== d.effort, !sameSet(m.families, d.families), m.digestTokens !== d.digestTokens, m.pinsTokens !== d.pinsTokens, hasOwn(agents.caching.roles, "main"), r.on !== dr.on, r.onFail !== dr.onFail, timeouts.finalReviewMs !== TIMEOUTS.finalReviewMs];
-  return settings.filter(Boolean).length + fieldsChanged(m.stages, d.stages) + (r.scope !== dr.scope ? 1 : 0) + ownChanged(m.budget, d.budget) + ownChanged(r.budget, dr.budget);
+  return settings.filter(Boolean).length + fieldsChanged(m.stages, d.stages) + (r.scope !== dr.scope ? 1 : 0) + ownChanged(m.budget, d.budget) + ownChanged(r.budget, dr.budget) + sessionChanged(agents);
+}
+
+/** Main agent → Session: when the session is summarized, on what connection and model and with what effort, how long a summary may be, past what size it runs and how many turns stay whole, and what past turns keep. A connection with its model counts as one. */
+export function sessionChanged(agents: Readonly<AgentSettings>): number {
+  const c = agents.compaction;
+  const dc = DEFAULTS.compaction;
+  const m = agents.main;
+  const d = DEFAULTS.main;
+  return [c.when !== dc.when, c.connectionId !== dc.connectionId || c.model !== dc.model, c.effort !== dc.effort, c.summaryTokens !== dc.summaryTokens, c.atTokens !== dc.atTokens, c.keepTurns !== dc.keepTurns, m.sessionKeeps !== d.sessionKeeps, m.receiptChars !== d.receiptChars].filter(Boolean).length;
 }
 
 /** The GM assistant's page: where it runs, its effort, how its changes land, its history, its own limits and its caching. */

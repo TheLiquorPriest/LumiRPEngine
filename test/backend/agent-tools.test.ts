@@ -9,7 +9,7 @@
 import { describe, expect, test } from "bun:test";
 import { type Resolved, resolvePerson, resolvePlace, resolveTrack } from "../../src/backend/agents/tools/resolve";
 import { type AgentOp, outsideWriter, type ToolWriter } from "../../src/backend/agents/tools/writer";
-import { badValue, schemaWorld } from "../../src/backend/agents/tools/schema";
+import { badValue, ENUM_CAP, schemaWorld } from "../../src/backend/agents/tools/schema";
 import { renderPrompt } from "../../src/backend/prompts";
 import { TOOL_DEFINITIONS, toolsFor } from "../../src/backend/agents/tools/registry";
 import { promptGroups } from "../../src/frontend/settings/agent-prompts";
@@ -70,7 +70,7 @@ describe("the Every agent page lists exactly the tools", () => {
     const tools = TOOL_DEFINITIONS.flatMap((def) => [toolTextId(def.name), ...(toolText(def.name)?.args ?? []).map((a) => toolArgTextId(def.name, a.path))]);
     expect([...listed].sort()).toEqual([...tools].sort());
     expect(TOOL_TEXTS.map((t) => t.name).sort()).toEqual(TOOL_DEFINITIONS.map((d) => d.name).sort());
-    for (const def of TOOL_DEFINITIONS) expect({ name: def.name, family: toolText(def.name)?.family, tier: toolText(def.name)?.tier }).toEqual({ name: def.name, family: def.family, tier: def.tier });
+    for (const def of TOOL_DEFINITIONS) expect({ name: def.name, family: toolText(def.name)?.family, tier: toolText(def.name)?.tier, notes: toolText(def.name)?.notes === true }).toEqual({ name: def.name, family: def.family, tier: def.tier, notes: def.notes === true });
     // Each description is the tool's shipped text.
     for (const t of TOOL_TEXTS) expect(promptDef(toolTextId(t.name))?.text).toBe(t.text);
   });
@@ -232,13 +232,19 @@ describe("toolsFor", () => {
     for (const t of toolsFor({ world, tiers: ["gm"], texts: {}, env })) expect(tier(t.name)?.tier).toBe("gm");
   });
 
-  test("under every view a place argument offers every place, a secret one too, and an action argument every action", async () => {
+  test("under every view a place argument offers every place, a secret one too, and an action argument every action, up to ENUM_CAP; past it, plain text checked against every one", async () => {
     const { rig, chatId } = await alderChat();
     // Marcus's house is secret, and reading the bank statement is a step of the shop's secret.
     for (const knowledge of KNOWLEDGE) {
       const place = (await agentTools(rig, chatId, knowledge)).find((t) => t.name === "places_read");
       expect((propertiesOf(place?.parameters ?? {}).place as JsonObject).enum).toContain("birch_lane_12");
-      expect(JSON.stringify((await agentTools(rig, chatId, knowledge, { tiers: ["read", "gm"] })).map((t) => t.parameters))).toContain("read_bank_statement");
+      const view = await toolEnv(rig, chatId, knowledge).reader.view();
+      const actions = Object.keys(schemaWorld(view.world, view.registry).actions);
+      const odds = (await agentTools(rig, chatId, knowledge, { tiers: ["read", "gm"] })).find((t) => t.name === "checks_odds");
+      const action = propertiesOf(odds?.parameters ?? {}).action as JsonObject;
+      if (actions.length <= ENUM_CAP) expect(action.enum).toContain("read_bank_statement");
+      else expect(action.enum).toBeUndefined();
+      expect(actions).toContain("read_bank_statement");
     }
   });
 });

@@ -8,7 +8,8 @@
 // commit, re-validated in order. A make finds first and names the one there already; a thing too big
 // to carry lands where its person stands; a handover's basis decides its owner (§4.6); a merge is of
 // things made in play, an authored one the GM's; a place is found first under its parent; and a
-// change asked for again is the one staged, landing once.
+// change asked for again is the one staged, landing once. A make takes a kit's type, a wear a slot
+// (Ready is in hand), and a person's saved outfits are kept and changed into by name (DESIGN §28.16).
 
 import { describe, expect, test } from "bun:test";
 import { type ReadNotes, type ToolEnv, toolsFor } from "../../src/backend/agents/tools/registry";
@@ -496,5 +497,50 @@ describe("a make that gives neither a type nor a size takes its type (N3)", () =
     expect(more).toEqual([]);
     expect(state.entities[fridge]?.fields).toMatchObject({ place: HOME, catalog: "refrigerator" });
     expect(holderOf(state, fridge)).toBeUndefined();
+  });
+});
+
+describe("kits, slots and saved outfits in the Curator's tools (DESIGN §28.8, §28.16)", () => {
+  /** Jordan's denim jacket, worn, and his rain jacket, carried. */
+  const JACKETS: Record<string, JsonObject> = {
+    denim_jacket: { id: "denim_jacket", kind: "item", name: "Denim jacket", tier: "background", fields: { owner: POV, category: "clothing", slot: "torso_outer" }, relations: [{ type: "in", to: POV }, { type: "worn_by", to: POV, fields: { slot: "torso_outer" } }] },
+    rain_jacket: { id: "rain_jacket", kind: "item", name: "Rain jacket", tier: "background", fields: { owner: POV, category: "clothing", slot: "torso_outer" }, relations: [{ type: "in", to: POV }] },
+  };
+  /** How a thing is on Jordan: each relation wearing or readying it, with its slot. */
+  const on = (state: WorldState, id: string): [string, unknown][] => (state.entities[id]?.relations ?? []).filter((r) => (r.type === "worn_by" || r.type === "equipped") && r.to === POV).map((r) => [r.type, r.fields?.slot]);
+
+  test("item_make takes a kit's type, its pieces counted; item_wear readies a thing in hand, or puts it in another slot the slots table has", async () => {
+    const { rig, chatId } = await alderChat();
+    const turn = await curatorTurn(rig, chatId);
+    expect((await turn.call("item_make", { name: "First-aid kit", type: "first_aid_kit", at: HOME, why: "Jordan keeps a first-aid kit by the door" })).staged).toMatchObject({ changeType: "item_make", mode: "auto" });
+    expect((await turn.call("item_wear", { item: "Pocketknife", who: JORDAN, slot: "ready" })).staged).toMatchObject({ changeType: "item_wear", mode: "auto" });
+    expect((await turn.call("item_wear", { item: "Wristwatch", who: JORDAN, slot: "waist" })).staged).toMatchObject({ changeType: "item_wear", mode: "auto" });
+    expect((await turn.call("item_wear", { item: "Keys", who: JORDAN, slot: "tail" })).refused?.code).toBe("bad_slot");
+    const { out, state } = await turn.land();
+    expect(out.committed.map((c) => c.op.changeType)).toEqual(["item_make", "item_wear", "item_wear"]);
+    const [kit = "", ...more] = named(state, "First-aid kit");
+    expect(more).toEqual([]);
+    expect(state.entities[kit]).toMatchObject({ kind: "kit", fields: { kit: "first_aid_kit", place: HOME, made: { by: "curator" } } });
+    expect([on(state, "pov_pocketknife"), on(state, "pov_watch")]).toEqual([[["equipped", "hand_held"]], [["worn_by", "waist"]]]);
+  });
+
+  test("set_save keeps what Jordan wears, or the pieces named, as an outfit; set_apply changes him into one by its name, and refuses a name he keeps none of", async () => {
+    const { rig, chatId } = await alderChat({ put: { entities: JACKETS } });
+    const first = await curatorTurn(rig, chatId);
+    const kept = { changeType: "item_set", mode: "auto" };
+    expect((await first.call("set_save", { who: JORDAN, name: "Rainy day", kind: "outfit", pieces: ["Rain jacket", "Wristwatch"] })).staged).toMatchObject(kept);
+    expect((await first.call("set_save", { who: JORDAN, name: "Work", kind: "outfit" })).staged).toMatchObject(kept);
+    const { state: saved, head } = await first.land();
+    expect(saved.entities[POV]?.fields.sets).toEqual({
+      set_rainy_day: { name: "Rainy day", kind: "outfit", pieces: [{ item: "rain_jacket" }, { item: "pov_watch" }] },
+      set_work: { name: "Work", kind: "outfit", pieces: [{ item: "denim_jacket" }, { item: "pov_watch" }] },
+    });
+    const next = await curatorTurn(rig, chatId, { head });
+    // By its name as the reply says it.
+    expect((await next.call("set_apply", { who: JORDAN, set: "rainy day" })).staged).toMatchObject(kept);
+    await expect(next.call("set_apply", { who: JORDAN, set: "Gala" })).rejects.toThrow("set_apply doesn't take Gala as set; it takes one of: Rainy day, Work.");
+    const { out, state } = await next.land();
+    expect(out.committed.map((c) => c.op.changeType)).toEqual(["item_set"]);
+    expect([on(state, "rain_jacket"), on(state, "denim_jacket"), holderOf(state, "denim_jacket"), on(state, "pov_watch")]).toEqual([[["worn_by", "torso_outer"]], [], POV, [["worn_by", "wrist"]]]);
   });
 });

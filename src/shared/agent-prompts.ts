@@ -1,10 +1,13 @@
 // What the agent runtime itself says to a model (AGENT-LOOP-PLAN §9: everything sent to a model is
 // editable): the built-in `scratch_read` tool, the notes it puts on tool results, the text form a
-// connection that refuses native tools is offered them in, and the framing of the system files every
-// agent's prompt carries (AGENTS.md and roles/<role>.md). Each is a registry text with the shipped
-// default, reset per item on Settings → Agents → Prompts (R5), under the page "Every agent", which also
-// holds the texts every agent's tools are sent with (`TOOL_PROMPTS`) and the lore index's.
+// connection that refuses native tools is offered them in, the framing of the system files every
+// agent's prompt carries (AGENTS.md and roles/<role>.md), and what several tools share, told once in
+// the system prompt of an agent given any of them (`TOOL_GUIDE_TEXTS`). Each is a registry text with
+// the shipped default, reset per item on Settings → Agents → Prompts (R5), under the page "Every
+// agent", which also holds the texts every agent's tools are sent with (`TOOL_PROMPTS`) and the lore
+// index's.
 
+import { TOOL_GUIDE_TEXTS, toolGuideId } from "./agent-tools";
 import type { PromptDef, PromptPage } from "./prompts";
 
 export const RUNTIME_PROMPT_PAGE: PromptPage = { id: "runtime", label: "Every agent", note: "What any agent's model is told besides its role's own prompts: the scratch_read tool, the notes on tool results, tools offered as text, and how the workspace's system files (AGENTS.md, roles/<role>.md) are framed; then every tool's description and its arguments', the notes the tools answer with, and the lore index, which the GM assistant, the main agent and each turn role are all sent." };
@@ -186,4 +189,5 @@ export const RUNTIME_PROMPTS: readonly PromptDef[] = [
   { id: RUNTIME_TEXT.condenseSystem, page, label: "condense: the call's system prompt", note: "The system prompt of the one call the condense tool makes, on the agent's own connection, with no tools.", text: "You condense a source for the agents of a roleplay engine. Keep every name, number, date, id and fact they could need, and each secret's mark as written; drop repetition, scaffolding and anything the instructions say doesn't matter. Answer with the note alone: plain lines, no preamble.", vars: [] },
   { id: RUNTIME_TEXT.condenseAsk, page, label: "condense: what it is asked", note: "Leads the source's text in the condense call.", text: "Condense {{source}} into a short note.\n{{focus}}", vars: [{ name: "source", text: "the source's path or lore id", required: true }, { name: "focus", text: "what the agent said the note should keep, if anything" }] },
   { id: RUNTIME_TEXT.condenseNote, page, label: "condense: the note", note: "The note the condense tool writes: its source and the source's hash (so a later reader can tell whether it is still current), then the condensed text.", text: "Condensed from {{source}} (hash {{hash}}):\n{{text}}", vars: [{ name: "source", text: "the source's path or lore id", required: true }, { name: "hash", text: "the start of the source text's hash", required: true }, { name: "text", text: "the condensed text", required: true }] },
+  ...TOOL_GUIDE_TEXTS.map((g): PromptDef => ({ id: toolGuideId(g.guide), page, group: "What tools share", label: g.label, note: g.note, text: g.text, vars: [] })),
 ];

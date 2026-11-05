@@ -742,27 +742,32 @@ interface KnowledgeAsk {
 }
 
 /**
- * The knowledge step's calls on `turn` (DESIGN §24.11), one per batch, one after another: each is
- * asked once the one before it is checked (`checkKnowledge`), on what the ones before it left, and
- * reads, beside the facts in play, the facts they made (`knowledgeContext`), so it names one of them
- * by its id rather than making it again in its own words. A learning that doesn't fit the state is
- * dropped, and the log says why each was.
+ * The knowledge step's calls on `turn` (DESIGN §24.11), one per batch, at most `callsAtOnce` of them
+ * under way at once (Settings → Minds → Knowledge). A call is asked once a place is free, and reads,
+ * beside the facts in play, the facts the answers checked before it made (`knowledgeContext`), so it
+ * names one of them by its id rather than making it again in its own words. Each answer is checked
+ * (`checkKnowledge`) as it comes back, one at a time, on what the answers checked before it left: one
+ * that says again in the same words (`claimKey`) a fact another made is that fact. At 1, each call is
+ * asked once the one before it is checked, one after another. A learning that doesn't fit the state
+ * is dropped, and the log says why each was.
  */
 async function knowledgeCalls(deps: MindsDeps, settings: UserSettings, config: StepConfig, turn: KnowledgeTurn, batches: readonly (readonly EntityId[])[], ask: KnowledgeAsk): Promise<KnowledgeRan> {
   const { reg, world, state } = turn;
   const { userId, signal, guidance } = ask;
   const scene = settings.minds.knowledge.batch === "scene";
   const w = new Working(reg, world, state);
-  const { factsPerTurn, factsPerChat, learningsPerTurn } = settings.minds.knowledge;
+  const { factsPerTurn, factsPerChat, learningsPerTurn, callsAtOnce } = settings.minds.knowledge;
   const out: KnowledgeRan = { events: [], proposals: [], traces: [], connection: helperCallOf(config, settings.helper).connectionId ?? null, refused: {}, failed: 0, limits: { factsPerTurn, factsPerChat, learningsPerTurn } };
   const refused = (kind: KnowledgeRefusal, n = 1): void => {
     out.refused[kind] = (out.refused[kind] ?? 0) + n;
   };
   // The turn's limits hold across its calls: new facts, learnings and witnessed facts are counted for
-  // the turn, not each call. Each call reads the facts the ones before it made, by id, and one that
-  // names such a fact, or says it again in the same words, has its learners join those who hold it.
+  // the turn, not each call. Each call reads the facts the answers checked before it made, by id, and
+  // one that names such a fact, or says it again in the same words, has its learners join those who hold it.
   const spent = knowledgeSpent();
-  for (const batch of batches) {
+  // The answers are checked one at a time, in the order they come back.
+  let checks: Promise<void> = Promise.resolve();
+  const call = async (batch: readonly EntityId[]): Promise<void> => {
     const who = scene ? "" : (own(state.entities, batch[0] ?? "")?.name ?? batch[0] ?? "");
     const vars = { ...varsFor(world, state, world.pov), character: who };
     const prompt = mindPrompt("knowledge", world, settings.minds, vars);
@@ -784,22 +789,32 @@ async function knowledgeCalls(deps: MindsDeps, settings: UserSettings, config: S
           classic: () => deps.steps.helperJson("knowledge", prompt.text, context, config, userId, signal, { guidance, usage }),
         });
     const ms = Math.round(performance.now() - t0);
-    const lore = raw === null ? null : await loreRefs(deps, world, userId, raw);
-    const checked = raw === null ? null : checkKnowledge({ ...turn, state: w.state, ...(lore && lore.size > 0 ? { lore } : {}) }, batch, raw, spent);
-    if (!checked && !signal.aborted) out.failed++;
-    for (const why of checked?.refused ?? []) deps.host.log("info", `[LumiRPEngine] knowledge ${turn.messageId.slice(0, 8)}: refused ${why}`, userId);
-    for (const [kind, n] of Object.entries(checked?.refusedAs ?? {})) refused(kind as KnowledgeRefusal, n);
-    for (const event of checked?.events ?? []) {
-      const rejection = w.apply(event);
-      if (rejection) {
-        deps.host.log("info", `[LumiRPEngine] knowledge ${turn.messageId.slice(0, 8)}: dropped a learning (${rejection.code}: ${rejection.reason})`, userId);
-        refused("state");
-      } else out.events.push(event);
-    }
-    out.proposals.push(...(checked?.proposals ?? []));
-    // A scene's call thinks for no one; one person's is listed only when the player may know of them.
-    if (scene || traced(reg, world, state, batch[0] ?? "")) out.traces.push({ purpose: "knowledge", phase: ask.phase, who, level: null, outcome: checked ? "recorded" : "failed", ms, tokens: usage.tokens, prompt: prompt.source });
-  }
+    checks = checks.then(async () => {
+      const lore = raw === null ? null : await loreRefs(deps, world, userId, raw);
+      const checked = raw === null ? null : checkKnowledge({ ...turn, state: w.state, ...(lore && lore.size > 0 ? { lore } : {}) }, batch, raw, spent);
+      if (!checked && !signal.aborted) out.failed++;
+      for (const why of checked?.refused ?? []) deps.host.log("info", `[LumiRPEngine] knowledge ${turn.messageId.slice(0, 8)}: refused ${why}`, userId);
+      for (const [kind, n] of Object.entries(checked?.refusedAs ?? {})) refused(kind as KnowledgeRefusal, n);
+      for (const event of checked?.events ?? []) {
+        const rejection = w.apply(event);
+        if (rejection) {
+          deps.host.log("info", `[LumiRPEngine] knowledge ${turn.messageId.slice(0, 8)}: dropped a learning (${rejection.code}: ${rejection.reason})`, userId);
+          refused("state");
+        } else out.events.push(event);
+      }
+      out.proposals.push(...(checked?.proposals ?? []));
+      // A scene's call thinks for no one; one person's is listed only when the player may know of them.
+      if (scene || traced(reg, world, state, batch[0] ?? "")) out.traces.push({ purpose: "knowledge", phase: ask.phase, who, level: null, outcome: checked ? "recorded" : "failed", ms, tokens: usage.tokens, prompt: prompt.source });
+    });
+    await checks;
+  };
+  // Each place takes the next call once its last answer is checked.
+  let next = 0;
+  const place = async (): Promise<void> => {
+    for (let batch = batches[next++]; batch !== undefined; batch = batches[next++]) await call(batch);
+  };
+  const places = Number.isSafeInteger(callsAtOnce) && callsAtOnce > 1 ? Math.min(callsAtOnce, batches.length) : 1;
+  await Promise.all(Array.from({ length: places }, place));
   // A new fact no one learned is made of nothing: counted once the calls are done, since a later call may learn it.
   for (const f of spent.unlearned.values()) deps.host.log("info", `[LumiRPEngine] knowledge ${turn.messageId.slice(0, 8)}: a new fact no one learned, not made: "${f.claim}"`, userId);
   if (spent.unlearned.size > 0) refused("unlearned", spent.unlearned.size);

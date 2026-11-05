@@ -313,7 +313,8 @@ describe("no stale outlets", () => {
   test("same-roll Re-runs: a Re-run whose outline step is switched off holds no outline line an earlier run wrote", async () => {
     const rig = new Rig();
     const { chatId } = await outlinedCoins(rig);
-    rig.body(await rig.send({ type: "lre.settings.set", patch: { modelUse: { steps: { outline: { enabled: false }, brief: { enabled: false } } } } }));
+    // A Regenerate re-runs the turn here (a swipe re-narrates by default).
+    rig.body(await rig.send({ type: "lre.settings.set", patch: { swipeDefault: "rerun", modelUse: { steps: { outline: { enabled: false }, brief: { enabled: false } } } } }));
     const again = await rig.host.start(chatId, { type: "regenerate" });
     expect(again.halted).toBeUndefined();
     expect(rig.host.section("Outcome")).toMatch(/Flip a coin/);
@@ -323,6 +324,8 @@ describe("no stale outlets", () => {
   test("same-roll Re-runs: a Re-narrate tells its source swipe's outline, never one from a Re-run dropped before its reply", async () => {
     const rig = new Rig();
     const { chatId, beats } = await outlinedCoins(rig);
+    // The Regenerate re-runs the turn; the swipe after it re-narrates.
+    rig.body(await rig.send({ type: "lre.settings.set", patch: { swipeDefault: "rerun" } }));
     expect((await rig.host.begin(chatId, { type: "regenerate" })).halted).toBe("cancelled");
     expect(beats()).toBe(2);
     rig.body(await rig.send({ type: "lre.settings.set", patch: { swipeDefault: "renarrate" } }));

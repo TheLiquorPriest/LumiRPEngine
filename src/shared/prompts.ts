@@ -17,6 +17,7 @@ import { isRecord } from "./json";
 import { DEFAULT_SECTIONS } from "./sections";
 import { SECRET_MARK_WORDING, type SecretMarkWording } from "./secret-marks";
 import { loreIndexPrompts } from "./lore-routing";
+import { neutralizeMacros } from "./macros";
 
 /** A placeholder a text may use: `{{name}}`, filled with what `text` says it holds; `required` when the text can't work without it. */
 export interface PromptVar {
@@ -117,6 +118,31 @@ export const PRICES_RULE_ID = "narrator.prices";
 /** The prices rule as shipped. */
 export const PRICES_RULE =
   "Prices: whenever a purchase or a price comes up, state the price the engine gives for it: what the Outcome says a purchase this turn cost, or the price the Money section lists for something sold where the player character is. Use that exact amount; never leave it out, round it or give another. For something nothing lists, give a price that fits the place.";
+
+/**
+ * The line that ends the narrator rules for a swipe the player asked something of (Build C item 1):
+ * the swipe chip's What should change?, or the sheet Settings → Swipes → Ask what should change on
+ * each swipe opens. It is for that one telling: the guard writes it with the turn's sections and no
+ * record, hash or prompt set holds what was asked, and no engine role reads it.
+ */
+export const SWIPE_DIRECTION_ID = "narrator.swipe_direction";
+
+/** The most a swipe's direction may be, in characters, once trimmed. */
+export const SWIPE_DIRECTION_CHARS = 600;
+
+/** A swipe's direction as the player gave it, made safe to send: trimmed, no host macro, at most `SWIPE_DIRECTION_CHARS` long; null for none. */
+export function swipeDirectionOf(raw: unknown): string | null {
+  if (typeof raw !== "string") return null;
+  const whole = neutralizeMacros(raw).trim();
+  // A cut never splits a character: a UTF-16 unit from 0xD800 to 0xDBFF opens a surrogate pair.
+  const at = whole.length > SWIPE_DIRECTION_CHARS && whole.charCodeAt(SWIPE_DIRECTION_CHARS - 1) >= 0xd800 && whole.charCodeAt(SWIPE_DIRECTION_CHARS - 1) <= 0xdbff ? SWIPE_DIRECTION_CHARS - 1 : SWIPE_DIRECTION_CHARS;
+  const text = whole.slice(0, at).trim();
+  return text === "" ? null : text;
+}
+
+/** The swipe direction's text as shipped. */
+export const SWIPE_DIRECTION =
+  "The player swiped the last reply for a new telling, and asks this of it: {{direction}}\nKeep to the turn as the engine played it, every fact and outcome above; change only how the reply tells it, as they ask.";
 
 /** A built-in section's guidance: its template, which leads its lines and says where they go. */
 export function sectionPromptId(slot: SlotId): string {
@@ -260,6 +286,7 @@ export const FINAL_OUTPUT_PROMPTS: readonly PromptDef[] = [
   { id: "narrator.marked_facts", page: FINAL_OUTPUT_PAGE.id, group: NARRATOR_GROUP, label: "Marked facts", note: "What a fact marked as unknown to the player character means, and how each character keeps to what they know.", text: MARKED_FACTS_RULE, vars: [] },
   { id: PRICES_RULE_ID, page: FINAL_OUTPUT_PAGE.id, group: NARRATOR_GROUP, label: "Prices", note: "Tells the narrator to state the prices the engine gives when a purchase or a price comes up; sent while Settings → Narrator → Prices is on.", text: PRICES_RULE, vars: [] },
   { id: PRESET_RULES_LEAD_ID, page: FINAL_OUTPUT_PAGE.id, group: NARRATOR_GROUP, label: "Before your preset's rules", note: "Leads the rules of your preset's RPEngine · narrator block, when it has them.", text: PRESET_RULES_LEAD, vars: [] },
+  { id: SWIPE_DIRECTION_ID, page: FINAL_OUTPUT_PAGE.id, group: NARRATOR_GROUP, label: "What should change, on a swipe", note: "Ends the narrator rules for a swipe the player asked something of (the swipe chip's What should change?, or Settings → Swipes → Ask what should change on each swipe), for that one telling; nothing records it.", text: SWIPE_DIRECTION, vars: [{ name: "direction", text: "what the player asked of the new telling, as they wrote it", required: true }] },
   ...MARK_PROMPTS,
   ...SECTION_PROMPTS,
   ...OFFSTAGE_PROMPTS,

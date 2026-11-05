@@ -9,6 +9,8 @@ import type { DiagCall, DiagRecord } from "../../src/shared/diagnostics";
 import { STEP_LABEL } from "../../src/shared/diagnostics";
 import type { JsonObject, JsonValue } from "../../src/shared/json";
 import { isRecord } from "../../src/shared/json";
+import { hashJson } from "../../src/shared/hash";
+import { GM_OUTLINE, GM_ROSTER, gmRosterEntry } from "../../src/shared/gm-parts";
 import { applyPatch } from "../../src/shared/json-patch";
 import type { MindsRunView } from "../../src/shared/minds";
 import type { AssistantProposal, AssistantProposalOp, AssistantRun, AssistantView, LoreBookEntryView, LorePinView, TraceRow, WorkspaceFileView } from "../../src/shared/protocol";
@@ -22,6 +24,9 @@ import { renderIndex } from "../../src/backend/lore-routing";
 import { agentSettingsOf, type AcceptanceState } from "../../src/shared/agent-settings";
 import { blobHash, isFilePath, isKeptPath, isLearnedPath } from "../../src/shared/stores";
 import type { GmView, StateView } from "../../src/shared/state-view";
+import type { ThingType } from "../../src/shared/thing-view";
+import { setIdOf, SET_KINDS } from "../../src/shared/things";
+import type { VehicleClassChoice } from "../../src/shared/vehicles";
 import type { WorldDoc, WorldIndex } from "../../src/shared/world";
 import { compileMaps, mapLint, mapTemplate } from "../../src/shared/maps";
 import { findPath, gridMinutes } from "../../src/shared/grid";
@@ -39,11 +44,13 @@ import { formulaFunctions } from "../../src/engine/scope";
 import { buildCharacter } from "../../src/engine/character";
 import { initialState } from "../../src/engine/world-state";
 import { buildSections } from "../../src/backend/sections-build";
+import { playThingTypes } from "../../src/backend/claims";
 import { markWording } from "../../src/backend/prompts";
 import { sectionsOf, sectionTokens } from "../../src/backend/book";
 import { DEFAULT_SECTIONS } from "../../src/shared/sections";
 import { unrevealedSecrets } from "../../src/engine/visibility";
-import { ALL_PACKS } from "../../src/packs/index";
+import { ALL_PACKS, STARTER_WORLDS } from "../../src/packs/index";
+import { claimCap } from "../../src/packs/economy/core/model";
 import { applyProfile, profileChoices, profileOf } from "../../src/shared/profiles/index";
 import { modernSheetFixture } from "./profile-fixture";
 import { STARTER_INFO } from "../../src/packs/starters/info";
@@ -153,6 +160,40 @@ const ASKED_CHANGES: { asks: RegExp; call: TraceRow; change: PreviewFileChange |
   { asks: /\bpin/i, call: { tool: "workspace_pin", summary: "lore-drafts/rusty-anchor.md", ms: 9 }, change: { kind: "ws_pin", path: "lore-drafts/rusty-anchor.md", pinned: true }, op: { changeType: "workspace", lines: ["workspace file lore-drafts/rusty-anchor.md pinned"], mode: "auto" } },
 ];
 
+/**
+ * A saved set's gear action done at once, off screen (`set_apply`, `set_save`, `set_drop`), on
+ * Belongings' sets as the gear pack leaves them, with what its fix chip says, or why it is refused;
+ * null for any other action. Changed into, the set is on and every other of its kind off; saved,
+ * what is worn now of its kind (an outfit's clothes; a loadout's weapons, armor and ammunition) is
+ * kept under its name and on, one of that name replaced; forgotten, it is gone.
+ */
+function setAction(gear: Readonly<Record<string, unknown>>, action: string, params: JsonObject): { sets: Record<string, unknown>[]; label: string } | { refused: string } | null {
+  if (action !== "set_apply" && action !== "set_save" && action !== "set_drop") return null;
+  const sets = (Array.isArray(gear.sets) ? gear.sets : []).filter(isRecord);
+  if (action === "set_save") {
+    const kind = SET_KINDS.find((k) => k === params.kind);
+    const name = typeof params.name === "string" ? params.name.trim() : "";
+    if (!kind || name === "") return { refused: "Name the set, and say whether it is an outfit or a loadout." };
+    const worn = (Array.isArray(gear.outfit) ? gear.outfit : []).filter(isRecord).filter((i) => (i.category === "weapon" || i.category === "armor" || i.category === "ammo") === (kind === "loadout"));
+    if (worn.length === 0) return { refused: `Nothing worn now to keep as ${kind === "outfit" ? "an outfit" : "a loadout"}.` };
+    const id = setIdOf(name);
+    const saved = { id, name, kind, pieces: worn.map((i) => ({ item: String(i.id), name: String(i.name) })), on: true };
+    return { sets: [...sets.filter((s) => s.id !== id), saved].sort((a, b) => String(a.kind).localeCompare(String(b.kind)) || String(a.name).localeCompare(String(b.name))), label: `Saved ${name}` };
+  }
+  const set = sets.find((s) => s.id === params.set);
+  if (!set) return { refused: "No such outfit is saved." };
+  if (action === "set_drop") return { sets: sets.filter((s) => s !== set), label: `Forgot ${String(set.name)}` };
+  return {
+    sets: sets.map((s) => {
+      if (s === set) return { ...s, on: true };
+      if (s.kind !== set.kind) return s;
+      const { on: _was, ...off } = s;
+      return off;
+    }),
+    label: `Changed into ${String(set.name)}`,
+  };
+}
+
 export class MockBackend {
   /** The chat's latest minds run (`lre.minds`): the preview runs it one mind at a time, and the third fails as a cut-off call does. */
   private mindsRun: MindsRunView | null = null;
@@ -193,6 +234,12 @@ export class MockBackend {
   private assistantIds = 0;
   /** The GM view, the routine changes and the workspace as they were before each GM edit, by the edit's Undo chip. */
   private readonly beforeEdit = new Map<string, EditSnapshot>();
+  /** Belongings' saved sets as they were before each set action done at once, by its Undo chip. */
+  private readonly beforeSets = new Map<string, unknown>();
+  /** How many gear actions were done at once: each one's Undo chip is its own. */
+  private atOnce = 0;
+  /** What Play's Add reads (`playTypes`), once read. */
+  private starterTypes: { types: ThingType[]; classes: VehicleClassChoice[]; cap: number } | null = null;
   /** Kept jobs (`lre.job list`): an import a restart cut off after its first chunk. */
   private kept: JobSummary[] = [{ jobId: "job-kept", kind: "import_lore", worldId: WORLDS[0]?.id ?? "", status: "interrupted", progress: 0.5, message: "Interrupted by a restart. The 2 proposal(s) it made before it stopped are below; run it again for the rest.", result: { proposals: PROPOSALS.slice(0, 2) }, input: { bookIds: ["book-1"] }, at: Date.now() - 600_000 }];
   /** The active preset as the backend reads it: one section outlet placed, one unknown, and guidance blocks in each state. */
@@ -218,6 +265,18 @@ export class MockBackend {
     const request = readMapRequest(this.draft, input);
     const answer = readMapAnswer(this.draft, request, mapTemplate("grid", request.mapId, request.scope) as unknown as JsonValue);
     return answer.map === null ? [] : [mapProposal(request, { ...answer, map: answer.map })];
+  }
+
+  /**
+   * What Play's Add reads (`lre.things` scope `play`), as the backend's `playThingTypes` builds it:
+   * the catalogs' types and the vehicle classes of the modern starter (the preview world keeps no
+   * catalogs of its own), with its claim cap; read once.
+   */
+  private playTypes(): { types: ThingType[]; classes: VehicleClassChoice[]; cap: number } {
+    if (this.starterTypes) return this.starterTypes;
+    const world = STARTER_WORLDS.modern_slice_of_life?.("preview", "modern_slice_of_life");
+    this.starterTypes = world ? { ...playThingTypes(REGISTRY, world, initialState(world, "preview", REGISTRY)), cap: claimCap(world) } : { types: [], classes: [], cap: 0 };
+    return this.starterTypes;
   }
 
   /** Replaces the view and pushes the change as a delta. */
@@ -480,10 +539,14 @@ export class MockBackend {
           this.routines = undone.routines;
           this.workspace = undone.workspace;
         }
+        // A set action done at once puts Belongings' sets back as they were.
+        const sets = chip.kind === "fix" ? this.beforeSets.get(chip.id) : undefined;
         if (chip.id === "c-overdrawn" && message.choice === "other" && !this.payAnotherWay()) return this.error(reqId, "validation", "No other way to pay covers it.");
         this.result(reqId, "lre.chip", { applied: true, pending: false });
         this.mutate((view) => {
           view.chips = view.chips.filter((c) => c.id !== message.chip);
+          const gear = view.panels["gear.gear"];
+          if (sets !== undefined && isRecord(gear)) gear.sets = sets as JsonValue;
           if (chip.kind === "fix") view.journal = view.journal.filter((n) => !(n.kind === "fix" && n.text === chip.detail));
           if (chip.kind === "confirm" && message.choice === "confirm") view.journal.push({ kind: "note", messageId: chip.messageId, ref: null, text: `Confirmed: ${chip.label}` });
           if (chip.kind === "keep_report" && (message.choice === "keep" || message.choice === "discard")) {
@@ -507,7 +570,23 @@ export class MockBackend {
           view.journal.push({ kind: message.choice === "discard" ? "tombstoned" : "note", messageId: message.messageId, ref: null, text: message.choice === "discard" ? "Discarded the turns after your edit." : "Kept the turns after your edit." });
         }, 60);
         return;
-      case "lre.action":
+      case "lre.action": {
+        // Done at once, off screen (DESIGN §11), as the backend answers it: recorded with its Undo, no turn played; a saved set's action changes Belongings' sets as the gear pack would, or is refused.
+        if (message.offstage) {
+          const gear = this.view?.panels["gear.gear"];
+          const set = isRecord(gear) ? setAction(gear, message.action, message.params) : null;
+          if (set && "refused" in set) return this.error(reqId, "validation", set.refused);
+          this.atOnce += 1;
+          const chip = `fix:m4:0:atonce${String(this.atOnce)}`;
+          if (set && isRecord(gear)) this.beforeSets.set(chip, structuredClone(gear.sets ?? []));
+          this.result(reqId, "lre.action", { applied: true, pending: false, undo: chip });
+          this.mutate((view) => {
+            const panel = view.panels["gear.gear"];
+            if (set && isRecord(panel)) panel.sets = set.sets as JsonValue;
+            view.chips.push({ id: chip, kind: "fix", messageId: "m4", label: set?.label ?? `Done at once: ${message.action.replace(/[._]/g, " ")}`, actions: [{ id: "undo", label: "Undo", style: "danger" }], expires: "next_send" });
+          }, 40);
+          return;
+        }
         this.result(reqId, "lre.action", { messageId: `m-${Date.now()}` });
         this.mutate((view) => {
           view.status = "in_flight";
@@ -524,8 +603,37 @@ export class MockBackend {
           view.journal.push({ kind: "note", messageId: "m5", ref: null, text: `Action: ${message.action} ${JSON.stringify(message.params)}` });
         }, 900);
         return;
+      }
       case "lre.gm":
         return this.result(reqId, "lre.gm", { ...structuredClone(this.gm), routineRoles: chatRolesFixture(this.routines) });
+      case "lre.gm.part": {
+        // One part of the GM view as `lre.gm.part` builds it, from the preview's view: the roster slim,
+        // the entities or money ids name (in their order), any other part whole; `same` while the
+        // view is what the key the page holds was read at.
+        const gm: GmView = { ...structuredClone(this.gm), routineRoles: chatRolesFixture(this.routines) };
+        const key = hashJson(gm);
+        const id = message.id ?? null;
+        if (message.since === key) return this.result(reqId, "lre.gm.part", { part: message.part, id, key, same: true });
+        const { part, ids } = message;
+        const value =
+          part === GM_OUTLINE
+            ? []
+            : part === GM_ROSTER
+              ? gm.entities.filter((e) => !ids || ids.includes(e.id)).map(gmRosterEntry)
+              : part === "entities" && ids
+                ? ids.flatMap((i) => gm.entities.filter((e) => e.id === i))
+                : part === "money" && ids
+                  ? ids.flatMap((i) => gm.money.filter((m) => m.party === i))
+                  : gm[part];
+        return this.result(reqId, "lre.gm.part", { part, id, key, value } as unknown as ResultBodies["lre.gm.part"]);
+      }
+      case "lre.things": {
+        // Play's Add (`playThingTypes`): the catalogs' types, the vehicle classes and, under this chat's capped Make it real, the claim cap. GM and Build scopes aren't the preview's.
+        if (message.scope !== "play") return;
+        const claims = this.view?.controls?.realism.claims ?? null;
+        const { types, classes, cap } = this.playTypes();
+        return this.result(reqId, "lre.things", { types, classes, ...(claims?.mode === "real" && claims.capped ? { cap } : {}) });
+      }
       case "lre.sections": {
         // The real builder (`buildSections`) over the preview world as a chat starts it, people where
         // the GM fixture has them, and each section's settings as This chat → Sections shows them.
@@ -601,8 +709,10 @@ export class MockBackend {
         this.result(reqId, "lre.edit", { pending: false, undo: chip });
         return;
       }
-      case "lre.fix":
-        this.result(reqId, "lre.fix", { pending: false });
+      case "lre.fix": {
+        // ✎ on things of one's own (Belongings, Move to…, Owner & use…): the preview keeps the fix's chip, for the notice's Undo, and changes nothing else.
+        const thingsChip = "things" in message ? `fix:m4:0:things${String(this.view?.chips.length ?? 0)}` : null;
+        this.result(reqId, "lre.fix", { pending: false, ...(thingsChip ? { undo: thingsChip } : {}) });
         this.mutate((view) => {
           // Show a hint: one more of the row's earned hints open, kept with its Undo, as the backend's would be.
           if ("hint" in message) {
@@ -613,7 +723,10 @@ export class MockBackend {
             view.chips.push({ id: `fix:m4:0:hint${String(row.opened)}`, kind: "fix", messageId: "m4", label: `Opened a hint: ${String(row.label)}`, actions: [{ id: "undo", label: "Undo", style: "danger" }], expires: "next_send" });
             return;
           }
-          // ✎ on a thing of one's own: the preview records nothing of it.
+          if ("things" in message) {
+            if (thingsChip) view.chips.push({ id: thingsChip, kind: "fix", messageId: "m4", label: message.label, actions: [{ id: "undo", label: "Undo", style: "danger" }], expires: "next_send" });
+            return;
+          }
           if ("thing" in message) return;
           if (!view.hud) return;
           // The clock's ✎: the pill reads the date and time set, as the backend's would.
@@ -640,6 +753,7 @@ export class MockBackend {
           }
         }, 40);
         return;
+      }
       case "lre.marker":
         if (message.kind === "migrate" && message.preview) {
           this.result(reqId, "lre.marker", { pending: false, preview: { lines: [{ text: `The chat moves to revision ${message.to.slice(0, 8)} of Maple Falls from the next turn.`, tone: "info" }], upgrade: structuredClone(UPGRADE_PREVIEW) } });

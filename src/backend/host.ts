@@ -289,11 +289,16 @@ export interface QuietRequest {
   stream?: true;
 }
 
-/** A tool a quiet call offers (the host's `ToolSchemaDTO`): its parameters as a JSON Schema. */
+/**
+ * A tool a quiet call offers (the host's `ToolSchemaDTO`): its parameters as a JSON Schema. `cache`
+ * marks a cache breakpoint after it (the host's `cache_control`, which its Anthropic provider sends
+ * on a tool): the tools up to it are one cached prefix, read first, whatever follows them.
+ */
 export interface QuietTool {
   name: string;
   description: string;
   parameters: JsonObject;
+  cache?: true;
 }
 
 /** A tool call the model made (the host's `ToolCallDTO`), its arguments parsed; `thoughtSignature`, Google's, goes back with it. */

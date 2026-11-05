@@ -138,9 +138,10 @@ describe("the places tools on Port Alder", () => {
     const road = route.routes.find((r) => r.mode === "road");
     expect(walk?.legs.at(-1)?.to).toEqual(SHOP_REF);
     expect(walk !== undefined && road !== undefined && road.minutes < walk.minutes).toBe(true);
-    expect(route.none).toContain("water");
+    // Port Alder authors no air leg, so the air is never a way there.
+    expect(route.none).toEqual(expect.arrayContaining(["water", "air"]));
     expect((await answerOf<RouteRead>(rig, chatId, "everyone", "places_route", { to: "Alder Automotive", mode: "walk" })).routes.map((r) => r.mode)).toEqual(["walk"]);
-    expect(await callTool(rig, chatId, "everyone", "places_route", { to: "Alder Automotive", mode: "boat" })).toEqual({ text: "places_route doesn't take boat as mode; it takes one of: walk, road, offroad, water.", error: true });
+    expect(await callTool(rig, chatId, "everyone", "places_route", { to: "Alder Automotive", mode: "boat" })).toEqual({ text: "places_route doesn't take boat as mode; it takes one of: walk, road, offroad, water, air.", error: true });
 
     const everyone = await answerOf<RouteRead>(rig, chatId, "everyone", "places_route", { to: "birch_lane_12", from: "Alder Automotive", mode: "walk" });
     expect(everyone.from).toEqual(SHOP_REF);

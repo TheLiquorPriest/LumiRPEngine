@@ -4,7 +4,7 @@
 import { featureOn, FINANCE_FEATURES, payeeKey, type AccountView, type CardView, type FinanceView, type Flow, type FlowView, type JournalLine } from "../../src/shared/finance";
 import { DOMAINS, INTERRUPT_CLASSES } from "../../src/shared/ids";
 import type { DomainId, InterruptClass, InterruptPolicy } from "../../src/shared/ids";
-import type { JsonValue } from "../../src/shared/json";
+import type { JsonObject, JsonValue } from "../../src/shared/json";
 import { OFFSTAGE_DEFAULTS } from "../../src/shared/offstage";
 import type { AssistantProposalOp, AssistantView, ExtractionModeView, TraceRow, UpgradePreview, WorkspaceFileView } from "../../src/shared/protocol";
 import type { ChangeType, ExtractionType, UserSettings } from "../../src/shared/settings";
@@ -122,18 +122,7 @@ export function stateFixture(chatId: string): StateView {
           { id: "boat1", name: "Dev's jon boat", kind: "Boat · outboard", status: "Needs work", place: "Garage", fuelPct: 10, odometerLabel: "212 h", assignedTo: { name: "You", until: "Sun 18:00", overdue: false }, service: [{ label: "Registration", due: "expired Sep 30", overdue: true }] },
         ],
       },
-      "gear.gear": {
-        level: 3,
-        on: [
-          { id: "apron", name: "Server apron", slot: "Waist", as: "worn", whose: "yours", kept: "On you", children: [{ id: "pad", name: "Order pad", children: [] }, { id: "pen", name: "Pen", qty: 3, children: [] }] },
-          { id: "jacket", name: "Rain jacket", slot: "Outer", as: "worn", condition: 45, whose: "yours", children: [] },
-          { id: "backpack", name: "Backpack", whose: "yours", load: { used: 4.2, capacity: 10, unit: "kg" }, children: [{ id: "wallet", name: "Wallet", children: [{ id: "cashstack", name: "Cash", qty: 46, children: [] }] }, { id: "phone", name: "Phone", condition: 30, children: [] }, { id: "kit", name: "Mechanic toolbox", kit: { complete: false, present: 43, total: 45, missing: ["10 mm socket", "torque wrench"] }, children: [] }] },
-        ],
-        holding: [{ id: "keys", name: "Truck keys", as: "pocket", whose: "Dev's", why: "Dev handed it to you to hold: to move the truck", kept: "On Dev", children: [] }],
-        elsewhere: [{ id: "tent", name: "2-person tent", condition: 90, whose: "yours", kept: "Apartment", where: "At your apartment", children: [] }],
-        lent: [{ id: "drill", name: "Cordless drill", condition: 80, whose: "yours", lent: { to: "Dev", until: "Mon 18:00", overdue: true }, where: "With Dev", children: [] }],
-        borrowed: [],
-      },
+      "gear.gear": samGear(),
       // Play → Me → Needs as the engine builds it (`buildNeedsView`): hunger past its point, the rest not.
       "castlife.needs": {
         needs: NEED_IDS.map((need) => {
@@ -653,6 +642,69 @@ function samMoney(): FinanceView {
     payPrefs: [{ use: "cash", max: 2000 }, { use: "visa_card" }],
     paysFor: [],
     ownKeys: ["pov", payeeKey("Sam Rivera")],
+  };
+}
+
+/**
+ * Sam's Belongings at Gear 3 (Play → Me → Belongings), shaped as the gear core's `GearView` builds it:
+ * what Sam wears (Work clothes, a saved outfit, on now) and carries (a backpack holding the wallet,
+ * the phone and a first-aid kit missing two pieces; pepper spray; Dev's truck keys, held for him),
+ * what is at the diner (a booth, today's paper, the spare shirt in the staff lockers), what is kept at
+ * home in Apartment 4B (the bedroom closet's clothes and softball bat, a rifle case with a .22 and its
+ * rounds, the tent loose there), the drill lent to Dev and overdue, and the saved sets (Range day and
+ * Day off out of reach at home). Its loans end as the engine's `loanChoices` words them.
+ */
+function samGear(): JsonValue {
+  const now = 1902;
+  const cal = calendarOf(worldFixture());
+  const yours = { whose: "yours", mine: true, ownerId: "pov" };
+  const clothes = (id: string, name: string, slot: string, rest: JsonObject = {}): JsonObject => ({ id, name, slot, category: "clothing", size: "hand", wearable: true, children: [], ...yours, ...rest });
+  const apron = clothes("apron", "Server apron", "Waist", { as: "worn", kept: "On you", holds: "pocket", children: [{ id: "pad", name: "Order pad", size: "pocket", ...yours, children: [] }, { id: "pen", name: "Pen", qty: 3, size: "pocket", ...yours, children: [] }] });
+  const shirt = clothes("shirt", "Work shirt", "Torso", { as: "worn", kept: "Bedroom closet" });
+  const sneakers = clothes("sneakers", "Work sneakers", "Feet", { as: "worn", kept: "Bedroom closet" });
+  const jacket = clothes("jacket", "Rain jacket", "Outer", { as: "worn", condition: 45, kept: "Bedroom closet" });
+  const kit = { id: "kit", name: "First-aid kit", size: "hand", holds: "pocket", ...yours, kit: { complete: false, present: 14, total: 16, missing: ["gauze pads", "tweezers"] }, children: [] };
+  const backpack = { id: "backpack", name: "Backpack", size: "armful", holds: "hand", kept: "Bedroom closet", ...yours, use: [{ basis: "owner", label: "You · owner", who: ["Sam Rivera"] }, { basis: "housemate", label: "Apartment 4B · housemates", who: ["Dev Patel"] }], load: { used: 4.2, capacity: 25, unit: "l" }, children: [{ id: "wallet", name: "Wallet", size: "pocket", holds: "pocket", ...yours, children: [{ id: "cashstack", name: "Cash", qty: 46, size: "pocket", ...yours, children: [] }] }, { id: "phone", name: "Phone", condition: 30, size: "pocket", ...yours, children: [] }, kit] };
+  const pepper = { id: "pepper", name: "Pepper spray", as: "pocket", category: "weapon", size: "pocket", kept: "On you", ...yours, children: [] };
+  const keys = { id: "keys", name: "Truck keys", as: "pocket", size: "pocket", whose: "Dev's", ownerId: "npc_dev", why: "Dev handed it to you to hold: to move the truck", kept: "On Dev", children: [] };
+  const flannel = clothes("flannel", "Flannel shirt", "Torso", { kept: "Bedroom closet" });
+  const boots = clothes("boots", "Hiking boots", "Feet", { kept: "Bedroom closet" });
+  const bat = { id: "bat", name: "Softball bat", category: "weapon", size: "armful", kept: "Bedroom closet", ...yours, children: [] };
+  const rifle = { id: "rifle", name: ".22 rifle", slot: "Back", category: "weapon", size: "armful", wearable: true, kept: "Rifle case", ...yours, children: [] };
+  const rounds = { id: "rounds", name: ".22 LR rounds", qty: 50, category: "ammo", size: "pocket", kept: "Rifle case", ...yours, children: [] };
+  const tent = { id: "tent", name: "2-person tent", condition: 90, size: "armful", kept: "Apartment 4B", where: "At your apartment", ...yours, grants: [{ who: "npc_dev", name: "Dev Patel", basis: "assign" }], children: [] };
+  const closet = { holder: { id: "closet", name: "Bedroom closet" }, where: "Bedroom", items: [flannel, boots, bat] };
+  return {
+    level: 3,
+    on: [apron, shirt, sneakers, jacket, backpack, pepper],
+    holding: [keys],
+    elsewhere: [tent, { id: "rod", name: "Fishing rod", size: "armful", kept: "Apartment 4B", where: "In Dev's jon boat", ...yours, children: [] }],
+    lent: [{ id: "drill", name: "Cordless drill", condition: 80, size: "hand", ...yours, lent: { to: "Dev", until: "Mon 18:00", overdue: true }, where: "With Dev", children: [] }],
+    borrowed: [],
+    outfit: [apron, shirt, sneakers, jacket],
+    carried: [backpack, pepper, keys],
+    wardrobe: [{ holder: closet.holder, where: closet.where, items: [flannel, boots] }],
+    here: {
+      place: "Rosie's Diner",
+      room: [{ id: "booth", name: "Corner booth", size: "furniture", whose: "Rosie's Diner crew's", children: [] }],
+      lying: [{ id: "paper", name: "Today's paper", size: "hand", whose: "nobody's", children: [] }],
+      inside: [{ holder: { id: "lockers", name: "Staff lockers" }, items: [clothes("spare_shirt", "Spare work shirt", "Torso", { kept: "Staff lockers" })] }],
+    },
+    stored: [closet, { holder: { id: "rifle_case", name: "Rifle case" }, where: "Bedroom", items: [rifle, rounds] }, { holder: null, where: "Apartment 4B", items: [tent] }],
+    sets: [
+      { id: "set_range_day", name: "Range day", kind: "loadout", pieces: [{ item: "rifle", name: ".22 rifle", slot: "back", missing: true }, { item: "rounds", name: ".22 LR rounds", missing: true }] },
+      { id: "set_day_off", name: "Day off", kind: "outfit", pieces: [{ item: "flannel", name: "Flannel shirt", missing: true }, { item: "boots", name: "Hiking boots", missing: true }, { item: "jacket", name: "Rain jacket" }] },
+      { id: "set_work_clothes", name: "Work clothes", kind: "outfit", pieces: [{ item: "apron", name: "Server apron" }, { item: "shirt", name: "Work shirt" }, { item: "sneakers", name: "Work sneakers" }, { item: "jacket", name: "Rain jacket" }], on: true },
+    ],
+    people: [
+      { id: "npc_rosie", name: "Rosie Alvarez" },
+      { id: "npc_dev", name: "Dev Patel" },
+    ],
+    vehicles: 2,
+    loans: ([[1, "For a day"], [3, "For three days"], [7, "For a week"]] as const).map(([days, words]) => ({ label: `${words}, until ${formatClock(cal, now + days * 1440)}`, until: now + days * 1440 })),
+    household: { id: "apt_4b", name: "Apartment 4B" },
+    home: { id: "apartment", name: "Apartment 4B" },
+    ceiling: "armful",
   };
 }
 
@@ -1382,7 +1434,8 @@ export function settingsFixture(): UserSettings {
     inferred: null,
     extraction: { regard: { mode: "never" } },
     thingReads: { shown: 40, whyMax: 120, madeMax: 6 },
-    swipeDefault: "rerun",
+    swipeDefault: "renarrate",
+    swipeAsk: false,
     swipeTexts: "turn",
     hideJsonBlocks: true,
     minds: defaultMindsSettings(),
@@ -1399,6 +1452,8 @@ export function settingsFixture(): UserSettings {
     statePrices: true,
     offstage: { tell: { ...OFFSTAGE_DEFAULTS.tell }, paymentsFrom: OFFSTAGE_DEFAULTS.paymentsFrom },
     tidy: { findings: 50 },
+    gm: { duringTurn: "hold" },
+    perf: { reuseViews: true },
   };
 }
 

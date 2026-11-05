@@ -43,7 +43,8 @@ export function putAwayEvents(ctx: ReadContext, end: number): LedgerEvent[] {
   const left = end - config.hours * 60;
   const granted = new Set(grants(ctx.state).map((g) => g.thing));
   const person = (id: EntityId): boolean => kindIs(ctx.registry, ctx.world, own(ctx.state.entities, id)?.kind ?? "", "person");
-  const w = new Working(ctx.registry, ctx.world, ctx.state);
+  // Made only when something goes back: a slot with nothing to put away copies nothing.
+  let w: Working | null = null;
   for (const [place, ids] of [...thingIndex(ctx).loose].sort(([a], [b]) => a.localeCompare(b))) {
     // In the player character's sight: what lies where they are.
     if (place === here) continue;
@@ -60,10 +61,11 @@ export function putAwayEvents(ctx: ReadContext, end: number): LedgerEvent[] {
       const { rest } = restOf(ctx, id);
       const to: Spot | null = rest === "owner" ? (npc !== undefined ? { in: npc } : null) : rest;
       if (to === null || ("place" in to && to.place === place)) continue;
-      const mark = w.mark();
+      w ??= new Working(ctx.registry, ctx.world, ctx.state);
+      const mark = w.lightMark();
       const done = applyItemOp(w, { do: "move", item: id, to, why: WHY }, { by: npc ?? owners[0] ?? pov, confirmed: false, gm: false, salt: `put_away:${id}:${end}`, viewer: pov });
       if ("code" in done) w.restore(mark);
     }
   }
-  return [...w.events];
+  return w ? [...w.events] : [];
 }

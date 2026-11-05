@@ -38,10 +38,16 @@ function messageText(m: QuietMessage): string {
   return m.parts.map((p) => (p.type === "text" ? p.text : p.type === "tool_use" ? `${p.name} ${JSON.stringify(p.input)}` : p.content)).join("\n");
 }
 
-/** A call's prompt as estimated before it is sent: every message, and each tool's name, description and schema. */
+/** A call's prompt as estimated before it is sent: every message, and each tool's name, description and schema (`toolTokens`). */
 export function promptTokens(messages: readonly QuietMessage[], tools: readonly QuietTool[]): number {
-  let tokens = 0;
+  let tokens = toolTokens(tools);
   for (const m of messages) tokens += tokensOf(messageText(m));
+  return tokens;
+}
+
+/** What tools weigh in a call's prompt, as estimated: each one's name, description and schema. */
+export function toolTokens(tools: readonly QuietTool[]): number {
+  let tokens = 0;
   for (const t of tools) tokens += tokensOf(`${t.name} ${t.description} ${JSON.stringify(t.parameters)}`);
   return tokens;
 }

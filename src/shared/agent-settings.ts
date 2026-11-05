@@ -11,7 +11,7 @@
 
 import type { AgentKnowledge, ToolFamily } from "./agent-tools";
 import { AGENT_KNOWLEDGE, TOOL_FAMILY_LABEL } from "./agent-tools";
-import { defaultStages, MAIN_STAGES, type MainStages, roleRunOf, STAGE_MODES } from "./agent-pipeline";
+import { CURATOR_GATES, type CuratorGate, defaultStages, MAIN_STAGES, type MainStages, roleRunOf, STAGE_MODES } from "./agent-pipeline";
 import { defaultRoleSettings, ROLE_IDS, ROLE_LABEL, ROLE_ON_FAIL, ROLE_TIERS, type RoleId, type RoleSettings } from "./agent-roles";
 import { type ContextSettings, contextSettingsOf, defaultContextSettings } from "./agent-context";
 import { hasOwn, isRecord, safeKey } from "./json";
@@ -135,13 +135,33 @@ export interface PipelineSettings {
    * purchases true to the reply, and the read proposes none of those; off, the read does, as classic's.
    */
   curator: boolean;
+  /** The Curator's quiet-turn gate (Settings → Agents → Roles → Curator → When it runs): `shadow` records what it would decide; `on` lets a quiet reply skip the Curator, the read's held changes landing instead. */
+  curatorGate: CuratorGate;
 }
 
-/** The main session's compaction (Settings → Agents → Compaction): once it passes `atTokens`, all but the last `keepTurns` turns are summarized; `summarizeTool` gives the main agent its summarize tool. */
+/** When the compaction the next turn needs is made (Settings → Agents → Main agent → Session): during the turn before, in the background, so the next turn finds it made (`ahead`), or as that turn starts, before its first stage (`before_turn`). */
+export type CompactionWhen = "ahead" | "before_turn";
+export const COMPACTION_WHEN: readonly CompactionWhen[] = ["ahead", "before_turn"];
+
+/** The compaction's effort: one of an agent's efforts, or the main agent's own (`main`). */
+export type CompactionEffort = AgentEffort | "main";
+export const COMPACTION_EFFORTS: readonly CompactionEffort[] = ["main", ...AGENT_EFFORTS];
+
+/**
+ * The main session's compaction (Settings → Agents → Compaction; Main agent → Session): once it
+ * passes `atTokens`, all but the last `keepTurns` turns are summarized; `summarizeTool` gives the
+ * main agent its summarize tool. `when` says when the summary is made; it is written on
+ * `connectionId` and `model` (null: the main agent's) with `effort`, at most `summaryTokens` long.
+ */
 export interface CompactionSettings {
   atTokens: number;
   keepTurns: number;
   summarizeTool: boolean;
+  when: CompactionWhen;
+  connectionId: string | null;
+  model: string | null;
+  effort: CompactionEffort;
+  summaryTokens: number;
 }
 
 /** What an agent turn records for the narrator (Settings → Agents → Recording): each output event's text, in characters at most. */
@@ -212,13 +232,18 @@ export interface KeptSettings {
 /** The messages kept worked out by default (`KeptSettings.folds`): room for the longest chats, each message's steps a few hundred bytes. */
 export const KEPT_FOLDS_DEFAULT = 65_536;
 
+/** What the main session keeps of each past turn (Settings → Agents → Main agent → Session): receipts of its long messages and results (`receipts`), or its messages whole (`whole`). Either way the full messages stay with the turn, which `past_turn` reads. */
+export type SessionKeeps = "receipts" | "whole";
+export const SESSION_KEEPS: readonly SessionKeeps[] = ["receipts", "whole"];
+
 /**
  * The main agent (Settings → Agents → Main agent; INC2-SPEC C14), while the pipeline has one decide:
  * the connection and model it runs on (null: your default connection, and that connection's model),
  * its effort, its tool families (read only: it changes nothing itself; they read everything, secrets
  * marked, as every turn agent's do), its own limits over `budget` for each stage it works, and its
  * turn task's parts in tokens at most: the digest of what changed since its last turn, and its pinned
- * files where `.pins.json` sets no budget for it, which is every role's pins budget too.
+ * files where `.pins.json` sets no budget for it, which is every role's pins budget too. Its session
+ * keeps each past turn as `sessionKeeps` says, a receipt keeping `receiptChars` of each answer.
  */
 export interface MainAgentSettings {
   connectionId: string | null;
@@ -230,6 +255,8 @@ export interface MainAgentSettings {
   pinsTokens: number;
   /** How each stage runs (Settings → Agents → Main agent → Stages): the main agent decides it, or its roles run on their own and the next send says what ran. */
   stages: MainStages;
+  sessionKeeps: SessionKeeps;
+  receiptChars: number;
 }
 
 export interface AgentSettings {
@@ -258,6 +285,8 @@ export interface AgentSettings {
   clipChars: number;
   /** Per connection; a connection not listed has none. */
   throttles: ConnectionThrottle[];
+  /** Calls under way at once on every connection whose throttle sets none of its own (Settings → Speed → Calls, Settings → Agents → Throttles). */
+  callsAtOnce: Limit;
   /**
    * Caching (§8): explicit cache breakpoints where the provider takes them, on for every role unless
    * its own says otherwise. `nonce`, changed by Bust, heads every role's prompt that has none of
@@ -313,14 +342,15 @@ export function defaultAgentSettings(): AgentSettings {
     loopRepeats: 3,
     clipChars: 4000,
     throttles: [],
+    callsAtOnce: "none",
     caching: { on: true, nonce: "", roles: {} },
     acceptance: { connections: [], estimateFactor: 2 },
     // The assistant reads everything, outside the story, and its changes wait for your Apply.
     assistant: { connectionId: null, model: null, effort: "inherit", apply: "ask", historyTokens: 20_000, budget: {} },
-    pipeline: { mode: "fixed", memory: "after_reply", curator: true },
+    pipeline: { mode: "fixed", memory: "after_reply", curator: true, curatorGate: "shadow" },
     roles: defaultRoleSettings(),
-    // The main agent reads the workspace, everything secrets marked as every turn agent does; its digest and pins, 2,000 tokens each (§15).
-    main: { connectionId: null, model: null, effort: "inherit", families: ["workspace"], budget: {}, digestTokens: 2000, pinsTokens: 2000, stages: defaultStages() },
+    // The main agent reads the workspace, everything secrets marked as every turn agent does; its digest and pins, 2,000 tokens each (§15). Past turns stay as receipts, each answer's first 600 characters.
+    main: { connectionId: null, model: null, effort: "inherit", families: ["workspace"], budget: {}, digestTokens: 2000, pinsTokens: 2000, stages: defaultStages(), sessionKeeps: "receipts", receiptChars: 600 },
     context: defaultContextSettings(),
     // The final review is on, sees every part, and a review that fails sends the sections unrevised; its budget is the main agent's.
     finalReview: { on: true, onFail: "send", scope: "all", budget: {} },
@@ -329,7 +359,8 @@ export function defaultAgentSettings(): AgentSettings {
     gmOpsPerTurn: 10,
     curatorOps: 24,
     kept: { runs: 64, gates: 256, watchers: 256, live: 16, texts: 4_000_000, folds: KEPT_FOLDS_DEFAULT },
-    compaction: { atTokens: 32_000, keepTurns: 3, summarizeTool: true },
+    // The summary is made ahead, on the main agent's route, 16,000 tokens at most (Build C).
+    compaction: { atTokens: 32_000, keepTurns: 3, summarizeTool: true, when: "ahead", connectionId: null, model: null, effort: "main", summaryTokens: 16_000 },
     recording: { outputChars: 2000 },
     review: { placement: "chips" },
     vsClassic: 2,
@@ -356,6 +387,25 @@ export function mainBudget(settings: Readonly<AgentSettings>): AgentBudget {
 /** The final review's budget: the main agent's for a stage, with the limits the review sets of its own standing in. */
 export function finalReviewBudget(settings: Readonly<AgentSettings>): AgentBudget {
   return { ...mainBudget(settings), ...settings.finalReview.budget };
+}
+
+/**
+ * What an effort may spend reasoning before it writes, in tokens: the room a compaction's call gets
+ * past its summary (`compactionBudget`). A model that reasons longer is cut off, and its summary,
+ * cut, never lands.
+ */
+export const REASONING_ALLOWANCE: Readonly<Record<AgentEffort, number>> = Object.freeze({ off: 0, low: 4_000, medium: 12_000, high: 32_000, model: 32_000, inherit: 32_000 });
+
+/** Where the compaction's summary is written: its own connection, model and effort, each the main agent's where it sets none. */
+export function compactionRoute(settings: Readonly<AgentSettings>): { connectionId: string | null; model: string | null; effort: AgentEffort } {
+  const { compaction: c, main } = settings;
+  const own = c.connectionId !== null;
+  return { connectionId: own ? c.connectionId : main.connectionId, model: own ? c.model : (c.model ?? main.model), effort: c.effort === "main" ? main.effort : c.effort };
+}
+
+/** The compaction call's budget: the main agent's, its answer capped at the summary's length plus its effort's reasoning allowance. */
+export function compactionBudget(settings: Readonly<AgentSettings>): AgentBudget {
+  return { ...mainBudget(settings), callTokensOut: settings.compaction.summaryTokens + REASONING_ALLOWANCE[compactionRoute(settings).effort] };
 }
 
 /** The main agent's role, as the runtime, Diagnostics and the caching settings name it. */
@@ -442,17 +492,23 @@ export const KEPT_DEFS: Readonly<Record<keyof KeptSettings, AgentLimitDef>> = {
   folds: { label: "Messages kept worked out", limits: "How many of your chats' messages the engine keeps worked out in memory, each with what it did to the world, so working a chat out again starts where it changed rather than from its first message. Keep it above your longest chat's messages.", fires: "The message used longest ago is let go: the next time it is needed, it is worked out again from the nearest state the engine kept or saved.", unit: "count", min: 1, none: null },
 };
 
-/** Settings → Agents → Compaction: when the main session is summarized, and how much of it stays whole. */
-export const COMPACTION_DEFS: Readonly<Record<"atTokens" | "keepTurns", AgentLimitDef>> = {
+/** Settings → Agents → Compaction and Main agent → Session: when the main session is summarized, how much of it stays whole, and how long a summary may be. */
+export const COMPACTION_DEFS: Readonly<Record<"atTokens" | "keepTurns" | "summaryTokens", AgentLimitDef>> = {
   atTokens: { label: "Compact the session past", limits: "How long the main agent's session may grow before everything but its latest turns is summarized.", fires: "The older turns become one summary, kept with the span it replaced for a rollback.", unit: "tokens", min: 1, none: null },
   keepTurns: { label: "Recent turns kept whole", limits: "How many of the latest turns a compaction leaves as they were.", fires: "Older turns are summarized.", unit: "count", min: 0, none: null },
+  summaryTokens: { label: "Summary length", limits: "How long a compaction's summary may be: its instructions ask for no more, and its call may write that and its effort's reasoning, no more.", fires: "A summary cut off there, or one that stops mid-sentence, never lands: the session goes on whole, Diagnostics warns, and the next turn tries again.", unit: "tokens", min: 500, none: null },
 };
 
-/** Settings → Agents → Main agent: how much of its turn task the digest and its pinned files may take. */
-export const MAIN_DEFS: Readonly<Record<"digestTokens" | "pinsTokens", AgentLimitDef>> = {
+/** Settings → Agents → Main agent: how much of its turn task the digest and its pinned files may take, and how much of each answer a past turn's receipt keeps. */
+export const MAIN_DEFS: Readonly<Record<"digestTokens" | "pinsTokens" | "receiptChars", AgentLimitDef>> = {
   digestTokens: { label: "Turn digest", limits: "How much of the main agent's turn task the digest of what changed since its last turn may take: the newest replies first.", fires: "Older replies are left out, and the digest says how many.", unit: "tokens", min: 0, none: null },
   pinsTokens: { label: "Pinned files, per role", limits: "How much of an agent's prompt its pinned files may take, where .pins.json sets no budget for it: the main agent's, and every role's.", fires: "A file past it comes as its headings, which workspace_read reads whole.", unit: "tokens", min: 0, none: null },
+  receiptChars: { label: "Receipt of each answer", limits: "How much of each role's answer a past turn's receipt keeps in the session: its first characters, with its length and hash.", fires: "The rest stays in the turn's full messages, which past_turn reads or greps.", unit: "chars", min: 0, none: null },
 };
+
+/** Settings → Agents → Main agent → Session's words for each choice. */
+export const COMPACTION_WHEN_LABELS: Readonly<Record<CompactionWhen, string>> = { ahead: "Ahead of time", before_turn: "As the turn starts" };
+export const SESSION_KEEPS_LABELS: Readonly<Record<SessionKeeps, string>> = { receipts: "Receipts", whole: "Whole messages" };
 
 /** Settings → Agents → Recording: each line an agent turn records for the narrator. */
 export const OUTPUT_CHARS_DEF: AgentLimitDef = { label: "Narrator-facing output, each", limits: "How long each text an agent turn records for the narrator may be: an outcome, montage or outline line, the brief, a scene note.", fires: "A longer text is cut to it, ending in “…”; the cut is noted in your diagnostics.log, not on the Diagnostics page.", unit: "chars", min: 1, none: null };
@@ -560,6 +616,23 @@ function mainOf(v: unknown, d: Readonly<MainAgentSettings>): MainAgentSettings {
     digestTokens: whole(m.digestTokens, MAIN_DEFS.digestTokens.min) ?? d.digestTokens,
     pinsTokens: whole(m.pinsTokens, MAIN_DEFS.pinsTokens.min) ?? d.pinsTokens,
     stages: stagesOf(m.stages, d.stages),
+    sessionKeeps: oneOf(m.sessionKeeps, SESSION_KEEPS, d.sessionKeeps),
+    receiptChars: whole(m.receiptChars, MAIN_DEFS.receiptChars.min) ?? d.receiptChars,
+  };
+}
+
+/** The compaction's settings as stored: each field checked, else `d`'s; a connection or model cleared with null is the main agent's. */
+function compactionOf(v: unknown, d: Readonly<CompactionSettings>): CompactionSettings {
+  const c = isRecord(v) ? v : {};
+  return {
+    atTokens: whole(c.atTokens, COMPACTION_DEFS.atTokens.min) ?? d.atTokens,
+    keepTurns: whole(c.keepTurns, COMPACTION_DEFS.keepTurns.min) ?? d.keepTurns,
+    summarizeTool: typeof c.summarizeTool === "boolean" ? c.summarizeTool : d.summarizeTool,
+    when: oneOf(c.when, COMPACTION_WHEN, d.when),
+    connectionId: c.connectionId === null ? null : safeKey(c.connectionId) ? c.connectionId : d.connectionId,
+    model: c.model === null ? null : safeKey(c.model) ? c.model : d.model,
+    effort: oneOf(c.effort, COMPACTION_EFFORTS, d.effort),
+    summaryTokens: whole(c.summaryTokens, COMPACTION_DEFS.summaryTokens.min) ?? d.summaryTokens,
   };
 }
 
@@ -639,7 +712,6 @@ export function agentSettingsOf(raw: unknown, d: Readonly<AgentSettings> = defau
   const acceptance = isRecord(a.acceptance) ? a.acceptance : {};
   const factor = acceptance.estimateFactor;
   const pipeline = isRecord(a.pipeline) ? a.pipeline : {};
-  const compaction = isRecord(a.compaction) ? a.compaction : {};
   const recording = isRecord(a.recording) ? a.recording : {};
   const review = isRecord(a.review) ? a.review : {};
   const kept = isRecord(a.kept) ? a.kept : {};
@@ -652,13 +724,14 @@ export function agentSettingsOf(raw: unknown, d: Readonly<AgentSettings> = defau
     loopRepeats: whole(a.loopRepeats, LOOP_DEFS.loopRepeats.min) ?? d.loopRepeats,
     clipChars: whole(a.clipChars, LOOP_DEFS.clipChars.min) ?? d.clipChars,
     throttles: listOf(a.throttles, d.throttles, (t, id) => ({ id, requestsPerMinute: limitIn(t.requestsPerMinute, THROTTLE_MIN, Number.MAX_SAFE_INTEGER, "none"), tokensPerMinute: limitIn(t.tokensPerMinute, THROTTLE_MIN, Number.MAX_SAFE_INTEGER, "none"), atOnce: limitIn(t.atOnce, AT_ONCE_DEF.min, Number.MAX_SAFE_INTEGER, "none") })),
+    callsAtOnce: limitIn(a.callsAtOnce, AT_ONCE_DEF.min, Number.MAX_SAFE_INTEGER, d.callsAtOnce),
     caching: { on: typeof caching.on === "boolean" ? caching.on : d.caching.on, nonce: cacheNonce(caching.nonce, d.caching.nonce), roles },
     acceptance: {
       connections: acceptanceConnectionsOf(acceptance.connections, d.acceptance.connections),
       estimateFactor: typeof factor === "number" && Number.isFinite(factor) && factor >= ESTIMATE_FACTOR_MIN ? factor : d.acceptance.estimateFactor,
     },
     assistant: assistantOf(a.assistant, d.assistant),
-    pipeline: { mode: oneOf(pipeline.mode, PIPELINE_MODES, d.pipeline.mode), memory: oneOf(pipeline.memory, MEMORY_PLACEMENTS, d.pipeline.memory), curator: typeof pipeline.curator === "boolean" ? pipeline.curator : d.pipeline.curator },
+    pipeline: { mode: oneOf(pipeline.mode, PIPELINE_MODES, d.pipeline.mode), memory: oneOf(pipeline.memory, MEMORY_PLACEMENTS, d.pipeline.memory), curator: typeof pipeline.curator === "boolean" ? pipeline.curator : d.pipeline.curator, curatorGate: oneOf(pipeline.curatorGate, CURATOR_GATES, d.pipeline.curatorGate) },
     roles: rolesOf(a.roles, d.roles),
     main: mainOf(a.main, d.main),
     context: contextSettingsOf(a.context, d.context),
@@ -667,7 +740,7 @@ export function agentSettingsOf(raw: unknown, d: Readonly<AgentSettings> = defau
     gmOpsPerTurn: whole(a.gmOpsPerTurn, GM_OPS_DEF.min) ?? d.gmOpsPerTurn,
     curatorOps: whole(a.curatorOps, CURATOR_OPS_DEF.min) ?? d.curatorOps,
     kept: { runs: whole(kept.runs, KEPT_DEFS.runs.min) ?? d.kept.runs, gates: whole(kept.gates, KEPT_DEFS.gates.min) ?? d.kept.gates, watchers: whole(kept.watchers, KEPT_DEFS.watchers.min) ?? d.kept.watchers, live: whole(kept.live, KEPT_DEFS.live.min) ?? d.kept.live, texts: whole(kept.texts, KEPT_DEFS.texts.min) ?? d.kept.texts, folds: whole(kept.folds, KEPT_DEFS.folds.min) ?? d.kept.folds },
-    compaction: { atTokens: whole(compaction.atTokens, COMPACTION_DEFS.atTokens.min) ?? d.compaction.atTokens, keepTurns: whole(compaction.keepTurns, COMPACTION_DEFS.keepTurns.min) ?? d.compaction.keepTurns, summarizeTool: typeof compaction.summarizeTool === "boolean" ? compaction.summarizeTool : d.compaction.summarizeTool },
+    compaction: compactionOf(a.compaction, d.compaction),
     recording: { outputChars: whole(recording.outputChars, OUTPUT_CHARS_DEF.min) ?? d.recording.outputChars },
     review: { placement: oneOf(review.placement, REVIEW_PLACEMENTS, d.review.placement) },
     // A ratio, so any amount above none: under 1, an agent turn must spend less than classic's.

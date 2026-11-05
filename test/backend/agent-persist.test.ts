@@ -7,7 +7,7 @@
 
 import { describe, expect, test } from "bun:test";
 import type { QuietRequest } from "../../src/backend/host";
-import { type PersistAsk, sceneBasis, ScenePersistence } from "../../src/backend/agents/persist";
+import { lastSceneOf, type PersistAsk, sceneBasis, ScenePersistence } from "../../src/backend/agents/persist";
 import { calendarOf, dayPartAt } from "../../src/engine/calendar";
 import { outputsOf } from "../../src/engine/outputs";
 import { placeOfEntity } from "../../src/engine/scope";
@@ -125,35 +125,58 @@ const ON = { on: true, turns: 2, minutes: 30 };
 const ask = (over: Partial<PersistAsk> = {}): PersistAsk => ({ settings: ON, kind: "normal", after: REPLY, basis: BASIS, clock: 100, ...over });
 
 describe("when the last turn's scene holds", () => {
-  test("only on a new turn after the reply whose scene is known, with persistence on; each why in words", () => {
+  test("only on a new turn after the reply whose scene is known, with persistence on; each why in words", async () => {
     const p = new ScenePersistence();
-    expect(p.hold("chat", ask({ settings: { ...ON, on: false } }))).toEqual({ holds: false, why: "Smart persistence is off." });
-    expect(p.hold("chat", ask())).toEqual({ holds: false, why: "The last turn's scene isn't known: its roles ran on another reply, or before a restart." });
+    expect(await p.hold("chat", ask({ settings: { ...ON, on: false } }))).toEqual({ holds: false, why: "Smart persistence is off." });
+    expect(await p.hold("chat", ask())).toEqual({ holds: false, why: "The last turn's scene isn't known: its roles ran on another reply." });
     p.begin("gen1", "chat", BASIS, 100);
     p.closed("gen1", REPLY, 2);
-    expect(p.hold("chat", ask())).toEqual({ holds: true });
+    expect(await p.hold("chat", ask())).toEqual({ holds: true });
     // Never on a Re-run, a swipe, a Continue, an impersonation or a Re-narrate.
-    expect(p.hold("chat", ask({ kind: "regenerate" }))).toEqual({ holds: false, why: "A Re-run asks every role again." });
-    expect(p.hold("chat", ask({ kind: "swipe" }))).toEqual({ holds: false, why: "A swipe asks every role again." });
-    expect(p.hold("chat", ask({ kind: "continue" }))).toEqual({ holds: false, why: "A Continue plays no turn." });
-    expect(p.hold("chat", ask({ kind: "impersonate" }))).toEqual({ holds: false, why: "An impersonation plays no turn." });
-    expect(p.hold("chat", ask({ kind: "renarrate" }))).toEqual({ holds: false, why: "A Re-narrate tells its turn's own plan." });
+    expect(await p.hold("chat", ask({ kind: "regenerate" }))).toEqual({ holds: false, why: "A Re-run asks every role again." });
+    expect(await p.hold("chat", ask({ kind: "swipe" }))).toEqual({ holds: false, why: "A swipe asks every role again." });
+    expect(await p.hold("chat", ask({ kind: "continue" }))).toEqual({ holds: false, why: "A Continue plays no turn." });
+    expect(await p.hold("chat", ask({ kind: "impersonate" }))).toEqual({ holds: false, why: "An impersonation plays no turn." });
+    expect(await p.hold("chat", ask({ kind: "renarrate" }))).toEqual({ holds: false, why: "A Re-narrate tells its turn's own plan." });
     // After another reply (a swipe of it, a Branch), or in another chat, the scene isn't known.
-    expect(p.hold("chat", ask({ after: { ...REPLY, swipeId: 1 } })).holds).toBe(false);
-    expect(p.hold("other", ask()).holds).toBe(false);
+    expect((await p.hold("chat", ask({ after: { ...REPLY, swipeId: 1 } }))).holds).toBe(false);
+    expect((await p.hold("other", ask())).holds).toBe(false);
     // A scene that changed says what did, in its words.
-    expect(p.hold("chat", ask({ basis: { ...BASIS, dayPart: "noon", things: "things-2" } }))).toEqual({ holds: false, why: "The scene changed: the time of day, the things here." });
+    expect(await p.hold("chat", ask({ basis: { ...BASIS, dayPart: "noon", things: "things-2" } }))).toEqual({ holds: false, why: "The scene changed: the time of day, the things here." });
     // A mark or GM fix since the turn closed changes the scene: the marks it closed with are the chain's then.
-    expect(p.hold("chat", ask({ basis: { ...BASIS, marks: "3" } }))).toEqual({ holds: false, why: "The scene changed: a GM fix or marker since." });
+    expect(await p.hold("chat", ask({ basis: { ...BASIS, marks: "3" } }))).toEqual({ holds: false, why: "The scene changed: a GM fix or marker since." });
     // Past the world minutes since its roles last ran afresh.
-    expect(p.hold("chat", ask({ clock: 131 }))).toEqual({ holds: false, why: "31 world minutes passed since its roles last ran, more than Smart persistence keeps." });
-    expect(p.hold("chat", ask({ clock: 130 }))).toEqual({ holds: true });
+    expect(await p.hold("chat", ask({ clock: 131 }))).toEqual({ holds: false, why: "31 world minutes passed since its roles last ran, more than Smart persistence keeps." });
+    expect(await p.hold("chat", ask({ clock: 130 }))).toEqual({ holds: true });
     // Forgotten, nothing holds.
     p.forget("chat");
-    expect(p.hold("chat", ask()).holds).toBe(false);
+    expect((await p.hold("chat", ask())).holds).toBe(false);
   });
 
-  test("a turn that kept counts on from the last; past the turns in a row the next asks afresh, and a fresh turn starts the count over", () => {
+  test("a restart reads the chat's last scene from its store, once: it holds for the reply it was written for, and a damaged one is no scene", async () => {
+    const files = new Map<string, unknown>();
+    const store = {
+      lastScene: async (chatId: string, userId: string): Promise<unknown> => files.get(`${userId}/${chatId}`) ?? null,
+      keepScene: async (chatId: string, userId: string, scene: unknown): Promise<void> => void files.set(`${userId}/${chatId}`, JSON.parse(JSON.stringify(scene))),
+    };
+    const before = new ScenePersistence(store);
+    before.begin("gen1", "chat", BASIS, 100, "u1");
+    before.closed("gen1", REPLY, 2);
+    await Promise.resolve();
+    expect(lastSceneOf(files.get("u1/chat"))).toEqual({ reply: REPLY, basis: { ...BASIS, marks: "2" }, freshAt: 100, kept: 0 });
+    // The engine starts again: a new persistence, the same store.
+    const after = new ScenePersistence(store);
+    expect(await after.hold("chat", ask(), "u1")).toEqual({ holds: true });
+    expect((await after.hold("chat", ask({ after: { ...REPLY, swipeId: 1 } }), "u1")).holds).toBe(false);
+    // Without the user, nothing is read; another user's chat of the same id is theirs.
+    expect((await new ScenePersistence(store).hold("chat", ask())).holds).toBe(false);
+    expect((await new ScenePersistence(store).hold("chat", ask(), "u2")).holds).toBe(false);
+    files.set("u1/chat", { reply: REPLY, basis: { place: 3 }, freshAt: 100, kept: 0 });
+    expect((await new ScenePersistence(store).hold("chat", ask(), "u1")).holds).toBe(false);
+    expect([lastSceneOf(null), lastSceneOf({ reply: { messageId: "", swipeId: 0 } })]).toEqual([null, null]);
+  });
+
+  test("a turn that kept counts on from the last; past the turns in a row the next asks afresh, and a fresh turn starts the count over", async () => {
     const p = new ScenePersistence();
     const turn = (gen: string, messageId: string, clock: number, kept: boolean): void => {
       p.begin(gen, "chat", BASIS, clock);
@@ -163,14 +186,14 @@ describe("when the last turn's scene holds", () => {
     turn("g1", "m1", 100, false);
     turn("g2", "m2", 105, true);
     turn("g3", "m3", 110, true);
-    expect(p.hold("chat", ask({ after: { messageId: "m3", swipeId: 0 }, clock: 115 }))).toEqual({ holds: false, why: "It was kept 2 turns in a row, the most Smart persistence keeps." });
+    expect(await p.hold("chat", ask({ after: { messageId: "m3", swipeId: 0 }, clock: 115 }))).toEqual({ holds: false, why: "It was kept 2 turns in a row, the most Smart persistence keeps." });
     // The minutes count from when its roles last ran afresh, not from the last kept turn.
     turn("g4", "m4", 112, true);
-    expect(p.hold("chat", ask({ settings: { ...ON, turns: 9 }, after: { messageId: "m4", swipeId: 0 }, clock: 131 }))).toEqual({ holds: false, why: "31 world minutes passed since its roles last ran, more than Smart persistence keeps." });
+    expect(await p.hold("chat", ask({ settings: { ...ON, turns: 9 }, after: { messageId: "m4", swipeId: 0 }, clock: 131 }))).toEqual({ holds: false, why: "31 world minutes passed since its roles last ran, more than Smart persistence keeps." });
     // A fresh turn: the count and the minutes start over.
     turn("g5", "m5", 140, false);
     expect(p.kept("g5")).toBe(false);
-    expect(p.hold("chat", ask({ after: { messageId: "m5", swipeId: 0 }, clock: 150 }))).toEqual({ holds: true });
+    expect(await p.hold("chat", ask({ after: { messageId: "m5", swipeId: 0 }, clock: 150 }))).toEqual({ holds: true });
     // A turn another generation took goes with it.
     p.begin("g6", "chat", BASIS, 150);
     p.keptIn("g6");
@@ -288,12 +311,12 @@ async function headRecord(rig: Rig, chatId: string): Promise<Rec> {
   return rec;
 }
 
-/** Plays a turn (`text` sent, else a Re-run of the head reply) with `reply`: what it asked, its narrator's Minds and Scene, its record and its plan. */
+/** Plays a turn (`text` sent, else a Re-run of the head reply, as its "Re-run the turn with the engine" chip asks) with `reply`: what it asked, its narrator's Minds and Scene, its record and its plan. */
 async function turn(rig: Rig, chatId: string, text: string | null, reply: string) {
   if (text !== null) {
     rig.host.sendUser(chatId, text);
     await rig.host.settle();
-  }
+  } else rig.rt.setSwipeChoice(chatId, "rerun");
   const from = rig.host.quietCalls.length;
   const g = await rig.host.start(chatId, { type: text === null ? "regenerate" : "normal" });
   expect(g.halted).toBeUndefined();
@@ -338,6 +361,22 @@ describe("two quiet turns", () => {
     expect(mindReasons(again.rec)).toEqual({ [DANNY]: "live", [PRIYA]: "live" });
     expect(whyOf(again.plan, "minds")).toContain("a Re-run asks every role again");
     expect(rig.rt.ledger.errors).toEqual([]);
+  });
+
+  test("after a restart, the second quiet turn still keeps its minds and the scene's notes", async () => {
+    const rig = new Rig({ shipped: true, minds: true });
+    const chatId = await quietChat(rig, true);
+    const first = await turn(rig, chatId, "I look around the shop.", "The shop is quiet.");
+    expect(first.asked).toMatchObject({ minds: ["Danny Okafor", "Priya Nair"], scene: 1 });
+    await rig.host.settle();
+    // The engine starts again over the same chats and storage: the last scene is read back for the reply it was written for.
+    const after = rig.restart();
+    models(after);
+    const second = await turn(after, chatId, "I wait by the counter.", "Nothing much happens.");
+    expect(second.asked).toMatchObject({ minds: [], scene: 0 });
+    expect(mindReasons(second.rec)).toEqual({ [DANNY]: "kept", [PRIYA]: "kept" });
+    expect(statusOf(second.plan)).toMatchObject({ minds: "kept", scene: "kept" });
+    expect(after.rt.ledger.errors).toEqual([]);
   });
 
   test("a mind the player names is asked again while the other stays kept", async () => {

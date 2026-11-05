@@ -2,20 +2,22 @@
 // volume and load limits; stacks; kits as template plus overrides; condition, wear, consumables;
 // use grants (lending) with overdue semantics; everyday carry (ITEMS-SPEC §4.4, `carry.ts`); the
 // put-away process, off screen, of NPCs' things left lying away from where they are kept (§4.3,
-// `put-away.ts`).
+// `put-away.ts`); saved outfits and loadouts (DESIGN §28.16, `sets.ts`); and the arsenal, descriptive
+// only: what is readied in hand and how many rounds are left, for world rules (`readied`, `ammo_of`).
 //
 // Level contract (domain `gear`):
 //   0  off: transfers are no-ops; nothing renders
 //   1  only things in play render: notable ones and what the story brought in (transfers still
 //      apply: the data is uniform); everyday carry is made from here
 //   2  items, containers (volume/load limits), stacks; cash lives in a wallet
-//   3  worn and equipped slots, kits, condition
+//   3  worn and equipped slots, kits, condition, saved outfits and loadouts
 //   4  wear per use, consumables
 //
 // Services: gear.transfer, gear.drop, gear.give, gear.spawn, gear.take_piece, gear.lend,
-// gear.retrieve. Queries: has_item, gear.kit_status, gear.overdue. Formulas besides: who may use a
-// thing and who may lend it out (`may_use`, `may_assign`: the things model's access resolver).
-// The Gear and People sections are `feed.ts`'s; Play → Me → Gear is `view.ts`'s.
+// gear.retrieve, gear.set_op. Queries: has_item, gear.kit_status, gear.overdue, gear.room_problem,
+// gear.offstage_refusal. Formulas besides: who may use a thing and who may lend it out (`may_use`,
+// `may_assign`: the things model's access resolver). The Gear and People sections are `feed.ts`'s;
+// Play → Me → Gear is `view.ts`'s.
 
 import type { JsonObject, JsonValue } from "../../../shared/json";
 import { hasOwn, isRecord } from "../../../shared/json";
@@ -24,7 +26,7 @@ import { hashParts } from "../../../shared/hash";
 import type { LedgerEvent } from "../../../shared/ledger";
 import type { DataTable, ShippedRevision } from "../../../shared/tables";
 import { AUDIENCES } from "../../../shared/org";
-import { GRANT_BASES, HANDOVER_BASES, isItemChange, ITEM_CHANGES, PERMIT_SCOPES, SIZES, sizeRank, THING_FACTS, thingsConfigOf, type HandoverBasis, type ItemOp, type Size } from "../../../shared/things";
+import { GRANT_BASES, HANDOVER_BASES, isItemChange, ITEM_CHANGES, PERMIT_SCOPES, SET_KINDS, setIdSaid, setsOf, SIZES, sizeRank, THING_FACTS, thingsConfigOf, type HandoverBasis, type ItemOp, type SetOp, type Size } from "../../../shared/things";
 import { requirementExpr, type ActionDef, type EntityDef, type KindDef, type WorldCurrency, type WorldDoc } from "../../../shared/world";
 import { accessFor, assignFor, reachOf } from "../../../engine/access";
 import { calendarOf, clockOfPhrase } from "../../../engine/calendar";
@@ -35,8 +37,9 @@ import { factOf, reconcileFact, type Reconciled } from "../../../engine/reconcil
 import type { EffectContext, FeedLine, PackDef, ReadContext, Rejection } from "../../../engine/registry";
 import { effectLists } from "../../../engine/ruleset-lint";
 import { GONE_FIELD, isGone, kindIs, placeOfEntity } from "../../../engine/scope";
-import { applyItemOp } from "../../../engine/thing-ops";
-import { carriedBy, findPiece, fitProblem, fitsOn, fixedOf, goesIn, grants, hasItem, holdProblem, holdsAs, isInside, kindGoesIn, kindHoldsAs, kitStatus, overdueFor, takenOf, weightOf, type Grant, type KitStatus } from "./model";
+import { applyItemOp, type Adding, type ItemOpOptions } from "../../../engine/thing-ops";
+import { ammoOf, carriedBy, findPiece, fitProblem, fitsOn, fixedOf, goesIn, grants, hasItem, holdProblem, holdsAs, isInside, kindGoesIn, kindHoldsAs, kitStatus, overdueFor, readied, roomProblem, takenOf, weightOf, type Grant, type KitStatus } from "./model";
+import { setOpEvents } from "./sets";
 import { putAwayEvents } from "./put-away";
 import { contentsOf, holderOf, holdsOf, possessorOf, restOf, sizeOf, spotOf, whoseOf } from "../../../engine/things";
 import { sentence, thingName, thingText } from "../../../engine/thing-words";
@@ -202,6 +205,8 @@ declare module "../../../engine/registry" {
     "gear.take_piece": (ctx: ReadContext, kit: EntityId, piece: string, to: EntityId) => LedgerEvent[] | Rejection;
     "gear.lend": (ctx: ReadContext, thing: EntityId, to: EntityId, until: number) => LedgerEvent[] | Rejection;
     "gear.retrieve": (ctx: ReadContext, thing: EntityId) => LedgerEvent[] | Rejection;
+    /** A person's saved sets changed (DESIGN §28.16): the item ops `set_save`, `set_apply` and `set_drop`. */
+    "gear.set_op": (ctx: ReadContext, op: SetOp, opts: ItemOpOptions) => LedgerEvent[] | Rejection;
   }
   interface QueryMap {
     has_item: (ctx: ReadContext, holder: EntityId, what: string) => boolean;
@@ -211,6 +216,10 @@ declare module "../../../engine/registry" {
     "gear.hold_problem": (ctx: ReadContext, thing: EntityId, holder: EntityId) => string | null;
     /** What a thing holds as, and where it may be put (DESIGN §7 containment). */
     "gear.containment": (ctx: ReadContext, id: EntityId) => { holds: "person" | "vehicle" | "container" | null; goes: "any" | "vehicle" | "nowhere" };
+    /** Why a holder's room or load can't spare a thing (or what a thing being made adds), in words after its name, or null (ITEMS-SPEC §3.2, `packs.gear.config.containers`). */
+    "gear.room_problem": (ctx: ReadContext, holder: EntityId, adding: EntityId | Adding) => string | null;
+    /** Why a hand-over done at once, off screen, can't be (DESIGN §11): the one it goes to, or comes back from, isn't here. */
+    "gear.offstage_refusal": (ctx: ReadContext, action: string, params: JsonObject, actor: EntityId) => string | null;
   }
 }
 
@@ -483,15 +492,36 @@ function search(ctx: ReadContext, who: EntityId, target: EntityId | null): Event
 /**
  * The events an item op makes (ITEMS-SPEC §3.5, §8) as an action's or an authored effect's: the one
  * validator's, on what the state holds now, by `by`, never confirmed, so a Built-in thing never moves
- * by an action. Nothing at Gear 0, where moves are no-ops.
+ * by an action, and a holder's room, load and depth counting (`room`), as the player's own paths
+ * do. Nothing at Gear 0, where moves are no-ops.
  */
 function itemOpEvents(ctx: ReadContext, op: Exclude<ItemOp, { do: "remove" }>, by: EntityId, salt: string): Events {
   const thing = "item" in op ? op.item : null;
   const to = op.do === "hand" ? op.to : op.do === "move" && "in" in op.to ? op.to.in : undefined;
   if (thing !== null && own(ctx.state.entities, thing) && gearLevel(ctx, thing, to) === 0) return [];
   const w = new Working(ctx.registry, ctx.world, ctx.state);
-  const out = applyItemOp(w, op, { by, confirmed: false, gm: false, salt, viewer: ctx.world.pov });
+  const out = applyItemOp(w, op, { by, confirmed: false, gm: false, salt, viewer: ctx.world.pov, room: true });
   return "code" in out ? out : [...w.events];
+}
+
+/**
+ * Why a hand-over done at once, off screen, can't be (DESIGN §11, `gear.offstage_refusal`): Give,
+ * Hand over and Lend reach only someone here, and Take back only a thing here or with someone
+ * here, since nobody walked it over; in the player's words, or null. In the story they still play.
+ */
+function handoverRefusal(ctx: ReadContext, action: string, params: JsonObject, actor: EntityId): string | null {
+  const here = placeOfEntity(ctx.state, actor);
+  const away = (id: EntityId): boolean => here === null || placeOfEntity(ctx.state, id) !== here;
+  if (action === "give" || action === "hand_over" || action === "lend") {
+    const to = strOf(params.to);
+    return to !== "" && own(ctx.state.entities, to) && away(to) ? `${labelOf(ctx, to)} isn't here to take it.` : null;
+  }
+  if (action !== "reclaim") return null;
+  const item = strOf(params.item);
+  if (!own(ctx.state.entities, item)) return null;
+  const has = possessorOf(ctx, item);
+  if (has !== null) return has !== actor && away(has) ? `${labelOf(ctx, has)} has it, and isn't here.` : null;
+  return away(item) ? `${labelOf(ctx, item)} isn't here.` : null;
 }
 
 /**
@@ -687,11 +717,14 @@ export const gearPack: PackDef = {
     r.service("gear.take_piece", takePiece);
     r.service("gear.lend", lend);
     r.service("gear.retrieve", retrieve);
+    r.service("gear.set_op", setOpEvents);
     r.query("has_item", hasItem);
     r.query("gear.kit_status", kitStatus);
     r.query("gear.overdue", (ctx, owner) => overdueFor(ctx.state, owner));
     r.query("gear.hold_problem", holdProblem);
     r.query("gear.containment", (ctx, id) => ({ holds: holdsAs(ctx, id), goes: goesIn(ctx, id) }));
+    r.query("gear.room_problem", roomProblem);
+    r.query("gear.offstage_refusal", handoverRefusal);
 
     r.formula("has_item", (ctx, holder, what) => hasItem(ctx, String(holder ?? ""), String(what ?? "")));
     r.formula("carries", (ctx, holder, item) => isInside(ctx.state, String(item ?? ""), String(holder ?? "")));
@@ -722,6 +755,9 @@ export const gearPack: PackDef = {
     // Whom a thing goes back to from someone here (§4.6 return), or null; whether its rest is close enough to put it away.
     r.formula("returns_to", (ctx, who, thing) => returnsTo(ctx, String(who ?? ""), String(thing ?? "")));
     r.formula("rest_near", (ctx, who, thing) => restNear(ctx, String(who ?? ""), String(thing ?? "")));
+    // The arsenal, descriptive (Gear 3): whether a weapon (or anything `what` names) is drawn and held ready, and how many rounds someone carries for a weapon or of an ammunition, for a world's own rules.
+    r.formula("readied", (ctx, who, what) => readied(ctx, String(who ?? ""), String(what ?? "")));
+    r.formula("ammo_of", (ctx, who, what) => ammoOf(ctx, String(who ?? ""), String(what ?? "")));
 
     const wrap = (type: string, args: readonly string[], f: (args: Record<string, JsonValue>, ctx: EffectContext) => Events): void => r.effect({ type, args, resolve: (a, ctx) => f(a, ctx) });
     wrap("gear.transfer", ["item", "to"], (a, ctx) => {
@@ -770,6 +806,25 @@ export const gearPack: PackDef = {
       return lend(ctx, strOf(a.item), strOf(a.to), until);
     });
     wrap("gear.retrieve", ["item"], (a, ctx) => retrieve(ctx, strOf(a.item)));
+    // Saved outfits and loadouts (DESIGN §28.16), the item ops' own: kept from what is worn now, changed into, dropped.
+    // A set is picked by its name, as Belongings sends it and the palette's reader writes it, so the
+    // action reads, and the story is told, "Change into: Everyday", never its id; its id still works.
+    wrap("gear.set_save", ["who", "name", "kind"], (a, ctx) => {
+      const kind = SET_KINDS.find((k) => k === a.kind);
+      return kind ? itemOpEvents(ctx, { do: "set_save", who: strOf(a.who) || ctx.world.pov, name: strOf(a.name), kind }, strOf(a.who) || ctx.world.pov, ctx.rng.seed) : reject("bad_kind", "a saved set is an outfit or a loadout");
+    });
+    const setOf = (a: Readonly<Record<string, JsonValue>>, ctx: EffectContext): { who: EntityId; set: string } => {
+      const who = strOf(a.who) || ctx.world.pov;
+      return { who, set: setIdSaid(setsOf(own(ctx.state.entities, who)?.fields), strOf(a.set)) };
+    };
+    wrap("gear.set_apply", ["who", "set"], (a, ctx) => {
+      const { who, set } = setOf(a, ctx);
+      return itemOpEvents(ctx, { do: "set_apply", who, set }, who, ctx.rng.seed);
+    });
+    wrap("gear.set_drop", ["who", "set"], (a, ctx) => {
+      const { who, set } = setOf(a, ctx);
+      return itemOpEvents(ctx, { do: "set_drop", who, set }, who, ctx.rng.seed);
+    });
     wrap("gear.wear", ["item", "wearer", "slot?"], (a, ctx) => wear(ctx, strOf(a.item), strOf(a.wearer), typeof a.slot === "string" ? a.slot : undefined));
     wrap("gear.remove", ["item"], (a, ctx) => {
       const item = strOf(a.item);
@@ -850,6 +905,11 @@ export const gearPack: PackDef = {
     // the palette always sends days.
     r.action({ id: "lend", label: "Lend", description: "Lend something to someone, for some days or until a time.", pack: "gear", params: { item: { type: "ref", ref: "item" }, to: { type: "ref", ref: "person" }, days: { type: "number", optional: true }, until: { type: "text", optional: true, label: "Until (a time: 7 pm, tonight, tomorrow)" } }, requires: ["may_assign(self, item)", "days > 0 or params.until != null", "at(to, here) or at(item, here)"], outcomes: { default: [{ type: "gear.lend", args: { item: "item", to: "to", until: "=days > 0 ? clock + days(days) : 0", said: "=params.until" } }] }, duration: "2", lexicon: ["lend", "loan", "let borrow"], observable: "lends something" });
     r.action({ id: "reclaim", label: "Take back", description: "Take back something of yours that you lent out.", pack: "gear", params: { item: { type: "ref", ref: "item" } }, requires: ["item.owner == self", "lent_out(item)"], outcomes: { default: [{ type: "gear.retrieve", args: { item: "item" } }] }, duration: "5", lexicon: ["take back", "get back", "reclaim"], observable: "takes something back" });
+    // Changing into a saved outfit or loadout (DESIGN §28.16): each piece to hand put on in its slot, the rest of its kind off, at home put away.
+    r.action({ id: "set_apply", label: "Change into", description: "Change into one of your saved outfits or loadouts.", pack: "gear", params: { set: { type: "text", label: "Outfit or loadout" } }, requires: ["level.gear >= 3"], outcomes: { default: [{ type: "gear.set_apply", args: { who: "self", set: "=params.set" } }] }, duration: "5", lexicon: ["change into", "put on my", "get dressed in", "gear up"], observable: "changes clothes" });
+    // Keeping and dropping one is bookkeeping (`mechanical`): done at once, never told.
+    r.action({ id: "set_save", label: "Save what I'm wearing", description: "Keep what you wear now as an outfit, or what you carry ready as a loadout.", pack: "gear", params: { name: { type: "text", label: "Name" }, kind: { type: "text", label: "Outfit or loadout" } }, requires: ["level.gear >= 3"], outcomes: { default: [{ type: "gear.set_save", args: { who: "self", name: "=params.name", kind: "=params.kind" } }] }, duration: "0", mechanical: true });
+    r.action({ id: "set_drop", label: "Forget an outfit", description: "Stop keeping one of your saved outfits or loadouts.", pack: "gear", params: { set: { type: "text", label: "Outfit or loadout" } }, requires: [], outcomes: { default: [{ type: "gear.set_drop", args: { who: "self", set: "=params.set" } }] }, duration: "0", mechanical: true });
     r.action({ id: "wear", label: "Wear or equip", description: "Put on or equip clothing, armor or gear.", pack: "gear", params: { item: { type: "ref", ref: "item", claim: "held" } }, requires: ["carries(self, item) or (place(item) == here and reach(self, item))", "level.gear >= 3", "movable(item)", "may_use(self, item)"], outcomes: { default: [{ type: "gear.wear", args: { item: "item", wearer: "self" } }] }, duration: "2", lexicon: ["wear", "put on", "equip"], observable: "puts something on" });
     r.action({ id: "remove", label: "Take off", description: "Take off something you wear or have equipped.", pack: "gear", params: { item: { type: "ref", ref: "item" } }, requires: ["carries(self, item)"], outcomes: { default: [{ type: "gear.remove", args: { item: "item" } }] }, duration: "2", lexicon: ["take off", "remove", "unequip"], observable: "takes something off" });
     r.action({ id: "use", label: "Use", description: "Use an item you carry or can reach.", pack: "gear", params: { item: { type: "ref", ref: "item", claim: "held" } }, requires: ["carries(self, item) or (on_grid(item) and reach(self, item))", "may_use(self, item)"], outcomes: { default: [{ type: "gear.use", args: { item: "item", user: "self" } }] }, duration: "5", lexicon: ["use", "apply"], observable: "uses something" });

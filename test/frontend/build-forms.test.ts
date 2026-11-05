@@ -75,7 +75,8 @@ describe("Build travel times", () => {
   test("the form takes no speed lint refuses: never 0, and its least speed lints clean", () => {
     const reg = createRegistry(ALL_PACKS);
     const fields = speedFields();
-    expect(fields.length).toBe(5);
+    // A speed for each of the five modes (walk, road, off-road, water and the air) and a vehicle's own.
+    expect(fields.length).toBe(6);
     for (const { path, field } of fields) {
       expect([path, numberProblem("0", field) !== null]).toEqual([path, true]);
       const least = field.min ?? 0;

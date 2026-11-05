@@ -11,6 +11,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "preact/hooks";
 import type { Cell } from "../../../shared/grid";
 import type { MapDisplay } from "../../../shared/world";
+import { PLACE_MARK_LABEL, PLACE_MARKS } from "../../../shared/maps";
 import { pushSheet, useApp } from "../../../frontend/app";
 import { Empty, IconButton, JsonView, List, ListRow, Section, Seg, useBusy } from "../../../frontend/components";
 import { formatMinutes } from "../../../frontend/format";
@@ -23,7 +24,7 @@ import { useSelect } from "../../../frontend/store";
 import type { MapPlaceView, MapScopeView, MapView } from "../core/view";
 import { useThemeVersion } from "./canvas-theme";
 import { labelAt, labelPadding, type PlacedLabel } from "./labels";
-import { drawScope, placePoint, scopeBounds, unitOf } from "./map-draw";
+import { drawScope, MARK_ICON, placePoint, scopeBounds, unitOf } from "./map-draw";
 import { mapFocus, MODE_ICON, PlaceDetail, placeStatus } from "./place";
 import { decodeMapView } from "./view";
 
@@ -337,6 +338,8 @@ function MapCanvas(props: { view: MapView; chatId: string }) {
     root.current?.closest<HTMLElement>("[data-lre-overlay]")?.focus({ preventScroll: true });
   };
   const cellTitle = things.length > 0 ? things.map((t) => t.name).join(", ") : "This spot";
+  // The marks this scope's places carry, in the legend's order: one row each.
+  const marks = PLACE_MARKS.filter((m) => scope.places.some((p) => p.mark === m));
   return (
     <div ref={root} class={overlay ? "lre-map lre-world-map in-overlay" : "lre-map lre-world-map"} data-lre-map data-lre-map-scope={scope.id ?? ""} data-lre-map-display={display}>
       <MapStage
@@ -390,6 +393,16 @@ function MapCanvas(props: { view: MapView; chatId: string }) {
       {!listing && dockedPlace === null && cell === null ? (
         <div class="lre-world-mode">
           <Seg<MapDisplay> label="The map shows" value={display} options={DISPLAYS} disabled={busy} onChange={(next) => run(() => app.request({ type: "lre.map", chatId: props.chatId, display: next }))} />
+          {marks.length > 0 ? (
+            <ul class="lre-world-legend" aria-label="Marks" data-lre-map-legend>
+              {marks.map((mark) => (
+                <li key={mark}>
+                  <Icon name={MARK_ICON[mark]} size={14} />
+                  {PLACE_MARK_LABEL[mark]}
+                </li>
+              ))}
+            </ul>
+          ) : null}
         </div>
       ) : null}
       {cell ? (

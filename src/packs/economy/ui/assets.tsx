@@ -20,7 +20,7 @@ import type { HubControls, SectionProps, SegmentProps } from "./hub";
 import { endableLeases, holdingControls, investmentBlocks, knownPeople, mortgageTermChoices, moveSources, overviewBlocks, propertyControls, ROUTE_ELSEWHERE, routePick, stakesOf, transferTargets, type HoldingControl, type PropertyControl } from "./layout";
 import { FieldsPage } from "./lines";
 import { actionPage, Controls, detailPage, Hero, MoneyPage, Note, type HubNav, type HubPage, type HubPages } from "./nav";
-import { amountOf, exerciseAction, leaseEndAction, leaseStartAction, newIdFor, propertyBuyAction, propertySellAction, propertySpawnOps, routeAction, routeOps, setPriceOps, tradeAction, type RouteTarget, type TradeForm } from "./requests";
+import { amountOf, exerciseAction, leaseEndAction, leaseStartAction, newIdFor, propertyBuyAction, propertyMakeOps, propertySellAction, propertySpawnOps, routeAction, routeOps, setPriceOps, tradeAction, type RouteTarget, type TradeForm } from "./requests";
 
 /** A gain or a loss with its sign: "+$12.00", "-$3.50". */
 function signed(cents: number, currency: WorldCurrency): string {
@@ -462,19 +462,28 @@ export function AssetsSegment(props: SegmentProps) {
   );
 }
 
-/** The GM's new property for the party: its name and value, the party its whole owner, one edit. */
+/**
+ * The GM's new property for the party: its name and value, the party its whole owner, one edit. At
+ * a place (one no property stands at yet) it is that place made a property (`economy.property_make`),
+ * its name the place's unless another is given; at none, a property of its own.
+ */
 function NewPropertyPage(props: SectionProps) {
   const { view, controls, nav } = props;
   const [name, setName] = useState("");
   const [value, setValue] = useState("");
+  const [place, setPlace] = useState("");
   if (controls.mode !== "gm") return null;
   const cents = amountOf(value, controls.currency);
-  const problem = name.trim() === "" ? "Give it a name." : amountProblem(value, controls.currency, "its value");
+  const taken = new Set(controls.gm.entities.flatMap((e) => (e.kind === "property" && !e.gone && e.place !== null ? [e.place] : [])));
+  const places = controls.gm.places.filter((p) => !taken.has(p.id) || p.id === place).sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
+  const at = places.find((p) => p.id === place) ?? null;
+  const problem = name.trim() === "" && at === null ? "Give it a name, or pick the place it is." : amountProblem(value, controls.currency, "its value");
   return (
-    <ActionPage nav={nav} controls={controls} name="property-new" title="Add a property" subtitle={view.name} go="Add the property" problem={problem} submit={() => (problem !== null || cents === null ? Promise.resolve(false) : controls.edit(propertySpawnOps(newIdFor("prop", name, new Set(controls.gm.entities.map((e) => e.id))), name.trim(), view.party, cents)))}>
-      <TextField label="Name" value={name} onInput={setName} placeholder="The lake cabin" />
+    <ActionPage nav={nav} controls={controls} name="property-new" title="Add a property" subtitle={view.name} go="Add the property" problem={problem} submit={() => (problem !== null || cents === null ? Promise.resolve(false) : controls.edit(at !== null ? propertyMakeOps(at.id, { name, value: cents, owner: view.party }) : propertySpawnOps(newIdFor("prop", name, new Set(controls.gm.entities.map((e) => e.id))), name.trim(), view.party, cents)))}>
+      <SelectField label="At" value={place} empty="No place" options={places.map((p) => ({ value: p.id, label: p.name }))} onChange={setPlace} />
+      <TextField label={at !== null ? "Name (empty: the place's)" : "Name"} value={name} onInput={setName} placeholder={at?.name ?? "The lake cabin"} />
       <AmountField label="Value" value={value} currency={controls.currency} onInput={setValue} invalid={value.trim() !== "" && cents === null} />
-      <Note>{`${view.name} owns it whole.`}</Note>
+      <Note>{at !== null ? `${at.name} becomes a property, and ${view.name} owns it whole.` : `${view.name} owns it whole.`}</Note>
     </ActionPage>
   );
 }
@@ -597,6 +606,8 @@ function BuyPropertyPage(props: SectionProps & { property: PropertyView }) {
   // A purchase gets the usual term unless another is chosen.
   const [term, setTerm] = useState(String((p.mortgageTerms?.find((t) => t.usual) ?? p.mortgageTerms?.[0])?.months ?? ""));
   const [from, setFrom] = useState("");
+  // Moving in is the buyer's to say: off unless ticked.
+  const [live, setLive] = useState(false);
   if (controls.mode !== "player") return null;
   const cents = amountOf(price, controls.currency);
   const downCents = down.trim() === "" ? null : amountOf(down, controls.currency);
@@ -604,13 +615,14 @@ function BuyPropertyPage(props: SectionProps & { property: PropertyView }) {
   // Only what isn't paid down is a mortgage, and only a mortgage has a term.
   const financed = cents !== null && downCents !== null && downCents < cents;
   const terms = mortgageTermChoices(p);
-  const body = problem !== null || cents === null ? null : propertyBuyAction(p.id, cents, { ...(from ? { from } : {}), ...(downCents !== null ? { down: downCents } : {}), ...(financed && term !== "" ? { termMonths: Number(term) } : {}) });
+  const body = problem !== null || cents === null ? null : propertyBuyAction(p.id, cents, { ...(from ? { from } : {}), ...(downCents !== null ? { down: downCents } : {}), ...(financed && term !== "" ? { termMonths: Number(term) } : {}), ...(live ? { live: true } : {}) });
   return (
     <ActionPage nav={nav} controls={controls} name="property-buy" title="Buy" subtitle={p.name} go="Buy" problem={problem} action={body} submit={(tell) => (body === null ? Promise.resolve(false) : controls.act(body, tell))}>
       <AmountField label="Offer" value={price} currency={controls.currency} onInput={setPrice} invalid={cents === null} />
       <AmountField label="Down payment (empty: pay it all)" value={down} currency={controls.currency} onInput={setDown} invalid={down.trim() !== "" && downCents === null} />
       {financed && terms.length > 0 ? <ChoiceField label="Mortgage over" value={term} options={terms} onChange={setTerm} /> : null}
       <SelectField label="Paid from" value={from} empty="Your usual account" options={moveSources(view).map((a) => ({ value: a.id, label: a.name }))} onChange={setFrom} />
+      <ToggleField label="Live there" help={p.place ? `${p.place} is your home from today.` : "It is your home from today."} checked={live} onChange={setLive} />
     </ActionPage>
   );
 }

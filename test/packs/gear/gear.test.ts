@@ -99,6 +99,22 @@ describe("gear: containment, slots and use grants", () => {
     expect(buildGearView(w.ctx).on.filter((i) => i.as === "worn").map((i) => i.id)).toEqual(["coat"]);
   });
 
+  test("Change into a saved outfit swaps what holds a slot, where the palette's Wear is refused (DESIGN §28.16)", () => {
+    const w = setup((wd) => {
+      wd.entities.parka = { id: "parka", kind: "item", name: "Parka", tier: "background", fields: { owner: "you", slot: "torso_outer" }, relations: [{ type: "in", to: "you" }, { type: "worn_by", to: "you", fields: { slot: "torso_outer" } }] };
+      wd.entities.coat = { id: "coat", kind: "item", name: "Coat", tier: "background", fields: { owner: "you", slot: "torso_outer" }, relations: [{ type: "in", to: "you" }] };
+    });
+    const act = (action: string, params: Record<string, string>) => resolveAction(reg, w, { action, params }, createRng(`${action}:${JSON.stringify(params)}`));
+    const worn = (id: string): boolean => w.state.entities[id]?.relations.some((r) => r.type === "worn_by") === true;
+    expect(act("set_save", { name: "Snow day", kind: "outfit" }).rejected).toEqual([]);
+    expect(act("remove", { item: "parka" }).rejected).toEqual([]);
+    expect(act("wear", { item: "coat" }).rejected).toEqual([]);
+    expect(act("wear", { item: "parka" }).rejected[0]?.rejection.code).toBe("slot_taken");
+    expect(act("set_apply", { set: "set_snow_day" }).rejected).toEqual([]);
+    expect([worn("parka"), worn("coat"), w.state.entities.coat?.relations]).toEqual([true, false, [{ type: "in", to: "you" }]]);
+    expect(buildGearView(w.ctx).sets.map((s) => [s.name, s.on === true])).toEqual([["Snow day", true]]);
+  });
+
   test("a use grant expires to overdue (with a signal) and the owner's retrieval brings it back", () => {
     const w = setup((wd) => {
       wd.entities.you!.fields.place = "garage";

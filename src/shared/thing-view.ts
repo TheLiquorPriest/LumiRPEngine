@@ -169,13 +169,17 @@ export interface PersonThings {
   wardrobe: WardrobeRows[];
 }
 
-/** A catalog type as Add a thing offers it: its row, its name and category, and the size it gives. */
+/** A catalog type as Add a thing offers it: its row, its name and category, the size it gives, and its typical price where its row has one (minor units). */
 export interface ThingType {
   id: string;
-  table: "gear.items" | "gear.containers" | "economy.catalog";
+  table: "gear.items" | "gear.containers" | "economy.catalog" | "gear.kits";
   name: string;
+  /** Its category as the catalogs name it ("Clothing, basics through outerwear"); null for none. */
   category: string | null;
+  /** Its category's id (its own, else its row's), which says its kind: clothing, weapon, armor, ammo…; null for none. */
+  categoryId: string | null;
   size: SizeClass;
+  priceCents?: number;
 }
 
 // ---------------------------------------------------------------- words

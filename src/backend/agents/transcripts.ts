@@ -1,7 +1,8 @@
 // An agent's transcript as Diagnostics keeps it (AGENT-LOOP-PLAN §3.5): one agent record per call its
 // send made (a call the connection refused for its native tools among them), and one for a stop short
-// of an answer, each with what that call was sent and answered as a blob only Diagnostics points to.
-// The GM assistant's sends, the main agent's stages and the roles' tasks record so.
+// of an answer, each with what that call was sent and answered as a blob only Diagnostics points to,
+// and each answer with the tools it was offered and what they weighed (`offered`). The GM assistant's
+// sends, the main agent's stages and the roles' tasks record so.
 
 import type { DiagAgentOutcome, DiagPhase } from "../../shared/diagnostics";
 import type { DiagAt, Diagnostics } from "../diagnostics";
@@ -50,7 +51,7 @@ export async function recordAgentCalls(diag: Pick<Diagnostics, "agentCall">, inp
     if (e.kind === "answer") {
       model = e.model || model;
       const { estimated, ...counts } = e.usage;
-      await diag.agentCall(at, phase, { role, connection, model: e.model, usage: { ...counts, ...(estimated.length > 0 ? { estimated: [...estimated] } : {}) }, ms: e.ms, outcome: "ok", ...(e.calls.length > 0 ? { tools: e.calls.map((c) => c.name) } : {}) }, texts[n++]);
+      await diag.agentCall(at, phase, { role, connection, model: e.model, usage: { ...counts, ...(estimated.length > 0 ? { estimated: [...estimated] } : {}) }, ms: e.ms, outcome: "ok", ...(e.calls.length > 0 ? { tools: e.calls.map((c) => c.name) } : {}), ...(e.offered ? { offered: { ...e.offered } } : {}) }, texts[n++]);
     } else if (e.kind === "tools_refused") {
       await diag.agentCall(at, phase, { role, connection, model, usage: null, ms: e.ms, outcome: "refused", error: e.reason }, texts[n++]);
     } else if (e.kind === "stop") {

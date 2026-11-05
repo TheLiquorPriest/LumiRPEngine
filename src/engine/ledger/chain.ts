@@ -25,6 +25,12 @@ export interface FoldInput {
   /** The chat's stored fold snapshots: a cold fold starts from the furthest one on its chain. The reference fold ignores them. */
   snapshots?: SnapshotStore;
   /**
+   * The output's state may be the cache's own (a kept step's, a snapshot's) rather than a copy of
+   * it, for a reader that only reads it (the GM view's parts, `LedgerCore.readState`): nothing may
+   * change it. Absent, the output's state is always the fold's own.
+   */
+  share?: boolean;
+  /**
    * A GM edit or ✎ fix worked out again from what it asked for (`PostEntry.edit`) against the state
    * it folds after (the chat's `LedgerEnv.resolveFix`): on a rebased view it folds as that, not as
    * stored (DESIGN §7, P2). Null for an entry that keeps nothing to work out.

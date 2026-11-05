@@ -37,8 +37,8 @@ import { registerWind } from "./wind";
 
 declare module "../../../engine/registry" {
   interface QueryMap {
-    /** Every organization for the GM view (`core.gm`, GM → Orgs): its page as the GM sees it, and who holds each power there and why. */
-    "orgs.gm": (ctx: ReadContext) => OrgGmView[];
+    /** Every organization for the GM view (`core.gm`, GM → Orgs): its page as the GM sees it, and who holds each power there and why; with `only`, those it names, each built alone. */
+    "orgs.gm": (ctx: ReadContext, only?: readonly string[]) => OrgGmView[];
   }
   interface ServiceMap {
     /** What an act for an organization records beside its effects, in their unit: a payment counted toward its payer's month (`orgs.spent`), and its History line (`orgs.log`). */
@@ -77,7 +77,7 @@ export const orgsPack: PackDef = {
     r.effect({ type: "orgs.note", args: ["org", "text", "by?", "names?"], gm: true, resolve: (a, ctx) => (strOf(a.org) !== "" && strOf(a.text) !== "" ? [orgLog(ctx, strOf(a.org), strOf(a.text), { ...(strOf(a.by) !== "" ? { by: strOf(a.by) } : {}), names: Array.isArray(a.names) ? a.names.filter((n): n is string => typeof n === "string" && n !== "") : [] })] : { code: "bad_args", reason: "a History line needs an organization and its words" }) });
     r.view({ panel: ORGS_LIST_PANEL, build: (ctx) => buildOrgList(ctx) as unknown as JsonValue });
     r.view({ panel: ORGS_ORG_PANEL, build: (ctx) => buildOrgPages(ctx) as unknown as JsonValue });
-    r.query("orgs.gm", (ctx) => buildOrgsGm(ctx));
+    r.query("orgs.gm", (ctx, only) => buildOrgsGm(ctx, only));
     registerOrgActions(r);
     registerParty(r);
     registerFound(r);

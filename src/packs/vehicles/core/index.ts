@@ -15,6 +15,9 @@ import type { JsonObject, JsonValue } from "../../../shared/json";
 import type { EntityId, PlaceId, TravelMode } from "../../../shared/ids";
 import type { LedgerEvent } from "../../../shared/ledger";
 import type { DataTable, ShippedRevision, TableRow } from "../../../shared/tables";
+import { ownersIn } from "../../../shared/finance";
+import { hashParts } from "../../../shared/hash";
+import { matchVehicleClass, saysNew, shortClassName, USED_VEHICLE_AGE_YEARS, vehicleDomainOf, vehicleNameFrom, vehiclesConfigOf, type VehicleDomain, type VehiclePrice, type VehicleSpawn } from "../../../shared/vehicles";
 import type { KindDef } from "../../../shared/world";
 import { ENGINE_EVENTS } from "../../../engine/engine-pack";
 import { bump, labelOf, numOf, objOf, optionalQuery, optionalService, own, rowOf, strOf } from "../../../engine/pack-kit";
@@ -24,11 +27,12 @@ import { fieldDef, isGone, kindIs, placeOfEntity } from "../../../engine/scope";
 import { partyAt, relocate } from "../../../engine/relocate";
 import { ownsThrough } from "../../../engine/org";
 import { passMemo } from "../../../engine/read-pass";
-import { calendarOf, formatClock } from "../../../engine/calendar";
+import { calendarOf, dateAt, formatClock } from "../../../engine/calendar";
 import { sentence, thingDescription, thingDetails, thingName } from "../../../engine/thing-words";
 import { canSeeEntity, canSeeField, canSeePlace, knows } from "../../../engine/visibility";
 import { fieldNoun } from "../../../shared/words";
 import { accessOf, owns } from "../../../engine/access";
+import { useTier, vehiclesFor } from "./access";
 import { siteOf, together } from "../../../engine/presence";
 import type { FeedLine } from "../../../engine/registry";
 import type { FeedScope } from "../../../shared/world";
@@ -68,6 +72,8 @@ declare module "../../../engine/registry" {
   interface ServiceMap {
     /** Fuel, odometer or engine hours, and (level 4, with an rng) breakdowns for one trip. */
     "vehicle.consume": (ctx: ReadContext, vehicle: EntityId, leg: Leg, rng?: Rng) => LedgerEvent[];
+    /** A vehicle of a class made in play (a purchase, a make): its fields from the class and the details, where it stands, whose it is and its home base. */
+    "vehicles.spawn": (ctx: ReadContext, spec: VehicleSpawn) => { entity: EntityId; events: LedgerEvent[] } | Rejection;
   }
   interface QueryMap {
     /** Whether the vehicle has fuel for the trip (always true below Vehicles level 2). */
@@ -76,8 +82,16 @@ declare module "../../../engine/registry" {
     "vehicles.travel_options": (ctx: ReadContext, from: PlaceId) => TravelOption[];
     /** Each insured vehicle's monthly premium, its owner and its name: the economy pays it as a flow linked to the vehicle. */
     "vehicles.insurance": (ctx: ReadContext) => { vehicle: EntityId; owner: EntityId; cents: number; label: string }[];
+    /** Each registered vehicle's yearly fee, its owner, its name and the month it renews, where the world registers vehicles (Vehicles 4, `packs.vehicles.config.registration`). */
+    "vehicles.registration": (ctx: ReadContext) => { vehicle: EntityId; owner: EntityId; cents: number; label: string; month: number }[];
     /** What each vehicle is worth: its own `value`, else its class's typical used price; the economy counts it in its owners' net worth. */
     "vehicles.values": (ctx: ReadContext) => { vehicle: EntityId; cents: number }[];
+    /** The vehicles `who` may drive (the one reader, `vehiclesFor`): owned, a household's or company's, staff's, granted or permitted. */
+    "vehicles.for": (ctx: ReadContext, who: EntityId) => EntityId[];
+    /** The class words buy (or `cls`, a class row given) and its price (`economy.buy`'s quote, after the catalog): used unless they say new. Null when they name no class. */
+    "vehicles.priced": (ctx: ReadContext, words: string, place: PlaceId | null, cls?: string) => VehiclePrice | null;
+    /** The class a purchase's main noun phrase names as what it buys (`economy.buy`'s quote, `economy.unpriced`): one whose name ends it, the longest ("flatbed truck", "jet ski", "Cessna 172"). Null when none does ("plane ticket", "car insurance"). */
+    "vehicles.named": (ctx: ReadContext, noun: string) => string | null;
   }
 }
 
@@ -145,7 +159,8 @@ export function vehicleLines(ctx: ReadContext, scope: FeedScope): FeedLine[] {
   if (level === 0) return [];
   const see = (who: EntityId, id: EntityId): boolean => canSeeEntity(ctx.registry, ctx.world, ctx.state, who, id);
   const cal = calendarOf(ctx.world);
-  const grants = new Map((own(ctx.state.entities, pov)?.relations ?? []).filter((r) => r.type === "uses").map((r) => [r.to, r]));
+  // What he may drive, and what it rests on (the one reader): his own from level 1, his household's or company's from 2, what is assigned, lent or permitted from 3.
+  const uses = new Map(vehiclesFor(ctx, pov).map((u) => [u.id, u]));
   const here = placeOfEntity(ctx.state, pov);
   const site = siteOf(ctx.world, here);
   const ownerName = (owner: EntityId): string => (see(pov, owner) ? (own(ctx.state.entities, owner)?.name ?? "someone") : "someone");
@@ -175,16 +190,17 @@ export function vehicleLines(ctx: ReadContext, scope: FeedScope): FeedLine[] {
   for (const v of Object.keys(ctx.state.entities).sort()) {
     const e = own(ctx.state.entities, v);
     if (!e || !kindIs(ctx.registry, ctx.world, e.kind, "vehicle") || isGone(ctx.state, v)) continue;
-    const owner = accessOf(ctx.state, v).owners[0]?.party ?? null;
-    const grant = grants.get(v);
+    const stated = accessOf(ctx.state, v).owners[0]?.party ?? null;
+    const u = uses.get(v);
+    const owner = u?.owner ?? stated;
     const place = placeOfEntity(ctx.state, v);
-    const whose = owner === pov ? "yours" : level >= 2 && owner !== null && ownsThrough(ctx, pov, owner) ? `${ownerName(owner)}'s` : level >= 3 && grant ? `${owner ? `${ownerName(owner)}'s, ` : ""}${grant.until !== undefined ? `lent to you until ${formatClock(cal, grant.until)}` : "assigned to you"}` : null;
-    if (whose === null) {
+    const whose = !u || useTier(u.use) > level ? null : u.mine ? "yours" : u.use.basis === "grant" ? `${owner ? `${ownerName(owner)}'s, ` : ""}${u.use.until !== undefined ? `lent to you until ${formatClock(cal, u.use.until)}` : "assigned to you"}` : `${owner ? ownerName(owner) : "someone"}'s${u.use.basis === "staff" ? ", yours to use at work" : u.use.basis === "permit" ? ", yours to use" : ""}`;
+    if (whose === null || !u) {
       // Someone else's: told when it is at his site.
-      if (site !== null && siteOf(ctx.world, place) === site) others.push({ v, owner, place });
+      if (site !== null && siteOf(ctx.world, place) === site) others.push({ v, owner: stated, place });
       continue;
     }
-    if (owner !== pov && !see(pov, v)) continue;
+    if (!u.mine && !see(pov, v)) continue;
     const elsewhere = site !== null && siteOf(ctx.world, place) !== site;
     // The narrator hears where it is as the player may: a place the POV can't see is somewhere.
     const head = [placeText(place), ...(level === 1 ? [] : [whose]), ...(elsewhere ? ["away from here"] : [])];
@@ -242,16 +258,16 @@ export function vehicleLines(ctx: ReadContext, scope: FeedScope): FeedLine[] {
   return lines;
 }
 
-/** The class domain: road, marine or offroad. */
-function domainOf(ctx: Pick<ReadContext, "tables" | "state">, vehicle: EntityId): "road" | "marine" | "offroad" {
-  const d = strOf(classRow(ctx, vehicle)?.domain, strOf(own(ctx.state.entities, vehicle)?.fields.domain, "road"));
-  return d === "marine" || d === "offroad" ? d : "road";
+/** The class domain: road, marine, offroad or air. */
+function domainOf(ctx: Pick<ReadContext, "tables" | "state">, vehicle: EntityId): VehicleDomain {
+  const row = classRow(ctx, vehicle);
+  return row ? vehicleDomainOf(row) : vehicleDomainOf({ domain: strOf(own(ctx.state.entities, vehicle)?.fields.domain, "road") });
 }
 
-/** The travel modes a vehicle can use. */
+/** The travel modes a vehicle can use: an aircraft flies only over the routes the world authors for the air. */
 export function modesOf(ctx: Pick<ReadContext, "tables" | "state">, vehicle: EntityId): TravelMode[] {
   const d = domainOf(ctx, vehicle);
-  return d === "marine" ? ["water"] : d === "offroad" ? ["offroad", "road"] : ["road"];
+  return d === "marine" ? ["water"] : d === "air" ? ["air"] : d === "offroad" ? ["offroad", "road"] : ["road"];
 }
 
 function factor(ctx: ReadContext, guide: string, key: string): number {
@@ -284,13 +300,13 @@ export function fuelUse(ctx: ReadContext, vehicle: EntityId, leg: Leg): FuelUse 
   const e = own(ctx.state.entities, vehicle);
   const miles = leg.distanceKm * KM_TO_MI;
   const hours = leg.minutes / 60;
-  if (!row || !e) return { pct: 0, miles, hours };
+  if (!row || !e || strOf(row.fuel_type) === "none") return { pct: 0, miles, hours };
   const guide = strOf(row.factor_guide, domainOf(ctx, vehicle));
-  const level = ctx.levelOf(e.fields.owner && typeof e.fields.owner === "string" ? e.fields.owner : ctx.world.pov, "vehicles");
+  const level = ownerLevel(ctx, vehicle);
   let mult = level >= 4 ? terrainFactor(ctx, guide, leg.terrain) : 1;
   const payload = numOf(row.payload_kg);
   const cargoKg = Object.values(ctx.state.entities).filter((x) => x.relations.some((r) => r.type === "in" && r.to === vehicle)).reduce((a, x) => a + numOf(x.fields.weight_g) / 1000, 0);
-  if (level >= 4 && payload > 0 && cargoKg > payload / 2) mult *= guide === "road" ? factor(ctx, "road", "loaded_to_payload") : guide === "marine" ? factor(ctx, "marine", "heavy_load_full_crew") : factor(ctx, "offroad", "two_up_or_loaded_cargo");
+  if (level >= 4 && payload > 0 && cargoKg > payload / 2) mult *= guide === "road" ? factor(ctx, "road", "loaded_to_payload") : guide === "marine" ? factor(ctx, "marine", "heavy_load_full_crew") : guide === "air" ? factor(ctx, "air", "max_gross_weight") : factor(ctx, "offroad", "two_up_or_loaded_cargo");
   const consumption = objOf(row.consumption);
   const unit = strOf(row.consumption_unit);
   if (unit === "mpg" || unit === "mi_per_kwh") {
@@ -299,14 +315,15 @@ export function fuelUse(ctx: ReadContext, vehicle: EntityId, leg: Leg): FuelUse 
     const capacity = unit === "mpg" ? numOf(row.tank_capacity_gal, 15) : numOf(row.usable_battery_kwh, 60);
     return { pct: (used / capacity) * 100, miles, hours };
   }
-  const perHour = guide === "marine" ? numOf(consumption.cruise_planing, 5) : numOf(consumption.normal_trail, 1.5);
+  const perHour = guide === "marine" ? numOf(consumption.cruise_planing, 5) : guide === "air" ? numOf(consumption.cruise, 9) : numOf(consumption.normal_trail, 1.5);
   const capacity = numOf(row.tank_capacity_gal, 10);
   return { pct: ((perHour * hours * mult) / capacity) * 100, miles, hours };
 }
 
+/** The realism level a vehicle runs at: its first owner's (an `owner`, or the first of an `owners` list), else the POV's. */
 function ownerLevel(ctx: ReadContext, vehicle: EntityId): number {
-  const owner = own(ctx.state.entities, vehicle)?.fields.owner;
-  return ctx.levelOf(typeof owner === "string" && own(ctx.state.entities, owner) ? owner : ctx.world.pov, "vehicles");
+  const owner = ownersIn(own(ctx.state.entities, vehicle)?.fields ?? {})[0]?.party;
+  return ctx.levelOf(owner !== undefined && own(ctx.state.entities, owner) ? owner : ctx.world.pov, "vehicles");
 }
 
 /** Maintenance interval in miles (road) or hours (marine, off-road), or null. */
@@ -397,12 +414,82 @@ export function rangeLeft(ctx: ReadContext, vehicle: EntityId): { value: number;
   return { value: Math.round((fuel / probe.pct) * (road ? 100 : 1) * 10) / 10, unit: road ? "mi" : "h" };
 }
 
-function fuelProduct(ctx: Pick<ReadContext, "tables" | "state">, vehicle: EntityId): { catalog: string; unit: "gal" | "kWh"; capacity: number } {
+/** What fills a vehicle's tank: a price catalog row, else (aviation gasoline) its class's own price a gallon. */
+function fuelProduct(ctx: Pick<ReadContext, "tables" | "state">, vehicle: EntityId): { catalog: string | null; perUnit: number; unit: "gal" | "kWh"; capacity: number } {
   const row = classRow(ctx, vehicle);
   const type = strOf(row?.fuel_type, "gasoline");
-  if (type === "electricity") return { catalog: "ev_public_l2_kwh", unit: "kWh", capacity: numOf(row?.usable_battery_kwh, 60) };
+  if (type === "electricity") return { catalog: "ev_public_l2_kwh", perUnit: 0, unit: "kWh", capacity: numOf(row?.usable_battery_kwh, 60) };
+  if (type === "avgas") return { catalog: null, perUnit: numOf(objOf(row?.fuel_cents_per_gal).typical, 700), unit: "gal", capacity: numOf(row?.tank_capacity_gal, 50) };
   const marine = domainOf(ctx, vehicle) === "marine";
-  return { catalog: type === "diesel" ? (marine ? "marine_diesel" : "diesel") : marine ? "marine_gasoline" : "gasoline_regular", unit: "gal", capacity: numOf(row?.tank_capacity_gal, 15) };
+  return { catalog: type === "diesel" ? (marine ? "marine_diesel" : "diesel") : marine ? "marine_gasoline" : "gasoline_regular", perUnit: 0, unit: "gal", capacity: numOf(row?.tank_capacity_gal, 15) };
+}
+
+/** A plate as a state's DMV issues one ("7KDX219"), the same for the same vehicle id. */
+function plateFor(id: string): string {
+  const h = hashParts("plate", id);
+  const letters = [0, 2, 4].map((i) => String.fromCharCode(65 + (parseInt(h.slice(i, i + 2), 16) % 26))).join("");
+  return `${parseInt(h.slice(6, 7), 16) % 9 + 1}${letters}${(parseInt(h.slice(8, 12), 16) % 1000).toString().padStart(3, "0")}`;
+}
+
+/**
+ * A vehicle of a class made in play (DESIGN §9.3; a purchase's or a make's, ITEMS-SPEC §5.3): named
+ * by the spec, else its make and model, else the class; its make, model and year from the details,
+ * else the class's and (used) four years back; new, no miles and full condition and tank, used the
+ * miles or hours four years give and condition 80 with half a tank (what burns nothing has no tank);
+ * a road vehicle plated; owned as given; standing where given (or in a holder); home where given,
+ * else at its owner's home, else where it stands.
+ */
+function spawnVehicle(ctx: ReadContext, spec: VehicleSpawn): { entity: EntityId; events: LedgerEvent[] } | Rejection {
+  const row = rowOf(ctx, "vehicles.classes", spec.class);
+  if (!row) {
+    const some = Object.keys(ctx.tables.get("vehicles.classes")?.rows ?? {}).slice(0, 8);
+    return reject("unknown_class", `no vehicle class ${spec.class}${some.length > 0 ? `; classes include ${some.join(", ")}` : ""}`);
+  }
+  const d = spec.details ?? {};
+  const domain = vehicleDomainOf(row);
+  const used = spec.new !== true;
+  const year = dateAt(calendarOf(ctx.world), ctx.state.clock).year;
+  const make = typeof d.make === "string" && d.make.trim() !== "" ? d.make.trim() : strOf(row.make);
+  const model = typeof d.model === "string" && d.model.trim() !== "" ? d.model.trim() : strOf(row.model);
+  const name = spec.name?.trim() || (make !== "" && model !== "" ? `${make} ${model}` : shortClassName(strOf(row.name, spec.class)));
+  const holder = spec.holder && own(ctx.state.entities, spec.holder) ? spec.holder : null;
+  const place = holder ? null : (spec.place ?? null);
+  // Its id is its salt's, as a made thing's (`madeId`): the same make or purchase checked again after the read's changes and the time they took, or applied from its review card, makes the same vehicle, so the changes that name it still find it.
+  let id = `vehicle:${hashParts("vehicle", spec.class, name, spec.owner ?? "", spec.salt ?? "").slice(0, 12)}`;
+  for (let n = 2; own(ctx.state.entities, id); n++) id = `vehicle:${hashParts("vehicle", spec.class, name, spec.owner ?? "", spec.salt ?? "", String(n)).slice(0, 12)}`;
+  const ownerHome = spec.owner ? own(ctx.state.entities, spec.owner)?.fields.home : undefined;
+  const home = spec.home ?? (typeof ownerHome === "string" && own(ctx.world.places, ownerHome) ? ownerHome : place);
+  const burns = strOf(row.fuel_type) !== "none";
+  const fields: JsonObject = { class: spec.class, status: "ok" };
+  if (spec.owner) fields.owner = spec.owner;
+  if (make !== "") fields.make = make;
+  if (model !== "") fields.model = model;
+  fields.year = typeof d.year === "number" && Number.isFinite(d.year) ? Math.round(d.year) : used ? year - USED_VEHICLE_AGE_YEARS : year;
+  if (typeof d.colour === "string" && d.colour.trim() !== "") fields.colour = d.colour.trim();
+  if (typeof d.plate === "string" && d.plate.trim() !== "") fields.plate = d.plate.trim();
+  else if (domain === "road" && burns) fields.plate = plateFor(id);
+  if (domain === "road") fields.odometer_mi = typeof d.odometer_mi === "number" ? d.odometer_mi : used ? 12000 * USED_VEHICLE_AGE_YEARS : 10;
+  else if (burns) fields.engine_hours = typeof d.engine_hours === "number" ? d.engine_hours : used ? 60 * USED_VEHICLE_AGE_YEARS : 1;
+  fields.condition = typeof d.condition === "number" ? d.condition : used ? 80 : 100;
+  if (burns) fields.fuel_pct = typeof d.fuel_pct === "number" ? d.fuel_pct : used ? 50 : 100;
+  if (typeof d.value === "number" && d.value > 0) fields.value = Math.round(d.value);
+  if (home) fields.home = home;
+  if (place) fields.place = place;
+  Object.assign(fields, spec.fields ?? {});
+  return { entity: id, events: [{ type: "spawn", entity: { id, kind: "vehicle", name, tier: "background", fields, relations: holder ? [{ type: "in", to: holder }] : [] } }] };
+}
+
+/** What words buy (DESIGN §9.5): the class they name, used unless they say new, at the class's typical price of that kind. */
+function pricedVehicle(ctx: ReadContext, words: string, given?: string): VehiclePrice | null {
+  const table = ctx.tables.get("vehicles.classes");
+  const cls = given !== undefined && own(table?.rows ?? {}, given) ? given : matchVehicleClass(words, table);
+  const row = cls ? own(table?.rows ?? {}, cls) : undefined;
+  if (!cls || !row) return null;
+  const fresh = saysNew(words);
+  const raw = objOf(fresh ? row.price_new_cents : row.price_used_cents);
+  const band = { min: Math.round(numOf(raw.min)), typical: Math.round(numOf(raw.typical)), max: Math.round(numOf(raw.max)) };
+  if (!(band.typical > 0)) return null;
+  return { class: cls, name: vehicleNameFrom(words, strOf(row.name, cls)), new: fresh, band, cents: band.typical };
 }
 
 function reject(code: string, reason: string): Rejection {
@@ -443,13 +530,12 @@ export const vehiclesPack: PackDef = {
         .filter((to) => to !== from);
       const placeName = (p: PlaceId): string => own(ctx.world.places, p)?.name ?? p;
       const home = own(ctx.state.entities, pov)?.fields.home;
-      for (const v of Object.keys(ctx.state.entities).sort()) {
+      for (const v of vehiclesFor(ctx, pov).map((u) => u.id)) {
         const e = own(ctx.state.entities, v);
-        if (!e || !kindIs(ctx.registry, ctx.world, e.kind, "vehicle") || isGone(ctx.state, v)) continue;
-        const mine = e.fields.owner === pov || own(ctx.state.entities, pov)?.relations.some((x) => x.type === "uses" && x.to === v);
+        if (!e) continue;
         const at = placeOfEntity(ctx.state, v);
         // One parked elsewhere is offered where the player character may know it is: the row says where.
-        if (!mine || !at || (at !== from && !canSeePlace(ctx.registry, ctx.world, ctx.state, pov, at))) continue;
+        if (!at || (at !== from && !canSeePlace(ctx.registry, ctx.world, ctx.state, pov, at))) continue;
         const named = /^(your|my|the|a|an)\s/i.test(e.name) ? e.name.charAt(0).toLowerCase() + e.name.slice(1) : `the ${e.name}`;
         for (const [to, trip] of tripsFor(ctx, v, from, targets)) {
           // Left short of the place, a trip is worth offering only when it beats walking there.
@@ -458,13 +544,14 @@ export const vehiclesPack: PackDef = {
           const leg = legOf(trip);
           const why = e.fields.status === "broken" ? "broken down" : !fuelOk(ctx, v, leg) ? "not enough fuel" : undefined;
           const sail = trip.drive.mode === "water";
+          const fly = trip.drive.mode === "air";
           const parts: TravelPart[] = [];
           if (trip.fetch) parts.push({ kind: "fetch", minutes: trip.fetch.minutes, words: `to reach it ${at === home ? "at home" : `at ${placeName(at)}`}` });
           if (trip.startMinutes > 0) parts.push({ kind: "start", minutes: trip.startMinutes, words: "to get going" });
-          if (trip.drive.minutes > 0) parts.push({ kind: "drive", minutes: trip.drive.minutes, words: sail ? "sailing" : "driving" });
-          if (trip.parkMinutes > 0) parts.push({ kind: "park", minutes: trip.parkMinutes, words: sail ? "to tie up" : "to park" });
+          if (trip.drive.minutes > 0) parts.push({ kind: "drive", minutes: trip.drive.minutes, words: fly ? "flying" : sail ? "sailing" : "driving" });
+          if (trip.parkMinutes > 0) parts.push({ kind: "park", minutes: trip.parkMinutes, words: fly ? "to land and tie down" : sail ? "to tie up" : "to park" });
           if (trip.walk && trip.walk.minutes > 0) parts.push({ kind: "walk", minutes: trip.walk.minutes, words: `on foot from ${placeName(trip.park)}` });
-          out.push({ to, label: `${sail ? "Sail" : "Drive"} ${named} to ${placeName(to)}`, mode: trip.drive.mode, minutes: trip.minutes, parts, vehicle: e.name, action: "drive", params: { vehicle: v, to }, ...(why ? { disabled: why } : {}) });
+          out.push({ to, label: `${fly ? "Fly" : sail ? "Sail" : "Drive"} ${named} to ${placeName(to)}`, mode: trip.drive.mode, minutes: trip.minutes, parts, vehicle: e.name, action: "drive", params: { vehicle: v, to }, ...(why ? { disabled: why } : {}) });
         }
       }
       return out;
@@ -540,7 +627,7 @@ export const vehiclesPack: PackDef = {
         if (wanted <= 0) return reject("full", `${e.name} is full`);
         const product = fuelProduct(ctx, v);
         const qty = Math.round(((wanted / 100) * product.capacity) * 100) / 100;
-        const cents = priceOf(ctx, product.catalog, qty);
+        const cents = product.catalog !== null ? priceOf(ctx, product.catalog, qty) : Math.round(product.perUnit * qty);
         const paid = charge(ctx, payer, cents, `Fuel for ${e.name} (${qty} ${product.unit})`, "fuel");
         if (!Array.isArray(paid)) return paid;
         return [...paid, bump(ctx.state, v, "fuel_pct", wanted, fuel)];
@@ -570,7 +657,7 @@ export const vehiclesPack: PackDef = {
     r.action({
       id: "drive",
       label: "Drive",
-      description: "Drive, ride or sail a vehicle you own or may use to another place.",
+      description: "Drive, ride, sail or fly a vehicle you own or may use to another place.",
       pack: "vehicles",
       params: { vehicle: { type: "ref", ref: "vehicle" }, to: { type: "ref", ref: "place", label: "Destination" } },
       // A vehicle parked elsewhere is fetched on foot, within the world's travel tuning: the trip from here says whether it can go.
@@ -579,7 +666,7 @@ export const vehiclesPack: PackDef = {
       outcomes: { default: [{ type: "vehicles.drive", args: { vehicle: "vehicle", to: "=to", driver: "self" } }] },
       duration: "drive_minutes(vehicle, to, here)",
       activity: { type: "travel", until: "clock + drive_minutes(vehicle, to, here)" },
-      lexicon: ["drive to", "drive over to", "take the truck", "take the car", "sail to", "ride to"],
+      lexicon: ["drive to", "drive over to", "take the truck", "take the car", "sail to", "ride to", "fly to", "fly the plane to"],
       observable: "drives off",
     });
     r.action({ id: "refuel", label: "Refuel", description: "Fill up a vehicle's tank, or charge it.", pack: "vehicles", params: { vehicle: { type: "ref", ref: "vehicle" } }, requires: ["place(vehicle) == here", "fuel_pct(vehicle) < 100"], outcomes: { default: [{ type: "vehicles.refuel", args: { vehicle: "vehicle", payer: "self" } }] }, duration: "10", lexicon: ["refuel", "fill up", "gas up", "charge the car"], observable: "fills up the tank" });
@@ -611,13 +698,33 @@ export const vehiclesPack: PackDef = {
       const out: { vehicle: EntityId; owner: EntityId; cents: number; label: string }[] = [];
       for (const v of Object.keys(ctx.state.entities).sort()) {
         const e = own(ctx.state.entities, v);
-        const owner = typeof e?.fields.owner === "string" ? e.fields.owner : null;
+        // Its first owner pays: an `owner`, or the first of an `owners` list.
+        const owner = e ? (ownersIn(e.fields)[0]?.party ?? null) : null;
         if (!e || !owner || !own(ctx.state.entities, owner) || !kindIs(ctx.registry, ctx.world, e.kind, "vehicle") || ownerLevel(ctx, v) < 4) continue;
         const premium = Math.round(numOf(classRow(ctx, v)?.insurance_full_cents_per_month));
         if (premium > 0) out.push({ vehicle: v, owner, cents: premium, label: `Insurance: ${e.name}` });
       }
       return out;
     });
+    // Registration (DESIGN §25.5): each owned vehicle's class fee a year, which the economy pays as a
+    // flow linked to the vehicle, in a month of its own; only at Vehicles 4, and only where the
+    // world's vehicles config turns registration on.
+    r.query("vehicles.registration", (ctx) => {
+      const out: { vehicle: EntityId; owner: EntityId; cents: number; label: string; month: number }[] = [];
+      if (!vehiclesConfigOf(ctx.world).registration) return out;
+      for (const v of Object.keys(ctx.state.entities).sort()) {
+        const e = own(ctx.state.entities, v);
+        const owner = e ? (ownersIn(e.fields)[0]?.party ?? null) : null;
+        if (!e || !owner || !own(ctx.state.entities, owner) || !kindIs(ctx.registry, ctx.world, e.kind, "vehicle") || isGone(ctx.state, v) || ownerLevel(ctx, v) < 4) continue;
+        const fee = Math.round(numOf(objOf(classRow(ctx, v)?.registration_cents_per_year).typical));
+        if (fee > 0) out.push({ vehicle: v, owner, cents: fee, label: `Registration: ${e.name}`, month: (parseInt(hashParts("registration", v).slice(0, 4), 16) % 12) + 1 });
+      }
+      return out;
+    });
+    r.query("vehicles.for", (ctx, who) => vehiclesFor(ctx, who).map((u) => u.id));
+    r.query("vehicles.priced", (ctx, words, _place, cls) => pricedVehicle(ctx, words, cls));
+    r.query("vehicles.named", (ctx, noun) => matchVehicleClass(noun, ctx.tables.get("vehicles.classes"), { ending: true }));
+    r.service("vehicles.spawn", spawnVehicle);
     r.query("vehicles.values", (ctx) => {
       const out: { vehicle: EntityId; cents: number }[] = [];
       for (const v of Object.keys(ctx.state.entities).sort()) {

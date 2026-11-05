@@ -1070,6 +1070,19 @@ export class LedgerCore {
   }
 
   /**
+   * The state `renderState` gives, for a reader that only reads it (the GM view's parts, built once
+   * per head and shared, `backend/gm-memo.ts`): with no planned turn in flight and the chat started,
+   * the fold's own state, the one its cache keeps, never copied. Nothing may change it. Otherwise
+   * `renderState`'s, which is a copy of its own.
+   */
+  readState(observed: readonly ChainMessage[]): { state: Readonly<WorldState>; world: WorldDoc } | null {
+    if (this.plannedTurn() || !this.journal.started) return this.renderState(observed);
+    const out = this.folder.fold({ ...this.foldInput(observed), ...(this.env.snapshots ? { snapshots: this.env.snapshots } : {}), share: true });
+    const world = this.playedAt(out.state);
+    return world ? { state: out.state, world } : null;
+  }
+
+  /**
    * What `renderState` reads, as one key (DESIGN §9.6): equal keys give equal states, so what is made
    * from the state the narrator sees can be kept under it. The head fold's state key, with the
    * starting markers before the chat's first record; while a planned turn is in flight, its fold
@@ -1351,7 +1364,12 @@ export class LedgerCore {
     return true;
   }
 
-  private refuse(write: HeldWrite, reason: string, observed: readonly ChainMessage[]): void {
+  /**
+   * A write that can't be made at all, kept with its reason so the player's notice tells them rather
+   * than it vanishing: a held one as its window closes (`land`), or one the backend answered as queued
+   * that its own operation then refused.
+   */
+  refuse(write: HeldWrite, reason: string, observed: readonly ChainMessage[]): void {
     const head = this.chain(observed).findLast((m) => !m.isUser)?.id ?? null;
     this.journal.refused = [...(this.journal.refused ?? []), { write, reason, messageId: head }].slice(-REFUSED_KEPT);
   }

@@ -3,7 +3,9 @@
 // (ITEMS-SPEC §10.2, as GM → Things opens it), anything else its editor. While a fight is on, a
 // Fight card leads, opening the fight as the GM sees it (everyone named, HP exact). The things the
 // player claimed into being (DESIGN §9.4) get a section of their own, with who holds each, so a GM
-// can find one and remove it from its page. Spawn adds someone or something to this chat.
+// can find one and remove it from its page. Spawn adds someone or something to this chat. The list
+// reads the roster, every entity slim; a page reads its entity's full entry (and a character's
+// money), Change selected those of everyone picked, saying Loading… until they land.
 
 import { useEffect, useId, useState } from "preact/hooks";
 import type { EncounterView } from "../../packs/combat/ui/panel";
@@ -17,6 +19,7 @@ import { BatchPage } from "./batch";
 import type { BulkEditor, Editor } from "./editor";
 import { claimedThings, findEntities } from "./editor";
 import { EntityBadges, EntityPage } from "./entity";
+import { thinEntity } from "./parts";
 import { GmThingPage, isThingKind } from "./things";
 import { BuildLink, GmPage, useGmFocus, usePages } from "./ui";
 import { CharacterSheet } from "./character";
@@ -119,6 +122,13 @@ export function WorldSection(props: { editor: BulkEditor; chatId: string }) {
   useEffect(() => {
     if (page !== null && !open) pages.back();
   });
+  // An entity's page reads its full entry, a person's their money too, and Change selected the
+  // entries of everyone picked; the list has them slim.
+  const opened = entity?.id ?? null;
+  const person = entity?.person === true;
+  useEffect(() => (opened === null ? undefined : editor.need(person ? { entities: [opened], money: [opened] } : { entities: [opened] })), [opened, person]);
+  const batch = page === "batch" ? chosen.join("\u0000") : "";
+  useEffect(() => (batch === "" ? undefined : editor.need({ entities: batch.split("\u0000") })), [batch]);
   const list = findEntities(editor.gm.entities, query, kind);
   const kinds = editor.gm.kinds.filter((k) => editor.gm.entities.some((e) => e.kind === k.id));
   const claimed = claimedThings(editor.gm);
@@ -198,7 +208,11 @@ export function WorldSection(props: { editor: BulkEditor; chatId: string }) {
         </GmPage>
       ) : null}
       {entity ? (
-        entity.person ? (
+        thinEntity(entity) ? (
+          <GmPage name="loading" title={entity.name} backLabel="World" onBack={pages.back}>
+            <Empty icon="hourglass">Loading…</Empty>
+          </GmPage>
+        ) : entity.person ? (
           <CharacterSheet entity={entity} editor={editor} chatId={props.chatId} onBack={pages.back} onOpen={(id) => pages.open({ entity: id })} />
         ) : isThingKind(editor.gm.kinds, entity.kind) && !entity.gone ? (
           <GmThingPage key={entity.id} chatId={props.chatId} id={entity.id} editor={editor} backLabel="World" onBack={pages.back} onOpen={(id) => pages.open({ entity: id })} />
@@ -206,7 +220,15 @@ export function WorldSection(props: { editor: BulkEditor; chatId: string }) {
           <EntityPage entity={entity} editor={editor} onBack={pages.back} />
         )
       ) : null}
-      {page === "batch" && chosen.length > 0 ? <BatchPage editor={editor} ids={chosen} onBack={pages.back} /> : null}
+      {page === "batch" && chosen.length > 0 ? (
+        editor.gm.entities.some((e) => thinEntity(e) && chosen.includes(e.id)) ? (
+          <GmPage name="loading" title={chosen.length === 1 ? "Change 1 selected" : `Change ${chosen.length} selected`} backLabel="World" onBack={pages.back}>
+            <Empty icon="hourglass">Loading…</Empty>
+          </GmPage>
+        ) : (
+          <BatchPage editor={editor} ids={chosen} onBack={pages.back} />
+        )
+      ) : null}
     </div>
   );
 }

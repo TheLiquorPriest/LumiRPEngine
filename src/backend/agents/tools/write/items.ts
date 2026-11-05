@@ -7,19 +7,21 @@
 // it doesn't hold, and the same change asked again is the one staged. Names resolve among what the
 // view may name; a thing, and a thing something goes into, as `items_find` reads words
 // (`resolveNamedThing`, `resolveHolder`): "the fridge" is the Refrigerator, one the agent staged
-// this turn too, and words that fit several as well are refused with each of them.
+// this turn too, and words that fit several as well are refused with each of them. A make takes a
+// kit's type as any other, and a vehicle class (`class`, its details beside it). A person's saved
+// outfits and loadouts (DESIGN §28.16) are kept and changed into by `set_save` and `set_apply`.
 
 import { WRITE_NOTE } from "../../../../shared/agent-tools-write";
 import type { EntityId } from "../../../../shared/ids";
 import { hasOwn, type JsonObject } from "../../../../shared/json";
-import { GRANT_BASES, type GrantBasis, HANDOVER_BASES, type HandoverBasis, type ItemOp, isSize, PERMIT_SCOPES, type PermitScope, type Rest, SIZES, type Size, type Spot } from "../../../../shared/things";
+import { GRANT_BASES, type GrantBasis, HANDOVER_BASES, type HandoverBasis, type ItemOp, isSize, nameKey, PERMIT_SCOPES, type PermitScope, type Rest, SET_KINDS, type SetKind, setsOf, SIZES, type Size, type Spot, vehicleDetailsOf } from "../../../../shared/things";
 import { calendarOf, clockOfPhrase, clockOfStamp } from "../../../../engine/calendar";
 import type { ToolOutcome } from "../../runtime";
 import { BOOLEAN, boolArg, gmEdit, missing, needId, propose, refusedAnswer, TEXT_LIST, wordsArg } from "../propose";
 import type { ToolReadView } from "../read-view";
 import type { ToolDefinition, ToolEnv } from "../registry";
 import { resolveEntity, resolveHolder, resolveNamedThing, resolvePerson, resolvePlace } from "../resolve";
-import { argGiven, badValue, integer, intArg, needText, objectSchema, text, textArg } from "../schema";
+import { argGiven, badValue, integer, intArg, needText, objectArg, objectSchema, text, textArg } from "../schema";
 
 /** The arguments every item tool takes besides its own: only check it (`dry`). */
 const DRY = { dry: BOOLEAN };
@@ -99,7 +101,7 @@ const party = (view: ToolReadView, tool: string, args: JsonObject, key: string):
 const why = (view: ToolReadView, tool: string, args: JsonObject): string | ToolOutcome => needText(view, tool, args, "why");
 
 export const ITEMS_WRITES: readonly ToolDefinition[] = [
-  itemTool("item_make", "story", { name: text(), type: text(), size: text([...SIZES]), ...SPOT, owner: text(), home: text(), qty: integer({ minimum: 1 }), aliases: TEXT_LIST, hidden: BOOLEAN, why: text() }, ["name", "why"], (view, args) => {
+  itemTool("item_make", "story", { name: text(), type: text(), class: text(), details: objectSchema({ make: text(), model: text(), year: integer(), colour: text(), plate: text() }), size: text([...SIZES]), ...SPOT, owner: text(), home: text(), qty: integer({ minimum: 1 }), aliases: TEXT_LIST, hidden: BOOLEAN, why: text() }, ["name", "why"], (view, args) => {
     const name = needText(view, "item_make", args, "name");
     if (isNote(name)) return name;
     const at = spotOf(view, "item_make", args);
@@ -115,7 +117,23 @@ export const ITEMS_WRITES: readonly ToolDefinition[] = [
     const qty = intArg(args, "qty");
     const aliases = wordsArg(args, "aliases");
     const type = textArg(args, "type");
-    return { do: "make", name, at, why: reason, ...(type !== null ? { type } : {}), ...(size !== undefined && isSize(size) ? { size } : {}), ...(owner !== undefined ? { owner } : {}), ...(home !== undefined ? { home } : {}), ...(qty !== null ? { qty } : {}), ...(aliases && aliases.length > 0 ? { aliases } : {}), ...(boolArg(args, "hidden") === true ? { hidden: true } : {}) };
+    const vehicleClass = textArg(args, "class");
+    const details = vehicleDetailsOf(objectArg(args, "details"));
+    return {
+      do: "make",
+      name,
+      at,
+      why: reason,
+      ...(type !== null ? { type } : {}),
+      ...(vehicleClass !== null ? { class: vehicleClass } : {}),
+      ...(vehicleClass !== null && details !== null ? { details } : {}),
+      ...(size !== undefined && isSize(size) ? { size } : {}),
+      ...(owner !== undefined ? { owner } : {}),
+      ...(home !== undefined ? { home } : {}),
+      ...(qty !== null ? { qty } : {}),
+      ...(aliases && aliases.length > 0 ? { aliases } : {}),
+      ...(boolArg(args, "hidden") === true ? { hidden: true } : {}),
+    };
   }),
   itemTool("item_move", "story", { item: text(), ...SPOT, why: text() }, ["item", "why"], (view, args) => {
     const item = thing(view, "item_move", args);
@@ -168,12 +186,15 @@ export const ITEMS_WRITES: readonly ToolDefinition[] = [
     const qty = intArg(args, "qty");
     return { do: "use", item, ...(qty !== null ? { qty } : {}) };
   }),
-  itemTool("item_wear", "story", { item: text(), who: text(), off: BOOLEAN }, ["item", "who"], (view, args) => {
+  itemTool("item_wear", "story", { item: text(), who: text(), off: BOOLEAN, slot: text() }, ["item", "who"], (view, args) => {
     const item = thing(view, "item_wear", args);
     if (isNote(item)) return item;
     const who = needId(view, "item_wear", args, "who", resolvePerson);
     if (isNote(who)) return who;
-    return { do: "wear", item, who, ...(boolArg(args, "off") === true ? { off: true } : {}) };
+    // Ready is in hand; any other slot as the slots table names it (holster, sheath, quiver, back…).
+    const said = textArg(args, "slot")?.toLowerCase().replace(/[\s-]+/g, "_");
+    const slot = said === "ready" || said === "hand" || said === "in_hand" ? "hand_held" : said;
+    return { do: "wear", item, who, ...(boolArg(args, "off") === true ? { off: true } : {}), ...(slot !== undefined && slot !== "" ? { slot } : {}) };
   }),
   itemTool("item_condition", "story", { item: text(), delta: integer() }, ["item", "delta"], (view, args) => {
     const item = thing(view, "item_condition", args);
@@ -209,6 +230,34 @@ export const ITEMS_WRITES: readonly ToolDefinition[] = [
     if (isNote(item)) return item;
     const reason = why(view, "item_remove", args);
     return isNote(reason) ? reason : { do: "remove", item, why: reason };
+  }),
+  itemTool("set_save", "story", { who: text(), name: text(), kind: text([...SET_KINDS]), pieces: TEXT_LIST }, ["who", "name", "kind"], (view, args) => {
+    const who = needId(view, "set_save", args, "who", resolvePerson);
+    if (isNote(who)) return who;
+    const name = needText(view, "set_save", args, "name");
+    if (isNote(name)) return name;
+    const kind = oneOf<SetKind>(view, "set_save", args, "kind", SET_KINDS);
+    if (kind === undefined) return missing(view, "set_save", "kind");
+    if (isNote(kind)) return kind;
+    // The pieces named, as items_find reads words; left out, what they wear now of its kind.
+    const pieces: { item: EntityId }[] = [];
+    for (const said of wordsArg(args, "pieces") ?? []) {
+      const piece = resolveNamedThing(view, said);
+      if ("refused" in piece) return piece.refused;
+      pieces.push({ item: piece.id });
+    }
+    return { do: "set_save", who, name, kind, ...(pieces.length > 0 ? { pieces } : {}) };
+  }),
+  itemTool("set_apply", "story", { who: text(), set: text() }, ["who", "set"], (view, args) => {
+    const who = needId(view, "set_apply", args, "who", resolvePerson);
+    if (isNote(who)) return who;
+    const said = needText(view, "set_apply", args, "set");
+    if (isNote(said)) return said;
+    // A saved set by its id, or its name as the reply says it ("her work clothes" is Work).
+    const sets = setsOf(view.state.entities[who]?.fields);
+    const key = nameKey(said);
+    const id = hasOwn(sets, said) ? said : Object.keys(sets).find((s) => sets[s]?.name.trim().toLowerCase() === said.trim().toLowerCase()) ?? Object.keys(sets).find((s) => key !== null && nameKey(sets[s]?.name ?? "")?.words.every((w) => key.words.includes(w)) === true);
+    return id !== undefined ? { do: "set_apply", who, set: id } : badValue(view, "set_apply", "set", said, Object.values(sets).map((s) => s.name));
   }),
 ];
 

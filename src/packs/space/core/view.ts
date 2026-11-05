@@ -111,6 +111,8 @@ export function buildMapView(ctx: ReadContext, chosen: MapDisplay | null = null)
   const standIns = new Map<PlaceId, PlaceId>();
   for (const id of path) if (!known(id)) standIns.set(id, standIn(world, standIns.size + 1));
   const closed = closedRoutes(ctx);
+  // Home, owned and for-sale marks on the places the POV knows, each with the property the place is where the POV may know it (`economy.place_marks`, when the economy is loaded).
+  const marks = new Map((optionalQuery(ctx, "economy.place_marks")?.(ctx, world.pov) ?? []).map((m) => [m.place, m] as const));
   const filter: ScopeFilter = {
     known,
     drawn: (id) => inside.has(id) || known(id),
@@ -118,6 +120,7 @@ export function buildMapView(ctx: ReadContext, chosen: MapDisplay | null = null)
     shown: (id) => standIns.get(id) ?? id,
     // Travel skips a closed route from Space 2, where routes are first drawn, so the map does too.
     routeOpen: (id) => !closed.has(id),
+    mark: (id) => marks.get(id),
   };
   const children = placeChildren(world);
   const opens = (id: PlaceId): boolean => hasGrid(world, id) || (children.get(id) ?? []).some(filter.drawn);

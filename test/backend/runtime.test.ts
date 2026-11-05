@@ -57,6 +57,8 @@ describe("backend runtime", () => {
   test("Re-narrate copies the source's seed and pre events and reads its reply after them, as the record's own events; Re-run rolls afresh", async () => {
     const rig = new Rig();
     const chatId = await rig.worldChat();
+    // A swipe re-runs by default here, so the chip's one-shot Re-narrate is what tells the turn again.
+    rig.body(await rig.send({ type: "lre.settings.set", patch: { swipeDefault: "rerun" } }));
     await rig.turn(chatId, "look around", "The kitchen is quiet.");
     const head = rig.host.head(chatId);
     if (!head) throw new Error("no head");

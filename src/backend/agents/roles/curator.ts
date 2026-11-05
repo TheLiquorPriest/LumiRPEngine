@@ -11,9 +11,11 @@
 // as classic's.
 //
 // Its work is what it staged and noted: a limit on its rounds of tool calls that stops its agent
-// before it answers leaves that standing, its answer cut short (`ExtractRead.short`). Wherever its
-// own work isn't whole (cut short, failed, or never run), the read's changes of its types, held
-// aside for it, land for what it didn't stage or answer (`uncurated`).
+// before it answers leaves that standing, its answer cut short (`ExtractRead.short`), and so does a
+// closing answer the engine can't read once it staged or noted something (`unclosed`); only an agent
+// that did neither falls back. Wherever its own work isn't whole (cut short, unclosed, failed, or
+// never run), the read's changes of its types, held aside for it, land for what it didn't stage or
+// answer (`uncurated`).
 
 import type { EntityId } from "../../../shared/ids";
 import { hasOwn, isRecord, type JsonObject, type JsonValue } from "../../../shared/json";
@@ -29,12 +31,16 @@ import { renderPrompt } from "../../prompts";
 import type { Runtime } from "../../runtime";
 import { type ExtractRead, extractAnswer } from "../../steps";
 import type { ReadNotes } from "../tools/registry";
+import { isOpRefusal, type ToolWriter } from "../tools/writer";
 import type { CurateTask, TurnAgentCtx } from "../turn-ctx";
 import { commitOrder, type StagedOp } from "../turn-writer";
 import { type RoleAnswer, runRoleAgent } from "./agent";
 
 /** The limits on rounds of tool calls (Tool rounds per agent, Tool rounds per turn): one that stops the Curator's agent before it answers leaves its work standing. */
 const ROUND_LIMITS: Readonly<Record<string, true>> = { tool_turns: true, turn_tool_turns: true };
+
+/** How a closing answer the engine can't read fails its run (`runRoleAgent`): not JSON, or not its form. Once the Curator staged or noted work, that work stands. */
+const UNREAD_CLOSE: Readonly<Record<string, true>> = { no_json: true, contract: true };
 
 /** The field a purchase, a walk-on and a place made name what they are of by: the thing bought, the person, the place. */
 const NAMED_BY: Readonly<Record<string, string>> = { purchase: "item", spawn: "name", place_make: "place" };
@@ -53,8 +59,21 @@ export async function curateRun(rt: Runtime, task: CurateTask, ctx: TurnAgentCtx
       return true;
     },
   };
+  // What its tools staged, so an answer that closes its work unread leaves that work standing.
+  let staged = 0;
+  const stage = ctx.writer.stage?.bind(ctx.writer);
+  const writer: ToolWriter = stage
+    ? {
+        ...ctx.writer,
+        async stage(op) {
+          const out = await stage(op);
+          if (!isOpRefusal(out)) staged += 1;
+          return out;
+        },
+      }
+    : ctx.writer;
   const said = i.said.trim();
-  const answered = await runRoleAgent(rt, ctx, {
+  const answered = await runRoleAgent(rt, { ...ctx, writer }, {
     sub: "curate",
     phase: "read",
     names: { world: i.world.name, pov: own(i.world.entities, i.world.pov)?.name ?? i.world.pov },
@@ -75,9 +94,11 @@ export async function curateRun(rt: Runtime, task: CurateTask, ctx: TurnAgentCtx
       return { ...read, proposals: [...noted.values(), ...read.proposals], where: null };
     },
   });
-  if (answered.ok || !hasOwn(ROUND_LIMITS, answered.code)) return answered;
-  // A round limit stopped its agent before it answered: what it staged stands, and what it noted lands with the read, its answer cut short.
-  return { ok: true, out: { proposals: [...noted.values()], where: null, short: "cut" }, usage: answered.usage, via: "agent", text: answered.text };
+  if (answered.ok) return answered;
+  // A round limit stopped its agent before it answered, or it closed with an answer the engine can't read after it made changes: what it staged stands, and what it noted lands with the read, its answer cut short.
+  if (hasOwn(ROUND_LIMITS, answered.code)) return { ok: true, out: { proposals: [...noted.values()], where: null, short: "cut" }, usage: answered.usage, via: "agent", text: answered.text };
+  if (hasOwn(UNREAD_CLOSE, answered.code) && (staged > 0 || noted.size > 0)) return { ok: true, out: { proposals: [...noted.values()], where: null, short: "unclosed" }, usage: answered.usage, via: "agent", text: answered.text };
+  return answered;
 }
 
 /** A purchase's, a walk-on's or a place made's key: its type and what it is of, folded as the resolver folds words (case, accents, apostrophes, punctuation); null for any other change, or one naming nothing. */

@@ -10,14 +10,17 @@
 // refresh, or a classic chat; the read, the Curator, the knowledge, the memory, the skip and the
 // world's steps are never kept (`NEVER_SKIPPED`).
 //
-// What the last turn's scene was is kept in memory per chat, for the reply that turn wrote (`ScenePersistence`):
-// a restart, a Branch or a swipe asks every role afresh, which is always safe. Nothing here is
-// recorded but the kept copies themselves.
+// What the last turn's scene was is kept per chat, for the reply that turn wrote (`ScenePersistence`),
+// in memory and, through its store, beside the chat's prefs (`runs/<chatId>/scene.json`), so a
+// restart keeps what a quiet scene may keep: a stored scene is read once, when the chat's next turn
+// asks, and holds only for the reply it was written for. A Branch or a swipe asks every role afresh,
+// which is always safe. Nothing here is recorded in the ledger but the kept copies themselves.
 
-import { BASIS_WORDS, basisChanged, type PersistHold, type SceneBasis } from "../../shared/agent-pipeline";
+import { BASIS_SIGNALS, BASIS_WORDS, basisChanged, type PersistHold, type SceneBasis } from "../../shared/agent-pipeline";
 import type { PersistSettings } from "../../shared/agent-settings";
 import { hashParts } from "../../shared/hash";
-import type { ChatId, EntityId, MessageId } from "../../shared/ids";
+import type { ChatId, EntityId, MessageId, UserId } from "../../shared/ids";
+import { isRecord } from "../../shared/json";
 import type { GenerationKind } from "../../shared/ledger";
 import type { WorldDoc } from "../../shared/world";
 import { calendarOf, dayPartAt } from "../../engine/calendar";
@@ -79,16 +82,35 @@ export function sceneBasis(reg: Registry, world: WorldDoc, state: Readonly<World
 }
 
 /** The last agent turn's scene in a chat: the reply it wrote, its basis, the marks once it closed, when its roles last ran afresh, and how many turns in a row kept them since. */
-interface LastScene {
+export interface LastScene {
   reply: { messageId: MessageId; swipeId: number };
   basis: SceneBasis;
   freshAt: number;
   kept: number;
 }
 
-/** A turn under way: its basis, its clock, and whether it kept anything. */
+/** Where each chat's last scene is kept between restarts (`ChatPrefs`): read once per chat, written each time a turn closes. A write that fails is the store's to tell; the next restart then asks afresh. */
+export interface SceneStore {
+  lastScene(chatId: ChatId, userId: UserId): Promise<unknown>;
+  keepScene(chatId: ChatId, userId: UserId, scene: LastScene): Promise<void>;
+}
+
+/** A stored last scene, or null when it doesn't read as one (a file from another build, a damaged one). */
+export function lastSceneOf(raw: unknown): LastScene | null {
+  if (!isRecord(raw) || !isRecord(raw.reply) || !isRecord(raw.basis)) return null;
+  const { messageId, swipeId } = raw.reply;
+  const { freshAt, kept } = raw;
+  const basis = raw.basis;
+  if (typeof messageId !== "string" || messageId === "" || typeof swipeId !== "number" || !Number.isInteger(swipeId) || swipeId < 0) return null;
+  if (typeof freshAt !== "number" || !Number.isFinite(freshAt) || typeof kept !== "number" || !Number.isInteger(kept) || kept < 0) return null;
+  if (!BASIS_SIGNALS.every((s) => typeof basis[s] === "string")) return null;
+  return { reply: { messageId, swipeId }, basis: Object.fromEntries(BASIS_SIGNALS.map((s) => [s, String(basis[s])])) as SceneBasis, freshAt, kept };
+}
+
+/** A turn under way: its chat and user, its basis, its clock, and whether it kept anything. */
 interface TurnScene {
   chatId: ChatId;
+  userId: UserId | null;
   basis: SceneBasis;
   clock: number;
   kept: boolean;
@@ -111,20 +133,43 @@ const KIND_WHY: Partial<Record<GenerationKind, string>> = {
   renarrate: "A Re-narrate tells its turn's own plan.",
 };
 
-/** Each chat's last agent turn's scene, and each turn's under way, by generation; at most `cap` of each. */
+/** Each chat's last agent turn's scene, and each turn's under way, by generation; at most `cap` of each, the chats' kept by `store` too. */
 export class ScenePersistence {
   private readonly chats = new Map<ChatId, LastScene>();
   private readonly turns = new Map<string, TurnScene>();
+  /** The chats whose stored scene was read since the engine started (each read once). */
+  private readonly read = new Set<ChatId>();
 
-  constructor(private readonly cap = 256) {}
+  constructor(
+    private readonly store: SceneStore | null = null,
+    private readonly cap = 256,
+  ) {}
 
-  /** Whether the turn's scene is the last turn's, so persistence keeps what it may; else why not. */
-  hold(chatId: ChatId, ask: PersistAsk): PersistHold {
+  /** The chat's last scene: in memory, else, once since the engine started, the stored one. */
+  private async last(chatId: ChatId, userId: UserId | null): Promise<LastScene | undefined> {
+    const known = this.chats.get(chatId);
+    if (known || !this.store || userId === null || this.read.has(chatId)) return known;
+    this.read.add(chatId);
+    while (this.read.size > this.cap) this.read.delete(this.read.values().next().value as ChatId);
+    const stored = lastSceneOf(await this.store.lastScene(chatId, userId).catch((): unknown => null));
+    // A turn that closed while the file was read is newer.
+    if (stored && !this.chats.has(chatId)) this.remember(chatId, stored);
+    return this.chats.get(chatId);
+  }
+
+  private remember(chatId: ChatId, scene: LastScene): void {
+    this.chats.delete(chatId);
+    this.chats.set(chatId, scene);
+    while (this.chats.size > this.cap) this.chats.delete(this.chats.keys().next().value as ChatId);
+  }
+
+  /** Whether the turn's scene is the last turn's, so persistence keeps what it may; else why not. `userId` reads the chat's stored scene after a restart. */
+  async hold(chatId: ChatId, ask: PersistAsk, userId: UserId | null = null): Promise<PersistHold> {
     if (!ask.settings.on) return { holds: false, why: "Smart persistence is off." };
     const kind = KIND_WHY[ask.kind];
     if (kind) return { holds: false, why: kind };
-    const last = this.chats.get(chatId);
-    if (!last || !ask.after || last.reply.messageId !== ask.after.messageId || last.reply.swipeId !== ask.after.swipeId) return { holds: false, why: "The last turn's scene isn't known: its roles ran on another reply, or before a restart." };
+    const last = await this.last(chatId, userId);
+    if (!last || !ask.after || last.reply.messageId !== ask.after.messageId || last.reply.swipeId !== ask.after.swipeId) return { holds: false, why: "The last turn's scene isn't known: its roles ran on another reply." };
     const changed = basisChanged(last.basis, ask.basis);
     if (changed.length > 0) return { holds: false, why: `The scene changed: ${changed.map((s) => BASIS_WORDS[s]).join(", ")}.` };
     if (last.kept >= ask.settings.turns) return { holds: false, why: `It was kept ${last.kept === 1 ? "1 turn" : `${last.kept} turns`} in a row, the most Smart persistence keeps.` };
@@ -133,10 +178,10 @@ export class ScenePersistence {
     return { holds: true };
   }
 
-  /** A turn's scene, as it plays: its basis and clock, which the next turn compares with once it closes. */
-  begin(generationId: string, chatId: ChatId, basis: SceneBasis, clock: number): void {
+  /** A turn's scene, as it plays: its basis and clock, which the next turn compares with once it closes; `userId` is whose store keeps it. */
+  begin(generationId: string, chatId: ChatId, basis: SceneBasis, clock: number, userId: UserId | null = null): void {
     this.turns.delete(generationId);
-    this.turns.set(generationId, { chatId, basis, clock, kept: false });
+    this.turns.set(generationId, { chatId, userId, basis, clock, kept: false });
     while (this.turns.size > this.cap) this.turns.delete(this.turns.keys().next().value as string);
   }
 
@@ -159,16 +204,17 @@ export class ScenePersistence {
     this.turns.set(to, t);
   }
 
-  /** The turn closed on its reply: the chat's last scene is its, with the marks the chain holds now folded into its basis; a turn that kept counts on from the last one. */
+  /** The turn closed on its reply: the chat's last scene is its, with the marks the chain holds now folded into its basis, kept by the store too; a turn that kept counts on from the last one. */
   closed(generationId: string, reply: { messageId: MessageId; swipeId: number }, marks: number): void {
     const t = this.turns.get(generationId);
     this.turns.delete(generationId);
     if (!t) return;
     const last = this.chats.get(t.chatId);
     const keptOn = t.kept && last !== undefined;
-    this.chats.delete(t.chatId);
-    this.chats.set(t.chatId, { reply, basis: { ...t.basis, marks: String(marks) }, freshAt: keptOn ? last.freshAt : t.clock, kept: keptOn ? last.kept + 1 : 0 });
-    while (this.chats.size > this.cap) this.chats.delete(this.chats.keys().next().value as ChatId);
+    const scene: LastScene = { reply, basis: { ...t.basis, marks: String(marks) }, freshAt: keptOn ? last.freshAt : t.clock, kept: keptOn ? last.kept + 1 : 0 };
+    this.remember(t.chatId, scene);
+    this.read.add(t.chatId);
+    if (this.store && t.userId !== null) void this.store.keepScene(t.chatId, t.userId, scene);
   }
 
   /** The chat's last scene is no longer the one its next turn follows: a classic turn, a rollback, a deleted reply. */

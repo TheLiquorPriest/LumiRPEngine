@@ -48,7 +48,7 @@ import { askRollback, sessionView } from "./compaction";
 import { type AgentHandle, type AgentHistoryMessage, type AgentReply, type AgentTool, type AgentTranscript, startAgent } from "./runtime";
 import { systemInstructions, withInstructions } from "./system-files";
 import { outsideReader } from "./tools/read-view";
-import { type ToolTier, toolsFor } from "./tools/registry";
+import { type ToolTier, toolsFor, toolsGuide } from "./tools/registry";
 import { listWorkspace, readWorkspaceFile } from "./tools/workspace";
 import { type AgentOp, batchKey, GM_ROLE, isKeptOp, type OpPreview, outsideWriter, type ToolWriter } from "./tools/writer";
 import { recordAgentCalls } from "./transcripts";
@@ -434,9 +434,9 @@ export class Assistant {
     // One reader for the whole answer, with the GM's view of everything: each tool call reads the chat's head afresh through it, so a turn that lands meanwhile is seen.
     const reads = { userId, chatId, knowledge: "gm" as const };
     const reader = outsideReader(this.rt, reads);
-    // Its system prompt and instructions, then its system files: AGENTS.md and roles/assistant.md, the global workspace's then the chat's (DESIGN §4.4).
+    // Its system prompt and instructions, what its tools share (`toolsGuide`), then its system files: AGENTS.md and roles/assistant.md, the global workspace's then the chat's (DESIGN §4.4).
     const prompt = [renderPrompt(GM_TEXT.system, texts, vars), renderPrompt(GM_TEXT.instructions, texts, vars)].filter((s) => s.trim() !== "").join("\n\n");
-    const system = withInstructions(prompt, await systemInstructions(await reader.view(), { role: ASSISTANT_ROLE, tokens: agents.systemTokens, texts }));
+    const instructions = await systemInstructions(await reader.view(), { role: ASSISTANT_ROLE, tokens: agents.systemTokens, texts });
     // The thread's latest exchanges go with it; when any are left out, the first message sent says how many.
     const { history, left } = historyOf(
       t.messages.map((m) => m.value),
@@ -466,6 +466,7 @@ export class Assistant {
       },
     };
     const tools = toolsFor({ world, tiers: TIERS, texts, env: { ...base, writer } }).map((tool) => this.watched(t, run, tool));
+    const system = withInstructions([prompt, toolsGuide(tools, texts)].filter((s) => s.trim() !== "").join("\n\n"), instructions);
     const handle = startAgent({ role: ASSISTANT_ROLE, connectionId: own.connectionId, model: own.model, effort: own.effort, system, prefix: [], tools, budget: assistantBudget(agents), history }, { host: this.rt.host, userId, settings: agents, texts, accounts: this.rt.agentAccounts, turn: null });
     run.handle = handle;
     run.agentId = handle.id;

@@ -4,7 +4,7 @@
 // mapping from a tap to its message is tested directly; amounts arrive typed and are read in the
 // world's currency.
 
-import type { ChatId, EntityId } from "../../../shared/ids";
+import type { ChatId, EntityId, PlaceId } from "../../../shared/ids";
 import type { JsonObject, JsonValue } from "../../../shared/json";
 import type { EditOp } from "../../../shared/protocol";
 import { parseMoneyInput } from "../../../shared/money";
@@ -419,8 +419,9 @@ export function routeOps(target: RouteTarget, party: EntityId, to: string): Edit
   return [{ op: "effect", effect: "economy.route", args: { ...target, party, to } }];
 }
 
-export function propertyBuyAction(property: EntityId, price: number, opts: { from?: EntityId; down?: number; termMonths?: number } = {}): ActionBody {
-  return { action: FINANCE_ACTIONS.propertyBuy, params: { property, price, ...(opts.from ? { from: opts.from } : {}), ...(opts.down !== undefined ? { down: opts.down } : {}), ...(opts.termMonths !== undefined ? { term_months: opts.termMonths } : {}) } };
+/** Buying a property: the offer, where it's paid from, a down payment and the mortgage's term; `live` moves the buyer in (their home from today). */
+export function propertyBuyAction(property: EntityId, price: number, opts: { from?: EntityId; down?: number; termMonths?: number; live?: boolean } = {}): ActionBody {
+  return { action: FINANCE_ACTIONS.propertyBuy, params: { property, price, ...(opts.from ? { from: opts.from } : {}), ...(opts.down !== undefined ? { down: opts.down } : {}), ...(opts.termMonths !== undefined ? { term_months: opts.termMonths } : {}), ...(opts.live === true ? { live: true } : {}) } };
 }
 
 export function propertySellAction(property: EntityId, price: number, opts: { buyer?: EntityId; to?: EntityId } = {}): ActionBody {
@@ -495,4 +496,10 @@ export function propertySpawnOps(id: EntityId, name: string, owner: EntityId, va
     { op: "set", entity: id, field: "owners", value: [{ party: owner, role: "owner", share: 100 }] },
     { op: "set", entity: id, field: "value", value },
   ];
+}
+
+/** A property made of a place (`economy.property_make`, a GM effect): its name (else the place's), its value, its whole owner (else nobody) and an asking price, each only when given. */
+export function propertyMakeOps(place: PlaceId, opts: { name?: string; value?: number; owner?: EntityId; askingPrice?: number } = {}): EditOp[] {
+  const name = opts.name?.trim() ?? "";
+  return [{ op: "effect", effect: "economy.property_make", args: { place, ...(name !== "" ? { name } : {}), ...(opts.value !== undefined ? { value: opts.value } : {}), ...(opts.owner ? { owner: opts.owner } : {}), ...(opts.askingPrice !== undefined ? { asking_price: opts.askingPrice } : {}) } }];
 }

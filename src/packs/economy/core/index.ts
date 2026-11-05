@@ -19,7 +19,7 @@
 // nothing stale. The trial balance is 0 at every level mix.
 
 import type { JsonObject, JsonValue } from "../../../shared/json";
-import { hasOwn } from "../../../shared/json";
+import { hasOwn, isRecord } from "../../../shared/json";
 import type { EntityId } from "../../../shared/ids";
 import type { LedgerEvent, PostingLine } from "../../../shared/ledger";
 import { CLASS_TRAITS, DEFAULT_ACCOUNT_PRODUCT, FEATURE_DEFS, FINANCE_FEATURES, isAccountClass, isOwnerRole, LEGACY_TYPE_CLASS, ownersIn, heldBy, PARTY_KINDS, PRICES_SOURCE, UNPAID, worthShares, type FinanceFeature, type FinanceView, type MoneySummary, type PartyKind } from "../../../shared/finance";
@@ -30,7 +30,7 @@ import { formatMoney } from "../../../shared/world";
 import { minorUnitPlural } from "../../../shared/money";
 import { calendarOf } from "../../../engine/calendar";
 import { isMaterialized } from "../../../engine/materialize";
-import { labelOf, numOf, objOf, optionalService, own, rowOf, strOf } from "../../../engine/pack-kit";
+import { labelOf, numOf, objOf, optionalQuery, optionalService, own, rowOf, strOf } from "../../../engine/pack-kit";
 import type { CoreRegistry, EffectContext, FeedLine, PackDef, ReadContext, Rejection } from "../../../engine/registry";
 import type { Rng } from "../../../engine/rng";
 import { isGone, kindIs, placeOfEntity } from "../../../engine/scope";
@@ -43,6 +43,7 @@ import { Working } from "../../../engine/working";
 import { canSeeEntity } from "../../../engine/visibility";
 import type { FeedScope } from "../../../shared/world";
 import { propertyLines } from "./feed";
+import { propertyAt } from "./property";
 import { FINANCE_MODULES } from "./modules";
 import type { FinanceApi, FinanceHooks, FinanceKind, FinanceRegistry, OpenAccount, Payment, PostMeta } from "./module";
 import { ASK_PARAM } from "../../../shared/org-motions";
@@ -56,6 +57,7 @@ import { businessAt } from "../../../engine/org";
 import type { MembershipContext } from "../../../engine/selector";
 import { type CatalogName, catalogName, itemName } from "./items";
 import { isSize, sizeRank, stem, thingsConfigOf } from "../../../shared/things";
+import type { VehicleDetails, VehiclePrice } from "../../../shared/vehicles";
 import {
   CORRECTION_ACCOUNT,
   WORLD_ACCOUNT,
@@ -84,7 +86,7 @@ import {
   type Price,
   type PriceRef,
 } from "./model";
-import { accountLevel, asUnit, carriedCash, charge, claimCash, featureFor, isParty, isRejection, l1Move, loseWith, mayUse, move, namedSource, otherWay, overdraftRoom, paidFrom, payMethodOf, postGuard, posting, reprice, setCash, signal, transfer, transferParty, depositAccount, type ChargeOptions, type ChargeService, type PaidFrom, type PayMethod } from "./pay";
+import { accountLevel, asUnit, cardsOn, carriedCash, charge, claimCash, featureFor, isParty, isRejection, l1Move, loseWith, mayUse, move, namedSource, otherWay, overdraftRoom, paidFrom, payMethodOf, postGuard, posting, reprice, setCash, signal, transfer, transferParty, depositAccount, type ChargeOptions, type ChargeService, type PaidFrom, type PayMethod } from "./pay";
 import { materializeMoney, MONEY_STEP_LEVEL, moneyStep, openAccounts, openingEvent, planStep } from "./process";
 import { moneySummary } from "./summary";
 import { buildFinanceView, buildMoneyView, buildPeopleMoney } from "./view";
@@ -315,11 +317,27 @@ function amountOf(v: JsonValue | undefined): number {
 /** Purchases in these categories become gear items. */
 const PHYSICAL = new Set(["groceries_staples", "clothing", "electronics", "tools_hardware", "household_goods", "home_furnishings", "personal_care", "gifts", "alcohol", "medical"]);
 
-/** An `economy.buy`'s price, the catalog row it is priced as, and a narrated price the charge doesn't match. */
+/** What a vehicle purchase is charged under: no price category of the world's, so it never becomes a gear thing. */
+const VEHICLE_CATEGORY = "vehicles";
+
+/**
+ * The vehicle class a purchase's words name as what it buys (DESIGN §9.5, `vehicles.named`): one
+ * whose name ends the item's main noun ("flatbed truck", "jet ski", "a truck for work"), never one
+ * that only says what another thing is of or for ("plane ticket", "bus pass", "car insurance",
+ * "groceries for the boat"), nor when the purchase gives another category the world prices.
+ */
+function vehicleNamed(ctx: ReadContext, item: string, category: string): string | null {
+  if (category !== "" && category !== VEHICLE_CATEGORY && rowOf(ctx, "economy.categories", category)) return null;
+  const noun = itemName(item)?.noun;
+  return noun ? (optionalQuery(ctx, "vehicles.named")?.(ctx, noun) ?? null) : null;
+}
+
+/** An `economy.buy`'s price, the catalog row it is priced as, a narrated price the charge doesn't match, and the vehicle class it buys. */
 interface Quote {
   price: Price;
   row: string | null;
   narrated?: ChargeOptions["narrated"];
+  vehicle?: VehiclePrice;
 }
 
 /**
@@ -328,15 +346,29 @@ interface Quote {
  * that names it (`matchCatalog`); in lenient worlds a narrated price inside the row's band is
  * taken and one outside it clamped. Without a row, the stated price: the player's own (`stated`)
  * in full, the narration's alone capped at the world's `unpricedCap`. Then the band of the category
- * the purchase gives, or that the item names. Null when nothing prices it.
+ * the purchase gives, or that the item names. Null when nothing prices it. A vehicle
+ * (category `vehicles`, a class given, or words no catalog row names that name one as what they
+ * buy, `vehicleNamed`) is one, at its class's used price, or its new price when the words say new; a
+ * narrated price inside the class's band is taken and one outside it clamped.
  */
 function quote(ctx: EffectContext, args: JsonObject, payer: EntityId, qty: number): Quote | null {
   const place = placeOfEntity(ctx.state, payer);
   const named = strOf(args.item);
   const given = strOf(args.category);
-  const row = named === "" ? null : rowOf(ctx, "economy.catalog", named) ? named : matchCatalog(ctx, named, place, given);
-  const category = given !== "" ? given : !row && rowOf(ctx, "economy.categories", named) ? named : "";
+  const cls = strOf(args.class);
+  const catalogRow = named === "" ? null : rowOf(ctx, "economy.catalog", named) ? named : matchCatalog(ctx, named, place, given);
+  const vehicleFirst = given === VEHICLE_CATEGORY || cls !== "";
   const said = typeof args.price === "number" && args.price > 0 ? Math.round(args.price) : undefined;
+  const wordsClass = vehicleFirst || catalogRow !== null ? null : vehicleNamed(ctx, named, given);
+  const vehicle = vehicleFirst || wordsClass !== null ? (optionalQuery(ctx, "vehicles.priced")?.(ctx, [named, strOf(args.name)].filter((w) => w !== "").join(" "), place, cls || (wordsClass ?? undefined)) ?? null) : null;
+  if (vehicle) {
+    const unit = said === undefined ? vehicle.cents : args.exact === true ? said : Math.min(vehicle.band.max, Math.max(vehicle.band.min, said));
+    const clamped = said !== undefined && unit !== said;
+    const price: Price = { cents: unit, unitCents: unit, band: vehicle.band, source: "catalog", clamped, name: vehicle.name, category: VEHICLE_CATEGORY };
+    return { price, row: null, vehicle, ...(clamped && said !== undefined ? { narrated: { cents: said, limited: "band" as const } } : {}) };
+  }
+  const row = catalogRow;
+  const category = given !== "" ? given : !row && rowOf(ctx, "economy.categories", named) ? named : "";
   const rowDef = row ? rowOf(ctx, "economy.catalog", row) : undefined;
   // A price taken as it is: the item keeps its row's name and category, else its own words and the category it gives.
   const asIs = (cents: number): Price => ({ cents, unitCents: Math.round(cents / qty), band: { min: cents, typical: cents, max: cents }, source: row ? "catalog" : "category", clamped: false, name: strOf(rowDef?.name, named || "something"), category: rowDef ? strOf(rowDef.category) : rowOf(ctx, "economy.categories", category) ? category : "misc" });
@@ -352,6 +384,39 @@ function quote(ctx: EffectContext, args: JsonObject, payer: EntityId, qty: numbe
   }
   const banded = category !== "" ? priceOf(ctx, { category, qty, place }, ctx.rng) : null;
   return banded ? { price: banded, row: null } : null;
+}
+
+/** A vehicle's details as a purchase or a make gives them: only the vehicle kind's own fields, each of its type. */
+function vehicleDetails(v: JsonValue | undefined): VehicleDetails {
+  const o = objOf(v);
+  const out: VehicleDetails = {};
+  for (const k of ["make", "model", "colour", "plate"] as const) if (typeof o[k] === "string" && o[k].trim() !== "") out[k] = o[k].trim();
+  for (const k of ["year", "odometer_mi", "engine_hours", "condition", "fuel_pct", "value"] as const) if (typeof o[k] === "number" && Number.isFinite(o[k])) out[k] = o[k];
+  return out;
+}
+
+/** What a payer may pay from, for a refusal to list: each account and card of theirs that pays, by name and id. */
+function payChoices(ctx: ReadContext, payer: EntityId): string {
+  const ways = accountsOf(ctx, payer, "spend").filter((id) => traitsOf(ctx, id)?.pays === true).flatMap((id) => [id, ...cardsOn(ctx.state, id).filter((c) => strOf(own(ctx.state.entities, c)?.fields.holder) === payer)]);
+  return ways.length > 0 ? ways.map((id) => `${labelOf(ctx, id)} (${id})`).join(", ") : "nothing of theirs pays";
+}
+
+/**
+ * The account or card a buy's `method` names by id (DESIGN §9.5): one the payer may pay from is the
+ * source; an id of anything else, or an id-shaped method naming nothing, is refused with the
+ * choices. Words that aren't an id go by `namedSource` and `payMethodOf` as before (null here).
+ */
+function methodSource(ctx: ReadContext, payer: EntityId, words: string): { source: EntityId } | Rejection | null {
+  const id = words.trim();
+  const e = own(ctx.state.entities, id);
+  if (e && (e.kind === "account" || e.kind === "card")) {
+    const account = e.kind === "card" ? strOf(e.fields.account) : id;
+    const holder = e.kind === "card" ? strOf(e.fields.holder) : payer;
+    if (holder === payer && canSpend(ctx.state, account, payer)) return { source: id };
+    return reject("bad_method", `${labelOf(ctx, payer)} can't pay from ${labelOf(ctx, id)}; they can pay from ${payChoices(ctx, payer)}`);
+  }
+  if (/^[a-z][a-z0-9]*(?:_[a-z0-9]+)+$/.test(id)) return reject("bad_method", `no account or card ${id}; ${labelOf(ctx, payer)} can pay from ${payChoices(ctx, payer)}`);
+  return null;
 }
 
 function emptyHooks(): FinanceHooks {
@@ -610,8 +675,17 @@ function registerRest(r: CoreRegistry, hooks: FinanceHooks): void {
     const { payer } = purchaser(p, ctx);
     const item = strOf(p.item);
     const category = strOf(p.category);
-    // Priced as `economy.buy` prices it: a price set or narrated, a catalog row that names the item, or a category's band.
-    const priced = (typeof p.price === "number" && p.price > 0) || (typeof p.playerPrice === "number" && p.playerPrice > 0) || !!rowOf(ctx, "economy.categories", category) || (item !== "" && (!!rowOf(ctx, "economy.catalog", item) || !!rowOf(ctx, "economy.categories", item) || matchCatalog(ctx, item, placeOfEntity(ctx.state, payer), category) !== null));
+    // Priced as `economy.buy` prices it: a price set or narrated, a catalog row that names the item, a category's band, or a vehicle class; a property by its asking price or its value.
+    const set = (typeof p.price === "number" && p.price > 0) || (typeof p.playerPrice === "number" && p.playerPrice > 0);
+    if (typeof p.property === "string" && p.property !== "") {
+      const id = own(ctx.state.entities, p.property)?.kind === "property" ? p.property : propertyAt(ctx.state, p.property);
+      const f = id ? (own(ctx.state.entities, id)?.fields ?? {}) : {};
+      return !set && !(numOf(f.asking_price) > 0 || numOf(f.value) > 0) && own(ctx.state.entities, payer) !== undefined && ctx.levelOf(payer, "money") >= 1;
+    }
+    // A vehicle as `quote` takes one: the category or a class given, else a class the words name as what they buy (`vehicleNamed`).
+    const cls = strOf(p.class) || (category === VEHICLE_CATEGORY || rowOf(ctx, "economy.catalog", item) ? "" : (vehicleNamed(ctx, item, category) ?? ""));
+    const vehicle = item !== "" && (category === VEHICLE_CATEGORY || cls !== "") && optionalQuery(ctx, "vehicles.priced")?.(ctx, item, placeOfEntity(ctx.state, payer), cls || undefined) != null;
+    const priced = set || vehicle || !!rowOf(ctx, "economy.categories", category) || (item !== "" && (!!rowOf(ctx, "economy.catalog", item) || !!rowOf(ctx, "economy.categories", item) || matchCatalog(ctx, item, placeOfEntity(ctx.state, payer), category) !== null));
     return !priced && own(ctx.state.entities, payer) !== undefined && ctx.levelOf(payer, "money") >= 1;
   });
   r.query("economy.purchaser", (ctx, p) => purchaser(p, ctx).payer);
@@ -722,19 +796,32 @@ function registerRest(r: CoreRegistry, hooks: FinanceHooks): void {
       if (!isParty(ctx, payer)) return reject("bad_payer", "a payer must be an account holder");
       // Nothing pricing it doesn't refuse it: what was bought is the payer's, with nothing charged
       // until a price is set (`economy.unpriced`).
+      // A property bought (`property`: a property, or a place one is made of) needs the property or place.
+      if (typeof p.property === "string" && p.property !== "") return own(ctx.state.entities, p.property)?.kind === "property" || own(ctx.world.places, p.property) ? null : reject("missing_property", `no property or place ${labelOf(ctx, p.property)}`);
       return strOf(p.item) === "" && strOf(p.category) === "" ? reject("bad_proposal", "a purchase needs an item or a category") : null;
     },
     // `playerPrice` (minor units) is the price the player set on a chip, charged as set; `owned` says
     // the thing is the payer's already (an unpriced purchase priced later), so only its charge is
     // made. The engine adds both, never a model (`inMinorUnits` drops them from model output). A
     // `seller` who has the thing sells it (ITEMS-SPEC §6.3); `size` and `at` say how big a new thing
-    // is and where it ends up (§5.2).
+    // is and where it ends up (§5.2). A vehicle (`class`, `details`) may be financed (`finance`:
+    // `down`, `term` in months), a loan it secures. A property (`property`, with `down`,
+    // `term_months` and `live`) is bought by `economy.property_buy`, made from a place that has none;
+    // one the payer has already is only charged there, as a property is bought, never at a till.
     toEffects: (p, ctx) => {
       const { payer, from, method } = purchaser(p, ctx);
       const set = typeof p.playerPrice === "number" && p.playerPrice > 0 ? p.playerPrice : undefined;
       const price = set ?? (typeof p.price === "number" ? p.price : undefined);
       const seller = strOf(p.seller);
-      return [{ type: "economy.buy", args: { payer, item: strOf(p.item), category: strOf(p.category), name: strOf(p.name), qty: typeof p.qty === "number" ? p.qty : 1, ...(price !== undefined ? { price } : {}), ...(set !== undefined ? { exact: true } : {}), ...(method !== undefined ? { method } : {}), ...(from !== undefined ? { from } : {}), ...(p.owned === true ? { keep: false } : {}), ...(seller !== "" && seller !== payer ? { seller } : {}), ...(isSize(p.size) ? { size: p.size } : {}), ...(typeof p.at === "string" && p.at.trim() !== "" ? { at: JSON.stringify(p.at.trim()) } : {}), story: true } }];
+      const finance = objOf(p.finance);
+      const down = typeof finance.down === "number" ? finance.down : typeof p.down === "number" ? p.down : undefined;
+      const term = typeof finance.term === "number" ? finance.term : typeof p.term_months === "number" ? p.term_months : undefined;
+      const property = strOf(p.property);
+      if (property !== "") {
+        return [{ type: "economy.property_buy", args: { party: payer, property, ...(price !== undefined ? { price } : {}), ...(down !== undefined ? { down } : {}), ...(term !== undefined ? { term_months: term } : {}), ...(from !== undefined ? { from } : {}), ...(p.live === true ? { live: true } : {}), ...(strOf(p.item) !== "" ? { name: strOf(p.item) } : {}), ...(p.owned === true ? { owned: true } : {}), story: true } }];
+      }
+      const financed = down !== undefined || term !== undefined ? { ...(down !== undefined ? { down } : {}), ...(term !== undefined ? { term_months: term } : {}), finance: true } : {};
+      return [{ type: "economy.buy", args: { payer, item: strOf(p.item), category: strOf(p.category), name: strOf(p.name), qty: typeof p.qty === "number" ? p.qty : 1, ...(price !== undefined ? { price } : {}), ...(set !== undefined ? { exact: true } : {}), ...(method !== undefined ? { method } : {}), ...(from !== undefined ? { from } : {}), ...(p.owned === true ? { keep: false } : {}), ...(seller !== "" && seller !== payer ? { seller } : {}), ...(isSize(p.size) ? { size: p.size } : {}), ...(typeof p.at === "string" && p.at.trim() !== "" ? { at: JSON.stringify(p.at.trim()) } : {}), ...(typeof p.class === "string" && p.class !== "" ? { class: p.class } : {}), ...(isRecord(p.details) ? { details: p.details } : {}), ...financed, story: true } }];
     },
   });
   r.proposal({
@@ -854,7 +941,7 @@ function actor(ctx: EffectContext, args: Record<string, JsonValue>, key = "who")
 function registerEffects(r: CoreRegistry, hooks: FinanceHooks): void {
   r.effect({
     type: "economy.buy",
-    args: ["item?", "category?", "qty?", "price?", "exact?", "stated?", "name?", "payer?", "method?", "from?", "payee?", "keep?", "cashback?", "story?", "seller?", "size?", "at?", "by?"],
+    args: ["item?", "category?", "qty?", "price?", "exact?", "stated?", "name?", "payer?", "method?", "from?", "payee?", "keep?", "cashback?", "story?", "seller?", "size?", "at?", "by?", "class?", "details?", "finance?", "down?", "term_months?"],
     resolve(args, ctx) {
       // Bought `as` an organization (ORG-SPEC §3.6), or with an account of one the words name: it
       // pays and owns what was bought, and its buyer (`by`) is where it is bought and takes it.
@@ -864,11 +951,19 @@ function registerEffects(r: CoreRegistry, hooks: FinanceHooks): void {
       const named = asked === by ? namedOrgSource(ctx, by, words) : null;
       const payer = named?.party ?? asked;
       const buyer = by !== "" && by !== payer && own(ctx.state.entities, by) ? by : payer;
-      const qty = typeof args.qty === "number" && args.qty > 0 ? args.qty : 1;
+      // A method that names an account or card by id pays from it when the payer may; any other id is
+      // refused, with the choices. Words that name a way of paying, or one of the payer's own by its
+      // words, go as before (`namedSource`, `payMethodOf`).
+      const idKind = own(ctx.state.entities, words.trim())?.kind;
+      const byId = words === "" ? null : idKind === "account" || idKind === "card" || (payMethodOf(words.replace(/_/g, " ")) === "auto" && namedSource(ctx, payer, words.replace(/_/g, " ")) === null) ? methodSource(ctx, payer, words) : null;
+      if (byId && "code" in byId) return byId;
       // A sale (ITEMS-SPEC §6.3): the seller's own thing by those words changes hands at the price
       // they agreed, the money to the seller, as one unit; nothing is made twice.
       const sold = soldThing(ctx, strOf(args.seller), strOf(args.item) || strOf(args.name), payer);
-      const priced = quote(ctx, sold && typeof args.price === "number" ? { ...args, exact: true } : args, buyer, qty);
+      const priced = quote(ctx, sold && typeof args.price === "number" ? { ...args, exact: true } : args, buyer, typeof args.qty === "number" && args.qty > 0 ? args.qty : 1);
+      // One vehicle a purchase, whatever the count said.
+      const vehicle = sold ? undefined : priced?.vehicle;
+      const qty = vehicle ? 1 : typeof args.qty === "number" && args.qty > 0 ? args.qty : 1;
       // A purchase the story made (`story`, DESIGN §9.5) stands without a price too: what was bought
       // is the payer's, with nothing charged until a price is set. So does one nothing of the payer's
       // can pay: `charge` charges nothing, and its journal line says what it would have cost.
@@ -877,28 +972,57 @@ function registerEffects(r: CoreRegistry, hooks: FinanceHooks): void {
       const name = sold ? (own(ctx.state.entities, sold)?.name ?? "something") : strOf(args.name) || priced?.price.name || strOf(args.item) || strOf(args.category) || "something";
       const what = `${name}${qty > 1 ? ` ×${qty}` : ""}`;
       const seller = strOf(args.seller);
+      // A vehicle financed (`finance`, `down`, `term_months`): the down payment now (the finance tables' typical share when none is said) with the sales tax on its whole price, the rest a car loan the vehicle secures, over a term lenders offer.
+      // Only a vehicle the purchase makes is financed: one owned already (`keep: false`), or where vehicles are off, is only charged.
+      const spawnVehicle = vehicle !== undefined && args.keep !== false && ctx.levelOf(buyer, "vehicles") >= 1 ? optionalService(ctx, "vehicles.spawn") : null;
+      const auto = objOf(objOf(ctx.tables.get("economy.finance")?.rows.loans?.values).auto);
+      const terms = objOf(auto.term_months);
+      const financing = spawnVehicle !== null && priced !== null && (args.finance === true || typeof args.down === "number" || typeof args.term_months === "number");
+      const term = Math.round(typeof args.term_months === "number" ? args.term_months : numOf(terms.typical, 60));
+      if (financing && (term < numOf(terms.min, 12) || term > numOf(terms.max, 96))) return reject("bad_term", `car loans run ${numOf(terms.min, 12)} to ${numOf(terms.max, 96)} months`);
+      const down = financing && priced ? Math.max(0, Math.min(priced.price.cents, Math.round(typeof args.down === "number" ? args.down : (priced.price.cents * numOf(auto.down_payment_pct_typical, 12)) / 100))) : 0;
+      const financed = financing && priced ? priced.price.cents - down : 0;
       return actAs(ctx, { by, party: payer, power: "money.spend", ...(seller !== "" ? { target: seller } : {}), line: (paid) => `Bought ${what}${paid !== undefined ? ` for ${moneyWords(ctx, paid)}` : ""}` }, () => {
         const out: LedgerEvent[] = [];
-        if (priced) {
+        if (priced && priced.price.cents > 0) {
           const { price, row } = priced;
           // Pay another way names the account it pays from (`from`); the Buy action passes the player's
           // words ("with my card"), and a narrated purchase the prose's. A card or account of the payer's
           // those words name pays (`namedSource`, "with my Visa"); words that name only a way of paying
           // go by that way and the payer's order.
-          const from = strOf(args.from) || named?.source || (namedSource(ctx, payer, words) ?? "");
+          const from = strOf(args.from) || byId?.source || named?.source || (namedSource(ctx, payer, words) ?? "");
           const payee = sold ? seller : typeof args.payee === "string" ? args.payee : undefined;
-          // A sale between people pays its seller what they agreed: no till, so no business takes it and no sales tax is added.
-          const till = sold ? {} : { sale: { place: placeOfEntity(ctx.state, buyer), item: row ?? name } };
-          const paid = charge(hooks, ctx, payer, price.cents, `Bought ${what}`, { method: payMethodOf(words), category: price.category, kind: "purchase", ...till, ...(priced.narrated ? { narrated: priced.narrated } : {}), ...(payee !== undefined ? { payee } : {}), ...(from !== "" ? { source: from } : {}), ...(typeof args.cashback === "number" && args.cashback > 0 ? { cashback: args.cashback } : {}), ...(story ? { story } : {}) });
+          // A sale between people pays its seller what they agreed: no till, so no business takes it and no sales tax is added. A financed one is taxed on its whole price, paid with the down payment (alone when nothing is put down).
+          const till = sold ? {} : { sale: { place: placeOfEntity(ctx.state, buyer), item: row ?? name, ...(financed > 0 ? { price: price.cents } : {}) } };
+          const paid = charge(hooks, ctx, payer, price.cents - financed, financed > 0 ? `Bought ${what}, ${down > 0 ? moneyWords(ctx, down) : "nothing"} down` : `Bought ${what}`, { method: payMethodOf(words), category: price.category, kind: "purchase", ...till, ...(priced.narrated ? { narrated: priced.narrated } : {}), ...(payee !== undefined ? { payee } : {}), ...(from !== "" ? { source: from } : {}), ...(typeof args.cashback === "number" && args.cashback > 0 ? { cashback: args.cashback } : {}), ...(story ? { story } : {}) });
           if (isRejection(paid)) return paid;
           out.push(...paid);
         }
         if (sold) {
-          // Handed over as a sale: the payer's from now, with them (a thing too big to carry where they stand).
+          // Handed over as a sale: the payer's from now, with them (a thing too big to carry where they stand; a vehicle where it stands).
           const w = new Working(ctx.registry, ctx.world, ctx.state);
           const handed = applyItemOp(w, { do: "hand", item: sold, to: payer, basis: "sale", why: "" }, { by: seller, confirmed: false, gm: false, salt: ctx.rng.seed });
           if ("code" in handed) return handed;
           return [...out, ...w.events];
+        }
+        if (vehicle) {
+          // A vehicle of its class (DESIGN §9.3), the payer's, standing where the purchase says, else at
+          // the buyer's home, else where they stand; worth what it was bought for, unless the story says.
+          if (!spawnVehicle || !priced) return out;
+          const where = boughtSpot(ctx, buyer, { size: "furniture" }, strOf(args.at), name);
+          const place = "place" in where ? where.place : placeOfEntity(ctx.state, buyer);
+          const made = spawnVehicle(ctx, { class: vehicle.class, name, owner: payer, place, new: vehicle.new, details: { value: priced.price.cents, ...vehicleDetails(args.details) }, salt: `buy:${ctx.rng.seed}`, fields: { got: { how: "bought", at: ctx.state.clock }, made: { by: story ? "story" : buyer, ...(place ? { at: { place } } : {}) } } as unknown as JsonObject });
+          if ("code" in made) return made;
+          out.push(...made.events);
+          if (financed > 0) {
+            // The lender decides at the payer's credit, up to what the vehicle is worth.
+            const w = new Working(ctx.registry, ctx.world, ctx.state);
+            w.applyAll(made.events);
+            const loan = makeApi(hooks).applyCredit(w.ctx, payer, { product: "loan", cents: financed, term_months: term, secured_by: made.entity, into: external(`seller:${made.entity}`), id: `${made.entity}:loan`, name: `Car loan, ${name}` });
+            if (isRejection(loan)) return loan;
+            out.push(...loan);
+          }
+          return out;
         }
         // A thing in a category of things is kept. So is what the story bought that nothing says is
         // anything else: no price, or no category the world knows ("misc").

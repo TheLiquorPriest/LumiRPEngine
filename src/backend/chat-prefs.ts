@@ -2,12 +2,14 @@
 // and the Tidy up findings the GM left as they are (GM → Things, ITEMS-SPEC §7.5). It is
 // presentation, not world state, so it lives beside the chat in `userStorage/runs/<chatId>/prefs.json`
 // rather than in its ledger: a swipe, a branch or a Re-run never changes it, and it never changes
-// the world.
+// the world. Beside it, `scene.json` keeps Smart persistence's last scene (`agents/persist.ts`), so a
+// restart keeps what a quiet scene may keep; it holds only for the reply it was written for.
 
 import type { ChatId, UserId } from "../shared/ids";
 import { runDir } from "../shared/ids";
 import { isRecord } from "../shared/json";
 import type { MapDisplay } from "../shared/world";
+import type { LastScene, SceneStore } from "./agents/persist";
 import type { HostPort } from "./host";
 import { readStoredJson } from "./stored-json";
 
@@ -21,7 +23,7 @@ interface ChatPrefsFile {
   tidyLeft?: string[];
 }
 
-export class ChatPrefs {
+export class ChatPrefs implements SceneStore {
   /** Prefs by `user \0 chat`: one user's cache never answers another. */
   private readonly prefs = new Map<string, ChatPrefsFile>();
 
@@ -29,6 +31,23 @@ export class ChatPrefs {
 
   private path(chatId: ChatId): string {
     return `${runDir(chatId)}prefs.json`;
+  }
+
+  /** Smart persistence's last scene for the chat, as stored (`lastSceneOf` reads it); null when there is none. */
+  async lastScene(chatId: ChatId, userId: UserId): Promise<unknown> {
+    const raw = await readStoredJson(this.host, `${runDir(chatId)}scene.json`, userId, "Smart persistence's last scene", (r) => isRecord(r) && r.v === 1);
+    return isRecord(raw) && raw.v === 1 ? raw.scene : null;
+  }
+
+  /** Keeps the chat's last scene for after a restart; a write that fails is logged, and that restart asks every role afresh. */
+  async keepScene(chatId: ChatId, userId: UserId, scene: LastScene): Promise<void> {
+    const path = `${runDir(chatId)}scene.json`;
+    try {
+      await this.host.storage.write(`${path}.tmp`, JSON.stringify({ v: 1, scene }), userId);
+      await this.host.storage.move(`${path}.tmp`, path, userId);
+    } catch (error) {
+      this.host.log("warn", `[LumiRPEngine] chat ${chatId}: Smart persistence's last scene wasn't kept for after a restart (${error instanceof Error ? error.message : String(error)}); a turn after one asks every role afresh`, userId);
+    }
   }
 
   private async load(chatId: ChatId, userId: UserId): Promise<ChatPrefsFile> {

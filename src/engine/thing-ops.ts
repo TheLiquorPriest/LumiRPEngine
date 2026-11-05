@@ -4,8 +4,11 @@
 // chat folds as it always did. The categorical rules bite here, when an op is resolved and never in
 // the fold: nothing rests in a person above the person ceiling (it lands where they stand, with a
 // note), nothing goes into something smaller, a part never leaves what it is built into, and a
-// Built-in thing moves only by a confirmed op. A thing is made only when nothing it may be fits
-// (find first). Removing a thing is the GM's despawn (`engine/edits`). Pure.
+// Built-in thing moves only by a confirmed op; on the player's own paths a holder's room, its load
+// and how deep things nest count too (`room`). A thing is made only when nothing it may be fits
+// (find first); a vehicle is made by the vehicles pack (`vehicles.spawn`) and handed over where it
+// stands. A person's saved sets are the gear pack's (`gear.set_op`). Removing a thing is the GM's
+// despawn (`engine/edits`). Pure.
 
 import { ownersIn } from "../shared/finance";
 import { hashParts } from "../shared/hash";
@@ -13,19 +16,19 @@ import type { EntityId, PlaceId } from "../shared/ids";
 import type { JsonObject, JsonValue } from "../shared/json";
 import { hasOwn } from "../shared/json";
 import type { LedgerEvent } from "../shared/ledger";
-import type { Got, GotHow, ItemOp, Rest, SizeClass, Spot } from "../shared/things";
+import type { Got, GotHow, ItemOp, Rest, SetOp, Size, SizeClass, Spot } from "../shared/things";
 import { typeFields } from "../shared/items-build";
-import { nameKey, sizeRank, SIZE_LABELS, THING_NAME_MAX } from "../shared/things";
+import { isSetOp, nameKey, sizeRank, SIZE_LABELS, THING_NAME_MAX, thingsConfigOf } from "../shared/things";
 import type { EntityDef } from "../shared/world";
 import { accessFor, assignFor } from "./access";
 import { ENGINE_EVENTS } from "./engine-pack";
 import { orgPower, orgTypeOf } from "./org";
-import { labelOf, optionalQuery, optionalService, own } from "./pack-kit";
+import { labelOf, optionalQuery, optionalService, own, rowOf } from "./pack-kit";
 import type { ReadContext, Rejection } from "./registry";
 import { fieldDef, GONE_FIELD, isGone, kindIs, placeOfEntity } from "./scope";
 import { typeRowOf } from "./thing-index";
 import { findThings, meets } from "./thing-resolve";
-import { contentsOf, holdersOf, holdsOf, isThing, possessorOf, SHARED_SLOTS, sizeOf, sizeOfDef, spotOf, whoseOf } from "./things";
+import { contentsOf, holdersOf, holdsOf, isThing, possessorOf, SHARED_SLOTS, sizeOf, sizeOfDef, slotOf, spotOf, whoseOf } from "./things";
 import { isDiscoverable, knows } from "./visibility";
 import type { Working } from "./working";
 
@@ -43,6 +46,17 @@ export interface ItemOpOptions {
   viewer?: EntityId;
   /** The longest `why` kept; a longer one is cut. */
   whyMax?: number;
+  /**
+   * The player's own paths (an action, a ✎ fix): a holder's room and load and how deep things nest
+   * count, from Gear 2 (`packs.gear.config.containers`); never the story's read, an agent's or the GM's.
+   */
+  room?: boolean;
+}
+
+/** What a thing being made adds to a holder, before it is in the world: its volume and weight, its count's. */
+export interface Adding {
+  volumeL: number;
+  weightG: number;
 }
 
 /** What an applied op did beyond its events: the thing it made, and where the size rules put a thing other than asked. */
@@ -93,14 +107,42 @@ export function locate(ctx: ReadContext, thing: EntityId, to: Spot): LedgerEvent
   return out;
 }
 
+/** How many holders deep the things inside `thing` go below it (0 for nothing inside), so it never goes in deeper than its holders allow with them. */
+function nestDepth(ctx: ReadContext, thing: EntityId, guard = 0): number {
+  if (guard >= 32) return 0;
+  let deepest = 0;
+  for (const inner of contentsOf(ctx.state, thing)) deepest = Math.max(deepest, 1 + nestDepth(ctx, inner, guard + 1));
+  return deepest;
+}
+
+/**
+ * Why a holder that isn't a person can't take `adding` on the player's own paths (`room`, from
+ * Gear 2 of whoever does it), or null: it would sit more holders deep than the world's depth
+ * (`packs.gear.config.containers.depth`, what it holds counted with it), or, while capacity counts
+ * (`refuse`), the holder's room or load can't spare it (the gear pack's `gear.room_problem`).
+ */
+function roomProblem(ctx: ReadContext, name: string, holder: EntityId, opts: ItemOpOptions, adding: EntityId | Adding): Rejection | null {
+  if (opts.room !== true || kindIs(ctx.registry, ctx.world, own(ctx.state.entities, holder)?.kind ?? "", "person")) return null;
+  const doer = own(ctx.state.entities, opts.by) ? opts.by : ctx.world.pov;
+  if (ctx.levelOf(doer, "gear") < 2) return null;
+  const rule = thingsConfigOf(ctx.world).containers;
+  const depth = 1 + holdersOf(ctx.state, holder).length + (typeof adding === "string" ? nestDepth(ctx, adding) : 0);
+  if (depth > rule.depth) return reject("too_deep", `${name} can't go in ${labelOf(ctx, holder)}: things are packed at most ${rule.depth} deep`);
+  if (rule.capacity === "off") return null;
+  const problem = optionalQuery(ctx, "gear.room_problem")?.(ctx, holder, adding) ?? null;
+  return problem === null ? null : reject("no_room", `${name} ${problem}`);
+}
+
 /**
  * Where a thing of `size` called `name` may go when asked to go to `to` (§3.2, §5.3 step 4), or why
  * it can't: a part never leaves its holder (`moving`); a Built-in thing moves only by a confirmed
  * op; a vehicle goes only on another vehicle; nothing goes into what holds nothing, or into a holder
  * smaller than it; a thing above the person ceiling put on someone lands where they stand instead
- * (`noted`). A size nothing says counts as portable, as the story stated the move.
+ * (`noted`). A size nothing says counts as portable, as the story stated the move. On the player's
+ * own paths a holder's room, load and depth count too (`roomProblem`): `adding` is the thing moved,
+ * or what a thing being made adds.
  */
-function landing(ctx: ReadContext, name: string, size: SizeClass, to: Spot, opts: ItemOpOptions, moving: boolean): { spot: Spot; noted?: string } | Rejection {
+function landing(ctx: ReadContext, name: string, size: SizeClass, to: Spot, opts: ItemOpOptions, moving: boolean, adding: EntityId | Adding): { spot: Spot; noted?: string } | Rejection {
   if (moving && size === "part") return reject("part", `${name} is built into what holds it`);
   if (moving && size === "builtin" && !opts.confirmed) return reject("builtin", `${name} is built in: moving it needs a confirmed change`);
   if ("place" in to) return own(ctx.world.places, to.place) ? { spot: to } : reject("missing_place", `no place ${labelOf(ctx, to.place)}`);
@@ -109,7 +151,7 @@ function landing(ctx: ReadContext, name: string, size: SizeClass, to: Spot, opts
   const holds = holdsOf(ctx, to.in);
   if (holds === null) return reject("cant_hold", `${holder.name} can't hold anything`);
   if (size === "vehicle" && !kindIs(ctx.registry, ctx.world, holder.kind, "vehicle")) return reject("cant_hold", `${name} is a vehicle: it goes only on another vehicle`);
-  if (size === "unknown" || size === "part" || size === "vehicle" || sizeRank(size) <= sizeRank(holds)) return { spot: to };
+  if (size === "unknown" || size === "part" || size === "vehicle" || sizeRank(size) <= sizeRank(holds)) return roomProblem(ctx, name, to.in, opts, adding) ?? { spot: to };
   if (kindIs(ctx.registry, ctx.world, holder.kind, "person")) {
     const place = placeOfEntity(ctx.state, to.in);
     if (!place) return reject("too_big", `${name} is too big for ${holder.name} to carry, and ${holder.name} is nowhere`);
@@ -148,7 +190,7 @@ function moveThing(w: Working, thing: EntityId, to: Spot, opts: ItemOpOptions, w
   // writer kept them apart) reads at its place, but a move there still takes it out of the holder.
   if (sameSpot(spotOf(ctx.state, thing), to) && !(typeof e.fields.place === "string" && e.fields.place !== "" && e.relations.some((r) => r.type === "in"))) return reject("no_change", `${e.name} is there already`);
   if ("in" in to && (to.in === thing || holdersOf(ctx.state, to.in).includes(thing))) return reject("cycle", `${e.name} can't go inside ${labelOf(ctx, to.in)}`);
-  const where = landing(ctx, e.name, sizeOf(ctx, thing).size, to, opts, true);
+  const where = landing(ctx, e.name, sizeOf(ctx, thing).size, to, opts, true, thing);
   if ("code" in where) return where;
   const before = possessorOf(ctx, thing);
   const hidden = isDiscoverable(ctx.world, ctx.state, thing);
@@ -177,6 +219,18 @@ function endGrants(ctx: ReadContext, thing: EntityId): LedgerEvent[] {
   const out: LedgerEvent[] = [];
   for (const id of Object.keys(ctx.state.entities).sort()) for (const r of own(ctx.state.entities, id)?.relations ?? []) if (r.type === "uses" && r.to === thing) out.push({ type: "unlink", rel: "uses", from: id, to: thing });
   if (own(ctx.state.entities, thing)?.fields.overdue === true) out.push({ type: "set", entity: thing, field: "overdue", value: false });
+  return out;
+}
+
+/**
+ * The events that make a thing `owner`'s (or nobody's): its `owner`, or, for a thing whose owners
+ * are a list (a vehicle, an asset with shares), that list replaced by the one owner, or emptied.
+ */
+function ownerEvents(ctx: ReadContext, thing: EntityId, owner: EntityId | null): LedgerEvent[] {
+  const e = own(ctx.state.entities, thing);
+  if (!Array.isArray(e?.fields.owners)) return [{ type: "set", entity: thing, field: "owner", value: owner }];
+  const out: LedgerEvent[] = [{ type: "set", entity: thing, field: "owners", value: owner === null ? [] : [{ party: owner, role: "owner" }] }];
+  if (typeof e.fields.owner === "string") out.push({ type: "set", entity: thing, field: "owner", value: owner });
   return out;
 }
 
@@ -244,7 +298,51 @@ export function thingTypeFor(ctx: ReadContext, name: string, place: PlaceId | nu
   return head ? { type: head.id, cents: gearCents(head.id), food: false } : { cents: null, food: false };
 }
 
+/**
+ * A vehicle made (§28.8, `make` with a `class`): the vehicles pack makes it of its class
+ * (`vehicles.spawn`), its owner's, with its details, standing where it is made: at the place, on a
+ * vehicle it rides on, or where the person it is made on stands. One of its name already standing
+ * there is found, not made again.
+ */
+function makeVehicle(w: Working, op: Extract<ItemOp, { do: "make" }>, vehicleClass: string, opts: ItemOpOptions): ItemOpApplied | ItemOpRefusal {
+  const ctx = w.ctx;
+  const spawn = optionalService(ctx, "vehicles.spawn");
+  if (!spawn) return reject("no_vehicles", "this world plays no vehicles");
+  const name = op.name.trim();
+  if (name.length > THING_NAME_MAX) return reject("bad_name", `a name is at most ${THING_NAME_MAX} characters`);
+  const problem = (op.owner !== undefined ? partyProblem(ctx, op.owner) : null) ?? (op.home !== undefined && op.home !== "owner" && "place" in op.home ? restProblem(ctx, op.home) : null);
+  if (problem) return problem;
+  let at: Spot;
+  if ("place" in op.at) {
+    if (!own(ctx.world.places, op.at.place)) return reject("missing_place", `no place ${labelOf(ctx, op.at.place)}`);
+    at = op.at;
+  } else {
+    const holder = own(ctx.state.entities, op.at.in);
+    if (!holder || isGone(ctx.state, op.at.in)) return reject("missing_entity", `no holder ${labelOf(ctx, op.at.in)}`);
+    const place = placeOfEntity(ctx.state, op.at.in);
+    if (kindIs(ctx.registry, ctx.world, holder.kind, "vehicle")) at = op.at;
+    else if (place !== null) at = { place };
+    else return reject("missing_place", `${holder.name} is nowhere`);
+  }
+  const place = "place" in at ? at.place : placeOfEntity(ctx.state, at.in);
+  const viewer = opts.viewer ?? ctx.world.pov;
+  const seen = name === "" ? undefined : findThings(ctx, name, { actor: viewer, viewer, scope: "all" }).find((c) => c.full && !c.secret && sizeOf(ctx, c.id).size === "vehicle" && placeOfEntity(ctx.state, c.id) === place);
+  if (seen) return { ...reject("exists", `${labelOf(ctx, seen.id)} is already there`), exists: seen.id };
+  const fields: JsonObject = { made: { by: opts.by, at } as unknown as JsonValue };
+  const description = op.description?.trim() ?? "";
+  if (description !== "") fields.description = description;
+  const aliases = (op.aliases ?? []).map((a) => a.trim()).filter((a) => a !== "");
+  if (aliases.length > 0) fields.aliases = aliases;
+  const home = op.home !== undefined && op.home !== "owner" && "place" in op.home ? op.home.place : undefined;
+  const made = spawn(ctx, { class: vehicleClass, ...(name !== "" ? { name } : {}), owner: op.owner ?? null, ...("in" in at ? { holder: at.in } : { place: at.place }), ...(home !== undefined ? { home } : {}), ...(op.details !== undefined ? { details: op.details } : {}), salt: opts.salt, fields });
+  if ("code" in made) return made;
+  const rejection = applyAll(w, made.events);
+  if (rejection) return rejection;
+  return sameSpot(at, op.at) ? { made: made.entity } : { made: made.entity, placed: at };
+}
+
 function make(w: Working, op: Extract<ItemOp, { do: "make" }>, opts: ItemOpOptions): ItemOpApplied | ItemOpRefusal {
+  if (op.class !== undefined) return makeVehicle(w, op, op.class, opts);
   const ctx = w.ctx;
   const name = op.name.trim();
   if (name === "" || name.length > THING_NAME_MAX) return reject("bad_name", `a name is 1–${THING_NAME_MAX} characters`);
@@ -259,15 +357,20 @@ function make(w: Working, op: Extract<ItemOp, { do: "make" }>, opts: ItemOpOptio
   const found = findThings(ctx, name, { actor: near ?? viewer, viewer, scope: near !== null ? "on" : "all", ...(op.owner !== undefined ? { owner: op.owner } : {}) }).filter((c) => c.full && (near !== null || (place !== null && placeOfEntity(ctx.state, c.id) === place)));
   const seen = found.find((c) => !c.secret);
   if (seen) return { ...reject("exists", `${labelOf(ctx, seen.id)} is already there`), exists: seen.id };
-  // A make that gives neither a type nor a size takes the type its name reads as (`thingTypeFor`), as the reply's read does.
-  const type = op.type ?? (op.size === undefined ? thingTypeFor(ctx, name, place).type : undefined);
+  // A make that says nothing of what it is (no type, size, holder size or category) takes the type its name reads as (`thingTypeFor`), as the reply's read does.
+  const type = op.type ?? (op.size === undefined && op.holds === undefined && op.category === undefined ? thingTypeFor(ctx, name, place).type : undefined);
   const row = type !== undefined ? typeRowOf(ctx, { catalog: type }) : null;
   if (op.type !== undefined && !row) return reject("missing_type", `no type ${op.type} in the catalogs`);
   const typed = row && type !== undefined ? typeFields(row.table, type, row.row) : null;
-  const kind = typed?.kind ?? "item";
+  // Said to hold things, a thing of no type of its own is a container.
+  const kind = typed?.kind ?? (op.holds !== undefined ? "container" : "item");
   const fields: JsonObject = { ...typed?.fields };
   if (op.owner !== undefined) fields.owner = op.owner;
   if (op.size !== undefined) fields.size = op.size;
+  if (op.holds !== undefined) fields.holds = op.holds;
+  if (op.category !== undefined && typeof fields.category !== "string") fields.category = op.category;
+  const description = op.description?.trim() ?? "";
+  if (description !== "") fields.description = description;
   if (op.home !== undefined) fields.home = restValue(op.home);
   if (op.qty !== undefined && op.qty !== 1) fields.qty = op.qty;
   const aliases = (op.aliases ?? []).map((a) => a.trim()).filter((a) => a !== "");
@@ -277,7 +380,9 @@ function make(w: Working, op: Extract<ItemOp, { do: "make" }>, opts: ItemOpOptio
   const maybe = found.find((c) => c.secret);
   if (maybe) fields.maybe_same_as = maybe.id;
   if ("in" in op.at && !own(ctx.state.entities, op.at.in)) return reject("missing_entity", `no holder ${labelOf(ctx, op.at.in)}`);
-  const where = landing(ctx, name, sizeOfDef(ctx, kind, fields, name).size, op.at, opts, false);
+  const count = op.qty ?? 1;
+  const adding: Adding = { volumeL: (typeof fields.volume_l === "number" ? fields.volume_l : 0) * count, weightG: (typeof fields.weight_g === "number" ? fields.weight_g : 0) * count };
+  const where = landing(ctx, name, sizeOfDef(ctx, kind, fields, name).size, op.at, opts, false, adding);
   if ("code" in where) return where;
   const id = madeId(ctx, name, opts.salt);
   fields.made = { by: opts.by, at: where.spot } as unknown as JsonValue;
@@ -293,6 +398,12 @@ function make(w: Working, op: Extract<ItemOp, { do: "make" }>, opts: ItemOpOptio
   return sameSpot(where.spot, op.at) ? { made: id } : { made: id, placed: where.spot };
 }
 
+/** The grant a hold or a loan brings: a loan to one who isn't an owner; a hold only to one who may not use it already (§3.4), so staff handed the shop's tool at the shop hold it as staff and no more. */
+function handGrant(ctx: ReadContext, op: Extract<ItemOp, { do: "hand" }>, by: EntityId | null): LedgerEvent[] {
+  if (!((op.basis === "loan" && !whoseOf(ctx, op.item).owners.includes(op.to)) || (op.basis === "hold" && accessFor(ctx, op.to, op.item).use === null))) return [];
+  return [{ type: "link", rel: "uses", from: op.to, to: op.item, fields: { basis: op.basis, ...(by !== null ? { by } : {}) }, ...(op.until !== undefined ? { until: Math.round(op.until) } : {}) }];
+}
+
 function hand(w: Working, op: Extract<ItemOp, { do: "hand" }>, opts: ItemOpOptions): ItemOpApplied | Rejection {
   const ctx = w.ctx;
   const to = own(ctx.state.entities, op.to);
@@ -304,18 +415,20 @@ function hand(w: Working, op: Extract<ItemOp, { do: "hand" }>, opts: ItemOpOptio
   const owners = ownersIn(e.fields).map((o) => o.party);
   // A return goes back to the owner, or to one of an owning household's or group's own.
   if (op.basis === "return" && !owners.some((o) => o === op.to || (orgTypeOf(ctx, o) !== null && orgPower(ctx, op.to, o, "assets.use") !== null))) return reject("not_owner", `${e.name} goes back to its owner, not ${to.name}`);
+  const newOwner = op.basis === "gift" || op.basis === "sale" || op.basis === "trade";
+  const owning = newOwner && !(owners.length === 1 && owners[0] === op.to) ? ownerEvents(ctx, op.item, op.to) : [];
+  // A vehicle changes hands where it stands (§28.8): its basis applies in place, nobody carrying it.
+  if (sizeOf(ctx, op.item).size === "vehicle") {
+    if (op.basis === "theft") return reject("cant_hold", `${e.name} is a vehicle: it is taken by driving it off, not by hand`);
+    const by = own(ctx.state.entities, opts.by) ? opts.by : (owners.find((o) => own(ctx.state.entities, o) !== undefined) ?? null);
+    const events = newOwner || op.basis === "return" ? [...endGrants(ctx, op.item), ...owning] : handGrant(ctx, op, by);
+    if (events.length === 0) return reject("no_change", `${to.name} may use ${e.name} already`);
+    return applyAll(w, events) ?? {};
+  }
   const how: Record<typeof op.basis, GotHow | null> = { hold: "holding", loan: "loan", return: null, gift: "given", sale: "bought", trade: "bought", theft: "took" };
   const moved = moveThing(w, op.item, { in: op.to }, opts, op.why, how[op.basis]);
   if ("code" in moved) return moved;
-  const events: LedgerEvent[] = [];
-  if (op.basis === "gift" || op.basis === "sale" || op.basis === "trade") {
-    events.push(...endGrants(ctx, op.item));
-    if (!(owners.length === 1 && owners[0] === op.to)) events.push({ type: "set", entity: op.item, field: "owner", value: op.to });
-  } else if (op.basis === "return") events.push(...endGrants(ctx, op.item));
-  // A loan is the receiver's to use till it ends. A hold grants use only to one who may not use it
-  // already (§3.4): staff handed the shop's tool at the shop hold it as staff, so it is no more theirs
-  // to use away from the shop than before.
-  else if ((op.basis === "loan" && !whoseOf(ctx, op.item).owners.includes(op.to)) || (op.basis === "hold" && accessFor(ctx, op.to, op.item).use === null)) events.push({ type: "link", rel: "uses", from: op.to, to: op.item, fields: { basis: op.basis, ...(giver !== null ? { by: giver } : {}) }, ...(op.until !== undefined ? { until: Math.round(op.until) } : {}) });
+  const events = newOwner || op.basis === "return" ? [...endGrants(ctx, op.item), ...owning] : handGrant(ctx, op, giver);
   return applyAll(w, events) ?? moved;
 }
 
@@ -351,10 +464,15 @@ function wear(w: Working, op: Extract<ItemOp, { do: "wear" }>, opts: ItemOpOptio
   const who = own(ctx.state.entities, op.who);
   if (!e || !who || !kindIs(ctx.registry, ctx.world, who.kind, "person")) return reject("not_a_person", `${labelOf(ctx, op.who)} can't wear anything`);
   const worn = e.relations.filter((r) => (r.type === "worn_by" || r.type === "equipped") && r.to === op.who);
-  if (op.off === true) return worn.length === 0 ? reject("not_worn", `${who.name} isn't wearing ${e.name}`) : (applyAll(w, worn.map((r) => ({ type: "unlink" as const, rel: r.type, from: op.item, to: op.who }))) ?? {});
-  if (worn.length > 0) return reject("no_change", `${who.name} already wears ${e.name}`);
-  const slot = typeof e.fields.slot === "string" ? e.fields.slot : typeRowOf(ctx, e.fields)?.row.equip_slot;
-  if (typeof slot !== "string" || slot === "" || slot === "none") return reject("no_slot", `${e.name} isn't worn`);
+  const unworn = worn.map((r): LedgerEvent => ({ type: "unlink", rel: r.type, from: op.item, to: op.who }));
+  if (op.off === true) return worn.length === 0 ? reject("not_worn", `${who.name} isn't wearing ${e.name}`) : (applyAll(w, unworn) ?? {});
+  // The slot it goes in: the one asked (`slot`: "hand_held" readies it in hand), else its own.
+  const ownSlot = slotOf(ctx, e.fields);
+  const slot = op.slot ?? ownSlot;
+  if (slot === null || slot === "none") return reject("no_slot", `${e.name} isn't worn`);
+  if (op.slot !== undefined && op.slot !== ownSlot && op.slot !== "hand_held" && rowOf(ctx, "gear.slots", op.slot) === undefined) return reject("bad_slot", `there is no ${op.slot.replace(/_/g, " ")} slot`);
+  // Worn already: in that slot it is so; in another, it moves to this one.
+  if (worn.length > 0 && (op.slot === undefined || worn.some((r) => r.fields?.slot === slot))) return reject("no_change", `${who.name} already wears ${e.name}`);
   if (holdersOf(ctx.state, op.item)[0] !== op.who) {
     const moved = moveThing(w, op.item, { in: op.who }, opts, "", null);
     if ("code" in moved) return moved;
@@ -363,7 +481,7 @@ function wear(w: Working, op: Extract<ItemOp, { do: "wear" }>, opts: ItemOpOptio
   // Whatever holds the slot already comes off and stays carried (§10.3); pockets and hands hold several.
   const rel = slot === "hand_held" ? "equipped" : "worn_by";
   const taken = hasOwn(SHARED_SLOTS, slot) ? [] : Object.keys(ctx.state.entities).sort().filter((id) => id !== op.item && own(ctx.state.entities, id)?.relations.some((r) => r.type === rel && r.to === op.who && r.fields?.slot === slot));
-  return applyAll(w, [...taken.map((id): LedgerEvent => ({ type: "unlink", rel, from: id, to: op.who })), { type: "link", rel, from: op.item, to: op.who, fields: { slot } }]) ?? {};
+  return applyAll(w, [...unworn, ...taken.map((id): LedgerEvent => ({ type: "unlink", rel, from: id, to: op.who })), { type: "link", rel, from: op.item, to: op.who, fields: { slot } }]) ?? {};
 }
 
 function merge(w: Working, op: Extract<ItemOp, { do: "merge" }>, opts: ItemOpOptions): ItemOpApplied | Rejection {
@@ -441,6 +559,18 @@ function label(w: Working, op: Extract<ItemOp, { do: "label" }>): ItemOpApplied 
 }
 
 /**
+ * A person's saved sets changed (§28.16): the gear pack's (`gear.set_op`), whose events apply here
+ * as any op's; without the gear pack there are none.
+ */
+function setOp(w: Working, op: SetOp, opts: ItemOpOptions): ItemOpApplied | Rejection {
+  const sets = optionalService(w.ctx, "gear.set_op");
+  if (!sets) return reject("no_sets", "saved outfits are the gear pack's");
+  const events = sets(w.ctx, op, opts);
+  if (!Array.isArray(events)) return events;
+  return applyAll(w, events) ?? {};
+}
+
+/**
  * Applies one item op to the working state (§3.5): its events, each validated against the state the
  * ones before it left, or the op's refusal; with what it made and where the size rules put a thing
  * other than asked. Removing a thing from the world is the GM's despawn (`engine/edits`).
@@ -448,6 +578,7 @@ function label(w: Working, op: Extract<ItemOp, { do: "label" }>): ItemOpApplied 
 export function applyItemOp(w: Working, op: Exclude<ItemOp, { do: "remove" }>, opts: ItemOpOptions): ItemOpApplied | ItemOpRefusal {
   const ctx = w.ctx;
   if (op.do === "make") return make(w, op, opts);
+  if (isSetOp(op)) return setOp(w, op, opts);
   if ("from" in op) return permit(w, op);
   const missing = thingProblem(ctx, op.do === "merge" ? op.drop : op.item);
   if (missing) return missing;
@@ -462,10 +593,10 @@ export function applyItemOp(w: Working, op: Exclude<ItemOp, { do: "remove" }>, o
         const party = partyProblem(ctx, op.owner);
         if (party) return party;
       }
-      if (Array.isArray(e?.fields.owners)) return reject("shared", `${labelOf(ctx, op.item)} has owners with shares: change them in its owners`);
+      // Owners kept as a list (a vehicle, an asset with shares) become the one owner, or none.
       const owners = ownersIn(e?.fields ?? {}).map((o) => o.party);
       if (op.owner === null ? owners.length === 0 : owners.length === 1 && owners[0] === op.owner) return reject("no_change", "it is so already");
-      return applyAll(w, [{ type: "set", entity: op.item, field: "owner", value: op.owner }, ...endGrants(ctx, op.item)]) ?? {};
+      return applyAll(w, [...ownerEvents(ctx, op.item, op.owner), ...endGrants(ctx, op.item)]) ?? {};
     }
     case "grant":
     case "revoke":

@@ -124,8 +124,40 @@ export function mapSettingsOf(world: { readonly mapSettings?: unknown }): MapSet
 /** A vehicle trip's overheads when the world doesn't tune them; no speeds, so every route keeps its own minutes. */
 export const DEFAULT_TRAVEL: Readonly<TravelTuning> = Object.freeze({ speeds: {}, vehicleSpeeds: {}, startMinutes: 1, parkMinutes: 1, fetchMinutes: 30 });
 
-/** Every way of travelling a route may offer. */
-export const TRAVEL_MODES: readonly TravelMode[] = ["walk", "road", "offroad", "water"];
+/** Every way of travelling a route may offer; `air` only aircraft take, over the routes a world authors for it. */
+export const TRAVEL_MODES: readonly TravelMode[] = ["walk", "road", "offroad", "water", "air"];
+
+/** A place's mark on the player's map (DESIGN §27.9): the POV's home, a property the POV holds a part of, or one for sale; only places the POV knows. */
+export type PlaceMark = "home" | "owned" | "for_sale";
+export const PLACE_MARKS: readonly PlaceMark[] = ["home", "owned", "for_sale"];
+/** How the map's legend and the place sheet's badge name each mark. */
+export const PLACE_MARK_LABEL: Readonly<Record<PlaceMark, string>> = { home: "Home", owned: "Yours", for_sale: "For sale" };
+
+/** What the player's map says of a place's ownership (`MapPlaceView.mark`, `.property`): its mark, and the property it is when the POV may know it (theirs, or one for sale). */
+export interface PlaceMarkView {
+  mark?: PlaceMark;
+  property?: EntityId;
+}
+
+/** A place of the map view as its JSON carries it, read for its mark and property: neither on a place the POV doesn't know, a mark only of the three. */
+export function placeMarkOf(p: Readonly<Record<string, unknown>>): PlaceMarkView {
+  if (p.known === false) return {};
+  return { ...((PLACE_MARKS as readonly unknown[]).includes(p.mark) ? { mark: p.mark as PlaceMark } : {}), ...(typeof p.property === "string" && p.property !== "" ? { property: p.property } : {}) };
+}
+
+/**
+ * A place in the map view's JSON (Play's `space.map` panel), wherever one of its scopes draws it:
+ * its name, whether the POV knows it, its mark and its property (`placeMarkOf`); null when none
+ * does. A pack's part of the place sheet reads the map's facts of its place through here.
+ */
+export function mapPlaceOf(view: unknown, id: string): (PlaceMarkView & { name: string; known: boolean }) | null {
+  for (const scope of isRecord(view) && Array.isArray(view.scopes) ? view.scopes : []) {
+    for (const p of isRecord(scope) && Array.isArray(scope.places) ? scope.places : []) {
+      if (isRecord(p) && p.id === id) return { name: typeof p.name === "string" ? p.name : id, known: p.known !== false, ...placeMarkOf(p) };
+    }
+  }
+  return null;
+}
 
 /** A world's travel tuning (DESIGN §9.1), each part read for itself: one missing or malformed is the default; a speed is kept only when above 0. */
 export function travelTuningOf(world: { readonly mapSettings?: unknown }): TravelTuning {

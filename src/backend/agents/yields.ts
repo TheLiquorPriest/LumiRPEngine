@@ -114,8 +114,8 @@ function lostOf(say: (id: string, vars?: Readonly<Record<string, string>>) => st
       // A split read's changes of the Curator's types wait for it: they land only where its own work doesn't cover them.
       const held = read.held ?? [];
       if (held.length > 0) lost.push(say(YIELD_TEXT.readHeld, { count: String(held.length), types: [...new Set(held.map((p) => String(p.type)))].join(", ") }));
-      // The Curator's work is what it staged: an answer with no facts is its usual one, and one a round limit cut short says so.
-      if (kind === "curate") return read.short === "cut" ? [...lost, say(YIELD_TEXT.curatorCut)] : lost;
+      // The Curator's work is what it staged: an answer with no facts is its usual one, and one a round limit cut short, or whose closing answer couldn't be read, says so.
+      if (kind === "curate") return read.short === "cut" ? [...lost, say(YIELD_TEXT.curatorCut)] : read.short === "unclosed" ? [...lost, say(YIELD_TEXT.curatorUnclosed)] : lost;
       const untracked = read.untracked ?? [];
       if (untracked.length > 0) lost.push(say(YIELD_TEXT.readUntracked, { count: String(untracked.length), things: [...new Set(untracked)].join(", ") }));
       if (lost.length === 0 && read.proposals.length === 0) lost.push(say(YIELD_TEXT.readEmpty));

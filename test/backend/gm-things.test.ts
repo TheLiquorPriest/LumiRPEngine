@@ -3,8 +3,9 @@
 // edit's Undo, its bought fridge read from a ledger an earlier build recorded
 // (`gm-things-fridge-58b2ac44.json`: the build at 58b2ac44 put every purchase on its payer), the
 // other kinds from reads an older build could have recorded; Leave it, kept beside the chat, and
-// the findings a run shows; a thing's page with why it is had, where it rests and its history; and
-// Keep in the world, which copies the things and places the chat made in play into its world's draft.
+// the findings a run shows; a thing's page with why it is had, where it rests, its history and the
+// grants of it, a loan's end among them; and Keep in the world, which copies the things and places
+// the chat made in play into its world's draft.
 
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
@@ -13,6 +14,7 @@ import { decodeLedger, encodeLedger, journalPath, toChain } from "../../src/back
 import type { Journal, LedgerEvent, MessageLedger } from "../../src/shared/ledger";
 import type { EditOp } from "../../src/shared/protocol";
 import type { GmThingExtras, KeepResult, MadeInPlay, TidyRun } from "../../src/shared/thing-gm";
+import type { ThingPage } from "../../src/shared/thing-view";
 import type { WorldDoc } from "../../src/shared/world";
 import type { WorldState } from "../../src/engine/state";
 import { Rig } from "../support/rig";
@@ -249,6 +251,27 @@ describe("a thing's page in GM, and the list's Here", () => {
 
     await edit(rig, chatId, [{ op: "item", change: { do: "move", item: "pov_toolbox", to: { place: "alder_automotive" }, why: "Put away" } }]);
     expect(((await things(rig, chatId, { op: "thing", entity: "pov_toolbox" })).gm as GmThingExtras).putAway).toBeNull();
+  });
+
+  test("a grant with an end, one the loans Hand to… offers, is a loan the page shows until then, the GM's and the player's alike; an end before now is refused", async () => {
+    const rig = new Rig({ shipped: true });
+    const { chatId } = await portAlder(rig);
+    const page = async (): Promise<{ thing: ThingPage; gm: GmThingExtras }> => {
+      const body = await things(rig, chatId, { op: "thing", entity: "pov_toolbox" });
+      return { thing: body.thing as ThingPage, gm: body.gm as GmThingExtras };
+    };
+    const [day, , week] = (await page()).gm.loans;
+    if (!day || !week) throw new Error("no loans offered");
+    await edit(rig, chatId, [{ op: "item", change: { do: "grant", item: "pov_toolbox", who: "danny_okafor", until: day.until, by: "pov" } }]);
+    // The player's ✎ lends it for a week the same way.
+    rig.body(await rig.send({ type: "lre.fix", chatId, thing: { do: "grant", item: "pov_toolbox", who: "marcus_delgado", until: week.until } }));
+    const ends = (label: string): string => label.slice(label.indexOf("until ") + "until ".length);
+    expect((await page()).thing.grants.map((g) => [g.who.id, g.basis, g.until])).toEqual([
+      ["danny_okafor", "loan", ends(day.label)],
+      ["marcus_delgado", "loan", ends(week.label)],
+    ]);
+    const now = (await headState(rig, chatId)).state.clock;
+    expect(await rig.send({ type: "lre.edit", chatId, ops: [{ op: "item", change: { do: "grant", item: "pov_toolbox", who: "danny_okafor", until: now } }] })).toMatchObject({ type: "lre.error", message: "a grant's end is after now" });
   });
 
   test("the list says where the player character is, and why each one who has a thing has it", async () => {

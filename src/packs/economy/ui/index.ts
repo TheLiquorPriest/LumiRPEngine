@@ -1,10 +1,11 @@
 // Economy UI: your own money (Play → Me → Money, its segments Summary · Accounts · In & out ·
 // Assets · Credit, its pages riding Play's sheet stack as `money` and `account` sheets; ORG-SPEC
 // §5), an organization's Money, Ownership, Taxes and Payroll in Orgs (`r.orgTab`, with GM → Orgs'
-// versions), a person's money in GM mode, Now's money glance, the economy pack's config in Build
-// (the narrated-price cap, the claim cap, the Custom money features, products and assets), and
-// Build's editors for the structured money fields of its kinds and for places' cash machines and
-// branches. The data tables (catalog, categories, occupations, regions, finance) are all `tables`.
+// versions), a person's money in GM mode, Now's money glance, the place sheet's Property here (the
+// property a place is, Buy…, Make this a property), the economy pack's config in Build (the
+// narrated-price cap, the claim cap, the Custom money features, products and assets), and Build's
+// editors for the structured money fields of its kinds and for places' cash machines and branches.
+// The data tables (catalog, categories, occupations, regions, finance) are all `tables`.
 
 import type { UiPackDef } from "../../../frontend/registry";
 import { EconomyConfig } from "./config";
@@ -14,6 +15,7 @@ import { GmMoneySection } from "./gm";
 import { GmOrgMoneyTab, GmOrgPayrollPart, OrgMoneyTab, OrgPayrollPart } from "./orgs";
 import { GmOrgOwnershipTab, OrgOwnershipTab } from "./ownership";
 import { MoneyPanel } from "./panel";
+import { PropertyHereSection } from "./place-part";
 import { AccountSheet, MoneySheet } from "./sheet";
 import { GmOrgTaxesTab, OrgTaxesTab } from "./taxes";
 
@@ -33,6 +35,7 @@ const economy: UiPackDef = {
     r.config(EconomyConfig);
     for (const def of MONEY_FIELD_EDITORS) r.field(def);
     for (const def of MONEY_PLACE_FIELDS) r.placeField(def);
+    r.placePart({ id: "economy.here", order: 30, component: PropertyHereSection });
   },
 };
 

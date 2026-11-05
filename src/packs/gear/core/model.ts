@@ -1,5 +1,6 @@
-// Gear model (DESIGN §9.2, §9.3): containment, loads, kits as a template plus overrides, and use
-// grants. Pure functions over the state; the services and effects in index.ts turn them into events.
+// Gear model (DESIGN §9.2, §9.3): containment, loads, kits as a template plus overrides, use
+// grants, and the arsenal as world rules read it (what is readied, how many rounds are left). Pure
+// functions over the state; the services and effects in index.ts turn them into events.
 //
 // Representation (uniform at every level):
 //   - an item is `in` its holder (a person, a container, a vehicle) or lies at a `place`;
@@ -7,7 +8,9 @@
 //   - a kit is a container with a `kit` row id and a `taken` map {piece name: count}; taking a
 //     piece creates one override item (`piece`, `from_kit`), and completeness is derived;
 //   - a use grant is a `uses` relation from the borrower to the thing, with `until`; the thing is
-//     flagged `overdue` once the grant has expired.
+//     flagged `overdue` once the grant has expired;
+//   - ammunition is a stack (`qty`, rounds), never a thing per round; a weapon's type row names the
+//     ammunition it takes (`ammo`).
 
 import type { JsonObject } from "../../../shared/json";
 import { fixedReason, type FixedReason } from "../../../shared/items-build";
@@ -17,9 +20,11 @@ import type { WorldDoc } from "../../../shared/world";
 import type { ReadContext } from "../../../engine/registry";
 import type { Registry } from "../../../engine/registry-impl";
 import { numOf, objOf, strOf, own, rowOf } from "../../../engine/pack-kit";
-import { kindIs } from "../../../engine/scope";
+import { isGone, kindIs } from "../../../engine/scope";
 import { readPass } from "../../../engine/read-pass";
 import type { WorldState } from "../../../engine/state";
+import { typeRowOf } from "../../../engine/thing-index";
+import type { Adding } from "../../../engine/thing-ops";
 import { nameMeets, namesThing } from "../../../engine/thing-resolve";
 import { contentsOf, holderOf, holdsOf, sizeOf } from "../../../engine/things";
 
@@ -92,6 +97,23 @@ export function fitProblem(state: Readonly<WorldState>, item: EntityId, containe
   const load = loadOf(state, container);
   if (load.capacityL !== null && load.usedL + volumeOf(state, item) > load.capacityL + 1e-9) return "doesn't fit";
   if (load.maxKg !== null && load.usedKg + weightOf(state, item) / 1000 > load.maxKg + 1e-9) return "too heavy for it";
+  return null;
+}
+
+/**
+ * Why `holder`'s room or load can't spare what goes in (ITEMS-SPEC §3.2, on the player's own paths:
+ * `packs.gear.config.containers`): a thing, by its volume and its weight with what is in it, or what
+ * a thing being made adds; in words after its name ("doesn't fit in Daypack: 2 l of 20 l free"), or
+ * null. A holder with no capacity and no load limit takes whatever its size allows.
+ */
+export function roomProblem(ctx: ReadContext, holder: EntityId, adding: EntityId | Adding): string | null {
+  const load = loadOf(ctx.state, holder);
+  const name = own(ctx.state.entities, holder)?.name ?? holder;
+  const volume = typeof adding === "string" ? volumeOf(ctx.state, adding) : adding.volumeL;
+  const grams = typeof adding === "string" ? weightOf(ctx.state, adding) : adding.weightG;
+  const round = (n: number): number => Math.max(0, Math.round(n * 10) / 10);
+  if (load.capacityL !== null && load.usedL + volume > load.capacityL + 1e-9) return `doesn't fit in ${name}: ${round(load.capacityL - load.usedL)} l of ${round(load.capacityL)} l free`;
+  if (load.maxKg !== null && load.usedKg + grams / 1000 > load.maxKg + 1e-9) return `is too heavy for ${name}, which takes ${round(load.maxKg)} kg`;
   return null;
 }
 
@@ -271,25 +293,72 @@ export function overdueFor(state: Readonly<WorldState>, owner: EntityId): Grant[
   return grants(state).filter((g) => g.owner === owner && g.overdue);
 }
 
-// ---------------------------------------------------------------- has_item
+// ---------------------------------------------------------------- has_item, readied, ammo_of
 
 /**
- * Whether `holder` carries (transitively) a thing matching `what`: a kind (with inheritance), a
- * catalog id, a category, or words that name it by any of its names (`namesThing`, the things
- * model's one name rule: "key" names keys, never a turkey sandwich), or a piece present in a kit
- * they carry (`nameMeets`). One read pass, so the thing index the names are read from is built once
- * for everything they carry.
+ * Whether a thing is one `what` names: a kind (with inheritance), a catalog id, a category, or words
+ * that name it by any of its names (`namesThing`, the things model's one name rule: "key" names
+ * keys, never a turkey sandwich), or a piece present in it, a kit (`nameMeets`).
+ */
+function thingIs(ctx: ReadContext, id: EntityId, what: string): boolean {
+  const e = own(ctx.state.entities, id);
+  if (!e) return false;
+  if (kindIs(ctx.registry, ctx.world, e.kind, what)) return true;
+  const f: JsonObject = e.fields;
+  if (f.catalog === what || f.category === what || namesThing(ctx, id, what)) return true;
+  if (typeof f.kit !== "string" && !Array.isArray(f.pieces)) return false;
+  return kitStatus(ctx, id)?.pieces.some((p) => p.present > 0 && nameMeets(what, p.name)) ?? false;
+}
+
+/**
+ * Whether `holder` carries (transitively) a thing matching `what` (`thingIs`). One read pass, so the
+ * thing index the names are read from is built once for everything they carry.
  */
 export function hasItem(ctx: ReadContext, holder: EntityId, what: string): boolean {
-  return readPass(() =>
-    carriedBy(ctx.state, holder).some((id) => {
+  return readPass(() => carriedBy(ctx.state, holder).some((id) => thingIs(ctx, id, what)));
+}
+
+/** A thing's category: its own, else its type row's. */
+function categoryOf(ctx: ReadContext, f: Readonly<JsonObject>): unknown {
+  return typeof f.category === "string" ? f.category : typeRowOf(ctx, f)?.row.category;
+}
+
+/** Whether a thing is one `what` names for the arsenal: itself by id, its category (its type row's too), or as `has_item` names it. */
+function armsAre(ctx: ReadContext, id: EntityId, what: string): boolean {
+  const f = own(ctx.state.entities, id)?.fields;
+  return f !== undefined && (id === what || categoryOf(ctx, f) === what || thingIs(ctx, id, what));
+}
+
+/**
+ * Whether `who` has a thing `what` names readied in hand (Gear 3, the arsenal, descriptive): drawn
+ * and held ready (`equipped`), not holstered, sheathed, slung or carried.
+ */
+export function readied(ctx: ReadContext, who: EntityId, what: string): boolean {
+  return readPass(() => contentsOf(ctx.state, who).some((id) => own(ctx.state.entities, id)?.relations.some((r) => r.type === "equipped" && r.to === who) === true && !isGone(ctx.state, id) && armsAre(ctx, id, what)));
+}
+
+/** The ammunition a weapon takes: its own `ammo`, else its type row's; null for none. */
+function ammoTypeOf(ctx: ReadContext, f: Readonly<JsonObject>): string | null {
+  const ammo = typeof f.ammo === "string" && f.ammo !== "" ? f.ammo : typeRowOf(ctx, f)?.row.ammo;
+  return typeof ammo === "string" && ammo !== "" ? ammo : null;
+}
+
+/**
+ * How many rounds `who` carries (transitively) for `what`: a weapon (a thing, or a type, whose row
+ * names the ammunition it takes) counts that ammunition's stacks; anything else counts the
+ * ammunition (category `ammo`) `what` names ("ammo": every round). Each stack counts its quantity;
+ * one used up is gone.
+ */
+export function ammoOf(ctx: ReadContext, who: EntityId, what: string): number {
+  return readPass(() => {
+    const weapon = own(ctx.state.entities, what);
+    const takes = ammoTypeOf(ctx, weapon ? weapon.fields : { catalog: what });
+    let rounds = 0;
+    for (const id of carriedBy(ctx.state, who)) {
       const e = own(ctx.state.entities, id);
-      if (!e) return false;
-      if (kindIs(ctx.registry, ctx.world, e.kind, what)) return true;
-      const f: JsonObject = e.fields;
-      if (f.catalog === what || f.category === what || namesThing(ctx, id, what)) return true;
-      if (typeof f.kit !== "string" && !Array.isArray(f.pieces)) return false;
-      return kitStatus(ctx, id)?.pieces.some((p) => p.present > 0 && nameMeets(what, p.name)) ?? false;
-    }),
-  );
+      if (!e || isGone(ctx.state, id)) continue;
+      if (takes !== null ? e.fields.catalog === takes : categoryOf(ctx, e.fields) === "ammo" && armsAre(ctx, id, what)) rounds += Math.max(0, numOf(e.fields.qty, 1));
+    }
+    return rounds;
+  });
 }

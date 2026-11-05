@@ -27,7 +27,7 @@ import { mindLines } from "../packs/minds/core/section";
 import { namedInText, singlesOut } from "../packs/minds/core/fidelity";
 import { matchCatalog, transferCents, type PaidFrom } from "../packs/economy/core/index";
 import { itemName } from "../packs/economy/core/items";
-import { CURATOR_FACTS, isItemChange, isThingFact, nameTokens, sizeRank, stem, THING_FACTS } from "../shared/things";
+import { isItemChange, isThingFact, nameTokens, sizeRank, stem, THING_FACTS } from "../shared/things";
 import { holderOf, holdersOf, isThing, restOf, sizeOf, whoseOf } from "../engine/things";
 import { thingIndex } from "../engine/thing-index";
 import { factChange, reconcileFact } from "../engine/reconcile-things";
@@ -83,15 +83,16 @@ import { Agents, type BuildInfo, thisBuild } from "./agents";
 import { AgentAccounts } from "./agents/provider";
 import { EngineBook, narratorRules, sectionsOf, sectionTokens } from "./book";
 import { DEFAULT_SECTIONS } from "../shared/sections";
-import { type PromptTexts, UNCHANGED_TEXT_ID } from "../shared/prompts";
+import { promptDef, type PromptTexts, SWIPE_DIRECTION_ID, swipeDirectionOf, UNCHANGED_TEXT_ID } from "../shared/prompts";
 import { holdsSecretMark, type SecretMarkWording, secretMarkText } from "../shared/secret-marks";
-import { markWording, PromptSets, sourceTexts, turnPromptSet } from "./prompts";
+import { fillPrompt, markWording, PromptSets, resolvePrompt, sourceTexts, turnPromptSet } from "./prompts";
 import { ChatPrefs } from "./chat-prefs";
 import { ChatAgentMeta } from "./chat-agent-meta";
 import { GlobalWorkspace } from "./global-workspace";
 import { ChatMetaQueue } from "./chat-meta-queue";
 import { BlobStore } from "./agents/blobs";
 import { Sessions } from "./agents/sessions";
+import { CompactionMemo } from "./agents/compaction-memo";
 import { Sweep } from "./agents/sweep";
 import { ChatKnowledge, chatKnowledgePrefsOf, knowledgeOn, narratorView, tidyOn } from "./chat-knowledge-prefs";
 import { ChipStore, type StoredChip } from "./chips";
@@ -133,12 +134,13 @@ import { Orchestrator, type TurnCalls } from "./agents/orchestrator";
 import { Review } from "./agents/review";
 import { LiveFeeds } from "./agents/live";
 import { uncurated } from "./agents/roles/curator";
+import { quietCurator } from "./agents/curator-gate";
 import { defaultAgentSettings, KEPT_FOLDS_DEFAULT } from "../shared/agent-settings";
 import type { ExtractInput, InterpretOutcome, ProseAsk, SceneOut } from "./agents/turn-ctx";
 import { chainMarks, sceneBasis, ScenePersistence } from "./agents/persist";
-import type { RoleId } from "../shared/agent-roles";
+import { curatorKinds, type RoleId, type RoleSettings } from "../shared/agent-roles";
 import { outputsOf } from "../engine/outputs";
-import { CANNOT_STOP, DIAG_RING, STEP_LABEL, type DiagPhase } from "../shared/diagnostics";
+import { CANNOT_STOP, DIAG_RING, type DiagPhase, type DiagStep, STEP_LABEL } from "../shared/diagnostics";
 import { RETENTION_DEFAULTS } from "../shared/stores";
 // The steps by their Settings names, apart from the activity line's in-flight labels above.
 import { STEP_LABEL as STEP_NAME } from "../shared/steps";
@@ -862,6 +864,8 @@ export class Runtime implements TurnHooks {
   readonly blobs: BlobStore;
   /** The main agent's session, read along each chat's chain from the blobs its records name (DESIGN §4.4). */
   readonly sessions: Sessions;
+  /** The main session's folds, made ahead or as a turn starts, by everything their call is made from (`compaction-memo.ts`): the next turn, and a swipe of it, finds its summary made. */
+  readonly compactions = new CompactionMemo();
   /** An agent turn's review card (INC2-SPEC C13): its changes that ask first, answered through `lre.review` or its chip. */
   readonly review: Review;
   /** GM → Live (DESIGN §4.6): each chat's latest agent run as its agents work it, pushed to the pages watching it. */
@@ -869,7 +873,7 @@ export class Runtime implements TurnHooks {
   /** The agent turn loop (INC2-SPEC lane T1): a chat on agents plays each turn through its roles. */
   readonly orchestrator: Orchestrator;
   /** Smart persistence (Settings → Agents → Pipeline): each chat's last agent turn's scene, which its next turn's quiet minds and scene notes are kept by. */
-  readonly persistence = new ScenePersistence();
+  readonly persistence: ScenePersistence;
   /** Each chat's agent metadata: the learned area's index, the GM assistant's thread and a session rollback asked for (DESIGN §4.4). */
   readonly chatAgents: ChatAgentMeta;
   /** Each user's global workspace (`~/`, DESIGN §4.4): the files every chat of theirs shares, kept apart from every chat's story. */
@@ -985,6 +989,7 @@ export class Runtime implements TurnHooks {
     this.staged = new StagedActions(this.host);
     this.inspector = new InspectorLog(this.host);
     this.chatPrefs = new ChatPrefs(this.host);
+    this.persistence = new ScenePersistence(this.chatPrefs);
     this.chatKnowledge = new ChatKnowledge(this.host, this.chatMeta);
     this.book = new EngineBook(this.host, this.worlds, this.chatMeta);
     this.promptSets = new PromptSets(this.host);
@@ -1003,7 +1008,7 @@ export class Runtime implements TurnHooks {
     this.steps.gate = async (userId, connectionId, signal) => {
       const frame = turnFrame();
       if (!frame || frame.userId !== userId || (await this.chatKnowledge.engine(frame.chatId, userId)) !== "agents") return () => undefined;
-      return this.agentAccounts.atOnce(userId, connectionId ?? (await this.activeConnectionId(userId)), frame.settings.agents.throttles, signal);
+      return this.agentAccounts.atOnce(userId, connectionId ?? (await this.activeConnectionId(userId)), frame.settings.agents.throttles, signal, frame.settings.agents.callsAtOnce);
     };
     this.toolSupport = new ToolSupport(this.host);
     this.loreRouting = new LoreRouting(this.host, this.settings, this.worlds, this.bookReads);
@@ -1320,7 +1325,7 @@ export class Runtime implements TurnHooks {
     // turn's, the quiet Live minds and the scene's notes are kept (`agents/persist.ts`). The basis is
     // the head's, before this turn's own memory and tidying.
     const basis = agent ? sceneBasis(this.registry, render.world, folded.state, chainMarks(input.core, before)) : null;
-    const persist = basis ? this.persistence.hold(input.chatId, { settings: settings.agents.persist, kind: p.kind, after: lastReply ? { messageId: lastReply.id, swipeId: lastReply.swipeId } : null, basis, clock: folded.state.clock }) : null;
+    const persist = basis ? await this.persistence.hold(input.chatId, { settings: settings.agents.persist, kind: p.kind, after: lastReply ? { messageId: lastReply.id, swipeId: lastReply.swipeId } : null, basis, clock: folded.state.clock }, input.userId) : null;
     const keepScene = persist?.holds === true && settings.agents.roles.scene.run === "smart" && lastReply ? this.keptScene(input.core, lastReply) : null;
     // A Regenerate's or swipe's minds read the chat up to the reply it replaces, never that reply again.
     const asking = { chatId: input.chatId, userId: input.userId, world: render.world, state: render.state, user: text, reply: lastReply ? (lastReply.swipes[lastReply.swipeId] ?? "") : "", guidance: preset.guidance.mind ?? "", knowledge: knowing, ...(p.messageId ? { replaces: p.messageId } : {}), ...(persist?.holds === true && settings.agents.roles.minds.run === "smart" ? { persist: true } : {}) };
@@ -1414,7 +1419,7 @@ export class Runtime implements TurnHooks {
     if (basis) {
       // The turn's scene, which the next turn's Smart persistence compares with, and its plan for GM → Live.
       const keptMinds = minds.events.filter((e) => e.type === MINDS_EVENTS.mind && "data" in e && isRecord(e.data) && e.data.reason === KEPT_MIND_REASON).length;
-      this.persistence.begin(p.generationId, input.chatId, basis, folded.state.clock);
+      this.persistence.begin(p.generationId, input.chatId, basis, folded.state.clock, input.userId);
       if (keptMinds > 0 || (keepScene && !readTimelapse())) this.persistence.keptIn(p.generationId);
       const mindsOff = mindsOn(settings) ? null : "Character minds are off: Settings → Minds.";
       const asked: Partial<Record<RoleId, string | null>> = {
@@ -1852,20 +1857,22 @@ export class Runtime implements TurnHooks {
    * while votes or answers are, the open motions and requests for approval (`decisionExtractLines`); the
    * things the state shows it are the user's `shown` (ITEMS-SPEC §5.2). The
    * prepared read's, and Test's for the read role's texts. On an agent chat with the Curator on
-   * (`split`), the read's change types leave out the Curator's (`CURATOR_FACTS`: the thing facts, a
-   * purchase, a walk-on, a place made in play), which it holds aside (`held`) for where the Curator's
-   * own work doesn't cover them, and the Curator's prompt-only read (`"curator"`) is told those alone
-   * (ITEMS-SPEC §6.4, one writer per domain).
+   * (`split`), the read's change types leave out the Curator's (`curatorKinds` of its settings,
+   * `curator`: of the thing facts, a purchase, a walk-on and a place made in play, those its tools
+   * make), which it holds aside (`held`) for where the Curator's own work doesn't cover them, and
+   * the Curator's prompt-only read (`"curator"`) is told those alone (ITEMS-SPEC §6.4, one writer per
+   * domain); what its tools can't make stays the read's (a walk-on, without People's writes).
    */
-  extractInput(at: Pick<ReadInput, "world" | "state" | "pre">, input: { run: StepRun; text: string; said: string; vars: Readonly<Record<string, string>>; usual: readonly string[]; skipped: boolean; shown: number; split?: "read" | "curator" }): ExtractInput {
+  extractInput(at: Pick<ReadInput, "world" | "state" | "pre">, input: { run: StepRun; text: string; said: string; vars: Readonly<Record<string, string>>; usual: readonly string[]; skipped: boolean; shown: number; split?: "read" | "curator"; curator: Pick<RoleSettings, "families" | "tier" | "promptOnly"> }): ExtractInput {
     const { world, state } = at;
     const window = { said: [input.text, input.said], shown: input.shown };
     const places = placeMenu(this.registry, world, state, [input.text, input.said], prefixEntities(this.registry, world, state, window).flatMap(({ e }) => (typeof e.fields.place === "string" ? [e.fields.place] : [])));
     const personKinds = [...new Set([...Object.keys(world.kinds), ...this.registry.kinds.keys()])].filter((k) => kindIs(this.registry, world, k, "person"));
     // The read gives facts: the change types' own (but the item change types, which the thing facts are settled into, ITEMS-SPEC §5.2–5.4), and the thing facts.
     const every: string[] = [...EXTRACTION_TYPES.filter((t) => !(KNOWLEDGE_CHANGES as readonly string[]).includes(t) && !isItemChange(t) && (t === "time_advance" ? !input.skipped : this.registry.proposals.has(t))), ...THING_FACTS];
-    const channels = input.split === undefined ? every : every.filter((t) => CURATOR_FACTS.includes(t) === (input.split === "curator"));
-    const held = input.split === "read" ? every.filter((t) => CURATOR_FACTS.includes(t)) : [];
+    const kinds = curatorKinds(input.curator);
+    const channels = input.split === undefined ? every : every.filter((t) => kinds.includes(t) === (input.split === "curator"));
+    const held = input.split === "read" ? every.filter((t) => kinds.includes(t)) : [];
     // The engine's clock as the Scene tells it: when the player's message came, and now, after the minutes the turn's own actions took.
     const applied = clockMinutes(at.pre);
     const ctx = this.registry.context(world, state);
@@ -2568,10 +2575,11 @@ export class Runtime implements TurnHooks {
     // L27: a timelapse or speed-through turn's time passed as its timelapse, so its reply proposes no skip.
     const skipped = facts.timelapse || !!plan?.timelapse;
     // What extract reads, as classic's call and the read role are told it. On an agent chat with the
-    // Curator on (ITEMS-SPEC §6.4), the read proposes no thing, place, walk-on or purchase: the Curator,
-    // beside it, owns those, and commits after it in role order.
+    // Curator on (ITEMS-SPEC §6.4), the read proposes none of the things, places, walk-ons or
+    // purchases the Curator's tools make: the Curator, beside it, owns those, and commits after it in
+    // role order.
     const curated = this.orchestrator.isAgent(key) && settings.agents.pipeline.curator;
-    const asked = { text, said: pre?.text ?? "", vars, usual, skipped, shown: settings.thingReads.shown };
+    const asked = { text, said: pre?.text ?? "", vars, usual, skipped, shown: settings.thingReads.shown, curator: settings.agents.roles.curator };
     const extractInput = extractRun ? this.extractInput(context, { run: extractRun, ...asked, ...(curated ? { split: "read" as const } : {}) }) : null;
     const itemTexts = { facts: renderPrompt(EXTRACT_ITEM_TEXT.facts, settings.prompts.texts, {}), rules: renderPrompt(EXTRACT_ITEM_TEXT.rules, settings.prompts.texts, {}) };
     // The organization facts and their rules (ORG-SPEC §7.3); the plans' open items are each input's own.
@@ -2585,8 +2593,15 @@ export class Runtime implements TurnHooks {
     const readCall = extractRun && extractInput && budget.take() ? { run: extractRun, input: extractInput } : null;
     const extractTask = readCall ? calls.extract({ reply: text, world: live, state: context.state, input: readCall.input, classic: classicRead(readCall.run, readCall.input) }, budget.signal) : Promise.resolve<ExtractRead>({ proposals: [], where: null });
     const curatorInput = curated && readCall ? this.extractInput(context, { run: readCall.run, ...asked, split: "curator" }) : null;
-    // It is told what the turn did already, in the GM's words, so it does nothing twice. None when it failed or never ran.
-    const curateTask = readCall && curatorInput ? calls.curate({ reply: text, world: live, state: context.state, input: curatorInput, events: authorLines(this.registry, context.world, context.state, context.pre, context.pre.length), classic: classicRead(readCall.run, curatorInput) }, budget.signal) : Promise.resolve(null);
+    // The turn's own action as the player typed it, and its Buys, the first action's and the queued ones'.
+    const intent = pre ? bridge.intentOf(pre.text) : null;
+    const buyActions = intent ? [{ action: intent.action, params: intent.params }, ...(intent.queue ?? [])].filter((a) => a.action === "buy") : [];
+    // The Curator's quiet-turn gate (`pipeline.curatorGate`): on, words that name nothing it keeps, on a
+    // turn with no Buy, skip it, and the read's held facts land in its place; in shadow it only records
+    // what it would decide.
+    const quiet = curatorInput !== null && quietCurator(this, { chatId, userId, turn: key }, settings.agents.pipeline.curatorGate, { world: live, state: context.state, reply: text, said: pre?.text ?? "", buy: buyActions.length > 0 });
+    // It is told what the turn did already, in the GM's words, so it does nothing twice. None when it failed, never ran or its gate skipped it.
+    const curateTask = readCall && curatorInput && !quiet ? calls.curate({ reply: text, world: live, state: context.state, input: curatorInput, events: authorLines(this.registry, context.world, context.state, context.pre, context.pre.length), classic: classicRead(readCall.run, curatorInput) }, budget.signal) : Promise.resolve(null);
     const effectsTasks = (["extract", "choices"] as const).flatMap((purpose) => runsOf(modelUse, context.world, purpose, facts, { output: "effects", guidance })).map((r) => (budget.take() ? calls.effects({ template: r.template?.template ?? "", world: live, vars, currency: context.world.currency, classic: (signal) => promptedEffects(this.steps, r, vars, context.world.currency, userId, signal, lore(r, true)) }, budget.signal) : Promise.resolve([])));
     const npcRun = runsOf(modelUse, context.world, "npc.choose", facts, { guidance })[0];
     const offscreen = npcAsked(ties.offscreen);
@@ -2639,10 +2654,8 @@ export class Runtime implements TurnHooks {
     // typed for this turn's Buy, in minor units, when there is one). A purchase that names the Buy with
     // other things keeps the others, each its own purchase; one that may be the Buy told again is only
     // ever offered ("Also bought …?").
-    const intent = pre ? bridge.intentOf(pre.text) : null;
     // The prices the player typed for this turn's Buys (minor units), the first action's and the queued
     // ones', and the items as typed, whose words say what kind of thing the charged row's name may not.
-    const buyActions = intent ? [{ action: intent.action, params: intent.params }, ...(intent.queue ?? [])].filter((a) => a.action === "buy") : [];
     const typed = buyActions.flatMap((a) => (typeof a.params.price === "number" ? [a.params.price] : []));
     const typedItems = buyActions.flatMap((a) => (typeof a.params.item === "string" ? [a.params.item] : []));
     const unsure = new Set<JsonObject>();
@@ -2651,7 +2664,7 @@ export class Runtime implements TurnHooks {
     // prompt-only read stands in for a failed agent), each lands for what it didn't stage or answer;
     // the rest, and all of them where its work is whole, are its own.
     const held = extracted.held ?? [];
-    const short = curatedRead === null ? "it failed or never ran" : curatedRead.short === "cut" ? "a round limit stopped its agent" : curatedRead.short === "fallback" ? "its agent failed, and its prompt-only read stands in" : null;
+    const short = curatedRead === null ? (quiet ? "the quiet-turn gate skipped it" : "it failed or never ran") : curatedRead.short === "cut" ? "a round limit stopped its agent" : curatedRead.short === "unclosed" ? "its agent's closing answer couldn't be read" : curatedRead.short === "fallback" ? "its agent failed, and its prompt-only read stands in" : null;
     const fallback = short === null ? [] : uncurated(this.registry, context.world, context.state, held, { staged: this.orchestrator.stagedBy(key, "curator"), answer: curatedRead?.proposals ?? [] });
     if (held.length > 0 && short === null) this.host.log("info", `[LumiRPEngine] read ${messageId.slice(0, 8)}: the Curator's work is whole, so none of the ${held.length} change(s) the read held for it lands`, userId);
     if (held.length > 0 && short !== null) this.host.log("warn", `[LumiRPEngine] read ${messageId.slice(0, 8)}: the Curator's work isn't whole (${short}): ${fallback.length} of the ${held.length} change(s) the read held for it land through the reconciler, the rest being what it staged or answered`, userId);
@@ -3310,15 +3323,24 @@ export class Runtime implements TurnHooks {
     this.sweep.nudge(userId);
   }
 
-  /** The next swipe's mode, chosen on the swipe-option chip; consumed by that swipe. */
-  private readonly swipeChoice = new Map<ChatId, "rerun" | "renarrate">();
+  /** The next swipe's mode, chosen on the swipe-option chip, and what the player asked of its telling there; consumed by that swipe (`kindOf`). */
+  private readonly swipeChoice = new Map<ChatId, { mode: "rerun" | "renarrate"; direction?: string }>();
+  /**
+   * What each swipe's generation took (`kindOf`), by its id, for its engine run's sections
+   * (`deliver`): the direction its chip's choice carried, or that no choice asked anything of it
+   * (`plain`), so the page may ask (Settings → Swipes). In memory only.
+   */
+  private readonly swiped = new Map<string, { direction?: string; plain?: true }>();
 
   /**
    * A Re-run rolls the turn again, so a turn kept from a failed reply goes and the engine runs; a
-   * Re-narrate keeps the outcome, which the kept turn is (DESIGN §5.1).
+   * Re-narrate keeps the outcome, which the kept turn is (DESIGN §5.1). `direction` is what the
+   * player asked of the new telling (the chip's What should change?), made safe to send
+   * (`swipeDirectionOf`): for the narrator alone, and it lapses with the choice.
    */
-  setSwipeChoice(chatId: ChatId, mode: "rerun" | "renarrate"): void {
-    lruSet(this.swipeChoice, chatId, mode, 256);
+  setSwipeChoice(chatId: ChatId, mode: "rerun" | "renarrate", direction?: string): void {
+    const asked = swipeDirectionOf(direction);
+    lruSet(this.swipeChoice, chatId, { mode, ...(asked ? { direction: asked } : {}) }, 256);
     if (mode === "rerun") this.ledger.discardKept(chatId);
   }
 
@@ -3529,11 +3551,13 @@ export class Runtime implements TurnHooks {
     return this.bridges.get(chatId)?.passOutline(text, lines) ?? false;
   }
 
-  async kindOf(input: { chatId: ChatId; userId: UserId; kind: GenerationKind }): Promise<GenerationKind> {
+  async kindOf(input: { chatId: ChatId; userId: UserId; kind: GenerationKind; generationId?: string; target?: MessageId | null }): Promise<GenerationKind> {
     if (input.kind !== "swipe" && input.kind !== "regenerate") return input.kind;
     const choice = this.swipeChoice.get(input.chatId);
     this.swipeChoice.delete(input.chatId);
-    const mode = choice ?? (await this.settings.get(input.userId)).swipeDefault;
+    // A swipe of a reply no choice asked anything of is a plain one: the page may ask what should change (`deliver`).
+    if (input.generationId !== undefined && (choice?.direction !== undefined || (!choice && input.target))) lruSet(this.swiped, input.generationId, choice?.direction !== undefined ? { direction: choice.direction } : { plain: true }, 256);
+    const mode = choice?.mode ?? (await this.settings.get(input.userId)).swipeDefault;
     return mode === "renarrate" ? "renarrate" : input.kind;
   }
 
@@ -3655,7 +3679,7 @@ export class Runtime implements TurnHooks {
    * preset's outlet, puts them. The book is made, repaired, placed for the chat's revision and
    * attached first; the turn's inspector record is kept.
    */
-  async deliver(input: { chatId: ChatId; userId: UserId; core: LedgerCore; observed: ChainMessage[]; generationId: string }): Promise<Delivered> {
+  async deliver(input: { chatId: ChatId; userId: UserId; core: LedgerCore; observed: ChainMessage[]; generationId: string; stopped?: string | null }): Promise<Delivered> {
     const started = Date.now();
     const run = await this.runOf(input.chatId, input.userId);
     if (!run) throw new Error("the chat has no world attached");
@@ -3784,8 +3808,12 @@ export class Runtime implements TurnHooks {
     // The prompt set the turn was made from goes onto its record at commit, outside every hash, so a
     // later Re-narrate can be sent the same texts (DESIGN §6.12).
     if (pending) pending.prompts = await this.promptSets.put(input.userId, turnPromptSet(texts));
+    // A swipe's telling may be asked something by the player (Build C item 1): the turn's text for it, and what was asked or whether the page asks.
+    const swiped = input.stopped ? this.swiped.get(input.stopped) : undefined;
+    if (input.stopped) this.swiped.delete(input.stopped);
+    const swipe = swiped ? { text: resolvePrompt(SWIPE_DIRECTION_ID, texts).text, ...(swiped.direction !== undefined ? { direction: swiped.direction } : {}), ...(swiped.plain && settings.swipeAsk ? { ask: true as const } : {}) } : undefined;
     // Nothing goes into the book yet: the final review reads it first, and the guard of the generation that takes the turn writes it (`fill`).
-    return { bookId, fills: new Map(fills.map((f) => [f.id, f.content])), parts: fills.map((f) => ({ id: f.part, label: f.label, entry: f.id })), placed: `${preset.placed}\u0000${this.book.placedAs(bookId)}`, wording, view: narrated };
+    return { bookId, fills: new Map(fills.map((f) => [f.id, f.content])), parts: fills.map((f) => ({ id: f.part, label: f.label, entry: f.id })), placed: `${preset.placed}\u0000${this.book.placedAs(bookId)}`, wording, view: narrated, ...(swipe ? { swipe } : {}) };
   }
 
   /**
@@ -3810,6 +3838,7 @@ export class Runtime implements TurnHooks {
       else delete pending.finalEdits;
       const missed = told.missed.length > 0 ? `; ${counted(told.missed.length, "edit no longer finds its line", "edits no longer find their lines")} and changed nothing` : "";
       this.diag.yielded(at, "sections", FINAL_REVIEW_STEP, `the re-narrated turn's final review told again: ${counted(told.applied.length, "edit", "edits")}${missed}`, told.missed.length > 0);
+      this.diag.phase(at, { name: "final_review", ms: 0, cause: "told again from the swiped turn's review, with no call" });
       return this.revised(input, told.parts);
     }
     // A turn that wasn't re-narrated keeps only the edits its own review makes.
@@ -3841,9 +3870,17 @@ export class Runtime implements TurnHooks {
       if (pending && scoped.applied.length > 0) pending.finalEdits = scoped.applied;
       this.orchestrator.reviewKept(input.generationId, parts, scoped.applied);
       this.diag.yielded(at, "sections", FINAL_REVIEW_STEP, `nothing the final review sees changed since the last turn's, so none was sent: ${counted(scoped.applied.length, "edit", "edits")} of that review made again`, false);
+      this.diag.phase(at, { name: "final_review", ms: 0, cause: "nothing changed since the last turn's review, so none was sent" });
       return scoped.applied.length > 0 ? this.revised(input, whole([])) : input.delivered;
     }
-    const outcome = await this.diag.step(at, "sections", FINAL_REVIEW_STEP, () => this.orchestrator.finalReview({ generationId: input.generationId, core: input.core, observed: input.observed, parts: scoped?.changed ?? parts, signal: input.signal }), (o) => (o === null || o.reviewed ? null : { status: "failed", reason: o.stopped ? o.reason : `${o.reason}; the narrator gets the prompt as the engine made it`, ...(o.fix ? { fix: o.fix } : {}) }));
+    // Its part of the turn's time, saying what it was sent: only the parts that changed, or every part.
+    const sent = scoped ? `changed parts only, ${scoped.changed.length} of ${parts.length}` : `every part, ${parts.length}`;
+    const outcome = await this.diag.phased(
+      at,
+      "final_review",
+      () => this.diag.step(at, "sections", FINAL_REVIEW_STEP, () => this.orchestrator.finalReview({ generationId: input.generationId, core: input.core, observed: input.observed, parts: scoped?.changed ?? parts, signal: input.signal }), (o) => (o === null || o.reviewed ? null : { status: "failed", reason: o.stopped ? o.reason : `${o.reason}; the narrator gets the prompt as the engine made it`, ...(o.fix ? { fix: o.fix } : {}) })),
+      (o) => (o === null || o.reviewed ? sent : `${sent}; it failed`),
+    );
     seen(outcome?.reviewed === true);
     const edits = [...(scoped?.applied ?? []), ...(outcome?.reviewed ? outcome.edits : [])];
     if (edits.length === 0) return input.delivered;
@@ -3919,7 +3956,7 @@ export class Runtime implements TurnHooks {
   async fill(chatId: ChatId, userId: UserId, delivered: Delivered): Promise<"filled" | "moved"> {
     const now = (await this.presets.current(chatId, userId)).placed;
     if (`${now}\u0000${this.book.placedAs(delivered.bookId)}` !== delivered.placed) return "moved";
-    await this.book.write(delivered.bookId, delivered.fills, userId);
+    await this.book.write(delivered.bookId, directedFills(delivered), userId);
     lruSet(this.turnNarrator, chatId, { wording: delivered.wording, view: delivered.view }, 512);
     return "filled";
   }
@@ -4307,7 +4344,10 @@ export class Runtime implements TurnHooks {
       memo = new ViewMemo();
       this.viewMemos.set(core, memo);
     }
-    const view = buildView({ chatId, run, core, observed, registry: this.registry, world: (r) => core.worldAt(r), stored, meter: this.meter.view(userId), mapDisplay, knowledge, offstage: settings.offstage, memo });
+    // Each panel's cost, kept by Diagnostics where it is slow, so the next log names it.
+    const parts: DiagStep[] = [];
+    const view = buildView({ chatId, run, core, observed, registry: this.registry, world: (r) => core.worldAt(r), stored, meter: this.meter.view(userId), mapDisplay, knowledge, offstage: settings.offstage, memo, parts });
+    for (const p of parts) this.diag.slow(userId, chatId, `state view/${p.name}`, p.ms);
     view.panels["core.context"] = this.inspectorView(chatId, userId);
     // A turn kept from a reply that failed waits on the player (DESIGN §5.1): its card shows while it lasts.
     const kept = this.ledger.keptOf(chatId);
@@ -5019,6 +5059,21 @@ function paidWords(paid: PaidFrom | null, world: WorldDoc): { label: string; det
 function buyerOf(p: JsonObject, ctx: ReadContext): string | null {
   const payer = optionalQuery(ctx, "economy.purchaser")?.(ctx, p) ?? ctx.world.pov;
   return payer === ctx.world.pov ? null : refName(ctx, "person", payer);
+}
+
+/**
+ * What the guard writes for a turn (`Runtime.fill`): its fills, and for a swipe the player asked
+ * something of (`Delivered.swipe`), the narrator rules ending with the turn's text for it, filled
+ * with what they asked. Nothing else holds it: it reaches the narrator, for this telling only.
+ */
+function directedFills(delivered: Delivered): ReadonlyMap<string, string> {
+  const swipe = delivered.swipe;
+  const entry = delivered.parts.find((p) => p.id === RULES_PART)?.entry;
+  const def = promptDef(SWIPE_DIRECTION_ID);
+  if (swipe?.direction === undefined || entry === undefined || !def) return delivered.fills;
+  const fills = new Map(delivered.fills);
+  fills.set(entry, `${fills.get(entry) ?? ""}\n\n${fillPrompt(def, swipe.text, { direction: swipe.direction }).trim()}`);
+  return fills;
 }
 
 /**

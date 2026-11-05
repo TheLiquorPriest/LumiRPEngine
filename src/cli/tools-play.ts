@@ -11,7 +11,7 @@ import type { InferredChecks } from "../shared/inferred";
 import type { JsonObject, JsonValue } from "../shared/json";
 import { hasOwn, isRecord } from "../shared/json";
 import { parsePointer } from "../shared/json-patch";
-import { GM_KEYED_PARTS, GM_OUTLINE, GM_PARTS, keyedItem, type GmKeyedPart, type GmOutline, type GmPart, type QueuedOn } from "../shared/gm-parts";
+import { GM_IDS_PARTS, GM_KEYED_PARTS, GM_OUTLINE, GM_PARTS, GM_ROSTER, keyedItem, type GmKeyedPart, type GmOutline, type GmPartAnswer, type GmPartReply, type GmReadPart, type QueuedOn } from "../shared/gm-parts";
 import type { EventRef, ResolveScope, TimeControl, TimeScope } from "../shared/ledger";
 import type { MindEditOp } from "../shared/minds";
 import type { RoutineEditOp } from "../shared/routines";
@@ -51,18 +51,20 @@ export const PAGING: JsonObject = { pointer: POINTER, offset: OFFSET, from: FROM
 /** The command line's paging flags of a read tool, and how its usage shows them. */
 export const PAGING_OPTIONS: NonNullable<CliMirror["options"]> = { "--pointer": { arg: "pointer", as: "text" }, "--offset": { arg: "offset", as: "int" }, "--from": { arg: "from", as: "int" }, "--limit": { arg: "limit", as: "int" } };
 export const PAGING_USAGE = "[--pointer <p>] [--offset <n> | --from <n> [--limit <n>]]";
-/** What a GM read picks besides its part (`gmRead`): one entity, party's money or organization, the entities of a kind, compact entities; its paging after them. */
+/** What a GM read picks besides its part (`gmRead`): one entity, party's money or organization, several by ids, the entities of a kind, compact entities, the key it holds; its paging after them. */
 export const GM_PICKS: JsonObject = {
   entity: { type: "string", description: "One entity, by id or name." },
   party: { type: "string", description: "One party's money (a person, household, business, trust or group), by id or name." },
   account: { type: "string", description: "With party: only this account of theirs (id or name), its cards, lines and standing payments." },
   org: { type: "string", description: "One organization as GM → Orgs shows it, by id or name." },
-  kind: { type: "string", description: "Only entities of this kind, or of a kind extending it." },
+  ids: { type: "array", items: { type: "string" }, description: "With part entities, roster, money or orgs: only these, by id, in this order (at most 500)." },
+  kind: { type: "string", description: "Only entities (or roster entries, or money) of this kind, or of a kind extending it." },
   compact: { type: "boolean", description: "Entities with each field's definition once per kind (/fieldDefs), each field's value alone." },
+  since: { type: "string", description: "The key an earlier read of this part answered with: while the chat is unchanged, the answer says so and sends nothing again." },
   ...PAGING,
 };
 /** The command line's flags for `GM_PICKS`. */
-export const GM_PICK_OPTIONS: NonNullable<CliMirror["options"]> = { "--entity": { arg: "entity", as: "text" }, "--party": { arg: "party", as: "text" }, "--account": { arg: "account", as: "text" }, "--org": { arg: "org", as: "text" }, "--kind": { arg: "kind", as: "text" }, "--compact": { arg: "compact", as: "flag" }, ...PAGING_OPTIONS };
+export const GM_PICK_OPTIONS: NonNullable<CliMirror["options"]> = { "--entity": { arg: "entity", as: "text" }, "--party": { arg: "party", as: "text" }, "--account": { arg: "account", as: "text" }, "--org": { arg: "org", as: "text" }, "--ids": { arg: "ids", as: "list" }, "--kind": { arg: "kind", as: "text" }, "--compact": { arg: "compact", as: "flag" }, "--since": { arg: "since", as: "text" }, ...PAGING_OPTIONS };
 
 /** What a held write waits on, as its answer tells it (`queued`): it lands once that turn is over. */
 const QUEUED: Record<QueuedOn, string> = {
@@ -167,6 +169,14 @@ const PICKS = { entity: "entities", party: "money", org: "orgs" } as const satis
 /** lre_gm's part that reads the whole view at once: on a large world it is many megabytes, so a bare call reads the view's outline instead. */
 export const GM_ALL = "all";
 
+/** What a GM read asks of one part besides its name: one item by id or name, several by ids, those of a kind, and the key the reader holds. */
+export interface GmReadPick {
+  id?: string;
+  ids?: string[];
+  kind?: string;
+  since?: string;
+}
+
 /**
  * Where a GM read comes from: a chat on the host (`lre.gm.part`, `lre.gm`), or a sandbox on this
  * machine (DESIGN §23), which has the world's parts alone. `what` is how its answers name it.
@@ -174,9 +184,13 @@ export const GM_ALL = "all";
 export interface GmSource {
   what: string;
   /** The parts it has, in the view's order. */
-  parts: readonly GmPart[];
-  /** One part, built alone; with `id`, of the entities, money or organizations only that one (an empty list when there is none). A name several share is refused. */
-  part(part: GmPart, id?: string): Promise<{ id: string | null; value: unknown }>;
+  parts: readonly GmReadPart[];
+  /**
+   * One part, built alone; with `id`, of the entities, money or organizations only that one (an
+   * empty list when there is none), with `ids` those, with `kind` those of that kind. A name several
+   * share is refused. `key`: the chat's head it was read at; `same`: still the `since` key, nothing sent.
+   */
+  part(part: GmReadPart, pick?: GmReadPick): Promise<{ id: string | null; value: unknown; key?: string; same?: true }>;
   /** How many each part holds. */
   outline(): Promise<GmOutline>;
   /** Every part at once. */
@@ -189,12 +203,15 @@ export interface GmSource {
 function chatGm(ctx: ToolContext, chatId: string): GmSource {
   return {
     what: `the GM view of chat ${chatId}`,
-    parts: GM_PARTS,
-    part: async (part, id) => {
-      const read = await ask(ctx, chatId, "lre.gm.part", { chatId, part, ...(id !== undefined ? { id } : {}) });
-      return { id: read.id, value: read.value };
+    parts: [GM_PARTS[0], GM_ROSTER, ...GM_PARTS.slice(1)],
+    part: async (part, pick = {}) => {
+      const read = await ask(ctx, chatId, "lre.gm.part", { chatId, part, ...pick });
+      return read.same ? { id: read.id, value: null, key: read.key, same: true } : { id: read.id, value: read.value, key: read.key };
     },
-    outline: async () => (await ask(ctx, chatId, "lre.gm.part", { chatId, part: GM_OUTLINE })).value as GmOutline,
+    outline: async () => {
+      const read = await ask(ctx, chatId, "lre.gm.part", { chatId, part: GM_OUTLINE });
+      return read.same || read.part !== GM_OUTLINE ? [] : read.value;
+    },
     whole: () => ask(ctx, chatId, "lre.gm", { chatId }),
     noneNamed: (part, said) => noneNamed(part, said, `chat ${chatId}`),
   };
@@ -216,6 +233,8 @@ async function gmView(args: Args, ctx: ToolContext): Promise<ToolResult> {
 export async function gmRead(args: Args, source: GmSource): Promise<ToolResult> {
   const asked = textArg(args, "part");
   const kind = textArg(args, "kind");
+  const ids = textsArg(args, "ids");
+  const since = textArg(args, "since");
   const account = textArg(args, "account");
   const compact = boolArg(args, "compact");
   const picked = Object.entries(PICKS).flatMap(([arg, part]) => {
@@ -227,10 +246,13 @@ export async function gmRead(args: Args, source: GmSource): Promise<ToolResult> 
   const part = asked === undefined ? undefined : asked.trim() === GM_ALL ? GM_ALL : source.parts.find((p) => p === asked.trim());
   if (asked !== undefined && part === undefined) throw new ToolError(`part is one of ${source.parts.join(", ")} or ${GM_ALL}, not ${JSON.stringify(asked)}.`);
   if (account !== undefined && pick?.arg !== "party") throw new ToolError("account cuts one party's money to one account: give party with it.");
-  if ((kind !== undefined || compact) && (pick ? pick.part !== "entities" : part !== undefined && part !== "entities")) throw new ToolError("kind and compact read the entities: give them with part entities, entity, or neither.");
+  if (compact && (pick ? pick.part !== "entities" : part !== undefined && part !== "entities")) throw new ToolError("compact reads the entities: give it with part entities, entity, or neither.");
+  if (kind !== undefined && (pick ? pick.part !== "entities" : part !== undefined && part !== "entities" && part !== GM_ROSTER && part !== "money")) throw new ToolError("kind reads the entities, the roster or the money: give it with part entities, roster or money, entity, or alone.");
+  if (ids !== undefined && (pick !== undefined || part === undefined || part === GM_ALL || !GM_IDS_PARTS.includes(part))) throw new ToolError(`ids read some of ${GM_IDS_PARTS.join(", ")}: give them with one of those parts.`);
+  if (since !== undefined && (part === undefined || part === GM_ALL)) throw new ToolError("since rereads one part: give it with that part.");
   const { what } = source;
   if (pick) {
-    const { id, value } = await source.part(pick.part, pick.said);
+    const { id, value } = await source.part(pick.part, { id: pick.said });
     const [one] = value as JsonValue[];
     if (one === undefined) throw new ToolError(source.noneNamed(pick.part, pick.said));
     const root = pick.part === "entities" && compact ? compacted([one as unknown as GmEntity]) : pick.part === "money" && account !== undefined ? onlyAccount(one as JsonObject, account, `${pick.said}'s money`) : one;
@@ -239,23 +261,11 @@ export async function gmRead(args: Args, source: GmSource): Promise<ToolResult> 
   if (part === GM_ALL) return readOut(await source.whole(), `${what}: everything as it stands, secrets included`, args);
   if (part !== undefined || kind !== undefined || compact) {
     const read = part ?? "entities";
-    let value = (await source.part(read)).value;
-    if (read === "entities" && kind !== undefined) {
-      const { value: kinds } = await source.part("kinds");
-      const parents = new Map((kinds as GmView["kinds"]).map((k) => [k.id, k.extends]));
-      // A kind matches what it is or extends, as the engine's `kindIs` walks the chain.
-      const isKind = (k: string): boolean => {
-        const seen = new Set<string>();
-        for (let at: string | null = k; at !== null && !seen.has(at); at = parents.get(at) ?? null) {
-          if (at === kind) return true;
-          seen.add(at);
-        }
-        return false;
-      };
-      value = (value as GmEntity[]).filter((e) => isKind(e.kind));
-    }
-    const root = read === "entities" && compact ? compacted(value as GmEntity[]) : value;
-    return readOut(root, `${what}: its ${read}${kind !== undefined ? ` of kind ${kind}` : ""}${compact ? ", each field's definition once per kind under /fieldDefs" : ""}`, args);
+    const got = await source.part(read, { ...(ids ? { ids } : {}), ...(kind !== undefined ? { kind } : {}), ...(since !== undefined ? { since } : {}) });
+    // Read at the key this read held: nothing changed, so nothing is sent again.
+    if (got.same) return readOut({ same: true, key: got.key ?? since ?? null }, `${what}: its ${read}, unchanged since key ${since}`, args);
+    const root = read === "entities" && compact ? compacted(got.value as GmEntity[]) : got.value;
+    return readOut(root, `${what}: its ${read}${ids ? `, ${ids.length} by id` : ""}${kind !== undefined ? ` of kind ${kind}` : ""}${compact ? ", each field's definition once per kind under /fieldDefs" : ""}${got.key !== undefined ? ` (key ${got.key}: pass it as since to read this again only once it changed)` : ""}`, args);
   }
   // A pointer into one part reads that part alone; one keyed into a list of entities, money or organizations builds that one alone.
   let tokens: string[] = [];
@@ -269,7 +279,7 @@ export async function gmRead(args: Args, source: GmSource): Promise<ToolResult> 
     const second = tokens[1];
     const keyed = GM_KEYED_PARTS.find((p) => p === first);
     const id = keyed !== undefined && second !== undefined && !/^(0|[1-9]\d*)$/.test(second) ? second : undefined;
-    const { value } = await source.part(first, id);
+    const { value } = await source.part(first, id !== undefined ? { id } : {});
     if (keyed !== undefined && id !== undefined && Array.isArray(value) && value.length === 0) throw new ToolError(source.noneNamed(keyed, id));
     return readOut({ [first]: value }, `${what}: everything as it stands, secrets included`, args);
   }
@@ -336,7 +346,13 @@ async function minds(args: Args, ctx: ToolContext): Promise<ToolResult> {
   gate(args, "lre_minds", "shows characters' private minds, plans and notes");
   const chatId = chatIdOf(args);
   const [gm, status] = await Promise.all([ask(ctx, chatId, "lre.gm.part", { chatId, part: "minds" }), ask(ctx, chatId, "lre.minds", { chatId, op: "status" })]);
-  return readOut({ ...(gm.value as GmView["minds"]), run: status.run }, `the character minds of chat ${chatId} (secrets included), with the latest Run minds now`, args);
+  return readOut({ ...(builtPart(gm).value as GmView["minds"]), run: status.run }, `the character minds of chat ${chatId} (secrets included), with the latest Run minds now`, args);
+}
+
+/** A part read that held no key (`since`): what was built, which such a read is always answered with. */
+function builtPart(read: GmPartReply): GmPartAnswer {
+  if (read.same) throw new ToolError("The GM view answered unchanged to a read that held no key.");
+  return read;
 }
 
 /** A thing as lre_items_find answers it: its id and name, its type, its size, where it is (outermost first), whose it is and who has it, and whether it is hidden or secret. */
@@ -413,7 +429,7 @@ async function orgsRead(args: Args, ctx: ToolContext): Promise<ToolResult> {
   if (boolArg(args, "spoilers")) {
     // The party is named by words its page doesn't carry: it is found among them all.
     const byWords = said !== undefined && hasOwn(PARTY_WORDS, said.trim().toLowerCase());
-    const { value } = await ask(ctx, chatId, "lre.gm.part", { chatId, part: "orgs", ...(said !== undefined && !byWords ? { id: said } : {}) });
+    const { value } = builtPart(await ask(ctx, chatId, "lre.gm.part", { chatId, part: "orgs", ...(said !== undefined && !byWords ? { id: said } : {}) }));
     const orgs = value as GmView["orgs"];
     if (said === undefined) return answer({ chatId, organizations: orgs.map((o): JsonValue => ({ id: o.page.id, name: o.page.name, type: o.page.type, badge: o.page.badge, runBy: o.page.runBy.map((r) => r.name), people: o.page.people.length })), about: "Read one with lre_orgs {chatId, org, part?, spoilers: true}; change one with lre_gm_edit's org op." }, `GM → Orgs of chat ${chatId}`);
     const one = byWords ? orgs.find((o) => o.page.type === "party") : orgs[0];

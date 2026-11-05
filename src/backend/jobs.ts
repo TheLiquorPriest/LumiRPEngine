@@ -76,12 +76,19 @@ function isProposal(raw: unknown): raw is JobProposal {
   return raw.index === undefined || (isRecord(raw.index) && Array.isArray(raw.index.terms) && raw.index.terms.every((t) => typeof t === "string") && Array.isArray(raw.index.topics) && raw.index.topics.every((t) => isRecord(t) && typeof t.id === "string" && typeof t.label === "string"));
 }
 
+/** A Check world day's process times as stored: each a finite, non-negative number of ms, else none. */
+function processMsOf(raw: unknown): { processMs: Record<string, number> } | Record<string, never> {
+  if (!isRecord(raw)) return {};
+  const ms = Object.fromEntries(Object.entries(raw).filter((e): e is [string, number] => typeof e[1] === "number" && Number.isFinite(e[1]) && e[1] >= 0));
+  return Object.keys(ms).length > 0 ? { processMs: ms } : {};
+}
+
 /** A stored result as the review reads it: entries of the wrong shape are dropped (the file comes from storage, not from us). */
 function storedResult(raw: unknown): JobResult | undefined {
   if (!isRecord(raw)) return undefined;
   if (Array.isArray(raw.proposals)) return { proposals: (JSON.parse(JSON.stringify(raw.proposals)) as unknown[]).filter(isProposal), ...(isRecord(raw.next) ? { next: JSON.parse(JSON.stringify(raw.next)) as JsonObject } : {}) };
   if (!Array.isArray(raw.turns) || !Array.isArray(raw.lint)) return undefined;
-  const turns = raw.turns.flatMap((t) => (isRecord(t) && typeof t.user === "string" && typeof t.reply === "string" && Array.isArray(t.notes) ? [{ user: t.user, reply: t.reply, notes: t.notes.filter((n): n is string => typeof n === "string") }] : []));
+  const turns = raw.turns.flatMap((t) => (isRecord(t) && typeof t.user === "string" && typeof t.reply === "string" && Array.isArray(t.notes) ? [{ user: t.user, reply: t.reply, notes: t.notes.filter((n): n is string => typeof n === "string"), ...processMsOf(t.processMs) }] : []));
   const lint = raw.lint.flatMap((l) => (isRecord(l) && typeof l.severity === "string" && hasOwn(SEVERITIES, l.severity) && typeof l.path === "string" && typeof l.code === "string" && typeof l.message === "string" ? [{ severity: l.severity as LintIssue["severity"], path: l.path, code: l.code, message: l.message }] : []));
   return { turns, lint };
 }

@@ -5,11 +5,13 @@
 // then committed from the Build bar. The backend keeps each job (`lre.job list`), so a reload or a
 // restart shows the last run of each tool again, and a job a restart cut off as interrupted, with its
 // proposals so far and Run it again. A pass of Propose routines that stops before everyone was read
-// offers Continue (propose-routines.tsx has its start form and review).
+// offers Continue (propose-routines.tsx has its start form and review). Check world's days each say
+// which simulated processes took longest that day.
 // A job's page leads with its status and results; Apply stays in reach in
 // a sticky bar while the review scrolls.
 
 import { useEffect, useId, useMemo, useState } from "preact/hooks";
+import { phaseTimeText } from "../../shared/diagnostics";
 import { hasOwn, isRecord } from "../../shared/json";
 import type { JsonObject, JsonValue } from "../../shared/json";
 import { addToLoreIndex, loreIndexJson, loreSourceOf } from "../../shared/lore";
@@ -446,7 +448,33 @@ function ProposalReview(props: { app: App; worldId: string; proposals: JobPropos
   );
 }
 
-/** A playtest's transcript, or what Check world saw day by day, then the issues the run found. */
+/** Processes a Check world day names, slowest first. */
+const SLOWEST_SHOWN = 5;
+
+/**
+ * A Check world day's slowest simulated processes, as the day says them ("Slowest processes:
+ * economy.flows 1.2 s · castlife.routine 340 ms"): the `SLOWEST_SHOWN` that took longest, by id, each
+ * at least a millisecond; null when none did. Wall clock: a second run's times differ.
+ */
+export function slowestProcessesText(ms: Readonly<Record<string, number>>): string | null {
+  const slowest = Object.entries(ms)
+    .filter(([, t]) => Number.isFinite(t) && t >= 1)
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .slice(0, SLOWEST_SHOWN);
+  return slowest.length === 0 ? null : `Slowest processes: ${slowest.map(([id, t]) => `${id} ${phaseTimeText(t)}`).join(" · ")}`;
+}
+
+/** A Check world day's slowest processes, under its notes; nothing when none took a millisecond. Hook-free. */
+function DayTimes(props: { ms: Readonly<Record<string, number>> }) {
+  const text = slowestProcessesText(props.ms);
+  return text === null ? null : (
+    <span class="lre-small lre-muted lre-num" style={{ overflowWrap: "anywhere" }} data-lre-day-times>
+      {text}
+    </span>
+  );
+}
+
+/** A playtest's transcript, or what Check world saw day by day (with each day's slowest processes), then the issues the run found. */
 function RunReport(props: { kind: JobKind; worldId: string; report: Extract<JobResult, { turns: unknown }> }) {
   const app = useApp();
   const doc = useSelect(app.drafts, (d) => (d?.worldId === props.worldId ? d.doc : undefined));
@@ -472,6 +500,7 @@ function RunReport(props: { kind: JobKind; worldId: string; report: Extract<JobR
                   ))}
                 </ul>
               ) : null}
+              {turn.processMs ? <DayTimes ms={turn.processMs} /> : null}
             </li>
           ))}
         </ol>

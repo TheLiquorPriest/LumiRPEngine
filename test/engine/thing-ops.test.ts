@@ -3,7 +3,11 @@
 // seeded random sequences); the size rules bite when an op is resolved (a refrigerator put on Jordan
 // lands where he stands, nothing goes into something smaller, a part never moves, a Built-in thing
 // moves only when confirmed); a make finds what it would make first; a handover moves possession,
-// never ownership, unless it gives, sells or trades; and a merge never puts a thing inside itself.
+// never ownership, unless it gives, sells or trades, and a vehicle changes hands where it stands; a
+// merge never puts a thing inside itself; a thing is worn in a slot of its own, Ready in hand; on the
+// player's own paths a holder's room, its load and how deep things nest count; and the player's ✎
+// on a thing of theirs says whose it is, who may use it, what it is called, puts it away or hands it
+// to someone here, and adds a thing, under the player's rules (DESIGN §28.8).
 
 import { describe, expect, test } from "bun:test";
 import type { EntityId } from "../../src/shared/ids";
@@ -211,6 +215,38 @@ describe("a handover moves possession, never ownership, unless the story gives, 
   });
 });
 
+describe("a vehicle changes hands where it stands (DESIGN §28.8)", () => {
+  test("Jordan lends Danny his pickup: it stays at 114 Harbor Street, Danny's to use till then; given, it is Danny's and the loan ends; it is never taken by hand", () => {
+    const w = portAlder();
+    const until = w.state.clock + 600;
+    expect(applyItemOp(w, { do: "hand", item: "pov_truck", to: DANNY, basis: "loan", until, why: "Danny needs a truck" }, STORY)).toEqual({});
+    expect(spotOf(w.state, "pov_truck")).toEqual({ place: "harbor_street_114" });
+    expect(w.state.entities.pov_truck?.fields.owner).toBe(JORDAN);
+    expect(w.state.entities[DANNY]?.relations).toContainEqual({ type: "uses", to: "pov_truck", fields: { basis: "loan", by: JORDAN }, until });
+    expect(applyItemOp(w, { do: "hand", item: "pov_truck", to: DANNY, basis: "theft", why: "" }, STORY)).toEqual({ code: "cant_hold", reason: "Your pickup is a vehicle: it is taken by driving it off, not by hand" });
+    expect(applyItemOp(w, { do: "hand", item: "pov_truck", to: DANNY, basis: "gift", why: "Keep it" }, STORY)).toEqual({});
+    expect(spotOf(w.state, "pov_truck")).toEqual({ place: "harbor_street_114" });
+    expect(w.state.entities.pov_truck?.fields.owner).toBe(DANNY);
+    expect(w.state.entities[DANNY]?.relations.some((r) => r.type === "uses" && r.to === "pov_truck")).toBe(false);
+    // His now, he may use it already: a hold changes nothing.
+    expect(applyItemOp(w, { do: "hand", item: "pov_truck", to: DANNY, basis: "hold", why: "" }, STORY)).toMatchObject({ code: "no_change" });
+  });
+
+  test("owners kept as a list become the one owner, or none, where they were refused before", () => {
+    const w = portAlder((world) => {
+      world.entities.skiff = { id: "skiff", kind: "vehicle", name: "Shared skiff", tier: "background", fields: { class: "bass_boat_outboard", place: "alder_harbor_marina", owners: [{ party: JORDAN, role: "owner", share: 50 }, { party: DANNY, role: "owner", share: 50 }] }, relations: [] };
+    });
+    expect(applyItemOp(w, { do: "own", item: "skiff", owner: JORDAN, why: "Jordan bought Danny out" }, GM)).toEqual({});
+    expect(w.state.entities.skiff?.fields.owners).toEqual([{ party: JORDAN, role: "owner" }]);
+    expect(applyItemOp(w, { do: "own", item: "skiff", owner: JORDAN, why: "" }, GM)).toMatchObject({ code: "no_change" });
+    // Given for keeps, the receiver is its one owner, and it stays at the marina.
+    expect(applyItemOp(w, { do: "hand", item: "skiff", to: DANNY, basis: "gift", why: "" }, GM)).toEqual({});
+    expect([w.state.entities.skiff?.fields.owners, spotOf(w.state, "skiff")]).toEqual([[{ party: DANNY, role: "owner" }], { place: "alder_harbor_marina" }]);
+    expect(applyItemOp(w, { do: "own", item: "skiff", owner: null, why: "" }, GM)).toEqual({});
+    expect(w.state.entities.skiff?.fields.owners).toEqual([]);
+  });
+});
+
 // ---------------------------------------------------------------- merging
 
 describe("a merge never puts a thing inside itself (ITEMS-SPEC §3.3, §7.5)", () => {
@@ -279,6 +315,104 @@ describe("wearing takes off what holds the slot, and a thing worn but lying else
   });
 });
 
+describe("a thing is worn in a slot of its own, and Ready is in hand (DESIGN §28.8)", () => {
+  /** Port Alder with a hunting knife and a machete on Jordan, each kept in a sheath. */
+  const armed = (): Working =>
+    portAlder((world) => {
+      world.entities.knife = thing("knife", "Hunting knife", { owner: JORDAN, category: "weapon", slot: "sheath" }, [{ type: "in", to: JORDAN }]);
+      world.entities.machete = thing("machete", "Machete", { owner: JORDAN, category: "weapon", slot: "sheath" }, [{ type: "in", to: JORDAN }]);
+    });
+  /** How a thing is on Jordan: each relation that wears or readies it, with its slot. */
+  const on = (w: Working, id: string): [string, unknown][] => (w.state.entities[id]?.relations ?? []).filter((r) => (r.type === "worn_by" || r.type === "equipped") && r.to === JORDAN).map((r) => [r.type, r.fields?.slot]);
+
+  test("the knife goes in its sheath, is readied in hand and goes back to the sheath; readied twice, it is so already", () => {
+    const w = armed();
+    expect(applyItemOp(w, { do: "wear", item: "knife", who: JORDAN }, STORY)).toEqual({});
+    expect(on(w, "knife")).toEqual([["worn_by", "sheath"]]);
+    expect(applyItemOp(w, { do: "wear", item: "knife", who: JORDAN, slot: "hand_held" }, STORY)).toEqual({});
+    expect(on(w, "knife")).toEqual([["equipped", "hand_held"]]);
+    expect(applyItemOp(w, { do: "wear", item: "knife", who: JORDAN, slot: "hand_held" }, STORY)).toMatchObject({ code: "no_change" });
+    expect(applyItemOp(w, { do: "wear", item: "knife", who: JORDAN, slot: "sheath" }, STORY)).toEqual({});
+    expect(on(w, "knife")).toEqual([["worn_by", "sheath"]]);
+  });
+
+  test("a sheath takes one: the machete in it takes the knife off, still carried; anything may be readied; a slot the slots table hasn't is refused", () => {
+    const w = armed();
+    expect(applyItemOp(w, { do: "wear", item: "knife", who: JORDAN }, STORY)).toEqual({});
+    expect(applyItemOp(w, { do: "wear", item: "machete", who: JORDAN }, STORY)).toEqual({});
+    expect([on(w, "knife"), on(w, "machete"), spotOf(w.state, "knife")]).toEqual([[], [["worn_by", "sheath"]], { in: JORDAN }]);
+    // The flashlight in the pickup's glovebox has no slot of its own: readied, it comes out into his hand.
+    expect(applyItemOp(w, { do: "wear", item: "pov_flashlight", who: JORDAN, slot: "hand_held" }, STORY)).toEqual({});
+    expect([spotOf(w.state, "pov_flashlight"), on(w, "pov_flashlight")]).toEqual([{ in: JORDAN }, [["equipped", "hand_held"]]]);
+    // Any slot the slots table has: his watch moves from his wrist to his waist.
+    expect(applyItemOp(w, { do: "wear", item: "pov_watch", who: JORDAN, slot: "waist" }, STORY)).toEqual({});
+    expect(on(w, "pov_watch")).toEqual([["worn_by", "waist"]]);
+    expect(applyItemOp(w, { do: "wear", item: "pov_watch", who: JORDAN, slot: "tail" }, STORY)).toEqual({ code: "bad_slot", reason: "there is no tail slot" });
+  });
+});
+
+describe("on the player's own paths a holder's room, its load and how deep things nest count (DESIGN §28.8)", () => {
+  /** An op on the player character's own path (an action, a ✎ fix): `room`. */
+  const PLAYER: ItemOpOptions = { by: JORDAN, confirmed: false, gm: false, salt: "test", room: true };
+  /** Port Alder with the gear pack's config as given and Jordan at the shop, where a shoebox takes a litre and a kilogram; a ball and a brick on him. */
+  function shop(config: JsonObject = {}): Working {
+    return portAlder((world) => {
+      world.packs.gear = { version: world.packs.gear?.version ?? 1, config };
+      const pov = world.entities[JORDAN];
+      if (pov) pov.fields.place = "alder_automotive";
+      world.entities.shoebox = { id: "shoebox", kind: "container", name: "Shoebox", tier: "background", fields: { owner: JORDAN, capacity_l: 1, max_load_kg: 1, holds: "hand", place: "alder_automotive" }, relations: [] };
+      world.entities.ball = thing("ball", "Ball", { owner: JORDAN, size: "hand", volume_l: 2, weight_g: 100 }, [{ type: "in", to: JORDAN }]);
+      world.entities.brick = thing("brick", "Brick", { owner: JORDAN, size: "hand", volume_l: 0.5, weight_g: 2500 }, [{ type: "in", to: JORDAN }]);
+    });
+  }
+  const into = (item: string, holder: string): Op => ({ do: "move", item, to: { in: holder }, why: "" });
+
+  test("the ball doesn't fit and the brick is too heavy for the shoebox, nor four mugs made in it; the story's and the GM's moves land as told", () => {
+    const w = shop();
+    expect(applyItemOp(w, into("ball", "shoebox"), PLAYER)).toEqual({ code: "no_room", reason: "Ball doesn't fit in Shoebox: 1 l of 1 l free" });
+    expect(applyItemOp(w, into("brick", "shoebox"), PLAYER)).toEqual({ code: "no_room", reason: "Brick is too heavy for Shoebox, which takes 1 kg" });
+    expect(applyItemOp(w, { do: "make", name: "Coffee mug", type: "mug_ceramic", qty: 4, at: { in: "shoebox" }, why: "" }, PLAYER)).toEqual({ code: "no_room", reason: "Coffee mug doesn't fit in Shoebox: 1 l of 1 l free" });
+    const two = applyItemOp(w, { do: "make", name: "Coffee mug", type: "mug_ceramic", qty: 2, at: { in: "shoebox" }, why: "" }, PLAYER);
+    if ("code" in two) throw new Error(two.reason);
+    expect(spotOf(w.state, two.made ?? "")).toEqual({ in: "shoebox" });
+    expect(applyItemOp(w, into("ball", "shoebox"), PLAYER)).toMatchObject({ reason: "Ball doesn't fit in Shoebox: 0.3 l of 1 l free" });
+    expect(applyItemOp(w, into("ball", "shoebox"), STORY)).toEqual({});
+    expect(applyItemOp(w, into("brick", "shoebox"), GM)).toEqual({});
+  });
+
+  test("with the world's capacity off only the size decides, and below Gear 2 nothing but the size counts", () => {
+    expect(applyItemOp(shop({ containers: { capacity: "off" } }), into("ball", "shoebox"), PLAYER)).toEqual({});
+    const low = shop();
+    low.state.realism.levels.gear = 1;
+    expect(applyItemOp(low, into("brick", "shoebox"), PLAYER)).toEqual({});
+  });
+
+  test("nothing nests deeper than the world's depth: a tin with a coin in it goes in the bag, not the pouch inside the bag", () => {
+    const nested = (depth?: number): Working =>
+      portAlder((world) => {
+        world.packs.gear = { version: world.packs.gear?.version ?? 1, config: depth !== undefined ? { containers: { depth } } : {} };
+        const pov = world.entities[JORDAN];
+        if (pov) pov.fields.place = "alder_automotive";
+        world.entities.bag = { id: "bag", kind: "container", name: "Duffel bag", tier: "background", fields: { owner: JORDAN, holds: "armful", place: "alder_automotive" }, relations: [] };
+        world.entities.pouch = { id: "pouch", kind: "container", name: "Pouch", tier: "background", fields: { owner: JORDAN, holds: "hand" }, relations: [{ type: "in", to: "bag" }] };
+        world.entities.tin = { id: "tin", kind: "container", name: "Tin", tier: "background", fields: { owner: JORDAN, size: "pocket", holds: "pocket" }, relations: [{ type: "in", to: JORDAN }] };
+        world.entities.coin = thing("coin", "Coin", { owner: JORDAN, size: "pocket" }, [{ type: "in", to: "tin" }]);
+        world.entities.button = thing("button", "Button", { owner: JORDAN, size: "pocket" }, [{ type: "in", to: JORDAN }]);
+      });
+    const w = nested(2);
+    // In the pouch, in the bag: two deep, as deep as this world packs things.
+    expect(applyItemOp(w, into("button", "pouch"), PLAYER)).toEqual({});
+    // The tin takes its coin with it, which would be three deep.
+    expect(applyItemOp(w, into("tin", "pouch"), PLAYER)).toEqual({ code: "too_deep", reason: "Tin can't go in Pouch: things are packed at most 2 deep" });
+    expect(applyItemOp(w, into("tin", "bag"), PLAYER)).toEqual({});
+    // Told by the story, it lands in the pouch; nothing more is made in it on the player's path.
+    expect(applyItemOp(w, into("tin", "pouch"), STORY)).toEqual({});
+    expect(applyItemOp(w, { do: "make", name: "Washer", size: "pocket", at: { in: "tin" }, why: "" }, PLAYER)).toMatchObject({ code: "too_deep" });
+    // The world's own depth is 8.
+    expect(applyItemOp(nested(), into("tin", "pouch"), PLAYER)).toEqual({});
+  });
+});
+
 describe("a Gear or Place line the final review took out is a finding (N3)", () => {
   test("the head turn's dropped and rewritten Gear lines each read as one, naming the things they name; a Rules edit or an append is none", () => {
     const w = portAlder();
@@ -310,12 +444,22 @@ describe("a player's ✎ on a thing of theirs (fix_item, N3)", () => {
       world.entities.wardrobe = thing("wardrobe", "Wardrobe", { owner: JORDAN, place: "harbor_street_114" });
     });
   }
+  /** Port Alder at home, where Jordan wakes with Danny there: his old guitar on him, kept at home, and a cigar box there a harmonica fills. */
+  function home(): Working {
+    return portAlder((world) => {
+      world.entities.guitar = thing("guitar", "Old guitar", { owner: JORDAN, home: "harbor_street_114" }, [{ type: "in", to: JORDAN }]);
+      world.entities.cigar_box = { id: "cigar_box", kind: "container", name: "Cigar box", tier: "background", fields: { owner: JORDAN, capacity_l: 0.2, holds: "hand", place: "harbor_street_114" }, relations: [] };
+      world.entities.harmonica = thing("harmonica", "Harmonica", { owner: JORDAN, size: "pocket", volume_l: 0.2 }, [{ type: "in", to: "cigar_box" }]);
+    });
+  }
   const fix = (w: Working, change: ItemFix): string | null => {
     const out = resolveEdit(reg, w.world, w.state, [{ op: "fix_item", change }], { gm: false, runSeed: "fix" });
     if ("rejection" in out) return out.rejection.code;
     w.applyAll(out.events);
     return null;
   };
+  /** Whether `who` has leave to use `item` (a `uses` to it). */
+  const mayUse = (w: Working, who: string, item: string): boolean => w.state.entities[who]?.relations.some((r) => r.type === "uses" && r.to === item) === true;
 
   test("his own TV moves home, and its size can be set and left to its name again", () => {
     const w = market();
@@ -333,5 +477,91 @@ describe("a player's ✎ on a thing of theirs (fix_item, N3)", () => {
     expect(fix(w, { do: "move", item: "tv", to: { in: DANNY } })).toBe("not_yours");
     expect(fix(w, { do: "move", item: "tv", to: { place: "no_such_place" } })).toBe("missing_place");
     expect(spotOf(w.state, "tv")).toEqual({ in: JORDAN });
+  });
+
+  test("whose it is: his own, nobody's, or his household's once he has one; anyone else's is a Give, a Lend or a sale", () => {
+    const w = market();
+    expect(fix(w, { do: "own", item: "tv", owner: null })).toBeNull();
+    expect(w.state.entities.tv?.fields.owner).toBeNull();
+    // Nobody's, and on him: still his to change.
+    expect(fix(w, { do: "own", item: "tv", owner: "self" })).toBeNull();
+    expect(w.state.entities.tv?.fields.owner).toBe(JORDAN);
+    expect(fix(w, { do: "own", item: "tv", owner: "self" })).toBe("no_change");
+    expect(fix(w, { do: "own", item: "tv", owner: "household" })).toBe("no_household");
+    const housed = portAlder((world) => {
+      world.entities[JORDAN]?.relations.push({ type: "member_of", to: "household_kowalczyk", fields: { role: "member" } });
+    });
+    expect(fix(housed, { do: "own", item: "pov_watch", owner: "household" })).toBeNull();
+    expect(housed.state.entities.pov_watch?.fields.owner).toBe("household_kowalczyk");
+  });
+
+  test("who may use it: someone he knows, for good or until an end after now, and taken back from one who has leave; and what it is called", () => {
+    const w = market();
+    const until = w.state.clock + 1440;
+    expect(fix(w, { do: "grant", item: "tv", who: DANNY, until })).toBeNull();
+    expect(w.state.entities[DANNY]?.relations).toContainEqual({ type: "uses", to: "tv", fields: { basis: "loan", by: JORDAN }, until });
+    expect(fix(w, { do: "grant", item: "tv", who: "marcus_delgado" })).toBeNull();
+    expect(w.state.entities.marcus_delgado?.relations).toContainEqual({ type: "uses", to: "tv", fields: { basis: "assign", by: JORDAN } });
+    expect(fix(w, { do: "grant", item: "tv", who: DANNY, until: w.state.clock })).toBe("bad_until");
+    expect(fix(w, { do: "grant", item: "tv", who: JORDAN })).toBe("missing_entity");
+    expect(fix(w, { do: "grant", item: "thermos", who: "marcus_delgado" })).toBe("not_yours");
+    expect(fix(w, { do: "revoke", item: "tv", who: DANNY })).toBeNull();
+    expect([mayUse(w, DANNY, "tv"), mayUse(w, "marcus_delgado", "tv")]).toEqual([false, true]);
+    expect(fix(w, { do: "revoke", item: "tv", who: DANNY })).toBe("no_change");
+    expect(fix(w, { do: "label", item: "tv", name: "Old TV" })).toBeNull();
+    expect(w.state.entities.tv?.name).toBe("Old TV");
+    expect(fix(w, { do: "label", item: "tv", name: "Old TV" })).toBe("no_change");
+    expect(fix(w, { do: "label", item: "thermos", name: "Mine now" })).toBe("not_yours");
+  });
+
+  test("put away: back where it is kept, or on him from someone holding it for him; a thing kept nowhere is refused", () => {
+    const w = home();
+    expect(fix(w, { do: "away", item: "guitar" })).toBeNull();
+    expect(spotOf(w.state, "guitar")).toEqual({ place: "harbor_street_114" });
+    expect(fix(w, { do: "away", item: "guitar" })).toBe("no_change");
+    // His pocketknife, with Danny to hold: put away, it is back on him, and Danny's hold is over.
+    expect(fix(w, { do: "hand", item: "pov_pocketknife", to: DANNY, basis: "hold" })).toBeNull();
+    expect([spotOf(w.state, "pov_pocketknife"), mayUse(w, DANNY, "pov_pocketknife")]).toEqual([{ in: DANNY }, true]);
+    expect(fix(w, { do: "away", item: "pov_pocketknife" })).toBeNull();
+    expect([spotOf(w.state, "pov_pocketknife"), mayUse(w, DANNY, "pov_pocketknife")]).toEqual([{ in: JORDAN }, false]);
+    // Made in play with nothing to say where it is kept: nowhere to put it.
+    w.state.entities.sock = { kind: "item", name: "Odd sock", tier: "background", fields: { owner: JORDAN }, relations: [{ type: "in", to: JORDAN }], levels: {}, agent: false };
+    expect(fix(w, { do: "away", item: "sock" })).toBe("no_rest");
+  });
+
+  test("handed to someone here: to hold, lent until an end, given; never to someone not here, and a loan needs its end", () => {
+    const w = home();
+    const until = w.state.clock + 600;
+    expect(fix(w, { do: "hand", item: "guitar", to: DANNY, basis: "loan" })).toBe("bad_until");
+    expect(fix(w, { do: "hand", item: "guitar", to: DANNY, basis: "loan", until })).toBeNull();
+    expect([spotOf(w.state, "guitar"), w.state.entities.guitar?.fields.owner]).toEqual([{ in: DANNY }, JORDAN]);
+    expect(w.state.entities[DANNY]?.relations).toContainEqual({ type: "uses", to: "guitar", fields: { basis: "loan", by: JORDAN }, until });
+    expect(fix(w, { do: "hand", item: "pov_watch", to: DANNY, basis: "gift" })).toBeNull();
+    expect([spotOf(w.state, "pov_watch"), w.state.entities.pov_watch?.fields.owner]).toEqual([{ in: DANNY }, DANNY]);
+    // Marcus is at his own house: nobody walks it over to him.
+    expect(fix(w, { do: "hand", item: "pov_keys", to: "marcus_delgado", basis: "hold" })).toBe("not_here");
+    expect(fix(w, { do: "hand", item: "pov_keys", to: "pov_wallet", basis: "hold" })).toBe("not_a_person");
+    // Given back only to whose it is: the keys are his own.
+    expect(fix(w, { do: "hand", item: "pov_keys", to: DANNY, basis: "return" })).toBe("not_owner");
+    expect(spotOf(w.state, "pov_keys")).toEqual({ in: JORDAN });
+  });
+
+  test("a thing he adds (Play's Add): his, by a type, by what it is or a vehicle's class, where he can see; never on someone else, nor while the chat holds him to the world", () => {
+    const w = home();
+    const made = (name: string): JsonObject | undefined => Object.values(w.state.entities).find((e) => e.name === name)?.fields;
+    expect(fix(w, { do: "make", name: "Coffee mug", type: "mug_ceramic", at: { place: "harbor_street_114" } })).toBeNull();
+    expect(made("Coffee mug")).toMatchObject({ catalog: "mug_ceramic", owner: JORDAN, place: "harbor_street_114", made: { by: "player" } });
+    expect(fix(w, { do: "make", name: "Old revolver", is: "weapon", at: { in: JORDAN } })).toBeNull();
+    expect(made("Old revolver")).toMatchObject({ category: "weapon", owner: JORDAN });
+    expect(fix(w, { do: "make", name: "Shoebox", is: "container", description: "Full of letters", at: { place: "harbor_street_114" } })).toBeNull();
+    expect(made("Shoebox")).toMatchObject({ holds: "hand", description: "Full of letters", owner: JORDAN });
+    expect(fix(w, { do: "make", name: "Beater", class: "compact_car", details: { make: "Ford", model: "Focus", year: 2009 }, at: { place: "harbor_street_114" } })).toBeNull();
+    expect(made("Beater")).toMatchObject({ class: "compact_car", owner: JORDAN, make: "Ford", model: "Focus", year: 2009, place: "harbor_street_114" });
+    expect(fix(w, { do: "make", name: "Mug", at: { in: DANNY } })).toBe("not_yours");
+    expect(fix(w, { do: "make", name: "Mug", at: { place: "birch_lane_12" } })).toBe("missing_place");
+    // A fix counts a holder's room: the harmonica fills the cigar box.
+    expect(fix(w, { do: "move", item: "pov_phone", to: { in: "cigar_box" } })).toBe("no_room");
+    w.state.claims = { mode: "hold", capped: false };
+    expect(fix(w, { do: "make", name: "Mug", at: { place: "harbor_street_114" } })).toBe("no_claims");
   });
 });

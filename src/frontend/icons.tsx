@@ -10,17 +10,17 @@ export type IconName =
   | "help" | "link" | "external" | "download" | "upload" | "list" | "grid" | "layers" | "code" | "function" | "branch"
   | "table" | "checklist" | "sparkle" | "wand" | "send" | "message" | "clock" | "calendar" | "hourglass" | "pause" | "play"
   | "fast-forward" | "bolt" | "pin" | "home" | "route" | "sun" | "moon" | "cloud" | "rain" | "snow" | "wind" | "wallet"
-  | "coins" | "card" | "bank" | "receipt" | "bag" | "box" | "key" | "car" | "boat" | "fuel" | "wrench" | "briefcase"
+  | "coins" | "card" | "bank" | "receipt" | "bag" | "box" | "key" | "car" | "boat" | "plane" | "fuel" | "wrench" | "briefcase"
   | "heart" | "pulse" | "shield" | "sword" | "flag" | "scroll" | "star" | "user-plus" | "folder" | "file";
 
-/** A path's `d`; a stroked circle; a filled dot (the only fill the set allows); a rounded rect. */
-type Shape =
+/** A path's `d`; a stroked circle; a filled dot (the only fill the set allows); a rounded rect. On a 24-unit square, as the map's canvas draws them too. */
+export type IconShape =
   | string
   | readonly ["c", number, number, number]
   | readonly ["dot", number, number, number]
   | readonly ["r", number, number, number, number, number];
 
-const ICONS: Record<IconName, readonly Shape[]> = {
+export const ICONS: Record<IconName, readonly IconShape[]> = {
   dice: [["r", 3.5, 3.5, 17, 17, 3.5], ["dot", 8.25, 8.25, 1.3], ["dot", 15.75, 8.25, 1.3], ["dot", 12, 12, 1.3], ["dot", 8.25, 15.75, 1.3], ["dot", 15.75, 15.75, 1.3]],
   eye: ["M2.5 12C5 7.6 8.2 5.5 12 5.5s7 2.1 9.5 6.5c-2.5 4.4-5.7 6.5-9.5 6.5S5 16.4 2.5 12Z", ["c", 12, 12, 3]],
   "eye-off": ["M2.5 12C5 7.6 8.2 5.5 12 5.5s7 2.1 9.5 6.5c-2.5 4.4-5.7 6.5-9.5 6.5S5 16.4 2.5 12Z", ["c", 12, 12, 3], "M4 4l16 16"],
@@ -99,6 +99,7 @@ const ICONS: Record<IconName, readonly Shape[]> = {
   key: [["c", 7.75, 16.25, 4.25], "M10.75 13.25L20 4", "M16.75 7.25l2.75 2.75", "M14.25 9.75l2 2"],
   car: ["M5.5 17h-2v-3.5a2 2 0 0 1 2-2h13a2 2 0 0 1 2 2V17h-2M9.5 17h5", "M6 11.5l1.6-4.2A1.5 1.5 0 0 1 9 6.5h6a1.5 1.5 0 0 1 1.4.8L18 11.5", ["c", 7.5, 17, 2], ["c", 16.5, 17, 2]],
   boat: ["M2.5 15.5h19l-3 4.5h-13Z", "M12 3V15.5", "M12 3.5l7 9.5h-7", "M10 6.5l-5 6.5h5"],
+  plane: ["M12 2.5c.85 0 1.5.9 1.5 2V9l7 4.5v2l-7-2.2V18l2 1.5V21L12 20l-3.5 1v-1.5l2-1.5v-4.7l-7 2.2v-2L10.5 9V4.5c0-1.1.65-2 1.5-2Z"],
   fuel: ["M5 20.5v-15a2 2 0 0 1 2-2h5a2 2 0 0 1 2 2v15", "M3.5 20.5h12", ["r", 7.5, 6.5, 4, 4, 0.5], "M14 11h1.5a1.5 1.5 0 0 1 1.5 1.5v4a1.5 1.5 0 0 0 3 0v-8l-2.5-2.5"],
   wrench: ["M13.22 13.04L7.54 18.72A1.6 1.6 0 0 1 5.28 16.46L10.96 10.78A4.75 4.75 0 0 1 17.38 4.5L14.72 7.16A1.5 1.5 0 0 0 16.84 9.28L19.5 6.62A4.75 4.75 0 0 1 13.22 13.04Z"],
   briefcase: [["r", 3.5, 7, 17, 12.5, 2], "M9 7V5.5A1.5 1.5 0 0 1 10.5 4h3A1.5 1.5 0 0 1 15 5.5V7", "M3.5 12.5h17"],
@@ -112,7 +113,7 @@ const ICONS: Record<IconName, readonly Shape[]> = {
   "user-plus": [["c", 10, 8, 3.75], "M3 20c0-4 3.1-6.75 7-6.75 1.4 0 2.7.35 3.75 1", "M18 13v6M15 16h6"],
 };
 
-function shape(spec: Shape, key: number) {
+function shape(spec: IconShape, key: number) {
   if (typeof spec === "string") return <path key={key} d={spec} />;
   switch (spec[0]) {
     case "c":

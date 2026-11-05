@@ -360,7 +360,8 @@ export class LedgerFold {
       if (kept && checkpoint && input.snapshots && input.pauses.length === 0) input.snapshots.put(this.snapshotOf(hashParts(context, parent, shape), steps, kept));
     }
 
-    const out: FoldOutput = { state: shared ? structuredClone(shared) : state, notes: [], keepReport: [], messages: [], resolved: [], violations: [] };
+    // A reader that only reads (`FoldInput.share`) takes the kept state as it is; any other, its own copy.
+    const out: FoldOutput = { state: shared ? (input.share ? shared : structuredClone(shared)) : state, notes: [], keepReport: [], messages: [], resolved: [], violations: [] };
     for (const s of steps) {
       out.messages.push(s.result);
       out.notes.push(...s.notes);

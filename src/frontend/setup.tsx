@@ -24,6 +24,7 @@ import { UI_PACKS } from "./packs";
 import { ProtocolClient } from "./protocol-client";
 import { watchReconnects } from "./reconnect";
 import { startPreparedReplies } from "./restart";
+import { askSwipeDirection } from "./swipe-ask";
 import type { FrontendToBackend } from "../shared/protocol";
 import { CannotStopNotice, OPEN_DIAGNOSTICS_EVENT } from "./diagnostics";
 import { timeMarker } from "./requests";
@@ -74,9 +75,10 @@ export function setup(ctx: SpindleFrontendContext): () => void {
   };
   cleanups.push(client.onError((error) => toast(error.message, "error")));
   // The engine ran before a reply the guard stopped (DESIGN §5.1): a page showing that chat on screen
-  // claims the turn and starts it with Lumiverse's own command (`restart.ts`).
+  // claims the turn and starts it with Lumiverse's own command (`restart.ts`), a swipe asking first
+  // what should change when Settings → Swipes says to (`swipe-ask.tsx`).
   client.visible = () => document.visibilityState === "visible";
-  cleanups.push(startPreparedReplies(client, { activeChat: host.activeChat, generate: host.generate, toast }));
+  cleanups.push(startPreparedReplies(client, { activeChat: host.activeChat, generate: host.generate, toast, ask: () => askSwipeDirection(host.ui) }));
 
   let overlays: OverlaySet | null = null;
   const app: App = {

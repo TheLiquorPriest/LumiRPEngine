@@ -476,6 +476,8 @@ export interface Template {
   delegations?: TplDelegation[];
   /** The economy pack's config: products, Custom money toggles, assets, and module keys (taxes). */
   economy?: JsonObject;
+  /** The vehicles pack's config (`packs.vehicles.config`): `registration`, yearly registration fees at Vehicles 4. */
+  vehiclesConfig?: JsonObject;
   /** Everyday carry (ITEMS-SPEC §4.4): the catalog types every person carries from the start; absent, the Modern US default (a wallet, keys and a phone). */
   carry?: string[];
   prices?: { id: string; name: string; unit: string; category: string; band: { min: number; typical: number; max: number } }[];

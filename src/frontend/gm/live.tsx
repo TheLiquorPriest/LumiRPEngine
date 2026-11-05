@@ -7,7 +7,10 @@
 // folds over its arguments and its result, its caret's colour and words saying how the call stands,
 // its stop, and the writes its run staged with what came of them. The turn's
 // phases, a wait at a gate and what stopped it sit between the groups, and so does the turn's plan,
-// once its pre phase knows it: each role runs, is kept, off, auto or none, with why. The feed follows the newest
+// once its pre phase knows it: each role runs, is kept, off, auto or none, with why. Once the turn
+// ends, the plan's entry (else the feed's foot) shows where the turn's time went, read from
+// Diagnostics: each part in order with its time, its calls, and the slowest's way to Settings →
+// Speed. The feed follows the newest
 // unless you've scrolled up; a filter shows one role's work; Cancel stops the turn while it can be
 // stopped. Once the turn ends, the view stays as that turn's record until the next one starts.
 
@@ -16,9 +19,10 @@ import { agentLabel } from "../../shared/agent-settings";
 import { PLAN_STATUS_WORDS, type PlanStatus } from "../../shared/agent-pipeline";
 import type { ChatId } from "../../shared/ids";
 import { agentModel, DROP_WORDS, END_WORDS, followLive, groupSpent, type LiveAgentView, type LiveGroup, type LiveItem, liveItems, type LiveStatus, type LiveView, PHASE_WORDS, REVIEW_OUTCOME_WORDS, reviewEditWords, usageWords, WRITE_OUTCOME_WORDS } from "../../shared/live";
+import { turnTimeline, type TurnTimeline } from "../../shared/diagnostics";
 import { useApp } from "../app";
 import { Badge, Button, Empty, Seg, useBusy } from "../components";
-import { cancelTurn, elapsedText } from "../diagnostics";
+import { cancelTurn, elapsedText, openSpeed, TurnTimeView } from "../diagnostics";
 import type { GmSectionProps, RequestBody } from "../registry";
 import { scrollParent } from "../scroll";
 import { useSelect } from "../store";
@@ -192,8 +196,18 @@ function groupOf(g: LiveGroup, view: LiveView, open: boolean, onToggle: (open: b
 /** How each plan status reads at a glance. */
 const PLAN_TONE: Readonly<Record<PlanStatus, "neutral" | "accent" | "pos" | "warn">> = { runs: "accent", kept: "pos", off: "warn", auto: "accent", none: "neutral" };
 
-/** A mark between groups; the final review's says how it ended, with each edit it made to the narrator's prompt; the plan's lists each role, how it stands and why. */
-function markOf(item: Extract<LiveItem, { type: "mark" }>) {
+/** "Where this turn's time went", once the turn's parts are recorded: each with its time, the slowest's way to its setting. */
+function timeOf(timeline: TurnTimeline, onControl?: (row: string) => void) {
+  return (
+    <div class="lre-live-time" data-lre-live-time={timeline.turn}>
+      <p class="lre-live-dim">Where this turn's time went</p>
+      <TurnTimeView timeline={timeline} {...(onControl ? { onControl } : {})} />
+    </div>
+  );
+}
+
+/** A mark between groups; the final review's says how it ended, with each edit it made to the narrator's prompt; the plan's lists each role, how it stands and why, then where the turn's time went once it is known. */
+function markOf(item: Extract<LiveItem, { type: "mark" }>, timeline: TurnTimeline | null, onControl?: (row: string) => void) {
   const e = item.entry;
   if (e.kind === "plan") {
     const kept = e.rows.filter((r) => r.status === "kept").length;
@@ -209,6 +223,7 @@ function markOf(item: Extract<LiveItem, { type: "mark" }>) {
               </li>
             ))}
           </ul>
+          {timeline ? timeOf(timeline, onControl) : null}
         </details>
       </li>
     );
@@ -250,6 +265,10 @@ export interface LiveFeedProps {
   busy: boolean;
   /** The time now (epoch ms), for a running turn's elapsed time. */
   now: number;
+  /** Where the run's time went, once its parts are recorded (the plan's entry shows it, else the feed's foot); absent while unknown. */
+  timeline?: TurnTimeline | null;
+  /** Opens Settings → Speed at the row the slowest part points to. */
+  onControl?(row: string): void;
   /** Whether a group shows open: its own choice, else `open`, the default. */
   open(key: string, open: boolean): boolean;
   onToggle(key: string, open: boolean): void;
@@ -309,8 +328,9 @@ export function LiveFeed(props: LiveFeedProps) {
       </div>
       <Seg<string> label="Show the work of" value={props.role ?? "all"} options={[{ value: "all", label: "Every agent" }, ...roles.map((r) => ({ value: r, label: agentLabel(r) }))]} onChange={(v) => props.onRole(v === "all" ? null : v)} />
       <ol class="lre-live-feed" aria-label="What the agents did">
-        {shown.map((item) => (item.type === "mark" ? markOf(item) : groupOf(item, view, props.open(item.key, item.status === "working" || item.status === "failed" || item === lastGroup), (open) => props.onToggle(item.key, open))))}
+        {shown.map((item) => (item.type === "mark" ? markOf(item, props.timeline ?? null, props.onControl) : groupOf(item, view, props.open(item.key, item.status === "working" || item.status === "failed" || item === lastGroup), (open) => props.onToggle(item.key, open))))}
       </ol>
+      {props.timeline && !shown.some((i) => i.type === "mark" && i.entry.kind === "plan") ? timeOf(props.timeline, props.onControl) : null}
     </div>
   );
 }
@@ -380,6 +400,22 @@ export function LiveSection(props: GmSectionProps) {
     const timer = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(timer);
   }, [running]);
+  // Where the run's time went, read from Diagnostics once it has ended: its own turn's parts, else (a turn renamed when its generation took it) the latest turn's that ran with it.
+  const [timeline, setTimeline] = useState<TurnTimeline | null>(null);
+  const ended = view?.ended?.at ?? null;
+  useEffect(() => {
+    setTimeline(null);
+    if (!view || ended === null) return;
+    let live = true;
+    void app.request({ type: "lre.diag", chatId: props.chatId, op: "get" }).then((result) => {
+      if (!live || !result) return;
+      const latest = turnTimeline(result.records, view.turn) ?? turnTimeline(result.records);
+      setTimeline(latest && latest.start + latest.ms >= view.startedAt ? latest : null);
+    });
+    return () => {
+      live = false;
+    };
+  }, [props.chatId, view?.turn, ended]);
   // Following the newest: at the foot of the page while you haven't scrolled up from it.
   useEffect(() => {
     const scroller = root.current ? scrollParent(root.current) : null;
@@ -405,6 +441,8 @@ export function LiveSection(props: GmSectionProps) {
           cancellable={cancellable}
           busy={busy || props.busy}
           now={now}
+          timeline={timeline}
+          onControl={(row) => openSpeed(app, row)}
           open={(key, open) => toggled[key] ?? open}
           onToggle={(key, open) => setToggled((t) => (t[key] === open ? t : { ...t, [key]: open }))}
           onRole={setRole}

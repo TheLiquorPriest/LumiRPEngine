@@ -586,7 +586,7 @@ Extends `group`.
 | Effect | Arguments |
 |---|---|
 | `economy.apply_credit` | `product`, `cents?`, `term?`, `secured_by?`, `who?`, `by?` |
-| `economy.buy` | `item?`, `category?`, `qty?`, `price?`, `exact?`, `stated?`, `name?`, `payer?`, `method?`, `from?`, `payee?`, `keep?`, `cashback?`, `story?`, `seller?`, `size?`, `at?`, `by?` |
+| `economy.buy` | `item?`, `category?`, `qty?`, `price?`, `exact?`, `stated?`, `name?`, `payer?`, `method?`, `from?`, `payee?`, `keep?`, `cashback?`, `story?`, `seller?`, `size?`, `at?`, `by?`, `class?`, `details?`, `finance?`, `down?`, `term_months?` |
 | `economy.card_replace` | `card`, `who?`, `by?` |
 | `economy.card_state` | `card`, `state`, `who?`, `by?` |
 | `economy.cash_rule` | `atm` |
@@ -629,8 +629,9 @@ Extends `group`.
 | `economy.project_pause` | `project`, `org?`, `by?` |
 | `economy.project_resume` | `project`, `org?`, `by?` |
 | `economy.project_start` | `org?`, `template?`, `project?`, `name?`, `account?`, `payee?`, `steps?`, `by?` |
-| `economy.property_buy` | `property`, `price?`, `from?`, `down?`, `term_months?`, `party?`, `by?` |
+| `economy.property_buy` | `property`, `price?`, `from?`, `down?`, `term_months?`, `party?`, `by?`, `live?`, `story?`, `name?`, `owned?` |
 | `economy.property_list` | `property`, `price?`, `party?`, `by?` |
+| `economy.property_make` | `place`, `name?`, `value?`, `owner?`, `asking_price?` |
 | `economy.property_sell` | `property`, `price`, `buyer?`, `to?`, `party?`, `by?` |
 | `economy.release_hold` | `account`, `hold` |
 | `economy.revenue_adjust` | `stream`, `factor?`, `cents?`, `days?`, `reason`, `by?`, `story?` |
@@ -715,7 +716,7 @@ Extends `group`.
 | `project_pause` | Pause a project | Pause a project under way: its steps stop where they are and keep the work they have left. | `project: ref` |  | `default` | `2` | pause the project, halt work, stop drilling |
 | `project_resume` | Resume a project | Set a paused project going again: each step under way finishes the work it had left. | `project: ref` |  | `default` | `2` | resume the project, restart work |
 | `project_start` | Start a project | Start a production project for an organization: from one of the world's templates (a well, a foundry, a building, a farm season), or a planned one. Its steps run day by day and pay from its account; what it builds comes in as each is done. | `org: ref`, `template?: text`, `project?: ref`, `name?: text`, `account?: ref → account` |  | `default` | `2` | start a project, drill a well, build a foundry, put up a building, plant the crop |
-| `property_buy` | Buy a property | Buy a property, outright or with a mortgage. | `property: ref → property`, `price?: money`, `from?: ref → account`, `down?: money`, `term_months?: number`, `as?: ref` |  | `default` | `60` | buy the house, buy the property, make an offer on |
+| `property_buy` | Buy a property | Buy a property, outright or with a mortgage. | `property: ref → property`, `price?: money`, `from?: ref → account`, `down?: money`, `term_months?: number`, `live?: bool`, `as?: ref` |  | `default` | `60` | buy the house, buy the property, make an offer on |
 | `property_list` | List a property for sale | Put a property you own up for sale at an asking price, or take it off the market. | `property: ref → property`, `price?: money`, `as?: ref` |  | `default` | `5` | put the house on the market, list the property, take it off the market |
 | `property_sell` | Sell a property | Sell a property you own. | `property: ref → property`, `price: money`, `buyer?: ref → person`, `to?: ref → account`, `as?: ref` |  | `default` | `60` | sell the house, sell the property |
 | `route_distributions` | Route dividends, rent or profits | Choose where dividends, rent or profits are paid: reinvested, or into an account. | `holding?: ref → holding`, `property?: ref → property`, `business?: ref → business`, `to?: text`, `as?: ref` |  | `default` | `1` | reinvest dividends, send dividends to, send the rent to |
@@ -868,6 +869,9 @@ Extends `container`.
 | `gear.remove` | `item` |
 | `gear.retrieve` | `item` |
 | `gear.search` | `who`, `target?` |
+| `gear.set_apply` | `who`, `set` |
+| `gear.set_drop` | `who`, `set` |
+| `gear.set_save` | `who`, `name`, `kind` |
 | `gear.take` | `item`, `to` |
 | `gear.take_piece` | `kit`, `piece`, `to` |
 | `gear.thing_change` | `change` |
@@ -877,6 +881,7 @@ Extends `container`.
 
 ### Formula functions
 
+- `ammo_of(who, what)`
 - `carried_kg(holder)`
 - `carries(holder, item)`
 - `fetch_minutes(who, thing)`
@@ -891,6 +896,7 @@ Extends `container`.
 - `movable(thing)`
 - `possessor(thing)`
 - `reach_of(who, thing)`
+- `readied(who, what)`
 - `rest_near(who, thing)`
 - `returns_to(who, thing)`
 
@@ -910,6 +916,9 @@ Extends `container`.
 | `reclaim` | Take back | Take back something of yours that you lent out. | `item: ref → item` |  | `default` | `5` | take back, get back, reclaim |
 | `remove` | Take off | Take off something you wear or have equipped. | `item: ref → item` |  | `default` | `2` | take off, remove, unequip |
 | `search` | Search | Search where you are, or look through a container, for what isn't in plain sight. | `target?: ref → item` |  | `default` | `5` | search, look around, examine, look through, look inside, open, rummage |
+| `set_apply` | Change into | Change into one of your saved outfits or loadouts. | `set: text` |  | `default` | `5` | change into, put on my, get dressed in, gear up |
+| `set_drop` | Forget an outfit | Stop keeping one of your saved outfits or loadouts. | `set: text` |  | `default` | `0` |  |
+| `set_save` | Save what I'm wearing | Keep what you wear now as an outfit, or what you carry ready as a loadout. | `name: text`, `kind: text` |  | `default` | `0` |  |
 | `take` | Take | Pick up something that is here. | `item: ref → item, claim: here` |  | `default` | `1` | take, pick up, grab |
 | `take_piece` | Take from a kit | Take one piece, such as a tool or a part, out of a kit. | `kit: ref → kit`, `piece: text` |  | `default` | `1` | take the, grab a, get a |
 | `use` | Use | Use an item you carry or can reach. | `item: ref → item, claim: held` |  | `default` | `5` | use, apply |
@@ -955,10 +964,10 @@ Detail on demand: `gear` (version 2).
 
 | Table | Label | Schema | Columns | Default rows |
 |---|---|---|---|---|
-| `gear.containers` | Containers | `lre-table/gear.containers/v1` | name (text), capacity_l (number), max_load_kg (number), empty_weight_g (int), location (enum), size (enum, optional), holds (enum, optional), equip_slot (ref), price_cents (band), notes (text, optional) | 34 |
-| `gear.items` | Gear items | `lre-table/gear.items/v1` | name (text), category (enum), equip_slot (ref), weight_g (int), volume_l (number), size (enum, optional), price_cents (band), notes (text, optional) | 90 |
+| `gear.containers` | Containers | `lre-table/gear.containers/v1` | name (text), capacity_l (number), max_load_kg (number), empty_weight_g (int), location (enum), size (enum, optional), holds (enum, optional), equip_slot (ref), price_cents (band), notes (text, optional) | 37 |
+| `gear.items` | Gear items | `lre-table/gear.items/v1` | name (text), category (enum), equip_slot (ref), weight_g (int), volume_l (number), size (enum, optional), price_cents (band), ammo (ref, optional), notes (text, optional) | 116 |
 | `gear.kits` | Kits | `lre-table/gear.kits/v1` | name (text), recommended_container (ref), description (text), piece_count (int), pieces_total_weight_g (number), packed_volume_l (number), price_cents (band), pieces (list), notes (text, optional) | 5 |
-| `gear.slots` | Equip slots | `lre-table/gear.slots/v1` | description (text) | 20 |
+| `gear.slots` | Equip slots | `lre-table/gear.slots/v1` | description (text) | 23 |
 
 ### Lint codes
 
@@ -1424,7 +1433,7 @@ Extends `container`.
 
 | Action | Label | Description | Parameters | Check | Outcomes | Minutes | Lexicon |
 |---|---|---|---|---|---|---|---|
-| `drive` | Drive | Drive, ride or sail a vehicle you own or may use to another place. | `vehicle: ref → vehicle`, `to: ref → place` |  | `default` | `drive_minutes(vehicle, to, here)` | drive to, drive over to, take the truck, take the car, sail to, ride to |
+| `drive` | Drive | Drive, ride, sail or fly a vehicle you own or may use to another place. | `vehicle: ref → vehicle`, `to: ref → place` |  | `default` | `drive_minutes(vehicle, to, here)` | drive to, drive over to, take the truck, take the car, sail to, ride to, fly to, fly the plane to |
 | `refuel` | Refuel | Fill up a vehicle's tank, or charge it. | `vehicle: ref → vehicle` |  | `default` | `10` | refuel, fill up, gas up, charge the car |
 | `repair_vehicle` | Repair | Have a damaged or broken-down vehicle repaired. | `vehicle: ref → vehicle` |  | `default` | `180` | repair, fix the truck, fix the car, get it towed |
 | `service_vehicle` | Service | Have a vehicle serviced: an oil change, a tune-up. | `vehicle: ref → vehicle` |  | `default` | `60` | service, oil change, tune up |
@@ -1445,8 +1454,8 @@ Detail on demand: `vehicles` (version 1).
 
 | Table | Label | Schema | Columns | Default rows |
 |---|---|---|---|---|
-| `vehicles.classes` | Vehicle classes | `lre-table/vehicles.classes/v1` | name (text), domain (enum), fuel_type (enum), factor_guide (ref), tank_capacity_gal (number, optional), tank_capacity_l (number, optional), usable_battery_kwh (number, optional), consumption_unit (enum), consumption (json), range_mi (int, optional), range_h (number, optional), price_new_cents (band), price_used_cents (band), insurance_liability_cents_per_month (int), insurance_full_cents_per_month (int), registration_cents_per_year (band), annual_maintenance_cents_per_year (int), maintenance (json), passengers (int), cargo_l (number), payload_kg (number), towing_kg (number, optional), charging (json, optional), notes (text) | 19 |
-| `vehicles.factors` | Consumption factor guides | `lre-table/vehicles.factors/v1` | basis (text), factors (json), note (text, optional) | 3 |
+| `vehicles.classes` | Vehicle classes | `lre-table/vehicles.classes/v1` | name (text), aliases (list, optional), make (text, optional), model (text, optional), domain (enum), fuel_type (enum), factor_guide (ref), tank_capacity_gal (number, optional), tank_capacity_l (number, optional), usable_battery_kwh (number, optional), consumption_unit (enum), consumption (json), range_mi (int, optional), range_h (number, optional), price_new_cents (band), price_used_cents (band), insurance_liability_cents_per_month (int), insurance_full_cents_per_month (int), registration_cents_per_year (band), fuel_cents_per_gal (band, optional), annual_maintenance_cents_per_year (int), maintenance (json), passengers (int), cargo_l (number), payload_kg (number), towing_kg (number, optional), charging (json, optional), notes (text) | 32 |
+| `vehicles.factors` | Consumption factor guides | `lre-table/vehicles.factors/v1` | basis (text), factors (json), note (text, optional) | 4 |
 
 ### Lint codes
 

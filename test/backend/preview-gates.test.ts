@@ -299,7 +299,8 @@ describe("no request plays a place the player character can't know of", () => {
 
 describe("an outline let through is for its one turn", () => {
   test("after Play, a Re-run swipe plans again and waits on the gate again", async () => {
-    const { rig, chatId } = await alder([{ modelUse: { preset: "full" } }, { gates: { outline: true } }]);
+    // A swipe re-runs the turn here (it re-narrates by default).
+    const { rig, chatId } = await alder([{ swipeDefault: "rerun", modelUse: { preset: "full" } }, { gates: { outline: true } }]);
     let outlines = 0;
     rig.host.quietReply = (req: QuietRequest) => {
       if (!(req.messages[0]?.content ?? "").startsWith(OUTLINE_MARK)) return "{}";

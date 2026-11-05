@@ -22,6 +22,7 @@ import { hasOwn, type JsonObject } from "../../src/shared/json";
 import { LEDGER_NAMESPACE, type LedgerEvent } from "../../src/shared/ledger";
 import { factId, type KnowledgeFact, MINDS_EVENTS, type MindsGmView } from "../../src/shared/minds";
 import { GM_TEXT, promptDef } from "../../src/shared/prompts";
+import { TOOL_GUIDE_TEXTS } from "../../src/shared/agent-tools";
 import { type AssistantView, type BackendToFrontend, WRITE_REFUSED } from "../../src/shared/protocol";
 import { nounFor } from "../../src/shared/words";
 import type { QuietScript } from "../support/fake-host";
@@ -643,11 +644,13 @@ describe("its texts and its thread", () => {
     const { rig, chatId } = await alder();
     const vars = { world: "Port Alder", pov: "Jordan Ellis" };
     const instructions = renderPrompt(GM_TEXT.instructions, {}, vars);
+    // What its change tools share follows them, once (Build C).
+    const guide = TOOL_GUIDE_TEXTS.map((g) => g.text).join("\n\n");
     const mine = "You help the game master of {{world}}, where {{pov}} plays.";
     rig.body(await rig.send({ type: "lre.settings.set", patch: { prompts: { texts: { [GM_TEXT.system]: mine } } } }));
     const asked = model(rig, () => "Ready.");
     await ask(rig, chatId, "Are you there?");
-    expect(asked[0]?.messages[0]).toMatchObject({ role: "system", content: `You help the game master of Port Alder, where Jordan Ellis plays.\n\n${instructions}` });
+    expect(asked[0]?.messages[0]).toMatchObject({ role: "system", content: `You help the game master of Port Alder, where Jordan Ellis plays.\n\n${instructions}\n\n${guide}` });
     // Its Diagnostics record keeps what was sent.
     const [record] = await agentRecords(rig, chatId);
     expect(rig.body(await rig.send({ type: "lre.diag", chatId, op: "text", hash: record?.agent?.text ?? "" })).text).toContain("You help the game master of Port Alder");
@@ -656,7 +659,7 @@ describe("its texts and its thread", () => {
     await ask(rig, chatId, "And now?");
     const shipped = renderPrompt(GM_TEXT.system, {}, vars);
     expect(shipped.startsWith((promptDef(GM_TEXT.system)?.text ?? "").slice(0, 40))).toBe(true);
-    expect(asked[1]?.messages[0]?.content).toBe(`${shipped}\n\n${instructions}`);
+    expect(asked[1]?.messages[0]?.content).toBe(`${shipped}\n\n${instructions}\n\n${guide}`);
     // The thread so far went with it.
     expect(asked[1]?.messages.slice(1).map((m) => [m.role, m.content])).toEqual([
       ["user", "Are you there?"],

@@ -4,10 +4,12 @@
 // everything in it marked as its view marks it, and writes, at the GM tier, through `env.writer` (C7). A tool's
 // description and each argument's are registry texts (`tool.<name>`, `tool.<name>.<path>`, Settings →
 // Agents → Prompts, Every agent page, group "Tools"), sent in the user's own words where they wrote them;
-// its JSON Schema is hand-written with the world's enums filled in (`tools/schema.ts`).
+// its JSON Schema is hand-written with the world's enums filled in (`tools/schema.ts`). What several
+// tools share is told once, in the system prompt of the agent given them (`toolsGuide`), so every call
+// sends the same, smaller tool block, which the provider caches.
 
 import type { ToolFamily, ToolTier, ToolView } from "../../../shared/agent-tools";
-import { toolArgTextId, toolText, toolTextId } from "../../../shared/agent-tools";
+import { guidesOf, toolArgTextId, toolGuideId, toolText, toolTextId } from "../../../shared/agent-tools";
 import type { ChatId, UserId } from "../../../shared/ids";
 import { isRecord, type JsonObject } from "../../../shared/json";
 import type { PromptTexts } from "../../../shared/prompts";
@@ -126,4 +128,16 @@ export function toolsFor(input: { world: WorldDoc; tiers: readonly ToolTier[]; f
       run: (args, ctx) => def.run(args, { ...env, agent: { role: ctx.role, id: ctx.agentId }, signal: AbortSignal.any([env.signal, ctx.signal]) }),
     }),
   );
+}
+
+/**
+ * What `tools` share (`ToolText.guides`: what a change to a thing or a place does, how a thing is
+ * named), each once, in the user's words where they wrote them: the agent given them is told this in
+ * its system prompt instead of in each tool's description. Empty when none of them shares anything.
+ */
+export function toolsGuide(tools: readonly { name: string }[], texts: PromptTexts): string {
+  return guidesOf(tools.map((t) => t.name))
+    .map((g) => renderPrompt(toolGuideId(g), texts, {}))
+    .filter((t) => t.trim() !== "")
+    .join("\n\n");
 }

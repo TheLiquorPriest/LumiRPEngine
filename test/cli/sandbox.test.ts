@@ -49,6 +49,15 @@ describe("the sandbox", () => {
     expect(moved.stopped).toBeUndefined();
     const months = list(moved.months);
     expect(months.map((m) => m.month)).toEqual(["Sep 2026", "Oct 2026", "Nov 2026"]);
+    // Each month names its slowest processes, five at most, each with its time over the month.
+    for (const m of months) {
+      const slowest = String(m.slowest);
+      expect(slowest).toStartWith("Slowest processes: ");
+      const named = slowest.slice("Slowest processes: ".length).split(" · ");
+      expect(named.length).toBeGreaterThan(0);
+      expect(named.length).toBeLessThanOrEqual(5);
+      for (const p of named) expect(p).toMatch(/^\S+ \d/);
+    }
     // Each month whole, from the sandbox's log: its first entry is this advance.
     const whole = async (key: string): Promise<Record<string, unknown>[]> => (await Promise.all(months.map(async (_, i) => list(await read("lre_sandbox_read", { sandbox, part: "log", pointer: `/0/advance/months/${i}/${key}` }))))).flat();
     const bills = (await whole("bills")).filter((b) => b.id === LOAN);

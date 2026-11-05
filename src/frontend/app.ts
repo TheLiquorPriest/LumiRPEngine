@@ -55,7 +55,7 @@ export interface GmState {
   focus?: string;
 }
 
-export type SettingsPage = "home" | "helper" | "model" | "steps" | "minds" | "narrator" | "timeouts" | "agents" | "roles" | "context" | "main" | "assistant" | "prompts" | "retention" | "realism" | "checks" | "time" | "extraction" | "swipes" | "preset" | "lore" | "display" | "caveats" | "diagnostics" | "mcp";
+export type SettingsPage = "home" | "helper" | "model" | "steps" | "minds" | "narrator" | "timeouts" | "agents" | "roles" | "context" | "main" | "assistant" | "prompts" | "retention" | "speed" | "realism" | "checks" | "time" | "extraction" | "swipes" | "preset" | "lore" | "display" | "caveats" | "diagnostics" | "mcp";
 
 /**
  * Where Settings is: a page, and on a page with pages of its own one of them (`sub`: one of the

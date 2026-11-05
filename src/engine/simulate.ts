@@ -145,6 +145,43 @@ export interface AdvanceResult {
   tracks: TrackChange[];
   /** The slot the run ended inside when it reached its target there (for the next piece, `AdvanceOptions.open`); null on a slot's end. */
   open: OpenSlot | null;
+  /**
+   * How long each process took in this run, by its id, in ms (wall clock, its steps and its
+   * instants), when its caller times the run (`timedProcesses`): what Check world and a sandbox's
+   * digest show. Timing only: no event or state reads it. Empty for an untimed run.
+   */
+  processMs?: Record<string, number>;
+}
+
+/** The wall clock processes are timed by, inside `timedProcesses`; none outside it, so a run reads no ambient time. */
+let processClock: (() => number) | null = null;
+
+/**
+ * Runs `run`, a synchronous engine run (a Check world day's plan), with each process its runs step
+ * timed by `clock` into their `AdvanceResult.processMs`; with no clock, untimed. The engine never
+ * reads a clock of its own: the host that wants the times (the background lane, the command line)
+ * passes one.
+ */
+export function timedProcesses<T>(clock: (() => number) | undefined, run: () => T): T {
+  const outer = processClock;
+  processClock = clock ?? null;
+  try {
+    return run();
+  } finally {
+    processClock = outer;
+  }
+}
+
+/** Adds how long `fn` took to `times` under `id` when the run is timed (`timedProcesses`), and gives its value. */
+function timeProcess<T>(times: Record<string, number>, id: string, fn: () => T): T {
+  const clock = processClock;
+  if (clock === null) return fn();
+  const t0 = clock();
+  try {
+    return fn();
+  } finally {
+    times[id] = (times[id] ?? 0) + (clock() - t0);
+  }
 }
 
 /** Interrupt policy per class for a run. */
@@ -167,12 +204,12 @@ function rngFactory(runSeed: string, process: string, slot: number): (entity: En
  * narrated skip): its routine doesn't move it, and its scene holds whoever is in it (DESIGN §8).
  * `run`, the span the run passes (`SlotInfo.run`), when one does.
  */
-function stepAgent(reg: Registry, w: Working, agent: EntityId, slot: Slot, runSeed: string, povRoutine: boolean, timelapse: boolean, run?: { from: number; to: number }): LedgerEvent[] {
+function stepAgent(reg: Registry, w: Working, agent: EntityId, slot: Slot, runSeed: string, povRoutine: boolean, timelapse: boolean, times: Record<string, number>, run?: { from: number; to: number }): LedgerEvent[] {
   const applied: LedgerEvent[] = [];
   for (const def of reg.processes) {
     if (def.scope !== "agent") continue;
     if (w.ctx.levelOf(agent, def.domain) < def.minLevel) continue;
-    applied.push(...w.applyAll(def.step({ start: slot.start, end: slot.end, index: slot.index, ...(povRoutine ? {} : { povRoutine: false }), ...(timelapse ? { timelapse: true } : {}), ...(run ? { run } : {}) }, w.ctx, rngFactory(runSeed, def.id, slot.index), agent)));
+    applied.push(...w.applyAll(timeProcess(times, def.id, () => def.step({ start: slot.start, end: slot.end, index: slot.index, ...(povRoutine ? {} : { povRoutine: false }), ...(timelapse ? { timelapse: true } : {}), ...(run ? { run } : {}) }, w.ctx, rngFactory(runSeed, def.id, slot.index), agent))));
   }
   return applied;
 }
@@ -212,7 +249,8 @@ export function advance(reg: Registry, w: Working, to: number, opts: AdvanceOpti
   const cap = clampUnitCap(opts.unitCap ?? w.state.time.unitCap);
   const spent = opts.spent ?? { slots: 0, agentDays: 0, events: 0 };
   const startEvents = w.events.length;
-  const result: AdvanceResult = { from, to: from, requested: to, slots: 0, stop: "target", stoppedBy: null, stops: [], notes: [], agentDays: 0, events: 0, rules: [], tracks: [], open: opts.open ?? null };
+  const processMs: Record<string, number> = {};
+  const result: AdvanceResult = { from, to: from, requested: to, slots: 0, stop: "target", stoppedBy: null, stops: [], notes: [], agentDays: 0, events: 0, rules: [], tracks: [], open: opts.open ?? null, processMs };
   if (to <= from) return result;
   const cal = calendarOf(w.world);
   // Up to how far the world has run (after the clock was set back), everything already happened:
@@ -295,7 +333,8 @@ export function advance(reg: Registry, w: Working, to: number, opts: AdvanceOpti
       } else if (moment) {
         t++;
         clockTo(w, moment.at, cause, e);
-        if (stillActs(w, moment.agent)) e.emit(moment.def.atInstant?.(w.ctx, moment.agent, moment.instant, info) ?? []);
+        const at = moment.def.atInstant;
+        if (at && stillActs(w, moment.agent)) e.emit(timeProcess(processMs, moment.def.id, () => at(w.ctx, moment.agent, moment.instant, info)));
       }
     }
   };
@@ -317,7 +356,7 @@ export function advance(reg: Registry, w: Working, to: number, opts: AdvanceOpti
       // Someone a death earlier in the slot stopped, or who dies on the way, steps no further.
       while (k < last && stillActs(w, agent)) {
         k++;
-        const applied = stepAgent(reg, w, agent, k === slot.index ? slot : slotOf(cal, k), opts.runSeed, povRoutine, timelapse, run);
+        const applied = stepAgent(reg, w, agent, k === slot.index ? slot : slotOf(cal, k), opts.runSeed, povRoutine, timelapse, processMs, run);
         if (applied.length > 0) result.rules.push(...runRulesOnEvents(reg, w, applied, { seed: hashParts(opts.runSeed, "agent", agent, k) }));
       }
       cursors.set(agent, k);
@@ -344,7 +383,9 @@ export function advance(reg: Registry, w: Working, to: number, opts: AdvanceOpti
       result.stop = "cap";
       break;
     }
-    const mark = opened ? opened.mark : timelapse && result.slots + spent.slots > 0 ? w.mark() : null;
+    // A slot goes back only when the events cap trips after it, so its mark copies nothing now: the
+    // Working copies its state once and rebuilds the slot's start from that copy if the cap trips.
+    const mark = opened ? opened.mark : timelapse && result.slots + spent.slots > 0 ? w.lightMark() : null;
     const held = mark && !opened ? new Map(cursors) : null;
     const before = opened ? opened.since : w.events.length;
     const rulesBefore = result.rules.length;
@@ -358,7 +399,7 @@ export function advance(reg: Registry, w: Working, to: number, opts: AdvanceOpti
     const info = infoOf(slot);
     for (const def of reg.processes) {
       if (def.scope === "agent" || rulesetFloor(w.world, def.domain, w.state.realism.levels[def.domain] ?? 0) < def.minLevel) continue;
-      e.emit(def.step(info, w.ctx, rngFactory(opts.runSeed, def.id, slot.index)));
+      e.emit(timeProcess(processMs, def.id, () => def.step(info, w.ctx, rngFactory(opts.runSeed, def.id, slot.index))));
     }
     stepThrough(agents, slot.index, slot);
     const dayEnds = (slot.index + 1) % cal.partStarts.length === 0;
@@ -412,7 +453,7 @@ export function advance(reg: Registry, w: Working, to: number, opts: AdvanceOpti
         if (stepped) {
           for (const [agent, slot] of cursors) settle(agent, slot);
           cursors = new Map();
-          mark = w.mark();
+          mark = w.lightMark();
         }
         open = { slot: tail.index, since: w.events.length, mark };
       }
@@ -488,7 +529,7 @@ export function catchUp(reg: Registry, w: Working, opts: CatchUpOptions): CatchU
     while (k < done && budget > 0 && stillActs(w, agent)) {
       k++;
       // A turn's catch-up: the story holds the POV, and its scene whoever is in it.
-      const applied = stepAgent(reg, w, agent, slotOf(cal, k), opts.runSeed, false, false);
+      const applied = stepAgent(reg, w, agent, slotOf(cal, k), opts.runSeed, false, false, {});
       if (applied.length > 0) runRulesOnEvents(reg, w, applied, { seed: hashParts(opts.runSeed, "agent", agent, k) });
       budget -= slotLen;
     }

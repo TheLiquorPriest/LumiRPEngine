@@ -33,6 +33,7 @@ import type { CanvasPalette } from "./canvas-theme";
 import { cellAt, cellView, crossCell, EditCanvas, gridLines, gridUnit, strokeCells, Swatch, usePalette, ZOOM_STRIP, type CanvasTool } from "./editors";
 import { LABEL_PAD, LINE, placeLabels, type Box, type PlacedLabel } from "./labels";
 import { areaFill, FRAME_UNITS, terrainFill, type Paint } from "./map-draw";
+import { paintWalls, thinWalls, wallKindOf, wallPlan, type WallCell, type WallPlan } from "./map-walls";
 import { MapPreview, previewMarks, previewScope, type PreviewMark } from "./map-preview";
 
 /** The code area's line height in px (the gutter and the text share it). */
@@ -104,7 +105,7 @@ export interface MapModel {
   links: MapLinkEntry[];
 }
 
-const MODES: readonly TravelMode[] = ["walk", "road", "offroad", "water"];
+const MODES: readonly TravelMode[] = ["walk", "road", "offroad", "water", "air"];
 
 function pairOf(value: unknown): Cell | null {
   return Array.isArray(value) && value.length === 2 && typeof value[0] === "number" && typeof value[1] === "number" ? { x: value[0], y: value[1] } : null;
@@ -480,6 +481,44 @@ function drawPlaces(g: CanvasRenderingContext2D, places: readonly { id: string; 
   return labels;
 }
 
+/** What a cell of this meaning is to the wall lines, as Play's map reads its compiled terrain. */
+function wallCellOf(m: CellMeaning): WallCell {
+  switch (m.kind) {
+    case "wall":
+      return "wall";
+    case "door":
+    case "roomDoor":
+      return "door";
+    case "terrain":
+      return wallKindOf(m.terrain) ?? (m.blocked ? "solid" : "open");
+    case "nothing":
+    case "unknown":
+      return "solid";
+    default:
+      return "open";
+  }
+}
+
+// One wall plan per layout read: the editor redraws on every pan frame, the layout only with an edit.
+const plans = new WeakMap<LayoutFacts, WallPlan>();
+
+/** The layout's walls and doors as Play's map draws them (map-walls.ts). */
+function layoutWalls(model: MapModel, facts: LayoutFacts): WallPlan {
+  const kept = plans.get(facts);
+  if (kept) return kept;
+  const cells: WallCell[] = [];
+  for (let y = 0; y < model.height; y++) {
+    const row = [...(model.layout[y] ?? "")];
+    for (let x = 0; x < model.width; x++) {
+      const ch = row[x];
+      cells.push(ch === undefined ? "solid" : wallCellOf(facts.meaning.get(ch) ?? { kind: "unknown" }));
+    }
+  }
+  const plan = wallPlan({ width: model.width, height: model.height, cells, room: new Set([...facts.areas.values()].flat()) });
+  plans.set(facts, plan);
+  return plan;
+}
+
 function drawGridMap(g: CanvasRenderingContext2D, model: MapModel, facts: LayoutFacts, view: Transform, width: number, height: number, palette: CanvasPalette, overlay: { marks: readonly PreviewMark[]; selected: string | null }): void {
   const unit = gridUnit(model);
   const t = cellView(view, unit);
@@ -487,12 +526,18 @@ function drawGridMap(g: CanvasRenderingContext2D, model: MapModel, facts: Layout
   const ids = model.places.map((p) => p.id).sort();
   const zones = [...new Set([...facts.meaning.values()].flatMap((m) => (m.kind === "zone" ? [m.zone] : [])))].sort();
   const neg = palette.series[3] ?? palette.ink;
+  // Walls and doors drawn thin, as Play draws them: a wall's cell and a door's in a wall line lie on
+  // faint floor under the lines; a door in no line, and every cell too small for a line, keep their fill.
+  const walls = thinWalls(t.k) ? layoutWalls(model, facts) : null;
+  const gaps = new Set(walls?.doors.map((d) => d.cell));
+  const floor = terrainFill("floor", palette);
   model.layout.forEach((row, y) => {
     [...row].forEach((ch, x) => {
       const p = toScreen(t, { x, y });
       if (p.x > width || p.y > height || p.x + t.k < 0 || p.y + t.k < 0) return;
       const m = facts.meaning.get(ch) ?? { kind: "unknown" };
-      const fill = meaningFill(m, palette);
+      const lined = walls !== null && (gaps.has(y * model.width + x) || wallCellOf(m) === "wall");
+      const fill = lined ? floor : meaningFill(m, palette);
       if (fill) {
         g.globalAlpha = fill.alpha;
         g.fillStyle = fill.color;
@@ -520,7 +565,7 @@ function drawGridMap(g: CanvasRenderingContext2D, model: MapModel, facts: Layout
         g.stroke();
         g.globalAlpha = 1;
       }
-      if ((m.kind === "terrain" && m.blocked) || m.kind === "unknown") crossCell(g, p, t.k, m.kind === "unknown" ? neg : palette.muted);
+      if ((m.kind === "terrain" && m.blocked && !lined) || m.kind === "unknown") crossCell(g, p, t.k, m.kind === "unknown" ? neg : palette.muted);
       if (m.kind === "item") {
         const c = { x: p.x + t.k / 2, y: p.y + t.k / 2 };
         const r = Math.max(4, t.k * 0.24);
@@ -539,6 +584,7 @@ function drawGridMap(g: CanvasRenderingContext2D, model: MapModel, facts: Layout
     });
   });
   gridLines(g, t, model.width, model.height, palette);
+  if (walls) paintWalls(g, walls, (c) => toScreen(t, c), t.k, window.devicePixelRatio || 1, palette);
   const cells = gridPlaceCells(model, facts.areas);
   const placed = model.places.flatMap((p) => {
     const cell = cells.get(p.id);
@@ -548,7 +594,7 @@ function drawGridMap(g: CanvasRenderingContext2D, model: MapModel, facts: Layout
   drawPlaces(g, placed, overlay.selected, width, height, palette);
 }
 
-const LINK_DASH: Record<TravelMode, number[]> = { road: [], walk: [6, 6], offroad: [10, 4, 2, 4], water: [2, 5] };
+const LINK_DASH: Record<TravelMode, number[]> = { road: [], walk: [6, 6], offroad: [10, 4, 2, 4], water: [2, 5], air: [1, 7] };
 
 function drawNodeMap(g: CanvasRenderingContext2D, model: MapModel, view: Transform, width: number, height: number, palette: CanvasPalette, overlay: { marks: readonly PreviewMark[]; selected: Selection | null; band: { from: string; to: Point } | null }): void {
   const unit = FRAME_UNITS / Math.max(1, model.width, model.height);
@@ -663,7 +709,7 @@ const HINTS: Record<GridTool | NodeTool, string> = {
   add: "Tap the map where the new place goes.",
 };
 
-const MODE_LABEL: Record<TravelMode, string> = { walk: "Walk", road: "Road", offroad: "Off-road", water: "Water" };
+const MODE_LABEL: Record<TravelMode, string> = { walk: "Walk", road: "Road", offroad: "Off-road", water: "Water", air: "Air" };
 
 const MEANINGS = [
   { value: "wall", label: "Wall" },

@@ -116,8 +116,8 @@ describe("a ledger recorded on 58b2ac44", () => {
   test.each(recorded.map((r) => [r.name, r] as const))("%s keeps its own revision through Data updates, and folds the same once upgraded to the revision they make", (_name, r) => {
     const world = worldOf(r);
     const updates = tableUpdates(world, reg.tables);
-    // Its world never changed a table, so every newer one is taken: sized, aliased, the index's history added, and the unemployment taxes' rows and the tax-exempt statuses (ORG-SPEC §3.11, Phase 5).
-    expect(Object.fromEntries(updates.map((u) => [u.table, u.status]))).toEqual({ "economy.catalog": "update", "economy.categories": "update", "economy.exempt": "missing", "economy.finance": "update", "economy.regions": "update", [INDEX_HISTORY_TABLE]: "missing", "economy.projects": "missing", "gear.items": "update", "gear.containers": "update" });
+    // Its world never changed a table, so every newer one is taken: sized, aliased, the index's history added, the unemployment taxes' rows and the tax-exempt statuses (ORG-SPEC §3.11, Phase 5), and Build C's vehicle classes, the air's factors and the arsenal's slots and items.
+    expect(Object.fromEntries(updates.map((u) => [u.table, u.status]))).toEqual({ "economy.catalog": "update", "economy.categories": "update", "economy.exempt": "missing", "economy.finance": "update", "economy.regions": "update", [INDEX_HISTORY_TABLE]: "missing", "economy.projects": "missing", "gear.items": "update", "gear.containers": "update", "gear.slots": "update", "vehicles.classes": "update", "vehicles.factors": "update" });
     // What Apply puts in the draft (`lre.editor shipped`): each shipped table, pinned at its revision.
     const shipped = Object.fromEntries(updates.map((u) => [u.table, reg.tables.get(u.table)?.defaults]).filter((e): e is [string, DataTable] => e[1] !== undefined && e[1] !== null));
     const refreshed: WorldDoc = { ...world, tables: { ...world.tables, ...shipped }, pins: { ...world.pins, tables: { ...world.pins.tables, ...Object.fromEntries(Object.values(shipped).map((t) => [t.id, t.revision])) } } };

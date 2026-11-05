@@ -166,6 +166,16 @@ export class Sessions {
     return { summary: parts.summary, messages: parts.segments.flatMap((s) => s.messages), refs, missing: parts.missing };
   }
 
+  /**
+   * Segments by hash, for a look back at past turns (`past_turn`): from the latest session read
+   * where it holds them, else from the store, leaving that read as it was. Null for one the store
+   * doesn't have, or that isn't a segment.
+   */
+  segments(userId: UserId, hashes: readonly string[]): Promise<(SessionMessage[] | null)[]> {
+    const cached = this.read.get(userId);
+    return Promise.all(hashes.map(async (hash) => cached?.get(hash) ?? segmentOf(await this.blobs.getJson(userId, hash))));
+  }
+
   /** The session `refs` name, turn by turn (`SessionParts`), its segments read together. */
   async parts(userId: UserId, refs: SessionRefs): Promise<SessionParts> {
     const missing: string[] = [];

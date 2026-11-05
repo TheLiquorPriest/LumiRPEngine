@@ -293,13 +293,18 @@ function ActionButton(props: { action: ChipAction; controls: ChipControls; pill?
   );
 }
 
-/** The small form an action with an input opens: an amount in the world's currency, one of its options, or text to edit; Apply sends it as the chip's payload. */
+/**
+ * The small form an action with an input opens: an amount in the world's currency, one of its
+ * options, or text to edit, which an `optional` input may send empty (a swipe's "What should
+ * change?"); Apply sends it as the chip's payload.
+ */
 function ChipInputForm(props: { action: ChipAction; input: Exclude<ChipInput, { type: "action" } | { type: "org" }>; currency: WorldCurrency; busy: boolean; onSend(payload: JsonObject): void; onCancel(): void }) {
   const { input } = props;
   const [text, setText] = useState(() => (input.type === "money" && input.value !== undefined ? formatMoneyInput(input.value, props.currency) : input.type === "text" ? input.value : ""));
   const [picked, setPicked] = useState(() => (input.type === "choice" ? (input.options[0]?.value ?? "") : ""));
   const cents = input.type === "money" ? parseMoneyInput(text, props.currency) : null;
-  const ok = input.type === "money" ? cents !== null && cents > 0 : input.type === "text" ? text.trim() !== "" : picked !== "";
+  const optional = input.type === "text" && input.optional === true;
+  const ok = input.type === "money" ? cents !== null && cents > 0 : input.type === "text" ? optional || text.trim() !== "" : picked !== "";
   return (
     <form
       class="lre-chat-form"
@@ -312,7 +317,7 @@ function ChipInputForm(props: { action: ChipAction; input: Exclude<ChipInput, { 
         if (event.key === "Escape") props.onCancel();
       }}
     >
-      <Field label={input.label}>
+      <Field label={optional ? `${input.label} (optional)` : input.label}>
         {input.type === "money" ? (
           <MoneyInput currency={props.currency} value={text} onInput={setText} label={input.label} invalid={text.trim() !== "" && !ok} autoFocus />
         ) : input.type === "text" ? (

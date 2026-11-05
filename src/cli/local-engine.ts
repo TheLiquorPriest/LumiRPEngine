@@ -13,7 +13,7 @@ import type { GmView } from "../shared/state-view";
 import type { WorldDoc } from "../shared/world";
 import { ENGINE_VERSION, EXPORT_FORMAT } from "../shared/world";
 import { checkWorldDay, isWorldDoc, lintWorld, migrateWorld, newBlankWorld, playtestStart, playtestTurn, shapeIssues, type DayFindings, type PlaytestStep, type PlaytestTurn } from "../engine/authoring";
-import { buildGmWorld, buildGmWorldPart, gmWorldPartCount, type GmWorldPart } from "../engine/gm-view";
+import { buildGmWorld, buildGmWorldPart, gmWorldPartCount, type GmPick, type GmWorldPart } from "../engine/gm-view";
 import { readPass } from "../engine/read-pass";
 import { createRegistry, type Registry } from "../engine/registry-impl";
 import type { WorldState } from "../engine/state";
@@ -105,7 +105,7 @@ export function checkWorld(world: WorldDoc, days = 3, runSeed = "offline"): RunR
   const out: PlaytestTurn[] = [];
   const count = Math.max(1, Math.min(14, Math.floor(days)));
   for (let i = 0; i < count; i++) {
-    const step = checkWorldDay(reg, pipeline, world, state, runSeed, i, intent);
+    const step = checkWorldDay(reg, pipeline, world, state, runSeed, i, intent, { clock: () => performance.now() });
     state = step.state;
     out.push(step.turn);
   }
@@ -127,12 +127,12 @@ export function sandboxTurn(world: WorldDoc, state: WorldState, user: string, ru
 export function sandboxSpan(world: WorldDoc, state: WorldState, runSeed: string, index: number, at: number, leaks: boolean): PlaytestStep & { findings: DayFindings } {
   const overrides: Record<string, string> = {};
   for (const id of [...Object.keys(world.time.interrupts), ...Object.keys(state.time.interrupts)]) overrides[id] = "note";
-  return checkWorldDay(registryOf(), pipeline, world, state, runSeed, index, timelapseIntent({ type: "at", at }, overrides), { leaks });
+  return checkWorldDay(registryOf(), pipeline, world, state, runSeed, index, timelapseIntent({ type: "at", at }, overrides), { leaks, clock: () => performance.now() });
 }
 
-/** One world part of the GM view on a sandbox's state, built alone; with `id`, of the entities, money or organizations only that one. */
-export function sandboxGmPart<P extends GmWorldPart>(world: WorldDoc, state: WorldState, part: P, id?: string): GmView[P] {
-  return readPass(() => buildGmWorldPart(registryOf(), world, state, part, id));
+/** One world part of the GM view on a sandbox's state, built alone; with a pick, of the entities, money or organizations only those it names, or those of its kind. */
+export function sandboxGmPart<P extends GmWorldPart>(world: WorldDoc, state: WorldState, part: P, pick: GmPick = {}): GmView[P] {
+  return readPass(() => buildGmWorldPart(registryOf(), world, state, part, pick));
 }
 
 /** Every world part of the GM view on a sandbox's state. */

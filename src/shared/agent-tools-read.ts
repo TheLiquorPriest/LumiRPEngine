@@ -169,6 +169,17 @@ export const READ_TOOL_TEXTS: readonly ToolText[] = [
       { path: "item", text: thing },
     ],
   },
+  {
+    name: "vehicles_classes",
+    family: "items",
+    tier: "read",
+    note: "Lists the world's vehicle classes and their prices.",
+    text: "The world's vehicle classes: each with its id, name, domain (road, offroad, marine or air), the make and model a new one takes, its other names, and its used and new price bands in minor units; air says whether the world authors air routes (aircraft are listed only where it does, and elsewhere a flight is told, never routed). A purchase or a make of a vehicle names one of these ids as its class.",
+    args: [
+      { path: "domain", text: "Only this domain's classes: road, offroad, marine or air." },
+      { path: "search", text: "Only classes whose id, name or other names hold these words." },
+    ],
+  },
   // ---------------------------------------------------------------- money
   {
     name: "money_balances",

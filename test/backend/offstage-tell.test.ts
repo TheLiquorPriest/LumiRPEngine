@@ -4,7 +4,9 @@
 // tells it again while the turn after doesn't; and the choice recorded on the action stands
 // whatever Settings says later. Tell and Don't tell change only the last thing done, never while a
 // turn is under way or once it has come, and a double tap changes it once. Port Alder's player
-// character, at its own Money level.
+// character, at its own Money level. Belongings' hand-overs and changes of outfit (the Hand-overs
+// and outfits group) are told by default, a change of the player's own things alone is not, and
+// nothing is handed to someone, or taken back from someone, who isn't here.
 
 import { describe, expect, test } from "bun:test";
 import { actionRequest, blankFlowForm, flowCreateAction, flowStatusAction, transferAction, type ActionBody } from "../../src/packs/economy/ui/requests";
@@ -13,6 +15,9 @@ import { account, MoneyChat } from "../support/money-chat";
 import { toChain } from "../../src/backend/ledger-io";
 import { TELL_FIXED } from "../../src/backend/view";
 import { provenance } from "../../src/packs/economy/core/flows";
+import { thingsFix } from "../../src/frontend/things/at-once";
+import { handoverRequest } from "../../src/packs/gear/ui/belongings";
+import { setApplyRequest, setSaveRequest } from "../../src/packs/gear/ui/sets-sheet";
 
 const CHECKING = "acct_pov_checking";
 const SAVINGS = "acct_pov_savings";
@@ -60,6 +65,16 @@ async function gym(chat: MoneyChat): Promise<ActionBody> {
 
 /** A turn: a transfer played with Send now; the Outcome its narrator got. */
 const turn = (chat: MoneyChat): Promise<string> => chat.play(transferAction(CHECKING, SAVINGS, 100));
+
+/** A request as Belongings sends it, settled: its answer, a refusal included. */
+async function sent(chat: MoneyChat, request: Readonly<Record<string, unknown>>) {
+  const reply = await chat.rig.send(request);
+  await chat.rig.rt.push.settle();
+  return reply;
+}
+
+/** A gear action sent at once from Belongings (`offstage`). */
+const atOnce = (chatId: string, action: string, params: Record<string, string | number>) => ({ type: "lre.action", chatId, action, params, source: "palette", offstage: true });
 
 describe("an action done off screen and told", () => {
   test("leads the next turn's Outcome once, and the turn after doesn't", async () => {
@@ -190,6 +205,44 @@ describe("Tell and Don't tell change only the last thing done, between turns", (
     expect(await fixChips(chat)).toEqual([[done, ["undo"]]]);
     expect(await choose(chat, done, "untell")).toMatchObject({ type: "lre.error", code: "bad_request" });
     expect(await turn(chat)).toContain(TOLD);
+  });
+});
+
+describe("hand-overs and changes of outfit done at once from Belongings (Hand-overs and outfits)", () => {
+  test("a hand-over is told by default and leads the next turn's Outcome; a change to his own things alone isn't; nobody not here is handed anything", async () => {
+    const chat = await MoneyChat.start();
+    const handed = chipOf(chat.rig.body(await sent(chat, { ...thingsFix(chat.chatId, [{ do: "hand", item: "pov_pocketknife", to: "danny_okafor", basis: "hold" }], "Handed Danny the pocketknife") })));
+    expect(await fixChips(chat)).toEqual([[handed, ["untell", "undo"]]]);
+    const renamed = chipOf(chat.rig.body(await sent(chat, { ...thingsFix(chat.chatId, [{ do: "label", item: "pov_watch", name: "Grandpa's watch" }], "Renamed the watch") })));
+    expect(await fixChips(chat)).toEqual([
+      [handed, ["undo"]],
+      [renamed, ["tell", "undo"]],
+    ]);
+    // Marcus is at his own house: lending him the watch at once is refused, in the player's words.
+    expect(await sent(chat, atOnce(chat.chatId, "lend", { item: "pov_watch", to: "marcus_delgado", days: 1 }))).toMatchObject({ type: "lre.error", code: "validation", message: "Marcus Delgado isn't here to take it." });
+    const outcome = await turn(chat);
+    expect(outcome).toContain(`${OFFSTAGE_LINE} Handed Danny the pocketknife. What changed: Pocketknife is no longer carried by you`);
+    expect(outcome.split(OFFSTAGE_LINE)).toHaveLength(2);
+    expect(outcome).not.toContain("Renamed the watch");
+  });
+
+  test("Change into a saved outfit and a Lend are told, a save and a Take off aren't; Take back from someone not here is refused", async () => {
+    const chat = await MoneyChat.start();
+    expect(chat.rig.body(await sent(chat, { ...setSaveRequest(chat.chatId, "Everyday", "outfit") }))).toHaveProperty("applied", true);
+    expect(chat.rig.body(await sent(chat, atOnce(chat.chatId, "remove", { item: "pov_watch" })))).toHaveProperty("applied", true);
+    // By its name, as the sheet sends it: the story hears the set's name, never its id.
+    const changed = chipOf(chat.rig.body(await sent(chat, { ...setApplyRequest(chat.chatId, "Everyday") })));
+    expect((await fixChips(chat)).at(-1)).toEqual([changed, ["untell", "undo"]]);
+    expect(chat.rig.body(await sent(chat, atOnce(chat.chatId, "lend", { item: "pov_watch", to: "danny_okafor", days: 1 })))).toHaveProperty("applied", true);
+    // Danny goes to the shop with the watch: nobody here has it to take back.
+    await chat.edit([{ op: "move", entity: "danny_okafor", to: "alder_automotive" }]);
+    expect(await sent(chat, { ...handoverRequest(chat.chatId, "reclaim", "pov_watch") })).toMatchObject({ type: "lre.error", code: "validation", message: "Danny Okafor has it, and isn't here." });
+    const outcome = await turn(chat);
+    expect(outcome.split(OFFSTAGE_LINE)).toHaveLength(3);
+    expect(outcome.indexOf(`${OFFSTAGE_LINE} Change into (Everyday)`)).toBeLessThan(outcome.indexOf(`${OFFSTAGE_LINE} Lend`));
+    expect(outcome).toContain(`${OFFSTAGE_LINE} Change into (Everyday). What changed:`);
+    expect(outcome).not.toContain("set_everyday");
+    expect(outcome).toContain("Wristwatch is now carried by Danny Okafor");
   });
 });
 

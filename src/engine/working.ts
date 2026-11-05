@@ -14,11 +14,22 @@ export interface Dropped {
   rejection: Rejection;
 }
 
-/** A state snapshot plus the event counts, for an all-or-nothing step (`Working.mark`). */
+/**
+ * A state snapshot plus the event counts, for an all-or-nothing step (`Working.mark`). A light mark
+ * (`Working.lightMark`) holds no snapshot (`state` null): its state is rebuilt on restore from the
+ * Working's checkpoint (`base`) and the events applied between the two.
+ */
 export interface WorkingMark {
-  state: WorldState;
+  state: WorldState | null;
   events: number;
   dropped: number;
+  base?: WorkingCheckpoint;
+}
+
+/** A copy of the working state once `events` events had been applied: what light marks rebuild from. */
+export interface WorkingCheckpoint {
+  state: WorldState;
+  events: number;
 }
 
 export class Working {
@@ -78,12 +89,36 @@ export class Working {
     return { state: structuredClone(this.state), events: this.events.length, dropped: this.dropped.length };
   }
 
+  /** The checkpoint light marks rebuild from: taken at the first light mark, kept while no restore goes back before it. */
+  private checkpoint: WorkingCheckpoint | null = null;
+
+  /**
+   * A mark that copies nothing as it is taken, for a step whose restore is rare (a timelapse slot,
+   * which goes back only when the unit cap trips): the Working copies its state once, at its first
+   * light mark, and a restore rebuilds the marked state from that copy by applying again, in order,
+   * the events applied between them, each to exactly the state it was validated against, as a
+   * re-fold does. Marks are restored innermost first, as every all-or-nothing step does.
+   */
+  lightMark(): WorkingMark {
+    if (this.checkpoint === null || this.checkpoint.events > this.events.length) this.checkpoint = { state: structuredClone(this.state), events: this.events.length };
+    return { state: null, events: this.events.length, dropped: this.dropped.length, base: this.checkpoint };
+  }
+
   /** Restores a mark: the state and the event lists return to what they were. */
   restore(mark: WorkingMark): void {
     // Every WorldState key is required, so assigning a copy replaces each one in place and the
     // read context (which holds this object) stays valid.
-    Object.assign(this.state, structuredClone(mark.state));
+    if (mark.state !== null) Object.assign(this.state, structuredClone(mark.state));
+    else if (mark.base) {
+      Object.assign(this.state, structuredClone(mark.base.state));
+      for (let i = mark.base.events; i < mark.events; i++) {
+        const e = this.events[i];
+        if (e) applyEvent(this.reg, e, this.state, this.ctx);
+      }
+    }
     this.events.length = mark.events;
     this.dropped.length = mark.dropped;
+    // A checkpoint past where the events now end was taken on a path the restore left.
+    if (this.checkpoint !== null && this.checkpoint.events > this.events.length) this.checkpoint = null;
   }
 }

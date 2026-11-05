@@ -88,6 +88,8 @@ export interface DiagAgentCall {
   error?: string;
   /** The tools the answer called, by name, in order; their arguments and results are in the text. */
   tools?: string[];
+  /** The tools the call was offered: how many, and about how many tokens their definitions took (Settings → Speed shows it beside the cached share). */
+  offered?: DiagOffered;
   /**
    * The blob hash (`shared/stores.ts`) of the call's text, its messages and its answer, read only
    * through `lre.diag`'s `text`; gone once transcript retention (Settings → Agents → Retention) passes.
@@ -95,10 +97,23 @@ export interface DiagAgentCall {
   text?: string;
 }
 
+/** The tools an agent call was offered: how many, and their definitions' tokens, as estimated. */
+export interface DiagOffered {
+  tools: number;
+  tokens: number;
+}
+
+/** One step of a slow request's time (a GM view's read, decode, render, build and encode), in ms. */
+export interface DiagStep {
+  name: string;
+  ms: number;
+}
+
 export interface DiagRecord {
   /** Increasing per chat. */
   seq: number;
-  kind: "step" | "error" | "sections" | "slow" | "turn" | "agent";
+  /** `phase`: one part of a turn's time (`TURN_PHASES`), its name the record's step and its cause the reason. */
+  kind: "step" | "error" | "sections" | "slow" | "turn" | "agent" | "phase";
   level: DiagLevel;
   /** The generation the record belongs to; null outside a turn. */
   turn: string | null;
@@ -119,6 +134,8 @@ export interface DiagRecord {
   sections?: DiagSection[];
   /** Agent records: the call. */
   agent?: DiagAgentCall;
+  /** Slow records: where the request's time went, step by step, in order. */
+  steps?: DiagStep[];
   /** An agent turn's own failure (INC2-SPEC lane T1): the one kind of record that stops an agent turn, as its roles' failures follow their own settings instead. */
   fatal?: true;
 }
@@ -142,6 +159,111 @@ export function diagnosticsSettingsOf(raw: unknown, base: Readonly<DiagnosticsSe
 
 /** A request (a view or an edit) slower than this is recorded. */
 export const SLOW_MS = 1000;
+
+// ---------------------------------------------------------------- where a turn's time went
+
+/**
+ * The parts of a turn's time, in the turn's order (Settings → Speed, GM → Live and Diagnostics show
+ * them as "Where the last turn's time went"). Each is recorded as it ends (`Diagnostics.phase`), with
+ * its time and, where it says why, its cause: `wait` the time the turn waited for the chat (another
+ * write or turn holding it), `setup` reading the chat and settings up to the first model call,
+ * `compaction` the main session's summary of earlier turns on the turn's path (cause `ready` when it
+ * was made ahead), `digest` what changed since the main agent's last turn, `stage.<stage>` the main
+ * agent's sends in each stage, `plan` the engine's plan, `brief` the narrator's brief and outline,
+ * `final_review` the final review, `reply` the narrator's reply, `read` the reply's read, and `memory`
+ * the minds' memory.
+ */
+export const TURN_PHASES = ["wait", "setup", "compaction", "digest", "stage.intent", "stage.prepare", "stage.beats", "stage.read", "stage.memory", "plan", "brief", "final_review", "reply", "read", "memory"] as const;
+export type TurnPhaseName = (typeof TURN_PHASES)[number];
+
+/** Each part of a turn's time, as "Where the last turn's time went" names it. */
+export const TURN_PHASE_LABEL: Readonly<Record<TurnPhaseName, string>> = Object.freeze({
+  wait: "Waiting for the chat",
+  setup: "Setup",
+  compaction: "Summarizing earlier turns",
+  digest: "What changed since the last turn",
+  "stage.intent": "Main agent: the intent",
+  "stage.prepare": "Main agent: scene, minds and decisions",
+  "stage.beats": "Main agent: the beats",
+  "stage.read": "Main agent: the read",
+  "stage.memory": "Main agent: the memory",
+  plan: "The plan",
+  brief: "The narrator's brief",
+  final_review: "The final review",
+  reply: "The reply",
+  read: "The reply's read",
+  memory: "Memory",
+});
+
+/** Whether a record's step names a part of a turn's time. */
+export function isTurnPhase(name: string): name is TurnPhaseName {
+  return (TURN_PHASES as readonly string[]).includes(name);
+}
+
+/** One agent call inside a part of the turn's time: its role, model, time, the tools it was offered and the share of its prompt read from the provider's cache. */
+export interface TimelineCall {
+  role: string;
+  model: string;
+  ms: number;
+  offered: DiagOffered | null;
+  /** `cachedIn / in`, 0 to 1; null when the call has no counts. */
+  cached: number | null;
+}
+
+/** One row of "Where the last turn's time went": a part of the turn, its time and cause, the calls made inside it, and whether it was the slowest. */
+export interface TimelineRow {
+  name: TurnPhaseName;
+  label: string;
+  ms: number;
+  cause: string | null;
+  start: number;
+  calls: TimelineCall[];
+  slowest: boolean;
+}
+
+/** A turn's time, part by part: its turn id, when it started, its rows in order and their time in all. */
+export interface TurnTimeline {
+  turn: string;
+  start: number;
+  ms: number;
+  rows: TimelineRow[];
+}
+
+/**
+ * Where a turn's time went (Settings → Speed, GM → Live, Diagnostics): `turn`'s phase records (the
+ * latest turn that has any when `turn` is absent), in the order they started, each with the agent
+ * calls that ended inside it, the slowest marked. Null when no turn has phase records yet.
+ */
+export function turnTimeline(records: readonly DiagRecord[], turn?: string): TurnTimeline | null {
+  const phases = records.filter((r) => r.kind === "phase" && r.turn !== null && isTurnPhase(r.step));
+  const id = turn ?? phases.reduce<DiagRecord | null>((latest, r) => (latest === null || r.start > latest.start || (r.start === latest.start && r.seq > latest.seq) ? r : latest), null)?.turn;
+  if (id === undefined || id === null) return null;
+  const own = phases.filter((r) => r.turn === id).sort((a, b) => a.start - b.start || a.seq - b.seq);
+  if (own.length === 0) return null;
+  const agents = records.filter((r) => r.kind === "agent" && r.turn === id && r.agent);
+  const slowest = own.reduce((max, r) => (r.ms > max.ms ? r : max), own[0] as DiagRecord);
+  const rows = own.map((r): TimelineRow => {
+    const calls = agents
+      .filter((a) => a.end > r.start && a.end <= r.end)
+      .map((a): TimelineCall => {
+        const call = a.agent as DiagAgentCall;
+        const u = call.usage;
+        return { role: call.role, model: call.model, ms: call.ms, offered: call.offered ?? null, cached: u && u.in > 0 ? Math.min(1, u.cachedIn / u.in) : null };
+      });
+    return { name: r.step as TurnPhaseName, label: TURN_PHASE_LABEL[r.step as TurnPhaseName], ms: r.ms, cause: r.reason ?? null, start: r.start, calls, slowest: r === slowest && r.ms > 0 };
+  });
+  const start = Math.min(...own.map((r) => r.start));
+  const end = Math.max(...own.map((r) => r.end));
+  return { turn: id, start, ms: end - start, rows };
+}
+
+/** A part's time in words, as the timeline says it: "7 min 46 s", "14.2 s", "350 ms". */
+export function phaseTimeText(ms: number): string {
+  if (ms < 1000) return `${Math.round(ms)} ms`;
+  if (ms < 60_000) return `${(ms / 1000).toFixed(1)} s`;
+  const s = Math.round(ms / 1000);
+  return `${Math.floor(s / 60)} min ${s % 60} s`;
+}
 
 /** The in-flight line: what the engine is doing for the chat now, or what failed last. */
 export interface Activity {

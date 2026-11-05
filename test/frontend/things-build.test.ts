@@ -11,7 +11,8 @@ import { createRegistry } from "../../src/engine/registry-impl";
 import { buildContext, findThingIds, personThings, thingPage, thingsList, thingTypes } from "../../src/engine/thing-view";
 import { IssueLine } from "../../src/frontend/build/check";
 import { WorldContent } from "../../src/frontend/build/build";
-import { OwnerList, PersonGroups, PlaceTree, SizeChoices, ThingChips, ThingRowView, TreeRows, UseSection, searchTypes, whereWords } from "../../src/frontend/build/things";
+import { OwnerList, PersonGroups, PlaceTree, ThingChips, ThingRowView, TreeRows, UseSection, whereWords } from "../../src/frontend/build/things";
+import { SizeChoices, THING_KINDS, searchTypes } from "../../src/frontend/things/what-it-is";
 import { entityGroups, giveOps, lendOps, moveOps, newThing, ownerCounts, placeSections, removeOps } from "../../src/frontend/build/things-model";
 import { Button, IconButton, ListRow } from "../../src/frontend/components";
 import { cannotHold, searchWhere, whereIndex, whereLabel } from "../../src/frontend/things/where";
@@ -137,6 +138,14 @@ describe("the draft changes the Things pages make", () => {
     expect(thingsList(ctxOf(world)).rows.find((r) => r.id === "spare_toolbox")?.size).toBe("armful");
     const crate = newThing(portAlder, { name: "Crate", type: null, size: "heavy", where: { in: "pov_truck_bed" }, owner: null, kept: "owner" });
     expect(crate.value).toMatchObject({ kind: "item", fields: { size: "heavy", home: "owner" }, relations: [{ type: "in", to: "pov_truck_bed" }] });
+  });
+
+  test("Add offers every kind, vehicles included: a vehicle is one thing of the vehicle kind with its class; a kind said without a type sets its category or makes a holder", () => {
+    expect(THING_KINDS).toEqual(["item", "clothing", "container", "kit", "weapon", "armor", "ammo", "vehicle"]);
+    const van = newThing(portAlder, { name: "Delivery van", type: null, size: null, vehicle: { id: "midsize_pickup", name: "Midsize pickup", domain: "road", make: "Ford", model: "Ranger", year: 2021 }, where: { place: "alder_automotive" }, owner: null, kept: null });
+    expect(van.value).toMatchObject({ kind: "vehicle", name: "Delivery van", fields: { class: "midsize_pickup", make: "Ford", model: "Ranger", year: 2021, place: "alder_automotive" } });
+    expect(newThing(portAlder, { name: "Bandolier", type: null, size: "hand", is: "ammo", where: { in: "pov" }, owner: null, kept: null }).value).toMatchObject({ kind: "item", fields: { category: "ammo", size: "hand" } });
+    expect(newThing(portAlder, { name: "Tote", type: null, size: null, is: "container", where: { in: "pov" }, owner: null, kept: null }).value).toMatchObject({ kind: "container" });
   });
 
   test("Move, Give, Lend and Remove each change only what they say", () => {

@@ -331,6 +331,7 @@ function KnowledgeSection(props: { knowledge: KnowledgeSettings; busy: boolean; 
   const { knowledge: k, busy } = props;
   const set = (change: KnowledgeSettingsChange) => props.patch(knowledgePatch(change));
   const [lo, hi] = KNOWLEDGE_RANGES.threshold;
+  const [atLeast, atMost] = KNOWLEDGE_RANGES.atOnce;
   return (
     <Section title="Knowledge">
       <div class="lre-minds-body" data-lre-knowledge-settings="">
@@ -341,7 +342,9 @@ function KnowledgeSection(props: { knowledge: KnowledgeSettings; busy: boolean; 
         <div class="lre-minds-group">
           <span class="lre-minds-group-title">The knowledge step</span>
           <Seg<KnowledgeBatch> label="The knowledge step" value={k.batch} options={KNOWLEDGE_BATCHES.map((b) => ({ value: b, label: BATCH_LABEL[b] }))} disabled={busy} onChange={(batch) => set({ batch })} />
-          <Note>One call per scene works out everyone who could perceive the turn at once. One call per character asks about each of them alone, one after another, each shown the facts the ones before it made: closer reading, a call each.</Note>
+          <Note>One call per scene works out everyone who could perceive the turn at once. One call per character asks about each of them alone, a call each: closer reading.</Note>
+          <NumberStepper label="Calls at once" value={k.callsAtOnce} min={atLeast} max={atMost} step={1} integer disabled={busy} onChange={(callsAtOnce) => set({ callsAtOnce })} />
+          <Note>With one call per character: at 1 they go one after another, each shown the facts the ones before it made; more go out together, sooner, each answer checked as it comes back, and a fact two of them make in the same words is one fact.</Note>
         </div>
         <div class="lre-minds-group">
           <span class="lre-minds-group-title">Limits</span>

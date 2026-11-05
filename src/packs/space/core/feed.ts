@@ -172,6 +172,12 @@ export function placeLines(ctx: ReadContext, scope: FeedScope): FeedLine[] {
     if (groups.size > 0) lines.push({ text: `In the room: ${[...groups].map(([key, ids]) => `${ids.map((id) => thingName(ctx, id)).join(", ")}${key !== "" ? ` (${key})` : ""}`).join("; ")}.`, known: "pov" });
     for (const id of furnishings.filter((f) => !bare.includes(f))) lines.push({ text: sentence(`In the room: ${thingText(ctx, id, whose(id))}`), known: "pov" });
     for (const id of seen.filter((t) => !fixture(t))) lines.push({ text: sentence(`Lying here: ${thingText(ctx, id, whose(id))}`), known: "pov" });
+    // The vehicles parked here the POV can see, by name and whose (the Vehicles section tells the rest of each).
+    const parked = (thingIndex(ctx).loose.get(here) ?? []).filter((id) => {
+      const e = own(ctx.state.entities, id);
+      return !!e && !isGone(ctx.state, id) && kindIs(ctx.registry, ctx.world, e.kind, "vehicle") && seeThing(pov, id);
+    });
+    if (parked.length > 0) lines.push({ text: `Parked here: ${parked.map((id) => thingName(ctx, id, undefined, whose(id))).join(", ")}.`, known: "pov" });
     // What is in each holder here the POV may use (the fridge, a parts bin): its contents by name, whose only where it isn't the holder's.
     const ownersOf = (id: EntityId): string => [...whoseOf(ctx, id).owners].sort().join(" ");
     const holders = seen.filter((id) => holdsOf(ctx, id) !== null && accessFor(ctx, pov, id).use !== null);

@@ -54,8 +54,9 @@ describe("Data updates", () => {
 
   test("a Port Alder made on the old tables gets each changed table as an update and the index's history as missing", () => {
     const updates = tableUpdates(oldPortAlder(), reg.tables);
-    // The unemployment taxes' rows and columns and the tax-exempt statuses (ORG-SPEC §3.11, Phase 5) came after 58b2ac44 too.
-    expect(Object.fromEntries(updates.map((u) => [u.table, u.status]))).toEqual({ "economy.catalog": "update", "economy.categories": "update", "economy.exempt": "missing", "economy.finance": "update", "economy.regions": "update", "economy.index_history": "missing", "economy.projects": "missing", "gear.items": "update", "gear.containers": "update" });
+    // The unemployment taxes' rows and columns and the tax-exempt statuses (ORG-SPEC §3.11, Phase 5) came after 58b2ac44 too, and so did the
+    // vehicle classes from the bicycle to the aircraft with the air's factors, and the arsenal's slots and items (Build C).
+    expect(Object.fromEntries(updates.map((u) => [u.table, u.status]))).toEqual({ "economy.catalog": "update", "economy.categories": "update", "economy.exempt": "missing", "economy.finance": "update", "economy.regions": "update", "economy.index_history": "missing", "economy.projects": "missing", "gear.items": "update", "gear.containers": "update", "gear.slots": "update", "vehicles.classes": "update", "vehicles.factors": "update" });
     const catalog = updates.find((u) => u.table === "economy.catalog");
     expect(catalog?.label).toBe("Price catalog");
     expect(catalog?.shipped.columns.added).toEqual(["aliases", "size", "holds"]);
@@ -75,7 +76,7 @@ describe("Data updates", () => {
     const edited = tableUpdates(world, reg.tables).find((u) => u.table === "gear.items");
     expect(edited?.status).toBe("edited");
     expect(edited?.yours).toEqual({ added: { count: 0, names: [] }, changed: { count: 1, names: ["Wallet, bifold"] }, dropped: { count: 0, names: [] } });
-    expect(edited?.shipped.columns.added).toEqual(["size"]);
+    expect(edited?.shipped.columns.added).toEqual(["size", "ammo"]);
     expect(edited?.shipped.changed.count).toBe(Object.keys(items.rows).length);
   });
 
@@ -111,20 +112,24 @@ describe("Data updates", () => {
         "economy.projects": ["missing", "packs"],
         "gear.items": ["update", name],
         "gear.containers": ["update", "packs"],
+        "gear.slots": ["update", "packs"],
+        "vehicles.classes": ["update", name],
+        "vehicles.factors": ["update", "packs"],
       });
       const catalog = updates.find((u) => u.table === "economy.catalog");
       expect(catalog?.starter).toEqual({ id, name });
       expect(catalog?.shipped.columns.added).toEqual(["aliases", "size", "holds"]);
-      expect(updates.find((u) => u.table === "gear.items")?.shipped.columns.added).toEqual(["size"]);
+      expect(updates.find((u) => u.table === "gear.items")?.shipped.columns.added).toEqual(["size", "ammo"]);
       // Data updates puts the starter's own version in, never the Modern US one; the packs' own for the rest.
-      for (const table of ["economy.catalog", "gear.items"]) {
+      for (const table of ["economy.catalog", "gear.items", "vehicles.classes"]) {
         expect(shippedVersion(world, reg.tables, STARTER_TABLES, table)).toBe(ownTable(id, table));
         expect(ownTable(id, table).revision).not.toBe(reg.tables.get(table)?.defaults?.revision);
       }
       expect(shippedVersion(world, reg.tables, STARTER_TABLES, "gear.containers")).toBe(reg.tables.get("gear.containers")?.defaults ?? null);
-      expect(statuses({ tables: { ...world.tables, "economy.catalog": ownTable(id, "economy.catalog"), "gear.items": ownTable(id, "gear.items") } })).toEqual({ "economy.exempt": "missing", "economy.finance": "update", "economy.regions": "update", "economy.index_history": "missing", "economy.projects": "missing", "gear.containers": "update" });
-      // Without the starters' histories, their copies are the world's own, as before they shipped.
-      expect(Object.fromEntries(tableUpdates(world, reg.tables).map((u) => [u.table, u.status]))).toEqual({ "economy.exempt": "missing", "economy.finance": "update", "economy.regions": "update", "economy.index_history": "missing", "economy.projects": "missing", "gear.containers": "update" });
+      expect(statuses({ tables: { ...world.tables, "economy.catalog": ownTable(id, "economy.catalog"), "gear.items": ownTable(id, "gear.items"), "vehicles.classes": ownTable(id, "vehicles.classes") } })).toEqual({ "economy.exempt": "missing", "economy.finance": "update", "economy.regions": "update", "economy.index_history": "missing", "economy.projects": "missing", "gear.containers": "update", "gear.slots": "update", "vehicles.factors": "update" });
+      // Without the starters' histories, their prices and items are the world's own, as before they shipped; their vehicle classes,
+      // the Modern US classes beside the starter's own, read as the packs' classes edited, now that the packs ship newer ones.
+      expect(Object.fromEntries(tableUpdates(world, reg.tables).map((u) => [u.table, u.status]))).toEqual({ "economy.exempt": "missing", "economy.finance": "update", "economy.regions": "update", "economy.index_history": "missing", "economy.projects": "missing", "gear.containers": "update", "gear.slots": "update", "vehicles.classes": "edited", "vehicles.factors": "update" });
     }
   });
 
@@ -136,7 +141,7 @@ describe("Data updates", () => {
     if (!items || first === undefined || !row) throw new Error("no rows in Brindlemere's old items");
     items.rows[first] = { ...row, price_cents: { min: 1, typical: 2, max: 3 } };
     const edited = tableUpdates(world, reg.tables, STARTER_TABLES).find((u) => u.table === "gear.items");
-    expect([edited?.status, edited?.starter?.id, edited?.yours?.changed.count, edited?.shipped.columns.added]).toEqual(["edited", "fantasy_town", 1, ["size"]]);
+    expect([edited?.status, edited?.starter?.id, edited?.yours?.changed.count, edited?.shipped.columns.added]).toEqual(["edited", "fantasy_town", 1, ["size", "ammo"]]);
     expect(shippedVersion(world, reg.tables, STARTER_TABLES, "gear.items")).toBe(ownTable("fantasy_town", "gear.items"));
     const now = starter("fantasy_town");
     const catalog = now.tables["economy.catalog"];

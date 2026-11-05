@@ -725,7 +725,7 @@ export class AgentAccounts {
     if (entry?.only && !u.run) throw new AgentStop("acceptance", { id: STOP_TEXT.acceptanceClosed, vars: { connection } });
     const throttle = settings.throttles.find((t) => t.id === connection);
     // A place among the connection's calls at once first, so a call waiting for one holds nothing of its minute.
-    const release = await this.atOnce(userId, connection, settings.throttles, input.signal);
+    const release = await this.atOnce(userId, connection, settings.throttles, input.signal, settings.callsAtOnce);
     let tokensIn: number;
     const run = u.run;
     try {
@@ -759,14 +759,16 @@ export class AgentAccounts {
   }
 
   /**
-   * A place among the connection's calls under way at once (Settings → Agents → Throttles, `atOnce`):
-   * every agent's call takes one as it is reserved, and an agent turn's prompt-only call as it is made
-   * (`Steps.gate`), through the same gate; past the limit a call waits for one to free, and one whose
-   * signal aborts meanwhile throws its reason. Its release frees it. A connection with no limit holds
-   * nothing.
+   * A place among the connection's calls under way at once (Settings → Agents → Throttles, `atOnce`;
+   * a connection whose throttle sets none takes `fallback`, the calls at once every such connection
+   * takes, Settings → Speed → Calls): every agent's call takes one as it is reserved, and an agent
+   * turn's prompt-only call as it is made (`Steps.gate`), through the same gate; past the limit a
+   * call waits for one to free, and one whose signal aborts meanwhile throws its reason. Its release
+   * frees it. A connection with no limit holds nothing.
    */
-  async atOnce(userId: UserId, connection: string, throttles: readonly ConnectionThrottle[], signal: AbortSignal): Promise<() => void> {
-    const most = limitOf(throttles.find((t) => t.id === connection)?.atOnce ?? "none");
+  async atOnce(userId: UserId, connection: string, throttles: readonly ConnectionThrottle[], signal: AbortSignal, fallback: Limit = "none"): Promise<() => void> {
+    const own = throttles.find((t) => t.id === connection)?.atOnce;
+    const most = limitOf(own !== undefined && own !== "none" ? own : fallback);
     if (most === Number.POSITIVE_INFINITY) return NOTHING_HELD;
     const key = `${userId}\u0000${connection}`;
     let gate = this.gates.get(key);
@@ -889,14 +891,20 @@ export class ProviderSession {
     const profile = await this.connection();
     const connection = profile?.id ?? this.spec.connectionId;
     if (!this.textTools && connection !== null && tools.length > 0 && (await accounts.refusesTools(userId, connection))) this.textTools = true;
-    const native = this.textTools ? [] : [...tools];
+    const offered = this.textTools ? [] : [...tools];
     const caching = roleCaching(settings, this.spec.role);
     // Off sends a fresh key on every call, so even a provider's automatic cache never matches (§8).
     const key = caching.on ? caching.nonce : crypto.randomUUID();
     const opening: Opening = { nonce: key === "" ? null : renderPrompt(RUNTIME_TEXT.cacheNonce, texts, { nonce: key }), prefix: this.spec.prefix, system: this.spec.system, tools: this.textTools && tools.length > 0 ? toolsAsText(tools, texts) : null };
     const cache = profile?.cache ?? null;
-    const breakpoints = caching.on && cache ? Math.max(0, cache.limit - ownBreakpoints(cache, native.length)) : 0;
-    const messages = assemble(opening, conversation, breakpoints);
+    const breakpoints = caching.on && cache ? Math.max(0, cache.limit - ownBreakpoints(cache, offered.length)) : 0;
+    // A provider that takes breakpoints reads native tools first: with a third to spend, it goes after
+    // the last tool (the tool block alone, which every call offering the same tools reads, whatever its
+    // opening) instead of after the shared prefix, which only calls with these same tools could read,
+    // and those read the opening's. A connection that marks its tools itself keeps them.
+    const toolMark = offered.length > 0 && cache !== null && !cache.tools && breakpoints >= 3;
+    const native = toolMark ? offered.map((t, i): QuietTool => (i === offered.length - 1 ? { ...t, cache: true } : t)) : offered;
+    const messages = assemble(opening, conversation, toolMark ? breakpoints - 1 : breakpoints);
     return { messages, tools: native, names: new Set(tools.map((t) => t.name)), textTools: this.textTools && tools.length > 0, estimate: promptTokens(messages, native), connection, targets: profile ? profile.targets : null, model: this.spec.model ?? profile?.model ?? "" };
   }
 

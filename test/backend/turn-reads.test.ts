@@ -47,7 +47,9 @@ async function where(rig: Rig, chatId: string): Promise<string | null> {
   return placeOfEntity(state, "pov");
 }
 
+/** A Re-run of the head reply's turn (a swipe re-narrates by default, so it is chosen). */
 async function rerun(rig: Rig, chatId: string, reply: string): Promise<void> {
+  rig.rt.setSwipeChoice(chatId, "rerun");
   const g = await rig.host.start(chatId, { type: "regenerate" });
   await rig.host.finish(g, reply);
 }

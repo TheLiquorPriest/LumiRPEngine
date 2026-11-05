@@ -91,7 +91,8 @@ export type Visibility = "public" | "known_by" | "secret";
 /** A place's visibility: `discoverable` keeps it hidden until the POV has been there or knows of it (DESIGN §7). */
 export type PlaceVisibility = Visibility | "discoverable";
 
-export type TravelMode = "walk" | "road" | "offroad" | "water";
+/** Ways of travelling a route; `air` only over routes a world authors for it (aircraft, DESIGN §9.3). */
+export type TravelMode = "walk" | "road" | "offroad" | "water" | "air";
 
 /** Activity types that Speed through handles (DESIGN §9.2). Worlds may add more. */
 export type ActivityType = "sleep" | "work_shift" | "travel" | "waiting" | (string & {});

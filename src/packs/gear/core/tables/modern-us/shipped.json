@@ -115,6 +115,48 @@
         "size": "8f86d188",
         "price_cents": "12e8789d",
         "notes": "818bffbf"
+      },
+      "added": [
+        "pistol_9mm",
+        "pistol_45",
+        "revolver_38",
+        "rifle_hunting_308",
+        "rifle_ar15",
+        "rifle_22",
+        "shotgun_12ga",
+        "hunting_knife",
+        "machete",
+        "baton_expandable",
+        "stun_gun",
+        "pepper_spray",
+        "compound_bow",
+        "crossbow",
+        "body_armor_soft",
+        "plate_carrier",
+        "helmet_ballistic",
+        "ammo_9mm",
+        "ammo_45_acp",
+        "ammo_38_special",
+        "ammo_556",
+        "ammo_308",
+        "ammo_22lr",
+        "ammo_12ga",
+        "arrow_carbon",
+        "crossbow_bolt"
+      ]
+    },
+    {
+      "revision": "3b706178b400380a9407c9cd01f27c48",
+      "columns": {
+        "name": "36de7a58",
+        "category": "f0fd0ef0",
+        "equip_slot": "d0861bfc",
+        "weight_g": "65a14944",
+        "volume_l": "cf86793b",
+        "size": "8f86d188",
+        "price_cents": "12e8789d",
+        "ammo": "f1160518",
+        "notes": "818bffbf"
       }
     }
   ],
@@ -181,6 +223,26 @@
         "equip_slot": "d0861bfc",
         "price_cents": "12e8789d",
         "notes": "818bffbf"
+      },
+      "added": [
+        "gun_safe",
+        "rifle_case_soft",
+        "ammo_can"
+      ]
+    },
+    {
+      "revision": "91ebed05ed7fe51de7bfd7c0c318bd72",
+      "columns": {
+        "name": "36de7a58",
+        "capacity_l": "cf86793b",
+        "max_load_kg": "772792fe",
+        "empty_weight_g": "71af05dd",
+        "location": "b0e71912",
+        "size": "da0f6bc3",
+        "holds": "4fe800e8",
+        "equip_slot": "d0861bfc",
+        "price_cents": "12e8789d",
+        "notes": "818bffbf"
       }
     }
   ],
@@ -203,6 +265,17 @@
   "gear.slots": [
     {
       "revision": "3b7a1c09512b25782bd3e5533a74e7ea",
+      "columns": {
+        "description": "36de7a58"
+      },
+      "added": [
+        "holster",
+        "sheath",
+        "quiver"
+      ]
+    },
+    {
+      "revision": "e813e37ac93fe7f769ef6081705b58f8",
       "columns": {
         "description": "36de7a58"
       }

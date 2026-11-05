@@ -53,6 +53,9 @@ import { TELL_LABEL, type OffstageSettings } from "../shared/offstage";
 import { renderPrompt } from "./prompts";
 import { chatCashRule, toggles } from "../packs/economy/core/pay";
 import { FEATURE_DEFS } from "../shared/finance";
+import { turnFrame } from "./turn-frame";
+import { gmKeyOf } from "./gm-memo";
+import type { DiagStep } from "../shared/diagnostics";
 
 /** The palette's timelapse action; its params are `{target, overrides}`. */
 export const TIMELAPSE_ACTION = "timelapse";
@@ -470,40 +473,48 @@ export const TELL_FIXED = "Something changed after it, so whether it's told can'
  * the POV may see, about things it has met, worded with labels, leak-checked). They are `note`
  * entries, each followed by a `fix` note per ✎ fix or GM edit the player may see, and per action
  * the player did off screen (DESIGN §11), which reads as itself where it changed nothing they see
- * (a standing payment set up, someone hired); the fold's own notes follow them. The latest `keep` of them.
+ * (a standing payment set up, someone hired); the fold's own notes follow them. The latest `keep` of
+ * them, of the replies from chain index `start` on: read back to front, so a window reads only the
+ * turns it shows, however long the chat (each turn's entries are its own, read against the head).
  */
-function turnNotes(chain: readonly ChainMessage[], fold: FoldOutput, core: LedgerCore, registry: Registry, world: WorldDoc, state: WorldState, keep = JOURNAL_TURNS): JournalNote[] {
-  const out: JournalNote[] = [];
-  chain.forEach((m, i) => {
-    if (m.isUser) return;
+function turnNotes(chain: readonly ChainMessage[], fold: FoldOutput, core: LedgerCore, registry: Registry, world: WorldDoc, state: WorldState, keep = JOURNAL_TURNS, start = 0): JournalNote[] {
+  const turns: JournalNote[][] = [];
+  let count = 0;
+  for (let i = chain.length - 1; i >= Math.max(0, start) && count < keep; i--) {
+    const m = chain[i];
+    if (!m || m.isUser) continue;
     const rec = activeRecord(m, core.journal.tombstones);
-    if (!rec) return;
+    if (!rec) continue;
+    const own: JournalNote[] = [];
     const applied = appliedEvents(rec, fold, i);
     const lines = turnLines(registry, world, state, [...applied.events, ...applied.post]);
     const minutes = clockMinutes(rec.events);
     if (minutes > 0 && fold.messages[i]?.fold !== "plain") lines.push(`${spanText(minutes)} passed`);
-    if (lines.length > 0) out.push({ kind: "note", messageId: m.id, ref: null, text: lines.join(" · ") });
+    if (lines.length > 0) own.push({ kind: "note", messageId: m.id, ref: null, text: lines.join(" · ") });
     for (const fix of applied.fixes) {
       const seen = fixLines(registry, world, state, fix.events);
       const fixed = seen.length > 0 || !fix.by || fix.by.action === "hint" ? seen : [fix.by.label];
       // Who made it, for the main agent's digest (DESIGN §11): the player out of play, told or not, or the GM (an edit, a review card's Apply).
       const source = fix.by ? (fix.by.told !== undefined ? "told" : "untold") : fix.gm || fix.agent ? "gm" : undefined;
-      if (fixed.length > 0) out.push({ kind: "fix", messageId: m.id, ref: { in: "post", seq: fix.seq, index: 0 }, text: fixed.join(" · "), ...(source ? { source } : {}) });
+      if (fixed.length > 0) own.push({ kind: "fix", messageId: m.id, ref: { in: "post", seq: fix.seq, index: 0 }, text: fixed.join(" · "), ...(source ? { source } : {}) });
     }
-  });
-  return out.slice(-keep);
+    turns.push(own);
+    count += own.length;
+  }
+  return turns.reverse().flat().slice(-keep);
 }
 
 /**
- * Every turn's Journal entries on the chain before `index` (`turnNotes`, none left out), as the
- * player sees them at that point: the main agent's digest of what changed since its last turn.
+ * Every turn's Journal entries on the chain before `index` (`turnNotes`, none left out), from chain
+ * index `start` on, as the player sees them at that point: the main agent's digest of what changed
+ * since its last turn, which reads none before that turn.
  */
-export function journalNotes(core: LedgerCore, observed: readonly ChainMessage[], index: number, registry: Registry): JournalNote[] {
+export function journalNotes(core: LedgerCore, observed: readonly ChainMessage[], index: number, registry: Registry, start = 0): JournalNote[] {
   const prefix = observed.slice(0, Math.max(0, index));
   const fold = core.fold(prefix);
   const world = core.playedAt(fold.state);
   if (!world) return [];
-  return turnNotes(core.chain(prefix), fold, core, registry, world, fold.state, Number.POSITIVE_INFINITY);
+  return turnNotes(core.chain(prefix), fold, core, registry, world, fold.state, Number.POSITIVE_INFINITY, start);
 }
 
 /**
@@ -541,19 +552,38 @@ export function toldWords(what: string, changes: readonly string[]): string {
 /** Turns `{{recent}}` holds (DESIGN §5.2). */
 const RECENT_TURNS = 5;
 
+/** `{{recent}}` as last made for each ledger and registry, by the fold's key of the chain it was made from (Settings → Speed → Reuse built views): a few chains each, the oldest let go. */
+const recentMemo = new WeakMap<LedgerCore, WeakMap<Registry, Map<string, readonly string[]>>>();
+const RECENT_KEPT = 8;
+
 /**
  * `{{recent}}` for a model step (DESIGN §5.2): the Journal's latest turn lines before `index` in the
  * chain, oldest first, as the player sees them at that point (worded and filtered by `turnNotes`
- * against the state there, so nothing the POV hadn't seen by then).
+ * against the state there, so nothing the POV hadn't seen by then). With `reuse` (Reuse built
+ * views; a turn's own setting, else on), the lines made for a chain whose fold has the same key are
+ * given again: equal keys fold to equal outputs, so they read the same.
  */
-export function recentLines(core: LedgerCore, observed: readonly ChainMessage[], index: number, registry: Registry): string[] {
+export function recentLines(core: LedgerCore, observed: readonly ChainMessage[], index: number, registry: Registry, reuse = turnFrame()?.settings.perf.reuseViews ?? true): string[] {
   const prefix = observed.slice(0, Math.max(0, index));
+  const keys = reuse ? core.foldKeys(prefix) : null;
+  const key = keys ? `${keys.steps.at(-1) ?? keys.root}\u0000${JSON.stringify(core.journal.tombstones)}` : null;
+  const byRegistry = key === null ? undefined : recentMemo.get(core)?.get(registry);
+  const known = key === null ? undefined : byRegistry?.get(key);
+  if (known) return [...known];
   const fold = core.fold(prefix);
   const world = core.playedAt(fold.state);
   if (!world) return [];
-  return turnNotes(core.chain(prefix), fold, core, registry, world, fold.state)
-    .slice(-RECENT_TURNS)
-    .map((n) => n.text);
+  const lines = turnNotes(core.chain(prefix), fold, core, registry, world, fold.state, RECENT_TURNS).map((n) => n.text);
+  if (key !== null) {
+    const byCore = recentMemo.get(core) ?? new WeakMap<Registry, Map<string, readonly string[]>>();
+    const map = byCore.get(registry) ?? new Map<string, readonly string[]>();
+    map.delete(key);
+    map.set(key, Object.freeze([...lines]));
+    if (map.size > RECENT_KEPT) map.delete(map.keys().next().value ?? "");
+    byCore.set(registry, map);
+    recentMemo.set(core, byCore);
+  }
+  return lines;
 }
 
 /**
@@ -700,8 +730,11 @@ function derivedChips(chain: readonly ChainMessage[], fold: FoldOutput, keepRepo
     else if (rec.status === "degraded") chips.push({ id: `degraded:${m.id}:${m.swipeId}`, kind: "degraded", messageId: m.id, label: "Not fully simulated", detail: "Part of this turn ran engine-only.", actions: [], expires: "next_send" });
     const minutes = clockMinutes(rec.events);
     if (minutes > 0) chips.push({ id: `elapsed:${m.id}:${m.swipeId}`, kind: "elapsed", messageId: m.id, label: minutes >= 60 ? `+${Math.floor(minutes / 60)} h ${minutes % 60} min` : `+${minutes} min`, actions: [], expires: "next_send" });
-    // Re-narrate/Re-run (P3, §12): the choice sets the next swipe's mode, then the UI swipes.
-    if (rec.seed !== "" && rec.path !== "") chips.push({ id: `swipe_option:${m.id}:${m.swipeId}`, kind: "swipe_option", messageId: m.id, label: "Swipe as…", detail: "Re-narrate keeps this turn's outcome and rewrites the prose; Re-run rolls the turn again.", actions: [{ id: "renarrate", label: "Re-narrate" }, { id: "rerun", label: "Re-run" }], expires: "next_send" });
+    // Re-narrate/Re-run (P3, §12; Build C item 1): the choice sets the next swipe's mode, with what the player asks of the new telling when they say (only the narrator reads it), then the UI swipes.
+    if (rec.seed !== "" && rec.path !== "") {
+      const ask = { type: "text" as const, label: "What should change?", value: "", optional: true as const };
+      chips.push({ id: `swipe_option:${m.id}:${m.swipeId}`, kind: "swipe_option", messageId: m.id, label: "Swipe as…", detail: "Re-narrate tells this turn again: the same outcome, new prose. Re-run the turn with the engine plays it again, with a fresh roll. Either may take a word on what should change, which only the narrator reads.", actions: [{ id: "renarrate", label: "Re-narrate…", input: ask }, { id: "rerun", label: "Re-run the turn with the engine", input: ask }], expires: "next_send" });
+    }
     const state = fold.state;
     const ctx = registry.context(world, state);
     const applied = appliedEvents(rec, fold, i);
@@ -831,6 +864,23 @@ export interface ViewInput {
   offstage: OffstageSettings;
   /** What the chat's views share between builds (`ViewMemo`). */
   memo: ViewMemo;
+  /**
+   * Where the build's time went, filled as it goes: the fold, each pack panel (`panel:<id>`), and
+   * the HUD, scene, chips, clocks, Journal, palette and controls it made, in order, each in ms. The
+   * runtime keeps a slow one in the chat's diagnostics as `state view/<part>`.
+   */
+  parts?: DiagStep[];
+}
+
+/** `fn`'s value, with how long it took added to `parts` as `name` (nothing kept without `parts`). */
+function timedPart<T>(parts: DiagStep[] | undefined, name: string, fn: () => T): T {
+  if (!parts) return fn();
+  const t0 = performance.now();
+  try {
+    return fn();
+  } finally {
+    parts.push({ name, ms: performance.now() - t0 });
+  }
 }
 
 export function buildView(input: ViewInput): StateView {
@@ -843,7 +893,7 @@ export function buildView(input: ViewInput): StateView {
   const chainHit = memo.chain?.key === chainKey ? memo.chain : null;
   // Folded only when a part kept doesn't stand for the chat as it is now.
   let fold: FoldOutput | null = null;
-  const folded = (): FoldOutput => (fold ??= core.fold(observed));
+  const folded = (): FoldOutput => (fold ??= timedPart(input.parts, "fold", () => core.fold(observed)));
   const head = stateHit ? null : folded().state;
   const doc = head ? (input.world(head.revision) ?? input.world(input.run.revision)) : undefined;
   // The world as the head state plays it (ITEMS-SPEC §6.2): with the places it made.
@@ -857,7 +907,7 @@ export function buildView(input: ViewInput): StateView {
   const paletteHit = memo.palette?.key === paletteKey ? memo.palette : null;
   const controlsHit = chainHit && memo.controls?.key === controlsKey(chainHit.scene.sceneType) ? memo.controls : null;
   let next: WorldState | null = null;
-  const nextState = (): WorldState => (next ??= core.renderState(observed, false, fold ?? undefined)?.state ?? folded().state);
+  const nextState = (): WorldState => (next ??= timedPart(input.parts, "render", () => core.renderState(observed, false, fold ?? undefined)?.state) ?? folded().state);
   if (!chainHit) folded();
   if (!paletteHit || !controlsHit) nextState();
   // Everything else only reads the folded states, many times over: one read pass (DESIGN §9.6).
@@ -869,13 +919,15 @@ export function buildView(input: ViewInput): StateView {
       const panels: Record<PanelId, JsonValue> = {};
       const prefs = { mapDisplay: input.mapDisplay ?? null };
       for (const view of registry.views) {
-        try {
-          panels[view.panel] = view.build(ctx, prefs);
-        } catch (error) {
-          panels[view.panel] = { error: error instanceof Error ? error.message : String(error) };
-        }
+        timedPart(input.parts, `panel:${view.panel}`, () => {
+          try {
+            panels[view.panel] = view.build(ctx, prefs);
+          } catch (error) {
+            panels[view.panel] = { error: error instanceof Error ? error.message : String(error) };
+          }
+        });
       }
-      parts = memo.state = { key: stateKey, world, revision: state.revision, lag: definitionsLag(state), panels: kept(panels), hud: kept(hud(world, state, panels, ctx)) };
+      parts = memo.state = { key: stateKey, world, revision: state.revision, lag: definitionsLag(state), panels: kept(panels), hud: kept(timedPart(input.parts, "hud", () => hud(world, state, panels, ctx))) };
     }
     let read = chainHit;
     if (!read) {
@@ -888,19 +940,19 @@ export function buildView(input: ViewInput): StateView {
         const m = chain.find((x) => x.id === messageId);
         return m ? activeRecord(m, journal.tombstones) : null;
       };
-      const drops = playerDrops(registry, world, state, recordOf, out.notes, out.keepReport);
+      const drops = timedPart(input.parts, "drops", () => playerDrops(registry, world, state, recordOf, out.notes, out.keepReport));
       read = memo.chain = {
         key: chainKey,
-        scene: kept(scene(world, state, lastRec ? clockMinutes(lastRec.events) : 0, registry)),
-        chips: kept(derivedChips(chain, out, drops.keep, core, registry, world)),
-        replyClocks: kept(replyClocks(chain, out, core, world, state)),
-        journal: kept([...turnNotes(chain, out, core, registry, world, state), ...drops.notes]),
+        scene: kept(timedPart(input.parts, "scene", () => scene(world, state, lastRec ? clockMinutes(lastRec.events) : 0, registry))),
+        chips: kept(timedPart(input.parts, "chips", () => derivedChips(chain, out, drops.keep, core, registry, world))),
+        replyClocks: kept(timedPart(input.parts, "clocks", () => replyClocks(chain, out, core, world, state))),
+        journal: kept([...timedPart(input.parts, "journal", () => turnNotes(chain, out, core, registry, world, state)), ...drops.notes]),
         keepReport: kept(drops.keep),
       };
     }
     const sceneType = read.scene.sceneType;
-    const shownPalette = paletteHit ?? (memo.palette = { key: paletteKey, palette: kept(palette(world, nextState(), registry)) });
-    const shownControls = controlsHit ?? (memo.controls = { key: controlsKey(sceneType), controls: kept(controls(world, nextState(), sceneType, registry, input.knowledge, input.offstage)) });
+    const shownPalette = paletteHit ?? (memo.palette = { key: paletteKey, palette: kept(timedPart(input.parts, "palette", () => palette(world, nextState(), registry))) });
+    const shownControls = controlsHit ?? (memo.controls = { key: controlsKey(sceneType), controls: kept(timedPart(input.parts, "controls", () => controls(world, nextState(), sceneType, registry, input.knowledge, input.offstage))) });
     const pending: PendingMark[] = journal.held.map((h) => ({ panel: "*", entity: h.write.kind === "post" ? povEntity(world) : null }));
     const packs: Record<PackId, number> = {};
     for (const pack of registry.packs) packs[pack.id] = pack.version;
@@ -927,6 +979,8 @@ export function buildView(input: ViewInput): StateView {
       meter: input.meter,
       packs,
       currency: world.currency,
+      // Moves only when what the GM view reads does (not on a status flip), so the GM page reloads on it alone.
+      gmKey: gmKeyOf(core, observed, keys),
     };
   });
 }

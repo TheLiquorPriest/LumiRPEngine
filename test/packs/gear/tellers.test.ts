@@ -257,12 +257,13 @@ describe("Play → Me → Gear", () => {
     const view = buildGearView(w.ctx);
     expect(view.on.map((i) => i.id)).toEqual(["pov_keys", "pov_phone", "pov_pocketknife", "pov_wallet"]);
     expect(view.on.find((i) => i.id === "pov_wallet")?.children?.map((i) => i.id)).not.toContain("danny_jacket");
-    expect(view.holding).toEqual([{ id: "danny_jacket", name: "Denim jacket", whose: "Danny Okafor's", why: "Danny Okafor handed it to you to hold: while he changes a tire", where: "In Wallet" }]);
+    // Whose it is by id too (GearItem.ownerId), for Owner & use: Danny, whom the player character knows.
+    expect(view.holding).toEqual([{ id: "danny_jacket", name: "Denim jacket", ownerId: DANNY, whose: "Danny Okafor's", why: "Danny Okafor handed it to you to hold: while he changes a tire", where: "In Wallet" }]);
+    // Jordan's ATV, boat and pickup are the Garage's, with the pickup's bed and glovebox: what he keeps in the glovebox is his elsewhere, with where it is.
     expect(view.elsewhere.map((i) => [i.id, i.where])).toEqual([
-      ["pov_atv", "At Alder Automotive"],
-      ["pov_boat", "At Alder Harbor Marina"],
+      ["pov_first_aid", "In Truck glovebox at 114 Harbor Street"],
+      ["pov_flashlight", "In Truck glovebox at 114 Harbor Street"],
       ["pov_toolbox", "At Alder Automotive"],
-      ["pov_truck", "At 114 Harbor Street"],
     ]);
     expect(view.lent.map((i) => [i.id, i.lent, i.where, i.kept])).toEqual([["pov_watch", { to: "Danny Okafor", overdue: false, hold: true }, "With Danny Okafor", "On you"]]);
     expect(view.borrowed.map((i) => [i.id, i.whose, i.borrowed])).toEqual([["jack", "Marcus Delgado's", { from: "Marcus Delgado", until: formatClock(calendarOf(w.world), until), overdue: false }]]);

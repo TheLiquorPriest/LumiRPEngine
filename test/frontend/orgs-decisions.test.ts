@@ -6,7 +6,8 @@
 import { describe, expect, test } from "bun:test";
 import { Button, Empty, Seg } from "../../src/frontend/components";
 import { answerChange, decisionOps, DecisionsBoard, endChange, MotionCard, RequestCard, rulesChange, rulesDraft, rulesProblem, standingChange, voteChange, type DecisionChange } from "../../src/packs/orgs/ui/decisions";
-import type { DecisionsView, MotionView, RequestView } from "../../src/shared/org-motions";
+import { DECISION_ACTIONS, type DecisionsView, type MotionView, type RequestView } from "../../src/shared/org-motions";
+import { offstageGroupOf, playsOffstage } from "../../src/shared/offstage";
 import { labelled, press, propsOf } from "../support/tree";
 
 const ORG = { id: "ellis_mobile_repair_co", name: "Ellis Mobile Repair" };
@@ -65,6 +66,11 @@ describe("what each control sends", () => {
     expect(rulesProblem({ ...rulesDraft(view), days: "0" })).toBe("Days: a whole number from 1 to 365.");
     expect(standingChange(ORG.id, "priya_nair", "with", "danny_okafor")).toEqual({ action: "org_vote_rule", params: { org: ORG.id, vote: "with", with: "danny_okafor" }, effect: "orgs.vote_rule", gm: { org: ORG.id, vote: "with", with: "danny_okafor", who: "priya_nair" } });
     expect(decisionOps(voteChange(ORG.id, motion, "danny_okafor", "for"))).toEqual([{ op: "effect", effect: "orgs.vote", args: { org: ORG.id, motion: "m_1", vote: "for", who: "danny_okafor" } }]);
+  });
+
+  test("every action the tab sends is done at once, off screen, as governance: Deny as Approve is, never queued for the next message", () => {
+    for (const action of Object.values(DECISION_ACTIONS)) expect([action, offstageGroupOf(action), playsOffstage(action, {}, false)]).toEqual([action, "governance", true]);
+    expect(answerChange(ORG.id, request, "deny").action).toBe(DECISION_ACTIONS.deny);
   });
 });
 

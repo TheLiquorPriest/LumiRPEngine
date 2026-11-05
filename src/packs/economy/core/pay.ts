@@ -86,8 +86,13 @@ export interface ChargeOptions {
   flow?: string;
   /** A narrated price the charge doesn't match, for the journal: capped at the world's `unpricedCap`, or clamped into the item's band. */
   narrated?: { cents: number; limited: "cap" | "band" };
-  /** A purchase at a till: who sells there may be a business (the sale hooks), a card pays as a card, cash back is possible. */
-  sale?: { place: string | null; item: string };
+  /**
+   * A purchase at a till: who sells there may be a business (the sale hooks), a card pays as a card,
+   * cash back is possible. A financed purchase names its whole price (`price`), of which the charge is
+   * the down payment: the sales tax on all of it is paid now with the down payment, or alone when
+   * nothing is put down.
+   */
+  sale?: { place: string | null; item: string; price?: number };
   /** Cash handed back on a debit purchase, into the payer's wallet. */
   cashback?: number;
   /** Let a transactional account go into overdraft as its policy allows (payments and flows do; transfers don't). */
@@ -701,7 +706,7 @@ export function overdraftEvents(ctx: ReadContext, account: EntityId, total: numb
 /** What a sale at a till brings with it: the first sale hook that names a seller or tax there. */
 function saleTermsOf(hooks: FinanceHooks, ctx: ReadContext, payer: EntityId, cents: number, category: string, sale: NonNullable<ChargeOptions["sale"]>): SaleTerms | null {
   for (const hook of hooks.sales) {
-    const terms = hook(ctx, { payer, place: sale.place, category, cents, item: sale.item });
+    const terms = hook(ctx, { payer, place: sale.place, category, cents, ...(sale.price !== undefined ? { price: sale.price } : {}), item: sale.item });
     if (terms) return terms;
   }
   return null;
@@ -718,7 +723,8 @@ function saleTermsOf(hooks: FinanceHooks, ctx: ReadContext, payer: EntityId, cen
 export function charge(hooks: FinanceHooks, ctx: ReadContext, payer: EntityId, rawCents: number, memo: string, opts: ChargeOptions = {}): LedgerEvent[] | Rejection {
   if (!own(ctx.state.entities, payer)) return reject("missing_entity", `no payer ${labelOf(ctx, payer)}`);
   const cents = Math.round(rawCents);
-  if (!(cents > 0)) return [];
+  // A financed purchase put nothing down still pays the sales tax on its whole price now.
+  if (!(cents > 0) && !(cents === 0 && (opts.sale?.price ?? 0) > 0)) return [];
   const level = ctx.levelOf(payer, "money");
   if (level === 0) return [];
   const at = opts.at ?? ctx.state.clock;
@@ -726,6 +732,7 @@ export function charge(hooks: FinanceHooks, ctx: ReadContext, payer: EntityId, r
   const tax = Math.max(0, Math.round(terms?.tax ?? 0));
   const cashback = Math.max(0, Math.round(opts.cashback ?? 0));
   const total = cents + tax + cashback;
+  if (!(total > 0)) return [];
   const overdraft = opts.overdraft !== false;
   const out: LedgerEvent[] = [];
   // Where it lands, worked out first: the payer never pays from that account (a parent paying its subsidiary, on whose account it is an authorized user).

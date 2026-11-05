@@ -8,7 +8,7 @@
 // it). Everything is an author's view: every thing, a secret one marked. Pure.
 
 import type { EntityId, PlaceId } from "../shared/ids";
-import { hasOwn } from "../shared/json";
+import { hasOwn, isRecord } from "../shared/json";
 import { TYPE_TABLES, typeFields } from "../shared/items-build";
 import type { AccessChip, GrantView, OwnerGroup, PartyRef, PersonThings, Presumption, ThingPage, ThingPicks, ThingRow, ThingsList, ThingType, WardrobeRows, WhereChoice, WhereStep, WhoseView } from "../shared/thing-view";
 import { partyPossessive } from "../shared/thing-view";
@@ -279,13 +279,14 @@ function orgPlaceAt(ctx: ReadContext, org: EntityId, at: PlaceId | null): string
 
 /**
  * Who may use a thing beyond a grant, ground by ground (ITEMS-SPEC §3.4, §10.1): every person asked
- * of the access resolver, as a chat starts, and grouped by what their use rests on ("The Kowalczyks ·
- * members", "Alder Automotive staff · at Alder Automotive", "Anyone"). A grant is the page's own row.
+ * of the access resolver (or only those `keep` admits: the ones a player knows), as a chat starts,
+ * and grouped by what their use rests on ("The Kowalczyks · members", "Alder Automotive staff · at
+ * Alder Automotive", "Anyone"). A grant is the page's own row.
  */
-function useChips(ctx: ReadContext, thing: EntityId): AccessChip[] {
+export function useChips(ctx: ReadContext, thing: EntityId, keep: (who: EntityId) => boolean = () => true): AccessChip[] {
   const chips = new Map<string, { answer: AccessAnswer; who: string[] }>();
   const people = Object.keys(ctx.state.entities)
-    .filter((id) => isPerson(ctx, id) && !isGone(ctx.state, id))
+    .filter((id) => isPerson(ctx, id) && !isGone(ctx.state, id) && keep(id))
     .sort((a, b) => partyOrder(ctx, partyRef(ctx, a), partyRef(ctx, b)));
   for (const who of people) {
     const use = accessFor(ctx, who, thing).use;
@@ -460,7 +461,7 @@ function categoryName(ctx: ReadContext, category: unknown): string | null {
   return `${words.charAt(0).toUpperCase()}${words.slice(1)}`;
 }
 
-/** The catalog's types (both catalogs, a type named in two read from the first, as a thing's is), each with the size it gives. */
+/** The catalog's types (both catalogs and the kits, a type named in two read from the first, as a thing's is), each with the size it gives and its typical price. */
 export function thingTypes(ctx: ReadContext): ThingType[] {
   return readPass(() => {
     const out: ThingType[] = [];
@@ -472,7 +473,10 @@ export function thingTypes(ctx: ReadContext): ThingType[] {
         if (!row || seen.has(id)) continue;
         seen.add(id);
         const typed = typeFields(table, id, row);
-        out.push({ id, table, name: typeof row.name === "string" ? row.name : id, category: categoryName(ctx, typed.fields.category), size: sizeOfDef(ctx, typed.kind, typed.fields).size });
+        const categoryId = typeof typed.fields.category === "string" && typed.fields.category !== "" ? typed.fields.category : null;
+        const price = row.price_cents;
+        const cents = typeof price === "number" ? price : isRecord(price) && typeof price.typical === "number" ? price.typical : null;
+        out.push({ id, table, name: typeof row.name === "string" ? row.name : id, category: categoryName(ctx, categoryId), categoryId, size: sizeOfDef(ctx, typed.kind, typed.fields).size, ...(cents !== null ? { priceCents: cents } : {}) });
       }
     }
     return out.sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id));

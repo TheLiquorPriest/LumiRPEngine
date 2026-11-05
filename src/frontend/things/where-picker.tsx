@@ -4,8 +4,9 @@
 // whose it is and where. The field shows the value as a path with Change…; the sheet finds a choice
 // by any word of its name or whereabouts, browses from the top down (places, then who and what is
 // there), offers the caller's suggestions and extra choices on top, and holds back what can't take
-// the thing (a holder too small, a person past the ceiling), saying why. Secret ones carry a badge:
-// these are author and GM views. Styles: the place picker's (styles/character.ts).
+// the thing (a holder too small, a person past the ceiling, and whatever the caller's `blocked`
+// says, such as a holder already full), saying why. Secret ones carry a badge: these are author and
+// GM views. Styles: the place picker's (styles/character.ts).
 
 import type { ComponentChildren } from "preact";
 import { useId, useMemo, useState } from "preact/hooks";
@@ -66,10 +67,10 @@ function choiceLine(index: WhereIndex, choice: WhereChoice): string {
 
 /**
  * A where field: the value as a path, and the button that opens the sheet (`action`, "Change…" by
- * default). `size` holds back what can't take the thing; `extras` add choices of the caller's own;
- * `clearLabel` offers clearing it ("Nowhere"), for which `onPick` gets null.
+ * default). `size` and `blocked` hold back what can't take the thing; `extras` add choices of the
+ * caller's own; `clearLabel` offers clearing it ("Nowhere"), for which `onPick` gets null.
  */
-export function WherePicker(props: { choices: readonly WhereChoice[]; value: WherePick | null; onPick(next: WherePick | null): void; title: string; label?: string; size?: SizeClass | null; extras?: readonly WhereExtra[]; suggestions?: readonly WhereSuggestion[]; action?: string; clearLabel?: string; empty?: string; help?: ComponentChildren; disabled?: boolean }) {
+export function WherePicker(props: { choices: readonly WhereChoice[]; value: WherePick | null; onPick(next: WherePick | null): void; title: string; label?: string; size?: SizeClass | null; blocked?(choice: WhereChoice): string | null; extras?: readonly WhereExtra[]; suggestions?: readonly WhereSuggestion[]; action?: string; clearLabel?: string; empty?: string; help?: ComponentChildren; disabled?: boolean }) {
   const [open, setOpen] = useState(false);
   const extra = props.value && "extra" in props.value ? (props.extras ?? []).find((x) => "extra" in props.value! && x.value === props.value.extra) : undefined;
   return (
@@ -89,6 +90,7 @@ export function WherePicker(props: { choices: readonly WhereChoice[]; value: Whe
           choices={props.choices}
           value={props.value}
           size={props.size ?? null}
+          blocked={props.blocked}
           extras={props.extras}
           suggestions={props.suggestions}
           title={props.title}
@@ -105,10 +107,9 @@ export function WherePicker(props: { choices: readonly WhereChoice[]; value: Whe
   );
 }
 
-/** One choice as a row of the sheet: what it is, Choose (held back, with why, when it can't take the thing), and › into it. */
-function ChoiceRow(props: { index: WhereIndex; choice: WhereChoice; size: SizeClass | null; current: boolean; onPick(choice: WhereChoice): void; onOpen?(id: string): void }) {
-  const { choice } = props;
-  const why = cannotHold(choice, props.size);
+/** One choice as a row of the sheet: what it is, Choose (held back, with `why`, when it can't take the thing), and › into it. */
+function ChoiceRow(props: { index: WhereIndex; choice: WhereChoice; why: string | null; current: boolean; onPick(choice: WhereChoice): void; onOpen?(id: string): void }) {
+  const { choice, why } = props;
   const inside = props.index.children.get(choice.id)?.length ?? 0;
   const onOpen = props.onOpen;
   return (
@@ -151,11 +152,13 @@ function trail(index: WhereIndex, id: string | null): WhereChoice[] {
 /**
  * The picker's sheet alone, for an action rather than a field ("Move…", "Give…"): search, the
  * caller's suggestions and extra choices, and the browse. Enter in the search picks its first
- * result that can take the thing.
+ * result that can take the thing. `blocked` holds back more than the size does (a holder already
+ * full), with its reason.
  */
-export function WhereSheet(props: { choices: readonly WhereChoice[]; value: WherePick | null; onPick(next: WherePick | null): void; onClose(): void; title: string; size?: SizeClass | null; extras?: readonly WhereExtra[]; suggestions?: readonly WhereSuggestion[]; clearLabel?: string; empty?: string }) {
+export function WhereSheet(props: { choices: readonly WhereChoice[]; value: WherePick | null; onPick(next: WherePick | null): void; onClose(): void; title: string; size?: SizeClass | null; blocked?(choice: WhereChoice): string | null; extras?: readonly WhereExtra[]; suggestions?: readonly WhereSuggestion[]; clearLabel?: string; empty?: string }) {
   const index = useMemo(() => whereIndex(props.choices), [props.choices]);
   const size = props.size ?? null;
+  const whyNot = (choice: WhereChoice): string | null => cannotHold(choice, size) ?? props.blocked?.(choice) ?? null;
   const [query, setQuery] = useState("");
   const [at, setAt] = useState<string | null>(() => browseStart(index, props.value));
   const searchId = useId();
@@ -183,7 +186,7 @@ export function WhereSheet(props: { choices: readonly WhereChoice[]; value: Wher
             value={query}
             onInput={(event) => setQuery(event.currentTarget.value)}
             onKeyDown={(event) => {
-              const first = results.find((c) => cannotHold(c, size) === null);
+              const first = results.find((c) => whyNot(c) === null);
               if (event.key !== "Enter" || !first) return;
               event.preventDefault();
               pick(first);
@@ -197,7 +200,7 @@ export function WhereSheet(props: { choices: readonly WhereChoice[]; value: Wher
             <Section title={results.length === 1 ? "1 match" : `${results.length} matches${results.length === WHERE_LIMIT ? ", keep typing to narrow" : ""}`} flush>
               <div class="lre-cp-rows" role="list" data-lre-where-results="">
                 {results.map((c) => (
-                  <ChoiceRow key={c.id} index={index} choice={c} size={size} current={c.id === current?.id} onPick={pick} />
+                  <ChoiceRow key={c.id} index={index} choice={c} why={whyNot(c)} current={c.id === current?.id} onPick={pick} />
                 ))}
               </div>
             </Section>
@@ -211,7 +214,7 @@ export function WhereSheet(props: { choices: readonly WhereChoice[]; value: Wher
                     <ListRow key={`extra:${x.value}`} icon="star" title={x.label} subtitle={x.help} current={extra?.value === x.value} onClick={() => props.onPick({ extra: x.value })} />
                   ))}
                   {(props.suggestions ?? []).map((s) => {
-                    const why = cannotHold(s.choice, size);
+                    const why = whyNot(s.choice);
                     return <ListRow key={`${s.label}:${s.choice.id}`} icon="star" title={s.label} subtitle={why ?? pathText([...s.choice.path, { id: s.choice.id, name: s.choice.name, is: s.choice.is }])} disabled={why !== null} current={s.choice.id === current?.id} onClick={() => pick(s.choice)} />;
                   })}
                 </List>
@@ -238,7 +241,7 @@ export function WhereSheet(props: { choices: readonly WhereChoice[]; value: Wher
               ) : (
                 <div class="lre-cp-rows" role="list" data-lre-where-browse={at ?? ""}>
                   {rows.map((c) => (
-                    <ChoiceRow key={c.id} index={index} choice={c} size={size} current={c.id === current?.id} onPick={pick} onOpen={setAt} />
+                    <ChoiceRow key={c.id} index={index} choice={c} why={whyNot(c)} current={c.id === current?.id} onPick={pick} onOpen={setAt} />
                   ))}
                 </div>
               )}

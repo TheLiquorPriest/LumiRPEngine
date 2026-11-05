@@ -2,8 +2,9 @@
 // trees (no DOM), as Build's Things tests do, from what the engine reads of a chat starting: Here
 // (in the room, lying here, on the people here with why each has what they have), Tidy up's cards
 // (Fix and the choices, Leave it and Bring it back, Ask the Curator, Show N left, findings per run),
-// Keep in the world's list, and the GM thing page, each control's one GM edit with the sentence its
-// notice says; and GM → This chat → Things, the chat's own Tidy up switch over the world's.
+// Keep in the world's list, the GM thing page, the bulk bar and + Add a thing, each control's one GM
+// edit with the sentence its notice says; a person's outfits and loadouts on their GM page; and GM →
+// This chat → Things, the chat's own Tidy up switch over the world's.
 
 import { describe, expect, test } from "bun:test";
 import type { VNode } from "preact";
@@ -12,21 +13,25 @@ import { buildGmWorld } from "../../src/engine/gm-view";
 import { createRegistry } from "../../src/engine/registry-impl";
 import { gmThingExtras, gmThingsList } from "../../src/engine/thing-gm";
 import { tidyFindings, tidyRun } from "../../src/engine/thing-tidy";
-import { buildContext, thingPage, thingPicks, thingsList } from "../../src/engine/thing-view";
+import { buildContext, thingPage, thingPicks, thingsList, thingTypes } from "../../src/engine/thing-view";
+import { buildClasses, HoldsSection, ThingRowView } from "../../src/frontend/build/things";
 import { AddPicker, RefPicker } from "../../src/frontend/build/form-kit";
-import { HoldsSection, ThingRowView } from "../../src/frontend/build/things";
 import { Button, Disclosure, HostSwitch, ListRow, NumberStepper, Section } from "../../src/frontend/components";
 import { thingsSummary, tidyRequest, TidySwitch } from "../../src/frontend/gm/chat-things";
 import type { Editor } from "../../src/frontend/gm/editor";
 import { FieldRow, Relations } from "../../src/frontend/gm/entity";
-import { bulkEdit, GmThingBody, HereView, KeepList, ThingsBulkBar, TidyCard, TidyList, hereSections, isThingKind, keepKey, type GmThingBodyProps, type ThingSheet } from "../../src/frontend/gm/things";
+import { addEdit, allWorn, bulkEdit, bulkLoans, GmAddSheet, GmSets, gmSets, GmThingBody, HereView, KeepList, ThingsBulkBar, TidyCard, TidyList, hereSections, isThingKind, keepKey, type BulkSheet, type GmThingBodyProps, type ThingSheet } from "../../src/frontend/gm/things";
 import type { Selection } from "../../src/frontend/multi-select";
 import { ActionRow, GmCard } from "../../src/frontend/gm/ui";
+import type { AddDraft } from "../../src/frontend/things/add-thing";
+import { AddThingSheet } from "../../src/frontend/things/add-thing";
+import { typesOfKind } from "../../src/frontend/things/what-it-is";
 import type { EditOp } from "../../src/shared/protocol";
-import type { GmView } from "../../src/shared/state-view";
+import type { GmEntity, GmView } from "../../src/shared/state-view";
 import type { MadeInPlay, TidyFinding } from "../../src/shared/thing-gm";
 import { DEFAULT_CURRENCY, type WorldDoc } from "../../src/shared/world";
 import { ALL_PACKS } from "../../src/packs/index";
+import { piecesLine, SetRows } from "../../src/packs/gear/ui/sets-sheet";
 import { expand, labelled, press, type Props } from "../support/tree";
 
 const reg = createRegistry(ALL_PACKS);
@@ -325,6 +330,139 @@ describe("Select and the bulk bar", () => {
     click(body(page.row), "Take off");
     click(body({ ...page.row, worn: null, slot: "wrist" }), "Wear");
     expect(sent.map((s) => s.ops)).toEqual([[{ op: "item", change: { do: "wear", item: "pov_watch", who: "pov", off: true } }], [{ op: "item", change: { do: "wear", item: "pov_watch", who: "pov" } }]]);
+  });
+
+  test("Take off when every one picked is worn, else Wear what takes a slot, each on whoever has it, as one edit; Hand to…, Let use… and Rename… (one thing only) open their sheets", () => {
+    const { editor, sent } = editorOf();
+    const sheets: BulkSheet[] = [];
+    const worn = pick(["pov_watch", "pov_wallet"]);
+    expect(allWorn(worn)).toBe(true);
+    const bar = ThingsBulkBar({ selection, all: [], shown: [], rows: worn, editor, onSheet: (s) => sheets.push(s) });
+    click(bar, "Take off");
+    for (const text of ["Hand to…", "Let use…"]) click(bar, text);
+    expect(find(bar, Button).find((p) => textOf(p.children) === "Rename…")?.disabled).toBe(true);
+    // The watch off already and the toolbox, which nobody has: only the watch is worn.
+    const mixed = [{ ...worn[0]!, worn: null }, ...pick(["pov_toolbox"])];
+    click(ThingsBulkBar({ selection, all: [], shown: [], rows: mixed, editor, onSheet: () => undefined }), "Wear");
+    click(ThingsBulkBar({ selection, all: [], shown: [], rows: pick(["pov_toolbox"]), editor, onSheet: (s) => sheets.push(s) }), "Rename…");
+    expect(sent).toEqual([
+      { ops: worn.map((r) => ({ op: "item", change: { do: "wear", item: r.id, who: "pov", off: true } })), done: "Wristwatch and Wallet are taken off; each stays with whoever wore it." },
+      { ops: [{ op: "item", change: { do: "wear", item: "pov_watch", who: "pov" } }], done: "Wristwatch is worn now, by whoever has it." },
+    ]);
+    expect(sheets).toEqual(["hand", "use", "rename"]);
+    expect(bulkEdit({ do: "wear" }, pick(["pov_toolbox"]))).toBeNull();
+  });
+
+  test("Hand to… hands each over in one edit, a loan until its end; Let use… grants each, a loan with an end, else assigned; Rename names one; what they hold or own already is left out", () => {
+    const two = pick(["pov_wallet", "pov_toolbox"]);
+    const loans = bulkLoans(1000);
+    expect(loans).toEqual([
+      { label: "For a day", until: 2440 },
+      { label: "For three days", until: 5320 },
+      { label: "For a week", until: 11080 },
+    ]);
+    expect(bulkLoans(null)).toEqual([]);
+    const day = loans[0]!;
+    expect(bulkEdit({ do: "hand", to: "danny_okafor", whom: "Danny Okafor", basis: "loan", until: day }, two)).toEqual({
+      ops: two.map((r) => ({ op: "item", change: { do: "hand", item: r.id, to: "danny_okafor", basis: "loan", until: 2440, why: "The GM handed it over" } })),
+      done: "Danny Okafor has Wallet and Mechanic's toolbox on loan, for a day.",
+    });
+    expect(bulkEdit({ do: "hand", to: "danny_okafor", whom: "Danny Okafor", basis: "gift" }, two)?.done).toBe("Wallet and Mechanic's toolbox are Danny Okafor's now, a gift.");
+    expect(bulkEdit({ do: "hand", to: "danny_okafor", whom: "Danny Okafor", basis: "hold" }, two)?.done).toBe("Danny Okafor is holding Wallet and Mechanic's toolbox now.");
+    // Jordan has the wallet on him already: only the toolbox goes to him.
+    expect(bulkEdit({ do: "hand", to: "pov", whom: "Jordan Ellis", basis: "hold" }, two)?.ops).toEqual([{ op: "item", change: { do: "hand", item: "pov_toolbox", to: "pov", basis: "hold", why: "The GM handed it over" } }]);
+    expect(bulkEdit({ do: "grant", who: "danny_okafor", whom: "Danny Okafor" }, two)).toEqual({
+      ops: two.map((r) => ({ op: "item", change: { do: "grant", item: r.id, who: "danny_okafor", basis: "assign" } })),
+      done: "Danny Okafor may use Wallet and Mechanic's toolbox now.",
+    });
+    expect(bulkEdit({ do: "grant", who: "danny_okafor", whom: "Danny Okafor", until: day }, two)).toEqual({
+      ops: two.map((r) => ({ op: "item", change: { do: "grant", item: r.id, who: "danny_okafor", basis: "loan", until: 2440 } })),
+      done: "Danny Okafor may use Wallet and Mechanic's toolbox for a day.",
+    });
+    // Both are Jordan's: he needs no leave to use them.
+    expect(bulkEdit({ do: "grant", who: "pov", whom: "Jordan Ellis" }, two)).toBeNull();
+    expect(bulkEdit({ do: "rename", name: " Old wallet " }, [two[0]!])).toEqual({ ops: [{ op: "item", change: { do: "label", item: "pov_wallet", name: "Old wallet" } }], done: "Wallet is called Old wallet now." });
+    expect(bulkEdit({ do: "rename", name: "Old wallet" }, two)).toBeNull();
+    expect(bulkEdit({ do: "rename", name: "Wallet" }, [two[0]!])).toBeNull();
+  });
+});
+
+describe("+ Add a thing", () => {
+  const ctx = ctxOf();
+  const pick = thingPicks(ctx);
+  const types = thingTypes(ctx);
+  const at = (id: string) => pick.where.find((c) => c.id === id) ?? ((): never => { throw new Error(`no ${id}`); })();
+  const draft = (over: Partial<AddDraft>): AddDraft => ({ name: "Thing", kind: "item", what: null, qty: 1, at: at("harbor_street_114"), ...over });
+
+  test("its sheet starts where the player character is, offers Vehicle once the world has classes, and sends one make: a vehicle by its class, with its make, model and year", async () => {
+    const { editor, sent } = editorOf();
+    const classes = buildClasses(portAlder);
+    let closed = 0;
+    const sheet = (over: Partial<Parameters<typeof GmAddSheet>[0]> = {}) => GmAddSheet({ pick, here: "harbor_street_114", types, classes, editor, onClose: () => (closed += 1), ...over });
+    const tree = sheet();
+    expect(tree.type).toBe(AddThingSheet);
+    const props = tree.props as Props;
+    expect(props.start).toEqual({ at: at("harbor_street_114") });
+    expect(props.kinds).toContain("vehicle");
+    expect(sheet({ classes: [] }).props.kinds).not.toContain("vehicle");
+    expect(sheet({ classes: null }).props.kinds).not.toContain("vehicle");
+    const pickup = classes.find((c) => c.domain === "road");
+    if (!pickup) throw new Error("no road class");
+    (props.onSubmit as (d: AddDraft) => void)(draft({ name: "Dad's old pickup", kind: "vehicle", what: { vehicle: { id: pickup.id, name: pickup.name, domain: pickup.domain, make: "Ford", model: "F-150", year: 2004 } } }));
+    expect(sent).toEqual([{ ops: [{ op: "item", change: { do: "make", name: "Dad's old pickup", at: { place: "harbor_street_114" }, class: pickup.id, details: { make: "Ford", model: "F-150", year: 2004 }, why: "The GM put it there" } }], done: "Dad's old pickup is at 114 Harbor Street now." }]);
+    await Promise.resolve();
+    expect(closed).toBe(1);
+  });
+
+  test("a catalog type (each kind lists its category's), or something else by its kind and size; how many; in a holder or on someone", () => {
+    expect(typesOfKind(types, "clothing").length).toBeGreaterThan(0);
+    expect(typesOfKind(types, "weapon").every((t) => t.categoryId === "weapon")).toBe(true);
+    const rounds = typesOfKind(types, "ammo")[0];
+    if (!rounds) throw new Error("no ammunition in the catalogs");
+    expect(addEdit(draft({ name: "Rounds", kind: "ammo", what: { type: rounds }, qty: 50, at: at("pov_truck_glovebox") }))).toEqual({
+      ops: [{ op: "item", change: { do: "make", name: "Rounds", at: { in: "pov_truck_glovebox" }, type: rounds.id, qty: 50, why: "The GM put it there" } }],
+      done: "Rounds ×50 is in Truck glovebox now.",
+    });
+    expect(addEdit(draft({ name: "Rain poncho", kind: "clothing", what: { size: "hand" }, at: at("pov") }))).toEqual({
+      ops: [{ op: "item", change: { do: "make", name: "Rain poncho", at: { in: "pov" }, category: "clothing", size: "hand", why: "The GM put it there" } }],
+      done: "Rain poncho is on Jordan Ellis now.",
+    });
+    expect(addEdit(draft({ name: "Crate", kind: "container" })).ops).toEqual([{ op: "item", change: { do: "make", name: "Crate", at: { place: "harbor_street_114" }, holds: "hand", why: "The GM put it there" } }]);
+  });
+});
+
+describe("a person's outfits and loadouts on their GM page", () => {
+  const ctx = ctxOf();
+  const rows = thingsList(ctx).rows;
+  const worn = rows.filter((r) => r.id === "pov_watch" || r.id === "pov_keys");
+
+  test("each saved set with its pieces (one gone from the world named so) and On now; Change into and Forget are GM edits", () => {
+    const { gm, editor, sent } = editorOf();
+    const jordan = gm.entities.find((e) => e.id === "pov");
+    if (!jordan) throw new Error("no Jordan");
+    const sets = {
+      set_watch: { name: "Watch on", kind: "outfit", pieces: [{ item: "pov_watch" }] },
+      set_keys: { name: "Keys out", kind: "outfit", pieces: [{ item: "pov_keys", slot: "hand_held" }] },
+      set_gone: { name: "Lost ring", kind: "loadout", pieces: [{ item: "nowhere_ring" }] },
+    };
+    const person: GmEntity = { ...jordan, fields: [...jordan.fields, { id: "sets", label: "sets", type: "text", value: sets, extra: true }] };
+    const listed = gmSets(person, worn, gm.entities);
+    expect(listed.map((s) => [s.id, s.on === true, piecesLine(s)])).toEqual([
+      ["set_gone", false, "missing nowhere_ring"],
+      ["set_keys", false, "Keys"],
+      ["set_watch", true, "Wristwatch"],
+    ]);
+    const tree = GmSets({ person, outfit: worn, editor });
+    expect(find(tree, SetRows).map((p) => p.kind)).toEqual(["outfit", "loadout"]);
+    const outfits = SetRows(find(tree, SetRows)[0] as Parameters<typeof SetRows>[0]);
+    const change = find(outfits, Button).filter((p) => textOf(p.children) === "Change into");
+    expect(change.map((p) => p.disabled)).toEqual([false, true]);
+    (change[0]?.onClick as () => void)();
+    (find(outfits, Button).find((p) => p.label === "Forget Watch on")?.onClick as () => void)();
+    expect(sent).toEqual([
+      { ops: [{ op: "item", change: { do: "set_apply", who: "pov", set: "set_keys" } }], done: "Jordan Ellis changed into Keys out." },
+      { ops: [{ op: "item", change: { do: "set_drop", who: "pov", set: "set_watch" } }], done: "Jordan Ellis no longer keeps Watch on." },
+    ]);
   });
 });
 

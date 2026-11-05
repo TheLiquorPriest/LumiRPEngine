@@ -107,9 +107,14 @@ describe("narration proposals", () => {
     const outboard = resolveAction(reg, w, { action: "buy", params: { item: "spare outboard engine", price: 900_000 } }, createRng("o"));
     expect(outboard.rejected[0]?.rejection.code).toBe("declined");
     expect(moneyView(w.ctx).recent.some((t) => t.memo === "Bought spare outboard engine")).toBe(false);
+    const surfboard = resolveAction(reg, w, { action: "buy", params: { item: "used surfboard", price: 90_000 } }, createRng("s"));
+    expect(surfboard.rejected).toEqual([]);
+    expect(moneyView(w.ctx).recent.find((t) => t.memo === "Bought used surfboard")?.cents).toBe(-96_300);
+    // A kayak is a vehicle class: bought at the stated price, inside its band, as a kayak of the POV's.
     const kayak = resolveAction(reg, w, { action: "buy", params: { item: "used kayak", price: 90_000 } }, createRng("k"));
     expect(kayak.rejected).toEqual([]);
-    expect(moneyView(w.ctx).recent.find((t) => t.memo === "Bought used kayak")?.cents).toBe(-96_300);
+    expect(moneyView(w.ctx).recent.find((t) => t.memo === "Bought Kayak")?.cents).toBe(-96_300);
+    expect(Object.values(w.state.entities).filter((e) => e.kind === "vehicle" && e.fields.class === "kayak").map((e) => [e.fields.owner, e.fields.value])).toEqual([["you", 90_000]]);
   });
 
   test("free-text buys match a catalog row, preferring what the place sells: beers at a bar are pints", () => {

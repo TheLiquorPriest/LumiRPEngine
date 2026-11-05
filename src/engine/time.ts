@@ -496,7 +496,7 @@ export class TimelapseRun {
     this.from = w.state.clock;
     this.to = resolved.to;
     this.cap = clampUnitCap(opts.unitCap ?? w.state.time.unitCap);
-    this.result = { from: this.from, to: this.from, requested: resolved.to, slots: 0, stop: "target", stoppedBy: null, stops: [], notes: [], agentDays: 0, events: 0, rules: [], tracks: [], open: null };
+    this.result = { from: this.from, to: this.from, requested: resolved.to, slots: 0, stop: "target", stoppedBy: null, stops: [], notes: [], agentDays: 0, events: 0, rules: [], tracks: [], open: null, processMs: {} };
   }
 
   /** A run toward `target`, or why none can start (the clock is paused, the target doesn't resolve). */
@@ -539,6 +539,7 @@ export class TimelapseRun {
     acc.stops.push(...r.stops);
     acc.notes.push(...r.notes);
     acc.rules.push(...r.rules);
+    for (const [id, ms] of Object.entries(r.processMs ?? {})) if (acc.processMs) acc.processMs[id] = (acc.processMs[id] ?? 0) + ms;
     acc.tracks.push(...r.tracks);
     acc.open = r.open;
     if (r.stop === "target") return true;

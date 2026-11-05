@@ -90,18 +90,17 @@ function chainOf(ctx: ReadContext, org: EntityId, who: EntityId, power: OrgPower
   }
 }
 
-/** Every organization in the GM view, with Who may…'s answers. */
-export function buildOrgsGm(ctx: ReadContext): OrgGmView[] {
+/** Every organization in the GM view, with Who may…'s answers; with `only`, those it names, in the view's order, each built alone (an id naming no organization is left out). */
+export function buildOrgsGm(ctx: ReadContext, only?: readonly string[]): OrgGmView[] {
   const people = Object.keys(ctx.state.entities)
     .sort()
     .filter((id) => !isGone(ctx.state, id) && kindIs(ctx.registry, ctx.world, own(ctx.state.entities, id)?.kind ?? "", "person"));
   const party = partyIdOf(ctx);
+  const wanted = only ? new Set(only) : null;
   const ids = [
     ...(party.exists ? [] : [party.id]),
-    ...Object.keys(ctx.state.entities)
-      .sort()
-      .filter((id) => orgTypeOf(ctx, id) !== null && !isGone(ctx.state, id)),
-  ];
+    ...(wanted ? [...wanted].filter((id) => own(ctx.state.entities, id)).sort() : Object.keys(ctx.state.entities).sort()).filter((id) => orgTypeOf(ctx, id) !== null && !isGone(ctx.state, id)),
+  ].filter((id) => !wanted || wanted.has(id));
   return ids.flatMap((id) => {
     const page = buildOrgView(ctx, id, null);
     if (!page) return [];

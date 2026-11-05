@@ -4,6 +4,7 @@
 // (`purchase`, story tier), which the Curator's call notes for the reply's read, checked by the
 // economy's `purchase` channel and settled with the read's changes, the goods and the money as one.
 
+import type { JsonValue } from "../../../../shared/json";
 import { SIZES } from "../../../../shared/things";
 import { gmEdit, missing, needId, noteFact, NUMBER, propose } from "../propose";
 import type { ToolDefinition } from "../registry";
@@ -40,19 +41,19 @@ export const MONEY_WRITES: readonly ToolDefinition[] = [
     },
   },
   {
-    // The goods side of a purchase the reply establishes (ITEMS-SPEC §6.3, §7.3): the economy's purchase channel, which moves a seller's own thing and posts the money as one change, and makes a new thing only when the seller holds none.
+    // The goods side of a purchase the reply establishes (ITEMS-SPEC §6.3, §7.3): the economy's purchase channel, which moves a seller's own thing and posts the money as one change, and makes a new thing only when the seller holds none. A vehicle is a purchase of a class (`category: "vehicles"`, `class` from `vehicles_classes`, its `details`), made where the story leaves it and financed when `finance` says; a property is a place or property bought (`property`), made a property when the place is none, moved into when `live`.
     name: "purchase",
     family: "money",
     tier: "story",
     notes: true,
-    parameters: () => objectSchema({ item: text(), category: text(), payer: text(), qty: integer({ minimum: 1 }), price: NUMBER, method: text(), seller: text(), size: text([...SIZES]), at: text() }, ["item", "category"]),
+    parameters: () => objectSchema({ item: text(), category: text(), payer: text(), qty: integer({ minimum: 1 }), price: NUMBER, method: text(), seller: text(), size: text([...SIZES]), at: text(), class: text(), details: jsonObject(), finance: jsonObject(), property: text(), live: { type: "boolean" } }, ["item", "category"]),
     async run(args, env) {
       const view = await env.reader.view();
       const item = needText(view, "purchase", args, "item");
       if (typeof item !== "string") return item;
       const category = needText(view, "purchase", args, "category");
       if (typeof category !== "string") return category;
-      const fact: Record<string, string | number> = { type: "purchase", item, category };
+      const fact: Record<string, JsonValue> = { type: "purchase", item, category };
       for (const key of ["payer", "seller"] as const) {
         if (!argGiven(args, key)) continue;
         const id = needId(view, "purchase", args, key, key === "payer" ? resolvePerson : resolveEntity);
@@ -78,6 +79,27 @@ export const MONEY_WRITES: readonly ToolDefinition[] = [
           if (typeof place !== "string") return place;
           fact.at = place;
         }
+      }
+      // A vehicle: its class (a `vehicles_classes` id) and what the story says of it.
+      const cls = textArg(args, "class");
+      if (cls !== null) {
+        const classes = Object.keys(view.ctx.tables.get("vehicles.classes")?.rows ?? {});
+        if (!classes.includes(cls)) return badValue(view, "purchase", "class", cls, classes);
+        fact.class = cls;
+      }
+      const details = objectArg(args, "details");
+      if (details !== null) fact.details = details;
+      const finance = objectArg(args, "finance");
+      if (finance !== null) fact.finance = { ...(typeof finance.down === "number" && Number.isFinite(finance.down) ? { down: finance.down } : {}), ...(typeof finance.term === "number" && Number.isFinite(finance.term) ? { term: Math.round(finance.term) } : {}) };
+      // A property: a place, or a property the world keeps, by id or name.
+      if (argGiven(args, "property")) {
+        const said = needText(view, "purchase", args, "property");
+        if (typeof said !== "string") return said;
+        const place = resolvePlace(view, said);
+        const id = "id" in place ? place.id : needId(view, "purchase", args, "property", resolveEntity);
+        if (typeof id !== "string") return id;
+        fact.property = id;
+        if (args.live === true) fact.live = true;
       }
       return noteFact(view, env, fact);
     },

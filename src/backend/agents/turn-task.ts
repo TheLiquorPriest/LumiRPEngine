@@ -229,7 +229,8 @@ export function digestOf(d: DigestInput): string {
   const lines = new Map<string, string[]>();
   const apart: Record<"told" | "untold" | "gm", string[]> = { told: [], untold: [], gm: [] };
   const indexOf = new Map(chain.map((m, i) => [m.id, i]));
-  for (const note of journalNotes(d.core, d.observed, d.observed.length, d.registry)) {
+  // Only what changed since the main agent's last turn is told, so the notes start there.
+  for (const note of journalNotes(d.core, d.observed, d.observed.length, d.registry, d.last ?? 0)) {
     if (note.kind === "fix" && note.source !== undefined) {
       if (d.last === null || (indexOf.get(note.messageId) ?? -1) >= d.last) apart[note.source].push(note.text);
       continue;

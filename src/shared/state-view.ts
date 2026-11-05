@@ -184,12 +184,13 @@ export type ChipKind =
 /**
  * A value a chip action asks for before it's sent, in its `lre.chip` payload: an amount in the
  * world's currency (`{cents}`, minor units; `value` is the amount it starts at), one of `options`
- * (`{value}`), text the player edits (`{text}`; `value` is the text it starts with), or an action
- * picked again in the Actions palette, opened at `action` with `params` already picked (`{params}`).
- * Or no value at all: `org` opens an organization's page in Orgs, at its `tab` when named (the
- * Plan's Edit, ORG-SPEC §4.4), and sends nothing.
+ * (`{value}`), text the player edits (`{text}`; `value` is the text it starts with; `optional`: it
+ * may be sent empty, as a swipe's "What should change?" is), or an action picked again in the
+ * Actions palette, opened at `action` with `params` already picked (`{params}`). Or no value at all:
+ * `org` opens an organization's page in Orgs, at its `tab` when named (the Plan's Edit, ORG-SPEC
+ * §4.4), and sends nothing.
  */
-export type ChipInput = { type: "money"; label: string; value?: number } | { type: "choice"; label: string; options: { value: string; label: string }[] } | { type: "text"; label: string; value: string } | { type: "action"; label: string; action: string; params: JsonObject } | { type: "org"; label: string; org: string; tab?: string };
+export type ChipInput = { type: "money"; label: string; value?: number } | { type: "choice"; label: string; options: { value: string; label: string }[] } | { type: "text"; label: string; value: string; optional?: true } | { type: "action"; label: string; action: string; params: JsonObject } | { type: "org"; label: string; org: string; tab?: string };
 
 export interface ChipAction {
   id: string;
@@ -423,6 +424,13 @@ export interface StateView {
   packs: Record<PackId, number>;
   /** The attached revision's money display; format amounts with `formatMoney` from `shared/world`. */
   currency: WorldCurrency | null;
+  /**
+   * What the GM page shows changes only with this (`gmKeyOf`): the state as the GM view reads it,
+   * the chain's edits and the held and refused writes. A status flip, a message sent or a chip
+   * answered that leaves them as they were doesn't move it, so the page isn't loaded again for it.
+   * Absent on a chat that isn't a world's.
+   */
+  gmKey?: string;
 }
 
 /** A field on the GM view's entity form: as the entity's kind defines it (when it does) and as stored. */
@@ -499,6 +507,33 @@ export interface GmEntity {
   sheet: SheetSectionView[] | null;
   /** Its life state (DESIGN §8), and who knows it as it is: everyone but `unaware`, or only `aware` (people). */
   life: { state: string; label: string; acts: boolean; everyone: boolean; aware: { id: EntityId; name: string }[]; unaware: { id: EntityId; name: string }[] };
+}
+
+/**
+ * One entity as GM → World's list shows it (`lre.gm.part` `roster`, `gmRosterEntry`): its name,
+ * kind, tier and where it is, with its badges, a few hundred bytes; its page reads the full entry
+ * (`entities` by id). What is false, empty or as most are (public, alive) is left out.
+ */
+export interface GmRosterEntry {
+  id: EntityId;
+  name: string;
+  kind: string;
+  tier: string;
+  place: PlaceId | null;
+  holder?: EntityId;
+  visibility?: Exclude<GmEntity["visibility"], "public">;
+  found?: boolean;
+  /** Its life state when it isn't alive. */
+  life?: { state: string; label: string; acts: boolean };
+  holds?: NonNullable<GmEntity["holds"]>;
+  goes?: NonNullable<GmEntity["goes"]>;
+  tags?: string[];
+  pov?: true;
+  person?: true;
+  agent?: true;
+  gone?: true;
+  spawned?: true;
+  claimed?: true;
 }
 
 /**

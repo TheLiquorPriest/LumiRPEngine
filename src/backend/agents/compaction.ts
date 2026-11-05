@@ -9,9 +9,17 @@
 //   which the main agent never reads: its turn task's digest covers those turns instead
 //   (`turn-task.ts`), as it covers classic turns.
 // - **Compaction:** once its own messages pass Settings → Agents → Compaction's tokens, the turn
-//   summarizes all but its latest turns (`keepTurns`) in one call with the compaction instructions,
-//   before its first stage; the summarize tool does the same when the main agent asks. The summary is
-//   a base the session reads from, and the session it replaced is archived whole beside it.
+//   summarizes all but its latest turns (`keepTurns`) in one call with the compaction instructions;
+//   the summarize tool does the same when the main agent asks. With Main agent → Session's Summarize
+//   ahead of time (the default), the turn before made that call in the background, so the turn finds
+//   its summary made, or joins the call under way (`compaction-memo.ts`); else, or when it finds
+//   none, it makes the call before its first stage. The summary is a base the session reads from,
+//   and the session it replaced is archived whole beside it. A summary cut off at its limit, or one
+//   that stops mid-sentence, never lands (`summaryOf`): the session goes on whole, Diagnostics warns,
+//   and the next turn tries again.
+// - **Receipts:** with Main agent → Session keeping receipts (the default), the session keeps a past
+//   turn's long messages and answers as receipts, which is what the main agent reads
+//   (`MainMessage.content`), with each message whole beside it (`whole`), which `past_turn` reads.
 // - **Rollback:** GM → Workspace asks for one (`lre.workspace rollback`), kept in the chat's agent
 //   metadata; the next agent turn whose session stands on that compaction brings the archived span
 //   back, marked as restored, so it offers no rollback of its own. Either lands on the record of the
@@ -30,22 +38,34 @@ import { activeRecord } from "../../engine/ledger/path";
 import { tokensOf } from "../book";
 import { renderPrompt } from "../prompts";
 import type { Runtime } from "../runtime";
-import type { AgentHistoryMessage, AgentReply } from "./runtime";
+import { type AgentHistoryMessage, type AgentReply, cutShort } from "./runtime";
+import type { FoldResult } from "./compaction-memo";
 import { type Rebase, recordSessionOf, type SessionMessage, type SessionParts, type SessionRefs, sessionAt } from "./sessions";
 import { chatHead } from "./tools/workspace";
 
 /** What marks a message of the main agent's own in a session segment. */
 export const MAIN_BY = "main";
 
-/** A message of the main agent's own, as its segments keep it: a turn's task or a stage's message, and what it did there. A type, not an interface, so it is JSON a segment stores. */
+/**
+ * A message of the main agent's own, as its segments keep it: a turn's task or a stage's message, and
+ * what it did there. `content` is what its later turns read; `whole`, where the session keeps a
+ * receipt in its place, the message as it was (`past_turn`). A type, not an interface, so it is JSON
+ * a segment stores.
+ */
 export type MainMessage = {
   role: "user" | "assistant";
   content: string;
   by: typeof MAIN_BY;
+  whole?: string;
 };
 
 export function isMainMessage(m: SessionMessage): m is SessionMessage & MainMessage {
   return m.by === MAIN_BY && (m.role === "user" || m.role === "assistant") && typeof m.content === "string";
+}
+
+/** A message of the main agent's own as it was: whole, where the session keeps a receipt of it. */
+export function wholeText(m: SessionMessage & MainMessage): string {
+  return typeof m.whole === "string" ? m.whole : m.content;
 }
 
 /** The session a main-agent turn reads: where it stands on the chain (or after the turn's own compaction or rollback), turn by turn. */
@@ -110,26 +130,64 @@ export interface Compacted {
   kept: number;
 }
 
+/** A compaction's call (`foldOf`): its instructions and its message, and how many of the session's turns it folds and keeps whole. */
+export interface Fold {
+  system: string;
+  message: string;
+  folded: number;
+  kept: number;
+}
+
 /**
- * Compacts `session`: all but its latest `keep` turns become one summary, which `summarize` writes
- * (one call: the compaction instructions as its system prompt, the summary so far and the turns to
- * fold as its message), and the session it replaced is archived whole for a rollback; both are held
- * for `holder` until the turn's record carries them. Only the main agent's own messages are
- * summarized. Null when the session holds no more than `keep` turns, or none of its own to fold;
- * `failed` with the call's reason when it wrote none.
+ * The call that compacts `session`: all but its latest `keep` turns fold into one summary, at most
+ * `limit` tokens long; the instructions are its system prompt, the summary so far and the turns to
+ * fold its message. Only the main agent's own messages are summarized, as the session keeps them.
+ * Null when the session holds no more than `keep` turns, or none of its own to fold.
  */
-export async function compact(rt: Pick<Runtime, "sessions">, input: { userId: UserId; holder: string; session: MainSession; keep: number; texts: PromptTexts; summarize: (system: string, message: string) => Promise<AgentReply> }): Promise<Compacted | { failed: string } | null> {
-  const { session, keep, texts } = input;
+export function foldOf(session: Pick<SessionParts, "summary" | "segments">, input: { keep: number; limit: number; texts: PromptTexts }): Fold | null {
+  const { keep, texts } = input;
   const folded = session.segments.slice(0, Math.max(0, session.segments.length - keep));
   const read = folded.map((segment) => segment.messages.filter(isMainMessage));
   if (read.every((messages) => messages.length === 0)) return null;
   const none = renderPrompt(MAIN_TEXT.none, texts, {});
   const turns = read.flatMap((messages) => (messages.length === 0 ? [] : [messages.map((m) => `${m.role}: ${m.content}`).join("\n")])).join("\n\n");
-  const reply = await input.summarize(renderPrompt(MAIN_TEXT.compaction, texts, { keep: String(keep) }), renderPrompt(MAIN_TEXT.compactionInput, texts, { summary: session.summary ?? none, turns }));
+  return { system: renderPrompt(MAIN_TEXT.compaction, texts, { keep: String(keep), limit: String(input.limit) }), message: renderPrompt(MAIN_TEXT.compactionInput, texts, { summary: session.summary ?? none, turns }), folded: folded.length, kept: session.segments.length - folded.length };
+}
+
+/** What a sentence never ends on: a summary that stops on one was cut off mid-sentence. */
+const DANGLING = /(?:[,;:([{/&+\-–—]|\b(?:and|or|but|nor|the|a|an|of|to|with|from|for|that|which|whose|than|into))$/i;
+
+/**
+ * The summary a compaction's call answered, or why it can't land (BUILD-C §4 C1, the guard): its
+ * call failed or answered nothing, or its answer stopped at its limit (`cutShort`: the provider's
+ * finish reason, `AgentReply.finish`) or mid-sentence, which a cut answer does where the provider
+ * never said.
+ */
+export function summaryOf(reply: Pick<AgentReply, "status" | "text" | "reason" | "finish">, none: string): FoldResult {
   const summary = reply.text.trim();
   if (reply.status !== "answered" || summary === "") return { failed: reply.reason ?? none };
-  const rebase = await rt.sessions.compact(input.userId, input.holder, session.refs, summary, keep);
-  return { rebase, session: await readSession(rt, input.userId, rebasedRefs(rebase)), summary, folded: folded.length, kept: session.segments.length - folded.length };
+  if (cutShort(reply.finish)) return { failed: "its summary was cut off at its limit (Summary length)", cut: true };
+  if (DANGLING.test(summary)) return { failed: "its summary stops mid-sentence", cut: true };
+  return { summary };
+}
+
+/** Lands `summary` on `session`: it stands for all but the latest `keep` turns, and the session it replaced is archived whole, both held for `holder` until the turn's record carries them. */
+export async function landSummary(rt: Pick<Runtime, "sessions">, input: { userId: UserId; holder: string; session: MainSession; keep: number; summary: string; fold: Pick<Fold, "folded" | "kept"> }): Promise<Compacted> {
+  const rebase = await rt.sessions.compact(input.userId, input.holder, input.session.refs, input.summary, input.keep);
+  return { rebase, session: await readSession(rt, input.userId, rebasedRefs(rebase)), summary: input.summary, folded: input.fold.folded, kept: input.fold.kept };
+}
+
+/**
+ * Compacts `session` (`foldOf`): `summarize` makes the call, or finds it made, and a summary that
+ * stands lands (`landSummary`). Null when there is nothing to fold; `failed` with why when no
+ * summary lands (`cut` when it was cut off).
+ */
+export async function compact(rt: Pick<Runtime, "sessions">, input: { userId: UserId; holder: string; session: MainSession; keep: number; limit: number; texts: PromptTexts; summarize: (fold: Fold) => Promise<FoldResult> }): Promise<Compacted | { failed: string; cut?: true } | null> {
+  const fold = foldOf(input.session, input);
+  if (!fold) return null;
+  const made = await input.summarize(fold);
+  if ("failed" in made) return made;
+  return landSummary(rt, { userId: input.userId, holder: input.holder, session: input.session, keep: input.keep, summary: made.summary, fold });
 }
 
 /**
@@ -189,7 +247,8 @@ function messageView(m: SessionMessage): SessionMessageView[] {
 /**
  * GM → Workspace's view of the main session at the chat's head (`lre.workspace session`): all of it,
  * every message saying whether it is the main agent's own (what its next turn reads), how much of it
- * the main agent reads, and its latest compaction's rollback.
+ * the main agent reads, in all and per turn (Settings → Main agent → Session warns from it when the
+ * kept turns alone pass the compaction's limit), and its latest compaction's rollback.
  */
 export async function sessionView(rt: Runtime, chatId: ChatId, userId: UserId): Promise<SessionView> {
   const head = await chatHead(rt, chatId, userId);
@@ -205,7 +264,7 @@ export async function sessionView(rt: Runtime, chatId: ChatId, userId: UserId): 
     summary: session.summary,
     turns: session.segments.length,
     tokens,
-    segments: session.segments.map((s) => ({ turn: turns.get(s.hash) ?? null, messages: s.messages.flatMap(messageView) })),
+    segments: session.segments.map((s) => ({ turn: turns.get(s.hash) ?? null, messages: s.messages.flatMap(messageView), tokens: sessionTokens({ summary: null, segments: [s] }) })),
     reads: { turns: session.segments.filter((s) => s.messages.some(isMainMessage)).length, tokens: sessionTokens(session) },
     missing: session.missing.length,
     rollback,

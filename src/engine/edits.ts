@@ -32,7 +32,7 @@ import { ROUTINE_AWARENESS, ROUTINE_MODES, ROUTINE_ROLES, SKIP_LIVES } from "../
 import { isBand, tierOf } from "../shared/tiers";
 import type { EffectSpec, FieldDef, FieldType, WorldDoc } from "../shared/world";
 import { BUILTIN_RELATIONS, formatMoney, readSectionFeed, spanRecords } from "../shared/world";
-import { parseItemFix, parseItemOp, parsePlaceOp, type ItemFix, type Spot } from "../shared/things";
+import { makeFieldsOf, parseItemFix, parseItemOp, parsePlaceOp, type ItemFix, type Spot } from "../shared/things";
 import { parseOrgOp } from "../shared/org-ops";
 import { FEED_EVENT } from "./feed";
 import { calendarOf, slotIndexAt } from "./calendar";
@@ -54,7 +54,8 @@ import { Working } from "./working";
 import { workspaceOf, workspacePins, wsDelete, wsPin, wsWrite } from "./workspace";
 import { applyItemOp, type ItemOpOptions } from "./thing-ops";
 import { accessFor } from "./access";
-import { isThing, mayFixThing } from "./things";
+import { householdOf, isThing, mayFixThing, restOf, whoseOf } from "./things";
+import { claimsOf } from "./realism";
 import { canSeeEntity, canSeePlace } from "./visibility";
 
 export interface EditOptions {
@@ -175,14 +176,15 @@ function thingMove(w: Working, thing: EntityId, to: Spot, opts: EditOptions, rng
 /**
  * A player's ✎ on a thing (`fix_item`, ITEMS-SPEC §10.3), under the player's rules whatever the
  * edit's: a thing of theirs they can see (`mayFixThing`), moved or kept only where they can see,
- * never on another person and never in a holder they may not use; worn or taken off by them; sized,
- * or its size left to its type or name again. Never a confirmed change: a Built-in thing stays.
+ * never on another person and never in a holder they may not use, a holder's room, load and depth
+ * counting (`room`); worn or taken off by them, in a slot of its own (Ready is in hand); sized, or
+ * its size left to its type or name again; made theirs, their household's or nobody's; lent for use
+ * to someone they know or that taken back; renamed; put back where it is kept; handed to someone
+ * here (to hold, lent, given, or given back). And a thing they add (Play's Add), theirs, where they
+ * can see, unless the chat holds them to the world. Never a confirmed change: a Built-in thing stays.
  */
 function fixItemOp(reg: Registry, w: Working, change: ItemFix, opts: EditOptions, rng: Rng): Rejection | null {
   const pov = w.world.pov;
-  const item = change.item;
-  if (!isThing(w.ctx, item) || isGone(w.state, item) || !canSeeEntity(reg, w.world, w.state, pov, item)) return reject("missing_entity", `no thing ${labelOf(w, item)}`);
-  if (!mayFixThing(w.ctx, pov, item)) return reject("not_yours", `${labelOf(w, item)} isn't yours to change`);
   const spotProblem = (spot: Spot): Rejection | null => {
     if ("place" in spot) return canSeePlace(reg, w.world, w.state, pov, spot.place) ? null : reject("missing_place", "no such place");
     if (spot.in === pov) return null;
@@ -191,7 +193,27 @@ function fixItemOp(reg: Registry, w: Working, change: ItemFix, opts: EditOptions
     if (kindIs(reg, w.world, holder.kind, "person")) return reject("not_yours", `${holder.name} isn't yours to put things on`);
     return accessFor(w.ctx, pov, spot.in).use !== null ? null : reject("not_yours", `${holder.name} isn't yours to use`);
   };
-  const options = itemOptions({ ...opts, gm: false, confirmed: false }, rng);
+  // Someone the player character knows, for a grant; someone here with them, for a handover.
+  const partyProblem = (who: EntityId, here: boolean): Rejection | null => {
+    const e = own(w.state.entities, who);
+    if (who === pov || !e || isGone(w.state, who) || !canSeeEntity(reg, w.world, w.state, pov, who)) return reject("missing_entity", "no such person");
+    if (!here) return null;
+    if (!kindIs(reg, w.world, e.kind, "person")) return reject("not_a_person", `${e.name} can't be handed anything`);
+    const at = placeOfEntity(w.state, pov);
+    return at !== null && placeOfEntity(w.state, who) === at ? null : reject("not_here", `${e.name} isn't here to take it`);
+  };
+  const options: ItemOpOptions = { ...itemOptions({ ...opts, gm: false, confirmed: false }, rng), room: true };
+  if (change.do === "make") {
+    if (claimsOf(w.world, w.state).mode === "hold") return reject("no_claims", "This chat holds you to the world: nothing is added that the story hasn't brought in.");
+    const where = spotProblem(change.at);
+    if (where) return where;
+    const typed = change.type !== undefined || change.class !== undefined;
+    const made = applyItemOp(w, { do: "make", name: change.name, at: change.at, owner: pov, why: "", ...(change.type !== undefined ? { type: change.type } : {}), ...(change.class !== undefined ? { class: change.class } : {}), ...(change.details !== undefined ? { details: change.details } : {}), ...(!typed && change.is !== undefined ? makeFieldsOf(change.is) : {}), ...(change.description !== undefined ? { description: change.description } : {}), ...(change.size !== undefined ? { size: change.size } : {}), ...(change.qty !== undefined ? { qty: change.qty } : {}) }, options);
+    return "code" in made ? made : null;
+  }
+  const item = change.item;
+  if (!isThing(w.ctx, item) || isGone(w.state, item) || !canSeeEntity(reg, w.world, w.state, pov, item)) return reject("missing_entity", `no thing ${labelOf(w, item)}`);
+  if (!mayFixThing(w.ctx, pov, item)) return reject("not_yours", `${labelOf(w, item)} isn't yours to change`);
   const applied = (() => {
     switch (change.do) {
       case "move":
@@ -199,10 +221,37 @@ function fixItemOp(reg: Registry, w: Working, change: ItemFix, opts: EditOptions
       case "home":
         return (change.home !== null && change.home !== "owner" ? spotProblem(change.home) : null) ?? applyItemOp(w, { do: "home", item, home: change.home }, options);
       case "wear":
-        return applyItemOp(w, { do: "wear", item, who: pov, ...(change.off === true ? { off: true } : {}) }, options);
+        return applyItemOp(w, { do: "wear", item, who: pov, ...(change.off === true ? { off: true } : {}), ...(change.slot !== undefined ? { slot: change.slot } : {}) }, options);
       case "size":
         if (change.size !== null) return applyItemOp(w, { do: "label", item, size: change.size }, options);
         return own(w.state.entities, item)?.fields.size === undefined ? reject("no_change", "nothing sets its size") : (w.apply({ type: "set", entity: item, field: "size", value: null }) ?? {});
+      case "own": {
+        // Theirs, their household's or nobody's (§10.3): anyone else's is a Give, a Lend or a sale, told to the story.
+        const owner = change.owner === "self" ? pov : change.owner === "household" ? householdOf(w.ctx, pov) : null;
+        if (change.owner === "household" && owner === null) return reject("no_household", "You aren't in a household");
+        return applyItemOp(w, { do: "own", item, owner, why: "" }, options);
+      }
+      case "grant":
+        if (change.until !== undefined && !(change.until > w.state.clock)) return reject("bad_until", "an end is after now");
+        return partyProblem(change.who, false) ?? applyItemOp(w, { do: "grant", item, who: change.who, basis: change.until !== undefined ? "loan" : "assign", by: pov, ...(change.until !== undefined ? { until: change.until } : {}) }, options);
+      case "revoke":
+        if (!own(w.state.entities, change.who)?.relations.some((r) => r.type === "uses" && r.to === item)) return reject("no_change", `${labelOf(w, change.who)} has no leave to use it`);
+        return partyProblem(change.who, false) ?? applyItemOp(w, { do: "revoke", item, who: change.who }, options);
+      case "label":
+        return applyItemOp(w, { do: "label", item, name: change.name }, options);
+      case "away": {
+        // Back where it is kept (`restOf`, as Put away takes it): a place or a holder they can see, or on its owner, who is them or someone here.
+        const rest = restOf(w.ctx, item).rest;
+        if (rest === null) return reject("no_rest", `${labelOf(w, item)} has nowhere it's kept`);
+        if (rest !== "owner") return spotProblem(rest) ?? applyItemOp(w, { do: "move", item, to: rest, why: "" }, options);
+        const owner = whoseOf(w.ctx, item).owners[0];
+        if (owner === pov) return applyItemOp(w, { do: "move", item, to: { in: pov }, why: "" }, options);
+        if (owner === undefined) return reject("no_rest", `${labelOf(w, item)} has nowhere it's kept`);
+        return partyProblem(owner, true) ?? applyItemOp(w, { do: "hand", item, to: owner, basis: "return", why: "" }, options);
+      }
+      case "hand":
+        if (change.basis === "loan" && change.until === undefined) return reject("bad_until", "a loan needs its end");
+        return partyProblem(change.to, true) ?? applyItemOp(w, { do: "hand", item, to: change.to, basis: change.basis, why: "", ...(change.until !== undefined ? { until: change.until } : {}) }, options);
     }
   })();
   return "code" in applied ? applied : null;

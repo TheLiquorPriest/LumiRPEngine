@@ -48,8 +48,8 @@ export function mindsPromptPatch(purpose: MindPurpose, text: string | null): Jso
   return { minds: { prompts: { [purpose]: own } } };
 }
 
-/** A change to Settings → Minds → Knowledge: the switch, the suspicion threshold, how the step asks, or a limit. */
-export type KnowledgeSettingsChange = Partial<Pick<KnowledgeSettings, "enabled" | "threshold" | "batch" | KnowledgeLimit>>;
+/** A change to Settings → Minds → Knowledge: the switch, the suspicion threshold, how the step asks and how many of its calls at once, or a limit. */
+export type KnowledgeSettingsChange = Partial<Pick<KnowledgeSettings, "enabled" | "threshold" | "batch" | "callsAtOnce" | KnowledgeLimit>>;
 
 /** Knowledge settings changed: the user's own, so the preset stays. */
 export function knowledgePatch(change: KnowledgeSettingsChange): JsonObject {

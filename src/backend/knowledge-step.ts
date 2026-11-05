@@ -4,7 +4,8 @@
 // lie, what they would act on…), each saying why it matters and to whom, as its default wording says.
 // One call per scene by default, or one per character (Settings → Minds → Knowledge), for everyone
 // who could perceive the turn: the player character and whoever was there with them, each call asked
-// once the one before it is checked.
+// once the one before it is checked, or, with more calls at once, several together, each answer
+// checked as it comes back.
 //
 //   knowledgeContext  what the call reads: what happened (the player's message, the reply, the turn's
 //                     events and what the read found in it), who could perceive it and from when,

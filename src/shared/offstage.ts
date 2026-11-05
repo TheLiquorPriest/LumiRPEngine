@@ -3,14 +3,16 @@
 // marks them, each with its group; the group decides, by Settings → Narrator → Out-of-play actions,
 // whether the next turn's narrator is told of it (`by.told` on its fix, in the Outcome's words,
 // recorded when it is done and never worked out again). Typed words or Send now still play the
-// action as a turn, and `buy` stays in the world: it is no entry here. The gear actions Gear → Manage
-// sends are entries too, applied at once only when their request says so (`offstage`); a palette
-// tap of one stays story. Pure.
+// action as a turn, and `buy` stays in the world: it is no entry here. The gear actions Play → Me →
+// Belongings sends (its things, and its hand-overs and changes of outfit) are entries too, applied at
+// once only when their request says so (`offstage`); a palette tap of one stays story. Pure.
+
+import type { ItemFix } from "./things";
 
 /** What an out-of-play action is about: which of Settings → Narrator → Out-of-play actions' defaults tells it. */
-export type OffstageGroup = "accounts" | "payments" | "credit" | "investing" | "property" | "business" | "staff" | "members" | "structure" | "governance" | "things";
+export type OffstageGroup = "accounts" | "payments" | "credit" | "investing" | "property" | "business" | "staff" | "members" | "structure" | "governance" | "things" | "handovers";
 
-export const OFFSTAGE_GROUPS: readonly OffstageGroup[] = ["payments", "credit", "property", "business", "staff", "members", "structure", "accounts", "investing", "governance", "things"];
+export const OFFSTAGE_GROUPS: readonly OffstageGroup[] = ["payments", "credit", "property", "business", "staff", "members", "structure", "handovers", "accounts", "investing", "governance", "things"];
 
 /** Each group as Settings and the Tell switch name it. */
 export const OFFSTAGE_GROUP_LABEL: Readonly<Record<OffstageGroup, string>> = {
@@ -25,6 +27,7 @@ export const OFFSTAGE_GROUP_LABEL: Readonly<Record<OffstageGroup, string>> = {
   structure: "Structure",
   governance: "Governance",
   things: "Things",
+  handovers: "Hand-overs and outfits",
 };
 
 /** What each group holds, in a few words, for its row in Settings. */
@@ -39,10 +42,11 @@ export const OFFSTAGE_GROUP_HELP: Readonly<Record<OffstageGroup, string>> = {
   members: "Admitting, removing, appointing, delegating, dues, your party",
   structure: "Founding, renaming, restructuring, merging, winding up",
   governance: "Votes, motions, decision rules, goals, orders, positions, entry",
-  things: "Wearing, taking off, dropping, putting away (Gear → Manage)",
+  things: "Wearing, taking off, dropping, putting away, putting in, moving your things (Belongings)",
+  handovers: "Giving, handing over, lending, giving back and taking back things, and changing into a saved outfit or loadout (Belongings)",
 };
 
-/** Which group's default tells each out-of-play action. Every money and organization action but `buy`, and Gear → Manage's actions. */
+/** Which group's default tells each out-of-play action. Every money and organization action but `buy`, and Belongings' gear actions. */
 export const OFFSTAGE_ACTIONS: Readonly<Record<string, OffstageGroup>> = Object.freeze({
   // Your own accounts.
   move_money: "accounts",
@@ -136,27 +140,37 @@ export const OFFSTAGE_ACTIONS: Readonly<Record<string, OffstageGroup>> = Object.
   org_entry: "governance",
   org_approve: "governance",
   org_deny: "governance",
-  // Things: Gear → Manage only (`offstage`).
+  // Things: Belongings only (`offstage`).
   wear: "things",
   remove: "things",
   drop: "things",
   put_away: "things",
   take: "things",
   put_in: "things",
+  // Hand-overs and outfits: Belongings only (`offstage`); someone not here is never handed anything.
+  give: "handovers",
+  hand_over: "handovers",
+  give_back: "handovers",
+  lend: "handovers",
+  reclaim: "handovers",
+  set_apply: "handovers",
 });
 
-/** The gear actions Gear → Manage sends at once (`ActionRequest.offstage`); from the palette they stay story. */
-export const OFFSTAGE_GEAR: readonly string[] = Object.freeze(Object.keys(OFFSTAGE_ACTIONS).filter((id) => OFFSTAGE_ACTIONS[id] === "things"));
+/** The groups of the gear actions Belongings sends at once (`ActionRequest.offstage`); from the palette they stay story. */
+const GEAR_GROUPS: Readonly<Partial<Record<OffstageGroup, true>>> = { things: true, handovers: true };
+
+/** The gear actions Belongings sends at once (`ActionRequest.offstage`); from the palette they stay story. */
+export const OFFSTAGE_GEAR: readonly string[] = Object.freeze(Object.keys(OFFSTAGE_ACTIONS).filter((id) => GEAR_GROUPS[OFFSTAGE_ACTIONS[id] ?? "accounts"] === true));
 
 /** An action's group, or null for one that always plays in the story (`buy`, travel, a check). */
 export function offstageGroupOf(action: string): OffstageGroup | null {
   return Object.hasOwn(OFFSTAGE_ACTIONS, action) ? (OFFSTAGE_ACTIONS[action] ?? null) : null;
 }
 
-/** Whether a tap of the action with no words is done at once wherever it is sent from: every money and organization action of the table; gear only from Gear → Manage (`offstage`). */
+/** Whether a tap of the action with no words is done at once wherever it is sent from: every money and organization action of the table; gear only from Belongings (`offstage`). */
 export function atOnceByDefault(action: string): boolean {
   const group = offstageGroupOf(action);
-  return group !== null && group !== "things";
+  return group !== null && GEAR_GROUPS[group] !== true;
 }
 
 /**
@@ -176,9 +190,9 @@ export interface OffstageSettings {
   paymentsFrom: number;
 }
 
-/** Told by default: what the story would have narrated as a turn (payments to others at any amount, credit, property, business, staff, members, structure); not told: your own accounts, investing, governance, things. */
+/** Told by default: what the story would have narrated as a turn (payments to others at any amount, credit, property, business, staff, members, structure, hand-overs and changes of outfit); not told: your own accounts, investing, governance, things. */
 export const OFFSTAGE_DEFAULTS: Readonly<OffstageSettings> = Object.freeze({
-  tell: Object.freeze({ payments: true, credit: true, property: true, business: true, staff: true, members: true, structure: true, accounts: false, investing: false, governance: false, things: false }),
+  tell: Object.freeze({ payments: true, credit: true, property: true, business: true, staff: true, members: true, structure: true, handovers: true, accounts: false, investing: false, governance: false, things: false }),
   paymentsFrom: 0,
 });
 
@@ -208,6 +222,11 @@ export function toldByDefault(action: string, params: Readonly<Record<string, un
   if (group !== "payments" || settings.paymentsFrom <= 0) return true;
   const amount = offstageAmount(params);
   return amount === null || amount >= settings.paymentsFrom * 10 ** decimals;
+}
+
+/** The group a list of ✎ changes to things (Belongings' `lre.fix {things}`) is told by: hand-overs when one of them hands a thing to someone, else things. */
+export function fixGroupOf(things: readonly ItemFix[]): OffstageGroup {
+  return things.some((t) => t.do === "hand") ? "handovers" : "things";
 }
 
 /** A confirm step's Tell switch for the action it sends (DESIGN §11): null for one done in the story, else on or off as Settings → Narrator → Out-of-play actions presets it. */

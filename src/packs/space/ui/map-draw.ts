@@ -1,20 +1,23 @@
-// Drawing one map scope on a canvas (DESIGN §12): the grid behind its places (terrain, walls,
-// doors, each place's area tinted), the routes, the places' dots and their names, and the things
-// lying in cells. The display mode decides how what the POV knows only in part is drawn: by
-// knowledge, a place only heard of is a dashed ring; in fog, places never visited are dimmed and
-// the cells the view leaves out of `seen` lie under fog. Play's map and Build's map preview both
-// draw through here, so a map looks the same while it's being written. Every colour comes from
-// the canvas palette (canvas-theme.ts), read at draw time, so the map follows the host theme.
+// Drawing one map scope on a canvas (DESIGN §12): the grid behind its places (terrain, each place's
+// area tinted, and its walls and doors drawn thin, map-walls.ts), the routes, the places' dots and
+// their names, and the things lying in cells. The display mode decides how what the POV knows only
+// in part is drawn: by knowledge, a place only heard of is a dashed ring; in fog, places never
+// visited are dimmed and the cells the view leaves out of `seen` lie under fog. Play's map and
+// Build's map preview both draw through here, so a map looks the same while it's being written.
+// Every colour comes from the canvas palette (canvas-theme.ts), read at draw time, so the map
+// follows the host theme.
 
 import type { Bounds, Point, Transform } from "../../../frontend/map-math";
 import { toScreen } from "../../../frontend/map-math";
 import { hasCell } from "../../../shared/grid";
-import { VOID_TERRAIN } from "../../../shared/maps";
+import { VOID_TERRAIN, type PlaceMark } from "../../../shared/maps";
+import { ICONS, type IconName } from "../../../frontend/icons";
 import type { MapDisplay } from "../../../shared/world";
 import type { MapPlaceView, MapScopeView } from "../core/map-scope";
 import type { CanvasPalette } from "./canvas-theme";
 import { canvasPalette } from "./canvas-theme";
 import { controlBoxes, LABEL_PAD, LINE, placeLabels, type PlacedLabel } from "./labels";
+import { paintWalls, thinWalls, wallKindOf, wallPlan, type WallCell, type WallGrid, type WallPlan } from "./map-walls";
 
 /** Drawing units along a scope's longer side: any scope, a 4×3 room or a 200-cell field, fits the shared zoom range. */
 export const FRAME_UNITS = 400;
@@ -101,7 +104,30 @@ function fill(g: CanvasRenderingContext2D, paint: Paint, x: number, y: number, w
   g.globalAlpha = 1;
 }
 
-function paintGrid(g: CanvasRenderingContext2D, scope: MapScopeView, t: Transform, width: number, height: number, opts: DrawOptions, palette: CanvasPalette): void {
+/** A scope's grid as its walls read it: what each cell is (a cell under fog hidden, so nothing joins through it) and the rooms' cells. */
+function wallGridOf(grid: NonNullable<MapScopeView["grid"]>, fog: boolean): WallGrid {
+  const blocked = new Set(grid.blocked);
+  const seen = grid.seen ?? "";
+  const cells = grid.terrain.map((terrain, index): WallCell => {
+    if (fog && !hasCell(seen, index)) return "hidden";
+    if (terrain === "" || terrain === VOID_TERRAIN) return "solid";
+    return wallKindOf(terrain) ?? (blocked.has(index) ? "solid" : "open");
+  });
+  return { width: grid.width, height: grid.height, cells, room: new Set(Object.values(grid.areas).flat()) };
+}
+
+// One wall plan per grid view and display: a map redraws on every pan frame, its grid only with the view.
+const plans = new WeakMap<object, { fog: boolean; plan: WallPlan }>();
+
+function wallsOf(grid: NonNullable<MapScopeView["grid"]>, fog: boolean): WallPlan {
+  const kept = plans.get(grid);
+  if (kept?.fog === fog) return kept.plan;
+  const plan = wallPlan(wallGridOf(grid, fog));
+  plans.set(grid, { fog, plan });
+  return plan;
+}
+
+function paintGrid(g: CanvasRenderingContext2D, scope: MapScopeView, t: Transform, width: number, height: number, opts: DrawOptions, palette: CanvasPalette, dpr: number): void {
   const grid = scope.grid;
   if (!grid) return;
   const unit = unitOf(scope);
@@ -113,10 +139,15 @@ function paintGrid(g: CanvasRenderingContext2D, scope: MapScopeView, t: Transfor
     for (const cell of grid.areas[place.id] ?? []) tint.set(cell, areaFill(i, palette));
   });
   const wall = terrainFill("wall", palette);
+  const floor = terrainFill("floor", palette);
   // In fog, the cells the view didn't show (never seen, or a room not yet been in) lie under fog:
   // only the fog is drawn there, never the ground under it.
   const fog = opts.display === "fog";
   const seen = grid.seen ?? "";
+  // Walls and doors drawn thin: a wall's cell, and a door's in a wall line, lie on faint floor under
+  // the lines; a door in no line keeps its fill. Cells too small for a line keep every fill.
+  const plan = thinWalls(size) ? wallsOf(grid, fog) : null;
+  const gaps = new Set(plan?.doors.map((d) => d.cell));
   for (let y = 0; y < grid.height; y += 1) {
     for (let x = 0; x < grid.width; x += 1) {
       const p = toScreen(t, { x: x * unit, y: y * unit });
@@ -130,12 +161,13 @@ function paintGrid(g: CanvasRenderingContext2D, scope: MapScopeView, t: Transfor
       // Nothing (outside a layout, a hidden place's cells, a cell the display hides) is the bare ground.
       if (terrain === "" || terrain === VOID_TERRAIN) continue;
       const shut = blocked.has(index);
-      const ground = terrainFill(terrain, palette);
+      const lined = plan !== null && (gaps.has(index) || wallKindOf(terrain) === "wall");
+      const ground = lined ? floor : terrainFill(terrain, palette);
       fill(g, ground, p.x, p.y, span, span);
       const area = tint.get(index);
       if (area && !shut) fill(g, area, p.x, p.y, span, span);
       // A cell nobody can enter that isn't a wall (deep water, a counter) keeps its terrain under a hatch.
-      if (shut && ground.color !== wall.color && size >= 8) {
+      if (shut && !lined && ground.color !== wall.color && size >= 8) {
         g.save();
         g.beginPath();
         g.rect(p.x, p.y, span, span);
@@ -158,6 +190,7 @@ function paintGrid(g: CanvasRenderingContext2D, scope: MapScopeView, t: Transfor
       }
     }
   }
+  if (plan) paintWalls(g, plan, (c) => toScreen(t, { x: c.x * unit, y: c.y * unit }), size, dpr, palette);
   // Places without a cell sit in a row below the grid, set off by a dashed line.
   if (scope.frame.height > grid.height) {
     const a = toScreen(t, { x: 0, y: (grid.height + 0.5) * unit });
@@ -206,6 +239,47 @@ function paintGrid(g: CanvasRenderingContext2D, scope: MapScopeView, t: Transfor
   }
 }
 
+/** The glyph each mark is drawn with, from the icon set: the legend draws the same ones. */
+export const MARK_ICON: Readonly<Record<PlaceMark, IconName>> = { home: "home", owned: "key", for_sale: "flag" };
+
+/** One icon of the set on the canvas, its 24-unit square drawn `size` px wide at `x`, `y`. */
+function paintIcon(g: CanvasRenderingContext2D, name: IconName, x: number, y: number, size: number, color: string): void {
+  g.save();
+  g.translate(x, y);
+  g.scale(size / 24, size / 24);
+  g.strokeStyle = color;
+  g.fillStyle = color;
+  g.lineWidth = 2.25;
+  g.lineCap = "round";
+  g.lineJoin = "round";
+  for (const s of ICONS[name]) {
+    if (typeof s === "string") {
+      g.stroke(new Path2D(s));
+      continue;
+    }
+    g.beginPath();
+    if (s[0] === "r") g.rect(s[1], s[2], s[3], s[4]);
+    else g.arc(s[1], s[2], s[3], 0, Math.PI * 2);
+    if (s[0] === "dot") g.fill();
+    else g.stroke();
+  }
+  g.restore();
+}
+
+/** A place's mark: a small badge up and right of its dot, on the map's own ground, its glyph in the ink. */
+function paintMark(g: CanvasRenderingContext2D, mark: PlaceMark, p: Point, dim: number, palette: CanvasPalette): void {
+  const c = { x: p.x + 11, y: p.y - 11 };
+  g.globalAlpha = dim;
+  g.beginPath();
+  g.arc(c.x, c.y, 8.5, 0, Math.PI * 2);
+  g.fillStyle = palette.bg;
+  g.fill();
+  g.strokeStyle = palette.ink;
+  g.lineWidth = 1.5;
+  g.stroke();
+  paintIcon(g, MARK_ICON[mark], c.x - 6, c.y - 6, 12, palette.ink);
+}
+
 /** A faint square grid behind a node map, so panning and zooming read. */
 function paintBackdrop(g: CanvasRenderingContext2D, t: Transform, width: number, height: number, palette: CanvasPalette): void {
   const step = 100 * t.k;
@@ -241,7 +315,7 @@ export function drawScope(canvas: HTMLCanvasElement, scope: MapScopeView, t: Tra
   g.clearRect(0, 0, width, height);
   g.fillStyle = palette.bg;
   g.fillRect(0, 0, width, height);
-  if (scope.grid) paintGrid(g, scope, t, width, height, opts, palette);
+  if (scope.grid) paintGrid(g, scope, t, width, height, opts, palette, dpr);
   else paintBackdrop(g, t, width, height, palette);
   const screen = new Map(scope.places.map((p) => [p.id, toScreen(t, placePoint(scope, p))]));
   // Roads solid, footpaths dashed, water dotted: the line's pattern says what it is, not only its colour.
@@ -291,6 +365,8 @@ export function drawScope(canvas: HTMLCanvasElement, scope: MapScopeView, t: Tra
       g.arc(p.x, p.y, here || isSelected ? 15 : 12, 0, Math.PI * 2);
       g.stroke();
     }
+    // Whose a place is to the POV (`mark`): a badge by its dot, which the legend names.
+    if (place.mark) paintMark(g, place.mark, p, dim, palette);
     g.globalAlpha = 1;
   }
   // Names go where they don't collide (labels.ts): beside the dot, or further out on a leader line,
@@ -298,7 +374,7 @@ export function drawScope(canvas: HTMLCanvasElement, scope: MapScopeView, t: Tra
   g.font = `13px ${palette.font}`;
   const dimmed = new Map(scope.places.map((place) => [place.id, !place.known ? 0.45 : opts.display === "fog" && unvisited(place, opts) ? 0.55 : 1]));
   const labels = placeLabels(
-    scope.places.map((place) => ({ id: place.id, ...(screen.get(place.id) ?? { x: 0, y: 0 }), r: place.id === opts.here || place.id === opts.selected || opts.inside.has(place.id) ? 16 : 8, text: place.known ? place.name : `${place.name}?` })),
+    scope.places.map((place) => ({ id: place.id, ...(screen.get(place.id) ?? { x: 0, y: 0 }), r: place.id === opts.here || place.id === opts.selected || opts.inside.has(place.id) ? 16 : place.mark ? 18 : 8, text: place.known ? place.name : `${place.name}?` })),
     { width, height, measure: (s) => g.measureText(s).width, avoid: controlBoxes(width, height, opts.top), first: [opts.here, opts.selected].filter((id): id is string => id !== null) },
   );
   g.globalAlpha = 0.5;

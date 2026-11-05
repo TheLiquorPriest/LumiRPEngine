@@ -643,8 +643,9 @@ function worldTables(c: Ctx): { tables: Record<string, DataTable>; pins: Record<
         rows[made.id] = made.row;
         c.classes.set(v.id, made.id);
       }
+      // Mounts eat feed and carts burn nothing: the Modern US list may name `none` already.
       const fuel = classes.columns.fuel_type;
-      const columns = fuel ? { ...classes.columns, fuel_type: { ...fuel, values: [...(fuel.values ?? []), "feed", "none"] } } : classes.columns;
+      const columns = fuel ? { ...classes.columns, fuel_type: { ...fuel, values: [...new Set([...(fuel.values ?? []), "feed", "none"])] } } : classes.columns;
       tables["vehicles.classes"] = { ...classes, columns, rows };
     }
   }
@@ -776,6 +777,8 @@ export function convertTemplate(tpl: Template, env: ConvertEnv): WorldDoc {
   config("space", { closedRoutes: tpl.routes.filter((r) => r.secret === true).map((r) => r.id) });
   // People carry the template's region for income tax; sales tax at a place reads it from the economy config.
   if (tpl.economy || tpl.region) config("economy", { ...(tpl.region ? { region: tpl.region } : {}), ...(tpl.economy ?? {}) });
+  // The vehicles pack's config: yearly registration where the template turns it on (the Modern US starter does).
+  if (tpl.vehiclesConfig) config("vehicles", tpl.vehiclesConfig);
   // Everyday carry (ITEMS-SPEC §4.4): a template of another era names its own, or none; without one, the Modern US default applies.
   if (tpl.carry) config("gear", { carry: tpl.carry.length > 0 ? [{ who: { kind: ["person"] }, types: tpl.carry }] : [] });
 

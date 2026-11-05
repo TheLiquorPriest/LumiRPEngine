@@ -4,11 +4,14 @@
 // (`shared/prompts.ts` makes them from `TOOL_TEXTS` and `TOOL_NOTES`, the way it makes each section's
 // guidance), edited on Settings → Agents → Prompts on the Every agent page: so the page lists exactly the
 // tools there are, and the backend (`backend/agents/tools/registry.ts`, `toolsFor`) sends each one with
-// the user's own text where they wrote one. The JSON Schemas themselves are fixed output contracts
-// (§16): only their descriptions are texts.
+// the user's own text where they wrote one. What several tools share (`TOOL_GUIDE_TEXTS`: what a change
+// does, how a thing is named) is a text of its own on that page, sent once in the system prompt of an
+// agent given any of them instead of in each description, so the tool block stays small and the same
+// on every call. The JSON Schemas themselves are fixed output contracts (§16): only their descriptions
+// are texts.
 
 import { READ_TOOL_TEXTS } from "./agent-tools-read";
-import { WRITE_TOOL_NOTES, WRITE_TOOL_TEXTS } from "./agent-tools-write";
+import { WRITE_TOOL_GUIDES, WRITE_TOOL_NOTES, WRITE_TOOL_TEXTS } from "./agent-tools-write";
 import type { PromptVar } from "./prompts";
 
 /**
@@ -81,6 +84,27 @@ export interface ToolText {
   note: string;
   text: string;
   args: readonly ToolArgText[];
+  /** What it shares with other tools (`TOOL_GUIDE_TEXTS`), told once in the system prompt of an agent given it instead of in its description. */
+  guides?: readonly ToolGuide[];
+  /** Given only to an agent that notes facts for the reply's read (the Curator working a turn), as its definition is (`ToolDefinition.notes`). */
+  notes?: true;
+}
+
+/** What several tools share, sent once (`ToolText.guides`): what a change to a thing or a place does, and how a tool names a thing. */
+export type ToolGuide = "changes" | "things";
+export const TOOL_GUIDES: readonly ToolGuide[] = ["changes", "things"];
+
+/** A shared text as shipped: the Every agent page's label and line for it, and its text (the registry text `tool.guide.<guide>`). */
+export interface ToolGuideText {
+  guide: ToolGuide;
+  label: string;
+  note: string;
+  text: string;
+}
+
+/** The registry text of a text several tools share. */
+export function toolGuideId(guide: ToolGuide): string {
+  return `tool.guide.${guide}`;
 }
 
 /** A note the tool layer answers with (not found, several match, …): a registry text of the Every agent page's "Tool answers". */
@@ -175,8 +199,44 @@ export const TOOL_NOTES: readonly ToolNote[] = [...LAYER_NOTES, ...WRITE_TOOL_NO
 /** Every tool's texts, in the order the Prompts page lists them: the read families', then the writes', the workspace's and the lore's. */
 export const TOOL_TEXTS: readonly ToolText[] = [...READ_TOOL_TEXTS, ...WRITE_TOOL_TEXTS];
 
+/** What several tools share, in the order an agent's system prompt tells them. */
+export const TOOL_GUIDE_TEXTS: readonly ToolGuideText[] = WRITE_TOOL_GUIDES;
+
 const BY_NAME: ReadonlyMap<string, ToolText> = new Map(TOOL_TEXTS.map((t) => [t.name, t]));
 
 export function toolText(name: string): ToolText | undefined {
   return BY_NAME.get(name);
+}
+
+/** What the tools named share (`ToolText.guides`), each once, in `TOOL_GUIDES`' order. */
+export function guidesOf(names: Iterable<string>): ToolGuide[] {
+  const used = new Set<ToolGuide>();
+  for (const name of names) for (const g of BY_NAME.get(name)?.guides ?? []) used.add(g);
+  return TOOL_GUIDES.filter((g) => used.has(g));
+}
+
+// ---------------------------------------------------------------- weight
+
+/** The characters a token is taken to hold, as the backend estimates a prompt (`backend/book.ts`, `tokensOf`). */
+const CHARS_PER_TOKEN = 3.2;
+/** A tool's JSON around its texts (`{"name":…,"description":…,"parameters":{"type":"object","properties":{…},"additionalProperties":false}}`), and each argument's (`"x":{"type":"string","description":…},`), in characters. */
+const TOOL_FRAME_CHARS = 100;
+const ARG_FRAME_CHARS = 36;
+
+/**
+ * About how many tokens tools take of each call's prompt, from their texts as `text` gives each (the
+ * user's own, else the shipped): their names, descriptions and arguments with the JSON around them,
+ * and what they share (`TOOL_GUIDE_TEXTS`) once. An estimate: a world's own ids, which some
+ * arguments list, add to it.
+ */
+export function toolsWeight(names: readonly string[], text: (id: string) => string): number {
+  let chars = 0;
+  for (const name of names) {
+    const t = BY_NAME.get(name);
+    if (!t) continue;
+    chars += TOOL_FRAME_CHARS + name.length + text(toolTextId(name)).length;
+    for (const a of t.args) chars += ARG_FRAME_CHARS + a.path.length + text(toolArgTextId(name, a.path)).length;
+  }
+  for (const g of guidesOf(names)) chars += text(toolGuideId(g)).length;
+  return Math.ceil(chars / CHARS_PER_TOKEN);
 }

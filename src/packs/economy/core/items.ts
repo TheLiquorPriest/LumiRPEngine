@@ -33,6 +33,8 @@ function wordsOf(list: readonly string[]): string[] {
 export interface ItemName {
   /** The main noun: the last word of the name's noun phrase, stemmed. */
   head: string;
+  /** The noun phrase as said, lowercase, without filler: "used flatbed truck" in "a used flatbed truck for work" (what names a vehicle class, `vehicles.named`). */
+  noun: string;
   /** The noun phrase's words and its qualifiers' ("Milk, whole" is milk with whole), stemmed, without filler. */
   words: Set<string>;
   /** A trailing phrase cut from the noun ("for Danny" in "coffee for Danny"): its first word and its words. */
@@ -56,7 +58,7 @@ export function itemName(text: string): ItemName | null {
   const head = noun.findLast((t) => /[a-z]/.test(t));
   if (head === undefined) return null;
   const trailing = at < 0 ? null : { word: base[at] ?? "", words: wordsOf(base.slice(at + 1)) };
-  return { head: stem(head), words: new Set([...wordsOf(noun), ...wordsOf(qualifier)]), trailing };
+  return { head: stem(head), noun: noun.join(" "), words: new Set([...wordsOf(noun), ...wordsOf(qualifier)]), trailing };
 }
 
 export interface CatalogName {

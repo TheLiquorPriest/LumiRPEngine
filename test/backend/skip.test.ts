@@ -157,6 +157,7 @@ describe("time skips", () => {
     await skipDays(rig, chatId, 2);
     const first = calls.length;
     expect(first).toBeGreaterThan(0);
+    rig.rt.setSwipeChoice(chatId, "rerun");
     const g = await rig.host.start(chatId, { type: "swipe" });
     await rig.host.finish(g, "Days pass, again.");
     expect(calls.length).toBeGreaterThan(first);

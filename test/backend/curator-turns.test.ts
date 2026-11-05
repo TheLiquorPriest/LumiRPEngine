@@ -14,6 +14,7 @@ import { madePlaces } from "../../src/engine/places-in-play";
 import type { WorldState } from "../../src/engine/state";
 import { CURATOR_TOOL_TURNS, ROLE_LABEL } from "../../src/shared/agent-roles";
 import type { JsonObject } from "../../src/shared/json";
+import type { ReviewCardView } from "../../src/shared/protocol";
 import type { QuietScript } from "../support/fake-host";
 import { alderChat, DANNY, PRIYA, stateOf } from "../support/mind-chat";
 import { Rig } from "../support/rig";
@@ -33,6 +34,11 @@ const call = (name: string, args: JsonObject, callId: string): QuietToolCall => 
 
 /** The Curator's make of the receipt Helen keeps in the book. */
 const MAKE_RECEIPT = call("item_make", { name: RECEIPT, at: HOME, size: "pocket", why: "Helen's receipt for the salt, in the book on the shelf" }, "m1");
+
+/** A thing bigger than Armful, whose make asks first (ITEMS-SPEC §5.4), and a change to it the same Curator makes next. */
+const SACKS = "Rock salt sacks";
+const MAKE_SACKS = call("item_make", { name: SACKS, at: HOME, size: "heavy", why: "Helen's sacks of rock salt, stacked by the door" }, "m2");
+const LABEL_SACKS = call("item_label", { item: SACKS, aliases: ["the salt"], description: "Four sacks of rock salt for the path" }, "l1");
 
 /** The role whose agent made a call, as its system prompt names it; null for a classic call. */
 const roleOf = (req: QuietRequest): string | null => /You are the (\w+) agent of LumiRPEngine/.exec(req.messages[0]?.content ?? "")?.[1] ?? null;
@@ -101,6 +107,12 @@ function heldBy(state: WorldState, thing: string): { holder: string | null; basi
 /** A thing the Curator made in play, by its name. */
 const madeThing = (state: WorldState, name: string) => Object.values(state.entities).find((e) => e.name === name && (e.fields.made as JsonObject | undefined)?.by === "curator");
 
+/** The review card's items, by role and change type, with their status. */
+async function cardItems(rig: Rig, chatId: string): Promise<{ turn: string; items: string[] }[]> {
+  const cards = rig.body(await rig.send({ type: "lre.review", chatId, op: "get" })).cards as ReviewCardView[];
+  return cards.map((c) => ({ turn: c.turn, items: c.items.map((i) => `${i.role}:${i.changeType}:${i.status}`) }));
+}
+
 describe("the Curator's work in an agent turn", () => {
   test("a Curator a round limit stops before it answers keeps what it staged, says so as a warning, and the read's handover lands for what it didn't stage", async () => {
     const rig = new Rig({ shipped: true, minds: true });
@@ -123,17 +135,24 @@ describe("the Curator's work in an agent turn", () => {
     expect(rig.host.logs.some((l) => l.startsWith("warn:") && l.includes("the Curator's work isn't whole (a round limit stopped its agent): 1 of the 1 change(s) the read held for it land"))).toBe(true);
   });
 
-  test("a Curator whose agent fails lands nothing it staged, and the read's held handover lands beside its prompt-only read", async () => {
+  test("a Curator whose agent staged work and then closed with an answer the engine can't read keeps that work, unclosed; one that staged nothing falls back to its prompt-only read", async () => {
     const rig = new Rig({ shipped: true, minds: true });
     const played = await curated(rig, (_req, n) => (n === 0 ? { content: "", toolCalls: [MAKE_RECEIPT] } : "not an answer"));
     expect(played.curator).toHaveLength(2);
-    // Its make was staged, and its failed run took it back.
+    // Its make was staged, and stands: no prompt-only read ran in its place.
     expect(played.curator[1]?.messages.at(-1)?.content ?? "").toContain('"staged"');
-    expect(madeThing(played.state, RECEIPT)).toBeUndefined();
-    // Its onFail, prompt-only by default, read the Curator's facts once more, and found none.
-    expect(played.classic).toHaveLength(1);
+    expect(madeThing(played.state, RECEIPT)).toBeDefined();
+    expect(played.classic).toEqual([]);
+    // The read's handover, held for the Curator, lands for what it didn't stage.
     expect(heldBy(played.state, PHONE)).toEqual({ holder: DANNY, basis: "hold" });
-    expect(rig.host.logs.some((l) => l.startsWith("warn:") && l.includes("the Curator's work isn't whole (its agent failed, and its prompt-only read stands in): 1 of the 1 change(s) the read held for it land"))).toBe(true);
+    const records = await rig.rt.diag.records(played.chatId, rig.host.userId);
+    expect(records.some((r) => r.step === ROLE_LABEL.curator && (r.reason ?? "").includes("its agent's closing answer couldn't be read: what it staged and noted stands"))).toBe(true);
+    // Staging nothing and closing unread, it fails as before: its onFail, prompt-only by default, reads the Curator's facts once more.
+    const other = new Rig({ shipped: true, minds: true });
+    const bare = await curated(other, () => "not an answer");
+    expect(bare.classic).toHaveLength(1);
+    expect(heldBy(bare.state, PHONE)).toEqual({ holder: DANNY, basis: "hold" });
+    expect(other.host.logs.some((l) => l.startsWith("warn:") && l.includes("the Curator's work isn't whole (its agent failed, and its prompt-only read stands in): 1 of the 1 change(s) the read held for it land"))).toBe(true);
   });
 
   test("the reply's handover lands once: as the Curator staged it where it did, and not at all where its work is whole", async () => {
@@ -180,5 +199,24 @@ describe("the Curator's work in an agent turn", () => {
     const lookedUp = await spent(other, bare.chatId);
     expect([fromSections.calls, lookedUp.calls]).toEqual([2, 3]);
     expect(fromSections.tokensIn).toBeLessThan(lookedUp.tokensIn);
+  });
+
+  test("a change to a thing whose make waits on the review card waits there with it, after it, and Apply lands both", async () => {
+    // As seen live: a make that asks first, then a change to what it made, refused at commit as naming nothing.
+    const rig = new Rig({ shipped: true, minds: true });
+    const played = await curated(rig, (_req, n) => (n === 0 ? { content: "", toolCalls: [MAKE_SACKS] } : n === 1 ? { content: "", toolCalls: [LABEL_SACKS] } : JSON.stringify({ proposals: [] })));
+    expect(played.curator).toHaveLength(3);
+    // Nothing of either landed with the turn, and the change wasn't refused: both wait on the card, the make first.
+    expect(Object.values(played.state.entities).some((e) => e.name === SACKS)).toBe(false);
+    const [card] = await cardItems(rig, played.chatId);
+    expect(card?.items).toEqual(["curator:item_make:open", "curator:item_label:open"]);
+    // Apply lands the make, then the change to it: the thing the card showed, labelled as it said.
+    rig.body(await rig.send({ type: "lre.review", chatId: played.chatId, op: "apply", turn: card?.turn }));
+    const [applied] = await cardItems(rig, played.chatId);
+    expect(applied?.items.map((i) => i.split(":").at(-1))).toEqual(["applied", "applied"]);
+    // Landed by the card's Apply, the GM's: the thing as its make said, labelled as its change said.
+    const sacks = Object.values((await stateOf(rig, played.chatId)).state.entities).find((e) => e.name === SACKS);
+    expect([sacks?.fields.size, sacks?.fields.place, sacks?.fields.aliases, sacks?.fields.description]).toEqual(["heavy", HOME, ["the salt"], "Four sacks of rock salt for the path"]);
+    expect(rig.rt.ledger.errors).toEqual([]);
   });
 });

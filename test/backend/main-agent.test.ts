@@ -412,7 +412,8 @@ describe("a GM note on the reply a Regenerate remakes", () => {
 describe("the main session", () => {
   test("compacts past its tokens, keeping its latest turns whole; a rollback from GM → Workspace lands on the next turn's record", async () => {
     const rig = new Rig({ shipped: true });
-    const chatId = await mainChat(rig, { agents: { compaction: { atTokens: 1, keepTurns: 1 } } });
+    // Summarized as each turn starts (`before_turn`, as earlier builds did), so every compaction call counted is the turn's own, none made ahead for the next.
+    const chatId = await mainChat(rig, { agents: { compaction: { when: "before_turn", atTokens: 1, keepTurns: 1 } } });
     let turn = "first";
     const asked = models(rig, { tag: () => `task-${turn}`, summary: "SUMMARY of the harbor turns." });
     await played(rig, chatId, "I look out over the harbor.", "Gulls wheel over the water.");
@@ -455,6 +456,111 @@ describe("the main session", () => {
     const messages = await rig.host.chats.messages(chatId, rig.host.userId);
     const thirdReply = messages.filter((m) => !m.isUser).at(-2);
     expect(thirdReply ? core?.journal.messages[thirdReply.id]?.ledger.swipes[String(thirdReply.swipeId)]?.session : undefined).toEqual(third.session);
+    expect(rig.rt.ledger.errors).toEqual([]);
+  });
+
+  test("summarized ahead (the default): the turn whose next turn will compact makes the fold that turn needs in the background, off its own path; the next turn adopts it, calling it no more, and its record carries the summary", async () => {
+    const rig = new Rig({ shipped: true });
+    const chatId = await mainChat(rig, { agents: { compaction: { atTokens: 1, keepTurns: 1 } } });
+    let turn = "first";
+    const asked = models(rig, { tag: () => `task-${turn}` });
+    // The compaction's call answers only once the test says: a turn that waited on it would hang.
+    const summary = Promise.withResolvers<string>();
+    const base = rig.host.quietReply;
+    rig.host.quietReply = (req) => (sentOf(req).includes(COMPACTION_MARK) ? summary.promise : (base?.(req) ?? "{}"));
+    const folds = (): string[] => rig.host.quietCalls.filter((c) => sentOf(c).includes(COMPACTION_MARK)).map(sentOf);
+    await played(rig, chatId, "I look out over the harbor.", "Gulls wheel over the water.");
+    expect(folds()).toEqual([]);
+    turn = "second";
+    // The second turn keeps its one past turn whole, but the third will compact: the fold the third needs (the first turn) starts now, and the second plays on without it.
+    const second = await played(rig, chatId, "I walk to the pier.", "The boards creak.");
+    expect([second.status, second.session?.summary]).toEqual(["ok", undefined]);
+    const [fold = ""] = folds();
+    expect(folds()).toHaveLength(1);
+    expect(fold).toContain("task-first");
+    expect(fold).not.toContain("task-second");
+    summary.resolve("SUMMARY made ahead.");
+    turn = "third";
+    const from = asked.length;
+    const third = await played(rig, chatId, "I sit on a bench.", "The bench is warm.");
+    // The third adopts it: its first send reads the summary in the first turn's place, and the fold is never called again.
+    const sent = sentOf(asked[from] as QuietRequest);
+    expect(sent).toContain(SUMMARY_LEAD);
+    expect(sent).toContain("SUMMARY made ahead.");
+    expect(sent).not.toContain("task-first");
+    expect(sent).toContain("task-second");
+    expect(folds().filter((f) => f === fold)).toHaveLength(1);
+    expect([typeof third.session?.summary, typeof third.session?.archived]).toEqual(["string", "string"]);
+    // "Where the last turn's time went": the third turn's compaction was ready.
+    const phases = (await rig.rt.diag.records(chatId, rig.host.userId)).filter((r) => r.kind === "phase" && r.step === "compaction");
+    expect(phases.at(-1)?.reason).toBe("ready");
+    expect(rig.rt.ledger.errors).toEqual([]);
+  });
+
+  test("a turn that finds the fold still under way joins it; Stop ends its wait at once and the stopped turn lands nothing, while the fold goes on for the turn after, which adopts it", async () => {
+    const rig = new Rig({ shipped: true });
+    const chatId = await mainChat(rig, { agents: { compaction: { atTokens: 1, keepTurns: 1 } } });
+    let turn = "first";
+    const asked = models(rig, { tag: () => `task-${turn}` });
+    const summary = Promise.withResolvers<string>();
+    const base = rig.host.quietReply;
+    rig.host.quietReply = (req) => (sentOf(req).includes(COMPACTION_MARK) ? summary.promise : (base?.(req) ?? "{}"));
+    const folds = (): string[] => rig.host.quietCalls.filter((c) => sentOf(c).includes(COMPACTION_MARK)).map(sentOf);
+    await played(rig, chatId, "I look out over the harbor.", "Gulls wheel over the water.");
+    turn = "second";
+    await played(rig, chatId, "I walk to the pier.", "The boards creak.");
+    const [fold = ""] = folds();
+    // The third turn asks for that fold while it is still under way.
+    const joined = Promise.withResolvers<void>();
+    const memo = rig.rt.compactions;
+    const run = memo.run.bind(memo);
+    memo.run = (key, make) => {
+      const got = run(key, make);
+      if (got.found === "running") joined.resolve();
+      return got;
+    };
+    turn = "third";
+    rig.host.sendUser(chatId, "I sit on a bench.");
+    await rig.host.settle();
+    const stopped = rig.host.start(chatId, { type: "normal" });
+    await joined.promise;
+    // Stop on the activity line: the turn stops waiting, though the fold hasn't answered.
+    expect(rig.body(await rig.send({ type: "lre.cancel", chatId })).cancelled).toBe(true);
+    expect((await stopped).halted).toBe("cancelled");
+    expect((await sessionOf(rig, chatId)).summary).toBeNull();
+    const phases = (await rig.rt.diag.records(chatId, rig.host.userId)).filter((r) => r.kind === "phase" && r.step === "compaction");
+    expect(phases.at(-1)?.reason).toBe("it failed (the turn was stopped), so the session went on whole");
+    // The fold answers after: the third turn played again adopts it, calling it no more.
+    summary.resolve("SUMMARY made ahead.");
+    const from = asked.length;
+    const again = await rig.host.start(chatId, { type: "regenerate" });
+    expect(again.halted).toBeUndefined();
+    await rig.host.finish(again, "The bench is warm.");
+    expect(typeof (await lastRecord(rig, chatId)).session?.summary).toBe("string");
+    expect(sentOf(asked[from] as QuietRequest)).toContain("SUMMARY made ahead.");
+    expect(folds().filter((f) => f === fold)).toHaveLength(1);
+    expect(rig.rt.ledger.errors).toEqual([]);
+  });
+
+  test("a summary cut off at its limit never lands, whatever the provider calls it: the session goes on whole, Diagnostics says why, and the next turn, whose fold is another, tries again", async () => {
+    const rig = new Rig({ shipped: true });
+    const chatId = await mainChat(rig, { agents: { compaction: { when: "before_turn", atTokens: 1, keepTurns: 1 } } });
+    models(rig);
+    let cut = true;
+    const base = rig.host.quietReply;
+    // Google's and Vertex's word for an answer stopped at its cap, on a text that reads as whole.
+    rig.host.quietReply = (req) => (sentOf(req).includes(COMPACTION_MARK) ? (cut ? { content: "The harbor, then the pier, told in full", finishReason: "MAX_TOKENS" } : "SUMMARY at last.") : (base?.(req) ?? "{}"));
+    await played(rig, chatId, "I look out over the harbor.", "Gulls wheel over the water.");
+    await played(rig, chatId, "I walk to the pier.", "The boards creak.");
+    const third = await played(rig, chatId, "I sit on a bench.", "The bench is warm.");
+    expect([third.status, third.session?.summary]).toEqual(["ok", undefined]);
+    expect((await sessionOf(rig, chatId)).summary).toBeNull();
+    const warned = (await rig.rt.diag.records(chatId, rig.host.userId)).filter((r) => r.kind === "step" && r.step === "compaction");
+    expect(warned.map((r) => [r.status, r.reason, r.fix])).toEqual([["failed", "the main session wasn't compacted: its summary was cut off at its limit (Summary length). It goes on whole, and the next turn tries again", "Raise Summary length, or lower the compaction's effort (Settings → Agents → Main agent → Session)"]]);
+    cut = false;
+    const fourth = await played(rig, chatId, "I stand up.", "You stand.");
+    expect(typeof fourth.session?.summary).toBe("string");
+    expect((await sessionOf(rig, chatId)).summary).toBe("SUMMARY at last.");
     expect(rig.rt.ledger.errors).toEqual([]);
   });
 
@@ -898,6 +1004,8 @@ describe("what a run gave the engine", () => {
       revised.add(stageNumber(req));
       return { content: "", toolCalls: [call("revise", { agentId: agent, message: "Once more, shorter." }, `v${n}`)] };
     });
+    // A Re-run of the turn, so its stages run again (a swipe re-narrates by default).
+    rig.rt.setSwipeChoice(chatId, "rerun");
     const g = await rig.host.start(chatId, { type: "regenerate" });
     expect(g.halted).toBeUndefined();
     await rig.host.finish(g, "The harbor is calm and grey.");

@@ -316,10 +316,10 @@ describe("Settings → Agents: each section's page", () => {
   test("Default shows only while a value differs from its default, and sends null", () => {
     for (const page of SECTIONS) expect(labels(page(DEFAULTS)).filter((l) => String(l).startsWith("Reset"))).toEqual([]);
     const changed = agentsWith((a) => {
-      a.pipeline = { mode: "main", memory: "before_next", curator: false };
+      a.pipeline = { ...a.pipeline, mode: "main", memory: "before_next", curator: false };
       a.persist = { on: true, turns: 5, minutes: 45 };
       a.review.placement = "gate";
-      a.compaction = { atTokens: 48_000, keepTurns: 5, summarizeTool: false };
+      a.compaction = { ...a.compaction, atTokens: 48_000, keepTurns: 5, summarizeTool: false };
       a.recording.outputChars = 1500;
       a.gmOpsPerTurn = 4;
       a.kept.gates = 16;
@@ -488,7 +488,16 @@ describe("a role's page", () => {
     const own = agentsWith((a) => (a.curatorOps = 12));
     expect(roleChanged(own, "curator")).toBe(1);
     click(labelled(rolePage(own, "curator"), Button, "Reset Curator to its shipped defaults"));
-    expect(take()).toEqual({ agents: { roles: { curator: null }, context: { roles: { curator: null } }, caching: { roles: { curator: null } }, curatorOps: null } });
+    expect(take()).toEqual({ agents: { roles: { curator: null }, context: { roles: { curator: null } }, caching: { roles: { curator: null } }, curatorOps: null, pipeline: { curatorGate: null } } });
+    // When it runs: the quiet-turn gate ships in Shadow, unchanged; On is a change, its Default sends null.
+    const gate = labelled(tree, Seg, "Curator: skip it on quiet turns");
+    expect([gate.value, (gate.options as { value: string }[]).map((o) => o.value)]).toEqual(["shadow", ["off", "shadow", "on"]]);
+    press(gate, "on");
+    expect(take()).toEqual({ agents: { pipeline: { curatorGate: "on" } } });
+    const on = agentsWith((a) => (a.pipeline.curatorGate = "on"));
+    expect(roleChanged(on, "curator")).toBe(1);
+    click(labelled(rolePage(on, "curator"), Button, "Reset skipping the Curator on quiet turns to its default, Shadow"));
+    expect(take()).toEqual({ agents: { pipeline: { curatorGate: null } } });
     // Switched off in Pipeline, its page says so and links there.
     const off = rolePage(agentsWith((a) => (a.pipeline.curator = false)), "curator");
     const link = only(propsOf(off, NavRow).filter((r) => r.id === "pipeline"));
@@ -537,7 +546,7 @@ describe("Settings → Agents → Roles and Context", () => {
   test("Context is an overview: each role's perspective and what it starts with, each row opening its page at What it reads", () => {
     const rows = propsOf(rendered(ContextPage({ agents: DEFAULTS, go })), NavRow);
     expect(rows.map((r) => r.id)).toEqual([...ROLE_IDS]);
-    expect(only(rows.filter((r) => r.id === "curator")).subtitle).toBe("The GM's · starts with People, Gear, Place · never Minds");
+    expect(only(rows.filter((r) => r.id === "curator")).subtitle).toBe("The GM's · starts with People, Gear, Vehicles, Place, Property · never Minds");
     expect(only(rows.filter((r) => r.id === "intent")).subtitle).toBe("Your character's · its task alone");
     (only(rows.filter((r) => r.id === "read")).onOpen as () => void)();
     expect(went).toEqual({ page: "context", sub: "read", at: "reads" });
@@ -557,7 +566,7 @@ describe("Settings → Agents → Main agent", () => {
 
   test("reads the shipped defaults and sends each change under agents.main, the review's under agents.finalReview", () => {
     const tree = mainPage(DEFAULTS);
-    press(only(propsOf(tree, ConnectionSelect)), "deepseek");
+    press(only(propsOf(tree, ConnectionSelect).filter((p) => p.firstLabel === "None: Lumiverse's default connection")), "deepseek");
     expect(take()).toEqual(mainPatch({ connectionId: "deepseek", model: null }));
     press(only(propsOf(tree, "select").filter((s) => s["aria-label"] === "The main agent: reasoning effort")), { currentTarget: { value: "medium" } });
     expect(take()).toEqual(mainPatch({ effort: "medium" }));
@@ -662,6 +671,6 @@ describe("the agents' settings in the settings store", () => {
     expect(agents).toEqual(DEFAULTS);
     expect((await rig.rt.settings.get(rig.host.userId)).timeouts.finalReviewMs).toBe(TIMEOUTS.finalReviewMs);
     expect(agents.context).toEqual(defaultContextSettings());
-    expect(mainResetPatch()).toEqual({ agents: { main: null, finalReview: null, caching: { roles: { main: null } } }, timeouts: { finalReviewMs: null } });
+    expect(mainResetPatch()).toEqual({ agents: { main: null, compaction: { when: null, connectionId: null, model: null, effort: null, summaryTokens: null, atTokens: null, keepTurns: null }, finalReview: null, caching: { roles: { main: null } } }, timeouts: { finalReviewMs: null } });
   });
 });

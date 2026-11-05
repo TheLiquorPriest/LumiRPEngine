@@ -22,7 +22,9 @@ import { identifiers } from "./expr";
 import type { Registry } from "./registry-impl";
 import { worldSkills } from "./inferred";
 import { buildEntitySheet } from "./ruleset";
-import type { InterpretOutput, TurnPipeline } from "./steps";
+import type { InterpretOutput, TurnPipeline, TurnPlan, TurnPlanInput } from "./steps";
+import { timedProcesses } from "./simulate";
+import type { TimelapseOutcome } from "./time";
 import type { WorldState } from "./state";
 import { findLeaks, readsStory, unrevealedSecrets } from "./visibility";
 import { lintLore } from "./lore-lint";
@@ -374,6 +376,12 @@ export interface PlaytestTurn {
   user: string;
   reply: string;
   notes: string[];
+  /**
+   * A Check world day's time per simulated process, by its id, in ms (`AdvanceResult.processMs`):
+   * wall clock, so it is shown beside the day and never in its notes, reply or events, which read
+   * the same on every run. Absent for a Playtest turn, and for a day that ran no timelapse.
+   */
+  processMs?: Record<string, number>;
 }
 
 export interface PlaytestStep {
@@ -407,6 +415,20 @@ function applyAll(registry: Registry, world: WorldDoc, state: WorldState, events
   return { applied, dropped };
 }
 
+/** A Check world day's plan: the engine's (`planTurn`) holds its timelapse, whose result says how long each process took; another pipeline's may not. */
+export type CheckPlan = TurnPlan & { timelapse?: TimelapseOutcome | null };
+
+/** A pipeline Check world runs on, whose plans may hold their timelapse (`CheckPlan`). */
+export interface CheckPipeline extends TurnPipeline {
+  plan(input: TurnPlanInput): CheckPlan;
+}
+
+/** How long each process of a plan's timelapse took (`AdvanceResult.processMs`); nothing for a plan that ran none, or a pipeline that doesn't say. */
+function processMsOf(plan: CheckPlan): Record<string, number> | undefined {
+  const ms = plan.timelapse?.result.processMs;
+  return ms && Object.keys(ms).length > 0 ? { ...ms } : undefined;
+}
+
 export function playtestStart(registry: Registry, world: WorldDoc, revision: string): WorldState {
   return initialState(world, revision, registry);
 }
@@ -435,23 +457,27 @@ export const CHECK_DAY_MINUTES = 24 * 60;
  * One Check world day: a one-day timelapse with every interrupt class at `note`, so processes,
  * agents, tracks and rules all run. Reports dropped events, failures and narrator-facing leaks; the
  * transcript is the author's view of the day: every event, unmet people's and secrets included,
- * worded with names like Playtest's (no ids or bookkeeping). `intent` is the day's timelapse; a
- * sandbox's advance gives each day its own target. `leaks: false` leaves the sections unread (a
- * sandbox's advance reads them at each month's end), so no leak or section failure is reported.
+ * worded with names like Playtest's (no ids or bookkeeping), and with `clock` (the host's wall
+ * clock: the engine reads none of its own) each process's time beside it (`PlaytestTurn.processMs`).
+ * `intent` is the day's timelapse; a sandbox's advance gives each day its own target. `leaks: false`
+ * leaves the sections unread (a sandbox's advance reads them at each month's end), so no leak or
+ * section failure is reported.
  */
-export function checkWorldDay(registry: Registry, pipeline: TurnPipeline, world: WorldDoc, state: WorldState, runSeed: string, day: number, intent: InterpretOutput, options: { leaks?: boolean } = {}): PlaytestStep & { findings: DayFindings } {
+export function checkWorldDay(registry: Registry, pipeline: CheckPipeline, world: WorldDoc, state: WorldState, runSeed: string, day: number, intent: InterpretOutput, options: { leaks?: boolean; clock?: () => number } = {}): PlaytestStep & { findings: DayFindings } {
   const next = structuredClone(state);
   const label = `Day ${day + 1}`;
   const notes: string[] = [];
   const findings: DayFindings = { dropped: [], failed: [], leaks: [] };
   let events: LedgerEvent[] = [];
   let applied: LedgerEvent[] = [];
+  let processMs: Record<string, number> | undefined;
   const note = (kind: keyof DayFindings, text: string): void => {
     findings[kind].push(text);
     notes.push(text);
   };
   try {
-    const plan = pipeline.plan({ registry, world, state: next, runSeed, seed: `${runSeed}:check:${day}`, kind: "normal", userTexts: [`(Timelapse: ${label})`], intent });
+    const plan = timedProcesses(options.clock, () => pipeline.plan({ registry, world, state: next, runSeed, seed: `${runSeed}:check:${day}`, kind: "normal", userTexts: [`(Timelapse: ${label})`], intent }));
+    processMs = processMsOf(plan);
     const planned = applyAll(registry, world, next, plan.events);
     for (const text of planned.dropped) note("dropped", text);
     const post = pipeline.post({ registry, world, state: next, runSeed, seed: `${runSeed}:check:${day}:post`, appliedMinutes: plan.elapsedMinutes, extracted: [] });
@@ -476,7 +502,7 @@ export function checkWorldDay(registry: Registry, pipeline: TurnPipeline, world:
     }
   }
   const lines = authorLines(registry, world, next, events, 40);
-  return { turn: { user: label, reply: lines.length > 0 ? lines.join("\n") : "(nothing happened)", notes }, state: next, events: applied, findings };
+  return { turn: { user: label, reply: lines.length > 0 ? lines.join("\n") : "(nothing happened)", notes, ...(processMs ? { processMs } : {}) }, state: next, events: applied, findings };
 }
 
 /**

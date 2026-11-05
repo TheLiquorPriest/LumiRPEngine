@@ -9,7 +9,7 @@ import type { UserId } from "../shared/ids";
 import { hashJson } from "../shared/hash";
 import { hasOwn, isRecord } from "../shared/json";
 import type { PromptDef, PromptProblem, PromptTexts } from "../shared/prompts";
-import { MARK_TEXT_IDS, PROMPT_BRACES, promptDef, promptProblems, PROMPTS, sendable, TURN_PROMPT_PAGES } from "../shared/prompts";
+import { MARK_TEXT_IDS, PROMPT_BRACES, promptDef, promptProblems, PROMPTS, sendable, SWIPE_DIRECTION_ID, TURN_PROMPT_PAGES } from "../shared/prompts";
 import type { SecretMarkWording } from "../shared/secret-marks";
 import type { Schema } from "../shared/schema-check";
 import { checkSchema, pathText } from "../shared/schema-check";
@@ -111,15 +111,19 @@ export function turnPromptSet(texts: PromptTexts): PromptSet {
 /**
  * The texts a Re-narrate or a Re-run is sent for its source turn (DESIGN §6.12): the turn's prompt
  * set's (`set`; none for a turn recorded before records named one, which was made with the shipped
- * texts), except a secret mark's wording (`MARK_TEXT_IDS`) the set doesn't hold: before it was a
- * registry text it came from Settings, whatever the turn, and the user's settings now hold it
- * (`current`, where a settings file's old wording moved), so it is theirs.
+ * texts), except a text the set doesn't hold that is the user's whatever the turn (`CURRENT_TEXT_IDS`):
+ * a secret mark's wording, which came from Settings before it was a registry text, and the user's
+ * settings now hold (`current`, where a settings file's old wording moved); and what a swipe asks of
+ * its telling (`narrator.swipe_direction`), which no turn made before it was a text holds.
  */
 export function sourceTexts(set: PromptSet | null, current: PromptTexts): PromptTexts {
   const texts: Record<string, string> = { ...set?.texts };
-  for (const id of Object.values(MARK_TEXT_IDS)) if (!hasOwn(texts, id) && hasOwn(current, id)) texts[id] = current[id] ?? "";
+  for (const id of CURRENT_TEXT_IDS) if (!hasOwn(texts, id) && hasOwn(current, id)) texts[id] = current[id] ?? "";
   return texts;
 }
+
+/** The texts a source turn's set that lacks them is sent as the user has them now (`sourceTexts`). */
+const CURRENT_TEXT_IDS: readonly string[] = [...Object.values(MARK_TEXT_IDS), SWIPE_DIRECTION_ID];
 
 function isPromptSet(raw: unknown): raw is PromptSet {
   return isRecord(raw) && raw.v === 1 && isRecord(raw.texts) && Object.values(raw.texts).every((t) => typeof t === "string");

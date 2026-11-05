@@ -71,14 +71,26 @@ export function fieldEnum(world: WorldDoc, kind?: string): string[] {
   return [...out].sort();
 }
 
-/** The world's place ids, sorted (`schemaWorld`). */
-export function placeEnum(world: WorldDoc): string[] {
-  return Object.keys(world.places).sort();
+/**
+ * The most ids an enum of the world's places or actions lists: past it, the argument is plain text,
+ * which each tool resolves or checks itself, by id or name (a grown world's 300 places would
+ * otherwise weigh on every call, and change the tool block each time one is made).
+ */
+export const ENUM_CAP = 40;
+
+/** `ids` sorted, or none past `ENUM_CAP`: an argument of none is plain text (`text`). */
+function capped(ids: string[]): string[] {
+  return ids.length > ENUM_CAP ? [] : ids.sort();
 }
 
-/** The world's action ids, the packs' included, sorted (`schemaWorld`). */
+/** The world's place ids, sorted, or none past `ENUM_CAP` (`schemaWorld`). */
+export function placeEnum(world: WorldDoc): string[] {
+  return capped(Object.keys(world.places));
+}
+
+/** The world's action ids, the packs' included, sorted, or none past `ENUM_CAP` (`schemaWorld`). */
 export function actionEnum(world: WorldDoc): string[] {
-  return Object.keys(world.actions).sort();
+  return capped(Object.keys(world.actions));
 }
 
 // ---------------------------------------------------------------- reading arguments

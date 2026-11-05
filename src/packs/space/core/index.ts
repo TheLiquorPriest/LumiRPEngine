@@ -1,4 +1,4 @@
-// Space & travel pack (DESIGN §9.3): places, routes with travel modes (walk, road, off-road, water),
+// Space & travel pack (DESIGN §9.3): places, routes with travel modes (walk, road, off-road, water, air),
 // distances, terrain, grids, positions and tracking. It also owns the base kinds every other pack
 // builds on: `thing` (anything with a place and an owner) and `person`, whose fields carry each
 // domain's level contract.
@@ -18,7 +18,7 @@ import { FILING_STATUSES } from "../../../shared/finance";
 import type { JsonObject, JsonValue } from "../../../shared/json";
 import { hasOwn, isRecord } from "../../../shared/json";
 import { cellIndex, findPath, gridMinutes, gridOf, SIGHT_MAX, standingGrid, type GridPath } from "../../../shared/grid";
-import { mapLint, mapSettingsOf } from "../../../shared/maps";
+import { mapLint, mapSettingsOf, TRAVEL_MODES } from "../../../shared/maps";
 import type { EntityId, PlaceId, TravelMode } from "../../../shared/ids";
 import type { LedgerEvent } from "../../../shared/ledger";
 import type { LintIssue } from "../../../shared/protocol";
@@ -83,12 +83,10 @@ declare module "../../../engine/registry" {
   }
 }
 
-const MODES: readonly TravelMode[] = ["walk", "road", "offroad", "water"];
-
 /** Whether `to` can be reached from `from` by any one travel mode; below Space 2 movement is nominal, so always. */
 export function reachable(ctx: ReadContext, from: PlaceId, to: PlaceId): boolean {
   if (from === to || ctx.levelOf(ctx.world.pov, "space") < 2) return true;
-  return MODES.some((m) => routeAt(ctx, from, to, m) !== null);
+  return TRAVEL_MODES.some((m) => routeAt(ctx, from, to, m) !== null);
 }
 
 /** A walk on the grid the POV stands on at `place`, from its cell to (x, y), never through a place it can't see; null when it has no cell there or nothing joins the two. */
@@ -121,10 +119,10 @@ function gridLint(world: WorldDoc): LintIssue[] {
         if (v !== undefined && (typeof v !== "number" || !Number.isFinite(v) || v <= 0)) err(path, "A speed is km/h, above 0.");
       };
       for (const [key, v] of Object.entries(isRecord(travel.speeds) ? travel.speeds : {})) {
-        if (!(MODES as readonly string[]).includes(key)) err(`mapSettings.travel.speeds.${key}`, `"${key}" isn't a way of travel: walk, road, offroad or water.`);
+        if (!(TRAVEL_MODES as readonly string[]).includes(key)) err(`mapSettings.travel.speeds.${key}`, `"${key}" isn't a way of travel: walk, road, offroad, water or air.`);
         else speed(`mapSettings.travel.speeds.${key}`, v);
       }
-      if (travel.speeds !== undefined && !isRecord(travel.speeds)) err("mapSettings.travel.speeds", "Speeds are km/h by way of travel: walk, road, offroad, water.");
+      if (travel.speeds !== undefined && !isRecord(travel.speeds)) err("mapSettings.travel.speeds", "Speeds are km/h by way of travel: walk, road, offroad, water, air.");
       if (travel.vehicleSpeeds !== undefined && !isRecord(travel.vehicleSpeeds)) err("mapSettings.travel.vehicleSpeeds", "Vehicle speeds are km/h by vehicle class.");
       for (const [cls, v] of Object.entries(isRecord(travel.vehicleSpeeds) ? travel.vehicleSpeeds : {})) speed(`mapSettings.travel.vehicleSpeeds.${cls}`, v);
       for (const key of ["startMinutes", "parkMinutes", "fetchMinutes"] as const) {
@@ -212,7 +210,7 @@ export const GROUP: KindDef = { id: GROUP_KIND, label: "Group", extends: "thing"
 export const PARTY: KindDef = { id: PARTY_KIND, label: "Party", extends: GROUP_KIND, pack: "space", fields: { leader: { type: "ref", label: "Leader", ref: "person" } } };
 
 function asMode(v: unknown): TravelMode {
-  return typeof v === "string" && (MODES as readonly string[]).includes(v) ? (v as TravelMode) : "walk";
+  return typeof v === "string" && (TRAVEL_MODES as readonly string[]).includes(v) ? (v as TravelMode) : "walk";
 }
 
 

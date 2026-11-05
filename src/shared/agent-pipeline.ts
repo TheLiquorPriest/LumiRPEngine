@@ -77,7 +77,7 @@ export const PIPELINE_ROLES: Readonly<Record<RoleId, { keep: boolean; off: boole
   world: { keep: false, off: false },
 };
 
-/** The roles the engine never skips: never kept, never switched off. The read, the Curator, the knowledge, the memory, a timelapse's skip and the world's steps stand on every turn's reply, and the intent is the turn. */
+/** The roles the engine never skips: never kept, never switched off. The read, the Curator (save where its quiet-turn gate skips it, `CuratorGate`), the knowledge, the memory, a timelapse's skip and the world's steps stand on every turn's reply, and the intent is the turn. */
 export const NEVER_SKIPPED: readonly RoleId[] = ROLE_IDS.filter((r) => !PIPELINE_ROLES[r].keep && !PIPELINE_ROLES[r].off);
 
 /** The run choices a role's page offers: `smart` always, `always` where it may be kept, `off` where it may be switched off. */
@@ -101,6 +101,27 @@ export function roleRunHelp(role: RoleId, run: RoleRun): string {
   if (run === "always") return "Whenever the turn asks, even while Smart persistence would keep its last answer.";
   return PIPELINE_ROLES[role].keep ? "Whenever the turn asks; while Smart persistence is on and the scene is unchanged, its last answer is kept instead of asked again." : "Whenever the turn asks.";
 }
+
+// ---------------------------------------------------------------- the Curator's quiet-turn gate
+
+/**
+ * Whether a quiet turn skips the Curator (`pipeline.curatorGate`; Settings → Agents → Roles →
+ * Curator → When it runs): `off`, it runs after every reply; `shadow`, it still does, and
+ * Diagnostics records each turn what the gate would have decided; `on`, a reply that names nothing
+ * the Curator keeps (a thing in the scene, a newcomer, a hand-over, placement, purchase, wear or
+ * use), on a turn with no Buy, skips it, and the read's own changes of its kinds land in its place.
+ * The gate reads only the words (`backend/agents/curator-gate.ts`): no call.
+ */
+export type CuratorGate = "off" | "shadow" | "on";
+export const CURATOR_GATES: readonly CuratorGate[] = ["off", "shadow", "on"];
+export const CURATOR_GATE_LABELS: Readonly<Record<CuratorGate, string>> = { off: "Off", shadow: "Shadow", on: "On" };
+
+/** Each gate choice in words, for the Curator's page. */
+export const CURATOR_GATE_HELP: Readonly<Record<CuratorGate, string>> = {
+  off: "It runs after every reply.",
+  shadow: "It runs after every reply, and Diagnostics records whether the reply was quiet enough to skip it, and why not.",
+  on: "A quiet reply skips it: one that names no thing in the scene, no newcomer, and no hand-over, placement, purchase, wear or use, on a turn with no Buy. The read's own changes of the Curator's kinds land instead.",
+};
 
 // ---------------------------------------------------------------- the scene basis
 

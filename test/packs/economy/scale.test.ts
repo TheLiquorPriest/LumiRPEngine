@@ -2,11 +2,17 @@
 // one read pass the world's flows, accounts and tax standing are gathered once, not per party, and
 // each party added costs a bounded number of walks over the world's entities. And the money
 // process that opens authored accounts, which runs every slot: once they are open, it costs one
-// walk however many parties there are, with the events a walk over every party gave.
+// walk however many parties there are, with the events a walk over every party gave. And a
+// timelapse over that world (BUILD-C C3): its slots' marks copy nothing (`Working.lightMark`), so it
+// copies the state no more for three days than for one, and a run the unit cap ends, which goes
+// back to a slot's start, ends as one that copied the state at every slot did.
 
 import { describe, expect, test } from "bun:test";
+import type { Rejection } from "../../../src/engine/registry";
+import { runTimelapse, type TimelapseOutcome } from "../../../src/engine/time";
+import { Working } from "../../../src/engine/working";
 import type { FinanceView } from "../../../src/shared/finance";
-import type { EntityId } from "../../../src/shared/ids";
+import type { EntityId, InterruptClass, InterruptPolicy } from "../../../src/shared/ids";
 import type { LedgerEvent } from "../../../src/shared/ledger";
 import { isMaterialized } from "../../../src/engine/materialize";
 import { readPass } from "../../../src/engine/read-pass";
@@ -15,7 +21,7 @@ import { isGone } from "../../../src/engine/scope";
 import { moneyLevel } from "../../../src/packs/economy/core/model";
 import { isParty } from "../../../src/packs/economy/core/pay";
 import { openAccounts, openingEvent } from "../../../src/packs/economy/core/process";
-import { account, CLERK, entity, reg, setup } from "./work-world";
+import { account, CLERK, entity, lapse, reg, setup } from "./work-world";
 
 /** Riverton with `n` more people, each with a checking account and a clerk's job. */
 function crowd(n: number): ReturnType<typeof setup> {
@@ -98,5 +104,81 @@ describe("opening authored accounts, every slot", () => {
     const large = opening(60, true);
     expect(large.walks).toBe(small.walks);
     expect(large.walks).toBeLessThanOrEqual(1);
+  });
+});
+
+const DAY = 24 * 60;
+/** The interrupts a timelapse here meets, noted rather than stopping it, as `lapse` runs them. */
+const NOTED: Partial<Record<InterruptClass, InterruptPolicy>> = { invitation: "note", decline: "note", incident: "note", quest: "note", arrival: "note" };
+
+/** A timelapse of a crowd of 12 settled by a day of its own (its accounts open, its first pay worked out), and what it did, and how many times it copied the working state whole. */
+interface Lapse {
+  outcome: TimelapseOutcome;
+  events: unknown;
+  state: unknown;
+  copies: number;
+}
+
+/**
+ * `days` days' timelapse of the settled crowd, with `events` its unit cap's events when given:
+ * the outcome (`processMs`, which is wall clock, left out), the events it applied and the state it
+ * left, and how many times anything copied the working state whole (`structuredClone` of it).
+ */
+function settledLapse(days: number, events?: number): Lapse {
+  const { w } = crowd(12);
+  lapse(w, DAY);
+  const before = w.events.length;
+  const real = globalThis.structuredClone;
+  let copies = 0;
+  globalThis.structuredClone = ((value: unknown, options?: StructuredSerializeOptions) => {
+    if (value === w.state) copies++;
+    return real(value, options);
+  }) as typeof structuredClone;
+  let outcome: TimelapseOutcome | Rejection;
+  try {
+    outcome = runTimelapse(reg, w, { type: "duration", minutes: days * DAY }, { runSeed: "run", overrides: NOTED, ...(events !== undefined ? { unitCap: { agentDays: 600, events } } : {}) });
+  } finally {
+    globalThis.structuredClone = real;
+  }
+  if ("code" in outcome) throw new Error(outcome.reason);
+  const { processMs: _wallClock, ...result } = outcome.result;
+  return { outcome: { ...outcome, result }, events: JSON.parse(JSON.stringify(w.events.slice(before))), state: JSON.parse(JSON.stringify(w.state)), copies };
+}
+
+/** `fn` with every slot's mark a whole copy of the state (`Working.mark`), as before light marks. */
+function wholeMarks<T>(fn: () => T): T {
+  const light = Working.prototype.lightMark;
+  Working.prototype.lightMark = Working.prototype.mark;
+  try {
+    return fn();
+  } finally {
+    Working.prototype.lightMark = light;
+  }
+}
+
+describe("a timelapse's slots", () => {
+  test("copy the state no more for three days than for one: at most once a day beside the slots, and never per slot", () => {
+    const one = settledLapse(1);
+    const three = settledLapse(3);
+    expect([one.outcome.result.slots, three.outcome.result.slots]).toEqual([4, 12]);
+    // At most a day's slots and one more, per day, as the plan bounds it; in fact once, however many days.
+    expect(three.copies).toBeLessThanOrEqual(three.outcome.result.slots / 3 + 1);
+    expect(three.copies).toBe(one.copies);
+    // With a whole copy at each slot's mark, as before, the copies grow with the slots.
+    const oneWhole = wholeMarks(() => settledLapse(1));
+    const threeWhole = wholeMarks(() => settledLapse(3));
+    expect(threeWhole.copies - oneWhole.copies).toBe(three.outcome.result.slots - one.outcome.result.slots);
+  });
+
+  test("end as they did with a whole copy at every slot: run to the target, and stopped by the unit cap, which goes back to a slot's start", () => {
+    const through = settledLapse(3);
+    expect(through.outcome.result.stop).toBe("target");
+    expect(through).toEqual({ ...wholeMarks(() => settledLapse(3)), copies: through.copies });
+    // The cap trips mid-run: the slot that took it past is undone, rebuilt from the copy the Working's first light mark made.
+    const capped = settledLapse(3, 60);
+    expect(capped.outcome.result.stop).toBe("cap");
+    expect(capped.outcome.result.slots).toBeLessThan(12);
+    expect(capped.outcome.remaining).toBeGreaterThan(0);
+    expect(capped).toEqual({ ...wholeMarks(() => settledLapse(3, 60)), copies: capped.copies });
   });
 });

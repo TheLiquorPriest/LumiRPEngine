@@ -278,7 +278,9 @@ export function interpretScene(reg: Registry, world: WorldDoc, state: Readonly<W
   const seen = (id: EntityId): boolean => id !== world.pov && !isGone(state, id) && canSeeEntity(reg, world, state, world.pov, id) && opts.mayKnow(id);
   const people = here === null ? [] : Object.keys(state.entities).filter((id) => seen(id) && kindIs(reg, world, own(state.entities, id)?.kind ?? "", "person") && placeOfEntity(state, id) === here);
   const carried = carriedBy(state, world.pov).filter(seen);
-  const vehicles = Object.keys(state.entities).filter((id) => seen(id) && kindIs(reg, world, own(state.entities, id)?.kind ?? "", "vehicle") && (own(state.entities, id)?.fields.owner === world.pov || (pov?.relations.some((r) => r.type === "uses" && r.to === id) ?? false)));
+  // Its vehicles by the one reader (owned, its household's or company's, granted or permitted), when the vehicles pack is loaded.
+  const drives = new Set(optionalQuery(ctx, "vehicles.for")?.(ctx, world.pov) ?? []);
+  const vehicles = Object.keys(state.entities).filter((id) => seen(id) && drives.has(id));
   const waiting = (optionalQuery(ctx, "castlife.invitations")?.(ctx, world.pov) ?? []).filter((inv) => opts.mayKnow(inv.host)).map((inv) => `${inv.text} (host ${inv.host})`);
   // A message can take for granted being with someone who isn't here ("I sit down next to Marcus"),
   // a move to read first (DESIGN §5.2): the people it names who aren't here, with where the POV last

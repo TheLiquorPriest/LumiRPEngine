@@ -10,7 +10,7 @@ import type { JsonValue } from "../shared/json";
 import { hasOwn, isRecord } from "../shared/json";
 import { lorePinsOf } from "../shared/lore";
 import { DOMAINS, type KindId } from "../shared/ids";
-import type { GmEntity, GmField, GmView } from "../shared/state-view";
+import type { GmEntity, GmField, GmRosterEntry, GmView } from "../shared/state-view";
 import { tiersInOrder } from "../shared/tiers";
 import type { FieldDef, FieldType, WorldDoc } from "../shared/world";
 import { BUILTIN_RELATIONS, ENGINE_FIELDS, GM_OWNER, GM_OWNER_NAME, lifeStateOf, lifeStatesOf } from "../shared/world";
@@ -106,16 +106,66 @@ function entityOf(reg: Registry, ctx: ReadContext, id: string): GmEntity | null 
   };
 }
 
+/**
+ * One entity as GM → World's list shows it (`roster`): what `gmRosterEntry` keeps of its whole
+ * entry, read without building its fields, relations, levels or sheet.
+ */
+function rosterOf(reg: Registry, ctx: ReadContext, id: string): GmRosterEntry | null {
+  const { world, state } = ctx;
+  const e = own(state.entities, id);
+  if (!e) return null;
+  const now = lifeOf(state, id);
+  const life = lifeStateOf(world, now);
+  const containment = optionalQuery(ctx, "gear.containment")?.(ctx, id);
+  const discoverable = isDiscoverable(world, state, id);
+  const visibility = discoverable ? "discoverable" : entityVisibility(world, state, id);
+  const holder = e.relations.find((r) => r.type === "in")?.to ?? null;
+  const tags = [...tagsOf(world, state, id)];
+  return {
+    id,
+    name: e.name,
+    kind: e.kind,
+    tier: e.tier,
+    place: placeOfEntity(state, id),
+    ...(holder !== null ? { holder } : {}),
+    ...(visibility !== "public" ? { visibility } : {}),
+    ...(discoverable ? { found: knows(state, world.pov, id) } : {}),
+    ...(now !== "alive" ? { life: { state: now, label: life.label, acts: life.acts } } : {}),
+    ...(containment?.holds ? { holds: containment.holds } : {}),
+    ...(containment && containment.goes !== "any" ? { goes: containment.goes } : {}),
+    ...(tags.length > 0 ? { tags } : {}),
+    ...(id === world.pov ? { pov: true as const } : {}),
+    ...(kindIs(reg, world, e.kind, "person") ? { person: true as const } : {}),
+    ...(e.agent ? { agent: true as const } : {}),
+    ...(isGone(state, id) ? { gone: true as const } : {}),
+    ...(!own(world.entities, id) ? { spawned: true as const } : {}),
+    ...(e.fields.claimed === true ? { claimed: true as const } : {}),
+  };
+}
+
 /** The parts of the GM view the world as it stands gives: all but the edits and the refused and held writes, which the chain and the journal hold, and the minds, which need the user's settings. */
 export type GmWorldPart = Exclude<keyof GmView, "edits" | "refused" | "held" | "minds">;
 
+/** Which items of a part to build: of the entities, the roster, the money and the organizations those `ids` name (in that order, any naming none left out); of the entities, the roster and the money those of `kind` (or a kind extending it). */
+export interface GmPick {
+  ids?: readonly string[];
+  kind?: string;
+}
+
+/** The entities a pick names, in its order (else every entity in id order), of its kind when it names one. */
+function picked(reg: Registry, ctx: ReadContext, pick: GmPick): string[] {
+  const ids = pick.ids ? [...new Set(pick.ids)].filter((id) => own(ctx.state.entities, id)) : Object.keys(ctx.state.entities).sort();
+  const kind = pick.kind;
+  return kind === undefined ? ids : ids.filter((id) => kindIs(reg, ctx.world, own(ctx.state.entities, id)?.kind ?? "", kind));
+}
+
 /**
- * Each world part, built alone (`lre.gm.part`), in the view's order. With `id`, of the entities and
- * the money only that one, by id (none when there is no such entity or party); of the organizations,
- * that one, read from them all.
+ * Each world part, built alone (`lre.gm.part`), in the view's order. With a pick (`GmPick`), of the
+ * entities, the money and the organizations only those it names, of the entities and the money only
+ * those of its kind; an organization named builds only its own page.
  */
-const WORLD_PARTS: { [P in GmWorldPart]: (reg: Registry, ctx: ReadContext, id?: string) => GmView[P] } = {
-  entities: (reg, ctx, id) => (id !== undefined ? [id] : Object.keys(ctx.state.entities).sort()).flatMap((e) => entityOf(reg, ctx, e) ?? []),
+const WORLD_PARTS: { [P in GmWorldPart]: (reg: Registry, ctx: ReadContext, pick: GmPick) => GmView[P] } = {
+  entities: (reg, ctx, pick) => picked(reg, ctx, pick).flatMap((e) => entityOf(reg, ctx, e) ?? []),
   // The world's own kinds lie over built-in ones of the same id, as `kindParent` resolves them: its label, its Extends if it gives one.
   kinds: (reg, { world }) => {
     const kinds = new Map<string, { label: string; extends: string | null }>();
@@ -150,46 +200,67 @@ const WORLD_PARTS: { [P in GmWorldPart]: (reg: Registry, ctx: ReadContext, id?: 
     for (const id of BUILTIN_RELATIONS) if (!relationTypes.has(id)) relationTypes.set(id, { id, label: id.replace(/_/g, " "), from: "*", to: "*", fields: [] });
     return [...relationTypes.values()].sort((a, b) => a.label.localeCompare(b.label));
   },
-  // Everyone's money, or one party's, as the economy pack's GM page builds it.
-  money: (reg, ctx, id) => {
-    if (id === undefined) return optionalQuery(ctx, "economy.people_money")?.(ctx) ?? [];
-    const e = own(ctx.state.entities, id);
+  // Everyone's money as the economy pack's GM page builds it, of a kind's parties when a pick names one; or the parties a pick names, each built alone.
+  money: (reg, ctx, pick) => {
+    if (pick.ids === undefined) {
+      const all = optionalQuery(ctx, "economy.people_money")?.(ctx) ?? [];
+      const kind = pick.kind;
+      return kind === undefined ? all : all.filter((m) => kindIs(reg, ctx.world, own(ctx.state.entities, m.party)?.kind ?? "", kind));
+    }
     const finance = optionalQuery(ctx, "economy.finance");
-    return e && finance && PARTY_KINDS.some((k) => kindIs(reg, ctx.world, e.kind, k)) ? [finance(ctx, id, false)] : [];
+    if (!finance) return [];
+    return picked(reg, ctx, pick).flatMap((id) => {
+      const e = own(ctx.state.entities, id);
+      return e && PARTY_KINDS.some((k) => kindIs(reg, ctx.world, e.kind, k)) ? [finance(ctx, id, false)] : [];
+    });
   },
-  // Every organization as the GM sees it, with who holds each power there (the orgs pack's GM → Orgs).
-  orgs: (_reg, ctx, id) => {
-    const all = optionalQuery(ctx, "orgs.gm")?.(ctx) ?? [];
-    return id === undefined ? all : all.filter((o) => o.page.id === id);
-  },
+  // Every organization as the GM sees it, with who holds each power there (the orgs pack's GM → Orgs); those a pick names, each built alone.
+  orgs: (_reg, ctx, pick) => optionalQuery(ctx, "orgs.gm")?.(ctx, pick.ids) ?? [],
   // The fight under way, as only the GM sees it (the combat pack); its view model is plain JSON.
   encounter: (_reg, ctx) => (optionalQuery(ctx, "combat.gm")?.(ctx) ?? null) as unknown as JsonValue | null,
   routineRoles: (_reg, ctx) => optionalQuery(ctx, "castlife.chat_roles")?.(ctx) ?? [],
 };
 
-/** One world part of the GM view, built alone; with `id`, of the entities, money or organizations only that one. */
-export function buildGmWorldPart<P extends GmWorldPart>(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, part: P, id?: string): GmView[P] {
-  return WORLD_PARTS[part](reg, reg.context(world, state), id);
+/** One world part of the GM view, built alone; with a pick, of the entities, money or organizations only those it names or of its kind. */
+export function buildGmWorldPart<P extends GmWorldPart>(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, part: P, pick: GmPick = {}): GmView[P] {
+  return WORLD_PARTS[part](reg, reg.context(world, state), pick);
+}
+
+/** The roster (`lre.gm.part` `roster`): every entity slim, in id order, or those a pick names or of its kind. */
+export function buildGmRoster(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, pick: GmPick = {}): GmRosterEntry[] {
+  const ctx = reg.context(world, state);
+  return picked(reg, ctx, pick).flatMap((id) => rosterOf(reg, ctx, id) ?? []);
 }
 
 /**
- * How many one world part of the GM view holds, for its outline (`GmOutline`): the entities,
- * places, tracks and classification facets counted where the part reads them, without building
- * them; any other part built and counted (its items, or the fight 1 while one is under way).
+ * How many one world part of the GM view holds, for its outline (`GmOutline`): counted where the
+ * part reads them, without building it (the entities, the kinds, tiers, life states and domains,
+ * the facets, places, tracks and relation types); a part a pack builds (the money, the
+ * organizations, the fight, the routine roles) built and counted.
  */
 export function gmWorldPartCount(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, part: GmWorldPart): number {
   const ctx = reg.context(world, state);
   switch (part) {
     case "entities":
       return Object.keys(ctx.state.entities).length;
+    case "kinds":
+      return new Set([...[...reg.kinds.values()].map((k) => k.id), ...Object.values(world.kinds).map((k) => k.id)]).size;
+    case "tiers":
+      return tiersInOrder(world).length;
+    case "lifeStates":
+      return lifeStatesOf(world).length;
+    case "domains":
+      return DOMAINS.length;
     case "places":
       return Object.keys(ctx.world.places).length;
     case "tracks":
       return Object.keys(ctx.world.tracks).length;
     case "classifications":
       return Object.keys(ctx.world.classifications).length;
+    case "relationTypes":
+      return new Set([...[...reg.relations.values()].map((d) => d.id), ...Object.values(world.relations).map((d) => d.id), ...BUILTIN_RELATIONS]).size;
     default: {
-      const value: unknown = WORLD_PARTS[part](reg, ctx);
+      const value: unknown = WORLD_PARTS[part](reg, ctx, {});
       return Array.isArray(value) ? value.length : value === null ? 0 : 1;
     }
   }
@@ -198,5 +269,5 @@ export function gmWorldPartCount(reg: Registry, world: WorldDoc, state: Readonly
 /** Everything the GM view shows but its list of edits, which the chain holds, the refused and held writes, which the journal holds, and the minds, which need the user's settings. */
 export function buildGmWorld(reg: Registry, world: WorldDoc, state: Readonly<WorldState>): Pick<GmView, GmWorldPart> {
   const ctx = reg.context(world, state);
-  return Object.fromEntries(Object.entries(WORLD_PARTS).map(([part, build]) => [part, build(reg, ctx)])) as Pick<GmView, GmWorldPart>;
+  return Object.fromEntries(Object.entries(WORLD_PARTS).map(([part, build]) => [part, build(reg, ctx, {})])) as Pick<GmView, GmWorldPart>;
 }

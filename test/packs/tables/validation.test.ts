@@ -40,7 +40,7 @@ describe("type mismatches", () => {
 
   test("a value outside an enum", () => {
     const sources = cloneSources();
-    mutate(sources, VEHICLES, ["entries", { id: "compact_car" }, "domain"], "air");
+    mutate(sources, VEHICLES, ["entries", { id: "compact_car" }, "domain"], "space");
     const issues = brief(issuesOf(sources));
     expect(issues).toContainEqual({ rule: "type", table: "vehicles.classes", row: "compact_car", column: "domain" });
   });
@@ -167,7 +167,7 @@ describe("references", () => {
 
   test("a vehicle whose consumption guide does not exist", () => {
     const sources = cloneSources();
-    mutate(sources, VEHICLES, ["entries", { id: "compact_car" }, "consumption_factors_ref"], "consumption_factor_guides.air");
+    mutate(sources, VEHICLES, ["entries", { id: "compact_car" }, "consumption_factors_ref"], "consumption_factor_guides.space");
     expect(brief(issuesOf(sources))).toEqual([{ rule: "ref", table: "vehicles.classes", row: "compact_car", column: "factor_guide" }]);
   });
 

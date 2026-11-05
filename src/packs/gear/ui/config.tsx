@@ -5,19 +5,23 @@
 // default applies (people carry a wallet, keys and a phone); an empty list carries nothing. Sizes by
 // name (§4.1): what a thing's head noun makes it when its type and volume say nothing, each name a
 // row that opens as a sheet (its size, its other names, what it holds and whether clothing rests in
-// it), the shipped ones marked, each change with its reset. Also the Gear section's Not with you
-// lines (§5.5), which Build → Sections → Gear sets too; the put-away process (§4.3: on, after how
-// many hours, from which Gear level); and whether impossible holds are tidied every turn (§9). A
-// setting left at its default keeps no entry of its own.
+// it), the shipped ones marked, each change with its reset. Containers (DESIGN §28.8): whether a
+// holder's room and load turn away what doesn't fit on the player's own paths, and how deep things
+// nest; saved outfits and loadouts (§28.16): how many a person keeps; each of these rows says
+// Changed while it differs from the shipped default, with Default to go back. Also the Gear section's
+// Not with you lines (§5.5), which Build → Sections → Gear sets too; the put-away process (§4.3: on,
+// after how many hours, from which Gear level); and whether impossible holds are tidied every turn
+// (§9). A setting left at its default keeps no entry of its own.
 
 import { useState } from "preact/hooks";
 import type { JsonObject, JsonValue } from "../../../shared/json";
 import { hasOwn, isRecord } from "../../../shared/json";
-import { DEFAULT_THINGS_CONFIG, isSize, SIZE_LABELS, SIZES, thingsConfigOf, type NameSize, type Size, type ThingsConfig } from "../../../shared/things";
+import { CONTAINER_DEPTH_MAX, CONTAINER_RULES, DEFAULT_THINGS_CONFIG, isSize, SETS_MAX, SIZE_LABELS, SIZES, thingsConfigOf, type ContainerRule, type NameSize, type Size, type ThingsConfig } from "../../../shared/things";
 import type { Selector, WorldDoc } from "../../../shared/world";
 import { Button, IconButton } from "../../../frontend/components";
 import { AddPicker, CheckField, Chip, FormGroup, FormSheet, Issues, ItemRow, type RefOption } from "../../../frontend/build/form-kit";
 import { ChoiceInput, lintAt, LintBadge, NumberInput, TextInput } from "../../../frontend/build/schema-form";
+import { SettingRow } from "../../../frontend/settings/kit";
 import { NOT_WITH_YOU_PATH, NotWithYouField } from "../../../frontend/build/section-template";
 import { SelectorEditor, selectorOf } from "../../../frontend/build/selector-editor";
 import type { PackConfigProps } from "../../../frontend/registry";
@@ -167,8 +171,8 @@ function EverydayCarry(props: PackConfigProps) {
   );
 }
 
-/** The config with one group of settings (the put-away process's, Tidy up's) as given, or without it when that is the shipped default. */
-export function withPart(config: Readonly<JsonObject>, key: "putAway" | "tidy", value: JsonObject, shipped: Readonly<JsonObject>): JsonObject {
+/** The config with one group of settings (the put-away process's, Tidy up's, the containers', the saved sets') as given, or without it when that is the shipped default. */
+export function withPart(config: Readonly<JsonObject>, key: "putAway" | "tidy" | "containers" | "sets", value: JsonObject, shipped: Readonly<JsonObject>): JsonObject {
   const { [key]: _old, ...rest } = config;
   return Object.keys(shipped).every((k) => value[k] === shipped[k]) ? rest : { ...rest, [key]: value };
 }
@@ -361,6 +365,87 @@ function SizesByName(props: PackConfigProps & { read: Readonly<ThingsConfig["siz
   );
 }
 
+const CONTAINERS_NOTE = "What a bag, a box or a piece of furniture takes when the player puts something in it (an action, a change in Belongings), from Gear 2. What the story and the GM put somewhere lands as they say.";
+const CAPACITY_LABEL: Readonly<Record<ContainerRule, string>> = { refuse: "Refuse", off: "Off" };
+const CAPACITY_CHOICES: readonly RefOption[] = CONTAINER_RULES.map((rule) => ({ value: rule, label: CAPACITY_LABEL[rule] }));
+const CAPACITY_HELP: Readonly<Record<ContainerRule, string>> = {
+  refuse: "What a holder hasn't the room or the load to spare is turned away, saying how much it has free.",
+  off: "Only sizes decide: a holder takes anything up to the size it holds, however full it is.",
+};
+const DEPTH_HELP = "How deep things may be packed one inside another: a key in a pouch in a bag lying here is two deep; in the bag on your back, three.";
+const SETS_HELP = "Saved outfits (what someone wears) and loadouts (what they carry ready), kept and changed into from Gear 3. 0 keeps none; one more is refused until one is dropped.";
+
+/** A number the config takes: a whole one from `min` to `max`, else null. */
+function wholeIn(value: JsonValue | undefined, min: number, max: number): number | null {
+  return typeof value === "number" && Number.isInteger(value) && value >= min && value <= max ? value : null;
+}
+
+/**
+ * Containers (DESIGN §28.8): whether a holder's room and load refuse what doesn't fit, and how deep
+ * things nest, each row Changed while it differs from the shipped default, with Default to go back;
+ * `onChange` gets the whole config. Hook-free, so its controls can be pressed in tests.
+ */
+export function ContainerRows(props: PackConfigProps & { read: Readonly<ThingsConfig["containers"]> }) {
+  const path = `${CONFIG}.containers`;
+  const shipped = DEFAULT_THINGS_CONFIG.containers;
+  const put = (next: Partial<ThingsConfig["containers"]>) => props.onChange(withPart(props.config, "containers", { ...props.read, ...next }, shipped));
+  return (
+    <FormGroup title="Containers">
+      <span class="lre-field-help">{CONTAINERS_NOTE}</span>
+      <SettingRow id="gear-capacity" label="Room and load" bare changed={props.read.capacity !== shipped.capacity} help={CAPACITY_HELP[props.read.capacity]} reset={{ label: `Reset a holder's room and load to its default, ${CAPACITY_LABEL[shipped.capacity]}`, to: CAPACITY_LABEL[shipped.capacity], onClick: () => put({ capacity: shipped.capacity }) }} busy={false}>
+        <ChoiceInput
+          label="A holder's room and load"
+          value={props.read.capacity}
+          options={CAPACITY_CHOICES}
+          issues={lintAt(props.lint, `${path}.capacity`)}
+          onChange={(value) => {
+            const capacity = CONTAINER_RULES.find((rule) => rule === value);
+            if (capacity) put({ capacity });
+          }}
+        />
+      </SettingRow>
+      <SettingRow id="gear-depth" label="Depth" bare changed={props.read.depth !== shipped.depth} help={DEPTH_HELP} reset={{ label: `Reset how deep things nest to its default, ${shipped.depth}`, to: String(shipped.depth), onClick: () => put({ depth: shipped.depth }) }} busy={false}>
+        <NumberInput
+          label="Packed at most, holders deep"
+          value={props.read.depth}
+          min={1}
+          max={CONTAINER_DEPTH_MAX}
+          step={1}
+          issues={lintAt(props.lint, `${path}.depth`)}
+          onChange={(value) => {
+            const depth = wholeIn(value, 1, CONTAINER_DEPTH_MAX);
+            if (depth !== null) put({ depth });
+          }}
+        />
+      </SettingRow>
+    </FormGroup>
+  );
+}
+
+/** Saved outfits and loadouts (DESIGN §28.16): how many a person keeps, Changed while it differs from the shipped default, with Default to go back; `onChange` gets the whole config. Hook-free. */
+export function SavedSetRows(props: PackConfigProps & { read: Readonly<ThingsConfig["sets"]> }) {
+  const shipped = DEFAULT_THINGS_CONFIG.sets;
+  const put = (max: number) => props.onChange(withPart(props.config, "sets", { max }, shipped));
+  return (
+    <FormGroup title="Saved outfits and loadouts">
+      <SettingRow id="gear-sets" label="Kept at most" bare changed={props.read.max !== shipped.max} help={SETS_HELP} reset={{ label: `Reset how many outfits and loadouts a person keeps to its default, ${shipped.max}`, to: String(shipped.max), onClick: () => put(shipped.max) }} busy={false}>
+        <NumberInput
+          label="Each person keeps at most"
+          value={props.read.max}
+          min={0}
+          max={SETS_MAX}
+          step={1}
+          issues={lintAt(props.lint, `${CONFIG}.sets.max`)}
+          onChange={(value) => {
+            const max = wholeIn(value, 0, SETS_MAX);
+            if (max !== null) put(max);
+          }}
+        />
+      </SettingRow>
+    </FormGroup>
+  );
+}
+
 const PUT_AWAY_NOTE = "Off screen, a thing someone else or their household owns, left lying away from where it's kept, goes back there once it has lain out of your character's sight this long. Your character's own things never move, nor anything lent, lost or too big to carry.";
 const TIDY_NOTE = "Every turn, before it's read: a thing too big to carry that someone has on them is put down at the buyer's home when it was bought, else where they are, and a thing worn but lying elsewhere is taken off. Each is recorded with Undo, and one the player undid stays as it is while it stays where it was; anything else waits in GM → Things → Tidy up.";
 
@@ -407,6 +492,8 @@ export function GearConfig(props: PackConfigProps) {
     <div class="lre-form-fields" data-lre-gear-config>
       <EverydayCarry {...props} />
       <SizesByName {...props} read={read.sizes.byName} />
+      <ContainerRows {...props} read={read.containers} />
+      <SavedSetRows {...props} read={read.sets} />
       <FormGroup title="Gear section">
         <NotWithYouField value={read.notWithYou} issues={lintAt(props.lint, NOT_WITH_YOU_PATH)} onChange={(next) => props.onChange(next === DEFAULT_THINGS_CONFIG.notWithYou ? rest : { ...rest, notWithYou: next })} />
       </FormGroup>

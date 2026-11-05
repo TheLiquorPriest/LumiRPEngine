@@ -16,7 +16,8 @@ import { MainAgentPage } from "../../src/frontend/settings/main-agent";
 import { RolePage } from "../../src/frontend/settings/role-page";
 import { RolesPage } from "../../src/frontend/settings/roles";
 import { PromptsPage } from "../../src/frontend/settings/agent-prompts";
-import { SettingsBody, settingsHeader, settingsKeyDown } from "../../src/frontend/settings/settings";
+import { HOME_GROUPS, SettingsBody, settingsHeader, settingsKeyDown } from "../../src/frontend/settings/settings";
+import { SpeedPage, speedSummary } from "../../src/frontend/settings/speed";
 import { agentUsersText, type Connection } from "../../src/frontend/settings/steps";
 import { defaultAgentSettings, type AgentSettings } from "../../src/shared/agent-settings";
 import { defaultRoleSettings, ROLE_IDS } from "../../src/shared/agent-roles";
@@ -95,6 +96,16 @@ describe("Settings' places", () => {
     expect(settingsFocus({ page: "roles", sub: "intent" }, { page: "agents", sub: "budgets" })).toEqual({ selector: ".lre-page-header button", reveal: "start" });
     expect(settingsFocus(null, { page: "agents" }).selector).toBe(".lre-page-header button");
   });
+
+  test("Speed: its page in the Agents group after Agents, its header and Back, and a link from the timeline opens at its row", () => {
+    expect(HOME_GROUPS.find((g) => g.title === "Agents")?.pages.slice(0, 2)).toEqual(["agents", "speed"]);
+    const el = body({ page: "speed" });
+    expect([el.type, el.props.settings]).toEqual([SpeedPage, SETTINGS]);
+    expect(settingsHeader({ page: "speed" })).toMatchObject({ title: "Speed", backLabel: "Settings" });
+    expect(settingsBack({ page: "speed", at: "compaction.when" })).toEqual({ page: "home" });
+    expect(settingsFocus({ page: "diagnostics" }, { page: "speed", at: "compaction.when" })).toEqual({ selector: '[data-lre-agent-section="compaction.when"]', reveal: "start" });
+    expect(speedSummary(SETTINGS)).toBe("Thorough preset");
+  });
 });
 
 /** Every Agents page, rendered with `agents`. */
@@ -114,7 +125,7 @@ function agentPages(agents: AgentSettings): unknown[] {
 describe("what the Agents pages say", () => {
   const changed = (() => {
     const a = structuredClone(defaultAgentSettings());
-    a.pipeline = { mode: "main", memory: "before_next", curator: false };
+    a.pipeline = { mode: "main", memory: "before_next", curator: false, curatorGate: "on" };
     for (const id of ROLE_IDS) a.roles[id] = { ...defaultRoleSettings()[id], connectionId: "deepseek", effort: "high", tier: "gm", promptOnly: true, onFail: "skip", run: roleRuns(id).at(-1) ?? "smart", budget: { toolTurns: 3, wallMs: "none" } };
     a.main = { ...a.main, connectionId: "deepseek", budget: { revisions: 1 }, stages: { ...a.main.stages, prepare: "auto", memory: "auto" } };
     a.finalReview = { on: false, onFail: "stop", scope: "changed", budget: { toolTurns: 2 } };

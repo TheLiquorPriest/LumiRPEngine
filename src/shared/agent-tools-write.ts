@@ -1,12 +1,14 @@
 // The write tools' texts as shipped (AGENT-LOOP-PLAN §6; INC1-SPEC R3b): the GM-tier edits, the
-// workspace's tools and the lore's, each tool's description and its arguments', and the answers the
-// writer and these tools give, all registry texts on the Every agent page (`shared/agent-tools.ts`).
-// What each tool does is `backend/agents/tools/write/*.ts`, `tools/workspace.ts` and `tools/lore.ts`.
+// workspace's tools and the lore's, each tool's description and its arguments', what the changes to
+// things and places share (`WRITE_TOOL_GUIDES`, told once in the system prompt of an agent given any of
+// them instead of in each description), and the answers the writer and these tools give, all registry
+// texts on the Every agent page (`shared/agent-tools.ts`). What each tool does is
+// `backend/agents/tools/write/*.ts`, `tools/workspace.ts` and `tools/lore.ts`.
 // Outside a turn a write is only proposed (`tools/writer.ts`, a dry run): the engine checks it and
 // says what it would change, and nothing changes until it is applied. Inside a turn it is staged
 // (`turn-writer.ts`): it lands when the turn commits, or waits for the GM's Apply on the review card.
 
-import type { ToolNote, ToolText } from "./agent-tools";
+import type { ToolGuideText, ToolNote, ToolText } from "./agent-tools";
 
 const entity = "The person or thing: their id, or their name as the world has it.";
 const person = "The person: their id, or their name as the world has it.";
@@ -16,15 +18,37 @@ const path = "The workspace file's path: names joined by /, such as notes/marcus
 const under = "Only files under this folder, such as notes/; leave it out for every file.";
 const lore = "The lore entry's id, as lore_index, lore_search or lore_grep gives it: a short id such as lr0101, a World Info entry as bookId/entryId, or a world entry's own id.";
 const proposes = "The answer is the change in plain words, its change type and its mode. Working a turn, the change is staged at once: it lands when the turn commits, or, when its mode is confirm, waits for the game master's Apply on the turn's review card. Otherwise nothing changes until the game master applies it.";
-/** What every change to a thing or a place says of itself (ITEMS-SPEC §7.3): one change, checked first, staged, refused with why. */
-const story = `One change, checked by the engine against the world: one that doesn't hold is refused with why, and the same change asked again is the one already made. ${proposes} With dry set, it is only checked, and nothing is staged.`;
-const item = 'The thing: its id (items_find gives it), its name, or words that name it as items_find reads them ("the fridge", "Danny\'s keys"); words that fit several things as well are answered with each of their ids.';
+/** A change tool's `dry`: what dry does is told once, with what a change does (the `changes` guide). */
+const dry = "true: check only; nothing is staged.";
+/** The `dry` of a GM-tier tool, which no guide speaks for. */
+const dryWhole = "true: only check the change and say what it would do; nothing is staged.";
+/** A thing a change takes: how words name one is told once (the `things` guide). */
+const item = 'The thing: its id, its name, or words for it ("the fridge").';
 const why = "Why, in a few words, as the reply has it.";
-const dry = "true: only check the change and say what it would do; nothing is staged.";
-const into = 'Into what: a person, by id or name, or a thing that holds things (a bag, a car, a fridge), by id, name or words as items_find reads them ("the fridge"). Give in or at, not both.';
+const into = "Into whom or what: a person, or a thing that holds things (a bag, a car, a fridge). Give in or at, not both.";
 const at = "At a place: its id or name. Give in or at, not both.";
 const until = 'When it ends, in the story\'s words ("until 7 tonight", "for two days", "Friday") or as YYYY-MM-DD HH:MM; leave it out for no end.';
 const partyArg = "A person, household, business or group: an id or name.";
+
+/**
+ * What the changes to things and places share (ITEMS-SPEC §7.3), each told once in the system prompt
+ * of an agent given any tool of `ToolText.guides` (the Curator's): what one change does, checked
+ * first, staged, refused with why; and how a tool names a thing.
+ */
+export const WRITE_TOOL_GUIDES: readonly ToolGuideText[] = [
+  {
+    guide: "changes",
+    label: "What a change does",
+    note: "Told once, in the system prompt of an agent given any tool that changes a thing or a place (the Curator's), instead of in each tool's description: how the engine checks, stages and refuses a change, and what dry does.",
+    text: `How each of your tools that changes a thing or a place works: it makes one change, checked by the engine against the world. One that doesn't hold is refused with why, and the same change asked again is the one already made. ${proposes} With dry set, it is only checked, and nothing is staged.`,
+  },
+  {
+    guide: "things",
+    label: "How a thing is named",
+    note: "Told once, in the system prompt of an agent given any tool that takes a thing, instead of in each such argument's description.",
+    text: 'A thing a tool takes is named by its id (items_find gives it), its name, or words that name it as items_find reads them ("the fridge", "Danny\'s keys"); words that fit several things as well are answered with each of their ids.',
+  },
+];
 
 export const WRITE_TOOL_TEXTS: readonly ToolText[] = [
   // ---------------------------------------------------------------- people
@@ -152,6 +176,7 @@ export const WRITE_TOOL_TEXTS: readonly ToolText[] = [
     tier: "story",
     note: "Notes someone who walks on in the reply, for the read's newcomers.",
     text: "Note someone the reply introduces by name who isn't in the world yet (a waitress, a delivery driver): they join with the reply's other changes, as the read's newcomers do, found first and within the chat's spawn cap, under the New characters mode. Look for them first (people_find).",
+    notes: true,
     args: [
       { path: "name", text: "Their name, as the reply gives it." },
       { path: "kind", text: "The kind of person they are, among the world's; person when left out." },
@@ -177,7 +202,8 @@ export const WRITE_TOOL_TEXTS: readonly ToolText[] = [
     family: "places",
     tier: "story",
     note: "Makes a place in play: a room, a spot or a venue.",
-    text: `Make a place the reply establishes that the world doesn't have: a room (inside a building or home), a spot (a part of a place: "the back booth") or a venue (a new place in town), under its parent. Find it first (places_find): one with the same name or alias under the same parent is refused with its id (exists). With entity, the place is noted with the reply's other changes, and that person or thing is put there with it. ${story}`,
+    text: 'Make a place the reply establishes that the world doesn\'t have: a room (inside a building or home), a spot (a part of a place: "the back booth") or a venue (a new place in town), under its parent. Find it first (places_find): one with the same name or alias under the same parent is refused with its id (exists). With entity, the place is noted with the reply\'s other changes, and that person or thing is put there with it.',
+    guides: ["changes"],
     args: [
       { path: "name", text: 'Its name, as the story calls it ("the back booth").' },
       { path: "parent", text: "The place it is part of or in: its id or name." },
@@ -195,7 +221,8 @@ export const WRITE_TOOL_TEXTS: readonly ToolText[] = [
     family: "places",
     tier: "story",
     note: "Renames a place made in play, or gives it other names or a description.",
-    text: `Rename a place made in play, or give it other names or a description, as the reply calls it. ${story}`,
+    text: "Rename a place made in play, or give it other names or a description, as the reply calls it.",
+    guides: ["changes"],
     args: [
       { path: "place", text: "The place: its id or name." },
       { path: "name", text: "Its new name." },
@@ -210,11 +237,14 @@ export const WRITE_TOOL_TEXTS: readonly ToolText[] = [
     family: "items",
     tier: "story",
     note: "Makes a thing the story acts on that the world doesn't have.",
-    text: `Make a thing the reply acts on (moved, handed over, used, worn, bought) or establishes as mattering (a clue), when the world has none: find it first (items_find). One in its scope is refused with its id (exists). A thing too big to carry made on someone lands where they stand. A new thing that is big or costly asks first. ${story}`,
+    text: "Make a thing the reply acts on (moved, handed over, used, worn, bought) or establishes as mattering (a clue), when the world has none: find it first (items_find). One in its scope is refused with its id (exists). A thing too big to carry made on someone lands where they stand. A new thing that is big or costly asks first.",
+    guides: ["changes", "things"],
     args: [
       { path: "name", text: 'Its name, as the story calls it ("torque wrench").' },
-      { path: "type", text: "Its catalog type's id, when the world's catalogs have one; leave it out otherwise." },
-      { path: "size", text: "pocket, hand, armful, heavy, furniture or builtin, when the reply makes it plain." },
+      { path: "type", text: "Its catalog type's id (a kit's too), when the world's catalogs have one; leave it out otherwise." },
+      { path: "class", text: "A vehicle's class id (vehicles_classes), for a vehicle the reply brings in; the vehicles pack makes it, and it asks first." },
+      { path: "details", text: "With class: the vehicle's make, model, year, colour and plate, as the reply gives them." },
+      { path: "size", text: "Its size, when the reply makes it plain." },
       { path: "in", text: into },
       { path: "at", text: at },
       { path: "owner", text: `Whose it is: ${partyArg} Leave it out when the story doesn't say: the engine presumes it from where it is.` },
@@ -231,7 +261,8 @@ export const WRITE_TOOL_TEXTS: readonly ToolText[] = [
     family: "items",
     tier: "story",
     note: "Moves a thing into a holder or to a place.",
-    text: `Move a thing into a holder (a person, who then has it; a bag; a car) or to a place, out of whatever held it, as the reply says: picked up, put down, put away, fetched. A thing too big to carry put on someone lands where they stand; nothing goes into a holder smaller than it; a Built-in thing moves only once the game master applies it. ${story}`,
+    text: "Move a thing into a holder (a person, who then has it; a bag; a car) or to a place, out of whatever held it, as the reply says: picked up, put down, put away, fetched. A thing too big to carry put on someone lands where they stand; nothing goes into a holder smaller than it; a Built-in thing moves only once the game master applies it.",
+    guides: ["changes", "things"],
     args: [
       { path: "item", text: item },
       { path: "in", text: into },
@@ -245,7 +276,8 @@ export const WRITE_TOOL_TEXTS: readonly ToolText[] = [
     family: "items",
     tier: "story",
     note: "Hands a thing to someone, on a basis: hold, loan, return, gift, sale, trade or theft.",
-    text: `Hand a thing to a person, on the basis the reply says. hold (handed over with no giving words): still its owner's, the receiver may use it while they hold it. loan (borrowed, lent, or a stated end): still its owner's, until when it ends. return (back to its owner or the owner's household): its grants end. gift ("keep it", a present, food or drink to have now), sale or trade: the receiver's. theft: taken without a right, still its owner's. ${story}`,
+    text: 'Hand a thing to a person, on the basis the reply says. hold (handed over with no giving words): still its owner\'s, the receiver may use it while they hold it. loan (borrowed, lent, or a stated end): still its owner\'s, until when it ends. return (back to its owner or the owner\'s household): its grants end. gift ("keep it", a present, food or drink to have now), sale or trade: the receiver\'s. theft: taken without a right, still its owner\'s.',
+    guides: ["changes", "things"],
     args: [
       { path: "item", text: item },
       { path: "to", text: "Who gets it: a person's id or name." },
@@ -260,7 +292,8 @@ export const WRITE_TOOL_TEXTS: readonly ToolText[] = [
     family: "items",
     tier: "story",
     note: "Changes whose a thing is, as the story states.",
-    text: `Change whose a thing is, when the reply states it (inherited, signed over, abandoned), without moving it; a handover for keeps is item_hand's gift, sale or trade. Its grants end. ${story}`,
+    text: "Change whose a thing is, when the reply states it (inherited, signed over, abandoned), without moving it; a handover for keeps is item_hand's gift, sale or trade. Its grants end.",
+    guides: ["changes", "things"],
     args: [
       { path: "item", text: item },
       { path: "owner", text: `Its new owner: ${partyArg} Or nobody.` },
@@ -273,7 +306,8 @@ export const WRITE_TOOL_TEXTS: readonly ToolText[] = [
     family: "items",
     tier: "story",
     note: "Lets someone use a thing.",
-    text: `Let a person use a thing that isn't theirs: hold (while they hold it for its owner), loan (until it ends) or assign (theirs to use until it is taken back). A grant from someone it isn't theirs to lend is made, flagged for the game master. ${story}`,
+    text: "Let a person use a thing that isn't theirs: hold (while they hold it for its owner), loan (until it ends) or assign (theirs to use until it is taken back). A grant from someone it isn't theirs to lend is made, flagged for the game master.",
+    guides: ["changes", "things"],
     args: [
       { path: "item", text: item },
       { path: "who", text: "Who may use it: a person's id or name." },
@@ -288,7 +322,8 @@ export const WRITE_TOOL_TEXTS: readonly ToolText[] = [
     family: "items",
     tier: "story",
     note: "Takes back someone's use of a thing.",
-    text: `Take back a person's grant to use a thing. ${story}`,
+    text: "Take back a person's grant to use a thing.",
+    guides: ["changes", "things"],
     args: [
       { path: "item", text: item },
       { path: "who", text: "Whose grant ends: a person's id or name." },
@@ -300,7 +335,8 @@ export const WRITE_TOOL_TEXTS: readonly ToolText[] = [
     family: "items",
     tier: "story",
     note: "Lets someone use another's things, all of them or those at home.",
-    text: `Let a person use another's things as a standing permission ("make yourself at home"): all of them, or those at home. ${story}`,
+    text: 'Let a person use another\'s things as a standing permission ("make yourself at home"): all of them, or those at home.',
+    guides: ["changes"],
     args: [
       { path: "from", text: `Whose things: ${partyArg}` },
       { path: "to", text: "Who may use them: a person's id or name." },
@@ -315,7 +351,8 @@ export const WRITE_TOOL_TEXTS: readonly ToolText[] = [
     family: "items",
     tier: "story",
     note: "Ends a standing permission to use another's things.",
-    text: `End a standing permission to use another's things. ${story}`,
+    text: "End a standing permission to use another's things.",
+    guides: ["changes"],
     args: [
       { path: "from", text: `Whose things: ${partyArg}` },
       { path: "to", text: "Whose permission ends: a person's id or name." },
@@ -327,7 +364,8 @@ export const WRITE_TOOL_TEXTS: readonly ToolText[] = [
     family: "items",
     tier: "story",
     note: "Sets where a thing is kept when not in use.",
-    text: `Set where a thing is kept when not in use, as the reply establishes it ("the spare key lives under the mat"): in a holder, at a place, or on its owner; or clear it, so the engine works it out. Off screen, things drift back there. ${story}`,
+    text: 'Set where a thing is kept when not in use, as the reply establishes it ("the spare key lives under the mat"): in a holder, at a place, or on its owner; or clear it, so the engine works it out. Off screen, things drift back there.',
+    guides: ["changes", "things"],
     args: [
       { path: "item", text: item },
       { path: "in", text: "In what: a person or a thing that holds things, by id or name. Give one of in, at, owner or clear." },
@@ -342,7 +380,8 @@ export const WRITE_TOOL_TEXTS: readonly ToolText[] = [
     family: "items",
     tier: "story",
     note: "Uses up a thing, or some of a stack.",
-    text: `Use up a thing the reply eats, drinks or spends, or some of a stack; the last of it leaves the world. ${story}`,
+    text: "Use up a thing the reply eats, drinks or spends, or some of a stack; the last of it leaves the world.",
+    guides: ["changes", "things"],
     args: [
       { path: "item", text: item },
       { path: "qty", text: "How many; 1 when left out." },
@@ -354,11 +393,13 @@ export const WRITE_TOOL_TEXTS: readonly ToolText[] = [
     family: "items",
     tier: "story",
     note: "Puts a thing on someone, or takes it off.",
-    text: `Put a wearable thing on a person, or take it off; one not on them comes to them first. ${story}`,
+    text: "Put a wearable thing on a person, or take it off; one not on them comes to them first. A slot readies it (ready: in hand) or holsters, sheathes or slings it; what held that slot comes off and stays carried.",
+    guides: ["changes", "things"],
     args: [
       { path: "item", text: item },
       { path: "who", text: "Who wears it: a person's id or name." },
       { path: "off", text: "true: taken off." },
+      { path: "slot", text: "Where it goes, when not its own slot: ready (in hand), holster, sheath, quiver, back, shoulder." },
       { path: "dry", text: dry },
     ],
   },
@@ -367,7 +408,8 @@ export const WRITE_TOOL_TEXTS: readonly ToolText[] = [
     family: "items",
     tier: "story",
     note: "Wears a thing down or mends it.",
-    text: `Change a thing's condition, when the reply damages, wears out or mends it, within its bounds. ${story}`,
+    text: "Change a thing's condition, when the reply damages, wears out or mends it, within its bounds.",
+    guides: ["changes", "things"],
     args: [
       { path: "item", text: item },
       { path: "delta", text: "How much: negative wears it down, positive mends it." },
@@ -379,7 +421,8 @@ export const WRITE_TOOL_TEXTS: readonly ToolText[] = [
     family: "items",
     tier: "story",
     note: "Loses a thing, or has it stolen.",
-    text: `A thing lost (whereabouts unknown, with any cash in it), or stolen: into the thief's hands, still its owner's. A loss asks first. ${story}`,
+    text: "A thing lost (whereabouts unknown, with any cash in it), or stolen: into the thief's hands, still its owner's. A loss asks first.",
+    guides: ["changes", "things"],
     args: [
       { path: "item", text: item },
       { path: "by", text: "Who stole it: a person's id or name; leave it out for lost." },
@@ -391,13 +434,14 @@ export const WRITE_TOOL_TEXTS: readonly ToolText[] = [
     family: "items",
     tier: "story",
     note: "Renames a thing, or gives it other names, a description or a size.",
-    text: `Rename a thing, or give it other names, a description or its size, as the reply calls it. ${story}`,
+    text: "Rename a thing, or give it other names, a description or its size, as the reply calls it.",
+    guides: ["changes", "things"],
     args: [
       { path: "item", text: item },
       { path: "name", text: "Its new name." },
       { path: "aliases", text: "Its other names, all of them." },
       { path: "description", text: "What it is like, in a sentence." },
-      { path: "size", text: "pocket, hand, armful, heavy, furniture or builtin." },
+      { path: "size", text: "Its new size." },
       { path: "dry", text: dry },
     ],
   },
@@ -406,10 +450,39 @@ export const WRITE_TOOL_TEXTS: readonly ToolText[] = [
     family: "items",
     tier: "story",
     note: "Merges a thing made twice into one.",
-    text: `Merge a thing made twice into one: the dropped one's quantity, grants and contents go to the one kept, and it leaves the world. Only things made in play merge; one the world document defines is the game master's to merge. A merge asks first. ${story}`,
+    text: "Merge a thing made twice into one: the dropped one's quantity, grants and contents go to the one kept, and it leaves the world. Only things made in play merge; one the world document defines is the game master's to merge. A merge asks first.",
+    guides: ["changes", "things"],
     args: [
       { path: "keep", text: "The one kept: an id or name." },
       { path: "drop", text: "The one merged into it: an id or name." },
+      { path: "dry", text: dry },
+    ],
+  },
+  {
+    name: "set_save",
+    family: "items",
+    tier: "story",
+    note: "Keeps what someone wears as a saved outfit or loadout.",
+    text: "Keep, under a name, what a person wears now as an outfit (their clothes), or what they carry ready as a loadout (in hand, holstered, sheathed, in a quiver, on their back, and arms and armor), when the reply has them say or make it so; one of the same name is replaced.",
+    guides: ["changes", "things"],
+    args: [
+      { path: "who", text: "Whose: a person's id or name." },
+      { path: "name", text: 'Its name, as the story calls it ("Work", "Range day").' },
+      { path: "kind", text: "outfit or loadout." },
+      { path: "pieces", text: "The things in it, by id or name; leave it out for what they wear now of its kind." },
+      { path: "dry", text: dry },
+    ],
+  },
+  {
+    name: "set_apply",
+    family: "items",
+    tier: "story",
+    note: "Changes someone into one of their saved outfits or loadouts.",
+    text: "Change a person into one of their saved outfits or loadouts, by its name, when the reply has them change into it: each piece to hand goes on in its slot, what else of its kind they wear comes off, and at home what came off goes back where it is kept. Pieces out of reach are named, not made.",
+    guides: ["changes", "things"],
+    args: [
+      { path: "who", text: "Who changes: a person's id or name." },
+      { path: "set", text: "The saved outfit or loadout: its name (the Gear section lists them) or id." },
       { path: "dry", text: dry },
     ],
   },
@@ -418,7 +491,8 @@ export const WRITE_TOOL_TEXTS: readonly ToolText[] = [
     family: "items",
     tier: "gm",
     note: "Takes a thing out of the world.",
-    text: `Take a thing out of the world, as the GM's Remove does: a GM change, asked first. ${story}`,
+    text: "Take a thing out of the world, as the GM's Remove does: a GM change, asked first.",
+    guides: ["changes", "things"],
     args: [
       { path: "item", text: item },
       { path: "why", text: why },
@@ -453,7 +527,8 @@ export const WRITE_TOOL_TEXTS: readonly ToolText[] = [
     family: "money",
     tier: "story",
     note: "Notes what the reply has bought, for the economy's purchase.",
-    text: "Note a purchase the reply establishes: it lands with the reply's other changes, as the read's purchases do, the money posted and the goods placed as one change, under the Purchases mode. A seller's own thing that the seller holds changes hands; a new one is made only otherwise. A purchase too big to carry lies where it ends up, never on the buyer. A purchase the turn already made (Buy) is never noted again.",
+    text: "Note a purchase the reply establishes: it lands with the reply's other changes, as the read's purchases do, the money posted and the goods placed as one change, under the Purchases mode. A seller's own thing that the seller holds changes hands; a new one is made only otherwise. A purchase too big to carry lies where it ends up, never on the buyer. A purchase the turn already made (Buy) is never noted again. A vehicle is a purchase of category vehicles and its class, standing where the story leaves it (at), never an item; a house is a purchase of its place (property).",
+    notes: true,
     args: [
       { path: "item", text: "What was bought, as the reply names it." },
       { path: "category", text: "Its category in the world's price catalog (groceries, hardware, home_furnishings, …)." },
@@ -462,8 +537,13 @@ export const WRITE_TOOL_TEXTS: readonly ToolText[] = [
       { path: "price", text: "What it cost each, as a plain amount in the world's money (8 for $8), when the reply says." },
       { path: "method", text: 'How they paid, in the reply\'s words ("cash", "her Amex"), when it says.' },
       { path: "seller", text: "Who sold it: a person's or business's id or name, when the reply names one." },
-      { path: "size", text: "pocket, hand, armful, heavy, furniture or builtin, when the reply makes it plain." },
+      { path: "size", text: "Its size, when the reply makes it plain." },
       { path: "at", text: 'Where it ends up, when the reply says: a place\'s id or name, or "home".' },
+      { path: "class", text: "For a vehicle (category vehicles): its class id from vehicles_classes. It is made a vehicle of that class, never an item." },
+      { path: "details", text: "For a vehicle: what the reply says of it, as {make, model, year, colour, plate, odometer_mi, condition, value}." },
+      { path: "finance", text: "Bought on a loan, when the reply says: {down: the down payment as a plain amount, term: months}; the rest is a loan the vehicle or property secures." },
+      { path: "property", text: "For a house, flat or lot: the place's or property's id or name; a place that is no property yet becomes one. Its price goes in price." },
+      { path: "live", text: "For a property: true when the reply says the buyer moves in; their home becomes it." },
     ],
   },
   {
@@ -478,7 +558,7 @@ export const WRITE_TOOL_TEXTS: readonly ToolText[] = [
       { path: "cents", text: "Minor units added to each payment while it lasts (negative takes them off), at most one payment's own; leave it out to give a factor." },
       { path: "days", text: "How many days it lasts, 1 to 31; 7 when left out." },
       { path: "reason", text: "Why, in a few words for its History line." },
-      { path: "dry", text: dry },
+      { path: "dry", text: dryWhole },
     ],
   },
   {
@@ -487,6 +567,7 @@ export const WRITE_TOOL_TEXTS: readonly ToolText[] = [
     tier: "story",
     note: "Notes what the reply says of a revenue stream earning more or less for a while.",
     text: "Note what the reply says of a revenue stream earning more or less for a while (\"the fair doubled the stall's takings this week\"): a factor on each payment (0.25 to 4) or an amount on each (at most one payment's own), for 1 to 31 days, quoting the reply. It lands with the reply's changes under the revenue mode, which asks first. Only a stream its author opened to the agents takes one.",
+    notes: true,
     args: [
       { path: "stream", text: "The stream: its id or name." },
       { path: "factor", text: "A factor on each payment while it lasts; leave it out to give cents." },
@@ -504,7 +585,7 @@ export const WRITE_TOOL_TEXTS: readonly ToolText[] = [
     text: `Propose one change to an organization (a company, a household, a group, a trust or the party), as the GM makes it: no one's powers are asked, and the change keeps its History line. The change is an object with its do and fields; people, organizations, jobs, accounts and places by id or name, money in minor units (2500 is 25.00), dates as YYYY-MM-DD. found {type: company or group, name, founder, kind?, structure?, capital?, from?, units?}; admit {org, who, title?, position?, why}; remove {org, who, why}; appoint {org, who, position or null, why}; title {org, who, title or null}; position {org, position: {title, id?, powers?, seats?, reports_to?, scope?: org or below, limits?: {payment?, month?}, successor?: next, vacant or someone, default?}}; unposition {org, position}; delegate {org, to, powers, payment?, month?, accounts?, until?, by}; revoke {org, to}; hire {org, who, position?, title?, basis?, rate?, hours?}; fire {job, why}; pay {job, rate or pct}; issue {org, to, units, price (a unit), class?, from?}; buy_back {org, from, units, price (a unit)}; transfer {org, from, to, units or pct, price? (in all; none is a gift)}; list {org, units, price? (a unit; else its books a unit), symbol?} (a C corporation on the market, new units sold to the public; listed already, more units at its market price); delist {org, price? (a unit; else its market price)} (every public unit bought back); trade {org, who, side: buy or sell, units, account?} (its stock on the market; units held on its cap table sell into its float); entry {place, entry: owner, members, staff, customers, public or null, keys?}; dues {org, cents or null, every?: week, month or year}; tier {who, tier: core, companion, hired, ally or null}; restructure {org, structure}; wind_up {org, stage?: all, begin, finish or resume, property?: distribute or sell, to?, why?} (a company's debts paid, the rest paid out by share, and it dissolved); merge {org, into, ratio? (into's units for each of org's), cash? (in all), from?, keep?: true keeps org as into's subsidiary, why?}; rename {org, name}; tax_status {org, status: charity, church or club (a row of the world's exempt table), or null} (exempt from income tax, and from FUTA and SUTA as the status says; not a household or the party); consolidate {org, elect: true or false} (a C corporation's one federal return with the corporations it holds 80% or more of); project {org, act: start, pause, resume, drop or note, project?, template?, name?, account?, step?, days?, cents?, why?} (a production project, as gm_project makes it). Decisions, motions and requests by the ids orgs_read's decisions part gives: propose {by, change, party?} puts a decision (change: an issue, buy_back, restructure, list, delist, wind_up or merge, as above) to a vote for by, who hasn't the votes to make it alone (party: an organization holder they decide as), their vote for it; vote {org, motion, who, vote: for, against or abstain}, cast for anyone with a vote on it, carries the motion out once it passes; end_motion {org, motion, how: close (on the votes cast now) or withdraw}; answer {org, request, answer: approve, deny or withdraw, by?, why?} (by: one up the requester's chain of command who may approve it, or the requester withdrawing; left out, the GM's), approving runs the act then as the requester's; decisions {org, vote_by?: shares or members, quorum?, pass? (percent), days?, approval_days? (null puts the default back)}. One that doesn't hold is refused with why. ${proposes} With dry set, it is only checked, and nothing is staged.`,
     args: [
       { path: "change", text: 'The change, written as a JSON object: {"do": "appoint", "org": "Alder Automotive", "who": "Danny Okafor", "position": "shop_foreman", "why": "Marcus made him foreman"}.' },
-      { path: "dry", text: dry },
+      { path: "dry", text: dryWhole },
     ],
   },
   {
@@ -524,7 +605,7 @@ export const WRITE_TOOL_TEXTS: readonly ToolText[] = [
       { path: "days", text: "note: whole days it is set back." },
       { path: "cents", text: "note: what it costs on top, in minor units (2500 is 25.00)." },
       { path: "why", text: "Why, in a few words (a note needs it)." },
-      { path: "dry", text: dry },
+      { path: "dry", text: dryWhole },
     ],
   },
   {
@@ -533,6 +614,7 @@ export const WRITE_TOOL_TEXTS: readonly ToolText[] = [
     tier: "story",
     note: "Notes a production project's step set back or costing more, as the reply tells it.",
     text: "Note that the reply sets a production project's step back or makes it cost more (a breakdown, the weather, a part that had to be replaced): it lands with the reply's other changes under the project setbacks mode, with its receipt and Undo. At most 30 days, and what it costs on top at most the world's cap on unlisted prices. Never note a step done, started or dropped: the engine finishes each step on its day, and the player decides the rest.",
+    notes: true,
     args: [
       { path: "project", text: "The project, by id or name (orgs_read's projects part lists them)." },
       { path: "step", text: "The step, by id or name; the one under way when left out." },

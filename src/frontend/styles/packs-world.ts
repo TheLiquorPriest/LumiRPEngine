@@ -30,6 +30,8 @@ button.lre-world-pill:hover{background:linear-gradient(var(--lre-hover),var(--lr
 .lre-world-mode{position:absolute;left:8px;bottom:8px;z-index:1;padding:2px;border-radius:var(--lre-r-lg);background:var(--lre-bar-bg);border:1px solid var(--lre-border);box-shadow:var(--lre-shadow-sm)}
 .lre-world-mode .lre-seg{flex-wrap:nowrap}
 .lre-world-mode .lre-seg>button{flex:1 0 auto;min-width:var(--lre-tap)}
+.lre-world-legend{display:flex;flex-wrap:wrap;gap:2px var(--lre-s3);margin:0;padding:2px var(--lre-s2) 0;list-style:none;font-size:var(--lre-fs-sm);color:var(--lre-muted)}
+.lre-world-legend>li{display:inline-flex;align-items:center;gap:4px}
 .lre-world-dock,.lre-world-maplist{position:absolute;left:8px;right:8px;bottom:8px;z-index:2;overflow:auto;overscroll-behavior:contain;display:flex;flex-direction:column;gap:var(--lre-s2);padding:var(--lre-s3);border-radius:var(--lre-r-xl);border:1px solid var(--lre-border);background:var(--lre-bar-bg);box-shadow:var(--lre-shadow-lg)}
 .lre-world-dock{max-height:min(65%,440px)}
 .lre-world-dock-head{display:flex;align-items:center;justify-content:space-between;gap:var(--lre-s2);min-width:0}

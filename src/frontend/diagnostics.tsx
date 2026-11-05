@@ -9,10 +9,12 @@
 // only once the player opens its curtain, and never keeps them in pushed state.
 
 import { useEffect, useState } from "preact/hooks";
-import { CANNOT_STOP, DIAGNOSTICS_DEFAULTS, type Activity, type ActivityAgent, type DiagAgentCall, type DiagnosticsSettings, type DiagRecord, type DiagUsageField } from "../shared/diagnostics";
+import { agentLabel } from "../shared/agent-settings";
+import { CANNOT_STOP, DIAGNOSTICS_DEFAULTS, isTurnPhase, phaseTimeText, TURN_PHASE_LABEL, turnTimeline, type Activity, type ActivityAgent, type DiagAgentCall, type DiagnosticsSettings, type DiagRecord, type DiagUsageField, type TimelineCall, type TurnTimeline } from "../shared/diagnostics";
 import type { ChatId } from "../shared/ids";
 import type { JsonObject } from "../shared/json";
-import { useApp } from "./app";
+import { PHASE_CONTROL, speedRow } from "../shared/speed-presets";
+import { type App, useApp } from "./app";
 import { Badge, Banner, Button, Empty, List, ListRow, NumberStepper, Section, Seg, useBusy } from "./components";
 import { Icon } from "./icons";
 import { useSelect } from "./store";
@@ -244,6 +246,7 @@ export function diagText(records: readonly DiagRecord[]): string {
       ...(r.sections ?? []).map((s) => `    section ${s.slot}${s.outlet ? ` → ${s.outlet}` : ""}: ${s.filled ? "filled" : "empty"}`),
       ...callText(r),
       ...(r.agent ? [`    agent ${r.agent.role}: ${agentText(r.agent)}`] : []),
+      ...(r.steps ?? []).map((s) => `    step ${s.name}: ${Math.round(s.ms)} ms`),
     ])
     .join("\n");
 }
@@ -254,9 +257,10 @@ function msText(ms: number): string {
   return ms >= 1000 ? `${(ms / 1000).toFixed(1)} s` : `${Math.round(ms)} ms`;
 }
 
-/** A record's name in the timeline: the turn's summary, an agent's call, a phase's step, or what was asked. */
+/** A record's name in the timeline: the turn's summary, a part of its time, an agent's call, a phase's step, or what was asked. */
 function titleOf(r: DiagRecord): string {
   if (r.kind === "turn") return "The turn";
+  if (r.kind === "phase" && isTurnPhase(r.step)) return TURN_PHASE_LABEL[r.step];
   const step = r.kind === "agent" ? `${r.step} agent` : r.step;
   return r.phase && r.phase !== r.step && r.phase !== "request" ? `${r.phase} · ${step}` : step;
 }
@@ -311,7 +315,7 @@ function RecordRow(props: { record: DiagRecord; chatId: string }) {
         badge={r.kind === "slow" ? <Badge tone="warn">slow</Badge> : <Badge tone={STATUS_TONE[r.status]}>{r.agent?.outcome ?? r.status}</Badge>}
       />
       {r.fix ? <p class="lre-diag-fix">Fix: {r.fix}</p> : null}
-      {calls.length > 0 || (r.sections?.length ?? 0) > 0 || r.agent ? (
+      {calls.length > 0 || (r.sections?.length ?? 0) > 0 || r.agent || (r.steps?.length ?? 0) > 0 ? (
         <ul class="lre-diag-calls">
           {calls.map((c, i) => (
             <li key={i} data-lre-diag-call={c.ok && c.finishReason !== "length" ? "ok" : "bad"}>
@@ -326,9 +330,107 @@ function RecordRow(props: { record: DiagRecord; chatId: string }) {
             </li>
           ))}
           {r.agent ? <li data-lre-diag-call={r.agent.outcome === "ok" || r.agent.outcome === "cancelled" ? "ok" : "bad"}>{agentText(r.agent)}</li> : null}
+          {(r.steps ?? []).map((s, i) => (
+            <li key={`step-${i}`} data-lre-diag-call="ok" data-lre-diag-step={s.name}>
+              {s.name} · {msText(s.ms)}
+            </li>
+          ))}
         </ul>
       ) : null}
       {r.agent?.text ? <AgentText chatId={props.chatId} hash={r.agent.text} /> : null}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------- where a turn's time went
+
+/** A call's line under its part of the turn: its agent, model and time, the tools it was offered, and the share of its prompt read from the provider's cache. */
+export function timelineCallText(c: TimelineCall): string {
+  const offered = c.offered ? ` · ${n(c.offered.tools)} ${c.offered.tools === 1 ? "tool" : "tools"} offered, about ${n(c.offered.tokens)} tokens` : "";
+  const cached = c.cached !== null ? ` · ${Math.round(c.cached * 100)}% cached` : "";
+  return `${agentLabel(c.role)} · ${c.model} · ${phaseTimeText(c.ms)}${offered}${cached}`;
+}
+
+/** The slowest part's way to the setting that decides it, in words: "Summarizing earlier turns: 7 min 46 s → Summarize ahead of time". */
+export function slowestFixText(timeline: TurnTimeline): { row: string; text: string } | null {
+  const slowest = timeline.rows.find((r) => r.slowest);
+  const id = slowest ? PHASE_CONTROL[slowest.name] : undefined;
+  const row = id ? speedRow(id) : undefined;
+  return slowest && row ? { row: row.id, text: `${slowest.label}: ${phaseTimeText(slowest.ms)} → ${row.fix}` } : null;
+}
+
+/**
+ * "Where the last turn's time went" (Settings → Speed, GM → Live, Diagnostics): each part of the turn
+ * in order with its time and cause, the agent calls inside it (the tools each was offered and its
+ * cached share), the slowest part marked, and its way to the setting that decides it. Hook-free.
+ */
+export function TurnTimeView(props: { timeline: TurnTimeline; onControl?(row: string): void }) {
+  const t = props.timeline;
+  const fix = slowestFixText(t);
+  return (
+    <div class="lre-stack lre-turn-time" data-lre-turn-time={t.turn}>
+      <p class="lre-small lre-muted" style={{ margin: 0 }}>
+        Turn {t.turn.slice(0, 8)} · {new Date(t.start).toLocaleTimeString()} · {phaseTimeText(t.ms)} from its first part to its last
+      </p>
+      <List>
+        {t.rows.map((r, i) => (
+          <div key={`${r.name}-${i}`} class="lre-diag-row" data-lre-turn-phase={r.name} data-lre-slowest={r.slowest ? "" : undefined}>
+            <ListRow icon={r.slowest ? "hourglass" : "clock"} title={r.label} subtitle={r.cause ?? undefined} value={phaseTimeText(r.ms)} valueTone={r.slowest ? "warn" : "muted"} badge={r.slowest ? <Badge tone="warn">slowest</Badge> : undefined} />
+            {r.calls.length > 0 ? (
+              <ul class="lre-diag-calls">
+                {r.calls.map((c, j) => (
+                  <li key={j} data-lre-diag-call="ok">
+                    {timelineCallText(c)}
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+          </div>
+        ))}
+      </List>
+      {fix && props.onControl ? (
+        <Button size="sm" variant="secondary" icon="sliders" onClick={() => props.onControl?.(fix.row)}>
+          {fix.text}
+        </Button>
+      ) : null}
+    </div>
+  );
+}
+
+/** Opens Settings → Speed at one of its rows (`row`, a `SPEED_ROWS` id), from wherever the drawer is. */
+export function openSpeed(app: Pick<App, "ui">, row?: string): void {
+  app.ui.update((ui) => ({ ...ui, mode: "settings", settings: { page: "speed", ...(row !== undefined ? { at: row } : {}) } }));
+}
+
+/**
+ * The chat's last turn's time, read through `lre.diag` once it shows and again on Refresh or when
+ * `reload` changes: `turn`'s, else (or when `turn` has none, as a turn renamed when its generation
+ * took it) the latest turn's that started at `since` or after. Nothing is read until a chat is open.
+ */
+export function LastTurnTime(props: { chatId: ChatId; turn?: string; since?: number; reload?: unknown; onControl?(row: string): void }) {
+  const app = useApp();
+  const [records, setRecords] = useState<DiagRecord[] | null>(null);
+  const [busy, run] = useBusy();
+  const load = () =>
+    run(async () => {
+      const result = await app.request({ type: "lre.diag", chatId: props.chatId, op: "get" });
+      setRecords(result ? result.records : []);
+    });
+  useEffect(() => {
+    setRecords(null);
+    load();
+  }, [props.chatId, props.turn, props.reload]);
+  const own = records && props.turn !== undefined ? turnTimeline(records, props.turn) : null;
+  const latest = records && own === null ? turnTimeline(records) : null;
+  const timeline = own ?? (latest && (props.since === undefined || latest.start >= props.since) ? latest : null);
+  return (
+    <div class="lre-stack" data-lre-last-turn-time>
+      {records === null ? <Empty icon="hourglass">Reading the last turn's time…</Empty> : timeline ? <TurnTimeView timeline={timeline} {...(props.onControl ? { onControl: props.onControl } : {})} /> : <Empty icon="clock">No turn has recorded its time yet: the next agent turn's parts show here, each with its time.</Empty>}
+      <div>
+        <Button size="sm" variant="ghost" icon="refresh" busy={busy} onClick={load}>
+          Refresh
+        </Button>
+      </div>
     </div>
   );
 }
@@ -399,6 +501,7 @@ export function DiagnosticsPage(props: { diagnostics: DiagnosticsSettings; patch
   const shown = records ? filterRecords(records, filter) : [];
   // What failed, newest first; a failed turn's summary only when none of its steps says why.
   const problems = (records ?? []).filter((r) => r.status === "failed" && (r.kind !== "turn" || !(records ?? []).some((s) => s !== r && s.turn === r.turn && s.status === "failed"))).slice(-20).reverse();
+  const timeline = records ? turnTimeline(records) : null;
   return (
     <div class="lre-stack lre-diag" data-lre-settings-page="diagnostics">
       <CannotStopNotice />
@@ -452,6 +555,11 @@ export function DiagnosticsPage(props: { diagnostics: DiagnosticsSettings; patch
               </Banner>
             ))}
           </div>
+        </Section>
+      ) : null}
+      {timeline ? (
+        <Section title="Where the last turn's time went" flush>
+          <TurnTimeView timeline={timeline} onControl={(row) => openSpeed(app, row)} />
         </Section>
       ) : null}
       {records === null ? (

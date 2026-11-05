@@ -803,11 +803,13 @@ export interface ExtractRead {
   held?: JsonObject[];
   /**
    * The Curator's answer when its own work isn't whole: `cut`, a limit on its rounds of tool calls
-   * stopped its agent before it answered, and what it staged and noted stands; `fallback`, its agent
-   * failed and this is its prompt-only read. Either way the read's held facts land for what it
-   * doesn't cover. Absent on a whole answer, and on every other read.
+   * stopped its agent before it answered, and what it staged and noted stands; `unclosed`, its agent
+   * staged or noted work and then closed with an answer the engine can't read (not JSON, or not its
+   * form), and that work stands; `fallback`, its agent failed and this is its prompt-only read. Each
+   * way the read's held facts land for what it doesn't cover. Absent on a whole answer, and on every
+   * other read.
    */
-  short?: "cut" | "fallback";
+  short?: "cut" | "unclosed" | "fallback";
 }
 
 /** A place the reply puts someone or something in that Places lacks (ITEMS-SPEC §6.2), for a read that has no `location` to say it with. */
@@ -950,6 +952,14 @@ export function inMinorUnits(p: JsonObject, currency: WorldCurrency): JsonObject
   const money = q.type === "purchase" ? "price" : q.type === "transfer" ? "amount" : q.type === "employment" ? "rate" : null;
   const v = money ? q[money] : undefined;
   if (money && typeof v === "number" && Number.isFinite(v)) q[money] = Math.round(v * 10 ** currency.decimals);
+  // A purchase's down payment (`finance.down`) and a vehicle's stated worth (`details.value`) are as written too.
+  if (q.type === "purchase") {
+    for (const [part, key] of [["finance", "down"], ["details", "value"]] as const) {
+      const o = q[part];
+      const n = isRecord(o) ? o[key] : undefined;
+      if (isRecord(o) && typeof n === "number" && Number.isFinite(n)) q[part] = { ...o, [key]: Math.round(n * 10 ** currency.decimals) };
+    }
+  }
   return q;
 }
 

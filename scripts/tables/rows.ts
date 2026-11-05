@@ -65,13 +65,14 @@ const FINANCE_TITLES: Record<string, string> = {
 const SCHOOL_TITLES: Record<string, string> = { k12: "K-12", college: "College" };
 
 /** The unit each source consumption block declares, as the table's `consumption_unit`. */
-const CONSUMPTION_UNITS: Record<string, string> = { mpg: "mpg", mi_per_kwh: "mi_per_kwh", gal_per_hour: "gal_per_h" };
+const CONSUMPTION_UNITS: Record<string, string> = { mpg: "mpg", mi_per_kwh: "mi_per_kwh", gal_per_hour: "gal_per_h", none: "none" };
 
 /** Rate keys each domain's `consumption` must carry (a `note` is allowed on any). */
 const CONSUMPTION_KEYS: Record<string, string[]> = {
   road: ["city", "highway", "combined"],
   marine: ["idle_no_wake", "cruise_planing", "wide_open"],
   offroad: ["idle", "normal_trail", "hard_use", "approx_mpg_trail"],
+  air: ["taxi", "climb", "cruise"],
 };
 
 const GUIDE_PREFIX = "consumption_factor_guides.";
@@ -308,6 +309,9 @@ export const ROW_SPECS: Record<string, RowSpec> = {
       if (typeof guideRef !== "string" || !guideRef.startsWith(GUIDE_PREFIX)) f.fail("ref", `consumption_factors_ref ${JSON.stringify(guideRef)} is not ${GUIDE_PREFIX}<guide>`, "factor_guide");
       return {
         name: f.take("name"),
+        aliases: f.take("aliases"),
+        make: f.take("make"),
+        model: f.take("model"),
         domain: f.take("domain"),
         fuel_type: f.take("fuel_type"),
         factor_guide: typeof guideRef === "string" ? guideRef.slice(GUIDE_PREFIX.length) : undefined,
@@ -323,6 +327,7 @@ export const ROW_SPECS: Record<string, RowSpec> = {
         insurance_liability_cents_per_month: insurance.take("liability_only"),
         insurance_full_cents_per_month: insurance.take("full_coverage"),
         registration_cents_per_year: f.take("registration_cents_per_year"),
+        fuel_cents_per_gal: f.take("fuel_cents_per_gal"),
         annual_maintenance_cents_per_year: annual,
         maintenance: upkeep,
         passengers: f.take("passengers"),
@@ -336,11 +341,17 @@ export const ROW_SPECS: Record<string, RowSpec> = {
     check(rows, report) {
       for (const [id, row] of Object.entries(rows)) {
         const domain = typeof row.domain === "string" ? row.domain : "";
-        const expected = domain === "road" ? (row.fuel_type === "electricity" ? "mi_per_kwh" : "mpg") : "gal_per_h";
+        // What burns nothing (a bicycle, a kayak) has no rates; a road class burns by the mile, every other by the hour.
+        const expected = row.fuel_type === "none" ? "none" : domain === "road" ? (row.fuel_type === "electricity" ? "mi_per_kwh" : "mpg") : "gal_per_h";
         if (row.consumption_unit !== expected) {
           report("unit", `a ${String(row.fuel_type)} ${domain} class consumes in ${expected}, not ${String(row.consumption_unit)}`, { row: id, column: "consumption_unit" });
         }
         const rates = row.consumption;
+        if (expected === "none") {
+          if (isRecord(rates) && Object.keys(rates).some((k) => k !== "note")) report("column", "a class that burns nothing has no consumption rates", { row: id, column: "consumption" });
+          if (row.tank_capacity_gal !== undefined || row.usable_battery_kwh !== undefined) report("column", "a class that burns nothing has no tank or battery", { row: id, column: "tank_capacity_gal" });
+          continue;
+        }
         const keys = CONSUMPTION_KEYS[domain];
         if (!isRecord(rates) || !keys) continue;
         for (const key of keys) {
@@ -379,6 +390,7 @@ export const ROW_SPECS: Record<string, RowSpec> = {
         volume_l: f.take("volume_l"),
         size: f.take("size"),
         price_cents: f.take("price_cents"),
+        ammo: f.take("ammo"),
         notes: f.take("notes"),
       };
     },

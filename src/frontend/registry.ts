@@ -7,6 +7,7 @@ import type { ComponentType } from "preact";
 import type { PanelHome, SheetKind, SheetRoute } from "./app";
 import type { IconName } from "./icons";
 import type { JsonObject, JsonValue } from "../shared/json";
+import type { GmReadPart } from "../shared/gm-parts";
 import type { ChatId, EntityId, FieldId, KindId, PackId, PanelId } from "../shared/ids";
 import type { EditOp, FrontendToBackend, ResultMessage, ErrorMessage, LintIssue, WorldCollection } from "../shared/protocol";
 import type { OrgView } from "../shared/org-view";
@@ -147,12 +148,14 @@ export interface ChipProps {
 /** What a pack's GM view tab gets: the GM view as loaded, and the one way it changes the chat. */
 export interface GmSectionProps {
   chatId: ChatId;
+  /** The GM view as the tab reads it: its parts (`GmSectionDef.parts`) as loaded, the rest as last loaded or empty. */
   gm: GmView;
   currency: WorldCurrency;
   /**
-   * Changes when the chat moves on (a turn, an edit, an undo: `gmReloadKey`), not when the GM view is
-   * only loaded again: a tab that reads more than `gm` reads it again on this, not on `gm`, so one
-   * change isn't read twice (once for the chat moving on, once for the reload after it).
+   * The chat's GM key as the view was last loaded at (`StateView.gmKey`): it changes when the chat
+   * moves on and the view loads again (a turn, an edit, an undo), not when a part lands or a tab
+   * opens. A tab that reads more than `gm` reads it again on this, not on `gm`, so one change isn't
+   * read twice; while the page holds during a turn, neither moves.
    */
   reloadKey: string;
   busy: boolean;
@@ -179,6 +182,12 @@ export interface GmSectionDef {
   /** Order among the packs' tabs. */
   order: number;
   component: ComponentType<GmSectionProps>;
+  /**
+   * The GM view's parts the tab reads (`lre.gm.part`, the roster for a list of entities), loaded when
+   * it opens and again when the chat moves on; the edits are read with every tab's. Absent, every
+   * part: a tab that reads entities' fields, relations or levels reads `entities` whole.
+   */
+  parts?: readonly GmReadPart[];
 }
 
 /** The tabs the orgs pack's own page draws (ORG-SPEC §4.3): a pack's part may join one of them. */

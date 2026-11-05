@@ -6,8 +6,8 @@
 import { ownersIn } from "../shared/finance";
 import type { EntityId, PlaceId } from "../shared/ids";
 import { hasOwn, type JsonObject } from "../shared/json";
-import type { NameSize, Rest, SizeClass, SizeFrom, Spot } from "../shared/things";
-import { gotOf, holdsOfVolume, isRest, isSize, madeOf, nameSizeOf, sizeOfVolume, sizeRank, thingsConfigOf, type Size } from "../shared/things";
+import type { NameSize, Rest, SetKind, SizeClass, SizeFrom, Spot } from "../shared/things";
+import { ARSENAL_CATEGORIES, gotOf, holdsOfVolume, isRest, isSize, madeOf, nameSizeOf, sizeOfVolume, sizeRank, thingsConfigOf, type Size } from "../shared/things";
 import type { TableRow } from "../shared/tables";
 import { businessAt, orgTypeOf } from "./org";
 import { own } from "./pack-kit";
@@ -222,6 +222,11 @@ export function mayFixThing(ctx: ThingContext, pov: EntityId, item: EntityId): b
   return presumedAt(ctx, at).owners.some(ours);
 }
 
+/** The household a person belongs to (§3.4), the first by id they are a member of; null for none. */
+export function householdOf(ctx: ThingContext, who: EntityId): EntityId | null {
+  return Object.keys(ctx.state.entities).sort().find((id) => orgTypeOf(ctx, id) === "household" && !isGone(ctx.state, id) && isMemberOf(ctx, who, id)) ?? null;
+}
+
 // ---------------------------------------------------------------- where it rests
 
 /** Where a rest came from: the thing's own `home`, the world's placing of it, or the inference for things made in play (`stored`: what keeps its kind at its owner's home, a wardrobe for clothing). */
@@ -241,11 +246,23 @@ function everyday(ctx: ThingContext, id: EntityId, owner: EntityId | undefined):
   return thingsConfigOf(ctx.world).carry.some((rule) => rule.types.includes(type) && selectorMatches(ctx.registry, ctx.world, ctx.state, rule.who, owner));
 }
 
-/** The slots that carry rather than dress (§10.3): never an outfit's, and never what makes a thing clothing. */
-const CARRY_SLOTS: Readonly<Record<string, true>> = { none: true, pocket: true, pocket_or_bag: true, hand_held: true, back: true, shoulder: true };
+/** The slots that carry rather than dress (§10.3): never an outfit's, and never what makes a thing clothing; the arsenal's holster, sheath and quiver among them. */
+const CARRY_SLOTS: Readonly<Record<string, true>> = { none: true, pocket: true, pocket_or_bag: true, hand_held: true, back: true, shoulder: true, holster: true, sheath: true, quiver: true };
 
 /** The slots several things share at once (pockets, hands): wearing one there takes nothing else off. */
 export const SHARED_SLOTS: Readonly<Record<string, true>> = { pocket: true, pocket_or_bag: true, hand_held: true };
+
+/**
+ * Which kind of saved set a thing worn in `slot` is part of (§28.16): a loadout's (in hand, on the
+ * back or a shoulder, holstered, sheathed or in a quiver, or arms, armor or ammunition worn), an
+ * outfit's (any other worn slot), or neither (a pocket).
+ */
+export function setKindOf(ctx: Pick<ThingContext, "tables">, f: Readonly<JsonObject>, slot: string): SetKind | null {
+  if (slot === "pocket" || slot === "pocket_or_bag" || slot === "none") return null;
+  if (hasOwn(CARRY_SLOTS, slot)) return "loadout";
+  const category = typeof f.category === "string" ? f.category : typeRowOf(ctx, f)?.row.category;
+  return typeof category === "string" && (ARSENAL_CATEGORIES as readonly string[]).includes(category) ? "loadout" : "outfit";
+}
 
 /** The slot a thing is worn in (§10.3): its own `slot`, else its type row's `equip_slot`; null when it isn't worn. */
 export function slotOf(ctx: Pick<ThingContext, "tables">, f: Readonly<JsonObject>): string | null {

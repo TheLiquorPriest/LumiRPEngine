@@ -1,16 +1,19 @@
 // Build's Things as plain data (ITEMS-SPEC §10.1): which world-home list an entity is in (People,
 // Organizations, Things, Money), and who opens on a thing's page; the By place tree and the By
 // owner groups over the rows `lre.things` answers; and the draft changes the Things pages make: a
-// new thing from Add's four fields, a thing moved, made someone's, kept somewhere, given or lent,
-// someone let use it or no longer, and a thing removed with what it held left where it was. Each is
-// a draft patch (RFC 6902) of only what it changes, so an edit made elsewhere to anything else stands.
+// new thing from Add's four fields (a vehicle by its class), a thing moved, made someone's, kept
+// somewhere, given or lent, someone let use it or no longer, and a thing removed with what it held
+// left where it was. Each is a draft patch (RFC 6902) of only what it changes, so an edit made
+// elsewhere to anything else stands.
 
 import { pointerOf } from "../../shared/json-patch";
 import type { JsonObject, JsonValue } from "../../shared/json";
 import { hasOwn, isRecord } from "../../shared/json";
 import type { JsonPatchOp } from "../../shared/protocol";
 import type { OwnerGroup, PartyRef, ThingRow, ThingType, WhereStep } from "../../shared/thing-view";
-import type { GrantBasis, Size, Spot } from "../../shared/things";
+import type { GrantBasis, Size, Spot, ThingIs } from "../../shared/things";
+import { makeFieldsOf } from "../../shared/things";
+import type { VehiclePick } from "../../shared/vehicles";
 import { typeFields } from "../../shared/items-build";
 import type { TableRow } from "../../shared/tables";
 import type { WorldDoc } from "../../shared/world";
@@ -290,6 +293,10 @@ export interface NewThing {
   type: { type: ThingType; row: TableRow } | null;
   /** Its size, for something else (a type gives its own). */
   size: Size | null;
+  /** What it is said to be when no type says it (Add's kind chips): a category, or a holder; null or absent, a plain thing. */
+  is?: ThingIs | null;
+  /** A vehicle, by its class, with its make, model and year: the vehicles pack's kind. */
+  vehicle?: VehiclePick | null;
   where: Spot;
   /** Its owner; null for nobody. */
   owner: string | null;
@@ -297,13 +304,23 @@ export interface NewThing {
   kept: string | null;
 }
 
-/** The thing Add a thing makes: an id from its name, free in the draft; its kind and fields from its type; where it is; whose. */
+/** A vehicle's own fields from a pick: its class, and the make, model and year it was given. */
+function vehicleFields(pick: VehiclePick): JsonObject {
+  return { class: pick.id, ...(pick.make.trim() !== "" ? { make: pick.make.trim() } : {}), ...(pick.model.trim() !== "" ? { model: pick.model.trim() } : {}), ...(pick.year > 0 ? { year: pick.year } : {}) };
+}
+
+/**
+ * The thing Add a thing makes: an id from its name, free in the draft; its kind and fields from its
+ * type, or a vehicle's from its class, or else what it is said to be (a category, or a holder);
+ * where it is; whose.
+ */
 export function newThing(doc: WorldDoc, input: NewThing): { id: string; value: JsonObject } {
   const name = input.name.trim();
   const id = deriveId(name, new Set(Object.keys(doc.entities)));
-  const typed = input.type ? typeFields(input.type.type.table, input.type.type.id, input.type.row) : { kind: "item" as const, fields: {} };
+  const said = input.is ? makeFieldsOf(input.is) : {};
+  const typed = input.vehicle ? { kind: "vehicle", fields: vehicleFields(input.vehicle) } : input.type ? typeFields(input.type.type.table, input.type.type.id, input.type.row) : { kind: said.holds !== undefined ? "container" : "item", fields: said.category !== undefined ? { category: said.category } : {} };
   const fields: JsonObject = { ...typed.fields };
-  if (input.type === null && input.size !== null) fields.size = input.size;
+  if (input.type === null && !input.vehicle && input.size !== null) fields.size = input.size;
   if (input.owner !== null) fields.owner = input.owner;
   if (input.kept !== null) fields.home = input.kept;
   const blank: JsonObject = { ...newItem("entities", id, doc, name), kind: typed.kind, fields };

@@ -216,8 +216,8 @@ const GROUNDED: Readonly<Record<string, Build>> = {
     if (!run) return { run: null, left: ["the reply's read: the extract step is off"] };
     if (!reply) return { run: null, left: [] };
     const { vars, usual } = replyFacts(rt, m, reply.text);
-    // As the turn reads on an agent chat: with the Curator on, the read leaves the Curator's facts to it (ITEMS-SPEC §6.4).
-    const input = rt.extractInput(m.at, { run, text: reply.text, said: m.user, vars, usual, skipped: false, shown: m.settings.thingReads.shown, ...(m.settings.agents.pipeline.curator ? { split: "read" as const } : {}) });
+    // As the turn reads on an agent chat: with the Curator on, the read leaves the facts its tools make to it (ITEMS-SPEC §6.4).
+    const input = rt.extractInput(m.at, { run, text: reply.text, said: m.user, vars, usual, skipped: false, shown: m.settings.thingReads.shown, curator: m.settings.agents.roles.curator, ...(m.settings.agents.pipeline.curator ? { split: "read" as const } : {}) });
     return { run: (ctx) => extractRun(rt, { reply: reply.text, world: m.world, state: m.at.state, input, classic: noClassic }, ctx), left: [] };
   },
   [roleContractId("curator", "curate")]: async (rt, m) => {
@@ -226,7 +226,7 @@ const GROUNDED: Readonly<Record<string, Build>> = {
     if (!run) return { run: null, left: ["the Curator's read of the reply: the extract step it stands in for is off"] };
     if (!reply) return { run: null, left: [] };
     const { vars, usual } = replyFacts(rt, m, reply.text);
-    const input = rt.extractInput(m.at, { run, text: reply.text, said: m.user, vars, usual, skipped: false, shown: m.settings.thingReads.shown, split: "curator" });
+    const input = rt.extractInput(m.at, { run, text: reply.text, said: m.user, vars, usual, skipped: false, shown: m.settings.thingReads.shown, split: "curator", curator: m.settings.agents.roles.curator });
     const events = authorLines(rt.registry, m.at.world, m.at.state, m.at.pre, m.at.pre.length);
     return { run: (ctx) => curateRun(rt, { reply: reply.text, world: m.world, state: m.at.state, input, events, classic: noClassic }, ctx), left: [] };
   },

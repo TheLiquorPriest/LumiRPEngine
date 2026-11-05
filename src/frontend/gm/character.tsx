@@ -20,7 +20,7 @@ import { bringOp, characterRequest, partyOf } from "../requests";
 import { bedOp, homeOp, moveOp, routineStanding, type RoutineStanding } from "./character-ops";
 import { TIER_LABELS } from "../../shared/party";
 import { formatMoney } from "../../shared/world";
-import type { Editor } from "./editor";
+import type { BulkEditor } from "./editor";
 import { nameOf } from "./editor";
 import { Classification, FieldRow, Life, PartyField, Relations, Simulation } from "./entity";
 import { gmOpen } from "./gate";
@@ -50,14 +50,14 @@ const STANDING_NOTE: Record<Exclude<RoutineStanding, "held" | "living">, string>
 };
 
 /** The character's GM page, over World's list (or wherever a person's GM page opens). */
-export function CharacterSheet(props: { entity: GmEntity; editor: Editor; chatId: string; onBack(): void; backLabel?: string; onOpen?(entity: string): void }) {
+export function CharacterSheet(props: { entity: GmEntity; editor: BulkEditor; chatId: string; onBack(): void; backLabel?: string; onOpen?(entity: string): void }) {
   const { entity, editor } = props;
   const app = useApp();
   const [read, setRead] = useState<CharacterResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [routine, setRoutine] = useState<RoutineGmView | null>(null);
   const [moving, setMoving] = useState(false);
-  // Read again whenever the GM view reloads (an edit, its Undo, a turn), so the sheet shows them at once.
+  // Read again whenever the chat moves on and the GM view loads again (an edit, its Undo, a turn), so the sheet shows them at once; not when a part of the view lands.
   useEffect(() => {
     let live = true;
     void app.request(characterRequest(entity.id, { chatId: props.chatId })).then((result) => {
@@ -72,7 +72,7 @@ export function CharacterSheet(props: { entity: GmEntity; editor: Editor; chatId
     return () => {
       live = false;
     };
-  }, [entity.id, props.chatId, editor.gm]);
+  }, [entity.id, props.chatId, editor.reloadKey]);
   const edit = (ops: EditOp[]): void => void editor.edit(ops);
   const pov = editor.gm.entities.find((e) => e.pov) ?? null;
   const party = partyOf(entity, editor.gm);

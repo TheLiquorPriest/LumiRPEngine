@@ -7,7 +7,8 @@
 
 import type { RoleRun } from "./agent-pipeline";
 import type { AgentBudget, AgentEffort } from "./agent-settings";
-import type { ToolFamily } from "./agent-tools";
+import { TOOL_TEXTS, type ToolFamily, type ToolTier } from "./agent-tools";
+import { CURATOR_FACTS } from "./things";
 
 /** The roles of §5, by id, with the Curator (ITEMS-SPEC §7): after the read, it keeps the world's fabric (things, places, walk-on people, a purchase's goods) true to the reply. */
 export type RoleId = "intent" | "scene" | "minds" | "knowledge" | "director" | "read" | "curator" | "memory" | "skip" | "world";
@@ -90,6 +91,47 @@ const FAMILIES: Readonly<Record<RoleId, readonly ToolFamily[]>> = {
  * and a round limit that stops it leaves what it staged standing (ITEMS-SPEC §7.2).
  */
 export const CURATOR_TOOL_TURNS = 6;
+
+/** The role whose story-tier tools change the world's fabric (ITEMS-SPEC §6.4, one writer per domain per phase): things and places, walk-ons and a purchase's goods are its own after the reply; another role makes such a change only with the GM's tier. */
+export const FABRIC_ROLE: RoleId = "curator";
+
+/** The tool families whose writes are the story's own (`opTier`): the workspace, and lore saved to it. A role at the story tier is given those writes and no GM edit. */
+export const STORY_FAMILIES: readonly ToolFamily[] = ["workspace", "lore"];
+
+/**
+ * The families a role's tools come from at each tool tier (§6): its families' reads; their story
+ * changes to the fabric for the Curator, or any role at the GM tier; and the GM's edits, of the
+ * workspace and lore at the story tier, of every family at the GM tier. A role that reads only gets
+ * its reads.
+ */
+export function roleToolScope(role: RoleId, s: Pick<RoleSettings, "families" | "tier">): Readonly<Record<ToolTier, readonly ToolFamily[]>> {
+  if (s.tier === "read") return { read: s.families, story: [], gm: [] };
+  return { read: s.families, story: s.tier === "gm" || role === FABRIC_ROLE ? s.families : [], gm: s.tier === "gm" ? s.families : s.families.filter((f) => STORY_FAMILIES.includes(f)) };
+}
+
+/**
+ * The tools a role's agent is given working a turn, by name, as its agent gets them (each tier of its
+ * scope, `roleToolScope`, in turn): the tools that note facts for the read (`ToolText.notes`) only
+ * for the Curator, whose task notes them. Its runtime adds `scratch_read`.
+ */
+export function roleToolNames(role: RoleId, s: Pick<RoleSettings, "families" | "tier">): string[] {
+  const scope = roleToolScope(role, s);
+  return (["read", "story", "gm"] as const).flatMap((tier) => TOOL_TEXTS.filter((t) => t.tier === tier && scope[tier].includes(t.family) && (t.notes !== true || role === FABRIC_ROLE)).map((t) => t.name));
+}
+
+/** The tool that makes each of the Curator's facts but the thing facts, which an item change makes. */
+const FACT_TOOL: Readonly<Record<string, string>> = { purchase: "purchase", spawn: "person_add", place_make: "place_make" };
+
+/**
+ * The reply's facts that are the Curator's on an agent chat (`CURATOR_FACTS`, ITEMS-SPEC §6.4): those
+ * its tools can make, so the read keeps what it can't (a walk-on, while it has no People tools, lands
+ * through the read). Prompt-only, it is classic's read of them all.
+ */
+export function curatorKinds(s: Pick<RoleSettings, "families" | "tier" | "promptOnly">): string[] {
+  if (s.promptOnly) return [...CURATOR_FACTS];
+  const names = new Set(roleToolNames(FABRIC_ROLE, s));
+  return CURATOR_FACTS.filter((t) => names.has(FACT_TOOL[t] ?? "item_move"));
+}
 
 /**
  * Every role's settings as a new user has them (§15): its classic step's connection, the effort its

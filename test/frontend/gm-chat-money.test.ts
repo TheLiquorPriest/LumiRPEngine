@@ -26,8 +26,8 @@ describe("GM → This chat → Money", () => {
 });
 
 describe("Settings → Narrator → Out-of-play actions", () => {
-  test("told by default: payments to others at any amount, credit, property, business, staff, members, structure", () => {
-    expect(OFFSTAGE_DEFAULTS.tell).toEqual({ payments: true, credit: true, property: true, business: true, staff: true, members: true, structure: true, accounts: false, investing: false, governance: false, things: false });
+  test("told by default: payments to others at any amount, credit, property, business, staff, members, structure, hand-overs and changes of outfit", () => {
+    expect(OFFSTAGE_DEFAULTS.tell).toEqual({ payments: true, credit: true, property: true, business: true, staff: true, members: true, structure: true, handovers: true, accounts: false, investing: false, governance: false, things: false });
     expect(toldByDefault("pay", { to: "x", amount: 1 }, OFFSTAGE_DEFAULTS, 2)).toBe(true);
     expect(toldByDefault("move_money", { amount: 100_000 }, OFFSTAGE_DEFAULTS, 2)).toBe(false);
     expect(toldByDefault("buy", {}, OFFSTAGE_DEFAULTS, 2)).toBe(false);
@@ -43,9 +43,10 @@ describe("Settings → Narrator → Out-of-play actions", () => {
     expect(tellPreset("move_money", { amount: 2000 }, OFFSTAGE_DEFAULTS, 2)).toBe(false);
     expect(tellPreset("pay", { amount: 1999 }, { ...OFFSTAGE_DEFAULTS, paymentsFrom: 20 }, 2)).toBe(false);
     expect(tellPreset("move_money", {}, offstageSettingsOf({ tell: { accounts: true } }), 2)).toBe(true);
-    // `buy` plays in the story, and Gear → Manage's actions have no confirm step.
+    // `buy` plays in the story, and Belongings' actions (its things, its hand-overs) have no confirm step.
     expect(tellPreset("buy", { item: "coffee" }, OFFSTAGE_DEFAULTS, 2)).toBeNull();
     expect(tellPreset("wear", { item: "coat" }, OFFSTAGE_DEFAULTS, 2)).toBeNull();
+    expect(tellPreset("give", { item: "coat", to: "x" }, OFFSTAGE_DEFAULTS, 2)).toBeNull();
   });
 
   test("a switch patches one group, the amount a whole number from 0, and Reset all of it", () => {

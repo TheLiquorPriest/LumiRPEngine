@@ -28,8 +28,9 @@
 //
 // The orchestrator commits a phase's draft in the turn's fixed order (`commitOrder`: by role in §5's
 // order, then by staging order), each operation re-validated in order (`commitStaged`): one under
-// Confirm goes to the turn's review card instead, one that no longer holds is refused. An operation's
-// key is the hash of the operation, so staging it again is the same operation and stages nothing more.
+// Confirm goes to the turn's review card instead, and so does one that names a thing or a place such
+// a one makes, after it; one that no longer holds is refused. An operation's key is the hash of the
+// operation, so staging it again is the same operation and stages nothing more.
 
 import { ROLE_IDS, type RoleId, type RoleTier } from "../../shared/agent-roles";
 import type { ToolView } from "../../shared/agent-tools";
@@ -40,6 +41,7 @@ import type { LedgerEvent } from "../../shared/ledger";
 import type { LiveDropWhy } from "../../shared/live";
 import { effectiveMemory } from "../../shared/minds";
 import type { ChangeType, ExtractionLearning, UserSettings } from "../../shared/settings";
+import { PLACE_EVENT } from "../../engine/places-in-play";
 import type { WorldState } from "../../engine/state";
 import { placeCapsOf } from "../../shared/world";
 import { Working } from "../../engine/working";
@@ -453,28 +455,52 @@ export interface CommitCtx {
   signal: AbortSignal;
 }
 
+/** Whether `value` names one of `ids` anywhere in it, as a whole string. */
+function namesAny(value: unknown, ids: ReadonlySet<string>): boolean {
+  if (typeof value === "string") return ids.has(value);
+  if (Array.isArray(value)) return value.some((v) => namesAny(v, ids));
+  return isRecord(value) && Object.values(value).some((v) => namesAny(v, ids));
+}
+
 /**
  * Commits `ops` (in `commitOrder`) onto `w` (INC2-SPEC C10): each re-validated in order on what the
  * ones before it left, through the outside writer's checks for its role; one under Confirm is set
  * aside for the review card, one that no longer holds is refused, and the rest apply, each whole
- * (its events one unit, so a rebased view keeps or drops it whole) or not at all. Synchronous: the
- * plan and the read call it inside the core's own steps.
+ * (its events one unit, so a rebased view keeps or drops it whole) or not at all. An operation that
+ * names a thing or a place one set aside makes can't hold on `w`, where that make never landed: it
+ * is checked on the set-aside operations' events instead and, if it holds there, set aside after its
+ * make, so the card's Apply lands both, in order (a make's id is its edit's own, the same then as
+ * now). Synchronous: the plan and the read call it inside the core's own steps.
  */
 export function commitStaged(rt: Runtime, commit: CommitCtx, ops: readonly StagedOp[], w: Working): CommitOutcome {
   const out: CommitOutcome = { committed: [], confirm: [], refused: [], kept: {} };
+  // What the operations set aside make, and their events, in order.
+  const made = new Set<string>();
+  const aside: LedgerEvent[] = [];
   for (const op of ops) {
     const env: WriterEnv = { userId: commit.userId, chatId: commit.chatId, knowledge: "everyone", reader: commit.reader, agent: { role: op.role, id: op.agentId }, signal: commit.signal, connectionId: op.connectionId, gm: op.gm };
     const ctx = commit.ctx();
-    const checked = checkOp(rt, ctx, env, w.state, withKept(ctx.kept, out.kept), op.op);
+    let on: Working = w;
+    if (made.size > 0 && !op.op.kind.startsWith("ws_") && namesAny(op.op, made)) {
+      on = new Working(rt.registry, ctx.head.world, w.state);
+      on.applyAll(aside);
+    }
+    const checked = checkOp(rt, ctx, env, on.state, withKept(ctx.kept, out.kept), op.op);
     if (isOpRefusal(checked)) {
       out.refused.push({ op, refusal: checked });
       continue;
     }
-    if (checked.mode === "confirm" && op.approved !== true) {
+    if (on !== w || (checked.mode === "confirm" && op.approved !== true)) {
       // The card is the player's: its lines are the player character's.
-      const after = new Working(rt.registry, ctx.head.world, w.state);
+      const after = new Working(rt.registry, ctx.head.world, on.state);
       after.applyAll(checked.events);
       out.confirm.push({ ...op, mode: "confirm", events: checked.events, cardLines: opLines(rt, ctx, "player", checked.type, after.state, checked.shown) });
+      // The things and places it makes: a spawned entity's id, a place made in play's.
+      for (const e of checked.events) {
+        if (e.type === "spawn") made.add(e.entity.id);
+        else if (e.type === PLACE_EVENT && "data" in e && isRecord(e.data) && typeof e.data.place === "string") made.add(e.data.place);
+      }
+      aside.push(...checked.events);
       continue;
     }
     // A kept file's change writes no event: it is made in its store when the turn closes.

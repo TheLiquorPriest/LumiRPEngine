@@ -9,7 +9,7 @@
 import type { EntityId } from "../../../shared/ids";
 import type { FeedScope } from "../../../shared/world";
 import type { GrantBasis } from "../../../shared/things";
-import { gotOf, grantBasisOf, madeOf, thingsConfigOf } from "../../../shared/things";
+import { gotOf, grantBasisOf, madeOf, SET_KINDS, setsOf, thingsConfigOf } from "../../../shared/things";
 import { listWords } from "../../../shared/words";
 import { calendarOf, formatClock } from "../../../engine/calendar";
 import { orgPower, orgTypeOf } from "../../../engine/org";
@@ -140,7 +140,8 @@ export function restsOn(ctx: ReadContext, id: EntityId, who: EntityId): boolean 
  * - `Borrowed from <owner>`: on loan or assigned to them, until when or overdue, and where it is when not on them;
  * - `Lent out` (`With <someone>` for one held for them): their own someone else has by a grant;
  * - `Not with you`: their own things that go about with them (`restsOn`) and aren't with them now,
- *   with where, as far as the world's Not with you lines allow (`notWithYou`).
+ *   with where, as far as the world's Not with you lines allow (`notWithYou`);
+ * - `Saved outfits`, `Saved loadouts`: their saved sets by name, from Gear 3 (DESIGN §28.16).
  * At Gear 1 only things in play (`inPlay`) are on you or not with you; what changed hands always
  * shows. In `gm` scope, something on them they don't know of (a thing planted on them) is added, marked.
  */
@@ -197,6 +198,12 @@ export function gearLines(ctx: ReadContext, scope: FeedScope): FeedLine[] {
       // On someone else by no grant of theirs (taken, found), it is somewhere they can't know.
       const where = possessorOf(ctx, id) === null ? whereWords(ctx, id) : null;
       lines.push({ text: sentence(`Not with you: ${thingText(ctx, id, [where ?? "you don't know where"])}`), known: "pov" });
+    }
+    // Their saved outfits and loadouts by name (Gear 3, DESIGN §28.16), so a change into one is told and read by it.
+    const sets = level >= 3 ? Object.values(setsOf(own(ctx.state.entities, pov)?.fields)) : [];
+    for (const kind of SET_KINDS) {
+      const names = sets.filter((s) => s.kind === kind).map((s) => s.name).sort((a, b) => a.localeCompare(b));
+      if (names.length > 0) lines.push({ text: `${kind === "outfit" ? "Saved outfits" : "Saved loadouts"}: ${listWords(names)}.`, known: "pov" });
     }
     if (scope === "gm") {
       const unknown = [...new Set([...carriedBy(ctx.state, pov), ...wornBy(ctx, pov)])].filter((id) => own(ctx.state.entities, id)?.kind !== "account" && !see(id));

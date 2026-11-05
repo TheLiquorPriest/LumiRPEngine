@@ -4,7 +4,8 @@
 // its run starts fails the run as a failed step does; a write to the chat's world (a payment, a ✎
 // fix, a GM edit, a chip's Apply or Undo, a Realism level, detail opened) is held by the turn and
 // lands once its reply is in, over what the turn did. Only a change to the chat itself (a message
-// sent, edited, swiped or deleted) keeps a prepared reply from starting. Port Alder, on classic and
+// sent, edited, swiped or deleted) keeps a prepared reply from starting; a write answered as queued
+// that the chat then refuses is told on the page, as a held write that can't land is. Port Alder, on classic and
 // on agents with a main agent.
 
 import { describe, expect, test } from "bun:test";
@@ -291,5 +292,22 @@ describe("every other change from the tab while the engine runs a turn", () => {
     expect(reply.halted).toBeUndefined();
     await rig.host.finish(reply, "Someone waves back.");
     expect(await flagged(rig, chatId)).toBeNull();
+  });
+
+  test("a GM edit answered as queued that the chat then refuses (an earlier message edited meanwhile) is told on the page as a held write that can't land is, never lost", async () => {
+    const { rig, chatId } = await alder();
+    const earlier = rig.host.chat(chatId).messages.find((m) => m.isUser)?.id ?? "";
+    const { g, answer } = await playWhile(rig, chatId, "I stretch and yawn.", () => {
+      const queued = rig.send({ type: "lre.edit", chatId, ops: [{ op: "move", entity: DANNY, to: "rusty_anchor" }] });
+      // While it waits on the run, the player's earlier message is edited: the chat pauses for Keep or Discard, so the edit can't land.
+      rig.host.editMessage(chatId, earlier, "I look around the bedroom.");
+      return queued;
+    });
+    expect(g.halted).toBe("cancelled");
+    expect(rig.body(answer)).toMatchObject({ pending: true, queued: "engine" });
+    const journal = (await rig.rt.ledger.core(chatId, rig.host.userId))?.journal;
+    expect([journal?.held, journal?.refused?.map((r) => r.reason)]).toEqual([[], ["paused"]]);
+    expect((await rig.rt.view(chatId, rig.host.userId)).chips.filter((c) => c.kind === "refused").map((c) => c.label)).toEqual(["Your correction didn't apply after the reply"]);
+    expect((await headRecord(rig, chatId)).post.some((p) => p.kind === "fix" && p.gm === true)).toBe(false);
   });
 });

@@ -13,8 +13,9 @@ import type { EventRef, FixDirective, HeldWrite, LedgerEvent, MarkerBody, Rec } 
 import { LEDGER_NAMESPACE } from "../shared/ledger";
 import type { ActionDef, RulesetDef, WorldDoc } from "../shared/world";
 import { ENGINE_VERSION, formatMoney } from "../shared/world";
-import { OFFSTAGE_ORIGIN, ORIGIN_FIELD, playsOffstage, toldByDefault } from "../shared/offstage";
-import { parseItemFix } from "../shared/things";
+import { fixGroupOf, OFFSTAGE_ORIGIN, ORIGIN_FIELD, playsOffstage, toldByDefault } from "../shared/offstage";
+import { parseItemFix, type ItemFix } from "../shared/things";
+import { playThingTypes } from "./claims";
 import { actionWords, toldAction } from "../engine/action-words";
 import { placeOfEntity } from "../engine/scope";
 import { previewSheet, previewSkills } from "../engine/authoring";
@@ -25,8 +26,9 @@ import { sheetRulesetProblem } from "../engine/ruleset";
 import { formulaFunctions } from "../engine/scope";
 import { neutralizeMacros } from "../shared/macros";
 import type { DraftChanged, ErrorCode, FrontendToBackend, LintIssue, MarkerPreview, ResultBodies, UpgradePreview, WorldChatInfo } from "../shared/protocol";
-import { AGENT_API, PROTOCOL_VERSION } from "../shared/protocol";
-import { EXTRACTION_TYPES, helperCallOf, narratorViewOf, type UserSettings } from "../shared/settings";
+import { AGENT_API, FIX_THINGS_MAX, PROTOCOL_VERSION } from "../shared/protocol";
+import { EXTRACTION_TYPES, helperCallOf, narratorViewOf, perfSettingsOf, type UserSettings } from "../shared/settings";
+import type { DiagStep } from "../shared/diagnostics";
 import { formatMs, TimeoutFired, timerMs } from "../shared/timeouts";
 import type { TimelapseTarget } from "../shared/ledger";
 import { TIME_CONTROLS, validMarkerBody } from "../engine/events";
@@ -50,6 +52,7 @@ import type { LedgerCore } from "../engine/ledger/journal";
 import { activeRecord } from "../engine/ledger/path";
 import type { StoredChip } from "./chips";
 import { toChain } from "./ledger-io";
+import { cachedChain } from "./chain-cache";
 import { JobError, type JobRunner } from "./jobs";
 import { saveFromChat } from "./lore";
 import { pinBooks, pinEntries, pinViews } from "./lore-pins";
@@ -63,7 +66,8 @@ import { recordOutcome, undoModeChange, type ModeChange } from "./settings-store
 import { applyProposals } from "./turn-model";
 import { upgradePreview } from "./upgrade-preview";
 import { appliedEvents, doneAfter, fixChip, fixLines, recentLines, TIMELAPSE_ACTION, toldWords } from "./view";
-import { buildGmPart, buildGmView, gmThings, gmThingsHead, keepInWorld, madeInPlay } from "./gm";
+import { buildGmView, gmThings, gmThingsHead, keepInWorld, madeInPlay } from "./gm";
+import { readGmPart, type GmReadSteps } from "./gm-memo";
 import type { QueuedOn } from "../shared/gm-parts";
 import type { KeepResult } from "../shared/thing-gm";
 import { buildCharacter } from "../engine/character";
@@ -73,7 +77,7 @@ import { type DraftNotice, newChatRun, WorldError } from "./worlds";
 import { SecrecyError, SecrecyMoves } from "./secrecy-migration";
 import { Assistant, AssistantError, ASSISTANT_ROLE, workspaceRequest } from "./agents/assistant";
 import { roleTextTest, testedRole } from "./agents/roles/test";
-import { promptDef } from "../shared/prompts";
+import { promptDef, swipeDirectionOf } from "../shared/prompts";
 import { type Review, ReviewError } from "./agents/review";
 
 export class RequestError extends Error {
@@ -178,8 +182,10 @@ export class Dispatcher {
     const chatId = isRecord(raw) && typeof raw.chatId === "string" ? raw.chatId : null;
     const what = `${raw.type}${isRecord(raw) && typeof raw.op === "string" ? ` ${raw.op}` : ""}`;
     const t0 = performance.now();
+    // Where a slow request's time went, for the requests that say (a GM read's read, decode, render, build and encode).
+    const steps: DiagStep[] = [];
     try {
-      await this.route(raw, userId, session, reply, noted);
+      await this.route(raw, userId, session, reply, noted, steps);
     } catch (error) {
       const e = error instanceof RequestError ? error : error instanceof WorldError ? new RequestError(error.code, error.message, error.lint) : error instanceof JobError ? new RequestError(error.code, error.message) : new RequestError("internal", error instanceof Error ? error.message : String(error));
       if (e.code === "internal") this.rt.host.log("error", `[LumiRPEngine] ${raw.type}: ${error instanceof Error ? (error.stack ?? error.message) : String(error)}`, userId);
@@ -191,7 +197,7 @@ export class Dispatcher {
     } finally {
       const ms = performance.now() - t0;
       // Any view or edit over a second is kept, so a slow tab says which request was slow.
-      this.rt.diag.slow(userId, chatId, what, ms);
+      this.rt.diag.slow(userId, chatId, what, ms, steps.length > 0 ? steps : undefined);
       // One slower than the user's Engine requests limit had the tab stop waiting before it answered: say so.
       const limit = timerMs(this.rt.settings.known(userId)?.timeouts.requestMs ?? "none");
       if (limit !== null && ms > limit) this.rt.diag.timeout({ chatId, userId, turn: null }, "request", what, new TimeoutFired("requestMs", limit), `${what} answered after ${formatMs(ms)}, so the tab had shown it as unanswered`);
@@ -208,7 +214,8 @@ export class Dispatcher {
 
   private async write(chatId: ChatId, userId: UserId, w: HeldWrite): Promise<{ applied: boolean; pending: boolean; queued?: QueuedOn; posted?: { messageId: string; swipeId: number; seq: number } }> {
     await this.requireWorldChat(chatId, userId);
-    const result = await this.rt.ledger.write(chatId, userId, w);
+    // A write from the page answers "queued" at once while the engine run holds the chat (Build C item 6); it lands after the run.
+    const result = await this.rt.ledger.write(chatId, userId, w, { answerQueued: true });
     if (result.reason === "paused") throw new RequestError("paused", "an earlier message was edited: Keep or Discard first");
     if (!result.applied && !result.pending) throw new RequestError("bad_request", result.reason ?? "the write was refused");
     this.rt.push.changed(chatId, userId);
@@ -287,7 +294,7 @@ export class Dispatcher {
   private async offstage(chatId: ChatId, userId: UserId, world: WorldDoc, state: Working["state"], action: ActionDef, r: Extract<FrontendToBackend, { type: "lre.action" }>, label: string): Promise<ResultBodies["lre.action"]> {
     const runSeed = this.runSeedOf(chatId);
     const w = new Working(this.rt.registry, world, state);
-    const absent = optionalQuery(w.ctx, "economy.offstage_refusal")?.(w.ctx, r.action, r.params, world.pov) ?? null;
+    const absent = optionalQuery(w.ctx, "economy.offstage_refusal")?.(w.ctx, r.action, r.params, world.pov) ?? optionalQuery(w.ctx, "gear.offstage_refusal")?.(w.ctx, r.action, r.params, world.pov) ?? null;
     if (absent !== null) throw new RequestError("validation", absent);
     const pov = state.entities[world.pov];
     const before = { picks: actionWords(this.rt.registry, world, state, action, r.params), from: placeOfEntity(state, world.pov), fields: { ...(pov?.fields ?? {}) } };
@@ -373,7 +380,7 @@ export class Dispatcher {
     });
   }
 
-  private async route(r: FrontendToBackend, userId: UserId, session: string | undefined, reply: <K extends keyof ResultBodies>(request: K, body: ResultBodies[K]) => void, noted: DraftNoted): Promise<void> {
+  private async route(r: FrontendToBackend, userId: UserId, session: string | undefined, reply: <K extends keyof ResultBodies>(request: K, body: ResultBodies[K]) => void, noted: DraftNoted, steps: DiagStep[]): Promise<void> {
     switch (r.type) {
       case "lre.hello":
       case "lre.state.resync": {
@@ -415,7 +422,7 @@ export class Dispatcher {
         reply("lre.cancel", { cancelled: this.rt.ledger.cancel(r.chatId, userId) });
         return;
       case "lre.restart":
-        reply("lre.restart", { start: this.rt.ledger.claimRestart(r.chatId, userId, session, r.turn) });
+        reply("lre.restart", { start: this.rt.ledger.claimRestart(r.chatId, userId, session, r.turn, swipeDirectionOf(r.direction) ?? undefined) });
         return;
       case "lre.action": {
         await this.requireWorldChat(r.chatId, userId);
@@ -515,7 +522,7 @@ export class Dispatcher {
       case "lre.fix": {
         const { state, world } = await this.head(r.chatId, userId);
         let events: LedgerEvent[];
-        let by: { action: string; label: string } | null = null;
+        let by: { action: string; label: string; told?: string } | null = null;
         // What the fix asks for, kept on its entry: one held through a reply, or that a read later comes
         // before, is resolved again from it, so it lands over whatever the story changed (DESIGN §7). A
         // hint opened is the player's doing, not a correction, and keeps its own events.
@@ -546,6 +553,21 @@ export class Dispatcher {
           if ("rejection" in edit) throw new RequestError("validation", edit.rejection.reason);
           events = edit.events;
           asked = { ops };
+        } else if ("things" in r) {
+          // Belongings' changes to the player's things (DESIGN §28.16): ✎ fixes under the player's rules, all or none, one entry with one Undo, named by its label; told as the handovers group says when one hands a thing to someone.
+          const changes = Array.isArray(r.things) ? r.things.map(parseItemFix) : [];
+          if (changes.length === 0 || changes.length > FIX_THINGS_MAX || changes.some((c) => c === null) || typeof r.label !== "string") throw new RequestError("bad_request", `1 to ${FIX_THINGS_MAX} changes to things, with a label`);
+          const fixes = changes as ItemFix[];
+          const ops = fixes.map((change) => ({ op: "fix_item" as const, change }));
+          const edit = resolveEdit(this.rt.registry, world, state, ops, { gm: false, runSeed: this.runSeedOf(r.chatId) });
+          if ("rejection" in edit) throw new RequestError("validation", edit.rejection.reason);
+          events = edit.events;
+          asked = { ops };
+          const label = neutralizeMacros(r.label.trim().slice(0, 120) || "Your things");
+          const tell = typeof r.tell === "boolean" ? r.tell : (await this.rt.settings.get(userId)).offstage.tell[fixGroupOf(fixes)];
+          const after = new Working(this.rt.registry, world, state);
+          after.applyAll(events);
+          by = { action: "things", label, ...(tell ? { told: neutralizeMacros(toldWords(label, fixLines(this.rt.registry, world, after.state, events))) } : {}) };
         } else {
           const set = { op: "set" as const, entity: r.entity, field: r.field, value: r.value };
           // A place fixed with ✎ (the player character's, or where someone in People is) is a real move
@@ -589,13 +611,27 @@ export class Dispatcher {
         return;
       }
       case "lre.gm.part": {
-        // One part of the GM view, built alone (`lre_gm`'s part, party, org and entity): behind the GM gate, as `lre.gm` is.
+        // One part of the GM view, built alone (the GM page's tabs, `lre_gm`'s part, party, org and
+        // entity): behind the GM gate, as `lre.gm` is. Built views reused, the head's render and its
+        // parts are kept for the next read, and a read naming the key it holds builds nothing.
         await this.requireWorldChat(r.chatId, userId);
         const core = await this.rt.ledger.core(r.chatId, userId);
-        const part = core ? buildGmPart(core, toChain(await this.rt.host.chats.messages(r.chatId, userId)), this.rt.registry, (await this.rt.settings.get(userId)).minds, this.rt.ledger.queuedOn(r.chatId), r.part, r.id) : null;
+        if (!core) throw new RequestError("unavailable", "the chat's world revision is not loaded");
+        const settings = await this.rt.settings.get(userId);
+        const reuse = perfSettingsOf(settings.perf).reuseViews;
+        const t0 = performance.now();
+        const messages = await this.rt.host.chats.messages(r.chatId, userId);
+        const t1 = performance.now();
+        const observed = reuse ? cachedChain(messages) : toChain(messages);
+        const t2 = performance.now();
+        const timed: GmReadSteps = { render: 0, build: 0, built: [] };
+        const ask = { part: r.part, ...(r.id !== undefined ? { id: r.id } : {}), ...(r.ids !== undefined ? { ids: r.ids } : {}), ...(r.kind !== undefined ? { kind: r.kind } : {}), ...(r.since !== undefined ? { since: r.since } : {}), ...(r.bytes !== undefined ? { bytes: r.bytes } : {}) };
+        const part = readGmPart({ core, observed, registry: this.rt.registry, minds: settings.minds, waitsOn: this.rt.ledger.queuedOn(r.chatId), reuse }, ask, timed);
         if (!part) throw new RequestError("unavailable", "the chat's world revision is not loaded");
         if ("refused" in part) throw new RequestError("bad_request", part.refused);
+        const t3 = performance.now();
         reply("lre.gm.part", part);
+        steps.push({ name: "read", ms: t1 - t0 }, { name: "decode", ms: t2 - t1 }, { name: "render", ms: timed.render }, { name: "build", ms: timed.build }, { name: "encode", ms: performance.now() - t3 });
         return;
       }
       case "lre.chat.export": {
@@ -658,6 +694,14 @@ export class Dispatcher {
       case "lre.things": {
         if (r.scope === "gm") {
           reply("lre.things", await this.gmThings(r, userId, noted));
+          return;
+        }
+        // Play's Belongings Add (DESIGN §28.16): what the player may make, read from the chat's head.
+        if (r.scope === "play") {
+          await this.requireWorldChat(r.chatId, userId);
+          if (r.op !== "types") throw new RequestError("bad_request", "the op is types");
+          const { world, state } = await this.head(r.chatId, userId);
+          reply("lre.things", playThingTypes(this.rt.registry, world, state));
           return;
         }
         // Build's Things (ITEMS-SPEC §10.1): the world's draft as a chat would start from it, an author's view.
@@ -1255,7 +1299,7 @@ export class Dispatcher {
     }
     if (kind === "swipe_option") {
       if (choice !== "renarrate" && choice !== "rerun") throw new RequestError("bad_request", `unknown swipe mode ${choice}`);
-      this.rt.setSwipeChoice(chatId, choice);
+      this.rt.setSwipeChoice(chatId, choice, swipeDirectionOf(payload?.text) ?? undefined);
       return { applied: true, pending: false };
     }
     if (kind === "reply_failed") {

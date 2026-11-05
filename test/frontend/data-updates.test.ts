@@ -36,7 +36,7 @@ describe("Build → World → Data updates", () => {
 
   test("an edited table's review says what each side changed, the rows by name", () => {
     const items = of("gear.items");
-    expect(changeLines(items.shipped, items.shipped.columns)).toEqual([expect.stringMatching(/^90 rows changed: Wallet, bifold; .*; and 78 more$/), "Column added: Size"]);
+    expect(changeLines(items.shipped, items.shipped.columns)).toEqual([expect.stringMatching(/^26 rows added: Pistol, 9mm semi-automatic; .*; and 14 more$/), expect.stringMatching(/^90 rows changed: Wallet, bifold; .*; and 78 more$/), "Columns added: Size, Ammo", "Column changed: Category"]);
     expect(changeLines(items.yours ?? { added: { count: 0, names: [] }, changed: { count: 0, names: [] }, dropped: { count: 0, names: [] } })).toEqual(["1 row changed: Wallet, bifold"]);
   });
 });

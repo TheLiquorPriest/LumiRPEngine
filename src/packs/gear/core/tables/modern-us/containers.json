@@ -2,7 +2,7 @@
   "id": "gear.containers",
   "pack": "gear",
   "schema": "lre-table/gear.containers/v1",
-  "revision": "29334aeff91f1b6b9e99db08972661f1",
+  "revision": "91ebed05ed7fe51de7bfd7c0c318bd72",
   "label": "Containers",
   "source": {"dataPack":"modern-us","file":"us/gear.json","sourceSchema":"lre-data-src/us/gear/v1","reflectsPeriod":"2025-2026 retail prices; physical values are typical product weights","approximate":true,"basis":"Typical product weights and dimensions from manufacturer spec sheets and common retail products, rounded; prices from prices.json bands and typical retail. Not a real inventory standard."},
   "columns": {
@@ -51,6 +51,9 @@
     "motorcycle_saddlebags": {"name":"Motorcycle saddlebags, pair","capacity_l":30,"max_load_kg":10,"empty_weight_g":3000,"location":"vehicle_fixed","holds":"hand","equip_slot":"none","price_cents":{"min":10000,"typical":25000,"max":70000}},
     "scooter_underseat": {"name":"Scooter under-seat storage","capacity_l":30,"max_load_kg":5,"empty_weight_g":0,"location":"vehicle_fixed","holds":"hand","equip_slot":"none","price_cents":{"min":0,"typical":0,"max":0}},
     "atv_racks": {"name":"ATV front and rear racks","capacity_l":120,"max_load_kg":120,"empty_weight_g":0,"location":"vehicle_fixed","holds":"armful","equip_slot":"none","price_cents":{"min":0,"typical":0,"max":0},"notes":"About 40 kg front plus 80 kg rear."},
-    "utv_cargo_bed": {"name":"UTV dump bed","capacity_l":350,"max_load_kg":450,"empty_weight_g":0,"location":"vehicle_fixed","holds":"heavy","equip_slot":"none","price_cents":{"min":0,"typical":0,"max":0}}
+    "utv_cargo_bed": {"name":"UTV dump bed","capacity_l":350,"max_load_kg":450,"empty_weight_g":0,"location":"vehicle_fixed","holds":"heavy","equip_slot":"none","price_cents":{"min":0,"typical":0,"max":0}},
+    "gun_safe": {"name":"Gun safe","capacity_l":400,"max_load_kg":300,"empty_weight_g":150000,"location":"furniture","size":"furniture","holds":"armful","equip_slot":"none","price_cents":{"min":50000,"typical":120000,"max":400000},"notes":"Long guns upright, handguns and ammunition on the door and shelves; most bolt to the floor."},
+    "rifle_case_soft": {"name":"Rifle case, soft","capacity_l":12,"max_load_kg":8,"empty_weight_g":1200,"location":"carried","size":"armful","holds":"armful","equip_slot":"shoulder","price_cents":{"min":2500,"typical":6000,"max":20000}},
+    "ammo_can": {"name":"Ammo can, .50 caliber","capacity_l":8,"max_load_kg":15,"empty_weight_g":1800,"location":"carried","size":"hand","holds":"hand","equip_slot":"hand_held","price_cents":{"min":1500,"typical":2500,"max":5000}}
   }
 }

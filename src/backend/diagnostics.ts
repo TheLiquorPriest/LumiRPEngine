@@ -14,7 +14,7 @@ import { agentLabel } from "../shared/agent-settings";
 import type { ChatId, UserId } from "../shared/ids";
 import { runDir } from "../shared/ids";
 import { isRecord } from "../shared/json";
-import type { Activity, ActivityAgent, DiagAgentCall, DiagCall, DiagLevel, DiagPhase, DiagRecord, DiagSection, DiagStatus, DiagUsage } from "../shared/diagnostics";
+import type { Activity, ActivityAgent, DiagAgentCall, DiagCall, DiagLevel, DiagOffered, DiagPhase, DiagRecord, DiagSection, DiagStatus, DiagStep, DiagUsage, TurnPhaseName } from "../shared/diagnostics";
 import { callLabel, DIAG_AGENT_OUTCOMES, DIAG_PHASES, DIAG_RING, DIAG_USAGE_FIELDS, SLOW_MS, STEP_LABEL, suggestFix } from "../shared/diagnostics";
 import type { Limit } from "../shared/minds";
 import { limitOf } from "../shared/minds";
@@ -76,7 +76,7 @@ interface ChatDiag {
 const FORMAT = 1;
 const STATUSES: readonly DiagStatus[] = ["ok", "skipped", "failed"];
 const LEVELS: readonly DiagLevel[] = ["debug", "info", "warn", "error"];
-const KINDS: readonly DiagRecord["kind"][] = ["step", "error", "sections", "slow", "turn", "agent"];
+const KINDS: readonly DiagRecord["kind"][] = ["step", "error", "sections", "slow", "turn", "agent", "phase"];
 
 function isDiagRecord(raw: unknown): raw is DiagRecord {
   if (!isRecord(raw)) return false;
@@ -106,23 +106,34 @@ function usageOf(raw: unknown): DiagUsage | null | undefined {
   return { in: sent, cachedIn, ...(isCount(cacheWrite) ? { cacheWrite } : {}), out, reasoningOut, ...(guessed.length > 0 ? { estimated: guessed } : {}) };
 }
 
-/** An agent call as stored, or null when it doesn't read as one; a malformed tool list or text ref is left out of it. */
+/** The tools a call was offered as stored or given, or undefined when it isn't that. */
+function offeredOf(raw: unknown): DiagOffered | undefined {
+  return isRecord(raw) && isCount(raw.tools) && isCount(raw.tokens) ? { tools: raw.tools, tokens: raw.tokens } : undefined;
+}
+
+/** A slow request's steps as stored or given: each a name and a time; any other entry is left out. */
+function stepsOf(raw: unknown): DiagStep[] {
+  return Array.isArray(raw) ? raw.flatMap((s) => (isRecord(s) && typeof s.name === "string" && s.name !== "" && isCount(s.ms) ? [{ name: s.name.slice(0, 80), ms: s.ms }] : [])) : [];
+}
+
+/** An agent call as stored, or null when it doesn't read as one; a malformed tool list, offer or text ref is left out of it. */
 function agentCallOf(raw: unknown): DiagAgentCall | null {
   if (!isRecord(raw)) return null;
   const { role, connection, model, ms, error, tools, text } = raw;
   const usage = usageOf(raw.usage);
   const outcome = DIAG_AGENT_OUTCOMES.find((o) => o === raw.outcome);
   if (typeof role !== "string" || typeof connection !== "string" || typeof model !== "string" || !isCount(ms) || outcome === undefined || usage === undefined) return null;
-  return { role, connection, model, usage, ms, outcome, ...(typeof error === "string" ? { error } : {}), ...(Array.isArray(tools) ? { tools: tools.filter((t): t is string => typeof t === "string") } : {}), ...(isBlobHash(text) ? { text } : {}) };
+  const offered = offeredOf(raw.offered);
+  return { role, connection, model, usage, ms, outcome, ...(typeof error === "string" ? { error } : {}), ...(Array.isArray(tools) ? { tools: tools.filter((t): t is string => typeof t === "string") } : {}), ...(offered ? { offered } : {}), ...(isBlobHash(text) ? { text } : {}) };
 }
 
-/** A stored record, or null when it doesn't read as one. A malformed agent call is dropped from its record, which stays; files written before agent calls read as they did. */
+/** A stored record, or null when it doesn't read as one. A malformed agent call is dropped from its record, which stays, and so are malformed steps; files written before agent calls read as they did. */
 function storedRecord(raw: unknown): DiagRecord | null {
   if (!isDiagRecord(raw)) return null;
-  if (raw.agent === undefined) return raw;
-  const { agent, ...rest } = raw;
-  const call = agentCallOf(agent);
-  return call ? { ...rest, agent: call } : rest;
+  const { agent, steps, ...rest } = raw;
+  const call = agent === undefined ? null : agentCallOf(agent);
+  const own = steps === undefined ? [] : stepsOf(steps);
+  return { ...rest, ...(call ? { agent: call } : {}), ...(own.length > 0 ? { steps: own } : {}) };
 }
 
 export function messageOf(error: unknown): string {
@@ -491,7 +502,8 @@ export class Diagnostics {
     const reason = call.error ?? (call.outcome === "cancelled" ? "cancelled" : call.outcome === "refused" ? "refused by the provider" : undefined);
     const fix = status === "failed" && reason ? suggestFix(reason) : undefined;
     const usage = usageOf(call.usage) ?? null;
-    const agent: DiagAgentCall = { role: call.role, connection: call.connection, model: call.model, usage, ms: call.ms, outcome: call.outcome, ...(call.error !== undefined ? { error: call.error } : {}), ...(call.tools && call.tools.length > 0 ? { tools: [...call.tools] } : {}), ...(hash ? { text: hash } : {}) };
+    const offered = offeredOf(call.offered);
+    const agent: DiagAgentCall = { role: call.role, connection: call.connection, model: call.model, usage, ms: call.ms, outcome: call.outcome, ...(call.error !== undefined ? { error: call.error } : {}), ...(call.tools && call.tools.length > 0 ? { tools: [...call.tools] } : {}), ...(offered ? { offered } : {}), ...(hash ? { text: hash } : {}) };
     const record = this.add(at, { kind: "agent", level: status === "failed" ? "warn" : "info", turn: at.turn, phase, step: call.role, status, start: end - call.ms, end, ms: call.ms, ...(reason ? { reason } : {}), ...(fix ? { fix } : {}), agent });
     if (hash !== undefined && text !== undefined && blobs) await blobs.put(at.userId, text).catch((error: unknown) => this.host.log("warn", `[LumiRPEngine] chat ${at.chatId}: the ${call.role} agent call's text wasn't stored (${messageOf(error)})`, at.userId, at.turn ?? undefined));
     return record;
@@ -581,15 +593,23 @@ export class Diagnostics {
     if (activity?.turn === from) this.activities.set(chatId, { ...activity, turn: to });
   }
 
-  /** A request that took `ms`: kept when it is slower than `SLOW_MS`. */
-  slow(userId: UserId, chatId: ChatId | null, what: string, ms: number): void {
+  /**
+   * A request that took `ms`: kept when it is slower than `SLOW_MS`, with where its time went
+   * (`steps`, each a name and its ms, in order: a GM view's read, decode, render, build and encode;
+   * a state view's panels) when the caller measured it.
+   */
+  slow(userId: UserId, chatId: ChatId | null, what: string, ms: number, steps?: readonly DiagStep[]): void {
     if (ms <= SLOW_MS) return;
     const end = this.now();
-    this.add({ chatId, userId, turn: null }, { kind: "slow", level: "warn", turn: null, phase: "request", step: what, status: "ok", start: end - ms, end, ms, reason: `${what} took ${(ms / 1000).toFixed(1)} s` });
+    const own = stepsOf(steps ?? []);
+    this.add({ chatId, userId, turn: null }, { kind: "slow", level: "warn", turn: null, phase: "request", step: what, status: "ok", start: end - ms, end, ms, reason: `${what} took ${(ms / 1000).toFixed(1)} s${own.length > 0 ? ` (${own.map((s) => `${s.name} ${(s.ms / 1000).toFixed(1)} s`).join(", ")})` : ""}`, ...(own.length > 0 ? { steps: own } : {}) });
   }
 
-  /** Times a request, keeping it when slow; one that throws is recorded as an error on its chat, and rethrown. */
-  async timed<T>(userId: UserId, chatId: ChatId | null, what: string, fn: () => Promise<T>): Promise<T> {
+  /**
+   * Times a request, keeping it when slow; one that throws is recorded as an error on its chat, and
+   * rethrown. `steps` is read once it ends, so `fn` may fill it as it goes.
+   */
+  async timed<T>(userId: UserId, chatId: ChatId | null, what: string, fn: () => Promise<T>, steps?: readonly DiagStep[]): Promise<T> {
     const t0 = performance.now();
     try {
       return await fn();
@@ -597,7 +617,34 @@ export class Diagnostics {
       if (chatId) this.error({ chatId, userId, turn: null }, what, error);
       throw error;
     } finally {
-      this.slow(userId, chatId, what, performance.now() - t0);
+      this.slow(userId, chatId, what, performance.now() - t0, steps);
+    }
+  }
+
+  /**
+   * One part of a turn's time (`TURN_PHASES`), recorded as it ends: how long it took and, where it
+   * says why, its cause ("ready" for a summary made ahead). "Where the last turn's time went" reads
+   * these. Informational: it never fails a turn and never touches the activity line.
+   */
+  phase(at: DiagAt, p: { name: TurnPhaseName; ms: number; cause?: string }): void {
+    const end = this.now();
+    const ms = Number.isFinite(p.ms) && p.ms > 0 ? p.ms : 0;
+    const cause = p.cause?.trim().slice(0, 300);
+    this.add(at, { kind: "phase", level: "info", turn: at.turn, phase: null, step: p.name, status: "ok", start: end - ms, end, ms, ...(cause ? { reason: cause } : {}) });
+  }
+
+  /** Times `fn` as one part of a turn's time (`phase`), whether it returns or throws; `cause` may read its value. */
+  async phased<T>(at: DiagAt, name: TurnPhaseName, fn: () => Promise<T>, cause?: (value: T) => string | undefined): Promise<T> {
+    const t0 = this.now();
+    let value: T | undefined;
+    let ok = false;
+    try {
+      value = await fn();
+      ok = true;
+      return value;
+    } finally {
+      const why = ok && cause ? cause(value as T) : ok ? undefined : "it failed";
+      this.phase(at, { name, ms: this.now() - t0, ...(why ? { cause: why } : {}) });
     }
   }
 

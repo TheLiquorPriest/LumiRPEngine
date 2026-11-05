@@ -3,33 +3,38 @@
 // Here: where the player character is, what is in the room (furniture, built-in things and vehicles,
 // what is in them nested), what lies there, and what the people there have, with why each has it.
 // By place and By owner: Build's trees. Select makes those lists choose: the bulk bar under them
-// moves, puts in, puts away (each to where it rests), makes theirs, sizes or removes every thing
-// picked as one GM edit with one Undo. Tidy up: the audit's findings, each with the one GM edit that
-// fixes it or the fixes to choose from, Leave it (kept beside the chat; Show N left brings one back),
-// Ask the Curator (the GM assistant), and how many a run shows; then Keep in the world, which copies
-// what the chat made in play into its world's draft. A thing's page, from here or from World: where
-// it is and why whoever has it has it, where it rests and Put it away, Move to…, Put in…, Hand to…,
-// Kept at…, Wear and Take off, whose it is and who may use it, what it is and holds, its secrecy, its
-// history in this chat and every field under Advanced; never a simulation level, a life or a tier.
-// A person's things on their GM page: Outfit, Carried and Wardrobe first. Each control is one GM
-// edit with its own Undo, its notice saying what it did.
+// moves, puts in, puts away (each to where it rests), puts on or takes off, hands over, makes
+// theirs, lets someone use, renames (one), sizes or removes every thing picked as one GM edit with
+// one Undo. + Add a thing makes one anywhere, as one GM edit. Tidy up: the audit's findings, each
+// with the one GM edit that fixes it or the fixes to choose from, Leave it (kept beside the chat;
+// Show N left brings one back), Ask the Curator (the GM assistant), and how many a run shows; then
+// Keep in the world, which copies what the chat made in play into its world's draft. A thing's page,
+// from here or from World: where it is and why whoever has it has it, where it rests and Put it
+// away, Move to…, Put in…, Hand to…, Kept at…, Wear and Take off, whose it is and who may use it,
+// what it is and holds, its secrecy, its history in this chat and every field under Advanced; never
+// a simulation level, a life or a tier. A person's things on their GM page: Outfit, Carried and
+// Wardrobe first, then (Gear 3) their saved outfits and loadouts. Each control is one GM edit with
+// its own Undo, its notice saying what it did.
 
-import { useEffect, useMemo, useState } from "preact/hooks";
+import type { ComponentChildren } from "preact";
+import { useEffect, useId, useMemo, useState } from "preact/hooks";
 import type { EntityId } from "../../shared/ids";
 import type { EditOp, GmThingsRead, ResultBodies } from "../../shared/protocol";
 import { EDIT_OPS_MAX } from "../../shared/protocol";
 import { TIDY_BOUNDS } from "../../shared/settings";
 import type { GmEntity, GmView } from "../../shared/state-view";
 import type { GmThingExtras, HistorySource, KeepResult, LoanChoice, MadeInPlay, RestView, TidyFinding, TidyFix, TidyKind, TidyRun } from "../../shared/thing-gm";
-import type { HandoverBasis, ItemOp, Rest, Size, SizeClass, Spot } from "../../shared/things";
-import { isSize, SIZE_LABELS, SIZES, THING_NAME_MAX } from "../../shared/things";
-import type { PartyRef, ThingPage, ThingPicks, ThingRow, WhereChoice, WhereStep } from "../../shared/thing-view";
+import type { HandoverBasis, ItemOp, Rest, SetKind, Size, SizeClass, Spot } from "../../shared/things";
+import { isSize, makeFieldsOf, SET_KIND_LABEL, SET_KINDS, SET_NAME_MAX, setsOf, SIZE_LABELS, SIZES, THING_NAME_MAX } from "../../shared/things";
+import type { PartyRef, ThingPage, ThingPicks, ThingRow, ThingType, WhereChoice, WhereStep } from "../../shared/thing-view";
 import { GRANT_WORDS, partyPossessive, presumedLine, SIZE_FROM_WORDS, SIZE_WORDS, sizeLabel, whoseWords } from "../../shared/thing-view";
+import type { VehicleClassChoice } from "../../shared/vehicles";
 import { listWords } from "../../shared/words";
-import { useApp } from "../app";
+import { SetRows } from "../../packs/gear/ui/sets-sheet";
+import { useApp, useChatWorld } from "../app";
 import { AddPicker, CheckField, FormSheet, RefPicker, type RefOption } from "../build/form-kit";
 import type { MenuItem } from "../build/chrome";
-import { HoldsSection, OwnerList, PersonGroups, PlaceTree, SizeChoices, ThingChips, ThingRowView, TreeRows, whereWords, type PersonBucket } from "../build/things";
+import { buildClasses, HoldsSection, OwnerList, PersonGroups, PlaceTree, ThingChips, ThingRowView, TreeRows, whereWords, type PersonBucket } from "../build/things";
 import { placeSections, type TreeNode } from "../build/things-model";
 import { TextListEditor } from "../character/text-list";
 import { wordsOf } from "../character/places";
@@ -37,10 +42,14 @@ import { Badge, Banner, Button, Disclosure, Empty, HostSelect, IdText, List, Lis
 import { Icon } from "../icons";
 import { PickBox, SelectBar, useSelection, type Selection } from "../multi-select";
 import { gmThingsRequest } from "../requests";
+import { useSelect } from "../store";
+import { AddThingSheet, type AddDraft } from "../things/add-thing";
 import { cannotHold, pathText, stepWords } from "../things/where";
 import { WhereSheet, type WhereExtra, type WherePick } from "../things/where-picker";
+import { SizeChoices, THING_KINDS } from "../things/what-it-is";
 import type { BulkEditor, Editor } from "./editor";
 import { FieldRow, Relations } from "./entity";
+import { thinEntity } from "./parts";
 import { gmAt, gmOpen } from "./gate";
 import { ActionRow, ActionRows, GmCard, GmPage, usePages } from "./ui";
 
@@ -50,12 +59,12 @@ type ThingsBody = ResultBodies["lre.things"];
 const NO_PROBLEMS: ReadonlyMap<string, "error" | "warning"> = new Map();
 
 /**
- * Reads `lre.things` in GM scope for the chat, again whenever the GM view loads again (`gm`: a new
- * view after every turn, edit and Undo). Null while it loads; `failed` once it couldn't be read;
- * `set` takes an answer another request gave (Leave it, Keep in the world). A read of something
- * else shows nothing of the last one's.
+ * Reads `lre.things` in GM scope for the chat, again when the chat moves on (`BulkEditor.reloadKey`:
+ * a turn, an edit, an Undo), not when a part of the GM view lands. Null while it loads; `failed` once
+ * it couldn't be read; `set` takes an answer another request gave (Leave it, Keep in the world). A
+ * read of something else shows nothing of the last one's.
  */
-function useGmThings(chatId: string, read: GmThingsRead | null, gm: GmView): { body: ThingsBody | null; failed: boolean; set(body: ThingsBody): void } {
+function useGmThings(chatId: string, read: GmThingsRead | null, reloadKey: string): { body: ThingsBody | null; failed: boolean; set(body: ThingsBody): void } {
   const app = useApp();
   const key = read ? JSON.stringify(read) : "";
   const [state, setState] = useState<{ key: string; body: ThingsBody | null; failed: boolean }>({ key: "", body: null, failed: false });
@@ -68,7 +77,7 @@ function useGmThings(chatId: string, read: GmThingsRead | null, gm: GmView): { b
     return () => {
       live = false;
     };
-  }, [app, chatId, key, gm]);
+  }, [app, chatId, key, reloadKey]);
   const mine = state.key === key;
   return { body: mine ? state.body : null, failed: mine && state.failed, set: (body) => setState({ key, body, failed: false }) };
 }
@@ -357,11 +366,11 @@ export function KeepList(props: { made: MadeInPlay; picked: ReadonlySet<string>;
  * how many a run shows (the user's setting), Ask the Curator (the finding's sentence sent to the GM
  * assistant, which then opens), and Keep in the world's list and its Keep.
  */
-function TidyPanel(props: { chatId: string; editor: Editor; names: ReadonlyMap<string, string>; onOpen(id: EntityId): void }) {
+function TidyPanel(props: { chatId: string; editor: BulkEditor; names: ReadonlyMap<string, string>; onOpen(id: EntityId): void }) {
   const app = useApp();
   const { editor, chatId } = props;
-  const tidy = useGmThings(chatId, { op: "tidy" }, editor.gm);
-  const made = useGmThings(chatId, { op: "made" }, editor.gm);
+  const tidy = useGmThings(chatId, { op: "tidy" }, editor.reloadKey);
+  const made = useGmThings(chatId, { op: "made" }, editor.reloadKey);
   const [showLeft, setShowLeft] = useState(false);
   const [picked, setPicked] = useState<ReadonlySet<string>>(new Set());
   const [kept, setKept] = useState<KeepResult | null>(null);
@@ -431,18 +440,35 @@ function TidyPanel(props: { chatId: string; editor: Editor; names: ReadonlyMap<s
 // ---------------------------------------------------------------- Select: the bulk bar
 
 /** The sheets the bulk bar opens. */
-export type BulkSheet = "move" | "put" | "own" | "size" | "remove";
+export type BulkSheet = "move" | "put" | "hand" | "own" | "use" | "rename" | "size" | "remove";
 
-/** One change the bulk bar makes to every thing picked: `words` says where a move takes them ("at the Garage", "in the Wardrobe"). */
-export type BulkChange = { do: "move"; to: Spot; words: string } | { do: "away" } | { do: "own"; owner: PartyRef | null } | { do: "size"; size: Size } | { do: "remove" };
+/**
+ * One change the bulk bar makes to every thing picked: `words` says where a move takes them ("at the
+ * Garage", "in the Wardrobe"); `whom` names whom a hand-over or a grant is to, and `until` when a
+ * loan or a grant ends.
+ */
+export type BulkChange =
+  | { do: "move"; to: Spot; words: string }
+  | { do: "away" }
+  | { do: "wear" }
+  | { do: "hand"; to: EntityId; whom: string; basis: Extract<HandoverBasis, "hold" | "gift" | "loan">; until?: LoanChoice }
+  | { do: "own"; owner: PartyRef | null }
+  | { do: "grant"; who: EntityId; whom: string; until?: LoanChoice }
+  | { do: "rename"; name: string }
+  | { do: "size"; size: Size }
+  | { do: "remove" };
 
 /** "1 thing", "3 things". */
 const counted = (n: number): string => (n === 1 ? "1 thing" : `${n} things`);
 
-/** The things a notice names: up to three by name, more by how many, with the verb that agrees. */
+/** The things a notice names: up to three by name, more by how many. */
+function namesOf(rows: readonly ThingRow[]): string {
+  return rows.length <= 3 ? listWords(rows.map((r) => r.name)) : counted(rows.length);
+}
+
+/** The things a notice names, with the verb that agrees. */
 function named(rows: readonly ThingRow[], verb: { one: string; many: string }): string {
-  const who = rows.length <= 3 ? listWords(rows.map((r) => r.name)) : counted(rows.length);
-  return `${who} ${rows.length === 1 ? verb.one : verb.many}`;
+  return `${namesOf(rows)} ${rows.length === 1 ? verb.one : verb.many}`;
 }
 
 const IS = { one: "is", many: "are" } as const;
@@ -453,11 +479,25 @@ function isAt(row: ThingRow, spot: Spot): boolean {
   return "place" in spot ? at?.is === "place" && at.id === spot.place : at?.id === spot.in;
 }
 
+/** Whether every thing picked is worn: the bar's Wear is Take off then. */
+export function allWorn(rows: readonly ThingRow[]): boolean {
+  return rows.length > 0 && rows.every((r) => r.worn !== null && r.with !== null);
+}
+
+/** The ends the bulk bar's loans and grants offer from the HUD's clock (`now`, its minutes): a day, three days or a week from now; none without a clock. */
+export function bulkLoans(now: number | null): LoanChoice[] {
+  if (now === null) return [];
+  return ([[1, "For a day"], [3, "For three days"], [7, "For a week"]] as const).map(([days, label]) => ({ label, until: now + days * 1440 }));
+}
+
 /**
  * The one GM edit a bulk change makes to the things picked (ITEMS-SPEC §10.2), with its notice: Move
- * to a place, Put in a holder, Put away (each to where it rests, `ThingRow.rest`), Make it theirs, a
- * size, or Remove; each thing one op, as its own page's control sends it. A thing already so is left
- * out (and a Put away says how many stay); null when that leaves nothing to change.
+ * to a place, Put in a holder, Put away (each to where it rests, `ThingRow.rest`), Wear or Take off
+ * (on whoever has it: Take off once every one is worn, else Wear what takes a slot and isn't worn
+ * yet), Hand to someone (to hold, a gift or a loan), Make it theirs, Let someone use it (until an
+ * end, a loan; else assigned), Rename (one thing), a size, or Remove; each thing one op, as its own
+ * page's control sends it. A thing already so is left out (and a Put away says how many stay); null
+ * when that leaves nothing to change.
  */
 export function bulkEdit(change: BulkChange, rows: readonly ThingRow[]): { ops: EditOp[]; done: string } | null {
   switch (change.do) {
@@ -473,12 +513,38 @@ export function bulkEdit(change: BulkChange, rows: readonly ThingRow[]): { ops: 
       const staying = stay === 0 ? "" : ` ${counted(stay)} ${stay === 1 ? "stays" : "stay"}: already where it is kept, or kept nowhere.`;
       return { ops: going.map((g) => item({ do: "move", item: g.row.id, to: g.rest, why: "Put away" })), done: `${named(going.map((g) => g.row), IS)} put away, each where it is kept.${staying}` };
     }
+    case "wear": {
+      if (allWorn(rows)) return { ops: rows.flatMap((r) => (r.with !== null ? [item({ do: "wear", item: r.id, who: r.with, off: true })] : [])), done: `${named(rows, IS)} taken off; ${rows.length === 1 ? "it stays" : "each stays"} with whoever wore it.` };
+      const wearing = rows.flatMap((r) => (r.slot !== null && r.with !== null && r.worn === null ? [{ row: r, who: r.with }] : []));
+      if (wearing.length === 0) return null;
+      return { ops: wearing.map((w) => item({ do: "wear", item: w.row.id, who: w.who })), done: `${named(wearing.map((w) => w.row), IS)} worn now, ${wearing.length === 1 ? "by" : "each by"} whoever has it.` };
+    }
+    case "hand": {
+      // What they hold already is no hand-over.
+      const handing = rows.filter((r) => !isAt(r, { in: change.to }));
+      if (handing.length === 0) return null;
+      const until = change.until;
+      const done = change.basis === "gift" ? `${named(handing, IS)} ${partyPossessive({ name: change.whom, is: "person" })} now, a gift.` : change.basis === "loan" ? `${change.whom} has ${namesOf(handing)} on loan${until ? `, ${until.label.charAt(0).toLowerCase()}${until.label.slice(1)}` : ""}.` : `${change.whom} is holding ${namesOf(handing)} now.`;
+      return { ops: handing.map((r) => item({ do: "hand", item: r.id, to: change.to, basis: change.basis, ...(until ? { until: until.until } : {}), why: "The GM handed it over" })), done };
+    }
     case "own": {
       const owner = change.owner;
       // A stated owner already theirs (or, for nobody, none stated) is no change.
       const changing = rows.filter((r) => (owner === null ? r.whose.presumed === null : !(r.whose.presumed === null && r.whose.owners.length === 1 && r.whose.owners[0]?.id === owner.id)));
       if (changing.length === 0) return null;
       return { ops: changing.map((r) => item({ do: "own", item: r.id, owner: owner?.id ?? null, why: "The GM made it so" })), done: `${named(changing, IS)} ${owner ? partyPossessive(owner) : "nobody's"} now.` };
+    }
+    case "grant": {
+      // Its stated owner needs no leave to use it.
+      const granting = rows.filter((r) => !(r.whose.presumed === null && r.whose.owners.some((o) => o.id === change.who)));
+      if (granting.length === 0) return null;
+      const until = change.until;
+      return { ops: granting.map((r) => item({ do: "grant", item: r.id, who: change.who, basis: until ? "loan" : "assign", ...(until ? { until: until.until } : {}) })), done: `${change.whom} may use ${namesOf(granting)} ${until ? `${until.label.charAt(0).toLowerCase()}${until.label.slice(1)}` : "now"}.` };
+    }
+    case "rename": {
+      const row = rows.length === 1 ? rows[0] : undefined;
+      const name = change.name.trim();
+      return !row || name === "" || name === row.name ? null : { ops: [item({ do: "label", item: row.id, name })], done: `${row.name} is called ${name} now.` };
     }
     case "size": {
       const changing = rows.filter((r) => r.size !== change.size);
@@ -498,15 +564,18 @@ function biggest(rows: readonly ThingRow[]): SizeClass | null {
 
 /**
  * The bar under GM → Things while it chooses: how many are picked, Select all and Clear, and what to
- * do to every thing picked: Move to…, Put in…, Put away (each to where it rests), Make it theirs…,
- * Size… and Remove…, each one GM edit of one op a thing with one Undo, so at most `EDIT_OPS_MAX` at a
- * time. Put away sends at once; the rest open their sheets.
+ * do to every thing picked: Move to…, Put in…, Put away (each to where it rests), Wear or Take off
+ * (on whoever has it), Hand to…, Make it theirs…, Let use…, Rename… (one thing), Size… and
+ * Remove…, each one GM edit of one op a thing with one Undo, so at most `EDIT_OPS_MAX` at a time.
+ * Put away and Wear send at once; the rest open their sheets.
  */
 export function ThingsBulkBar(props: { selection: Selection; all: readonly string[]; shown: readonly string[]; rows: readonly ThingRow[]; editor: Editor; onSheet(sheet: BulkSheet): void }) {
   const { rows, editor } = props;
   const over = rows.length > EDIT_OPS_MAX;
   const off = editor.busy || rows.length === 0 || over;
   const away = bulkEdit({ do: "away" }, rows);
+  const wear = bulkEdit({ do: "wear" }, rows);
+  const takeOff = allWorn(rows);
   return (
     <SelectBar label="Things picked" selection={props.selection} all={props.all} shown={props.shown}>
       {over ? <span class="lre-small lre-muted" data-lre-bulk-over="">{`One edit holds at most ${EDIT_OPS_MAX} changes: pick fewer.`}</span> : null}
@@ -519,8 +588,20 @@ export function ThingsBulkBar(props: { selection: Selection; all: readonly strin
       <Button size="sm" icon="home" disabled={off || away === null} title={away === null && rows.length > 0 ? "Each is where it is kept already, or kept nowhere" : undefined} onClick={() => away && void editor.edit(away.ops, away.done)}>
         Put away
       </Button>
+      <Button size="sm" icon={takeOff ? "close" : "shield"} disabled={off || wear === null} title={wear === null && rows.length > 0 ? "None of them takes a slot and is with someone to wear it" : undefined} onClick={() => wear && void editor.edit(wear.ops, wear.done)}>
+        {takeOff ? "Take off" : "Wear"}
+      </Button>
+      <Button size="sm" icon="user-plus" disabled={off} onClick={() => props.onSheet("hand")}>
+        Hand to…
+      </Button>
       <Button size="sm" icon="user" disabled={off} onClick={() => props.onSheet("own")}>
         Make it theirs…
+      </Button>
+      <Button size="sm" icon="key" disabled={off} onClick={() => props.onSheet("use")}>
+        Let use…
+      </Button>
+      <Button size="sm" icon="edit" disabled={off || rows.length !== 1} title={rows.length > 1 ? "Rename one thing at a time" : undefined} onClick={() => props.onSheet("rename")}>
+        Rename…
       </Button>
       <Button size="sm" icon="layers" disabled={off} onClick={() => props.onSheet("size")}>
         Size…
@@ -532,26 +613,62 @@ export function ThingsBulkBar(props: { selection: Selection; all: readonly strin
   );
 }
 
-/** Make it theirs… for the things picked: a person or an organization, searched by name, or Nobody. */
-function PartySheet(props: { subtitle: string; parties: readonly PartyRef[]; onPick(party: PartyRef | null): void; onClose(): void }) {
+/** A person or an organization for the things picked, searched by name: Make it theirs… (or Nobody), or Let use… (people only, `children` above them saying until when). */
+function PartySheet(props: { kind: "own" | "use"; subtitle: string; parties: readonly PartyRef[]; children?: ComponentChildren; onPick(party: PartyRef | null): void; onClose(): void }) {
   const [query, setQuery] = useState("");
   const want = wordsOf(query);
   const shown = props.parties.filter((p) => want.every((q) => wordsOf(p.name).some((w) => w.startsWith(q))));
+  const search = props.kind === "own" ? "Search people and organizations" : "Search people";
   return (
-    <FormSheet title="Make it theirs" subtitle={props.subtitle} onClose={props.onClose}>
-      <div class="lre-cp-sheet" data-lre-bulk-own="">
+    <FormSheet title={props.kind === "own" ? "Make it theirs" : "Let someone use them"} subtitle={props.subtitle} onClose={props.onClose}>
+      <div class="lre-cp-sheet" data-lre-bulk-party={props.kind}>
+        {props.children}
         <label class="lre-cp-search">
           <Icon name="search" size={16} />
-          <input class="lre-input" type="search" placeholder="Search people and organizations" aria-label="Search people and organizations" value={query} onInput={(event) => setQuery(event.currentTarget.value)} />
+          <input class="lre-input" type="search" placeholder={search} aria-label={search} value={query} onInput={(event) => setQuery(event.currentTarget.value)} />
         </label>
         <List>
-          {want.length === 0 ? <ListRow icon="minus" title="Nobody" subtitle="Nobody's: anyone's to use" onClick={() => props.onPick(null)} /> : null}
+          {props.kind === "own" && want.length === 0 ? <ListRow icon="minus" title="Nobody" subtitle="Nobody's: anyone's to use" onClick={() => props.onPick(null)} /> : null}
           {shown.map((p) => (
             <ListRow key={p.id} icon={p.is === "person" ? "user" : "users"} title={p.name} subtitle={p.is === "person" ? undefined : p.is === "company" ? "A business" : `A ${p.is}`} onClick={() => props.onPick(p)} />
           ))}
         </List>
         {shown.length === 0 ? <Empty icon="search">No one is called that.</Empty> : null}
       </div>
+    </FormSheet>
+  );
+}
+
+/** Let use… for the things picked: until a day, three days or a week from now, or with no end (assigned to them), then whom. */
+function UseSheet(props: { subtitle: string; people: readonly PartyRef[]; loans: readonly LoanChoice[]; onPick(who: PartyRef, until: LoanChoice | null): void; onClose(): void }) {
+  const [loan, setLoan] = useState(-1);
+  const until = props.loans[loan] ?? null;
+  return (
+    <PartySheet kind="use" subtitle={props.subtitle} parties={props.people} onClose={props.onClose} onPick={(who) => who && props.onPick(who, until)}>
+      {props.loans.length > 0 ? <HostSelect label="Until" value={String(loan)} options={[{ value: "-1", label: "No end: until someone stops it" }, ...props.loans.map((l, i) => ({ value: String(i), label: l.label }))]} onChange={(next) => setLoan(Number(next))} /> : null}
+    </PartySheet>
+  );
+}
+
+/** Rename… for the one thing picked: what it is called from now on. */
+function RenameSheet(props: { row: ThingRow; busy: boolean; onRename(name: string): void; onClose(): void }) {
+  const [name, setName] = useState(props.row.name);
+  const trimmed = name.trim();
+  return (
+    <FormSheet
+      title="Rename"
+      subtitle={props.row.name}
+      onClose={props.onClose}
+      actions={
+        <Button size="sm" variant="primary" disabled={props.busy || trimmed === "" || trimmed === props.row.name} onClick={() => props.onRename(trimmed)}>
+          Rename
+        </Button>
+      }
+    >
+      <label class="lre-field" data-lre-bulk-rename="">
+        <span class="label">Name</span>
+        <input class="lre-input" value={name} maxLength={THING_NAME_MAX} onInput={(event) => setName(event.currentTarget.value)} />
+      </label>
     </FormSheet>
   );
 }
@@ -575,21 +692,86 @@ function treeIds(nodes: readonly TreeNode[]): string[] {
   return nodes.flatMap((n) => [...("thing" in n ? [n.thing.id] : []), ...treeIds(n.children)]);
 }
 
+// ---------------------------------------------------------------- + Add a thing
+
+/**
+ * The one GM edit + Add a thing makes of a draft (ITEMS-SPEC §10.2), with its notice: one make of its
+ * type, of a vehicle's class with its make, model and year, or else of what it is said to be (its
+ * category, or that it holds things) and how big; how many; where (at a place, on a person, in a
+ * holder).
+ */
+export function addEdit(draft: AddDraft): { ops: EditOp[]; done: string } {
+  const what = draft.what;
+  const at: Spot = draft.at.is === "place" ? { place: draft.at.id } : { in: draft.at.id };
+  const said = what !== null && "vehicle" in what ? { class: what.vehicle.id, details: { make: what.vehicle.make, model: what.vehicle.model, year: what.vehicle.year } } : what !== null && "type" in what ? { type: what.type.id } : { ...(draft.kind !== "vehicle" ? makeFieldsOf(draft.kind) : {}), ...(what !== null && "size" in what ? { size: what.size } : {}) };
+  const op = item({ do: "make", name: draft.name, at, ...said, ...(draft.qty !== 1 ? { qty: draft.qty } : {}), why: "The GM put it there" });
+  return { ops: [op], done: `${draft.name}${draft.qty !== 1 ? ` ×${draft.qty}` : ""} is ${stepWords({ id: draft.at.id, name: draft.at.name, is: draft.at.is })} now.` };
+}
+
+/**
+ * + Add a thing in GM → Things (ITEMS-SPEC §10.2): Add's one sheet (its name, its kind and what it
+ * is, how many, where: any place, person or holder, starting where the player character is), made
+ * at once as one GM edit with its Undo (`addEdit`); Vehicle once the world's classes are read and it
+ * has some. Hook-free: `GmAddThing` reads the types and the classes.
+ */
+export function GmAddSheet(props: { pick: ThingPicks; here: string | null; types: readonly ThingType[] | null; classes: readonly VehicleClassChoice[] | null; editor: Editor; onClose(): void }) {
+  const { editor } = props;
+  return (
+    <AddThingSheet
+      title="Add a thing"
+      subtitle="Made in this chat: what it's called, what it is, how many, where"
+      types={props.types}
+      classes={props.classes}
+      choices={props.pick.where}
+      start={{ at: props.pick.where.find((c) => c.is === "place" && c.id === props.here) ?? null }}
+      kinds={props.classes !== null && props.classes.length > 0 ? THING_KINDS : THING_KINDS.filter((k) => k !== "vehicle")}
+      busy={editor.busy}
+      action="Add"
+      help="Made at once, as one GM edit with its Undo."
+      onClose={props.onClose}
+      onSubmit={(draft) => {
+        const edit = addEdit(draft);
+        void editor.edit(edit.ops, edit.done).then((ok) => ok && props.onClose());
+      }}
+    />
+  );
+}
+
+/** + Add a thing while it is open: the catalogs' types (`lre.things` types in GM scope), and the chat's world for its vehicle classes, of the year its clock is in. */
+function GmAddThing(props: { chatId: string; pick: ThingPicks; here: string | null; editor: Editor; onClose(): void }) {
+  const app = useApp();
+  const [types, setTypes] = useState<ThingType[] | null>(null);
+  const world = useChatWorld(app.send);
+  // The HUD's date, `YYYY-MM-DD HH:MM`; without one, the year the world starts.
+  const now = useSelect(app.sync, (s) => s.view?.hud?.fixes.time?.value ?? null);
+  useEffect(() => {
+    let live = true;
+    void app.request(gmThingsRequest(props.chatId, { op: "types" })).then((answer) => {
+      if (live) setTypes(answer?.types ?? []);
+    });
+    return () => {
+      live = false;
+    };
+  }, [props.chatId]);
+  const classes = useMemo(() => (world ? buildClasses(world, Number(now?.slice(0, 4)) || undefined) : null), [world, now]);
+  return <GmAddSheet pick={props.pick} here={props.here} types={types} classes={classes} editor={props.editor} onClose={props.onClose} />;
+}
+
 // ---------------------------------------------------------------- the Things section
 
 type ThingsView = "here" | "place" | "owner" | "tidy";
 
 /**
- * GM → Things: search, Here · By place · By owner · Tidy up, and a thing's page over the list.
- * Select turns the lists to choosing: a row's tap picks it, and the bulk bar under them changes every
- * thing picked in one GM edit.
+ * GM → Things: search, Select, + Add a thing, Here · By place · By owner · Tidy up, and a thing's
+ * page over the list. Select turns the lists to choosing: a row's tap picks it, and the bulk bar
+ * under them changes every thing picked in one GM edit.
  */
 export function ThingsSection(props: { editor: BulkEditor; chatId: string }) {
   const app = useApp();
   const { editor, chatId } = props;
   const pages = usePages<{ thing: EntityId }>();
-  // The list is read again with the GM view, so what an edit changed shows once it applied.
-  const { body, failed } = useGmThings(chatId, { op: "list" }, editor.gm);
+  // The list is read again when the chat moves on, so what an edit changed shows once it applied.
+  const { body, failed } = useGmThings(chatId, { op: "list" }, editor.reloadKey);
   const [view, setView] = useState<ThingsView>("here");
   const [query, setQuery] = useState("");
   const [found, setFound] = useState<{ words: string; ids: EntityId[] } | null>(null);
@@ -597,6 +779,9 @@ export function ThingsSection(props: { editor: BulkEditor; chatId: string }) {
   const [owners, setOwners] = useState<ReadonlySet<string> | null>(null);
   const selection = useSelection();
   const [bulk, setBulk] = useState<BulkSheet | null>(null);
+  const [adding, setAdding] = useState(false);
+  // The world's clock as the HUD reads it: how long the bulk bar's loans and grants run.
+  const clock = useSelect(app.sync, (s) => s.view?.hud?.clock.minutes ?? null);
   const words = query.trim();
   useEffect(() => {
     if (words === "") return;
@@ -611,7 +796,7 @@ export function ThingsSection(props: { editor: BulkEditor; chatId: string }) {
       live = false;
       clearTimeout(timer);
     };
-  }, [words, chatId, editor.gm]);
+  }, [words, chatId, editor.reloadKey]);
   const list = body?.list ?? null;
   const here = body?.here ?? null;
   const rows = useMemo(() => new Map((list?.rows ?? []).map((r) => [r.id, r])), [list]);
@@ -637,8 +822,10 @@ export function ThingsSection(props: { editor: BulkEditor; chatId: string }) {
   const tap = (id: EntityId): void => (choosing ? selection.toggle(id) : openThing(id));
   const shown = words !== "" ? (results ?? []).map((r) => r.id) : view === "here" ? hereAt.flatMap((s) => [...treeIds(s.room), ...treeIds(s.lying), ...treeIds(s.people)]) : view === "place" ? sections.flatMap((s) => treeIds(s.nodes)) : (list?.owners ?? []).filter((g) => ownersOpen.has(g.owner?.id ?? "")).flatMap((g) => [...g.on, ...g.home, ...g.away]);
   const chosen = selection.ids.flatMap((id) => rows.get(id) ?? []);
+  const one = chosen.length === 1 ? chosen[0] : undefined;
   const pick = list?.pick ?? null;
   const chosenIds = new Set(chosen.map((r) => r.id));
+  const loans = bulkLoans(clock);
   const closeBulk = () => setBulk(null);
   /** One bulk change as one GM edit; its sheet closes once it applied. */
   const change = (next: BulkChange): void => {
@@ -666,6 +853,9 @@ export function ThingsSection(props: { editor: BulkEditor; chatId: string }) {
               {choosing ? "Done" : "Select"}
             </Button>
           ) : null}
+          <Button size="sm" icon="plus" label="Add a thing" title="Add a thing to this chat" disabled={!pick} onClick={() => setAdding(true)}>
+            Add
+          </Button>
         </div>
         {words !== "" ? (
           results === null ? (
@@ -721,13 +911,31 @@ export function ThingsSection(props: { editor: BulkEditor; chatId: string }) {
       </div>
       {bulk === "move" && pick ? <WhereSheet title="Move to" choices={pick.where.filter((c) => c.is === "place")} value={null} size={biggest(chosen)} onClose={closeBulk} onPick={(next) => next && "choice" in next && change({ do: "move", to: { place: next.choice.id }, words: `at ${next.choice.name}` })} /> : null}
       {bulk === "put" && pick ? <WhereSheet title="Put in" choices={pick.where.filter((c) => c.is === "thing" && !chosenIds.has(c.id) && !c.path.some((s) => chosenIds.has(s.id)))} value={null} size={biggest(chosen)} empty="Nothing picked" onClose={closeBulk} onPick={(next) => next && "choice" in next && change({ do: "move", to: { in: next.choice.id }, words: `in ${next.choice.name}` })} /> : null}
-      {bulk === "own" && pick ? <PartySheet subtitle={counted(chosen.length)} parties={pick.parties} onClose={closeBulk} onPick={(owner) => change({ do: "own", owner })} /> : null}
+      {bulk === "hand" && pick ? (
+        <HandSheet
+          name={namesOf(chosen)}
+          size={biggest(chosen) ?? "unknown"}
+          people={pick.where.filter((c) => c.is === "person" && !chosen.every((r) => isAt(r, { in: c.id })))}
+          owner={null}
+          loans={loans}
+          onClose={closeBulk}
+          onHand={(to, basis, until) => {
+            if (basis !== "hold" && basis !== "gift" && basis !== "loan") return;
+            const ends = loans.find((l) => l.until === until);
+            change({ do: "hand", to, whom: pick.where.find((c) => c.id === to)?.name ?? to, basis, ...(ends ? { until: ends } : {}) });
+          }}
+        />
+      ) : null}
+      {bulk === "own" && pick ? <PartySheet kind="own" subtitle={counted(chosen.length)} parties={pick.parties} onClose={closeBulk} onPick={(owner) => change({ do: "own", owner })} /> : null}
+      {bulk === "use" && pick ? <UseSheet subtitle={namesOf(chosen)} people={pick.parties.filter((p) => p.is === "person")} loans={loans} onClose={closeBulk} onPick={(who, until) => change({ do: "grant", who: who.id, whom: who.name, ...(until ? { until } : {}) })} /> : null}
+      {bulk === "rename" && one ? <RenameSheet row={one} busy={editor.busy} onClose={closeBulk} onRename={(name) => change({ do: "rename", name })} /> : null}
       {bulk === "size" ? (
         <FormSheet title="Size" subtitle={counted(chosen.length)} onClose={closeBulk}>
           <SizeChoices value={null} onPick={(size) => change({ do: "size", size })} />
         </FormSheet>
       ) : null}
       {bulk === "remove" ? <RemoveSheet rows={chosen} busy={editor.busy} onClose={closeBulk} onRemove={() => change({ do: "remove" })} /> : null}
+      {adding && pick ? <GmAddThing chatId={chatId} pick={pick} here={here?.here ?? null} editor={editor} onClose={() => setAdding(false)} /> : null}
       {page ? <GmThingPage key={page.thing} chatId={chatId} id={page.thing} editor={editor} backLabel="Things" onBack={pages.back} onOpen={(id) => (isThingKind(editor.gm.kinds, editor.gm.entities.find((e) => e.id === id)?.kind ?? "") ? openThing(id) : openPerson(id))} /> : null}
     </div>
   );
@@ -1118,11 +1326,13 @@ const KEPT_EXTRAS: readonly WhereExtra[] = [
  * A thing's page in GM (from Things or World): its read (`lre.things` thing in GM scope), the page,
  * and the sheets its controls open. A removed thing says so, with Restore.
  */
-export function GmThingPage(props: { chatId: string; id: EntityId; editor: Editor; backLabel: string; onBack(): void; onOpen(id: EntityId): void }) {
+export function GmThingPage(props: { chatId: string; id: EntityId; editor: BulkEditor; backLabel: string; onBack(): void; onOpen(id: EntityId): void }) {
   const { editor, id } = props;
   const entity = editor.gm.entities.find((e) => e.id === id);
   const gone = entity?.gone === true;
-  const { body, failed } = useGmThings(props.chatId, gone ? null : { op: "thing", entity: id }, editor.gm);
+  const { body, failed } = useGmThings(props.chatId, gone ? null : { op: "thing", entity: id }, editor.reloadKey);
+  // Its full entry (fields, relations, the label form's values): Things lists it slim.
+  useEffect(() => editor.need({ entities: [id] }), [id]);
   const [sheet, setSheet] = useState<ThingSheet | null>(null);
   const page = body?.thing ?? null;
   const gm = body?.gm ?? null;
@@ -1170,7 +1380,7 @@ export function GmThingPage(props: { chatId: string; id: EntityId; editor: Edito
       ) : !page || !gm || !pick ? (
         <Empty icon="hourglass">Reading the thing…</Empty>
       ) : (
-        <GmThingBody page={page} gm={gm} pick={pick} entity={entity} editor={editor} onSheet={setSheet} onOpen={props.onOpen} />
+        <GmThingBody page={page} gm={gm} pick={pick} entity={entity && !thinEntity(entity) ? entity : undefined} editor={editor} onSheet={setSheet} onOpen={props.onOpen} />
       )}
       {sheet === "move" && page && pick ? (
         <WhereSheet title="Move to" choices={pick.where.filter((c) => c.is === "place")} value={lyingAt ? { choice: lyingAt } : null} size={page.row.size} onClose={close} onPick={(next) => next && "choice" in next && send([item({ do: "move", item: id, to: { place: next.choice.id }, why: "The GM moved it" })], `${name} is at ${next.choice.name} now.`)} />
@@ -1240,24 +1450,111 @@ export function personThingMenu(row: ThingRow, bucket: PersonBucket["key"], pers
   return out;
 }
 
+/** A saved set as `SetRows` lists it: the gear pack's `GearSet`, which the frontend reads through the pack's UI, never its core. */
+type SetRow = Parameters<typeof SetRows>[0]["sets"][number];
+
+/**
+ * A person's saved outfits and loadouts as their GM page lists them (`fields.sets`, DESIGN §28.16), by
+ * kind and name: each piece by name and the slot it goes in (one gone from the world, missing), and
+ * On now when every piece still in the world is worn in its slot (`outfit`: what they wear, as their
+ * things read).
+ */
+export function gmSets(person: Pick<GmEntity, "fields">, outfit: readonly ThingRow[], entities: readonly GmEntity[]): SetRow[] {
+  const byId = new Map(entities.map((e) => [e.id, e]));
+  const worn = new Map(outfit.map((r) => [r.id, r]));
+  return Object.entries(setsOf({ sets: person.fields.find((f) => f.id === "sets")?.value }))
+    .map(([id, set]): SetRow => {
+      const reached = set.pieces.filter((p) => byId.get(p.item)?.gone === false);
+      const on =
+        reached.length > 0 &&
+        reached.every((p) => {
+          const row = worn.get(p.item);
+          return row !== undefined && row.worn !== null && row.worn === (p.slot ?? row.slot);
+        });
+      const pieces = set.pieces.map((p) => ({ item: p.item, name: byId.get(p.item)?.name ?? p.item, ...(p.slot !== undefined ? { slot: p.slot.replace(/_/g, " ") } : {}), ...(reached.includes(p) ? {} : { missing: true as const }) }));
+      return { id, name: set.name, kind: set.kind, pieces, ...(on ? { on: true as const } : {}) };
+    })
+    .sort((a, b) => a.kind.localeCompare(b.kind) || a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
+}
+
+/**
+ * A person's outfits and loadouts on their GM page (DESIGN §28.16; from Gear 3): each saved set with
+ * its pieces and On now, Change into (the gear pack's `set_apply`: each piece put on in its slot,
+ * what else of its kind they wear taken off and, at home, put back where it is kept) and Forget, then
+ * Save what they wear as…; each one GM edit with its Undo. Hook-free but for the save form.
+ */
+export function GmSets(props: { person: GmEntity; outfit: readonly ThingRow[]; editor: Editor }) {
+  const { person, editor } = props;
+  const sets = gmSets(person, props.outfit, editor.gm.entities);
+  return (
+    <Section title="Outfits & loadouts">
+      <div class="lre-stack" data-lre-gm-sets={person.id}>
+        {SET_KINDS.map((kind) => (
+          <div key={kind} class="lre-bel-group">
+            <div class="lre-bel-group-head">{kind === "outfit" ? "Outfits" : "Loadouts"}</div>
+            <SetRows
+              sets={sets}
+              kind={kind}
+              busy={editor.busy}
+              onApply={(set) => void editor.edit([item({ do: "set_apply", who: person.id, set: set.id })], `${person.name} changed into ${set.name}.`)}
+              onDrop={(set) => void editor.edit([item({ do: "set_drop", who: person.id, set: set.id })], `${person.name} no longer keeps ${set.name}.`)}
+            />
+          </div>
+        ))}
+        <SaveSetForm person={person} editor={editor} />
+      </div>
+    </Section>
+  );
+}
+
+/** Save what they wear as…: what the person wears now kept as an outfit, or what they have ready as a loadout, under a name (one of that name replaced); one GM edit. */
+function SaveSetForm(props: { person: GmEntity; editor: Editor }) {
+  const { person, editor } = props;
+  const [name, setName] = useState("");
+  const [kind, setKind] = useState<SetKind>("outfit");
+  const nameId = useId();
+  const trimmed = name.trim();
+  const done = kind === "outfit" ? `${trimmed}: what ${person.name} wears now, saved as an outfit.` : `${trimmed}: what ${person.name} has ready now, saved as a loadout.`;
+  return (
+    <div class="lre-bel-group" data-lre-gm-set-save="">
+      <div class="lre-bel-group-head">Save what they wear as…</div>
+      <Seg<SetKind> label="Save as" value={kind} options={SET_KINDS.map((k) => ({ value: k, label: SET_KIND_LABEL[k] }))} onChange={setKind} />
+      <div class="lre-field">
+        <label class="label" for={nameId}>
+          Name
+        </label>
+        <input id={nameId} class="lre-input" value={name} maxLength={SET_NAME_MAX} placeholder={kind === "outfit" ? "Work clothes" : "Range day"} onInput={(event) => setName(event.currentTarget.value)} />
+        <span class="lre-field-help">{kind === "outfit" ? `Keeps what ${person.name} wears now.` : `Keeps what ${person.name} has ready: in hand, holstered, sheathed, and their armor.`}</span>
+      </div>
+      <Button variant="primary" icon="check" disabled={editor.busy || trimmed === ""} onClick={() => void editor.edit([item({ do: "set_save", who: person.id, name: trimmed, kind })], done).then((ok) => ok && setName(""))}>
+        Save
+      </Button>
+    </div>
+  );
+}
+
 /**
  * A person's things on their GM page (ITEMS-SPEC §10.2): Outfit, Carried and Wardrobe, then the rest
  * of theirs and what they hold for others, as Build's Character page groups them, read from the
  * chat's head and again after every edit; a row opens its thing page, and its menu is
- * `personThingMenu`'s.
+ * `personThingMenu`'s. From Gear 3, their outfits and loadouts (`GmSets`).
  */
-export function GmPersonThings(props: { chatId: string; person: { id: EntityId; name: string }; editor: Editor; onOpen(id: EntityId): void }) {
-  const { body, failed } = useGmThings(props.chatId, { op: "person", entity: props.person.id }, props.editor.gm);
+export function GmPersonThings(props: { chatId: string; person: GmEntity; editor: BulkEditor; onOpen(id: EntityId): void }) {
+  const { body, failed } = useGmThings(props.chatId, { op: "person", entity: props.person.id }, props.editor.reloadKey);
   const groups = body?.person ?? null;
+  const gear = props.person.levels.find((l) => l.domain === "gear")?.level ?? 0;
   return (
-    <Section title="Things">
-      {failed ? (
-        <Empty icon="alert">Their things couldn't be read.</Empty>
-      ) : groups ? (
-        <PersonGroups person={props.person.id} groups={groups} problems={NO_PROBLEMS} menu={(row, bucket) => personThingMenu(row, bucket, props.person, props.editor)} onOpen={props.onOpen} />
-      ) : (
-        <span class="lre-small lre-muted">Reading their things…</span>
-      )}
-    </Section>
+    <>
+      <Section title="Things">
+        {failed ? (
+          <Empty icon="alert">Their things couldn't be read.</Empty>
+        ) : groups ? (
+          <PersonGroups person={props.person.id} groups={groups} problems={NO_PROBLEMS} menu={(row, bucket) => personThingMenu(row, bucket, props.person, props.editor)} onOpen={props.onOpen} />
+        ) : (
+          <span class="lre-small lre-muted">Reading their things…</span>
+        )}
+      </Section>
+      {gear >= 3 ? <GmSets person={props.person} outfit={groups?.outfit ?? []} editor={props.editor} /> : null}
+    </>
   );
 }

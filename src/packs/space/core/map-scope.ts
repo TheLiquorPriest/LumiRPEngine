@@ -7,7 +7,7 @@
 
 import type { EntityId, PlaceId, TravelMode } from "../../../shared/ids";
 import { isRecord } from "../../../shared/json";
-import { VOID_TERRAIN } from "../../../shared/maps";
+import { VOID_TERRAIN, type PlaceMark, type PlaceMarkView } from "../../../shared/maps";
 import type { MapDoc, WorldDoc } from "../../../shared/world";
 import { own } from "../../../engine/pack-kit";
 import { HIDDEN_PLACE_NAME } from "../../../engine/visibility";
@@ -30,6 +30,10 @@ export interface MapPlaceView {
   known: boolean;
   /** Whether the POV has been there, or somewhere inside it (`space.seen`): one known and not visited is only heard of. */
   visited: boolean;
+  /** The POV's home, a property it holds a part of, or one for sale (`economy.place_marks`); only on a place it knows. */
+  mark?: PlaceMark;
+  /** The property the place is, where the POV may know it (one it holds a part of, or one for sale): the place sheet's Property here reads it. */
+  property?: EntityId;
 }
 
 /** A thing lying at a cell of a grid, where the POV sees it. */
@@ -95,6 +99,8 @@ export interface ScopeFilter {
   shown(id: PlaceId): PlaceId;
   /** Whether a route is open now: a closed one (a secret passage not found yet, a ferry not running) isn't drawn. */
   routeOpen(id: string): boolean;
+  /** A known place's mark and property, when the economy gives it one. */
+  mark?(id: PlaceId): PlaceMarkView | undefined;
 }
 
 /** A drawn place's name as the viewer may read it: its own when known, else `HIDDEN_PLACE_NAME`. */
@@ -222,7 +228,8 @@ export function scopeView(world: Pick<WorldDoc, "places" | "routes" | "grids" | 
     const pos = at.get(id) ?? { x: 0, y: 0 };
     const known = filter.known(id);
     // A stand-in carries nothing of the place but where it is: no name, no id, no scene type.
-    return { id: filter.shown(id), name: shownName(world, filter, id), x: pos.x, y: pos.y, ...(known && p?.sceneType ? { kind: p.sceneType } : {}), known, visited: filter.visited(id) };
+    const marked = known ? filter.mark?.(id) : undefined;
+    return { id: filter.shown(id), name: shownName(world, filter, id), x: pos.x, y: pos.y, ...(known && p?.sceneType ? { kind: p.sceneType } : {}), known, visited: filter.visited(id), ...(marked?.mark ? { mark: marked.mark } : {}), ...(marked?.mark && marked.property ? { property: marked.property } : {}) };
   });
   const drawn = new Set(kids);
   const routes = new Map<string, MapRouteView>();

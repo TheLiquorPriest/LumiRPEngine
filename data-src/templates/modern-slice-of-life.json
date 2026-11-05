@@ -3244,6 +3244,9 @@
       ]
     }
   ],
+  "vehiclesConfig": {
+    "registration": true
+  },
   "economy": {
     "assets": {
       "broad_us_equity_index": {

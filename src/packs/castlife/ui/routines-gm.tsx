@@ -78,6 +78,8 @@ const BINDING_TONE: Record<RoutineBinding, Tone> = { routine: "neutral", story: 
 interface Ctx {
   chatId: string;
   gm: GmView;
+  /** `GmSectionProps.reloadKey`: what a page reads besides `gm` it reads again on this. */
+  reloadKey: string;
   busy: boolean;
   send: Send;
   edit(ops: EditOp[]): Promise<boolean>;
@@ -106,7 +108,7 @@ export function GmRoutinesSection(props: GmSectionProps) {
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<Filter>("");
   const [changed, setChanged] = useState<RoutineChangeSummary[] | null>(null);
-  // Read again whenever the GM view reloads: an edit, an Undo or a turn may have changed someone.
+  // Read again whenever the chat moves on and the GM view loads again: an edit, an Undo or a turn may have changed someone.
   useEffect(() => {
     let live = true;
     void props.send({ type: "lre.routine", chatId: props.chatId, op: "changed" }).then((m) => {
@@ -115,8 +117,8 @@ export function GmRoutinesSection(props: GmSectionProps) {
     return () => {
       live = false;
     };
-  }, [props.chatId, props.gm]);
-  const ctx: Ctx = { chatId: props.chatId, gm: props.gm, busy: props.busy, send: props.send, edit: props.edit };
+  }, [props.chatId, props.reloadKey]);
+  const ctx: Ctx = { chatId: props.chatId, gm: props.gm, reloadKey: props.reloadKey, busy: props.busy, send: props.send, edit: props.edit };
   // The world's roles for each level; until the world is read, the defaults stand in.
   const roles = routineSettingsOf(useChatWorld(props.send) ?? {}).roles;
   const rows = routineRows(props.gm.minds.characters, props.gm.entities, changed ?? [], roles);
@@ -206,7 +208,7 @@ function CharacterPages(props: { ctx: Ctx; row: RoutineRow; summary: RoutineChan
   const changes = usePages<RoutineChange>();
   const [view, setView] = useState<RoutineGmView | null>(null);
   const [error, setError] = useState<string | null>(null);
-  // Read again whenever the GM view reloads, so an edit or its Undo shows at once.
+  // Read again whenever the chat moves on and the GM view loads again, so an edit or its Undo shows at once.
   useEffect(() => {
     let live = true;
     void ctx.send({ type: "lre.routine", chatId: ctx.chatId, op: "day", entity: row.entity, view: "gm" }).then((m) => {
@@ -219,7 +221,7 @@ function CharacterPages(props: { ctx: Ctx; row: RoutineRow; summary: RoutineChan
     return () => {
       live = false;
     };
-  }, [ctx.chatId, row.entity, ctx.gm]);
+  }, [ctx.chatId, row.entity, ctx.reloadKey]);
   const change = changes.page;
   const block = change?.kind === "block" && change.id !== null ? view?.blocks.find((b) => b.block.id === change.id) : undefined;
   const schedule = change?.kind === "schedule" ? view?.schedules.find((s) => s.schedule === change.id) : undefined;

@@ -8,14 +8,15 @@
 
 import type { GmThingsRead, JsonPatchOp, ResultBodies } from "../shared/protocol";
 import type { GmView } from "../shared/state-view";
-import { GM_KEYED_PARTS, GM_OUTLINE, GM_PARTS, keyedItem, type GmHeldWrite, type GmOutline, type GmPart, type GmPartAnswer, type GmPartView, type QueuedOn } from "../shared/gm-parts";
+import { GM_IDS_MAX, GM_IDS_PARTS, GM_KEYED_PARTS, GM_KIND_PARTS, GM_OUTLINE, GM_PARTS, GM_ROSTER, keyedItem, type GmHeldWrite, type GmOutline, type GmPart, type GmPartAnswer, type GmPartView, type GmReadPart, type QueuedOn } from "../shared/gm-parts";
 import { effectiveMemory, knowledgeThreshold, type MindsSettings } from "../shared/minds";
 import type { HistorySource, KeepResult, MadeInPlay } from "../shared/thing-gm";
 import type { WorldDoc } from "../shared/world";
 import type { WorldState } from "../engine/state";
 import { finalEditsOf, type FinalEdit } from "../shared/final-review";
-import { buildGmWorld, buildGmWorldPart, gmWorldPartCount, type GmWorldPart } from "../engine/gm-view";
+import { buildGmRoster, buildGmWorld, buildGmWorldPart, gmWorldPartCount, type GmPick, type GmWorldPart } from "../engine/gm-view";
 import { buildMindsGm } from "../packs/minds/core/gm";
+import { hasOwn, isRecord } from "../shared/json";
 import type { ChainMessage } from "../engine/ledger/chain";
 import type { LedgerCore } from "../engine/ledger/journal";
 import { activeRecord, ownMessage } from "../engine/ledger/path";
@@ -34,12 +35,12 @@ const GM_EDITS = 40;
 /** How many entries a thing's History strip shows, newest first. */
 const HISTORY = 12;
 
-/** What building the GM view's parts reads: the chat's head as it renders, its chain and journal, the user's minds settings, and what a held write waits on now. */
-interface GmHead {
+/** What building the GM view's parts reads: the chat's head as it renders (shared, read only), its chain and journal, the user's minds settings, and what a held write waits on now. */
+export interface GmHead {
   core: LedgerCore;
   observed: readonly ChainMessage[];
   registry: Registry;
-  render: { state: WorldState; world: WorldDoc };
+  render: { state: Readonly<WorldState>; world: WorldDoc };
   minds: MindsSettings;
   waitsOn: QueuedOn | null;
 }
@@ -82,56 +83,127 @@ export function buildGmView(core: LedgerCore, observed: readonly ChainMessage[],
   return readPass(() => ({ ...buildGmWorld(registry, render.world, render.state), edits: CHAT_PARTS.edits(head), refused: CHAT_PARTS.refused(head), held: CHAT_PARTS.held(head), minds: CHAT_PARTS.minds(head) }));
 }
 
+/** What `lre.gm.part` asks for (`GmPartRequest` without its envelope, its chat or its `since`). */
+export interface GmPartAsk {
+  part: string;
+  id?: string;
+  ids?: readonly string[];
+  kind?: string;
+  bytes?: boolean;
+}
+
+/** Why `lre.gm.part` refuses what was asked, read before anything is built; null when it may be built. */
+export function gmPartProblem(ask: GmPartAsk): string | null {
+  // What a client sent is checked as it came: a part, an id and a kind are text, ids a list of them.
+  if (typeof ask.part !== "string" || (ask.id !== undefined && typeof ask.id !== "string") || (ask.kind !== undefined && typeof ask.kind !== "string")) return "part, id and kind are text";
+  if (ask.ids !== undefined && (!Array.isArray(ask.ids) || ask.ids.some((x) => typeof x !== "string"))) return "ids is a list of ids";
+  if (ask.bytes !== undefined && typeof ask.bytes !== "boolean") return "bytes is true or false";
+  if (ask.part === GM_OUTLINE) return ask.id !== undefined || ask.ids !== undefined || ask.kind !== undefined ? `the outline is read whole; only ${GM_KEYED_PARTS.join(", ")} take an id` : null;
+  const asked = readPart(ask.part);
+  if (asked === undefined) return `part is one of ${[...GM_PARTS, GM_ROSTER].join(", ")} or ${GM_OUTLINE}, not ${JSON.stringify(ask.part)}`;
+  if (ask.bytes !== undefined) return "only the outline tells each part's bytes";
+  if (ask.id !== undefined && !GM_KEYED_PARTS.some((p) => p === asked)) return `only ${GM_KEYED_PARTS.join(", ")} take an id; ${asked} is read whole`;
+  if (ask.id !== undefined && (ask.ids !== undefined || ask.kind !== undefined)) return "name one by its id, or several by ids, not both";
+  if (ask.ids !== undefined && !GM_IDS_PARTS.includes(asked)) return `only ${GM_IDS_PARTS.join(", ")} take ids; ${asked} is read whole`;
+  if (ask.ids !== undefined && ask.ids.length > GM_IDS_MAX) return `at most ${GM_IDS_MAX} ids at once`;
+  if (ask.kind !== undefined && !GM_KIND_PARTS.includes(asked)) return `only ${GM_KIND_PARTS.join(", ")} take a kind; ${asked} is read whole`;
+  return null;
+}
+
+function readPart(part: string): GmReadPart | undefined {
+  return part === GM_ROSTER ? GM_ROSTER : GM_PARTS.find((p) => p === part);
+}
+
+/** A part's value, made once per head under `key` when the head keeps what it built (`parts`), else made now. */
+function once<T>(parts: Map<string, unknown> | null, key: string, make: () => T, built?: (part: string) => void): T {
+  if (parts?.has(key)) return parts.get(key) as T;
+  const value = make();
+  built?.(key);
+  parts?.set(key, value);
+  return value;
+}
+
 /**
  * One part of the GM view (`lre.gm.part`), built alone, as the whole view holds it. With `id`, of
  * the entities, money or organizations only that one, named by its id or by its name (read without
  * case): a list of it, empty when there is none, and refused when several have that name, with
- * their ids. `outline` (`GM_OUTLINE`) is how many each part holds, as the whole view would hold it:
- * a world part counted as `gmWorldPartCount` counts it, the chain's and the journal's built and
- * counted, the minds by their characters. Null when the chat's world isn't loaded.
+ * their ids; an organization named by its id builds only its own page. With `ids`, those found, in
+ * the order asked; with `kind`, those of that kind. `roster` is every entity slim. `outline`
+ * (`GM_OUTLINE`) is how many each part holds, as the whole view would hold it, counted without
+ * building where the part's own reads count it, and with `bytes` each part's size as sent. What it
+ * builds goes in `parts`, the head's memo, under the request that built it; `built` hears each part
+ * built rather than found there. `gmPartProblem` is checked first.
  */
-export function buildGmPart(core: LedgerCore, observed: readonly ChainMessage[], registry: Registry, minds: MindsSettings, waitsOn: QueuedOn | null, part: string, id?: string): GmPartAnswer | { refused: string } | null {
-  if (part === GM_OUTLINE) {
-    if (id !== undefined) return { refused: `the outline is read whole; only ${GM_KEYED_PARTS.join(", ")} take an id` };
-    const render = core.renderState(observed);
-    if (!render) return null;
-    const head: GmHead = { core, observed, registry, render, minds, waitsOn };
-    const outline = readPass((): GmOutline => GM_PARTS.map((p) => ({ part: p, count: !hasOwnPart(CHAT_PARTS, p) ? gmWorldPartCount(registry, render.world, render.state, p) : p === "minds" ? CHAT_PARTS.minds(head).characters.length : CHAT_PARTS[p](head).length })));
-    return { part: GM_OUTLINE, id: null, value: outline };
-  }
-  const asked = GM_PARTS.find((p) => p === part);
-  if (asked === undefined) return { refused: `part is one of ${GM_PARTS.join(", ")} or ${GM_OUTLINE}, not ${JSON.stringify(part)}` };
-  const keyed = GM_KEYED_PARTS.find((p) => p === asked);
-  if (id !== undefined && keyed === undefined) return { refused: `only ${GM_KEYED_PARTS.join(", ")} take an id; ${asked} is read whole` };
-  const render = core.renderState(observed);
-  if (!render) return null;
-  const { world, state } = render;
-  return readPass((): GmPartView | { refused: string } => {
-    if (keyed === undefined || id === undefined) {
-      const value = hasOwnPart(CHAT_PARTS, asked) ? CHAT_PARTS[asked]({ core, observed, registry, render, minds, waitsOn }) : buildGmWorldPart(registry, world, state, asked);
+export function buildGmPart(head: GmHead, ask: GmPartAsk, parts: Map<string, unknown> | null = null, built?: (part: string) => void): GmPartAnswer | { refused: string } {
+  const problem = gmPartProblem(ask);
+  if (problem !== null) return { refused: problem };
+  const { registry } = head;
+  const { world, state } = head.render;
+  // A part read whole, as the memo keeps it: the outline and the bytes read the same ones.
+  const whole = (part: GmReadPart): unknown =>
+    once(parts, part, () => (part === GM_ROSTER ? buildGmRoster(registry, world, state) : hasOwnPart(CHAT_PARTS, part) ? CHAT_PARTS[part](head) : buildGmWorldPart(registry, world, state, part)), built);
+  return readPass((): GmPartAnswer | { refused: string } => {
+    if (ask.part === GM_OUTLINE) {
+      const outline: GmOutline = [GM_PARTS[0], GM_ROSTER, ...GM_PARTS.slice(1)].map((p) => {
+        const count = p === GM_ROSTER || p === "entities" ? Object.keys(state.entities).length : p === "refused" ? (head.core.journal.refused ?? []).length : p === "held" ? head.core.journal.held.length : hasOwn(COUNTED, p) ? gmWorldPartCount(registry, world, state, p as GmWorldPart) : countOf(p, whole(p));
+        return { part: p, count, ...(ask.bytes ? { bytes: Buffer.byteLength(JSON.stringify(whole(p)), "utf8") } : {}) };
+      });
+      return { part: GM_OUTLINE, id: null, value: outline };
+    }
+    const asked = readPart(ask.part) as GmReadPart;
+    const pick: GmPick = { ...(ask.ids ? { ids: ask.ids } : {}), ...(ask.kind !== undefined ? { kind: ask.kind } : {}) };
+    if (ask.id === undefined) {
+      if (pick.ids === undefined && pick.kind === undefined) return { part: asked, id: null, value: whole(asked) } as GmPartView;
+      const key = `${asked}\u0000${JSON.stringify(pick)}`;
+      const value = once(parts, key, () => (asked === GM_ROSTER ? buildGmRoster(registry, world, state, pick) : buildGmWorldPart(registry, world, state, asked as GmWorldPart, pick)), built);
       return { part: asked, id: null, value } as GmPartView;
     }
-    // An organization is named as its page names it; an entity or a party as the world does.
-    const orgs = keyed === "orgs" ? buildGmWorldPart(registry, world, state, "orgs") : [];
-    const named =
-      keyed === "orgs"
-        ? keyedItem(orgs, id, (o) => o.page.id, (o) => o.page.name)
-        : keyedItem(
-            Object.entries(state.entities).map(([e, def]) => ({ id: e, name: def.name })),
-            id,
-            (e) => e.id,
-            (e) => e.name,
-          );
-    if (named && "ambiguous" in named) return { refused: `${named.ambiguous.length} have the name ${JSON.stringify(id)}: ${named.ambiguous.join(", ")}; name one by its id` };
-    if (!named) return { part: keyed, id, value: [] } as GmPartView;
-    const found = "page" in named.item ? named.item.page.id : named.item.id;
-    const value = keyed === "orgs" ? orgs.filter((o) => o.page.id === found) : buildGmWorldPart(registry, world, state, keyed, found);
-    return { part: keyed, id: found, value } as GmPartView;
+    const keyed = GM_KEYED_PARTS.find((p) => p === asked);
+    if (keyed === undefined) return { refused: `only ${GM_KEYED_PARTS.join(", ")} take an id; ${asked} is read whole` };
+    const id = ask.id;
+    const key = `${keyed}\u0000${JSON.stringify({ id })}`;
+    return once(
+      parts,
+      key,
+      (): GmPartAnswer | { refused: string } => {
+        // An organization named by its id is built alone; by its name, as its page names it, from them all.
+        if (keyed === "orgs") {
+          const alone = buildGmWorldPart(registry, world, state, "orgs", { ids: [id] });
+          if (alone.length === 1) return { part: keyed, id, value: alone };
+          const all = whole("orgs") as GmView["orgs"];
+          const named = keyedItem(all, id, (o) => o.page.id, (o) => o.page.name);
+          if (named && "ambiguous" in named) return { refused: `${named.ambiguous.length} have the name ${JSON.stringify(id)}: ${named.ambiguous.join(", ")}; name one by its id` };
+          return named ? { part: keyed, id: named.item.page.id, value: [named.item] } : { part: keyed, id, value: [] };
+        }
+        // An entity or a party as the world names it.
+        const named = keyedItem(
+          Object.entries(state.entities).map(([e, def]) => ({ id: e, name: def.name })),
+          id,
+          (e) => e.id,
+          (e) => e.name,
+        );
+        if (named && "ambiguous" in named) return { refused: `${named.ambiguous.length} have the name ${JSON.stringify(id)}: ${named.ambiguous.join(", ")}; name one by its id` };
+        if (!named) return { part: keyed, id, value: [] } as GmPartView;
+        return { part: keyed, id: named.item.id, value: buildGmWorldPart(registry, world, state, keyed, { ids: [named.item.id] }) } as GmPartView;
+      },
+      built,
+    );
   });
 }
 
+/** The world parts the outline counts where their own reads count them, without building them; any other part is built (and kept) to count it. */
+const COUNTED: Partial<Record<GmReadPart, true>> = { kinds: true, tiers: true, lifeStates: true, domains: true, classifications: true, places: true, tracks: true, relationTypes: true };
+
+/** How many one part holds, as its outline counts it: a list's items, the classifications' facets, the minds' characters, the fight 1 while one is under way. */
+function countOf(part: GmReadPart, value: unknown): number {
+  if (part === "minds") return isRecord(value) && Array.isArray(value.characters) ? value.characters.length : 0;
+  if (Array.isArray(value)) return value.length;
+  if (part === "classifications") return isRecord(value) ? Object.keys(value).length : 0;
+  return value === null || value === undefined ? 0 : 1;
+}
+
 /** Whether a part is one the chain, the journal or the settings give (`CHAT_PARTS`). */
-function hasOwnPart(parts: typeof CHAT_PARTS, part: GmPart): part is Exclude<GmPart, GmWorldPart> {
+function hasOwnPart(parts: typeof CHAT_PARTS, part: GmReadPart): part is Exclude<GmPart, GmWorldPart> {
   return Object.prototype.hasOwnProperty.call(parts, part);
 }
 

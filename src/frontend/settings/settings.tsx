@@ -54,6 +54,8 @@ import { limitText, TimeoutsSection } from "./timeouts";
 import { RetentionPage, retentionSummary } from "./retention";
 import { LorePage, loreSummary } from "./lore";
 import { ownTextCount, promptTestRequest, PromptsPage } from "./agent-prompts";
+import { SpeedPage, speedSummary } from "./speed";
+import { speedChanged } from "../../shared/speed-presets";
 
 type Page = Exclude<SettingsPage, "home">;
 type Caveat = { code: string; message: string };
@@ -72,6 +74,7 @@ const PAGE: Record<Page, { title: string; subtitle: string; icon: IconName }> = 
   narrator: { title: "Narrator", subtitle: "What the narrator knows, and what of a secret", icon: "eye" },
   timeouts: { title: "Timeouts", subtitle: "How long each wait may run", icon: "hourglass" },
   agents: { title: "Agents", subtitle: "A turn at a glance, and what every agent runs under", icon: "function" },
+  speed: { title: "Speed", subtitle: "How long a turn takes, and where the last one's time went", icon: "fast-forward" },
   roles: { title: "Roles", subtitle: "Each part of an agent turn, and where it runs", icon: "branch" },
   context: { title: "Context", subtitle: "What each role starts with", icon: "layers" },
   main: { title: "Main agent", subtitle: "Decides each turn, when the pipeline has one, and reviews the narrator's prompt", icon: "sparkle" },
@@ -91,10 +94,10 @@ const PAGE: Record<Page, { title: string; subtitle: string; icon: IconName }> = 
   retention: { title: "Retention", subtitle: "Which turns keep their transcripts, and how long the agents' stored texts are kept", icon: "box" },
 };
 
-/** The home list's groups, in order. */
-const GROUPS: readonly { title: string; pages: readonly Page[] }[] = [
+/** The home list's groups, in order, each with its pages. */
+export const HOME_GROUPS: readonly { title: string; pages: readonly Page[] }[] = [
   { title: "Getting started", pages: ["helper", "model", "steps", "minds", "narrator", "timeouts"] },
-  { title: "Agents", pages: ["agents", "roles", "context", "main", "assistant", "prompts", "retention"] },
+  { title: "Agents", pages: ["agents", "speed", "roles", "context", "main", "assistant", "prompts", "retention"] },
   { title: "Defaults for new chats", pages: ["realism", "checks", "time"] },
   { title: "Replies", pages: ["extraction", "swipes"] },
   { title: "Your preset", pages: ["preset"] },
@@ -153,6 +156,8 @@ function summaryOf(page: Page, data: SettingsResult, caveats: readonly Caveat[] 
       return { subtitle: `Engine run ${limitText(settings.timeouts.engineRunMs)} · reading the reply ${limitText(settings.timeouts.postReplyMs)}` };
     case "agents":
       return { subtitle: agentsSummary(settings.agents), ...changed(agentsChanged(settings.agents)) };
+    case "speed":
+      return { subtitle: speedSummary(settings), ...changed(speedChanged(settings)) };
     case "roles":
       return { subtitle: rolesSummary(settings.agents), ...changed(rolesChanged(settings.agents)) };
     case "context":
@@ -177,7 +182,7 @@ function summaryOf(page: Page, data: SettingsResult, caveats: readonly Caveat[] 
       return { subtitle: pinned > 0 ? `${pinned} pinned, the rest learn` : "Every type learns from you" };
     }
     case "swipes":
-      return { subtitle: `${settings.swipeDefault === "rerun" ? "Re-run by default" : "Re-narrate by default"} · Swipes send ${settings.swipeTexts === "turn" ? "the turn's texts" : "your current texts"}` };
+      return { subtitle: `${settings.swipeDefault === "rerun" ? "Re-run by default" : "Re-narrate by default"}${settings.swipeAsk ? " · asks what should change" : ""} · Swipes send ${settings.swipeTexts === "turn" ? "the turn's texts" : "your current texts"}` };
     case "preset":
       return { subtitle: settings.hideJsonBlocks ? "JSON blocks hidden in world chats" : "JSON blocks shown" };
     case "lore":
@@ -208,7 +213,7 @@ function Home(props: { data: SettingsResult; caveats: readonly Caveat[] | null; 
   return (
     <div class="lre-stack lre-set-home" data-lre-settings-page="home">
       <PageHeader title="Settings" subtitle="Yours, for every world chat" />
-      {GROUPS.map((group) => (
+      {HOME_GROUPS.map((group) => (
         <Section key={group.title} title={group.title} flush>
           <List>
             {group.pages.map((page) => {
@@ -318,7 +323,9 @@ export function SettingsBody(props: { route: SettingsRoute; data: SettingsResult
     case "timeouts":
       return <TimeoutsSection timeouts={settings.timeouts} patch={patch} busy={busy} />;
     case "agents":
-      return <AgentsHub agents={settings.agents} routes={routes} connections={connections} busy={busy} patch={patch} go={go} />;
+      return <AgentsHub agents={settings.agents} routes={routes} connections={connections} busy={busy} patch={patch} go={go} speed={settings} />;
+    case "speed":
+      return <SpeedPage settings={settings} busy={busy} patch={patch} go={go} />;
     case "roles":
       return <RolesPage agents={settings.agents} timeouts={settings.timeouts} routes={routes} connections={connections} go={go} />;
     case "context":
@@ -336,7 +343,7 @@ export function SettingsBody(props: { route: SettingsRoute; data: SettingsResult
     case "extraction":
       return <ExtractionPage data={data} patch={patch} busy={busy} />;
     case "swipes":
-      return <SwipesPage value={settings.swipeDefault} texts={settings.swipeTexts} patch={patch} busy={busy} />;
+      return <SwipesPage value={settings.swipeDefault} ask={settings.swipeAsk} texts={settings.swipeTexts} patch={patch} busy={busy} />;
     case "preset":
       return <PresetPage hideJsonBlocks={settings.hideJsonBlocks} patch={patch} busy={busy} />;
     case "lore":

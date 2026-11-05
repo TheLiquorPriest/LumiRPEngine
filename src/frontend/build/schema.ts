@@ -5,6 +5,7 @@
 import { safeKey, type JsonObject, type JsonValue } from "../../shared/json";
 import { loreIsSecret } from "../../shared/lore";
 import { DOMAINS } from "../../shared/ids";
+import { TRAVEL_MODES } from "../../shared/maps";
 import type { WorldCollection, WorldPart } from "../../shared/protocol";
 import { spawnTierOf } from "../../shared/tiers";
 import type { WorldDoc } from "../../shared/world";
@@ -88,7 +89,6 @@ const PLACE_VISIBILITY = ["public", "known_by", "discoverable", "secret"] as con
 /** Visibility as an author reads it: what each value means for a thing or a person, and for a place. */
 const ENTITY_VISIBILITY_LABEL: Readonly<Record<string, string>> = { public: "Anyone who can see it", known_by: "Whoever knows of it", discoverable: "Hidden until searched", secret: "Secret (GM only)" };
 const PLACE_VISIBILITY_LABEL: Readonly<Record<string, string>> = { public: "Anyone", known_by: "Whoever knows of it", discoverable: "Hidden until visited or heard of", secret: "Secret (GM only)" };
-const TRAVEL_MODES = ["walk", "road", "offroad", "water"] as const;
 
 const BAND: FieldSpec = {
   kind: "object",
@@ -672,6 +672,7 @@ export const PART_SPECS: Record<Exclude<WorldPart, "tiers" | "loreIndex" | "rule
                 { kind: "number", key: "road", label: "By road", min: 1, step: 1, optional: true },
                 { kind: "number", key: "offroad", label: "Off road", min: 1, step: 1, optional: true },
                 { kind: "number", key: "water", label: "On water", min: 1, step: 1, optional: true },
+                { kind: "number", key: "air", label: "In the air", min: 1, step: 1, optional: true, hint: "Only aircraft fly, over the routes the world authors with an air leg" },
               ],
             },
             { kind: "record", key: "vehicleSpeeds", label: "Speed by vehicle class (km/h)", keyLabel: "Vehicle class", item: { kind: "number", key: "", label: "km/h", min: 1, step: 1 }, hint: "A class of the vehicles table (atv_utility, pickup_midsize…): its vehicles take every leg with a distance at this speed, whatever the way" },

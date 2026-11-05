@@ -40,7 +40,8 @@ import { gotOf, madeOf } from "../../../../shared/things";
 import { grants, isInside, kitStatus } from "../../../../packs/gear/core/model";
 import { TOOL_NOTE } from "../../../../shared/agent-tools";
 import type { EntityId } from "../../../../shared/ids";
-import { hasOwn, type JsonValue } from "../../../../shared/json";
+import { hasOwn, isRecord, type JsonValue } from "../../../../shared/json";
+import { VEHICLE_DOMAINS, vehicleDomainOf, worldHasAir } from "../../../../shared/vehicles";
 import type { FieldDef } from "../../../../shared/world";
 import { missing } from "../propose";
 import type { ToolReadView, ViewRef } from "../read-view";
@@ -506,6 +507,31 @@ export const ITEMS_TOOLS: readonly ToolDefinition[] = [
         const access = accessFor(view.ctx, p.id, t.id);
         const ground = (a: AccessAnswer | null) => (a === null ? null : { basis: a.basis, via: a.via ? (view.entity(a.via)?.name ?? a.via) : undefined, by: a.by ? (view.entity(a.by)?.name ?? a.by) : undefined, grant: a.grant, until: a.until === undefined ? undefined : clockWords(view, a.until), presumed: a.presumed });
         return view.answer({ who: view.entity(p.id), thing: view.entity(t.id), use: ground(access.use), dispose: ground(access.dispose) });
+      });
+    },
+  },
+  {
+    // The world's vehicle classes (DESIGN §9.3), for a purchase of a class or a make of one: each with its domain, the make and model a new one takes, and its used and new price bands; aircraft only where the world flies.
+    name: "vehicles_classes",
+    family: "items",
+    tier: "read",
+    parameters: () => objectSchema({ domain: text([...VEHICLE_DOMAINS]), search: text() }, []),
+    run: async (args, env) => {
+      const view = await env.reader.view();
+      const domain = textArg(args, "domain");
+      const search = (textArg(args, "search") ?? "").toLowerCase();
+      return view.read(() => {
+        const table = view.ctx.tables.get("vehicles.classes");
+        const air = worldHasAir(view.world);
+        const band = (v: JsonValue | undefined): { min: number; typical: number; max: number } | undefined => (isRecord(v) && typeof v.min === "number" && typeof v.typical === "number" && typeof v.max === "number" ? { min: v.min, typical: v.typical, max: v.max } : undefined);
+        const classes = Object.entries(table?.rows ?? {}).flatMap(([id, row]) => {
+          const d = vehicleDomainOf(row);
+          const name = strOf(row.name, id);
+          const aliases = Array.isArray(row.aliases) ? row.aliases.filter((a): a is string => typeof a === "string") : [];
+          if ((d === "air" && !air) || (domain !== null && d !== domain) || (search !== "" && ![id, name, ...aliases].some((w) => w.toLowerCase().includes(search)))) return [];
+          return [{ id, name, domain: d, ...(typeof row.make === "string" ? { make: row.make } : {}), ...(typeof row.model === "string" ? { model: row.model } : {}), ...(aliases.length > 0 ? { also: aliases } : {}), used: band(row.price_used_cents), new: band(row.price_new_cents) }];
+        });
+        return view.answer({ classes, air });
       });
     },
   },

@@ -1,15 +1,16 @@
 // The place sheet: a place from the map, with its exact travel options (mode,
-// time, cost, or why not), whether the POV is there, has been there or has only heard of it, and
-// ways back to the map: open its own map, or show it where it lies; then the parts other packs add
-// (`r.placePart`: the gear pack's Things here, where the POV is). A place the POV can't see goes
-// by "Somewhere" and offers nothing. Places aren't entities, so opening one observes nothing new
-// (the map was observed when its destination opened). The same details show in the map overlay's
-// dock, where no sheet stack is.
+// time, cost, or why not), whether the POV is there, has been there or has only heard of it, its
+// mark (home, yours or for sale, `economy.place_marks`) as a badge, and ways back to the map: open
+// its own map, or show it where it lies; then the parts other packs add (`r.placePart`: the gear
+// pack's Things here, where the POV is). A place the POV can't see goes by "Somewhere" and offers
+// nothing. Places aren't entities, so opening one observes nothing new (the map was observed when
+// its destination opened). The same details show in the map overlay's dock, where no sheet stack is.
 
 import { useMemo } from "preact/hooks";
 import type { TravelMode } from "../../../shared/ids";
+import { PLACE_MARK_LABEL } from "../../../shared/maps";
 import { playAt, useApp } from "../../../frontend/app";
-import { Empty, IdText, List, ListRow, PageHeader, Section, useBusy } from "../../../frontend/components";
+import { Badge, Empty, IdText, List, ListRow, PageHeader, Section, useBusy } from "../../../frontend/components";
 import { formatCents, formatMinutes } from "../../../frontend/format";
 import type { IconName } from "../../../frontend/icons";
 import { Icon } from "../../../frontend/icons";
@@ -19,7 +20,7 @@ import { createStore } from "../../../frontend/store";
 import type { MapPlaceView, MapScopeView, MapView } from "../core/view";
 import { decodeMapView } from "./view";
 
-export const MODE_ICON: Record<TravelMode, IconName> = { walk: "route", road: "car", offroad: "car", water: "boat" };
+export const MODE_ICON: Record<TravelMode, IconName> = { walk: "route", road: "car", offroad: "car", water: "boat", air: "plane" };
 
 /**
  * A place sheet's request that the map show a scope, with a place picked; Play's map takes each new
@@ -78,9 +79,10 @@ export function PlaceDetail(props: { view: MapView; place: MapPlaceView; chatId:
   const onShow = props.onShow;
   return (
     <div class="lre-stack" data-lre-place-detail={place.id}>
-      <p class="lre-world-status">
+      <p class="lre-world-status" data-lre-place-mark={place.mark}>
         <Icon name={status.icon} size={16} />
         <span>{status.text}</span>
+        {place.mark ? <Badge tone="accent">{PLACE_MARK_LABEL[place.mark]}</Badge> : null}
       </p>
       {!there ? (
         <Section title="Getting there" flush>

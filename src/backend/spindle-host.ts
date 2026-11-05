@@ -3,7 +3,7 @@
 // event payloads carry no userId; handlers receive it as the second argument) and maps the port's
 // calls onto `lumiverse-spindle-types` 0.6.49 plus the local augmentation.
 
-import type { GenerationReasoningOverrideDTO, GenerationRequestDTO, LlmMessageDTO, LlmMessagePartDTO, PromptBlockDTO, PromptBlockSnapshotDTO, StreamChunkDTO, WorldBookEntryCreateDTO, WorldBookEntryDTO, WorldInfoInterceptorCtxDTO } from "lumiverse-spindle-types";
+import type { GenerationReasoningOverrideDTO, GenerationRequestDTO, LlmMessageDTO, LlmMessagePartDTO, PromptBlockDTO, PromptBlockSnapshotDTO, StreamChunkDTO, ToolSchemaDTO, WorldBookEntryCreateDTO, WorldBookEntryDTO, WorldInfoInterceptorCtxDTO } from "lumiverse-spindle-types";
 import type { HostSpindleAPI, RegexScriptInput } from "../spindle-augment";
 import { MCP_PERMISSION } from "../shared/agents";
 import type { HostPresetBlockInput } from "./host";
@@ -30,6 +30,7 @@ import type {
   QuietMessage,
   QuietRequest,
   QuietThinkingBlock,
+  QuietTool,
   QuietToolCall,
   SwipeAction,
   WorldInfoCandidate,
@@ -306,6 +307,15 @@ export function messageDTO(m: QuietMessage): LlmMessageDTO {
   };
 }
 
+/**
+ * A tool as the host takes it (`ToolSchemaDTO`), its breakpoint as an ephemeral `cache_control`: the
+ * host passes it on, and its Anthropic provider sends it on the tool (Lumiverse
+ * `src/llm/providers/anthropic.ts`); the published DTO doesn't name the field yet (a Spindle gap).
+ */
+export function toolDTO(t: QuietTool): ToolSchemaDTO {
+  return { name: t.name, description: t.description, parameters: t.parameters, ...(t.cache ? { cache_control: { type: "ephemeral" } } : {}) };
+}
+
 /** A thinking block the host passed back, or null when it isn't one. */
 function thinkingBlock(raw: unknown): QuietThinkingBlock | null {
   const type = str(raw, "type");
@@ -575,7 +585,7 @@ export function createSpindleHost(): HostPort {
           messages: request.messages.map(messageDTO),
           parameters,
           ...(request.connectionId ? { connection_id: request.connectionId } : {}),
-          ...(request.tools && request.tools.length > 0 ? { tools: request.tools.map((t) => ({ name: t.name, description: t.description, parameters: t.parameters })) } : {}),
+          ...(request.tools && request.tools.length > 0 ? { tools: request.tools.map(toolDTO) } : {}),
           ...(reasoning ? { reasoning } : {}),
           userId,
           signal,

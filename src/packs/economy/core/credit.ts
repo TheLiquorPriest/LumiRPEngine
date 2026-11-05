@@ -8,7 +8,7 @@ import type { LedgerEvent } from "../../../shared/ledger";
 import { CLASS_TRAITS, FINANCE_EVENTS, SCORE_MAX, SCORE_MIN, creditTierOf, isAccountClass, isCredit, scoreBand, type AccountClass, type CreditApplication, type CreditEntry, type CreditReport, type CreditTier, type ScoreFactors } from "../../../shared/finance";
 import { formatMoney } from "../../../shared/world";
 import { calendarOf, clockAt, clockOfLocal, dateAt, formatClock } from "../../../engine/calendar";
-import { labelOf, numOf, objOf, own, sliceOf, strOf } from "../../../engine/pack-kit";
+import { labelOf, numOf, objOf, optionalQuery, own, sliceOf, strOf } from "../../../engine/pack-kit";
 import type { ReadContext, Rejection } from "../../../engine/registry";
 import { cycleOf, reject } from "./journal";
 import { accountsOf, balance, classOf, productOf, statusOf, worldProducts } from "./model";
@@ -123,12 +123,12 @@ function limitFor(ctx: ReadContext, cls: AccountClass, score: number | null): nu
 }
 
 /**
- * The most a lender lends at a score: up to what secures the loan is worth, else the personal-loan
- * range's top for a prime score or better, its typical amount for a fair or poor one, its least
- * below that.
+ * The most a lender lends at a score: up to what secures the loan is worth (its `value`, else a
+ * vehicle's class's typical used price, `vehicles.values`), else the personal-loan range's top for a
+ * prime score or better, its typical amount for a fair or poor one, its least below that.
  */
 function loanCeiling(ctx: ReadContext, score: number | null, securedBy?: EntityId): number {
-  const worth = numOf(own(ctx.state.entities, securedBy ?? "")?.fields.value);
+  const worth = numOf(own(ctx.state.entities, securedBy ?? "")?.fields.value) || (securedBy !== undefined ? (optionalQuery(ctx, "vehicles.values")?.(ctx).find((v) => v.vehicle === securedBy)?.cents ?? 0) : 0);
   if (worth > 0) return worth;
   const amounts = objOf(objOf(objOf(objOf(ctx.tables.get("economy.finance")?.rows.loans?.values).personal).amount_cents));
   const tier = creditTierOf(score ?? 700);

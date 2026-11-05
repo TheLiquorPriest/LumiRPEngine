@@ -14,7 +14,8 @@
 // has no insurance or upkeep and no housing swings; a property with a `valuation` (a mineral interest
 // by default) is worth what its linked revenue streams are projected to pay (`revenue.ts`).
 
-import type { EntityId } from "../../../shared/ids";
+import type { EntityId, PlaceId } from "../../../shared/ids";
+import type { PlaceMark } from "../../../shared/maps";
 import type { JsonObject, JsonValue } from "../../../shared/json";
 import type { LedgerEvent, PostingLine } from "../../../shared/ledger";
 import { ownersIn, worthShares, type Flow, type FlowShare, type FlowSplit, type FlowView, type LeaseView, type Owner, type OwnerLine, type PropertyView } from "../../../shared/finance";
@@ -27,6 +28,7 @@ import { labelOf, numOf, objOf, own, strOf } from "../../../engine/pack-kit";
 import type { EffectContext, ReadContext, Rejection, SlotInfo } from "../../../engine/registry";
 import type { Rng } from "../../../engine/rng";
 import type { WorldState } from "../../../engine/state";
+import { Working } from "../../../engine/working";
 import { canSeeEntity, canSeePlace } from "../../../engine/visibility";
 import type { AmountProvider, FinanceApi, FinanceRegistry, FlowPosting } from "./module";
 import { addMonths, clockOfDate, dateText, instantIn, investingRows, reject } from "./assets";
@@ -39,6 +41,20 @@ import { byShare } from "./records";
 import { correlated, gbmStep, normal } from "./pricing";
 import { actAs, asParam, mayAs } from "./acting";
 import { incomeValue } from "./revenue";
+
+declare module "../../../engine/registry" {
+  interface QueryMap {
+    /** The marks `who`'s map draws on the places it knows (DESIGN §27.9): home, a property it holds a part of, one for sale; with each, the property the place is when `who` may know it. */
+    "economy.place_marks": (ctx: ReadContext, who: EntityId) => PlaceMarkAt[];
+  }
+}
+
+/** A place's mark on `who`'s map, and the property the place is when `who` may know it (one they hold a part of, or one for sale). */
+export interface PlaceMarkAt {
+  place: PlaceId;
+  mark: PlaceMark;
+  property?: EntityId;
+}
 
 export const PROPERTY_COST_PROVIDER = "property_cost";
 const COSTS = ["tax", "insurance", "upkeep"] as const;
@@ -529,6 +545,92 @@ export function buyProperty(api: FinanceApi, ctx: EffectContext | ReadContext, x
   ]);
 }
 
+/**
+ * A property the story made the buyer's with nothing charged, priced after (its unpriced chip,
+ * DESIGN §9.5): the price from the buyer to its sellers outside the world, as buying a property pays
+ * it (no sales tax), what it was bought for, and its worth when nothing said what it was worth.
+ */
+function priceOwned(api: FinanceApi, ctx: EffectContext | ReadContext, x: { party: EntityId; property: EntityId; price: number; from?: EntityId }): LedgerEvent[] | Rejection {
+  const e = own(ctx.state.entities, x.property);
+  if (!e || e.kind !== "property") return reject("missing_property", `no property ${labelOf(ctx, x.property)}`);
+  if (!api.feature(ctx, x.party, "property")) return reject("level", "property isn't followed at this money level");
+  const price = Math.round(x.price);
+  if (!(price > 0)) return reject("bad_amount", "a price is above nothing");
+  const from = x.from ?? api.depositAccount(ctx, x.party);
+  if (!from) return reject("no_account", `${labelOf(ctx, x.party)} has no account to pay from`);
+  const unusable = api.mayUse(ctx, x.party, from, "from");
+  if (unusable) return unusable;
+  const lines: PostingLine[] = [
+    { account: from, amount: -price },
+    { account: api.outside(`seller:${x.property}`), amount: price },
+  ];
+  const posted = api.post(ctx, lines, { memo: `Bought ${e.name} for ${formatMoney(price, ctx.world.currency)}`, kind: "purchase", category: "property" });
+  if (isRejection(posted)) return posted;
+  return unit([
+    ...posted,
+    { type: "set", entity: x.property, field: "purchase_price", value: price },
+    ...(propertyValue(ctx.state, x.property) <= 0 ? [{ type: "set" as const, entity: x.property, field: "value", value: price }] : []),
+    acquisition(x.property, x.party, price),
+  ]);
+}
+
+/** The property a place is, by id order: the first whose `place` is it. */
+export function propertyAt(state: Readonly<WorldState>, place: PlaceId): EntityId | null {
+  return propertyIds(state).find((id) => fieldsOf(state, id).place === place) ?? null;
+}
+
+export interface PropertyMake {
+  place: PlaceId;
+  name?: string;
+  /** What it is worth; absent, nothing yet (a price set later values it). */
+  value?: number;
+  /** Its owner, the whole of it; absent, nobody's. */
+  owner?: EntityId | null;
+  asking_price?: number;
+}
+
+/** A property made of a place that isn't one yet (DESIGN §27.9): its name the place's, its value and owner as given. */
+export function makeProperty(ctx: ReadContext, x: PropertyMake): { entity: EntityId; events: LedgerEvent[] } | Rejection {
+  const place = own(ctx.world.places, x.place);
+  if (!place) return reject("missing_place", `no place ${labelOf(ctx, x.place)}`);
+  const had = propertyAt(ctx.state, x.place);
+  // Never naming it: Play's place sheet offers this on a place whose property the player may not know of.
+  if (had) return reject("already_property", `${place.name} is a property already`);
+  if (x.owner && !own(ctx.state.entities, x.owner)) return reject("missing_entity", `no owner ${labelOf(ctx, x.owner)}`);
+  let id = `property:${x.place}`;
+  for (let i = 2; own(ctx.state.entities, id); i++) id = `property:${x.place}:${i}`;
+  const value = Math.max(0, Math.round(x.value ?? 0));
+  const fields: JsonObject = { place: x.place, value, ...(x.owner ? { owners: [{ party: x.owner, role: "owner", share: 100 }] } : {}), ...(x.asking_price !== undefined && x.asking_price > 0 ? { asking_price: Math.round(x.asking_price) } : {}) };
+  return { entity: id, events: [{ type: "spawn", entity: { id, kind: "property", name: x.name?.trim() || place.name, tier: "background", fields, relations: [] } }] };
+}
+
+/**
+ * The marks the player's map draws (DESIGN §27.9; `MapPlaceView.mark`), for places `who` knows
+ * only: their home; a property they hold a part of; a property up for sale (an asking price), not
+ * theirs. One mark a place, in that order, whatever the properties' ids. With it, the place's
+ * property where `who` may know it (theirs, or one for sale they can see; the first by id between
+ * two alike), which the place sheet's Property here shows: their home is marked as home whether or
+ * not it is such a property.
+ */
+export function placeMarks(api: FinanceApi, ctx: ReadContext, who: EntityId): PlaceMarkAt[] {
+  const sees = (p: PlaceId): boolean => own(ctx.world.places, p) !== undefined && canSeePlace(ctx.registry, ctx.world, ctx.state, who, p);
+  // Each place's property mark: one they hold a part of before one for sale.
+  const held = new Map<PlaceId, { mark: "owned" | "for_sale"; property: EntityId }>();
+  for (const id of propertyIds(ctx.state)) {
+    const place = strOf(fieldsOf(ctx.state, id).place);
+    if (place === "" || held.get(place)?.mark === "owned" || !sees(place)) continue;
+    const mark = api.shareOf(ctx.state, id, who) > 0 ? "owned" : num(fieldsOf(ctx.state, id).asking_price) !== undefined && canSeeEntity(ctx.registry, ctx.world, ctx.state, who, id) ? "for_sale" : null;
+    if (mark !== null && (mark === "owned" || !held.has(place))) held.set(place, { mark, property: id });
+  }
+  const marks = new Map<PlaceId, { mark: PlaceMark; property?: EntityId }>(held);
+  const home = own(ctx.state.entities, who)?.fields.home;
+  if (typeof home === "string" && sees(home)) {
+    const property = held.get(home)?.property;
+    marks.set(home, { mark: "home", ...(property !== undefined ? { property } : {}) });
+  }
+  return [...marks].sort(([a], [b]) => a.localeCompare(b)).map(([place, m]) => ({ place, ...m }));
+}
+
 /** Whether a lease pays the given owners: its payee is one of them, or an account one of them holds. */
 function paysOwners(api: FinanceApi, ctx: ReadContext, lease: EntityId, owners: readonly EntityId[]): boolean {
   const to = strOf(fieldsOf(ctx.state, lease).to);
@@ -852,18 +954,63 @@ export function registerProperty(r: FinanceRegistry): void {
   const acted = (a: Record<string, JsonValue>, ctx: ReadContext, power: OrgPower, line: () => string, names: readonly (EntityId | undefined)[], run: () => LedgerEvent[] | Rejection): LedgerEvent[] | Rejection => actAs(ctx, { by: strOf(a.by), party: party(a, ctx), power, line, names }, run);
   r.core.effect({
     type: "economy.property_buy",
-    args: ["property", "price?", "from?", "down?", "term_months?", "party?", "by?"],
+    args: ["property", "price?", "from?", "down?", "term_months?", "party?", "by?", "live?", "story?", "name?", "owned?"],
     resolve: (a, ctx) => {
       const price = n(a, "price");
       const from = s(a, "from");
       const down = n(a, "down");
       const term = n(a, "term_months");
-      const property = strOf(a.property);
-      return acted(a, ctx, "property.trade", () => `Bought ${labelOf(ctx, property)}${price !== undefined ? ` for ${money(ctx, price)}` : ""}`, [], () =>
-        buyProperty(r.api, ctx, { party: party(a, ctx), property, ...(price !== undefined ? { price } : {}), ...(from ? { from } : {}), ...(down !== undefined ? { down } : {}), ...(term !== undefined ? { term_months: term } : {}) }),
-      );
+      const buyer = party(a, ctx);
+      let property = strOf(a.property);
+      // A place (DESIGN §27.9): the property it is, else one made of it, valued at the price.
+      const made: LedgerEvent[] = [];
+      let at: ReadContext = ctx;
+      if (own(ctx.state.entities, property)?.kind !== "property" && own(ctx.world.places, property)) {
+        const there = propertyAt(ctx.state, property);
+        if (there) property = there;
+        else {
+          const make = makeProperty(ctx, { place: property, ...(s(a, "name") ? { name: s(a, "name") } : {}), ...(price !== undefined ? { value: price } : {}) });
+          if ("code" in make) return make;
+          const w = new Working(ctx.registry, ctx.world, ctx.state);
+          w.applyAll(make.events);
+          made.push(...make.events);
+          property = make.entity;
+          at = w.ctx;
+        }
+      }
+      // Moving in (`live`): the buyer's home is the property's place from today.
+      const place = strOf(fieldsOf(at.state, property).place);
+      const moveIn: LedgerEvent[] = a.live === true && place !== "" && own(ctx.world.places, place) && own(ctx.state.entities, buyer)?.fields.home !== place ? [{ type: "set", entity: buyer, field: "home", value: place }] : [];
+      return acted(a, ctx, "property.trade", () => `Bought ${labelOf(at, property)}${price !== undefined ? ` for ${money(ctx, price)}` : ""}`, [], () => {
+        // A purchase the story made with nothing to price it by (no price, no asking price, no value) is the buyer's with nothing charged: its unpriced chip prices it.
+        const e = own(at.state.entities, property);
+        if (a.story === true && price === undefined && num(e?.fields.asking_price) === undefined && propertyValue(at.state, property) <= 0 && ownersIn(e?.fields ?? {}).length === 0) {
+          return unit([...made, { type: "set", entity: property, field: "owners", value: [{ party: buyer, role: "owner", share: 100 }] }, { type: "set", entity: property, field: "purchased", value: dateText(ctx.world, ctx.state.clock) }, ...moveIn]);
+        }
+        // Priced on that chip once it is the buyer's (`owned`): only its charge.
+        if (a.owned === true && price !== undefined && r.api.shareOf(at.state, property, buyer) > 0) {
+          const charged = priceOwned(r.api, at, { party: buyer, property, price, ...(from ? { from } : {}) });
+          return isRejection(charged) ? charged : unit([...made, ...charged, ...moveIn]);
+        }
+        const bought = buyProperty(r.api, at, { party: buyer, property, ...(price !== undefined ? { price } : {}), ...(from ? { from } : {}), ...(down !== undefined ? { down } : {}), ...(term !== undefined ? { term_months: term } : {}) });
+        return isRejection(bought) ? bought : unit([...made, ...bought, ...moveIn]);
+      });
     },
   });
+  r.core.effect({
+    type: "economy.property_make",
+    args: ["place", "name?", "value?", "owner?", "asking_price?"],
+    // GM → Money's Add a property at a place, and the place sheet's Make this a property: a GM edit's effect.
+    gm: true,
+    resolve: (a, ctx) => {
+      const owner = s(a, "owner");
+      const asking = n(a, "asking_price");
+      const value = n(a, "value");
+      const made = makeProperty(ctx, { place: strOf(a.place), ...(s(a, "name") ? { name: s(a, "name") } : {}), ...(value !== undefined ? { value } : {}), ...(owner ? { owner } : {}), ...(asking !== undefined ? { asking_price: asking } : {}) });
+      return "code" in made ? made : made.events;
+    },
+  });
+  r.core.query("economy.place_marks", (ctx, who) => placeMarks(r.api, ctx, who));
   r.core.effect({
     type: "economy.property_sell",
     args: ["property", "price", "buyer?", "to?", "party?", "by?"],
@@ -912,9 +1059,9 @@ export function registerProperty(r: FinanceRegistry): void {
     label: "Buy a property",
     description: "Buy a property, outright or with a mortgage.",
     pack: "economy",
-    params: { property: { type: "ref", ref: "property" }, price: { type: "money", label: "Offer", optional: true }, from: { type: "ref", ref: "account", label: "Pay from", optional: true }, down: { type: "money", label: "Down payment (the rest on a mortgage)", optional: true }, term_months: { type: "number", label: "Mortgage term, months (one a lender offers)", optional: true }, as: trading },
+    params: { property: { type: "ref", ref: "property" }, price: { type: "money", label: "Offer", optional: true }, from: { type: "ref", ref: "account", label: "Pay from", optional: true }, down: { type: "money", label: "Down payment (the rest on a mortgage)", optional: true }, term_months: { type: "number", label: "Mortgage term, months (one a lender offers)", optional: true }, live: { type: "bool", label: "Live there: their home from today, only when the input says they move in", optional: true }, as: trading },
     requires: [...requires, mayAs("property.trade")],
-    outcomes: { default: [{ type: "economy.property_buy", args: { party: "self", property: "property", price: "=params.price", from: "=params.from", down: "=params.down", term_months: "=params.term_months", by: "actor" } }] },
+    outcomes: { default: [{ type: "economy.property_buy", args: { party: "self", property: "property", price: "=params.price", from: "=params.from", down: "=params.down", term_months: "=params.term_months", live: "=params.live", by: "actor" } }] },
     duration: "60",
     lexicon: ["buy the house", "buy the property", "make an offer on"],
     observable: "signs a stack of papers",

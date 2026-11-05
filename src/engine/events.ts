@@ -223,12 +223,14 @@ export function coreEventTypes(lookup: () => EventTypes): EventTypeDef[] {
       // Detail is sampled once per entity and domain (DESIGN §9.2): a second one, such as a carried
       // ✎ cash fix's when the new swipe already opened the accounts, would post their opening again.
       if (hasOwn(ctx.state.materialized, `${e.entity}:${e.domain}`)) return reject("materialized", `${e.domain} detail for ${nameOf(ctx, e.entity)} is already recorded`);
-      // Nested events validate in sequence against the state they will see.
+      // Nested events validate in sequence against the state they will see: a lone one sees the
+      // state as it is, so only several need a scratch copy, and the last of them needs no applying.
+      if (e.events.length <= 1) return e.events[0] ? validateEvent(lookup(), e.events[0], ctx) : null;
       const scratch = structuredClone(ctx.state) as WorldState;
-      for (const inner of e.events) {
+      for (const [i, inner] of e.events.entries()) {
         const failure = validateEvent(lookup(), inner, { ...ctx, state: scratch });
         if (failure) return failure;
-        applyEvent(lookup(), inner, scratch, { ...ctx, state: scratch });
+        if (i < e.events.length - 1) applyEvent(lookup(), inner, scratch, { ...ctx, state: scratch });
       }
       return null;
     },

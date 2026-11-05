@@ -2,7 +2,7 @@
   "id": "gear.slots",
   "pack": "gear",
   "schema": "lre-table/gear.slots/v1",
-  "revision": "3b7a1c09512b25782bd3e5533a74e7ea",
+  "revision": "e813e37ac93fe7f769ef6081705b58f8",
   "label": "Equip slots",
   "source": {"dataPack":"modern-us","file":"us/gear.json","sourceSchema":"lre-data-src/us/gear/v1","reflectsPeriod":"2025-2026 retail prices; physical values are typical product weights","approximate":true,"basis":"Typical product weights and dimensions from manufacturer spec sheets and common retail products, rounded; prices from prices.json bands and typical retail. Not a real inventory standard."},
   "columns": {
@@ -25,6 +25,9 @@
     "feet": {"description":"Shoes and boots"},
     "back": {"description":"Backpacks"},
     "shoulder": {"description":"Shoulder and crossbody bags"},
+    "holster": {"description":"A holster on the belt, the shoulder or the thigh: a sidearm, a stun gun, a baton"},
+    "sheath": {"description":"A sheath on the belt: a knife, a machete"},
+    "quiver": {"description":"A quiver: arrows, crossbow bolts"},
     "hand_held": {"description":"Carried in hand: luggage, toolboxes, umbrellas"},
     "pocket": {"description":"Small items carried in a pocket"},
     "pocket_or_bag": {"description":"Small items carried in a pocket or a bag"},
