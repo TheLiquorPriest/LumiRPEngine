@@ -18,7 +18,7 @@ import type { GrantBasis, Size, SizeClass, Spot } from "../../shared/things";
 import { isSize, SIZE_LABELS, SIZES, THING_NAME_MAX } from "../../shared/things";
 import type { GrantView, OwnerGroup, PartyRef, PersonThings, ThingPage as ThingPageView, ThingPicks, ThingRow, ThingType, WhereChoice } from "../../shared/thing-view";
 import { GRANT_WORDS, presumedLine, SIZE_FROM_WORDS, SIZE_WORDS, sizeLabel, whoseWords } from "../../shared/thing-view";
-import { vehicleClassChoices, worldHasAir, type VehicleClassChoice, type VehiclePick } from "../../shared/vehicles";
+import { vehicleClassChoices, vehicleSpecsOf, worldHasAir, type VehicleClassChoice, type VehiclePick } from "../../shared/vehicles";
 import { playedKinds, type WorldDoc } from "../../shared/world";
 import { VehiclePicker } from "../../packs/vehicles/ui/picker";
 import { useApp } from "../app";
@@ -33,6 +33,7 @@ import { useSelect } from "../store";
 import { cannotHold, stepWords, whereLabel } from "../things/where";
 import { WherePicker, WhereSheet, type WhereExtra, type WherePick } from "../things/where-picker";
 import { KindChips, sizeOfWhat, suggestedName, THING_KINDS, TypeSheet, whatWords, type ThingKind, type WhatItIs } from "../things/what-it-is";
+import { SpecsEditor } from "../things/specs";
 import { entityFormSpecs, entityPatch } from "./character-model";
 import { go, ItemHeader, OverflowMenu, type MenuItem } from "./chrome";
 import { RevealItem } from "./contents";
@@ -751,6 +752,11 @@ export function ThingPage(props: EditorProps) {
         <CheckField label="Sleep in or on" help="A bed, a sofa, a sleeping bag, a van." checked={fields.sleep === true} onChange={(on) => setValue(withField(value, "sleep", on ? true : undefined))} />
         <CheckField label="Consumable" help="Used up as it is used: food, fuel, ammunition." checked={fields.consumable === true} onChange={(on) => setValue(withField(value, "consumable", on ? true : undefined))} />
       </Section>
+      {value.kind === "vehicle" ? (
+        <Section title="Specs">
+          <SpecsEditor value={vehicleSpecsOf(fields.specs) ?? []} onChange={(next) => setValue(withField(value, "specs", next.length > 0 ? next.map((s) => ({ label: s.label, value: s.value })) : undefined))} />
+        </Section>
+      ) : null}
       {row && row.holds !== null && page ? (
         <HoldsSection holds={row.holds} contents={page.contents} problems={problems} onOpen={(c) => go(app, { view: "item", worldId: props.world.id, collection: "entities", id: c })} onAdd={() => setInside(true)}>
           <HostSelect label="Takes things up to" value={isSize(fields.holds) ? fields.holds : ""} options={sizeOptions(isSize(fields.holds) ? "unknown" : row.holds, "")} onChange={(next) => setValue(withField(value, "holds", next === "" ? undefined : next))} />

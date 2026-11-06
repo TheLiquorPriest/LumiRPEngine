@@ -1,24 +1,29 @@
 // The Garage's controls (DESIGN §9.3; item 6): each at once, off screen, as the player's ✎ fix with
 // its Undo in the notice at the top. Where is it? parks it where the story left it; Home base… sets
 // where it is kept; Owner & use… (the shared sheet) says whose it is, lends it and stops a grant;
-// Drive… takes it somewhere, a story action. "+ Add a vehicle" makes one of a class where the player
-// says, under the chat's claims policy: Make it real makes it at once, Ask first asks in the sheet,
-// Hold me to the world offers no Add.
+// Specs… (one's own) sets its free specs; Drive… takes it somewhere, a story action. "+ Add a
+// vehicle" makes one of a class where the player says, under the chat's claims policy: Make it real
+// makes it at once, Ask first asks in the sheet, Hold me to the world offers no Add.
 
+import { useState } from "preact/hooks";
 import type { ClaimsPolicy } from "../../../shared/claims";
 import type { ChatId, EntityId, PlaceId } from "../../../shared/ids";
 import type { ItemFix } from "../../../shared/things";
+import type { VehicleSpec } from "../../../shared/vehicles";
+import { FormSheet } from "../../../frontend/build/form-kit";
+import { Button } from "../../../frontend/components";
 import { useApp } from "../../../frontend/app";
 import { PlaceSheet } from "../../../frontend/character/place-picker";
 import { travelRequest } from "../../../frontend/requests";
 import { AddThingSheet, type AddDraft } from "../../../frontend/things/add-thing";
 import { thingsFix, type AtOnce } from "../../../frontend/things/at-once";
 import { OwnerUseSheet, type OwnerUseThing } from "../../../frontend/things/owner-sheet";
+import { SpecsEditor } from "../../../frontend/things/specs";
 import { playWhere } from "../../../frontend/things/play-where";
 import type { GarageVehicle, GarageView } from "../core/view";
 
 /** Which of the Garage's sheets is open, and for which vehicle. */
-export type GarageSheet = { kind: "where" | "home" | "owner" | "drive"; vehicle: EntityId } | { kind: "add" };
+export type GarageSheet = { kind: "where" | "home" | "owner" | "specs" | "drive"; vehicle: EntityId } | { kind: "add" };
 
 /** Parks a vehicle where the story left it. */
 export function parkFix(vehicle: EntityId, place: PlaceId): ItemFix {
@@ -28,6 +33,32 @@ export function parkFix(vehicle: EntityId, place: PlaceId): ItemFix {
 /** Sets where a vehicle is kept, or clears it. */
 export function homeFix(vehicle: EntityId, place: PlaceId | null): ItemFix {
   return { do: "home", item: vehicle, home: place === null ? null : { place } };
+}
+
+/** Sets a vehicle's specs, the whole list; an empty one clears them. */
+export function specsFix(vehicle: EntityId, specs: readonly VehicleSpec[]): ItemFix {
+  return { do: "specs", item: vehicle, specs: [...specs] };
+}
+
+/** Specs…: the list as the card shows it, changed here and saved as one fix. */
+function SpecsSheet(props: { chatId: ChatId; vehicle: GarageVehicle; atOnce: AtOnce; onClose(): void }) {
+  const v = props.vehicle;
+  const [specs, setSpecs] = useState<VehicleSpec[]>(v.specs ?? []);
+  const changed = JSON.stringify(specs) !== JSON.stringify(v.specs ?? []);
+  return (
+    <FormSheet
+      title="Specs"
+      subtitle={v.name}
+      onClose={props.onClose}
+      actions={
+        <Button variant="primary" disabled={!changed} busy={props.atOnce.busy} onClick={() => props.atOnce.send(thingsFix(props.chatId, [specsFix(v.id, specs)], `Specs of ${v.name}`), specs.length > 0 ? `${v.name}'s specs are saved.` : `${v.name} has no specs now.`, props.onClose)}>
+          Save
+        </Button>
+      }
+    >
+      <SpecsEditor value={specs} disabled={props.atOnce.busy} onChange={setSpecs} />
+    </FormSheet>
+  );
 }
 
 /** A vehicle as the Owner & use sheet reads it. */
@@ -87,6 +118,7 @@ export function GarageSheets(props: { chatId: ChatId; view: GarageView; sheet: G
   const v = view.vehicles.find((x) => x.id === sheet.vehicle);
   if (!v) return null;
   if (sheet.kind === "owner") return <OwnerUseSheet chatId={props.chatId} thing={ownerThing(v)} people={view.people ?? []} loans={view.loans ?? []} household={view.household ?? null} onClose={props.onClose} />;
+  if (sheet.kind === "specs") return <SpecsSheet chatId={props.chatId} vehicle={v} atOnce={atOnce} onClose={props.onClose} />;
   if (sheet.kind === "where") {
     return (
       <PlaceSheet

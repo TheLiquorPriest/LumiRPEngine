@@ -1,15 +1,17 @@
 // Play → Me → Garage (DESIGN §9.1 Vehicles): "runs fine" at level 1; fuel, location and owner from
 // 2; odometer, use grants and home base from 3; maintenance and registration at 4. Each vehicle the
-// player may drive is a card: whose it is and what their use rests on, its class, cargo and grants,
-// and its controls (Where is it?, Home base…, Owner & use…, Drive…), each at once with Undo. "+ Add a
-// vehicle" follows the chat's claims policy. Overdue use grants and service are flagged.
+// player may drive is a card: whose it is and what their use rests on, its class, cargo, specs and
+// grants, and its controls (Where is it?, Home base…, Owner & use…, Specs…, Drive…), each at once
+// with Undo. Above the cards, with two or more, Sort (name, type, location) and filter chips by type
+// (its class, else its domain) and by location. "+ Add a vehicle" follows the chat's claims policy.
+// Overdue use grants and service are flagged.
 
 import { useState } from "preact/hooks";
 import { isRecord } from "../../../shared/json";
 import type { PlaceRef } from "../../../shared/character";
 import { GRANT_BASES } from "../../../shared/things";
-import { VEHICLE_DOMAINS } from "../../../shared/vehicles";
-import { Badge, Button, Empty, JsonView, List, ListRow, Meter } from "../../../frontend/components";
+import { shortClassName, specWords, VEHICLE_DOMAIN_LABEL, VEHICLE_DOMAINS, vehicleSpecsOf } from "../../../shared/vehicles";
+import { Badge, Button, Empty, JsonView, List, ListRow, Meter, Seg, type SegOption } from "../../../frontend/components";
 import { list, num, obj, oneOf, optNum, optStr, str, strings } from "../../../frontend/decode";
 import { Icon } from "../../../frontend/icons";
 import type { IconName } from "../../../frontend/icons";
@@ -59,6 +61,7 @@ export function decodeGarageView(value: unknown): GarageView | null {
             cargo: strings(v.cargo),
             mine: v.mine === true,
             canLend: v.canLend === true,
+            specs: vehicleSpecsOf(v.specs) ?? [],
           }
         : null;
     }),
@@ -76,7 +79,7 @@ export function vehicleIcon(v: GarageVehicle): IconName {
   return /air/i.test(v.kind) ? "plane" : /boat|water|sea|marine/i.test(v.kind) ? "boat" : "car";
 }
 
-function VehicleCard(props: { vehicle: GarageVehicle; onSheet?(kind: "where" | "home" | "owner" | "drive"): void }) {
+export function VehicleCard(props: { vehicle: GarageVehicle; onSheet?(kind: "where" | "home" | "owner" | "specs" | "drive"): void }) {
   const v = props.vehicle;
   // "runs fine" or "ok" reads as fine; any other status needs attention.
   const status = v.status.toLowerCase();
@@ -109,6 +112,7 @@ function VehicleCard(props: { vehicle: GarageVehicle; onSheet?(kind: "where" | "
         {v.place ? <ListRow icon="pin" title="Location" subtitle={v.home && v.home !== v.place ? `home: ${v.home}` : undefined} value={v.place} /> : null}
         {v.odometerLabel ? <ListRow icon="route" title={v.odometerLabel.endsWith(" h") ? "Engine hours" : "Odometer"} value={v.odometerLabel} /> : null}
         {v.cargo && v.cargo.length > 0 ? <ListRow icon="box" title="Cargo" subtitle={v.cargo.join(", ")} /> : null}
+        {v.specs && v.specs.length > 0 ? <ListRow icon="list" title="Specs" subtitle={v.specs.map(specWords).join(" · ")} /> : null}
         {v.assignedTo ? (
           <ListRow
             icon="key"
@@ -140,6 +144,11 @@ function VehicleCard(props: { vehicle: GarageVehicle; onSheet?(kind: "where" | "
               {(v.grants ?? []).length > 0 ? "Lend… / Stop" : "Owner & use…"}
             </Button>
           ) : null}
+          {v.mine ? (
+            <Button size="sm" variant="secondary" icon="edit" onClick={() => open("specs")}>
+              Specs…
+            </Button>
+          ) : null}
           {status !== "broken" ? (
             <Button size="sm" variant="secondary" icon={vehicleIcon(v)} onClick={() => open("drive")}>
               Drive…
@@ -151,19 +160,92 @@ function VehicleCard(props: { vehicle: GarageVehicle; onSheet?(kind: "where" | "
   );
 }
 
+/** How the Garage orders its cards. */
+export type GarageSort = "name" | "type" | "location";
+
+const SORTS: readonly SegOption<GarageSort>[] = [
+  { value: "name", label: "Name" },
+  { value: "type", label: "Type" },
+  { value: "location", label: "Location" },
+];
+
+/** A vehicle's type, as Sort and the type chips read it: its class's short name, else its domain. */
+export function garageType(v: GarageVehicle): string {
+  if (v.className) return shortClassName(v.className);
+  const domain = VEHICLE_DOMAINS.find((d) => d === v.kind);
+  return domain ? VEHICLE_DOMAIN_LABEL[domain] : v.kind || "Vehicle";
+}
+
+/** Where a vehicle is, as Sort and the location chips read it. */
+export function garageLocation(v: GarageVehicle): string {
+  return v.place ?? "Unknown";
+}
+
+/** The cards the Garage shows: of the picked type and location (null: any), in the picked order, then by name. */
+export function garageShown(vehicles: readonly GarageVehicle[], pick: GaragePick): GarageVehicle[] {
+  const key = (v: GarageVehicle): string => (pick.sort === "type" ? garageType(v) : pick.sort === "location" ? garageLocation(v) : "");
+  return vehicles
+    .filter((v) => (pick.type === null || garageType(v) === pick.type) && (pick.place === null || garageLocation(v) === pick.place))
+    .sort((a, b) => key(a).localeCompare(key(b)) || a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
+}
+
+/** What Sort and the chips have picked: an order, and a type and a location (null: any). */
+export interface GaragePick {
+  sort: GarageSort;
+  type: string | null;
+  place: string | null;
+}
+
+/** The types and locations the chips offer, and the pick as it holds: one no vehicle has any more (one moved, one sold) shows them all. */
+export function garageFilters(vehicles: readonly GarageVehicle[], pick: GaragePick): { types: string[]; places: string[]; pick: GaragePick } {
+  const types = [...new Set(vehicles.map(garageType))].sort((a, b) => a.localeCompare(b));
+  const places = [...new Set(vehicles.map(garageLocation))].sort((a, b) => a.localeCompare(b));
+  return { types, places, pick: { sort: pick.sort, type: pick.type !== null && types.includes(pick.type) ? pick.type : null, place: pick.place !== null && places.includes(pick.place) ? pick.place : null } };
+}
+
+/** One row of filter chips, "All" first; none when every vehicle shares one value. Hook-free. */
+export function GarageChips(props: { filter: "type" | "place"; label: string; values: readonly string[]; value: string | null; onPick(value: string | null): void }) {
+  if (props.values.length < 2) return null;
+  return (
+    <div class="lre-bel-chips" role="group" aria-label={props.label} data-lre-garage-filter={props.filter}>
+      {[null, ...props.values].map((value) => (
+        <button key={value ?? ""} type="button" class="lre-bel-chip" aria-pressed={props.value === value} data-lre-garage-chip={value ?? ""} onClick={() => props.onPick(value)}>
+          {value ?? "All"}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/** Sort and the filter chips, over two or more vehicles. Hook-free. */
+export function GarageControls(props: { vehicles: readonly GarageVehicle[]; pick: GaragePick; onPick(next: GaragePick): void }) {
+  if (props.vehicles.length < 2) return null;
+  const { types, places, pick } = garageFilters(props.vehicles, props.pick);
+  return (
+    <div class="lre-stack" data-lre-garage-controls="">
+      <Seg<GarageSort> label="Sort by" value={pick.sort} options={SORTS} onChange={(sort) => props.onPick({ ...pick, sort })} />
+      <GarageChips filter="type" label="Type" values={types} value={pick.type} onPick={(type) => props.onPick({ ...pick, type })} />
+      <GarageChips filter="place" label="Location" values={places} value={pick.place} onPick={(place) => props.onPick({ ...pick, place })} />
+    </div>
+  );
+}
+
 export function GaragePanel(props: PanelProps) {
   const view = decodeGarageView(props.view);
   const atOnce = useAtOnce(props.chatId);
   const [sheet, setSheet] = useState<GarageSheet | null>(null);
+  const [pick, setPick] = useState<GaragePick>({ sort: "name", type: null, place: null });
   if (props.view === null || props.view === undefined) return <Empty icon="car">No vehicles.</Empty>;
   if (!view) return <JsonView value={props.view} />;
   const claims = props.state.controls?.realism.claims ?? null;
   const canAdd = addPolicyOf(claims) !== "hidden" && (view.classes ?? []).length > 0;
+  const shown = garageShown(view.vehicles, garageFilters(view.vehicles, pick).pick);
   return (
     <div class="lre-stack lre-me" data-lre-panel="vehicles.garage">
       <AtOnceNotice done={atOnce.done} busy={atOnce.busy} onUndo={atOnce.undo} onDismiss={atOnce.dismiss} />
       {view.vehicles.length === 0 ? <Empty icon="car">No vehicles yet.</Empty> : null}
-      {view.vehicles.map((v) => (
+      <GarageControls vehicles={view.vehicles} pick={pick} onPick={setPick} />
+      {shown.map((v) => (
         <VehicleCard key={v.id} vehicle={v} onSheet={(kind) => setSheet({ kind, vehicle: v.id })} />
       ))}
       {canAdd ? (

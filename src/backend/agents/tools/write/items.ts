@@ -15,6 +15,7 @@ import { WRITE_NOTE } from "../../../../shared/agent-tools-write";
 import type { EntityId } from "../../../../shared/ids";
 import { hasOwn, type JsonObject } from "../../../../shared/json";
 import { GRANT_BASES, type GrantBasis, HANDOVER_BASES, type HandoverBasis, type ItemOp, isSize, nameKey, PERMIT_SCOPES, type PermitScope, type Rest, SET_KINDS, type SetKind, setsOf, SIZES, type Size, type Spot, vehicleDetailsOf } from "../../../../shared/things";
+import { vehicleSpecsOf } from "../../../../shared/vehicles";
 import { calendarOf, clockOfPhrase, clockOfStamp } from "../../../../engine/calendar";
 import type { ToolOutcome } from "../../runtime";
 import { BOOLEAN, boolArg, gmEdit, missing, needId, propose, refusedAnswer, TEXT_LIST, wordsArg } from "../propose";
@@ -99,9 +100,11 @@ const thing = (view: ToolReadView, tool: string, args: JsonObject, key = "item")
 const party = (view: ToolReadView, tool: string, args: JsonObject, key: string): string | ToolOutcome => needId(view, tool, args, key, resolveEntity);
 /** A reason, as the change keeps it. */
 const why = (view: ToolReadView, tool: string, args: JsonObject): string | ToolOutcome => needText(view, tool, args, "why");
+/** A vehicle's specs, each a label and its value. */
+const SPECS: JsonObject = { type: "array", items: objectSchema({ label: text(), value: text() }, ["label", "value"]) };
 
 export const ITEMS_WRITES: readonly ToolDefinition[] = [
-  itemTool("item_make", "story", { name: text(), type: text(), class: text(), details: objectSchema({ make: text(), model: text(), year: integer(), colour: text(), plate: text() }), size: text([...SIZES]), ...SPOT, owner: text(), home: text(), qty: integer({ minimum: 1 }), aliases: TEXT_LIST, hidden: BOOLEAN, why: text() }, ["name", "why"], (view, args) => {
+  itemTool("item_make", "story", { name: text(), type: text(), class: text(), details: objectSchema({ make: text(), model: text(), year: integer(), colour: text(), plate: text(), specs: SPECS }), size: text([...SIZES]), ...SPOT, owner: text(), home: text(), qty: integer({ minimum: 1 }), aliases: TEXT_LIST, hidden: BOOLEAN, why: text() }, ["name", "why"], (view, args) => {
     const name = needText(view, "item_make", args, "name");
     if (isNote(name)) return name;
     const at = spotOf(view, "item_make", args);
@@ -209,7 +212,7 @@ export const ITEMS_WRITES: readonly ToolDefinition[] = [
     if (isNote(by)) return by;
     return { do: "lose", item, ...(by !== undefined ? { by } : {}) };
   }),
-  itemTool("item_label", "story", { item: text(), name: text(), aliases: TEXT_LIST, description: text(), size: text([...SIZES]) }, ["item"], (view, args) => {
+  itemTool("item_label", "story", { item: text(), name: text(), aliases: TEXT_LIST, description: text(), size: text([...SIZES]), specs: SPECS }, ["item"], (view, args) => {
     const item = thing(view, "item_label", args);
     if (isNote(item)) return item;
     const size = oneOf<Size>(view, "item_label", args, "size", SIZES);
@@ -217,7 +220,8 @@ export const ITEMS_WRITES: readonly ToolDefinition[] = [
     const name = textArg(args, "name");
     const aliases = wordsArg(args, "aliases");
     const description = typeof args.description === "string" ? args.description : null;
-    return { do: "label", item, ...(name !== null ? { name } : {}), ...(aliases !== null ? { aliases } : {}), ...(description !== null ? { description } : {}), ...(size !== undefined ? { size } : {}) };
+    const specs = vehicleSpecsOf(args.specs);
+    return { do: "label", item, ...(name !== null ? { name } : {}), ...(aliases !== null ? { aliases } : {}), ...(description !== null ? { description } : {}), ...(size !== undefined ? { size } : {}), ...(specs !== null ? { specs } : {}) };
   }),
   itemTool("item_merge", "story", { keep: text(), drop: text() }, ["keep", "drop"], (view, args) => {
     const keep = thing(view, "item_merge", args, "keep");

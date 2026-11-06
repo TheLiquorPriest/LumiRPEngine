@@ -8,7 +8,7 @@
 
 import type { EntityId, Level, PlaceId } from "./ids";
 import { hasOwn, isRecord, safeKey } from "./json";
-import { VEHICLE_DETAIL_KEYS, type VehicleDetails } from "./vehicles";
+import { VEHICLE_DETAIL_KEYS, type VehicleDetails, type VehicleSpec, vehicleSpecsOf } from "./vehicles";
 import { selectorOrNull } from "./minds";
 import { isAudience, type Audience } from "./org";
 import type { Selector, WorldDoc } from "./world";
@@ -205,7 +205,7 @@ export type ItemOp =
   | { do: "wear"; item: EntityId; who: EntityId; off?: boolean; slot?: string }
   | { do: "condition"; item: EntityId; delta: number }
   | { do: "lose"; item: EntityId; by?: EntityId }
-  | { do: "label"; item: EntityId; name?: string; aliases?: string[]; description?: string; size?: Size }
+  | { do: "label"; item: EntityId; name?: string; aliases?: string[]; description?: string; size?: Size; specs?: VehicleSpec[] }
   | { do: "merge"; keep: EntityId; drop: EntityId }
   | { do: "remove"; item: EntityId; why: string }
   | { do: "set_save"; who: EntityId; name: string; kind: SetKind; pieces?: SetPiece[] }
@@ -272,7 +272,7 @@ export function isRest(v: unknown): v is Rest {
   return v === "owner" || isSpot(v);
 }
 
-/** A made vehicle's details from outside data (its make, model, year, colour, plate, …): each key it gives as its type is, the rest left out; null when it isn't an object. */
+/** A made vehicle's details from outside data (its make, model, year, colour, plate, …, its specs): each key it gives as its type is, the rest left out; null when it isn't an object. */
 export function vehicleDetailsOf(v: unknown): VehicleDetails | null {
   if (!isRecord(v)) return null;
   const out: Record<string, string | number> = {};
@@ -281,7 +281,8 @@ export function vehicleDetailsOf(v: unknown): VehicleDetails | null {
     const words = key === "make" || key === "model" || key === "colour" || key === "plate";
     if (words ? typeof value === "string" && value.trim() !== "" : finite(value)) out[key] = words ? (value as string).trim() : (value as number);
   }
-  return out as VehicleDetails;
+  const specs = vehicleSpecsOf(v.specs);
+  return specs !== null && specs.length > 0 ? { ...(out as VehicleDetails), specs } : (out as VehicleDetails);
 }
 
 /**
@@ -338,8 +339,8 @@ export function parseItemOp(o: unknown): ItemOp | null {
     case "lose":
       return id(o.item) && optional(o.by, id) ? { do: "lose", item: o.item, ...(id(o.by) ? { by: o.by } : {}) } : null;
     case "label":
-      if (!id(o.item) || !optional(o.name, text) || !optional(o.aliases, strings) || !optional(o.description, text) || !optional(o.size, isSize)) return null;
-      return { do: "label", item: o.item, ...(text(o.name) ? { name: o.name } : {}), ...(strings(o.aliases) ? { aliases: o.aliases } : {}), ...(text(o.description) ? { description: o.description } : {}), ...(isSize(o.size) ? { size: o.size } : {}) };
+      if (!id(o.item) || !optional(o.name, text) || !optional(o.aliases, strings) || !optional(o.description, text) || !optional(o.size, isSize) || !optional(o.specs, Array.isArray)) return null;
+      return { do: "label", item: o.item, ...(text(o.name) ? { name: o.name } : {}), ...(strings(o.aliases) ? { aliases: o.aliases } : {}), ...(text(o.description) ? { description: o.description } : {}), ...(isSize(o.size) ? { size: o.size } : {}), ...(Array.isArray(o.specs) ? { specs: vehicleSpecsOf(o.specs) ?? [] } : {}) };
     case "merge":
       return id(o.keep) && id(o.drop) ? { do: "merge", keep: o.keep, drop: o.drop } : null;
     case "remove":
@@ -398,7 +399,7 @@ export type FixOwner = "self" | "household" | null;
  * A player's ✎ fix to a thing of theirs (`fix_item`, ITEMS-SPEC §10.3): where it is, where it is
  * kept, whether the player character wears it (and in which slot: "hand_held" is Ready), its size
  * (null: what its type or name gives), whose it is (theirs, their household's or nobody's), who
- * may use it, its name, putting it away, handing it to someone here, and a thing they add (Play's
+ * may use it, its name, a vehicle's specs, putting it away, handing it to someone here, and a thing they add (Play's
  * Add). `engine/edits` resolves it under the player's rules.
  */
 export type ItemFix =
@@ -410,6 +411,7 @@ export type ItemFix =
   | { do: "grant"; item: EntityId; who: EntityId; until?: number }
   | { do: "revoke"; item: EntityId; who: EntityId }
   | { do: "label"; item: EntityId; name: string }
+  | { do: "specs"; item: EntityId; specs: VehicleSpec[] }
   | { do: "away"; item: EntityId }
   | { do: "hand"; item: EntityId; to: EntityId; basis: FixHandBasis; until?: number }
   | { do: "make"; name: string; type?: string; class?: string; is?: ThingIs; description?: string; details?: VehicleDetails; size?: Size; qty?: number; at: Spot };
@@ -450,6 +452,8 @@ export function parseItemFix(o: unknown): ItemFix | null {
       return id(o.who) ? { do: "revoke", item: o.item, who: o.who } : null;
     case "label":
       return text(o.name) ? { do: "label", item: o.item, name: o.name } : null;
+    case "specs":
+      return Array.isArray(o.specs) ? { do: "specs", item: o.item, specs: vehicleSpecsOf(o.specs) ?? [] } : null;
     case "away":
       return { do: "away", item: o.item };
     case "hand":

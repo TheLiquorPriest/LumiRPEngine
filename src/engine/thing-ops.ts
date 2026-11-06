@@ -554,6 +554,12 @@ function label(w: Working, op: Extract<ItemOp, { do: "label" }>): ItemOpApplied 
   if (aliases !== undefined && JSON.stringify(aliases) !== JSON.stringify(e.fields.aliases ?? [])) events.push({ type: "set", entity: op.item, field: "aliases", value: aliases });
   if (op.description !== undefined && op.description.trim() !== (e.fields.description ?? "")) events.push({ type: "set", entity: op.item, field: "description", value: op.description.trim() });
   if (op.size !== undefined && op.size !== e.fields.size) events.push({ type: "set", entity: op.item, field: "size", value: op.size });
+  // A vehicle's free specs, the whole list at once; an empty one clears them.
+  if (op.specs !== undefined) {
+    if (!kindIs(ctx.registry, ctx.world, e.kind, "vehicle")) return reject("not_a_vehicle", `${e.name} isn't a vehicle; only a vehicle has specs`);
+    const specs = op.specs.length > 0 ? op.specs.map((s) => ({ label: s.label, value: s.value })) : null;
+    if (JSON.stringify(specs) !== JSON.stringify(e.fields.specs ?? null)) events.push({ type: "set", entity: op.item, field: "specs", value: specs });
+  }
   if (events.length === 0) return reject("no_change", "nothing to change");
   return applyAll(w, events) ?? {};
 }

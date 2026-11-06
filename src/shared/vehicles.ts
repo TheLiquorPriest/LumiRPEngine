@@ -35,6 +35,39 @@ export interface VehicleDetails {
   fuel_pct?: number;
   /** What it would sell for, when the story or the GM says; else its class's typical used price. */
   value?: number;
+  /** Its free specs, as the story or the owner tells them (`vehicleSpecsOf`). */
+  specs?: VehicleSpec[];
+}
+
+/** One of a vehicle's free specs: a label and its value ("Engine": "5.0L V8", "Seats": "5"). */
+export interface VehicleSpec {
+  label: string;
+  value: string;
+}
+
+/** At most this many specs a vehicle keeps. */
+export const VEHICLE_SPECS_MAX = 24;
+/** At most this many characters a spec's label, or its value, keeps. */
+export const VEHICLE_SPEC_TEXT_MAX = 80;
+
+/** Specs from outside data (a field, a fix, a tool's arguments): each with a label and a value, trimmed and capped; null when it isn't a list. */
+export function vehicleSpecsOf(v: unknown): VehicleSpec[] | null {
+  if (!Array.isArray(v)) return null;
+  const words = (x: unknown): string => (typeof x === "string" ? x : typeof x === "number" && Number.isFinite(x) ? String(x) : "").replace(/\s+/g, " ").trim().slice(0, VEHICLE_SPEC_TEXT_MAX);
+  const out: VehicleSpec[] = [];
+  for (const s of v) {
+    if (out.length >= VEHICLE_SPECS_MAX) break;
+    if (!isRecord(s)) continue;
+    const label = words(s.label);
+    const value = words(s.value);
+    if (label !== "" && value !== "") out.push({ label, value });
+  }
+  return out;
+}
+
+/** A spec as a line tells it: "Engine: 5.0L V8". */
+export function specWords(spec: VehicleSpec): string {
+  return `${spec.label}: ${spec.value}`;
 }
 
 /** The detail keys a make or a purchase may set, in the order the vehicle kind lists them. */

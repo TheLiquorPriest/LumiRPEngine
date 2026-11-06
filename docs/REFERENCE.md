@@ -1411,6 +1411,7 @@ Extends `container`.
 | `model` | Model | text |  |  |  |  |  |
 | `odometer_mi` | Odometer (mi) | number | ≥ 0 |  |  |  | live from vehicles 3; locked |
 | `plate` | Plate | text |  |  |  |  |  |
+| `specs` | Specs ({label, value}) | list |  |  |  |  |  |
 | `status` | Status | enum: ok, needs_service, broken |  | `"ok"` |  |  | live from vehicles 1; bound confirm |
 | `value` | Value | money | ≥ 0 |  |  |  | live from money 3 |
 | `year` | Year | number |  |  |  |  |  |

@@ -9,7 +9,7 @@ import type { PlaceRef } from "../../../shared/character";
 import type { EntityId, PlaceId } from "../../../shared/ids";
 import type { LoanChoice } from "../../../shared/thing-gm";
 import { grantBasisOf, type GrantBasis } from "../../../shared/things";
-import { vehicleClassChoices, worldHasAir, type VehicleClassChoice } from "../../../shared/vehicles";
+import { vehicleClassChoices, vehicleSpecsOf, worldHasAir, type VehicleClassChoice, type VehicleSpec } from "../../../shared/vehicles";
 import type { ReadContext } from "../../../engine/registry";
 import { accessOf } from "../../../engine/access";
 import { calendarOf, dateAt, formatClock } from "../../../engine/calendar";
@@ -70,6 +70,8 @@ export interface GarageVehicle {
   mine?: boolean;
   /** The POV may lend it out or let someone use it. */
   canLend?: boolean;
+  /** Its free specs ("Engine": "5.0L V8"), when it has any. */
+  specs?: VehicleSpec[];
 }
 
 export interface GarageView {
@@ -167,6 +169,8 @@ export function buildGarageView(ctx: ReadContext): GarageView {
       .filter((x) => !isGone(ctx.state, x) && seesEntity(x) && own(ctx.state.entities, x)?.relations.some((r) => r.type === "in" && r.to === id))
       .map((x) => own(ctx.state.entities, x)?.name ?? x);
     if (cargo.length > 0) v.cargo = cargo;
+    const specs = vehicleSpecsOf(e.fields.specs) ?? [];
+    if (specs.length > 0) v.specs = specs;
     if (level >= 4) {
       const interval = serviceInterval(ctx, id);
       if (interval !== null) {

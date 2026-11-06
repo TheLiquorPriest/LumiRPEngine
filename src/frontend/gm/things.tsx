@@ -28,7 +28,7 @@ import type { HandoverBasis, ItemOp, Rest, SetKind, Size, SizeClass, Spot } from
 import { isSize, makeFieldsOf, SET_KIND_LABEL, SET_KINDS, SET_NAME_MAX, setsOf, SIZE_LABELS, SIZES, THING_NAME_MAX } from "../../shared/things";
 import type { PartyRef, ThingPage, ThingPicks, ThingRow, ThingType, WhereChoice, WhereStep } from "../../shared/thing-view";
 import { GRANT_WORDS, partyPossessive, presumedLine, SIZE_FROM_WORDS, SIZE_WORDS, sizeLabel, whoseWords } from "../../shared/thing-view";
-import type { VehicleClassChoice } from "../../shared/vehicles";
+import { vehicleSpecsOf, type VehicleClassChoice, type VehicleSpec } from "../../shared/vehicles";
 import { listWords } from "../../shared/words";
 import { SetRows } from "../../packs/gear/ui/sets-sheet";
 import { useApp, useChatWorld } from "../app";
@@ -47,6 +47,7 @@ import { AddThingSheet, type AddDraft } from "../things/add-thing";
 import { cannotHold, pathText, stepWords } from "../things/where";
 import { WhereSheet, type WhereExtra, type WherePick } from "../things/where-picker";
 import { SizeChoices, THING_KINDS } from "../things/what-it-is";
+import { SpecsEditor } from "../things/specs";
 import type { BulkEditor, Editor } from "./editor";
 import { FieldRow, Relations } from "./entity";
 import { thinEntity } from "./parts";
@@ -1116,6 +1117,11 @@ export function GmThingBody(props: GmThingBodyProps) {
         </span>
         <LabelForm key={JSON.stringify([name, fieldOf(entity, "aliases"), fieldOf(entity, "description"), fieldOf(entity, "size"), fieldOf(entity, "consumable"), fieldOf(entity, "sleep"), fieldOf(entity, "qty"), fieldOf(entity, "condition")])} id={id} name={name} entity={entity} size={row.size} editor={editor} />
       </Section>
+      {row.kind === "vehicle" ? (
+        <Section title="Specs">
+          <GmSpecs key={JSON.stringify(fieldOf(entity, "specs"))} id={id} name={name} stored={vehicleSpecsOf(fieldOf(entity, "specs")) ?? []} editor={editor} />
+        </Section>
+      ) : null}
       {row.holds !== null ? <HoldsSection holds={row.holds} contents={page.contents} problems={NO_PROBLEMS} onOpen={props.onOpen} onAdd={() => props.onSheet("inside")} /> : null}
       <Section title="Secrecy">
         <ActionRows label="Secrecy">
@@ -1163,6 +1169,20 @@ export function GmThingBody(props: GmThingBodyProps) {
         </Button>
       </Section>
     </div>
+  );
+}
+
+/** A vehicle's specs, changed here and saved as one label edit. */
+function GmSpecs(props: { id: EntityId; name: string; stored: VehicleSpec[]; editor: Editor }) {
+  const [specs, setSpecs] = useState<VehicleSpec[]>(props.stored);
+  const busy = props.editor.busy;
+  return (
+    <>
+      <SpecsEditor value={specs} disabled={busy} onChange={setSpecs} />
+      <Button size="sm" variant="primary" disabled={busy || JSON.stringify(specs) === JSON.stringify(props.stored)} onClick={() => void props.editor.edit([item({ do: "label", item: props.id, specs })], specs.length > 0 ? `${props.name}'s specs are saved.` : `${props.name} has no specs now.`)}>
+        Save specs
+      </Button>
+    </>
   );
 }
 

@@ -241,6 +241,8 @@ function fixItemOp(reg: Registry, w: Working, change: ItemFix, opts: EditOptions
         return partyProblem(change.who, false) ?? applyItemOp(w, { do: "revoke", item, who: change.who }, options);
       case "label":
         return applyItemOp(w, { do: "label", item, name: change.name }, options);
+      case "specs":
+        return applyItemOp(w, { do: "label", item, specs: change.specs }, options);
       case "away": {
         // Back where it is kept (`restOf`, as Put away takes it): a place or a holder they can see, or on its owner, who is them or someone here.
         const rest = restOf(w.ctx, item).rest;

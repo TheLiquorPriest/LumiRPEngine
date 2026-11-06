@@ -41,7 +41,7 @@ import { grants, isInside, kitStatus } from "../../../../packs/gear/core/model";
 import { TOOL_NOTE } from "../../../../shared/agent-tools";
 import type { EntityId } from "../../../../shared/ids";
 import { hasOwn, isRecord, type JsonValue } from "../../../../shared/json";
-import { VEHICLE_DOMAINS, vehicleDomainOf, worldHasAir } from "../../../../shared/vehicles";
+import { specWords, VEHICLE_DOMAINS, vehicleDomainOf, vehicleSpecsOf, worldHasAir } from "../../../../shared/vehicles";
 import type { FieldDef } from "../../../../shared/world";
 import { missing } from "../propose";
 import type { ToolReadView, ViewRef } from "../read-view";
@@ -469,6 +469,8 @@ export const ITEMS_TOOLS: readonly ToolDefinition[] = [
         const made = madeOf(e.fields.made);
         const rest = restOf(view.ctx, r.id);
         const traits = TRAITS.filter((t) => e.fields[t] === true);
+        // A vehicle's specs, every one ("Engine: 5.0L V8"): the Vehicles section tells only a few.
+        const specs = (vehicleSpecsOf(e.fields.specs) ?? []).map(specWords);
         return view.answer({
           ...shown(view, page.row),
           kind: page.kindLabel,
@@ -482,6 +484,7 @@ export const ITEMS_TOOLS: readonly ToolDefinition[] = [
           made: made ? { by: made.by, at: "place" in made.at ? (view.place(made.at.place)?.name ?? made.at.place) : (view.entity(made.at.in)?.name ?? made.at.in) } : undefined,
           aliases: Array.isArray(e.fields.aliases) && e.fields.aliases.length > 0 ? e.fields.aliases : undefined,
           description: typeof e.fields.description === "string" && e.fields.description !== "" ? e.fields.description : undefined,
+          specs: specs.length > 0 ? specs : undefined,
           maybeSameAs: typeof e.fields.maybe_same_as === "string" ? (view.entity(e.fields.maybe_same_as) ?? undefined) : undefined,
           contents: page.contents.map((c) => shown(view, c)),
         });

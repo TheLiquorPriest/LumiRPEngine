@@ -17,7 +17,7 @@ import type { LedgerEvent } from "../../../shared/ledger";
 import type { DataTable, ShippedRevision, TableRow } from "../../../shared/tables";
 import { ownersIn } from "../../../shared/finance";
 import { hashParts } from "../../../shared/hash";
-import { matchVehicleClass, saysNew, shortClassName, USED_VEHICLE_AGE_YEARS, vehicleDomainOf, vehicleNameFrom, vehiclesConfigOf, type VehicleDomain, type VehiclePrice, type VehicleSpawn } from "../../../shared/vehicles";
+import { matchVehicleClass, saysNew, shortClassName, specWords, USED_VEHICLE_AGE_YEARS, vehicleDomainOf, vehicleNameFrom, vehiclesConfigOf, vehicleSpecsOf, type VehicleDomain, type VehiclePrice, type VehicleSpawn } from "../../../shared/vehicles";
 import type { KindDef } from "../../../shared/world";
 import { ENGINE_EVENTS } from "../../../engine/engine-pack";
 import { bump, labelOf, numOf, objOf, optionalQuery, optionalService, own, rowOf, strOf } from "../../../engine/pack-kit";
@@ -117,6 +117,8 @@ export const VEHICLE: KindDef = {
     last_service: { type: "number", label: "Last service (mi or h)", min: 0, domain: "vehicles", level: 4 },
     // What it would sell for, when its author or the GM says; else its class's typical used price.
     value: { type: "money", label: "Value", min: 0, domain: "money", level: 3 },
+    // Free specs, each `{label, value}` ("Engine": "5.0L V8"), as its author, the GM, the owner or the story tells them; no class seeds any.
+    specs: { type: "list", label: "Specs ({label, value})" },
   },
 };
 
@@ -133,9 +135,12 @@ function burnsFuel(ctx: Pick<ReadContext, "tables" | "state">, vehicle: EntityId
 /**
  * A vehicle's fields its Vehicles line tells its own way, not as `label value`: its class by the
  * table's name for it, its fuel with the range it gives, its status, and its last service as when
- * the next is due.
+ * the next is due; and its specs, told only of one near him, `SPECS_TOLD` of them.
  */
-const TOLD_APART: Readonly<Record<string, true>> = { class: true, fuel_pct: true, status: true, last_service: true };
+const TOLD_APART: Readonly<Record<string, true>> = { class: true, fuel_pct: true, status: true, last_service: true, specs: true };
+
+/** At most this many specs a Vehicles line tells of one vehicle; the agents' reads have them all. */
+const SPECS_TOLD = 4;
 
 /**
  * The Vehicles section (DESIGN §6, §6.11, §9.3): what the player character may use, his own; from
@@ -145,9 +150,10 @@ const TOLD_APART: Readonly<Record<string, true>> = { class: true, fuel_pct: true
  * labels (make, model, year, colour, plate, odometer or engine hours, condition from level 3, its
  * value), fuel and range and its status from level 2, when its next service is due from level 4,
  * who is aboard and its cargo by name (for one at his site; what a thing in it holds only when the
- * vehicle or the thing is his, or he knows of what it holds), and its description. Then other
- * people's vehicles at his site that he can see, each with whose it is and what anyone sees of it
- * (its class, its fields of no realism domain, its description). The ones he may use away from his
+ * vehicle or the thing is his, or he knows of what it holds), its first few specs (for one at his
+ * place or the one he is aboard), and its description. Then other people's vehicles at his site
+ * that he can see, each with whose it is and what anyone sees of it (its class, its fields of no
+ * realism domain, its first few specs when it is at his place, its description). The ones he may use away from his
  * site come last, each named with where it is, so a section trimmed to the budget loses those
  * first. Owners are named only as he may know them. In `scene` scope a vehicle here he can't see is
  * added, marked, when its owner is with him and can see it (a secret one never: no one can), its
@@ -170,6 +176,15 @@ export function vehicleLines(ctx: ReadContext, scope: FeedScope): FeedLine[] {
     const name = classRow(ctx, v)?.name;
     if (typeof name !== "string" || name.trim() === "" || !canSeeField(ctx.registry, ctx.world, ctx.state, pov, v, "class")) return [];
     return [`${fieldNoun(fieldDef(ctx.registry, ctx.world, kind, "class")?.label, "class").noun} ${name.trim()}`];
+  };
+  // Its first few specs, for one at his place or the one he is aboard: the agents' reads have them all.
+  const specsText = (v: EntityId, place: PlaceId | null): string[] => {
+    const near = (here !== null && place === here) || own(ctx.state.entities, pov)?.relations.some((r) => r.type === "in" && r.to === v) === true;
+    if (!near || !canSeeField(ctx.registry, ctx.world, ctx.state, pov, v, "specs")) return [];
+    const specs = vehicleSpecsOf(own(ctx.state.entities, v)?.fields.specs) ?? [];
+    if (specs.length === 0) return [];
+    const more = specs.length - SPECS_TOLD;
+    return [`specs ${specs.slice(0, SPECS_TOLD).map(specWords).join(", ")}${more > 0 ? `, and ${more} more` : ""}`];
   };
   // What is in a holder, as far as he can see.
   const contents = (holder: EntityId): EntityId[] =>
@@ -221,6 +236,7 @@ export function vehicleLines(ctx: ReadContext, scope: FeedScope): FeedLine[] {
       const due = Math.round(numOf(e.fields.last_service) + interval).toLocaleString("en-US");
       parts.push(usage(ctx, v) > numOf(e.fields.last_service) + interval ? `service overdue (it was due at ${due} ${unit})` : `next service due at ${due} ${unit}`);
     }
+    parts.push(...specsText(v, place));
     // Who and what is in it only for one at his site: one away from here he can't see into.
     const inside = elsewhere ? [] : contents(v);
     const aboard = inside.filter((id) => kindIs(ctx.registry, ctx.world, own(ctx.state.entities, id)?.kind ?? "", "person")).map((id) => (id === pov ? "you" : (own(ctx.state.entities, id)?.name ?? id)));
@@ -239,7 +255,7 @@ export function vehicleLines(ctx: ReadContext, scope: FeedScope): FeedLine[] {
     .filter((o) => see(pov, o.v))
     .map((o): FeedLine => {
       const e = own(ctx.state.entities, o.v);
-      const looks = e ? [...classText(o.v, e.kind), ...thingDetails(ctx, o.v, (field, def) => TOLD_APART[field] === true || def.domain !== undefined)] : [];
+      const looks = e ? [...classText(o.v, e.kind), ...thingDetails(ctx, o.v, (field, def) => TOLD_APART[field] === true || def.domain !== undefined), ...specsText(o.v, o.place)] : [];
       const description = thingDescription(ctx, o.v);
       return { text: `${e?.name ?? o.v}: ${[`${placeText(o.place)}, ${o.owner ? `${ownerName(o.owner)}'s` : "no one's you know of"}`, ...looks].join("; ")}.${description ? ` ${sentence(description)}` : ""}`, known: "pov" };
     });
@@ -473,6 +489,8 @@ function spawnVehicle(ctx: ReadContext, spec: VehicleSpawn): { entity: EntityId;
   fields.condition = typeof d.condition === "number" ? d.condition : used ? 80 : 100;
   if (burns) fields.fuel_pct = typeof d.fuel_pct === "number" ? d.fuel_pct : used ? 50 : 100;
   if (typeof d.value === "number" && d.value > 0) fields.value = Math.round(d.value);
+  const specs = vehicleSpecsOf(d.specs) ?? [];
+  if (specs.length > 0) fields.specs = specs.map((s) => ({ label: s.label, value: s.value }));
   if (home) fields.home = home;
   if (place) fields.place = place;
   Object.assign(fields, spec.fields ?? {});
