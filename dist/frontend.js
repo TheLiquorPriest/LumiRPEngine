@@ -6555,6 +6555,28 @@ function vehicleDomainOf(row) {
   const d3 = row?.domain;
   return d3 === "offroad" || d3 === "marine" || d3 === "air" ? d3 : "road";
 }
+var VEHICLE_SPECS_MAX = 24;
+var VEHICLE_SPEC_TEXT_MAX = 80;
+function vehicleSpecsOf(v3) {
+  if (!Array.isArray(v3))
+    return null;
+  const words = (x2) => (typeof x2 === "string" ? x2 : typeof x2 === "number" && Number.isFinite(x2) ? String(x2) : "").replace(/\s+/g, " ").trim().slice(0, VEHICLE_SPEC_TEXT_MAX);
+  const out = [];
+  for (const s3 of v3) {
+    if (out.length >= VEHICLE_SPECS_MAX)
+      break;
+    if (!isRecord(s3))
+      continue;
+    const label = words(s3.label);
+    const value = words(s3.value);
+    if (label !== "" && value !== "")
+      out.push({ label, value });
+  }
+  return out;
+}
+function specWords(spec) {
+  return `${spec.label}: ${spec.value}`;
+}
 function shortClassName(name) {
   const cut = name.replace(/\s*\(.*\)\s*$/, "").trim();
   return cut === "" ? name.trim() : cut;
@@ -16737,7 +16759,7 @@ var WRITE_TOOL_TEXTS = [
       { path: "name", text: 'Its name, as the story calls it ("torque wrench").' },
       { path: "type", text: "Its catalog type's id (a kit's too), when the world's catalogs have one; leave it out otherwise." },
       { path: "class", text: "A vehicle's class id (vehicles_classes), for a vehicle the reply brings in; the vehicles pack makes it, and it asks first." },
-      { path: "details", text: "With class: the vehicle's make, model, year, colour and plate, as the reply gives them." },
+      { path: "details", text: `With class: the vehicle's make, model, year, colour and plate, as the reply gives them, and its specs ([{label, value}], "Engine": "5.0L V8") when the reply tells them.` },
       { path: "size", text: "Its size, when the reply makes it plain." },
       { path: "in", text: into },
       { path: "at", text: at },
@@ -16927,8 +16949,8 @@ var WRITE_TOOL_TEXTS = [
     name: "item_label",
     family: "items",
     tier: "story",
-    note: "Renames a thing, or gives it other names, a description or a size.",
-    text: "Rename a thing, or give it other names, a description or its size, as the reply calls it.",
+    note: "Renames a thing, or gives it other names, a description, a size or (a vehicle) its specs.",
+    text: "Rename a thing, or give it other names, a description or its size, as the reply calls it; or set a vehicle's specs as the reply tells them.",
     guides: ["changes", "things"],
     args: [
       { path: "item", text: item },
@@ -16936,6 +16958,7 @@ var WRITE_TOOL_TEXTS = [
       { path: "aliases", text: "Its other names, all of them." },
       { path: "description", text: "What it is like, in a sentence." },
       { path: "size", text: "Its new size." },
+      { path: "specs", text: `A vehicle's specs, all of them ([{label, value}]: "Engine": "5.0L V8", "Seats": "5"); [] clears them.` },
       { path: "dry", text: dry }
     ]
   },
@@ -22339,6 +22362,92 @@ function TypeSheet(props) {
   }, undefined, false, undefined, this);
 }
 
+// src/frontend/things/specs.tsx
+function SpecsEditor(props) {
+  const [label, setLabel] = d2("");
+  const [value, setValue] = d2("");
+  const inputId = P2();
+  const full = props.value.length >= VEHICLE_SPECS_MAX;
+  const ready = label.trim() !== "" && value.trim() !== "" && !full;
+  const add = () => {
+    if (!ready)
+      return;
+    props.onChange([...props.value, { label: label.trim(), value: value.trim() }]);
+    setLabel("");
+    setValue("");
+  };
+  const onKeyDown = (event) => {
+    if (event.key !== "Enter")
+      return;
+    event.preventDefault();
+    add();
+  };
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-field lre-cp-textlist",
+    "data-lre-specs": "",
+    children: [
+      /* @__PURE__ */ u3("label", {
+        for: inputId,
+        children: "Specs"
+      }, undefined, false, undefined, this),
+      props.value.length > 0 ? /* @__PURE__ */ u3("div", {
+        class: "lre-form-chips",
+        role: "list",
+        "aria-label": "Specs",
+        children: props.value.map((s3, i3) => /* @__PURE__ */ u3("span", {
+          role: "listitem",
+          children: /* @__PURE__ */ u3(Chip, {
+            removeLabel: `Remove ${s3.label}`,
+            disabled: props.disabled,
+            onRemove: () => props.onChange(props.value.filter((_3, j3) => j3 !== i3)),
+            children: specWords(s3)
+          }, undefined, false, undefined, this)
+        }, `${i3}:${s3.label}`, false, undefined, this))
+      }, undefined, false, undefined, this) : /* @__PURE__ */ u3("span", {
+        class: "lre-cp-note",
+        children: "None yet."
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3("div", {
+        class: "lre-cp-textlist-add",
+        children: [
+          /* @__PURE__ */ u3("input", {
+            id: inputId,
+            class: "lre-input",
+            "aria-label": "Spec",
+            placeholder: "Engine",
+            maxLength: VEHICLE_SPEC_TEXT_MAX,
+            value: label,
+            disabled: props.disabled || full,
+            onInput: (event) => setLabel(event.currentTarget.value),
+            onKeyDown
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3("input", {
+            class: "lre-input",
+            "aria-label": "Value",
+            placeholder: "5.0L V8",
+            maxLength: VEHICLE_SPEC_TEXT_MAX,
+            value,
+            disabled: props.disabled || full,
+            onInput: (event) => setValue(event.currentTarget.value),
+            onKeyDown
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3(Button, {
+            size: "sm",
+            icon: "plus",
+            disabled: props.disabled || !ready,
+            onClick: add,
+            children: "Add"
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this),
+      /* @__PURE__ */ u3("span", {
+        class: "lre-field-help",
+        children: full ? `At most ${VEHICLE_SPECS_MAX} specs.` : "Anything worth knowing about it, a label and its value: Seats, 5."
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+
 // src/shared/items-build.ts
 function typeFields(table, id, row) {
   if (table === "gear.kits") {
@@ -23869,6 +23978,13 @@ function ThingPage(props) {
           }, undefined, false, undefined, this)
         ]
       }, undefined, true, undefined, this),
+      value.kind === "vehicle" ? /* @__PURE__ */ u3(Section, {
+        title: "Specs",
+        children: /* @__PURE__ */ u3(SpecsEditor, {
+          value: vehicleSpecsOf(fields.specs) ?? [],
+          onChange: (next) => setValue(withField(value, "specs", next.length > 0 ? next.map((s3) => ({ label: s3.label, value: s3.value })) : undefined))
+        }, undefined, false, undefined, this)
+      }, undefined, false, undefined, this) : null,
       row && row.holds !== null && page ? /* @__PURE__ */ u3(HoldsSection, {
         holds: row.holds,
         contents: page.contents,
@@ -86991,6 +87107,31 @@ function parkFix(vehicle, place2) {
 function homeFix(vehicle, place2) {
   return { do: "home", item: vehicle, home: place2 === null ? null : { place: place2 } };
 }
+function specsFix(vehicle, specs2) {
+  return { do: "specs", item: vehicle, specs: [...specs2] };
+}
+function SpecsSheet(props) {
+  const v6 = props.vehicle;
+  const [specs2, setSpecs] = d2(v6.specs ?? []);
+  const changed = JSON.stringify(specs2) !== JSON.stringify(v6.specs ?? []);
+  return /* @__PURE__ */ u3(FormSheet, {
+    title: "Specs",
+    subtitle: v6.name,
+    onClose: props.onClose,
+    actions: /* @__PURE__ */ u3(Button, {
+      variant: "primary",
+      disabled: !changed,
+      busy: props.atOnce.busy,
+      onClick: () => props.atOnce.send(thingsFix(props.chatId, [specsFix(v6.id, specs2)], `Specs of ${v6.name}`), specs2.length > 0 ? `${v6.name}'s specs are saved.` : `${v6.name} has no specs now.`, props.onClose),
+      children: "Save"
+    }, undefined, false, undefined, this),
+    children: /* @__PURE__ */ u3(SpecsEditor, {
+      value: specs2,
+      disabled: props.atOnce.busy,
+      onChange: setSpecs
+    }, undefined, false, undefined, this)
+  }, undefined, false, undefined, this);
+}
 function ownerThing2(v6) {
   return {
     id: v6.id,
@@ -87049,6 +87190,13 @@ function GarageSheets(props) {
       people: view.people ?? [],
       loans: view.loans ?? [],
       household: view.household ?? null,
+      onClose: props.onClose
+    }, undefined, false, undefined, this);
+  if (sheet.kind === "specs")
+    return /* @__PURE__ */ u3(SpecsSheet, {
+      chatId: props.chatId,
+      vehicle: v6,
+      atOnce,
       onClose: props.onClose
     }, undefined, false, undefined, this);
   if (sheet.kind === "where") {
@@ -87124,7 +87272,8 @@ function decodeGarageView(value) {
         grants: list(v6.grants, (g2) => typeof g2.who === "string" ? { who: g2.who, name: str(g2.name, g2.who), basis: oneOf(g2.basis, GRANT_BASES, "assign"), ...typeof g2.until === "string" ? { until: g2.until } : {}, ...g2.overdue === true ? { overdue: true } : {} } : null),
         cargo: strings(v6.cargo),
         mine: v6.mine === true,
-        canLend: v6.canLend === true
+        canLend: v6.canLend === true,
+        specs: vehicleSpecsOf(v6.specs) ?? []
       } : null;
     }),
     places: list(value.places, decodePlaceRef),
@@ -87226,6 +87375,11 @@ function VehicleCard(props) {
             title: "Cargo",
             subtitle: v6.cargo.join(", ")
           }, undefined, false, undefined, this) : null,
+          v6.specs && v6.specs.length > 0 ? /* @__PURE__ */ u3(ListRow, {
+            icon: "list",
+            title: "Specs",
+            subtitle: v6.specs.map(specWords).join(" · ")
+          }, undefined, false, undefined, this) : null,
           v6.assignedTo ? /* @__PURE__ */ u3(ListRow, {
             icon: "key",
             title: "Assigned to",
@@ -87282,6 +87436,13 @@ function VehicleCard(props) {
             onClick: () => open("owner"),
             children: (v6.grants ?? []).length > 0 ? "Lend… / Stop" : "Owner & use…"
           }, undefined, false, undefined, this) : null,
+          v6.mine ? /* @__PURE__ */ u3(Button, {
+            size: "sm",
+            variant: "secondary",
+            icon: "edit",
+            onClick: () => open("specs"),
+            children: "Specs…"
+          }, undefined, false, undefined, this) : null,
           status !== "broken" ? /* @__PURE__ */ u3(Button, {
             size: "sm",
             variant: "secondary",
@@ -87294,10 +87455,83 @@ function VehicleCard(props) {
     ]
   }, undefined, true, undefined, this);
 }
+var SORTS = [
+  { value: "name", label: "Name" },
+  { value: "type", label: "Type" },
+  { value: "location", label: "Location" }
+];
+function garageType(v6) {
+  if (v6.className)
+    return shortClassName(v6.className);
+  const domain = VEHICLE_DOMAINS.find((d3) => d3 === v6.kind);
+  return domain ? VEHICLE_DOMAIN_LABEL[domain] : v6.kind || "Vehicle";
+}
+function garageLocation(v6) {
+  return v6.place ?? "Unknown";
+}
+function garageShown(vehicles, pick) {
+  const key = (v6) => pick.sort === "type" ? garageType(v6) : pick.sort === "location" ? garageLocation(v6) : "";
+  return vehicles.filter((v6) => (pick.type === null || garageType(v6) === pick.type) && (pick.place === null || garageLocation(v6) === pick.place)).sort((a3, b3) => key(a3).localeCompare(key(b3)) || a3.name.localeCompare(b3.name) || a3.id.localeCompare(b3.id));
+}
+function garageFilters(vehicles, pick) {
+  const types = [...new Set(vehicles.map(garageType))].sort((a3, b3) => a3.localeCompare(b3));
+  const places2 = [...new Set(vehicles.map(garageLocation))].sort((a3, b3) => a3.localeCompare(b3));
+  return { types, places: places2, pick: { sort: pick.sort, type: pick.type !== null && types.includes(pick.type) ? pick.type : null, place: pick.place !== null && places2.includes(pick.place) ? pick.place : null } };
+}
+function GarageChips(props) {
+  if (props.values.length < 2)
+    return null;
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-bel-chips",
+    role: "group",
+    "aria-label": props.label,
+    "data-lre-garage-filter": props.filter,
+    children: [null, ...props.values].map((value) => /* @__PURE__ */ u3("button", {
+      type: "button",
+      class: "lre-bel-chip",
+      "aria-pressed": props.value === value,
+      "data-lre-garage-chip": value ?? "",
+      onClick: () => props.onPick(value),
+      children: value ?? "All"
+    }, value ?? "", false, undefined, this))
+  }, undefined, false, undefined, this);
+}
+function GarageControls(props) {
+  if (props.vehicles.length < 2)
+    return null;
+  const { types, places: places2, pick } = garageFilters(props.vehicles, props.pick);
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-stack",
+    "data-lre-garage-controls": "",
+    children: [
+      /* @__PURE__ */ u3(Seg, {
+        label: "Sort by",
+        value: pick.sort,
+        options: SORTS,
+        onChange: (sort) => props.onPick({ ...pick, sort })
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(GarageChips, {
+        filter: "type",
+        label: "Type",
+        values: types,
+        value: pick.type,
+        onPick: (type) => props.onPick({ ...pick, type })
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(GarageChips, {
+        filter: "place",
+        label: "Location",
+        values: places2,
+        value: pick.place,
+        onPick: (place2) => props.onPick({ ...pick, place: place2 })
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
 function GaragePanel(props) {
   const view = decodeGarageView(props.view);
   const atOnce = useAtOnce(props.chatId);
   const [sheet, setSheet] = d2(null);
+  const [pick, setPick] = d2({ sort: "name", type: null, place: null });
   if (props.view === null || props.view === undefined)
     return /* @__PURE__ */ u3(Empty, {
       icon: "car",
@@ -87309,6 +87543,7 @@ function GaragePanel(props) {
     }, undefined, false, undefined, this);
   const claims = props.state.controls?.realism.claims ?? null;
   const canAdd = addPolicyOf(claims) !== "hidden" && (view.classes ?? []).length > 0;
+  const shown2 = garageShown(view.vehicles, garageFilters(view.vehicles, pick).pick);
   return /* @__PURE__ */ u3("div", {
     class: "lre-stack lre-me",
     "data-lre-panel": "vehicles.garage",
@@ -87323,7 +87558,12 @@ function GaragePanel(props) {
         icon: "car",
         children: "No vehicles yet."
       }, undefined, false, undefined, this) : null,
-      view.vehicles.map((v6) => /* @__PURE__ */ u3(VehicleCard, {
+      /* @__PURE__ */ u3(GarageControls, {
+        vehicles: view.vehicles,
+        pick,
+        onPick: setPick
+      }, undefined, false, undefined, this),
+      shown2.map((v6) => /* @__PURE__ */ u3(VehicleCard, {
         vehicle: v6,
         onSheet: (kind) => setSheet({ kind, vehicle: v6.id })
       }, v6.id, false, undefined, this)),
@@ -92201,6 +92441,15 @@ function GmThingBody(props) {
           }, JSON.stringify([name, fieldOf(entity2, "aliases"), fieldOf(entity2, "description"), fieldOf(entity2, "size"), fieldOf(entity2, "consumable"), fieldOf(entity2, "sleep"), fieldOf(entity2, "qty"), fieldOf(entity2, "condition")]), false, undefined, this)
         ]
       }, undefined, true, undefined, this),
+      row2.kind === "vehicle" ? /* @__PURE__ */ u3(Section, {
+        title: "Specs",
+        children: /* @__PURE__ */ u3(GmSpecs, {
+          id,
+          name,
+          stored: vehicleSpecsOf(fieldOf(entity2, "specs")) ?? [],
+          editor
+        }, JSON.stringify(fieldOf(entity2, "specs")), false, undefined, this)
+      }, undefined, false, undefined, this) : null,
       row2.holds !== null ? /* @__PURE__ */ u3(HoldsSection, {
         holds: row2.holds,
         contents: page7.contents,
@@ -92287,6 +92536,26 @@ function GmThingBody(props) {
           }, undefined, false, undefined, this)
         ]
       }, undefined, true, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+function GmSpecs(props) {
+  const [specs2, setSpecs] = d2(props.stored);
+  const busy = props.editor.busy;
+  return /* @__PURE__ */ u3(M, {
+    children: [
+      /* @__PURE__ */ u3(SpecsEditor, {
+        value: specs2,
+        disabled: busy,
+        onChange: setSpecs
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(Button, {
+        size: "sm",
+        variant: "primary",
+        disabled: busy || JSON.stringify(specs2) === JSON.stringify(props.stored),
+        onClick: () => void props.editor.edit([item2({ do: "label", item: props.id, specs: specs2 })], specs2.length > 0 ? `${props.name}'s specs are saved.` : `${props.name} has no specs now.`),
+        children: "Save specs"
+      }, undefined, false, undefined, this)
     ]
   }, undefined, true, undefined, this);
 }

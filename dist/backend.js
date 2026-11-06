@@ -6773,6 +6773,28 @@ function vehicleDomainOf(row) {
   const d = row?.domain;
   return d === "offroad" || d === "marine" || d === "air" ? d : "road";
 }
+var VEHICLE_SPECS_MAX = 24;
+var VEHICLE_SPEC_TEXT_MAX = 80;
+function vehicleSpecsOf(v) {
+  if (!Array.isArray(v))
+    return null;
+  const words = (x) => (typeof x === "string" ? x : typeof x === "number" && Number.isFinite(x) ? String(x) : "").replace(/\s+/g, " ").trim().slice(0, VEHICLE_SPEC_TEXT_MAX);
+  const out = [];
+  for (const s of v) {
+    if (out.length >= VEHICLE_SPECS_MAX)
+      break;
+    if (!isRecord(s))
+      continue;
+    const label = words(s.label);
+    const value = words(s.value);
+    if (label !== "" && value !== "")
+      out.push({ label, value });
+  }
+  return out;
+}
+function specWords(spec) {
+  return `${spec.label}: ${spec.value}`;
+}
 var VEHICLE_DETAIL_KEYS = ["make", "model", "year", "colour", "plate", "odometer_mi", "engine_hours", "condition", "fuel_pct", "value"];
 function vehiclesConfigOf(world) {
   const raw = Object.prototype.hasOwnProperty.call(world.packs ?? {}, "vehicles") ? world.packs.vehicles?.config : undefined;
@@ -6967,7 +6989,8 @@ function vehicleDetailsOf(v) {
     if (words ? typeof value === "string" && value.trim() !== "" : finite(value))
       out[key] = words ? value.trim() : value;
   }
-  return out;
+  const specs = vehicleSpecsOf(v.specs);
+  return specs !== null && specs.length > 0 ? { ...out, specs } : out;
 }
 function parseItemOp(o) {
   if (!isRecord(o))
@@ -7024,9 +7047,9 @@ function parseItemOp(o) {
     case "lose":
       return id(o.item) && optional(o.by, id) ? { do: "lose", item: o.item, ...id(o.by) ? { by: o.by } : {} } : null;
     case "label":
-      if (!id(o.item) || !optional(o.name, text) || !optional(o.aliases, strings) || !optional(o.description, text) || !optional(o.size, isSize))
+      if (!id(o.item) || !optional(o.name, text) || !optional(o.aliases, strings) || !optional(o.description, text) || !optional(o.size, isSize) || !optional(o.specs, Array.isArray))
         return null;
-      return { do: "label", item: o.item, ...text(o.name) ? { name: o.name } : {}, ...strings(o.aliases) ? { aliases: o.aliases } : {}, ...text(o.description) ? { description: o.description } : {}, ...isSize(o.size) ? { size: o.size } : {} };
+      return { do: "label", item: o.item, ...text(o.name) ? { name: o.name } : {}, ...strings(o.aliases) ? { aliases: o.aliases } : {}, ...text(o.description) ? { description: o.description } : {}, ...isSize(o.size) ? { size: o.size } : {}, ...Array.isArray(o.specs) ? { specs: vehicleSpecsOf(o.specs) ?? [] } : {} };
     case "merge":
       return id(o.keep) && id(o.drop) ? { do: "merge", keep: o.keep, drop: o.drop } : null;
     case "remove":
@@ -7109,6 +7132,8 @@ function parseItemFix(o) {
       return id(o.who) ? { do: "revoke", item: o.item, who: o.who } : null;
     case "label":
       return text(o.name) ? { do: "label", item: o.item, name: o.name } : null;
+    case "specs":
+      return Array.isArray(o.specs) ? { do: "specs", item: o.item, specs: vehicleSpecsOf(o.specs) ?? [] } : null;
     case "away":
       return { do: "away", item: o.item };
     case "hand":
@@ -10094,7 +10119,7 @@ var WRITE_TOOL_TEXTS = [
       { path: "name", text: 'Its name, as the story calls it ("torque wrench").' },
       { path: "type", text: "Its catalog type's id (a kit's too), when the world's catalogs have one; leave it out otherwise." },
       { path: "class", text: "A vehicle's class id (vehicles_classes), for a vehicle the reply brings in; the vehicles pack makes it, and it asks first." },
-      { path: "details", text: "With class: the vehicle's make, model, year, colour and plate, as the reply gives them." },
+      { path: "details", text: `With class: the vehicle's make, model, year, colour and plate, as the reply gives them, and its specs ([{label, value}], "Engine": "5.0L V8") when the reply tells them.` },
       { path: "size", text: "Its size, when the reply makes it plain." },
       { path: "in", text: into },
       { path: "at", text: at },
@@ -10284,8 +10309,8 @@ var WRITE_TOOL_TEXTS = [
     name: "item_label",
     family: "items",
     tier: "story",
-    note: "Renames a thing, or gives it other names, a description or a size.",
-    text: "Rename a thing, or give it other names, a description or its size, as the reply calls it.",
+    note: "Renames a thing, or gives it other names, a description, a size or (a vehicle) its specs.",
+    text: "Rename a thing, or give it other names, a description or its size, as the reply calls it; or set a vehicle's specs as the reply tells them.",
     guides: ["changes", "things"],
     args: [
       { path: "item", text: item },
@@ -10293,6 +10318,7 @@ var WRITE_TOOL_TEXTS = [
       { path: "aliases", text: "Its other names, all of them." },
       { path: "description", text: "What it is like, in a sentence." },
       { path: "size", text: "Its new size." },
+      { path: "specs", text: `A vehicle's specs, all of them ([{label, value}]: "Engine": "5.0L V8", "Seats": "5"); [] clears them.` },
       { path: "dry", text: dry }
     ]
   },
@@ -19904,6 +19930,13 @@ function label(w, op) {
     events2.push({ type: "set", entity: op.item, field: "description", value: op.description.trim() });
   if (op.size !== undefined && op.size !== e.fields.size)
     events2.push({ type: "set", entity: op.item, field: "size", value: op.size });
+  if (op.specs !== undefined) {
+    if (!kindIs(ctx.registry, ctx.world, e.kind, "vehicle"))
+      return reject7("not_a_vehicle", `${e.name} isn't a vehicle; only a vehicle has specs`);
+    const specs = op.specs.length > 0 ? op.specs.map((s) => ({ label: s.label, value: s.value })) : null;
+    if (JSON.stringify(specs) !== JSON.stringify(e.fields.specs ?? null))
+      events2.push({ type: "set", entity: op.item, field: "specs", value: specs });
+  }
   if (events2.length === 0)
     return reject7("no_change", "nothing to change");
   return applyAll2(w, events2) ?? {};
@@ -44701,6 +44734,9 @@ function buildGarageView(ctx) {
     const cargo = Object.keys(ctx.state.entities).sort().filter((x) => !isGone(ctx.state, x) && seesEntity(x) && own(ctx.state.entities, x)?.relations.some((r) => r.type === "in" && r.to === id2)).map((x) => own(ctx.state.entities, x)?.name ?? x);
     if (cargo.length > 0)
       v.cargo = cargo;
+    const specs = vehicleSpecsOf(e.fields.specs) ?? [];
+    if (specs.length > 0)
+      v.specs = specs;
     if (level >= 4) {
       const interval = serviceInterval(ctx, id2);
       if (interval !== null) {
@@ -44967,7 +45003,8 @@ var VEHICLE = {
     engine_hours: { type: "number", label: "Engine hours", min: 0, domain: "vehicles", level: 3, locked: true },
     home: { type: "ref", label: "Home base", domain: "vehicles", level: 3 },
     last_service: { type: "number", label: "Last service (mi or h)", min: 0, domain: "vehicles", level: 4 },
-    value: { type: "money", label: "Value", min: 0, domain: "money", level: 3 }
+    value: { type: "money", label: "Value", min: 0, domain: "money", level: 3 },
+    specs: { type: "list", label: "Specs ({label, value})" }
   }
 };
 function classRow(ctx, vehicle) {
@@ -44977,7 +45014,8 @@ function burnsFuel(ctx, vehicle) {
   const row = classRow(ctx, vehicle);
   return row !== undefined && strOf(row.fuel_type, "gasoline") !== "none";
 }
-var TOLD_APART = { class: true, fuel_pct: true, status: true, last_service: true };
+var TOLD_APART = { class: true, fuel_pct: true, status: true, last_service: true, specs: true };
+var SPECS_TOLD = 4;
 function vehicleLines(ctx, scope) {
   const pov = ctx.world.pov;
   const level = ctx.levelOf(pov, "vehicles");
@@ -44995,6 +45033,16 @@ function vehicleLines(ctx, scope) {
     if (typeof name !== "string" || name.trim() === "" || !canSeeField(ctx.registry, ctx.world, ctx.state, pov, v, "class"))
       return [];
     return [`${fieldNoun(fieldDef(ctx.registry, ctx.world, kind, "class")?.label, "class").noun} ${name.trim()}`];
+  };
+  const specsText = (v, place2) => {
+    const near = here !== null && place2 === here || own(ctx.state.entities, pov)?.relations.some((r) => r.type === "in" && r.to === v) === true;
+    if (!near || !canSeeField(ctx.registry, ctx.world, ctx.state, pov, v, "specs"))
+      return [];
+    const specs = vehicleSpecsOf(own(ctx.state.entities, v)?.fields.specs) ?? [];
+    if (specs.length === 0)
+      return [];
+    const more = specs.length - SPECS_TOLD;
+    return [`specs ${specs.slice(0, SPECS_TOLD).map(specWords).join(", ")}${more > 0 ? `, and ${more} more` : ""}`];
   };
   const contents = (holder) => Object.keys(ctx.state.entities).sort().filter((id2) => !isGone(ctx.state, id2) && see(pov, id2) && own(ctx.state.entities, id2)?.relations.some((r) => r.type === "in" && r.to === holder));
   const named = (id2, depth2, mine) => {
@@ -45041,6 +45089,7 @@ function vehicleLines(ctx, scope) {
       const due = Math.round(numOf(e.fields.last_service) + interval).toLocaleString("en-US");
       parts.push(usage(ctx, v) > numOf(e.fields.last_service) + interval ? `service overdue (it was due at ${due} ${unit3})` : `next service due at ${due} ${unit3}`);
     }
+    parts.push(...specsText(v, place2));
     const inside2 = elsewhere ? [] : contents(v);
     const aboard = inside2.filter((id2) => kindIs(ctx.registry, ctx.world, own(ctx.state.entities, id2)?.kind ?? "", "person")).map((id2) => id2 === pov ? "you" : own(ctx.state.entities, id2)?.name ?? id2);
     const cargo = inside2.filter((id2) => !kindIs(ctx.registry, ctx.world, own(ctx.state.entities, id2)?.kind ?? "", "person")).map((id2) => named(id2, 0, owns(ctx, pov, v)));
@@ -45055,7 +45104,7 @@ function vehicleLines(ctx, scope) {
   }
   const seen = others.filter((o) => see(pov, o.v)).map((o) => {
     const e = own(ctx.state.entities, o.v);
-    const looks = e ? [...classText(o.v, e.kind), ...thingDetails(ctx, o.v, (field2, def) => TOLD_APART[field2] === true || def.domain !== undefined)] : [];
+    const looks = e ? [...classText(o.v, e.kind), ...thingDetails(ctx, o.v, (field2, def) => TOLD_APART[field2] === true || def.domain !== undefined), ...specsText(o.v, o.place)] : [];
     const description = thingDescription(ctx, o.v);
     return { text: `${e?.name ?? o.v}: ${[`${placeText(o.place)}, ${o.owner ? `${ownerName(o.owner)}'s` : "no one's you know of"}`, ...looks].join("; ")}.${description ? ` ${sentence(description)}` : ""}`, known: "pov" };
   });
@@ -45265,6 +45314,9 @@ function spawnVehicle(ctx, spec) {
     fields.fuel_pct = typeof d.fuel_pct === "number" ? d.fuel_pct : used ? 50 : 100;
   if (typeof d.value === "number" && d.value > 0)
     fields.value = Math.round(d.value);
+  const specs = vehicleSpecsOf(d.specs) ?? [];
+  if (specs.length > 0)
+    fields.specs = specs.map((s) => ({ label: s.label, value: s.value }));
   if (home)
     fields.home = home;
   if (place2)
@@ -99030,6 +99082,8 @@ function fixItemOp(reg, w, change2, opts, rng) {
         return partyProblem2(change2.who, false) ?? applyItemOp(w, { do: "revoke", item: item2, who: change2.who }, options);
       case "label":
         return applyItemOp(w, { do: "label", item: item2, name: change2.name }, options);
+      case "specs":
+        return applyItemOp(w, { do: "label", item: item2, specs: change2.specs }, options);
       case "away": {
         const rest = restOf(w.ctx, item2).rest;
         if (rest === null)
@@ -111442,9 +111496,9 @@ function thisBuild(moduleUrl = import.meta.url) {
   const dir = moduleUrl.replace(/[^/]*$/, "");
   const path2 = pathOfFileUrl(`${dir}${KIT_FILE}`);
   const core = pathOfFileUrl(`${dir}${CORE_FILE}`);
-  const sha256 = "facef408b1da1258b057f14da390955894d7668bf842a5ab9614576d9841510e";
+  const sha256 = "26ead041e1df2f25036b46fcf69fff193d3973fa1e104e04ce37c28f3a013fc4";
   const tools = ["5db39011b1a09652e3360031f99d4092", "b2101fc2b5d70b51c9dccdfef28a3f73"].filter((f) => f !== undefined);
-  return { id: "6f56e6d8", kit: sha256 !== undefined && path2 !== null && core !== null ? { path: path2, core, sha256, api: KIT_API } : null, tools };
+  return { id: "fabe287a", kit: sha256 !== undefined && path2 !== null && core !== null ? { path: path2, core, sha256, api: KIT_API } : null, tools };
 }
 var BUILD_FILE = "agents/build.json";
 var USER_FILE = "agents.json";
@@ -118594,6 +118648,7 @@ var ITEMS_TOOLS = [
         const made = madeOf(e.fields.made);
         const rest = restOf(view.ctx, r.id);
         const traits2 = TRAITS.filter((t) => e.fields[t] === true);
+        const specs = (vehicleSpecsOf(e.fields.specs) ?? []).map(specWords);
         return view.answer({
           ...shown4(view, page7.row),
           kind: page7.kindLabel,
@@ -118607,6 +118662,7 @@ var ITEMS_TOOLS = [
           made: made ? { by: made.by, at: "place" in made.at ? view.place(made.at.place)?.name ?? made.at.place : view.entity(made.at.in)?.name ?? made.at.in } : undefined,
           aliases: Array.isArray(e.fields.aliases) && e.fields.aliases.length > 0 ? e.fields.aliases : undefined,
           description: typeof e.fields.description === "string" && e.fields.description !== "" ? e.fields.description : undefined,
+          specs: specs.length > 0 ? specs : undefined,
           maybeSameAs: typeof e.fields.maybe_same_as === "string" ? view.entity(e.fields.maybe_same_as) ?? undefined : undefined,
           contents: page7.contents.map((c) => shown4(view, c))
         });
@@ -119641,8 +119697,9 @@ async function checkOrPropose(view, env, change2, dry2) {
 var thing2 = (view, tool, args, key = "item") => needId(view, tool, args, key, resolveNamedThing);
 var party = (view, tool, args, key) => needId(view, tool, args, key, resolveEntity);
 var why2 = (view, tool, args) => needText(view, tool, args, "why");
+var SPECS = { type: "array", items: objectSchema({ label: text6(), value: text6() }, ["label", "value"]) };
 var ITEMS_WRITES = [
-  itemTool("item_make", "story", { name: text6(), type: text6(), class: text6(), details: objectSchema({ make: text6(), model: text6(), year: integer(), colour: text6(), plate: text6() }), size: text6([...SIZES]), ...SPOT, owner: text6(), home: text6(), qty: integer({ minimum: 1 }), aliases: TEXT_LIST, hidden: BOOLEAN, why: text6() }, ["name", "why"], (view, args) => {
+  itemTool("item_make", "story", { name: text6(), type: text6(), class: text6(), details: objectSchema({ make: text6(), model: text6(), year: integer(), colour: text6(), plate: text6(), specs: SPECS }), size: text6([...SIZES]), ...SPOT, owner: text6(), home: text6(), qty: integer({ minimum: 1 }), aliases: TEXT_LIST, hidden: BOOLEAN, why: text6() }, ["name", "why"], (view, args) => {
     const name = needText(view, "item_make", args, "name");
     if (isNote2(name))
       return name;
@@ -119774,7 +119831,7 @@ var ITEMS_WRITES = [
       return by;
     return { do: "lose", item: item2, ...by !== undefined ? { by } : {} };
   }),
-  itemTool("item_label", "story", { item: text6(), name: text6(), aliases: TEXT_LIST, description: text6(), size: text6([...SIZES]) }, ["item"], (view, args) => {
+  itemTool("item_label", "story", { item: text6(), name: text6(), aliases: TEXT_LIST, description: text6(), size: text6([...SIZES]), specs: SPECS }, ["item"], (view, args) => {
     const item2 = thing2(view, "item_label", args);
     if (isNote2(item2))
       return item2;
@@ -119784,7 +119841,8 @@ var ITEMS_WRITES = [
     const name = textArg(args, "name");
     const aliases = wordsArg(args, "aliases");
     const description = typeof args.description === "string" ? args.description : null;
-    return { do: "label", item: item2, ...name !== null ? { name } : {}, ...aliases !== null ? { aliases } : {}, ...description !== null ? { description } : {}, ...size !== undefined ? { size } : {} };
+    const specs = vehicleSpecsOf(args.specs);
+    return { do: "label", item: item2, ...name !== null ? { name } : {}, ...aliases !== null ? { aliases } : {}, ...description !== null ? { description } : {}, ...size !== undefined ? { size } : {}, ...specs !== null ? { specs } : {} };
   }),
   itemTool("item_merge", "story", { keep: text6(), drop: text6() }, ["keep", "drop"], (view, args) => {
     const keep = thing2(view, "item_merge", args, "keep");
@@ -126348,7 +126406,7 @@ class Runtime {
   foldOf(userId) {
     let fold = this.folds.get(userId);
     if (!fold) {
-      fold = new LedgerFold(this.registry, { fingerprint: "6f56e6d8", keep: () => this.settings.known(userId)?.agents.kept.folds ?? KEPT_FOLDS_DEFAULT });
+      fold = new LedgerFold(this.registry, { fingerprint: "fabe287a", keep: () => this.settings.known(userId)?.agents.kept.folds ?? KEPT_FOLDS_DEFAULT });
       this.folds.set(userId, fold);
     }
     return fold;

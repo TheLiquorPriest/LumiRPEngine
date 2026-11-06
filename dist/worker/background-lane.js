@@ -2236,6 +2236,28 @@ function vehicleDomainOf(row) {
   const d = row?.domain;
   return d === "offroad" || d === "marine" || d === "air" ? d : "road";
 }
+var VEHICLE_SPECS_MAX = 24;
+var VEHICLE_SPEC_TEXT_MAX = 80;
+function vehicleSpecsOf(v) {
+  if (!Array.isArray(v))
+    return null;
+  const words = (x) => (typeof x === "string" ? x : typeof x === "number" && Number.isFinite(x) ? String(x) : "").replace(/\s+/g, " ").trim().slice(0, VEHICLE_SPEC_TEXT_MAX);
+  const out = [];
+  for (const s of v) {
+    if (out.length >= VEHICLE_SPECS_MAX)
+      break;
+    if (!isRecord(s))
+      continue;
+    const label = words(s.label);
+    const value = words(s.value);
+    if (label !== "" && value !== "")
+      out.push({ label, value });
+  }
+  return out;
+}
+function specWords(spec) {
+  return `${spec.label}: ${spec.value}`;
+}
 function vehiclesConfigOf(world) {
   const raw = Object.prototype.hasOwnProperty.call(world.packs ?? {}, "vehicles") ? world.packs.vehicles?.config : undefined;
   return { registration: isRecord(raw) && raw.registration === true };
@@ -9140,7 +9162,7 @@ var WRITE_TOOL_TEXTS = [
       { path: "name", text: 'Its name, as the story calls it ("torque wrench").' },
       { path: "type", text: "Its catalog type's id (a kit's too), when the world's catalogs have one; leave it out otherwise." },
       { path: "class", text: "A vehicle's class id (vehicles_classes), for a vehicle the reply brings in; the vehicles pack makes it, and it asks first." },
-      { path: "details", text: "With class: the vehicle's make, model, year, colour and plate, as the reply gives them." },
+      { path: "details", text: `With class: the vehicle's make, model, year, colour and plate, as the reply gives them, and its specs ([{label, value}], "Engine": "5.0L V8") when the reply tells them.` },
       { path: "size", text: "Its size, when the reply makes it plain." },
       { path: "in", text: into },
       { path: "at", text: at },
@@ -9330,8 +9352,8 @@ var WRITE_TOOL_TEXTS = [
     name: "item_label",
     family: "items",
     tier: "story",
-    note: "Renames a thing, or gives it other names, a description or a size.",
-    text: "Rename a thing, or give it other names, a description or its size, as the reply calls it.",
+    note: "Renames a thing, or gives it other names, a description, a size or (a vehicle) its specs.",
+    text: "Rename a thing, or give it other names, a description or its size, as the reply calls it; or set a vehicle's specs as the reply tells them.",
     guides: ["changes", "things"],
     args: [
       { path: "item", text: item },
@@ -9339,6 +9361,7 @@ var WRITE_TOOL_TEXTS = [
       { path: "aliases", text: "Its other names, all of them." },
       { path: "description", text: "What it is like, in a sentence." },
       { path: "size", text: "Its new size." },
+      { path: "specs", text: `A vehicle's specs, all of them ([{label, value}]: "Engine": "5.0L V8", "Seats": "5"); [] clears them.` },
       { path: "dry", text: dry }
     ]
   },
@@ -20574,6 +20597,13 @@ function label(w, op) {
     events2.push({ type: "set", entity: op.item, field: "description", value: op.description.trim() });
   if (op.size !== undefined && op.size !== e.fields.size)
     events2.push({ type: "set", entity: op.item, field: "size", value: op.size });
+  if (op.specs !== undefined) {
+    if (!kindIs(ctx.registry, ctx.world, e.kind, "vehicle"))
+      return reject7("not_a_vehicle", `${e.name} isn't a vehicle; only a vehicle has specs`);
+    const specs = op.specs.length > 0 ? op.specs.map((s) => ({ label: s.label, value: s.value })) : null;
+    if (JSON.stringify(specs) !== JSON.stringify(e.fields.specs ?? null))
+      events2.push({ type: "set", entity: op.item, field: "specs", value: specs });
+  }
   if (events2.length === 0)
     return reject7("no_change", "nothing to change");
   return applyAll2(w, events2) ?? {};
@@ -42962,6 +42992,9 @@ function buildGarageView(ctx) {
     const cargo = Object.keys(ctx.state.entities).sort().filter((x) => !isGone(ctx.state, x) && seesEntity(x) && own(ctx.state.entities, x)?.relations.some((r) => r.type === "in" && r.to === id)).map((x) => own(ctx.state.entities, x)?.name ?? x);
     if (cargo.length > 0)
       v.cargo = cargo;
+    const specs = vehicleSpecsOf(e.fields.specs) ?? [];
+    if (specs.length > 0)
+      v.specs = specs;
     if (level >= 4) {
       const interval = serviceInterval(ctx, id);
       if (interval !== null) {
@@ -43228,7 +43261,8 @@ var VEHICLE = {
     engine_hours: { type: "number", label: "Engine hours", min: 0, domain: "vehicles", level: 3, locked: true },
     home: { type: "ref", label: "Home base", domain: "vehicles", level: 3 },
     last_service: { type: "number", label: "Last service (mi or h)", min: 0, domain: "vehicles", level: 4 },
-    value: { type: "money", label: "Value", min: 0, domain: "money", level: 3 }
+    value: { type: "money", label: "Value", min: 0, domain: "money", level: 3 },
+    specs: { type: "list", label: "Specs ({label, value})" }
   }
 };
 function classRow(ctx, vehicle) {
@@ -43238,7 +43272,8 @@ function burnsFuel(ctx, vehicle) {
   const row = classRow(ctx, vehicle);
   return row !== undefined && strOf(row.fuel_type, "gasoline") !== "none";
 }
-var TOLD_APART = { class: true, fuel_pct: true, status: true, last_service: true };
+var TOLD_APART = { class: true, fuel_pct: true, status: true, last_service: true, specs: true };
+var SPECS_TOLD = 4;
 function vehicleLines(ctx, scope) {
   const pov = ctx.world.pov;
   const level = ctx.levelOf(pov, "vehicles");
@@ -43256,6 +43291,16 @@ function vehicleLines(ctx, scope) {
     if (typeof name !== "string" || name.trim() === "" || !canSeeField(ctx.registry, ctx.world, ctx.state, pov, v, "class"))
       return [];
     return [`${fieldNoun(fieldDef(ctx.registry, ctx.world, kind, "class")?.label, "class").noun} ${name.trim()}`];
+  };
+  const specsText = (v, place2) => {
+    const near = here !== null && place2 === here || own(ctx.state.entities, pov)?.relations.some((r) => r.type === "in" && r.to === v) === true;
+    if (!near || !canSeeField(ctx.registry, ctx.world, ctx.state, pov, v, "specs"))
+      return [];
+    const specs = vehicleSpecsOf(own(ctx.state.entities, v)?.fields.specs) ?? [];
+    if (specs.length === 0)
+      return [];
+    const more = specs.length - SPECS_TOLD;
+    return [`specs ${specs.slice(0, SPECS_TOLD).map(specWords).join(", ")}${more > 0 ? `, and ${more} more` : ""}`];
   };
   const contents = (holder) => Object.keys(ctx.state.entities).sort().filter((id) => !isGone(ctx.state, id) && see(pov, id) && own(ctx.state.entities, id)?.relations.some((r) => r.type === "in" && r.to === holder));
   const named = (id, depth2, mine) => {
@@ -43302,6 +43347,7 @@ function vehicleLines(ctx, scope) {
       const due = Math.round(numOf(e.fields.last_service) + interval).toLocaleString("en-US");
       parts.push(usage(ctx, v) > numOf(e.fields.last_service) + interval ? `service overdue (it was due at ${due} ${unit3})` : `next service due at ${due} ${unit3}`);
     }
+    parts.push(...specsText(v, place2));
     const inside2 = elsewhere ? [] : contents(v);
     const aboard = inside2.filter((id) => kindIs(ctx.registry, ctx.world, own(ctx.state.entities, id)?.kind ?? "", "person")).map((id) => id === pov ? "you" : own(ctx.state.entities, id)?.name ?? id);
     const cargo = inside2.filter((id) => !kindIs(ctx.registry, ctx.world, own(ctx.state.entities, id)?.kind ?? "", "person")).map((id) => named(id, 0, owns(ctx, pov, v)));
@@ -43316,7 +43362,7 @@ function vehicleLines(ctx, scope) {
   }
   const seen = others.filter((o) => see(pov, o.v)).map((o) => {
     const e = own(ctx.state.entities, o.v);
-    const looks = e ? [...classText(o.v, e.kind), ...thingDetails(ctx, o.v, (field2, def) => TOLD_APART[field2] === true || def.domain !== undefined)] : [];
+    const looks = e ? [...classText(o.v, e.kind), ...thingDetails(ctx, o.v, (field2, def) => TOLD_APART[field2] === true || def.domain !== undefined), ...specsText(o.v, o.place)] : [];
     const description = thingDescription(ctx, o.v);
     return { text: `${e?.name ?? o.v}: ${[`${placeText(o.place)}, ${o.owner ? `${ownerName(o.owner)}'s` : "no one's you know of"}`, ...looks].join("; ")}.${description ? ` ${sentence(description)}` : ""}`, known: "pov" };
   });
@@ -43526,6 +43572,9 @@ function spawnVehicle(ctx, spec) {
     fields.fuel_pct = typeof d.fuel_pct === "number" ? d.fuel_pct : used ? 50 : 100;
   if (typeof d.value === "number" && d.value > 0)
     fields.value = Math.round(d.value);
+  const specs = vehicleSpecsOf(d.specs) ?? [];
+  if (specs.length > 0)
+    fields.specs = specs.map((s) => ({ label: s.label, value: s.value }));
   if (home)
     fields.home = home;
   if (place2)
