@@ -7,6 +7,10 @@ import { describe, expect, test } from "bun:test";
 import { depthPort, ProviderRefusal } from "../../src/backend/depth-model-host";
 import { answerWhy, askRole } from "../../src/backend/depth/common";
 import type { QuietResult } from "../../src/backend/host";
+import { reporting } from "../../src/backend/depth/scene/reporting";
+import type { LoopbackModelCall } from "../../src/shared/loopback";
+import { metered } from "../../src/backend/depth/spend";
+import { costTokens } from "../../src/backend/depth/budget";
 import { defaultSettings } from "../../src/backend/settings-store";
 import { PROMPTS } from "../../src/shared/prompts";
 import { OLD_WHY_FIELD } from "../../src/shared/scene-prompts";
@@ -49,6 +53,17 @@ describe("a refusal stop reason", () => {
     expect((error as Error).message).toBe("the author's call was refused by its provider (stop reason refusal, category reasoning_extraction): The request asked for the model's internal reasoning.");
     expect((error as Error).message).not.toContain("wasn't the JSON object");
     expect(h.calls).toBe(1);
+    expect((error as ProviderRefusal).usage).toEqual({ tokensIn: 10, tokensOut: 0 });
+  });
+
+  test("the turn's report and its spend count a refused call with what it spent, and the call still fails", async () => {
+    const h = host({ finishReason: "refusal", tokensIn: 40, tokensOut: 2 });
+    const calls: LoopbackModelCall[] = [];
+    const meter = metered(reporting(depthPort(h.host as never, async () => defaultSettings(), "u1", { day: null }), { call: (c) => void calls.push(c) }));
+    const error = await meter.port("author", [{ role: "user", content: "hi" }]).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(ProviderRefusal);
+    expect(calls).toMatchObject([{ role: "author", promptTokens: 40, completionTokens: 2 }]);
+    expect(costTokens(meter.spent().cost)).toBe(42);
   });
 
   test("without stop_details it says the provider gave no reason; a stage asking the role fails with it", async () => {

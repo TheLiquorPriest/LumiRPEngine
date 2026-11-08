@@ -94,6 +94,8 @@ export interface LoopbackIO {
   files: LoopbackFiles;
   /** Runs a program (systemctl, loginctl, id) with `env` over this process's environment, and resolves with its exit code and output. */
   run(command: string, args: readonly string[], env?: Readonly<Record<string, string>>): Promise<{ code: number; out: string; err: string }>;
+  /** Waits `ms`; setTimeout when absent. */
+  sleep?(ms: number): Promise<void>;
 }
 
 /** The loopback's part of the command line, as commands.ts parsed it. */
@@ -722,6 +724,7 @@ async function up(a: LoopbackArgs, io: CliIO, lio: LoopbackIO): Promise<number> 
     throw new Error(`${user}'s service manager isn't running (lingering is off, and ${user} isn't logged in), so the relay's user service can't start. Turn lingering on with: sudo loginctl enable-linger ${user}, then run this again.`);
   }
   await must(lio, "systemctl", [...ctl.args, "enable", place.unitName], ctl.env);
+  if (previous !== null) await drain(previous, io, lio);
   await must(lio, "systemctl", [...ctl.args, "restart", place.unitName], ctl.env);
   const when = lingering ? "it is started, and starts at boot and keeps running when you log out" : "it is started, but only runs while you are logged in (see above)";
   io.out(`Installed the relay in ${place.data} and the ${place.scope} unit ${place.unitName}${account !== null ? `, run as ${account.name}` : ""}; ${when}.`);
@@ -807,6 +810,41 @@ async function restartIfInstalled(place: Place, io: CliIO, lio: LoopbackIO): Pro
   const ctl = ctlOf(place, io, lio);
   await must(lio, "systemctl", [...ctl.args, "restart", place.unitName], ctl.env);
   io.out(`Restarted ${place.unitName}.`);
+}
+
+/** How long `up` waits for the running relay's calls to finish before restarting it, and how often it asks. */
+const DRAIN_MS = 300_000;
+const DRAIN_POLL_MS = 2_000;
+
+/** The calls the relay running with this config has under way, from its /healthz; 0 when it doesn't answer. */
+async function callsUnderWay(config: LoopbackConfig, io: CliIO): Promise<number> {
+  try {
+    const host = config.listen.includes(":") && !config.listen.startsWith("[") ? `[${config.listen}]` : config.listen;
+    const reply = await io.http({ method: "GET", url: `http://${host}:${config.port}/healthz`, headers: { Accept: "application/json" } });
+    const body: unknown = JSON.parse(reply.text);
+    return isRecord(body) && typeof body.calls === "number" ? body.calls : 0;
+  } catch {
+    return 0;
+  }
+}
+
+function delay(ms: number): Promise<void> {
+  const { promise, resolve } = Promise.withResolvers<void>();
+  setTimeout(resolve, ms);
+  return promise;
+}
+
+/** Before `up` restarts a running relay: a restart cuts the turns it carries, so it waits for them to finish, up to DRAIN_MS. */
+async function drain(config: LoopbackConfig, io: CliIO, lio: LoopbackIO): Promise<void> {
+  let calls = await callsUnderWay(config, io);
+  if (calls === 0) return;
+  io.out(`The running relay has ${calls} call(s) under way: waiting up to ${DRAIN_MS / 60_000} minutes for them to finish before restarting it.`);
+  const sleep = lio.sleep ?? delay;
+  for (let n = 0; n < DRAIN_MS / DRAIN_POLL_MS && calls > 0; n++) {
+    await sleep(DRAIN_POLL_MS);
+    calls = await callsUnderWay(config, io);
+  }
+  if (calls > 0) io.err(`${calls} call(s) still under way after ${DRAIN_MS / 60_000} minutes: restarting the relay ends them.`);
 }
 
 async function login(a: LoopbackArgs, io: CliIO, lio: LoopbackIO): Promise<number> {

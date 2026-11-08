@@ -310,9 +310,23 @@ export class Relay {
     const length = Number(req.headers.get("content-length") ?? "0");
     const tooLarge = (bytes: number): Response => json(413, errorJson(`This request is ${(bytes / 1048576).toFixed(1)} MiB, and the loopback carries at most ${(this.settings.maxBodyBytes / 1048576).toFixed(1)} MiB (Lumiverse's socket drops larger frames). Lower the connection's context size.`, "too_large"));
     if (length > this.settings.maxBodyBytes) return tooLarge(length);
-    const text = await req.text();
-    const bytes = encoder.encode(text).length;
-    if (bytes > this.settings.maxBodyBytes) return tooLarge(bytes);
+    // Counted as it arrives, so a body sent without Content-Length stops at the cap instead of being read whole.
+    const parts: Uint8Array[] = [];
+    let bytes = 0;
+    if (req.body !== null) {
+      const reader = req.body.getReader();
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        bytes += value.byteLength;
+        if (bytes > this.settings.maxBodyBytes) {
+          void reader.cancel().catch(() => {});
+          return tooLarge(bytes);
+        }
+        parts.push(value);
+      }
+    }
+    const text = new TextDecoder().decode(Buffer.concat(parts));
     let body: unknown;
     try {
       body = JSON.parse(text);

@@ -141,6 +141,24 @@ describe("the shared relay's untagged requests", () => {
   });
 });
 
+describe("Settings → Loopback's Test and last request", () => {
+  test("Test says what is missing until a relay runs, the key is set and a connection is the loopback; a relay's last request is when it last carried one", async () => {
+    const rig = new Rig();
+    const before = pageOf(await rig.send({ type: "lre.loopback.page", op: "test" }));
+    expect(before.test).toEqual({ ok: false, text: "Test failed. No relay carries your replies yet: start one with the line in Settings → Loopback." });
+    const ready = await readyLoopback(rig);
+    const after = pageOf(await rig.send({ type: "lre.loopback.page", op: "test" }));
+    expect(after.test?.ok).toBe(true);
+    expect(after.test?.text).toStartWith("Test passed: sam is running");
+    expect(after.relays[0]?.requestAt).toBeNull();
+    expect(pageOf(await rig.send({ type: "lre.loopback.page", op: "get" })).test).toBeUndefined();
+    const at = Date.now();
+    const body = { model: LOOPBACK_MODEL, messages: [{ role: "user", content: "Summarize the chat." }] };
+    expect((await rig.send({ type: "lre.loopback.passthrough", secret: ready.secret, call: callId(), key: ready.key, body }, RELAY_SESSION)).type).toBe("lre.result");
+    expect(pageOf(await rig.send({ type: "lre.loopback.page", op: "get" })).relays[0]?.requestAt).toBeGreaterThanOrEqual(at);
+  });
+});
+
 describe("a registry read that fails", () => {
   test("is never kept as an empty registry, and a write meanwhile wipes nothing: the next request reads the real one", async () => {
     const first = new Rig();

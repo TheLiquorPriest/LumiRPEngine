@@ -6,7 +6,7 @@
 // Per chat, every operation runs through one queue, so the core sees host events in order.
 
 import { hashParts } from "../shared/hash";
-import type { JsonObject } from "../shared/json";
+import type { JsonObject, JsonValue } from "../shared/json";
 import { deepFreeze, isRecord } from "../shared/json";
 import type { ChatId, MessageId, UserId, WorldId } from "../shared/ids";
 import { runDir } from "../shared/ids";
@@ -33,6 +33,7 @@ import { giveWay } from "./give-way";
 import type { ContextHandlerInput, ContextVerdict, GenerationEndedEvent, GenerationStartedEvent, HostGenerationType, HostMessage, HostPort } from "./host";
 import { setAside } from "./stored-json";
 import { ancestorOf, LayerStore, type HeldDraft } from "./layer-store";
+import { carryOf, LAYER_CARRY_KEY } from "./layer-carry";
 import type { Diagnostics } from "./diagnostics";
 import { messageOf } from "./diagnostics";
 import { inTurn, outsideTurns, type TurnFrame } from "./turn-frame";
@@ -902,6 +903,10 @@ export class LedgerService {
   private readonly chats = new Map<ChatId, ChatSlot>();
   private readonly unsubscribe: (() => void)[] = [];
   private outstanding = 0;
+  /** Chats whose layer grew past what their metadata carries (`layer-carry.ts`): marked so once, then left. */
+  private readonly carriedOver = new Set<ChatId>();
+  /** Chats that landed in their layer since it was last carried in their metadata. */
+  private readonly carryDirty = new Set<ChatId>();
   /** Every operation failure, also logged to the host. */
   readonly errors: string[] = [];
   hooks: TurnHooks | null = null;
@@ -995,8 +1000,14 @@ export class LedgerService {
         this.unmirror(e.chatId, e.messageId);
         this.onMessage(e.chatId, userId, e.messageId, "deleted");
       }),
-      h.on("CHAT_DELETED", (e) => {
-        this.shown.delete(e.chatId);
+      // A deleted chat takes its whole run with it: journal, snapshots, layer, the bootstrap's spool and its job files (DEPTH-PLAN R8).
+      h.on("CHAT_DELETED", (e, userId) => {
+        this.forget(e.chatId);
+        if (!userId) return;
+        this.outstanding++;
+        void this.removeRun(e.chatId, userId)
+          .catch((error: unknown) => this.host.log("warn", `[LumiRPEngine] chat ${e.chatId}: its run files weren't removed (${error instanceof Error ? error.message : String(error)})`, userId))
+          .finally(() => this.outstanding--);
       }),
       h.on("GENERATION_STARTED", (e, userId) => {
         this.generating.add(e.generationId);
@@ -1036,6 +1047,8 @@ export class LedgerService {
         const commit = (): Promise<void> =>
           this.run(e.chatId, userId, async (core, observed) => {
             core.sync(observed);
+            // The layer is carried in the chat's metadata once a turn, when it changed since (`layer-carry.ts`).
+            await this.carry(e.chatId, core, observed);
             if (e.error) this.host.log("warn", `[LumiRPEngine] generation ${e.generationId.slice(0, 8)} ended with an error${cut ? ", its scene cut where its last passage streamed" : ""}: ${e.error.slice(0, 200)}`, userId ?? undefined, e.generationId);
             // A generation that ended in error commits as stopped: no auto-read, no extraction; the
             // reply's Retry read chip covers whatever text was saved. A cut scene commits as below.
@@ -2338,6 +2351,12 @@ export class LedgerService {
     }
   }
 
+  /** Removes a deleted chat's run directory (`runs/<chatId>/`), file by file; an id that could escape it removes nothing. */
+  private async removeRun(chatId: ChatId, userId: UserId): Promise<void> {
+    const dir = runDir(chatId);
+    for (const path of await this.host.storage.list(dir, userId)) if (path.startsWith(dir)) await this.host.storage.remove(path, userId);
+  }
+
   /**
    * Whether the chat holds what only memory keeps: an operation queued or running, a turn in flight,
    * or a turn its gate holds from the guard's stop to the end of its engine run, while a prepared turn
@@ -2696,6 +2715,7 @@ export class LedgerService {
         }
       }
       const made = new Map((await slot.layer.append(accepted)).map((e) => [e.id, e]));
+      if (made.size > 0) this.carryDirty.add(slot.layer.chatId);
       return results.map((r, i): LandResult => {
         if (r) return r;
         const entry = made.get(items[i]?.draft.id ?? "");
@@ -2704,6 +2724,20 @@ export class LedgerService {
     } finally {
       slot.landing.length = 0;
     }
+  }
+
+  /**
+   * Keeps the chat's layer carried in its metadata, so a Lumiverse export takes it along
+   * (`layer-carry.ts`): once a turn, and only when something landed since. A layer past the cap is
+   * marked so, carrying nothing, and left (entries only ever grow); the chat keeps the export warning.
+   */
+  private async carry(chatId: ChatId, core: LedgerCore, observed: readonly ChainMessage[]): Promise<void> {
+    const slot = this.chats.get(chatId);
+    const runSeed = core.journal.run?.runSeed;
+    if (!slot || !runSeed || !this.carryDirty.delete(chatId) || this.carriedOver.has(chatId)) return;
+    const carry = carryOf(chatId, runSeed, slot.layer.foldEntries(), core.chain(observed));
+    if ("over" in carry) this.carriedOver.add(chatId);
+    await this.host.chats.mergeChatMetadata(chatId, { [LAYER_CARRY_KEY]: JSON.parse(JSON.stringify(carry)) as JsonValue }, slot.userId).catch((error: unknown) => this.host.log("warn", `[LumiRPEngine] chat ${chatId}: its layer wasn't carried in its metadata (${error instanceof Error ? error.message : String(error)})`, slot.userId));
   }
 
   /**
@@ -2730,6 +2764,33 @@ export class LedgerService {
       const own = d.by?.role === "user" || d.by?.role === "player";
       if (own || basisIndex(chain, slot.core.journal.tombstones, d.basis) >= 0) this.host.toast(`${own ? "Your change" : "Work"} made while the reply was written wasn't kept: ${r.reason}`, slot.userId);
     });
+  }
+
+  /**
+   * The adopt step (DEPTH-PLAN §2.3, §6.3): the results held while a turn is in flight whose basis
+   * message is one the turn reads through (`on`), work between turns it waited for, land now, each
+   * checked as a drain checks it, so the turn's read folds them. The ids that landed, for the turn's
+   * citation (`author.adopt`); the rest stay held.
+   */
+  async adoptHeld(chatId: ChatId, userId: UserId, on: ReadonlySet<MessageId>): Promise<string[]> {
+    const landed: string[] = [];
+    await this.run(chatId, userId, async (core, observed) => {
+      const slot = this.chats.get(chatId);
+      if (!slot) return;
+      const taken = await slot.layer.adoptHeld((h) => on.has(h.draft.basis.message));
+      if (taken.length === 0) return;
+      const results = await this.landNow(slot, core, observed, taken, false);
+      results.forEach((r, i) => {
+        const d = taken[i]?.draft;
+        if (!d) return;
+        const key = `${chatId}\u0000${d.id}`;
+        this.heldWaits.get(key)?.resolve(r);
+        this.heldWaits.delete(key);
+        if (r.status === "landed") landed.push(r.entry.id);
+        else this.host.log("info", `[LumiRPEngine] chat ${chatId}: a ${d.kind} result (${d.id}) the turn waited for didn't land: ${r.status === "refused" ? r.reason : r.status}`, userId);
+      });
+    });
+    return landed;
   }
 
   /** The chat's own landed entries, without their events: for resuming and listing; with `inherited`, also the entries it inherits as a branch, in its own message ids. */

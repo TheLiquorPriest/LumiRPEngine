@@ -35,7 +35,7 @@ import type { WorldState } from "../../../engine/state";
 import { povRender, type LivedPov, type PovStaging } from "../../character-agent";
 import { mindInput, povRefs } from "../../character-engine";
 import { renderPrompt } from "../../prompts";
-import { beatLine, DepthAnswerError, nameKey, putText, readAnswer, twice, type BeatText, type Blobs, type StagingText } from "../common";
+import { answerWhy, beatLine, DepthAnswerError, nameKey, putText, readAnswer, twice, type BeatText, type Blobs, type StagingText } from "../common";
 import type { ModelPort, PortUsage } from "../port";
 import type { Moment, NarrationOutcome, RealtimeCtx, RealtimeOutcome, RenderBeat, SceneRt } from "./contract";
 import { actBeatTexts, play, sceneRecall, sceneSoFar, type PlayAct, type PlayOut, type SceneRead } from "./play";
@@ -178,7 +178,7 @@ function perceiversOf(raw: unknown, resolve: (said: unknown) => EntityId | null,
 export function readWatch(answer: Record<string, unknown> | null, ctx: { world: WorldDoc; state: Readonly<WorldState>; present: readonly EntityId[]; pc: EntityId; with: EntityId }): WatchAnswer | null {
   if (!answer) return null;
   const notes: string[] = [];
-  const reasoning = nonBlank(answer.reasoning);
+  const reasoning = nonBlank(answerWhy(answer));
   const base = { others: [] as WatchPerceiver[], world: [] as WatchWorld[], end: nonBlank(answer.end), poll: answer.poll === "later" ? ("later" as const) : ("now" as const), ...(reasoning !== null ? { reasoning } : {}), notes };
   const takeover = nonBlank(answer.takeover);
   if (takeover !== null) return { ...base, takeover, line: null };
@@ -274,7 +274,7 @@ export function readExposure(answer: Record<string, unknown> | null, ctx: { worl
   if (!answer || !Array.isArray(answer.answer)) return null;
   const notes: string[] = [];
   const resolve = resolverOf(ctx.world, ctx.state, ctx.present);
-  const reasoning = nonBlank(answer.reasoning);
+  const reasoning = nonBlank(answerWhy(answer));
   return { answer: perceiversOf(answer.answer, resolve, notes, new Set([ctx.with])), outcome: perceiversOf(answer.outcome, resolve, notes, new Set()), ...(reasoning !== null ? { reasoning } : {}), notes };
 }
 
@@ -697,7 +697,10 @@ async function exchange(ctx: RealtimeCtx, x: ExchangeInput): Promise<RealtimeOut
   const staged = x.staging.get(pc);
   narration.add({ beats: exchanged.map(renderBeat), ...(staged ? { staging: staged } : {}), mark: 0 } satisfies Moment);
   if (worldBeats.length > 0) narration.add({ beats: worldBeats.map(renderBeat), ...(staged ? { staging: staged } : {}), mark: 1 } satisfies Moment);
-  const [narrated] = await Promise.all([narration.drain(), ...beats.filter((b) => !pcInPart(b)).map(renderPov)]);
+  // A point of view that fails fails the line, but only once the narration has settled: nothing it renders streams after the line has failed (review-last L-8).
+  const [settled, ...povs] = await Promise.allSettled([narration.drain(), ...beats.filter((b) => !pcInPart(b)).map(renderPov)]);
+  for (const p of [...povs, settled]) if (p.status === "rejected") throw p.reason;
+  const narrated = (settled as PromiseFulfilledResult<NarrationOutcome>).value;
 
   // A Stop keeps the moments whose prose streamed (§9.2): none, the line and its answer, or all.
   const kept = !narrated.stopped ? [...first, ...then] : narrated.streamedThrough === null ? [] : narrated.streamedThrough === 0 ? first : [...first, ...then];

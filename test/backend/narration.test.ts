@@ -226,6 +226,14 @@ describe("what the player asked this telling to change (§3.9)", () => {
     await p.drain();
     expect(said(plain, "check")[0]).not.toContain("What the player asked");
   });
+
+  test("the GM's check reads the author's notebook excerpts the narrator was given, as tone that adds no facts (M23)", async () => {
+    const model = scripted({ narrator: ["Maya turns away, the rain slow on the glass."], check: [{ faithful: true }] });
+    const n = new Narration({ model, sink: sinkLog().sink, throughOf: () => 0 }, input(new AbortController().signal, { excerpts: ["Keep it rain-soaked and quiet: Maya is hiding the letter."] }));
+    n.add({ beats: [beat("b1", { exposure: WHOLE })], mark: 0 });
+    await n.drain();
+    expect(said(model, "check")[0]).toContain("## From the author's notebook, for this scene (the narrator was asked to carry these; they add no facts)\nKeep it rain-soaked and quiet: Maya is hiding the letter.");
+  });
 });
 
 describe("the narrator fails (§1.3, §1.4)", () => {

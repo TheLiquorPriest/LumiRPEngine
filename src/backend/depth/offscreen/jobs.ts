@@ -21,9 +21,9 @@
 // started are put off, said in the treatment log. What a job couldn't do is said, never dropped
 // silently; nothing here throws.
 
-import { AUTHOR_ASK, askEvent, type AskData } from "../../../shared/author";
+import { AUTHOR_ASK, AUTHOR_SPEND, askEvent, spendEvent, type AskData } from "../../../shared/author";
 import { AUTHOR_DROP, dropEvent, STORY_DRAFT, type DraftData } from "../../../shared/episodes";
-import { DEPTH_TREATMENT_LABEL, DEPTH_TREATMENTS, type DepthBudget, type DepthTreatment } from "../../../shared/depth-settings";
+import { DEPTH_TREATMENT_LABEL, DEPTH_TREATMENTS, thresholdGuidance, type DepthBudget, type DepthTreatment } from "../../../shared/depth-settings";
 import type { ChatId, UserId } from "../../../shared/ids";
 import type { Basis, LayerEntry, LayerSummary } from "../../../shared/layer";
 import { calendarOf, formatClock } from "../../../engine/calendar";
@@ -34,7 +34,7 @@ import type { WorldDoc } from "../../../shared/world";
 import type { BasisRead } from "../../ledger-io";
 import type { CeilingBind } from "../budget";
 import type { ModelPort } from "../port";
-import { intervalAt, INTERVAL_MINUTES } from "../spend";
+import { intervalAt, INTERVAL_MINUTES, spendData } from "../spend";
 import { namesOf, tag, type DraftLine, type EpisodeAsk, type OffscreenFacts } from "../scene/author";
 import { draftOf } from "../../../shared/episodes";
 import { askLine, openAsks } from "./asks";
@@ -50,8 +50,8 @@ export interface JobsRt extends OffscreenRt {
   };
 }
 
-/** The ladder a part slides down when its treatment's allowance is spent: each treatment's next cheaper one. */
-const CHEAPER: Readonly<Record<DepthTreatment, DepthTreatment | null>> = { live: "campfire", campfire: "room", room: "written", written: null };
+/** The ladder a part slides down when its treatment's allowance is spent: each treatment's next cheaper one, in `DEPTH_TREATMENT_DEFS`' order. */
+const CHEAPER = Object.fromEntries(DEPTH_TREATMENTS.map((t, i) => [t, DEPTH_TREATMENTS[i + 1] ?? null])) as Readonly<Record<DepthTreatment, DepthTreatment | null>>;
 
 /** The parts this story interval's drafts spent per treatment: every live draft on the chain, settled, dropped or open, whose story time falls in the interval holding `clock`. */
 export function spentIn(drafts: readonly Pick<DraftOn, "draft">[], budget: Pick<DepthBudget, "interval">, clock: number): Record<DepthTreatment, number> {
@@ -115,7 +115,7 @@ export async function offscreenFacts(rt: JobsRt, chatId: ChatId, userId: UserId,
   });
   const names = namesOf(world, state);
   const asked = openAsks(at.events).map((a) => askLine(a.ask, (id) => tag(names, id)));
-  return { drafts: open.map((d) => draftLine(world, state, story, d.draft)), rebase, allowances, threshold: budget.threshold, asked, ask: budget.ask };
+  return { drafts: open.map((d) => draftLine(world, state, story, d.draft)), rebase, allowances, threshold: thresholdGuidance(budget), asked, ask: budget.ask };
 }
 
 /**
@@ -138,8 +138,8 @@ export function overAllowance(ask: EpisodeAsk, budget: DepthBudget, spent: Reado
   return over;
 }
 
-/** The episode's parts within this interval's allowances: one past its treatment's slides down the ladder, said in its rationale; one past "written" too is left out, said. */
-export function withinAllowances(ask: EpisodeAsk, budget: DepthBudget, spent: Record<DepthTreatment, number>, said: string[]): EpisodeAsk {
+/** The episode's parts within this interval's allowances: one past its treatment's slides down the ladder, said in its rationale; one past "written" too is left out, a line in `put` (the treatment log's). */
+export function withinAllowances(ask: EpisodeAsk, budget: DepthBudget, spent: Record<DepthTreatment, number>, put: string[]): EpisodeAsk {
   const parts: EpisodeAsk["parts"] = [];
   for (const p of ask.parts) {
     let t: DepthTreatment | null = p.treatment;
@@ -150,7 +150,7 @@ export function withinAllowances(ask: EpisodeAsk, budget: DepthBudget, spent: Re
     }
     const subject = "who" in p.subject ? p.subject.who : p.subject.event;
     if (t === null) {
-      said.push(`${subject}: this story ${budget.interval}'s allowances are spent down to written, so it is left unwritten until it matters`);
+      put.push(`${subject}: this story ${budget.interval}'s allowances are spent down to written, so it is left unwritten until it matters`);
       continue;
     }
     spent[t]++;
@@ -167,7 +167,7 @@ export interface OffscreenOut {
   drafted: string[];
   /** The episodes held for the player's answer past an allowance, by episode id. */
   asked: string[];
-  /** What a ceiling put off, in words, a line each: the treatment log's (`author.spend`'s `put`). */
+  /** What a ceiling or a spent allowance put off, in words, a line each: the treatment log's (`author.spend`'s `put`). */
   put: string[];
   /** What a job couldn't do or said, in words. */
   said: string[];
@@ -267,9 +267,9 @@ export async function offscreenJobs(rt: JobsRt, chatId: ChatId, userId: UserId, 
         }
         continue;
       }
-      const said: string[] = [];
-      const within = withinAllowances(ask, o.budget, spent, said);
-      out.said.push(...said.map((line) => `episode ${index + 1}: ${line}`));
+      const left: string[] = [];
+      const within = withinAllowances(ask, o.budget, spent, left);
+      out.put.push(...left.map((line) => `Episode ${index + 1}: ${line}`));
       if (within.parts.length === 0) continue;
       try {
         const r = await draftEpisode(rt, chatId, userId, basis, within, { index, ...common });
@@ -301,6 +301,9 @@ export async function draftAnswered(rt: OffscreenRt, chatId: ChatId, userId: Use
     const at = await rt.ledger.foldAtBasis(chatId, userId, basis, [STORY_DRAFT]);
     const spent = at ? spentIn(draftsOn(at.events), o.budget, at.state.clock) : (Object.fromEntries(DEPTH_TREATMENTS.map((t) => [t, 0])) as Record<DepthTreatment, number>);
     episode = withinAllowances(wanted, o.budget, spent, said);
+    // What it left unwritten goes in the treatment log too, as the poll's put-offs do.
+    const put = spendData({ cost: { calls: 0, tokensIn: 0, tokensOut: 0 }, roles: {} }, { treatment: "written", interval: o.budget.interval, at: at?.state.clock ?? 0, for: ask.id, put: said });
+    if (put) await landEntry(rt, chatId, userId, { id: layerEntryId(AUTHOR_SPEND, chatId, ask.id, "unwritten", basis.message, basis.swipe), basis, kind: AUTHOR_SPEND, events: [spendEvent(put)], by: { role: "author" } }, {});
     if (episode.parts.length === 0) return { draft: null, landed: null, said };
   }
   const r = await draftEpisode(rt, chatId, userId, basis, episode, { index: ask.index, ...(o.model ? { model: o.model } : {}), ...(o.signal ? { signal: o.signal } : {}), ...(o.plugs ? { plugs: o.plugs } : {}) });

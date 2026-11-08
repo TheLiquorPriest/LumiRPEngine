@@ -47,6 +47,7 @@ import type { EngineTurnPlan } from "../../../engine/turn";
 import type { Registry } from "../../../engine/registry-impl";
 import type { WorldState } from "../../../engine/state";
 import type { LiveEvent } from "../../../engine/ledger/story";
+import type { CardHost } from "../../character-agent";
 import type { ArchiveSource } from "../archive-tools";
 import type { CeilingBind, TurnBudget } from "../budget";
 import type { BeatText, Blobs, StagingText } from "../common";
@@ -63,6 +64,8 @@ export interface SceneRt {
   readonly registry: Registry;
   /** The user's blobs; a stage reads the texts the turn made so far through the loop's own reader, which looks here last. */
   readonly blobs: { get(userId: UserId, hash: string): Promise<string | null> };
+  /** The host's cards: a mind formed in play takes its core from one (`formCore`); absent, from what the world knows. */
+  readonly host?: CardHost;
 }
 
 /** The fold a turn or a job reads: the frontier it answers and everything through it (`foldAtBasisOf`, queue-free). */

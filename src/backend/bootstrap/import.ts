@@ -3,10 +3,10 @@
 // entries, where a starter keeps all of its own) and World Info stay the user's lore and keep doing
 // their job; they are read here only so a character with no card can have its core seeded from what
 // the world says of it (D-17). The memory entries (Lumibooks' books, core's summary, Memory Cortex,
-// and on a chat that had LRE's minds, their notes, commitments and summaries) are evidence the history
-// is reconciled against: none enters a mind. An entry that agrees cites the beats; one recording an
-// event the history no longer holds becomes beats sourced from it, marked for review; one that
-// contradicts the beats or a formed mind goes to the spot checks, and the user decides.
+// and on a chat that had LRE's minds, their notes, commitments, plans, summaries and holdings) are
+// evidence the history is reconciled against: none enters a mind. An entry that agrees cites the
+// beats; one recording an event the history no longer holds becomes beats sourced from it, marked for
+// review; one that contradicts the beats goes to the spot checks, and the user decides.
 
 import type { ChatId, EntityId, UserId } from "../../shared/ids";
 import { loreIsSecret, loreSourceOf } from "../../shared/lore";
@@ -26,7 +26,8 @@ import type { HostPort } from "../host";
 import { loreBookIds } from "../book-lore";
 import { renderPrompt } from "../prompts";
 import type { ModelPort } from "../depth/port";
-import { bareId, DepthAnswerError, putText, readAnswer, sameName, spoken } from "../depth/common";
+import { bareId, DepthAnswerError, personNamed, putText, readAnswer, sameName, spoken } from "../depth/common";
+import type { WorldState } from "../../engine/state";
 import type { Person, ReconcileOut } from "./run";
 
 /** One entry the import read. */
@@ -157,20 +158,27 @@ export async function readImports(deps: ImportDeps, chatId: ChatId, userId: User
     }
   }
 
-  // LRE's earlier minds on this chat: each character's notes, commitments, plans and summary.
-  const chars = deps.minds && isRecord(deps.minds.chars) ? deps.minds.chars : null;
-  if (chars) {
-    for (const [id, raw] of Object.entries(chars)) {
-      if (!isRecord(raw)) continue;
-      const name = deps.names.get(id) ?? id;
-      const lines = [
-        ...(typeof raw.summary === "string" && raw.summary.trim() !== "" ? [`Summary: ${raw.summary.trim()}`] : []),
-        ...(Array.isArray(raw.notes) ? raw.notes.flatMap((n) => (isRecord(n) && typeof n.text === "string" ? [`Note: ${n.text}`] : [])) : []),
-        ...(Array.isArray(raw.commitments) ? raw.commitments.flatMap((c) => (isRecord(c) && typeof c.text === "string" ? [`Commitment: ${c.text}`] : [])) : []),
-        ...(Array.isArray(raw.plans) ? raw.plans.flatMap((p) => (isRecord(p) && typeof p.what === "string" ? [`Plan: ${p.what}`] : [])) : []),
-      ];
-      if (lines.length > 0) entries.push(entry("lre_minds", id, "memory", `${name}'s earlier mind`, lines.join("\n"), [name]));
-    }
+  // LRE's earlier minds on this chat: each character's notes, commitments, plans and summary, and what it held of the chat's facts.
+  const chars = deps.minds && isRecord(deps.minds.chars) ? deps.minds.chars : {};
+  const knowledge = deps.minds && isRecord(deps.minds.knowledge) ? deps.minds.knowledge : {};
+  const facts = isRecord(knowledge.facts) ? knowledge.facts : {};
+  const holdings = isRecord(knowledge.holdings) ? knowledge.holdings : {};
+  for (const id of new Set([...Object.keys(chars), ...Object.keys(holdings)])) {
+    const raw = isRecord(chars[id]) ? chars[id] : {};
+    const held = isRecord(holdings[id]) ? holdings[id] : {};
+    const name = deps.names.get(id) ?? id;
+    const lines = [
+      ...(typeof raw.summary === "string" && raw.summary.trim() !== "" ? [`Summary: ${raw.summary.trim()}`] : []),
+      ...(Array.isArray(raw.notes) ? raw.notes.flatMap((n) => (isRecord(n) && typeof n.text === "string" ? [`Note: ${n.text}`] : [])) : []),
+      ...(Array.isArray(raw.commitments) ? raw.commitments.flatMap((c) => (isRecord(c) && typeof c.text === "string" ? [`Commitment: ${c.text}`] : [])) : []),
+      ...(Array.isArray(raw.plans) ? raw.plans.flatMap((p) => (isRecord(p) && typeof p.what === "string" ? [`Plan: ${p.what}`] : [])) : []),
+      ...Object.entries(held).flatMap(([fact, h]) => {
+        const f = facts[fact];
+        if (!isRecord(h) || !isRecord(f) || typeof f.claim !== "string") return [];
+        return [`Held: ${f.claim} (takes it as ${typeof h.belief === "string" ? h.belief : "uncertain"}${typeof h.confidence === "number" ? `, ${Math.round(h.confidence * 100)}% sure` : ""}${typeof h.how === "string" ? `, ${h.how}` : ""})`];
+      }),
+    ];
+    if (lines.length > 0) entries.push(entry("lre_minds", id, "memory", `${name}'s earlier mind`, lines.join("\n"), [name]));
   }
   count("lre_minds", null);
   return { entries, views };
@@ -203,6 +211,8 @@ export interface ReconcileInput {
   beats: readonly Beat[];
   blobs: Readonly<Record<string, string>>;
   minds: readonly Person[];
+  /** The world as the chapter's basis folds it, to name anyone the story has met (`personNamed`), not only those with a mind; absent, the minded only. */
+  state?: Readonly<WorldState>;
   basis: Basis;
   /** The chapter's clock where the ledger has one: an event the history lost is dated there, approximately. */
   at: number;
@@ -221,12 +231,13 @@ export async function reconcile(model: ModelPort, i: ReconcileInput): Promise<Re
   const ids = new Set(memory.map((e) => e.id));
   const people = new Set(i.minds.map((p) => p.id));
   const beatIds = new Set(i.beats.map((b) => b.id));
-  // A person as the answer names them: a character's id, else the one character by that name as an answer may write it (`sameName`); anyone else as written.
+  // A person as the answer names them: a character's id, else the one character by that name as an answer may write it (`sameName`), else anyone the story has met by that name or id (`personNamed`); anyone else as written.
   const personOf = (said: string): string => {
     const t = bareId(said);
     if (people.has(t)) return t;
     const named = i.minds.filter((p) => sameName(t, p.name));
-    return named.length === 1 ? (named[0]?.id ?? t) : t;
+    if (named.length === 1) return named[0]?.id ?? t;
+    return (i.state ? personNamed(i.state, t) : null) ?? t;
   };
   const lines = i.beats.map((b) => `- ${b.id} (${b.act}; ${b.actors.join(", ") || "no one"}${b.place ? ` at ${b.place}` : ""}): ${i.blobs[b.what] ?? ""}${b.quotes && i.blobs[b.quotes] ? ` "${i.blobs[b.quotes]}"` : ""}`);
   const recordable = i.final ? "at the history's end, any entry may, if no chapter holds its event." : "in this chapter, only an entry whose span lies inside it may; leave the rest for later chapters.";
@@ -276,5 +287,16 @@ export async function reconcile(model: ModelPort, i: ReconcileInput): Promise<Re
     }
     if (made.length > 0) recorded.push({ entry: from, beats: made });
   }
-  return { events, blobs, agree, recorded, contradictions, ...(answer.reasoning ? { reasoning: answer.reasoning } : {}) };
+  // Each decision readable beside what it landed: which entry agreed with which beats, which became beats, which contradicts, with the GM's why where it gave one.
+  const whyOf = (entry: string, key: "agree" | "recorded"): string => {
+    const found = (Array.isArray(o[key]) ? o[key] : []).find((x: unknown) => isRecord(x) && text(x.entry) === entry);
+    return isRecord(found) && text(found.why) !== "" ? `: ${text(found.why)}` : ".";
+  };
+  const account = [
+    ...agree.map((a) => `${a.entry} agrees with ${a.beats.join(", ") || "the chapter"}${whyOf(a.entry, "agree")}`),
+    ...recorded.map((r) => `${r.entry} records what the history no longer holds, now ${r.beats.join(", ")}${whyOf(r.entry, "recorded")}`),
+    ...contradictions.map((c) => `${c.entry} contradicts ${c.against || "the chapter"}: ${c.why}`),
+  ].join("\n");
+  const reasoning = [answer.reasoning ?? "", account].filter((s) => s !== "").join("\n\n");
+  return { events, blobs, agree, recorded, contradictions, ...(reasoning !== "" ? { reasoning } : {}) };
 }

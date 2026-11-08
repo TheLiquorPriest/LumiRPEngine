@@ -221,7 +221,13 @@ export function GmMindsSection(props: GmSectionProps) {
           </Section>
         ) : null}
         <RunCard minds={minds} busy={props.busy} />
-        <RunEveryone count={liveNear} disabled={props.busy || running} picking={picking.on} onRun={() => void minds.start()} onPick={() => (picking.on ? picking.stop() : picking.start())} />
+        {minds.off !== null ? (
+          <Section title="Run minds now">
+            <p class="lre-gm-note" data-lre-minds-off="">{minds.off}</p>
+          </Section>
+        ) : (
+          <RunEveryone count={liveNear} disabled={props.busy || running} picking={picking.on} onRun={() => void minds.start()} onPick={() => (picking.on ? picking.stop() : picking.start())} />
+        )}
         <div class="lre-gm-tools">
           <label class="lre-gm-search">
             <Icon name="search" size={16} />
@@ -336,11 +342,11 @@ function CharacterPages(props: { ctx: Ctx; c: MindsGmCharacter; onBack(): void }
           <div class="lre-gm-minds" data-lre-gm-minds={c.entity}>
             <Section title="Run their mind now" flush>
               <List>
-                <ListRow icon="sparkle" title="Run their mind now" subtitle="From the chat so far and their lore, as a turn would; recorded as one edit you can undo" chevron disabled={ctx.busy || ctx.minds.run?.status === "running"} onClick={() => void ctx.minds.start([c.entity])} />
+                <ListRow icon="sparkle" title="Run their mind now" subtitle={ctx.minds.off ?? "From the chat so far and their lore, as a turn would; recorded as one edit you can undo"} chevron disabled={ctx.busy || ctx.minds.off !== null || ctx.minds.run?.status === "running"} onClick={() => void ctx.minds.start([c.entity])} />
               </List>
             </Section>
             {ctx.minds.run?.entries.some((e) => e.entity === c.entity) || ctx.minds.error ? <RunCard minds={ctx.minds} busy={ctx.busy} /> : null}
-            <Ladder c={c} busy={ctx.busy} open={changes.open} />
+            <Ladder c={c} busy={ctx.busy || ctx.minds.off !== null} open={changes.open} />
             <Intent c={c} busy={ctx.busy} open={changes.open} />
             <LatestMind ctx={ctx} c={c} />
             <Holdings ctx={ctx} who={c} open={changes.open} />

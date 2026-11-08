@@ -12,6 +12,7 @@
 // On a chat on depth that reply's text is never read into canon (`PendingTurn.depth`), and the
 // thinking block and the reply's chip say so.
 
+import { adoptEvent, type AdoptData } from "../../../shared/author";
 import type { ArchiveQuery } from "../../../shared/archive";
 import { depthCall, DEPTH_ROLE_WORDS } from "../../../shared/depth-settings";
 import type { ChatId, MessageId, UserId } from "../../../shared/ids";
@@ -39,7 +40,7 @@ import { reporting } from "./reporting";
 import { runDepthTurn, type ScenePlugs } from "./turn";
 
 /** What the depth turn reads of the runtime. */
-export type DepthTurnsRt = Pick<Runtime, "host" | "registry" | "blobs" | "settings" | "ledger" | "archive" | "bridgeOf" | "loopback">;
+export type DepthTurnsRt = Pick<Runtime, "host" | "registry" | "blobs" | "settings" | "ledger" | "archive" | "bridgeOf" | "loopback" | "depthNeeded">;
 
 /** The replies whose after-reply work is kept until their commit takes it; past this the oldest goes (a commit that never came). */
 const AFTERS_KEPT = 64;
@@ -87,12 +88,24 @@ export class DepthTurns {
     if (turn === null || ctx.kind === "impersonate" || ctx.kind === "continue") return null;
     const bridge = this.rt.bridgeOf(chatId);
     if (!bridge || !(await this.on(chatId, userId))) return null;
-    const read = await this.read(chatId, userId, ctx.generationId, turn, ctx.kind, ctx.direction);
+    const first = await this.read(chatId, userId, ctx.generationId, turn, ctx.kind, ctx.direction);
+    if (first === null) return null;
+    // The work between turns at the messages the turn reads through that the next turn reads (DEPTH-PLAN §6): it waits for it, lands what it held for the turn's window, reads again, and cites it.
+    const upTo = turn.chain.findIndex((m) => m.id === first.at.basis.message);
+    const on = new Set<MessageId>(turn.chain.slice(0, upTo + 1).map((m) => m.id));
+    const needed = await this.rt.depthNeeded(chatId, on, ctx.signal);
+    if (needed.waited.length + needed.without.length > 0) ctx.sink.progress(`Waited for the work between turns this turn reads${needed.without.length > 0 ? `; going on without ${needed.without.map((j) => j.what).join(", ")}, which lands after` : ""}`);
+    const adopted = needed.waited.length > 0 ? await this.rt.ledger.adoptHeld(chatId, userId, on) : [];
+    const read = needed.waited.length > 0 ? await this.read(chatId, userId, ctx.generationId, turn, ctx.kind, ctx.direction) : first;
     if (read === null) return null;
+    const adoption: AdoptData | null = needed.waited.length + needed.without.length > 0 ? { waited: needed.waited, without: needed.without, entries: adopted } : null;
     const settings = await this.rt.settings.get(userId);
     // The input area's Regenerate deleted the chat's last depth reply (D-4 a): its redo follows the swipe setting where that reply's record holds beats to tell again, else the scene plays again.
     const again = ctx.redo && settings.swipeDefault === "renarrate" && ctx.redo.pre.some((e) => e.type === STORY_BEAT) ? ctx.redo : null;
     if (ctx.redo) ctx.sink.progress(again ? "Redoing the reply you deleted, as your swipe setting says: the same beats, told afresh" : "Redoing the reply you deleted: the scene plays again from your message");
+    // A depth scene's calls are the author's, the characters' and the narrator's own: the request's tools (a preset's, an extension's) aren't offered to any of them, and the thinking block says so (L46).
+    const tools = Array.isArray(ctx.body.tools) ? ctx.body.tools.length : 0;
+    if (tools > 0) ctx.sink.progress(`This request offered ${tools === 1 ? "a tool" : `${tools} tools`}; a depth scene doesn't use them: its author, characters and narrator call only their own.`);
     const budget = await budgetFor(daySpendOf(this.rt.host), userId, settings.depth.budget);
     const plan = bridge.planFor(turn.seed);
     const result = await runDepthTurn(
@@ -117,7 +130,7 @@ export class DepthTurns {
         model: this.port(userId, ctx.sink, samplingOf(ctx.body)),
         sink: ctx.sink,
         signal: ctx.signal,
-        rt: { registry: this.rt.registry, blobs: this.rt.blobs },
+        rt: { registry: this.rt.registry, blobs: this.rt.blobs, host: this.rt.host },
         archive: this.archive(chatId, userId, read.at.basis.message),
         budget,
       },
@@ -127,7 +140,7 @@ export class DepthTurns {
     const spent = recordedTokens(result.pre);
     this.afters.set(ctx.generationId, { ...result.after, turn: ctx.generationId, ...(spent > 0 ? { spent } : {}) });
     if (this.afters.size > AFTERS_KEPT) this.afters.delete(this.afters.keys().next().value ?? "");
-    return { pre: result.pre, read: result.read, blobs: result.blobs, ...(result.error !== undefined ? { error: result.error } : {}) };
+    return { pre: adoption ? [...result.pre, adoptEvent(adoption)] : result.pre, read: result.read, blobs: result.blobs, ...(result.error !== undefined ? { error: result.error } : {}) };
   };
 
   /** What runs right after the depth reply of `generationId` (`afterDepthReply`), taken once by its commit; null when it played no depth turn. */

@@ -1,17 +1,17 @@
 // The Character Engine through the ledger (DEPTH-PLAN §4.4, §4.9): a catch-up's mind writes land as
 // a basis-anchored layer entry, fold in every fold, and survive a swipe of a later reply; an entry
 // anchored at the swiped reply goes inert and comes back with it; what a character recalls is only
-// what it lived; and a switch of player character (D-10) hands the old one his agent back. What the
-// player does while a reply is written anchors at the last message kept, before that reply, and
-// lands as the reply is kept; a switch of player character there lands only where the reply still
-// folds with it.
+// what it lived; and a chat switched to another player character (D-10) before Play as was turned
+// off hands the old one his agent back. What the player does while a reply is written anchors at the
+// last message kept, before that reply, and lands as the reply is kept; a switch of player character
+// there lands only where the reply still folds with it.
 
 import { describe, expect, test } from "bun:test";
-import { catchUpNow, interviewMind, mindEdit, mindView, mindsView, povSwitch, type EngineRt } from "../../src/backend/character-engine";
+import { catchUpNow, headBasis, interviewMind, mindEdit, mindView, mindsView, type EngineRt } from "../../src/backend/character-engine";
 import type { ModelPort } from "../../src/backend/depth/port";
 import { defaultSettings } from "../../src/backend/settings-store";
-import { MIND_INTERVIEW, MIND_WRITE, exposedBeats, livedCorpus, mindFileWrite, mindFilesAt, mindMetaAt, mindPath, mindTakeEvent, mindV2At, povOf, recallSearch } from "../../src/shared/character-engine";
-import type { ChatId, EntityId } from "../../src/shared/ids";
+import { MIND_INTERVIEW, MIND_POV, MIND_WRITE, exposedBeats, livedCorpus, mindFileWrite, mindFilesAt, mindMetaAt, mindPath, mindPovEvent, mindTakeEvent, mindV2At, povOf, recallSearch } from "../../src/shared/character-engine";
+import type { ChatId, EntityId, UserId } from "../../src/shared/ids";
 import { beatEvent, type Beat } from "../../src/shared/story";
 import { blobHash } from "../../src/shared/stores";
 import storyPack from "../../src/packs/story/core/index";
@@ -34,6 +34,13 @@ const TEXT = {
 
 function beat(id: string, at: number, surface: string, what: string, exposure: Beat["exposure"], quotes?: string): Beat {
   return { id, at, order: 1, place: "home", actors: [], act: "did", about: [], what: blobHash(what), surface: blobHash(surface), ...(quotes ? { quotes: blobHash(quotes) } : {}), exposure, by: { entry: "test" } };
+}
+
+/** A switch of player character as Play as landed it before it was turned off (D-10): `minds.v2.pov` at the head; one made while a reply is written waits for it. */
+async function switchTo(rt: EngineRt, chat: ChatId, userId: UserId, who: EntityId): Promise<void> {
+  const basis = await headBasis(rt, chat, userId);
+  if (!basis) throw new Error("no basis");
+  await rt.ledger.landLayer(chat, userId, { id: `pov:${who}:${basis.message}:${basis.swipe}`, basis, kind: MIND_POV, events: [mindPovEvent(who)], by: { role: "user" } });
 }
 
 /** A runtime over the harness: its ledger, a blob store in memory, the shipped settings. */
@@ -201,7 +208,7 @@ describe("the Character Engine through the ledger", () => {
     expect(Object.keys(await devMind(h, chat)).sort()).toEqual(["memories/000000600-1.md", "memories/000000620-1.md"]);
   });
 
-  test("the player switches whom he plays (D-10): the new one has no agent, the old one catches up on what reached him", async () => {
+  test("a chat switched to another player character (D-10): the new one has no agent, the old one catches up on what reached him", async () => {
     const h = new Harness("fresh", { packs: [storyPack] });
     const rt = rtOf(h);
     const userId = h.host.userId;
@@ -212,7 +219,7 @@ describe("the Character Engine through the ledger", () => {
     await h.service.landLayer(chat, userId, { id: "beats", basis: b1, kind: "story.beat", events: [beatEvent(beat("letter", 615, TEXT.letter, TEXT.letterWhat, [{ who: "sam", channel: "sight", reach: "whole" }]))] });
     await expect(catchUpNow(rt, chat, userId, "sam", { model: port() })).rejects.toThrow("player character");
 
-    await povSwitch(rt, chat, userId, "dev");
+    await switchTo(rt, chat, userId, "dev");
     const head = await h.service.basisFor(chat, userId);
     const at = head ? await h.service.foldAtBasis(chat, userId, head) : null;
     expect(at ? povOf(at.world, at.state) : null).toBe("dev");
@@ -288,14 +295,14 @@ describe("what the player does while a reply is written", () => {
 
     // Dev plays in the reply being written: switching to him before it would unmake his play there,
     // so the switch is refused as the reply is kept, and the player reads why.
-    await during("Dev, the door.", () => povSwitch(rt, chat, userId, "dev"));
+    await during("Dev, the door.", () => switchTo(rt, chat, userId, "dev"));
     expect(await povNow()).toBe("sam");
     expect(await devMind(h, chat)).toEqual({});
     expect((await h.service.layerSummaries(chat, userId)).map((s) => s.kind)).toEqual([]);
     expect(h.host.toasts).toEqual([{ message: expect.stringMatching(/^Your change made while the reply was written wasn't kept: a later turn no longer folds with it \(.*player character has no agent/), userId }]);
 
     // A reply he plays no part in: the switch made while it is written lands with it.
-    await during("Quiet morning.", () => povSwitch(rt, chat, userId, "dev"));
+    await during("Quiet morning.", () => switchTo(rt, chat, userId, "dev"));
     expect(await povNow()).toBe("dev");
     expect(await devMind(h, chat)).toEqual({});
     expect(h.host.toasts).toHaveLength(1);

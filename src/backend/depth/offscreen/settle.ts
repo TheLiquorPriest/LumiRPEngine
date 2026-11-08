@@ -157,7 +157,7 @@ export async function readDraft(input: DraftReadInput): Promise<DraftRead> {
   for (const { ref, beat } of refs) {
     const v = answer.beats.get(ref);
     if (v && !v.keep) continue;
-    const adjusted = v !== undefined && (v.what !== undefined || v.surface !== undefined || v.quotes !== undefined);
+    const adjusted = v !== undefined && (v.what !== undefined || v.surface !== undefined || v.quotes !== undefined || v.deed !== undefined);
     if (!adjusted) {
       beats.push({ ...beat, exposure: settledExposure(beat.exposure, minded, pov, true) });
       continue;
@@ -167,10 +167,11 @@ export async function readDraft(input: DraftReadInput): Promise<DraftRead> {
     const quotes = v.quotes ?? read?.quotes;
     const exposure = settledExposure(beat.exposure, minded, pov, false);
     const newId = beatId(draft.id, "settled", ref);
-    // The draft's deed told the beat as drafted: rewritten, it keeps none, so its actors live it from the inside, as the point-of-view render tells it (`SceneBook.povs`), rather than an act it no longer holds.
+    // The draft's deed told the beat as drafted: rewritten, it keeps only the deed the settlement restated (L-9); without one its actors live it from the inside, as the point-of-view render tells it (`SceneBook.povs`), rather than an act it no longer holds.
     const { deed: _drafted, ...settled } = beat;
-    await book.povs({ id: newId, surface, ...(quotes ? { quotes } : {}), actors: beat.actors, about: beat.about, ...(beat.addressed ? { addressed: beat.addressed } : {}) }, exposure, model, texts, input.signal);
-    beats.push({ ...settled, id: newId, what: putText(book.blobs, v.what ?? read?.what ?? ""), surface: putText(book.blobs, surface), ...(quotes ? { quotes: putText(book.blobs, quotes) } : {}), exposure });
+    const deed = beat.actors.length > 0 ? v.deed : undefined;
+    await book.povs({ id: newId, surface, ...(quotes ? { quotes } : {}), ...(deed ? { deed } : {}), actors: beat.actors, about: beat.about, ...(beat.addressed ? { addressed: beat.addressed } : {}) }, exposure, model, texts, input.signal);
+    beats.push({ ...settled, id: newId, what: putText(book.blobs, v.what ?? read?.what ?? ""), surface: putText(book.blobs, surface), ...(quotes ? { quotes: putText(book.blobs, quotes) } : {}), ...(deed ? { deed: putText(book.blobs, deed) } : {}), exposure });
   }
   const kept: LedgerEvent[] = [];
   draft.effects.forEach((e, i) => {

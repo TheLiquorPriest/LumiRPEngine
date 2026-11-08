@@ -4,7 +4,10 @@
 // - The turn tagger, LumiRPEngine's one prompt interceptor (D0a check 2), runs last: for a world
 //   chat's generation the guard let straight on because its connection is the loopback, it mints a
 //   single-use token keyed to the chat and the generation (`lre_turn`), and keeps the prompt as it
-//   saw it, every message with its source (F6), until the generation ends.
+//   saw it, every message with its source (F6), until the generation ends. On a chat on depth it
+//   takes every history message before the chat's cutoff out of the prompt core sends (GM → This
+//   chat → Depth → History, `shared/depth-history.ts`): the request never carries the whole history,
+//   and the author and the GM read the rest on demand with the archive tools.
 // - The World Info interceptor's verdict for that generation's prompt gives each engine entry the
 //   turn fills its mark (`marked`), so the prompt shows where core placed each section (`compose.ts`).
 // - The relay's requests arrive as protocol requests from its own session; each but `register`
@@ -40,6 +43,8 @@ import type { ErrorCode, LoopbackPageRequest } from "../../shared/protocol";
 import { PROTOCOL_VERSION } from "../../shared/protocol";
 import { KIT_FILE } from "../../shared/agents";
 import { depthCall } from "../../shared/depth-settings";
+import { hiddenByCut } from "../../shared/depth-history";
+import { historyCut } from "../depth/history-cut";
 import type { UserSettings } from "../../shared/settings";
 import type { HostConnectionProfile, HostGenerationType, HostMessage, PromptInterceptorInput, PromptMessage, PromptVerdict, QuietMessage, QuietRequest, QuietResult, WorldInfoInput, WorldInfoVerdict } from "../host";
 import type { LoopRun } from "../ledger-io";
@@ -136,6 +141,8 @@ interface LiveRelay {
   user: UserId;
   session: string | null;
   seenAt: number;
+  /** When it last carried a reply request (`open`). */
+  requestAt?: number;
   report: RelayReport | null;
 }
 
@@ -279,6 +286,8 @@ export class LoopbackBridge {
   private readonly lastScene = new Map<ChatId, { messageId: MessageId; shown: number; swipes: Map<number, SceneSwipe> }>();
   /** A chat whose last depth reply the player deleted: the swipe it showed, which the next new reply redoes where it answers the same message, its text as it was; that message deleted or its text changed, or a message of his own sent, it is gone. */
   private readonly redos = new Map<ChatId, SceneSwipe>();
+  /** Each world chat's last dry run on the loopback: the narrator's prompt LumiRPEngine would send for it (L45), newest per chat. */
+  private readonly dryRuns = new Map<ChatId, { userId: UserId; at: number; messages: QuietMessage[] }>();
   /** Each generation's turn work under way: its end waits on it (`settled`). */
   private readonly working = new Map<string, { calls: number; done: PromiseWithResolvers<void> }>();
   /** The shared relay's untagged requests in the last minute, by the key's user (D-8). */
@@ -406,7 +415,11 @@ export class LoopbackBridge {
    * passthrough, with no engine run and no record: it stops instead (fails closed, §3.14).
    */
   async tag(input: PromptInterceptorInput): Promise<PromptVerdict> {
-    if (input.dryRun || input.generationType === "other") return {};
+    if (input.generationType === "other") return {};
+    if (input.dryRun) {
+      await this.dryRunPrompt(input);
+      return {};
+    }
     const loop = this.rt.ledger.loopOf(input.chatId, input.userId);
     if (!loop) {
       if ((await this.isLoopback(input.connectionId, input.userId)) && (await this.rt.worldOf(input.chatId, input.userId)) !== null) {
@@ -415,22 +428,74 @@ export class LoopbackBridge {
       }
       return {};
     }
-    const history = input.messages.flatMap((m, i) => (m.history ? [i] : []));
+    // A chat on depth: the history before its cutoff leaves the prompt, so core's body (and the short context made of it) never carries it.
+    const omit = await this.hiddenOf(input);
+    const gone = new Set(omit);
+    const messages = gone.size > 0 ? input.messages.filter((_, i) => !gone.has(i)) : input.messages;
+    const history = messages.flatMap((m, i) => (m.history ? [i] : []));
     const first = history[0];
     const last = history.at(-1);
     const token = randomHex(128);
-    const entry: Token = { token, userId: input.userId, chatId: input.chatId, generationId: loop.generationId, type: loop.type, at: Date.now(), shape: { count: input.messages.length, history, first: first !== undefined ? (input.messages[first]?.content ?? null) : null, last: last !== undefined ? (input.messages[last]?.content ?? null) : null }, prompt: input.messages, turn: null, ended: false };
+    const entry: Token = { token, userId: input.userId, chatId: input.chatId, generationId: loop.generationId, type: loop.type, at: Date.now(), shape: { count: messages.length, history, first: first !== undefined ? (messages[first]?.content ?? null) : null, last: last !== undefined ? (messages[last]?.content ?? null) : null }, prompt: messages, turn: null, ended: false };
     // An assembly of the same generation again: the newer token stands.
     const before = this.byGeneration.get(loop.generationId);
     if (before) this.tokens.delete(before.token);
     this.tokens.set(token, entry);
     this.byGeneration.set(loop.generationId, entry);
+    // No relay of the player's running: the reply can't reach LumiRPEngine, so the chat says why (L55). Off the tagger's path, which answers at once.
+    void this.relayCheck(input.chatId, input.userId, loop.target);
     for (const [t, e] of this.tokens) {
       if (this.tokens.size <= 256 && Date.now() - e.at < TOKEN_MS) break;
       this.tokens.delete(t);
       if (this.byGeneration.get(e.generationId) === e) this.byGeneration.delete(e.generationId);
     }
-    return { parameters: { [TURN_PARAM]: token } };
+    return { parameters: { [TURN_PARAM]: token }, ...(omit.length > 0 ? { omit } : {}) };
+  }
+
+  /** A tagged world-chat generation while no relay of the player's runs (Settings → Loopback's own readiness, `unready`): the chat's flag says why, with that page's line (`Runtime.relayDown`). */
+  private async relayCheck(chatId: ChatId, userId: UserId, target: MessageId | null): Promise<void> {
+    try {
+      const why = await this.unready(userId);
+      if (why !== null) await this.rt.relayDown({ chatId, userId, target, why });
+    } catch (error) {
+      this.rt.host.log("warn", `[LumiRPEngine] the chat wasn't told its relay isn't running: ${messageOf(error)}`, userId);
+    }
+  }
+
+  /** The places of the history messages a chat on depth leaves out of its prompt, by the chat's cutoff (GM → This chat → Depth → History); none on any other chat. The turn and its dry run both ask it, so the preview holds what the turn sends. */
+  private async hiddenOf(input: PromptInterceptorInput): Promise<number[]> {
+    return (await this.rt.depth.on(input.chatId, input.userId)) ? hiddenByCut(input.messages, await historyCut(this.rt.host, input.chatId, input.userId)) : [];
+  }
+
+  /**
+   * A dry run of a world chat on the loopback starts no generation and runs no engine, so it gets no
+   * token: the narrator's prompt LumiRPEngine would compose from that assembly is kept instead
+   * (`dryRunOf`) and logged. On a depth chat it is today's narrator's short context (B2), the preset
+   * as assembled with the recent window where the history was; elsewhere the assembly as it is. Either
+   * way without the turn's sections, which only a turn's engine run writes.
+   */
+  private async dryRunPrompt(input: PromptInterceptorInput): Promise<void> {
+    try {
+      if (!(await this.isLoopback(input.connectionId, input.userId)) || (await this.rt.worldOf(input.chatId, input.userId)) === null) return;
+      // On a chat on depth, the prompt as its turn would send it: without the history before the chat's cutoff.
+      const gone = new Set(await this.hiddenOf(input));
+      const prompt = gone.size > 0 ? input.messages.filter((_, i) => !gone.has(i)) : input.messages;
+      const body = quietMessages(prompt);
+      const settings = await this.rt.settings.get(input.userId);
+      const messages = (await this.rt.depth.on(input.chatId, input.userId)) ? shortContext({ prompt, body, sections: [], window: settings.depth.window, absorption: "keep" }).frame() : body;
+      this.dryRuns.set(input.chatId, { userId: input.userId, at: Date.now(), messages });
+      if (this.dryRuns.size > 512) this.dryRuns.delete(this.dryRuns.keys().next().value ?? ("" as ChatId));
+      const chars = messages.reduce((n, m) => n + m.content.length, 0);
+      this.rt.host.log("info", `[LumiRPEngine] a dry run of this world chat: the narrator's prompt LumiRPEngine would send holds ${messages.length} messages, ${chars} characters (without the sections a turn's engine run writes)`, input.userId);
+    } catch (error) {
+      this.rt.host.log("warn", `[LumiRPEngine] this dry run's narrator prompt couldn't be composed: ${messageOf(error)}`, input.userId);
+    }
+  }
+
+  /** The narrator's prompt the chat's last dry run on the loopback would have sent (`dryRunPrompt`); null when none was kept for this user. */
+  dryRunOf(chatId: ChatId, userId: UserId): { at: number; messages: QuietMessage[] } | null {
+    const kept = this.dryRuns.get(chatId);
+    return kept && kept.userId === userId ? { at: kept.at, messages: kept.messages } : null;
   }
 
   /**
@@ -651,6 +716,8 @@ export class LoopbackBridge {
   private open(id: string, relay: string, userId: UserId, generationId: string | null, chatId: ChatId | null): Call {
     const call: Call = { id, relay, userId, generationId, chatId, turn: null, held: new Map(), last: 0, done: false, doneAt: null, over: false, startedAt: Date.now(), abort: new AbortController(), buffer: null, timer: null, models: [] };
     this.calls.set(id, call);
+    const live = this.live.get(relay);
+    if (live) live.requestAt = call.startedAt;
     if (generationId !== null) {
       const w = this.working.get(generationId) ?? { calls: 0, done: Promise.withResolvers<void>() };
       w.calls++;
@@ -732,7 +799,7 @@ export class LoopbackBridge {
     this.flush(call);
     const promptTokens = call.models.reduce((n, c) => n + (c.promptTokens ?? 0), 0);
     const completionTokens = call.models.reduce((n, c) => n + (c.completionTokens ?? 0), 0);
-    this.send(call, { kind: "finish", finish, usage: { promptTokens, completionTokens, totalTokens: promptTokens + completionTokens, calls: [...call.models] } });
+    this.send(call, { kind: "finish", finish, usage: { promptTokens, completionTokens, totalTokens: promptTokens + completionTokens, calls: call.models.map(({ reasoning: _, ...c }) => c) } });
     this.ended(call);
   }
 
@@ -890,10 +957,15 @@ export class LoopbackBridge {
           if (!round) sink.progress(unreadWords(run.as, run.turn !== null));
           // No scene plays it, so today's narrator writes it, from B2's short context all the same: the preset as Lumiverse assembled it, every section of the run in its place (no beats tell any of them), and the recent window where the history was; a tool round's exchange follows it.
           const unscened = this.shortFrame(token, messages.slice(0, state.opened), placed, settings, sink, false, !round);
-          return await this.narrate(call, token.userId, sink, [...unscened(), ...messages.slice(state.opened)], body, whole);
+          return await this.narrate(call, token.userId, sink, [...unscened(), ...messages.slice(state.opened)], body, whole, !round);
         }
       }
-      await this.narrate(call, token.userId, sink, withSections(messages, token.shape, placed), body, whole);
+      // Impersonate on a chat on depth (C17): the player character's next message is written from the short context as well, the preset (the persona with it) and the recent window, never the whole history.
+      if (token.type === "impersonate" && (await this.rt.depth.on(token.chatId, token.userId))) {
+        const own = this.shortFrame(token, messages.slice(0, state.opened), placed, settings, sink, false, !round);
+        return await this.narrate(call, token.userId, sink, [...own(), ...messages.slice(state.opened)], body, whole, !round);
+      }
+      await this.narrate(call, token.userId, sink, withSections(messages, token.shape, placed), body, whole, !round);
     } catch (error) {
       if (call.abort.signal.aborted) return this.close(call);
       if (error instanceof LoopbackRefused) return this.fail(call, error.message, error.code);
@@ -928,20 +1000,25 @@ export class LoopbackBridge {
     return { role, connection: connectionId ?? "default", model: result.model ?? model ?? "default", requestId: requestIdOf(result.usage), ...(result.tokensIn !== undefined ? { promptTokens: result.tokensIn } : {}), ...(result.tokensOut !== undefined ? { completionTokens: result.tokensOut } : {}), ms };
   }
 
-  /** The call as the body asks it, on the user's narrator connection (Settings → Depth → Narrator), the body's sampling over the connection's. */
-  private async request(userId: UserId, messages: QuietMessage[], body: JsonObject): Promise<{ request: QuietRequest; connectionId: string | null; model: string | null }> {
+  /** The call as the body asks it, on the user's narrator connection (Settings → Depth → Narrator), the body's sampling over the connection's; its tools only where `offer` (a tool round's call goes on without them, L-14). */
+  private async request(userId: UserId, messages: QuietMessage[], body: JsonObject, offer = true): Promise<{ request: QuietRequest; connectionId: string | null; model: string | null }> {
     const route = depthCall(await this.rt.settings.get(userId), "narrator");
     const refusal = await this.loopRefusal(route.connectionId, userId);
     if (refusal) throw new LoopbackRefused("validation", refusal);
-    const tools = quietTools(body.tools);
-    const toolChoice = toolChoiceOf(body);
+    const tools = offer ? quietTools(body.tools) : [];
+    const toolChoice = offer ? toolChoiceOf(body) : undefined;
     const request: QuietRequest = { messages, maxTokens: maxTokensOf(body) ?? route.maxTokens, json: false, connectionId: route.connectionId, model: route.model, effort: route.effort, params: { ...route.params, ...samplingOf(body) }, usage: true, ...(tools.length > 0 ? { tools } : {}), ...(toolChoice !== undefined ? { toolChoice } : {}) };
     return { request, connectionId: route.connectionId, model: route.model };
   }
 
-  /** The narrator's call, streamed: its text as the reply, its own reasoning into the thinking block (unless that shows progress only, D-5), tools answered in kind. */
-  private async narrate(call: Call, userId: UserId, sink: TurnSink, messages: QuietMessage[], body: JsonObject, whole: boolean): Promise<void> {
-    const { request, connectionId, model } = await this.request(userId, messages, body);
+  /**
+   * The narrator's call, streamed: its text as the reply, its own reasoning into the thinking block
+   * (unless that shows progress only, D-5), tools answered in kind. A tool round's call (`offer`
+   * false) has its tools' results in and is offered no tools again, so the narrator writes the reply
+   * rather than call again until core's rounds run out and the reply ends empty (L-14).
+   */
+  private async narrate(call: Call, userId: UserId, sink: TurnSink, messages: QuietMessage[], body: JsonObject, whole: boolean, offer: boolean): Promise<void> {
+    const { request, connectionId, model } = await this.request(userId, messages, body, offer);
     sink.progress("The narrator is writing the reply");
     const started = Date.now();
     const result = await this.rt.host.models.stream(request, userId, call.abort.signal, (piece) => {
@@ -984,6 +1061,7 @@ export class LoopbackBridge {
     let minted: string | undefined;
     switch (r.op) {
       case "get":
+      case "test":
         break;
       case "mint": {
         const key = `lre_lk_${randomHex(256)}`;
@@ -1023,9 +1101,22 @@ export class LoopbackBridge {
         break;
       }
       default:
-        throw new LoopbackRefused("bad_request", "op must be get, mint, shared, fix or forget");
+        throw new LoopbackRefused("bad_request", "op must be get, mint, shared, fix, forget or test");
     }
-    return this.view(userId, originOf(r.origin), minted);
+    const page = await this.view(userId, originOf(r.origin), minted);
+    return r.op === "test" ? { ...page, test: await this.test(page, userId) } : page;
+  }
+
+  /** Settings → Loopback's Test: whether a relay of yours is running, your key is set, a connection is the loopback and the narrator writes on a real model; one line. */
+  private async test(page: LoopbackPage, userId: UserId): Promise<{ ok: boolean; text: string }> {
+    const unready = loopbackUnready(page);
+    if (unready !== null) return { ok: false, text: `Test failed. ${unready}` };
+    const narrator = await this.loopRefusal(depthCall(await this.rt.settings.get(userId), "narrator").connectionId, userId);
+    if (narrator !== null) return { ok: false, text: `Test failed. ${narrator}` };
+    const running = page.relays.filter((r) => (r.mode !== "shared" || page.shared.enabled) && !r.signIn);
+    const heard = running.map((r) => r.seenAt).filter((t): t is number => t !== null);
+    const ago = heard.length > 0 ? `, last heard ${Math.max(0, Math.round((Date.now() - Math.max(...heard)) / 1000))} s ago` : "";
+    return { ok: true, text: `Test passed: ${running.map((r) => r.name).join(", ")} is running${ago}; your key is set; ${page.connections.map((c) => c.name).join(", ")} is the loopback; the narrator writes on a real model.` };
   }
 
   /** Why this user can't play a chat on depth now, read from Settings → Loopback's own page (`loopbackUnready`); null when they can. */
@@ -1084,6 +1175,7 @@ export class LoopbackBridge {
           port: x.port,
           registeredAt: x.registeredAt,
           seenAt,
+          requestAt: live?.requestAt ?? null,
           report,
           signIn: report?.session.valid === false || silent,
           update: x.build !== build,

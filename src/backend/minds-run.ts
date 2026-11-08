@@ -50,6 +50,9 @@ export function mindsRunConfig(settings: { modelUse: Pick<ModelUseSettings, "ste
   return { ...step, enabled: true, route };
 }
 
+/** Why GM → Minds' run, Ladder and the MCP's `lre_minds_run` are off on a chat on depth. */
+export const CLASSIC_MINDS_OFF = "This chat plays at depth: each character's mind is written by their own agent from what they lived, so running minds and their ladder here are off. GM → Depth → Minds shows their minds.";
+
 export class RunError extends Error {
   constructor(
     readonly code: "bad_request" | "conflict" | "not_world_chat" | "unavailable",
@@ -78,6 +81,11 @@ export class MindsRuns {
     return this.runs.get(`${userId}\u0000${chatId}`)?.view ?? null;
   }
 
+  /** Why the classic run is off in this chat, in the words GM → Minds shows; null where it runs. A depth chat's minds are its character agents' (GM → Depth → Minds), written only from what each lived: this run would be a second writer. */
+  async off(chatId: ChatId, userId: UserId): Promise<string | null> {
+    return (await this.rt.depthOn(chatId, userId)) ? CLASSIC_MINDS_OFF : null;
+  }
+
   /** Stops a running run: what is still thinking is dropped and nothing is recorded. */
   cancel(chatId: ChatId, userId: UserId, runId: string): MindsRunView | null {
     const run = this.runs.get(`${userId}\u0000${chatId}`);
@@ -96,6 +104,9 @@ export class MindsRuns {
     if (this.runs.get(key)?.view.status === "running") throw new RunError("conflict", "Minds are already running in this chat; wait for them, or cancel the run.");
     const core = await this.rt.ledger.core(chatId, userId);
     if (!core || !(await this.rt.runOf(chatId, userId))) throw new RunError("not_world_chat", "this chat is not attached to a world");
+    // A depth chat's minds are its character agents' (GM → Depth → Minds), written only from what each lived: today's run would be a second writer.
+    const off = await this.off(chatId, userId);
+    if (off !== null) throw new RunError("bad_request", off);
     const settings = await this.rt.settings.get(userId);
     // Each mind runs where the Minds role does (Settings → Agents → Roles → Minds), else on its step.
     const config = mindsRunConfig(settings, settings.agents.roles.minds);

@@ -33,7 +33,7 @@
 // steps 1 and 2 run, and the rest waits for the next poll, which reads everything since the last.
 
 import { AUTHOR_POLL, AUTHOR_PREDICT, AUTHOR_SCORE, AUTHOR_SPEND, authorData, driftEvent, pollEvent, predictEvent, predictionId, scoreEvent, spendEvent, type PollConsidered, type PollData, type PollJob, type PredictData, type ScoreData } from "../../../shared/author";
-import { exposedBeats, hasAgent, MIND_FILE_NAMES, mindedAt, mindFileOf, mindV2At, mindWriteEvent, pendingFor, povOf, reachOf, TAKES_KEPT, takersAt, takesOf } from "../../../shared/character-engine";
+import { exposedBeats, hasAgent, MIND_FILE_NAMES, mindedAt, mindFileOf, mindV2At, mindWriteEvent, pendingFor, povOf, reachOf, TAKES_KEPT, takersAt, takesOf, writtenFromGone } from "../../../shared/character-engine";
 import { DEPTH_CADENCE_LABEL, type DepthCadence } from "../../../shared/depth-settings";
 import type { ChatId, EntityId, UserId } from "../../../shared/ids";
 import { hasOwn } from "../../../shared/json";
@@ -63,6 +63,7 @@ import { DRAFT_TYPES } from "../offscreen/drafts";
 import { offscreenFacts, offscreenJobs, type JobsRt, type OffscreenOut } from "../offscreen/jobs";
 import { episodeOf, type OffscreenPlugs } from "../offscreen/episode";
 import { metered, spendData } from "../spend";
+import { chatBudget } from "../chat-allowances";
 
 /** What the after-reply step reads of the runtime: the Character Engine's, the fold at a basis with the live events it asks for, the chain's bases, and the chat's own layer for the world beyond view (`Runtime` is one). */
 export type AfterRt = JobsRt;
@@ -77,6 +78,10 @@ export interface AfterOptions {
   occasion?: string;
   /** Story time that passed outside any turn, landed at the basis (the clock moved on, its minutes and why): it wakes the poll, which reads it beside what passed since it last looked, its minutes counted once (a poll that hasn't read through the basis yet already counts them there). */
   woken?: { minutes: number; why: string };
+  /** Called once what the next turn reads is in (the remembering, its truth links and the catch-ups the poll asked for now): a turn waiting for it goes on from here, while reflections and the work off screen run on (DEPTH-PLAN §6). */
+  ready?: () => void;
+  /** Set on the one extra poll a settlement the off-screen jobs landed wakes: remembering and the turn's truth links are skipped, and it wakes nothing more. */
+  wakeRound?: true;
 }
 
 /** What the after-reply step did. */
@@ -198,15 +203,29 @@ function dueOf(world: WorldDoc, state: Readonly<WorldState>, names: Names): stri
 /** What each character with an agent has waiting to be lived, as the poll reads it. */
 async function pendingOf(rt: Pick<EngineRt, "blobs">, userId: UserId, at: Pick<BasisRead, "world" | "state" | "story">, played: readonly EntityId[]): Promise<PendingLine[]> {
   const { beats } = exposedBeats(at.story);
+  const replaced = new Set(at.story.replaced.map((r) => r.id));
   const out: PendingLine[] = [];
   for (const who of mindedAt(at.state)) {
     if (!hasAgent(at.world, at.state, who)) continue;
-    const waiting = pendingFor(beats, mindV2At(at.state, who), who);
+    const mind = mindV2At(at.state, who);
+    const waiting = pendingFor(beats, mind, who);
+    // The files a retcon put out of mind (written from a beat since amended or struck, with no verdict since): the poll decides whether a reflection rewrites them.
+    const gone = Object.entries(mind.files).flatMap(([path, m]) => (writtenFromGone(m, mind, replaced) ? [path] : []));
+    // A mind near the count that calls its remembering asks for a reflection (§4.4): the poll hears how full it is.
+    const takes = takesOf(at.state, who).length;
+    const near = takes >= Math.floor((TAKES_KEPT * 3) / 4);
     const newest = waiting[waiting.length - 1];
-    if (!newest) continue;
-    const reach = reachOf(newest, who);
+    if (!newest && gone.length === 0 && !near) continue;
+    const reach = newest ? reachOf(newest, who) : null;
     const latest = reach ? ((await rt.blobs.get(userId, reach.text))?.trim() ?? "") : "";
-    out.push({ who, pending: waiting.length, ...(latest !== "" ? { latest: clip(latest, LATEST_CHARS) } : {}), played: played.includes(who) });
+    out.push({ who, pending: waiting.length, ...(latest !== "" ? { latest: clip(latest, LATEST_CHARS) } : {}), played: played.includes(who), ...(gone.length > 0 ? { gone } : {}), ...(near ? { takes } : {}) });
+  }
+  // Whoever the story reached who has no mind yet (someone met from afar, on a call, by a rumor): listed too, so the poll may catch them up, which forms their mind first (`catchUpNow`).
+  const minded = new Set(mindedAt(at.state));
+  const unminded = [...new Set(beats.flatMap((b) => b.exposure.map((x) => x.who)))].filter((who) => !minded.has(who) && hasOwn(at.state.entities, who) && hasAgent(at.world, at.state, who));
+  for (const who of unminded) {
+    const waiting = pendingFor(beats, mindV2At(at.state, who), who);
+    if (waiting.length > 0) out.push({ who, pending: waiting.length, played: false, unminded: true });
   }
   return out;
 }
@@ -274,7 +293,7 @@ export async function afterDepthReply(rt: AfterRt, chatId: ChatId, userId: UserI
     const talking = talk && talk.state === "on" ? talk.with : null;
     const rememberers = takersAt(start.state).filter((who) => hasAgent(start.world, start.state, who) && (who !== talking || takesOf(start.state, who).length >= TAKES_KEPT));
     let kept: { who: EntityId; text: string }[] = [];
-    if (rememberers.length > 0 && !held(`Remembering the scene (${rememberers.map((id) => namesOf(start.world, start.state).name(id)).join(", ")})`)) {
+    if (!o.wakeRound && rememberers.length > 0 && !held(`Remembering the scene (${rememberers.map((id) => namesOf(start.world, start.state).name(id)).join(", ")})`)) {
       try {
         const r = await rememberAfterReply(rt, chatId, userId, { basis, model, who: rememberers, ...signal });
         out.remembered = r.remembered;
@@ -294,7 +313,7 @@ export async function afterDepthReply(rt: AfterRt, chatId: ChatId, userId: UserI
     const names = namesOf(at.world, at.state);
     const turnIds = new Set(after.beats);
     const turnBeats = at.story.beats.filter((p) => turnIds.has(p.beat.id)).map((p) => p.beat);
-    if ((turnBeats.length > 0 || out.remembered.length > 0) && !held("The GM's truth-link of the turn's beats")) {
+    if (!o.wakeRound && (turnBeats.length > 0 || out.remembered.length > 0) && !held("The GM's truth-link of the turn's beats")) {
       try {
         const r = await linkTruths(rt, chatId, userId, basis, { who: out.remembered, beats: turnBeats, ...(o.occasion !== undefined ? { key: occasion } : {}), model, ...signal });
         said("the GM's truth-link", r.refused);
@@ -311,8 +330,10 @@ export async function afterDepthReply(rt: AfterRt, chatId: ChatId, userId: UserI
     }
     const bases = await rt.ledger.chainBases(chatId, userId);
     const since = sinceLastPoll(at, bases, basis);
-    // Story time passing by a timelapse the player ran in this reply, or the clock he moved on, wakes a poll a conversation put off to its end.
-    const woken = o.woken !== undefined || at.events.some((e) => e.event.type === "timelapse" && e.from.messageId === basis.message);
+    // Story time passing by a timelapse the player ran in this reply, or the clock he moved on, wakes a poll a conversation put off to its end; so does the story clock passing the time the last poll asked to be woken at.
+    const lastPoll = at.events.flatMap((e) => authorData<PollData>(e.event, AUTHOR_POLL) ?? []).at(-1);
+    const asked = lastPoll?.wake && at.state.clock >= lastPoll.wake.at ? lastPoll.wake : null;
+    const woken = o.woken !== undefined || asked !== null || at.events.some((e) => e.event.type === "timelapse" && e.from.messageId === basis.message);
     if ((!after.poll && !woken) || held("The author's poll: who catches up and reflects, and what happens off screen")) return out;
     const pov = povOf(at.world, at.state);
     const scored = new Set(at.events.flatMap((e) => authorData<ScoreData>(e.event, AUTHOR_SCORE)?.prediction ?? []));
@@ -325,7 +346,7 @@ export async function afterDepthReply(rt: AfterRt, chatId: ChatId, userId: UserI
     // Facts that can't be read leave the world off screen out of this poll.
     let offscreen: OffscreenFacts | undefined;
     try {
-      offscreen = await offscreenFacts(rt, chatId, userId, at, settings.depth.budget);
+      offscreen = await offscreenFacts(rt, chatId, userId, at, await chatBudget(rt.host, chatId, userId, settings.depth.budget));
     } catch (error) {
       fail("reading the drafts off screen", error);
     }
@@ -344,7 +365,7 @@ export async function afterDepthReply(rt: AfterRt, chatId: ChatId, userId: UserI
         beats: (await beatTexts(rt, userId, since.beats)).map((beat, i) => ({ ref: `b${i + 1}`, beat })),
         kept,
         minutes: since.minutes + (o.woken && !since.readsBasis ? o.woken.minutes : 0),
-        spans: [...since.spans, ...(o.woken ? [o.woken.why] : [])],
+        spans: [...since.spans, ...(o.woken ? [o.woken.why] : []), ...(asked ? [`reaching ${formatClock(calendarOf(at.world), asked.at)}, when you asked to be woken${asked.why !== "" ? ` (${asked.why})` : ""}`] : [])],
         due: dueOf(at.world, at.state, names),
         pending: await pendingOf(rt, userId, at, after.remember),
         predictions,
@@ -378,7 +399,7 @@ export async function afterDepthReply(rt: AfterRt, chatId: ChatId, userId: UserI
       } else considered.push({ what: poll.author.depth === "chapter" ? "My own re-read of the chapter" : "My own reflection on the scene", raised: false, why: [poll.author.why, `Held back: ${held}`].filter((s) => s !== "").join(" ") });
     }
     try {
-      const events = [pollEvent({ through: basis.message, considered, jobs }), ...poll.scores.map((s) => scoreEvent(s))];
+      const events = [pollEvent({ through: basis.message, considered, jobs, ...(poll.wake ? { wake: { at: at.state.clock + poll.wake.minutes, why: poll.wake.why } } : {}) }), ...poll.scores.map((s) => scoreEvent(s))];
       await land(rt, chatId, userId, basis, AUTHOR_POLL, { events, blobs: {}, ...(poll.reasoning ? { reasoning: poll.reasoning } : {}) }, layerEntryId(AUTHOR_POLL, chatId, basis.message, basis.swipe, ...occasion), "author");
     } catch (error) {
       fail("keeping the author's poll", error);
@@ -407,6 +428,7 @@ export async function afterDepthReply(rt: AfterRt, chatId: ChatId, userId: UserI
         return r.lived > 0;
       });
     }
+    o.ready?.();
     if (poll.reflect.length > 0 && !held(`Reflections (${poll.reflect.map((c) => names.name(c.who)).join(", ")})`)) out.reflected = await ran(poll.reflect, "reflection", async (who) => (await reflectNow(rt, chatId, userId, who, { basis, model, ...signal })) !== null);
     // What the catch-ups and reflections wrote is linked as the reply's remembering is (§4.4): a character the author played or handled only catches up, and gets its holdings here.
     const wrote = [...new Set([...out.caughtUp, ...out.reflected])];
@@ -421,12 +443,24 @@ export async function afterDepthReply(rt: AfterRt, chatId: ChatId, userId: UserI
     // Off screen (§4.6): drops, rebases, settlements and their catch-ups, then the episodes drafted at their treatments, each started only while no ceiling binds.
     if (offscreen && poll.drop.length + poll.rebase.length + poll.settle.length + poll.episodes.length > 0) {
       try {
-        out.offscreen = await offscreenJobs(rt, chatId, userId, basis, poll, { budget: settings.depth.budget, model: offMeter.port, ...signal, ...(o.plugs ? { plugs: o.plugs } : {}), binds, first });
+        out.offscreen = await offscreenJobs(rt, chatId, userId, basis, poll, { budget: await chatBudget(rt.host, chatId, userId, settings.depth.budget), model: offMeter.port, ...signal, ...(o.plugs ? { plugs: o.plugs } : {}), binds, first });
         out.put.push(...out.offscreen.put);
         said("off screen", out.offscreen.said);
       } catch (error) {
         fail("the work off screen", error);
       }
+    }
+    // A settlement landed off screen wakes the poll once more at once: what it made canon may call for a catch-up or an episode. That round wakes nothing more.
+    const settled = out.offscreen?.settled ?? [];
+    if (settled.length > 0 && !o.wakeRound) {
+      const { ready: _ready, ...rest } = o;
+      const round = await afterDepthReply(rt, chatId, userId, basis, { ...after, poll: false, beats: [], spent: (after.spent ?? 0) + costTokens(mine.spent().cost) + costTokens(offMeter.spent().cost) }, { ...rest, occasion: [...occasion, "settled"].join("."), woken: { minutes: 0, why: `the settling of draft${settled.length === 1 ? "" : "s"} ${settled.join(", ")} into canon off screen` }, wakeRound: true });
+      out.jobs = [...(out.jobs ?? []), ...(round.jobs ?? [])];
+      out.caughtUp.push(...round.caughtUp);
+      out.reflected.push(...round.reflected);
+      out.failed.push(...round.failed.map((f) => `after the settlement: ${f}`));
+      out.authorReflected ??= round.authorReflected;
+      if (round.offscreen && out.offscreen) for (const k of ["dropped", "rebased", "settled", "drafted", "asked", "said"] as const) out.offscreen[k].push(...round.offscreen[k]);
     }
     if (!reflection || held(reflection.depth === "chapter" ? "The author's re-read of the chapter" : "The author's reflection on the scene")) return out;
     try {
@@ -450,7 +484,9 @@ export async function afterDepthReply(rt: AfterRt, chatId: ChatId, userId: UserI
       }
       const notebook = await readNotebook(rt, userId, now.state);
       const beats = (await beatTexts(rt, userId, stretch)).map((beat, i) => ({ ref: `b${i + 1}`, beat }));
-      const r = await twice(() => authorReflect({ world: now.world, state: now.state, texts, pov: povOf(now.world, now.state), model, ...signal, notebook, depth, beats, becoming, chapter: notebookOf(now.state).chapters.length, through: basis.message }), o.signal);
+      // His signals this turn, and each beat of the stretch that stands in for one an edit or a correction struck: what he changed says what he wants.
+      const amended = stretch.flatMap((b, i) => (b.supersedes && b.supersedes.length > 0 ? [`b${i + 1} stands in for an earlier beat (his edit of a reply, or a correction)`] : []));
+      const r = await twice(() => authorReflect({ world: now.world, state: now.state, texts, pov: povOf(now.world, now.state), model, ...signal, notebook, depth, beats, becoming, chapter: notebookOf(now.state).chapters.length, through: basis.message, signals: [...(after.signals ?? []), ...amended] }), o.signal);
       said("the author's reflection", r.refused);
       const events = [...r.events, ...r.drift.map((d) => driftEvent(d)), ...r.predictions.map((p, i) => predictEvent({ id: predictionId(chatId, basis.message, basis.swipe, ...occasion, String(i)), text: p.text, about: p.about, from: depth }))];
       if (events.length > 0) {

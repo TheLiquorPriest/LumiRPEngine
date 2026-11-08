@@ -10,7 +10,8 @@ import { describe, expect, test } from "bun:test";
 import type { CallFields, CallRequestType, RelayLink, RelaySettings } from "../../src/cli/loopback-relay";
 import { RELAY_DEFAULTS, Relay } from "../../src/cli/loopback-relay";
 import { LoopbackLink } from "../../src/cli/loopback-link";
-import type { LoopbackChunk, LoopbackResultBodies } from "../../src/shared/loopback";
+import type { LoopbackChunk, LoopbackRelayView, LoopbackResultBodies } from "../../src/shared/loopback";
+import { loopbackUnready } from "../../src/shared/loopback";
 import { coreStream } from "./core-staging/llm/openai-stream";
 import { FakeLumiverse, USER } from "./fake-lumiverse";
 
@@ -372,5 +373,45 @@ describe("what it answers", () => {
     // A wildcard address names none of the machine's: any Host is answered, and the key and the Origin refusal stand in the way.
     expect(await status("0.0.0.0", "evil.example:7861")).toBe(200);
     expect(await status("::", "evil.example:7861")).toBe(200);
+  });
+
+  test("a body sent without Content-Length is counted as it arrives and refused at the cap, not read whole", async () => {
+    const link: RelayLink = {
+      up: true,
+      out: null,
+      refused: null,
+      request: async () => {
+        throw new Error("nothing reaches LumiRPEngine here");
+      },
+    };
+    const relay = new Relay(link, { ...settings(7861), maxBodyBytes: 1024 }, env);
+    let pulled = 0;
+    const { promise: cancelled, resolve: cancel } = Promise.withResolvers<void>();
+    // Endless: a relay that read it whole would never answer.
+    const body = new ReadableStream<Uint8Array>({
+      pull: (controller) => {
+        pulled += 1;
+        controller.enqueue(new Uint8Array(256).fill(0x20));
+      },
+      cancel: () => cancel(),
+    });
+    const req = new Request("http://127.0.0.1:7861/v1/chat/completions", { method: "POST", headers: { host: "127.0.0.1:7861", authorization: "Bearer lk_test_key", "content-type": "application/json" }, body, duplex: "half" } as RequestInit);
+    expect(req.headers.get("content-length")).toBeNull();
+    const res = await relay.fetch(req);
+    expect(res.status).toBe(413);
+    expect(await res.json()).toMatchObject({ error: { code: "too_large" } });
+    expect(pulled).toBeLessThan(10);
+    await cancelled;
+  });
+});
+
+describe("after an update of LumiRPEngine", () => {
+  test("a relay one build behind that said hello to this LumiRPEngine still carries depth; one not heard from since asks for its update", () => {
+    // Cast, not typed: the view gains fields the gate never reads.
+    const relay = (over: Partial<LoopbackRelayView>) => ({ relay: "rl-1", name: "lumi", mode: "user", build: "old", host: "box", listen: "127.0.0.1", port: 7861, registeredAt: 0, seenAt: null, report: null, signIn: false, update: true, lines: { update: null, login: null }, ...over }) as LoopbackRelayView;
+    const page = (r: LoopbackRelayView): Parameters<typeof loopbackUnready>[0] => ({ relays: [r], shared: { operator: false, enabled: false }, key: { set: true, print: null, at: null }, connections: [{ id: "c1", name: "Loopback" }] });
+    expect(loopbackUnready(page(relay({ seenAt: 1 })))).toBeNull();
+    expect(loopbackUnready(page(relay({ seenAt: null })))).toBe("No relay of yours is running this build: update lumi with its line in Settings → Loopback.");
+    expect(loopbackUnready(page(relay({ seenAt: 1, signIn: true })))).toContain("sign it in again");
   });
 });

@@ -33,6 +33,7 @@ import { own } from "../../engine/pack-kit";
 import { depthOptedIn } from "../bootstrap/service";
 import type { Runtime } from "../runtime";
 import { costTokens, dayOf, daySpendOf } from "./budget";
+import { chatBudget } from "./chat-allowances";
 import { ASK_TYPES, askChipsOn, asksOn, askWords } from "./offscreen/asks";
 import { DRAFT_TYPES, draftsOn } from "./offscreen/drafts";
 import { spentIn, type JobsRt } from "./offscreen/jobs";
@@ -104,14 +105,14 @@ function ceilingsOf(budget: DepthBudget, turn: { spent: number; of: string }, to
 
 /** GM → Depth → Treatments: the asks waiting on the player, the treatment log, the meter and the budget dial as it stands, for the chat's chain. */
 export async function treatmentsView(rt: TreatmentsRt, chatId: ChatId, userId: UserId): Promise<DepthTreatmentsView> {
-  const budget = (await rt.settings.get(userId)).depth.budget;
+  const budget = await chatBudget(rt.host, chatId, userId, (await rt.settings.get(userId)).depth.budget);
   const day = daySpendOf(rt.host);
   await day.load(userId);
   const today = day.tokens(userId);
   const optedIn = await depthOptedIn(rt, chatId, userId);
   const basis = await rt.ledger.basisFor(chatId, userId);
   const at = basis ? await rt.ledger.foldAtBasis(chatId, userId, basis, TREATMENT_TYPES) : null;
-  const dial = { ask: budget.ask, threshold: budget.threshold };
+  const dial = { ask: budget.ask, threshold: budget.threshold, level: budget.level };
   if (!at) {
     return { on: optedIn, asks: [], log: [], meter: [], interval: `This story ${budget.interval}`, allowances: allowancesOf(budget, spentIn([], budget, 0)), ceilings: ceilingsOf(budget, { spent: 0, of: "No turn on this chat has spent anything yet" }, today), ...dial };
   }
@@ -242,6 +243,9 @@ export async function treatmentsView(rt: TreatmentsRt, chatId: ChatId, userId: U
         const of = g.spends.flatMap((s) => s.roles[role] ?? []);
         return of.length > 0 ? [{ role, cost: summed(of) }] : [];
       }),
+      grades: drafts
+        .filter((d) => intervalAt(g.unit, d.draft.at).from === g.from)
+        .flatMap((d) => d.draft.episode.parts.map((p) => ({ episode: d.draft.summary.trim() || d.draft.episode.why, subject: "who" in p.subject ? name(p.subject.who) : p.subject.event, depth: DEPTH_TREATMENT_LABEL[p.treatment], why: p.rationale }))),
     }));
 
   // The latest turn's spend: everything at its reply.

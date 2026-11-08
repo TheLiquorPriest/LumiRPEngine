@@ -19,9 +19,10 @@
 // decided this one.
 
 import { CHARACTER_TEXT } from "../../../shared/character-prompts";
-import { exposedBeats, livedCorpus, mindLivedEvent, mindTakeEvent, mindV2At, pendingFor, reachOf, recallSearch, takesOf, type ExposedBeat, type Reach, type RecallDoc, type RecallHit } from "../../../shared/character-engine";
+import { exposedBeats, livedCorpus, mindLivedEvent, mindTakeEvent, mindV2At, pendingFor, reachOf, recallSearch, takesOf, MIND_WRITE, type ExposedBeat, type Reach, type RecallDoc, type RecallHit } from "../../../shared/character-engine";
 import type { EntityId, UserId } from "../../../shared/ids";
 import { hasOwn } from "../../../shared/json";
+import { blobHash } from "../../../shared/stores";
 import type { Beat, StoryRead } from "../../../shared/story";
 import type { WorldDoc } from "../../../shared/world";
 import type { WorldState } from "../../../engine/state";
@@ -255,7 +256,11 @@ export async function play(model: ModelPort, input: PlayInput): Promise<PlayOut>
   w.single("now", "now", answer.now);
   const keep = textIn(answer.keep);
   if (keep !== null) w.memory(keep, lived, addressed, input.at);
-  return { events: w.events, blobs: w.blobs, ...(reasoning.length > 0 ? { reasoning: reasoning.join("\n\n") } : {}), usage, act, take, recalls };
+  // Its writes ride the turn's record, which keeps no reasoning of its own: each carries the play's, so Minds → Writes shows why it wrote them.
+  const why = reasoning.join("\n\n");
+  const hash = why !== "" ? blobHash(why) : null;
+  const events = hash === null ? w.events : w.events.map((e) => (e.type === MIND_WRITE ? { ...e, data: { ...e.data, reasoning: hash } } : e));
+  return { events, blobs: hash === null ? w.blobs : { ...w.blobs, [hash]: why }, ...(why !== "" ? { reasoning: why } : {}), usage, act, take, recalls };
 }
 
 /**

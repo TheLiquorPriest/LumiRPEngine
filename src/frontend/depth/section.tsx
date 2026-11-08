@@ -4,10 +4,11 @@
 // (Turn), the Archive of the chat's own prose, and the Bootstrap. Every one is the player's to read
 // (§1.4, D-9). A link from This chat → Depth opens the Bootstrap tab through GM mode's focus
 // (`gmOpen(ui, DEPTH_SECTION, "bootstrap")`), and a Settled off screen chip's Read opens its draft in
-// the Drafts tab (`draftFocus`).
+// the Drafts tab (`draftFocus`). Above the tabs, the pause for depth's work between turns (§6.2).
 
-import { useId, useState } from "preact/hooks";
-import { Tabs, tabPanel } from "../components";
+import { useEffect, useId, useState } from "preact/hooks";
+import { useApp } from "../app";
+import { HostSwitch, Tabs, tabPanel } from "../components";
 import { useGmFocus } from "../gm/ui";
 import type { GmSectionProps } from "../registry";
 import { ArchiveView } from "./archive";
@@ -29,6 +30,37 @@ export function draftFocus(draft: string): string {
   return `${DRAFT_FOCUS}${draft}`;
 }
 
+/** The drawer's pause for depth's work between turns: Settings → Depth → Work between turns, whose off stops the work under way too once what the next turn reads is in. */
+function BackgroundPause() {
+  const app = useApp();
+  const [on, setOn] = useState<boolean | null>(null);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    let live = true;
+    void app.request({ type: "lre.settings.get" }).then((result) => {
+      if (live && result) setOn(result.settings.depth.background.on);
+    });
+    return () => {
+      live = false;
+    };
+  }, []);
+  if (on === null) return null;
+  return (
+    <HostSwitch
+      label="Work between turns"
+      checked={on}
+      disabled={busy}
+      onChange={(next) => {
+        setBusy(true);
+        void app.request({ type: "lre.settings.set", patch: { depth: { background: { on: next } } } }).then((result) => {
+          if (result) setOn(result.settings.depth.background.on);
+          setBusy(false);
+        });
+      }}
+    />
+  );
+}
+
 export function DepthSection(props: GmSectionProps) {
   const [tab, setTab] = useState<DepthTab>("notebook");
   // The draft a link asked to open, a fresh object each ask, so asking again for one closed since opens it again.
@@ -43,6 +75,7 @@ export function DepthSection(props: GmSectionProps) {
   });
   return (
     <div class="lre-stack lre-depth" data-lre-depth-section={tab}>
+      <BackgroundPause />
       <Tabs<DepthTab>
         label="Depth"
         panelId={panelId}

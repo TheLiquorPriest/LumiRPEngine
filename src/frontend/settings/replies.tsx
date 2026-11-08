@@ -174,7 +174,7 @@ export function SwipesPage(props: { value: "rerun" | "renarrate"; ask: boolean; 
               onChange={(swipeDefault) => props.patch({ swipeDefault })}
             />
           </SettingRow>
-          <SettingRow id="swipe-ask" label="Ask what should change on each swipe" bare changed={props.ask !== d.swipeAsk} help={props.ask ? "Each swipe first asks what should change, in a word or two, before its reply starts; leave it empty and the swipe goes ahead as it is. Only the narrator reads it, for that telling alone." : "A swipe starts its reply at once. The Swipe as… chip still takes a word on what should change."} reset={{ label: `Reset asking on each swipe to its default, ${d.swipeAsk ? "on" : "off"}`, to: d.swipeAsk ? "on" : "off", onClick: () => props.patch({ swipeAsk: null }) }} busy={props.busy}>
+          <SettingRow id="swipe-ask" label="Ask what should change on each swipe" bare changed={props.ask !== d.swipeAsk} help={props.ask ? "Each swipe first asks what should change, in a word or two, before its reply starts; leave it empty and the swipe goes ahead as it is. Only the narrator reads it, for that telling alone. A depth chat's swipe on the loopback doesn't ask: use the Swipe as… chip there." : "A swipe starts its reply at once. The Swipe as… chip still takes a word on what should change."} reset={{ label: `Reset asking on each swipe to its default, ${d.swipeAsk ? "on" : "off"}`, to: d.swipeAsk ? "on" : "off", onClick: () => props.patch({ swipeAsk: null }) }} busy={props.busy}>
             <HostSwitch label="Ask what should change on each swipe" checked={props.ask} disabled={props.busy} onChange={(swipeAsk) => props.patch({ swipeAsk })} />
           </SettingRow>
         </div>

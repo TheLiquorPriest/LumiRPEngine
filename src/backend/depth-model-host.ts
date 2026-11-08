@@ -27,7 +27,22 @@ import type { ModelPort, PortUsage } from "./depth/port";
 import { maxTokensLimit, requestRefused, TRANSIENT_RETRIES, transientFailure } from "./steps";
 import { tokensOf } from "./book";
 import { daySpendOf, type DaySpend } from "./depth/budget";
-import { connectionPlace, type GateLane } from "./agents/provider";
+import { connectionPlace, minuteRoom, minuteWindowOf, ownBreakpoints, SYSTEM_CLOCK, type AccountsClock, type GateLane } from "./agents/provider";
+import type { HostConnectionProfile, QuietMessage } from "./host";
+
+/**
+ * A depth call's messages as the host takes them: on a connection whose provider takes explicit
+ * cache breakpoints with one left to spend after its own, the leading system message (the role's
+ * stable instructions, the author's or a character's) carries one, so the next call of that role
+ * reads it from the cache (§6.6). Everywhere else, plain texts.
+ */
+export function cachedMessages(messages: readonly { role: QuietMessage["role"]; content: string }[], cache: HostConnectionProfile["cache"] | undefined): QuietMessage[] {
+  const out: QuietMessage[] = messages.map((m) => ({ role: m.role, content: m.content }));
+  const first = out[0];
+  if (!cache || cache.limit - ownBreakpoints(cache, 0) < 1 || !first || first.role !== "system" || first.content === "" || out.length < 2) return out;
+  out[0] = { ...first, parts: [{ type: "text", text: first.content, cache: true }] };
+  return out;
+}
 
 /** The first wait before a transient failure is asked again; it doubles each time. */
 const RETRY_WAIT_MS = 2000;
@@ -75,6 +90,9 @@ function usageOf(r: QuietResult, promptChars: number): PortUsage {
  * it gave them (`stop_details`' explanation and category), and it isn't asked again.
  */
 export class ProviderRefusal extends Error {
+  /** What the refused call spent, and where it ran: the turn's report counts it (`scene/reporting.ts`). */
+  usage?: PortUsage;
+  call?: { connection: string; model: string };
   constructor(
     readonly role: string,
     readonly category: string | null,
@@ -119,6 +137,8 @@ export interface DepthPortOptions {
   lane?: GateLane;
   /** Where the rooms providers stated are kept: the process's by default. */
   rooms?: LearnedRooms;
+  /** The per-minute throttle's clock: the system's by default (tests pass their own). */
+  clock?: AccountsClock;
 }
 
 /**
@@ -134,12 +154,14 @@ export interface DepthPortOptions {
  * a place in its connection's line (`o.lane`) while it runs; one that gives its place up to a
  * turn's call counts its prompt as spent, is logged, and waits in line again. An answer whose
  * finish reason is `refusal` fails as the provider's refusal, in its own words (`ProviderRefusal`),
- * its tokens counted, and isn't asked again.
+ * its tokens counted, and isn't asked again. The call's stable instructions carry a cache breakpoint
+ * where its connection takes one (`cachedMessages`).
  */
 export function depthPort(host: Pick<HostPort, "models" | "log" | "storage"> & Partial<Pick<HostPort, "connections">>, settings: (userId: UserId) => Promise<Readonly<UserSettings>>, userId: UserId, o: DepthPortOptions = {}): ModelPort {
   const day = o.day === undefined ? daySpendOf(host) : o.day;
   const lane = o.lane ?? "background";
   const rooms = o.rooms ?? LEARNED_ROOMS;
+  const clock = o.clock ?? SYSTEM_CLOCK;
   return async (role, messages, opts = {}) => {
     const s = await settings(userId);
     const call = depthCall(s, role);
@@ -147,6 +169,7 @@ export function depthPort(host: Pick<HostPort, "models" | "log" | "storage"> & P
     const promptChars = messages.reduce((n, m) => n + m.content.length, 0);
     // The default connection keeps its line under its own id, as agent turns' calls on it do.
     const connection = call.connectionId ?? (await host.connections?.active(userId).catch(() => null))?.id ?? "";
+    const cache = (await host.connections?.profile?.(call.connectionId ?? null, userId).catch(() => null))?.cache;
     const room = `${connection}\n${call.model ?? ""}`;
     const asked = opts.maxTokens ?? call.maxTokens;
     const learned = rooms.get(room);
@@ -162,11 +185,16 @@ export function depthPort(host: Pick<HostPort, "models" | "log" | "storage"> & P
       const giving = new AbortController();
       let release = (): void => undefined;
       let pause = 0;
+      let sending = false;
       try {
         release = await connectionPlace(host, userId, connection, s.agents.throttles, signal, s.agents.callsAtOnce, lane === "foreground" ? {} : { lane, ...(lane === "background" ? { background: s.depth.background.atOnce } : {}), giveWay: () => giving.abort(new Error("it gave its place on its connection to a turn's call")) });
+        // The connection's per-minute throttle (Settings → Agents → Throttles), shared with agent turns' calls, the foreground first as room frees.
+        const throttle = s.agents.throttles.find((t) => t.id === connection);
+        const entry = await minuteRoom(minuteWindowOf(host, userId), connection, Math.ceil(promptChars / 3.2) + maxTokens, throttle, AbortSignal.any([signal, giving.signal]), clock, lane);
+        sending = true;
         const r = await host.models.quiet(
           {
-            messages: messages.map((m) => ({ role: m.role, content: m.content })),
+            messages: cachedMessages(messages, cache),
             maxTokens,
             json: opts.json ?? false,
             connectionId: call.connectionId,
@@ -180,16 +208,23 @@ export function depthPort(host: Pick<HostPort, "models" | "log" | "storage"> & P
           AbortSignal.any([signal, giving.signal]),
         );
         const answered = usageOf(r, promptChars);
+        entry.tokens = answered.tokensIn + answered.tokensOut;
         day?.add(userId, answered.tokensIn + answered.tokensOut);
         const refused = refusalOf(role, r);
-        if (refused) throw refused;
+        if (refused) {
+          // What it spent goes with it, so the turn's report counts the refused call too (review-last).
+          refused.usage = answered;
+          refused.call = { connection: call.connectionId ?? "", model: r.model ?? call.model ?? "" };
+          throw refused;
+        }
         const usage = gaveWay > 0 ? { ...answered, tokensIn: answered.tokensIn + gaveWay } : answered;
         const requestId = requestIdOf(r.usage);
         return { text: r.content, ...(r.reasoning ? { reasoning: r.reasoning } : {}), usage, ...(r.finishReason ? { finish: r.finishReason } : {}), call: { connection: call.connectionId ?? "", model: r.model ?? call.model ?? "", ...(requestId ? { requestId } : {}) }, ...(capped ? { capped } : {}), room: maxTokens };
       } catch (error) {
         if (error instanceof ProviderRefusal) throw error;
         if (giving.signal.aborted && !signal.aborted) {
-          const sent = Math.ceil(promptChars / 3.2);
+          // One that gave its place up before it was sent spent nothing.
+          const sent = sending ? Math.ceil(promptChars / 3.2) : 0;
           gaveWay += sent;
           day?.add(userId, sent);
           host.log("info", `[LumiRPEngine] depth ${role} call gave its place on its connection to a turn's call; it waits in line again, its prompt (about ${sent} tokens) counted as spent`, userId);

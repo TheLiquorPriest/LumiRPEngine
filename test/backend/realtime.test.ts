@@ -433,6 +433,18 @@ describe("one line of real-time dialogue", () => {
     expect(said.exposure.find((x) => x.who === "dev")?.channel).toBe("hearing");
   });
 
+  test("words said down the line reach the player character by hearing, whole, his exact words verbatim; the watch's \"why\" is its account in the thinking block (M-3, M-15)", async () => {
+    const words = { say: "Ring Ray now. Two bottles and the caliper.", to: ["sam"], take: "He'll manage.", now: "Busy." };
+    const { reasoning: _, ...watch } = THROUGH;
+    const run = await line({ watch: { ...watch, why: "He can answer this down the line." }, play: words, apart: true });
+    if (run.outcome.kind !== "exchange") throw new Error(`a ${run.outcome.kind}`);
+    const [, answered] = beatsIn(run.outcome.events) as [Beat, Beat];
+    expect(answered.exposure.find((x) => x.who === POV)).toMatchObject({ who: POV, channel: "hearing", reach: "whole" });
+    expect(answered.exposure.some((x) => x.who === POV && x.channel === "sight")).toBe(false);
+    expect(run.moments[0]?.beats.find((b) => b.beat.id === answered.id)?.quotes).toBe("Ring Ray now. Two bottles and the caliper.");
+    expect(run.lines).toContain("He can answer this down the line.");
+  });
+
   test("an act the player character sees only in part gets his point of view before the narrator renders it; an account unreadable twice takes the line into a scene, writing nothing", async () => {
     const did = { do: "Dev turns the March ledger face down.", take: "Not that page.", now: "Wary." };
     const run = await line({ watch: THROUGH, play: did, exposure: [{ answer: [{ who: "sam", channel: "sight", reach: "partial" }], outcome: [] }], pov: { povs: { sam: "Dev's hand moves on the desk; a book closes." } } });

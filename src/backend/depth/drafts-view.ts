@@ -58,7 +58,7 @@ async function thinkingOf(rt: Pick<OffscreenRt, "blobs">, userId: UserId, e: Liv
 }
 
 /** One draft as the view shows it. */
-async function draftOf(rt: Pick<OffscreenRt, "blobs" | "registry">, userId: UserId, at: BasisRead, order: ReadonlyMap<MessageId, number>, live: readonly LiveEvent[], d: DraftOn): Promise<DepthDraft> {
+async function draftOf(rt: Pick<OffscreenRt, "blobs" | "registry">, userId: UserId, at: BasisRead, order: ReadonlyMap<MessageId, number>, live: readonly LiveEvent[], d: DraftOn, press?: DepthDraft["press"]): Promise<DepthDraft> {
   const { world, state, story } = at;
   const cal = calendarOf(world);
   const name = (id: EntityId): string => own(state.entities, id)?.name ?? id;
@@ -104,7 +104,24 @@ async function draftOf(rt: Pick<OffscreenRt, "blobs" | "registry">, userId: User
     pins: d.settle ? d.settle.data.pins.count : story.beats.filter((p) => p.beat.at >= draft.at).length,
     ...(d.settle ? { settle: { ...placeOf(d.settle.from), why: d.settle.data.why, reasoning: await thinkingOf(rt, userId, settled), beats: d.settle.data.beats.length } } : {}),
     ...(d.drop ? { drop: { ...placeOf(d.drop.from), why: d.drop.data.why, reasoning: await thinkingOf(rt, userId, dropped) } } : {}),
+    ...(press ? { press } : {}),
   };
+}
+
+/** The player's Settle now and Re-draft presses, by user, chat and draft: what each came to, kept while the host runs for the draft's page (the newest `PRESSES_KEPT`). */
+const presses = new Map<string, NonNullable<DepthDraft["press"]>>();
+const PRESSES_KEPT = 500;
+const pressKey = (chatId: ChatId, userId: UserId, draft: string): string => `${userId}\u0000${chatId}\u0000${draft}`;
+
+/** Keeps what a Settle now or Re-draft on draft `draft` came to, for its page in the Drafts view. */
+export function notePress(chatId: ChatId, userId: UserId, draft: string, press: NonNullable<DepthDraft["press"]>): void {
+  const key = pressKey(chatId, userId, draft);
+  presses.delete(key);
+  presses.set(key, { op: press.op, state: press.state, lines: [...press.lines] });
+  for (const old of presses.keys()) {
+    if (presses.size <= PRESSES_KEPT) break;
+    presses.delete(old);
+  }
 }
 
 /** GM → Depth → Drafts: every draft on the chat's chain, newest first. */
@@ -116,7 +133,7 @@ export async function draftsView(rt: DraftsRt, chatId: ChatId, userId: UserId): 
   const drafts: DepthDraft[] = [];
   // Each message by the number the chat shows it with (`chainNumbers`).
   const order = await chainNumbers(rt.host, chatId, userId, (await rt.ledger.chainBases(chatId, userId)).map((b) => b.message));
-  for (const d of draftsOn(live)) drafts.push(await draftOf(rt, userId, head.at, order, live, d));
+  for (const d of draftsOn(live)) drafts.push(await draftOf(rt, userId, head.at, order, live, d, presses.get(pressKey(chatId, userId, d.draft.id))));
   return { on: on || drafts.length > 0, drafts: drafts.reverse() };
 }
 

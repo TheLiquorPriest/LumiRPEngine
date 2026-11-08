@@ -87,22 +87,35 @@ Press the connection's **Test**: the model list shows `lre-narrator` when the ke
 
 Other requests on the loopback connection (summaries, council planning, other extensions' calls) pass through to your Narrator connection as they are, tools included. A world chat's reply on it always runs as a turn. If LumiRPEngine can't tie a reply to its turn, because it never heard the reply start, it stops the reply and says so rather than let it through untracked. Generating again plays it.
 
+Once a world chat's tools have answered, the narrator's next call is offered no tools, so it writes the reply instead of calling tools again until Lumiverse's three rounds run out. A dry run (Lumiverse's prompt preview) of a world chat on the loopback gets no turn: LumiRPEngine keeps the narrator prompt it would send instead (on a depth chat, today's narrator's short context), without the sections a real turn's engine run writes, and logs its size. On a depth chat, GM → Depth → Turn shows it, message by message with their roles, in a folded **Dry run** panel. The tagger never waits on a chat's queue, so a long bootstrap can't hold a reply's tagging past Lumiverse's 30-second interceptor limit.
+
+A depth chat's reply is different: its scene's calls are the author's, the characters' and the narrator's own, and the request's tools reach none of them. The thinking block says so whenever the request offered some ([Depth](DEPTH.md), Known limits).
+
+**The request's size.** On a chat on depth the tagger takes every chat message before the chat's cutoff (GM → This chat → Depth → History: the latest 40 messages by default, or every message from one you name on) out of the prompt before it leaves, so the request carries your preset's own blocks and the latest messages only, and stays small whatever the loopback connection's context size. The author and the GM search and quote the rest of the chat themselves when a turn needs it. A world chat that isn't on depth still sends everything Lumiverse assembles: if the relay refuses one of its requests as over just under 4 MiB (`too_large`), lower the loopback connection's context size.
+
+**If Lumiverse stopped passing the tag.** The turn's tag (`lre_turn`) reaches the relay as an extra parameter of the request. Should a later Lumiverse stop passing extra parameters through, the fallback is a marker message the tagger adds to the prompt and the relay takes out again. That fallback is described here and not built: Lumiverse passes the parameter today.
+
 ## Settings → Loopback
 
 From top to bottom:
 
+- **No relay is running**: when none of yours is, the page opens with this warning and the line that starts one, with **Copy**.
 - **Start the relay**: the two lines above, each with **Copy**.
 - **Your loopback key**: its fingerprint and when it was made; **Mint a key** or **Rotate**.
 - **Your relays** (**Refresh** reloads): each relay with when it was last heard, where it listens, how it runs (system service, user service, foreground), its build, the local-inference scheduler, and its Lumiverse session. Badges: **Running**, **Update**, **Sign-in needed**, **Shared**. **Sign-in needed** shows the `loopback login` line with **Copy**; **Update** shows the update-and-restart line. Every line runs as the account Lumiverse runs as, from `/`, and runs LumiRPEngine's own install or a system service's copies of it, never a path the relay reports. A system service's lines run as root only system programs: `install` writing the new files that account read over the copies in `/var/lib/lumirpengine/`, and `systemctl`. A relay missing from the scheduler's exclusions gets **Fix**: Lumiverse applies it within 5 seconds, so wait that long before generating. **Forget** removes your own relay from LumiRPEngine (stop it on its machine with `loopback down`).
+  Each row also says when the relay last carried a request since LumiRPEngine started ("Last request 2 min ago"), beside when it was last heard.
 - **The loopback connection**: which of your connections is the loopback, and **Make the loopback connection**, the settings above with **Copy** on each.
+  **Test** checks, in one line, that a relay of yours is running, your loopback key is set, one of your connections is the loopback and the narrator writes on a real model, or says which of these fails. Under it a standing note: opting a chat into depth pins it to the loopback connection, and Lumiverse's "always use the active connection" governs Edit and Send only, so the pin holds for replies, swipes, Continue and Impersonate.
 - **The shared relay**: the operator's **Allow a shared relay** switch; everyone else sees whether it's allowed.
 - **How replies travel**: every reply goes through the relay. Where Lumiverse has message sessions (an in-process route for new replies), the page says why they aren't used yet: Lumiverse can't yet complete a reply an extension writes passage by passage.
+- **Lumiverse in Docker** (folded): the two forms in [Docker](#docker), each with **Copy**.
 
 ## Keep it running
 
 - `lumirpengine loopback status [--name <name>]`: its config, its service, whether it reaches LumiRPEngine, and until when its Lumiverse session holds. For a system service, run as its account, it gives `systemctl status lumirpengine-loopback-<name>.service` for its unit.
 - **Sign-in.** The relay renews its session once a day. If it ends anyway (you signed it out, or the server was off for a week), Settings → Loopback says **Sign-in needed**, and a chat's reply says the same. Run the line the page shows. For a user service it is `lumirpengine loopback login --name <name>`, run as the account the relay runs as, which restarts the service. For a system service it runs the service's copies as that account, which writes the relay's config in place, and root then restarts the unit: `sudo -u <account> /var/lib/lumirpengine/bun --cwd / /var/lib/lumirpengine/lumirpengine.js loopback login --config /etc/lumirpengine/loopback-<name>.json && sudo systemctl restart lumirpengine-loopback-<name>.service`. A relay running in the foreground takes the new sign-in when it next connects.
 - **Updates.** After LumiRPEngine updates, Settings → Loopback shows **Update** when the relay's copy is from another build. For a user service the line is the start line again, run as the same account: it updates the copy and restarts it. For a system service, run in sh, bash or zsh, the account reads the new `lumirpengine.js` and its kit into a directory of your own that `mktemp` makes (`sudo -u <account> cat … >"$t"/…`). Only when both reads succeeded and neither is empty (`test -s`) does root write them over the service's copies in `/var/lib/lumirpengine/` (`sudo install -m 0644 "$t"/… …`), and only once both are written does it restart the unit (`sudo systemctl restart`), so a read that fails (`sudo -u` refused, LumiRPEngine mid-update) leaves the copies as they were. Root reads none of the account's files itself, only the ones in your directory, so it never follows a link the account made to a file only root may read, and neither line has root run the copies: the unit runs them as the account.
+  After an update, depth can still be turned on with a relay one build behind while it speaks the same loopback API and has been heard from since the update; the **Update** line stays until you run it. Running `loopback up` again over a running relay first waits, saying so, up to 5 minutes for the relay's calls under way to finish, then restarts it; a call still open after that is ended by the restart.
 - `lumirpengine loopback down --name <name>` stops and removes a user service. For a system service, run it as its account (never as root from `/var/lib/lumirpengine`): it prints the line root runs, with systemd's own programs, `sudo systemctl disable --now lumirpengine-loopback-<name>.service && sudo rm /etc/systemd/system/lumirpengine-loopback-<name>.service && sudo systemctl daemon-reload` (see [A system service instead](#1-start-the-relay)). Its config stays until you delete it.
 
 ## What you see in a chat
@@ -111,7 +124,7 @@ The thinking block streams the turn: the author's thinking, each beat as it is d
 
 **Stop** works as usual: the turn keeps the beats whose prose streamed, whichever reached LumiRPEngine first, the relay's word or Lumiverse's Stop. A send stopped before any text leaves no blank reply: LumiRPEngine deletes the empty message Lumiverse staged, and generating again is a new reply. A swipe stopped before any text leaves no blank swipe.
 
-**Swipes and Regenerate** follow your Settings → Swipes choices (Re-narrate or Re-run, Ask, the one-shot chip), and the thinking block says which one ran. Regenerate in the input area, which deletes the reply first, plays as a Re-run; on a chat on depth it redoes the deleted reply as your swipe setting says, where the new reply answers the same message, unchanged (DEPTH.md).
+**Swipes and Regenerate** follow your Settings → Swipes choices (Re-narrate or Re-run, the one-shot chip), and the thinking block says which one ran. **Ask what should change on each swipe** doesn't open on a loopback turn: that field opens only when LumiRPEngine stops a swipe and starts it again, which the loopback never does, so a plain swipe goes ahead as it is; **Swipe as…** under the reply takes a word for it. Regenerate in the input area, which deletes the reply first, plays as a Re-run; on a chat on depth it redoes the deleted reply as your swipe setting says, where the new reply answers the same message, unchanged (DEPTH.md).
 
 A failure reads in the chat as the provider's error, in words:
 
@@ -121,6 +134,8 @@ A failure reads in the chat as the provider's error, in words:
 - "LumiRPEngine stopped with an error …, Lumiverse doesn't restart it by itself": within 10 seconds of a crash. Restart it in the Extensions tab.
 - "LumiRPEngine restarted during this reply, so it stopped here …": within about 15 seconds.
 - "LumiRPEngine stopped answering the loopback during this reply …": after two minutes of silence.
+
+When a world chat generates on the loopback while Settings → Loopback's readiness check fails (no relay running, or one gone quiet, or no key), your message gets the flag **The loopback relay isn't running**, with the reason, the page's line and a **Settings → Loopback** button. It goes away at your next send.
 
 Press **Retry** or swipe.
 
@@ -170,7 +185,7 @@ The config may hold `"tuning"` overrides, in milliseconds unless named:
 - `silentMs` (45000): how long a question may go unanswered before LumiRPEngine counts as silent.
 - `crashMs` (10000): after Lumiverse reports an error in LumiRPEngine, how long silence makes it a crash.
 - `resendMs` (3000)
-- `maxBodyBytes`: just under 4 MiB, Lumiverse's socket frame limit.
+- `maxBodyBytes`: just under 4 MiB, Lumiverse's socket frame limit. A body over it is refused with 413 `too_large`, also when it comes without a `Content-Length`: the relay stops reading at the cap.
 - `passthroughPerMinute` (20, shared mode): LumiRPEngine holds each user to 20 anyway, so this can only lower it.
 
 **What it answers.** Only requests addressed to it, so no DNS rebinding: the `Host` must name its own address and port. On a loopback address that can be any of `127.0.0.1`, `localhost` and `[::1]`; on another address (`--listen 192.168.1.20`, say), that address itself. A relay on a wildcard address (`--listen 0.0.0.0` or `::`) is reached by whatever names its machine has, so it checks no `Host`. There only the loopback key every call needs, and the `Origin` refusal, stand in the way. It never answers a browser: a request with an `Origin` header is refused. `GET /healthz` says, without a key, whether its link to LumiRPEngine is `up`, or why not: `down`, `silent`, `stopped`, `crashed` or `refused`.

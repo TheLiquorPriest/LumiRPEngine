@@ -116,6 +116,31 @@ test("up names the account by its username, not the register reply's user id", a
   expect(m.words()).not.toContain(USER_ID);
 });
 
+test("up run again waits for the running relay's calls under way before restarting it", async () => {
+  const m = machine({ uid: 1000, bun: "/home/u/.bun/bin/bun", self: "/srv/lre/dist/lumirpengine.js", owners: { "/home/u/.bun/bin/bun": 1000, "/srv/lre/dist/lumirpengine.js": 1000 } });
+  expect(await up(m.io, m.fake.base)).toBe(0);
+  const order: string[] = [];
+  const underWay = [2, 1, 0];
+  const http = m.io.http;
+  m.io.http = (req) => {
+    if (!req.url.endsWith("/healthz")) return http(req);
+    const calls = underWay.shift() ?? 0;
+    order.push(`healthz ${calls}`);
+    return Promise.resolve({ status: 200, header: () => null, text: JSON.stringify({ ok: true, link: "up", calls, mode: "user" }) });
+  };
+  const lio = m.io.loopback;
+  if (lio === undefined) throw new Error("no loopback io");
+  lio.sleep = async () => void order.push("sleep");
+  const run = lio.run;
+  lio.run = (command, args, env) => {
+    if (command === "systemctl" && args.includes("restart")) order.push("restart");
+    return run(command, args, env);
+  };
+  expect(await up(m.io, m.fake.base)).toBe(0);
+  expect(order).toEqual(["healthz 2", "sleep", "healthz 1", "sleep", "healthz 0", "restart"]);
+  expect(m.words()).toContain("The running relay has 2 call(s) under way: waiting up to 5 minutes for them to finish before restarting it.");
+});
+
 describe("as root", () => {
   test("up refuses to run from files another account can change, before it signs in, and says how to run it as that account", async () => {
     const lumi = 1001;

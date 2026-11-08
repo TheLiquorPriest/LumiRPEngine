@@ -59,17 +59,40 @@ export function mbText(bytes: number): string {
   return `${Math.round(bytes / 1_048_576).toLocaleString("en-US")} MB`;
 }
 
-/** The run's cap, set before it starts or resumes: none, or tokens or money and how much. */
-export function CapControl(props: { cap: BootstrapCap | "none"; busy: boolean; onCap(cap: BootstrapCap | "none"): void }) {
+/** Whether a cap of `cap` would stop the run before what `estimate` projects is done: the projection passes it. */
+export function capPassed(cap: BootstrapCap | "none", estimate: BootstrapEstimate | null): boolean {
+  if (cap === "none" || !estimate) return false;
+  if (cap.unit === "tokens") return estimate.total.tokensIn + estimate.total.tokensOut > cap.value;
+  return estimate.total.cost !== null && estimate.total.cost > cap.value;
+}
+
+/**
+ * The run's cap, set before it starts or resumes: none, or tokens or money and how much. Money is
+ * offered only where the estimate is priced (every stage's connection reports a price): a money cap
+ * can't bind otherwise. It warns when the estimate passes the cap.
+ */
+export function CapControl(props: { cap: BootstrapCap | "none"; estimate: BootstrapEstimate | null; busy: boolean; onCap(cap: BootstrapCap | "none"): void }) {
   const cap = props.cap === "none" ? null : props.cap;
+  const priced = props.estimate !== null && props.estimate.total.cost !== null;
+  const units: { value: "tokens" | "money"; label: string }[] = priced || cap?.unit === "money" ? [{ value: "tokens", label: "Tokens" }, { value: "money", label: "Money" }] : [{ value: "tokens", label: "Tokens" }];
   return (
     <div class="lre-stack lre-depth-cap" data-lre-depth-cap>
       <HostSwitch label="No cap" checked={cap === null} disabled={props.busy} onChange={(none) => props.onCap(none ? "none" : { unit: "tokens", value: 20_000_000 })} />
       {cap ? (
         <>
-          <Seg<"tokens" | "money"> label="Cap in" value={cap.unit} options={[{ value: "tokens", label: "Tokens" }, { value: "money", label: "Money" }]} disabled={props.busy} onChange={(unit) => props.onCap({ unit, value: unit === cap.unit ? cap.value : unit === "money" ? 20 : 20_000_000 })} />
+          <Seg<"tokens" | "money"> label="Cap in" value={cap.unit} options={units} disabled={props.busy} onChange={(unit) => props.onCap({ unit, value: unit === cap.unit ? cap.value : unit === "money" ? 20 : 20_000_000 })} />
           <NumberStepper label={cap.unit === "money" ? "Cap (in your connection's money)" : "Cap (tokens)"} value={cap.value} min={1} step={cap.unit === "money" ? 5 : 1_000_000} integer={cap.unit === "tokens"} disabled={props.busy} onChange={(value) => props.onCap({ unit: cap.unit, value })} />
+          {!priced ? (
+            <p class="lre-small lre-muted" data-lre-depth-cap-unpriced="">
+              {cap.unit === "money" ? "A money cap can't bind here: a connection the run uses reports no price, so the run stops at its first such call. Cap it in tokens." : "The cap is in tokens: a connection the run uses reports no price, so a money cap couldn't bind."}
+            </p>
+          ) : null}
         </>
+      ) : null}
+      {capPassed(props.cap, props.estimate) ? (
+        <Banner tone="warn" title="The estimate passes the cap">
+          {`The run would pause at its cap (${capText(props.cap)}) before it is done. Raise the cap, give fewer characters a mind, or pick cheaper models in Settings → Depth.`}
+        </Banner>
       ) : null}
     </div>
   );
@@ -149,7 +172,15 @@ function SpotItemBody(props: { item: SpotItem; onJump(messageId: MessageId): voi
         </div>
         <div class="lre-depth-spot-source">
           <span class="lre-small lre-muted">It cites</span>
-          <p>{item.cites.length > 0 ? item.cites.join(", ") : "Nothing"}</p>
+          {item.cites.length > 0 ? (
+            <ul class="lre-small">
+              {item.cites.map((c) => (
+                <li key={c.beat}>{c.what || c.beat}</li>
+              ))}
+            </ul>
+          ) : (
+            <p>Nothing</p>
+          )}
         </div>
       </div>
     );
@@ -203,6 +234,16 @@ export function SpotCard(props: { card: SpotCheckCard; notes: Readonly<Record<st
               </div>
             );
           })}
+          {card.uncertain && card.uncertain.length > 0 ? (
+            <div class="lre-stack" data-lre-depth-spot-uncertain={card.uncertain.length}>
+              <Badge tone="warn">Flagged as uncertain, naming no beat</Badge>
+              <ul class="lre-small">
+                {card.uncertain.map((u, i) => (
+                  <li key={i}>{u}</li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
           {card.misread && card.misread.length > 0 ? (
             <Disclosure summary={`Answers the parser didn't keep whole (${card.misread.length})`}>
               <div class="lre-stack" data-lre-depth-spot-misread={card.misread.length}>
@@ -238,8 +279,8 @@ export interface BootstrapControls {
   onJump(messageId: MessageId): void;
 }
 
-/** Said on every depth chat's Depth and Bootstrap views: Lumiverse's chat export doesn't carry LRE's depth layer, and the bootstrap can't rebuild what live turns made. */
-export const EXPORT_NOTE = "An export of this chat doesn't carry its depth (minds, beats, notebook). Keep the original chat.";
+/** Said on every depth chat's Depth and Bootstrap views: an export carries the depth layer in the chat's metadata only while it fits (`layer-carry.ts`), and the bootstrap can't rebuild what live turns made. */
+export const EXPORT_NOTE = "An export of this chat carries its depth (minds, beats, notebook) as it stood at the end of the last turn, while that fits in 1 MB compressed. Past that, an imported copy starts without it: keep the original chat.";
 
 /** GM → Depth → Bootstrap's body, hook-free. */
 export function BootstrapBody(props: { view: BootstrapView; c: BootstrapControls }) {
@@ -278,7 +319,7 @@ export function BootstrapBody(props: { view: BootstrapView; c: BootstrapControls
       ) : null}
       <Section title="The run">
         <div class="lre-stack">
-          {startable || resumable ? <CapControl cap={c.cap} busy={c.busy} onCap={c.onCap} /> : <p class="lre-small lre-muted">{`Cap: ${capText(view.cap)}`}</p>}
+          {startable || resumable || view.status === "done" ? <CapControl cap={c.cap} estimate={view.remaining} busy={c.busy} onCap={c.onCap} /> : <p class="lre-small lre-muted">{`Cap: ${capText(view.cap)}`}</p>}
           <div class="lre-inline">
             {startable ? (
               <Button variant="primary" icon="play" busy={c.busy} disabled={view.status === "idle"} onClick={c.onStart}>
@@ -293,6 +334,11 @@ export function BootstrapBody(props: { view: BootstrapView; c: BootstrapControls
             {view.status === "running" ? (
               <Button icon="pause" busy={c.busy} onClick={c.onPause}>
                 Pause
+              </Button>
+            ) : null}
+            {view.status === "done" ? (
+              <Button icon="refresh" busy={c.busy} onClick={c.onResume}>
+                Run again
               </Button>
             ) : null}
             {resumable ? (
@@ -322,7 +368,19 @@ export function BootstrapBody(props: { view: BootstrapView; c: BootstrapControls
         <Section title="Chapters" flush>
           <ActionRows label="Chapters">
             {view.chapters.map((ch) => (
-              <ActionRow key={ch.n} title={`Chapter ${ch.n + 1}`} subtitle={`Chunks ${ch.chunks[0] + 1}–${ch.chunks[1] + 1}${ch.ended ? "" : " · still open"}`} value={ch.spot === "waiting" ? <Badge tone="accent">Spot check waiting</Badge> : ch.spot === "reviewed" ? <Badge tone="pos">Reviewed</Badge> : undefined} />
+              <ActionRow
+                key={ch.n}
+                title={`Chapter ${ch.n + 1}`}
+                subtitle={`Chunks ${ch.chunks[0] + 1}–${ch.chunks[1] + 1}${ch.ended ? "" : " · still open"}`}
+                value={ch.spot === "waiting" ? <Badge tone="accent">Spot check waiting</Badge> : ch.spot === "reviewed" ? <Badge tone="pos">Reviewed</Badge> : undefined}
+                actions={
+                  ch.ended && view.status !== "running" && view.status !== "pausing" ? (
+                    <Button size="sm" variant="secondary" busy={c.busy} onClick={() => c.onRedo(ch.n)}>
+                      {`Redo from chapter ${ch.n + 1}`}
+                    </Button>
+                  ) : undefined
+                }
+              />
             ))}
           </ActionRows>
         </Section>

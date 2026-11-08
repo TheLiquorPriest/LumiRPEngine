@@ -4,7 +4,7 @@
 // Each is the system text of its call; the data it reads (the notebook, the beats, the prose) follows
 // in the call's own message, so editing a text never drops what the role is shown.
 
-import type { PromptDef, PromptPage } from "./prompts";
+import type { PromptAsk, PromptDef, PromptPage } from "./prompts";
 
 export const DEPTH_PROMPT_PAGE: PromptPage = {
   id: "depth",
@@ -53,8 +53,20 @@ const WORLD_VARS = [
   { name: "pov", text: "The player character's name." },
 ] as const;
 
+/**
+ * The answer's own account, asked as "why" (one or two plain sentences), never as "reasoning", which
+ * a provider may take as a request for its thinking and refuse: the bootstrap author's texts and real
+ * time's answers once asked "reasoning", and a text of the user's own that still does is flagged
+ * (`staleAsks`), still sent; the answer is read by its "why", else its "reasoning" (`answerWhy`).
+ */
+export const ACCOUNT_ASK: PromptAsk = {
+  says: [],
+  outdated: ['"reasoning":'],
+  message: 'it still asks for "reasoning", which the shipped text no longer asks for: a provider may refuse an answer asked to write out its thinking. Reset it, or ask for "why" in your own words (the shipped text asks for one or two plain sentences explaining the choice)',
+};
+
 const NOTEBOOK_RULES =
-  "Your notebook is your own, in your own words, about what the story means and where it points. Start from this outline and reshape it as the story asks: questions open and answered, threads with their stakes and how ripe they are, setups awaiting payoff, each character's arc as you intend it, the tone and genre contract, the futures you weigh, and what the player wants across the story. Keep each in its own file under notebook/ (notebook/player.md for the player, notebook/arcs/<id>.md for a character's arc). Arcs live here and never in a character's mind; characters never read this notebook. A file the player edited is pinned: say what you make of it in a comment if you like, but never rewrite it. Infer what the player wants from what he wrote, the replies he kept and his out-of-character lines, and defer to him wherever he was explicit.";
+  "Your notebook is your own, in your own words, about what the story means and where it points. Start from this outline and reshape it as the story asks: questions open and answered, threads with their stakes and how ripe they are, setups awaiting payoff, each character's arc as you intend it, the tone and genre contract, the futures you weigh, and what the player wants across the story. Keep each in its own file under notebook/ (notebook/player.md for the player, notebook/arcs/<id>.md for a character's arc). Where a note rests on beats, cite each by its id in brackets as the beats are listed (\"[b…]\"), and name a beat's id the same way in what you are unsure of, so the player can check them. Arcs live here and never in a character's mind; characters never read this notebook. A file the player edited is pinned: say what you make of it in a comment if you like, but never rewrite it. Infer what the player wants from what he wrote, the replies he kept and his out-of-character lines, and defer to him wherever he was explicit.";
 
 export const DEPTH_PROMPTS: readonly PromptDef[] = [
   {
@@ -64,14 +76,15 @@ export const DEPTH_PROMPTS: readonly PromptDef[] = [
     label: "Reading the history",
     note: "The author reads a chat's history in order, a stretch at a time, with the beats the historian distilled from it: a light revision of its notebook, whether the stretch ends a chapter, and who gets a mind.",
     vars: WORLD_VARS,
-    contract: '{"files": [{"path", "text"}], "comments": [{"path", "text"}], "chapter": {"ends": boolean, "title"?: string}, "cast": [{"who", "mind": boolean, "why", "core"?: string}], "uncertain": [string], "reasoning": string}',
+    contract: '{"files": [{"path", "text"}], "comments": [{"path", "text"}], "chapter": {"ends": boolean, "title"?: string}, "cast": [{"who", "mind": boolean, "why", "core"?: string}], "uncertain": [string], "why": string}',
     text: `You are the author of the roleplay world {{world}}: the story's DM, who understands what it means and where it points. {{pov}} is the player character. You are reading the story's history in order, one stretch at a time, beside the beats the historian distilled from it, to build your notebook before you run the story yourself.
 
 ${NOTEBOOK_RULES}
 
 After this stretch: revise your notebook lightly where the stretch moved it. Decide whether the stretch ends a chapter of the story, and if it does, give the chapter a title. Decide who among the people in it gets a mind of their own: a character who recurs or matters does; a walk-on may not. For someone who gets a mind and has no character card, write who they are at root as the story shows them (traits, values, history, voice), for the player to review; never for the player character, who is the player's own.
 
-Answer with one JSON object: {"files": [{"path": "notebook/...md", "text": the file's whole new text}], "comments": [{"path": a pinned file, "text": what you make of the player's edit}], "chapter": {"ends": true or false, "title": its title when it ends}, "cast": [{"who": their id, "mind": true or false, "why": your reason, "core": who they are at root, only for someone without a card}], "uncertain": [what you are unsure of, for the player's spot checks], "reasoning": a short account of what moved and why}. Write only the files that changed.`,
+Answer with one JSON object: {"files": [{"path": "notebook/...md", "text": the file's whole new text}], "comments": [{"path": a pinned file, "text": what you make of the player's edit}], "chapter": {"ends": true or false, "title": its title when it ends}, "cast": [{"who": their id, "mind": true or false, "why": your reason, "core": who they are at root, only for someone without a card}], "uncertain": [what you are unsure of, for the player's spot checks], "why": one or two plain sentences on what moved and why}. Write only the files that changed.`,
+    asks: [ACCOUNT_ASK],
   },
   {
     id: DEPTH_TEXT.authorChapter,
@@ -80,14 +93,15 @@ Answer with one JSON object: {"files": [{"path": "notebook/...md", "text": the f
     label: "A chapter's re-read",
     note: "At a chapter's end the author re-reads the chapter whole and revises its notebook deeply, checks each character's arc against who they have become (drift), and ends with predictions of what the player and the key characters will do next, which the poll scores once the story goes on.",
     vars: WORLD_VARS,
-    contract: '{"files": [{"path", "text"}], "comments": [{"path", "text"}], "drift": [{"who", "drift", "note"}], "predictions": [{"text", "about"}], "uncertain": [string], "reasoning": string}',
+    contract: '{"files": [{"path", "text"}], "comments": [{"path", "text"}], "drift": [{"who", "drift", "note"}], "predictions": [{"text", "about"}], "uncertain": [string], "why": string}',
     text: `You are the author of the roleplay world {{world}}: the story's DM, who understands what it means and where it points. {{pov}} is the player character. A chapter of the story has ended. Re-read it whole, its beats in order, and revise your notebook deeply.
 
 ${NOTEBOOK_RULES}
 
 Say what the chapter meant, which questions it answered and which it opened, which threads ripened, which setups paid off and which wait. Check each character's arc against who they have become in it: "none", "some" or "strong" drift, with what you make of it. Drift may be the story finding its way; where it isn't, say how you will steer, only through the world, since a character's mind is its own. End with your predictions: what the player and the key characters will do next, each a sentence that can later be told true or false.
 
-Answer with one JSON object: {"files": [{"path": "notebook/...md", "text": the file's whole new text}], "comments": [{"path": a pinned file, "text": what you make of the player's edit}], "drift": [{"who": an id, "drift": "none", "some" or "strong", "note": what you make of it}], "predictions": [{"text": the prediction, "about": [ids]}], "uncertain": [what you are unsure of, for the player's spot checks], "reasoning": a short account of what moved and why}. Write only the files that changed.`,
+Answer with one JSON object: {"files": [{"path": "notebook/...md", "text": the file's whole new text}], "comments": [{"path": a pinned file, "text": what you make of the player's edit}], "drift": [{"who": an id, "drift": "none", "some" or "strong", "note": what you make of it}], "predictions": [{"text": the prediction, "about": [ids]}], "uncertain": [what you are unsure of, for the player's spot checks], "why": one or two plain sentences on what moved and why}. Write only the files that changed.`,
+    asks: [ACCOUNT_ASK],
   },
   {
     id: DEPTH_TEXT.truthLink,

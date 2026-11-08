@@ -266,6 +266,8 @@ export interface LoopbackModelCall {
   capped?: { asked: number; limit: number };
   /** The fields its stage's parse didn't keep as written, with the answer as the model wrote it (`shared/misread.ts`): on the turn inspector's record only, never in the finish chunk's usage. */
   misread?: CallMisread;
+  /** The model's own reasoning for this call, where its provider gave it (the turn inspector's "every call with its reasoning", PLAN:738): on the turn inspector's record only, never in the finish chunk's usage. */
+  reasoning?: string;
 }
 
 /** The call's usage: the sums over its model calls, and each of them. */
@@ -398,6 +400,8 @@ export interface LoopbackRelayView {
   registeredAt: number;
   /** When it last said hello or pinged since LumiRPEngine started; null when it hasn't. */
   seenAt: number | null;
+  /** When it last carried a reply request to LumiRPEngine (a world chat's turn or a passthrough) since LumiRPEngine started; null when it hasn't. */
+  requestAt: number | null;
   /** What it said of itself last (name, build, runtime, scheduler, session); null before its first hello. */
   report: RelayReport | null;
   /** Silent past twice its heartbeat, or its Lumiverse session is no longer valid: the page shows "sign-in needed" with `login`. */
@@ -416,6 +420,8 @@ export interface LoopbackPage {
   key: { set: boolean; print: string | null; at: number | null };
   /** The key just minted or rotated: shown once, never again. */
   minted?: string;
+  /** What Test found, as one line: whether a relay of yours is running, your key is set, a connection is the loopback and the narrator writes on a real model. */
+  test?: { ok: boolean; text: string };
   relays: LoopbackRelayView[];
   /**
    * The one line that starts a relay for this server, absolute paths filled in where the server knows
@@ -439,12 +445,15 @@ export interface LoopbackPage {
  * opt-in's gate, DEPTH-PLAN §3.3, §3.4): no relay of theirs to carry a reply (or the shared one, while
  * the operator allows it), none Running (each needs signing in again or an update), no loopback key,
  * or no connection that is the loopback; in that order, with the fix on that page. Null when one
- * relay is Running and the key and a loopback connection are there.
+ * relay is Running and the key and a loopback connection are there. A relay on an older build counts
+ * as Running once it has said hello to this LumiRPEngine since it started (`seenAt`) and stays heard
+ * from: the hello refuses a relay that speaks another loopback API, so it is compatible, and an
+ * update of LumiRPEngine doesn't stop depth until its relay is updated too (its update line stays).
  */
 export function loopbackUnready(page: Pick<LoopbackPage, "relays" | "shared" | "key" | "connections">): string | null {
   const relays = page.relays.filter((r) => r.mode !== "shared" || page.shared.enabled);
   if (relays.length === 0) return "No relay carries your replies yet: start one with the line in Settings → Loopback.";
-  if (!relays.some((r) => !r.signIn && !r.update)) {
+  if (!relays.some((r) => !r.signIn && (!r.update || r.seenAt !== null))) {
     const quiet = relays.filter((r) => r.signIn);
     return quiet.length > 0 ? `No relay of yours is running: ${quiet.map((r) => r.name).join(", ")} has gone quiet or its Lumiverse session ended; sign it in again with its line in Settings → Loopback.` : `No relay of yours is running this build: update ${relays.map((r) => r.name).join(", ")} with its line in Settings → Loopback.`;
   }

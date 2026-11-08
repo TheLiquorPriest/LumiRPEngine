@@ -9,7 +9,7 @@
 // `backend/depth/offscreen/author.ts`); only their descriptions are texts.
 
 import type { PromptDef } from "./prompts";
-import { AUTHOR, BEAT_SHAPE, DM_RULES, STAGING_SHAPE, VARS, WHY_ASK } from "./scene-prompts";
+import { AUTHOR, BEAT_SHAPE, DM_RULES, STAGING_SHAPE, VARS, WHY_ASK, WHY_OWN_ASK } from "./scene-prompts";
 
 /** The texts' ids (stored: never change once shipped). */
 export const OFFSCREEN_TEXT = {
@@ -19,7 +19,7 @@ export const OFFSCREEN_TEXT = {
   walkOn: "depth.author.walk_on",
 } as const;
 
-const SETTLE_BEATS = '"beats": [{"ref": a beat\'s ref, "keep": true or false, "what": its adjusted truth, "surface": what there was to sense, adjusted, "quotes": its words, adjusted}], "effects": [{"index": a world change\'s number, "keep": true or false}], "attempts": [{"who": an id, "attempt": what they try now}]';
+const SETTLE_BEATS = '"beats": [{"ref": a beat\'s ref, "keep": true or false, "what": its adjusted truth, "surface": what there was to sense, adjusted, "quotes": its words, adjusted, "deed": what its actors did and said, adjusted, plainly, as they did it (null when no one acts in it)}], "effects": [{"index": a world change\'s number, "keep": true or false}], "attempts": [{"who": an id, "attempt": what they try now}]';
 
 const EPISODE_BEAT = `${BEAT_SHAPE.slice(0, -1)}, "attempt": what its actor tries that the world's rules decide (a sale, a theft, a fight), if anything}`;
 
@@ -84,7 +84,7 @@ Answer with one JSON object: {"exposure": [{"beat": the ref of a beat just decid
     label: "Settling a draft",
     note: "A draft settles against every beat since its story time: the author keeps it, adjusts what something seen since contradicts, drops it when the story overtook it, or redrafts it for a later time. What it settles becomes canon now, its narrative dated when it happened, and those in it catch up on what reached them.",
     vars: VARS,
-    contract: '{"verdict": "settle" | "drop" | "redraft", "why": string, "beats": [{"ref", "keep", "what"?, "surface"?, "quotes"?}], "effects": [{"index", "keep"}], "attempts": [{"who", "attempt"}], "redraft": {"in"} | null}',
+    contract: '{"verdict": "settle" | "drop" | "redraft", "why": string, "beats": [{"ref", "keep", "what"?, "surface"?, "quotes"?, "deed"?}], "effects": [{"index", "keep"}], "attempts": [{"who", "attempt"}], "redraft": {"in"} | null}',
     text: `${AUTHOR}
 
 A draft of something that happened off screen waits to become canon. Here it is: its episode, its beats at their own times, and the world changes it would make. Here too is everything that has happened in the story since its story time, every beat whoever decided it: each one is a pin the draft must agree with. Read the draft against them, and against your notebook:
@@ -95,7 +95,7 @@ A draft of something that happened off screen waits to become canon. Here it is:
 - Redraft it when it no longer fits but something like it should still happen, and say when.
 
 Answer with one JSON object: {"verdict": "settle", "drop" or "redraft", "why": a line on how it reads against the pins, ${SETTLE_BEATS}, "redraft": {"in": story minutes from now until it starts} or null}. Give adjusted words only where you change them.`,
-    asks: [WHY_ASK],
+    asks: [WHY_OWN_ASK],
   },
   {
     id: OFFSCREEN_TEXT.walkOn,
@@ -104,7 +104,7 @@ Answer with one JSON object: {"verdict": "settle", "drop" or "redraft", "why": a
     label: "A scene reaches a draft",
     note: "Before the player's scene plays past what an open draft holds (its people, its places, the things it changes), the author settles the draft now, drops it, or re-dates it to after the scene: no one plays from what isn't canon. A settlement here is a walk-on, its own line in the turn's budget.",
     vars: VARS,
-    contract: '{"verdict": "settle" | "drop" | "redate", "why": string, "beats": [{"ref", "keep", "what"?, "surface"?, "quotes"?}], "effects": [{"index", "keep"}], "attempts": [{"who", "attempt"}], "redate": {"in"} | null}',
+    contract: '{"verdict": "settle" | "drop" | "redate", "why": string, "beats": [{"ref", "keep", "what"?, "surface"?, "quotes"?, "deed"?}], "effects": [{"index", "keep"}], "attempts": [{"who", "attempt"}], "redate": {"in"} | null}',
     text: `${AUTHOR}
 
 The scene {{pov}} is playing reaches something an open draft holds: a draft of what happens off screen, not canon yet, holding people, places or things this scene has, from before the scene's time. No one plays past it while it is open, and you never play around it: settle it now, drop it, or re-date it to after this scene. Here is the draft (its episode, its beats at their own times, the world changes it would make), what of this scene it holds, and everything that has happened since its story time, every beat whoever decided it, this scene's so far included: each one is a pin the draft must agree with. Read it against them, and against your notebook:
@@ -115,6 +115,6 @@ The scene {{pov}} is playing reaches something an open draft holds: a draft of w
 - Re-date it when it hasn't happened yet after all: it happens as drafted, later, after this scene. Say when it starts.
 
 Answer with one JSON object: {"verdict": "settle", "drop" or "redate", "why": a line on how it reads against the pins and this scene, ${SETTLE_BEATS}, "redate": {"in": story minutes from now until it starts, past this scene} or null}. Give adjusted words only where you change them.`,
-    asks: [WHY_ASK],
+    asks: [WHY_OWN_ASK],
   },
 ];

@@ -459,6 +459,8 @@ export class Narration implements NarrationPort {
       section("The beats of its moment", beats.join("\n")),
       section(`Where ${pov} was`, stagingLine(making.moment.staging)),
       knows !== undefined ? section(`Whom ${pov} knows by name`, knows.length > 0 ? knows.join(", ") : "No one here.") : "",
+      // The author's notebook excerpts the narrator holds (DEPTH-PLAN §4.5, its readers): the tone and setups it was asked to carry are no departure; facts still come only from the beats.
+      section("From the author's notebook, for this scene (the narrator was asked to carry these; they add no facts)", (this.input.excerpts ?? []).map((e) => e.trim()).filter((e) => e !== "").join("\n\n") || undefined),
       // What the player asked of this telling (§3.9): texture he asked for is the narrator's to give him, never a departure; facts still come only from the beats.
       section("What the player asked this telling to change", this.input.direction?.trim() ? `${this.input.direction.trim()}\nThe texture he asked for (phrasing, rhythm, colour, tone, what the passage dwells on) is allowed and is no departure from the beats; an act, a word, an outcome or a detail anyone could later notice still has to be in them.` : undefined),
     ]

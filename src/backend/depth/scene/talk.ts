@@ -128,12 +128,12 @@ export async function talkTap(rt: TalkRt, chatId: ChatId, userId: UserId, chipId
  * The end of a talk the player left (§2.5; §4.4: a character remembers when a scene ends for it), at
  * the message the Leave landed at: the step after a reply runs for it (`afterDepthReply`, its entries
  * named by the Leave's), so whoever holds takes there remembers, the talk's partner among them, and
- * the GM links what they now believe. The poll waits for the next reply's, which reads everything
- * since it last looked. A Leave held behind a reply in flight needs none: that reply's own step finds
- * the talk ended. Never throws.
+ * the GM links what they now believe. The conversation's end is where a poll its lines deferred runs
+ * (PLAN:180), so the author's poll runs there too, reading everything since it last looked. A Leave
+ * held behind a reply in flight needs none: that reply's own step finds the talk ended. Never throws.
  */
 export function talkLeft(rt: AfterRt, chatId: ChatId, userId: UserId, left: TalkLeft, o: { model?: ModelPort } = {}): Promise<AfterOut> {
-  return afterDepthReply(rt, chatId, userId, left.basis, { scene: left.scene ?? null, ended: false, remember: [left.with], poll: false, beats: [] }, { ...o, occasion: left.entry });
+  return afterDepthReply(rt, chatId, userId, left.basis, { scene: left.scene ?? null, ended: false, remember: [left.with], poll: true, beats: [] }, { ...o, occasion: left.entry });
 }
 
 /**

@@ -51,7 +51,7 @@ export interface SpotInput {
   seed: number;
   beats: readonly Beat[];
   blobs: Readonly<Record<string, string>>;
-  /** What the historian flagged: beat ids, or words naming them. */
+  /** What the historian and the author flagged: beat ids, or words naming them; words naming no beat are listed on the card as they are. */
   uncertain: readonly string[];
   prose: ReadonlyMap<MessageId, { text: string; index: number }>;
   /** Each character's catch-ups in the chapter. */
@@ -89,12 +89,18 @@ function memoriesOf(who: EntityId, out: StageOut): { path: string; text: string;
 
 export function buildSpotCard(i: SpotInput): SpotCheckCard {
   const rnd = random(i.seed);
+  const beatWhat = (id: string): string => {
+    const b = i.beats.find((x) => x.id === id);
+    return b ? (i.blobs[b.what] ?? "") : "";
+  };
   const items: SpotItem[] = [];
-  const flagged = new Set(i.beats.filter((b) => b.uncertain !== undefined || i.uncertain.includes(b.id) || i.uncertain.some((u) => u.includes(b.id))).map((b) => b.id));
+  const flagged = new Set(i.beats.filter((b) => b.uncertain !== undefined || i.uncertain.some((u) => u.includes(b.id))).map((b) => b.id));
+  const unplaced = [...new Set(i.uncertain.map((u) => u.trim()).filter((u) => u !== "" && !i.beats.some((b) => u.includes(b.id))))];
   const pool = i.beats.filter((b) => !flagged.has(b.id) && "bootstrap" in b.by);
   const picked = new Set<string>();
   while (picked.size < Math.min(i.sample, pool.length)) picked.add((pool[Math.floor(rnd() * pool.length)] as Beat).id);
-  for (const b of i.beats) {
+  // Flagged beats first, then the sample, each in the chapter's order.
+  for (const b of [...i.beats.filter((x) => flagged.has(x.id)), ...i.beats.filter((x) => !flagged.has(x.id))]) {
     if (!picked.has(b.id) && !flagged.has(b.id)) continue;
     const src = "bootstrap" in b.by ? b.by.bootstrap.message : null;
     const prose = src ? i.prose.get(src) : undefined;
@@ -141,13 +147,16 @@ export function buildSpotCard(i: SpotInput): SpotCheckCard {
     const path = String(note.data.path);
     const hash = typeof note.data.blob === "string" ? note.data.blob : typeof note.data.hash === "string" ? note.data.hash : "";
     const body = i.notebook?.blobs[hash] ?? "";
-    if (body !== "") items.push({ id: `notebook:${path}`, kind: "notebook", mark: null, flagged: false, path, excerpt: body.length > 1600 ? `${body.slice(0, 1600)}…` : body, cites: [...new Set(body.match(/\bb_[0-9a-z]+\b/g) ?? [])].slice(0, 12) });
+    if (body !== "") items.push({ id: `notebook:${path}`, kind: "notebook", mark: null, flagged: false, path, excerpt: body.length > 1600 ? `${body.slice(0, 1600)}…` : body, cites: [...new Set(body.match(/\bb[0-9a-f]{31}\b/g) ?? [])].slice(0, 12).map((id) => ({ beat: id, what: beatWhat(id) })) });
   }
-  // Every contradiction the import found.
+  // Every contradiction the import found, against a beat's words where it names one.
   const entries = new Map(i.entries.map((e) => [e.id, e]));
   for (const c of i.contradictions) {
     const e = entries.get(c.entry);
-    items.push({ id: `contradiction:${c.entry}:${c.against}`, kind: "contradiction", mark: null, flagged: true, entry: c.entry, source: e?.source ?? "world_info", title: e?.title ?? c.entry, text: e?.text ?? "", against: c.against, why: c.why });
+    const what = beatWhat(c.against);
+    items.push({ id: `contradiction:${c.entry}:${c.against}`, kind: "contradiction", mark: null, flagged: true, entry: c.entry, source: e?.source ?? "world_info", title: e?.title ?? c.entry, text: e?.text ?? "", against: what === "" ? c.against : what, why: c.why });
   }
-  return { id: i.id, chapter: i.chapter, createdAt: i.now, items, ...(i.misread && i.misread.length > 0 ? { misread: [...i.misread] } : {}) };
+  // Flagged items first (a stable sort keeps each kind's order).
+  items.sort((a, b) => Number(b.flagged) - Number(a.flagged));
+  return { id: i.id, chapter: i.chapter, createdAt: i.now, items, ...(unplaced.length > 0 ? { uncertain: unplaced } : {}), ...(i.misread && i.misread.length > 0 ? { misread: [...i.misread] } : {}) };
 }

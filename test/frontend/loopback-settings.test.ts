@@ -23,7 +23,7 @@ function report(over: Partial<RelayReport> = {}): RelayReport {
 }
 
 function relay(over: Partial<LoopbackRelayView> = {}): LoopbackRelayView {
-  return { relay: "rl-1", name: "sam", mode: "user", build: "b1", host: "box", listen: "127.0.0.1", port: 7861, registeredAt: NOW - 86_400_000, seenAt: NOW - 12_000, report: report(), signIn: false, update: false, lines: { update: null, login: null }, ...over };
+  return { relay: "rl-1", name: "sam", mode: "user", build: "b1", host: "box", listen: "127.0.0.1", port: 7861, registeredAt: NOW - 86_400_000, seenAt: NOW - 12_000, requestAt: NOW - 180_000, report: report(), signIn: false, update: false, lines: { update: null, login: null }, ...over };
 }
 
 function page(over: Partial<LoopbackPage> = {}): LoopbackPage {
@@ -193,5 +193,38 @@ describe("Settings → Loopback", () => {
     const noop = (): void => undefined;
     const el = SettingsBody({ route: { page: "loopback" }, data, ctx: { connections: [], caveats: [], view: null, busy: false, patch: noop, go: noop } });
     expect(el?.type).toBe(LoopbackSettingsPage);
+  });
+
+  test("each relay says when it last carried a request; Test asks for its line, which the page shows; the pin's note on Lumiverse's active-connection setting", () => {
+    const { words, button, click, acts, part } = show(page());
+    expect(words).toContain("Last request 3 min ago.");
+    expect(part("data-lre-loopback-down")).toEqual([]);
+    click(button("Test"));
+    expect(acts).toEqual([{ op: "test" }]);
+    expect(words).toContain('Lumiverse\'s "always use the active connection" governs Edit and Send only, so the pin holds');
+    const tested = show(page({ test: { ok: false, text: "Test failed. You have no loopback key." } }));
+    expect(tested.part("data-lre-loopback-test", "failed")).toHaveLength(1);
+    expect(tested.words).toContain("Test failed. You have no loopback key.");
+    expect(show(page({ relays: [relay({ requestAt: null })] })).words).toContain("No request carried since LumiRPEngine started.");
+  });
+
+  test("Docker: the relay inside Lumiverse's container or as a compose service sharing its network, each with Copy", () => {
+    const { button, click, copied, part } = show(page());
+    expect(part("data-lre-loopback-group", "docker")).toHaveLength(1);
+    click(button("Copy: Inside Lumiverse's container, as a second process"));
+    click(button("Copy: As a compose service sharing Lumiverse's network"));
+    expect(copied[0]).toBe(`${BUN} --cwd / ${SCRIPT} loopback up --url http://127.0.0.1:7860`);
+    expect(copied[1]).toContain('network_mode: "service:lumiverse"');
+    expect(copied[1]).toContain(`command: ["${BUN}", "${SCRIPT}", "loopback", "serve", "--config"`);
+  });
+
+  test("no relay running: a warning at the top with the line that starts one", () => {
+    const none = show(page({ relays: [] }));
+    expect(none.part("data-lre-loopback-down")).toHaveLength(1);
+    expect(none.words).toContain("No relay is running");
+    none.click(none.button("Copy: Start the relay"));
+    expect(none.copied).toEqual([page().line.command ?? ""]);
+    const quiet = show(page({ relays: [relay({ signIn: true })] }));
+    expect(quiet.words).toContain("Every relay of yours has gone quiet or needs signing in again");
   });
 });

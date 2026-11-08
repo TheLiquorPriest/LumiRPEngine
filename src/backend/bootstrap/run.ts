@@ -8,9 +8,9 @@
 // revises the notebook deeply, the GM reconciles the imported memory entries that cover it, and a
 // spot-check card is queued for the user. A beat the user marks wrong on a card is a directive
 // (§8.6): between chunks the author amends it at its own source message (a superseding beat, or a
-// strike), and the characters who lived it live the corrected beat. The player's switches of
-// character inside the history (D-10) land at the message he starts playing someone else at, before
-// that chunk's catch-ups; the player character in force at a message never catches up on it.
+// strike), and the characters who lived it live the corrected beat. The player character is the
+// world's own throughout (D-10; Play as isn't supported yet): a switch of character the historian
+// reads in the history is noted in the log, never landed, and he never catches up on what he played.
 //
 // Every job is keyed by what it read (its chunk, and the keys of the jobs before it); its model
 // answer is recorded in its own file before anything lands, and what it lands are layer entries with
@@ -37,7 +37,7 @@ import type { LedgerEvent } from "../../shared/ledger";
 import type { Basis, LandResult, LayerDraft, LayerSummary } from "../../shared/layer";
 import type { Beat, Staging } from "../../shared/story";
 import { beatEvent, STORY_BEAT, STORY_STRIKE, strikeEvent } from "../../shared/story";
-import { MIND_POV, mindPovEvent, needsPov, reachOf, type ReachAs } from "../../shared/character-engine";
+import { needsPov, reachOf, type ReachAs } from "../../shared/character-engine";
 import { DEPTH_ROLE_WORDS, DEPTH_ROOM_MOST, type DepthRole } from "../../shared/depth-settings";
 import { BOOTSTRAP_LOG_LINES, BOOTSTRAP_STAGES, NO_COUNTS } from "../../shared/bootstrap";
 import type { BootstrapCap, BootstrapStage, BootstrapStatus, BootstrapView, ChapterView, ImportView, SpotCheckCard, SpotMisread, StageCounts } from "../../shared/bootstrap";
@@ -82,7 +82,7 @@ export interface HistorianOut extends StageOut {
   newcomers: { ref: string; name: string; note: string }[];
   /** Places the history meets that the world lacks, in the place each is in: after binding, `ref` is the id the run gave them. */
   newPlaces?: { ref: string; name: string; note: string; parent: string }[];
-  /** The player's switches of character (D-10), in message order: from `message` on he plays `who`. */
+  /** The player's switches of character (D-10) the history shows, in message order: from `message` on he plays `who`. Play as isn't supported yet: each is noted in the log, never landed. */
   switches?: { message: MessageId; who: EntityId }[];
   uncertain: string[];
 }
@@ -183,7 +183,9 @@ export interface BootstrapLedger {
 
 export interface BootstrapKnobs {
   chunkTokens: number;
-  atOnce: { historian: number; minds: number; author: number };
+  atOnce: { minds: number };
+  /** The most characters given a mind, in the author's order; 0 for no limit. */
+  mostMinds: number;
   sample: number;
   pauseAfterWrong: number;
 }
@@ -482,8 +484,8 @@ export class BootstrapRun {
   private laneStopped = false;
   private runningSince: number | null = null;
   private loaded = false;
-  /** The stages that asked a model in the chunk under way, for the measured rates. */
-  private asked = new Set<BootstrapStage>();
+  /** The units (a stage and its chunk; its chapter for reconcile) that asked a model, each counted once for the measured rates, whichever lane asked it. */
+  private unitsSeen = new Set<string>();
   /** The player character the history starts with (D-10): the world's own. */
   private firstPc: EntityId = "";
   /**
@@ -609,11 +611,18 @@ export class BootstrapRun {
     await this.env.files.write(file, card);
     this.state.wrongInRow = right ? 0 : this.state.wrongInRow + 1;
     if (!right) this.note(`Marked wrong on chapter ${card.chapter + 1}'s card (${item.kind}): ${note || "no note"}`);
-    // The chunk a wrong beat came from, by its message's place on the path.
-    const chunk = !right && item.kind === "beat" ? this.manifest?.chunks.find((c) => item.index >= c.firstIndex && item.index <= c.lastIndex)?.n : undefined;
-    if (item.kind === "beat") this.state.amends = this.state.amends.filter((a) => a.beat !== item.beat);
-    if (chunk !== undefined && item.kind === "beat") {
-      this.state.amends.push({ card: cardId, item: itemId, beat: item.beat, chunk, note: item.mark.note, at: item.mark.at });
+    // The chunk a wrong beat came from, by its message's place on the path. A contradiction marked wrong says its beat is wrong as the entry has it: that beat is amended the same way, with the entry beside the user's word.
+    let chunk = !right && item.kind === "beat" ? this.manifest?.chunks.find((c) => item.index >= c.firstIndex && item.index <= c.lastIndex)?.n : undefined;
+    const contradicted = item.kind === "contradiction" ? (item.id.split(":").at(-1) ?? "") : "";
+    if (!right && item.kind === "contradiction") {
+      const chapter = this.state.chapters.find((c) => c.n === card.chapter);
+      for (const n of chapter ? range(chapter.from, chapter.to) : []) if (chunk === undefined && (await this.recordOf<HistorianOut>(`historian:${n}`))?.beats.some((b) => b.id === contradicted)) chunk = n;
+    }
+    const beat = item.kind === "beat" ? item.beat : contradicted;
+    if (beat !== "") this.state.amends = this.state.amends.filter((a) => a.beat !== beat);
+    if (chunk !== undefined && beat !== "") {
+      const why = item.kind === "contradiction" ? `${item.mark.note} (The ${item.title} entry says: ${item.text.slice(0, 1500)}; the import found: ${item.why})` : item.mark.note;
+      this.state.amends.push({ card: cardId, item: itemId, beat, chunk, note: why, at: item.mark.at });
       this.note(`The author amends that beat before the run's next chunk, and the characters who lived it live the corrected beat.`);
     }
     const knobs = await this.env.knobs();
@@ -673,7 +682,7 @@ export class BootstrapRun {
       chapters,
       spent: totalOf(this.state.spent),
       cap: this.state.cap,
-      remaining: manifest ? estimateRemaining({ chatId: this.env.chatId, manifest, knobs, routes: await this.env.routes(), spent: this.state.spent, units: this.state.units, done, chapters: this.state.chapters.filter((c) => c.ended).length, minds: minds > 0 ? minds : (await this.env.people()).cast.length, rss: Math.max(0, ...Object.values(this.state.rss)) || null }) : null,
+      remaining: manifest ? estimateRemaining({ chatId: this.env.chatId, manifest, knobs, routes: await this.env.routes(), spent: this.state.spent, units: this.state.units, done, chapters: this.state.chapters.filter((c) => c.ended).length, minds: minds > 0 ? minds : Math.min((await this.env.people()).cast.length, knobs.mostMinds > 0 ? knobs.mostMinds : Infinity), rss: Math.max(0, ...Object.values(this.state.rss)) || null }) : null,
       imported: this.state.imported,
       spot,
       redoFrom: this.state.redoFrom,
@@ -791,8 +800,8 @@ export class BootstrapRun {
     const done = (async () => {
       let prev = from > 0 ? (this.state.hist[from - 1] ?? "start") : "start";
       let before = await this.beforeOf(from);
-      // The player character as each chunk opens (D-10): the one the history starts with, then each switch the historian noticed.
-      let pc = await this.pcBefore(from);
+      // The player character throughout (D-10): the one the history starts with. A switch the historian reads is noted, never landed.
+      const pc = this.firstPc;
       try {
         for (let n = from; n < manifest.chunks.length; n++) {
           const chunk = manifest.chunks[n] as ChunkInfo;
@@ -821,7 +830,7 @@ export class BootstrapRun {
           });
           for (const c of out.newcomers) this.state.newcomers[c.ref] ??= { name: c.name.trim(), since: n };
           for (const p of out.newPlaces ?? []) this.state.places[p.ref] ??= { name: p.name.trim(), since: n };
-          pc = out.switches?.at(-1)?.who ?? pc;
+          for (const s of out.switches ?? []) this.note(`The history has the player play ${people.cast.find((p) => p.id === s.who)?.name ?? this.state.newcomers[s.who]?.name ?? s.who} from message ${s.message} on. Switching isn't supported yet, so ${people.cast.find((p) => p.id === pc)?.name ?? pc} stays the player character.`);
           this.state.pcs[n] = pc;
           this.state.hist[n] = key;
           prev = key;
@@ -875,7 +884,6 @@ export class BootstrapRun {
     for (let n = from; n < manifest.chunks.length; n++) {
       this.halt();
       await this.amendQueued(n - 1, knobs, people.cast);
-      this.asked.clear();
       const chunk = manifest.chunks[n] as ChunkInfo;
       if (!chapter || chapter.ended) chapter = this.openChapter((chapter?.n ?? -1) + 1, n);
       const histKey = await ready(n);
@@ -884,23 +892,29 @@ export class BootstrapRun {
       chapter.to = n;
       const rows = await this.rows(chunk);
       const cast = this.castOf(people.cast);
-      const pcAt = this.pcAt(rows, hist, await this.pcBefore(n));
+      const pc = this.firstPc;
       // The author reads the chunk with its beats: where chapters end, who gets a mind, the notebook.
       const authorSlot = `author:${n}`;
       const aKey = hashParts(authorSlot, histKey, authorKey);
       const ch = chapter;
       const author = await this.answer<AuthorOut>(authorSlot, aKey, "author", (model) => this.env.stages.authorRead({ chunk: rows, beats: hist.beats, blobs: hist.blobs, chapter: { index: ch.n, chunks: range(ch.from, n) }, cast, basis: chunk.basis }, model));
       authorKey = aKey;
-      // The player character gets no mind (D-10): no one the player plays through the whole chunk.
+      // The player character gets no mind (D-10): no one the player plays through the whole chunk. Past the most minds the settings allow, the author's further picks wait unminded.
+      const passed: string[] = [];
       for (const pick of author.cast) {
-        if (!pick.mind || this.state.minds[pick.who] || rows.every((r) => pcAt(r.id) === pick.who)) continue;
+        if (pick.mind && !this.state.minds[pick.who] && knobs.mostMinds > 0 && Object.keys(this.state.minds).length >= knobs.mostMinds) {
+          passed.push(cast.find((p) => p.id === pick.who)?.name ?? this.state.newcomers[pick.who]?.name ?? pick.who);
+          continue;
+        }
+        if (!pick.mind || this.state.minds[pick.who] || pick.who === pc) continue;
         const name = cast.find((p) => p.id === pick.who)?.name ?? this.state.newcomers[pick.who]?.name;
         if (name !== undefined) this.state.minds[pick.who] = { name, since: n };
       }
+      if (passed.length > 0) this.note(`Chunk ${n + 1}: ${passed.join(", ")} got no mind: the run is at its most minds (${knobs.mostMinds}, Settings → Depth → Bootstrap).`);
       const minded = Object.keys(this.state.minds);
       // Points of view for every beat that reached someone with a mind in part (its own act with a deed aside), as a message without its words, or whole but involving someone it doesn't know (`needsPov`); never the player character at that beat.
       const known = await this.env.stages.knows(minded, chunk.basis);
-      const partOf = (beat: Beat): EntityId[] => beat.exposure.filter((e) => minded.includes(e.who) && e.who !== pcAt(sourceOf(beat)) && needsPov(beat, e.who, known[e.who] ?? [])).map((e) => e.who);
+      const partOf = (beat: Beat): EntityId[] => beat.exposure.filter((e) => minded.includes(e.who) && e.who !== pc && needsPov(beat, e.who, known[e.who] ?? [])).map((e) => e.who);
       const povSlot = `pov:${n}`;
       const pKey = hashParts(povSlot, histKey, aKey);
       const povs = await this.answer<Record<string, Record<EntityId, string>>>(povSlot, pKey, "pov", async (model) => {
@@ -917,9 +931,9 @@ export class BootstrapRun {
         );
         return out;
       });
-      // The chunk's beats land at their own source messages, each with the points of view it reached, the player's switches at theirs, with the author's notebook and the cores of those just given a mind: one write.
+      // The chunk's beats land at their own source messages, each with the points of view it reached, with the author's notebook and the cores of those just given a mind: one write.
       const bKey = hashParts(`beats:${n}`, histKey, pKey);
-      const first: LayerDraft[] = [...(await this.beatDrafts(n, bKey, rows, hist, povs, pcAt)), ...(await this.draftOf(authorSlot, aKey, author, chunk.basis, "author"))];
+      const first: LayerDraft[] = [...(await this.beatDrafts(n, bKey, rows, hist, povs, pc)), ...(await this.draftOf(authorSlot, aKey, author, chunk.basis, "author"))];
       for (const who of minded) {
         if (this.state.minds[who]?.since !== n) continue;
         const seedSlot = `seed:${n}:${who}`;
@@ -931,7 +945,7 @@ export class BootstrapRun {
       }
       await this.landBatch(first);
       // Each one's catch-up on what reached it, in story order, characters at once, landing where it last isn't the player character; mind writes at an old message re-fold the chain from it, so they land together.
-      const lived = this.livedOf(hist, povs, minded, rows, pcAt, chunk.basis, known);
+      const lived = this.livedOf(hist, povs, minded, rows, pc, chunk.basis, known);
       const caught = minded.filter((w) => lived.has(w));
       const writes = new Map<EntityId, LayerDraft[]>();
       await bounded(caught, knobs.atOnce.minds, async (who) => {
@@ -953,7 +967,6 @@ export class BootstrapRun {
         chapter.title = author.title ?? null;
         authorKey = await this.endChapter(chapter, chunk, knobs, mindKeys, linkKey, authorKey);
       }
-      for (const s of this.asked) this.state.units[s] += 1;
       // What the run landed for this chunk before, that nothing landed now took the place of, is retired before the chunk counts as done.
       if (n < manifest.chunks.length - 1) await this.retire((k) => k === n);
       this.note(`Chunk ${n + 1} of ${manifest.chunks.length} done (resident memory ${Math.round(this.env.rss() / 1048576)} MB).`);
@@ -980,8 +993,8 @@ export class BootstrapRun {
     const rows = await this.rows(chunk);
     const at = lastClock(rows);
     const minded = Object.keys(this.state.minds);
-    // The one the player plays at the chapter's end has no agent to reflect (D-10).
-    const pcEnd = await this.pcBefore(chunk.n + 1);
+    // The player character has no agent to reflect (D-10).
+    const pcEnd = this.firstPc;
     const reflecting = minded.filter((w) => w !== pcEnd);
     const reflections = new Map<EntityId, LayerDraft[]>();
     await bounded(reflecting, knobs.atOnce.minds, async (who) => {
@@ -1019,12 +1032,13 @@ export class BootstrapRun {
           const out = await this.recordOf<StageOut>(`minds:${n}:${who}`);
           if (out) minds.push({ who, name: this.state.minds[who]?.name ?? who, out });
         }
-      // Beside its items, the answers the parsers didn't keep whole since the last card.
-      const card = buildSpotCard({ id: cardId, chapter: chapter.n, now: this.env.now(), sample: knobs.sample, seed: hash32(cardId), beats: read.beats, blobs: read.blobs, uncertain: read.uncertain, prose: read.prose, minds, povs: read.povs, notebook: revised, contradictions, entries: this.entries, misread: this.state.misread });
+      // Beside its items, what the historian and the author flagged as uncertain, and the answers the parsers didn't keep whole since the last card.
+      const noted = [...read.uncertain, ...revised.uncertain];
+      for (const n of range(chapter.from, chapter.to)) noted.push(...((await this.recordOf<AuthorOut>(`author:${n}`))?.uncertain ?? []));
+      const card = buildSpotCard({ id: cardId, chapter: chapter.n, now: this.env.now(), sample: knobs.sample, seed: hash32(cardId), beats: read.beats, blobs: read.blobs, uncertain: noted, prose: read.prose, minds, povs: read.povs, notebook: revised, contradictions, entries: this.entries, misread: this.state.misread });
       await this.env.files.write(`spot/${cardId}.json`, card);
       this.state.misread = [];
     }
-    this.state.units.reconcile += this.asked.has("reconcile") ? 1 : 0;
     this.note(`Chapter ${chapter.n + 1} (chunks ${chapter.from + 1}–${chapter.to + 1}) is done; its spot-check card is waiting.`);
     await this.save();
     this.env.changed();
@@ -1063,7 +1077,12 @@ export class BootstrapRun {
     await this.env.files.write(jobFile(slot), { slot, key, at: this.env.now(), out, entries: [], supersedes, spent, ...(misread.length > 0 ? { misread } : {}), ...(capped.length > 0 ? { capped } : {}) } satisfies JobRecord);
     this.state.misread.push(...misread.map((m): SpotMisread => ({ stage, job: slot, call: m.call, fields: m.fields, count: m.count })));
     this.state.misread.splice(0, Math.max(0, this.state.misread.length - MISREAD_KEPT));
-    this.asked.add(stage);
+    // A unit is a stage's chunk (its chapter for reconcile), counted once: the historian's lane runs ahead of the chunk the rest are on, and an amendment's jobs belong to no chunk.
+    const unit = slot.split(":")[1] ?? "";
+    if (/^\d+$/.test(unit) && !this.unitsSeen.has(`${stage}:${unit}`)) {
+      this.unitsSeen.add(`${stage}:${unit}`);
+      this.state.units[stage] += 1;
+    }
     return out;
   }
 
@@ -1115,10 +1134,9 @@ export class BootstrapRun {
 
   /**
    * The chunk's beats as entries, one per source message, with the points of view filled in, after
-   * the newcomers and new places they meet; each switch of player character in an entry of its own
-   * at its message, after that message's beats. The slot's record names them before any lands.
+   * the newcomers and new places they meet. The slot's record names them before any lands.
    */
-  private async beatDrafts(n: number, key: string, rows: readonly SpoolRow[], hist: HistorianOut, povs: Record<string, Record<EntityId, string>>, pcAt: (message: MessageId) => EntityId): Promise<LayerDraft[]> {
+  private async beatDrafts(n: number, key: string, rows: readonly SpoolRow[], hist: HistorianOut, povs: Record<string, Record<EntityId, string>>, pc: EntityId): Promise<LayerDraft[]> {
     const slot = `beats:${n}`;
     const blobs: Record<string, string> = { ...hist.blobs };
     const beats = hist.beats.map((b): Beat => {
@@ -1132,8 +1150,8 @@ export class BootstrapRun {
     if (first && (born.length > 0 || places.length > 0)) {
       // A newcomer the player character was placed to perceive acting, or being spoken of, is someone he has met.
       const metBy = (id: EntityId): EntityId | null => {
-        const b = beats.find((x) => (x.actors.includes(id) || x.about.some((r) => "entity" in r && r.entity === id)) && x.exposure.some((e) => e.who === pcAt(sourceOf(x))));
-        return b ? pcAt(sourceOf(b)) : null;
+        const b = beats.find((x) => (x.actors.includes(id) || x.about.some((r) => "entity" in r && r.entity === id)) && x.exposure.some((e) => e.who === pc));
+        return b ? pc : null;
       };
       const made = await this.env.stages.spawn(
         born.map((c) => ({ id: c.ref, name: c.name, note: c.note, knownBy: metBy(c.ref) })),
@@ -1143,13 +1161,12 @@ export class BootstrapRun {
       if (made.people.length > 0) drafts.push({ id: layerEntryId("bootstrap", this.env.chatId, slot, key, "spawn"), basis: first.basis, kind: "spawn", events: made.people, by: { role: "historian", job: slot } });
       if (made.places.length > 0) drafts.push({ id: layerEntryId("bootstrap", this.env.chatId, slot, key, "places"), basis: first.basis, kind: "space.place", events: made.places, by: { role: "historian", job: slot } });
     }
-    // One entry per source message, the closing staging with the last: what the next chunk opens on.
+    // One entry per source message, the closing staging with the last: what the next chunk opens on; each with the historian's account of the chunk, readable beside it.
     const byMessage = this.env.stages.beatEvents(beats, hist.staging, blobs, rows);
+    const reasoning = hist.reasoning ? putText(blobs, hist.reasoning) : undefined;
     for (const row of rows) {
       const events = byMessage[row.id] ?? [];
-      if (events.length > 0) drafts.push({ id: layerEntryId("bootstrap", this.env.chatId, slot, key, row.id), basis: row.basis, kind: STORY_BEAT, events, by: { role: "historian", job: slot } });
-      const to = hist.switches?.find((s) => s.message === row.id)?.who;
-      if (to !== undefined) drafts.push({ id: layerEntryId("bootstrap", this.env.chatId, slot, key, "pov", row.id), basis: row.basis, kind: MIND_POV, events: [mindPovEvent(to)], by: { role: "historian", job: slot } });
+      if (events.length > 0) drafts.push({ id: layerEntryId("bootstrap", this.env.chatId, slot, key, row.id), basis: row.basis, kind: STORY_BEAT, events, ...(reasoning ? { reasoning } : {}), by: { role: "historian", job: slot } });
     }
     const rec = await this.env.files.read(jobFile(slot), isJob);
     const made = drafts.map((d) => d.id);
@@ -1285,16 +1302,14 @@ export class BootstrapRun {
    * else the beat's deed), a message it sent with no place and one it received as the message's
    * words, else its own point of view where one was written or the surface where whole; a reach the
    * rule gives a point of view of its own (`needsPov`, with `known`) waits for one, so no text names
-   * someone it doesn't know. Up to the chunk's last message after which it isn't the player character
-   * (D-10), with the basis its catch-up lands at: that message's, the chunk's own where that is its
-   * last. One the player plays to the chunk's end lives only what reached it before he took it over;
-   * one he played earlier in the chunk lives that too, as its agent catches up.
+   * someone it doesn't know. The whole chunk for everyone but the player character (D-10), who lives
+   * none of it, with the basis its catch-up lands at.
    */
-  private livedOf(hist: Pick<HistorianOut, "beats" | "blobs">, povs: Record<string, Record<EntityId, string>>, minded: readonly EntityId[], rows: readonly SpoolRow[], pcAt: (message: MessageId) => EntityId, end: Basis, known: Record<EntityId, EntityId[]>): Map<EntityId, { lived: Lived[]; basis: Basis }> {
+  private livedOf(hist: Pick<HistorianOut, "beats" | "blobs">, povs: Record<string, Record<EntityId, string>>, minded: readonly EntityId[], rows: readonly SpoolRow[], pc: EntityId, end: Basis, known: Record<EntityId, EntityId[]>): Map<EntityId, { lived: Lived[]; basis: Basis }> {
     const out = new Map<EntityId, { lived: Lived[]; basis: Basis }>();
     const ordered = [...hist.beats].sort((a, b) => a.at - b.at || a.order - b.order);
     for (const who of minded) {
-      const last = rows.findLastIndex((r) => pcAt(r.id) !== who);
+      const last = who === pc ? -1 : rows.length - 1;
       if (last < 0) continue;
       const upTo = new Set(rows.slice(0, last + 1).map((r) => r.id));
       const lived: Lived[] = [];
@@ -1319,26 +1334,6 @@ export class BootstrapRun {
   /** Says each point of view of beat `beat` the render fell back on: written naming someone who wasn't there, or not at all, even when asked again, so its person lives the beat as the plain one in its place has it. */
   private fellBackPovs(beat: string, fellBack: Readonly<Record<EntityId, string[]>> | undefined): void {
     for (const [who, names] of Object.entries(fellBack ?? {})) this.note(fellBackLine(this.state.minds[who]?.name ?? who, `beat ${beat}`, names));
-  }
-
-  /** The player character in force as chunk `n` opens (D-10): the last switch the historian noticed before it, else the one the history starts with. */
-  private async pcBefore(n: number): Promise<EntityId> {
-    for (let k = n - 1; k >= 0; k--) {
-      const pc = this.state.pcs[k] ?? (await this.recordOf<HistorianOut>(`historian:${k}`))?.switches?.at(-1)?.who;
-      if (pc !== undefined) return pc;
-    }
-    return this.firstPc;
-  }
-
-  /** The player character in force after each message of a chunk (D-10): from a switch's message on, the one he switched to. */
-  private pcAt(rows: readonly SpoolRow[], hist: Pick<HistorianOut, "switches">, opening: EntityId): (message: MessageId) => EntityId {
-    const after = new Map<MessageId, EntityId>();
-    let pc = opening;
-    for (const r of rows) {
-      pc = hist.switches?.find((s) => s.message === r.id)?.who ?? pc;
-      after.set(r.id, pc);
-    }
-    return (message) => after.get(message) ?? opening;
   }
 
   // ------------------------------------------------------------ beats marked wrong (§8.6)
@@ -1371,10 +1366,10 @@ export class BootstrapRun {
 
   private async amendOne(a: Amend, at: { chunk: ChunkInfo; front: ChunkInfo; hist: HistorianOut; old: Beat; rows: SpoolRow[]; row: SpoolRow }, knobs: BootstrapKnobs, world: readonly Person[]): Promise<void> {
     const { chunk, front, hist, old, rows, row } = at;
-    const pcAt = this.pcAt(rows, hist, await this.pcBefore(chunk.n));
+    const pc = this.firstPc;
     const slot = `amend:${old.id}`;
     const key = hashParts(slot, this.state.hist[chunk.n] ?? "", a.note);
-    const amended = await this.answer<AmendOut>(slot, key, "author", (model) => this.env.stages.amend({ beat: old, blobs: hist.blobs, message: row, note: a.note, cast: this.castOf(world), pov: pcAt(row.id), key, basis: chunk.basis }, model));
+    const amended = await this.answer<AmendOut>(slot, key, "author", (model) => this.env.stages.amend({ beat: old, blobs: hist.blobs, message: row, note: a.note, cast: this.castOf(world), pov: pc, key, basis: chunk.basis }, model));
     const blobs: Record<string, string> = { ...amended.blobs };
     const all = { ...hist.blobs, ...blobs };
     const minded = Object.entries(this.state.minds)
@@ -1386,7 +1381,7 @@ export class BootstrapRun {
     let povs: Record<EntityId, string> = {};
     if (beat) {
       const b = beat;
-      const who = b.exposure.filter((e) => minded.includes(e.who) && e.who !== pcAt(row.id) && needsPov(b, e.who, known[e.who] ?? [])).map((e) => e.who);
+      const who = b.exposure.filter((e) => minded.includes(e.who) && e.who !== pc && needsPov(b, e.who, known[e.who] ?? [])).map((e) => e.who);
       const quotes = b.quotes !== undefined ? all[b.quotes] : undefined;
       if (who.length > 0) {
         povs = await this.answer<Record<EntityId, string>>(`${slot}:pov`, hashParts(`${slot}:pov`, key), "pov", async (model) => {
@@ -1402,13 +1397,12 @@ export class BootstrapRun {
     const landed = await this.draftOf(slot, key, { events, blobs, kind: beat ? STORY_BEAT : STORY_STRIKE, ...(amended.reasoning ? { reasoning: amended.reasoning } : {}) }, row.basis, "author");
     await this.landBatch(landed);
     // Whoever lived it lives the corrected beat at the frontier, and rewrites what it wrote from the
-    // old one, as it had reached them; the one the player plays there has no agent (D-10).
-    const pcFront = await this.pcBefore(front.n + 1);
-    const minds = minded.filter((w) => w !== pcFront);
+    // old one, as it had reached them; the player character has no agent (D-10).
+    const minds = minded.filter((w) => w !== pc);
     const oldPovs = (await this.recordOf<Record<string, Record<EntityId, string>>>(`pov:${chunk.n}`)) ?? {};
-    const was = this.livedOf({ beats: [old], blobs: hist.blobs }, oldPovs, minds, rows, pcAt, chunk.basis, known);
+    const was = this.livedOf({ beats: [old], blobs: hist.blobs }, oldPovs, minds, rows, pc, chunk.basis, known);
     const b = beat;
-    const reach = b ? this.livedOf({ beats: [b], blobs: { ...all, ...blobs } }, { [b.id]: povs }, minds, rows, pcAt, chunk.basis, known) : new Map<EntityId, { lived: Lived[]; basis: Basis }>();
+    const reach = b ? this.livedOf({ beats: [b], blobs: { ...all, ...blobs } }, { [b.id]: povs }, minds, rows, pc, chunk.basis, known) : new Map<EntityId, { lived: Lived[]; basis: Basis }>();
     const relive = [...new Set([...reach.keys(), ...was.keys()])];
     const writes = new Map<EntityId, LayerDraft[]>();
     await bounded(relive, knobs.atOnce.minds, async (who) => {
@@ -1525,10 +1519,12 @@ export class BootstrapRun {
     const cap = this.state.cap;
     if (!cap) return;
     const total = totalOf(this.state.spent);
+    // A money cap measures nothing on a connection that reports no price: the run stops rather than run uncapped.
+    if (cap.unit === "money" && Object.values(this.state.spent).some((s) => s.calls > 0 && s.cost === null)) throw new Halt("A money cap can't bind on this run: a stage's connection reports no price for its calls, so what the run spends can't be measured in money. Set the cap in tokens (or no cap), then Resume.");
     const used = cap.unit === "tokens" ? total.tokensIn + total.tokensOut : (total.cost ?? 0);
     if (used < cap.value) return;
     const what = cap.unit === "tokens" ? `${used.toLocaleString("en-US")} of ${cap.value.toLocaleString("en-US")} tokens` : `${used.toFixed(2)} of ${cap.value.toFixed(2)}`;
-    throw new Halt(`The run reached its cap (${what}) after ${this.state.progress.length} of ${this.manifest?.chunks.length ?? 0} chunks and paused; the rest is estimated below. Raise the cap, give fewer characters a mind, or pick cheaper models for the historian and the point-of-view render, then Resume.`);
+    throw new Halt(`The run reached its cap (${what}) after ${this.state.progress.length} of ${this.manifest?.chunks.length ?? 0} chunks and paused; the rest is estimated below. Raise the cap, give fewer characters a mind (Settings → Depth → Bootstrap → Most characters with a mind), or pick cheaper models for the historian and the point-of-view render, then Resume.`);
   }
 
   private redoEpoch(n: number): string {

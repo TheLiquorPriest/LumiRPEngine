@@ -867,6 +867,9 @@ export class FakeHost implements HostPort {
     try {
       const verdict = await tagger.handler({ chatId: g.chatId, userId: this.userId, generationType: g.type, dryRun: false, connectionId: this.contextConnectionId, presetId: this.activePreset, frontendSessionId: session, messages });
       if (verdict.parameters) g.parameters = structuredClone(verdict.parameters);
+      // The messages the interceptor left out never reach the provider.
+      const omit = new Set(verdict.omit ?? []);
+      if (omit.size > 0) g.prompt = (g.prompt ?? []).filter((_, i) => !omit.has(i));
       return "go";
     } catch {
       return tagger.required && this.capabilities.interceptors ? "failed" : "go";

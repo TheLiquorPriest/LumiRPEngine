@@ -49,7 +49,7 @@ import { relocate } from "../../../engine/relocate";
 import type { WorldState } from "../../../engine/state";
 import { Working } from "../../../engine/working";
 import { stagingBefore } from "../../../engine/ledger/story";
-import type { LivedPov } from "../../character-agent";
+import { formCore, type LivedPov } from "../../character-agent";
 import { knowsFor, mindInput, readMind } from "../../character-engine";
 import { budgetWords, costTokens, type CeilingBind } from "../budget";
 import { beatLine, DepthAnswerError, named, type BeatText, type Blobs } from "../common";
@@ -397,7 +397,8 @@ class Turn {
 
     // The scene, its cast and staging, and moment 0: the player's beats, the opening, the world's.
     // A ceiling that binds already (§6.5): whoever the setup still cast as their own agent the author plays instead, said.
-    const cast = this.slideOf(setup.cast);
+    // Whoever it cast as their own agent with no mind yet gets one now, and plays as their own agent from this scene on.
+    const cast = await this.formMinds(this.slideOf(setup.cast));
     const pcPlace = placeOfEntity(book.state, this.pov);
     book.scene = setup.continues && playing ? playing.scene : sceneId(input.turn);
     book.place = setup.place ?? (setup.continues && playing ? playing.place : null) ?? pcPlace ?? Object.keys(this.world.places)[0] ?? "";
@@ -524,6 +525,61 @@ class Turn {
     book.cast = cast;
     this.agents = new Set(cast.filter((c) => c.effort === "agent").map((c) => c.who));
     book.apply([sceneEvent({ scene: book.scene, place: book.place, at: book.minute, cast })], mark);
+  }
+
+  /**
+   * A mind formed in play (D-17), for someone with no mind yet: someone first met after opt-in, a new
+   * person, anyone on a chat turned on without the bootstrap. Its core lands in moment 0, from their
+   * card, else from what the world knows of them (for the user's review), and the thinking block says
+   * so; from this scene on they may play as their own agent. False when nothing could form it.
+   */
+  private async formMind(who: EntityId): Promise<boolean> {
+    const { input, book } = this;
+    const entity = own(book.state.entities, who) ?? own(this.world.entities, who);
+    const linked = own(this.world.entities, who)?.characterId;
+    const formed = await formCore({ who, name: this.name(who), player: this.name(this.pov), at: book.state.clock, fields: entity?.fields ?? {}, ...(typeof linked === "string" && linked !== "" ? { characterId: linked } : {}), ...(input.rt.host ? { host: input.rt.host } : {}), chatId: input.chatId, userId: input.userId, texts: this.texts });
+    if (!formed) return false;
+    book.apply(formed.events, 0);
+    Object.assign(book.blobs, formed.blobs);
+    this.think(`${this.name(who)} has a mind now, its core formed from ${formed.source === "card" ? "their card" : "what the world knows of them (Minds → Core to review)"}: they may play as their own agent from this scene on.`);
+    return true;
+  }
+
+  /**
+   * The minds the scene's setup forms first: everyone with the player character who has no mind yet
+   * and a role worth one, a life of their own in the world (a LOD1 agent: their agendas and plans) or
+   * a card the world links them to. The author then reads them as having a mind.
+   */
+  private async formHere(here: PlaceId | null): Promise<void> {
+    const { input, book } = this;
+    const minded = new Set(mindedAt(book.state));
+    for (const [id, e] of Object.entries(book.state.entities)) {
+      if (minded.has(id) || !hasAgent(this.world, book.state, id) || isGone(book.state, id) || !kindIs(input.rt.registry, this.world, e.kind, "person")) continue;
+      if (!together(this.world, here, placeOfEntity(book.state, id))) continue;
+      const card = own(this.world.entities, id)?.characterId;
+      if (e.agent === true || (typeof card === "string" && card !== "")) await this.formMind(id);
+    }
+  }
+
+  /**
+   * Whoever the setup cast as their own agent with no mind yet (`cast`) gets one now (`formMind`): the
+   * author's casting is the role worth one. One with nothing to form it from is the author's to
+   * play, said, and its next step hears it.
+   */
+  private async formMinds(cast: readonly SceneCast[]): Promise<SceneCast[]> {
+    const minded = new Set(mindedAt(this.book.state));
+    const out: SceneCast[] = [];
+    for (const c of cast) {
+      if (c.effort !== "agent" || minded.has(c.who) || !hasAgent(this.world, this.book.state, c.who) || (await this.formMind(c.who))) {
+        out.push(c);
+        continue;
+      }
+      const why = `${this.name(c.who)} has no card and nothing the world knows of them to form a mind from, so you play them`;
+      this.say(`The author's setup: ${why}.`);
+      this.unkept = [...this.unkept, why];
+      out.push({ ...c, effort: "author", why: c.why ? `${c.why} (No mind could be formed for them: no card, and nothing the world knows of them.)` : "No mind could be formed for them: no card, and nothing the world knows of them." });
+    }
+    return out;
   }
 
   /**
@@ -690,6 +746,8 @@ class Turn {
   private async setup(playerBeats: DraftBeat[], signals: string[], resolved: readonly Resolution[], scene: Parameters<typeof authorSetup>[0]["scene"], talk: { with: EntityId } | null, takeover: string | undefined): Promise<SetupResult> {
     const { input, book } = this;
     const at = input.at;
+    // Minds form first for those with him whose role is worth one (`formHere`): the author reads them as having one.
+    await this.formHere(placeOfEntity(book.state, this.pov));
     const state = book.state;
     const here = placeOfEntity(state, this.pov);
     const minded = new Set(mindedAt(state));

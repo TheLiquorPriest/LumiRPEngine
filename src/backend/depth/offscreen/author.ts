@@ -195,6 +195,8 @@ export interface BeatVerdict {
   what?: string;
   surface?: string;
   quotes?: string;
+  /** The beat's deed, restated for the beat as settled (L-9): absent, a rewritten beat keeps none. */
+  deed?: string;
 }
 
 export interface SettleAnswer extends StageCost {
@@ -249,7 +251,8 @@ export async function settleRead(input: SettleInput): Promise<SettleAnswer> {
     const what = text(b.what);
     const surface = text(b.surface);
     const quotes = spoken(b.quotes);
-    beats.set(ref, { keep: b.keep !== false, ...(what !== "" ? { what } : {}), ...(surface !== "" ? { surface } : {}), ...(quotes !== "" ? { quotes } : {}) });
+    const deed = text(b.deed);
+    beats.set(ref, { keep: b.keep !== false, ...(what !== "" ? { what } : {}), ...(surface !== "" ? { surface } : {}), ...(quotes !== "" ? { quotes } : {}), ...(deed !== "" ? { deed } : {}) });
   }
   const effects = new Map<number, boolean>();
   for (const r of list(a.effects)) {

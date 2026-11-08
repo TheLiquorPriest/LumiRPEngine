@@ -9,6 +9,7 @@
 // host's, answered by what the call holds.
 
 import { describe, expect, test } from "bun:test";
+import { ARCHIVE_TOOLS, archiveTools } from "../../src/backend/depth/archive-tools";
 import { toChain } from "../../src/backend/ledger-io";
 import { LreError } from "../../src/cli/connection";
 import type { CallFields, CallRequestType, RelayLink } from "../../src/cli/loopback-relay";
@@ -288,6 +289,69 @@ describe("a chat on depth, through the loopback", () => {
     expect(narrator).not.toContain("Earlier line 2.");
     expect(narrator).not.toContain("Morning.");
     expect(reasoning).toContain("The narrator reads your preset as it is and the chat's last 4 messages");
+    expect(reasoning).toContain("The 3 earlier messages stay out of its prompt.");
+  });
+
+  // The owner's rule (C16, L18): a depth turn's request never carries the whole history. The chat's
+  // cutoff (GM → This chat → Depth → History) takes every message before it out of what core sends,
+  // and the archive tools still reach them.
+  test("a depth turn's request carries no message before the chat's cutoff, and the archive search still finds them", async () => {
+    const rig = new Rig({ shipped: true });
+    const host = rig.host;
+    const at = await loopbackDepth(rig, [], []);
+    const chat = host.chat(at.chatId);
+    const early = host.sendUser(at.chatId, "We row out to the lighthouse at dawn.");
+    await host.settle();
+    for (let i = 2; i <= 6; i++) host.append(chat, { id: `old${i}`, isUser: i % 2 === 1, name: i % 2 === 1 ? "User" : "Narrator", swipes: [`Earlier line ${i}.`], swipeId: 0, bag: {} });
+    // A new chat keeps the latest 40; this one keeps the latest 3.
+    expect(rig.body(await rig.send({ type: "lre.bootstrap", chatId: at.chatId, op: "status" })).view).toMatchObject({ history: { keep: "last", count: 40 } });
+    expect(rig.body(await rig.send({ type: "lre.bootstrap", chatId: at.chatId, op: "history", cut: { keep: "last", count: 3 } })).view).toMatchObject({ history: { keep: "last", count: 3 } });
+    const g = await host.begin(at.chatId, { type: "continue" });
+    const sent = (g.prompt ?? []).map((m) => m.content).join("\n");
+    for (const kept of ["Earlier line 4.", "Earlier line 5.", "Earlier line 6."]) expect(sent).toContain(kept);
+    for (const gone of ["Morning.", "lighthouse", "Earlier line 2.", "Earlier line 3."]) expect(sent).not.toContain(gone);
+    expect(sent).toContain("You are the narrator of this story.");
+    const before = host.quietCalls.length;
+    const { reasoning } = await relayed(at, g);
+    const narrator = host.quietCalls.slice(before).at(-1)?.messages.map((m) => m.content).join("\n") ?? "";
+    expect(narrator).toContain("Earlier line 6.");
+    expect(narrator).not.toContain("lighthouse");
+    expect(reasoning).toContain("the chat's last 3 messages");
+    expect(reasoning).not.toContain("earlier message");
+
+    // The archive tool the author and the GM search with reads the chat itself, the messages the request left out too.
+    const { state, world } = await stateOf(rig, at.chatId);
+    const tools = archiveTools({ texts: {}, world, state, source: { search: (q) => rig.rt.archive.search(at.chatId, host.userId, q), quote: (r) => rig.rt.archive.quote(at.chatId, host.userId, r) } });
+    const search = tools.find((t) => t.name === ARCHIVE_TOOLS.search);
+    const found = await search?.run({ text: "lighthouse" }, { signal: new AbortController().signal, agentId: "agent_test", role: "author", callId: "call_search" });
+    expect(found?.error).toBeFalsy();
+    expect(found?.text).toContain(`[${early}]`);
+    expect(found?.text).toContain("lighthouse");
+
+    // From a message on: every message before it stays out.
+    rig.body(await rig.send({ type: "lre.bootstrap", chatId: at.chatId, op: "history", cut: { keep: "from", index: 5 } }));
+    const again = ((await host.begin(at.chatId, { type: "continue" })).prompt ?? []).map((m) => m.content).join("\n");
+    expect(again).toContain("Earlier line 6.");
+    expect(again).not.toContain("Earlier line 4.");
+    // A cutoff that isn't one is refused.
+    expect((await rig.send({ type: "lre.bootstrap", chatId: at.chatId, op: "history", cut: { keep: "last", count: 0 } })).type).toBe("lre.error");
+  });
+
+  // C17: Impersonate on a chat on depth read the whole history; it is written from the short context now.
+  test("Impersonate on a chat on depth is written from the short context: the recent window, never the history before it", async () => {
+    const rig = new Rig({ shipped: true });
+    const host = rig.host;
+    const at = await loopbackDepth(rig, [], []);
+    const chat = host.chat(at.chatId);
+    for (let i = 1; i <= 6; i++) host.append(chat, { id: `old${i}`, isUser: i % 2 === 1, name: i % 2 === 1 ? "User" : "Narrator", swipes: [`Earlier line ${i}.`], swipeId: 0, bag: {} });
+    const g = await host.begin(at.chatId, { type: "impersonate" });
+    const before = host.quietCalls.length;
+    const { reasoning } = await relayed(at, g);
+    const narrator = host.quietCalls.slice(before).at(-1)?.messages.map((m) => m.content).join("\n") ?? "";
+    expect(narrator).toContain("Earlier line 3.");
+    expect(narrator).toContain("Earlier line 6.");
+    expect(narrator).not.toContain("Earlier line 2.");
+    expect(narrator).not.toContain("Morning.");
     expect(reasoning).toContain("The 3 earlier messages stay out of its prompt.");
   });
 

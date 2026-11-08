@@ -98,6 +98,17 @@ function DraftPage(props: { draft: DepthDraft; c: DraftsControls }) {
             <p class="lre-small lre-muted lre-depth-note">{`Settle now: the author reads it against everything since its time (${d.pins} ${d.pins === 1 ? "beat" : "beats"} so far), as the poll does, and settles, drops or redrafts it. Re-draft: dropped, and drafted again from where the story is now. Drop: your verdict that it won't happen.`}</p>
           </div>
         ) : null}
+        {d.press ? (
+          <div data-lre-depth-draft-press data-state={d.press.state}>
+            <GmCard title={`${d.press.op === "settle" ? "Settle now" : "Re-draft"}: ${d.press.state === "running" ? "under way" : d.press.state === "done" ? "what became of it" : "it failed"}`}>
+              {d.press.lines.map((line, i) => (
+                <p key={i} class="lre-depth-reasoning">
+                  {line}
+                </p>
+              ))}
+            </GmCard>
+          </div>
+        ) : null}
         {d.settle ? (
           <div data-lre-depth-draft-settle>
             <GmCard title={`Settled at message ${d.settle.index}`} subtitle={`${d.settle.beats} ${d.settle.beats === 1 ? "beat" : "beats"} made canon, read against ${d.pins} ${d.pins === 1 ? "pin" : "pins"}`}>

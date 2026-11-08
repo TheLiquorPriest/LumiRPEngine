@@ -56,10 +56,17 @@ export function metered(port: ModelPort): Metered {
   const roles: Partial<Record<DepthRole, SpendCost>> = {};
   return {
     port: async (role, messages, opts) => {
-      const answer = await port(role, messages, opts);
-      const c = callCost(answer.usage);
-      cost = addCost(cost, c);
-      roles[role] = addCost(roles[role] ?? NO_COST, c);
+      const count = (usage: Parameters<typeof callCost>[0]): void => {
+        const c = callCost(usage);
+        cost = addCost(cost, c);
+        roles[role] = addCost(roles[role] ?? NO_COST, c);
+      };
+      // A call its provider refused spent what it read (`ProviderRefusal.usage`): the turn's spend counts it.
+      const answer = await port(role, messages, opts).catch((error: unknown) => {
+        if (error instanceof Error && error.name === "ProviderRefusal" && "usage" in error && error.usage) count(error.usage as Parameters<typeof callCost>[0]);
+        throw error;
+      });
+      count(answer.usage);
       return answer;
     },
     spent: () => ({ cost, roles: { ...roles } }),

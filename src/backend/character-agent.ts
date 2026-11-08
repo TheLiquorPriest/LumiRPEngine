@@ -982,3 +982,33 @@ export async function readCard(host: { characters?: { get(id: string, userId: Us
   }
 }
 
+/** The host's cards, as forming a core reads them. */
+export interface CardHost {
+  characters?: { get(id: string, userId: UserId): Promise<HostCharacter | null>; ofChat(chatId: string, userId: UserId): Promise<string | null> };
+}
+
+/**
+ * A mind formed in play (D-17), for someone the author first casts as their own agent with no mind
+ * yet: someone first met after opt-in, a new person, everyone on a chat turned on without the
+ * bootstrap. core.md from their card (the one the world links them to, else the chat's own card when
+ * it bears their name), else from the world's own description of them, which waits for the user's
+ * review; null when neither says anything of them. No model call.
+ */
+export async function formCore(input: { who: EntityId; name: string; player: string; at: number; fields: Readonly<Record<string, unknown>>; characterId?: string; host?: CardHost; chatId: string; userId: UserId; texts?: PromptTexts }): Promise<(StageOut & { source: "card" | "world" }) | null> {
+  const host = input.host;
+  const texts = input.texts ? { texts: input.texts } : {};
+  let card: HostCharacter | null = null;
+  if (host?.characters) {
+    if (input.characterId) card = await readCard(host, input.characterId, input.userId);
+    else {
+      const own = await host.characters.ofChat(input.chatId, input.userId).catch(() => null);
+      const chats = own ? await readCard(host, own, input.userId) : null;
+      if (chats && sameName(chats.name, input.name)) card = chats;
+    }
+  }
+  const fromCard = card ? cardCoreText(card, { name: input.name, player: input.player, ...texts }) : "";
+  if (fromCard !== "") return { ...seedCore({ who: input.who, at: input.at, source: "card", text: fromCard }), source: "card" };
+  const fromWorld = worldCoreText({ name: input.name, fields: input.fields, lore: [], player: input.player, ...texts });
+  return fromWorld !== "" ? { ...seedCore({ who: input.who, at: input.at, source: "world", text: fromWorld, review: true }), source: "world" } : null;
+}
+

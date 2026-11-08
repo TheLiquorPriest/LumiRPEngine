@@ -15,7 +15,7 @@ import { DEPTH_ASKER_LABEL, DEPTH_EFFORT_LABEL, DEPTH_WRITE_LABEL, type DepthInt
 import type { EntityId, MessageId } from "../../shared/ids";
 import { GmMindsSection } from "../../packs/minds/ui/gm";
 import { useApp } from "../app";
-import { Badge, Button, Disclosure, Empty, Field, HostSelect, HostSwitch, List, ListRow, Section, Tabs, tabPanel, TextDiff, useBusy } from "../components";
+import { Badge, Button, Disclosure, Empty, Field, HostSwitch, List, ListRow, Section, Tabs, tabPanel, TextDiff, useBusy } from "../components";
 import { ActionRow, ActionRows, GmCard, GmPage, useGmFocus } from "../gm/ui";
 import { markdown } from "../markdown";
 import type { GmSectionProps } from "../registry";
@@ -33,14 +33,13 @@ const VERDICT: Readonly<Record<DepthMindView["beliefs"][number]["verdict"], { la
   unlinked: { label: "Not linked yet", tone: "neutral" },
 };
 
-/** The Minds list: whose point of view you play, then every character with a mind. */
-export function MindsList(props: { view: DepthMindsView; busy: boolean; onOpen(id: EntityId): void; onPov(id: EntityId): void }) {
+/** The Minds list: whose point of view you play (Play as isn't supported yet), then every character with a mind. */
+export function MindsList(props: { view: DepthMindsView; onOpen(id: EntityId): void }) {
   const { view } = props;
   return (
     <div class="lre-stack lre-depth-minds" data-lre-depth-minds>
       <Section title="Your point of view">
         <p class="lre-small lre-muted lre-depth-note">{view.pov ? `You play ${view.pov.name}. The player character has no agent: you drive him, and what reached him is what his scenes exposed him to.` : "No one is the player character yet."}</p>
-        {view.povChoices.length > 0 ? <HostSelect label="Play as" value={view.pov?.id ?? ""} options={view.povChoices.map((c) => ({ value: c.id, label: c.name }))} disabled={props.busy} onChange={(id) => (id && id !== view.pov?.id ? props.onPov(id) : undefined)} /> : null}
       </Section>
       <Section title={`Minds (${view.characters.length})`} flush>
         {view.characters.length === 0 ? (
@@ -132,10 +131,11 @@ function FilesTab(props: { mind: DepthMindView; c: MindControls }) {
               title={mindFileLabel(f.path)}
               subtitle={[f.at ? `Written ${f.at}` : null, `${f.revisions} ${f.revisions === 1 ? "revision" : "revisions"}`].filter(Boolean).join(" · ")}
               badges={
-                f.pinned || f.out ? (
+                f.pinned || f.out || f.review ? (
                   <>
                     {f.pinned ? <Badge tone="accent">Your edit, pinned</Badge> : null}
                     {f.out ? <Badge tone="warn">Out of mind</Badge> : null}
+                    {f.review ? <Badge tone="warn">To review</Badge> : null}
                   </>
                 ) : undefined
               }
@@ -164,6 +164,11 @@ function FilesTab(props: { mind: DepthMindView; c: MindControls }) {
                     <Button size="sm" icon="edit" disabled={c.busy || c.draft !== null} onClick={() => c.onDraft({ path: f.path, text: f.text })}>
                       Edit
                     </Button>
+                    {f.review ? (
+                      <Button size="sm" variant="ghost" icon="check" disabled={c.busy || c.draft !== null} onClick={() => c.onSave({ path: f.path, text: f.text })}>
+                        Keep as it is
+                      </Button>
+                    ) : null}
                   </div>
                 </>
               )}
@@ -430,19 +435,7 @@ export function MindsV2(props: { section: GmSectionProps; view: DepthMindsView; 
     },
   };
   if (open !== null) return mind ? <MindPage mind={mind} c={c} panelId={panelId} /> : <Empty icon="hourglass">Reading their mind…</Empty>;
-  return (
-    <MindsList
-      view={props.view}
-      busy={busy}
-      onOpen={setOpen}
-      onPov={(id) =>
-        run(async () => {
-          const result = await app.request<"lre.depth">({ type: "lre.depth", chatId, op: "pov", who: id });
-          if (result) props.reload();
-        })
-      }
-    />
-  );
+  return <MindsList view={props.view} onOpen={setOpen} />;
 }
 
 /**

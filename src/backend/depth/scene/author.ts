@@ -615,8 +615,8 @@ export interface SetupResult extends StageCost {
   redone: string[];
 }
 
-/** The cast an answer gives: everyone present but the player character, each at an effort; "agent" only for someone with a mind. */
-function castOf(raw: unknown, names: Names, ctx: AuthorCtx, minded: ReadonlySet<EntityId>, refused: string[]): SceneCast[] {
+/** The cast an answer gives: everyone present but the player character, each at an effort; "agent" for someone with no mind yet forms theirs (the turn's `formMinds`). */
+function castOf(raw: unknown, names: Names, ctx: AuthorCtx, refused: string[]): SceneCast[] {
   const out: SceneCast[] = [];
   for (const r of list(raw)) {
     const c = record(r);
@@ -628,11 +628,7 @@ function castOf(raw: unknown, names: Names, ctx: AuthorCtx, minded: ReadonlySet<
     }
     if (who === ctx.pov) continue;
     if (out.some((o) => o.who === who)) continue;
-    let effort = (SCENE_EFFORTS as readonly string[]).includes(text(c.effort)) ? (text(c.effort) as DepthEffort) : "world";
-    if (effort === "agent" && !minded.has(who)) {
-      refused.push(`${tag(names, who)} has no mind yet, so no agent of their own to play them; you play them`);
-      effort = "author";
-    }
+    const effort = (SCENE_EFFORTS as readonly string[]).includes(text(c.effort)) ? (text(c.effort) as DepthEffort) : "world";
     out.push({ who, effort, why: text(c.why) });
   }
   return out;
@@ -642,7 +638,6 @@ function castOf(raw: unknown, names: Names, ctx: AuthorCtx, minded: ReadonlySet<
 export async function authorSetup(input: SetupInput): Promise<SetupResult> {
   const { world, state } = input;
   const names = namesOf(world, state);
-  const minded = new Set(input.present.filter((p) => p.mind).map((p) => p.who));
   const tools = input.archive ? archiveTools({ texts: input.texts, world, state, source: input.archive }) : [];
   // Everyone the scene may reach, each by their id (LIVE3d L3d-5): the player character always, wherever he is.
   const others = input.present.filter((p) => p.who !== input.pov);
@@ -685,11 +680,11 @@ export async function authorSetup(input: SetupInput): Promise<SetupResult> {
     const refused: string[] = [];
     const taken: NotTheirs[] = [];
     const sc = record(a.scene);
-    const cast = castOf(a.cast, names, input, minded, refused);
+    const cast = castOf(a.cast, names, input, refused);
     const agents = new Set(cast.filter((c) => c.effort === "agent").map((c) => c.who));
     const rt = record(a.realtime);
     let realtime: SetupResult["realtime"] = null;
-    // Real time with someone who has a mind but wasn't cast as their own agent: said back, and the scene set again (LIVE3 L3b-3).
+    // Real time with someone not cast as their own agent: said back, and the scene set again (LIVE3 L3b-3).
     let unplayed = false;
     if (rt && str(rt.end)) realtime = { end: rt.end.trim() };
     else if (rt) {
@@ -699,8 +694,8 @@ export async function authorSetup(input: SetupInput): Promise<SetupResult> {
         else {
           // Real time goes to the character's own agent: one the author plays itself, or handles as world, can't take it.
           const effort = cast.find((c) => c.who === withWho)?.effort;
-          unplayed = minded.has(withWho);
-          refused.push(`real-time dialogue with ${tag(names, withWho)} needs them playing as their own agent ("effort": "agent")${!minded.has(withWho) ? ", and they have no mind yet" : effort === "author" ? ", and you cast them as yours to play" : effort === "world" ? ", and you cast them as part of the world" : ", and you didn't cast them"}; it wasn't entered`);
+          unplayed = true;
+          refused.push(`real-time dialogue with ${tag(names, withWho)} needs them playing as their own agent ("effort": "agent")${effort === "author" ? ", and you cast them as yours to play" : effort === "world" ? ", and you cast them as part of the world" : ", and you didn't cast them"}; it wasn't entered`);
         }
       } else if (rt.with !== undefined) refused.push(`real-time dialogue needs someone with an agent of their own to talk with (${text(rt.with) || "no one"})`);
     }
@@ -901,10 +896,11 @@ export async function authorAsk(input: AskInput): Promise<AskResult> {
   ].join("\n\n");
   const asked = await ask(input, SCENE_TEXT.ask, data);
   const refused: string[] = [];
+  const account = answerWhy(asked.answer);
   return {
     beats: draftBeats(asked.answer.beats, names, input, { agents, onScreen: true }, refused, "a"),
     refused,
-    ...(asked.reasoning ? { reasoning: asked.reasoning } : {}),
+    ...(asked.reasoning ? { reasoning: asked.reasoning } : account !== "" ? { reasoning: account } : {}),
     ...(asked.usage ? { usage: asked.usage } : {}),
   };
 }
@@ -920,6 +916,12 @@ export interface PendingLine {
   latest?: string;
   /** It played this turn as its own agent (it remembers the scene anyway). */
   played: boolean;
+  /** Its files a retcon put out of mind (written from a beat since amended or struck, with no verdict since), by path under its folder: a reflection rewrites them. */
+  gone?: string[];
+  /** The takes its working memory holds unremembered, given only when they near the count that calls its remembering: a mind near it asks for a reflection. */
+  takes?: number;
+  /** No mind yet: the story reached them (from afar, say), and a catch-up would form their mind first, from their card or what the world knows of them. */
+  unminded?: true;
 }
 
 export interface PollInput extends AuthorCtx {
@@ -1003,6 +1005,8 @@ export interface PollResult extends StageCost {
   rebase: { draft: string; why: string }[];
   considered: PollConsidered[];
   refused: string[];
+  /** The story minutes from now after which it asks to be woken, and why; null when it asks nothing. */
+  wake: { minutes: number; why: string } | null;
 }
 
 function draftLines(lines: readonly DraftLine[]): string {
@@ -1075,7 +1079,7 @@ export async function authorPoll(input: PollInput): Promise<PollResult> {
     `The beats since you last looked:\n${input.beats.map((b) => beatText(world, names, b.ref, b.beat)).join("\n") || "- (none)"}`,
     `What characters wrote that will stay with them:\n${input.kept.map((k) => `- ${tag(names, k.who)}: ${k.text}`).join("\n") || "- (nothing yet)"}`,
     `Plans falling due:\n${input.due.map((d) => `- ${d}`).join("\n") || "- (none)"}`,
-    `What waits to be lived:\n${input.pending.map((p) => `- ${tag(names, p.who)}: ${p.pending} point${p.pending === 1 ? "" : "s"} of view waiting${p.latest ? `, the newest ${p.latest}` : ""}${p.played ? " (played this turn as their own agent)" : ""}`).join("\n") || "- (no one)"}`,
+    `What waits to be lived:\n${input.pending.map((p) => `- ${tag(names, p.who)}: ${p.pending} point${p.pending === 1 ? "" : "s"} of view waiting${p.latest ? `, the newest ${p.latest}` : ""}${p.played ? " (played this turn as their own agent)" : ""}${p.unminded ? " (no mind yet: a catch-up forms one, from their card or what the world knows of them, then lives these)" : ""}${p.gone && p.gone.length > 0 ? `; out of mind since a correction struck what they were written from: ${p.gone.join(", ")} (a reflection rewrites them)` : ""}${p.takes !== undefined ? `; their working memory is nearly full (${p.takes} takes unremembered): they ask to reflect` : ""}`).join("\n") || "- (no one)"}`,
     `Your open predictions:\n${input.predictions.map((p) => `- [${p.id}] ${p.text}`).join("\n") || "- (none)"}`,
     `The player's signals:\n${input.signals.map((s) => `- ${s}`).join("\n") || "- (none)"}`,
     `${input.sceneEnded ? "The scene ended with this turn." : "The scene goes on."} ${input.sinceChapter} turn${input.sinceChapter === 1 ? "" : "s"} since you last re-read a chapter. Your cadence: ${input.cadence === "turns" ? "you may revise lightly after any turn" : input.cadence === "scenes" ? "you reflect at a scene's end at the soonest" : "you reflect only at a chapter's end"}.`,
@@ -1083,7 +1087,7 @@ export async function authorPoll(input: PollInput): Promise<PollResult> {
       ? [
           `Your open drafts (off screen, not canon yet):\n${draftLines(input.offscreen.drafts) || "- (none)"}`,
           `Drafts a swipe took off the chain:\n${draftLines(input.offscreen.rebase) || "- (none)"}`,
-          `What this interval's allowances leave: ${input.offscreen.allowances.join("; ") || "no limits"}. The player's words on what deserves more than written: ${input.offscreen.threshold.trim() || "(none given)"}. ${input.offscreen.ask ? "Where you judge a moment major, mark its part major: once its treatment's allowance is spent, the player is asked whether to spend one more rather than it sliding down." : "The player asked not to be asked: a part past its treatment's allowance slides down the ladder."}`,
+          `What this interval's allowances leave: ${input.offscreen.allowances.join("; ") || "no limits"}. The player's threshold for what deserves more than written: ${input.offscreen.threshold.trim() || "(none given)"}. ${input.offscreen.ask ? "Where you judge a moment major, mark its part major: once its treatment's allowance is spent, the player is asked whether to spend one more rather than it sliding down." : "The player asked not to be asked: a part past its treatment's allowance slides down the ladder."}`,
           `Episodes waiting on the player's answer past an allowance (don't open them again):\n${(input.offscreen.asked ?? []).map((a) => `- ${a}`).join("\n") || "- (none)"}`,
         ]
       : []),
@@ -1107,6 +1111,8 @@ export async function authorPoll(input: PollInput): Promise<PollResult> {
   };
   const au = record(a.author);
   const depth = au && (au.depth === "scene" || au.depth === "chapter") ? au.depth : null;
+  const wk = record(a.wake);
+  const wake = wk && typeof wk.minutes === "number" && Number.isFinite(wk.minutes) && wk.minutes > 0 ? { minutes: Math.round(wk.minutes), why: text(wk.why) } : null;
   const known = new Set(input.predictions.map((p) => p.id));
   const scores: PollResult["scores"] = [];
   for (const r of list(a.scores)) {
@@ -1135,6 +1141,7 @@ export async function authorPoll(input: PollInput): Promise<PollResult> {
     rebase: verdictsOf(a.rebase, swiped, refused, "rebase"),
     considered,
     refused,
+    wake,
     ...(asked.reasoning ? { reasoning: asked.reasoning } : account !== "" ? { reasoning: account } : {}),
     ...(asked.usage ? { usage: asked.usage } : {}),
   };
@@ -1153,6 +1160,8 @@ export interface ReflectInput extends AuthorCtx {
   chapter: number;
   /** The latest message the reflection read. */
   through: string | null;
+  /** The player's signals the reflection weighs for player.md: how his turns came (a swipe, a Regenerate, a Re-narrate), his out-of-character lines, his edits. */
+  signals: readonly string[];
 }
 
 export interface ReflectResult extends StageCost {
@@ -1209,6 +1218,7 @@ export async function authorReflect(input: ReflectInput): Promise<ReflectResult>
     input.depth === "chapter" ? `Re-read the chapter: it would be chapter ${input.chapter + 1}. Its beats, in order:` : "Take stock at the scene's end. Its beats, in order:",
     input.beats.map((b) => beatText(world, names, b.ref, b.beat)).join("\n") || "- (none)",
     `Who the characters have become, in their own words:\n\n${input.becoming.map((b) => `### ${tag(names, b.who)}\n${[b.self && `Their story of themselves:\n${b.self}`, b.mind && `What they keep in mind:\n${b.mind}`].filter(Boolean).join("\n\n") || "(nothing written yet)"}`).join("\n\n") || "(no one has a mind yet)"}`,
+    `The player's signals beyond his words (what he swiped, regenerated or edited, his out-of-character lines), the evidence for what he wants (player.md):\n${input.signals.map((s) => `- ${s}`).join("\n") || "- (none)"}`,
   ].join("\n\n");
   const asked = await ask(input, SCENE_TEXT.reflect, data);
   const a = asked.answer;

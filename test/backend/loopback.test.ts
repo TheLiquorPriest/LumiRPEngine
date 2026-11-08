@@ -322,6 +322,10 @@ describe("the loopback's bridge", () => {
     expect(second.content).toBe("You rolled a 16: the lock gives.");
     expect(second.reasoning).toContain("The tools answered: the narrator goes on");
     expect(second.reasoning).not.toContain("LumiRPEngine is working out the turn");
+    // The tools' results are in: the narrator's second call is offered no tools, so it writes the reply rather than call again until core's rounds run out (L-14).
+    const again = host.quietCalls.findLast((r) => r.messages.some((m) => m.content.includes(TOOL_RESULTS)));
+    expect(again?.tools).toBeUndefined();
+    expect(again?.toolChoice).toBeUndefined();
     await host.finish(g, second.content);
     expect((await chain(rig, chatId)).at(-1)?.ledger?.swipes["0"]?.status).toBe("ok");
   });

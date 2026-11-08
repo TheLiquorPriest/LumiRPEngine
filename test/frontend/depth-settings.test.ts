@@ -181,7 +181,8 @@ describe("the stored Depth settings", () => {
     expect(read.steps).toBe(12);
     expect(depthSettingsOf({ steps: 30 }).steps).toBe(30);
     expect(read.bootstrap.cap).toBe("none");
-    expect(read.bootstrap.atOnce).toEqual({ historian: 1, minds: 4, author: 1 });
+    expect(read.bootstrap.atOnce).toEqual({ minds: 4 });
+    expect(read.bootstrap.mostMinds).toBe(0);
     expect(depthSettingsOf(undefined)).toEqual(shipped);
   });
 

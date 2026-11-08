@@ -8,7 +8,7 @@
 // Nothing is withheld (§1.4). The body is hook-free; `TurnView` holds the request.
 
 import { useEffect, useState } from "preact/hooks";
-import { durationText, tokensText } from "../../shared/depth-views";
+import { type DepthResult, durationText, tokensText } from "../../shared/depth-views";
 import type { MessageId } from "../../shared/ids";
 import { type DepthSceneView, SCENE_DECIDER_LABEL, type SceneBeat, type ScenePassage } from "../../shared/scene-view";
 import { useApp } from "../app";
@@ -127,6 +127,7 @@ export function TurnBody(props: { view: DepthSceneView; busy: boolean; onPick(me
               <ActionRow key={i} title={c.role} subtitle={[c.connection || "your default connection", c.model, c.requestId ?? ""].filter((s) => s !== "").join(" · ")} value={[c.promptTokens !== undefined || c.completionTokens !== undefined ? `${tokensText((c.promptTokens ?? 0) + (c.completionTokens ?? 0))} tokens` : "", c.ms !== undefined ? durationText(c.ms) : ""].filter((s) => s !== "").join(" · ")} {...(c.misread ? { tone: "warn" as const } : {})}>
                 {c.capped ? <p class="lre-small lre-muted">{`Its answer room of ${tokensText(c.capped.asked)} tokens was over what the model takes, so it was asked again at ${tokensText(c.capped.limit)}.`}</p> : null}
                 {c.misread ? <MisreadFields fields={c.misread.fields} count={c.misread.count} raw={c.misread.raw} /> : null}
+                {c.reasoning ? <Disclosure summary="Its reasoning">{c.reasoning}</Disclosure> : null}
               </ActionRow>
             ))}
           </ActionRows>
@@ -173,12 +174,14 @@ export function TurnView(props: { section: GmSectionProps }) {
   const [view, setView] = useState<DepthSceneView | null | undefined>(undefined);
   const [message, setMessage] = useState<MessageId | undefined>(undefined);
   const [busy, setBusy] = useState(false);
+  const [dryRun, setDryRun] = useState<DepthResult["dryRun"]>(null);
   useEffect(() => {
     let live = true;
     setBusy(true);
     void app.request<"lre.depth">({ type: "lre.depth", chatId: section.chatId, op: "scene", ...(message !== undefined ? { message } : {}) }).then((result) => {
       if (!live) return;
       setView(result?.scene ?? null);
+      setDryRun(result?.dryRun ?? null);
       setBusy(false);
     });
     return () => {
@@ -188,13 +191,33 @@ export function TurnView(props: { section: GmSectionProps }) {
   if (view === undefined) return <Empty icon="hourglass">Reading the scene…</Empty>;
   if (view === null) return <Empty icon="layers">The scene couldn't be read.</Empty>;
   return (
-    <TurnBody
-      view={view}
-      busy={busy}
-      onPick={setMessage}
-      onJump={(messageId) => {
-        if (!app.host.revealMessage(messageId)) app.toast("That message isn't on screen in this chat.", "info");
-      }}
-    />
+    <>
+      <TurnBody
+        view={view}
+        busy={busy}
+        onPick={setMessage}
+        onJump={(messageId) => {
+          if (!app.host.revealMessage(messageId)) app.toast("That message isn't on screen in this chat.", "info");
+        }}
+      />
+      {dryRun ? <DryRunPanel dryRun={dryRun} /> : null}
+    </>
+  );
+}
+
+/** The chat's last dry run on the loopback: the narrator's prompt LumiRPEngine would send, each message in order. */
+function DryRunPanel(props: { dryRun: NonNullable<DepthResult["dryRun"]> }) {
+  const { dryRun } = props;
+  return (
+    <details class="lre-depth-dry-run">
+      <summary>{`Dry run: the narrator prompt LumiRPEngine would send (${dryRun.messages.length} messages, ${new Date(dryRun.at).toLocaleTimeString()})`}</summary>
+      <p class="lre-small lre-muted">Without the sections a turn's engine run writes: a dry run runs no engine.</p>
+      {dryRun.messages.map((m, i) => (
+        <div key={i} class="lre-small">
+          <strong>{m.role}</strong>
+          <pre class="lre-section-text">{m.content}</pre>
+        </div>
+      ))}
+    </details>
   );
 }

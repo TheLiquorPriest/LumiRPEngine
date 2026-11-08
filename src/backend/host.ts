@@ -260,9 +260,10 @@ export interface PromptInterceptorInput {
   messages: PromptMessage[];
 }
 
-/** Its answer: parameters merged into the generation's (the turn tag, DEPTH-PLAN §3.5); the prompt goes on as it is. */
+/** Its answer: parameters merged into the generation's (the turn tag, DEPTH-PLAN §3.5), and the places of the messages that leave the prompt (`omit`: a depth chat's history before its cutoff); the rest goes on as it is. */
 export interface PromptVerdict {
   parameters?: JsonObject;
+  omit?: readonly number[];
 }
 
 /** A piece of a streamed call's answer as it is written: the reply's text, or the model's reasoning. */

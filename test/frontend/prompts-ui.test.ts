@@ -15,7 +15,9 @@ import { Chip } from "../../src/frontend/build/form-kit";
 import { Button, ListRow, SearchField, TextDiff } from "../../src/frontend/components";
 import { FINAL_OUTPUT_PAGE, OFFSTAGE_TEXT_ID, PROMPT_PAGES, PROMPTS, promptDef, promptProblems, sectionPromptId, staleAsks, type PromptDef, type PromptSettings } from "../../src/shared/prompts";
 import { OFFSCREEN_TEXT } from "../../src/shared/offscreen-prompts";
-import { OLD_WHY_FIELD, SCENE_STAGING_SHAPE, SCENE_TEXT, STAGING_SHAPE, WHY_ASK } from "../../src/shared/scene-prompts";
+import { ACCOUNT_ASK, DEPTH_TEXT } from "../../src/shared/depth-prompts";
+import { REALTIME_TEXT } from "../../src/shared/realtime-prompts";
+import { OLD_WHY_FIELD, SCENE_STAGING_SHAPE, SCENE_TEXT, STAGING_SHAPE, WHY_ASK, WHY_OWN_ASK } from "../../src/shared/scene-prompts";
 import type { PromptTestView } from "../../src/shared/protocol";
 import { Rig } from "../support/rig";
 import { labelled, propsOf } from "../support/tree";
@@ -194,7 +196,7 @@ describe("finding a text", () => {
     expect(fixCount(prompts)).toBe(2);
     expect(ids(findTexts("", "fix", prompts))).toEqual([SCENE_TEXT.setup, SCENE_TEXT.step]);
     const flag = staleAsks(def(SCENE_TEXT.setup), old(SCENE_TEXT.setup));
-    expect(flag).toEqual(['it doesn\'t ask where each person staged is ("place", by the id of one of the world\'s places, or "remote" for someone the scene reaches only from afar): written before the staging said so, its answer leaves everyone but the player character where they were, and the author is asked once more each time. Reset it, or ask for both in your own words']);
+    expect(flag).toEqual(['it doesn\'t ask where each person staged is ("place", by the id of one of the world\'s places, or "remote" for someone the scene reaches only from afar): written before the staging said so, its answer leaves everyone but the player character where they were, and the author is asked once more each time. Reset it, or ask for both in your own words, naming the keys "place" and "remote" as they are']);
     expect(savedProblems(def(SCENE_TEXT.step), prompts)).toEqual(flag);
     // A flag, never a refusal: it saves and is sent; the shipped texts, and one that asks for both in its own words, aren't flagged.
     expect(promptTextPatch(def(SCENE_TEXT.setup), old(SCENE_TEXT.setup), 20_000)).toEqual({ prompts: { texts: { [SCENE_TEXT.setup]: old(SCENE_TEXT.setup) } } });
@@ -203,8 +205,10 @@ describe("finding a text", () => {
   });
 
   test("an override of an author's text that still asks for the old answer field needs a fix, and is still saved", () => {
-    const asking = PROMPTS.filter((d) => d.asks?.includes(WHY_ASK));
+    const asking = PROMPTS.filter((d) => d.asks?.includes(WHY_ASK) || d.asks?.includes(WHY_OWN_ASK));
     expect(ids(asking).sort()).toEqual([...Object.values(SCENE_TEXT), ...Object.values(OFFSCREEN_TEXT)].sort());
+    // A text whose "why" is its own (the two edits, settling, a scene reaching a draft) is told only to take the old field out.
+    expect(ids(PROMPTS.filter((d) => d.asks?.includes(WHY_OWN_ASK))).sort()).toEqual([SCENE_TEXT.edit, SCENE_TEXT.editOwn, OFFSCREEN_TEXT.settle, OFFSCREEN_TEXT.walkOn].sort());
     // Each as written before: its "why" the old field, or, where its "why" is its own, the old field beside it.
     const why = '"why": one or two plain sentences explaining the choice';
     const old = (d: PromptDef) => (d.text.includes(why) ? d.text.replace(why, OLD_WHY_FIELD) : d.text.replace(/\}\.( Give|$)/, `, ${OLD_WHY_FIELD}}.$1`));
@@ -212,10 +216,27 @@ describe("finding a text", () => {
     const prompts = settings(Object.fromEntries(asking.map((d) => [d.id, old(d)])));
     expect(fixCount(prompts)).toBe(asking.length);
     for (const d of asking) {
-      expect(savedProblems(d, prompts)).toEqual([WHY_ASK.message]);
+      expect(savedProblems(d, prompts)).toEqual([(d.asks?.includes(WHY_OWN_ASK) ? WHY_OWN_ASK : WHY_ASK).message]);
       expect(staleAsks(d, d.text)).toEqual([]);
     }
     expect(WHY_ASK.message).toContain(OLD_WHY_FIELD);
+    expect(WHY_OWN_ASK.message).toContain("take that field out");
+  });
+
+  test("a bootstrap author's text or a real-time answer that still asks for \"reasoning\" needs a fix", () => {
+    const asking = PROMPTS.filter((d) => d.asks?.includes(ACCOUNT_ASK));
+    expect(ids(asking).sort()).toEqual([DEPTH_TEXT.authorRead, DEPTH_TEXT.authorChapter, REALTIME_TEXT.watchAnswer, REALTIME_TEXT.exposureAnswer].sort());
+    for (const d of asking) {
+      expect(d.text).not.toContain('"reasoning"');
+      expect(d.text).toContain('"why"');
+      expect(staleAsks(d, d.text)).toEqual([]);
+      expect(staleAsks(d, d.text.replace('"why":', '"reasoning":'))).toEqual([ACCOUNT_ASK.message]);
+    }
+  });
+
+  test("a poll override that takes the old field out in its own words isn't flagged", () => {
+    const why = '"why": one or two plain sentences explaining the choice';
+    const old = (d: PromptDef) => (d.text.includes(why) ? d.text.replace(why, OLD_WHY_FIELD) : d.text.replace(/\}\.( Give|$)/, `, ${OLD_WHY_FIELD}}.$1`));
     // A flag, never a refusal: it saves and is sent; one that takes the field out in its own words isn't flagged.
     const poll = def(SCENE_TEXT.poll);
     expect(promptTextPatch(poll, old(poll), 20_000)).toEqual({ prompts: { texts: { [poll.id]: old(poll) } } });

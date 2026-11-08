@@ -962,7 +962,7 @@ export type ToolsRequest = Request<"lre.tools"> & ({ op: "list" } | { op: "descr
  * the scheduler's exclusions) or forgetting it. `origin` is the page's own address, which the one
  * line names.
  */
-export type LoopbackPageRequest = Request<"lre.loopback.page"> & { origin?: string } & ({ op: "get" } | { op: "mint" } | { op: "shared"; enabled: boolean } | { op: "fix"; relay: string } | { op: "forget"; relay: string });
+export type LoopbackPageRequest = Request<"lre.loopback.page"> & { origin?: string } & ({ op: "get" } | { op: "mint" } | { op: "shared"; enabled: boolean } | { op: "fix"; relay: string } | { op: "forget"; relay: string } | { op: "test" });
 
 /** Cancel on the activity line (DESIGN §5.1): stop the chat's engine run or reply read under way. A cancelled turn ends with no failure, and can be sent again. */
 export interface CancelTurnRequest extends Request<"lre.cancel"> {
@@ -1396,7 +1396,8 @@ export interface ResultBodies extends LoopbackResultBodies {
   /** `get`: the chat's records, oldest first, and its activity line now; `text`: the agent call's text, null when it is gone. */
   "lre.diag": { records: DiagRecord[]; activity: Activity | null; text?: string | null };
   /** The run started, cancelled or asked about; null when the chat has had none since the extension started. */
-  "lre.minds": { run: MindsRunView | null };
+  /** `off`: why the classic minds run is off in this chat (a chat on depth, whose minds their own agents write); absent where it runs. */
+  "lre.minds": { run: MindsRunView | null; off?: string };
   "lre.bootstrap": { view: BootstrapView; estimate?: BootstrapEstimate };
   "lre.depth": DepthResult;
   /** `list`: the tools and the backend's build; `describe`: the one tool; `call`: its answer. */

@@ -118,6 +118,8 @@ export interface MindWriteData {
   source?: CoreSource;
   /** A core seeded from anything but the card or the world alone (an imported entry, the history): marked for the user's review. */
   review?: true;
+  /** The reasoning of the call that wrote it, by its blob's hash, where the write rides a turn's record rather than a layer entry of its own (a play's writes). */
+  reasoning?: string;
 }
 
 /** `minds.v2.lived`: the beats one call of the character's agent lived, in story order, whatever it kept of each. */
@@ -279,6 +281,7 @@ export function mindWriteOf(data: JsonObject): MindWriteData | string {
   if (data.supersedes !== undefined && !str(data.supersedes)) return "what a mind write supersedes is a beat's id";
   if (data.source !== undefined && !(CORE_SOURCES as readonly unknown[]).includes(data.source)) return `a seeded core's source is one of ${CORE_SOURCES.join(", ")}`;
   if (data.review !== undefined && data.review !== true) return "review is true or absent";
+  if (data.reasoning !== undefined && !isBlobHash(data.reasoning)) return "a mind write's reasoning is a blob's hash";
   return {
     who,
     path,
@@ -291,6 +294,7 @@ export function mindWriteOf(data: JsonObject): MindWriteData | string {
     ...(data.supersedes !== undefined ? { supersedes: data.supersedes as string } : {}),
     ...(data.source !== undefined ? { source: data.source as CoreSource } : {}),
     ...(data.review === true ? { review: true as const } : {}),
+    ...(isBlobHash(data.reasoning) ? { reasoning: data.reasoning } : {}),
   };
 }
 

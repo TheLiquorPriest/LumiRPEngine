@@ -41,9 +41,10 @@ export const AUTHOR_EDIT = "author.edit";
 export const AUTHOR_SPEND = "author.spend";
 export const AUTHOR_ASK = "author.ask";
 export const AUTHOR_ANSWER = "author.answer";
+export const AUTHOR_ADOPT = "author.adopt";
 
 /** The author's record types, which change no world state. */
-export const AUTHOR_EVENTS: readonly string[] = [AUTHOR_POLL, AUTHOR_PREDICT, AUTHOR_SCORE, AUTHOR_DRIFT, AUTHOR_EDIT, AUTHOR_SPEND, AUTHOR_ASK, AUTHOR_ANSWER];
+export const AUTHOR_EVENTS: readonly string[] = [AUTHOR_POLL, AUTHOR_PREDICT, AUTHOR_SCORE, AUTHOR_DRIFT, AUTHOR_EDIT, AUTHOR_SPEND, AUTHOR_ASK, AUTHOR_ANSWER, AUTHOR_ADOPT];
 
 /** The longest words a record keeps in one field, in characters; the author's whole thinking rides with the entry's reasoning. */
 export const AUTHOR_WORDS_MAX = 2000;
@@ -77,6 +78,8 @@ export interface PollData {
   jobs: PollJob[];
   /** The author's short account of the poll, a blob. */
   note?: BlobRef;
+  /** The story clock (in minutes) past which it asked to be woken, and why. */
+  wake?: { at: number; why: string };
 }
 
 /** `author.predict`'s data: one prediction. */
@@ -146,6 +149,19 @@ export interface SpendCost {
   reasoningOut?: number;
   /** Money, where the provider priced the calls. */
   money?: number;
+}
+
+/**
+ * `author.adopt`'s data, in a turn's `pre` (DEPTH-PLAN §6.3, the adopt step of §2.3): the work
+ * between turns this turn waited for before it read the fold (what it was and the message it read
+ * through), and what it went on without because it wasn't ready in time. Nothing is marked adopted
+ * anywhere else; the record is the citation.
+ */
+export interface AdoptData {
+  waited: { what: string; message: string }[];
+  without: { what: string; message: string }[];
+  /** The layer entries it landed for the turn's read from what it waited for (`LedgerIO.adoptHeld`). */
+  entries: string[];
 }
 
 /** `author.spend`'s data: what one piece of work cost, with what it bought and when. */
@@ -241,6 +257,7 @@ export function authorProblem(type: string, data: unknown): string | null {
         const p = jobProblem(j);
         if (p) return p;
       }
+      if (data.wake !== undefined && !(isRecord(data.wake) && typeof data.wake.at === "number" && Number.isFinite(data.wake.at) && words(data.wake.why, true))) return "a poll's wake is a story time and why";
       return data.note === undefined || isBlobHash(data.note) ? null : "a poll's note is a stored text";
     }
     case AUTHOR_PREDICT:
@@ -299,6 +316,11 @@ export function authorProblem(type: string, data: unknown): string | null {
     case AUTHOR_ANSWER:
       if (!nonBlank(data.ask)) return "an answer names its ask";
       return typeof data.spend === "boolean" ? null : "an answer spends or doesn't";
+    case AUTHOR_ADOPT: {
+      const cited = (list: unknown): boolean => Array.isArray(list) && list.every((c) => isRecord(c) && nonBlank(c.what) && nonBlank(c.message));
+      if (!Array.isArray(data.entries) || !data.entries.every(nonBlank)) return "an adoption lists the entries it landed, by id";
+      return cited(data.waited) && cited(data.without) ? null : "an adoption names the work it waited for and went without, each with its message";
+    }
     default:
       return `${type} isn't an author's record`;
   }
@@ -321,6 +343,7 @@ export function pollEvent(d: PollData): PackEvent {
     }),
   };
   if (d.note !== undefined) data.note = d.note;
+  if (d.wake !== undefined) data.wake = { at: d.wake.at, why: bounded(d.wake.why) };
   return { type: AUTHOR_POLL, data };
 }
 
@@ -365,6 +388,11 @@ export function askEvent(d: AskData): PackEvent {
 
 export function answerEvent(d: AnswerData): PackEvent {
   return { type: AUTHOR_ANSWER, data: { ask: d.ask, spend: d.spend } };
+}
+
+export function adoptEvent(d: AdoptData): PackEvent {
+  const list = (l: AdoptData["waited"]): JsonObject[] => l.map((c) => ({ what: bounded(c.what), message: c.message }));
+  return { type: AUTHOR_ADOPT, data: { waited: list(d.waited), without: list(d.without), entries: [...d.entries] } };
 }
 
 /** The data of an author's record when `e` is a well-formed one of `type`. */

@@ -202,6 +202,20 @@ const MINDS_POST_CALLS: readonly StepPurpose[] = ["memory", "consolidate", "know
 /** Why every role of an agent turn is none in GM → Live when a chat on depth generated off the loopback (`offLoopback`). */
 const OFF_LOOPBACK_WHY = "Generated off the loopback: no scene and no read of the reply.";
 
+/** One piece of depth work under way in a chat (`Runtime.depthWorking`): what it is, whose, the message it reads through once known, whether it is work between turns, its abort, and when what the next turn reads of it is in. */
+interface DepthJob {
+  what: string;
+  userId: UserId;
+  message: MessageId | null;
+  between: boolean;
+  stop: AbortController;
+  ready: Promise<void>;
+  isReady: boolean;
+}
+
+/** How long a turn waits for depth work it reads through before it goes on without it (`Runtime.depthNeeded`). */
+const NEEDED_WAIT_MS = 120_000;
+
 /** Refusals of a change the state already holds (a fact already known, a life state already so): nothing to show or tell. */
 const ALREADY_SO: ReadonlySet<string> = new Set(["already_known", "already"]);
 
@@ -895,6 +909,8 @@ export class Runtime implements TurnHooks {
   readonly depth: DepthTurns;
   /** What follows depth replies and reads the player's edits of them, under way outside every turn (`depthSettled`). */
   private readonly depthWork = new Set<Promise<void>>();
+  /** The same work by chat (DEPTH-PLAN §6.1-6.3): what a swipe or delete stops, what Work between turns off stops, and what a turn waits for. */
+  private readonly depthJobs = new Map<ChatId, Set<DepthJob>>();
   /** Smart persistence (Settings → Agents → Pipeline): each chat's last agent turn's scene, which its next turn's quiet minds and scene notes are kept by. */
   readonly persistence: ScenePersistence;
   /** Each chat's agent metadata: the learned area's index, the GM assistant's thread and a session rollback asked for (DESIGN §4.4). */
@@ -1069,8 +1085,11 @@ export class Runtime implements TurnHooks {
     });
     // The host shifts a message's swipes down when one is deleted; the chips shown by swipe follow.
     this.host.on("MESSAGE_SWIPED", (e, userId) => {
+      // Another swipe shows, or the shown one went: depth work that read through this message's swipe has lost its basis (DEPTH-PLAN §6.3).
+      if (e.action !== "updated") this.depthLeft(e.chatId, e.message.id, "a swipe took the reply it read off the chat");
       if (e.action === "deleted" && userId) this.swipeDeleted(e.chatId, userId, e.message.id, e.swipeId).catch((error: unknown) => this.host.log("warn", `[LumiRPEngine] chat ${e.chatId}: chips didn't follow a deleted swipe (${error instanceof Error ? error.message : String(error)})`, userId));
     });
+    this.host.on("MESSAGE_DELETED", (e) => this.depthLeft(e.chatId, e.messageId, "the message it read was deleted"));
     this.host.on("WORLD_INFO_ACTIVATED", (e) => this.onActivated(e.chatId, e.entries.map((x) => x.id)));
     const gate = this.worldInfoGate();
     // A loopback generation's prompt also gets the marks of the engine entries its turn fills (DEPTH-PLAN §3.12, B2): core places each where it places the entry, and the narrator's prompt puts the section there.
@@ -3231,7 +3250,7 @@ export class Runtime implements TurnHooks {
   private afterDepth(input: TurnContext): void {
     const after = this.depth.after(input.generationId);
     const basis = after ? chainBases(input.core.chain(input.observed), input.core.journal.tombstones).find((b) => b.message === input.messageId) : undefined;
-    if (after && basis) this.depthWorking(input.chatId, input.userId, "the step after the reply", afterDepthReply(this, input.chatId, input.userId, basis, after).then(() => undefined));
+    if (after && basis) this.depthWorking(input.chatId, input.userId, "the step after the reply", (job) => afterDepthReply(this, input.chatId, input.userId, basis, after, { signal: job.signal, ready: job.ready }).then(() => undefined), { reads: basis.message, between: true });
   }
 
   /**
@@ -3247,7 +3266,7 @@ export class Runtime implements TurnHooks {
       input.chatId,
       input.userId,
       "the reading of your edit",
-      (async () => {
+      () => (async () => {
         if (!(await this.depth.on(input.chatId, input.userId))) return;
         const out = await replyEdited(this, input.chatId, input.userId, input.messageId, input.text);
         this.host.log("info", `[LumiRPEngine] chat ${input.chatId}, your edit of ${input.isUser ? "your message" : "a reply"}: ${out.said}`, input.userId);
@@ -3269,22 +3288,81 @@ export class Runtime implements TurnHooks {
       chatId,
       userId,
       "the author's poll after the clock moved on",
-      (async () => {
+      (job) => (async () => {
         if (!(await this.depth.on(chatId, userId))) return;
         const basis = await headBasis(this, chatId, userId);
         if (basis === null) return;
-        await afterDepthReply(this, chatId, userId, basis, { scene: null, ended: false, remember: [], poll: true, beats: [] }, { occasion: `clock:${moved.fix}`, woken: { minutes: moved.minutes, why: moved.why } });
+        job.reads(basis.message);
+        await afterDepthReply(this, chatId, userId, basis, { scene: null, ended: false, remember: [], poll: true, beats: [] }, { occasion: `clock:${moved.fix}`, woken: { minutes: moved.minutes, why: moved.why }, signal: job.signal, ready: job.ready });
         this.changed(chatId, userId);
       })(),
+      { between: true },
     );
   }
 
-  /** Keeps `work` among the depth work under way until it is done; what it throws is logged. */
-  private depthWorking(chatId: ChatId, userId: UserId, what: string, work: Promise<void>): void {
-    const tracked: Promise<void> = work
+  /**
+   * Keeps the work `run` starts among the depth work under way until it is done; what it throws is
+   * logged. `reads`: the message it reads through, once known (`job.reads` sets it later): a swipe or
+   * delete of that message stops it (`depthLeft`), and a turn reading through it waits for what the
+   * next turn reads of it (`depthNeeded`). `between`: work between turns, which Work between turns
+   * off stops (`depthPaused`).
+   */
+  private depthWorking(chatId: ChatId, userId: UserId, what: string, run: (job: { signal: AbortSignal; ready: () => void; reads: (message: MessageId) => void }) => Promise<void>, o: { reads?: MessageId; between?: boolean } = {}): void {
+    const ready = Promise.withResolvers<void>();
+    const job: DepthJob = { what, userId, message: o.reads ?? null, between: o.between === true, stop: new AbortController(), ready: ready.promise, isReady: false };
+    const markReady = (): void => {
+      job.isReady = true;
+      ready.resolve();
+    };
+    const jobs = this.depthJobs.get(chatId) ?? new Set<DepthJob>();
+    this.depthJobs.set(chatId, jobs.add(job));
+    const tracked: Promise<void> = run({ signal: job.stop.signal, ready: markReady, reads: (message) => (job.message = message) })
       .catch((error: unknown) => this.host.log("warn", `[LumiRPEngine] chat ${chatId}: ${what} didn't go through: ${error instanceof Error ? error.message : String(error)}`, userId))
-      .finally(() => this.depthWork.delete(tracked));
+      .finally(() => {
+        markReady();
+        jobs.delete(job);
+        if (jobs.size === 0 && this.depthJobs.get(chatId) === jobs) this.depthJobs.delete(chatId);
+        this.depthWork.delete(tracked);
+      });
     this.depthWork.add(tracked);
+  }
+
+  /** Stops the depth work in `chatId` that read through `message`, which left the chain (DEPTH-PLAN §6.3): cancelling only saves its cost; what it already landed stays at a basis the chain no longer folds. */
+  private depthLeft(chatId: ChatId, message: MessageId, why: string): void {
+    for (const job of this.depthJobs.get(chatId) ?? []) {
+      if (job.message !== message || job.stop.signal.aborted) continue;
+      job.stop.abort(new Error(why));
+      this.host.log("info", `[LumiRPEngine] chat ${chatId}: ${job.what} stopped: ${why}`, job.userId);
+    }
+  }
+
+  /**
+   * Work between turns was turned off (Settings → Depth): `userId`'s work between turns under way
+   * stops once what the next turn reads of it is in (the remembering and truth links that run with
+   * the setting off too), so a running poll, its reflections and the work off screen stop with it.
+   */
+  depthPaused(userId: UserId): void {
+    for (const jobs of this.depthJobs.values())
+      for (const job of jobs) if (job.userId === userId && job.between) void job.ready.then(() => job.stop.abort(new Error("Work between turns was turned off")));
+  }
+
+  /**
+   * The foreground's wait (DEPTH-PLAN §6, "needed by this turn"): a turn reading through the messages
+   * `on` waits for what the next turn reads of the depth work under way at them (the remembering, its
+   * truth links, the catch-ups the poll asked for now), up to `NEEDED_WAIT_MS`; what isn't in by then
+   * it goes on without, and that work lands after it. What it waited for and went without, for its
+   * citation (`author.adopt`).
+   */
+  async depthNeeded(chatId: ChatId, on: ReadonlySet<MessageId>, signal?: AbortSignal): Promise<{ waited: { what: string; message: MessageId }[]; without: { what: string; message: MessageId }[] }> {
+    const jobs = [...(this.depthJobs.get(chatId) ?? [])].filter((j) => j.message !== null && on.has(j.message) && !j.isReady && !j.stop.signal.aborted);
+    if (jobs.length === 0) return { waited: [], without: [] };
+    const late = Promise.withResolvers<void>();
+    const timer = setTimeout(late.resolve, NEEDED_WAIT_MS);
+    signal?.addEventListener("abort", () => late.resolve(), { once: true });
+    await Promise.race([Promise.all(jobs.map((j) => j.ready)), late.promise]);
+    clearTimeout(timer);
+    const cite = (j: DepthJob): { what: string; message: MessageId } => ({ what: j.what, message: j.message ?? ("" as MessageId) });
+    return { waited: jobs.filter((j) => j.isReady && !j.stop.signal.aborted).map(cite), without: jobs.filter((j) => !j.isReady || j.stop.signal.aborted).map(cite) };
   }
 
   /** Resolves once nothing that follows a depth reply or reads an edit of one is under way (tests; shutdown). */
@@ -3748,6 +3826,30 @@ export class Runtime implements TurnHooks {
     const live = this.live.start({ chatId: input.chatId, userId: input.userId, turn: input.generationId, kind: "turn", pipeline: settings.agents.pipeline.mode === "main" ? "main" : "fixed", text: said ? (said.swipes[said.swipeId] ?? "") : "" });
     live.add({ kind: "plan", rows: ROLE_IDS.map((role) => ({ role, status: "none", why: OFF_LOOPBACK_WHY })) });
     live.end("done", "Generated off the loopback, so the engine didn't run.");
+  }
+
+  /**
+   * A world chat's generation on the loopback while no relay of the player's runs (L55): the reply
+   * never reaches LumiRPEngine, and core shows only a connection error. He is told why under the
+   * message the reply answers (as `offLoopback` places it), with Settings → Loopback's own line for it.
+   */
+  async relayDown(input: { chatId: ChatId; userId: UserId; target: MessageId | null; why: string }): Promise<void> {
+    const messages = await this.host.chats.messages(input.chatId, input.userId);
+    const at = input.target === null ? -1 : messages.findIndex((m) => m.id === input.target);
+    const told = ownMessage(at < 0 ? messages : messages.slice(0, at))?.id ?? input.target;
+    if (!told) return;
+    await this.chips.add(input.chatId, input.userId, [
+      {
+        id: `needs_loopback:relay:${told}`,
+        kind: "needs_loopback",
+        messageId: told,
+        label: "The loopback relay isn't running",
+        detail: `This chat generates through the loopback, so its reply reaches LumiRPEngine only through a running relay. ${input.why}`,
+        actions: [{ id: "loopback", label: "Settings → Loopback", input: { type: "settings", label: "Settings → Loopback", page: "loopback" } }],
+        expires: "next_send",
+        payload: {},
+      },
+    ]);
   }
 
   /**

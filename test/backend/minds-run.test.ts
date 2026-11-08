@@ -8,6 +8,8 @@
 import { describe, expect, test } from "bun:test";
 import type { QuietRequest } from "../../src/backend/host";
 import { toChain } from "../../src/backend/ledger-io";
+import { CLASSIC_MINDS_OFF } from "../../src/backend/minds-run";
+import { BootstrapFiles } from "../../src/backend/bootstrap/files";
 import type { JsonObject } from "../../src/shared/json";
 import type { MindsRunView } from "../../src/shared/minds";
 import type { WorldDoc } from "../../src/shared/world";
@@ -65,6 +67,23 @@ async function runEnd(rig: Rig, runId: string): Promise<MindsRunView> {
   if (last.type !== "lre.minds.update") throw new Error("not a minds run update");
   return last.run;
 }
+
+describe("Run minds now on a chat on depth", () => {
+  test("is off: the status says why, a run is refused in those words, and no mind runs", async () => {
+    const rig = new Rig({ shipped: true, minds: true });
+    fakeModels(rig, { text: "TURN-MARK" });
+    const chatId = await alderChat(rig);
+    await rig.turn(chatId, "Hello.", "Danny nods.");
+    expect(rig.body(await rig.send({ type: "lre.minds", op: "status", chatId })).off).toBeUndefined();
+    // The chat on depth, as GM → This chat → Depth leaves it (its relay checks aside).
+    await new BootstrapFiles(rig.host, chatId as never, rig.host.userId).write("depth.json", { on: true });
+    expect(rig.body(await rig.send({ type: "lre.minds", op: "status", chatId })).off).toBe(CLASSIC_MINDS_OFF);
+    const before = mindCalls(rig).length;
+    const refused = await rig.send({ type: "lre.minds", op: "run", chatId, who: ["danny_okafor"] });
+    expect(refused.type === "lre.error" ? refused.message : null).toBe(CLASSIC_MINDS_OFF);
+    expect(mindCalls(rig).length).toBe(before);
+  });
+});
 
 describe("Run minds now (GM → Minds)", () => {
   test("records the chosen characters' minds from the chat so far, as one GM edit with its Undo, and tells the player nothing", async () => {

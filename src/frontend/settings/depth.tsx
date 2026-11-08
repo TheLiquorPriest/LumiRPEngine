@@ -12,7 +12,7 @@
 
 import { useState } from "preact/hooks";
 import type { AgentLimitDef } from "../../shared/agent-settings";
-import { currentDepthPreset, DEPTH_CADENCE_LABEL, DEPTH_PRESET_WORDS, DEPTH_PRESETS, DEPTH_REASONING, DEPTH_ROLE_WORDS, DEPTH_ROLES, DEPTH_THRESHOLD_DEFAULT, DEPTH_TREATMENT_LABEL, DEPTH_TREATMENTS, DEPTH_USES_LABEL, defaultDepthSettings, depthPresetChanges, type DepthCadence, type DepthLimit, type DepthModel, type DepthPresetId, type DepthRole, type DepthSettings, type DepthUses } from "../../shared/depth-settings";
+import { currentDepthPreset, DEPTH_CADENCE_LABEL, DEPTH_PRESET_WORDS, DEPTH_PRESETS, DEPTH_REASONING, DEPTH_ROLE_WORDS, DEPTH_ROLES, DEPTH_THRESHOLD_DEFAULT, DEPTH_THRESHOLD_LEVEL_WORDS, DEPTH_THRESHOLD_LEVELS, DEPTH_TREATMENT_LABEL, DEPTH_TREATMENTS, DEPTH_USES_LABEL, defaultDepthSettings, depthPresetChanges, type DepthCadence, type DepthLimit, type DepthModel, type DepthPresetId, type DepthRole, type DepthSettings, type DepthThresholdLevel, type DepthUses } from "../../shared/depth-settings";
 import type { JsonObject, JsonValue } from "../../shared/json";
 import { Banner, Button, Field, HostModelPicker, HostSwitch, NumberStepper, Section, Seg } from "../components";
 import { LimitRow, SettingRow } from "./kit";
@@ -86,7 +86,7 @@ export function ModelRows(props: { id: string; owner: string; value: Readonly<De
           </select>
         </label>
       </SettingRow>
-      <SettingRow id={`${props.id}.maxTokens`} label="Answer room" bare changed={value.maxTokens !== standard.maxTokens} help="The most tokens one answer may take, reasoning included." reset={{ label: `Reset ${owner}'s answer room to its default, ${n(standard.maxTokens)} tokens`, to: `${n(standard.maxTokens)} tokens`, onClick: () => props.set({ maxTokens: standard.maxTokens }) }} busy={props.busy}>
+      <SettingRow id={`${props.id}.maxTokens`} label="Answer room" bare changed={value.maxTokens !== standard.maxTokens} help="The tokens an ordinary answer may take, reasoning included. Stages whose answers grow with what they read (the historian, the author's readings, catch-ups, reflections, truth links) ask for all the room the model takes instead, unless a role on its own model has its room set here; a few calls ask for a room of their own." reset={{ label: `Reset ${owner}'s answer room to its default, ${n(standard.maxTokens)} tokens`, to: `${n(standard.maxTokens)} tokens`, onClick: () => props.set({ maxTokens: standard.maxTokens }) }} busy={props.busy}>
         <NumberStepper label={`${owner}: answer room (tokens)`} value={value.maxTokens} min={256} max={1_000_000} step={1024} integer disabled={props.busy} onChange={(maxTokens) => props.set({ maxTokens })} />
       </SettingRow>
     </div>
@@ -240,7 +240,7 @@ export function DepthPage(props: { depth: Readonly<DepthSettings>; connections: 
           {DEPTH_ROLES.map((role) => (
             <RoleRow key={role} role={role} depth={depth} connections={connections} busy={busy} patch={props.patch} />
           ))}
-          <NumberRow id="catchUpBatch" label="Beats per catch-up" unit="" value={depth.catchUpBatch} standard={SHIPPED.catchUpBatch} min={1} max={1000} step={5} help="The most beats one catch-up call lives when a character lives what reached them; more waiting are lived over several calls, in order." busy={busy} set={(catchUpBatch) => set({ catchUpBatch })} />
+          <NumberRow id="catchUpBatch" label="Beats per catch-up" unit="" value={depth.catchUpBatch} standard={SHIPPED.catchUpBatch} min={1} max={1000} step={5} help="The most beats one catch-up call lives when a character lives what reached them, and the most new beats one remembering call adds to a scene's; more waiting are lived over several calls, in order." busy={busy} set={(catchUpBatch) => set({ catchUpBatch })} />
         </div>
       </Section>
       <Section title="The author" flush>
@@ -259,6 +259,7 @@ export function DepthPage(props: { depth: Readonly<DepthSettings>; connections: 
           <SettingRow id="budget.ask" label="Ask me" bare changed={b.ask !== sb.ask} help="When an allowance is spent and the author judges a moment major, it asks you with a chip before spending more." reset={{ label: "Reset Ask me to its default, on", to: "On", onClick: () => set({ budget: { ask: sb.ask } }) }} busy={busy}>
             <HostSwitch label="Ask me before spending past an allowance" checked={b.ask} disabled={busy} onChange={(ask) => set({ budget: { ask } })} />
           </SettingRow>
+          <ChoiceRow<DepthThresholdLevel> id="budget.level" label="Threshold level" value={b.level} standard={sb.level} options={DEPTH_THRESHOLD_LEVELS.map((l) => ({ value: l, label: DEPTH_THRESHOLD_LEVEL_WORDS[l].label }))} help="How readily the author raises a part above written, read beside your words below." busy={busy} set={(level) => set({ budget: { level } })} />
           <SettingRow id="budget.threshold" label="What deserves more than written" changed={b.threshold !== sb.threshold} help="Guidance in your words: the author grades each candidate against it, and every grade shows with its reason." reset={{ label: "Reset the threshold to its shipped words", to: "the shipped words", onClick: () => set({ budget: { threshold: DEPTH_THRESHOLD_DEFAULT } }) }} busy={busy}>
             <Field label="Threshold">
               <textarea class="lre-input lre-depth-threshold" rows={3} value={b.threshold} disabled={busy} aria-label="What deserves more than written" onChange={(event) => set({ budget: { threshold: event.currentTarget.value } })} />
@@ -289,9 +290,8 @@ export function DepthPage(props: { depth: Readonly<DepthSettings>; connections: 
         <div class="lre-set-rows" data-lre-depth-group="bootstrap">
           <p class="lre-small lre-muted lre-depth-note">Onboarding a chat with history (GM → This chat → Depth): canon beats from the prose, minds from each character's own experience, the author's notebook chapter by chapter.</p>
           <NumberRow id="bootstrap.chunkTokens" label="Chunk size" unit="tokens" value={boot.chunkTokens} standard={sboot.chunkTokens} min={2000} max={200_000} step={1000} help="Whole messages up to this many tokens make one chunk of history. The historian asks for all the room its model takes (only what it uses is spent), or the Historian's own answer room where you set one, and an answer cut off at it is asked once more at twice it. A chunk the model can't finish within its output limit keeps being cut: make it smaller." busy={busy} set={(chunkTokens) => set({ bootstrap: { chunkTokens } })} />
-          <NumberRow id="bootstrap.historian" label="Historian chunks at once" unit="" value={boot.atOnce.historian} standard={sboot.atOnce.historian} min={1} max={8} step={1} busy={busy} set={(historian) => set({ bootstrap: { atOnce: { historian } } })} />
           <NumberRow id="bootstrap.minds" label="Minds at once" unit="" value={boot.atOnce.minds} standard={sboot.atOnce.minds} min={1} max={16} step={1} help="Memory grows with the jobs in flight, not with the chat." busy={busy} set={(minds) => set({ bootstrap: { atOnce: { minds } } })} />
-          <NumberRow id="bootstrap.author" label="Author chunks at once" unit="" value={boot.atOnce.author} standard={sboot.atOnce.author} min={1} max={4} step={1} busy={busy} set={(author) => set({ bootstrap: { atOnce: { author } } })} />
+          <NumberRow id="bootstrap.mostMinds" label="Most characters with a mind" unit="" value={boot.mostMinds} standard={sboot.mostMinds} min={0} max={500} step={1} help="The run gives a mind to at most this many characters, in the order the author picks them; 0 for no limit. Minds are most of a run's cost: fewer cost less. Anyone without one is played by the author." busy={busy} set={(mostMinds) => set({ bootstrap: { mostMinds } })} />
           <SettingRow id="bootstrap.cap" label="The run's cap" changed={JSON.stringify(boot.cap) !== JSON.stringify(sboot.cap)} help="At the cap the run pauses and says how far it got and what the rest would cost. Each run's own cap is set before it starts." reset={{ label: "Reset the run's cap to its default", to: standardCap ? `${n(standardCap.value)} ${standardCap.unit === "money" ? "in money" : "tokens"}` : "No cap", onClick: () => set({ bootstrap: { cap: sboot.cap } }) }} busy={busy}>
             <HostSwitch label="No cap" checked={cap === null} disabled={busy} onChange={(none) => set({ bootstrap: { cap: none ? "none" : (standardCap ?? { unit: "tokens", value: 20_000_000 }) } })} />
             {cap ? (

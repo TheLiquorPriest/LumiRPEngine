@@ -183,4 +183,53 @@ describe("depth's calls on their connection", () => {
     for (const said of ["c1", "c2", "c3"]) answer(said);
     expect((await Promise.all(chunks)).map((a) => a.text)).toEqual(["answer to c1", "answer to c2", "answer to c3"]);
   });
+
+  test("the connection's per-minute throttle holds depth's calls too, and a turn's call waiting for room goes before the background calls waiting", async () => {
+    const { host, asked, answer } = heldHost();
+    let now = 0;
+    const sleepers: { at: number; wake: () => void }[] = [];
+    const clock = {
+      now: () => now,
+      sleep: (ms: number) => {
+        const { promise, resolve } = Promise.withResolvers<void>();
+        sleepers.push({ at: now + ms, wake: resolve });
+        return promise;
+      },
+    };
+    const advance = async (ms: number): Promise<void> => {
+      now += ms;
+      // What a wake puts to sleep again, already due, wakes in the same turn of the clock.
+      for (let due = sleepers.filter((x) => x.at <= now); due.length > 0; due = sleepers.filter((x) => x.at <= now)) {
+        for (const s of due) {
+          sleepers.splice(sleepers.indexOf(s), 1);
+          s.wake();
+        }
+        await flush();
+      }
+      await flush();
+    };
+    const settings = settingsWith((s) => {
+      s.agents.throttles = [{ id: "", requestsPerMinute: 1, tokensPerMinute: "none", atOnce: "none" }];
+      s.depth.background.atOnce = 5;
+    });
+    const background = depthPort(host as never, settings, "u1", { day: null, clock });
+    const turn = depthPort(host as never, settings, "u1", { day: null, lane: "foreground", clock });
+    const calls = ["b1", "b2"].map((said) => background("character", [{ role: "user", content: said }]));
+    await flush();
+    // The minute's one request went to b1; b2 waits for room.
+    expect(asked).toEqual(["b1"]);
+    const scene = turn("author", [{ role: "user", content: "scene" }]);
+    await flush();
+    expect(asked).toEqual(["b1"]);
+    // The minute turns over: the turn's call takes the room though b2 waited longer.
+    await advance(60_000);
+    expect(asked).toEqual(["b1", "scene"]);
+    answer("scene");
+    expect((await scene).text).toBe("answer to scene");
+    await advance(60_001);
+    expect(asked).toEqual(["b1", "scene", "b2"]);
+    answer("b1");
+    answer("b2");
+    expect((await Promise.all(calls)).map((a) => a.text)).toEqual(["answer to b1", "answer to b2"]);
+  });
 });

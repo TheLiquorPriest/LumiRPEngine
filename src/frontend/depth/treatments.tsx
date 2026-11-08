@@ -9,7 +9,7 @@
 // Nothing is withheld (§1.4, D-9). The body is hook-free; `TreatmentsView` holds the requests.
 
 import { useEffect, useState } from "preact/hooks";
-import { DEPTH_ROLE_WORDS, DEPTH_TREATMENT_LABEL } from "../../shared/depth-settings";
+import { DEPTH_ROLE_WORDS, DEPTH_THRESHOLD_LEVEL_WORDS, DEPTH_TREATMENT_LABEL } from "../../shared/depth-settings";
 import { costText, DEPTH_LANE_LABEL, DEPTH_LOG_KIND_LABEL, DEPTH_LOG_STATE_LABEL, type DepthLogState, type DepthTreatmentsView, tokensText } from "../../shared/depth-views";
 import type { MessageId } from "../../shared/ids";
 import { useApp } from "../app";
@@ -113,6 +113,16 @@ function MeterTab(props: { view: DepthTreatmentsView }) {
                 </ActionRows>
               </Disclosure>
             ) : null}
+            {m.grades.length > 0 ? (
+              <>
+                <h4 class="lre-depth-subhead">The author's grades</h4>
+                <ActionRows label={`${m.label}, grades`}>
+                  {m.grades.map((g, i) => (
+                    <ActionRow key={`${g.episode}:${g.subject}:${i}`} title={`${g.subject}: ${g.depth}`} subtitle={g.why.trim() === "" ? g.episode : `${g.episode}. ${g.why}`} />
+                  ))}
+                </ActionRows>
+              </>
+            ) : null}
           </GmCard>
         </div>
       ))}
@@ -154,8 +164,8 @@ function BudgetTab(props: { view: DepthTreatmentsView }) {
       </Section>
       <Section title="What deserves more than written">
         <div class="lre-stack">
-          <p class="lre-depth-reasoning">{view.threshold.trim() === "" ? "No words given." : view.threshold}</p>
-          <p class="lre-small lre-muted lre-depth-note">Your words, which the author grades each candidate against; every grade shows in the log with its reason. Settings → Depth → Budget sets these.</p>
+          <p class="lre-depth-reasoning">{`${DEPTH_THRESHOLD_LEVEL_WORDS[view.level].label}: ${view.threshold.trim() === "" ? "no words given." : view.threshold}`}</p>
+          <p class="lre-small lre-muted lre-depth-note">Your level and words, which the author grades each candidate against; every grade shows in the log and on the Meter with its reason. Settings → Depth → Budget sets these.</p>
         </div>
       </Section>
     </div>

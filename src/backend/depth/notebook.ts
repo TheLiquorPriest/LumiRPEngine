@@ -23,7 +23,7 @@ import type { LiveEvent } from "../../engine/ledger/story";
 import { isBlobHash } from "../../shared/stores";
 import { wsWrite, WS_WRITE } from "../../engine/workspace";
 import type { Runtime } from "../runtime";
-import { askRole, bareId, beatLine, named, personNamed, putText, sameName, type BeatText, type Blobs, type Reading, type StageCost } from "./common";
+import { answerWhy, askRole, bareId, beatLine, named, personNamed, putText, sameName, type BeatText, type Blobs, type Reading, type StageCost } from "./common";
 import type { HistorianRow } from "./historian";
 import type { ModelPort } from "./port";
 import { depthOptedIn } from "../bootstrap/service";
@@ -145,7 +145,7 @@ function revision(answer: Record<string, unknown>, read: Reading, notebook: Note
     if (pinned.has(path) && text !== "") comments[path] = text;
     else read.drop(`comments[${i}]`, c);
   }
-  const reason = read.text("reasoning", answer.reasoning);
+  const reason = answerWhy(answer);
   if (events.length > 0 || Object.keys(comments).length > 0 || chapter) {
     const data: NotebookEventData = { kind, files, through, ...(chapter ? { chapter } : {}), ...(reason !== "" ? { reason } : {}), ...(Object.keys(comments).length > 0 ? { comments } : {}) };
     events.push(notebookEvent(data));

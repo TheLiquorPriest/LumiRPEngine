@@ -54,7 +54,7 @@ export const SCENE_STAGING_SHAPE = `${STAGING_SHAPE.slice(0, -1)}, "place": the 
  */
 const STAGING_PLACE_ASK: PromptAsk = {
   says: ['"place"', '"remote"'],
-  message: 'it doesn\'t ask where each person staged is ("place", by the id of one of the world\'s places, or "remote" for someone the scene reaches only from afar): written before the staging said so, its answer leaves everyone but the player character where they were, and the author is asked once more each time. Reset it, or ask for both in your own words',
+  message: 'it doesn\'t ask where each person staged is ("place", by the id of one of the world\'s places, or "remote" for someone the scene reaches only from afar): written before the staging said so, its answer leaves everyone but the player character where they were, and the author is asked once more each time. Reset it, or ask for both in your own words, naming the keys "place" and "remote" as they are',
 };
 
 /** The answer field that once asked for the author's thinking, which a provider may refuse to write out (`WHY_ASK`). */
@@ -62,13 +62,22 @@ export const OLD_WHY_FIELD = '"reasoning": your thinking';
 
 /**
  * The answer's own account of its choice: once `OLD_WHY_FIELD`, now "why", one or two plain
- * sentences (a text that asks "why" for something of its own already has its account, and asks
- * nothing more). A text of the user's own that still asks the old way is flagged (`staleAsks`).
+ * sentences. A text of the user's own that still asks the old way is flagged (`staleAsks`).
  */
 export const WHY_ASK: PromptAsk = {
   says: [],
   outdated: [OLD_WHY_FIELD],
-  message: `it still asks for ${OLD_WHY_FIELD}, which the shipped text no longer asks for: a provider may refuse an answer asked to write out its thinking. Reset it, or take that field out in your own words (the shipped text asks for "why": one or two plain sentences explaining the choice)`,
+  message: `it still asks for ${OLD_WHY_FIELD}, which the shipped text no longer asks for: a provider may refuse an answer asked to write out its thinking. Reset it, or ask for "why" in its place in your own words (the shipped text asks for one or two plain sentences explaining the choice)`,
+};
+
+/**
+ * `WHY_ASK` for a text whose "why" is something of its own (an edit's meaning, a draft's reading),
+ * which already is its account: the old field only goes.
+ */
+export const WHY_OWN_ASK: PromptAsk = {
+  says: [],
+  outdated: [OLD_WHY_FIELD],
+  message: `it still asks for ${OLD_WHY_FIELD}, which the shipped text no longer asks for: a provider may refuse an answer asked to write out its thinking, and the answer's own "why" already gives its account. Reset it, or take that field out`,
 };
 
 /** The answer to the player's edit, a reply's or his own message's. */
@@ -95,7 +104,7 @@ ${DM_RULES}
 The player has just written his turn, and the GM has read it into his own beats: what he did and said, and how the rules resolved what he tried. Infer what he wants from this moment, from his words and your notebook's player section, and set the scene that answers it:
 - Does this carry on the scene that was playing, or open a new one? Where does it play? Does it end with this turn?
 - Stage it: everyone present, where they are and what they are doing, as anyone there could see it (the points of view of whoever a beat reaches in part are written from it), {{pov}} among them, and the id of the world's place each is at: whoever the world has elsewhere is moved to the place you give them. Give everyone you stage a place, or "remote": no place is guessed for anyone given neither, but {{pov}}, whom the scene plays from: given no place, he is at the scene's place. Someone the scene reaches only from afar (the far end of a phone call, a radio, a screen) is "remote", never at the scene's place: they stay where they are.
-- Decide each character's effort for this scene, and say why: "agent" plays as its own agent, beat by beat, as a player would (only someone with a mind; one call each time it acts); "author" you play them yourself, from their mind (several cost you one call); "world" you handle them as part of the world, like a walk-on. Spend effort where this scene needs it.
+- Decide each character's effort for this scene, and say why: "agent" plays as its own agent, beat by beat, as a player would (one call each time it acts; someone with no mind yet gets one, formed from their card or what the world knows of them, and keeps it from then on: do it for someone who will matter beyond this scene, never a passer-by); "author" you play them yourself, from their mind (several cost you one call); "world" you handle them as part of the world, like a walk-on. Spend effort where this scene needs it.
 - Write who perceived each of the player's beats, and how fully. {{pov}} perceives his own acts.
 - When the scene opens or someone arrives, write an opening beat of what was there to sense. Then any beat the world does now, and the acts of those you play or handle, in order.
 - Name who acts next among those playing as their own agents (several act at once when they would), or end the turn when the moment has come for the player to answer.
@@ -119,6 +128,8 @@ Answer with one JSON object: {"scene": {"continues": true or false, "place": the
 ${DM_RULES}
 
 Here is the scene so far and the beat just decided. Who perceived it, and how fully? Did it move anyone (their staging)? Does the world do anything now? Do those you play or handle act? Who acts next among those playing as their own agents, or do several act at once? Has the moment come for the player to answer? Keep the scene moving at the pace the story wants: end the turn when {{pov}} has something to answer, see or decide.
+
+A beat of the world itself, which no one acts in (rain starts, a door slams in the wind), takes no "deed". Write "exposure" entries only for the beats listed as just decided, waiting for who perceived them; a beat you write yourself carries its own "exposure".
 
 Answer with one JSON object: {"exposure": [{"beat": the ref of a beat just decided, "who", "channel", "reach"}], "staging": [${SCENE_STAGING_SHAPE}, for each person this moved], "beats": [${BEAT_SHAPE}], "next": [ids of characters playing as their own agents who act now], "end": your reason the player answers now, or null, "sceneEnds": true when the scene itself ends with this turn, "why": one or two plain sentences explaining the choice}.`,
     asks: [STAGING_PLACE_ASK, WHY_ASK],
@@ -147,7 +158,7 @@ Answer with one JSON object: {"beats": [${BEAT_SHAPE}], "why": one or two plain 
     label: "The poll",
     note: "After each turn the author reads what changed and decides who catches up now and who can wait until they matter, who reflects, whether it reflects itself, how its open predictions scored, and what happens off screen: the episodes it opens with each part's treatment, and which drafts settle, drop or are rebased; it logs what it considered and didn't raise.",
     vars: VARS,
-    contract: '{"catchup": [{"who", "why"}], "reflect": [{"who", "why"}], "author": {"depth", "why"} | null, "scores": [{"prediction", "outcome", "note"}], "episodes": [{"why", "in", "minutes", "places", "people", "parts": [{"who"?, "event"?, "treatment", "rationale", "major"?}]}], "settle": [{"draft", "why"}], "drop": [{"draft", "why"}], "rebase": [{"draft", "why"}], "considered": [{"what", "raised", "why"}], "why": string}',
+    contract: '{"catchup": [{"who", "why"}], "reflect": [{"who", "why"}], "author": {"depth", "why"} | null, "scores": [{"prediction", "outcome", "note"}], "episodes": [{"why", "in", "minutes", "places", "people", "parts": [{"who"?, "event"?, "treatment", "rationale", "major"?}]}], "settle": [{"draft", "why"}], "drop": [{"draft", "why"}], "rebase": [{"draft", "why"}], "wake": {"minutes", "why"} | null, "considered": [{"what", "raised", "why"}], "why": string}',
     text: `${AUTHOR}
 
 A turn has just been played. Here is what changed: its beats, what characters wrote that will stay with them, the story time that passed, plans falling due, what reached each character that they haven't lived yet, and the player's own signals; and off screen, your open drafts and what has happened since each one's story time. You are the story's nervous system: you decide who thinks, and when, and how the world lives beyond {{pov}}'s view.
@@ -158,8 +169,9 @@ A turn has just been played. Here is what changed: its beats, what characters wr
 - What should happen off screen, and at what depth? Open an episode where the world must move beyond {{pov}}'s view because it will matter (a plan falling due, a consequence, someone's life going on): when it happens, where, who is in it, why it matters, and each person's and each event's treatment, graded against the player's own words on what deserves more than written and kept within what this interval's allowances leave: "live" (they play as their own agents, the costliest), "campfire" (you play them from their minds), "room" (you and the GM decide what happens to them), "written" (a few plain beats). Where nothing is at stake, open nothing. Where you judge a moment major, mark its part "major": if its treatment's allowance is spent, the player is asked whether to spend one more instead of it sliding down to a cheaper treatment. Mark only what truly is.
 - Your open drafts: settle one now when the story will soon reach what it holds (someone or something in it is about to enter a scene past its time), drop one the story has overtaken, and leave the rest until they matter. A draft a swipe took off the chain is a rebase candidate: rebase it (it stands where the story now is, and its pins are read when it settles), or drop it.
 - Log what you considered and whether you raised it, with your reason, so the player can read your judgment. Raise nothing out of habit.
+- If something should be looked at again once enough story time has passed (a plan maturing, a wait running out), ask to be woken after that many story minutes; otherwise null.
 
-Answer with one JSON object: {"catchup": [{"who": an id, "why": your reason}], "reflect": [{"who": an id, "why": your reason}], "author": {"depth": "scene" or "chapter", "why": your reason} or null, "scores": [{"prediction": its id, "outcome": "hit", "miss" or "partly", "note": what happened}], "episodes": [{"why": why it matters, "in": story minutes from now until it starts (negative when it already began), "minutes": how long it runs, "places": [place ids], "people": [ids], "parts": [{"who": an id, or "event": the event in words, "treatment": "live", "campfire", "room" or "written", "rationale": your grade against the player's words, and why, "major": true when you judge the moment major}]}], "settle": [{"draft": its id, "why": your reason}], "drop": [{"draft": its id, "why": your reason}], "rebase": [{"draft": its id, "why": your reason}], "considered": [{"what": what you considered, "raised": true or false, "why": your reason}], "why": one or two plain sentences explaining the choice}.`,
+Answer with one JSON object: {"catchup": [{"who": an id, "why": your reason}], "reflect": [{"who": an id, "why": your reason}], "author": {"depth": "scene" or "chapter", "why": your reason} or null, "scores": [{"prediction": its id, "outcome": "hit", "miss" or "partly", "note": what happened}], "episodes": [{"why": why it matters, "in": story minutes from now until it starts (negative when it already began), "minutes": how long it runs, "places": [place ids], "people": [ids], "parts": [{"who": an id, or "event": the event in words, "treatment": "live", "campfire", "room" or "written", "rationale": your grade against the player's words, and why, "major": true when you judge the moment major}]}], "settle": [{"draft": its id, "why": your reason}], "drop": [{"draft": its id, "why": your reason}], "rebase": [{"draft": its id, "why": your reason}], "wake": {"minutes": story minutes from now, "why": your reason} or null, "considered": [{"what": what you considered, "raised": true or false, "why": your reason}], "why": one or two plain sentences explaining the choice}.`,
     asks: [WHY_ASK],
   },
   {
@@ -193,7 +205,7 @@ The player edited a reply. The reply renders beats that were canon; his edit is 
 ${EDIT_RULES}
 
 ${EDIT_ANSWER}`,
-    asks: [WHY_ASK],
+    asks: [WHY_OWN_ASK],
   },
   {
     id: SCENE_TEXT.editOwn,
@@ -209,6 +221,6 @@ The player edited his own message, from which the beats of what {{pov}} did and 
 ${EDIT_RULES}
 
 ${EDIT_ANSWER}`,
-    asks: [WHY_ASK],
+    asks: [WHY_OWN_ASK],
   },
 ];

@@ -11,7 +11,7 @@
 import { describe, expect, setSystemTime, test } from "bun:test";
 import { hashJson, hashParts } from "../../src/shared/hash";
 import type { ChatId, MessageId } from "../../src/shared/ids";
-import type { Basis, LayerDraft } from "../../src/shared/layer";
+import type { Basis, LayerDraft, LayerEntry } from "../../src/shared/layer";
 import { LEDGER_NAMESPACE, type LedgerEvent } from "../../src/shared/ledger";
 import { beatEvent, beatId, strikeEvent, type Beat } from "../../src/shared/story";
 import type { TurnModel } from "../../src/engine/ledger/journal";
@@ -23,6 +23,8 @@ import { Harness } from "../support/harness";
 import { POV } from "../support/test-pack";
 import { ArchiveIndex } from "../../src/backend/archive-index";
 import { layerDir } from "../../src/backend/layer-store";
+import { carryOf } from "../../src/backend/layer-carry";
+import { randomBytes } from "node:crypto";
 
 const blob = (s: string): string => hashParts("test.blob", s);
 
@@ -277,6 +279,25 @@ describe("the basis-anchored layer", () => {
     expect(await files(h, chat)).toEqual(["a", "b", "c"]);
   });
 
+  test("a chat carries its layer in its own metadata, so an imported copy folds what it landed under its copies of the messages; a layer too large to carry is marked so", async () => {
+    const { h, chat, ids } = await setup();
+    const [, , a1, , a2] = ids as [MessageId, MessageId, MessageId, MessageId, MessageId];
+    await land(h, chat, draft("e1", await basisOf(h, chat, a1), [note("a")]));
+    await land(h, chat, draft("e2", await basisOf(h, chat, a2), [note("b")]));
+    // Carried once a turn, when something landed since: the next turn's end writes it.
+    expect(h.host.chat(chat).metadata.lre_layer).toBeUndefined();
+    await h.send(chat, "On.", "Third reply.");
+    const copy = h.host.importCopy(chat);
+    await h.service.open(copy, h.host.userId);
+    await h.host.settle();
+    expect(await files(h, copy)).toEqual(["a", "b"]);
+    await h.restart();
+    expect(await files(h, copy)).toEqual(["a", "b"]);
+    // Past the cap, nothing is carried: the copy starts without it, and the chat keeps the export warning.
+    const big = Array.from({ length: 40 }, (_, i): LayerEntry => ({ id: `big${i}`, chat, basis: { message: a1, swipe: "c0", parentPath: "" }, kind: "test", events: [], reasoning: randomBytes(48_000).toString("base64"), landed: { seq: i, at: new Date(0).toISOString() } }));
+    expect("over" in carryOf(chat, "run", big, [])).toBe(true);
+  });
+
   test("a branch holds what it inherited in its own layer: it keeps it once its parent chat is gone, across a restart", async () => {
     const { h, chat, ids } = await setup();
     const [, , a1, , a2] = ids as [MessageId, MessageId, MessageId, MessageId, MessageId];
@@ -292,6 +313,8 @@ describe("the basis-anchored layer", () => {
     expect(stored.map((e) => e.basis.message)).toEqual([copies[2], copies[4]]);
     h.host.deleteChat(chat);
     await h.host.settle();
+    // The deleted chat's run goes with it: its layer, journal and every other file under its run directory.
+    expect([...h.host.files.keys()].filter((k) => k.includes(`runs/${chat}/`))).toEqual([]);
     await h.restart();
     expect(await files(h, branch)).toEqual(["a", "b"]);
     expect((await h.service.layerSummaries(branch, h.host.userId, { inherited: true })).map((s) => s.id)).toEqual(["e1", "e2"]);

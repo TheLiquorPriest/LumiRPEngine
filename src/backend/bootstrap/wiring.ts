@@ -96,9 +96,31 @@ export function historyEnd(chain: readonly ChainMessage[], making: ReadonlySet<M
   return end;
 }
 
+/**
+ * The history a survey read, per (user, chat), until the chat changes: the host's message events and
+ * a chat's change or deletion drop it, and so does the run's own landing (its clocks and bases fold
+ * from the layer). So an estimate, a Start and a Resume in a row read and fold the chat once (B2).
+ * Two chats at most are kept: the survey reads only the one it surveys.
+ */
+const SURVEYS_KEPT = 2;
+const surveys = new WeakMap<Runtime, Map<string, SurveyMessage[]>>();
+
+function surveysOf(rt: Runtime): Map<string, SurveyMessage[]> {
+  const known = surveys.get(rt);
+  if (known) return known;
+  const kept = new Map<string, SurveyMessage[]>();
+  const drop = (chatId: string): void => {
+    for (const key of [...kept.keys()]) if (key.endsWith(`\u0000${chatId}`)) kept.delete(key);
+  };
+  for (const event of ["MESSAGE_SENT", "MESSAGE_EDITED", "MESSAGE_SWIPED", "MESSAGE_DELETED", "CHAT_CHANGED", "CHAT_DELETED", "GENERATION_STARTED", "GENERATION_ENDED"] as const) rt.host.on(event, (e) => drop(e.chatId));
+  surveys.set(rt, kept);
+  return kept;
+}
+
 /** The bootstrap's run environment for one chat of one user's. */
 export function bootstrapEnv(rt: Runtime, chatId: ChatId, userId: UserId, changed: () => void): BootstrapEnv {
   const files = new BootstrapFiles(rt.host, chatId, userId);
+  const surveyKey = `${userId}\u0000${chatId}`;
   // The run counts against its own cap (§8.3), never the per-day ceiling, and keeps the idle line on each connection: a turn's calls go first (§6.2).
   const model = depthPort(rt.host, (u) => rt.settings.get(u), userId, { day: null, lane: "idle" });
   const settings = (): Promise<UserSettings> => rt.settings.get(userId);
@@ -134,8 +156,13 @@ export function bootstrapEnv(rt: Runtime, chatId: ChatId, userId: UserId, change
     const withCards = await cardsOf(world, state);
     return cast.map((p) => ({ id: p.id, name: p.name, card: withCards.has(p.id), mind: mindMetaAt(state, p.id)["core.md"] !== undefined }));
   };
-  /** What the player did beyond his words that the spool shows: the replies he swiped, and which he kept. */
-  const signalsOf = (rows: readonly SpoolRow[]): string[] => rows.flatMap((r) => (r.swipes !== undefined && r.swipes > 1 ? [`Message ${r.index + 1} (${r.name}): ${r.swipes} swipes; the player kept number ${(r.swipe ?? 0) + 1}.`] : []));
+  /** What the player did beyond his words that the spool shows: the replies he swiped, and which he kept; and his out-of-character lines (`OOC:`, `(OOC …)`, `[OOC …]`, `((…))`), word for word. */
+  const OOC = /\(\([^)]*\)\)|^\s*[([]\s*ooc\b.*$|^\s*ooc\s*:.*$/gim;
+  const signalsOf = (rows: readonly SpoolRow[]): string[] =>
+    rows.flatMap((r) => [
+      ...(r.swipes !== undefined && r.swipes > 1 ? [`Message ${r.index + 1} (${r.name}): ${r.swipes} swipes; the player kept number ${(r.swipe ?? 0) + 1}.`] : []),
+      ...(r.isUser ? (r.text.match(OOC) ?? []).map((line) => `Message ${r.index + 1}, the player out of character: ${line.trim()}`) : []),
+    ]);
 
   const stages: BootstrapStages = {
     async historian(i, m) {
@@ -276,7 +303,8 @@ export function bootstrapEnv(rt: Runtime, chatId: ChatId, userId: UserId, change
       return { events: r.events, blobs: r.blobs, kind: "truthlink", ...(r.reasoning ? { reasoning: r.reasoning } : {}) };
     },
     async reconcile(i, m) {
-      return { ...(await reconcile(m, { chatId, chapter: i.chapter, final: i.final, span: i.span, entries: i.entries, beats: i.beats, blobs: i.blobs, minds: i.minds, basis: i.basis, at: i.at, texts: await texts() })), kind: "story.beat" };
+      const folded = await fold(i.basis);
+      return { ...(await reconcile(m, { chatId, chapter: i.chapter, final: i.final, span: i.span, entries: i.entries, beats: i.beats, blobs: i.blobs, minds: i.minds, state: folded.state, basis: i.basis, at: i.at, texts: await texts() })), kind: "story.beat" };
     },
     async amend(i, m) {
       const at = await fold(i.basis);
@@ -294,7 +322,10 @@ export function bootstrapEnv(rt: Runtime, chatId: ChatId, userId: UserId, change
     stages,
     ledger: {
       // Waiting for what a turn in flight holds: the job after a landing reads it (§8.2).
-      landAll: (drafts, without) => rt.ledger.landLayers(chatId, userId, drafts, { without, wait: true }),
+      landAll: (drafts, without) => {
+        surveysOf(rt).delete(surveyKey);
+        return rt.ledger.landLayers(chatId, userId, drafts, { without, wait: true });
+      },
       async putBlobs(texts) {
         for (const text of Object.values(texts)) await rt.blobs.put(userId, text);
       },
@@ -308,6 +339,9 @@ export function bootstrapEnv(rt: Runtime, chatId: ChatId, userId: UserId, change
       },
     },
     async messages(): Promise<SurveyMessage[]> {
+      const kept = surveysOf(rt);
+      const cached = kept.get(surveyKey);
+      if (cached) return [...cached];
       const messages = await rt.host.chats.messages(chatId, userId);
       const bases = new Map((await rt.ledger.chainBases(chatId, userId)).map((b) => [b.message, b]));
       const core = await rt.ledger.core(chatId, userId);
@@ -317,10 +351,14 @@ export function bootstrapEnv(rt: Runtime, chatId: ChatId, userId: UserId, change
       // The history, never depth's play: up to the first turn depth played, or the one in flight now.
       const making = new Set(Object.values(core?.journal.pending ?? {}).flatMap((p) => (p.messageId !== null ? [p.messageId] : [])));
       const end = historyEnd(core ? core.chain(observed) : observed, making, (core?.journal.prereply ?? []).length > 0);
-      return messages.slice(0, end).flatMap((m) => {
+      const read = messages.slice(0, end).flatMap((m) => {
         const basis = bases.get(m.id);
         return basis ? [{ id: m.id, isUser: m.isUser, name: m.name, text: m.swipes[m.swipeId] ?? m.content, basis, clock: clocks.get(m.id) ?? null, swipes: m.swipes.length, swipe: m.swipeId }] : [];
       });
+      kept.delete(surveyKey);
+      kept.set(surveyKey, read);
+      for (const key of [...kept.keys()].slice(0, Math.max(0, kept.size - SURVEYS_KEPT))) kept.delete(key);
+      return [...read];
     },
     async people() {
       const { state, world } = await head();
@@ -341,7 +379,7 @@ export function bootstrapEnv(rt: Runtime, chatId: ChatId, userId: UserId, change
     },
     async knobs(): Promise<BootstrapKnobs> {
       const b = (await settings()).depth.bootstrap;
-      return { chunkTokens: b.chunkTokens, atOnce: { ...b.atOnce }, sample: b.sample, pauseAfterWrong: b.pauseAfterWrong };
+      return { chunkTokens: b.chunkTokens, atOnce: { ...b.atOnce }, mostMinds: b.mostMinds, sample: b.sample, pauseAfterWrong: b.pauseAfterWrong };
     },
     async room(role: DepthRole) {
       return ownRoom((await settings()).depth, role);

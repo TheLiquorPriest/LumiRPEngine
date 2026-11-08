@@ -660,7 +660,12 @@ export function createSpindleHost(): HostPort {
       }, 100);
     },
     registerPromptInterceptor(handler, options) {
-      spindle.registerInterceptor(
+      // Core drops a registration made while `interceptor` isn't granted and never asks again, so the
+      // grant registers it once more. Core keeps one interceptor per extension: this one replaces it.
+      let dispose: (() => void) | null = null;
+      const register = (): void => {
+        dispose?.();
+        dispose = spindle.registerInterceptor(
         async (messages, context) => {
           const read = messages.map(promptMessageOf);
           const clean = read.map((r) => r.clean);
@@ -681,10 +686,17 @@ export function createSpindleHost(): HostPort {
             messages: read.map((r) => r.message),
           };
           const verdict = await handler(input);
-          return verdict.parameters ? { messages: clean, parameters: verdict.parameters } : clean;
+          const omit = new Set(verdict.omit ?? []);
+          const sent = omit.size > 0 ? clean.filter((_, i) => !omit.has(i)) : clean;
+          return verdict.parameters ? { messages: sent, parameters: verdict.parameters } : sent;
         },
         { priority: options.priority, match: { generationTypes: [...options.generationTypes] }, required: options.required },
-      );
+        );
+      };
+      register();
+      spindle.on("PERMISSION_CHANGED", (detail) => {
+        if (detail.permission === "interceptor" && detail.granted) register();
+      });
     },
     models: {
       quiet: (request, userId, signal) => quietCall(request, userId, signal),

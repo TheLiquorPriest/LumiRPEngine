@@ -352,6 +352,7 @@ const EVERY_TYPE: LedgerEvent[] = [
   { type: "author.ask", data: { id: "e2", index: 0, why: "Dev's night matters", in: 60, minutes: 120, places: ["home"], people: ["dev"], parts: [{ subject: { who: "dev" }, treatment: "live", rationale: "His choice", major: true }], over: [{ part: 0, allowance: 2, spent: 2 }], interval: "week" } },
   { type: "author.answer", data: { ask: "e2", spend: false } },
   { type: "author.drop", data: { draft: "d2", why: "It no longer fits" } },
+  { type: "author.adopt", data: { waited: [{ what: "catchup dev", message: "m1" }], without: [], entries: [] } },
   // The player's switch of character (D-10) is the minds slice's, never an entity's definition.
   { type: "minds.v2.pov", data: { who: "dev" } },
   // Whether the chat tracks knowledge at all is the slice's own switch.

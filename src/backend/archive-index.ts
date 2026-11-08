@@ -11,7 +11,6 @@ import { ARCHIVE_QUOTE_MAX } from "../shared/archive";
 import type { ChatId, EntityId, MessageId, PlaceId, UserId } from "../shared/ids";
 import { beatPeople, type PlacedBeat, type StoryRead } from "../shared/story";
 import { LexicalIndex } from "../engine/lexical";
-import { contentId } from "../engine/ledger/path";
 import type { ArchiveMessage, ArchiveView, LedgerService } from "./ledger-io";
 
 /** Chats whose index is kept, the most recently searched last. */
@@ -20,8 +19,8 @@ const SNIPPET = 400;
 
 interface ChatArchive {
   index: LexicalIndex<MessageId>;
-  /** Per message, the swipe and text it was indexed with. */
-  seen: Map<MessageId, string>;
+  /** Per message, the swipe and text it was indexed with: compared as they are, so a search never hashes the chat. */
+  seen: Map<MessageId, { swipe: string; text: string }>;
 }
 
 /** What the live beats say of each message they cite. */
@@ -72,17 +71,17 @@ export class ArchiveIndex {
   /** The chat's index brought up to date with `messages`. */
   private synced(chatId: ChatId, userId: UserId, messages: readonly ArchiveMessage[]): ChatArchive {
     const key = `${userId}\u0000${chatId}`;
-    const archive = this.chats.get(key) ?? { index: new LexicalIndex<MessageId>(), seen: new Map<MessageId, string>() };
+    const archive = this.chats.get(key) ?? { index: new LexicalIndex<MessageId>(), seen: new Map<MessageId, { swipe: string; text: string }>() };
     this.chats.delete(key);
     this.chats.set(key, archive);
     while (this.chats.size > ARCHIVE_CHATS_KEPT) this.chats.delete(this.chats.keys().next().value ?? "");
     const now = new Set<MessageId>();
     for (const m of messages) {
       now.add(m.id);
-      const stamp = `${m.swipe}\u0000${contentId(m.text).hash}`;
-      if (archive.seen.get(m.id) === stamp) continue;
+      const was = archive.seen.get(m.id);
+      if (was && was.swipe === m.swipe && was.text === m.text) continue;
       archive.index.add(m.id, m.text);
-      archive.seen.set(m.id, stamp);
+      archive.seen.set(m.id, { swipe: m.swipe, text: m.text });
     }
     for (const id of [...archive.seen.keys()]) {
       if (now.has(id)) continue;

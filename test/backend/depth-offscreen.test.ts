@@ -11,10 +11,10 @@ import { describe, expect, test } from "bun:test";
 import type { ModelPort } from "../../src/backend/depth/port";
 import { afterDepthReply, type AfterRt } from "../../src/backend/depth/scene/after";
 import type { OffscreenPlugs } from "../../src/backend/depth/offscreen/episode";
-import { OFFSCREEN_PLUGS } from "../../src/backend/depth/offscreen/episode";
+import { effectTouches, OFFSCREEN_PLUGS } from "../../src/backend/depth/offscreen/episode";
 import { DRAFT_TYPES, draftsOn, settledChipsOn } from "../../src/backend/depth/offscreen/drafts";
 import { eventsOf } from "../../src/backend/ledger-io";
-import { withinAllowances } from "../../src/backend/depth/offscreen/jobs";
+import { offscreenJobs, withinAllowances } from "../../src/backend/depth/offscreen/jobs";
 import { seedCore } from "../../src/backend/character-agent";
 import { defaultSettings } from "../../src/backend/settings-store";
 import { AUTHOR_POLL, authorData, type PollData } from "../../src/shared/author";
@@ -152,7 +152,7 @@ describe("the world beyond view, off screen", () => {
     const two = port({
       author: [
         { settle: [{ draft: id, why: "Sam is about to reach the dock." }] },
-        { verdict: "settle", why: "Nothing Sam saw says otherwise.", beats: [{ ref: "d3", keep: true, surface: "Cash changes hands on the dock; the keys go with it." }] },
+        { verdict: "settle", why: "Nothing Sam saw says otherwise.", beats: [{ ref: "d2", keep: true, deed: "I tell the buyer my price: ten thousand, and she's his." }, { ref: "d3", keep: true, surface: "Cash changes hands on the dock; the keys go with it." }] },
       ],
       character: [{ memories: [{ lived: [], about: [], text: "I sold her. Ten thousand. It still feels like losing a limb." }] }],
       gm: [{ facts: [{ ref: "f1", claim: "Dev sold his boat to a buyer from the next town.", matters: "Dev has no boat to work from now.", about: ["dev"] }], links: [] }],
@@ -181,8 +181,11 @@ describe("the world beyond view, off screen", () => {
     // Backdated to the episode's own minute, though landed at the second reply.
     expect(Math.min(...settled.map((b) => b.beat.at))).toBe(draft.at);
     expect(settled.every((b) => b.from.messageId === second.message)).toBe(true);
-    // The adjusted beat is a new one; the others are the draft's own.
-    expect(settled.map((b) => draft.beats.some((d) => d.id === b.beat.id))).toEqual([true, true, false]);
+    // The adjusted beats are new ones; the other is the draft's own. A rewritten beat with actors keeps the deed the settlement restated (L-9).
+    expect(settled.map((b) => draft.beats.some((d) => d.id === b.beat.id))).toEqual([true, false, false]);
+    const restated = settled[1]?.beat;
+    expect(restated?.actors.length).toBeGreaterThan(0);
+    expect(restated?.deed).toBe(blobHash("I tell the buyer my price: ten thousand, and she's his."));
     const out = (await h.folds(chat)).reference;
     expect(objOf(sliceOf(out.state, "story").flags)).toEqual({ boat_sold: true });
     expect(out.violations).toEqual([]);
@@ -205,6 +208,106 @@ describe("the world beyond view, off screen", () => {
     expect(draftsOn(await h.service.readEvents(chat, userId, DRAFT_TYPES)).map((d) => d.state)).toEqual(["settled"]);
     expect((await settledChips(h, chat)).map((c) => c.id)).toEqual([`settled:${second.message}:0:${id}`]);
     expect((await h.service.layerSummaries(chat, userId)).map((s) => s.kind).filter((k) => k === STORY_DRAFT || k === STORY_SETTLE)).toEqual([STORY_DRAFT, STORY_SETTLE]);
+  });
+
+  test("a draft a swipe took off the chain comes back to rebase and lands again; a settlement keeps or refuses its changes; a pin that contradicts it drops it", async () => {
+    const h = new Harness("fresh", { packs: [storyPack, authorPack], model });
+    const rt = rtOf(h);
+    const userId = h.host.userId;
+    const chat = await h.newChat();
+    const greeting = await head(h, chat);
+    const core = seedCore({ who: "dev", at: 0, source: "card", text: "Dev runs the marina cafe and owes the bank." });
+    for (const text of Object.values(core.blobs)) await rt.blobs.put(userId, text);
+    expect((await h.service.landLayer(chat, userId, { id: "dev-core", basis: greeting, kind: "minds.v2.write", events: core.events })).status).toBe("landed");
+    await h.send(chat, "I head home for the night.", "Sam walks home.");
+    const first = await head(h, chat);
+    const one = port({
+      author: [
+        { episodes: [{ why: "The bank calls in Dev's loan on Friday.", in: 0, minutes: 45, places: ["home"], people: ["dev"], parts: [{ who: "dev", treatment: "live", rationale: "his choice decides what he owes" }, { event: "the buyer", treatment: "written", rationale: "a walk-on" }] }] },
+        { staging: [{ who: "dev", where: "on the dock by his boat", doing: "coiling a line" }], beats: [{ ref: "o1", by: "author", actors: [], act: "happened", what: "A buyer from the next town walks down the dock.", surface: "A stranger in a rain jacket walks down the dock.", exposure: [{ who: "dev", channel: "sight", reach: "whole" }] }], next: ["dev"], end: null, summary: "Dev sells his boat to a buyer." },
+        { exposure: [], beats: [], next: [], end: "The sale is made.", summary: "Dev sold his boat to a buyer from the next town." },
+      ],
+      character: [{ say: "Ten thousand, and she's yours.", attempt: "sell the boat to the buyer", take: "I hate this." }],
+    });
+    const after1 = await afterDepthReply(rt, chat, userId, first, { scene: null, ended: false, remember: [], poll: true, beats: [] }, { model: one, plugs });
+    expect(after1.failed).toEqual([]);
+    const id = after1.offscreen?.drafted[0] ?? "";
+    expect(id).not.toBe("");
+
+    // A swipe of the reply it was drafted at takes it off the chain; the next poll is offered it to rebase, and it lands again at the new telling.
+    await h.host.finish(await h.host.start(chat, { type: "swipe" }), "Sam lingers at the gate, then walks home.");
+    await h.host.settle();
+    expect(draftsOn(await h.service.readEvents(chat, userId, DRAFT_TYPES))).toEqual([]);
+    const swiped = await head(h, chat);
+    expect(swiped.message).toBe(first.message);
+    expect(swiped.swipe).not.toBe(first.swipe);
+    const rebase = port({ author: [{ rebase: [{ draft: id, why: "Nothing in this telling stops the sale." }] }] });
+    const after2 = await afterDepthReply(rt, chat, userId, swiped, { scene: null, ended: false, remember: [], poll: true, beats: [] }, { model: rebase, plugs });
+    expect(after2.failed).toEqual([]);
+    expect(rebase.sent.author?.[0]).toContain("Drafts a swipe took off the chain");
+    expect(rebase.sent.author?.[0]).toContain(`[${id}]`);
+    expect(after2.offscreen).toMatchObject({ rebased: [id], said: [] });
+    expect(draftsOn(await h.service.readEvents(chat, userId, DRAFT_TYPES)).map((d) => [d.draft.id, d.state])).toEqual([[id, "open"]]);
+
+    // The settlement keeps its beats but refuses its world change: the boat isn't sold.
+    await h.send(chat, "Morning. I walk down to the marina.", "Sam walks to the marina.");
+    const second = await head(h, chat);
+    const settle = port({
+      author: [
+        { settle: [{ draft: id, why: "Sam is about to reach the dock." }] },
+        { verdict: "settle", why: "The talk happened, but the sale fell through.", beats: [], effects: [{ index: 1, keep: false }] },
+      ],
+      character: [{ memories: [] }],
+      gm: [{ facts: [], links: [] }],
+    });
+    const after3 = await afterDepthReply(rt, chat, userId, second, { scene: null, ended: false, remember: [], poll: true, beats: [] }, { model: settle, plugs });
+    expect(after3.failed).toEqual([]);
+    expect(settle.sent.author?.[1]).toContain("The world changes it would make:\n1. ");
+    expect(after3.offscreen?.settled).toEqual([id]);
+    expect(objOf(sliceOf((await h.folds(chat)).reference.state, "story").flags)).toEqual({});
+
+    // A swipe of that reply leaves it open again; this time a pin contradicts it (the boat is still at the dock), and the author drops it.
+    await h.host.finish(await h.host.start(chat, { type: "swipe" }), "Sam walks to the marina; Dev's boat is tied at the dock as ever.");
+    await h.host.settle();
+    expect(draftsOn(await h.service.readEvents(chat, userId, DRAFT_TYPES)).map((d) => d.state)).toEqual(["open"]);
+    const again = await head(h, chat);
+    const contradicted = port({
+      author: [
+        { settle: [{ draft: id, why: "Sam is at the dock." }] },
+        { verdict: "drop", why: "Pin p2: Sam sees Dev's boat tied at the dock this morning, so it was never sold." },
+      ],
+    });
+    const after4 = await afterDepthReply(rt, chat, userId, again, { scene: null, ended: false, remember: [], poll: true, beats: [] }, { model: contradicted, plugs });
+    expect(after4.failed).toEqual([]);
+    expect(contradicted.sent.author?.[1]).toContain("Its pins, every beat since its story time");
+    expect(after4.offscreen).toMatchObject({ dropped: [id], settled: [] });
+    const last = draftsOn(await h.service.readEvents(chat, userId, DRAFT_TYPES));
+    expect(last.map((d) => [d.draft.id, d.state])).toEqual([[id, "dropped"]]);
+    expect(last[0]?.drop?.data.why).toContain("never sold");
+    expect(objOf(sliceOf((await h.folds(chat)).reference.state, "story").flags)).toEqual({});
+  });
+
+  test("an episode part left unwritten past written goes in the treatment log's put-off lines", async () => {
+    const h = new Harness("fresh", { packs: [storyPack, authorPack], model });
+    const rt = rtOf(h);
+    const settings = await rt.settings.get(h.host.userId);
+    settings.depth.budget = { ...settings.depth.budget, allowances: { live: 0, campfire: 0, room: 0, written: 0 } };
+    const userId = h.host.userId;
+    const chat = await h.newChat();
+    await h.send(chat, "I head home for the night.", "Sam walks home.");
+    const first = await head(h, chat);
+    const ask = { why: "A storm rolls in.", in: 0, minutes: 30, places: ["home"], people: ["sam"], parts: [{ subject: { event: "the radio" }, treatment: "written" as const, rationale: "a forecast" }] };
+    const out = await offscreenJobs(rt, chat, userId, first, { episodes: [ask], settle: [], drop: [], rebase: [] }, { budget: settings.depth.budget, model: port({}) });
+    expect(out.put).toEqual(["Episode 1: the radio: this story week's allowances are spent down to written, so it is left unwritten until it matters"]);
+    expect(out.said).toEqual([]);
+    expect(out.drafted).toEqual([]);
+  });
+
+  test("what a draft's world changes write becomes its touches: the thing and the places it moved between, never the player character's", () => {
+    const e = (place: string) => ({ fields: { place }, relations: [] }) as never;
+    const was = { entities: { dev: e("home"), boat: e("dock"), pc: e("cafe") } };
+    const now = { entities: { dev: e("home"), boat: e("harbour"), pc: e("dock"), keys: e("cafe") } };
+    expect(effectTouches(was, now, "pc")).toEqual([{ entity: "boat" }, { entity: "keys" }, { place: "harbour" }]);
   });
 
   test("a part past this interval's allowance slides down the ladder, said; one past written too is left unwritten", () => {

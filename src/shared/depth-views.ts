@@ -8,7 +8,7 @@
 
 import type { StageCounts } from "./bootstrap";
 import type { InterviewAsker } from "./character-engine";
-import type { DepthRole, DepthTreatment } from "./depth-settings";
+import type { DepthRole, DepthThresholdLevel, DepthTreatment } from "./depth-settings";
 import type { ChatId, EntityId, MessageId, PlaceId } from "./ids";
 import type { DepthSceneView } from "./scene-view";
 
@@ -60,14 +60,12 @@ export interface DepthMindRow {
   review: boolean;
 }
 
-/** GM → Minds: every character with a mind, and whose point of view the player drives (D-10). */
+/** GM → Minds: every character with a mind, and whose point of view the player drives (D-10; Play as isn't supported yet). */
 export interface DepthMindsView {
   /** Whether the chat runs on depth (GM → This chat → Depth). */
   on: boolean;
   /** The player character: the player drives him; he has no agent (D-10). */
   pov: { id: EntityId; name: string } | null;
-  /** The people the player may switch his point of view to. */
-  povChoices: { id: EntityId; name: string }[];
   characters: DepthMindRow[];
 }
 
@@ -83,6 +81,8 @@ export interface DepthMindFile {
   at: string | null;
   /** Out of its mind and recall (`writtenFromGone`): its latest write drew on a beat an amendment or a strike replaced, and no catch-up has kept or rewritten it since; one asked twice for a verdict stays so (§4.2, Retcons propagate). */
   out?: true;
+  /** A seeded core waiting for your review (D-17): from the history, an imported entry, World Info, or what the world knew of someone met in play. Keeping it as it is, or your edit, clears it. */
+  review?: true;
 }
 
 /** One write to a mind (`minds.v2.write`), newest first: what its agent wrote, why, and the beats it lived. */
@@ -308,6 +308,8 @@ export interface DepthDraft {
   settle?: DepthAt & { why: string; reasoning: string; beats: number };
   /** Its live drop: where, why, and the author's thinking. */
   drop?: DepthAt & { why: string; reasoning: string };
+  /** What the player's last Settle now or Re-draft on it came to while the host has run: under way, done (what became of it, a line each) or failed (why). */
+  press?: { op: "settle" | "redraft"; state: "running" | "done" | "failed"; lines: string[] };
 }
 
 /** GM → Depth → Drafts (§4.6, §7): every draft on this chat's chain, newest first; Settle now, Drop and Re-draft act on an open one. */
@@ -342,6 +344,8 @@ export interface DepthMeterRow {
   treatments: { treatment: DepthTreatment; episodes: number; cost: DepthCost }[];
   /** Each role that spent anything. */
   roles: { role: DepthRole; cost: DepthCost }[];
+  /** Each episode drafted in the interval: each part's treatment with the author's grade and reason against the threshold. */
+  grades: { episode: string; subject: string; depth: string; why: string }[];
 }
 
 /** One treatment's allowance this story interval (§6.5) and the parts the drafts on the chain spent of it. */
@@ -418,6 +422,7 @@ export interface DepthTreatmentsView {
   ceilings: DepthCeiling[];
   ask: boolean;
   threshold: string;
+  level: DepthThresholdLevel;
 }
 
 /** What `lre.depth` asks, beside its chat. The bootstrap and the opt-in are `lre.bootstrap`'s (`shared/bootstrap.ts`). */
@@ -426,6 +431,7 @@ export type DepthOp =
   | { op: "mind"; who: EntityId }
   | { op: "mind_edit"; who: EntityId; path: string; text: string }
   | { op: "interview"; who: EntityId; question: string; neutral: boolean }
+  /** Play as (D-10): refused, since switching isn't supported yet. */
   | { op: "pov"; who: EntityId }
   /** Its agent lives the points of view waiting for it now, rather than when the author's poll asks. */
   | { op: "catch_up"; who: EntityId }
@@ -455,6 +461,8 @@ export interface DepthResult {
   notebook?: DepthNotebookView;
   archive?: DepthArchiveResult;
   scene?: DepthSceneView;
+  /** With `scene`: the chat's last dry run on the loopback, the narrator's prompt LumiRPEngine would send for it; null when none was kept. */
+  dryRun?: { at: number; messages: { role: string; content: string }[] } | null;
   drafts?: DepthDraftsView;
   treatments?: DepthTreatmentsView;
   /** How many points of view a catch-up lived. */

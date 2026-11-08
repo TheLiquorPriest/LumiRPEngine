@@ -27,6 +27,7 @@ import { startState } from "../packs/support";
 import { Rig } from "../support/rig";
 import { DANNY, PRIYA } from "../support/mind-chat";
 import { readyLoopback } from "../support/relay";
+import { depthOptedIn } from "../../src/backend/bootstrap/service";
 
 const PROSE = "The kettle ticked on the stove while the rain worked at the window, and the shop smelled of solder and wet coats. ".repeat(30);
 
@@ -350,7 +351,7 @@ describe("bootstrap", () => {
     expect(view.log.some((l) => l.includes("rewrote what they wrote from it"))).toBe(true);
   }, 60_000);
 
-  test("a switch of player character inside the history lands at its message, the new one lives only what came before it, and a new place is made", async () => {
+  test("a switch of player character inside the history is noted, never landed (Play as isn't supported yet): the world's own stays the player character, and a new place is made", async () => {
     const rig = new Rig({ shipped: true });
     const chatId = await historyChat(rig);
     const asked = fakeModels(rig, { switchAt: "h6", placeAt: "h5" });
@@ -362,21 +363,19 @@ describe("bootstrap", () => {
     const basis = await rig.rt.ledger.basisFor(chatId, rig.host.userId);
     const at = basis ? await rig.rt.ledger.foldAtBasis(chatId, rig.host.userId, basis) : null;
     if (!at) throw new Error("no fold");
-    // From h6 on the player plays Priya: the switch landed at h6, and she is the player character now.
-    const switches = (await rig.rt.ledger.layerSummaries(chatId, rig.host.userId)).filter((s) => s.kind === MIND_POV);
-    expect(switches.map((s) => s.basis.message)).toEqual(["h6"]);
-    expect(povOf(at.world, at.state)).toBe(PRIYA);
+    // The history has the player play Priya from h6, but switching isn't supported yet: no switch lands, the log says so, and the world's own stays the player character.
+    expect((await rig.rt.ledger.layerSummaries(chatId, rig.host.userId)).filter((s) => s.kind === MIND_POV)).toEqual([]);
+    expect(view.log.some((l) => l.includes("from message h6 on. Switching isn't supported yet"))).toBe(true);
+    expect(povOf(at.world, at.state)).toBe(at.world.pov);
     const story = await rig.rt.ledger.readStory(chatId, rig.host.userId);
     const byMessage = new Map(story.beats.flatMap((p) => ("bootstrap" in p.beat.by ? [[p.beat.by.bootstrap.message, p.beat] as const] : [])));
     const h5 = byMessage.get("h5");
     const h6 = byMessage.get("h6");
     if (!h5 || !h6) throw new Error("no beats at h5 and h6");
-    // She lived h5's beat before she was played, never h6's; Danny lived both. She has no agent to reflect at the history's end.
+    // She lived h5's beat and h6's, as Danny did, since she is never the player character.
     expect(mindV2At(at.state, PRIYA).lived[h5.id]).toBe(true);
-    expect(mindV2At(at.state, PRIYA).lived[h6.id]).toBeUndefined();
-    expect(h6.exposure.find((e) => e.who === PRIYA)?.pending).toBeUndefined();
+    expect(mindV2At(at.state, PRIYA).lived[h6.id]).toBe(true);
     expect(mindV2At(at.state, DANNY).lived[h6.id]).toBe(true);
-    expect(asked.reflect).toBe(3);
     // The lighthouse, a place the world didn't have, was made, and h5's beat happens there.
     const lighthouse = Object.values(at.world.places).find((p) => p.name === "The Lighthouse");
     expect(lighthouse).toBeDefined();
@@ -631,9 +630,10 @@ describe("bootstrap", () => {
     const prose = "Chapter 1 opens at the shop.";
     let authored = 0;
     rig.host.quietReply = (req) => {
-      // The author's first answer, prose, spends past the cap, so it is never asked again.
+      // The author's first answer, prose, spends past the cap, so it is never asked again. Every call is priced: a money cap refuses a connection that reports none.
       if (text(req).includes('"chapter": {"ends"') && authored++ === 0) return { content: prose, usage: { cost: 10 } };
-      return answer ? answer(req) : "{}";
+      const r = answer ? answer(req) : "{}";
+      return typeof r === "string" ? { content: r, usage: { cost: 0 } } : r;
     };
     await bootstrap(rig, chatId, { op: "opt", on: true });
     await bootstrap(rig, chatId, { op: "start", cap: { unit: "money", value: 5 } });
@@ -650,6 +650,55 @@ describe("bootstrap", () => {
     expect(kept.misread?.map((m) => [m.call, m.fields.map((f) => f.field), m.raw])).toEqual([[0, ["(the answer)"], prose]]);
     expect(kept.misread?.[0]?.fields[0]?.why).toContain("the author's answer wasn't the JSON object it was asked for");
     // Without the cap, Resume asks the author again and finishes.
+    await bootstrap(rig, chatId, { op: "resume", cap: "none" });
+    expect((await finished(rig, chatId)).status).toBe("done");
+  }, 60_000);
+
+  test("a survey is read once until the chat changes: an estimate again reuses it, a new message drops it", async () => {
+    const rig = new Rig({ shipped: true });
+    const chatId = await historyChat(rig);
+    await bootstrap(rig, chatId, { op: "opt", on: true });
+    const ledger = rig.rt.ledger;
+    const core = ledger.core.bind(ledger);
+    let folds = 0;
+    ledger.core = (async (...args: Parameters<typeof core>) => {
+      folds++;
+      return core(...args);
+    }) as typeof ledger.core;
+    const estimate = async (): Promise<number> => {
+      const before = folds;
+      const body = await bootstrap(rig, chatId, { op: "estimate" });
+      expect(body.estimate).toBeDefined();
+      return folds - before;
+    };
+    const warm = await estimate();
+    const messages = ((await bootstrap(rig, chatId, { op: "estimate" })).estimate as BootstrapEstimate).messages;
+    rig.host.sendUser(chatId, "I ask Danny about the boat.");
+    expect(await estimate()).toBeGreaterThan(warm);
+    expect(((await bootstrap(rig, chatId, { op: "estimate" })).estimate as BootstrapEstimate).messages).toBe(messages + 1);
+  }, 60_000);
+
+  test("a branch of a chat on depth is on depth until it opts out itself", async () => {
+    const rig = new Rig({ shipped: true });
+    const chatId = await historyChat(rig);
+    await bootstrap(rig, chatId, { op: "opt", on: true });
+    const branch = rig.host.createChat("Morning.");
+    await rig.host.chats.mergeChatMetadata(branch, { branched_from: chatId, branch_at_message: "h1" }, rig.host.userId);
+    expect(await depthOptedIn({ host: rig.host }, branch, rig.host.userId)).toBe(true);
+    expect(await depthOptedIn({ host: rig.host }, rig.host.createChat("Elsewhere."), rig.host.userId)).toBe(false);
+  }, 60_000);
+
+  test("a money cap on connections that report no price stops the run at its first call, rather than run uncapped", async () => {
+    const rig = new Rig({ shipped: true });
+    const chatId = await historyChat(rig);
+    fakeModels(rig);
+    await bootstrap(rig, chatId, { op: "opt", on: true });
+    await bootstrap(rig, chatId, { op: "start", cap: { unit: "money", value: 5 } });
+    const stopped = await finished(rig, chatId);
+    expect(stopped.status).toBe("paused");
+    expect(stopped.reason).toContain("A money cap can't bind");
+    expect(stopped.spent.calls).toBe(1);
+    // In tokens, Resume finishes.
     await bootstrap(rig, chatId, { op: "resume", cap: "none" });
     expect((await finished(rig, chatId)).status).toBe("done");
   }, 60_000);

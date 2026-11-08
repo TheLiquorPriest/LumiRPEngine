@@ -18,7 +18,7 @@ import { depthRequest, type DepthHost } from "../../src/backend/depth-views";
 import type { Runtime } from "../../src/backend/runtime";
 import { PROTOCOL_VERSION } from "../../src/shared/protocol";
 import { AUTHOR_DRIFT, AUTHOR_POLL, AUTHOR_PREDICT, AUTHOR_SCORE, authorData, predictEvent, predictionId, type PollData } from "../../src/shared/author";
-import { mindLivedEvent, mindTakeEvent, TAKES_KEPT, takesOf } from "../../src/shared/character-engine";
+import { mindFileWrite, mindLivedEvent, mindPath, mindTakeEvent, TAKES_KEPT, takesOf } from "../../src/shared/character-engine";
 import { depthModel, type DepthRole } from "../../src/shared/depth-settings";
 import { sceneEvent } from "../../src/shared/scene";
 import { beatEvent, type Beat } from "../../src/shared/story";
@@ -136,8 +136,9 @@ describe("right after a depth reply", () => {
     expect(model.sent.gm?.[1]).toContain(BELIEFS);
     const poll = model.sent.author?.[0] ?? "";
     for (const part of [MEMORY, BOAT, "[p-old]", "(OOC) let it rain later", "The scene ended with this turn."]) expect(poll).toContain(part);
-    // The author's own reflection came after Dev's: it read who he has become.
+    // The author's own reflection came after Dev's: it read who he has become, and the player's signals for player.md.
     expect(model.sent.author?.[1]).toContain(SELF);
+    expect(model.sent.author?.[1]).toContain("- (OOC) let it rain later");
 
     const head = await h.service.foldAtBasis(chat, userId, basis, [AUTHOR_POLL, AUTHOR_SCORE, AUTHOR_DRIFT, AUTHOR_PREDICT]);
     if (!head) throw new Error("no fold");
@@ -153,6 +154,28 @@ describe("right after a depth reply", () => {
     await h.host.finish(await h.host.start(chat, { type: "swipe", messageId: basis.message }), "Okay, at eight.");
     const swiped = await h.service.readEvents(chat, userId, [AUTHOR_POLL, AUTHOR_SCORE]);
     expect(swiped).toEqual([]);
+  });
+
+  test("the poll keeps the story time it asks to be woken at, and a reply whose clock passed it wakes a poll a conversation put off", async () => {
+    const h = new Harness("fresh", { packs: [storyPack, authorPack] });
+    const rt = rtOf(h);
+    const userId = h.host.userId;
+    const chat = await h.newChat();
+    await h.send(chat, "I'll wait for the tide.");
+    const basis = await h.service.basisFor(chat, userId);
+    if (!basis) throw new Error("no basis");
+    const model = port({ author: [{ wake: { minutes: 30, why: "the tide turns" } }, {}] });
+    await afterDepthReply(rt, chat, userId, basis, { scene: null, ended: false, remember: [], poll: true, beats: [] }, { model });
+    const first = await h.service.foldAtBasis(chat, userId, basis, [AUTHOR_POLL]);
+    if (!first) throw new Error("no fold");
+    const wake = first.events.flatMap((e) => authorData<PollData>(e.event, AUTHOR_POLL)?.wake ?? []).at(-1);
+    expect(wake).toEqual({ at: first.state.clock + 30, why: "the tide turns" });
+    // Before the clock reaches it, a put-off poll stays asleep.
+    expect((await afterDepthReply(rt, chat, userId, basis, { scene: null, ended: false, remember: [], poll: false, beats: [] }, { model, occasion: "early" })).jobs).toBeNull();
+    expect((await h.service.landLayer(chat, userId, { id: "tide", basis, kind: "clock", events: [{ type: "clock", minutes: 45, cause: "advance" }] })).status).toBe("landed");
+    const out = await afterDepthReply(rt, chat, userId, basis, { scene: null, ended: false, remember: [], poll: false, beats: [] }, { model, occasion: "tide" });
+    expect(out.jobs).toEqual([]);
+    expect(model.sent.author?.[1]).toContain("when you asked to be woken (the tide turns)");
   });
 
   test("Settings → Depth → Notebook revisions bounds how often the author reflects", () => {
@@ -206,11 +229,12 @@ describe("right after a depth reply", () => {
     const during = await afterDepthReply(rt, chat, userId, basis, { scene: "s1", ended: false, remember: [], poll: false, beats: ["pier"] }, { model });
     expect([during.remembered, model.sent.character]).toEqual([[], undefined]);
 
-    // The player leaves: the talk ends at the reply, and its end remembers it there and links what Dev believes now.
+    // The player leaves: the talk ends at the reply, and its end remembers it there, links what Dev believes now, and runs the poll the conversation deferred.
     const tap = await talkTap({ host: h.host, ledger: h.service }, chat, userId, `talk:${basis.message}:0`, TALK_CHOICES.leave);
     if (!("applied" in tap) || !tap.left) throw new Error(`no Leave: ${JSON.stringify(tap)}`);
     const left = await talkLeft(rt, chat, userId, tap.left, { model });
-    expect([left.remembered, left.linked, left.failed, left.jobs]).toEqual([["dev"], true, [], null]);
+    expect([left.remembered, left.linked, left.failed, left.jobs]).toEqual([["dev"], true, [], []]);
+    expect(model.sent.author?.length).toBe(1);
     expect(model.sent.gm?.[1]).toContain(BELIEFS);
     const after = await h.service.foldAtBasis(chat, userId, basis);
     expect(after ? takesOf(after.state, "dev") : null).toEqual([]);
@@ -297,6 +321,47 @@ describe("right after a depth reply", () => {
     const before = asked.length;
     await depthRequest(rt as unknown as Runtime, {} as DepthHost, reflect, userId);
     expect(asked.length - before).toBe(1);
+  });
+
+  test("the poll is told what a correction put out of a mind, so it can ask for the reflection that rewrites it", async () => {
+    const h = new Harness("fresh", { packs: [storyPack, authorPack] });
+    const rt = rtOf(h);
+    const userId = h.host.userId;
+    const chat = await h.newChat();
+    const greeting = await h.service.basisFor(chat, userId);
+    if (!greeting) throw new Error("no greeting");
+    // Dev lived the warning and wrote his beliefs from it.
+    const beliefs = mindFileWrite({ who: "dev", path: mindPath("dev", "beliefs"), at: 600, mode: "catch-up", lived: ["pier"], about: [] }, BELIEFS);
+    await rt.blobs.put(userId, BELIEFS);
+    // He holds 300 takes unremembered, near the count that calls his remembering.
+    const takes = Array.from({ length: 300 }, (_, i) => mindTakeEvent({ who: "dev", at: 600, lived: ["pier"], take: `Take ${i}.` }).event);
+    expect((await h.service.landLayer(chat, userId, { id: "lived", basis: greeting, kind: "story.beat", events: [beatEvent(beat("pier", 600, PIER_WHAT, PIER, false)), mindLivedEvent({ who: "dev", beats: ["pier"], at: 600, mode: "catch-up" }), ...beliefs.events, ...takes] })).status).toBe("landed");
+    await h.send(chat, "No, Sam said nine.");
+    const basis = await h.service.basisFor(chat, userId);
+    if (!basis) throw new Error("no basis");
+    // An edit corrected the warning: its new beat stands in for the old one.
+    expect((await h.service.landLayer(chat, userId, { id: "edit", basis, kind: "story.beat", events: [beatEvent({ ...beat("pier9", 600, "Sam warns Dev that the pier floods at nine.", "Sam says the pier floods at nine.", true), supersedes: ["pier"] })] })).status).toBe("landed");
+    const model = port({ author: [{}] });
+    await afterDepthReply(rt, chat, userId, basis, { scene: null, ended: false, remember: [], poll: true, beats: ["pier9"] }, { model });
+    expect(model.sent.author?.[0]).toContain("out of mind since a correction struck what they were written from: beliefs.md (a reflection rewrites them)");
+    // A mind near that count asks for a reflection: the poll hears it.
+    expect(model.sent.author?.[0]).toContain("their working memory is nearly full (300 takes unremembered): they ask to reflect");
+  });
+
+  test("someone the story reached who has no mind yet is listed to the poll, which may catch them up (H3)", async () => {
+    const h = new Harness("fresh", { packs: [storyPack, authorPack] });
+    const rt = rtOf(h);
+    const userId = h.host.userId;
+    const chat = await h.newChat();
+    await h.send(chat, "I shout down the well.");
+    const basis = await h.service.basisFor(chat, userId);
+    if (!basis) throw new Error("no basis");
+    // The shout reaches the rat from afar, who has no mind.
+    const shout: Beat = { ...beat("shout", 600, PIER_WHAT, PIER, true), exposure: [{ who: "rat", channel: "hearing", reach: "partial", pending: true as const, pov: blobHash(PIER) }] };
+    expect((await h.service.landLayer(chat, userId, { id: "turn", basis, kind: "story.beat", events: [beatEvent(shout)] })).status).toBe("landed");
+    const model = port({ author: [{}] });
+    await afterDepthReply(rt, chat, userId, basis, { scene: null, ended: false, remember: [], poll: true, beats: ["shout"] }, { model });
+    expect(model.sent.author?.[0]).toContain("Rat [rat]: 1 point of view waiting (no mind yet: a catch-up forms one, from their card or what the world knows of them, then lives these)");
   });
 });
 

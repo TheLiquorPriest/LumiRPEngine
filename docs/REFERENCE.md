@@ -192,7 +192,7 @@ Version 1 · realism domain none · requires none.
 
 ### Events
 
-Its own: `author.answer`, `author.ask`, `author.drift`, `author.drop`, `author.edit`, `author.poll`, `author.predict`, `author.score`, `author.spend`.
+Its own: `author.adopt`, `author.answer`, `author.ask`, `author.drift`, `author.drop`, `author.edit`, `author.poll`, `author.predict`, `author.score`, `author.spend`.
 
 ## Calendar & time pack (`calendar`)
 

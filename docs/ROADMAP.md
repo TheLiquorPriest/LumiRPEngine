@@ -307,7 +307,7 @@ Long chats outgrew a single prompt: a thousand messages in, the model writing th
 - **Real-time dialogue**: your line goes straight to the character, with the author watching beside it.
 - **The world beyond view**: episodes simulated off screen as drafts, at treatments the budget allows, settled into canon only when the story reaches them; Ask me before spending past an allowance.
 - **Edits as directives**: your edit of a reply amends the beats it changes, and everyone who lived them catches up and keeps or rewrites what they wrote from them.
-- **Playing someone else**: GM → Minds → Play as switches the player character.
+- **Playing someone else**: not supported yet. You play one player character; GM → Minds → Play as is hidden, and a switch is refused.
 - **GM → Depth**: Notebook, Drafts, Treatments, Turn (every model call a reply made, its beats and each passage), Archive and Bootstrap. **Settings → Depth**: every role's model, the budget, the narrator's window and the bootstrap's settings, with Deepest, Balanced and Lean presets.
 - **The loopback relay**: `lumirpengine loopback up` starts an OpenAI-compatible relay (a systemd service with `--systemd`) that hands Lumiverse's reply call to LumiRPEngine and streams the turn into the thinking block; `serve`, `login`, `status` and `down` keep it.
 - **No spoiler gate**: GM mode opens straight onto the truth.
@@ -321,4 +321,4 @@ Long chats outgrew a single prompt: a thousand messages in, the model writing th
 - Depth needs the relay running beside Lumiverse; message sessions can't yet complete a reply written passage by passage, so there is no in-process route yet.
 - Impersonate and Continue still use the classic narrator on a depth chat.
 - "Pick blocks" is removed: Spindle's prompt interceptor gives no preset block identity. Leave a block out per chat in Lumiverse's own preset. I plan to ask for block ids after the release.
-- A chat exported from Lumiverse and imported again starts with no depth work.
+- A chat exported from Lumiverse carries its depth work in its metadata only while it fits in 1 MB compressed; past that, an imported copy starts with no depth work.

@@ -18,6 +18,9 @@ import { BootstrapFiles } from "./files";
 import { BootstrapRun } from "./run";
 import { bootstrapEnv } from "./wiring";
 import { chatNumbers } from "../depth/chat-numbers";
+import { historyCut, setHistoryCut } from "../depth/history-cut";
+import { chatAllowances, chatAllowancesOf, setChatAllowances } from "../depth/chat-allowances";
+import { historyCutOf } from "../../shared/depth-history";
 
 export class BootstrapError extends Error {
   /** `unavailable`: depth can't be played by this user now (`loopbackUnready`), so the opt-in is refused; the page offers Settings → Loopback. */
@@ -63,9 +66,22 @@ function pinOf(meta: JsonObject): ChatPin {
   return { connection_profile_id: read(meta.connection_profile_id), connection_model: read(meta.connection_model) };
 }
 
-/** Whether the chat is on depth (GM → This chat → Depth): what every depth reader asks first. */
-export async function depthOptedIn(rt: Pick<Runtime, "host">, chatId: ChatId, userId: UserId): Promise<boolean> {
-  return (await new BootstrapFiles(rt.host, chatId, userId).read(OPT, isOpt))?.on === true;
+/**
+ * Whether the chat is on depth (GM → This chat → Depth): what every depth reader asks first. A branch
+ * that never opted in or out itself is on where the chat it was branched from is (`branched_from`,
+ * which core writes), as its layer is inherited too.
+ */
+export async function depthOptedIn(rt: Pick<Runtime, "host">, chatId: ChatId, userId: UserId, hops = 0): Promise<boolean> {
+  const own = await new BootstrapFiles(rt.host, chatId, userId).read(OPT, isOpt);
+  if (own) return own.on;
+  if (hops > 4) return false;
+  let from: unknown;
+  try {
+    from = (await rt.host.chats.chatMetadata(chatId, userId)).branched_from;
+  } catch {
+    return false;
+  }
+  return typeof from === "string" && from !== chatId ? depthOptedIn(rt, from as ChatId, userId, hops + 1) : false;
 }
 
 /** D-18: once the chat's memory is the ledger, the notebook and the minds, the advice to turn off what they replace for it; nothing more. */
@@ -108,7 +124,9 @@ export class Bootstraps {
     // A spot-check beat names the message it came from by the number the chat shows it with (`chatNumbers`), not its place on the path the run spooled.
     const numbers = view.spot.some((card) => card.items.some((item) => item.kind === "beat")) ? await chatNumbers(this.rt.host, chatId, userId) : null;
     const spot = numbers ? view.spot.map((card) => ({ ...card, items: card.items.map((item) => (item.kind === "beat" ? { ...item, index: numbers.get(item.message) ?? item.index } : item)) })) : view.spot;
-    return { ...view, spot, advice: view.status === "done" ? adviceOf(view.imported) : [] };
+    const budget = (await this.rt.settings.get(userId)).depth.budget;
+    const allowances = { own: await chatAllowances(this.rt.host, chatId, userId), yours: budget.allowances, interval: budget.interval };
+    return { ...view, spot, advice: view.status === "done" ? adviceOf(view.imported) : [], history: await historyCut(this.rt.host, chatId, userId), allowances };
   }
 
   /** Answers one `lre.bootstrap` request with the chat's view, and the estimate where it asked for one. */
@@ -158,6 +176,20 @@ export class Bootstraps {
           throw new BootstrapError(run.busy ? "conflict" : "bad_request", error instanceof Error ? error.message : String(error));
         });
         break;
+      case "history": {
+        // GM → This chat → Depth → History: the cutoff a depth turn's request leaves the earlier messages out by.
+        const cut = historyCutOf(r.cut);
+        if (cut === null) throw new BootstrapError("bad_request", "Keep the latest messages (at least one) or every message from a message's number on.");
+        await setHistoryCut(this.rt.host, chatId, userId, cut);
+        break;
+      }
+      case "allowances": {
+        // GM → This chat → Depth → Allowances: the chat's own, over the user's.
+        const allowances = chatAllowancesOf(r.allowances);
+        if (allowances === null) throw new BootstrapError("bad_request", "Each allowance is a treatment's whole number of parts (0 or more), or no limit.");
+        await setChatAllowances(this.rt.host, chatId, userId, allowances);
+        break;
+      }
       default:
         throw new BootstrapError("bad_request", "no such bootstrap request");
     }

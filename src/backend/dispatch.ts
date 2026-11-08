@@ -90,6 +90,7 @@ import { DepthRefused, depthRequest } from "./depth-views";
 import { isTalkChoice, TALK_CHIP_KIND, talkLeft, talkTap } from "./depth/scene/talk";
 import { ASK_CHIP_KIND, askAnswer, isAskChoice } from "./depth/offscreen/asks";
 import { draftAnswered } from "./depth/offscreen/jobs";
+import { chatBudget } from "./depth/chat-allowances";
 import { LoopbackRefused } from "./loopback/bridge";
 import { listsText, OutsideTools, servedTools } from "./agents/tools/outside";
 import { Refusal } from "./agents/tools/outside-tool";
@@ -847,6 +848,7 @@ export class Dispatcher {
           const before = await this.rt.settings.get(userId);
           const after = await this.rt.settings.set(userId, r.patch, guard);
           if (after.hideJsonBlocks !== before.hideJsonBlocks) await this.rt.hidingChanged(userId, after.hideJsonBlocks);
+          if (before.depth.background.on && !after.depth.background.on) this.rt.depthPaused(userId);
           // A served tool's text changed: every outside client of the user lists the tools again (DESIGN §23).
           const listed = (texts: typeof before.prompts.texts): string => JSON.stringify(Object.entries(texts).filter(([id]) => listsText(id)));
           if (listed(after.prompts.texts) !== listed(before.prompts.texts)) this.rt.host.frontend.send({ lre: PROTOCOL_VERSION, type: "lre.tools.changed" }, userId);
@@ -1009,7 +1011,8 @@ export class Dispatcher {
         // GM → Minds (DESIGN §24.9): sent only from behind the GM gate; its progress goes to this session.
         try {
           const run = r.op === "run" ? await this.minds.start(r.chatId, userId, session, Array.isArray(r.who) ? r.who.filter((id) => typeof id === "string") : undefined) : r.op === "cancel" ? this.minds.cancel(r.chatId, userId, r.runId) : this.minds.status(r.chatId, userId);
-          reply("lre.minds", { run });
+          const off = r.op === "status" ? await this.minds.off(r.chatId, userId) : null;
+          reply("lre.minds", { run, ...(off !== null ? { off } : {}) });
         } catch (error) {
           if (error instanceof RunError) throw new RequestError(error.code, error.message);
           throw error;
@@ -1518,7 +1521,7 @@ export class Dispatcher {
       if (!isAskChoice(choice)) throw new RequestError("bad_request", `unknown choice ${choice}`);
       const tap = await askAnswer(this.rt, chatId, userId, id, choice);
       if ("lapsed" in tap) throw new RequestError("not_found", tap.lapsed);
-      const budget = (await this.rt.settings.get(userId)).depth.budget;
+      const budget = await chatBudget(this.rt.host, chatId, userId, (await this.rt.settings.get(userId)).depth.budget);
       void draftAnswered(this.rt, chatId, userId, tap, { budget })
         .then((r) => {
           for (const line of r.said) this.rt.host.log("info", `[LumiRPEngine] chat ${chatId}, the episode you answered for: ${line}`, userId);

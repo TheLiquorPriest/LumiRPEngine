@@ -20,10 +20,10 @@ import type { FixOp } from "../shared/ledger";
 import type { DepthRequest } from "../shared/protocol";
 import type { WorldDoc } from "../shared/world";
 import type { WorldState } from "../engine/state";
-import { catchUpNow, interviewMind, MindRefused, mindEdit, mindsView, mindView, portFor, povSwitch, reflectNow } from "./character-engine";
+import { catchUpNow, interviewMind, MindRefused, mindEdit, mindsView, mindView, PLAY_AS_OFF, portFor, reflectNow } from "./character-engine";
 import { notebookEditOps, notebookView } from "./depth/notebook";
 import { beliefLinks, linkTruths } from "./depth/truth-link";
-import { DraftRefused, draftsView, dropDraft, redraft, settleNow } from "./depth/drafts-view";
+import { DraftRefused, draftsView, dropDraft, notePress, redraft, settleNow } from "./depth/drafts-view";
 import { chatNumbers } from "./depth/chat-numbers";
 import { sceneView } from "./depth/scene/scene-view";
 import { treatmentsView } from "./depth/treatments-view";
@@ -136,8 +136,7 @@ export async function depthRequest(rt: Runtime, host: DepthHost, r: DepthRequest
         if (r.question.trim() === "") throw new DepthRefused("bad_request", "Ask a question.");
         return { interview: await interviewMind(rt, chatId, userId, r.who, r.question.trim(), r.neutral === true) };
       case "pov":
-        await povSwitch(rt, chatId, userId, r.who);
-        return {};
+        throw new DepthRefused("validation", PLAY_AS_OFF);
       // Made while a reply is written, what it lived lands once the reply is kept: it lived nothing yet.
       case "catch_up": {
         const caught = await catchUpNow(rt, chatId, userId, r.who);
@@ -164,7 +163,7 @@ export async function depthRequest(rt: Runtime, host: DepthHost, r: DepthRequest
       case "archive":
         return { archive: await archive(rt, host, chatId, userId, r) };
       case "scene":
-        return { scene: await sceneView(rt, await host.head(chatId, userId), chatId, userId, r.message) };
+        return { scene: await sceneView(rt, await host.head(chatId, userId), chatId, userId, r.message), dryRun: rt.loopback.dryRunOf(chatId, userId) };
       case "drafts":
         return { drafts: await draftsView(rt, chatId, userId) };
       case "draft_drop": {
@@ -173,16 +172,23 @@ export async function depthRequest(rt: Runtime, host: DepthHost, r: DepthRequest
       }
       case "draft_settle":
       case "draft_redraft": {
-        // The author's reading (and a redraft's episode) can run for minutes: it goes on in the background, and the view reads it again once it lands.
-        const job = r.op === "draft_settle" ? settleNow(rt, chatId, userId, r.draft) : redraft(rt, chatId, userId, r.draft);
-        const doing = r.op === "draft_settle" ? "The author is reading it against everything since its time" : "The author is drafting it again";
+        // The author's reading (and a redraft's episode) can run for minutes: it goes on in the background, and what became of it is kept for the draft's page, which the view reads again once it lands.
+        const op = r.op === "draft_settle" ? "settle" : "redraft";
+        const doing = op === "settle" ? "The author is reading it against everything since its time" : "The author is drafting it again";
+        notePress(chatId, userId, r.draft, { op, state: "running", lines: [`${doing}.`] });
+        const job = op === "settle" ? settleNow(rt, chatId, userId, r.draft) : redraft(rt, chatId, userId, r.draft);
         void job
           .then((lines) => {
             for (const line of lines) rt.host.log("info", `[LumiRPEngine] chat ${chatId}, draft ${r.draft}: ${line}`, userId);
-            rt.push.changed(chatId, userId);
+            notePress(chatId, userId, r.draft, { op, state: "done", lines: lines.length > 0 ? lines : ["Nothing changed: the author left it as it was."] });
           })
-          .catch((error: unknown) => rt.host.log("warn", `[LumiRPEngine] chat ${chatId}, draft ${r.draft}: ${error instanceof Error ? error.message : String(error)}`, userId));
-        return { said: [`${doing}; GM → Depth → Drafts shows what became of it.`] };
+          .catch((error: unknown) => {
+            const why = error instanceof Error ? error.message : String(error);
+            rt.host.log("warn", `[LumiRPEngine] chat ${chatId}, draft ${r.draft}: ${why}`, userId);
+            notePress(chatId, userId, r.draft, { op, state: "failed", lines: [why] });
+          })
+          .finally(() => rt.push.changed(chatId, userId));
+        return { said: [`${doing}; its page in GM → Depth → Drafts shows what became of it.`] };
       }
       case "treatments":
         return { treatments: await treatmentsView(rt, chatId, userId) };

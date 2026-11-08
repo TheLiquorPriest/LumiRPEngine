@@ -17,6 +17,7 @@ import { LEDGER_NAMESPACE } from "../shared/ledger";
 import type { ChainMessage } from "../engine/ledger/chain";
 import { foldLayerOf, inheritedBy, inheritedFirst, swipeKeyOf } from "../engine/ledger/layer";
 import type { HostMessage, HostPort } from "./host";
+import { carriedEntries, carriedMap, carryIn, copyMap } from "./layer-carry";
 
 /** A segment is closed past this many entries or characters, so a landing rewrites a bounded file. */
 export const LAYER_SEGMENT_ENTRIES = 64;
@@ -264,6 +265,15 @@ export class LayerStore {
     return ready;
   }
 
+  /** Takes the held drafts `which` picks, whatever windows they wait for: a turn adopting the work it waited for (DEPTH-PLAN §6.3). */
+  async adoptHeld(which: (h: HeldDraft) => boolean): Promise<HeldDraft[]> {
+    const taken = this.held.filter(which);
+    if (taken.length === 0) return [];
+    this.held = this.held.filter((h) => !taken.includes(h));
+    await this.writeHeld();
+    return taken;
+  }
+
   private async writeHeld(): Promise<void> {
     const dir = layerDir(this.chatId);
     if (this.held.length === 0) {
@@ -287,7 +297,9 @@ export class LayerStore {
  * when the chat was branched (`branched_from`, `branch_at_message`, which core writes) from a chat of
  * the same run, the ancestor's entries as it folds them (what it inherited itself included), of which
  * the branch takes those landed by the end of the second the host made it in (`inheritedBy`), each
- * under its message's copy (`inheritMap`, on both chats' messages as `chainOf` decodes them).
+ * under its message's copy (`inheritMap`, on both chats' messages as `chainOf` decodes them). A chat
+ * that wasn't branched but holds a layer carried in its metadata from another chat of the run (an
+ * imported copy, `LAYER_CARRY_KEY`) takes the entries carried, each under the copy of its message.
  * `opened`: the ancestor's layer, when its chat is open here. A read that fails answers null.
  */
 export async function ancestorOf(host: HostPort, chatId: ChatId, userId: UserId, runSeed: string, opened: (chatId: ChatId) => LayerStore | undefined, chainOf: (messages: readonly HostMessage[]) => ChainMessage[], depth = 0): Promise<Ancestry> {
@@ -296,7 +308,7 @@ export async function ancestorOf(host: HostPort, chatId: ChatId, userId: UserId,
     const meta = await host.chats.chatMetadata(chatId, userId);
     const from = meta.branched_from;
     const at = meta.branch_at_message;
-    if (typeof from !== "string" || typeof at !== "string" || from === chatId) return "none";
+    if (typeof from !== "string" || typeof at !== "string" || from === chatId) return await carriedAncestry(meta, chatId, runSeed, async () => chainOf(await host.chats.messages(chatId, userId)));
     const fromRun = (await host.chats.chatMetadata(from, userId))[LEDGER_NAMESPACE];
     if (!isRecord(fromRun) || fromRun.runSeed !== runSeed) return "none";
     const store = opened(from) ?? (await LayerStore.open(host, from, userId, () => ancestorOf(host, from, userId, runSeed, opened, chainOf, depth + 1), { readOnly: true }));
@@ -311,11 +323,13 @@ export async function ancestorOf(host: HostPort, chatId: ChatId, userId: UserId,
   }
 }
 
-/** An ancestor's message (`i`) and its copy (`j`), by their places in their chats, and the pair before them in a run of copies. */
-interface CopyPair {
-  i: number;
-  j: number;
-  prev: CopyPair | null;
+/** What an imported copy takes of the layer carried in its metadata: every entry carried, under the copy of its message; "none" when it carries none of another chat of this run. */
+async function carriedAncestry(meta: Readonly<Record<string, unknown>>, chatId: ChatId, runSeed: string, chain: () => Promise<ChainMessage[]>): Promise<Ancestry> {
+  const carry = carryIn(meta);
+  if (!carry || carry.chat === chatId || carry.runSeed !== runSeed || "over" in carry) return "none";
+  const entries = carriedEntries(carry);
+  if (!entries || entries.length === 0) return "none";
+  return { inherit: { from: carry.chat, before: carry.at, messages: carriedMap(carry, await chain()) }, entries };
 }
 
 /**
@@ -332,36 +346,7 @@ interface CopyPair {
 export function inheritMap(ancestor: readonly ChainMessage[], branchAt: MessageId, branch: readonly ChainMessage[]): Record<MessageId, MessageId> | null {
   const point = ancestor.findIndex((m) => m.id === branchAt);
   if (point < 0) return null;
-  const shared = ancestor.slice(0, point + 1);
   // Each message's identities, swipe by swipe; no tombstone counts, a copy holding the records its original held when it was copied.
-  const [mine, theirs] = [shared, branch].map((list) => list.map((m) => new Set(m.swipes.map((_, s) => swipeKeyOf({ ...m, swipeId: s }, [])))));
-  // Where each identity stands in the branch, in chat order.
-  const places = new Map<string, number[]>();
-  for (const [j, keys] of theirs.entries()) {
-    for (const key of keys) {
-      const list = places.get(key);
-      if (list) list.push(j);
-      else places.set(key, [j]);
-    }
-  }
-  // The longest common run of copies (Hunt–Szymanski): `ends[k]` ends, of the runs of k + 1 pairs found so far, the one that stops earliest in the branch.
-  const ends: CopyPair[] = [];
-  for (const [i, keys] of mine.entries()) {
-    const copies = new Set<number>();
-    for (const key of keys) for (const j of places.get(key) ?? []) if (branch[j].isUser === shared[i].isUser) copies.add(j);
-    // The latest first, so no message pairs twice in one run.
-    for (const j of [...copies].sort((x, y) => y - x)) {
-      let lo = 0;
-      let hi = ends.length;
-      while (lo < hi) {
-        const mid = (lo + hi) >> 1;
-        if (ends[mid].j < j) lo = mid + 1;
-        else hi = mid;
-      }
-      ends[lo] = { i, j, prev: ends[lo - 1] ?? null };
-    }
-  }
-  const out: Record<MessageId, MessageId> = {};
-  for (let p = ends.at(-1) ?? null; p !== null; p = p.prev) out[shared[p.i].id] = branch[p.j].id;
-  return out;
+  const [mine, theirs] = [ancestor.slice(0, point + 1), branch].map((list) => list.map((m) => ({ id: m.id, user: m.isUser, keys: new Set(m.swipes.map((_, s) => swipeKeyOf({ ...m, swipeId: s }, []))) })));
+  return copyMap(mine, theirs);
 }

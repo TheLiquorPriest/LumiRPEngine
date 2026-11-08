@@ -20,7 +20,6 @@ import {
   mindFileOf,
   mindFileWrite,
   mindMetaAt,
-  mindPovEvent,
   mindV2At,
   mindWriteEvent,
   mindInterviewOf,
@@ -59,7 +58,7 @@ import type { Registry } from "../engine/registry-impl";
 import { isGone, kindIs } from "../engine/scope";
 import type { WorldState } from "../engine/state";
 import type { WorldDoc } from "../shared/world";
-import { catchUp, interview, reflect, type LivedPov, type MindFiles, type MindInput, type MindRewrite, type PovRefs, type StageOut } from "./character-agent";
+import { catchUp, formCore, interview, reflect, type LivedPov, type MindFiles, type MindInput, type MindRewrite, type PovRefs, type StageOut } from "./character-agent";
 import type { ModelPort } from "./depth/port";
 import { DRAFT_TYPES, draftsOn, heldFrom } from "./depth/offscreen/drafts";
 import { placeNamed } from "./depth/common";
@@ -69,7 +68,7 @@ import { chatNumbers } from "./depth/chat-numbers";
 
 /** What the Character Engine needs of the runtime (`Runtime` is one). */
 export interface EngineRt {
-  readonly host: Pick<HostPort, "models" | "log" | "storage" | "chats">;
+  readonly host: Pick<HostPort, "models" | "log" | "storage" | "chats" | "characters">;
   readonly registry: Registry;
   readonly blobs: { get(userId: UserId, hash: string): Promise<string | null>; put(userId: UserId, text: string, holder?: string): Promise<string> };
   readonly settings: { get(userId: UserId): Promise<UserSettings> };
@@ -289,7 +288,7 @@ function beatRef(placed: PlacedBeat | undefined, id: string, texts: Readonly<Rec
 export async function mindsView(rt: EngineRt, chatId: ChatId, userId: UserId): Promise<DepthMindsView> {
   const basis = await rt.ledger.basisFor(chatId, userId);
   const at = basis ? await rt.ledger.foldAtBasis(chatId, userId, basis) : null;
-  if (!basis || !at) return { on: false, pov: null, povChoices: [], characters: [] };
+  if (!basis || !at) return { on: false, pov: null, characters: [] };
   const { state, world, story } = at;
   const cal = calendarOf(world);
   const pov = povOf(world, state);
@@ -316,7 +315,6 @@ export async function mindsView(rt: EngineRt, chatId: ChatId, userId: UserId): P
   return {
     on: characters.length > 0 || beats.length > 0,
     pov: people.includes(pov) ? { id: pov, name: nameOf(world, state, pov) } : null,
-    povChoices: people.filter((id) => id !== pov).map((id) => ({ id, name: nameOf(world, state, id) })),
     characters: characters.sort((a, b) => a.name.localeCompare(b.name)),
   };
 }
@@ -331,7 +329,7 @@ export async function mindView(rt: EngineRt, chatId: ChatId, userId: UserId, who
   const reaching = story.beats.filter((p) => p.beat.exposure.some((x) => x.who === who));
   const byId = new Map(story.beats.map((p) => [p.beat.id, p]));
   const numbers = await chatNumbers(rt.host, chatId, userId);
-  const writes = (await rt.ledger.readEvents(chatId, userId, [MIND_WRITE])).map((e) => ({ data: mindWriteEvent(e.event), reasoning: e.reasoning })).filter((w) => w.data?.who === who);
+  const writes = (await rt.ledger.readEvents(chatId, userId, [MIND_WRITE])).map((e) => ({ data: mindWriteEvent(e.event), reasoning: e.reasoning })).filter((w) => w.data?.who === who).map((w) => ({ ...w, reasoning: w.reasoning ?? w.data?.reasoning }));
   const takes = takesOf(state, who);
   const interviews = (await rt.ledger.readEvents(chatId, userId, [MIND_INTERVIEW])).flatMap((e) => {
     const d = "data" in e.event ? mindInterviewOf(e.event.data) : null;
@@ -358,7 +356,7 @@ export async function mindView(rt: EngineRt, chatId: ChatId, userId: UserId, who
   const texts = await textsOf(rt.blobs, userId, hashes);
   const { replaced } = exposedBeats(story);
   const files: DepthMindFile[] = Object.entries(meta)
-    .map(([rel, m]) => ({ path: rel, text: texts[m.hash] ?? "", pinned: pinnedBy(m, rel), revisions: m.rev, at: formatClock(cal, m.at), ...(writtenFromGone(m, mind, replaced) ? { out: true as const } : {}) }))
+    .map(([rel, m]) => ({ path: rel, text: texts[m.hash] ?? "", pinned: pinnedBy(m, rel), revisions: m.rev, at: formatClock(cal, m.at), ...(writtenFromGone(m, mind, replaced) ? { out: true as const } : {}), ...(m.review ? { review: true as const } : {}) }))
     .sort((a, b) => mindFileOrder(a.path) - mindFileOrder(b.path) || (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
   const previous = new Map<string, string>();
   const written: DepthMindWrite[] = [];
@@ -467,17 +465,11 @@ export async function mindEditUndo(rt: Pick<EngineRt, "ledger">, chatId: ChatId,
 }
 
 /**
- * The switch of player character (D-10): from the head on, the player plays `who`, who has no agent
- * while he does; the one he played gets his agent back and catches up on what reached him meanwhile.
- * A path-keyed event in the layer, so a branch or a swipe of an earlier reply carries the chat's
- * choice as it was then.
+ * Play as (D-10) isn't supported yet: the player plays one player character, and no request switches
+ * him. A chat switched before keeps playing the one it plays now (`povOf`): its `minds.v2.pov` entries
+ * still fold, and an imported history's switches still land (the bootstrap).
  */
-export async function povSwitch(rt: EngineRt, chatId: ChatId, userId: UserId, who: EntityId): Promise<void> {
-  const at = await foldAt(rt, chatId, userId);
-  personOf(rt, at.world, at.state, who);
-  if (povOf(at.world, at.state) === who) return;
-  await land(rt, chatId, userId, at.basis, MIND_POV, { events: [mindPovEvent(who)], blobs: {} }, layerEntryId("pov", chatId, who, at.basis.message, at.basis.swipe, String(Date.now())), "user");
-}
+export const PLAY_AS_OFF = "Play as isn't supported yet: you play one player character, the one this chat plays now.";
 
 /**
  * An interview (§4.4), asked from GM → Minds: the character answers in voice. The question and the
@@ -545,6 +537,14 @@ export async function catchUpNow(rt: EngineRt, chatId: ChatId, userId: UserId, w
   let gone = o.gone && o.gone.length > 0 ? storyOrder(o.gone) : null;
   const settings = await rt.settings.get(userId);
   const model = o.model ?? portFor(rt, userId);
+  // Someone with no mind yet (the story reached them from afar, and the poll asked) gets one first, as a scene would form it (`formCore`): their card, else what the world knows of them.
+  const first = await foldAt(rt, chatId, userId, o.basis, DRAFT_TYPES);
+  if (Object.keys(mindMetaAt(first.state, who)).length === 0 && hasAgent(first.world, first.state, who)) {
+    const linked = own(first.world.entities, who)?.characterId;
+    const fields = (own(first.state.entities, who) ?? own(first.world.entities, who))?.fields ?? {};
+    const formed = await formCore({ who, name: nameOf(first.world, first.state, who), player: nameOf(first.world, first.state, povOf(first.world, first.state)), at: first.state.clock, fields, ...(typeof linked === "string" && linked !== "" ? { characterId: linked } : {}), host: rt.host, chatId, userId, texts: settings.prompts.texts });
+    if (formed) entries.push(await land(rt, chatId, userId, first.basis, MIND_WRITE, formed, layerEntryId("mind-form", chatId, who, first.basis.message, first.basis.swipe), "character"));
+  }
   for (;;) {
     const at = await foldAt(rt, chatId, userId, o.basis, DRAFT_TYPES);
     personOf(rt, at.world, at.state, who);

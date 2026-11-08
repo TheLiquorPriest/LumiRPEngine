@@ -19,6 +19,7 @@
 import { MIND_FILE_NAMES, mindDir, mindedAt, mindV2At, povOf } from "../../../shared/character-engine";
 import { draftEvent, draftId, episodeId, STORY_DRAFT, type DraftData, type DraftTouch, type EpisodePart, type StoryEpisode } from "../../../shared/episodes";
 import { spendEvent } from "../../../shared/author";
+import { DEPTH_TREATMENT_DEFS } from "../../../shared/depth-settings";
 import { hashParts } from "../../../shared/hash";
 import type { ChatId, EntityId, UserId } from "../../../shared/ids";
 import type { Basis, LandResult, LayerDraft } from "../../../shared/layer";
@@ -26,6 +27,7 @@ import type { LedgerEvent } from "../../../shared/ledger";
 import type { Beat, StoryRef } from "../../../shared/story";
 import { calendarOf, formatClock } from "../../../engine/calendar";
 import { layerEntryId } from "../../../engine/ledger/layer";
+import { inStoryOrder } from "../../../engine/ledger/story";
 import { NOTEBOOK_DIR, notebookFiles } from "../../../engine/notebook";
 import { own } from "../../../engine/pack-kit";
 import { placeOfEntity } from "../../../engine/scope";
@@ -124,6 +126,22 @@ function touchesOf(episode: StoryEpisode, beats: readonly Beat[], named: readonl
 }
 
 /**
+ * What a draft's world changes hold (§4.6): every person or thing whose record they wrote (made,
+ * changed or removed) between `was` and `now`, and the places it was at before and after, but the
+ * player character and his place, so no scene plays from a version of them that isn't canon yet.
+ */
+export function effectTouches(was: Pick<WorldState, "entities">, now: Pick<WorldState, "entities">, pov: EntityId): StoryRef[] {
+  const ids = new Set([...Object.keys(was.entities), ...Object.keys(now.entities)]);
+  const changed = [...ids].filter((id) => id !== pov && JSON.stringify(own(was.entities, id) ?? null) !== JSON.stringify(own(now.entities, id) ?? null));
+  const refs: StoryRef[] = changed.map((entity) => ({ entity }));
+  const pc = new Set([placeOfEntity(was, pov), placeOfEntity(now, pov)]);
+  const places = new Set<string>();
+  for (const id of changed) for (const p of [placeOfEntity(was, id), placeOfEntity(now, id)]) if (p !== null && !pc.has(p)) places.add(p);
+  for (const place of places) refs.push({ place });
+  return refs;
+}
+
+/**
  * Drafts episode `ask` (the `index`th the poll at `basis` opened) at its treatments and lands it as a
  * draft at `basis`. Throws only for what the caller must say (an answer that can't be read twice);
  * a refused landing comes back as its result.
@@ -171,12 +189,13 @@ export async function draftEpisode(rt: OffscreenRt, chatId: ChatId, userId: User
   for (const p of episode.parts) {
     if (!("who" in p.subject)) continue;
     const who = p.subject.who;
-    if (p.treatment === "live" && who !== pov && minded.has(who)) {
+    const plays = DEPTH_TREATMENT_DEFS[p.treatment].plays;
+    if (plays === "agent" && who !== pov && minded.has(who)) {
       if (!live.includes(who)) live.push(who);
       continue;
     }
-    if (p.treatment === "live") said.push(`${who} has no mind to play live: the author plays them from what it knows`);
-    if (p.treatment === "live" || p.treatment === "campfire") {
+    if (plays === "agent") said.push(`${who} has no mind to play live: the author plays them from what it knows`);
+    if (plays !== "author") {
       const files = await readMind(rt.blobs, userId, state, who, replaced);
       const shown: PlayedMind["files"] = {};
       for (const kind of PLAYED_FILES) {
@@ -188,7 +207,8 @@ export async function draftEpisode(rt: OffscreenRt, chatId: ChatId, userId: User
       played.push({ who, files: shown });
     }
   }
-  const recent = (await beatTexts(rt, userId, story.beats.slice(-RECENT_BEATS).map((p) => p.beat))).map((beat, i) => ({ ref: `r${i + 1}`, beat }));
+  // The latest beats as the story tells them: a settled draft's backdated beats read in their place, not where they landed.
+  const recent = (await beatTexts(rt, userId, inStoryOrder(story.beats).slice(-RECENT_BEATS).map((p) => p.beat))).map((beat, i) => ({ ref: `r${i + 1}`, beat }));
   const view: EpisodeView = { episode, live, played, recent };
   const notebook = await readNotebook(rt, userId, state);
 
@@ -208,7 +228,10 @@ export async function draftEpisode(rt: OffscreenRt, chatId: ChatId, userId: User
     if (actor === undefined) return;
     const r = await plugs.resolveAttempt(model, { registry: rt.registry, world, state: book.state, act: { actor, surface: beat.surface, ...(beat.quotes ? { quotes: beat.quotes } : {}), attempt }, seed: hashParts(id, "attempt", beat.beat.id), runSeed, scene: book.beats.map((b) => beatLine(world, book.state, b)), texts, ...signal });
     if (r.reasoning) reasoning.push(`The GM: ${r.reasoning}`);
+    const was = structuredClone({ entities: book.state.entities });
     effects.push(...book.apply(r.events, mark));
+    // What the change wrote of the world is held from this minute, as what the author named is.
+    for (const ref of effectTouches(was, book.state, pov)) named.push({ ref, after: Math.max(0, book.minute - episode.span[0]) });
     book.minute += Math.max(0, r.minutes);
     if (!r.outcome) return;
     const exposure = beat.beat.exposure.map(({ who, channel, reach }) => ({ who, channel, reach }));

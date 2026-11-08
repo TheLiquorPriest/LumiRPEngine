@@ -737,7 +737,7 @@ People also tells what each person with your character visibly wears and carries
 
 ## Depth
 
-**Depth** is a second way to play a world chat, opted into per chat in **GM → This chat → Depth**. On a depth chat the story is decided before the reply is written: an author sets each scene and runs it beat by beat, each character with a mind plays as its own agent from what it has lived, the GM resolves what anyone tries and keeps the truth, and the narrator renders only what reached your character, passage by passage, checked before each streams. A chat with a history can be read in once by the **bootstrap**, which turns it into canon beats, minds and the author's notebook. Depth runs through the **loopback**, a small relay beside Lumiverse that your chat's connection points at.
+**Depth** is a second way to play a world chat, opted into per chat in **GM → This chat → Depth**. On a depth chat the story is decided before the reply is written: an author sets each scene and runs it beat by beat, each character with a mind plays as its own agent from what it has lived, the GM resolves what anyone tries and keeps the truth, and the narrator renders only what reached your character, passage by passage, checked before each streams. A chat with a history can be read in once by the **bootstrap**, which turns it into canon beats, minds and the author's notebook. A depth turn's request never carries the whole history: **History** on the same page sets how many of the latest messages it does (40 by default), and the author and the GM search and quote the rest of the chat when they need it. Depth runs through the **loopback**, a small relay beside Lumiverse that your chat's connection points at.
 
 - [The depth guide](DEPTH.md): turning it on, the bootstrap, a turn on depth, minds, the notebook, the archive, drafts and treatments, real-time dialogue, playing someone else, and Settings → Depth.
 - [The loopback guide](LOOPBACK.md): starting the relay with one line, your key, the connection, Docker and shared servers.
@@ -758,7 +758,7 @@ There are two ways to retry a reply:
 **Settings → Swipes** has three rows, each with **Changed** and **Default**:
 
 - **What a swipe does**: *Re-narrate* (the default) or *Re-run*. A *Re-run* default stored before this build is moved to *Re-narrate* once.
-- **Ask what should change on each swipe** (off): when on, every plain swipe opens the **What should change?** field before its reply starts.
+- **Ask what should change on each swipe** (off): when on, every plain swipe opens the **What should change?** field before its reply starts. A swipe of a world chat on the loopback (depth) doesn't ask: it goes ahead as it is, and **Swipe as…** takes a word for it.
 - **Swipe with**: *The turn's texts* (the default) or *My current texts* (below).
 
 **Swipe as…**, under the latest reply, offers **Re-narrate…** and **Re-run the turn with the engine**. Each opens an optional **What should change?** field; leave it empty to swipe as is. What you write (trimmed, up to 600 characters, no macros) reaches only the narrator, for that one telling. It ends the narrator rules, and no record, hash, prompt set or role ever holds it. A second swipe has none unless you give it again. A **Retry** of a failed reply keeps it.

@@ -16,8 +16,8 @@ import { useApp } from "../app";
 import { Badge, Banner, Button, Disclosure, Empty, HostSwitch, Section, useBusy } from "../components";
 import { SettingRow } from "./kit";
 
-/** What a press asks LumiRPEngine: the page again, a key minted or rotated, the shared relay allowed or not, a relay fixed or forgotten. */
-export type LoopbackAct = { op: "get" } | { op: "mint" } | { op: "shared"; enabled: boolean } | { op: "fix"; relay: string } | { op: "forget"; relay: string };
+/** What a press asks LumiRPEngine: the page again, a key minted or rotated, the shared relay allowed or not, a relay fixed or forgotten, or Test. */
+export type LoopbackAct = { op: "get" } | { op: "mint" } | { op: "shared"; enabled: boolean } | { op: "fix"; relay: string } | { op: "forget"; relay: string } | { op: "test" };
 
 const SCHEDULER_WORDS: Readonly<Record<SchedulerState, string>> = {
   excluded: "Kept out of your local-inference scheduler.",
@@ -145,6 +145,7 @@ export function RelayRow(props: { relay: LoopbackRelayView; mine: boolean; build
   const r = props.relay;
   const report = r.report;
   const heard = r.seenAt === null ? `Not heard from since LumiRPEngine started (registered ${dateText(r.registeredAt)}).` : `Last heard ${agoText(props.now - r.seenAt, r.seenAt)}.`;
+  const requested = r.requestAt === null ? "No request carried since LumiRPEngine started." : `Last request ${agoText(props.now - r.requestAt, r.requestAt)}.`;
   const fixable = props.mine && report !== null && (report.scheduler === "missing" || report.scheduler === "unknown");
   return (
     <div class="lre-set-row" data-lre-loopback-relay={r.name}>
@@ -156,6 +157,7 @@ export function RelayRow(props: { relay: LoopbackRelayView; mine: boolean; build
         </span>
       </div>
       <ul class="lre-loopback-facts">
+        <li>{requested}</li>
         <li>{heard}</li>
         <li>
           Listens at <span class="lre-set-code">{relayBase(r.listen, r.port)}</span>
@@ -201,16 +203,31 @@ export function RelayRow(props: { relay: LoopbackRelayView; mine: boolean; build
   );
 }
 
-/** The connections LumiRPEngine treats as the loopback, and how to make one. */
-function ConnectionSection(props: { page: LoopbackPage; copy(text: string): void }) {
-  const { connections, relays, shared } = props.page;
+/** The connections LumiRPEngine treats as the loopback, how to make one, Test, and what keeps a world chat on it. */
+function ConnectionSection(props: { page: LoopbackPage; busy: boolean; act(act: LoopbackAct): void; copy(text: string): void }) {
+  const { connections, relays, shared, test } = props.page;
   const relay = relays.find((r) => r.mode === "user") ?? relays[0];
   const names = connections.map((c) => c.name);
   return (
-    <Section title="The loopback connection">
+    <Section
+      title="The loopback connection"
+      aside={
+        <Button size="sm" variant="secondary" disabled={props.busy} onClick={() => props.act({ op: "test" })}>
+          Test
+        </Button>
+      }
+    >
       <div class="lre-set-rows" data-lre-loopback-group="connection">
+        {test ? (
+          <div data-lre-loopback-test={test.ok ? "ok" : "failed"}>
+            <Banner tone={test.ok ? "info" : "warn"}>{test.text}</Banner>
+          </div>
+        ) : null}
         <p class="lre-set-note" data-lre-loopback-connections>
           {names.length > 0 ? `LumiRPEngine treats ${names.join(", ")} as the loopback.` : "None of your connections is the loopback yet."} A world chat on it plays its turn inside the reply; the narrator writes on the model you name in Settings → Depth → Narrator, never on the loopback.
+        </p>
+        <p class="lre-set-note" data-lre-loopback-pin>
+          Opting a world chat into depth pins it to the loopback connection. Lumiverse's "always use the active connection" governs Edit and Send only, so the pin holds for replies, swipes, Continue and Impersonate. A reply generated on another connection runs no engine turn, and LumiRPEngine flags it under the message: switch the chat back to the loopback, or opt it out of depth in its Depth tab.
         </p>
         <div class="lre-set-row">
           <Disclosure summary="Make the loopback connection" defaultOpen={names.length === 0}>
@@ -237,13 +254,58 @@ function ConnectionSection(props: { page: LoopbackPage; copy(text: string): void
   );
 }
 
-/** The page's body: everything above, hook-free. `now` is when the page is shown, for "last heard". */
+/** Lumiverse in a container: the relay inside it as a second process, or a compose service sharing its network. */
+function DockerSection(props: { page: LoopbackPage; copy(text: string): void }) {
+  const { line } = props.page;
+  const bun = line.bun ?? "<bun>";
+  const script = line.script ?? "<LumiRPEngine's folder>/dist/lumirpengine.js";
+  const inside = `${shellWord(bun)} --cwd / ${shellWord(script)} loopback up --url ${line.url ?? "<the address you open Lumiverse at>"}`;
+  const compose = [
+    "lumirpengine-loopback:",
+    "  image: <Lumiverse's image>",
+    '  network_mode: "service:lumiverse"',
+    "  volumes: [<Lumiverse's data volume, mounted where it is in Lumiverse's service>]",
+    `  command: ["${bun}", "${script}", "loopback", "serve", "--config", "<the config path loopback up printed>"]`,
+    "  restart: always",
+  ].join("\n");
+  return (
+    <Section title="Lumiverse in Docker" flush>
+      <div class="lre-set-rows" data-lre-loopback-group="docker">
+        <div class="lre-set-row">
+          <Disclosure summary="Run the relay with Lumiverse in a container">
+            <p class="lre-set-note">In a container there is no systemd, and Lumiverse's 127.0.0.1 is the container's own. Run the relay one of two ways; loopback up prints this too when it sees it is in a container.</p>
+            <CopyLine id="docker-inside" label="Inside Lumiverse's container, as a second process" text={inside} help="Run it in Lumiverse's container, without --systemd." copy={props.copy} />
+            <CopyLine id="docker-compose" label="As a compose service sharing Lumiverse's network" text={compose} help="127.0.0.1 is then the same for both. Run loopback up once inside the container first, so its config exists, and put the config path it printed in the command." copy={props.copy} />
+          </Disclosure>
+        </div>
+      </div>
+    </Section>
+  );
+}
+
+/** No relay of yours is running: the warning at the top, with the line that starts one. */
+function RelayDown(props: { page: LoopbackPage; copy(text: string): void }) {
+  const { page } = props;
+  const usable = page.relays.filter((r) => r.mode !== "shared" || page.shared.enabled);
+  if (usable.some((r) => !r.signIn)) return null;
+  return (
+    <div data-lre-loopback-down>
+      <Banner tone="warn" title="No relay is running">
+        {usable.length === 0 ? "No relay of yours has registered, so a world chat on the loopback gets no reply." : "Every relay of yours has gone quiet or needs signing in again, so a world chat on the loopback gets no reply."} Start one on the machine Lumiverse runs on{page.line.command !== null ? " with this line:" : " with the line under Start the relay."}
+      </Banner>
+      {page.line.command !== null ? <CopyLine id="down-up" label="Start the relay" text={page.line.command} copy={props.copy} /> : null}
+    </div>
+  );
+}
+
+/** The page's body: everything above, hook-free. `now` is when the page is shown, for "last heard" and "last request". */
 export function LoopbackBody(props: { page: LoopbackPage; now: number; busy: boolean; act(act: LoopbackAct): void; copy(text: string): void }) {
   const { page, busy } = props;
   const { shared } = page;
   return (
     <div class="lre-stack" data-lre-settings-page="loopback">
       <p class="lre-set-lead">The loopback lets a world chat play its turn inside the reply: give the chat the loopback connection, and LumiRPEngine runs the turn when Lumiverse asks for the reply, its thinking in the thinking block, then the narrator writes on your own model. It needs a small relay on the machine Lumiverse runs on, started once with the line below.</p>
+      <RelayDown page={page} copy={props.copy} />
       <LineSection page={page} copy={props.copy} />
       <KeySection page={page} busy={busy} act={props.act} copy={props.copy} />
       <Section
@@ -263,7 +325,8 @@ export function LoopbackBody(props: { page: LoopbackPage; now: number; busy: boo
           )}
         </div>
       </Section>
-      <ConnectionSection page={page} copy={props.copy} />
+      <ConnectionSection page={page} busy={busy} act={props.act} copy={props.copy} />
+      <DockerSection page={page} copy={props.copy} />
       <Section title="The shared relay" flush>
         <div class="lre-set-rows" data-lre-loopback-group="shared">
           {shared.operator ? (
@@ -336,7 +399,8 @@ export function LoopbackSettingsPage() {
   const [busy, run] = useBusy();
   const ask = async (act: LoopbackAct): Promise<void> => {
     const result = await app.request<"lre.loopback.page">({ type: "lre.loopback.page", origin: location.origin, ...act });
-    if (result) setPage(result.page);
+    // Test's line stays while the page reads itself again; any other press, or Test again, replaces it.
+    if (result) setPage((prev) => (act.op === "get" && result.page.test === undefined && prev?.test !== undefined ? { ...result.page, test: prev.test } : result.page));
     else setFailed(true);
   };
   useEffect(() => {

@@ -3,6 +3,8 @@
 // (§8.6), the advice about the memory systems the bootstrap replaces (D-18) and the `lre.bootstrap`
 // request's operations. Every number here is bookkeeping; every judgment the run makes is an agent's.
 
+import type { DepthLimit, DepthTreatment } from "./depth-settings";
+import type { HistoryCut } from "./depth-history";
 import type { ChatId, EntityId, MessageId } from "./ids";
 import type { Misread } from "./misread";
 
@@ -82,7 +84,8 @@ export interface ChapterView {
 export type SpotItem = { id: string; mark: SpotMark | null; flagged: boolean } & (
   | { kind: "beat"; beat: string; what: string; quotes: string; message: MessageId; index: number; prose: string }
   | { kind: "memory"; who: EntityId; name: string; path: string; text: string; lived: { beat: string; text: string }[] }
-  | { kind: "notebook"; path: string; excerpt: string; cites: string[] }
+  | { kind: "notebook"; path: string; excerpt: string; cites: { beat: string; what: string }[] }
+  /** `against`: the words of the beat it contradicts, where it names one; else what the import's reconciliation said. */
   | { kind: "contradiction"; entry: string; source: ImportSource; title: string; text: string; against: string; why: string }
 );
 
@@ -99,6 +102,8 @@ export interface SpotCheckCard {
   chapter: number;
   createdAt: number;
   items: SpotItem[];
+  /** What the historian or the author flagged as uncertain without naming a beat, as they wrote it. Absent when none. */
+  uncertain?: string[];
   /** The model answers the run's parsers didn't keep whole since the card before (the raw-against-saved audit): each with its job and the fields; the answer as written stays in the job's record. Absent when none. */
   misread?: SpotMisread[];
 }
@@ -161,6 +166,10 @@ export interface BootstrapView {
   advice: BootstrapAdvice[];
   /** The latest lines of the run's log, newest last. */
   log: string[];
+  /** The chat's history cutoff (GM → This chat → Depth → History): what a depth turn's request leaves out. Absent where it wasn't read. */
+  history?: HistoryCut;
+  /** The chat's own allowances (GM → This chat → Depth → Allowances), over `yours`, the user's in Settings → Depth → Budget, per story `interval`. Absent where it wasn't read. */
+  allowances?: { own: Partial<Record<DepthTreatment, DepthLimit>>; yours: Record<DepthTreatment, DepthLimit>; interval: "day" | "week" | "month" };
 }
 
 /** `lre.bootstrap`'s operations; every one answers with the chat's `BootstrapView`, `estimate` with a `BootstrapEstimate` too. */
@@ -172,6 +181,8 @@ export type BootstrapOp =
   | { op: "pause" }
   | { op: "resume"; cap?: BootstrapCap | "none" }
   | { op: "mark"; card: string; item: string; right: boolean; note?: string }
-  | { op: "redo"; chapter: number };
+  | { op: "redo"; chapter: number }
+  | { op: "history"; cut: HistoryCut }
+  | { op: "allowances"; allowances: Partial<Record<DepthTreatment, DepthLimit>> };
 
 export const BOOTSTRAP_LOG_LINES = 40;

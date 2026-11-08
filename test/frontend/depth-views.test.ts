@@ -59,10 +59,6 @@ function tap(props: Props): void {
 const MINDS: DepthMindsView = {
   on: true,
   pov: { id: "you", name: "Sam Reyes" },
-  povChoices: [
-    { id: "you", name: "Sam Reyes" },
-    { id: "npc_rosie", name: "Rosie Alvarez" },
-  ],
   characters: [
     { id: "npc_rosie", name: "Rosie Alvarez", files: 7, last: { path: "minds/npc_rosie/memories/0007-the-diner.md", at: "Tuesday 14 May, 08:40" }, pending: 2, effort: "agent", review: false },
     { id: "npc_dev", name: "Dev Patel", files: 1, last: null, pending: 0, effort: null, review: true },
@@ -120,18 +116,13 @@ function mindControls(over: Partial<MindControls> = {}): MindControls & { calls:
 }
 
 describe("GM → Minds on a depth chat", () => {
-  test("the list says whose point of view the player drives, lets him switch it (D-10), and lists every mind with what waits", () => {
+  test("the list says whose point of view the player drives, offers no Play as (switching isn't supported yet), and lists every mind with what waits", () => {
     const opened: string[] = [];
-    const switched: string[] = [];
-    const tree = render(MindsList({ view: MINDS, busy: false, onOpen: (id) => void opened.push(id), onPov: (id) => void switched.push(id) }));
+    const tree = render(MindsList({ view: MINDS, onOpen: (id) => void opened.push(id) }));
     const text = textOf(tree);
     expect(text).toContain("You play Sam Reyes");
     expect(text).toContain("Minds (2)");
-    const playAs = propsOf(tree, HostSelect).find((p) => p.label === "Play as");
-    expect((playAs?.options as { value: string }[]).map((o) => o.value)).toEqual(["you", "npc_rosie"]);
-    (playAs?.onChange as (v: string) => void)("npc_rosie");
-    (playAs?.onChange as (v: string) => void)("you");
-    expect(switched).toEqual(["npc_rosie"]);
+    expect(propsOf(tree, HostSelect).find((p) => p.label === "Play as")).toBeUndefined();
     const rows = propsOf(tree, ListRow);
     expect(rows.map((r) => r.title)).toEqual(["Rosie Alvarez", "Dev Patel"]);
     expect(String(rows[0]?.subtitle)).toContain("Memory: 0007 the diner");
@@ -485,7 +476,7 @@ describe("GM → Depth → Bootstrap", () => {
 function chatControls(): DepthChatControls & { calls: unknown[][] } {
   const calls: unknown[][] = [];
   const log = (name: string) => (...args: unknown[]) => void calls.push([name, ...args]);
-  return { calls, busy: false, cap: { unit: "tokens", value: 20_000_000 }, onCap: log("cap"), onEstimate: log("estimate"), onOptIn: log("in"), onOptOut: log("out"), onOpenBootstrap: log("open"), onOpenLoopback: log("loopback") };
+  return { calls, busy: false, cap: { unit: "tokens", value: 20_000_000 }, onCap: log("cap"), onEstimate: log("estimate"), onOptIn: log("in"), onOptOut: log("out"), onOpenBootstrap: log("open"), onOpenLoopback: log("loopback"), onHistory: log("history") };
 }
 
 describe("GM → This chat → Depth", () => {
@@ -532,6 +523,23 @@ describe("GM → This chat → Depth", () => {
     expect(text).toContain(EXPORT_NOTE);
     expect(textOf(render(BootstrapBody({ view: view(), c: bootControls() })))).toContain(EXPORT_NOTE);
     expect(textOf(render(DepthChatBody({ view: view({ optedIn: false }), estimate: null, c: chatControls() })))).not.toContain(EXPORT_NOTE);
+  });
+
+  test("on, History says what a turn's request carries, and sets the chat's cutoff", () => {
+    const c = chatControls();
+    const tree = render(DepthChatBody({ view: view({ history: { keep: "last", count: 12 } }), estimate: null, c }));
+    expect(textOf(tree)).toContain("A turn's request carries only the latest 12 messages of this chat");
+    const [seg] = propsOf(tree, Seg);
+    (seg?.onChange as (keep: string) => void)("from");
+    const [stepper] = propsOf(tree, NumberStepper);
+    expect(stepper?.label).toBe("Messages kept");
+    (stepper?.onChange as (n: number) => void)(30);
+    expect(c.calls).toEqual([
+      ["history", { keep: "from", index: 0 }],
+      ["history", { keep: "last", count: 30 }],
+    ]);
+    // A chat that never set one shows the default.
+    expect(textOf(render(DepthChatBody({ view: view(), estimate: null, c: chatControls() })))).toContain("only the latest 40 messages");
   });
 
   test("a refused opt-in says why, with Settings → Loopback; none shown, no banner", () => {
@@ -694,8 +702,9 @@ const TREATMENTS: DepthTreatmentsView = {
         { role: "author", cost: { calls: 5, tokens: 60_000 } },
         { role: "character", cost: { calls: 11, tokens: 70_200 } },
       ],
+      grades: [{ episode: "Dale sells the boat", subject: "Dale", depth: "Live", why: "It changes what Dev owes him." }],
     },
-    { label: "Story week: Monday 6 May 2026 – Sunday 12 May 2026", now: false, total: { calls: 2, tokens: 900 }, lanes: [], treatments: [], roles: [] },
+    { label: "Story week: Monday 6 May 2026 – Sunday 12 May 2026", now: false, total: { calls: 2, tokens: 900 }, lanes: [], treatments: [], roles: [], grades: [] },
   ],
   interval: "Story week: Monday 13 May 2026 – Sunday 19 May 2026",
   allowances: [
@@ -710,6 +719,7 @@ const TREATMENTS: DepthTreatmentsView = {
   ],
   ask: true,
   threshold: "Anything that changes what someone owes or loves.",
+  level: "balanced",
 };
 
 function treatmentsControls(over: Partial<TreatmentsControls> = {}): TreatmentsControls & { calls: unknown[][] } {

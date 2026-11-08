@@ -529,6 +529,73 @@ export function connectionPlace(host: object, userId: UserId, connection: string
   return gate.take(most, signal, o);
 }
 
+/** A connection's requests in the last minute: when, and their tokens (settling a call corrects its entry to what it spent). */
+export type MinuteWindow = Map<string, { at: number; tokens: number }[]>;
+
+/** Each runtime's per-minute windows (by its host), by user: agent turns' calls and depth's share them, as they share the gates. */
+const WINDOWS = new WeakMap<object, Map<UserId, MinuteWindow>>();
+/** The foreground calls waiting for room in each window, by connection: a background or idle call lets them go first. */
+const FORE_WAITING = new WeakMap<MinuteWindow, Map<string, number>>();
+
+/** `userId`'s per-minute window on `host`'s connections, shared by every caller on that host. */
+export function minuteWindowOf(host: object, userId: UserId): MinuteWindow {
+  let users = WINDOWS.get(host);
+  if (!users) {
+    users = new Map();
+    WINDOWS.set(host, users);
+  }
+  let w = users.get(userId);
+  if (!w) {
+    w = new Map();
+    users.set(userId, w);
+  }
+  return w;
+}
+
+/**
+ * Waits until `connection`'s throttle (Settings → Agents → Throttles) has room this minute in
+ * `window` for a call of `tokens`; refuses a call bigger than the whole minute. A background or idle
+ * call (`lane`) also waits while a foreground call is waiting for room, so the foreground goes first
+ * as room frees. Once it has room its entry (now, `tokens`) is in the window, returned for the caller
+ * to correct or take back; with no throttle nothing is kept and a fresh entry is returned.
+ */
+export async function minuteRoom(window: MinuteWindow, connection: string, tokens: number, throttle: ConnectionThrottle | undefined, signal: AbortSignal, clock: AccountsClock = SYSTEM_CLOCK, lane: GateLane = "foreground"): Promise<{ at: number; tokens: number }> {
+  if (!throttle) return { at: clock.now(), tokens };
+  const requests = limitOf(throttle.requestsPerMinute);
+  const perMinute = limitOf(throttle.tokensPerMinute);
+  if (tokens > perMinute) throw new AgentStop("throttle", { id: STOP_TEXT.throttle, vars: { tokens: counted(tokens, "token", "tokens"), limit: String(perMinute) } });
+  let fore = FORE_WAITING.get(window);
+  if (!fore) {
+    fore = new Map();
+    FORE_WAITING.set(window, fore);
+  }
+  let waiting = false;
+  try {
+    for (;;) {
+      const now = clock.now();
+      const recent = (window.get(connection) ?? []).filter((e) => e.at > now - MINUTE_MS);
+      window.set(connection, recent);
+      const used = recent.reduce((n, e) => n + e.tokens, 0);
+      const oldest = recent[0];
+      const room = !oldest || (recent.length < requests && used + tokens <= perMinute);
+      const ahead = lane === "foreground" ? 0 : (fore.get(connection) ?? 0);
+      if (room && ahead === 0) {
+        const entry = { at: now, tokens };
+        recent.push(entry);
+        return entry;
+      }
+      if (lane === "foreground" && !waiting) {
+        waiting = true;
+        fore.set(connection, (fore.get(connection) ?? 0) + 1);
+      }
+      // Behind a waiting foreground call, a moment later than it wakes.
+      await clock.sleep(room || !oldest ? 1 : oldest.at + MINUTE_MS - now + (lane === "foreground" ? 0 : 1), signal);
+    }
+  } finally {
+    if (waiting) fore.set(connection, (fore.get(connection) ?? 1) - 1);
+  }
+}
+
 interface StoredRun {
   label: string;
   openedAt: number;
@@ -548,7 +615,7 @@ interface UserAccounts {
   /** What calls in flight hold, per connection. */
   held: Map<string, { tokensIn: number; tokensOut: number }>;
   /** Each connection's requests in the last minute: when, and their tokens. */
-  window: Map<string, { at: number; tokens: number }[]>;
+  window: MinuteWindow;
   /** Each connection and model's reported prompt tokens over the estimate, once a call has reported them. */
   calibration: Map<string, number>;
   /** Connections seen refusing native tools since the extension started. */
@@ -640,7 +707,7 @@ export class AgentAccounts {
       let damaged = false;
       const raw = await readStoredJson(this.host, ACCEPTANCE_PATH, userId, "acceptance runs", (r) => isRecord(r) && r.v === 1, () => (damaged = true));
       const file = isRecord(raw) ? raw : {};
-      const u: UserAccounts = { run: runOf(file.run), last: runOf(file.last), guard: Array.isArray(file.connections) ? acceptanceConnectionsOf(file.connections) : undefined, lost: damaged || file.lost === true, setAside: damaged, held: new Map(), window: new Map(), calibration: new Map(), refusesTools: new Set(), writing: Promise.resolve(), unread: null, warned: new Set() };
+      const u: UserAccounts = { run: runOf(file.run), last: runOf(file.last), guard: Array.isArray(file.connections) ? acceptanceConnectionsOf(file.connections) : undefined, lost: damaged || file.lost === true, setAside: damaged, held: new Map(), window: minuteWindowOf(this.host, userId), calibration: new Map(), refusesTools: new Set(), writing: Promise.resolve(), unread: null, warned: new Set() };
       this.users.set(userId, u);
       // The fresh file says the guard was lost, so a restart doesn't read the missing file as no guard.
       if (damaged) void this.save(userId, u);
@@ -706,7 +773,7 @@ export class AgentAccounts {
     } catch (error) {
       const known = this.unread.get(userId);
       if (known) return known;
-      const u: UserAccounts = { run: null, last: null, guard: undefined, lost: false, setAside: false, held: new Map(), window: new Map(), calibration: new Map(), refusesTools: new Set(), writing: Promise.resolve(), unread: error instanceof Error ? error.message : String(error), warned: new Set() };
+      const u: UserAccounts = { run: null, last: null, guard: undefined, lost: false, setAside: false, held: new Map(), window: minuteWindowOf(this.host, userId), calibration: new Map(), refusesTools: new Set(), writing: Promise.resolve(), unread: error instanceof Error ? error.message : String(error), warned: new Set() };
       this.unread.set(userId, u);
       return u;
     }
@@ -773,23 +840,6 @@ export class AgentAccounts {
     this.host.log("info", `[LumiRPEngine] connection ${connection} refused native tools (${reason.slice(0, 200)}); its agents are offered them as text from now on`, userId);
   }
 
-  /** Waits until the connection's throttle has room this minute; refuses a call bigger than the whole minute. */
-  private async throttle(u: UserAccounts, connection: string, tokens: number, throttle: ConnectionThrottle | undefined, signal: AbortSignal): Promise<void> {
-    if (!throttle) return;
-    const requests = limitOf(throttle.requestsPerMinute);
-    const perMinute = limitOf(throttle.tokensPerMinute);
-    if (tokens > perMinute) throw new AgentStop("throttle", { id: STOP_TEXT.throttle, vars: { tokens: counted(tokens, "token", "tokens"), limit: String(perMinute) } });
-    for (;;) {
-      const now = this.clock.now();
-      const recent = (u.window.get(connection) ?? []).filter((e) => e.at > now - MINUTE_MS);
-      u.window.set(connection, recent);
-      const used = recent.reduce((n, e) => n + e.tokens, 0);
-      const oldest = recent[0];
-      if (!oldest || (recent.length < requests && used + tokens <= perMinute)) return;
-      await this.clock.sleep(oldest.at + MINUTE_MS - now, signal);
-    }
-  }
-
   /**
    * Holds a call's tokens on its connection (null: the default connection, which couldn't be told)
    * before it is sent: the acceptance guard, the throttle, then the run's ceilings. The guard is the
@@ -825,8 +875,10 @@ export class AgentAccounts {
     const release = await this.atOnce(userId, connection, settings.throttles, input.signal, settings.callsAtOnce);
     let tokensIn: number;
     const run = u.run;
+    // Only a throttled connection keeps its minute; settling a call corrects its entry to what it spent.
+    let entryAt: { at: number; tokens: number } | null = null;
     try {
-      await this.throttle(u, connection, input.tokensIn + input.tokensOut, throttle, input.signal);
+      entryAt = await minuteRoom(u.window, connection, input.tokensIn + input.tokensOut, throttle, input.signal, this.clock);
       const factor = u.calibration.get(`${connection}\u0000${input.model}`) ?? settings.acceptance.estimateFactor;
       tokensIn = Math.ceil(input.tokensIn * factor);
       if (run && entry) {
@@ -843,14 +895,13 @@ export class AgentAccounts {
         }
       }
     } catch (error) {
+      const kept = u.window.get(connection);
+      if (entryAt && kept) u.window.set(connection, kept.filter((e) => e !== entryAt));
       release();
       throw error;
     }
     const held = u.held.get(connection) ?? { tokensIn: 0, tokensOut: 0 };
     u.held.set(connection, { tokensIn: held.tokensIn + tokensIn, tokensOut: held.tokensOut + input.tokensOut });
-    // Only a throttled connection keeps its minute; settling a call corrects its entry to what it spent.
-    const entryAt = { at: this.clock.now(), tokens: input.tokensIn + input.tokensOut };
-    if (throttle) u.window.set(connection, [...(u.window.get(connection) ?? []), entryAt]);
     if (run) this.changed(userId);
     return { userId, connection, model: input.model, estimate: input.tokensIn, tokensIn, tokensOut: input.tokensOut, run, entry: entryAt, accounts: u, release };
   }

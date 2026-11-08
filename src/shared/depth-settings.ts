@@ -56,11 +56,23 @@ export type DepthCadence = "turns" | "scenes" | "chapters";
 
 export const DEPTH_CADENCE_LABEL: Readonly<Record<DepthCadence, string>> = Object.freeze({ turns: "After any turn", scenes: "At a scene's end", chapters: "At a chapter's end" });
 
-/** The four treatments (§4.6, D-13): the Character Engine's effort off screen. */
-export const DEPTH_TREATMENTS = ["live", "campfire", "room", "written"] as const;
-export type DepthTreatment = (typeof DEPTH_TREATMENTS)[number];
+/**
+ * The treatments (§4.6, D-13), the Character Engine's effort off screen, one row each, dearest first
+ * (the order is the ladder a part slides down when an allowance is spent): its label, and how a
+ * part at it is played (`agent`: the character plays its own mind's agent; `mind`: the author plays
+ * them from their mind's files; `author`: the author tells it). A new treatment is a row here and
+ * its allowance's default, not a format change: parts, asks and spends name a treatment by key.
+ */
+export const DEPTH_TREATMENT_DEFS = Object.freeze({
+  live: { label: "Live", plays: "agent" },
+  campfire: { label: "Campfire", plays: "mind" },
+  room: { label: "Room", plays: "author" },
+  written: { label: "Written", plays: "author" },
+} as const satisfies Record<string, { label: string; plays: "agent" | "mind" | "author" }>);
+export type DepthTreatment = keyof typeof DEPTH_TREATMENT_DEFS;
+export const DEPTH_TREATMENTS: readonly DepthTreatment[] = Object.freeze(Object.keys(DEPTH_TREATMENT_DEFS) as DepthTreatment[]);
 
-export const DEPTH_TREATMENT_LABEL: Readonly<Record<DepthTreatment, string>> = Object.freeze({ live: "Live", campfire: "Campfire", room: "Room", written: "Written" });
+export const DEPTH_TREATMENT_LABEL: Readonly<Record<DepthTreatment, string>> = Object.freeze(Object.fromEntries(DEPTH_TREATMENTS.map((t) => [t, DEPTH_TREATMENT_DEFS[t].label])) as Record<DepthTreatment, string>);
 
 /** The budget dial (§6.5, D-7): allowances per story interval and treatment, the threshold the author applies, and per-turn and per-day ceilings over all of depth's model work, in tokens. */
 export interface DepthBudget {
@@ -70,6 +82,8 @@ export interface DepthBudget {
   ask: boolean;
   /** What deserves more than "written", in your words; the author grades each candidate against it and shows its grade. */
   threshold: string;
+  /** The threshold as a level, beside the words: how readily the author raises a part above written. */
+  level: DepthThresholdLevel;
   perTurn: DepthLimit;
   perDay: DepthLimit;
 }
@@ -78,8 +92,10 @@ export interface DepthBudget {
 export interface DepthBootstrapSettings {
   /** A chunk's token bound: whole messages up to it (§8.1). */
   chunkTokens: number;
-  /** Jobs at once per stage (§8.5): memory scales with these, not with the chat. */
-  atOnce: { historian: number; minds: number; author: number };
+  /** Minds' jobs at once (§8.5): memory scales with this, not with the chat. The historian and the author read one chunk at a time, in order: each builds on the one before. */
+  atOnce: { minds: number };
+  /** The most characters the run gives a mind, in the order the author picks them; 0 for no limit. Fewer minds cost less. */
+  mostMinds: number;
   /** The run's cap, set before it starts and raised at will (§8.3); "none" for no cap (a merge patch's null deletes). */
   cap: { unit: "money" | "tokens"; value: number } | "none";
   /** Spot-check cards per chapter, beside every flagged one (§8.6). */
@@ -152,6 +168,7 @@ export function defaultDepthSettings(): DepthSettings {
       allowances: { live: 2, campfire: 4, room: 8, written: "none" },
       ask: true,
       threshold: DEPTH_THRESHOLD_DEFAULT,
+      level: "balanced",
       perTurn: 600_000,
       perDay: 30_000_000,
     },
@@ -163,12 +180,27 @@ export function defaultDepthSettings(): DepthSettings {
     catchUpBatch: 40,
     realtime: "judged",
     background: { on: true, atOnce: 2 },
-    bootstrap: { chunkTokens: 30_000, atOnce: { historian: 1, minds: 3, author: 1 }, cap: { unit: "tokens", value: 20_000_000 }, sample: 5, pauseAfterWrong: 3 },
+    bootstrap: { chunkTokens: 30_000, atOnce: { minds: 3 }, mostMinds: 0, cap: { unit: "tokens", value: 20_000_000 }, sample: 5, pauseAfterWrong: 3 },
   };
 }
 
 /** The threshold's shipped words (§6.5): guidance the author applies, never a rule. */
 export const DEPTH_THRESHOLD_DEFAULT = "More than written when it could change what someone the player knows wants, believes or does, or when the player is likely to meet it soon.";
+
+/** The threshold as a level (§6.5): how readily the author raises a part above written, read beside the words. */
+export const DEPTH_THRESHOLD_LEVELS = ["sparing", "balanced", "generous"] as const;
+export type DepthThresholdLevel = (typeof DEPTH_THRESHOLD_LEVELS)[number];
+
+export const DEPTH_THRESHOLD_LEVEL_WORDS: Readonly<Record<DepthThresholdLevel, { label: string; guidance: string }>> = Object.freeze({
+  sparing: { label: "Sparing", guidance: "Raise a part above written only when it clearly meets the words." },
+  balanced: { label: "Balanced", guidance: "Raise a part above written when it fairly meets the words." },
+  generous: { label: "Generous", guidance: "Raise a part above written whenever it plausibly meets the words." },
+});
+
+/** The threshold as the author reads it: the level's guidance, then the player's words. */
+export function thresholdGuidance(budget: Pick<DepthBudget, "threshold" | "level">): string {
+  return `${DEPTH_THRESHOLD_LEVEL_WORDS[budget.level].guidance} ${budget.threshold.trim() || "(no words given)"}`;
+}
 
 export const DEPTH_REASONING: readonly ReasoningChoice[] = ["inherit", "off", "auto", "minimal", "low", "medium", "high", "max", "xhigh"];
 
@@ -217,6 +249,7 @@ export function depthSettingsOf(raw: unknown, base: Readonly<DepthSettings> = de
       allowances: Object.fromEntries(DEPTH_TREATMENTS.map((t) => [t, limit(a[t], 0, base.budget.allowances[t])])) as Record<DepthTreatment, DepthLimit>,
       ask: typeof b.ask === "boolean" ? b.ask : base.budget.ask,
       threshold: typeof b.threshold === "string" ? b.threshold : base.budget.threshold,
+      level: pick(b.level, DEPTH_THRESHOLD_LEVELS, base.budget.level),
       perTurn: limit(b.perTurn, 1000, base.budget.perTurn),
       perDay: limit(b.perDay, 1000, base.budget.perDay),
     },
@@ -231,7 +264,8 @@ export function depthSettingsOf(raw: unknown, base: Readonly<DepthSettings> = de
     background: { on: typeof bg.on === "boolean" ? bg.on : base.background.on, atOnce: int(bg.atOnce, 1, 16, base.background.atOnce) },
     bootstrap: {
       chunkTokens: int(boot.chunkTokens, 2000, 200_000, base.bootstrap.chunkTokens),
-      atOnce: { historian: int(at.historian, 1, 8, base.bootstrap.atOnce.historian), minds: int(at.minds, 1, 16, base.bootstrap.atOnce.minds), author: int(at.author, 1, 4, base.bootstrap.atOnce.author) },
+      atOnce: { minds: int(at.minds, 1, 16, base.bootstrap.atOnce.minds) },
+      mostMinds: int(boot.mostMinds, 0, 500, base.bootstrap.mostMinds),
       cap,
       sample: int(boot.sample, 0, 50, base.bootstrap.sample),
       pauseAfterWrong: int(boot.pauseAfterWrong, 1, 50, base.bootstrap.pauseAfterWrong),
